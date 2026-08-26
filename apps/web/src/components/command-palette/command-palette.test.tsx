@@ -119,3 +119,13 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
     expect(document.body.textContent).not.toMatch(/\d+\s*(회|번|분 전|초 전)/);
   });
 });
+
+// story #3007(로드맵 P2·PR-E, L1) — cmd palette 다이얼로그는 floating이라 --elev-overlay.
+describe('CommandPalette — 로드맵 P2·PR-E L1(다이얼로그 elevation 토큰)', () => {
+  it('팝업이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {
+    await mount();
+    const popup = document.body.querySelector('.rounded-xl.bg-popover');
+    expect(popup?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(popup?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
+  });
+});

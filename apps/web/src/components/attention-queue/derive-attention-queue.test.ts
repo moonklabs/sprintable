@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { createTranslator } from 'next-intl';
 import {
   parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue, diffAttentionQueueItemIds,
+  parseInboxAttentionItems, resolveInboxItemHref, buildAttentionQueueFromInbox,
+  dedupInboxApprovalsAgainstGatePending,
+  BUCKET_BY_KIND,
   type BeAttentionItem, type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
 import koMessagesRaw from '../../../messages/ko.json';
@@ -198,7 +201,7 @@ describe('buildAttentionQueueFromBe', () => {
 describe('buildAttentionQueue', () => {
   function item(kind: AttentionQueueItem['kind'], sortKey: number): AttentionQueueItem {
     return {
-      id: `${kind}-${sortKey}`, kind, kindLabel: kind, proofState: kind === 'merge_ready' ? 'green' : 'amber',
+      id: `${kind}-${sortKey}`, kind, bucket: BUCKET_BY_KIND[kind], kindLabel: kind, proofState: kind === 'merge_ready' ? 'green' : 'amber',
       claim: kind, actor: null, actionLabel: '가기', actionTone: 'neutral', href: '/board',
       enteredStateAtMs: null, sortKey,
     };
@@ -225,12 +228,40 @@ describe('buildAttentionQueue', () => {
     expect(shown).toHaveLength(1);
     expect(overflow).toBe(0);
   });
+
+  // story #2923 AQ3 MEDIUM①(카디르 QA, PR#3353 2026-08-22) — overflow로 잘린 항목 중 GATE
+  // 버킷이 있는지 정직하게 판정(결재함=Gate 3종 완전 목록이라 GATE 아닌 잘린 항목은 거기
+  // 없다 — 앵커를 걸면 눌러도 없는 결과).
+  describe('overflowHasGate', () => {
+    it('잘린(overflow) 항목 중 GATE 버킷이 하나라도 있으면 true(merge_ready=GATE)', () => {
+      // cap=1 → sortKey 큰 순으로 1개만 shown, 나머지 cut. merge_ready는 KIND_PRIORITY가
+      // 낮은 티어(amber보다 뒤)라 amber 항목들 뒤로 밀려 cut에 포함된다.
+      const items = [
+        ...Array.from({ length: 3 }, (_, i) => item('verify_fail', 100 + i)),
+        item('merge_ready', 1),
+      ];
+      const { overflowHasGate } = buildAttentionQueue(items, 1);
+      expect(overflowHasGate).toBe(true);
+    });
+
+    it('잘린 항목이 전부 GATE 아닌 버킷이면(재현: needs_input류만) false', () => {
+      const items = Array.from({ length: 10 }, (_, i) => item('decision_needed', i)); // bucket=STEER
+      const { overflow, overflowHasGate } = buildAttentionQueue(items); // cap=7 → overflow=3, 전부 STEER
+      expect(overflow).toBe(3);
+      expect(overflowHasGate).toBe(false);
+    });
+
+    it('overflow=0(캡 이내)이면 당연히 false(잘린 게 없으니 GATE도 없음)', () => {
+      const { overflowHasGate } = buildAttentionQueue([item('verify_fail', 1)]);
+      expect(overflowHasGate).toBe(false);
+    });
+  });
 });
 
 describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', () => {
   function item(id: string, claim: string): AttentionQueueItem {
     return {
-      id, kind: 'blocked', kindLabel: '막힘', proofState: 'amber', claim,
+      id, kind: 'blocked', bucket: 'BLOCK', kindLabel: '막힘', proofState: 'amber', claim,
       actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/board',
       enteredStateAtMs: null, sortKey: 0,
     };
@@ -256,5 +287,251 @@ describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', 
     const prev = [item('a', 'x'), item('b', 'y')];
     const next = [item('a', 'x')];
     expect(diffAttentionQueueItemIds(prev, next)).toEqual(new Set());
+  });
+});
+
+// story #2923(P0-E AQ1, PO 9→4 매핑표 정본 2026-08-22) — GATE=gate_pending·merge_ready·approval
+// / STEER=decision·needs_input / BLOCK=verify_fail·blocked·blocker / Q=mention.
+describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => {
+  it('verify_fail → BLOCK, blocked → BLOCK, merge_ready → GATE', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'verify_fail', story_id: 's1' }),
+      beItem({ kind: 'blocked', story_id: 's2' }),
+      beItem({ kind: 'merge_ready', story_id: 's3' }),
+    ], t);
+    const bucketByKind = Object.fromEntries(items.map((i) => [i.kind, i.bucket]));
+    expect(bucketByKind['verify_fail']).toBe('BLOCK');
+    expect(bucketByKind['blocked']).toBe('BLOCK');
+    expect(bucketByKind['merge_ready']).toBe('GATE');
+  });
+
+  it('gate_pending origin → decision_needed row bucketed GATE (합쳐지기 전 원신호 기억)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'gate_pending', story_id: 's1' })], t);
+    expect(items[0]!.kind).toBe('decision_needed');
+    expect(items[0]!.bucket).toBe('GATE');
+  });
+
+  it('needs_input origin → decision_needed row bucketed STEER (gate_pending과 버킷이 갈린다)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'needs_input', story_id: 's1' })], t);
+    expect(items[0]!.kind).toBe('decision_needed');
+    expect(items[0]!.bucket).toBe('STEER');
+  });
+
+  it('같은 story에 gate_pending이 먼저 도착하면 needs_input이 뒤이어 와도 GATE 버킷을 유지한다(title/enteredAtMs는 여전히 first-wins, dedup 자체는 무변경)', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'gate_pending', story_id: 's1' }),
+      beItem({ kind: 'needs_input', story_id: 's1' }),
+    ], t);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.bucket).toBe('GATE');
+  });
+
+  // PO 리뷰(PR#3352, 2026-08-22) — 버킷이 BE 배열 «도착 순서»라는 우연에 결박되면 안 된다.
+  // needs_input이 먼저 와도 gate_pending이 나중에 도착하면 GATE로 승격돼야 한다(결재 대기가
+  // 입력 대기보다 개입 의미가 강하다 — 더 강한 신호가 순서와 무관하게 이겨야 정확한 개입 신호).
+  it('같은 story에 needs_input이 먼저 도착해도 gate_pending이 뒤이어 오면 GATE로 승격된다(순서에 안 결박)', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'needs_input', story_id: 's1' }),
+      beItem({ kind: 'gate_pending', story_id: 's1' }),
+    ], t);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.bucket).toBe('GATE');
+  });
+});
+
+function inboxItem(overrides: Partial<import('./derive-attention-queue').InboxAttentionItem> = {}): import('./derive-attention-queue').InboxAttentionItem {
+  return { id: 'inbox-1', kind: 'approval', title: '가격 콘솔 결재 요청', origin_chain: [], created_at: '2026-08-20T00:00:00.000Z', ...overrides };
+}
+
+describe('parseInboxAttentionItems (story #2923 AQ1 — /api/inbox {data:[...]} shape-safety)', () => {
+  it('unwraps the {data:[...]} envelope', () => {
+    const items = parseInboxAttentionItems({ data: [inboxItem()] });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.kind).toBe('approval');
+  });
+
+  it('returns [] for malformed shapes (no-fiction)', () => {
+    expect(parseInboxAttentionItems(null)).toEqual([]);
+    expect(parseInboxAttentionItems({ foo: 'bar' })).toEqual([]);
+    expect(parseInboxAttentionItems('not an object')).toEqual([]);
+  });
+
+  it('skips unknown kinds without crashing', () => {
+    const items = parseInboxAttentionItems({ data: [inboxItem(), { id: 'x', kind: 'scope_violation', title: 't', origin_chain: [], created_at: '2026-01-01' }] });
+    expect(items).toHaveLength(1);
+  });
+
+  it('skips items missing id/title/created_at (cannot fabricate claim/sort key)', () => {
+    const items = parseInboxAttentionItems({
+      data: [
+        { kind: 'approval', title: 't', origin_chain: [], created_at: '2026-01-01' }, // no id
+        { id: 'x', kind: 'approval', origin_chain: [], created_at: '2026-01-01' }, // no title
+        { id: 'x', kind: 'approval', title: 't', origin_chain: [] }, // no created_at
+      ],
+    });
+    expect(items).toEqual([]);
+  });
+
+  it('drops malformed origin_chain nodes but keeps well-formed ones', () => {
+    const items = parseInboxAttentionItems({
+      data: [inboxItem({ origin_chain: [{ type: 'story', id: 's1' }, { type: 'unknown_type', id: 'x' }, { type: 'memo' }] as never })],
+    });
+    expect(items[0]!.origin_chain).toEqual([{ type: 'story', id: 's1' }]);
+  });
+});
+
+describe('resolveInboxItemHref (story #2923 AQ1 — PO 실측 라우트 우선순위: story > memo(slug 있으면) > null)', () => {
+  it('story가 있으면 항상 그것을 쓴다(기존 /board?story= 관례)', () => {
+    const href = resolveInboxItemHref([{ type: 'memo', id: 'm1' }, { type: 'story', id: 's1' }], new Map([['m1', 'my-doc']]));
+    expect(href).toBe('/board?story=s1');
+  });
+
+  it('story 없고 memo만 있으면 사전 해소된 slug로 /docs/{slug}를 만든다', () => {
+    const href = resolveInboxItemHref([{ type: 'memo', id: 'm1' }], new Map([['m1', 'my-doc']]));
+    expect(href).toBe('/docs/my-doc');
+  });
+
+  it('memo인데 slug가 해소 안 됐으면(맵에 없음) null(지어내지 않음)', () => {
+    const href = resolveInboxItemHref([{ type: 'memo', id: 'm1' }], new Map());
+    expect(href).toBeNull();
+  });
+
+  it('run/initiative만 있으면(story/memo 둘 다 없음) null — FE 상세 라우트가 실재하지 않는다(PO 실측)', () => {
+    expect(resolveInboxItemHref([{ type: 'run', id: 'r1' }], new Map())).toBeNull();
+    expect(resolveInboxItemHref([{ type: 'initiative', id: 'i1' }], new Map())).toBeNull();
+  });
+
+  it('origin_chain이 비어 있으면 null', () => {
+    expect(resolveInboxItemHref([], new Map())).toBeNull();
+  });
+});
+
+describe('buildAttentionQueueFromInbox (story #2923 AQ1 — DecisionsWaiting 흡수)', () => {
+  it('approval → GATE 버킷·결재 액션·amber', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'approval' })], t, new Map());
+    expect(item!.bucket).toBe('GATE');
+    expect(item!.actionLabel).toBe('결재');
+    expect(item!.proofState).toBe('amber');
+    expect(item!.actionTone).toBe('primary');
+  });
+
+  it('decision → STEER 버킷·확認 액션', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'decision' })], t, new Map());
+    expect(item!.bucket).toBe('STEER');
+    expect(item!.actionLabel).toBe('확認');
+  });
+
+  it('blocker → BLOCK 버킷·해소 액션', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'blocker' })], t, new Map());
+    expect(item!.bucket).toBe('BLOCK');
+    expect(item!.actionLabel).toBe('해소');
+    expect(item!.actionTone).toBe('neutral');
+  });
+
+  it('mention → Q 버킷·답 액션', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'mention' })], t, new Map());
+    expect(item!.bucket).toBe('Q');
+    expect(item!.actionLabel).toBe('답');
+  });
+
+  it('claim은 item.title 그대로 쓴다(BE가 이미 완결된 문자열이라 템플릿 래핑 없음)', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ title: '가격 콘솔 결재 요청' })], t, new Map());
+    expect(item!.claim).toBe('가격 콘솔 결재 요청');
+  });
+
+  it('href는 resolveInboxItemHref 그대로 반영한다(story 있으면 그걸로)', () => {
+    const [item] = buildAttentionQueueFromInbox(
+      [inboxItem({ origin_chain: [{ type: 'story', id: 's1' }] })], t, new Map(),
+    );
+    expect(item!.href).toBe('/board?story=s1');
+  });
+
+  it('run만 있어 라우트가 없으면 href=null(호출부가 비내비게이션 처리)', () => {
+    const [item] = buildAttentionQueueFromInbox(
+      [inboxItem({ origin_chain: [{ type: 'run', id: 'r1' }] })], t, new Map(),
+    );
+    expect(item!.href).toBeNull();
+  });
+
+  it('id에 inbox- 접두어를 붙여 BE 신호 id와 네임스페이스 충돌을 막는다', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ id: 'abc123' })], t, new Map());
+    expect(item!.id).toBe('inbox-abc123');
+  });
+
+  it('ko/en 파리티 — en translator로도 렌더된다', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'approval' })], tEn, new Map());
+    expect(item!.actionLabel).toBe('Approve');
+    expect(item!.kindLabel).toBe('Approval needed');
+  });
+});
+
+// story #2923(카디르 QA HIGH2, PR#3352 2026-08-22 처방) — gate_pending(Gate 1차 소스)과
+// approval(inbox_items, 외부 producer)이 같은 story에 동시 존재하면 같은 사실이 두 행으로
+// 중복 노출된다. Gate 우선·겹치는 inbox approval은 drop.
+describe('dedupInboxApprovalsAgainstGatePending (story #2923, 카디르 QA HIGH2)', () => {
+  it('같은 story를 가리키는 approval은 gate_pending 존재 시 drop된다', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's1' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toEqual([]);
+  });
+
+  it('다른 story를 가리키는 approval은(겹치지 않음) 그대로 남는다', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's2' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toHaveLength(1);
+  });
+
+  it('gate_pending 집합이 비어 있으면(겹치는 story 자체가 없음) 전부 그대로 남는다', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's1' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set());
+    expect(result).toHaveLength(1);
+  });
+
+  it('approval인데 origin_chain에 story가 없으면(memo/run/initiative만) dedup 판정 불가라 그대로 남는다(정직 — 근거 없이 안 지움)', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'memo', id: 'm1' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toHaveLength(1);
+  });
+
+  it('approval이 아닌 kind(decision/blocker/mention)는 story가 겹쳐도 절대 안 지운다(gate_pending과 진짜 중복인 건 approval뿐)', () => {
+    const items = [
+      inboxItem({ id: 'd1', kind: 'decision', origin_chain: [{ type: 'story', id: 's1' }] }),
+      inboxItem({ id: 'b1', kind: 'blocker', origin_chain: [{ type: 'story', id: 's1' }] }),
+      inboxItem({ id: 'm1', kind: 'mention', origin_chain: [{ type: 'story', id: 's1' }] }),
+    ];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toHaveLength(3);
+  });
+
+  it('approval 여러 건 중 겹치는 것만 선택적으로 drop한다(전체 삭제 아님)', () => {
+    const items = [
+      inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's1' }] }),
+      inboxItem({ id: 'a2', kind: 'approval', origin_chain: [{ type: 'story', id: 's2' }] }),
+    ];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result.map((i) => i.id)).toEqual(['a2']);
+  });
+
+  // 카디르 재verdict MEDIUM①(PR#3352, 2026-08-22) — origin_chain에 story 노드가 2개 이상일
+  // 수 있는데 첫 번째만 보면(.find) 두 번째 이후 story가 gate_pending과 겹쳐도 못 잡는다.
+  it('origin_chain에 story 노드가 여러 개면(첫 번째가 안 겹쳐도) 전부 검사해 하나라도 겹치면 drop한다', () => {
+    const items = [inboxItem({
+      id: 'a1', kind: 'approval',
+      origin_chain: [{ type: 'story', id: 's-not-matching' }, { type: 'story', id: 's1' }],
+    })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toEqual([]);
+  });
+
+  // 카디르 재verdict MEDIUM②(PR#3352, 2026-08-22) — Gate의 story_id는 항상 lowercase UUID(DB
+  // 관례)인데 inbox_items의 origin_chain은 외부 producer가 채워 형식 제약이 없다 — 대소문자만
+  // 다른 같은 story가 dedup을 피해가면 안 된다.
+  it('id 대소문자가 달라도(외부 producer가 대문자 UUID를 보내도) 같은 story로 정확히 매칭돼 drop한다', () => {
+    const items = [inboxItem({
+      id: 'a1', kind: 'approval',
+      origin_chain: [{ type: 'story', id: 'S1-UPPER-CASE' }],
+    })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1-upper-case']));
+    expect(result).toEqual([]);
   });
 });

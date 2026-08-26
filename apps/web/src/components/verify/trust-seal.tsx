@@ -1,5 +1,6 @@
 import { Bot, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/storage/format';
 
@@ -45,8 +46,13 @@ export function TrustSeal(props: TrustSealProps) {
 
   if (props.variant === 'claimed') {
     return (
-      <div className={cn('flex items-center gap-2 rounded-[10px] bg-proof-amber-soft px-2.5 py-2 text-[11.5px]', props.className)}>
-        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border border-proof-blue bg-proof-blue-soft text-[9px] font-bold text-proof-blue">
+      // story #3054(2984-S6) — VerificationStamp(S1) 재질 언어(헤어라인+엠보스 inset) 채택,
+      // bg-proof-amber-soft 채움 폐지. Green 무결성 SOUL-LOCK 무변경(green 토큰 미참조) —
+      // amber 라벨("검증 대기")은 실제 상태 신호라 그대로 KEEP.
+      <div className={cn('flex items-center gap-2 rounded-[10px] border border-proof-line bg-proof-panel px-2.5 py-2 text-[11.5px] shadow-[var(--elev-inset)]', props.className)}>
+        {/* story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·soft-fill
+            폐지) 채택. border는 이미 있었으니 배경만 투명으로 교체. */}
+        <span className={cn('flex size-[22px] shrink-0 items-center justify-center rounded-full border border-proof-blue text-[9px] font-bold', AGENT_MARK_FILL_CLASS)}>
           {props.agentInitial ?? <Bot className="size-3" aria-hidden="true" />}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">
@@ -60,7 +66,7 @@ export function TrustSeal(props: TrustSealProps) {
   if (props.variant === 'verified') {
     return (
       <div className={cn('flex items-center gap-2 rounded-[10px] bg-proof-green-soft px-2.5 py-2 text-[11.5px]', props.className)}>
-        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-proof-green text-[9px] font-bold text-white dark:text-[#0B0C0D]">
+        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-proof-green text-[9px] font-bold text-white dark:text-proof-bg">
           {initials(props.humanName)}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">

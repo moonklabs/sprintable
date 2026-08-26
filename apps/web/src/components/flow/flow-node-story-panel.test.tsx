@@ -212,6 +212,20 @@ describe('FlowNodeStoryPanel — 로딩 표시(유나 가디언 리뷰 2026-07-3
     // 아직 마운트되지 않아야 정상이다(fetch가 안 끝났으므로).
     expect(container.querySelector('[data-testid="story-detail-panel-stub"]')).toBeNull();
   });
+
+  // story #3007(로드맵 P2·PR-E, L1) — 로딩 플로팅 패널은 floating이라 --elev-overlay.
+  it('로딩 패널이 shadow-[var(--elev-overlay)]를 쓰고 shadow-xl은 안 쓴다', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+
+    act(() => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+    });
+
+    const panel = [...container.querySelectorAll('div')].find((d) => d.textContent?.includes('노드를 불러오는 중'));
+    expect(panel?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(panel?.className).not.toMatch(/(^|\s)shadow-xl(\s|$)/);
+  });
 });
 
 describe('FlowNodeStoryPanel — 모바일 게이트(유나 가디언 리뷰 2026-07-31, issuecomment-5139371576)', () => {

@@ -87,6 +87,7 @@ async def test_checkout_raises_when_org_lock_finds_no_row():
 
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
+        _exec_result(None),      # ⛔P0 가드 — 기존 active 유료 구독 조회(없음)
         _exec_result(offering),  # ① offering lookup
         no_org_result,           # #2092 — org FOR UPDATE 락-SELECT가 0행(삭제됨)
     ])
@@ -129,6 +130,7 @@ async def test_checkout_activates_subscription_when_charge_confirmed():
 
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
+        _exec_result(None),       # ⛔P0 가드 — 기존 active 유료 구독 조회(없음)
         _exec_result(offering),   # ① offering lookup
         _org_exists_result(),     # #2092 — org FOR UPDATE 락-존재확인
         _claim_result(1),         # #2511 claim(=구독 pending 전이 겸함) — 성공
@@ -154,8 +156,8 @@ async def test_checkout_activates_subscription_when_charge_confirmed():
     assert charge_kwargs["amount_minor"] == 59_000
     assert charge_kwargs["currency"] == "krw"
 
-    # claim(=구독 pending 전이 겸함) 확認 — 세 번째 execute 호출(①offering②org락 다음).
-    claim_call = session.execute.call_args_list[2]
+    # claim(=구독 pending 전이 겸함) 확認 — 네 번째 execute 호출(⛔P0가드①offering②org락 다음).
+    claim_call = session.execute.call_args_list[3]
     compiled = claim_call.args[0].compile().params
     assert compiled["status"] == "pending"
     assert compiled["tier"] == "team"
@@ -163,7 +165,7 @@ async def test_checkout_activates_subscription_when_charge_confirmed():
 
     # 카디르 CRITICAL fix(codex, #2896 리뷰) — ④ activate UPDATE도 release와 동일한
     # CAS(checkout_claimed_at==이 호출이 claim한 값)가 걸려 있어야 한다. claim 다음 호출.
-    activate_call = session.execute.call_args_list[3]
+    activate_call = session.execute.call_args_list[4]
     activate_where_literal = str(activate_call.args[0].whereclause)
     assert "checkout_claimed_at" in activate_where_literal
 
@@ -180,6 +182,7 @@ async def test_checkout_rejects_when_another_checkout_already_in_progress():
 
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
+        _exec_result(None),      # ⛔P0 가드 — 기존 active 유료 구독 조회(없음)
         _exec_result(offering),  # ① offering lookup
         _org_exists_result(),    # #2092 — org FOR UPDATE 락-존재확인
         _claim_result(0),        # #2511 claim 실패 — 다른 요청이 진행 中
@@ -194,7 +197,7 @@ async def test_checkout_rejects_when_another_checkout_already_in_progress():
 
     mock_issue.assert_not_awaited()
     mock_charge.assert_not_awaited()
-    assert session.execute.await_count == 3  # offering+org락+claim뿐, finally release도 없음(claim 자체가 실패)
+    assert session.execute.await_count == 4  # P0가드+offering+org락+claim뿐, finally release도 없음(claim 자체가 실패)
 
 
 @pytest.mark.anyio
@@ -227,6 +230,7 @@ async def test_checkout_declined_leaves_subscription_pending_not_active():
 
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
+        _exec_result(None),        # ⛔P0 가드 — 기존 active 유료 구독 조회(없음)
         _exec_result(offering),    # ① offering lookup
         _org_exists_result(),      # #2092 — org FOR UPDATE 락-존재확인
         _claim_result(1),          # #2511 claim 성공
@@ -246,8 +250,8 @@ async def test_checkout_declined_leaves_subscription_pending_not_active():
             )
 
     assert exc_info.value.subscription.status == "pending"
-    # 5번째(active로 올리는) execute가 없어야 — offering+org락+claim+refetch+release 딱 5번.
-    assert session.execute.await_count == 5
+    # 6번째(active로 올리는) execute가 없어야 — P0가드+offering+org락+claim+refetch+release 딱 6번.
+    assert session.execute.await_count == 6
 
 
 @pytest.mark.anyio
@@ -262,6 +266,7 @@ async def test_checkout_does_not_activate_when_order_not_confirmed_race_loss():
 
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
+        _exec_result(None),         # ⛔P0 가드 — 기존 active 유료 구독 조회(없음)
         _exec_result(offering),
         _org_exists_result(),       # #2092 — org FOR UPDATE 락-존재확인
         _claim_result(1),
@@ -280,4 +285,4 @@ async def test_checkout_does_not_activate_when_order_not_confirmed_race_loss():
         )
 
     assert result.status == "pending"
-    assert session.execute.await_count == 5
+    assert session.execute.await_count == 6

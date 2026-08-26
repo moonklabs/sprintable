@@ -101,11 +101,13 @@ async def create_project_access(
         # 18073a52: 에이전트 grant — member_id(=agent members.id) 앵커, org_member_id 없음.
         # 대상이 프로젝트 org 의 활성 에이전트인지 검증(ensure_human_member skip).
         from sqlalchemy import text
+        # story #2953: 에러 문구가 "active agent"라 말하면서 실제론 deleted_at만 봐 비활성
+        # (is_active=false·미삭제) 에이전트에도 grant를 새로 만들 수 있던 라벨-실체 불일치.
         agent_ok = (await session.execute(
             text(
                 "SELECT 1 FROM members m JOIN projects p ON p.id = :pid "
                 "WHERE m.id = :mid AND m.type = 'agent' AND m.deleted_at IS NULL "
-                "AND m.org_id = p.org_id LIMIT 1"
+                "AND m.is_active = true AND m.org_id = p.org_id LIMIT 1"
             ),
             {"pid": str(project_id), "mid": str(body.member_id)},
         )).scalar_one_or_none()

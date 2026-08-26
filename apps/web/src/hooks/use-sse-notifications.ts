@@ -6,6 +6,7 @@ import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/real
 import { createReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
+import { createVisibilityReconnectState } from '@/lib/realtime/sse-visibility-reconnect';
 
 export interface SseEventNotification {
   id?: string;
@@ -173,10 +174,32 @@ export function useSseNotifications({
 
     connect();
 
+    // story #2987(PO 지적, chat과 동일 좀비 커넥션 클래스 — sse-multiplexer.ts·use-chat-sse.ts
+    // 주석 참고) — 이 fallback은 mux ON(dev/prod 라이브)이면 애초에 안 탄다(위 106행 가드).
+    // mux가 이미 그 경로를 고쳤으니 이건 mux OFF/Provider 밖 경로 전용 동형 처방(방어 계층).
+    // last_event_id는 이 effect 본문의 지역 변수라 강제 재연결에도 자동 보존된다.
+    const visibilityState = createVisibilityReconnectState();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        visibilityState.onHidden();
+        return;
+      }
+      if (visibilityState.onVisible()) connect();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       closed = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (retryTimer) clearTimeout(retryTimer);
       es?.close();
     };
-  }, [mux, enabled]);
+  // story #2964(sse-multiplexer.ts #2940과 동일 클래스) — org 전환으로 memberId가 바뀌어도
+  // 이 effect가 재실행되지 않으면(구 deps=[mux, enabled]) 커넥션이 옛 member_id로 남는다.
+  // memberIdRef 쓰기는 effect를 재트리거하지 못한다 — memberId를 deps에 편입해 값이 실제로
+  // 바뀔 때만(문자열 값 비교) 재구독을 강제한다. `lastEventId`가 이 effect 본문의 지역
+  // 변수(ref 아님)라 재실행마다 자동으로 새로 초기화되므로 — memberId가 실제로 바뀐 재실행에서
+  // 옛 org의 커서가 자동으로 버려진다(#3388 카디르 QA와 동일 목표를 use-chat-sse.ts의
+  // prevMemberIdForResetRef 같은 별도 판별 없이 이 파일의 기존 설계가 이미 충족).
+  }, [mux, enabled, memberId]);
 }

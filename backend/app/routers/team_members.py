@@ -19,6 +19,7 @@ from app.schemas.team_member import (
     ActiveStorySummary, TeamMemberCreate, TeamMemberResponse, TeamMemberUpdate,
 )
 from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
+from app.services.avatar_upload import AvatarUploadError, confirm_upload, create_upload_url, delete_avatar
 from app.services.member_resolver import assert_caller_is_member, is_caller_member
 from app.services.project_auth import has_project_access
 
@@ -524,6 +525,93 @@ async def update_team_member(
         await _assert_can_manage_human(member, session, org_id, auth, data=data)
     # AC3-4 2-2: team_members 뷰 — 필드를 앵커 테이블로 라우팅(anchor-only). expire 후 뷰 재조회로 갱신값 반영.
     await repo.apply_anchor_update(member, data)
+    session.expire(member)
+    updated = await repo.get(id)
+    _m = updated or member
+    return await _inject_online_single(TeamMemberResponse.model_validate(_m), _m.id)
+
+
+async def _assert_can_edit_avatar(
+    id: uuid.UUID, member: TeamMember, session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
+) -> None:
+    """story #2887 — avatar_url PATCH와 정확히 동일한 권한 질문("이 caller가 이 member의
+    avatar_url을 바꿀 수 있는가")이라 기존 게이트를 그대로 재사용한다. 에이전트=owner/admin
+    (assert_agent_owner), 휴먼=self(프로필 필드 한정)/admin(_assert_can_manage_human) — 새
+    권한 개념을 만들지 않는다(페드루 AC 확定)."""
+    if member.type == "agent":
+        await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
+    else:
+        await _assert_can_manage_human(member, session, org_id, auth, data={"avatar_url": None})
+
+
+class AvatarUploadUrlRequest(BaseModel):
+    content_type: str
+
+
+@router.post("/{id}/avatar/upload-url")
+async def create_avatar_upload_url(
+    id: uuid.UUID,
+    body: AvatarUploadUrlRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    repo = TeamMemberRepository(session, org_id)
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    await _assert_can_edit_avatar(id, member, session, org_id, auth)
+    try:
+        return await create_upload_url(org_id=org_id, member_id=id, content_type=body.content_type)
+    except AvatarUploadError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
+
+
+class AvatarConfirmRequest(BaseModel):
+    object_path: str
+
+
+@router.post("/{id}/avatar/confirm", response_model=TeamMemberResponse)
+async def confirm_avatar_upload(
+    id: uuid.UUID,
+    body: AvatarConfirmRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> TeamMemberResponse:
+    repo = TeamMemberRepository(session, org_id)
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    await _assert_can_edit_avatar(id, member, session, org_id, auth)
+    try:
+        new_url = await confirm_upload(
+            org_id=org_id, member_id=id, object_path=body.object_path,
+            previous_avatar_url=member.avatar_url,
+        )
+    except AvatarUploadError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
+    await repo.apply_anchor_update(member, {"avatar_url": new_url})
+    session.expire(member)
+    updated = await repo.get(id)
+    _m = updated or member
+    return await _inject_online_single(TeamMemberResponse.model_validate(_m), _m.id)
+
+
+@router.delete("/{id}/avatar", response_model=TeamMemberResponse)
+async def delete_avatar_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> TeamMemberResponse:
+    repo = TeamMemberRepository(session, org_id)
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    await _assert_can_edit_avatar(id, member, session, org_id, auth)
+    await delete_avatar(current_avatar_url=member.avatar_url)
+    await repo.apply_anchor_update(member, {"avatar_url": None})
     session.expire(member)
     updated = await repo.get(id)
     _m = updated or member

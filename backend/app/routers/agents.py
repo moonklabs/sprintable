@@ -562,6 +562,10 @@ async def get_agent_access_matrix(
     **인가(PO 승인조건 #2)**: 고객대면(org admin 이 자기 에이전트 접근을 조망) — `require_operator`
     (플랫폼 운영자) 아닌 **org admin/owner**. 기존 `is_org_owner_or_admin`(project_access.py 의
     role-설정 엔드포인트가 이미 씀) 재사용, 신규 프리미티브 0.
+
+    story #2952 AC2 — `m.deleted_at IS NULL`만 보고 `m.is_active`를 안 봐 deactivate된
+    에이전트의 grant가 이 매트릭스에 그대로 잔존했다(창구 불일치, PO 실측). `deleted_at`(하드
+    삭제 여부)과 `is_active`(비활성화 여부)는 별개 축 — 이 화면은 둘 다 걸러야 한다.
     """
     from app.services.project_auth import is_org_owner_or_admin
 
@@ -576,7 +580,7 @@ async def get_agent_access_matrix(
                 FROM project_access pa
                 JOIN members m ON m.id = pa.member_id
                 JOIN projects p ON p.id = pa.project_id
-                WHERE m.type = 'agent' AND m.deleted_at IS NULL
+                WHERE m.type = 'agent' AND m.deleted_at IS NULL AND m.is_active = true
                   AND p.org_id = :org_id AND p.deleted_at IS NULL
                 """
             ),

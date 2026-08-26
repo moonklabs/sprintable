@@ -48,9 +48,11 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_PRESENCE_REDIS_ENABLED", "_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED",
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
-    "_NEXT_PUBLIC_APP_URL",
+    "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
     # story #2771 — office-converter(Gotenberg) URL, deploy-office-converter 스텝과 짝.
     "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
+    # story #2887 — avatar 전용 GCS 버킷, deploy-backend dev 분기(ADMIN_OPERATOR_*와 동일 패턴).
+    "_GCS_AVATARS_BUCKET",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -120,6 +122,10 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         "_REDIS_URL": redis_url,
         "_LICENSE_CONSENT": "agreed",
         "_NEXT_PUBLIC_APP_URL": "https://example.run.app",
+        "_ADMIN_OPERATOR_AUDIENCE": "https://example-audience.run.app",
+        "_ADMIN_OPERATOR_ALLOWLIST": "operator@example.iam.gserviceaccount.com",
+        # story #2887 — set -u라 미설정이면 스크립트가 죽는다(ADMIN_OPERATOR_*와 동일 이유).
+        "_GCS_AVATARS_BUCKET": "sprintable-avatars-dev",
         # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
         # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
         "_GOTENBERG_SERVICE_URL": gotenberg_url,
@@ -168,6 +174,49 @@ def test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_synta
         )
 
 
+_CLOUDBUILD_STEP_ARG_BYTE_LIMIT = 10_000
+
+
+def test_bash_entrypoint_steps_under_cloudbuild_arg_byte_limit():
+    """⭐story #3031 핫픽스(2026-08-24) — Cloud Build 실사고: `deploy-realtime` 스텝이
+    "invalid .steps field: build step 11 arg 1 too long (max: 10000)"로 dev develop
+    배포를 2연속 실패시켰다(4d8014ab3·2406e6f89).
+
+    함정의 본체: 그 스텝은 **문자 수로는 7,590자**(다른 스텝들과 비슷한 규모)였는데
+    **UTF-8 바이트로는 11,459바이트**였다 — 한글 완성형 1글자가 UTF-8에서 3바이트라,
+    한글 주석이 많은 스텝은 "문자 수 감각"으로 안전해 보여도 실제 한도(Cloud Build는
+    **바이트** 기준)를 조용히 넘길 수 있다. 리뷰에서 육안으로 "길다"는 못 느끼면서
+    바이트 한도를 넘기는 이 클래스는 다시 재발할 수 있다 — 그래서 문자 수가 아니라
+    **`.encode('utf-8')` 길이**로 정적 고정한다(에디터 표시 글자수를 믿지 않는다).
+
+    ⛔PO 리뷰 지적(2026-08-24, PR#3455 1라운드) — 최초 버전은 `_BASH_ENTRYPOINT_STEP_IDS`
+    (substitution-escape 가드용 4개 목록, 위)만 순회해 apply-gcs-avatars-cors·
+    update-migrate-job·deploy-mcp·deploy-realtime-gce 4개 스텝이 가드 밖이었다 — 이
+    함정은 "한글 주석이 자라는 어느 bash 스텝에서든" 재발하는 클래스라 목록 상수(용도가
+    다른 가드와 공유하는 고정 집합)로는 원천적으로 사각을 만든다. 그래서 이 가드만큼은
+    `entrypoint == "bash"`인 스텝 **전부**를 cloudbuild.yaml에서 동적으로 순회한다(신규
+    bash 스텝이 나중에 추가돼도 목록 갱신 없이 자동 커버 — `_BASH_ENTRYPOINT_STEP_IDS`는
+    $$ substitution 가드 용도로만 그대로 둔다, 그쪽은 실 substitution 참조가 있는
+    스텝만 의도적으로 좁힌 것이라 별개 스코프).
+
+    ⛔이 값(10,000)은 story #3031 사고 당시 GitHub 에러 메시지("max: 10000")를 그대로
+    반영한 것 — Cloud Build 쪽 실제 한도가 바뀌면(추정: 인프라 변경 없이는 안 바뀜) 이
+    상수도 같이 갱신할 것.
+    """
+    doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
+    bash_steps = [s for s in doc["steps"] if s.get("entrypoint") == "bash"]
+    assert bash_steps, "cloudbuild.yaml에 bash entrypoint 스텝이 0개 — 이 가드 자체가 무의미해짐(파일 구조 변경 의심)"
+    for step in bash_steps:
+        script = step["args"][1]
+        byte_len = len(script.encode("utf-8"))
+        assert byte_len < _CLOUDBUILD_STEP_ARG_BYTE_LIMIT, (
+            f"cloudbuild.yaml {step['id']} 스텝 args가 UTF-8 {byte_len}바이트로 Cloud Build "
+            f"한도({_CLOUDBUILD_STEP_ARG_BYTE_LIMIT})를 넘김(문자 수={len(script)} — 문자 "
+            "수만으로는 안 걸리는 게 story #3031 사고의 정확한 함정). 긴 한글 주석은 "
+            "관련 테스트 파일 docstring 등 외부로 옮기고 스텝엔 짧은 포인터만 남길 것."
+        )
+
+
 def test_deploy_backend_is_bash_entrypoint():
     """story #2141 정정 — env 조건분기를 위해 gcloud 단순 args에서 bash로 전환됐다."""
     doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
@@ -189,6 +238,33 @@ def test_deploy_backend_prod_excludes_plain_redis_url():
     assert "REDIS_URL" not in result
 
 
+def test_deploy_backend_dev_includes_admin_operator_env_vars():
+    """story #2777 — dev는 ADMIN_OPERATOR_AUDIENCE/ALLOWLIST를 plain env로 넘긴다."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app" in result
+    assert "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com" in result
+
+
+def test_deploy_backend_prod_excludes_admin_operator_env_vars():
+    """⭐story #2777 핵심 AC — prod는 ADMIN_OPERATOR_AUDIENCE/ALLOWLIST를 절대 안 싣는다(⛔대표
+    승인 前 prod 결제 개입 전면금지 태세 — require_admin_operator가 미설정을 fail-closed 503으로
+    처리해, 이 두 키가 없으면 그 엔드포인트 자체가 prod에서 항상 503)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "ADMIN_OPERATOR_AUDIENCE" not in result
+    assert "ADMIN_OPERATOR_ALLOWLIST" not in result
+
+
+def test_deploy_backend_dev_includes_avatars_bucket_env_var():
+    """story #2887 — dev는 GCS_AVATARS_BUCKET을 plain env로 넘긴다(ADMIN_OPERATOR_*와 동일 배선)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "GCS_AVATARS_BUCKET=sprintable-avatars-dev" in result
+
+
+def test_deploy_backend_prod_excludes_avatars_bucket_env_var():
+    """⭐prod 버킷 미프로비저닝 상태 — 값이 있어도 prod에는 이 키 자체가 없어야 한다(REDIS_URL/
+    ADMIN_OPERATOR_*와 동일 원칙, cloudbuild.yaml의 story #2887 주석 참고)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "GCS_AVATARS_BUCKET" not in result
 
 
 def test_deploy_backend_includes_gotenberg_service_url_when_set():
@@ -229,6 +305,9 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "FANOUT_WAKE_REDIS_ENABLED=false,PRESENCE_REDIS_ENABLED=false,"
         "PRESENCE_ONLINE_REDIS_ENABLED=false,SSE_LEASE_REDIS_ENABLED=false,"
         "SSE_TRANSIENT_REPLAY_ENABLED=false,LICENSE_CONSENT=agreed,"
-        "NEXT_PUBLIC_APP_URL=https://example.run.app,"
-        "REDIS_URL=redis://10.164.120.243:6379"
+        "NEXT_PUBLIC_APP_URL=https://example.run.app,DEPLOY_ENV=dev,"
+        "REDIS_URL=redis://10.164.120.243:6379,"
+        "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
+        "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
+        "GCS_AVATARS_BUCKET=sprintable-avatars-dev"
     )

@@ -497,6 +497,49 @@ async def test_reopen_gate_if_new_sha_flips_approved_to_pending_realdb():
 
 
 @pytest.mark.anyio
+async def test_reopen_gate_if_new_sha_clears_resolver_fields_realdb():
+    """story #2961(실 DB 관측, story 2905 pr_number=3307 gate 재현) — 재-pending 시
+    resolver_id/resolved_at/resolution_note가 status와 함께 지워지는지. 다른 두 재-pending
+    경로(gate_service.py의 _reopen_rejected_gate·undo_gate_resolution)는 이미 이 셋을
+    같이 지우는데 이 함수만 빠뜨려, "해소됐다"는 흔적(resolved_at 有)이 status=pending인
+    게이트에 그대로 남아있었다(불변식 위반: 이 셋은 status!=pending일 때만 값을 가져야 함)."""
+    from datetime import datetime, timezone
+    import uuid
+
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+
+    engine, Session = await _session_factory()
+    try:
+        resolver_id = uuid.uuid4()
+        stale_resolved_at = datetime(2026, 8, 21, 16, 33, 20, tzinfo=timezone.utc)
+        async with Session() as s:
+            seeded = await _seed(
+                s, gate_status="approved", approved_head_sha="old-sha", github_check_run_id=9001,
+            )
+            gate = await s.get(Gate, seeded["gate_id"])
+            gate.resolver_id = resolver_id
+            gate.resolved_at = stale_resolved_at
+            gate.resolution_note = "approved via PR review"
+            await s.commit()
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "new-sha", repo_full_name="acme/repo", pr_number=7)
+            await s.commit()
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            assert gate.status == "pending"
+            # ⭐핵심 — 셋 다 status와 함께 지워져야(다른 두 재-pending 경로와 동형).
+            assert gate.resolver_id is None
+            assert gate.resolved_at is None
+            assert gate.resolution_note is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_reopen_gate_if_new_sha_noop_when_sha_matches_realdb():
     """양성대조 — SHA가 같으면 재-pending 안 한다(vacuous하게 항상 flip하는 버그 방지)."""
     from app.models.gate import Gate
@@ -903,7 +946,12 @@ async def test_evaluate_merge_gate_clears_auto_axis_anchor_when_decision_leaves_
 async def test_evaluate_merge_gate_never_clears_human_approved_anchor_realdb():
     """카디르 R4① 안전경계 — `gate.status=="approved"`(사람 승인, gates.py 축)는
     evaluate_merge_gate 재평가가 **절대** 못 건드린다. 시스템 재평가가 사람 결재를 역전시키면
-    사고이므로, 클리어 조건은 반드시 `gate.status=="auto_passed"`로만 스코프돼야 한다."""
+    사고이므로, 클리어 조건은 반드시 `gate.status=="auto_passed"`로만 스코프돼야 한다.
+
+    story #2893(§2 A1, 0271) 갱신 — 멱등 키가 pr_number를 포함한다. 최초 create_gate에도
+    아래 evaluate_merge_gate와 같은 pr_number(99)를 넘겨 «같은 PR이 재평가되는» 실 시나리오와
+    일치시킨다(다른 pr_number면 서로 다른 gate row가 돼 재평가 자체가 이 게이트에 안 닿는다
+    — 그건 이 테스트의 관심사가 아니라 test_2893_gate_pr_scoped_isolation_realdb의 관심사)."""
     from app.services.gate_service import create_gate
     from app.services.merge_verdict_gate import BLOCK, MERGE_GATE_TYPE, evaluate_merge_gate
 
@@ -915,7 +963,7 @@ async def test_evaluate_merge_gate_never_clears_human_approved_anchor_realdb():
             # 사람이 이미 승인한 상태를 직접 시뮬레이션(gates.py 축과 동형 — status=approved+anchor).
             gate = await create_gate(
                 s, seeded["org_id"], seeded["story_id"], "story", MERGE_GATE_TYPE,
-                seeded["member_id"], None, project_id=None, neutral_facts={},
+                seeded["member_id"], None, project_id=None, neutral_facts={}, pr_number=99,
             )
             gate.status = "approved"
             gate.approved_head_sha = "sha-human-approved"
@@ -937,5 +985,161 @@ async def test_evaluate_merge_gate_never_clears_human_approved_anchor_realdb():
             # create_gate가 approved 게이트를 멱등 반환하므로 status는 그대로 approved 유지.
             assert gate.status == "approved"
             assert gate.approved_head_sha == "sha-human-approved"  # ⭐핵심 단언 — 안 지워짐.
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_reuses_existing_run_when_another_gate_shares_sha_realdb():
+    """story #2908(실사고 재현, story 2905 PR #3307/#3331) — 서로 다른 두 Gate 행(다른 PR 번호)이
+    같은 SHA에 바인딩되면, 나중에 publish되는 쪽은 자기 캐시(github_check_run_id=None)만 보고
+    새 check-run을 만들면 안 된다 — GitHub 쪽에 이미 있는지(list_check_runs_for_ref) 먼저 물어
+    있으면 그 run을 PATCH해야 한다(중복 생성 0). 두 Gate 행을 실제로 seed해 재현한다."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.models.github_installation import GithubInstallation
+    from app.models.organization import Organization
+    from app.models.pm import Story
+    from app.models.project import Project
+    from app.services.gate_github_check import publish_gate_check
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        shared_sha = "sha-stack-shared"
+        async with Session() as s:
+            org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+            s.add(org)
+            await s.commit()
+            project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+            s.add(project)
+            await s.commit()
+            story = Story(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="stack story")
+            s.add(story)
+            installation = GithubInstallation(
+                id=uuid.uuid4(), org_id=org.id, installation_id=424243, account_login="acme",
+            )
+            s.add(installation)
+            # gate_a = base PR(#3307류) — 이미 그 SHA에 check-run을 만들어둔 상태(먼저 publish됨).
+            gate_a = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="pending", pr_number=3307,
+                github_check_run_id=90001, github_check_run_sha=shared_sha,
+            )
+            s.add(gate_a)
+            # gate_b = 재타겟된 통합 PR(#3331류) — 자기 캐시는 비어있음(같은 SHA를 처음 본다).
+            gate_b = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="approved", approved_head_sha=shared_sha,
+                pr_number=3331,
+            )
+            s.add(gate_b)
+            await s.commit()
+            org_id, gate_b_id = org.id, gate_b.id
+
+        with patch(
+            "app.services.gate_github_check.list_check_runs_for_ref",
+            AsyncMock(return_value=[{"id": 90001}]),
+        ) as list_mock, patch(
+            "app.services.gate_github_check.create_check_run", AsyncMock(),
+        ) as create_mock, patch(
+            "app.services.gate_github_check.update_check_run",
+            AsyncMock(return_value={"id": 90001}),
+        ) as update_mock, patch("app.core.database.async_session_factory", Session):
+            await publish_gate_check(
+                org_id, gate_b_id,
+                head_sha=shared_sha, repo_full_name="acme/repo", pr_number=3331,
+            )
+
+        list_mock.assert_awaited_once()
+        create_mock.assert_not_awaited()  # ⭐핵심 — 중복 생성 0.
+        update_mock.assert_awaited_once()
+        _, update_kwargs = update_mock.call_args
+        assert update_kwargs.get("conclusion") == "success"  # gate_b는 approved.
+
+        async with Session() as s:
+            gate_b_row = (await s.execute(select(Gate).where(Gate.id == gate_b_id))).scalar_one()
+            assert gate_b_row.github_check_run_id == 90001  # gate_a의 run을 재사용.
+            assert gate_b_row.github_check_run_sha == shared_sha
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_falls_back_to_create_when_list_check_runs_fails_realdb():
+    """PO 확定(2026-08-23) fail-closed 폴백 — GitHub 조회(list_check_runs_for_ref) 자체가
+    실패(None)하면 skip이 아니라 기존 create-new 동작 그대로(최악에도 현행 동작 유지, 신규 SHA의
+    정상 첫 check-run 생성까지 막는 과잉살상 금지)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="pending")
+
+        with patch(
+            "app.services.gate_github_check.list_check_runs_for_ref",
+            AsyncMock(return_value=None),  # 조회 실패.
+        ) as list_mock, patch(
+            "app.services.gate_github_check.create_check_run",
+            AsyncMock(return_value={"id": 9099}),
+        ) as create_mock, patch(
+            "app.services.gate_github_check.update_check_run", AsyncMock(),
+        ) as update_mock, patch("app.core.database.async_session_factory", Session):
+            await publish_gate_check(
+                seeded["org_id"], seeded["gate_id"],
+                head_sha="sha-fallback", repo_full_name="acme/repo", pr_number=7,
+            )
+
+        list_mock.assert_awaited_once()
+        create_mock.assert_awaited_once()  # 폴백 — 기존 create-new 그대로.
+        update_mock.assert_not_awaited()
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
+            assert gate.github_check_run_id == 9099
+            assert gate.github_check_run_sha == "sha-fallback"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_creates_when_list_check_runs_returns_empty_realdb():
+    """양성대조 — 조회가 성공했지만 매치 0건(진짜 새 SHA)이면 정상 생성 경로(폴백이 아님)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="pending")
+
+        with patch(
+            "app.services.gate_github_check.list_check_runs_for_ref",
+            AsyncMock(return_value=[]),  # 조회 성공, 매치 0건.
+        ) as list_mock, patch(
+            "app.services.gate_github_check.create_check_run",
+            AsyncMock(return_value={"id": 9100}),
+        ) as create_mock, patch(
+            "app.services.gate_github_check.update_check_run", AsyncMock(),
+        ) as update_mock, patch("app.core.database.async_session_factory", Session):
+            await publish_gate_check(
+                seeded["org_id"], seeded["gate_id"],
+                head_sha="sha-genuinely-new", repo_full_name="acme/repo", pr_number=7,
+            )
+
+        list_mock.assert_awaited_once()
+        create_mock.assert_awaited_once()
+        update_mock.assert_not_awaited()
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
+            assert gate.github_check_run_id == 9100
     finally:
         await engine.dispose()

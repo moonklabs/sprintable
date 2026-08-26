@@ -55,6 +55,11 @@
  * AC7 — 이 가드가 «못 잡는 것» (선언 없이 초록이면 「전부 봤다」로 읽힌다):
  *   ㉠런타임에 조립되는 경로 — `resourceLink(variable)`처럼 문자열 리터럴이 아닌 인자, 또는
  *     `router.push(`/${x}`)`류 템플릿 조합. 정규식은 리터럴만 본다.
+ *     실사례(story #2930 I3, 2026-08-22): `sprints`가 nav-config work 존에서 'board'로
+ *     접혀 사이드바 진입점이 사라진 뒤에도 이 가드가 계속 초록인 건 command-palette.tsx의
+ *     `go-sprints`(리터럴 href) 덕분이다 — WorkspaceFrameTabs가 만든 진짜 진입점(router.push
+ *     템플릿 리터럴)은 바로 이 ㉠ 시야 밖이라 안 보인다. command-palette 쪽 주석에 "지우지
+ *     말 것" 경고를 남겨 뒀다(PO 확定) — 지우면 이 가드가 못 잡는 조용한 orphan이 된다.
  *   ㉡`(authenticated)` 안이라도 `[ws]/[proj]` 밖의 라우트(`/organization/workforce`처럼
  *     세그먼트가 2개 이상인 하드코딩 href, `/gates/[id]` 등 엔티티 상세) — AC1이 대조하는
  *     축 자체가 `[ws]/[proj]/<resource>` 하나뿐이다.
@@ -244,6 +249,22 @@ export function findRouteWithoutEntry(routeDirs: string[], hits: EntryHit[]): st
   return routeDirs.filter((dir) => !referenced.has(dir));
 }
 
+// ── AC3(story #2956, 2026-08-23) — 세 번째 판정: «살아있는 실 라우트가 legacy rename/retire
+// 표에도 동시에 올라있다». #3377이 `[ws]/[proj]/epics/page.tsx`를 신설했는데
+// `RENAMED_RESOURCES.epics='goals'`가 이미 그 이름을 쥐고 있어, proxy.ts(edge 미들웨어, 항상
+// Next 파일 라우팅보다 먼저 실행)가 모든 요청을 /goals로 가로채 그 실 라우트가 영원히 도달
+// 불가였다. 이 클래스는 위 두 판정(findEntryWithoutRoute/findRouteWithoutEntry) 어느 쪽도
+// 못 잡는다 — `EXEMPT_TARGETS`가 RENAMED_RESOURCE_ALIASES를 "이미 아는 별칭"으로 먼저
+// continue시켜(line 240 `if (exempt.has(...) || ...) continue`) entryWithoutRoute 검사
+// 자체를 건너뛰고, routeWithoutEntry는 "그 이름을 가리키는 진입점이 있는가"만 보므로 진입점
+// (WorkspaceFrameTabs 탭·command-palette)이 있으면 통과해 버린다 — 정확히 이 사고의 두 조건
+// (실 라우트 존재 + 진입점 존재)이 이 가드를 초록으로 만드는 바로 그 조합이었다. 별도 축으로
+// 신설: 라우트 존재와 rename/retire 별칭 존재가 **동시에** 참이면 무조건 실패(진입점 유무와
+// 무관 — 있으면 죽은 라우트, 없으면 애초에 존재 이유가 없는 라우트).
+export function findAliasedLiveRoutes(routeDirs: string[], aliases: Set<string>): string[] {
+  return routeDirs.filter((dir) => aliases.has(dir));
+}
+
 // ── main ────────────────────────────────────────────────────────────────
 
 function main(): void {
@@ -275,6 +296,7 @@ function main(): void {
 
   const entryWithoutRoute = findEntryWithoutRoute(hits, routeDirs, EXEMPT_TARGETS);
   const routeWithoutEntry = findRouteWithoutEntry(routeDirsList, hits);
+  const aliasedLiveRoutes = findAliasedLiveRoutes(routeDirsList, RENAMED_RESOURCE_ALIASES);
 
   const uniqueTargets = new Set(hits.map((h) => h.target));
   console.log(
@@ -313,6 +335,14 @@ function main(): void {
       console.log(`\n❌ routeWithoutEntry(신규) — 라우트는 있는데 진입점이 어디에도 없다(도달 불가, 더 조용한 쪽) ${newOnes.length}건:`);
       for (const dir of [...newOnes].sort()) console.log(`  - [ws]/[proj]/${dir}`);
     }
+  }
+
+  // AC3(story #2956) — grandfather 없음(신설 판정이라 현재 0건이 정상): 실 라우트+rename/retire
+  // 별칭 동시 존재는 신규 채무를 절대 허용하면 안 되는 클래스(발견되는 순간 이미 죽은 라우트).
+  if (aliasedLiveRoutes.length > 0) {
+    failed = true;
+    console.log(`\n❌ aliasedLiveRoute(신규) — 실 라우트인데 legacy rename/retire 표에도 올라있다(진입점 유무 무관, proxy.ts가 항상 먼저 가로채 영원히 도달 불가) ${aliasedLiveRoutes.length}건:`);
+    for (const dir of [...aliasedLiveRoutes].sort()) console.log(`  - [ws]/[proj]/${dir} ↔ RENAMED_RESOURCES/RETIRED_RESOURCES['${dir}']`);
   }
 
   const staleBaseline = [...GRANDFATHER_BASELINE].filter((k) => !baselineHit.has(k));

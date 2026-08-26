@@ -29,7 +29,12 @@ from app.services.gate_resolver import (
     SOURCE_ORG_POLICY,
     resolve_disposition,
 )
-from app.services.gate_service import create_gate, resolve_work_item_project_id
+from app.services.gate_service import (
+    create_gate,
+    find_gate_slot_with_pr_fallback,
+    find_pending_merge_gates_by_head_sha,
+    resolve_work_item_project_id,
+)
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
@@ -258,6 +263,100 @@ async def _role_key(session: AsyncSession, role_id: uuid.UUID) -> str | None:
     return role.key if role is not None else None
 
 
+async def _observe_pr_diff_facts(
+    session: AsyncSession, org_id: uuid.UUID, repo: str, pr_number: int
+) -> dict[str, Any]:
+    """story #2950 슬라이스②(PO 설계안 승인, doc gate-risk-real-discriminator-design-2950 §3) —
+    diff_size(변경 파일 수)·touches_migration(마이그레이션 파일 접촉)을 **관찰 사실로만**
+    neutral_facts에 남긴다. ⚠️판정 아님 — risk_grade 재계산에 이 값을 쓰지 않는다(doc §6 §1972
+    정합 논거 그대로: `Gate` 모델 독스트링이 애초에 이 두 필드를 "관찰 사실"로 예견했다).
+    임계값·low/high 재판정은 v1 스코프 밖(PO 명시, 별도 승인 필요).
+
+    `fetch_pr_changed_files`(verdict_capture.py)가 이미 GitHub PR-files API를 호출하는 능력을
+    scope-violation 체크 전용으로만 썼던 것을 여기로 확장 — 신규 API 통합 0. best-effort:
+    installation 없음/토큰 발급 실패/API 실패 어느 단계든 조용히 `{}` 반환(기존 `_reopen_gate_
+    hook_after_participation` 등과 동일 fail-closed 관례 — 외부 신호를 지어내지 않는다). 이
+    관찰 실패가 머지 게이트 평가 자체를 절대 막지 않는다."""
+    from app.models.github_installation import GithubInstallation
+    from app.services.github_app import get_installation_token
+    from app.services.verdict_capture import fetch_pr_changed_files
+
+    try:
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return {}
+        token = await get_installation_token(installation.installation_id)
+        if not token:
+            return {}
+        changed_files = await fetch_pr_changed_files(repo, pr_number, token)
+        if changed_files is None:
+            return {}
+        return {
+            "diff_size": len(changed_files),
+            # 카디르 QA(PR#3383, 2026-08-23) — GitHub PR-files API는 레포 루트 기준 경로를
+            # 준다(실측: #3376 파일 전부 "backend/..."). 이 모노레포의 실 alembic 위치는
+            # "backend/alembic/versions/"이지 "alembic/versions/"가 아니다 — 원래 버전은
+            # 이 축이 영구 False였다("틀릴 수 없는 표본" 클래스, 신규 테스트가 매치 로직을
+            # 실제로 돌리지 않아 못 잡았다).
+            "touches_migration": any(f.startswith("backend/alembic/versions/") for f in changed_files),
+        }
+    except Exception:  # noqa: BLE001 — best-effort 관찰, 실패해도 게이트 평가를 막지 않는다.
+        logger.warning(
+            "merge gate: PR diff facts 관찰 실패(best-effort) org=%s repo=%s pr=%d",
+            org_id, repo, pr_number, exc_info=True,
+        )
+        return {}
+
+
+async def _observe_pr_reviewer_facts(
+    session: AsyncSession, org_id: uuid.UUID, repo: str, pr_number: int
+) -> dict[str, Any]:
+    """story #3014(2995 보류 결정의 관찰 슬라이스, PO 2026-08-24) — PR의 requested_reviewers를
+    **관찰 사실로만** neutral_facts에 남긴다. ⚠️판정 아님 — designated_approver_id 배선도, 어떤
+    임계값 분기도 하지 않는다(_observe_pr_diff_facts와 동형 관례). GitHub reviewer login을
+    Sprintable member_id로 바꿀 조인키가 시스템에 없음이 2995 재그라운딩에서 확定됐으므로(지어내지
+    않는다), 이 슬라이스는 raw login 문자열과 개수만 세어 "«정확히 1명» 게이트가 실제로 얼마나
+    되는지"를 실측하는 게 유일한 목적 — 그 숫자가 선행(identity linking, story de7a115b의
+    보류 사유)의 착수 우선순위를 정한다.
+
+    _observe_pr_diff_facts와 동일한 fail-open 관례: installation 없음/토큰 발급 실패/API 실패
+    어느 단계든 조용히 `{}` 반환 — 이 관찰 실패가 게이트 생성 자체를 절대 막지 않는다."""
+    from app.models.github_installation import GithubInstallation
+    from app.services.github_app import get_installation_token, get_pull_request
+
+    try:
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return {}
+        token = await get_installation_token(installation.installation_id)
+        if not token:
+            return {}
+        pr = await get_pull_request(installation.installation_id, repo, pr_number)
+        if pr is None:
+            return {}
+        reviewers = pr.get("requested_reviewers") or []
+        logins = sorted({r.get("login") for r in reviewers if isinstance(r, dict) and r.get("login")})
+        return {"reviewer_count": len(logins), "reviewer_logins": logins}
+    except Exception:  # noqa: BLE001 — best-effort 관찰, 실패해도 게이트 평가를 막지 않는다.
+        logger.warning(
+            "merge gate: PR reviewer facts 관찰 실패(best-effort) org=%s repo=%s pr=%d",
+            org_id, repo, pr_number, exc_info=True,
+        )
+        return {}
+
+
 async def evaluate_merge_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -367,6 +466,12 @@ async def evaluate_merge_gate(
 
     # 3. 정책 disposition 아티팩트 gate row(Cage·AC⑥). create_gate가 disposition→status 설정·멱등.
     facts = {
+        # story #1715(PO 판정 2026-08-24) — 상신자 해소 회신(gate_service.py::
+        # _notify_doc_gate_requester)용 stash. 새 식별 로직 0 — member_id는 이 함수가 이미
+        # participation.member_id(누가 실작업했는지)로 계산해 create_gate()의 정책판정에
+        # 쓰던 그 값 그대로, doc.py의 동명 필드와 같은 계약(neutral_facts에 저장해두면 해소
+        # 시점에 그 값으로 회신 대상을 찾는다).
+        "requested_by_member_id": str(member_id),
         "ci_result": ci,
         "pr_result": pr,
         # HO-S6(AC⑥): 신뢰 근거 = 가설 적중 이력(CI clean-pass 아님). 명시 노출.
@@ -387,18 +492,34 @@ async def evaluate_merge_gate(
     # story #1968: 이 함수는 story_id(uuid)만 갖고 Story 객체를 로드하지 않으므로(participation/
     # verdict/trust 경로 전부 story_id만 소비) resolve_work_item_project_id()로 신규 조회.
     project_id = await resolve_work_item_project_id(session, org_id, "story", story_id)
+    # story #2893(설계안 §2 A1) — pr_number<=0(no-substance/board-preflight, PR 컨텍스트
+    # 자체가 없음)은 DB에 0을 지어내지 않고 NULL로 정직하게 유지. 0271의 부분 유니크
+    # 인덱스가 NULL 구간=옛 "스토리+gate_type당 1행" 계약을 그대로 지킨다.
+    db_pr_number = pr_number if pr_number > 0 else None
+    # story #2932(HIGH1) — pr_number와 짝으로 repo도 정직하게: 빈 문자열("", no-substance
+    # self-report shell의 관례값)은 "모름"이지 실 repo가 아니므로 None으로 정규화.
+    db_repo_full_name = repo or None
+    # story #2950 슬라이스② — 관찰 사실(diff_size/touches_migration)만 neutral_facts에 병합.
+    # no-substance shell(db_pr_number/db_repo_full_name 둘 다 None)이면 관찰 대상 자체가 없다.
+    if db_pr_number is not None and db_repo_full_name is not None:
+        facts.update(await _observe_pr_diff_facts(session, org_id, db_repo_full_name, db_pr_number))
+        # story #3014 — reviewer 관찰 사실(판정 무영향). _observe_pr_reviewer_facts docstring 참고.
+        facts.update(await _observe_pr_reviewer_facts(session, org_id, db_repo_full_name, db_pr_number))
     # story #2118(E-DG-REAL ②): create_gate()가 이미 pending인 기존 gate를 멱등 반환할 때(예:
     # report-done/board-preflight가 이 함수를 반복 호출)마다 승인요청 카드를 중복 배달하지 않으려면
     # "이 호출에서 방금 pending이 됐는지"(신규 생성 또는 rejected/voided→재오픈)를 알아야 한다 —
     # create_gate()는 그 신호를 반환하지 않으므로(반환형 변경은 8개 호출부 전체에 영향, 스코프 밖)
-    # 호출 *전* 상태를 가볍게 먼저 조회해 비교한다(create_gate 내부의 멱등 조회와 동형 SELECT,
-    # 신규 인덱스 불필요 — uq(work_item_id, work_item_type, gate_type) 이미 있음).
-    _prior_status = (await session.execute(
-        select(Gate.status).where(
-            Gate.org_id == org_id, Gate.work_item_id == story_id,
-            Gate.work_item_type == "story", Gate.gate_type == MERGE_GATE_TYPE,
-        )
-    )).scalar_one_or_none()
+    # 호출 *전* 상태를 가볍게 먼저 조회해 비교한다(create_gate 내부의 멱등 조회와 동형 SELECT).
+    # story #2893 — pr_number를 키에 편입(0271): 안 넣으면 "이 PR의 게이트가 방금
+    # pending이 됐는지"가 아니라 "같은 스토리 다른 PR의 상태"를 잘못 비교해 카드
+    # 배달 판정이 어긋난다(그 PR 실사고류와 동일 클래스). 카디르 QA(PR#3349 CI 실패①,
+    # 2026-08-22) — 정확매치 only는 이 바로 아래 create_gate() 호출이 찾을 행(NULL-슬롯
+    # 승격 포함)과 다른 답을 낼 수 있어 fallback 헬퍼로 통일한다(같은 물음엔 같은 답).
+    _prior_gate = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+        gate_type=MERGE_GATE_TYPE, pr_number=db_pr_number, repo_full_name=db_repo_full_name,
+    )
+    _prior_status = _prior_gate.status if _prior_gate is not None else None
     gate = await create_gate(
         session,
         org_id,
@@ -409,6 +530,8 @@ async def evaluate_merge_gate(
         role_id,
         project_id=project_id,
         neutral_facts=facts,
+        pr_number=db_pr_number,
+        repo_full_name=db_repo_full_name,
     )
 
     # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable
@@ -439,6 +562,19 @@ async def evaluate_merge_gate(
             "merge gate re-opened on resubmit story=%s gate=%s prior=%s",
             story_id, gate.id, prior["status"],
         )
+    elif gate.status in ("pending", "auto_passed") and _prior_gate is not None:
+        # story #3039(2026-08-25, 근본원인 fix②) — create_gate()의 멱등 반환은 이미 존재하는
+        # gate에 새 neutral_facts를 전혀 반영하지 않는다(신규 생성 시점에만 씀). 그래서 CI/PR
+        # 증거가 나중에(웹훅으로) 갱신돼도 이 함수가 매번 새로 계산한 ci_result/pr_result 등이
+        # DB에 영구 반영 안 되고 증발했다 — decision_basis/auto_decision_reason(아래 H1-FIX-1,
+        # gate row 컬럼)은 이미 재평가마다 write-back되는데 neutral_facts(JSONB, FE가 실제
+        # "CI 통과/사유"를 읽는 자리)만 최초 생성 시점 값에 영구히 갇혀 있었다(실사고: PR#3460 —
+        # 5개 워크플로 전부 green check_suite completed 웹훅을 200으로 수신했으나
+        # gate.neutral_facts.ci_result가 계속 null). 기존 키(과거 reopen이 남긴
+        # decision_history 등)는 보존하고 이번에 새로 계산된 관찰사실/증거만 병합 갱신한다
+        # (전체교체 아님 — #2832 교훈과 동형).
+        gate.neutral_facts = {**(gate.neutral_facts or {}), **facts}
+        await session.flush()
 
     # story #2118(E-DG-REAL ②) — doc.py의 dispatch_approval_request_cards(#2604) 패턴을 merge
     # gate까지 확장: 이 호출에서 gate가 «방금» pending이 된 경우만(_prior_status와 비교, 위 주석
@@ -503,6 +639,11 @@ async def evaluate_merge_gate(
     if decision == AUTO_MERGE:
         if head_sha:
             gate.approved_head_sha = head_sha
+            # story #2932 완주조건 HIGH2(5라운드) — 이전엔 여기서 서버 now()로
+            # pr_head_observed_at을 씨딩했으나(4라운드), 서로 다른 시계(서버시각 vs GitHub
+            # 실시각)를 같은 필드에 섞는 결함으로 판명(카디르 5라운드+codex 실물재현) —
+            # 삭제했다. 이 필드는 이제 reopen_gate_if_new_sha(gate_github_check.py) 오직
+            # 한 곳, 오직 실 webhook payload의 pr_updated_at에서만 채워진다.
     elif gate.status == "auto_passed" and gate.approved_head_sha:
         logger.info(
             "gate=%s: 재평가로 decision이 AUTO_MERGE 이탈(%s) — auto-axis anchor(%s) 무효화",
@@ -564,6 +705,7 @@ async def reconcile_merge_gate_with_real_evidence(
     ci_result: str | None,
     merged: bool,
     head_sha: str | None = None,
+    gate_check_publish: list[dict] | None = None,
 ) -> MergeGateDecision | None:
     """story #2156 AC2(2026-08-07) — GitHub 웹훅이 잡은 실 CI/PR verdict를 merge-type
     게이트에 반영한다.
@@ -593,21 +735,203 @@ async def reconcile_merge_gate_with_real_evidence(
     ⚠️호출 위치 주의 — `evaluate_merge_gate` 자신이 내부에서 `capture_pr_ci_verdict`를 이미
     부른다. 이 함수를 `capture_pr_ci_verdict` 본문 안에서 부르면 무한 재귀가 된다 — 반드시
     그 호출부(웹훅 핸들러 등) 쪽에서, `capture_pr_ci_verdict` 리턴 後에 별도로 부를 것.
-    """
-    existing = await session.execute(
-        select(Gate).where(
-            Gate.org_id == org_id,
-            Gate.work_item_id == story_id,
-            Gate.work_item_type == "story",
-            Gate.gate_type == MERGE_GATE_TYPE,
-            Gate.status.in_(("pending", "auto_passed")),
-        ).limit(1)
+
+    ⭐story #3033(2026-08-24, PO 판정) — pr_number 경로가 아무 게이트도 못 찾으면(아래),
+    SHA 폴백으로 한 번 더 시도한다. 그라운딩(디디, #3350/#3307 2/2 실물): 스택형 형제 PR이
+    같은 head SHA를 공유하면, 원 PR이 머지된 뒤 도착하는 CI-완료 웹훅(check_suite/
+    workflow_run/status)의 pull_requests[]에서 GitHub이 그 PR을 빼버려 pr_number 자체가
+    틀린 PR(형제)을 가리킨다 — «같은 story의 게이트» 스코프로는 못 잡는다(story 자체를
+    그 틀린 pr_number 경유로 아는 순환이라). CI verdict는 PR이 아니라 SHA의 속성이라는
+    PO 판정에 따라, org+github_check_run_sha로만(story 무관) 찾는다
+    (`find_pending_merge_gates_by_head_sha`). 일치가 여럿이면 전부 갱신 — **ci_result만**.
+    pr_result(머지/클로즈)는 PR별 사실이라 SHA로 공유될 근거가 없으므로 각 게이트의 기존
+    값을 그대로 보존한다(evaluate_merge_gate의 pr_result 파라미터는 무조건부 덮어쓰기라
+    None을 넘기면 기존 값을 지운다 — 그래서 명시로 읽어 되돌려 넣는다).
+
+    ⚠️반환 계약은 그대로 유지(하위 호환 — 이 함수를 직접 호출하는 기존 realdb 테스트
+    다수(#2156/#2520/#2853/#2893)가 단일 `MergeGateDecision | None`을 전제로 한다): SHA
+    폴백이 갱신한 형제 게이트들은 이 반환값에 실리지 않는다(원래 pr_number 경로가 찾은
+    "그 story의" 결정만 반환). 대신 `gate_check_publish`(옵션, `_process_webhook_event`의
+    동형 outparam 관례 그대로 — 넘기면 형제 게이트마다 자신의 pr_number/repo로 항목을
+    append) 로 그 결과에 접근한다. 안 넘기면(기존 모든 호출부) DB 쓰기(ci_result 갱신)는
+    그대로 일어나되 GitHub check-run publish 신호만 안 나간다 — 그 쓰기 자체가 이 fix의
+    본체(게이트가 영원히 pending에 갇히는 것 해소)이므로 publish는 부가.
+
+    관측(AC2, PO 지시) — 폴백이 발동하면 info 로그(매치 건수 포함), pr_number 경로도
+    SHA 폴백도 둘 다 못 찾으면 warning(«이 CI 신호가 어떤 게이트에도 안 닿았다»가 조용히
+    묻히지 않게)."""
+    # story #2893(설계안 §2 A1) — pr_number를 키에 편입: 안 넣으면 "이 웹훅이 나른 PR B의
+    # CI/merge 증거"로 story의 아무 pending/auto_passed 게이트(실은 PR A 것일 수 있음)를
+    # 재평가해버린다 — 실사고1/2와 정확히 같은 클래스(엉뚱한 PR의 SHA/증거가 다른 PR의
+    # 게이트에 새는 것).
+    # 카디르 QA(PR#3349 CI 실패②, 2026-08-22) — 정확매치 only 조회는 line-engine/board-
+    # preflight self-report shell(pr_number 모름, NULL로 생성)이 나중에 실 PR로 reconcile
+    # 되는 정상 경로를 놓친다(gate_service.find_gate_slot_with_pr_fallback 참조).
+    existing = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+        gate_type=MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
+        repo_full_name=(repo or None),
     )
-    if existing.scalar_one_or_none() is None:
+    if existing is not None and existing.status in ("pending", "auto_passed"):
+        return await evaluate_merge_gate(
+            session, org_id, story_id,
+            pr_number=pr_number, repo=repo, ci_result=ci_result,
+            pr_result=("pass" if merged else None),
+            head_sha=head_sha,
+        )
+
+    if not head_sha:
         return None
-    return await evaluate_merge_gate(
-        session, org_id, story_id,
-        pr_number=pr_number, repo=repo, ci_result=ci_result,
-        pr_result=("pass" if merged else None),
-        head_sha=head_sha,
+    sibling_gates = await find_pending_merge_gates_by_head_sha(session, org_id=org_id, head_sha=head_sha)
+    if not sibling_gates:
+        logger.warning(
+            "merge gate reconcile: no pending/auto_passed gate matched by pr_number(=%s) or "
+            "sha=%s (org=%s repo=%s) — this CI/merge signal reached no gate",
+            pr_number, head_sha, org_id, repo,
+        )
+        return None
+    logger.info(
+        "merge gate SHA fallback triggered: sha=%s matched %d sibling gate(s) (pr_number=%s path found none)",
+        head_sha, len(sibling_gates), pr_number,
     )
+    for gate in sibling_gates:
+        gate_pr_number = gate.pr_number or 0
+        gate_repo = (gate.neutral_facts or {}).get("repo") or gate.repo_full_name or repo
+        decision = await evaluate_merge_gate(
+            session, org_id, gate.work_item_id,
+            pr_number=gate_pr_number, repo=gate_repo, ci_result=ci_result,
+            # story #3033(PO 정정, 2026-08-24, 1라운드 QA REQUEST_CHANGES) — 최초 버전은
+            # gate.neutral_facts["pr_result"]를 읽어 "보존"했는데, 그건 게이트 **생성 시점
+            # 스냅샷**이라(neutral_facts는 이후 재평가마다 안 갱신됨, 위 docstring 참조)
+            # 실제로는 stale일 수 있다. CI-완료 이벤트(check_suite/workflow_run/status)엔
+            # PR 머지/클로즈 여부가 구조적으로 안 실린다 — 그 「모름」을 stale snapshot으로
+            # 위조하면(카디르+codex 실PG 재현) neutral_facts가 우연히 옛 "pass"를 들고 있는
+            # gate_status=="auto_passed" 게이트에서 «상향 오판»(auto_merge 잘못 승인)이
+            # 난다. 그래서 명시로 None(모름)을 넘긴다 — `_decide()`의 AUTO_MERGE 분기는
+            # pr=="pass" 정확 일치만 통과시켜 None은 항상 막고(상향 전이 없음, PO 요건②),
+            # `capture_pr_ci_verdict`는 merged=False일 때 pr verdict 자체를 기록 안 해(그
+            # 함수 참조 — merged=True일 때만 기록) "미머지"를 이력에 지어내지도 않는다(PO
+            # 요건①). status=="pending"(실사고 #3350/#3307 둘 다 이 케이스)인 게이트는
+            # `_decide()`가 pr 값과 무관하게 "policy disposition=ask"로 조기 반환하므로
+            # 실사고 재현 시나리오엔 아예 영향이 없다 — 이 정정은 auto_passed 게이트에서만
+            # 실제로 갈린다.
+            pr_result=None,
+            head_sha=head_sha,
+        )
+        if gate_check_publish is not None and decision.gate_id is not None:
+            gate_check_publish.append({
+                "org_id": org_id, "gate_id": decision.gate_id,
+                "head_sha": head_sha, "repo_full_name": gate_repo, "pr_number": gate_pr_number,
+            })
+    return None
+
+
+async def trigger_gate_creation_for_late_participation(
+    session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID,
+) -> None:
+    """story #2893 후속(카디르 4라운드 verdict, PR#3357 qa:changes) — 순서 조합 갭: PR
+    opened(참여 無)→라벨정렬(웹훅 트리거는 실행되나 evaluate_merge_gate가 "no implementation
+    participation"으로 gate_id=None 즉시반환)→참여등록(재평가 훅 0)→이후 웹훅 이벤트 없음
+    → **게이트 row가 영구 미생성**된다(2893 원 증상 — close/reopen 강제 그대로 재현. B3
+    재평가 API도 gate id가 없어 호출 불가하므로 이 순서에선 탈출구가 없었다).
+
+    참여 생성 공유 chokepoint(`ensure_implementation_participation`— assignee 자동참여·
+    story claim 양쪽이 공유·`add_participation` 라우터의 직접 생성) 양쪽에서 이 훅을 불러,
+    지금 story에 연결된 PR마다 게이트가 아직 없으면 즉시 만든다(B3의 원격 GitHub 조회
+    조합을 그대로 재사용 — get_pull_request로 현재 head SHA/merged를, fetch_status_check_
+    rollup으로 CI를 읽어 evaluate_merge_gate 재호출. 새 규칙 발명 0).
+
+    ⚠️호출자의 세션을 그대로 받는다(별도 세션 아님) — 방금 `flush`된(아직 커밋 前) participation
+    행을 evaluate_merge_gate가 같은 트랜잭션 안에서 즉시 봐야 하기 때문(실측: 별도 세션으로
+    분리했더니 그 세션엔 아직 안 보이는 미커밋 행 탓에 "no implementation participation"으로
+    재실패 — read-your-own-write가 세션 경계를 못 넘는다). 대신 **세션 오염은 SAVEPOINT로
+    막는다**(카디르 QA②) — 링크마다 `session.begin_nested()`로 감싸, 그 PR의 DB 예외가
+    SAVEPOINT까지만 롤백되고 호출자의 participation flush·다른 링크의 처리·최종 commit에는
+    전혀 새지 않는다.
+
+    카디르 QA(PR#3357 재재verdict, 2026-08-22) 3건 하드닝:
+    ①**link별 예외 격리** — 하나의 PR 처리 실패가 나머지 PR을 막으면 안 된다(전체를 감싸던
+    단일 try를 per-link try로 분리).
+    ②**세션 오염 차단** — 위 SAVEPOINT 격리(개별 세션이 아니라 개별 SAVEPOINT — 이유는
+    docstring 서두 참조).
+    ③**soft-delete 필터** — `resolve_pr_link`(canonical reader)와 동일하게
+    `deleted_at IS NULL`만 조회한다 — 없으면 사용자가 명시로 끊은 연결(explicit unlink)이
+    이 훅으로 되살아나는 의미 결함이었다.
+
+    best-effort — 어느 PR이 실패해도 다른 PR·호출자의 참여 등록 자체를 절대 막지 않는다.
+    링크된 PR이 없거나(board-preflight 전용 story 등) GitHub installation이 없으면 조용히
+    no-op(fail-closed: 외부 신호를 지어내지 않는다)."""
+    from app.models.github_installation import GithubInstallation
+    from app.models.pull_request_story_link import PullRequestStoryLink
+    from app.services.github_app import get_installation_token, get_pull_request
+    from app.services.verdict_capture import fetch_status_check_rollup
+
+    try:
+        links = (
+            await session.execute(
+                select(PullRequestStoryLink).where(
+                    PullRequestStoryLink.org_id == org_id,
+                    PullRequestStoryLink.story_id == story_id,
+                    PullRequestStoryLink.deleted_at.is_(None),
+                )
+            )
+        ).scalars().all()
+        if not links:
+            return
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return
+        installation_id = installation.installation_id
+    except Exception:  # noqa: BLE001 — best-effort: 준비 단계 실패도 참여 등록을 안 막는다.
+        logger.warning(
+            "story=%s: 참여등록 후 게이트 생성 재시도 준비 단계 실패(best-effort)",
+            story_id, exc_info=True,
+        )
+        return
+
+    for link in links:
+        try:
+            async with session.begin_nested():  # SAVEPOINT — 이 링크만 롤백, 호출자 트랜잭션은 무영향.
+                existing = await find_gate_slot_with_pr_fallback(
+                    session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+                    gate_type=MERGE_GATE_TYPE, pr_number=link.pr_number,
+                    repo_full_name=link.repo_full_name,
+                )
+                if existing is not None:
+                    continue  # 이미 게이트가 있음 — 이 훅이 고치려는 갭이 아니다.
+                token = await get_installation_token(installation_id)
+                if not token:
+                    continue
+                pr = await get_pull_request(installation_id, link.repo_full_name, link.pr_number)
+                if pr is None:
+                    continue
+                head_sha = (pr.get("head") or {}).get("sha")
+                if not head_sha:
+                    continue
+                ci_result, _reason = await fetch_status_check_rollup(link.repo_full_name, head_sha, token)
+                # story #3035(2026-08-24, #3033 QA 부수발견 — verdict_capture.py:541과 형제
+                # 결함) — 바로 위에서 GitHub REST로 이 PR의 실 `merged` 상태를 이미 받아왔는데
+                # (head_sha 추출에만 쓰고) 여기 안 넘겼다 — `evaluate_merge_gate`가 그래서
+                # 기본값 "pass"로 낙관적 확定(아직 안 머지된 PR도 "머지됨"으로 게이트 생성
+                # 시점에 고정)했다. 이미 아는 사실을 던져버리고 근거없는 기본값으로 대체하던
+                # landmine — #3033과 동일 원칙(모름/아직-아님을 pass로 위조 안 함) 그대로
+                # 명시 배선. merged=False(아직 열려 있거나 머지 없이 닫힘)는 "실패"가 아니라
+                # 중립(None)으로 — 다른 웹훅 경로(`reconcile_merge_gate_with_real_evidence`
+                # 등)와 동일 관례.
+                merged = bool(pr.get("merged"))
+                await evaluate_merge_gate(
+                    session, org_id, story_id,
+                    pr_number=link.pr_number, repo=link.repo_full_name,
+                    ci_result=ci_result, pr_result=("pass" if merged else None), head_sha=head_sha,
+                )
+        except Exception:  # noqa: BLE001 — 이 링크만 실패 처리(SAVEPOINT 롤백), 다른 링크·호출자 세션엔 무영향.
+            logger.warning(
+                "story=%s pr=%s: 참여등록 후 게이트 생성 재시도 실패(best-effort, 다른 PR·참여 등록 자체엔 무영향)",
+                story_id, link.pr_number, exc_info=True,
+            )

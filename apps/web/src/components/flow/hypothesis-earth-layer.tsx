@@ -50,7 +50,8 @@ function HypothesisCard({
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(hypothesis.id); }
       }}
       className={cn(
-        'flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-brand/60 hover:shadow-sm',
+        // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
+        'flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-brand/60 hover:shadow-[var(--elev-card)]',
         dim && 'opacity-60',
         // story #2543 — 방금 심은 가설(guided 생성 직후) 하이라이트. mockup .hcard.new와
         // 같은 결(브랜드 링 + 배지) — 가설 반증에 빨강을 못 쓰는 규율과 무관한 순수 강조색.

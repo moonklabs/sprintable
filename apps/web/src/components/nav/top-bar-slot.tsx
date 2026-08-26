@@ -3,6 +3,11 @@
 import { useEffect, type ReactNode } from 'react';
 import { useTopBar } from './top-bar-context';
 
+/**
+ * story #2879(S1b) — top-bar ↔ PageHeader(`components/ui/page-header.tsx`) 역할 규칙
+ * 전문은 그쪽 파일 주석 참고. 요지: 이 `title`과 PageHeader의 `title`을 같은 화면에서
+ * 동시에 쓰지 않는다 — 화면 타입별로 title을 갖는 표면을 하나만 고른다.
+ */
 interface TopBarSlotProps {
   title: ReactNode;
   actions?: ReactNode;

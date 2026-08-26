@@ -19,14 +19,14 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate, set_gate_status
 from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation
 from app.models.pull_request_story_link import PullRequestStoryLink
-from app.services.github_app import create_check_run, update_check_run
+from app.services.github_app import create_check_run, list_check_runs_for_ref, update_check_run
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE
 
 logger = logging.getLogger(__name__)
@@ -255,18 +255,50 @@ async def publish_gate_check(
             # 카디르 QA③-c — check-run은 **SHA당 1개**가 정본. 기존 run이 다른 SHA에 대한
             # 것이면(github_check_run_sha 불일치) PATCH가 아니라 새 run을 만든다 — 안 그러면 새
             # head로는 영원히 check가 안 생겨 required가 영구 미충족되는 데드엔드가 생긴다.
+            #
+            # story #2908(실사고 그라운딩) — 위 전제("이 Gate 행이 모르면 없다")가 이 Gate 행
+            # 스코프에서만 참이다. 서로 다른 Gate 행(다른 PR 번호)이 같은 SHA에 바인딩되는 경우
+            # (스택 PR을 통합 PR로 재타겟하는 워크플로 등) 각자 "나는 모른다"고 독립적으로
+            # create해 한 SHA에 동명 check-run이 중복 생성됐다 — 승인된 쪽만 완결되고 먼저
+            # 만들어진 쪽은 영원히 in_progress 고아로 남았다(실측: story 2905, PR #3307/#3331).
+            # 처방(PO 확定, 후보 C): create 前 GitHub 쪽 실 상태를 직접 물어(list_check_runs_
+            # for_ref) 이미 있으면 그걸 PATCH — "SHA당 실물 1개"를 캐시가 아니라 GitHub 자신에게
+            # 확인해 강제한다. 조회 실패(None)는 fail-closed 폴백(PO 확定) — skip은 신규 SHA의
+            # 정상 첫 check-run 생성까지 막는 과잉살상이라, 최악에도 기존 동작(create-new)으로.
             if gate.github_check_run_id is None or gate.github_check_run_sha != head_sha:
-                result = await create_check_run(
-                    installation_id, repo_full_name, head_sha,
-                    name=CHECK_NAME, status=gh_status, conclusion=gh_conclusion,
-                    title="Sprintable Gate",
-                    summary=f"게이트 상태: {gate.status}",
+                existing_runs = await list_check_runs_for_ref(
+                    installation_id, repo_full_name, head_sha, name=CHECK_NAME,
                 )
-                if result is None:
-                    logger.warning("gate=%s: check-run 생성 실패(fail-closed, GitHub 쪽 무영향)", gate_id)
-                    return
-                gate.github_check_run_id = result.get("id")
-                gate.github_check_run_sha = head_sha
+                if existing_runs is None:
+                    logger.warning(
+                        "gate=%s: check-run 조회 실패 — 기존 create-new 폴백(PO 확定, fail-closed)",
+                        gate_id,
+                    )
+                reused_id = existing_runs[0].get("id") if existing_runs else None
+                if reused_id is not None:
+                    result = await update_check_run(
+                        installation_id, repo_full_name, reused_id,
+                        status=gh_status, conclusion=gh_conclusion,
+                        title="Sprintable Gate",
+                        summary=f"게이트 상태: {gate.status}",
+                    )
+                    if result is None:
+                        logger.warning("gate=%s: check-run 갱신 실패(fail-closed, GitHub 쪽 무영향)", gate_id)
+                        return
+                    gate.github_check_run_id = reused_id
+                    gate.github_check_run_sha = head_sha
+                else:
+                    result = await create_check_run(
+                        installation_id, repo_full_name, head_sha,
+                        name=CHECK_NAME, status=gh_status, conclusion=gh_conclusion,
+                        title="Sprintable Gate",
+                        summary=f"게이트 상태: {gate.status}",
+                    )
+                    if result is None:
+                        logger.warning("gate=%s: check-run 생성 실패(fail-closed, GitHub 쪽 무영향)", gate_id)
+                        return
+                    gate.github_check_run_id = result.get("id")
+                    gate.github_check_run_sha = head_sha
             else:
                 result = await update_check_run(
                     installation_id, repo_full_name, gate.github_check_run_id,
@@ -292,6 +324,38 @@ async def publish_gate_check(
         logger.exception("gate=%s: check 발행 처리 중 예외(fail-closed, GitHub 쪽 무영향)", gate_id)
 
 
+# story #2893(설계안 §3 B2-a) — 재검토를 강제하는 대상 라벨. 「라벨=검증된 SHA에 대한 약속」
+# 시맨틱이라 SHA 재-pending 시 이 둘을 뗀다. diff 분류 fast-path(문서만 변경 등)는 설계상
+# 스코프 밖(PO 명시 제외, 2026-08-21) — 여기 조건 분기 0.
+RECHECK_LABELS = ("qa:pass", "design:pass")
+
+
+async def publish_label_unlabel(org_id: uuid.UUID, repo_full_name: str, pr_number: int, labels: list[str]) -> None:
+    """story #2893(설계안 §3 B2-a) — SHA 재-pending 시 qa:pass/design:pass 라벨을 GitHub에서
+    제거한다. `publish_gate_check`와 동일 background-task 패턴(자기 세션 열어 installation_id만
+    해소 — gate row 조회는 이 함수 관심사 밖, 호출자(verdict_capture.py)가 재-pending 판단을
+    이미 끝내고 넘긴다). 절대 예외를 던지지 않는다 — 실패는 로그만(fail-closed: 라벨이 안
+    떨어져도 GitHub 쪽은 이전 상태 그대로일 뿐, DB 트랜잭션은 이미 커밋 완료된 뒤라 무관)."""
+    from app.core.database import async_session_factory
+    from app.services.github_app import remove_pr_label
+
+    try:
+        async with async_session_factory() as session:
+            installation_id = await _resolve_installation_id(session, org_id)
+        if installation_id is None:
+            logger.info("org=%s: GitHub installation 없음 — 라벨 제거 skip", org_id)
+            return
+        for label in labels:
+            ok = await remove_pr_label(installation_id, repo_full_name, pr_number, label)
+            if not ok:
+                logger.warning(
+                    "repo=%s pr=%s label=%s 제거 실패(fail-closed, GitHub 쪽 무영향)",
+                    repo_full_name, pr_number, label,
+                )
+    except Exception:  # noqa: BLE001 — fail-closed 경계: 백그라운드 태스크는 절대 안 죽는다.
+        logger.exception("repo=%s pr=%s: 라벨 제거 처리 중 예외(fail-closed)", repo_full_name, pr_number)
+
+
 async def reopen_gate_if_new_sha(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -300,6 +364,7 @@ async def reopen_gate_if_new_sha(
     *,
     repo_full_name: str,
     pr_number: int,
+    pr_updated_at: datetime | None = None,
 ) -> bool:
     """SHA 귀속(AC②) — 승인된 게이트가 더 이상 최신 커밋과 안 맞으면 pending으로 되돌린다.
     **호출자의 기존 트랜잭션 안에서 동작**(commit 안 함 — verdict_capture.py가 커밋).
@@ -319,18 +384,122 @@ async def reopen_gate_if_new_sha(
     ⛔카디르 R2 CRITICAL(2026-08-19) — `auto_passed`도 `approved`와 동일하게 다룬다. 정책이
     allow_auto로 내린 통과도 "그 SHA에 대한" 승인이라 새 커밋엔 무효 — 자동통과 정책이 새
     증거로 다시 통과시키는 것은 `evaluate_merge_gate`(재평가 시 anchor 재확定)의 몫이지,
-    구 anchor를 새 SHA에 그대로 붙여두는 것의 몫이 아니다."""
+    구 anchor를 새 SHA에 그대로 붙여두는 것의 몫이 아니다.
+
+    pr_updated_at: story #2932(완주조건 HIGH2, 0273) — GitHub가 웹훅 배달 순서를 보장하지
+    않아, 이미 최신 SHA로 승인된 게이트에 **뒤늦게 도착한 옛 배달**이 그 옛 SHA와의 불일치만
+    보고 부당 재-pending시킬 수 있었다("승인은 그때의 커밋에" — story #2893 핵심 보증을 이
+    클래스가 직접 깬다). `pull_request.updated_at`(GitHub가 실 갱신마다 단조증가시킴)을
+    `gate.pr_head_observed_at`에 워터마크로 남겨, 새 이벤트의 `updated_at`이 이미 관측된
+    값보다 **엄격히 과거면**(`<`) SHA 불일치와 무관하게 stale로 skip한다. 폴링/GitHub API
+    재조회 없이(story #2893 §4 C1 원칙과 동형) 페이로드 자체 신호만 쓴다. None이면(payload에
+    없거나 파싱 실패 등) 검증을 건너뛰고 기존 SHA-diff-only 동작 그대로(새로 나빠지지 않음,
+    다만 이 방지축을 못 얻을 뿐).
+
+    ⛔카디르 4라운드(codex 발견) — 원래 `<=`(동일 timestamp도 stale)는 서로 다른 두 진짜
+    배달이 같은 초 단위 timestamp를 우연히 공유하면(연속 push 등, GitHub 해상도 제약) 신규
+    SHA를 stale로 오판해 skip할 위험이 있었다. `<`로 완화하면 동일 timestamp는 이 가드를
+    안 타고 아래 **기존 SHA-diff 비교**(approved_head_sha == new_head_sha)로 자연히
+    넘어간다 — "동일 timestamp면 SHA로 갈라라"는 요구를 새 비교 축을 추가하지 않고 이미 있는
+    분기가 그대로 흡수한다(SHA가 같으면 no-op, 다르면 정상 재-pending — 타임스탬프 동률은
+    stale 여부 판정에서 아예 빠지고 SHA가 유일한 진실이 된다).
+
+    ⛔카디르 5라운드(codex+독립교차리뷰 일치, 근본 재설계) — 4라운드 처방(`seed_pr_head_
+    watermark()`가 UI 승인·AUTO_MERGE·publish_gate_check success 3곳에서 서버 `now()`를
+    워터마크로 씀)이 **서로 다른 두 시계를 같은 필드에 혼용**하는 새 결함을 냈다: 커밋A
+    push(GH실시각T1)→커밋B(진짜 새커밋) push(T1.5)→사람이 A를 승인(서버시각T2, T1.5<T2)→
+    B의 웹훅이 지연도착(payload `pr_updated_at=T1.5`)→`T1.5 < T2(서버시각워터마크)`라 진짜
+    새 커밋 B가 stale로 오판돼 **영영 미처리**(2893 핵심보증을 반대방향으로 위반 — 지워야
+    할 걸 안 지움). 처방(삭제 기반 재설계, "더 적은 코드가 더 강한 보증"): `seed_pr_head_
+    watermark()`와 그 3개 호출부를 **완전 삭제**한다 — `pr_head_observed_at`을 쓰는 자리는
+    이제 이 함수 하나, 오직 실 webhook payload의 `pr_updated_at`에서만 온다. 서버시각이
+    이 필드에 섞일 수 있는 경로가 코드상 구조적으로 0개가 된다(관리로 막는 게 아니라 쓰는
+    자리를 없애 원리적으로 불가능하게).
+
+    ⛔페드루 PO 지적(5라운드, 구현 前 명시 요구) — 위 삭제만으로는 **3라운드 구멍이
+    부활한다**: 이 함수는 바로 아래 `gate.status not in ("approved","auto_passed")` 가드
+    때문에 pending 게이트에 대해선 즉시 return해 왔다 — pending 상태에서 도착하는 «진짜»
+    웹훅(PR이 opened/synchronize될 때 거의 항상 먼저 오는 것)의 `pr_updated_at`을 관측할
+    기회 자체가 없었다. 그러면 나중에 사람이 승인해도(서버-now() 씨딩을 없앴으니) 워터마크는
+    여전히 None — 승인 직후 stale webhook 무방비 상태(4라운드가 고치려던 바로 그 구멍)가
+    그대로 되살아난다. **처방**: 워터마크 "관측"(newer면 기록)을 status 가드보다 **먼저,
+    status 무관**으로 수행한다 — pending 상태에서 실 webhook이 오면 이제도 워터마크가
+    쌓인다. 재-pending "판정"만 approved/auto_passed로 계속 스코프한다(이 둘은 다른 축 —
+    관측=항상, 판정=승인된 게이트에서만 의미 있음). 이러면 PR에 연결된 merge gate 대부분
+    (거의 항상 opened/synchronize가 승인보다 먼저 온다)이 승인 시점 이전에 이미 실 GH시각
+    워터마크를 보유하게 돼, 4라운드가 원래 지키려던 "승인 직후 stale webhook 차단"이 서버
+    시계 없이도 자연히 성립한다. **남는(정직하게 문서화하는) 한계**: 이 gate가 «한 번도»
+    실 webhook을 받은 적 없이(순수 self-report/board-preflight 경로) 승인/AUTO_MERGE된
+    경우만 워터마크가 여전히 None — 그 직후 첫 webhook은 SHA-diff-only(#2932 이전
+    baseline)로 판정한다. 새로 나빠지는 게 아니라 그 좁은 창에서만 원래 상태로 되돌아가는
+    것 — 5라운드가 낸 "진짜 새 커밋을 영영 못 지운다" 사고는 이 설계에서 서버시각이 이
+    필드에 원천적으로 안 쓰이므로 구조적으로 재발 불가.
+
+    ⛔카디르 6라운드(codex 발견, 이 PR 자신이 도입한 신규 결함) — 5라운드의 관측 블록은
+    "읽고(Python) 비교하고 쓰는" 3단계라, exact-match SELECT(gate_service.py의
+    `find_gate_slot_with_pr_fallback`)가 `.with_for_update()` 없이 이 gate row를 가져오는
+    한 동시성 레이스에 노출된다: 워터마크=T0인 gate에 Tx A(웹훅 T2, 진짜 최신)와 Tx B(웹훅
+    T1, T0<T1<T2)가 동시 도착 → 둘 다 언락 SELECT로 T0를 읽고 각자 "내 값이 T0보다
+    새롭다"로 독립 판정 → A가 T2로 먼저 commit → 대기하던 B의 UPDATE가 **T1으로 덮어씀**
+    (row-lock은 write만 직렬화할 뿐, Python 비교 결과를 lock 획득 後 재계산하지 않음) →
+    최종 워터마크가 T2가 아니라 T1으로 **역행** → 이후 T1<Tmid<T2인 진짜 stale webhook이
+    가드를 통과해 부당 재-pending. HIGH2(NULL 슬롯 승격)가 이미 같은 클래스 레이스를
+    `.with_for_update()`로 막았는데 관측 로직엔 그 보호가 빠져 있었다.
+
+    **처방(DB 원자적 GREATEST, 페드루 PO 소견 채택)**: FOR UPDATE 잠금 대신 단일 원자적
+    `UPDATE ... SET pr_head_observed_at = GREATEST(pr_head_observed_at, :new)
+    RETURNING pr_head_observed_at`로 관측을 수행한다. PostgreSQL은 각 UPDATE 문을 그
+    실행 시점의 **최신 커밋된** 행 값에 대해 계산한다 — 두 번째 UPDATE는 첫 번째가 커밋해
+    락을 놓은 뒤에야 진행되고, 그때는 이미 첫 번째가 쓴 값을 본 채로 GREATEST를 재계산한다.
+    그 결과 커밋 순서와 무관하게 최종 워터마크는 항상 "지금까지 관측된 모든 값의 최댓값"이
+    된다 — 단조성이 Python 비교(코드 규율)가 아니라 GREATEST라는 **DB 성질 자체**가 되어
+    역행이 구조적으로 불가능해진다(FOR UPDATE처럼 락 대기를 추가로 도입할 필요도 없음).
+    staleness 판정도 같은 원자적 왕복에서 얻는다 — RETURNING된 값이 내 `pr_updated_at`과
+    같으면 내 배달이 GREATEST에서 이겼다(=stale 아님, 4라운드 동일-timestamp tie-break도
+    이 비교가 자연히 흡수 — 같으면 stale 아님, SHA-diff로 넘어감), 다르면(더 큰 값이
+    이미 기록돼 있었다) stale이다."""
     if gate.gate_type != MERGE_GATE_TYPE:
         return False
+    # 관측(상태 무관, 항상) — DB 원자적 GREATEST 갱신(위 6라운드 설명 참조). 판정(승인된
+    # 게이트에서만)보다 먼저 수행.
+    is_stale_delivery = False
+    if pr_updated_at is not None:
+        result = await session.execute(
+            text(
+                "UPDATE gate SET pr_head_observed_at = GREATEST(pr_head_observed_at, "
+                "CAST(:new_ts AS timestamptz)) WHERE id = CAST(:gate_id AS uuid) "
+                "RETURNING pr_head_observed_at"
+            ),
+            {"new_ts": pr_updated_at, "gate_id": gate.id},
+        )
+        new_watermark = result.scalar_one()
+        gate.pr_head_observed_at = new_watermark  # ORM 인스턴스를 실제 DB 값과 동기화.
+        is_stale_delivery = new_watermark != pr_updated_at
     if gate.status not in ("approved", "auto_passed"):
+        return False  # pending 등 — 관측은 위에서 이미 기록됨(status 무관), 재-pending 판정 대상만 아님.
+    if is_stale_delivery:
+        logger.info(
+            "gate=%s: stale/순서역전 웹훅 무시(pr_updated_at=%s, 이미 관측된 워터마크=%s) — 재-pending skip",
+            gate.id, pr_updated_at, gate.pr_head_observed_at,
+        )
         return False
     if gate.approved_head_sha == new_head_sha:
-        return False
+        return False  # 워터마크는 위에서 이미 원자적으로 전진 처리됨 — 중복 세팅 불요.
     logger.info(
         "gate=%s: SHA 불일치(approved=%s new=%s) — 재-pending", gate.id, gate.approved_head_sha, new_head_sha
     )
     prior_sha = gate.approved_head_sha
     set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
+    # story #2961(실 DB 관측, story 2905 gate 재현) — 이 함수만 재-pending 3종 중 유일하게
+    # resolver_id/resolved_at/resolution_note를 안 지웠다. gate_service.py의 다른 두 재-pending
+    # 경로(_reopen_rejected_gate·undo_gate_resolution)는 이 셋을 항상 함께 지운다 — status가
+    # pending으로 돌아가면 "누가 언제 무슨 사유로 해소했나"는 더 이상 참이 아니므로(그 해소는
+    # 이제 무효화된 옛 SHA에 대한 것), 셋을 같이 null로 되돌려 그 불변식(해소 3종 필드는
+    # status!=pending일 때만 값을 가진다)을 여기서도 지킨다. 감사 이력은 유실 안 됨 — 아래
+    # GateGithubCheckEvent(re_pending, prior_sha)가 별도로 원장에 남긴다.
+    gate.resolver_id = None
+    gate.resolved_at = None
+    gate.resolution_note = None
     gate.approved_head_sha = None
     gate.github_check_run_id = None  # 새 SHA는 새 check-run(같은 SHA의 pending→success 갱신 축과 분리).
     gate.github_check_run_sha = None

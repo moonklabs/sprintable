@@ -50,6 +50,15 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     _gr = MagicMock()
     _g = MagicMock()
     _g.gate_type = "merge"
+    # story #2975 — bare MagicMock의 auto-attribute는 None이 아니라 또 다른 MagicMock이라,
+    # transition_gate_endpoint의 reviewed_head_sha 대조(known SHA가 None이 아니면 body와
+    # 불일치 시 409)가 이 테스트의 관심사(resolver_id 강제)와 무관하게 발동해버린다. 이
+    # 테스트는 SHA 앵커링을 다루지 않으므로 명시적으로 None(known SHA 없음)으로 고정해
+    # 그 검증 대상 밖임을 분명히 한다.
+    _g.github_check_run_sha = None
+    # story #2982 — 이미해소 가드(status!='pending'이면 409)도 MagicMock 오토속성(항상
+    # not-None)을 "이미 해소됨"으로 오독한다. "pending"으로 명시해 그 가드도 대상 밖임을 밝힌다.
+    _g.status = "pending"
     _gr.scalar_one_or_none.return_value = _g
     _sess.execute = AsyncMock(return_value=_gr)
     from fastapi import BackgroundTasks

@@ -85,6 +85,13 @@ const ENTITY_ROUTE_SEGMENT = {
   story: 'stories',
   doc: 'docs',
   artifact: 'visual-artifacts',
+  // story #2889(S2h①, 페드루 확定 2026-08-21) — BE BACKLINKS_ALLOWED_TARGET_TYPES와 집합
+  // 파리티(entity-backlinks-section.route-map.test.ts가 코드스캔으로 고정). gate/
+  // pull_request는 아직 상세 라우트 소비처가 없다(미르코 S2d gate 프리뷰 side-pane 축과
+  // 어긋나지 않게 좁게: 이 맵은 fetch 세그먼트일 뿐 화면 링크 목적지가 아니다) — 프록시
+  // route.ts만 신설(app/api/gates/[id]/backlinks, app/api/pull-requests/[id]/backlinks).
+  gate: 'gates',
+  pull_request: 'pull-requests',
 } as const satisfies Record<string, string>;
 
 export type BacklinksEntityType = keyof typeof ENTITY_ROUTE_SEGMENT;

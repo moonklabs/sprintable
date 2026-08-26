@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
+import { AlertTriangle, Compass, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +27,7 @@ import {
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { fetchWithAuth } from '@/lib/db/client';
+import { extractBackendErrorMessage } from '@/lib/api-error-message';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
 // 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
@@ -141,9 +142,15 @@ interface ChatInputProps {
   // 그 셋 중 아무것도 안 열려 있을 때만 이 콜백까지 내려온다).
   threadId: string;
   onEscape?: () => void;
+  // story #2942(2921-S5, doc steer-event-axis-design-2927 §2/§4) — composer STEER 모드.
+  // currentTeamMemberId는 대상 피커에서 본인을 제외하는 데만 쓴다. participants가 없거나
+  // (본인 제외) 0명이면 STEER 토글 자체를 숨긴다(대상 없이는 발행이 원천 불가 — 신규
+  // 발행경로가 필요 없는 화면에 죽은 버튼을 심지 않는다, graceful).
+  currentTeamMemberId?: string;
+  participants?: { member_id: string; name: string | null }[];
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants }: ChatInputProps) {
   const t = useTranslations('chats');
   // story 1946(PO 실기기 발견): 터치(가상 키보드)엔 Cmd/Shift 조합이 없어 Enter=발송이면 장문
   // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
@@ -170,6 +177,22 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const [commandQuery, setCommandQuery] = useState<string | null>(null);
   const [commandIndex, setCommandIndex] = useState(0);
+
+  // story #2942(2921-S5) — composer STEER 모드. 본문(#/@)의 in-text 트리거 파서와는 완전히
+  // 분리된 별도 mini-form(steerMode=true일 때만 렌더) — 기존 mention/entity/command 3체계를
+  // 전혀 안 건드려 회귀 위험 0으로 만든다(별도 send path, 별도 검증). 대상 피커는 참가자
+  // 목록(props, 신규 fetch 0)에서 직접 고르고, work item 피커는 useEntityPicker를 독립
+  // 인스턴스로 재사용(같은 참조 코어 — #2264가 이미 "새 자리 비용=설정 한 줄"로 증명한 것).
+  const [steerMode, setSteerMode] = useState(false);
+  const [steerTargetId, setSteerTargetId] = useState('');
+  const [steerWorkItem, setSteerWorkItem] = useState<{ entity_type: string; entity_id: string; title: string } | null>(null);
+  const [steerWorkItemQuery, setSteerWorkItemQuery] = useState('');
+  const workItemPicker = useEntityPicker(projectId);
+  const [steerSending, setSteerSending] = useState(false);
+  const [steerError, setSteerError] = useState<string | null>(null);
+  // doc §4: "현재 스레드 참가자로 한정 권장"(422 예방) — 본인 제외 목록. 0명이면 STEER
+  // 토글이 아예 숨는다(아래 JSX, canSteer).
+  const steerTargets = (participants ?? []).filter((p) => p.member_id !== currentTeamMemberId);
 
   // S6: 첨부 메뉴(파일 업로드/스토리지에서 선택) + 자산 피커.
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -350,6 +373,54 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     }
   };
 
+  // story #2942 — doc §2 계약 그대로: 일반 messages POST가 아니라 POST /events/publish를
+  // definition_key='preset.steer.instruct'로 호출한다. conversation_id 오버라이드(§2 보강)
+  // 덕에 "지금 보는 이 스레드"로 바로 발행되고, 대상이 그 스레드 참가자가 아니면 BE가
+  // 422(conversation_target_mismatch)로 fail-closed 거부한다(지시가 조용히 미도달하는 것
+  // 방지) — 그 케이스만 doc §4가 요구하는 명시 카피로 갈아끼우고, 그 외 에러는 BE 메시지를
+  // 그대로 보여준다(임의 문구 창작 금지 — extractBackendErrorMessage 기존 관례).
+  const handleSendSteer = async () => {
+    const instruction = text.trim();
+    if (!instruction || !steerTargetId || !steerWorkItem || steerSending || disabled) return;
+    setSteerSending(true);
+    setSteerError(null);
+    try {
+      const res = await fetchWithAuth('/api/events/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          definition_key: 'preset.steer.instruct',
+          conversation_id: threadId,
+          payload: {
+            work_item_type: steerWorkItem.entity_type,
+            work_item_id: steerWorkItem.entity_id,
+            target_member_id: steerTargetId,
+            instruction,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { detail?: { code?: string } } | null;
+        setSteerError(
+          body?.detail?.code === 'conversation_target_mismatch'
+            ? t('steerErrorNotParticipant')
+            : extractBackendErrorMessage(body) ?? t('sendFailed'),
+        );
+        return;
+      }
+      setText('');
+      setSteerTargetId('');
+      setSteerWorkItem(null);
+      setSteerWorkItemQuery('');
+      setSteerMode(false);
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    } catch {
+      setSteerError(t('sendFailed'));
+    } finally {
+      setSteerSending(false);
+    }
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // command(/) picker — mention/entity와 정확 동일 패턴(§5.2 가드·§5.4 a11y는 렌더). 배타라 최상단.
     if (commandCandidates.length > 0) {
@@ -387,7 +458,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     // 데스크톱: 기존 그대로 Enter=발송·Shift+Enter=개행.
     if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice) {
       e.preventDefault();
-      void handleSend();
+      if (steerMode) void handleSendSteer();
+      else void handleSend();
     }
     // story #2032 AC4/AC5: ESC 뒤로가기 — 위 세 분기(command/entity/mention picker) 중 아무것도
     // 안 열려 있을 때만 여기 도달한다. 그 셋은 이미 각자 Escape에서 return 하므로, 이 지점은
@@ -432,6 +504,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const atMaxAttachments = pendingFiles.length >= MAX_ATTACHMENTS;
   const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !sending && !disabled;
+  const canSteerSend = text.trim().length > 0 && !!steerTargetId && !!steerWorkItem && !steerSending && !disabled;
 
   return (
     <div
@@ -484,6 +557,14 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       )}
       {sendFailed && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
+      )}
+      {/* story #2942 — STEER 패널(bg-info/8) 안이 아니라 여기 바깥(무-tint 배경)에 렌더한다.
+          #2590(교차-요소 tint×계열색) 가드 — info-tint 조상 안의 text-destructive는 그
+          tint의 대비 계산이 destructive 대상이 아니라서 걸린다(verify:cross-element-tint-text
+          가 실제로 이 자리를 잡음). 무-tint 배경으로 옮기면 destructive 자체는 이미 무해한
+          조합(#2419 계보) — 새 토큰 발명 없이 위치만 옮겨 해소. */}
+      {steerError && (
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{steerError}</p>
       )}
       {atMaxAttachments && (
         <p className="mb-1 text-xs text-muted-foreground">첨부는 최대 {MAX_ATTACHMENTS}개까지 가능합니다.</p>
@@ -538,10 +619,75 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         );
       })()}
 
+      {/* story #2942(2921-S5) — STEER mini-form. 챗 1급 동작(doc §2 "방향서 4문법")이라
+          별도 색 언어(info 계열, command 프리뷰 칩과 같은 톤 — "이 메시지는 평범한 채팅이
+          아니다"라는 신호를 재사용, 신규 색 발명 0). 대상 피커=참가자 select(신규 fetch
+          0, doc §4 "참가자로 한정"), work item 피커=workItemPicker(useEntityPicker 독립
+          인스턴스) 검색 결과 목록. */}
+      {steerMode && (
+        <div className="mb-2 space-y-1.5 rounded-lg border border-info/30 bg-info/8 p-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+            <Compass className="h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
+            {t('steerPanelTitle')}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <select
+              aria-label={t('steerPanelTargetLabel')}
+              value={steerTargetId}
+              onChange={(e) => setSteerTargetId(e.target.value)}
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+            >
+              <option value="">{t('steerPanelTargetPlaceholder')}</option>
+              {steerTargets.map((p) => (
+                <option key={p.member_id} value={p.member_id}>{p.name ?? p.member_id}</option>
+              ))}
+            </select>
+            <div className="relative min-w-0 flex-1">
+              <input
+                type="text"
+                value={steerWorkItem ? steerWorkItem.title : steerWorkItemQuery}
+                onChange={(e) => {
+                  setSteerWorkItem(null);
+                  setSteerWorkItemQuery(e.target.value);
+                  workItemPicker.setEntityQuery(e.target.value);
+                }}
+                onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
+                placeholder={t('steerPanelWorkItemPlaceholder')}
+                aria-label={t('steerPanelWorkItemLabel')}
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
+              />
+              {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
+                  멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
+              {workItemPicker.entityResults.length > 0 && (
+                <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+                  {workItemPicker.entityResults.map((ent) => (
+                    <li key={`${ent.entity_type}:${ent.entity_id}`}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSteerWorkItem({ entity_type: ent.entity_type, entity_id: ent.entity_id, title: ent.title });
+                          setSteerWorkItemQuery('');
+                          workItemPicker.close();
+                        }}
+                        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-foreground hover:bg-muted"
+                      >
+                        <span className="shrink-0 text-muted-foreground">{entityTypeLabel(ent.entity_type)}</span>
+                        <span className="truncate">{ent.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="relative flex items-end gap-2">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -563,7 +709,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul role="listbox" aria-label="멘션 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="멘션 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
@@ -585,7 +731,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
             (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
         {entityPicker.entityResults.length > 0 && (
-          <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
               const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
@@ -662,6 +808,26 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* STEER 토글 — story #2942(2921-S5). doc §4: 대상이 0명(본인만 있는 대화 등)이면
+            발행 자체가 원천 불가라 토글을 안 보인다(죽은 버튼 금지). */}
+        {steerTargets.length > 0 && (
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label={t('steerToggleLabel')}
+            aria-pressed={steerMode}
+            onClick={() => {
+              setSteerMode((v) => !v);
+              setSteerError(null);
+            }}
+            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 ${
+              steerMode ? 'bg-info/10 text-info' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+            }`}
+          >
+            <Compass className="h-4 w-4" />
+          </button>
+        )}
         {/* story #2805 — accept로 확장자를 좁혀도 실제 게이트가 아니다(드래그앤드롭·붙여넣기는
             원래 accept를 안 타 이미 임의 파일 첨부가 가능했고, 서버도 타입 allowlist가 없다).
             좁은 accept는 그저 "피커 버튼으로 고를 수 있는 파일"만 실제와 불일치시켰다 — docx/pptx
@@ -698,8 +864,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               setCommandQuery(null);
             }, 150);
           }}
-          disabled={disabled || sending}
-          placeholder={placeholder ?? t('inputPlaceholderMobile')}
+          disabled={disabled || sending || steerSending}
+          placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
           className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
@@ -708,8 +874,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         <Button
           size="icon"
           className="h-9 w-9 flex-shrink-0 rounded-xl"
-          onClick={() => void handleSend()}
-          disabled={!canSend}
+          onClick={() => void (steerMode ? handleSendSteer() : handleSend())}
+          disabled={steerMode ? !canSteerSend : !canSend}
         >
           <Send className="h-4 w-4" />
         </Button>

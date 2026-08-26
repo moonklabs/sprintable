@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { X } from 'lucide-react';
+import { ArrowLeft, MessageSquare, X } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { normalizeToMessage } from '@/hooks/use-chat-sse';
 import { ChatBubble } from './chat-bubble';
@@ -16,6 +16,18 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
 // 매번 재실행된다 — 어차피 빈 배열이라 fetch는 안 나가지만 불필요한 재실행 자체를 막는다).
 const EMPTY_THREAD_MESSAGES: ChatMessage[] = [];
+
+// story #2911(S2e②③) — 헤더 칩의 "원 메시지 요약"은 순수 텍스트라야 한다(ChatBubble의 마크다운
+// 렌더 전체를 여기 또 태우면 칩 안에 카드/칩이 중첩되는 사고). 마크다운 링크 `[라벨](...)`는
+// 라벨만 남기고, 기본 강조 마커는 지운 뒤 공백을 접는다 — 시안이 요구하는 "≤15ch truncate"는
+// CSS(max-w+truncate, ReadingPanel과 동일 패턴)가 처리하므로 여기선 자르지 않는다.
+function plainPreview(content: string): string {
+  return content
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 interface ThreadPanelProps {
   parentMessage: ChatMessage;
@@ -39,6 +51,13 @@ interface ThreadPanelProps {
   /** story #2637 — chat-view.tsx의 event_definitions 카탈로그 캐시를 그대로 물려받는다
    * (entityStatusByKey와 동일 이유·별도로 안 만든다). */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** 답글 뱃지 안 꺼지는 버그 fix(2026-08-24, 선생님 리포트) — chat-view.tsx의 markRead(top-level
+   * mark-read와 동일 엔드포인트·멱등 GREATEST 래칫)를 그대로 물려받는다. 이 패널은 열리면 항상
+   * 최신 답글까지 자동 스크롤(위 shouldScrollToBottomRef)이라 "열람=끝까지 봄"이 성립 — 로드
+   * 완료 시·신규 답글 수신 시 마크리드해야 conversation-level unread_count가 내려간다(스레드
+   * 답글도 parent_id 구분 없이 unread_count를 올리는 chat-list-view.tsx#applyConversationMessageUpdate
+   * 와 대칭). */
+  onMarkRead?: (upToIso: string) => void;
 }
 
 export function ThreadPanel({
@@ -53,6 +72,7 @@ export function ThreadPanel({
   requestedEntityStatusKeysRef,
   setEntityStatusByKey,
   eventDefinitionsByKey,
+  onMarkRead,
 }: ThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,11 +99,16 @@ export function ThreadPanel({
       if (!res.ok) return;
       const raw = await res.json() as Record<string, unknown>;
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
-      setMessages(rawData.map(normalizeToMessage));
+      const data = rawData.map(normalizeToMessage);
+      setMessages(data);
+      // 패널이 열리면 항상 하단까지 스크롤(아래 effect)이라 "로드=최신까지 열람" — 답글이
+      // 없으면 원 메시지까지만 본 것이므로 parentMessage.created_at으로 마크리드.
+      const latest = data[data.length - 1];
+      onMarkRead?.(latest ? latest.created_at : parentMessage.created_at);
     } finally {
       setLoading(false);
     }
-  }, [conversationId, parentMessage.id]);
+  }, [conversationId, parentMessage.id, parentMessage.created_at, onMarkRead]);
 
   useEffect(() => {
     void fetchThreadMessages();
@@ -102,7 +127,10 @@ export function ThreadPanel({
       return [...prev, incomingMessage];
     });
     shouldScrollToBottomRef.current = true;
-  }, [incomingMessage]);
+    // 패널이 열려있는 동안 도착한 답글도 자동 스크롤로 즉시 열람됨 — top-level chat-view.tsx의
+    // addMessage(nearBottom일 때 markRead)와 동형.
+    onMarkRead?.(incomingMessage.created_at);
+  }, [incomingMessage, onMarkRead]);
 
   // AC6: 매 render 후 플래그 확인 → DOM 업데이트 직후 스크롤 (bare useEffect)
   useEffect(() => {
@@ -136,21 +164,51 @@ export function ThreadPanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background">
-      {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-2.5">
-        <span className="text-sm font-medium text-foreground">스레드</span>
+      {/* Header — story #2911(S2e②③/R4) 「s2e-thread-depth-grammar」 확定: ReadingPanel과
+          «같은 칩 브레드크럼» 문법(칩 버튼 + `›` text-border 구분자, 동일 토큰/스타일).
+          「스레드」 평문 폐기. 스레드는 단일 레벨이라 세그먼트는 정확히 2개 — [대화](뒤로
+          어포던스, 모바일 「← 대화」 텍스트 바를 이 칩이 대체) › [원 메시지 요약](스크롤로
+          pin이 밀려도 헤더에 «어느 스레드인지» 상시 유지, 현 위치라 비클릭·ReadingPanel의
+          최상단 세그먼트와 같은 문법). tint는 유나양 확定(2026-08-21) — chat_message는
+          의도적 무색(§2263 C-7)이고 메시지는 5계열 어느 의미도 아니라 둘 다 중립 muted bg
+          하나로 통일, 구분은 색이 아니라 아이콘+텍스트 weight로만(아래). */}
+      <div className="flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-border/80 px-2 py-1.5">
+        {/* story #2911 — 유나양 확定(2026-08-21, C-7 논거: chat_message는 의도적 무색이고
+            메시지는 5계열 어느 «의미」도 아니라 없는 뜻을 억지로 안 붙인다): 둘 다 muted bg
+            하나로 통일, 구분은 색이 아니라 **아이콘+텍스트 weight**로만 — 「대화」=뒤로
+            어포던스(ArrowLeft)+text-muted-foreground, 원 메시지=현재 위치(MessageSquare)+
+            text-foreground font-medium. 신규 색 0. */}
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+        >
+          <ArrowLeft className="size-3 shrink-0" />
+          <span>대화</span>
+        </button>
+        <span className="text-xs text-border">›</span>
+        <span
+          title={plainPreview(parentMessage.content)}
+          className="flex max-w-32 shrink items-center gap-1 rounded bg-muted px-1.5 py-1 text-xs font-medium text-foreground"
+        >
+          <MessageSquare className="size-3 shrink-0" />
+          <span className="truncate">{plainPreview(parentMessage.content)}</span>
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
           aria-label="스레드 닫기"
+          className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      {/* AC9: 원본 메시지 */}
-      <div className="flex-shrink-0 border-b border-border/60 bg-muted/30 px-4 py-3">
+      {/* AC9: 원본 메시지. story #2911(S2e①/R4) — 좌측 rail(border-l-2)이 이 블록에서
+          시작해 아래 답글 목록까지 같은 x-오프셋(pl-3)으로 끊김 없이 이어진다(스펙 §5 "원
+          메시지 pin + 좌측 라인" — 답글이 원 메시지에서 뻗어나온 것처럼). 기존 border-border
+          토큰 재사용(신규 색 0). */}
+      <div className="flex-shrink-0 border-b border-l-2 border-border bg-muted/30 py-3 pl-3 pr-4">
         <p className="mb-1 text-[10px] font-medium text-muted-foreground">원본 메시지</p>
         <ChatBubble
           message={parentMessage}
@@ -162,14 +220,21 @@ export function ThreadPanel({
         />
       </div>
 
-      {/* Thread messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      {/* Thread messages — 유나양 design 반려 fix(2026-08-21, 로컬 렌더 실측): 이전
+          `py-3`의 top 12px가 pin 블록 rail-bottom과 답글 rail-top 사이를 세로로 끊었다
+          (「코드 연속≠픽셀 연속」). pt-0으로 상단 패딩 제거해 flush — border-b는 구분자로
+          그대로 유지. */}
+      <div className="flex-1 overflow-y-auto pt-0 pb-3 pr-4">
         {loading ? (
           <p className="text-center text-sm text-muted-foreground">불러오는 중…</p>
         ) : messages.length === 0 ? (
           <p className="text-center text-sm text-muted-foreground">아직 답글이 없습니다.</p>
         ) : (
-          <div className="flex flex-col gap-2">
+          // story #2911 — rail은 목록 전체를 감싸는 이 wrapper 하나(border-l-2, 원본 메시지
+          // 블록과 동일 x-오프셋 — 둘 다 컨테이너 왼쪽 끝에서 시작)뿐이라 개별 ChatBubble
+          // 그룹핑(isGrouped)과 무관하게 끊기지 않는다(AC3 — 한 줄로 쭉 이어지고, 그 안의
+          // 버블 간격만 gap-2로 나뉜다).
+          <div className="flex flex-col gap-2 border-l-2 border-border pl-3">
             {messages.map((msg, idx) => {
               const prev = messages[idx - 1];
               const isGrouped = Boolean(prev && prev.created_by === msg.created_by);

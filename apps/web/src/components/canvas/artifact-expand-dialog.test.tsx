@@ -93,3 +93,13 @@ describe('ArtifactExpandDialog — 반응형 미리보기 브레이크포인트 
     expect(iframe().style.width).toBe('1280px');
   });
 });
+
+// story #3007(로드맵 P2·PR-E, L1) — 다이얼로그는 floating이라 --elev-overlay.
+describe('ArtifactExpandDialog — 로드맵 P2·PR-E L1(다이얼로그 elevation 토큰)', () => {
+  it('팝업이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {
+    await mount();
+    const popup = document.body.querySelector('.rounded-xl.bg-card');
+    expect(popup?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(popup?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
+  });
+});

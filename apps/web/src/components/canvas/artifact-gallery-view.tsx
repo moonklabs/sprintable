@@ -366,10 +366,10 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
             {railContent}
           </div>
 
-          <div
-            className="overflow-hidden rounded-xl border border-border bg-card px-5 py-4"
-            style={{ clipPath: 'polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%)' }}
-          >
+          {/* story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path, §2955 §5가 22px 드리프트를
+              24px 정본으로 정정했던 그 자리) 전면 폐지, proof-surface(13px 균일 라운드)+
+              proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-xl은 흡수. */}
+          <div className="proof-surface proof-surface-lift overflow-hidden border border-border bg-card px-5 py-4">
             <div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{axisLabel(axis)}</div>
             {!selectedGroup || selectedGroup.artifacts.length === 0 ? (
               <p className="py-8 text-center text-[12.5px] text-muted-foreground">{t('galleryGroupEmpty')}</p>

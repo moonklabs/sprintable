@@ -19,7 +19,9 @@ from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+from app.models.doc import Doc
 from app.models.event import Event
+from app.models.gate import Gate
 from app.models.project import OrgMember, Project
 from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
@@ -414,6 +416,101 @@ async def _fetch_conversation_participants(
     return conv_participants
 
 
+# story #2925(2921-S2 선행, 유나 확定 스펙) — L1 대화 행을 ProofCapsule card로 승격시킬지
+# 판별하는 신호. 「참조(게이트/작업) 있는 대화만 승격·색은 참조 대상의 실제 상태가 몬다·
+# 참조 없으면 plain(fail-safe·거짓 색 금지)」(2921-S2 서면 확定). 오늘 코드베이스에서 대화가
+# 게이트를 "임베드"하는 유일한 실 메커니즘은 `dispatch_approval_request_cards`(approval_
+# delivery.py)가 심는 `msg_metadata['approval_target']['gate_id']`뿐이다 — entity_references
+# (source_type='chat_message', target_type='gate')는 이 delivery 경로가 안 거쳐(mentions
+# 추출은 insert_chat_mentions·conversations.py의 일반 send_message 경로에서만 발화) 실제로
+# 채워지지 않는다. 「작업(task) 상태」 폴백은 이 그라운딩에서 대화-임베드 메커니즘을 찾지
+# 못해(지어내지 않는다) 이번 판에는 뺐다 — gate 참조가 없으면 null(스토리 fail-safe 원칙
+# 그대로), task 전용 대화-임베드 축은 별도 결정 필요(PO/유나 확認 대상으로 완료 보고에 명시).
+#
+# 상태 매핑(PO 전달 유나 확定): rejected→violation(red) · approved/auto_passed→verified
+# (green) · pending+requires_human→pending_human(blue) · pending(아직 human 단계 아님)·
+# held→waiting(amber). voided는 4상태 어디에도 안 맞는(관리자 회수·실 판정 아님) 상태라
+# 후보에서 제외한다(거짓 색 금지 원칙 — 차라리 null이 낫다).
+def _derive_gate_proof_state(gate: "Gate") -> str | None:
+    if gate.status == "rejected":
+        return "violation"
+    if gate.status in ("approved", "auto_passed"):
+        return "verified"
+    if gate.status == "pending":
+        return "pending_human" if gate.requires_human else "waiting"
+    if gate.status == "held":
+        return "waiting"
+    return None  # voided(또는 알려지지 않은 값) — 지어내지 않는다.
+
+
+_OPEN_GATE_STATUSES = ("pending", "held")
+
+
+async def _batch_resolve_linked_proof(
+    conv_ids: list[uuid.UUID],
+    org_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict[uuid.UUID, dict | None]:
+    """대화(들)의 「행 승격 신호」 배치 조회 — N+1 방지(리스트 크기 무관 쿼리 2개 고정,
+    `_fetch_conversation_participants`/unread_map과 동일 배치 패턴). 대화당 여러 approval
+    카드가 있으면(재상신 등) 열린(pending/held) 게이트를 우선하고, 없으면 가장 최근에
+    해소된 게이트를 반환한다(승인 완료도 "증명"으로서 보여줄 가치가 있다는 2916-B 원칙).
+    voided뿐이거나 참조가 아예 없으면 None(스토리의 fail-safe 원칙)."""
+    if not conv_ids:
+        return {}
+
+    approval_rows = (await db.execute(
+        select(
+            ConversationMessage.conversation_id,
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext.label("gate_id"),
+            ConversationMessage.created_at,
+        ).where(
+            ConversationMessage.conversation_id.in_(conv_ids),
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext.isnot(None),
+        )
+    )).all()
+    if not approval_rows:
+        return {}
+
+    conv_candidates: dict[uuid.UUID, list[tuple[uuid.UUID, object]]] = defaultdict(list)
+    all_gate_ids: set[uuid.UUID] = set()
+    for row in approval_rows:
+        try:
+            gate_id = uuid.UUID(row.gate_id)
+        except (ValueError, TypeError, AttributeError):
+            continue  # 손상된/구형 payload — 지어내지 않고 건너뜀.
+        conv_candidates[row.conversation_id].append((gate_id, row.created_at))
+        all_gate_ids.add(gate_id)
+
+    gates = (await db.execute(
+        select(Gate).where(Gate.id.in_(all_gate_ids), Gate.org_id == org_id)
+    )).scalars().all()
+    gate_map: dict[uuid.UUID, Gate] = {g.id: g for g in gates}
+
+    result: dict[uuid.UUID, dict | None] = {}
+    for conv_id, candidates in conv_candidates.items():
+        # 최신 배달 우선(같은 게이트가 재상신돼도 최신 참조가 "그 대화가 지금 가리키는 것").
+        candidates.sort(key=lambda c: c[1], reverse=True)
+        open_pick: Gate | None = None
+        fallback_pick: Gate | None = None
+        for gate_id, _created_at in candidates:
+            gate = gate_map.get(gate_id)
+            if gate is None or gate.status == "voided":
+                continue
+            if gate.status in _OPEN_GATE_STATUSES and open_pick is None:
+                open_pick = gate
+            elif fallback_pick is None:
+                fallback_pick = gate
+        chosen = open_pick or fallback_pick
+        if chosen is None:
+            continue
+        state = _derive_gate_proof_state(chosen)
+        if state is None:
+            continue
+        result[conv_id] = {"kind": "gate", "state": state, "gate_id": str(chosen.id)}
+    return result
+
+
 _SUMMARY_PREVIEW_MAX = 80
 
 
@@ -459,6 +556,7 @@ def _msg_payload(
             "id": str(sender.id),
             "name": sender.name,
             "type": sender.type,
+            "avatar_url": sender.avatar_url,
         } if sender else None,
         # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
         "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
@@ -583,6 +681,7 @@ async def _dispatch_conversation_event(
     sender: "ResolvedMember | TeamMember",
     exclude_ids: set[uuid.UUID] | None = None,
     webhook_covered_ids: set[uuid.UUID] | None = None,
+    references: list[dict[str, str]] | None = None,
 ) -> list[tuple[str, dict]]:
     """conversation:message → Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
@@ -590,12 +689,16 @@ async def _dispatch_conversation_event(
     webhook_covered_ids: E-EVENT-1CONFIG — webhook 으로 전달되는(=SSE enqueue 스킵할) agent
         member 집합. send_message 요청 트랜잭션서 webhook 전달 대상과 **같은 snapshot** 으로
         산출돼 넘어온다(resolve_conversation_webhook_targets) → skip↔deliver 동일 결정·TOCTOU 차단.
+    references: story #2889(S2h, #2263 AC6이 남긴 "SSE/POST 응답은 이 키가 없다" 갭을 닫는다) —
+        send_message가 insert_chat_mentions 직후 같은 트랜잭션에서 fetch_stored_references로
+        해소해 넘긴다. None이면 기존 동작(키 자체 없음) 무변경 — 이 함수의 다른 잠재 호출부를
+        회귀시키지 않는다.
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id:
         return []
 
-    payload = _msg_payload(msg, sender)
+    payload = _msg_payload(msg, sender, references=references)
 
     # story #2650: SSE/webhook 패리티 — conversation_webhook.py가 이미 하는 첨부 컨텍스트 주입
     # (attachment_context.py, IDOR-safe·conversation 스코프 게이트 포함)을 SSE 수신자에게도
@@ -704,18 +807,20 @@ async def _dispatch_mention_events(
     sender: TeamMember,
     mention_targets: set[uuid.UUID],
     webhook_covered_ids: set[uuid.UUID] | None = None,
+    references: list[dict[str, str]] | None = None,
 ) -> list[tuple[str, dict]]:
     """AC1: 멘션 대상에게 conversation:mention Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
     webhook_covered_ids: E-EVENT-1CONFIG — webhook 전달 대상과 같은 snapshot 으로 산출된
         SSE-skip agent 집합(_dispatch_conversation_event 와 공유). 멘션 대상 ⊆ authorized 라
         그대로 적용 가능.
+    references: story #2889 — _dispatch_conversation_event와 동일 원칙(위 docstring 참고).
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id or not mention_targets:
         return []
 
-    payload = _msg_payload(msg, sender)
+    payload = _msg_payload(msg, sender, references=references)
     member_rows = (await db.execute(
         select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(mention_targets))
     )).all()
@@ -770,6 +875,7 @@ async def _dispatch_human_intervention_event(
     sender: TeamMember,
     blocked_agent_recipient_ids: set[uuid.UUID],
     chain_depth_cap: int,
+    references: list[dict[str, str]] | None = None,
 ) -> list[tuple[str, dict]]:
     """story #2608 P1 AC1: 연쇄 cap 초과로 agent recipient가 막힌 메시지를, 그 대화의 human
     참가자 전원에게 `conversation.human_intervention_requested` Event로 알린다 — "왜 조용한가"
@@ -778,6 +884,8 @@ async def _dispatch_human_intervention_event(
     `_dispatch_mention_events`와 동형 구조(Event INSERT + flush, commit 후 push) — 대상만
     human 참가자로 다르다. human은 recipient_seq 개념이 없어(agent 전용 gap-free 커서)
     assign_recipient_seq를 안 부른다(_dispatch_conversation_event의 기존 관례와 동일).
+
+    references: story #2889 — _dispatch_conversation_event와 동일 원칙.
     """
     if not conversation.project_id:
         return []
@@ -792,7 +900,7 @@ async def _dispatch_human_intervention_event(
         return []
 
     payload = {
-        **_msg_payload(msg, sender),
+        **_msg_payload(msg, sender, references=references),
         "blocked_recipient_ids": [str(rid) for rid in sorted(blocked_agent_recipient_ids)],
         "chain_depth_cap": chain_depth_cap,
         "reason": "chain-expired",
@@ -1302,6 +1410,9 @@ async def list_conversations(
     )).all() if conv_id_list else []
     unread_map: dict[uuid.UUID, int] = {r[0]: r[1] for r in unread_rows}
 
+    # story #2925: 행 승격 신호 배치 조회(N+1 방지 — 쿼리 2개 고정, 리스트 크기 무관).
+    linked_proof_map = await _batch_resolve_linked_proof(conv_id_list, org_id, db)
+
     result = []
     for conv in convs:
         latest_msg = (await db.execute(
@@ -1326,6 +1437,8 @@ async def list_conversations(
                 if caller_last_read_at.get(conv.id) else None
             ),
             "unread_count": unread_map.get(conv.id, 0),
+            # story #2925(2921-S2 선행) — 참조 없으면 null(fail-safe, 거짓 색 금지).
+            "linked_proof": linked_proof_map.get(conv.id),
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
@@ -1395,6 +1508,12 @@ async def list_recent_conversations_outside_project(
     "오래 안 들어간 것부터" 캡의 의미론에 애초에 안 낀다 — list_conversations의
     `include_agent_conversations`처럼 별도 admin 전용 노출 축이 필요하면 그건 이 스토리
     스코프 밖의 별개 결정).
+
+    story #2972 — participants는 unread_count/latest_message와 달리 "미리보기용 부가정보"가
+    아니라 DM 행의 **유일한 이름 소스**다(Conversation.title은 DM에서 항상 NULL — 표시명은
+    참가자 이름으로 클라 조립하는 게 list_conversations 관례). 애초 스펙(#2168)이 이걸
+    "미리보기"로 묶어 함께 뺐던 게 원인 — limit≤5라 배치조회 비용은 무시 가능해 여기만
+    되살린다(unread_count/latest_message는 스펙 그대로 계속 뺀다).
     """
     sender = await _resolve_member(auth, org_id, db, project_id=None)
     uid = uuid.UUID(str(auth.user_id))
@@ -1425,6 +1544,12 @@ async def list_recent_conversations_outside_project(
     )
     rows = (await db.execute(stmt)).all()
 
+    # story #2972 — DM 행은 title이 항상 NULL(대화명은 참가자 이름으로 클라 조립, list_conversations
+    # 관례 그대로)인데 이 엔드포인트가 participants를 안 내려줘 FE가 조립할 재료 자체가 없었다
+    # ("님과의 대화"라는 접미 조각만 그대로 노출되던 원인). limit≤5라 배치조회 비용 무시 가능
+    # — list_conversations/get_conversation과 동일 헬퍼(_fetch_conversation_participants) 재사용.
+    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db)
+
     return {
         "data": [
             {
@@ -1435,6 +1560,7 @@ async def list_recent_conversations_outside_project(
                 "project_name": project_name,
                 "project_slug": project_slug,
                 "last_read_at": last_read_at.isoformat() if last_read_at else None,
+                "participants": conv_participants.get(conv.id, []),
             }
             for conv, project_name, project_slug, last_read_at in rows
         ]
@@ -2399,10 +2525,51 @@ async def send_message(
     # 예외가 그대로 propagate 되어 메시지 전송 전체가 롤백된다(AC4 원자성 — 아래 best-effort 블록들과
     # 의도적으로 다른 격리 수준).
     from app.services.mention_parser import insert_chat_mentions
+    # story #2889(S2h③, 페드루 확定 2026-08-21): gate/pull_request/member는 TARGET_ONLY_TYPES
+    # (완전지원 ENTITY_RESOLVERS 아님)라 insert_chat_mentions의 기본 target_types(=ENTITY_
+    # RESOLVERS만)엔 안 잡힌다 — "존재판정+멘션 자동감지"까지가 이 세 타입의 계약(reference_
+    # registry.py 참고)이라 여기서 명시로 넓힌다. chat_message는 안 넣는다(자기 자신을
+    # @멘션하는 토큰은 의미가 없음 — proof form의 별도 경로로만 채팅 메시지를 인용한다).
+    from app.services.reference_registry import ENTITY_RESOLVERS
     mention_result = await insert_chat_mentions(
         db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
         auto_story_ids=frozenset(_auto_story_ids),
+        target_types=frozenset(ENTITY_RESOLVERS) | {"gate", "pull_request", "member"},
     )
+
+    # story #2889(S2h): #2263 AC6이 남긴 갭(SSE/POST 응답엔 읽기 경로의 references[] 키가
+    # 없다 — 방금 보낸 메시지의 임베드가 즉시 리치로 안 뜬다)을 닫는다. 같은 트랜잭션·같은
+    # 세션이라 위 insert_chat_mentions가 방금 쓴 행을 이 SELECT가 그대로 본다(SQLAlchemy
+    # autoflush가 미flush 변경분도 이 쿼리 前에 flush한다 — 별도 flush 불요). 읽기 경로
+    # (list_messages 등)와 정확히 같은 함수·같은 반환 shape 재사용(재구현 0).
+    from app.services.mention_parser import fetch_stored_references
+    msg_references = (
+        await fetch_stored_references(db, org_id=org_id, source_type="chat_message", source_ids=[msg.id])
+    ).get(msg.id, [])
+
+    # story #2747(2026-08-25, PO 판정) — 이 메시지가 draft 상태 doc을 mention했으면 작성자에게
+    # 1회성 넛지(결재 상신 여부를 묻는다). msg_references가 이미 이 메시지의 stored doc
+    # 참조를 갖고 있어(위) 재파싱 불요 — target_type=="doc"인 것만 실 Doc 행 조회.
+    _mentioned_doc_ids = {
+        uuid.UUID(r["target_id"]) for r in msg_references if r.get("target_type") == "doc"
+    }
+    if _mentioned_doc_ids and conv.project_id:
+        try:
+            from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
+
+            _docs = (await db.execute(
+                select(Doc.id, Doc.title, Doc.status, Doc.created_by).where(
+                    Doc.id.in_(_mentioned_doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
+                )
+            )).all()
+            for _doc_id, _doc_title, _doc_status, _doc_author_id in _docs:
+                await maybe_nudge_draft_doc_shared_in_chat(
+                    db, org_id=org_id, project_id=conv.project_id,
+                    doc_id=_doc_id, doc_title=_doc_title, doc_status=_doc_status,
+                    doc_author_id=_doc_author_id, sender_id=sender.id,
+                )
+        except Exception:  # noqa: BLE001 — 넛지 실패가 메시지 전송을 막지 않는다(best-effort).
+            logger.warning("draft doc 넛지 배선 실패(비차단) message=%s", msg.id, exc_info=True)
 
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
     # S7: 반환 url→asset_id 로 JSONB asset_id 역기입(denorm·catch#4: asset_links=SSOT·JSONB=denorm).
@@ -2519,6 +2686,7 @@ async def send_message(
                 db, conv, msg, org_id, sender,
                 exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
                 webhook_covered_ids=webhook_covered_ids,
+                references=msg_references,
             )
     except Exception as _dispatch_err:
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
@@ -2554,6 +2722,7 @@ async def send_message(
                             pending_sse_pushes += await _dispatch_human_intervention_event(
                                 db, conv, msg, org_id, sender,
                                 chain_expired_agent_targets, _AGENT_CHAIN_DEPTH_CAP,
+                                references=msg_references,
                             )
                     except Exception:
                         logger.warning(
@@ -2598,6 +2767,7 @@ async def send_message(
                     pending_sse_pushes += await _dispatch_mention_events(
                         db, conv, msg, org_id, sender, mention_targets,
                         webhook_covered_ids=webhook_covered_ids,
+                        references=msg_references,
                     )
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
@@ -2809,7 +2979,7 @@ async def send_message(
             },
         )
 
-    response: dict = {"data": _msg_payload(msg, sender)}
+    response: dict = {"data": _msg_payload(msg, sender, references=msg_references)}
     if fork_info:
         response["forked"] = True
         response["forked_conversation_id"] = fork_info["forked_conversation_id"]

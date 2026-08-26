@@ -506,9 +506,9 @@ async def update_doc(
     if "parent_id" in data:
         await _assert_doc_parent_in_project(session, doc.project_id, data["parent_id"])
 
-    # 일반 필드 적용 (slug 제외)
-    for attr, val in data.items():
-        setattr(doc, attr, val)
+    # story #2874(하드닝): slug/slug_locked도 아래서 setattr 직접 대신 data에 모아 뒀다가
+    # update_with_cas() 한 SQL 문으로 함께 반영한다 — 필드 적용을 두 단계(setattr 여기 +
+    # slug setattr 저기)로 나누면 그 사이에도 TOCTOU 창이 생겨 원자성이 반쪽이 된다.
 
     # slug 변경 처리 (4dd399c6)
     if slug_in is not None:
@@ -544,7 +544,7 @@ async def update_doc(
                     session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id
                 )
             old_slug = doc.slug
-            doc.slug = new_slug
+            data["slug"] = new_slug
             # AC3: 구 slug → alias 보존 (이미 있으면 skip). 신 slug 가 과거 alias였다면 정리(live 우선).
             await session.execute(
                 sa_delete(DocSlugAlias).where(
@@ -569,10 +569,28 @@ async def update_doc(
                 existing_alias.doc_id = doc.id
 
     if slug_locked_in is not None:
-        doc.slug_locked = slug_locked_in
+        data["slug_locked"] = slug_locked_in
 
-    await session.flush()
-    await session.refresh(doc)
+    # story #2874: check-then-write(위 expected_updated_at 사전 체크, side-effect 前 빠른
+    # 실패용)는 non-atomic이라 진짜 동시 PATCH TOCTOU 창이 남는다 — 실제 write는 여기
+    # update_with_cas()의 원자 SQL(UPDATE...WHERE updated_at=)로 다시 한번 강제한다
+    # (force_overwrite면 CAS 생략). stories.py::update_story와 동일 공용 판정 함수(중복 구현 0).
+    from app.repositories.base import CasConflict
+    try:
+        doc = await repo.update_with_cas(
+            id, expected_updated_at=None if force_overwrite else expected_updated_at, **data
+        )
+    except CasConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "DOC_CONFLICT",
+                "message": "문서가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                "current_updated_at": e.current.updated_at.isoformat(),
+            },
+        )
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
 
     if "content" in data:
         cutoff_sq = (
@@ -890,6 +908,10 @@ async def get_doc_backlinks(
 
 class DocTransitionRequest(BaseModel):
     status: str
+    # story #2985(PO 설계 확定 2026-08-24)에서 신설, story #3004(선생님 정책 확定)부터
+    # draft→pending 상신 시 **필수**(transition_doc이 None을 400 APPROVER_REQUIRED로 거부).
+    # Optional 타입은 그대로 두는(다른 to_status 값엔 이 필드가 안 쓰이므로 애초 무관).
+    approver_member_id: uuid.UUID | None = None
 
 
 @router.post("/{id}/transition", response_model=DocResponse)
@@ -910,7 +932,10 @@ async def transition_doc_endpoint(
     # 잡던 갭). via_gate 시스템 경로(gate 해소)는 transition_doc 직호출이라 무영향(이 엔드포인트만 user authz).
     await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), org_id)
     try:
-        doc = await transition_doc(session, org_id, caller, id, body.status)
+        doc = await transition_doc(
+            session, org_id, caller, id, body.status,
+            designated_approver_id=body.approver_member_id,
+        )
         await session.commit()
         # 48f064e5 fix: UPDATE 후 commit 으로 server-onupdate 컬럼(updated_at)이 expired → model_validate
         # 의 동기 컨텍스트서 lazy-load 시 MissingGreenlet(async IO) → 500. refresh 로 async 컨텍스트서
@@ -921,6 +946,8 @@ async def transition_doc_endpoint(
         _codes = {
             "DOC_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
             "INVALID_STATUS": 422, "INVALID_DOC_TRANSITION": 422,
+            # story #3004 — 결재선 필수화(상신 시 designated_approver_id 미지정/부적격).
+            "APPROVER_REQUIRED": 400, "APPROVER_SELF_NOT_ALLOWED": 422, "APPROVER_INELIGIBLE": 400,
         }
         raise HTTPException(
             status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
@@ -1080,6 +1107,7 @@ async def upload_doc_attachment(
     (has_project_access·sync_attachment_assets) — doc 은 업로드=등록이 곧 종결 액션이라(story/chat과
     달리 별도 "메시지 생성" 시점이 없음) S5식 집계 재검증이 불필요하다(이 한 호출 자체가 그 지점).
     """
+    from app.core.config import settings
     from app.models.doc import Doc
     from app.services import mcp_attachment_upload
     from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
@@ -1106,6 +1134,16 @@ async def upload_doc_attachment(
     )
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
+
+    # story #2906(선생님 확定 2026-08-21) — 이 엔드포인트는 sync_attachment_assets 6개
+    # 호출부 중 유일하게 check_storage_capacity가 안 걸려 있던 자리(발견된 진짜 갭).
+    # 다른 4곳(conversations.py·docs.py 문서저장·stories.py×2)과 동일 규율(ee seam·SaaS
+    # only·OSS no-op)로 sync 直前에 건다 — put_object 直後(byte는 이미 썼지만 이 함수
+    # 자체가 head_object로 재조회하는 기존 계약이라 업로드 前 시점엔 걸 수 없다, 다른
+    # 4곳과 동형 트레이드오프).
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(session, org_id, [{"url": object_path}])
 
     created_by: uuid.UUID | None = None
     try:

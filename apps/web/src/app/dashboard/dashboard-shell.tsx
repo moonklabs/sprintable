@@ -6,6 +6,7 @@ import {
   TAB_PROJECT_STORAGE_KEY,
   bumpOrgSyncVersion,
   installProjectHeaderInterceptor,
+  resolveEffectiveOrgId,
   resolveEffectiveProjectId,
   setEffectiveProjectId,
   setEffectiveOrgId,
@@ -296,9 +297,26 @@ export function DashboardShell({
   const showTopBar = !pathname.startsWith('/settings');
   const tabletCentered = isTabRootPage(pathname);
 
+  // ⚠️카디르 라이브 재QA(2026-08-10, qa:changes) — 세션의 "현재 org" 정본은 `orgId`(me?.org_id)가
+  // 아니라 `jwtOrgId`다. `orgId`는 실제로는 대개 `app_metadata.project_id` 클레임으로 찾은
+  // TeamMember 행의 org라 `app_metadata.org_id` 클레임(=jwtOrgId)과 다른 신호다 — 부분-stale
+  // JWT(org_id는 reset됐는데 project_id는 옛 org를 여전히 가리키는 경우) 라이브 재현에서
+  // orgId가 pathOrgId와 "우연히" 같아져 아래 org-sync effect가 조기 return했다. jwtOrgId
+  // (getServerSession이 jwtVerify 직후 읽어둔 그 클레임)를 우선하고, 그 클레임이 없는
+  // 인증경로(Firebase 세션 — db/server.ts 참고)에서만 orgId(project-chain 파생)로 폴백한다.
+  const actualTokenOrgId = jwtOrgId ?? orgId;
   // story #2093 — 경로(`[ws]/[proj]`) resolve 결과가 최우선(화면이 실제로 그리는 것의 정본).
-  // 계정 상태(orgId, server prop)는 flat 라우트(경로에 org/project가 없는 화면)에서만 쓰인다.
-  const effectiveOrgId = pathOrgId ?? orgId;
+  // story #2873 — flat 라우트(pathOrgId 없음)의 계정 상태 폴백도 project-chain 파생값
+  // (orgId)이 아니라 jwtOrgId(위 actualTokenOrgId와 동일 우선순위 — resolveEffectiveOrgId
+  // 참고)를 쓴다. 0-프로젝트 org로 전환하면 switch-org가 CURRENT_PROJECT_COOKIE를 지워(그
+  // org엔 앵커할 project가 없어) project-chain 파생값(orgId)이 새 org로 영영 못 넘어가는데도,
+  // 새로 발급된 JWT의 org_id 클레임 자체는 정확히 갱신되어 있었다(BE 실측 확認, 디디군) —
+  // 그런데 flat 라우트는 org-sync effect(아래)가 pathOrgId 부재로 조기 return해 그 정본을 못
+  // 쓰고 orgId로만 폴백하다 보니, X-Org-Id 헤더가 전환 前 org에 갇혀 "새 프로젝트" 같은
+  // 요청이 조용히 옛 org로 갔다(라이브 재현: SK Leak Test로 전환 후 생성한 프로젝트가
+  // 뭉클랩에 떨어짐). resolveEffectiveOrgId를 쓰면 flat 라우트든 아니든 X-Org-Id가 항상
+  // 실제 세션 org를 정확히 반영한다.
+  const effectiveOrgId = resolveEffectiveOrgId(pathOrgId, jwtOrgId, orgId);
   // story #2497 — 인터셉터가 X-Project-Id 옆에 X-Org-Id도 함께 실어야 하는 자리(fire #2486
   // 근본원인: 멀티-org 유저의 stale JWT org가 탭의 실제 org와 달라 has_project_access가
   // 엉뚱한 org로 검증됨). setEffectiveProjectId와 동일하게 렌더 단계에서 동기화 —
@@ -312,17 +330,6 @@ export function DashboardShell({
   // 간헐적으로 403이 난다. 근본: 헤더로 매 요청 우회하는 대신, 불일치를 발견하는 즉시 실제
   // 토큰을 pathOrgId로 재발급해 그 뒤 모든 요청(헤더 有無 무관)이 처음부터 맞게 만든다 —
   // AC2가 명시 허용한 두 방법(헤더 신뢰 / 토큰 재발급) 중 후자.
-  //
-  // ⚠️카디르 라이브 재QA(2026-08-10, qa:changes) — 이 비교엔 `orgId`(me?.org_id)가 아니라
-  // `jwtOrgId`를 쓴다. `orgId`는 실제로는 대개 `app_metadata.project_id` 클레임으로 찾은
-  // TeamMember 행의 org라 `app_metadata.org_id` 클레임(위 jwtOrgId 정의 참고)과 다른
-  // 신호다 — 부분-stale JWT(org_id는 reset됐는데 project_id는 옛 org를 여전히 가리키는
-  // 경우) 라이브 재현에서 orgId가 이미 pathOrgId와 "우연히" 같아져 이 effect가 조기
-  // return하고, 그 순간 실제 서명된 app_metadata.org_id 클레임은 여전히 달라 switch-org가
-  // 0회 발화했다. jwtOrgId(getServerSession이 jwtVerify 직후 읽어둔 그 클레임)를 우선하고,
-  // 그 클레임이 없는 인증경로(Firebase 세션 —
-  // db/server.ts 참고)에서만 orgId로 폴백한다.
-  const actualTokenOrgId = jwtOrgId ?? orgId;
   // story #2587 AC3 — 아래 switch-org effect의 조기 return 조건(`!pathOrgId ||
   // pathOrgId === actualTokenOrgId`)과 정확히 대칭인 부정형. true인 동안은 재발급이
   // 시도됐거나 시도될 예정이라 이 순간의 403은 stale일 수 있다(로딩 유지가 맞음) — false면

@@ -12,7 +12,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
-const { NotificationBell } = await import('./notification-bell');
+const { NotificationBell, getEntityHref } = await import('./notification-bell');
+import type { EventNotification } from './notification-bell';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -293,5 +294,119 @@ describe('NotificationBell — conversation.read SSE 즉시 unread-count 재fetc
     await act(async () => { await Promise.resolve(); });
 
     expect(fetchMock.mock.calls.length).toBe(beforeCalls);
+  });
+});
+
+// ⚠️QA changes(PR#3381, 카디르+codex, 2026-08-23) — story #2956이 지운 RENAMED_RESOURCES
+// (epics→goals) 301에 이 딥링크가 얹혀 살고 있었다(테스트 0건이었음). `/epics/{id}`는
+// bare 승격(MIGRATED_RESOURCES) 後 `/{ws}/{proj}/epics/{id}`가 됐다가 옛 rename이 다시
+// `/{ws}/{proj}/goals/{id}`로 옮겨줬는데, 신 `[ws]/[proj]/epics/`엔 목록(`page.tsx`)만
+// 있고 `[id]` 서브라우트가 없어(#3377 스코프에 상세 페이지 없음) rename 제거로 404가
+// 됐다. 회귀가드: 이 딥링크 계약(entity_type='epic' → 유효한 상세 라우트)을 명시로 고정.
+function baseNotification(overrides: Partial<EventNotification>): EventNotification {
+  return {
+    id: 'n1', event_type: 'story.status_changed', source_entity_type: null, source_entity_id: null,
+    payload: null, read_at: null, created_at: '2026-08-23T00:00:00Z',
+    ...overrides,
+  };
+}
+
+describe('getEntityHref — 딥링크 계약(story #2956 QA changes)', () => {
+  it("entity_type='epic' → /goals/{id}(Goal=Epic, goals/[id]가 에픽 상세 정본 — /epics/{id} 아님)", () => {
+    const href = getEntityHref(baseNotification({ source_entity_type: 'epic', source_entity_id: 'e-123' }));
+    expect(href).toBe('/goals/e-123');
+  });
+
+  it('source_entity_id가 없으면 null(다른 타입도 동형)', () => {
+    expect(getEntityHref(baseNotification({ source_entity_type: 'epic', source_entity_id: null }))).toBeNull();
+  });
+});
+
+// story #3007(로드맵 P2·PR-E, L1) — 데스크톱 드롭다운 패널은 floating이라 --elev-overlay.
+describe('NotificationBell — 로드맵 P2·PR-E L1(드롭다운 패널 elevation 토큰)', () => {
+  it('데스크톱 드롭다운(.w-80)이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+    const desktopPanel = container.querySelector('.w-80');
+    expect(desktopPanel?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(desktopPanel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
+  });
+});
+
+// story #3074 — 데스크톱 실 알림 발화 코드 신설. window.__sprintableBridge가 있으면 그 경로
+// «만»(브라우저 Notification 병행 금지), 없으면 기존 브라우저 경로 그대로(회귀 0).
+describe('NotificationBell — story #3074 데스크톱 브리지 notify_show', () => {
+  function stubBrowserNotification() {
+    const ctor = vi.fn();
+    vi.stubGlobal('Notification', Object.assign(ctor, { permission: 'granted' }));
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    return ctor;
+  }
+
+  function emitLiveNotification(overrides: Record<string, unknown> = {}) {
+    const es = FakeEventSource.instances[0]!;
+    return act(async () => {
+      es.emit('notification', {
+        id: 'live-1', event_type: 'story.status_changed', source_entity_type: 'epic', source_entity_id: 'e-9',
+        payload: { summary: '스토리 상태 변경', sender_name: '유나 홀름' }, read_at: null, created_at: '2026-08-25T01:00:00Z',
+        ...overrides,
+      });
+    });
+  }
+
+  it('브리지가 있으면 notify_show를 snake_case payload로 부르고, 브라우저 Notification은 안 부른다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    const notificationCtor = stubBrowserNotification();
+    const notifyShow = vi.fn().mockResolvedValue(true);
+    (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge = { notify_show: notifyShow };
+
+    await openBell();
+    await emitLiveNotification();
+
+    expect(notifyShow).toHaveBeenCalledTimes(1);
+    expect(notifyShow).toHaveBeenCalledWith({
+      event_type: 'story.status_changed',
+      body: '유나 홀름 · 스토리 상태 변경',
+      deeplink_path: '/goals/e-9',
+    });
+    expect(notificationCtor).not.toHaveBeenCalled();
+
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+  });
+
+  it('브리지가 없으면(일반 브라우저) 기존 Notification 경로가 그대로 동작한다(회귀 0)', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    const notificationCtor = stubBrowserNotification();
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+
+    await openBell();
+    await emitLiveNotification();
+
+    expect(notificationCtor).toHaveBeenCalledTimes(1);
+    expect(notificationCtor).toHaveBeenCalledWith('스토리 상태 변경', { body: '유나 홀름', icon: '/favicon.ico' });
+  });
+
+  it('딥링크로 못 푸는 알림(source_entity_id 없음)이면 deeplink_path가 "/"로 안전 폴백한다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    stubBrowserNotification();
+    const notifyShow = vi.fn().mockResolvedValue(true);
+    (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge = { notify_show: notifyShow };
+
+    await openBell();
+    await emitLiveNotification({ source_entity_type: null, source_entity_id: null, payload: { summary: '시스템 공지' } });
+
+    expect(notifyShow).toHaveBeenCalledWith({
+      event_type: 'story.status_changed',
+      body: '시스템 공지',
+      deeplink_path: '/',
+    });
+
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
   });
 });

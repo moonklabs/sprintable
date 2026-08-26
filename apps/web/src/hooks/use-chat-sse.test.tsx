@@ -4,7 +4,7 @@
 // 오염 방지 회귀가드. Provider 없이 렌더하면 useSseMultiplexerContext()가 null을 반환해
 // 독립 EventSource 폴백 분기를 타는 것을 이용한다(SseMultiplexerContext 기본값 null).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useChatSse, normalizeToMessage } from './use-chat-sse';
 
@@ -25,6 +25,22 @@ describe('normalizeToMessage — story #2604 P2 approval_target 노출', () => {
 
   it('BE가 additive로 null을 명시해 보내도 null 그대로다', () => {
     expect(normalizeToMessage({ id: 'm3', content: 'hi', approval_target: null }).approval_target).toBeNull();
+  });
+});
+
+describe('normalizeToMessage — story #2901 sender.avatar_url 노출', () => {
+  it('sender.avatar_url이 있으면 sender_avatar_url로 실린다', () => {
+    const raw = { id: 'm1', content: 'hi', sender: { id: 'u1', name: '오르테가', type: 'agent', avatar_url: 'https://cdn.test/a.png' } };
+    expect(normalizeToMessage(raw).sender_avatar_url).toBe('https://cdn.test/a.png');
+  });
+
+  it('sender.avatar_url이 없으면(레거시 OrgMember 소싱 등) null로 통일된다', () => {
+    const raw = { id: 'm2', content: 'hi', sender: { id: 'u2', name: '송윤재', type: 'human' } };
+    expect(normalizeToMessage(raw).sender_avatar_url).toBeNull();
+  });
+
+  it('sender 자체가 없으면 null로 통일된다', () => {
+    expect(normalizeToMessage({ id: 'm3', content: 'hi' }).sender_avatar_url).toBeNull();
   });
 });
 
@@ -159,5 +175,218 @@ describe('useChatSse — 동시 마운트된 두 인스턴스가 같은 이벤�
 
     expect(onMessageA).toHaveBeenCalledTimes(1); // 전역 싱글턴이면 여기가 0이었다(둘 중 하나가 굶음)
     expect(onMessageB).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story #2964(sse-multiplexer.ts #2940과 동일 클래스, 폴백 경로 전용) — mux OFF(Provider 밖,
+// 이 파일 전체가 이미 그 조건)일 때만 실제로 발현하던 결함. mux ON(RealtimeProvider 안)이면
+// 이 훅은 애초에 이 effect 자체를 안 타므로(위 mux 분기), 이 회귀가드는 구조적으로 "폴백
+// 경로 전용" 검증이다 — dev가 지금 mux live라 급하진 않되(story 설명 그대로), 같은 클래스
+// 결함을 사전에 닫는다.
+describe('useChatSse — org 전환(memberId 변경) 재연결(story #2964, mux OFF 폴백 경로 전용)', () => {
+  it('currentTeamMemberId가 바뀌면 옛 커넥션을 닫고 새 member_id로 재연결한다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toContain('member_id=member-org-a');
+    expect(FakeEventSource.instances[0]!.closed).toBe(false);
+
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-b" />); });
+
+    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1]!.url).toContain('member_id=member-org-b');
+  });
+
+  it('memberId 전환 시 옛 org의 last_event_id를 새 커넥션 URL에 안 싣는다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'conversation.message_created', { id: 'm1' }, 'org-a-last-event-id',
+      );
+    });
+
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-b" />); });
+
+    const url = lastReconnectUrl();
+    expect(url.searchParams.get('member_id')).toBe('member-org-b');
+    expect(url.searchParams.get('last_event_id')).toBeNull(); // ⭐핵심 — 옛 org 커서가 안 샌다.
+  });
+
+  it('memberId가 안 바뀌면(무관한 리렌더) 재연결하지 않는다 — 과잉 재연결 금지', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.closed).toBe(false);
+  });
+});
+
+// story #2987(선생님 실사용 지적, standalone-fallback 경로) — sse-multiplexer.test.tsx의
+// "가시성 복귀 강제 재연결" 회귀가드와 동형(mux OFF일 때 이 훅이 직접 여는 EventSource도
+// 같은 처방을 받아야 한다).
+describe('useChatSse — 가시성 복귀 강제 재연결(#2987, standalone-fallback)', () => {
+  function setVisibility(state: DocumentVisibilityState) {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+
+  afterEach(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  it('임계값(3s) 이상 숨겨졌다 돌아오면 기존 커넥션을 닫고 새로 연다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    act(() => { setVisibility('visible'); });
+
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+  });
+
+  it('임계값(3s) 미만의 짧은 전환은 재연결하지 않는다 — 처칭 방지', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    act(() => { setVisibility('visible'); });
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
+
+  it('강제 재연결이 열리면 onReconnect가 불린다(backfill 트리거, backoff 이력 무관)', async () => {
+    const onReconnect = vi.fn();
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onReconnect={onReconnect} />); });
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    act(() => { setVisibility('visible'); });
+    act(() => { FakeEventSource.instances[1]!.onopen?.(); });
+
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story #3081(선생님 P0 지시, standalone-fallback 경로) — sse-multiplexer.test.tsx의
+// "window.focus 강제 재연결" 회귀가드와 동형. 위 #2987 스위트(visibilitychange 축)와 달리
+// hidden 이력 없이 focus만으로도 재연결이 걸려야 한다.
+describe('useChatSse — window.focus 강제 재연결(#3081, 가시성 축과 독립, standalone-fallback)', () => {
+  it('hidden 이력 없이 window.focus만 와도 기존 커넥션을 닫고 새로 연다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+  });
+
+  it('짧은 시간 내 중복 focus는 두 번째부터 throttle되어 재연결하지 않는다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(FakeEventSource.instances).toHaveLength(2);
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(FakeEventSource.instances).toHaveLength(2); // throttle(3s) 안 — 재연결 안 함
+  });
+
+  it('focus 강제 재연결이 열리면 onReconnect가 불린다(backfill 트리거)', async () => {
+    const onReconnect = vi.fn();
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onReconnect={onReconnect} />); });
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    act(() => { FakeEventSource.instances[1]!.onopen?.(); });
+
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story 6ddaa086(critical, 선생님 실사고) — 「연결이 끊겼어요」 배너가 실 연결(readyState=1
+// OPEN) 정상 도달 뒤에도 안 풀리던 결함. 근본원인: mux 핸들(sse-multiplexer.ts)이 #2144
+// 처방으로 참조안정적인데, chat-view의 배너는 mux.connected를 getter로 직접 읽어 그 값이
+// 바뀌어도 리렌더를 못 받았다(핸들 참조=Context 값이 안 바뀌므로 Provider가 소비자를
+// 스킵). realtime-provider.tsx에 connected 전용 반응형 컨텍스트(SseConnectedContext)를
+// 신설해 분리 — mux 핸들 자체의 참조안정성(#2144 보존)과 connected 리렌더 반응성을 둘 다
+// 만족시킨다. use-team-presence.test.tsx #2144 스위트와 동일한 vi.stubEnv+resetModules+
+// 동적 import 패턴(mux 공유 커넥션 경로 재현에 필수).
+describe('useChatSse — mux 공유 커넥션 경로에서 connected 리렌더 반응성(story 6ddaa086)', () => {
+  afterEach(() => { vi.resetModules(); });
+
+  it('mux 최초 open(false→true)이 이 훅을 리렌더시켜 connected=true를 즉시 반영한다', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
+    const { RealtimeProvider } = await import('@/components/realtime-provider');
+    const { useChatSse: useChatSseFresh } = await import('./use-chat-sse');
+
+    const connectedCapture = { current: false };
+    function Consumer() {
+      const { connected } = useChatSseFresh({ currentTeamMemberId: 'm1' });
+      useEffect(() => { connectedCapture.current = connected; }, [connected]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <RealtimeProvider currentTeamMemberId="m1">
+          <Consumer />
+        </RealtimeProvider>,
+      );
+      await Promise.resolve();
+    });
+    expect(connectedCapture.current).toBe(false);
+
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+
+    // 옛 버그: mux 핸들 참조가 안 바뀌어 Consumer가 리렌더 안 되고 connectedCapture가 false에
+    // 고착됐다(PO 실측 — readyState=1인데 배너만 남는 그 증상). 고친 뒤엔 이 open 자체가
+    // 곧바로 리렌더를 유발해 true로 반영된다 — 다른 무관한 트리거(새 메시지 등) 불필요.
+    expect(connectedCapture.current).toBe(true);
+  });
+
+  it('재연결(error→새 인스턴스 open)에서도 다른 무관한 리렌더 없이 connected가 다시 true로 풀린다(PO 재현 시나리오)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
+    const { RealtimeProvider } = await import('@/components/realtime-provider');
+    const { useChatSse: useChatSseFresh } = await import('./use-chat-sse');
+
+    const connectedCapture = { current: false };
+    function Consumer() {
+      const { connected } = useChatSseFresh({ currentTeamMemberId: 'm1' });
+      useEffect(() => { connectedCapture.current = connected; }, [connected]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <RealtimeProvider currentTeamMemberId="m1">
+          <Consumer />
+        </RealtimeProvider>,
+      );
+      await Promise.resolve();
+    });
+    const first = FakeEventSource.instances[0]!;
+    await act(async () => { first.onopen?.(); await Promise.resolve(); });
+    expect(connectedCapture.current).toBe(true);
+
+    // 끊김 — PO 실측대로 배너가 뜨는 쪽(정상 동작).
+    await act(async () => { first.readyState = FakeEventSource.CONNECTING; first.onerror?.(); await Promise.resolve(); });
+    expect(connectedCapture.current).toBe(false);
+
+    // 재연결 — 새 EventSource 인스턴스가 open(신규 인스턴스라는 게 PO 가설①의 핵심 축).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000); // backoff 재시도 대기
+      const second = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+      second.onopen?.();
+      await Promise.resolve();
+    });
+    expect(connectedCapture.current).toBe(true);
   });
 });

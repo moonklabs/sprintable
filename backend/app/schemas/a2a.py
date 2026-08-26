@@ -98,6 +98,29 @@ class AgentCard(BaseModel):
     default_input_modes: list[str] = Field(alias="defaultInputModes")
     default_output_modes: list[str] = Field(alias="defaultOutputModes")
     skills: list[AgentSkill]
+    model: str | None = Field(
+        default=None,
+        description="방향서 03·에이전트 속성 — 사용 모델. AgentPersona.model 실물 값만 표시(no-fiction, 미배정이면 None).",
+    )
+    permission_scope: list[str] | None = Field(
+        default=None,
+        alias="permissionScope",
+        description=(
+            "방향서 03·에이전트 속성 — 권한 범위. 표시 SSOT=ApiKey.scope(실제 매 요청 집행되는 "
+            "값, persona.config.tool_allowlist 아님 — 설계 doc agent-attributes-permission-cost-"
+            "stop-2939 §1 드리프트 경고 참조). 발급된 활성 키가 없으면 None."
+        ),
+    )
+    expected_cost: str | None = Field(
+        default=None,
+        alias="expectedCost",
+        description="방향서 03·에이전트 속성 — 예상 비용(선언, 자유 텍스트). 미선언이면 None.",
+    )
+    stop_condition: str | None = Field(
+        default=None,
+        alias="stopCondition",
+        description="방향서 03·에이전트 속성 — 중단 조건(선언, 자유 텍스트). 미선언이면 None.",
+    )
     security_schemes: dict[str, SecurityScheme] = Field(
         default_factory=dict, alias="securitySchemes"
     )

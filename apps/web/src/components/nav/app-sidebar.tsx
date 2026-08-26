@@ -4,14 +4,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { CircleHelp, Search } from 'lucide-react';
+import { Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
+import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS } from '@/lib/nav-config';
+import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
   Sidebar,
   SidebarContent,
@@ -70,9 +72,6 @@ export function AppSidebar({
       || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${resource}`));
     return { href, isActive };
   }
-  // story #2681 — docsLink는 footer 도움말 링크가 루프 밖에서 따로 참조해 개별 바인딩을
-  // 유지한다(그 외 리소스 항목은 전부 NAV_GROUPS 순회 중 resourceLink()를 그 자리에서 호출).
-  const docsLink = resourceLink('docs');
   // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
   // 칸반은 /flow?view=list로 흡수됐다(PR#2698, `/board` 라우트 자체는 삭제) — 사이드바에
   // board를 flow와 나란히 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" —
@@ -118,6 +117,7 @@ export function AppSidebar({
   }, []);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mux = useSseMultiplexerContext();
 
   useEffect(() => {
     let cancelled = false;
@@ -125,11 +125,16 @@ export function AppSidebar({
       try {
         // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환) — 그
         // 규율은 story #1981의 새 엔드포인트에도 그대로 적용한다.
-        const res = await fetchWithAuth('/api/gates?status=pending&assigned_to_me=true');
+        // story #3084(2026-08-25 층1, PO 확定) — assigned_to_me(project access+not-author,
+        // "누가 승인 자격이 있나"의 넓은 질문)를 designated-pending-count(순수 "내가 지정
+        // 결재자로 지정된 미해소 건이 몇 개인가", room 추론 0)로 교체. #3001부터 카드가
+        // 지정 라인 전용으로만 발행되므로 이 좁은 쿼리가 GNB "미확認" 뱃지의 정확한 SSOT다
+        // (BE 문서 gates.py::get_designated_pending_count — "AC1이 이 층에서 닫히는 근거").
+        const res = await fetchWithAuth('/api/gates/designated-pending-count');
         if (!res.ok || cancelled) return;
-        const gates = await res.json() as unknown[];
+        const json = await res.json() as { count?: number };
         if (!cancelled) {
-          setInboxPendingCount(Array.isArray(gates) ? gates.length : 0);
+          setInboxPendingCount(typeof json.count === 'number' ? json.count : 0);
         }
       } catch { /* noop */ }
     };
@@ -148,6 +153,27 @@ export function AppSidebar({
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
+
+  // story #3084(2026-08-25 층1) — "라이브 카운트"(유나 규격 §3). 승인/토스/위임 어느 쪽이든
+  // 이 뱃지가 세는 집합(designated_approver_id=me AND status=pending)을 바꿀 수 있는 3
+  // 이벤트 전부에서 즉시 재조회(30초 폴링은 mux 미연결/이벤트 유실 대비 안전망으로 유지).
+  useEffect(() => {
+    if (!mux) return;
+    const refetch = () => {
+      void fetchWithAuth('/api/gates/designated-pending-count')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json: { count?: number } | null) => {
+          if (json && typeof json.count === 'number') setInboxPendingCount(json.count);
+        })
+        .catch(() => { /* noop — 다음 정상 이벤트나 30초 폴링으로 자연 회복 */ });
+    };
+    const unsubs = [
+      mux.subscribe('conversation.gate_resolved', refetch),
+      mux.subscribe('conversation.gate_delegated', refetch),
+      mux.subscribe('conversation.gate_tossed', refetch),
+    ];
+    return () => { for (const unsub of unsubs) unsub(); };
+  }, [mux]);
 
   function isActive(href: string) {
     return pathname === href || (href !== '/' && pathname.startsWith(href));
@@ -177,11 +203,41 @@ export function AppSidebar({
         </button>
       </SidebarHeader>
 
+      {/* story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
+          «밖» 1급으로 승격(선생님 확定) — NAV_GROUPS 순회에 안 실린다(구역에 묻으면 강등이라는
+          게 이 승격의 요점). 시안 아티팩트(6242dffb .chatc) 그대로: 상시 blue-soft 카드,
+          active/inactive로 톤이 안 바뀐다(항상 눈에 띄어야 하는 1급 자리라 일반 nav 항목의
+          "현재 페이지만 강조" 관례를 안 따름 — 시안에도 active 변형이 없다). */}
+      <div className="mx-2.5 mt-2">
+        <Link
+          href={CHAT_CENTER_ITEM.path}
+          // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
+          // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
+          // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
+          // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
+          className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
+        >
+          <MessageSquare className="size-[18px] shrink-0" />
+          <span className="flex-1 truncate text-[13px] font-bold">{t(CHAT_CENTER_ITEM.labelKey)}</span>
+          {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
+              4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
+              bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
+              sidebar-primary(=proof-blue)와 짝으로 설계된 토큰이라 이 자리에 맞다). */}
+          {chatUnreadTotal > 0 ? (
+            <span className="shrink-0 rounded-full bg-sidebar-primary px-1.5 py-0.5 text-[9px] font-bold text-sidebar-primary-foreground">
+              {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
+            </span>
+          ) : null}
+        </Link>
+      </div>
+
       <SidebarContent>
         {/* story #2681 — 데스크톱 GNB와 모바일 /more 허브(S2)가 한 정의(NAV_GROUPS)에서
             파생된다(doc mobile-ia-full-completion-2678 §2.5-3). 그룹·항목 목록 자체는
             nav-config.ts가 유일한 출처이고, 여기선 오직 순회+렌더만 한다 — 순서·라벨·아이콘·
-            그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). */}
+            그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). story #2930 I1 — 이제 4구역+관리
+            프레임 순서(오늘→워크스페이스→신뢰→지식→조직→설정)로 재편됐다. chats는 위
+            챗 center로 승격돼 이 순회 밖이라 badgeKey는 이제 'inbox' 하나만 실질 도달한다. */}
         {NAV_GROUPS.map((group) => (
           <SidebarGroup key={group.id}>
             {group.labelKey ? <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel> : null}
@@ -192,9 +248,7 @@ export function AppSidebar({
                     ? { href: item.path, isActive: isActive(item.path) }
                     : resourceLink(item.path);
                   const Icon = item.icon;
-                  const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount
-                    : item.badgeKey === 'chats' ? chatUnreadTotal
-                    : 0;
+                  const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
                   const label = t(item.labelKey);
                   return (
@@ -224,20 +278,11 @@ export function AppSidebar({
 
       <SidebarFooter className="space-y-2 p-2">
         {userName && <ProfileMenu name={userName} />}
-        <div className="flex items-center justify-between gap-1">
-          <div className="flex items-center gap-1">
-            <LocaleSwitcher />
-            <ThemeToggle />
-          </div>
-          <Link
-            href={docsLink.href}
-            aria-label={t('help')}
-            title={t('help')}
-            className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/60 transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          >
-            <CircleHelp className="size-4" />
-          </Link>
+        <div className="flex items-center gap-1">
+          <LocaleSwitcher />
+          <ThemeToggle />
         </div>
+        <BusinessInfoDisclosure />
       </SidebarFooter>
 
       <SidebarRail />

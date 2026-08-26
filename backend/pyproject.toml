@@ -16,6 +16,10 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
+    # story #3064: macOS 네이티브 APNs 발송(HTTP/2 필수 — Apple provider API 요구사항).
+    # httpx가 h2 설치 시 자동으로 HTTP/2 클라이언트를 활성화(신규 API 학습 0, 기존 httpx 사용
+    # 패턴 그대로 http2=True만 추가) — aioapns 등 전용 APNs 클라이언트 라이브러리 도입 회피.
+    "h2>=4.1.0",
     "alembic>=1.13.0",
     "psycopg2-binary>=2.9.0",
     "slowapi>=0.1.9",

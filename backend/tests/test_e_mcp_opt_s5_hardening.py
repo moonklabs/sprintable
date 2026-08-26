@@ -134,7 +134,10 @@ async def test_get_current_user_passes_x_mcp_transport_header_through():
         await get_current_user(
             credentials=None, x_agent_api_key="sk_live_abc", x_mcp_transport="http",
         )
-    resolve.assert_awaited_once_with("sk_live_abc", resolve.await_args.args[1], transport="http")
+    # story #2087 — get_current_user가 이제 request도 _resolve_api_key로 전달한다(직접호출이라 None).
+    resolve.assert_awaited_once_with(
+        "sk_live_abc", resolve.await_args.args[1], transport="http", request=None,
+    )
 
 
 def test_mcp_client_sends_x_mcp_transport_header(monkeypatch):

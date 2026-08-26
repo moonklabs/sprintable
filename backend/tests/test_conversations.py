@@ -20,13 +20,16 @@ def anyio_backend():
     return "asyncio"
 
 
-def _make_member(member_id: uuid.UUID = MEMBER_ID, member_type: str = "human") -> MagicMock:
+def _make_member(
+    member_id: uuid.UUID = MEMBER_ID, member_type: str = "human", avatar_url: str | None = None,
+) -> MagicMock:
     m = MagicMock()
     m.id = member_id
     m.name = "테스트 멤버"
     m.type = member_type
     m.org_id = ORG_ID
     m.user_id = uuid.uuid4()
+    m.avatar_url = avatar_url
     return m
 
 
@@ -126,6 +129,35 @@ def test_msg_payload_includes_summary():
     payload = _msg_payload(msg, sender)
     assert "summary" in payload
     assert payload["summary"].startswith(f"{sender.name}: ")
+
+
+def test_msg_payload_sender_includes_avatar_url():
+    """story #2901 — sender dict에 avatar_url 동봉(read+SSE+POST 응답 전부의 SSOT인
+    _msg_payload 한 지점만 고치면 되는 이유 — 호출부 7곳이 전부 이 함수를 거친다)."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    sender = _make_member(avatar_url="https://cdn.test/member.png")
+    payload = _msg_payload(msg, sender)
+    assert payload["sender"]["avatar_url"] == "https://cdn.test/member.png"
+
+
+def test_msg_payload_sender_avatar_url_none_when_sender_has_none():
+    """avatar_url 미보유 sender(예: 레거시 org_member 전용 휴먼)는 None으로 정직하게 떨어짐
+    (없는 값을 지어내지 않음)."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    sender = _make_member()  # avatar_url 기본값 None
+    payload = _msg_payload(msg, sender)
+    assert payload["sender"]["avatar_url"] is None
+
+
+def test_msg_payload_sender_none_when_no_sender():
+    """sender 자체가 없으면(orphan 등) payload["sender"]는 None 그대로 — avatar_url 키를
+    억지로 만들지 않음(기존 계약 무변경 확認)."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    payload = _msg_payload(msg, None)
+    assert payload["sender"] is None
 
 
 def test_msg_payload_exposes_approval_target_when_present():
@@ -347,9 +379,14 @@ async def test_list_conversations():
         latest_msg_result = MagicMock()
         latest_msg_result.scalar_one_or_none.return_value = mock_msg
 
+        # story #2925: linked_proof 배치 조회(approval_target 참조 0건 → gates 배치조회는
+        # 안 불림 — _batch_resolve_linked_proof가 approval_rows 빈 결과에서 조기 return).
+        approval_rows_result = MagicMock()
+        approval_rows_result.all.return_value = []
+
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
         ])
 
         async with client as c:
@@ -610,9 +647,15 @@ async def test_send_message_filters_cross_org_mentions_group():
         user_blocker_result = MagicMock()
         user_blocker_result.scalars.return_value.all.return_value = []
 
-        # 실제 코드 순서: conv → _resolve_member(TM) → participant → user_blocker_ids
+        # story #2889: insert_chat_mentions 직후 fetch_stored_references가 1회 추가(SSE/POST
+        # 응답에 방금 저장된 references를 즉시 싣기 위함) — .all() 사용, 이 테스트는 멘션
+        # cross-org 필터링만 검증하므로 빈 결과로 충분.
+        fetch_refs_result = MagicMock()
+        fetch_refs_result.all.return_value = []
+
+        # 실제 코드 순서: conv → _resolve_member(TM) → participant → user_blocker_ids → fetch_stored_references
         session.execute = AsyncMock(
-            side_effect=[conv_result, member_result, participant_result, user_blocker_result]
+            side_effect=[conv_result, member_result, participant_result, user_blocker_result, fetch_refs_result]
         )
 
         captured = {}
@@ -631,7 +674,7 @@ async def test_send_message_filters_cross_org_mentions_group():
 
         mention_calls = {}
         async def _capture_mention(db, conversation, msg, org_id, sender, mention_targets,
-                                   webhook_covered_ids=None):
+                                   webhook_covered_ids=None, references=None):
             mention_calls["targets"] = set(mention_targets)
             return []
 

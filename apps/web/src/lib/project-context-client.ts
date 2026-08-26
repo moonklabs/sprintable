@@ -164,3 +164,21 @@ export function resolveEffectiveProjectId(
   if (serverProjectId && accessibleIds.has(serverProjectId)) return serverProjectId;
   return undefined;
 }
+
+/**
+ * story #2873 — flat 라우트(경로에 org 세그먼트가 없는 화면)에서 세션의 "현재 org"를 판정한다.
+ * `pathOrgId`(경로 `[ws]/[proj]` resolve 결과)가 최우선(기존 동작 그대로). 그다음은
+ * `jwtOrgId`(JWT `app_metadata.org_id` 클레임 — getServerSession이 jwtVerify 직후 읽어둔 정본)
+ * 를 `orgId`(project_id-체인으로 파생된 값)보다 우선한다: 0-프로젝트 org로 전환하면 그 org엔
+ * 앵커할 project가 없어 project-chain 파생값이 새 org로 영영 못 넘어가지만(switch-org가
+ * CURRENT_PROJECT_COOKIE를 지운다), 새로 발급된 JWT의 org_id 클레임 자체는 switch-org 직후
+ * 정확히 갱신되어 있다(BE 실측 확認, story #2873). jwtOrgId가 없는 인증경로(Firebase 세션 —
+ * db/server.ts 참고)에서만 orgId(project-chain)로 폴백한다.
+ */
+export function resolveEffectiveOrgId(
+  pathOrgId: string | undefined,
+  jwtOrgId: string | undefined,
+  orgId: string | undefined,
+): string | undefined {
+  return pathOrgId ?? jwtOrgId ?? orgId;
+}

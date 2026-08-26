@@ -105,13 +105,12 @@ async def test_project_scoped_member_receives_transient_push_no_event_row():
     """project_a 접근 member_a(연결 中)는 story.trust_stage_changed를 큐로 직접 수신 —
     Event row 생성 0(가드레일①).
 
-    story #2067(2026-07-21): merge 게이트 approve는 `_advance_story_on_merge_approve`(H1-FIX-2)로
-    story를 done까지 진행시키는데, 그 헬퍼가 부르는 `emit_story_status_changed`가 이제(story #2059/
-    #2067 fanout 수정) 이 같은 queue_a에 `story.status_changed`도 함께 push한다 — trust_stage_changed
-    "직전"(gate_service.transition_gate 안에서 `_advance_story_on_merge_approve`가
-    `maybe_emit_trust_stage_changed`보다 먼저 호출됨, 결정적 순서·레이스 아님)에 도착하므로 큐에
-    2건이 쌓인다. 둘 다 이 fanout 경로가 살아있다는 증거라 이 테스트 목적(project-scoped 수신
-    검증)엔 오히려 더 정확한 신호 — event_type으로 골라서 검증한다(순서에 의존하지 않음)."""
+    story #2965(PO 판정 2026-08-23) 후속 정정 — 예전엔 merge 게이트 approve가
+    `_advance_story_on_merge_approve`(H1-FIX-2)로 story를 done까지 진행시켜, 그 헬퍼가 부르는
+    `emit_story_status_changed`도 이 queue_a에 `story.status_changed`를 함께 push해 큐에 2건이
+    쌓였다. #2965가 그 자동전진을 제거해(머지≠done, done은 사람 명시 PATCH) 지금은
+    `story.trust_stage_changed` 1건만 온다 — event_type으로 골라서 검증하므로(순서·건수에
+    비의존) 이 테스트 자체는 무회귀."""
     from app.models.event import Event
     from app.routers import events as ev
     from app.services.gate_service import transition_gate

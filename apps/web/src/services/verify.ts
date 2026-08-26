@@ -47,34 +47,29 @@ export function deriveTrustStage(signal: TrustSignal): TrustStage {
   return null;
 }
 
-/**
- * P0-04 — trust-pipeline-minimal-decision(doc) 결정: 6레인 대시보드 기각·in-flight 전용 칩만
- * 채택. done(주장됨/검증됨)엔 칩 0(TrustSeal이 담당·중복 금지). Queued/Running/범위이탈은
- * BE 신호 자체가 없어(AgentRun story_id 필터 미착지·범위 스키마 무) 렌더 안 함(no-fiction).
- */
-export type InFlightTrustChip = 'needs_input' | 'merge_ready' | null;
-
-interface ChipGate {
-  gate_type: string;
-  status: string;
-  neutral_facts?: Record<string, unknown> | null;
-}
-
-// _ALWAYS_MANUAL_GATE_TYPES(BE gate_service.py) 미러 — 항상 사람 입력 대기.
-const NEEDS_INPUT_GATE_TYPES = new Set(['doc_approval', 'loop_decision', 'artifact_canonicalize']);
+const _TERMINAL_GATE_STATUSES = new Set(['approved', 'rejected', 'voided']);
 
 /**
- * 결정 doc §스펙: Needs-input(gate 3종 pending)→"입력 필요"(amber)·Merge-ready(merge gate+
- * ci_result=pass+pending)→"병합 대기"(green). story.status==='done'이면 항상 무표시.
+ * story #2893(설계안 §2 A1) — 한 스토리에 merge 게이트가 여러 개(PR마다 1개)일 수 있게 됐다.
+ * "이 스토리의 merge 게이트"를 단건으로 보여주는 화면(StoryMergeGate·Workcell Evidence
+ * 구획)이 이제 «어느 PR 것을 보여줄지» 골라야 한다 — 옛 `.find(g => g.gate_type==='merge')`
+ * (배열의 첫 번째, 삽입순=사실상 무작위)를 대체.
+ *
+ * 우선순위: ①미종결(pending/auto_passed/held — 지금 사람 눈이 필요한 것)이 종결(approved/
+ * rejected/voided)보다 우선 ②동순위 중엔 pr_number가 큰 쪽(가장 최근 열린 PR으로 근사).
+ * pr_number가 없는(레거시/PR 컨텍스트 없음) 게이트는 항상 최하순위(0 취급, 실 PR 정보가
+ * 있는 쪽을 우선 — 지어내지 않되 있으면 쓴다).
  */
-export function deriveInFlightTrustChip(storyStatus: string, gates: ChipGate[]): InFlightTrustChip {
-  if (storyStatus === 'done') return null;
-  const pending = gates.filter((g) => g.status === 'pending');
-  if (pending.some((g) => g.gate_type === 'merge' && g.neutral_facts?.['ci_result'] === 'pass')) {
-    return 'merge_ready';
-  }
-  if (pending.some((g) => NEEDS_INPUT_GATE_TYPES.has(g.gate_type))) {
-    return 'needs_input';
-  }
-  return null;
+export function pickRelevantMergeGate<G extends { gate_type: string; status: string; pr_number?: number | null }>(
+  gates: G[],
+): G | undefined {
+  const mergeGates = gates.filter((g) => g.gate_type === 'merge');
+  if (mergeGates.length === 0) return undefined;
+  const sorted = [...mergeGates].sort((a, b) => {
+    const aOpen = _TERMINAL_GATE_STATUSES.has(a.status) ? 0 : 1;
+    const bOpen = _TERMINAL_GATE_STATUSES.has(b.status) ? 0 : 1;
+    if (aOpen !== bOpen) return bOpen - aOpen; // 미종결 먼저.
+    return (b.pr_number ?? 0) - (a.pr_number ?? 0); // 큰 pr_number(최근 PR) 먼저.
+  });
+  return sorted[0];
 }

@@ -19,7 +19,7 @@ neutral_facts: 관찰 사실만 (touches_migration, diff_size 등).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, func, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,10 +64,28 @@ class Gate(Base):
     work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     work_item_type: Mapped[str] = mapped_column(String(20), nullable=False)
     gate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # story #2893(0271) — 멱등 키 확장: (org_id, work_item_id, work_item_type, gate_type)
+    # 1슬롯 공유가 「PR A 서명이 PR B의 SHA를 뭄」실사고(설계안 §2 A1)의 근본원인이었다.
+    # NULL=PR 컨텍스트 없음(board-preflight no-substance 경로) 또는 애초에 PR 개념이 없는
+    # gate_type(doc_approval 등) — 지어내지 않는다. DB 제약은 0271에서 부분 유니크 인덱스
+    # 2개로 분리(NULL 구간=옛 계약 그대로, NOT NULL 구간=+pr_number). create_gate() 호출부
+    # 전수는 gate_service.py 참조.
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # story #2932(HIGH1, 0272) — pr_number 단독은 repo 경계가 없어(전역이 아니라 스토리
+    # 스코프 안에서도) 다른 repo의 같은 번호 PR이 슬롯을 공유할 수 있었다(cross-repo
+    # 충돌). pr_number와 짝으로 멱등 키에 편입 — find_gate_slot_with_pr_fallback.py 참조.
+    # NULL=pr_number와 동형 사유(PR 컨텍스트 없음/레거시 미백필).
+    repo_full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2985(PO 설계 확定 2026-08-24) — 「누가 해야 하는지」(사전 지정, resolver_id의
+    # 대칭짝). 상신 시 지정하면 그 1인에게만 액션 카드·나머지 org/project owner+admin은
+    # 정보성으로 강등(dispatch_approval_request_cards). 미지정(None)이면 현행(권한자 전원
+    # 액션) 그대로 — 회귀 0. 지정자가 아니어도 owner/admin의 해소 권한 자체는 무변화(SoD와
+    # 별개 축 — 이건 «기본 노출»만 좁힌다).
+    designated_approver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # ⭐S31: hold 만료(시한부 보류). status='held' 일 때만 의미·무기한 hold 면 None. 0132 마이그(post-0096).
     # FE 가 gate 직독으로 held_until 배지 렌더(step_run 경유 leaky 회피)·step_run.held_until 도 SLA 동기화.
     held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -96,6 +114,10 @@ class Gate(Base):
     # 웹훅의 새 head_sha와 다르면 재-pending(approved→pending) 트리거(카디르 QA③-b: reopen 가드를
     # synchronize만이 아니라 네 액션 전부에서 돌림 — 다른 head로 돌아온 재오픈 PR도 잡는다).
     approved_head_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2932(완주조건 HIGH2, 0273) — GitHub `pull_request.updated_at`(실 PR 갱신마다
+    # 단조증가) 워터마크. reopen_gate_if_new_sha가 이걸로 stale/순서역전 웹훅 배달을
+    # 걸러 이미 최신 SHA로 승인된 게이트를 옛 배달로 부당 재-pending시키지 않는다.
+    pr_head_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

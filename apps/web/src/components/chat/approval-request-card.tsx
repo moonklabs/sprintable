@@ -1,21 +1,28 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Check, Eye, FileText, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, FileText, Forward, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
-import { EntityPreviewModal, canPreviewEntity, getEntityHref, resolveEntityIcon } from '@/components/chat/embed-card';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from '@/components/cage/gate-risk';
+import { EntityPreviewModal, canPreviewEntity, getEntityHref } from '@/components/chat/embed-card';
+import { useReadingPanel } from '@/components/chat/reading-panel-context';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
+import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
+import { useToast, ToastContainer } from '@/components/ui/toast';
+import { TossSheet } from '@/components/chat/toss-sheet';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -26,6 +33,13 @@ export interface ApprovalTarget {
    * 이 컴포넌트에서 실제로 읽히지 않는다(gate 상태는 항상 fetchGate()의 실물로 판단) —
    * optional로 둬 두 메시지 종류(request/result) 모두 같은 타입으로 수용한다. */
   actions?: string[];
+  /** story #2985 — 결재선 지정 시 이 카드가 지정 결재자에게 간 액션 카드인지. story #3001
+   * (선생님 정책 확定) 이후로는 카드 자체가 지정자에게만 발행되므로(비지정자는 카드 자체를
+   * 못 받는다) 항상 true와 동형 — 이 필드는 구메시지 호환용으로만 남는다. */
+  designated?: boolean;
+  /** story #2985 — 발송 당시 지정 결재자 표시 이름(스냅샷). story #3001부터는 정보성 카드
+   * 문구용으로는 쓰이지 않는다(그 렌더 자체가 폐기) — 남겨는 두되 현재 미사용. */
+  designated_approver_name?: string | null;
 }
 
 interface ApprovalRequestCardProps {
@@ -88,9 +102,22 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  */
 export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
+  // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
+  // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
+  const tCage = useTranslations('cage');
   const [state, setState] = useState<CardState>({ kind: 'loading' });
   const [resolving, setResolving] = useState(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  // story #2926(P0-F F1) — claim 클릭(제목 미리보기)이 이제 ProofCapsule 셸 소관이라 이
+  // state도 그쪽에 맞춰 여기(바깥 컴포넌트)로 끌어올렸다(기존 ApprovalRequestBody 소유였음).
+  const [showPreview, setShowPreview] = useState(false);
+  // story #461e9a54(P0) — approvals-queue.tsx(인박스, 채팅 밖)에서도 이 카드가 쓰인다 —
+  // Provider 밖이면 null이라 기존 Dialog 모달 폴백(회귀 0).
+  const readingPanel = useReadingPanel();
+  // story #3084(2026-08-25 층3) — 토스 성공/409 안내용. 이 카드 인스턴스 로컬(다른 카드
+  // 인스턴스와 공유 안 함) — attachment-file.tsx와 동일 선례, ToastContainer도 이 카드가
+  // 직접 렌더한다(fixed 오버레이라 DOM 위치 무관하게 뜬다).
+  const { toasts, addToast, dismissToast } = useToast();
 
   const fetchGate = useCallback(async () => {
     try {
@@ -108,6 +135,55 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
 
+  // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 이 게이트를 먼저 해소하면,
+  // 이 카드를 보고 있는 화면도 새로고침 없이 "처리됨"으로 갱신된다. BE가
+  // notify_gate_card_recipients_resolved(approval_delivery.py)에서 원 카드(액션+정보성
+  // 무관) 받았던 전원에게 새 ConversationMessage 없이 순수 SSE 이벤트만 심는다 — 그 계약의
+  // FE 절반. mux가 없으면(RealtimeProvider 밖·플래그 OFF) 조용히 스킵 — 이 경우 기존처럼
+  // 마운트 1회 fetchGate만 유효(회귀 아님, 저하일 뿐).
+  const mux = useSseMultiplexerContext();
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_resolved', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === target.gate_id) void fetchGate();
+      } catch { /* malformed — 무시(다음 정상 이벤트나 fetchGate 재시도로 자연 회복) */ }
+    });
+    return unsub;
+  }, [mux, target.gate_id, fetchGate]);
+
+  // story #3001(위임) — 원 지정자가 위임으로 밀려나면(gate.designated_approver_id가
+  // 더 이상 자신이 아니게 되면) 그 사람이 보고 있는 이 카드도 새로고침 없이 "위임됨"으로
+  // 갱신된다. BE notify_gate_delegated_to_old_approver가 gate_resolved와 동형 계약
+  // (ConversationMessage 없이 순수 SSE 이벤트만) — 동일 구독 패턴 재사용.
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_delegated', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === target.gate_id) void fetchGate();
+      } catch { /* malformed — 무시 */ }
+    });
+    return unsub;
+  }, [mux, target.gate_id, fetchGate]);
+
+  // story #3084(2026-08-25 층3, PO 확定 — FE 요건②) — 이 gate_id의 사본을 갖고 있던 모든
+  // conversation 수신자에게 방출되는 순수 SSE 이벤트(gate_resolved/gate_delegated와 동형,
+  // 새 ConversationMessage는 안 만듦). conversation_id 무관 gate_id 매칭이라 신규 사본이
+  // 하나 더 생겼다는 사실이 이미 열린 화면 전부(원 카드·기존 사본 전부)에 자동 반영된다 —
+  // AC2(여러 방 동기 전이)의 FE 절반이 이 구독 하나로 끝난다.
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_tossed', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === target.gate_id) void fetchGate();
+      } catch { /* malformed — 무시 */ }
+    });
+    return unsub;
+  }, [mux, target.gate_id, fetchGate]);
+
   const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     setResolving(true);
     setTransitionError(null);
@@ -117,11 +193,29 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
         // 플로우 onApprove에서만 true로 실린다, 아래 ApprovalRequestBody 배선 참조).
-        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
+        // story #2975 회귀 자체발견(#2982 작업 중) — reviewed_head_sha 누락(gates/[id]/
+        // page.tsx만 #2975에서 고쳐지고 이 챗 카드는 빠져 있었다). known SHA 있는 merge
+        // 게이트를 이 카드에서 승인하면 #3410 착지 後 항상 409(gate_head_changed)로
+        // 거부되는 라이브 회귀 — state.gate(fetchGate 실측)에서 채운다.
+        body: JSON.stringify({
+          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
+          reviewed_head_sha: state.kind === 'ready' ? (state.gate.github_check_run_sha ?? null) : null,
+        }),
       });
       if (res.ok) { await fetchGate(); return; }
-      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      setTransitionError(body?.error?.message ?? `HTTP ${res.status}`);
+      const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
+      const code = body?.error?.code;
+      // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문) 대신 사람
+      // 문구로 매핑(gates/[id]/page.tsx와 동형). 둘 다 "화면이 아는 상태가 서버와
+      // 어긋났다"는 뜻이라 재조회로 실제 현재 상태를 반영(AC1 — 죽은 버튼이 다시 안 뜬다).
+      if (code === 'gate_head_changed' || code === 'gate_already_resolved') {
+        await fetchGate();
+      }
+      setTransitionError(
+        code === 'gate_head_changed' ? tCage('gateHeadChangedError')
+          : code === 'gate_already_resolved' ? tCage('gateAlreadyResolvedError')
+          : (body?.error?.message ?? `HTTP ${res.status}`)
+      );
     } catch {
       setTransitionError(t('hitlSendFailed'));
     } finally {
@@ -154,49 +248,97 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     }
   };
 
-  const Icon = resolveEntityIcon(toEntityType(target.work_item_type)) ?? FileText;
+  // story #2926(P0-F F1) — loading/not-found/error는 claim(제목)이 아직 없는 과도 상태라
+  // Proof Capsule 셸을 억지로 씌우지 않는다(claim이 빈 이야기를 지어내는 게 되므로) — 기존
+  // 가벼운 placeholder 그대로 유지. AC1(3서피스 단일 ProofCapsule 소비)의 대상은 실 데이터가
+  // 있는 'ready' 상태다.
+  if (state.kind !== 'ready') {
+    return (
+      <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+          <FileText className="h-3 w-3" aria-hidden />
+          {t('approvalRequestLabel')}
+        </div>
+        {state.kind === 'loading' ? (
+          <div className="h-8 animate-pulse rounded-lg bg-muted" />
+        ) : state.kind === 'not-found' ? (
+          <p className="text-xs text-muted-foreground">{t('approvalRequestNotFound')}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t('approvalRequestLoadError')}</p>
+        )}
+      </div>
+    );
+  }
+
+  const gate = state.gate;
+  const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+  const previewEntityType = toEntityType(gate.work_item_type);
+  const canPreview = canPreviewEntity(previewEntityType);
+  // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①·② 처방) — F1/F2/F3 3곳 중복 판정
+  // 로직을 gate-risk.ts의 deriveGateProofState()로 승격, stateLabel 문구도 'cage' 네임스페이스
+  // 통일 키로 수렴(F1↔F2 held/approved 문구 불일치 해소). 매핑 안 된 값은 원문 그대로(지어내지
+  // 않음, 기존 관례 유지).
+  const { proofState, statusKey } = deriveGateProofState(gate.status);
+  const stateLabel = statusKey ? tCage(statusKey) : gate.status;
 
   return (
-    <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-        <Icon className="h-3 w-3" aria-hidden />
-        {t('approvalRequestLabel')}
-      </div>
-
-      {state.kind === 'loading' ? (
-        <div className="h-8 animate-pulse rounded-lg bg-muted" />
-      ) : state.kind === 'not-found' ? (
-        <p className="text-xs text-muted-foreground">{t('approvalRequestNotFound')}</p>
-      ) : state.kind === 'error' ? (
-        <p className="text-xs text-muted-foreground">{t('approvalRequestLoadError')}</p>
-      ) : (
-        <ApprovalRequestBody
-          gate={state.gate}
-          resolving={resolving}
-          transitionError={transitionError}
-          onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
-          onReject={(reason) => void transition('rejected', reason)}
-          onDiscuss={(reason) => void discuss(reason)}
-          onDiscussClick={() => setDiscussDialogOpen(true)}
-          onUndone={() => void fetchGate()}
-          eventDefinitionsByKey={eventDefinitionsByKey}
+    <>
+      <ProofCapsule
+        density="card"
+        proofState={proofState}
+        stateLabel={stateLabel}
+        claim={title}
+        onClaimClick={canPreview ? () => {
+          if (readingPanel) {
+            readingPanel.open({
+              kind: 'entity', entityType: previewEntityType, entityId: gate.work_item_id,
+              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id),
+            });
+            return;
+          }
+          setShowPreview(true);
+        } : undefined}
+        className="max-w-full"
+        footer={
+          <ApprovalRequestBody
+            gate={gate}
+            resolving={resolving}
+            transitionError={transitionError}
+            onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
+            onReject={(reason) => void transition('rejected', reason)}
+            onDiscuss={(reason) => void discuss(reason)}
+            onDiscussClick={() => setDiscussDialogOpen(true)}
+            onUndone={() => void fetchGate()}
+            eventDefinitionsByKey={eventDefinitionsByKey}
+            addToast={addToast}
+          />
+        }
+      />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <GateDiscussDialog
+        open={discussDialogOpen}
+        onOpenChange={setDiscussDialogOpen}
+        onSubmit={(reason) => void discuss(reason)}
+        submitting={discussSubmitting}
+        error={discussError}
+      />
+      {!readingPanel && showPreview && (
+        <EntityPreviewModal
+          entityType={previewEntityType}
+          entityId={gate.work_item_id}
+          title={title}
+          status={null}
+          href={getEntityHref(previewEntityType, gate.work_item_id)}
+          onClose={() => setShowPreview(false)}
         />
       )}
-      {state.kind === 'ready' ? (
-        <GateDiscussDialog
-          open={discussDialogOpen}
-          onOpenChange={setDiscussDialogOpen}
-          onSubmit={(reason) => void discuss(reason)}
-          submitting={discussSubmitting}
-          error={discussError}
-        />
-      ) : null}
-    </div>
+    </>
   );
 }
 
 function ApprovalRequestBody({
   gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
+  addToast,
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -209,13 +351,53 @@ function ApprovalRequestBody({
   onDiscussClick: () => void;
   onUndone: () => void;
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #3084(층3) — 토스 성공/409 안내 토스트(카드 인스턴스가 소유한 useToast, 부모가 전달). */
+  addToast: (toast: { type?: 'info' | 'warning' | 'success' | 'error'; title: string; body?: string }) => void;
 }) {
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, projectId } = useDashboardContext();
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+
+  // story #3084(2026-08-25, 유나 픽셀 규격 v1 §부록A — 상태 파생표 SSOT) — «대기·requester»/
+  // «대기·관찰자»/토스 시트 문구가 필요로 하는 이름 2종(designated_approver_id·resolver_id)을
+  // gates/[id]/page.tsx의 fetchedResolverIdRef 관례와 동형으로 지연 조회한다(카드마다 독립
+  // — DelegateApprovalControl의 openPicker on-demand 조회와 같은 결).
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  const fetchedNameIdsRef = useRef<string | null>(null);
+  const requesterId = (() => {
+    const raw = gate.neutral_facts?.['requested_by_member_id'];
+    return typeof raw === 'string' ? raw : null;
+  })();
+  const hasDesignatedLine = !!gate.designated_approver_id;
+  const isDesignatedViewer = hasDesignatedLine && gate.designated_approver_id === currentTeamMemberId;
+  const isRequesterViewer = !isDesignatedViewer && !!requesterId && requesterId === currentTeamMemberId;
+  const needsDesignatedName = gate.status === 'pending' && hasDesignatedLine && !isDesignatedViewer;
+  const needsResolverName = gate.status !== 'pending' && !!gate.resolver_id && gate.resolver_id !== currentTeamMemberId;
+  useEffect(() => {
+    const idsKey = `${needsDesignatedName ? gate.designated_approver_id : ''}|${needsResolverName ? gate.resolver_id : ''}`;
+    if (idsKey === '|' || fetchedNameIdsRef.current === idsKey) return;
+    fetchedNameIdsRef.current = idsKey;
+    void fetchWithAuth('/api/team-members')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: { id: string; name: string }[] } | null) => {
+        if (!json?.data) return;
+        const names: Record<string, string> = {};
+        for (const m of json.data) names[m.id] = m.name;
+        setMemberNames((prev) => ({ ...prev, ...names }));
+      })
+      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+  }, [needsDesignatedName, needsResolverName, gate.designated_approver_id, gate.resolver_id]);
+  const designatedApproverName = gate.designated_approver_id
+    ? memberNames[gate.designated_approver_id] ?? gate.designated_approver_id.slice(0, 8)
+    : null;
+
+  // story #3084 층3 — 토스 시트 open state. 진입점은 아래 canToss 게이트(designated 본인
+  // ⋯ 오버플로 / requester 본인 "다른 방에도 보내기" 버튼) 둘 다 공유.
+  const [tossOpen, setTossOpen] = useState(false);
+  const canToss = gate.status === 'pending' && hasDesignatedLine && (isDesignatedViewer || isRequesterViewer);
 
   // story #2637 AC4(PO 08-14 확定, Q2/Q3 그라운딩) — resolved(회신) 분기만 preset.gate.verdict
   // block_template을 부분 소비(text·fields만 — header/actions는 안 씀, 「결재 요청」 라벨은
@@ -251,30 +433,17 @@ function ApprovalRequestBody({
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
-  const [showPreview, setShowPreview] = useState(false);
-  // story #2118(E-DG-REAL) — doc 전용이던 제목 진입점을 전 work_item_type으로 확장하되,
-  // «클릭에 값이 있는 타입»만(페드루 리뷰). canPreviewEntity가 RICH_PREVIEW/ENTITY_API fetch
-  // 전략/own-href 셋 다 없는 타입(loop·wf_line_version 등)을 걸러 빈 모달 진입점을 안 만든다
-  // — story #2118(P2.2) AC④("미리보기 없는 타입에 억지로 진입점 달아 빈 모달 여는 거짓 안
-  // 만든다")와 동형 판정을 embed-card.tsx 공유 함수로 그대로 재사용.
-  const previewEntityType = toEntityType(gate.work_item_type);
-  const canPreview = canPreviewEntity(previewEntityType);
+  // story #3001 — 지정이 걸린 게이트인데 지금 이 카드를 보는 나는 더 이상 그 지정자가
+  // 아니다(위임됨). 미지정(broadcast) 게이트는 gate.designated_approver_id가 애초 null이라
+  // 이 분기 자체가 안 걸린다(회귀 0).
+  const isDelegatedAway = gate.status === 'pending' && !!gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId;
+  const canDelegate = canAct && !isDelegatedAway && !!gate.designated_approver_id && gate.designated_approver_id === currentTeamMemberId;
 
   return (
     <div className="space-y-2">
-      {canPreview ? (
-        <button
-          type="button"
-          onClick={() => setShowPreview(true)}
-          className="group/preview flex w-full min-w-0 items-center gap-1 text-left"
-        >
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground group-hover/preview:underline">{title}</span>
-          <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        </button>
-      ) : (
-        <p className="truncate text-sm font-medium text-foreground">{title}</p>
-      )}
-
+      {/* story #2926(P0-F F1) — 제목(claim)·미리보기 진입점·EntityPreviewModal은 이제 바깥
+          ApprovalRequestCard의 ProofCapsule 셸이 소유한다(claim=onClaimClick). 이 body는
+          claim 아래의 실 기능(위험 배지·서명 플로우·회신 상태·액션 버튼)만 담당. */}
       {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
         <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
           {riskLevel === 'high' ? tCage('riskHigh') : tCage('riskUnknown')}
@@ -308,6 +477,18 @@ function ApprovalRequestBody({
                   fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
                   같은 값을 보여준다.
                   story #2637 AC4 — 템플릿 없음/파싱실패 시 폴백(비회귀 안전망, AC2와 동형). */}
+              {/* story #3084(2026-08-25, 유나 픽셀 규격 부록A) — 「남이 처리」 상태만 처리자
+                  이름 표기(「내가 처리」는 굳이 이름을 안 붙여도 자명 — 상태 어휘표 그대로).
+                  gates/[id]/page.tsx의 gateDetailResolvedByStatus를 그대로 재사용(동일 개념=
+                  동일 어휘, DS 원칙 — 새 키 안 만듦). */}
+              {gate.resolver_id && gate.resolver_id !== currentTeamMemberId ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {tCage('gateDetailResolvedByStatus', {
+                    name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8),
+                    status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
+                  })}
+                </p>
+              ) : null}
               {gate.resolution_note ? (
                 <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
               ) : null}
@@ -319,13 +500,50 @@ function ApprovalRequestBody({
             <GateUndoButton gateId={gate.id} onUndone={onUndone} compact />
           ) : null}
         </>
+      ) : isRequesterViewer ? (
+        // story #3084(2026-08-25, 유나 픽셀 규격 부록A) — 「대기·requester」. requesterId를
+        // gate.neutral_facts에서 확실히 아는 경우에만(⚠️아래 관찰자 분기와 함께, requesterId가
+        // null인 legacy/무기록 게이트는 이 분기 자체가 안 걸려 그대로 isDelegatedAway로
+        // 폴백한다 — #3001 당시엔 이 구분이 없었던 것과 동형 안전망, 회귀 0).
+        <>
+          <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
+            {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+          </div>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setTossOpen(true)} className="w-full">
+            {t('approvalRequestTossTrigger')}
+          </Button>
+        </>
+      ) : requesterId && hasDesignatedLine && !isDesignatedViewer ? (
+        // story #3084 — 「대기·관찰자」(그룹방 3자). requesterId를 알고 있고 그게 나도 아니고
+        // designated도 내가 아닌, 진짜 제3자 시점 — 액션 없음(#3001 delegate와 무관한 축이라
+        // "위임됨" 문구는 부정확해 안 쓴다).
+        <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
+          {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+        </div>
+      ) : isDelegatedAway ? (
+        // story #3001(선생님 정책 확定) — 이 카드의 원 수신자(=지금 보고 있는 나)가 위임으로
+        // 밀려났다. "위임됨"은 BE rule A상 여전히 canAct===true로 잡힐 수 있어도(transition
+        // authz는 이 스토리 스코프 밖 — designated_approver_id는 카드 배달만 좌우) 화면에서는
+        // 무조건 읽기전용으로 좁힌다 — 결정 권한이 여기 남아있는 것처럼 보이는 UI 자체가
+        // "승계는 튕겨내기로만" 원칙(선생님)의 시각적 위반이라(누구 이름인지는 지어내지
+        // 않는다 — GateResponse가 현재 지정자 이름을 안 실어 보낸다).
+        // story #3084 — requesterId를 모르는(legacy/무기록) 게이트의 「대기·requester/관찰자」
+        // 판정 불가 케이스도 이 분기로 안전 폴백(위 두 분기가 requesterId 존재를 전제).
+        <p className="text-xs text-muted-foreground">{t('approvalRequestDelegatedAway')}</p>
       ) : !canAct ? (
         // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
         // "액션 불가" 사유는 무권한뿐이다.
         <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
       ) : needsFullFlow ? (
+        // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
+        // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
+        // 에만 적용되고 이 챗 카드는 빠져 있었다. 같은 컴포넌트·같은 취약(SHA 바뀐 뒤에도
+        // 열람체크가 살아있어 재확認 없이 재승인 가능)이라 동형 처방.
         <GateSignatureApproval
+          key={gate.github_check_run_sha}
           gate={gate}
           resolving={resolving}
           error={transitionError}
@@ -359,17 +577,130 @@ function ApprovalRequestBody({
           </Button>
         </>
       )}
-
-      {showPreview && (
-        <EntityPreviewModal
-          entityType={previewEntityType}
-          entityId={gate.work_item_id}
-          title={title}
-          status={null}
-          href={getEntityHref(previewEntityType, gate.work_item_id)}
-          onClose={() => setShowPreview(false)}
+      {/* story #3084(층3) — designated 본인의 토스 진입점. 승인/반려 판단 여부와 무관하게
+          (서명 고위험 플로우 아래서도) 항상 같은 자리 — 토스는 "판단"이 아니라 "도달 경로
+          추가"라 evidence 확인 게이트(needsFullFlow)·delegate와 별개 축. */}
+      {canToss && isDesignatedViewer ? (
+        <Button type="button" size="sm" variant="ghost" onClick={() => setTossOpen(true)} className="w-full text-muted-foreground">
+          <Forward className="h-3.5 w-3.5" aria-hidden />
+          {t('approvalRequestTossTrigger')}
+        </Button>
+      ) : null}
+      {/* story #3001 — 위임(튕겨내기). 승인/반려 판단 여부와 무관하게(서명 고위험 플로우
+          아래서도) 항상 같은 자리에 둔다 — 위임은 "판단을 남에게 넘기는" 행위라 evidence
+          확인 게이트(needsFullFlow)와는 별개 축. */}
+      {canDelegate ? <DelegateApprovalControl gateId={gate.id} onDelegated={onUndone} /> : null}
+      {canToss && projectId ? (
+        <TossSheet
+          open={tossOpen}
+          onOpenChange={setTossOpen}
+          gateId={gate.id}
+          projectId={projectId}
+          currentTeamMemberId={currentTeamMemberId ?? ''}
+          designatedApproverId={gate.designated_approver_id ?? ''}
+          designatedApproverName={designatedApproverName}
+          onTossed={(conversationTitle) => {
+            addToast({ type: 'info', title: t('approvalRequestTossSuccessToast', { conversation: conversationTitle }) });
+            onUndone();
+          }}
+          onAlreadyResolved={() => {
+            addToast({ type: 'warning', title: tCage('gateAlreadyResolvedError') });
+            onUndone();
+          }}
         />
-      )}
+      ) : null}
+    </div>
+  );
+}
+
+function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDelegated: () => void }) {
+  const t = useTranslations('chats');
+  const { currentTeamMemberId } = useDashboardContext();
+  const [open, setOpen] = useState(false);
+  const [members, setMembers] = useState<SelectOption[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [selected, setSelected] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // story #3040 v3 — 동명 표시이름 오지정 실사고(선생님 실계정 vs PO 대행 계정, 둘 다
+  // "송윤재") 재발 방지. AC2: 동명이 실재할 때만 경고(음성 대조 — 비동명 org는 항상 false).
+  const [hasDuplicateNames, setHasDuplicateNames] = useState(false);
+
+  const openPicker = async () => {
+    setOpen(true);
+    setError(null);
+    if (members.length > 0) return;
+    setLoadingMembers(true);
+    try {
+      const res = await fetchWithAuth('/api/org-members');
+      const json = await res.json().catch(() => null) as {
+        data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
+      } | null;
+      // story #3001 하드닝(PO 확定) — 위임 대상 자격은 BE가 400으로 최종 강제하지만(owner/admin
+      // fresh 조회), 여기서도 같은 축(owner/admin·본인 제외)으로 미리 좁혀 자격 밖 클릭 자체를
+      // 줄인다(지어낸 자격 판단이 아니라 BE와 같은 규칙 재사용 — org-members-section.tsx와 동형).
+      // story #3040 v3 — label 산출(이메일 병기)·동명 경고 판정은 doc-gate-section.tsx와
+      // 동일 소스(buildApproverPickerOptions)로 통일 — 지정 표면 두 곳이 갈리지 않게.
+      const { options, hasDuplicateNames: dup } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      setMembers(options);
+      setHasDuplicateNames(dup);
+    } catch {
+      setError(t('hitlSendFailed'));
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!selected) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetchWithAuth(`/api/gates/${gateId}/delegate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_approver_member_id: selected }),
+      });
+      if (res.ok) { setOpen(false); onDelegated(); return; }
+      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      setError(body?.error?.message ?? `HTTP ${res.status}`);
+    } catch {
+      setError(t('hitlSendFailed'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <Button type="button" size="sm" variant="ghost" onClick={() => void openPicker()} className="w-full text-muted-foreground">
+        {t('approvalRequestDelegate')}
+      </Button>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {error ? <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{error}</p> : null}
+      {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
+      {hasDuplicateNames ? (
+        <p role="alert" className="text-[11px] text-warning-strong">{t('approvalRequestDelegateDuplicateWarning')}</p>
+      ) : null}
+      <OperatorDropdownSelect
+        value={selected}
+        onValueChange={setSelected}
+        options={members}
+        placeholder={loadingMembers ? t('approvalRequestDelegateLoading') : t('approvalRequestDelegatePickPlaceholder')}
+        disabled={loadingMembers || submitting}
+      />
+      <div className="flex gap-1.5">
+        <Button type="button" size="sm" onClick={() => void submit()} disabled={!selected || submitting} className="flex-1">
+          {t('approvalRequestDelegateConfirm')}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)} disabled={submitting} className="flex-1">
+          {t('approvalRequestDelegateCancel')}
+        </Button>
+      </div>
     </div>
   );
 }

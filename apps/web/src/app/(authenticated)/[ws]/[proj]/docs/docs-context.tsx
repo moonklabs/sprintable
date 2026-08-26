@@ -10,6 +10,10 @@ export interface Doc {
   icon: string | null;
   sort_order: number;
   is_folder?: boolean;
+  // story #2955 §2/§6 — 지식 인덱스 상태 칩·카테고리 카운트용. BE DocSummaryResponse는
+  // 이미 status를 내려주지만(story #2672 이래 draft 기본값 보장) 이 FE Doc 타입엔 없었다
+  // (fetchTree가 런타임엔 그대로 들고 있었으나 접근할 타입 선언이 없었을 뿐).
+  status?: string;
   // story #2167: 트리 정렬 토글("수정일순")용 — BE DocSummaryResponse는 이미 내려주지만
   // 이 FE Doc 타입엔 없었다.
   updated_at?: string;

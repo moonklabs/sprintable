@@ -101,6 +101,81 @@ describe('useSseMultiplexer — story #2078', () => {
     expect(instances).toHaveLength(0);
   });
 
+  describe('org 전환(memberId 변경) 재연결 — story #2940(실사고 재현)', () => {
+    it('memberId가 바뀌면 옛 커넥션을 닫고 새 member_id로 재연결한다', async () => {
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      expect(instances).toHaveLength(1);
+      expect(instances[0]!.url).toContain('member_id=member-org-a');
+      expect(instances[0]!.closed).toBe(false);
+
+      // org 전환 흉내 — 부모가 새 memberId로 리렌더.
+      await act(async () => {
+        root.render(<Harness memberId="member-org-b" enabled />);
+      });
+
+      expect(instances[0]!.closed).toBe(true); // 옛 커넥션은 닫힘.
+      expect(instances).toHaveLength(2); // 새 커넥션이 열림.
+      expect(instances[1]!.url).toContain('member_id=member-org-b');
+      expect(instances[1]!.closed).toBe(false);
+    });
+
+    it('재연결 후에도 전환 前 구독이 그대로 살아 새 커넥션의 이벤트를 받는다(구독 복원)', async () => {
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      const handler = vi.fn();
+      await act(async () => { handle!.subscribe('notification', handler); });
+      act(() => { dispatchNamed(instances[0]!, 'notification', { from: 'org-a' }); });
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        root.render(<Harness memberId="member-org-b" enabled />);
+      });
+
+      // ⭐핵심 — 재연결 前에 구독한 handler가, 재연결로 새로 열린 커넥션의 이벤트도 받아야 한다
+      // (subscribe를 다시 호출할 필요 없이 namedSubscribersRef가 재연결을 관통해 유지됨).
+      act(() => { dispatchNamed(instances[1]!, 'notification', { from: 'org-b' }); });
+      expect(handler).toHaveBeenCalledTimes(2);
+    });
+
+    it('memberId 전환 시 옛 org의 last_event_id를 새 커넥션 URL에 안 싣는다 — 카디르 QA(PR#3388) HIGH', async () => {
+      // codex+카디르 발견: 재연결 자체는 되지만 lastEventIdRef가 org 전환에도 안 지워지면
+      // 새 org 커넥션이 옛 org의 last_event_id를 그대로 보낸다 — BE가 org 스코프 없이 그
+      // id의 생성시각만으로 백필기준을 잡아, 새 org의 더 이른 이벤트가 조용히 누락된다.
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      await act(async () => { handle!.subscribe('story.status_changed', vi.fn()); });
+      act(() => { dispatchNamed(instances[0]!, 'story.status_changed', {}, 'org-a-last-event-id'); });
+
+      await act(async () => {
+        root.render(<Harness memberId="member-org-b" enabled />);
+      });
+
+      const reconnectUrl = new URL(instances[instances.length - 1]!.url, 'http://localhost');
+      expect(reconnectUrl.searchParams.get('member_id')).toBe('member-org-b');
+      // ⭐핵심 — 옛 org(org-a)의 last_event_id가 새 org 커넥션에 새면 안 된다.
+      expect(reconnectUrl.searchParams.get('last_event_id')).toBeNull();
+    });
+
+    it('memberId가 안 바뀌면(무관한 리렌더) 재연결하지 않는다 — 과잉 재연결 금지', async () => {
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      expect(instances).toHaveLength(1);
+
+      // 같은 memberId로 리렌더(예: 부모가 다른 이유로 리렌더된 경우).
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+
+      expect(instances).toHaveLength(1); // 새 커넥션 없음.
+      expect(instances[0]!.closed).toBe(false);
+    });
+  });
+
   it('같은 이벤트명에 구독자 여러 개(다른 훅 흉내)가 전부 이벤트를 받는다 — 멀티플렉싱 핵심', async () => {
     await act(async () => {
       root.render(<Harness memberId="me-1" enabled />);
@@ -317,6 +392,110 @@ describe('useSseMultiplexer — story #2078', () => {
       const reconnectUrl = new URL(instances[instances.length - 1]!.url, 'http://localhost');
       expect(reconnectUrl.searchParams.get('last_event_id')).toBe('a-series-id'); // B계열에 안 덮임
       vi.useRealTimers();
+    });
+  });
+
+  // story #2987(선생님 실사용 지적) — "앱을 나갔다 들어와야 채팅이 갱신된다"의 근본원인
+  // 회귀가드. readyState는 좀비 커넥션(브라우저가 아직 못 알아챈 죽은 소켓)을 못 잡으므로,
+  // 가시성 복귀 시 그걸 안 보고 무조건 강제 재연결해야 한다.
+  describe('가시성 복귀 강제 재연결(#2987)', () => {
+    function setVisibility(state: DocumentVisibilityState) {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    afterEach(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    });
+
+    it('임계값(3s) 이상 숨겨졌다 돌아오면 기존 커넥션을 닫고 새로 연다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+      expect(instances).toHaveLength(1);
+
+      act(() => { setVisibility('hidden'); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      act(() => { setVisibility('visible'); });
+
+      expect(instances).toHaveLength(2);
+      expect(instances[0]!.closed).toBe(true);
+      vi.useRealTimers();
+    });
+
+    it('임계값(3s) 미만의 짧은 전환은 재연결하지 않는다 — 처칭 방지', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+
+      act(() => { setVisibility('hidden'); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      act(() => { setVisibility('visible'); });
+
+      expect(instances).toHaveLength(1);
+      vi.useRealTimers();
+    });
+
+    it('강제 재연결이 열리면 backoff 이력과 무관하게 subscribeReconnect 핸들러가 불린다(backfill 트리거)', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      const onReconnect = vi.fn();
+      await act(async () => { handle!.subscribeReconnect(onReconnect); });
+      act(() => { instances[0]!.onopen?.(); }); // 최초 open(onError 이력 없음)
+      expect(onReconnect).not.toHaveBeenCalled();
+
+      act(() => { setVisibility('hidden'); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      act(() => { setVisibility('visible'); });
+      act(() => { instances[1]!.onopen?.(); }); // 강제 재연결의 새 커넥션이 open
+
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+    });
+  });
+
+  // story #3081(선생님 P0 지시) — visibilitychange만으론 "창은 계속 visible인 채 OS 포커스만
+  // 오간" 복귀를 못 잡는다(document.visibilityState가 한 번도 'hidden'이 안 되므로 위 #2987
+  // 로직 자체가 안 걸림). window.focus를 hidden 이력과 무관한 독립 신호로 추가.
+  describe('window.focus 강제 재연결(#3081, 가시성 축과 독립)', () => {
+    it('document.visibilityState가 계속 visible이었어도(hidden 이력 0) window.focus만으로 강제 재연결한다', async () => {
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+      expect(instances).toHaveLength(1);
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+
+      expect(instances).toHaveLength(2);
+      expect(instances[0]!.closed).toBe(true);
+    });
+
+    it('짧은 시간 내 중복 focus는 throttle되어 추가 재연결을 안 만든다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(instances).toHaveLength(2);
+
+      act(() => { instances[1]!.onopen?.(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      act(() => { window.dispatchEvent(new Event('focus')); });
+
+      expect(instances).toHaveLength(2); // throttle 창(3s) 안 — 추가 재연결 없음
+      vi.useRealTimers();
+    });
+
+    it('focus 강제 재연결도 subscribeReconnect 핸들러를 불러 backfill을 트리거한다', async () => {
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      const onReconnect = vi.fn();
+      await act(async () => { handle!.subscribeReconnect(onReconnect); });
+      act(() => { instances[0]!.onopen?.(); });
+      expect(onReconnect).not.toHaveBeenCalled();
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      act(() => { instances[1]!.onopen?.(); });
+
+      expect(onReconnect).toHaveBeenCalledTimes(1);
     });
   });
 });

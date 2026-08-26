@@ -188,7 +188,12 @@ async def test_silence_no_declaration_skips_fetch_entirely():
 
         async with Session() as s:
             link = await _link_evidence(s, seeded["org_id"], seeded["story_id"])
-            assert link is None  # 행 자체가 생성 안 됨.
+            # story #3039 — SID로 해소된 PR은 이제 그 사실 자체가 링크 행으로 캐싱된다(스코프
+            # 체크와 무관한 별개 목적 — check_suite류 텍스트-없는 후속 웹훅이 재해소할 수 있게).
+            # 이 테스트의 진짜 불변식은 "scope_check 증거를 지어내지 않는다"이지 "행 자체가
+            # 안 생긴다"가 아니다 — evidence에 그 키가 없는지로 좁혀 확인한다.
+            assert link is not None
+            assert "scope_check" not in (link.evidence or {})
     finally:
         await engine.dispose()
 
@@ -204,7 +209,10 @@ async def test_silence_fetch_failure_writes_nothing():
         assert "scope_check" not in result
         async with Session() as s:
             link = await _link_evidence(s, seeded["org_id"], seeded["story_id"])
-            assert link is None  # 판정불가는 추측 금지 — 행도 안 남김.
+            # story #3039 — 위와 동형: SID 해소 캐싱 행은 생기되(별개 목적), scope_check 증거는
+            # 판정불가라 여전히 지어내지 않는다(진짜 불변식).
+            assert link is not None
+            assert "scope_check" not in (link.evidence or {})
     finally:
         await engine.dispose()
 

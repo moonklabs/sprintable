@@ -21,7 +21,6 @@ from app.models.agent_session import AgentSession
 from app.models.asset import Asset
 from app.models.hitl import HitlRequest
 from app.models.org_subscription import OrgSubscription
-from app.models.plan_tier_limit import PlanTierLimit
 from app.models.project import OrgMember
 from app.models.user import User
 from app.services.email import send_email
@@ -821,9 +820,16 @@ async def storage_usage_warn(
         subs = list((await session.execute(
             select(OrgSubscription).where(OrgSubscription.status == "active")
         )).scalars().all())
+        # story #2906(선생님 확定 2026-08-21) — SSOT를 offering_versions로 이관(check_storage_capacity와
+        # 동일 소스, 구 twin(plan_tier_limits) 결별). 이관 전엔 「경고 임계(이 cron)≠거부 임계(#2906
+        # 이전 check_storage_capacity)」split-brain 위험이 실재했다 — DISTINCT ON으로 tier당 대표 1행
+        # (currency 무관·ASC 결정적 — `_get_org_storage_limits`와 동일 규율).
         caps = {
             t: mb for t, mb in (await session.execute(
-                select(PlanTierLimit.tier, PlanTierLimit.max_storage_mb)
+                text(
+                    "SELECT DISTINCT ON (tier) tier, storage_mb_limit FROM offering_versions "
+                    "WHERE effective_to IS NULL ORDER BY tier, currency ASC"
+                )
             )).all()
         }
         notified = 0
@@ -955,9 +961,10 @@ async def db_connection_stats(
 
 
 # ─── GET /api/v2/internal/cron/toss-billing-maintenance ───────────────────────
-# 결제②-C3(story #2494): dunning 재시도(pricing-policy-proposal-v1 §12.1) + pending
-# 대사(reconciliation). "신규 결제 주기 도래" 트리거는 스코프 밖(story #2502 대기) —
-# billing_scheduler.trigger_due_charges()가 그 자리를 NotImplementedError로 명시해둔다.
+# 결제②-C3(story #2494): dunning 재시도(story #2907 daily cadence) + pending 대사
+# (reconciliation). "신규 결제 주기 도래" 트리거(trigger_due_charges)는 story #2502
+# (완료, 2026-08-21 이전)가 전제를 채운 뒤 #2907이 실제로 채웠다 — dunning의 진입점
+# (여기서 실패해야 sweep_dunning_retries가 이어받는다)이라 dunning보다 먼저 돈다.
 @router.get("/toss-billing-maintenance")
 async def toss_billing_maintenance(
     request: Request,
@@ -965,11 +972,29 @@ async def toss_billing_maintenance(
 ) -> JSONResponse:
     verify_cron(request)
     try:
-        from app.services.billing_scheduler import sweep_dunning_retries, sweep_stale_pending_orders
+        from app.services.billing_scheduler import (
+            sweep_dunning_retries,
+            sweep_expired_grants,
+            sweep_stale_pending_orders,
+            trigger_due_charges,
+        )
+        from app.services.org_subscription_downgrade import sweep_pending_tier_downgrades
 
+        renewal_result = await trigger_due_charges(session)
         dunning_result = await sweep_dunning_retries(session)
         reconciliation_result = await sweep_stale_pending_orders(session)
-        return _ok({"dunning": dunning_result, "reconciliation": reconciliation_result})
+        # story #2777 PR2 — 어드민 credit_grant의 자가회수. 신규 cron 잡 발명 대신 이
+        # 기존 billing-maintenance 표면에 동거(PO 지시 2026-08-18).
+        grant_sweep_result = await sweep_expired_grants(session)
+        # story #2881 — 하향 예약 갱신일 적용도 동일 원칙(신규 cron 잡 발명 대신 동거).
+        # ⛔이 엔드포인트 자체를 부르는 Cloud Scheduler 잡이 아직 전 리전 0건(story #2896
+        # 대기) — 코드는 완결이지만 라이브 집행은 그 잡 착지 後(PR 본문 참고).
+        downgrade_sweep_result = await sweep_pending_tier_downgrades(session)
+        return _ok({
+            "renewal": renewal_result, "dunning": dunning_result,
+            "reconciliation": reconciliation_result, "grant_sweep": grant_sweep_result,
+            "downgrade_sweep": downgrade_sweep_result,
+        })
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

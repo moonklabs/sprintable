@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from jose import jwt
 from pydantic import BaseModel
@@ -314,3 +314,44 @@ async def delete_link(
     link.deleted_at = datetime.now(timezone.utc)
     await session.commit()
     return JSONResponse(content={"deleted": True, "id": str(link_id)})
+
+
+@router.get("/links/{link_id}/backlinks")
+async def get_pr_link_backlinks(
+    link_id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """GET /api/v2/integrations/github/links/{link_id}/backlinks — story #2889(S2h①) — 이
+    PR을 언급한 chat_message 목록(stories.py::get_story_backlinks와 동일 convention). TARGET
+    게이트는 delete_link와 동일(link.id+org_id+미삭제 선조회 → story_id 경유 project 접근권
+    — SEC-S8 Z와 동형 패턴, 새 게이트 미발명). 무권한/미존재는 generic 404(존재 비노출)."""
+    from app.services.backlinks import list_entity_backlinks
+    from app.services.project_auth import has_project_access
+
+    link = (
+        await session.execute(
+            select(PullRequestStoryLink).where(
+                PullRequestStoryLink.id == link_id,
+                PullRequestStoryLink.org_id == org_id,
+                PullRequestStoryLink.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if link is None:
+        raise HTTPException(status_code=404, detail="PR link not found")
+    story_project_id = (
+        await session.execute(select(Story.project_id).where(Story.id == link.story_id))
+    ).scalar_one_or_none()
+    if story_project_id is None or not await has_project_access(
+        session, uuid.UUID(auth.user_id), story_project_id, org_id
+    ):
+        raise HTTPException(status_code=404, detail="PR link not found")
+
+    return await list_entity_backlinks(
+        session, org_id=org_id, target_type="pull_request", target_id=link_id,
+        auth=auth, limit=limit, cursor=before,
+    )

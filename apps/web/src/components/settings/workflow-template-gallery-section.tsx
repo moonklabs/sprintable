@@ -189,7 +189,8 @@ export function WorkflowTemplateGallerySection({
               key={tmpl.slug}
               onClick={() => void handleSelectTemplate(tmpl)}
               disabled={loadingDetail}
-              className={`rounded-lg border p-4 text-left transition hover:border-primary/60 hover:shadow-sm disabled:opacity-60 ${
+              // story #3010(로드맵 P3, L1) — 선택 가능한 인라인 카드는 --elev-card.
+              className={`rounded-lg border p-4 text-left transition hover:border-primary/60 hover:shadow-[var(--elev-card)] disabled:opacity-60 ${
                 selected?.slug === tmpl.slug ? 'border-primary bg-primary/5' : 'border-border bg-background'
               }`}
             >

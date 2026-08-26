@@ -16,6 +16,7 @@ import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
 import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
 import { ScaleLadder } from '@/components/flow/scale-ladder';
+import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -43,12 +44,13 @@ type FlowView = 'hypothesis' | 'flow' | 'list';
 // NextMakerScreen)에서 'hypothesis'로 이동한다. 갈래·목록은 폐기 아님 — 나란한 탭으로
 // 남아 v3.4 계승(§6)을 만족한다. 가설→갈래 드릴다운은 S5(축척 전환) 몫이라 이번엔 병렬.
 //
-// ⛔카디르 라이브 QA(2026-08-09, ①HIGH) — 모바일(390px)은 세그 자체를 안 그리므로(#2225
-// 탭이 대신함), 기본값을 데스크톱과 똑같이 가설로 바꾸면 모바일에서 갈래(NextMakerScreen
-// 상호작용 보드)·목록(칸반)으로 갈 UI 경로가 0이 되는 dead-end였다. 모바일 가설 축척은
-// #2225(모바일 3화면)/S5 몫이라 — 데스크톱만 가설 기본, 모바일은 기존(flow=NextMakerScreen)
-// 유지한다. `?view=`가 URL에 명시돼 있으면(모바일도 주소로는 들어올 수 있으므로) 그 값을
-// 그대로 존중 — 이 폴백은 «파라미터가 아예 없을 때»만 개입한다.
+// story #3043(선생님 실사고·민 실측 2026-08-25, PO+유나 IA 확定 ⓑ) — #2225(모바일 3화면
+// 대체 세그)는 실제론 status=backlog·한 줄도 안 짜여 있었다(그라운딩으로 기각) — 그런데도
+// 아래 세그를 `isMobile ? null : ...`로 숨겨온 탓에 모바일에서 갈래·목록(칸반) 둘 다 도달
+// UI 경로가 0이었다(PO가 "모바일에 보드 없다"고 오답할 정도). 세그를 모바일에서도 그리고
+// (아래), 파라미터 없을 때의 모바일 기본값도 flow(갈래 캔버스)에서 list(칸반)로 바꾼다 —
+// 「보드가 안 보인다」는 원 신고에 가장 가까운 화면을 첫 진입 기본값으로 세운다. `?view=`가
+// URL에 명시돼 있으면 그대로 존중(이 폴백은 파라미터가 아예 없을 때만 개입) — 회귀 없음.
 // ⛔카디르 재QA 비차단②(2026-08-09, S3) — 모바일에서 `?hypothesis=<id>`만 있고 `?view=`가
 // 없으면(공유 링크·새로고침의 흔한 형태) 위 모바일 기본값(flow)이 이겨 서사 패널이
 // 렌더되지 않았다(패널은 view==='hypothesis'에서만 뜬다). hypothesis 파라미터가 있으면
@@ -58,7 +60,7 @@ function parseView(raw: string | null, isMobile: boolean, hasHypothesisParam: bo
   if (raw === 'flow') return 'flow';
   if (raw === 'hypothesis') return 'hypothesis';
   if (hasHypothesisParam) return 'hypothesis';
-  return isMobile ? 'flow' : 'hypothesis';
+  return isMobile ? 'list' : 'hypothesis';
 }
 
 /**
@@ -209,46 +211,59 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 재분류(구조·크기 불변):
+          TopBar 타이틀=Heading(무게↑만·크기는 TopBar 유지).
+          story #2974 §3(PR-D0) — doc이 명시한 소비처: 무게(font-extrabold)는 이미 Heading
+          그대로 두고, 페이스(family)만 별도 축으로 font-display 토큰 경유 추가(D0 값=
+          var(--font-sans)라 시각 변화 0 — 세리프 켜지면 board TopBar 타이틀도 함께 전환). */}
+      <TopBarSlot title={<h1 className="text-sm font-display font-extrabold">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
+        {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
+            sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 3탭(가설|갈래|칸반)과
+            다른 층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
+        <WorkspaceFrameTabs active="board" />
+
         {/* ② 세 칸 세그(가설|갈래|칸반) — story #2531(E-FLOW-V4 S1)에서 「가설」 칸을
             맨 앞에 신설(v4 조직원리 §2, 축척 최상위=가설). 갈래·칸반 두 칸은 07-23
             시안(`e15905e8`)에서 되찾은 것(IA 개정 때 조용히 지워졌던 것, 유나 지적
             2026-07-30) 그대로 — 폐기 아니라 나란한 탭으로 유지(v3.4 계승). ⛔"현황판" 세
             번째 칸은 선생님 재정정으로 지웠었다(그 자리에 이제 "가설"이 대신 선다 — 다른
-            이유·다른 칸). 모바일은 #2225의 갈래·막힘·멈춤 탭이 이 자리를 대신하므로 세그를
-            그리지 않는다(isMobile===undefined인 최초 렌더에서도 안전하게 숨김). */}
-        {isMobile ? null : (
-          <div className="flex items-center gap-1 border-b border-border pb-2">
-            <button
-              type="button"
-              onClick={() => setView('hypothesis')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'hypothesis' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {t('viewHypothesis')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('flow')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'flow' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {t('viewFlow')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('list')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {t('viewList')}
-            </button>
-          </div>
-        )}
+            이유·다른 칸). story #3043(PO+유나 IA 확定 ⓑ) — 예전엔 모바일에서 이 세그를
+            숨기고 #2225(미구현으로 그라운딩 확認) 대체 탭이 그 자리를 대신한다고 가정했으나,
+            그 대체물이 실재하지 않아 모바일에 세그도 대체도 둘 다 없는 dead-end였다. 이제
+            모바일에서도 그대로 그린다 — 새 모바일 전용 UI를 만들지 않고 데스크톱과 동일
+            컴포넌트를 재사용(회귀 위험 최소·유지보수 표면 1개). */}
+        <div className="flex items-center gap-1 border-b border-border pb-2">
+          <button
+            type="button"
+            onClick={() => setView('hypothesis')}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'hypothesis' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            {t('viewHypothesis')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('flow')}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'flow' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            {t('viewFlow')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('list')}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            {t('viewList')}
+          </button>
+        </div>
 
         {/* story #2535(E-FLOW-V4 S5) — 축척 브레드크럼. 가설 뷰는 HypothesisEarthLayer가
             자기 안에서 이미 사다리를 그리므로(지구=활성) 여기서 중복 안 그린다. 갈래=도시·
             목록=건물 — 「지금 보는 층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. */}
-        {view !== 'hypothesis' ? <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'building'} /> : null}
+        {view !== 'hypothesis' ? (
+          <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'building'} compact={isMobile} />
+        ) : null}
 
         {view === 'hypothesis' ? (
           // story #2531(E-FLOW-V4 S1) — 새 기본 랜딩. 가설(질문)을 최상위 조직 단위로 삼는

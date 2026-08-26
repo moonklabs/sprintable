@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 // story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface DocContentRendererProps {
@@ -35,6 +36,43 @@ interface DocContentRendererProps {
   publicImageLabel?: string;
   /** authed-mode label shown when an asset-ref image fails to resolve via the signed route. */
   assetImageErrorLabel?: string;
+  /** story #2967(선생님 실사용 판정) — 리더가 마스트헤드 H1(doc.title)을 그리는데 본문 첫
+   * 줄이 같은 제목을 `#`로 다시 쓴 문서가 대부분이라 2중 렌더로 보였다. 이 값(=doc.title)이
+   * 본문 첫 heading과 정규화 비교(대소문자·공백·선행 # 무시) 동일하면 그 heading만 생략한다
+   * — 리더 전용 opt-in(prop 생략 시 기존 동작 100% 유지, 에디터 프리뷰 등 다른 소비처 무접촉). */
+  suppressLeadingTitle?: string;
+  /** story #2967 — 다크에서 본문 문단이 text-foreground/92라 WCAG는 통과(14.88)하지만 체감
+   * 눌림(full=17.66과 대비). 리더만 'full'로 옵트인 — 기본(미지정)은 기존 /92 그대로라
+   * 공유 렌더러의 다른 소비처(에디터 프리뷰 등) 무접촉. */
+  bodyEmphasis?: 'default' | 'full';
+}
+
+function normalizeHeadingForTitleCompare(s: string): string {
+  return s.trim().replace(/^#+\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+}
+
+// story #2967 후속(PO 배포후 실픽셀 재검, 2026-08-23) — 제목 2중이 일부 문서에 잔존했다.
+// 원인: 우리 doc 제목 관례가 "…설계안(story #1234)" 처럼 괄호 스토리 접미를 붙이는데
+// 본문 첫 heading은 그 접미 없이 순수 제목만 쓴다 — 정규화해도 완전 일치가 안 났다.
+// 처방: 양쪽 다 "말미 괄호(...)" 를 벗겨(반복 적용 — 접미가 여러 겹이어도) 한 번 더
+// 비교한다. 완전 다른 제목은 벗겨도 여전히 다르므로 음성대조 유지(허구 생략 없음).
+function stripTrailingParenthetical(s: string): string {
+  let prev: string;
+  let next = s;
+  do {
+    prev = next;
+    next = prev.replace(/\s*[([][^()[\]]*[)\]]\s*$/, '');
+  } while (next !== prev);
+  return next;
+}
+
+function isLikelyDuplicateTitle(headingText: string, docTitle: string): boolean {
+  const a = normalizeHeadingForTitleCompare(headingText);
+  const b = normalizeHeadingForTitleCompare(docTitle);
+  if (a === b) return true;
+  const aStripped = stripTrailingParenthetical(a).trim();
+  const bStripped = stripTrailingParenthetical(b).trim();
+  return aStripped.length > 0 && aStripped === bStripped;
 }
 
 // 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img/div 의 data-* 를 제거하므로
@@ -80,11 +118,6 @@ const docMarkdownSanitizeSchema = {
     href: [...(defaultSchema.protocols?.href ?? []), 'entity'],
   },
 };
-
-// story #2639 — 본문 엔티티 참조 토큰 `[제목](entity:타입:id)`의 href 매칭(id는 UUID만 —
-// 비-UUID는 매칭 실패→평문 링크 폴백). chat-bubble.tsx·story-detail-panel.tsx의 파싱 규칙과
-// 문자 그대로 동일하게 둔다(정의가 세 곳에 흩어지면 그 자체가 드리프트 위험).
-const ENTITY_REF_RE = /^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 // asset-ref 식별 — react-markdown 은 hast node(properties.dataAssetId) + data-* prop 양쪽을 줄 수 있어
 // 둘 다 확인한다(스키마 통과분만 도달).
@@ -180,6 +213,8 @@ export function DocContentRenderer({
   publicAttachmentLabel = 'Attachment unavailable in public view',
   publicImageLabel = 'Image unavailable in public view',
   assetImageErrorLabel = 'This image could not be loaded',
+  suppressLeadingTitle,
+  bodyEmphasis = 'default',
 }: DocContentRendererProps) {
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
@@ -540,17 +575,18 @@ export function DocContentRenderer({
     // epic→/goals/·doc→/docs?id= 동일오리진 라우트를 준다(웹뷰서 SPA 착지·셸 무변경).
     // 매핑 없는 타입은 getEntityHref=null→모달만 뜨고(무동작 0), 비-UUID/asset은 평문 링크 폴백.
     a: ({ href, children }: { href?: string; children?: ReactNode }) => {
-      const m = href?.match(ENTITY_REF_RE);
+      // story #2888(S2a) — 파싱은 parseEntityRef SSOT(chat-bubble.tsx·embed-card.tsx와 공유).
+      const ref = parseEntityRef(href);
       // asset은 story-detail-panel과 동일하게 칩 경로에서 제외한다(자산 임베드는 별 경로).
-      if (m && m[1]!.toLowerCase() !== 'asset') {
+      if (ref && ref.entityType.toLowerCase() !== 'asset') {
         // public share 뷰어: 내부 참조는 비활성 평문(메타 유출 경계 — wikiLink publicMode와 동일).
         if (publicMode) return <span className="text-sm text-muted-foreground">{children}</span>;
         return (
           <EntityChip
-            entityType={m[1]!}
-            entityId={m[2]!}
+            entityType={ref.entityType}
+            entityId={ref.entityId}
             label={String(children)}
-            href={getEntityHref(m[1]!, m[2]!)}
+            href={getEntityHref(ref.entityType, ref.entityId)}
           />
         );
       }
@@ -603,7 +639,9 @@ export function DocContentRenderer({
     '[&_h1]:scroll-mt-24 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight',
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
-    '[&_p]:leading-7 [&_p]:text-foreground/92',
+    // story #2967 — 다크 체감 눌림(/92=14.88 vs full=17.66, 둘 다 WCAG 통과지만 체감 차).
+    // 리더만 bodyEmphasis='full' 옵트인 — 기본은 기존 /92 그대로(다른 소비처 무접촉).
+    bodyEmphasis === 'full' ? '[&_p]:leading-7 [&_p]:text-foreground' : '[&_p]:leading-7 [&_p]:text-foreground/92',
     // story #2023 ⓒ(§5-2): 유틸 부재로 인한 var() 우회 참조를 정식 토큰으로 되돌림 — 문서 본문
     // 링크색, L1~L5 재분류 아님(콘텐츠 하이퍼링크는 서명·시스템상태 어느 축도 아님).
     '[&_a]:text-brand-soft [&_a]:underline [&_a]:underline-offset-4',
@@ -647,7 +685,12 @@ export function DocContentRenderer({
         urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
         components={{
           h1: ({ children }) => {
-            const heading = headings[headingIndex++];
+            const idx = headingIndex++;
+            const heading = headings[idx];
+            // story #2967 — 첫 heading(idx===0)이 doc.title과 정규화 동일하면 생략(2중 렌더 제거).
+            if (idx === 0 && suppressLeadingTitle && heading && isLikelyDuplicateTitle(heading.text, suppressLeadingTitle)) {
+              return null;
+            }
             return <h1 id={heading?.id}>{children}</h1>;
           },
           h2: ({ children }) => {
@@ -757,7 +800,11 @@ function ShikiCodeBlock({
   );
 }
 
-function sanitizeDocHtml(content: string): string {
+// story #3776ccfe(FE·결재 카드) — embed-card.tsx의 doc 미리보기(renderEntityDetail)가
+// content_format='html' doc을 마크다운 전용 렌더러(MdBody)에 먹여 태그가 텍스트로 그대로
+// 찍히던 결함을 고치며 이 sanitize 정본을 재사용한다(사본 분화 금지 — decorateHtmlContent의
+// TOC/코드카피 장식은 그 소비처 전용이라 안 가져감, 순수 sanitize만).
+export function sanitizeDocHtml(content: string): string {
   const maybePurifier = DOMPurify as unknown as {
     sanitize?: (value: string) => string;
     default?: { sanitize?: (value: string) => string };

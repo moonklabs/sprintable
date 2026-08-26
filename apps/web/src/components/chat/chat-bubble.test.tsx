@@ -64,6 +64,7 @@ const baseMessage: ChatMessage = {
   created_by: 'agent-1',
   sender_name: '오르테가',
   sender_type: 'agent',
+  sender_avatar_url: null,
   // story #2671 — 링크 하나뿐인 문단은 이제 EmbedCard(카드)로 렌더된다(신규 기능, 아래
   // 전용 describe에서 검증). 이 파일의 나머지 스위트는 전부 EntityChip 특화 동작(사실성
   // 표기·상태 배지·결재 CTA·모달 재렌더 생존 등)을 재는 게 목적이라 앞에 문맥어를 붙여
@@ -149,9 +150,14 @@ describe('ChatBubble — story #2262 AC1(사실성·표면·지점 표기, doc f
         />,
       ));
     });
-    expect(container.textContent).toContain('관찰됨');
-    expect(container.textContent).toContain('멘션');
-    expect(container.textContent).toContain('7/26');
+    // story #2886(S2b) — 격납 메타는 hover/focus tooltip으로 이동(더는 항상 인라인 표기 안 함).
+    // 트리거에 포커스를 줘 tooltip을 열고, base-ui Portal이 document.body에 그리는 내용을 본다.
+    await act(async () => { container.querySelector('button')!.focus(); });
+    // story #2886(S2b) — 유나군 하이파이 목업 대조: 툴팁은 라벨:값 행 구조(상태·참조 형태·관찰).
+    expect(document.body.textContent).toContain('참조 형태');
+    expect(document.body.textContent).toContain('멘션');
+    expect(document.body.textContent).toContain('관찰');
+    expect(document.body.textContent).toContain('7/26');
   });
 
   it('매칭되는 stored 참조가 있어도 form·referenced_at이 없으면(구서버 폴백) 표기를 지어내지 않는다', async () => {
@@ -179,8 +185,10 @@ describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카�
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, references: undefined }} isMine={false} />));
     });
-    expect(container.textContent).toContain('아직 모름');
-    expect(container.textContent).not.toContain('상태 없음');
+    // story #2886(S2b) — 상태 라벨은 격납(hover/focus tooltip)으로 이동. 포커스로 열고 확認.
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('아직 모름');
+    expect(document.body.textContent).not.toContain('상태 없음');
   });
 
   it('no-status-concept 타입(hypothesis) 칩은 "상태 없음"을 보인다(로딩이 아니라 구조적 부재)', async () => {
@@ -193,8 +201,9 @@ describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카�
         />,
       ));
     });
-    expect(container.textContent).toContain('상태 없음');
-    expect(container.textContent).not.toContain('아직 모름');
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('상태 없음');
+    expect(document.body.textContent).not.toContain('아직 모름');
   });
 
   it('유령 칩에는 상태 라벨을 안 보인다(대상 자체가 없는데 상태를 말할 수 없다)', async () => {
@@ -217,8 +226,10 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
         />,
       ));
     });
-    expect(container.textContent).toContain('확定');
-    expect(container.textContent).not.toContain('아직 모름');
+    // story #2886(S2b) — 상태 라벨은 격납(hover/focus tooltip)으로 이동. 포커스로 열고 확認.
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('확定');
+    expect(document.body.textContent).not.toContain('아직 모름');
   });
 
   it('entityId가 대문자 UUID 토큰이어도 소문자로 정규화해 캐시 키와 매칭한다', async () => {
@@ -244,7 +255,8 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
         />,
       ));
     });
-    expect(container.textContent).toContain('아직 모름');
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('아직 모름');
   });
 
   it('배치조회가 error로 끝나면 loading과 같은 급인 "아직 모름"을 보인다(가짜 "확認 중" 아님)', async () => {
@@ -257,7 +269,8 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
         />,
       ));
     });
-    expect(container.textContent).toContain('아직 모름');
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('아직 모름');
   });
 });
 
@@ -690,7 +703,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    expect(container.textContent).toContain('결재 요청');
+    // story #2926(P0-F F1) — 「결재 요청」 정적 라벨 행은 ProofCapsule 셸로 전환되며
+    // 빠졌다(카드 정체성은 이제 컷코너+레일 모양이 진다). 대신 stateLabel(pending=
+    // 「결재 대기」)이 그 자리를 잇는다 — 텍스트 내용은 더 구체적으로 유지.
+    expect(container.textContent).toContain('결재 대기');
     expect(container.textContent).toContain('제안서.md');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);
@@ -710,7 +726,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
     expect(transitionCall).toBeDefined();
-    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: null, evidence_viewed: false });
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: null, evidence_viewed: false, reviewed_head_sha: null });
     expect(container.textContent).toContain('처리됨');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
   });
@@ -763,7 +779,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
-    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: '근거 확인함, 승인', evidence_viewed: true });
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: '근거 확인함, 승인', evidence_viewed: true, reviewed_head_sha: null });
   });
 
   it('이미 처리된 게이트(status=approved)는 버튼 없이 처리됨 상태만 보인다', async () => {
@@ -946,7 +962,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       await act(async () => {
         root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
       });
-      expect(container.textContent).toContain('결재 요청'); // Q3 — 카드 라벨은 그대로.
+      // story #2926(P0-F F1) — Q3(카드 라벨은 그대로)의 실현 방식이 바뀌었다: 정적 「결재
+      // 요청」 텍스트 행 대신 ProofCapsule stateLabel(resolved="승인됨", 아래서 검증)이
+      // 카드 정체성을 잇는다 — 카드 자체가 사라지거나 라벨 없이 뜨는 게 아니라는 Q3 취지는
+      // 유지, 표현 수단만 shape+stateLabel로 옮겨갔다.
       expect(container.textContent).not.toContain('게이트 판정'); // header는 부분소비 제외.
       expect(container.textContent).not.toContain(DOC_ID); // Q2 — UUID 노출 금지.
       expect(container.textContent).toContain('doc_approval');
@@ -1244,13 +1263,12 @@ describe('ChatBubble — story #2037 이미지 라이트박스 진입점', () =>
 describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
   const DOC_STATUS_KEY = `doc:${DOC_ID.toLowerCase()}`;
 
-  it('draft + project 멤버 — "결재로 올리기" 버튼이 뜨고 클릭하면 transition POST 후 pending으로 즉시 반영된다', async () => {
+  it('story #3004(선생님 정책 확定) — draft + project 멤버는 "결재자 지정하고 올리기" 링크가 뜨고 문서 페이지로 딥링크한다(직접 제출 없음)', async () => {
     mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
       calls.push({ url, method: init?.method, body: init?.body });
       if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
-      if (url === `/api/docs/${DOC_ID}/transition` && init?.method === 'POST') return { ok: true, json: async () => ({ data: {} }) };
       return { ok: false, json: async () => ({}) };
     }));
     await act(async () => {
@@ -1264,23 +1282,17 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
 
-    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '결재로 올리기');
-    expect(submitBtn).toBeDefined();
-    await act(async () => {
-      submitBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    });
-
-    const transitionCall = calls.find((c) => c.url === `/api/docs/${DOC_ID}/transition`);
-    expect(transitionCall?.method).toBe('POST');
-    expect(JSON.parse(transitionCall!.body!)).toEqual({ status: 'pending' });
-    // 재조회 없이 로컬 반영 — 배지가 "검토 중"으로, 버튼은 "결재로 올리기"에서 "결재함에서 보기"로.
-    expect(container.textContent).toContain('검토 중');
+    // story #3004 — approver_member_id가 서버 필수가 되며 이 인라인 칩은 더 이상 직접
+    // 제출하지 않는다(픽커를 놓을 공간이 없다 — Pedro 리뷰 PR #3435). 문서 페이지
+    // (doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
+    const goToDocLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '결재자 지정하고 올리기');
+    expect(goToDocLink).toBeDefined();
+    expect(goToDocLink!.getAttribute('href')).toBe(`/docs?id=${DOC_ID}`);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
-    expect(container.textContent).toContain('결재함에서 보기');
+    expect(calls.some((c) => c.url === `/api/docs/${DOC_ID}/transition`)).toBe(false);
   });
 
-  it('draft지만 doc의 project 멤버가 아니면 "결재로 올리기" 버튼이 안 뜬다(fail-closed)', async () => {
+  it('draft지만 doc의 project 멤버가 아니면 "결재자 지정하고 올리기" 링크가 안 뜬다(fail-closed)', async () => {
     mockDashboardContext.projectMemberships = [{ projectId: 'other-proj', projectName: 'Other' }];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
@@ -1296,10 +1308,10 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+    expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재자 지정하고 올리기')).toBe(false);
   });
 
-  it('draft + 권한조회(preview) 실패 — 조용히 무권한 취급(버튼 노출 안 함, 카드 자체는 안 죽음)', async () => {
+  it('draft + 권한조회(preview) 실패 — 조용히 무권한 취급(링크 노출 안 함, 카드 자체는 안 죽음)', async () => {
     mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     await act(async () => {
@@ -1312,7 +1324,7 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+    expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재자 지정하고 올리기')).toBe(false);
     expect(container.textContent).toContain('제안서.md');
   });
 
@@ -1343,7 +1355,9 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).toContain('반려됨');
+    // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동.
+    await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
+    expect(document.body.textContent).toContain('반려됨');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
     expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재함에서 보기')).toBe(false);
   });
@@ -1359,35 +1373,15 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).toContain('확定');
+    // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동.
+    await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
+    expect(document.body.textContent).toContain('확定');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
   });
 
-  it('상신 실패(transition 500) — 재시도 가능한 에러 문구를 보이고 버튼은 draft 그대로 남는다', async () => {
-    mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
-      if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
-      if (url === `/api/docs/${DOC_ID}/transition` && init?.method === 'POST') return { ok: false, json: async () => ({}) };
-      return { ok: false, json: async () => ({}) };
-    }));
-    await act(async () => {
-      root.render(wrap(
-        <ChatBubble
-          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
-          isMine={false}
-          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
-        />,
-      ));
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    });
-    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '결재로 올리기') as HTMLButtonElement;
-    await act(async () => {
-      submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    });
-    expect(container.textContent).toContain('상신 실패');
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(true);
-  });
+  // story #3004 — 이 인라인 칩은 더 이상 직접 transition을 쏘지 않는다(위 route-first 테스트
+  // 참조) — "상신 실패(transition 500)" 시나리오 자체가 이 컴포넌트에서 도달 불가가 됐다.
+  // 실패 처리 책임은 doc-gate-section.tsx(문서 페이지, 실제 제출 지점)로 옮겨갔다.
 });
 
 // story #2671 — EmbedCard(ME-S5 원조 카드, "메모 기능 퇴역" PR#924 이후 실 렌더 경로 0건이던
@@ -1424,6 +1418,71 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     // non-doc 분기엔 미리보기 아이콘이 없다(doc 전용) — 카드 자체를 눌러 모달을 연다.
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
     expect(container.textContent).toContain('스토리 제목');
+  });
+
+  // story #2905(#3322 QA 채무, 카디르 지적 2026-08-21) — 「open-panel 클릭 왕복이 레포 전체에서
+  // 테스트 0건(어댑터를 no-op으로 무력화해도 전부 통과)」의 정확한 처방. sole-link EmbedCard를
+  // 실제로 클릭해 onOpenReadingPanel prop이 올바른 ReadingPanelTarget 값으로 호출되는지 잰다
+  // — 이 테스트가 없던 시절엔 toEmbedCardOpenPanel을 no-op으로 바꿔도 위 두 렌더 테스트는
+  // 여전히 그린이었다(클릭 자체를 아무도 안 눌렀으므로).
+  it('sole-link EmbedCard를 클릭하면 onOpenReadingPanel이 올바른 ReadingPanelTarget으로 호출된다(open-panel 왕복 회귀가드)', async () => {
+    const storyId = '55555555-5555-5555-5555-555555555556';
+    const onOpenReadingPanel = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[스토리 제목](entity:story:${storyId})`, references: [{ target_type: 'story', target_id: storyId }] }}
+          isMine={false}
+          onOpenReadingPanel={onOpenReadingPanel}
+        />,
+      ));
+    });
+    const cardButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 제목'));
+    expect(cardButton).toBeTruthy();
+    await act(async () => { cardButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onOpenReadingPanel).toHaveBeenCalledTimes(1);
+    expect(onOpenReadingPanel).toHaveBeenCalledWith({
+      kind: 'entity',
+      entityType: 'story',
+      entityId: storyId,
+      title: '스토리 제목',
+      status: null,
+      href: '/board?story=' + storyId,
+    });
+  });
+
+  // story #2905(S2c②) — gate 단건 sole-link 참조는 EmbedCard 대신 approval-request-card.tsx가
+  // 그대로 뜬다(§8 "표면은 둘·실체는 하나", 승인 로직 사본 분화 금지 — PO 판정).
+  it('참조 링크 하나뿐인 문단(gate)은 EmbedCard가 아니라 ApprovalRequestCard(결재 요청 카드)로 렌더된다', async () => {
+    const gateId = '44444444-4444-4444-4444-444444444444';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === `/api/gates/${gateId}`) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              id: gateId, status: 'pending', gate_type: 'doc_approval', risk_grade: 'low',
+              work_item_type: 'doc', work_item_id: 'wi-1', can_approve: true,
+              work_item_summary: { title: '기획안 v2', slug: null },
+              resolver_id: null, resolved_at: null, resolution_note: null, neutral_facts: null,
+            },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[결재 요청](entity:gate:${gateId})`, references: [{ target_type: 'gate', target_id: gateId }] }}
+          isMine={false}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // ApprovalRequestCard 전용 마커 — "결재 요청" 라벨은 EmbedCard엔 없다.
+    expect(container.textContent).toContain('기획안 v2');
+    expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull(); // EmbedCard doc 전용 마커 아님
   });
 
   it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩(행동 0)이다', async () => {
@@ -1475,5 +1534,323 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
     expect(container.textContent).toContain('참고:');
     expect(container.textContent).toContain('제안서.md');
+  });
+});
+
+// story #2905(S2c③④ 착수 전 안전망 — 페드루 지시 2026-08-21) — 「연속 sole-link 문단
+// 그룹핑(캐러셀/간결리스트/접힌 헤더)」은 ChatMarkdown 진입점 자체를 바꾸는 축이라(전 메시지
+// 렌더 경로) 회귀 반경이 넓다. 시안(유나양) 착지 전까지 지금 "그룹핑 미착수" 상태의 실제
+// 동작을 characterization test로 고정해 둔다 — ③④ 구현 시 이 스위트가 "의도한 대로 바뀐
+// 지점"과 "실수로 깨진 지점"을 가른다.
+// story #2905 S2c③④(#3310 베이스라인 → 그룹핑 착지 후 rebase, 2026-08-22) — 이 스위트가
+// «오늘은 그룹핑 없음»으로 고정해 둔 4건 중 2건(같은 타입 연속)의 기대값이 실제로 뒤집혔다.
+// 페드루 지시: 그 뒤집힘이 diff에 명시적으로 드러나야 이 그물의 원 설계 취지(#3310의
+// "③④ 구현 시 이 스위트가 의도한 변경과 실수를 가른다")가 선다 — .rounded-md 카운트만
+// 보는 낡은 단언은 EmbedGroup(ConciseList/ArtifactCarousel)이 내부적으로도 EmbedCard를
+// 재사용하는 바람에 숫자가 우연히 그대로 맞아 "말없이 통과"할 뻔했다(실측으로 확認) — 그룹
+// wrapper(.space-y-1.5·overflow-x-auto) 존재 여부로 뮤테이션 감지력을 되살린다. 그대로 남는
+// 2건(다른 타입 섞임·산문 단절)은 §3 delta의 두 불변식을 재확認하는 자리로 성격이 바뀐다.
+describe('ChatBubble — story #2905 S2c③④ 다중 sole-link 문단(그룹핑 착지 후, #3310 베이스라인 뒤집힘 명시)', () => {
+  it('연속된 같은 타입(story) sole-link 문단 2개 — 이제 EmbedGroup(간결 리스트)으로 묶여 렌더된다(베이스라인 뒤집힘)', async () => {
+    const idA = '55555555-5555-5555-5555-555555555551';
+    const idB = '55555555-5555-5555-5555-555555555552';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: `[스토리 A](entity:story:${idA})\n\n[스토리 B](entity:story:${idB})`,
+            references: [{ target_type: 'story', target_id: idA }, { target_type: 'story', target_id: idB }],
+          }}
+          isMine={false}
+        />,
+      ));
+    });
+    // 간결 리스트 그룹 wrapper(embed-group.tsx ConciseList)가 정확히 1개 — 개별 <p> 2개로
+    // 흩어지지 않고 하나의 그룹으로 묶였다는 것 자체가 이 테스트의 요지.
+    expect(container.querySelectorAll('.space-y-1\\.5')).toHaveLength(1);
+    const cards = container.querySelectorAll('.rounded-md');
+    expect(cards).toHaveLength(2);
+    expect(container.textContent).toContain('스토리 A');
+    expect(container.textContent).toContain('스토리 B');
+    // 그룹 안에서도 렌더 순서=본문 순서는 유지된다.
+    expect(container.textContent!.indexOf('스토리 A')).toBeLessThan(container.textContent!.indexOf('스토리 B'));
+  });
+
+  it('연속된 서로 다른 타입(doc·story) sole-link 문단 2개 — §3 delta 「타입별 서브그룹」 불변식대로 여전히 각자 독립 렌더된다(그룹 대상 아님)', async () => {
+    const docId = DOC_ID;
+    const storyId = '55555555-5555-5555-5555-555555555553';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: `[문서](entity:doc:${docId})\n\n[스토리](entity:story:${storyId})`,
+            references: [{ target_type: 'doc', target_id: docId }, { target_type: 'story', target_id: storyId }],
+          }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.querySelectorAll('.rounded-md')).toHaveLength(2);
+    // doc 전용 마커(미리보기 버튼)가 정확히 doc 카드에만 붙는다 — 타입별 폼이 안 섞였는지.
+    expect(container.querySelectorAll('button[aria-label="미리보기"]')).toHaveLength(1);
+    // 그룹 조건(같은 타입+2개↑)을 각자 1개씩만 채워 미달 — EmbedGroup wrapper가 안 생긴다.
+    expect(container.querySelectorAll('.space-y-1\\.5')).toHaveLength(0);
+  });
+
+  it('산문으로 떨어진(연속 아닌) 같은 타입 sole-link 문단 2개 — §3 delta 「산문 문단만 run을 끊는다」 불변식대로 오늘도 앞으로도 그룹핑 영구 비대상(각자 독립)', async () => {
+    const idA = '55555555-5555-5555-5555-555555555554';
+    const idB = '55555555-5555-5555-5555-555555555555';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: `[스토리 A](entity:story:${idA})\n\n중간에 낀 산문 한 줄.\n\n[스토리 B](entity:story:${idB})`,
+            references: [{ target_type: 'story', target_id: idA }, { target_type: 'story', target_id: idB }],
+          }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.querySelectorAll('.rounded-md')).toHaveLength(2);
+    expect(container.textContent).toContain('중간에 낀 산문 한 줄.');
+    // 산문이 run을 끊어 그룹 wrapper 자체가 안 생긴다(공백줄과 달리 산문은 진짜 단절).
+    expect(container.querySelectorAll('.space-y-1\\.5')).toHaveLength(0);
+  });
+
+  it('sole-link 문단 3개 연속(artifact) — 이제 가로 캐러셀(overflow-x-auto)로 격납돼 렌더된다(카드 홍수 베이스라인 뒤집힘)', async () => {
+    const ids = ['66666666-6666-6666-6666-666666666661', '66666666-6666-6666-6666-666666666662', '66666666-6666-6666-6666-666666666663'];
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: ids.map((id, i) => `[아티팩트 ${i + 1}](entity:artifact:${id})`).join('\n\n'),
+            references: ids.map((id) => ({ target_type: 'artifact', target_id: id })),
+          }}
+          isMine={false}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    // 캐러셀 wrapper(embed-group.tsx ArtifactCarousel)가 정확히 1개 — 3장이 세로로 벽처럼
+    // 흩어지지 않고 가로 스크롤 한 자리로 격납됐다는 것 자체가 이 테스트의 요지(§3 「풍부
+    // 하되 격납」 불변식).
+    expect(container.querySelectorAll('.overflow-x-auto')).toHaveLength(1);
+    expect(container.querySelectorAll('.rounded-md')).toHaveLength(3);
+  });
+});
+
+describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofline 재도장)', () => {
+  const plainMessage: ChatMessage = {
+    ...baseMessage,
+    content: '안녕한 일반 텍스트 메시지인 — 참조 없음',
+  };
+
+  it('버블=무채 panel(내 메시지=blue-soft) — isMine이면 bg-proof-blue-soft, 아니면 bg-proof-panel', async () => {
+    // ⛔bg-proof-blue-soft는 에이전트 아바타(ProofAvatar isAgent)에도 붙어 셀렉터가 겹친다 —
+    // 버블 고유 모서리 클래스(rounded-tr-sm/rounded-tl-sm)와 함께 잡아 버블 자신만 특정한다.
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine />));
+    });
+    expect(container.querySelector('.rounded-tr-sm.bg-proof-blue-soft')).toBeTruthy();
+    expect(container.querySelector('.rounded-tr-sm.bg-proof-panel')).toBeNull();
+    // 옛 solid 배경+흰 글자 조합이 안 남아있다(눈에 안 보이는 흰 글자 회귀 방지).
+    expect(container.querySelector('.bg-primary.text-primary-foreground')).toBeNull();
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine={false} />));
+    });
+    expect(container.querySelector('.rounded-tl-sm.bg-proof-panel')).toBeTruthy();
+    expect(container.querySelector('.rounded-tl-sm.bg-proof-blue-soft')).toBeNull();
+  });
+
+  // story #2921 S4 후속(2026-08-22, 유나 합성 5규칙 확定·avatar-unification-design-memo-2921) —
+  // ProofAvatar가 폐기되고 Avatar(components/shared/avatar.tsx)로 통합됐다 — 형태(circle/
+  // square)·idle blue 링·human 테두리는 이제 Avatar 내부가 결정한다. 아래 2건은 그 통합
+  // 결과를 잰다(옛 ProofAvatar 전용 클래스 대신 Avatar의 실 출력 클래스로 갱신).
+  it('에이전트 아바타=circle+idle blue 링(Avatar 통합, 사본 분화 금지)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'agent' }} isMine={false} />));
+    });
+    const avatar = container.querySelector('.ring-proof-blue');
+    expect(avatar).toBeTruthy();
+    expect(avatar?.className).toContain('rounded-full');
+    expect(avatar?.className).not.toContain('rounded-md');
+  });
+
+  it('human 아바타=square+무채 테두리(본인·상대 공통) — 에이전트만 circle+링이다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine={false} />));
+    });
+    const avatar = container.querySelector('.border-proof-line');
+    expect(avatar).toBeTruthy();
+    expect(avatar?.className).toContain('rounded-md');
+    expect(avatar?.className).not.toContain('rounded-full');
+    expect(avatar?.className).not.toContain('ring-proof-blue');
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine />));
+    });
+    const mineAvatar = container.querySelector('.border-proof-line');
+    expect(mineAvatar).toBeTruthy();
+    expect(mineAvatar?.className).toContain('rounded-md');
+  });
+});
+
+// story #3000 로드맵 PR-B(L5) — Bot 배지 배경은 정적(비-pulse) 정체성 마킹이라 citron이 아니라
+// proof-blue-soft여야 한다(story-card 아바타·avatar.tsx idle 링과 정합).
+describe('ChatBubble — 로드맵 PR-B L5(Bot 배지 배경 proof-blue-soft)', () => {
+  it('story #3049(2984-S1) — agent 발신 메시지의 Bot 배지가 AgentIdentity(헤어라인+신호 dot)를 쓰고 soft-fill은 안 쓴다', async () => {
+    const plainMessage: ChatMessage = { ...baseMessage, content: '봇 메시지', sender_type: 'agent' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [] }} isMine={false} />));
+    });
+    const badge = container.querySelector('.border-proof-line');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toBe('Bot');
+    expect(badge?.className).not.toContain('bg-proof-blue-soft');
+    expect(badge?.className).not.toContain('accent-claim');
+    expect(badge?.querySelector('.bg-proof-blue')).toBeTruthy();
+  });
+});
+
+// story #ec57c80c(v2 3호, 아티팩트 2fdc81aa) — report성 메시지 밀도 재설계(kicker+리드+
+// 최상위 목록+전문 보기). 발동은 에이전트의 긴 report성 메시지만(AC1), 짧은 대화·human
+// 메시지는 무변경(회귀 가드), kicker 오분류는 안전측으로 미표시(AC2, 강제 테스트).
+describe('ChatBubble — story #ec57c80c report성 메시지 밀도(kicker+리드+최상위 목록+전문 보기)', () => {
+  const REPORT_CONTENT = [
+    '**전체 판정 — PASS**',
+    '오늘 배포한 3개 표면 전부 실측 완료했는.',
+    '**① 3009 — PASS**',
+    '- 인라인 카드 elev-card 토큰 확認.',
+    '**② 3010 — PASS**',
+    '- inbox Bot칩 확認.',
+    '**③ 3011 — PASS**',
+    '- Workcell 잘림 fix 확認.',
+  ].join('\n');
+
+  const AMBIGUOUS_LONG_CONTENT = [
+    '**진행 상황 업데이트**',
+    '오늘 작업한 내용을 정리해서 공유하는.',
+    '**작업 1**',
+    '- 세부 내용 1',
+    '**작업 2**',
+    '- 세부 내용 2',
+    '**작업 3**',
+    '- 세부 내용 3',
+  ].join('\n');
+
+  it('짧은 agent 메시지는 무변경 — kicker/전문보기 UI 자체가 없다(AC1 회귀 가드)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content: '고맙는!', references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('전문 보기');
+    expect(container.textContent).toContain('고맙는!');
+  });
+
+  it('긴 report성 agent 메시지 + message_kind="result" — kicker "판정"+리드+최상위 목록+전문보기가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', references: [] }} isMine={false} />,
+      ));
+    });
+    expect(container.textContent).toContain('판정');
+    // 실렌더 harness로 적발된 회귀 — 첫 줄이 리드로도 목록 첫 항목으로도 중복 노출됐었다.
+    // "전체 판정 — PASS"는 리드 한 번만 나와야 한다(목록엔 중복 제거).
+    expect(container.textContent!.split('전체 판정 — PASS').length - 1).toBe(1);
+    expect(container.textContent).toContain('① 3009 — PASS');
+    expect(container.textContent).toContain('전문 보기');
+    // 접힌 상태에선 하위 상세("인라인 카드 elev-card 토큰 확認")는 안 보여야 한다(폴딩).
+    expect(container.textContent).not.toContain('인라인 카드 elev-card 토큰 확認');
+  });
+
+  // story #3052(2984-S4) — kicker는 MaterialChip(S1, 헤어라인+fill 0)을 쓴다. 옛
+  // bg-proof-blue-soft 채움은 폐지.
+  it('story #3052 — kicker가 MaterialChip(헤어라인)을 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', references: [] }} isMine={false} />,
+      ));
+    });
+    const kicker = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '판정');
+    expect(kicker).toBeTruthy();
+    expect(kicker?.className).toContain('border-proof-line');
+    expect(kicker?.className).not.toContain('bg-proof-blue-soft');
+  });
+
+  it('「전문 보기」 클릭 시 실제로 펼쳐져 하위 상세까지 전부 보인다(정보 소실 0) — 실 클릭 시뮬레이션', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', references: [] }} isMine={false} />,
+      ));
+    });
+    const viewFullBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('전문 보기'));
+    expect(viewFullBtn).toBeTruthy();
+    await act(async () => { viewFullBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 펼친 뒤엔 하위 상세 원문이 실제로 나타난다(폴딩 이전엔 없었던 텍스트).
+    expect(container.textContent).toContain('인라인 카드 elev-card 토큰 확認');
+    expect(container.textContent).toContain('접기');
+
+    const collapseBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '접기');
+    expect(collapseBtn).toBeTruthy();
+    await act(async () => { collapseBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 다시 접으면 하위 상세가 사라지고 요약 뷰로 돌아온다.
+    expect(container.textContent).not.toContain('인라인 카드 elev-card 토큰 확認');
+    expect(container.textContent).toContain('전문 보기');
+  });
+
+  it('message_kind 없고 패턴도 불확실하면 — 발동은 하되(길이 조건 충족) kicker는 미표시(AC2 강제 테스트, 오분류 방지)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: AMBIGUOUS_LONG_CONTENT, message_kind: null, references: [] }} isMine={false} />,
+      ));
+    });
+    expect(container.textContent).toContain('전문 보기');
+    expect(container.textContent).toContain('진행 상황 업데이트');
+    expect(container.textContent).not.toContain('판정');
+  });
+
+  it('human 발신 메시지는 아무리 길어도 report 밀도 처리 대상이 아니다(범위=에이전트 메시지만)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', sender_type: 'human', references: [] }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('전문 보기');
+    // 원문(하위 상세 포함)이 그대로 렌더돼야 한다 — 접힘 없음.
+    expect(container.textContent).toContain('인라인 카드 elev-card 토큰 확認');
+  });
+
+  // 카디르 QA(#3448) 적출 — 첫 줄 문장 경계가 볼드 스팬 중간에 떨어지면(마침표가 "**" 안에
+  // 있으면) 리드가 "**Summary."처럼 닫는 마커 없이 잘려 화면에 미완성 ** 문자가 그대로
+  // 노출됐다(dedup도 이 변형에서 무력화). 실렌더로 미완성 마커 부재를 직접 확認한다.
+  it('첫 줄이 볼드 스팬 중간에서 잘리는 경우에도 미완성 마커(**)가 화면에 안 샌다', async () => {
+    const raw = [
+      '**Summary. Done**',
+      '오늘 배포한 3개 표면 전부 실측 완료했는.',
+      '**① 3009 — PASS**',
+      '- 인라인 카드 elev-card 토큰 확認.',
+      '**② 3010 — PASS**',
+      '- inbox Bot칩 확認.',
+      '**③ 3011 — PASS**',
+      '- Workcell 잘림 fix 확認.',
+    ].join('\n');
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content: raw, message_kind: 'result', references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('**');
+    expect(container.textContent).toContain('Summary. Done');
+    // "Summary. Done"이 리드 한 번만 나와야 한다(목록에 중복 노출 금지).
+    expect(container.textContent!.split('Summary. Done').length - 1).toBe(1);
   });
 });

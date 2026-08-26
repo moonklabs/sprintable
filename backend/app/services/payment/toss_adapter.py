@@ -80,8 +80,21 @@ class TossAdapter(PaymentProvider):
 
         return resp.json()
 
-    async def _get(self, path: str, *, timeout: float, op_label: str) -> dict:
-        """공용 GET 왕복 — 결제 조회(get_payment_by_order_id)용. _post와 동일 에러 처리."""
+    async def _get(
+        self, path: str, *, timeout: float, op_label: str, quiet_codes: frozenset[str] = frozenset(),
+    ) -> dict:
+        """공용 GET 왕복 — 결제 조회(get_payment_by_order_id)용. _post와 동일 에러 처리.
+
+        story #2913 후속(2896 라이브 실측, 페드루군 2026-08-22) — sweep_stale_pending_orders는
+        `NOT_FOUND_PAYMENT`를 "확정 미발생"으로 이미 안전 처리하고 자체 INFO 로그를 남기는데
+        (billing_scheduler.py), 이 어댑터 층이 그 위에 매번 별도 ERROR 한 줄을 또 찍어 traceback은
+        없앴어도 "일 단위 ERROR 반복"이라는 원 증상의 절반이 남아 있었다. **어댑터는 호출자
+        문맥(이 404가 정상 흐름인지 이상 신호인지)을 모른다**는 게 근본 원인이라, 코드 하나를
+        무조건 낮추는 대신 호출자가 명시적으로 "이 code는 나한테는 조용해도 된다"고 선언한
+        경우만 로그 레벨을 낮춘다(`quiet_codes` — 기본 빈 집합, 즉 기존 동작 그대로).
+        `billing_reconciliation.py`(confirmed order가 Toss에 없다=원장 무결성 이상 신호)·
+        `billing_charge.py`(DUPLICATED_ORDER_ID 뒤 조회 — 실시간 결제 경로)는 이 파라미터를
+        안 넘겨 ERROR 그대로 유지(전수 호출부 실측 — 두 곳 다 404가 진짜 이상일 수 있음)."""
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.get(f"{_API_BASE}{path}", headers=self._auth_header())
@@ -92,10 +105,42 @@ class TossAdapter(PaymentProvider):
         if resp.status_code != 200:
             body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             code = body.get("code", str(resp.status_code))
-            logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, code)
+            if code in quiet_codes:
+                logger.info("Toss %s: status=%s code=%s (caller handles this as expected)", op_label, resp.status_code, code)
+            else:
+                logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, code)
             raise TossApiError(code, f"Toss {op_label} failed", status_code=resp.status_code)
 
         return resp.json()
+
+    async def _delete(self, path: str, *, timeout: float, op_label: str) -> None:
+        """공용 DELETE 왕복(story #2989) — 빌링키 삭제 전용. 공식 문서 직접 대조
+        (2026-08-24, 훈련데이터 안 믿음 원칙 — 이 파일 상단 주석과 동형): `DELETE
+        /v1/billing/{billingKey}`는 성공 시 200+빈 바디를 낸다(_post/_get과 달리
+        resp.json()을 성공 경로에서 아예 호출하지 않는다 — 빈 바디에 json()을 부르면
+        JSONDecodeError)."""
+        headers = self._auth_header()
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.delete(f"{_API_BASE}{path}", headers=headers)
+        except httpx.RequestError as exc:
+            logger.exception("Toss %s request failed", op_label)
+            raise RuntimeError("Cannot reach Toss API") from exc
+
+        if resp.status_code != 200:
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            code = body.get("code", str(resp.status_code))
+            logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, code)
+            raise TossApiError(code, f"Toss {op_label} failed", status_code=resp.status_code)
+
+    async def delete_billing_key(self, *, billing_key: str) -> None:
+        """DELETE /v1/billing/{billingKey}(story #2989) — 빌링키를 Toss 측에서 실 폐기.
+        DB 행 정리만으로는 반쪽(카드가 PG 쪽에 계속 살아있어 재청구/재조회가 가능한 채로
+        남음, 페드루 PO 실측 지적 2026-08-24) — 호출자는 이 호출이 성공한 *後에* DB
+        상태를 정리해야 한다(반대 순서면 DB엔 없는데 Toss엔 남는 유령 빌링키가 생긴다)."""
+        await self._delete(
+            f"/v1/billing/{billing_key}", timeout=15, op_label="billing key deletion",
+        )
 
     async def create_billing_key(self, *, auth_key: str, customer_key: str) -> dict:
         """POST /v1/billing/authorizations/issue — FE 위젯이 넘긴 authKey + customerKey로
@@ -130,27 +175,42 @@ class TossAdapter(PaymentProvider):
         규율을 강제하지 않는다 — 순수 PG 왕복 레이어).
 
         amount_minor: KRW는 무소수 통화라 minor unit이 곧 원 단위 정수 — Toss의 `amount`
-        필드에 그대로 넘긴다(달러처럼 /100 환산 불요)."""
+        필드에 그대로 넘긴다(달러처럼 /100 환산 불요).
+
+        ⚠️story #2892(P0, 실사고 2026-08-21) — 파이썬 타입힌트(`int`)는 런타임에 강제되지
+        않는다. 실제로 `compute_pack_charge_minor`(SQL `SUM(bigint)`가 Postgres 표준상
+        `numeric`을 반환 → asyncpg가 Decimal로 디코드)가 이 계약을 어기고 Decimal을 흘려
+        보내, httpx의 `json.dumps`가 "Object of type Decimal is not JSON serializable"로
+        Toss 네트워크 호출조차 못 나가고 500을 냈다(charge_org의 pending 청구 기록이
+        confirm 못 받고 영구 pending). 호출부(billing_charge_amount.py)에서도 고쳤지만,
+        이 어댑터가 PG로 나가는 «최종 경계»이므로 여기서도 한 번 더 강제 변환한다 —
+        미래의 다른 호출부가 같은 계약을 또 어겨도 이 함수를 지나는 순간 사고가 죽는다."""
         return await self._post(
             f"/v1/billing/{billing_key}",
             json={
                 "customerKey": customer_key,
                 "orderId": order_id,
-                "amount": amount_minor,
+                "amount": int(amount_minor),
                 "orderName": order_name,
             },
             timeout=65,  # Toss 문서: 최대 60초 소요 가능 — 여유 5초.
             op_label="charge",
         )
 
-    async def get_payment_by_order_id(self, *, order_id: str) -> dict:
+    async def get_payment_by_order_id(self, *, order_id: str, quiet_codes: frozenset[str] = frozenset()) -> dict:
         """GET /v1/payments/orders/{orderId} — PaymentProvider 8메서드 밖의 보조 조회
         (story #2493 C2, PO 리뷰 권장). charge가 `DUPLICATED_ORDER_ID`로 실패했을 때(=
         이 orderId가 이미 처리된 적이 있다는 뜻이지 신규 실패가 아니다) 실제 결제 상태·
         paymentKey를 여기서 확認한다 — Toss 에러 응답 자체엔 그 정보가 없어(공식 문서
-        확認) 조회가 유일한 경로."""
+        확認) 조회가 유일한 경로.
+
+        `quiet_codes`(story #2913 후속) — 호출자가 "이 Toss 에러 code는 나한테는 정상
+        흐름"이라고 명시할 때만 어댑터의 ERROR 로그를 INFO로 낮춘다(기본 빈 집합=기존
+        동작 그대로 ERROR). 어댑터 자신은 어느 호출자가 부르는지 모르므로 기본값을
+        절대 조용하게 두지 않는다 — 호출자별 실제 문맥(_get docstring 참고)에 맞게
+        opt-in으로만 낮춘다."""
         return await self._get(
-            f"/v1/payments/orders/{order_id}", timeout=15, op_label="payment lookup",
+            f"/v1/payments/orders/{order_id}", timeout=15, op_label="payment lookup", quiet_codes=quiet_codes,
         )
 
     def verify_webhook(self, raw_body: bytes, signature: str | None) -> bool:
@@ -190,7 +250,8 @@ class TossAdapter(PaymentProvider):
         넘겨야 재시도가 중복 취소를 만들지 않는다."""
         body: dict[str, Any] = {"cancelReason": cancel_reason}
         if cancel_amount_minor is not None:
-            body["cancelAmount"] = cancel_amount_minor
+            # story #2892 — charge()와 동일 경계 방어(Decimal이 이 인자에도 흘러들 수 있음).
+            body["cancelAmount"] = int(cancel_amount_minor)
         return await self._post(
             f"/v1/payments/{payment_key}/cancel",
             json=body,

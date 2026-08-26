@@ -112,7 +112,8 @@ async def test_dispatch_notification_via_outbox_propagates_to_both_channels(mock
 
     with patch("app.services.notification_dispatch._deliver_personal_webhooks", new=AsyncMock()) as mock_wh, \
          patch("app.core.config.settings.license_consent", "agreed"), \
-         patch("ee.services.expo_push.deliver_expo_push", new=AsyncMock()) as mock_push:
+         patch("ee.services.expo_push.deliver_expo_push", new=AsyncMock()) as mock_push, \
+         patch("ee.services.apns_push.deliver_apns_push", new=AsyncMock()) as mock_apns:
         await dispatch_notification(
             mock_session, org_id=org_id, event_type="conversation.message",
             target_member_ids=[member_id], title="t", via_outbox=True,
@@ -120,6 +121,8 @@ async def test_dispatch_notification_via_outbox_propagates_to_both_channels(mock
 
     assert mock_wh.call_args.kwargs["via_outbox"] is True
     assert mock_push.call_args.kwargs["via_outbox"] is True
+    # story #3064: macOS APNs 채널도 같은 via_outbox 계약을 따른다(세 채널 모두 propagate).
+    assert mock_apns.call_args.kwargs["via_outbox"] is True
 
 
 @pytest.mark.anyio

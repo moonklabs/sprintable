@@ -147,3 +147,133 @@ describe('ConversationPage — 실패 자리 (story #2168 PR-②, 능동 클릭 
     expect(container.textContent).toContain('해당 프로젝트에 접근 권한이 없습니다');
   });
 });
+
+// story #2968(선생님 실사용 발견) — 채팅 헤더는 이전까지 avatar_url을 애초에 안 그렸다(제목
+// 텍스트만). avatar.tsx 정본(#2887/#2921) 배선으로 DM 상대의 실사진을 헤더에도 노출한다.
+describe('ConversationPage — 헤더 아바타(story #2968)', () => {
+  it('DM 상대의 avatar_url이 있으면 헤더에 실사진(<img>)을 렌더한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: null, type: 'dm', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('https://storage.googleapis.com/bucket/avatar/a.png');
+  });
+
+  it('group 대화는 헤더에 단일 실사진을 그리지 않는다(다인원, 회귀 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: '팀 채널', type: 'group', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  // story #2988(선생님 실사용 지적, 스크린샷) — top-bar.tsx의 `[&>*]:truncate`가 title 루트
+  // div 자신에 overflow:hidden을 건다(빌드 CSS 실측). agent Avatar의 ring-2 ring-offset-1은
+  // box-shadow라 레이아웃 박스 밖 3px까지 번지는데, 그 div가 overflow:hidden이면서 자기
+  // 자식(24px Avatar)에 딱 맞는 높이라 링이 상하로 잘렸다. py-1(4px, 3px보다 여유)로 클립
+  // 경계를 밀어내는 fix의 회귀가드 — 실제 DOM에서 padding 클래스가 걸려있는지 고정한다.
+  it('agent 상대 헤더의 title 루트가 py-1을 가져 ring(box-shadow)이 overflow:hidden에 안 잘린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: null, type: 'dm', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '페드루', avatar_url: null, type: 'agent' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const titleRoot = backBtn?.parentElement;
+    expect(titleRoot?.className).toContain('py-1');
+  });
+});
+
+// story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/방이름=Claim(600)
+// 로 재분류(구조·크기 불변).
+describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)', () => {
+  it('DM 헤더 타이틀이 font-semibold(Claim 무게)를 갖는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: null, type: 'dm', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const titleEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '유나');
+    expect(titleEl).not.toBeUndefined();
+    expect(titleEl?.className).toContain('font-semibold');
+    expect(titleEl?.className).not.toContain('font-medium');
+  });
+
+  // 카디르 QA독립검증(PR#3405) — PR-5 신규 테스트가 DM(plain span)만 렌더해 group(editable
+  // 버튼 분기)의 동일 처방이 무테스트였던 갭. PR-6(#3405 이월분)에 편입.
+  it('group 방이름(편집 가능 버튼 분기)도 font-semibold(Claim 무게)를 갖는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: '팀 채널', type: 'group', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const titleEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '팀 채널');
+    expect(titleEl).not.toBeUndefined();
+    expect(titleEl?.className).toContain('font-semibold');
+    expect(titleEl?.className).not.toContain('font-medium');
+  });
+});

@@ -470,6 +470,45 @@ async def test_deactivate_team_member_403_when_not_self_or_admin():
 
 
 @pytest.mark.anyio
+async def test_deactivate_agent_403_when_not_owner_or_admin():
+    """story #2952 AC3 — agent 대상 deactivate/delete 회귀는 기존에 human 경로
+    (_assert_can_manage_human)만 있었고, assert_agent_owner 경로(창작자 또는 org-admin만
+    허용)는 미검증이었다. 창작자도 org-admin도 아닌 caller가 타 에이전트를 delete하면 403."""
+    client, session, app = await _client()
+    try:
+        agent_member = _mock_member(is_active=True, type_="agent")
+        other_creator_id = uuid.uuid4()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                # deactivate_team_member 內 repo.get(id)
+                result.scalars.return_value.first.return_value = agent_member
+            else:
+                # assert_agent_owner 內 자체 조회 — 다른 사람이 만든 에이전트
+                owned_by_other = MagicMock()
+                owned_by_other.id = MEMBER_ID
+                owned_by_other.type = "agent"
+                owned_by_other.created_by = other_creator_id
+                result.scalar_one_or_none.return_value = owned_by_other
+            return result
+
+        session.execute = mock_execute
+
+        with patch("app.dependencies.ownership._is_org_admin", AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.delete(f"/api/v2/team-members/{MEMBER_ID}")
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_deactivate_not_found_404():
     client, session, app = await _client()
     try:

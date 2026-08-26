@@ -240,3 +240,191 @@ describe('ChatInput — `#` 엔티티 피커 종류별 그룹화(story #2263 ㉠
     expect(listbox!.textContent).not.toContain('in-review');
   });
 });
+
+// story #2942(2921-S5, doc steer-event-axis-design-2927 §2/§4) — composer STEER 모드.
+// 본문(@/#) in-text 트리거와 완전히 분리된 별도 send path라 그쪽 기존 44개 테스트는
+// 무회귀(위 describe 블록들 그대로) — 이 블록은 STEER 전용 표면만 잰다.
+describe('ChatInput — STEER 모드(story #2942)', () => {
+  const PARTICIPANTS = [
+    { member_id: 'me', name: '나' },
+    { member_id: 'u1', name: '동료1' },
+  ];
+
+  function toggleBtn(): HTMLButtonElement | null {
+    return [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '방향 전환(STEER)') as HTMLButtonElement | undefined ?? null;
+  }
+
+  function setValue(el: HTMLTextAreaElement | HTMLInputElement | HTMLSelectElement, value: string) {
+    const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype
+      : el instanceof HTMLSelectElement ? window.HTMLSelectElement.prototype
+      : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    setter.call(el, value);
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  }
+
+  it('참가자가 본인 1명뿐이면(대상 0명) STEER 토글 자체가 안 보인다', async () => {
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput threadId="c1" onSend={vi.fn()} currentTeamMemberId="me" participants={[{ member_id: 'me', name: '나' }]} />,
+      ));
+    });
+    expect(toggleBtn()).toBeNull();
+  });
+
+  it('대상이 있으면 토글이 보이고, 클릭하면 STEER 패널이 열려 textarea placeholder가 바뀐다', async () => {
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput threadId="c1" onSend={vi.fn()} currentTeamMemberId="me" participants={PARTICIPANTS} />,
+      ));
+    });
+    expect(toggleBtn()).not.toBeNull();
+    await act(async () => { toggleBtn()!.click(); });
+    expect(container.textContent).toContain('방향 전환 지시');
+    expect(textarea().placeholder).toBe('지시 내용을 입력하세요');
+    // 본인(me)은 대상 select에 없다 — 본인에게 STEER를 보내는 건 무의미.
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect(select.textContent).not.toContain('나');
+    expect(select.textContent).toContain('동료1');
+  });
+
+  it('대상·작업·지시 셋 다 없으면 전송 버튼이 비활성 — 셋 다 채워야 활성화된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 's1', title: '대상 스토리', status: 'in-progress' }] }));
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput threadId="c1" onSend={vi.fn()} currentTeamMemberId="me" participants={PARTICIPANTS} projectId="p1" />,
+      ));
+    });
+    await act(async () => { toggleBtn()!.click(); });
+    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(true);
+
+    // 지시 텍스트만 채움 — 여전히 비활성(대상·작업 미선택).
+    await act(async () => { setValue(textarea(), '이제 A로 가자'); });
+    expect(sendBtn.disabled).toBe(true);
+
+    // 대상 선택.
+    const select = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => { setValue(select, 'u1'); });
+    expect(sendBtn.disabled).toBe(true); // 작업 아직 미선택.
+
+    // 작업 검색 → 후보 클릭.
+    const workItemInput = container.querySelectorAll('input[type="text"]')[0] as HTMLInputElement;
+    await act(async () => { setValue(workItemInput, '대상'); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    const candidate = [...container.querySelectorAll('[role="listbox"] button')].find((b) => b.textContent?.includes('대상 스토리')) as HTMLButtonElement;
+    expect(candidate, '작업 후보를 못 찾음').toBeDefined();
+    await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+
+    expect(sendBtn.disabled).toBe(false); // 셋 다 채워짐.
+  });
+
+  it('전송 성공 — POST /api/events/publish를 정확한 body로 호출하고, 성공 後 STEER 패널이 닫힌다', async () => {
+    let publishBody: unknown = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      if (url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 's1', title: '대상 스토리', status: 'in-progress' }] }));
+      }
+      if (url === '/api/events/publish' && init?.method === 'POST') {
+        publishBody = JSON.parse(init.body ?? '{}');
+        return new Response(JSON.stringify({ data: { conversation_id: 'c1', message_id: 'm1' } }), { status: 201 });
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput threadId="c1" onSend={vi.fn()} currentTeamMemberId="me" participants={PARTICIPANTS} projectId="p1" />,
+      ));
+    });
+    await act(async () => { toggleBtn()!.click(); });
+    await act(async () => { setValue(textarea(), '이제 A로 가자'); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => { setValue(select, 'u1'); });
+    const workItemInput = container.querySelectorAll('input[type="text"]')[0] as HTMLInputElement;
+    await act(async () => { setValue(workItemInput, '대상'); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
+    await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+
+    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    await act(async () => { sendBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(publishBody).toEqual({
+      definition_key: 'preset.steer.instruct',
+      conversation_id: 'c1',
+      payload: {
+        work_item_type: 'story', work_item_id: 's1',
+        target_member_id: 'u1', instruction: '이제 A로 가자',
+      },
+    });
+    // 성공 後 패널이 닫힌다(steerMode=false) — placeholder가 원래대로 돌아온다.
+    expect(container.textContent).not.toContain('방향 전환 지시');
+  });
+
+  it('422 conversation_target_mismatch — 명시 한국어 에러 카피가 뜨고 패널은 열린 채 유지된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 's1', title: '대상 스토리', status: 'in-progress' }] }));
+      }
+      if (url === '/api/events/publish' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ detail: { code: 'conversation_target_mismatch', message: 'internal BE msg', errors: ['u1'] } }), { status: 422 });
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput threadId="c1" onSend={vi.fn()} currentTeamMemberId="me" participants={PARTICIPANTS} projectId="p1" />,
+      ));
+    });
+    await act(async () => { toggleBtn()!.click(); });
+    await act(async () => { setValue(textarea(), '이제 A로 가자'); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => { setValue(select, 'u1'); });
+    const workItemInput = container.querySelectorAll('input[type="text"]')[0] as HTMLInputElement;
+    await act(async () => { setValue(workItemInput, '대상'); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
+    await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+
+    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    await act(async () => { sendBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // BE 원문 메시지가 아니라 doc §4가 요구하는 명시 카피로 교체돼야 한다.
+    expect(container.textContent).not.toContain('internal BE msg');
+    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없습니다');
+    // 패널은 열린 채 유지(재시도 가능 — 대상 재선택 등).
+    expect(container.textContent).toContain('방향 전환 지시');
+  });
+});
+
+// story #3000 로드맵 PR-B(L1) — floating 드롭다운(멘션 등)은 --elev-overlay 토큰이어야 한다
+// (shadow-md 리터럴 회귀가드).
+describe('ChatInput — 로드맵 PR-B L1(floating elev-overlay)', () => {
+  it('멘션 후보 드롭다운이 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'm1', name: '오르테가' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '@오');
+      el.selectionStart = 2;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox).not.toBeNull();
+    expect(listbox?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(listbox?.className).not.toContain('shadow-md');
+  });
+});

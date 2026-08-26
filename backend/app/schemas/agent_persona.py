@@ -20,6 +20,8 @@ class PersonaBaseResponse(BaseModel):
     system_prompt: str
     style_prompt: str | None
     model: str | None
+    expected_cost_note: str | None
+    stop_condition_note: str | None
     config: dict[str, Any]
     is_builtin: bool
     is_default: bool
@@ -48,6 +50,8 @@ class CreatePersonaRequest(BaseModel):
     system_prompt: str | None = None
     style_prompt: str | None = None
     model: str | None = None
+    expected_cost_note: str | None = None
+    stop_condition_note: str | None = None
     base_persona_id: uuid.UUID | None = None
     tool_allowlist: list[str] | None = None
     is_default: bool | None = None
@@ -60,6 +64,8 @@ class UpdatePersonaRequest(BaseModel):
     system_prompt: str | None = None
     style_prompt: str | None = None
     model: str | None = None
+    expected_cost_note: str | None = None
+    stop_condition_note: str | None = None
     base_persona_id: uuid.UUID | None = None
     tool_allowlist: list[str] | None = None
     is_default: bool | None = None

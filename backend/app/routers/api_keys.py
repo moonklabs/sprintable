@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -10,9 +10,11 @@ from app.repositories.api_key import ApiKeyRepository
 from app.schemas.api_key import (
     ApiKeyCreatedResponse,
     ApiKeyResponse,
+    ApiKeyUsageLogResponse,
     CreateApiKeyRequest,
     RotateApiKeyRequest,
 )
+from app.services.agent_api_key_usage import DEFAULT_LIST_LIMIT, list_api_key_usage
 from app.services.recruit_service import acquire_agent_mutation_lock
 
 router = APIRouter(prefix="/api/v2", tags=["api-keys", "Organization"])
@@ -54,6 +56,28 @@ async def rotate_api_key(
     return ApiKeyCreatedResponse(**data.model_dump(), api_key=plaintext)
 
 
+@router.get("/api-keys/{key_id}/logs", response_model=list[ApiKeyUsageLogResponse])
+async def list_api_key_logs(
+    key_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    repo: ApiKeyRepository = Depends(_get_repo),
+    limit: int = Query(DEFAULT_LIST_LIMIT, ge=1, le=200),
+) -> list[ApiKeyUsageLogResponse]:
+    """story #2087 — FE `apps/web/src/app/api/api-keys/[id]/logs/route.ts`가 그동안 가리키던
+    죽은 경로를 살린다. 자매 엔드포인트(rotate/list/create/revoke)와 동일하게
+    ``assert_agent_owner``로 대상 키의 소유(호출자 org+생성자 or org admin/owner)를
+    먼저 확認한다(story 561fd294 IDOR 교훈 — org_id dependency·ownership 검증 없이 열면
+    타 org 키의 사용 이력이 그대로 샌다)."""
+    existing = await repo.get(key_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    await assert_agent_owner(existing.team_member_id, session, org_id, uuid.UUID(auth.user_id))
+    logs = await list_api_key_usage(session, key_id, limit=limit)
+    return [ApiKeyUsageLogResponse.model_validate(log) for log in logs]
+
+
 @router.get("/agents/{agent_id}/api-keys", response_model=list[ApiKeyResponse])
 async def list_agent_api_keys(
     agent_id: uuid.UUID,
@@ -77,6 +101,14 @@ async def create_agent_api_key(
     repo: ApiKeyRepository = Depends(_get_repo),
 ) -> ApiKeyCreatedResponse:
     await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    # story #2944(PO 정책 확定, 카디르 HIGH 발견 후속) — 「발급=교체」 통일: 이 엔드포인트가
+    # 예전엔 기존 활성 키 확인 없이 무조건 신규 발급이라 다건 활성 키가 합법으로 생겼다(2941의
+    # 다중 키 방어는 그 결과를 다루는 임시 봉합, 이건 유입 자체를 막는 정본). FE
+    # (agent-api-key-manager.tsx)도 이미 이 의도(활성 키 있으면 revoke-확認 다이얼로그)로 설계돼
+    # 있었다 — 서버가 그 의도를 원자적으로 강제한다. rotate()와 같은 agent-scoped lock으로
+    # recruit_agent()/rotate와도 직렬화(크로스엔드포인트 레이스 봉인, 기존 컨벤션 재사용).
+    await acquire_agent_mutation_lock(session, agent_id)
+    await repo.revoke_all_active(agent_id)
     key, plaintext = await repo.create(
         team_member_id=agent_id,
         scope=body.scope,

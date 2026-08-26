@@ -35,9 +35,12 @@ def _gate(**overrides):
 
 
 @pytest.mark.anyio
-async def test_non_doc_gate_is_noop_zero_db_calls():
+async def test_unhandled_gate_type_is_noop_zero_db_calls():
+    """story #1715 — merge(gate_type="merge")는 이제 처리 대상이라(아래
+    test_merge_gate_calls_delivery_with_correct_args) 이 no-op 표본을 pr_review로 교체한다
+    (아직 미처리인 다른 gate_type — doc_approval/agent_decision_request/merge 3종 밖)."""
     session = AsyncMock()
-    gate = _gate(work_item_type="story", gate_type="merge")
+    gate = _gate(work_item_type="story", gate_type="pr_review")
     await _notify_doc_gate_requester(session, gate, "approved")
     session.execute.assert_not_called()
 
@@ -112,6 +115,54 @@ async def test_valid_gate_calls_delivery_with_correct_args():
     assert kw["resolver_id"] == gate.resolver_id
     assert kw["decision"] == "rejected"
     assert kw["resolution_note"] == "사유"
+
+
+@pytest.mark.anyio
+async def test_merge_gate_calls_delivery_with_correct_args():
+    """story #1715 — merge gate(work_item_type="story")도 상신자 회신 대상. requested_by_
+    member_id는 evaluate_merge_gate()가 stash한 participation.member_id(신규 로직 0)."""
+    session = AsyncMock()
+    story_title_result = AsyncMock()
+    story_title_result.scalar_one_or_none = lambda: "머지 대상 스토리"
+    session.execute = AsyncMock(return_value=story_title_result)
+
+    requester_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    gate = _gate(
+        work_item_type="story", gate_type="merge",
+        neutral_facts={"requested_by_member_id": str(requester_id)},
+    )
+
+    with patch("app.services.approval_delivery.dispatch_approval_result_reply", new=AsyncMock()) as mock_dispatch, \
+         patch("app.services.gate_service.resolve_work_item_project_id", new=AsyncMock(return_value=project_id)):
+        await _notify_doc_gate_requester(session, gate, "approved")
+
+    mock_dispatch.assert_awaited_once()
+    kw = mock_dispatch.await_args.kwargs
+    assert kw["org_id"] == gate.org_id
+    assert kw["work_item_type"] == "story"
+    assert kw["work_item_id"] == gate.work_item_id
+    assert kw["project_id"] == project_id
+    assert kw["title"] == "머지 대상 스토리"
+    assert kw["gate_id"] == gate.id
+    assert kw["requester_id"] == requester_id
+    assert kw["resolver_id"] == gate.resolver_id
+    assert kw["decision"] == "approved"
+    assert kw["event_type"] == "merge_gate_resolved"
+
+
+@pytest.mark.anyio
+async def test_merge_gate_no_project_id_is_noop_no_delivery_call():
+    session = AsyncMock()
+    story_title_result = AsyncMock()
+    story_title_result.scalar_one_or_none = lambda: "제목"
+    session.execute = AsyncMock(return_value=story_title_result)
+    gate = _gate(work_item_type="story", gate_type="merge")
+
+    with patch("app.services.approval_delivery.dispatch_approval_result_reply", new=AsyncMock()) as mock_dispatch, \
+         patch("app.services.gate_service.resolve_work_item_project_id", new=AsyncMock(return_value=None)):
+        await _notify_doc_gate_requester(session, gate, "approved")
+    mock_dispatch.assert_not_awaited()
 
 
 @pytest.mark.anyio

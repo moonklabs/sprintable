@@ -5,6 +5,7 @@ import {
   extractComposedTargets,
   extractLiteralTargets,
   extractNavConfigResourceTargets,
+  findAliasedLiveRoutes,
   findEntryWithoutRoute,
   findRouteWithoutEntry,
   GRANDFATHER_BASELINE,
@@ -131,6 +132,25 @@ describe('AC4 — 네 방향 mutation (단위테스트 고정)', () => {
     const routeDirs = new Set(['flow', 'docs']);
     expect(findEntryWithoutRoute(hits, routeDirs, EXEMPT_TARGETS).size).toBe(0);
     expect(findRouteWithoutEntry(['flow', 'docs'], hits)).toEqual([]);
+  });
+});
+
+// AC3(story #2956) — 세 번째 판정: 실 라우트가 legacy rename/retire 표에도 동시에 올라있으면
+// 진입점 유무와 무관하게 실패한다. #3377이 `[ws]/[proj]/epics`를 신설했을 때
+// `RENAMED_RESOURCES.epics='goals'`가 이미 그 이름을 쥐고 있었는데, findEntryWithoutRoute·
+// findRouteWithoutEntry 둘 다 이 조합(라우트 존재+진입점 존재+exempt 존재)을 초록으로 통과시켰다
+// — 그 정확한 사각을 이 함수가 메운다.
+describe('findAliasedLiveRoutes — AC3(story #2956, 신설 판정)', () => {
+  it('실 라우트 이름이 alias 표에도 있으면 잡는다(진입점이 있어도 — #3377/epics 실사례)', () => {
+    expect(findAliasedLiveRoutes(['epics', 'flow'], new Set(['epics', 'board']))).toEqual(['epics']);
+  });
+
+  it('겹치는 이름이 없으면 빈 배열(과잉살상 아님)', () => {
+    expect(findAliasedLiveRoutes(['flow', 'docs'], new Set(['epics', 'board']))).toEqual([]);
+  });
+
+  it('실 저장소 현재 상태 — epics는 더 이상 RENAMED_RESOURCE_ALIASES에 없다(이 스토리의 직접 fix)', () => {
+    expect(RENAMED_RESOURCE_ALIASES.has('epics')).toBe(false);
   });
 });
 

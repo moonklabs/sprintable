@@ -55,7 +55,7 @@ function Flag({ tone, label }: { tone: 'info' | 'neutral' | 'brand' | 'warn'; la
     info: 'border-info/50 text-info',
     neutral: 'border-border text-muted-foreground',
     brand: 'border-primary/50 text-primary font-semibold',
-    warn: 'border-amber-500/50 text-amber-600 dark:text-amber-400 font-semibold',
+    warn: 'border-warning/50 text-warning-strong font-semibold',
   }[tone];
   return <span className={`rounded border px-1 py-0.5 font-mono text-[9.5px] ${cls}`}>{label}</span>;
 }

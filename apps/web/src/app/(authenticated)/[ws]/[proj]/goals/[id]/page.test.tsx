@@ -151,6 +151,17 @@ describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
     expect(replaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain('목표 제목');
   });
+
+  // story #2974(PR-D0 delta, 유나 확定 2026-08-23) — 이 두 숫자(진행률/outcome)는 doc상
+  // Display 대상이 아니다(font-display 미부착). 대신 무게 유틸(font-editorial-heading,
+  // --font-weight-editorial-heading:820)만 유지 — D0 초판(font-display 단독 치환)이 이
+  // 무게를 조용히 지웠던 회귀를 여기서 고정한다.
+  it('진행률·outcome 숫자는 font-display가 아니라 font-editorial-heading(무게 820)만 경유한다(#2974 D0 delta)', async () => {
+    await mount(vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: epicFixture() }) })));
+    const weightEls = [...container.querySelectorAll('.font-editorial-heading')];
+    expect(weightEls.length).toBeGreaterThanOrEqual(2);
+    expect(weightEls.every((el) => !el.classList.contains('font-display'))).toBe(true);
+  });
 });
 
 // story #2587 AC3·AC4 — org-sync가 이 경로에 대해 아무 것도 할 게 없는(orgSyncPending=false,
@@ -205,7 +216,13 @@ describe('EpicDetailPage — org-sync stale-guard (story #2545)', () => {
       resolveFirst = resolve;
     });
 
-    const fetchImpl = vi.fn(async () => {
+    // story #2958 — GoalTrustRail이 이 페이지에 /api/hypotheses 호출을 하나 더 추가했다(§6, 기존
+    // 엔드포인트 재사용). 이 테스트가 감시하는 건 오직 /api/goals/{id} 왕복의 race이므로, 그
+    // 호출만 계수한다(가짜로 3번째를 만들지 않기 위해 URL로 분기).
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (typeof url === 'string' && !url.includes('/api/goals/')) {
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      }
       calls += 1;
       if (calls === 1) return firstPending; // 1차 — 의도적으로 오래 걸림(in-flight)
       return { ok: true, status: 200, json: async () => ({ data: epicFixture({ title: '회복된 목표' }) }) }; // 2차
@@ -241,5 +258,83 @@ describe('EpicDetailPage — org-sync stale-guard (story #2545)', () => {
 
     expect(replaceMock).not.toHaveBeenCalled(); // stale 1차가 뒤늦게 replace를 발화하지 않는다
     expect(container.textContent).toContain('회복된 목표'); // 2차 성공 화면 그대로 유지
+  });
+});
+
+// story #2958(doc goals-outcome-ledger-redesign-handoff §2/§4) — 결과 캡슐(이중 신호)+수직
+// 신뢰 레일 재조립 회귀가드.
+describe('EpicDetailPage — 결과 캡슐 재조립(§2 이중 신호·§4 신뢰 레일)', () => {
+  async function mountByUrl(epicOverrides: Record<string, unknown>, hypotheses: unknown[] = []) {
+    const fetchImpl = vi.fn(async (url: unknown) => {
+      if (typeof url === 'string' && url.includes('/api/hypotheses')) {
+        return { ok: true, status: 200, json: async () => ({ data: hypotheses }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: epicFixture(epicOverrides) }) };
+    });
+    return mount(fetchImpl);
+  }
+
+  it('이중 신호 캡슐 2개(작업 CLAIMED/결과 VERIFIED)가 나란히 뜬다', async () => {
+    await mountByUrl({ stories: [{ id: 's1', title: 'S1', status: 'done' }, { id: 's2', title: 'S2', status: 'backlog' }], outcome_status: 'pending' });
+    expect(container.textContent).toContain('CLAIMED');
+    expect(container.textContent).toContain('VERIFIED');
+    expect(container.textContent).toContain('1/2');
+  });
+
+  it('작업 진척 바는 중립(proof-ink-3)이지 primary가 아니다', async () => {
+    await mountByUrl({ stories: [{ id: 's1', title: 'S1', status: 'done' }], outcome_status: 'hit' });
+    expect(container.querySelector('.bg-proof-ink-3')).not.toBeNull();
+  });
+
+  it('결과 캡슐 — outcome_status=hit이면 "달성"이 뜬다', async () => {
+    await mountByUrl({ outcome_status: 'hit' });
+    expect(container.textContent).toContain('달성');
+  });
+
+  it('결과 캡슐 — outcome_status=miss도 빨강 클래스 없이 렌더된다(soul-lock)', async () => {
+    await mountByUrl({ outcome_status: 'miss' });
+    expect(container.textContent).toContain('미달');
+    expect(container.querySelector('.text-destructive')).toBeNull();
+  });
+
+  it('신뢰 레일 — 결과 미판정(pending)+measure_after 있으면 "결과 검증 (예정)"과 측정일이 뜬다', async () => {
+    await mountByUrl({ outcome_status: 'pending', measure_after: '2026-09-01' });
+    expect(container.textContent).toContain('결과 검증 (예정)');
+    expect(container.textContent).toContain('측정 예정');
+  });
+
+  it('신뢰 레일 — 결과 판정 완료(hit)면 "결과 확定" 노드로 전환된다', async () => {
+    await mountByUrl({ outcome_status: 'hit' });
+    expect(container.textContent).toContain('결과 확定');
+    expect(container.textContent).not.toContain('결과 검증 (예정)');
+  });
+
+  it('신뢰 레일 — 가설이 있으면 개수가 뜨고, 없으면 그 노드 자체가 안 뜬다', async () => {
+    await mountByUrl({ outcome_status: 'pending' }, [{ id: 'h1' }, { id: 'h2' }]);
+    expect(container.textContent).toContain('가설 2');
+  });
+
+  it('신뢰 레일 — "목표 생성" 노드는 항상 뜬다', async () => {
+    await mountByUrl({ outcome_status: 'n_a' });
+    expect(container.textContent).toContain('목표 생성');
+  });
+
+  // story #3053(2984-S5) — Outcome Capsule은 헤어라인+elev(border-proof-line·bg-proof-panel)를
+  // 쓰고 bg-proof-blue-soft 채움은 안 쓴다.
+  // story #7d7634ee(P0) — proof-cut(컷코너) 폐지, proof-surface-lift(재질 언어) 채택.
+  it('결과 캡슐 — 헤어라인+재질을 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+    await mountByUrl({ outcome_status: 'hit' });
+    const capsule = container.querySelector('.proof-surface.border-proof-line');
+    expect(capsule).toBeTruthy();
+    expect(capsule?.className).toContain('proof-surface-lift');
+    expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
+  });
+
+  // story #3053(2984-S5) — KEEP 재검(§2): 「생성」노드 dot이 형제(가설) 노드와 같은 solid
+  // bg-proof-blue를 쓰고 옛 -soft(옅은 틴트)는 안 쓴다.
+  it('신뢰 레일 — "생성" 노드 dot이 solid bg-proof-blue를 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+    await mountByUrl({ outcome_status: 'n_a' });
+    expect(container.querySelector('.bg-proof-blue')).toBeTruthy();
+    expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
   });
 });

@@ -32,6 +32,12 @@ def _mock_persona(role_template_id: str | None = None) -> MagicMock:
         p.config["role_template_id"] = role_template_id
     p.is_default = True
     p.deleted_at = None
+    # #3369(방향서 03 슬라이스①)의 AgentCard.model 배관 이후: 명시 설정 안 하면 MagicMock
+    # 자동생성 attr이 pydantic str|None 검증을 깨뜨린다(#3366 동형 클래스). #3371(슬라이스②)의
+    # expected_cost/stop_condition도 동일 클래스라 같이 명시.
+    p.model = None
+    p.expected_cost_note = None
+    p.stop_condition_note = None
     return p
 
 

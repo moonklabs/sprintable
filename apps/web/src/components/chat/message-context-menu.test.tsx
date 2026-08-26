@@ -115,3 +115,18 @@ describe('MessageContextMenu — story #2349 사용자 차단', () => {
     expect(container.textContent).not.toContain('사용자 차단');
   });
 });
+
+// story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay 토큰이어야 한다(shadow-md
+// 리터럴 회귀가드).
+describe('MessageContextMenu — 로드맵 PR-B L1(floating elev-overlay)', () => {
+  it('메뉴 컨테이너가 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
+    await act(async () => {
+      root.render(
+        <MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} />,
+      );
+    });
+    const menu = container.querySelector('[role="menu"]');
+    expect(menu?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(menu?.className).not.toContain('shadow-md');
+  });
+});

@@ -298,7 +298,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                     <span
                       key={s}
                       title={s}
-                      className={`max-w-full truncate rounded px-1.5 py-0.5 text-xs font-medium ${s === 'admin' ? 'bg-orange-100 text-orange-700' : 'bg-muted text-muted-foreground'}`}
+                      className={`max-w-full truncate rounded px-1.5 py-0.5 text-xs font-medium ${s === 'admin' ? 'bg-warning-tint text-warning-strong' : 'bg-muted text-muted-foreground'}`}
                     >
                       {s}
                     </span>
@@ -316,7 +316,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   const isExpired = daysLeft <= 0;
                   const isWarning = daysLeft > 0 && daysLeft <= 7;
                   return (
-                    <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-orange-500 font-medium' : 'text-muted-foreground'}`}>
+                    <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-warning-strong font-medium' : 'text-muted-foreground'}`}>
                       {isExpired
                         ? `Expired ${expiresDate.toLocaleDateString()}`
                         : isWarning

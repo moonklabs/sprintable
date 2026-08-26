@@ -101,3 +101,28 @@ describe('AddParticipantModal — 에이전트 정책 거부 구조화 안내(st
     expect(document.body.querySelectorAll('a[href^="/organization/workforce/"]').length).toBe(0);
   });
 });
+
+// story #3049(2984-S1) — 후보 목록의 Bot 배지는 AgentIdentity(헤어라인+proof-blue 신호 dot),
+// soft-fill 폐지(옛 PR-B의 proof-blue-soft 결정을 대체).
+describe('AddParticipantModal — story #3049(AgentIdentity 헤어라인+신호 dot)', () => {
+  it('agent 후보 항목의 Bot 배지가 AgentIdentity를 쓰고 soft-fill/accent-claim은 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: MEMBERS }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <AddParticipantModal
+          conversationId={CONV_ID} conversationType="group" projectId={PROJECT_ID}
+          existingParticipantIds={['m-yuna']} onClose={() => {}} onAdded={() => {}}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const badge = document.body.querySelector('.border-proof-line');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toBe('Bot');
+    expect(badge?.className).not.toContain('bg-proof-blue-soft');
+    expect(document.body.querySelector('.bg-accent-claim\\/15')).toBeNull();
+  });
+});

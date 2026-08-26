@@ -22,7 +22,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
 from app.services.payment.factory import get_payment_adapter
-from app.services.platform_settings import get_platform_settings
+from app.services.platform_settings import get_platform_settings, require_billing_checkout_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -82,13 +82,34 @@ async def get_billing_status(
             "can_manage": can_manage,
         }
 
+    # story #2892(P0, 실사고 2026-08-21) — org_subscription_checkout.py의 상태기계는
+    # "청구 성공 時에만 status='active' 전이"를 명시 계약으로 문서화해 뒀는데(그 파일
+    # 모듈 docstring §4), 이 엔드포인트는 그 계약을 안 보고 `tier`를 무조건 내보냈다.
+    # checkout claim UPSERT는 Toss 청구를 부르기 *전에* 이미 커밋된다(TOCTOU 방지를 위한
+    # 의도된 설계, org_subscription_checkout.py 참고) — 그래서 청구가 크래시/거절되면
+    # status='pending'인 채 새 tier 값이 이미 이 행에 앉아 있는 상태가 실존한다. 실사고:
+    # `TypeError: Decimal is not JSON serializable`(billing_charge_amount.py, 별도 fix)로
+    # Toss 호출 자체가 500으로 죽었는데, 이 엔드포인트가 status를 안 보고 tier='starter'를
+    # 그대로 내보내 "돈은 안 냈는데 플랜은 적용된 것처럼" 화면에 잡혔다(재로그인 후에도
+    # 재현 — 이 GET이 그 소스). status가 'active'가 아니면(pending·downgraded 등) 실제로
+    # 확定된 유료 권리가 없다 — tier를 'free'로 낸다(billing_cycle/current_period_end도
+    # 같이 무의미해지므로 None). status 필드 자체는 원값 그대로 실어(FE가 pending 상태를
+    # 구분해 "결제 진행/재시도 필요" 안내를 그릴 여지는 남긴다).
+    effective_tier = sub.tier if sub.status == "active" else "free"
     return {
         "org_id": str(org_id),
-        "tier": sub.tier,
-        "billing_cycle": sub.billing_cycle,
+        "tier": effective_tier,
+        "billing_cycle": sub.billing_cycle if sub.status == "active" else None,
         "status": sub.status,
-        "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+        "current_period_end": sub.current_period_end.isoformat() if (
+            sub.status == "active" and sub.current_period_end
+        ) else None,
         "can_manage": can_manage,
+        # story #2909② — 하향 예약(#2881)/취소 예약(#2882)이 같은 pending_* 슬롯을 쓴다
+        # (pending_tier='free'=취소, 그 외=하향). FE가 카드에 "예약됨" 상태·철회 CTA를
+        # 그리려면 필요 — 이 엔드포인트가 지금까지 안 실었을 뿐, 값 자체는 이미 있었다.
+        "pending_tier": sub.pending_tier,
+        "pending_change_apply_at": sub.pending_change_apply_at.isoformat() if sub.pending_change_apply_at else None,
     }
 
 
@@ -131,10 +152,11 @@ async def create_checkout_session(
     """Polar checkout 세션 생성 — owner/admin 전용.
 
     story #2728(선생님 결정②) — 구세계(Polar) checkout도 신세계와 동일하게 서버측 전면
-    차단(org_subscription_checkout.py의 checkout과 동일 근거·동일 스위치)."""
+    차단(org_subscription_checkout.py의 checkout과 동일 근거·동일 스위치). 카디르 QA
+    (PR#3460) — EE 환경서 라이브 등록되는데 이 축 테스트가 0건이었다(실측 적출). 같은
+    헬퍼(require_billing_checkout_enabled)를 공유해 판정이 갈라지지 않게 한다."""
     platform_settings = await get_platform_settings(session)
-    if not platform_settings.billing_checkout_enabled:
-        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+    require_billing_checkout_enabled(platform_settings)
 
     # owner/admin 권한 확인
     role_result = await session.execute(

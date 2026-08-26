@@ -1,45 +1,27 @@
 'use client';
 
-import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { MessageSquare } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChatListView } from '@/components/chat/chat-list-view';
-import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { EmptyState } from '@/components/ui/empty-state';
 
+/**
+ * story #2921 S1 — 리스트 본체는 `chats/layout.tsx`(영구 좌측 레일)로 이관됐다. 이 페이지는
+ * 이제 데스크톱 스플릿뷰의 **우측 outlet 빈 상태**만 그린다(모바일은 layout이 이 outlet
+ * 자체를 숨겨 아예 안 보인다 — `/chats` 경로에서 모바일은 레일이 전체화면을 차지, 현행 유지).
+ */
 export default function ChatsPage() {
   const t = useTranslations('chats');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
-  const [showModal, setShowModal] = useState(false);
-
-  if (!currentTeamMemberId || !projectId) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <EmptyState title="로딩 중…" description="" className="w-full max-w-xs" />
-      </div>
-    );
-  }
 
   return (
     <>
-      <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-        actions={
-          <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newConversation')}
-          </Button>
-        }
-        showContextChip
-      />
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <ChatListView
-          projectId={projectId}
-          currentTeamMemberId={currentTeamMemberId}
-          open={showModal}
-          onOpenChange={setShowModal}
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      <div className="flex h-full items-center justify-center">
+        <EmptyState
+          icon={<MessageSquare className="size-8 text-muted-foreground" />}
+          title={t('title')}
+          description="왼쪽에서 대화를 선택하세요"
+          className="w-full max-w-xs"
         />
       </div>
     </>

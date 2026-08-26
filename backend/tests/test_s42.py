@@ -53,6 +53,8 @@ def _make_persona_summary():
         resolved_system_prompt="You are a helpful assistant.",
         resolved_style_prompt=None,
         model=None,
+        expected_cost_note=None,
+        stop_condition_note=None,
         config={},
         is_builtin=False,
         is_default=True,

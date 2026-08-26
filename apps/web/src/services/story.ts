@@ -81,10 +81,14 @@ export class StoryService {
   }
 
   async update(id: string, input: UpdateStoryInput) {
+    // story #2868/#2874 자매(2026-08-21, 페드루 라이브 프로브) — expected_updated_at/
+    // force_overwrite가 이 allowlist에 없어 zod를 통과해도 여기서 다시 조용히 스트립됐다
+    // (같은 «있다≠지금 쓰는 것» 클래스가 요청 파이프라인 두 층에 중복 존재했던 것).
     const ALLOWED_FIELDS: (keyof UpdateStoryInput)[] = [
       'title', 'status', 'priority', 'story_points', 'description', 'acceptance_criteria',
       'attachments', 'epic_id', 'sprint_id', 'assignee_id', 'assignee_ids', 'position',
       'success_hypothesis', 'metric_definition', 'measure_after',
+      'expected_updated_at', 'force_overwrite',
     ];
     const sanitized: Record<string, unknown> = {};
     for (const key of ALLOWED_FIELDS) {

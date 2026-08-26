@@ -85,8 +85,9 @@ async def withdraw_pending_run(
             ).values(status="withdrawn", resolved_at=_now())
         )
     # ⭐B1(까심): Gate instance 도 닫는다. 안 닫으면 다른 approver 가 POST /gates/{id}/transition→approved
-    # 시 find_active_step_run_for_gate 가 withdrawn run 을 못 찾아 legacy _advance_story_on_merge_approve
-    # 로 story=done 우회. Gate enum 미확장 유지 — 기존 'rejected'(withdraw 시맨틱)로 pending gate 닫음.
+    # 시 find_active_step_run_for_gate 가 withdrawn run 을 못 찾아 legacy(story #2965로 done-advance
+    # 자체는 제거됐지만) 경로로 새고, 그 pending gate가 응당 안 열려야 할 승인 창으로 남는다. Gate
+    # enum 미확장 유지 — 기존 'rejected'(withdraw 시맨틱)로 pending gate 닫음.
     gate_ids = [g for g in (sr.gate_id, sr.h1_gate_id) if g is not None]
     if gate_ids:
         await session.execute(

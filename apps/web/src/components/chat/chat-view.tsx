@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, RefreshCw } from 'lucide-react';
+import { ChevronLeft, RefreshCw, WifiOff } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
@@ -11,6 +11,8 @@ import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } fr
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
+import { useReadingPanelStack } from './use-reading-panel-stack';
+import { ReadingPanelProvider } from './reading-panel-context';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
@@ -26,6 +28,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 
 interface ChatViewProps {
   threadId: string;
@@ -46,6 +49,11 @@ interface ChatViewProps {
   // 전(meta fetch 레이스, "여기부터 안읽음" 마커 계산을 그 값 도착까지 보류) · null=한 번도 안
   // 읽음(모든 타인 메시지 앞에 마커) · string=그 시각 이후 타인 메시지 앞에 마커.
   initialLastReadAt?: string | null;
+  // story #2942(2921-S5) — composer STEER 모드의 대상 피커. 대화 참가자로 한정해야
+  // (doc steer-event-axis-design-2927 §4) POST /events/publish의 conversation_id 오버라이드
+  // fail-closed(§2 보강, 422 conversation_target_mismatch)를 애초에 안 만난다. 없으면(구
+  // 호출부·비-2942 화면) STEER 토글 자체를 숨긴다(graceful — 신규 표면 0 강제 아님).
+  participants?: { member_id: string; name: string | null }[];
 }
 
 interface MessageGroup {
@@ -68,7 +76,26 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt }: ChatViewProps) {
+// story #3081(정본 ⑤) — 재연결·focus 재조회(before 없는 fetchMessages 호출)가 서버 최신
+// 50개로 통째로 setMessages(data)하면 사용자가 위로 스크롤해 loadMore로 펼쳐 둔 과거
+// 페이지가 날아간다. data[0](가장 오래된 신규 항목)보다 더 과거인 prev 항목만 보존해
+// 앞에 붙인다 — dedup은 id로(data와 겹치는 구간은 새 값을 신뢰).
+export function mergeBackfilledMessages(prev: ChatMessage[], data: ChatMessage[]): ChatMessage[] {
+  if (!data.length) return prev;
+  const newIds = new Set(data.map((m) => m.id));
+  const olderKept = prev.filter((m) => !newIds.has(m.id) && m.created_at < data[0]!.created_at);
+  return [...olderKept, ...data];
+}
+
+// story #3081(정본 ③) — backfill(fetchMessages 재조회)이 채운 신규 메시지도 addMessage(SSE
+// 실시간 수신)와 동일하게 「활성 뷰어가 하단을 보고 있으면 mark-read」돼야 한다. 표시할
+// up_to 시각을 판정만 순수함수로 뽑는다(호출 자체는 handleReconnect가 한다).
+export function resolveBackfillMarkReadIso(latest: ChatMessage[] | undefined, nearBottom: boolean): string | null {
+  if (!latest?.length || !nearBottom) return null;
+  return latest[latest.length - 1]!.created_at;
+}
+
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -131,20 +158,32 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // story #2766(레인 A) — ReadingPanel도 우측 패널이라 스레드와 동일 슬롯을 공유한다(동시
   // 2패널 레이아웃은 인계 doc에 없는 새 영역이라 짓지 않음 — 열면 서로 배타적으로 닫는다).
-  const [activeReadingPanel, setActiveReadingPanel] = useState<ReadingPanelTarget | null>(null);
-  // activeThreadRef와 동일 이유(popstate stale closure 방지) — 모바일 뒤로가기 제스처가
-  // ThreadPanel과 똑같이 이 패널도 먼저 닫아야 한다(페이지 이탈 아님).
-  const activeReadingPanelRef = useRef(false);
+  // story #2888/S2 R5 — 단일 target에서 스택(배열)으로. 빈 배열=닫힘(기존 null과 동형).
+  // story #2904 — 스택 오케스트레이션(최대 깊이 truncation·history 1회 정책)은
+  // use-reading-panel-stack.ts로 추출(단위 테스트 가능). 이 컴포넌트는 스레드 패널과의
+  // 상호배타(activeThread 클리어)만 감싸서 얹는다.
+  // 훅이 반환하는 객체 자체는 매 렌더 새 참조라 그대로 deps에 넣으면 콜백 메모이제이션이
+  // 무의미해진다(exhaustive-deps도 "readingPanel 전체"를 요구해 그 무의미함을 강제) — 여기서
+  // 바로 구조분해해 안정 참조(각 함수는 훅 내부 useCallback([])로 고정)만 아래에서 쓴다.
+  const { stack: readingPanelStack, isOpenRef: activeReadingPanelRef, open: openReadingPanelStack, close: closeReadingPanelStack, navigateTo: navigateReadingPanelTo } = useReadingPanelStack();
+
+  // story #2921 S6 — layout.tsx의 리스트 레일에 "지금 ReadingPanel이 열려 있는지"를 끌어올린다
+  // (xl 미만에서 rail 자동 접힘 판단에 필요, 이 컴포넌트만 아는 상태라 layout.tsx가 직접 볼 수
+  // 없다). Thread는 이 신호 대상이 아니다(chat-rail-context.tsx 주석 — w-80이 480보다 훨씬
+  // 좁아 같은 폭에서 눌림이 덜하고 유나 확定 문구가 "Reading 열림"만 명시).
+  const { railMode, setReadingOpen } = useChatRail();
+  useEffect(() => {
+    setReadingOpen(readingPanelStack.length > 0);
+  }, [readingPanelStack.length, setReadingOpen]);
 
   // 스레드 열기: 현재 URL 유지한 채 history entry 추가
   const openThread = useCallback((message: ChatMessage) => {
-    activeReadingPanelRef.current = false;
-    setActiveReadingPanel(null);
+    closeReadingPanelStack();
     setActiveThread(message);
     activeThreadRef.current = true;
     const url = window.location.pathname + window.location.search;
     window.history.pushState({ _sprintableThread: true }, '', url);
-  }, []);
+  }, [closeReadingPanelStack]);
 
   // 스레드 닫기: history.back() 제거 — Next.js router와 충돌 방지 (P0 리그레션 원인)
   const closeThread = useCallback(() => {
@@ -152,19 +191,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     setActiveThread(null);
   }, []);
 
+  // story #2888/S2 R5 — 패널이 이미 열려 있으면(스택 비어있지 않음) push(임베드 안에서 또
+  // 임베드), 닫혀 있었으면 새 1단 스택으로 시작(정확한 truncation·history 정책은
+  // use-reading-panel-stack.ts#open 참고).
   const openReadingPanel = useCallback((target: ReadingPanelTarget) => {
     activeThreadRef.current = false;
     setActiveThread(null);
-    activeReadingPanelRef.current = true;
-    setActiveReadingPanel(target);
-    const url = window.location.pathname + window.location.search;
-    window.history.pushState({ _sprintableReadingPanel: true }, '', url);
-  }, []);
+    openReadingPanelStack(target);
+  }, [openReadingPanelStack]);
 
-  const closeReadingPanel = useCallback(() => {
-    activeReadingPanelRef.current = false;
-    setActiveReadingPanel(null);
-  }, []);
+  const closeReadingPanel = closeReadingPanelStack;
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -231,24 +267,26 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return el.scrollHeight - el.scrollTop - el.clientHeight <= 50;
   }, []);
 
-  const fetchMessages = useCallback(async (before?: string) => {
+  const fetchMessages = useCallback(async (before?: string): Promise<ChatMessage[] | undefined> => {
+    let merged: ChatMessage[] | undefined;
     try {
       const params = new URLSearchParams({ limit: '50' });
       if (before) params.set('before', before);
       const res = await fetch(`${apiPrefix}/${threadId}/messages?${params.toString()}`);
-      if (!res.ok) return;
+      if (!res.ok) return undefined;
       // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
       const raw = await res.json() as Record<string, unknown>;
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
       const meta = Array.isArray(raw) ? null : raw.meta as { next_cursor?: string; has_more?: boolean } | undefined;
       const data = rawData.map(normalizeToMessage);
       if (before) {
-        setMessages((prev) => [...data, ...prev]);
+        setMessages((prev) => { merged = [...data, ...prev]; return merged; });
       } else {
-        setMessages(data);
+        setMessages((prev) => { merged = mergeBackfilledMessages(prev, data); return merged; });
       }
       setCursor(meta?.next_cursor ?? null);
       setHasMore(meta?.has_more ?? false);
+      return merged;
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -326,9 +364,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, [threadId, addMessage]);
 
   // AC4: 재연결 시 누락 메시지 backfill
+  // story #3081(정본 ③) — backfill이 놓친 신규 메시지를 채워도 이 fetchMessages 경로는
+  // addMessage(SSE 실시간 수신)와 달리 markRead를 안 태웠다 — 활성 뷰어가 하단을 보고
+  // 있어도 배지가 안 꺼지는 갭. fetchMessages가 반환하는 실 데이터(merged 결과)로
+  // 최신 메시지를 판별해 addMessage와 동일 조건(isNearBottom)으로 mark-read한다.
   const handleReconnect = useCallback(() => {
-    fetchMessages();
-  }, [fetchMessages]);
+    void fetchMessages().then((latest) => {
+      const markReadIso = resolveBackfillMarkReadIso(latest, isNearBottom());
+      if (markReadIso) markRead(markReadIso);
+    });
+  }, [fetchMessages, isNearBottom, markRead]);
 
   // 1aeecdde P2: working 폴링(#1353 GET /working·in-memory 45s TTL) → typingAgents.
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
@@ -356,12 +401,25 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   useEffect(() => { void fetchWorking(); }, [fetchWorking]);
 
-  useChatSse({
+  // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
+  // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가
+  // 그동안 아무도 안 읽고 있었다.
+  const { connected } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onWorking: handleWorking,
     onReconnect: handleReconnect,
   });
+  // 짧은 순단(정상 60초 재연결 사이클, sse-reconnect-backoff.ts 주석 참고)까지 매번 배너를
+  // 띄우면 소음이라, 끊김이 일정 시간(2s) 이상 지속될 때만 보인다 — 자동 재연결(#2987 §1)이
+  // 대부분 그 안에 복구하므로 실사용자는 배너를 거의 못 본다. 안 붙으면(주소창 없는 앱에서
+  // 자동 재연결도 실패) 수동 갱신 affordance가 유일한 탈출구가 된다.
+  const [showDisconnectedBanner, setShowDisconnectedBanner] = useState(false);
+  useEffect(() => {
+    if (connected) { setShowDisconnectedBanner(false); return; }
+    const timer = setTimeout(() => setShowDisconnectedBanner(true), 2000);
+    return () => clearTimeout(timer);
+  }, [connected]);
 
   // fix: popstate — 스레드/리딩패널 열린 상태에서만 가로채기 (Next.js 네비게이션 비간섭)
   useEffect(() => {
@@ -372,13 +430,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       // 패널 닫기 + 현재 URL 재push → 실제 뒤로가기 취소, 채팅 화면 유지
       activeThreadRef.current = false;
       setActiveThread(null);
-      activeReadingPanelRef.current = false;
-      setActiveReadingPanel(null);
+      closeReadingPanelStack();
       window.history.pushState(e.state ?? null, '', window.location.pathname + window.location.search);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [closeReadingPanelStack, activeReadingPanelRef]);
 
   // CB-S8: 모바일 pull-to-refresh — 스크롤 최상단에서 아래로 당기면 새로고침
   // fix(story #1987): React onTouch* prop은 루트에 passive로 위임돼 있어(React 17+) preventDefault()가
@@ -740,10 +797,19 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #2766(레인 A) — ReadingPanel도 같은 "메인 채팅 숨김" 규칙을 탄다(모바일 전체화면
   // 드로어). ReadingPanel 자신이 이미 자체 닫기(X) 버튼을 갖고 있어(FileViewer/EntityPreviewModal
   // 헤더) ThreadPanel처럼 별도 상단 "뒤로" 바를 새로 만들지 않는다.
-  const isMobileReadingView = activeReadingPanel !== null;
+  const isMobileReadingView = readingPanelStack.length > 0;
   const isMobileRightPanelView = isMobileThreadView || isMobileReadingView;
 
+  // story #461e9a54(P0) — 채팅 하위 트리 전체(메시지·입력창 포함)를 이 Provider로 감싼다.
+  // EntityChip(embed-card.tsx)·approval-request-card.tsx가 이 값을 useReadingPanel()로
+  // 직접 소비 — prop-drilling 없이도 새 임베드 소비처가 자동으로 패널行 된다.
+  const readingPanelContextValue = useMemo(
+    () => ({ open: openReadingPanel, close: closeReadingPanel, navigateTo: navigateReadingPanelTo }),
+    [openReadingPanel, closeReadingPanel, navigateReadingPanelTo],
+  );
+
   return (
+    <ReadingPanelProvider value={readingPanelContextValue}>
     <div className="flex h-full flex-col overflow-hidden">
       {/* Mobile thread back — only while a thread panel is open (closes it). The page
           TopBar owns the conversation header, so this no longer duplicates it (S2). */}
@@ -766,6 +832,24 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
         <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
+          {/* story #2987 AC2 후반 — 자동 재연결(§1)이 대부분 소리 없이 복구하지만, 실패하면
+              (예: 서버가 실제로 죽음) 주소창 없는 앱에선 새로고침 우회조차 없다 — 수동 갱신
+              affordance가 유일한 탈출구. 빨강(destructive) 아님 — "네가 실패했다"가 아니라
+              "연결이 끊긴 상태"(reference-drop-notice.tsx와 동일 warning-tint 관례). */}
+          {showDisconnectedBanner && (
+            <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
+              <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="flex-1">{t('connectionLost')}</span>
+              <button
+                type="button"
+                onClick={() => void fetchMessages()}
+                className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
+              >
+                <RefreshCw className="h-3 w-3" />
+                {t('refreshNow')}
+              </button>
+            </div>
+          )}
           {/* Messages */}
           <div
             ref={scrollRef}
@@ -945,6 +1029,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             commandTargets={commandTargets}
             placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
             onEscape={() => router.replace(backHref)}
+            currentTeamMemberId={currentTeamMemberId}
+            participants={participants}
           />
 
           {/* story #2265(C-7) — 확定된 범위를 어느 스토리에 붙일지 고르는 자리. 기존
@@ -962,7 +1048,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
         {/* AC7/AC8: 스레드 패널 — 데스크톱 사이드 패널 / 모바일 전체 뷰 */}
         {activeThread && (
-          <div className={`flex flex-col overflow-hidden ${isMobileThreadView ? 'flex-1' : 'hidden w-80 flex-shrink-0 lg:flex'}`}>
+          // story #2910(S2f/R3) — ReadingPanel과 동형 slide-in(1회, activeThread가 null→값
+          // 전환될 때만 — 다른 스레드로 전환은 ThreadPanel 자체 key가 담당, 이 wrapper는 안
+          // 리마운트돼 재발화 없음). exit 애니 의도적 무(ReadingPanel과 동일 판정).
+          <div className={`motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden ${isMobileThreadView ? 'flex-1' : 'hidden w-80 flex-shrink-0 lg:flex'}`}>
             <ThreadPanel
               key={activeThread.id}
               parentMessage={activeThread}
@@ -972,6 +1061,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               onClose={closeThread}
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
               onReplyAdded={handleReplyAdded}
+              onMarkRead={markRead}
               entityStatusByKey={entityStatusByKey}
               eventDefinitionsByKey={eventDefinitionsByKey}
               requestedEntityStatusKeysRef={requestedEntityStatusKeysRef}
@@ -983,12 +1073,19 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         {/* story #2766(레인 A) §A1 — ReadingPanel: 데스크톱 clamp(480px,40vw,720px) 사이드 /
             모바일 전체 뷰. ThreadPanel과 같은 슬롯이지만 폭 규격이 다르다(320px 고정이 아님
             — 문서 가독 기준 폭). */}
-        {activeReadingPanel && (
+        {readingPanelStack.length > 0 && (
+          // story #2910(S2f/R3) — 패널이 처음 열릴 때 1회만 slide-in(이 div는 push/pop마다
+          // readingPanelStack 참조만 바뀔 뿐 리마운트되지 않아 재발화 안 함 — 스택 전환은
+          // reading-panel.tsx 안쪽 콘텐츠 wrapper가 자기 key로 별도 담당, 자연 분리).
+          // exit(닫기) 애니는 의도적 무(PO 판정 — 즉시 사라짐=반응성 피드백).
           <div
-            className={`flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
-            style={isMobileReadingView ? undefined : { width: 'clamp(480px, 40vw, 720px)', flexShrink: 0 }}
+            className={`motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
+            // story #2921 S6(유나 확定④) — rail이 접힌/오버레이 상태(xl 미만+reading 열림)에선
+            // clamp 대신 480px 고정(Pedro 산수: main 544 보장은 reading=480 전제). xl↑나
+            // reading 닫힘(=railMode 'normal')은 기존 clamp(480,40vw,720) 그대로.
+            style={isMobileReadingView ? undefined : { width: railMode === 'normal' ? 'clamp(480px, 40vw, 720px)' : '480px', flexShrink: 0 }}
           >
-            <ReadingPanel target={activeReadingPanel} onClose={closeReadingPanel} />
+            <ReadingPanel stack={readingPanelStack} onNavigateTo={navigateReadingPanelTo} onClose={closeReadingPanel} />
           </div>
         )}
       </div>
@@ -1004,5 +1101,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         onConfirm={() => { if (!blockSubmitting) void handleConfirmBlockUser(); }}
       />
     </div>
+    </ReadingPanelProvider>
   );
 }

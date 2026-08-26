@@ -162,7 +162,9 @@ export function KanbanColumn({
             </>
           ) : (
             <>
-              <h3 className="flex items-center gap-2 text-xs font-semibold text-foreground">
+              {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩
+                  (Heading 무게, sans 유지 — 한글이라 caps/mono 금지). 크기(text-xs)는 불변. */}
+              <h3 className="flex items-center gap-2 text-xs font-extrabold text-foreground">
                 <span className={`size-1.5 shrink-0 rounded-full ${statusColor.dot}`} aria-hidden="true" />
                 {label}
               </h3>

@@ -31,6 +31,14 @@ import { PricingPlanCard } from './pricing-plan-card';
 import { PricingLimitsTable } from './pricing-limits-table';
 import { PricingPacks, type PackKind } from './pricing-packs';
 import { completeCheckout, startBillingAuth, type CheckoutOutcome } from './toss-checkout';
+import { PaymentMethodSection } from './payment-method-section';
+import {
+  cancelSubscription,
+  changeTier,
+  reserveDowngrade,
+  revokePendingChange,
+  type ChangeTierOutcome,
+} from './billing-actions';
 import {
   AUTOMATION_PACK,
   STORAGE_PACK,
@@ -54,6 +62,9 @@ interface BillingStatus {
   status: string;
   current_period_end: string | null;
   can_manage: boolean;
+  /** story #2909② — 하향(#2881)/취소(#2882) 예약 슬롯 공유. 'free'=취소, 그 외=하향. */
+  pending_tier: string | null;
+  pending_change_apply_at: string | null;
 }
 
 function toTierId(raw: string | undefined): TierId {
@@ -81,6 +92,11 @@ export function BillingTab({ orgId }: { orgId: string }) {
   const [packTarget, setPackTarget] = useState<{ kind: PackKind; quantity: number } | null>(null);
   const [checkoutProcessing, setCheckoutProcessing] = useState(false);
   const [checkoutOutcome, setCheckoutOutcome] = useState<CheckoutOutcome | { kind: 'widgetFailed' } | null>(null);
+  // story #2909② — 유료→유료 상향(change-tier)/하향 예약/취소 예약. 신규 결제(checkout,
+  // 위 upgradeTarget)와 별개 진입점 — 셋 다 authKey/위젯 리다이렉트가 없다.
+  const [changeTierTarget, setChangeTierTarget] = useState<Exclude<TierId, 'free'> | null>(null);
+  const [downgradeTarget, setDowngradeTarget] = useState<Exclude<TierId, 'free'> | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
 
   const refetchStatus = () => {
     setLoading(true);
@@ -167,6 +183,9 @@ export function BillingTab({ orgId }: { orgId: string }) {
   }
 
   const currentTier = toTierId(status?.tier);
+  // pending_tier는 항상 BE가 유효한 TierId 문자열만 낸다(#2881/#2882 자체가 카탈로그
+  // 존재 확認 후 기입) — toTierId의 pro→business 레거시 매핑 대상이 아니다.
+  const pendingTierId = (status?.pending_tier as TierId | null | undefined) ?? null;
   const canManage = status?.can_manage ?? false;
   const isPricePublic = platformSettings?.billing_price_public ?? false;
   const checkoutEnabled = platformSettings?.billing_checkout_enabled ?? false;
@@ -215,6 +234,8 @@ export function BillingTab({ orgId }: { orgId: string }) {
         </Alert>
       )}
 
+      <PaymentMethodSection canManage={canManage} />
+
       {isPricePublic && (
         <Tabs value={cycle} onValueChange={(v) => setCycle(v as 'monthly' | 'yearly')}>
           <div className="flex items-center gap-3">
@@ -237,8 +258,30 @@ export function BillingTab({ orgId }: { orgId: string }) {
               tier={tier}
               isPricePublic={isPricePublic}
               isCurrent={tierId === currentTier}
+              currentTier={currentTier}
               displayPriceMonthlyKrw={displayPriceMonthlyKrw}
-              onUpgrade={(target) => canManage && checkoutEnabled && setUpgradeTarget(target)}
+              pendingTier={pendingTierId}
+              pendingChangeApplyAt={status?.pending_change_apply_at ?? null}
+              onUpgrade={(target) => {
+                if (!canManage || !checkoutEnabled || target === 'free') return;
+                // story #2909② P0 — currentTier가 이미 유료면 checkout(신규 결제)이 아니라
+                // change-tier(기존 billing_key로 즉시 전액+잔여 부분취소)를 타야 한다.
+                // checkout은 BE가 이제 활성 유료 org 재진입을 400으로 거부한다(#2909①).
+                if (currentTier === 'free') {
+                  setUpgradeTarget(target);
+                } else {
+                  setChangeTierTarget(target as Exclude<TierId, 'free'>);
+                }
+              }}
+              onDowngrade={(target) => {
+                if (!canManage || !checkoutEnabled || target === 'free') return;
+                setDowngradeTarget(target as Exclude<TierId, 'free'>);
+              }}
+              onCancel={() => canManage && checkoutEnabled && setCancelDialogOpen(true)}
+              onRevokePending={() => {
+                if (!canManage || !checkoutEnabled) return;
+                revokePendingChange().then(() => refetchStatus());
+              }}
             />
           );
         })}
@@ -263,6 +306,22 @@ export function BillingTab({ orgId }: { orgId: string }) {
         cycle={cycle}
         currentSeats={TIER_DEFINITIONS[currentTier].limits.seats}
         onClose={() => setUpgradeTarget(null)}
+      />
+      <ChangeTierConfirmDialog
+        tierId={changeTierTarget}
+        onClose={() => setChangeTierTarget(null)}
+        onDone={() => refetchStatus()}
+      />
+      <DowngradeConfirmDialog
+        tierId={downgradeTarget}
+        onClose={() => setDowngradeTarget(null)}
+        onDone={() => refetchStatus()}
+      />
+      <CancelSubscriptionConfirmDialog
+        open={cancelDialogOpen}
+        currentTierName={t(`tierName_${currentTier}`)}
+        onClose={() => setCancelDialogOpen(false)}
+        onDone={() => refetchStatus()}
       />
       <PackPurchaseDialog target={packTarget} onClose={() => setPackTarget(null)} />
     </div>
@@ -354,6 +413,217 @@ export function UpgradeCheckoutDialog({
               <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" />
             ) : null}
             {t('checkoutDialogConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * story #2909②(P0) — 유료→유료 상향. checkout(위 UpgradeCheckoutDialog)과 달리 위젯
+ * 리다이렉트가 없다(기존 billing_key 재사용, 즉시 완결) — 문안은 페드루군 지시대로
+ * "신 요금 전액 결제+기존 잔여 일할 부분취소"를 명시(고객이 «왜 두 번 청구/환불처럼
+ * 보이는 일이 동시에 생기는지» 미리 이해하게).
+ */
+function ChangeTierConfirmDialog({
+  tierId,
+  onClose,
+  onDone,
+}: {
+  tierId: Exclude<TierId, 'free'> | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const t = useTranslations('pricingPlans');
+  const [submitting, setSubmitting] = useState(false);
+  const [outcome, setOutcome] = useState<ChangeTierOutcome | null>(null);
+  if (tierId == null) return null;
+  const tier = TIER_DEFINITIONS[tierId];
+  const chargeKrw = withVatKrw(tier.priceMonthlyKrw);
+
+  const handleConfirm = () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setOutcome(null);
+    changeTier(tierId)
+      .then((result) => {
+        setOutcome(result);
+        setSubmitting(false);
+        if (result.kind === 'active') {
+          onDone();
+          onClose();
+        }
+      })
+      .catch(() => {
+        setOutcome({ kind: 'error', status: 0 });
+        setSubmitting(false);
+      });
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !submitting && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('changeTierDialogTitle', { tier: t(`tierName_${tierId}`) })}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">{t('changeTierDialogExplain')}</p>
+        <dl className="divide-y divide-border text-sm">
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('checkoutDialogChargeLabel')}</dt>
+            <dd className="font-semibold">{t('checkoutDialogChargeValue', { amount: formatKrw(chargeKrw) })}</dd>
+          </div>
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('changeTierDialogRefundLabel')}</dt>
+            <dd className="font-semibold">{t('changeTierDialogRefundValue')}</dd>
+          </div>
+        </dl>
+        {outcome?.kind === 'declined' && (
+          <Alert variant="warning">
+            <AlertDescription>{t('checkoutDeclinedBanner', { reason: outcome.result.declined_reason ?? '' })}</AlertDescription>
+          </Alert>
+        )}
+        {outcome?.kind === 'error' && (
+          <Alert variant="destructive">
+            <AlertDescription>{t('checkoutErrorBanner')}</AlertDescription>
+          </Alert>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            {t('checkoutDialogCancel')}
+          </Button>
+          <Button
+            variant="default"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={handleConfirm}
+            disabled={submitting}
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" /> : null}
+            {t('changeTierDialogConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** story #2909②(하위 tier 카드) — 유료→유료 하향 예약(#2881). 즉시 전이 없음·부분 환불 없음. */
+function DowngradeConfirmDialog({
+  tierId,
+  onClose,
+  onDone,
+}: {
+  tierId: Exclude<TierId, 'free'> | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const t = useTranslations('pricingPlans');
+  const [submitting, setSubmitting] = useState(false);
+  const [errored, setErrored] = useState(false);
+  if (tierId == null) return null;
+
+  const handleConfirm = () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setErrored(false);
+    reserveDowngrade(tierId)
+      .then((result) => {
+        setSubmitting(false);
+        if (result.kind === 'active') {
+          onDone();
+          onClose();
+        } else {
+          setErrored(true);
+        }
+      })
+      .catch(() => {
+        setSubmitting(false);
+        setErrored(true);
+      });
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !submitting && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('downgradeDialogTitle', { tier: t(`tierName_${tierId}`) })}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">{t('downgradeDialogExplain')}</p>
+        {errored && (
+          <Alert variant="destructive">
+            <AlertDescription>{t('checkoutErrorBanner')}</AlertDescription>
+          </Alert>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            {t('checkoutDialogCancel')}
+          </Button>
+          <Button variant="default" onClick={handleConfirm} disabled={submitting}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" /> : null}
+            {t('downgradeDialogConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** story #2909②(free 카드=취소, #2882) — 「현재 기간 말까지 사용, 다음 갱신 중지」. */
+function CancelSubscriptionConfirmDialog({
+  open,
+  currentTierName,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  currentTierName: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const t = useTranslations('pricingPlans');
+  const [submitting, setSubmitting] = useState(false);
+  const [errored, setErrored] = useState(false);
+  if (!open) return null;
+
+  const handleConfirm = () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setErrored(false);
+    cancelSubscription()
+      .then((result) => {
+        setSubmitting(false);
+        if (result.kind === 'active') {
+          onDone();
+          onClose();
+        } else {
+          setErrored(true);
+        }
+      })
+      .catch(() => {
+        setSubmitting(false);
+        setErrored(true);
+      });
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !submitting && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('cancelDialogTitle')}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">{t('cancelDialogExplain', { tier: currentTierName })}</p>
+        {errored && (
+          <Alert variant="destructive">
+            <AlertDescription>{t('checkoutErrorBanner')}</AlertDescription>
+          </Alert>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            {t('cancelDialogKeepPlan')}
+          </Button>
+          <Button variant="destructive" onClick={handleConfirm} disabled={submitting}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" /> : null}
+            {t('cancelDialogConfirm')}
           </Button>
         </DialogFooter>
       </DialogContent>

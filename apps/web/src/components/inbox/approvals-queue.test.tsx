@@ -12,9 +12,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import type { GateItem, HitlInboxItem } from '../kanban/types';
 
-const { useDashboardContextMock, pushMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, pushMock, muxSubscribeMock, useSseMultiplexerContextMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   pushMock: vi.fn(),
+  muxSubscribeMock: vi.fn((_eventName: string, _handler: (raw: string, eventId?: string) => void) => () => {}),
+  useSseMultiplexerContextMock: vi.fn(),
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -23,6 +25,18 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+}));
+
+// story #2985 AC2 — approval-request-card.test.tsx와 동일 전략.
+// story #3069(2026-08-25) — 이 파일이 이제 mux.subscribe를 직접 안 부르고
+// useSseNotifications(use-sse-notifications.ts)를 경유한다(그 훅이 mux 有/無를 갈라
+// 폴백까지 구조적으로 보장 — 컴포넌트는 mux를 몰라도 됨). 그 훅의 mux 분기가
+// subscribeMessage도 무조건 부르므로(NOTIFICATION_EVENT_NAMES 자체 구독과 무관하게)
+// 목(mock)에 없으면 런타임 TypeError — 완전한 SseMultiplexerHandle 형태로 맞춘다.
+// useSseMultiplexerContextMock을 vi.fn()으로 둬 개별 테스트가 null(=mux 비활성/미연결)로
+// override할 수 있게 한다 — «mux 폴백 부재» 재발을 막는 회귀가드(story #3069)의 핵심.
+vi.mock('@/components/realtime-provider', () => ({
+  useSseMultiplexerContext: () => useSseMultiplexerContextMock(),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -85,6 +99,16 @@ beforeEach(() => {
     orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }],
     projectMemberships: [],
     currentMemberType: 'human',
+    currentTeamMemberId: 'member-1',
+  });
+  muxSubscribeMock.mockClear();
+  // 기본값 = mux 활성(기존 스위트 전부가 이 전제) — mux 비활성/폴백 경로를 검증하는
+  // 케이스만 개별로 useSseMultiplexerContextMock.mockReturnValueOnce(null) override.
+  useSseMultiplexerContextMock.mockReturnValue({
+    subscribe: muxSubscribeMock,
+    subscribeMessage: () => () => {},
+    subscribeReconnect: () => () => {},
+    connected: true,
   });
 });
 
@@ -145,17 +169,107 @@ describe('ApprovalsQueue', () => {
     expect(container.querySelectorAll('button').length).toBeGreaterThanOrEqual(4);
   });
 
-  it('held gate는 보류중 배지를 표시하고 위험도 배지는 생략한다', async () => {
+  // story #2926(잔여 fast-follow, 카디르 F2 QA LOW①) — stateLabel 문구가 통일 키
+  // gateStatusHeld("보류됨")로 바뀌었다(F1/F2와 문구 통일, 옛 heldBadge="보류중"은 이
+  // 렌더 슬롯에서 폐기 — heldBadge 자체는 다른 슬롯(인라인 카드 배지, line 294)에 여전히 산다).
+  it('held gate는 보류됨 상태를 표시하고 위험도 배지는 생략한다', async () => {
     mockFetches([], [gate({ id: 'g-held', status: 'held', held_until: null })]);
     await mount();
-    expect(container.textContent).toContain(koMessages.cage.heldBadge);
+    expect(container.textContent).toContain(koMessages.cage.gateStatusHeld);
     expect(container.textContent).not.toContain(koMessages.cage.riskUnknown);
   });
 
-  it('held 아닌 pending gate는 위험도(unknown) 배지를 표시한다', async () => {
+  // story #2926(P0-F F3, 유나 확定①) — 이 항목(클릭-스루만 가능·인라인 액션 없음)이
+  // ProofCapsule density="row"로 바뀌며 위험도 배지 슬롯이 없어졌다(row 밀도 자체의 기존
+  // 한계 — Attention Queue 원안에도 이미 있던 제약, F3이 새로 만든 게 아니다). 대신
+  // stateLabel("결재 대기")이 그 자리의 상태 신호를 잇는다. 잔여 fast-follow로 통일 키
+  // gateStatusPending으로 갱신(F1/F2와 동일 키).
+  it('held 아닌 pending gate는 stateLabel(결재 대기)을 표시한다(row 밀도라 위험도 배지는 생략)', async () => {
     mockFetches([gate({ id: 'g-pending' })], []);
     await mount();
-    expect(container.textContent).toContain(koMessages.cage.riskUnknown);
+    expect(container.textContent).toContain(koMessages.cage.gateStatusPending);
+    expect(container.textContent).not.toContain(koMessages.cage.riskUnknown);
+  });
+
+  // story #2950 슬라이스②(PO 설계안 승인) — risk_grade 칩을 대체하는 관찰 사실 노출.
+  // can_approve=true인 인라인 카드 경로(density="full")에서만 diffFacts 슬롯이 산다.
+  it('neutral_facts.diff_size/touches_migration이 있으면 「파일 N · 마이그레이션 접촉」을 표시한다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-diff', can_approve: true, requires_human: true,
+        neutral_facts: { diff_size: 12, touches_migration: true },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('파일 12');
+    expect(text).toContain(koMessages.cage.diffFactsMigrationTouch);
+  });
+
+  it('touches_migration=false면 마이그레이션 접촉 문구 없이 파일 수만 표시한다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-diff-no-migration', can_approve: true, requires_human: true,
+        neutral_facts: { diff_size: 3, touches_migration: false },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('파일 3');
+    expect(text).not.toContain(koMessages.cage.diffFactsMigrationTouch);
+  });
+
+  it('neutral_facts가 없으면 diffFacts를 지어내지 않고 아예 표시하지 않는다', async () => {
+    mockFetches([gate({ id: 'g-no-facts', can_approve: true, requires_human: true, neutral_facts: null })], []);
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('파일');
+  });
+
+  it('story #3038 AC4(PO #3188 오서명 실사고) — 같은 work_item의 merge 게이트 2장이 pr_number로 서로 구분된다', async () => {
+    mockFetches(
+      [
+        gate({
+          id: 'g-pr-a', can_approve: true, requires_human: true,
+          work_item_id: 'w-2728', work_item_summary: { title: '2728 결제 게이팅', slug: null },
+          pr_number: 3187, github_check_run_sha: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+        }),
+        gate({
+          id: 'g-pr-b', can_approve: true, requires_human: true,
+          work_item_id: 'w-2728', work_item_summary: { title: '2728 결제 게이팅', slug: null },
+          pr_number: 3460, github_check_run_sha: 'f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5',
+        }),
+      ],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('PR #3187');
+    expect(text).toContain('a1b2c3d');
+    expect(text).toContain('PR #3460');
+    expect(text).toContain('f6e5d4c');
+  });
+
+  it('story #3038 AC4 — pr_number가 없는 게이트(doc_approval 등)는 PR 배지를 지어내지 않는다', async () => {
+    mockFetches(
+      [gate({ id: 'g-no-pr', can_approve: true, requires_human: true, pr_number: null })],
+      [],
+    );
+    await mount();
+    expect(container.textContent ?? '').not.toContain('PR #');
+  });
+
+  it('risk_grade 칩(고위험/위험도 확인 중)은 어떤 경우에도 더 이상 렌더되지 않는다', async () => {
+    mockFetches(
+      [gate({ id: 'g-no-chip', can_approve: true, requires_human: true, risk_grade: 'high' })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain(koMessages.cage.riskHigh);
+    expect(text).not.toContain(koMessages.cage.riskUnknown);
   });
 
   it('created_at이 오늘이면 "오늘 접수", 과거면 "N일 대기"로 노화를 표시한다', async () => {
@@ -178,6 +292,28 @@ describe('ApprovalsQueue', () => {
     const button = container.querySelector('button');
     await act(async () => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/gates/g-tap');
+  });
+
+  // story #2926(P0-F F3) — 클릭-스루 전용 항목은 ProofCapsule density="row"(컷코너+신뢰단계
+  // 레일)로 셸이 바뀐다. 3버튼 인라인 결재 카드·resolved 카드는 F3 스코프 밖(현행 rounded-xl
+  // border 카드 그대로 — 2923이 다룰 표면)이라 이 항목만 겨냥해 확認한다.
+  it('클릭-스루 항목(inlineResolvable=false·미해소)은 ProofCapsule row 셸(재질)로 렌더된다', async () => {
+    mockFetches([gate({ id: 'g-row' })], []);
+    await mount();
+    // ProofCapsule의 CutCornerShell 자체 시그니처. story #7d7634ee(P0)로 컷코너(clip-path)가
+    // proof-surface(재질)로 교체됐다 — 클래스명으로 식별.
+    const capsule = container.querySelector('.proof-surface');
+    expect(capsule).toBeTruthy();
+    expect(capsule?.className).toContain('bg-proof-panel');
+  });
+
+  it('3버튼 인라인 결재 카드는 F3 스코프 밖 — 현행 rounded-xl border 카드 셸 그대로다(2923 선점 안 함)', async () => {
+    mockFetches([lowRiskActionable()], []);
+    await mount();
+    // 인라인 액션 카드는 여전히 기존 셸(ProofCapsule 컷코너 아님) — 승인/변경요청 버튼이
+    // 그 증거(row 밀도엔 그런 버튼 슬롯이 없다).
+    expect(container.textContent).toContain(koMessages.cage.gateApprove);
+    expect(container.querySelector('[style*="clip-path"]')).toBeNull();
   });
 
   it('pending·held 둘 다 비어 있으면 빈 상태 문구를 렌더한다', async () => {
@@ -344,7 +480,7 @@ describe('ApprovalsQueue', () => {
 
     const postCall = calls.find((c) => c.method === 'POST');
     expect(postCall?.url).toBe('/api/gates/g-low/transition');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null, evidence_viewed: false });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null, evidence_viewed: false, reviewed_head_sha: null });
 
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     expect(container.textContent).toContain(koMessages.cage.queueViewRecord);
@@ -354,6 +490,47 @@ describe('ApprovalsQueue', () => {
     // 재조회(fetchGates) 없이 이 렌더만으로 반영됐다 — GET 호출 수가 mount 시점(pending+held
     // 각 1회=2)에서 늘지 않았다.
     expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+  });
+
+  // story #2982(선생님 실사용 리포트, PO 확定 2026-08-24) — 이 큐의 stale items[] 스냅샷(주석
+  // 위 L125 참고 — resolveGate() 성공 後에도 status=pending 그대로) 때문에, 다른 채널이 먼저
+  // 해소한 게이트를 여기서 다시 승인/반려 시도하면 서버가 409(gate_already_resolved)로 거부한다.
+  // AC1(죽은 버튼이 다시 안 뜬다)+AC3(인간 문구)를 재조회 없이(current_status로 즉시) 만족해야 함.
+  it('AC1·AC3 — 다른 채널이 먼저 해소한 게이트를 클릭하면 서버가 409(gate_already_resolved)로 거부하고, 재조회 없이 즉시 완료 카드+사람 문구로 전환된다', async () => {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      if (init?.method === 'POST') {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            data: null,
+            error: {
+              code: 'gate_already_resolved',
+              message: '이미 처리된 결재입니다. 되돌리려면 PO에게 재검토를 요청해주세요.',
+              current_status: 'approved',
+            },
+            meta: null,
+          }),
+        };
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 「완료」 카드로 즉시 전환됐다 — 그 자체가 AC3의 명시 안내다(별도 에러 배너를 겹쳐
+    // 보이는 게 아니라, 진짜 상태를 정직하게 보여주는 것으로 "그래서 뭘 해야 하는지"가
+    // 이미 답이 된다: 되돌리려면 undo 창 안이면 취소 버튼, 밖이면 기록 보기뿐).
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    // 재조회(GET) 없이 body의 current_status만으로 전환됐다 — mount 시점(pending+held=2)에서
+    // POST 1건 추가된 것 외 GET 호출 수가 안 늘어야 한다.
+    expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
   it('AC "중복 탭 중복 실행 0" — 승인 요청이 아직 안 끝난 상태에서 버튼이 비활성화돼 재클릭이 두 번째 요청을 만들지 않는다', async () => {
@@ -390,7 +567,7 @@ describe('ApprovalsQueue', () => {
     const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null, evidence_viewed: false });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null, evidence_viewed: false, reviewed_head_sha: null });
     expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
   });
 
@@ -424,7 +601,7 @@ describe('ApprovalsQueue', () => {
   it('pending 상태에 held_until만 세팅돼도 인라인 버튼이 안 뜬다(보류 배지·원탭 버튼 공존 봉쇄)', async () => {
     mockFetches([lowRiskActionable({ id: 'g-pending-held-until', held_until: new Date().toISOString() })], []);
     await mount();
-    expect(container.textContent).toContain(koMessages.cage.heldBadge);
+    expect(container.textContent).toContain(koMessages.cage.gateStatusHeld);
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
@@ -604,7 +781,7 @@ describe('ApprovalsQueue', () => {
 
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
       expect(postCall?.url).toBe('/api/gates/g-sig-approve/transition');
-      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: '근거 확認·서명 사유', evidence_viewed: true });
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: '근거 확認·서명 사유', evidence_viewed: true, reviewed_head_sha: null });
       expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeFalsy();
       expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     });
@@ -623,7 +800,7 @@ describe('ApprovalsQueue', () => {
       await act(async () => { rejectButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
-      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: '재작업 필요', evidence_viewed: false });
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: '재작업 필요', evidence_viewed: false, reviewed_head_sha: null });
       expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
     });
 
@@ -682,5 +859,205 @@ describe('ApprovalsQueue', () => {
       expect(wrapper.parentElement).toBe(actionRow);
       expect(mobileOrderOf(primary!)).toBeLessThan(mobileOrderOf(wrapper));
     }
+  });
+});
+
+describe('ApprovalsQueue — 실시간 해소/위임 반영(story #2985 AC2)', () => {
+  function actionableGate(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-live', gate_type: 'merge_gate', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '실시간 대상 항목', slug: null },
+      ...overrides,
+    });
+  }
+
+  it('mux가 conversation.gate_resolved(큐에 있는 gate_id)를 쏘면 그 항목이 완료 상태로 바뀐다(undo 버튼 없이)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).toContain('실시간 대상 항목');
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-live', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    // 남이 해소한 건 — 이 세션에서 내가 한 게 아니므로 undo(정정) 버튼은 안 뜬다.
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateUndo))).toBe(false);
+  });
+
+  it('큐에 없는 gate_id의 이벤트는 무시한다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'not-in-queue', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('mux가 conversation.gate_delegated를 쏘면 그 항목이 큐에서 사라진다(assigned_to_me 스코프 이탈)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).toContain('실시간 대상 항목');
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-live', new_approver_id: 'member-3' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('실시간 대상 항목');
+  });
+
+  // story #3044(PO 실사고 표본②, 2026-08-25) — fetchGates()는 마운트 1회뿐이고 gate_resolved/
+  // gate_delegated 둘 다 "새 게이트가 생겼다"는 못 알린다. conversation.gate_created 구독이
+  // 그 3번째 신호 — payload는 gate_id뿐이라 단건 GET으로 채워 prepend해야 한다.
+  it('mux가 conversation.gate_created를 쏘면 단건 GET으로 채워 목록 맨 앞에 즉시 추가된다(하드 리로드 불요)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).not.toContain('새로생긴카드');
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/g-new') {
+        return { ok: true, json: async () => gate({ id: 'g-new', work_item_summary: { title: '새로생긴카드', slug: null } }) };
+      }
+      return { ok: true, json: async () => [] };
+    }));
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_created');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-new' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('새로생긴카드');
+  });
+
+  it('mux가 conversation.gate_created를 쏴도 이미 목록에 있는 gate_id면 중복 추가하지 않는다(레이스 가드)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    const before = container.textContent;
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => actionableGate() })));
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_created');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-live' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toBe(before);
+  });
+
+  it('malformed payload는 크래시 없이 무시한다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+
+    const resolvedHandler = muxSubscribeMock.mock.calls.find(([e]) => e === 'conversation.gate_resolved')![1] as (raw: string) => void;
+    const delegatedHandler = muxSubscribeMock.mock.calls.find(([e]) => e === 'conversation.gate_delegated')![1] as (raw: string) => void;
+    expect(() => resolvedHandler('not-json{')).not.toThrow();
+    expect(() => delegatedHandler('not-json{')).not.toThrow();
+  });
+});
+
+// story #3069(P1, 2026-08-25) — mux가 null(피처플래그 off·미연결 등)이어도 이 세 이벤트가
+// 여전히 최소 한 곳에서 리스닝돼야 한다는 불변식의 회귀가드. 예전엔 mux.subscribe만 있고
+// fallback이 없어 mux가 죽으면 이 세 이벤트가 페이지 전체에서 리스너 자체를 잃었다(실사고
+// — BE는 정상 delivered인데 화면 카드 0건). useSseNotifications의 독립 EventSource 폴백
+// (mux === null일 때만 타는 effect)을 거쳐 여기서도 정확히 살아있는지 직접 증명한다.
+class FakeEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  static instances: FakeEventSource[] = [];
+  listeners: Record<string, Array<(e: { data: string; lastEventId?: string }) => void>> = {};
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string; lastEventId?: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  readyState = 0;
+  constructor(public url: string, _opts?: unknown) {
+    FakeEventSource.instances.push(this);
+  }
+  addEventListener(type: string, cb: (e: { data: string; lastEventId?: string }) => void) {
+    (this.listeners[type] ??= []).push(cb);
+  }
+  close() { this.closed = true; }
+  emit(type: string, data: string, lastEventId?: string) {
+    for (const cb of this.listeners[type] ?? []) cb({ data, lastEventId });
+  }
+}
+
+describe('ApprovalsQueue — mux 비활성 시 fallback EventSource(story #3069, 실사고 재발가드)', () => {
+  function actionableGate(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-live', gate_type: 'merge_gate', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '실시간 대상 항목', slug: null },
+      ...overrides,
+    });
+  }
+
+  beforeEach(() => {
+    FakeEventSource.instances = [];
+    (globalThis as unknown as { EventSource: typeof FakeEventSource }).EventSource = FakeEventSource;
+    // 이 describe만 mux를 null로 — RealtimeProvider가 피처플래그 off거나 미연결일 때와 동형.
+    useSseMultiplexerContextMock.mockReturnValue(null);
+  });
+
+  it('mux가 null이어도 conversation.gate_resolved가 fallback EventSource로 리스닝된다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+
+    expect(FakeEventSource.instances.length).toBeGreaterThan(0);
+    const es = FakeEventSource.instances[0]!;
+    expect(es.listeners['conversation.gate_resolved']).toBeTruthy();
+
+    await act(async () => {
+      es.emit('conversation.gate_resolved', JSON.stringify({ gate_id: 'g-live', status: 'approved' }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('mux가 null이어도 conversation.gate_delegated가 fallback EventSource로 리스닝된다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).toContain('실시간 대상 항목');
+
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('conversation.gate_delegated', JSON.stringify({ gate_id: 'g-live' }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('실시간 대상 항목');
+  });
+
+  it('mux가 null이어도 conversation.gate_created가 fallback EventSource로 리스닝돼 단건 GET 후 prepend된다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).not.toContain('새로생긴카드');
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/g-new') {
+        return { ok: true, json: async () => gate({ id: 'g-new', work_item_summary: { title: '새로생긴카드', slug: null } }) };
+      }
+      return { ok: true, json: async () => [] };
+    }));
+
+    const es = FakeEventSource.instances[0]!;
+    expect(es.listeners['conversation.gate_created']).toBeTruthy();
+    await act(async () => {
+      es.emit('conversation.gate_created', JSON.stringify({ gate_id: 'g-new' }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('새로생긴카드');
   });
 });

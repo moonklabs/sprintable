@@ -244,3 +244,155 @@ async def test_push_device_register_without_platform_realdb():
             await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": str(ORG)})
             await s.commit()
         await engine.dispose()
+
+
+APNS_TOKEN_A = "ab" * 32
+APNS_TOKEN_B = "cd" * 32
+
+
+@pytest.mark.anyio
+async def test_push_device_register_macos_apns_round_trip_realdb():
+    """story #3064: platform='macos'는 apns_device_token으로 등록되고(expo_push_token 없이),
+    기존 Expo(ios/android) 등록과 같은 org 안에 공존하며, 재등록도 apns_device_token UNIQUE
+    기준으로 멱등(같은 행 갱신)임을 실증. 0278/0279 마이그(스캔→CHECK) 검증의 실 왕복 대응."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.dependencies.auth import get_verified_org_id
+    from ee.routers import push_devices as pd
+    from tests.conftest import override_db_and_read
+
+    app = FastAPI()
+    app.include_router(pd.router, prefix="/api/v2/push")
+
+    engine = create_async_engine(_async_url())
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with SessionLocal() as s:
+        await s.execute(text("DELETE FROM push_devices WHERE org_id=:o"), {"o": str(ORG)})
+        await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": str(ORG)})
+        await s.execute(
+            text("INSERT INTO organizations (id,name,slug,plan) VALUES (:o,'S2 Org','s2-mobile','free')"),
+            {"o": str(ORG)},
+        )
+        await s.commit()
+
+    async def _override_db():
+        async with SessionLocal() as sess:
+            yield sess
+            await sess.commit()
+
+    def _make_caller_override(member_id: uuid.UUID):
+        async def _override():
+            return member_id
+        return _override
+
+    override_db_and_read(app, _override_db)
+    app.dependency_overrides[get_verified_org_id] = lambda: ORG
+    app.dependency_overrides[pd._get_caller_member_id] = _make_caller_override(MEMBER_X)
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            with _ee_on():
+                # 1) macOS 등록 — apns_device_token만, expo_push_token 없이 200.
+                r = await client.post(
+                    "/api/v2/push/devices",
+                    json={"apns_device_token": APNS_TOKEN_A, "platform": "macos"},
+                )
+                assert r.status_code == 200, r.text
+                dev = r.json()
+                assert dev["platform"] == "macos"
+                assert dev["apns_device_token"] == APNS_TOKEN_A
+                assert dev["expo_push_token"] is None
+                dev_id = dev["id"]
+
+                # 2) Expo(ios) 디바이스도 같은 org에 공존 — 채널 분리 확認.
+                r = await client.post(
+                    "/api/v2/push/devices",
+                    json={"expo_push_token": TOKEN_A, "platform": "ios"},
+                )
+                assert r.status_code == 200, r.text
+
+                r = await client.get("/api/v2/push/devices")
+                assert len(r.json()) == 2
+
+                # 3) macOS 재등록(같은 apns_device_token) → 멱등(동일 행, app_version 갱신).
+                r = await client.post(
+                    "/api/v2/push/devices",
+                    json={"apns_device_token": APNS_TOKEN_A, "platform": "macos", "app_version": "0.9.0"},
+                )
+                assert r.status_code == 200, r.text
+                assert r.json()["id"] == dev_id
+                assert r.json()["app_version"] == "0.9.0"
+
+                # 4) 두 번째 macOS 디바이스(다른 토큰) → 신규 행.
+                r = await client.post(
+                    "/api/v2/push/devices",
+                    json={"apns_device_token": APNS_TOKEN_B, "platform": "macos"},
+                )
+                assert r.status_code == 200, r.text
+                r = await client.get("/api/v2/push/devices")
+                assert len(r.json()) == 3
+
+                # 5) 스키마 계약 위반(macos인데 apns_device_token 누락) → 422.
+                r = await client.post("/api/v2/push/devices", json={"platform": "macos"})
+                assert r.status_code == 422, r.text
+    finally:
+        app.dependency_overrides.clear()
+        async with SessionLocal() as s:
+            await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": str(ORG)})
+            await s.commit()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_push_devices_token_platform_exclusive_check_enforced_at_db_layer():
+    """0278 마이그의 push_devices_token_platform_exclusive_check 를 스키마(pydantic) 우회해
+    raw INSERT로 직접 찔러 DB 레벨 방어가 실재함을 증명 — API 계약이 뚫려도(버그·직접 SQL 등)
+    최후방어선이 산다는 것 자체가 이 CHECK의 존재 이유."""
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(_async_url())
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    from sqlalchemy import text
+
+    org = uuid.uuid4()
+    try:
+        async with SessionLocal() as s:
+            await s.execute(
+                text("INSERT INTO organizations (id,name,slug,plan) VALUES (:o,'CHK Org','chk-org','free')"),
+                {"o": str(org)},
+            )
+            await s.commit()
+
+        # ① macos인데 apns_device_token NULL·expo_push_token만 채움 → 위반.
+        async with SessionLocal() as s:
+            with pytest.raises(IntegrityError):
+                await s.execute(
+                    text(
+                        "INSERT INTO push_devices (id, org_id, member_id, platform, expo_push_token) "
+                        "VALUES (gen_random_uuid(), :o, gen_random_uuid(), 'macos', :t)"
+                    ),
+                    {"o": str(org), "t": "ExponentPushToken[should-not-work-for-macos]"},
+                )
+                await s.commit()
+
+        # ② ios인데 expo_push_token NULL(apns만 채움) → 위반.
+        async with SessionLocal() as s:
+            with pytest.raises(IntegrityError):
+                await s.execute(
+                    text(
+                        "INSERT INTO push_devices (id, org_id, member_id, platform, apns_device_token) "
+                        "VALUES (gen_random_uuid(), :o, gen_random_uuid(), 'ios', :t)"
+                    ),
+                    {"o": str(org), "t": "ab" * 32},
+                )
+                await s.commit()
+    finally:
+        async with SessionLocal() as s:
+            await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": str(org)})
+            await s.commit()
+        await engine.dispose()

@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { useSseMultiplexerContext, useSseConnectedContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
+import { createVisibilityReconnectState } from '@/lib/realtime/sse-visibility-reconnect';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -22,6 +23,9 @@ export interface ChatMessage {
   created_by: string;     // backend: sender.id
   sender_name: string;    // backend: sender.name
   sender_type: string;    // backend: sender.type ('human' | 'agent')
+  // story #2901 — backend: sender.avatar_url. TeamMember/Member 소싱만 값이 있고
+  // OrgMember 소싱(레거시 JWT-휴먼 일부 경로)은 컬럼 자체가 없어 항상 null.
+  sender_avatar_url: string | null;
   content: string;
   /** story #2319 — set이면 tombstone됨(행은 남고 content는 서버가 이미 ""로 스크럽했다).
    * ChatBubble이 이 필드로 placeholder를 렌더한다(#2299 still_exists와 같은 축 — 「끊어짐」은
@@ -62,6 +66,13 @@ export interface ChatMessage {
   approval_target?: {
     work_item_type: string; work_item_id: string; gate_id: string;
     actions?: string[]; decision?: string; resolution_note?: string | null;
+    /** story #2985 — 결재선 지정 시 이 카드의 수신자가 지정 결재자인지(true)/정보성으로
+     * 강등된 나머지 owner·admin인지(false). 미지정 상신(designated_approver_id=None)이면
+     * 전원 true(회귀 0) — approval_delivery.py::dispatch_approval_request_cards. */
+    designated?: boolean;
+    /** story #2985 — 지정 결재자 표시 이름(정보성 카드 안내문구용). 지정 없음/미확인이면
+     * null. */
+    designated_approver_name?: string | null;
   } | null;
   /** story #2637 AC0-a — BE(#3036)가 msg_metadata['event']를 payload top-level에 additive로
    * 노출(`_event_payload`, approval_target과 동형 패턴). 있으면 이 메시지는 이벤트 레지스트리
@@ -69,11 +80,16 @@ export interface ChatMessage {
    * 없으면 content(BE의 제네릭 폴백 텍스트, #2633 _render_event_message_content)를 그대로
    * 렌더한다(비회귀). 구서버/일반 메시지는 `?? null`로 통일(approval_target과 같은 이유). */
   event?: { event_key: string; payload: Record<string, unknown> } | null;
+  /** story #2985 — 'request'(액션 카드)/'result'(회신 카드) 판별(BE msg_metadata.activation.kind
+   * → _activation_payload가 top-level로 노출). story #3001부터 'request_info'는 BE가 더
+   * 이상 발행하지 않는다(정보성 카드 폐기 — 카드 자체가 지정자에게만 간다). 구서버(undefined/
+   * null)는 기존 렌더로 무회귀. */
+  message_kind?: string | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
 export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
-  const sender = raw.sender as { id?: string; name?: string; type?: string } | undefined;
+  const sender = raw.sender as { id?: string; name?: string; type?: string; avatar_url?: string | null } | undefined;
   return {
     id: (raw.id ?? '') as string,
     // conversation:message uses conversation_id; chat:message uses thread_id or memo_id
@@ -81,6 +97,7 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     created_by: (raw.created_by ?? sender?.id ?? '') as string,
     sender_name: (sender?.name ?? '') as string,
     sender_type: (sender?.type ?? 'human') as string,
+    sender_avatar_url: (sender?.avatar_url ?? null) as string | null,
     content: (raw.content ?? '') as string,
     deleted_at: (raw.deleted_at ?? null) as string | null,
     attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
@@ -99,6 +116,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
     // story #2637 AC0-a — approval_target과 동일 규율.
     event: (raw.event ?? null) as ChatMessage['event'],
+    // story #2985 — _activation_payload가 top-level에 싣는 message_kind 그대로.
+    message_kind: (raw.message_kind ?? null) as string | null,
   };
 }
 
@@ -144,6 +163,9 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   const onConversationReadRef = useRef(onConversationRead);
   const onReconnectRef = useRef(onReconnect);
   const memberIdRef = useRef(currentTeamMemberId);
+  // story #2964(#2940과 동일 클래스, 폴백 경로 전용) — memberId가 진짜로 바뀐 재실행(마운트·
+  // mux 단독 토글이 아니라)인지 판별용.
+  const prevMemberIdForResetRef = useRef(currentTeamMemberId);
 
   // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
   // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
@@ -182,6 +204,11 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   // 이미 살아있는 canonical 경로 `conversation.message_created`(S-COMM-12, 아래
   // handleConversationMessage)가 전부 커버한다 — 별도 기능 손실 없이 제거.
   const mux = useSseMultiplexerContext();
+  // story 6ddaa086(critical, 선생님 실사고) — mux.connected(getter)는 mux 핸들 자체가
+  // 참조안정적(realtime-provider.tsx 주석 참고)이라 값이 바뀌어도 리렌더를 못 유발했다
+  // ("연결 끊겼어요" 배너가 정상 재연결 후에도 안 풀리는 근본원인). 반응형 전용 컨텍스트로
+  // 교체.
+  const muxConnected = useSseConnectedContext();
 
   useEffect(() => {
     if (!mux) return;
@@ -198,6 +225,21 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   useEffect(() => {
     if (mux || typeof EventSource === 'undefined') return;
 
+    // story #2964(sse-multiplexer.ts #2940과 동일 클래스) — org 전환으로 currentTeamMemberId가
+    // 바뀌어도 이 effect가 재실행되지 않으면(구 deps=[mux, backoff]) 커넥션이 옛 member_id로
+    // 남는다. memberIdRef 쓰기는 effect를 재트리거하지 못한다 — currentTeamMemberId를 deps에
+    // 편입해 값이 실제로 바뀔 때만(문자열 값 비교) 재구독을 강제한다. 동시에 memberId가 진짜
+    // 바뀐 경우에만 옛 org의 lastEventIdRef를 버린다(#3388 카디르 QA와 동일 근거 — 새 org
+    // 커넥션에 옛 org의 last_event_id가 실리면 BE가 org 스코프 없이 그 id의 생성시각만으로
+    // 백필기준을 잡아 조용히 누락된다). mux 단독 토글이나 최초 마운트에선 리셋하지 않는다.
+    if (prevMemberIdForResetRef.current !== currentTeamMemberId) lastEventIdRef.current = null;
+    prevMemberIdForResetRef.current = currentTeamMemberId;
+
+    // story #2987 — sse-multiplexer.ts와 동일 처방(그쪽 주석 참고). 가시성 복귀 강제 재연결은
+    // backoff.isReconnect()를 안 거치므로(onError 미경유) 이 플래그로 onReconnect(=backfill)를
+    // 확실히 태운다.
+    let pendingForcedReconnect = false;
+
     function connect() {
       sourceRef.current?.close();
       sourceRef.current = null;
@@ -210,7 +252,8 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
       sourceRef.current = source;
 
       source.onopen = () => {
-        const isReconnect = backoff.isReconnect();
+        const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
+        pendingForcedReconnect = false;
         setConnected(true);
         backoff.onOpen();
         // AC4: 재연결 시 backfill 트리거
@@ -266,14 +309,48 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
 
     connect();
 
+    // story #2987 — sse-multiplexer.ts와 동일 처방(그쪽 주석 참고, sse-visibility-reconnect.ts
+    // 공용 모듈). readyState는 좀비 커넥션을 못 잡으므로 가시성 복귀 시 무조건 강제 재연결한다.
+    const visibilityState = createVisibilityReconnectState();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        visibilityState.onHidden();
+        return;
+      }
+      if (visibilityState.onVisible()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // story #3081 — visibilitychange 축과 독립: 데스크톱 셸(창은 계속 visible)에서 OS
+    // 포커스만 잃었다 되찾는 경우 위 handleVisibilityChange는 안 fire한다(sse-visibility-
+    // reconnect.ts의 onFocusRegained 주석 참고). sse-multiplexer.ts와 동일 처방.
+    const handleWindowFocus = () => {
+      if (visibilityState.onFocusRegained()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
+
     return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      // #3388 카디르 QA MEDIUM과 동일 근거 — clearTimeout만으론 stale ref가 남아, 재마운트
+      // (memberId 전환) 직후 대기 中이던 백오프 재시도가 stale ref에 걸려 건너뛸 수 있었다.
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       sourceRef.current?.close();
       sourceRef.current = null;
     };
-  }, [mux, backoff]);
+  }, [mux, backoff, currentTeamMemberId]);
 
-  // mux 경로에서는 로컬 connected state를 동기화하지 않고(setState-in-effect 회피) 멀티플렉서
-  // 자신의 connected를 그대로 노출한다 — 이미 반응형(context 값 변경 시 이 훅도 리렌더).
-  return { connected: mux ? mux.connected : connected };
+  // story 6ddaa086 — 이전 주석은 "mux.connected가 이미 반응형"이라 적었으나 틀렸다: mux
+  // 핸들 자체는 참조안정적이라(realtime-provider.tsx) getter 뒤 값이 바뀌어도 이 컴포넌트가
+  // 리렌더되지 않았다. muxConnected(위, 전용 컨텍스트)만 실제로 반응형이다.
+  return { connected: mux ? muxConnected : connected };
 }

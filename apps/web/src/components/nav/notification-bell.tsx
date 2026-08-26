@@ -18,6 +18,7 @@ import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
+import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -37,7 +38,7 @@ function getNotificationTab(eventType: string): 'story' | 'system' {
   return 'system';
 }
 
-interface EventNotification {
+export interface EventNotification {
   id: string;
   event_type: string;
   source_entity_type: string | null;
@@ -52,7 +53,11 @@ interface EventNotification {
   created_at: string;
 }
 
-function getEntityHref(notification: EventNotification): string | null {
+// export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
+// 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
+export function getEntityHref(
+  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload'>,
+): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
   switch (source_entity_type) {
@@ -61,7 +66,13 @@ function getEntityHref(notification: EventNotification): string | null {
     case 'task':
       return `/board?task_id=${source_entity_id}`;
     case 'epic':
-      return `/epics/${source_entity_id}`;
+      // ⚠️QA changes(PR#3381, 카디르+codex, 2026-08-23) — 이 딥링크는 story #2956이 지운
+      // RENAMED_RESOURCES(epics→goals) 301에 얹혀 살고 있었다: `/epics/{id}`가 bare 승격
+      // (MIGRATED_RESOURCES) 後 `/{ws}/{proj}/epics/{id}`가 됐다가 그 rename이 다시
+      // `/{ws}/{proj}/goals/{id}`로 옮겨줬다 — 신 `[ws]/[proj]/epics/`엔 목록(`page.tsx`)만
+      // 있고 `[id]` 서브라우트가 없어(#3377 스코프에 상세 페이지 없음), rename 제거로
+      // 404가 됐다. Goal=Epic이라 `goals/[id]`가 이미 에픽 상세 정본 — 직접 가리킨다.
+      return `/goals/${source_entity_id}`;
     case 'sprint':
       // sprints-client.tsx에서 id 파라미터 처리 추가됨
       return `/sprints?id=${source_entity_id}`;
@@ -396,9 +407,23 @@ export function NotificationBell() {
       };
       return [notification, ...prev];
     });
+    // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
+    // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
+    // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
+    const summary = incoming.payload?.summary ?? getEventTypeCopy(t, incoming.event_type);
+    if (hasDesktopNotifyBridge()) {
+      const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
+      void notifyViaDesktopBridge({
+        event_type: incoming.event_type,
+        body,
+        deeplink_path: getEntityHref(incoming) ?? '/',
+      });
+      return;
+    }
+
     // 탭 비활성 상태에서 브라우저 알림 표시
     if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-      void new Notification(incoming.payload?.summary ?? getEventTypeCopy(t, incoming.event_type), {
+      void new Notification(summary, {
         body: incoming.payload?.sender_name ?? undefined,
         icon: '/favicon.ico',
       });
@@ -560,7 +585,8 @@ export function NotificationBell() {
 
       {/* 데스크톱 드롭다운 (lg+) */}
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-lg lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
+        // story #3007(로드맵 P2·PR-E, L1) — 드롭다운 패널은 floating이라 --elev-overlay.
+        <div className="absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
           <NotificationPanel
             notifications={notifications}
             onMarkAllRead={handleMarkAllRead}

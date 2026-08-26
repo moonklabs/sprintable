@@ -10,14 +10,18 @@ const alertVariants = cva(
         default: 'border-border bg-muted/40 text-foreground',
         // story #2513 — 글자는 text-foreground로 통일(라이트 테마 AA 미달 fix, warning과
         // 동형). variant 정체성은 border-*-border·아이콘·bg-*-tint로만 표현한다.
+        // story #2969 §2 PR-2(doc proofline-system-layer-2969) — 좌측 2px 상태 액센트
+        // 추가(border-l-2, 기존 border-*-border 색 그대로 두껍게만). default(중립)는 축이
+        // 없어 미적용, 색 variant 전부 대칭 적용(doc "정보/경고 색"은 대표 예시로 읽음 —
+        // success/destructive만 빼면 형제간 비일관).
         success:
-          'border-success-border bg-success-tint text-foreground',
+          'border-success-border border-l-2 bg-success-tint text-foreground',
         warning:
-          'border-warning-border bg-warning-tint text-foreground',
+          'border-warning-border border-l-2 bg-warning-tint text-foreground',
         destructive:
-          'border-destructive-border bg-destructive-tint text-foreground',
+          'border-destructive-border border-l-2 bg-destructive-tint text-foreground',
         info:
-          'border-info-border bg-info-tint text-foreground',
+          'border-info-border border-l-2 bg-info-tint text-foreground',
       },
     },
     defaultVariants: {

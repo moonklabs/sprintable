@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import {
   DropdownMenu,
@@ -24,11 +25,12 @@ import { useToast, ToastContainer } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
+import { KanbanTrustColumn } from './kanban-trust-column';
 import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
+import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -110,6 +112,25 @@ function saveWipLimit(projectId: string | undefined, status: string, limit: numb
   }
 }
 
+// story #2933 H4 — doneCollapseKey와 동형 localStorage 패턴(project별).
+function axisModeKey(projectId: string | undefined): string {
+  return `board_axis_mode_${projectId ?? 'default'}`;
+}
+
+// PO 긴급 fix(선생님 지적, 2026-08-22) — 방향서 P0-04 원문 «5-status를 보조 뷰로 남기고
+// 기본 상태는 신뢰 파이프라인으로» = 기본값은 'trust'가 스펙. localStorage 미설정 시 'status'로
+// 낙하하던 게 실측 결함(#2933 done 선언 당시 전원이 놓친 사각) — 명시적으로 저장된 'status'
+// 선택만 존중하고, 그 외(미설정 포함)엔 'trust'로 낙하한다.
+function loadAxisMode(projectId: string | undefined): 'status' | 'trust' {
+  if (typeof window === 'undefined') return 'trust';
+  return localStorage.getItem(axisModeKey(projectId)) === 'status' ? 'status' : 'trust';
+}
+
+function saveAxisMode(projectId: string | undefined, mode: 'status' | 'trust'): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(axisModeKey(projectId), mode);
+}
+
 export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -147,7 +168,26 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [assigneeTypeFilter, setAssigneeTypeFilter] = useState<'' | 'human' | 'agent'>('');
-  const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
+  // story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — 예전엔 이 state가 뷰포트 무관 'board'로
+  // 하드코딩돼 있었다(유나 실측: flow-client의 view='list' 세그로 진입해도 여기서 다시
+  // 'board'로 떨어져 3.55배 가로 overflow가 재발 — 이름이 같은 두 「board/list」 개념 충돌).
+  // null=아직 사용자가 명시로 안 고름(URL이나 클릭 없음) → isMobile로 유도한 기본값을 쓴다.
+  // 사용자가 토글 버튼을 누르면(setViewMode 직접 호출) 그 이후엔 뷰포트 변화와 무관하게
+  // 그 선택을 고정 존중(flow-client.tsx의 `?view=` 우선·isMobile 폴백과 동일한 위계).
+  const [viewModeOverride, setViewMode] = useState<'board' | 'list' | null>(null);
+  const isMobile = useIsMobile();
+  const viewMode = viewModeOverride ?? (isMobile ? 'list' : 'board');
+  // story #2933 H4(P0-H) — 5-status/6단계 신뢰축 컬럼 축 토글. viewMode(board/list)와 직교
+  // (list 뷰는 이번 슬라이스 스코프 밖 — trust 축은 board 렌더 안에서만). doneCollapsed와
+  // 동형 localStorage 패턴(project별) — 재방문해도 마지막 선택 유지.
+  const [axisMode, setAxisMode] = useState<'status' | 'trust'>('trust');
+  useEffect(() => {
+    setAxisMode(loadAxisMode(projectId));
+  }, [projectId]);
+  const handleSetAxisMode = useCallback((next: 'status' | 'trust') => {
+    setAxisMode(next);
+    saveAxisMode(projectId, next);
+  }, [projectId]);
   const [sprintSearch, setSprintSearch] = useState('');
   const [epicSearch, setEpicSearch] = useState('');
   const [assigneeSearch, setAssigneeSearch] = useState('');
@@ -640,6 +680,157 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     return null;
   };
 
+  // story #2933 H4(P0-H, v4 아티팩트 e65f1016) — story→트러스트 컬럼 매핑. SSOT는 BE
+  // trust_pipeline.derive_trust_stage()(H1이 story.trust_stage로 노출) — FE는 그 값을 그대로
+  // 컬럼 판별자로 읽을 뿐 재계산하지 않는다(PO 지침 (a), 구 story-detail-panel:769류 폐기된
+  // FE 재파생 반복 금지). done만 예외 — derive_trust_stage가 done을 None으로 반환해(파이프라인
+  // 밖) trust_stage 하나만으론 done 여부를 못 가른다(같은 None이 "미지 status"와 안 구분되는
+  // H1 스키마의 정직한 한계, story.py trust_stage 필드 주석과 동형) — status==='done'을 별도로
+  // 대조해 7번째 «완료» 컬럼으로 보낸다.
+  const storyTrustColumn = (s: KanbanStory): TrustColumnId | null => {
+    if (s.status === 'done') return 'done';
+    return (s.trust_stage as TrustColumnId | null) ?? null;
+  };
+
+  const isLockedTrustColumn = (columnId: TrustColumnId): boolean =>
+    TRUST_COLUMNS.find((c) => c.id === columnId)?.locked ?? false;
+
+  // 파생 3컬럼(needs_input/verified/merge_ready)은 드롭 타깃으로 절대 해소되지 않는다(잠금) —
+  // v4 결정⑤ "파생서 카드 빼는 길=게이트 해소뿐". 컬럼 자체에 드롭하든 그 컬럼의 카드 위에
+  // 드롭하든 동일하게 null(드롭 무효)을 반환해 handleTrustDragEnd가 조용히 무시하게 한다.
+  const resolveTrustColumnId = (overId: string): TrustColumnId | null => {
+    const asColumn = TRUST_COLUMNS.find((c) => c.id === overId);
+    if (asColumn) return asColumn.locked ? null : asColumn.id;
+
+    const targetStory = stories.find((s) => s.id === overId);
+    if (targetStory) {
+      const col = storyTrustColumn(targetStory);
+      if (col && isLockedTrustColumn(col)) return null;
+      return col;
+    }
+    return null;
+  };
+
+  const computeNewTrustPosition = (
+    columnStories: KanbanStory[],
+    storyId: string,
+    overId: string,
+  ): number => {
+    const overStory = columnStories.find((s) => s.id === overId);
+    if (!overStory) {
+      const sorted = [...columnStories].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+      const last = sorted[sorted.length - 1];
+      return last ? (last.position ?? 0) + 1000 : 1000;
+    }
+    const sorted = [...columnStories.filter((s) => s.id !== storyId)]
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    const overIdx = sorted.findIndex((s) => s.id === overId);
+    if (overIdx === -1) {
+      const last = sorted[sorted.length - 1];
+      return last ? (last.position ?? 0) + 1000 : 1000;
+    }
+    const prev = sorted[overIdx - 1];
+    const next = sorted[overIdx];
+    const prevPos = prev?.position ?? (next.position ?? 0) - 2000;
+    const nextPos = next?.position ?? prevPos + 2000;
+    return Math.round((prevPos + nextPos) / 2);
+  };
+
+  // story #2933 H4 — handleDragEnd의 트러스트축 형제. 판별자만 다르다(status 동등비교 대신
+  // storyTrustColumn 동등비교) — 그래서 PO 지침(b)이 저절로 성립한다: queued 컬럼이 backlog+
+  // ready-for-dev 둘 다 담아도, "같은 트러스트 컬럼 안에서" 재정렬(예: backlog 카드를 그
+  // 컬럼의 ready-for-dev 카드보다 위로 끌기)은 isSameTrustColumn=true라 position-only PATCH만
+  // 타고 status는 절대 안 건드린다 — backlog 카드가 컬럼 내 이동만으로 승격되지 않는다.
+  const handleTrustDragEnd = async (event: DragEndEvent) => {
+    setActiveId(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const storyId = String(active.id);
+    const overId = String(over.id);
+    const newTrustColumn = resolveTrustColumnId(overId);
+    if (!newTrustColumn) return; // 파생 컬럼 드롭 시도 등 — 조용히 무효(스냅백, PATCH 0건).
+
+    const story = stories.find((s) => s.id === storyId);
+    if (!story) return;
+    const oldTrustColumn = storyTrustColumn(story);
+    if (!oldTrustColumn) return; // 드래그 시작 카드 자체가 파생 컬럼 소속 — useSortable disabled로 애초 안 잡히지만 방어.
+
+    const isSameTrustColumn = oldTrustColumn === newTrustColumn;
+    const targetColumnStories = stories.filter((s) => storyTrustColumn(s) === newTrustColumn);
+    const newPosition = computeNewTrustPosition(targetColumnStories, storyId, overId);
+
+    if (isSameTrustColumn) {
+      setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, position: newPosition } : s)));
+      void fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: newPosition }),
+      });
+      return;
+    }
+
+    // PO 지침④ — queued로의 이동은 항상 ready-for-dev로 승격(backlog 강등은 이 뷰에서 안 함).
+    const newStatus = TRUST_COLUMN_TO_STATUS[newTrustColumn];
+    if (!newStatus) return; // 이론상 도달 불가(resolveTrustColumnId가 이미 locked를 거름) — 방어.
+
+    setStories((prev) =>
+      prev.map((s) => (s.id === storyId ? { ...s, status: newStatus, position: newPosition } : s)),
+    );
+
+    try {
+      const res = await fetch('/api/stories/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
+      });
+      if (!res.ok) {
+        setStories((prev) =>
+          prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
+        );
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.error?.code === 'FORBIDDEN') {
+          bumpTransitionErrorNonce();
+          setTransitionError(t('transitionDenied'));
+          setTimeout(() => setTransitionError(null), 4000);
+        }
+        return;
+      }
+      const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
+      const okItem = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId) : null;
+      const violation = okItem?.violation ?? null;
+      if (violation) addToast({ type: 'warning', title: t('transitionViolation') });
+      // story #2933 H4 qa:changes(카디르+codex, 2026-08-22) — 위 낙관 갱신(L764-766)은
+      // status/position만 바꿔 trust_stage는 이전 값 그대로 스프레드된다. queued→running
+      // 이동은 카드가 옛 컬럼(queued)에 그대로 남고, done 카드를 다른 컬럼으로 옮기면
+      // trust_stage=null이 유지돼(그 카드가 done이던 동안 원래 null이었으므로) status만
+      // 바뀐 뒤에는 storyTrustColumn이 어느 컬럼과도 안 맞아 카드가 보드에서 실종된다. 서버가
+      // 이제(backend/app/routers/stories.py bulk_update_stories에 _attach_trust_stage 배선
+      // 추가) 계산해 돌려준 진짜 trust_stage를 응답 도착 시점에 병합 — 재파생 폴백 아님(PO
+      // 조건② 그대로, BE 판정값을 그대로 반영할 뿐).
+      if (okItem && 'trust_stage' in okItem) {
+        setStories((prev) =>
+          prev.map((s) => (s.id === storyId ? { ...s, trust_stage: okItem.trust_stage ?? null } : s)),
+        );
+      }
+      void fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: newPosition }),
+      });
+    } catch {
+      setStories((prev) =>
+        prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
+      );
+    }
+  };
+
+  // story #2933 H4 — storiesByColumn의 트러스트축 형제(status 동등비교 대신 storyTrustColumn).
+  const storiesByTrustColumn = (columnId: TrustColumnId): KanbanStory[] => {
+    const col = filteredStories.filter((s) => storyTrustColumn(s) === columnId);
+    return [...col].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  };
+
   // AC4: 드래그 완료 후 position gap 계산
   const computeNewPosition = (
     columnStories: KanbanStory[],
@@ -884,6 +1075,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     }
   }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal, bumpTransitionErrorNonce]);
 
+  // story #2949 — 트러스트 뷰의 인라인 컴포저는 TrustColumnId(예: 'queued')를 넘긴다.
+  // handleCreateStory는 그 값을 그대로 story.status로 POST하므로(classic 뷰는 컬럼id=status라
+  // 문제 없음), TRUST_COLUMN_TO_STATUS(H4 확定 매핑, 드롭과 동일 규칙)로 실 status를 먼저
+  // 해소한 뒤 위임한다 — 생성 로직 자체는 발명 0(같은 handleCreateStory 재사용).
+  const handleCreateStoryTrust = useCallback((columnId: string, title: string) => {
+    const status = TRUST_COLUMN_TO_STATUS[columnId as TrustColumnId] ?? columnId;
+    return handleCreateStory(status, title);
+  }, [handleCreateStory]);
+
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
     setWipLimits((prev) => ({
@@ -936,7 +1136,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         // story #2154 — handleDragEnd/handleChangeStatus/handleCreateStory가 실패 시점마다
         // bumpTransitionErrorNonce()를 함께 호출해, 4초 내 동일 사유가 재발해도 key가 바뀌어
         // 항상 새 DOM 노드로 재낭독된다(#2400이 남긴 latent gap 해소).
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
+        // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
         </div>
       )}
@@ -1287,6 +1488,43 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               <LayoutList className="size-3.5" />
             </button>
           </div>
+
+          {/* story #2933 H4(P0-H, 유나 판정 2026-08-22) — 5-status/6단계 신뢰축 컬럼 축 토글.
+              애초 board/list 아이콘-토글 스타일(pill+bg-muted)을 그대로 이었었으나, 유나가
+              PR#3358(I3) 위계 규율을 재확인 — 「프레임 레벨 토글=WorkspaceFrameTabs underline이
+              정본·pill=flow 내부 뷰 탭 전용」. 이 토글은 아이콘 버튼 한 쌍(board/list)과 달리
+              보드가 렌더하는 «컬럼 체계 자체»를 바꾸는 프레임급 전환이라 pill이 아니라
+              workspace-frame-tabs.tsx와 동일한 underline 패턴(border-b-2+text-sm font-semibold,
+              active=border-primary/text-foreground)을 직접 재사용한다(별도 컴포넌트 추출 없이
+              — 이 자리 2탭뿐이라 workspace-frame-tabs.tsx의 라우팅 전용 구조를 억지로 씌우기보다
+              그 시각 어휘만 인라인 차용, 신규 발명 아님). list 뷰에선 숨김(trust axis는 board
+              렌더 전용, 이번 슬라이스 스코프). */}
+          {viewMode === 'board' && (
+            <div className="flex items-center gap-3 border-b border-border/60" role="tablist" aria-label={t('trustAxisView')}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={axisMode === 'status'}
+                onClick={() => handleSetAxisMode('status')}
+                className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                  axisMode === 'status' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t('trustClassicView')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={axisMode === 'trust'}
+                onClick={() => handleSetAxisMode('trust')}
+                className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                  axisMode === 'trust' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t('trustAxisView')}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1298,9 +1536,16 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           // 1문장) — 보드 자체가 이미 레인 시각이라 별도 visual/AI hint는 중복·클러터.
           // stories(unfiltered 원본)로 진짜 빈 프로젝트만 판정 — 필터/검색 결과 0건은 여기 안 타고
           // 기존 per-column "스토리가 없습니다" 그대로(에픽 PR#2209에서 배운 필터빈 vs 진짜빈 구분).
-          // ⚠️컬럼 그리드를 대체하지 않고 그 위 배너로만 — CTA가 여는 백로그 인라인 컴포저
-          // (autoComposeSignal)가 KanbanColumn 내부 상태라, 컬럼 자체가 마운트돼 있어야
-          // CTA 클릭이 실제로 컴포저를 연다(대체했다면 신호를 받을 컬럼이 없어 무반응했을 것).
+          // ⚠️컬럼 그리드를 대체하지 않고 그 위 배너로만 — CTA가 여는 인라인 컴포저
+          // (autoComposeSignal)가 컬럼 내부 상태라, 컬럼 자체가 마운트돼 있어야 CTA 클릭이
+          // 실제로 컴포저를 연다(대체했다면 신호를 받을 컬럼이 없어 무반응했을 것).
+          //
+          // story #2949(본편, PR#3378의 축 전환 브리지 대체) — 인라인 컴포저가 이제
+          // KanbanTrustColumn(settable 4컬럼)에도 있어, 축 전환 없이 **현재 보이는 축의
+          // settable 첫 컬럼**(trust=queued/status=backlog)이 바로 컴포저를 연다. #3378의
+          // 임시 브리지(클릭 시 클래식으로 강제 전환)는 신호를 받을 컬럼이 없을 때만 필요했던
+          // 처방이라 여기서 제거 — 축 전환 자체가 없으니 유나 #3378 design 판정이 지적한
+          // "전환 시각 큐 부재"도 함께 소멸(전환이 안 일어나므로 큐가 지킬 대상이 없음).
           <div className="shrink-0 border-b border-border/60 px-6 py-4">
             <EmptyState
               icon={<Workflow className="size-8" />}
@@ -1325,8 +1570,71 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               memberMap={memberMap}
               onStoryClick={handleStoryClick}
               onChangeStatus={handleChangeStatus}
+              executionMap={executionMap}
+              blockedByMap={blockedByMap}
+              storyLabelsMap={storyLabelsMap}
+              storyGatesMap={storyGatesMap}
+              storyLineMap={storyLineMap}
+              projectId={projectId}
             />
           </div>
+        ) : axisMode === 'trust' ? (
+          // story #2933 H4(P0-H) — 6단계 신뢰축+완료 7컬럼. handleTrustDragEnd가 파생 3컬럼
+          // (needs_input/verified/merge_ready)으로의 드롭을 resolveTrustColumnId 단계에서
+          // 이미 null 처리해 무효화하므로, 그 카드들의 useSortable도 locked=true로 애초에
+          // 드래그 시작 자체를 막는다(이중 방어 — dnd-kit listeners 부재+drop 타깃 무효 둘 다).
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleTrustDragEnd}
+          >
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
+              {TRUST_COLUMNS.map((col) => {
+                const colStories = storiesByTrustColumn(col.id);
+                return (
+                  <KanbanTrustColumn
+                    key={col.id}
+                    id={col.id}
+                    label={t(col.i18nKey)}
+                    locked={col.locked}
+                    stories={colStories}
+                    epicMap={epicMap}
+                    memberMap={memberMap}
+                    onStoryClick={handleStoryClick}
+                    onEditStory={handleEditStory}
+                    onChangeStatus={handleChangeStatus}
+                    onDeleteStory={handleDeleteStory}
+                    projectId={projectId}
+                    onKickoffStory={handleKickoff}
+                    executionMap={executionMap}
+                    blockedByMap={blockedByMap}
+                    storyLabelsMap={storyLabelsMap}
+                    storyGatesMap={storyGatesMap}
+                    storyLineMap={storyLineMap}
+                    isDragging={activeId != null}
+                    onCreateStory={handleCreateStoryTrust}
+                    autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
+                  />
+                );
+              })}
+            </div>
+            <DragOverlayCompat adjustScale={false} className="cursor-grabbing">
+              {activeStory && (
+                <div className="rotate-3 scale-105">
+                  <StoryCard
+                    story={activeStory}
+                    epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
+                    assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
+                    assignees={(activeStory.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
+                    onClick={() => {}}
+                    lineStatus={storyLineMap[activeStory.id]}
+                    verifiedBy={activeStory.human_verified_by ? memberMap[activeStory.human_verified_by] : undefined}
+                  />
+                </div>
+              )}
+            </DragOverlayCompat>
+          </DndContext>
         ) : (
           <DndContext
             sensors={sensors}

@@ -6,7 +6,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
-import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import type { KanbanStory, KanbanMember, DependencyEdge, GateItem } from './types';
 import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
@@ -15,6 +15,7 @@ import { parseCursorMeta } from '@/lib/pagination';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { parseEntityRef } from '@/components/chat/entity-ref';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from '@/components/chat/reference-drop-notice';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
@@ -22,11 +23,13 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
-import { ChatProofSection } from '@/components/verify/chat-proof-section';
-import { deriveInFlightTrustChip } from '@/services/verify';
-import type { ProofState } from '@/components/proof-capsule/proof-capsule';
-import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
-import { initials } from '@/lib/storage/format';
+import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
+import { pickRelevantMergeGate } from '@/services/verify';
+import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
+import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
+import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
+import { initials, formatDate } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -293,16 +296,18 @@ export function DescriptionViewer({
           </span>
         );
       }
-      // id는 UUID만 허용 — chat-bubble.tsx의 entity: 파싱 규칙과 동일.
-      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+      // story #2888(S2a) — 파싱은 parseEntityRef SSOT(chat-bubble.tsx·embed-card.tsx와 공유,
+      // 정규식 정의 1곳). ghost 판정(isGhostOutgoingReference)은 이 화면 고유 축(story 서술의
+      // «나가는» 참조)이라 EmbedRenderer 결정 트리와는 별개 — 그대로 둔다.
+      const ref = parseEntityRef(href);
       // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입(mention_parser.py
       // 주석 참조) — chat-bubble.tsx와 동일하게 일반 EntityChip 경로를 안 태운다.
-      if (m && m[1]!.toLowerCase() !== 'asset') {
-        const ghost = isGhostOutgoingReference(references, m[1]!, m[2]!);
+      if (ref && ref.entityType.toLowerCase() !== 'asset') {
+        const ghost = isGhostOutgoingReference(references, ref.entityType, ref.entityId);
         return (
           // 긴급 정정(2026-07-28) 재발 방지 — 부모 div의 편집모드 진입 onClick으로 버블링 금지.
           <span onClick={(e) => e.stopPropagation()}>
-            <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} ghost={ghost} />
+            <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId)} ghost={ghost} />
           </span>
         );
       }
@@ -357,12 +362,84 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [savingStatus, setSavingStatus] = useState(false);
   const [localStatus, setLocalStatus] = useState(story.status);
 
+  // story #2933 H2(P0-H) — Workcell 스테퍼(pipelineStage, H1이 story.trust_stage 직결로 배선)를
+  // `story.trust_stage_changed` SSE로 라이브 갱신한다. AttentionQueueView(story #2923)와 동형
+  // 패턴 — SSE payload를 신뢰의 소스로 안 쓰고(트리거로만) 실제 값은 항상 REST 재조회로 얻는다
+  // (진실은 서버). undefined=아직 SSE 오버라이드 없음(story prop의 trust_stage 그대로 씀).
+  const [ssePipelineStage, setSsePipelineStage] = useState<WorkcellPipelineStage | null | undefined>(undefined);
+  const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
+  // 「이미 발화해 in-flight인 fetch」는 못 막는다. 늦게 도착한 응답이 새 story 패널에 옛
+  // story의 stage를 override로 붙이는 레이스였다 — 해소 시점에 「fetch를 쏜 id == 지금 보고
+  // 있는 id」를 대조해야 진짜로 막힌다(리셋만으론 pre-fetch 케이스만 덮고 in-flight는 못 덮음).
+  const currentStoryIdRef = useRef(story.id);
+  // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 currentStoryIdRef 가드는 "다른
+  // story로 전환"만 막는다. 같은 story에 연속 발화한 두 SSE 이벤트(E1 debounce 만료→fetchA
+  // in-flight 상태에서 E2 도착→fetchB 발사)의 응답이 네트워크에서 역순 도착하면(B 먼저,
+  // A 나중) — 둘 다 firedForId가 같아 위 가드를 통과하고, 나중에 도착한(=먼저 쏜, 더 옛
+  // stage인) A가 이미 반영된 B(더 신선한 stage)를 덮어써 부당 회귀한다(다음 SSE 없으면
+  // 자체 회복 안 됨). 처방: AbortController로 in-flight 자체를 최대 1개로 강제 — 새 fetch를
+  // 쏘기 직전 이전 컨트롤러를 abort하면 오래된 fetch는 AbortError로 죽어 절대 응답을
+  // 반영하지 못한다(순서 문제가 "가장 최근 것만 살아있다"는 불변식으로 구조적 소멸).
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    currentStoryIdRef.current = story.id;
+    setSsePipelineStage(undefined);
+    return () => {
+      if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
+      fetchAbortRef.current?.abort();
+    };
+  }, [story.id]);
+
+  const handleTrustStageChanged = useCallback((_eventName: string, data: unknown) => {
+    if (typeof data !== 'object' || data === null) return;
+    if ((data as Record<string, unknown>)['story_id'] !== story.id) return;
+    const firedForId = story.id; // 클로저 캡처 — 이 콜백은 story.id별로 useCallback 재생성됨.
+    if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
+    sseDebounceRef.current = setTimeout(() => {
+      sseDebounceRef.current = null;
+      // 이전 in-flight fetch를 abort — 동시 in-flight 0건 불변식(위 주석). 새 컨트롤러로 교체.
+      fetchAbortRef.current?.abort();
+      const controller = new AbortController();
+      fetchAbortRef.current = controller;
+      // story #2933 H2(PO 조건②) — 재파생 폴백 없음: SSE payload의 new_stage를 바로 안 쓰고
+      // (그 값은 트리거일 뿐), get_story(H1이 trust_stage 배선한 그 엔드포인트)를 다시 불러
+      // BE 판정값을 그대로 반영한다. 실패하면 조용히 무시(기존 표시값 유지 — 재파생 0).
+      fetchWithAuth(`/api/stories/${firedForId}`, { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          // 레이스 가드 — fetch를 쏜 뒤 다른 story로 전환됐으면(currentStoryIdRef가 그새
+          // 바뀜) 늦게 도착한 이 응답은 버린다. 새 story 패널에 옛 값이 새는 것 방지.
+          if (currentStoryIdRef.current !== firedForId) return;
+          const fresh = json?.data as { trust_stage?: WorkcellPipelineStage | null } | undefined;
+          if (fresh && 'trust_stage' in fresh) setSsePipelineStage(fresh.trust_stage ?? null);
+        })
+        .catch(() => { /* 무시(abort 포함) — 기존 표시값 유지, 재파생 안 함 */ });
+    }, 500);
+  }, [story.id]);
+
+  useSseNotifications({
+    extraEventNames: ['story.trust_stage_changed'],
+    onExtraEvent: handleTrustStageChanged,
+  });
+
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
   const [savingDescription, setSavingDescription] = useState(false);
   const [editingAC, setEditingAC] = useState(false);
   const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
   const [savingAC, setSavingAC] = useState(false);
+  // story #178c7c6d(3015②) — Workcell Brief의 "더 보기"가 위임할 기존 본문 섹션 앵커.
+  // ref 기반(전역 DOM id 아님) — 이 패널이 kanban/epic-swimlane/flow-node 여러 곳에서
+  // 마운트되므로 id 충돌 없이 인스턴스별로 정확한 자기 섹션을 스크롤한다.
+  const descriptionSectionRef = useRef<HTMLDivElement | null>(null);
+  const acSectionRef = useRef<HTMLDivElement | null>(null);
+  const scrollToDescriptionSection = useCallback(() => {
+    descriptionSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+  const scrollToAcceptanceCriteriaSection = useCallback(() => {
+    acSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
   // story #2315 — description/acceptance_criteria PATCH가 참조를 조용히 거를 수 있다(#2294와
   // 같은 병, story 저장 축). BE가 아직 사이드밴드를 안 실어도(parseDroppedReferences가 빈
   // 배열로 폴백) 안 깨지고, 실으면 바로 뜬다 — ephemeral(persist 안 함·패널 재오픈 시 소멸).
@@ -386,9 +463,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
-  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩. gate_type/status/
-  // neutral_facts.ci_result만 필요(GateItem 전체 불요) — 얇은 로컬 타입으로 충분.
-  const [chipGates, setChipGates] = useState<{ gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null }[]>([]);
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩. story #2922 W2에서
+  // GateItem 전체로 넓힘(id·risk_grade도 필요 — Workcell Evidence 구획의 merge 게이트 링크/위험도).
+  const [chipGates, setChipGates] = useState<GateItem[]>([]);
   const [showAddDep, setShowAddDep] = useState(false);
   const [depQuery, setDepQuery] = useState('');
   const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
@@ -485,11 +562,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 를 받아 DescriptionViewer의 render-time 치환에 넘긴다. undefined면 치환 자체를 보류(축A
   // 미로드와 동형 폴백 — 안 뜨는 게 거짓 렌더보다 안전).
   const [bareNumberTargets, setBareNumberTargets] = useState<Record<string, string> | undefined>(undefined);
+  // story #2922 W5 — Workcell Conversation 구획 요약(대화 근거 건수+링크). count=null이면
+  // 확認된 0건(정직한 "연결된 대화 없음"), undefined면 로딩/실패라 렌더 보류(no-fiction).
+  const [chatProofSummary, setChatProofSummary] = useState<{ count: number | null; href: string | null } | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
     setOutgoingRefs(undefined);
     setBareNumberTargets(undefined);
+    setChatProofSummary(undefined);
     fetchWithAuth(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: unknown; bare_number_targets?: unknown } | null) => {
@@ -505,8 +586,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         if (json.bare_number_targets && typeof json.bare_number_targets === 'object') {
           setBareNumberTargets(json.bare_number_targets as Record<string, string>);
         }
+        // story #2922 W5 — 같은 응답을 ChatProofSection과 동일 파서(parseStoryProofReferences)로
+        // 재해석해 Workcell 요약도 채운다(전용 fetch 신설 0). 가장 최근(첫) 근거의 대화로 링크.
+        const { items } = parseStoryProofReferences(json);
+        const first = items[0] ?? null;
+        setChatProofSummary({
+          count: items.length,
+          href: first ? `/chats/${first.conversationId}?messageId=${first.startMessageId}` : null,
+        });
       })
-      .catch(() => { /* undefined 유지 — 유령/치환 판정 보류 */ });
+      .catch(() => { /* undefined 유지 — 유령/치환/대화요약 판정 전부 보류 */ });
     return () => { cancelled = true; };
   }, [story.id, orgSyncVersion]);
 
@@ -646,7 +735,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     try {
       const res = await fetch(`/api/stories/${story.id}/request-verification`, { method: 'POST' });
       if (res.ok) {
-        const gate = await res.json() as { gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null };
+        const gate = await res.json() as GateItem;
         setChipGates((prev) => [...prev.filter((g) => g.gate_type !== 'qa'), gate]);
         addToast({ type: 'success', title: t('verificationRequested') });
       } else {
@@ -725,39 +814,109 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const statusKey = statusKeyMap[localStatus];
   const statusLabel = statusKey ? t(statusKey) : localStatus;
 
-  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 칩. done엔 항상 무표시(TrustSeal
-  // 담당·중복 금지, deriveInFlightTrustChip 내부에서 강제). 무신호=칩 자체 미렌더(no-fiction).
-  const trustChip = deriveInFlightTrustChip(localStatus, chipGates);
-  const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
-
   // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
   // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
   // blocked_by/comments)만으로 채울 수 있는 것만 채운다 — 없는 값은 허구로 안 채움:
   // - Run.now/stage는 story.status(coarse) 이상의 세부 행위 신호가 없어 statusLabel 그대로
   //   사용(과장 없음). tools/scopes는 실 데이터 없어 빈 배열(빈 배열=정직, 조작 아님).
-  // - Evidence는 ProofCapsuleProps 실 매핑 인프라(EvidenceSection 재사용)가 후속 스코프라
-  //   지금은 null(정직한 "아직 증거 없음" — 스펙이 명시적으로 허용하는 케이스).
-  // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
-  // P0-04 그라운딩(2026-07-11): GET /api/v2/agent-runs가 story_id 필터를 지원하지 않아(BE
-  // AgentRunRepository.list()는 project_id/agent_id만 필터) FE가 "지금 실제로 도는 에이전트가
-  // 있는지" 알 방법이 없다. 종전엔 blue 상태에 공용 "실행 중"(proofCapsuleStateRunning) 라벨을
-  // 썼는데, 이는 story.status='in-progress'라는 coarse 신호를 "에이전트가 지금 실행 중"이라는
-  // 더 구체적인 주장으로 과장한 것 — no-fiction 위반(파운더 독트린: 실시간 이벤트 텍스트≠실
-  // 실시간 신호). Workcell 전용으로 "진행 중"(workcellStateInProgress, 순수 status 반영, 실행
-  // 주장 없음)으로 정정. Board/Audit의 공용 blue="실행 중" 라벨은 별개 표면이라 스코프 밖
-  // (그쪽도 같은 근본 갭이 있으면 후속 별도 판단). 실 AgentRun story_id 필터는 디디 BE 티켓.
-  const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
-    'in-progress': 'blue', 'in-review': 'amber', done: 'green',
-  };
-  const proofState = PROOF_STATE_BY_STATUS[localStatus];
-  const proofStateLabel = proofState
-    ? { blue: t('workcellStateInProgress'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven'), red: t('proofCapsuleStateViolation') }[proofState]
-    : null;
+  // - story #2922 W2 — Evidence는 이제 실 매핑(아래 workcellEvidence). ac/diff/proofCount는
+  //   신호 자체가 없어(story.acceptance_criteria는 freeform 텍스트라 카운트=fiction, glance-hero.tsx
+  //   buildEvidence와 동일 규율) 렌더 안 함 — trustSeal(human_verified/self_reported)+
+  //   evidence.autoVerify(merge 게이트 neutral_facts.ci_result)+gate(그 게이트 자체)만 real signal.
+  // - story #2993(PO 확定①) — human assignee 없어도 Workcell은 렌더한다(2993 이전엔 여기서
+  //   전체 생략했으나 "주전장이 안 보인다" 실사고 근본원인 중 하나였다). owner 자리는 정직한
+  //   "책임자 미지정"으로 대체(허구 human 여전히 금지 — ProofCapsule 배선 규율 그대로).
+  // story #2933 H1(P0-H) — 구 FE 재파생(PIPELINE_STAGE_BY_STATUS+trustChip 조합, #3336
+  // 드리프트 실사례로 이미 1회 버그난 그 로직)을 폐기하고 BE derive_trust_stage() 판정값을
+  // story.trust_stage로 직접 소비한다(get_story/list_stories 둘 다 배선됨). PO 조건①(2933) —
+  // 판정은 BE 한 곳(trust_pipeline.derive_trust_stage)에만 존재, FE 재계산 0.
+  // PO 조건②(2933) — story prop이 이 필드를 못 채운 응답에서 온 경우(예: handleChangeStatus의
+  // `onStoryUpdate?.({ ...story, status: newStatus })` 낙관적 갱신 — status만 덮어쓰고
+  // trust_stage는 스프레드로 이전 값이 그대로 남는다)도 "기존값 유지"를 자동으로 만족한다 —
+  // 별도 재파생 폴백은 없다. story #2933 H2 — ssePipelineStage(위, `story.trust_stage_changed`
+  // 구독 결과)가 있으면 그걸 우선(더 최신 BE 조회값), 없으면(SSE 미도달·아직 이 story에서
+  // 이벤트 0건) story prop 그대로.
+  const pipelineStage: WorkcellPipelineStage | null = ssePipelineStage !== undefined
+    ? ssePipelineStage
+    : (story.trust_stage as WorkcellPipelineStage | null) ?? null;
+
+  // story #2933 H3(P0-H 정직성 감사, PO 부수기록ⓐ) — P0-04 in-flight 칩(trustChip)도 BE
+  // trust_stage로 수렴한다. 예전엔 deriveInFlightTrustChip(gate 목록 별도 재파생)이 판정했는데
+  // pipelineStage의 needs_input/merge_ready가 정확히 같은 개념(BE 판정 SoT, H1)이라 그대로
+  // 재사용 — FE 재파생의 두 번째 온상을 닫는다(H1이 스테퍼 쪽을, 이번엔 이 배지 쪽을).
+  // done엔 pipelineStage 자체가 이미 null(derive_trust_stage §7 확定④)이라 구 함수가 하던
+  // "담당·중복 금지" 강제를 별도 코드 없이 그대로 계승한다 — 단, 이건 story.trust_stage가
+  // 실제로 서버에서 새로 온 경우에만 참이다.
+  // ⚠️QA changes(PR#3364, codex 교차모델, 2026-08-22) — handleChangeStatus의 낙관적 갱신은
+  // `onStoryUpdate?.({ ...story, status: newStatus })`로 status만 덮어쓰고 trust_stage는
+  // 스프레드로 «이전 값 그대로» 남긴다(PO 조건②·바로 위 주석). localStatus는 이 낙관 갱신으로
+  // 즉시 'done'이 되지만, pipelineStage(=story.trust_stage)는 실 BE 재조회(SSE 트리거
+  // 재fetch)가 도착하기 전까지 옛 값(예: 'needs_input')에 머무는 창이 생긴다 — 그 창에서
+  // "done인데 in-flight 칩"이 뜨는 부당 표시(구 deriveInFlightTrustChip이 갖고 있던
+  // status==='done' 하드가드가 수렴 과정에서 소실됐던 회귀). localStatus==='done'이면
+  // pipelineStage 값과 무관하게 명시적으로 차단 — 낙관 갱신 창의 신뢰 축을 status(즉시 반영)
+  // 로 고정한다(pipelineStage는 곧 뒤따라 null로 수렴하지만 그 사이 창을 UI에 노출 안 함).
+  const trustChip: 'needs_input' | 'merge_ready' | null = localStatus === 'done'
+    ? null
+    : pipelineStage === 'needs_input' ? 'needs_input' : pipelineStage === 'merge_ready' ? 'merge_ready' : null;
+  const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
+
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
-  const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
+  // story #2993(PO 확定①③) — 「책임자=assignee 중 human」이 유일 소스였던 게 에이전트
+  // 단독배정 스토리(오늘 세션 다수 실사례)에서 Workcell 전체를 지우던 근본원인. 우선순위
+  // 폴백체인(실데이터 있을 때만 — 지어내지 않음): human_owner_member_id(P0-03, BE가 이미
+  // human만 지정 가능하도록 write-time 검증함) → human_verified_by(who 검증했나) →
+  // assigneeIds 중 human. memberMap에 실제로 해당 멤버가 resolve된 경우만 채택(부분
+  // 데이터로 이름을 지어내지 않는다).
+  const proofHumanId =
+    (story.human_owner_member_id && memberMap[story.human_owner_member_id] ? story.human_owner_member_id : null) ??
+    (story.human_verified_by && memberMap[story.human_verified_by] ? story.human_verified_by : null) ??
+    assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent') ??
+    null;
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
   const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
   const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
+
+  // story #2922 W2 — Workcell Evidence 구획 = ProofCapsule density="full" 실배선. glance-hero.tsx
+  // (GlanceHero의 buildEvidence/buildTrustSeal, 유일한 기존 density="full" 실 호출부)와 동일 규율:
+  // 신호 없는 필드는 절대 지어내지 않는다(no-fiction). claim=story.title(GlanceHero 선례 그대로).
+  const EVIDENCE_STATE_LABEL_BY_STATUS: Partial<Record<string, ProofState>> = {
+    'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+  };
+  const evidenceProofState = EVIDENCE_STATE_LABEL_BY_STATUS[localStatus] ?? null;
+  const evidenceStateLabel = evidenceProofState
+    ? { blue: t('proofCapsuleStateRunning'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven') }[evidenceProofState]
+    : null;
+  // story #2893(설계안 §2 A1) — 스토리당 merge 게이트가 여러 개(PR마다 1개)일 수 있어졌다.
+  // pickRelevantMergeGate(미종결 우선·동순위는 최근 PR 우선)로 하나를 고른다 — 옛
+  // "배열의 첫 번째"는 실사고1/2의 근본원인과 같은 축(어느 PR인지 무작위로 고정)이었다.
+  const mergeGate = pickRelevantMergeGate(chipGates) ?? null;
+  const GATE_RISK_MAP: Record<'low' | 'high', '낮음' | '높음'> = { low: '낮음', high: '높음' };
+  const ciResult = mergeGate?.neutral_facts?.['ci_result'];
+  const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
+  const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
+  const humanVerifiedByName = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? story.human_verified_by.slice(0, 6)) : null;
+  const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
+    story.human_verified && humanVerifiedByName && story.human_verified_at
+      ? { variant: 'verified', humanName: humanVerifiedByName, when: formatDate(story.human_verified_at) }
+      : story.self_reported
+        ? (proofAgent ? { variant: 'claimed', agentInitial: initials(proofAgent.name) } : { variant: 'claimed' })
+        : undefined;
+  // Human gate는 pending(아직 결정 안 됨)일 때만 "결정을 청하는" 표면 의미가 있다 — resolved 게이트를
+  // 다시 열자고 하면 no-fiction 위반(이미 끝난 결정을 대기 중처럼 보여줌).
+  const workcellGate: ProofCapsuleGate | undefined =
+    mergeGate && mergeGate.status === 'pending'
+      ? { risk: mergeGate.risk_grade ? GATE_RISK_MAP[mergeGate.risk_grade] : undefined, action: t('workcellGateAction'), href: `/gates/${mergeGate.id}` }
+      : undefined;
+  const workcellEvidence: ProofCapsuleProps | null =
+    evidenceProofState && evidenceStateLabel && (workcellEvidenceSignal || workcellTrustSeal || workcellGate)
+      ? {
+          density: 'full', proofState: evidenceProofState, stateLabel: evidenceStateLabel, claim: story.title,
+          human: proofHuman ? { name: proofHuman.name, role: 'human' } : undefined,
+          agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+          evidence: workcellEvidenceSignal, trustSeal: workcellTrustSeal, gate: workcellGate,
+        }
+      : null;
 
   const WORKCELL_NEXT_NEED_BY_STATUS: Record<string, string> = {
     'in-progress': t('workcellNextNeedInProgress'),
@@ -1131,9 +1290,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         role="dialog"
         aria-modal="true"
         aria-label={story.title}
+        // story #3007(로드맵 P2·PR-E, L1) — 모바일 시트/데스크톱 사이드시트 둘 다 floating이라
+        // --elev-overlay.
         className={overlayPosition
-          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-xl outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
-          : 'fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
+          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
+          : 'fixed inset-0 z-50 bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
         style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">
@@ -1202,22 +1363,19 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               </DropdownMenu>
               {/* P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩(입력 필요/병합
                   대기). done엔 렌더 0(TrustSeal 중복 방지)·무신호(gate 없음)면 칩 자체 미렌더. 5-status
-                  배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당). */}
+                  배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당).
+                  story #2e583f9e(2984-S7, 유나 확定 2026-08-25) — soft-fill SHIFT→헤어라인. dot은
+                  색 신호 그대로 KEEP(merge_ready=green·기타=amber) — 계열색 텍스트만 헤어라인 위에서
+                  라이트 AA 미달이라 text-foreground로 이전(대비표 정본). */}
               {trustChip && trustChipLabel ? (
-                <span
-                  className={
-                    trustChip === 'merge_ready'
-                      ? 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-green-soft px-2 py-0.5 text-[11px] font-semibold text-proof-green'
-                      : 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber'
-                  }
-                >
+                <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
                   <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
                   {trustChipLabel}
                 </span>
               ) : null}
               {/* story #2258 AC2 — 검증요청: pending "qa" gate가 없을 때만 요청 버튼, 있으면 대기 배지. */}
               {chipGates.some((g) => g.gate_type === 'qa' && g.status === 'pending') ? (
-                <span className="inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber">
+                <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
                   <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
                   {t('verificationPending')}
                 </span>
@@ -1270,32 +1428,40 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             옵트인(신규 CSS 아님) — .tableWrapper(#2203)가 이미 라이브 양성으로 검증한 패턴. */}
         <div className="scrollbar-visible flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
-            {/* E-UI-DAEGBYEON P0 — Workcell 4층 데뷔(최소 실화면 배선, story `e5310d1b`).
-                Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/StoryMergeGate 실
-                데이터 매핑은 후속 스코프, 대체 아님). human assignee 없으면 전체 생략. */}
-            {proofState && proofStateLabel && proofHuman ? (
-              <Workcell
-                title={story.title}
-                proofState={proofState}
-                stateLabel={proofStateLabel}
-                brief={{
-                  goal: story.description?.trim() || story.title,
-                  dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),
-                  owner: { name: proofHuman.name, role: 'human' },
-                  agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
-                }}
-                run={{
-                  now: statusLabel,
-                  stage: statusLabel,
-                  tools: [],
-                  scopes: [],
-                  blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
-                  nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
-                }}
-                evidence={null}
-                conversation={{ view: 'run', messages: workcellMessages }}
-              />
-            ) : null}
+            {/* E-UI-DAEGBYEON P0 — Workcell 데뷔(최소 실화면 배선, story `e5310d1b`) + story #2922
+                W1 2×2 재설계. Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/
+                StoryMergeGate 실데이터 매핑은 후속 스코프, 대체 아님).
+                story #2993(PO 확定①②) — 이전엔 pipelineStage(done=null)·proofHuman(에이전트
+                단독배정=null) 둘 중 하나만 없어도 Workcell 전체가 사라져 "주전장이 안
+                보인다" 실사고로 이어졌다. 이제 무조건 렌더 — 각자 정직한 빈 상태로 대체
+                (owner=null→"책임자 미지정", pipelineStage=null→"파이프라인 범위 밖"). 지어낸
+                값은 여전히 0(no-fiction 원칙 유지). */}
+            <Workcell
+              title={story.title}
+              pipelineStage={pipelineStage}
+              brief={{
+                goal: story.description?.trim() || story.title,
+                // story #178c7c6d(3015②) — 예전엔 board 네임스페이스의 옛 DoD 미기재 문자열
+                // 키를 직접 호출해 넘겼으나, 이제 null로 정직하게 부재를 표현한다. 표시
+                // 문구·"본문 AC 보기" 링크는 BriefLayer가 소유(워크셀 자체 i18n으로 이관,
+                // 그 옛 board 키는 폐기).
+                dod: story.acceptance_criteria?.trim() || null,
+                owner: proofHuman ? { name: proofHuman.name, role: 'human' } : null,
+                agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+                onGoalMore: scrollToDescriptionSection,
+                onDodMore: scrollToAcceptanceCriteriaSection,
+              }}
+              run={{
+                now: statusLabel,
+                stage: statusLabel,
+                tools: [],
+                scopes: [],
+                blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
+                nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
+              }}
+              evidence={workcellEvidence}
+              conversation={{ view: 'run', messages: workcellMessages, chatProof: chatProofSummary }}
+            />
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
@@ -1398,7 +1564,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             ) : null}
 
             {/* Description */}
-            <div>
+            <div ref={descriptionSectionRef}>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('description')}</span>
                 {!editingDescription && (
@@ -1457,7 +1623,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             </div>
 
             {/* Acceptance Criteria — Description 블록 미러 (E-BOARD-UX S3) */}
-            <div>
+            <div ref={acSectionRef}>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('acceptanceCriteria')}</span>
                 {!editingAC && (

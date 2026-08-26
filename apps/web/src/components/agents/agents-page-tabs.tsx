@@ -17,8 +17,10 @@ import { fetchWithAuth } from '@/lib/db/client';
 type AgentsTab = 'stats' | 'manage' | 'recruit' | 'access';
 const VALID_TABS = new Set<AgentsTab>(['stats', 'manage', 'recruit', 'access']);
 
-function resolveTab(tab: string | null): AgentsTab {
-  return tab && VALID_TABS.has(tab as AgentsTab) ? (tab as AgentsTab) : 'stats';
+// export — story #2952 AC1 회귀가드(agents-page-tabs.test.tsx)가 전체 컴포넌트 마운트 없이
+// 기본 탭 판정만 직접 검증.
+export function resolveTab(tab: string | null): AgentsTab {
+  return tab && VALID_TABS.has(tab as AgentsTab) ? (tab as AgentsTab) : 'manage';
 }
 
 /**
@@ -29,6 +31,12 @@ function resolveTab(tab: string | null): AgentsTab {
  * 못 받아 조회 자체가 무의미).
  * 페이지 타이틀은 탭 전환과 무관하게 고정 — RecruiterClient 임베드 시 자체 TopBarSlot을
  * showTopBar=false 로 꺼서 top-bar-context 싱글턴 레이스를 원천 차단.
+ *
+ * story #2952 AC1(발견성) — 기본 탭을 'stats'→'manage'로 정정. 사이드바 GNB "조직›워크포스"
+ * 항목(nav-config.ts)과 settings/page.tsx의 "에이전트 관리로 이동" 버튼이 모두 ?tab= 없이
+ * 이 경로로 보내는데, 실제 삭제(비활성화)/재활성 액션은 관리 탭에만 있다 — 첫 방문자가
+ * 통계 탭(차트만 있음)에 떨어져 "삭제 경로가 없다"고 오판한 근본 원인(PO+선생님 실사례,
+ * customer-zero: 코드상 존재해도 못 찾으면 없는 것과 같다).
  */
 export function AgentsPageTabs() {
   const t = useTranslations('agents');

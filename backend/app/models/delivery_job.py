@@ -36,7 +36,8 @@ class DeliveryJob(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('org_webhook', 'personal_webhook', 'expo_push')", name="ck_delivery_jobs_kind"
+            "kind IN ('org_webhook', 'personal_webhook', 'expo_push', 'apns_push')",
+            name="ck_delivery_jobs_kind",
         ),
         # story #2761 — 'claimed' 추가: claim(attempts+1)과 status 전이가 같은 원자적 UPDATE
         # 안에서 일어나야 재집기 창이 닫힌다(0256 마이그 참조 — 근본원인·prod 3중복 실사고).

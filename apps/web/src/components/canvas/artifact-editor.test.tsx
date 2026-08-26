@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ArtifactViewer } from './artifact-viewer';
+import { ArtifactEditor } from './artifact-editor';
 import { CommitBar } from './commit-bar';
 import { MOCK_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS, MOCK_EDITABLE_ARTIFACT } from '@/services/canvas';
 
@@ -54,5 +55,16 @@ describe('C3 감시-게이트 회귀가드 (§4 — 편집 표면은 CCTV로 가
   it('CommitBar disables the save action when there are no changes (no empty commits)', () => {
     const markup = renderToStaticMarkup(wrap(<CommitBar changeCount={0} onCommit={() => {}} />));
     expect(markup).toContain('disabled=""');
+  });
+});
+
+// story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
+describe('ArtifactEditor — 로드맵 P2·PR-F L1(인라인 카드 elevation 토큰)', () => {
+  it('카드 셸이 shadow-[var(--elev-card)]를 쓰고 shadow-sm은 안 쓴다', () => {
+    const markup = renderToStaticMarkup(
+      wrap(<ArtifactEditor title="t" initialNodes={[]} />),
+    );
+    expect(markup).toContain('shadow-[var(--elev-card)]');
+    expect(markup).not.toMatch(/shadow-sm["\s]/);
   });
 });

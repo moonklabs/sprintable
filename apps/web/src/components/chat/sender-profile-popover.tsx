@@ -1,13 +1,17 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Bot, ShieldOff, User } from 'lucide-react';
+import { ShieldOff } from 'lucide-react';
+import { Avatar } from '@/components/shared/avatar';
 
 interface SenderProfilePopoverProps {
   x: number;
   y: number;
   name: string;
   isAgent: boolean;
+  /** story #2968(카디르 QA #3397 MEDIUM) — chat-bubble.tsx가 이미 들고 있던 sender_avatar_url을
+   * 안 넘겨 이 팝업만 Bot/User 하드코딩 아이콘에 머물러 있었다. avatar.tsx 정본 배선. */
+  avatarUrl?: string | null;
   onClose: () => void;
   /** 생략하면(undefined) 「사용자 차단」 버튼 자체를 안 그린다(자기 자신 클릭 시 호출부가 안 넘김). */
   onBlock?: () => void;
@@ -16,7 +20,7 @@ interface SenderProfilePopoverProps {
 // story #2349 — "상대 프로필" 진입점. 이 제품에 다른 멤버를 보는 화면이 없었다(net-new 표면,
 // 그라운딩 확認됨) — message-context-menu.tsx와 같은 위치-고정 팝업 패턴을 그대로 재사용해
 // 새 상호작용 패턴을 발명하지 않는다.
-export function SenderProfilePopover({ x, y, name, isAgent, onClose, onBlock }: SenderProfilePopoverProps) {
+export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, onClose, onBlock }: SenderProfilePopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,13 +46,12 @@ export function SenderProfilePopover({ x, y, name, isAgent, onClose, onBlock }: 
       ref={ref}
       role="dialog"
       aria-label={name}
-      className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover py-2 shadow-md"
+      // story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
+      className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover py-2 shadow-[var(--elev-overlay)]"
       style={{ left: clampedX, top: clampedY }}
     >
       <div className="flex items-center gap-2.5 px-3 py-1.5">
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          {isAgent ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
-        </div>
+        <Avatar name={name} avatarUrl={avatarUrl ?? null} actorType={isAgent ? 'agent' : 'human'} size={32} />
         <span className="truncate text-sm font-medium text-foreground">{name}</span>
       </div>
       {onBlock && (

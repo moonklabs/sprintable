@@ -146,6 +146,10 @@ async def test_story_list_and_get_carry_org_project_slug():
                 status_filter=None, no_sprint=False, unattached=False, ids=None,
                 story_number=None, q=None, boost_candidates_from=None, limit=1000,
                 cursor=None, response=None, repo=repo, auth=_auth(agent_id, org.id),
+                # story #3019: epic_ids/include_unassigned/done_within_days 신규 Query
+                # 파라미터 — sentinel lint(scripts/lint_query_sentinel_direct_calls.py)
+                # baseline과 missing-set을 맞추기 위해 명시.
+                epic_ids=None, include_unassigned=False, done_within_days=None,
             )
             assert len(listed) == 1
             assert listed[0].org_slug == org.slug
@@ -229,6 +233,9 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
                     status_filter=None, no_sprint=False, unattached=False, ids=None,
                     story_number=None, q=None, boost_candidates_from=None, limit=1000,
                     cursor=None, response=None, repo=repo, auth=_auth(agent_id, org.id),
+                    # story #3019: epic_ids/include_unassigned/done_within_days 신규
+                    # Query 파라미터 — sentinel lint baseline과 missing-set을 맞추기 위해 명시.
+                    epic_ids=None, include_unassigned=False, done_within_days=None,
                 )
             finally:
                 event.remove(engine.sync_engine, "before_cursor_execute", _before_cursor_execute)

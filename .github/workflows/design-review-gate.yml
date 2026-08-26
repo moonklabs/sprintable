@@ -40,12 +40,14 @@ name: Design Review Gate
 # ⚠️등록 «이전»에 이미 열려 있던 PR은 이 체크를 자동으로 못 받을 수 있다 — GitHub이 그
 # PR에 대해선 이 체크를 아예 "기대하지 않는" 상태로 남아 required인데도 «영원한 pending»이
 # 된다(실측 2026-07-31: #2737·#2294). 이것도 "안 잰 것"인데 앞서 잡은 스킵=통과 병의
-# 반대편(안 재면서 빨강)이다 — 고치는 법이 코드가 아니라 사람 손(새 커밋 push로 synchronize
-# 이벤트를 유발하거나, PR을 close 후 재오픈)이라는 게 다르다.
+# 반대편(안 재면서 빨강)이다 — base branch만 바뀌고 새 커밋이 없는 재타겟(synchronize
+# 미발화)의 경우 story #2912(2899 그라운딩 갈래D) 이전엔 고치는 법이 코드가 아니라 사람 손
+# (새 커밋 push로 synchronize 이벤트를 유발하거나, PR을 close 후 재오픈)뿐이었다 — 아래
+# edited 추가로 이 케이스는 이제 자동 재트리거된다(#3317 실사고 재발 방지).
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: [main, develop]
 
 concurrency:
@@ -113,6 +115,28 @@ jobs:
             echo "No changed file matches the design-review path list — this PR is out of this gate's scope (not a skip: it was evaluated and found empty)."
           fi
 
+      # story #2973(미르코 그라운딩, 2026-08-23) — `github.event.pull_request.labels`는
+      # 이 워크플로를 트리거한 그 웹훅 «페이로드 스냅샷»이다(라이브 조회가 아니다). QA·
+      # Design 두 리뷰어가 근접한 시각에 각자 라벨을 달면, 먼저 도착한 labeled 이벤트의
+      # job이 "그 시점 페이로드"(상대 라벨이 아직 안 실린)만 보고 HAS_*_PASS=false로
+      # 잘못 실패한다(실측: #3399 08:40:39 실패 run 로그 — "형제 run 미완" 판정이 아니라
+      # 이 레이스였다. #3391도 동일 뿌리 — rerun이 같은 스테일 페이로드로 재생돼 "GH가
+      # rerun을 거부"로 보이는 증상까지 설명한다). 처방: 판정 자체를 이벤트 페이로드가
+      # 아니라 `gh api`로 "지금 이 순간의" 라벨을 라이브 재조회해서 낸다 — 대기-폴링(그래도
+      # 타임아웃 전에 실패할 여지가 남는다)이 아니라, 판정 시점의 진짜 상태를 본다.
+      - name: Fetch live PR labels (avoid stale webhook-payload race — story #2973)
+        if: steps.scope.outputs.in_scope == 'true'
+        id: live_labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          LABELS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" --paginate --slurp | jq '[.[][] | .name]')"
+          echo "live labels: ${LABELS_JSON}"
+          echo "has_design_pass=$(echo "${LABELS_JSON}" | jq 'index("design:pass") != null')" >> "$GITHUB_OUTPUT"
+          echo "has_design_changes=$(echo "${LABELS_JSON}" | jq 'index("design:changes") != null')" >> "$GITHUB_OUTPUT"
+
       # ⭐유나신 지적(2026-07-31) — design:changes 라벨 설명은 "design:pass로 바뀌기 前에는
       # 머지하지 않는다"고 약속하는데, 그 약속을 지키는 코드가 아무것도 없었다(가드는
       # design:pass «존재»만 본다). design:pass와 design:changes가 같이 붙어 있으면(수정
@@ -122,7 +146,7 @@ jobs:
       - name: Enforce design:changes blocks merge (unconditional — regardless of design:pass)
         if: steps.scope.outputs.in_scope == 'true'
         env:
-          HAS_DESIGN_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'design:changes') }}
+          HAS_DESIGN_CHANGES: ${{ steps.live_labels.outputs.has_design_changes }}
         run: |
           set -euo pipefail
           if [ "${HAS_DESIGN_CHANGES}" = "true" ]; then
@@ -136,7 +160,7 @@ jobs:
       - name: Enforce design:pass label when in scope
         if: steps.scope.outputs.in_scope == 'true'
         env:
-          HAS_DESIGN_PASS: ${{ contains(github.event.pull_request.labels.*.name, 'design:pass') }}
+          HAS_DESIGN_PASS: ${{ steps.live_labels.outputs.has_design_pass }}
         run: |
           set -euo pipefail
           if [ "${HAS_DESIGN_PASS}" = "true" ]; then
@@ -203,37 +227,21 @@ jobs:
       # 적으면 fail-closed(모르면 실패)로 막지만, 위 두 관찰 포맷과 «다른» 새 포맷이 등장하면
       # 오탐(엉뚱한 코멘트를 판정 근거로 오인)이 생길 여지가 QA gate보다 크다 — 포맷이
       # 고정적이지 않다는 것 자체가 이 스텝의 한계다(디자인 게이트는 QA gate보다 약한 보증).
+      #
+      # story #2912(2899 그라운딩 갈래C) — qa-review-gate.yml이 이 로직을 그대로 복붙해
+      # 갖고 있었다(story #2676·#2827 fix가 양쪽에 각각 적용된 이력이 그 증거) — 공유
+      # 컴포지트 액션(.github/actions/verdict-head-check)으로 수렴. 정규식은 이 게이트의
+      # 기존 느슨한 패턴 그대로 전달(QA 쪽과 다른 이유는 그 액션 자체의 주석 참고 — 통일
+      # 대상 아님, 이 파일이 위에서 이미 밝힌 "포맷이 고정적이지 않다"는 사실을 그대로
+      # 반영한 의도적 차이).
       - name: Enforce design:pass verdict comment's stated head matches current PR head
         if: steps.scope.outputs.in_scope == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          LATEST_VERDICT_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
-            --jq '.[] | select(.body | test("^## .*PASS")) | [.created_at, .body] | @tsv' \
-            | sort | tail -1 | cut -f2-)"
-          if [ -z "${LATEST_VERDICT_BODY}" ]; then
-            echo "::error title=design:pass verdict comment not found::design:pass 라벨은 있는데 그 근거로 보이는 'PASS' 판정 코멘트를 못 찾았다 — head 대조 불가. fail-closed."
-            exit 1
-          fi
-          VERDICT_HEAD="$(printf '%s' "${LATEST_VERDICT_BODY}" | grep -ioE 'head[^0-9a-f]*[0-9a-f]{7,40}' | head -1 | grep -oE '[0-9a-f]{7,40}$')"
-          if [ -z "${VERDICT_HEAD}" ]; then
-            echo "::error title=design:pass verdict head unparsable::가장 최근 design 판정 코멘트에서 head sha를 못 찾았다 — head 대조 불가. fail-closed."
-            exit 1
-          fi
-          echo "latest design verdict comment states head: ${VERDICT_HEAD}"
-          echo "current PR head: ${HEAD_SHA}"
-          case "${HEAD_SHA}" in
-            "${VERDICT_HEAD}"*)
-              echo "일치 — 가장 최근 design:pass verdict가 현재 head를 보고 판정했다."
-              ;;
-            *)
-              echo "::error title=design:pass verdict is for a stale head::가장 최근 design 판정 코멘트가 명시한 head(${VERDICT_HEAD})가 현재 PR head(${HEAD_SHA})와 다르다 — 그 사이 새 커밋이 끼어들었다(story #2676). 재리뷰 후 design:pass를 다시 붙일 것."
-              exit 1
-              ;;
-          esac
+        uses: ./.github/actions/verdict-head-check
+        with:
+          label-name: design:pass
+          header-regex: '^## .*PASS'
+          head-extract-regex: 'head[^0-9a-f]*[0-9a-f]{7,40}'
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       # story #2676 AC2 — qa-review-gate.yml과 동형(로직 복제). 잡 이름이 "— advisory"로
       # 끝나면 비차단 관례(실측 확認)라 그것만 빼고, design:pass 붙인 시점에 나머지 체크런

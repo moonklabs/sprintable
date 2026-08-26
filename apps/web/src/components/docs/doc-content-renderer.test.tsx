@@ -135,4 +135,76 @@ describe('DocContentRenderer', () => {
     expect(markup).toContain('내부참조');
     expect(markup).not.toContain('<button type="button"');
   });
+
+  // story #2967(선생님 실사용 판정 ①) — 마스트헤드 H1(doc.title)과 본문 첫 # 제목이 중복
+  // 렌더되던 것을 정규화 비교로 생략한다. 리더 전용 opt-in prop이라 미지정 시 회귀 0.
+  describe('suppressLeadingTitle(story #2967 §1 — 리더 2중 제목 생략)', () => {
+    it('본문 첫 h1이 doc.title과 정규화 동일하면 생략한다(공백·대소문자·# 무시)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'#   결제 스펙 V2   \n\n본문 내용'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" />,
+      );
+      expect(markup).not.toContain('<h1');
+      expect(markup).toContain('<p>본문 내용</p>');
+    });
+
+    it('본문 첫 h1이 doc.title과 다르면 그대로 렌더한다(허구 생략 금지)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 다른 제목\n\n본문'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" />,
+      );
+      expect(markup).toContain('<h1 id="다른-제목">다른 제목</h1>');
+    });
+
+    it('두 번째 이후 h1(문서 중간)은 doc.title과 같아도 생략하지 않는다(첫 heading만 대상)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 서론\n\n본문\n\n# 결제 스펙 v2\n\n두 번째 섹션'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" />,
+      );
+      expect(markup).toContain('<h1 id="서론">서론</h1>');
+      expect(markup).toContain('결제 스펙 v2</h1>');
+    });
+
+    it('prop을 안 주면(에디터 프리뷰 등 기존 소비처) 첫 h1도 그대로 렌더한다(회귀 0)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 결제 스펙 v2\n\n본문'} contentFormat="markdown" />,
+      );
+      expect(markup).toContain('결제 스펙 v2</h1>');
+    });
+
+    // PO 배포후 실픽셀 재검(2026-08-23) — doc.title이 "…설계안(story #1234)"처럼 괄호
+    // 스토리 접미를 다는 관례라 본문(접미 없음)과 완전일치가 안 나 2중이 잔존했다.
+    it('doc.title에 "(story #NNNN)" 접미가 있고 본문 h1은 접미 없이 같으면 생략한다', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" />,
+      );
+      expect(markup).not.toContain('<h1');
+    });
+
+    it('반대 방향(본문 h1에 접미·title은 접미 없음)도 생략한다(대칭)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안(story #1234)\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안" />,
+      );
+      expect(markup).not.toContain('<h1');
+    });
+
+    // 음성대조 — 접미를 벗겨도 완전 다른 제목이면 생략하지 않는다(허구 생략 금지 유지).
+    it('접미를 벗겨도 본문 제목이 다르면 여전히 생략하지 않는다(음성대조)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 전혀 다른 문서 제목\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" />,
+      );
+      expect(markup).toContain('전혀 다른 문서 제목</h1>');
+    });
+  });
+
+  // story #2967(선생님 실사용 판정 ③) — 다크 본문 체감 눌림 교정(WCAG는 이미 통과·체감 문제).
+  describe('bodyEmphasis(story #2967 §3 — 다크 본문 체감 눌림)', () => {
+    it('기본값은 기존 text-foreground/92 그대로(회귀 0)', () => {
+      const markup = renderToStaticMarkup(<DocContentRenderer content="본문" contentFormat="markdown" />);
+      expect(markup).toContain('text-foreground/92');
+    });
+
+    it("bodyEmphasis='full'이면 /92 없는 순수 text-foreground를 쓴다(리더 전용 옵트인)", () => {
+      const markup = renderToStaticMarkup(<DocContentRenderer content="본문" contentFormat="markdown" bodyEmphasis="full" />);
+      expect(markup).not.toContain('text-foreground/92');
+      expect(markup).toContain('text-foreground');
+    });
+  });
 });

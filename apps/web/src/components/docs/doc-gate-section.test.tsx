@@ -96,6 +96,124 @@ async function renderSection(pendingGate: GateItem) {
   return fetchMock;
 }
 
+describe('DocGateSection — story #3004(선생님 정책 확定) draft 상신은 결재자 지정이 전제', () => {
+  async function renderDraftSection() {
+    const { DocGateSection } = await import('./doc-gate-section');
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (typeof url === 'string' && url.includes('/api/gates?')) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (typeof url === 'string' && url.includes('/revisions')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      if (typeof url === 'string' && url.includes('/team-members')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      if (typeof url === 'string' && url.includes('/api/org-members')) {
+        return new Response(JSON.stringify({
+          data: [
+            { id: 'member-1', user_id: 'u-1', name: '나', role: 'owner' }, // 본인 — 제외돼야
+            { id: 'member-2', user_id: 'u-2', name: '올리베이라군', role: 'admin' },
+            { id: 'member-3', user_id: 'u-3', name: '멤버', role: 'member' }, // member — 제외돼야
+          ],
+        }), { status: 200 });
+      }
+      // /transition — 이 테스트 스위트가 감시할 호출.
+      return new Response(JSON.stringify({ data: { id: 'doc-1', status: 'pending' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(wrap(
+        <DocGateSection docId="doc-1" status="draft" onTransitioned={() => {}} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    return fetchMock;
+  }
+
+  it('"검토 요청" 클릭이 즉시 전이 대신 결재자 픽커를 연다(전이 fetch 미발생)', async () => {
+    const fetchMock = await renderDraftSection();
+    const reqBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateRequestReview));
+    await act(async () => { reqBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(fetchMock.mock.calls.some(([u]) => typeof u === 'string' && u.includes('/api/org-members'))).toBe(true);
+    expect(fetchMock.mock.calls.some(([u]) => typeof u === 'string' && u.includes('/transition'))).toBe(false);
+    // 취소 버튼이 뜬 것 자체가 픽커가 열렸다는 증거.
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.docs.docGateApproverPickerCancel))).toBe(true);
+  });
+
+  it('결재자 미선택이면 제출 버튼이 비활성(서버 400 왕복 없이 클라이언트에서 막는다)', async () => {
+    await renderDraftSection();
+    const reqBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateRequestReview));
+    await act(async () => { reqBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateRequestReview));
+    expect(submitBtn?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('취소 클릭 시 픽커가 닫히고 draft CTA로 복귀한다', async () => {
+    await renderDraftSection();
+    const reqBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateRequestReview));
+    await act(async () => { reqBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const cancelBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateApproverPickerCancel));
+    await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.docs.docGateApproverPickerCancel))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.docs.docGateRequestReview))).toBe(true);
+  });
+});
+
+// story #3040 v3(선생님 확定, 2026-08-25) — 동명 표시이름 오지정 실사고(선생님 실계정 vs
+// PO 대행 계정, 둘 다 "송윤재") 재발 방지. AC2 — 동명 실재 시에만 경고, 비동명 org는 경고 0.
+describe('DocGateSection — story #3040 v3 AC2 결재자 픽커 동명 경고', () => {
+  async function renderWithOrgMembers(members: Array<{ id: string; user_id: string; name: string; role: string }>) {
+    const { DocGateSection } = await import('./doc-gate-section');
+    const fetchMock = vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/gates?')) return new Response(JSON.stringify([]), { status: 200 });
+      if (typeof url === 'string' && url.includes('/revisions')) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (typeof url === 'string' && url.includes('/team-members')) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (typeof url === 'string' && url.includes('/api/org-members')) {
+        return new Response(JSON.stringify({ data: members }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { id: 'doc-1', status: 'pending' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(<DocGateSection docId="doc-1" status="draft" onTransitioned={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const reqBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateRequestReview));
+    await act(async () => { reqBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('실사고 재현 — 동명 2계정(선생님 실계정 vs PO 대행 계정)이 후보군에 있으면 경고가 뜬다', async () => {
+    await renderWithOrgMembers([
+      { id: 'member-1', user_id: 'u-1', name: '나', role: 'owner' },
+      { id: 'e75ca548', user_id: 'aac01791', name: '송윤재', role: 'owner' },
+      { id: '2fd14616', user_id: 'd3ed4ed8', name: '송윤재', role: 'admin' },
+    ]);
+    expect(container.textContent).toContain(koMessages.docs.docGateApproverPickerDuplicateWarning);
+  });
+
+  it('음성대조 — 동명이 없는 org는 경고가 안 뜬다', async () => {
+    await renderWithOrgMembers([
+      { id: 'member-1', user_id: 'u-1', name: '나', role: 'owner' },
+      { id: 'member-2', user_id: 'u-2', name: '올리베이라군', role: 'admin' },
+    ]);
+    expect(container.textContent).not.toContain(koMessages.docs.docGateApproverPickerDuplicateWarning);
+  });
+});
+
 describe('DocGateSection — high-risk(risk_grade=high) 승인은 서명 플로우를 거친다', () => {
   it('승인 버튼 클릭이 note 없는 bare transition을 쏘지 않고 서명 다이얼로그를 연다', async () => {
     const fetchMock = await renderSection(gate({}));

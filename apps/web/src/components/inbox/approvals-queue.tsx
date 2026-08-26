@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -8,20 +8,23 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, XCircle } from 'lucide-react';
-import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
+import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
-// 그대로 재사용) 단일 목록. decision(inbox_items)은 별도 표면(/inbox 기본 탭 DecisionsWaiting
-// 유지) — 이 큐엔 편입하지 않는다(PO+디디+유나 확定).
+// 그대로 재사용) 단일 목록. decision(inbox_items)은 별도 표면(story #2923 AQ1부터 attention
+// 탭의 AttentionQueueView가 흡수 — 구 DecisionsWaiting 패널은 폐기됨) — 이 큐엔 편입하지
+// 않는다(PO+디디+유나 확定, #1954/#1960).
 //
 // 정렬(긴급도) — `?sort=urgency`(story #1973, 배포 완료)가 SLA overdue 최상위→age(created_at)
 // 오래된 순 정렬을 내려준다. `status` 필터는 여전히 하드 필터라(list_gates가 `Gate.status==
@@ -54,6 +57,15 @@ function isHitl(item: GateInboxItem): item is HitlInboxItem {
 
 function isHeld(gate: GateItem): boolean {
   return gate.status === 'held' || !!gate.held_until;
+}
+
+// story #3038 AC4(페드루 전언, PO #3188 오서명 실사고) — row 밀도(ProofCapsule)는 claim
+// 텍스트 1줄뿐이라 gateBody 카드처럼 별도 행을 못 얹는다. 같은 work_item(스토리)의 merge
+// 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 되므로, 있으면
+// 그 1줄 안에 PR 번호를 이어붙여 게이트 자신을 구분 가능하게 한다.
+function gateRowClaimLabel(gate: GateItem): string {
+  const identity = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+  return gate.pr_number ? `${identity} · PR #${gate.pr_number}` : identity;
 }
 
 // story #1961(P2-S5) — gates/[id]/page.tsx의 canAct 판정과 동일 규칙(중복 빌드 봉쇄 취지상
@@ -104,7 +116,7 @@ export function ApprovalsQueue() {
   // 같은 버그클래스: 이 큐는 그 판정을 미리 안 보고 에이전트 계정에도 승인/반려 버튼을
   // 무조건 열었다. Gate와 달리 HitlInboxItem엔 per-item can_approve 필드가 없어(BE 응답
   // shape 차이) 계정 자체의 type(human/agent, DashboardContext #2103 신규)으로 게이팅한다.
-  const { orgMemberships, currentMemberType } = useDashboardContext();
+  const { orgMemberships, currentMemberType, currentTeamMemberId } = useDashboardContext();
   const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,6 +190,74 @@ export function ApprovalsQueue() {
     return () => { cancelled = true; };
   }, []);
 
+  // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 큐에 있는 게이트를 먼저
+  // 해소하면, 이 화면도 새로고침 없이 갱신된다. resolveGate()가 본인 해소 시 이미 쓰는
+  // resolvedGates 오버레이를 그대로 재사용(신규 렌더 분기 0) — resolvedAtMs는 일부러
+  // 안 채운다(그건 "이 세션에서 내가 방금 해소했다"는 undo 자격 신호라 남이 해소한 건에는
+  // undo 버튼이 뜨면 안 된다, 위 resolvedAtMs 주석 참조). BE 계약은 approval-request-
+  // card.tsx/gates/[id]/page.tsx와 동일(notify_gate_card_recipients_resolved, 신규 배관 0).
+  // ⚠️items를 deps에 넣지 않는다(items.some(...) 멤버십 가드는 fetchGates 완료 前 빈
+  // 배열을 캡처한 stale effect가 재구독으로 안 씻겨나가는 함정이 있다). 대신 무조건 기록 —
+  // items에 없는 gate_id가 들어와도 그 키는 그냥 안 쓰일 뿐(렌더는 items.map()이 도는
+  // 항목만 resolvedGates[gate.id]를 읽는다).
+  //
+  // story #3069(P1, 2026-08-25 PO 실측·디디 그라운딩) — 이 세 이벤트를 예전엔
+  // `useSseMultiplexerContext()`가 준 mux에 직접 `mux.subscribe(...)`로만 걸었다. mux는
+  // 피처플래그(SSE_MULTIPLEX_ENABLED) off거나 이 컴포넌트 마운트 시점에 미연결이면 null을
+  // 주고, 그 경우 `if (!mux) return;`으로 조용히 no-op — 즉 폴백 경로가 아예 없어 세 이벤트
+  // 전부가 페이지 전체에서 리스너 자체를 잃었다(BE는 정상 발화·delivered 마킹했는데도 화면
+  // 카드는 0건, 실사고 재현). `use-chat-sse.ts`/`use-sse-notifications.ts`(원 3훅)는 이미
+  // mux 없으면 자체 독립 EventSource로 폴백하는 설계라 그 사이드에선 안 죽었다 — 이 컴포넌트만
+  // 그 불변식(мux 유무 무관 항상 최소 1곳에서 리스닝)을 안 지켰던 것.
+  // 처방: 새 EventSource를 직접 열지 않고(발명 0) `useSseNotifications`의 `extraEventNames`
+  // 경로를 재사용한다 — 그 훅이 mux 有=mux.subscribe, mux 無=자체 폴백 EventSource를 이미
+  // 구조적으로 갈라주므로 이 컴포넌트는 mux 존재 여부를 더 이상 알 필요가 없다(그 훅의 dedup
+  // ·backoff·visibility-reconnect·cursor 승격까지 전부 공짜로 상속).
+  const handleGateEvent = useCallback((eventName: string, data: unknown) => {
+    if (typeof data !== 'object' || data === null) return;
+    const payload = data as { gate_id?: string; status?: 'approved' | 'rejected' };
+    if (!payload.gate_id) return;
+
+    if (eventName === 'conversation.gate_resolved') {
+      if (!payload.status) return;
+      setResolvedGates((prev) => ({ ...prev, [payload.gate_id!]: payload.status! }));
+      return;
+    }
+
+    if (eventName === 'conversation.gate_delegated') {
+      // story #3001(위임) — 이 큐는 assigned_to_me=true로 이미 스코프돼 있다. 지정자가
+      // 위임으로 밀려나면 그 게이트는 더 이상 "내 할 일"이 아니므로(재조회하면 안 옴), 목록
+      // 에서 바로 제거한다 — gate_resolved(완료 오버레이 유지)와 다르게 여긴 실제 삭제가
+      // 재조회 결과와 정확히 일치한다.
+      setItems((prev) => prev.filter((it) => it.id !== payload.gate_id));
+      return;
+    }
+
+    if (eventName === 'conversation.gate_created') {
+      // story #3044(PO 실사고 표본②, 2026-08-25) — fetchGates()는 마운트 1회뿐이고 위 두
+      // SSE는 기존 항목의 상태 변화만 다뤄, "새 게이트가 생겼다"를 알리는 신호가 없었다
+      // (이미 열어둔 탭에 새 게이트가 생기면 하드 리로드 전까진 영원히 안 뜸 — gate
+      // 2a14c177 실사고). BE가 notify_gate_created_to_recipients(approval_delivery.py)로
+      // 심는 conversation.gate_created를 구독 — payload는 gate_id뿐이라(다른 두 이벤트와
+      // 동형, 최소 payload 관례) 단건 GET으로 채워 prepend한다. 이미 목록에 있으면(레이스
+      // — fetchGates()가 방금 같은 걸 받아왔거나 중복 이벤트) 지어내지 않고 skip.
+      void (async () => {
+        try {
+          const res = await fetchWithAuth(`/api/gates/${payload.gate_id}`);
+          if (!res.ok) return;
+          const gate = (await res.json()) as GateItem;
+          setItems((prev) => (prev.some((it) => it.id === gate.id) ? prev : [gate, ...prev]));
+        } catch { /* fetch 실패 — 무시(다음 하드 리로드가 흡수) */ }
+      })();
+    }
+  }, []);
+
+  useSseNotifications({
+    memberId: currentTeamMemberId,
+    extraEventNames: ['conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_created'],
+    onExtraEvent: handleGateEvent,
+  });
+
   // story #2054 AC3: HitlRequest는 상세 페이지가 없어 이 큐 안에서 바로 승인/반려한다 —
   // 승인 후 원래 작업(report-done)이 통과하는지는 사용자 왕복(재시도)으로 확認된다.
   const resolveHitl = async (id: string, status: 'approved' | 'rejected') => {
@@ -202,12 +282,21 @@ export function ApprovalsQueue() {
     setResolvingIds((prev) => new Set(prev).add(id));
     setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
+      // story #2975 회귀 자체발견(#2982 작업 중) — 이 큐의 인라인 승인(원탭·서명모달 둘 다
+      // 이 함수 하나를 공유)이 reviewed_head_sha를 전혀 안 보냈다. gates/[id]/page.tsx만
+      // #2975에서 고쳐졌고 이 큐는 빠져 있어, #3410 착지 後 known SHA가 있는 merge 게이트를
+      // 이 큐에서 승인하면 항상 409(gate_head_changed)로 거부되는 라이브 회귀였다 — items[]
+      // 에서 찾아 동일 계약으로 채운다.
+      const g = items.find((it) => it.id === id && !isHitl(it)) as GateItem | undefined;
       const res = await fetch(`/api/gates/${id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
         // 플로우 onApprove에서만 true로 실린다, 아래 GateSignatureApproval 배선 참조).
-        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
+        body: JSON.stringify({
+          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
+          reviewed_head_sha: g?.github_check_run_sha ?? null,
+        }),
       });
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
@@ -216,8 +305,26 @@ export function ApprovalsQueue() {
         // 잘못 닫지 않도록 대상 id 일치 확認).
         setSignatureTargetId((cur) => (cur === id ? null : cur));
       } else {
-        const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        setGateErrors((prev) => ({ ...prev, [id]: body?.error?.message ?? t('gateTransitionErrorGeneric') }));
+        const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string; current_status?: string } } | null;
+        const code = body?.error?.code;
+        // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문·i18n 안 됨)
+        // 대신 사람 문구로. gate_already_resolved는 이 시점부터 서버 진실을 아는 것이므로
+        // (current_status), 재조회 없이도 즉시 「완료」 카드로 전환할 수 있다(AC1 — 죽은
+        // 버튼이 다시 안 뜬다) — approved/rejected만 이 큐의 표시 슬롯이 있고, 그 외
+        // (held/voided 등)는 표시할 슬롯이 없어 목록에서만 제거(클릭-스루로 상세에서 확認).
+        if (code === 'gate_already_resolved') {
+          const cur = body?.error?.current_status;
+          if (cur === 'approved' || cur === 'rejected') {
+            setResolvedGates((prev) => ({ ...prev, [id]: cur }));
+          } else {
+            setItems((prev) => prev.filter((it) => it.id !== id));
+          }
+          setSignatureTargetId((c) => (c === id ? null : c));
+        }
+        const reason = code === 'gate_head_changed' ? t('gateHeadChangedError')
+          : code === 'gate_already_resolved' ? t('gateAlreadyResolvedError')
+          : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
+        setGateErrors((prev) => ({ ...prev, [id]: reason }));
       }
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
@@ -285,16 +392,13 @@ export function ApprovalsQueue() {
         const orgName = orgMemberships.find((o) => o.orgId === gate.org_id)?.orgName;
         const resolved = resolvedGates[gate.id];
         const inlineResolvable = !resolved && canInlineResolve(gate);
+        const diffFacts = deriveDiffFacts(gate);
         const gateBody = (
           <>
             <div className="flex w-full flex-wrap items-center gap-1.5">
               <Badge variant="chip">{gate.gate_type}</Badge>
               {held ? (
                 <Badge variant="secondary">{t('heldBadge')}</Badge>
-              ) : deriveRiskLevel(gate) === 'high' ? (
-                <Badge variant="warning">{t('riskHigh')}</Badge>
-              ) : deriveRiskLevel(gate) === 'unknown' ? (
-                <Badge variant="outline" className="text-muted-foreground">{t('riskUnknown')}</Badge>
               ) : null}
               <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{formatAge(gate.created_at, t)}</span>
             </div>
@@ -302,10 +406,29 @@ export function ApprovalsQueue() {
                 content 폭까지 shrink-to-fit돼 ellipsis가 걸릴 폭 기준 자체가 없다(카드
                 우변에서 그냥 잘림). w-full로 폭을 부모 카드 전체로 고정해야 truncate가 실제로
                 동작한다. */}
-            <p className="w-full truncate text-sm text-foreground">
+            <p
+              className="w-full truncate text-sm text-foreground"
+              title={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+            >
               {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
+            {/* story #3038 AC4(페드루 전언, PO #3188 오서명 실사고) — 같은 work_item(스토리)의
+                merge 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 된다.
+                pr_number·head SHA는 이미 GateResponse에 있었지만(from_attributes 자동 채움)
+                카드가 안 그려 판별자가 못 됐다 — 이 게이트 자신의 고유 식별을 1행에 표기. */}
+            {gate.pr_number ? (
+              <p className="text-[11px] font-medium text-muted-foreground">
+                PR #{gate.pr_number}
+                {gate.github_check_run_sha ? ` · ${gate.github_check_run_sha.slice(0, 7)}` : ''}
+              </p>
+            ) : null}
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
+            {diffFacts ? (
+              <p className="text-[11px] text-muted-foreground">
+                {t('diffFactsFileCount', { count: diffFacts.fileCount })}
+                {diffFacts.touchesMigration ? ` · ${t('diffFactsMigrationTouch')}` : ''}
+              </p>
+            ) : null}
           </>
         );
 
@@ -355,14 +478,37 @@ export function ApprovalsQueue() {
               </div>
             );
           }
+          // story #2926(P0-F F3, 유나 확定①) — 「밀도는 항목의 액션 무게를 따른다」. 이
+          // 항목(inlineResolvable=false·미해소 — held/무권한/unknown 등 클릭-스루만 가능)은
+          // 경량이라 ProofCapsule density="row"로 셸만 교체한다. 3버튼 인라인 결재 카드·
+          // resolved 카드는 2923(결재함 완전목록 overflow=card로 정식화될 표면)이 다룰
+          // 영역이라 F3 스코프에서 명시적으로 뺐다(선점 금지).
+          //
+          // ⛔정보 축소 고지 — InlineRow는 risk/gate_type 배지·org 컨텍스트를 담을 슬롯이
+          // 없다(row 밀도 자체의 기존 한계, Attention Queue 원안 문서에 이미 "위험도 표시는
+          // row에서 생략 가능"으로 명시돼 있던 것 그대로 — F3이 새로 만든 제약이 아니다).
+          // claim(제목)+state(pending=결재 대기·held=보류)+age(duration)만 남는다.
+          //
+          // story #2926(잔여 fast-follow, 카디르 F2 QA LOW①·②) — stateLabel 문구는
+          // deriveGateProofState()의 통일 키(gateStatusPending/Held)로 F1/F2와 맞춘다.
+          // proofState는 의도적으로 amber 고정 유지(F1/F2와 다름) — 이 분기는 !resolved만
+          // 타므로 여기 오는 gate.status는 실질 pending/held뿐이고, held도 "아직 조치 대기"
+          // 의미라 이 큐에서는 amber가 맞다(F1/F2가 held를 종결취급=red로 보는 것과 다른
+          // 문맥 — 색은 갈리지만 문구는 같은 개념이라 통일한다).
           return (
             <button
               key={gate.id}
               type="button"
               onClick={() => router.push(`/gates/${gate.id}`)}
-              className="flex min-h-12 w-full flex-col items-start gap-1 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/40"
+              className="block w-full text-left"
             >
-              {gateBody}
+              <ProofCapsule
+                density="row"
+                proofState={'amber' as ProofState}
+                stateLabel={held ? t('gateStatusHeld') : t('gateStatusPending')}
+                claim={gateRowClaimLabel(gate)}
+                duration={formatAge(gate.created_at, t)}
+              />
             </button>
           );
         }
@@ -463,9 +609,20 @@ export function ApprovalsQueue() {
             <DialogTitle>
               {signatureGate ? (signatureGate.work_item_summary?.title ?? `#${signatureGate.work_item_id.slice(0, 8)}`) : ''}
             </DialogTitle>
+            {/* story #3038 AC4 — 서명 모달도 방어적으로 동형 표기(카드 단계에서 이미 구분
+                가능해졌지만, 모달 단독으로도 "이게 그 PR 맞나" 재확認 가능하게). */}
+            {signatureGate?.pr_number ? (
+              <p className="text-[11px] text-muted-foreground">
+                PR #{signatureGate.pr_number}
+                {signatureGate.github_check_run_sha ? ` · ${signatureGate.github_check_run_sha.slice(0, 7)}` : ''}
+              </p>
+            ) : null}
           </DialogHeader>
           {signatureGate ? (
+            // story #2975(유나양 design 판정) 갭 자체발견(#2982 작업 중) — 동형 처방(SHA
+            // 변경 시 evidenceViewed/reason 강제 리셋). page.tsx만 #2975에서 고쳐졌었다.
             <GateSignatureApproval
+              key={signatureGate.github_check_run_sha}
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}

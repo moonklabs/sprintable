@@ -32,6 +32,16 @@
  *     목적지까지만, doc §2.4 표와 동일 범위).
  *   ㉤그룹 내부 항목 순서 — 이 가드는 항목이 그 그룹 안에 «있다/없다»만 본다. 항목이 그룹
  *     안에서 몇 번째로 뜨는지(스크롤 위치)는 depth 개념이 아니라서 다루지 않는다.
+ *   ㉥챗 center(story #2930 P0-G I2, 데스크톱만 — 유나 확定 ⓒ, 2026-08-22) — 챗은 이제
+ *     NAV_GROUPS 자체에 없다(데스크톱 4구역 밖 1급 승격, ㉢과 동형 이유로 사이드바 챗
+ *     center 카드는 이 순수 데이터 스캔의 시야 밖). **모바일은 그대로다** — center FAB는
+ *     4탭(오늘/워크/신뢰/지식) 최종 상태와 기하학적으로 한 세트라 「결재→오늘/AQ」 흡수
+ *     (B3 확定) 전엔 도입 보류(카디르 QA HIGH·PR#3354 겹침 발견) — mobile-tab-bar.tsx는
+ *     develop 5탭 그대로고 챗도 일반 탭 하나라 이 가드의 depth 계산 대상 밖(원래도 그랬다,
+ *     이 파일이 스캔하는 건 NAV_GROUPS뿐이지 mobile-tab-bar.tsx의 독자 TABS가 아니다).
+ *     데스크톱 챗 center의 depth-1 대응(구조적으로 보장, app-sidebar.tsx가 NAV_GROUPS
+ *     순회 밖에 하드 배선)은 이 가드가 자동 검증 못 한다 — 렌더 검증은 app-sidebar.test.tsx
+ *     가 맡는다(그룹 순서·라벨 회귀가드).
  */
 import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '../src/lib/nav-config';
 

@@ -10,6 +10,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
@@ -193,6 +194,12 @@ export default function ConversationPage() {
     ? formatHeaderTitle(meta, currentTeamMemberId)
     : (meta === null ? '채팅' : '로딩 중…');
 
+  // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
+  // avatar.tsx 정본으로 실사진을 보여준다. group은 다인원이라 대표 사진이 없어 미표시 유지.
+  const headerAvatarParticipant = meta?.type === 'dm'
+    ? meta.participants.find((p) => p.member_id !== currentTeamMemberId)
+    : null;
+
   // S8 #2: pre-send capability 경고 대상 = 에이전트 participant(본인 제외)·runtime_type 필드 존재시만.
   // (S8b 미머지 → runtime_type undefined → commandTargets 빈 배열 → 경고 미표시 graceful.)
   const commandTargets = (meta?.participants ?? [])
@@ -203,7 +210,15 @@ export default function ConversationPage() {
     <>
       <TopBarSlot
         title={
-          <div className="flex min-w-0 items-center gap-1">
+          // story #2988(선생님 실사용 지적) — top-bar.tsx의 `[&>*]:min-w-0 [&>*]:truncate`가
+          // 이 title 루트 div 자신에 `overflow:hidden`을 건다(빌드 CSS 실측:
+          // `.truncate{overflow:hidden;...}`). 텍스트 말줄임(6df91dce)이 원 의도였는데, 이
+          // div의 자연 높이는 가장 큰 자식(Avatar 24px)에 맞춰지고, agent Avatar의
+          // `ring-2 ring-offset-1`은 box-shadow라 레이아웃 박스 밖으로 3px 번진다(빌드 CSS
+          // 실측: `calc(2px + 1px)` 링 반경) — overflow:hidden이 그 3px를 상하로 그대로
+          // 잘라 "위아래가 잘려 렌더"됐다. py-1(4px)로 클립 경계를 링 밖까지 밀어낸다(회귀
+          // 0 — 텍스트 말줄임 동작은 overflow:hidden이 여전히 걸려있어 그대로 유지).
+          <div className="flex min-w-0 items-center gap-1 py-1">
             <button
               type="button"
               // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
@@ -219,6 +234,15 @@ export default function ConversationPage() {
               <ChevronLeft className="h-4 w-4" />
               <span className="lg:hidden">채팅</span>
             </button>
+            {headerAvatarParticipant && (
+              <Avatar
+                name={headerAvatarParticipant.name ?? '?'}
+                avatarUrl={headerAvatarParticipant.avatar_url ?? null}
+                actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
+                size={24}
+                className="flex-shrink-0"
+              />
+            )}
             {editingTitle && meta?.type === 'group' ? (
               <input
                 autoFocus
@@ -239,11 +263,13 @@ export default function ConversationPage() {
                 className="group/title flex min-w-0 items-center gap-1"
                 aria-label="방 이름 편집"
               >
-                <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>
+                {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/
+                    방이름=Claim(600)로 재분류(리스트 대화명과 동일 처방, 구조·크기 불변). */}
+                <span className="min-w-0 truncate text-sm font-semibold text-foreground">{headerTitle}</span>
                 <Pencil className="size-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
               </button>
             ) : (
-              <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>
+              <span className="min-w-0 truncate text-sm font-semibold text-foreground">{headerTitle}</span>
             )}
           </div>
         }
@@ -308,6 +334,7 @@ export default function ConversationPage() {
             presenceById={presenceById}
             scrollToMessageId={scrollToMessageId}
             initialLastReadAt={meta ? meta.lastReadAt : undefined}
+            participants={meta?.participants ?? []}
           />
         )}
       </div>

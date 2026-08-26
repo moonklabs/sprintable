@@ -9,12 +9,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 
 /**
  * E-DG S28 + 24f5ae18/34360c54 — doc decision gate UI(doc 상세 상단). S24 hypothesis-gate-badge 어휘 미러·신규 토큰 0.
@@ -88,6 +90,16 @@ export function DocGateSection({
   // 동일 패턴(canonical GateSignatureApproval을 Dialog로) 그대로 배선한다 — 새 UI 발명 0.
   const [sigOpen, setSigOpen] = useState(false);
   const [sigError, setSigError] = useState<string | null>(null);
+  // story #3004(선생님 정책 확定 2026-08-24) — 결재선 지정이 상신의 전제(서버가 미지정을
+  // 400으로 거부) — draft→pending 클릭이 이제 즉시 전이가 아니라 결재자 픽커를 연다.
+  const [approverPickerOpen, setApproverPickerOpen] = useState(false);
+  const [approverOptions, setApproverOptions] = useState<SelectOption[]>([]);
+  const [loadingApprovers, setLoadingApprovers] = useState(false);
+  const [selectedApprover, setSelectedApprover] = useState('');
+  const [approverError, setApproverError] = useState<string | null>(null);
+  // story #3040 v3 — 동명 표시이름 오지정 실사고(선생님 실계정 vs PO 대행 계정, 둘 다
+  // "송윤재") 재발 방지. AC2: 동명이 실재할 때만 경고(음성 대조 — 비동명 org는 항상 false).
+  const [approverHasDuplicateNames, setApproverHasDuplicateNames] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const [gates, revsJson, membersJson] = await Promise.all([
@@ -125,17 +137,50 @@ export function DocGateSection({
   const fmtDate = (s: string | undefined) => (s ? new Date(s).toLocaleString() : '');
 
   // doc.status transition(draft↔pending↔denied). gate-row transition과 별개.
-  const docTransition = async (next: string) => {
-    if (busy) return;
+  // story #3004 — draft→pending(상신)은 approverMemberId가 이제 서버 필수(그 외 전이엔 무관·안 실음).
+  const docTransition = async (next: string, approverMemberId?: string): Promise<{ ok: boolean; error?: string }> => {
+    if (busy) return { ok: false };
     setBusy(true);
     try {
+      const body: Record<string, unknown> = { status: next };
+      if (next === 'pending' && approverMemberId) body.approver_member_id = approverMemberId;
       const res = await fetchWithAuth(`/api/docs/${docId}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) { onTransitioned(); await load(); }
+      if (res.ok) { onTransitioned(); await load(); return { ok: true }; }
+      const resBody = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      return { ok: false, error: resBody?.error?.message ?? t('docGateTransitionErrorGeneric') };
     } finally { setBusy(false); }
+  };
+
+  // story #3004 — 결재자 픽커 열기(owner/admin·본인 제외 — #3001 위임 픽커와 동형 규율 재사용).
+  const openApproverPicker = async () => {
+    setApproverPickerOpen(true);
+    setApproverError(null);
+    if (approverOptions.length > 0) return;
+    setLoadingApprovers(true);
+    try {
+      const res = await fetchWithAuth('/api/org-members');
+      const json = await res.json().catch(() => null) as {
+        data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
+      } | null;
+      const { options, hasDuplicateNames } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      setApproverOptions(options);
+      setApproverHasDuplicateNames(hasDuplicateNames);
+    } catch {
+      setApproverError(t('docGateTransitionErrorGeneric'));
+    } finally {
+      setLoadingApprovers(false);
+    }
+  };
+
+  const submitForApproval = async () => {
+    if (!selectedApprover) return;
+    setApproverError(null);
+    const { ok, error } = await docTransition('pending', selectedApprover);
+    if (ok) { setApproverPickerOpen(false); setSelectedApprover(''); } else { setApproverError(error ?? null); }
   };
 
   // gate-row resolution transition(approved/rejected). 성공 시 BE가 doc.status를 confirmed/denied로 flip.
@@ -216,7 +261,7 @@ export function DocGateSection({
   return (
     <section aria-label={t('docGateLabel')} className="mb-4 max-h-[40vh] space-y-2 overflow-y-auto rounded-xl border border-border bg-muted/20 p-3">
       {/* (34360c54) draft = "검토 요청" 상시 entry(Shield + 안내 + primary 버튼 → draft→pending). 저자 자기승인 아님. */}
-      {isDraft ? (
+      {isDraft && !approverPickerOpen ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="grid size-6 shrink-0 place-items-center text-muted-foreground">
             <Shield className="size-4" />
@@ -227,11 +272,44 @@ export function DocGateSection({
             variant="default"
             className="h-7 shrink-0 gap-1"
             disabled={busy}
-            onClick={() => void docTransition('pending')}
+            onClick={() => void openApproverPicker()}
           >
             <Shield className="size-3.5" />
             {t('docGateRequestReview')}
           </Button>
+        </div>
+      ) : null}
+
+      {/* story #3004 — 결재선 지정이 상신의 전제(서버 필수). "검토 요청" 클릭이 즉시 전이가
+          아니라 이 픽커를 연다 — owner/admin·본인 제외로 좁힌다(#3001 위임 픽커와 동형 규율). */}
+      {isDraft && approverPickerOpen ? (
+        <div className="space-y-1.5">
+          {approverError ? (
+            <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{approverError}</p>
+          ) : null}
+          {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
+          {approverHasDuplicateNames ? (
+            <p role="alert" className="text-[11px] text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
+          ) : null}
+          <OperatorDropdownSelect
+            value={selectedApprover}
+            onValueChange={setSelectedApprover}
+            options={approverOptions}
+            placeholder={loadingApprovers ? t('docGateApproverPickerLoading') : t('docGateApproverPickerPlaceholder')}
+            disabled={loadingApprovers || busy}
+          />
+          <div className="flex gap-1.5">
+            <Button size="sm" className="h-7 flex-1" disabled={!selectedApprover || busy} onClick={() => void submitForApproval()}>
+              <Shield className="size-3.5" />
+              {t('docGateRequestReview')}
+            </Button>
+            <Button
+              size="sm" variant="ghost" className="h-7 flex-1 text-muted-foreground" disabled={busy}
+              onClick={() => { setApproverPickerOpen(false); setSelectedApprover(''); setApproverError(null); }}
+            >
+              {t('docGateApproverPickerCancel')}
+            </Button>
+          </div>
         </div>
       ) : null}
 

@@ -180,8 +180,20 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "TOSS_WEBHOOK_SECRET" in keys
     assert "AGENT_GROUP_DEFAULT_MENTIONS" in keys
     assert "CHAIN_ESCALATION_NOTIFY_ENABLED" not in keys
+    # story #2777(E-ADMIN-REDESIGN·결제 운영, 2026-08-18): admin_operator_audience/
+    # admin_operator_allowlist(어드민 mutation SA ID-token 인가 레인) + deploy_env(prod
+    # 하드가드가 읽는, 이 앱이 여태 전무했던 dev/prod 런타임 신호) 필드 신설로 94→97
+    # (ADMIN_OPERATOR_AUDIENCE·ADMIN_OPERATOR_ALLOWLIST·DEPLOY_ENV 포함). 가드가 신규
+    # 필드를 설계대로 잡은 것.
+    assert "ADMIN_OPERATOR_AUDIENCE" in keys and "ADMIN_OPERATOR_ALLOWLIST" in keys
+    assert "DEPLOY_ENV" in keys
     # story #2822(2026-08-20): gotenberg_service_url 필드 신설(office_conversion.py의
     # os.environ 직접읽기를 Settings SSOT 경유로 교체)로 97→98. 가드가 신규 필드를 설계대로 잡은 것.
     assert "GOTENBERG_SERVICE_URL" in keys
-    # promote(2026-08-21): main은 #2777 3필드(ADMIN_OPERATOR 2+DEPLOY_ENV)를 싣지 않는다 — dev 98 - 3 = 95.
-    assert len(keys) == 95
+    # story #3064(2026-08-25): apns_auth_key_p8·apns_key_id·apns_team_id·apns_bundle_id·
+    # apns_use_sandbox 5필드 신설(macOS 네이티브 APNs 발송기 설정)로 98→103.
+    # apns_configured는 @property(SSOT 파생값)라 env 필드로 안 잡힘 — 가드가 정확히 5개만
+    # 잡은 것. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "APNS_AUTH_KEY_P8" in keys and "APNS_KEY_ID" in keys and "APNS_TEAM_ID" in keys
+    assert "APNS_BUNDLE_ID" in keys and "APNS_USE_SANDBOX" in keys
+    assert len(keys) == 103

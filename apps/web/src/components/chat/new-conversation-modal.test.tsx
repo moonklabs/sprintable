@@ -134,3 +134,23 @@ describe('NewConversationModal — 에이전트 정책 거부 구조화 안내(s
     expect(document.body.textContent).toContain('대화 생성에 실패했습니다. 다시 시도해보세요.');
   });
 });
+
+// story #3049(2984-S1) — 후보 목록의 Bot 배지는 AgentIdentity(헤어라인+proof-blue 신호 dot),
+// soft-fill 폐지(옛 PR-B의 proof-blue-soft 결정을 대체).
+describe('NewConversationModal — story #3049(AgentIdentity 헤어라인+신호 dot)', () => {
+  it('agent 후보 항목의 Bot 배지가 AgentIdentity를 쓰고 soft-fill/accent-claim은 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: MEMBERS }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(<NewConversationModal projectId={PROJECT_ID} onClose={() => {}} onCreated={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const badge = document.body.querySelector('.border-proof-line');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toBe('Bot');
+    expect(badge?.className).not.toContain('bg-proof-blue-soft');
+    expect(document.body.querySelector('.bg-accent-claim\\/15')).toBeNull();
+  });
+});

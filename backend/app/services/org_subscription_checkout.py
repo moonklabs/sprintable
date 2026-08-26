@@ -77,6 +77,16 @@ class CheckoutDeclined(Exception):
         super().__init__(message)
 
 
+class ActivePaidSubscriptionExists(Exception):
+    """⛔P0(페드루 실측 지시, 2026-08-21, story a8fec107) — 이 org가 이미 «다른» 유료
+    tier로 active인데 이 엔드포인트로 다시 들어오면(FE 배선 갭·API 직콜 무관하게 가능)
+    가드가 전혀 없어 기존 active 구독을 pending으로 덮어쓰고 신 tier 전액을 재청구했다
+    (원 checkout_subscription()이 신규 결제 전용으로 짜였는데 재진입을 막는 코드가
+    0건이었음 — story #2880 audit doc 1번 갭의 진짜 뿌리). 라우터가 400으로 매핑하며
+    「change-tier로 가라」는 정확한 복구 행동을 문구에 명시한다(틀린 원인 설명이 틀린
+    복구 행동을 유도하지 않게)."""
+
+
 def _checkout_order_id(org_id: uuid.UUID, offering_version_id: uuid.UUID, today: datetime) -> str:
     """결정적 orderId — 같은 org가 같은 offering으로 같은 날 여러 번 요청(더블클릭·FE
     재시도)해도 charge_org의 원자적 claim(#2493)이 같은 order_id로 수렴시켜 중복 Toss
@@ -98,6 +108,36 @@ async def checkout_subscription(
         raise CheckoutError(f"tier={tier!r}는 체크아웃 대상이 아님(free 제외, {sorted(PAID_TIERS)}만)")
     if billing_cycle not in BILLING_CYCLES:
         raise CheckoutError(f"billing_cycle={billing_cycle!r}는 'monthly'/'annual'만 허용")
+
+    # ⛔P0 가드 — 이미 «다른» 유료 tier 또는 «다른» billing_cycle로 active인 org는
+    # 거부(ActivePaidSubscriptionExists 참고). ⚠️같은 tier·같은 cycle 재제출(더블클릭·
+    # 네트워크 재시도)만 막지 않는다 — 그건 _checkout_order_id의 결정적 order_id +
+    # charge_org의 원자적 claim(#2493)이 안전하게 수렴시키는 기존 계약(story #2511
+    # 동시성 테스트가 그 경로를 고정)이라, 여기서 막으면 그 무해한 재시도까지 오폭한다.
+    #
+    # ⛔billing_cycle도 비교 대상에 넣는 이유(페드루 실측 지적, 2026-08-21, 카디르 QA
+    # 中) — offering_version은 tier당 monthly/annual 가격을 «같은 행»에 함께 담는다
+    # (offering_version_id가 cycle과 무관). `_checkout_order_id`는 이 offering_version_id
+    # +날짜로만 키잉되므로, 같은 tier인데 cycle만 다른 요청(예: starter monthly active
+    # → 같은 날 starter annual checkout)은 offering_version_id가 같아 1차 charge와
+    # order_id가 충돌 — charge_org가 기존 confirmed order를 재사용(Toss 재호출 없음, 실PG
+    # 재현 확定: charge_count가 1로 고정)한 채 구독만 billing_cycle='annual'로 갱신된다
+    # — 이중청구가 아니라 «월납 가격에 연납 권리 획득»(반대방향 매출 누수)이 실제 결과.
+    # tier만 비교하면 이 경로를 못 막는다 — cycle도 같아야만 진짜 무해한 재시도다.
+    existing_sub = (
+        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+    ).scalar_one_or_none()
+    if (
+        existing_sub is not None and existing_sub.status == "active"
+        and existing_sub.tier in PAID_TIERS
+        and (existing_sub.tier != tier or existing_sub.billing_cycle != billing_cycle)
+    ):
+        raise ActivePaidSubscriptionExists(
+            f"org_id={org_id}는 이미 활성 유료 구독(tier={existing_sub.tier!r}, "
+            f"billing_cycle={existing_sub.billing_cycle!r})입니다 — "
+            "플랜/결제주기 변경은 POST /api/v2/org-subscriptions/change-tier를 쓰세요. "
+            "checkout은 신규 결제 전용입니다."
+        )
 
     offering = (
         await session.execute(
@@ -207,6 +247,15 @@ async def checkout_subscription(
 
 
 async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:
+    """⛔latent 버그 발견(2026-08-21, P0 가드 추가 中 실증) — 이 함수 이름 자체가 "refetch"
+    (=최신값 재조회) 계약인데, 같은 세션에서 이 org_id 행을 먼저 SELECT한 적이 있으면
+    (예: P0 가드의 존재확인 조회) SQLAlchemy identity map이 그 «캐시된» 인스턴스를 그대로
+    돌려주고 이 함수의 재조회를 무시한다 — 중간에 raw UPDATE(Core)로 값이 바뀌어도 이
+    세션이 들고 있는 Python 객체는 안 바뀐다. `populate_existing()`으로 매번 강제로
+    행을 다시 읽어 인스턴스를 최신화한다(이 함수를 "refetch"라 부르는 이상 항상 참이어야
+    할 불변식 — 호출부가 이 세션에서 먼저 뭘 SELECT했는지에 의존하면 안 된다)."""
     return (
-        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+        await session.execute(
+            select(OrgSubscription).where(OrgSubscription.org_id == org_id).execution_options(populate_existing=True)
+        )
     ).scalar_one()

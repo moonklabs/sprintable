@@ -131,7 +131,8 @@ async def test_create_story_201():
         # 그 호출 자체를 no-op으로 patch한다(행동 검증은 test_2328_candidate_hook_on_create_realdb.py).
         with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock), \
-             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock):
+             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock), \
+             patch("app.routers.stories._attach_trust_stage", new_callable=AsyncMock):
             # story #2642(카디르 QA 패턴 재적용, 2026-08-14): slug 부착은 이 테스트의
             # 관심사가 아니고 session이 그 신규 쿼리용으로 configure된 적 없다.
             mock_create.return_value = story
@@ -423,7 +424,8 @@ async def test_create_story_with_intent_fields_201():
         # session.execute()에 그대로 부딪혀 TypeError).
         with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock), \
-             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock):
+             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock), \
+             patch("app.routers.stories._attach_trust_stage", new_callable=AsyncMock):
             # story #2642(카디르 QA 패턴 재적용, 2026-08-14): test_create_story_201과 동형.
             mock_create.return_value = story
 
@@ -495,7 +497,8 @@ async def test_create_story_outcome_fields_ignored():
         # session.execute()에 그대로 부딪혀 TypeError).
         with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock), \
-             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock):
+             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock), \
+             patch("app.routers.stories._attach_trust_stage", new_callable=AsyncMock):
             # story #2642(카디르 QA 패턴 재적용, 2026-08-14): test_create_story_201과 동형.
             mock_create.return_value = story
 

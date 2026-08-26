@@ -1,24 +1,32 @@
-"""H1-FIX-2: merge 게이트 approve → 스토리 done 진행.
+"""story #2965(PO 판정 2026-08-23) — H1-FIX-2 되돌림: merge 게이트 approve가 더 이상 스토리를
+done으로 자동전진시키지 않는다.
 
-S7이 verdict만 기록하고 →done 진행을 안 박아, 사람이 approve해도 일이 done 도달 못 하던 dogfood
-갭을 닫는다. approve→done·reject→유지·비-merge→미진행·멱등.
+원래(H1-FIX-2, 이 파일명의 유래): 사람이 approve하면 `_advance_story_on_merge_approve`가 story를
+즉시 done까지 진행시켰다. 실사고(2933→2931→2952→2958, 하루 4회 재발): 그 approve 시점에 PR이
+아직 미머지(design 라벨·CLEAN 대기)인 채로 board가 done을 보여줘 no-fiction 위반이었다 — 매번
+PO가 in-review로 수동 되돌렸다.
+
+처방 재검토: "PR 머지 웹훅으로 done 트리거"(스토리 원안)는 기각 — story #2327(2026-07-30)이 같은
+이유("머지 ≠ done, done은 사람 확認 後")로 정확히 그 메커니즘(close-on-merge)을 이미 정지시켰다.
+트리거만 바꿔 되살리면 동일 사고가 재발한다. 채택안: `_advance_story_on_merge_approve` 자체를
+gate_service.py에서 제거 — gate approve는 게이트 상태만 바꾸고 story.status는 건드리지 않는다.
+done은 사람이 board에서 명시 PATCH하는 경로 하나로 통일.
 """
 from __future__ import annotations
 
 import os
 import uuid
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from app.services.gate_service import _advance_story_on_merge_approve
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 # story 8236bbc3: create_all/drop_all로 자체 스키마 직접 관리 — 공유 alembic-migrated DB
 # 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
-pytestmark = pytest.mark.destructive_schema
+pytestmark = [
+    pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)"),
+    pytest.mark.destructive_schema,
+]
 
 
 @pytest.fixture
@@ -26,95 +34,38 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture(autouse=True)
-def _mock_status_side_effects():
-    """41a6e294: _advance_story_on_merge_approve가 done 진행 후 status_changed side-effects를
-    발화하므로, status 진행 로직만 검증하는 단위 테스트에서는 emit을 격리(실제 발화는 별도 실DB로 검증)."""
-    with patch(
-        "app.services.story_status_events.emit_story_status_changed", new=AsyncMock()
-    ):
-        yield
-
-
-def _gate(gate_type="merge", work_item_type="story"):
-    return SimpleNamespace(
-        gate_type=gate_type, work_item_type=work_item_type,
-        work_item_id=uuid.uuid4(), org_id=uuid.uuid4(), resolver_id=uuid.uuid4(),
-    )
-
-
-# ── 단위 ───────────────────────────────────────────────────────────────────────
-
-@pytest.mark.anyio
-async def test_merge_approve_advances_story_to_done():
-    story = SimpleNamespace(status="in-review")
-    session = AsyncMock()
-    session.get = AsyncMock(return_value=story)
-    await _advance_story_on_merge_approve(session, _gate("merge"), "approved")
-    assert story.status == "done"  # approve → done 진행.
-
-
-@pytest.mark.anyio
-async def test_reject_keeps_status():
-    session = AsyncMock()
-    session.get = AsyncMock()
-    await _advance_story_on_merge_approve(session, _gate("merge"), "rejected")
-    session.get.assert_not_awaited()  # reject → 진행 안 함(in-review 유지).
-
-
-@pytest.mark.anyio
-async def test_non_merge_gate_no_advance():
-    session = AsyncMock()
-    session.get = AsyncMock()
-    await _advance_story_on_merge_approve(session, _gate("qa"), "approved")
-    session.get.assert_not_awaited()  # 비-merge 게이트는 미진행.
-
-
-@pytest.mark.anyio
-async def test_already_done_noop():
-    story = SimpleNamespace(status="done")
-    session = AsyncMock()
-    session.get = AsyncMock(return_value=story)
-    await _advance_story_on_merge_approve(session, _gate("merge"), "approved")
-    assert story.status == "done"  # 멱등 no-op.
-
-
-@pytest.mark.anyio
-async def test_non_story_workitem_no_advance():
-    session = AsyncMock()
-    session.get = AsyncMock()
-    await _advance_story_on_merge_approve(session, _gate("merge", work_item_type="epic"), "approved")
-    session.get.assert_not_awaited()
-
-
-# ── 실DB E2E: transition_gate(approve) → 스토리 done 도달 ──────────────────────
-
-@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
-@pytest.mark.anyio
-async def test_transition_approve_drives_story_done_real_db():
-    from sqlalchemy import text as _text
+async def _session_factory():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.core.database import Base
     import app.models  # noqa: F401
-    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
-    from app.models.gate import Gate
-    from app.models.participation import Participation, ParticipationRole
-    from app.models.pm import Story
-    from app.models.verdict import Verdict  # noqa: F401 — create_all 테이블 등록(S7 verdict 기록).
-    from app.services.gate_service import transition_gate
+    import app.models.verdict  # noqa: F401 — #2662: app.models 벌크 import에 안 잡힘, create_all 전 명시 필요.
+    import app.models.activity_log  # noqa: F401 — 동일 이유(transition_gate가 ActivityLog 기록).
 
     url = _REAL_DB_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace(
         "postgresql://", "postgresql+asyncpg://"
     )
     engine = create_async_engine(url)
-    org, project, story_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    member, role_id, resolver, gate_id = (uuid.uuid4() for _ in range(4))
-
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    Session = async_sessionmaker(engine, expire_on_commit=False)
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest.mark.anyio
+async def test_transition_approve_does_not_advance_story_to_done_real_db():
+    """⭐핵심 — merge 게이트 approve는 story.status를 건드리지 않는다(in-review 그대로)."""
+    from sqlalchemy import text as _text
+
+    from app.models.participation import Participation, ParticipationRole
+    from app.models.pm import Story
+    from app.services.gate_service import transition_gate
+
+    engine, Session = await _session_factory()
+    org, project, story_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    member, role_id, resolver, gate_id = (uuid.uuid4() for _ in range(4))
     try:
+        from app.models.gate import Gate
+
         async with Session() as s:
             await s.execute(_text("SET session_replication_role = replica"))
             s.add_all([
@@ -135,9 +86,56 @@ async def test_transition_approve_drives_story_done_real_db():
             status = (await s.execute(
                 _text("SELECT status FROM stories WHERE id=:id"), {"id": story_id}
             )).scalar()
-            # dogfood 갭 해소: 사람 approve만으로 스토리가 done에 도달(재시도/재평가 불요).
-            assert status == "done", f"approve 후 스토리가 done이어야, got {status}"
+            assert status == "in-review", (
+                f"approve 후에도 story.status는 불변이어야(done은 사람 명시 PATCH 몫), got {status}"
+            )
     finally:
+        from app.core.database import Base
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_transition_reject_does_not_advance_story_either():
+    """양성대조 — reject도 당연히 story.status 불변(원래도 진행 안 했음, 회귀 없음 확인)."""
+    from sqlalchemy import text as _text
+
+    from app.models.participation import Participation, ParticipationRole
+    from app.models.pm import Story
+    from app.services.gate_service import transition_gate
+
+    engine, Session = await _session_factory()
+    org, project, story_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    member, role_id, resolver, gate_id = (uuid.uuid4() for _ in range(4))
+    try:
+        from app.models.gate import Gate
+
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            s.add_all([
+                ParticipationRole(id=role_id, org_id=org, key="implementation", label="구현", is_default=True),
+                Story(id=story_id, org_id=org, project_id=project, title="S", status="in-review", story_points=3),
+                Participation(id=uuid.uuid4(), org_id=org, story_id=story_id, member_id=member, role_id=role_id),
+                Gate(id=gate_id, org_id=org, work_item_id=story_id, work_item_type="story",
+                     gate_type="merge", status="pending"),
+            ])
+            await s.commit()
+
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            await transition_gate(s, org, gate_id, "rejected", resolver_id=resolver)
+            await s.commit()
+
+        async with Session() as s:
+            status = (await s.execute(
+                _text("SELECT status FROM stories WHERE id=:id"), {"id": story_id}
+            )).scalar()
+            assert status == "in-review"
+    finally:
+        from app.core.database import Base
+
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()

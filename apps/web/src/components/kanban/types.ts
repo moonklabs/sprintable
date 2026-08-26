@@ -34,11 +34,21 @@ export interface KanbanStory {
   human_verified?: boolean | null;
   human_verified_by?: string | null;
   human_verified_at?: string | null;
+  // story #2993 — P0-03(backend/app/schemas/story.py StoryResponse)이 이미 배선해 반환하던
+  // 필드인데 FE가 소비한 적이 없었다(FE 타입 부재). Workcell 책임자 표시 폴백체인(human_owner_
+  // member_id → human_verified_by → assigneeIds 스캔)의 최우선 소스.
+  human_owner_member_id?: string | null;
   // story #2187 — 라이브 QA가 만든 임시 카드([TEMP-QA] 등)는 삭제가 휴먼 전용(에이전트 API키
   // 403)이라 만든 쪽이 못 치운다. PO가 우선 is_excluded=true로 마킹해 analytics/command_center
   // 지표에서는 뺐으나(#2187 관측) 보드/백로그 화면은 그 플래그를 안 봐 그대로 남아 있었다 —
   // 이 필드로 화면도 존중해 숨긴다(삭제 아닌 숨김, DB엔 남음).
   is_excluded?: boolean;
+  // story #2933 H1(P0-H) — BE trust_pipeline.derive_trust_stage() 판정값(get_story·list_stories
+  // 둘 다 배선). null="done/미지 status(파이프라인 스코프 밖)" 또는 "이 응답 경로가 이 필드를
+  // 아예 안 채움"(bulk_update/update_story 등 H1 스코프 밖) 둘 다일 수 있어 이 필드 하나로는
+  // 구분 못 한다(정직한 한계, story.py trust_stage 필드 주석과 동형) — 소비부는 재파생 폴백을
+  // 두지 않고 "기존값 유지"로 대응한다(story-detail-panel.tsx pipelineStage 참고).
+  trust_stage?: 'queued' | 'running' | 'needs_input' | 'claimed_done' | 'verified' | 'merge_ready' | null;
 }
 
 export interface GateItem {
@@ -51,6 +61,10 @@ export interface GateItem {
   gate_type: string;
   status: string;
   resolver_id: string | null;
+  // story #3001(선생님 정책 확定 2026-08-24) — 결재선(수신자) 지정+위임. resolver_id의
+  // 사전 대칭짝(#2985 BE 신설, additive)이 이제까지 이 타입엔 누락돼 있었음 — 위임 버튼
+  // 노출 판단(현재 로그인 사용자==이 값)과 "위임됨" 표시 판단(원 카드 수신자!=이 값)에 쓴다.
+  designated_approver_id?: string | null;
   resolved_at: string | null;
   resolution_note: string | null;
   held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.
@@ -71,6 +85,10 @@ export interface GateItem {
   // 가 OrgGatePolicy.posture+gate_type에서 순수 파생해 list/단건 조회 둘 다 동봉(additive). null/undefined는
   // BE가 아직 못 보낸 구버전 응답 대비 방어적 폴백일 뿐 — 정상 응답은 항상 "low"|"high" 둘 중 하나.
   risk_grade?: 'low' | 'high' | null;
+  // story #2893(설계안 §2 A1, 0271) — merge-type만 실제 값을 갖는다(PR 컨텍스트 없는 평가·
+  // PR 개념이 없는 타 gate_type은 null). 한 스토리에 merge 게이트가 여러 개(PR마다 1개)일
+  // 수 있게 된 뒤로, FE가 "이 gates 배열 중 어느 게 지금 관심 있는 PR의 것인지" 고르는 축.
+  pr_number?: number | null;
   // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
   requires_human?: boolean;
   evidence_status?: string | null; // sufficient | blocked | insufficient
@@ -232,6 +250,11 @@ export interface DependencyEdge {
 export interface KanbanEpic {
   id: string;
   title: string;
+  // story #2931 — 에픽 스윔레인의 "기본 active만" 필터+정렬에 필요(GoalResponse가 이미
+  // 응답에 싣는 필드, BE 신규 작업 0 — 기존 kanban-board.tsx epicMap은 title만 뽑아 썼지만
+  // 원본 응답엔 이미 있었다).
+  status?: string;
+  position?: number | null;
 }
 
 export interface KanbanSprint {
@@ -263,6 +286,37 @@ export const COLUMNS = [
 ] as const;
 
 export type ColumnId = (typeof COLUMNS)[number]['id'];
+
+// story #2933 H4(P0-H) — 6단계 신뢰축+완료 7컬럼(doc/아티팩트 e65f1016 v4, SSOT=backend
+// trust_pipeline.py derive_trust_stage). settable(드래그 가능) 4개=queued/running/
+// claimed_done/done — status에서 직접 나온다. 파생(드래그 불가) 3개=needs_input/verified/
+// merge_ready — 게이트/증거 사실(has_pending_human_gate·human_verified·blocker·verify_fail)
+// 이 계산, 드래그로 못 만들고 못 뺀다(게이트 해소가 유일한 이탈 경로). done은 파이프라인
+// 밖(derive_trust_stage=None)이지만 제품제약("완료물은 기본 뷰에 보인다")상 7번째 컬럼으로
+// 같은 보드에 둔다(별도 대시보드 신설 아님 — 계승조각 ⓐ 6레인 기각과 정합, 이건 6레인이
+// 아니라 6+1).
+export const TRUST_COLUMNS = [
+  { id: 'queued', i18nKey: 'trustQueued', locked: false },
+  { id: 'running', i18nKey: 'trustRunning', locked: false },
+  { id: 'needs_input', i18nKey: 'trustNeedsInput', locked: true },
+  { id: 'claimed_done', i18nKey: 'trustClaimedDone', locked: false },
+  { id: 'verified', i18nKey: 'trustVerified', locked: true },
+  { id: 'merge_ready', i18nKey: 'trustMergeReady', locked: true },
+  { id: 'done', i18nKey: 'trustDone', locked: false },
+] as const;
+
+export type TrustColumnId = (typeof TRUST_COLUMNS)[number]['id'];
+
+// story #2933 H4 — settable 트러스트 컬럼 드롭 시 set할 status(v4 §C 매핑표 그대로). PO
+// 확定④: queued는 backlog+ready-for-dev를 흡수하지만 드롭(다른 컬럼→queued로 이동)은 항상
+// ready-for-dev로 승격 — backlog 강등은 이 보드에서 안 하고(5-status 클래식 뷰/카드 메뉴 몫).
+// 파생 3개는 여기 없다 — resolveTrustColumnId가 그 컬럼으로의 드롭 자체를 절대 허용하지 않는다.
+export const TRUST_COLUMN_TO_STATUS: Partial<Record<TrustColumnId, string>> = {
+  queued: 'ready-for-dev',
+  running: 'in-progress',
+  claimed_done: 'in-review',
+  done: 'done',
+};
 
 // story #2133: assignee_id(단일)/assignee_ids(배열) 이중표현이 생산처마다 손으로
 // 맞춰지다 하루 2회(#2384·#2130) 동일 클래스로 어긋났다. assignee_ids를 단일 SSOT로 두고

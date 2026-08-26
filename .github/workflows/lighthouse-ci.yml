@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+# story #2912(2899 그라운딩 갈래B 처방) — pull_request+push 혼합 트리거라 PR번호가 없는
+# push 이벤트도 커버해야 해서 ci.yml과 동형으로 github.ref 기반 그룹을 쓴다(pull_request
+# 이벤트의 github.ref는 refs/pull/N/merge로 안정적이라 PR별로도 정확히 갈린다).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lighthouse:
     runs-on: ubuntu-latest

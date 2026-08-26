@@ -127,7 +127,19 @@ async def get_me(
             except (ValueError, AttributeError):
                 where_clause = TeamMember.user_id == uid
         else:
-            where_clause = TeamMember.user_id == uid
+            # story #2873(미르코 실측): project_id_str가 ""(0-프로젝트 org, 정상 클레임)일 때
+            # falsy로 삼켜 user_id 단독 조회로 떨어지면 TeamMember가 org 무관(멀티-org 유저는
+            # 임의 org 행 매치 — 뭉클랩처럼 최초 가입 org 행이 먼저 잡히는 식). org_id 클레임을
+            # 반드시 함께 걸어 그 org 소속 TeamMember가 없으면 아래 org_members 폴백(139줄~)으로
+            # 정확히 떨어지게 한다(0-프로젝트 org는 애초에 TeamMember 행이 없는 게 정상 형태).
+            org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+            if org_id_str:
+                try:
+                    where_clause = (TeamMember.user_id == uid) & (TeamMember.org_id == uuid.UUID(org_id_str))
+                except (ValueError, AttributeError):
+                    where_clause = TeamMember.user_id == uid
+            else:
+                where_clause = TeamMember.user_id == uid
 
     result = await session.execute(
         select(TeamMember)
@@ -306,7 +318,16 @@ async def update_me(
             except (ValueError, AttributeError):
                 where_clause = TeamMember.user_id == uid
         else:
-            where_clause = TeamMember.user_id == uid
+            # story #2873: get_me와 동일 결함 클래스 — org_id 클레임으로 스코프해 org-blind
+            # 오매칭(멀티-org 유저가 다른 org의 TeamMember를 PATCH)을 차단.
+            org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+            if org_id_str:
+                try:
+                    where_clause = (TeamMember.user_id == uid) & (TeamMember.org_id == uuid.UUID(org_id_str))
+                except (ValueError, AttributeError):
+                    where_clause = TeamMember.user_id == uid
+            else:
+                where_clause = TeamMember.user_id == uid
 
     # AC3-5 ②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
     result = await session.execute(

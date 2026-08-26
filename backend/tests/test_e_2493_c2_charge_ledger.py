@@ -104,6 +104,72 @@ async def test_toss_get_payment_by_order_id_success():
     assert call_args.args[0].endswith("/v1/payments/orders/ord-dup1")
 
 
+@pytest.mark.anyio
+async def test_toss_get_payment_by_order_id_error_logs_error_by_default(caplog):
+    """story #2913 후속(페드루군 2026-08-22 라이브 실측) — 어댑터는 호출자를 모르므로
+    기본값(quiet_codes 미지정)은 기존 그대로 ERROR. billing_reconciliation.py(confirmed
+    order가 Toss에 없다=원장 무결성 이상)·billing_charge.py(DUPLICATED_ORDER_ID 뒤
+    조회, 실시간 결제 경로) 둘 다 이 기본값을 그대로 쓰므로 이 회귀가 그 두 곳의 ERROR
+    가시성을 보장한다."""
+    import logging
+
+    from app.services.payment.toss_adapter import TossAdapter, TossApiError
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_resp.headers = {"content-type": "application/json"}
+    mock_resp.json.return_value = {"code": "NOT_FOUND_PAYMENT", "message": "not found"}
+
+    with patch("app.services.payment.toss_adapter.settings") as mock_settings:
+        mock_settings.toss_payments_secret_key = "test_sk_dummy"
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_resp)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            adapter = TossAdapter()
+            with caplog.at_level(logging.INFO):
+                with pytest.raises(TossApiError):
+                    await adapter.get_payment_by_order_id(order_id="ord-x")
+
+    assert any(
+        r.levelno == logging.ERROR and "NOT_FOUND_PAYMENT" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.anyio
+async def test_toss_get_payment_by_order_id_quiet_codes_downgrades_to_info(caplog):
+    """story #2913 후속 — 호출자(sweep_stale_pending_orders)가 명시적으로 quiet_codes에
+    NOT_FOUND_PAYMENT를 넣으면 어댑터 자신의 ERROR 한 줄이 INFO로 낮아진다(2896 라이브
+    실측: billing_scheduler.py가 이미 자체 INFO를 남기는데 그 위에 어댑터가 또 ERROR를
+    찍어 "일 단위 ERROR 반복"이 실제로는 안 없어졌던 잔여를 여기서 닫는다)."""
+    import logging
+
+    from app.services.payment.toss_adapter import TossAdapter, TossApiError
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_resp.headers = {"content-type": "application/json"}
+    mock_resp.json.return_value = {"code": "NOT_FOUND_PAYMENT", "message": "not found"}
+
+    with patch("app.services.payment.toss_adapter.settings") as mock_settings:
+        mock_settings.toss_payments_secret_key = "test_sk_dummy"
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_resp)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            adapter = TossAdapter()
+            with caplog.at_level(logging.INFO):
+                with pytest.raises(TossApiError):
+                    await adapter.get_payment_by_order_id(
+                        order_id="ord-x", quiet_codes=frozenset({"NOT_FOUND_PAYMENT"}),
+                    )
+
+    assert not any(r.levelno == logging.ERROR for r in caplog.records), "quiet_codes 지정 시 ERROR가 찍히면 안 됨"
+    assert any(
+        r.levelno == logging.INFO and "NOT_FOUND_PAYMENT" in r.getMessage()
+        for r in caplog.records
+    ), "quiet_codes 지정 시 INFO로 대체 기록돼야 함"
+
+
 # ─── charge_org — 원자적 claim + orderId-먼저-기록 오케스트레이션 ──────────
 
 def _mock_billing_key_row(*, org_id: uuid.UUID):

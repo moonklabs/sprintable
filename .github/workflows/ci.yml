@@ -2,6 +2,15 @@ name: CI
 
 on:
   pull_request:
+    # story #2912(2899 그라운딩 갈래D 처방) — 기본값([opened, synchronize, reopened])엔
+    # edited가 없어, base branch만 바뀌고 새 커밋이 없는 재타겟(synchronize 미발화)에서
+    # 이 required 워크플로 자체가 재트리거되지 않았다(#3317 실사고). edited를 명시 추가해
+    # base 재타겟도 새 런을 튼다 — required 3잡(alembic-fresh-db·backend-test·ci)엔
+    # changes.base skip-필터를 걸지 않는다(그 잡들의 기존 `if: always()`가 스킵-캐스케이드
+    # 방지용이라, skip 조건을 더하면 그 방지를 무력화한다 — [[ci-stuck-c-d-remedy-design-20260822]]
+    # landmine 참고). title/body 편집에도 전체 재실행되지만 PR#3324의 concurrency그룹이
+    # 연속 편집 시 구run을 자동취소해 낭비를 완화한다.
+    types: [opened, synchronize, reopened, edited]
     branches: [main, develop]
   push:
     branches: [main, develop]
@@ -567,6 +576,17 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
 
+  no-script-output-artifacts-lint:
+    name: no script output artifacts lint (guard, story #3008)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/scripts/ for committed ad-hoc diagnostic output (prod IP/PII residue — fk_null_survey_result.json class)
+        working-directory: backend
+        run: python3 scripts/lint_no_script_output_artifacts.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
@@ -846,6 +866,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # story #2929 — base가 develop/main이 아닌 스택 PR(feat/* 위 feat/*)에는 이 job이 전혀
+  # 안 돈다(트리거 `branches: [main, develop]`, 위). 그 갭은 `stack-pr-frontend-preview.yml`
+  # (별도 파일, `branches-ignore: [main, develop]`)이 required 체크 이름을 건드리지 않고
+  # 메운다 — 이 job과 완전 분리라 required 체크 의미론엔 영향 없음. 새 verify:* 스텝을
+  # 여기 추가하면 그 파일에도 반영할 것(리뷰에서 확인).
   ci:
     name: Lint, Type Check, Test, Build
     runs-on: ubuntu-latest

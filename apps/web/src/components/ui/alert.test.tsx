@@ -125,6 +125,25 @@ describe('Alert variant 라이트 대비 통일 (story #2513)', () => {
     },
   );
 
+  // story #2969 §2 PR-2(doc proofline-system-layer-2969) — 색 variant(success/warning/
+  // destructive/info)는 좌측 2px 상태 액센트를 갖는다. default(중립)는 축이 없어 미적용.
+  it.each(['success', 'warning', 'destructive', 'info'] as const)(
+    'variant=%s — 좌측 2px 상태 액센트(border-l-2)를 갖는다',
+    async (variant) => {
+      await act(async () => {
+        root.render(<Alert variant={variant}><AlertDescription>메시지</AlertDescription></Alert>);
+      });
+      expect(container.firstElementChild?.className).toContain('border-l-2');
+    },
+  );
+
+  it('default(중립)는 좌측 액센트가 없다(축이 없음)', async () => {
+    await act(async () => {
+      root.render(<Alert><AlertDescription>메시지</AlertDescription></Alert>);
+    });
+    expect(container.firstElementChild?.className).not.toContain('border-l-2');
+  });
+
   // 글자만 foreground로 통일됐을 뿐 variant 구분(색 정체성) 자체는 border/tint로 남아야
   // 한다 — 넷이 서로 다른 border-*-border/bg-*-tint를 갖는지 직접 대조.
   it('variant별 색 정체성(border·tint)은 서로 다르게 유지된다(글자 통일이 구분을 지우지 않는다)', async () => {

@@ -5,78 +5,24 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {
-  ExternalLink, X, FileText, File, Layers, CheckSquare, Eye,
-  Calendar, Image, FlaskConical, Paperclip, type LucideIcon,
-} from 'lucide-react';
+import { ExternalLink, X, Eye } from 'lucide-react';
+import { cva, type VariantProps } from 'class-variance-authority';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorageUrl } from '@/lib/entity-project-url';
-import { initials } from '@/lib/storage/format';
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
+import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
+import { parseEntityRef } from './entity-ref';
+import { useReadingPanel } from './reading-panel-context';
+// story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
+// entity-registry.tsx 참고.
+import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
 
-// story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
-// (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
-// 밖 FE 전용 타입(AC5 명시 예외) — 아이콘을 **일부러** 안 준다: asset은 이미지/PDF/영상 등
-// content-type이 제각각이라 타입 레벨 단일 아이콘이 의미가 없고(개별 파일 아이콘은
-// getFileIcon이 파일별로 처리), "아이콘 없으면 이름 글자로"가 AC4가 못박은 **기본값**이지
-// asset만의 예외 처리가 아니다 — 그래서 이 fallback은 `resolveEntityIcon()`이 모든 타입에
-// 공통 적용한다(Hash 캐치올을 버림 — 있지도 않은 아이콘을 그리는 거짓보다 글자가 정직하다).
-//
-// ⛔story #2263(C-7, 2026-07-29) — 한 번 여기 chat_message를 추가했다가 되돌렸다: BE
-// ENTITY_RESOLVERS에 등록하면 «완전지원 엔티티»(검색·MCP mention·project축 parity까지)를
-// 전부 갖춰야 한다는 게 CI 13건 실패로 드러났다(PO 판정). chat_message는 참조 TARGET은
-// 되지만 그 다섯 계약을 구조적으로 다 못 갖춰(검색대상 아님·project축 아님·단독조회
-// 라우트 없음) `reference_registry.TARGET_ONLY_TYPES`라는 별도 집합으로 옮겨졌다 —
-// ENTITY_RESOLVERS 밖이라 이 FE parity 대조에도 안 걸린다(의도적으로 안 나타난다).
-export const ENTITY_ICONS: Record<string, LucideIcon> = {
-  story: FileText,
-  doc: File,
-  epic: Layers,
-  task: CheckSquare,
-  sprint: Calendar,
-  artifact: Image,
-  hypothesis: FlaskConical,
-  evidence: Paperclip,
-};
-
-/** ENTITY_ICONS에 없는 타입(지금은 asset뿐) → 아이콘 대신 이름 첫 글자(들). 예외 처리 아님(위 주석). */
-export function resolveEntityIcon(entityType: string): LucideIcon | null {
-  return ENTITY_ICONS[entityType] ?? null;
-}
-
-/** 아이콘이 없는 타입(asset)의 렌더 지점 3곳(모달 헤더·EmbedCard·EntityChip)이 각자 Hash로
- * 캐치올하지 않고 한 곳에서 초성/이니셜 폴백을 공유하게 — 새 타입이 추가돼도 렌더 지점마다
- * 따로 안 고쳐도 된다. Icon은 호출부에서 미리 resolve해 prop으로 받는다(레포 관례 —
- * storage-file-glyph.tsx 동일 주석: 컴포넌트 스코프 안에서 lookup한 컴포넌트를 바로 JSX로 쓰면
- * `react-hooks/static-components`에 걸린다). */
-function EntityGlyph({ Icon, label, className }: { Icon: LucideIcon | null; label: string; className?: string }) {
-  if (Icon) return <Icon className={className ?? 'size-4 shrink-0'} />;
-  return <span className={`flex items-center justify-center text-[10px] font-bold ${className ?? 'size-4 shrink-0'}`}>{initials(label)}</span>;
-}
-
-// 엔티티 신호 토큰(하드코딩 blue/purple/emerald/slate 제거·다크 자동 정합). 타입별 절제 틴트.
-// ⛔AC4: ②/③(담긴 곳으로 보내거나 갈 곳이 없는) 상태에서는 이 틴트를 쓰지 않고 GRAY_STATE_COLOR로
-// 덮어쓴다(회색 하나로 통일 — 노랑 금지 근거는 그 상수 주석 참고). 여기 있는 색은 **①일 때만** 보인다.
-const ENTITY_COLORS: Record<string, string> = {
-  story: 'border-info/30 bg-info/8 text-foreground',
-  doc: 'border-border bg-muted/40 text-foreground',
-  epic: 'border-secondary bg-secondary/40 text-foreground',
-  task: 'border-success/30 bg-success/8 text-foreground',
-  sprint: 'border-warning/30 bg-warning/8 text-foreground',
-  artifact: 'border-info/30 bg-info/8 text-foreground',
-  hypothesis: 'border-border bg-muted/40 text-foreground',
-  evidence: 'border-border bg-muted/40 text-foreground',
-  // S6: 스토리지 자산 토큰 — info 틴트(파일 아이콘은 content-type 의존이라 AssetEmbedCard 에서 getFileIcon 처리).
-  asset: 'border-info/30 bg-info/8 text-foreground',
-};
-
-// ⛔AC4 색 규율: 노랑 금지 — 노랑은 "기다리면 풀리는 것"인데 ②/③은 사용자가 기다려서 풀 수
-// 있는 상태가 아니다(담긴 곳으로 보내거나, 애초에 갈 곳이 없는 것). 구별은 색이 아니라 말로.
-export const GRAY_STATE_COLOR = 'border-border bg-muted/40 text-muted-foreground';
+export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
 
 /** story #2302 — task·evidence는 항상 담긴 곳(②) 판정에 own-href가 없다(모델 FK 그대로:
  * Task.story_id/Evidence.work_item_id 항상 NOT NULL — 항상 유일한 부모, 모호함 0).
@@ -176,18 +122,17 @@ const MdBadge = ({ label }: { label: string }) => (
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
 // 이 객체는 props/상태에 의존하지 않는 순수 상수이고 자식도 전부 stateless라 useMemo조차
 // 불필요 — 모듈 스코프로 끌어올려 참조를 영구 고정한다.
-// story #2639 — 본문 엔티티 참조 토큰 `[제목](entity:타입:id)`의 href 매칭(id는 UUID만).
-// doc-content-renderer.tsx·chat-bubble.tsx의 파싱 규칙과 문자 그대로 동일(드리프트 방지).
-const MDBODY_ENTITY_REF_RE = /^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-
 const mdBodyComponents = {
   // story #2639(미르코 리뷰 ⑤) — 결재 카드 문서 미리보기(EntityPreviewModal→EntityDetail doc
   // 분기)가 이 경량 렌더러를 쓴다. doc-content-renderer와 동일하게 entity: 참조를 EntityChip으로
   // 잇는다(같은 파일의 EntityChip 재사용·사본 0). 비-UUID/asset은 평문 링크 폴백(무동작 0).
+  // story #2888(S2a) — 파싱은 parseEntityRef SSOT. 이 렌더러엔 `references` 사이드밴드가
+  // 없어(중첩 엔티티 본문) doc-content-renderer.tsx와 동일한 단순 2갈래(asset 제외 칩 or
+  // 평문 링크)를 그대로 유지한다 — asset은 원래도 AssetEmbedCard가 아니라 평문 링크 폴백.
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
-    const m = href?.match(MDBODY_ENTITY_REF_RE);
-    if (m && m[1]!.toLowerCase() !== 'asset') {
-      return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+    const ref = parseEntityRef(href);
+    if (ref && ref.entityType.toLowerCase() !== 'asset') {
+      return <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId)} />;
     }
     return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
   },
@@ -261,8 +206,26 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
   }
 
   if (entityType === 'doc') {
-    const d = detail as { content?: string };
-    return d.content ? <MdBody content={d.content} /> : null;
+    // story #3776ccfe(FE·결재 카드, 선생님 실사용 발견) — content_format을 안 보고 항상
+    // MdBody(마크다운 전용)에 먹였다: html doc이면 태그가 렌더 안 되고 이스케이프 텍스트로
+    // 그대로 찍혔다(react-markdown은 rehype-raw 없이는 raw HTML을 실행 안 함). doc-content-
+    // renderer.tsx(전체 읽기 뷰)가 이미 쓰는 DOMPurify sanitize 정본(sanitizeDocHtml)을
+    // 재사용해 html이면 sanitize 後 dangerouslySetInnerHTML, 그 외(markdown 기본값)는
+    // 기존 MdBody 그대로(회귀 0) — sanitize를 우회할 새 경로를 만들지 않는다.
+    const d = detail as { content?: string; content_format?: string };
+    if (!d.content) return null;
+    if (d.content_format === 'html') {
+      // 유나 design PASS 관찰(비차단, PR#3481) — table/code가 미스타일이었다. mdBodyComponents
+      // (markdown 경로)의 pre/code 사이징을 그대로 옮기고, table은 이 렌더러의 첫 소비처라
+      // 신규 최소셋(테두리+헤더 강조)만 준다 — 과설계 금지.
+      return (
+        <div
+          className="text-sm leading-6 [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_p]:mb-2 [&_ul]:mb-2 [&_ul]:ml-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:ml-4 [&_ol]:list-decimal [&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-[13px] [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:mb-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[13px] [&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1"
+          dangerouslySetInnerHTML={{ __html: sanitizeDocHtml(d.content) }}
+        />
+      );
+    }
+    return <MdBody content={d.content} />;
   }
 
   // story #2614 — 부모(story/epic/doc)가 없는 독립 artifact(챗에 바로 올린 mockup 등)는 풋터에
@@ -346,6 +309,33 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
   return null;
 }
 
+// story #2889(S2h①③)·S2d(미르코) — gate는 TARGET_ONLY라 renderEntityDetail/RICH_PREVIEW_TYPES
+// (parity 대상)엔 안 들어간다. 완전히 독립된 렌더 함수 — 위 renderEntityDetail과 대칭이되 이
+// 파일의 parity 계약과 무관(entity-registry.parity.test.ts는 이 함수를 스캔하지 않는다).
+// 요약만(제목·상태·risk 배지) — 근거확인/서명/승인 액션은 여기 안 붙인다(approval-request-
+// card.tsx가 이미 챗 카드에서 그 몫을 완결하고 있다, 사본 분화 금지 — 이건 "칩 클릭시 훑어보는
+// 요약"이지 결재 액션 표면이 아니다).
+function renderGateSummary(detail: Record<string, unknown>): React.ReactNode | null {
+  const d = detail as {
+    gate_type?: string; status?: string; risk_grade?: 'low' | 'high' | 'unknown' | null;
+    work_item_summary?: { title: string; slug: string | null } | null; work_item_id?: string;
+  };
+  if (!d.status && !d.gate_type) return null;
+  const statusLabel = d.status ? translateEntityStatus('gate', d.status) : null;
+  const title = d.work_item_summary?.title ?? (d.work_item_id ? `#${d.work_item_id.slice(0, 8)}` : null);
+  return (
+    <div className="space-y-2">
+      {title && <p className="text-sm font-medium text-foreground">{title}</p>}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {d.gate_type && <MdBadge label={d.gate_type} />}
+        {statusLabel && <MdBadge label={statusLabel} />}
+        {d.risk_grade === 'high' && <MdBadge label="High risk" />}
+        {d.risk_grade === 'unknown' && <MdBadge label="Risk unknown" />}
+      </div>
+    </div>
+  );
+}
+
 // story #2627 — 결재 카드(chat/approval-request-card.tsx)가 doc 본문 열람을 위해 그대로
 // 재사용한다(신규 뷰어 금지·사본 분화 금지, PO 확定). 이전엔 이 파일 내부(EntityChip)만
 // 소비하는 비-export 컴포넌트였다 — export만 추가, 내부 로직은 무변경.
@@ -375,7 +365,12 @@ export function EntityPreviewModal({
   // 다른 타입(hypothesis·evidence·미등록 타입)은 아래 effect의 `if (!url) return` 이 loading을
   // 영영 false로 안 만들어 **무한 스피너**였다(실측으로 발견 — 이 스토리가 고치기 전까지 잠복
   // 결함). fetch 전략이 있는 타입(doc 특수분기 포함)만 loading=true로 시작한다.
-  const hasFetchStrategy = entityType === 'doc' || Boolean(ENTITY_API[entityType]);
+  // story #2889(S2h①③)·S2d(미르코, gate 프리뷰) — gate는 reference_registry의
+  // TARGET_ONLY_TYPES라 ENTITY_API/RICH_PREVIEW_TYPES/getEntityHref(전부 entity-registry.
+  // parity.test.ts가 BE ENTITY_RESOLVERS와 엄격 대조하는 자리)엔 못 들어간다. 그 계약 밖에서
+  // gate 전용 fetch/href/렌더를 독립적으로 붙인다(parity 가드 무영향) — GateSummary(아래)가
+  // 유일한 소비 지점.
+  const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
   // ㉠ "대상이 없습니다" 판정 — fetch를 **시도했는데** 실패한 경우만 켠다(fetch를 아예 안 하는
@@ -424,6 +419,25 @@ export function EntityPreviewModal({
           if (!cancelled) setDetail(docJson.data ?? null);
         } catch {
           if (!cancelled) setNotFound(true); // ㉠ — preview 해소든 본문 조회든 실패=대상이 없다.
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
+    if (entityType === 'gate') {
+      // gates/[id]/page.tsx·approval-request-card.tsx와 동일 계약(GET /api/gates/{id},
+      // {data:GateItem} envelope) — parity 대상 ENTITY_API를 거치지 않는 독립 fetch.
+      // fetchWithAuth 필수([[feedback-client-fetch-use-fetchwithauth]]).
+      void (async () => {
+        try {
+          const res = await fetchWithAuth(`/api/gates/${entityId}`);
+          if (!res.ok) throw new Error();
+          const json = (await res.json()) as { data?: Record<string, unknown> };
+          if (!cancelled) setDetail(json.data ?? null);
+        } catch {
+          if (!cancelled) setNotFound(true);
         } finally {
           if (!cancelled) setLoading(false);
         }
@@ -559,6 +573,12 @@ export function EntityPreviewModal({
     // ③ 고정 — 위 getEntityHref 주석 참고.
     resolvedHref = null;
     linkKind = null;
+  } else if (entityType === 'gate') {
+    // gate 상세(/gates/[id])는 story #1954부터 이미 org-scope 플랫 라우트(워크스페이스/
+    // 프로젝트 slug 세그먼트 없음, gates/[id]/page.tsx 그대로) — story/epic처럼 슬러그 해소가
+    // 필요 없다. getEntityHref의 parity 스위치는 안 거친다(gate는 그 계약 밖).
+    resolvedHref = `/gates/${entityId}`;
+    linkKind = 'own';
   } else {
     // story·epic·sprint·asset — own-href ①. story #2642(BE #3044)부터 각 detail 응답이
     // org_slug/project_slug를 직접 싣는다 — 엔티티 자신의 project로 직행(뷰어의 현재 프로젝트
@@ -608,6 +628,8 @@ export function EntityPreviewModal({
   // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
   const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail) : null;
+  // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
+  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail) : null;
 
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -620,6 +642,8 @@ export function EntityPreviewModal({
         <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>
       ) : richContent !== null ? (
         richContent
+      ) : gateSummary !== null ? (
+        gateSummary
       ) : (
         <p className="py-4 text-xs text-muted-foreground">이 엔티티는 별도 미리보기가 없습니다.</p>
       )}
@@ -686,6 +710,23 @@ export function EmbedCard({
   // 노출하던 같은 클래스의 gap. translateEntityStatus로 통과시킨다(미매핑=null=뱃지 안 그림).
   const statusLabel = status ? translateEntityStatus(entity_type, status) : null;
 
+  // story #2905(S2c①) — artifact/mockup은 "실 렌더 인라인"(§3 표): 텍스트 칩이 아니라 목업
+  // 자체를 축소 프리뷰로 보여준다. version_number를 몰라 ArtifactThumbnail을 못 그렸던 갭 —
+  // ENTITY_API['artifact'](parity 대상, 이미 등록됨)로 직접 fetch(EntityPreviewModal의 detail
+  // fetch와 별개 경로 — EmbedCard는 원래 fetch를 안 했다, 이 타입 하나만 예외).
+  const [artifactDetail, setArtifactDetail] = useState<{ latest_version_number?: number; anchor_version?: number | null } | null>(null);
+  useEffect(() => {
+    if (entity_type !== 'artifact') return;
+    let cancelled = false;
+    const url = ENTITY_API.artifact?.(entity_id);
+    if (!url) return;
+    void fetchWithAuth(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: Record<string, unknown> } | null) => { if (!cancelled) setArtifactDetail((json?.data ?? null) as typeof artifactDetail); })
+      .catch(() => { if (!cancelled) setArtifactDetail(null); });
+    return () => { cancelled = true; };
+  }, [entity_type, entity_id]);
+
   const handleDocClick = useCallback(async () => {
     setNavigating(true);
     try {
@@ -712,7 +753,26 @@ export function EmbedCard({
     }
   }, [entity_id, router]);
 
-  const inner = (
+  // story #2905(S2c①) — artifact/mockup 실 렌더 인라인. version_number를 아직 못 받았으면(fetch
+  // 중/실패) 기존 아이콘+라벨 폼으로 정직하게 폴백(renderEntityDetail의 "있으면 열고 없으면
+  // 안 연다" 원칙과 동형 — 빈 썸네일을 거짓으로 그리지 않는다).
+  const isRichArtifact = entity_type === 'artifact' && artifactDetail?.latest_version_number != null;
+
+  const inner = isRichArtifact ? (
+    <div className={`overflow-hidden rounded-md border ${colorClass}`}>
+      <ArtifactThumbnail
+        artifactId={entity_id}
+        latestVersionNumber={artifactDetail!.latest_version_number!}
+        anchorVersion={artifactDetail!.anchor_version ?? null}
+        className="aspect-video w-full"
+      />
+      <div className="flex items-center gap-2 border-t border-current/10 px-3 py-1.5 text-sm">
+        <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
+        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        {navigating && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+      </div>
+    </div>
+  ) : (
     <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
       <span className="font-medium">{label}</span>
@@ -729,12 +789,16 @@ export function EmbedCard({
   // 자신의 명시 액션으로 이동, EntityPreviewModal 풋터 링크가 이미 그 역할). 채팅 밖 호출부
   // (onOpenReadingPanel 미제공 — chat-input.tsx 작성 중 미리보기 등)는 아래 타입별 기존
   // 분기를 그대로 유지(회귀 0).
+  // story #2910(S2f/R3) — 「칩→카드→패널 연속」을 shared-element 모핑(비용 대비 장식, §6 위반
+  // 소지) 대신 press 즉각 스케일 피드백 + 뒤이은 패널 slide-in 순차 배치로 전달(PO 판정
+  // 2026-08-21). 이 파일의 클릭 가능 지점 4곳(이 버튼·doc 버튼·EntityChip 트리거·plain
+  // Link) 전부 동일 패턴.
   if (onOpenReadingPanel) {
     return (
       <button
         type="button"
         onClick={() => onOpenReadingPanel(entity_type, entity_id, title, status, href)}
-        className="block w-full text-left transition-opacity hover:opacity-80"
+        className="block w-full text-left transition hover:opacity-80 motion-safe:active:scale-[0.98]"
       >
         {inner}
       </button>
@@ -793,7 +857,7 @@ export function EmbedCard({
       <button
         type="button"
         onClick={() => setShowModal(true)}
-        className="block w-full text-left transition-opacity hover:opacity-80"
+        className="block w-full text-left transition hover:opacity-80 motion-safe:active:scale-[0.98]"
       >
         {inner}
       </button>
@@ -828,6 +892,22 @@ function formatReferencePoint(iso: string): string {
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
 
+/**
+ * story #2886(S2b) — 선생님 실증(2026-08-21): 인라인 칩이 전체 제목+메타 4항을 항상 펼쳐
+ * 산문을 익사시켰다. `inline`(기본) = 아이콘+짧은 라벨만, 메타(관찰됨·form·point·status)는
+ * hover/focus 시 tooltip으로 격납. `inline-meta` = 기존 그대로 전개(독립 표시용 — 예:
+ * 산문 밖에서 칩 하나만 크게 보여줄 때). S1 variant 체계(cva) 준수.
+ */
+const entityChipLabelVariants = cva('', {
+  variants: {
+    variant: {
+      inline: 'max-w-[14ch] truncate',
+      'inline-meta': '',
+    },
+  },
+  defaultVariants: { variant: 'inline' },
+});
+
 export function EntityChip({
   entityType,
   entityId,
@@ -836,6 +916,7 @@ export function EntityChip({
   ghost = false,
   referenceMeta = null,
   entityStatus,
+  variant = 'inline',
 }: {
   entityType: string;
   entityId?: string;
@@ -854,22 +935,25 @@ export function EntityChip({
    * 폴백한다(has-status면 "아직 모름", no-status-concept이면 "상태 없음" — renderEntityStatusLabel이
    * entityType으로 그 둘을 이미 가른다). */
   entityStatus?: EntityStatusFetchState;
-}) {
+} & VariantProps<typeof entityChipLabelVariants>) {
   const [showModal, setShowModal] = useState(false);
+  // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
+  // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
+  const readingPanel = useReadingPanel();
   const colorClass = ghost ? GRAY_STATE_COLOR : (ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR);
 
   // story #2669(B2) — doc이 chat-view.tsx 배치조회로 draft라고 확認되면, 상신 가능(project
   // write access) 여부를 딱 그 경우에만 추가 조회한다(모든 doc 칩마다 매번 조회하면 N+1 —
-  // 대부분의 참조는 이미 confirmed라 draft만 걸러 조회 비용을 줄인다). 승인 직후엔 서버
-  // 재조회 없이 이 칩의 로컬 상태만 'pending'으로 넘겨 즉시 반영(배치조회 다음 폴백까지
-  // "결재로 올리기"가 다시 뜨는 깜빡임을 막는다).
+  // 대부분의 참조는 이미 confirmed라 draft만 걸러 조회 비용을 줄인다).
+  // story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 서버 필수가 되며 이 칩
+  // 자체에서 즉시 상신하던 경로(및 그 낙관적 로컬 상태 갱신)를 걷어냈다 — 이 인라인 칩은
+  // 결재자 픽커를 담을 공간이 없다(Pedro 리뷰, PR #3435). draft=문서 페이지로 route-first
+  // 딥링크(doc-gate-section.tsx가 이미 그 픽커를 가진다), pending=기존과 동일하게 결재함
+  // 딥링크 — "쓰던 자리" 원칙(#2669)은 실 제출 액션에서만 후퇴, 목적지 발견성은 유지.
   const { projectMemberships } = useDashboardContext();
-  const [localDocStatus, setLocalDocStatus] = useState<string | null>(null);
   const [canSubmit, setCanSubmit] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
   const rawDocStatus = entityStatus?.kind === 'resolved' ? entityStatus.raw : null;
-  const effectiveDocStatus = localDocStatus ?? rawDocStatus;
+  const effectiveDocStatus = rawDocStatus;
 
   useEffect(() => {
     if (entityType !== 'doc' || !entityId || effectiveDocStatus !== 'draft') { setCanSubmit(false); return; }
@@ -888,39 +972,28 @@ export function EntityChip({
     return () => { cancelled = true; };
   }, [entityType, entityId, effectiveDocStatus, projectMemberships]);
 
-  const submitForApproval = async () => {
-    if (!entityId || submitting) return;
-    setSubmitting(true);
-    setSubmitError(false);
-    try {
-      const res = await fetch(`/api/docs/${entityId}/transition`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' }),
-      });
-      if (!res.ok) throw new Error();
-      setLocalDocStatus('pending');
-    } catch {
-      setSubmitError(true);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, localDocStatus ? { kind: 'resolved', raw: localDocStatus } : (entityStatus ?? { kind: 'loading' }));
+  const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, entityStatus ?? { kind: 'loading' });
+  // story #2886(S2b) — inline-meta는 기존 그대로 항상 펼침. inline(기본)은 인라인 메타를
+  // 감추고(격납) hover/focus tooltip으로만 낸다 — 산문 속 반복 전개 제거가 이 스토리의 요지.
+  const showInlineMeta = variant === 'inline-meta';
 
   const inner = (
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} className="size-3 shrink-0" />
-      <span>{ghost ? '대상이 없습니다' : label}</span>
+      {/* AC3 — truncate된 라벨의 전체 텍스트를 title(native)로도 보장(가장 낮은 공통분모
+          접근성 폴백 — 아래 커스텀 tooltip과 별개, JS 없이도 동작). */}
+      <span className={entityChipLabelVariants({ variant })} title={ghost ? undefined : label}>
+        {ghost ? '대상이 없습니다' : label}
+      </span>
       {/* AC1 — 사실성(상수 "관찰됨": entity_references 자체가 관찰됨 tier) · 표면 · 지점.
-          ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). */}
-      {referenceMeta ? (
+          ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). inline-meta 변형에서만
+          항상 펼친다 — inline(기본)은 아래 tooltip으로 격납. */}
+      {showInlineMeta && referenceMeta ? (
         <span className="opacity-70">
           · 관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
         </span>
       ) : null}
-      {statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
+      {showInlineMeta && statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
     </span>
   );
 
@@ -928,20 +1001,46 @@ export function EntityChip({
     return <span className="inline-flex cursor-default no-underline">{inner}</span>;
   }
 
+  // story #2886(S2b) AC2 — 격납 메타(관찰됨·form·point·status)를 hover/focus tooltip으로.
+  // base-ui Tooltip은 hover+focus 둘 다 기본 지원(키보드 Tab으로 트리거에 도달 가능) — 별도
+  // 배선 불요. inline-meta 변형이거나 표시할 메타가 아예 없으면 tooltip을 안 씌운다(불필요한
+  // 빈 popover 방지).
+  // story #2886(S2b) — 유나군 하이파이 목업(S2b 칩 가독성 목업) 대조: 툴팁은 한 줄 문장이
+  // 아니라 라벨:값 행 구조(상태·참조 형태·관찰) — 목업의 「열기(side pane)」 버튼은 S2d(side
+  // pane 정형화) 스코프라 이번엔 제외한다(별도 CTA 배선 없음, 이 스토리 AC 밖).
+  const tooltipRow = (rowLabel: string, value: string) => (
+    <div className="flex items-baseline justify-between gap-4">
+      <span className="text-[10px] text-background/60">{rowLabel}</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+  const tooltipContent = !showInlineMeta && (referenceMeta || statusLabel) ? (
+    <div className="space-y-1">
+      <p className="font-semibold">{label}</p>
+      <div className="space-y-0.5 border-t border-background/20 pt-1">
+        {statusLabel ? tooltipRow('상태', statusLabel) : null}
+        {referenceMeta ? tooltipRow('참조 형태', FORM_LABELS[referenceMeta.form] ?? referenceMeta.form) : null}
+        {referenceMeta ? tooltipRow('관찰', formatReferencePoint(referenceMeta.referencedAt)) : null}
+      </div>
+    </div>
+  ) : null;
+
   if (entityId) {
     // story #2669(B2) — "쓰던 자리에 이미 있어야 한다": 모달을 열지 않고도 칩 자체에 상태별
-    // CTA가 상시 붙는다. draft=상신 가능자에게만 「결재로 올리기」(fail-closed) · pending=
-    // 「결재함에서 보기」 딥링크. confirmed/denied는 위 statusLabel 배지로 이미 정직하게 표시.
+    // CTA가 상시 붙는다. pending=「결재함에서 보기」 딥링크. confirmed/denied는 위 statusLabel
+    // 배지로 이미 정직하게 표시.
+    // story #3004 — draft="결재로 올리기"는 더 이상 이 칩에서 직접 제출하지 않는다(결재자
+    // 지정이 서버 필수가 됐고, 이 인라인 칩엔 픽커를 놓을 공간이 없다 — Pedro 리뷰 PR #3435).
+    // 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
     const docCta = entityType === 'doc' && !ghost ? (
       effectiveDocStatus === 'draft' && canSubmit ? (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); void submitForApproval(); }}
-          disabled={submitting}
-          className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10 disabled:opacity-60"
+        <Link
+          href={getEntityHref('doc', entityId) ?? '#'}
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >
-          {submitting ? '...' : '결재로 올리기'}
-        </button>
+          결재자 지정하고 올리기
+        </Link>
       ) : effectiveDocStatus === 'pending' ? (
         <Link
           href="/inbox?tab=gates"
@@ -952,18 +1051,30 @@ export function EntityChip({
         </Link>
       ) : null
     ) : null;
+    const triggerButtonProps = {
+      type: 'button' as const,
+      onClick: () => {
+        if (readingPanel) {
+          readingPanel.open({ kind: 'entity', entityType, entityId, title: label, status: null, href });
+          return;
+        }
+        setShowModal(true);
+      },
+      className: 'inline-flex no-underline transition hover:opacity-80 motion-safe:active:scale-[0.98]',
+    };
+    const chipButton = tooltipContent ? (
+      <Tooltip>
+        <TooltipTrigger render={<button {...triggerButtonProps} />}>{inner}</TooltipTrigger>
+        <TooltipContent side="top">{tooltipContent}</TooltipContent>
+      </Tooltip>
+    ) : (
+      <button {...triggerButtonProps}>{inner}</button>
+    );
     return (
       <span className="inline-flex flex-wrap items-center gap-1">
-        <button
-          type="button"
-          onClick={() => setShowModal(true)}
-          className="inline-flex no-underline transition-opacity hover:opacity-80"
-        >
-          {inner}
-        </button>
+        {chipButton}
         {docCta}
-        {submitError ? <span className="text-xs text-destructive">상신 실패, 다시 시도해 주세요</span> : null}
-        {showModal && (
+        {!readingPanel && showModal && (
           <EntityPreviewModal
             entityType={entityType}
             entityId={entityId}
@@ -979,7 +1090,7 @@ export function EntityChip({
 
   if (href) {
     return (
-      <Link href={href} className="inline-flex no-underline transition-opacity hover:opacity-80">
+      <Link href={href} className="inline-flex no-underline transition hover:opacity-80 motion-safe:active:scale-[0.98]">
         {inner}
       </Link>
     );

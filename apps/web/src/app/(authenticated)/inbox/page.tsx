@@ -7,7 +7,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff, 
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
-import { DecisionsWaiting } from '@/components/inbox/decisions-waiting';
+import { AgentIdentity } from '@/components/ui/agent-identity';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
@@ -18,6 +18,7 @@ import {
   getNotificationReasonKey,
   NOTIFICATION_TYPE_ICONS,
 } from '@/services/notification-display';
+import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic-notification-grouping';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
@@ -47,11 +48,16 @@ interface Notification {
   created_at: string;
 }
 
-// f2ec5395: 인박스 렌더 단위 — 개별 알림(single) 또는 같은 스토리 status_changed 그룹(group).
+// f2ec5395: 인박스 렌더 단위 — 개별 알림(single) 또는 그룹(group). story #0d1c69f3(v2 4호)
+// — 그룹은 두 갈래: 'status_change'(f2ec5395, 같은 스토리의 상태변경 반복 — reference_id로
+// 묶음) · 'generic'(신규, 같은 type+제목+본문이 반복되는 제네릭 알림 — 라이브 실측 121건
+// 「결재 대기 중인 게이트가 있습니다」류. content로 묶음, 대상은 서로 다름). groupKind로
+// 펼침 콘텐츠를 분기한다(status_change=기존 title+time 행 그대로, generic=구체 참조 칩+CTA).
 type InboxItem =
   | { kind: 'single'; notification: Notification; sortTime: number }
   | {
       kind: 'group';
+      groupKind: 'status_change' | 'generic';
       key: string;
       notifications: Notification[];
       latest: Notification;
@@ -343,19 +349,24 @@ export default function InboxPage() {
   );
 
   // f2ec5395: 같은 스토리 status_changed 알림을 reference_id로 그룹(2건+). 타 type·단건은 개별 유지.
+  // story #0d1c69f3(v2 4호) — status_change 그룹에 안 들어간 나머지 중 동일 type+제목+본문이
+  // 반복되는 제네릭 알림(라이브 실측 121건 「결재 대기 중인 게이트가 있습니다」류)도 2건+면
+  // 묶는다(groupByIdenticalContent, lib 순수함수·단위테스트 별도). 두 그룹 종류는 groupKind로
+  // 구분해 펼침 렌더를 분기한다.
   const inboxItems = useMemo<InboxItem[]>(() => {
-    const groups = new Map<string, Notification[]>();
+    const statusChangeGroups = new Map<string, Notification[]>();
     const items: InboxItem[] = [];
+    const remainder: Notification[] = [];
     for (const n of notifications) {
       if (n.type === 'story_status_changed' && n.reference_id) {
-        const arr = groups.get(n.reference_id) ?? [];
+        const arr = statusChangeGroups.get(n.reference_id) ?? [];
         arr.push(n);
-        groups.set(n.reference_id, arr);
+        statusChangeGroups.set(n.reference_id, arr);
       } else {
-        items.push({ kind: 'single', notification: n, sortTime: new Date(n.created_at).getTime() });
+        remainder.push(n);
       }
     }
-    for (const [key, arr] of groups) {
+    for (const [key, arr] of statusChangeGroups) {
       const sorted = [...arr].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       const latest = sorted[0]!;
       const sortTime = new Date(latest.created_at).getTime();
@@ -364,11 +375,25 @@ export default function InboxPage() {
         items.push({ kind: 'single', notification: latest, sortTime });
       } else {
         items.push({
-          kind: 'group', key, notifications: sorted, latest, count: sorted.length,
+          kind: 'group', groupKind: 'status_change', key, notifications: sorted, latest, count: sorted.length,
           hasUnread: sorted.some((n) => !n.is_read), sortTime,
         });
       }
     }
+
+    const { groups: genericGroups, ungrouped } = groupByIdenticalContent(remainder);
+    for (const n of ungrouped) {
+      items.push({ kind: 'single', notification: n, sortTime: new Date(n.created_at).getTime() });
+    }
+    for (const g of genericGroups) {
+      const sorted = [...g.notifications].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const latest = sorted[0]!;
+      items.push({
+        kind: 'group', groupKind: 'generic', key: `generic:${g.key}`, notifications: sorted, latest,
+        count: sorted.length, hasUnread: sorted.some((n) => !n.is_read), sortTime: new Date(latest.created_at).getTime(),
+      });
+    }
+
     return items.sort((a, b) => b.sortTime - a.sortTime);
   }, [notifications]);
 
@@ -399,11 +424,18 @@ export default function InboxPage() {
     return next;
   });
 
-  // 그룹 헤더 클릭 → 그룹 전체 읽음 + 스토리 이동(AC2).
+  // 그룹 헤더 클릭 → 그룹 전체 읽음 + (status_change만) 스토리 이동(AC2, f2ec5395).
+  // story #0d1c69f3(v2 4호) — generic 그룹은 서로 다른 121개 대상을 묶은 것이라 "최신 1건"
+  // 으로 임의 내비하면 나머지 120건의 실제 대상을 못 찾는다(정직 유의 위반) — 대신 펼쳐서
+  // 항목별 구체 참조 칩+CTA(아래 렌더)로 실제 대상을 고르게 한다.
   const openGroup = async (group: Extract<InboxItem, { kind: 'group' }>) => {
     const unread = group.notifications.filter((n) => !n.is_read);
     await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true)));
-    if (group.latest.href) router.push(group.latest.href);
+    if (group.groupKind === 'status_change' && group.latest.href) {
+      router.push(group.latest.href);
+    } else if (group.groupKind === 'generic') {
+      toggleGroup(group.key);
+    }
   };
 
   return (
@@ -458,8 +490,9 @@ export default function InboxPage() {
           </div>
         ) : (
         <>
-        <DecisionsWaiting onChange={() => void refreshNotifications()} />
-
+        {/* story #2923(P0-E AQ1) — DecisionsWaiting 패널 폐기(doc attention-audit-redesign-2923).
+            그 데이터(/api/inbox pending)는 이제 attention 탭의 AttentionQueueView가 흡수해
+            보여준다(별 패널 제거, GATE/STEER/BLOCK/Q 병합). */}
         {workflowExecs.length > 0 && (
           <div className="shrink-0 border-b border-border/80 px-4 py-3">
             <p className="mb-2 text-[11px] font-medium text-muted-foreground">워크플로우 실행</p>
@@ -545,8 +578,12 @@ export default function InboxPage() {
                                       </p>
                                       {/* story #2023 ⓑ: 카운트 칩=L5(시스템 상태), 브랜드 아님 */}
                                       {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+                                      {/* story #0d1c69f3(v2 4호) — generic 그룹은 status_change와 다른 문구(반복
+                                          알림 건수일 뿐 "상태 변경" 의미가 아니다)를 쓴다. */}
                                       <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
-                                        {t('statusChangeCount', { count: item.count })}
+                                        {item.groupKind === 'status_change'
+                                          ? t('statusChangeCount', { count: item.count })
+                                          : t('notificationGroupCount', { count: item.count })}
                                       </span>
                                     </div>
                                     <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
@@ -554,7 +591,7 @@ export default function InboxPage() {
                                 </div>
                               </button>
                             </div>
-                            {expanded ? (
+                            {expanded && item.groupKind === 'status_change' ? (
                               <div className="space-y-1.5 py-2 pl-9 pr-3">
                                 {item.notifications.map((n, idx) => (
                                   <div key={n.id} className="flex items-center gap-2 text-xs">
@@ -563,6 +600,49 @@ export default function InboxPage() {
                                     <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
                                   </div>
                                 ))}
+                              </div>
+                            ) : null}
+                            {/* story #0d1c69f3(v2 4호) — generic 그룹 펼침: 항목별 구체 참조
+                                (reference_type 라벨+reference_id 조각)+CTA(기존 href 재사용,
+                                신규 데이터 0). href 없는 항목은 CTA를 안 그린다(갈 곳 없는
+                                링크 금지 — 죽은 링크 0, AC2). */}
+                            {expanded && item.groupKind === 'generic' ? (
+                              <div className="space-y-1.5 py-2 pl-9 pr-3">
+                                {item.notifications.map((n) => {
+                                  const refLabel = referenceTypeLabel(t, n.reference_type);
+                                  return (
+                                    <div key={n.id} className="flex items-center gap-2 text-xs">
+                                      {refLabel ? (
+                                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                          {refLabel}
+                                        </span>
+                                      ) : null}
+                                      {n.reference_id ? (
+                                        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground">
+                                          {n.reference_id.slice(0, 8)}
+                                        </span>
+                                      ) : (
+                                        <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
+                                      )}
+                                      <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
+                                      {n.href ? (
+                                        <a
+                                          href={n.href}
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            void (async () => {
+                                              if (!n.is_read) await setNotificationReadState(n.id, n.is_read, true);
+                                              router.push(n.href!);
+                                            })();
+                                          }}
+                                          className="shrink-0 font-semibold text-primary hover:underline"
+                                        >
+                                          {t('notificationOpenCta')}
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             ) : null}
                           </div>
@@ -595,14 +675,12 @@ export default function InboxPage() {
                             {notification.body ? (
                               <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
                             ) : null}
-                            {/* 목업 ⑤: 타입 1급 — agent_joined=Bot 칩(accent-claim)·도달사유 칩 */}
+                            {/* 목업 ⑤: 타입 1급 — agent_joined=Bot 칩·도달사유 칩. story #3049
+                                (2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue 신호
+                                dot) 채택, soft-fill 폐지. */}
                             {(notification.type === 'agent_joined' || reasonKey) ? (
                               <div className="flex flex-wrap items-center gap-1.5">
-                                {notification.type === 'agent_joined' ? (
-                                  <Badge className="gap-0.5 bg-accent-claim/15 text-accent-claim text-[10px]">
-                                    <Bot className="size-2.5" />Bot
-                                  </Badge>
-                                ) : null}
+                                {notification.type === 'agent_joined' ? <AgentIdentity /> : null}
                                 {reasonKey ? <Badge variant="info" className="text-[10px]">{t(reasonKey)}</Badge> : null}
                               </div>
                             ) : null}

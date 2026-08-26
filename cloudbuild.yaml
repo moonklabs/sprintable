@@ -13,6 +13,21 @@ substitutions:
   # story #2701 — dev-safe 기본값(빈 문자열 = 이 env var 자체를 안 싣는다, 아래 deploy-mcp
   # 참조). GHA cloud-build.yml이 prod에서만 실값으로 override.
   _MCP_ALLOWED_HOSTS: ''
+  # story #2777(어드민 개입 액션) — admin_auth.require_admin_operator()의 ID-token 검증
+  # 축(발급자=admin-web-dev 서비스 SA·수신측 audience=이 backend 서비스 자신). 페드루군
+  # gcloud describe 실측(2026-08-18) — ⚠️audience는 format-exact(services list의 project
+  # 번호 표기와 describe의 canonical hash 표기가 다르면 401, 위 _FASTAPI_URL 재사용 금지 —
+  # 이 값은 반드시 describe 출력 그대로). prod는 아래 배포 스텝의 _DEPLOY_ENV 가드로 절대
+  # ENV_VARS에 안 실린다(REDIS_URL과 동일 이중가드 — 여기 값이 남아 있어도 안전) + 라우터
+  # 자체의 _reject_prod() 가드까지 삼중.
+  _ADMIN_OPERATOR_AUDIENCE: https://sprintable-backend-dev-57iommnikq-du.a.run.app
+  _ADMIN_OPERATOR_ALLOWLIST: sprintable-admin-web@sprintable-494803.iam.gserviceaccount.com
+  # story #2887(BE 아바타 업로드) — REDIS_URL/ADMIN_OPERATOR_*와 동일 원칙: dev만 싣는다.
+  # 버킷은 avatar 전용 신규 격리 버킷(sprintable-avatars-dev, public-read·uniform bucket-level
+  # access·cloudrun-runtime-dev=objectAdmin — 페드루 확定 2026-08-21)이고 prod 버킷은 아직
+  # 프로비저닝 전(심사 후 일괄)이라 prod에는 이 키 자체가 없어야 한다(설정 부재 시 코드가
+  # 업로드 발급을 503으로 fail-closed — REDIS_URL/GOTENBERG_SERVICE_URL과 동일 이중가드 원칙).
+  _GCS_AVATARS_BUCKET: sprintable-avatars-dev
   # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter는 아래 deploy-office-
   # converter 스텝이 매 배포마다 재생성/갱신한다. **부트스트랩 완료(페드루군, 2026-08-19)**:
   # 최초 배포가 --port 누락(Gotenberg는 3000, Cloud Run 헬스체크 기본 8080)으로 Ready 실패
@@ -287,6 +302,32 @@ steps:
         echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
     waitFor: ['-']
 
+  # story #2887 — avatar 전용 버킷(sprintable-avatars-dev) CORS. dev 전용 게이트(prod 버킷
+  # 미프로비저닝 — office-converter와 동일 스킵 관례). PUT까지 필요(memo-attachments는
+  # GET/HEAD뿐 — 아바타는 FE가 서명 URL로 직접 PUT하는 업로드 흐름이라 다름).
+  - id: apply-gcs-avatars-cors
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip apply-gcs-avatars-cors: prod bucket pending (story #2887, 심사 후 일괄)"
+          exit 0
+        fi
+        gcloud storage buckets update gs://${_GCS_AVATARS_BUCKET} \
+          --cors-file=infra/gcs-avatars-cors.json \
+          --quiet
+        applied=$(gcloud storage buckets describe gs://${_GCS_AVATARS_BUCKET} --format='value(cors_config)')
+        echo "${_GCS_AVATARS_BUCKET} CORS applied = $${applied}"
+        case "$${applied}" in
+          *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
+          *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
+        esac
+        echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
+    waitFor: ['-']
+
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
@@ -505,7 +546,7 @@ steps:
         # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
         # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
         # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
-        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}"
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV}"
         # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
         # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
         # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
@@ -525,6 +566,19 @@ steps:
         # 달러 한 개 표기 그대로 유지 — 그건 Cloud Build가 실제로 채워야 하는 값이라 안전하다).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
+        fi
+        # story #2777 — ADMIN_OPERATOR_AUDIENCE/ALLOWLIST도 REDIS_URL과 동일 원칙: dev만
+        # 싣는다. prod는 이 두 env var 자체가 없어(require_admin_operator가 auth_configured
+        # 부재를 fail-closed 503으로 처리) ⛔대표 승인 前 prod 결제 개입 전면금지 태세와 정합.
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="$${ENV_VARS},ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE},ADMIN_OPERATOR_ALLOWLIST=${_ADMIN_OPERATOR_ALLOWLIST}"
+        fi
+        # story #2887 — GCS_AVATARS_BUCKET도 위와 동일 원칙(dev만). prod 버킷 미프로비저닝
+        # 상태에서 이 키가 prod에 실리면 코드 기본값(미설정)이 아니라 존재하지 않는 버킷명이
+        # 박혀 avatar 업로드가 500으로 터질 수 있다 — REDIS_URL/ADMIN_OPERATOR_*와 동일하게
+        # "값의 유무가 아니라 prod에는 이 키 자체가 없어야 안전" 원칙.
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="$${ENV_VARS},GCS_AVATARS_BUCKET=${_GCS_AVATARS_BUCKET}"
         fi
         # ⛔QA catch(카디르군, 2026-08-19) — office-converter 자체가 dev 전용 하드게이트인데
         # (deploy-office-converter 스텝) 이 배선엔 REDIS_URL/ADMIN_OPERATOR_*와 같은
@@ -597,6 +651,30 @@ steps:
           echo "      FASTAPI_URL 로 쓰므로 빈 값으로 진행하면 self URL 이 지워진다."
           echo "      --substitutions 에 _REALTIME_URL=<realtime 서비스 URL> 을 명시할 것."
           exit 1
+        fi
+        # story #3031 — realtime path-filter(Cloud Run). 근거·설계 전문은
+        # backend/tests/test_3031_realtime_cloudrun_deploy_path_filter.py 참조(이 스텝의
+        # UTF-8 바이트 한도 초과 핫픽스로 이관). 로컬 변수는 $$ 이스케이프 필수(Cloud
+        # Build 자신의 substitution 파서가 bash 실행 前에 미선언 substitution 참조를 거부).
+        serving_revision="$(gcloud run services describe sprintable-realtime-${_DEPLOY_ENV} \
+          --region="${_AR_REGION}" --project="${PROJECT_ID}" \
+          --format='value(status.traffic.filter(percent=100).revisionName)' 2>/dev/null || echo '')"
+        if [ -z "$$serving_revision" ]; then
+          echo "deploy-realtime: 100% 트래픽 서빙 리비전을 못 읽음(최초 배포이거나 트래픽 스플릿 중) — path-filter 건너뛰고 배포 진행"
+        else
+          last_image="$(gcloud run revisions describe "$$serving_revision" \
+            --region="${_AR_REGION}" --project="${PROJECT_ID}" \
+            --format='value(spec.containers[0].image)' 2>/dev/null || echo '')"
+          last_sha="$${last_image##*:}"
+          if [ -z "$$last_sha" ] || [ "$$last_sha" = "$$last_image" ]; then
+            echo "deploy-realtime: 서빙 리비전 이미지 태그를 못 읽음 — path-filter 건너뛰고 배포 진행"
+          else
+            git fetch --unshallow >/dev/null 2>&1 || true
+            if ! bash backend/scripts/check_realtime_relevant_diff.sh "$$last_sha" "${COMMIT_SHA}"; then
+              echo "skip deploy-realtime: $$last_sha..${COMMIT_SHA} 사이 realtime-관련 경로 변경 없음(story #3031 path-filter, 스킵 사유는 위 로그 참고)"
+              exit 0
+            fi
+          fi
         fi
         # ⚠️story #2078 긴급수정(2026-07-21): PG_LISTEN_ENABLED가 여기 true로 하드코딩돼
         # 있었다 — PO가 라이브에서 손으로 false로 전환(LISTEN 제거·Redis 단독 dispatch 확認

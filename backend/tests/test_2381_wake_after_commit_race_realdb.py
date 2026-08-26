@@ -208,6 +208,73 @@ async def test_rollback_never_fires_wake(monkeypatch):
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_savepoint_release_does_not_fire_wake_but_outer_commit_does(monkeypatch):
+    """story #3062 — approval_delivery.py의 `_schedule_gate_created_push_after_commit`
+    (PR#3467, 카디르 QA REQUEST_CHANGES② 발견)과 완전히 동형인 SAVEPOINT 유령 wake 결함이
+    이 원본(`_schedule_wake_after_commit`, story #2381)에도 동일하게 잠복해 있는지 카디르
+    최소재현 그대로 고정한다. SQLAlchemy `after_commit`은 outer 최종 commit뿐 아니라
+    `begin_nested()` SAVEPOINT release(`nested.commit()`)에도 발화한다 — outer가 그 뒤
+    rollback돼도 이미 wake가 나가버리면 존재하지 않게 될 recipient_seq를 가리키는 유령
+    재조회 신호가 라이브로 샌다. ①SAVEPOINT release=0회 ②outer commit=1회 ③outer
+    rollback=0회를 정확히 고정한다.
+
+    실전 경로: `approval_delivery.dispatch_approval_request_cards`의 승인자별 SAVEPOINT
+    격리 루프(`db.begin_nested()`)가 승인자/요청자가 agent일 때 `_dispatch_conversation_event`
+    → `assign_recipient_seq`를 그 SAVEPOINT 안에서 부른다 — 이 테스트와 동일한 실전 재현
+    지점이다.
+    """
+    engine, Session = await _session()
+    try:
+        async with Session() as seed_s:
+            org, proj, agent_id = await _seed_org_project_agent(seed_s)
+
+        import app.routers.agent_gateway as gw_mod
+        from app.models.event import Event
+        from app.services.event_seq import assign_recipient_seq
+
+        woken: list[tuple[str, int]] = []
+        monkeypatch.setattr(gw_mod, "wake_agent", lambda rid, seq: woken.append((rid, seq)))
+
+        # ① SAVEPOINT release — wake가 아직 나가면 안 된다(outer가 살아있다).
+        async with Session() as s:
+            nested = await s.begin_nested()
+            event = Event(
+                project_id=proj, org_id=org, event_type="dispatched",
+                recipient_id=agent_id, recipient_type="agent",
+                payload={"content": "x"}, status="pending",
+            )
+            s.add(event)
+            await s.flush()
+            seq = await assign_recipient_seq(s, event)
+            await nested.commit()
+            assert woken == [], "SAVEPOINT release에서 wake가 나가면 안 된다(outer 미확定)"
+
+            # ② outer 진짜 commit — 이제서야 나간다.
+            await s.commit()
+            assert woken == [(str(agent_id), seq)], f"outer commit 直後 정확히 1회 발화해야 하는데: {woken}"
+
+        # ③ outer rollback 케이스 — 별도 세션으로 독립 재현.
+        woken.clear()
+        async with Session() as s:
+            nested = await s.begin_nested()
+            event2 = Event(
+                project_id=proj, org_id=org, event_type="dispatched",
+                recipient_id=agent_id, recipient_type="agent",
+                payload={"content": "y"}, status="pending",
+            )
+            s.add(event2)
+            await s.flush()
+            await assign_recipient_seq(s, event2)
+            await nested.commit()
+            assert woken == [], "SAVEPOINT release에서 wake가 나가면 안 된다"
+            await s.rollback()
+        assert woken == [], "outer rollback 후에도 SAVEPOINT release 시점 wake가 새면 안 된다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_multiple_dispatches_same_session_each_wake_exactly_once(monkeypatch):
     """한 세션에서 여러 번 commit(=여러 dispatch)해도 매번 그 트랜잭션분만 정확히 한 번씩
     발화한다 — 세션 재사용 시 리스너 중복등록(이중발화)도, 예약 누락(무발화)도 없어야 한다."""

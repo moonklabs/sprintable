@@ -41,7 +41,9 @@ def _msg(mentioned=None):
 
 
 def _sender():
-    return SimpleNamespace(id=uuid.uuid4(), name="에이전트A", type="agent")
+    # story #2901 — _msg_payload가 sender.avatar_url을 읽는다(ResolvedMember/TeamMember
+    # 실 타입 둘 다 이 속성을 갖는다).
+    return SimpleNamespace(id=uuid.uuid4(), name="에이전트A", type="agent", avatar_url=None)
 
 
 class _DB:

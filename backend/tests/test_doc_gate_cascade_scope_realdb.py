@@ -32,6 +32,9 @@ async def _session():
     import app.models  # noqa: F401
     import app.models.participation  # noqa: F401
     import app.models.workflow_line  # noqa: F401
+    # story #2975 — void_pending_doc_gate가 void_gate()를 타므로 이제 ActivityLog도 씀
+    # (이전엔 logger.info뿐이라 미등재였음).
+    import app.models.activity_log  # noqa: F401
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql://"):
         if url.startswith(prefix):

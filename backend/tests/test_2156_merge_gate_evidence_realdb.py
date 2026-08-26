@@ -183,7 +183,14 @@ async def test_reconcile_updates_pending_merge_gate_with_real_evidence_realdb():
     """⭐핵심 — reconcile_merge_gate_with_real_evidence가 실 ci/pr 증거로 pending merge 게이트를
     재평가한다. cold-start(outcome 표본 0<3)라 최종 decision은 여전히 ask_human이지만, 그
     reason이 "CI unknown"에서 "outcome sample insufficient"로 바뀐다 — 실 증거가 게이트에
-    도달했다는 관측 가능한 증거."""
+    도달했다는 관측 가능한 증거.
+
+    story #2893(§2 A1, 0271) 갱신 — 멱등 키가 pr_number를 포함한다. 두 호출을 **같은 PR
+    번호(42)**로 통일 — 이게 실제 프로덕션 체인과도 정합된다(reconcile은 verdict_capture.py
+    웹훅 핸들러에서만 불리고, 그 핸들러는 실 PR 이벤트에서만 pr_number를 뽑아 항상 >0이다
+    — pr_number=0인 reconcile 호출은 애초에 실사용 경로가 아니다). 다른 PR 번호로 만든
+    게이트에 이 증거가 새면 안 된다는 게 정확히 이 스토리의 요지 — 그 회귀가드는
+    test_2893_gate_pr_scoped_isolation_realdb가 전담한다."""
     from app.services.merge_verdict_gate import evaluate_merge_gate, reconcile_merge_gate_with_real_evidence
 
     engine, Session = await _session_factory()
@@ -200,9 +207,12 @@ async def test_reconcile_updates_pending_merge_gate_with_real_evidence_realdb():
                     AsyncMock(return_value=True),
                 ),
             ):
+                # story #2932(HIGH1) — repo도 이제 멱등 키 일부다. 두 호출을 같은 repo로
+                # 통일(실제 프로덕션 체인과도 정합 — pr_number=42는 항상 실 repo와 짝으로
+                # 옴, repo=""는 pr_number<=0 no-substance 전용 관례값이지 이 케이스가 아님).
                 await evaluate_merge_gate(
                     s, seeded["org_id"], seeded["story_id"],
-                    pr_number=0, repo="", ci_result=None, pr_result=None,
+                    pr_number=42, repo="moonklabs/sprintable", ci_result=None, pr_result=None,
                 )
                 await s.commit()
 
@@ -410,3 +420,169 @@ async def test_create_gate_sets_requires_human_false_for_auto_passed_gate_realdb
             assert gate.requires_human is False
     finally:
         await engine.dispose()
+
+
+# ─── story #2912(2899 그라운딩 갈래D 처방③, BE 레이어) ──────────────────────
+# pull_request.edited가 base retarget(새 커밋 없이 base branch만 바뀜, #3317 실사고)에도
+# 뜨는데, 이 웹훅 핸들러의 두 체크런 재발행 분기(ungated_check_publish·gate_check_publish)
+# 는 edited를 아예 안 들었다 — GHA 레이어(PR①/#3326)와 독립적으로 같은 갭. changes.base
+# 유무로 순수 title/body 편집과 base 변경을 가른다(GitHub이 base가 실제로 바뀐 edited
+# 이벤트에만 payload.changes.base를 채워 보낸다).
+
+def _base_retarget_payload(*, pr_number=42, changes_base=True):
+    payload = {
+        "repository": {"full_name": "moonklabs/sprintable"},
+        "pull_request": {
+            "number": pr_number, "merged": False, "title": "fix(#1): x",
+            "head": {"ref": "fix/1-x", "sha": "newsha123"},
+        },
+        "action": "edited",
+        "installation": {"id": 123},
+    }
+    if changes_base:
+        payload["changes"] = {"base": {"ref": {"from": "main"}, "sha": {"from": "oldbasesha"}}}
+    else:
+        payload["changes"] = {"title": {"from": "old title"}}  # 순수 제목편집, base 무변화
+    return payload
+
+
+def test_is_base_retarget_edit_computation_pure():
+    """is_base_retarget_edit 계산 자체(순수 함수적 조각) — edited+changes.base 有일 때만
+    True, 그 외(edited인데 base없음·edited아닌 다른 action)는 전부 False."""
+    def _compute(pr_action, payload):
+        return pr_action == "edited" and bool((payload.get("changes") or {}).get("base"))
+
+    assert _compute("edited", {"changes": {"base": {"ref": {"from": "main"}}}}) is True
+    assert _compute("edited", {"changes": {"title": {"from": "old"}}}) is False
+    assert _compute("edited", {}) is False
+    assert _compute("edited", {"changes": None}) is False
+    assert _compute("synchronize", {"changes": {"base": {"ref": {"from": "main"}}}}) is False
+    assert _compute(None, {}) is False
+
+
+@pytest.mark.anyio
+async def test_ungated_check_publish_fires_on_base_retarget_edit_but_not_pure_title_edit():
+    """unlinked story(rl.story_id=None) 경로 — base retarget edited는 ungated_check_publish에
+    (installation_id 등) append돼야 하고, 순수 title 편집(changes.base 없음)은 append 안 돼야
+    한다(낭비 재발행 방지 — GHA required 잡과 달리 skip 상태 landmine은 없는 자리)."""
+    from app.models.github_installation import GithubInstallation, GithubWebhookDelivery
+    from app.routers.verdict_capture import _process_webhook_event
+    from app.services.pr_story_link import ResolvedLink
+
+    org_id = uuid.uuid4()
+    installation = GithubInstallation(
+        id=uuid.uuid4(), installation_id=123, org_id=org_id, account_login="moonklabs",
+    )
+
+    async def _run(payload):
+        delivery = GithubWebhookDelivery(
+            id=uuid.uuid4(), source="app", delivery_id=f"d-{uuid.uuid4()}",
+            event="pull_request", status="received",
+        )
+        session = AsyncMock()
+        exec_result = AsyncMock()
+        exec_result.scalar_one_or_none = lambda: installation
+        session.execute = AsyncMock(return_value=exec_result)
+        ungated: list[dict] = []
+        with (
+            patch(
+                "app.routers.verdict_capture.resolve_story_for_pr",
+                AsyncMock(return_value=ResolvedLink(None, None, None, None, False, "no_match")),
+            ),
+            patch("app.services.gate_github_check.is_repo_check_enforced", AsyncMock(return_value=True)),
+        ):
+            await _process_webhook_event(
+                session, "app", "pull_request", payload, 123, delivery,
+                gate_check_publish=[], ungated_check_publish=ungated,
+            )
+        return ungated
+
+    base_retarget = await _run(_base_retarget_payload(changes_base=True))
+    assert len(base_retarget) == 1, "base retarget edited는 ungated_check_publish에 정확히 1건 append돼야 함"
+    assert base_retarget[0]["installation_id"] == 123
+
+    title_only = await _run(_base_retarget_payload(changes_base=False))
+    assert title_only == [], "순수 title 편집(changes.base 없음)은 append 0건이어야 함(낭비 재발행 방지)"
+
+
+def test_missing_changes_key_entirely_is_false_without_exception():
+    """codex 독립 QA(#3332) 항목⑥ — payload에 changes 키 자체가 없는(None이 아니라 부재)
+    malformed/구 replay payload에도 is_base_retarget_edit 계산이 예외 없이 False로 떨어져야
+    한다(`.get("changes")`가 None을 반환하는 경로와 동치지만 명시적으로 고정)."""
+    payload = {
+        "repository": {"full_name": "moonklabs/sprintable"},
+        "pull_request": {"number": 42, "merged": False, "head": {"ref": "x", "sha": "s"}},
+        "action": "edited",
+        # changes 키 자체가 없음(테스트 파일 상단 헬퍼는 항상 넣어주므로 여기선 직접 구성).
+    }
+    assert "changes" not in payload
+    is_base_retarget_edit = payload.get("action") == "edited" and bool(
+        (payload.get("changes") or {}).get("base")
+    )
+    assert is_base_retarget_edit is False
+
+
+@pytest.mark.anyio
+async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked():
+    """codex 독립 QA(#3332) 항목⑤ — `ungated_check_publish` 경로(story 미해소)만 카디르가
+    직접 실호출로 확認했었다. story가 **해소된**(rl.story_id 有) 경로의 `gate_check_publish`
+    분기(기존 Gate 없음→evaluate_merge_gate로 신규 평가)도 base retarget edited로 실제
+    호출해 정확히 append되는지 직접 고정한다(codex가 임시로 증명한 시나리오를 영구 회귀로
+    저장 — codex 자신의 권고③)."""
+    from types import SimpleNamespace
+
+    from app.models.github_installation import GithubInstallation, GithubWebhookDelivery
+    from app.routers.verdict_capture import _process_webhook_event
+    from app.services.pr_story_link import ResolvedLink
+
+    org_id, story_id, gate_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    installation = GithubInstallation(
+        id=uuid.uuid4(), installation_id=123, org_id=org_id, account_login="moonklabs",
+    )
+    delivery = GithubWebhookDelivery(
+        id=uuid.uuid4(), source="app", delivery_id="d-gate-linked",
+        event="pull_request", status="received",
+    )
+    session = AsyncMock()
+    installation_result = AsyncMock()
+    installation_result.scalar_one_or_none = lambda: installation
+    no_gate_result = AsyncMock()
+    no_gate_result.scalar_one_or_none = lambda: None  # 기존 merge Gate row 없음 → evaluate 분기.
+    # story #2893/#2932 후속(카디르 QA) — find_gate_slot_with_pr_fallback가 정확매치(없음)→
+    # repo-unknown 슬롯(없음, story #2932 HIGH1 잔여)→NULL-슬롯 폴백까지 조회한다(3 SELECT).
+    # 이 테스트는 전부 "없음"인 시나리오(진짜 신규)라 매 자리 no_gate_result 재사용으로 충분.
+    # story #3039 — resolve_story_for_pr가 sid(비-stored) 경로로 해소되면 upsert_link()가
+    # 그 자리서 링크를 영속화한다(기존 PullRequestStoryLink 존재여부 확인 SELECT 1건 추가).
+    session.execute = AsyncMock(
+        side_effect=[installation_result, no_gate_result, no_gate_result, no_gate_result, no_gate_result]
+    )
+    evaluate = AsyncMock(return_value=SimpleNamespace(gate_id=gate_id))
+    gate_check_publish: list[dict] = []
+
+    with (
+        patch(
+            "app.routers.verdict_capture.resolve_story_for_pr",
+            AsyncMock(return_value=ResolvedLink(story_id, org_id, "sid", "high", True, "sid_exact")),
+        ),
+        patch("app.services.merge_verdict_gate.evaluate_merge_gate", evaluate),
+    ):
+        result, status = await _process_webhook_event(
+            session, "app", "pull_request", _base_retarget_payload(changes_base=True), 123, delivery,
+            gate_check_publish=gate_check_publish, ungated_check_publish=[],
+        )
+
+    # story #3035(2026-08-24) — 이 late-gate-creation 분기가 pr_result를 명시로 None
+    # 넘기도록 정정됐다(과거엔 생략→evaluate_merge_gate 기본값 "pass"가 낙관적으로 확定).
+    evaluate.assert_awaited_once_with(
+        session, org_id, story_id, pr_number=42, repo="moonklabs/sprintable",
+        ci_result=None, pr_result=None, head_sha="newsha123",
+    )
+    assert gate_check_publish == [{
+        "org_id": org_id, "gate_id": gate_id, "head_sha": "newsha123",
+        "repo_full_name": "moonklabs/sprintable", "pr_number": 42,
+    }]
+    # 이 시나리오는 merged=False·ci_conclusion=None(non-actionable)이라 verdict capture
+    # 자체는 no-op으로 정직하게 skip된다 — gate_check_publish append는 그 skip과 독립적으로
+    # 이미 큐잉됐음을 위에서 확認했다.
+    assert result == {"skipped_reason": "no_actionable_signal", "recorded": []}
+    assert status == "ignored"

@@ -199,3 +199,225 @@ async def test_agent_card_advertises_streaming_true():
         assert card.capabilities.streaming is True
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_surfaces_persona_model_when_set():
+    """방향서 03·에이전트 속성 슬라이스① — AgentPersona.model이 카드 API에 실제로 배관됐는지."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.agent_deployment import AgentPersona
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Model Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            persona = AgentPersona(
+                id=uuid.uuid4(), org_id=member.org_id, project_id=member.project_id,
+                agent_id=member.id, slug="model-card-test",
+                name="Model Card Test Persona", is_default=True, model="claude-sonnet-5",
+            )
+            s.add(persona)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.model == "claude-sonnet-5"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_model_is_honest_none_when_persona_has_none():
+    """no-fiction: 미배정/persona 없음이면 지어내지 않고 None 그대로 노출."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="No Persona Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.model is None
+        assert card.permission_scope is None
+        assert card.expected_cost is None
+        assert card.stop_condition is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_surfaces_expected_cost_and_stop_condition_when_declared():
+    """방향서 03·에이전트 속성 슬라이스② — 선언 필드(예상 비용·중단 조건) 배관."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.agent_deployment import AgentPersona
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Declared Attrs Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            persona = AgentPersona(
+                id=uuid.uuid4(), org_id=member.org_id, project_id=member.project_id,
+                agent_id=member.id, slug="declared-attrs-test",
+                name="Declared Attrs Test Persona", is_default=True,
+                expected_cost_note="월 5만원 내외(추정)", stop_condition_note="예산 초과 시 정지",
+            )
+            s.add(persona)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.expected_cost == "월 5만원 내외(추정)"
+        assert card.stop_condition == "예산 초과 시 정지"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_reflects_active_api_key_not_persona_config():
+    """표시 SSOT=ApiKey.scope(실제 집행값) — persona.config.tool_allowlist가 달라도 카드는
+    실제 발급된 활성 키의 scope를 보인다(설계 doc §1의 드리프트 경고를 직접 검증)."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.agent_deployment import AgentPersona
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Scope Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            persona = AgentPersona(
+                id=uuid.uuid4(), org_id=member.org_id, project_id=member.project_id,
+                agent_id=member.id, slug="scope-drift-test", name="Scope Drift Test Persona",
+                is_default=True, config={"tool_allowlist": ["stale_persona_only_tool"]},
+            )
+            s.add(persona)
+            key = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_testpfx",
+                key_hash="fake-hash-for-test", scope=["real_enforced_tool"],
+            )
+            s.add(key)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope == ["real_enforced_tool"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_ignores_revoked_key():
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Revoked Key Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            revoked = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_revoked",
+                key_hash="fake-hash-revoked", scope=["should_not_appear"],
+                revoked_at=datetime.now(timezone.utc),
+            )
+            s.add(revoked)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_unions_multiple_active_keys():
+    """카디르 HIGH 재발견(story #2941): 활성 키가 2개 이상일 수 있다(POST /agents/{id}/
+    api-keys는 recruit과 달리 기존 활성 키 확인 없이 무조건 신규 발급). "표시=집행값"
+    원칙상 어느 한 키만 임의로 보여주면 과소평가 위험 — 전 활성 키 scope의 합집합을 보인다."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Multi Key Union Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            key_a = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_uniona",
+                key_hash="fake-hash-union-a", scope=["read", "write"],
+            )
+            key_b = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_unionb",
+                key_hash="fake-hash-union-b", scope=["deploy"],
+            )
+            s.add_all([key_a, key_b])
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope == ["deploy", "read", "write"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_none_when_any_active_key_unrestricted():
+    """무제한(scope=None) 활성 키가 하나라도 있으면 좁은 목록으로 과소평가하지 않고
+    전체를 None(무제한)으로 표시한다."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Unrestricted Key Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            narrow_key = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_narrow",
+                key_hash="fake-hash-narrow", scope=["read"],
+            )
+            unrestricted_key = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_unres",
+                key_hash="fake-hash-unrestricted", scope=None,
+            )
+            s.add_all([narrow_key, unrestricted_key])
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope is None
+    finally:
+        await engine.dispose()

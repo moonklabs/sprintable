@@ -334,6 +334,7 @@ async def _reopen_rejected_gate(
     neutral_facts: dict[str, Any] | None,
     project_id: uuid.UUID | None,
     notify: bool = True,
+    designated_approver_id: uuid.UUID | None = None,
 ) -> Gate:
     """story #2150(P1) 근본수정 — create_gate()의 멱등 조회에 status 필터가 없어 rejected
     게이트를 그대로 반환했다(merge_verdict_gate.py의 ``gate_status=="rejected"`` 체크와
@@ -385,6 +386,9 @@ async def _reopen_rejected_gate(
     gate.resolver_id = None
     gate.resolution_note = None
     gate.resolved_at = datetime.now(timezone.utc) if new_status != "pending" else None
+    # story #2985 — 재제출(새 결재 사이클)이면 이번 상신의 결재선으로 재stamp(doc.py의
+    # requested_by_member_id 재stamp와 동일 관례 — 옛 사이클의 지정을 그대로 물려받지 않는다).
+    gate.designated_approver_id = designated_approver_id
     merged_facts = dict(neutral_facts or {})
     merged_facts["decision_history"] = prior_history
     gate.neutral_facts = merged_facts
@@ -421,6 +425,178 @@ async def _reopen_rejected_gate(
     return gate
 
 
+async def find_gate_slot_with_pr_fallback(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    work_item_id: uuid.UUID,
+    work_item_type: str,
+    gate_type: str,
+    pr_number: int | None,
+    repo_full_name: str | None = None,
+) -> Gate | None:
+    """story #2893(§2 A1, 0271) 후속 — 카디르 QA(PR#3349 CI 실 실패 2건, 2026-08-22):
+    pr_number를 멱등 키에 편입한 것(정확매치 only)이 「PR 컨텍스트가 나중에 밝혀지는」
+    정상 케이스까지 «다른 PR»과 똑같이 취급해 새 행을 만들며 옛 행을 고아화시켰다 —
+    ①line-engine/board-preflight self-report shell(pr_number 모름, NULL) 後 실 PR이
+    연결되는 경우 ②legacy/백필 누락 행의 재제출(rejected reopen). A1의 취지는 «서로
+    다른 PR 간 격리»지 「PR 컨텍스트가 나중에 채워지는 같은 게이트의 분열」이 아니다
+    (PO 확定).
+
+    pr_number가 주어지면(실 PR 문맥) 먼저 그 PR 전용 슬롯을 정확매치로 찾는다. 없으면
+    아직 pr_number를 모르던 시절의 NULL-슬롯이 있는지 찾아 **승격**(pr_number+
+    repo_full_name을 채워 재사용 — flush까지 이 함수 책임, 호출자가 추가로 flush 안 해도
+    이후 조회에 반영됨)한다. 승격 後엔 그 행이 이 PR(과 이 repo)에 귀속되므로(정확매치
+    슬롯으로 편입) 다른 PR이 같은 NULL-슬롯을 다시 가로챌 길이 없다 — 실사고1/2가 막던
+    축(서로 다른 PR의 SHA가 같은 슬롯을 공유)은 그대로 보존된다(승격은 "미상→특정 PR"
+    1회성 전이일 뿐, "PR A→PR B" 전이는 이 함수가 만들어내지 않는다).
+
+    repo_full_name: story #2932(HIGH1, 0272) — pr_number 단독은 repo 경계가 없어(같은
+    스토리에 다른 repo의 동일 번호 PR이 링크되면 슬롯을 공유) SHA/evidence가 섞일 수
+    있었다(카디르 소스 직접확認). repo_full_name이 주어지면 정확매치가 (pr_number,
+    repo_full_name) 둘 다로 스코프된다 — 다른 repo의 같은 pr_number는 별개 슬롯.
+
+    ⛔카디르 QA(PR#3359 3라운드, codex 발견) — repo_full_name이 **주어지지 않으면**
+    (호출부가 정말 모름 — report-done류 self-report의 실 경로, workflow_report.py) "repo
+    무관 아무 행이나 매치"로 물러나면 안 된다. 이 PR이 정당하게 허용한 「같은 pr_number·
+    다른 repo 2행 이상」 상태에서 그런 조회가 `MultipleResultsFound`(500)로 죽었다(실사고).
+    `pr_number IS NULL`(PR 컨텍스트 자체 미상)과 대칭으로, repo_full_name=None 조회는
+    **repo도 마찬가지로 모르는 행**(`repo_full_name IS NULL`)만 매치한다 — 그 조건을
+    만족하는 행은 구조적으로 최대 1개뿐이라(`uq_gate_work_item_gate_type_pr_no_repo`)
+    모호성이 원천적으로 없다. repo를 아는 기존 행과는 별개 identity로 남는다(멋대로
+    병합하지 않는다 — 어느 쪽이 "진짜"인지 여기서 판단할 근거가 없다).
+
+    **동시성**(story #2932 HIGH2): NULL-슬롯 승격은 read-then-write라 동시 웹훅 2개가
+    같은 NULL-슬롯을 서로 다른 PR로 경쟁 승격할 수 있었다(나중 커밋이 조용히 덮어씀).
+    NULL-슬롯 조회에 `SELECT ... FOR UPDATE`를 걸어 두 번째 트랜잭션이 첫 번째의 커밋을
+    기다리게 한다 — 커밋 後 재평가되는 WHERE(`pr_number IS NULL`)가 더는 참이 아니므로
+    두 번째는 자연히 None을 받아(이미 승격된 슬롯을 못 봄) 새 실 INSERT 경로로 빠진다
+    (row가 이미 존재하는 UPDATE류 경합이라 SELECT FOR UPDATE가 유효 — row 자체가 없는
+    check-then-insert TOCTOU와는 다른 축, feedback_check_then_insert_toctou 참고).
+
+    pr_number가 None(PR 컨텍스트가 원래 없는 gate_type 또는 board-preflight no-substance)
+    이면 옛 계약 그대로 NULL-슬롯만 찾는다 — 승격 대상 자체가 없다("PR 컨텍스트 있음"으로
+    바꿀 근거가 없다).
+
+    카디르 QA(story #2932 HIGH1, 2026-08-22, 이 PR 자체 재재verdict) — repo_full_name을
+    대소문자/공백 그대로 비교하면 `Acme/Repo`≠`acme/repo`로 같은 실 repo가 다른 슬롯으로
+    분열한다(DB 유니크 인덱스도 case-sensitive). 기존 SSOT `pr_story_link.py::normalize_repo`
+    (strip+lower)를 여기(읽기·쓰기 둘 다의 단일 관문)서 관통시킨다 — 호출부가 원본 대소문자를
+    그대로 넘겨도 이 함수 안에서 항상 정규화되므로 4개 호출부 전부를 개별 수정할 필요가
+    없다(단일 chokepoint)."""
+    if repo_full_name is not None:
+        from app.services.pr_story_link import normalize_repo
+        repo_full_name = normalize_repo(repo_full_name) or None
+    if pr_number is not None:
+        exact_conditions = [
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+            Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+            Gate.pr_number == pr_number,
+        ]
+        # 카디르 QA(story #2932, PR#3359 3라운드, codex 발견) — repo_full_name이 없을 때
+        # (호출부가 정말 모름 — report-done류 self-report의 실 경로) repo 필터를 아예
+        # 안 걸면, 이 PR이 정당하게 허용한 「같은 pr_number·다른 repo 2행 이상」 상태를
+        # 만나 scalar_one_or_none()이 MultipleResultsFound로 500을 낸다(실사고). repo를
+        # 모른다는 것을 "아무 repo나 매치"로 지어내지 않는다 — `Gate.pr_number.is_(None)`
+        # (아래 NULL-슬롯 매치)과 대칭으로, repo_full_name=None 조회는 **repo도 마찬가지로
+        # 모르는 행**(repo_full_name IS NULL, 이 함수 자신이 승격시켜 둔 행 포함)만 매치한다
+        # — 정확히 한 행만 있을 수 있는 조건(uq_gate_work_item_gate_type_pr_no_repo)이라
+        # 구조적으로 모호성이 없다. repo를 아는 기존 행과는 다른 identity로 남는다(멋대로
+        # 병합하지 않는다 — 어느 쪽이 "진짜"인지 여기서 판단할 근거가 없다).
+        exact_conditions.append(
+            Gate.repo_full_name == repo_full_name if repo_full_name is not None
+            else Gate.repo_full_name.is_(None)
+        )
+        exact = (
+            await session.execute(select(Gate).where(*exact_conditions))
+        ).scalar_one_or_none()
+        if exact is not None:
+            return exact
+
+        # story #2932(HIGH1 잔여) — pr_number는 이미 정확히 아는데 repo만 몰랐던 legacy/
+        # 미백필 행이 있으면(0272 백필 누락·neutral_facts.repo 부재 등) 「repo가 나중에
+        # 밝혀지는」 같은 클래스의 정상 케이스다 — NULL-슬롯 승격과 대칭: pr_number 대신
+        # repo_full_name 하나만 미상인 슬롯을 찾아 승격한다(고아화 방지, 새 규칙 발명 0).
+        if repo_full_name is not None:
+            repo_unknown_slot = (
+                await session.execute(
+                    select(Gate).where(
+                        Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                        Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                        Gate.pr_number == pr_number, Gate.repo_full_name.is_(None),
+                    ).with_for_update()  # story #2932 HIGH2와 동일 이유 — 동시 승격 경쟁 직렬화.
+                )
+            ).scalar_one_or_none()
+            if repo_unknown_slot is not None:
+                repo_unknown_slot.repo_full_name = repo_full_name
+                await session.flush()
+                return repo_unknown_slot
+
+        null_slot = (
+            await session.execute(
+                select(Gate).where(
+                    Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                    Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                    Gate.pr_number.is_(None),
+                ).with_for_update()  # story #2932 HIGH2 — 동시 승격 경쟁 직렬화.
+            )
+        ).scalar_one_or_none()
+        if null_slot is not None:
+            null_slot.pr_number = pr_number
+            null_slot.repo_full_name = repo_full_name
+            await session.flush()
+        return null_slot
+    return (
+        await session.execute(
+            select(Gate).where(
+                Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                Gate.pr_number.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def find_pending_merge_gates_by_head_sha(
+    session: AsyncSession, *, org_id: uuid.UUID, head_sha: str,
+) -> list[Gate]:
+    """story #3033(2026-08-24, PO 판정) — CI verdict는 PR의 속성이 아니라 SHA의 속성이다.
+
+    실사고 그라운딩(#3350 MERGED·#3307 CLOSED, 2/2 실물): 스택형 형제 PR이 같은 head SHA를
+    공유하면(브랜치를 다른 PR에 이어 붙이는 관례), 원 PR이 머지된 뒤 도착하는 CI-완료 웹훅
+    (check_suite/workflow_run/status)의 `pull_requests[]`에서 GitHub이 그 PR을 빼버린다
+    (머지된 PR은 더는 그 SHA의 "현재 head"가 아니므로) — 남는 건 그 SHA를 여전히 물고 있는
+    형제 PR뿐이다. `_extract_pr_ci`가 그 페이로드에서 뽑는 pr_number는 그래서 **원 PR이
+    아니라 형제 PR**을 가리키고, `find_gate_slot_with_pr_fallback`(work_item_id=story_id
+    스코프)는 애초에 "다른 story일 수도 있는" 그 형제 게이트를 찾을 근거가 없다(순환 —
+    story 자체를 pr_number 경유로 아는데, 그 pr_number가 이미 틀렸다).
+
+    그래서 이 폴백은 **story 스코프를 걷어내고 org+SHA로만** 찾는다 — `gate.github_check_run_sha`
+    는 그 게이트가 생성될 때 찍힌 실 head SHA(anchor)라 「이 SHA의 CI가 완료됐다」는 사실을
+    story 경계 없이 그대로 반영할 수 있다(SHA는 조직 전역에서 유일). 일치가 여럿(형제 PR
+    각자의 게이트, 같은 story든 다른 story든)이면 **전부** 후보 — 같은 SHA의 CI 결과는
+    사실 그 자체로 공유되는 것이지 임의 선택이 아니다.
+
+    ⛔pending/auto_passed만: `find_gate_slot_with_pr_fallback`과 동일 이유(rejected/voided/
+    held는 사람이 이미 명시 결정했거나 일시정지한 것 — CI 이벤트로 조용히 재오픈/간섭 금지).
+    ⛔pr_result는 이 함수의 관심사가 아니다 — 호출자(`reconcile_merge_gate_with_real_evidence`)
+    가 ci_result만 갱신하고 pr_result는 각 게이트의 기존 값을 보존한다(머지/클로즈 여부는
+    PR별 사실이라 SHA로 공유될 근거가 없다 — PO 명시 구분)."""
+    # 순환 import 회피(merge_verdict_gate.py가 이 모듈을 모듈 레벨에서 import) — 이 파일의
+    # 1444행 기존 관례와 동일하게 함수 안에서 지역 import.
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    return list((
+        await session.execute(
+            select(Gate).where(
+                Gate.org_id == org_id, Gate.gate_type == MERGE_GATE_TYPE,
+                Gate.github_check_run_sha == head_sha,
+                Gate.status.in_(("pending", "auto_passed")),
+            )
+        )
+    ).scalars().all())
+
+
 async def create_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -433,8 +609,21 @@ async def create_gate(
     project_id: uuid.UUID | None = None,
     notify: bool = True,
     gate_id: uuid.UUID | None = None,
+    pr_number: int | None = None,
+    repo_full_name: str | None = None,
+    designated_approver_id: uuid.UUID | None = None,
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
+
+    pr_number: story #2893(설계안 §2 A1) — merge-type만 실제로 쓴다(호출부는
+    evaluate_merge_gate 하나뿐, 그라운딩 확認). 나머지 7개 호출부는 인자를 안 넘겨
+    기본값 None 그대로 — 멱등 키가 `(work_item_id, work_item_type, gate_type)` 옛
+    계약대로 유지된다(무회귀). None이면 "PR 컨텍스트 없음"을 지어내지 않고 그대로 둔다
+    (0 같은 sentinel로 바꾸지 않음 — DB 컬럼 자체가 nullable Integer).
+
+    repo_full_name: story #2932(HIGH1) — pr_number와 짝. pr_number 단독은 repo 경계가
+    없어 다른 repo의 같은 번호 PR이 슬롯을 공유할 수 있었다(cross-repo 충돌). pr_number를
+    넘기는 유일 호출부(evaluate_merge_gate)가 항상 실 repo를 알고 있어 함께 넘긴다.
 
     gate_id: story #2709(2026-08-17, PO 판정) — self-referencing standalone anchor(work_item이
     없는 순수 질문류 gate_type)를 위한 파라미터. 호출측(MCP 도구)이 uuid4를 미리 만들어
@@ -456,17 +645,30 @@ async def create_gate(
     보낼 때, 이 generic "gate.pending_approval" 벨과의 중복을 끄는 opt-out(기본값 True=기존
     全 호출부 무회귀). gate_type/work_item_type별 하드코딩 대신 호출부 판단으로 남겨 이 함수의
     공용 chokepoint 성격을 유지한다.
+
+    designated_approver_id: story #2985(PO 설계 확定 2026-08-24) — 상신 시 지정한 결재선(선택).
+    None(기본값, 기존 全 호출부 무회귀)이면 지정 없음 — dispatch_approval_request_cards가
+    권한자 전원에게 액션 카드를 보내는 현행 그대로. 지정하면 그 1인만 액션·나머지는 정보성
+    (호출부가 이 값을 실 dispatch_approval_request_cards 호출에도 같이 넘겨야 실제로
+    갈린다 — 여기서는 Gate 행에 저장만).
     """
-    # 멱등: 이미 존재하면 기존 반환
-    existing_r = await session.execute(
-        select(Gate).where(
-            Gate.org_id == org_id,
-            Gate.work_item_id == work_item_id,
-            Gate.work_item_type == work_item_type,
-            Gate.gate_type == gate_type,
-        ).limit(1)
+    # 카디르 QA(story #2932 HIGH1, 2026-08-22) — repo_full_name도 find_gate_slot_with_pr_
+    # fallback과 동일하게 여기서 정규화한다: 이 함수의 Gate(...) INSERT는 그 헬퍼를 거치지
+    # 않으므로(조회만 거침) 별도로 정규화해야 저장값 자체가 일관된다(대소문자 다른 두
+    # 호출이 같은 실 repo인데 다른 슬롯으로 분열하는 것 방지).
+    if repo_full_name is not None:
+        from app.services.pr_story_link import normalize_repo
+        repo_full_name = normalize_repo(repo_full_name) or None
+
+    # 멱등: 이미 존재하면 기존 반환. story #2893 — pr_number도 키에 편입(0271 부분
+    # 유니크 인덱스와 동형 조건). find_gate_slot_with_pr_fallback가 정확매치 우선+
+    # NULL-슬롯 승격 폴백까지 처리(카디르 QA, PR#3349 CI 실패 2건 후속 — pr_number가
+    # 나중에 밝혀지는 정상 케이스를 다른 PR과 혼동해 고아 행을 만들던 결함).
+    existing = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=work_item_id,
+        work_item_type=work_item_type, gate_type=gate_type, pr_number=pr_number,
+        repo_full_name=repo_full_name,
     )
-    existing = existing_r.scalar_one_or_none()
     if existing is not None:
         # story #2150 근본수정: rejected는 재제출 시 새 결재 사이클을 연다(그 외 terminal
         # status는 기존 그대로 불변 반환 — 판단 근거는 _reopen_rejected_gate 참조).
@@ -475,7 +677,7 @@ async def create_gate(
         return await _reopen_rejected_gate(
             session, existing, org_id=org_id, member_id=member_id, role_id=role_id,
             gate_type=gate_type, neutral_facts=neutral_facts, project_id=project_id,
-            notify=notify,
+            notify=notify, designated_approver_id=designated_approver_id,
         )
 
     # SID 301ee45d/#2047: 반환값이 (disposition, source) — 이 범용 생성기는 disposition→status
@@ -494,6 +696,8 @@ async def create_gate(
         work_item_id=work_item_id,
         work_item_type=work_item_type,
         gate_type=gate_type,
+        pr_number=pr_number,
+        repo_full_name=repo_full_name,
         status=status,
         # #2156 AC3(2026-08-07) — merge-type만 evaluate_merge_gate가 이후 이 필드를 정확히
         # 채웠고(decision 기반), 그 외 gate_type(qa·pr_review·deploy 등)은 create_gate가 여태
@@ -507,6 +711,7 @@ async def create_gate(
         status_entered_at=datetime.now(timezone.utc),
         neutral_facts=neutral_facts,
         resolved_at=datetime.now(timezone.utc) if status != "pending" else None,
+        designated_approver_id=designated_approver_id,
     )
     session.add(gate)
     await session.flush()
@@ -606,6 +811,12 @@ async def transition_gate(
             "work_item_type": gate.work_item_type,
             "work_item_id": str(gate.work_item_id),
             "note": note,
+            # story #2975 AC4(PO 확定 2026-08-24) — 「이 액션이 어느 SHA에 대한 것이었나」를
+            # 이 시점의 gate.github_check_run_sha로 스냅샷. gate.approved_head_sha 컬럼은
+            # 이후 재-pending 시 null로 되돌아가(gate_github_check.py::reopen_gate_if_new_sha)
+            # 그 시점의 역사가 사라지므로, append-only인 이 context가 유일한 영속 기록이 된다.
+            # merge 게이트가 아니면 애초에 None(무관 필드 — 조용히 무해).
+            "head_sha": gate.github_check_run_sha,
         },
     )
 
@@ -617,6 +828,35 @@ async def transition_gate(
     from app.services.cold_start_seed import record_cold_start_seed  # 순환 회피 lazy import.
 
     await record_cold_start_seed(session, org_id, gate, new_status, resolver_id)
+
+    # story #2985 AC2(PO 계약 확定 2026-08-24) — 원 카드(액션+정보성 무관) 받았던 전원의 열린
+    # 화면이 새로고침 없이 "처리됨"으로 갱신되게. gate_type/line-bound 여부와 무관하게 항상
+    # (아래 line-resolution 분기 이전) — best-effort(실패해도 해소 자체는 막지 않음, 다른
+    # notify_* 형제들과 동일 관례). Event 행 자체는 pending_deliveries 유무와 무관하게 항상
+    # 남긴다(재연결 backfill로도 도달 — durable). 즉시(live) push는 호출부가
+    # pending_deliveries를 넘겼을 때만 추가로 시도(호출부가 이미 commit-후-push 계약을 쓰고
+    # 있다는 뜻 — 없으면 backfill 경로로만 도달, 무강제).
+    if new_status in ("approved", "rejected"):
+        try:
+            from app.services.approval_delivery import notify_gate_card_recipients_resolved
+            _sse_pushes = await notify_gate_card_recipients_resolved(
+                session, org_id=org_id, gate_id=gate.id, status=new_status,
+                resolver_id=resolver_id, resolved_at=gate.resolved_at,
+            )
+            if pending_deliveries is not None:
+                for _pid_str, _sse_payload in _sse_pushes:
+                    pending_deliveries.append({"sse_push": {"pid_str": _pid_str, "payload": _sse_payload}})
+        except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 게이트 해소를 막지 않음.
+            logger.warning("gate_resolved 카드 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
+
+    # story #1715(PO 판정 2026-08-24) — 상신자(requested_by_member_id) 회신은 gate_type/
+    # line-bound 분기와 무관하게 **이 한 자리에서만** 부른다(아래 if/else 갈리기 전) — 두
+    # 경로 양쪽에 각자 호출을 심으면 "구조적으로 배타적"이라는 주장이 코드 두 곳의 일치에
+    # 의존하게 된다(다음 사람이 한쪽만 고치면 조용히 깨지는 자리). 단일 호출점이면 이중발송
+    # 자체가 원리적으로 불가능 — _notify_doc_gate_requester 내부가 gate_type 스위치가 아니라
+    # neutral_facts.requested_by_member_id **유무**로 자기 자신을 게이트한다(PO 지적 — 판별축
+    # 정정: gate_type이 아니라 "상신자가 실제로 있는가"가 맞는 축).
+    await _notify_doc_gate_requester(session, gate, new_status)
 
     # E-DG S6: gate 전이를 범용 line resolution 에 배선. gate 에 묶인 active line step_run 이 있으면
     # apply_workflow_line_resolution(H1/line approve 동일 status side-effect 경로)·없으면 legacy
@@ -634,14 +874,24 @@ async def transition_gate(
         if _wake_payload is not None and pending_deliveries is not None:
             pending_deliveries.append(_wake_payload)
     else:
-        # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
-        await _advance_story_on_merge_approve(session, gate, new_status)
+        # story #2965(PO 판정 2026-08-23) — H1-FIX-2가 여기서 story를 done으로 자동전진시키던
+        # 것을 제거했다. merge 게이트 approve는 이 이벤트 자체가 "머지됐다"는 뜻이 아니다(PR이
+        # 아직 미머지인 채 approve만 된 상태가 정상 경로 — design 라벨·CLEAN 대기 등) — approve
+        # 순간 done이 되면 배포되지 않은 것을 "완료"라 말하는 no-fiction 위반이었다(2933→2931
+        # →2952→2958에서 하루 4회 재발, 매번 PO가 in-review로 수동 되돌림).
+        # ⛔되살리기 前 반드시 확認할 것 — story #2327(2026-07-30, PO 판정)이 같은 문제를 다른
+        # 트리거(PR merge 웹훅 close-on-merge)로 이미 겪고 정지시켰다: "머지 ≠ done, done은 사람
+        # 확認 後"가 이 조직의 규율이다. 트리거를 gate-approve든 PR-merge든 무엇으로 바꿔도, 사람의
+        # AC 전량 대조 확認 없이 이벤트 하나로 done을 미는 것 자체가 그 판정의 대상이다. done은
+        # 오직 사람이 board에서 명시 PATCH하는 경로 하나로 통일한다(그 경로는 그대로 살아있다).
+        # advance_story_to_done()(story_status_events.py) 자체는 삭제하지 않는다 — 조직 단위
+        # auto-done on/off 설정이 생기면(#2327이 남긴 되살리기 조건, 아직 없음) 그 설정을 읽어
+        # 조건부로 재배선할 단일 idempotent 헬퍼로 의도적으로 남겨둔다.
         # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
         await _resolve_doc_gate(session, gate, new_status)
-        # story #2624: 해소 결과를 상신자에게 회신(approval_delivery.py 반대 방향) — 선생님
-        # 직접 지적(폴링해야만 반려를 알던 실사례). doc.status 변경 후 호출돼도 무방(회신
-        # 내용은 gate 필드에서만 유도).
-        await _notify_doc_gate_requester(session, gate, new_status)
+        # story #2624 — 상신자 회신은 이제 이 if/else 진입 前 단일 호출점(위 story #1715 주석
+        # 참조)에서 이미 처리됨. doc.status 변경 순서와 무관(회신 내용은 gate 필드에서만
+        # 유도 — _notify_doc_gate_requester가 아래서 다시 안 불림, 여기 있던 호출 제거).
         # E-CANVAS C4-S8(story a5118cb0): 정본화 게이트 approve→anchor_version set·reject→재논의 코멘트.
         await _resolve_artifact_canonicalize_gate(session, gate, new_status)
         # HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀. writer 미배선이라 오늘은 no-op.
@@ -728,6 +978,8 @@ async def undo_gate_resolution(
     _prev_resolver_id = gate.resolver_id
     _prev_resolved_at = gate.resolved_at
     _prev_note = gate.resolution_note
+    # story #2975 AC4 — approved_head_sha(무엇이 승인됐었나)도 취소로 곧 사라질 값이라 스냅샷.
+    _prev_approved_head_sha = gate.approved_head_sha
 
     from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
     if gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE and gate.gate_type == DOC_GATE_TYPE:
@@ -762,6 +1014,8 @@ async def undo_gate_resolution(
             "previous_resolver_id": str(_prev_resolver_id) if _prev_resolver_id else None,
             "previous_resolved_at": _prev_resolved_at.isoformat() if _prev_resolved_at else None,
             "previous_note": _prev_note,
+            # story #2975 AC4 — 무엇이 취소됐는지(어느 SHA에 대한 승인이었는지)의 스냅샷.
+            "previous_approved_head_sha": _prev_approved_head_sha,
         },
     )
 
@@ -875,13 +1129,33 @@ async def void_gate(
     gate_id: uuid.UUID,
     voider_id: uuid.UUID,
     reason: str,
+    *,
+    actor_type: str = "human",
+    void_reason_label: str = "admin",
 ) -> Gate:
     """⭐S30 admin recovery: 잘못 생성된 **pending** gate 를 무효화(voided).
 
     ⚠️void ≠ approval: 묶인 line step_run 을 ``skipped`` 로 해소해 엔티티가 unblock(re-route 가능)되되
     "승인됨"으로 전진하지 않는다(전이 미적용). voider 는 인증 caller(라우터가 강제·body 신뢰 금지·
     S23 RC① 패턴). audit = gate 행(status='voided'·resolver_id·resolution_note)이 distinct 추적
-    (approve/reject 와 **status 로 구분**) + app-log. void=복구 액션이라 strict SoD 불요(PO Q4).
+    (approve/reject 와 **status 로 구분**) + ActivityLog(story #2975 AC4, approve/reject/undo와
+    동형 — 이전엔 logger.info뿐이라 DB 조회 불가였음). void=복구 액션이라 strict SoD 불요(PO Q4).
+
+    actor_type: story #2789(2026-08-24) — 이전엔 이 함수의 유일한 호출자(admin-only `/void`
+    엔드포인트)가 항상 사람이라 ActivityLog에 `actor_type="human"`을 하드코딩해도 참이었다.
+    이 스토리가 새 호출자(요청자 자기-철회 `/withdraw`, 에이전트도 호출 가능)를 추가하며
+    그 전제가 깨진다 — 호출부가 실제 caller 타입(agent_gateway.py 등에서 이미 쓰는
+    `app_metadata.api_key_id` 신호와 동형 판별)을 명시로 넘긴다. 기본값 "human"은 기존
+    admin `/void` 경로의 무회귀만 보존한다.
+
+    void_reason_label: 카디르 QA(#3462, 2026-08-25) — 최초 구현이 이 값을 `actor_type`과
+    같은 변수로 합쳐 썼다가, 그 결과 step_run.routing_reason 리터럴이 기존 admin `/void`
+    경로에서도 "gate voided by admin: ..."(항상 이 고정 문구였음, git blame 확認)에서
+    "gate voided by human: ..."로 바뀌어버려 `test_edg_s30_void_recovery`가 실 PG에서
+    깨졌다(disposable PG 재현). `actor_type`(ActivityLog 감사축)과 `void_reason_label`
+    (routing_reason 표시축)은 서로 다른 축이라 분리한다 — 전자는 "누가"(agent/human),
+    후자는 "어떤 경로로"(admin 복구 vs 요청자 철회)를 나타낸다. 기본값 "admin"은 기존
+    admin `/void` 호출자의 출력을 byte-동일 보존한다.
     """
     gate = (await session.execute(
         select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
@@ -908,11 +1182,32 @@ async def void_gate(
         )).scalar_one_or_none()
         if sr is not None:
             sr.status = "skipped"
-            sr.routing_reason = f"gate voided by admin: {reason}"[:500]
+            # story #2789 — "by admin"이 더는 항상 참이 아니다(요청자 자기-철회 경로 추가).
+            # 카디르 QA(#3462): actor_type과 혼용하면 기존 admin 경로 출력이 바뀐다 — 별도 축.
+            sr.routing_reason = f"gate voided by {void_reason_label}: {reason}"[:500]
             sr.resolved_at = datetime.now(timezone.utc)
 
-    # void 는 별개 액션으로 app-log 추적(DB distinct 추적은 gate.status='voided'). ⚠️permission_audit_logs
-    # 는 action CHECK(member_* 만)라 사용 불가·HitlGateAudit 는 enforce-coverage 전용 → gate 행+log 채택.
+    # story #2975 AC4(PO 확定 2026-08-24) — 위 주석이 남긴 이유(permission_audit_logs=member 전용·
+    # HitlGateAudit=enforce-coverage 전용)로 여태 logger.info() 뿐이었다(Cloud Logging 한정,
+    # DB 비영속·조회불가) — 진짜 감사 갭이었다. approve/reject/undo와 동형으로 ActivityLog에
+    # 옮긴다(신규 테이블 불요, 기존 표 재사용).
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action="gate_voided",
+        actor_id=voider_id,
+        actor_type=actor_type,
+        entity_type="gate",
+        entity_id=gate.id,
+        context={
+            "gate_type": gate.gate_type,
+            "work_item_type": gate.work_item_type,
+            "work_item_id": str(gate.work_item_id),
+            "reason": reason,
+            "head_sha": gate.github_check_run_sha,
+        },
+    )
     logger.info(
         "gate_voided org=%s gate=%s voider=%s work=%s/%s step_run=%s reason=%s",
         org_id, gate_id, voider_id, gate.work_item_type, gate.work_item_id, sr_id, reason,
@@ -1078,6 +1373,114 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
     await session.flush()
 
 
+async def resolve_designatable_gate_context(
+    session: AsyncSession, gate: Gate,
+) -> tuple[str, uuid.UUID, uuid.UUID] | None:
+    """story #3001 — 위임(delegate) 대상 카드 배달용 (title, project_id, requester_id) 해소.
+    _notify_doc_gate_requester의 doc_approval/agent_decision_request 두 분기와 같은 근원
+    (Doc row·neutral_facts) — merge는 여기 없다(#2985가 designated_approver_id 배선 자체를
+    보류해 뒀으므로 delegate 엔드포인트가 애초에 merge gate에 도달 못 함, 별도 분기 불요).
+    해소 못 하면(doc 없음·필드 없음 등) None(지어내지 않음, 호출부가 no-op 처리)."""
+    from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+
+    facts = gate.neutral_facts or {}
+    requester_raw = facts.get("requested_by_member_id")
+    if not requester_raw:
+        return None
+    requester_id = uuid.UUID(str(requester_raw))
+
+    if gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE and gate.gate_type == DOC_GATE_TYPE:
+        from app.models.doc import Doc
+        doc = (await session.execute(
+            select(Doc).where(Doc.id == gate.work_item_id, Doc.org_id == gate.org_id)
+        )).scalar_one_or_none()
+        if doc is None or not doc.project_id:
+            return None
+        return doc.title, doc.project_id, requester_id
+    if gate.gate_type == "agent_decision_request":
+        project_id_raw = facts.get("project_id")
+        question = facts.get("question")
+        if not project_id_raw or not question:
+            return None
+        return str(question), uuid.UUID(str(project_id_raw)), requester_id
+    return None
+
+
+async def dispatch_gate_delegation(
+    session: AsyncSession, gate: Gate, *, old_approver_id: uuid.UUID, new_approver_id: uuid.UUID,
+) -> None:
+    """story #3001(선생님 정책 확定 2026-08-24) — 위임 실행: 새 지정자에게 실 액션 카드
+    배달(dispatch_approval_request_cards 재사용, 신규 카드 메커니즘 0) + 원 지정자(호출자)
+    카드가 "위임됨"으로 실시간 갱신되도록 conversation.gate_delegated 이벤트 전파(오늘
+    #2985가 만든 conversation.gate_resolved 형제 — 새 ConversationMessage는 안 만든다,
+    같은 이유로 챗버블 스팸 방지).
+
+    best-effort(카드/이벤트 배달 실패가 위임 자체 — gate.designated_approver_id 갱신+
+    ActivityLog — 를 막지 않는다, 라우터가 이미 그 둘을 먼저 commit한 後 이 함수를 부른다)."""
+    ctx = await resolve_designatable_gate_context(session, gate)
+    if ctx is None:
+        logger.warning("gate delegate 컨텍스트 해소 실패 gate=%s — 카드/이벤트 배달 스킵", gate.id)
+        return
+    title, project_id, requester_id = ctx
+
+    try:
+        from app.services.approval_delivery import dispatch_approval_request_cards
+        # story #3044 — 새 지정자의 결재함 목록도 새로고침 없이 이 게이트를 즉시 봐야 한다.
+        # dispatch_approval_request_cards가 내부에서 notify_gate_created_to_recipients를
+        # 부르고, 그 함수가 after_commit 훅으로 push를 자체 예약한다(approval_delivery.py
+        # 문서 참고) — 이 함수 자신은 커밋 타이밍을 몰라도 된다. 아래 gate_delegated의
+        # 기존 commit(이 함수의 원래 유일한 커밋)에서 같이 발화된다(별도 커밋 불요).
+        await dispatch_approval_request_cards(
+            session, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            project_id=project_id, title=title, gate_id=gate.id,
+            requester_id=requester_id, approver_ids=[new_approver_id],
+            designated_approver_id=new_approver_id,
+        )
+    except Exception:  # noqa: BLE001 — best-effort, 신규 카드 배달 실패가 위임 자체를 막지 않음.
+        logger.warning("gate delegate 신규 카드 배달 실패 gate=%s new_approver=%s", gate.id, new_approver_id, exc_info=True)
+
+    try:
+        from app.services.approval_delivery import notify_gate_delegated_to_old_approver
+        pushes = await notify_gate_delegated_to_old_approver(
+            session, org_id=gate.org_id, gate_id=gate.id,
+            old_approver_id=old_approver_id, new_approver_id=new_approver_id,
+        )
+        await session.commit()
+        for pid_str, payload in pushes:
+            from app.routers.events import _push_to_agent
+            _push_to_agent(pid_str, payload)
+    except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 위임 자체를 막지 않음.
+        logger.warning("gate delegate 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
+
+
+async def dispatch_gate_toss(
+    session: AsyncSession, gate: Gate, *, target_conversation_id: uuid.UUID, tossed_by_id: uuid.UUID,
+) -> None:
+    """story #3084(2026-08-25 정렬 v1 층3) — 토스의 브로드캐스트 절반만 담당. 카드 삽입
+    자체(dispatch_approval_card_toss)는 라우터(gates.py::toss_gate_endpoint)가 인가 검증
+    직후 이미 커밋했다 — "토스됐다"는 응답이 카드 존재를 보장해야 하므로 삽입은 best-effort가
+    아니다(#2142 "조용히 넘어가는 게 제일 나쁜 것" 원칙과 동형, dispatch_gate_delegation의
+    신규 카드 배달 단계와 대비되는 지점 — 위임은 새 지정자에게 처음 가는 카드라 best-effort로
+    족하지만, 토스는 "이미 있던 카드를 옮겼다"는 사용자 확인 응답 자체이므로 다르다).
+
+    여기서 하는 일은 기존 사본 보유자 전체에 대한 conversation.gate_tossed 다방 동기 반영
+    (notify_gate_tossed)뿐 — 이건 delegate의 notify_gate_delegated_to_old_approver와 동일
+    이유로 best-effort(실시간 반영 실패가 토스 자체를 무효화하지 않음, 재조회하면 결국
+    맞는 상태를 본다)."""
+    try:
+        from app.services.approval_delivery import notify_gate_tossed
+        pushes = await notify_gate_tossed(
+            session, org_id=gate.org_id, gate_id=gate.id,
+            target_conversation_id=target_conversation_id, tossed_by_id=tossed_by_id,
+        )
+        await session.commit()
+        for pid_str, payload in pushes:
+            from app.routers.events import _push_to_agent
+            _push_to_agent(pid_str, payload)
+    except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 토스 자체를 막지 않음.
+        logger.warning("gate toss 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
+
+
 async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_status: str) -> None:
     """story #2624: doc 결재 게이트 해소 결과를 상신자에게 회신 —
     dispatch_approval_request_cards(상신→승인자)의 반대 방향. P2(#3007)는 전방 경로만
@@ -1096,6 +1499,7 @@ async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_stat
     격리하지만, requester_id 파싱 등 그 앞 단계도 안전해야 한다)."""
     try:
         from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+        from app.services.merge_verdict_gate import MERGE_GATE_TYPE
         if new_status not in ("approved", "rejected") or gate.resolver_id is None:
             return
 
@@ -1136,6 +1540,25 @@ async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_stat
                 requester_id=requester_id, resolver_id=gate.resolver_id,
                 decision=new_status, resolution_note=gate.resolution_note,
                 event_type="agent_decision_resolved",
+            )
+        elif gate.gate_type == MERGE_GATE_TYPE:
+            # story #1715(PO 판정 2026-08-24) — merge gate(work_item_type="story")도 상신자
+            # 회신 대상에 편입. requested_by_member_id는 evaluate_merge_gate()가 이미 계산해
+            # 두던 participation.member_id(누가 실작업했는지)를 neutral_facts에 stash만 추가한
+            # 것(merge_verdict_gate.py) — 새 식별 로직 0.
+            from app.models.pm import Story
+            story_title = (await session.execute(
+                select(Story.title).where(Story.id == gate.work_item_id, Story.org_id == gate.org_id)
+            )).scalar_one_or_none() or f"#{str(gate.work_item_id)[:8]}"
+            project_id = await resolve_work_item_project_id(session, gate.org_id, "story", gate.work_item_id)
+            if not project_id:
+                return
+            await dispatch_approval_result_reply(
+                session, org_id=gate.org_id, work_item_type="story", work_item_id=gate.work_item_id,
+                project_id=project_id, title=story_title, gate_id=gate.id,
+                requester_id=requester_id, resolver_id=gate.resolver_id,
+                decision=new_status, resolution_note=gate.resolution_note,
+                event_type="merge_gate_resolved",
             )
     except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 게이트 해소를 막지 않는다.
         logger.warning(
@@ -1228,28 +1651,6 @@ async def _resume_a2a_task_on_gate_resolve(session: AsyncSession, gate: Gate, ne
         return  # 링크 없음(writer 미배선) 또는 이미 다른 경로로 해소됨 — no-op.
     task.state = "TASK_STATE_WORKING" if new_status == "approved" else "TASK_STATE_REJECTED"
     await session.flush()
-
-
-async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new_status: str) -> None:
-    """merge 게이트 approve 시 work_item 스토리를 done으로 진행(H1-FIX-2).
-
-    사람이 이미 approve했으므로 done PATCH의 _preflight 재평가를 우회해 직접 전이한다. reject나
-    비-merge 게이트는 진행하지 않는다(reject→in-review 유지). 이미 done이면 no-op(멱등).
-    """
-    if gate.gate_type != "merge" or gate.work_item_type != "story" or new_status != "approved":
-        return
-    from app.models.pm import Story  # 순환 회피 lazy import.
-
-    # Bot-L.1: gate-approve 와 PR-merge close-on-merge 가 **단일 idempotent 헬퍼**(advance_story_to_done)를
-    # 공유한다 — 상태전이 정책을 1곳에 둬 중복 advance/drift 0. 헬퍼가 done side-effects(events→L1 verdict
-    # 증거·webhook·L2·notification·activity)를 발화(board parity). actor=resolver(승인 휴먼·#1504). 이미
-    # done/부재면 no-op(멱등).
-    from app.services.story_status_events import advance_story_to_done
-
-    story = await session.get(Story, gate.work_item_id)
-    await advance_story_to_done(
-        session, gate.org_id, story, actor_id=gate.resolver_id, actor_type="human",
-    )
 
 
 # gate_type → verdict source (qa→qa·merge→merge·deploy→design·pr_review→pr).
@@ -1461,6 +1862,26 @@ async def override_gate(
             },
             correlation_id=sr.correlation_id,
         ))
+    # story #2975 AC4(PO 확定 2026-08-24, ㉮) — 위 WorkflowLineStepRunEvent는 sr(line step_run)이
+    # 있을 때만 쓰인다. line-less override는 지금까지 gate.neutral_facts(위)뿐이었는데 그건
+    # mutable이라 다음 전이가 덮어써 감사 기록이 못 된다 — line 유무 무관하게 ActivityLog에도
+    # 항상 남긴다(transition_gate가 이미 base gate_approved/rejected를 쓰지만, override 고유
+    # 메타(bypassed_sod·override_reason)는 그 안 담기므로 별개 action으로 append).
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action="gate_overridden",
+        actor_id=owner_id,
+        actor_type="human",
+        entity_type="gate",
+        entity_id=gate.id,
+        context={
+            "decision": decision, "reason": reason, "bypassed_sod": True,
+            "bypassed_approver_ids": [str(x) for x in bypassed],
+            "head_sha": gate.github_check_run_sha,
+        },
+    )
     logger.warning(
         "gate_overridden org=%s gate=%s decision=%s owner=%s bypassed_approvers=%d reason=%s",
         org_id, gate_id, decision, owner_id, len(bypassed), reason,

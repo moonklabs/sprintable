@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createReconnectBackoffState } from './sse-reconnect-backoff';
 import { isSessionAlive } from './sse-session-guard';
 import { isCursorEligibleEventName } from './sse-cursor-eligibility';
+import { createVisibilityReconnectState } from './sse-visibility-reconnect';
 
 /**
  * story #2078(E-ARCH 0단계) — presence·notification·chat이 각자 EventSource를 열어 탭당 장수
@@ -61,6 +62,9 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   const lastEventIdRef = useRef<string | null>(null);
   const memberIdRef = useRef(memberId);
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
+  // story #2940 카디르 QA(PR#3388) HIGH — memberId가 진짜로 바뀐 재실행(마운트·enabled 단독
+  // 토글이 아니라)인지 판별용. 초기값을 memberId로 잡아 마운트 시점엔 항상 "안 바뀜"이 된다.
+  const prevMemberIdForResetRef = useRef(memberId);
 
   const dispatchNamed = useCallback((eventName: string, data: string, eventId?: string) => {
     // story #2162 — presence·conversation.working처럼 DB Event 행이 없는 B계열은 재개 커서로
@@ -100,8 +104,22 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   useEffect(() => {
     if (!enabled || typeof EventSource === 'undefined') return;
 
+    // story #2940 카디르 QA(PR#3388) HIGH — memberId가 실제로 바뀐 재실행이면(org 전환) 옛
+    // org에서 받은 마지막 event id를 버린다. 안 버리면 새 org 커넥션 URL에 옛 org의
+    // last_event_id가 그대로 실리고, BE(events.py)가 org/member 스코프 없이 그 id의
+    // 생성시각만으로 백필 기준시각을 잡아 — 새 org의 더 이른 시각 이벤트가 조용히
+    // 백필에서 빠진다("재연결 안 됨"이 "잘못된 커서로 일부 누락"으로 증상만 이동). enabled
+    // 단독 토글이나 최초 마운트에선 리셋하지 않는다(불필요한 전량 백필 방지).
+    if (prevMemberIdForResetRef.current !== memberId) lastEventIdRef.current = null;
+    prevMemberIdForResetRef.current = memberId;
+
     let closed = false;
     const backoff = createReconnectBackoffState();
+    // story #2987 — 가시성 복귀로 강제 재연결할 때는 backoff.isReconnect()(과거 onError
+    // 이력 여부)가 아니라 이 플래그로 reconnectSubscribers(=chat-view의 backfill fetch 등)를
+    // 확실히 태운다. onError를 거치지 않은 강제 재연결이라 backoff 내부 상태는 그대로 두고
+    // (실패 카운트·healthy-cycle 판정 오염 방지) 이 자리에서만 별도로 신호한다.
+    let pendingForcedReconnect = false;
 
     const connect = () => {
       if (closed) return;
@@ -118,7 +136,8 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       for (const eventName of namedSubscribersRef.current.keys()) attachIfNeeded(eventName);
 
       es.onopen = () => {
-        const isReconnect = backoff.isReconnect();
+        const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
+        pendingForcedReconnect = false;
         backoff.onOpen();
         setConnected(true);
         if (isReconnect) for (const handler of reconnectSubscribersRef.current) handler();
@@ -156,15 +175,58 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
     connect();
 
+    // story #2987 — 앱이 백그라운드로 갔다 돌아와도 커넥션이 실제로 살아있는지 아무도 확認
+    // 안 하던 것(선생님 실사용 지적 "나갔다 들어와야 갱신됨"의 근본원인). readyState는 좀비
+    // 커넥션(브라우저가 아직 끊김을 감지 못한 상태)을 못 잡으므로, 숨겨진 시간이 임계값
+    // 이상이면 readyState를 안 보고 무조건 강제 재연결한다(sse-visibility-reconnect.ts).
+    const visibilityState = createVisibilityReconnectState();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        visibilityState.onHidden();
+        return;
+      }
+      if (visibilityState.onVisible()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // story #3081(선생님 P0 지시) — visibilitychange 하나만으론 "창은 계속 visible인 채
+    // OS 포커스만 오간" 복귀를 못 잡는다(sse-visibility-reconnect.ts 모듈 docstring 참고 —
+    // onVisible()은 hidden 이력이 없으면 구조적으로 항상 false). window.focus를 독립
+    // 신호로 추가 — hidden 이력과 무관하게 강제 재연결하되 짧은 throttle로 중복 억제.
+    const handleWindowFocus = () => {
+      if (visibilityState.onFocusRegained()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
+
     return () => {
       closed = true;
       setConnected(false);
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      // 카디르 QA(PR#3388) MEDIUM — clearTimeout만으론 stale ref가 남아, 재마운트(예: memberId
+      // 전환) 직후 대기 중이던 백오프 재시도의 scheduleRetry()가 `if (retryTimerRef.current)
+      // return` 가드에 stale 값으로 걸려 재시도를 건너뛸 수 있었다. null로 명시 리셋.
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
       esRef.current?.close();
       esRef.current = null;
     };
+  // story #2940(실사고 재현·codex 발견) — org 전환으로 memberId가 바뀌어도 이 effect가
+  // 재실행되지 않아(구 deps=[enabled]) 커넥션이 옛 member_id로 남아있었다. memberIdRef는
+  // connect() 재호출 시점의 최신값을 읽으려는 용도였지 effect 재트리거는 못 준다 — ref 쓰기는
+  // effect를 재실행시키지 않는다. memberId를 deps에 편입해 값이 실제로 바뀔 때만(문자열 값
+  // 비교라 참조 흔들림에 안 낚임) 재구독을 강제한다 — 그 외 참조 안정적인 항목(attachIfNeeded
+  // 등)은 여전히 의도적으로 제외라 disable 유지.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, memberId]);
 
   // story #2144 — connectedRef는 매 렌더 최신 connected를 반영(렌더 중 ref 대입은 다음
   // 커밋 전에 끝나 안전 — React 규칙상 자기 자신이 렌더링 중인 컴포넌트의 ref를 렌더 중

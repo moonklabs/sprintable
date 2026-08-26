@@ -71,4 +71,37 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  // story #2968(카디르 QA #3397 MEDIUM) — chat-bubble.tsx가 이미 들고 있던 sender_avatar_url을
+  // 이 팝업에 안 넘겨 Bot/User 하드코딩 아이콘에 머물러 있었다. avatar.tsx 정본 배선.
+  it('avatarUrl을 주면 Bot/User 아이콘 대신 avatar.tsx 정본이 실사진(<img>)을 렌더한다', async () => {
+    await act(async () => {
+      root.render(
+        <SenderProfilePopover x={0} y={0} name="유나" isAgent={false} avatarUrl="https://storage.googleapis.com/bucket/avatar/a.png" onClose={NOOP} />,
+      );
+    });
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('https://storage.googleapis.com/bucket/avatar/a.png');
+  });
+
+  it('avatarUrl을 안 주면(레거시) avatar.tsx 정본의 이니셜 폴백으로 떨어진다(img 없음)', async () => {
+    await act(async () => {
+      root.render(<SenderProfilePopover x={0} y={0} name="유나" isAgent={false} onClose={NOOP} />);
+    });
+    expect(container.querySelector('img')).toBeNull();
+  });
+});
+
+// story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay 토큰이어야 한다(shadow-md
+// 리터럴 회귀가드).
+describe('SenderProfilePopover — 로드맵 PR-B L1(floating elev-overlay)', () => {
+  it('팝오버 컨테이너가 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
+    await act(async () => {
+      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />);
+    });
+    const popover = container.querySelector('[role="dialog"]');
+    expect(popover?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(popover?.className).not.toContain('shadow-md');
+  });
 });

@@ -15,6 +15,8 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { AgentProjectAccessSection } from '@/components/settings/agent-project-access-section';
+import { Avatar } from '@/components/shared/avatar';
+import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 import { MemberNotificationPreferencesSummary } from '@/components/agents/member-notification-preferences-summary';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -52,6 +54,7 @@ interface AgentMember {
   is_active: boolean;
   webhook_url: string | null;
   created_by: string | null;
+  avatar_url?: string | null;
   // story #2362(2026-07-31) — 이 필드는 렌더에서 더 안 쓴다(fakechat은 다이얼아웃 방식이라
   // 포트를 리슨하지 않는다, packages/fakechat/server.ts 참고 — 「연결하라」고 안내하던 것이
   // 거짓이었다). 컬럼(마이그 0037) 자체는 안 지운다 — 이 파일 밖 소비처 전수를 안 했다.
@@ -391,7 +394,7 @@ export default function AgentDetailPage() {
                   placeholder="role"
                   className="max-w-32"
                 />
-                <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} className="text-emerald-500 hover:text-emerald-400 disabled:opacity-50">
+                <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} className="text-success transition hover:opacity-80 disabled:opacity-50">
                   <Check className="h-4 w-4" />
                 </button>
                 <button type="button" onClick={() => setEditingName(false)} className="text-muted-foreground hover:text-foreground">
@@ -400,6 +403,7 @@ export default function AgentDetailPage() {
               </div>
             ) : (
               <div className="flex flex-1 items-center gap-3 min-w-0">
+                <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={40} />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-base font-semibold text-foreground">{agent.name}</span>
@@ -424,7 +428,14 @@ export default function AgentDetailPage() {
           </div>
         </SectionCardHeader>
         {canEdit && (
-          <SectionCardBody>
+          <SectionCardBody className="space-y-4">
+            <AvatarEditCard
+              memberId={agent.id}
+              name={agent.name}
+              avatarUrl={agent.avatar_url ?? null}
+              actorType="agent"
+              onUpdated={(url) => setAgent((prev) => (prev ? { ...prev, avatar_url: url } : prev))}
+            />
             <Button
               variant="glass"
               size="sm"

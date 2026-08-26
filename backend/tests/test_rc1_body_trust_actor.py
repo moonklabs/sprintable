@@ -37,6 +37,14 @@ def _non_doc_gate_session():
         # — 이 목의 gate_type이 정확히 "merge")가 AttributeError로 죽는다 — None으로 명시해
         # "링크 없음/head_sha 미상"과 동형 무해 경로를 타게 한다.
         evidence=None,
+        # story #2975 — SimpleNamespace는 MagicMock과 달리 미선언 속성 접근 시 AttributeError를
+        # 던진다. reviewed_head_sha 대조 분기가 이 값을 읽으므로(known SHA 유무 판정), 이 파일의
+        # 관심사(resolver_id 강제, RC#1)와 무관하게 명시 필요 — None="known SHA 없음"으로 그
+        # 검증 자체가 대상 밖임을 분명히 한다(evidence=None과 동형 처리).
+        github_check_run_sha=None,
+        # story #2982 — 이미해소 가드(status!='pending'이면 409)도 이 값을 읽는다. SimpleNamespace는
+        # 미선언 속성이 AttributeError라 명시 필요 — "pending"으로 그 가드가 대상 밖임을 분명히 한다.
+        status="pending", resolver_id=None, resolved_at=None,
     )
     s.execute = AsyncMock(return_value=gr)
     return s

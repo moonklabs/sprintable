@@ -136,3 +136,27 @@ describe('EntityAwareTextarea — story #2264', () => {
     expect(container.textContent).not.toContain('in-review');
   });
 });
+
+// story #3007(로드맵 P2·PR-E, L1) — 자동완성 리스트박스는 floating이라 --elev-overlay.
+describe('EntityAwareTextarea — 로드맵 P2·PR-E L1(리스트박스 elevation 토큰)', () => {
+  it('# 후보 리스트박스가 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ entity_type: 'story', entity_id: '11111111-1111-1111-1111-111111111111', title: '제목', status: null }],
+    }))));
+    await act(async () => {
+      root.render(<ControlledHarness initial="" projectId="p1" onValueChange={() => {}} />);
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(listbox?.className).not.toMatch(/(^|\s)shadow-md(\s|$)/);
+  });
+});

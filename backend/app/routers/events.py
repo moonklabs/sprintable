@@ -181,15 +181,45 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
     queues = _agent_connections.get(member_id)
     pushed = False
     if queues:
-        dead: list[asyncio.Queue] = []
+        # story #2530(2026-08-24, agent_gateway.py::wake_agent과 형제 결함·동일 처방) —
+        # 예전엔 QueueFull이 그 큐(연결)를 `_agent_connections`에서 통째로 제거하는
+        # 신호였다: 스트림 자체는 안 끊긴 채("연결은 살아 보이는" 상태) 이 member로 오는
+        # 모든 이후 push가 이 연결을 dict에서 영원히 못 찾아 조용히 no-op되는 반쪽 상태가
+        # 코드로 가능했다. 처방: 큐를 ring-buffer로 다뤄 가장 오래된 항목을 버리고 자리를
+        # 만들어 이번 payload를 넣는다 — 연결을 절대 dict에서 지우지 않는다. A계열(event_id
+        # 有)은 재연결 시 DB backfill로 회수되니 무해·B계열(transient) 1건 유실은 발생할 수
+        # 있으나, 예전처럼 "연결 자체가 사라져 그 뒤 전부 유실"보다는 항상 개선(strict
+        # improvement) — 연결이 dict에 남아있는 한 다음 push부터는 정상 도달한다.
         for q in list(queues):
             try:
-                q.put_nowait(payload)
+                # story #3029(카디르+codex 발견, #3447 QA) — 이 member의 모든 큐에 **같은
+                # dict 객체**를 넣으면, generate()의 라이브 루프가 그 객체에서
+                # `_sse_transient_id`를 pop()할 때(#2158) 공유 객체라 다른 연결 큐에 든
+                # "같은" 항목에서도 키가 사라진다 — 두 번째로 처리되는 연결은 원본 id를
+                # 잃고 즉석 uuid4를 새로 발급해, 그 연결이 재연결 후 Redis replay로 같은
+                # 이벤트를 원본 id로 받으면 라이브 때 발급한 가짜 id와 안 맞아 클라
+                # dedup이 무력화된다(3026과 같은 "다중 연결" 문제군의 B계열 발현). 큐마다
+                # 독립 객체를 넣어(얕은 복사 — payload 값 자체는 불변으로 다뤄지므로 얕은
+                # 복사로 충분) 한 연결의 pop이 다른 연결의 사본에 안 번지게 한다.
+                q.put_nowait(dict(payload))
                 pushed = True
             except asyncio.QueueFull:
-                dead.append(q)
-        for q in dead:
-            queues.discard(q)
+                logger.warning(
+                    "_push_to_agent: queue full(maxsize=%d) for member=%s — dropping oldest "
+                    "pending payload to make room (connection kept registered, not discarded)",
+                    q.maxsize, member_id,
+                )
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(dict(payload))
+                    pushed = True
+                except asyncio.QueueFull:
+                    # 극단적 경합 — 이번 push만 포기(무한 재시도 금지). 연결은 dict에 남아
+                    # 다음 push부터 정상 도달(agent_gateway.py wake_agent과 동일 근거).
+                    pass
     if not _from_listener:
         # prod 커넥션 누수 근본fix(2026-07-08) — 참조 미보관 create_task는 GC가 pg_notify()의
         # async with async_session_factory() 도중 태스크를 조기수거할 수 있다(공식 문서 경고) —
@@ -262,6 +292,18 @@ async def push_to_org_members(
             ids = {str(r[0]) for r in rows.all()}
     for mid in ids:
         _push_to_agent(mid, {"event_type": event_type, **data})
+
+
+def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
+    """story #3026 — 라이브 루프의 pre-yield dedup 판단을 순수함수로 뽑아 직접 단위테스트
+    가능하게 한다(generate()는 클로저라 직접 호출 불가). `sent_event_ids`는 **연결-로컬**
+    집합이어야 한다 — 이 함수 자체는 그 계약을 강제하지 않으므로(순수함수라 호출자 책임),
+    호출부(generate())가 매 연결마다 새 집합을 만들어 넘기는 것으로 보장한다. 예전엔 이
+    판단을 `Event.status`(DB, org 전체 공유)로 했다 — 같은 member의 다른 연결이 먼저
+    yield하면 이 함수 상당 로직이 전역적으로 "이미 처리됨"을 봐서, 자기 큐에 항목이 와
+    있는 다른 연결까지 전부 skip시켰다(#3026 실사고 근본원인, 968fe78d 실측). 연결-로컬
+    집합으로 바꾸면 그 결함이 구조적으로 성립 안 한다."""
+    return bool(eid) and eid in sent_event_ids
 
 
 def _event_to_payload(event: "Event") -> dict:
@@ -396,6 +438,19 @@ async def agent_event_stream(
     _lifespan_deadline = time.monotonic() + _SSE_LIFESPAN_SEC + random.uniform(0, _SSE_LIFESPAN_JITTER_SEC)
 
     async def generate():
+        # story #3026(실사고, PO 확定 2026-08-24) — 이 연결이 실제로 클라에 내보낸(yield
+        # 성공한) A계열(eid 有) event_id 집합. **연결-로컬**이다(다른 연결과 공유 안 함) —
+        # 이게 이 스토리의 핵심 처방. 예전엔 이 dedup을 `Event.status`(DB, org 전체 공유
+        # 상태)로 판별해 "같은 member의 다른 연결(다른 탭·프로브·잔존 연결)이 먼저 yield해
+        # delivered로 찍으면 나머지 연결 전부가 스킵"되는 결함이 있었다(동시 연결 N개 중
+        # 1개만 실제 갱신 — 968fe78d 실사고 실측, delivered_at 편차 +0.1s~+103s). `_push_to_
+        # agent`의 fan-out(멤버의 모든 큐에 push) 자체는 정상이었으므로, 문제는 순전히 "누가
+        # 이미 봤나"를 연결이 아니라 이벤트 자체에 물었던 것 — 연결-로컬 집합으로 바꾸면
+        # 같은 연결 내 중복(백필+라이브 겹침)은 그대로 막히면서, 다른 연결은 서로 완전히
+        # 독립적으로 판단해 진짜 fan-out이 된다. `Event.status`/`delivered_at` DB 마킹
+        # 자체는 그대로 유지(백필 원칙 — "재연결 시 이미 delivered여도 다시 준다"는 이
+        # 값을 재연결 커서 판정에 계속 쓴다, 라이브 dedup의 판단 근거로만 안 쓸 뿐).
+        _sent_event_ids: set[str] = set()
         try:
             # 즉시 heartbeat → HTTP 응답 헤더 즉시 반환 (대량 백필 전 hang 방지)
             yield "event: heartbeat\ndata: {}\n\n"
@@ -514,6 +569,10 @@ async def agent_event_stream(
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
                     for data, evt in zip(batch_data, batch):
                         yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
+                        # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
+                        # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
+                        # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
+                        _sent_event_ids.add(str(evt.id))
                     for evt in batch:
                         evt.status = "delivered"
                         evt.delivered_at = now
@@ -578,24 +637,17 @@ async def agent_event_stream(
                             continue
                         event_data = get_task.result()
                         event_type = event_data.get("event_type", "message")
-                        # 1c22da3e fix: yield 전엔 pending 여부만 확인(skip 판정, 마킹 X),
-                        # delivered 마킹은 yield 성공 후로 미룬다 → yield 실패 시 영구 누락 방지.
+                        # story #3026 — dedup 판단은 이 연결이 이미 보냈는지(연결-로컬
+                        # `_sent_event_ids`)만 본다. ⚠️예전엔 여기서 `Event.status`(DB, org
+                        # 전체 공유)를 조회해 "이미 delivered"면 skip했는데, 그러면 같은
+                        # member의 다른 연결이 먼저 yield한 순간 **이 연결은 자기 큐에 항목이
+                        # 와 있어도 영원히 못 보낸다**(동시 다중 탭 중 1개만 갱신되는 실사고
+                        # 근본원인, 968fe78d 실측). 연결-로컬 판단으로 바꾸면 그 결함이
+                        # 구조적으로 성립 안 한다 — 부수로 매 라이브 이벤트마다의 DB 왕복도
+                        # 없앴다(hot-path DB 0, #2158 B계열과 동일 원칙을 A계열에도 적용).
                         eid = event_data.get("event_id")
-                        if eid:
-                            try:
-                                async with async_session_factory() as db:
-                                    r = await db.execute(
-                                        select(Event.status).where(
-                                            Event.id == uuid.UUID(eid),
-                                            Event.org_id == org_id,
-                                        )
-                                    )
-                                    _status = r.scalar_one_or_none()
-                                    if _status is not None and _status != "pending":
-                                        # 이미 백필/타 연결에서 delivered → 중복 skip
-                                        continue
-                            except Exception:
-                                pass
+                        if _should_skip_live_event(eid, _sent_event_ids):
+                            continue  # 이 연결이 이미 보낸 id(백필 또는 이전 라이브) — 중복 skip.
                         # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
                         # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
                         # #2158: B계열은 `_push_to_agent`가 발행 시점에 부여한 `_sse_transient_id`를
@@ -610,6 +662,12 @@ async def agent_event_stream(
                         if event_type == "conversation.message_created":
                             yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
                         yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        # story #3026 — 이 연결이 방금 보낸 id를 기록(연결-로컬, 위 pre-yield
+                        # 체크가 읽는 그 집합). yield가 여기까지 왔다는 건 이미 성공했다는
+                        # 뜻이라 실패 시 기록 안 남는 걱정은 없다(아래 DB 마킹과 동일 순서
+                        # 원칙 — "성공 후에만" 기록).
+                        if eid:
+                            _sent_event_ids.add(eid)
                         # yield 성공 후 delivered 마킹 (1c22da3e: 손실 방지, dup은 클라 dedup)
                         if eid:
                             try:
@@ -919,6 +977,13 @@ class EventPublishRequest(BaseModel):
     # 정의의 routing.broadcast가 선언한 대상 외에 발행 시점에 추가로 공람시킬 대상(옵션 — P1
     # 플랜 §2-2 "추가 전파 대상"). org 소속만 허용(cross-org 필터, send_message와 동형).
     extra_broadcast_member_ids: list[uuid.UUID] = []
+    # story #2935(설계 doc steer-event-axis-design-2927 §2) — 발행 대상 conversation을
+    # 호출자가 직접 지정(예: composer가 "지금 보는 스레드"에 STEER 지시를 남기는 경우).
+    # 지정되면 _get_or_create_event_conversation의 참가자-집합 자동계산을 건너뛰고 그
+    # conversation에 바로 발행한다. None이면(기존 호출부 전부) 현행 동작 그대로 — additive,
+    # 무회귀. escalation 대상이 그 conversation의 실 참가자가 아니면 422로 거부한다(doc
+    # "⚠️§2 보강" — fail-closed, 조용한 미도달 방지).
+    conversation_id: uuid.UUID | None = None
 
 
 async def _resolve_event_project_id(
@@ -1023,6 +1088,7 @@ async def publish_registry_event(
     return await _publish_registry_event_core(
         db, org_id, auth, body.definition_key, body.payload, background_tasks,
         request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
+        conversation_id=body.conversation_id,
     )
 
 
@@ -1036,6 +1102,7 @@ async def _publish_registry_event_core(
     *,
     request: Request | None = None,
     extra_broadcast_member_ids: "list[uuid.UUID] | None" = None,
+    conversation_id: uuid.UUID | None = None,
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
@@ -1188,10 +1255,47 @@ async def _publish_registry_event_core(
             ) from None
 
     participant_ids = {sender.id} | escalation_ids | broadcast_ids
-    conv = await _get_or_create_event_conversation(
-        db, org_id=org_id, project_id=project_id,
-        participant_ids=participant_ids, created_by=sender.id,
-    )
+
+    if conversation_id is not None:
+        # story #2935(설계 doc §2 보강) — 지정 conversation에 바로 발행. sender의 참가자
+        # 여부는 send_message()의 기존 인가가 그대로 검증(및 human+non-dm이면 auto-join)한다
+        # — 여기서 중복 검사하지 않는다. 이 함수가 추가로 지켜야 하는 것은 escalation 대상
+        # ("실제로 도달해야 하는" 대상 — routing이 계산한 것)이 그 conversation의 실 참가자가
+        # 아닌 경우다: 정상 경로(_get_or_create_event_conversation)는 참가자 집합 자체를 그
+        # 대상들로 구성하므로 이 문제가 구조적으로 없는데, 오버라이드는 그 계산을 건너뛰므로
+        # escalation 대상이 실제로 그 스레드에 없으면 메시지가 "성공"해도 대상은 못 보는
+        # 조용한 미도달이 된다 — fail-closed 422로 거부(doc §2 "⚠️§2 보강", 대안: 자동 멘션
+        # 부여는 프라이버시 침범+신규 전달계통 원칙 위반으로 기각됨).
+        from app.models.conversation import Conversation, ConversationParticipant
+
+        conv = (await db.execute(
+            select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )).scalar_one_or_none()
+        if conv is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conv_participant_ids = set((await db.execute(
+            select(ConversationParticipant.member_id).where(
+                ConversationParticipant.conversation_id == conv.id
+            )
+        )).scalars().all())
+        missing_escalation = escalation_ids - conv_participant_ids
+        if missing_escalation:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "conversation_target_mismatch",
+                    "message": (
+                        "지정된 conversation_id에 escalation 대상이 참가자로 없어 발행을 "
+                        "거부합니다(지시가 조용히 미도달하는 것을 막기 위함)."
+                    ),
+                    "errors": [str(i) for i in missing_escalation],
+                },
+            )
+    else:
+        conv = await _get_or_create_event_conversation(
+            db, org_id=org_id, project_id=project_id,
+            participant_ids=participant_ids, created_by=sender.id,
+        )
 
     from app.routers.conversations import SendMessageRequest, send_message
 

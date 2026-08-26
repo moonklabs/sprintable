@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, MessageSquare, Users } from 'lucide-react';
+import { MessageSquare, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -10,6 +10,7 @@ import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
+import { Avatar } from '@/components/shared/avatar';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -39,6 +40,8 @@ interface ChatListViewProps {
 
 // story #2168 PR-② — 현재 프로젝트 밖에서 caller가 참여 중인 최근 대화(BE
 // GET /conversations/recent-outside-project, caller last_read_at DESC·최대 5개).
+// story #2972 — participants 추가(BE delta). DM 행은 title이 항상 NULL이라 이게 없으면
+// FE가 상대 이름을 조립할 재료가 아예 없었다("님과의 대화" 반쪽 문자열 버그의 원인).
 interface OutsideProjectConversation {
   id: string;
   type: 'dm' | 'group';
@@ -46,6 +49,7 @@ interface OutsideProjectConversation {
   project_id: string;
   project_name: string;
   project_slug: string;
+  participants?: Participant[];
 }
 
 function formatTime(iso: string): string {
@@ -104,13 +108,19 @@ function ConversationRow({
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 
-  const avatarInitial = !isAgentConv && conv.type === 'dm' && conv.participants
-    ? (conv.participants.find((p) => p.member_id !== currentMemberId)?.name?.slice(0, 2) ?? 'DM')
-    : null;
-
   const others = conv.participants ? getOtherParticipants(conv.participants, currentMemberId) : [];
   const isAgentInConv = conv.participants ? hasAgentParticipant(conv.participants) : false;
   const agentCount = others.filter((p) => p.type === 'agent').length;
+  // story #2968 — 1:1(conv.type==='dm')만 상대가 특정되므로 avatar_url 실사진을 그대로 쓴다
+  // (avatar.tsx=정본, story #2887/#2921 — 3단 폴백[이미지→이니셜→아이콘]도 그쪽이 갖고 있다).
+  // group은 "그 방을 대표하는 단일 인물"이 없어(다인원) 기존 Users 아이콘을 유지한다.
+  //
+  // 카디르 QA(#3397, HIGH) — isAgentConv를 조건에 넣으면 agent탭의 group 대화까지 걸려
+  // others[0](임의 참가자 1인)을 대표사진처럼 노출했다(agentOnlyConvs 필터가 conv.type을
+  // 안 가려 group에도 isAgentConv=true가 붙는다, ChatListView 참고). 순수 conv.type만 본다
+  // — isAgentConv는 이름/actorType 폴백에서만 쓴다(agent탭 DM의 상대가 실제 에이전트임을
+  // 보강하는 용도, group 판정에는 관여하지 않는다).
+  const oneOnOneParticipant = conv.type === 'dm' ? others[0] : null;
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
@@ -165,30 +175,28 @@ function ConversationRow({
       onClick={onClick}
       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
     >
-      {/* Avatar — story #2590(TIER1 아이콘): 계열 글자는 tint 유무와 무관하게(카드/배경/muted
-          전부) 3.0 미달이라(--warning L=0.75 자체가 옅음) tint 제거+ring으로도 안 풀린다(직접
-          재실측: warning on card 2.25·warning-border on card 1.65 — 둘 다 실패). 진한 warning
-          토큰 신설은 이 스토리 범위 밖(#2420 doc "별건") — foreground로 잠정 통일. */}
-      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
-        isAgentConv
-          ? 'bg-warning-tint text-foreground'
-          : conv.type === 'dm'
-            ? 'bg-primary/15 text-primary'
-            : 'bg-info/15 text-info'
-      }`}>
-        {isAgentConv
-          ? <Bot className="h-4 w-4" />
-          : conv.type === 'dm' && avatarInitial
-            ? avatarInitial
-            : conv.type === 'dm'
-              ? <MessageSquare className="h-4 w-4" />
-              : <Users className="h-4 w-4" />}
-      </div>
+      {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
+          책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
+      {oneOnOneParticipant ? (
+        <Avatar
+          name={oneOnOneParticipant.name ?? (isAgentConv ? t('agent') : 'DM')}
+          avatarUrl={oneOnOneParticipant.avatar_url ?? null}
+          actorType={isAgentConv || oneOnOneParticipant.type === 'agent' ? 'agent' : 'human'}
+          size={36}
+        />
+      ) : (
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-info/15 text-foreground">
+          {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+        </div>
+      )}
 
       {/* Info */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
-          <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+          {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로
+              재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
+              규칙에 이미 부합 — 무편집. */}
+          <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
           <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time)}</span>
         </div>
         {participantLayer}
@@ -211,13 +219,22 @@ function ConversationRow({
 // 병기)도 이쪽에만 있다. onClick은 부모가 준다(project 전환+토스트는 목록 상태를 알아야 함).
 function OutsideProjectRow({
   conv,
+  currentMemberId,
   onClick,
 }: {
   conv: OutsideProjectConversation;
+  currentMemberId: string;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
-  const displayName = conv.title ?? (conv.type === 'dm' ? t('dmWith') : t('groupSection'));
+  // story #2972 — DM 행 title은 항상 NULL(list_conversations 관례)이라 participants로
+  // 조립해야만 상대 이름이 뜬다(ConversationRow와 동일 패턴). BE가 이제 participants를
+  // 실어줘(delta) 여기서도 formatParticipantNames를 탈 수 있다 — participants가 비어있는
+  // 진짜 무재료 상황만 no-fiction 폴백(dmWith/groupSection, 완결된 단어로 수정됨)으로 떨어진다.
+  const displayName = conv.title ??
+    (conv.participants && conv.participants.length > 0
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t)
+      : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   return (
     <button
@@ -231,7 +248,8 @@ function OutsideProjectRow({
         {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
       </div>
       <div className="min-w-0 flex-1">
-        <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+        {/* story #2969 §1.3-b(PR-5) — 대화명=Claim(600), ConversationRow와 동일 처방. */}
+        <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
         {/* ⭐AC③ — 프로젝트명 병기("왜 여기 있지"를 그 자리서 답한다) */}
         <p className="truncate text-xs text-muted-foreground">{conv.project_name}</p>
       </div>
@@ -405,7 +423,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // handleReconnect(fetchMessages 재호출)와 동형 — "재연결됐다"는 신호를 받으면 목록을
   // 통째로 다시 가져와 서버 truth로 백필한다. agent 탭은 이미 연 적 있을 때만(lazy 유지 원칙,
   // loadAgentConversationsOnce와 동일 가드).
+  // story #3081 — SSE onReconnect(연결 자체의 재연결)와 아래 visibility/focus 리스너가
+  // 근접 시점에 겹쳐 부르면(예: 짧은 네트워크 끊김 직후 탭 포커스 복귀) 같은 재fetch가
+  // 중복 실행된다. 결과 자체는 idempotent라 데이터 오염은 없지만 불필요한 API 처칭을
+  // 억제한다.
+  const lastReconnectFetchAtRef = useRef(0);
+  const RECONNECT_COALESCE_MS = 1_000;
   const handleReconnect = useCallback(() => {
+    const now = Date.now();
+    if (now - lastReconnectFetchAtRef.current < RECONNECT_COALESCE_MS) return;
+    lastReconnectFetchAtRef.current = now;
     void fetchConversations(0, false);
     if (agentLoadedRef.current) void fetchAllConversations(0, false);
   }, [fetchConversations, fetchAllConversations]);
@@ -420,12 +447,18 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story #1978(트랙C) — onReconnect(SSE 커넥션 자체의 재연결)와는 다른 축: 탭이 백그라운드에
   // 있는 동안엔 SSE가 안 끊겨도(브라우저가 살려둘 수 있음) 목록이 갱신 안 됐을 수 있다.
   // use-chat-unread-total.ts와 동일 패턴(document.visibilitychange, !document.hidden에서만).
+  // story #3081 — 데스크톱 셸(창은 계속 visible)에서 OS 포커스만 잃었다 되찾는 경우
+  // visibilitychange는 안 fire하므로 window.focus를 같은 핸들러에 추가 배선한다.
   useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden) handleReconnect();
     };
     document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
   }, [handleReconnect]);
 
   const handleCreated = (conversationId: string) => {
@@ -490,7 +523,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('otherProjectsSection')}
       </p>
       {outsideProjectConvs.map((conv) => (
-        <OutsideProjectRow key={conv.id} conv={conv} onClick={() => handleOutsideProjectClick(conv)} />
+        <OutsideProjectRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => handleOutsideProjectClick(conv)} />
       ))}
     </div>
   );

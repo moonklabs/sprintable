@@ -146,6 +146,28 @@ async def list_stories(
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
     story_number: int | None = Query(default=None, description="프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)"),
     q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
+    epic_ids: str | None = Query(
+        default=None,
+        description=(
+            "story #3019 — comma-separated epic ids(IN 필터). epic_id(단일)와 별개 파라미터 "
+            "— include_unassigned=true와 함께 쓰면 OR(이 에픽들 소속 «또는» 미배정) 결합."
+        ),
+    ),
+    include_unassigned: bool = Query(
+        default=False,
+        description=(
+            "story #3019 — epic_id IS NULL(가설 링크 유무 무관, 기존 unattached와 다른 개념) "
+            "인 story도 결과에 포함. epic_ids와 단독으로도 쓸 수 있다(그 경우 미배정만)."
+        ),
+    ),
+    done_within_days: int | None = Query(
+        default=None,
+        ge=1,
+        description=(
+            "story #3019 — status=done row만 created_at이 최근 N일 이내인 것으로 제한(list_board "
+            "의 done-7일 관례를 제네릭 경로에 일반화). done 아닌 상태는 무관."
+        ),
+    ),
     boost_candidates_from: uuid.UUID | None = Query(
         default=None,
         description=(
@@ -167,6 +189,19 @@ async def list_stories(
     # 오는데, 센티널은 항상 truthy라 `if unattached:`가 무조건 참이 돼 기존 테스트 전부가
     # 조용히 필터링당한다 — `isinstance` 가드로 실제 bool일 때만 필터를 켠다.
     unattached = unattached if isinstance(unattached, bool) else False
+    # story #3019 — 동일 함정(위 boost_candidates_from 주석 참조), 신규 파라미터 3종에도 그대로 적용.
+    include_unassigned = include_unassigned if isinstance(include_unassigned, bool) else False
+    epic_ids = epic_ids if isinstance(epic_ids, str) else None
+    done_within_days = done_within_days if isinstance(done_within_days, int) else None
+
+    parsed_epic_ids: list[uuid.UUID] | None = None
+    if epic_ids is not None:
+        try:
+            parsed_epic_ids = [uuid.UUID(x) for x in epic_ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid epic id in epic_ids")
+        if len(parsed_epic_ids) > 200:  # ids 파라미터와 동형 방어(과대 IN 금지).
+            raise HTTPException(status_code=422, detail="too many epic ids (max 200)")
 
     if ids is not None:
         # story ca37b2b0 ②: 갤러리 등 정확한 story 집합이 필요한 소비자용 — base.list()의
@@ -189,6 +224,7 @@ async def list_stories(
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
@@ -217,6 +253,7 @@ async def list_stories(
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -244,6 +281,7 @@ async def list_stories(
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -263,7 +301,11 @@ async def list_stories(
     # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
     # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
     cursor_dt = _parse_stories_cursor(cursor)
-    stories, total = await repo.list(limit=limit, q=q, cursor=cursor_dt, unattached=unattached, **filters)
+    stories, total = await repo.list(
+        limit=limit, q=q, cursor=cursor_dt, unattached=unattached,
+        epic_ids=parsed_epic_ids, include_unassigned=include_unassigned,
+        done_within_days=done_within_days, **filters,
+    )
     if response is not None:
         response.headers["X-Total-Count"] = str(total)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
@@ -283,6 +325,7 @@ async def list_stories(
         )
     await _attach_has_hypothesis_or_goal(repo.session, stories)
     await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+    await _attach_trust_stage(repo.session, repo.org_id, stories)
     return [StoryResponse.model_validate(s) for s in stories]
 
 
@@ -395,6 +438,30 @@ async def _attach_has_hypothesis_or_goal(session: AsyncSession, stories: list[St
             s.has_hypothesis_or_goal = True
 
 
+async def _attach_trust_stage(
+    session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
+) -> None:
+    """story #2933 H1(P0-H) — Trust Pipeline 6단계 판정(transient attr, ORM 컬럼 아님·
+    story-status-primary-axis 전제 유지). PO 조건①: 판정(derive_trust_stage)뿐 아니라 수집
+    (batch_trust_facts) 경로도 단일/배치 어디서 호출하든 이 함수 하나만 거친다 — get_story
+    (단일)·list_stories(보드 주경로) 둘 다 여기로 수렴, FE의 별도 재파생(구
+    deriveInFlightTrustChip+PIPELINE_STAGE_BY_STATUS, #3336 드리프트 실사례)을 없애는 게
+    목적이라 BE 쪽에 그 결함 클래스를 다시 심지 않는다. done/미지 status는 None(파이프라인
+    스코프 밖, §7 확定④) — _attach_has_evidence류의 "positive 단방향" 규율과 달리 이 필드는
+    None 자체가 유효한 판정값이다(has_evidence처럼 "미설정=신호없음"이 아니라
+    derive_trust_stage가 실제로 None을 반환하는 경우가 있음)."""
+    if not stories:
+        return
+    from app.services.trust_pipeline import batch_trust_facts, derive_trust_stage
+
+    story_ids = [s.id for s in stories]
+    facts_map = await batch_trust_facts(session, org_id, story_ids)
+    for s in stories:
+        facts = facts_map.get(s.id)
+        if facts is not None:
+            s.trust_stage = derive_trust_stage(facts)
+
+
 async def _attach_org_project_slugs(
     session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
 ) -> None:
@@ -491,15 +558,21 @@ async def _preflight_merge_gate(
 
 def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
     """E-MCP-OPT S6: chat(S5 #2)과 동일 갭을 story 에서 처음부터 막는다 — mcp-태그 첨부(dict shape:
-    url/size 키) 부분집합만 선언한도(5개/6MiB) 재검증. FE 업로드 첨부(마커 없음)는 무관."""
+    url/size 키) 부분집합만 선언한도(5개/6MiB) 재검증. FE 업로드 첨부(마커 없음)는 무관.
+
+    story #2044 AC4: 개수/전체 상한 초과가 여기(예전엔 400)와 첨부 개수·개별 크기 상한
+    (StoryAttachment 필드 validator, 422)이 서로 다른 상태코드로 갈려 호출자가 원인을
+    오판하기 쉬웠다 — 422로 통일(Pydantic 검증류와 동일 관례)하고, 실측값(몇 개/몇 바이트)을
+    메시지에 싣는다."""
     mcp_origin = [a for a in attachments if mcp_attachment_upload.is_mcp_upload_object_path(a["url"], kind="story")]
+    total_bytes = sum(a["size"] for a in mcp_origin)
     if len(mcp_origin) > mcp_attachment_upload.MCP_MAX_ATTACHMENTS or (
-        sum(a["size"] for a in mcp_origin) > mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
+        total_bytes > mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
     ):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=(
-                f"mcp attachments exceed declared limit "
+                f"mcp attachments exceed declared limit: {len(mcp_origin)} files / {total_bytes} bytes "
                 f"(max {mcp_attachment_upload.MCP_MAX_ATTACHMENTS} files / "
                 f"{mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
             ),
@@ -810,6 +883,13 @@ async def create_story(
     if story.epic_id is not None:
         story.has_hypothesis_or_goal = True
     await _attach_org_project_slugs(session, org_id, [story])
+    # story #2933 H4(카디르 QA 실결함, PR#3366 2026-08-22 처방) — 이 인라인 생성 경로에
+    # _attach_trust_stage가 빠져 있어 새로 만든 story의 응답이 StoryResponse 기본값
+    # trust_stage=None을 그대로 직렬화했다. FE kanban-board.tsx의 storyTrustColumn은
+    # status!=='done'이면 story.trust_stage를 그대로 컬럼 판별자로 쓰므로(FE 재파생
+    # 폴백 없음, H1/H3 처방과 정합), 이 트랜지언트 속성이 없는 새 story는 신뢰축 뷰의
+    # 어느 컬럼에도 안 잡혀(실종) — get_story/list_stories엔 이미 있던 호출을 여기도 붙인다.
+    await _attach_trust_stage(session, org_id, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -879,6 +959,7 @@ async def get_story(
     await _attach_has_evidence(repo.session, [story])
     await _attach_has_hypothesis_or_goal(repo.session, [story])
     await _attach_org_project_slugs(repo.session, repo.org_id, [story])
+    await _attach_trust_stage(repo.session, repo.org_id, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -1856,6 +1937,14 @@ async def bulk_update_stories(
     await _attach_has_evidence(db, updated)
     await _attach_has_hypothesis_or_goal(db, updated)
     await _attach_org_project_slugs(db, repo.org_id, updated)
+    # story #2933 H4 qa:changes(카디르+codex, 2026-08-22) — 이 응답이 이제 보드 드래그(교차
+    # 신뢰컬럼)라는 실 소비자를 얻었다. H1 당시엔 "뮤테이션 응답 갱신은 SSE/H2 몫"이라 bulk를
+    # 의도적으로 스코프 밖에 뒀지만, 그 결정은 "소비자 0"을 전제한 것 — 지금은 FE가 이 응답의
+    # trust_stage를 낙관 갱신에 직접 병합해야만 한다(그러지 않으면 status만 바뀌고 trust_stage는
+    # 스프레드로 구값 잔존 → 컬럼 판정이 틀어져 카드가 옛 컬럼에 남거나, done→비done 이동 시
+    # null 유지로 어느 컬럼에도 안 걸려 보드에서 실종). flush 後·commit 前 — 방금 setattr한
+    # 새 status를 그대로 읽어(같은 트랜잭션 내 read-your-writes) 새 trust_stage를 계산한다.
+    await _attach_trust_stage(db, repo.org_id, updated)
 
     # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
     # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
@@ -1970,6 +2059,26 @@ async def update_story(
         await _assert_human_owner(db, repo.org_id, body.human_owner_member_id)
 
     data = body.model_dump(exclude_unset=True)
+    # story #2868(P0, 실사고 — 2752 본문 유실): docs.py의 낙관적 동시성(151e05f1)을 stories에도
+    # 동형 이식 — expected_updated_at은 stories 컬럼이 아니므로 repo.update 前에 분리.
+    expected_updated_at = data.pop("expected_updated_at", None)
+    force_overwrite = data.pop("force_overwrite", None)
+    if expected_updated_at is not None and not force_overwrite and _story_for_access.updated_at is not None:
+        # ⚠️ ms 절삭 비교(docs.py와 동일 근거) — FE가 JS Date(ms 정밀도)로 round-trip하면 μs
+        # 손실 → μs-exact 비교면 매 저장 false-409(defense가 오히려 상시 저장 실패로 악화).
+        cur_ms = _story_for_access.updated_at.replace(
+            microsecond=(_story_for_access.updated_at.microsecond // 1000) * 1000
+        )
+        exp_ms = expected_updated_at.replace(microsecond=(expected_updated_at.microsecond // 1000) * 1000)
+        if cur_ms != exp_ms:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "STORY_CONFLICT",
+                    "message": "스토리가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                    "current_updated_at": _story_for_access.updated_at.isoformat(),
+                },
+            )
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
         data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
@@ -2045,7 +2154,24 @@ async def update_story(
     # status를 그대로 씀, #2131은 status_changed **emit** 갭만 닫았지 게이트 자체는 다른 축).
     # 단건은 게이트를 거치는데 bulk는 안 거쳐 사람 승인을 우회할 수 있는 별건 갭 — #2521로
     # 후속 분리(#2156 advisory→enforcing flip 前에 닫아야 flip이 실효).
-    story = await repo.update(id, **data)
+    # story #2874: 위의 expected_updated_at 사전 체크(commit 전, 다른 side-effect 前 빠른
+    # 실패)는 non-atomic 시야라 진짜 동시 PATCH TOCTOU 창이 남는다 — 실제 write는 여기
+    # update_with_cas()의 원자 SQL(UPDATE...WHERE updated_at=)로 다시 한번, 이번엔 진짜로
+    # 강제한다(force_overwrite면 CAS 자체를 생략 — docs.py와 동일 계약).
+    from app.repositories.base import CasConflict
+    try:
+        story = await repo.update_with_cas(
+            id, expected_updated_at=None if force_overwrite else expected_updated_at, **data
+        )
+    except CasConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "STORY_CONFLICT",
+                "message": "스토리가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                "current_updated_at": e.current.updated_at.isoformat(),
+            },
+        )
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
 
@@ -2125,11 +2251,20 @@ async def update_story(
     if "assignee_id" in data and old_assignee_id != story.assignee_id:
         # story #2172 근본수정(AC1): 이 side-effects를 PATCH /bulk과 공유하는 단일 helper로
         # 추출 — 두 라우트가 발행 지점을 갈라 갖던 #2131류 결함 재발을 막는다.
-        await emit_story_assignee_changed(
-            db, repo.org_id, story, old_assignee_id,
-            background_tasks=background_tasks,
-            actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
-        )
+        # story #2044 AC2(2026-08-21): 이 라우트는 위에서 이미 db.commit()으로 write를 확정했다
+        # ("side effects 에러가 rollback시키지 않도록") — 그 설계가 실효되려면 commit 뒤 코드가
+        # 예외를 던져 500으로 새면 안 된다(성공한 쓰기가 실패로 위장). 알림 발행 실패는 write
+        # 자체와 무관한 best-effort라 position-event push(아래)와 동일하게 log+continue.
+        try:
+            await emit_story_assignee_changed(
+                db, repo.org_id, story, old_assignee_id,
+                background_tasks=background_tasks,
+                actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+            )
+        except Exception:
+            logger.warning(
+                "assignee_changed 알림 발행 실패(story=%s, write는 이미 commit됨)", story.id, exc_info=True,
+            )
 
     # story #2172 AC2 판정(오르테가군 지시 — "재정렬 전용 이벤트가 필요한지, 기존 것으로
     # 되는지 판단하고 근거 남길 것"): 신규 전용 event_type(`story.position_changed`)을 쓰되,
@@ -2198,10 +2333,33 @@ async def update_story(
             context=_context,
         )
 
-    await _attach_assignee_ids(db, repo.org_id, [story])
-    await _attach_has_evidence(db, [story])
-    await _attach_has_hypothesis_or_goal(db, [story])
-    await _attach_org_project_slugs(db, repo.org_id, [story])
+    # story #2044 AC2: 아래 4개는 응답에 denorm 필드를 얹는 순수 enrichment다(각 helper
+    # docstring 그대로 — assignee_ids/has_evidence/has_hypothesis_or_goal/org_slug 전부
+    # "positive 단방향, 없으면 미설정"이 기존 계약이라 실패해도 필드가 비는 것 이상의 의미
+    # 손실이 없다). commit()이 이미 위에서 write를 확정했으므로(2112) 이 중 하나가 예외를
+    # 던져 500으로 새면 "저장은 성공, 응답은 실패"라는 원 결함 그대로 재발한다 — 각자
+    # log+continue로 격리해 한 곳이 죽어도 나머지 enrichment와 핵심 응답(title/attachments/
+    # status 등)은 살아남는다.
+    for _attach_fn, _args in (
+        (_attach_assignee_ids, (db, repo.org_id, [story])),
+        (_attach_has_evidence, (db, [story])),
+        (_attach_has_hypothesis_or_goal, (db, [story])),
+        (_attach_org_project_slugs, (db, repo.org_id, [story])),
+        # story #2933 H4 qa:changes 2R(카디르, 2026-08-22) — bulk_update_stories·update_
+        # story_status는 이미 배선됐으나 이 일반 PATCH(assignee/title 등)만 빠져 있어
+        # 항상 trust_stage:null을 반환하던 API 계약 비일관. FE는 handleTrustDragEnd 경로
+        # 밖(assignee 변경 등)이라 spread-preserve로 버텨 UI 회귀는 없었지만, 이 응답을
+        # 직접 소비하는 다른(미래) 호출자는 값을 잃는다 — {list·create·get·bulk·status·
+        # update} 전 StoryResponse 엔드포인트를 이걸로 완결한다.
+        (_attach_trust_stage, (db, repo.org_id, [story])),
+    ):
+        try:
+            await _attach_fn(*_args)
+        except Exception:
+            logger.warning(
+                "%s enrichment 실패(story=%s, write는 이미 commit됨)",
+                _attach_fn.__name__, story.id, exc_info=True,
+            )
     # story #2459 prod 회귀(2026-08-05): model_validate는 동기 호출이라 story의 어떤 컬럼이
     # unloaded 상태면(원인 미확定 — repo.update()가 flush+refresh 直後인데도 관측됨)
     # MissingGreenlet 500(await_only 호출 불가 — sync 컨텍스트에서 lazy load 시도)으로
@@ -2494,6 +2652,10 @@ async def update_story_status(
     # story #2459 prod 회귀(2026-08-05): update_story와 동형 — model_validate 直前 명시
     # refresh로 unloaded 컬럼(예: updated_at) MissingGreenlet 500을 막는다.
     await db.refresh(story)
+    # story #2933 H4 qa:changes — bulk_update_stories와 동일 이유(보드 드래그 실 소비자
+    # 등장). refresh 後에도 transient attr는 보존되지만, 순서를 model_validate 直前으로
+    # 맞춰 그 값이 응답에 확실히 실린다.
+    await _attach_trust_stage(db, repo.org_id, [story])
     resp = StoryResponse.model_validate(story)
     # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
     resp.violation = build_violation_flag(old_status, story.status)

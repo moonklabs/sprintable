@@ -29,6 +29,7 @@ def _device_ns(member_id: uuid.UUID, org_id: uuid.UUID | None = None) -> SimpleN
         org_id=org_id or uuid.uuid4(),
         member_id=member_id,
         expo_push_token="ExponentPushToken[abc123]",
+        apns_device_token=None,
         platform="ios",
         device_id=None,
         app_version=None,
@@ -67,6 +68,38 @@ def test_register_schema_rejects_bad_platform():
         RegisterPushDevice(expo_push_token="ExponentPushToken[abc]", platform="windows")
 
 
+# ─── story #3064: macOS/APNs 토큰 계약 ────────────────────────────────────────
+
+def test_register_schema_accepts_macos_apns_token():
+    body = RegisterPushDevice(apns_device_token="AB" * 32, platform="macos")
+    assert body.apns_device_token == "ab" * 32  # 소문자로 정규화
+    assert body.expo_push_token is None
+
+
+def test_register_schema_rejects_macos_without_apns_token():
+    with pytest.raises(ValidationError):
+        RegisterPushDevice(platform="macos")
+
+
+def test_register_schema_rejects_macos_with_expo_token_set():
+    # 플랫폼별 토큰 상호배타 — macos인데 expo_push_token까지 실려오면 거부(둘 다 채우는
+    # 클라 버그를 조용히 받아주지 않는다).
+    with pytest.raises(ValidationError):
+        RegisterPushDevice(
+            platform="macos", apns_device_token="ab" * 32, expo_push_token="ExponentPushToken[x]",
+        )
+
+
+def test_register_schema_rejects_non_macos_without_expo_token():
+    with pytest.raises(ValidationError):
+        RegisterPushDevice(platform="ios", apns_device_token="ab" * 32)
+
+
+def test_register_schema_rejects_short_apns_token():
+    with pytest.raises(ValidationError):
+        RegisterPushDevice(platform="macos", apns_device_token="abcd")
+
+
 # ─── 등록: member_id = caller 강제(IDOR·body 무신뢰) ──────────────────────────
 
 @pytest.mark.anyio
@@ -84,6 +117,26 @@ async def test_register_forces_caller_member_id():
     assert repo.upsert.await_args.kwargs["expo_push_token"] == "ExponentPushToken[abc]"
     assert repo.upsert.await_args.kwargs["platform"] == "ios"
     assert out.member_id == caller  # 응답도 caller 소유
+
+
+@pytest.mark.anyio
+async def test_register_passes_apns_token_through_for_macos():
+    from ee.routers.push_devices import register_push_device
+    caller = uuid.uuid4()
+    repo = AsyncMock()
+    device = _device_ns(caller)
+    device.expo_push_token = None
+    device.apns_device_token = "ab" * 32
+    device.platform = "macos"
+    repo.upsert = AsyncMock(return_value=device)
+    body = RegisterPushDevice(apns_device_token="AB" * 32, platform="macos")
+
+    await register_push_device(body, repo=repo, caller_member_id=caller, _ee=None)
+
+    assert repo.upsert.await_args.kwargs["member_id"] == caller
+    assert repo.upsert.await_args.kwargs["apns_device_token"] == "ab" * 32
+    assert repo.upsert.await_args.kwargs["expo_push_token"] is None
+    assert repo.upsert.await_args.kwargs["platform"] == "macos"
 
 
 # ─── 조회: member-scope(org-wide leak 차단) ───────────────────────────────────

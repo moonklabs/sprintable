@@ -106,3 +106,80 @@ async def test_update_check_run_http_failure_returns_none_not_raise():
     with patch("httpx.AsyncClient.patch", new=AsyncMock(return_value=r)):
         result = await ga.update_check_run(999, "acme/repo", 555, status="completed", conclusion="failure")
     assert result is None
+
+
+# story #2893(설계안 §3 B2-a) — remove_pr_label(신규, create/update_check_run과 동형 계약).
+@pytest.mark.anyio
+async def test_remove_pr_label_sends_delete_to_correct_url():
+    r = _resp(200, {})
+    captured = {}
+
+    async def _delete(self, url, headers=None):
+        captured["url"] = url
+        return r
+
+    with patch("httpx.AsyncClient.delete", new=_delete):
+        result = await ga.remove_pr_label(999, "acme/repo", 42, "design:pass")
+
+    assert result is True
+    # ':' 는 URL 컴포넌트라 인코딩돼야 한다(라벨명이 그대로 path segment에 못 들어감).
+    assert captured["url"] == "https://api.github.com/repos/acme/repo/issues/42/labels/design%3Apass"
+
+
+@pytest.mark.anyio
+async def test_remove_pr_label_404_is_idempotent_success():
+    """라벨이 애초에 없었다 — 목표 상태(제거됨)와 동일하므로 성공 취급(fail-closed 아님,
+    존재-확인 없이 매번 시도하는 설계에서 필수)."""
+    r = _resp(404, {})
+    with patch("httpx.AsyncClient.delete", new=AsyncMock(return_value=r)):
+        result = await ga.remove_pr_label(999, "acme/repo", 42, "qa:pass")
+    assert result is True
+
+
+@pytest.mark.anyio
+async def test_remove_pr_label_other_failure_returns_false_not_raise():
+    r = _resp(500, {})
+    with patch("httpx.AsyncClient.delete", new=AsyncMock(return_value=r)):
+        result = await ga.remove_pr_label(999, "acme/repo", 42, "qa:pass")
+    assert result is False
+
+
+@pytest.mark.anyio
+async def test_remove_pr_label_no_token_returns_false():
+    ga._token_cache.clear()
+    with patch.object(ga, "build_app_jwt", return_value=None):
+        result = await ga.remove_pr_label(999, "acme/repo", 42, "qa:pass")
+    assert result is False
+
+
+# story #2893(설계안 §3 B3) — get_pull_request(신규, create_check_run과 동형 계약).
+@pytest.mark.anyio
+async def test_get_pull_request_sends_get_to_correct_url_and_returns_body():
+    r = _resp(200, {"number": 42, "head": {"sha": "abc123"}, "merged": True})
+    captured = {}
+
+    async def _get(self, url, headers=None):
+        captured["url"] = url
+        return r
+
+    with patch("httpx.AsyncClient.get", new=_get):
+        result = await ga.get_pull_request(999, "acme/repo", 42)
+
+    assert result == {"number": 42, "head": {"sha": "abc123"}, "merged": True}
+    assert captured["url"] == "https://api.github.com/repos/acme/repo/pulls/42"
+
+
+@pytest.mark.anyio
+async def test_get_pull_request_http_failure_returns_none_not_raise():
+    r = _resp(404, {})
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=r)):
+        result = await ga.get_pull_request(999, "acme/repo", 42)
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_get_pull_request_no_token_returns_none():
+    ga._token_cache.clear()
+    with patch.object(ga, "build_app_jwt", return_value=None):
+        result = await ga.get_pull_request(999, "acme/repo", 42)
+    assert result is None

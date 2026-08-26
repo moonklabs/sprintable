@@ -4,11 +4,14 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { Bot, Check, Copy, MessageSquare, Terminal, User } from 'lucide-react';
+import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
+import { AgentIdentity } from '@/components/ui/agent-identity';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { parseEntityRef } from '@/components/chat/entity-ref';
+import { resolveEmbedDecision } from '@/components/chat/embed-renderer';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
 import { getFileIcon } from '@/lib/file-icon';
@@ -19,7 +22,8 @@ import { ImageLightbox, type LightboxItem } from './image-lightbox';
 import type { ReadingPanelTarget } from './reading-panel';
 import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { SenderProfilePopover } from './sender-profile-popover';
-import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
+import { type PresenceStatus } from './presence-dot';
+import { Avatar } from '@/components/shared/avatar';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
@@ -27,6 +31,10 @@ import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
+import { segmentMessageContent } from './message-segments';
+import { EmbedGroup } from './embed-group';
+import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
+import { ReportMessageSummary } from './report-message-summary';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -75,39 +83,6 @@ interface ChatBubbleProps {
 interface ContextMenuState {
   x: number;
   y: number;
-}
-
-// story #2263 AC6 — 본문 토큰(target_type+target_id)이 메시지의 stored 참조 목록에 있는지
-// 대조한다. `references === undefined`(옛 서버·SSE 디스패치 등 이 필드를 안 주는 경로)는
-// 판단 재료가 없다는 뜻이라 유령 처리를 보류한다(폴백 — 기존처럼 그대로 그린다). 대소문자
-// 차이(사용자가 UUID를 대문자로 쳐 넣는 경우)를 흡수하려 양쪽 다 lower-case로 비교한다.
-function isGhostReference(
-  references: ChatMessage['references'],
-  targetType: string,
-  targetId: string,
-): boolean {
-  if (references === undefined) return false;
-  const type = targetType.toLowerCase();
-  const id = targetId.toLowerCase();
-  return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
-}
-
-// story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 「사실성 · 표면 · 지점」의
-// «표면·지점» 재료. isGhostReference와 같은 대조를 한 번 더 해 form·referenced_at까지
-// 끌어온다(스토리 자신의 AC1 정의: 표면=form('mention'|'embed'|'proof'), 지점=referenced_at —
-// "이 참조가 «언제 생겼나»"이지 대상이 「언제 만들어졌나」가 아니다). 매칭 없으면(유령이거나
-// references 자체가 없으면) null — 그때는 칩에 표기하지 않는다(모르는 것을 지어내지 않는다).
-function findReferenceMeta(
-  references: ChatMessage['references'],
-  targetType: string,
-  targetId: string,
-): { form: string; referencedAt: string } | null {
-  if (!references) return null;
-  const type = targetType.toLowerCase();
-  const id = targetId.toLowerCase();
-  const match = references.find((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
-  if (!match || !match.form || !match.referenced_at) return null;
-  return { form: match.form, referencedAt: match.referenced_at };
 }
 
 // story #2671 — EmbedCard(ME-S5 원조 카드 렌더)가 실 렌더 경로에 미배선이던 것을 여기서
@@ -193,15 +168,24 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   );
 }
 
-function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel }: {
+// story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
+// 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
+export function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
+  /** story #2905(S2c②) — gate 단건 sole-link 참조가 ApprovalRequestCard(Block Kit 리치 블록,
+   * 사본 분화 금지 재사용)로 뜰 때 그 컴포넌트가 요구하는 카탈로그를 그대로 물려준다. */
+  eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }) {
-  const text = isMine ? 'text-primary-foreground' : 'text-foreground';
-  const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
-  const codeBg = isMine ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-foreground';
-  const border = isMine ? 'border-primary-foreground/30' : 'border-border';
+  // story #2921 S4(유나 확定) — 「내 메시지=blue-soft」로 바뀌며 isMine 버블도 밝은 배경이
+  // 됐다(옛 solid bg-primary 위 흰 글자 전제가 깨졌다). 이제 양쪽 다 밝은 무채/blue-soft
+  // 패널 위 어두운 ink라 isMine으로 갈릴 이유가 없다 — Proof Capsule(proof-capsule.tsx)도
+  // 발화자와 무관하게 항상 proof-ink/proof-ink-2를 쓰는 것과 같은 이치.
+  const text = 'text-foreground';
+  const muted = 'text-muted-foreground';
+  const codeBg = 'bg-muted text-foreground';
+  const border = 'border-border';
 
   const hasMention = /@[\w가-힣]+/.test(content);
   const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
@@ -216,21 +200,40 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
   const components = useMemo(() => ({
     p: ({ children, node }: { children?: React.ReactNode; node?: HastElementLike }) => {
       // story #2671 — 참조 링크 하나가 문단의 전부면(다른 텍스트 0) 카드 임베드로.
+      // story #2888(S2a) — 파싱은 parseEntityRef SSOT·결정은 resolveEmbedDecision(EmbedRenderer)
+      // 공유. 이 슬롯은 'card' kind일 때만 반응하고(allowCard:true), asset/chip은 원래도
+      // 여기선 무동작이라(기존 동작 그대로) 그대로 아래 <p> 폴백으로 떨어진다.
       const link = soleLinkChild(node);
       const href = link?.properties?.href;
-      const m = typeof href === 'string' ? href.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i) : null;
-      if (m && m[1]!.toLowerCase() !== 'asset' && !isGhostReference(references, m[1]!, m[2]!)) {
-        const statusFetch = entityStatusByKey?.[`${m[1]!.toLowerCase()}:${m[2]!.toLowerCase()}`];
+      const ref = typeof href === 'string' ? parseEntityRef(href) : null;
+      const decision = ref ? resolveEmbedDecision(ref.entityType, ref.entityId, references, { allowCard: true }) : null;
+      if (ref && decision?.kind === 'card') {
+        // story #2905(S2c②) — gate 단건 sole-link 참조 = §3 Block Kit 리치 블록. approval-
+        // request-card.tsx를 그대로 재사용(PO 판정 — 사본 분화 금지). ApprovalRequestCard가
+        // 자체 fetch(GET /api/gates/{id}, GateResponse에 work_item_type/work_item_id 1급
+        // 필드로 실림)로 완결되므로 여기선 placeholder만 넘긴다(실사용은 fetch 후 컴포넌트
+        // 내부에서 gate 실물로 대체 — approval-request-card.tsx 자체 수정분 참고). 자체
+        // 인터랙션(승인/반려/서명)을 가진 컴포넌트라 onOpenReadingPanel 클릭-전체-래핑
+        // 대상이 아니다(버튼-안-버튼 방지, §8 "표면은 둘·실체는 하나").
+        if (ref.entityType === 'gate') {
+          return (
+            <ApprovalRequestCard
+              target={{ work_item_type: '', work_item_id: '', gate_id: ref.entityId }}
+              eventDefinitionsByKey={eventDefinitionsByKey}
+            />
+          );
+        }
+        const statusFetch = entityStatusByKey?.[`${ref.entityType.toLowerCase()}:${ref.entityId.toLowerCase()}`];
         const status = statusFetch?.kind === 'resolved' ? statusFetch.raw : null;
         // PO 리뷰 지적 — 링크 라벨이 여러 자식(예: **강조** 섞인 텍스트)으로 쪼개질 수
         // 있어 첫 자식만 읽으면 라벨이 잘린다. 전 자식을 이어붙인다(hastNodeText가
         // 재귀로 하듯 여기도 동일 패턴).
-        const label = (link!.children ?? []).map(hastNodeText).join('') || m[2]!;
-        const openReadingPanel = onOpenReadingPanel
-          ? (entityType: string, entityId: string, t: string | null, s: string | null, h: string | null) =>
-              onOpenReadingPanel({ kind: 'entity', entityType, entityId, title: t, status: s, href: h })
-          : undefined;
-        return <EmbedCard entity_type={m[1]!} entity_id={m[2]!} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
+        const label = (link!.children ?? []).map(hastNodeText).join('') || ref.entityId;
+        // object(ReadingPanelTarget)→5-인자 어댑터는 embed-card-open-panel-adapter.ts SSOT
+        // (embed-group.tsx의 캐러셀/간결 리스트와 진짜 같은 참조 — 카디르 QA #3319 지적으로
+        // 각자 로컬 구현하던 드리프트를 제거했다).
+        const openReadingPanel = toEmbedCardOpenPanel(onOpenReadingPanel);
+        return <EmbedCard entity_type={ref.entityType} entity_id={ref.entityId} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
       }
       return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>;
     },
@@ -268,39 +271,46 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
     blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
       if (href?.startsWith('mention:')) {
+        // story #2921 S4 — 옛 isMine 분기(흰 글자 vs text-primary)는 solid bg-primary 버블
+        // 전제였다. blue-soft로 바뀐 지금은 발화자 무관하게 같은 밝은 배경이라 갈릴 이유가
+        // 없다(위 text/muted/codeBg/border와 동일 논리).
         return (
-          <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
+          <span className="font-medium text-primary underline decoration-primary/40">
             {children}
           </span>
         );
       }
       // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
-      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-      if (m) {
+      // story #2888(S2a) — 파싱·결정은 parseEntityRef+resolveEmbedDecision(EmbedRenderer) 공유.
+      const ref = parseEntityRef(href);
+      if (ref) {
+        const decision = resolveEmbedDecision(ref.entityType, ref.entityId, references, { allowCard: false });
         // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
         // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입이라(embed-card.tsx
         // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
         // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
-        if (m[1]!.toLowerCase() === 'asset') {
-          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
+        if (decision.kind === 'asset') {
+          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
         }
-        const ghost = isGhostReference(references, m[1]!, m[2]!);
-        const referenceMeta = ghost ? null : findReferenceMeta(references, m[1]!, m[2]!);
-        return (
-          <EntityChip
-            entityType={m[1]!}
-            entityId={m[2]!}
-            label={String(children)}
-            href={getEntityHref(m[1]!, m[2]!)}
-            ghost={ghost}
-            referenceMeta={referenceMeta}
-            entityStatus={entityStatusByKey?.[`${m[1]!.toLowerCase()}:${m[2]!.toLowerCase()}`]}
-          />
-        );
+        // allowCard:false라 decision.kind는 여기서 항상 'chip'('card'는 불가능 — resolveEmbedDecision
+        // 계약: opts.allowCard가 false면 'card'를 반환하지 않는다).
+        if (decision.kind === 'chip') {
+          return (
+            <EntityChip
+              entityType={ref.entityType}
+              entityId={ref.entityId}
+              label={String(children)}
+              href={getEntityHref(ref.entityType, ref.entityId)}
+              ghost={decision.ghost}
+              referenceMeta={decision.referenceMeta}
+              entityStatus={entityStatusByKey?.[`${ref.entityType.toLowerCase()}:${ref.entityId.toLowerCase()}`]}
+            />
+          );
+        }
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel]);
+  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -312,16 +322,38 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
 
   const prepared = hasMention ? prepareMentions(content) : content;
 
+  // story #2905(S2c③④) — 렌더 전에 메시지를 세그먼트로 미리 쪼갠다(§3 delta 「연속 판별」).
+  // 산문/단건 sole-link 세그먼트는 원문 그대로 기존 단일 ReactMarkdown 경로(components 재사용,
+  // 회귀 0)로 흘러가고, 2개↑ 연속 sole-link 세그먼트만 EmbedGroup(캐러셀/간결 리스트/gate
+  // 접힘)으로 대체된다. references(유령·asset 판정)는 그룹 판별에도 같은 SSOT를 쓴다
+  // (message-segments.ts가 resolveEmbedDecision을 직접 호출).
+  const segments = segmentMessageContent(prepared, references);
+
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkBreaks]}
-      urlTransform={(url) =>
-        url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
-      }
-      components={components}
-    >
-      {prepared}
-    </ReactMarkdown>
+    <>
+      {segments.map((seg, idx) =>
+        seg.kind === 'group' ? (
+          <EmbedGroup
+            key={idx}
+            entityType={seg.entityType}
+            refs={seg.refs}
+            onOpenReadingPanel={onOpenReadingPanel}
+            eventDefinitionsByKey={eventDefinitionsByKey}
+          />
+        ) : (
+          <ReactMarkdown
+            key={idx}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            urlTransform={(url) =>
+              url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
+            }
+            components={components}
+          >
+            {seg.text}
+          </ReactMarkdown>
+        ),
+      )}
+    </>
   );
 }
 
@@ -462,26 +494,25 @@ export function ChatBubble({
         {isGrouped ? (
           <div className="w-7 flex-shrink-0" />
         ) : (
-          <div className="relative h-7 w-7 flex-shrink-0">
-            {/* story #2349 — "상대 프로필" 진입점. 자기 자신 아바타는 클릭 불가(role/tabIndex도 안 붙임). */}
-            <div
-              role={isMine ? undefined : 'button'}
-              tabIndex={isMine ? undefined : 0}
-              onClick={isMine ? undefined : handleOpenProfilePopover}
-              onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
-              className={`flex h-full w-full items-center justify-center rounded-full text-xs font-medium ${
-                isAgent
-                  ? 'bg-accent-claim/15 text-accent-claim'
-                  : isMine
-                    ? 'bg-primary/20 text-primary'
-                    : 'bg-muted text-muted-foreground'
-              } ${isAgent && isWorking ? WORKING_RING_CLASS : ''} ${isMine ? '' : 'cursor-pointer'}`}
-            >
-              {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-            </div>
-            {isAgent && presenceStatus ? (
-              <PresenceDot status={presenceStatus} className="absolute -bottom-0.5 -right-0.5" />
-            ) : null}
+          <div
+            role={isMine ? undefined : 'button'}
+            tabIndex={isMine ? undefined : 0}
+            onClick={isMine ? undefined : handleOpenProfilePopover}
+            onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
+            className={`flex-shrink-0 ${isMine ? '' : 'cursor-pointer'}`}
+          >
+            {/* story #2349 — "상대 프로필" 진입점. 자기 자신 아바타는 클릭 불가(role/tabIndex도 안 붙임).
+                story #2901(3335)+#2921 S4(3339) 합성(유나 확定 5규칙, avatar-unification-design-memo-2921) —
+                Avatar가 정본(사본 분화 금지) — shape(에이전트=circle·human=square)·idle blue 링·
+                working citron 펄스·human 테두리는 전부 avatar.tsx 내부가 결정한다. */}
+            <Avatar
+              name={displayName}
+              avatarUrl={message.sender_avatar_url ?? null}
+              actorType={isAgent ? 'agent' : 'human'}
+              size={28}
+              presenceStatus={isAgent ? presenceStatus : null}
+              isWorking={isWorking}
+            />
           </div>
         )}
 
@@ -503,9 +534,9 @@ export function ChatBubble({
                 {displayName}
               </span>
               {isAgent && (
-                <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-accent-claim">
-                  Bot
-                </span>
+                // story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue 신호
+                // dot) 채택, soft-fill 폐지.
+                <AgentIdentity />
               )}
             </div>
           )}
@@ -566,12 +597,28 @@ export function ChatBubble({
               </code>
             </div>
           ) : (
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
+            /* story #2921 S4(유나 확定) — 버블=무채 panel(내 메시지=blue-soft). 옛
+               bg-primary(solid 채색)+text-primary-foreground(흰 글자)를 proof-blue-soft
+               (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
+               배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
+            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
               isMine
-                ? 'rounded-tr-sm bg-primary text-primary-foreground'
-                : 'rounded-tl-sm bg-muted text-foreground'
+                ? 'rounded-tr-sm bg-proof-blue-soft'
+                : 'rounded-tl-sm bg-proof-panel'
             }`}>
-              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} />
+              {/* story #ec57c80c(v2 3호) — report성 밀도 재설계는 에이전트 메시지에만
+                  적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는
+                  무변경). ReportMessageSummary 내부가 발동 조건(computeReportDensity) 미충족
+                  이면 곧바로 ChatMarkdown으로 폴백하므로 인간 메시지 경로는 항상 원본 그대로. */}
+              {isAgent ? (
+                <ReportMessageSummary
+                  content={displayContent} messageKind={message.message_kind} isMine={isMine}
+                  references={message.references} entityStatusByKey={entityStatusByKey}
+                  onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey}
+                />
+              ) : (
+                <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />
+              )}
             </div>
           )}
 
@@ -704,6 +751,7 @@ export function ChatBubble({
           y={profilePopover.y}
           name={displayName}
           isAgent={isAgent}
+          avatarUrl={message.sender_avatar_url ?? null}
           onClose={() => setProfilePopover(null)}
           onBlock={onBlockUser}
         />

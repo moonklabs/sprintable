@@ -3,6 +3,7 @@
  * 파일 크기 포맷은 재구현 금지 → `formatFileSize`(file-node.tsx) 재사용. 여기엔 그 외 표시 유틸만.
  */
 
+import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
 
 /** 파일 아이콘 틴트 분류 — 목업 `.fic.*` 5종에 1:1 대응. */
@@ -46,25 +47,39 @@ export function fileTypeTint(contentType: string): FileTint {
   return 'doc';
 }
 
-/** 결정론적 아바타 배경(고정 토큰 유틸 집합 — Tailwind safelist 안전). */
-const AVATAR_BG = ['bg-info', 'bg-success', 'bg-warning', 'bg-brand', 'bg-destructive'] as const;
-
-export function avatarColor(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return AVATAR_BG[hash % AVATAR_BG.length] ?? AVATAR_BG[0];
+/**
+ * story #2921 S4 후속(유나 design:changes, 2026-08-22) — 이니셜 배경 무채 계승 처방. 옛
+ * AVATAR_BG는 이름 해시로 시맨틱 신호색(info/success/warning/brand/destructive) 5색 중
+ * 하나를 «무작위»로 골랐다 — 해시가 destructive를 뽑은 사람은 아바타가 «빨강=위반»으로
+ * 읽히는 의미 충돌이었고(90% 무채 원칙도 파괴), 옛 ProofAvatar(agent=blue-soft·human=sunk
+ * 무채 2값)에서의 회귀이기도 했다. 그 2값 체계를 그대로 계승 — 사람별 해시 다양성은
+ * 포기하고(신호색 오염 제거가 우선), bg+text를 한 쌍으로 반환해 호출부가 text-white를
+ * 별도로 하드코딩하지 않게 한다(밝은 -soft 배경 위 흰 글자 가독성 문제 원천 차단).
+ */
+export function avatarColor(isAgent: boolean): string {
+  // story #3049(2984-S1) — agent 이니셜 배경은 AGENT_MARK_FILL_CLASS(투명·§2 형태로 이미
+  // 있는 ring/border가 경계를 짊어짐). human 배경(무채 sunk)은 재질 이전 대상 밖(신호 없는
+  // 중립 배경이라 SHIFT 항목이 아님) — 무변경.
+  return isAgent ? AGENT_MARK_FILL_CLASS : 'bg-proof-sunk text-proof-ink-2';
 }
 
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
+  const first = parts[0] ?? '';
+  const isLatin = /[a-zA-Z]/.test(first);
   if (parts.length === 1) {
-    const p = parts[0] ?? '';
-    return /[a-zA-Z]/.test(p) ? p.slice(0, 2).toUpperCase() : p.slice(0, 1);
+    return isLatin ? first.slice(0, 2).toUpperCase() : first.slice(0, 1);
   }
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
+  // story #2986(선생님 실사용 발견) — 어절별 첫 글자를 조합하면(라틴 이니셜 관례) 한글에서
+  // 우연히 실제 단어(간혹 비속어)가 조립될 구조적 위험이 있다 — 「시스템 발행」→「시」+「발」
+  // =「시발」실사고. 한글(및 그 외 비라틴) 다어절 이름은 조합하지 않고 첫 어절 첫 글자
+  // 1자만 쓴다(단일 어절일 때와 동일 규칙). 라틴 다어절(예: John Smith)은 국제 관례대로
+  // 각 단어 첫 글자 조합(JS)을 유지 — 위험은 한글류 음절 문자에 한정된다.
+  if (isLatin) {
+    return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
+  }
+  return first.slice(0, 1);
 }
 
 /** 파일 확장자 라벨 — 파일명 우선, 없으면 content-type subtype. (예: PNG·PDF·DOCX·JSON) */

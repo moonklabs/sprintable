@@ -176,6 +176,22 @@ def test_wilson_lower_bound_sample_aware():
 
 # ── evaluate_merge_gate 오케스트레이션 (Cage 합성·AC⑥) ──────────────────────────
 
+def _mock_session() -> AsyncMock:
+    """카디르 QA(PR#3349 재재verdict, 2026-08-22) — evaluate_merge_gate가 이제 내부에서
+    find_gate_slot_with_pr_fallback(gate_service.py, 최대 2회 session.execute)를 거친다.
+    완전 미설정 `AsyncMock()`은 `.scalar_one_or_none()`(실제론 동기 메서드)까지 AsyncMock
+    자손이라, 호출하면(await 없이) 「awaited 안 된 coroutine」객체를 그대로 반환한다 — 그
+    코루틴이 `is not None`이라 헬퍼가 "게이트 찾음"으로 오판, `.status` 접근에서
+    AttributeError. 이 세션은 session.execute(...)가 항상 "게이트 없음"을 뜻하는 **동기**
+    결과를 반환하도록 미리 배선해 그 함정을 없앤다(pr_number 유무에 따라 1~2회 호출돼도
+    return_value 방식이라 호출 횟수 무관)."""
+    no_row = MagicMock()
+    no_row.scalar_one_or_none = MagicMock(return_value=None)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=no_row)
+    return session
+
+
 def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, participation=True,
                  project_id=None):
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4()) if participation else None
@@ -209,7 +225,7 @@ async def _run(**cage):
             patch.object(mod, "create_gate", AsyncMock(return_value=gate))
         )
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=12, repo="o/r", ci_result="pass", pr_result="pass",
         )
     return res, create_spy
@@ -267,7 +283,7 @@ async def test_evaluate_ci_fail_blocks():
             stack.enter_context(p)
         stack.enter_context(patch.object(mod, "create_gate", AsyncMock(return_value=gate)))
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=1, repo="o/r", ci_result="failure",
         )
     assert res.decision == BLOCK and res.ci_result == "fail"
@@ -299,7 +315,7 @@ async def test_trust_computed_before_capture_records():
          patch.object(mod, "capture_pr_ci_verdict", side_effect=_capture), \
          patch.object(mod, "resolve_work_item_project_id", AsyncMock(return_value=uuid.uuid4())), \
          patch.object(mod, "create_gate", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), status="auto_passed", evidence_status=None, approved_head_sha=None))):
-        await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(), pr_number=1, repo="o/r", ci_result="pass")
+        await evaluate_merge_gate(_mock_session(), uuid.uuid4(), uuid.uuid4(), pr_number=1, repo="o/r", ci_result="pass")
 
     assert order == ["trust", "capture"], f"trust must precede capture, got {order}"
 
@@ -392,7 +408,7 @@ async def test_evaluate_persists_decision_metadata_on_gate():
                AsyncMock(return_value={"scores": []})), \
          patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=1, repo="o/r", ci_result="pass", pr_result="pass",
         )
     assert res.decision == ASK_HUMAN  # trust None(pending) → ask_human.
@@ -416,11 +432,37 @@ async def test_evaluate_auto_merge_metadata_sufficient():
                AsyncMock(return_value={"scores": [{"role_key": "implementation", "clean_pass_rate": 0.95,
                    "hit": 95, "resolved": 100, "pending": 0, "hit_rate": 0.95}]})), \
          patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
-        res = await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+        res = await evaluate_merge_gate(_mock_session(), uuid.uuid4(), uuid.uuid4(),
                                         pr_number=1, repo="o/r", ci_result="pass", pr_result="pass")
     assert res.decision == AUTO_MERGE
     assert gate.requires_human is False and gate.evidence_status == "sufficient"
     assert gate.auto_decision_reason == AUTO_MERGE
+
+
+@pytest.mark.anyio
+async def test_evaluate_auto_merge_with_head_sha_does_not_touch_pr_head_observed_at():
+    """story #2932 완주조건 HIGH2(5라운드 재설계) — AUTO_MERGE는 approved_head_sha를
+    세우지만 pr_head_observed_at은 **더 이상 건드리지 않는다**(4라운드는 서버 now()로
+    씨딩했으나, 서로 다른 시계를 같은 필드에 섞는 결함으로 판명 — 카디르 5라운드+codex
+    실물재현). 이 필드는 이제 gate_github_check.py::reopen_gate_if_new_sha 오직 한 곳,
+    오직 실 webhook payload에서만 채워진다."""
+    gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed",
+                           requires_human=True, evidence_status=None, decision_basis=None, auto_decision_reason=None,
+                           approved_head_sha=None, pr_head_observed_at=None)
+    part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
+    with patch("app.services.merge_verdict_gate.resolve_implementation_participation", AsyncMock(return_value=part)), \
+         patch("app.services.merge_verdict_gate._role_key", AsyncMock(return_value="implementation")), \
+         patch("app.services.merge_verdict_gate.capture_pr_ci_verdict", AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
+         patch("app.services.merge_verdict_gate.compute_member_trust_scores",
+               AsyncMock(return_value={"scores": [{"role_key": "implementation", "clean_pass_rate": 0.95,
+                   "hit": 95, "resolved": 100, "pending": 0, "hit_rate": 0.95}]})), \
+         patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
+        res = await evaluate_merge_gate(_mock_session(), uuid.uuid4(), uuid.uuid4(),
+                                        pr_number=1, repo="o/r", ci_result="pass", pr_result="pass",
+                                        head_sha="sha-auto-merge")
+    assert res.decision == AUTO_MERGE
+    assert gate.approved_head_sha == "sha-auto-merge"
+    assert gate.pr_head_observed_at is None, "AUTO_MERGE는 서버시각을 이 필드에 절대 쓰면 안 됨(5라운드 원칙)"
 
 
 # ── HO-S6 키스톤 실DB: 가설 적중 이력만으로 auto_merge ──────────────────────────
@@ -530,7 +572,7 @@ async def _run_substance(*, ci_result, pr_number, disposition, source="system_de
                                          AsyncMock(return_value={"scores": []})))
         create_spy = stack.enter_context(patch.object(mod, "create_gate", AsyncMock(return_value=gate)))
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=pr_number, repo=("o/r" if pr_number else ""),
             ci_result=ci_result, pr_result=None,
         )
@@ -626,3 +668,233 @@ async def test_deny_policy_materializes_even_without_evidence():
     res, create_spy = await _run_substance(ci_result=None, pr_number=0, disposition="deny")
     assert res.gate_id is not None
     create_spy.assert_awaited_once()
+
+
+# ── story #2950 슬라이스② — diff_size/touches_migration 관찰 사실(판정 아님) ─────────
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_merges_observed_diff_facts_into_neutral_facts():
+    """PO 설계안 승인(doc gate-risk-real-discriminator-design-2950 §3) — diff_size/
+    touches_migration이 관찰되면 neutral_facts에 그대로 병합돼야 한다(재판정 없음,
+    기존 facts 키와 나란히)."""
+    with patch.object(
+        mod, "_observe_pr_diff_facts",
+        AsyncMock(return_value={"diff_size": 12, "touches_migration": True}),
+    ):
+        res, create_spy = await _run()
+    assert res.gate_id is not None
+    neutral_facts = create_spy.call_args.kwargs["neutral_facts"]
+    assert neutral_facts["diff_size"] == 12
+    assert neutral_facts["touches_migration"] is True
+    assert neutral_facts["ci_result"] == "pass"  # 기존 facts 보존(덮어쓰기 아님).
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_diff_facts_observation_failure_is_silent():
+    """관찰 실패(설치 없음/토큰 없음/API 실패)는 게이트 평가 자체를 막지 않는다 — facts에
+    diff_size/touches_migration 키가 그냥 없을 뿐."""
+    with patch.object(mod, "_observe_pr_diff_facts", AsyncMock(return_value={})):
+        res, create_spy = await _run()
+    assert res.gate_id is not None
+    neutral_facts = create_spy.call_args.kwargs["neutral_facts"]
+    assert "diff_size" not in neutral_facts
+    assert "touches_migration" not in neutral_facts
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_no_substance_shell_skips_diff_observation():
+    """pr_number<=0(no-substance shell)이면 관찰 대상 PR 자체가 없다 — _observe_pr_diff_facts를
+    아예 호출하지 않는다(불필요한 GitHub API 호출 방지)."""
+    observe_spy = AsyncMock(return_value={"diff_size": 1, "touches_migration": False})
+    with patch.object(mod, "_observe_pr_diff_facts", observe_spy):
+        await _run_substance(ci_result="fail", pr_number=0, disposition="ask")
+    observe_spy.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_observe_pr_diff_facts_no_installation_returns_empty():
+    """GithubInstallation 없음(미연동 org) — 조용히 {} 반환, 예외 없음."""
+    from app.services.merge_verdict_gate import _observe_pr_diff_facts
+
+    no_row = MagicMock()
+    no_row.scalar_one_or_none = MagicMock(return_value=None)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=no_row)
+
+    result = await _observe_pr_diff_facts(session, uuid.uuid4(), "o/r", 12)
+    assert result == {}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_diff_facts_computes_size_and_migration_touch():
+    """설치+토큰+PR 파일 조회 전부 성공 시 diff_size(파일 수)·touches_migration(경로 매치)을
+    정확히 계산한다. ⚠️카디르 QA(PR#3383, 2026-08-23) — GitHub PR-files API는 레포 루트
+    기준 경로를 준다(이 모노레포 실측: "backend/..."). 이전 버전은 이 테스트 fixture가
+    "alembic/versions/..."(prefix 없이)라 버그(코드가 정확히 그 잘못된 prefix를 기대)와
+    우연히 맞아떨어져 매치 로직 결함을 못 잡았다 — 실 형상 경로로 교정."""
+    from app.services.merge_verdict_gate import _observe_pr_diff_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    changed_files = [
+        "backend/app/routers/gates.py",
+        "backend/app/services/merge_verdict_gate.py",
+        "backend/alembic/versions/0276_something.py",
+    ]
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.verdict_capture.fetch_pr_changed_files", AsyncMock(return_value=changed_files)):
+        result = await _observe_pr_diff_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {"diff_size": 3, "touches_migration": True}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_diff_facts_no_migration_file_is_false():
+    """양성대조 짝 — 실 형상 경로인데 마이그레이션 파일이 없으면 False(실패할 수 있는 대조)."""
+    from app.services.merge_verdict_gate import _observe_pr_diff_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    changed_files = ["backend/app/routers/gates.py", "backend/tests/test_gates.py"]
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.verdict_capture.fetch_pr_changed_files", AsyncMock(return_value=changed_files)):
+        result = await _observe_pr_diff_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {"diff_size": 2, "touches_migration": False}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_diff_facts_fetch_failure_returns_empty():
+    """fetch_pr_changed_files가 None(조회 실패/판정불가)이면 관찰 사실 없이 {} — 지어내지 않는다."""
+    from app.services.merge_verdict_gate import _observe_pr_diff_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.verdict_capture.fetch_pr_changed_files", AsyncMock(return_value=None)):
+        result = await _observe_pr_diff_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {}
+
+
+# ── story #3014(2995 보류 결정의 관찰 슬라이스) — reviewer_count/reviewer_logins 관찰 사실(판정 아님) ──
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_merges_observed_reviewer_facts_into_neutral_facts():
+    """관찰되면 neutral_facts에 그대로 병합돼야 한다(재판정 없음, 기존 facts 키와 나란히) —
+    _observe_pr_diff_facts 병합 테스트와 동형."""
+    with patch.object(mod, "_observe_pr_reviewer_facts",
+                       AsyncMock(return_value={"reviewer_count": 1, "reviewer_logins": ["alice"]})):
+        res, create_spy = await _run()
+    assert res.gate_id is not None
+    neutral_facts = create_spy.call_args.kwargs["neutral_facts"]
+    assert neutral_facts["reviewer_count"] == 1
+    assert neutral_facts["reviewer_logins"] == ["alice"]
+    assert neutral_facts["ci_result"] == "pass"  # 기존 facts 보존(덮어쓰기 아님).
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_reviewer_facts_observation_failure_is_silent():
+    """관찰 실패(설치 없음/토큰 없음/API 실패)는 게이트 평가 자체를 막지 않는다 — facts에
+    reviewer_count/reviewer_logins 키가 그냥 없을 뿐."""
+    with patch.object(mod, "_observe_pr_reviewer_facts", AsyncMock(return_value={})):
+        res, create_spy = await _run()
+    assert res.gate_id is not None
+    neutral_facts = create_spy.call_args.kwargs["neutral_facts"]
+    assert "reviewer_count" not in neutral_facts
+    assert "reviewer_logins" not in neutral_facts
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_no_substance_shell_skips_reviewer_observation():
+    """pr_number<=0(no-substance shell)이면 관찰 대상 PR 자체가 없다 — _observe_pr_reviewer_facts를
+    아예 호출하지 않는다(불필요한 GitHub API 호출 방지)."""
+    observe_spy = AsyncMock(return_value={"reviewer_count": 1, "reviewer_logins": ["alice"]})
+    with patch.object(mod, "_observe_pr_reviewer_facts", observe_spy):
+        await _run_substance(ci_result="fail", pr_number=0, disposition="ask")
+    observe_spy.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_no_installation_returns_empty():
+    """GithubInstallation 없음(미연동 org) — 조용히 {} 반환, 예외 없음."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    no_row = MagicMock()
+    no_row.scalar_one_or_none = MagicMock(return_value=None)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=no_row)
+
+    result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+    assert result == {}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_counts_and_lists_logins():
+    """설치+토큰+PR 조회 전부 성공 시 reviewer_count·reviewer_logins(정렬된 dedup 목록)을
+    정확히 계산한다 — GitHub PR 응답의 requested_reviewers는 [{"login": ...}, ...] 형태."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    pr = {"requested_reviewers": [{"login": "bob"}, {"login": "alice"}]}
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.github_app.get_pull_request", AsyncMock(return_value=pr)):
+        result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {"reviewer_count": 2, "reviewer_logins": ["alice", "bob"]}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_zero_reviewers_returns_count_zero():
+    """양성대조 짝 — 대부분의 실경로일 zero-reviewer 케이스가 예외 없이 count 0을 낸다(AC②)."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    pr = {"requested_reviewers": []}
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.github_app.get_pull_request", AsyncMock(return_value=pr)):
+        result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {"reviewer_count": 0, "reviewer_logins": []}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_fetch_failure_returns_empty():
+    """get_pull_request가 None(조회 실패/판정불가)이면 관찰 사실 없이 {} — 지어내지 않는다(AC③)."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.github_app.get_pull_request", AsyncMock(return_value=None)):
+        result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {}

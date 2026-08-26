@@ -92,7 +92,8 @@ export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
       role="toolbar"
       aria-label="텍스트 서식"
       style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
-      className="flex items-center gap-0.5 rounded-xl border border-border bg-background p-1 shadow-lg"
+      // story #3007(로드맵 P2·PR-E, L1) — 툴바는 floating이라 --elev-overlay.
+      className="flex items-center gap-0.5 rounded-xl border border-border bg-background p-1 shadow-[var(--elev-overlay)]"
     >
       {buttons.map(({ icon: Icon, label, action, active }) => (
         <button

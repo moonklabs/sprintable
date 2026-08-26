@@ -5,12 +5,22 @@ from datetime import datetime
 from typing import Any, Generic, TypeVar
 
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import Base
 from app.models.base import SoftDeleteMixin
 
 T = TypeVar("T", bound=Base)
+
+
+class CasConflict(Exception):
+    """story #2874: update_with_cas() 낙관적 동시성 충돌 — 호출자가 .current(최신 row)로
+    409 detail(current_updated_at 등)을 구성한다."""
+
+    def __init__(self, current: Any) -> None:
+        self.current = current
+        super().__init__("optimistic concurrency conflict")
 
 # cursor 페이지네이션이 안전한 단조 정렬 컬럼 화이트리스트.
 # title/priority 등 비단조 컬럼은 cursor 중복으로 누락/중복을 유발하므로 제외한다.
@@ -122,6 +132,59 @@ class BaseRepository(Generic[T]):
         await self.session.flush()
         await self.session.refresh(obj)
         return obj
+
+    async def update_with_cas(
+        self, id: uuid.UUID, *, expected_updated_at: datetime | None = None, **data: Any
+    ) -> T | None:
+        """story #2874(하드닝): ``update()``는 재조회→setattr→flush로 check-then-write라
+        원자적이지 않다 — 같은 밀리초대 진짜 동시 PATCH 두 건이 겹치면(둘 다 "충돌 前" 값을
+        읽고 통과) 나중 flush가 먼저 것을 조용히 덮어쓸 수 있다(#3288 QA·codex 지적, 카디르
+        사실 확認). ``expected_updated_at``이 주어지면 단일 SQL 문
+        ``UPDATE ... WHERE id= AND updated_at=`` 로 승격 — DB가 원자적으로 비교+쓰기를
+        한 스텝에 한다(진짜 CAS, TOCTOU 창 없음).
+
+        ms-절삭 비교(docs.py 151e05f1 근거 그대로, 카디르 probe로 실증된 축 — DB μs=654321·
+        클라 ms절삭 654000 전송해도 false-409 없이 통과해야 함): ``date_trunc('milliseconds',
+        ...)``로 컬럼·파라미터 양쪽을 SQL 레벨에서 동일하게 절삭 후 비교한다.
+
+        ⚠️#3291 카디르 QA rework(2026-08-21, SQL 레벨 결정적 재현): ms-절삭 토큰을 CAS 비교에
+        쓰면 「T1의 write가 만든 새 updated_at이 원래 값과 같은 ms 버킷에 떨어지는」 경우
+        T2가 낡은 expected를 들고 와도 date_trunc 비교가 통과해 rowcount=1로 조용히
+        덮어쓴다(같은 버킷=같은 절삭값). 이 메서드는 절대 ``updated_at``을 explicit으로
+        SET하지 않는다 — 대상 모델(Story/Doc)이 컬럼 자체의 ``onupdate``를 「매 write마다
+        직전 값보다 최소 1ms 전진」(``GREATEST(clock_timestamp(), updated_at + 1ms)``,
+        app/models/pm.py·doc.py)로 override해 뒀으므로, 이 CAS 경로뿐 아니라 일반
+        ``update()``(setattr+flush, onupdate가 그대로 적용)까지 **같은 한 곳의 선언**으로
+        모노토닉이 강제된다(둘 중 하나만 고치면 반쪽이 되는 걸 원천 차단).
+
+        rowcount=0이면 대상이 없거나(404, 호출자가 반환값 None으로 판별) 그 사이 다른 write가
+        있었다(409, ``CasConflict`` — 최신 row를 실어 올린다). ``expected_updated_at``이
+        None이면 기존 ``update()``와 완전히 동일(무CAS·하위호환)."""
+        if expected_updated_at is None:
+            return await self.update(id, **data)
+
+        result = await self.session.execute(
+            sa_update(self.model)
+            .where(
+                self._org_filter(),
+                self.model.id == id,  # type: ignore[attr-defined]
+                func.date_trunc("milliseconds", self.model.updated_at)  # type: ignore[attr-defined]
+                == func.date_trunc("milliseconds", expected_updated_at),
+            )
+            .values(**data)
+        )
+        # Core-style UPDATE는 세션 identity map을 자동 동기화하지 않는다 — 호출부가 이미
+        # 같은 id를 로드해 둔 인스턴스(예: 라우터의 사전조회 story_before)가 있으면 재조회
+        # (get)만으로는 그 캐시된 파이썬 객체를 그대로 돌려줄 뿐 새 컬럼값을 안 반영한다.
+        # expire_all()로 강제 무효화 후 재조회해야 rowcount 판정과 무관하게 항상 신선하다.
+        self.session.expire_all()
+        if result.rowcount == 1:
+            return await self.get(id)
+
+        current = await self.get(id)
+        if current is None:
+            return None
+        raise CasConflict(current)
 
     async def delete(self, id: uuid.UUID) -> bool:
         obj = await self.get(id)

@@ -27,7 +27,7 @@ from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
 from app.services.merge_verdict_gate import reconcile_merge_gate_with_real_evidence
-from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr
+from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr, upsert_link
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
@@ -318,6 +318,7 @@ async def _process_webhook_event(
     *,
     gate_check_publish: list[dict] | None = None,
     ungated_check_publish: list[dict] | None = None,
+    label_unlabel_publish: list[dict] | None = None,
 ) -> tuple[dict, str]:
     """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅·Bot-L.1 resolver 체인). (result, status) 반환.
 
@@ -331,14 +332,56 @@ async def _process_webhook_event(
     **독립**(PR 자체 이벤트에서 판정) — resolver를 그 skip보다 먼저 실행해 두 판정이 서로를 막지 않게 한다.
 
     ``gate_check_publish``(story #2813, ccbcd9da A-1 `pending_deliveries`와 동형 outparam): 넘기면
-    PR 라이프사이클 이벤트(opened/reopened/ready_for_review/synchronize)가 발행해야 할 GitHub
-    check-run 정보를 append — 호출자(github_webhook)가 **commit 後** 배경 태스크로 발행(fail-closed:
-    GitHub 외부 API 호출을 DB 트랜잭션 성공 확정 前에 하지 않는다).
+    PR 라이프사이클 이벤트(opened/reopened/ready_for_review/synchronize/**edited-단 base가 실제로
+    바뀐 경우만**, story #2912/**qa:pass+design:pass 라벨이 둘 다 갖춰진 labeled 이벤트**, story
+    #2893 설계안 §4 C1)가 발행해야 할 GitHub check-run 정보를 append — 호출자(github_webhook)
+    가 **commit 後** 배경 태스크로 발행(fail-closed: GitHub 외부 API 호출을 DB 트랜잭션 성공 확정
+    前에 하지 않는다).
+
+    ``label_unlabel_publish``(story #2893 설계안 §3 B2-a, 위와 동형 outparam): `reopen_gate_if_new_sha`
+    가 실제로 SHA 재-pending을 발생시킨 경우에만(단순 재확인·SHA 일치는 대상 아님) qa:pass/
+    design:pass 라벨 제거 요청을 append — 마찬가지로 commit 後 background_tasks로 발행.
     """
     texts = _candidate_texts(payload)
     repo = (payload.get("repository") or {}).get("full_name") or ""
     pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)
     pr_action = payload.get("action") if event == "pull_request" else None
+    # story #2912(2899 그라운딩 갈래D 처방③, BE 레이어) — pull_request.edited는 title/body
+    # 편집에도 뜨고 base branch 변경에도 뜬다(GitHub 공식 문서). 이 두 아래 체크런
+    # (재)발행 분기는 "새 커밋 없이 base만 바뀌어 synchronize가 안 뜬 재타겟"(#3317 실사고)을
+    # 커버해야 하므로 edited를 추가하되, title/body만 바뀐 edited까지 매번 재발행하면 낭비다
+    # — GHA 워크플로 required 잡(PR①/#3326)과 달리 여기는 "skipped 상태" 개념이 없는 순수
+    # 백엔드 사이드이펙트(체크런 재발행 여부)라 changes.base 유무로 필터링해도 그 landmine이
+    # 없다([[ci-stuck-c-d-remedy-design-20260822]] 참고) — payload.changes.base는 base가
+    # 실제로 바뀐 edited 이벤트에만 GitHub이 채워 보낸다.
+    is_base_retarget_edit = pr_action == "edited" and bool((payload.get("changes") or {}).get("base"))
+    # story #2893(설계안 §4 C1) — 원 스토리(#2893) 증상 자체("QA·design·CI 전부 서고도 merge
+    # 게이트 레코드가 없어 PR 작성자가 close→reopen으로 수동 생성") 최종 처방: qa:pass+
+    # design:pass 라벨이 **둘 다** 갖춰지는 순간(pull_request.labeled, GitHub raw 웹훅 —
+    # 폴링 0)을 게이트 생성 트리거로 더한다. `pull_request` 페이로드는 어떤 action이든 현재
+    # 라벨 전체 집합(labels)을 동봉하므로 추가 조회 불요. RECHECK_LABELS(B2-a와 동일 SSOT) —
+    # "이 두 라벨이 갖춰지면 게이트가 있어야 한다"는 명제가 "SHA 불일치 시 이 두 라벨을 뗀다"는
+    # B2-a 명제와 정확히 대칭이라 같은 상수를 공유한다.
+    is_label_alignment_trigger = False
+    if pr_action == "labeled":
+        from app.services.gate_github_check import RECHECK_LABELS
+
+        _label_names = {
+            (label.get("name") or "") for label in (payload.get("pull_request") or {}).get("labels") or []
+        }
+        is_label_alignment_trigger = all(name in _label_names for name in RECHECK_LABELS)
+
+    # story #2932(완주조건 HIGH2, 0273) — stale/순서역전 웹훅이 최신 승인 SHA를 부당
+    # 재-pending시키는 것을 막는 워터마크. GitHub는 pull_request 이벤트마다 현재
+    # pull_request.updated_at(실 갱신 단조증가)을 동봉한다 — 파싱 실패/부재는 None(그
+    # 이벤트는 이 방지축 없이 기존 SHA-diff-only 동작으로 fail-open, 크래시 아님).
+    _pr_updated_at_raw = (payload.get("pull_request") or {}).get("updated_at")
+    pr_updated_at: datetime | None = None
+    if _pr_updated_at_raw:
+        try:
+            pr_updated_at = datetime.fromisoformat(str(_pr_updated_at_raw).replace("Z", "+00:00"))
+        except ValueError:
+            pr_updated_at = None
 
     installation: GithubInstallation | None = None
     org_id: uuid.UUID | None = None
@@ -401,7 +444,7 @@ async def _process_webhook_event(
         if (
             org_id is not None
             and event == "pull_request"
-            and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+            and (pr_action in ("opened", "reopened", "ready_for_review", "synchronize") or is_base_retarget_edit)
             and head_sha
             and ungated_check_publish is not None
         ):
@@ -426,6 +469,33 @@ async def _process_webhook_event(
     org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
     delivery.org_id = org_id
 
+    # story #3039(2026-08-25, PO 판정) — resolve_story_for_pr()의 SID/auto_match/text 해소는
+    # 매 호출 휘발성(반환만·미영속)이다. pull_request류 이벤트는 payload에 title/body가
+    # 있어(_candidate_texts) 매번 SID 텍스트로 재해소되지만, check_suite/workflow_run/status
+    # 이벤트는 그 텍스트 자체가 payload에 없어 이 경로로는 다시는 못 찾는다 — 최초
+    # pull_request.opened 웹훅에서 SID로 딱 한 번 풀리고, 그 뒤 도착하는 CI-완료 웹훅은 전부
+    # "story 못 찾음"으로 조용히 ignored 처리돼(위 skipped_reason 분기) 게이트 재평가
+    # (reconcile_merge_gate_with_real_evidence)가 원천적으로 다시 안 태워지는 근본원인이었다
+    # (실 사례: PR#3460 — 5개 워크플로 전부 green·check_suite completed 웹훅 200 배달 확認됐으나
+    # 게이트 neutral_facts.ci_result 영구 null, evaluate_merge_gate 재호출 로그 0건). 비-stored
+    # 경로(explicit/stored_link 가 아닌, 즉 이번에 텍스트/auto_match 로 새로 풀린 것)로 해소되면
+    # 그 자리서 canonical link 로 영속화 — 다음부턴 이 함수의 1)단계(explicit/stored link, 텍스트
+    # 불요)가 바로 찾는다. #2832 교훈대로 upsert_link 는 evidence 병합(전체교체 아님)이라 이후
+    # 웹훅이 채우는 head_sha/scope_check 와 충돌 없다. 저장 실패는 이 요청의 처리 자체를 막지
+    # 않는다(비차단 — 최악의 경우 이번에도 못 찾은 것과 동일하게 남을 뿐).
+    if org_id is not None and repo and pr_number > 0 and rl.reason not in ("stored_explicit", "stored_link"):
+        try:
+            await upsert_link(
+                session, org_id, story_id, repo, pr_number,
+                link_source=rl.source or "auto_match", confidence=rl.confidence or "medium",
+                evidence=rl.evidence,
+            )
+        except Exception:  # noqa: BLE001 — 링크 캐싱 실패가 이번 웹훅 처리 자체를 막으면 안 된다.
+            logger.warning(
+                "PR-story link 영속화 실패(비차단) repo=%s pr=%s story=%s",
+                repo, pr_number, story_id, exc_info=True,
+            )
+
     # story #2813 — PR 라이프사이클 자체(opened/reopened/ready_for_review/synchronize)는 CI/merge
     # 증거와 무관하게 merge 게이트를 GitHub check-run으로 반영한다. 설계 doc §2-1(PO 승인): 카드
     # 원안 "push 이벤트" 대신 `pull_request.synchronize`를 쓴다 — PR번호+head_sha가 payload에
@@ -436,31 +506,53 @@ async def _process_webhook_event(
     # 그새 커밋이 바뀐 경우를 못 잡는다. 네 액션 전부에서 동일 가드를 돌린다(비교 비용은 동일).
     if (
         event == "pull_request"
-        and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+        and (
+            pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+            or is_base_retarget_edit
+            or is_label_alignment_trigger
+        )
         and head_sha
         and gate_check_publish is not None
     ):
-        from app.models.gate import Gate as _Gate
         from app.services.gate_github_check import reopen_gate_if_new_sha
+        from app.services.gate_service import find_gate_slot_with_pr_fallback
         from app.services.merge_verdict_gate import MERGE_GATE_TYPE as _MERGE_GATE_TYPE
 
-        merge_gate = (
-            await session.execute(
-                select(_Gate).where(
-                    _Gate.org_id == org_id, _Gate.work_item_id == story_id,
-                    _Gate.work_item_type == "story", _Gate.gate_type == _MERGE_GATE_TYPE,
-                )
-            )
-        ).scalar_one_or_none()
+        # story #2893(설계안 §2 A1) — pr_number 없이 조회하면 같은 스토리의 다른 열린 PR
+        # 게이트를 집어 그 게이트를 "이 PR"의 새 SHA로 재-pending 시켜버린다(실사고1/2
+        # 그 자체). PR-scoped 게이트가 없으면(None) else 분기가 evaluate_merge_gate로
+        # 정확히 이 PR용 게이트를 새로 만든다 — 기존 동작(#2826 auto-create)과 동형.
+        #
+        # 카디르 QA(PR#3349 CI 실패, 2026-08-22) — 정확매치 only는 line-engine/board-
+        # preflight self-report shell(NULL 슬롯)이 이 PR로 처음 연결되는 순간을 "게이트
+        # 없음"으로 오판해 evaluate_merge_gate가 별도 행을 또 만들 뻔했다(다른 3곳과 동일
+        # 클래스 결함) — find_gate_slot_with_pr_fallback로 나머지 3곳과 동일하게 통일.
+        merge_gate = await find_gate_slot_with_pr_fallback(
+            session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+            gate_type=_MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
+            repo_full_name=(repo or None),
+        )
         if merge_gate is not None:
-            await reopen_gate_if_new_sha(
+            _repended = await reopen_gate_if_new_sha(
                 session, org_id, merge_gate, head_sha,
                 repo_full_name=repo, pr_number=pr_number,
+                pr_updated_at=pr_updated_at,
             )
             gate_check_publish.append({
                 "org_id": org_id, "gate_id": merge_gate.id,
                 "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
             })
+            # story #2893(설계안 §3 B2-a) — 「라벨=검증된 SHA에 대한 약속」. 실제 재-pending이
+            # 일어난 경우(SHA 실불일치)에만 qa:pass/design:pass를 뗀다(재검토 강제) — SHA가
+            # 그대로면(False) 아직 유효한 약속이므로 라벨은 안 건드린다. diff 분류 fast-path
+            # (문서만 변경 등 자동 재라벨)는 PO 명시 스코프 밖 — 여기 조건분기 0.
+            if _repended and label_unlabel_publish is not None:
+                from app.services.gate_github_check import RECHECK_LABELS
+
+                label_unlabel_publish.append({
+                    "org_id": org_id, "repo_full_name": repo, "pr_number": pr_number,
+                    "labels": list(RECHECK_LABELS),
+                })
         else:
             # story #2826(주 처방, PO 확定 2026-08-20) — story 링크는 해소됐는데 gate가 아직
             # 없다(지금까지 유일한 생성 경로였던 board →done preflight를 아직 안 거쳤다는 뜻,
@@ -473,9 +565,19 @@ async def _process_webhook_event(
             # 나중 쪽은 기존 gate를 그대로 반환) — 별도 dedup 로직 불필요.
             from app.services.merge_verdict_gate import evaluate_merge_gate as _evaluate_merge_gate
 
+            # story #3035(2026-08-24, 카디르+codex QA #3456 부수발견, PO 판정) — 이 분기
+            # 자체가 pull_request 라이프사이클 이벤트(opened/reopened/ready_for_review/
+            # synchronize) 전용이다(위 바깥 if의 pr_action 조건) — merge closed 이벤트는
+            # 함수 앞부분에서 이미 별도로 처리된다. 즉 이 시점에 PR은 **구조적으로 아직
+            # 안 머지된 상태**인데, `pr_result`를 생략하면 `evaluate_merge_gate`의 기본값
+            # "pass"가 그대로 게이트 생성 시점(neutral_facts)에 낙관적으로 확定돼 버렸다
+            # — #3033(SHA 폴백)이 세운 규율과 동일: 모름/아직-아님을 "pass"로 위조하지
+            # 않는다. 여기선 실제로 "미머지"를 안다(이벤트 종류 자체가 증거)면서도 기본값이
+            # "머지됨"을 지어내던 landmine이라 #3033보다 더 명백한 오류 — 명시로 None을
+            # 넘겨 `_decide()`가 AUTO_MERGE(pr=="pass" 요건)를 잘못 통과시키지 않게 한다.
             decision = await _evaluate_merge_gate(
                 session, org_id, story_id,
-                pr_number=pr_number, repo=repo, ci_result=None, head_sha=head_sha,
+                pr_number=pr_number, repo=repo, ci_result=None, pr_result=None, head_sha=head_sha,
             )
             if decision.gate_id is not None:
                 gate_check_publish.append({
@@ -598,10 +700,14 @@ async def _process_webhook_event(
     # 전체 rollback+500으로 처리해 GitHub가 재시도하므로, 여기서 삼키지 않고 그대로 올린다.
     # story #2813(카디르 R2) — head_sha를 넘겨 auto_passed 판정 시 anchor(gate.approved_head_sha)
     # 즉시 확定(merge_verdict_gate.evaluate_merge_gate 참고).
+    # story #3033(2026-08-24) — SHA 폴백(형제 PR 게이트 여럿 갱신 가능)의 publish 큐잉은
+    # 이 함수 자신이 담당(각 형제가 자기 pr_number/repo로 append — 웹훅 자신의 pr_number/
+    # repo는 그 형제 중 하나만 가리켜 잘못된 PR에 check-run을 publish할 위험이 있다).
+    # 반환값은 그대로 원래 pr_number 경로가 찾은 "이 story의" 단일 decision(하위 호환).
     _reconcile_decision = await reconcile_merge_gate_with_real_evidence(
         session, org_id, story_id,
         pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
-        head_sha=head_sha,
+        head_sha=head_sha, gate_check_publish=gate_check_publish,
     )
     # story #2853(AC①) — 예전엔 이 반환값을 그냥 버려, 재평가로 decision이 AUTO_MERGE에서
     # 이탈해도(CI 재실패·trust 재계산 등) 이미 GitHub에 선 success check-run이 안 고쳐졌다.
@@ -643,9 +749,11 @@ async def _process_webhook_event(
     # 이었다(should_auto_close는 org/workflow 설정이 아니라 매 PR confidence로 즉석 계산되는 값).
     # SID 정규식 fix(story_number 인식, 이 PR)가 이 분기의 도달률을 정상적으로 되돌리면, 그 순간
     # «거짓 done 자동화»가 라이브에서 돌기 시작한다 — 그래서 fix와 같은 PR에서 정지시킨다.
-    # ⛔advance_story_to_done()은 gate-approve(_advance_story_on_merge_approve)와 공유 헬퍼라
-    # 그 함수 자체는 손대지 않는다 — 이 호출부(webhook merge 분기) 하나만 멈춘다. `would_close`로
-    # "정지 안 했으면 벌어졌을 일"은 계속 보이게 남겨(관측 가능·소급 판단 재료), 실제 mutation만 뺀다.
+    # ⛔advance_story_to_done() 자체는 손대지 않는다 — 이 호출부(webhook merge 분기) 하나만
+    # 멈춘다. `would_close`로 "정지 안 했으면 벌어졌을 일"은 계속 보이게 남겨(관측 가능·소급
+    # 판단 재료), 실제 mutation만 뺀다. (story #2965, 2026-08-23 — gate-approve 쪽의 공유
+    # 호출부였던 `_advance_story_on_merge_approve`도 같은 이유로 이후 완전히 제거됐다: 트리거가
+    # 뭐든 이벤트 하나만으로 done을 미는 것 자체가 이 조직의 규율 위반이다.)
     #
     # ⛔PO 지적(2026-07-30, em-dash PR#2668/2670 되돌림과 같은 교훈 — "지운 이유를 안 남기면
     # 다음 사람이 «자동 done이 빠졌네」로 되살린다"): 여기 다시 advance_story_to_done()을 넣기
@@ -791,11 +899,13 @@ async def github_webhook(
     # 5) 처리 + status 갱신 + commit 을 **동일 트랜잭션**으로. 실패=rollback(delivery row 도 함께 → retry 보존).
     _gate_check_publish: list[dict] = []
     _ungated_check_publish: list[dict] = []
+    _label_unlabel_publish: list[dict] = []
     try:
         result, status_label = await _process_webhook_event(
             session, source, event, payload, installation_id, delivery,
             gate_check_publish=_gate_check_publish,
             ungated_check_publish=_ungated_check_publish,
+            label_unlabel_publish=_label_unlabel_publish,
         )
         delivery.status = status_label
         # story #2327(재정의): "ignored"의 실제 사유를 delivery 행에도 남긴다 — HTTP 응답
@@ -815,6 +925,13 @@ async def github_webhook(
 
             for _payload in _ungated_check_publish:
                 background_tasks.add_task(publish_action_required_check, **_payload)
+        # story #2893(설계안 §3 B2-a): SHA 재-pending으로 인한 qa:pass/design:pass 라벨 제거도
+        # 동일하게 commit 後 발행(fail-closed).
+        if _label_unlabel_publish:
+            from app.services.gate_github_check import publish_label_unlabel
+
+            for _payload in _label_unlabel_publish:
+                background_tasks.add_task(publish_label_unlabel, **_payload)
         return _ok(result)
     except Exception as exc:
         await session.rollback()  # delivery insert 포함 전부 rollback → GitHub retry 가 재처리(영구 no-op 금지).

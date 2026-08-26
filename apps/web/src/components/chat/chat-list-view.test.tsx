@@ -137,6 +137,139 @@ describe('ChatListView — 다른 프로젝트 섹션 (story #2168 PR-②)', () 
 
     expect(sessionStorage.getItem('sprintable_pending_toast')).toBe('sprintable-content 프로젝트로 이동');
   });
+
+  // story #2972(선생님 admin 세션 실측) — "다른 프로젝트" DM 행은 title이 항상 NULL(list_
+  // conversations 관례)인데 BE가 participants를 안 줘 FE가 상대 이름을 조립할 재료가 없었다.
+  // 그 결과 "님과의 대화"(이름 앞이 빈 채 조사만 남은 접미 조각)가 그대로 노출됐다 — BE delta로
+  // participants를 실었으니 여기서도 ConversationRow와 동일하게 조립되는지 고정한다.
+  it('title=null인 DM 행은 participants로 상대 이름을 조립한다(#2972 fix)', async () => {
+    stubFetch([{
+      id: 'conv-outside-dm-1', type: 'dm', title: null,
+      project_id: 'proj-content', project_name: 'sprintable-content', project_slug: 'sprintable-content',
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '댄', avatar_url: null, type: 'human' },
+      ],
+    }]);
+    await mount();
+    expect(container.textContent).toContain('댄');
+    expect(container.textContent).not.toContain('님과의 대화');
+  });
+
+  // 참가자 정보 자체가 없는 진짜 무재료 상황(구 데이터·participants 필드 부재)만 no-fiction
+  // 폴백으로 떨어진다 — "님과의 대화"라는 반쪽 문자열이 아니라 완결된 단어("DM", dmSection과
+  // 동일 관례)여야 한다.
+  it('participants가 없는 DM 행은 완결된 "DM" 폴백을 쓴다 — 조사만 남는 조립 금지(#2972 AC2)', async () => {
+    stubFetch([{
+      id: 'conv-outside-dm-2', type: 'dm', title: null,
+      project_id: 'proj-content', project_name: 'sprintable-content', project_slug: 'sprintable-content',
+    }]);
+    await mount();
+    expect(container.textContent).not.toContain('님과의 대화');
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === 'DM');
+    expect(nameEl).not.toBeUndefined();
+  });
+});
+
+// story #2968(선생님 실사용 발견) — 리스트가 avatar.tsx(정본, #2887/#2921)를 안 쓰고 Bot 아이콘/
+// 이니셜만 그려 avatar_url이 애초에 죽은 데이터였다(캐시·BE 스냅샷 문제 아님 — 3층 그라운딩
+// 실측으로 확認: BE는 write/read 전부 members.avatar_url 라이브, 업로드도 매번 새 uuid4 키).
+function stubFetchWithConversations(items: unknown[]) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/recent-outside-project')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    if (url.includes('/api/conversations?')) {
+      return { ok: true, json: async () => ({ data: items, total: items.length }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  }));
+}
+
+describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
+  it('DM 상대의 avatar_url이 있으면 이니셜/아이콘 대신 실사진(<img>)을 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-1', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+      ],
+    }]);
+    await mount();
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('https://storage.googleapis.com/bucket/avatar/a.png');
+  });
+
+  it('avatar_url이 없으면(레거시·미업로드) Avatar 정본 자체의 이니셜 폴백으로 떨어진다(img 없음)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-2', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-2', name: '유나', avatar_url: null, type: 'human' },
+      ],
+    }]);
+    await mount();
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('유나');
+  });
+
+  // 음성대조 — group은 특정 1인 사진이 의미 없어(다인원) 기존 Users 아이콘 자리를 그대로 유지한다.
+  it('group 대화는 여전히 단일 실사진을 그리지 않는다(다인원, 회귀 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-group-1', type: 'group', title: '팀 채널',
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+        { member_id: 'them-2', name: '카디르', avatar_url: 'https://storage.googleapis.com/bucket/avatar/b.png', type: 'human' },
+      ],
+    }]);
+    await mount();
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  // 카디르 QA(#3397, HIGH 재발) — agentOnlyConvs 필터(`!myConvIds.has(c.id)`)는 conv.type을
+  // 안 가려 group 대화도 isAgentConv=true로 렌더된다. 그 경로에서까지 "임의 참가자 1인 사진을
+  // 대표사진처럼" 보여주면 안 된다(PR 자신의 group 원칙 위반) — 기존 group 테스트는 일반탭만
+  // 커버해 이 회귀를 놓쳤다. agent 탭을 실제로 열어(role="tab" 클릭) 검증한다.
+  it('agent 탭의 group 대화도 임의 참가자 사진을 대표사진처럼 노출하지 않는다(회귀 재발 방지)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('include_agent_conversations=true')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{
+              id: 'conv-agent-group-1', type: 'group', title: '에이전트 그룹',
+              latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+              participants: [
+                { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+                { member_id: 'agent-1', name: '올리베이라', avatar_url: 'https://storage.googleapis.com/bucket/avatar/agent.png', type: 'agent' },
+                { member_id: 'human-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/yuna.png', type: 'human' },
+              ],
+            }],
+            total: 1,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [], total: 0 }) };
+    }));
+    await mount();
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    expect(agentTab).not.toBeUndefined();
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('에이전트 그룹');
+    expect(container.querySelector('img')).toBeNull();
+  });
 });
 
 // story #1978(트랙C) — SSE 드롭 후 놓친 conversation.message_created가 목록에 미백필되던
@@ -182,5 +315,66 @@ describe('ChatListView — SSE 재연결·백그라운드 복귀 재fetch (story
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
 
     expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount);
+  });
+});
+
+describe('ChatListView — window.focus 강제 재fetch·중복 coalescing (story #3081)', () => {
+  it('window.focus가 오면(visibilitychange 없이도) 목록이 재fetch된다', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1);
+  });
+
+  it('SSE onReconnect와 focus가 근접 시점에 겹치면 재fetch가 1회로 coalesce된다', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+
+    const opts = useChatSseMock.mock.calls.at(-1)?.[0] as { onReconnect?: () => void } | undefined;
+    await act(async () => {
+      opts!.onReconnect!();
+      window.dispatchEvent(new Event('focus'));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1); // 2가 아니라 1
+  });
+});
+
+// story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로 재분류
+// (구조·크기 불변, preview는 이미 Body-small 부합이라 무편집).
+describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
+  it('대화명이 font-semibold(Claim 무게)를 갖는다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-1', type: 'dm', title: '유나',
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' },
+      ],
+    }]);
+    await mount();
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '유나');
+    expect(nameEl).not.toBeUndefined();
+    expect(nameEl?.className).toContain('font-semibold');
+    expect(nameEl?.className).not.toContain('font-medium');
+  });
+
+  // 카디르 QA독립검증(PR#3405) — PR-5가 ConversationRow만 커버해 OutsideProjectRow의 동일
+  // 처방(§1.3-b)이 무테스트였던 갭. PR-6(#3405 이월분)에 편입.
+  it('"다른 프로젝트" 항목의 대화명도 font-semibold(Claim 무게)를 갖는다', async () => {
+    stubFetch([OUTSIDE_CONV]);
+    await mount();
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '댄군과의 대화');
+    expect(nameEl).not.toBeUndefined();
+    expect(nameEl?.className).toContain('font-semibold');
+    expect(nameEl?.className).not.toContain('font-medium');
   });
 });

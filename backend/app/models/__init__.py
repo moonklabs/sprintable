@@ -28,6 +28,7 @@ from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
 from app.models.agent_auth_failure import AgentAuthFailure
+from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
 from app.models.human_api_key import HumanApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
@@ -63,6 +64,7 @@ from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
 from app.models.pull_request_story_link import PullRequestStoryLink
+from app.models.doc_chat_nudge_dispatch import DocChatNudgeDispatch
 from app.models.retro import RetroAction, RetroItem, RetroSession, RetroVote
 from app.models.reward import RewardLedger
 from app.models.login_audit_log import LoginAuditLog
