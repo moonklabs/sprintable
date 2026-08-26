@@ -21,7 +21,8 @@ export type RuntimeKey =
   | 'opencode'
   | 'claude-code'
   | 'codex'
-  | 'cursor';
+  | 'cursor'
+  | 'system-publisher';
 
 export interface RuntimeCapability {
   deterministicCommand: boolean;
@@ -41,6 +42,14 @@ export type RuntimeStatus = CommandSupport | 'unset' | 'unknown';
 /**
  * 드롭다운 옵션 순서 = 블루프린트 §3 표 순서(지원 → 부분 → 미지원으로 그룹핑).
  * 9 런타임, BE RuntimeType enum과 값 1:1 정합.
+ *
+ * story #3107(#3092 후속, 선생님 지시 2026-08-26) — `system-publisher`는 위 9종과 달리
+ * 사람이 붙이는 실 코딩 에이전트 런타임이 아니라 시스템이 발행한 메시지/기록의 발신
+ * 주체를 나타내는 예약값이다(#3103/#3508 QA 실측으로 registry 밖 실재 확認). capability는
+ * 둘 다 false(슬래시 커맨드 지원 대상 자체가 아님 — 사실을 그대로 반영, 억지 값 아님)로
+ * 두고 label만 부여해 `runtimeLabel()`/뱃지가 다른 9종과 동일 경로로 동작하게 한다. 단
+ * "실 에이전트가 고를 수 있는 런타임" 목록(workforce 상세 페이지의 런타임 드롭다운)에는
+ * 노출하지 않는다 — 그 목록에서만 명시적으로 걸러낸다(아래 workforce 상세 페이지 참고).
  */
 export const RUNTIME_REGISTRY: readonly RuntimeDef[] = [
   { key: 'hermes', label: 'Hermes', capability: { deterministicCommand: true, commandEndpointAvailable: true } },
@@ -52,6 +61,7 @@ export const RUNTIME_REGISTRY: readonly RuntimeDef[] = [
   { key: 'claude-code', label: 'Claude Code', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
   { key: 'codex', label: 'Codex', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
   { key: 'cursor', label: 'Cursor', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
+  { key: 'system-publisher', label: 'Sprintable', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
 ] as const;
 
 const REGISTRY_BY_KEY: ReadonlyMap<string, RuntimeDef> = new Map(
@@ -122,8 +132,15 @@ export interface ConnectorBadgeDef {
   /** kind='icon' 전용 — public/connector-icons/<key>.svg|png 상대경로(SVG 우선, 벡터
    * 부재 시 고해상 PNG도 허용 — hermes가 선례). */
   asset?: string;
-  /** kind='icon' 전용 — 'color'=브랜드 원색 유지(디스크=테마 bg-card). 'mono'=단색 마크
-   * (디스크=고정 밝은 배경, 무테마 — 다크 테마에서도 검정 마크 대비 확保). */
+  /** kind='icon' 전용 — 디스크 배경 전략(아이콘 자체 색상 수와는 무관 — 이름은 "단색
+   * 마크" 유래지만 실제 의미는 "디스크 고정" 여부):
+   * - 'color': 디스크=테마 토큰(bg-card). 아이콘이 어떤 색이든 그 원색을 그대로 두고
+   *   테마를 따라가는 디스크가 자체 대비를 낸다(예: openclaw의 그라디언트 레드).
+   * - 'mono': 디스크=고정 밝은 배경(무테마 — 다크 테마에서도 대비 확保). 원래는
+   *   흑백 단색 아이콘(cursor 등)을 위한 값이었으나, story #3092(#3107 delta, 유나
+   *   확定 2026-08-26) — sprintable-symbol처럼 다색(인디고+시안) 아이콘이라도 "항상
+   *   밝은 디스크 위에 얹혀야 하는" 경우(자사 브랜드 마크·투명배경 파생판)도 이 값을
+   *   재사용한다(disc:'light' 규격 표기와 동일 동작 — 아이콘 자체 색은 무변형 유지). */
   colorMode?: 'color' | 'mono';
   /** kind='initials'일 때(디스크 항상 이니셜)이거나, kind='icon'인데 아바타가 minIconSize
    * 미만이어서 아이콘 대신 보일 때(§ minIconSize 참고) 디스크에 그릴 1~2자(중립 mono,
@@ -170,4 +187,19 @@ export const CONNECTOR_BADGE_REGISTRY: Record<RuntimeKey, ConnectorBadgeDef> = {
     initials: 'He',
     sourceNote: '1st-party: https://nousresearch.com/wp-content/uploads/2024/03/android-chrome-512x512-1-300x300.png(자사 사이트 자체 favicon/앱아이콘 세트 중 하나, 300×300 PNG — Nous Research 브랜드 마스코트 일러스트. 배경 투명·검정 단색 라인아트라 mono 취급). 3단계 "벡터 자산 부재" 판정은 hermes-agent repo의 유니코드 글리프 favicon만 조사한 것이었고, 공식 사이트 자체의 래스터 아이콘 세트는 미조사 상태였음(선생님 재지시로 발견) — 이 판정으로 대체. minIconSize=48·이니셜 "He"는 유나 실측(av48 확신 식별·av36 이하 blob)',
   },
+  // story #3107(#3092 후속, 선생님 지시 2026-08-26) — system-publisher는 사람이 붙이는
+  // 코딩 에이전트가 아니라 시스템이 발행한 메시지/기록의 발신 주체(#3103/#3508 QA가
+  // registry 밖 실재 값으로 실측). 이전엔 "시스템 내부 정체성이라 라벨 생략" 판정이었으나
+  // 선생님이 "생략 대신 Sprintable 자사 심볼로 표기"로 확定 — 2색 브랜드 마크(인디고+시안,
+  // globals.css --brand-mark-primary/--brand-mark-accent와 동일 마크).
+  //
+  // story #3107 delta(유나 design 판정 2026-08-26) — 최초 구현은 `/icon.svg`(파비콘) 원본을
+  // 그대로 썼으나, 그 파일은 흰 배경 rect가 baked-in돼 있어 다크 테마 디스크 위에서 밝은
+  // 사각 패치가 비치는 결함이 실측 확認됐다. 처방: 자사 자산이라 무변형 제약이 제3자 상표
+  // 건과 달리 완화된다는 PO 판단 하, **흰 rect만 제거한 투명 파생판**
+  // `connector-icons/sprintable-symbol.svg`를 신설(마크 자체의 path data·색상은 무변형 —
+  // diff로 검증 가능). `/icon.svg`(실제 파비콘 라우트) 자체는 불변. 디스크는 다른 mono
+  // 아이콘과 동형으로 고정 밝은 배경(colorMode='mono' — 위 필드 독스트링의 "disc:'light'"
+  // 케이스, 아이콘 자체는 2색 원본 그대로).
+  'system-publisher': { kind: 'icon', asset: '/connector-icons/sprintable-symbol.svg', colorMode: 'mono', sourceNote: '1st-party 파생판: apps/web/src/app/icon.svg(Sprintable 웹 앱 자체의 Next.js app-icon 자산, `/icon.svg` 경로로 서빙)에서 흰 배경 rect만 제거 — 마크(인디고 #42549B+시안 #00A3D1 path data) 자체는 무변형. 유나 design 판정(2026-08-26)으로 다크 테마 배경 패치 결함 처방.' },
 };
