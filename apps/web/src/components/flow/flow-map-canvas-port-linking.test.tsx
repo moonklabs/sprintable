@@ -168,12 +168,12 @@ describe('FlowMapCanvas — port 가시성 사이징(2026-08-27, rest 10px/hover
     expect(port.getAttribute('data-slot')).toBe('tooltip-trigger');
   });
 
-  it('버튼(터치 히트박스)이 44px 폭·38px 높이로 시각 점보다 넓게 확장돼 있다(투명 확장)', async () => {
+  it('버튼(히트박스)이 44×24(WCAG 2.5.8 AA)로 시각 점보다 넓게 확장돼 있다(투명 확장)', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
     await renderCanvas(lane);
     const port = getPort('n1');
     expect(port.className).toContain('w-11'); // 44px
-    expect(port.className).toContain('h-[38px]');
+    expect(port.className).toContain('h-[24px]');
   });
 
   it('crosshair 커서가 여전히 유지된다(회귀 없음)', async () => {

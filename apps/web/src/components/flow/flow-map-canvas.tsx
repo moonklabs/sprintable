@@ -188,11 +188,11 @@ function FlowMapNodeCard({
           토폴로지 불변) — 방향은 «끈 순서»가 정하므로 양쪽에 달지 않는다.
           story #2353 가시성 후속(2026-08-27, 유나 확定分) — 3px가 라이브에서 "안 보인다"로
           실증돼 rest 10px(테두리 1.6px)/hover·active 14px(브랜드+"+" 글리프)로 확대,
-          "+ 연결" 툴팁 신설. 터치 히트박스는 시각 크기와 분리해 44px 폭으로 투명 확장 —
-          ⚠️세로는 44 그대로 쓰지 않고 38px로 살짝 좁혔다: NODE_ROW_HEIGHT(32px)가 카드
-          (24px)보다 8px만 크고, 44를 그대로 중앙 배치하면 인접 행 카드 쪽으로 ~2px
-          파고들어 "인접 히트박스 간 ≥8px" 요건을 어긴다 — 가로는 카드 바깥쪽이라 이웃이
-          없어 44 그대로 유지. */}
+          "+ 연결" 툴팁 신설. 히트박스는 시각 크기와 분리해 44×24로 확장 —
+          ⚠️데스크톱은 마우스 표면이라 Apple HIG 44×44(터치 표면 기준)가 아닌 WCAG 2.5.8 AA
+          (포인터 타깃 최소 24×24)가 근거: 세로 24는 NODE_ROW_HEIGHT(32px)보다 작아 인접 행
+          카드와 «≥8px» 여유를 두고도 겹침이 0(카디르 기하 재검산, 2026-08-27). 가로는 카드
+          바깥쪽이라 이웃이 없어 44 그대로 유지. */}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -201,7 +201,7 @@ function FlowMapNodeCard({
               aria-label={t('portLinkStart', { n: node.storyNumber })}
               onPointerDown={(e) => onPortPointerDown(e, node.id)}
               onKeyDown={(e) => onPortKeyDown(e, node.id)}
-              className="focus-inset group absolute -right-[22px] top-1/2 flex h-[38px] w-11 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
+              className="focus-inset group absolute -right-[22px] top-1/2 flex h-[24px] w-11 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
             />
           }
         >
