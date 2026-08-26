@@ -28,9 +28,13 @@ describe('TrustSeal (claimed — Green 무결성 SOUL-LOCK, claimed-vs-verified-
     expect(markup.toLowerCase()).not.toContain('text-success');
   });
 
-  it('renders the amber "주장" framing with a specific agent avatar when agentInitial is given', () => {
+  // story #3099(DS·AA 후속, #3090과 동형) — "검증 대기" 라벨(10.5px bold)이 라이트에서
+  // proof-amber AA 미달(3.64)이라 text-proof-ink로 중립화. amber 토큰 자체를 더는 참조하지
+  // 않는다(별도 dot 없는 자리라 텍스트만 — SOUL-LOCK인 "green 미참조"는 무변경).
+  it('renders the neutral(ink) "주장" framing with a specific agent avatar when agentInitial is given', () => {
     const markup = render({ variant: 'claimed', agentInitial: '미' });
-    expect(markup).toContain('proof-amber');
+    expect(markup).toContain('text-proof-ink');
+    expect(markup).not.toContain('proof-amber');
     expect(markup).toContain('에이전트 주장');
     expect(markup).toContain('인간 검증 대기');
     expect(markup).toContain('>미<');

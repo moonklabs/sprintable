@@ -108,7 +108,9 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
       <div className="mt-6 border border-border bg-muted/30 p-3">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{t('trustRailColorRuleTitle')}</div>
         <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-          <strong className="text-proof-green">{t('trustRailColorRuleGreen')}</strong> {t('trustRailColorRuleBody')}
+          {/* story #3099(DS·AA 후속) — green 소형텍스트(12px) AA 미달, text-proof-ink로
+              중립화(별도 dot 없는 범례 문구 — 텍스트 자체가 이미 규칙을 서술). */}
+          <strong className="text-proof-ink">{t('trustRailColorRuleGreen')}</strong> {t('trustRailColorRuleBody')}
         </div>
       </div>
     </div>
