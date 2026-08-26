@@ -1,22 +1,9 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
+import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 
 const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
-
-// story #3118(Sign in with Apple) — PO 전언(페드루, 민 그라운딩 축): scope에 name/email이
-// 있는 Apple 콜백은 GET 리다이렉트가 아니라 cross-site POST(response_mode=form_post)로
-// 온다. SameSite=Lax 쿠키는 cross-site *POST*엔 안 실린다(Lax는 top-level GET 네비게이션만
-// 봐준다) — 이 5개 oauth_* 쿠키가 Lax로 남아있으면 Apple 콜백에서 state 검증이 "쿠키가 아예
-// 안 옴"으로 매번 헛실패한다(잘 알려진 함정 클래스). Apple만 SameSite=None(+Secure 필수 —
-// 브라우저가 None을 Secure 없이 거부)으로 쓴다. Google은 GET 리다이렉트라 Lax로 충분 —
-// 그대로 둔다(불필요하게 None으로 넓히지 않는다, 최소 권한).
-function oauthCookieOptions(provider: string) {
-  if (provider === 'apple') {
-    return { httpOnly: true, secure: true, sameSite: 'none' as const, maxAge: 300, path: '/' };
-  }
-  return { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, maxAge: 300, path: '/' };
-}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
