@@ -104,6 +104,18 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('treats /.well-known/apple-app-site-association as public — [P1] iOS TestFlight 구글 로그인 후 404 인시던트, 실제 AASA 경로(§10.2)', async () => {
+    const response = await middleware(makeRequest('/.well-known/apple-app-site-association'));
+    expect(response.status).toBe(200);
+  });
+
+  it('treats /native/oauth-return as public (no cookie) — [P1] 실측(next start+curl)으로 발견: 누락 시 307-to-login으로 폴백 페이지가 렌더되지 않았다', async () => {
+    // native 핸드오프 콜백은 이 응답에 웹 세션 쿠키를 세팅하지 않으므로(격리 rail) 쿠키 없는
+    // 요청이 정상 케이스 — /auth/native와 동일 결함 클래스.
+    const response = await middleware(makeRequest('/native/oauth-return?code=test-code'));
+    expect(response.status).toBe(200);
+  });
+
   it('passes all /api/* paths without JWT check', async () => {
     const apiPaths = [
       '/api/v1/bridge/slack/interactions',

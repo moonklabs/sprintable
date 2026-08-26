@@ -90,6 +90,14 @@ const PUBLIC_PREFIX = [
   // §10.2: App Link/Universal Link 검증파일 — OS 레벨 검증기가 인증 쿠키 없이 호출.
   '/.well-known/',
   '/apple-app-site-association',
+  // [P1] iOS TestFlight 구글 로그인 후 404 인시던트 — AASA 미서빙으로 유니버설 링크 복귀가
+  // 실패하면 인앱 브라우저가 이 경로를 직접 로드한다(?code=...). native 핸드오프 콜백은
+  // 이 응답에 웹 세션 쿠키를 절대 세팅하지 않으므로(route.ts §7.4/§10.1 — 격리 rail) 쿠키가
+  // 없는 게 정상 — /auth/native·/auth/oauth-handoff(story 26170479/PR#2224)와 동일한
+  // "세션 생성 전 라우트가 보호 라우트로 오인돼 307" 결함 클래스. 실측(next start + curl)으로
+  // 발견: 이 목록 누락 시 /login?next=%2Fnative%2Foauth-return 307로 튕겨 폴백 페이지가
+  // 렌더되지 않았다.
+  '/native/oauth-return',
   '/invite',
   '/internal-dogfood',
   '/terms',
