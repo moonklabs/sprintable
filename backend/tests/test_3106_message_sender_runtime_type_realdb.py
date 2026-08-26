@@ -55,7 +55,7 @@ def _client_for(app):
 
 async def _setup_app_human(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -72,7 +72,9 @@ async def _setup_app_human(app, Session, user_id, org_id):
             claims={"app_metadata": {"org_id": str(org_id)}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3) — get_db만 걸면 get_read_db를 놓치는 재발 클래스를 구조적으로
+    # 막는 정본 헬퍼(tests/conftest.py). raw dependency_overrides[get_db]=... 직접대입 금지.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
