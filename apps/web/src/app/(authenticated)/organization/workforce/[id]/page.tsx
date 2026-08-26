@@ -462,11 +462,15 @@ export default function AgentDetailPage() {
         const stagedDef = getRuntimeDef(selectedRuntime);
         const stagedKnown = !!stagedDef;
         // ⑤ 미인식: 원값을 드롭다운 트리거에 그대로 노출(데이터 은닉 금지) + 미인식 표시.
+        // story #3107 — system-publisher는 사람이 만든 에이전트가 고를 실 런타임이 아니라
+        // 시스템 예약값이라(뱃지/라벨 표기 전용) 이 "에이전트 런타임 지정" 드롭다운에서만
+        // 명시적으로 걸러낸다(runtimeLabel()·CONNECTOR_BADGE_REGISTRY 등 다른 소비처는
+        // RUNTIME_REGISTRY를 그대로 써 무필터).
         const runtimeOptions = [
           ...(selectedRuntime && !stagedKnown
             ? [{ value: selectedRuntime, label: `${selectedRuntime} (${t('runtimeUnknown')})`, disabled: true }]
             : []),
-          ...RUNTIME_REGISTRY.map((r) => ({ value: r.key, label: r.label })),
+          ...RUNTIME_REGISTRY.filter((r) => r.key !== 'system-publisher').map((r) => ({ value: r.key, label: r.label })),
         ];
         // 변경 + registry 등록값일 때만 저장 가능(④ 미선택·⑤ 미인식 재저장 방지).
         const canSaveRuntime = stagedKnown && selectedRuntime !== savedRuntime;

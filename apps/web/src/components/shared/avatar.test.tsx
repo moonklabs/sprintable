@@ -337,4 +337,24 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
     expect(container.textContent).toContain('Agent');
   });
+
+  // story #3107(#3092 후속, 선생님 지시 2026-08-26) — system-publisher(시스템 발행 주체,
+  // dev 실물 team-members 레코드로 확認됨)는 이전엔 registry 밖이라 라벨 생략이었으나,
+  // 이제 Sprintable 자사 app-icon(src/app/icon.svg, `/icon.svg` 경로) 무변형 재사용으로
+  // 표기한다. 다른 8종과 동형 사다리(av≥28 아이콘·<28 Agent 텍스트, minIconSize 미지정).
+  it('system-publisher는 Sprintable app-icon 배지를 쓴다(신규 디자인 없이 기존 /icon.svg 재사용)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="시스템 발행" actorType="agent" size={32} runtimeType="system-publisher" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk.className).toContain('bg-card');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/icon.svg');
+
+    const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
+    await act(async () => {
+      trigger.focus();
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('시스템 발행Agent · Sprintable');
+  });
 });

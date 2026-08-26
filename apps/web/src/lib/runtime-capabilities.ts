@@ -21,7 +21,8 @@ export type RuntimeKey =
   | 'opencode'
   | 'claude-code'
   | 'codex'
-  | 'cursor';
+  | 'cursor'
+  | 'system-publisher';
 
 export interface RuntimeCapability {
   deterministicCommand: boolean;
@@ -41,6 +42,14 @@ export type RuntimeStatus = CommandSupport | 'unset' | 'unknown';
 /**
  * 드롭다운 옵션 순서 = 블루프린트 §3 표 순서(지원 → 부분 → 미지원으로 그룹핑).
  * 9 런타임, BE RuntimeType enum과 값 1:1 정합.
+ *
+ * story #3107(#3092 후속, 선생님 지시 2026-08-26) — `system-publisher`는 위 9종과 달리
+ * 사람이 붙이는 실 코딩 에이전트 런타임이 아니라 시스템이 발행한 메시지/기록의 발신
+ * 주체를 나타내는 예약값이다(#3103/#3508 QA 실측으로 registry 밖 실재 확認). capability는
+ * 둘 다 false(슬래시 커맨드 지원 대상 자체가 아님 — 사실을 그대로 반영, 억지 값 아님)로
+ * 두고 label만 부여해 `runtimeLabel()`/뱃지가 다른 9종과 동일 경로로 동작하게 한다. 단
+ * "실 에이전트가 고를 수 있는 런타임" 목록(workforce 상세 페이지의 런타임 드롭다운)에는
+ * 노출하지 않는다 — 그 목록에서만 명시적으로 걸러낸다(아래 workforce 상세 페이지 참고).
  */
 export const RUNTIME_REGISTRY: readonly RuntimeDef[] = [
   { key: 'hermes', label: 'Hermes', capability: { deterministicCommand: true, commandEndpointAvailable: true } },
@@ -52,6 +61,7 @@ export const RUNTIME_REGISTRY: readonly RuntimeDef[] = [
   { key: 'claude-code', label: 'Claude Code', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
   { key: 'codex', label: 'Codex', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
   { key: 'cursor', label: 'Cursor', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
+  { key: 'system-publisher', label: 'Sprintable', capability: { deterministicCommand: false, commandEndpointAvailable: false } },
 ] as const;
 
 const REGISTRY_BY_KEY: ReadonlyMap<string, RuntimeDef> = new Map(
@@ -170,4 +180,12 @@ export const CONNECTOR_BADGE_REGISTRY: Record<RuntimeKey, ConnectorBadgeDef> = {
     initials: 'He',
     sourceNote: '1st-party: https://nousresearch.com/wp-content/uploads/2024/03/android-chrome-512x512-1-300x300.png(자사 사이트 자체 favicon/앱아이콘 세트 중 하나, 300×300 PNG — Nous Research 브랜드 마스코트 일러스트. 배경 투명·검정 단색 라인아트라 mono 취급). 3단계 "벡터 자산 부재" 판정은 hermes-agent repo의 유니코드 글리프 favicon만 조사한 것이었고, 공식 사이트 자체의 래스터 아이콘 세트는 미조사 상태였음(선생님 재지시로 발견) — 이 판정으로 대체. minIconSize=48·이니셜 "He"는 유나 실측(av48 확신 식별·av36 이하 blob)',
   },
+  // story #3107(#3092 후속, 선생님 지시 2026-08-26) — system-publisher는 사람이 붙이는
+  // 코딩 에이전트가 아니라 시스템이 발행한 메시지/기록의 발신 주체(#3103/#3508 QA가
+  // registry 밖 실재 값으로 실측). 이전엔 "시스템 내부 정체성이라 라벨 생략" 판정이었으나
+  // 선생님이 "생략 대신 Sprintable 자사 심볼로 표기"로 확定 — 에셋은 신규 제작 없이
+  // 웹 앱 자체의 app-icon 자산(src/app/icon.svg, Next.js app-icon 컨벤션으로 `/icon.svg`
+  // 경로에 그대로 서빙됨)을 무변형 재사용한다. 2색 브랜드 마크(인디고+시안, globals.css
+  // --brand-mark-primary/--brand-mark-accent와 동일 마크)라 원본색 유지(colorMode='color').
+  'system-publisher': { kind: 'icon', asset: '/icon.svg', colorMode: 'color', sourceNote: '1st-party: apps/web/src/app/icon.svg(Sprintable 웹 앱 자체의 Next.js app-icon 자산, `/icon.svg` 경로로 서빙 — 신규 디자인 없이 그대로 재사용)' },
 };
