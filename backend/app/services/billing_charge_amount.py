@@ -26,11 +26,20 @@ from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.offering_version import OfferingVersion
 from app.models.org_subscription import OrgSubscription
 from app.models.project import OrgMember
+from app.services.platform_settings import get_platform_settings
 
 
 class ChargeAmountError(Exception):
     """청구액을 계산할 수 없는 상태(구독/카탈로그 불변식 위반) — 잘못된 금액으로 조용히
     진행하는 대신 명시적으로 실패한다."""
+
+
+def apply_vat_minor(amount_minor: int, vat_rate_bp: int) -> int:
+    """story #3097(선생님 결정 2026-08-26) — 공급가(minor unit)에 VAT를 가산한 최종
+    청구액. `vat_rate_bp`는 platform_settings.vat_rate_bp(basis points, 1bp=0.01%) —
+    호출부가 하드코딩하지 않고 매번 이 파라미터로 받는다. 반올림은 FE `withVatKrw`
+    (`Math.round(krw * (1 + VAT_RATE))`)와 동일 관례(표시-청구 반올림 방식 일치)."""
+    return round(amount_minor * (10_000 + vat_rate_bp) / 10_000)
 
 
 async def count_human_seats(session: AsyncSession, org_id: uuid.UUID) -> int:
@@ -129,7 +138,17 @@ async def _compute_amount_for_offering(
             f"org_subscription.currency={sub.currency!r} for org_id={org_id}"
         )
 
-    return base_amount + seat_amount + pack_amount, offering.currency
+    # story #3097(선생님 결정 2026-08-26) — VAT는 base+seat(공급가)에만 가산한다.
+    # pack_amount는 compute_pack_charge_minor가 billing_ledger_entries(entry_type=
+    # 'pack_purchase')에서 합산한 값 — 그 원장은 purchase_packs()가 기입 시점에 이미
+    # VAT를 가산해 기록한다(billing_pack.py 참고). 여기서 pack_amount까지 다시 VAT를
+    # 매기면 이중가산이 된다 — 그래서 base+seat 합만 가산하고 pack_amount는 그대로
+    # 더한다(현재 subscription_id 미기입 갭으로 pack_amount는 항상 0 — compute_pack_
+    # charge_minor 독스트링 참고 — 이 분기는 그 갭이 닫힐 미래를 위한 정확성 보장).
+    settings = await get_platform_settings(session)
+    taxed_base_and_seat = apply_vat_minor(base_amount + seat_amount, settings.vat_rate_bp)
+
+    return taxed_base_and_seat + pack_amount, offering.currency
 
 
 async def _load_sub(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:

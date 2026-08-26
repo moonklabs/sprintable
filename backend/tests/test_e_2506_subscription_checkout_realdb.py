@@ -108,7 +108,8 @@ async def test_checkout_full_flow_activates_subscription_and_writes_ledger_reald
                 )
             ).first()
             assert order_row.status == "confirmed"
-            assert order_row.amount_minor == 59_000
+            # story #3097 — VAT 10% 가산(공급가 59,000 → 청구 64,900).
+            assert order_row.amount_minor == 64_900
 
             # 원장(A2)에 charge 엔트리가 실제로 기입됐는지.
             ledger_row = (
@@ -118,7 +119,7 @@ async def test_checkout_full_flow_activates_subscription_and_writes_ledger_reald
                 )
             ).first()
             assert ledger_row.entry_type == "charge"
-            assert ledger_row.amount_minor == 59_000
+            assert ledger_row.amount_minor == 64_900
             assert ledger_row.direction == "credit"
     finally:
         await engine.dispose()
