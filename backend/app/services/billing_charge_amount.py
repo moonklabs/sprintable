@@ -26,11 +26,42 @@ from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.offering_version import OfferingVersion
 from app.models.org_subscription import OrgSubscription
 from app.models.project import OrgMember
+from app.services.platform_settings import get_platform_settings
 
 
 class ChargeAmountError(Exception):
     """청구액을 계산할 수 없는 상태(구독/카탈로그 불변식 위반) — 잘못된 금액으로 조용히
     진행하는 대신 명시적으로 실패한다."""
+
+
+def apply_vat_minor(amount_minor: int, vat_rate_bp: int) -> int:
+    """story #3097(선생님 결정 2026-08-26) — 공급가(minor unit)에 VAT를 가산한 최종
+    청구액. `vat_rate_bp`는 platform_settings.vat_rate_bp(basis points, 1bp=0.01%) —
+    호출부가 하드코딩하지 않고 매번 이 파라미터로 받는다.
+
+    ⚠️FE `withVatKrw`(apps/web/src/ee/components/billing/pricing-data.ts,
+    `Math.round(krw * (1 + VAT_RATE))`)와 **지금은 결과가 같지만 두 사본**이다 —
+    근본(율 단일 출처화)은 아직 안 닫혔다(페드루 PO 리뷰, PR#3506, 2026-08-26 —
+    후속 story #3104 「VAT율 단일 출처화 — FE가 BE platform_settings.vat_rate_bp를
+    소비하도록」에 등재). 구체적으로 갈리는 축 3개:
+      ①**출처** — FE `VAT_RATE=0.1`은 하드코딩 상수, BE는 이 함수의 `vat_rate_bp`
+        인자(어드민이 platform_settings에서 바꿀 수 있음) — 어드민이 vat_rate_bp를
+        1000(10%) 밖으로 바꾸는 순간 FE 표시와 BE 실 청구가 갈라진다.
+      ②**가산 순서** — 구독 청구(`_compute_amount_for_offering`)는 여기처럼 합산
+        後 가산(FE와 동형)이지만, **팩 구매**(billing_pack.py::purchase_packs)는
+        개당 가산 後 quantity를 곱한다(그래야 `_packs_reserved_this_period`의
+        총액÷개당가 역산이 나눠떨어진다 — purchase_packs 주석 참고) — FE
+        `PackPurchaseDialog`는 `withVatKrw(pack.priceKrwPerPack * quantity)`로
+        합산 後 가산이라 이 둘도 산식 자체가 다르다(현재 가격대에선 우연히 결과가
+        같음 — 카탈로그가 1,000원 단위라 나눗셈 잔차가 안 생기는 것뿐).
+      ③**반올림 규칙** — Python `round()`는 5 근처에서 은행가 반올림(round-half-
+        to-even), JS `Math.round()`는 항상 올림(round-half-up) — 정확히 .5로
+        떨어지는 금액이면 이 둘이 다른 정수로 갈 수 있다(현재 카탈로그 가격들은
+        이 경계에 안 걸림, 실측 확認 — test_3097_vat_fe_be_cross_pin.py 참고).
+    이 함수/파일을 고칠 때는 위 세 축이 여전히 우연 일치인지, 근본(단일 출처화)이
+    닫혔는지부터 확認할 것 — 안 닫혔으면 test_3097_vat_fe_be_cross_pin.py가 먼저
+    빨개지는 걸 신뢰(가격/율/산식 변경의 조기경보 tripwire)."""
+    return round(amount_minor * (10_000 + vat_rate_bp) / 10_000)
 
 
 async def count_human_seats(session: AsyncSession, org_id: uuid.UUID) -> int:
@@ -129,7 +160,17 @@ async def _compute_amount_for_offering(
             f"org_subscription.currency={sub.currency!r} for org_id={org_id}"
         )
 
-    return base_amount + seat_amount + pack_amount, offering.currency
+    # story #3097(선생님 결정 2026-08-26) — VAT는 base+seat(공급가)에만 가산한다.
+    # pack_amount는 compute_pack_charge_minor가 billing_ledger_entries(entry_type=
+    # 'pack_purchase')에서 합산한 값 — 그 원장은 purchase_packs()가 기입 시점에 이미
+    # VAT를 가산해 기록한다(billing_pack.py 참고). 여기서 pack_amount까지 다시 VAT를
+    # 매기면 이중가산이 된다 — 그래서 base+seat 합만 가산하고 pack_amount는 그대로
+    # 더한다(현재 subscription_id 미기입 갭으로 pack_amount는 항상 0 — compute_pack_
+    # charge_minor 독스트링 참고 — 이 분기는 그 갭이 닫힐 미래를 위한 정확성 보장).
+    settings = await get_platform_settings(session)
+    taxed_base_and_seat = apply_vat_minor(base_amount + seat_amount, settings.vat_rate_bp)
+
+    return taxed_base_and_seat + pack_amount, offering.currency
 
 
 async def _load_sub(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:

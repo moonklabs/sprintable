@@ -85,7 +85,8 @@ async def test_purchase_pack_confirms_and_writes_pack_purchase_ledger_realdb():
                 )
 
             assert order.status == "confirmed"
-            assert order.amount_minor == 10_000  # 5,000 * 2
+            # story #3097 — VAT 10% 가산(개당 5,000×1.1=5,500 × 2).
+            assert order.amount_minor == 11_000
 
             entry = (
                 await session.execute(
@@ -97,7 +98,7 @@ async def test_purchase_pack_confirms_and_writes_pack_purchase_ledger_realdb():
                 )
             ).first()
             assert entry.entry_type == "pack_purchase"
-            assert entry.amount_minor == 10_000
+            assert entry.amount_minor == 11_000
     finally:
         await engine.dispose()
 
@@ -238,6 +239,7 @@ async def test_purchase_pack_concurrent_requests_do_not_exceed_max_packs_realdb(
                     {"prefix": f"pack:{org_id}:au:%"},
                 )
             ).scalar_one()
-            assert total_packs_amount == 25_000  # 5개 * 5,000 — 6개(30,000)로 안 샘
+            # story #3097 — VAT 10% 가산(개당 5,500) — 5개 * 5,500. 6개(33,000)로 안 샘.
+            assert total_packs_amount == 27_500
     finally:
         await engine.dispose()

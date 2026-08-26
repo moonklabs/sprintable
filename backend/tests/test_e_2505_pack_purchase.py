@@ -37,6 +37,20 @@ def _exec_result(scalar_value):
     return r
 
 
+def _fake_settings(vat_rate_bp=1000):
+    """story #3097 — platform_settings.vat_rate_bp 목(default 1000bp=10%)."""
+    s = MagicMock()
+    s.vat_rate_bp = vat_rate_bp
+    return s
+
+
+def _patch_settings(vat_rate_bp=1000):
+    return patch(
+        "app.services.billing_pack.get_platform_settings",
+        new=AsyncMock(return_value=_fake_settings(vat_rate_bp)),
+    )
+
+
 # ─── purchase_packs — 입력/전제 검증 ────────────────────────────────────────
 
 @pytest.mark.anyio
@@ -106,11 +120,11 @@ async def test_purchase_packs_raises_when_exceeding_max_packs():
     session.execute = AsyncMock(side_effect=[
         _exec_result(sub),          # sub lookup
         MagicMock(),                # advisory xact lock 획득
-        _exec_result(4 * 5_000),    # 이미 4개(20,000원어치) 예약/구매
+        _exec_result(4 * 5_500),    # 이미 4개(VAT 가산 개당 5,500원 × 4 = 22,000원어치) 예약/구매
     ])
     session.get = AsyncMock(return_value=offering)
 
-    with pytest.raises(PackPurchaseError, match="max_packs"):
+    with _patch_settings(), pytest.raises(PackPurchaseError, match="max_packs"):
         await purchase_packs(session, org_id=org_id, resource="au", quantity=2, idempotency_key="k1")  # 4+2 > 5
 
     session.rollback.assert_awaited_once()  # 락을 즉시 해제
@@ -131,11 +145,13 @@ async def test_purchase_packs_allows_up_to_max_packs_exactly():
     session.execute = AsyncMock(side_effect=[
         _exec_result(sub),
         MagicMock(),              # advisory xact lock 획득
-        _exec_result(3 * 5_000),  # 3개 이미 예약/구매
+        _exec_result(3 * 5_500),  # 3개 이미 예약/구매(VAT 가산 개당 5,500원)
     ])
     session.get = AsyncMock(return_value=offering)
 
-    with patch("app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)) as mock_charge:
+    with _patch_settings(), patch(
+        "app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)
+    ) as mock_charge:
         result = await purchase_packs(session, org_id=org_id, resource="au", quantity=2, idempotency_key="k1")  # 3+2=5=max
 
     assert result.status == "confirmed"
@@ -154,10 +170,15 @@ async def test_purchase_packs_no_cap_when_max_packs_none():
     confirmed_order.status = "confirmed"
 
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=_exec_result(sub))  # max_packs None → 두번째 조회(구매이력) 안 함
+    # sub lookup(1)만 있으면 된다 — max_packs None → advisory lock/구매이력 조회 스킵.
+    # get_platform_settings는 session.execute가 아니라 별도 패치로 우회하므로 이 리스트에
+    # 안 섞인다.
+    session.execute = AsyncMock(return_value=_exec_result(sub))
     session.get = AsyncMock(return_value=offering)
 
-    with patch("app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)):
+    with _patch_settings(), patch(
+        "app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)
+    ):
         result = await purchase_packs(session, org_id=org_id, resource="lab_credit", quantity=100, idempotency_key="k1")
 
     assert result.status == "confirmed"
@@ -180,11 +201,14 @@ async def test_purchase_packs_charges_price_times_quantity_with_pack_purchase_en
     session.execute = AsyncMock(side_effect=[_exec_result(sub), MagicMock(), _exec_result(0)])
     session.get = AsyncMock(return_value=offering)
 
-    with patch("app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)) as mock_charge:
+    with _patch_settings(), patch(
+        "app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)
+    ) as mock_charge:
         await purchase_packs(session, org_id=org_id, resource="au", quantity=3, idempotency_key="click-1")
 
     kwargs = mock_charge.await_args.kwargs
-    assert kwargs["amount_minor"] == 5_000 * 3
+    # story #3097 — 청구액은 VAT 가산 後(개당 5,000×1.1=5,500 반올림 × 3).
+    assert kwargs["amount_minor"] == 5_500 * 3
     assert kwargs["currency"] == "krw"
     assert kwargs["entry_type"] == "pack_purchase"
     assert kwargs["ledger_metadata"] == {"resource": "au", "quantity": 3, "unit": 150_000}
@@ -204,11 +228,13 @@ async def test_purchase_packs_same_idempotency_key_is_deterministic_order_id():
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
         _exec_result(sub), MagicMock(), _exec_result(0),
-        _exec_result(sub), MagicMock(), _exec_result(5_000),
+        _exec_result(sub), MagicMock(), _exec_result(5_500),
     ])
     session.get = AsyncMock(return_value=offering)
 
-    with patch("app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)) as mock_charge:
+    with _patch_settings(), patch(
+        "app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)
+    ) as mock_charge:
         await purchase_packs(session, org_id=org_id, resource="au", quantity=1, idempotency_key="same-key")
         await purchase_packs(session, org_id=org_id, resource="au", quantity=1, idempotency_key="same-key")
 
@@ -231,7 +257,7 @@ async def test_purchase_packs_declined_raises_with_order_attached():
     session.execute = AsyncMock(side_effect=[_exec_result(sub), MagicMock(), _exec_result(0), _exec_result(failed_order)])
     session.get = AsyncMock(return_value=offering)
 
-    with patch(
+    with _patch_settings(), patch(
         "app.services.billing_pack.charge_org",
         new=AsyncMock(side_effect=TossApiError("CARD_DECLINED", "카드 거절", status_code=400)),
     ):
