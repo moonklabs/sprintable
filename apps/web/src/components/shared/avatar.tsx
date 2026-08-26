@@ -104,7 +104,7 @@ export function Avatar({
           className={cn('absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 font-bold', AGENT_MARK_FILL_CLASS)}
           style={{ fontSize: Math.max(7, Math.round(badgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
         >
-          AI
+          Agent
         </span>
       )}
       {isAgent && presenceStatus ? (

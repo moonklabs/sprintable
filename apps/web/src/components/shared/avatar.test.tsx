@@ -49,30 +49,31 @@ describe('Avatar — story #2887 S2g', () => {
     expect(container.textContent).toContain('송');
   });
 
-  it('휴먼은 링·AI배지·dot이 없다', async () => {
+  it('휴먼은 링·Agent배지·dot이 없다', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="송윤재" avatarUrl={null} actorType="human" presenceStatus="online" />));
     });
-    expect(container.textContent).not.toContain('AI');
+    expect(container.textContent).not.toContain('Agent');
     expect(container.querySelector('[role="img"]')).toBeNull();
   });
 
-  it('에이전트는 이미지가 있어도 AI 배지가 유지된다', async () => {
+  it('에이전트는 이미지가 있어도 Agent 배지가 유지된다', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" avatarUrl="https://example.com/a.png" actorType="agent" presenceStatus="online" />));
     });
     expect(container.querySelector('img')).not.toBeNull();
-    expect(container.textContent).toContain('AI');
+    expect(container.textContent).toContain('Agent');
     expect(container.querySelector('[role="img"]')).not.toBeNull(); // PresenceDot
   });
 
-  // story #3049(2984-S1) — 정적 "AI" 코너배지 border는 proof-blue 유지(정체성 마킹), 배경
+  // story #3049(2984-S1) — 정적 "Agent" 코너배지 border는 proof-blue 유지(정체성 마킹), 배경
   // soft-fill은 폐지(AGENT_MARK_FILL_CLASS=투명, 헤어라인만 남김).
-  it('AI 코너배지가 border-proof-blue를 쓰고 soft-fill/citron은 안 쓴다', async () => {
+  // story #3092(선생님 전달 제안 1단계) — 배지 텍스트 "AI"→"Agent"로 교체.
+  it('Agent 코너배지가 border-proof-blue를 쓰고 soft-fill/citron은 안 쓴다', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" />));
     });
-    const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === 'AI');
+    const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === 'Agent');
     expect(badge).toBeTruthy();
     expect(badge?.className).toContain('border-proof-blue/40');
     expect(badge?.className).not.toContain('bg-proof-blue-soft');
