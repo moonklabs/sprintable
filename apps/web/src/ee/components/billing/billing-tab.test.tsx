@@ -351,9 +351,12 @@ describe('UpgradeCheckoutDialog — 확인 클릭 시 Toss 위젯을 연다(stor
 describe('PackPurchaseDialog — 청구 확인창은 VAT 가산액을 그대로 보인다(story #3097)', () => {
   // story #3097(선생님 결정 2026-08-26) — v2.3 확정가=공급가, BE(billing_pack.py)가 이제
   // 청구 시점에 실제로 VAT 10%를 가산한다. 이 확인창(청구 직전)도 UpgradeCheckoutDialog와
-  // 동일 원칙 — 실 청구액을 그대로 보여야 한다(withVatKrw 적용, "VAT 별도" 카피는 더는
+  // 동일 원칙 — 실 청구액을 그대로 보여야 한다(withVatKrw 적용, "부가세 별도" 카피는 더는
   // 정직하지 않음 — 실제로 VAT가 걸리기 때문).
-  it('automation 팩 1개 — 공급가 5,000원 → 표시 5,500원 "(VAT 포함)"', async () => {
+  //
+  // story #3109(선생님 원 지시 원문 표기 2026-08-26) — ko 카피를 "VAT 별도/포함"에서
+  // "부가세 별도/포함"으로 정렬(en은 "VAT" 그대로 불변).
+  it('automation 팩 1개 — 공급가 5,000원 → 표시 5,500원 "(부가세 포함)"', async () => {
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -362,11 +365,11 @@ describe('PackPurchaseDialog — 청구 확인창은 VAT 가산액을 그대로 
       );
     });
     expect(document.body.textContent).toContain('5,500원');
-    expect(document.body.textContent).toContain('VAT 포함');
-    expect(document.body.textContent).not.toContain('VAT 별도');
+    expect(document.body.textContent).toContain('부가세 포함');
+    expect(document.body.textContent).not.toContain('부가세 별도');
   });
 
-  it('storage 팩 2개 — 공급가 3,000원×2=6,000원 → 표시 6,600원 "(VAT 포함)"', async () => {
+  it('storage 팩 2개 — 공급가 3,000원×2=6,000원 → 표시 6,600원 "(부가세 포함)"', async () => {
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -375,6 +378,6 @@ describe('PackPurchaseDialog — 청구 확인창은 VAT 가산액을 그대로 
       );
     });
     expect(document.body.textContent).toContain('6,600원');
-    expect(document.body.textContent).toContain('VAT 포함');
+    expect(document.body.textContent).toContain('부가세 포함');
   });
 });
