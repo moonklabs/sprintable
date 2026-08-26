@@ -100,3 +100,42 @@ export function runtimeLabel(key: string | null | undefined): string | null {
   if (!key) return null;
   return getRuntimeDef(key)?.label ?? null;
 }
+
+/**
+ * story #3092(3단계, 유나 규격 v3 doc cd8983c4 + 실행 패키지 doc 5745ad66) — 아바타 코너
+ * 배지를 커넥터별 공식 아이콘으로 승격. 9종 중 claude-code·gemini는 상표 사인오프 전이라
+ * 이니셜(«CC»·«G»)로 선출시(승인 나면 아이콘 자산 한 줄 교체) — 선생님 표대로 승인
+ * (2026-08-26). hermes는 실행 패키지가 지정한 소스(Nous Research 공식/repo)를 조사했으나
+ * 신뢰 가능한 벡터 자산이 없어(favicon이 시스템 폰트 의존 유니코드 글리프 "⚕" 뿐 — 렌더
+ * 환경마다 모양이 달라지는 위험) 이니셜로 임시 강등(미르코 판단, 유나 재확認 요청 — 아래
+ * sourceNote 참고).
+ *
+ * `sourceNote`는 실행 패키지가 요구한 "각 아이콘 출처 URL 명기"를 코드에도 고정해 자산이
+ * 바뀌어도 근거가 diff에 남게 한다(PR 본문과 이중 기록 — 실행 소스는 여기가 SSOT).
+ */
+export type ConnectorBadgeKind = 'icon' | 'initials';
+
+export interface ConnectorBadgeDef {
+  kind: ConnectorBadgeKind;
+  /** kind='icon' 전용 — public/connector-icons/<key>.svg 상대경로. */
+  asset?: string;
+  /** kind='icon' 전용 — 'color'=브랜드 원색 유지(디스크=테마 bg-card). 'mono'=단색 마크
+   * (디스크=고정 밝은 배경, 무테마 — 다크 테마에서도 검정 마크 대비 확保). */
+  colorMode?: 'color' | 'mono';
+  /** kind='initials' 전용 — 디스크에 그릴 1~2자(중립 mono, 브랜드색/서체 미모사). */
+  initials?: string;
+  /** 실행 패키지 §5/① 요건 — 실제 pull한 출처(공식 소스 우선·애그리게이터는 대조 후만). */
+  sourceNote: string;
+}
+
+export const CONNECTOR_BADGE_REGISTRY: Record<RuntimeKey, ConnectorBadgeDef> = {
+  'claude-code': { kind: 'initials', initials: 'CC', sourceNote: 'Anthropic 상표 사전승인 대기(HIGH) — 승인 시 아이콘 자산 스왑' },
+  gemini: { kind: 'initials', initials: 'G', sourceNote: 'Google 브랜드 정책 검토 대기(HIGH) — 승인 시 아이콘 자산 스왑' },
+  codex: { kind: 'icon', asset: '/connector-icons/codex.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg codex.svg(OpenAI 공식 Codex 마크 대조) — openai.com/brand 직접 접근 차단(Cloudflare)으로 애그리게이터 사용' },
+  grok: { kind: 'icon', asset: '/connector-icons/grok.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg grok.svg — x.ai/legal/brand-guidelines 직접 접근 차단(Cloudflare)으로 애그리게이터 사용' },
+  cursor: { kind: 'icon', asset: '/connector-icons/cursor.svg', colorMode: 'mono', sourceNote: 'simple-icons cursor.svg(PO/유나 사전 확保)' },
+  opencode: { kind: 'icon', asset: '/connector-icons/opencode.svg', colorMode: 'mono', sourceNote: 'simple-icons opencode.svg(PO/유나 사전 확保)' },
+  openclaw: { kind: 'icon', asset: '/connector-icons/openclaw.svg', colorMode: 'color', sourceNote: '1st-party: https://openclaw.ai/favicon.svg(공식 사이트 자체 favicon·헤더 로고와 동일 — repo README "🦞 the lobster way" 브랜딩과 정합)' },
+  pi: { kind: 'icon', asset: '/connector-icons/pi.svg', colorMode: 'mono', sourceNote: '1st-party: https://pi.dev/logo-auto.svg(github.com/earendil-works/pi README가 직접 링크하는 공식 자산). ⚠️내부에 prefers-color-scheme 미디어쿼리가 있어 OS 테마 기준으로 흑/백이 갈린다(앱 테마와 별개 축) — 무변형 원칙상 후처리로 강제하지 않음, 극단적 조합(라이트 앱+다크 OS 등)에서 대비가 낮아질 수 있는 자산 자체의 한계로 기록' },
+  hermes: { kind: 'initials', initials: 'H', sourceNote: '⚠️미해결 — NousResearch/hermes-agent 공식 favicon이 유니코드 글리프("⚕") 텍스트 렌더뿐이라 렌더 환경별로 모양이 달라지는 위험 판단, 벡터 자산 부재로 임시 이니셜 강등(미르코). 유나 재확認/대체소스 필요' },
+};

@@ -217,3 +217,81 @@ describe('Avatar — story #3092 2단계 커넥터 hover 툴팁', () => {
     expect(content).not.toContain('unknown-runtime-x');
   });
 });
+
+// story #3092(3단계, 규격 v3 doc cd8983c4) — 코너 배지 3단 폴백 사다리(아이콘/이니셜/"Agent"
+// 텍스트). "Agent" 텍스트 배지는 옛 사각 배지(border-proof-blue/40)로, 아이콘/이니셜은
+// 신규 원형 디스크(rounded-full, ring-2 ring-background)로 서로 다른 마크업이라 구조로
+// 판별한다.
+describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
+  it('아바타≥28 + 아이콘 승인 커넥터(cursor)는 원형 아이콘 디스크를 그린다(모노=bg-white)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="cursor" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk).toBeTruthy();
+    expect(disk.className).toContain('bg-white');
+    const img = disk.querySelector('img');
+    expect(img?.getAttribute('src')).toBe('/connector-icons/cursor.svg');
+    // "Agent" 텍스트 배지(옛 사각 배지)는 안 뜬다 — 배타적 택일.
+    expect(container.textContent).not.toContain('Agent');
+  });
+
+  it('아바타≥28 + 풀컬러 아이콘 커넥터(openclaw)는 디스크가 bg-card(테마 토큰)다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="openclaw" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk.className).toContain('bg-card');
+    expect(disk.className).not.toContain('bg-white');
+  });
+
+  it('아바타<28(마크<11px 존)이면 아이콘 승인 커넥터도 "Agent" 텍스트로 강등된다(구 사각 배지)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="cursor" />));
+    });
+    expect(container.textContent).toContain('Agent');
+    expect(container.querySelector('img[src="/connector-icons/cursor.svg"]')).toBeNull();
+  });
+
+  it('HIGH 미승인 커넥터(claude-code)는 크기와 무관하게 항상 이니셜("CC") — 아이콘도 Agent 텍스트도 아니다', async () => {
+    for (const size of [16, 32, 48]) {
+      await act(async () => {
+        root.render(wrap(<Avatar name="유나" actorType="agent" size={size} runtimeType="claude-code" />));
+      });
+      const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+      expect(disk?.textContent).toBe('CC');
+      expect(disk?.className).toContain('bg-card');
+      expect(container.querySelector('img[src*="connector-icons"]')).toBeNull();
+    }
+  });
+
+  it('gemini도 크기 무관 항상 이니셜("G")', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={16} runtimeType="gemini" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk?.textContent).toBe('G');
+  });
+
+  it('hermes는 이번 스코프에서 벡터 자산 미확保로 이니셜("H")까지만 — 라벨층(툴팁)은 그대로 "Hermes"', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="hermes" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk?.textContent).toBe('H');
+    const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
+    await act(async () => {
+      trigger.focus();
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('유나Agent · Hermes');
+  });
+
+  it('runtime_type null이면 아이콘/이니셜 디스크 자체가 안 뜨고 옛 "Agent" 텍스트 배지만 뜬다(회귀 없음)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType={null} />));
+    });
+    expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
+    expect(container.textContent).toContain('Agent');
+  });
+});
