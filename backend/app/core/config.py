@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     # OAuth — Google (story #2155: GitHub 로그인 제거 — GitHub App/봇 연동과는 무관, :209 참조)
     google_client_id: str = ""
     google_client_secret: str = ""
+    # OAuth — Apple(story #3118, App Store Guideline 4.8 — 서드파티 로그인 제공 앱은 동등
+    # 프라이버시의 Sign in with Apple 병행 필수). Google과 달리 client_secret이 고정 문자열이
+    # 아니라 이 3개 값(Team ID·Services ID·Key ID+개인키)으로 매 요청 ES256 서명 JWT를
+    # 생성해야 한다(_apple_client_secret_jwt() 참고) — apple_team_id는 apple-app-site-
+    # association 라우트에 이미 실린 기지값(JN798BC4KC)과 동일해야 한다(선생님 확認 済).
+    apple_team_id: str = ""
+    apple_services_id: str = ""  # OAuth client_id로도 쓰인다(Apple 용어=Services ID).
+    apple_key_id: str = ""
+    apple_private_key: str = ""  # SIWA Key .p8 파일 내용 그대로(PEM, ES256 개인키).
     # Next.js 프론트엔드 URL (OAuth redirect_uri 조합용)
     app_url: str = "http://localhost:3000"
 

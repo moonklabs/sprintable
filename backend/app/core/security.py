@@ -256,3 +256,25 @@ def decode_oauth_state_token(token: str, expected_provider: str) -> None:
         raise JWTError("Invalid state token type")
     if payload.get("provider") != expected_provider:
         raise JWTError("Provider mismatch in state token")
+
+
+# story #3118(Sign in with Apple) — Google과 달리 Apple의 OAuth client_secret은 고정
+# 문자열이 아니라 Team ID(iss)·Services ID(sub)·Key ID(kid)+개인키(SIWA Key .p8)로 매 요청
+# 서명하는 ES256 JWT다(Apple 공식 요건). Apple은 최대 6개월 만료까지 허용하지만 이 값은
+# 매 토큰교환 호출 시점에 그때그때 새로 만들어 쓰므로(caching 안 함 — 트래픽이 실시간 로그인
+# 뿐이라 매회 생성 비용이 무시 가능) 짧게(5분) 잡아 노출창을 최소화한다.
+APPLE_CLIENT_SECRET_EXPIRE_MINUTES = 5
+
+
+def apple_client_secret_jwt(team_id: str, services_id: str, key_id: str, private_key_pem: str) -> str:
+    """Sign in with Apple client_secret — ES256 서명 JWT(Apple 공식 스펙, 고정 시크릿 아님)."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=APPLE_CLIENT_SECRET_EXPIRE_MINUTES)
+    payload = {
+        "iss": team_id,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "aud": "https://appleid.apple.com",
+        "sub": services_id,
+    }
+    return jwt.encode(payload, private_key_pem, algorithm="ES256", headers={"kid": key_id})
