@@ -395,16 +395,34 @@ _WEB_CODE_SERVICES = {"sprintable-frontend-dev", "sprintable-frontend-prod"}
 _SERVICE_NAME_RE = re.compile(r"sprintable-[a-z]+-(?:dev|prod)")
 
 # `_SERVICE_NAME_RE`는 모양(`sprintable-*-{dev,prod}`)만 보는 정규식이라, Cloud Run 서비스가
-# 아닌 다른 리소스(GCS 버킷 등)의 이름이 우연히 같은 모양이면 구분 못한다. 마스터
-# (_SERVICE_SCRIPT_MAP)는 "실 서비스 8개"로 고정된 목록이라 여기 편입시키면 그 불변식이
-# 깨진다 — 그 대신 사유와 함께 여기서 명시 제외한다(주석-스트립과 같은 종류의 오탐 방지,
-# 다만 "주석"이 아니라 "다른 리소스 종류"가 원인).
-_NON_SERVICE_LITERAL_ALLOWLIST: dict[str, str] = {
-    "sprintable-avatars-dev": (
-        "story #2887 — avatar 업로드 전용 GCS 버킷(cloudbuild.yaml _GCS_AVATARS_BUCKET). "
-        "Cloud Run 서비스가 아님."
-    ),
-}
+# 아닌 다른 리소스(GCS 버킷 등)의 이름이 우연히 같은 모양이면 구분 못한다.
+#
+# ⛔story #3117(2026-08-26, PR#3520 카디르 qa:changes) — GCS_AVATARS_BUCKET을 prod에도 명시
+# 배선(`GCS_AVATARS_BUCKET=sprintable-avatars-prod`·`BUCKET="sprintable-avatars-prod"`)하자
+# 이 스캐너가 그 리터럴을 "유령 서비스"로 오탐해 CI를 3연쇄 실패시켰다. 개별 리터럴을
+# `_NON_SERVICE_LITERAL_ALLOWLIST`에 하나씩 추가하는 건 밴드에이드다(다음 버킷/GCS 리소스
+# 리터럴마다 재발하는 클래스) — 대신 매치 **직전 컨텍스트**로 "이건 GCS 버킷 참조다"를
+# 구조적으로 가른다: 이 저장소의 모든 버킷 참조는 예외 없이 (a) `gs://` 뒤에 오거나
+# (b) 이름에 BUCKET이 들어간 키/변수(`_GCS_AVATARS_BUCKET:`·`GCS_AVATARS_BUCKET=`·
+# `BUCKET="`류)의 값으로만 등장한다(실측: 이 파일들의 서비스 선언 8종 — SERVICE_NAME=·
+# FASTAPI_SERVICE=·FASTAPI_URL=·https:// 자동생성 URL·`gcloud run deploy/services` 커맨드 —
+# 그 어느 것도 이름에 BUCKET이 없다). `_looks_like_resource_literal()`이 이 두 컨텍스트를
+# 매치 직전 텍스트로 판별한다 — 새 버킷을 몇 개를 더 만들어도 이 두 관례(BUCKET named
+# key/`gs://`)만 지키면 이 가드가 자동으로 걸러낸다(마스터 불변식은 그대로 유지).
+_NON_SERVICE_LITERAL_ALLOWLIST: dict[str, str] = {}
+
+# BUCKET이 들어간 key/변수명 뒤에(`:`/`=`, 옵션 인용부호) 곧바로 오는 값 — GCS 버킷 참조.
+_BUCKET_KEY_CONTEXT_RE = re.compile(r"[A-Za-z_]*BUCKET[A-Za-z_]*\s*[:=]\s*[\"']?$", re.IGNORECASE)
+
+
+def _looks_like_resource_literal(line: str, match_start: int) -> bool:
+    """매치 직전 컨텍스트(같은 줄, 매치 앞부분)로 "Cloud Run 서비스명이 아니라 다른 GCP
+    리소스(GCS 버킷 등) 리터럴"인지 판별. `gs://` 직후이거나, BUCKET이 든 key/변수의 값이면
+    True(서비스명 후보에서 제외)."""
+    prefix = line[:match_start]
+    if prefix.endswith("gs://"):
+        return True
+    return bool(_BUCKET_KEY_CONTEXT_RE.search(prefix))
 
 
 def _service_subset_wellformed_violations() -> list[str]:
@@ -451,7 +469,11 @@ def _external_iac_service_literals() -> set[str]:
     names: set[str] = set()
     for path in targets:
         for line in path.read_text().splitlines():
-            names |= set(_SERVICE_NAME_RE.findall(_strip_comment(line)))
+            stripped = _strip_comment(line)
+            for m in _SERVICE_NAME_RE.finditer(stripped):
+                if _looks_like_resource_literal(stripped, m.start()):
+                    continue
+                names.add(m.group(0))
     return names - set(_NON_SERVICE_LITERAL_ALLOWLIST)
 
 

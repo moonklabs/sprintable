@@ -262,11 +262,14 @@ def test_deploy_backend_dev_includes_avatars_bucket_env_var():
     assert "GCS_AVATARS_BUCKET=sprintable-avatars-dev" in result
 
 
-def test_deploy_backend_prod_excludes_avatars_bucket_env_var():
-    """⭐prod 버킷 미프로비저닝 상태 — 값이 있어도 prod에는 이 키 자체가 없어야 한다(REDIS_URL/
-    ADMIN_OPERATOR_*와 동일 원칙, cloudbuild.yaml의 story #2887 주석 참고)."""
+def test_deploy_backend_prod_includes_avatars_bucket_env_var():
+    """⭐story #3117(2026-08-26, prod 실사고 후속) — prod 버킷(gs://sprintable-avatars-prod)을
+    PO가 프로비저닝 완료해 REDIS_URL/ADMIN_OPERATOR_*와 같던 "prod엔 키 자체가 없어야 안전"
+    유보가 풀렸다. 그 유보가 실사용 503(AVATAR_UPLOAD_NOT_CONFIGURED)으로 터진 게 이 스토리라
+    이제 prod는 substitution이 아닌 prod 전용 리터럴 버킷명을 싣는다(dev와 다른 값 — 취급
+    혼동 방지 위해 하드코딩 확인)."""
     result = _run_env_vars_assembly("prod", "")
-    assert "GCS_AVATARS_BUCKET" not in result
+    assert "GCS_AVATARS_BUCKET=sprintable-avatars-prod" in result
 
 
 def test_deploy_backend_includes_gotenberg_service_url_when_set():
