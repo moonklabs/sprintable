@@ -416,6 +416,22 @@ async def _fetch_conversation_participants(
     return conv_participants
 
 
+async def _lookup_sender_runtime_types(
+    sender_ids: set[uuid.UUID], db: AsyncSession,
+) -> dict[uuid.UUID, str | None]:
+    """story #3106 — 메시지 읽기 경로(list_messages 등)가 `lookup_members_by_ids`로 얻는
+    ResolvedMember엔 runtime_type 컬럼이 없다(_fetch_conversation_participants가 이미
+    같은 이유로 참가자 목록용 별도 배치쿼리를 쓰는 것과 동형 — 그 함수의 runtime_type_map
+    블록 재사용, 로직 이중선언 아님·쿼리 셰이프만 sender_id 스코프로 좁힘). 페이지 전체를
+    쿼리 1회로 해소(N+1 방지, list_messages의 member_map 배치조회와 동일 관례)."""
+    if not sender_ids:
+        return {}
+    rows = (await db.execute(
+        select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(sender_ids))
+    )).all()
+    return {r.id: r.runtime_type for r in rows}
+
+
 # story #2925(2921-S2 선행, 유나 확定 스펙) — L1 대화 행을 ProofCapsule card로 승격시킬지
 # 판별하는 신호. 「참조(게이트/작업) 있는 대화만 승격·색은 참조 대상의 실제 상태가 몬다·
 # 참조 없으면 plain(fail-safe·거짓 색 금지)」(2921-S2 서면 확定). 오늘 코드베이스에서 대화가
@@ -533,6 +549,7 @@ def _msg_payload(
     msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
     *, references: list[dict[str, str]] | None = None,
     blocked_sender_ids: set[uuid.UUID] | None = None,
+    sender_runtime_type: str | None = None,
 ) -> dict:
     # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone인데 attachments가 응답에
     # 그대로 남아 첨부(영상 등)가 계속 재생됐다. AC③(오발송 스크럽) 근거가 이걸로 무너진다 —
@@ -557,6 +574,16 @@ def _msg_payload(
             "name": sender.name,
             "type": sender.type,
             "avatar_url": sender.avatar_url,
+            # story #3106(#3092 후속) — 챗 아바타 뱃지가 "Agent" 폴백에 머무는 갭(sender에
+            # runtime_type 미배선) 해소. write/dispatch 경로(_resolve_member가 API키 agent에
+            # 돌려주는 실 TeamMember 행)는 getattr로 그냥 읽힌다(추가 쿼리 0) — read 경로
+            # (list_messages 등, lookup_members_by_ids가 돌려주는 ResolvedMember엔 이 컬럼이
+            # 없다)는 호출부가 배치조회해 sender_runtime_type으로 명시 주입한다(그 값이 있으면
+            # 우선). human sender는 두 경로 다 자연히 None(additive, 기존 shape 비파괴).
+            "runtime_type": (
+                sender_runtime_type if sender_runtime_type is not None
+                else getattr(sender, "runtime_type", None)
+            ),
         } if sender else None,
         # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
         "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
@@ -1847,6 +1874,8 @@ async def list_messages(
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
+    # story #3106 — runtime_type_map도 페이지 전체 1회 배치(위 member_map과 동일 관례).
+    runtime_type_map = await _lookup_sender_runtime_types(sender_ids, db)
     # story #2263 AC6(오르테가 판정 2026-07-29): 페이지 전체를 쿼리 1회로 해소(N+1 방지) —
     # 메시지별 왕복 없음.
     from app.services.mention_parser import fetch_stored_references
@@ -1859,6 +1888,7 @@ async def list_messages(
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
+            sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
         )
         for m in msgs
     ]
@@ -1892,6 +1922,10 @@ async def get_message(
         raise HTTPException(status_code=404, detail="Message not found")
 
     sender_map = await lookup_members_by_ids({msg.sender_id} if msg.sender_id else set(), db)
+    # story #3106 — list_messages와 동형(단건이라 배치도 최대 1행).
+    runtime_type_map = await _lookup_sender_runtime_types(
+        {msg.sender_id} if msg.sender_id else set(), db,
+    )
     from app.services.mention_parser import fetch_stored_references
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[msg.id],
@@ -1900,6 +1934,7 @@ async def get_message(
     return _msg_payload(
         msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []),
         blocked_sender_ids=blocked_sender_ids,
+        sender_runtime_type=runtime_type_map.get(msg.sender_id) if msg.sender_id else None,
     )
 
 
@@ -1999,6 +2034,8 @@ async def list_message_replies(
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
+    # story #3106 — list_messages와 동형(위 참고).
+    runtime_type_map = await _lookup_sender_runtime_types(sender_ids, db)
     # story #2263 AC6: list_messages와 동형 — 페이지 전체 쿼리 1회(N+1 방지).
     from app.services.mention_parser import fetch_stored_references
     refs_by_msg = await fetch_stored_references(
@@ -2010,6 +2047,7 @@ async def list_message_replies(
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
+            sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
         )
         for m in msgs
     ]
