@@ -141,7 +141,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
             <span
               className={cn(
                 'absolute bottom-2 left-3 text-[9.5px] font-semibold tracking-wide uppercase',
-                behavior.kind === 'dead' ? 'text-muted-foreground/60' : behavior.kind === 'move' ? 'text-brand' : 'text-muted-foreground',
+                behavior.kind === 'move' ? 'text-brand' : 'text-muted-foreground',
               )}
             >
               {rungLabel(level)}
