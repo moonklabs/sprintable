@@ -32,6 +32,25 @@ def _clean_background_tasks():
     pg_pubsub._background_tasks.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_shutdown_event_after():
+    """CI 실측(2026-08-26, 페드루 PO 재현·delta) — 이 파일의 test_shutdown_drains_before_
+    dispose_end_to_end만 실 `app.main.lifespan()`을 왕복한다. 그 finally가 프로세스 전역
+    `app.core.shutdown.shutdown_event`를 set()하는데(shutdown.py 계약), 이후 같은 pytest
+    프로세스에서 그 이벤트를 다시 startup 경로로 reset하는 코드가 전혀 없으면 "이미
+    셧다운됨" 상태가 그대로 남는다 — 알파벳순으로 이 파일 뒤에 도는
+    test_2143_agent_stream_legacy_push_id_omission.py의 agent_stream() SSE 제너레이터가
+    (`app/routers/agent_gateway.py`의 shutdown_task가 즉시 done) presence 프레임 도달 전에
+    "event: shutdown_reconnect"를 내고 즉시 return — StopIteration으로 관측됐다(단독 실행 시
+    통과·이 조합에서만 3/3 결정적 재현, 실측 완료). shutdown_event는 이 테스트만 건드리므로
+    (다른 4개는 pg_pubsub 함수 단위) 여기서 자기 발자국을 스스로 지운다 — main.py startup과
+    동일한 공개 API(reset_shutdown_event)로 되돌려 "이 테스트 실행 전/후 전역 상태 불변"을
+    복원한다(테스트가 안 건드렸으면 no-op와 동형이라 나머지 4개엔 부작용 없음)."""
+    yield
+    from app.core import shutdown as shutdown_module
+    shutdown_module.reset_shutdown_event()
+
+
 async def test_drain_awaits_pending_task_that_finishes_within_timeout():
     from app.services import pg_pubsub
 
