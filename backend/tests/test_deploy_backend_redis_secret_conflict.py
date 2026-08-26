@@ -53,6 +53,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
     # story #2887 — avatar 전용 GCS 버킷, deploy-backend dev 분기(ADMIN_OPERATOR_*와 동일 패턴).
     "_GCS_AVATARS_BUCKET",
+    # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
+    "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
