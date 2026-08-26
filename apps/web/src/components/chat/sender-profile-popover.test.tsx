@@ -93,6 +93,25 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
   });
 });
 
+// story #3106(#3092 후속) — chat-bubble.tsx가 message.sender_runtime_type을 그대로 넘겨줘야
+// 이 팝업의 아바타도 Presence 패널과 동일하게 커넥터 마크를 그린다.
+describe('SenderProfilePopover — story #3106 runtimeType 배선', () => {
+  it('runtimeType을 주면 아바타에 커넥터 공식 아이콘이 뜬다', async () => {
+    await act(async () => {
+      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent runtimeType="claude-code" onClose={NOOP} />);
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background');
+    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
+  });
+
+  it('runtimeType을 안 주면(레거시) "Agent" 텍스트 폴백 그대로다(회귀 없음)', async () => {
+    await act(async () => {
+      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />);
+    });
+    expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
+  });
+});
+
 // story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay 토큰이어야 한다(shadow-md
 // 리터럴 회귀가드).
 describe('SenderProfilePopover — 로드맵 PR-B L1(floating elev-overlay)', () => {

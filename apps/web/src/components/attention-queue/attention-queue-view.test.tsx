@@ -280,3 +280,21 @@ describe('AttentionRow — story #3052 헤어라인 액센트(citron fill 폐지
     expect(row?.className).not.toContain('border-l-proof-citron');
   });
 });
+
+// story #3099(DS·AA 후속, #3090과 동형 문법) — 「모두 처리됨」 빈 상태 문구(11px bold)가
+// 라이트에서 text-proof-green AA 미달(3.49)이었다. 텍스트는 text-proof-ink로 중립화하고
+// 색 신호는 ShieldCheck 아이콘 하나로 좁힌다(아이콘은 non-text 3:1 기준 PASS).
+describe('AttentionQueueView — story #3099 빈 상태(모두 처리됨) 텍스트 AA 중립화', () => {
+  it('빈 큐 안내 텍스트는 text-proof-ink이고, 색 신호는 ShieldCheck 아이콘에만 있다', async () => {
+    await mount(async (url: string) => {
+      if (url.includes('/api/glance/attention')) return { ok: true, json: async () => ({ data: { items: [] } }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    });
+    const label = [...container.querySelectorAll('div')].find((d) => d.textContent?.trim() === 'ALL CLEAR');
+    expect(label).toBeTruthy();
+    expect(label?.className).toContain('text-proof-ink');
+    expect(label?.className).not.toContain('text-proof-green');
+    const icon = label?.querySelector('svg');
+    expect(icon?.getAttribute('class')).toContain('text-proof-green');
+  });
+});

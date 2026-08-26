@@ -44,6 +44,22 @@ describe('normalizeToMessage — story #2901 sender.avatar_url 노출', () => {
   });
 });
 
+describe('normalizeToMessage — story #3106(#3092 후속) sender.runtime_type 노출', () => {
+  it('sender.runtime_type이 있으면 sender_runtime_type으로 실린다', () => {
+    const raw = { id: 'm1', content: 'hi', sender: { id: 'u1', name: '오르테가', type: 'agent', runtime_type: 'claude-code' } };
+    expect(normalizeToMessage(raw).sender_runtime_type).toBe('claude-code');
+  });
+
+  it('human sender는 runtime_type이 없어 null로 통일된다', () => {
+    const raw = { id: 'm2', content: 'hi', sender: { id: 'u2', name: '송윤재', type: 'human' } };
+    expect(normalizeToMessage(raw).sender_runtime_type).toBeNull();
+  });
+
+  it('sender 자체가 없으면 null로 통일된다', () => {
+    expect(normalizeToMessage({ id: 'm3', content: 'hi' }).sender_runtime_type).toBeNull();
+  });
+});
+
 class FakeEventSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;

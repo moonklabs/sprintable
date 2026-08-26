@@ -241,6 +241,7 @@ export default function ConversationPage() {
                 actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
                 size={24}
                 className="flex-shrink-0"
+                runtimeType={headerAvatarParticipant.type === 'agent' ? (headerAvatarParticipant.runtime_type ?? null) : null}
               />
             )}
             {editingTitle && meta?.type === 'group' ? (

@@ -227,8 +227,11 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
         <div>{Array.from({ length: 3 }).map((_, i) => <RowSkeleton key={i} />)}</div>
       ) : shown.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.02em] text-proof-green">
-            <ShieldCheck className="size-3.5" aria-hidden="true" />{t('allClear')}
+          {/* story #3099(DS·AA 후속) — green 소형텍스트(11px bold) AA 미달, 텍스트는 중립화
+              (text-proof-ink)하고 색 신호는 아이콘 하나로 좁힌다(#3090과 동형: 색은 그래픽,
+              텍스트는 중립 — 아이콘은 3:1 non-text 기준으로 이미 PASS). */}
+          <div className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.02em] text-proof-ink">
+            <ShieldCheck className="size-3.5 text-proof-green" aria-hidden="true" />{t('allClear')}
           </div>
           <p className="text-[15px] font-semibold text-proof-ink-2">{t('emptyTitle')}</p>
           <p className="text-[12.5px] text-proof-ink-3">{t('emptyBody')}</p>

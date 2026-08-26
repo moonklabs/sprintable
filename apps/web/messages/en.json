@@ -618,7 +618,7 @@
     "definerDerivedNone": "None"
   },
   "flow": {
-    "title": "Flow",
+    "title": "Board",
     "loading": "Loading…",
     "viewHypothesis": "Hypotheses",
     "viewFlow": "Flow",
@@ -1274,6 +1274,7 @@
     "lastProjectMembership": "Cannot remove the last active project membership for this member",
     "humanMember": "Human",
     "agentMember": "Agent",
+    "connectorLabel": "Connector",
     "noProjectMembers": "No members assigned to this project",
     "noProjectMembersHint": "Invite new members from the Organization Members tab.",
     "projectManagement": "Projects",
@@ -3489,6 +3490,8 @@
     "approvalRequestTossEmptyTitle": "No conversations to send to",
     "approvalRequestTossEmptyBody": "{name} needs to be in a conversation first",
     "approvalRequestTossSuccessToast": "Sent to {conversation}",
+    "approvalRequestTossAlreadyThereChip": "Already there",
+    "approvalRequestTossAlreadyThereToast": "Already in {conversation}",
     "approvalRequestDelegate": "Delegate to another approver",
     "approvalRequestDelegateLoading": "Loading…",
     "approvalRequestDelegatePickPlaceholder": "Choose an approver",

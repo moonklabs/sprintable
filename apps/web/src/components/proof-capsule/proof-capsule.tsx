@@ -154,7 +154,7 @@ function CutCornerShell({ state, className, children }: { state: ProofState; cla
 
 function StateHeader({ state, label }: { state: ProofState; label: string }) {
   const tone: Record<ProofState, string> = {
-    blue: 'text-proof-blue', amber: 'text-proof-amber', green: 'text-proof-green', red: 'text-proof-red',
+    blue: 'text-proof-ink', amber: 'text-proof-ink', green: 'text-proof-ink', red: 'text-proof-red',
   };
   const dotTone: Record<ProofState, string> = {
     blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',

@@ -122,6 +122,9 @@ async def test_patch_story_is_excluded_true():
     marked_story.story_points = 3
     marked_story.description = None
     marked_story.acceptance_criteria = None
+    # story #2254 — 신규 필드(위 파일들의 기존 "MagicMock 자동 속성" 경고와 동일 이유로 명시 세팅).
+    marked_story.previous_description = None
+    marked_story.previous_acceptance_criteria = None
     marked_story.position = None
     marked_story.is_excluded = True  # 마킹됨
     marked_story.success_hypothesis = None

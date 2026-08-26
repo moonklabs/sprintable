@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Bot, User } from 'lucide-react';
 import { PresenceDot, AGENT_LIVE_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { CONNECTOR_BADGE_REGISTRY, getRuntimeDef, runtimeLabel } from '@/lib/runtime-capabilities';
 import { avatarColor, initials } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 
@@ -18,6 +20,10 @@ export interface AvatarProps {
   /** agent 전용 — 활동 축(AGENT_LIVE_RING_CLASS, citron pulse). 미작동 시 정적 proof-blue 링
    * (항상 "에이전트임" 식별 — 이미지가 있어도 유지, S2g 목업 규칙+#2921 규칙③ 색 스왑). */
   isWorking?: boolean;
+  /** story #3092(2단계, 유나 픽셀 규격) — agent 전용, 커넥터 정체(runtime_type 원값).
+   * hover 툴팁 2번째 줄("Agent · {runtimeLabel}")에만 쓰인다 — null/미배선 소비처는
+   * "Agent" 단독으로 자동 폴백(전역 폴백 규칙, raw key 노출 없음 — runtimeLabel()이 흡수). */
+  runtimeType?: string | null;
   className?: string;
 }
 
@@ -38,13 +44,36 @@ export interface AvatarProps {
  * presence-dot.tsx — 옛 WORKING_RING_CLASS 개명+색 스왑, 그 파일 주석 참고).
  */
 export function Avatar({
-  name, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, className,
+  name, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, runtimeType = null, className,
 }: AvatarProps) {
   const isAgent = actorType === 'agent';
   const dotSize = size >= 40 ? 'md' : 'sm';
   const iconSize = Math.round(size * 0.5);
   const initSize = Math.round(size * 0.4);
-  const badgeSize = Math.max(14, Math.round(size * 0.32));
+  // "Agent" 텍스트 배지(옛 지오메트리, 무변경) 전용 사이즈 — 아래 커넥터 아이콘/이니셜
+  // 배지(신규 원형 디스크)는 별도 diskSize를 쓴다(규격 §2, story #3092 3단계).
+  const textBadgeSize = Math.max(14, Math.round(size * 0.32));
+
+  // story #3092(3단계, 유나 규격 v3 doc cd8983c4) — 커넥터별 공식 아이콘 배지.
+  // 폴백 사다리(§3): ①공식 아이콘(마크≥~11px→아바타≥28 + 에셋有 + 상표승인) →
+  // ②이니셜(상표 미승인/에셋無 — 크기 tier 아님, 항상 적용) → ③"Agent" 텍스트
+  // (아바타<28 조밀 리스트 또는 runtime_type=null).
+  const runtimeDef = getRuntimeDef(runtimeType);
+  const badgeDef = runtimeDef ? CONNECTOR_BADGE_REGISTRY[runtimeDef.key] : null;
+  // story #3092(5단계 delta, 유나 실측 2026-08-26) — 상세 초상형 아이콘(hermes)은 전역
+  // 임계(28)에서 blob으로 뭉개짐(av36 이하 실측 확認) — 커넥터별 minIconSize override +
+  // 그 사이 구간(28~minIconSize) 전용 이니셜 폴백을 레지스트리 엔트리 필드로 얹는다(전역
+  // 상수 아님 — 기하 마크 8종은 필드 미설정이라 기존 동작 그대로, 단순 마크로 교체되면
+  // 필드만 지우면 원복).
+  const minIconSize = badgeDef?.kind === 'icon' ? (badgeDef.minIconSize ?? 28) : 28;
+  const showIconBadge = badgeDef?.kind === 'icon' && size >= minIconSize;
+  const showInitialsBadge =
+    badgeDef?.kind === 'initials' ||
+    (badgeDef?.kind === 'icon' && !showIconBadge && !!badgeDef.initials && size >= 28);
+  const showTextBadge = !showIconBadge && !showInitialsBadge;
+  // 디스크 지름 = clamp(16, 아바타×0.40, 30) · 마크 = 디스크×0.68(규격 §1~2).
+  const diskSize = Math.min(30, Math.max(16, Math.round(size * 0.4)));
+  const markSize = Math.round(diskSize * 0.68);
 
   // 카디르군 QA(#3304, HIGH) — avatar_url 「문자열 유무」만 보고 이미지 tier로 갔다: GCS
   // object 삭제·서명 만료·환경간 버킷 불일치로 실제 로드가 실패해도 native onError를 안 받아
@@ -60,8 +89,14 @@ export function Avatar({
   }
   const showImage = !!avatarUrl && !imgError;
 
-  return (
-    <div className={cn('relative shrink-0', className)} style={{ width: size, height: size }}>
+  const avatarNode = (
+    // story #3092(2단계, 표면2) — isAgent일 때 이 노드가 TooltipTrigger로 쓰인다. tabIndex=0
+    // 없으면 키보드로 절대 포커스가 안 가 hover 전용(마우스만)이 되어버린다 — 접근성 필수.
+    <div
+      className={cn('relative shrink-0', className)}
+      style={{ width: size, height: size }}
+      tabIndex={isAgent ? 0 : undefined}
+    >
       <div
         className={cn(
           'h-full w-full overflow-hidden',
@@ -97,19 +132,70 @@ export function Avatar({
         )}
       </div>
 
-      {isAgent && (
+      {isAgent && showIconBadge && badgeDef?.asset && (
+        <span
+          className={cn(
+            'absolute -right-1 -top-1 flex shrink-0 items-center justify-center overflow-hidden rounded-full ring-2 ring-background',
+            // 규격 §4 — 풀컬러 아이콘은 디스크=테마 토큰(원본색이 자체 대비를 싣는다),
+            // 모노(단색) 아이콘은 디스크를 테마 무관 고정 밝은색으로 박아 다크 테마에서도
+            // 검정 마크 대비를 확保(무변형 원칙상 아이콘 자체 색은 절대 안 건드린다).
+            badgeDef.colorMode === 'mono' ? 'bg-white' : 'bg-card',
+          )}
+          style={{ width: diskSize, height: diskSize }}
+        >
+          {/* SVG는 next/image가 dangerouslyAllowSVG 미설정 시 최적화를 거부한다(보안
+              기본값) — 전역 설정을 이 배지 하나 때문에 바꾸지 않고, 기존 avatar_url과
+              동형으로 raw img를 쓴다(로컬 정적 자산이라 CSP/원격도메인 우려는 없음). */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={badgeDef.asset} alt="" style={{ width: markSize, height: markSize }} />
+        </span>
+      )}
+      {isAgent && showInitialsBadge && (
+        // 규격 실행 패키지 ② — 이니셜은 아이콘과 같은 지오메트리(디스크+ring)를 재사용하되
+        // 디스크=bg-card·글자=text-foreground(중립, 브랜드색/서체 미모사 — 상표 무관).
+        <span
+          className="absolute -right-1 -top-1 flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-card font-semibold text-foreground ring-2 ring-background"
+          style={{ width: diskSize, height: diskSize, fontSize: Math.round(diskSize * 0.42), letterSpacing: '-0.02em' }}
+        >
+          {badgeDef?.initials}
+        </span>
+      )}
+      {isAgent && showTextBadge && (
         // story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·soft-fill
         // 폐지) 채택. border는 이미 있었으니 배경/텍스트색만 교체(단일 정의 재사용).
         <span
           className={cn('absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 font-bold', AGENT_MARK_FILL_CLASS)}
-          style={{ fontSize: Math.max(7, Math.round(badgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
+          style={{ fontSize: Math.max(7, Math.round(textBadgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
         >
-          AI
+          Agent
         </span>
       )}
       {isAgent && presenceStatus ? (
         <PresenceDot status={presenceStatus} size={dotSize} className="absolute -bottom-0.5 -right-0.5" />
       ) : null}
     </div>
+  );
+
+  // story #3092(2단계, 표면2) — human 아바타는 툴팁 없음(정체 모호성이 애초에 없음). agent만
+  // hover 시 "{name} / Agent · {runtimeLabel}" 2줄 — runtimeType이 없으면 2번째 줄이
+  // "Agent" 단독으로 자동 축약(전역 폴백, 새 텍스트 조립 없이 그대로 표현 가능).
+  if (!isAgent) return avatarNode;
+
+  const runtimeLbl = runtimeLabel(runtimeType);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={avatarNode} />
+      <TooltipContent side="top">
+        <div className="flex flex-col gap-0.5 py-0.5">
+          <span className="text-xs font-medium">{name}</span>
+          {/* 툴팁 팝업 자체가 bg-foreground(반전 배경)라 text-background가 이미 고대비
+              "본문" 색이다(popup 기본값 상속) — 유나 규격의 text-muted-foreground는 이
+              반전 배경에서 그대로 쓰면 대비가 깨져(라이트/다크 실측 재계산: 8.49/7.11로
+              AA는 통과하지만 톤 자체가 안 맞음) text-background/70(반전 배경용 동형 dim)로
+              옮겨 적용 — 의도(2번째 줄=보조 정보)는 그대로, 토큰만 반전 표면에 맞게 보정. */}
+          <span className="text-[11px] text-background/70">{runtimeLbl ? `Agent · ${runtimeLbl}` : 'Agent'}</span>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }

@@ -2099,13 +2099,44 @@ async def update_story(
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
+    # story #2254(그라운딩 doc e5bc0789, 2026-08-25) — append/restore도 stories 컬럼이
+    # 아니므로 분리(allow_shrink와 동형). 실제 반영은 아래 story_before 조회 블록에서.
+    _append_by_field = {
+        "description": data.pop("description_append", None),
+        "acceptance_criteria": data.pop("acceptance_criteria_append", None),
+    }
+    _restore_by_field = {
+        "description": data.pop("restore_description", False),
+        "acceptance_criteria": data.pop("restore_acceptance_criteria", False),
+    }
+    # 같은 필드에 plain/append/restore 중 둘 이상이 동시에 오면 호출 의도가 모호하다 —
+    # 조용히 아무거나 골라 처리하지 않고 즉시 거부(#2254 AC2: "어느 쪽인지 부르는 쪽이
+    # 알 수 있게" — 서버가 대신 추측하지 않는 것도 그 원칙의 일부).
+    for _f in _LENGTH_TRACKED_FIELDS:
+        _modes_set = sum((
+            _f in data, _append_by_field[_f] is not None, bool(_restore_by_field[_f]),
+        ))
+        if _modes_set > 1:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "AMBIGUOUS_UPDATE_MODE",
+                    "message": f"{_f}에 plain 값/append/restore 중 하나만 지정하세요(동시 지정 불가).",
+                },
+            )
+    _restore_driven_fields = {f for f in _LENGTH_TRACKED_FIELDS if _restore_by_field[f]}
     old_assignee_id: uuid.UUID | None = None
     old_position: int | None = None
     old_field_lengths: dict[str, int] = {}
     story_before = None
     # story #2172 AC2: position 변경도 old-value 대조가 필요해 assignee_id와 같은 사전조회를 공유.
     # story #2346 AC3: 긴 텍스트 필드 급감 기록도 같은 사전조회(repo.update() 前 old 값)가 필요.
-    if "assignee_id" in data or "position" in data or any(f in data for f in _LENGTH_TRACKED_FIELDS):
+    # story #2254: append/restore도 old 값(이어붙일 대상·되돌릴 previous_*)이 있어야 계산 가능
+    # 하므로 같은 사전조회를 공유.
+    if (
+        "assignee_id" in data or "position" in data or any(f in data for f in _LENGTH_TRACKED_FIELDS)
+        or any(v is not None for v in _append_by_field.values()) or _restore_driven_fields
+    ):
         story_before = await repo.get(id)
         if story_before:
             old_assignee_id = story_before.assignee_id
@@ -2113,9 +2144,38 @@ async def update_story(
             # ⛔story_before는 같은 세션의 identity map이라 repo.update() 뒤 story와 «같은
             # 객체»가 된다(속성이 그 자리서 덮어써짐) — old_assignee_id/old_position처럼
             # «스칼라 값»으로 지금 떠 둬야 update 前 값을 실제로 보존한다.
+            # story #2254 AC1 — append: 서버측 원자적 이어붙이기(클라 read-modify-write
+            # 경합을 애초에 제거 — #2254 사고의 근본원인).
+            for _f, _append_val in _append_by_field.items():
+                if _append_val is None:
+                    continue
+                _cur = getattr(story_before, _f) or ""
+                data[_f] = f"{_cur}\n\n{_append_val}" if _cur else _append_val
+            # story #2254 AC3 — restore: previous_* ↔ 현재값 swap(되돌리기 자체도 되돌릴
+            # 수 있게 — 별도 구현 없이 이 규칙에서 공짜로 성립).
+            for _f in _restore_driven_fields:
+                _prev_val = getattr(story_before, f"previous_{_f}")
+                if not _prev_val:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "NOTHING_TO_RESTORE",
+                            "message": f"{_f}에 되돌릴 직전 값이 없습니다.",
+                        },
+                    )
+                data[_f] = _prev_val
+            # story #2254 AC3 — 실제로 값이 바뀌는 tracked field는 적용 前 old 값을
+            # previous_*에 1-depth 스냅샷(전체 히스토리 아님, 사고 직후 1회 복구가 목표).
+            # restore driven field는 shrink-guard 대상에서 뺀다 — 되돌리기는 명시적 의도된
+            # 행동이라 «축소=사고 신호» 전제가 안 맞는다(직전 값이 현재보다 짧아도 정상).
             for _f in _LENGTH_TRACKED_FIELDS:
-                if _f in data:
-                    old_field_lengths[_f] = len(getattr(story_before, _f) or "")
+                if _f not in data:
+                    continue
+                _old_val = getattr(story_before, _f) or ""
+                if (data[_f] or "") != _old_val:
+                    data[f"previous_{_f}"] = _old_val
+                if _f not in _restore_driven_fields:
+                    old_field_lengths[_f] = len(_old_val)
     # ⛔story #2346 AC7: 긴 텍스트 필드가 50% 이상 줄면 거부 — 오늘 실제 3건 사고(모두 -80%대)가
     # 전부 이 게이트에 막혔을 것이다. allow_shrink=true로 명시 승인(정당한 축약)만 통과.
     if old_field_lengths and not allow_shrink:

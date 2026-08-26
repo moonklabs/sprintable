@@ -190,6 +190,15 @@ async def lifespan(app: FastAPI):
                 except asyncio.CancelledError:
                     pass
         finally:
+            # story #2041(그라운딩 doc 67b44d1e, PR-A) — 위 listen_loop.finally가 닫는 건 LISTEN
+            # 전용 raw 커넥션 하나뿐이다. pg_notify()가 fire_and_forget()으로 흩뿌린 개별
+            # 태스크(각자 async_session_factory() 세션을 짧게 쥠)는 이 5개 named task cancel+
+            # await가 전부 끝난 지금까지도 진행 중일 수 있다 — dispose보다 먼저 bounded 대기+
+            # cancel해 커넥션을 붙든 채 강제종료되지 않게 한다(named task 5개가 이미 정지했으므로
+            # 이 시점 이후 신규 발사가 없다 — drain_background_tasks 자체 docstring 참조).
+            from app.services.pg_pubsub import drain_background_tasks
+            await drain_background_tasks()
+
             # 좀비 연결 박멸(S:33e0c681): SIGTERM(Cloud Run 인스턴스 교체·스케일다운·리비전 삭제)
             # 시 SQLAlchemy 풀의 전 DB 연결을 정상 종료. dispose 누락 시 구 인스턴스가 연결을 안
             # 놓아 좀비 누적 → prod 100 cap 초과 → TooManyConnections(전 엔드포인트 500). lifespan

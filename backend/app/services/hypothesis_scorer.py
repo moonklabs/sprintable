@@ -28,6 +28,7 @@ session.begin_nested()(SAVEPOINT)로 격리해, 한 hypothesis의 DB abort가 �
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -104,7 +105,11 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
                 # Postgres 에러를 내도 이 hypothesis 처리만 롤백되고 batch 나머지(이미 flush된
                 # active→measuring 등)는 오염되지 않는다. except는 이 async with 밖에서 잡는다.
                 if source == "ga4":
-                    scoring = score_ga4_outcome(md)
+                    # story #2041(그라운딩 doc 67b44d1e, PR-C) — 동기 blocking gRPC 호출
+                    # (ga4_client.fetch_ga4_metric)이 이벤트루프를 막지 않도록 to_thread로
+                    # 포장. md는 순수 dict라 SAVEPOINT/session과 무관하게 안전(session을
+                    # 참조하지 않는 스레드 실행).
+                    scoring = await asyncio.to_thread(score_ga4_outcome, md)
                 elif source == "internal_ops":
                     pct = await _linked_story_completion_pct(session, hyp.id)
                     result = score_epic_outcome(md, pct)

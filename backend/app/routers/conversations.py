@@ -416,6 +416,22 @@ async def _fetch_conversation_participants(
     return conv_participants
 
 
+async def _lookup_sender_runtime_types(
+    sender_ids: set[uuid.UUID], db: AsyncSession,
+) -> dict[uuid.UUID, str | None]:
+    """story #3106 — 메시지 읽기 경로(list_messages 등)가 `lookup_members_by_ids`로 얻는
+    ResolvedMember엔 runtime_type 컬럼이 없다(_fetch_conversation_participants가 이미
+    같은 이유로 참가자 목록용 별도 배치쿼리를 쓰는 것과 동형 — 그 함수의 runtime_type_map
+    블록 재사용, 로직 이중선언 아님·쿼리 셰이프만 sender_id 스코프로 좁힘). 페이지 전체를
+    쿼리 1회로 해소(N+1 방지, list_messages의 member_map 배치조회와 동일 관례)."""
+    if not sender_ids:
+        return {}
+    rows = (await db.execute(
+        select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(sender_ids))
+    )).all()
+    return {r.id: r.runtime_type for r in rows}
+
+
 # story #2925(2921-S2 선행, 유나 확定 스펙) — L1 대화 행을 ProofCapsule card로 승격시킬지
 # 판별하는 신호. 「참조(게이트/작업) 있는 대화만 승격·색은 참조 대상의 실제 상태가 몬다·
 # 참조 없으면 plain(fail-safe·거짓 색 금지)」(2921-S2 서면 확定). 오늘 코드베이스에서 대화가
@@ -533,6 +549,7 @@ def _msg_payload(
     msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
     *, references: list[dict[str, str]] | None = None,
     blocked_sender_ids: set[uuid.UUID] | None = None,
+    sender_runtime_type: str | None = None,
 ) -> dict:
     # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone인데 attachments가 응답에
     # 그대로 남아 첨부(영상 등)가 계속 재생됐다. AC③(오발송 스크럽) 근거가 이걸로 무너진다 —
@@ -557,6 +574,16 @@ def _msg_payload(
             "name": sender.name,
             "type": sender.type,
             "avatar_url": sender.avatar_url,
+            # story #3106(#3092 후속) — 챗 아바타 뱃지가 "Agent" 폴백에 머무는 갭(sender에
+            # runtime_type 미배선) 해소. write/dispatch 경로(_resolve_member가 API키 agent에
+            # 돌려주는 실 TeamMember 행)는 getattr로 그냥 읽힌다(추가 쿼리 0) — read 경로
+            # (list_messages 등, lookup_members_by_ids가 돌려주는 ResolvedMember엔 이 컬럼이
+            # 없다)는 호출부가 배치조회해 sender_runtime_type으로 명시 주입한다(그 값이 있으면
+            # 우선). human sender는 두 경로 다 자연히 None(additive, 기존 shape 비파괴).
+            "runtime_type": (
+                sender_runtime_type if sender_runtime_type is not None
+                else getattr(sender, "runtime_type", None)
+            ),
         } if sender else None,
         # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
         "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
@@ -1011,7 +1038,15 @@ async def _dispatch_discord_outbound(
     ChannelRouter가 discord 선택한 수신자 → webhook_configs Discord endpoint 발송.
     Discord 선택 시 SSE 동시 발송 금지 (AC10).
     Discord endpoint 미설정 시 sse fallback (AC11).
-    """
+
+    story #2041(그라운딩 doc 67b44d1e, PR-B) 근본수정 — 예전엔 DB 세션을 연 채로 discord
+    멤버 수만큼 `httpx.AsyncClient().post()`를 순차 호출했다(웹훅 URL 조회↔외부 POST가
+    루프 안에서 번갈아 일어남) — Discord가 느리거나 멤버가 많으면 그 시간만큼 커넥션
+    풀을 통째로 붙들었다. 처방: DB 세션 구간에서 웹훅 URL을 **평면값(dict)으로 전부
+    미리 뽑아둔** 뒤 세션을 닫고, 그 다음에야 외부 HTTP 호출 루프를 돈다 — 쿼리 자체
+    (조건·`.first()` 픽 규칙)는 원본과 동일, 실행 시점만 앞으로 당겼다(결과 기록 DB
+    write는 원래도 없었으므로 — 실패는 로그만 — "짧은 별도 트랜잭션"이 별도로 필요
+    없다)."""
     from app.core.database import async_session_factory
     from app.services.channel_router import ChannelRouterError, route_message
     from sqlalchemy import select
@@ -1027,9 +1062,11 @@ async def _dispatch_discord_outbound(
         if not discord_members:
             return
 
-        import httpx
+        # 세션이 열린 동안 웹훅 URL만 평면값(dict)으로 전부 뽑아둔다 — 쿼리·픽 규칙은
+        # 원본 그대로(member_id별 channel="discord"·is_active 필터·`.first()`), 실행
+        # 시점만 세션이 열린 이 구간 안으로 모았다(외부 I/O는 세션 밖에서 돈다).
+        webhook_url_by_member: dict[uuid.UUID, str] = {}
         for decision in discord_members:
-            # discord channel WebhookConfig 조회
             wh = (await db.execute(
                 select(WebhookConfig).where(
                     WebhookConfig.member_id == decision.member_id,
@@ -1037,33 +1074,39 @@ async def _dispatch_discord_outbound(
                     WebhookConfig.is_active.is_(True),
                 )
             )).scalars().first()
+            if wh is not None:
+                webhook_url_by_member[decision.member_id] = wh.url
 
-            if wh is None:
-                # AC11: Discord endpoint 미설정 → sse fallback (SSE는 이미 _dispatch_conversation_event에서 처리)
-                logger.info(
-                    "Discord endpoint not configured for member %s — SSE fallback already dispatched",
-                    decision.member_id,
-                )
-                continue
-
-            # Discord URL이면 content/embeds 포맷, 아니면 generic JSON
-            is_discord_url = (
-                "discord.com/api/webhooks" in wh.url
-                or "discordapp.com/api/webhooks" in wh.url
+    # 세션 닫힘 — 여기부터는 순수 외부 HTTP 호출뿐, DB 커넥션을 전혀 점유하지 않는다.
+    import httpx
+    for decision in discord_members:
+        wh_url = webhook_url_by_member.get(decision.member_id)
+        if wh_url is None:
+            # AC11: Discord endpoint 미설정 → sse fallback (SSE는 이미 _dispatch_conversation_event에서 처리)
+            logger.info(
+                "Discord endpoint not configured for member %s — SSE fallback already dispatched",
+                decision.member_id,
             )
-            content_text = f"[conversation:message] message_id: {message_id}"
-            if is_discord_url:
-                discord_payload: dict = {"content": content_text}
-            else:
-                discord_payload = {"event_type": "conversation.message_created", "message_id": str(message_id)}
+            continue
 
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(wh.url, json=discord_payload)
-            except Exception:
-                logger.warning(
-                    "Discord outbound failed member_id=%s url=%s", decision.member_id, wh.url, exc_info=True
-                )
+        # Discord URL이면 content/embeds 포맷, 아니면 generic JSON
+        is_discord_url = (
+            "discord.com/api/webhooks" in wh_url
+            or "discordapp.com/api/webhooks" in wh_url
+        )
+        content_text = f"[conversation:message] message_id: {message_id}"
+        if is_discord_url:
+            discord_payload: dict = {"content": content_text}
+        else:
+            discord_payload = {"event_type": "conversation.message_created", "message_id": str(message_id)}
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(wh_url, json=discord_payload)
+        except Exception:
+            logger.warning(
+                "Discord outbound failed member_id=%s url=%s", decision.member_id, wh_url, exc_info=True
+            )
 
 
 async def _create_conversation_record(
@@ -1831,6 +1874,8 @@ async def list_messages(
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
+    # story #3106 — runtime_type_map도 페이지 전체 1회 배치(위 member_map과 동일 관례).
+    runtime_type_map = await _lookup_sender_runtime_types(sender_ids, db)
     # story #2263 AC6(오르테가 판정 2026-07-29): 페이지 전체를 쿼리 1회로 해소(N+1 방지) —
     # 메시지별 왕복 없음.
     from app.services.mention_parser import fetch_stored_references
@@ -1843,6 +1888,7 @@ async def list_messages(
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
+            sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
         )
         for m in msgs
     ]
@@ -1876,6 +1922,10 @@ async def get_message(
         raise HTTPException(status_code=404, detail="Message not found")
 
     sender_map = await lookup_members_by_ids({msg.sender_id} if msg.sender_id else set(), db)
+    # story #3106 — list_messages와 동형(단건이라 배치도 최대 1행).
+    runtime_type_map = await _lookup_sender_runtime_types(
+        {msg.sender_id} if msg.sender_id else set(), db,
+    )
     from app.services.mention_parser import fetch_stored_references
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[msg.id],
@@ -1884,6 +1934,7 @@ async def get_message(
     return _msg_payload(
         msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []),
         blocked_sender_ids=blocked_sender_ids,
+        sender_runtime_type=runtime_type_map.get(msg.sender_id) if msg.sender_id else None,
     )
 
 
@@ -1983,6 +2034,8 @@ async def list_message_replies(
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
+    # story #3106 — list_messages와 동형(위 참고).
+    runtime_type_map = await _lookup_sender_runtime_types(sender_ids, db)
     # story #2263 AC6: list_messages와 동형 — 페이지 전체 쿼리 1회(N+1 방지).
     from app.services.mention_parser import fetch_stored_references
     refs_by_msg = await fetch_stored_references(
@@ -1994,6 +2047,7 @@ async def list_message_replies(
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
+            sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
         )
         for m in msgs
     ]

@@ -189,6 +189,7 @@ async def test_toss_success_inserts_copy_and_broadcasts_and_logs():
                 json={"target_conversation_id": str(seeded["target_conversation_id"])},
             )
             assert resp.status_code == 200, resp.text
+            assert resp.json()["inserted"] is True  # story #3094 — 신규 삽입 시 inserted=True.
         finally:
             await client.aclose()
 
@@ -317,12 +318,16 @@ async def test_toss_idempotent_no_duplicate_copy_on_retoss():
         await _setup_app(app, Session, seeded["org_id"], seeded["designated_user_id"])
         client = _client_for(app)
         try:
-            for _ in range(2):
+            # story #3094 — 신규 삽입(1회차)은 inserted=True, 재토스(2회차, 멱등 no-op)는
+            # inserted=False. FE가 이 값으로 «이미 있음» 칩/토스트 문구를 구분한다.
+            expected_inserted = [True, False]
+            for expected in expected_inserted:
                 resp = await client.post(
                     f"/api/v2/gates/{seeded['gate_id']}/toss",
                     json={"target_conversation_id": str(seeded["target_conversation_id"])},
                 )
                 assert resp.status_code == 200, resp.text
+                assert resp.json()["inserted"] is expected, resp.text
         finally:
             await client.aclose()
 

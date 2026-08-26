@@ -117,6 +117,18 @@ class UpdateStoryInput(SprintableInput):
     # 자리). 이 필드가 없으면 «의도적으로» 줄이려는 정당한 요청도 되돌릴 방법이 없어 도구가
     # 그 상황에서 막다른 골목이 된다 — 단순 누락이 아니라 실제 워크플로우 차단이었다.
     allow_shrink: bool | None = None
+    # story #2254(그라운딩 doc e5bc0789, 2026-08-25) — 한 절을 덧붙이려고 description/
+    # acceptance_criteria 전문을 다시 보내다 기존 내용을 통째로 지운 실사고(디디 자진 보고,
+    # 2026-07-28)의 근본 처방. description_append/acceptance_criteria_append를 쓰면 서버가
+    # 「기존값+개행 2줄+이 값」을 원자적으로 이어붙인다(호출자가 현재값을 먼저 읽어올 필요
+    # 없음 — read-modify-write 경합 자체가 사라진다). plain description/acceptance_criteria와
+    # 동시 지정하면 BE가 422로 거부(호출 의도가 모호함 — 조용히 아무거나 고르지 않는다).
+    description_append: str | None = None
+    acceptance_criteria_append: str | None = None
+    # 직전 값(응답의 previous_description/previous_acceptance_criteria)으로 되돌린다(현재값과
+    # swap — 되돌리기 자체도 다시 되돌릴 수 있다). 되돌릴 직전 값이 없으면 BE가 422.
+    restore_description: bool | None = None
+    restore_acceptance_criteria: bool | None = None
 
 
 class AssignStoryToSprintInput(SprintableInput):
@@ -219,6 +231,11 @@ async def add_story(args: AddStoryInput) -> list[TextContent]:
 async def update_story(args: UpdateStoryInput) -> list[TextContent]:
     """스토리 수정.
 
+    ⭐한 절만 덧붙일 땐 description/acceptance_criteria에 전문을 다시 쓰지 말 것 —
+    description_append/acceptance_criteria_append를 쓰면 서버가 원자적으로 이어붙인다
+    (읽어와서 합쳐 재전송하다 실수로 기존 내용을 지우는 사고를 원천 차단, story #2254).
+    직전 값으로 되돌리려면 restore_description/restore_acceptance_criteria=true.
+
     story #2389 후속 — StoryUpdate에 있지만 이 도구에 «의도적으로 안 넣은» 셋:
       - position: 보드 드래그앤드롭 순서(정수, 이웃 상대적 계산 전제) — 자연어로 지시된 절대
         정수값을 그대로 넣으면 다른 카드들과의 순서가 어긋나기 쉽다. UI 드래그 전용으로 남긴다.
@@ -253,6 +270,14 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
         updates["measure_after"] = args.measure_after
     if args.allow_shrink is not None:
         updates["allow_shrink"] = args.allow_shrink
+    if args.description_append is not None:
+        updates["description_append"] = args.description_append
+    if args.acceptance_criteria_append is not None:
+        updates["acceptance_criteria_append"] = args.acceptance_criteria_append
+    if args.restore_description is not None:
+        updates["restore_description"] = args.restore_description
+    if args.restore_acceptance_criteria is not None:
+        updates["restore_acceptance_criteria"] = args.restore_acceptance_criteria
     if args.epic_id is not None:
         updates["epic_id"] = args.epic_id
     if args.declared_scope_paths is not None:

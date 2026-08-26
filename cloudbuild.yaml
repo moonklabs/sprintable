@@ -8,6 +8,11 @@
 substitutions:
   _AR_REGION: asia-northeast3
   _AR_REPO: sprintable
+  # story #3079 — 기본값 "false"(=배포 진행). GHA gate 스텝(cloud-build.yml)이 계산해 넘기지
+  # 않는 호출(수동 gcloud builds submit 등)에서도 안전측(배포)으로 fail — 스킵은 정확히
+  # "true" 문자열일 때만.
+  _REALTIME_GCE_SKIP: "false"
+  _REALTIME_CLOUDRUN_SKIP: "false"
   _DEPLOY_ENV: dev
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   # story #2701 — dev-safe 기본값(빈 문자열 = 이 env var 자체를 안 싣는다, 아래 deploy-mcp
@@ -105,6 +110,13 @@ substitutions:
   # 메일 링크가 prod로 갔다. dev-safe 기본값은 prod URL(수동 gcloud submit 시 최소한
   # prod와 같은 안전값) — GHA가 dev 브랜치에서만 dev 도메인으로 override.
   _NEXT_PUBLIC_APP_URL: "https://app.sprintable.ai"
+  # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(story 57526f21, #3499 PR 리뷰 delta) —
+  # /.well-known/apple-app-site-association 라우트(apps/web)가 읽는 env 2종. dev-safe
+  # 기본값(수동 gcloud builds submit override 없을 때) — GHA cloud-build.yml이 main에서
+  # MOBILE_APP_LINK_ORIGIN만 prod로 override(_FASTAPI_URL과 동일 배선 패턴). Team ID는
+  # AASA 응답으로 공개되는 값이라 시크릿 아니고 dev/prod 동일해 override 불요.
+  _APPLE_TEAM_ID: "JN798BC4KC"
+  _MOBILE_APP_LINK_ORIGIN: "https://dev-app.sprintable.ai"
   # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
   # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
   # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
@@ -447,7 +459,10 @@ steps:
       # E-ARCH 1단계(story #2078) — /api/event-stream 프록시 라우트가 REALTIME_URL을 읽어
       # SSE/LISTEN 전용 realtime-gateway로 향한다(REALTIME_URL 없으면 기존 FASTAPI_URL로
       # 폴백 — 이 값을 비우면 코드 변경·재배포 없이 즉시 원복). --update-env-vars(additive).
-      - --update-env-vars=REALTIME_URL=${_REALTIME_URL}
+      # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(story 57526f21) — APPLE_TEAM_ID·
+      # MOBILE_APP_LINK_ORIGIN 없으면 /.well-known/apple-app-site-association 라우트가
+      # 설계대로 500(fail-loud)을 낸다. 같은 --update-env-vars에 동반(additive, 기존 env 보존).
+      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN}
       - --quiet
     waitFor: [push-frontend]
 
@@ -594,9 +609,17 @@ steps:
         # 경유 시크릿으로 재바인딩(--update-secrets=additive, 기존 다른 시크릿 preserve — REDIS_URL_
         # PROD 등과 동일 컨벤션). prod는 이 플래그 자체를 안 넘겨 현재 DATABASE_URL_PROD 바인딩
         # 무변경. 시크릿 자체(DATABASE_URL_DEV_PGBOUNCER/DATABASE_URL_DIRECT_DEV)는 PO가 생성.
+        #
+        # story #3110 1보(2026-08-26, 보안 위생) — DATABASE_URL_DIRECT는 postgres 수퍼유저
+        # DSN(DATABASE_URL_DIRECT_DEV)이었다(pg_pubsub.py LISTEN/NOTIFY 전용 소비 — 애초에
+        # 수퍼유저가 필요 없는 경로). sprintable 앱 유저는 이미 public 197테이블 전부에 GRANT
+        # 보유(#3110 실측, postgres 116/197보다도 넓음) — 신규 시크릿 DATABASE_URL_DIRECT_DEV_
+        # SPRINTABLE(PO 발급·PO 실왕복 검증: current_user=sprintable·SELECT OK)로 전환.
+        # ⛔DATABASE_URL(PgBouncer 경유)은 이번 스코프 밖 — 유저 스왑이 PgBouncer userlist
+        # 갱신과 짝이라(안 맞추면 dev 서빙 인증 실패) #3110 2보로 분리.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           # story #2445 Phase1(2026-08-04) — prod cutover: DATABASE_URL→PgBouncer VIP(DATABASE_URL_PROD_PGBOUNCER,
           # =10.178.0.111:6432), DATABASE_URL_DIRECT→직결(DATABASE_URL_PROD). _BACKEND_DB_PGBOUNCER=true와 짝.
@@ -652,29 +675,15 @@ steps:
           echo "      --substitutions 에 _REALTIME_URL=<realtime 서비스 URL> 을 명시할 것."
           exit 1
         fi
-        # story #3031 — realtime path-filter(Cloud Run). 근거·설계 전문은
-        # backend/tests/test_3031_realtime_cloudrun_deploy_path_filter.py 참조(이 스텝의
-        # UTF-8 바이트 한도 초과 핫픽스로 이관). 로컬 변수는 $$ 이스케이프 필수(Cloud
-        # Build 자신의 substitution 파서가 bash 실행 前에 미선언 substitution 참조를 거부).
-        serving_revision="$(gcloud run services describe sprintable-realtime-${_DEPLOY_ENV} \
-          --region="${_AR_REGION}" --project="${PROJECT_ID}" \
-          --format='value(status.traffic.filter(percent=100).revisionName)' 2>/dev/null || echo '')"
-        if [ -z "$$serving_revision" ]; then
-          echo "deploy-realtime: 100% 트래픽 서빙 리비전을 못 읽음(최초 배포이거나 트래픽 스플릿 중) — path-filter 건너뛰고 배포 진행"
-        else
-          last_image="$(gcloud run revisions describe "$$serving_revision" \
-            --region="${_AR_REGION}" --project="${PROJECT_ID}" \
-            --format='value(spec.containers[0].image)' 2>/dev/null || echo '')"
-          last_sha="$${last_image##*:}"
-          if [ -z "$$last_sha" ] || [ "$$last_sha" = "$$last_image" ]; then
-            echo "deploy-realtime: 서빙 리비전 이미지 태그를 못 읽음 — path-filter 건너뛰고 배포 진행"
-          else
-            git fetch --unshallow >/dev/null 2>&1 || true
-            if ! bash backend/scripts/check_realtime_relevant_diff.sh "$$last_sha" "${COMMIT_SHA}"; then
-              echo "skip deploy-realtime: $$last_sha..${COMMIT_SHA} 사이 realtime-관련 경로 변경 없음(story #3031 path-filter, 스킵 사유는 위 로그 참고)"
-              exit 0
-            fi
-          fi
+        # story #3079(2026-08-25) 근본수정 — #3031이 여기 심었던 git-diff 기반 path-filter는
+        # Cloud Build 워크스페이스에 `.git`이 없어(로컬소스 tarball 업로드, `.gcloudignore`
+        # 미비로 gcloud 기본 규칙이 `.git` 항상 제외) 단 한 번도 실제로 스킵하지 못했다 —
+        # 매번 "판별 불가" fail-safe로 떨어져 상시 배포였다(실 로그로 확定). 판정을 Cloud
+        # Build 밖(GHA, 실 .git 보유 — cloud-build.yml "Resolve realtime deploy path-filter"
+        # 스텝)으로 옮기고 결과만 이 substitution으로 받는다.
+        if [ "${_REALTIME_CLOUDRUN_SKIP}" = "true" ]; then
+          echo "skip deploy-realtime: GHA path-filter(story #3079)가 realtime-관련 경로 변경 없음으로 판정"
+          exit 0
         fi
         # ⚠️story #2078 긴급수정(2026-07-21): PG_LISTEN_ENABLED가 여기 true로 하드코딩돼
         # 있었다 — PO가 라이브에서 손으로 false로 전환(LISTEN 제거·Redis 단독 dispatch 확認
@@ -862,39 +871,18 @@ steps:
           exit 0
         fi
 
-        # story #2089 (a) — realtime path-filter(페드루 PO 판정, 2026-08-17). #2182
-        # 그라운딩에서 오늘까지의 502 rolling 중 75.3%가 "realtime 코드가 실제로 안 바뀐
-        # 커밋"에서 유발됐음을 실측(2주 162커밋 대조) — 매 develop 머지가 무조건 이
-        # 스텝을 재실행시키던 걸 여기서 끊는다. 별도 GCB 트리거로 안 쪼갠다(SSOT 유지,
-        # 페드루 지시) — 기존 파이프라인 안 조건부 스텝 그대로.
-        #
-        # 판별 기준: 현재 MIG가 물고 있는 인스턴스 템플릿 이름에서 직전 배포 SHA를 뽑아,
-        # 그 SHA부터 이번 COMMIT_SHA까지 realtime-관련 경로(backend/scripts/
-        # check_realtime_relevant_diff.sh의 목록, 보수적 채택 — 공유 파일 포함 24.7%셋)가
-        # 바뀌었는지 본다. 얕은 클론이면 옛 SHA가 히스토리에 없을 수 있어 unshallow를
-        # 먼저 시도(실패해도 계속 — 아래 diff 성패로 최종 fail-safe 판단).
-        #
-        # ⛔hotfix 2차(2026-08-17, 페드루 P0) — 1차 fix(언더스코어 제거)로도 여전히 막혔다:
-        # GCB는 밑줄 없는 대문자 이름도 built-in substitution 후보로 검사한다("not a valid
-        # built-in substitution" 에러) — 즉 밑줄 유무와 무관하게 대문자 이름 자체가 GCB run
-        # 블록에서 위험하다. 이 파일의 다른 로컬변수(served·expected·names, 604~617행)가
-        # 안전했던 진짜 이유는 밑줄이 없어서가 아니라 **소문자**였기 때문 — 그 관행과 완전히
-        # 동형으로 맞춘다(대문자→소문자, 파서의 두 층 모두 회피). 교훈: 이 run 블록 안에서
-        # 새로 짓는 로컬 셸 변수는 소문자로만 짓는다(대문자는 사용자 substitution이든
-        # built-in이든 GCB 자체 치환 후보로 스캔된다).
-        current_template="$(gcloud compute instance-groups managed describe sprintable-realtime-gateway-dev \
-          --region="${_AR_REGION}" --project="${PROJECT_ID}" \
-          --format='value(versions[0].instanceTemplate)' 2>/dev/null | sed 's#.*/##' || echo '')"
-        last_sha="$(echo "$current_template" | grep -oE '[0-9a-f]{8}' | head -1 || echo '')"
-
-        if [ -z "$last_sha" ]; then
-          echo "deploy-realtime-gce: 기존 MIG 템플릿에서 직전 SHA를 못 읽음(최초 배포이거나 이름 패턴 변경) — path-filter 건너뛰고 배포 진행"
-        else
-          git fetch --unshallow >/dev/null 2>&1 || true
-          if ! bash backend/scripts/check_realtime_relevant_diff.sh "$last_sha" "${COMMIT_SHA}"; then
-            echo "skip deploy-realtime-gce: $last_sha..${COMMIT_SHA} 사이 realtime-관련 경로 변경 없음(story #2089 path-filter, 스킵 사유는 위 로그 참고)"
-            exit 0
-          fi
+        # story #2089(원안, 페드루 PO 판정 2026-08-17) — realtime path-filter.
+        # ⛔story #3079(2026-08-25) 근본수정 — 여기 있던 git-diff 기반 판정은 Cloud Build
+        # 워크스페이스에 `.git`이 없어(로컬소스 tarball 업로드, `.gcloudignore` 미비로
+        # gcloud 기본 규칙이 `.git` 항상 제외) 단 한 번도 실제로 스킵하지 못했다 — 매번
+        # "판별 불가" fail-safe로 떨어져 상시 배포였다(실 로그로 확定: `git diff ... 실패
+        # rc=129: Not a git repository`). 판정을 Cloud Build 밖(GHA, 실 .git 보유 —
+        # cloud-build.yml "Resolve realtime deploy path-filter" 스텝)으로 옮기고 결과만
+        # 이 substitution으로 받는다(SSOT 이전 — 로직 이중선언 아님, check_realtime_
+        # relevant_diff.sh 자체는 그 스텝에서 그대로 재사용).
+        if [ "${_REALTIME_GCE_SKIP}" = "true" ]; then
+          echo "skip deploy-realtime-gce: GHA path-filter(story #3079)가 realtime-관련 경로 변경 없음으로 판정"
+          exit 0
         fi
 
         GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" COMMIT_SHA="${COMMIT_SHA}" \

@@ -290,7 +290,7 @@ async def test_cron_epic_internal_ops_hit():
     """pending 에픽 + 하위 스토리 75% 완료 → completion_pct=75 → hit(target=50)."""
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_worker_db
     from httpx import ASGITransport, AsyncClient
 
     ctx = MagicMock()
@@ -326,7 +326,7 @@ async def test_cron_epic_internal_ops_hit():
     async def override_auth():
         return ctx
 
-    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_worker_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
 
     try:
@@ -351,7 +351,7 @@ async def test_cron_epic_does_not_change_epic_status():
     """채점 후 epic.status(active/done 등)는 절대 변경되지 않음."""
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_worker_db
     from httpx import ASGITransport, AsyncClient
 
     ctx = MagicMock()
@@ -387,7 +387,7 @@ async def test_cron_epic_does_not_change_epic_status():
     async def override_auth():
         return ctx
 
-    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_worker_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
 
     try:

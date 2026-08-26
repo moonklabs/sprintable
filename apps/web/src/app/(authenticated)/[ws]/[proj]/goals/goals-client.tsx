@@ -675,8 +675,11 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
         ) : null}
         <div className="flex items-center gap-2">
           <span className="w-8 shrink-0 font-mono text-[10px] text-muted-foreground">{t('outcomeLabel')}</span>
+          {/* story #3099(DS·AA 후속, #3090과 동형) — green/blue 소형텍스트(12px) AA 미달(라이트
+              green 3.49), 별도 dot 없는 자리라 text-proof-ink로 중립화(일관성 위해 blue도 동형
+              처리 — #3090 선례). 의미는 텍스트 자체(outcomeLine.text)가 이미 병기. */}
           <span className={`text-xs font-semibold ${
-            outcomeLine.tone === 'green' ? 'text-proof-green' : outcomeLine.tone === 'blue' ? 'text-proof-blue' : 'text-muted-foreground'
+            outcomeLine.tone === 'green' || outcomeLine.tone === 'blue' ? 'text-proof-ink' : 'text-muted-foreground'
           }`}
           >
             {outcomeLine.text}

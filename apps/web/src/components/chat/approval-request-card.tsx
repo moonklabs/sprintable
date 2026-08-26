@@ -599,8 +599,13 @@ function ApprovalRequestBody({
           currentTeamMemberId={currentTeamMemberId ?? ''}
           designatedApproverId={gate.designated_approver_id ?? ''}
           designatedApproverName={designatedApproverName}
-          onTossed={(conversationTitle) => {
-            addToast({ type: 'info', title: t('approvalRequestTossSuccessToast', { conversation: conversationTitle }) });
+          onTossed={(conversationTitle, inserted) => {
+            addToast({
+              type: 'info',
+              title: inserted
+                ? t('approvalRequestTossSuccessToast', { conversation: conversationTitle })
+                : t('approvalRequestTossAlreadyThereToast', { conversation: conversationTitle }),
+            });
             onUndone();
           }}
           onAlreadyResolved={() => {

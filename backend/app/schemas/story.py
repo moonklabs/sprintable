@@ -165,6 +165,15 @@ class StoryUpdate(BaseModel):
     story_points: int | None = None
     description: str | None = None
     acceptance_criteria: str | None = None
+    # story #2254(그라운딩 doc e5bc0789, 2026-08-25) — 서버측 원자적 이어붙이기(클라
+    # read-modify-write 경합 자체를 제거, #2254 사고의 근본원인). plain description/
+    # acceptance_criteria와 동시 지정은 422(모호성 거부 — stories.py::update_story).
+    description_append: str | None = None
+    acceptance_criteria_append: str | None = None
+    # story #2254 — 직전 값(previous_description/previous_acceptance_criteria)과 현재값을
+    # swap. True면 되돌리기 자체도 되돌릴 수 있게(1-depth). plain/append와 동시 지정 시 422.
+    restore_description: bool = False
+    restore_acceptance_criteria: bool = False
     position: int | None = None
     # E-OUTCOME-LOOP: 의도 필드 (Update 허용)
     success_hypothesis: str | None = None
@@ -264,6 +273,10 @@ class StoryResponse(BaseModel):
     story_points: int | None = None
     description: str | None = None
     acceptance_criteria: str | None = None
+    # story #2254 — 실 컬럼(ORM 그대로 노출). 값이 있으면 restore_description=true로 되돌릴
+    # 직전 값이 있다는 뜻(클라가 "되돌리기 가능" UI를 이 필드 존재로 판단할 수 있게).
+    previous_description: str | None = None
+    previous_acceptance_criteria: str | None = None
     position: int | None = None
     # E-OUTCOME-LOOP: 의도 필드
     success_hypothesis: str | None = None

@@ -152,6 +152,12 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     story_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2254(그라운딩 doc e5bc0789, 2026-08-25) — 직전 값 1-depth 스냅샷(전체 히스토리
+    # 아님, 사고 직후 1회 복구가 목표). description/acceptance_criteria가 plain/append/
+    # restore 어느 경로로든 «실제로» 바뀌는 매 update마다 라우터(stories.py::update_story)가
+    # 적용 前 현재 값을 여기 덮어쓴다. restore_*=True 요청은 여기 값을 읽어 현재값과 swap.
+    previous_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    previous_acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
     position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # E-CAGE-REFEREE P1: 데이터 오염 마킹 (삭제 아닌 플래그, 신뢰점수 집계 제외용)
     is_excluded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)

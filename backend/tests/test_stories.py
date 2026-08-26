@@ -42,6 +42,9 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.story_points = 3
     s.description = None
     s.acceptance_criteria = None
+    # story #2254 — 신규 필드(위 주석의 "매번 명시 세팅" 경고 그대로 적용).
+    s.previous_description = None
+    s.previous_acceptance_criteria = None
     s.position = None
     # E-CAGE-REFEREE P1: 오염 마킹 필드
     s.is_excluded = False
