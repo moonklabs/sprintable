@@ -125,6 +125,14 @@ substitutions:
   # AASA 응답으로 공개되는 값이라 시크릿 아니고 dev/prod 동일해 override 불요.
   _APPLE_TEAM_ID: "JN798BC4KC"
   _MOBILE_APP_LINK_ORIGIN: "https://dev-app.sprintable.ai"
+  # story #3118(Sign in with Apple, PO 확定 2026-08-26) — backend가 읽는 Apple OAuth
+  # provider 식별자 2종. Services ID(=OAuth client_id)·Key ID 둘 다 공개돼도 무해한
+  # 식별자(시크릿 아님, 위 _APPLE_TEAM_ID와 동일 원칙) — dev/prod 동일 값(PO가 app/
+  # dev-app 콜백 도메인 양쪽을 이 하나의 Services ID에 이미 등록 済, override 불요).
+  # 실제 비밀(SIWA 개인키)은 여기 두지 않는다 — deploy-backend 스텝의 --update-secrets
+  # (Secret Manager `APPLE_SIWA_PRIVATE_KEY`)로만 바인딩.
+  _APPLE_SERVICES_ID: "ai.sprintable.web"
+  _APPLE_KEY_ID: "DF2G3UV649"
   # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
   # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
   # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
@@ -583,7 +591,10 @@ steps:
         # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
         # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
         # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
-        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_OAUTH_HANDOFF_ENABLED=${_FIREBASE_OAUTH_HANDOFF_ENABLED}"
+        # story #3118(Sign in with Apple, PO 확定 2026-08-26) — APPLE_SERVICES_ID/APPLE_KEY_ID/
+        # APPLE_TEAM_ID 3종(비밀 아님, dev/prod 동일값) 추가. 개인키(APPLE_PRIVATE_KEY)는
+        # 이 plain env가 아니라 아래 SECRETS_FLAG(Secret Manager)로만 바인딩한다.
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_OAUTH_HANDOFF_ENABLED=${_FIREBASE_OAUTH_HANDOFF_ENABLED},APPLE_SERVICES_ID=${_APPLE_SERVICES_ID},APPLE_KEY_ID=${_APPLE_KEY_ID},APPLE_TEAM_ID=${_APPLE_TEAM_ID}"
         # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
         # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
         # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
@@ -643,7 +654,10 @@ steps:
         # 갱신과 짝이라(안 맞추면 dev 서빙 인증 실패) #3110 2보로 분리.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest"
+          # story #3118 — APPLE_PRIVATE_KEY(SIWA 개인키, Secret Manager `APPLE_SIWA_PRIVATE_KEY`)
+          # 는 dev/prod 공용 시크릿(PO 발급·양쪽 런타임 SA에 secretAccessor 부여 済) — DB 시크릿과
+          # 같은 --update-secrets 한 호출에 동봉(additive, 기존 다른 시크릿 preserve).
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           # story #2445 Phase1(2026-08-04) — prod cutover: DATABASE_URL→PgBouncer VIP(DATABASE_URL_PROD_PGBOUNCER,
           # =10.178.0.111:6432), DATABASE_URL_DIRECT→직결(DATABASE_URL_PROD). _BACKEND_DB_PGBOUNCER=true와 짝.
@@ -652,7 +666,8 @@ steps:
           #   sprintable_read 풀 경유). 지금까지 라이브 «수동 바인딩»이라 배포 SSOT 어디에도 선언이 없어
           #   env-drift-guard 축①이 매일 빨강이었다(additive --update-secrets 라 값은 보존됐으나 미선언=fragile:
           #   --set-secrets 리팩터·서비스 재생성 時 조용히 소실→reads가 primary 로 새 병목 악화). 여기 편입해 durable화.
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest"
+          # story #3118 — dev와 동일 시크릿(APPLE_SIWA_PRIVATE_KEY, dev/prod 공용) 동봉.
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         fi
         gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
