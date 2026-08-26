@@ -196,10 +196,9 @@ jobs:
             # 손대지 않는다(#2120/#2121/#2122와 동일 단계적 승격 원칙). 명시 false로 다른
             # 플래그들과 동일 컨벤션 유지(암묵 fallback 대신 의도 명시).
             echo "backend_sse_transient_replay_enabled=false" >> "$GITHUB_OUTPUT"
-            # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — dev 실기기 왕복 통과 전까지
-            # prod는 손대지 않는다(위 transient_replay와 동일 단계적 승격 원칙). 통과 후
-            # 이 한 줄만 "true"로 바꾸는 게 다음 처방(별도 PR).
-            echo "firebase_oauth_handoff_enabled=false" >> "$GITHUB_OUTPUT"
+            # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — dev 실기기 왕복 통과(2026-08-26,
+            # 선생님 iOS 앱 내 메시지 발신까지 확認·세션 확립 실증) 확認 후 prod on으로 승격.
+            echo "firebase_oauth_handoff_enabled=true" >> "$GITHUB_OUTPUT"
             # ⚠️승격 병합(promo/20260727·PO): 위 프론트 인스턴스 수·transient replay 스위치(develop #2077)와
             # 아래 REALTIME_URL 전환(main #2142/#2439)은 **서로 무관한 prod env 출력**이라 둘 다 보존한다.
             # 직전 승격(promo/backplane-20260723)이 같은 자리에서 같은 판단을 했고 그 근거가 아래 주석에 남아 있다.
