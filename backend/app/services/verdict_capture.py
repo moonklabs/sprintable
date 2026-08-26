@@ -284,7 +284,17 @@ async def capture_pr_ci_verdict(
         recorded.append("pr")
 
     # source=ci: CI 결과
-    if ci_result is not None:
+    # story #3115(2026-08-26, 승격 리드타임 — «재오픈 연쇄의 취소 오염») — ci_result="cancelled"
+    # (router._normalize_ci, ci.yml의 cancel-in-progress:true가 만드는 정상 흐름: 재오픈/재push로
+    # 새 workflow_run이 뜨면 concurrency 그룹의 옛 run이 취소된다)는 「실패」가 아니라 「이
+    # 실행에서 판정 안 남」이다. 예전엔 `"pass" if ... else "fail"`이 cancelled까지 fail로
+    # 밀어넣어 CI 게이트를 rejected로 그르치고(resolve_gate_from_verdict — verdict_result≠pass는
+    # 즉시 rejected, gate_service.py) story trust 이력에도 거짓 실패가 남았다(「직렬 재실행
+    # 정화」가 필요했던 그 오염). cancelled는 완전히 skip — 다른 곳의 "모름을 위조하지 않는다"
+    # 원칙(merge_verdict_gate.py의 pr_result=None 등)과 동일 축.
+    if ci_result is not None and ci_result.lower() == "cancelled":
+        pass
+    elif ci_result is not None:
         normalized = "pass" if ci_result.lower() in ("pass", "success") else "fail"
         await record_verdict(
             session, org_id, participation.id,

@@ -178,6 +178,31 @@ async def test_capture_ci_fail_records_ci_verdict():
 
 
 @pytest.mark.anyio
+async def test_capture_ci_cancelled_skips_verdict_no_false_fail():
+    """⭐story #3115(2026-08-26, 승격 리드타임 — «재오픈 연쇄의 취소 오염») — cancelled(재오픈/
+    재push로 새 workflow_run이 concurrency 그룹의 옛 run을 취소한 정상 흐름)를 fail로
+    채점하면 CI 게이트가 거짓 rejected되고 story trust 이력도 오염된다. cancelled는 완전히
+    skip(verdict 기록도 gate 해소도 안 함) — recorded에도 안 들어가야 한다."""
+    from app.services.verdict_capture import capture_pr_ci_verdict
+
+    session = AsyncMock()
+    participation = MagicMock()
+    participation.id = PARTICIPATION_ID
+
+    with patch("app.services.verdict_capture.resolve_implementation_participation", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.services.verdict_capture.record_verdict", new_callable=AsyncMock) as mock_record:
+        mock_resolve.return_value = participation
+
+        result = await capture_pr_ci_verdict(
+            session, ORG_ID, STORY_ID, pr_number=1108,
+            repo="moonklabs/sprintable", merged=False, ci_result="cancelled"
+        )
+
+        assert "ci" not in result["recorded"]
+        mock_record.assert_not_called()
+
+
+@pytest.mark.anyio
 async def test_capture_no_participation_skips():
     """participation 없으면 skip (거짓기록 금지)."""
     from app.services.verdict_capture import capture_pr_ci_verdict
