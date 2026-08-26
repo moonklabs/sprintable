@@ -425,6 +425,11 @@ async def test_list_messages_response_shape():
         sender_result = MagicMock()
         sender_result.scalars.return_value.all.return_value = [mock_member]
 
+        # story #3106: list_messages가 member_map 배치조회 직후 runtime_type_map도 1회
+        # 배치조회한다(_lookup_sender_runtime_types) — 빈 페이지 가정, .all()(scalars 아님).
+        runtime_type_result = MagicMock()
+        runtime_type_result.all.return_value = []
+
         # #1262: admin-bypass=agent-only 한정 — 휴먼 판별 헬퍼가 참가자/agent 조회.
         # agent-only 대화로 두어 owner org-level messages 접근(우회 허용)을 검증.
         agent_id = uuid.uuid4()
@@ -451,7 +456,7 @@ async def test_list_messages_response_shape():
 
         session.execute = AsyncMock(side_effect=[
             conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
-            refs_result, blocked_sender_result,
+            runtime_type_result, refs_result, blocked_sender_result,
         ])
 
         async with client as c:

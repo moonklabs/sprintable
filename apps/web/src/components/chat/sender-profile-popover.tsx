@@ -12,6 +12,9 @@ interface SenderProfilePopoverProps {
   /** story #2968(카디르 QA #3397 MEDIUM) — chat-bubble.tsx가 이미 들고 있던 sender_avatar_url을
    * 안 넘겨 이 팝업만 Bot/User 하드코딩 아이콘에 머물러 있었다. avatar.tsx 정본 배선. */
   avatarUrl?: string | null;
+  /** story #3106(#3092 후속) — chat-bubble.tsx의 message.sender_runtime_type 그대로. agent만
+   * 값 있고 human은 null(Avatar.runtimeType과 동형 규율). */
+  runtimeType?: string | null;
   onClose: () => void;
   /** 생략하면(undefined) 「사용자 차단」 버튼 자체를 안 그린다(자기 자신 클릭 시 호출부가 안 넘김). */
   onBlock?: () => void;
@@ -20,7 +23,7 @@ interface SenderProfilePopoverProps {
 // story #2349 — "상대 프로필" 진입점. 이 제품에 다른 멤버를 보는 화면이 없었다(net-new 표면,
 // 그라운딩 확認됨) — message-context-menu.tsx와 같은 위치-고정 팝업 패턴을 그대로 재사용해
 // 새 상호작용 패턴을 발명하지 않는다.
-export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, onClose, onBlock }: SenderProfilePopoverProps) {
+export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, runtimeType, onClose, onBlock }: SenderProfilePopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,7 +54,7 @@ export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, onClose, 
       style={{ left: clampedX, top: clampedY }}
     >
       <div className="flex items-center gap-2.5 px-3 py-1.5">
-        <Avatar name={name} avatarUrl={avatarUrl ?? null} actorType={isAgent ? 'agent' : 'human'} size={32} />
+        <Avatar name={name} avatarUrl={avatarUrl ?? null} actorType={isAgent ? 'agent' : 'human'} size={32} runtimeType={runtimeType ?? null} />
         <span className="truncate text-sm font-medium text-foreground">{name}</span>
       </div>
       {onBlock && (

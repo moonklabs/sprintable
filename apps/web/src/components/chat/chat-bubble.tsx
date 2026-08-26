@@ -512,6 +512,7 @@ export function ChatBubble({
               size={28}
               presenceStatus={isAgent ? presenceStatus : null}
               isWorking={isWorking}
+              runtimeType={isAgent ? message.sender_runtime_type : null}
             />
           </div>
         )}
@@ -752,6 +753,7 @@ export function ChatBubble({
           name={displayName}
           isAgent={isAgent}
           avatarUrl={message.sender_avatar_url ?? null}
+          runtimeType={isAgent ? message.sender_runtime_type : null}
           onClose={() => setProfilePopover(null)}
           onBlock={onBlockUser}
         />

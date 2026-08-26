@@ -19,6 +19,9 @@ interface Participant {
   name: string | null;
   avatar_url?: string | null;
   type?: 'agent' | 'human';
+  /** story #3106(#3092 후속) — BE `_fetch_conversation_participants`가 이미 싣던 필드(agent만
+   * 값, human=null)를 이 타입이 안 받아 그동안 버려지고 있었다. */
+  runtime_type?: string | null;
 }
 
 interface ConversationItem {
@@ -183,6 +186,7 @@ function ConversationRow({
           avatarUrl={oneOnOneParticipant.avatar_url ?? null}
           actorType={isAgentConv || oneOnOneParticipant.type === 'agent' ? 'agent' : 'human'}
           size={36}
+          runtimeType={(isAgentConv || oneOnOneParticipant.type === 'agent') ? (oneOnOneParticipant.runtime_type ?? null) : null}
         />
       ) : (
         <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-info/15 text-foreground">

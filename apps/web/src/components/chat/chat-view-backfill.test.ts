@@ -10,7 +10,7 @@ import type { ChatMessage } from '@/hooks/use-chat-sse';
 function msg(id: string, created_at: string): ChatMessage {
   return {
     id, memo_id: 'c1', created_by: 'u1', sender_name: 'test', sender_type: 'human',
-    sender_avatar_url: null, content: id, attachments: [], created_at,
+    sender_avatar_url: null, sender_runtime_type: null, content: id, attachments: [], created_at,
   };
 }
 
