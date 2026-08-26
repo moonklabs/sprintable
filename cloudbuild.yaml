@@ -110,6 +110,13 @@ substitutions:
   # 메일 링크가 prod로 갔다. dev-safe 기본값은 prod URL(수동 gcloud submit 시 최소한
   # prod와 같은 안전값) — GHA가 dev 브랜치에서만 dev 도메인으로 override.
   _NEXT_PUBLIC_APP_URL: "https://app.sprintable.ai"
+  # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(story 57526f21, #3499 PR 리뷰 delta) —
+  # /.well-known/apple-app-site-association 라우트(apps/web)가 읽는 env 2종. dev-safe
+  # 기본값(수동 gcloud builds submit override 없을 때) — GHA cloud-build.yml이 main에서
+  # MOBILE_APP_LINK_ORIGIN만 prod로 override(_FASTAPI_URL과 동일 배선 패턴). Team ID는
+  # AASA 응답으로 공개되는 값이라 시크릿 아니고 dev/prod 동일해 override 불요.
+  _APPLE_TEAM_ID: "JN798BC4KC"
+  _MOBILE_APP_LINK_ORIGIN: "https://dev-app.sprintable.ai"
   # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
   # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
   # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
@@ -452,7 +459,10 @@ steps:
       # E-ARCH 1단계(story #2078) — /api/event-stream 프록시 라우트가 REALTIME_URL을 읽어
       # SSE/LISTEN 전용 realtime-gateway로 향한다(REALTIME_URL 없으면 기존 FASTAPI_URL로
       # 폴백 — 이 값을 비우면 코드 변경·재배포 없이 즉시 원복). --update-env-vars(additive).
-      - --update-env-vars=REALTIME_URL=${_REALTIME_URL}
+      # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(story 57526f21) — APPLE_TEAM_ID·
+      # MOBILE_APP_LINK_ORIGIN 없으면 /.well-known/apple-app-site-association 라우트가
+      # 설계대로 500(fail-loud)을 낸다. 같은 --update-env-vars에 동반(additive, 기존 env 보존).
+      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN}
       - --quiet
     waitFor: [push-frontend]
 

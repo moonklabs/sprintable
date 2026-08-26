@@ -64,9 +64,14 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // ② 손 스냅샷(의도적, 2026-08-01 재실측) — 라이브 top-level 페이지 라우트(`app/*`+
   // `app/(authenticated)/*`, `[ws]`/`(authenticated)` 제외) + Next.js 메타데이터 파일
   // 라우트. `scripts/verify-reserved-first-segments-sync.ts`가 어긋남을 CI에서 잡는다.
-  'activity', 'api', 'apple-icon.png', 'auth', 'channel', 'chats', 'dashboard',
+  '.well-known', 'activity', 'api', 'apple-app-site-association', 'apple-icon.png', 'auth',
+  'channel', 'chats', 'dashboard',
   'favicon.ico', 'forgot-password', 'gates', 'icon.svg', 'inbox', 'internal-dogfood',
-  'invite', 'login', 'loop-queue', 'manifest.webmanifest', 'meetings', 'mfa', 'more', 'onboarding',
+  'invite', 'login', 'loop-queue', 'manifest.webmanifest', 'meetings', 'mfa', 'more',
+  // [P1] iOS TestFlight 구글 로그인 후 404 인시던트 — AASA(.well-known/apple-app-site-association)
+  // + native/oauth-return 신설(verify-reserved-first-segments-sync.test.ts가 이 목록 누락을
+  // 실측으로 잡았다).
+  'native', 'onboarding',
   'org-briefing', 'organization', 'privacy', 'refund-policy', 'register', 'reset-password',
   'rewards', 'settings', 'share', 'terms', 'verify-email',
 ]);
