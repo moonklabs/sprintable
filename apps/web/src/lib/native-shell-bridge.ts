@@ -5,6 +5,13 @@
 declare global {
   interface Window {
     ReactNativeWebView?: { postMessage(message: string): void };
+    // story #3118(Sign in with Apple, AC0) — ReactNativeWebView와 별개 이름공간(민군
+    // 정렬 済, sprintable-mobile 배선). ReactNativeWebView는 iOS·안드로이드 양쪽에
+    // react-native-webview가 동형으로 주입해 플랫폼 구분 신호가 못 된다 — 이 전역이
+    // "무엇인지"(셸의 진실)를 말하고, 웹은 "보여줄지"(AC0 노출 정책)만 판단한다. 셸은
+    // Android도 숨기지 않고 참값을 넣는다(injectedJavaScriptBeforeContentLoaded/Tauri
+    // initialization_script — hydrate 전 값이 서 있어야 fail-closed가 실제로 안전).
+    __SPRINTABLE_SHELL__?: { platform: 'ios' | 'android' | 'macos' };
   }
 }
 
@@ -19,6 +26,15 @@ export function notifyContentPainted() {
 // 호출하면 항상 false(window 없음).
 export function isNativeShell(): boolean {
   return typeof window !== 'undefined' && Boolean(window.ReactNativeWebView);
+}
+
+// story #3118 AC0(선생님 확定 2026-08-26) — Apple 로그인은 iOS·macOS 셸에서만 노출,
+// 웹·안드로이드는 없어야 한다. 신호 부재·위조(3값 밖 문자열 등)는 전부 비노출로 떨어지는
+// fail-closed — `platform`이 정확히 'ios'|'macos' 둘 중 하나일 때만 true. SSR에서는 항상
+// false(window 없음 — 로그인 페이지는 'use client'라 하이드레이션 후 재평가된다).
+export function isAppleLoginEligible(): boolean {
+  const platform = typeof window !== 'undefined' ? window.__SPRINTABLE_SHELL__?.platform : undefined;
+  return platform === 'ios' || platform === 'macos';
 }
 
 // story #2765(레인 B) §2 — 웹↔셸 postMessage 계약. content-painted와 동일한 명시 스키마

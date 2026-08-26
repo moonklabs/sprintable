@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from jose import jwt as jose_jwt
 import re
 
 from pydantic import BaseModel, field_validator
@@ -29,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 
 from app.core.security import (
+    apple_client_secret_jwt,
     create_tokens,
     create_password_reset_token,
     create_email_verification_token,
@@ -1008,15 +1010,27 @@ async def totp_verify(
 # "개발자 도구" 포지셔닝을 말하지 않게 하기 위함(GitHub App/봇 연동 `github_app.py`는
 # 완전히 별개 물건이라 무관 — config.py:209 주석 참조). 제거 전 prod 실측(디디, 읽기전용
 # 1회 잡): github_id는 있으나 다른 로그인 수단이 없는 사용자 0명 — 이관 경로 불요.
-# `_OAUTH_CONFIGS`가 provider 등록 자체를 게이트하므로("google" 하나만 등록) 아래
-# `_client_id`/`_client_secret`/oauth_callback의 provider 분기는 전부 "google 하나뿐"이
-# 확정된 상태에서 남은 스캐폴딩이다 — 향후 다른 provider가 추가되면 그때 다시 분기한다.
+#
+# story #3118(Sign in with Apple, App Store Guideline 4.8) — "google 하나뿐"이던 전제가
+# 깨져 아래 provider 분기가 실제로 쓰인다. Apple은 Google과 프로토콜 모양이 다르다:
+# userinfo GET 엔드포인트가 없고(id_token JWT 안에 sub/email이 실려온다, JWKS로 서명 검증),
+# client_secret도 고정 문자열이 아니라 매 요청 서명하는 JWT다(_client_secret() 참고). 그래서
+# "userinfo_url" 대신 "jwks_url"을 두고, oauth_callback()의 2번 단계(userinfo 조회)가
+# provider별로 완전히 다른 코드 경로를 탄다(아래 참고).
 _OAUTH_CONFIGS: dict[str, dict] = {
     "google": {
         "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
         "userinfo_url": "https://www.googleapis.com/oauth2/v3/userinfo",
         "scope": "openid email profile",
+        "id_field": "sub",
+        "email_field": "email",
+    },
+    "apple": {
+        "authorize_url": "https://appleid.apple.com/auth/authorize",
+        "token_url": "https://appleid.apple.com/auth/token",
+        "jwks_url": "https://appleid.apple.com/auth/keys",
+        "scope": "name email",
         "id_field": "sub",
         "email_field": "email",
     },
@@ -1028,11 +1042,50 @@ def _redirect_uri(provider: str) -> str:
 
 
 def _client_id(provider: str) -> str:
+    if provider == "apple":
+        return settings.apple_services_id
     return settings.google_client_id
 
 
 def _client_secret(provider: str) -> str:
+    if provider == "apple":
+        return apple_client_secret_jwt(
+            team_id=settings.apple_team_id,
+            services_id=settings.apple_services_id,
+            key_id=settings.apple_key_id,
+            private_key_pem=settings.apple_private_key,
+        )
     return settings.google_client_secret
+
+
+async def _verify_apple_id_token(client: httpx.AsyncClient, id_token: str, *, expected_audience: str) -> dict:
+    """Apple id_token(JWT)을 JWKS로 서명 검증하고 클레임을 반환한다.
+
+    story #3118 — Apple은 userinfo 엔드포인트가 없어 이 토큰의 sub/email 클레임이 유일한
+    신원 출처다. 서명 검증 없이 디코드만 하면 위조 토큰을 그대로 신뢰하는 구멍이 생기므로,
+    매 호출마다 Apple의 공개 JWKS(https://appleid.apple.com/auth/keys)를 받아 헤더의 kid에
+    맞는 키만 골라 RS256으로 검증한다(캐싱 안 함 — 로그인은 고빈도 경로가 아니고, Apple이
+    키를 순환해도 캐시 미스로 인한 로그인 실패를 만들지 않는 쪽이 더 안전하다).
+    """
+    unverified_header = jose_jwt.get_unverified_header(id_token)
+    kid = unverified_header.get("kid")
+    if not kid:
+        raise JWTError("Apple id_token missing kid header")
+
+    jwks_resp = await client.get(_OAUTH_CONFIGS["apple"]["jwks_url"])
+    if jwks_resp.status_code != 200:
+        raise JWTError("Failed to fetch Apple JWKS")
+    matching_key = next((k for k in jwks_resp.json().get("keys", []) if k.get("kid") == kid), None)
+    if not matching_key:
+        raise JWTError("No matching Apple JWKS key for id_token kid")
+
+    return jose_jwt.decode(
+        id_token,
+        matching_key,
+        algorithms=["RS256"],
+        audience=expected_audience,
+        issuer="https://appleid.apple.com",
+    )
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -1059,6 +1112,12 @@ async def oauth_authorize(provider: str) -> JSONResponse:
     if provider == "google":
         params["access_type"] = "offline"
         params["prompt"] = "select_account"
+    if provider == "apple":
+        # Apple 공식 요건 — scope에 name/email이 있으면 GET 리다이렉트가 아니라 콜백 URL로
+        # POST(form_post)해야 한다(Apple 스펙, GET이면 invalid_request). FE 콜백 라우트
+        # (apps/web/src/app/api/auth/callback/[provider]/route.ts)가 이 provider에 한해
+        # POST 바디도 받아야 한다 — story #3118 FE 변경분 참고.
+        params["response_mode"] = "form_post"
     url = f"{cfg['authorize_url']}?{urlencode(params)}"
     return _ok({"url": url, "state": state})
 
@@ -1099,14 +1158,26 @@ async def oauth_callback(
         if not access_token:
             return _err("OAUTH_NO_TOKEN", "No access_token in response", 400)
 
-        # 2. userinfo 조회
-        userinfo_resp = await client.get(
-            cfg["userinfo_url"],
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        if userinfo_resp.status_code != 200:
-            return _err("OAUTH_USERINFO_FAILED", "Failed to fetch user info", 400)
-        userinfo = userinfo_resp.json()
+        # 2. userinfo 조회 — Apple은 userinfo 엔드포인트 자체가 없다(공식 스펙). id/email은
+        # 토큰교환 응답에 함께 온 id_token(JWT) 클레임 안에 실려있고, Apple JWKS로 서명을
+        # 검증해야 신뢰할 수 있다(디코드만 하고 검증 생략하면 위조 토큰을 그대로 신뢰하는
+        # 구멍이 된다). Google은 기존 그대로 bearer-token GET.
+        if provider == "apple":
+            id_token = token_data.get("id_token")
+            if not id_token:
+                return _err("OAUTH_NO_TOKEN", "No id_token in response", 400)
+            try:
+                userinfo = await _verify_apple_id_token(client, id_token, expected_audience=_client_id(provider))
+            except JWTError:
+                return _err("OAUTH_USERINFO_FAILED", "Failed to verify Apple id_token", 400)
+        else:
+            userinfo_resp = await client.get(
+                cfg["userinfo_url"],
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if userinfo_resp.status_code != 200:
+                return _err("OAUTH_USERINFO_FAILED", "Failed to fetch user info", 400)
+            userinfo = userinfo_resp.json()
 
     oauth_id = str(userinfo.get(cfg["id_field"], ""))
     email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
@@ -1115,14 +1186,25 @@ async def oauth_callback(
         return _err("OAUTH_MISSING_INFO", "Missing id or email from provider", 400)
 
     # 3. 기존 유저 조회 (oauth_id 기준 → email 기준 순)
-    id_col = User.google_id
+    # story #3118 — "google 하나뿐"이던 시절의 하드코딩(User.google_id 고정)을 provider-
+    # generic으로 연다. User 모델에 {provider}_id 컬럼이 없으면(등록 안 된 provider) 여기
+    # AttributeError로 바로 터지는 게 맞다 — _OAUTH_CONFIGS에 provider가 있는데 컬럼이
+    # 없는 상태는 배포 순서 실수(마이그레이션 누락)지 조용히 넘길 상황이 아니다.
+    id_col = getattr(User, f"{provider}_id")
     result = await session.execute(select(User).where(id_col == oauth_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
 
     if not user:
-        # 동일 이메일 유저가 있으면 OAuth ID 연결
-        result = await session.execute(select(User).where(User.email == email, User.is_active.is_(True)))
-        user = result.scalar_one_or_none()
+        # story #3118(PO 확定 2026-08-26, private relay 이메일 특성) — Apple은 이메일 자동
+        # 매칭 병합을 안 탄다. Apple의 "이메일 가리기" 기능 때문에 같은 사람이 Google=실
+        # 이메일·Apple=매 앱마다 다른 relay 이메일을 쓸 수 있어, 이메일 매칭이 오히려
+        # 엉뚱한 계정에 잘못 연결될 위험이 더 크다(A의 relay 이메일이 우연히 B의 실이메일과
+        # 같을 순 없지만, 반대로 "당연히 매칭돼야 할 계정"이 매칭 안 되는 게 기본이 되므로
+        # 자동 병합에 기대지 않는다 — Apple의 sub만이 신뢰 가능한 1차 키). 수동 "계정 연결"
+        # UI는 별도 후속 스토리(PO 등재 예정) — 여기서는 항상 신규 생성한다.
+        user = None if provider == "apple" else (
+            await session.execute(select(User).where(User.email == email, User.is_active.is_(True)))
+        ).scalar_one_or_none()
         if user:
             await session.execute(
                 update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})

@@ -52,14 +52,15 @@ function decodeJwtSub(token: string): string | null {
 
 type RouteParams = { params: Promise<{ provider: string }> };
 
-export async function GET(request: Request, { params }: RouteParams) {
-  const { provider } = await params;
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get('code');
-  const state = searchParams.get('state');
+// story #3118(Sign in with Apple) — Apple 공식 스펙: authorize 요청에 response_mode=
+// form_post를 실으면(auth.py oauth_authorize, scope에 name/email이 있을 때 강제) Apple이
+// 이 콜백 URL로 GET 리다이렉트가 아니라 application/x-www-form-urlencoded POST를 보낸다.
+// code/state는 쿼리가 아니라 폼 바디에 실린다 — 그 외 로직(state 검증·BE 콜백·핸드오프)은
+// GET과 완전히 동일해 handleCallback()으로 공유한다.
+async function handleCallback(request: Request, provider: string, code: string | null, state: string | null) {
   const origin = resolveAppUrl(null);
 
-  if (!['google'].includes(provider)) {
+  if (!['google', 'apple'].includes(provider)) {
     return NextResponse.redirect(`${origin}/login?error=invalid_provider`);
   }
 
@@ -155,4 +156,21 @@ export async function GET(request: Request, { params }: RouteParams) {
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
   return res;
+}
+
+export async function GET(request: Request, { params }: RouteParams) {
+  const { provider } = await params;
+  const { searchParams } = new URL(request.url);
+  return handleCallback(request, provider, searchParams.get('code'), searchParams.get('state'));
+}
+
+// story #3118 — Apple의 form_post 콜백. 다른 provider는 이 메서드로 오지 않는다(Apple만
+// response_mode=form_post를 요청) — handleCallback() 안의 provider 화이트리스트가 그
+// 계약을 여전히 지킨다(누가 여기로 잘못 POST해도 provider가 없으면 즉시 invalid_provider).
+export async function POST(request: Request, { params }: RouteParams) {
+  const { provider } = await params;
+  const form = await request.formData().catch(() => null);
+  const code = typeof form?.get('code') === 'string' ? (form.get('code') as string) : null;
+  const state = typeof form?.get('state') === 'string' ? (form.get('state') as string) : null;
+  return handleCallback(request, provider, code, state);
 }
