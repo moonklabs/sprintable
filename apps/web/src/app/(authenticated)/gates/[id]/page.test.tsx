@@ -540,3 +540,87 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     expect(() => handler('not-json{')).not.toThrow();
   });
 });
+
+// story #3113(실사고·선생님 2026-08-26) — 상세 페이지에서도 결정 게이트(agent_decision_
+// request)의 question/assumption/options가 전문 열람 가능해야 한다(#3038이 고친 건 merge
+// 카드 렌더뿐, 이 gate_type은 미커버였다).
+describe('GateDetailPage — story #3113 결정 게이트(agent_decision_request) 전문 열람', () => {
+  function decisionGate(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      gate_type: 'agent_decision_request', can_approve: true, risk_grade: 'low',
+      neutral_facts: {
+        question: 'Apple Developer Program 등록 — 유형을 어느 쪽으로?',
+        assumption: 'PO 권고=A',
+        options: ['A) Organization', 'B) Individual', 'C) 보류'],
+      },
+      ...overrides,
+    });
+  }
+
+  it('claim(제목)에 question이 뜨고, 해시는 보조 캡션으로 강등된다', async () => {
+    await mount(decisionGate());
+    expect(container.textContent).toContain('Apple Developer Program 등록 — 유형을 어느 쪽으로?');
+    expect(container.textContent).toContain('#w-1');
+  });
+
+  it('AC2 — assumption·options 전문이 (펼치기 없이) 상세 페이지엔 항상 보인다', async () => {
+    await mount(decisionGate());
+    expect(container.textContent).toContain('PO 권고=A');
+    expect(container.textContent).toContain('A) Organization');
+    expect(container.textContent).toContain('B) Individual');
+    expect(container.textContent).toContain('C) 보류');
+  });
+
+  it('AC2 — 이미 해소된(approved) 결정 게이트도 전문이 그대로 남아 감사 가능하다', async () => {
+    await mount(decisionGate({ status: 'approved', resolver_id: null }));
+    expect(container.textContent).toContain('PO 권고=A');
+    expect(container.textContent).toContain('A) Organization');
+  });
+
+  async function mountCapturingDecisionTransition(gateFixture: GateItem) {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method, body: init?.body as string | undefined });
+      if (url === '/api/gates/gate-1/transition') return { ok: true, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    return calls;
+  }
+
+  it('AC3 — options가 있으면 안을 고르기 전엔 승인 버튼이 비활성이고, 고르면 활성화된다', async () => {
+    await mountCapturingDecisionTransition(decisionGate());
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(true);
+    expect(container.textContent).toContain(koMessages.cage.decisionSelectHint);
+
+    const radios = container.querySelectorAll('input[type="radio"]');
+    expect(radios).toHaveLength(3);
+    await act(async () => { (radios[0] as HTMLInputElement).click(); });
+    expect(approveBtn.disabled).toBe(false);
+  });
+
+  it('AC3 — 승인 시 선택안이 note로 전송·영구 기록된다(resolution_note)', async () => {
+    const calls = await mountCapturingDecisionTransition(decisionGate());
+    const radios = container.querySelectorAll('input[type="radio"]');
+    await act(async () => { (radios[2] as HTMLInputElement).click(); });
+
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approveBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const transitionCall = calls.find((c) => c.url === '/api/gates/gate-1/transition');
+    const body = JSON.parse(transitionCall?.body ?? '{}') as { status: string; note: string | null };
+    expect(body.status).toBe('approved');
+    expect(body.note).toBe('선택: C) 보류');
+  });
+
+  it('options가 없으면 승인 버튼이 곧바로 활성이다(선택 강요 없음)', async () => {
+    await mountCapturingDecisionTransition(decisionGate({ neutral_facts: { question: '확인만 부탁' } }));
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(false);
+  });
+});

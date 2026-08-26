@@ -7,8 +7,8 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CheckCircle, XCircle } from 'lucide-react';
-import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts } from '@/components/cage/gate-risk';
+import { CheckCircle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
+import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
@@ -63,8 +63,12 @@ function isHeld(gate: GateItem): boolean {
 // 텍스트 1줄뿐이라 gateBody 카드처럼 별도 행을 못 얹는다. 같은 work_item(스토리)의 merge
 // 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 되므로, 있으면
 // 그 1줄 안에 PR 번호를 이어붙여 게이트 자신을 구분 가능하게 한다.
+// story #3113(실사고·선생님 2026-08-26) — agent_decision_request 게이트는 work_item_summary가
+// 항상 null이라(BE 구조상 이 gate_type엔 title을 낼 work_item이 없다) 해시로만 식별됐다.
+// neutral_facts.question이 있으면 그걸 identity로 쓴다(#3038 AC1과 동형 — 해시는 항상 보조).
 function gateRowClaimLabel(gate: GateItem): string {
-  const identity = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+  const decisionFacts = isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
+  const identity = decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
   return gate.pr_number ? `${identity} · PR #${gate.pr_number}` : identity;
 }
 
@@ -149,6 +153,20 @@ export function ApprovalsQueue() {
   const signatureGate = signatureTargetId
     ? (items.find((it) => !isHitl(it) && it.id === signatureTargetId) as GateItem | undefined)
     : undefined;
+
+  // story #3113(실사고·선생님 2026-08-26) — 결정 게이트(agent_decision_request)는 이 큐에서
+  // 원탭 승인 전에 question/assumption/options 전문을 읽고 안을 골라야 한다. 접기/펼치기는
+  // 카드마다 독립(id 키 Set, 다른 상태 추적과 동형). 선택안은 승인 시 note에 실려 영구
+  // 기록(resolution_note)된다 — BE 신규 필드 없이 기존 자유텍스트 note로 충분(AC3).
+  const [expandedDecisionIds, setExpandedDecisionIds] = useState<Set<string>>(new Set());
+  const [selectedOptionByGateId, setSelectedOptionByGateId] = useState<Record<string, string>>({});
+  const toggleDecisionExpanded = (id: string) => {
+    setExpandedDecisionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   const discuss = async (id: string, reason: string) => {
     setDiscussSubmitting(true);
@@ -393,6 +411,11 @@ export function ApprovalsQueue() {
         const resolved = resolvedGates[gate.id];
         const inlineResolvable = !resolved && canInlineResolve(gate);
         const diffFacts = deriveDiffFacts(gate);
+        // story #3113(실사고·선생님 2026-08-26) — agent_decision_request는 work_item_summary가
+        // 항상 null이라 title 자리가 해시로만 채워졌다. question이 있으면 그걸 1행 요지로
+        // 쓰고(AC1), 해시는 아래 보조 캡션으로 강등(#3038 AC1과 동형 패턴).
+        const decisionFacts = isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
+        const decisionExpanded = expandedDecisionIds.has(gate.id);
         const gateBody = (
           <>
             <div className="flex w-full flex-wrap items-center gap-1.5">
@@ -405,13 +428,17 @@ export function ApprovalsQueue() {
             {/* PO 실측(390px, 2026-08-16) — items-start 부모(flex-col)에서 truncate는 자기
                 content 폭까지 shrink-to-fit돼 ellipsis가 걸릴 폭 기준 자체가 없다(카드
                 우변에서 그냥 잘림). w-full로 폭을 부모 카드 전체로 고정해야 truncate가 실제로
-                동작한다. */}
+                동작한다. decisionFacts.question은 문장형이라 1행 truncate 대신 line-clamp-2
+                (짧은 제목류와 다른 콘텐츠 성격 — 잘림보다 2행 노출이 "요지"에 더 가깝다). */}
             <p
-              className="w-full truncate text-sm text-foreground"
-              title={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+              className={decisionFacts ? 'w-full text-sm text-foreground line-clamp-2' : 'w-full truncate text-sm text-foreground'}
+              title={decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             >
-              {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+              {decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
+            {decisionFacts ? (
+              <p className="text-[11px] text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
+            ) : null}
             {/* story #3038 AC4(페드루 전언, PO #3188 오서명 실사고) — 같은 work_item(스토리)의
                 merge 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 된다.
                 pr_number·head SHA는 이미 GateResponse에 있었지만(from_attributes 자동 채움)
@@ -431,6 +458,56 @@ export function ApprovalsQueue() {
             ) : null}
           </>
         );
+
+        // story #3113(AC2) — 「읽지 않고는 승인 버튼이 정보 없이 눌리는」 실사고 처방.
+        // gateBody는 두 사이트(resolved 카드·inlineResolvable 카드)에서 <button onClick=
+        // {router.push}>{gateBody}</button>로 감싸져 렌더된다 — 그 안에 펼치기 버튼·라디오
+        // input을 넣으면 버튼 안에 버튼(invalid HTML, 클릭 버블링도 깨짐)이 된다. 그래서
+        // 이 블록은 gateBody 밖, inlineResolvable 카드에서만(아래 렌더) 그 버튼의 형제로
+        // 얹는다 — resolved/click-through 경로는 title 1행(question)+hash 캡션으로 이미
+        // AC1을 만족하고, 전문은 /gates/{id} 상세(이 스토리에서 함께 갱신)로 확認 가능하다.
+        const decisionExpandSection = decisionFacts ? (
+          <div className="w-full">
+            <button
+              type="button"
+              onClick={() => toggleDecisionExpanded(gate.id)}
+              className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+            >
+              {decisionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+              {t(decisionExpanded ? 'decisionCollapse' : 'decisionExpand')}
+            </button>
+            {decisionExpanded ? (
+              <div className="mt-1.5 space-y-2 rounded-lg border border-border bg-muted/20 p-2.5">
+                <p className="text-xs whitespace-pre-wrap text-foreground">{decisionFacts.question}</p>
+                {decisionFacts.assumption ? (
+                  <p className="text-[11px] whitespace-pre-wrap text-muted-foreground">
+                    <span className="font-medium text-foreground">{t('decisionAssumptionLabel')}</span> {decisionFacts.assumption}
+                  </p>
+                ) : null}
+                {decisionFacts.options.length > 0 ? (
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-medium text-foreground">{t('decisionOptionsLabel')}</p>
+                    {decisionFacts.options.map((option) => (
+                      <label
+                        key={option}
+                        className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-[11px] text-foreground hover:bg-muted/40"
+                      >
+                        <input
+                          type="radio"
+                          name={`decision-option-${gate.id}`}
+                          className="mt-0.5"
+                          checked={selectedOptionByGateId[gate.id] === option}
+                          onChange={() => setSelectedOptionByGateId((prev) => ({ ...prev, [gate.id]: option }))}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null;
 
         // story 22affaf2 — canInlineResolve(can_approve && needsAction && !held)를 만족하는
         // 항목만 이 2단 구조(제목=상세 이동 버튼 + 그 아래 승인/거절/보류 행)로 렌더한다 —
@@ -519,11 +596,18 @@ export function ApprovalsQueue() {
         // 통일한다(canonical 상세와 동형 — GateSignatureApproval 화면 하나가 승인/거절
         // 둘 다 담당, canSign이 서명 생략을 막는다). 저위험은 기존처럼 즉시 transition.
         const isSigFlow = usesSignatureFlow(deriveRiskLevel(gate));
+        // story #3113(AC3) — options가 있는 결정 게이트는 안을 고르기 전엔 승인 버튼이
+        // 안 눌린다(정보 없이 눌리는 구조 자체를 버튼 단에서 막는다). 거절은 "이 결정 요청
+        // 자체를 반려"라는 뜻이라 안 선택을 요구하지 않는다.
+        const requiresOptionChoice = decisionFacts !== null && decisionFacts.options.length > 0;
+        const selectedOption = selectedOptionByGateId[gate.id];
         const disabled = resolvingIds.has(gate.id);
         const primaryLabel = isSigFlow ? t('sigApproveAndSign') : t('gateApprove');
         const primaryOnClick = () => {
           if (isSigFlow) setSignatureTargetId(gate.id);
-          else void resolveGate(gate.id, 'approved');
+          // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록한다(BE 신규
+          // 필드 없이 기존 자유텍스트 필드 재사용 — 결과 조회 시 "어느 안"이었는지 그대로 읽힌다).
+          else void resolveGate(gate.id, 'approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption }) : null);
         };
         const rejectOnClick = () => {
           if (isSigFlow) setSignatureTargetId(gate.id);
@@ -539,6 +623,7 @@ export function ApprovalsQueue() {
             >
               {gateBody}
             </button>
+            {decisionExpandSection}
             {gateErrors[gate.id] ? (
               <p
                 className="mt-2 rounded-lg border border-destructive/30 bg-destructive/8 px-2.5 py-1.5 text-[11px] text-foreground"
@@ -578,13 +663,16 @@ export function ApprovalsQueue() {
               <Button
                 size="sm"
                 className="order-1 h-9 w-full gap-1.5 sm:order-3 sm:h-8 sm:w-auto"
-                disabled={disabled}
+                disabled={disabled || (requiresOptionChoice && !selectedOption)}
                 onClick={primaryOnClick}
               >
                 <CheckCircle className="size-3.5" />
                 {disabled && !isSigFlow ? '...' : primaryLabel}
               </Button>
             </div>
+            {requiresOptionChoice && !selectedOption ? (
+              <p className="mt-1.5 text-right text-[11px] text-muted-foreground">{t('decisionSelectHint')}</p>
+            ) : null}
           </div>
         );
       })}

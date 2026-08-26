@@ -11,7 +11,7 @@ import { GateEvidence, GateActivityHistory, gateNeedsAction, gateDecision } from
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
@@ -56,6 +56,10 @@ export default function GateDetailPage() {
   // story #2043 AC4: 누가 결재했는지 화면에 남는다 — gate-inbox.tsx와 동일 패턴(팀 멤버 이름맵,
   // resolver_id는 BE가 인증 caller로 강제하므로 신뢰 가능).
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  // story #3113(실사고·선생님 2026-08-26) — 결정 게이트(agent_decision_request)의 승인 전
+  // 안 선택(approvals-queue.tsx의 원탭 인라인 카드와 동일 계약: 선택안이 note에 실려
+  // resolution_note로 영구 기록된다, AC3).
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
 
   const fetchGate = useCallback(async () => {
     setLoading(true);
@@ -139,6 +143,10 @@ export default function GateDetailPage() {
   // 독자 판정으로 서버를 덮지 않는다(AC2). needsAction=true인데 can_approve=false면(권한 없는
   // 뷰어) 아래에서 읽기전용 사유 문구로 분기한다(무권한 상태에서 액션 버튼 자체를 렌더하지 않음).
   const canAct = needsAction && gate?.can_approve === true;
+  // story #3113 — question 없으면(BE 미배선 예외 등) null → 기존 title/해시 폴백으로 자연 후퇴.
+  const decisionFacts = gate && isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
+  const requiresOptionChoice = decisionFacts !== null && decisionFacts.options.length > 0;
+  const isSigFlowGate = !!gate && usesSignatureFlow(deriveRiskLevel(gate));
 
   const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     if (!gate) return;
@@ -260,7 +268,7 @@ export default function GateDetailPage() {
               const { statusKey } = deriveGateProofState(gate.status);
               return statusKey ? t(statusKey) : gate.status;
             })()}
-            claim={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+            claim={decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             className="max-w-none"
             footer={
               <div className="mt-3.5 space-y-3 border-t border-proof-line-soft pt-3">
@@ -270,6 +278,9 @@ export default function GateDetailPage() {
                       이제 중복. 클래스가 닫혔으니 지점 처방을 걷는다(PO 지시). */}
                   <Badge variant="chip">{gate.gate_type}</Badge>
                 </div>
+                {decisionFacts ? (
+                  <p className="text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
                   {t('gateDetailOrgContext', {
                     org: orgMemberships.find((o) => o.orgId === gate.org_id)?.orgName ?? gate.org_id.slice(0, 8),
@@ -278,6 +289,45 @@ export default function GateDetailPage() {
                     ? ` · ${projectMemberships.find((p) => p.projectId === gate.project_id)?.projectName ?? gate.project_id.slice(0, 8)}`
                     : ''}
                 </p>
+
+                {/* story #3113(AC2) — 「카드를 눌러도 내용을 볼 수 있는 상세 뷰 자체가 없다」
+                    처방. needsAction/canAct와 무관하게 항상 렌더(이미 해소된 결정도 «무엇을
+                    물었고 무슨 전제였는지»는 감사 가치가 있다 — GateActivityHistory와 같은
+                    원칙, 위 §2975 AC4 주석 참조). */}
+                {decisionFacts ? (
+                  <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-sm whitespace-pre-wrap text-foreground">{decisionFacts.question}</p>
+                    {decisionFacts.assumption ? (
+                      <p className="text-xs whitespace-pre-wrap text-muted-foreground">
+                        <span className="font-medium text-foreground">{t('decisionAssumptionLabel')}</span> {decisionFacts.assumption}
+                      </p>
+                    ) : null}
+                    {decisionFacts.options.length > 0 ? (
+                      <div className="space-y-1 pt-1">
+                        <p className="text-xs font-medium text-foreground">{t('decisionOptionsLabel')}</p>
+                        {decisionFacts.options.map((option) =>
+                          canAct && !isSigFlowGate ? (
+                            <label
+                              key={option}
+                              className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-xs text-foreground hover:bg-muted/40"
+                            >
+                              <input
+                                type="radio"
+                                name="decision-option"
+                                className="mt-0.5"
+                                checked={selectedOption === option}
+                                onChange={() => setSelectedOption(option)}
+                              />
+                              <span>{option}</span>
+                            </label>
+                          ) : (
+                            <p key={option} className="text-xs text-muted-foreground">{option}</p>
+                          ),
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {!needsAction ? (
                   <div className="space-y-3">
@@ -324,7 +374,7 @@ export default function GateDetailPage() {
                         : t('gateReadonlyNotAuthorized')}
                     </p>
                   </div>
-                ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
+                ) : isSigFlowGate ? (
                   // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
                   // 후 fetchGate() 재조회로 gate.github_check_run_sha가 바뀌어도, key 없이는 이
                   // 컴포넌트가 그대로 살아있어 evidenceViewed/reason state가 안 리셋된다 —
@@ -367,13 +417,17 @@ export default function GateDetailPage() {
                       </Button>
                       <Button
                         className="min-h-12 flex-1 gap-1.5"
-                        disabled={resolving}
-                        onClick={() => void transition('approved')}
+                        disabled={resolving || (requiresOptionChoice && !selectedOption)}
+                        // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록.
+                        onClick={() => void transition('approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption ?? '' }) : undefined)}
                       >
                         <CheckCircle className="size-4" />
                         {resolving ? '...' : t('gateApprove')}
                       </Button>
                     </div>
+                    {requiresOptionChoice && !selectedOption ? (
+                      <p className="text-center text-xs text-muted-foreground">{t('decisionSelectHint')}</p>
+                    ) : null}
                     {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
                     <Button
                       type="button"
