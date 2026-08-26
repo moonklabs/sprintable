@@ -23,6 +23,13 @@ Cloud Build보다 관대했던 것 — 테스트가 모델링한 계층과 실�
 `test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax`가(주석 포함
 전문 스캔으로) 회귀를 원천 차단한다(추출한 스크립트를 실행하지 않고 정적으로 스캔 — 셸
 계층과 무관).
+
+story #3118(Sign in with Apple, PO 확定 2026-08-26) — deploy-backend에 Apple OAuth 식별자
+3종(APPLE_SERVICES_ID·APPLE_KEY_ID·APPLE_TEAM_ID, plain env)+개인키 1종(APPLE_PRIVATE_KEY,
+Secret Manager `APPLE_SIWA_PRIVATE_KEY`, dev/prod 공용) 추가. Services ID/Key ID는 공개돼도
+무해한 식별자(시크릿 아님) — Team ID는 기존 `_APPLE_TEAM_ID`(AASA 라우트, deploy-frontend)를
+그대로 재사용한다(같은 값, 새 substitution 아님). 셋 다 cloudbuild.yaml 인라인 주석은 story
+#3031 바이트 한도(아래) 여유가 빠듯해 짧게만 남기고, 전체 맥락은 이 docstring이 SSOT다.
 """
 from __future__ import annotations
 
@@ -57,6 +64,11 @@ _DECLARED_SUBSTITUTIONS = {
     "_GCS_AVATARS_BUCKET",
     # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
     "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
+    # story #3118(Sign in with Apple) — deploy-backend(bash entrypoint)가 이제 이 3개를
+    # 직접 참조한다. _APPLE_TEAM_ID는 이전엔 deploy-frontend(순수 gcloud args 리스트 —
+    # 이 가드가 스캔하는 4개 bash 스텝 밖)에서만 쓰여 이 목록에 없어도 무해했으나, backend
+    # 쪽으로도 재사용하며 처음 걸린다.
+    "_APPLE_SERVICES_ID", "_APPLE_KEY_ID", "_APPLE_TEAM_ID",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -135,6 +147,11 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
         # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
         "_GOTENBERG_SERVICE_URL": gotenberg_url,
+        # story #3118 — set -u라 미설정이면 스크립트가 죽는다(GOTENBERG_SERVICE_URL과 동일 이유).
+        # 값은 cloudbuild.yaml substitutions 기본값과 정합(비밀 아님, dev/prod 동일).
+        "_APPLE_SERVICES_ID": "ai.sprintable.web",
+        "_APPLE_KEY_ID": "DF2G3UV649",
+        "_APPLE_TEAM_ID": "JN798BC4KC",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -316,6 +333,10 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "SSE_TRANSIENT_REPLAY_ENABLED=false,LICENSE_CONSENT=agreed,"
         "NEXT_PUBLIC_APP_URL=https://example.run.app,DEPLOY_ENV=dev,"
         "FIREBASE_OAUTH_HANDOFF_ENABLED=false,"
+        # story #3118 — 베이스 ENV_VARS 조립 문자열의 맨 끝(FIREBASE_OAUTH_HANDOFF_ENABLED
+        # 다음)에 이어붙는다 — REDIS_URL/ADMIN_OPERATOR_*/GCS_AVATARS_BUCKET은 그 뒤에
+        # 조건부로 append되는 후속 라인이라 실제 순서상 APPLE_*가 먼저 온다.
+        "APPLE_SERVICES_ID=ai.sprintable.web,APPLE_KEY_ID=DF2G3UV649,APPLE_TEAM_ID=JN798BC4KC,"
         "REDIS_URL=redis://10.164.120.243:6379,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
