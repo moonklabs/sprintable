@@ -446,7 +446,7 @@ describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 �
   it('headerAside를 안 넘기면 wrapper div 자체가 렌더되지 않는다 — StateHeader가 옛 구조 그대로 outer div의 직계 자식(byte-identical, 고정 문자열 대조)', () => {
     const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" />);
     expect(markup).toContain(
-      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-green">',
+      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-ink">',
     );
     // 새 wrapper(headerAside 전용)는 아예 없어야 한다.
     expect(markup).not.toContain('class="flex items-center justify-between gap-2"');
@@ -455,7 +455,7 @@ describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 �
   it('양성대조 — headerAside를 주면 위 "직계 자식" 단언이 실제로 깨진다(가드가 진짜 실패할 수 있음을 증명)', () => {
     const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" headerAside={<span>x</span>} />);
     expect(markup).not.toContain(
-      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-green">',
+      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-ink">',
     );
     expect(markup).toContain('class="flex items-center justify-between gap-2"');
   });
