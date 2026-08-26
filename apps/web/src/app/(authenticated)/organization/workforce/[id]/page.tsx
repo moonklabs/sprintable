@@ -23,6 +23,7 @@ import {
   RUNTIME_REGISTRY,
   getRuntimeDef,
   resolveRuntimeStatus,
+  runtimeLabel,
   type RuntimeStatus,
 } from '@/lib/runtime-capabilities';
 
@@ -403,7 +404,7 @@ export default function AgentDetailPage() {
               </div>
             ) : (
               <div className="flex flex-1 items-center gap-3 min-w-0">
-                <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={40} />
+                <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={40} runtimeType={agent.runtime_type} />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-base font-semibold text-foreground">{agent.name}</span>
@@ -412,6 +413,12 @@ export default function AgentDetailPage() {
                   <div className="mt-1 flex items-center gap-2">
                     <Badge variant="secondary">{t('agentMember')}</Badge>
                     <Badge variant="outline">{agent.role}</Badge>
+                    {/* story #3092(2단계, 표면3) — 커넥터 필드. runtime_type null이면 생략
+                        (전역 폴백 규칙 — 추측·「미지정」류 문구 금지). 공식 로고는 법무
+                        사인오프 전이라 이번엔 텍스트만(로고 트랙은 후속 스코프). */}
+                    {runtimeLabel(agent.runtime_type) ? (
+                      <Badge variant="chip">{t('connectorLabel')}: {runtimeLabel(agent.runtime_type)}</Badge>
+                    ) : null}
                   </div>
                 </div>
                 {canEdit && (

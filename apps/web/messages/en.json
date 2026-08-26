@@ -1274,6 +1274,7 @@
     "lastProjectMembership": "Cannot remove the last active project membership for this member",
     "humanMember": "Human",
     "agentMember": "Agent",
+    "connectorLabel": "Connector",
     "noProjectMembers": "No members assigned to this project",
     "noProjectMembersHint": "Invite new members from the Organization Members tab.",
     "projectManagement": "Projects",

@@ -161,3 +161,56 @@ describe('Avatar — story #2887 S2g', () => {
     expect(img?.src).toBe('https://example.com/new.png');
   });
 });
+
+// story #3092(2단계, 표면2) — agent 아바타 hover/focus 툴팁: name + "Agent · {runtimeLabel}".
+// tabIndex=0(agent 전용)이라 키보드 focus로 base-ui Tooltip이 열린다(hover 없이도 접근 가능
+// — 이 tabIndex 자체가 이번에 발견·수정한 접근성 갭: 없으면 키보드로 절대 못 연다).
+describe('Avatar — story #3092 2단계 커넥터 hover 툴팁', () => {
+  it('human 아바타는 tabIndex도 tooltip-trigger도 없다(정체 모호성 자체가 없음)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" actorType="human" />));
+    });
+    const el = container.querySelector('div')!;
+    expect(el.getAttribute('tabindex')).toBeNull();
+    expect(el.getAttribute('data-slot')).not.toBe('tooltip-trigger');
+  });
+
+  it('agent 아바타는 tabIndex=0 트리거를 갖고, focus 시 name+"Agent · {runtimeLabel}"이 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" runtimeType="claude-code" />));
+    });
+    const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
+    expect(trigger.getAttribute('tabindex')).toBe('0');
+    await act(async () => {
+      trigger.focus();
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('유나Agent · Claude Code');
+  });
+
+  it('runtimeType이 null/미배선이면 2번째 줄이 "Agent" 단독으로 폴백한다(raw key 노출 없음)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" runtimeType={null} />));
+    });
+    const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
+    await act(async () => {
+      trigger.focus();
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('유나Agent');
+  });
+
+  it('runtimeType이 registry 미등록 원값이어도 raw key를 그대로 노출하지 않고(runtimeLabel 계약) 보여준다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" runtimeType="unknown-runtime-x" />));
+    });
+    const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
+    await act(async () => {
+      trigger.focus();
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    // runtimeLabel()의 기존 계약(미등록값=원값 보존, S2 ⑤ 패턴)을 그대로 물려받는다 —
+    // 이 파일은 그 계약을 재정의하지 않는다. 여기선 "폴백이 죽지 않는다"만 고정.
+    expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('유나Agent · unknown-runtime-x');
+  });
+});

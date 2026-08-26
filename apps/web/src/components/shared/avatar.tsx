@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Bot, User } from 'lucide-react';
 import { PresenceDot, AGENT_LIVE_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { runtimeLabel } from '@/lib/runtime-capabilities';
 import { avatarColor, initials } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 
@@ -18,6 +20,10 @@ export interface AvatarProps {
   /** agent 전용 — 활동 축(AGENT_LIVE_RING_CLASS, citron pulse). 미작동 시 정적 proof-blue 링
    * (항상 "에이전트임" 식별 — 이미지가 있어도 유지, S2g 목업 규칙+#2921 규칙③ 색 스왑). */
   isWorking?: boolean;
+  /** story #3092(2단계, 유나 픽셀 규격) — agent 전용, 커넥터 정체(runtime_type 원값).
+   * hover 툴팁 2번째 줄("Agent · {runtimeLabel}")에만 쓰인다 — null/미배선 소비처는
+   * "Agent" 단독으로 자동 폴백(전역 폴백 규칙, raw key 노출 없음 — runtimeLabel()이 흡수). */
+  runtimeType?: string | null;
   className?: string;
 }
 
@@ -38,7 +44,7 @@ export interface AvatarProps {
  * presence-dot.tsx — 옛 WORKING_RING_CLASS 개명+색 스왑, 그 파일 주석 참고).
  */
 export function Avatar({
-  name, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, className,
+  name, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, runtimeType = null, className,
 }: AvatarProps) {
   const isAgent = actorType === 'agent';
   const dotSize = size >= 40 ? 'md' : 'sm';
@@ -60,8 +66,14 @@ export function Avatar({
   }
   const showImage = !!avatarUrl && !imgError;
 
-  return (
-    <div className={cn('relative shrink-0', className)} style={{ width: size, height: size }}>
+  const avatarNode = (
+    // story #3092(2단계, 표면2) — isAgent일 때 이 노드가 TooltipTrigger로 쓰인다. tabIndex=0
+    // 없으면 키보드로 절대 포커스가 안 가 hover 전용(마우스만)이 되어버린다 — 접근성 필수.
+    <div
+      className={cn('relative shrink-0', className)}
+      style={{ width: size, height: size }}
+      tabIndex={isAgent ? 0 : undefined}
+    >
       <div
         className={cn(
           'h-full w-full overflow-hidden',
@@ -111,5 +123,28 @@ export function Avatar({
         <PresenceDot status={presenceStatus} size={dotSize} className="absolute -bottom-0.5 -right-0.5" />
       ) : null}
     </div>
+  );
+
+  // story #3092(2단계, 표면2) — human 아바타는 툴팁 없음(정체 모호성이 애초에 없음). agent만
+  // hover 시 "{name} / Agent · {runtimeLabel}" 2줄 — runtimeType이 없으면 2번째 줄이
+  // "Agent" 단독으로 자동 축약(전역 폴백, 새 텍스트 조립 없이 그대로 표현 가능).
+  if (!isAgent) return avatarNode;
+
+  const runtimeLbl = runtimeLabel(runtimeType);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={avatarNode} />
+      <TooltipContent side="top">
+        <div className="flex flex-col gap-0.5 py-0.5">
+          <span className="text-xs font-medium">{name}</span>
+          {/* 툴팁 팝업 자체가 bg-foreground(반전 배경)라 text-background가 이미 고대비
+              "본문" 색이다(popup 기본값 상속) — 유나 규격의 text-muted-foreground는 이
+              반전 배경에서 그대로 쓰면 대비가 깨져(라이트/다크 실측 재계산: 8.49/7.11로
+              AA는 통과하지만 톤 자체가 안 맞음) text-background/70(반전 배경용 동형 dim)로
+              옮겨 적용 — 의도(2번째 줄=보조 정보)는 그대로, 토큰만 반전 표면에 맞게 보정. */}
+          <span className="text-[11px] text-background/70">{runtimeLbl ? `Agent · ${runtimeLbl}` : 'Agent'}</span>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
