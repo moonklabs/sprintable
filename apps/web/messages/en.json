@@ -3489,6 +3489,8 @@
     "approvalRequestTossEmptyTitle": "No conversations to send to",
     "approvalRequestTossEmptyBody": "{name} needs to be in a conversation first",
     "approvalRequestTossSuccessToast": "Sent to {conversation}",
+    "approvalRequestTossAlreadyThereChip": "Already there",
+    "approvalRequestTossAlreadyThereToast": "Already in {conversation}",
     "approvalRequestDelegate": "Delegate to another approver",
     "approvalRequestDelegateLoading": "Loading…",
     "approvalRequestDelegatePickPlaceholder": "Choose an approver",

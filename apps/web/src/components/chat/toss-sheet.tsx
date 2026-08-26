@@ -41,9 +41,9 @@ export interface TossSheetProps {
   currentTeamMemberId: string;
   designatedApproverId: string;
   designatedApproverName: string | null;
-  /** 200 성공(신규 삽입이든 기존 사본 재확인이든 — BE가 멱등이라 구분 안 함, story #3084
-   * dispatch_approval_card_toss 멱등 계약). 호출부가 성공 토스트+게이트 재조회를 담당. */
-  onTossed: (targetConversationTitle: string) => void;
+  /** 200 성공 — inserted=신규 삽입 여부(story #3094, GateTossResponse.inserted). false=멱등
+   * no-op(대상에 이미 카드 사본이 있었음). 호출부가 문구 분기+게이트 재조회를 담당. */
+  onTossed: (targetConversationTitle: string, inserted: boolean) => void;
   /** 409(gate_already_resolved) — 시트를 닫고 "이미 처리된 결재" 안내(유나 규격 §2). */
   onAlreadyResolved: () => void;
 }
@@ -57,11 +57,12 @@ export interface TossSheetProps {
  * 사람(requester/designated 본인) 스스로 그 방에 없으면 애초에 픽커에 골라 넣을 수 없는
  * 게 맞는 제약(비참여 방으로 몰래 보내는 경로 자체가 없다).
  *
- * ⚠️알려진 축소(2026-08-25, 미르코 그라운딩) — 유나 규격의 "이미 있음" 칩(이미 토스된
- * 대상 표시)은 BE에 "이 gate_id 카드가 이미 있는 conversation 목록"을 물을 데이터 소스가
- * 없어(PR#3488 계약에 미포함) 이번 스코프에서 뺐다. 이미 토스된 대상을 다시 선택해도
- * BE가 멱등으로 조용히 무해 처리(dispatch_approval_card_toss existing-check)하므로 기능
- * 정합성은 유지된다 — 사전 안내만 없을 뿐.
+ * story #3094(2026-08-26, 유나 규격 c40bf168 §2 SSOT) — 위 "알려진 축소" 후속. BE에
+ * "이 gate_id 카드가 이미 있는 conversation 전체 목록"을 물을 데이터 소스는 여전히 없다
+ * (신규 리스팅 엔드포인트는 이번 스코프 밖) — 대신 이 세션에서 실제로 토스를 시도한
+ * 대상만 결과(inserted)로 학습해 "이미 있음" 칩을 붙인다. 시트를 닫았다 다시 열어도(재토스
+ * 진입) 같은 TossSheet 인스턴스가 유지되는 한 칩이 남아 — 방금 토스했던 대상을 실수로
+ * 다시 골라도(멱등 자체는 무해) 사전에 "이미 있음"이 보인다.
  */
 export function TossSheet({
   open, onOpenChange, gateId, projectId, currentTeamMemberId, designatedApproverId, designatedApproverName,
@@ -74,6 +75,7 @@ export function TossSheet({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [alreadyThereIds, setAlreadyThereIds] = useState<Set<string>>(new Set());
   const fetchedRef = useRef(false);
 
   useEffect(() => {
@@ -113,8 +115,11 @@ export function TossSheet({
         body: JSON.stringify({ target_conversation_id: selectedId }),
       });
       if (res.ok) {
+        const body = await res.json().catch(() => null) as { inserted?: boolean } | null;
+        const inserted = body?.inserted ?? true;
+        setAlreadyThereIds((prev) => new Set(prev).add(selectedId));
         onOpenChange(false);
-        onTossed(target ? conversationDisplayName(target, currentTeamMemberId) : '');
+        onTossed(target ? conversationDisplayName(target, currentTeamMemberId) : '', inserted);
         return;
       }
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
@@ -160,6 +165,8 @@ export function TossSheet({
             candidates.map((c) => {
               const name = conversationDisplayName(c, currentTeamMemberId);
               const selected = selectedId === c.id;
+              // story #3094(유나 규격 §2 .pick.done) — 이 세션에서 이미 토스 시도한 대상.
+              const alreadyThere = alreadyThereIds.has(c.id);
               return (
                 <button
                   key={c.id}
@@ -168,20 +175,27 @@ export function TossSheet({
                   aria-pressed={selected}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-muted',
-                    selected && 'bg-muted'
+                    selected && 'bg-muted',
+                    alreadyThere && 'opacity-70'
                   )}
                 >
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                     {c.type === 'dm' ? <MessageSquare className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{name}</span>
-                  <span
-                    className={cn(
-                      'size-4 shrink-0 rounded-full border-2',
-                      selected ? 'border-primary bg-primary' : 'border-border'
-                    )}
-                    aria-hidden
-                  />
+                  {alreadyThere ? (
+                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10.5px] font-semibold text-primary">
+                      {t('approvalRequestTossAlreadyThereChip')}
+                    </span>
+                  ) : (
+                    <span
+                      className={cn(
+                        'size-4 shrink-0 rounded-full border-2',
+                        selected ? 'border-primary bg-primary' : 'border-border'
+                      )}
+                      aria-hidden
+                    />
+                  )}
                 </button>
               );
             })

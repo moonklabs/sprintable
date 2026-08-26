@@ -93,12 +93,12 @@ describe('TossSheet — 대상 피커(designated 참여 대화만)', () => {
 });
 
 describe('TossSheet — 제출(성공/409/기타 에러)', () => {
-  it('선택 후 보내기 — 성공 시 onTossed(대상 이름)+onOpenChange(false)', async () => {
+  it('선택 후 보내기 — 성공(신규 삽입) 시 onTossed(대상 이름, inserted=true)+onOpenChange(false)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
       if (init?.method === 'POST') {
         expect(url).toContain('/api/gates/gate-1/toss');
         expect(JSON.parse(init.body ?? '{}')).toEqual({ target_conversation_id: 'conv-3' });
-        return { ok: true, json: async () => ({ data: {} }) };
+        return { ok: true, json: async () => ({ inserted: true }) };
       }
       return { ok: true, json: async () => ({ data: CONVERSATIONS }) };
     }));
@@ -111,8 +111,74 @@ describe('TossSheet — 제출(성공/409/기타 에러)', () => {
     await act(async () => { sendBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(onTossed).toHaveBeenCalledWith('릴리스 채널');
+    expect(onTossed).toHaveBeenCalledWith('릴리스 채널', true);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('재토스(멱등 no-op) — onTossed(대상 이름, inserted=false)+재오픈 시 «이미 있음» 칩(story #3094)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      if (init?.method === 'POST') {
+        expect(url).toContain('/api/gates/gate-1/toss');
+        expect(JSON.parse(init.body ?? '{}')).toEqual({ target_conversation_id: 'conv-3' });
+        return { ok: true, json: async () => ({ inserted: false }) };
+      }
+      return { ok: true, json: async () => ({ data: CONVERSATIONS }) };
+    }));
+    const onTossed = vi.fn();
+    const onAlreadyResolved = vi.fn();
+    let isOpen = true;
+    const onOpenChange = vi.fn((next: boolean) => { isOpen = next; });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TossSheet
+            open={isOpen}
+            onOpenChange={onOpenChange}
+            gateId="gate-1"
+            projectId="proj-1"
+            currentTeamMemberId="member-1"
+            designatedApproverId="member-9"
+            designatedApproverName="선생님"
+            onTossed={onTossed}
+            onAlreadyResolved={onAlreadyResolved}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const row = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('릴리스 채널'));
+    await act(async () => { row?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const sendBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === koMessages.chats.approvalRequestTossSend);
+    await act(async () => { sendBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(onTossed).toHaveBeenCalledWith('릴리스 채널', false);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    // 재오픈(재토스 진입) — 같은 인스턴스가 학습한 «이미 있음» 칩이 그 대상에 사전 표시된다.
+    isOpen = true;
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TossSheet
+            open={isOpen}
+            onOpenChange={onOpenChange}
+            gateId="gate-1"
+            projectId="proj-1"
+            currentTeamMemberId="member-1"
+            designatedApproverId="member-9"
+            designatedApproverName="선생님"
+            onTossed={onTossed}
+            onAlreadyResolved={onAlreadyResolved}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const reopenedRow = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('릴리스 채널'));
+    expect(reopenedRow?.textContent).toContain(koMessages.chats.approvalRequestTossAlreadyThereChip);
   });
 
   it('보내기 버튼은 선택 전엔 비활성', async () => {
