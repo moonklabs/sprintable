@@ -99,6 +99,9 @@ export function PricingPlanCard({
           </span>
         )}
       </div>
+      {isPricePublic && (
+        <div className="mb-1.5 text-[10px] text-muted-foreground">{t('vatExcludedNote')}</div>
+      )}
 
       <div className="mb-3 text-xs text-muted-foreground">
         {t('seatsLabel', { count: limits.seats })}
