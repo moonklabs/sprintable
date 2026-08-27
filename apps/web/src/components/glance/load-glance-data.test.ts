@@ -138,13 +138,16 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
       if (url.startsWith('/api/goals')) {
         return jsonResponse([
           {
-            // ⛔이 표본은 created_at·updated_at·배열순서 셋 다 e-fresh보다 «늦게»(더 최근)
-            // 둬서, 이 tie-break가 정말 latest_story_activity_at만 읽는지를 가른다 — 옛
-            // updated_at 기반 계산이 실수로 되살아나도(#2341 AC2 델타 잔존), 혹은 배열/생성일
-            // 폴백만으로 우연히 같은 결과가 나와도 이 테스트는 통과하지 않는다(카디르 QA
-            // confound 제거 관행 계승, story #2341 AC2 선례).
-            id: 'e-stale', title: 'E-STALE(에픽 row 자체는 방금 갱신·소속 스토리는 조용)', status: 'active',
-            created_at: '2026-06-15T00:00:00Z', updated_at: '2026-08-27T00:00:00Z',
+            // ⛔페드루 QA 재지적(2026-08-27, #2341 AC2와 같은 confound 클래스 재발) — «필드
+            // 축»(latest_story_activity_at vs updated_at) confound는 첫 판에서 죽였으나
+            // «배열순서 축»(scopeRoadmapEpics의 position-없음 created_at ASC 폴백) confound가
+            // 남아있었다. 이 표본은 e-stale(질 쪽)의 created_at을 e-fresh보다 «이르게» 둬서
+            // 배열상 e-stale이 «먼저» 오게 만든다 — sort를 통째로 제거해도(폴백 배열순서만
+            // 남아도) e-stale이 뽑히면 이 tie-break가 진짜 latest_story_activity_at으로
+            // 정렬한다는 걸 증명 못 한다. updated_at은 반대로(e-stale이 더 최근) 둬서 옛
+            // updated_at 기반 계산이 되살아나도 걸리게 한다(필드축+배열축 이중 confound 제거).
+            id: 'e-stale', title: 'E-STALE(배열상 먼저 옴·에픽 row updated_at은 최근·소속 스토리는 조용)', status: 'active',
+            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-08-27T00:00:00Z',
             latest_story_activity_at: '2026-06-01T00:00:00Z', participant_ids: [],
             focal_story: {
               id: 's-stale', title: '오래된 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
@@ -153,11 +156,11 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
             },
           },
           {
-            // 에픽 row 자체(created_at/updated_at)는 e-stale보다 이르지만, 소속 스토리가
-            // 방금 움직였다(latest_story_activity_at가 가장 최신) — tie-break가 정확히 이
-            // 필드로 고르는지가 이 테스트의 핵심.
-            id: 'e-fresh', title: 'E-FRESH(에픽 row는 오래전·소속 스토리가 방금 움직임)', status: 'active',
-            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
+            // 배열상 e-stale보다 «뒤»(created_at 늦음)·에픽 row updated_at도 e-stale보다 이르다
+            // — 배열순서 폴백으로도, updated_at 기반 계산으로도 이 쪽이 이길 수 없다. 오직
+            // latest_story_activity_at가 가장 최신이라는 사실만으로 뽑혀야 이 테스트가 유효.
+            id: 'e-fresh', title: 'E-FRESH(배열상 뒤에 옴·에픽 row updated_at은 오래전·소속 스토리가 방금 움직임)', status: 'active',
+            created_at: '2026-06-15T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
             latest_story_activity_at: '2026-08-27T00:00:00Z', participant_ids: [],
             focal_story: {
               id: 's-fresh', title: '방금 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
@@ -181,8 +184,11 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
       if (url.startsWith('/api/goals')) {
         return jsonResponse([
           {
-            id: 'e-null', title: 'E-NULL(소속 non-done 스토리 없음)', status: 'active',
-            created_at: '2026-07-01T00:00:00Z', updated_at: '2026-08-27T00:00:00Z',
+            // e-null(질 쪽)의 created_at을 e-real보다 «이르게» 둬서 배열상 먼저 오게 만든다
+            // — sort를 통째로 제거하면 e-null이 뽑혀 이 단언이 깨진다(배열축 confound 제거,
+            // 위 tie-break 테스트와 같은 관행).
+            id: 'e-null', title: 'E-NULL(배열상 먼저 옴·소속 non-done 스토리 없음)', status: 'active',
+            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-08-27T00:00:00Z',
             latest_story_activity_at: null, participant_ids: [],
             focal_story: {
               id: 's-null', title: '스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
@@ -191,8 +197,8 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
             },
           },
           {
-            id: 'e-real', title: 'E-REAL(실 값 존재)', status: 'active',
-            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+            id: 'e-real', title: 'E-REAL(배열상 뒤에 옴·실 값 존재)', status: 'active',
+            created_at: '2026-07-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
             latest_story_activity_at: '2026-06-01T00:00:00Z', participant_ids: [],
             focal_story: {
               id: 's-real', title: '스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
