@@ -273,7 +273,7 @@ function SilentStallBucketRow({
       </button>
       {/* AC7 — 펼침 시 전량(절단 0), 긴 구간은 스크롤(화면을 안 밀어냄). */}
       {expanded ? (
-        <div className="max-h-[280px] overflow-y-auto">
+        <div className="focus-inset max-h-[280px] overflow-y-auto">
           {bucket.items.map((item) => (
             <SilentStallExpandedRow key={item.id} item={item} memberNames={memberNames} t={t} />
           ))}
