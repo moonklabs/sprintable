@@ -3499,6 +3499,8 @@
     "approvalRequestStatusHeld": "보류됨",
     "approvalRequestStatusVoided": "무효화됨",
     "approvalRequestResolutionNote": "사유: {note}",
+    "approvalRequestAssumption": "전제: {assumption}",
+    "approvalRequestRequestedBy": "요청자: {name}",
     "approvalRequestDelegatedAway": "다른 담당자에게 위임된 결재입니다.",
     "approvalRequestWaitingOn": "{name}님의 결재를 기다리는 중",
     "approvalRequestTossTrigger": "다른 방에도 보내기",
