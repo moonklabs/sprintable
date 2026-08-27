@@ -25,11 +25,14 @@ export interface QueueItem {
 }
 
 // story #3150(시연 리허설 발견) — 이 타입이 'agent_stuck' 하나뿐이라고 선언돼 있었는데
-// command_center.py는 실제로 8종을 낸다(agent_stuck·agent_auth_failure·story_stalled·
-// unanswered_blocker·hypothesis_falsified·loop_overdue_hypothesis·loop_overdue_goal·
-// loop_outcome_missing_goal — grep '"type": "' command_center.py 전수). 나머지 7종은
-// entity_id/entity_type이 아예 없는데 AttentionRow가 그 필드만 읽어(resolveName 경유)
-// 공백을 렌더했다 — 이 타입을 실제 union으로 넓혀 각 shape이 실 payload와 맞게 한다.
+// command_center.py는 실제로 7종을 낸다(agent_stuck·agent_auth_failure·unanswered_blocker·
+// hypothesis_falsified·loop_overdue_hypothesis·loop_overdue_goal·loop_outcome_missing_goal
+// — grep '"type": "' command_center.py 전수). ⛔story #93b076c8(2250)에서 'story_stalled'
+// (org-wide·Story.updated_at 기준·부정확 확定)를 BE가 완전 제거(twin 신호 정리, org-briefing
+// NowFace의 「침묵의 정체」org-wide 클러스터로 대체) — story #3154에서 이 죽은 소비자 가지를
+// FE에서도 걷어냈다(BE가 안 내는 타입을 union에 남겨 두면 다음 사람이 아직 산 것으로 착각).
+// 나머지 6종은 entity_id/entity_type이 아예 없는데 AttentionRow가 그 필드만 읽어(resolveName
+// 경유) 공백을 렌더했다 — 이 타입을 실제 union으로 넓혀 각 shape이 실 payload와 맞게 한다.
 // ⛔QueueItem 상단 주석과 같은 재발방지 원칙 — BE가 종을 늘리면 여기·action-zone.tsx
 // attentionEntityLabel/attentionDayCount 둘 다 맞춰야 한다.
 export type AttentionItem =
@@ -51,15 +54,6 @@ export type AttentionItem =
       failure_count: number;
       first_failed_at: string | null;
       last_failed_at: string | null;
-    }
-  | {
-      type: 'story_stalled';
-      severity: string;
-      auto_detected: boolean;
-      title: string;
-      story_id: string;
-      stalled_days: number | null;
-      project_id: string;
     }
   | {
       type: 'unanswered_blocker';
