@@ -95,6 +95,15 @@ def _https_return_uri() -> str:
 _CUSTOM_SCHEME_RETURN_URI = "ai.sprintable:/oauth-return"
 
 
+# story #3121 AC2/AC3 — issue/consume가 이제 Request를 받는다(rate limit IP 키·감사기록
+# ip/user-agent). 직접함수호출 스타일 테스트라 ASGI 스택 없이 최소 shape만 흉내낸다(기존
+# test_cbd578d4_c4_bootstrap_flow_realdb.py의 _FakeRequest 관행과 동형).
+class _FakeRequest:
+    def __init__(self, ip: str = "127.0.0.1"):
+        self.client = type("_FakeClient", (), {"host": ip})()
+        self.headers: dict[str, str] = {}
+
+
 def _issue_req(user_id, challenge, *, callback_mode="https", return_uri=None):
     from app.routers.auth_firebase_internal import OAuthHandoffIssueRequest
     return OAuthHandoffIssueRequest(
@@ -123,11 +132,11 @@ async def test_issue_and_consume_round_trip_success(monkeypatch):
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
         assert issued.code
 
         async with Session() as s:
-            consumed = await consume_oauth_handoff(
+            consumed = await consume_oauth_handoff(_FakeRequest(), 
                 _consume_req(issued.code, verifier), authorization=None, db=s,
             )
         assert consumed.access_token
@@ -156,12 +165,12 @@ async def test_consume_wrong_verifier_rejected(monkeypatch):
 
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
 
         wrong_verifier, _ = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await consume_oauth_handoff(
+                await consume_oauth_handoff(_FakeRequest(), 
                     _consume_req(issued.code, wrong_verifier), authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 401
@@ -185,18 +194,18 @@ async def test_consume_wrong_verifier_burns_code_no_retry(monkeypatch):
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
 
         wrong_verifier, _ = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException):
-                await consume_oauth_handoff(
+                await consume_oauth_handoff(_FakeRequest(), 
                     _consume_req(issued.code, wrong_verifier), authorization=None, db=s,
                 )
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await consume_oauth_handoff(
+                await consume_oauth_handoff(_FakeRequest(), 
                     _consume_req(issued.code, verifier), authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 401
@@ -216,16 +225,16 @@ async def test_consume_replay_after_success_rejected(monkeypatch):
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
 
         req = _consume_req(issued.code, verifier)
         async with Session() as s:
-            first = await consume_oauth_handoff(req, authorization=None, db=s)
+            first = await consume_oauth_handoff(_FakeRequest(), req, authorization=None, db=s)
         assert first.access_token
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await consume_oauth_handoff(req, authorization=None, db=s)
+                await consume_oauth_handoff(_FakeRequest(), req, authorization=None, db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -244,14 +253,14 @@ async def test_concurrent_consume_exactly_one_succeeds(monkeypatch):
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
 
         req = _consume_req(issued.code, verifier)
 
         async def _attempt():
             async with Session() as s:
                 try:
-                    return await consume_oauth_handoff(req, authorization=None, db=s)
+                    return await consume_oauth_handoff(_FakeRequest(), req, authorization=None, db=s)
                 except HTTPException:
                     return None
 
@@ -276,7 +285,7 @@ async def test_issue_rejected_when_feature_disabled(monkeypatch):
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+                await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
             assert exc_info.value.status_code == 501
     finally:
         await engine.dispose()
@@ -292,7 +301,7 @@ async def test_issue_rejected_unknown_user(monkeypatch):
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await issue_oauth_handoff(_issue_req(uuid.uuid4(), challenge), authorization=None, db=s)
+                await issue_oauth_handoff(_FakeRequest(), _issue_req(uuid.uuid4(), challenge), authorization=None, db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -318,7 +327,7 @@ async def test_issue_rejected_inactive_user(monkeypatch):
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+                await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -336,7 +345,7 @@ async def test_issue_rejected_short_code_challenge(monkeypatch):
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await issue_oauth_handoff(
+                await issue_oauth_handoff(_FakeRequest(), 
                     _issue_req(user_id, "too-short"), authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 400
@@ -359,14 +368,14 @@ async def test_orphan_finding_revoke_between_issue_and_consume_rejected(monkeypa
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
 
         async with Session() as s:
             await revoke_user_sessions(s, user_id, firebase_uid=None)
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await consume_oauth_handoff(
+                await consume_oauth_handoff(_FakeRequest(), 
                     _consume_req(issued.code, verifier), authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 401
@@ -392,7 +401,7 @@ async def test_issue_rejected_return_uri_mismatch_for_mode(monkeypatch):
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await issue_oauth_handoff(
+                await issue_oauth_handoff(_FakeRequest(), 
                     _issue_req(user_id, challenge, callback_mode="https", return_uri=_CUSTOM_SCHEME_RETURN_URI),
                     authorization=None, db=s,
                 )
@@ -416,13 +425,13 @@ async def test_consume_rejected_when_callback_mode_mismatches_issued(monkeypatch
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(
+            issued = await issue_oauth_handoff(_FakeRequest(), 
                 _issue_req(user_id, challenge, callback_mode="https"), authorization=None, db=s,
             )
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await consume_oauth_handoff(
+                await consume_oauth_handoff(_FakeRequest(), 
                     _consume_req(
                         issued.code, verifier,
                         callback_mode="custom_scheme", return_uri=_CUSTOM_SCHEME_RETURN_URI,
@@ -448,13 +457,13 @@ async def test_consume_rejected_when_return_uri_mismatches_issued(monkeypatch):
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(
+            issued = await issue_oauth_handoff(_FakeRequest(), 
                 _issue_req(user_id, challenge, callback_mode="https"), authorization=None, db=s,
             )
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await consume_oauth_handoff(
+                await consume_oauth_handoff(_FakeRequest(), 
                     _consume_req(
                         issued.code, verifier,
                         callback_mode="https", return_uri="https://evil.example.com/native/oauth-return",
@@ -485,14 +494,14 @@ async def test_issue_and_consume_omitted_mode_fields_defaults_to_https_round_tri
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(
+            issued = await issue_oauth_handoff(_FakeRequest(), 
                 OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                 authorization=None, db=s,
             )
         assert issued.code
 
         async with Session() as s:
-            consumed = await consume_oauth_handoff(
+            consumed = await consume_oauth_handoff(_FakeRequest(), 
                 OAuthHandoffConsumeRequest(code=issued.code, code_verifier=verifier),
                 authorization=None, db=s,
             )
@@ -516,13 +525,213 @@ async def test_issue_rejects_half_declared_mode_fields(monkeypatch):
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await issue_oauth_handoff(
+                await issue_oauth_handoff(_FakeRequest(), 
                     OAuthHandoffIssueRequest(
                         user_id=str(user_id), code_challenge=challenge, callback_mode="https",
                     ),
                     authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 400
+    finally:
+        await engine.dispose()
+
+
+# ─── story #3121 AC2 — custom_scheme 전용 rate limit ────────────────────────────────────
+
+def _reset_rate_limiter(monkeypatch):
+    """전역 싱글턴(`get_rate_limiter()`)이 프로세스 전체에서 재사용되므로, 테스트 간 카운터
+    누적을 막기 위해 매 rate-limit 테스트 시작 시 강제로 새 인스턴스로 교체한다."""
+    from app.services import rate_limiter as rate_limiter_module
+    monkeypatch.setattr(rate_limiter_module, "_limiter", None)
+
+
+@pytest.mark.anyio
+async def test_issue_custom_scheme_rate_limited_after_limit(monkeypatch):
+    """계약 §9 잔여위험(custom scheme = client impersonation 가능) — custom_scheme 발급은
+    별도(공용 로그인 limiter와 무관) 버킷으로 제한돼야 한다."""
+    from app.routers.auth_firebase_internal import (
+        _OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT, issue_oauth_handoff,
+    )
+
+    _reset_rate_limiter(monkeypatch)
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+
+        for _ in range(_OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT):
+            _verifier, challenge = _pkce_pair()
+            async with Session() as s:
+                issued = await issue_oauth_handoff(
+                    _FakeRequest(),
+                    _issue_req(user_id, challenge, callback_mode="custom_scheme", return_uri=_CUSTOM_SCHEME_RETURN_URI),
+                    authorization=None, db=s,
+                )
+            assert issued.code
+
+        _verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await issue_oauth_handoff(
+                    _FakeRequest(),
+                    _issue_req(user_id, challenge, callback_mode="custom_scheme", return_uri=_CUSTOM_SCHEME_RETURN_URI),
+                    authorization=None, db=s,
+                )
+            assert exc_info.value.status_code == 429
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_issue_https_mode_unaffected_by_custom_scheme_rate_limit(monkeypatch):
+    """«별도» 버킷임의 증거 — custom_scheme 한도를 초과하는 횟수만큼 https 발급을 반복해도
+    막히지 않아야 한다(같은 IP·같은 유저라도 축이 다름)."""
+    from app.routers.auth_firebase_internal import (
+        _OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT, issue_oauth_handoff,
+    )
+
+    _reset_rate_limiter(monkeypatch)
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+
+        for _ in range(_OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT + 3):
+            _verifier, challenge = _pkce_pair()
+            async with Session() as s:
+                issued = await issue_oauth_handoff(
+                    _FakeRequest(), _issue_req(user_id, challenge, callback_mode="https"),
+                    authorization=None, db=s,
+                )
+            assert issued.code
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_consume_custom_scheme_rate_limited_after_limit(monkeypatch):
+    """rate limit 검사가 code 유효성 검증보다 먼저 걸린다 — 매번 무효한 code라도(401) 한도
+    소진 후엔 429로 바뀐다."""
+    from app.routers.auth_firebase_internal import (
+        _OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT, consume_oauth_handoff,
+    )
+
+    _reset_rate_limiter(monkeypatch)
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        for _ in range(_OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT):
+            async with Session() as s:
+                with pytest.raises(HTTPException) as exc_info:
+                    await consume_oauth_handoff(
+                        _FakeRequest(),
+                        _consume_req(
+                            "bogus-code", "bogus-verifier",
+                            callback_mode="custom_scheme", return_uri=_CUSTOM_SCHEME_RETURN_URI,
+                        ),
+                        authorization=None, db=s,
+                    )
+                assert exc_info.value.status_code == 401
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_oauth_handoff(
+                    _FakeRequest(),
+                    _consume_req(
+                        "bogus-code", "bogus-verifier",
+                        callback_mode="custom_scheme", return_uri=_CUSTOM_SCHEME_RETURN_URI,
+                    ),
+                    authorization=None, db=s,
+                )
+            assert exc_info.value.status_code == 429
+    finally:
+        await engine.dispose()
+
+
+# ─── story #3121 AC3 — callback_mode별 start/consume 감사 기록 ──────────────────────────
+
+async def _last_audit_row(session, event_type: str):
+    from sqlalchemy import select
+    from app.models.login_audit_log import LoginAuditLog
+
+    result = await session.execute(
+        select(LoginAuditLog).where(LoginAuditLog.event_type == event_type).order_by(LoginAuditLog.created_at.desc())
+    )
+    return result.scalars().first()
+
+
+@pytest.mark.anyio
+async def test_issue_success_writes_mode_tagged_audit_log(monkeypatch):
+    from app.routers.auth_firebase_internal import issue_oauth_handoff
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+
+        _verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            await issue_oauth_handoff(
+                _FakeRequest(), _issue_req(user_id, challenge, callback_mode="custom_scheme", return_uri=_CUSTOM_SCHEME_RETURN_URI),
+                authorization=None, db=s,
+            )
+
+        async with Session() as s:
+            row = await _last_audit_row(s, "oauth_handoff_issued")
+        assert row is not None
+        assert row.user_id == user_id
+        assert row.detail == "callback_mode=custom_scheme"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_consume_success_writes_mode_tagged_audit_log(monkeypatch):
+    from app.routers.auth_firebase_internal import consume_oauth_handoff, issue_oauth_handoff
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+
+        verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
+
+        async with Session() as s:
+            await consume_oauth_handoff(_FakeRequest(), _consume_req(issued.code, verifier), authorization=None, db=s)
+
+        async with Session() as s:
+            row = await _last_audit_row(s, "oauth_handoff_consumed")
+        assert row is not None
+        assert row.user_id == user_id
+        assert row.detail == "callback_mode=https"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_consume_failure_writes_mode_tagged_audit_log(monkeypatch):
+    from app.routers.auth_firebase_internal import consume_oauth_handoff
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            with pytest.raises(HTTPException):
+                await consume_oauth_handoff(
+                    _FakeRequest(), _consume_req("bogus-code", "bogus-verifier"), authorization=None, db=s,
+                )
+
+        async with Session() as s:
+            row = await _last_audit_row(s, "oauth_handoff_consume_failed")
+        assert row is not None
+        assert row.user_id is None
+        assert row.detail == "callback_mode=https"
     finally:
         await engine.dispose()
 
@@ -598,7 +807,7 @@ async def test_oauth_handoff_code_not_consumable_via_attested_native_consume(mon
 
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
-            issued = await issue_oauth_handoff(_issue_req(user_id, challenge), authorization=None, db=s)
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
 
         # oauth-handoff 코드에는 대응하는 installation/challenge가 애초에 존재하지 않는다 —
         # 임의(존재하지 않는) installation_id/challenge_id로 시도해도 attested 테이블에서
