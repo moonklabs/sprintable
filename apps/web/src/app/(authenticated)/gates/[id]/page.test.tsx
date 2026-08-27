@@ -657,7 +657,10 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
   });
 
   it('doc/artifact가 아닌 다른 gate 유형(merge 등)은 대상 링크를 렌더하지 않는다(엉뚱한 경로 지어내지 않음)', async () => {
-    await mount(gate({ gate_type: 'merge_gate', work_item_type: 'story', can_approve: true, risk_grade: 'low' }));
+    // PO AC 리뷰(PR#3542) 사소 지적 — 'merge'가 실존 gate_type(hitl_config.py GATE_TYPES).
+    // 'merge_gate'는 이 파일 기존 기본 픽스처값(line 57)일 뿐 실존 타입 아님 — 내 신규
+    // 테스트는 정확한 값으로.
+    await mount(gate({ gate_type: 'merge', work_item_type: 'story', can_approve: true, risk_grade: 'low' }));
     expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetDoc);
     expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetArtifact);
   });
