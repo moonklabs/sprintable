@@ -122,6 +122,13 @@ export interface StoryListFilters extends PaginationOptions {
   /** story #3019 — status=done row만 created_at이 최근 N일 이내인 것으로 제한(list_board의
    * done-7일 관례를 제네릭 경로에 일반화). done 아닌 상태는 나이 무관 전부 포함. */
   done_within_days?: number;
+  /** story #3148/#3160 — comma-separated status 목록(IN 부정, BE stories.py exclude_status).
+   * `status`(단일 일치)와 별개 축. ⛔`no_sprint`는 여기 없다 — BE에서 이 필드가 true면
+   * cursor 페이지네이션이 아예 다른(비cursor·X-Total-Count) 분기로 빠지는데(list_backlog),
+   * 이 인터페이스는 cursor 기반 `list()` 계약이라 섞으면 조용히 틀린 페이지 메타를 낸다
+   * (route.ts의 `unattached==='true'` 조기 raw-proxy 분기와 동형 이유로 no_sprint도 그
+   * 조기 분기에서만 다룬다 — story #3160 판정, 일반 list() 필터로 안 올림). */
+  exclude_status?: string;
 }
 
 export interface IStoryRepository {

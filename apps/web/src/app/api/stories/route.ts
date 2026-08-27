@@ -54,7 +54,14 @@ export async function GET(request: Request) {
     // 레벨에서 걸러 X-Total-Count로 «정확한 전체 총계»를 이미 낸다(story #2190 backlog
     // route와 동형 헤더) — StoryService 추상 대신 raw proxy로 그 헤더를 그대로 meta.total에
     // 실어 보낸다(limit=100은 목록 표시용으로 그대로, 카운트만 헤더 기준으로 정직해진다).
-    if (searchParams.get('unattached') === 'true') {
+    //
+    // story #3160 — no_sprint=true도 같은 이유로 이 조기 분기에 합류한다: BE가 no_sprint일 때
+    // 완전히 다른 분기(list_backlog, cursor 미지원·X-Total-Count 계약)를 타서 아래 cursor
+    // 페이지네이션(service.list) 가정과 안 맞는다(#2534와 동형 판단, story #3160). raw proxy는
+    // 원본 쿼리스트링을 그대로 전달하므로(fastapi-proxy.ts) exclude_status 등 다른 파라미터도
+    // 이 분기에선 이미 화이트리스트 없이 통과한다 — «화이트리스트 유지」 결정은 아래 cursor
+    // 경로(service.list)에만 적용된다.
+    if (searchParams.get('unattached') === 'true' || searchParams.get('no_sprint') === 'true') {
       const _r = await proxyToFastapi(request, '/api/v2/stories');
       if (!_r.ok) return _r;
       const data = await _r.json();
@@ -100,6 +107,10 @@ export async function GET(request: Request) {
       epic_ids: searchParams.get('epic_ids')?.split(',').map((id) => id.trim()).filter(Boolean),
       epic_unassigned: searchParams.get('epic_unassigned') === 'true' ? true : undefined,
       done_within_days: searchParams.get('done_within_days') ? Number(searchParams.get('done_within_days')) : undefined,
+      // story #3148/#3160 — 같은 클래스 재발(위 boost_candidates_from/epic_ids류와 동형)
+      // 방지로 신설과 동시에 포함. cursor 페이지네이션과 안 섞이는 no_sprint와 달리 이
+      // 필터는 WHERE 절 추가일 뿐이라 cursor 경로와 안전하게 공존한다.
+      exclude_status: searchParams.get('exclude_status') ?? undefined,
       limit: pageInput.limit + 1,  // RC3: 오버페치 → buildCursorPageMeta hasMore 판단
       cursor: pageInput.cursor,
     });

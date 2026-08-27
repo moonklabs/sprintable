@@ -34,6 +34,10 @@ export class ApiStoryRepository implements IStoryRepository {
         epic_ids: filters.epic_ids?.join(','),
         include_unassigned: filters.epic_unassigned,
         done_within_days: filters.done_within_days,
+        // story #3148/#3160 — 같은 클래스 재발(q/unattached/story_number/boost_candidates_
+        // from/epic_ids류와 동형) 방지로 신설과 동시에 여기 포함. no_sprint는 여기 없음(위
+        // interface 주석 참조 — cursor 페이지네이션과 안 섞인다, route.ts 조기분기 전용).
+        exclude_status: filters.exclude_status,
       },
     });
   }

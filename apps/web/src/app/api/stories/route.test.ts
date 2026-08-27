@@ -105,3 +105,55 @@ describe('/api/stories GET — unattached=true 분기(story #2534, 카디르 QA 
     expect(res.status).toBe(500);
   });
 });
+
+// story #3160(#3148 라이브 대조 중 PO 발견) — no_sprint=true도 unattached와 동형으로 raw
+// proxy 조기분기를 타야 한다(BE list_backlog 분기는 cursor 미지원·X-Total-Count 계약이라
+// 아래 cursor 페이지네이션 가정과 안 맞음). exclude_status는 cursor 경로(일반 service.list)
+// 에도 화이트리스트로 추가돼 있어야 한다(«화이트리스트 유지+3자리 추가» PO 판정).
+describe('/api/stories GET — no_sprint=true 분기 라우팅(story #3160)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createStoryRepository.mockResolvedValue({});
+  });
+
+  it('no_sprint=true는 unattached와 동형으로 raw proxy를 탄다(StoryService 미호출)', async () => {
+    h.proxyToFastapi.mockResolvedValue(new Response(
+      JSON.stringify([story('1')]),
+      { status: 200, headers: { 'x-total-count': '9' } },
+    ));
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p&no_sprint=true&exclude_status=done,in-review'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.meta.total).toBe(9);
+    expect(h.list).not.toHaveBeenCalled();
+    // raw proxy는 원본 쿼리스트링을 그대로 전달(fastapi-proxy.ts url.search) — exclude_status가
+    // 이 분기에선 화이트리스트 없이 이미 통과한다는 것을 호출 인자로 확인.
+    expect(h.proxyToFastapi).toHaveBeenCalledWith(expect.any(Request), '/api/v2/stories');
+    const forwardedUrl = (h.proxyToFastapi.mock.calls[0]![0] as Request).url;
+    expect(forwardedUrl).toContain('no_sprint=true');
+    expect(forwardedUrl).toContain('exclude_status=done,in-review');
+  });
+});
+
+describe('/api/stories GET — exclude_status 화이트리스트 전달(cursor 경로, story #3148/#3160)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createStoryRepository.mockResolvedValue({});
+  });
+
+  it('exclude_status가 (no_sprint 없이도) StoryService.list()에 전달된다 — 프록시가 삼키지 않는다', async () => {
+    h.list.mockResolvedValue([story('1')]);
+    await GET(new Request('http://localhost/api/stories?project_id=p&exclude_status=done'));
+    const calledWith = h.list.mock.calls[0]![0] as { exclude_status?: string };
+    expect(calledWith.exclude_status).toBe('done');
+  });
+
+  it('exclude_status 미지정이면 undefined로 넘어간다(지어내지 않음, 회귀 0)', async () => {
+    h.list.mockResolvedValue([story('1')]);
+    await GET(new Request('http://localhost/api/stories?project_id=p'));
+    const calledWith = h.list.mock.calls[0]![0] as { exclude_status?: string };
+    expect(calledWith.exclude_status).toBeUndefined();
+  });
+});
