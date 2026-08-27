@@ -602,11 +602,14 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
           ENV_VARS="$${ENV_VARS},GOTENBERG_SERVICE_URL=${_GOTENBERG_SERVICE_URL}"
         fi
-        # story #2445/#3110/#3118 — DATABASE_URL(PgBouncer)·DATABASE_URL_DIRECT(dev=sprintable
-        # 앱유저·prod=postgres 직결)·DATABASE_URL_READ(prod만)·APPLE_PRIVATE_KEY 시크릿 바인딩.
+        # story #2445/#3110/#3118 — DATABASE_URL(PgBouncer, dev/prod 둘 다 sprintable 앱유저)·
+        # DATABASE_URL_DIRECT(dev=sprintable 앱유저·prod=postgres 직결)·DATABASE_URL_READ(prod만)·
+        # APPLE_PRIVATE_KEY 시크릿 바인딩. dev pgbouncer 경유분은 #3110 2보(userlist에 sprintable
+        # 유저 등재+DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE 시크릿 신설, PO 집행)로 sprintable
+        # 유저 전환 완료 — dev 서빙이 postgres 수퍼유저 DSN을 쓰는 자리가 이제 0개.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         fi
