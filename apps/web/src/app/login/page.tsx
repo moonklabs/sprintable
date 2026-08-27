@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
-import { notifyContentPainted } from '@/lib/native-shell-bridge';
+import { notifyContentPainted, isAppleLoginEligible } from '@/lib/native-shell-bridge';
 import { LegalFooter } from '@/components/legal/legal-footer';
 
 export default function LoginPage() {
@@ -45,6 +45,15 @@ export default function LoginPage() {
   // 폼이 그대로 나온다(스켈레톤 단계 없음) — 마운트 직후가 "첫 유의미한 페인트"로 정확하다.
   useEffect(() => {
     notifyContentPainted();
+  }, []);
+
+  // story #3118 AC0 — 기본값 false(SSR과 하이드레이션 첫 프레임 모두 비노출, fail-closed).
+  // 마운트 후에만 셸 신호를 읽어 iOS/macOS로 확認되면 true로 올라간다 — 신호가 없거나
+  // 안드로이드/웹이면 영원히 false로 남는다(재평가 트리거 자체가 없음 — 셸 신호는 페이지
+  // 로드 시점에 이미 고정돼 있어 재평가할 이유가 없다).
+  const [showAppleLogin, setShowAppleLogin] = useState(false);
+  useEffect(() => {
+    setShowAppleLogin(isAppleLoginEligible());
   }, []);
 
   // story a0118204: 스캐폴드 — NEXT_PUBLIC_FIREBASE_AUTH_ENABLED가 꺼져있으면(기본) 버튼 자체가
@@ -201,6 +210,25 @@ export default function LoginPage() {
               <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t('orContinueWith')}</span>
               <div className="flex-grow border-t border-border/50" />
             </div>
+
+            {/* story #3118 AC0/AC2 — iOS/macOS 셸에서만 노출(showAppleLogin), Apple HIG
+                버튼 규격. 유나 design:changes(2026-08-26) — 고정 bg-black은 다크 카드
+                배경에서 엣지가 소실된다(HIG: 어두운 배경엔 흰 버튼 변형 사용) —
+                dark:bg-white dark:text-black. 아이콘은 fill="currentColor"로 버튼
+                텍스트 색을 그대로 따라가 별도 다크 변형을 안 둬도 자동으로 맞는다.
+                유나 비차단 권고 2건도 함께 반영: 구글보다 위(애플 우선 순서)·ko 공식
+                카피 "Apple로 계속하기"(messages 참고). */}
+            {showAppleLogin && (
+              <a
+                href={`/auth/login?provider=apple&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}`}
+                className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white transition hover:bg-black/90 dark:bg-white dark:text-black dark:hover:bg-white/90"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.248-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.696.91-1.377 0-2.313-1.29-3.4-2.83-1.331-1.9-2.377-4.86-2.377-7.62 0-4.51 2.937-6.9 5.826-6.9 1.475 0 2.706.94 3.63.94.88 0 2.256-1 3.938-1 .638 0 2.933.06 4.443 2.23-.116.075-2.657 1.55-2.629 4.62.032 3.71 3.242 4.95 3.276 4.96-.026.075-.51 1.75-.433 1.73z" />
+                </svg>
+                {t('apple')}
+              </a>
+            )}
 
             <a href={`/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}`} className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50">
               <svg className="h-5 w-5" viewBox="0 0 24 24">

@@ -32,6 +32,10 @@ class User(Base):
     # prod 실측상 이 값이 채워진 사용자가 이미 0명이라 급하지도 않다 — 드롭은 별도 정리로
     # 미룬다(의도적 보존, 누락 아님).
     github_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
+    # story #3118(Sign in with Apple, App Store Guideline 4.8) — google_id/github_id와 동형
+    # 패턴(providerId=Apple의 sub 클레임, oauth_callback()의 getattr(User, f"{provider}_id")
+    # 이 이 이름 규칙에 의존한다 — "apple_id" 외 다른 이름이면 그 조회가 AttributeError).
+    apple_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
     last_project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )

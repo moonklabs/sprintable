@@ -23,6 +23,92 @@ Cloud Build보다 관대했던 것 — 테스트가 모델링한 계층과 실�
 `test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax`가(주석 포함
 전문 스캔으로) 회귀를 원천 차단한다(추출한 스크립트를 실행하지 않고 정적으로 스캔 — 셸
 계층과 무관).
+
+story #3118(Sign in with Apple, PO 확定 2026-08-26) — deploy-backend에 Apple OAuth 식별자
+3종(APPLE_SERVICES_ID·APPLE_KEY_ID·APPLE_TEAM_ID, plain env)+개인키 1종(APPLE_PRIVATE_KEY,
+Secret Manager `APPLE_SIWA_PRIVATE_KEY`, dev/prod 공용) 추가. Services ID/Key ID는 공개돼도
+무해한 식별자(시크릿 아님) — Team ID는 기존 `_APPLE_TEAM_ID`(AASA 라우트, deploy-frontend)를
+그대로 재사용한다(같은 값, 새 substitution 아님). 셋 다 cloudbuild.yaml 인라인 주석은 story
+#3031 바이트 한도(아래) 여유가 빠듯해 짧게만 남기고, 전체 맥락은 이 docstring이 SSOT다.
+
+## deploy-backend 인라인 주석 아카이브 (story #3124, 2026-08-26)
+
+story #3031(2026-08-24) 실사고 — deploy-realtime 스텝이 UTF-8 바이트 한도(10,000, "max: 10000"
+Cloud Build 에러 그대로)를 넘겨 dev 배포가 2연속 실패했다. deploy-backend는 그 사고 이후에도
+매 story마다 인라인 주석이 계속 자라 9,829/10,000(98.3%, 여유 171B)까지 차, 다음 env 1~2개
+추가만으로도 재발하는 구조였다(미르코·카디르 2026-08-26 이중 확認). story #3527(#3118)이 신규
+추가분은 짧게 남겼지만 **기존** 주석은 그대로였다 — 이 스토리가 그 기존 서사를 전부 여기로
+옮기고 cloudbuild.yaml엔 story 번호+한 줄 포인터만 남긴다(값/로직은 전혀 안 건드림, 순수 주석
+재배치). 원문(요약 없이 옮김):
+
+- **story #2005**: 요청 타임아웃 명시화(`_BACKEND_TIMEOUT`) — 이전엔 이 플래그 자체가 없어 Cloud
+  Run 인프라 기본값에 암묵 의존했다.
+- **--allow-unauthenticated 필수**: frontend가 `NEXT_PUBLIC_FASTAPI_URL`로 backend를 직접
+  호출(public 필수). 없으면 `gcloud run deploy`가 기존 IAM을 preserve(non-deterministic)해
+  신규/리셋 시 allUsers invoker 유실로 403(2026-06-21 prod promotion 사건).
+- **OB-1**: 에이전트 onboarding generator가 읽는 backend-direct URL을 런타임 env로 주입.
+- **--update-env-vars(additive) 필수**: 기존 backend env(DATABASE_URL 등) 보존. `--set-env-vars`
+  금지(전체 wipe).
+- **story #2442(P0)**: `DB_POOL_SIZE`/`DB_MAX_OVERFLOW`가 env별 substitution(`_DB_POOL_SIZE`/
+  `_DB_MAX_OVERFLOW`, GHA per-env override, `_BACKEND_MAX_INSTANCES`와 동일 배선 패턴)이 됨 —
+  dev는 #2040 검증값(3/1) 그대로, prod는 P0 완화값(20/10) durable화. rollout 산식:
+  `2×maxScale×(pool+overflow+pg_pubsub raw 1) ≤ DB max_conn` — 값 바꿀 때 cloud-build.yml의
+  maxScale·db_pool_size/db_max_overflow output과 짝으로 검토.
+- **story #2078(E-ARCH 1단계)**: `PG_LISTEN_ENABLED` durable화(dev=false·prod=true, GHA per-env).
+- **story #2078/#2123 정정**: `EVENT_BROKER_REDIS_CONSUME_ENABLED`/`_DISPATCH_ENABLED` durable화
+  — "api는 SSE 미서빙" 전제가 틀렸음이 드러나 값을 true로 정정(에이전트 SSE가
+  `agent_onboarding_config.py` 설계상 backend-dev를 직접 서빙). 키 이름도 story #2135에서 정정
+  (구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
+  `--remove-env-vars`로 명시 제거(안 지우면 두 키 공존, additive 함정).
+- **story #2123 S0-b**: `FANOUT_WAKE_REDIS_ENABLED`(dev만 true, prod는 손대지 않음).
+- **story #2141(2026-07-23, prod Redis Memorystore 전환)**: `REDIS_URL`을 이 스텝이 예전엔
+  dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(`REDIS_URL_PROD`, AUTH
+  필요)으로 전환하는데, 같은 배포에 plain `REDIS_URL` 키까지 넘기면 Cloud Run이 "env와 secret이
+  동명 키"로 배포 자체를 거부한다(값 유무 무관 — 키 존재 자체가 충돌). dev는 AUTH 없는 plain
+  Memorystore라 시크릿 바인딩 자체가 없으므로 기존처럼 plain으로 넘긴다. prod는 여기서
+  `REDIS_URL`을 절대 안 넘김 — 시크릿 바인딩(별도 1회 gcloud, PO lane)이 `--set-secrets` 없는 이
+  스텝에 preserve된다(`DATABASE_URL_PROD` 등 기존 15개와 동일 컨벤션).
+- **⛔story #2423 배포 실패 핫픽스(2026-07-23, 오르테가군 진단, 2차)**: Cloud Build는 bash 스텝
+  안이라도 args 문자열 전체(주석 포함 — bash에겐 주석이지만 Cloud Build 파서는 주석/코드를
+  구분하지 않고 그냥 문자열로 훑는다)를 자기 substitution 파서로 먼저 훑는다. 셸 변수 ENV_VARS는
+  유효한 built-in/사용자 substitution이 아니라서, 달러중괄호 표기로 참조하면(설명 예시로 적어도
+  마찬가지) build submit 자체가 INVALID_ARGUMENT로 거부된다(부분 배포 없이 안전하게 막힘 — 1차
+  사고와 동일 에러, 이번엔 그 사고를 설명하던 주석 문장 자체가 같은 표기를 그대로 써서
+  재현했다). 이후 이 파일 어디서도 ENV_VARS를 달러중괄호로 예시조차 적지 않는다 — 셸 변수
+  실참조는 달러 두 개로 이스케이프한 표기만 쓴다(진짜 substitution인 DEPLOY_ENV 등은 달러 한 개
+  표기 그대로 유지 — Cloud Build가 실제로 채워야 하는 값이라 안전하다).
+- **story #2777**: `ADMIN_OPERATOR_AUDIENCE`/`ALLOWLIST`도 REDIS_URL과 동일 원칙: dev만 싣는다.
+  prod는 이 두 env var 자체가 없어(`require_admin_operator`가 `auth_configured` 부재를
+  fail-closed 503으로 처리) 대표 승인 前 prod 결제 개입 전면금지 태세와 정합.
+- **story #3117(2026-08-26, prod 실사고 후속)**: `GCS_AVATARS_BUCKET`은 REDIS_URL/
+  ADMIN_OPERATOR_*와 달리 dev/prod 양쪽 다 명시 값으로 싣는다(prod 버킷 `gs://sprintable-avatars-
+  prod` PO 프로비저닝 완료 — story #2887의 "prod엔 키 자체가 없어야 안전" 유보 전제가 사라짐,
+  그 유보가 실사용 503으로 터진 게 이 스토리).
+- **카디르 QA(2026-08-19)**: office-converter 자체가 dev 전용 하드게이트인데(deploy-office-
+  converter 스텝) 이 배선엔 REDIS_URL/ADMIN_OPERATOR_*와 같은 `_DEPLOY_ENV != prod` 게이트가
+  빠져 있었다. `_GOTENBERG_SERVICE_URL` 기본값이 빈 문자열이라 무해했지만, prod substitution에
+  값이 실수로 채워지는 단 한 번의 수동 bootstrap 오조작만으로 prod backend가 dev
+  office-converter로 테넌트 pptx를 흘리는 구조가 된다 — 값의 유무가 아니라 prod에서는 이 키
+  자체가 없어야 안전(story #2141 REDIS_URL과 동일 원칙). dev만 싣는다.
+- **story #2445 Phase1(2026-08-03)**: dev만 `DATABASE_URL`/`DATABASE_URL_DIRECT`를 PgBouncer
+  경유 시크릿으로 재바인딩(`--update-secrets`=additive, 기존 다른 시크릿 preserve — REDIS_URL_
+  PROD 등과 동일 컨벤션). prod는 이 플래그 자체를 안 넘겨 현재 `DATABASE_URL_PROD` 바인딩
+  무변경. 시크릿 자체(`DATABASE_URL_DEV_PGBOUNCER`/`DATABASE_URL_DIRECT_DEV`)는 PO가 생성.
+- **story #3110 1보(2026-08-26, 보안 위생)**: `DATABASE_URL_DIRECT`는 postgres 수퍼유저 DSN
+  (`DATABASE_URL_DIRECT_DEV`)이었다(`pg_pubsub.py` LISTEN/NOTIFY 전용 소비 — 애초에 수퍼유저가
+  필요 없는 경로). sprintable 앱 유저는 이미 public 197테이블 전부에 GRANT 보유(#3110 실측,
+  postgres 116/197보다도 넓음) — 신규 시크릿 `DATABASE_URL_DIRECT_DEV_SPRINTABLE`(PO 발급·PO
+  실왕복 검증: current_user=sprintable·SELECT OK)로 전환. `DATABASE_URL`(PgBouncer 경유)은 이번
+  스코프 밖 — 유저 스왑이 PgBouncer userlist 갱신과 짝이라(안 맞추면 dev 서빙 인증 실패) #3110
+  2보로 분리.
+- **story #2445 Phase1(2026-08-04)**: prod cutover — `DATABASE_URL`→PgBouncer VIP
+  (`DATABASE_URL_PROD_PGBOUNCER`, =10.178.0.111:6432), `DATABASE_URL_DIRECT`→직결
+  (`DATABASE_URL_PROD`). `_BACKEND_DB_PGBOUNCER`=true와 짝. 시크릿은 PO 생성·backend-prod SA
+  (`cloudrun-runtime-prod`)에 secretAccessor 부여됨. + `DATABASE_URL_READ`(#2451 §6 읽기 라우팅,
+  rev 00266 라이브 flip): read replica DSN(PgBouncer sprintable_read 풀 경유). 지금까지 라이브
+  「수동 바인딩」이라 배포 SSOT 어디에도 선언이 없어 env-drift-guard 축①이 매일 빨강이었다
+  (additive `--update-secrets`라 값은 보존됐으나 미선언=fragile: `--set-secrets` 리팩터·서비스
+  재생성 時 조용히 소실→reads가 primary로 새 병목 악화). 여기 편입해 durable화.
 """
 from __future__ import annotations
 
@@ -57,6 +143,11 @@ _DECLARED_SUBSTITUTIONS = {
     "_GCS_AVATARS_BUCKET",
     # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
     "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
+    # story #3118(Sign in with Apple) — deploy-backend(bash entrypoint)가 이제 이 3개를
+    # 직접 참조한다. _APPLE_TEAM_ID는 이전엔 deploy-frontend(순수 gcloud args 리스트 —
+    # 이 가드가 스캔하는 4개 bash 스텝 밖)에서만 쓰여 이 목록에 없어도 무해했으나, backend
+    # 쪽으로도 재사용하며 처음 걸린다.
+    "_APPLE_SERVICES_ID", "_APPLE_KEY_ID", "_APPLE_TEAM_ID",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -135,6 +226,11 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
         # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
         "_GOTENBERG_SERVICE_URL": gotenberg_url,
+        # story #3118 — set -u라 미설정이면 스크립트가 죽는다(GOTENBERG_SERVICE_URL과 동일 이유).
+        # 값은 cloudbuild.yaml substitutions 기본값과 정합(비밀 아님, dev/prod 동일).
+        "_APPLE_SERVICES_ID": "ai.sprintable.web",
+        "_APPLE_KEY_ID": "DF2G3UV649",
+        "_APPLE_TEAM_ID": "JN798BC4KC",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -221,6 +317,40 @@ def test_bash_entrypoint_steps_under_cloudbuild_arg_byte_limit():
             "수만으로는 안 걸리는 게 story #3031 사고의 정확한 함정). 긴 한글 주석은 "
             "관련 테스트 파일 docstring 등 외부로 옮기고 스텝엔 짧은 포인터만 남길 것."
         )
+
+
+# story #3124(2026-08-26) — deploy-backend가 9,829/10,000(98.3%, 여유 171B)까지 자라 다음
+# env 1~2개 추가만으로도 #3031급 사고가 재발하는 구조였다. 위 test_bash_entrypoint_steps_
+# under_cloudbuild_arg_byte_limit()의 <10,000 하드 컷은 "이미 넘은 뒤"에만 CI를 빨갛게
+# 한다 — submit 시점까지 아무도 재지 않는 사각과 본질적으로 같은 모양(닥쳐서야 아는 것).
+# 90%(9,000B)를 넘는 순간 CI를 미리 빨갛게 해 "다음 PR이 그냥 넘겨버리는" 걸 막는다.
+_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO = 0.9
+
+
+def test_bash_entrypoint_steps_have_byte_headroom():
+    """⭐story #3124 — 바이트 한도의 90%(9,000B)를 넘는 bash 스텝이 있으면 실패. 하드 한도
+    (10,000B, 위 테스트)와 별개 축 — 그 테스트는 "이미 넘었다"만 잡고, 이 테스트는 "곧 넘긴다"를
+    미리 잡는다(구조적 여유 확保가 이 스토리의 핵심 AC, 그 여유가 실제로 있는지를 이 테스트가
+    영구히 재확인한다). deploy-backend는 이 스토리에서 9,829→4,391B로 낮췄다(여유
+    5,609B, AC1의 ≥2,000B 목표 초과 달성) — 다른 bash 스텝이 이 임계를 넘으면 그 스텝도
+    같은 방식(서사 주석 외부화)으로 손볼 시점이라는 신호."""
+    doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
+    bash_steps = [s for s in doc["steps"] if s.get("entrypoint") == "bash"]
+    warn_threshold = int(_CLOUDBUILD_STEP_ARG_BYTE_LIMIT * _CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO)
+    over_threshold = []
+    for step in bash_steps:
+        byte_len = len(step["args"][1].encode("utf-8"))
+        if byte_len >= warn_threshold:
+            over_threshold.append(
+                f"{step['id']}: {byte_len}B/{_CLOUDBUILD_STEP_ARG_BYTE_LIMIT}B "
+                f"({byte_len * 100 // _CLOUDBUILD_STEP_ARG_BYTE_LIMIT}%)"
+            )
+    assert not over_threshold, (
+        f"bash 스텝이 바이트 한도의 {int(_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO * 100)}%"
+        f"({warn_threshold}B)를 넘었다 — 다음 env/secret 1~2개 추가로 #3031급 submit 실패가 "
+        f"재발할 수 있는 구조: {over_threshold}. 서사 주석을 관련 테스트 파일 docstring으로 "
+        "외부화하거나 스텝을 분할해 여유를 만들 것(story #3124가 deploy-backend에 적용한 패턴)."
+    )
 
 
 def test_deploy_backend_is_bash_entrypoint():
@@ -316,6 +446,10 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "SSE_TRANSIENT_REPLAY_ENABLED=false,LICENSE_CONSENT=agreed,"
         "NEXT_PUBLIC_APP_URL=https://example.run.app,DEPLOY_ENV=dev,"
         "FIREBASE_OAUTH_HANDOFF_ENABLED=false,"
+        # story #3118 — 베이스 ENV_VARS 조립 문자열의 맨 끝(FIREBASE_OAUTH_HANDOFF_ENABLED
+        # 다음)에 이어붙는다 — REDIS_URL/ADMIN_OPERATOR_*/GCS_AVATARS_BUCKET은 그 뒤에
+        # 조건부로 append되는 후속 라인이라 실제 순서상 APPLE_*가 먼저 온다.
+        "APPLE_SERVICES_ID=ai.sprintable.web,APPLE_KEY_ID=DF2G3UV649,APPLE_TEAM_ID=JN798BC4KC,"
         "REDIS_URL=redis://10.164.120.243:6379,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"

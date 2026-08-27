@@ -53,6 +53,11 @@ export interface BeEpicListItem {
   title: string;
   status: string;
   created_at: string;
+  // `GoalResponse.updated_at`(backend/app/schemas/goal.py:96) — 에픽 레코드 자체의 최종수정
+  // 시각. story #3126부터 load-glance-data.ts의 tie-break 재료는 이 필드가 아니라
+  // `latest_story_activity_at`(아래)로 옮겼다 — 에픽 row가 갱신됐다는 것과 "그 안 스토리가
+  // 지금 움직인다"는 것은 다른 축이라(#2341 AC1 그라운딩), 후자를 재는 이름으로 분리했다.
+  updated_at: string;
   // E-GLANCE wedge #2(로드맵 조타): 큐레이션 순서(null=미조타). 아크는 이 순서를 소비만 한다
   // (드래그 없음). BE order_by=position 미지정/미보유 시 전부 null 취급 → 기존 created_at 정렬과
   // 동일(#2056 회귀0).
@@ -60,6 +65,11 @@ export interface BeEpicListItem {
   // story #2298(3단 웨이터폴 근절) — `?include=glance` 옵트인일 때만 실린다(미지정 시 undefined,
   // BE byte-identical 계약 그대로). participant_ids: 이 에픽의 고유 assignee_id 집합(캡 없음).
   participant_ids?: string[];
+  // story #3126 Phase 1(`GoalWithGlanceResponse.latest_story_activity_at`) — 이 에픽 소속
+  // non-done 스토리 updated_at 최댓값(스토리 0건·done뿐이면 null). "먼저 오는 하나"가 아니라
+  // «지금 실제로 움직이는 하나»를 고르는 load-glance-data.ts tie-break의 정식 재료 — 옛
+  // `updated_at`(#2341 AC2 완화) 기반 tie-break를 이 필드로 대체한다(구현 제약③: 옛 계산 잔존 0).
+  latest_story_activity_at?: string | null;
   focal_story?: BeFocalStory | null;
 }
 

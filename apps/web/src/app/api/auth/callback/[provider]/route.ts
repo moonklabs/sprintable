@@ -52,14 +52,15 @@ function decodeJwtSub(token: string): string | null {
 
 type RouteParams = { params: Promise<{ provider: string }> };
 
-export async function GET(request: Request, { params }: RouteParams) {
-  const { provider } = await params;
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get('code');
-  const state = searchParams.get('state');
+// story #3118(Sign in with Apple) — Apple 공식 스펙: authorize 요청에 response_mode=
+// form_post를 실으면(auth.py oauth_authorize, scope에 name/email이 있을 때 강제) Apple이
+// 이 콜백 URL로 GET 리다이렉트가 아니라 application/x-www-form-urlencoded POST를 보낸다.
+// code/state는 쿼리가 아니라 폼 바디에 실린다 — 그 외 로직(state 검증·BE 콜백·핸드오프)은
+// GET과 완전히 동일해 handleCallback()으로 공유한다.
+async function handleCallback(request: Request, provider: string, code: string | null, state: string | null) {
   const origin = resolveAppUrl(null);
 
-  if (!['google'].includes(provider)) {
+  if (!['google', 'apple'].includes(provider)) {
     return NextResponse.redirect(`${origin}/login?error=invalid_provider`);
   }
 
@@ -76,11 +77,16 @@ export async function GET(request: Request, { params }: RouteParams) {
   // e-mobile-oauth-native-handoff-contract §7.4/§5 — 격리 rail(오르테가 확定, /auth/native
   // 무접촉). native OAuth-start에서만 세팅되는 challenge — 있으면 이 콜백도 native 취급.
   const nativeChallenge = cookieStore.get(`oauth_native_challenge_${provider}`)?.value ?? null;
+  // story #3122(계정 연결) — auth/link/route.ts만 세팅하는 단명 쿠키. provider가 돌려주는
+  // code/state 자체엔 "로그인이냐 연결이냐" 구분이 없어(authorize 요청 파라미터가 로그인과
+  // 동일하게 생겼다, 의도된 설계) 이 쿠키가 유일한 분기 신호다.
+  const linkMode = cookieStore.get(`oauth_link_${provider}`)?.value === 'true';
   cookieStore.delete(`oauth_state_${provider}`);
   cookieStore.delete(`oauth_tos_${provider}`);
   cookieStore.delete(`oauth_invite_token_${provider}`);
   cookieStore.delete(`oauth_next_${provider}`);
   cookieStore.delete(`oauth_native_challenge_${provider}`);
+  cookieStore.delete(`oauth_link_${provider}`);
 
   // ⛔통과 조건은 원래와 동일(storedState 존재 AND 일치) — 분기는 로그용일 뿐, 검증 자체는
   // 안 바뀐다. 두 실패 분기 다 사용자에게는 동일한 csrf_mismatch로 리다이렉트한다.
@@ -93,6 +99,30 @@ export async function GET(request: Request, { params }: RouteParams) {
     return NextResponse.redirect(`${origin}/login?error=csrf_mismatch`);
   }
   logOauthStateCheck('ok', request, provider, nativeChallenge, state.length, storedState.length);
+
+  // story #3122 — 계정 연결 콜백. 로그인 rail(/oauth/callback)과 완전히 다른 BE 엔드포인트로
+  // 간다(AC4: 로그인 mint 아님 — 새 JWT를 안 받고, 기존 sp_at/sp_rt 쿠키를 그대로 둔다).
+  // 링크는 "로그인된 채로" 시작한 흐름이라 이 시점 sp_at이 여전히 유효해야 한다 — 최대
+  // OAUTH_STATE_EXPIRE_MINUTES(10분) 왕복 동안 세션이 끊기면(로그아웃 등) BE가 401을 주고,
+  // 그대로 실패로 리다이렉트한다(별도 처리 불요 — settings 쪽이 에러 코드로 안내).
+  if (linkMode) {
+    const spAt = cookieStore.get(SP_AT_COOKIE)?.value;
+    if (!spAt) {
+      return NextResponse.redirect(`${origin}/settings?link_error=SESSION_EXPIRED`);
+    }
+    const linkRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/${provider}/link/callback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${spAt}` },
+      body: JSON.stringify({ provider, code, state }),
+    }).catch(() => null);
+
+    if (!linkRes?.ok) {
+      const errBody = await linkRes?.json().catch(() => null) as { error?: { code?: string } } | null;
+      const errCode = errBody?.error?.code ?? 'LINK_FAILED';
+      return NextResponse.redirect(`${origin}/settings?link_error=${errCode}`);
+    }
+    return NextResponse.redirect(`${origin}/settings?linked=${provider}`);
+  }
 
   // FastAPI OAuth callback
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {
@@ -155,4 +185,21 @@ export async function GET(request: Request, { params }: RouteParams) {
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
   return res;
+}
+
+export async function GET(request: Request, { params }: RouteParams) {
+  const { provider } = await params;
+  const { searchParams } = new URL(request.url);
+  return handleCallback(request, provider, searchParams.get('code'), searchParams.get('state'));
+}
+
+// story #3118 — Apple의 form_post 콜백. 다른 provider는 이 메서드로 오지 않는다(Apple만
+// response_mode=form_post를 요청) — handleCallback() 안의 provider 화이트리스트가 그
+// 계약을 여전히 지킨다(누가 여기로 잘못 POST해도 provider가 없으면 즉시 invalid_provider).
+export async function POST(request: Request, { params }: RouteParams) {
+  const { provider } = await params;
+  const form = await request.formData().catch(() => null);
+  const code = typeof form?.get('code') === 'string' ? (form.get('code') as string) : null;
+  const state = typeof form?.get('state') === 'string' ? (form.get('state') as string) : null;
+  return handleCallback(request, provider, code, state);
 }

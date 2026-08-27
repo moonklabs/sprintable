@@ -83,13 +83,21 @@ export interface LaneGoalGrouping {
   fold: NextMakerGoal[];
 }
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
 /**
  * story #2224 AC1(멀티레인, 2026-07-31, 목업 84abdf43 v5 + PO/미르코군 정정) — 「레인이 몇
  * 개까지 서는가」의 답은 «수»가 아니라 «성질»이다: 목업의 "펼친 8"은 우연히 8이었을 뿐,
- * 규격은 "최근 30일 안에 변화가 있었던 목표는 펼치고, 나머지는 하나의 접힘 줄로 묶는다"다
- * (기존 과거-묶음 카드 패턴과 같은 결 — 개수를 하드코딩하지 않고 성질로 가른다).
+ * 규격은 "최근 dormancyThresholdHours 안에 변화가 있었던 목표는 펼치고, 나머지는 하나의
+ * 접힘 줄로 묶는다"다(기존 과거-묶음 카드 패턴과 같은 결 — 개수를 하드코딩하지 않고 성질로
+ * 가른다).
+ *
+ * story #3126(#2341 AC1 후속, 페드루 판정 2026-08-27) — 옛 하드코딩 THIRTY_DAYS_MS(30일)를
+ * 걷어내고 BE `epics-progress-lane`이 내려주는 `dormancy_threshold_hours`를 단일 소스로
+ * 받는다(호출부가 시간 단위를 넘긴다). ⚠️`lastActiveByEpic`(아래 activeStories로부터의 계산)은
+ * 걷어내지 않는다 — next-maker-screen.tsx가 스토리를 로컬에서 다른 목표로 재배정할 때
+ * "왕복이 화면에 바로 보이는 것이 완료 조건"(PO, story #2224)이라 서버 재조회 없이 즉시
+ * 반영돼야 하는데, BE `latest_story_activity_at`(#3126 Phase 1)은 마지막 fetch 시점 스냅샷이라
+ * 이 즉시성을 못 준다 — 옛 계산 그대로 두고 «임계값만» BE 단일 소스로 교체하는 것이 이
+ * 함수가 만족해야 할 두 계약(PO 즉시반영 확定 + #3126 임계 단일소스) 모두를 지킨다.
  *
  * ⛔스토리가 «정말 0건»인 목표는 이 함수에 아예 안 들어온다(expand도 fold도 아님) — PO
  * 정정(2026-07-31): 「접힘(활동은 있었으나 최근 안 움직인 것)」과 「0건(그릴 대상 자체가
@@ -105,11 +113,18 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 export function deriveActiveLaneGoals(
   goals: NextMakerGoal[],
   activeStories: NextMakerStory[],
+  dormancyThresholdHours: number,
   now: number,
 ): LaneGoalGrouping {
+  // story #3126(페드루 조건, parity-pin이 실제로 잡은 갭) — "done 제외"는 예전엔 호출부
+  // 계약(next-maker-screen.tsx가 done을 애초에 fetch 안 함)에만 의존하는 «외부» 보장이었다.
+  // BE `attach_glance_aggregates`의 공식은 `Story.status != "done"`을 SQL WHERE에서 직접
+  // 강제(«내부» 보장)한다 — 두 정의가 조용히 갈라지지 않으려면 이 함수도 같은 필터를
+  // 자체적으로 걸어야 한다(호출부가 언젠가 done을 섞어 넘겨도 동일하게 방어).
+  const dormancyThresholdMs = dormancyThresholdHours * 60 * 60 * 1000;
   const lastActiveByEpic = new Map<string, number>();
   for (const s of activeStories) {
-    if (!s.epicId) continue;
+    if (!s.epicId || s.status === 'done') continue;
     const t = new Date(s.updatedAt).getTime();
     if (Number.isNaN(t)) continue;
     const prev = lastActiveByEpic.get(s.epicId);
@@ -120,7 +135,7 @@ export function deriveActiveLaneGoals(
   const fold: NextMakerGoal[] = [];
   for (const g of goals) {
     const lastActive = lastActiveByEpic.get(g.id);
-    if (lastActive !== undefined && now - lastActive <= THIRTY_DAYS_MS) {
+    if (lastActive !== undefined && now - lastActive <= dormancyThresholdMs) {
       expand.push(g);
     } else {
       fold.push(g);

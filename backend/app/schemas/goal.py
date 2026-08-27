@@ -195,9 +195,16 @@ class GoalWithGlanceResponse(GoalResponse):
 
     participant_ids: 이 goal(에픽)에 연결된 story들의 고유 assignee_id 집합(FE
     `deriveCollaboration` 이관 — "참여=presence만, 개수 집계 0"과 동일 의미. 집합 계산이라
-    부분 반환("N건 더")이 불가능 — 캡을 두면 그 자체로 값이 틀려진다, 그래서 캡을 두지 않는다."""
+    부분 반환("N건 더")이 불가능 — 캡을 두면 그 자체로 값이 틀려진다, 그래서 캡을 두지 않는다.
+
+    latest_story_activity_at: story #3126(#2341 AC1 후속, ㉡′ — PO 승인 2026-08-27) — 이
+    goal 소속 non-done story의 updated_at 최댓값(없으면 None). 이름에 일부러 "active"를
+    안 쓴다(Goal.status='active'와의 겸직이 이번 병의 뿌리였다 — 재는 값 그대로의 이름).
+    판정(임계 적용)은 소비처(FE) 몫 — 이 필드는 원값만 정직하게 노출한다. `derive-next-maker.ts`
+    의 기존 client-side 계산(비-done story updatedAt MAX)과 동일 정의를 BE로 승격한 것."""
     participant_ids: list[uuid.UUID] = []
     focal_story: GlanceFocalStory | None = None
+    latest_story_activity_at: datetime | None = None
 
 
 class GoalProgressResponse(BaseModel):

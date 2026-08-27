@@ -129,8 +129,10 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
 // Claimed/결과 Verified) 재조립 회귀가드.
 describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스트헤드)', () => {
   it('마스트헤드(kicker+H1+dek)가 목표 활성/완료 카운트와 함께 렌더된다', async () => {
+    // story #3126 — 활성 카운트는 status='active'뿐 아니라 latest_story_activity_at이
+    // dormancy 임계 안(최근 움직임 실재)이어야 센다. 이 목표A는 방금 움직였다는 신호.
     stubFetch([
-      { id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1 },
+      { id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1, latest_story_activity_at: new Date().toISOString() },
       { id: 'e2', title: '목표B', status: 'done', total_stories: 4, done_stories: 4 },
     ]);
     await mount();
@@ -138,6 +140,17 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
     expect(container.querySelector('h1')?.textContent).toBe('목표');
     expect(container.textContent).toContain('활성 1');
     expect(container.textContent).toContain('완료 1');
+  });
+
+  it('story #3126: an active-status goal with NO recent story movement(latest_story_activity_at 없음/dormancy 밖) is NOT counted in 활성 — 52개 중 실제로 도는 것만 센다', async () => {
+    stubFetch([
+      { id: 'e1', title: '목표A(방금 움직임)', status: 'active', total_stories: 2, done_stories: 1, latest_story_activity_at: new Date().toISOString() },
+      { id: 'e2', title: '목표B(오래 조용함)', status: 'active', total_stories: 3, done_stories: 0, latest_story_activity_at: new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString() },
+      { id: 'e3', title: '목표C(신호 자체 없음)', status: 'active', total_stories: 1, done_stories: 0 },
+    ]);
+    await mount();
+    // status='active' 3개 중 실제로 최근 움직인 것은 1개뿐 — "3 active"가 아니라 "1 active".
+    expect(container.textContent).toContain('활성 1');
   });
 
   // story #2974 §1/§3(PR-D0) — 마스트헤드 h1이 font-display 토큰 경유(D0=Pretendard, 시각 무변화).

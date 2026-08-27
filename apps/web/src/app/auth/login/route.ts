@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
+import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 
 const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -17,7 +18,9 @@ export async function GET(request: Request) {
   const codeChallenge = searchParams.get('code_challenge');
   const origin = resolveAppUrl(null);
 
-  if (!provider || !['google'].includes(provider)) {
+  // story #3118(Sign in with Apple) — apple 추가. 노출 여부(iOS/macOS 셸 한정)는 로그인
+  // 버튼 렌더 게이트에서 이미 걸린다(login/page.tsx) — 여기는 provider 자체의 유효성만 본다.
+  if (!provider || !['google', 'apple'].includes(provider)) {
     return NextResponse.redirect(`${origin}/login`);
   }
 
@@ -35,50 +38,21 @@ export async function GET(request: Request) {
   }
 
   const cookieStore = await cookies();
-  cookieStore.set(`oauth_state_${provider}`, state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 300,
-    path: '/',
-  });
+  const cookieOpts = oauthCookieOptions(provider);
+  cookieStore.set(`oauth_state_${provider}`, state, cookieOpts);
   if (tosAccepted) {
-    cookieStore.set(`oauth_tos_${provider}`, 'true', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 300,
-      path: '/',
-    });
+    cookieStore.set(`oauth_tos_${provider}`, 'true', cookieOpts);
   }
   if (inviteToken) {
-    cookieStore.set(`oauth_invite_token_${provider}`, inviteToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 300,
-      path: '/',
-    });
+    cookieStore.set(`oauth_invite_token_${provider}`, inviteToken, cookieOpts);
   }
   if (next) {
-    cookieStore.set(`oauth_next_${provider}`, next, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 300,
-      path: '/',
-    });
+    cookieStore.set(`oauth_next_${provider}`, next, cookieOpts);
   }
   // §10.3: code_challenge는 base64url(패딩없음) 43자 이상만 수용 — 형식이 다르면 native
   // 핸드오프 자체를 시작하지 않는다(방어적, 최종 검증은 BE issue가 authoritative).
   if (native && codeChallenge && /^[A-Za-z0-9_-]{43,}$/.test(codeChallenge)) {
-    cookieStore.set(`oauth_native_challenge_${provider}`, codeChallenge, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 300,
-      path: '/',
-    });
+    cookieStore.set(`oauth_native_challenge_${provider}`, codeChallenge, cookieOpts);
   }
 
   return NextResponse.redirect(url);

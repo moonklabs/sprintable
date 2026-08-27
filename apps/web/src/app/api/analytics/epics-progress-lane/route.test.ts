@@ -8,7 +8,7 @@ import { GET } from './route';
 
 const PATH = '/api/v2/analytics/epics-progress-lane';
 const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
-const okRes = (b: unknown = { epics: {}, zones: {}, stall_threshold_hours: 168, stories_without_epic: 0 }) =>
+const okRes = (b: unknown = { epics: {}, zones: {}, stall_threshold_hours: 168, dormancy_threshold_hours: 720, stories_without_epic: 0 }) =>
   new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
 const req = () => new Request('http://localhost/api/analytics/epics-progress-lane?project_id=p');
 

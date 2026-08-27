@@ -196,4 +196,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 잡은 것. 가드가 신규 필드를 설계대로 잡은 것.
     assert "APNS_AUTH_KEY_P8" in keys and "APNS_KEY_ID" in keys and "APNS_TEAM_ID" in keys
     assert "APNS_BUNDLE_ID" in keys and "APNS_USE_SANDBOX" in keys
-    assert len(keys) == 103
+    # story #3118(Sign in with Apple, 2026-08-26): apple_team_id·apple_services_id·
+    # apple_key_id·apple_private_key 4필드 신설(BFF OAuth apple provider 설정)로 103→107.
+    # 가드가 신규 필드를 설계대로 잡은 것.
+    assert "APPLE_TEAM_ID" in keys and "APPLE_SERVICES_ID" in keys
+    assert "APPLE_KEY_ID" in keys and "APPLE_PRIVATE_KEY" in keys
+    assert len(keys) == 107

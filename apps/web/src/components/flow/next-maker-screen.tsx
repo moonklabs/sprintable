@@ -45,6 +45,9 @@ function unwrap<T>(json: unknown): T | null {
 // total_stories/done_stories로 충분하다).
 const ACTIVE_STATUSES = ['backlog', 'ready-for-dev', 'in-progress', 'in-review'] as const;
 const PAGE_LIMIT = 100; // /api/goals, /api/stories FE 프록시 상한(parseCursorPageInput maxLimit).
+// story #3126 — epics-progress-lane fetch가 실패했을 때만 쓰는 폴백(옛 하드코딩 THIRTY_DAYS_MS와
+// 동일한 30일). 정상 경로는 항상 BE dormancy_threshold_hours를 쓴다.
+const DEFAULT_DORMANCY_THRESHOLD_HOURS = 720;
 const SAFETY_MAX_PAGES = 50; // 무한루프 방어 — 100*50=5000건, 오늘 이 project 규모를 넉넉히 상회.
 
 // story #2224 후속(2026-08-16, 미르코 그라운딩) — dev 실측: 활성 목표 39건이 존재하는데
@@ -89,7 +92,17 @@ async function fetchAllStoriesByStatus(projectId: string, status: string): Promi
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; goals: NextMakerGoal[]; activeStories: NextMakerStory[]; recentlyClosedEpicIds: Set<string>; recentlyClosedTargetIds: Set<string>; blockedCount: number };
+  | {
+      kind: 'ready'; goals: NextMakerGoal[]; activeStories: NextMakerStory[]; recentlyClosedEpicIds: Set<string>;
+      recentlyClosedTargetIds: Set<string>; blockedCount: number;
+      // story #2224 후속(수→형, §A1) — lane.stalled(FlowLane)와 «같은 상수». 이 컴포넌트가
+      // epics-progress-lane을 이미 부르고 있어(위 문서 §I-6 "두 벌 서지 않는다") 그 응답에서
+      // 그대로 뽑는다 — FlowMultiLaneCanvas가 따로 fetch/하드코딩하지 않는다.
+      stallThresholdHours: number | undefined;
+      // story #3126 페드루 판정(2026-08-27) — stall(168h, 레인 단기 주의)과 dormancy(720h,
+      // 목표 장기 활동 분류)는 «같은 질문의 다른 값»이 아니라 별개 질문이라 병존한다.
+      dormancyThresholdHours: number;
+    };
 
 /**
  * story #2224 AC1(2026-07-31, 목업 84abdf43 v5 "팀의 흐름이 한눈에") — 갈래 캔버스의 몸통을
@@ -156,12 +169,21 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         const recentlyClosedEpicIds = deriveRecentlyClosedEpicIds(nextUp, activeStories);
         const recentlyClosedTargetIds = new Set(nextUp.filter((r) => r.isRecent).map((r) => r.targetId));
 
-        const laneData = unwrap<{ epics: Record<string, { blocked: number }> }>(laneRes);
+        const laneData = unwrap<{
+          epics: Record<string, { blocked: number }>;
+          stall_threshold_hours?: number;
+          dormancy_threshold_hours?: number;
+        }>(laneRes);
         const blockedCount = laneData
           ? Object.values(laneData.epics).reduce((sum, e) => sum + (e.blocked ?? 0), 0)
           : 0;
+        const stallThresholdHours = laneData?.stall_threshold_hours;
+        // story #3126 — 이 화면의 옛 하드코딩 30일(THIRTY_DAYS_MS)을 대체하는 BE 단일소스값.
+        // lane fetch 자체가 실패(laneData null)하면 옛 30일과 동일한 값으로 폴백 — 이 화면이
+        // 이 fetch 전에도 항상 30일로 동작했으니 실패 시 그 이상도 이하도 아닌 안전한 자리.
+        const dormancyThresholdHours = laneData?.dormancy_threshold_hours ?? DEFAULT_DORMANCY_THRESHOLD_HOURS;
 
-        setState({ kind: 'ready', goals, activeStories, recentlyClosedEpicIds, recentlyClosedTargetIds, blockedCount });
+        setState({ kind: 'ready', goals, activeStories, recentlyClosedEpicIds, recentlyClosedTargetIds, blockedCount, stallThresholdHours, dormancyThresholdHours });
       } catch {
         if (!cancelled) setState({ kind: 'error' });
       }
@@ -237,6 +259,10 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
     return deriveGoalStems(effectiveGoals, effectiveActiveStories, state.recentlyClosedEpicIds);
   }, [state, effectiveGoals, effectiveActiveStories]);
 
+  // story #2224 후속(수→형, §A1) — FlowMultiLaneCanvas가 필요로 하는 값. useMemo 불요(단순
+  // 프로퍼티 접근, 다른 파생값들과 나란히 두어 state.kind 가드를 한 자리에 모은다).
+  const stallThresholdHours = state.kind === 'ready' ? state.stallThresholdHours : undefined;
+
   const headline = useMemo(() => deriveHeadline(stems), [stems]);
   const zeroStage = useMemo(
     () => (state.kind === 'ready' ? deriveZeroStageStats(effectiveActiveStories, state.blockedCount) : null),
@@ -263,15 +289,16 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
   const [nowMs] = useState(() => Date.now());
 
   // story #2224 AC1 — 스토리가 «정말 0건»인 목표는 레인 자체를 안 그린다(PO 정정: 접힘과
-  // 0건은 다른 사정이라 섞으면 뜻이 흐려진다). 나머지만 30일-변화 성질로 펼침/접힘을 가른다.
+  // 0건은 다른 사정이라 섞으면 뜻이 흐려진다). 나머지만 dormancy-변화 성질로 펼침/접힘을
+  // 가른다(story #3126부터 임계는 BE dormancy_threshold_hours 단일소스, 옛 30일 하드코딩 걷음).
   //
-  // story #2535(E-FLOW-V4 S5) — focusGoalId가 30일 무변화로 fold 쪽에 떨어졌으면 그 목표
+  // story #2535(E-FLOW-V4 S5) — focusGoalId가 dormancy 무변화로 fold 쪽에 떨어졌으면 그 목표
   // «하나»만 강제로 expand로 옮긴다(다른 레인은 그대로 접힌 채 — 카드 폭발 회피를 구조로
   // 지킨다). 지구→대륙→도시 드릴다운으로 왔는데 목표가 안 보이면 다리가 끊긴 것이다.
   const laneGrouping = useMemo(() => {
     if (state.kind !== 'ready') return { expand: [], fold: [] };
     const goalsWithStories = effectiveGoals.filter((g) => g.totalStories > 0);
-    const base = deriveActiveLaneGoals(goalsWithStories, effectiveActiveStories, nowMs);
+    const base = deriveActiveLaneGoals(goalsWithStories, effectiveActiveStories, state.dormancyThresholdHours, nowMs);
     if (!focusGoalId || base.expand.some((g) => g.id === focusGoalId)) return base;
     const foldedTarget = base.fold.find((g) => g.id === focusGoalId);
     if (!foldedTarget) return base;
@@ -309,6 +336,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         selectedNodeId={selectedNodeId}
         memberMap={memberMap}
         focusGoalId={focusGoalId}
+        stallThresholdHours={stallThresholdHours}
       />
 
       <NextMakerHeader headline={headline} zeroStage={zeroStage} />

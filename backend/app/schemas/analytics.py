@@ -142,6 +142,12 @@ class EpicsProgressLaneResponse(BaseModel):
     zones: dict[str, EpicZoneCounts]
     stall_threshold_hours: int
     stories_without_epic: int
+    # story #3126(#2341 AC1 후속, 페드루 판정 2026-08-27) — stall_threshold_hours(168h)와
+    # 「같은 질문 두 값」이 아니다: stall=«단기 주의 신호»(story 하나가 조용함), dormancy=
+    # «장기 활동 분류»(goal 전체가 아직 사는가 — fold/은퇴 판정). 세부가 먼저 시들고 상위가
+    # 나중에 은퇴하는 위계라 값이 다른 게 정직하다 — 임계는 여기서만(BE 단일 소스),
+    # FE `derive-next-maker.ts`의 옛 하드코딩 30일을 이 값으로 대체한다.
+    dormancy_threshold_hours: int
 
 
 class FlowNode(BaseModel):

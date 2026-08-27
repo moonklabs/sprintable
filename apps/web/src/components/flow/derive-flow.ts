@@ -31,6 +31,11 @@ export interface EpicsProgressLaneResponse {
   epics: Record<string, EpicLaneCounts>;
   zones: Record<string, EpicZoneCounts>;
   stall_threshold_hours: number;
+  // story #3126(#2341 AC1 후속, 페드루 판정 2026-08-27) — stall_threshold_hours(168h, story
+  // 하나의 단기 정체 신호)와 「같은 질문 두 값」이 아니다: dormancy=goal 전체의 장기 활동
+  // 분류(fold/은퇴 판정). 위계상 세부가 먼저 시들고 상위가 나중에 은퇴하므로 값이 다른 게
+  // 정직하다 — `derive-next-maker.ts`의 옛 하드코딩 30일(THIRTY_DAYS_MS)을 이 값으로 대체한다.
+  dormancy_threshold_hours: number;
   stories_without_epic: number;
 }
 
@@ -118,6 +123,11 @@ export interface EpicFlowNodeItem {
   status: string;
   assignee_id: string | null;
   updated_at: string;
+  // story #2224 후속(문 두 층, 2026-08-27) — BE FlowNode(analytics.py)가 이미 보내고 있었으나
+  // 이 타입에 필드가 없어 그라운드에서 죽어 있었다(grep 무결과로 확認). gate_pending=false면
+  // gate_reason은 항상 null(BE 불변식) — FE가 그 불변식을 다시 검증하지 않는다.
+  gate_pending: boolean;
+  gate_reason: string | null;
 }
 
 export interface EpicFlowNodesResponse {

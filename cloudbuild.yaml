@@ -125,6 +125,14 @@ substitutions:
   # AASA 응답으로 공개되는 값이라 시크릿 아니고 dev/prod 동일해 override 불요.
   _APPLE_TEAM_ID: "JN798BC4KC"
   _MOBILE_APP_LINK_ORIGIN: "https://dev-app.sprintable.ai"
+  # story #3118(Sign in with Apple, PO 확定 2026-08-26) — backend가 읽는 Apple OAuth
+  # provider 식별자 2종. Services ID(=OAuth client_id)·Key ID 둘 다 공개돼도 무해한
+  # 식별자(시크릿 아님, 위 _APPLE_TEAM_ID와 동일 원칙) — dev/prod 동일 값(PO가 app/
+  # dev-app 콜백 도메인 양쪽을 이 하나의 Services ID에 이미 등록 済, override 불요).
+  # 실제 비밀(SIWA 개인키)은 여기 두지 않는다 — deploy-backend 스텝의 --update-secrets
+  # (Secret Manager `APPLE_SIWA_PRIVATE_KEY`)로만 바인딩.
+  _APPLE_SERVICES_ID: "ai.sprintable.web"
+  _APPLE_KEY_ID: "DF2G3UV649"
   # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
   # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
   # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
@@ -563,96 +571,44 @@ steps:
       - -c
       - |
         set -euo pipefail
-        # story #2005: 요청 타임아웃 명시화(_BACKEND_TIMEOUT) — 이전엔 이 플래그 자체가 없어
-        # Cloud Run 인프라 기본값에 암묵 의존했다.
-        # ⭐frontend 가 NEXT_PUBLIC_FASTAPI_URL 로 backend 를 직접 호출(public 필수). --allow-
-        # unauthenticated 없으면 gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic)
-        # → 신규/리셋 시 allUsers invoker 유실로 403(2026-06-21 prod promotion 사건).
-        # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
-        # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존).
-        # --set-env-vars 금지(전체 wipe). DB_POOL_SIZE/DB_MAX_OVERFLOW: story #2442(P0)부터
-        # env별 substitution(_DB_POOL_SIZE/_DB_MAX_OVERFLOW, GHA per-env override, 위
-        # _BACKEND_MAX_INSTANCES와 동일 배선 패턴) — dev는 #2040 검증값(3/1) 그대로, prod는
-        # P0 완화값(20/10) durable화. 근거·안전식은 위 substitutions 섹션 주석 참고.
-        # rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1) ≤ DB max_conn — 값 바꿀 때
-        # cloud-build.yml maxScale·db_pool_size/db_max_overflow output과 짝으로 검토.
-        # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화(dev=false·prod=true, GHA per-env).
-        # ⛔E-ARCH S2 정리(story #2078) 정정(#2123): EVENT_BROKER_REDIS_CONSUME_ENABLED/_DISPATCH_
-        # ENABLED durable화 — "api는 SSE 미서빙" 전제가 틀렸음이 드러나 값을 true로 정정(에이전트
-        # SSE가 agent_onboarding_config.py 설계상 backend-dev를 직접 서빙). 키 이름도 story #2135
-        # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
-        # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
-        # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
-        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_OAUTH_HANDOFF_ENABLED=${_FIREBASE_OAUTH_HANDOFF_ENABLED}"
-        # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
-        # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
-        # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
-        # "env와 secret이 동명 키"로 배포 자체를 거부한다(값 유무 무관 — 키 존재 자체가 충돌).
-        # dev는 AUTH 없는 plain Memorystore라 시크릿 바인딩 자체가 없으므로 기존처럼 plain으로 넘긴다.
-        # prod는 여기서 REDIS_URL을 절대 안 넘김 — 시크릿 바인딩(별도 1회 gcloud, PO lane)이
-        # --set-secrets 없는 이 스텝에 preserve된다(DATABASE_URL_PROD 등 기존 15개와 동일 컨벤션).
-        # ⛔story #2423 배포 실패 핫픽스(2026-07-23, 오르테가군 진단, 2차) — Cloud Build는 bash
-        # 스텝 안이라도 args 문자열 전체(주석 포함 — bash에겐 주석이지만 Cloud Build 파서는
-        # 주석/코드를 구분하지 않고 그냥 문자열로 훑는다)를 자기 substitution 파서로 먼저
-        # 훑는다. 셸 변수 ENV_VARS는 유효한 built-in/사용자 substitution이 아니라서, 달러중괄호
-        # 표기로 참조하면(이 문장처럼 예시로 적어도 마찬가지) build submit 자체가
-        # INVALID_ARGUMENT로 거부된다(부분 배포 없이 안전하게 막힘 — 1차 사고와 동일 에러,
-        # 이번엔 그 사고를 설명하던 주석 문장 자체가 같은 표기를 그대로 써서 재현했다). 이후
-        # 이 파일 어디서도 ENV_VARS를 달러중괄호로 예시조차 적지 않는다 — 셸 변수 실참조는
-        # 아래처럼 달러 두 개로 이스케이프한 표기만 쓴다(진짜 substitution인 DEPLOY_ENV 등은
-        # 달러 한 개 표기 그대로 유지 — 그건 Cloud Build가 실제로 채워야 하는 값이라 안전하다).
+        # ⚠️--update-env-vars(additive) 필수·--set-env-vars(전체wipe) 금지. --allow-unauthenticated
+        # 필수(frontend가 NEXT_PUBLIC_FASTAPI_URL로 직접호출·미지정 시 기존IAM preserve로 403 위험,
+        # 2026-06-21 prod 사건). story #2005/#2442/#2078/#2123/#2135/#3118 — 타임아웃·DB풀(rollout
+        # 산식: 2×maxScale×(pool+overflow+1)≤db max_conn)·PG_LISTEN·EVENT_BROKER_REDIS_*·
+        # FANOUT_WAKE·Apple OAuth 식별자(비밀 아님, 개인키는 아래 SECRETS_FLAG로). 전체 배경(사건
+        # 경위·근거)은 story #3124(2026-08-26 외부화)로 test_deploy_backend_redis_secret_
+        # conflict.py 모듈 docstring 「deploy-backend 인라인 주석 아카이브」 절이 SSOT.
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_OAUTH_HANDOFF_ENABLED=${_FIREBASE_OAUTH_HANDOFF_ENABLED},APPLE_SERVICES_ID=${_APPLE_SERVICES_ID},APPLE_KEY_ID=${_APPLE_KEY_ID},APPLE_TEAM_ID=${_APPLE_TEAM_ID}"
+        # story #2141 — REDIS_URL: prod는 Secret Manager 바인딩과 동명 키 충돌 방지로 여기서 안 넘김.
+        # ⛔story #2423 — 셸 변수는 반드시 $$로 이스케이프(단일 $는 Cloud Build 자신의 substitution
+        # 파서가 args 전체를 먼저 훑어 build submit 자체를 INVALID_ARGUMENT로 거부 — 예시로도 금지).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
         fi
-        # story #2777 — ADMIN_OPERATOR_AUDIENCE/ALLOWLIST도 REDIS_URL과 동일 원칙: dev만
-        # 싣는다. prod는 이 두 env var 자체가 없어(require_admin_operator가 auth_configured
-        # 부재를 fail-closed 503으로 처리) ⛔대표 승인 前 prod 결제 개입 전면금지 태세와 정합.
+        # story #2777 — ADMIN_OPERATOR_*: prod는 키 자체가 없어야 안전(require_admin_operator
+        # fail-closed 503, 대표승인 前 prod 결제개입 전면금지 태세와 정합).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE},ADMIN_OPERATOR_ALLOWLIST=${_ADMIN_OPERATOR_ALLOWLIST}"
         fi
-        # story #3117(2026-08-26, prod 실사고 후속) — GCS_AVATARS_BUCKET은 REDIS_URL/
-        # ADMIN_OPERATOR_*와 달리 이제 dev/prod 양쪽 다 명시 값으로 싣는다(prod 버킷
-        # gs://sprintable-avatars-prod PO 프로비저닝 완료 — story #2887의 "prod엔 키 자체가
-        # 없어야 안전" 유보 전제가 사라짐, 그 유보가 실사용 503으로 터진 게 이 스토리).
+        # story #3117 — GCS_AVATARS_BUCKET은 REDIS_URL/ADMIN_OPERATOR_*와 달리 dev/prod 둘 다
+        # 싣는다(prod 버킷 프로비저닝 완료로 #2887의 「prod엔 키 자체가 없어야 안전」 유보 해소).
         if [ "${_DEPLOY_ENV}" == "prod" ]; then
           ENV_VARS="$${ENV_VARS},GCS_AVATARS_BUCKET=sprintable-avatars-prod"
         else
           ENV_VARS="$${ENV_VARS},GCS_AVATARS_BUCKET=${_GCS_AVATARS_BUCKET}"
         fi
-        # ⛔QA catch(카디르군, 2026-08-19) — office-converter 자체가 dev 전용 하드게이트인데
-        # (deploy-office-converter 스텝) 이 배선엔 REDIS_URL/ADMIN_OPERATOR_*와 같은
-        # `_DEPLOY_ENV != prod` 게이트가 빠져 있었다. 지금은 `_GOTENBERG_SERVICE_URL` 기본값이
-        # 빈 문자열이라 무해하지만, prod substitution에 값이 실수로 채워지는 단 한 번의 수동
-        # bootstrap 오조작만으로 prod backend가 dev office-converter로 테넌트 pptx를 흘리는
-        # 구조가 된다 — 값의 유무가 아니라 **prod에서는 이 키 자체가 없어야** 안전(story #2141
-        # REDIS_URL과 동일 원칙). dev만 싣는다.
+        # story #2141 원칙 재사용(카디르 QA 2026-08-19) — GOTENBERG_SERVICE_URL도 prod엔 키 자체가
+        # 없어야 안전(dev 전용 office-converter 하드게이트).
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
           ENV_VARS="$${ENV_VARS},GOTENBERG_SERVICE_URL=${_GOTENBERG_SERVICE_URL}"
         fi
-        # story #2445 Phase1(2026-08-03) — dev만 DATABASE_URL/DATABASE_URL_DIRECT를 PgBouncer
-        # 경유 시크릿으로 재바인딩(--update-secrets=additive, 기존 다른 시크릿 preserve — REDIS_URL_
-        # PROD 등과 동일 컨벤션). prod는 이 플래그 자체를 안 넘겨 현재 DATABASE_URL_PROD 바인딩
-        # 무변경. 시크릿 자체(DATABASE_URL_DEV_PGBOUNCER/DATABASE_URL_DIRECT_DEV)는 PO가 생성.
-        #
-        # story #3110 1보(2026-08-26, 보안 위생) — DATABASE_URL_DIRECT는 postgres 수퍼유저
-        # DSN(DATABASE_URL_DIRECT_DEV)이었다(pg_pubsub.py LISTEN/NOTIFY 전용 소비 — 애초에
-        # 수퍼유저가 필요 없는 경로). sprintable 앱 유저는 이미 public 197테이블 전부에 GRANT
-        # 보유(#3110 실측, postgres 116/197보다도 넓음) — 신규 시크릿 DATABASE_URL_DIRECT_DEV_
-        # SPRINTABLE(PO 발급·PO 실왕복 검증: current_user=sprintable·SELECT OK)로 전환.
-        # ⛔DATABASE_URL(PgBouncer 경유)은 이번 스코프 밖 — 유저 스왑이 PgBouncer userlist
-        # 갱신과 짝이라(안 맞추면 dev 서빙 인증 실패) #3110 2보로 분리.
+        # story #2445/#3110/#3118 — DATABASE_URL(PgBouncer)·DATABASE_URL_DIRECT(dev=sprintable
+        # 앱유저·prod=postgres 직결)·DATABASE_URL_READ(prod만)·APPLE_PRIVATE_KEY 시크릿 바인딩.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
-          # story #2445 Phase1(2026-08-04) — prod cutover: DATABASE_URL→PgBouncer VIP(DATABASE_URL_PROD_PGBOUNCER,
-          # =10.178.0.111:6432), DATABASE_URL_DIRECT→직결(DATABASE_URL_PROD). _BACKEND_DB_PGBOUNCER=true와 짝.
-          # 시크릿은 PO 생성·backend-prod SA(cloudrun-runtime-prod)에 secretAccessor 부여됨.
-          # + DATABASE_URL_READ(#2451 §6 읽기 라우팅, rev 00266 라이브 flip): read replica DSN(PgBouncer
-          #   sprintable_read 풀 경유). 지금까지 라이브 «수동 바인딩»이라 배포 SSOT 어디에도 선언이 없어
-          #   env-drift-guard 축①이 매일 빨강이었다(additive --update-secrets 라 값은 보존됐으나 미선언=fragile:
-          #   --set-secrets 리팩터·서비스 재생성 時 조용히 소실→reads가 primary 로 새 병목 악화). 여기 편입해 durable화.
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         fi
         gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \

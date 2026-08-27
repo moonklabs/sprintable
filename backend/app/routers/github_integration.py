@@ -216,6 +216,16 @@ async def create_explicit_link(
         link_source="explicit", confidence="high", created_by=created_by,
         evidence={"by": "explicit_api"},
     )
+    # story #3115(2026-08-26, 승격 리드타임) — explicit link 생성도 story #2893 후속(참여
+    # 등록)과 동형 갭이었다: PR opened(링크 無)→action_required 발행(gate 미생성)→이 API로
+    # 뒤늦게 링크→**이후 재평가 훅 0**→다음 실 웹훅(재오픈 등)까지 gate가 영구 미생성.
+    # trigger_gate_creation_for_late_participation은 "story에 연결된 PR마다 gate 없으면
+    # 만든다"는 일반 훅이라 참여 등록만이 아니라 이 링크 생성에도 그대로 재사용된다(새 규칙
+    # 발명 0). 방금 flush된 링크 행을 같은 트랜잭션(commit 前)에서 즉시 봐야 하므로 커밋 前에
+    # 호출 — participation.py::add_participation과 동일 순서 규율.
+    from app.services.merge_verdict_gate import trigger_gate_creation_for_late_participation
+
+    await trigger_gate_creation_for_late_participation(session, org_id, body.story_id)
     await session.commit()
     return JSONResponse(
         content={

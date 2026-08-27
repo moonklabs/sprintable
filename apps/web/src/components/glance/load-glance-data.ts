@@ -120,15 +120,20 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   // 스토리 실재)을 두고 E-CHAT-REALTIME(진행중 스토리 0건)이 "지금"으로 뽑혀 초점 스트립이
   // 항상 빈 채로 뜬 사례가 실측됨. focal_story가 실재하는 active 에픽을 우선한다 — 그런 에픽이
   // 하나도 없을 때만(=진짜 0건) 기존처럼 첫 active로 폴백(정직한 빈 상태).
-  // ⛔불완전한 처방: active 에픽 52개 중에서도 여전히 roadmap 배열 순서상 «먼저 오는 하나»를
-  // 고르는 것뿐 — "가장 최근에 움직인 에픽"으로 좁히려면 에픽의 updated_at이 필요한데
-  // `BeEpicListItem`엔 created_at만 있고 updated_at이 없다(BE 계약에 없음). 그 필드가
-  // 오면(#2341, BE 후속 — "상태 자가회수" 스토리 AC2) "focal_story 있음" 다음 tie-break로
-  // 최신순 정렬을 추가한다. #2341 AC1은 더 근본적으로 "active"를 파생값으로 바꾸는 방향도
-  // 검토 중 — 이 tie-break는 그 방향이 확정되기 전까지의 완화(PR#2680)에 그친다.
+  // story #3126(2026-08-27) — "먼저 오는 하나"가 아니라 «가장 최근에 움직인 하나»로 좁힌다.
+  // #2341 AC2 델타는 이 tie-break를 에픽 자신의 `updated_at`로 근사했으나(재료 부재로 인한
+  // 완화), 이제 BE 공유 파생 필드 `latest_story_activity_at`(에픽 소속 non-done 스토리
+  // updated_at MAX)로 정식 대체한다 — "에픽 row가 언제 손댔는가"가 아니라 "그 안 스토리가
+  // 지금 움직이는가"를 직접 잰다(옛 updated_at 기반 계산은 이 함수에서 완전히 걷었다).
+  // focal_story 유무로 먼저 가르고, 같은 그룹 안에서 latest_story_activity_at 내림차순
+  // tie-break(스토리 0건·done뿐 = null은 "움직임 없음"으로 최하위 취급).
+  const byRecency = (a: RoadmapEpic, b: RoadmapEpic) =>
+    (rawById.get(b.id)?.latest_story_activity_at ?? '').localeCompare(rawById.get(a.id)?.latest_story_activity_at ?? '');
+  const activeWithFocal = roadmap.filter((e) => e.roadmapStatus === 'active' && rawById.get(e.id)?.focal_story);
+  const activeAny = roadmap.filter((e) => e.roadmapStatus === 'active');
   const activeEpic =
-    roadmap.find((e) => e.roadmapStatus === 'active' && rawById.get(e.id)?.focal_story) ??
-    roadmap.find((e) => e.roadmapStatus === 'active') ??
+    [...activeWithFocal].sort(byRecency)[0] ??
+    [...activeAny].sort(byRecency)[0] ??
     null;
   const focal = activeEpic ? (rawById.get(activeEpic.id)?.focal_story ?? null) : null;
   const heroStory: HeroStory | null = focal

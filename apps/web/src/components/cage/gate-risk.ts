@@ -73,3 +73,34 @@ export function deriveDiffFacts(gate: GateItem): DiffFacts | null {
   const touchesMigration = gate.neutral_facts?.['touches_migration'] === true;
   return { fileCount, touchesMigration };
 }
+
+// story #3113(실사고·선생님 2026-08-26) — gate_type='agent_decision_request'(request_decision
+// MCP 도구가 상신)는 neutral_facts에 question/assumption/options가 실려오는데(BE gates.py:419
+// 실측), F2(gates/[id]/page.tsx)·F3(approvals-queue.tsx) 모두 그 필드를 안 읽고 title 자리를
+// work_item_summary(이 gate_type엔 항상 null)→해시 폴백으로만 채워 «해시뿐+내용 열람 불가»
+// 상태였다(#3038이 고친 건 merge 카드의 PR번호 표기뿐, 이 gate_type은 미커버). F1(chat 임베드
+// 카드, approval-request-card.tsx)도 같은 해시 폴백을 쓰지만 이 스토리 스코프 밖(결재함
+// 표면만) — 후속으로 남긴다.
+export interface DecisionFacts {
+  question: string;
+  assumption: string | null;
+  options: string[];
+}
+
+export function isDecisionGate(gate: GateItem): boolean {
+  return gate.gate_type === 'agent_decision_request';
+}
+
+/** neutral_facts에서 question이 있을 때만 값을 만든다(question 없으면 이 gate_type이어도
+ * 지어내지 않고 null — 호출부가 기존 title/해시 폴백으로 자연 후퇴). */
+export function deriveDecisionFacts(gate: GateItem): DecisionFacts | null {
+  const nf = gate.neutral_facts;
+  if (!nf) return null;
+  const question = nf['question'];
+  if (typeof question !== 'string' || !question.trim()) return null;
+  const assumptionRaw = nf['assumption'];
+  const assumption = typeof assumptionRaw === 'string' && assumptionRaw.trim() ? assumptionRaw : null;
+  const optionsRaw = nf['options'];
+  const options = Array.isArray(optionsRaw) ? optionsRaw.filter((o): o is string => typeof o === 'string') : [];
+  return { question, assumption, options };
+}
