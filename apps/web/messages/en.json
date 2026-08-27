@@ -3942,6 +3942,7 @@
     "gateDetailOrgContext": "Org {org}",
     "gateDetailViewTargetDoc": "View document →",
     "gateDetailViewTargetArtifact": "View artifact →",
+    "gateDetailViewTargetLoop": "View loop →",
     "riskUnknown": "Risk pending",
     "riskHigh": "High risk · review closely",
     "diffFactsFileCount": "{count} files",
