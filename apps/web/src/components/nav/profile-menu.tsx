@@ -31,6 +31,11 @@ interface ProfileMenuProps {
   name: string;
   email?: string | null;
   avatarUrl?: string | null;
+  /** story #3146(모바일 계정 스위치) — 기본 트리거는 `sidebar-*` 테마 토큰을 쓴다(데스크톱
+   * AppSidebar의 어두운 사이드바 배경 전제). 사이드바 밖(모바일 「전체」허브 등 밝은 배경)에
+   * 그대로 꽂으면 글자색이 배경과 거의 안 갈려 사실상 안 보인다 — 그 표면에서만 무채 배경용
+   * 클래스로 갈아끼운다(기본값 생략 시 기존 desktop 클래스 그대로, 회귀 0). */
+  triggerClassName?: string;
 }
 
 function initialOf(label: string | null | undefined): string {
@@ -63,7 +68,7 @@ function Avatar({ url, label, className }: { url?: string | null; label: string;
   );
 }
 
-export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
+export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuProps) {
   const router = useRouter();
   const t = useTranslations('accountSwitcher');
   const tc = useTranslations('common');
@@ -159,10 +164,10 @@ export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
 
   return (
     <DropdownMenu onOpenChange={(open) => { if (open) void load(); }}>
-      <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-sidebar-accent">
+      <DropdownMenuTrigger className={triggerClassName ?? 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-sidebar-accent'}>
         <Avatar url={triggerAvatar} label={triggerName} className="size-7" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-sidebar-foreground">{triggerName}</span>
-        <ChevronsUpDown className="size-3.5 shrink-0 text-sidebar-foreground/60" />
+        <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', triggerClassName ? 'text-foreground' : 'text-sidebar-foreground')}>{triggerName}</span>
+        <ChevronsUpDown className={cn('size-3.5 shrink-0', triggerClassName ? 'text-muted-foreground' : 'text-sidebar-foreground/60')} />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">
         <DropdownMenuGroup>

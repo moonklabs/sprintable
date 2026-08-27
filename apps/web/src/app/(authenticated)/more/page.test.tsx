@@ -3,11 +3,26 @@
 // story #2682(모바일 IA S2) — 「전체」(/more)를 평면 stub에서 데스크톱 GNB(nav-config.ts)
 // 미러 그룹형 허브로 재건한 회귀가드. AC1(org 그룹·조직브리핑 포함)·AC3(아코디언 없음·stub
 // 배너 제거)·중복 방지(flow/inbox/chats는 바텀 탭이 이미 depth 1로 커버)를 실 렌더로 잰다.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
+
+// story #3146(모바일 계정 스위치) — MorePage가 useDashboardContext()로 userName을 얻어
+// ProfileMenu 마운트 여부를 결정한다. 기존 스위트는 이 훅을 안 모킹해(디폴트 컨텍스트,
+// userName=undefined) 계정 섹션이 항상 생략되는 경로만 탔다 — 아래 새 describe에서만
+// userName을 주입해 반대 경로(섹션이 실제로 뜨는지)를 명시적으로 잰다.
+const useDashboardContextMock = vi.fn(() => ({} as { userName?: string }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+// ProfileMenu(계정 스위치 트리거)가 useRouter()를 쓴다 — profile-menu.test.tsx와 동일 모킹.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/more',
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -26,11 +41,14 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  useDashboardContextMock.mockReturnValue({}); // 기본=기존 스위트와 동형(userName 없음).
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { accounts: [] } }) })));
 });
 
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 async function mount() {
@@ -98,5 +116,32 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(settingsSection).toBeDefined();
     const settingsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/settings');
     expect(settingsLink).toBeDefined();
+  });
+});
+
+// story #3146(선생님 실사용 발견) — "모바일에서 로그아웃 외엔 계정을 바꿀 방법이 없다".
+// ProfileMenu(계정 스위처)가 데스크톱 AppSidebar에만 마운트되고 모바일 표면 어디에도
+// 진입점이 없던 것을 이 허브 최상단에 추가한 회귀가드.
+describe('MorePage — story #3146 계정 스위치 진입점(모바일)', () => {
+  it('userName이 있으면 최상단에 계정 스위치(ProfileMenu) 트리거가 뜬다', async () => {
+    useDashboardContextMock.mockReturnValue({ userName: '송윤재' });
+    await mount();
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]');
+    expect(trigger).toBeTruthy();
+    expect(trigger!.textContent).toContain('송윤재');
+  });
+
+  it('userName이 없으면(컨텍스트 미준비) 계정 섹션 자체를 생략한다 — 빈 트리거로 지어내지 않음', async () => {
+    useDashboardContextMock.mockReturnValue({});
+    await mount();
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]');
+    expect(trigger).toBeNull();
+  });
+
+  it('기존 GNB 미러 섹션(오늘/워크스페이스/…) 순서·내용은 계정 섹션 추가 후에도 무회귀', async () => {
+    useDashboardContextMock.mockReturnValue({ userName: '송윤재' });
+    await mount();
+    const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent);
+    expect(sectionLabels).toEqual(['오늘', '워크스페이스', '신뢰', '지식', '조직', '설정']);
   });
 });

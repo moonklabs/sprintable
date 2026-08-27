@@ -85,3 +85,36 @@ describe('ProfileMenu — 약관 및 정책 그룹 제거 회귀가드 (story #2
     expect(signOutIdx).toBe(settingsIdx + 1);
   });
 });
+
+// story #3146(모바일 계정 스위치, 선생님 실사용 발견) — 데스크톱 AppSidebar 전용이던
+// ProfileMenu를 모바일 「전체」허브에도 마운트하려면, `sidebar-*` 테마 토큰 트리거(어두운
+// 사이드바 배경 전제)를 밝은 배경에도 안 묻히게 오버라이드할 수 있어야 한다.
+describe('ProfileMenu — story #3146 triggerClassName 오버라이드(모바일 재사용 배선)', () => {
+  it('triggerClassName 생략 시 기존 sidebar 테마 트리거 그대로(회귀 0)', async () => {
+    await mount(<ProfileMenu name="송윤재" />);
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    expect(trigger.className).toContain('hover:bg-sidebar-accent');
+    // 아바타 폴백도 <span>이라 이름 텍스트 span을 truncate 클래스로 특정한다.
+    const nameSpan = trigger.querySelector('span.truncate');
+    expect(nameSpan?.className).toContain('text-sidebar-foreground');
+  });
+
+  it('triggerClassName 전달 시 그 클래스로 완전히 갈아끼워진다(밝은 배경용)', async () => {
+    await mount(<ProfileMenu name="송윤재" triggerClassName="min-h-12 rounded-xl bg-red-500" />);
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    expect(trigger.className).toBe('min-h-12 rounded-xl bg-red-500');
+    expect(trigger.className).not.toContain('hover:bg-sidebar-accent');
+    // 이름 텍스트 span도 sidebar 전용 색이 아니라 무채 text-foreground로 갈아끼워진다.
+    const nameSpan = trigger.querySelector('span.truncate');
+    expect(nameSpan?.className).toContain('text-foreground');
+    expect(nameSpan?.className).not.toContain('sidebar');
+  });
+
+  it('오버라이드 상태에서도 메뉴 열기·계정 목록 기능은 그대로다(트리거 스타일만 바뀜, 로직 회귀 0)', async () => {
+    await mount(<ProfileMenu name="송윤재" triggerClassName="custom-trigger" />);
+    await openMenu();
+    const content = document.querySelector('[data-slot="dropdown-menu-content"]');
+    expect(content).toBeTruthy();
+    expect(content!.textContent).toContain('설정');
+  });
+});

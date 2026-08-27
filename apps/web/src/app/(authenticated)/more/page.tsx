@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { ProfileMenu } from '@/components/nav/profile-menu';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
 // #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
@@ -13,6 +15,7 @@ import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/li
 export default function MorePage() {
   const t = useTranslations('nav');
   const tMore = useTranslations('mobileTabBar');
+  const { userName } = useDashboardContext();
 
   const hubGroups = MOBILE_HUB_GROUP_ORDER
     .map((groupId) => NAV_GROUPS.find((g) => g.id === groupId))
@@ -26,6 +29,20 @@ export default function MorePage() {
           allowlist(showContextChip)로 켤 자리가 없었다. "슬롯 없으면 자동 켬"은 fail-open이라
           금지(유나양) — 슬롯을 명시적으로 쓰게 해서 켠다. */}
       <TopBarSlot title={<h1 className="text-sm font-medium">{tMore('more')}</h1>} showContextChip />
+      {/* story #3146(선생님 실사용 발견) — 계정 스위치(ProfileMenu, 데스크톱 AppSidebar
+          전용 마운트)가 모바일 표면 어디에도 진입점이 없어 "로그아웃 외엔 계정을 바꿀 방법이
+          없다"였다. NAV_GROUPS(페이지 목적지 SSOT) 항목이 아니라 데스크톱과 동일하게 계정
+          자체의 액션이라 그 목록 밖, 최상단 전용 자리에 둔다(데스크톱 사이드바 하단 배치와
+          같은 급). 컴포넌트는 완전 재사용(신규 UI 0) — triggerClassName만 이 밝은 배경에
+          맞게 오버라이드. */}
+      {userName ? (
+        <div className="mb-4 rounded-xl border border-border">
+          <ProfileMenu
+            name={userName}
+            triggerClassName="flex min-h-12 w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition hover:bg-muted"
+          />
+        </div>
+      ) : null}
       {/* story #2682 AC3 — 임시 stub 배너(#1965) 제거. 섹션 헤더 있는 단일 스크롤 목록(아코디언
           아님 — 아코디언은 목적지를 탭 뒤에 숨겨 depth+1이 된다, doc §2.3). */}
       <div className="space-y-5">
