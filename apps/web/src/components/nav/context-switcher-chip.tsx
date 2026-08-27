@@ -282,7 +282,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   type="button"
                   disabled={acc.busy !== null}
                   onClick={() => void acc.handleSignOut('this')}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-destructive transition hover:bg-destructive/10"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-destructive transition hover:bg-muted"
                 >
                   <LogOut className="size-4" />
                   <span className="text-sm">{acc.others.length > 0 ? acc.t('signOutThis') : acc.tc('logout')}</span>
@@ -292,7 +292,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                     type="button"
                     disabled={acc.busy !== null}
                     onClick={() => void acc.handleSignOut('all')}
-                    className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-destructive transition hover:bg-destructive/10"
+                    className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-destructive transition hover:bg-muted"
                   >
                     <LogOut className="size-4" />
                     <span className="text-sm">{acc.t('signOutAll')}</span>
