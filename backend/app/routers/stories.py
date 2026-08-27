@@ -134,6 +134,13 @@ async def list_stories(
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
+    exclude_status: str | None = Query(
+        default=None,
+        description=(
+            "story #3148 — comma-separated status 목록(IN 부정) — no_sprint(list_backlog) "
+            "분기 전용. status(단일 일치)와 별개 축, 미지정 시 무영향(무회귀)."
+        ),
+    ),
     unattached: bool = Query(
         default=False,
         description=(
@@ -193,6 +200,10 @@ async def list_stories(
     include_unassigned = include_unassigned if isinstance(include_unassigned, bool) else False
     epic_ids = epic_ids if isinstance(epic_ids, str) else None
     done_within_days = done_within_days if isinstance(done_within_days, int) else None
+    # story #3148 — 동일 Query(...) 센티널 함정(위 두 줄과 동형). 신규 파라미터라 기존
+    # 직접호출 테스트들은 이 kwarg를 아예 안 넘기므로 함수 기본값(Query 객체)이 그대로
+    # 들어온다 — isinstance 가드 없으면 `.split(",")`가 Query 객체에서 AttributeError.
+    exclude_status = exclude_status if isinstance(exclude_status, str) else None
 
     parsed_epic_ids: list[uuid.UUID] | None = None
     if epic_ids is not None:
@@ -243,9 +254,13 @@ async def list_stories(
         # story #2428: list_backlog가 이제 (stories, total) — X-Total-Count로 호출부가
         # "더 있는지"를 알 수 있게 한다(이 분기는 cursor 미지원, 위 docstring 참조 — 더
         # 필요하면 limit을 올려 재호출하는 것이 유일한 다음 페이지 수단).
+        parsed_exclude_statuses = (
+            [x.strip() for x in exclude_status.split(",") if x.strip()] if exclude_status else None
+        )
         stories, total = await repo.list_backlog(
             project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
             status=status_filter, story_number=story_number, q=q, unattached=unattached,
+            exclude_statuses=parsed_exclude_statuses,
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)

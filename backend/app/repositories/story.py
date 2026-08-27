@@ -268,6 +268,7 @@ class StoryRepository(BaseRepository[Story]):
         story_number: int | None = None,
         q: str | None = None,
         unattached: bool = False,
+        exclude_statuses: list[str] | None = None,
     ) -> tuple[list[Story], int]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
 
@@ -291,6 +292,13 @@ class StoryRepository(BaseRepository[Story]):
         를 타지 이 분기로 안 온다. "URL이 `/stories/backlog`니까 이 분기겠지"로 단정한 게
         오판 원인이었다 — #2190의 진짜 원인은 그 프록시가 `apiSuccess()`에 meta를 안 넘겨
         `hasMore`가 구조적으로 항상 false인 것(다른 층의 결함)이라 이 메서드와 무관하다.
+
+        story #3148 — `exclude_statuses`(신규, opt-in): sprint 미배정만으론 done/in-review도
+        섞인다(완료됐지만 sprint에 안 걸려 있던 스토리) — MCP `sprintable_list_backlog`가 이걸
+        「백로그」로 반환해 PO 오배분 사고를 냈다. `status`(단일 일치)와 별개 축이라 함께 못
+        쓴다는 제약은 없지만 실용상 상호배타적으로 쓰인다. 미지정(None) 시 기존 계약 무회귀
+        (test_2188_list_backlog_filter_drop_realdb.py::test_backlog_no_extra_filters_unspecified_
+        no_regression 고정) — 이 메서드의 기본 동작은 그대로 두고 호출부가 명시적으로 켠다.
         """
         query = select(Story).where(
             self._org_filter(),
@@ -304,6 +312,8 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.assignee_id == assignee_id)
         if status:
             query = query.where(Story.status == status)
+        if exclude_statuses:
+            query = query.where(Story.status.notin_(exclude_statuses))
         if story_number is not None:
             query = query.where(Story.story_number == story_number)
         if q:

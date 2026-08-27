@@ -33,3 +33,28 @@ async def test_list_backlog_targets_existing_endpoint_with_no_sprint(monkeypatch
     # no_sprint(+project_id)로 server-side backlog(sprint 미배정) 분기.
     assert captured["params"].get("no_sprint") == "true"
     assert captured["params"].get("project_id") == "proj-1"
+
+
+@pytest.mark.anyio
+async def test_list_backlog_always_excludes_done_and_in_review(monkeypatch):
+    """story #3148 — 「백로그」 이름이 약속한 필터(미완료)를 도구가 항상 고정 전송하는지.
+
+    호출자가 손댈 여지 없는 도구 기본 동작이어야 한다(ListBacklogInput에 status류 필드가
+    없다 — 사용자가 빠뜨려서 새는 게 아니라 도구가 애초에 항상 켠다는 것을 고정)."""
+    captured: dict = {}
+
+    class _FakeClient:
+        project_id = "proj-1"
+        org_id = None
+
+        def require_project_id(self):
+            return self.project_id
+
+        async def get_with_headers(self, path, params=None):
+            captured["params"] = params or {}
+            return [], {"x-total-count": "0"}
+
+    monkeypatch.setattr(st, "client", _FakeClient())
+    await st.list_backlog(st.ListBacklogInput())
+
+    assert captured["params"].get("exclude_status") == "done,in-review", captured
