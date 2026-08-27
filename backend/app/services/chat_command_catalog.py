@@ -303,7 +303,14 @@ async def try_execute_server_command(
         reply = ConversationMessage(
             conversation_id=conv.id, sender_id=sender.id, content=result.reply_content,
             mentioned_ids=[sender.id],
-            msg_metadata={"activation": {"kind": "result", "audience": [str(sender.id)], "expects_response": False}},
+            msg_metadata={
+                "activation": {"kind": "result", "audience": [str(sender.id)], "expects_response": False},
+                # story #3143 PO 리뷰 델타 — FE(#92f00dc4, 유나 규격 ⚡배지+4상태)가 이
+                # 카드를 텍스트 휴리스틱 없이 판별하는 기계 식별자. approval_target/event와
+                # 동일 additive namespace 선례(conversations.py::_server_command_payload가
+                # payload top-level로 노출).
+                "server_command": {"command": candidate.name, "outcome": result.outcome},
+            },
         )
         db.add(reply)
         await db.flush()

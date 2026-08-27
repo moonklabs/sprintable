@@ -164,6 +164,9 @@ async def test_done_command_transitions_story_and_posts_result_card():
             assert reply.msg_metadata["activation"]["kind"] == "result"
             assert "완료" in reply.content
             assert "다음:" in reply.content
+            # PO 리뷰 델타(2026-08-27) — FE(#92f00dc4)가 텍스트 휴리스틱 없이 이 카드를
+            # 판별하는 기계 식별자. approval_target/event와 동일 additive namespace.
+            assert reply.msg_metadata["server_command"] == {"command": "done", "outcome": "executed"}
     finally:
         await engine.dispose()
 
@@ -293,6 +296,7 @@ async def test_assign_ambiguous_prefix_lists_candidates_and_does_not_mutate():
                 )
             )).scalars().one()
             assert "Santiago" in reply.content and "Santi" in reply.content
+            assert reply.msg_metadata["server_command"] == {"command": "assign", "outcome": "ambiguous"}
     finally:
         await engine.dispose()
 
@@ -553,6 +557,14 @@ async def test_http_round_trip_human_sends_done_command():
                 json={"content": f"/done {story.story_number}"},
             )
             assert resp.status_code == 201, resp.text
+
+            # PO 리뷰 델타(2026-08-27) — GET 목록 응답에도 server_command가 top-level로
+            # 노출되는지(FE #92f00dc4가 실제로 소비하는 자리) 진짜 HTTP 왕복으로 고정.
+            list_resp = await client.get(f"/api/v2/conversations/{conv.id}/messages")
+            assert list_resp.status_code == 200, list_resp.text
+            result_items = [m for m in list_resp.json()["data"] if m.get("message_kind") == "result"]
+            assert len(result_items) == 1
+            assert result_items[0]["server_command"] == {"command": "done", "outcome": "executed"}
         finally:
             await client.aclose()
 

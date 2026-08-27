@@ -611,6 +611,9 @@ def _msg_payload(
     payload.update(_approval_payload(msg))
     # story #2637 AC 0-a: 이벤트 발행 메시지 스키마 top-level 노출(없으면 None·additive).
     payload.update(_event_payload(msg))
+    # story #3143(9a5abc24) PO 리뷰 델타: 서버 집행 커맨드 결과 카드 스키마 top-level
+    # 노출(없으면 None·additive) — FE가 텍스트 휴리스틱 없이 이 카드를 식별하는 축.
+    payload.update(_server_command_payload(msg))
     return payload
 
 
@@ -683,6 +686,17 @@ def _event_payload(msg: "ConversationMessage") -> dict:
     meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
     event = meta.get("event") if isinstance(meta, dict) else None
     return {"event": event if isinstance(event, dict) else None}
+
+
+def _server_command_payload(msg: "ConversationMessage") -> dict:
+    """story #3143(9a5abc24) PO 리뷰 델타 — msg_metadata['server_command'] → payload
+    top-level(없으면 None). _approval_payload/_event_payload와 동형(additive·__dict__
+    전용 read — 동일 greenlet_spawn 회피 이유). FE(#92f00dc4, 유나 규격 ⚡배지+4상태)가
+    이 필드 하나로 "서버가 직접 집행한 카드"임을 텍스트 휴리스틱 없이 판별한다 — 카드
+    렌더는 FE 몫, 여기는 스키마(command/outcome)만 실어 나른다."""
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    server_command = meta.get("server_command") if isinstance(meta, dict) else None
+    return {"server_command": server_command if isinstance(server_command, dict) else None}
 
 
 async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
