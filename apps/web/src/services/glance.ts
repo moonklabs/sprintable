@@ -53,6 +53,12 @@ export interface BeEpicListItem {
   title: string;
   status: string;
   created_at: string;
+  // story #2341 AC2 — `GoalResponse.updated_at`(backend/app/schemas/goal.py:96, `GoalWithGlanceResponse`가
+  // 상속하므로 `?include=glance` 응답에도 항상 실린다, git blame 6462ad1af4·2026-04-29부터 계약에
+  // 존재)를 tie-break 재료로 노출. load-glance-data.ts가 "active 에픽 52개 중 먼저 오는 하나"
+  // 문제를 이 필드로 좁힌다(#2341 AC1의 근본 방향(㉡ active를 파생값化)과는 별개 — 그게 오기
+  // 전까지의 완화).
+  updated_at: string;
   // E-GLANCE wedge #2(로드맵 조타): 큐레이션 순서(null=미조타). 아크는 이 순서를 소비만 한다
   // (드래그 없음). BE order_by=position 미지정/미보유 시 전부 null 취급 → 기존 created_at 정렬과
   // 동일(#2056 회귀0).

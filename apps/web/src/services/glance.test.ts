@@ -24,7 +24,8 @@ describe('deriveRoadmapStatus (epic.status → 3버킷, done/archived 통합)', 
 
 describe('scopeRoadmapEpics ("현재 궤적" window — 유나 서사 확定(b), active(들)를 anchor로 앞뒤 소수만)', () => {
   function epicAt(id: string, status: string, day: number): BeEpicListItem {
-    return { id, title: id, status, created_at: `2026-01-${String(day).padStart(2, '0')}T00:00:00Z` };
+    const ts = `2026-01-${String(day).padStart(2, '0')}T00:00:00Z`;
+    return { id, title: id, status, created_at: ts, updated_at: ts };
   }
 
   it('anchors on the single active epic and takes `behind` done epics before it, `ahead` upcoming after', () => {
@@ -87,7 +88,8 @@ describe('scopeRoadmapEpics ("현재 궤적" window — 유나 서사 확定(b),
 
 describe('scopeRoadmapEpics — 로드맵 조타 curated-first 소비(wedge #2·position 반영·#2056 회귀0)', () => {
   function epic(id: string, status: string, day: number, position?: number | null): BeEpicListItem {
-    return { id, title: id, status, created_at: `2026-01-${String(day).padStart(2, '0')}T00:00:00Z`, position };
+    const ts = `2026-01-${String(day).padStart(2, '0')}T00:00:00Z`;
+    return { id, title: id, status, created_at: ts, updated_at: ts, position };
   }
 
   it('position 전무(미조타) 시 created_at ASC 폴백 — 기존 렌더와 동일(#2056 회귀0)', () => {
@@ -110,9 +112,9 @@ describe('scopeRoadmapEpics — 로드맵 조타 curated-first 소비(wedge #2·
 
 describe('mergeRoadmap (epic 목록 순서 SSOT + 별도 진척 엔드포인트 병합)', () => {
   const epics: BeEpicListItem[] = [
-    { id: 'e1', title: 'E-VERIFY', status: 'done', created_at: '2026-06-01T00:00:00Z' },
-    { id: 'e2', title: 'E-CANVAS', status: 'active', created_at: '2026-06-15T00:00:00Z' },
-    { id: 'e3', title: 'E-GLANCE', status: 'draft', created_at: '2026-07-01T00:00:00Z' },
+    { id: 'e1', title: 'E-VERIFY', status: 'done', created_at: '2026-06-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z' },
+    { id: 'e2', title: 'E-CANVAS', status: 'active', created_at: '2026-06-15T00:00:00Z', updated_at: '2026-06-15T00:00:00Z' },
+    { id: 'e3', title: 'E-GLANCE', status: 'draft', created_at: '2026-07-01T00:00:00Z', updated_at: '2026-07-01T00:00:00Z' },
   ];
 
   it('preserves the epic list order and merges progress by epic_id', () => {
