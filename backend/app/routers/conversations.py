@@ -2683,9 +2683,31 @@ async def send_message(
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
+    # story #3143(9a5abc24, Chat ②층 P1 BE) — 서버 집행 커맨드(카탈로그 3종) 우선 판정.
+    # 명중하면 서버가 즉시 집행+결과 카드까지 이 자리에서 심는다(doc §"서버 카탈로그
+    # 우선(결정적) → 나머지 기존 게이트 흐름"). 미명중(카탈로그 밖 커맨드·비-커맨드)은
+    # 아무 부작용 없이 False — 아래 capability gate·에이전트 dispatch가 그대로 진행된다.
+    from app.services.chat_command_catalog import try_execute_server_command
+    server_command_executed = await try_execute_server_command(db, org_id=org_id, conv=conv, msg=msg, sender=sender)
+
     # E-CHAT-CMD S4: capability gate — 슬래시 커맨드를 미지원 런타임 에이전트에 주입 차단(+audit+hint).
     # 비-command 면 빈 결과 → 무영향. 차단 대상은 dispatch exclude 로 합쳐 주입 0.
     blocked_agent_ids, command_hints = await _command_capability_gate(db, conv, msg, sender, org_id)
+    if server_command_executed:
+        # 서버가 이미 결정적으로 집행했다 — 이 원본 메시지가 에이전트에게 또 dispatch되면
+        # 자연어로 같은 조작을 중복 시도할 위험이 있다(예: 에이전트가 "/done 3110"을 스스로
+        # 해석해 MCP로 한 번 더 done 전이 시도). capability gate와 동일한 exclude 축(SSE·
+        # 멘션·알림 전부 이 한 집합으로 걸러진다)에 이 conversation의 에이전트 참가자
+        # 전원을 합쳐 이중 집행을 막는다 — 새 exclude 축 발명 0.
+        _agent_participant_ids = set((await db.execute(
+            select(TeamMember.id)
+            .join(ConversationParticipant, ConversationParticipant.member_id == TeamMember.id)
+            .where(
+                ConversationParticipant.conversation_id == conv.id,
+                TeamMember.type == "agent", TeamMember.id != sender.id,
+            )
+        )).scalars().all())
+        blocked_agent_ids = blocked_agent_ids | _agent_participant_ids
 
     # story #2349 AC3 — 「이 발신자를 차단한 수신자」는 대화 메시지 SSE/멘션/알림에서 감산한다.
     # PO 경계(2026-08-02): 이건 conversations.py::send_message(대화)만이다 — 스토리 멘션(업무)은
