@@ -3502,6 +3502,8 @@
     "approvalRequestStatusHeld": "Held",
     "approvalRequestStatusVoided": "Voided",
     "approvalRequestResolutionNote": "Reason: {note}",
+    "approvalRequestAssumption": "Assumption: {assumption}",
+    "approvalRequestRequestedBy": "Requested by: {name}",
     "approvalRequestDelegatedAway": "This approval has been delegated to another approver.",
     "approvalRequestWaitingOn": "Waiting on {name}'s approval",
     "approvalRequestTossTrigger": "Send to another room",
