@@ -28,6 +28,7 @@ import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
+import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 
 export interface DashboardProjectOption {
@@ -188,6 +189,9 @@ function ScrollShell({
             userName={userName}
           />
         )}
+        <div className="px-3 pt-3 empty:hidden">
+          <ActivationChecklistBanner />
+        </div>
         <ContextualPanelLayout
           renderPanel={({ mode, closePanel }) => (
             <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-svh 2xl:p-2' : 'h-full'}>

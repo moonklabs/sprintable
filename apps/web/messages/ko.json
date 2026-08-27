@@ -47,6 +47,17 @@
     "add": "추가",
     "confirm": "확인"
   },
+  "activation": {
+    "bannerTitle": "가입을 마무리해 볼까요?",
+    "bannerProgress": "{completed}/{total}단계 완료",
+    "stepEmailVerified": "이메일 인증하기",
+    "stepOrgCreated": "조직 만들기",
+    "stepAgentConnected": "에이전트 연결하기",
+    "stepFirstRoundtrip": "첫 지시 보내고 회신 받기",
+    "collapseAria": "접기",
+    "expandAria": "펼치기",
+    "collapsedChip": "가입 완료 {completed}/{total}"
+  },
   "accountSwitcher": {
     "title": "계정",
     "addAccount": "계정 추가",

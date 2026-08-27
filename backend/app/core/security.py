@@ -231,6 +231,35 @@ def decode_email_verification_token(token: str) -> dict:
     return payload
 
 
+# ─── Email Unsubscribe Token ──────────────────────────────────────────────────
+# story #3159(retention·최소층) — 리마인드 메일 1-클릭 해제 링크. 반복 발송이 아니라 1회성
+# 안내라 만료를 짧게 둘 이유가 없다(수신자가 메일을 나중에 열어도 링크가 죽어있으면 안 됨) —
+# email_verification(24h)과 달리 EMAIL_UNSUBSCRIBE_EXPIRE_DAYS=365로 사실상 영구.
+
+EMAIL_UNSUBSCRIBE_EXPIRE_DAYS = 365
+
+
+def create_email_unsubscribe_token(user_id: str) -> str:
+    """1-클릭 수신거부 토큰(사실상 영구 — 위 근거)."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(days=EMAIL_UNSUBSCRIBE_EXPIRE_DAYS)
+    payload = {
+        "sub": user_id,
+        "type": "email_unsubscribe",
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_email_unsubscribe_token(token: str) -> dict:
+    """Unsubscribe token 검증. 만료/타입 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "email_unsubscribe":
+        raise JWTError("Invalid token type")
+    return payload
+
+
 # ─── OAuth State Token ────────────────────────────────────────────────────────
 
 OAUTH_STATE_EXPIRE_MINUTES = 10

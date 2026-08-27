@@ -47,6 +47,17 @@
     "add": "Add",
     "confirm": "Confirm"
   },
+  "activation": {
+    "bannerTitle": "Finish setting up your account",
+    "bannerProgress": "{completed}/{total} steps complete",
+    "stepEmailVerified": "Verify your email",
+    "stepOrgCreated": "Create an organization",
+    "stepAgentConnected": "Connect an agent",
+    "stepFirstRoundtrip": "Send an instruction and get a reply",
+    "collapseAria": "Collapse",
+    "expandAria": "Expand",
+    "collapsedChip": "Setup {completed}/{total}"
+  },
   "accountSwitcher": {
     "title": "Accounts",
     "addAccount": "Add account",

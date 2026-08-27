@@ -51,7 +51,7 @@ describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 review 없이 �
     expect(GRANDFATHER_BASELINE.size).toBe(162);
   });
 
-  it('EXEMPT_FILES는 8개 파일(pre-auth·공개 라우트·primitive 구현) 그대로다', () => {
-    expect(EXEMPT_FILES.size).toBe(8);
+  it('EXEMPT_FILES는 9개 파일(pre-auth·공개 라우트·primitive 구현) 그대로다(story #3159 — app/unsubscribe/page.tsx 추가)', () => {
+    expect(EXEMPT_FILES.size).toBe(9);
   });
 });
