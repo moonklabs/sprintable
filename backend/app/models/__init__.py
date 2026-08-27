@@ -9,6 +9,7 @@ from app.models.auth_identity import AuthIdentity, AuthMigration, AuthMigrationE
 from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
 from app.models.oauth_handoff_code import OAuthHandoffCode
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
+from app.models.chat_command_audit_log import ChatCommandAuditLog
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.dependency import ItemDependency
 from app.models.device_installation import DeviceInstallation, DeviceProofChallenge
