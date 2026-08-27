@@ -631,7 +631,7 @@ function CancelSubscriptionConfirmDialog({
   );
 }
 
-export function PackPurchaseDialog({
+function PackPurchaseDialog({
   target,
   onClose,
 }: {
@@ -641,12 +641,7 @@ export function PackPurchaseDialog({
   const t = useTranslations('pricingPlans');
   if (target == null) return null;
   const pack = target.kind === 'automation' ? AUTOMATION_PACK : STORAGE_PACK;
-  // story #3097(선생님 결정 2026-08-26) — v2.3 확정가=공급가, 청구 시점 VAT 10% 가산이
-  // BE(billing_pack.py::purchase_packs)에 이제 실제로 걸린다 — 이 확인창은 UpgradeCheckoutDialog/
-  // ChangeTierConfirmDialog와 동일 원칙(청구 직전 확인창=실 청구액을 그대로 보여준다)을
-  // 따라 withVatKrw를 적용한다. 마케팅 카탈로그(pricing-plan-card.tsx/pricing-packs.tsx)는
-  // 확정가(공급가)를 그대로 보이는 게 맞아 별개 — 그쪽은 안 건드림.
-  const priceKrw = withVatKrw(pack.priceKrwPerPack * target.quantity);
+  const priceKrw = pack.priceKrwPerPack * target.quantity;
   const packTitleKey = target.kind === 'automation' ? 'automationPackTitle' : 'storagePackTitle';
 
   return (

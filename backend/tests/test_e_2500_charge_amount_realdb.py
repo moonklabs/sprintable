@@ -63,8 +63,7 @@ async def test_team_tier_no_overage_realdb():
         async with Session() as session:
             org_id = await _seed_org(session, tier="team", billing_cycle="monthly", human_seats=5)
             amount, currency = await compute_charge_amount(session, org_id=org_id)
-            # story #3097 — VAT 10%(마이그 0282 기본 vat_rate_bp=1000) 가산.
-            assert amount == round(59_000 * 1.1)
+            assert amount == 59_000
             assert currency == "krw"
     finally:
         await engine.dispose()
@@ -81,8 +80,7 @@ async def test_team_tier_seat_overage_realdb():
             # included_seats=5, 7명 실좌석 → 2석 초과 * 11,000
             org_id = await _seed_org(session, tier="team", billing_cycle="monthly", human_seats=7)
             amount, currency = await compute_charge_amount(session, org_id=org_id)
-            # story #3097 — VAT 10% 가산(base+seat 합에).
-            assert amount == round((59_000 + 2 * 11_000) * 1.1)
+            assert amount == 59_000 + 2 * 11_000
             assert currency == "krw"
     finally:
         await engine.dispose()
@@ -98,8 +96,7 @@ async def test_business_tier_annual_cycle_realdb():
         async with Session() as session:
             org_id = await _seed_org(session, tier="business", billing_cycle="annual", human_seats=15)
             amount, currency = await compute_charge_amount(session, org_id=org_id)
-            # story #3097 — VAT 10% 가산.
-            assert amount == round(2_190_000 * 1.1)
+            assert amount == 2_190_000
             assert currency == "krw"
     finally:
         await engine.dispose()
@@ -150,9 +147,7 @@ async def test_pack_purchase_ledger_entries_included_when_period_set_realdb():
             )
 
             amount, _ = await compute_charge_amount(session, org_id=org_id)
-            # story #3097 — VAT는 base+seat에만 가산, 이미 기입된 pack 원장(7,000)은
-            # 그대로 더한다(이중가산 방지 — billing_charge_amount.py 주석 참고).
-            assert amount == round(59_000 * 1.1) + 7_000
+            assert amount == 59_000 + 7_000
     finally:
         await engine.dispose()
 

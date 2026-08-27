@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -45,20 +45,6 @@ def _exec_result(scalar_value):
     r.scalar_one.return_value = scalar_value
     r.scalar_one_or_none.return_value = scalar_value
     return r
-
-
-def _fake_settings(vat_rate_bp=1000):
-    """story #3097 — platform_settings.vat_rate_bp 목(default 1000bp=10%)."""
-    s = MagicMock()
-    s.vat_rate_bp = vat_rate_bp
-    return s
-
-
-def _patch_settings(vat_rate_bp=1000):
-    return patch(
-        "app.services.billing_charge_amount.get_platform_settings",
-        new=AsyncMock(return_value=_fake_settings(vat_rate_bp)),
-    )
 
 
 # ─── count_human_seats ──────────────────────────────────────────────────────
@@ -127,11 +113,9 @@ async def test_compute_charge_amount_base_only_no_overage_no_packs():
     session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(5)])
     session.get = AsyncMock(return_value=offering)
 
-    with _patch_settings():
-        amount, currency = await compute_charge_amount(session, org_id=org_id)
+    amount, currency = await compute_charge_amount(session, org_id=org_id)
 
-    # story #3097 — VAT 10% 가산(공급가 59,000 → 청구 64,900).
-    assert amount == 64_900
+    assert amount == 59_000
     assert currency == "krw"
 
 
@@ -147,11 +131,9 @@ async def test_compute_charge_amount_uses_annual_price_for_annual_cycle():
     session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(5)])
     session.get = AsyncMock(return_value=offering)
 
-    with _patch_settings():
-        amount, _ = await compute_charge_amount(session, org_id=org_id)
+    amount, _ = await compute_charge_amount(session, org_id=org_id)
 
-    # story #3097 — VAT 10% 가산(공급가 590,000 → 청구 649,000).
-    assert amount == 649_000
+    assert amount == 590_000
 
 
 @pytest.mark.anyio
@@ -167,11 +149,9 @@ async def test_compute_charge_amount_adds_seat_overage_at_extra_seat_price():
     session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(7)])
     session.get = AsyncMock(return_value=offering)
 
-    with _patch_settings():
-        amount, _ = await compute_charge_amount(session, org_id=org_id)
+    amount, _ = await compute_charge_amount(session, org_id=org_id)
 
-    # story #3097 — VAT 10% 가산(공급가 81,000 → 청구 89,100).
-    assert amount == round((59_000 + 2 * 11_000) * 1.1)
+    assert amount == 59_000 + 2 * 11_000
 
 
 @pytest.mark.anyio
@@ -186,11 +166,9 @@ async def test_compute_charge_amount_business_tier_uses_its_own_extra_seat_price
     session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(16)])
     session.get = AsyncMock(return_value=offering)
 
-    with _patch_settings():
-        amount, _ = await compute_charge_amount(session, org_id=org_id)
+    amount, _ = await compute_charge_amount(session, org_id=org_id)
 
-    # story #3097 — VAT 10% 가산.
-    assert amount == round((219_000 + 1 * 9_900) * 1.1)
+    assert amount == 219_000 + 1 * 9_900
 
 
 @pytest.mark.anyio
@@ -227,15 +205,9 @@ async def test_compute_charge_amount_includes_pack_charge_when_period_bounds_set
     session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(5), _exec_result(7_000)])
     session.get = AsyncMock(return_value=offering)
 
-    # story #3097 — get_platform_settings는 별도 patch로 우회하므로(실제 구현은
-    # session.execute를 한 번 더 태우지만, 그 호출은 이 side_effect 리스트가 아니라
-    # 아래 _patch_settings()가 가로챈다) 위 side_effect는 sub/seat/pack 3건 그대로 유지.
-    with _patch_settings():
-        amount, _ = await compute_charge_amount(session, org_id=org_id)
+    amount, _ = await compute_charge_amount(session, org_id=org_id)
 
-    # VAT는 base+seat(59,000)에만 가산, pack_amount(7,000)는 이미 원장에 VAT 가산되어
-    # 기록된 값이라(purchase_packs) 그대로 더한다(이중가산 방지).
-    assert amount == round(59_000 * 1.1) + 7_000
+    assert amount == 59_000 + 7_000
     assert session.execute.await_count == 3
 
 
@@ -253,11 +225,9 @@ async def test_compute_charge_amount_pack_charge_zero_without_period_bounds():
     session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(5)])
     session.get = AsyncMock(return_value=offering)
 
-    with _patch_settings():
-        amount, _ = await compute_charge_amount(session, org_id=org_id)
+    amount, _ = await compute_charge_amount(session, org_id=org_id)
 
-    # story #3097 — VAT 10% 가산.
-    assert amount == round(59_000 * 1.1)
+    assert amount == 59_000
     assert session.execute.await_count == 2
 
 
