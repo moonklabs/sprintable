@@ -18,7 +18,7 @@ consume의 optional 분기로 구현 금지" 요구를 코드 레벨에서 다�
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,11 @@ from app.core.database import Base
 
 class OAuthHandoffCode(Base):
     __tablename__ = "oauth_handoff_codes"
+    __table_args__ = (
+        CheckConstraint(
+            "callback_mode IN ('https', 'custom_scheme')", name="ck_oauth_handoff_codes_callback_mode"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -37,6 +42,16 @@ class OAuthHandoffCode(Base):
     purpose: Mapped[str] = mapped_column(Text, nullable=False)
     # PKCE S256: base64url(SHA256(code_verifier)) — consume 시점에 재계산해 등가 비교.
     code_challenge: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3121 AC1(계약 doc §2/§10.7) — iOS 17.4 미만 custom-scheme fallback은 "association
+    # 실패 후 동적 전환"이 아니라 "OAuth 시작 전 정적으로 결정되는 호환 모드"(계약 §2). 이 값과
+    # 아래 return_uri는 issue 시점에 고정돼 consume 시 그대로 대조된다 — 코드가 발급된 모드와
+    # 다른 모드/URI로 소비하려는 시도(예: https용으로 발급된 코드를 custom_scheme 경로로 소비)를
+    # 원자 UPDATE의 WHERE절에서 차단한다(§10.9 exact-origin 고정과 동형).
+    callback_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    # 위 모드에 대응하는 정확한 return URI — https는 `{app_url}/native/oauth-return`,
+    # custom_scheme은 `ai.sprintable:/oauth-return`(단일 슬래시, App.js OAUTH_RETURN_SCHEME_URL과
+    # byte-exact). 값 자체는 issue 라우터가 모드별 고정값과 대조해 검증(이 컬럼은 저장만).
+    return_uri: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

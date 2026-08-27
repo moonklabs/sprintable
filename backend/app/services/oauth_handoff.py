@@ -39,6 +39,11 @@ DEFAULT_TTL_SECONDS = 120  # 산티아고 §10.4 확定(non-sliding·non-renewab
 # 4단계/§10.1.1의 정확한 리터럴 — 오르테가군 relay 확인.
 PURPOSE_NATIVE_OAUTH_HANDOFF = "oauth_webview_handoff_v1"
 
+# story #3121 AC1(계약 §2) — 정적 compatibility mode. 값 유효성은 router의 Literal 스키마+DB
+# CHECK(ck_oauth_handoff_codes_callback_mode)가 이중으로 강제 — 이 서비스 계층은 전달만 한다.
+CALLBACK_MODE_HTTPS = "https"
+CALLBACK_MODE_CUSTOM_SCHEME = "custom_scheme"
+
 
 def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()
@@ -62,17 +67,23 @@ async def issue_handoff_code(
     code_hash: str,
     user_id,
     code_challenge: str,
+    callback_mode: str,
+    return_uri: str,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
     commit: bool = True,
 ) -> None:
     """`code_hash`는 `generate_handoff_code()`로 미리 계산된 값 — raw code는 이 함수에
-    전달되지 않는다(DB엔 hash만, 로그에도 남기지 않는다)."""
+    전달되지 않는다(DB엔 hash만, 로그에도 남기지 않는다). `callback_mode`/`return_uri`(story
+    #3121 AC1)는 호출부(router)가 이미 모드별 고정값과 대조 검증한 뒤 넘기는 값 — 이 함수는
+    그대로 저장만 한다."""
     now = datetime.now(timezone.utc)
     row = OAuthHandoffCode(
         user_id=user_id,
         code_hash=code_hash,
         purpose=PURPOSE_NATIVE_OAUTH_HANDOFF,
         code_challenge=code_challenge,
+        callback_mode=callback_mode,
+        return_uri=return_uri,
         created_at=now,
         expires_at=now + timedelta(seconds=ttl_seconds),
     )
@@ -94,11 +105,19 @@ async def consume_handoff_code(
     *,
     code: str,
     code_verifier: str,
+    callback_mode: str,
+    return_uri: str,
     commit: bool = True,
 ) -> ConsumedHandoffCode | None:
-    """원자적 1회 소비 — code_hash(+purpose+미소비+미만료)만으로 먼저 태운 뒤, PKCE
-    challenge를 constant-time 비교한다(§10.3/.4 MUST). verifier가 틀려도 코드는 이미
-    소모돼 재시도 불가 — 무제한 verifier 추측 방지."""
+    """원자적 1회 소비 — code_hash(+purpose+미소비+미만료+callback_mode+return_uri)만으로
+    먼저 태운 뒤, PKCE challenge를 constant-time 비교한다(§10.3/.4 MUST). verifier가 틀려도
+    코드는 이미 소모돼 재시도 불가 — 무제한 verifier 추측 방지.
+
+    story #3121 AC1(계약 §2/§10.7) — callback_mode/return_uri는 code_hash/purpose와 같은
+    WHERE절 조건(비밀값 아닌 선언값이라 constant-time 비교 불요, PKCE challenge와 다른 성격).
+    issue 시점에 고정된 값과 다른 모드/URI로 소비를 시도하면 그냥 매치되는 행이 없어
+    None(=재시도 가능, 코드 안 태움) — 모드/URI는 비밀이 아니므로 verifier처럼 "틀려도 태워야
+    추측 방지" 근거가 없다."""
     code_hash = _hash_code(code)
     now = datetime.now(timezone.utc)
 
@@ -109,6 +128,8 @@ async def consume_handoff_code(
             OAuthHandoffCode.purpose == PURPOSE_NATIVE_OAUTH_HANDOFF,
             OAuthHandoffCode.consumed_at.is_(None),
             OAuthHandoffCode.expires_at > now,
+            OAuthHandoffCode.callback_mode == callback_mode,
+            OAuthHandoffCode.return_uri == return_uri,
         )
         .values(consumed_at=now)
         .returning(OAuthHandoffCode.user_id, OAuthHandoffCode.created_at, OAuthHandoffCode.code_challenge)

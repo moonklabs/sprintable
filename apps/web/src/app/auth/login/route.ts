@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
 import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
+import { isOAuthCallbackMode } from '@/lib/auth/oauth-callback-mode';
 
 const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -16,6 +17,10 @@ export async function GET(request: Request) {
   // issue 호출에 씀(격리 rail, /auth/native 무접촉).
   const native = searchParams.get('native') === '1';
   const codeChallenge = searchParams.get('code_challenge');
+  // story #3121 AC1 — 모바일이 OAuth 시작 전 정적으로 결정한 호환 모드(계약 §2). 값 자체가
+  // 아니라 셸렉터일 뿐이라 여기선 형식만 검증(https|custom_scheme) — 실제 return_uri 문자열은
+  // 콜백(callback/[provider]/route.ts)에서 lib/auth/oauth-callback-mode 고정 매핑으로 계산한다.
+  const callbackModeParam = searchParams.get('callback_mode');
   const origin = resolveAppUrl(null);
 
   // story #3118(Sign in with Apple) — apple 추가. 노출 여부(iOS/macOS 셸 한정)는 로그인
@@ -53,6 +58,12 @@ export async function GET(request: Request) {
   // 핸드오프 자체를 시작하지 않는다(방어적, 최종 검증은 BE issue가 authoritative).
   if (native && codeChallenge && /^[A-Za-z0-9_-]{43,}$/.test(codeChallenge)) {
     cookieStore.set(`oauth_native_challenge_${provider}`, codeChallenge, cookieOpts);
+    // story #3121 AC1 — 형식이 다르면(구버전 클라 미전송 포함) 조용히 기본값(https)으로 유도
+    // 되게 쿠키 자체를 세팅 안 한다(콜백에서 쿠키 부재 = https). 잘못된 값은 저장하지 않는다
+    // (오배선을 그대로 실어 나르지 않는다).
+    if (isOAuthCallbackMode(callbackModeParam)) {
+      cookieStore.set(`oauth_native_callback_mode_${provider}`, callbackModeParam, cookieOpts);
+    }
   }
 
   return NextResponse.redirect(url);
