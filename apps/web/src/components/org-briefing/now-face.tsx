@@ -13,6 +13,7 @@ import {
   type NowFaceItem, type NowFaceTranslator,
 } from './derive-now-face';
 import { deriveAttentionClusters, type AttentionClusters, type ViewerContext } from './derive-attention-clusters';
+import { deriveSilentStallClusters, type SilentStallClusters, type RawSilentStallResponse } from './derive-silent-stall-clusters';
 import { AttentionClusterBoard, CrossProjectTag } from './attention-cluster-board';
 import { parseTeamMembers } from './derive-workforce-face';
 
@@ -24,24 +25,33 @@ const REFRESH_MS = 60_000;
 interface NowFaceLoad {
   items: NowFaceItem[];
   clusters: AttentionClusters;
+  silentStall: SilentStallClusters;
   memberNames: Record<string, string>;
 }
 
-async function loadNowFace(t: NowFaceTranslator, viewer: ViewerContext): Promise<NowFaceLoad> {
+async function loadNowFace(
+  t: NowFaceTranslator, viewer: ViewerContext, projectId: string | undefined, projectSlug: string | undefined,
+): Promise<NowFaceLoad> {
   // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!r.ok=>null) "지금" 면이
   // 빈 채로 60초 REFRESH_MS까지 안 채워졌다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
   // story #2852 — agent_auth_failure 클러스터가 member_id만 갖고 있어(BE가 이름을 안 줌)
   // 이름 표시엔 /api/team-members가 필요하다(workforce-face.tsx parseTeamMembers와 동형 소비).
-  const [ma, notifs, membersJson] = await Promise.all([
+  // story #93b076c8(2250) — 「침묵의 정체」는 project-scope 전용 별도 BE 엔드포인트라
+  // projectId 없인 조회 자체가 무의미(다른 세 fetch와 달리 조건부).
+  const [ma, notifs, membersJson, attentionJson] = await Promise.all([
     fetchWithAuth('/api/dashboard/my-actions').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     fetchWithAuth('/api/notifications?type=task_completed&unread=true').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    projectId
+      ? fetchWithAuth(`/api/glance/attention?project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const raw = parseMyActions(ma);
   return {
     items: buildNowFace(raw, parseCompletionNotifications(notifs), t, viewer),
-    // story #2541 — 같은 raw.attention을 story_stalled/hypothesis_falsified 전용으로 한 번 더
-    // 읽어 클러스터로 묶는다(buildNowFace는 이 두 타입을 더는 flat 행으로 안 올린다).
+    // story #2541 — 같은 raw.attention을 hypothesis_falsified 전용으로 한 번 더 읽어 클러스터로
+    // 묶는다(buildNowFace는 이 타입을 더는 flat 행으로 안 올린다). story_stalled는 #93b076c8에서
+    // silentStall(아래, 별도 BE 엔드포인트)로 대체·제거됐다(twin 신호 정리, 페드루 GO).
     // story #2829/#2830 — loop_* 3종도 동형(buildNowFace는 이 타입들을 flat 행으로 안 올림,
     // 미배선이라 자연히 무시됨). count 4종은 raw에서 그대로 넘긴다.
     clusters: deriveAttentionClusters(raw.attention, t, {
@@ -51,6 +61,11 @@ async function loadNowFace(t: NowFaceTranslator, viewer: ViewerContext): Promise
       measurePlanMissingGoalCount: raw.measurePlanMissingGoalCount,
       unmeasurableGoalCount: raw.unmeasurableGoalCount,
     }, viewer),
+    // FE 프록시가 apiSuccess로 한 번 더 감싸 실제 payload는 {data:{items,…}}다(derive-exception-
+    // signals.ts와 동형 크럭스 — glance.py AttentionResponse envelope 이중랩).
+    silentStall: deriveSilentStallClusters(
+      (attentionJson as { data?: RawSilentStallResponse } | null)?.data ?? null, viewer, projectSlug ?? null,
+    ),
     memberNames: parseTeamMembers(membersJson),
   };
 }
@@ -96,37 +111,40 @@ function RowSkeleton() {
   return <div className="h-[60px] animate-pulse border-t border-border bg-muted/30 first:border-t-0" />;
 }
 
-const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], stalled: [], loop: [], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0, authFailure: [] };
+const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], loop: [], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0, authFailure: [] };
+const EMPTY_SILENT_STALL: SilentStallClusters = { totalCount: 0, populationCount: 0, computedAt: '', buckets: [] };
 
 export function NowFace() {
   const t = useTranslations('orgBriefing');
   const [items, setItems] = useState<NowFaceItem[] | null>(null);
   const [clusters, setClusters] = useState<AttentionClusters>(EMPTY_CLUSTERS);
+  const [silentStall, setSilentStall] = useState<SilentStallClusters>(EMPTY_SILENT_STALL);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   // story #2842 — loop-face.tsx와 동형(orgMemberships에서 orgSlug 파생). useMemo로 orgId/
   // projectId(원시값)가 실제로 바뀔 때만 새 참조를 만든다 — 매 렌더 새 객체면 아래 effect가
   // 무한 재구독된다.
-  const { orgId, orgMemberships, projectId } = useDashboardContext();
+  const { orgId, orgMemberships, projectId, currentProjectSlug } = useDashboardContext();
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const viewer = useMemo<ViewerContext>(() => ({ orgSlug, activeProjectId: projectId }), [orgSlug, projectId]);
 
   useEffect(() => {
     const load = async () => {
-      const result = await loadNowFace(t, viewer);
+      const result = await loadNowFace(t, viewer, projectId, currentProjectSlug);
       setItems(result.items);
       setClusters(result.clusters);
+      setSilentStall(result.silentStall);
       setMemberNames(result.memberNames);
     };
     void load();
     const id = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(id);
-  }, [t, viewer]);
+  }, [t, viewer, projectId, currentProjectSlug]);
 
   const list = items ?? [];
   const shown = expanded ? list : list.slice(0, CAP);
   const overflow = Math.max(0, list.length - CAP);
-  const hasClusters = clusters.falsified.length > 0 || clusters.stalled.length > 0 || clusters.loopTotalCount > 0 || clusters.authFailure.length > 0;
+  const hasClusters = clusters.falsified.length > 0 || silentStall.totalCount > 0 || clusters.loopTotalCount > 0 || clusters.authFailure.length > 0;
   // story #2541 AC1/AC2 — story_stalled/hypothesis_falsified가 클러스터 보드로 옮겨간 뒤
   // NowFace 플랫 리스트가 실제로 비어도(decide/done/agent_stuck/unanswered_blocker가 0건)
   // 클러스터에 내용이 있으면 "모두 확인했어요"는 거짓이다 — 두 표면을 합쳐서 판단한다.
@@ -146,7 +164,7 @@ export function NowFace() {
       {items !== null ? (
         <AttentionClusterBoard
           falsified={clusters.falsified}
-          stalled={clusters.stalled}
+          silentStall={silentStall}
           loop={clusters.loop}
           loopTotalCount={clusters.loopTotalCount}
           measurePlanMissingGoalCount={clusters.measurePlanMissingGoalCount}

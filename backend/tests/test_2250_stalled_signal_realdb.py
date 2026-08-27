@@ -376,3 +376,148 @@ async def test_done_story_excluded_from_stalled_population():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ── FE 델타(페드루 판정 2026-08-27) — assignee_member_id·stalled_population_count ──────────
+@pytest.mark.anyio
+async def test_stalled_item_carries_assignee_member_id():
+    """유나 발주서 "펼침 행 소유자" 충족용 additive 필드 — id만 싣는다(이름은 FE가 기존
+    memberNames 사슬로 해소, 개명 시 stale 방지)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            from app.models.team import TeamMember
+            assignee = TeamMember(
+                id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
+                type="human", name="Owner", is_active=True,
+            )
+            s.add(assignee)
+            await s.commit()
+            story = _story(seeded["org_id"], seeded["project_id"], "Assigned Silent Story")
+            story.assignee_id = assignee.id
+            s.add(story)
+            await s.commit()
+            old_at = datetime.now(timezone.utc) - timedelta(hours=72)
+            await _seed_status_changed_activity(s, seeded["org_id"], seeded["project_id"], story.id, old_at)
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
+            assert resp.status_code == 200, resp.text
+            item = next(i for i in resp.json()["items"] if i["kind"] == "stalled")
+            assert item["assignee_member_id"] == str(assignee.id)
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_stalled_item_assignee_member_id_null_when_unassigned():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            story = _story(seeded["org_id"], seeded["project_id"], "Unassigned Silent Story")
+            s.add(story)
+            await s.commit()
+            old_at = datetime.now(timezone.utc) - timedelta(hours=72)
+            await _seed_status_changed_activity(s, seeded["org_id"], seeded["project_id"], story.id, old_at)
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
+            assert resp.status_code == 200, resp.text
+            item = next(i for i in resp.json()["items"] if i["kind"] == "stalled")
+            assert item["assignee_member_id"] is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_non_stalled_kinds_never_carry_assignee_member_id():
+    """페드루 조건 — 기존 5신호 소비자 무영향 단언. gate_pending 등은 항상 None(신규 필드가
+    있는지도 모르는 구 소비자가 있어도 값이 안 생겨야 회귀 0)."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.workflow_line import WorkflowLineStepApproval
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            story = _story(seeded["org_id"], seeded["project_id"], "Gate Pending Story")
+            s.add(story)
+            await s.commit()
+            gate = Gate(
+                id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id,
+                work_item_type="story", gate_type="review", status="pending",
+            )
+            s.add(gate)
+            await s.commit()
+            s.add(WorkflowLineStepApproval(
+                id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
+                step_run_id=uuid.uuid4(), approval_group_id=uuid.uuid4(),
+                approver_member_id=uuid.uuid4(), approver_member_type="agent",
+                gate_id=gate.id, kind="approver", blocking=True, status="pending",
+            ))
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
+            assert resp.status_code == 200, resp.text
+            item = next(i for i in resp.json()["items"] if i["kind"] == "gate_pending")
+            assert item["assignee_member_id"] is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_stalled_population_count_reflects_total_candidates_not_just_stalled():
+    """유나 발주서 "활성 N건 중" 서브텍스트용 — 48h 미만이라 stalled로 안 뜨는 항목도 population
+    에는 포함된다(전체 후보 수, "그중 몇 건이 48h+"의 분모)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            old_story = _story(seeded["org_id"], seeded["project_id"], "Old", status="in-progress")
+            fresh_story = _story(seeded["org_id"], seeded["project_id"], "Fresh", status="in-review")
+            s.add_all([old_story, fresh_story])
+            await s.commit()
+            old_at = datetime.now(timezone.utc) - timedelta(hours=72)
+            fresh_at = datetime.now(timezone.utc) - timedelta(hours=1)
+            await _seed_status_changed_activity(s, seeded["org_id"], seeded["project_id"], old_story.id, old_at)
+            await _seed_status_changed_activity(s, seeded["org_id"], seeded["project_id"], fresh_story.id, fresh_at)
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            stalled = [i for i in body["items"] if i["kind"] == "stalled"]
+            assert len(stalled) == 1, "fresh_story는 48h 미만이라 stalled엔 안 뜬다"
+            assert body["stalled_population_count"] == 2, "population은 전체 후보 2건(old+fresh) — stalled 1건과 달라야 한다"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

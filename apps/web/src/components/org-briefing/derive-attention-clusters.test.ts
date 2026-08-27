@@ -10,7 +10,7 @@ const t = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'org
 
 function attentionItem(overrides: Partial<RawAttentionItem>): RawAttentionItem {
   return {
-    type: 'story_stalled',
+    type: 'hypothesis_falsified',
     entity_type: null,
     entity_id: null,
     gate_type: null,
@@ -44,32 +44,11 @@ describe('deriveAttentionClusters', () => {
       attentionItem({ type: 'unanswered_blocker', blocked_story_id: 's2' }),
     ], t);
     expect(clusters.falsified).toHaveLength(0);
-    expect(clusters.stalled).toHaveLength(0);
   });
 
-  it('story #2541 AC1 — story_stalled 20건이 flood 아니라 정체 클러스터 하나로 묶인다(dedup=집계, 개별 데이터는 안 지움)', () => {
-    const items = Array.from({ length: 20 }, (_, i) =>
-      attentionItem({ type: 'story_stalled', story_id: `s${i}`, stalled_days: i + 1, title: `스토리 ${i}` }));
-    const clusters = deriveAttentionClusters(items, t);
-    expect(clusters.stalled).toHaveLength(20);
-  });
-
-  it('정체는 일수순(내림차순 — 오래 묵은 것 먼저)으로 정렬된다', () => {
-    const clusters = deriveAttentionClusters([
-      attentionItem({ type: 'story_stalled', story_id: 's1', stalled_days: 3, title: 'A' }),
-      attentionItem({ type: 'story_stalled', story_id: 's2', stalled_days: 9, title: 'B' }),
-      attentionItem({ type: 'story_stalled', story_id: 's3', stalled_days: 6, title: 'C' }),
-    ], t);
-    expect(clusters.stalled.map((s) => s.title)).toEqual(['B', 'C', 'A']);
-    expect(clusters.stalled.map((s) => s.days)).toEqual([9, 6, 3]);
-  });
-
-  it('story_id/title이 없으면 폴백 href·문구를 쓴다(no-fiction 안 지어냄)', () => {
-    const clusters = deriveAttentionClusters([attentionItem({ type: 'story_stalled' })], t);
-    expect(clusters.stalled[0]!.href).toBe('/board');
-    expect(clusters.stalled[0]!.title).toBe('스토리가 오래 멈춰 있습니다');
-    expect(clusters.stalled[0]!.days).toBeNull();
-  });
+  // story #93b076c8(2250) — story_stalled 클러스터링(dedup·정렬·폴백)은 이 함수에서 제거되고
+  // silentStall(별도 BE 엔드포인트 소스)로 대체됐다 — 그 동작의 테스트는
+  // derive-silent-stall-clusters.test.ts로 이관.
 
   it('가설 반증은 최근순(falsified_days 오름차순)으로 정렬되고 target/actual·대체가설 링크를 담는다', () => {
     const clusters = deriveAttentionClusters([
@@ -94,13 +73,11 @@ describe('deriveAttentionClusters', () => {
     expect(clusters.falsified[0]).toMatchObject({ hasOutcome: false, target: null, actual: null });
   });
 
-  it('두 유형이 섞여 들어와도 각자 클러스터로 갈린다', () => {
+  it('무관 타입이 섞여 들어와도 falsified 클러스터만 걸러 담긴다', () => {
     const clusters = deriveAttentionClusters([
-      attentionItem({ type: 'story_stalled', story_id: 's1', stalled_days: 2 }),
       attentionItem({ type: 'hypothesis_falsified', hypothesis_id: 'h1', statement: 'X', falsified_days: 1 }),
       attentionItem({ type: 'agent_stuck', entity_id: 's2' }),
     ], t);
-    expect(clusters.stalled).toHaveLength(1);
     expect(clusters.falsified).toHaveLength(1);
   });
 
@@ -156,10 +133,8 @@ describe('deriveAttentionClusters', () => {
     it('viewer(orgSlug+activeProjectId) 제공 시 href가 항목 소속 프로젝트 slug로 지어진다', () => {
       const clusters = deriveAttentionClusters([
         attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', overdue_days: 1, project_id: 'p-other', project_slug: 'other-proj' }),
-        attentionItem({ type: 'story_stalled', story_id: 's1', stalled_days: 1, project_id: 'p-other', project_slug: 'other-proj' }),
       ], t, undefined, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
       expect(clusters.loop[0]!.href).toBe('/moonklabs/other-proj/flow?view=flow&goal=g1');
-      expect(clusters.stalled[0]!.href).toBe('/moonklabs/other-proj/board?story=s1');
     });
 
     it('같은 프로젝트 소속이면 crossProjectLabel이 null(노이즈 절제) — href는 여전히 완전 경로', () => {

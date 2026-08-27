@@ -154,6 +154,11 @@ class AttentionItem(BaseModel):
     # (entered_state_at이 None이면 이 필드도 None) — "approx"는 없다: 유계가 아닌 오차는 근사가
     # 아니라 «모름»이다(blocked가 그 사례 — 값 자체를 안 싣는다, 모듈 docstring 참조).
     entered_state_at_precision: str | None = None
+    # story #93b076c8(2250) FE 델타(페드루 판정 2026-08-27) — 유나 발주서(펼침 행 "소유자")
+    # 충족용 additive 필드. **id만** 싣는다(이름 문자열을 여기서 실으면 개명 시 stale — FE가
+    # 기존 memberNames 해소 사슬으로 이름을 붙인다). stalled 외 5종은 항상 None(기존 소비자
+    # 무영향 — 아래 회귀 테스트로 고정).
+    assignee_member_id: uuid.UUID | None = None
 
 
 class AttentionResponse(BaseModel):
@@ -164,6 +169,12 @@ class AttentionResponse(BaseModel):
     # 반환할 일이 없다. 다른 5종 신호와 달리 이 값이 필요한 이유: stalled만 "무신호=진짜 0건"과
     # "무신호=계산 자체가 안 도는 중"을 구분할 별도 근거가 없다).
     stalled_computed_at: datetime
+    # story #93b076c8(2250) FE 델타 — 유나 발주서 "활성 N건 중" 서브텍스트용. stalled 모집단
+    # (backlog 제외 활성, kind 1~5 배타 적용 前) 총량 — items 중 kind="stalled" 건수(83)와는
+    # 다른 수(123): 전자는 "후보 전체", 후자는 "그중 48h+". BE=정의·로직 무변경(additive
+    # 부가정보만) — 지어내지 않는다(값 없이 카피를 쓰거나 population을 추측하는 대신 실제
+    # 쿼리 결과 그대로).
+    stalled_population_count: int
 
 
 @router.get("/attention", response_model=AttentionResponse)
@@ -360,7 +371,7 @@ async def glance_attention(
     _already_signaled_ids = {item.story_id for item in items if item.story_id is not None}
     stalled_population_rows = (
         await session.execute(
-            select(Story.id, Story.title)
+            select(Story.id, Story.title, Story.assignee_id)
             .where(
                 Story.org_id == org_id,
                 Story.project_id == project_id,
@@ -370,15 +381,15 @@ async def glance_attention(
         )
     ).all()
     stalled_candidates = [
-        (story_id, title) for story_id, title in stalled_population_rows
+        (story_id, title, assignee_id) for story_id, title, assignee_id in stalled_population_rows
         if story_id not in _already_signaled_ids
     ]
     latest_changed_map = await _batch_latest_status_changed_at(
-        session, org_id, [story_id for story_id, _ in stalled_candidates],
+        session, org_id, [story_id for story_id, _, _ in stalled_candidates],
     )
     _now = datetime.now(timezone.utc)
     stalled_items: list[AttentionItem] = []
-    for story_id, title in stalled_candidates:
+    for story_id, title, assignee_id in stalled_candidates:
         latest_changed = latest_changed_map.get(story_id)
         # 「모르면 안 준다」(blocked와 동일 원칙, 모듈 docstring 참조) — 이 story가 언제
         # 마지막으로 바뀌었는지 자체를 모르면(status_changed 행이 아예 없음) 48h+ 여부를
@@ -390,13 +401,17 @@ async def glance_attention(
         stalled_items.append(AttentionItem(
             kind="stalled", story_id=story_id, title=title,
             entered_state_at=latest_changed, entered_state_at_precision=_PRECISION_EXACT,
+            assignee_member_id=assignee_id,
         ))
     # ⛔BE는 top-N으로 자르지 않는다(모듈 docstring·#2250 페드루 판정 2026-08-27) — 무변화
     # 내림차순(=entered_state_at 오름차순, 가장 오래 안 바뀐 것 먼저)으로 전량 정렬만 한다.
     stalled_items.sort(key=lambda item: item.entered_state_at)
     items.extend(stalled_items)
 
-    return AttentionResponse(items=items, stalled_computed_at=_now)
+    return AttentionResponse(
+        items=items, stalled_computed_at=_now,
+        stalled_population_count=len(stalled_population_rows),
+    )
 
 
 # ── hero ProofCapsule envelope (story b464daa1·E-GLANCE 2D) ─────────────────────
