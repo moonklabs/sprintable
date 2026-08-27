@@ -285,3 +285,68 @@ describe('deriveActiveLaneGoals — dormancy 임계(호출부 전달, story #312
     expect(deriveActiveLaneGoals(goals, stories, 24, NOW).fold.map((g) => g.id)).toEqual(['e1']);
   });
 });
+
+// story #3126(페드루 조건, 2026-08-27 09:25) — «존치를 승인하되 조용히 갈라지지 못하게».
+// deriveActiveLaneGoals의 lastActiveByEpic 로컬 계산(activeStories로부터)과 BE
+// `GoalRepository.attach_glance_aggregates`의 latest_story_activity_at 공식이 같은
+// 정의(non-done story의 updated_at 최댓값)·같은 비교연산자(<=, 초과가 아니라 이상 포함)를
+// 지켜야 한다. 여기 오라클은 소스코드(deriveActiveLaneGoals 내부 Map 루프)와 «다른 방식»으로
+// 같은 규칙을 재구현한다(reduce 체인) — 소스와 같은 스타일로 베끼면 로직 버그가 그대로
+// 복제돼도 이 테스트가 못 잡는다.
+describe('deriveActiveLaneGoals — BE 공식(non-done MAX·<=) 등가 pin(story #3126, 페드루 조건)', () => {
+  const NOW = new Date('2026-07-31T00:00:00Z').getTime();
+
+  // BE app/repositories/goal.py::attach_glance_aggregates의 latest_story_activity_at
+  // 정의를 독립 재구현(SELECT MAX(updated_at) WHERE status != 'done' GROUP BY epic_id) —
+  // 소스(deriveActiveLaneGoals)와 다른 스타일(reduce)로 짜서 같은 버그를 복제하지 않는다.
+  function beFormulaOracle(
+    goals: NextMakerGoal[],
+    stories: NextMakerStory[],
+    dormancyThresholdHours: number,
+    now: number,
+  ): { expand: string[]; fold: string[] } {
+    const nonDone = stories.filter((s) => s.status !== 'done' && s.epicId != null);
+    const latestByEpic = nonDone.reduce<Record<string, number>>((acc, s) => {
+      const t = new Date(s.updatedAt).getTime();
+      if (Number.isNaN(t)) return acc;
+      const cur = acc[s.epicId as string];
+      acc[s.epicId as string] = cur === undefined ? t : Math.max(cur, t);
+      return acc;
+    }, {});
+    const thresholdMs = dormancyThresholdHours * 3600_000;
+    const expand: string[] = [];
+    const fold: string[] = [];
+    for (const g of goals) {
+      const latest = latestByEpic[g.id];
+      if (latest !== undefined && now - latest <= thresholdMs) expand.push(g.id);
+      else fold.push(g.id);
+    }
+    return { expand, fold };
+  }
+
+  it.each([
+    { name: '단일 non-done story, 임계 안', hours: 720, stories: [story({ epicId: 'e1', status: 'in-progress', updatedAt: '2026-07-20T00:00:00Z' })] },
+    { name: '단일 non-done story, 임계 밖', hours: 24, stories: [story({ epicId: 'e1', status: 'in-progress', updatedAt: '2026-07-20T00:00:00Z' })] },
+    { name: 'done story만 있음(제외되어 latest 없음)', hours: 720, stories: [story({ epicId: 'e1', status: 'done', updatedAt: '2026-07-30T23:00:00Z' })] },
+    {
+      name: 'done+non-done 혼재 — done의 더 최근 값이 안 섞인다',
+      hours: 720,
+      stories: [
+        story({ id: 's-done', epicId: 'e1', status: 'done', updatedAt: '2026-07-30T23:00:00Z' }),
+        story({ id: 's-old', epicId: 'e1', status: 'backlog', updatedAt: '2026-01-01T00:00:00Z' }),
+      ],
+    },
+    {
+      name: '경계값(정확히 임계) — <=라 expand',
+      hours: 720,
+      stories: [story({ epicId: 'e1', status: 'ready-for-dev', updatedAt: new Date(NOW - 720 * 3600_000).toISOString() })],
+    },
+    { name: '스토리 0건(latest 자체가 없음)', hours: 720, stories: [] },
+  ])('$name', ({ hours, stories }) => {
+    const goals = [goal({ id: 'e1' })];
+    const actual = deriveActiveLaneGoals(goals, stories, hours, NOW);
+    const expected = beFormulaOracle(goals, stories, hours, NOW);
+    expect(actual.expand.map((g) => g.id)).toEqual(expected.expand);
+    expect(actual.fold.map((g) => g.id)).toEqual(expected.fold);
+  });
+});

@@ -116,10 +116,15 @@ export function deriveActiveLaneGoals(
   dormancyThresholdHours: number,
   now: number,
 ): LaneGoalGrouping {
+  // story #3126(페드루 조건, parity-pin이 실제로 잡은 갭) — "done 제외"는 예전엔 호출부
+  // 계약(next-maker-screen.tsx가 done을 애초에 fetch 안 함)에만 의존하는 «외부» 보장이었다.
+  // BE `attach_glance_aggregates`의 공식은 `Story.status != "done"`을 SQL WHERE에서 직접
+  // 강제(«내부» 보장)한다 — 두 정의가 조용히 갈라지지 않으려면 이 함수도 같은 필터를
+  // 자체적으로 걸어야 한다(호출부가 언젠가 done을 섞어 넘겨도 동일하게 방어).
   const dormancyThresholdMs = dormancyThresholdHours * 60 * 60 * 1000;
   const lastActiveByEpic = new Map<string, number>();
   for (const s of activeStories) {
-    if (!s.epicId) continue;
+    if (!s.epicId || s.status === 'done') continue;
     const t = new Date(s.updatedAt).getTime();
     if (Number.isNaN(t)) continue;
     const prev = lastActiveByEpic.get(s.epicId);
