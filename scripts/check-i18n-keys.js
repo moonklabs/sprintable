@@ -49,113 +49,9 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { flatten, escapeRegExp, stripComments, extractKeyUsages, extractHookBindings } = require('./i18n-key-parser');
 
 const rootDir = path.join(__dirname, '..');
-
-function flatten(obj, prefix = '') {
-  const out = {};
-  for (const [k, v] of Object.entries(obj)) {
-    const p = prefix ? `${prefix}.${k}` : k;
-    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-      Object.assign(out, flatten(v, p));
-    } else {
-      out[p] = v;
-    }
-  }
-  return out;
-}
-
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * ㉤ — AC2 positive-control로 새로 찾은 5번째 결함(스토리 원문에도 없던 것). 주석 안에 예시로
- * 남은 옛 호출(`t('title')`처럼 은퇴 사유를 설명하는 주석 — inbox/page.tsx:188, story #2164)
- * 을 실제 호출로 오인해 「missing」 오탐을 냈다(en/ko 모두 `inbox.title` 자체가 없어 즉시
- * 눈에 띄었다 — AC9-c와 같은 교훈: 놀란 수가 나오면 자리부터 볼 게 아니라 자부터 본다).
- * 문자열/템플릿 리터럴 내용은 보존하고 `//`·`/* *\/` 주석만 제거한다.
- */
-// story #3023(카디르 QA #3445 근본추적) — 정규식 리터럴 안의 백틱을 아래 backtick 분기가
-// 문자열 델리미터로 오인하면, 짝이 안 맞는(홀수 개) 백틱을 담은 정규식(예:
-// `INLINE_CODE_SPAN_RE = /`[^`\n]*`/g`처럼 백틱 자체를 매칭하는 패턴 — story-detail-
-// panel.tsx L144 실측)이 그 뒤 남은 파일 전체를 "닫히지 않은 문자열 안"으로 착각시켜,
-// 그 이후의 진짜 `//` 주석이 전부 인식을 놓친다(실제로 지금까지 벌어진 CI 오탐의 원인).
-// '/' 직전의 마지막 유의미 문자가 이 목록에 있을 때만(정규식 리터럴이 실제로 오는 흔한
-// 문맥 — `= /../`, `(/../`, `, /../` 등) 정규식으로 판별해 안쪽을 통째로(백틱·따옴표
-// 델리미터 취급 없이) 건너뛴다. 일부러 좁게(allowlist) 잡았다 — `<`(JSX 닫는 태그
-// `</div>`)처럼 정규식이 아닌데 '/' 앞에 오는 문맥까지 넓히면 JSX가 널린 .tsx 전체에서
-// 새로운 오탐을 만든다. `return /regex/` 류(직전이 식별자 끝 문자라 division 취급되는
-// 소수 케이스)는 이 좁은 스코프 밖(story AC 범위 — 알려진 한계로 남김).
-const REGEX_LITERAL_CONTEXT_CHARS = new Set(['=', '(', ',', ':', ';', '!', '&', '|', '?', '[']);
-
-function stripComments(source) {
-  let out = '';
-  let i = 0;
-  const n = source.length;
-  let lastSig = ''; // 마지막으로 출력한 공백 아닌 문자(정규식 vs 나눗셈 판별용).
-  const emit = (ch) => {
-    out += ch;
-    if (!/\s/.test(ch)) lastSig = ch;
-  };
-  while (i < n) {
-    const c = source[i];
-    const c2 = source[i + 1];
-    if (c === '/' && c2 === '/') {
-      while (i < n && source[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '/' && c2 === '*') {
-      i += 2;
-      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) i++;
-      i += 2;
-      continue;
-    }
-    if (c === '/' && c2 !== '/' && c2 !== '*' && REGEX_LITERAL_CONTEXT_CHARS.has(lastSig)) {
-      let j = i + 1;
-      let inClass = false;
-      let closed = false;
-      while (j < n && source[j] !== '\n') {
-        if (source[j] === '\\') { j += 2; continue; }
-        if (source[j] === '[') { inClass = true; j++; continue; }
-        if (source[j] === ']') { inClass = false; j++; continue; }
-        if (source[j] === '/' && !inClass) { j++; closed = true; break; }
-        j++;
-      }
-      if (closed) {
-        while (j < n && /[a-z]/i.test(source[j])) j++; // 플래그(g/i/m/s/u/y 등) 소비.
-        for (let k = i; k < j; k++) emit(source[k]);
-        i = j;
-        continue;
-      }
-      // 줄 끝까지 닫는 '/'를 못 찾으면 정규식이 아니었다(오판) — 아래 일반 처리로 폴백.
-    }
-    if (c === '"' || c === "'") {
-      const quote = c;
-      emit(c); i++;
-      while (i < n && source[i] !== quote) {
-        if (source[i] === '\\') { emit(source[i]); i++; if (i < n) { emit(source[i]); i++; } continue; }
-        emit(source[i]); i++;
-      }
-      if (i < n) { emit(source[i]); i++; }
-      continue;
-    }
-    if (c === '`') {
-      emit(c); i++;
-      let depth = 0;
-      while (i < n) {
-        if (source[i] === '\\') { emit(source[i]); i++; if (i < n) { emit(source[i]); i++; } continue; }
-        if (source[i] === '`' && depth === 0) { emit(source[i]); i++; break; }
-        if (source[i] === '$' && source[i + 1] === '{') { depth++; emit(source[i]); emit(source[i + 1]); i += 2; continue; }
-        if (source[i] === '}' && depth > 0) { depth--; emit(source[i]); i++; continue; }
-        emit(source[i]); i++;
-      }
-      continue;
-    }
-    emit(c); i++;
-  }
-  return out;
-}
 
 /**
  * AC4 — 동적 조합 화이트리스트. AC3(②)보다 먼저 서야 하는 이유: 이게 없으면 아래 접두사를
@@ -198,24 +94,8 @@ function isDynamicallyComposed(flatKeyPath) {
   });
 }
 
-// ㉣ — 훅이 바인딩되는 실제 로컬 변수명을 파일마다 잡는다(하드코딩 `t` 가정을 버린다).
-const HOOK_BIND_RE = /const\s+(\w+)\s*=\s*(?:await\s+)?(?:useTranslations|getTranslations)\(\s*['"]([\w.]+)['"]/g;
-
-/**
- * ㉥ — story #3149(카디르 QA 실측·미르코 근본추적, PR#3558) — 워드바운더리
- * `(?<![\w$])varName\(`가 멤버 접근(`acc.t('title')`)의 `.t(`도 매치했다. `.`은 `\w`도
- * `$`도 아니라 룩비하인드를 통과 — 파일이 `const t = useTranslations('nav')`를 갖고
- * *동시에* 다른 객체(커스텀 훅이 반환한 `{ t, ... }`)의 `.t(...)`도 부르면, 후자가 전자
- * (`nav`)로 오귀속돼 「missing」 거짓 양성을 낸다(context-switcher-chip.tsx가 useAccountSwitcher
- * 훅에서 받은 `acc.t(...)`을 파일 자신의 `t`(nav)로 오판, 실렌더는 정상인데 CI만 빨간
- * 사례). 룩비하인드에 `.`을 추가해 「바로 앞이 단어문자·`$`·`.` 중 어느 것도 아닐 때만」
- * 매치하도록 좁힌다 — 로컬 `t()` 직접 호출(정상 케이스)은 앞이 공백·`(`·`{` 등이라
- * 영향 없고, 멤버 접근(`xxx.t(...)`)만 제외된다.
- */
-function extractKeyUsages(content, varName) {
-  const re = new RegExp(`(?<![\\w$.])${escapeRegExp(varName)}\\(\\s*['"]([\\w.]+)['"]`, 'g');
-  return [...content.matchAll(re)].map(m => m[1]);
-}
+// story #3156 — HOOK_BIND_RE/extractKeyUsages는 i18n-key-parser.js(공유 모듈)로 이관.
+// ㉣(훅 변수명 하드코딩 t 가정 폐기)·㉥(멤버접근 오귀속, story #3149) 둘 다 그쪽에서 관리.
 
 // main()으로 감싸 CLI 실행(require.main === module)일 때만 돈다 — 그래야 테스트가 순수함수
 // (flatten/stripComments/isDynamicallyComposed)만 require해 쓸 때 이 스캔 전체(파일 I/O·
@@ -238,10 +118,7 @@ function main() {
   files.forEach(file => {
     const content = stripComments(fs.readFileSync(path.join(rootDir, file), 'utf8'));
 
-    const varToNamespace = new Map();
-    for (const m of content.matchAll(HOOK_BIND_RE)) {
-      varToNamespace.set(m[1], m[2]);
-    }
+    const varToNamespace = extractHookBindings(content);
     if (varToNamespace.size === 0) return;
 
     for (const [varName, namespace] of varToNamespace) {
