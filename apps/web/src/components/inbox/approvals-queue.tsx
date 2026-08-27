@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CheckCircle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronUp, Pencil, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
@@ -646,7 +646,7 @@ export function ApprovalsQueue() {
                   disabled={disabled}
                   onClick={rejectOnClick}
                 >
-                  <XCircle className="size-3.5" />
+                  <Pencil className="size-3.5" />
                   {t('sigRequestChanges')}
                 </Button>
                 {/* story #2631(PO 결정③) — 「보류(논의 필요)」는 결재함 전 게이트 타입 단일 표면. */}
