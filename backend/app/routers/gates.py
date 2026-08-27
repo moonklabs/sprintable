@@ -459,11 +459,23 @@ async def create_decision_request(
     # story #d9c09f4b(2026-08-27) — 카드 배달(_notify_decision_request_card, best-effort)
     # 성패와 완전히 독립된 별도 조회. 카드가 조용히 성공(엉뚱한 대상)하든 실패하든 이
     # 필드는 "approver_member_id가 실제로 가리키는 사람"을 있는 그대로 보여준다 — 그게 이
-    # 필드의 존재 이유(호출자 자가검증)라 실패를 삼키면 안 된다(조회 실패 자체는 None 폴백,
-    # 지어내지 않는다 — 없으면 없는 대로 보여준다).
-    from app.services.member_resolver import lookup_members_by_ids
-    _designated = (await lookup_members_by_ids({body.approver_member_id}, session)).get(body.approver_member_id)
-    resp.designated_approver_name = _designated.name if _designated is not None else None
+    # 필드의 존재 이유(호출자 자가검증)라 조회 결과(미확인 멤버)는 None 폴백, 지어내지
+    # 않는다.
+    # ⛔카디르 QA(#3550): 위 "None 폴백"은 멤버-미존재만 커버할 의도였는데, try/except가
+    # 없어 조회 자체가 예외로 죽으면(레이스·일시적 DB 오류 등) 이미 성공한 게이트 생성이
+    # HTTP 500으로 뒤집혔다(강제 raise 재현) — 관측성 필드 하나가 본 기능(게이트 생성 자체는
+    # 이미 커밋 완료)을 죽이는 본말전도. 기존 best-effort 관용구(이 파일 전역 다수 — 예:
+    # _notify_decision_request_card)와 동형으로 감싼다.
+    try:
+        from app.services.member_resolver import lookup_members_by_ids
+        _designated = (await lookup_members_by_ids({body.approver_member_id}, session)).get(body.approver_member_id)
+        resp.designated_approver_name = _designated.name if _designated is not None else None
+    except Exception:  # noqa: BLE001 — best-effort, 조회 실패가 이미 성공한 게이트 생성 응답을 깨면 안 됨.
+        logger.warning(
+            "designated_approver_name 조회 실패(비차단) gate=%s approver=%s",
+            gate.id, body.approver_member_id, exc_info=True,
+        )
+        resp.designated_approver_name = None
     # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존
     # 갭을 여기서까지 상속하면 FE deriveRiskLevel이 null→'unknown'으로 읽어 low 등재의
     # 목적(원탭 승인)이 생성 응답 자체에서는 무효화된다 — 자체 신규 테스트로 발견·직접 수정).

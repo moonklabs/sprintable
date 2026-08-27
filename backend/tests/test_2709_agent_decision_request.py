@@ -326,6 +326,54 @@ async def test_response_echoes_designated_approver_identity_for_self_verificatio
 
 
 @pytest.mark.anyio
+async def test_designated_approver_name_lookup_exception_does_not_break_response(monkeypatch, caplog):
+    """카디르 QA(#3550) — designated_approver_name 조회가 «미확인 멤버»가 아니라 **예외**로
+    죽으면(레이스·일시적 DB 오류) 이미 커밋된 게이트 생성 응답이 500으로 뒤집히면 안 된다.
+    lookup_members_by_ids를 강제로 예외 발생시켜 응답이 여전히 201·필드는 None 폴백임을
+    고정한다(관측성 필드가 본 기능을 죽이는 회귀 방지)."""
+    import logging
+
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            caller_id = uuid.uuid4()
+            await _seed_human_member(s, org_id, user_id=caller_id, role="member")
+            approver_member_id = await _seed_human_member(s, org_id, role="admin")
+        await _setup_app_jwt(app, Session, org_id, project_id, caller_id)
+
+        import app.services.member_resolver as member_resolver_mod
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("simulated lookup failure")
+
+        monkeypatch.setattr(member_resolver_mod, "lookup_members_by_ids", _boom)
+
+        client = _client_for(app)
+        try:
+            with caplog.at_level(logging.WARNING):
+                resp = await client.post(
+                    "/api/v2/gates/decisions",
+                    json={
+                        "question": "approach A or B?", "assumption": "A",
+                        "approver_member_id": str(approver_member_id),
+                    },
+                )
+            assert resp.status_code == 201, resp.text
+            body = resp.json()
+            assert body["status"] == "pending", "게이트 생성 자체는 이미 커밋 완료 — 관측성 조회 실패로 뒤집히면 안 됨"
+            assert body["designated_approver_name"] is None
+            assert any("designated_approver_name 조회 실패" in r.message for r in caplog.records)
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_http_endpoint_missing_org_or_project_403():
     """음성대조 — org_id/project_id를 못 얻으면(예: X-Project-Id 없는 API키 컨텍스트에서
     project 미해소) 403(get_scope_context 경유, 조용히 통과 안 함)."""
