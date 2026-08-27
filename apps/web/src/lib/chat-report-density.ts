@@ -11,6 +11,10 @@ const MESSAGE_KIND_LABEL: Record<MessageKind, string> = {
   request: '요청', handoff: '핸드오프', result: '판정', ack: '확인',
 };
 
+// story #5c29454b — 판정 dot 게이팅용(호출부가 density.kicker와 문자열 비교). 이 라벨은
+// i18n 대상이 아니다(위 MESSAGE_KIND_LABEL 전체가 그렇듯 이 파일은 로케일 무관 내부 상수).
+export const RESULT_KICKER_LABEL = MESSAGE_KIND_LABEL.result;
+
 // story #2985 — FE ChatMessage.message_kind는 BE 계약을 앞서 좁히지 않으려 `string | null`로
 // 느슨하게 타입돼 있다(이 세션의 다른 필드들과 동일 관례). 4-enum 소속 여부는 여기서
 // 런타임으로만 판별한다 — 구서버·오염값은 항상 안전하게 폴백(무표시 또는 휴리스틱)한다.
@@ -53,6 +57,48 @@ export function isReportDense(content: string): boolean {
 // PASS/FAIL/REQUEST_CHANGES)가 볼드 라인에 있을 때만 kicker를 단다. 그 외(모호)는 전부
 // 미표시 — 오분류 kicker는 지어냄이라 미표시가 항상 안전측(story AC2).
 const VERDICT_PATTERN = /\*\*[^*]*\b(PASS|FAIL|REQUEST_CHANGES)\b[^*]*\*\*/;
+
+// story #5c29454b(③ result 카드, doc result-card-final-spec-5c29454b) — 판정 dot 색.
+// «확실한 어휘»일 때만 색을 준다(모호=중립 dot, 오분류=지어냄이라 안전측 폴백). 두 신호가
+// 동시에 있으면(예: 전/후 상태가 섞인 요약) 어느 한쪽으로 단정 못 하니 중립.
+export type VerdictTone = 'success' | 'destructive' | 'neutral';
+
+const SUCCESS_WORDS = /\bPASS\b|승인|완료/;
+const DESTRUCTIVE_WORDS = /\bFAIL\b|반려/;
+
+export function deriveVerdictTone(content: string): VerdictTone {
+  const hasSuccess = SUCCESS_WORDS.test(content);
+  const hasDestructive = DESTRUCTIVE_WORDS.test(content);
+  if (hasSuccess && !hasDestructive) return 'success';
+  if (hasDestructive && !hasSuccess) return 'destructive';
+  return 'neutral';
+}
+
+// story #5c29454b — 「다음 행동」 추출. 보수 패턴(구분자 명시 필요) — 「다음 오는 것」·
+// 「다음 재호출 시」·「다음 차례」류 구분자 없는 «다음»은 애초에 매치 안 된다(오분류 방지,
+// doc §③ 제외 목록). 여러 줄이 매치되면 마지막(가장 나중에 오는=결론) 매치를 채택한다.
+const NEXT_ACTION_PATTERNS: RegExp[] = [
+  /다음\s*[:=]\s*(.+)/,
+  /→\s*다음[\s:]\s*(.+)/,
+  /다음\s*행동\s*[:=]?\s*(.+)/,
+  /[Nn]ext\s*:\s*(.+)/,
+];
+
+/** 원문에 명시적 「다음: ...」류 구분자가 있을 때만 추출(verbatim substring). 없으면
+ * null(미표시 — kicker 보수 폴백과 동형 no-fiction 원칙). */
+export function extractNextAction(content: string): string | null {
+  let found: string | null = null;
+  for (const line of content.split('\n')) {
+    for (const pattern of NEXT_ACTION_PATTERNS) {
+      const m = line.match(pattern);
+      if (m?.[1]) {
+        found = stripInlineMarkers(m[1]);
+        break;
+      }
+    }
+  }
+  return found || null;
+}
 
 /** kicker 라벨. 1차 소스=message_kind(있으면 그걸로 확定), 없으면 보수적 패턴 폴백,
  * 그것도 아니면 null(미표시 — 지어내지 않음). */
@@ -140,6 +186,9 @@ export interface ReportDensity {
   kicker: string | null;
   lead: string;
   topLevelItems: TopLevelListItem[];
+  // story #5c29454b — kicker가 «판정»일 때만 의미 있다(호출부가 그 조건으로 게이팅).
+  verdictTone: VerdictTone;
+  nextAction: string | null;
 }
 
 /** 발동 조건(isReportDense) 미충족이면 null — 호출부는 null이면 기존 렌더를 그대로 쓴다
@@ -155,5 +204,7 @@ export function computeReportDensity(content: string, messageKind?: string | nul
     kicker: deriveKicker(content, messageKind),
     lead,
     topLevelItems,
+    verdictTone: deriveVerdictTone(content),
+    nextAction: extractNextAction(content),
   };
 }
