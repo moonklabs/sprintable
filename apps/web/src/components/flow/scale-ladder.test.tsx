@@ -144,24 +144,108 @@ describe('ScaleLadder', () => {
       expect(rung?.textContent).toContain('↗');
     });
 
-    it('작업 rung은 클릭 요소가 아니다(button도 a도 아님) — 전용 표면 없음, 거짓 ↗ 금지(조건①)', () => {
+    it('작업 rung은 목표(A)처럼 표면 이동 링크가 아니다 — 거짓 ↗ 금지는 여전히 유효(조건①)', () => {
       act(() => { root.render(wrap(<ScaleLadder />)); });
       const rung = findRung(koMessages.flow.ladderName_building);
-      expect(rung?.tagName).not.toBe('BUTTON');
       expect(rung?.tagName).not.toBe('A');
       expect(rung?.textContent).not.toContain('↗');
       act(() => { rung!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(pushMock).not.toHaveBeenCalled();
     });
 
-    it('렌즈/이동/대기 라벨로 이중 표식된다(조건① — 화살표만으론 부족, 텍스트 라벨도 동반)', () => {
+    it('렌즈/이동 라벨로 이중 표식된다(조건① — 화살표만으론 부족, 텍스트 라벨도 동반)', () => {
       act(() => { root.render(wrap(<ScaleLadder />)); });
       const earthRung = findRung(koMessages.flow.ladderName_earth);
       const goalRung = findRung(koMessages.flow.ladderName_continent);
-      const taskRung = findRung(koMessages.flow.ladderName_building);
       expect(earthRung?.textContent).toContain(koMessages.flow.ladderLabelLens);
       expect(goalRung?.textContent).toContain(koMessages.flow.ladderLabelMove);
-      expect(taskRung?.textContent).toContain(koMessages.flow.ladderLabelPending);
+    });
+  });
+
+  // story #3130(유나 SSOT doc 4f6cba9b) — 「작업」 dead(클릭 불가·«고장»으로 읽힘) →
+  // reserved(클릭 가능·안내 팝오버) 전환. 선생님이 "왜 안 눌리는지" 재차 물은 실목격 정정.
+  describe('작업 rung 예약 신호(story #3130)', () => {
+    function findRung(name: string): HTMLElement | undefined {
+      return Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []).find(
+        (d) => d.textContent?.includes(name),
+      ) as HTMLElement | undefined;
+    }
+
+    it('«표면 대기» 대신 칩(«◇ 스토리 안에 있음»)이 렌더된다 — 옛 라벨은 잔존하지 않는다', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const taskRung = findRung(koMessages.flow.ladderName_building);
+      expect(taskRung?.textContent).toContain(koMessages.flow.ladderReservedChip);
+      expect(taskRung?.textContent).not.toContain(koMessages.flow.ladderLabelPending);
+    });
+
+    it('dead가 아니라 reserved다 — cursor-not-allowed가 아니라 cursor-help, aria-disabled 없음', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const taskRung = findRung(koMessages.flow.ladderName_building);
+      expect(taskRung?.className).toContain('cursor-help');
+      expect(taskRung?.className).not.toContain('cursor-not-allowed');
+      expect(taskRung?.getAttribute('aria-disabled')).toBeNull();
+    });
+
+    it('클릭 가능한 button이 내부에 있다 — 클릭해도 push는 안 하지만(전용 표면 없음) 안내 팝오버가 뜬다', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const taskRung = findRung(koMessages.flow.ladderName_building);
+      const trigger = taskRung?.querySelector('button');
+      expect(trigger).toBeTruthy();
+      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+      act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(pushMock).not.toHaveBeenCalled();
+      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      // doc(4f6cba9b) MUST — «고장이 아니라» 절이 문구에 verbatim으로 있어야 한다.
+      expect(koMessages.flow.ladderReservedInfo).toContain('고장이 아니라');
+    });
+
+    it('열렸을 때만 aria-describedby가 팝오버 id를 가리킨다', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const taskRung = findRung(koMessages.flow.ladderName_building);
+      const trigger = taskRung!.querySelector('button')!;
+      expect(trigger.getAttribute('aria-describedby')).toBeNull();
+      act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const describedBy = trigger.getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+      const info = container.querySelector(`#${describedBy}`);
+      expect(info?.textContent).toBe(koMessages.flow.ladderReservedInfo);
+    });
+
+    it('다시 클릭하면(토글) 팝오버가 닫힌다', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const trigger = findRung(koMessages.flow.ladderName_building)!.querySelector('button')!;
+      act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+    });
+
+    it('바깥을 클릭하면 팝오버가 닫힌다', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const trigger = findRung(koMessages.flow.ladderName_building)!.querySelector('button')!;
+      act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      act(() => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+    });
+
+    it('Escape 키로 팝오버가 닫힌다', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const trigger = findRung(koMessages.flow.ladderName_building)!.querySelector('button')!;
+      act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+    });
+
+    it('compact 모드도 작업 칩 클릭 시 같은 안내 팝오버가 뜬다(터치는 hover가 없어 유일한 안내 경로)', () => {
+      act(() => { root.render(wrap(<ScaleLadder compact />)); });
+      const trigger = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.includes(koMessages.flow.ladderName_building),
+      );
+      expect(trigger).toBeTruthy();
+      act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
     });
   });
 

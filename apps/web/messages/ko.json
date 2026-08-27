@@ -633,6 +633,8 @@
     "ladderLabelLens": "렌즈",
     "ladderLabelMove": "이동",
     "ladderLabelPending": "표면 대기",
+    "ladderReservedChip": "◇ 스토리 안에 있음",
+    "ladderReservedInfo": "「작업」은 별도 화면이 없습니다. 지금은 스토리 안의 subtask로 관리됩니다 — 고장이 아니라 이 축척엔 아직 전용 표면이 없는 것입니다. 표면이 생기면 이 칸이 활성화됩니다.",
     "earthSectionTitle": "지금 검증 중인 질문",
     "earthEpicCount": "목표 {n}개 연결",
     "earthMetric": "지표",
