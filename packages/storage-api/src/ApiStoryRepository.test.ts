@@ -96,3 +96,35 @@ describe('ApiStoryRepository.list — unattached(story #2534 E-FLOW-V4 S4) 파�
     expect(requestedUrl).not.toContain('unattached=');
   });
 });
+
+describe('ApiStoryRepository.list — exclude_status(story #3148/#3160) 파라미터가 실제 요청 URL에 실린다', () => {
+  // story #3160(PO #3148 라이브 대조 중 발견) — BE(stories.py exclude_status)는 이미 받는데
+  // 이 query 객체엔 없었다 — q 소실(083176e8)·unattached 소실(#2534)과 같은 클래스, 이번엔
+  // exclude_status가 조립 지점에서만 빠져 있었다.
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [] }),
+    })) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('includes exclude_status in the outgoing query string when filters.exclude_status is set', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1', exclude_status: 'done,in-review' });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).toContain(`exclude_status=${encodeURIComponent('done,in-review')}`);
+  });
+
+  it('omits exclude_status from the query string when filters.exclude_status is undefined', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1' });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).not.toContain('exclude_status=');
+  });
+});
