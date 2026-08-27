@@ -23,7 +23,7 @@ const EMPTY_SILENT_STALL: { totalCount: number; populationCount: number; buckets
 function silentStallItem(overrides: Partial<SilentStallItem> = {}): SilentStallItem {
   return {
     id: 's1', title: '스토리', enteredStateAt: '2026-08-25T00:00:00Z', ageHours: 60,
-    assigneeMemberId: null, href: '/board?story=s1', ...overrides,
+    assigneeMemberId: null, href: '/board?story=s1', crossProjectLabel: null, ...overrides,
   };
 }
 
@@ -160,6 +160,28 @@ describe('AttentionClusterBoard', () => {
       const toggle = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
       await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(container.textContent).toContain(koMessages.orgBriefing.clusterSilentStallUnassigned);
+    });
+
+    // story #3153(org-wide 커버리지) — 다른 프로젝트 소속 항목만 프로젝트 태그가 붙는다.
+    it('crossProjectLabel이 있는 항목만 프로젝트 태그가 보인다', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard
+            falsified={[]}
+            silentStall={silentStallClusters({
+              '1mo+': [
+                silentStallItem({ id: 's-same', title: '같은 프로젝트', crossProjectLabel: null }),
+                silentStallItem({ id: 's-other', title: '다른 프로젝트', crossProjectLabel: 'other-proj' }),
+              ],
+            })}
+            {...NO_LOOP}
+          />,
+        ));
+      });
+      const toggle = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+      await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain('other-proj');
+      expect(container.textContent?.match(/other-proj/g)).toHaveLength(1);
     });
   });
 
