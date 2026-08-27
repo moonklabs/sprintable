@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Check, Circle } from 'lucide-react';
 import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from './derive-flow-map';
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
@@ -9,7 +10,7 @@ import {
   edgeGroupStrokeWidth, countRenderedEdgeLines, hasConfirmedRenderedEdgeLine, countCardsBeyondRightEdge,
   LANE_LABEL_WIDTH, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
   PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
-  PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
+  PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH, isNodeStalled,
 } from './derive-flow-map';
 import { isValidPortDropTarget, PORT_LINK_KINDS, resolveUndoTitle, type PortLinkKind } from './flow-port-linking';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -108,6 +109,10 @@ interface FlowMapCanvasProps {
    * 시(또는 값이 바뀔 때) 해당 레인으로 스크롤하고 짧게 고리로 강조한다 — 다른 레인은
    * 손대지 않는다(카드 폭발 회피를 구조로: 숨기지 않고 시선만 유도). */
   focusGoalId?: string | null;
+  /** story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A1) —
+   * 쇠퇴(곧 멈춤) 판정 임계(시간). 없으면(구버전 호출부 등) 판정 재료가 없다는 뜻이라
+   * isNodeStalled가 항상 false를 낸다(추측 안 함, 하드코딩 안 함). */
+  stallThresholdHours?: number;
 }
 
 export type CreateLinkResult = { ok: true } | { ok: false; error: string };
@@ -119,6 +124,31 @@ function nodeToneClass(node: FlowMapNode): string {
   if (node.kind === 'past') return 'border-l-border'; // 펼친 과거 — 끝난 것이라 점선(미착수 표시) 아님
   if (node.status === 'blocked') return 'border-l-destructive';
   return 'border-l-border border-dashed'; // .n.queue — 아직 시작 안 한 것은 점선
+}
+
+// story #2224 후속(문 두 층, 2026-08-27, Yuna artifact f82f8804 방향안) — 게이트 pending을
+// 「대기 N」 숫자가 아니라 흐름 위 «표식»으로 보인다. gate_reason의 두 값(AnalyticsRepository.
+// _gate_reason SSOT — 지어내지 않음)이 이미 두 사정을 가른다:
+//   'evidence_insufficient' → 판정 재료 자체가 부족(검증 대기) → 원(circle) 글리프
+//   'pending_approval'      → 재료는 갖췄고 사람의 승인/반려만 남음               → 체크 글리프
+// (그 외 값 — 오늘은 없지만 구조를 안 못박는다) → 승인문으로 폴백(더 흔한 사정).
+type GateGlyphKind = 'approve' | 'verify';
+
+function gateGlyphKind(gateReason: string | null | undefined): GateGlyphKind {
+  return gateReason === 'evidence_insufficient' ? 'verify' : 'approve';
+}
+
+function GateGlyph({ node, t }: { node: FlowMapNode; t: ReturnType<typeof useTranslations> }) {
+  if (!node.gatePending) return null;
+  const kind = gateGlyphKind(node.gateReason);
+  const label = kind === 'verify' ? t('flowGateVerifyLabel') : t('flowGateApproveLabel');
+  return (
+    <span className="shrink-0" title={label} aria-label={label} role="img">
+      {kind === 'verify'
+        ? <Circle className="size-2.5 text-brand" strokeWidth={2.5} aria-hidden="true" />
+        : <Check className="size-2.5 text-success" strokeWidth={2.5} aria-hidden="true" />}
+    </span>
+  );
 }
 
 interface FlowMapNodeCardProps {
@@ -139,16 +169,29 @@ interface FlowMapNodeCardProps {
   isJustLinked: boolean;
   onPortPointerDown: (e: React.PointerEvent, nodeId: string) => void;
   onPortKeyDown: (e: React.KeyboardEvent, nodeId: string) => void;
+  /** story #2224 후속(수→형, §A1) — isNodeStalled 계산 재료. 렌더 시각(nowMs)을 카드마다
+   * 부르지 않고 부모(FlowMapCanvas)가 한 번 잰 값을 그대로 받는다. */
+  nowMs: number;
+  stallThresholdHours: number;
 }
 
 function FlowMapNodeCard({
   node, left, top, superseded, selected, onSelectStory, isLinkSource, isInvalidDropTarget, isDropHover,
-  isJustLinked, onPortPointerDown, onPortKeyDown,
+  isJustLinked, onPortPointerDown, onPortKeyDown, nowMs, stallThresholdHours,
 }: FlowMapNodeCardProps) {
   const t = useTranslations('flow');
   // 유나양 규격(아티팩트 a125909a `.nd.past{opacity:.62}`) — 펼친 과거 카드는 항상 흐림
   // (대체-확認 흐림과 별개 사정 — 이미 끝난 일이라는 사실 자체를 흐림으로 나타낸다).
   const dimmed = superseded || node.kind === 'past' || isInvalidDropTarget;
+  // story #2224 후속(수→형, §A1, doc galrae-visual-transition-final-spec) — 쇠퇴는 «흐림
+  // (opacity)»이 아니라 «저채도 solid gray + 축소»(doc 명시: opacity 페이드 금지 — 흐림은
+  // 위 dimmed 한 의미에만 쓴다). lane.stalled(168h)와 같은 상수(stallThresholdHours)를 쓴다.
+  const stalled = isNodeStalled(node.updatedAt, stallThresholdHours, nowMs);
+  // border-dashed(아직 착수 안 한 큐 노드)는 «구조 신호»라 쇠퇴 색과 무관하게 보존한다 —
+  // 색만 저채도로 바꾸고 실선/점선 구분(now/queue 구별)은 그대로 둔다.
+  const toneClass = stalled
+    ? `border-l-muted-foreground${nodeToneClass(node).includes('dashed') ? ' border-dashed' : ''}`
+    : nodeToneClass(node);
   return (
     // story #2353 후속 — 포트가 «자기 카드를 여는 버튼»과 별개의 인터랙티브 요소가 되면서
     // (드래그 시작점) 버튼 안에 버튼을 못 넣는다(중첩 버튼은 무효 HTML). 바깥은 위치만 잡는
@@ -173,9 +216,11 @@ function FlowMapNodeCard({
         // A로 끌면 selected와 isDropHover가 동시에 참이 된다. 무관한 노드가 "놓을 자리"로
         // 오인되므로, 이제 호출부(FlowMapCanvas)가 잇기 진행 중(linkDraft.phase !== 'idle')엔
         // selected 자체를 false로 넘겨 이 컴포넌트에 도달하기 전에 막는다.
-        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
+        title={stalled ? t('flowNodeStalledHint') : undefined}
+        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-[11px] shadow-sm hover:border-info/60 ${toneClass} ${stalled ? 'origin-left scale-[0.92] text-muted-foreground' : ''} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
       >
         <span className="shrink-0 font-mono text-[9px] text-muted-foreground">#{node.storyNumber}</span>
+        <GateGlyph node={node} t={t} />
         {/* 대체(확認됨)만 — "옛 노드"에 취소선(유나양 규격). 제안 상태는 절대 취소선을 넣지
             않는다(computeSupersededNodeIds가 확認 간선만 모으므로 이 자리는 값만 받는다 —
             "제안이면 안 흐린다"는 판단을 이 컴포넌트가 다시 하지 않는다). */}
@@ -222,6 +267,11 @@ function FlowMapNodeCard({
 // 이와 직교하는 stroke-dasharray(확定=실선/제안=점선)로만 표현 — 아래 표에는 없다.
 // null(종 미정)은 화살촉 자체가 없다(유나양 지적: 넷째 모양을 주면 "미정"이 확定된 하나의
 // 종류처럼 보인다 — 모르면 그 채널을 비운다). 다만 방향은 아는지라 끝점에 점 하나만.
+// story #2224 후속(간선 3종 시각언어, 2026-08-27) — 유나 최종 판정: 코드 정본(아래 색·마커)
+// 이 이미 §A2 취지(축1=색+마커, 축2=dasharray 직교)를 만족한다 — doc의 신규 색(#4F46E5 등)은
+// 채택 안 하고 기존 info/brand/muted-foreground 유지. 대신 CVD 보강으로 hover/선택 시 종을
+// 텍스트로 노출(아래 edgeKindLabel + hover 툴팁) — 마커는 끝점에만 있어 선 중간은 색만이던
+// 것을 보완한다.
 function edgeKindStyle(kind: FlowMapEdgeKind | 'mixed'): { color: string; markerEnd: string; markerStart?: string } {
   if (kind === 'spawn') return { color: 'var(--info)', markerEnd: 'url(#flow-edge-arrow-open)' };
   if (kind === 'then') return { color: 'var(--brand)', markerEnd: 'url(#flow-edge-arrow-filled)', markerStart: 'url(#flow-edge-dot-start)' };
@@ -232,21 +282,34 @@ function edgeKindStyle(kind: FlowMapEdgeKind | 'mixed'): { color: string; marker
   return { color: 'var(--muted-foreground)', markerEnd: 'url(#flow-edge-dot-end)' };
 }
 
+// story #2224 후속(CVD 보강, 2026-08-27, 유나 최종판정) — FlowMapEdgeKind(spawn/then/
+// supersede, 코드 정본)를 기존 PortLinkKind i18n 키(portLinkKind_spawned/followed/
+// superseded — 포트 잇기 다이얼로그가 이미 쓰는 같은 개념·같은 문구)에 그대로 매핑한다.
+// 새 키를 또 만들지 않는다 — "여기서 나온 일"·"다음에 할 일"·"대신하는 일"은 잇는 순간과
+// 이미 이어진 선을 볼 때나 같은 뜻이다. null·'mixed'는 "하나로 말할 수 없다"는 사정이라
+// 라벨 자체가 없다(위 edgeKindStyle과 같은 원칙).
+function edgeKindPortLinkKey(kind: FlowMapEdgeKind | 'mixed'): PortLinkKind | null {
+  if (kind === 'spawn') return 'spawned';
+  if (kind === 'then') return 'followed';
+  if (kind === 'supersede') return 'superseded';
+  return null;
+}
+
 function FlowEdgeMarkerDefs() {
   return (
     <defs>
-      {/* 낳음 — 빈 화살촉(윤곽선만, 안이 안 채워짐) */}
+      {/* 낳음(spawn) — 빈 화살촉(윤곽선만, 안이 안 채워짐) */}
       <marker id="flow-edge-arrow-open" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M1,1 L9,5 L1,9" fill="none" stroke="var(--info)" strokeWidth={1.4} />
       </marker>
-      {/* 잇따름 — 채운 화살촉 + 출발점 점 */}
+      {/* 잇따름(then) — 채운 화살촉 + 출발점 점 */}
       <marker id="flow-edge-arrow-filled" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M1,1 L9,5 L1,9 Z" fill="var(--brand)" />
       </marker>
       <marker id="flow-edge-dot-start" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5">
         <circle cx="5" cy="5" r="3.5" fill="var(--brand)" />
       </marker>
-      {/* 대체 — 화살촉 없이 막대 끝(⊣) */}
+      {/* 대체(supersede) — 화살촉 없이 막대 끝(⊣) */}
       <marker id="flow-edge-bar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="8" orient="auto-start-reverse">
         <line x1="9" y1="1" x2="9" y2="9" stroke="var(--muted-foreground)" strokeWidth={1.6} />
       </marker>
@@ -308,9 +371,14 @@ export function FlowCanvasOffscreenHint({ count }: { count: number }) {
  */
 export function FlowMapCanvas({
   lanes, onSelectStory, onTogglePastBundle, loadingPastBundleEpicIds, selectedNodeId = null, onCreateLink, onDeleteLink, onRejectLink, memberMap,
-  onOffscreenCountChange, focusGoalId = null,
+  onOffscreenCountChange, focusGoalId = null, stallThresholdHours,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
+  // story #2224 후속(수→형, §A1) — 렌더 시각 하나를 고정해 같은 렌더 패스 안 모든 카드가
+  // 같은 기준으로 판정되게 한다(Date.now()를 카드마다 따로 부르면 렌더 중 시각이 미세하게
+  // 갈릴 수 있다 — 여기서만 부르고 순수함수(isNodeStalled)에 값으로 흘려보낸다).
+  const nowMs = Date.now();
+  const stallThresholdHoursOrInfinity = stallThresholdHours ?? Infinity;
   const { currentTeamMemberId } = useDashboardContext();
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
@@ -438,6 +506,10 @@ export function FlowMapCanvas({
   const [undoDeleting, setUndoDeleting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
+  // story #2224 후속(간선 3종 시각언어, 2026-08-27, 유나 CVD 보강 판정) — 마커는 선의
+  // 끝점에만 있어 «선 중간»은 색만으로 종을 말하고 있었다. hover 시 종을 텍스트로도
+  // 노출해 색만으로는 못 가르는 사람(CVD)도 끝까지 안 봐도 종을 알 수 있게 한다.
+  const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
 
   const resetLinkDraft = useCallback(() => setLinkDraft({ phase: 'idle' }), []);
 
@@ -653,6 +725,22 @@ export function FlowMapCanvas({
                 {/* 위 헤더 칸과 같은 사정 — LANE_LABEL_WIDTH 하나에서 나온다(사본 없음). */}
                 <div className="shrink-0 border-r border-border px-2 py-1.5" style={{ width: LANE_LABEL_WIDTH }}>
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
+                  {/* story #2224 후속(수→형, §A4, doc galrae-visual-transition-final-spec) —
+                      줄기 채움 바. 완료 N·전체 M «숫자»는 hover(title)로 강등하고 화면엔
+                      채움만 보인다 — NextMakerGoal.doneStories/totalStories(호출부가 이미
+                      들고 있는 값, 새 fetch 아님)를 그대로 옮긴 값. 재료가 없으면(단일-레인
+                      호출부 등 progress 미배선) 아무것도 안 그린다 — 0%를 지어내지 않는다. */}
+                  {lane.progress && lane.progress.total > 0 ? (
+                    <div
+                      className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-muted"
+                      title={t('flowLaneProgressHint', { done: lane.progress.done, total: lane.progress.total })}
+                    >
+                      <div
+                        className="h-full rounded-full bg-brand/85"
+                        style={{ width: `${Math.min(100, (lane.progress.done / lane.progress.total) * 100)}%` }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
                 <div ref={laneIndex === 0 ? laneContainerRef : undefined} className="relative min-w-0 flex-1">
                   {/* ②「지금」 세로선 — PO 정정(2026-07-30): 두께·색·불투명도는 통합 골격
@@ -711,22 +799,29 @@ export function FlowMapCanvas({
                           // 쓰면 되므로 "묶음이면 통째로 제외"는 과보수적이었다(클릭해도
                           // 아무 반응이 없어 "고장난 것"처럼 보이는 자리를 새로 심었다).
                           const isUndoable = Boolean(group.candidateId);
+                          const groupKey = `${group.fromNodeId}-${group.toNodeId}`;
+                          // story #2224 후속(CVD 보강) — 보이는 선(아래)은 얇아 hover가 어렵다.
+                          // isUndoable 여부와 무관하게 항상 넓은 투명 히트라인을 깔아 «어느
+                          // 간선이든» hover로 종을 텍스트로 확認할 수 있게 한다(클릭은
+                          // isUndoable일 때만 붙는다 — 되돌리기 자체는 기존 그대로).
                           return (
-                            <g key={`${group.fromNodeId}-${group.toNodeId}`}>
-                              {isUndoable ? (
-                                <line
-                                  aria-hidden="true"
-                                  x1={x1} y1={y1} x2={x2} y2={y2}
-                                  stroke="transparent"
-                                  strokeWidth={14}
-                                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                                  onClick={() => setUndoTarget({
-                                    candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
-                                    declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
-                                    confirmed: group.allConfirmed,
-                                  })}
-                                />
-                              ) : null}
+                            <g
+                              key={groupKey}
+                              onMouseEnter={() => setHoveredEdgeKey(groupKey)}
+                              onMouseLeave={() => setHoveredEdgeKey((k) => (k === groupKey ? null : k))}
+                            >
+                              <line
+                                aria-hidden="true"
+                                x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke="transparent"
+                                strokeWidth={14}
+                                style={{ pointerEvents: 'auto', cursor: isUndoable ? 'pointer' : undefined }}
+                                onClick={isUndoable ? () => setUndoTarget({
+                                  candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
+                                  declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
+                                  confirmed: group.allConfirmed,
+                                }) : undefined}
+                              />
                               <line
                                 data-edge-kind={group.uniformKind === 'mixed' ? 'mixed' : (group.uniformKind ?? 'unknown')}
                                 data-edge-confirmed={group.allConfirmed}
@@ -753,6 +848,20 @@ export function FlowMapCanvas({
                                   style={{ paintOrder: 'stroke', stroke: 'var(--card)', strokeWidth: 3 }}
                                 >
                                   {group.count}
+                                </text>
+                              ) : null}
+                              {/* story #2224 후속(CVD 보강) — hover 중 + 종이 하나로 정해질 때만
+                                  (null·mixed는 라벨 자체 없음, 위 함수와 같은 원칙). count 라벨
+                                  (midY-4)과 안 겹치게 한 줄 위(midY-14)에 둔다. */}
+                              {hoveredEdgeKey === groupKey && edgeKindPortLinkKey(group.uniformKind) ? (
+                                <text
+                                  data-testid="flow-edge-kind-hover-label"
+                                  x={midX} y={midY - 14}
+                                  textAnchor="middle"
+                                  className="fill-foreground font-sans text-[9px] font-semibold"
+                                  style={{ paintOrder: 'stroke', stroke: 'var(--card)', strokeWidth: 3 }}
+                                >
+                                  {t(`portLinkKind_${edgeKindPortLinkKey(group.uniformKind)}`)}
                                 </text>
                               ) : null}
                             </g>
@@ -834,9 +943,27 @@ export function FlowMapCanvas({
                       <div className="text-[9px] text-foreground">
                         {t('flowMapPastInternalCount', { n: lane.pastBundle.internalCount })}
                       </div>
-                      <div className="text-[9px] font-semibold text-foreground">
-                        {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
-                      </div>
+                      {/* story #2224 후속(수→형, §A4, doc galrae-visual-transition-final-spec)
+                          — 막다름(다음 0건)은 «0건» 텍스트가 아니라 끊긴 표식(테이퍼 도트+
+                          짧은 캡)으로 그린다. 숫자는 hover(title)로 강등 — 0이 아니면 기존
+                          그대로(0이 아닌 수는 그 자체로 유의미해 숫자를 남긴다). */}
+                      {lane.pastBundle.outgoingCount === 0 ? (
+                        <div
+                          className="flex h-[9px] items-center gap-0.5"
+                          title={t('flowLaneDeadEndHint')}
+                          aria-label={t('flowLaneDeadEndHint')}
+                          role="img"
+                        >
+                          <svg width="24" height="9" viewBox="0 0 24 9" aria-hidden="true">
+                            <line x1="0" y1="4.5" x2="17" y2="4.5" stroke="var(--muted-foreground)" strokeWidth="1.4" strokeDasharray="1 2.5" strokeLinecap="round" />
+                            <line x1="20" y1="1" x2="20" y2="8" stroke="var(--muted-foreground)" strokeWidth="1.4" strokeLinecap="round" />
+                          </svg>
+                        </div>
+                      ) : (
+                        <div className="text-[9px] font-semibold text-foreground">
+                          {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
+                        </div>
+                      )}
                       <div className="text-[9px] text-foreground">
                         {loadingPastBundleEpicIds.has(lane.epicId) ? t('flowMapPastLoading') : t('flowMapPastExpandHint')}
                       </div>
@@ -883,6 +1010,8 @@ export function FlowMapCanvas({
                       isJustLinked={justLinkedNodeId === node.id}
                       onPortPointerDown={handlePortPointerDown}
                       onPortKeyDown={handlePortKeyDown}
+                      nowMs={nowMs}
+                      stallThresholdHours={stallThresholdHoursOrInfinity}
                     />
                   ))}
 
@@ -901,6 +1030,8 @@ export function FlowMapCanvas({
                       isJustLinked={justLinkedNodeId === node.id}
                       onPortPointerDown={handlePortPointerDown}
                       onPortKeyDown={handlePortKeyDown}
+                      nowMs={nowMs}
+                      stallThresholdHours={stallThresholdHoursOrInfinity}
                     />
                   ))}
 
@@ -926,6 +1057,8 @@ export function FlowMapCanvas({
                             isJustLinked={justLinkedNodeId === node.id}
                             onPortPointerDown={handlePortPointerDown}
                             onPortKeyDown={handlePortKeyDown}
+                            nowMs={nowMs}
+                            stallThresholdHours={stallThresholdHoursOrInfinity}
                           />
                         ))}
                         {/* ③「+N건」 더보기 카드(판C) — 잘린 수를 정직하게 보인다. "숨김"이

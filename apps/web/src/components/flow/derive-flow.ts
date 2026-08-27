@@ -118,6 +118,11 @@ export interface EpicFlowNodeItem {
   status: string;
   assignee_id: string | null;
   updated_at: string;
+  // story #2224 후속(문 두 층, 2026-08-27) — BE FlowNode(analytics.py)가 이미 보내고 있었으나
+  // 이 타입에 필드가 없어 그라운드에서 죽어 있었다(grep 무결과로 확認). gate_pending=false면
+  // gate_reason은 항상 null(BE 불변식) — FE가 그 불변식을 다시 검증하지 않는다.
+  gate_pending: boolean;
+  gate_reason: string | null;
 }
 
 export interface EpicFlowNodesResponse {

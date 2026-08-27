@@ -603,3 +603,161 @@ describe('FlowMapCanvas — story #2369 가로 잘림 발견성(세로 접힘 �
     expect(scrollEl().scrollLeft).toBe(0);
   });
 });
+
+// story #2224 후속(문 두 층, 2026-08-27, Yuna artifact f82f8804 방향안) — 게이트 pending을
+// 대기 «숫자»가 아니라 흐름 위 표식으로 보인다. gate_reason의 두 값이 서로 다른 글리프를
+// 내는지(색만 다른 게 아니라 아이콘 자체가 다른지 — CVD/흑백 인쇄에서도 갈리게) 값으로 닫는다.
+describe('FlowMapCanvas — gate 두 층 글리프 (story #2224 문 레이어)', () => {
+  it('gatePending=false면 글리프가 렌더되지 않는다', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', gatePending: false, gateReason: null })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('[role="img"]')).toBeNull();
+  });
+
+  it('gate_reason=evidence_insufficient → 검증문 글리프(원, text-brand)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', gatePending: true, gateReason: 'evidence_insufficient' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const glyph = container.querySelector('[role="img"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute('title')).toBe(koMessages.flow.flowGateVerifyLabel);
+    expect(glyph?.querySelector('svg.lucide-circle')).not.toBeNull();
+    expect(glyph?.querySelector('svg')?.classList.contains('text-brand')).toBe(true);
+    expect(glyph?.querySelector('svg.lucide-check')).toBeNull();
+  });
+
+  it('gate_reason=pending_approval → 승인문 글리프(체크, text-success)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', gatePending: true, gateReason: 'pending_approval' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const glyph = container.querySelector('[role="img"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute('title')).toBe(koMessages.flow.flowGateApproveLabel);
+    expect(glyph?.querySelector('svg.lucide-check')).not.toBeNull();
+    expect(glyph?.querySelector('svg')?.classList.contains('text-success')).toBe(true);
+    expect(glyph?.querySelector('svg.lucide-circle')).toBeNull();
+  });
+});
+
+// story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A1/§A4) —
+// 줄기 채움 바·쇠퇴(저채도+축소, opacity 아님)·막다름 표식 3종을 값으로 고정한다.
+describe('FlowMapCanvas — 수→형 (story #2224 §A1/§A4)', () => {
+  it('lane.progress가 있으면 채움 바 폭이 done/total 비율로 계산된다', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })], progress: { done: 3, total: 4 } });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const fill = container.querySelector('.bg-brand\\/85') as HTMLElement | null;
+    expect(fill).not.toBeNull();
+    expect(fill?.style.width).toBe('75%');
+  });
+
+  it('lane.progress가 없으면 채움 바 자체를 안 그린다(0%를 지어내지 않는다)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('.bg-brand\\/85')).toBeNull();
+  });
+
+  it('outgoingCount=0이면 「0건」 텍스트 대신 막다름 표식(role=img)이 뜬다', async () => {
+    const lane = makeLane({ pastTotal: 5, pastBundle: { total: 5, internalCount: 2, outgoingCount: 0 } });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.textContent).not.toContain('0건');
+    const marker = container.querySelector('[title="' + koMessages.flow.flowLaneDeadEndHint + '"]');
+    expect(marker).not.toBeNull();
+    expect(marker?.getAttribute('role')).toBe('img');
+  });
+
+  it('outgoingCount>0이면 기존 숫자 텍스트가 그대로 뜬다(막다름 표식 없음)', async () => {
+    const lane = makeLane({ pastTotal: 5, pastBundle: { total: 5, internalCount: 2, outgoingCount: 3 } });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.textContent).toContain('3');
+    expect(container.querySelector('[title="' + koMessages.flow.flowLaneDeadEndHint + '"]')).toBeNull();
+  });
+
+  it('쇠퇴 노드는 저채도 border-l-muted-foreground + 축소(scale)를 갖고, opacity-50은 안 쓴다', async () => {
+    const now = Date.parse('2026-08-27T00:00:00Z');
+    const staleUpdatedAt = new Date(now - 200 * 60 * 60 * 1000).toISOString(); // 200h > 168h
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', updatedAt: staleUpdatedAt })] });
+      await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} stallThresholdHours={168} />)); });
+      const card = container.querySelector('[data-node-id="n1"] button');
+      expect(card?.classList.contains('border-l-muted-foreground')).toBe(true);
+      expect(card?.classList.contains('scale-[0.92]')).toBe(true);
+      expect(card?.classList.contains('opacity-50')).toBe(false);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
+  it('임계 미만이면 쇠퇴 스타일이 안 붙는다', async () => {
+    const now = Date.parse('2026-08-27T00:00:00Z');
+    const freshUpdatedAt = new Date(now - 10 * 60 * 60 * 1000).toISOString(); // 10h < 168h
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', updatedAt: freshUpdatedAt })] });
+      await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} stallThresholdHours={168} />)); });
+      const card = container.querySelector('[data-node-id="n1"] button');
+      expect(card?.classList.contains('border-l-muted-foreground')).toBe(false);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+});
+
+// story #2224 후속(간선 3종 시각언어, 2026-08-27) — 유나 최종 판정: 코드 정본 색(info/
+// brand/muted-foreground)이 이미 §A2 취지를 만족해 doc 신규 색(#4F46E5 등)은 채택 안 함.
+// 회귀 고정 — 색이 조용히 바뀌지 않는지 값으로 닫는다.
+describe('FlowMapCanvas — 간선 3종 색은 코드 정본 유지 (story #2224, 유나 최종판정)', () => {
+  it('spawn=info·then=brand·supersede=muted-foreground — 신규 색으로 안 바뀌었다', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const kinds: Array<FlowMapEdgeKind> = ['spawn', 'then', 'supersede'];
+    const queueNodes = kinds.map((_, i) => makeNode({ id: `u${i}`, kind: 'queue', depth: 0 }));
+    const edges = kinds.map((k, i) => makeEdge({ fromNodeId: 'n1', toNodeId: `u${i}`, kind: k, confirmed: true }));
+    const lane = makeLane({ nowNodes: [nowNode], queueNodesByDepth: new Map([[0, queueNodes]]), edges });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const strokeByKind = (kind: string) => container.querySelector(`line[data-edge-kind="${kind}"]`)?.getAttribute('stroke');
+    expect(strokeByKind('spawn')).toBe('var(--info)');
+    expect(strokeByKind('then')).toBe('var(--brand)');
+    expect(strokeByKind('supersede')).toBe('var(--muted-foreground)');
+  });
+});
+
+// story #2224 후속(CVD 보강, 2026-08-27, 유나 최종판정) — 마커는 끝점뿐이라 선 중간은 색만
+// 이던 것을 hover 시 종 텍스트로 보완한다. PortLinkKind 기존 i18n 키 재사용을 값으로 고정.
+describe('FlowMapCanvas — 간선 hover 시 종 텍스트 노출 (CVD 보강, story #2224)', () => {
+  it('hover하면 종 라벨이 뜨고, 벗어나면 사라진다', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const queueNode = makeNode({ id: 'u1', kind: 'queue', depth: 0 });
+    const lane = makeLane({
+      nowNodes: [nowNode],
+      queueNodesByDepth: new Map([[0, [queueNode]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn' })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+
+    expect(container.querySelector('[data-testid="flow-edge-kind-hover-label"]')).toBeNull();
+
+    // React가 onMouseEnter/onMouseLeave를 구현하는 방식 — 실제 mouseenter/mouseleave(버블
+    // 안 함) 대신 버블링되는 mouseover/mouseout을 루트에서 위임 청취해 relatedTarget으로
+    // enter/leave를 계산한다. jsdom에서 직접 트리거하려면 그 버블링 이벤트를 쏴야 한다.
+    const g = container.querySelector('line[data-edge-kind="spawn"]')?.closest('g');
+    await act(async () => { g?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    const label = container.querySelector('[data-testid="flow-edge-kind-hover-label"]');
+    expect(label).not.toBeNull();
+    expect(label?.textContent).toBe(koMessages.flow.portLinkKind_spawned);
+
+    await act(async () => { g?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="flow-edge-kind-hover-label"]')).toBeNull();
+  });
+
+  it('종 미정(null)은 hover해도 라벨이 안 뜬다(하나로 말할 수 없다는 원칙 그대로)', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const queueNode = makeNode({ id: 'u1', kind: 'queue', depth: 0 });
+    const lane = makeLane({
+      nowNodes: [nowNode],
+      queueNodesByDepth: new Map([[0, [queueNode]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: null })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const g = container.querySelector('line[data-edge-kind="unknown"]')?.closest('g');
+    await act(async () => { g?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="flow-edge-kind-hover-label"]')).toBeNull();
+  });
+});

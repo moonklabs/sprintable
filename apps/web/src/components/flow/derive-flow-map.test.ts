@@ -4,13 +4,16 @@ import {
   computeNodeLogicalPositions, computeEdgeLineEndpoints, groupEdgesByEndpoints, edgeGroupStrokeWidth,
   parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N, FLOW_MAP_FOLD_THRESHOLD,
   FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP, PAST_BUNDLE_NODE_ID,
-  computeCumulativeLaneHeight, snapToNearestLaneCount, countCardsBeyondRightEdge,
+  computeCumulativeLaneHeight, snapToNearestLaneCount, countCardsBeyondRightEdge, isNodeStalled,
   type FlowMapEdge, type FlowMapLane, type RawReferenceCandidate,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
 
 function makeItem(overrides: Partial<EpicFlowNodeItem> = {}): EpicFlowNodeItem {
-  return { id: 's1', story_number: 1, title: 'Story', status: 'backlog', assignee_id: null, updated_at: '2026-07-30T00:00:00Z', ...overrides };
+  return {
+    id: 's1', story_number: 1, title: 'Story', status: 'backlog', assignee_id: null,
+    updated_at: '2026-07-30T00:00:00Z', gate_pending: false, gate_reason: null, ...overrides,
+  };
 }
 
 // kind/confirmed는 대부분의 computeNodeDepth/deriveFlowMapLane 테스트에 무관(그 로직은
@@ -60,14 +63,29 @@ describe('computeNodeDepth', () => {
 describe('deriveFlowMapLane', () => {
   it('maps now items with kind=now and depth=0', () => {
     const lane = deriveFlowMapLane('e1', 'Epic 1', 10, [makeItem({ id: 'n1', status: 'in-progress' })], []);
-    expect(lane.nowNodes).toEqual([{ id: 'n1', storyNumber: 1, title: 'Story', status: 'in-progress', kind: 'now', depth: 0 }]);
+    expect(lane.nowNodes).toEqual([{ id: 'n1', storyNumber: 1, title: 'Story', status: 'in-progress', kind: 'now', depth: 0, gatePending: false, gateReason: null, updatedAt: '2026-07-30T00:00:00Z' }]);
   });
 
   it('computes queue node depth from edges (no special-casing empty edges)', () => {
     const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], [makeItem({ id: 'u1' })], []);
     expect(lane.queueNodesByDepth.get(0)).toEqual([
-      { id: 'u1', storyNumber: 1, title: 'Story', status: 'backlog', kind: 'queue', depth: 0 },
+      { id: 'u1', storyNumber: 1, title: 'Story', status: 'backlog', kind: 'queue', depth: 0, gatePending: false, gateReason: null, updatedAt: '2026-07-30T00:00:00Z' },
     ]);
+  });
+
+  // story #2224 후속(문 두 층, 2026-08-27) — gate_pending/gate_reason이 EpicFlowNodeItem→
+  // FlowMapNode 경계를 그대로 통과하는지(스네이크→카멜 변환 외 값 변형 없이).
+  it('carries gate_pending/gate_reason through to FlowMapNode for now/queue/past nodes', () => {
+    const lane = deriveFlowMapLane(
+      'e1', 'Epic 1', 1,
+      [makeItem({ id: 'n1', gate_pending: true, gate_reason: 'pending_approval' })],
+      [makeItem({ id: 'u1', gate_pending: true, gate_reason: 'evidence_insufficient' })],
+      [],
+      [makeItem({ id: 'p1', gate_pending: false, gate_reason: null })],
+    );
+    expect(lane.nowNodes[0]).toMatchObject({ gatePending: true, gateReason: 'pending_approval' });
+    expect(lane.queueNodesByDepth.get(0)?.[0]).toMatchObject({ gatePending: true, gateReason: 'evidence_insufficient' });
+    expect(lane.pastNodes[0]).toMatchObject({ gatePending: false, gateReason: null });
   });
 
   it('places queue nodes into different depth buckets when edges create a chain', () => {
@@ -195,7 +213,7 @@ describe('deriveFlowMapLane', () => {
     it('populates pastNodes from pastItems, kind="past"', () => {
       const pastItems = [makeItem({ id: 'p1', story_number: 10, title: 'Old story' })];
       const lane = deriveFlowMapLane('e1', 'Epic 1', 1, [], [], [], pastItems);
-      expect(lane.pastNodes).toEqual([{ id: 'p1', storyNumber: 10, title: 'Old story', status: 'backlog', kind: 'past', depth: 0 }]);
+      expect(lane.pastNodes).toEqual([{ id: 'p1', storyNumber: 10, title: 'Old story', status: 'backlog', kind: 'past', depth: 0, gatePending: false, gateReason: null, updatedAt: '2026-07-30T00:00:00Z' }]);
     });
 
     it('draws a direct edge between two past nodes once both are expanded (no longer counted in internalCount)', () => {
@@ -590,5 +608,38 @@ describe('shouldShowNoDeeperReason', () => {
 
   it('is false when the lane has no queue nodes at all (nothing to anchor the message to)', () => {
     expect(shouldShowNoDeeperReason(makeLane())).toBe(false);
+  });
+});
+
+// story #2224 후속(수→형, 2026-08-27) — lane.stalled(168h)와 «같은 상수»를 재사용한다는
+// 계약을 값으로 고정 — 이 함수가 임의 값을 하드코딩하지 않고 인자 그대로 쓰는지 확認.
+describe('isNodeStalled', () => {
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+
+  it('returns false when updatedAt is missing (재료 없음 — 추측 안 함)', () => {
+    expect(isNodeStalled(undefined, 168, Date.parse('2026-08-27T00:00:00Z'))).toBe(false);
+  });
+
+  it('returns false when updatedAt is unparsable', () => {
+    expect(isNodeStalled('not-a-date', 168, Date.parse('2026-08-27T00:00:00Z'))).toBe(false);
+  });
+
+  it('returns false exactly at the threshold (경계는 아직 쇠퇴 아님 — strict >)', () => {
+    const now = Date.parse('2026-08-27T00:00:00Z');
+    const updatedAt = new Date(now - 168 * ONE_HOUR_MS).toISOString();
+    expect(isNodeStalled(updatedAt, 168, now)).toBe(false);
+  });
+
+  it('returns true once past the threshold', () => {
+    const now = Date.parse('2026-08-27T00:00:00Z');
+    const updatedAt = new Date(now - (168 * ONE_HOUR_MS + 1)).toISOString();
+    expect(isNodeStalled(updatedAt, 168, now)).toBe(true);
+  });
+
+  it('uses the threshold argument, not a hardcoded 168 (임계 두 벌 금지 — 값으로 고정)', () => {
+    const now = Date.parse('2026-08-27T00:00:00Z');
+    const updatedAt = new Date(now - 10 * ONE_HOUR_MS).toISOString();
+    expect(isNodeStalled(updatedAt, 168, now)).toBe(false);
+    expect(isNodeStalled(updatedAt, 5, now)).toBe(true); // 다른 임계를 넘기면 즉시 반영돼야 한다
   });
 });
