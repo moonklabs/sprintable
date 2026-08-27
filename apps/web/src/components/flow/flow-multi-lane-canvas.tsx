@@ -33,6 +33,11 @@ interface FlowMultiLaneCanvasProps {
   /** story #2535(E-FLOW-V4 S5) — 드릴다운 착지점. 순수 통과(FlowMapCanvas가 실제 스크롤+
    * 하이라이트를 한다, next-maker-screen.tsx 문서 참고). */
   focusGoalId?: string | null;
+  /** story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A1) —
+   * 쇠퇴(곧 멈춤) 판정 임계(시간). lane.stalled와 «같은 상수»(BE stall_threshold_hours,
+   * epics-progress-lane 계약)를 호출부(next-maker-screen.tsx, 이미 그 엔드포인트를 부르고
+   * 있다)가 그대로 흘려보낸다 — 여기서 새로 fetch하거나 하드코딩하지 않는다(임계 두 벌 금지). */
+  stallThresholdHours?: number;
 }
 
 interface RawStoryListPage {
@@ -121,6 +126,7 @@ type LoadState =
  */
 export function FlowMultiLaneCanvas({
   projectId, expandGoals, foldedCount, onSelectStory, selectedNodeId = null, memberMap = {}, focusGoalId = null,
+  stallThresholdHours,
 }: FlowMultiLaneCanvasProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -301,9 +307,14 @@ export function FlowMultiLaneCanvas({
       const ing = state.ingredientsByEpic.get(g.id);
       if (!ing) return [];
       const pastItems = pastItemsByEpic.get(g.id) ?? [];
-      return [deriveFlowMapLane(
-        g.id, ing.epicTitle, ing.data.past.total, ing.data.now.items, ing.data.upcoming.items, ing.edges, pastItems,
-      )];
+      // story #2224 후속(수→형, §A4) — 줄기 채움 바 재료. deriveFlowMapLane 시그니처는
+      // 안 바꾼다(순수함수·기존 테스트 무변경) — 반환된 lane에 이미 들고 있는 값만 얹는다.
+      return [{
+        ...deriveFlowMapLane(
+          g.id, ing.epicTitle, ing.data.past.total, ing.data.now.items, ing.data.upcoming.items, ing.edges, pastItems,
+        ),
+        progress: { done: g.doneStories, total: g.totalStories },
+      }];
     });
   }, [state, expandGoals, pastItemsByEpic]);
 
@@ -348,6 +359,7 @@ export function FlowMultiLaneCanvas({
           memberMap={memberMap}
           onOffscreenCountChange={setOffscreenCardCount}
           focusGoalId={focusGoalId}
+          stallThresholdHours={stallThresholdHours}
         />
       </FlowCanvasResizePane>
       {/* 접힘 줄(목업 그대로) — "숨긴 것이 아니라 접은 것입니다". 오늘은 펼치기 인터랙션이

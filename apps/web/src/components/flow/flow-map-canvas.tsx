@@ -10,7 +10,7 @@ import {
   edgeGroupStrokeWidth, countRenderedEdgeLines, hasConfirmedRenderedEdgeLine, countCardsBeyondRightEdge,
   LANE_LABEL_WIDTH, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
   PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
-  PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
+  PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH, isNodeStalled,
 } from './derive-flow-map';
 import { isValidPortDropTarget, PORT_LINK_KINDS, resolveUndoTitle, type PortLinkKind } from './flow-port-linking';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -108,6 +108,10 @@ interface FlowMapCanvasProps {
    * 시(또는 값이 바뀔 때) 해당 레인으로 스크롤하고 짧게 고리로 강조한다 — 다른 레인은
    * 손대지 않는다(카드 폭발 회피를 구조로: 숨기지 않고 시선만 유도). */
   focusGoalId?: string | null;
+  /** story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A1) —
+   * 쇠퇴(곧 멈춤) 판정 임계(시간). 없으면(구버전 호출부 등) 판정 재료가 없다는 뜻이라
+   * isNodeStalled가 항상 false를 낸다(추측 안 함, 하드코딩 안 함). */
+  stallThresholdHours?: number;
 }
 
 export type CreateLinkResult = { ok: true } | { ok: false; error: string };
@@ -164,16 +168,29 @@ interface FlowMapNodeCardProps {
   isJustLinked: boolean;
   onPortPointerDown: (e: React.PointerEvent, nodeId: string) => void;
   onPortKeyDown: (e: React.KeyboardEvent, nodeId: string) => void;
+  /** story #2224 후속(수→형, §A1) — isNodeStalled 계산 재료. 렌더 시각(nowMs)을 카드마다
+   * 부르지 않고 부모(FlowMapCanvas)가 한 번 잰 값을 그대로 받는다. */
+  nowMs: number;
+  stallThresholdHours: number;
 }
 
 function FlowMapNodeCard({
   node, left, top, superseded, selected, onSelectStory, isLinkSource, isInvalidDropTarget, isDropHover,
-  isJustLinked, onPortPointerDown, onPortKeyDown,
+  isJustLinked, onPortPointerDown, onPortKeyDown, nowMs, stallThresholdHours,
 }: FlowMapNodeCardProps) {
   const t = useTranslations('flow');
   // 유나양 규격(아티팩트 a125909a `.nd.past{opacity:.62}`) — 펼친 과거 카드는 항상 흐림
   // (대체-확認 흐림과 별개 사정 — 이미 끝난 일이라는 사실 자체를 흐림으로 나타낸다).
   const dimmed = superseded || node.kind === 'past' || isInvalidDropTarget;
+  // story #2224 후속(수→형, §A1, doc galrae-visual-transition-final-spec) — 쇠퇴는 «흐림
+  // (opacity)»이 아니라 «저채도 solid gray + 축소»(doc 명시: opacity 페이드 금지 — 흐림은
+  // 위 dimmed 한 의미에만 쓴다). lane.stalled(168h)와 같은 상수(stallThresholdHours)를 쓴다.
+  const stalled = isNodeStalled(node.updatedAt, stallThresholdHours, nowMs);
+  // border-dashed(아직 착수 안 한 큐 노드)는 «구조 신호»라 쇠퇴 색과 무관하게 보존한다 —
+  // 색만 저채도로 바꾸고 실선/점선 구분(now/queue 구별)은 그대로 둔다.
+  const toneClass = stalled
+    ? `border-l-muted-foreground${nodeToneClass(node).includes('dashed') ? ' border-dashed' : ''}`
+    : nodeToneClass(node);
   return (
     // story #2353 후속 — 포트가 «자기 카드를 여는 버튼»과 별개의 인터랙티브 요소가 되면서
     // (드래그 시작점) 버튼 안에 버튼을 못 넣는다(중첩 버튼은 무효 HTML). 바깥은 위치만 잡는
@@ -198,7 +215,8 @@ function FlowMapNodeCard({
         // A로 끌면 selected와 isDropHover가 동시에 참이 된다. 무관한 노드가 "놓을 자리"로
         // 오인되므로, 이제 호출부(FlowMapCanvas)가 잇기 진행 중(linkDraft.phase !== 'idle')엔
         // selected 자체를 false로 넘겨 이 컴포넌트에 도달하기 전에 막는다.
-        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
+        title={stalled ? t('flowNodeStalledHint') : undefined}
+        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-[11px] shadow-sm hover:border-info/60 ${toneClass} ${stalled ? 'origin-left scale-[0.92] text-muted-foreground' : ''} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
       >
         <span className="shrink-0 font-mono text-[9px] text-muted-foreground">#{node.storyNumber}</span>
         <GateGlyph node={node} t={t} />
@@ -318,9 +336,14 @@ export function FlowCanvasOffscreenHint({ count }: { count: number }) {
  */
 export function FlowMapCanvas({
   lanes, onSelectStory, onTogglePastBundle, loadingPastBundleEpicIds, selectedNodeId = null, onCreateLink, onDeleteLink, onRejectLink, memberMap,
-  onOffscreenCountChange, focusGoalId = null,
+  onOffscreenCountChange, focusGoalId = null, stallThresholdHours,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
+  // story #2224 후속(수→형, §A1) — 렌더 시각 하나를 고정해 같은 렌더 패스 안 모든 카드가
+  // 같은 기준으로 판정되게 한다(Date.now()를 카드마다 따로 부르면 렌더 중 시각이 미세하게
+  // 갈릴 수 있다 — 여기서만 부르고 순수함수(isNodeStalled)에 값으로 흘려보낸다).
+  const nowMs = Date.now();
+  const stallThresholdHoursOrInfinity = stallThresholdHours ?? Infinity;
   const { currentTeamMemberId } = useDashboardContext();
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
@@ -663,6 +686,22 @@ export function FlowMapCanvas({
                 {/* 위 헤더 칸과 같은 사정 — LANE_LABEL_WIDTH 하나에서 나온다(사본 없음). */}
                 <div className="shrink-0 border-r border-border px-2 py-1.5" style={{ width: LANE_LABEL_WIDTH }}>
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
+                  {/* story #2224 후속(수→형, §A4, doc galrae-visual-transition-final-spec) —
+                      줄기 채움 바. 완료 N·전체 M «숫자»는 hover(title)로 강등하고 화면엔
+                      채움만 보인다 — NextMakerGoal.doneStories/totalStories(호출부가 이미
+                      들고 있는 값, 새 fetch 아님)를 그대로 옮긴 값. 재료가 없으면(단일-레인
+                      호출부 등 progress 미배선) 아무것도 안 그린다 — 0%를 지어내지 않는다. */}
+                  {lane.progress && lane.progress.total > 0 ? (
+                    <div
+                      className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-muted"
+                      title={t('flowLaneProgressHint', { done: lane.progress.done, total: lane.progress.total })}
+                    >
+                      <div
+                        className="h-full rounded-full bg-brand/85"
+                        style={{ width: `${Math.min(100, (lane.progress.done / lane.progress.total) * 100)}%` }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
                 <div ref={laneIndex === 0 ? laneContainerRef : undefined} className="relative min-w-0 flex-1">
                   {/* ②「지금」 세로선 — PO 정정(2026-07-30): 두께·색·불투명도는 통합 골격
@@ -844,9 +883,27 @@ export function FlowMapCanvas({
                       <div className="text-[9px] text-foreground">
                         {t('flowMapPastInternalCount', { n: lane.pastBundle.internalCount })}
                       </div>
-                      <div className="text-[9px] font-semibold text-foreground">
-                        {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
-                      </div>
+                      {/* story #2224 후속(수→형, §A4, doc galrae-visual-transition-final-spec)
+                          — 막다름(다음 0건)은 «0건» 텍스트가 아니라 끊긴 표식(테이퍼 도트+
+                          짧은 캡)으로 그린다. 숫자는 hover(title)로 강등 — 0이 아니면 기존
+                          그대로(0이 아닌 수는 그 자체로 유의미해 숫자를 남긴다). */}
+                      {lane.pastBundle.outgoingCount === 0 ? (
+                        <div
+                          className="flex h-[9px] items-center gap-0.5"
+                          title={t('flowLaneDeadEndHint')}
+                          aria-label={t('flowLaneDeadEndHint')}
+                          role="img"
+                        >
+                          <svg width="24" height="9" viewBox="0 0 24 9" aria-hidden="true">
+                            <line x1="0" y1="4.5" x2="17" y2="4.5" stroke="var(--muted-foreground)" strokeWidth="1.4" strokeDasharray="1 2.5" strokeLinecap="round" />
+                            <line x1="20" y1="1" x2="20" y2="8" stroke="var(--muted-foreground)" strokeWidth="1.4" strokeLinecap="round" />
+                          </svg>
+                        </div>
+                      ) : (
+                        <div className="text-[9px] font-semibold text-foreground">
+                          {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
+                        </div>
+                      )}
                       <div className="text-[9px] text-foreground">
                         {loadingPastBundleEpicIds.has(lane.epicId) ? t('flowMapPastLoading') : t('flowMapPastExpandHint')}
                       </div>
@@ -893,6 +950,8 @@ export function FlowMapCanvas({
                       isJustLinked={justLinkedNodeId === node.id}
                       onPortPointerDown={handlePortPointerDown}
                       onPortKeyDown={handlePortKeyDown}
+                      nowMs={nowMs}
+                      stallThresholdHours={stallThresholdHoursOrInfinity}
                     />
                   ))}
 
@@ -911,6 +970,8 @@ export function FlowMapCanvas({
                       isJustLinked={justLinkedNodeId === node.id}
                       onPortPointerDown={handlePortPointerDown}
                       onPortKeyDown={handlePortKeyDown}
+                      nowMs={nowMs}
+                      stallThresholdHours={stallThresholdHoursOrInfinity}
                     />
                   ))}
 
@@ -936,6 +997,8 @@ export function FlowMapCanvas({
                             isJustLinked={justLinkedNodeId === node.id}
                             onPortPointerDown={handlePortPointerDown}
                             onPortKeyDown={handlePortKeyDown}
+                            nowMs={nowMs}
+                            stallThresholdHours={stallThresholdHoursOrInfinity}
                           />
                         ))}
                         {/* ③「+N건」 더보기 카드(판C) — 잘린 수를 정직하게 보인다. "숨김"이

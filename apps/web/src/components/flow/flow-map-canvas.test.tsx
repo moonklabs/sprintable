@@ -636,3 +636,67 @@ describe('FlowMapCanvas — gate 두 층 글리프 (story #2224 문 레이어)',
     expect(glyph?.querySelector('svg.lucide-circle')).toBeNull();
   });
 });
+
+// story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A1/§A4) —
+// 줄기 채움 바·쇠퇴(저채도+축소, opacity 아님)·막다름 표식 3종을 값으로 고정한다.
+describe('FlowMapCanvas — 수→형 (story #2224 §A1/§A4)', () => {
+  it('lane.progress가 있으면 채움 바 폭이 done/total 비율로 계산된다', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })], progress: { done: 3, total: 4 } });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const fill = container.querySelector('.bg-brand\\/85') as HTMLElement | null;
+    expect(fill).not.toBeNull();
+    expect(fill?.style.width).toBe('75%');
+  });
+
+  it('lane.progress가 없으면 채움 바 자체를 안 그린다(0%를 지어내지 않는다)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('.bg-brand\\/85')).toBeNull();
+  });
+
+  it('outgoingCount=0이면 「0건」 텍스트 대신 막다름 표식(role=img)이 뜬다', async () => {
+    const lane = makeLane({ pastTotal: 5, pastBundle: { total: 5, internalCount: 2, outgoingCount: 0 } });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.textContent).not.toContain('0건');
+    const marker = container.querySelector('[title="' + koMessages.flow.flowLaneDeadEndHint + '"]');
+    expect(marker).not.toBeNull();
+    expect(marker?.getAttribute('role')).toBe('img');
+  });
+
+  it('outgoingCount>0이면 기존 숫자 텍스트가 그대로 뜬다(막다름 표식 없음)', async () => {
+    const lane = makeLane({ pastTotal: 5, pastBundle: { total: 5, internalCount: 2, outgoingCount: 3 } });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.textContent).toContain('3');
+    expect(container.querySelector('[title="' + koMessages.flow.flowLaneDeadEndHint + '"]')).toBeNull();
+  });
+
+  it('쇠퇴 노드는 저채도 border-l-muted-foreground + 축소(scale)를 갖고, opacity-50은 안 쓴다', async () => {
+    const now = Date.parse('2026-08-27T00:00:00Z');
+    const staleUpdatedAt = new Date(now - 200 * 60 * 60 * 1000).toISOString(); // 200h > 168h
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', updatedAt: staleUpdatedAt })] });
+      await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} stallThresholdHours={168} />)); });
+      const card = container.querySelector('[data-node-id="n1"] button');
+      expect(card?.classList.contains('border-l-muted-foreground')).toBe(true);
+      expect(card?.classList.contains('scale-[0.92]')).toBe(true);
+      expect(card?.classList.contains('opacity-50')).toBe(false);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
+  it('임계 미만이면 쇠퇴 스타일이 안 붙는다', async () => {
+    const now = Date.parse('2026-08-27T00:00:00Z');
+    const freshUpdatedAt = new Date(now - 10 * 60 * 60 * 1000).toISOString(); // 10h < 168h
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', updatedAt: freshUpdatedAt })] });
+      await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} stallThresholdHours={168} />)); });
+      const card = container.querySelector('[data-node-id="n1"] button');
+      expect(card?.classList.contains('border-l-muted-foreground')).toBe(false);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+});

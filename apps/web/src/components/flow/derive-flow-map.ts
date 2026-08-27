@@ -184,6 +184,10 @@ export interface FlowMapNode {
   //   'pending_approval'      — 판정 재료는 갖춰졌고 사람의 승인/반려만 남음(승인문)
   gatePending?: boolean;
   gateReason?: string | null;
+  // story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A1) —
+  // 쇠퇴(곧 멈춤) 판정의 재료. lane.stalled(168h 임계)와 «같은 상수»를 재사용해야 하므로
+  // 여기 값 자체를 저장하지 않고 원본 시각만 실어 호출부가 isNodeStalled()로 매번 판정한다.
+  updatedAt?: string;
 }
 
 export interface FlowMapOverflow {
@@ -215,6 +219,11 @@ export interface FlowMapLane {
    * BE `past:{total}`엔 개별 항목이 없어 호출부가 별도 fetch(`GET /api/stories?epic_id=&
    * status=done`, project_id는 빼야 함 — board 7일/10건 분기를 피하는 자리)로 채워 넘긴다. */
   pastNodes: FlowMapNode[];
+  // story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A4) — 줄기
+  // 채움 바의 재료. NextMakerGoal.doneStories/totalStories(호출부가 이미 들고 있는 값 —
+  // #2672 goals 계약, 새 fetch 아님)를 그대로 옮긴다. optional — deriveFlowMapLane 자체는
+  // 이 값을 모르므로(순수함수 시그니처 무변경) 호출부가 반환된 lane에 얹는다.
+  progress?: { done: number; total: number };
 }
 
 /** 정렬 규칙(판C) — "막힘 › 다음 지정됨 › 나머지". "다음 지정됨"에 대응하는 실 데이터
@@ -244,6 +253,7 @@ export function deriveFlowMapLane(
     depth: 0,
     gatePending: item.gate_pending,
     gateReason: item.gate_reason,
+    updatedAt: item.updated_at,
   }));
 
   const byDepth = new Map<number, FlowMapNode[]>();
@@ -258,6 +268,7 @@ export function deriveFlowMapLane(
       depth,
       gatePending: item.gate_pending,
       gateReason: item.gate_reason,
+      updatedAt: item.updated_at,
     };
     const list = byDepth.get(depth) ?? [];
     list.push(node);
@@ -288,6 +299,7 @@ export function deriveFlowMapLane(
     depth: 0,
     gatePending: item.gate_pending,
     gateReason: item.gate_reason,
+    updatedAt: item.updated_at,
   }));
   const isPastExpanded = pastNodes.length > 0;
 
@@ -632,6 +644,19 @@ export function computeSupersededNodeIds(edges: FlowMapEdge[]): Set<string> {
   return new Set(
     edges.filter((e) => e.kind === 'supersede' && e.confirmed).map((e) => e.fromNodeId),
   );
+}
+
+/** story #2224 후속(수→형, 2026-08-27, doc galrae-visual-transition-final-spec §A1) — 쇠퇴
+ * (곧 멈춤) 판정. `lane.stalled`(epics-progress-lane, 168h)와 «같은 상수»를 재사용해야
+ * 한다(임계 두 벌 금지, PO 지시) — 그래서 이 함수는 값 자체를 하드코딩하지 않고 호출부가
+ * 실어 온 stallThresholdHours를 그대로 쓴다. updatedAt이 없으면(과거 항목 등, gate_pending과
+ * 동일 사정) 판정 재료가 없다는 뜻이라 false(추측 안 함) — nowMs는 테스트가 결정론적으로
+ * 넘길 수 있게 순수함수 시그니처에 그대로 남긴다(Date.now()는 호출부 책임). */
+export function isNodeStalled(updatedAt: string | undefined, stallThresholdHours: number, nowMs: number): boolean {
+  if (!updatedAt) return false;
+  const updatedMs = new Date(updatedAt).getTime();
+  if (Number.isNaN(updatedMs)) return false;
+  return nowMs - updatedMs > stallThresholdHours * 60 * 60 * 1000;
 }
 
 /** 레인 하나의 높이(px) — 고정값이 아니라 «내용»에서 계산한다(판C ⑤, "고정이면 어느 레인은

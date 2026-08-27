@@ -89,7 +89,14 @@ async function fetchAllStoriesByStatus(projectId: string, status: string): Promi
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; goals: NextMakerGoal[]; activeStories: NextMakerStory[]; recentlyClosedEpicIds: Set<string>; recentlyClosedTargetIds: Set<string>; blockedCount: number };
+  | {
+      kind: 'ready'; goals: NextMakerGoal[]; activeStories: NextMakerStory[]; recentlyClosedEpicIds: Set<string>;
+      recentlyClosedTargetIds: Set<string>; blockedCount: number;
+      // story #2224 후속(수→형, §A1) — lane.stalled(FlowLane)와 «같은 상수». 이 컴포넌트가
+      // epics-progress-lane을 이미 부르고 있어(위 문서 §I-6 "두 벌 서지 않는다") 그 응답에서
+      // 그대로 뽑는다 — FlowMultiLaneCanvas가 따로 fetch/하드코딩하지 않는다.
+      stallThresholdHours: number | undefined;
+    };
 
 /**
  * story #2224 AC1(2026-07-31, 목업 84abdf43 v5 "팀의 흐름이 한눈에") — 갈래 캔버스의 몸통을
@@ -156,12 +163,13 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         const recentlyClosedEpicIds = deriveRecentlyClosedEpicIds(nextUp, activeStories);
         const recentlyClosedTargetIds = new Set(nextUp.filter((r) => r.isRecent).map((r) => r.targetId));
 
-        const laneData = unwrap<{ epics: Record<string, { blocked: number }> }>(laneRes);
+        const laneData = unwrap<{ epics: Record<string, { blocked: number }>; stall_threshold_hours?: number }>(laneRes);
         const blockedCount = laneData
           ? Object.values(laneData.epics).reduce((sum, e) => sum + (e.blocked ?? 0), 0)
           : 0;
+        const stallThresholdHours = laneData?.stall_threshold_hours;
 
-        setState({ kind: 'ready', goals, activeStories, recentlyClosedEpicIds, recentlyClosedTargetIds, blockedCount });
+        setState({ kind: 'ready', goals, activeStories, recentlyClosedEpicIds, recentlyClosedTargetIds, blockedCount, stallThresholdHours });
       } catch {
         if (!cancelled) setState({ kind: 'error' });
       }
@@ -237,6 +245,10 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
     return deriveGoalStems(effectiveGoals, effectiveActiveStories, state.recentlyClosedEpicIds);
   }, [state, effectiveGoals, effectiveActiveStories]);
 
+  // story #2224 후속(수→형, §A1) — FlowMultiLaneCanvas가 필요로 하는 값. useMemo 불요(단순
+  // 프로퍼티 접근, 다른 파생값들과 나란히 두어 state.kind 가드를 한 자리에 모은다).
+  const stallThresholdHours = state.kind === 'ready' ? state.stallThresholdHours : undefined;
+
   const headline = useMemo(() => deriveHeadline(stems), [stems]);
   const zeroStage = useMemo(
     () => (state.kind === 'ready' ? deriveZeroStageStats(effectiveActiveStories, state.blockedCount) : null),
@@ -309,6 +321,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         selectedNodeId={selectedNodeId}
         memberMap={memberMap}
         focusGoalId={focusGoalId}
+        stallThresholdHours={stallThresholdHours}
       />
 
       <NextMakerHeader headline={headline} zeroStage={zeroStage} />
