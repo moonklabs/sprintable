@@ -45,31 +45,38 @@ _REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
 _CLOUDBUILD_YAML = _REPO_ROOT / "cloudbuild.yaml"
 _SCRIPTS_DIR = _REPO_ROOT / "backend" / "scripts"
 
-# ①: `KEY=VALUE:latest`류 안의 VALUE. VALUE는 리터럴(대문자 시크릿명) 또는 `$${VAR}`/`${VAR}`
-# 참조 — group(1)="$"가 하나라도 있으면 변수참조(③ 해석 필요), group(2)=이름 본체. `KEY=`가
-# 존재하는 «시크릿 바인딩 자리»만 잡는다 — cloudbuild substitution(`${_FOO}`, 소문자+언더스코어
-# 접두 관례)은 이 자리에 오면 같이 잡히지만 ③ 해석 단계에서 리터럴을 못 찾으면 unresolved로
-# 넘어가 조용히 사라지지 않는다.
+# ①: `KEY=VALUE:latest`류 안의 VALUE. VALUE는 리터럴 시크릿명 또는 `$${VAR}`/`${VAR}` 참조 —
+# group(1)="$"가 하나라도 있으면 변수참조(③ 해석 필요), group(2)=이름 본체. `KEY=`가 존재하는
+# «시크릿 바인딩 자리»만 잡는다 — cloudbuild substitution(`${_FOO}`, 소문자+언더스코어 접두
+# 관례)은 이 자리에 오면 같이 잡히지만 ③ 해석 단계에서 리터럴을 못 찾으면 unresolved로 넘어가
+# 조용히 사라지지 않는다.
+#
+# ⚠️PO 페드루 리뷰 지적(PR #3549) — GCP Secret Manager 시크릿명은 대문자 SNAKE_CASE만이
+# 아니다(manifest 실물의 `cron-secret`·`github-app-webhook-secret-dev` 등 kebab-case 10건).
+# 문자군에 `-`가 없으면 이런 이름은 `:latest` 직전에서 매치 자체가 안 끊겨 정규식이 그 자리를
+# 통째로 건너뛴다 — resolved도 unresolved도 아닌 **완전 침묵**(가장 나쁜 실패 모드, 가드가
+# 못 보는 줄도 모르게 됨). 대문자/소문자/대시/언더스코어 전부 허용하도록 문자군을 넓힌다.
 _SECRET_BINDING_RE = re.compile(
-    r"[A-Za-z0-9_]+=(\$+)?\{?([A-Za-z_][A-Za-z0-9_]*)\}?:(?:latest|[0-9]+)"
+    r"[A-Za-z0-9_]+=(\$+)?\{?([A-Za-z_][A-Za-z0-9_-]*)\}?:(?:latest|[0-9]+)"
 )
-
-# ③: 같은 파일 안에서 `VAR="LITERAL"` 또는 `VAR='LITERAL'` 대입(조건 분기로 여러 번 있을 수
-# 있음 — 전부 수집). LITERAL이 대문자 시크릿명 모양(`[A-Z][A-Z0-9_]*`)일 때만 채택한다(다른
-# 종류의 변수 대입과 섞이지 않도록).
-def _resolve_var(var_name: str, text: str) -> set[str]:
-    pattern = re.compile(rf'{re.escape(var_name)}\s*=\s*["\']([A-Z][A-Z0-9_]*)["\']')
-    return set(pattern.findall(text))
 
 
 def extract_cloudbuild_inline_refs(cloudbuild_text: str | None = None) -> tuple[set[str], set[str]]:
-    """①+③: cloudbuild.yaml 인라인 시크릿 바인딩. (resolved 이름 집합, unresolved 토큰 집합) 반환."""
+    """①+③: cloudbuild.yaml 인라인 시크릿 바인딩. (resolved 이름 집합, unresolved 토큰 집합) 반환.
+
+    리터럴 vs 변수참조 판별은 대소문자 모양이 아니라 **`$` 접두 유무**로만 가른다(케밥/스네이크
+    양쪽 다 `$` 없이 그 자리에 오면 리터럴 시크릿명 그 자체) — PR #3549 리뷰 지적 fix: 예전엔
+    `[A-Z][A-Z0-9_]*` fullmatch로 "대문자 모양"을 리터럴 판정 기준으로 썼는데, 그러면 kebab-case
+    리터럴(`github-app-webhook-secret-dev`)이 이 fullmatch에 안 걸려 «변수 이름»으로 오인되고,
+    당연히 그런 이름의 셸 대입은 없으니 unresolved로도 못 가고(애초에 정규식 charset이 `-`를
+    안 받아 매치 지점 자체가 안 생김) 조용히 사라졌다."""
     text = cloudbuild_text if cloudbuild_text is not None else _CLOUDBUILD_YAML.read_text()
     resolved: set[str] = set()
     unresolved: set[str] = set()
     for dollar_prefix, token in _SECRET_BINDING_RE.findall(text):
-        if not dollar_prefix and re.fullmatch(r"[A-Z][A-Z0-9_]*", token):
-            # `$` 접두 없음 = 변수 참조가 아니라 리터럴 시크릿명 그 자체 — 그대로 채택.
+        if not dollar_prefix:
+            # `$` 접두 없음 = 변수 참조가 아니라 리터럴 시크릿명 그 자체(대문자든 kebab-case든
+            # 무관) — 그대로 채택.
             resolved.add(token)
             continue
         # `$`(`$$`) 접두 = 변수 참조(예: `$${AGENT_KEY_SECRET}`) — 같은 파일에서 대입 탐색.
@@ -79,6 +86,13 @@ def extract_cloudbuild_inline_refs(cloudbuild_text: str | None = None) -> tuple[
         else:
             unresolved.add(token)
     return resolved, unresolved
+
+
+# ③: 같은 파일 안에서 `VAR="LITERAL"` 또는 `VAR='LITERAL'` 대입(조건 분기로 여러 번 있을 수
+# 있음 — 전부 수집). LITERAL도 위와 동형으로 대문자/소문자/대시/언더스코어 전부 허용한다.
+def _resolve_var(var_name: str, text: str) -> set[str]:
+    pattern = re.compile(rf'{re.escape(var_name)}\s*=\s*["\']([A-Za-z_][A-Za-z0-9_-]*)["\']')
+    return set(pattern.findall(text))
 
 
 def _dry_run_spec(script_name: str, env: str, key: str) -> str | None:

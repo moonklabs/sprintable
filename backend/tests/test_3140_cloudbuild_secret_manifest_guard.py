@@ -70,6 +70,17 @@ def test_extract_inline_unresolvable_variable_surfaces_not_silently_dropped():
     assert unresolved == {"UNKNOWN_VAR"}
 
 
+def test_extract_inline_literal_kebab_case_secret_name():
+    """PO 페드루 리뷰 지적(PR #3549) 회귀가드 — GCP 시크릿명은 대문자 SNAKE_CASE만이 아니다
+    (manifest 실물의 `cron-secret`·`github-app-webhook-secret-dev` 등 kebab-case 10건). 예전
+    문자군(`[A-Z][A-Z0-9_]*`)은 이런 이름을 resolved도 unresolved도 아닌 완전 침묵으로 흘렸다
+    — 대문자 전용 fullmatch 판정을 걷어내고 `$` 접두 유무로만 가르게 고친 뒤의 회귀가드."""
+    text = 'gcloud run services update x --update-secrets="WEBHOOK=github-app-webhook-secret-dev:latest"'
+    resolved, unresolved = refs_mod.extract_cloudbuild_inline_refs(text)
+    assert resolved == {"github-app-webhook-secret-dev"}
+    assert unresolved == set()
+
+
 def test_extract_inline_ignores_non_secret_context():
     """`:latest`/`:버전`이 안 붙은 일반 KEY=VALUE는 시크릿 바인딩이 아니므로 무시."""
     text = "APP_URL=https://dev-app.sprintable.ai\nNODE_ENV=production"
