@@ -223,7 +223,10 @@ function ageDaysLabel(t: ReturnType<typeof useTranslations>, ageHours: number): 
 function SilentStallExpandedRow({
   item, memberNames, t,
 }: {
-  item: { id: string; title: string; ageHours: number; assigneeMemberId: string | null; href: string };
+  item: {
+    id: string; title: string; ageHours: number; assigneeMemberId: string | null; href: string;
+    crossProjectLabel: string | null;
+  };
   memberNames: Record<string, string>;
   t: ReturnType<typeof useTranslations>;
 }) {
@@ -235,6 +238,9 @@ function SilentStallExpandedRow({
     >
       <span className="w-12 shrink-0 font-mono text-xs text-warning-strong">{ageDaysLabel(t, item.ageHours)}</span>
       <span className="min-w-0 flex-1 truncate text-xs text-foreground">{item.title}</span>
+      {/* story #3153(org-wide) — 항목이 뷰어 활성 프로젝트와 다를 때만 병기(노이즈 절제,
+          derive-attention-clusters.ts의 기존 cross-project 관례와 동형). */}
+      <CrossProjectTag label={item.crossProjectLabel} />
       <span className="shrink-0 truncate text-[10.5px] text-muted-foreground">{owner}</span>
     </Link>
   );

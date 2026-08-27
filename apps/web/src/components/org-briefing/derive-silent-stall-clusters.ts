@@ -1,15 +1,16 @@
 /**
  * story #93b076c8(2250) FE — 「침묵의 정체」구간 묶음. doc `silence-stall-display-spec-93b076c8`
- * (유나 홈, 페드루 GO 2026-08-27). BE(`/api/v2/glance/attention` kind="stalled")는 무변경 계약 —
+ * (유나 홈, 페드루 GO 2026-08-27). BE(`/api/v2/glance/attention/org-stalled` kind="stalled")는
  * 전량·무변화 내림차순 배열만 낸다. 이 파일이 그 배열을 4구간(exclusive)으로 그룹만 한다
  * (개수 자르기 없음 — top-N 기각, «자르면 또 침묵»).
  *
- * ⛔이 엔드포인트는 이미 `project_id` 쿼리파라미터로 스코프돼 응답 전체가 **한 프로젝트**
- * 소속이다 — org-briefing의 다른 클러스터(falsified/loop 등)와 달리 cross-project 표시가
- * 필요 없다(모든 항목이 뷰어의 활성 프로젝트 소속). href 조립은 `projectHref`(기존 재사용,
- * 새 규약 발명 0).
+ * story #3153(93b076c8 후속, org-wide 커버리지 갭) — 소스가 project-scope 단일 `/attention`
+ * 에서 org-wide `/attention/org-stalled`로 바뀌었다(페드루 GO) — 항목이 이제 **여러 프로젝트**
+ * 소속일 수 있다. 그래서 href/병기는 org-briefing의 다른 클러스터(falsified/loop 등)와 동형으로
+ * `projectHref`/`crossProjectLabel`을 항목별 `project_id`/`project_slug`로 조립한다(새 규약
+ * 발명 0 — 기존 재사용).
  */
-import { projectHref, type ViewerContext } from './derive-attention-clusters';
+import { crossProjectLabel, projectHref, type ViewerContext } from './derive-attention-clusters';
 
 export interface RawSilentStallItem {
   kind: string;
@@ -18,6 +19,10 @@ export interface RawSilentStallItem {
   entered_state_at: string | null;
   entered_state_at_precision: string | null;
   assignee_member_id: string | null;
+  // story #3153 — org-stalled 엔드포인트만 채운다(단일-project `/attention` 소비자는 항상
+  // null, BE 계약 그대로 — 회귀 0).
+  project_id: string | null;
+  project_slug: string | null;
 }
 
 export interface RawSilentStallResponse {
@@ -33,6 +38,7 @@ export interface SilentStallItem {
   ageHours: number;
   assigneeMemberId: string | null;
   href: string;
+  crossProjectLabel: string | null;
 }
 
 export type SilentStallBucketKey = '48h-1w' | '1w-2w' | '2w-1mo' | '1mo+';
@@ -74,13 +80,12 @@ function bucketKeyFor(ageHours: number): SilentStallBucketKey | null {
 }
 
 /**
- * raw `/glance/attention` 응답 → 4구간 클러스터. `now`는 테스트 주입용(기본 `Date.now()`) —
- * 순수 함수 유지(파일 어디도 암묵적으로 시각을 캡처하지 않는다).
+ * raw `/glance/attention/org-stalled` 응답 → 4구간 클러스터. `now`는 테스트 주입용(기본
+ * `Date.now()`) — 순수 함수 유지(파일 어디도 암묵적으로 시각을 캡처하지 않는다).
  */
 export function deriveSilentStallClusters(
   raw: RawSilentStallResponse | null,
   viewer: ViewerContext | undefined,
-  activeProjectSlug: string | null,
   now: number = Date.now(),
 ): SilentStallClusters {
   // derive-exception-signals.ts와 동형 shape-safety — 같은 프록시(apiSuccess 이중랩) 소스라
@@ -97,7 +102,8 @@ export function deriveSilentStallClusters(
         enteredStateAt: i.entered_state_at as string,
         ageHours,
         assigneeMemberId: i.assignee_member_id,
-        href: projectHref(viewer, activeProjectSlug, `/board?story=${i.story_id}`),
+        href: projectHref(viewer, i.project_slug, `/board?story=${i.story_id}`),
+        crossProjectLabel: crossProjectLabel(viewer, i.project_id, i.project_slug),
       };
     });
 

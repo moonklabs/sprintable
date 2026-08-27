@@ -29,22 +29,18 @@ interface NowFaceLoad {
   memberNames: Record<string, string>;
 }
 
-async function loadNowFace(
-  t: NowFaceTranslator, viewer: ViewerContext, projectId: string | undefined, projectSlug: string | undefined,
-): Promise<NowFaceLoad> {
+async function loadNowFace(t: NowFaceTranslator, viewer: ViewerContext): Promise<NowFaceLoad> {
   // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!r.ok=>null) "지금" 면이
   // 빈 채로 60초 REFRESH_MS까지 안 채워졌다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
   // story #2852 — agent_auth_failure 클러스터가 member_id만 갖고 있어(BE가 이름을 안 줌)
   // 이름 표시엔 /api/team-members가 필요하다(workforce-face.tsx parseTeamMembers와 동형 소비).
-  // story #93b076c8(2250) — 「침묵의 정체」는 project-scope 전용 별도 BE 엔드포인트라
-  // projectId 없인 조회 자체가 무의미(다른 세 fetch와 달리 조건부).
+  // story #3153(93b076c8 후속) — 「침묵의 정체」는 이제 org-wide 엔드포인트(접근 가능한 전
+  // 프로젝트를 BE가 순회) — project_id 조건부 fetch가 아니라 다른 fetch들과 동형 무조건 호출.
   const [ma, notifs, membersJson, attentionJson] = await Promise.all([
     fetchWithAuth('/api/dashboard/my-actions').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     fetchWithAuth('/api/notifications?type=task_completed&unread=true').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    projectId
-      ? fetchWithAuth(`/api/glance/attention?project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-      : Promise.resolve(null),
+    fetchWithAuth('/api/glance/attention/org-stalled').then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
   const raw = parseMyActions(ma);
   return {
@@ -64,7 +60,7 @@ async function loadNowFace(
     // FE 프록시가 apiSuccess로 한 번 더 감싸 실제 payload는 {data:{items,…}}다(derive-exception-
     // signals.ts와 동형 크럭스 — glance.py AttentionResponse envelope 이중랩).
     silentStall: deriveSilentStallClusters(
-      (attentionJson as { data?: RawSilentStallResponse } | null)?.data ?? null, viewer, projectSlug ?? null,
+      (attentionJson as { data?: RawSilentStallResponse } | null)?.data ?? null, viewer,
     ),
     memberNames: parseTeamMembers(membersJson),
   };
@@ -124,13 +120,13 @@ export function NowFace() {
   // story #2842 — loop-face.tsx와 동형(orgMemberships에서 orgSlug 파생). useMemo로 orgId/
   // projectId(원시값)가 실제로 바뀔 때만 새 참조를 만든다 — 매 렌더 새 객체면 아래 effect가
   // 무한 재구독된다.
-  const { orgId, orgMemberships, projectId, currentProjectSlug } = useDashboardContext();
+  const { orgId, orgMemberships, projectId } = useDashboardContext();
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const viewer = useMemo<ViewerContext>(() => ({ orgSlug, activeProjectId: projectId }), [orgSlug, projectId]);
 
   useEffect(() => {
     const load = async () => {
-      const result = await loadNowFace(t, viewer, projectId, currentProjectSlug);
+      const result = await loadNowFace(t, viewer);
       setItems(result.items);
       setClusters(result.clusters);
       setSilentStall(result.silentStall);
@@ -139,7 +135,7 @@ export function NowFace() {
     void load();
     const id = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(id);
-  }, [t, viewer, projectId, currentProjectSlug]);
+  }, [t, viewer]);
 
   const list = items ?? [];
   const shown = expanded ? list : list.slice(0, CAP);
