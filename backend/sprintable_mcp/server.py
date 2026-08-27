@@ -436,8 +436,9 @@ _TOOL_DEFS: list[tuple] = [
      "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      ListStoriesInput, list_stories),
     ("sprintable_list_backlog",
-     "[일감] 백로그 스토리 목록 (스프린트 미배정). limit(선택)로 상한 조정 — 서버 기본은"
-     " limit 미지정 시 유지(무회귀). cursor 페이지네이션은 지원 안 함(limit 올려 재호출).",
+     "[일감] 백로그 스토리 목록 (스프린트 미배정 · done/in-review 제외, story #3148). limit"
+     "(선택)로 상한 조정 — 서버 기본은 limit 미지정 시 유지(무회귀). cursor 페이지네이션은"
+     " 지원 안 함(limit 올려 재호출).",
      ListBacklogInput, list_backlog),
     ("sprintable_add_story",
      "[일감] 스토리 생성. 응답 reference_token 필드가 이 스토리를 가리키는 참조 토큰"

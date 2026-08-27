@@ -173,12 +173,18 @@ async def list_stories(args: ListStoriesInput) -> list[TextContent]:
 
 
 async def list_backlog(args: ListBacklogInput) -> list[TextContent]:
-    """백로그 스토리 목록 (스프린트 미배정)."""
+    """백로그 스토리 목록 (스프린트 미배정 · done/in-review 제외)."""
     # b5870c4c: 전용 `/stories/backlog` 라우트 부재 → `/{id}` 로 shadow 돼 422(id="backlog" 非-UUID).
     # 기존 list 엔드포인트 + `no_sprint` 필터(server-side repo.list_backlog·sprint 미배정·docstring 정합) 재사용.
     # ⚠️ no_sprint 는 project_id 와 함께여야 backlog 분기 동작(stories.py list_stories).
+    # story #3148 — sprint 미배정만으론 done/in-review도 섞인다(PO가 이 도구로 오배분한
+    # 실사고 원인). exclude_status는 이 도구가 항상 고정으로 보낸다 — 이름이 「백로그」인
+    # 도구가 완료·검토중 항목을 내는 건 이름의 약속 위반이라 옵션이 아니라 기본 동작이다.
     try:
-        params: dict = {"project_id": client.require_project_id(), "no_sprint": "true"}
+        params: dict = {
+            "project_id": client.require_project_id(), "no_sprint": "true",
+            "exclude_status": "done,in-review",
+        }
         if args.limit:
             params["limit"] = args.limit
         items, headers = await client.get_with_headers("/api/v2/stories", params=params)
