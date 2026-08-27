@@ -72,4 +72,30 @@ describe('GET /auth/login — native OAuth-start branch', () => {
     const cookieNames = h.cookiesSetMock.mock.calls.map((c) => c[0] as string);
     expect(cookieNames).not.toContain('oauth_native_challenge_google');
   });
+
+  // story #3121 AC1 — 모바일이 OAuth 시작 전 정적으로 고른 호환 모드를 그대로 쿠키에 심는다.
+  it('native=1 + callback_mode=custom_scheme: sets the callback_mode cookie with the exact value', async () => {
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme' }));
+    const call = h.cookiesSetMock.mock.calls.find((c) => c[0] === 'oauth_native_callback_mode_google');
+    expect(call).toBeDefined();
+    expect(call?.[1]).toBe('custom_scheme');
+  });
+
+  it('native=1 + callback_mode=https: sets the callback_mode cookie', async () => {
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'https' }));
+    const call = h.cookiesSetMock.mock.calls.find((c) => c[0] === 'oauth_native_callback_mode_google');
+    expect(call?.[1]).toBe('https');
+  });
+
+  it('invalid callback_mode value: does not set the cookie (콜백이 https 기본값으로 유도)', async () => {
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'android' }));
+    const cookieNames = h.cookiesSetMock.mock.calls.map((c) => c[0] as string);
+    expect(cookieNames).not.toContain('oauth_native_callback_mode_google');
+  });
+
+  it('callback_mode present but native flag absent: no callback_mode cookie set (legacy flow unchanged)', async () => {
+    await GET(makeRequest({ provider: 'google', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme' }));
+    const cookieNames = h.cookiesSetMock.mock.calls.map((c) => c[0] as string);
+    expect(cookieNames).not.toContain('oauth_native_callback_mode_google');
+  });
 });

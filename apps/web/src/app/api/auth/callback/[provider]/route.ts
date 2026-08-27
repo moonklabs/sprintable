@@ -4,6 +4,7 @@ import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 import { resolveAppUrl } from '@/services/app-url';
+import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 // e-mobile-oauth-native-handoff-contract §2: returnUrl = 검증된 App Link. dev/prod 도메인·서명
@@ -77,6 +78,13 @@ async function handleCallback(request: Request, provider: string, code: string |
   // e-mobile-oauth-native-handoff-contract §7.4/§5 — 격리 rail(오르테가 확定, /auth/native
   // 무접촉). native OAuth-start에서만 세팅되는 challenge — 있으면 이 콜백도 native 취급.
   const nativeChallenge = cookieStore.get(`oauth_native_challenge_${provider}`)?.value ?? null;
+  // story #3121 AC1 — 모바일이 OAuth 시작 시 선택한 호환 모드(계약 §2). 쿠키 부재/형식오류는
+  // https로 기본 유도(BE Phase 1 확장-축소 계약과 동일 원칙 — 조용히 안 채우고 기본값 하나로
+  // 수렴). 값 자체(return_uri 문자열)는 여기서 고정 매핑으로 계산 — 클라 입력을 URI로 안 믿는다.
+  const nativeCallbackMode = (() => {
+    const raw = cookieStore.get(`oauth_native_callback_mode_${provider}`)?.value ?? null;
+    return isOAuthCallbackMode(raw) ? raw : 'https';
+  })();
   // story #3122(계정 연결) — auth/link/route.ts만 세팅하는 단명 쿠키. provider가 돌려주는
   // code/state 자체엔 "로그인이냐 연결이냐" 구분이 없어(authorize 요청 파라미터가 로그인과
   // 동일하게 생겼다, 의도된 설계) 이 쿠키가 유일한 분기 신호다.
@@ -86,6 +94,7 @@ async function handleCallback(request: Request, provider: string, code: string |
   cookieStore.delete(`oauth_invite_token_${provider}`);
   cookieStore.delete(`oauth_next_${provider}`);
   cookieStore.delete(`oauth_native_challenge_${provider}`);
+  cookieStore.delete(`oauth_native_callback_mode_${provider}`);
   cookieStore.delete(`oauth_link_${provider}`);
 
   // ⛔통과 조건은 원래와 동일(storedState 존재 AND 일치) — 분기는 로그용일 뿐, 검증 자체는
@@ -154,13 +163,20 @@ async function handleCallback(request: Request, provider: string, code: string |
       return NextResponse.redirect(`${origin}/login?error=oauth_native_issue_failed`);
     }
     const internalSecret = process.env['FIREBASE_BFF_INTERNAL_SECRET'];
+    // story #3121 AC1 — return_uri는 고정 매핑으로 계산(클라 입력 아님). APP_LINK_ORIGIN()은
+    // 기존 App Link 리다이렉트 목적지 계산과 동일 출처(아래 returnUrl 참조) — 새 소스 안 만든다.
     const issueRes = await fetch(`${FASTAPI_URL()}/api/v2/internal/auth/oauth-handoff/issue`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(internalSecret ? { Authorization: `Bearer ${internalSecret}` } : {}),
       },
-      body: JSON.stringify({ user_id: userId, code_challenge: nativeChallenge }),
+      body: JSON.stringify({
+        user_id: userId,
+        code_challenge: nativeChallenge,
+        callback_mode: nativeCallbackMode,
+        return_uri: expectedReturnUri(nativeCallbackMode, APP_LINK_ORIGIN()),
+      }),
     }).catch(() => null);
 
     if (!issueRes || !issueRes.ok) {
