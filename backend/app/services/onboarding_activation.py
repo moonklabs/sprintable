@@ -134,7 +134,9 @@ def _reminder_email_body(*, app_url: str, unsub_link: str) -> str:
         " — 몇 분이면 끝나는 남은 단계를 마무리하면 Sprintable의 진짜 가치를 바로 확인하실 수"
         " 있습니다.</p>"
         f"<p><a href='{app_url}'>이어서 진행하기</a></p>"
-        "<p style='font-size:12px;color:#888'>"
+        # 유나 design:pass 권장(2026-08-27) — #888은 흰 배경 대비 3.5:1로 AA(4.5) 미달.
+        # #595959로 7:1(AAA) 확保.
+        "<p style='font-size:12px;color:#595959'>"
         f"<a href='{unsub_link}'>이런 안내를 더 이상 받고 싶지 않다면 여기를 눌러 주세요</a></p>"
     )
 
@@ -150,7 +152,8 @@ async def send_activation_reminder(db: AsyncSession, user: User) -> bool:
     unsub_link = f"{app_url}/unsubscribe?token={unsub_token}"
     delivered = send_email(
         to=user.email,
-        subject="Sprintable — 몇 단계만 더 진행하면 완료예요",
+        # 유나 design:pass 권장(2026-08-27) — 해요체("완료예요") → 합니다체 정합.
+        subject="Sprintable — 가입 완료까지 몇 단계 남았습니다",
         html_body=_reminder_email_body(app_url=app_url, unsub_link=unsub_link),
     )
     user.onboarding_reminder_sent_at = datetime.now(timezone.utc)
