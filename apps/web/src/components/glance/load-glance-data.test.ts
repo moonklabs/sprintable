@@ -138,8 +138,14 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
       if (url.startsWith('/api/goals')) {
         return jsonResponse([
           {
-            id: 'e-stale', title: 'E-STALE(오래전 갱신)', status: 'active',
-            created_at: '2026-06-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z', participant_ids: [],
+            // ⛔카디르 QA(2026-08-27) — created_at을 e-fresh보다 이르게 둬야 confound 없는
+            // 표본이 된다: tie-break를 제거해도 배열순서(scopeRoadmapEpics의 created_at ASC
+            // 폴백) 자체가 e-fresh를 먼저 골라버리면, 이 테스트는 tie-break 로직이 아니라
+            // 우연히 같은 결과를 내는 폴백 정렬을 pin하는 것이 된다(제거해도 그린 — 가짜
+            // 회귀가드). e-stale이 배열상 «먼저»(created_at 이름) 오게 만들어, tie-break를
+            // 지우면 실제로 RED가 나는 것을 카디르가 직접 재현 확認.
+            id: 'e-stale', title: 'E-STALE(오래전 갱신, 배열순서상 먼저 옴)', status: 'active',
+            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z', participant_ids: [],
             focal_story: {
               id: 's-stale', title: '오래된 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
               proof_count: 0, auto_verify: null, gate: null,
@@ -147,10 +153,12 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
             },
           },
           {
-            // 배열 순서상 뒤에 오지만(먼저 오는 하나가 아님) updated_at이 더 최근 — tie-break가
-            // 순서가 아니라 최신성으로 고르는지가 이 테스트의 핵심.
-            id: 'e-fresh', title: 'E-FRESH(방금 갱신)', status: 'active',
-            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-08-27T00:00:00Z', participant_ids: [],
+            // created_at도 배열순서도 e-stale보다 «뒤»(늦음) — tie-break가 순서/생성일이
+            // 아니라 updated_at 최신성으로 고르는지가 이 테스트의 핵심. tie-break를 지우면
+            // (roadmap.find가 배열 첫 매치를 집는 옛 로직으로 돌아가면) e-stale이 먼저 뽑혀
+            // 이 단언이 깨진다(카디르 재현 확認).
+            id: 'e-fresh', title: 'E-FRESH(방금 갱신, 배열순서상 뒤에 옴)', status: 'active',
+            created_at: '2026-06-15T00:00:00Z', updated_at: '2026-08-27T00:00:00Z', participant_ids: [],
             focal_story: {
               id: 's-fresh', title: '방금 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
               proof_count: 0, auto_verify: null, gate: null,
