@@ -325,3 +325,50 @@ describe('useUnifiedSwitcher — switchOrg 네트워크 실패 시 optimistic �
     expect(result?.switchOrgError).toBeNull();
   });
 });
+
+// story #3147(doc mobile-switcher-redesign-spec-4758744a §③) — 검색 state 신규. 데스크톱
+// UnifiedSwitcher(lg:)는 이 필드를 안 읽으므로 여기 추가가 그쪽에 영향 없다(호출부 무변경).
+describe('useUnifiedSwitcher — story #3147 검색 state(신규)', () => {
+  it('searchQuery가 비어 있으면 filteredCurrentOrgProjects는 currentOrgProjects와 같다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: MOONKLABS_PROJECTS }) };
+      return { ok: true, json: async () => ({ data: { ok: true } }) };
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    expect(result?.filteredCurrentOrgProjects.length).toBe(result?.currentOrgProjects.length);
+  });
+
+  it('searchQuery 설정 시 프로젝트명 부분일치로만 필터한다(대소문자 무시)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') {
+        return { ok: true, json: async () => ({ data: [
+          { id: 'p1', name: 'Sprintable' }, { id: 'p2', name: 'Landing' },
+        ] }) };
+      }
+      return { ok: true, json: async () => ({ data: { ok: true } }) };
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    // #2093 후속 패턴과 동형 — open=true라야 X-Org-Id 재조회가 돈다(위 describe 참고).
+    await act(async () => { result?.setOpen(true); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { result?.setSearchQuery('sprint'); });
+    expect(result?.filteredCurrentOrgProjects.map((p) => p.projectName)).toEqual(['Sprintable']);
+  });
+
+  it('setOpen(false)로 닫으면 searchQuery가 비워진다(다음 오픈에 지난 검색 안 남음)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result?.setSearchQuery('landing'); });
+    expect(result?.searchQuery).toBe('landing');
+    await act(async () => { result?.setOpen(false); });
+    expect(result?.searchQuery).toBe('');
+  });
+
+  it('setOpen(true)로 열 때는 searchQuery를 안 건드린다(닫을 때만 초기화)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result?.setSearchQuery('landing'); });
+    await act(async () => { result?.setOpen(true); });
+    expect(result?.searchQuery).toBe('landing');
+  });
+});
