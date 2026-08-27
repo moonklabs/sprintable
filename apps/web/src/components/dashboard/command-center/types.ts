@@ -24,15 +24,94 @@ export interface QueueItem {
   created_at: string | null;
 }
 
-export interface AttentionItem {
-  type: 'agent_stuck';
-  severity: string; // 'warn' 등
-  auto_detected: boolean;
-  entity_type: string;
-  entity_id: string;
-  gate_type: string | null;
-  stuck_since: string | null;
-}
+// story #3150(시연 리허설 발견) — 이 타입이 'agent_stuck' 하나뿐이라고 선언돼 있었는데
+// command_center.py는 실제로 8종을 낸다(agent_stuck·agent_auth_failure·story_stalled·
+// unanswered_blocker·hypothesis_falsified·loop_overdue_hypothesis·loop_overdue_goal·
+// loop_outcome_missing_goal — grep '"type": "' command_center.py 전수). 나머지 7종은
+// entity_id/entity_type이 아예 없는데 AttentionRow가 그 필드만 읽어(resolveName 경유)
+// 공백을 렌더했다 — 이 타입을 실제 union으로 넓혀 각 shape이 실 payload와 맞게 한다.
+// ⛔QueueItem 상단 주석과 같은 재발방지 원칙 — BE가 종을 늘리면 여기·action-zone.tsx
+// attentionEntityLabel/attentionDayCount 둘 다 맞춰야 한다.
+export type AttentionItem =
+  | {
+      type: 'agent_stuck';
+      severity: string;
+      auto_detected: boolean;
+      entity_type: string;
+      entity_id: string;
+      gate_type: string | null;
+      stuck_since: string | null;
+    }
+  | {
+      type: 'agent_auth_failure';
+      severity: string;
+      auto_detected: boolean;
+      member_id: string;
+      reason: string;
+      failure_count: number;
+      first_failed_at: string | null;
+      last_failed_at: string | null;
+    }
+  | {
+      type: 'story_stalled';
+      severity: string;
+      auto_detected: boolean;
+      title: string;
+      story_id: string;
+      stalled_days: number | null;
+      project_id: string;
+    }
+  | {
+      type: 'unanswered_blocker';
+      severity: string;
+      auto_detected: boolean;
+      blocked_story_id: string;
+      blocker_id: string;
+      blocked_story_title: string;
+      age_days: number | null;
+      project_id: string;
+    }
+  | {
+      type: 'hypothesis_falsified';
+      severity: string;
+      auto_detected: boolean;
+      hypothesis_id: string;
+      statement: string;
+      outcome_result: string | null;
+      falsified_days: number | null;
+      superseded_by_hypothesis_id: string | null;
+      project_id: string;
+    }
+  | {
+      type: 'loop_overdue_hypothesis';
+      severity: string;
+      auto_detected: boolean;
+      hypothesis_id: string;
+      statement: string;
+      owner_member_id: string | null;
+      overdue_days: number | null;
+      project_id: string;
+    }
+  | {
+      type: 'loop_overdue_goal';
+      severity: string;
+      auto_detected: boolean;
+      goal_id: string;
+      title: string;
+      owner_member_id: string | null;
+      overdue_days: number | null;
+      project_id: string;
+    }
+  | {
+      type: 'loop_outcome_missing_goal';
+      severity: string;
+      auto_detected: boolean;
+      goal_id: string;
+      title: string;
+      owner_member_id: string | null;
+      done_days: number | null;
+      project_id: string;
+    };
 
 export interface MyActions {
   action_queue: { scope: string; items: QueueItem[] }; // BE가 danger>warn>info 정렬 — FE 재정렬 X
