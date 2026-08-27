@@ -250,6 +250,11 @@ function FlowMapNodeCard({
 // 이와 직교하는 stroke-dasharray(확定=실선/제안=점선)로만 표현 — 아래 표에는 없다.
 // null(종 미정)은 화살촉 자체가 없다(유나양 지적: 넷째 모양을 주면 "미정"이 확定된 하나의
 // 종류처럼 보인다 — 모르면 그 채널을 비운다). 다만 방향은 아는지라 끝점에 점 하나만.
+// story #2224 후속(간선 3종 시각언어, 2026-08-27) — 유나 최종 판정: 코드 정본(아래 색·마커)
+// 이 이미 §A2 취지(축1=색+마커, 축2=dasharray 직교)를 만족한다 — doc의 신규 색(#4F46E5 등)은
+// 채택 안 하고 기존 info/brand/muted-foreground 유지. 대신 CVD 보강으로 hover/선택 시 종을
+// 텍스트로 노출(아래 edgeKindLabel + hover 툴팁) — 마커는 끝점에만 있어 선 중간은 색만이던
+// 것을 보완한다.
 function edgeKindStyle(kind: FlowMapEdgeKind | 'mixed'): { color: string; markerEnd: string; markerStart?: string } {
   if (kind === 'spawn') return { color: 'var(--info)', markerEnd: 'url(#flow-edge-arrow-open)' };
   if (kind === 'then') return { color: 'var(--brand)', markerEnd: 'url(#flow-edge-arrow-filled)', markerStart: 'url(#flow-edge-dot-start)' };
@@ -260,21 +265,34 @@ function edgeKindStyle(kind: FlowMapEdgeKind | 'mixed'): { color: string; marker
   return { color: 'var(--muted-foreground)', markerEnd: 'url(#flow-edge-dot-end)' };
 }
 
+// story #2224 후속(CVD 보강, 2026-08-27, 유나 최종판정) — FlowMapEdgeKind(spawn/then/
+// supersede, 코드 정본)를 기존 PortLinkKind i18n 키(portLinkKind_spawned/followed/
+// superseded — 포트 잇기 다이얼로그가 이미 쓰는 같은 개념·같은 문구)에 그대로 매핑한다.
+// 새 키를 또 만들지 않는다 — "여기서 나온 일"·"다음에 할 일"·"대신하는 일"은 잇는 순간과
+// 이미 이어진 선을 볼 때나 같은 뜻이다. null·'mixed'는 "하나로 말할 수 없다"는 사정이라
+// 라벨 자체가 없다(위 edgeKindStyle과 같은 원칙).
+function edgeKindPortLinkKey(kind: FlowMapEdgeKind | 'mixed'): PortLinkKind | null {
+  if (kind === 'spawn') return 'spawned';
+  if (kind === 'then') return 'followed';
+  if (kind === 'supersede') return 'superseded';
+  return null;
+}
+
 function FlowEdgeMarkerDefs() {
   return (
     <defs>
-      {/* 낳음 — 빈 화살촉(윤곽선만, 안이 안 채워짐) */}
+      {/* 낳음(spawn) — 빈 화살촉(윤곽선만, 안이 안 채워짐) */}
       <marker id="flow-edge-arrow-open" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M1,1 L9,5 L1,9" fill="none" stroke="var(--info)" strokeWidth={1.4} />
       </marker>
-      {/* 잇따름 — 채운 화살촉 + 출발점 점 */}
+      {/* 잇따름(then) — 채운 화살촉 + 출발점 점 */}
       <marker id="flow-edge-arrow-filled" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M1,1 L9,5 L1,9 Z" fill="var(--brand)" />
       </marker>
       <marker id="flow-edge-dot-start" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5">
         <circle cx="5" cy="5" r="3.5" fill="var(--brand)" />
       </marker>
-      {/* 대체 — 화살촉 없이 막대 끝(⊣) */}
+      {/* 대체(supersede) — 화살촉 없이 막대 끝(⊣) */}
       <marker id="flow-edge-bar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="8" orient="auto-start-reverse">
         <line x1="9" y1="1" x2="9" y2="9" stroke="var(--muted-foreground)" strokeWidth={1.6} />
       </marker>
@@ -471,6 +489,10 @@ export function FlowMapCanvas({
   const [undoDeleting, setUndoDeleting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
+  // story #2224 후속(간선 3종 시각언어, 2026-08-27, 유나 CVD 보강 판정) — 마커는 선의
+  // 끝점에만 있어 «선 중간»은 색만으로 종을 말하고 있었다. hover 시 종을 텍스트로도
+  // 노출해 색만으로는 못 가르는 사람(CVD)도 끝까지 안 봐도 종을 알 수 있게 한다.
+  const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
 
   const resetLinkDraft = useCallback(() => setLinkDraft({ phase: 'idle' }), []);
 
@@ -760,22 +782,29 @@ export function FlowMapCanvas({
                           // 쓰면 되므로 "묶음이면 통째로 제외"는 과보수적이었다(클릭해도
                           // 아무 반응이 없어 "고장난 것"처럼 보이는 자리를 새로 심었다).
                           const isUndoable = Boolean(group.candidateId);
+                          const groupKey = `${group.fromNodeId}-${group.toNodeId}`;
+                          // story #2224 후속(CVD 보강) — 보이는 선(아래)은 얇아 hover가 어렵다.
+                          // isUndoable 여부와 무관하게 항상 넓은 투명 히트라인을 깔아 «어느
+                          // 간선이든» hover로 종을 텍스트로 확認할 수 있게 한다(클릭은
+                          // isUndoable일 때만 붙는다 — 되돌리기 자체는 기존 그대로).
                           return (
-                            <g key={`${group.fromNodeId}-${group.toNodeId}`}>
-                              {isUndoable ? (
-                                <line
-                                  aria-hidden="true"
-                                  x1={x1} y1={y1} x2={x2} y2={y2}
-                                  stroke="transparent"
-                                  strokeWidth={14}
-                                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                                  onClick={() => setUndoTarget({
-                                    candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
-                                    declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
-                                    confirmed: group.allConfirmed,
-                                  })}
-                                />
-                              ) : null}
+                            <g
+                              key={groupKey}
+                              onMouseEnter={() => setHoveredEdgeKey(groupKey)}
+                              onMouseLeave={() => setHoveredEdgeKey((k) => (k === groupKey ? null : k))}
+                            >
+                              <line
+                                aria-hidden="true"
+                                x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke="transparent"
+                                strokeWidth={14}
+                                style={{ pointerEvents: 'auto', cursor: isUndoable ? 'pointer' : undefined }}
+                                onClick={isUndoable ? () => setUndoTarget({
+                                  candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
+                                  declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
+                                  confirmed: group.allConfirmed,
+                                }) : undefined}
+                              />
                               <line
                                 data-edge-kind={group.uniformKind === 'mixed' ? 'mixed' : (group.uniformKind ?? 'unknown')}
                                 data-edge-confirmed={group.allConfirmed}
@@ -802,6 +831,20 @@ export function FlowMapCanvas({
                                   style={{ paintOrder: 'stroke', stroke: 'var(--card)', strokeWidth: 3 }}
                                 >
                                   {group.count}
+                                </text>
+                              ) : null}
+                              {/* story #2224 후속(CVD 보강) — hover 중 + 종이 하나로 정해질 때만
+                                  (null·mixed는 라벨 자체 없음, 위 함수와 같은 원칙). count 라벨
+                                  (midY-4)과 안 겹치게 한 줄 위(midY-14)에 둔다. */}
+                              {hoveredEdgeKey === groupKey && edgeKindPortLinkKey(group.uniformKind) ? (
+                                <text
+                                  data-testid="flow-edge-kind-hover-label"
+                                  x={midX} y={midY - 14}
+                                  textAnchor="middle"
+                                  className="fill-foreground font-sans text-[9px] font-semibold"
+                                  style={{ paintOrder: 'stroke', stroke: 'var(--card)', strokeWidth: 3 }}
+                                >
+                                  {t(`portLinkKind_${edgeKindPortLinkKey(group.uniformKind)}`)}
                                 </text>
                               ) : null}
                             </g>

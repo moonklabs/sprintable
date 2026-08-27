@@ -700,3 +700,64 @@ describe('FlowMapCanvas — 수→형 (story #2224 §A1/§A4)', () => {
     }
   });
 });
+
+// story #2224 후속(간선 3종 시각언어, 2026-08-27) — 유나 최종 판정: 코드 정본 색(info/
+// brand/muted-foreground)이 이미 §A2 취지를 만족해 doc 신규 색(#4F46E5 등)은 채택 안 함.
+// 회귀 고정 — 색이 조용히 바뀌지 않는지 값으로 닫는다.
+describe('FlowMapCanvas — 간선 3종 색은 코드 정본 유지 (story #2224, 유나 최종판정)', () => {
+  it('spawn=info·then=brand·supersede=muted-foreground — 신규 색으로 안 바뀌었다', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const kinds: Array<FlowMapEdgeKind> = ['spawn', 'then', 'supersede'];
+    const queueNodes = kinds.map((_, i) => makeNode({ id: `u${i}`, kind: 'queue', depth: 0 }));
+    const edges = kinds.map((k, i) => makeEdge({ fromNodeId: 'n1', toNodeId: `u${i}`, kind: k, confirmed: true }));
+    const lane = makeLane({ nowNodes: [nowNode], queueNodesByDepth: new Map([[0, queueNodes]]), edges });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const strokeByKind = (kind: string) => container.querySelector(`line[data-edge-kind="${kind}"]`)?.getAttribute('stroke');
+    expect(strokeByKind('spawn')).toBe('var(--info)');
+    expect(strokeByKind('then')).toBe('var(--brand)');
+    expect(strokeByKind('supersede')).toBe('var(--muted-foreground)');
+  });
+});
+
+// story #2224 후속(CVD 보강, 2026-08-27, 유나 최종판정) — 마커는 끝점뿐이라 선 중간은 색만
+// 이던 것을 hover 시 종 텍스트로 보완한다. PortLinkKind 기존 i18n 키 재사용을 값으로 고정.
+describe('FlowMapCanvas — 간선 hover 시 종 텍스트 노출 (CVD 보강, story #2224)', () => {
+  it('hover하면 종 라벨이 뜨고, 벗어나면 사라진다', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const queueNode = makeNode({ id: 'u1', kind: 'queue', depth: 0 });
+    const lane = makeLane({
+      nowNodes: [nowNode],
+      queueNodesByDepth: new Map([[0, [queueNode]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn' })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+
+    expect(container.querySelector('[data-testid="flow-edge-kind-hover-label"]')).toBeNull();
+
+    // React가 onMouseEnter/onMouseLeave를 구현하는 방식 — 실제 mouseenter/mouseleave(버블
+    // 안 함) 대신 버블링되는 mouseover/mouseout을 루트에서 위임 청취해 relatedTarget으로
+    // enter/leave를 계산한다. jsdom에서 직접 트리거하려면 그 버블링 이벤트를 쏴야 한다.
+    const g = container.querySelector('line[data-edge-kind="spawn"]')?.closest('g');
+    await act(async () => { g?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    const label = container.querySelector('[data-testid="flow-edge-kind-hover-label"]');
+    expect(label).not.toBeNull();
+    expect(label?.textContent).toBe(koMessages.flow.portLinkKind_spawned);
+
+    await act(async () => { g?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="flow-edge-kind-hover-label"]')).toBeNull();
+  });
+
+  it('종 미정(null)은 hover해도 라벨이 안 뜬다(하나로 말할 수 없다는 원칙 그대로)', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const queueNode = makeNode({ id: 'u1', kind: 'queue', depth: 0 });
+    const lane = makeLane({
+      nowNodes: [nowNode],
+      queueNodesByDepth: new Map([[0, [queueNode]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: null })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const g = container.querySelector('line[data-edge-kind="unknown"]')?.closest('g');
+    await act(async () => { g?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="flow-edge-kind-hover-label"]')).toBeNull();
+  });
+});
