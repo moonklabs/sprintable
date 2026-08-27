@@ -1955,7 +1955,9 @@ describe('ChatBubble — story #92f00dc4 server_command 카드 라우팅', () =>
     const ambiguousMessage: ChatMessage = {
       ...baseMessage,
       content: "'/assign' 실패 — 「채영」에 일치하는 멤버가 여럿입니다.",
-      server_command: { command: 'assign', outcome: 'ambiguous', candidates: ['채영1', '채영2'] },
+      // target_story_number(PR #3552 페드루 리뷰 후속) — 없으면 버튼이 비활성이라 클릭이
+      // 아무 효과가 없다(별도 테스트가 그 축을 검증). 여기는 배선 자체(ChatBubble→카드)만 잰다.
+      server_command: { command: 'assign', outcome: 'ambiguous', candidates: ['채영1', '채영2'], target_story_number: 2947 },
     };
     await act(async () => {
       root.render(wrap(<ChatBubble message={ambiguousMessage} isMine={false} onFillComposer={onFillComposer} />));
@@ -1963,7 +1965,7 @@ describe('ChatBubble — story #92f00dc4 server_command 카드 라우팅', () =>
     const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '채영1') as HTMLButtonElement;
     expect(button).toBeTruthy();
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(onFillComposer).toHaveBeenCalledWith('/assign 채영1');
+    expect(onFillComposer).toHaveBeenCalledWith('/assign #2947 채영1');
   });
 
   it('삭제된(tombstone) 메시지는 server_command가 있어도 삭제 placeholder가 우선한다', async () => {

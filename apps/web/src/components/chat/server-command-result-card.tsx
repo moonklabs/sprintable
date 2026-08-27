@@ -38,6 +38,11 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
   // 때만 구조화 배열로 싣는다(문장 comma-split 금지). 필드 부재(구서버·BE 델타 미착지)면
   // 후보 존 자체를 생략 — 지어내지 않는다.
   const candidates = serverCommand.outcome === 'ambiguous' ? serverCommand.candidates : undefined;
+  // story #92f00dc4(PR #3552 페드루 리뷰 후속) — target_story_number 없이 `/assign 채영1`만
+  // 채우면 BE가 「채영1」을 스토리 ref로 오인해 invalid_args로 떨어진다(#9a5abc24 소델타
+  // 대기, 디디 몫). 필드 부재면 채움 자체를 막는다 — 깨진 커맨드를 채우느니 기능 저하.
+  const targetStoryNumber = serverCommand.outcome === 'ambiguous' ? serverCommand.target_story_number : undefined;
+  const canFillCandidate = Boolean(onFillComposer) && targetStoryNumber != null;
 
   return (
     <div className="min-w-0 max-w-full rounded-xl bg-proof-panel px-3.5 py-2 text-sm text-foreground [overflow-wrap:anywhere]">
@@ -63,8 +68,8 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
               <li key={name}>
                 <button
                   type="button"
-                  onClick={() => onFillComposer?.(`/${serverCommand.command} ${name}`)}
-                  disabled={!onFillComposer}
+                  onClick={() => canFillCandidate && onFillComposer?.(`/${serverCommand.command} #${targetStoryNumber} ${name}`)}
+                  disabled={!canFillCandidate}
                   className="w-full rounded px-1.5 py-1 text-left text-sm leading-relaxed hover:bg-brand/10 disabled:cursor-default disabled:hover:bg-transparent"
                 >
                   {name}

@@ -95,11 +95,16 @@ export interface ChatMessage {
    * `candidates`는 outcome='ambiguous'일 때만 실리는 후보 이름 배열(페드루 판정, PR #3549
    * 리뷰 후속 — 문장 파싱 금지). 구서버(필드 부재)는 `?? null`로 통일 — FE는 candidates가
    * 없으면 후보 존 자체를 생략한다(파싱으로 지어내지 않는다).
-   */
+   * `target_story_number`는 outcome='ambiguous'일 때만 실리는 원 스토리 번호(페드루 리뷰
+   * PR #3552 후속, #9a5abc24 소델타 — 디디 몫). 후보 클릭 fill이 `/assign 채영1`처럼 스토리
+   * 참조를 빠뜨리면 BE가 「채영1」을 스토리 ref로 오인해 invalid_args로 떨어진다 — 이 필드로
+   * `/assign #<번호> <이름>`을 완전하게 채운다. 필드 부재(구서버·BE 델타 미착지)면 후보
+   * 버튼을 비활성화한다(깨진 커맨드를 채우느니 기능 저하, PO 판정). */
   server_command?: {
     command: string;
     outcome: 'executed' | 'denied' | 'not_found' | 'ambiguous' | 'invalid_args';
     candidates?: string[];
+    target_story_number?: number;
   } | null;
 }
 

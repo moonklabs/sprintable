@@ -156,13 +156,13 @@ describe('ServerCommandResultCard — story #92f00dc4 상태별 dot·배지', ()
     expect(container.textContent).not.toContain('후보');
   });
 
-  it('후보 클릭 시 onFillComposer가 "/{command} {name}"으로 호출된다(즉시 집행 아님 — 채움만)', async () => {
+  it('후보 클릭 시 onFillComposer가 "/{command} #{target_story_number} {name}"으로 호출된다(스토리 참조 유실 방지, PR #3552 페드루 리뷰 후속 — 즉시 집행 아님·채움만)', async () => {
     const onFillComposer = vi.fn();
     await act(async () => {
       root.render(wrap(
         <ServerCommandResultCard
           content="'/assign' 실패 — 「채영」에 일치하는 멤버가 여럿입니다."
-          serverCommand={{ command: 'assign', outcome: 'ambiguous', candidates: ['채영1', '채영2'] }}
+          serverCommand={{ command: 'assign', outcome: 'ambiguous', candidates: ['채영1', '채영2'], target_story_number: 2947 }}
           onFillComposer={onFillComposer}
         />
       ));
@@ -170,7 +170,7 @@ describe('ServerCommandResultCard — story #92f00dc4 상태별 dot·배지', ()
     const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '채영1');
     expect(button).toBeTruthy();
     await act(async () => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(onFillComposer).toHaveBeenCalledWith('/assign 채영1');
+    expect(onFillComposer).toHaveBeenCalledWith('/assign #2947 채영1');
   });
 
   it('onFillComposer 미제공이면 후보 버튼이 비활성(disabled)이다', async () => {
@@ -178,11 +178,28 @@ describe('ServerCommandResultCard — story #92f00dc4 상태별 dot·배지', ()
       root.render(wrap(
         <ServerCommandResultCard
           content="'/assign' 실패 — 「채영」에 일치하는 멤버가 여럿입니다."
-          serverCommand={{ command: 'assign', outcome: 'ambiguous', candidates: ['채영1'] }}
+          serverCommand={{ command: 'assign', outcome: 'ambiguous', candidates: ['채영1'], target_story_number: 2947 }}
         />
       ));
     });
     const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '채영1') as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+  });
+
+  it('target_story_number 필드 부재(구서버·BE 델타 미착지)면 onFillComposer가 있어도 후보 버튼이 비활성이다 — 스토리 참조 없이 채우면 BE가 invalid_args로 떨어지므로 깨진 커맨드보다 기능 저하를 택한다(페드루 판정)', async () => {
+    const onFillComposer = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <ServerCommandResultCard
+          content="'/assign' 실패 — 「채영」에 일치하는 멤버가 여럿입니다."
+          serverCommand={{ command: 'assign', outcome: 'ambiguous', candidates: ['채영1'] }}
+          onFillComposer={onFillComposer}
+        />
+      ));
+    });
+    const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '채영1') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onFillComposer).not.toHaveBeenCalled();
   });
 });
