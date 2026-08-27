@@ -86,14 +86,18 @@ def _data(resp):
 # my-actions 쿼리 순서: approvals(.all, gate_type 조인) → [approval_group_counts, approvals
 # 비어있지 않을 때만·명세2 무게] → reviews → my_tasks(명세1, 항상 실행) → my_blockers(.all) →
 # [blocker_weight_counts, my_blockers 비어있지 않을 때만·명세2 무게] → waiting_on_others(.all) →
-# agent_stuck → stalled(.all) → unanswered(.all).
+# agent_stuck → unanswered(.all).
+# ⛔story #93b076c8(2250, 2026-08-27) — "stalled"(story_stalled, Story.updated_at 기준) 쿼리는
+# 이 자리에서 완전히 걷어냈다(페드루 PO 판정 — 부정확 축 폐기, /glance/attention kind="stalled"
+# 로 대체). 그 자리를 차지하던 `seq.append(_r_all(stalled))`도 함께 제거 — 남겨두면 다음
+# 항목(unanswered)이 그 mock을 대신 소비해 시퀀스 전체가 밀린다.
 # ⛔approvals는 story #2288 BE 명세3(gate_type 패스스루)로 WorkflowLineStepRun과 조인해 이제
 # (approval, gate_type) 튜플을 낸다 — 단일 ORM 엔티티가 아니므로 scalars() 대신 .all().
 # ⛔명세2(무게) 배치 쿼리 둘은 **조건부**(원본 리스트가 비면 DB 왕복 자체를 스킵) — 그래서
 # 이 헬퍼도 고정 리스트가 아니라 그 조건을 그대로 반영해 순서를 조립한다(안 그러면 approvals/
 # my_blockers를 채운 테스트만 다음 호출들이 전부 밀려 엉뚱한 mock을 받는다).
 def _ma_seq(
-    approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), stalled=(), unanswered=(),
+    approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), unanswered=(),
     my_tasks=(), approval_group_counts=(), blocker_weight_counts=(), falsified=(),
     overdue_hyps=(), overdue_goals=(), done_no_outcome_goals=(), measure_plan_missing_goal_count=0,
     loop_overdue_hypothesis_count=None, loop_overdue_goal_count=None, loop_outcome_missing_goal_count=None,
@@ -109,9 +113,8 @@ def _ma_seq(
         seq.append(_r_all(blocker_weight_counts))
     seq.append(_r_all(waiting))
     seq.append(_r_scalars(stuck))
-    # story #2836 — 에이전트 401 연속 windowed-COUNT(agent_stuck 바로 뒤·stalled 前).
+    # story #2836 — 에이전트 401 연속 windowed-COUNT(agent_stuck 바로 뒤·unanswered 前).
     seq.append(_r_all(auth_failures))
-    seq.append(_r_all(stalled))
     seq.append(_r_all(unanswered))
     seq.append(_r_all(falsified))  # story #2539
     # story #2829(loop-closure P0) — 「닫히지 않은 루프」 3쿼리 + 미설정 goal 카운트 1쿼리 +
@@ -132,11 +135,11 @@ def _ma_seq(
     # story #2843(PO AC②) — unmeasurable_goal_count 스칼라 신설(#3262 CI 판독·Pedro 처방).
     seq.append(_r_scalar(unmeasurable_goal_count))
     # 0b17472c — attention.items[] project_slug 배치 조회. resolve_project_slugs는 project_id
-    # 집합이 비면 DB 왕복 자체를 스킵(조기 return) — stalled/unanswered/falsified/overdue_*/
+    # 집합이 비면 DB 왕복 자체를 스킵(조기 return) — unanswered/falsified/overdue_*/
     # done_no_outcome_goals 중 하나라도 있어야(그 항목들에 project_id가 실려 있어야) 이 쿼리가
     # 발생한다(approval_group_counts/blocker_weight_counts와 동형 조건부 패턴). command_center.py
     # 실 순서상 unmeasurable_goal_count(#2843) 스칼라 뒤에 이 배치가 온다(rebase 시 확認).
-    if stalled or unanswered or falsified or overdue_hyps or overdue_goals or done_no_outcome_goals:
+    if unanswered or falsified or overdue_hyps or overdue_goals or done_no_outcome_goals:
         seq.append(_r_all(project_slugs))
     return seq
 
@@ -254,29 +257,25 @@ async def test_my_actions_my_blockers_member_private():
 
 
 @pytest.mark.anyio
-async def test_my_actions_stalled_and_unanswered_blocker_enum_only():
-    """CC-BE.2 이상감지: story_stalled + unanswered_blocker(org attention·enum/ids/age·raw text 0).
+async def test_my_actions_unanswered_blocker_enum_only():
+    """CC-BE.2 이상감지: unanswered_blocker(org attention·enum/ids/age·raw text 0).
 
-    story #2538: title 추가(FE "제목+N일" 구별용) — 가설과 무관한 카피 오라벨링 정정의
-    전제 데이터."""
-    sid, blocker_id, blocked_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    story #2538: title 추가(FE "제목+N일" 구별용). ⛔story #93b076c8(2250) — 이 테스트는
+    원래 story_stalled도 함께 검증했으나 그 신호 자체가 폐기됐다(#8934ba7f AC1 실측으로
+    부정확 확定 — Story.updated_at은 같은 값 재대입에도 bump. /glance/attention
+    kind="stalled"가 대체). unanswered_blocker 커버리지는 그대로 유지."""
+    blocker_id, blocked_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
         execute_seq=_ma_seq(
-            stalled=[(sid, _OLD, "정체된 스토리", pid)],
             unanswered=[(blocker_id, blocked_id, _OLD, "막힌 스토리", pid)],
             project_slugs=[(pid, "acme")],
         ))
     assert resp.status_code == 200
     types = {i["type"] for i in _data(resp)["attention"]["items"]}
-    assert {"story_stalled", "unanswered_blocker"} <= types
+    assert "unanswered_blocker" in types
+    assert "story_stalled" not in types, "폐기된 신호가 아직 응답에 남아 있으면 회귀"
     items = _data(resp)["attention"]["items"]
-    stalled_item = next(i for i in items if i["type"] == "story_stalled")
-    assert stalled_item["story_id"] == str(sid) and isinstance(stalled_item["stalled_days"], int)
-    assert stalled_item["title"] == "정체된 스토리"
-    # 0b17472c — project_id/project_slug 배치 부착 확認.
-    assert stalled_item["project_id"] == str(pid)
-    assert stalled_item["project_slug"] == "acme"
     ub = next(i for i in items if i["type"] == "unanswered_blocker")
     assert ub["blocked_story_title"] == "막힌 스토리"
     assert ub["blocked_story_id"] == str(blocked_id) and isinstance(ub["age_days"], int)
