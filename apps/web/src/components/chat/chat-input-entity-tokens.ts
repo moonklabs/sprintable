@@ -22,10 +22,17 @@ export function getEntityQuery(value: string, cursorPos: number): string | null 
 // 안 친 채로(=피커가 열린 채로) 전송하려고 Enter를 누르면, 화살표로 후보를 능동 선택한 적이
 // 없어도(entityIndex는 새 결과 도착 시 자동으로 0번을 가리킨다) 그 최상위 후보가 조용히
 // 토큰으로 삽입돼버렸다(실사례: backlink 오염). hasNavigated(moveUp/moveDown을 최소 1회
-// 거쳤는지)가 true일 때만 Enter가 수락한다 — Tab은 전송 키가 아니라 위험이 없어 늘 수락.
+// 거쳤는지)가 true일 때만 Enter/Tab이 수락한다.
+//
+// ⛔story #3162(채팅·치환 결함 조사, customer-zero 다수) — Tab은 애초에 "전송 키가 아니라
+// 위험 없다"고 판단해 이 게이트 밖이었다(무조건 true). 그 판단이 틀렸다: Tab은 필드 이동
+// 습관(다른 UI로 넘어가려고·코드에디터 습관)으로 «메시지를 보낼 의도 없이도» 흔히 눌리는
+// 키다 — 화살표로 후보를 한 번도 안 훑은 채 Tab을 누르면 최상위 후보가 조용히 삽입되는
+// 것은 Enter 쪽과 완전히 같은 실패 클래스다(실사고: hex 색상 코드 `#595959` 타이핑 중
+// Tab 습관이 무관 스토리를 삽입). Enter와 동일하게 hasNavigated 게이트를 적용한다 —
+// d6f8e025가 절반만 고쳤던 것을 완성.
 export function shouldAcceptEntityPickerSelection(key: string, hasNavigated: boolean): boolean {
-  if (key === 'Tab') return true;
-  if (key === 'Enter') return hasNavigated;
+  if (key === 'Tab' || key === 'Enter') return hasNavigated;
   return false;
 }
 
