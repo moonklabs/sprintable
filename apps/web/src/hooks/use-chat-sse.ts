@@ -89,6 +89,23 @@ export interface ChatMessage {
    * 이상 발행하지 않는다(정보성 카드 폐기 — 카드 자체가 지정자에게만 간다). 구서버(undefined/
    * null)는 기존 렌더로 무회귀. */
   message_kind?: string | null;
+  /** story #92f00dc4(Chat ②층 FE)/#9a5abc24(BE) — BE가 msg_metadata['server_command']를
+   * payload top-level에 additive로 노출(approval_target/event와 동형 패턴). 있으면 이
+   * 메시지는 서버가 결정적으로 집행한 커맨드(카탈로그: done/assign/priority)의 결과 카드다.
+   * `candidates`는 outcome='ambiguous'일 때만 실리는 후보 이름 배열(페드루 판정, PR #3549
+   * 리뷰 후속 — 문장 파싱 금지). 구서버(필드 부재)는 `?? null`로 통일 — FE는 candidates가
+   * 없으면 후보 존 자체를 생략한다(파싱으로 지어내지 않는다).
+   * `target_story_number`는 outcome='ambiguous'일 때만 실리는 원 스토리 번호(페드루 리뷰
+   * PR #3552 후속, #9a5abc24 소델타 — 디디 몫). 후보 클릭 fill이 `/assign 채영1`처럼 스토리
+   * 참조를 빠뜨리면 BE가 「채영1」을 스토리 ref로 오인해 invalid_args로 떨어진다 — 이 필드로
+   * `/assign #<번호> <이름>`을 완전하게 채운다. 필드 부재(구서버·BE 델타 미착지)면 후보
+   * 버튼을 비활성화한다(깨진 커맨드를 채우느니 기능 저하, PO 판정). */
+  server_command?: {
+    command: string;
+    outcome: 'executed' | 'denied' | 'not_found' | 'ambiguous' | 'invalid_args';
+    candidates?: string[];
+    target_story_number?: number;
+  } | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -123,6 +140,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     event: (raw.event ?? null) as ChatMessage['event'],
     // story #2985 — _activation_payload가 top-level에 싣는 message_kind 그대로.
     message_kind: (raw.message_kind ?? null) as string | null,
+    // story #92f00dc4/#9a5abc24 — approval_target/event와 동일 규율(?? null 통일).
+    server_command: (raw.server_command ?? null) as ChatMessage['server_command'],
   };
 }
 

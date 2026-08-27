@@ -35,6 +35,7 @@ import { segmentMessageContent } from './message-segments';
 import { EmbedGroup } from './embed-group';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 import { ReportMessageSummary } from './report-message-summary';
+import { ServerCommandResultCard } from './server-command-result-card';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -78,6 +79,10 @@ interface ChatBubbleProps {
    * 중앙 모달/새 탭 대신 우측 ReadingPanel을 연다. 생략하면(undefined, ThreadPanel 등 아직
    * 안 물려주는 호출부) 기존 동작(모달·window.open) 그대로 — 회귀 없음. */
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
+  /** story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 모호 후보 클릭 콜백(입력창
+   * 채움, 즉시 집행 아님). ChatView가 ChatInput의 prefillCommand 상태로 연결한다. 생략하면
+   * (undefined) 후보 버튼이 비활성 상태로만 뜬다(기능 저하, 에러 아님). */
+  onFillComposer?: (text: string) => void;
 }
 
 interface ContextMenuState {
@@ -362,7 +367,7 @@ const LONG_PRESS_MS = 500;
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
-  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel,
+  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
@@ -386,6 +391,9 @@ export function ChatBubble({
   const eventBlockTemplate = eventTarget?.event_key
     ? parseBlockTemplate(eventDefinitionsByKey?.[eventTarget.event_key]?.block_template)
     : null;
+  // story #92f00dc4(#9a5abc24 BE 짝) — approval_target/event와 동일 규율(구조화 필드
+  // 존재만으로 판별, sniffing 0). 있으면 서버가 직접 집행한 카탈로그 커맨드 결과 카드.
+  const serverCommand = !isDeleted ? message.server_command ?? null : null;
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
@@ -579,6 +587,12 @@ export function ChatBubble({
             <EventBlockCard
               template={eventBlockTemplate}
               payload={eventTarget.payload}
+            />
+          ) : serverCommand ? (
+            <ServerCommandResultCard
+              content={message.content}
+              serverCommand={serverCommand}
+              onFillComposer={onFillComposer}
             />
           ) : hitlRequest ? (
             <HitlApprovalCard
