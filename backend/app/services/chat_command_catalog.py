@@ -167,6 +167,11 @@ class CommandOutcome:
     # 배열만(id는 재조회 없이 이름→서버 재검증이 이미 /assign 재호출 경로라 불필요 — 이
     # 필드는 "무엇을 다시 물어봤는지"만 보여준다).
     candidates: list[str] | None = None
+    # story #3143 PO 리뷰 델타 3회차(2026-08-27, 미르코 FE 배선) — ambiguous 후보 클릭이
+    # "해소된 명령"(`/assign #<번호> <이름>`)을 채우려면 원 스토리 참조가 필요한데, 이
+    # CommandOutcome은 이미 target_id(story.id, UUID)를 갖고 있지만 사람이 타이핑하는
+    # 형태(story_number)가 아니다. ambiguous 한정으로 그 값을 그대로 실어 보낸다.
+    target_story_number: int | None = None
 
 
 async def _execute_done(
@@ -245,7 +250,10 @@ async def _execute_assign(
         if match.candidates:
             candidate_names = [m.name for m in match.candidates]
             names = ", ".join(candidate_names)
-            return CommandOutcome("ambiguous", f"'/assign' 실패 — 「{rest}」에 일치하는 멤버가 여럿입니다: {names} (정확한 이름을 입력하세요)", target_type="story", target_id=story_id, reason="ambiguous_member", candidates=candidate_names)
+            target_story_number = (await db.execute(
+                select(Story.story_number).where(Story.id == story_id)
+            )).scalar_one_or_none()
+            return CommandOutcome("ambiguous", f"'/assign' 실패 — 「{rest}」에 일치하는 멤버가 여럿입니다: {names} (정확한 이름을 입력하세요)", target_type="story", target_id=story_id, reason="ambiguous_member", candidates=candidate_names, target_story_number=target_story_number)
         return CommandOutcome("not_found", f"'/assign' 실패 — 「{rest}」에 일치하는 멤버를 찾을 수 없습니다.", target_type="story", target_id=story_id, reason="member_not_found")
 
     before = (await db.execute(select(Story.assignee_id).where(Story.id == story_id))).scalar_one_or_none()
@@ -312,6 +320,10 @@ async def try_execute_server_command(
             # PO 리뷰 델타 2회차 — ambiguous일 때만. FE가 reply_content의 comma-join
             # 문장을 파싱하지 않고 이 배열로 클릭형 후보 행을 바로 그린다.
             _server_command_meta["candidates"] = result.candidates
+        if result.target_story_number is not None:
+            # PO 리뷰 델타 3회차 — ambiguous 후보 클릭이 "/assign #<번호> <이름>"으로
+            # 해소된 명령을 채우려면 원 스토리 참조(사람이 타이핑하는 형태)가 필요하다.
+            _server_command_meta["target_story_number"] = result.target_story_number
         reply = ConversationMessage(
             conversation_id=conv.id, sender_id=sender.id, content=result.reply_content,
             mentioned_ids=[sender.id],

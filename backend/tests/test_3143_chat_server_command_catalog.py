@@ -168,6 +168,7 @@ async def test_done_command_transitions_story_and_posts_result_card():
             # 판별하는 기계 식별자. approval_target/event와 동일 additive namespace.
             assert reply.msg_metadata["server_command"] == {"command": "done", "outcome": "executed"}
             assert "candidates" not in reply.msg_metadata["server_command"], "candidates는 ambiguous 전용 — 다른 outcome엔 키 자체가 없어야 한다"
+            assert "target_story_number" not in reply.msg_metadata["server_command"], "target_story_number도 ambiguous 전용"
     finally:
         await engine.dispose()
 
@@ -302,6 +303,9 @@ async def test_assign_ambiguous_prefix_lists_candidates_and_does_not_mutate():
             sc = reply.msg_metadata["server_command"]
             assert sc["command"] == "assign" and sc["outcome"] == "ambiguous"
             assert set(sc["candidates"]) == {"Santiago", "Santi"}
+            # PO 리뷰 델타 3회차(2026-08-27) — 후보 클릭이 "/assign #<번호> <이름>"으로
+            # 채워지려면 원 스토리 번호가 필요하다(story_id는 UUID라 사람이 못 타이핑).
+            assert sc["target_story_number"] == story.story_number
     finally:
         await engine.dispose()
 
