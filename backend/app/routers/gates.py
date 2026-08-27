@@ -186,6 +186,13 @@ class GateResponse(BaseModel):
     # from_attributes로 자동 채워짐(resolver_id와 동일 선례) — 오늘(#2985) 이 필드 자체를
     # 빠뜨렸던 걸 여기서 보강.
     designated_approver_id: uuid.UUID | None = None
+    # story #d9c09f4b(2026-08-27, customer-zero) — 카드가 어디로도 실패하지 않고 「엉뚱한
+    # 실사람」에게 정확히 배달된 실사고(호출자가 approver_member_id를 오지정·배달층 자체는
+    # 무결)의 해독제. 배달 성공/실패와 무관하게 "이 게이트가 실제로 누구를 가리키는지"를
+    # 응답에서 즉시 에코 — 호출자가 원탭 자가검증 가능. create_decision_request만 채움
+    # (additive·nullable, risk_grade/project_id와 동일 선례 — 타 엔드포인트는 이 속성이
+    # ORM에 없어 from_attributes 기본값 None으로 조용히 통과).
+    designated_approver_name: str | None = None
     held_until: datetime | None = None  # S31: status='held' 시 시한부 만료(무기한이면 None)·additive
     neutral_facts: dict[str, Any] | None = None
     # H1-S3: merge verdict gate evidence metadata (0118)·additive·하위호환 default.
@@ -449,6 +456,26 @@ async def create_decision_request(
     await session.refresh(gate)
     resp = GateResponse.model_validate(gate)
     resp.project_id = project_id
+    # story #d9c09f4b(2026-08-27) — 카드 배달(_notify_decision_request_card, best-effort)
+    # 성패와 완전히 독립된 별도 조회. 카드가 조용히 성공(엉뚱한 대상)하든 실패하든 이
+    # 필드는 "approver_member_id가 실제로 가리키는 사람"을 있는 그대로 보여준다 — 그게 이
+    # 필드의 존재 이유(호출자 자가검증)라 조회 결과(미확인 멤버)는 None 폴백, 지어내지
+    # 않는다.
+    # ⛔카디르 QA(#3550): 위 "None 폴백"은 멤버-미존재만 커버할 의도였는데, try/except가
+    # 없어 조회 자체가 예외로 죽으면(레이스·일시적 DB 오류 등) 이미 성공한 게이트 생성이
+    # HTTP 500으로 뒤집혔다(강제 raise 재현) — 관측성 필드 하나가 본 기능(게이트 생성 자체는
+    # 이미 커밋 완료)을 죽이는 본말전도. 기존 best-effort 관용구(이 파일 전역 다수 — 예:
+    # _notify_decision_request_card)와 동형으로 감싼다.
+    try:
+        from app.services.member_resolver import lookup_members_by_ids
+        _designated = (await lookup_members_by_ids({body.approver_member_id}, session)).get(body.approver_member_id)
+        resp.designated_approver_name = _designated.name if _designated is not None else None
+    except Exception:  # noqa: BLE001 — best-effort, 조회 실패가 이미 성공한 게이트 생성 응답을 깨면 안 됨.
+        logger.warning(
+            "designated_approver_name 조회 실패(비차단) gate=%s approver=%s",
+            gate.id, body.approver_member_id, exc_info=True,
+        )
+        resp.designated_approver_name = None
     # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존
     # 갭을 여기서까지 상속하면 FE deriveRiskLevel이 null→'unknown'으로 읽어 low 등재의
     # 목적(원탭 승인)이 생성 응답 자체에서는 무효화된다 — 자체 신규 테스트로 발견·직접 수정).
