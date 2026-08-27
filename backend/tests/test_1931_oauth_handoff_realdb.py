@@ -466,6 +466,67 @@ async def test_consume_rejected_when_return_uri_mismatches_issued(monkeypatch):
         await engine.dispose()
 
 
+# ─── story #3121 AC1 Phase 1 delta(PR #3538 PO 리뷰) — expand-contract 하위호환 ──────────
+
+@pytest.mark.anyio
+async def test_issue_and_consume_omitted_mode_fields_defaults_to_https_round_trip(monkeypatch):
+    """민군 BFF 절반 착지 전 레거시 payload({user_id, code_challenge}만·{code, code_verifier}만)
+    재현 — callback_mode/return_uri를 아예 안 보내도 서버가 https로 유도해 이슈+consume
+    왕복이 여전히 성공해야 한다(머지 즉시 422 전멸 방지가 이 delta의 목적)."""
+    from app.routers.auth_firebase_internal import (
+        OAuthHandoffConsumeRequest, OAuthHandoffIssueRequest, consume_oauth_handoff, issue_oauth_handoff,
+    )
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+
+        verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            issued = await issue_oauth_handoff(
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
+                authorization=None, db=s,
+            )
+        assert issued.code
+
+        async with Session() as s:
+            consumed = await consume_oauth_handoff(
+                OAuthHandoffConsumeRequest(code=issued.code, code_verifier=verifier),
+                authorization=None, db=s,
+            )
+        assert consumed.access_token
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_issue_rejects_half_declared_mode_fields(monkeypatch):
+    """callback_mode만 있고 return_uri가 없는(혹은 그 반대) 반쪽 선언은 레거시 유도 대상이
+    아니다 — 오배선 신호로 보고 명시 거부한다(조용히 한쪽만 기본값으로 채우지 않음)."""
+    from app.routers.auth_firebase_internal import OAuthHandoffIssueRequest, issue_oauth_handoff
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+
+        _verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await issue_oauth_handoff(
+                    OAuthHandoffIssueRequest(
+                        user_id=str(user_id), code_challenge=challenge, callback_mode="https",
+                    ),
+                    authorization=None, db=s,
+                )
+            assert exc_info.value.status_code == 400
+    finally:
+        await engine.dispose()
+
+
 # ─── §10.6 음성 테스트 — schema-level 거부(extra="forbid") ─────────────────────
 
 def test_consume_schema_rejects_unknown_fields():

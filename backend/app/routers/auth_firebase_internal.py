@@ -488,6 +488,34 @@ def _expected_return_uri(callback_mode: str) -> str:
     return f"{settings.app_url}{_OAUTH_NATIVE_RETURN_PATH}"
 
 
+_DEFAULT_CALLBACK_MODE = "https"
+
+
+def _resolve_callback_mode_and_uri(
+    callback_mode: str | None, return_uri: str | None, *, log_event: str,
+) -> tuple[str, str]:
+    """story #3121 AC1 — PO delta(2026-08-27, PR #3538 리뷰): expand-contract Phase 1.
+    현행 BFF(민군 절반 착지 전)는 이 두 필드를 아예 안 보낸다 — 필수로 걸면 머지 즉시
+    기존 이슈/consume 호출이 422로 전멸(dev 핸드오프 전면 다운). 미제공(둘 다 None)이면
+    https로 유도하되 조용히 넘어가지 않고 로그 한 줄로 파생임을 남긴다. 오늘 BFF가
+    custom_scheme을 아예 안 보내므로(#3116 활성화 트랙 전) https 유도가 실사용과 정합.
+
+    ⚠️Phase 2 승격 조건(코드 주석 고정 — 기한 없는 과도기 방지): 민군 BFF 절반(이슈
+    호출부 callback_mode/return_uri 명시 배선 + consume 호출부 동일)이 dev에 착지·배포
+    확認되면 이 두 필드를 Optional→필수로 승격하는 소PR을 낸다. 그 전까지는 두 필드
+    모두 명시 제공(둘 다 있어야 함 — 하나만 있는 반쪽 선언은 오배선 신호라 거부)하거나
+    둘 다 생략(레거시 유도)만 허용."""
+    if callback_mode is None and return_uri is None:
+        logger.info("%s callback_mode_derived reason=legacy_caller_no_mode_field mode=%s", log_event, _DEFAULT_CALLBACK_MODE)
+        return _DEFAULT_CALLBACK_MODE, _expected_return_uri(_DEFAULT_CALLBACK_MODE)
+    if callback_mode is None or return_uri is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="callback_mode and return_uri must both be provided or both omitted",
+        )
+    return callback_mode, return_uri
+
+
 class OAuthHandoffIssueRequest(BaseModel):
     # 산티아고 §10.1.2 계열 defense-in-depth: 이 내부 엔드포인트는 BFF 전용이라 공개 공격면은
     # 아니지만, 스키마가 정의한 필드 외 어떤 것도 조용히 무시하지 않는다(§10.6 음성테스트 7과
@@ -499,8 +527,10 @@ class OAuthHandoffIssueRequest(BaseModel):
     # story #3121 AC1 — 계약 §2: custom-scheme fallback은 OAuth 시작 전 정적으로 결정되는
     # compatibility mode(association 실패 후 동적 전환 아님). BFF가 OAuth-start 시점에 이미
     # 확定한 값을 그대로 선언 — 서버는 이 선언을 `_expected_return_uri()` 고정값과 대조만 한다.
-    callback_mode: Literal["https", "custom_scheme"]
-    return_uri: str
+    # PO delta(PR #3538) — Optional/None(Phase 1 expand-contract, `_resolve_callback_mode_and_uri`
+    # 참조). 민군 BFF 절반 착지 확認 후 필수 승격 예정.
+    callback_mode: Literal["https", "custom_scheme"] | None = None
+    return_uri: str | None = None
 
 
 class OAuthHandoffIssueResponse(BaseModel):
@@ -527,7 +557,11 @@ async def issue_oauth_handoff(
 
     # story #3121 AC1 — return_uri는 클라 선언을 그대로 저장하지 않는다: 모드별 서버 고정값과
     # byte-exact 일치해야 발급 자체를 진행(§10.9 exact-origin). 불일치는 오배선/변조 신호.
-    if body.return_uri != _expected_return_uri(body.callback_mode):
+    # PO delta(PR #3538, Phase 1) — 둘 다 미제공이면 레거시 BFF로 보고 https로 유도.
+    callback_mode, return_uri = _resolve_callback_mode_and_uri(
+        body.callback_mode, body.return_uri, log_event="auth.oauth_handoff.issue",
+    )
+    if return_uri != _expected_return_uri(callback_mode):
         logger.warning("auth.oauth_handoff.issue rejected reason=return_uri_mismatch")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid return_uri")
 
@@ -558,8 +592,8 @@ async def issue_oauth_handoff(
         code_hash=code_hash,
         user_id=user_uuid,
         code_challenge=body.code_challenge,
-        callback_mode=body.callback_mode,
-        return_uri=body.return_uri,
+        callback_mode=callback_mode,
+        return_uri=return_uri,
     )
 
     logger.info("auth.oauth_handoff.issue success")
@@ -580,8 +614,10 @@ class OAuthHandoffConsumeRequest(BaseModel):
 
     code: str
     code_verifier: str
-    callback_mode: Literal["https", "custom_scheme"]
-    return_uri: str
+    # PO delta(PR #3538) — Optional/None(Phase 1 expand-contract, `_resolve_callback_mode_and_uri`
+    # 참조). 민군 BFF 절반 착지 확認 후 필수 승격 예정.
+    callback_mode: Literal["https", "custom_scheme"] | None = None
+    return_uri: str | None = None
 
 
 class OAuthHandoffConsumeResponse(BaseModel):
@@ -614,12 +650,15 @@ async def consume_oauth_handoff(
     if not settings.firebase_oauth_handoff_enabled:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="OAuth handoff not enabled")
 
+    callback_mode, return_uri = _resolve_callback_mode_and_uri(
+        body.callback_mode, body.return_uri, log_event="auth.oauth_handoff.consume",
+    )
     consumed = await consume_handoff_code(
         db,
         code=body.code,
         code_verifier=body.code_verifier,
-        callback_mode=body.callback_mode,
-        return_uri=body.return_uri,
+        callback_mode=callback_mode,
+        return_uri=return_uri,
     )
     if consumed is None:
         logger.warning("auth.oauth_handoff.consume rejected reason=code_consume_failed")
