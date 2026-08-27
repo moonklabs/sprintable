@@ -633,6 +633,8 @@
     "ladderLabelLens": "Lens",
     "ladderLabelMove": "Go",
     "ladderLabelPending": "No surface yet",
+    "ladderReservedChip": "◇ Inside a story",
+    "ladderReservedInfo": "\"Task\" doesn't have its own screen yet. It's tracked as a subtask inside stories for now — that's not broken, this scale just doesn't have a dedicated surface yet. This tile activates once that surface exists.",
     "earthSectionTitle": "Questions being verified now",
     "earthEpicCount": "{n} goal(s) linked",
     "earthMetric": "Metric",
