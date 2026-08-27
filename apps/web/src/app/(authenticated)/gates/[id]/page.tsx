@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, CheckCircle, XCircle } from 'lucide-react';
@@ -132,6 +133,26 @@ export default function GateDetailPage() {
   // 승인 가능한 것처럼 보이는 게 실 결함이라 canonical의 첫 라이브 실측에서 바로 잡았다.
   const isDocGate = gate?.work_item_type === 'doc' || gate?.gate_type === 'doc_approval';
   const isCanonicalizeGate = gate?.gate_type === 'artifact_canonicalize';
+  // story #3134(#3128 전수점검 잔여 — loop_decision) — HypothesisOutcomeDraft(gate-evidence.tsx)가
+  // 초안 verdict(verified/falsified/killed·actual·reason) 텍스트는 보여주지만, 그 판정이 어느
+  // loop을 재는지로 가는 링크가 없었다. loop_decision의 work_item_id는 `LoopRun.id`(BE
+  // loop.py:303 create_gate 호출·work_item_type='loop')다 — `/loops/{id}` 가 실 상세 페이지
+  // (loop-detail-client.tsx, 268줄 실 콘텐츠 확認)라 artifact와 동일 primitive로 닫는다.
+  // ⛔workflow_config_publish는 이번에도 스코프 밖 — 그라운딩 결과 `wf_line_version`은 FE
+  // entity 계열에 아예 등록 안 됨(embed-card.tsx 자체 주석: RICH_PREVIEW_TYPES·ENTITY_API·
+  // getEntityHref 셋 다 없음) + 대상 페이지(organization/workforce/workflow)가 "지금 사는
+  // config"만 보여줄 뿐 "이 버전(review 대상)"을 볼 방법이 아예 없다 — 링크를 억지로 달면
+  // #2118 P2.2 AC④가 이미 금지한 "미리보기 없는 타입에 빈 모달 여는 거짓 진입점"이 된다.
+  // 이건 BE(neutral_facts에 config diff 임베드) 또는 신규 FE 뷰어가 필요한 더 큰 스코프 —
+  // 페드루군에 사이징 보고.
+  const isLoopDecisionGate = gate?.gate_type === 'loop_decision';
+  const targetLink = isDocGate && gate?.work_item_summary?.slug
+    ? { href: `/docs/${gate.work_item_summary.slug}`, labelKey: 'gateDetailViewTargetDoc' as const }
+    : isCanonicalizeGate && gate?.work_item_id
+    ? { href: `/artifacts/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetArtifact' as const }
+    : isLoopDecisionGate && gate?.work_item_id
+    ? { href: `/loops/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetLoop' as const }
+    : null;
   const needsAction = !!gate && gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate || isCanonicalizeGate);
   // story #2091(P0) — needsAction은 "이 게이트가 사람의 판단을 필요로 하는가"만 답한다(gate 자체의
   // 속성). "이 화면을 보는 나(caller)에게 승인 권한이 있는가"는 별개 질문인데 여태 이 둘을 섞어서
@@ -289,6 +310,15 @@ export default function GateDetailPage() {
                     ? ` · ${projectMemberships.find((p) => p.projectId === gate.project_id)?.projectName ?? gate.project_id.slice(0, 8)}`
                     : ''}
                 </p>
+
+                {/* story #3128 — needsAction/canAct와 무관하게 항상 렌더(이미 해소된 카드도
+                    "무엇을 승인했는지" 원문을 감사할 수 있어야 한다 — decisionFacts·
+                    GateActivityHistory와 같은 원칙). */}
+                {targetLink ? (
+                  <Link href={targetLink.href} className="text-xs font-medium text-primary hover:underline">
+                    {t(targetLink.labelKey)}
+                  </Link>
+                ) : null}
 
                 {/* story #3113(AC2) — 「카드를 눌러도 내용을 볼 수 있는 상세 뷰 자체가 없다」
                     처방. needsAction/canAct와 무관하게 항상 렌더(이미 해소된 결정도 «무엇을

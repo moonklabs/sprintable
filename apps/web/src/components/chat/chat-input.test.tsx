@@ -428,3 +428,100 @@ describe('ChatInput — 로드맵 PR-B L1(floating elev-overlay)', () => {
     expect(listbox?.className).not.toContain('shadow-md');
   });
 });
+
+// story #92f00dc4(Chat ②층 FE, doc exec-command-final-spec-92f00dc4 §①) — 서버 집행
+// 카탈로그(done/assign/priority) 자동완성 회귀가드.
+describe('ChatInput — 서버 집행 커맨드 자동완성(story #92f00dc4 §①)', () => {
+  it('"/" 입력 시 done/assign/priority가 인자 힌트와 함께 뜬다', async () => {
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '/');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const listbox = container.querySelector('[role="listbox"][aria-label="커맨드 후보"]');
+    expect(listbox).not.toBeNull();
+    const text = listbox!.textContent ?? '';
+    expect(text).toContain('/done');
+    expect(text).toContain('/assign');
+    expect(text).toContain('/priority');
+    expect(text).toContain('‹스토리#›'); // done 인자 힌트
+    expect(text).toContain('‹스토리#› ‹멤버명›'); // assign 인자 힌트
+    // 회귀가드 — commandArgHintPriority는 `<critical|high|medium|low>`처럼 `<...>`를 쓰면
+    // next-intl이 rich-text 태그 문법으로 오인해 파싱 실패, 화면에 "chats.commandArgHintPriority"
+    // 원시 키가 그대로 새는 실사고가 있었다(스크린샷 검증으로 발견). guillemet(‹›)로 우회.
+    expect(text).not.toContain('chats.commandArgHintPriority');
+    expect(text).toContain('critical|high|medium|low');
+  });
+
+  it('/do 접두로 좁히면 done만 남는다(prefix 필터 회귀 없음)', async () => {
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '/do');
+      el.selectionStart = 3;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const listbox = container.querySelector('[role="listbox"][aria-label="커맨드 후보"]');
+    const text = listbox!.textContent ?? '';
+    expect(text).toContain('/done');
+    expect(text).not.toContain('/assign');
+    expect(text).not.toContain('/priority');
+  });
+
+  it('done 후보 클릭 시 입력창이 "/done "으로 채워진다(기존 selectCommand 경로 재사용 확認)', async () => {
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '/');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const button = [...container.querySelectorAll('[role="listbox"][aria-label="커맨드 후보"] button')]
+      .find((b) => b.textContent?.includes('/done')) as HTMLButtonElement;
+    expect(button).toBeTruthy();
+    await act(async () => { button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    expect(el.value).toBe('/done ');
+  });
+});
+
+// story #92f00dc4(doc §🎯 모호 후보 클릭) — 결과 카드의 후보 클릭이 입력창을 채우는 배선
+// (chat-view.tsx handleFillComposer → ChatInput의 prefillCommand prop).
+describe('ChatInput — prefillCommand(story #92f00dc4 §🎯 모호 후보 클릭 배선)', () => {
+  it('prefillCommand가 오면 입력창이 그 텍스트로 교체+포커스된다(즉시 전송 아님)', async () => {
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} prefillCommand={{ text: '/assign #2947 채영1', nonce: 1 }} />));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); }); // requestAnimationFrame 흘려보냄
+    expect(textarea().value).toBe('/assign #2947 채영1');
+    expect(document.activeElement).toBe(textarea());
+  });
+
+  it('같은 nonce가 재전달되면(리렌더) 중복 적용하지 않는다 — 사용자가 그 사이 지운 텍스트를 되살리지 않음', async () => {
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} prefillCommand={{ text: '/done #1', nonce: 1 }} />));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, ''); // 사용자가 지움
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // 같은 nonce=1로 리렌더(부모가 다른 이유로 재렌더된 상황 재현) — effect가 재적용하면 안 됨.
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} prefillCommand={{ text: '/done #1', nonce: 1 }} />));
+    });
+    expect(textarea().value).toBe('');
+  });
+});

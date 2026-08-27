@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  computeReportDensity, deriveKicker, extractLeadSentence, extractTopLevelItems, isReportDense,
-  REPORT_DENSITY_MIN_CHARS, REPORT_DENSITY_MIN_LINES,
+  computeReportDensity, deriveKicker, deriveVerdictTone, extractLeadSentence, extractNextAction,
+  extractTopLevelItems, isReportDense, REPORT_DENSITY_MIN_CHARS, REPORT_DENSITY_MIN_LINES,
 } from './chat-report-density';
 
 describe('isReportDense (story #ec57c80c, 발동 임계값)', () => {
@@ -198,6 +198,55 @@ describe('extractTopLevelItems (story #ec57c80c — 최상위 목록만, 하위/
   });
 });
 
+describe('deriveVerdictTone (story #5c29454b — 판정 dot 색, 모호=중립 안전측)', () => {
+  it('PASS/승인/완료만 있으면 success', () => {
+    expect(deriveVerdictTone('**결과 — PASS**')).toBe('success');
+    expect(deriveVerdictTone('선생님이 승인했는')).toBe('success');
+    expect(deriveVerdictTone('작업 완료')).toBe('success');
+  });
+
+  it('FAIL/반려만 있으면 destructive', () => {
+    expect(deriveVerdictTone('**결과 — FAIL**')).toBe('destructive');
+    expect(deriveVerdictTone('사유 없이 반려됐는')).toBe('destructive');
+  });
+
+  it('둘 다 없거나 둘 다 있으면(모호) neutral', () => {
+    expect(deriveVerdictTone('그냥 진행 상황 업데이트')).toBe('neutral');
+    expect(deriveVerdictTone('이전엔 반려였는데 이번엔 승인')).toBe('neutral');
+  });
+});
+
+describe('extractNextAction (story #5c29454b — 다음 행동, no-fiction 보수 패턴)', () => {
+  it('"다음: ..." 구분자가 있으면 뒤의 문구를 verbatim으로 뽑는다', () => {
+    expect(extractNextAction('본문\n다음: 카디르군 QA 요청')).toBe('카디르군 QA 요청');
+  });
+
+  it('"다음 행동: ..." / "→ 다음 ..." / "Next: ..." 변형도 매치한다', () => {
+    expect(extractNextAction('다음 행동: PR 머지')).toBe('PR 머지');
+    expect(extractNextAction('→ 다음: 배포 확인')).toBe('배포 확인');
+    expect(extractNextAction('Next: review needed')).toBe('review needed');
+  });
+
+  it('구분자 없는 «다음»(사인오프·타맥락)은 매치하지 않는다(오분류 방지)', () => {
+    expect(extractNextAction('다음 오는 것 잇는')).toBeNull();
+    expect(extractNextAction('다음 재호출 시 반영되는')).toBeNull();
+    expect(extractNextAction('다음 차례에 처리하는')).toBeNull();
+  });
+
+  it('구분자 자체가 없으면 null(지어내지 않음)', () => {
+    expect(extractNextAction('그냥 평범한 보고문입니다.')).toBeNull();
+  });
+
+  it('여러 줄이 매치되면 마지막(결론) 매치를 채택한다', () => {
+    const raw = '다음: 초안\n중간 내용\n다음: 최종 확定 — 배포 진행';
+    expect(extractNextAction(raw)).toBe('최종 확定 — 배포 진행');
+  });
+
+  it('마크다운 마커는 스트립된 verbatim 텍스트로 나온다', () => {
+    expect(extractNextAction('다음: **PR#3541** 머지')).toBe('PR#3541 머지');
+  });
+});
+
 describe('computeReportDensity (story #ec57c80c — 통합, 발동 게이트)', () => {
   it('발동 조건 미충족이면 null(호출부가 기존 렌더로 폴백)', () => {
     expect(computeReportDensity('짧은 메시지', 'result')).toBeNull();
@@ -243,5 +292,37 @@ describe('computeReportDensity (story #ec57c80c — 통합, 발동 게이트)', 
     expect(result!.lead).toBe('요약 문장입니다');
     expect(result!.topLevelItems.map((i) => i.text)).toEqual(['두 번째 헤더', '세 번째 헤더', '네 번째 헤더']);
     expect(result!.topLevelItems.some((i) => i.text === result!.lead)).toBe(false);
+  });
+
+  it('story #5c29454b — verdictTone/nextAction도 함께 채운다', () => {
+    const raw = [
+      '**전체 판정 — PASS**',
+      '오늘 배포한 3개 표면 전부 실측 완료.',
+      '**① 3009 — PASS**',
+      '- 인라인 카드 elev-card 토큰 확認',
+      '**② 3010 — PASS**',
+      '- inbox Bot칩 확認',
+      '**③ 3011 — PASS**',
+      '- Workcell 잘림 fix 확認',
+      '다음: 유나군 design 게이트 대기',
+    ].join('\n');
+    const result = computeReportDensity(raw, 'result');
+    expect(result!.verdictTone).toBe('success');
+    expect(result!.nextAction).toBe('유나군 design 게이트 대기');
+  });
+
+  it('story #5c29454b — «다음» 구분자가 원문에 없으면 nextAction=null(지어내지 않음)', () => {
+    const raw = [
+      '**전체 판정 — PASS**',
+      '오늘 배포한 3개 표면 전부 실측 완료.',
+      '**① 3009 — PASS**',
+      '- 인라인 카드 elev-card 토큰 확認',
+      '**② 3010 — PASS**',
+      '- inbox Bot칩 확認',
+      '**③ 3011 — PASS**',
+      '- Workcell 잘림 fix 확認',
+    ].join('\n');
+    const result = computeReportDensity(raw, 'result');
+    expect(result!.nextAction).toBeNull();
   });
 });

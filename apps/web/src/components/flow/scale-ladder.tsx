@@ -1,7 +1,9 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 
@@ -31,14 +33,17 @@ export type LadderLevel = (typeof LADDER_LEVELS)[number];
 
 type LensView = 'hypothesis' | 'flow' | 'list';
 
-type RungBehavior = { kind: 'lens'; view: LensView } | { kind: 'move' } | { kind: 'dead' };
+// story #3130(유나 SSOT doc jakup-reserved-signal-final-spec-3731984e, 2026-08-27) — 「작업」
+// 칸의 dead(클릭 불가·«고장»으로 읽힘)를 reserved(클릭 가능·안내 팝오버)로 전환. `dead`
+// kind는 타입에서 제거하지 않는다(doc: "추가" — 향후 다른 kind가 필요할 자리로 존치).
+type RungBehavior = { kind: 'lens'; view: LensView } | { kind: 'move' } | { kind: 'dead' } | { kind: 'reserved' };
 
 const RUNG_BEHAVIOR: Record<LadderLevel, RungBehavior> = {
   earth: { kind: 'lens', view: 'hypothesis' },
   continent: { kind: 'move' },
   city: { kind: 'lens', view: 'flow' },
   street: { kind: 'lens', view: 'list' },
-  building: { kind: 'dead' },
+  building: { kind: 'reserved' },
 };
 
 export function ScaleLadder({ activeLevel = 'earth', compact = false }: { activeLevel?: LadderLevel; compact?: boolean }) {
@@ -67,8 +72,34 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
     const behavior = RUNG_BEHAVIOR[level];
     if (behavior.kind === 'move') return t('ladderLabelMove');
     if (behavior.kind === 'dead') return t('ladderLabelPending');
+    if (behavior.kind === 'reserved') return t('ladderLabelPending'); // 도달 안 함 — reserved는 전용 칩 렌더로 대체.
     return t('ladderLabelLens');
   }
+
+  // story #3130 — reserved rung 클릭 시 안내 팝오버. 한 번에 하나만 열린다(래더 전체에 예약
+  // rung이 여럿이어도 상태 하나 공유 — 오늘은 building 뿐이라 실질적으로 무관하지만 향후
+  // 확장 대비). ref는 열린 rung의 wrapper에만 붙는다 — 트리거 버튼 클릭이 "바깥 클릭"으로
+  // 오인돼 즉시 재닫히는 것을 막는다(sender-profile-popover.tsx와 동형 관행).
+  const [openReservedLevel, setOpenReservedLevel] = useState<LadderLevel | null>(null);
+  const reservedWrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (openReservedLevel === null) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (reservedWrapperRef.current && !reservedWrapperRef.current.contains(e.target as Node)) {
+        setOpenReservedLevel(null);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenReservedLevel(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openReservedLevel]);
 
   // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — <lg에서 이 카드열(이름+질문 5칸, py-2.5)이
   // 「주」처럼 보여 보드(칸반) 콘텐츠를 아래로 밀어냈다(유나 실측). 래더는 원래 역할이 보드의
@@ -89,6 +120,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
             'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium transition',
             active ? 'bg-brand/10 text-brand' : 'text-muted-foreground',
             behavior.kind === 'dead' && 'cursor-not-allowed opacity-60',
+            behavior.kind === 'reserved' && 'cursor-help',
           );
           if (behavior.kind === 'lens') {
             return (
@@ -102,6 +134,36 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
               <Link key={level} href={goalsHref} className={chipClassName}>
                 {t(`ladderName_${level}`)}
               </Link>
+            );
+          }
+          if (behavior.kind === 'reserved') {
+            // compact 칩 텍스트는 이름 그대로 유지(«스토리 안» 축약은 폭 예산상 생략) — (i)+
+            // 클릭 팝오버로 "예약/안내"임을 전달하는 것으로 충분하다고 판단(doc: 칩 축약은
+            // "가능"이지 필수 아님). 터치 기기는 hover가 없어 이 클릭 팝오버가 유일한 안내
+            // 경로다(doc 명시).
+            const open = openReservedLevel === level;
+            const infoId = `ladder-reserved-info-compact-${level}`;
+            return (
+              <div key={level} ref={open ? reservedWrapperRef : undefined} className="relative shrink-0">
+                <button
+                  type="button"
+                  aria-describedby={open ? infoId : undefined}
+                  onClick={() => setOpenReservedLevel(open ? null : level)}
+                  className={cn(chipClassName, 'inline-flex items-center gap-1')}
+                >
+                  {t(`ladderName_${level}`)}
+                  <Info aria-hidden="true" className="size-3" />
+                </button>
+                {open && (
+                  <div
+                    id={infoId}
+                    role="tooltip"
+                    className="absolute left-0 top-full z-20 mt-2 w-56 rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+                  >
+                    {t('ladderReservedInfo')}
+                  </div>
+                )}
+              </div>
             );
           }
           return (
@@ -123,7 +185,10 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
           'relative flex-1 border-r border-border px-3 py-2.5 pb-6 text-left last:border-r-0',
           active && 'bg-gradient-to-b from-brand/10 to-transparent',
           behavior.kind === 'dead' && 'cursor-not-allowed bg-muted/40',
-          behavior.kind !== 'dead' && 'cursor-pointer hover:bg-muted/30',
+          // story #3130 — reserved는 bg-muted/40을 유지한다(«죽음 회색»이 아니라 «예약» 신호로
+          // doc이 명시 — 색 자체는 안 바꾸고 cursor-help+hover 강화로 클릭 가능함만 알린다).
+          behavior.kind === 'reserved' && 'cursor-help bg-muted/40 hover:bg-muted/60',
+          behavior.kind !== 'dead' && behavior.kind !== 'reserved' && 'cursor-pointer hover:bg-muted/30',
         );
         const inner = (
           <>
@@ -161,6 +226,42 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
             <Link key={level} href={goalsHref} className={rungClassName}>
               {inner}
             </Link>
+          );
+        }
+        if (behavior.kind === 'reserved') {
+          // story #3130(유나 SSOT doc 4f6cba9b) — dot/라벨이 lens·move와 달라 공유 `inner`를
+          // 재사용하지 않는다: 점선 dot(placeholder 관용어)·이름 자리 우측의 (i) 아이콘·바닥의
+          // 라벨(9.5px uppercase 캡션) 대신 칩(«◇ 스토리 안에 있음»). 클릭 → 팝오버 토글.
+          const open = openReservedLevel === level;
+          const infoId = `ladder-reserved-info-${level}`;
+          return (
+            <div key={level} ref={open ? reservedWrapperRef : undefined} className={rungClassName}>
+              <button
+                type="button"
+                aria-describedby={open ? infoId : undefined}
+                onClick={() => setOpenReservedLevel(open ? null : level)}
+                className="block h-full w-full text-left"
+              >
+                <div className="text-sm font-semibold text-muted-foreground">{t(`ladderName_${level}`)}</div>
+                <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
+                <span aria-hidden="true" className="absolute top-2.5 right-2.5 flex items-center gap-1">
+                  <Info className="size-3 text-muted-foreground" />
+                  <span className="size-2 rounded-full border border-dashed border-border" />
+                </span>
+                <span className="absolute bottom-2 left-3 inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                  {t('ladderReservedChip')}
+                </span>
+              </button>
+              {open && (
+                <div
+                  id={infoId}
+                  role="tooltip"
+                  className="absolute left-3 top-full z-20 mt-2 w-56 rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+                >
+                  {t('ladderReservedInfo')}
+                </div>
+              )}
+            </div>
           );
         }
         return (

@@ -52,6 +52,92 @@ describe('ActionZone attention row (command-center-surveillance-reframe-handoff 
   });
 });
 
+// story #3150(시연 리허설 발견) — AttentionItem이 실제로는 8종인데 AttentionRow가
+// 'agent_stuck' 전용 필드(entity_id/entity_type)만 읽어 나머지 7종은 <span class="font-medium">
+// 이 통째로 공백 렌더되던 것(58건 실측). 각 타입이 BE(#2538 계약)가 이미 싣는 title/
+// statement/blocked_story_title을 그대로 보여주는지 회귀가드.
+describe('ActionZone attention row — story #3150 8종 전수(BE title/statement 폴백 없이 직접 소비)', () => {
+  function attentionData(item: MyActions['attention']['items'][number]): MyActions {
+    return {
+      action_queue: { scope: 'project', items: [] },
+      attention: { scope: 'project', items: [item], pending: [] },
+      is_clear: false,
+    };
+  }
+
+  it('story_stalled — title+stalled_days를 그대로 보여준다(공백 아님)', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'story_stalled', severity: 'warn', auto_detected: true, title: '결제 마이그레이션 정리', story_id: 's1', stalled_days: 42, project_id: 'p1' })}
+      resolveName={() => null} epicTitles={{}}
+    />));
+    expect(markup).toContain('결제 마이그레이션 정리');
+    expect(markup).toContain('42일째');
+    expect(markup).not.toContain('<span class="font-medium"></span>'); // 회귀가드 — 정확히 이 실측 공백 패턴
+  });
+
+  it('unanswered_blocker — blocked_story_title+age_days를 그대로 보여준다', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'unanswered_blocker', severity: 'warn', auto_detected: true, blocked_story_id: 's2', blocker_id: 's3', blocked_story_title: '온보딩 완주 체크', age_days: 5, project_id: 'p1' })}
+      resolveName={() => null} epicTitles={{}}
+    />));
+    expect(markup).toContain('온보딩 완주 체크');
+    expect(markup).toContain('5일째');
+  });
+
+  it('hypothesis_falsified — statement를 그대로 보여준다(days 없으면 확인 필요 폴백)', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'hypothesis_falsified', severity: 'info', auto_detected: true, hypothesis_id: 'h1', statement: '위클리 다이제스트가 리텐션을 높인다', outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, project_id: 'p1' })}
+      resolveName={() => null} epicTitles={{}}
+    />));
+    expect(markup).toContain('위클리 다이제스트가 리텐션을 높인다');
+    expect(markup).toContain('확인 필요');
+  });
+
+  it('loop_overdue_hypothesis — statement+overdue_days', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'loop_overdue_hypothesis', severity: 'warn', auto_detected: true, hypothesis_id: 'h2', statement: '리뷰 에이전트가 결함을 줄인다', owner_member_id: null, overdue_days: 3, project_id: 'p1' })}
+      resolveName={() => null} epicTitles={{}}
+    />));
+    expect(markup).toContain('리뷰 에이전트가 결함을 줄인다');
+    expect(markup).toContain('3일째');
+  });
+
+  it('loop_overdue_goal — title+overdue_days', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'loop_overdue_goal', severity: 'warn', auto_detected: true, goal_id: 'g1', title: '가입 전환율 개선', owner_member_id: null, overdue_days: 10, project_id: 'p1' })}
+      resolveName={() => null} epicTitles={{}}
+    />));
+    expect(markup).toContain('가입 전환율 개선');
+    expect(markup).toContain('10일째');
+  });
+
+  it('loop_outcome_missing_goal — title+done_days', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'loop_outcome_missing_goal', severity: 'warn', auto_detected: true, goal_id: 'g2', title: '온보딩 완주율', owner_member_id: null, done_days: 7, project_id: 'p1' })}
+      resolveName={() => null} epicTitles={{}}
+    />));
+    expect(markup).toContain('온보딩 완주율');
+    expect(markup).toContain('7일째');
+  });
+
+  it('agent_auth_failure — resolveName으로 멤버명 해소+실패 횟수', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'agent_auth_failure', severity: 'danger', auto_detected: true, member_id: 'm1', reason: 'expired', failure_count: 4, first_failed_at: '2026-08-27T00:00:00Z', last_failed_at: '2026-08-27T01:00:00Z' })}
+      resolveName={(id) => (id === 'm1' ? '까디르 아흐마디' : null)} epicTitles={{}}
+    />));
+    expect(markup).toContain('까디르 아흐마디');
+    expect(markup).toContain('인증 실패 4회');
+  });
+
+  it('agent_auth_failure — resolveName이 못 찾으면 reason으로 폴백(빈 값 아님)', () => {
+    const markup = renderToStaticMarkup(wrap(<ActionZone
+      data={attentionData({ type: 'agent_auth_failure', severity: 'danger', auto_detected: true, member_id: 'm-unknown', reason: 'revoked', failure_count: 1, first_failed_at: null, last_failed_at: null })}
+      resolveName={() => null} epicTitles={{}}
+    />));
+    expect(markup).toContain('revoked');
+  });
+});
+
 function queueItem(type: QueueItem['type'], overrides: Partial<QueueItem> = {}): QueueItem {
   return { type, priority: 'info', context: {}, created_at: null, ...overrides };
 }

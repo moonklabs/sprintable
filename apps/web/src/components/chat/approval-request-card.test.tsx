@@ -586,3 +586,78 @@ describe('ApprovalRequestCard — 토스(story #3084) pending 3분기 + 토스 �
     expect(getCount).toBe(2);
   });
 });
+
+// story #3151(선생님 실기기 발견) — agent_decision 결재 카드가 「결재 대기 / #해시 / 버튼」만
+// 보이고 결정 재료(질문·선택지·요청자)가 전무했다. neutral_facts.question/options/assumption
+// (backend/app/routers/gates.py::DecisionRequestCreate)을 카드가 한 번도 안 읽던 것이 원인.
+describe('ApprovalRequestCard — story #3151 agent_decision 결정 재료(질문·선택지·전제·요청자)', () => {
+  async function mountDecision(neutralFacts: Record<string, unknown> | null, statusOverrides: Partial<GateItem> = {}) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'member-7', name: '페드루 올리베이라' }] }) };
+      }
+      if (url.includes('/api/gates/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: gate({
+              work_item_type: 'agent_decision', work_item_summary: null, neutral_facts: neutralFacts,
+              ...statusOverrides,
+            }),
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'agent_decision', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('질문 전문+선택지+전제+요청자 전부 렌더된다 — 「#해시」뿐이던 회귀가드', async () => {
+    await mountDecision({
+      question: 'A/B 실험을 새 알고리즘으로 즉시 전환할까요, 아니면 1주 더 관찰할까요?',
+      options: ['즉시 전환', '1주 더 관찰'],
+      assumption: '현재 표본 수가 유의성 판정에 충분하지 않을 수 있음',
+      requested_by_member_id: 'member-7',
+    });
+    expect(container.textContent).toContain('A/B 실험을 새 알고리즘으로 즉시 전환할까요, 아니면 1주 더 관찰할까요?');
+    expect(container.textContent).toContain('즉시 전환');
+    expect(container.textContent).toContain('1주 더 관찰');
+    expect(container.textContent).toContain('현재 표본 수가 유의성 판정에 충분하지 않을 수 있음');
+    expect(container.textContent).toContain('페드루 올리베이라');
+  });
+
+  it('options 없으면 선택지 목록 자체가 안 뜬다(no-fiction — 지어내지 않음)', async () => {
+    await mountDecision({ question: '이대로 진행해도 될까요?', assumption: null, requested_by_member_id: null });
+    expect(container.textContent).toContain('이대로 진행해도 될까요?');
+    expect(container.querySelector('ul')).toBeNull();
+  });
+
+  it('question이 없으면(비-agent_decision 등 재료 자체가 없는 케이스) 결정 재료 블록이 통째로 생략된다', async () => {
+    await mountDecision(null);
+    expect(container.querySelector('ul')).toBeNull();
+    // 기존 「#해시」 폴백 자체는 이 스토리의 스코프 밖(work_item_summary 없는 agent_decision의
+    // claim 표기는 BE에 대응 엔티티가 없어 불가피 — 이 스토리는 그 아래 결정 재료를 채운다).
+  });
+
+  it('resolved(회신) 상태에서도 결정 재료가 그대로 보인다(뷰어 역할·상태와 무관 — AC1)', async () => {
+    await mountDecision(
+      { question: '배포를 지금 진행할까요?', options: ['진행', '보류'], requested_by_member_id: 'member-7' },
+      { status: 'approved', resolver_id: 'member-1' },
+    );
+    expect(container.textContent).toContain('배포를 지금 진행할까요?');
+    expect(container.textContent).toContain('진행');
+  });
+
+  it('기존 액션 버튼(승인/반려)은 결정 재료 블록 추가 후에도 회귀 없이 그대로 뜬다', async () => {
+    await mountDecision({ question: '진행할까요?', options: ['예', '아니오'] });
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+  });
+});

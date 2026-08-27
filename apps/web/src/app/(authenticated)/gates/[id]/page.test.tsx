@@ -624,3 +624,75 @@ describe('GateDetailPage — story #3113 결정 게이트(agent_decision_request
     expect(approveBtn.disabled).toBe(false);
   });
 });
+
+// story #3128(#3113의 doc_approval판, 페드루 PO 3529 라이브 검증 중 부수 발견) — 「내용으로
+// 직접 판단」하라면서 대상 문서/아티팩트로 가는 경로가 카드 어디에도 없던 결함.
+describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
+  it('doc_approval + work_item_summary.slug가 있으면 원문 링크가 /docs/{slug}로 뜬다', async () => {
+    await mount(gate({
+      gate_type: 'doc_approval', work_item_type: 'doc', can_approve: true, risk_grade: 'low',
+      work_item_summary: { title: '온보딩 재실측', slug: 'onboarding-remeasure' },
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetDoc);
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute('href')).toBe('/docs/onboarding-remeasure');
+  });
+
+  it('doc_approval인데 slug가 없으면(예외적 미해소) 링크를 렌더하지 않는다(없는 경로를 지어내지 않음)', async () => {
+    await mount(gate({
+      gate_type: 'doc_approval', work_item_type: 'doc', can_approve: true, risk_grade: 'low',
+      work_item_summary: null,
+    }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetDoc);
+  });
+
+  it('artifact_canonicalize는 work_item_summary 없이도 work_item_id로 /artifacts/{id} 링크가 뜬다', async () => {
+    await mount(gate({
+      gate_type: 'artifact_canonicalize', work_item_type: 'visual_artifact', work_item_id: 'artifact-42',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetArtifact);
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute('href')).toBe('/artifacts/artifact-42');
+  });
+
+  it('doc/artifact가 아닌 다른 gate 유형(merge 등)은 대상 링크를 렌더하지 않는다(엉뚱한 경로 지어내지 않음)', async () => {
+    // PO AC 리뷰(PR#3542) 사소 지적 — 'merge'가 실존 gate_type(hitl_config.py GATE_TYPES).
+    // 'merge_gate'는 이 파일 기존 기본 픽스처값(line 57)일 뿐 실존 타입 아님 — 내 신규
+    // 테스트는 정확한 값으로.
+    await mount(gate({ gate_type: 'merge', work_item_type: 'story', can_approve: true, risk_grade: 'low' }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetDoc);
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetArtifact);
+  });
+
+  // story #3134(#3128 전수점검 잔여) — loop_decision의 work_item_id는 LoopRun.id, `/loops/{id}`가
+  // 실 상세 페이지.
+  it('loop_decision은 work_item_id로 /loops/{id} 링크가 뜬다', async () => {
+    await mount(gate({
+      gate_type: 'loop_decision', work_item_type: 'loop', work_item_id: 'loop-7',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetLoop);
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute('href')).toBe('/loops/loop-7');
+  });
+
+  it('workflow_config_publish는 이번에도 대상 링크가 없다(실 뷰어 부재 — 억지 진입점 금지, #2118 AC④)', async () => {
+    await mount(gate({
+      gate_type: 'workflow_config_publish', work_item_type: 'wf_line_version', work_item_id: 'wf-9',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetDoc);
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetArtifact);
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetLoop);
+  });
+
+  it('이미 해소된(approved) doc 게이트도 원문 링크가 그대로 남는다(감사 가치는 액션 여부와 무관 — decisionFacts·GateActivityHistory와 동원칙)', async () => {
+    await mount(gate({
+      gate_type: 'doc_approval', work_item_type: 'doc', status: 'approved', resolver_id: null,
+      work_item_summary: { title: '온보딩 재실측', slug: 'onboarding-remeasure' },
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetDoc);
+    expect(link).toBeTruthy();
+  });
+});

@@ -27,8 +27,13 @@ import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { resolveAppUrl } from '@/services/app-url';
+import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+// story #3121 AC1 — issue 시점(callback/[provider]/route.ts)과 동일 출처. 이 라우트는 웹뷰
+// top-level POST라 쿠키/세션 연속성이 없다(§ 상단 주석) — 모바일이 code/code_verifier와
+// **같은 요청에** callback_mode를 실어 보내야만(App.js) issue 시점 값과 대조가 가능하다.
+const APP_LINK_ORIGIN = () => process.env['MOBILE_APP_LINK_ORIGIN'] ?? 'https://dev-app.sprintable.ai';
 
 function logHandoffFailure(reason: string): void {
   // §10.4: code/verifier/원문 절대 로그 금지 — reason enum만.
@@ -45,6 +50,9 @@ function handoffFailedResponse(): NextResponse {
 interface HandoffBody {
   code?: unknown;
   code_verifier?: unknown;
+  // story #3121 AC1 — 옵션(구버전 클라 대비). 있으면 형식 검증 후 BE에 그대로 전달, 없으면
+  // 필드 자체를 BE 호출에서 뺀다(BE Phase 1 확장-축소 계약 — 둘 다 없으면 https로 유도).
+  callback_mode?: unknown;
 }
 
 async function parseBody(request: Request): Promise<HandoffBody | null> {
@@ -55,7 +63,11 @@ async function parseBody(request: Request): Promise<HandoffBody | null> {
     }
     const raw = await request.text();
     const params = new URLSearchParams(raw);
-    return { code: params.get('code') ?? undefined, code_verifier: params.get('code_verifier') ?? undefined };
+    return {
+      code: params.get('code') ?? undefined,
+      code_verifier: params.get('code_verifier') ?? undefined,
+      callback_mode: params.get('callback_mode') ?? undefined,
+    };
   } catch {
     return null;
   }
@@ -83,6 +95,21 @@ export async function POST(request: Request) {
     return handoffFailedResponse();
   }
 
+  // story #3121 AC1 — 있으면 형식 검증(값 자체가 아니라 셸렉터), 없으면 필드 자체를 BE 호출에서
+  // 뺀다(구버전 클라 대비 — BE Phase 1이 "둘 다 없으면 https로 유도"를 이미 보장). 있는데
+  // 형식이 틀리면(변조/버그) missing_fields와 동일하게 거부 — 반쪽만 실어 보내는 조합은 없다.
+  let callbackModeFields: { callback_mode: string; return_uri: string } | Record<string, never> = {};
+  if (body.callback_mode !== undefined) {
+    if (typeof body.callback_mode !== 'string' || !isOAuthCallbackMode(body.callback_mode)) {
+      logHandoffFailure('bad_callback_mode');
+      return handoffFailedResponse();
+    }
+    callbackModeFields = {
+      callback_mode: body.callback_mode,
+      return_uri: expectedReturnUri(body.callback_mode, APP_LINK_ORIGIN()),
+    };
+  }
+
   const internalSecret = process.env['FIREBASE_BFF_INTERNAL_SECRET'];
   const consumeRes = await fetch(`${FASTAPI_URL()}/api/v2/internal/auth/oauth-handoff/consume`, {
     method: 'POST',
@@ -90,7 +117,7 @@ export async function POST(request: Request) {
       'Content-Type': 'application/json',
       ...(internalSecret ? { Authorization: `Bearer ${internalSecret}` } : {}),
     },
-    body: JSON.stringify({ code: body.code, code_verifier: body.code_verifier }),
+    body: JSON.stringify({ code: body.code, code_verifier: body.code_verifier, ...callbackModeFields }),
   }).catch(() => null);
 
   if (!consumeRes || !consumeRes.ok) {

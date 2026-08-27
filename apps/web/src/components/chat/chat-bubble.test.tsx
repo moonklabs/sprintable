@@ -1882,3 +1882,96 @@ describe('ChatBubble — story #3106 sender_runtime_type → Avatar 배선', () 
     expect(container.textContent).toContain('Agent');
   });
 });
+
+// story #3129(선생님 실목격 2026-08-27) — 게이트웨이 reply로 나간 커맨드형 메시지가 커맨드
+// 박스로 렌더되는 것 자체는 정상(isCommand는 content-only 판정, S8 설계 그대로)이나, 그
+// args 안의 참조 토큰이 링크/칩으로 안 풀리고 `[제목](entity:type:id)` 원문 그대로 노출되던
+// 결함(②)의 회귀가드. 커맨드 args도 일반 메시지와 같은 ChatMarkdown 경로를 타야 한다.
+describe('ChatBubble — story #3129 커맨드 렌더에서도 참조 토큰 파싱', () => {
+  it('커맨드 args 안의 참조 토큰이 원문 노출이 아니라 칩 라벨로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `/review [제안서.md](entity:doc:${DOC_ID})`, references: undefined }}
+          isMine={false}
+        />,
+      ));
+    });
+    // 커맨드 박스 식별(이름은 여전히 code로 고정 렌더).
+    expect(container.textContent).toContain('/review');
+    // 결함 재현 조건 — 고쳐지기 전엔 이 원문 마크다운 문자열이 그대로 텍스트로 남는다.
+    expect(container.textContent).not.toContain('entity:doc:');
+    expect(container.textContent).not.toContain('](');
+    // 대신 칩 라벨이 파싱되어 보인다.
+    expect(container.textContent).toContain('제안서.md');
+  });
+
+  it('args 없는 순수 커맨드(`/review`)는 참조 렌더 블록 자체가 안 생긴다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: '/review', references: undefined }} isMine={false} />,
+      ));
+    });
+    expect(container.textContent).toContain('/review');
+    expect(container.querySelector('button')).toBeNull();
+  });
+});
+
+// story #92f00dc4(#9a5abc24 BE 짝) — server_command(구조화 필드) 존재만으로 판별해
+// ServerCommandResultCard로 라우팅되는지(sniffing 0, approval_target/event와 동형 규율).
+describe('ChatBubble — story #92f00dc4 server_command 카드 라우팅', () => {
+  const serverCmdMessage: ChatMessage = {
+    ...baseMessage,
+    content: "'/done' 완료 — 스토리가 done으로 전이됐습니다.\n다음: 결과를 확인하세요.",
+    server_command: { command: 'done', outcome: 'executed' },
+  };
+
+  it('server_command가 있으면 ⚡ 서버 집행 배지가 뜬다(isCmd 분기·ReportMessageSummary보다 우선)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={serverCmdMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('서버 집행');
+  });
+
+  it('content가 "/"로 시작하지 않아 isCmd가 아니어도(사람이 아니라 서버가 회신) 서버 카드로 뜬다', async () => {
+    // 실제 BE 회신 문구는 "'/done' 완료 — ..."처럼 /로 시작하지 않는다 — isCommand()가 false를
+    // 반환해도 server_command 필드만으로 정확히 라우팅되는지가 이 테스트의 핵심.
+    expect(serverCmdMessage.content.startsWith('/')).toBe(false);
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={serverCmdMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain("'/done' 완료");
+  });
+
+  it('server_command 없는 일반 에이전트 메시지는 서버 집행 배지가 안 뜬다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, server_command: null }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('서버 집행');
+  });
+
+  it('onFillComposer가 결과 카드의 후보 클릭까지 그대로 배선된다(모호 상태)', async () => {
+    const onFillComposer = vi.fn();
+    const ambiguousMessage: ChatMessage = {
+      ...baseMessage,
+      content: "'/assign' 실패 — 「채영」에 일치하는 멤버가 여럿입니다.",
+      // target_story_number(PR #3552 페드루 리뷰 후속) — 없으면 버튼이 비활성이라 클릭이
+      // 아무 효과가 없다(별도 테스트가 그 축을 검증). 여기는 배선 자체(ChatBubble→카드)만 잰다.
+      server_command: { command: 'assign', outcome: 'ambiguous', candidates: ['채영1', '채영2'], target_story_number: 2947 },
+    };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={ambiguousMessage} isMine={false} onFillComposer={onFillComposer} />));
+    });
+    const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '채영1') as HTMLButtonElement;
+    expect(button).toBeTruthy();
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onFillComposer).toHaveBeenCalledWith('/assign #2947 채영1');
+  });
+
+  it('삭제된(tombstone) 메시지는 server_command가 있어도 삭제 placeholder가 우선한다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...serverCmdMessage, content: '', deleted_at: '2026-08-27T00:00:00.000Z' }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('서버 집행');
+  });
+});

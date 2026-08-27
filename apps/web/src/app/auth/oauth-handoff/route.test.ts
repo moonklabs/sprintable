@@ -1,7 +1,14 @@
 // e-mobile-oauth-native-handoff-contract §5/§6/§10 — 격리 rail consume 착지 회귀가드.
-// 핵심 불변식: (1) FIREBASE_OAUTH_HANDOFF_ENABLED 기본 off, (2) code+code_verifier만 받고
-// 다른 필드는 계약에 없음(installation_id 등 attested 필드가 여기 섞이면 격리 위반),
-// (3) mint 대상=레거시 sp_at/sp_rt(Firebase 아님), (4) 실패는 전부 동일 401(enumeration 방지).
+// 핵심 불변식: (1) FIREBASE_OAUTH_HANDOFF_ENABLED 기본 off, (2) code+code_verifier(+#3121
+// AC1 callback_mode)만 받고 다른 필드는 계약에 없음(installation_id 등 attested 필드가
+// 여기 섞이면 격리 위반), (3) mint 대상=레거시 sp_at/sp_rt(Firebase 아님), (4) 실패는 전부
+// 동일 401(enumeration 방지).
+//
+// story #3121 AC1 추가분 — 이 라우트는 issue 시점 쿠키와 연속성이 없는 웹뷰 top-level POST라
+// callback_mode는 요청 body에서만 온다(§ route.ts 상단 주석). 핵심: (5) callback_mode 없으면
+// (구버전 클라) BE 호출에서 그 필드 자체를 뺀다(반쪽만 보내지 않는다 — BE Phase 1 계약과
+// 대칭), (6) 있으면 형식 검증 후 그대로 전달+return_uri는 고정 매핑으로 계산(클라 입력 URI를
+// 안 믿는다), (7) 형식이 틀리면 거부한다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({ csrfCheck: vi.fn() }));
@@ -30,7 +37,7 @@ function makeUrlencodedRequest(fields: Record<string, string>): Request {
   });
 }
 
-const ENV_KEYS = ['FIREBASE_OAUTH_HANDOFF_ENABLED', 'FIREBASE_BFF_INTERNAL_SECRET', 'NEXT_PUBLIC_FASTAPI_URL'];
+const ENV_KEYS = ['FIREBASE_OAUTH_HANDOFF_ENABLED', 'FIREBASE_BFF_INTERNAL_SECRET', 'NEXT_PUBLIC_FASTAPI_URL', 'MOBILE_APP_LINK_ORIGIN'];
 
 describe('POST /auth/oauth-handoff', () => {
   beforeEach(() => {
@@ -169,5 +176,57 @@ describe('POST /auth/oauth-handoff', () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt' }) });
     const res = await POST(makeJsonRequest({ code: 'c', code_verifier: 'v', redirect_path: '//evil.com/phish' }));
     expect(res.headers.get('location')).toBe('http://localhost:3108/glance');
+  });
+
+  // ── story #3121 AC1 — callback_mode consume 절반 ──────────────────────────────
+  describe('callback_mode (#3121 AC1)', () => {
+    it('without callback_mode (legacy client): omits callback_mode/return_uri from the BE call entirely (never sends just one)', async () => {
+      process.env['FIREBASE_OAUTH_HANDOFF_ENABLED'] = 'true';
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt' }) });
+      await POST(makeJsonRequest({ code: 'c', code_verifier: 'v' }));
+      const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const sentBody = JSON.parse(opts.body as string) as Record<string, unknown>;
+      expect(sentBody).not.toHaveProperty('callback_mode');
+      expect(sentBody).not.toHaveProperty('return_uri');
+    });
+
+    it('with callback_mode=https: forwards callback_mode + the fixed https return_uri', async () => {
+      process.env['FIREBASE_OAUTH_HANDOFF_ENABLED'] = 'true';
+      process.env['MOBILE_APP_LINK_ORIGIN'] = 'https://dev-app.sprintable.ai';
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt' }) });
+      await POST(makeJsonRequest({ code: 'c', code_verifier: 'v', callback_mode: 'https' }));
+      const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const sentBody = JSON.parse(opts.body as string) as { callback_mode: string; return_uri: string };
+      expect(sentBody.callback_mode).toBe('https');
+      expect(sentBody.return_uri).toBe('https://dev-app.sprintable.ai/native/oauth-return');
+    });
+
+    it('with callback_mode=custom_scheme: forwards the byte-exact ai.sprintable return_uri, unaffected by MOBILE_APP_LINK_ORIGIN', async () => {
+      process.env['FIREBASE_OAUTH_HANDOFF_ENABLED'] = 'true';
+      process.env['MOBILE_APP_LINK_ORIGIN'] = 'https://app.sprintable.ai';
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt' }) });
+      await POST(makeJsonRequest({ code: 'c', code_verifier: 'v', callback_mode: 'custom_scheme' }));
+      const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const sentBody = JSON.parse(opts.body as string) as { callback_mode: string; return_uri: string };
+      expect(sentBody.callback_mode).toBe('custom_scheme');
+      expect(sentBody.return_uri).toBe('ai.sprintable:/oauth-return');
+    });
+
+    it('with an invalid callback_mode value: rejects the request (never forwards garbage to BE)', async () => {
+      process.env['FIREBASE_OAUTH_HANDOFF_ENABLED'] = 'true';
+      const res = await POST(makeJsonRequest({ code: 'c', code_verifier: 'v', callback_mode: 'android' }));
+      expect(res.status).toBe(401);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    // 자기검증(뮤테이션) — "반쪽만 보내면 안 된다" 불변식이 실제로 지켜지는지: callback_mode가
+    // 없을 때 return_uri **혼자** 새 나가면 안 된다(半-공급은 BE Literal 스키마를 아예 못 만족).
+    it('mut: never sends return_uri without callback_mode, or vice versa', async () => {
+      process.env['FIREBASE_OAUTH_HANDOFF_ENABLED'] = 'true';
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt' }) });
+      await POST(makeJsonRequest({ code: 'c', code_verifier: 'v' }));
+      const sentBody = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string) as Record<string, unknown>;
+      expect('callback_mode' in sentBody).toBe('return_uri' in sentBody);
+    });
   });
 });

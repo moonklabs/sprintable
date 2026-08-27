@@ -31,3 +31,11 @@ export function commandName(text: string | null | undefined): string | null {
   const firstToken = text.trim().split(/\s+/)[0] ?? '';
   return firstToken.slice(1);
 }
+
+/** 커맨드 이름 뒤 인자(trim). 커맨드 아니거나 인자 없으면 ''(BE `CommandCandidate.args`와 동형). */
+export function commandArgs(text: string | null | undefined): string {
+  if (!text || !COMMAND_RE.test(text)) return '';
+  const body = text.trim().slice(1);
+  const split = body.split(/\s+([\s\S]*)/);
+  return split[1]?.trim() ?? '';
+}

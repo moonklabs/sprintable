@@ -161,6 +161,23 @@ class SendChatInput(ConversationScopedInput):
     )
     reply_thread_id: str | None = None
     message_type: str | None = None
+    # story #5c29454b(③ 구조화 회신, AC1 발신 계약) — BE `SendMessageRequest.message_kind`
+    # (conversations.py, E-ACTIVATION S1)가 이미 받는 4-enum 발신 신호인데, 이 MCP 도구가
+    # 여태 노출을 안 해 발신측이 kind를 실을 길이 없었다(FE result 카드 레일이 헛도는
+    # 근본원인 — doc result-card-final-spec-5c29454b). message_type(위, 별개 필드 — meta에
+    # 얹혀 review UI류에 쓰이는 기존 계약)과 이름이 비슷해 보이지만 완전히 다른 축이다:
+    # message_type은 metadata 안 자유 문자열, message_kind는 top-level 4-enum이라 BE가
+    # `_ACTIVATION_KINDS`로 검증한다. 명시 안 하면 None 유지(조용한 유도 금지 — no-fiction).
+    message_kind: Literal["request", "handoff", "result", "ack"] | None = Field(
+        default=None,
+        description=(
+            "이 메시지의 의미 유형(4개뿐, message_type과 별개 축). result로 보내면 FE가 "
+            "«판정+근거+다음 행동» 카드로 렌더한다(긴 report성 메시지일 때) — 판정을 보고할 "
+            "땐 반드시 이걸 실어라, 안 실으면 보수적 어휘 추론(PASS/FAIL 등)에만 기대야 "
+            "하고 판정 dot(성공/반려 색)도 안 뜬다. 원문에 「다음: ...」류 다음 행동 문구를 "
+            "같이 적어야 다음 행동 박스가 뜬다(지어내지 않음)."
+        ),
+    )
     review_type: str | None = None
     metadata: dict | None = None
     # [{content_base64, name, content_type}, ...] — 스샷/작은 문서(최대 5개·파일당 2MiB·총 6MiB).
@@ -262,6 +279,10 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
             payload["thread_id"] = args.reply_thread_id
         if args.mentioned_ids:
             payload["mentioned_ids"] = args.mentioned_ids
+        # story #5c29454b AC1 — top-level 필드(meta에 얹지 않는다, BE가 top-level에서만
+        # 읽는다 — conversations.py SendMessageRequest.message_kind).
+        if args.message_kind:
+            payload["message_kind"] = args.message_kind
         meta: dict = {}
         if args.metadata:
             meta.update(args.metadata)

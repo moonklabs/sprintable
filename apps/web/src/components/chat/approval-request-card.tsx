@@ -376,9 +376,13 @@ function ApprovalRequestBody({
   const isRequesterViewer = !isDesignatedViewer && !!requesterId && requesterId === currentTeamMemberId;
   const needsDesignatedName = gate.status === 'pending' && hasDesignatedLine && !isDesignatedViewer;
   const needsResolverName = gate.status !== 'pending' && !!gate.resolver_id && gate.resolver_id !== currentTeamMemberId;
+  // story #3151 — AC1 "요청자 표시"는 뷰어 역할과 무관하게 항상 필요(대기/기결 둘 다, 결정
+  // 재료의 일부라 승인자·구경꾼 가리지 않는다) — 위 두 플래그(대기 상태·본인 여부로 분기)와
+  // 다른 축이라 별도 플래그로 둔다.
+  const needsRequesterName = !!requesterId && requesterId !== currentTeamMemberId;
   useEffect(() => {
-    const idsKey = `${needsDesignatedName ? gate.designated_approver_id : ''}|${needsResolverName ? gate.resolver_id : ''}`;
-    if (idsKey === '|' || fetchedNameIdsRef.current === idsKey) return;
+    const idsKey = `${needsDesignatedName ? gate.designated_approver_id : ''}|${needsResolverName ? gate.resolver_id : ''}|${needsRequesterName ? requesterId : ''}`;
+    if (idsKey === '||' || fetchedNameIdsRef.current === idsKey) return;
     fetchedNameIdsRef.current = idsKey;
     void fetchWithAuth('/api/team-members')
       .then((r) => (r.ok ? r.json() : null))
@@ -389,7 +393,7 @@ function ApprovalRequestBody({
         setMemberNames((prev) => ({ ...prev, ...names }));
       })
       .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
-  }, [needsDesignatedName, needsResolverName, gate.designated_approver_id, gate.resolver_id]);
+  }, [needsDesignatedName, needsResolverName, needsRequesterName, gate.designated_approver_id, gate.resolver_id, requesterId]);
   const designatedApproverName = gate.designated_approver_id
     ? memberNames[gate.designated_approver_id] ?? gate.designated_approver_id.slice(0, 8)
     : null;
@@ -439,6 +443,22 @@ function ApprovalRequestBody({
   const isDelegatedAway = gate.status === 'pending' && !!gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId;
   const canDelegate = canAct && !isDelegatedAway && !!gate.designated_approver_id && gate.designated_approver_id === currentTeamMemberId;
 
+  // story #3151(선생님 실기기 발견) — agent_decision 카드가 「결재 대기 / #해시 / 버튼」만
+  // 보이고 무엇을 결재하는지가 전무했다. 게이트 실물(neutral_facts.question/options/
+  // assumption, backend/app/routers/gates.py::DecisionRequestCreate)엔 재료가 이미 있는데
+  // 이 카드가 한 번도 읽지 않았다 — work_item_summary(title 소스)가 agent_decision엔 애초
+  // null이라 claim이 #해시로 폴백하는 것과 별개로, 그 아래 body에도 대체 재료가 없었다.
+  // status·뷰어 역할과 무관하게 항상 보여야(AC1: "채팅 밖으로 안 나가고 결정 끝나나") 최상단
+  // (위험 배지 다음)에 둔다.
+  const isDecisionGate = gate.work_item_type === 'agent_decision';
+  const decisionQuestion = isDecisionGate && typeof gate.neutral_facts?.['question'] === 'string'
+    ? (gate.neutral_facts['question'] as string) : null;
+  const decisionOptions = isDecisionGate && Array.isArray(gate.neutral_facts?.['options'])
+    ? (gate.neutral_facts['options'] as unknown[]).filter((o): o is string => typeof o === 'string') : [];
+  const decisionAssumption = isDecisionGate && typeof gate.neutral_facts?.['assumption'] === 'string'
+    ? (gate.neutral_facts['assumption'] as string) : null;
+  const requesterName = requesterId ? (memberNames[requesterId] ?? requesterId.slice(0, 8)) : null;
+
   return (
     <div className="space-y-2">
       {/* story #2926(P0-F F1) — 제목(claim)·미리보기 진입점·EntityPreviewModal은 이제 바깥
@@ -448,6 +468,27 @@ function ApprovalRequestBody({
         <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
           {riskLevel === 'high' ? tCage('riskHigh') : tCage('riskUnknown')}
         </Badge>
+      ) : null}
+
+      {/* story #3151 — 결정 재료(질문 전문·선택지·요청자). no-fiction: neutral_facts에 실린
+          값만 그대로 보이고, 없는 필드(assumption 등)는 그 줄 자체를 안 그린다. */}
+      {decisionQuestion ? (
+        <div className="min-w-0 space-y-1 rounded-lg border border-border bg-muted/40 p-2 [overflow-wrap:anywhere]">
+          <p className="text-xs font-medium text-foreground">{decisionQuestion}</p>
+          {decisionOptions.length > 0 ? (
+            <ul className="space-y-0.5 pl-3 text-xs text-foreground">
+              {decisionOptions.map((opt, i) => (
+                <li key={i} className="list-disc">{opt}</li>
+              ))}
+            </ul>
+          ) : null}
+          {decisionAssumption ? (
+            <p className="text-[11px] text-muted-foreground">{t('approvalRequestAssumption', { assumption: decisionAssumption })}</p>
+          ) : null}
+          {requesterName ? (
+            <p className="text-[11px] text-muted-foreground">{t('approvalRequestRequestedBy', { name: requesterName })}</p>
+          ) : null}
+        </div>
       ) : null}
 
       {gate.status !== 'pending' ? (

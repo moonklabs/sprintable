@@ -28,6 +28,63 @@ function gateLabel(t: ReturnType<typeof useTranslations>, gateType: string | nul
   return key ? t(key) : t('ccGateGeneric');
 }
 
+// story #3150 — AttentionItem 8종(types.ts 참조) 공통 식별명 추출. agent_stuck만 id 재해소가
+// 필요(entity_id가 멤버/에픽 id)하고, 나머지 7종은 BE(#2538 계약)가 title/statement/
+// blocked_story_title을 이미 직접 싣는다 — 그 필드를 그대로 쓰면 된다(재해소 시도 자체가
+// 이 버그의 원인이었다: resolveName이 멤버/에픽 id만 알아 story 스코프 항목에서 늘 null).
+function attentionEntityLabel(
+  item: AttentionItem,
+  resolveName: (id: string | null | undefined) => string | null,
+  epicTitles: Record<string, string>,
+): string {
+  switch (item.type) {
+    case 'agent_stuck':
+      return resolveName(item.entity_id) ?? epicTitles[item.entity_id] ?? item.entity_type;
+    case 'agent_auth_failure':
+      return resolveName(item.member_id) ?? item.reason;
+    case 'story_stalled':
+    case 'loop_overdue_goal':
+    case 'loop_outcome_missing_goal':
+      return item.title;
+    case 'unanswered_blocker':
+      return item.blocked_story_title;
+    case 'hypothesis_falsified':
+    case 'loop_overdue_hypothesis':
+      return item.statement;
+  }
+}
+
+// story #3150 — 부제 텍스트. agent_stuck은 기존 게이트 카피 그대로 유지(회귀 0). 나머지는
+// BE가 실어 보내는 경과일수 필드(타입마다 이름이 다르다 — stalled_days/age_days/
+// falsified_days/overdue_days/done_days) 중 있는 것을 그대로 보여준다(no-fiction: 실측값만,
+// 지어낸 사유 문구 0).
+function attentionDetailText(t: ReturnType<typeof useTranslations>, item: AttentionItem): string {
+  if (item.type === 'agent_stuck') return t('ccAgentStuck', { gate: gateLabel(t, item.gate_type) });
+  if (item.type === 'agent_auth_failure') return t('ccAttentionAuthFailure', { count: item.failure_count });
+  const days =
+    item.type === 'story_stalled' ? item.stalled_days
+    : item.type === 'unanswered_blocker' ? item.age_days
+    : item.type === 'hypothesis_falsified' ? item.falsified_days
+    : item.type === 'loop_overdue_hypothesis' || item.type === 'loop_overdue_goal' ? item.overdue_days
+    : item.done_days; // loop_outcome_missing_goal
+  return days != null ? t('ccAttentionDays', { days }) : t('ccAttentionGeneric');
+}
+
+// story #3150 — 8종 각자 id 필드명이 달라(entity_id/member_id/story_id/blocked_story_id/
+// hypothesis_id/goal_id) React key용 공통 추출.
+function attentionItemKey(item: AttentionItem): string {
+  switch (item.type) {
+    case 'agent_stuck': return item.entity_id;
+    case 'agent_auth_failure': return item.member_id;
+    case 'story_stalled': return item.story_id;
+    case 'unanswered_blocker': return item.blocked_story_id;
+    case 'hypothesis_falsified':
+    case 'loop_overdue_hypothesis': return item.hypothesis_id;
+    case 'loop_overdue_goal':
+    case 'loop_outcome_missing_goal': return item.goal_id;
+  }
+}
+
 // story #2288: 정상 경로에서는 splitRenderableQueue가 미확인 타입을 미리 걸러내므로 이 아래
 // 마지막 분기는 방어선(defense-in-depth)이다 — 직접 단위테스트하려고 export한다.
 export function QueueRow({ item }: { item: QueueItem }) {
@@ -124,15 +181,14 @@ function AttentionRow({ item, resolveName, epicTitles }: { item: AttentionItem; 
   // 감시톤 재프레임(command-center-surveillance-reframe-handoff): stuck_since는 항목 surfacing
   // 트리거로만 쓰이고(위쪽 필터링), 여기선 경과 분(minutesSince) 계산·표시를 걷었다 — "대기는
   // 경보가 아니라 상태"(§1/§8 시간 강조 0). 색도 warning→info/muted 중립 톤.
-  const entity = resolveName(item.entity_id) ?? epicTitles[item.entity_id] ?? item.entity_type;
-  // PO 지적(2026-07-29, #2650 리뷰) — gate_type 원시값을 그대로 안 보인다(gateLabel 참조).
-  const gate = gateLabel(t, item.gate_type);
+  const entity = attentionEntityLabel(item, resolveName, epicTitles);
+  const detail = attentionDetailText(t, item);
   return (
     <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 text-xs">
       <span className="mt-1 size-1.5 shrink-0 rounded-full bg-info/60" aria-hidden="true" />
       <p className="min-w-0 flex-1 text-foreground">
         <span className="font-medium">{entity}</span>{' '}
-        <span className="text-muted-foreground">{t('ccAgentStuck', { gate })}</span>
+        <span className="text-muted-foreground">{detail}</span>
       </p>
     </div>
   );
@@ -200,7 +256,7 @@ export function ActionZone({ data, resolveName, epicTitles }: {
                 <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{t('ccAutoTag')}</span>
               </div>
               {attention.map((a, i) => (
-                <AttentionRow key={`${a.entity_id}-${i}`} item={a} resolveName={resolveName} epicTitles={epicTitles} />
+                <AttentionRow key={`${attentionItemKey(a)}-${i}`} item={a} resolveName={resolveName} epicTitles={epicTitles} />
               ))}
               {/* pending 감지(CC-BE.2) — mock 0·미세 "준비중"만 */}
               {hasPending ? <p className="text-[10px] text-muted-foreground">{t('ccAttentionMorePending')}</p> : null}

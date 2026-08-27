@@ -131,8 +131,18 @@ export function countChangedSince(queue: QueueItem[], lastSeenMs: number | null)
  * attention은 action_queue와 다른 배열·다른 타임스탬프 필드라 하나로 합칠 근거가 약하고,
  * 호출부(ActionZone)가 둘을 더해 하나의 배너로 보인다(계산은 분리, 표시만 합침 — §7-0 층3).
  */
+// story #3150 — attention 8종 중 절대 타임스탬프를 가진 건 agent_stuck(stuck_since)·
+// agent_auth_failure(first_failed_at)뿐이다. 나머지 6종은 BE가 "생겨난 시점"이 아니라
+// 경과 일수(stalled_days 등)만 준다 — 그 일수로 시점을 역산해 "지어내지" 않고, 비교 불가
+// (null)로 남겨 §8-8 원칙("모름을 전부 새것으로 지어내지 않는다") 그대로 지킨다.
+function attentionSinceIso(item: AttentionItem): string | null {
+  if (item.type === 'agent_stuck') return item.stuck_since;
+  if (item.type === 'agent_auth_failure') return item.first_failed_at;
+  return null;
+}
+
 export function countAttentionChangedSince(attention: AttentionItem[], lastSeenMs: number | null): number {
-  return countChangedSinceGeneric(attention, lastSeenMs, (a) => a.stuck_since);
+  return countChangedSinceGeneric(attention, lastSeenMs, attentionSinceIso);
 }
 
 /** 방문 시 1회 호출 — 「지금」을 다음 방문의 기준점으로 남긴다. */

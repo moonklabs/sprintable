@@ -8,7 +8,7 @@ import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { AgentIdentity } from '@/components/ui/agent-identity';
-import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
+import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { resolveEmbedDecision } from '@/components/chat/embed-renderer';
@@ -35,6 +35,7 @@ import { segmentMessageContent } from './message-segments';
 import { EmbedGroup } from './embed-group';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 import { ReportMessageSummary } from './report-message-summary';
+import { ServerCommandResultCard } from './server-command-result-card';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -78,6 +79,10 @@ interface ChatBubbleProps {
    * 중앙 모달/새 탭 대신 우측 ReadingPanel을 연다. 생략하면(undefined, ThreadPanel 등 아직
    * 안 물려주는 호출부) 기존 동작(모달·window.open) 그대로 — 회귀 없음. */
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
+  /** story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 모호 후보 클릭 콜백(입력창
+   * 채움, 즉시 집행 아님). ChatView가 ChatInput의 prefillCommand 상태로 연결한다. 생략하면
+   * (undefined) 후보 버튼이 비활성 상태로만 뜬다(기능 저하, 에러 아님). */
+  onFillComposer?: (text: string) => void;
 }
 
 interface ContextMenuState {
@@ -362,7 +367,7 @@ const LONG_PRESS_MS = 500;
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
-  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel,
+  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
@@ -386,11 +391,15 @@ export function ChatBubble({
   const eventBlockTemplate = eventTarget?.event_key
     ? parseBlockTemplate(eventDefinitionsByKey?.[eventTarget.event_key]?.block_template)
     : null;
+  // story #92f00dc4(#9a5abc24 BE 짝) — approval_target/event와 동일 규율(구조화 필드
+  // 존재만으로 판별, sniffing 0). 있으면 서버가 직접 집행한 카탈로그 커맨드 결과 카드.
+  const serverCommand = !isDeleted ? message.server_command ?? null : null;
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
   const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
   const cmdName = isCmd ? commandName(message.content) : null;
+  const args = isCmd ? commandArgs(message.content) : '';
   const displayName = isMine ? t('you') : (message.sender_name || t('team'));
   const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
   const replyCount = message.reply_count ?? 0;
@@ -579,6 +588,12 @@ export function ChatBubble({
               template={eventBlockTemplate}
               payload={eventTarget.payload}
             />
+          ) : serverCommand ? (
+            <ServerCommandResultCard
+              content={message.content}
+              serverCommand={serverCommand}
+              onFillComposer={onFillComposer}
+            />
           ) : hitlRequest ? (
             <HitlApprovalCard
               request={hitlRequest}
@@ -592,10 +607,23 @@ export function ChatBubble({
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
-              <code className="block whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">
-                <span className="text-foreground">/{cmdName}</span>
-                <span className="text-muted-foreground">{message.content.slice(1 + (cmdName?.length ?? 0))}</span>
-              </code>
+              {/* story #3129 — 커맨드 렌더도 args 안의 참조 토큰(`[제목](entity:type:id)`)은
+                  링크/칩으로 풀려야 한다. `/cmdName`만 code로 고정하고, args는 일반 메시지와
+                  동일한 ChatMarkdown 경로(references·엔티티 칩 SSOT 공유)로 넘긴다 — args가
+                  순수 텍스트뿐이면 마크다운 매치가 없어 기존과 동일하게 보인다(회귀 0). */}
+              <code className="font-mono text-sm text-foreground">/{cmdName}</code>
+              {args && (
+                <div className="mt-0.5 font-mono text-sm text-muted-foreground [&_p]:mb-0">
+                  <ChatMarkdown
+                    content={args}
+                    isMine={isMine}
+                    references={message.references}
+                    entityStatusByKey={entityStatusByKey}
+                    onOpenReadingPanel={onOpenReadingPanel}
+                    eventDefinitionsByKey={eventDefinitionsByKey}
+                  />
+                </div>
+              )}
             </div>
           ) : (
             /* story #2921 S4(유나 확定) — 버블=무채 panel(내 메시지=blue-soft). 옛

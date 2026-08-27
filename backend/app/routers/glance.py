@@ -1,10 +1,21 @@
 """글랜스 '손이 필요한 것' 예외 스트림 BE (story db7eb049·E-GLANCE 2D).
 
 현 프로젝트의 human-attention **실신호만** 반환한다 — gate_pending(인간 승인 대기)·blocked(의존 대기)·
-merge_ready(리뷰/머지 대기)·needs_input·verify_fail. 유나 spec(glance-focus-legible-fe-spec-handoff
-ⓓ) 계약: 활동량/순위 0·감시 아니라 신뢰(주어=프로젝트/팀·예외만)·실신호 없으면 정직 빈배열(FE
-"손 필요한 것 없음"). 5 신호 전부 project_id 직스코프(approval.project_id·story.project_id 직결·
-조인은 title enrich만).
+merge_ready(리뷰/머지 대기)·needs_input·verify_fail·stalled(침묵의 정체, story #2250). 유나 spec
+(glance-focus-legible-fe-spec-handoff ⓓ) 계약: 활동량/순위 0·감시 아니라 신뢰(주어=프로젝트/팀·예외만)·
+실신호 없으면 정직 빈배열(FE "손 필요한 것 없음"). 6 신호 전부 project_id 직스코프(approval.
+project_id·story.project_id 직결·조인은 title enrich만).
+
+story #2250(⛔"침묵의 정체", doc `flow-board-blocked-taxonomy`) — 1~5(여기선 표시상 6종 중
+gate_pending/blocked/merge_ready/needs_input/verify_fail)는 전부 "스스로를 선언"하는 막힘이다.
+그 무엇도 아니면서 오랫동안 무변화인 항목은 화면에서 완전히 사라졌다(1~5만 그리면 "막힌 것
+없음"이라 거짓말하게 됨) — 그 빈자리를 stalled가 메운다. 정의(오르테가군 확定, 페드루 GO
+2026-08-27): `StoryActivity(activity_type=status_changed)` 최신 시각(㉠좁은 정의) 기준 48h+
+무변화. 모집단은 backlog 제외 활성(in-review/in-progress/ready-for-dev만 — backlog은 "아직
+시작 안 함"이지 "멈춰 섬"이 아니다, #2250 §6-1 실측) 중 위 5종에 이미 잡힌 story_id는 제외
+(AC5 — 7번을 1~6과 섞지 않는다). ⛔BE는 이 신호를 자르지 않는다(top-N 없음, 전량 반환) —
+"8~12건 표시"는 화면 설계(유나) 몫이지 신호의 정의가 아니다(페드루 판정 2026-08-27, #2250
+재실측이 분포에 깨끗한 단층이 없음을 보여줌 — 자르면 그 잘림 자체가 새로운 침묵이 된다).
 
 story #2249: 「그 상태에 들어간 시각」(entered_state_at) — kind별 소스가 다르다(전수):
   gate_pending → WorkflowLineStepApproval.created_at(row가 매 사이클 새 INSERT라 정확) — exact
@@ -32,7 +43,7 @@ story #2249: 「그 상태에 들어간 시각」(entered_state_at) — kind별 
 옵셔널 필드(모르는 필드 무시가 기본 — 회귀 0).
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -62,6 +73,19 @@ _LIMIT = 100
 # story #2249(오르테가군 리뷰): entered_state_at의 정밀도 — 모듈 docstring 참조.
 _PRECISION_EXACT = "exact"
 
+# story #2250 — stalled 모집단(backlog은 "아직 시작 안 함"이지 "멈춰 섬"이 아니라 별도 제외 —
+# _OPEN_EXCLUDED_STATUSES와 다른 축이라 이름을 안 겹친다).
+_STALLED_EXCLUDED_STATUSES = ("done", "backlog")
+
+# ⛔⛔story #2250 AC3-1(유나 발견·규율, 2026-07-28) — "N은 한 번 정하면 고정한다":
+# 8~12건이 뜨는 지점을 계속 "유지"하려고 이 값을 계속 올리면, 막힘이 늘어도 임계가 따라
+# 올라가 화면은 늘 비슷한 건수만 보여주게 되고 그 순간 이 지표는 자기충족이 되어 "막힘을
+# 감추는 손잡이"가 된다. 48h는 페드루 확定값(2026-08-27, #2250 재실측 — 모집단 123건 중
+# 48h+ 81건·분포에 깨끗한 단층 없음을 근거로 「자르지 않고 전량 낸다」로 판정. 표시 단의
+# top-N/집계 배지는 유나 몫). 이 값을 다시 재는 사유는 "건수가 많아져서"가 아니라 "작업
+# 방식이 바뀌어서"여야 한다.
+_STALLED_THRESHOLD_HOURS = 48
+
 
 async def _batch_story_entered_in_review_at(
     session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
@@ -86,15 +110,44 @@ async def _batch_story_entered_in_review_at(
     return {story_id: entered_at for story_id, entered_at in rows}
 
 
+async def _batch_latest_status_changed_at(
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, datetime]:
+    """story #2250 stalled 신호원 — `_batch_story_entered_in_review_at`과 동형이나 `new_value`
+    필터가 없다(어느 상태로 전이했든 "가장 최근 상태 변화" 그 자체가 관심사 — ㉠좁은 정의,
+    #2250 §"측정 준비" 오르테가군 확定). 행이 아예 없는 story는 반환 dict에서 빠진다 —
+    "그 story는 언제 마지막으로 바뀌었는지 모른다"는 뜻이라 호출부가 별도로 None 취급한다
+    (created_at 등으로 대체해 추측하지 않는다 — blocked 신호와 동일 "모르면 안 준다" 원칙)."""
+    if not story_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(StoryActivity.story_id, func.max(StoryActivity.created_at))
+            .where(
+                StoryActivity.org_id == org_id,
+                StoryActivity.story_id.in_(story_ids),
+                StoryActivity.activity_type == "status_changed",
+            )
+            .group_by(StoryActivity.story_id)
+        )
+    ).all()
+    return {story_id: latest for story_id, latest in rows}
+
+
 class AttentionItem(BaseModel):
     # P0-04(doc trust-pipeline-be-design §6): AQ 5신호 계약(attention-queue-fe-spec-handoff §6).
     # scope_violation은 §7 확定②로 이번 스코프 미구현 — 항상 빈 신호(kind로 등장 안 함·정직한 미가용).
-    kind: str  # "gate_pending" | "blocked" | "merge_ready" | "needs_input" | "verify_fail"
+    # stalled(story #2250, 2026-08-27)는 6번째 신호 — 위 5종과 달리 "스스로를 선언"하지 않는
+    # 무변화 항목이라 AC5(섞지 않는다)에 따라 kind로 명확히 구분해 낸다.
+    kind: str  # "gate_pending" | "blocked" | "merge_ready" | "needs_input" | "verify_fail" | "stalled"
     story_id: uuid.UUID | None = None
     title: str | None = None
     ref: dict = Field(default_factory=dict)
     # story #2249: 「그 상태에 들어간 시각」(UTC·마지막 진입). 소스는 kind별로 다름(모듈 docstring
     # 참조) — 원천이 아예 없거나(edge case) 조회 실패 시 None(옵셔널·모르는 필드 무시가 기본).
+    # stalled: 「마지막으로 무언가 바뀐 시각」(StoryActivity status_changed 최신) — 소비자가
+    # `now - entered_state_at`으로 무변화 일수를 직접 계산한다(페드루 판정 2026-08-27 —
+    # 별도 "일수" 필드를 새로 만들지 않는다, 기존 필드 재사용).
     entered_state_at: datetime | None = None
     # 오르테가군 리뷰(2026-07-28): "근사"가 화면에서 "정확"처럼 보이면 유나 설계(체류시간이
     # 위계를 만든다)의 정렬 신뢰가 무너진다 — 값과 함께 정밀도를 싣는다. "exact"|None만 존재
@@ -105,6 +158,12 @@ class AttentionItem(BaseModel):
 
 class AttentionResponse(BaseModel):
     items: list[AttentionItem]
+    # story #2250 AC6 — "0건일 때의 의미를 정한다: 정말 없음인가 못 세고 있음인가." stalled가
+    # 0건이어도 이 필드가 항상 채워져 있으면 "계산이 실제로 돌았다"는 증거가 된다(계산 자체가
+    # 실패했다면 이 응답을 만들 수 없었을 것이므로 — 이 필드는 항상 datetime.now(UTC), None을
+    # 반환할 일이 없다. 다른 5종 신호와 달리 이 값이 필요한 이유: stalled만 "무신호=진짜 0건"과
+    # "무신호=계산 자체가 안 도는 중"을 구분할 별도 근거가 없다).
+    stalled_computed_at: datetime
 
 
 @router.get("/attention", response_model=AttentionResponse)
@@ -294,7 +353,50 @@ async def glance_attention(
 
     # scope_violation: §7 확定② — 이번 스코프 미구현. 쿼리 자체가 없음(정직한 미가용·항상 빈 신호).
 
-    return AttentionResponse(items=items)
+    # ⑥ stalled = story #2250 "침묵의 정체" — 위 1~5(gate_pending/blocked/merge_ready/
+    # needs_input/verify_fail) 중 무엇도 아니면서 오래 무변화인 항목. AC5(섞지 않는다)에 따라
+    # 위에서 이미 만든 항목의 story_id는 후보에서 뺀다 — 같은 story가 stalled와 다른 kind로
+    # 동시에 뜨면 "할 일 목록"이 "사정 나열"이 된다(유나 규칙, 모듈 docstring 참조).
+    _already_signaled_ids = {item.story_id for item in items if item.story_id is not None}
+    stalled_population_rows = (
+        await session.execute(
+            select(Story.id, Story.title)
+            .where(
+                Story.org_id == org_id,
+                Story.project_id == project_id,
+                Story.status.not_in(_STALLED_EXCLUDED_STATUSES),
+                Story.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    stalled_candidates = [
+        (story_id, title) for story_id, title in stalled_population_rows
+        if story_id not in _already_signaled_ids
+    ]
+    latest_changed_map = await _batch_latest_status_changed_at(
+        session, org_id, [story_id for story_id, _ in stalled_candidates],
+    )
+    _now = datetime.now(timezone.utc)
+    stalled_items: list[AttentionItem] = []
+    for story_id, title in stalled_candidates:
+        latest_changed = latest_changed_map.get(story_id)
+        # 「모르면 안 준다」(blocked와 동일 원칙, 모듈 docstring 참조) — 이 story가 언제
+        # 마지막으로 바뀌었는지 자체를 모르면(status_changed 행이 아예 없음) 48h+ 여부를
+        # 판정할 근거가 없다 — created_at 등으로 대체 추측하지 않고 stalled 후보에서 뺀다.
+        if latest_changed is None:
+            continue
+        if (_now - latest_changed).total_seconds() < _STALLED_THRESHOLD_HOURS * 3600:
+            continue
+        stalled_items.append(AttentionItem(
+            kind="stalled", story_id=story_id, title=title,
+            entered_state_at=latest_changed, entered_state_at_precision=_PRECISION_EXACT,
+        ))
+    # ⛔BE는 top-N으로 자르지 않는다(모듈 docstring·#2250 페드루 판정 2026-08-27) — 무변화
+    # 내림차순(=entered_state_at 오름차순, 가장 오래 안 바뀐 것 먼저)으로 전량 정렬만 한다.
+    stalled_items.sort(key=lambda item: item.entered_state_at)
+    items.extend(stalled_items)
+
+    return AttentionResponse(items=items, stalled_computed_at=_now)
 
 
 # ── hero ProofCapsule envelope (story b464daa1·E-GLANCE 2D) ─────────────────────

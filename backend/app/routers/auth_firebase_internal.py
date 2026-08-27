@@ -20,8 +20,9 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,7 @@ from app.core.config import settings
 from app.dependencies.database import get_db
 from app.models.auth_identity import AuthIdentity, AuthMigration
 from app.models.device_installation import DeviceInstallation
+from app.models.login_audit_log import LoginAuditLog
 from app.models.user import User
 from app.services.android_key_attestation import AndroidAttestationVerificationError, verify_bootstrap_signature
 from app.services.apple_app_attest import AppAttestVerificationError, verify_assertion
@@ -47,6 +49,7 @@ from app.services.firebase_verifier import verify_firebase_id_token
 from app.services.native_bootstrap import consume_bootstrap_code
 from app.services.oauth_handoff import DEFAULT_TTL_SECONDS as OAUTH_HANDOFF_TTL_SECONDS
 from app.services.oauth_handoff import consume_handoff_code, generate_handoff_code, issue_handoff_code
+from app.services.rate_limiter import get_rate_limiter
 
 
 def _b64_decode(value: str | None) -> bytes | None:
@@ -473,15 +476,108 @@ async def consume_native_bootstrap(
 # access/refresh 토큰 쌍을 mint한다.
 _OAUTH_HANDOFF_MIN_CHALLENGE_LEN = 43  # base64url(SHA256) 무패딩 최소 길이(RFC 7636)
 
+# story #3121 AC1(계약 doc §2·산티아고 §10.9 exact-origin) — custom scheme은 App.js
+# OAUTH_RETURN_SCHEME_URL/apps/web native/oauth-return page.tsx와 byte-exact 고정(단일
+# 슬래시). https는 환경별 app_url + 동일 페이지 경로 — 클라 입력을 그대로 신뢰하지 않고 이
+# 고정값과 정확히 일치하는지 issue 시점에 검증한다(둘 다 서버가 계산·클라는 선언만).
+_OAUTH_NATIVE_RETURN_PATH = "/native/oauth-return"
+_OAUTH_CUSTOM_SCHEME_RETURN_URI = "ai.sprintable:/oauth-return"
+
+
+def _expected_return_uri(callback_mode: str) -> str:
+    if callback_mode == "custom_scheme":
+        return _OAUTH_CUSTOM_SCHEME_RETURN_URI
+    return f"{settings.app_url}{_OAUTH_NATIVE_RETURN_PATH}"
+
+
+_DEFAULT_CALLBACK_MODE = "https"
+
+
+def _resolve_callback_mode_and_uri(
+    callback_mode: str | None, return_uri: str | None, *, log_event: str,
+) -> tuple[str, str]:
+    """story #3121 AC1 — PO delta(2026-08-27, PR #3538 리뷰): expand-contract Phase 1.
+    현행 BFF(민군 절반 착지 전)는 이 두 필드를 아예 안 보낸다 — 필수로 걸면 머지 즉시
+    기존 이슈/consume 호출이 422로 전멸(dev 핸드오프 전면 다운). 미제공(둘 다 None)이면
+    https로 유도하되 조용히 넘어가지 않고 로그 한 줄로 파생임을 남긴다. 오늘 BFF가
+    custom_scheme을 아예 안 보내므로(#3116 활성화 트랙 전) https 유도가 실사용과 정합.
+
+    ⚠️Phase 2 승격 조건(코드 주석 고정 — 기한 없는 과도기 방지): 민군 BFF 절반(이슈
+    호출부 callback_mode/return_uri 명시 배선 + consume 호출부 동일)이 dev에 착지·배포
+    확認되면 이 두 필드를 Optional→필수로 승격하는 소PR을 낸다. 그 전까지는 두 필드
+    모두 명시 제공(둘 다 있어야 함 — 하나만 있는 반쪽 선언은 오배선 신호라 거부)하거나
+    둘 다 생략(레거시 유도)만 허용."""
+    if callback_mode is None and return_uri is None:
+        logger.info("%s callback_mode_derived reason=legacy_caller_no_mode_field mode=%s", log_event, _DEFAULT_CALLBACK_MODE)
+        return _DEFAULT_CALLBACK_MODE, _expected_return_uri(_DEFAULT_CALLBACK_MODE)
+    if callback_mode is None or return_uri is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="callback_mode and return_uri must both be provided or both omitted",
+        )
+    return callback_mode, return_uri
+
+
+# story #3121 AC2 — custom-mode(iOS 17.4 미만 fallback)는 계약 §9 잔여위험(client
+# impersonation) 축이 https보다 넓다: 역도메인 scheme은 호출 앱의 정체 증명이 아니라 다른
+# 앱도 동일 scheme을 등록해 가로챌 수 있다(§9 "iOS legacy callback 계약 고정 문구"). 그래서
+# custom_scheme 트래픽에만 «별도»(공용 8-route 로그인 limiter와 무관한 독립 버킷) rate limit을
+# 건다 — https 경로는 이 한도의 영향을 받지 않는다. 60초 창(`app/services/rate_limiter.py`
+# WINDOW_SECS 고정), IP 키(내부시크릿 게이트 우회/유출 시나리오의 방어심화 — 정상 경로는 BFF가
+# 중계하므로 IP가 실사용자를 구분 못 하는 게 알려진 한계, resend_verification_limiter의
+# "인스턴스별 카운터 느슨함"과 동급 별개 우려로 스코프 밖).
+_OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT = 5
+_OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT = 10
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+async def _enforce_custom_scheme_rate_limit(request: Request, callback_mode: str, *, scope: str, limit: int) -> None:
+    if callback_mode != "custom_scheme":
+        return
+    key = f"oauth_handoff_custom_scheme_{scope}:{_client_ip(request)}"
+    allowed, _remaining, retry_after = await get_rate_limiter().check(key, limit)
+    if not allowed:
+        logger.warning("auth.oauth_handoff.%s rejected reason=custom_scheme_rate_limited", scope)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": "RATE_LIMITED", "message": "Too many requests", "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+# story #3121 AC3 — callback_mode별 start(issue)/consume 로그 축. 기존 `login_audit_logs`
+# (app/routers/auth.py `_write_audit`와 동형 shape) 재사용 — 새 테이블 불요, `detail`에
+# mode를 실어 mode별 필터링 가능하게 한다.
+def _write_oauth_handoff_audit(
+    db: AsyncSession, event_type: str, *, user_id: uuid.UUID | None, callback_mode: str, request: Request,
+) -> None:
+    db.add(LoginAuditLog(
+        event_type=event_type,
+        user_id=user_id,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        detail=f"callback_mode={callback_mode}",
+    ))
+
 
 class OAuthHandoffIssueRequest(BaseModel):
     # 산티아고 §10.1.2 계열 defense-in-depth: 이 내부 엔드포인트는 BFF 전용이라 공개 공격면은
-    # 아니지만, 스키마가 정의한 두 필드 외 어떤 것도 조용히 무시하지 않는다(§10.6 음성테스트 7과
+    # 아니지만, 스키마가 정의한 필드 외 어떤 것도 조용히 무시하지 않는다(§10.6 음성테스트 7과
     # 동일 원칙 — "무시 아님, 거부").
     model_config = ConfigDict(extra="forbid")
 
     user_id: str  # BFF가 oauth_callback()으로 이미 해소한 서버-확定 subject.
     code_challenge: str  # PKCE S256 = base64url(SHA256(code_verifier)), 패딩 없음
+    # story #3121 AC1 — 계약 §2: custom-scheme fallback은 OAuth 시작 전 정적으로 결정되는
+    # compatibility mode(association 실패 후 동적 전환 아님). BFF가 OAuth-start 시점에 이미
+    # 확定한 값을 그대로 선언 — 서버는 이 선언을 `_expected_return_uri()` 고정값과 대조만 한다.
+    # PO delta(PR #3538) — Optional/None(Phase 1 expand-contract, `_resolve_callback_mode_and_uri`
+    # 참조). 민군 BFF 절반 착지 확認 후 필수 승격 예정.
+    callback_mode: Literal["https", "custom_scheme"] | None = None
+    return_uri: str | None = None
 
 
 class OAuthHandoffIssueResponse(BaseModel):
@@ -491,6 +587,7 @@ class OAuthHandoffIssueResponse(BaseModel):
 
 @router.post("/oauth-handoff/issue", response_model=OAuthHandoffIssueResponse)
 async def issue_oauth_handoff(
+    request: Request,
     body: OAuthHandoffIssueRequest,
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
@@ -505,6 +602,21 @@ async def issue_oauth_handoff(
 
     if len(body.code_challenge) < _OAUTH_HANDOFF_MIN_CHALLENGE_LEN:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code_challenge")
+
+    # story #3121 AC1 — return_uri는 클라 선언을 그대로 저장하지 않는다: 모드별 서버 고정값과
+    # byte-exact 일치해야 발급 자체를 진행(§10.9 exact-origin). 불일치는 오배선/변조 신호.
+    # PO delta(PR #3538, Phase 1) — 둘 다 미제공이면 레거시 BFF로 보고 https로 유도.
+    callback_mode, return_uri = _resolve_callback_mode_and_uri(
+        body.callback_mode, body.return_uri, log_event="auth.oauth_handoff.issue",
+    )
+    if return_uri != _expected_return_uri(callback_mode):
+        logger.warning("auth.oauth_handoff.issue rejected reason=return_uri_mismatch")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid return_uri")
+
+    # story #3121 AC2 — custom_scheme 트래픽만 별도 rate limit(https는 영향 없음).
+    await _enforce_custom_scheme_rate_limit(
+        request, callback_mode, scope="issue", limit=_OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT,
+    )
 
     try:
         user_uuid = uuid.UUID(body.user_id)
@@ -528,7 +640,18 @@ async def issue_oauth_handoff(
     await _reject_if_before_cutover(user_uuid, int(now.timestamp()), db)
 
     code, code_hash = generate_handoff_code()
-    await issue_handoff_code(db, code_hash=code_hash, user_id=user_uuid, code_challenge=body.code_challenge)
+    # story #3121 AC3 — 코드 행과 같은 commit에 실려야 "발급됐는데 감사기록만 유실"이 없다.
+    _write_oauth_handoff_audit(
+        db, "oauth_handoff_issued", user_id=user_uuid, callback_mode=callback_mode, request=request,
+    )
+    await issue_handoff_code(
+        db,
+        code_hash=code_hash,
+        user_id=user_uuid,
+        code_challenge=body.code_challenge,
+        callback_mode=callback_mode,
+        return_uri=return_uri,
+    )
 
     logger.info("auth.oauth_handoff.issue success")
     return OAuthHandoffIssueResponse(code=code, expires_in=OAUTH_HANDOFF_TTL_SECONDS)
@@ -540,10 +663,18 @@ class OAuthHandoffConsumeRequest(BaseModel):
     # assertion/ID token/임의 user·install ID 등 다른 어떤 필드도 "무시"가 아니라 요청 자체를
     # 거부해야 한다(extra="forbid"). native consume의 `existing_session_user_id`류 부가 필드를
     # 여기 들여오지 않는다 — 이 흐름은 애초에 기존 세션이 없는 최초 로그인 핸드오프다.
+    #
+    # story #3121 AC1 — callback_mode/return_uri 추가(계약 §2 확장, 위 §3 고정 취지와 상충
+    # 아님: 이 두 필드는 "다른 인증 재료"가 아니라 issue 시점에 이미 고정된 값을 그대로
+    # 재선언해 대조하는 것뿐 — 새 신뢰축을 열지 않는다).
     model_config = ConfigDict(extra="forbid")
 
     code: str
     code_verifier: str
+    # PO delta(PR #3538) — Optional/None(Phase 1 expand-contract, `_resolve_callback_mode_and_uri`
+    # 참조). 민군 BFF 절반 착지 확認 후 필수 승격 예정.
+    callback_mode: Literal["https", "custom_scheme"] | None = None
+    return_uri: str | None = None
 
 
 class OAuthHandoffConsumeResponse(BaseModel):
@@ -561,6 +692,7 @@ _OAUTH_HANDOFF_AUTH_SOURCE = "oauth_handoff"
 
 @router.post("/oauth-handoff/consume", response_model=OAuthHandoffConsumeResponse)
 async def consume_oauth_handoff(
+    request: Request,
     body: OAuthHandoffConsumeRequest,
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
@@ -576,9 +708,30 @@ async def consume_oauth_handoff(
     if not settings.firebase_oauth_handoff_enabled:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="OAuth handoff not enabled")
 
-    consumed = await consume_handoff_code(db, code=body.code, code_verifier=body.code_verifier)
+    callback_mode, return_uri = _resolve_callback_mode_and_uri(
+        body.callback_mode, body.return_uri, log_event="auth.oauth_handoff.consume",
+    )
+    # story #3121 AC2 — custom_scheme 트래픽만 별도 rate limit(https는 영향 없음).
+    await _enforce_custom_scheme_rate_limit(
+        request, callback_mode, scope="consume", limit=_OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT,
+    )
+
+    consumed = await consume_handoff_code(
+        db,
+        code=body.code,
+        code_verifier=body.code_verifier,
+        callback_mode=callback_mode,
+        return_uri=return_uri,
+    )
     if consumed is None:
         logger.warning("auth.oauth_handoff.consume rejected reason=code_consume_failed")
+        # story #3121 AC3 — 실패도 mode 축으로 남긴다(AC1이 막는 mode/URI 불일치 시도 자체가
+        # 이 reason으로 수렴하므로, 이 로그가 그 시도의 관측 지점이다). user_id는 미상(코드가
+        # 안 태워졌으니 누구 것인지 특정 불가 — login_failure의 user=None과 동형).
+        _write_oauth_handoff_audit(
+            db, "oauth_handoff_consume_failed", user_id=None, callback_mode=callback_mode, request=request,
+        )
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired code")
 
     user = await db.get(User, consumed.user_id)
@@ -608,6 +761,10 @@ async def consume_oauth_handoff(
         auth_source=_OAUTH_HANDOFF_AUTH_SOURCE, device_attested=False,
     )
     refresh_expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    # story #3121 AC3 — RT 저장과 같은 commit에 실린다(_store_refresh_token이 commit).
+    _write_oauth_handoff_audit(
+        db, "oauth_handoff_consumed", user_id=consumed.user_id, callback_mode=callback_mode, request=request,
+    )
     await _store_refresh_token(db, user, tokens["refresh_token"], refresh_expires_at)
 
     # mint 직후(레거시 토큰 서명+RT 저장 커밋 이후) 재확인 — native consume의 "3번째

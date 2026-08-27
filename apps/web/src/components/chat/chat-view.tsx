@@ -108,6 +108,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const orderedMessageIds = useMemo(() => messages.map((m) => m.id), [messages]);
   const [citationPickerOpen, setCitationPickerOpen] = useState(false);
   const [citationSaveState, setCitationSaveState] = useState<CitationSaveState>('idle');
+  // story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 서버 집행 커맨드 결과 카드의
+  // 「모호」 후보 클릭 = 입력창을 해소된 명령으로 채움(즉시 집행 아님). nonce는 같은 텍스트를
+  // 두 번 연속 눌러도 ChatInput의 effect가 반응하도록 매 클릭마다 증가시키는 카운터.
+  const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(null);
+  const handleFillComposer = useCallback((text: string) => {
+    setPrefillCommand((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -942,6 +949,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             projectId={projectId}
                             entityStatusByKey={entityStatusByKey}
               eventDefinitionsByKey={eventDefinitionsByKey}
+                            onFillComposer={handleFillComposer}
                             hitlAnswer={hitlAnswers.get(msg.id) ?? null}
                             onRespondHitl={(content) => handleSend(content)}
                             isCiteAnchor={citeSelection.isAnchor(msg.id)}
@@ -1031,6 +1039,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             onEscape={() => router.replace(backHref)}
             currentTeamMemberId={currentTeamMemberId}
             participants={participants}
+            prefillCommand={prefillCommand}
           />
 
           {/* story #2265(C-7) — 확定된 범위를 어느 스토리에 붙일지 고르는 자리. 기존
