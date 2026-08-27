@@ -50,7 +50,7 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
           입력한 /명령을 에이전트가 처리)과 구분: 이 카드는 발화자가 «서버»다. */}
       <div className="mb-1.5 flex items-center gap-1.5">
         <span className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold text-proof-ink-2">
-          <Zap className="size-2.5 text-warning" aria-hidden />
+          <Zap className="size-2.5 text-warning-strong" aria-hidden />
           {t('serverCommandBadge')}
         </span>
         <span className={`size-1.5 shrink-0 rounded-full ${DOT_CLASS_BY_OUTCOME[serverCommand.outcome]}`} aria-hidden />
