@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
@@ -98,7 +98,7 @@ export function GateSignatureApproval({
             disabled={resolving}
             onClick={() => onReject(reason)}
           >
-            <XCircle className="size-4" />
+            <Pencil className="size-4" />
             {t('sigRequestChanges')}
           </Button>
           <Button
