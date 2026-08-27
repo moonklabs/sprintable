@@ -1882,3 +1882,37 @@ describe('ChatBubble — story #3106 sender_runtime_type → Avatar 배선', () 
     expect(container.textContent).toContain('Agent');
   });
 });
+
+// story #3129(선생님 실목격 2026-08-27) — 게이트웨이 reply로 나간 커맨드형 메시지가 커맨드
+// 박스로 렌더되는 것 자체는 정상(isCommand는 content-only 판정, S8 설계 그대로)이나, 그
+// args 안의 참조 토큰이 링크/칩으로 안 풀리고 `[제목](entity:type:id)` 원문 그대로 노출되던
+// 결함(②)의 회귀가드. 커맨드 args도 일반 메시지와 같은 ChatMarkdown 경로를 타야 한다.
+describe('ChatBubble — story #3129 커맨드 렌더에서도 참조 토큰 파싱', () => {
+  it('커맨드 args 안의 참조 토큰이 원문 노출이 아니라 칩 라벨로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `/review [제안서.md](entity:doc:${DOC_ID})`, references: undefined }}
+          isMine={false}
+        />,
+      ));
+    });
+    // 커맨드 박스 식별(이름은 여전히 code로 고정 렌더).
+    expect(container.textContent).toContain('/review');
+    // 결함 재현 조건 — 고쳐지기 전엔 이 원문 마크다운 문자열이 그대로 텍스트로 남는다.
+    expect(container.textContent).not.toContain('entity:doc:');
+    expect(container.textContent).not.toContain('](');
+    // 대신 칩 라벨이 파싱되어 보인다.
+    expect(container.textContent).toContain('제안서.md');
+  });
+
+  it('args 없는 순수 커맨드(`/review`)는 참조 렌더 블록 자체가 안 생긴다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: '/review', references: undefined }} isMine={false} />,
+      ));
+    });
+    expect(container.textContent).toContain('/review');
+    expect(container.querySelector('button')).toBeNull();
+  });
+});
