@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, CheckCircle, XCircle } from 'lucide-react';
@@ -132,6 +133,23 @@ export default function GateDetailPage() {
   // 승인 가능한 것처럼 보이는 게 실 결함이라 canonical의 첫 라이브 실측에서 바로 잡았다.
   const isDocGate = gate?.work_item_type === 'doc' || gate?.gate_type === 'doc_approval';
   const isCanonicalizeGate = gate?.gate_type === 'artifact_canonicalize';
+  // story #3128(#3113의 doc_approval판, 페드루 PO 3529 라이브 검증 중 부수 발견) — 카드가
+  // 「근거 데이터 없음 — 내용으로 직접 판단」이라 안내하면서도 대상 실물(문서/아티팩트)로 가는
+  // 경로가 카드 안에 0개였다. doc은 work_item_summary.slug(BE #1970 기존 계약, doc gate만
+  // 채워짐)로 `/docs/{slug}` bare 경로(notification-bell.tsx와 동형 관행 — org/project
+  // slug 없이도 middleware가 현재 활성 프로젝트로 해소, 크로스 프로젝트 게이트는 기존
+  // org/project 이름 표시와 같은 알려진 한계). artifact_canonicalize(work_item_type=
+  // 'visual_artifact')는 BE work_item_summary가 이 타입엔 항상 null(_resolve_work_item_summary
+  // fail-soft)이지만, gate.work_item_id 자체는 항상 있어 slug 없이도 `/artifacts/{id}`
+  // bare 경로(legacy-resource-tables.ts MIGRATED_RESOURCES 등재 확認)로 충분 — 같은
+  // «비용 작으면 잔여 0» 원칙으로 이번 PR에 같이 닫는다. 다른 gate 유형(loop_decision의
+  // hypothesis 초안 verdict·workflow_config_publish)은 전수 점검했으나 링크 대상 라우트가
+  // 불명확해 이번 PR 스코프 밖 — 페드루군에 별도 사이징 보고.
+  const targetLink = isDocGate && gate?.work_item_summary?.slug
+    ? { href: `/docs/${gate.work_item_summary.slug}`, labelKey: 'gateDetailViewTargetDoc' as const }
+    : isCanonicalizeGate && gate?.work_item_id
+    ? { href: `/artifacts/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetArtifact' as const }
+    : null;
   const needsAction = !!gate && gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate || isCanonicalizeGate);
   // story #2091(P0) — needsAction은 "이 게이트가 사람의 판단을 필요로 하는가"만 답한다(gate 자체의
   // 속성). "이 화면을 보는 나(caller)에게 승인 권한이 있는가"는 별개 질문인데 여태 이 둘을 섞어서
@@ -289,6 +307,15 @@ export default function GateDetailPage() {
                     ? ` · ${projectMemberships.find((p) => p.projectId === gate.project_id)?.projectName ?? gate.project_id.slice(0, 8)}`
                     : ''}
                 </p>
+
+                {/* story #3128 — needsAction/canAct와 무관하게 항상 렌더(이미 해소된 카드도
+                    "무엇을 승인했는지" 원문을 감사할 수 있어야 한다 — decisionFacts·
+                    GateActivityHistory와 같은 원칙). */}
+                {targetLink ? (
+                  <Link href={targetLink.href} className="text-xs font-medium text-primary hover:underline">
+                    {t(targetLink.labelKey)}
+                  </Link>
+                ) : null}
 
                 {/* story #3113(AC2) — 「카드를 눌러도 내용을 볼 수 있는 상세 뷰 자체가 없다」
                     처방. needsAction/canAct와 무관하게 항상 렌더(이미 해소된 결정도 «무엇을

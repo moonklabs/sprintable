@@ -3940,6 +3940,8 @@
     "queueResolvedRejected": "Rejected",
     "queueViewRecord": "View record →",
     "gateDetailOrgContext": "Org {org}",
+    "gateDetailViewTargetDoc": "View document →",
+    "gateDetailViewTargetArtifact": "View artifact →",
     "riskUnknown": "Risk pending",
     "riskHigh": "High risk · review closely",
     "diffFactsFileCount": "{count} files",

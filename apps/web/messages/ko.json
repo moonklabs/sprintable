@@ -3940,6 +3940,8 @@
     "queueResolvedRejected": "반려됨",
     "queueViewRecord": "기록 보기 →",
     "gateDetailOrgContext": "조직 {org}",
+    "gateDetailViewTargetDoc": "문서 원문 보기 →",
+    "gateDetailViewTargetArtifact": "아티팩트 보기 →",
     "riskUnknown": "위험도 확인 중",
     "riskHigh": "고위험 · 신중 결재",
     "diffFactsFileCount": "파일 {count}",
