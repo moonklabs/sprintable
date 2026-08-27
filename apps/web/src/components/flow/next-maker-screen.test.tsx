@@ -73,6 +73,10 @@ function buildFetchMock(
   // 까심 QA REQUEST_CHANGES(2026-07-31) 회귀 가드용 — 「다음으로」 PATCH의 응답을 시나리오별로
   // 흔들기 위한 훅. 'fail'=HTTP 비-ok 응답, 'throw'=네트워크 자체가 끊김(unhandled rejection 재현).
   promoteStatusMode: 'ok' | 'fail' | 'throw' = 'ok',
+  // story #3126 — undefined면 기존 그대로(lane 응답에 필드 자체가 없음, 화면은 폴백 720h를
+  // 씀). 명시값을 주면 그 값을 lane 응답에 실어 화면이 «실제로 그 값을 읽어 쓰는지»를
+  // 별도 테스트에서 pin할 수 있게 한다(값을 안 주면 아무 기존 테스트의 동작도 안 바뀐다).
+  dormancyThresholdHours: number | undefined = undefined,
 ) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -108,7 +112,12 @@ function buildFetchMock(
       return jsonResponse([]);
     }
     if (url.startsWith('/api/analytics/epics-progress-lane')) {
-      return jsonResponse({ data: { epics: {}, zones: {}, stall_threshold_hours: 168, stories_without_epic: 0 } });
+      return jsonResponse({
+        data: {
+          epics: {}, zones: {}, stall_threshold_hours: 168, stories_without_epic: 0,
+          ...(dormancyThresholdHours !== undefined ? { dormancy_threshold_hours: dormancyThresholdHours } : {}),
+        },
+      });
     }
     // NextActionsStrip을 펼치면(GoalStemCard 마운트) 부르는 것들 — 승격 후보 계산 + 그 목표의
     // 단일-레인 캔버스는 showCanvas=false라 여기선 안 뜨지만 reference-candidates는 그대로 부른다.
@@ -204,6 +213,37 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
     // 스토리가 0건이라도 그 목표가 조용한지/승격 후보가 없는지는 여전히 물을 수 있다.
     expect(container.querySelector('[data-testid="expand-titles"]')?.textContent).toBe('E-Recent');
     expect(container.querySelector('[data-testid="folded-count"]')?.textContent).toBe('1');
+  });
+
+  // story #3126(2026-08-27) — 옛 하드코딩 30일이 아니라 BE `dormancy_threshold_hours`를
+  // «실제로 읽어 쓰는지» pin. E-Recent의 스토리는 5일(120h) 전 갱신 — lane 응답이 720h(기존
+  // 폴백과 동일값)를 주면 여전히 펼침이지만, 48h(2일)를 주면 120h > 48h라 접혀야 한다. 두
+  // 케이스가 다른 결과를 내야 화면이 진짜 이 값을 쓰고 있다는 증거다(같은 값이면 폴백만
+  // pin하는 것일 수 있어 가짜 회귀가드가 된다).
+  it('story #3126: uses the BE-supplied dormancy_threshold_hours, not a hardcoded 30일 — a narrower threshold folds a goal that a wider one would expand', async () => {
+    const wideUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(wideUrls, [], 'ok', 720));
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(container.querySelector('[data-testid="expand-titles"]')?.textContent).toBe('E-Recent');
+    await act(async () => { root.unmount(); });
+    container.remove();
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const narrowUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(narrowUrls, [], 'ok', 48));
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // 48h면 E-Recent(120h 전)·E-Stale(60일 전) 둘 다 접힌다(720h일 땐 E-Recent만 펼쳐졌던 것과
+    // 대비 — 접힌 개수 자체가 달라지는 것이 임계값이 실제로 화면에 반영된다는 증거).
+    expect(container.querySelector('[data-testid="expand-titles"]')?.textContent).toBe('');
+    expect(container.querySelector('[data-testid="folded-count"]')?.textContent).toBe('2');
   });
 
   // story #2535(E-FLOW-V4 S5) — 지구→대륙→도시 드릴다운 착지. focusGoalId가 fold 쪽에

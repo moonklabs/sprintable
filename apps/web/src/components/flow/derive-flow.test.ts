@@ -26,6 +26,7 @@ function makeLaneData(overrides: Partial<EpicsProgressLaneResponse> = {}): Epics
       e1: { title: 'Epic 1', total: 10, done: 4, pct: 40, past_cnt: 4, now_cnt: 2, upcoming_cnt: 4 },
     },
     stall_threshold_hours: 168,
+    dormancy_threshold_hours: 720,
     stories_without_epic: 0,
     ...overrides,
   };

@@ -31,6 +31,11 @@ export interface EpicsProgressLaneResponse {
   epics: Record<string, EpicLaneCounts>;
   zones: Record<string, EpicZoneCounts>;
   stall_threshold_hours: number;
+  // story #3126(#2341 AC1 후속, 페드루 판정 2026-08-27) — stall_threshold_hours(168h, story
+  // 하나의 단기 정체 신호)와 「같은 질문 두 값」이 아니다: dormancy=goal 전체의 장기 활동
+  // 분류(fold/은퇴 판정). 위계상 세부가 먼저 시들고 상위가 나중에 은퇴하므로 값이 다른 게
+  // 정직하다 — `derive-next-maker.ts`의 옛 하드코딩 30일(THIRTY_DAYS_MS)을 이 값으로 대체한다.
+  dormancy_threshold_hours: number;
   stories_without_epic: number;
 }
 
