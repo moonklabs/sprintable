@@ -210,6 +210,26 @@ async def onboarding_abandoned_sweep(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/onboarding-reminder-sweep ─────────────────────
+# story #3159(retention·최소층) — [now-48h,24h) 가입자 중 미완주(email 미인증 or agent 미연결
+# or 첫왕복 미완)에게 1회 리마인드 메일. users.onboarding_reminder_sent_at으로 중복 발송 차단.
+
+@router.post("/onboarding-reminder-sweep")
+async def onboarding_reminder_sweep(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.onboarding_activation import run_reminder_sweep
+
+        result = await run_reminder_sweep(session)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error (onboarding-reminder-sweep): %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/workflow-handoff-watchdog ──────────────────────
 # E-DG S8: handoff watchdog + ACK reconciliation(P0-3). silent handoff stall 을 observable
 # incident 로 전환 — ACK 대사 → acked / 10분 미ACK → timed_out(board badge) + fallback notification.

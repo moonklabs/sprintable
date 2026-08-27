@@ -50,6 +50,9 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # story #3159(retention·최소층) — 미완주 리마인드 메일 중복방지(발송 이력) + 1-클릭 수신거부.
+    onboarding_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    marketing_email_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class RefreshToken(Base):
