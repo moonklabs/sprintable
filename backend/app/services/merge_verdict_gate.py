@@ -841,6 +841,16 @@ async def trigger_gate_creation_for_late_participation(
     조합을 그대로 재사용 — get_pull_request로 현재 head SHA/merged를, fetch_status_check_
     rollup으로 CI를 읽어 evaluate_merge_gate 재호출. 새 규칙 발명 0).
 
+    story #3115(2026-08-26, 승격 리드타임) 후속 — 이 함수는 "story에 링크된 PR마다 gate가
+    없으면 만든다"는 참여-불특정 일반 훅이라, 참여 등록 갭과 완전히 동형인 **링크 생성 갭**
+    (PR opened(링크 無)→action_required 발행→`POST /github/links`(explicit link)로 뒤늦게
+    링크→재평가 훅 0→gate 영구 미생성)에도 그대로 재사용된다 —
+    `github_integration.py::create_explicit_link`도 이제 이 훅을 부른다(새 규칙 발명 0,
+    참여 쪽과 동일 chokepoint 원칙). 두 갭이 순서 무관하게 어느 쪽이든 먼저 채워지면(링크
+    먼저·참여 먼저 둘 다) 그 즉시 이 함수가 시도하고, 아직 안 채워진 나머지 한쪽이
+    evaluate_merge_gate 내부에서 계속 막으면(예: 링크는 있는데 참여가 아직 없음) 그 나머지
+    쪽이 채워질 때 같은 훅이 다시 성공한다 — 재오픈 없이 두 갭 모두 닫힌다.
+
     ⚠️호출자의 세션을 그대로 받는다(별도 세션 아님) — 방금 `flush`된(아직 커밋 前) participation
     행을 evaluate_merge_gate가 같은 트랜잭션 안에서 즉시 봐야 하기 때문(실측: 별도 세션으로
     분리했더니 그 세션엔 아직 안 보이는 미커밋 행 탓에 "no implementation participation"으로
