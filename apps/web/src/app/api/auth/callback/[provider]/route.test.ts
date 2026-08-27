@@ -92,8 +92,58 @@ describe('GET /api/auth/callback/[provider] — native OAuth-handoff branch', ()
     const [issueUrl, issueOpts] = mockFetch.mock.calls[1] as [string, RequestInit];
     expect(issueUrl).toContain('/api/v2/internal/auth/oauth-handoff/issue');
     expect(issueUrl).not.toContain('native-bootstrap');
-    const sentBody = JSON.parse(issueOpts.body as string) as { user_id: string; code_challenge: string };
-    expect(sentBody).toEqual({ user_id: 'user-123', code_challenge: 'a'.repeat(43) });
+    const sentBody = JSON.parse(issueOpts.body as string) as {
+      user_id: string; code_challenge: string; callback_mode: string; return_uri: string;
+    };
+    // story #3121 AC1 — callback_mode 쿠키 부재 시 https로 기본 유도(구버전 클라 대비).
+    expect(sentBody).toEqual({
+      user_id: 'user-123',
+      code_challenge: 'a'.repeat(43),
+      callback_mode: 'https',
+      return_uri: 'https://dev-app.sprintable.ai/native/oauth-return',
+    });
+  });
+
+  // story #3121 AC1 — custom_scheme 쿠키가 있으면 issue 호출에 그대로 실어 보낸다(https 기본값
+  // 오버라이드). return_uri는 App.js OAUTH_RETURN_SCHEME_URL과 byte-exact 고정값이라 별도
+  // env(MOBILE_APP_LINK_ORIGIN)에 안 흔들린다 — 그것도 같이 확認.
+  it('with callback_mode=custom_scheme cookie: sends custom_scheme + fixed ai.sprintable return_uri to issue', async () => {
+    stubCookies({ oauth_native_challenge_google: 'a'.repeat(43), oauth_native_callback_mode_google: 'custom_scheme' });
+    process.env['MOBILE_APP_LINK_ORIGIN'] = 'https://app.sprintable.ai'; // custom_scheme엔 무영향이어야 함
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { access_token: fakeJwt({ sub: 'user-123' }), refresh_token: 'legacy-rt' } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ code: 'handoff-code-xyz' }) });
+
+    await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+    const [, issueOpts] = mockFetch.mock.calls[1] as [string, RequestInit];
+    const sentBody = JSON.parse(issueOpts.body as string) as { callback_mode: string; return_uri: string };
+    expect(sentBody.callback_mode).toBe('custom_scheme');
+    expect(sentBody.return_uri).toBe('ai.sprintable:/oauth-return');
+  });
+
+  // 자기검증(뮤테이션) — 쿠키 값이 스키마 밖(임의 문자열)이면 https로 안전 폴백해야지, 그
+  // 값을 그대로 흘려보내면 안 된다(BE가 Literal["https","custom_scheme"]로 거부하는 자리를
+  // BFF가 미리 안 막으면 native 로그인 전체가 400으로 죽는다).
+  it('with an invalid callback_mode cookie value: falls back to https (never forwards garbage)', async () => {
+    stubCookies({ oauth_native_challenge_google: 'a'.repeat(43), oauth_native_callback_mode_google: 'not-a-real-mode' });
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { access_token: fakeJwt({ sub: 'user-123' }), refresh_token: 'legacy-rt' } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ code: 'x' }) });
+
+    await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+    const [, issueOpts] = mockFetch.mock.calls[1] as [string, RequestInit];
+    const sentBody = JSON.parse(issueOpts.body as string) as { callback_mode: string };
+    expect(sentBody.callback_mode).toBe('https');
+  });
+
+  it('with a native challenge cookie: deletes the callback_mode cookie (single-use, like the other oauth_* cookies)', async () => {
+    stubCookies({ oauth_native_challenge_google: 'a'.repeat(43), oauth_native_callback_mode_google: 'custom_scheme' });
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { access_token: fakeJwt({ sub: 'user-123' }), refresh_token: 'legacy-rt' } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ code: 'x' }) });
+
+    await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+    expect(h.cookiesDeleteMock).toHaveBeenCalledWith('oauth_native_callback_mode_google');
   });
 
   it('with a native challenge cookie: redirects to the App Link return URL with the handoff code, no-store + no-referrer', async () => {
