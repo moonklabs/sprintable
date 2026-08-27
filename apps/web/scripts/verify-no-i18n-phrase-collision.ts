@@ -161,6 +161,14 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 //                `outcome.currentPeriodEnd?.slice(0, 10)`(예: "2026-09-24") — teamId·slug와
 //                같은 축의 «불투명 포맷 값»이지 «N개/N건류 카운트»가 아니다(자릿수가 늘거나
 //                줄어도 문법이 안 바뀜 — 이 가드가 지키려는 «수와 함께 서는 문구» 축과 무관).
+//   provider   — OAuth 로그인 provider 이름(story #3149, linked-accounts-section.tsx —
+//                `{provider}`를 채우는 값은 코드상 항상 'Google'|'Apple' 리터럴 둘 중
+//                하나뿐, role·project·tier와 같은 축의 카테고리 라벨이지 카운트가 아니다.
+//                CI가 settings.linkedAccountsLinkedSuccess/linkedAccountsUnlinkedSuccess를
+//                settings.linkedAccountsConnect="연결"과 충돌로 잡았는데, EXEMPT_PAIRS(개별
+//                쌍 예외)가 아니라 여기(이름 자체가 비수치임을 선언)가 맞는 자리다 — 이
+//                이름을 쓰는 다음 키가 생겨도 자동으로 같은 판정을 받는다(EXEMPT_PAIRS는
+//                그 다음 키를 또 개별 등재해야 한다).
 // ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
 // 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
 // EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
@@ -170,7 +178,7 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 // 재는지 모르게 되는 것)이 재발한다.
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
-  'sources', 'excludes', 'slug', 'tier', 'date',
+  'sources', 'excludes', 'slug', 'tier', 'date', 'provider',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
