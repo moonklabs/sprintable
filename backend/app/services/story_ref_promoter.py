@@ -64,6 +64,19 @@ _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 _ENTITY_TOKEN_RE = re.compile(r"\[[^\]]*\]\(entity:[a-z_]+:[^)]+\)")
 
+# story #3162(채팅·치환 결함 조사) — 인용부호/블록인용 안의 `#N`은 「예시로 재인용」이지
+# 「새로 참조하려는 의도」가 아니다(디캄포 오늘 밤 재발 실사고: 정정 메시지에서 오염된
+# 원문을 그대로 다시 인용해 재승격됨). 코드블록·인라인코드와 같은 성격의 "이 안은 예시
+# 영역"으로 취급한다 — 같은 줄 안에서 닫히는 짝만(여러 줄에 걸친 따옴표는 보호 대상
+# 밖으로 두어 과잉 보호를 피한다, 기존 인라인코드 규율과 동형). 한글 채팅 관례의
+# 「」『』《》〈〉도 같은 원칙으로 포함.
+_DOUBLE_QUOTE_RE = re.compile(r'"[^"\n]*"')
+_SINGLE_QUOTE_RE = re.compile(r"'[^'\n]*'")
+_KOREAN_BRACKET_QUOTE_RE = re.compile(r"「[^」\n]*」|『[^』\n]*』|《[^》\n]*》|〈[^〉\n]*〉")
+# 블록인용(마크다운 `>` 관례) — 줄 전체를 보호(그 줄 안의 `#N`은 다른 사람 말/과거 발화를
+# 그대로 옮긴 것이지 이 발신자의 새 참조 의도가 아니다).
+_BLOCKQUOTE_LINE_RE = re.compile(r"^>.*$", re.MULTILINE)
+
 
 def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]]:
     """본문에서 «#숫자» 후보 위치를 뽑는다(DB 조회 없는 순수 함수 — 모양만 본다, 존재 여부는
@@ -95,10 +108,14 @@ def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]
 
 
 def _protected_spans(content: str) -> list[tuple[int, int]]:
-    """fenced 코드블록·인라인 코드·기존 entity 토큰의 (start, end) 구간. 이 구간에서
-    시작하는 후보는 승격 대상에서 제외한다(AC2 — 코드블록 미변환·이중 변환 금지)."""
+    """fenced 코드블록·인라인 코드·기존 entity 토큰·인용부호·블록인용의 (start, end) 구간.
+    이 구간에서 시작하는 후보는 승격 대상에서 제외한다(AC2 — 코드블록 미변환·이중 변환
+    금지, story #3162 — 인용부호/블록인용도 같은 "예시 영역" 원칙으로 추가)."""
     spans: list[tuple[int, int]] = []
-    for pat in (_FENCED_CODE_RE, _INLINE_CODE_RE, _ENTITY_TOKEN_RE):
+    for pat in (
+        _FENCED_CODE_RE, _INLINE_CODE_RE, _ENTITY_TOKEN_RE,
+        _DOUBLE_QUOTE_RE, _SINGLE_QUOTE_RE, _KOREAN_BRACKET_QUOTE_RE, _BLOCKQUOTE_LINE_RE,
+    ):
         spans.extend(m.span() for m in pat.finditer(content))
     return spans
 
