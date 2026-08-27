@@ -1916,3 +1916,60 @@ describe('ChatBubble — story #3129 커맨드 렌더에서도 참조 토큰 파
     expect(container.querySelector('button')).toBeNull();
   });
 });
+
+// story #92f00dc4(#9a5abc24 BE 짝) — server_command(구조화 필드) 존재만으로 판별해
+// ServerCommandResultCard로 라우팅되는지(sniffing 0, approval_target/event와 동형 규율).
+describe('ChatBubble — story #92f00dc4 server_command 카드 라우팅', () => {
+  const serverCmdMessage: ChatMessage = {
+    ...baseMessage,
+    content: "'/done' 완료 — 스토리가 done으로 전이됐습니다.\n다음: 결과를 확인하세요.",
+    server_command: { command: 'done', outcome: 'executed' },
+  };
+
+  it('server_command가 있으면 ⚡ 서버 집행 배지가 뜬다(isCmd 분기·ReportMessageSummary보다 우선)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={serverCmdMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('서버 집행');
+  });
+
+  it('content가 "/"로 시작하지 않아 isCmd가 아니어도(사람이 아니라 서버가 회신) 서버 카드로 뜬다', async () => {
+    // 실제 BE 회신 문구는 "'/done' 완료 — ..."처럼 /로 시작하지 않는다 — isCommand()가 false를
+    // 반환해도 server_command 필드만으로 정확히 라우팅되는지가 이 테스트의 핵심.
+    expect(serverCmdMessage.content.startsWith('/')).toBe(false);
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={serverCmdMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain("'/done' 완료");
+  });
+
+  it('server_command 없는 일반 에이전트 메시지는 서버 집행 배지가 안 뜬다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, server_command: null }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('서버 집행');
+  });
+
+  it('onFillComposer가 결과 카드의 후보 클릭까지 그대로 배선된다(모호 상태)', async () => {
+    const onFillComposer = vi.fn();
+    const ambiguousMessage: ChatMessage = {
+      ...baseMessage,
+      content: "'/assign' 실패 — 「채영」에 일치하는 멤버가 여럿입니다.",
+      server_command: { command: 'assign', outcome: 'ambiguous', candidates: ['채영1', '채영2'] },
+    };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={ambiguousMessage} isMine={false} onFillComposer={onFillComposer} />));
+    });
+    const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '채영1') as HTMLButtonElement;
+    expect(button).toBeTruthy();
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onFillComposer).toHaveBeenCalledWith('/assign 채영1');
+  });
+
+  it('삭제된(tombstone) 메시지는 server_command가 있어도 삭제 placeholder가 우선한다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...serverCmdMessage, content: '', deleted_at: '2026-08-27T00:00:00.000Z' }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('서버 집행');
+  });
+});

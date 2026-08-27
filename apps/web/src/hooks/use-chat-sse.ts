@@ -89,6 +89,18 @@ export interface ChatMessage {
    * 이상 발행하지 않는다(정보성 카드 폐기 — 카드 자체가 지정자에게만 간다). 구서버(undefined/
    * null)는 기존 렌더로 무회귀. */
   message_kind?: string | null;
+  /** story #92f00dc4(Chat ②층 FE)/#9a5abc24(BE) — BE가 msg_metadata['server_command']를
+   * payload top-level에 additive로 노출(approval_target/event와 동형 패턴). 있으면 이
+   * 메시지는 서버가 결정적으로 집행한 커맨드(카탈로그: done/assign/priority)의 결과 카드다.
+   * `candidates`는 outcome='ambiguous'일 때만 실리는 후보 이름 배열(페드루 판정, PR #3549
+   * 리뷰 후속 — 문장 파싱 금지). 구서버(필드 부재)는 `?? null`로 통일 — FE는 candidates가
+   * 없으면 후보 존 자체를 생략한다(파싱으로 지어내지 않는다).
+   */
+  server_command?: {
+    command: string;
+    outcome: 'executed' | 'denied' | 'not_found' | 'ambiguous' | 'invalid_args';
+    candidates?: string[];
+  } | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -123,6 +135,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     event: (raw.event ?? null) as ChatMessage['event'],
     // story #2985 — _activation_payload가 top-level에 싣는 message_kind 그대로.
     message_kind: (raw.message_kind ?? null) as string | null,
+    // story #92f00dc4/#9a5abc24 — approval_target/event와 동일 규율(?? null 통일).
+    server_command: (raw.server_command ?? null) as ChatMessage['server_command'],
   };
 }
 

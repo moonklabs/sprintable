@@ -77,11 +77,21 @@ export function applyAsset(
 interface CommandSuggestion {
   name: string;
   descKey: string;
+  /** story #92f00dc4(Chat ②층 FE, doc exec-command-final-spec-92f00dc4) — 서버 집행
+   * 카탈로그(done/assign/priority)만 인자 힌트가 있다(런타임 커맨드 3종은 무인자). */
+  argHintKey?: string;
 }
 const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
   { name: 'pixel', descKey: 'commandSuggestPixel' },
   { name: 'handoff', descKey: 'commandSuggestHandoff' },
   { name: 'review', descKey: 'commandSuggestReview' },
+  // story #92f00dc4(#9a5abc24 BE 짝) — 서버 집행 카탈로그 3종. BE `CATALOG` dict
+  // (chat_command_catalog.py)가 어휘 정본 — 카탈로그 목록 엔드포인트가 아직 없어(doc
+  // "1차는 정적이되 BE 카탈로그와 future 동기" 주석, 페드루 확定) 이 seed를 손으로
+  // 맞춘다. BE가 목록을 추가하면 fetch로 교체할 자리(하드코딩 그대로 두지 말 것).
+  { name: 'done', descKey: 'commandSuggestDone', argHintKey: 'commandArgHintDone' },
+  { name: 'assign', descKey: 'commandSuggestAssign', argHintKey: 'commandArgHintAssign' },
+  { name: 'priority', descKey: 'commandSuggestPriority', argHintKey: 'commandArgHintPriority' },
 ];
 
 // command picker 트리거: 입력 전체가 `/이름`(공백/args 전·커서가 끝)일 때만. 공백 시작 시 닫고 hint chip이 인계.
@@ -148,9 +158,17 @@ interface ChatInputProps {
   // 발행경로가 필요 없는 화면에 죽은 버튼을 심지 않는다, graceful).
   currentTeamMemberId?: string;
   participants?: { member_id: string; name: string | null }[];
+  /** story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 모호 후보 클릭 =
+   * «입력창을 해소된 명령으로 채움(즉시 집행 아님, 사람이 Enter로 확認)». 부모(chat-view)가
+   * 후보 클릭 시 이 값을 갱신하면(같은 text라도 매번 새 nonce) 아래 effect가 입력창을
+   * 그 텍스트로 교체+포커스+커서 끝으로 보낸다. nonce가 실제 신호(같은 명령을 두 번 연속
+   * 눌러도 반응해야 하므로 text 값만으로는 effect 트리거가 안 됨 — 카운터로 "이번이 새
+   * 클릭"임을 구분).
+   */
+  prefillCommand?: { text: string; nonce: number } | null;
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
   const t = useTranslations('chats');
   // story 1946(PO 실기기 발견): 터치(가상 키보드)엔 Cmd/Shift 조합이 없어 Enter=발송이면 장문
   // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
@@ -201,6 +219,23 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const commandCandidates = commandQuery === null
     ? []
     : COMMAND_SUGGESTIONS.filter((c) => c.name.toLowerCase().startsWith(commandQuery.toLowerCase()));
+
+  // story #92f00dc4(doc §🎯 모호 후보 클릭) — prefillCommand.nonce가 바뀔 때만 입력창을
+  // 그 텍스트로 교체한다(즉시 집행 아님 — 사람이 검토 후 Enter). 마운트 직후(nonce=0 등
+  // 초기값)엔 안 돈다는 보장이 없으므로 ref로 "이미 처리한 nonce"를 기억해 중복 적용을
+  // 막는다(리렌더마다 이 effect 자체는 매번 평가되지만 nonce가 그대로면 skip).
+  const appliedPrefillNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!prefillCommand) return;
+    if (appliedPrefillNonceRef.current === prefillCommand.nonce) return;
+    appliedPrefillNonceRef.current = prefillCommand.nonce;
+    setText(prefillCommand.text);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      textarea?.focus();
+      textarea?.setSelectionRange(prefillCommand.text.length, prefillCommand.text.length);
+    });
+  }, [prefillCommand]);
 
   useEffect(() => {
     if (mentionQuery === null) { setMentionMembers([]); return; }
@@ -686,8 +721,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
       <div className="relative flex items-end gap-2">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
+        {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
+            추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -696,11 +733,16 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   role="option"
                   aria-selected={idx === commandIndex}
                   onMouseDown={(e) => { e.preventDefault(); selectCommand(cmd); }}
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition ${idx === commandIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition ${idx === commandIndex ? 'bg-brand/10' : 'hover:bg-muted'}`}
                 >
-                  <Terminal className="size-3.5 shrink-0 text-info" aria-hidden />
-                  <span className="font-medium text-info">/{cmd.name}</span>
-                  <span className="ml-1 truncate text-xs text-muted-foreground">{t(cmd.descKey)}</span>
+                  <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  {/* story #92f00dc4(doc exec-command-final-spec-92f00dc4 §①) — 커맨드명
+                      mono+primary·인자 힌트 mono+muted(있을 때만)·설명은 우측 정렬. */}
+                  <span className="font-mono text-[12.5px] font-semibold text-primary">/{cmd.name}</span>
+                  {cmd.argHintKey ? (
+                    <span className="shrink-0 whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">{t(cmd.argHintKey)}</span>
+                  ) : null}
+                  <span className="ml-auto truncate pl-2 text-[11.5px] text-foreground">{t(cmd.descKey)}</span>
                 </button>
               </li>
             ))}
