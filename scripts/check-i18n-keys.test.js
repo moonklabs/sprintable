@@ -2,7 +2,7 @@
 // (require.main === module 가드) — 그래서 이 테스트는 파일 I/O나 process.exit 부작용 없이
 // flatten/stripComments/isDynamicallyComposed만 직접 잰다.
 import { describe, expect, it } from 'vitest';
-import { flatten, stripComments, isDynamicallyComposed, DYNAMIC_KEY_PREFIXES } from './check-i18n-keys.js';
+import { flatten, stripComments, isDynamicallyComposed, extractKeyUsages, DYNAMIC_KEY_PREFIXES } from './check-i18n-keys.js';
 
 describe('flatten — ㉢ 2단 이상 중첩 dot-path 평탄화', () => {
   it('flattens arbitrarily deep nesting into dot-joined leaf paths', () => {
@@ -115,5 +115,29 @@ describe('isDynamicallyComposed — AC4 화이트리스트, AC5 양성대조', (
       expect(entry.file, `${entry.prefix} missing file`).toBeTruthy();
       expect(entry.reason, `${entry.prefix} missing reason`).toBeTruthy();
     }
+  });
+});
+
+// story #3149(카디르 QA 실측·미르코 근본추적, PR#3558) — 멤버접근(`acc.t('title')`)이 파일
+// 자신의 `t`(다른 네임스페이스에 바인딩)로 오귀속되던 거짓 양성 회귀가드.
+describe('extractKeyUsages — ㉥ 멤버접근(`obj.t(...)`)은 로컬 t() 호출로 오귀속되지 않는다', () => {
+  it('바로 호출(`t(...)`)은 정상적으로 잡힌다', () => {
+    const content = "const t = useTranslations('nav');\nt('title');";
+    expect(extractKeyUsages(content, 't')).toEqual(['title']);
+  });
+
+  it('멤버접근(`acc.t(...)`)은 varName=t로 조회할 때 안 잡힌다(실제 재현 사례: context-switcher-chip.tsx가 useAccountSwitcher()가 반환한 t를 acc.t(...)로 쓰는데, 파일 자신의 useTranslations(\'nav\') t와 이름이 같아 오귀속됐었다)', () => {
+    const content = "const t = useTranslations('nav');\nconst acc = useAccountSwitcher(name);\nacc.t('title');";
+    expect(extractKeyUsages(content, 't')).toEqual([]);
+  });
+
+  it('한 파일에 로컬 t(...)와 멤버접근 acc.t(...)가 공존해도 로컬 호출만 잡힌다', () => {
+    const content = "const t = useTranslations('nav');\nconst acc = useAccountSwitcher(name);\nt('switcherMobileTriggerAria');\nacc.t('title');\nacc.t('signOutAll');";
+    expect(extractKeyUsages(content, 't')).toEqual(['switcherMobileTriggerAria']);
+  });
+
+  it('식별자 끝에 우연히 걸리는 것도 여전히 안 잡힌다(㉠ 기존 워드바운더리 보존 — get(\'x\')의 t(\'x\')류)', () => {
+    const content = "const t = useTranslations('nav');\nget('title');";
+    expect(extractKeyUsages(content, 't')).toEqual([]);
   });
 });

@@ -167,7 +167,7 @@ function ScrollShell({
   // 2505d27d: 상시 팀 presence 패널 — 2xl=inline right-rail / <2xl=drawer. storageKey로 open 영속.
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
   // R2(da9d1781): presence SSE event-driven(3s 폴 제거). member_id 로 event-stream 구독.
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, userName } = useDashboardContext();
   const items = useTeamPresence(true, currentTeamMemberId);
   const workingCount = items.filter((i) => i.working).length;
   // story #2852(2836 FE 조각) — presence 패널은 전역 상시 마운트라 「인증 실패」 뱃지 원자료도
@@ -185,6 +185,7 @@ function ScrollShell({
             orgMemberships={orgMemberships}
             projectId={projectId}
             projectMemberships={projectMemberships}
+            userName={userName}
           />
         )}
         <ContextualPanelLayout

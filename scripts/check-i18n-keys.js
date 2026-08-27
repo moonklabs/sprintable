@@ -201,6 +201,22 @@ function isDynamicallyComposed(flatKeyPath) {
 // ㉣ — 훅이 바인딩되는 실제 로컬 변수명을 파일마다 잡는다(하드코딩 `t` 가정을 버린다).
 const HOOK_BIND_RE = /const\s+(\w+)\s*=\s*(?:await\s+)?(?:useTranslations|getTranslations)\(\s*['"]([\w.]+)['"]/g;
 
+/**
+ * ㉥ — story #3149(카디르 QA 실측·미르코 근본추적, PR#3558) — 워드바운더리
+ * `(?<![\w$])varName\(`가 멤버 접근(`acc.t('title')`)의 `.t(`도 매치했다. `.`은 `\w`도
+ * `$`도 아니라 룩비하인드를 통과 — 파일이 `const t = useTranslations('nav')`를 갖고
+ * *동시에* 다른 객체(커스텀 훅이 반환한 `{ t, ... }`)의 `.t(...)`도 부르면, 후자가 전자
+ * (`nav`)로 오귀속돼 「missing」 거짓 양성을 낸다(context-switcher-chip.tsx가 useAccountSwitcher
+ * 훅에서 받은 `acc.t(...)`을 파일 자신의 `t`(nav)로 오판, 실렌더는 정상인데 CI만 빨간
+ * 사례). 룩비하인드에 `.`을 추가해 「바로 앞이 단어문자·`$`·`.` 중 어느 것도 아닐 때만」
+ * 매치하도록 좁힌다 — 로컬 `t()` 직접 호출(정상 케이스)은 앞이 공백·`(`·`{` 등이라
+ * 영향 없고, 멤버 접근(`xxx.t(...)`)만 제외된다.
+ */
+function extractKeyUsages(content, varName) {
+  const re = new RegExp(`(?<![\\w$.])${escapeRegExp(varName)}\\(\\s*['"]([\\w.]+)['"]`, 'g');
+  return [...content.matchAll(re)].map(m => m[1]);
+}
+
 // main()으로 감싸 CLI 실행(require.main === module)일 때만 돈다 — 그래야 테스트가 순수함수
 // (flatten/stripComments/isDynamicallyComposed)만 require해 쓸 때 이 스캔 전체(파일 I/O·
 // process.exit)가 같이 실행되는 부작용이 없다.
@@ -229,11 +245,8 @@ function main() {
     if (varToNamespace.size === 0) return;
 
     for (const [varName, namespace] of varToNamespace) {
-      // ㉠ 워드바운더리 — `varName(` 바로 앞이 단어문자/`$`가 아닐 때만(다른 식별자 끝에
-      // 우연히 걸리는 것 방지, 예: 훅 변수명이 `t`일 때 `get(`의 `t(`에 안 걸림).
-      const callRe = new RegExp(`(?<![\\w$])${escapeRegExp(varName)}\\(\\s*['"]([\\w.]+)['"]`, 'g');
-      for (const m of content.matchAll(callRe)) {
-        const key = m[1];
+      // ㉠ 워드바운더리 + ㉥ 멤버접근 제외 — extractKeyUsages 참조.
+      for (const key of extractKeyUsages(content, varName)) {
         const fullKey = `${namespace}.${key}`;
         referencedPaths.add(fullKey);
 
@@ -301,4 +314,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { flatten, escapeRegExp, stripComments, isDynamicallyComposed, DYNAMIC_KEY_PREFIXES, main };
+module.exports = { flatten, escapeRegExp, stripComments, isDynamicallyComposed, extractKeyUsages, DYNAMIC_KEY_PREFIXES, main };

@@ -20,9 +20,13 @@ interface TopBarProps {
   orgMemberships?: OrgSwitcherItem[];
   projectId?: string;
   projectMemberships?: Array<{ projectId: string; projectName: string }>;
+  /** story #3146(doc mobile-switcher-redesign-spec-4758744a §③ 계정층) — ContextSwitcherChip
+   * 시트의 계정 전환 섹션 활성화 여부(없으면 그 섹션 자체를 생략). 위 orgId 주석과 동일
+   * 이유로 훅이 아니라 prop으로 받는다. */
+  userName?: string;
 }
 
-export function TopBar({ className, orgId, orgMemberships = [], projectId, projectMemberships = [] }: TopBarProps) {
+export function TopBar({ className, orgId, orgMemberships = [], projectId, projectMemberships = [], userName }: TopBarProps) {
   const { title, actions, hidden, showContextChip } = useTopBar();
   const t = useTranslations('nav');
   const isTablet = useIsTablet();
@@ -59,6 +63,7 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
           currentOrgId={orgId}
           projects={projectMemberships}
           currentProjectId={projectId}
+          userName={userName}
         />
       )}
       {/* story 6df91dce — 390px에서 title(현재 탭 이름, 예 "결재함")이 contextChip+actions와
