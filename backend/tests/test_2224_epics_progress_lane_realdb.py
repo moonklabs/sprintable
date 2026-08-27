@@ -146,6 +146,10 @@ async def test_epics_progress_lane_buckets_correctly_and_one_call():
             # 없어 blocked에 안 잡히고, status=in-progress라 in_progress로 떨어져야 한다.
             assert sum(lane.values()) == 6, "네 칸(진행/대기/막힘/멈춤) + other == total_stories 항상 성립해야 함"
             assert body["stall_threshold_hours"] == 168
+            # story #3126 — stall(168h, story-level 단기 주의)과 dormancy(720h=30일, goal-level
+            # 장기 활동 분류)는 「같은 질문 두 값」이 아니다(페드루 판정 2026-08-27) — 값이
+            # 다른 게 정직하다.
+            assert body["dormancy_threshold_hours"] == 720
             assert body["stories_without_epic"] == 1, "epic 없는 story(story_no_epic) 1건이 응답에 실려야 함"
             assert call_count["n"] == 1, f"repo 메서드가 {call_count['n']}번 불림(N+1 의심)"
 

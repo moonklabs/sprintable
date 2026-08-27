@@ -172,14 +172,31 @@ class GoalRepository(BaseRepository[Goal]):
         데이터)를 갖고 평가된다(`GlanceFocalStory` docstring 참조 — 기존엔 재료가 없어 죽어
         있던 분기). story #2303부터 `focal_story`가 `/api/glance/hero?story_id=`가 주던
         9필드(assignee_ids·proof_count·auto_verify·gate.*·trust.*)까지 싣는다 — 전부 픽된
-        focal story id 집합(페이지 전체 goal 기준)으로 배치 조회, N+1 없음."""
+        focal story id 집합(페이지 전체 goal 기준)으로 배치 조회, N+1 없음.
+
+        latest_story_activity_at: story #3126 — 에픽별 non-done story updated_at 최댓값
+        (없으면 None). `derive-next-maker.ts`의 기존 client-side 계산과 동일 정의를 BE로
+        승격 — GROUP BY 단일 쿼리, N+1 없음."""
         for goal in goals:
             goal.participant_ids = []  # type: ignore[attr-defined]
             goal.focal_story = None  # type: ignore[attr-defined]
+            goal.latest_story_activity_at = None  # type: ignore[attr-defined]
         if not goals:
             return
 
         goal_ids = [g.id for g in goals]
+
+        activity_rows = await self.session.execute(
+            select(Story.epic_id, func.max(Story.updated_at)).where(
+                Story.epic_id.in_(goal_ids), Story.org_id == self.org_id,
+                Story.deleted_at.is_(None), Story.status != "done",
+            ).group_by(Story.epic_id)
+        )
+        activity_by_goal: dict[uuid.UUID, datetime] = dict(activity_rows.all())
+        for goal in goals:
+            latest = activity_by_goal.get(goal.id)
+            if latest is not None:
+                goal.latest_story_activity_at = latest  # type: ignore[attr-defined]
 
         participant_rows = await self.session.execute(
             select(Story.epic_id, Story.assignee_id).where(

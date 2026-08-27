@@ -133,19 +133,22 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     expect(data.heroStory?.id).toBe('s-real');
   });
 
-  it('story #2341 AC2: among multiple active epics that each have a focal_story, picks the most recently updated one(updated_at tie-break — "먼저 오는 하나"가 아니라 "가장 최근에 움직인 하나")', async () => {
+  it('story #3126: among multiple active epics that each have a focal_story, picks the one with the most recent latest_story_activity_at(«먼저 오는 하나»가 아니라 «지금 실제로 움직이는 하나»)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/goals')) {
         return jsonResponse([
           {
-            // ⛔카디르 QA(2026-08-27) — created_at을 e-fresh보다 이르게 둬야 confound 없는
-            // 표본이 된다: tie-break를 제거해도 배열순서(scopeRoadmapEpics의 created_at ASC
-            // 폴백) 자체가 e-fresh를 먼저 골라버리면, 이 테스트는 tie-break 로직이 아니라
-            // 우연히 같은 결과를 내는 폴백 정렬을 pin하는 것이 된다(제거해도 그린 — 가짜
-            // 회귀가드). e-stale이 배열상 «먼저»(created_at 이름) 오게 만들어, tie-break를
-            // 지우면 실제로 RED가 나는 것을 카디르가 직접 재현 확認.
-            id: 'e-stale', title: 'E-STALE(오래전 갱신, 배열순서상 먼저 옴)', status: 'active',
-            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z', participant_ids: [],
+            // ⛔페드루 QA 재지적(2026-08-27, #2341 AC2와 같은 confound 클래스 재발) — «필드
+            // 축»(latest_story_activity_at vs updated_at) confound는 첫 판에서 죽였으나
+            // «배열순서 축»(scopeRoadmapEpics의 position-없음 created_at ASC 폴백) confound가
+            // 남아있었다. 이 표본은 e-stale(질 쪽)의 created_at을 e-fresh보다 «이르게» 둬서
+            // 배열상 e-stale이 «먼저» 오게 만든다 — sort를 통째로 제거해도(폴백 배열순서만
+            // 남아도) e-stale이 뽑히면 이 tie-break가 진짜 latest_story_activity_at으로
+            // 정렬한다는 걸 증명 못 한다. updated_at은 반대로(e-stale이 더 최근) 둬서 옛
+            // updated_at 기반 계산이 되살아나도 걸리게 한다(필드축+배열축 이중 confound 제거).
+            id: 'e-stale', title: 'E-STALE(배열상 먼저 옴·에픽 row updated_at은 최근·소속 스토리는 조용)', status: 'active',
+            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-08-27T00:00:00Z',
+            latest_story_activity_at: '2026-06-01T00:00:00Z', participant_ids: [],
             focal_story: {
               id: 's-stale', title: '오래된 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
               proof_count: 0, auto_verify: null, gate: null,
@@ -153,12 +156,12 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
             },
           },
           {
-            // created_at도 배열순서도 e-stale보다 «뒤»(늦음) — tie-break가 순서/생성일이
-            // 아니라 updated_at 최신성으로 고르는지가 이 테스트의 핵심. tie-break를 지우면
-            // (roadmap.find가 배열 첫 매치를 집는 옛 로직으로 돌아가면) e-stale이 먼저 뽑혀
-            // 이 단언이 깨진다(카디르 재현 확認).
-            id: 'e-fresh', title: 'E-FRESH(방금 갱신, 배열순서상 뒤에 옴)', status: 'active',
-            created_at: '2026-06-15T00:00:00Z', updated_at: '2026-08-27T00:00:00Z', participant_ids: [],
+            // 배열상 e-stale보다 «뒤»(created_at 늦음)·에픽 row updated_at도 e-stale보다 이르다
+            // — 배열순서 폴백으로도, updated_at 기반 계산으로도 이 쪽이 이길 수 없다. 오직
+            // latest_story_activity_at가 가장 최신이라는 사실만으로 뽑혀야 이 테스트가 유효.
+            id: 'e-fresh', title: 'E-FRESH(배열상 뒤에 옴·에픽 row updated_at은 오래전·소속 스토리가 방금 움직임)', status: 'active',
+            created_at: '2026-06-15T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
+            latest_story_activity_at: '2026-08-27T00:00:00Z', participant_ids: [],
             focal_story: {
               id: 's-fresh', title: '방금 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
               proof_count: 0, auto_verify: null, gate: null,
@@ -174,6 +177,44 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     }));
     const data = await loadGlanceData('proj-recency-tiebreak');
     expect(data.heroStory?.id).toBe('s-fresh');
+  });
+
+  it('story #3126: an active epic whose focal_story has no latest_story_activity_at(무-non-done 스토리) loses the tie-break to one that has a real value', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/goals')) {
+        return jsonResponse([
+          {
+            // e-null(질 쪽)의 created_at을 e-real보다 «이르게» 둬서 배열상 먼저 오게 만든다
+            // — sort를 통째로 제거하면 e-null이 뽑혀 이 단언이 깨진다(배열축 confound 제거,
+            // 위 tie-break 테스트와 같은 관행).
+            id: 'e-null', title: 'E-NULL(배열상 먼저 옴·소속 non-done 스토리 없음)', status: 'active',
+            created_at: '2026-05-01T00:00:00Z', updated_at: '2026-08-27T00:00:00Z',
+            latest_story_activity_at: null, participant_ids: [],
+            focal_story: {
+              id: 's-null', title: '스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
+              proof_count: 0, auto_verify: null, gate: null,
+              trust: { self_reported: false, human_verified: false, human_verified_by: null, human_verified_at: null },
+            },
+          },
+          {
+            id: 'e-real', title: 'E-REAL(배열상 뒤에 옴·실 값 존재)', status: 'active',
+            created_at: '2026-07-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+            latest_story_activity_at: '2026-06-01T00:00:00Z', participant_ids: [],
+            focal_story: {
+              id: 's-real', title: '스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
+              proof_count: 0, auto_verify: null, gate: null,
+              trust: { self_reported: false, human_verified: false, human_verified_by: null, human_verified_at: null },
+            },
+          },
+        ]);
+      }
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    }));
+    const data = await loadGlanceData('proj-recency-null-tiebreak');
+    expect(data.heroStory?.id).toBe('s-real');
   });
 
   it('falls back to the first active epic when none of the active epics have a focal_story(진짜 0건 — 정직한 빈 상태 유지)', async () => {

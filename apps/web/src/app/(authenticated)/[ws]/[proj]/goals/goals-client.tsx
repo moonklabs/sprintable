@@ -103,6 +103,25 @@ interface Goal {
   // 제안 hook — 실 배선 P3/v2, v1은 미표시(no-fiction).
   position?: number | null;
   source_loop_id?: string | null;
+  // story #3126(#2341 AC1 후속) — `?include=glance` 옵트인 시에만 실린다. 이 goal 소속
+  // non-done story의 updated_at 최댓값(없으면 null) — "status='active' 52개 중 몇 개가
+  // «정말» 움직이는가"를 이 필드+dormancy_threshold_hours로 가른다("active" 미포함 이름).
+  latest_story_activity_at?: string | null;
+}
+
+// story #3126 — epics-progress-lane fetch가 실패했을 때만 쓰는 폴백(옛 코드가 이 신호 자체가
+// 없던 시절과 동일하게 «전부 active로 인정»하지 않기 위한 최소값이 아니라, next-maker-screen.tsx
+// 의 동일 상수와 정합해 같은 실패-시나리오에서 같은 값을 쓴다).
+const DEFAULT_DORMANCY_THRESHOLD_HOURS = 720;
+
+// story #3126 — Goal.status='active'(lifecycle)이면서 latest_story_activity_at이 dormancy
+// 임계 밖(또는 아예 없음)인 것을 "잠든 active"로 판별. status 자체의 뜻은 안 건드린다(lifecycle
+// SSOT는 무변경) — 이 판별은 오직 표시용 카운트에만 쓰인다.
+function isDormantActiveGoal(goal: Goal, dormancyThresholdHours: number, nowMs: number): boolean {
+  if (!goal.latest_story_activity_at) return true;
+  const t = new Date(goal.latest_story_activity_at).getTime();
+  if (Number.isNaN(t)) return true;
+  return nowMs - t > dormancyThresholdHours * 3600_000;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -938,6 +957,8 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const [showDispatch, setShowDispatch] = useState(false);
   const [justDispatched, setJustDispatched] = useState(false);
   const [dispatchedTo, setDispatchedTo] = useState<string[]>([]); // 지정 수신자 이름(핸드오프 표시용)
+  // story #3126 — BE 단일소스(epics-progress-lane), fetch 실패 시에만 폴백.
+  const [dormancyThresholdHours, setDormancyThresholdHours] = useState(DEFAULT_DORMANCY_THRESHOLD_HOURS);
   const sensors = useSensors(useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }));
   // story #2545(카디르 라이브 재QA 2단계) — org 불일치 자동교정(switch-org)이 이 fetch 直後
   // 성공하면 project는 안 바뀌므로 재요청 트리거가 없었다(project-context-client.ts 참고).
@@ -947,7 +968,11 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
   const fetchGoals = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ project_id: projectId, limit: String(STEER_LIMIT), order_by: 'position' });
+      // story #3126 — include=glance로 latest_story_activity_at을 같이 받는다(신규 round-trip
+      // 없음, 이미 하던 이 fetch에 옵트인 파라미터만 추가).
+      const params = new URLSearchParams({
+        project_id: projectId, limit: String(STEER_LIMIT), order_by: 'position', include: 'glance',
+      });
       const res = await fetchWithAuth(`/api/goals?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
       const { data } = await res.json() as { data: Goal[] };
@@ -1049,6 +1074,25 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
     void fetchGoals();
   }, [fetchGoals]);
 
+  // story #3126 — dormancy_threshold_hours를 1회 조회(project_id 변경 시 재조회). 실패 시
+  // DEFAULT_DORMANCY_THRESHOLD_HOURS 유지(위 useState 초기값 그대로, 별도 처리 불요).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/analytics/epics-progress-lane?project_id=${projectId}`);
+        if (!res.ok || cancelled) return;
+        const { data } = await res.json() as { data?: { dormancy_threshold_hours?: number } };
+        if (!cancelled && typeof data?.dormancy_threshold_hours === 'number') {
+          setDormancyThresholdHours(data.dormancy_threshold_hours);
+        }
+      } catch {
+        // 폴백 유지 — silent이되 파괴적이지 않음(옛 하드코딩과 동일 값이 그대로 쓰인다).
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
   if (loading) {
     return (
       <>
@@ -1066,7 +1110,14 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   // 커밋("조타 보내기")은 큐레이션(position≠null)이 하나라도 있을 때만 의미 있다.
   const hasCurated = epics.some((e) => typeof e.position === 'number');
 
-  const activeCount = epics.filter((e) => e.status === 'active').length;
+  // story #3126(#2341 §「52개 중 3개만 실제로 돈다」) — status='active'는 lifecycle(안 끝난
+  // 것 전부)이라 이 헤드라인 카운트를 있는 그대로 쓰면 "52 active"처럼 부풀려진 수를 그대로
+  // 노출한다. status='active' 중에서도 최근 dormancy 임계 안에 실제 움직임(latest_story_
+  // activity_at)이 있는 것만 센다 — status 자체의 뜻(lifecycle)은 안 건드리고 이 카운트만
+  // "정말 도는가"로 좁힌다.
+  const activeCount = epics.filter(
+    (e) => e.status === 'active' && !isDormantActiveGoal(e, dormancyThresholdHours, Date.now()),
+  ).length;
   const doneCount = epics.filter((e) => e.status === 'done').length;
 
   const listPanel = (

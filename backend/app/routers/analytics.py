@@ -120,6 +120,7 @@ async def get_epics_progress_lane(
         epics={k: EpicProgressLane.model_validate(v) for k, v in result["lanes"].items()},
         zones={k: EpicZoneCounts.model_validate(v) for k, v in result["zones"].items()},
         stall_threshold_hours=168,
+        dormancy_threshold_hours=720,  # story #3126 — 30일, derive-next-maker.ts 옛 THIRTY_DAYS_MS와 동치
         stories_without_epic=result["stories_without_epic"],
     )
 
