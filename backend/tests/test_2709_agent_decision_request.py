@@ -276,6 +276,56 @@ async def test_http_endpoint_creates_pending_low_risk_decision_gate():
 
 
 @pytest.mark.anyio
+async def test_response_echoes_designated_approver_identity_for_self_verification():
+    """story #d9c09f4b(2026-08-27, customer-zero) — 실사고 재발 방지: 카드 배달층은 무결했고
+    호출자가 approver_member_id를 오지정(다른 실사람)한 게 진짜 원인이었다. 배달 성공/실패와
+    무관하게 응답이 "실제로 누구를 가리키는지" 이름/이메일로 에코해야 호출자가 즉시
+    자가검증할 수 있다 — 이 테스트는 응답의 designated_approver_name이 seed 시 지정한
+    approver의 실제 email과 정확히 일치함을 고정한다(다른 값이면 즉시 RED)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            caller_id = uuid.uuid4()
+            await _seed_human_member(s, org_id, user_id=caller_id, role="member")
+            approver_user_id = uuid.uuid4()
+            approver_email = f"designated-{approver_user_id.hex[:8]}@test.com"
+            from app.core.security import hash_password
+            from app.models.project import OrgMember
+            from app.models.user import User
+
+            s.add(User(
+                id=approver_user_id, email=approver_email,
+                hashed_password=hash_password("x"), is_active=True, email_verified=True,
+            ))
+            await s.commit()
+            approver_member_id = uuid.uuid4()
+            s.add(OrgMember(id=approver_member_id, org_id=org_id, user_id=approver_user_id, role="admin"))
+            await s.commit()
+        await _setup_app_jwt(app, Session, org_id, project_id, caller_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/gates/decisions",
+                json={
+                    "question": "approach A or B?", "assumption": "A",
+                    "approver_member_id": str(approver_member_id),
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            body = resp.json()
+            assert body["designated_approver_id"] == str(approver_member_id)
+            assert body["designated_approver_name"] == approver_email
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_http_endpoint_missing_org_or_project_403():
     """음성대조 — org_id/project_id를 못 얻으면(예: X-Project-Id 없는 API키 컨텍스트에서
     project 미해소) 403(get_scope_context 경유, 조용히 통과 안 함)."""

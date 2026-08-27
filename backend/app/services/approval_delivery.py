@@ -180,6 +180,14 @@ async def dispatch_approval_request_cards(
     # 케이스를 배제해야 층2가 실제로 의미가 있다).
     _primary_conv_id_for_designated: uuid.UUID | None = None
 
+    # story #d9c09f4b(2026-08-27, customer-zero 실사고) — best-effort try/except가 "개별
+    # 실패"와 "전멸"을 같은 무음으로 취급했다(실사고 자체는 배달이 아니라 잘못된
+    # approver_member_id로 인한 오배달이었지만, 이 카운터는 그것과 별개로 유효한 방어층 —
+    # DM insert 레이스 등 실제 예외가 recipients 전원에서 나는 케이스는 지금 로그 0줄로
+    # 새 나간다). recipients가 이미 비지 않았음을 위에서 확인했으므로, 끝까지 돌고도
+    # delivered_count==0이면 "성공과 전멸이 같은 무음"인 그 갭 그대로다.
+    delivered_count = 0
+
     for approver_id in recipients:
         try:
             async with db.begin_nested():
@@ -216,11 +224,22 @@ async def dispatch_approval_request_cards(
                 db.add(msg)
                 await db.flush()
                 await _dispatch_conversation_event(db, conv, msg, org_id, requester)
+            delivered_count += 1
         except Exception:  # noqa: BLE001 — best-effort, 개별 승인자 실패가 상신을 막지 않음.
             logger.warning(
                 "approval-request 카드 배달 실패 %s=%s approver=%s",
                 work_item_type, work_item_id, approver_id, exc_info=True,
             )
+
+    if delivered_count == 0:
+        # ⚠️AC③ — 성공(delivered_count>0)과 전멸(모든 approver가 예외로 빠짐)이 지금까지
+        # 같은 무음이었다(개별 실패는 WARNING이 나지만, "그래서 결국 몇 건 착지했나"는 어디도
+        # 안 남았다). recipients가 이미 비지 않은 상태로 여기 도달했으므로, 이 WARNING은
+        # "받을 사람이 원래 없었다"(위의 project_id/approver_ids 가드)와 확실히 구분된다.
+        logger.warning(
+            "approval-request 카드 배달 0건(전멸) %s=%s recipients=%s",
+            work_item_type, work_item_id, recipients,
+        )
 
     # story #3044(2026-08-25) — 카드가 실제로 간 recipients와 정확히 같은 대상에게
     # conversation.gate_created(순수 SSE, 새 챗버블 없음)도 심는다 — 결재함 목록이

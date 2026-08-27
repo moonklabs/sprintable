@@ -210,8 +210,82 @@ async def test_one_approver_failure_does_not_poison_session_for_others():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_no_approvers_no_dm_created():
-    from app.services.approval_delivery import dispatch_approval_request_cards
+async def test_all_approvers_failing_logs_zero_delivery_warning(caplog):
+    """story #d9c09f4b(2026-08-27, customer-zero) — recipients가 비지 않았는데도(위
+    test_no_approvers_no_dm_created과 구분) 개별 승인자 전원이 실패하면, 지금까지는 각자
+    "카드 배달 실패" WARNING만 나고 "그래서 결국 0건 착지했다"는 어디에도 안 남았다
+    (성공과 전멸이 같은 무음). 전멸 전용 WARNING이 추가로 나야 한다."""
+    import logging
+
+    from app.services.approval_delivery import dispatch_approval_request_cards, logger as _logger
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            requester_id = await _seed_human(s, org_id, project_id)
+            doc = await _seed_doc(s, org_id, project_id)
+            # 둘 다 team_members에 없음 → 둘 다 FK 위반으로 실패(test_one_approver_failure의
+            # nonexistent_approver 관례 재사용, 신규 실패유도 메커니즘 발명 0).
+            nonexistent_1, nonexistent_2 = uuid.uuid4(), uuid.uuid4()
+
+            with caplog.at_level(logging.WARNING, logger=_logger.name):
+                await dispatch_approval_request_cards(
+                    s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
+                    project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                    requester_id=requester_id, approver_ids=[nonexistent_1, nonexistent_2],
+                )
+            await s.commit()
+
+            from sqlalchemy import select
+            from app.models.conversation import Conversation
+
+            convs = (await s.execute(select(Conversation).where(Conversation.org_id == org_id))).scalars().all()
+            assert convs == [], "전원 실패 — 방 자체가 하나도 안 생김"
+            assert any("전멸" in r.message for r in caplog.records), \
+                "recipients는 비지 않았는데 delivered_count==0인 전멸 케이스는 전용 WARNING이 나야 한다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_partial_success_does_not_log_zero_delivery_warning(caplog):
+    """1명이라도 성공하면(test_one_approver_failure_does_not_poison_session_for_others와
+    동일 시드) 전멸 WARNING은 나지 않아야 한다 — 개별 실패 WARNING과 전멸 WARNING을
+    혼동하면 성공 케이스까지 시끄러워진다(과잉 알림도 방어 대상)."""
+    import logging
+
+    from app.services.approval_delivery import dispatch_approval_request_cards, logger as _logger
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            requester_id = await _seed_human(s, org_id, project_id)
+            good_approver = await _seed_human(s, org_id, project_id)
+            nonexistent_approver = uuid.uuid4()
+            doc = await _seed_doc(s, org_id, project_id)
+
+            with caplog.at_level(logging.WARNING, logger=_logger.name):
+                await dispatch_approval_request_cards(
+                    s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
+                    project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                    requester_id=requester_id, approver_ids=[nonexistent_approver, good_approver],
+                )
+            await s.commit()
+
+            assert not any("전멸" in r.message for r in caplog.records)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_no_approvers_no_dm_created(caplog):
+    import logging
+
+    from app.services.approval_delivery import dispatch_approval_request_cards, logger as _logger
     from app.models.conversation import Conversation
 
     engine, Session = await _realdb_session()
@@ -221,12 +295,17 @@ async def test_no_approvers_no_dm_created():
             requester_id = await _seed_human(s, org_id, project_id)
             doc = await _seed_doc(s, org_id, project_id)
 
-            await dispatch_approval_request_cards(
-                s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
-                project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
-                requester_id=requester_id, approver_ids=[],
-            )
+            with caplog.at_level(logging.WARNING, logger=_logger.name):
+                await dispatch_approval_request_cards(
+                    s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
+                    project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                    requester_id=requester_id, approver_ids=[],
+                )
             await s.commit()
+            # story #d9c09f4b — "받을 사람이 원래 없었다"(project_id/approver_ids 가드)와
+            # "recipients는 있었는데 전멸했다"(위 test_all_approvers_failing_...)는 서로 다른
+            # 사실이라 같은 WARNING을 공유하면 안 된다.
+            assert not any("전멸" in r.message for r in caplog.records)
 
             from sqlalchemy import select
 
