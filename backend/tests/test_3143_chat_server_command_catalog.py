@@ -167,6 +167,7 @@ async def test_done_command_transitions_story_and_posts_result_card():
             # PO 리뷰 델타(2026-08-27) — FE(#92f00dc4)가 텍스트 휴리스틱 없이 이 카드를
             # 판별하는 기계 식별자. approval_target/event와 동일 additive namespace.
             assert reply.msg_metadata["server_command"] == {"command": "done", "outcome": "executed"}
+            assert "candidates" not in reply.msg_metadata["server_command"], "candidates는 ambiguous 전용 — 다른 outcome엔 키 자체가 없어야 한다"
     finally:
         await engine.dispose()
 
@@ -296,7 +297,11 @@ async def test_assign_ambiguous_prefix_lists_candidates_and_does_not_mutate():
                 )
             )).scalars().one()
             assert "Santiago" in reply.content and "Santi" in reply.content
-            assert reply.msg_metadata["server_command"] == {"command": "assign", "outcome": "ambiguous"}
+            # PO 리뷰 델타 2회차(2026-08-27, 미르코 FE 정독) — FE가 문장 파싱 없이 클릭형
+            # 후보 행을 그리는 축. 순서는 DB 조회 순서에 의존하지 않게 집합으로 비교.
+            sc = reply.msg_metadata["server_command"]
+            assert sc["command"] == "assign" and sc["outcome"] == "ambiguous"
+            assert set(sc["candidates"]) == {"Santiago", "Santi"}
     finally:
         await engine.dispose()
 

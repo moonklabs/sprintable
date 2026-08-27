@@ -161,6 +161,12 @@ class CommandOutcome:
     before_value: str | None = None
     after_value: str | None = None
     reason: str | None = None
+    # story #3143 PO 리뷰 델타 2회차(2026-08-27, 미르코 FE 정독 적출) — ambiguous outcome
+    # 전용. reply_content의 comma-join 문장만으론 FE가 후보 행(클릭→입력창 채움)을 만들려면
+    # 문장 파싱을 해야 해 server_command 식별자를 세운 취지와 모순됐다. 멤버 이름 문자열
+    # 배열만(id는 재조회 없이 이름→서버 재검증이 이미 /assign 재호출 경로라 불필요 — 이
+    # 필드는 "무엇을 다시 물어봤는지"만 보여준다).
+    candidates: list[str] | None = None
 
 
 async def _execute_done(
@@ -237,8 +243,9 @@ async def _execute_assign(
     match = await _resolve_member_by_query(db, project_id=project_id, query=rest)
     if match.member is None:
         if match.candidates:
-            names = ", ".join(m.name for m in match.candidates)
-            return CommandOutcome("ambiguous", f"'/assign' 실패 — 「{rest}」에 일치하는 멤버가 여럿입니다: {names} (정확한 이름을 입력하세요)", target_type="story", target_id=story_id, reason="ambiguous_member")
+            candidate_names = [m.name for m in match.candidates]
+            names = ", ".join(candidate_names)
+            return CommandOutcome("ambiguous", f"'/assign' 실패 — 「{rest}」에 일치하는 멤버가 여럿입니다: {names} (정확한 이름을 입력하세요)", target_type="story", target_id=story_id, reason="ambiguous_member", candidates=candidate_names)
         return CommandOutcome("not_found", f"'/assign' 실패 — 「{rest}」에 일치하는 멤버를 찾을 수 없습니다.", target_type="story", target_id=story_id, reason="member_not_found")
 
     before = (await db.execute(select(Story.assignee_id).where(Story.id == story_id))).scalar_one_or_none()
@@ -300,6 +307,11 @@ async def try_execute_server_command(
         from app.services.member_resolver import lookup_members_by_ids
 
         sender_resolved = (await lookup_members_by_ids({sender.id}, db)).get(sender.id)
+        _server_command_meta: dict = {"command": candidate.name, "outcome": result.outcome}
+        if result.candidates:
+            # PO 리뷰 델타 2회차 — ambiguous일 때만. FE가 reply_content의 comma-join
+            # 문장을 파싱하지 않고 이 배열로 클릭형 후보 행을 바로 그린다.
+            _server_command_meta["candidates"] = result.candidates
         reply = ConversationMessage(
             conversation_id=conv.id, sender_id=sender.id, content=result.reply_content,
             mentioned_ids=[sender.id],
@@ -309,7 +321,7 @@ async def try_execute_server_command(
                 # 카드를 텍스트 휴리스틱 없이 판별하는 기계 식별자. approval_target/event와
                 # 동일 additive namespace 선례(conversations.py::_server_command_payload가
                 # payload top-level로 노출).
-                "server_command": {"command": candidate.name, "outcome": result.outcome},
+                "server_command": _server_command_meta,
             },
         )
         db.add(reply)
