@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { commandName, dequoteLiteral, isCommand } from './command-classifier';
+import { commandArgs, commandName, dequoteLiteral, isCommand } from './command-classifier';
 
 /**
  * Parity 테스트 — `backend/app/services/command_classifier.py` 규칙과 일치 어서트(drift 가드).
@@ -41,6 +41,22 @@ describe('command-classifier — BE parity', () => {
       expect(commandName(' /review')).toBeNull();
       expect(commandName('hi')).toBeNull();
       expect(commandName(null)).toBeNull();
+    });
+  });
+
+  describe('commandArgs (이름 뒤 인자, BE CommandCandidate.args와 동형)', () => {
+    it('`/review` (인자 없음) → \'\'', () => expect(commandArgs('/review')).toBe(''));
+    it('`/review foo` → `foo`', () => expect(commandArgs('/review foo')).toBe('foo'));
+    it('`/review foo bar` → `foo bar` (첫 공백만 분리)', () => expect(commandArgs('/review foo bar')).toBe('foo bar'));
+    it('`/review   foo` (연속 공백) → `foo`', () => expect(commandArgs('/review   foo')).toBe('foo'));
+    it('`/review foo  ` (트레일링) → `foo`', () => expect(commandArgs('/review foo  ')).toBe('foo'));
+    it('참조 토큰 포함 `/review [제목](entity:story:abc)` → 토큰 그대로 보존', () =>
+      expect(commandArgs('/review [제목](entity:story:abc)')).toBe('[제목](entity:story:abc)'));
+    it('비-커맨드 → \'\'', () => {
+      expect(commandArgs('//review foo')).toBe('');
+      expect(commandArgs(' /review foo')).toBe('');
+      expect(commandArgs('hi')).toBe('');
+      expect(commandArgs(null)).toBe('');
     });
   });
 });

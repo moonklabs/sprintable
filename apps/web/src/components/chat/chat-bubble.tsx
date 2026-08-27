@@ -8,7 +8,7 @@ import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { AgentIdentity } from '@/components/ui/agent-identity';
-import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
+import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { resolveEmbedDecision } from '@/components/chat/embed-renderer';
@@ -391,6 +391,7 @@ export function ChatBubble({
   const isLiteral = !isCmd && message.content.startsWith('//');
   const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
   const cmdName = isCmd ? commandName(message.content) : null;
+  const args = isCmd ? commandArgs(message.content) : '';
   const displayName = isMine ? t('you') : (message.sender_name || t('team'));
   const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
   const replyCount = message.reply_count ?? 0;
@@ -592,10 +593,23 @@ export function ChatBubble({
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
-              <code className="block whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">
-                <span className="text-foreground">/{cmdName}</span>
-                <span className="text-muted-foreground">{message.content.slice(1 + (cmdName?.length ?? 0))}</span>
-              </code>
+              {/* story #3129 — 커맨드 렌더도 args 안의 참조 토큰(`[제목](entity:type:id)`)은
+                  링크/칩으로 풀려야 한다. `/cmdName`만 code로 고정하고, args는 일반 메시지와
+                  동일한 ChatMarkdown 경로(references·엔티티 칩 SSOT 공유)로 넘긴다 — args가
+                  순수 텍스트뿐이면 마크다운 매치가 없어 기존과 동일하게 보인다(회귀 0). */}
+              <code className="font-mono text-sm text-foreground">/{cmdName}</code>
+              {args && (
+                <div className="mt-0.5 font-mono text-sm text-muted-foreground [&_p]:mb-0">
+                  <ChatMarkdown
+                    content={args}
+                    isMine={isMine}
+                    references={message.references}
+                    entityStatusByKey={entityStatusByKey}
+                    onOpenReadingPanel={onOpenReadingPanel}
+                    eventDefinitionsByKey={eventDefinitionsByKey}
+                  />
+                </div>
+              )}
             </div>
           ) : (
             /* story #2921 S4(유나 확定) — 버블=무채 panel(내 메시지=blue-soft). 옛
