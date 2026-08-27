@@ -20,6 +20,7 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict
@@ -473,15 +474,33 @@ async def consume_native_bootstrap(
 # access/refresh 토큰 쌍을 mint한다.
 _OAUTH_HANDOFF_MIN_CHALLENGE_LEN = 43  # base64url(SHA256) 무패딩 최소 길이(RFC 7636)
 
+# story #3121 AC1(계약 doc §2·산티아고 §10.9 exact-origin) — custom scheme은 App.js
+# OAUTH_RETURN_SCHEME_URL/apps/web native/oauth-return page.tsx와 byte-exact 고정(단일
+# 슬래시). https는 환경별 app_url + 동일 페이지 경로 — 클라 입력을 그대로 신뢰하지 않고 이
+# 고정값과 정확히 일치하는지 issue 시점에 검증한다(둘 다 서버가 계산·클라는 선언만).
+_OAUTH_NATIVE_RETURN_PATH = "/native/oauth-return"
+_OAUTH_CUSTOM_SCHEME_RETURN_URI = "ai.sprintable:/oauth-return"
+
+
+def _expected_return_uri(callback_mode: str) -> str:
+    if callback_mode == "custom_scheme":
+        return _OAUTH_CUSTOM_SCHEME_RETURN_URI
+    return f"{settings.app_url}{_OAUTH_NATIVE_RETURN_PATH}"
+
 
 class OAuthHandoffIssueRequest(BaseModel):
     # 산티아고 §10.1.2 계열 defense-in-depth: 이 내부 엔드포인트는 BFF 전용이라 공개 공격면은
-    # 아니지만, 스키마가 정의한 두 필드 외 어떤 것도 조용히 무시하지 않는다(§10.6 음성테스트 7과
+    # 아니지만, 스키마가 정의한 필드 외 어떤 것도 조용히 무시하지 않는다(§10.6 음성테스트 7과
     # 동일 원칙 — "무시 아님, 거부").
     model_config = ConfigDict(extra="forbid")
 
     user_id: str  # BFF가 oauth_callback()으로 이미 해소한 서버-확定 subject.
     code_challenge: str  # PKCE S256 = base64url(SHA256(code_verifier)), 패딩 없음
+    # story #3121 AC1 — 계약 §2: custom-scheme fallback은 OAuth 시작 전 정적으로 결정되는
+    # compatibility mode(association 실패 후 동적 전환 아님). BFF가 OAuth-start 시점에 이미
+    # 확定한 값을 그대로 선언 — 서버는 이 선언을 `_expected_return_uri()` 고정값과 대조만 한다.
+    callback_mode: Literal["https", "custom_scheme"]
+    return_uri: str
 
 
 class OAuthHandoffIssueResponse(BaseModel):
@@ -506,6 +525,12 @@ async def issue_oauth_handoff(
     if len(body.code_challenge) < _OAUTH_HANDOFF_MIN_CHALLENGE_LEN:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code_challenge")
 
+    # story #3121 AC1 — return_uri는 클라 선언을 그대로 저장하지 않는다: 모드별 서버 고정값과
+    # byte-exact 일치해야 발급 자체를 진행(§10.9 exact-origin). 불일치는 오배선/변조 신호.
+    if body.return_uri != _expected_return_uri(body.callback_mode):
+        logger.warning("auth.oauth_handoff.issue rejected reason=return_uri_mismatch")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid return_uri")
+
     try:
         user_uuid = uuid.UUID(body.user_id)
     except ValueError:
@@ -528,7 +553,14 @@ async def issue_oauth_handoff(
     await _reject_if_before_cutover(user_uuid, int(now.timestamp()), db)
 
     code, code_hash = generate_handoff_code()
-    await issue_handoff_code(db, code_hash=code_hash, user_id=user_uuid, code_challenge=body.code_challenge)
+    await issue_handoff_code(
+        db,
+        code_hash=code_hash,
+        user_id=user_uuid,
+        code_challenge=body.code_challenge,
+        callback_mode=body.callback_mode,
+        return_uri=body.return_uri,
+    )
 
     logger.info("auth.oauth_handoff.issue success")
     return OAuthHandoffIssueResponse(code=code, expires_in=OAUTH_HANDOFF_TTL_SECONDS)
@@ -540,10 +572,16 @@ class OAuthHandoffConsumeRequest(BaseModel):
     # assertion/ID token/임의 user·install ID 등 다른 어떤 필드도 "무시"가 아니라 요청 자체를
     # 거부해야 한다(extra="forbid"). native consume의 `existing_session_user_id`류 부가 필드를
     # 여기 들여오지 않는다 — 이 흐름은 애초에 기존 세션이 없는 최초 로그인 핸드오프다.
+    #
+    # story #3121 AC1 — callback_mode/return_uri 추가(계약 §2 확장, 위 §3 고정 취지와 상충
+    # 아님: 이 두 필드는 "다른 인증 재료"가 아니라 issue 시점에 이미 고정된 값을 그대로
+    # 재선언해 대조하는 것뿐 — 새 신뢰축을 열지 않는다).
     model_config = ConfigDict(extra="forbid")
 
     code: str
     code_verifier: str
+    callback_mode: Literal["https", "custom_scheme"]
+    return_uri: str
 
 
 class OAuthHandoffConsumeResponse(BaseModel):
@@ -576,7 +614,13 @@ async def consume_oauth_handoff(
     if not settings.firebase_oauth_handoff_enabled:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="OAuth handoff not enabled")
 
-    consumed = await consume_handoff_code(db, code=body.code, code_verifier=body.code_verifier)
+    consumed = await consume_handoff_code(
+        db,
+        code=body.code,
+        code_verifier=body.code_verifier,
+        callback_mode=body.callback_mode,
+        return_uri=body.return_uri,
+    )
     if consumed is None:
         logger.warning("auth.oauth_handoff.consume rejected reason=code_consume_failed")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired code")
