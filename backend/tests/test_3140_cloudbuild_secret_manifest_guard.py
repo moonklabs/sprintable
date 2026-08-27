@@ -159,14 +159,68 @@ def test_pr_gate_reports_unresolved_tokens_without_failing_alone():
     assert any("DYNAMIC_TOKEN" in line for line in lines)
 
 
-def test_declared_uncovered_scripts_note_always_surfaces_in_output():
-    """story #3140 후속(카디르 QA #3549 changes) — deploy_realtime_gce.sh(base64
-    fetch-secrets 블록, kebab 시크릿 5종)는 이번 PR 스코프 밖(파서 신설 금지, PO 명시) —
-    실 커버리지 대신 **선언**만 한다. ok=True인 정상 케이스에서도 이 선언이 출력에서
-    빠지면 안 된다(조용히 완전한 척 금지)."""
-    ok, lines = pr_gate.check()  # 실 레포·실 manifest — 지금 ok=True.
+def test_declared_uncovered_scripts_empty_after_3145_promotion():
+    """story #9d1fde0c(3549 QA 후속) — deploy_realtime_gce.sh가 «선언»에서 «실 파서 커버리지»로
+    승격됐으므로(AC4) 이 선언 사전은 이제 비어야 한다. 다시 채워지면(새 미커버 스크립트
+    발생) 그건 정당한 회귀가 아니라 이 테스트가 먼저 알려줘야 할 신규 사실이다."""
+    assert refs_mod._DECLARED_UNCOVERED_SCRIPTS == {}
+
+
+def test_pr_gate_output_no_longer_carries_uncovered_note():
+    """위 승격의 관측면 — check() 출력에 더는 "정적으로 못 보는 시크릿 소스" 안내가
+    안 붙는다(선언이 비었으니 그 섹션 자체가 생성 안 됨, check()의 `if _DECLARED_
+    UNCOVERED_SCRIPTS:` 가드 참조)."""
+    ok, lines = pr_gate.check()
     assert ok is True
-    assert any("deploy_realtime_gce.sh" in line for line in lines)
+    assert not any("정적으로 못 보는 시크릿 소스" in line for line in lines)
+
+
+# ── extract_realtime_gce_secret_refs — ④(story #9d1fde0c, base64 fetch-secrets 파서) ──
+
+def test_realtime_gce_decode_extracts_secret_names_array():
+    """단위 — 디코드된 fetch-secrets 블록에서 `_secret_names=(...)` 배열 리터럴만 뽑고
+    `__AR_TOKEN__`(Secret Manager 시크릿이 아닌 access-token sentinel)은 제외한다."""
+    decoded = (
+        "cat > /tmp/fetch-secrets.sh <<'EOF'\n...\nEOF\n"
+        "_secret_names=( 'cron-secret' 'JWT_SECRET' '__AR_TOKEN__' )\n"
+        "_secret_env_names=( 'CRON_SECRET' 'JWT_SECRET' '_AR_TOKEN' )\n"
+    )
+    assert refs_mod._extract_secret_names_from_fetch_block(decoded) == {"cron-secret", "JWT_SECRET"}
+
+
+def test_realtime_gce_decode_no_array_returns_empty_not_crash():
+    """배열 리터럴이 없는 텍스트를 줘도(형식 변경 등) crash 대신 빈 집합(정직한 미가용)."""
+    assert refs_mod._extract_secret_names_from_fetch_block("no array here") == set()
+
+
+def test_real_repo_extract_realtime_gce_finds_dev_and_prod_kebab_secrets():
+    """실 레포 대조 — deploy_realtime_gce.sh(dev+prod) DRY_RUN을 실제로 돌려 kebab-case
+    시크릿(github-app-* 3종·cron-secret)이 실제로 잡히는지(추출기 자체가 깨지면 여기서
+    먼저 빨개진다 — 우연한 그린 방지)."""
+    result = refs_mod.extract_realtime_gce_secret_refs()
+    assert {
+        "cron-secret", "github-app-client-secret-dev", "github-app-private-key-dev",
+        "github-app-state-secret-dev", "CRON_SECRET_PROD", "github-app-client-secret-prod",
+    } <= result
+    assert "__AR_TOKEN__" not in result
+
+
+def test_real_repo_realtime_gce_refs_included_in_extract_all():
+    """④가 실제로 ①②③과 합류하는지 — extract_all_secret_refs()의 resolved 집합에 이
+    소스만의 고유 이름(다른 배포 스크립트엔 안 나오는 kebab 시크릿)이 포함돼야 한다."""
+    result = extract_all_secret_refs()
+    assert "github-app-private-key-dev" in result.resolved
+
+
+def test_realtime_gce_typo_mutation_goes_red_positive_control():
+    """AC3(양성대조) — deploy_realtime_gce.sh가 참조하는 시크릿명에 오탈자가 나면(manifest
+    엔 없는 이름) PR 게이트가 실제로 red가 되는지. `extract_all_secret_refs`를 몽키패치해
+    실제 gcloud/스크립트 재실행 없이 게이트 로직만 겨눈다(check() 자체는 순수 로직)."""
+    typo_refs = SecretRefs(resolved={"cron-secre-TYPO"}, unresolved=set())
+    with patch.object(pr_gate, "extract_all_secret_refs", return_value=typo_refs):
+        ok, lines = pr_gate.check()
+    assert ok is False
+    assert any("cron-secre-TYPO" in line for line in lines)
 
 
 def test_declared_uncovered_scripts_constant_names_a_real_script_path():
