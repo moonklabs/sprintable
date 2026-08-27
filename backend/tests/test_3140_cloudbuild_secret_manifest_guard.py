@@ -117,7 +117,10 @@ def test_pr_gate_passes_when_all_refs_in_manifest(monkeypatch):
     )
     ok, lines = pr_gate.check(manifest={"DATABASE_URL_DEV", "JWT_SECRET", "OTHER_UNRELATED"})
     assert ok is True
-    assert lines == []
+    # 정상 케이스라도 "선언된 미커버" 안내는 항상 붙는다(story #3140 후속) — missing/unresolved
+    # 관련 라인만 없는지를 본다(전체 lines가 비어야 한다는 옛 단언은 그 안내 추가로 더 이상
+    # 성립하지 않음).
+    assert not any("manifest에 없는" in line for line in lines)
 
 
 def test_pr_gate_ac2_positive_control_typo_mutation_goes_red(monkeypatch):
@@ -154,6 +157,26 @@ def test_pr_gate_reports_unresolved_tokens_without_failing_alone():
         ok, lines = pr_gate.check(manifest={"JWT_SECRET"})
     assert ok is True  # unresolved만으론 fail 아님.
     assert any("DYNAMIC_TOKEN" in line for line in lines)
+
+
+def test_declared_uncovered_scripts_note_always_surfaces_in_output():
+    """story #3140 후속(카디르 QA #3549 changes) — deploy_realtime_gce.sh(base64
+    fetch-secrets 블록, kebab 시크릿 5종)는 이번 PR 스코프 밖(파서 신설 금지, PO 명시) —
+    실 커버리지 대신 **선언**만 한다. ok=True인 정상 케이스에서도 이 선언이 출력에서
+    빠지면 안 된다(조용히 완전한 척 금지)."""
+    ok, lines = pr_gate.check()  # 실 레포·실 manifest — 지금 ok=True.
+    assert ok is True
+    assert any("deploy_realtime_gce.sh" in line for line in lines)
+
+
+def test_declared_uncovered_scripts_constant_names_a_real_script_path():
+    """선언이 가리키는 스크립트가 실제로 레포에 존재하는지 — 이름만 적어두고 스크립트
+    자체가 리네임/삭제돼도 아무도 모르는 걸 방지(선언 자체의 부패 방지, sync_* 스크립트가
+    manifest 부패를 잡는 것과 같은 원칙)."""
+    for script_name in refs_mod._DECLARED_UNCOVERED_SCRIPTS:
+        assert (refs_mod._SCRIPTS_DIR / script_name).exists(), (
+            f"{script_name}이 backend/scripts/에 없음 — 선언이 낡았을 가능성"
+        )
 
 
 def test_manifest_file_is_wellformed_no_duplicates_sorted_content():

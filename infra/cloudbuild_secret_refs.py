@@ -19,6 +19,14 @@ sync_cloudbuild_secret_manifest.py=GCP 실물 대조).
 ③ cloudbuild.yaml 안에서 시크릿명 자체가 쉘 변수(`$${VAR}`)로 간접 참조되는 극소수 자리
    (예: `AGENT_KEY_SECRET`) — 같은 파일 안의 `VAR="LITERAL"` 대입을 찾아 해석한다. 못 찾으면
    **조용히 버리지 않고** unresolved로 반환(호출부가 red로 만들지 declare 할지 결정).
+
+## ⚠️ 선언된 미커버(AC3, 카디르 QA #3549 changes — 이 PR 스코프 밖, 파서 신설 금지)
+`cloudbuild.yaml`(deploy-realtime-gce 스텝, ~L872)이 호출하는
+`backend/scripts/deploy_realtime_gce.sh`는 ②의 3개 스크립트에 안 들어있어 이 모듈이 못 본다.
+그 스크립트는 시크릿을 SECRETS_SPEC류 단순 조립이 아니라 **base64 인코딩된 fetch-secrets
+블록**으로 다루는 별도 형태라, 지금의 정규식/DRY_RUN 파싱으로 못 잡는다(kebab 시크릿 5종
+참조 — 카디르 실측). 실 커버리지 추가는 별도 후속 스토리(#9d1fde0c)의 몫 — 이 모듈은 그
+공백을 **선언**만 하고(`_DECLARED_UNCOVERED_SCRIPTS`), 조용히 완전한 척하지 않는다.
 """
 from __future__ import annotations
 
@@ -44,6 +52,17 @@ def _find_repo_root(start: Path) -> Path:
 _REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
 _CLOUDBUILD_YAML = _REPO_ROOT / "cloudbuild.yaml"
 _SCRIPTS_DIR = _REPO_ROOT / "backend" / "scripts"
+
+# story #3140(카디르 QA #3549 changes) — 이 모듈이 정적으로 못 보는 시크릿 소스를 명시
+# 선언한다(조용히 완전한 척 안 함). 실 커버리지 추가는 별도 후속 스토리(#9d1fde0c)의 몫 —
+# 이 PR 스코프는 선언까지만(파서 신설 금지, PO 페드루 명시).
+_DECLARED_UNCOVERED_SCRIPTS: dict[str, str] = {
+    "deploy_realtime_gce.sh": (
+        "cloudbuild.yaml deploy-realtime-gce 스텝(~L872)이 호출 — 시크릿을 base64 "
+        "fetch-secrets 블록으로 다뤄 SECRETS_SPEC류 정규식/DRY_RUN 파싱으로 안 잡힘 "
+        "(kebab 시크릿 5종 참조, 카디르 실측). 후속: story #9d1fde0c."
+    ),
+}
 
 # ①: `KEY=VALUE:latest`류 안의 VALUE. VALUE는 리터럴 시크릿명 또는 `$${VAR}`/`${VAR}` 참조 —
 # group(1)="$"가 하나라도 있으면 변수참조(③ 해석 필요), group(2)=이름 본체. `KEY=`가 존재하는

@@ -22,7 +22,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cloudbuild_secret_refs import _REPO_ROOT, extract_all_secret_refs  # noqa: E402
+from cloudbuild_secret_refs import (  # noqa: E402
+    _DECLARED_UNCOVERED_SCRIPTS, _REPO_ROOT, extract_all_secret_refs,
+)
 
 _MANIFEST_PATH = _REPO_ROOT / "infra" / "cloudbuild-secret-manifest.txt"
 
@@ -57,6 +59,14 @@ def check(manifest: set[str] | None = None) -> tuple[bool, list[str]]:
             f"⚠️ 정적으로 못 푼 시크릿 바인딩 토큰 {len(refs.unresolved)}건(대조 불가, 수동 확인 필요): "
             + ", ".join(sorted(refs.unresolved))
         )
+    if _DECLARED_UNCOVERED_SCRIPTS:
+        # story #3140 후속(카디르 QA #3549 changes) — ok 여부와 무관하게 매번 출력한다: "이
+        # 가드가 못 보는 소스가 있다"를 CI 로그에서 매번 보여야 조용히 완전한 척하지 않는다.
+        lines.append(
+            f"ℹ️ 이 가드가 정적으로 못 보는 시크릿 소스 {len(_DECLARED_UNCOVERED_SCRIPTS)}건(별도 후속):"
+        )
+        for script, reason in sorted(_DECLARED_UNCOVERED_SCRIPTS.items()):
+            lines.append(f"  - {script}: {reason}")
     return ok, lines
 
 
