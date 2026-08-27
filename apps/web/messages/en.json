@@ -3423,6 +3423,8 @@
   "chats": {
     "reportViewFull": "View full →",
     "reportCollapse": "Collapse",
+    "reportEvidenceLabel": "Evidence",
+    "reportNextActionLabel": "Next",
     "unreadMarker": "Unread from here",
     "citationAnchored": "Cited from here — pick the last message",
     "citationSelectedCount": "{count} messages selected",
