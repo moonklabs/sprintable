@@ -175,6 +175,43 @@ async def test_send_chat_message_with_attachment_still_surfaces_references_sideb
 
 
 @pytest.mark.anyio
+async def test_send_chat_message_surfaces_command_gate_sideband():
+    """story #1282 AC2(E-CHAT-CMD follow-up, S6 라이브 검증 2026-06-09 발견) — agent가 MCP로
+    `/cmd`를 보냈는데 수신 에이전트 런타임이 그 커맨드를 지원 안 하면, 백엔드는
+    `command_gate.blocked[]` hint를 응답 sibling에 싣는다(REST 직접 호출은 이미 받음).
+    이 hint가 MCP 경로에서도 살아남는지 — references 테스트(위)와 동일 구조(`references`
+    ↔ `command_gate`, 둘 다 story #2294 ③이 도입한 같은 sibling-preserve 메커니즘) — 이
+    테스트가 없으면 그 메커니즘이 command_gate 앞에서도 실제로 작동하는지 아무도 값으로
+    안 잰 상태였다(AC1 구현 자체는 이미 있었으나 AC2 값-테스트가 없었다)."""
+    args = SendChatInput(thread_id="conv-1", content="/deploy")
+    backend_response = {
+        "data": {"id": "m1", "content": "/deploy"},
+        "command_gate": {"blocked": ["deploy"]},
+    }
+
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value=backend_response)):
+        result = await send_chat_message(args)
+
+    import json
+    body = json.loads(result[0].text)
+    assert body["id"] == "m1"
+    assert body["command_gate"] == {"blocked": ["deploy"]}
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_omits_command_gate_when_backend_omits_it():
+    """command_gate가 없는(정상 발신) 응답에선 그 키 자체가 결과에 안 생긴다 — 항상
+    `{"blocked": []}`류로 조용히 채워 넣지 않는다(있을 때만 surface, 없는 걸 지어내지 않음)."""
+    args = SendChatInput(thread_id="conv-1", content="hi")
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})):
+        result = await send_chat_message(args)
+
+    import json
+    body = json.loads(result[0].text)
+    assert "command_gate" not in body
+
+
+@pytest.mark.anyio
 async def test_send_chat_message_upload_failure_does_not_call_message_create():
     args = SendChatInput(
         thread_id="conv-1", content="x",
