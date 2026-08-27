@@ -73,6 +73,17 @@ function hasKey(messages: unknown, dotted: string): boolean {
 
 const ASSIGN_RE = /(\w+)\s*=\s*useTranslations\(\s*['"]([\w.]+)['"]\s*\)/g;
 
+// story #3149(카디르 QA 실측·미르코 근본추적, PR#3558) — check-i18n-keys.js와 별개·독립
+// 구현인 이 가드가 같은 결함을 그대로 갖고 있었다: `\b${varName}\(`의 워드바운더리는 '.'
+// 앞에서도 통과해(`.`은 `\w`가 아님) 멤버접근(`acc.t('title')`)이 파일 자신의 로컬
+// `t`(다른 네임스페이스에 바인딩)로 오귀속됐다. check-i18n-keys.js의 처방과 동형으로
+// 룩비하인드에 `.`을 추가(`(?<![\w$.])`) — 멤버접근은 이제 로컬 varName 호출로 안 잡히고
+// 기존 워드바운더리 방어(`get('x')`의 `t('x')`류)는 그대로 보존.
+function extractKeyUsages(text: string, varName: string): string[] {
+  const re = new RegExp(`(?<![\\w$.])${varName}\\(\\s*['"]([\\w.]+)['"]`, 'g');
+  return [...text.matchAll(re)].map((m) => m[1]!);
+}
+
 function collectMissingKeys(): { key: string; locations: string[] }[] {
   const referenced = new Map<string, Set<string>>();
   for (const file of collectSourceFiles(SRC_ROOT)) {
@@ -82,8 +93,7 @@ function collectMissingKeys(): { key: string; locations: string[] }[] {
     if (assigns.length === 0) continue;
     const rel = path.relative(SRC_ROOT, file);
     for (const [, varName, ns] of assigns) {
-      const callRe = new RegExp(`\\b${varName}\\(\\s*['"]([\\w.]+)['"]`, 'g');
-      for (const [, key] of text.matchAll(callRe)) {
+      for (const key of extractKeyUsages(text, varName!)) {
         const full = `${ns}.${key}`;
         if (!referenced.has(full)) referenced.set(full, new Set());
         referenced.get(full)!.add(rel);
@@ -99,6 +109,25 @@ function collectMissingKeys(): { key: string; locations: string[] }[] {
   }
   return missing.sort((a, b) => a.key.localeCompare(b.key));
 }
+
+describe('extractKeyUsages — ㉥ 멤버접근(`obj.t(...)`)은 로컬 t() 호출로 오귀속되지 않는다 (#3149)', () => {
+  it('바로 호출(`t(...)`)은 정상적으로 잡힌다', () => {
+    expect(extractKeyUsages("t('title');", 't')).toEqual(['title']);
+  });
+
+  it('멤버접근(`acc.t(...)`)은 varName=t로 조회할 때 안 잡힌다', () => {
+    expect(extractKeyUsages("acc.t('title');", 't')).toEqual([]);
+  });
+
+  it('한 파일에 로컬 t(...)와 멤버접근 acc.t(...)가 공존해도 로컬 호출만 잡힌다', () => {
+    const content = "t('switcherMobileTriggerAria');\nacc.t('title');\nacc.t('signOutAll');";
+    expect(extractKeyUsages(content, 't')).toEqual(['switcherMobileTriggerAria']);
+  });
+
+  it('식별자 끝에 우연히 걸리는 것도 여전히 안 잡힌다(기존 워드바운더리 보존 — get(\'x\')의 t(\'x\')류)', () => {
+    expect(extractKeyUsages("get('title');", 't')).toEqual([]);
+  });
+});
 
 describe('i18n 키 커버리지 — 코드가 참조하는 키는 ko/en 양쪽에 다 있어야 한다 (#2210)', () => {
   it('apps/web/src의 모든 useTranslations(ns)(\'key\') 호출이 ko.json·en.json에 존재한다', () => {
