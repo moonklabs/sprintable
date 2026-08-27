@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export interface Account {
   account_id: string;
@@ -35,7 +36,7 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
   // (드롭다운 open·시트 open) 각자의 열림 이벤트에서 부른다.
   const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/accounts');
+      const r = await fetchWithAuth('/api/accounts');
       if (!r.ok) return;
       const j = (await r.json()) as { data?: { accounts?: Account[] }; accounts?: Account[] };
       setAccounts(j.data?.accounts ?? j.accounts ?? []);
@@ -51,6 +52,11 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
   const triggerAvatar = active?.avatar_url ?? avatarUrl ?? null;
   const atCap = accounts.length >= ACCOUNT_CAP;
 
+  // switch/add/signout-account는 의도적으로 raw fetch 유지(fetchWithAuth 미적용) — 세션
+  // 정체성 자체를 바꾸는 경로라 401을 fetchWithAuth의 전역 refresh-then-retry로 흡수하면
+  // 방금 전환/추가/로그아웃하려던 계정이 아닌 갱신된 舊세션으로 재시도되는 경쟁이 생긴다(예:
+  // add-account가 이미 자체 401 처리로 즉시 /login 바운스하는 것도 이 때문 — 원본 profile-
+  // menu.tsx부터 있던 동작, 재구현 0). GRANDFATHER_BASELINE 등재(PO 페드루, PR#3558).
   const handleSwitch = async (acc: Account) => {
     if (busy || acc.status === 'active') return;
     if (acc.status === 'expired') {
