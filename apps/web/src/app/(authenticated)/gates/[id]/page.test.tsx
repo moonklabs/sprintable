@@ -665,6 +665,28 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetArtifact);
   });
 
+  // story #3134(#3128 전수점검 잔여) — loop_decision의 work_item_id는 LoopRun.id, `/loops/{id}`가
+  // 실 상세 페이지.
+  it('loop_decision은 work_item_id로 /loops/{id} 링크가 뜬다', async () => {
+    await mount(gate({
+      gate_type: 'loop_decision', work_item_type: 'loop', work_item_id: 'loop-7',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetLoop);
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute('href')).toBe('/loops/loop-7');
+  });
+
+  it('workflow_config_publish는 이번에도 대상 링크가 없다(실 뷰어 부재 — 억지 진입점 금지, #2118 AC④)', async () => {
+    await mount(gate({
+      gate_type: 'workflow_config_publish', work_item_type: 'wf_line_version', work_item_id: 'wf-9',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetDoc);
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetArtifact);
+    expect(container.textContent).not.toContain(koMessages.cage.gateDetailViewTargetLoop);
+  });
+
   it('이미 해소된(approved) doc 게이트도 원문 링크가 그대로 남는다(감사 가치는 액션 여부와 무관 — decisionFacts·GateActivityHistory와 동원칙)', async () => {
     await mount(gate({
       gate_type: 'doc_approval', work_item_type: 'doc', status: 'approved', resolver_id: null,

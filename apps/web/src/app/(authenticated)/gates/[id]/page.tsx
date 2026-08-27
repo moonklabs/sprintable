@@ -133,22 +133,25 @@ export default function GateDetailPage() {
   // 승인 가능한 것처럼 보이는 게 실 결함이라 canonical의 첫 라이브 실측에서 바로 잡았다.
   const isDocGate = gate?.work_item_type === 'doc' || gate?.gate_type === 'doc_approval';
   const isCanonicalizeGate = gate?.gate_type === 'artifact_canonicalize';
-  // story #3128(#3113의 doc_approval판, 페드루 PO 3529 라이브 검증 중 부수 발견) — 카드가
-  // 「근거 데이터 없음 — 내용으로 직접 판단」이라 안내하면서도 대상 실물(문서/아티팩트)로 가는
-  // 경로가 카드 안에 0개였다. doc은 work_item_summary.slug(BE #1970 기존 계약, doc gate만
-  // 채워짐)로 `/docs/{slug}` bare 경로(notification-bell.tsx와 동형 관행 — org/project
-  // slug 없이도 middleware가 현재 활성 프로젝트로 해소, 크로스 프로젝트 게이트는 기존
-  // org/project 이름 표시와 같은 알려진 한계). artifact_canonicalize(work_item_type=
-  // 'visual_artifact')는 BE work_item_summary가 이 타입엔 항상 null(_resolve_work_item_summary
-  // fail-soft)이지만, gate.work_item_id 자체는 항상 있어 slug 없이도 `/artifacts/{id}`
-  // bare 경로(legacy-resource-tables.ts MIGRATED_RESOURCES 등재 확認)로 충분 — 같은
-  // «비용 작으면 잔여 0» 원칙으로 이번 PR에 같이 닫는다. 다른 gate 유형(loop_decision의
-  // hypothesis 초안 verdict·workflow_config_publish)은 전수 점검했으나 링크 대상 라우트가
-  // 불명확해 이번 PR 스코프 밖 — 페드루군에 별도 사이징 보고.
+  // story #3134(#3128 전수점검 잔여 — loop_decision) — HypothesisOutcomeDraft(gate-evidence.tsx)가
+  // 초안 verdict(verified/falsified/killed·actual·reason) 텍스트는 보여주지만, 그 판정이 어느
+  // loop을 재는지로 가는 링크가 없었다. loop_decision의 work_item_id는 `LoopRun.id`(BE
+  // loop.py:303 create_gate 호출·work_item_type='loop')다 — `/loops/{id}` 가 실 상세 페이지
+  // (loop-detail-client.tsx, 268줄 실 콘텐츠 확認)라 artifact와 동일 primitive로 닫는다.
+  // ⛔workflow_config_publish는 이번에도 스코프 밖 — 그라운딩 결과 `wf_line_version`은 FE
+  // entity 계열에 아예 등록 안 됨(embed-card.tsx 자체 주석: RICH_PREVIEW_TYPES·ENTITY_API·
+  // getEntityHref 셋 다 없음) + 대상 페이지(organization/workforce/workflow)가 "지금 사는
+  // config"만 보여줄 뿐 "이 버전(review 대상)"을 볼 방법이 아예 없다 — 링크를 억지로 달면
+  // #2118 P2.2 AC④가 이미 금지한 "미리보기 없는 타입에 빈 모달 여는 거짓 진입점"이 된다.
+  // 이건 BE(neutral_facts에 config diff 임베드) 또는 신규 FE 뷰어가 필요한 더 큰 스코프 —
+  // 페드루군에 사이징 보고.
+  const isLoopDecisionGate = gate?.gate_type === 'loop_decision';
   const targetLink = isDocGate && gate?.work_item_summary?.slug
     ? { href: `/docs/${gate.work_item_summary.slug}`, labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
     ? { href: `/artifacts/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetArtifact' as const }
+    : isLoopDecisionGate && gate?.work_item_id
+    ? { href: `/loops/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetLoop' as const }
     : null;
   const needsAction = !!gate && gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate || isCanonicalizeGate);
   // story #2091(P0) — needsAction은 "이 게이트가 사람의 판단을 필요로 하는가"만 답한다(gate 자체의
