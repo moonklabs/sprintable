@@ -1336,22 +1336,23 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </div>
               </div>
             ) : (
-              <button
+              <Button
                 type="button"
-                className="group flex w-full items-start gap-1 text-left"
+                variant="ghost"
+                className="group h-auto min-h-0 w-full min-w-0 items-start justify-start gap-1 p-0 text-left font-normal"
                 onClick={() => setEditingTitle(true)}
               >
                 <h2 className="text-lg font-semibold text-foreground">{story.title}</h2>
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
-              </button>
+              </Button>
             )}
             <div className="flex items-center gap-2">
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <button type="button" disabled={savingStatus} aria-label={t('status')}>
+                    <Button type="button" variant="ghost" className="h-auto min-h-0 min-w-0 p-0" disabled={savingStatus} aria-label={t('status')}>
                       <StatusBadge status={localStatus} label={statusLabel} interactive />
-                    </button>
+                    </Button>
                   }
                 />
                 <DropdownMenuContent align="start">
@@ -1391,14 +1392,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   {t('verificationPending')}
                 </span>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => void handleRequestVerification()}
                   disabled={requestingVerification}
-                  className="inline-flex items-center gap-1 rounded-[7px] border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="h-auto min-h-0 min-w-0 inline-flex items-center gap-1 rounded-[7px] border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
                   {requestingVerification ? t('loading') : t('requestVerification')}
-                </button>
+                </Button>
               )}
             </div>
             {/* E-VERIFY V0-S3 Lv1/Lv2 + P0-04 Claimed-vs-Verified — 완료 badge의 연장으로 읽히도록
@@ -1422,16 +1424,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 수 없는 조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라
                 미리 숨긴다. */}
             <HumanOnlyAction>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground transition hover:bg-destructive/10"
+                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive/10"
                 aria-label={t('deleteStory')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </HumanOnlyAction>
-            <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
+            <Button type="button" variant="ghost" onClick={onClose} className="h-auto min-h-0 min-w-0 rounded-md border border-border px-3 py-2 text-muted-foreground hover:text-foreground hover:bg-muted/50">✕</Button>
           </div>
         </div>
         {/* story #2528 — 전역 스크롤바 숨김(#2165) 하에선 스크롤은 되나 바가 안 보여 하단
@@ -1477,48 +1480,52 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
                 {!editingAssignee && (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => setEditingAssignee(true)}
-                    className="text-xs text-muted-foreground transition hover:text-foreground"
+                    className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
                     ✎ {t('edit')}
-                  </button>
+                  </Button>
                 )}
               </div>
               {editingAssignee ? (
                 <div className="mt-1 flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-1">
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => void handleClearAssignees()}
-                    className="w-full rounded px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted"
+                    className="h-auto min-h-0 w-full min-w-0 justify-start rounded px-2 py-1.5 text-left text-sm font-normal text-muted-foreground hover:bg-muted"
                   >
                     — {t('clearAssignees')}
-                  </button>
+                  </Button>
                   {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => {
                     const selected = localAssigneeIds.includes(m.id);
                     return (
-                      <button
+                      <Button
                         key={m.id}
                         type="button"
+                        variant="ghost"
                         onClick={() => void handleToggleAssignee(m.id)}
-                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
+                        className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
                           {m.name.slice(0, 2).toUpperCase()}
                         </span>
                         {m.name}
                         {selected && <span className="ml-auto text-primary">✓</span>}
-                      </button>
+                      </Button>
                     );
                   })}
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => setEditingAssignee(false)}
-                    className="mt-1 w-full rounded px-2 py-1 text-center text-xs text-muted-foreground hover:bg-muted"
+                    className="h-auto min-h-0 mt-1 w-full min-w-0 rounded px-2 py-1 text-center text-xs font-normal text-muted-foreground hover:bg-muted"
                   >
                     {t('cancel')}
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 <p className="mt-1 text-sm text-foreground">
@@ -1579,13 +1586,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('description')}</span>
                 {!editingDescription && (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => setEditingDescription(true)}
-                    className="text-xs text-muted-foreground transition hover:text-foreground"
+                    className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
                     ✎ {t('edit')}
-                  </button>
+                  </Button>
                 )}
               </div>
               {editingDescription ? (
@@ -1623,13 +1631,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <DescriptionViewer description={story.description} references={outgoingRefs} bareNumberTargets={bareNumberTargets} />
                 </div>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setEditingDescription(true)}
-                  className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
                 >
                   + {t('addDescription')}
-                </button>
+                </Button>
               )}
             </div>
 
@@ -1638,13 +1647,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('acceptanceCriteria')}</span>
                 {!editingAC && (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => setEditingAC(true)}
-                    className="text-xs text-muted-foreground transition hover:text-foreground"
+                    className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
                     ✎ {t('edit')}
-                  </button>
+                  </Button>
                 )}
               </div>
               {editingAC ? (
@@ -1675,13 +1685,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <DescriptionViewer description={story.acceptance_criteria} references={outgoingRefs} bareNumberTargets={bareNumberTargets} />
                 </div>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setEditingAC(true)}
-                  className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
                 >
                   + {t('addAcceptanceCriteria')}
-                </button>
+                </Button>
               )}
             </div>
 
@@ -1695,14 +1706,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('attachments')}</span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => attachInputRef.current?.click()}
                   disabled={uploadingAttachment || (story.attachments?.length ?? 0) >= STORY_ATTACHMENT_LIMIT}
-                  className="flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+                  className="h-auto min-h-0 min-w-0 flex items-center gap-1 p-0 text-xs font-normal text-muted-foreground hover:text-foreground disabled:opacity-40"
                 >
                   <Paperclip className="size-3" /> + 추가
-                </button>
+                </Button>
               </div>
               <input
                 ref={attachInputRef}
@@ -1728,26 +1740,28 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                             <AttachmentFile storedUrl={att.url} storyId={story.id} label={label} Icon={Icon} />
                           )
                         ) : null}
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           onClick={() => void handleRemoveAttachment(att.url)}
-                          className="absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive transition group-hover:block hover:bg-destructive/30"
+                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive group-hover:block hover:bg-destructive/30"
                           aria-label="첨부 삭제"
                         >
                           <X className="size-3" />
-                        </button>
+                        </Button>
                       </div>
                     );
                   })}
                 </div>
               ) : !uploadingAttachment ? (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => attachInputRef.current?.click()}
-                  className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
                 >
                   + {t('addAttachment')}
-                </button>
+                </Button>
               ) : null}
               {uploadingAttachment && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -1768,13 +1782,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <Tag className="size-3" />
                   <span>Labels</span>
                 </div>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setShowLabelPicker((v) => !v)}
-                  className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
                 >
                   {showLabelPicker ? '닫기' : '+ 추가'}
-                </button>
+                </Button>
               </div>
 
               {loadingLabels ? (
@@ -1786,14 +1801,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       {storyLabels.map((label) => (
                         <span key={label.itemLabelId} className="group relative inline-flex">
                           <LabelChip label={label} />
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
                             onClick={() => void handleDetachLabel(label.itemLabelId)}
-                            className="absolute -right-1 -top-1 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground hover:bg-destructive/80 hover:text-destructive-foreground group-hover:flex"
+                            className="h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 hidden items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-destructive-foreground group-hover:flex"
                             aria-label={`Remove ${label.name}`}
                           >
                             <X className="size-2" />
-                          </button>
+                          </Button>
                         </span>
                       ))}
                     </div>
@@ -1809,15 +1825,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           {orgLabels
                             .filter((l) => !storyLabels.some((sl) => sl.id === l.id))
                             .map((label) => (
-                              <button
+                              <Button
                                 key={label.id}
                                 type="button"
+                                variant="ghost"
                                 onClick={() => void handleAttachLabel(label.id)}
-                                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs text-foreground transition hover:bg-muted"
+                                className="h-auto min-h-0 min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs font-normal text-foreground hover:bg-muted"
                               >
                                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? '#8A8F98' }} />
                                 {label.name}
-                              </button>
+                              </Button>
                             ))}
                         </div>
                       )}
@@ -1825,11 +1842,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       <div className="flex items-center gap-1.5">
                         <div className="flex gap-1">
                           {LABEL_PRESET_COLORS.map((hex) => (
-                            <button
+                            <Button
                               key={hex}
                               type="button"
+                              variant="ghost"
                               onClick={() => setNewLabelColor(hex)}
-                              className={`h-4 w-4 rounded-full border-2 transition ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
+                              className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
                               style={{ backgroundColor: hex }}
                               aria-label={hex}
                             />
@@ -1843,14 +1861,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           placeholder="새 라벨 이름"
                           className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           onClick={() => void handleCreateLabel()}
                           disabled={!newLabelName.trim() || creatingLabel}
-                          className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50 hover:bg-primary/90 transition"
+                          className="h-auto min-h-0 min-w-0 rounded bg-primary px-2 py-1 text-xs font-normal text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                         >
                           {creatingLabel ? '...' : '생성'}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -1865,13 +1884,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <GitFork className="size-3" />
                   <span>Dependencies</span>
                 </div>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setShowAddDep((v) => !v)}
-                  className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                  className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
                 >
                   <Plus className="size-3" />{t('dep.add')}
-                </button>
+                </Button>
               </div>
 
               {/* 미완선행 경고 strip */}
@@ -1913,18 +1933,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     const blocker = storyMap[d.from_id];
                     return (
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
-                        <button type="button" onClick={() => onNavigate?.(d.from_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
+                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">Blocked by</span>
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
-                        </button>
-                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
-                        </button>
-                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label="Remove">
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label="Remove">
                           <X className="size-3" />
-                        </button>
+                        </Button>
                       </div>
                     );
                   })}
@@ -1934,18 +1954,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     const blocked = storyMap[d.to_id];
                     return (
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <button type="button" onClick={() => onNavigate?.(d.to_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
+                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">Blocking</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
-                        </button>
-                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
-                        </button>
-                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />
-                        </button>
+                        </Button>
                       </div>
                     );
                   })}
@@ -1955,18 +1975,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     const target = storyMap[d.to_id];
                     return (
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <button type="button" onClick={() => onNavigate?.(d.to_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
+                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 rotate-90" />
                           <span className="font-medium shrink-0">Depends on</span>
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{target.status}</span> : null}
-                        </button>
-                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
-                        </button>
-                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />
-                        </button>
+                        </Button>
                       </div>
                     );
                   })}
@@ -1976,18 +1996,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     const source = storyMap[d.from_id];
                     return (
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <button type="button" onClick={() => onNavigate?.(d.from_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
+                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 -rotate-90" />
                           <span className="font-medium shrink-0">Depended by</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{source.status}</span> : null}
-                        </button>
-                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
-                        </button>
-                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />
-                        </button>
+                        </Button>
                       </div>
                     );
                   })}
@@ -1999,14 +2019,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <div className="mt-2 space-y-2 rounded-lg border border-border bg-muted/20 p-2">
                   <div className="flex gap-1">
                     {(['blocks', 'depends_on'] as const).map((type) => (
-                      <button
+                      <Button
                         key={type}
                         type="button"
+                        variant="ghost"
                         onClick={() => setDepType(type)}
-                        className={`rounded px-2 py-0.5 text-[10px] font-medium transition ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                        className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-[10px] font-medium ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                       >
                         {type === 'blocks' ? t('dep.typeBlocks') : t('dep.typeDepends')}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                   <input
@@ -2035,11 +2056,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                         )}
                         {items.map((s) => (
                           <li key={s.id}>
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
                               onClick={() => void handleAddDep(s.id)}
                               disabled={addingDep}
-                              className="w-full px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-50"
+                              className="h-auto min-h-0 w-full min-w-0 flex-col items-start justify-start px-2 py-1.5 text-left text-xs font-normal hover:bg-muted disabled:opacity-50"
                             >
                               <span className="block truncate">{s.title}</span>
                               {showingCandidates ? (
@@ -2048,7 +2070,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                                   {'matched_snippet' in s && s.matched_snippet ? ` · ${s.matched_snippet}` : ''}
                                 </span>
                               ) : null}
-                            </button>
+                            </Button>
                           </li>
                         ))}
                       </ul>
@@ -2193,13 +2215,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                               <span>·</span>
                               <span>{new Date(activity.created_at).toLocaleString()}</span>
                               {isLong ? (
-                                <button
+                                <Button
                                   type="button"
+                                  variant="ghost"
                                   onClick={() => setExpandedActivityId(expanded ? null : activity.id)}
-                                  className="ml-auto rounded px-1.5 py-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                  className="h-auto min-h-0 min-w-0 ml-auto rounded px-1.5 py-0.5 font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
                                 >
                                   {expanded ? '접기' : '펼치기'}
-                                </button>
+                                </Button>
                               ) : null}
                             </div>
                           </li>

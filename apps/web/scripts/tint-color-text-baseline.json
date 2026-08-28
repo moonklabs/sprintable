@@ -71,7 +71,14 @@
     "baseline에 «잘못된 자리»로 등재해뒀을 뿐, 실제 이 자리(#1557 부근)가 진짜 검사",
     "대상으로 잡힌 적이 이제까지 없었다 — grandfather로 얼리되(AC4류 개별수리는 이",
     "스토리 몫이 아니다, 위 여러 전례와 동일 판정), 은폐가 걷혔다는 사실 자체를 여기",
-    "남긴다. 넷 다 develop 기존 코드(이 PR의 diff 아님) — git diff로 재확認."
+    "남긴다. 넷 다 develop 기존 코드(이 PR의 diff 아님) — git diff로 재확認.",
+    "",
+    "story #3183(2026-08-28, PR#3588) — story-detail-panel.tsx의 raw <button> 37건을",
+    "<Button variant=\"ghost\">로 이관하며 이 파일 destructive 항목의 className 리터럴이",
+    "바뀌었다(min-h-0/min-w-0 추가·transition 제거 — 순수 리팩터, 색 자체는 무변경). 옛",
+    "리터럴 키는 develop에 더는 없어 stale로 남고, 새 리터럴을 grandfather로 추가 등재한다",
+    "(카디르 QA가 merge-base 대조로 \"신규 위반 아님, exact-string 미스매치\"로 판독 —",
+    "PO 지시: 색 자체를 고치지 말 것, 그건 이 스토리의 \"변경 0\" 원칙 밖·별도 기존 채무)."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::success::border-success bg-success-tint text-success",
@@ -91,6 +98,7 @@
     "components/hypotheses/hypothesis-gate-badge.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-success",
     "components/inbox/approvals-queue.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground",
     "components/kanban/story-detail-panel.tsx::destructive::absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive transition group-hover:block hover:bg-destructive/30",
+    "components/kanban/story-detail-panel.tsx::destructive::h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive group-hover:block hover:bg-destructive/30",
     "components/nav/profile-menu.tsx::destructive::flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive",
     "components/settings/workflow-line-editor-section.tsx::success::gap-1 text-success hover:bg-success-tint hover:text-foreground",
     "components/storage/storage-delete-dialog.tsx::destructive::grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive",
