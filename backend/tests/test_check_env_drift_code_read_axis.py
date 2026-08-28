@@ -361,7 +361,17 @@ def test_ac6_dynamic_key_construction_is_not_detected(tmp_path):
 # 되지 않도록: baseline에 없는 새 ㉠은 FAIL, baseline 안은 count만, self-expiring ──────
 
 
-def _entry(reason="r", declared_by="PO", until="2026-08-27"):
+def _entry(reason="r", declared_by="PO", until=None):
+    """`until` 기본값은 호출 시점 기준 **상대** 계산(오늘+7일) — 절대 날짜를 하드코딩하면
+    시간이 지나 그 날짜를 지나는 순간 이 픽스처를 쓰는 테스트가 스스로 무너진다(실사고,
+    2026-08-28 — 구 기본값 "2026-08-27"이 자연 만료돼 이 헬퍼를 쓰는 테스트 2건이 얼어붙은
+    날짜 때문에 매일 낡아가고 있었다). 30일 상한보다 훨씬 안쪽(7일)이라 만료·상한 두 축
+    모두 항상 통과하는 «중립» 기본값 — 언제 실행해도 같은 의미(=유효한 baseline 항목)를
+    유지한다(개별 만료/상한-초과 시나리오를 테스트하는 곳은 `until=`을 명시로 오버라이드해
+    이 기본값과 무관하다)."""
+    from datetime import date, timedelta
+    if until is None:
+        until = (date.today() + timedelta(days=7)).isoformat()
     return {"reason": reason, "declared_by": declared_by, "until": until}
 
 
