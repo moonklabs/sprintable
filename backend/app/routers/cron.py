@@ -938,6 +938,147 @@ async def storage_usage_warn(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── story #3176(결제②-C): AU 80%/90%/유예 경고 + paused 캐시 크론 ──────────────
+
+_AU_WARN_80_THRESHOLD = 0.8
+_AU_WARN_90_THRESHOLD = 0.9
+_AU_WARN_90_COOLDOWN = timedelta(days=7)  # storage_usage_warn과 동형(90%만 이메일 대상).
+_AU_GRACE_WINDOW = timedelta(days=7)
+_AU_GRACE_OVERAGE_RATIO = 1.10  # 110%
+
+
+@router.get("/au-usage-warn")
+async def au_usage_warn(
+    request: Request,
+    session: AsyncSession = Depends(get_worker_db),
+) -> JSONResponse:
+    """story #3176 — doc `au-limit-enforcement-grounding-3176` §1.3 구현. AU는 storage와
+    달리 80%(마커만·이메일 없음, §11.1 "제품내경고"는 FE 별도 스토리 — 페드루 PO 조건②)·
+    90%(관리자 메일, storage_usage_warn과 동형 cooldown/re-arm)·100%+유예(110% 또는 7일 중
+    먼저, Free는 유예 없이 즉시)의 3단계를 이 크론 한 번의 순회로 전부 계산해 캐시한다.
+
+    ⛔`au_paused_at`은 요청마다 재계산하지 않는다(§1.3 (b)안, PO 승인) — 미들웨어/auth
+    dependency(`ee/plan_limits.py::check_au_not_paused`)는 이 크론이 써둔 캐시만 읽는다.
+    `au_eval_at`은 **처리된 모든 org에 대해 무조건** now()로 갱신한다 — 크론이 죽거나 이
+    org까지 못 왔으면(예외로 중간에 멈추면) 그 org의 au_eval_at이 그대로 stale해지고,
+    check_au_not_paused()가 stale 캐시를 fail-open으로 처리한다(페드루 PO 조건, 2026-08-28).
+    """
+    verify_cron(request)
+    try:
+        from ee.plan_limits import KNOWN_TIERS  # type: ignore[import]
+
+        now = datetime.now(timezone.utc)
+        period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        subs = list((await session.execute(
+            select(OrgSubscription).where(OrgSubscription.status == "active")
+        )).scalars().all())
+        # storage_usage_warn과 동일 규율 — tier당 대표 1행(currency 무관·ASC 결정적).
+        au_limits = {
+            t: lim for t, lim in (await session.execute(
+                text(
+                    "SELECT DISTINCT ON (tier) tier, au_limit FROM offering_versions "
+                    "WHERE effective_to IS NULL ORDER BY tier, currency ASC"
+                )
+            )).all()
+        }
+        evaluated = 0
+        notified_90 = 0
+        newly_paused = 0
+        for sub in subs:
+            if sub.tier not in KNOWN_TIERS:
+                logger.error("au-usage-warn: unknown tier %r org_id=%s — skipping(fail-open)", sub.tier, sub.org_id)
+                continue  # au_eval_at도 갱신 안 함 — 다음 요청은 stale 캐시로 자연히 fail-open.
+            au_limit = au_limits.get(sub.tier)
+            if not au_limit or au_limit <= 0:
+                logger.error("au-usage-warn: no/invalid au_limit for tier=%r org_id=%s — skipping(fail-open)", sub.tier, sub.org_id)
+                continue
+            current = int((await session.execute(
+                text(
+                    "SELECT current_value FROM usage_meters WHERE org_id = :oid "
+                    "AND meter_type = 'automation_units' AND period_start = :ps"
+                ),
+                {"oid": str(sub.org_id), "ps": period_start},
+            )).scalar() or 0)
+            pct = current / au_limit
+
+            values: dict = {"au_eval_at": now}
+
+            # 80% — 마커만(이메일 없음, FE 노출은 별도 스토리).
+            if pct >= _AU_WARN_80_THRESHOLD:
+                if sub.au_warn_80_notified_at is None:
+                    values["au_warn_80_notified_at"] = now
+            elif sub.au_warn_80_notified_at is not None:
+                values["au_warn_80_notified_at"] = None  # re-arm
+
+            # 90% — 관리자 메일(storage_usage_warn과 동형 cooldown).
+            if pct >= _AU_WARN_90_THRESHOLD:
+                if (
+                    sub.au_warn_90_notified_at is None
+                    or (now - sub.au_warn_90_notified_at) >= _AU_WARN_90_COOLDOWN
+                ):
+                    emails = [
+                        r[0] for r in (await session.execute(
+                            select(User.email)
+                            .join(OrgMember, User.id == OrgMember.user_id)
+                            .where(
+                                OrgMember.org_id == sub.org_id,
+                                OrgMember.role.in_(["owner", "admin"]),
+                                OrgMember.deleted_at.is_(None),
+                            )
+                        )).all()
+                    ]
+                    pct_display = round(pct * 100, 1)
+                    subject = f"[Sprintable] Automation usage (AU) at {pct_display}%"
+                    html = (
+                        f"<p>Your organization's automation usage (AU) has reached "
+                        f"<b>{pct_display}%</b> ({current} / {au_limit} AU this month).</p>"
+                        f"<p>At 100% MCP/API writes and automation will pause (reads and human "
+                        f"UI stay available). Consider upgrading before the limit is reached.</p>"
+                    )
+                    for em in emails:
+                        try:
+                            await asyncio.to_thread(send_email, em, subject, html)
+                        except Exception:
+                            logger.warning("au-usage-warn email 실패 org=%s", sub.org_id, exc_info=True)
+                    values["au_warn_90_notified_at"] = now
+                    notified_90 += 1
+            elif sub.au_warn_90_notified_at is not None:
+                values["au_warn_90_notified_at"] = None  # re-arm
+
+            # 100%+유예 — Free는 유예 없이 즉시 paused(§11.2 "Free AU: 즉시 경고→쓰기 중지").
+            if pct >= 1.0:
+                if sub.tier == "free":
+                    paused = True
+                else:
+                    grace_started = sub.au_grace_started_at
+                    if grace_started is None:
+                        grace_started = now
+                        values["au_grace_started_at"] = grace_started
+                    grace_expired = (now - grace_started) >= _AU_GRACE_WINDOW
+                    overage_expired = pct >= _AU_GRACE_OVERAGE_RATIO
+                    paused = grace_expired or overage_expired
+            else:
+                paused = False
+                if sub.au_grace_started_at is not None:
+                    values["au_grace_started_at"] = None  # 100% 아래로 복귀 — 유예 해제.
+
+            if paused and sub.au_paused_at is None:
+                values["au_paused_at"] = now
+                newly_paused += 1
+            elif not paused and sub.au_paused_at is not None:
+                values["au_paused_at"] = None
+
+            await session.execute(
+                update(OrgSubscription).where(OrgSubscription.id == sub.id).values(**values)
+            )
+            evaluated += 1
+        await session.commit()
+        return _ok({"evaluated_orgs": evaluated, "notified_90pct": notified_90, "newly_paused": newly_paused})
+    except Exception as exc:
+        logger.exception("au-usage-warn cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/db-connection-stats ─────────────────────────
 
 @router.get("/db-connection-stats")
