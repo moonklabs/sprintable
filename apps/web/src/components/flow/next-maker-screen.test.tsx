@@ -468,6 +468,46 @@ describe('NextMakerScreen — org-sync 성공 後 재요청 (story #2545)', () =
   });
 });
 
+// story #3169(P2·prod 실사용·선생님 제보) — FlowNodeStoryPanel에서 스토리를 삭제해도 이
+// 화면은 자기 자신의 fetch로 노드를 그리는 별도 컴포넌트라(부모가 목록을 안 들고 있음)
+// 삭제 신호가 갈 곳이 없어 이미 지워진 스토리가 노드로 계속 남았다(잔존 표시). 위
+// org-sync 재요청 테스트와 동일 계약 — `refetchToken`이 바뀌면 projectId가 그대로여도
+// 재요청되는지 고정한다(bumpOrgSyncVersion과 달리 이 값은 flow-client.tsx가 로컬로 들고
+// 있는 페이지 스코프 트리거 — project-context-client.ts의 전역 계약과 별개).
+describe('NextMakerScreen — refetchToken 변경 時 재요청(story #3169)', () => {
+  it('refetchToken이 바뀌면 projectId가 그대로여도 재요청된다', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} refetchToken={0} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const goalsCallsAfterMount = calledUrls.filter((u) => u.startsWith('/api/goals?')).length;
+    expect(goalsCallsAfterMount).toBeGreaterThan(0);
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} refetchToken={1} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const goalsCallsAfterBump = calledUrls.filter((u) => u.startsWith('/api/goals?')).length;
+    expect(goalsCallsAfterBump).toBeGreaterThan(goalsCallsAfterMount);
+  });
+
+  it('refetchToken 미지정(구 호출부 대비)이어도 마운트 시 정상 fetch된다(회귀 0)', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(calledUrls.filter((u) => u.startsWith('/api/goals?')).length).toBeGreaterThan(0);
+  });
+});
+
 // story #2224 후속(2026-08-16, 미르코) — dev 실측(활성 목표 39건인데 화면은 "목표 0개")의
 // 근본원인 회귀가드. fetchAllPages가 `if (!res.ok) break`로 실패를 «페이지네이션 끝»과
 // 구분 없이 삼켜, 어떤 실패든(이번엔 401·일반화하면 5xx도 동형) items=[]가 "정상 0건"인

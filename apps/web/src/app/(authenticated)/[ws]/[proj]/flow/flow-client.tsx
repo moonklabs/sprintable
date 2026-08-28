@@ -150,6 +150,18 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   }, [selectedStoryId]);
   const handleClosePanel = useCallback(() => setPanelOpen(false), []);
 
+  // story #3169(P2·prod 실사용·선생님 제보) — FlowNodeStoryPanel(위)에서 스토리를 삭제해도
+  // NextMakerScreen은 자기 자신의 fetch로 노드를 그리는 별도 컴포넌트라(kanban-board.tsx의
+  // `stories` 로컬 state와 달리 여기선 부모가 그 목록을 안 들고 있다) 삭제 신호가 갈 곳이
+  // 없었다 — 패널만 닫히고 갈래 캔버스엔 이미 지워진 스토리가 노드로 계속 남는 「잔존
+  // 표시」 표면이었다(다시 눌러 재삭제 시도 → 404 → 실패로 오인, 판별 A②). 전역
+  // bumpOrgSyncVersion()(project-context-client.ts)은 "org 전환 직후" 전용 계약이라 여기
+  // 재사용하지 않는다 — 이 페이지 스코프로 좁힌 자체 refetch 트리거만 하나 둔다.
+  const [flowRefetchToken, setFlowRefetchToken] = useState(0);
+  const handleFlowStoryDeleted = useCallback(() => {
+    setFlowRefetchToken((v) => v + 1);
+  }, []);
+
   // story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사 패널. story 패널(위)과 달리 「닫아도
   // 선택 유지」 뉘앙스가 AC에 없어 훨씬 단순하게: URL의 `?hypothesis=`가 곧 열림 상태의
   // 단일 소스다(별도 panelOpen 불필요) — 닫으면 파라미터 자체를 지운다.
@@ -268,6 +280,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
               onSelectStory={handleSelectStory}
               selectedNodeId={selectedStoryId}
               focusGoalId={focusGoalId}
+              refetchToken={flowRefetchToken}
             />
           )
         )}
@@ -283,7 +296,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         {view === 'flow' && panelOpen && selectedStoryId ? (
           // key={selectedStoryId} — 다른 노드를 연달아 누르면 통째로 다시 마운트시킨다(초기
           // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
-          <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
+          <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} onDeleteSuccess={handleFlowStoryDeleted} />
         ) : null}
 
         {/* story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 가설 뷰에서만(다른 탭엔 가설 카드

@@ -49,9 +49,23 @@ interface ApprovalRequestCardProps {
    * resolved(회신) 분기가 이 카탈로그의 preset.gate.verdict 항목을 찾아 정적 표현부(text·
    * fields)만 소비한다 — pending(요청·서명·버튼) 분기는 그대로다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #5ace2e84(2026-08-28 라이브 재측 후속) — chat-view.tsx가 대화 단위로 배치조회한
+   * gate_id→상태 맵 «전체»(use-gate-batch.ts). ⚠️단건 lookup만 넘기던 구판은 첫 마운트
+   * 레이스가 있었다 — React는 같은 커밋에서 자식(이 카드) effect를 부모(useGateBatchFetch)
+   * effect보다 먼저 돌리므로, 그 시점 맵이 아직 `{}`라 모든 카드가 "커버 안 됨"으로 오판해
+   * 배치가 뜨기도 전에 개별 fetchGate()를 전원 발사했다(라이브 실측: 대화당 여전히 ~50발 —
+   * 배치 자체는 33개를 1콜로 정확히 묶었지만 개별 콜을 막지 못함). 처방: **맵 객체 자체**
+   * (이 gate_id 항목이 아직 없어도, 빈 `{}`라도)를 "이 화면은 배치가 관장한다"는 신호로
+   * 쓴다 — 정의돼 있으면 항목이 없어도 기다리고, undefined(배치 컨텍스트 자체가 없음 —
+   * approvals-queue.tsx처럼 채팅 밖에서 쓰이는 경우)일 때만 개별 fetchGate()로 폴백
+   * (회귀 0). */
+  gateByKey?: Record<string, CardState>;
 }
 
-type CardState =
+/** story #5ace2e84 — use-gate-batch.ts(chat-view.tsx 대화 단위 배치조회)와 정확히 같은 shape을
+ * 공유하기 위해 export한다(타입 두 벌 갈라지는 drift 방지 — entity-status-labels.ts의
+ * EntityStatusFetchState와 동일 정신). */
+export type CardState =
   | { kind: 'loading' }
   /** 게이트가 없다(삭제 등) — AC4류 폴백: 조용한 실패 대신 정직한 문구. */
   | { kind: 'not-found' }
@@ -100,7 +114,7 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  * (`GateSignatureApproval`)와 형제로 렌더돼 모달 열람/닫기가 그 로컬 state(근거확인·사유)를
  * 건드리지 않는다(AC③, 언마운트 없음).
  */
-export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalRequestCardProps) {
+export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
   // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
   // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
@@ -133,7 +147,17 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     }
   }, [target.gate_id]);
 
-  useEffect(() => { void fetchGate(); }, [fetchGate]);
+  // story #5ace2e84(2026-08-28 라이브 재측 후속) — gateByKey «맵 객체 자체»가 정의돼 있으면
+  // (빈 `{}`라도) 이 화면은 배치가 관장한다는 뜻 — 이 gate_id 항목이 아직 안 채워졌어도
+  // 독립 fetchGate()를 안 태우고 기다린다(첫 마운트 레이스 처방, 위 prop 문서 참고).
+  // gateByKey 자체가 undefined일 때만(배치 컨텍스트 자체가 없음 — approvals-queue.tsx 등)
+  // 기존 개별 fetchGate()로 자연 폴백한다(회귀 0).
+  const initialGate = gateByKey?.[target.gate_id];
+  useEffect(() => {
+    if (initialGate) { setState(initialGate); return; }
+    if (gateByKey !== undefined) return; // 배치가 관장 중 — 항목 도착까지 대기.
+    void fetchGate();
+  }, [fetchGate, initialGate, gateByKey]);
 
   // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 이 게이트를 먼저 해소하면,
   // 이 카드를 보고 있는 화면도 새로고침 없이 "처리됨"으로 갱신된다. BE가

@@ -14,7 +14,10 @@ import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 import koMessages from '../../../messages/ko.json';
 
 vi.mock('@/components/kanban/story-detail-panel', () => ({
-  StoryDetailPanel: ({ story, onClose, overlayPosition }: { story: { title: string }; onClose: () => void; overlayPosition?: { top: number; heightPx: number } }) => (
+  StoryDetailPanel: ({ story, onClose, onDeleteSuccess, overlayPosition }: {
+    story: { id: string; title: string }; onClose: () => void;
+    onDeleteSuccess?: (id: string) => void; overlayPosition?: { top: number; heightPx: number };
+  }) => (
     <div data-testid="story-detail-panel-stub" data-mode={overlayPosition ? 'overlay' : 'fullscreen'}>
       <span data-testid="stub-title">{story.title}</span>
       {overlayPosition ? (
@@ -24,6 +27,8 @@ vi.mock('@/components/kanban/story-detail-panel', () => ({
         </>
       ) : null}
       <button type="button" onClick={onClose}>close</button>
+      {/* story #3169 — onDeleteSuccess 배선을 값으로 잰다(잔존 표시 처방). */}
+      <button type="button" onClick={() => onDeleteSuccess?.(story.id)}>delete</button>
     </div>
   ),
 }));
@@ -130,6 +135,59 @@ describe('FlowNodeStoryPanel — 자립 fetch (story #2354 AC8, 새 BE 0)', () =
       '/api/tasks?story_id=story-abc&limit=20',
     ]);
     expect(container.querySelector('[data-testid="stub-title"]')?.textContent).toBe('앵커 시험 스토리');
+  });
+});
+
+// story #3169(P2·prod 실사용) — 이 패널이 그동안 StoryDetailPanel에 onDeleteSuccess를 안
+// 물려줘(fullscreen·overlay 두 렌더 분기 다) 갈래 캔버스(NextMakerScreen)가 스토리 삭제를
+// 몰라 노드가 유령처럼 남았다(잔존 표시 표면, flow-client.tsx가 상위에서 refetch 트리거로
+// 소비). 여기선 이 패널이 받은 onDeleteSuccess를 두 렌더 분기 모두 그대로 물려주는지만 잰다.
+describe('FlowNodeStoryPanel — onDeleteSuccess 물려주기(story #3169, 잔존 표시 처방)', () => {
+  it('fullscreen 분기(모바일)에서 StoryDetailPanel의 onDeleteSuccess가 그대로 불린다', async () => {
+    stubFetch([]);
+    setViewportWidth(390); // isMobile=true → fullscreen 분기
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+    const onDeleteSuccess = vi.fn();
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} onDeleteSuccess={onDeleteSuccess} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const deleteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'delete');
+    await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(onDeleteSuccess).toHaveBeenCalledWith('story-abc');
+  });
+
+  it('overlay 분기(데스크톱)에서도 StoryDetailPanel의 onDeleteSuccess가 그대로 불린다', async () => {
+    stubFetch([]);
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+    const onDeleteSuccess = vi.fn();
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} onDeleteSuccess={onDeleteSuccess} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.querySelector('[data-testid="story-detail-panel-stub"]')?.getAttribute('data-mode')).toBe('overlay');
+    const deleteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'delete');
+    await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(onDeleteSuccess).toHaveBeenCalledWith('story-abc');
+  });
+
+  it('onDeleteSuccess 미지정(구 호출부 대비)이어도 delete 클릭이 크래시하지 않는다(회귀 0)', async () => {
+    stubFetch([]);
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const deleteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'delete');
+    expect(() => deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))).not.toThrow();
   });
 });
 

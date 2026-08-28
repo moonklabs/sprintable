@@ -28,7 +28,7 @@ import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
-import { ApprovalRequestCard } from './approval-request-card';
+import { ApprovalRequestCard, type CardState } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { segmentMessageContent } from './message-segments';
@@ -75,6 +75,13 @@ interface ChatBubbleProps {
   /** story #2637 — chat-view.tsx가 대화당 1회 배치조회한 event_definitions 카탈로그(entityStatusByKey와
    * 동일 패턴). 생략하면(undefined) 이벤트 메시지도 BE 제네릭 폴백 텍스트로 안전하게 그려진다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #5ace2e84 — chat-view.tsx가 대화 단위로 배치조회한 gate_id→상태 캐시(entityStatusByKey와
+   * 동일 물려받기 패턴, use-gate-batch.ts). ApprovalRequestCard에 맵 «전체»를 그대로 넘긴다
+   * (단건 lookup을 여기서 미리 뽑지 않는다 — 그러면 "항목 없음"과 "맵 자체가 없음"이
+   * undefined 하나로 뭉개져 첫 마운트 레이스가 재발한다, approval-request-card.tsx의
+   * gateByKey prop 문서 참고). 생략하면(undefined) 카드가 기존처럼 개별 fetch로 안전 폴백
+   * (회귀 0). */
+  gateByKey?: Record<string, CardState>;
   /** story #2766(레인 A) — ChatView가 물려주면 doc 임베드 미리보기·비-이미지 첨부 클릭이
    * 중앙 모달/새 탭 대신 우측 ReadingPanel을 연다. 생략하면(undefined, ThreadPanel 등 아직
    * 안 물려주는 호출부) 기존 동작(모달·window.open) 그대로 — 회귀 없음. */
@@ -367,7 +374,7 @@ const LONG_PRESS_MS = 500;
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
-  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer,
+  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
@@ -582,7 +589,11 @@ export function ChatBubble({
               </button>
             </div>
           ) : approvalTarget ? (
-            <ApprovalRequestCard target={approvalTarget} eventDefinitionsByKey={eventDefinitionsByKey} />
+            <ApprovalRequestCard
+              target={approvalTarget}
+              eventDefinitionsByKey={eventDefinitionsByKey}
+              gateByKey={gateByKey}
+            />
           ) : eventTarget && eventBlockTemplate ? (
             <EventBlockCard
               template={eventBlockTemplate}

@@ -8,6 +8,8 @@ import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
+import { useGateBatchFetch } from '@/hooks/use-gate-batch';
+import type { CardState as GateCardState } from '@/components/chat/approval-request-card';
 import type { EventDefinitionSummary } from '@/lib/block-template';
 
 import { fetchWithAuth } from '@/lib/db/client';
@@ -51,6 +53,13 @@ interface ThreadPanelProps {
   /** story #2637 — chat-view.tsx의 event_definitions 카탈로그 캐시를 그대로 물려받는다
    * (entityStatusByKey와 동일 이유·별도로 안 만든다). */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #5ace2e84 — chat-view.tsx의 gate 배치조회 캐시·요청장부를 그대로 물려받는다
+   * (entityStatusByKey와 동일 이유). 스레드 답글에 걸린 결재카드도 같은 장부를 공유해
+   * 부모 메시지 카드와 중복 fetch가 안 난다. 둘 다 생략하면(undefined) 이 패널의 gate
+   * 배치조회가 꺼지고 카드는 개별 fetchGate()로 자연 폴백(회귀 0). */
+  gateByKey?: Record<string, GateCardState>;
+  requestedGateIdsRef?: RefObject<Set<string>>;
+  setGateByKey?: (updater: (prev: Record<string, GateCardState>) => Record<string, GateCardState>) => void;
   /** 답글 뱃지 안 꺼지는 버그 fix(2026-08-24, 선생님 리포트) — chat-view.tsx의 markRead(top-level
    * mark-read와 동일 엔드포인트·멱등 GREATEST 래칫)를 그대로 물려받는다. 이 패널은 열리면 항상
    * 최신 답글까지 자동 스크롤(위 shouldScrollToBottomRef)이라 "열람=끝까지 봄"이 성립 — 로드
@@ -72,6 +81,9 @@ export function ThreadPanel({
   requestedEntityStatusKeysRef,
   setEntityStatusByKey,
   eventDefinitionsByKey,
+  gateByKey,
+  requestedGateIdsRef,
+  setGateByKey,
   onMarkRead,
 }: ThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -89,6 +101,15 @@ export function ThreadPanel({
     setEntityStatusByKey ? messages : EMPTY_THREAD_MESSAGES,
     requestedEntityStatusKeysRef ?? localRequestedKeysRef,
     setEntityStatusByKey ?? noopSetEntityStatusByKey,
+  );
+
+  // story #5ace2e84 — 위 entityStatusByKey와 동일 정신(꺼짐 폴백 패턴 그대로).
+  const localRequestedGateIdsRef = useRef<Set<string>>(new Set());
+  const noopSetGateByKey = useCallback(() => {}, []);
+  useGateBatchFetch(
+    setGateByKey ? messages : EMPTY_THREAD_MESSAGES,
+    requestedGateIdsRef ?? localRequestedGateIdsRef,
+    setGateByKey ?? noopSetGateByKey,
   );
 
   const fetchThreadMessages = useCallback(async () => {
@@ -217,6 +238,7 @@ export function ThreadPanel({
           projectId={projectId}
           entityStatusByKey={entityStatusByKey}
           eventDefinitionsByKey={eventDefinitionsByKey}
+          gateByKey={gateByKey}
         />
       </div>
 
@@ -247,6 +269,7 @@ export function ThreadPanel({
                   projectId={projectId}
                   entityStatusByKey={entityStatusByKey}
                   eventDefinitionsByKey={eventDefinitionsByKey}
+                  gateByKey={gateByKey}
                 />
               );
             })}

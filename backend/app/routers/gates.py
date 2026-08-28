@@ -43,6 +43,7 @@ from app.services.gate_service import (
 )
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import (
+    accessible_project_ids_in_org,
     get_project_role,
     has_project_access,
     is_org_owner,
@@ -585,6 +586,16 @@ async def list_gates(
     work_item_id: uuid.UUID | None = Query(default=None),
     work_item_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    # story #5ace2e84 — 대화 안 결재카드 N+1 처방(PO 실측: 대화 진입당 /api/gates/{id} 최대
+    # 51발·p50 894ms·max 7.47s). stories.py `ids` 파라미터(comma-separated 배치 앵커 조회)와
+    # 동형 계약 — ORDER BY/limit/기타 필터 전부 무시하는 고정 집합 조회. 단건 GET /{id}와
+    # 동일하게 project 접근권을 gate별로 강제한다(아래 gate_ids 분기, #2042와 같은 비대칭
+    # 재발 방지 — 목록이라고 단건보다 느슨해지면 안 됨).
+    # ⚠️바로 위 #2864 주석과 동일 이유로 Annotated(실 None 기본값) — list_gate_inbox()가 이
+    # 파라미터를 안 넘기고 list_gates()를 직접 호출한다(아래) — raw `Query(default=None)`이면
+    # 그 직접호출 경로에서 Query 객체 자체가 기본값으로 들어가 `ids is not None`이 항상 참이
+    # 되고 `.split(",")`가 Query 객체엔 없어 즉시 TypeError로 터진다.
+    ids: Annotated[str | None, Query(description="comma-separated gate ids — 배치 앵커 조회")] = None,
     # story #2864(P0, 침묵 스왈로): gate_type·limit·offset이 시그니처에 아예 없어 FastAPI가
     # 미등재 쿼리 파라미터를 조용히 무시했다(#2863 zod dead-code와 동일 클래스 — 있다≠지금
     # 쓰는 것). ⚠️`= Query(...)`를 직접 기본값으로 쓰지 않고 Annotated로 뺀 이유 — 이
@@ -613,6 +624,20 @@ async def list_gates(
         from app.models.hitl_config import GATE_TYPES
         if gate_type not in GATE_TYPES:
             raise HTTPException(status_code=422, detail=f"gate_type must be one of {sorted(GATE_TYPES)}")
+
+    # story #5ace2e84 — ids 배치 앵커 조회 파싱(stories.py list_stories와 동형: comma-separated·
+    # invalid UUID=422·과대 IN 방어). ids가 오면 아래 work_item_id/status/gate_type 등 나머지
+    # 필터는 전부 무시하는 고정 집합 조회로 갈린다(stories.py와 동일 계약).
+    gate_ids: list[uuid.UUID] | None = None
+    if ids is not None:
+        try:
+            gate_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid gate id in ids")
+        if not gate_ids:
+            return []
+        if len(gate_ids) > 200:  # stories.py ids 파라미터와 동형 방어(과대 IN 금지).
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
 
     # story #2042(P0, 침묵 스왈로 대칭 — 이번엔 authz 방향): work_item_id로 필터할 때 이
     # 라우트는 org_id 스코프만 걸고 project 접근권을 아예 안 물었다(has_project_access 호출
@@ -648,29 +673,34 @@ async def list_gates(
                 raise HTTPException(status_code=404, detail="Gate not found")
 
     q = select(Gate).where(Gate.org_id == org_id)
-    if work_item_id:
-        q = q.where(Gate.work_item_id == work_item_id)
-    if work_item_type:
-        q = q.where(Gate.work_item_type == work_item_type)
-    if status:
-        q = q.where(Gate.status == status)
-    if gate_type:
-        q = q.where(Gate.gate_type == gate_type)
-    # story #1973(P1a-S4): ?sort=urgency = SLA overdue 최상위 → age(created_at) 오래된 순 →
-    # held(향후 만료) 최하단(gate_service.apply_gate_urgency_sort). 미지정 시(기본) 기존 동작
-    # (무정렬/삽입순) 그대로 — 회귀 없음.
-    if sort == "urgency":
-        q = apply_gate_urgency_sort(q)
-    elif limit is not None or offset:
-        # story #2864: limit/offset이 결정적이려면 순서가 고정돼야 한다 — 무정렬(삽입순 암묵
-        # 의존)이었던 기존 동작을, 페이지네이션을 실제로 쓰는 호출에서만 created_at desc(최신
-        # 우선, 다른 목록 API들과 동형)로 명시. limit/offset 둘 다 안 쓰면 기존 무정렬 그대로
-        # (list_gate_inbox 등 기존 호출부 회귀 0).
-        q = q.order_by(Gate.created_at.desc())
-    if limit is not None:
-        q = q.limit(limit)
-    if offset:
-        q = q.offset(offset)
+    if gate_ids is not None:
+        # story #5ace2e84 — ids 배치는 고정 집합 앵커 조회(stories.py list_stories ids 분기와
+        # 동형). 나머지 필터/정렬/페이지네이션은 의미가 없어 전부 건너뛴다.
+        q = q.where(Gate.id.in_(gate_ids))
+    else:
+        if work_item_id:
+            q = q.where(Gate.work_item_id == work_item_id)
+        if work_item_type:
+            q = q.where(Gate.work_item_type == work_item_type)
+        if status:
+            q = q.where(Gate.status == status)
+        if gate_type:
+            q = q.where(Gate.gate_type == gate_type)
+        # story #1973(P1a-S4): ?sort=urgency = SLA overdue 최상위 → age(created_at) 오래된 순 →
+        # held(향후 만료) 최하단(gate_service.apply_gate_urgency_sort). 미지정 시(기본) 기존 동작
+        # (무정렬/삽입순) 그대로 — 회귀 없음.
+        if sort == "urgency":
+            q = apply_gate_urgency_sort(q)
+        elif limit is not None or offset:
+            # story #2864: limit/offset이 결정적이려면 순서가 고정돼야 한다 — 무정렬(삽입순 암묵
+            # 의존)이었던 기존 동작을, 페이지네이션을 실제로 쓰는 호출에서만 created_at desc(최신
+            # 우선, 다른 목록 API들과 동형)로 명시. limit/offset 둘 다 안 쓰면 기존 무정렬 그대로
+            # (list_gate_inbox 등 기존 호출부 회귀 0).
+            q = q.order_by(Gate.created_at.desc())
+        if limit is not None:
+            q = q.limit(limit)
+        if offset:
+            q = q.offset(offset)
     result = await session.execute(q)
     gates = list(result.scalars().all())
     responses = [GateResponse.model_validate(g) for g in gates]
@@ -836,6 +866,23 @@ async def list_gates(
     # caller·project 무권한 전부에서 자연히 유지된다(eligible_ids 에 없으면 False).
     for resp, g in non_doc_gates:
         resp.can_approve = g.id in eligible_ids and is_valid_transition(g.status, "approved")
+
+    if gate_ids is not None:
+        # story #5ace2e84 — ids 배치는 work_item_id 필터가 물던 project 접근권 검사(#2042)를
+        # 안 거친다(work_item_id가 None이라 위 그 블록 자체가 스킵) — 단건 GET /{id}
+        # (get_gate_endpoint)와 동일한 강제를 여기서 명시로 건다. project_id는 위에서 이미
+        # 배치 해소돼 있어 신규 N+1 없음(1 쿼리로 caller 접근 가능 project 집합만 추가 조회).
+        accessible_project_ids = set(await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id))
+        visible: list[GateResponse] = []
+        for resp, g in zip(responses, gates):
+            pid = project_id_by_work_item.get(g.work_item_id)
+            if pid is not None:
+                if pid in accessible_project_ids:
+                    visible.append(resp)
+            elif is_known_project_agnostic_work_item_type(g.work_item_type):
+                visible.append(resp)
+            # else: project_id 해소 실패(work_item이 이 org에 없음 등) → fail-closed(제외).
+        return visible
 
     if not assigned_to_me:
         return responses
