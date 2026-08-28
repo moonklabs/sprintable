@@ -8,12 +8,23 @@
 # ```
 # reason        필수 — 사유(연결된 story 포함)
 # declared_by   필수 — 누가 판단했는지
-# until         필수 — 만료일. 지나면 가드가 FAIL한다(최대 30일, infra/check_serving_reality.py와 동일 상한)
+# until         필수(declared_mismatches·declared_indirect) — 만료일. 지나면 가드가 FAIL한다
+#               (최대 30일, infra/check_serving_reality.py와 동일 상한). declared_permanent_
+#               indirect는 예외 — 아래 그 섹션 설명 참고, until 불요.
 # ```
 #
 # ⭐until이 필수인 이유 — #2271/#2280 자체가 겪은 일이다. 알려진 4건을 여기 영구로 묻어두면
 # 다음에 같은 파일에 새 병이 또 생겨도 "어차피 여기 원래 빨갛잖아"로 안 보이게 된다.
 # 만료되면 가드가 다시 빨개지고, 그때 #2281 진행 상황을 다시 판단한다.
+#
+# ⚠️story #3168(2026-08-28, 페드루 PO 판정) — 위 논리가 declared_indirect의 **모든** 항목에
+# 똑같이 맞는 건 아니었다. 「알려진 버그를 다음에 다시 볼 것」(declared_mismatches류)과
+# 「코드 패턴 자체가 항상 간접(동적 dispatch)이라 영원히 이 모양일 것」은 다른 질문이다 —
+# 후자에 30일 시한을 계속 다는 건 이 파일이 막으려는 "연장 반복" 그 자체를 재생산했다(실제로
+# 이번에 mcp path 2건이 그 함정에 걸려 재확認만 반복하고 있었다). 대신 가드의 `unreadable`
+# 재스캔이 매 실행 자동으로 "이 (module, function) 여전히 M으로 잡히는가"를 검증하므로(코드가
+# 바뀌어 그 호출부가 사라지면 이 항목 자체가 조회 대상에서 빠진다) — 시한이 없어도 기계
+# 재검증은 이미 매번 일어난다. `declared_permanent_indirect`가 이 축이다.
 
 # story #2281(2026-07-28)에서 4건 전부 해소됨 — declared_mismatches가 빈 배열인 것 자체가
 # 그 증거다(가드가 그린으로 남아 있으면 해소된 것, 다시 불일치가 뜨면 회귀).
@@ -32,33 +43,39 @@ declared_mismatches: []
 
 # 간접경로 — 리터럴이 아니라 변수로 경로를 받는 공용 헬퍼. 정적 대조가 원천적으로 못 읽어서
 # "조용히 빠지는" 쪽이라 이름을 반드시 명시하고(M), 수기 추적 결과까지 여기 남긴다.
-declared_indirect:
+# ⛔이 섹션은 이제 "언젠가 값을 채우거나 코드를 고쳐 없앨 시한부 채무"만 담는다 — 구조적으로
+# 항상 간접인 패턴은 declared_permanent_indirect(아래)로 간다. 지금은 비어 있음(story #3168
+# 재분류로 기존 2건 전부 이동).
+declared_indirect: []
+
+# 영구 간접경로 — story #3168(2026-08-28, 페드루 PO 판정). declared_indirect와 선언 형식은
+# 같으나(module/function/reason/declared_by) until이 없다 — 코드 패턴 자체가 동적 dispatch라
+# «앞으로도 계속» 정적 대조가 못 읽을 것이 구조적으로 확定된 것들. 재검증은 가드의
+# `unreadable` 재스캔이 매 실행 기계적으로 담당(호출부가 사라지면 이 항목이 조회조차 안 됨)
+# — 그래서 30일 시한이 재확認 노동 이상의 안전판을 더하지 못한다.
+declared_permanent_indirect:
   - module: attachments
     function: upload_attachments
     reason: >-
-      경로를 인자로 받는 공용 업로드 헬퍼(client.post(upload_path, ...)). 호출부 3곳 수기 추적:
-      docs.py:164(/docs/{id}/attachments) · chat.py:121(/conversations/{id}/attachments) ·
-      stories.py:147(/stories/{id}/attachments) — 서버 라우트 3곳(stories.py:578/docs.py:967/
-      conversations.py:2162) 전부 실재 확認됨(2026-07-28). 2026-08-28 일괄 만료로 파이프라인
-      전면 차단 해소 — 실 triage는 story #3168로 이관.
+      경로를 인자로 받는 공용 업로드 헬퍼(client.post(upload_path, ...)) — 여러 리소스가
+      공유하는 만큼 인자가 항상 변수일 수밖에 없는 구조(literal로 못 박으면 헬퍼의 존재
+      이유가 사라진다). 호출부 3곳 수기 추적(story #3168, 2026-08-28 재검증 — 2026-07-28
+      최초 확認 이후 드리프트 0): docs.py(/docs/{id}/attachments) ·
+      chat.py(/conversations/{id}/attachments) · stories.py(/stories/{id}/attachments) —
+      서버 라우트 3곳(stories.py:1682·docs.py:1094·conversations.py:3092) 전부 실재
+      확認됨.
     declared_by: 까심 아르야
-    until: "2026-09-26"
   - module: chat
     function: _resolve_mention_content
     reason: >-
       경로를 `_MENTION_ENTITY_ENDPOINTS[mention.type].format(id=mention.id)`로 조립하는
-      client.get(endpoint) 호출(story #2283 후속 2026-07-28 doc→doc/story/epic 확장,
-      story #2294 B단계 2026-07-29 task/sprint/artifact/hypothesis 추가, story #2314
-      2026-07-29(3차) evidence 추가 — GET /api/v2/evidence/{id} 신설로 예전 「의도적 제외」
-      근거가 사라져 `_MENTION_ENDPOINT_KNOWN_GAP`도 함께 걷음, PR #2626). 호출부는
-      `mention.type`이 Literal로 검증되므로 실제로 조립되는 경로는 정확히 8가지 — 수기 추적:
-      /api/v2/docs/{id}(docs.py GET /{id}) · /api/v2/stories/{id}(stories.py:539 GET /{id}) ·
-      /api/v2/goals/{id}(goals.py:136 GET /{id}, main.py:296 prefix=/api/v2/goals 마운트) ·
-      /api/v2/tasks/{id}(tasks.py:127 GET /{id}) · /api/v2/sprints/{id}(sprints.py:163
-      GET /{id}) · /api/v2/visual-artifacts/{id}(visual_artifacts.py:214 GET /{id}) ·
-      /api/v2/hypotheses/{id}(hypotheses.py:159 GET /{hypothesis_id}) ·
-      /api/v2/evidence/{id}(evidence.py GET /{id}, story #2314 신설) — 여덟 다 실재
-      확認됨(2026-07-29). 2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는
-      story #3168로 이관.
+      client.get(endpoint) 호출 — `mention.type`이 Literal로 검증되는 유한 집합이라도, 조립
+      자체가 딕셔너리 룩업+.format()이라 정적 대조는 원천적으로 못 읽는 구조(리터럴로
+      못 박으면 신규 mention 타입 추가 때마다 이 함수를 고쳐야 하는 게 오히려 설계 후퇴).
+      실제로 조립되는 경로는 정확히 8가지 — 수기 추적(story #3168, 2026-08-28 재검증 —
+      2026-07-29 최초 확認 이후 매핑·서버라우트 드리프트 0): doc→/api/v2/docs/{id} ·
+      story→/api/v2/stories/{id} · epic→/api/v2/goals/{id} · task→/api/v2/tasks/{id} ·
+      sprint→/api/v2/sprints/{id} · artifact→/api/v2/visual-artifacts/{id} ·
+      hypothesis→/api/v2/hypotheses/{id} · evidence→/api/v2/evidence/{id} — 여덟 다
+      GET /{id} 라우트 실재 확認됨.
     declared_by: 디디 은와추쿠
-    until: "2026-09-26"
