@@ -73,6 +73,7 @@ async def get_billing_status(
     can_manage = caller_role in ("owner", "admin")
 
     if sub is None:
+        au_current, au_limit = await _get_au_usage(session, org_id, "free")
         return {
             "org_id": str(org_id),
             "tier": "free",
@@ -80,6 +81,9 @@ async def get_billing_status(
             "status": "active",
             "current_period_end": None,
             "can_manage": can_manage,
+            "au_current": au_current,
+            "au_limit": au_limit,
+            "au_paused": False,
         }
 
     # story #2892(P0, 실사고 2026-08-21) — org_subscription_checkout.py의 상태기계는
@@ -96,6 +100,7 @@ async def get_billing_status(
     # 같이 무의미해지므로 None). status 필드 자체는 원값 그대로 실어(FE가 pending 상태를
     # 구분해 "결제 진행/재시도 필요" 안내를 그릴 여지는 남긴다).
     effective_tier = sub.tier if sub.status == "active" else "free"
+    au_current, au_limit = await _get_au_usage(session, org_id, effective_tier)
     return {
         "org_id": str(org_id),
         "tier": effective_tier,
@@ -110,7 +115,41 @@ async def get_billing_status(
         # 그리려면 필요 — 이 엔드포인트가 지금까지 안 실었을 뿐, 값 자체는 이미 있었다.
         "pending_tier": sub.pending_tier,
         "pending_change_apply_at": sub.pending_change_apply_at.isoformat() if sub.pending_change_apply_at else None,
+        # story #3190(결제②-C 후속·FE) — au_warn_80/90_notified_at은 크론의 메일-dedup
+        # 마커일 뿐(값 자체를 노출 표면 판정에 재사용하면 크론 주기 지연만큼 배너가
+        # 늦게 뜬다) — FE는 storage-capacity-banner와 동형으로 au_current/au_limit에서
+        # 직접 pct를 계산한다. au_paused만은 예외로 캐시값 그대로 노출(그레이스 윈도우
+        # 계산까지 FE가 재현하면 이중 SSOT — check_au_not_paused()가 읽는 것과 동일 값).
+        "au_current": au_current,
+        "au_limit": au_limit,
+        "au_paused": sub.au_paused_at is not None,
     }
+
+
+async def _get_au_usage(
+    session: AsyncSession, org_id: uuid.UUID, tier: str
+) -> tuple[int, int | None]:
+    """이번 달 AU 사용량 + tier별 한도. cron.py `au_usage_warn`과 동일 조회 규율
+    (offering_versions DISTINCT ON tier·usage_meters current period) — 크론이 쓰는
+    수치와 FE가 보는 수치가 갈라지면(split-brain) 배너 임계값이 실제 집행 임계값과
+    어긋난다."""
+    now = datetime.now(timezone.utc)
+    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    au_limit = (await session.execute(
+        text(
+            "SELECT au_limit FROM offering_versions "
+            "WHERE tier = :tier AND effective_to IS NULL ORDER BY currency ASC LIMIT 1"
+        ),
+        {"tier": tier},
+    )).scalar()
+    au_current = int((await session.execute(
+        text(
+            "SELECT current_value FROM usage_meters WHERE org_id = :oid "
+            "AND meter_type = 'automation_units' AND period_start = :ps"
+        ),
+        {"oid": str(org_id), "ps": period_start},
+    )).scalar() or 0)
+    return au_current, au_limit
 
 
 @router.get("/plans")
