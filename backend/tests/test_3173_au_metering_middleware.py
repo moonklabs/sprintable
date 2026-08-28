@@ -1,8 +1,9 @@
 """story #3173(결제②-B) — AUMeteringMiddleware 판정 로직 회귀(실 DB 불요, record_au_usage
 자체는 모킹). 미들웨어가 «언제 세고 언제 안 세는지»·«응답 경로에서 분리됐는지»를 고정한다.
 
-⚠️페드루 PO 리뷰(PR#3579, 2026-08-28) — 계측 DB 왕복은 `asyncio.create_task`로 응답
-반환 밖에 던져진다(fire-and-forget, §6 설계). 그래서 여기는 sync `TestClient`가 아니라
+⚠️페드루 PO 리뷰(PR#3579, 2026-08-28) — 계측 DB 왕복은 `pg_pubsub.fire_and_forget()`
+(canonical GC-safe 헬퍼, main.py lifespan의 drain과 이미 연동)로 응답 반환 밖에
+던져진다(§6 설계). 그래서 여기는 sync `TestClient`가 아니라
 `httpx.AsyncClient`+`ASGITransport`로 같은 이벤트루프를 유지하고, 매 요청 뒤
 `_drain_background_tasks()`로 스케줄된 태스크가 실제로 끝나길 기다린 다음에야 assert한다
 — 안 그러면 백그라운드 태스크가 돌기도 전에 테스트 함수가 끝나 항상 거짓양성(비어있음)이 뜬다."""
@@ -107,11 +108,15 @@ async def test_metering_is_scheduled_as_background_task_not_awaited_inline(monke
 
 
 @pytest.mark.anyio
-async def test_spawned_task_is_strongly_referenced_until_done(monkeypatch):
-    """페드루 PO 리뷰(PR#3579) — `asyncio.create_task()`의 반환값을 안 잡아두면 이벤트루프가
-    약참조로만 들고 있어 완료 前 GC될 수 있다(ruff RUF006 클래스). `_spawn_background()`가
-    모듈 레벨 set에 강한 참조를 잡아뒀다가 완료 시에만 비우는지 직접 확認한다."""
+async def test_metering_task_uses_canonical_fire_and_forget(monkeypatch):
+    """페드루 PO 자인(PR#3579, 카디르 QA 적발) — 최초 델타가 GC 조기수거 처방을 모듈
+    로컬 `asyncio.create_task`+새 set으로 직접 재구현했다가, 이미 레포에 있던 canonical
+    헬퍼 `pg_pubsub.fire_and_forget()`(main.py lifespan의 `drain_background_tasks()`와
+    이미 연동된 바로 그 강한참조 세트)를 재사용하도록 정정됐다. 이 테스트는 au_metering이
+    독자적인 태스크 세트를 다시 만들지 않고 `pg_pubsub`의 세트를 그대로 쓰는지 직접
+    확認한다 — 재발 시(다시 로컬 set을 만들면) 이 assert가 곧바로 잡는다."""
     import app.services.au_metering as au_metering
+    from app.services import pg_pubsub
 
     release = asyncio.Event()
     started = asyncio.Event()
@@ -122,14 +127,16 @@ async def test_spawned_task_is_strongly_referenced_until_done(monkeypatch):
 
     monkeypatch.setattr(au_metering, "record_au_usage", AsyncMock(side_effect=_slow))
 
-    assert len(au_metering._background_tasks) == 0
-    au_metering._spawn_background(au_metering._record_au_usage_safe(uuid.uuid4(), 1))
+    before = len(pg_pubsub._background_tasks)
+    au_metering.fire_and_forget(au_metering._record_au_usage_safe(uuid.uuid4(), 1))
     await started.wait()
-    assert len(au_metering._background_tasks) == 1, "spawn 직후엔 강한 참조가 set에 있어야 함"
+    assert len(pg_pubsub._background_tasks) == before + 1, (
+        "au_metering이 pg_pubsub의 canonical 강한참조 세트를 쓰고 있어야 함"
+    )
 
     release.set()
     await _drain_background_tasks()
-    assert len(au_metering._background_tasks) == 0, "완료 후엔 done_callback이 discard해야 함"
+    assert len(pg_pubsub._background_tasks) == before, "완료 후엔 done_callback이 discard해야 함"
 
 
 @pytest.mark.anyio

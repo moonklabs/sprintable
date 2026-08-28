@@ -209,9 +209,10 @@ async def test_send_phase_holds_no_connection_from_fetch_phase(monkeypatch):
 
         probe_succeeded = {"value": False}
 
-        async def _send_probe(targets, event, data):
-            # send가 실행되는 이 시점에 fetch 단계 커넥션이 반납돼 있어야, pool_size=1인
-            # 이 엔진으로 새 세션을 여는 이 호출이 안 멈추고 통과한다.
+        async def _send_probe(targets, event, data, org_id=None):
+            # story #3173 — _send_webhook_targets가 이제 4번째 인자(org_id, AU 계측용)를
+            # 받는다. send가 실행되는 이 시점에 fetch 단계 커넥션이 반납돼 있어야,
+            # pool_size=1인 이 엔진으로 새 세션을 여는 이 호출이 안 멈추고 통과한다.
             async with AsyncSession(engine) as probe_session:
                 await probe_session.execute(select(DeliveryJob.id).limit(1))
             probe_succeeded["value"] = True

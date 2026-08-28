@@ -22,7 +22,6 @@ story #3173 본문 "필수 보완" 조건 참고):
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -35,6 +34,7 @@ from starlette.types import ASGIApp
 
 from app.core.database import async_session_factory
 from app.models.usage_meter import AU_WEIGHTS
+from app.services.pg_pubsub import fire_and_forget
 
 logger = logging.getLogger(__name__)
 
@@ -127,27 +127,13 @@ def _au_weight_for(method: str, response: Response) -> int:
 
 
 async def _record_au_usage_safe(org_id: uuid.UUID, delta: int) -> None:
-    """`asyncio.create_task`로 던져지는 실제 DB 왕복 — 이 코루틴 자신이 예외를 전부
-    삼켜야 한다(안 그러면 "Task exception was never retrieved" — 아무도 안 기다리는
+    """`pg_pubsub.fire_and_forget()`로 던져지는 실제 DB 왕복 — 이 코루틴 자신이 예외를
+    전부 삼켜야 한다(안 그러면 "Task exception was never retrieved" — 아무도 안 기다리는
     태스크의 예외는 로그 없이 사라지거나 인터프리터 경고로만 남는다)."""
     try:
         await record_au_usage(org_id, delta)
     except Exception:
         logger.error("AU metering failed org_id=%s delta=%s", org_id, delta, exc_info=True)
-
-
-# 페드루 PO 리뷰(PR#3579, 2026-08-28) — `asyncio.create_task()`의 반환값을 아무 데도 안
-# 잡아두면 이벤트루프가 그 태스크를 약참조로만 들고 있어, 완료 前에 GC될 수 있다(파이썬
-# 공식 문서 명시 경고 — ruff RUF006이 잡는 클래스). 이 경로에서 그게 터지면 로그 한 줄
-# 없는 무흔적 유실이라 "조용한 실패 금지" 원칙에 정면으로 걸린다 — 표준 처방(강한 참조
-# set + 완료 시 자기 자신을 discard)으로 막는다.
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_background(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 class AUMeteringMiddleware(BaseHTTPMiddleware):
@@ -163,9 +149,16 @@ class AUMeteringMiddleware(BaseHTTPMiddleware):
     어긋나게 **모든 에이전트 요청**에 계측 DB 왕복을 응답 임계경로에 직렬로 얹고 있었다 —
     평시엔 무해하지만 같은 org 동시 버스트 시 advisory lock 직렬화가 꼬리 지연을 문다. 지금은
     「무엇을 셀지」(동기·순수 판단, `_plan_metering`/`_au_weight_for` — I/O 없음)와 「실제로
-    쓰는 것」(`_record_au_usage_safe`, DB 왕복)을 분리해, 후자만 `_spawn_background()`
-    (강한 참조 유지 — 아래 참고)로 응답 반환 밖으로 던진다 — 클라이언트는 계측을
-    기다리지 않는다."""
+    쓰는 것」(`_record_au_usage_safe`, DB 왕복)을 분리해, 후자만 응답 반환 밖으로 던진다.
+
+    ⛔재구현 정정(페드루 PO 자인, 2026-08-28, 카디르 QA 적발) — 위 분리 자체는 맞았으나
+    최초 델타가 `asyncio.create_task` + 모듈 로컬 `set`을 직접 새로 짰다(리뷰 지시가 grep
+    없이 "3줄" 처방을 준 것이 원인). 이 레포엔 이미 정확히 이 문제(fire-and-forget 태스크
+    GC 조기수거)를 잡은 canonical 헬퍼 `pg_pubsub.fire_and_forget()`이 있고, 그 모듈의
+    `drain_background_tasks()`가 main.py lifespan shutdown에 이미 배선돼 있다 — 로컬
+    set을 따로 만들면 그 drain 대상에서 빠져 graceful shutdown 시 이미 닫힌 커넥션
+    풀을 참조하는 위험을 새로 만든다(test_no_unreferenced_fire_and_forget.py가 적발).
+    지금은 `fire_and_forget()`을 그대로 재사용 — 새 세트·새 drain 로직 0."""
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
@@ -175,7 +168,7 @@ class AUMeteringMiddleware(BaseHTTPMiddleware):
         try:
             org_id, weight = self._plan_metering(request, response)
             if org_id is not None and weight > 0:
-                _spawn_background(_record_au_usage_safe(org_id, weight))
+                fire_and_forget(_record_au_usage_safe(org_id, weight))
         except Exception:
             logger.error(
                 "AU metering planning failed path=%s method=%s", request.url.path, request.method,
