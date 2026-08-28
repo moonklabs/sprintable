@@ -492,7 +492,18 @@ steps:
       # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(story 57526f21) — APPLE_TEAM_ID·
       # MOBILE_APP_LINK_ORIGIN 없으면 /.well-known/apple-app-site-association 라우트가
       # 설계대로 500(fail-loud)을 낸다. 같은 --update-env-vars에 동반(additive, 기존 env 보존).
-      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN}
+      # story #3168(2026-08-28, 페드루 PO 실측) — APP_BASE_URL/NEXT_PUBLIC_APP_URL 둘 다
+      # 이 스텝에 한 번도 배선된 적이 없어(순수 수동 category C) dev="NEXT_PUBLIC_APP_URL만
+      # 유"·prod="APP_BASE_URL만 유"로 환경마다 정반대 절반만 우연히 채워져 있었다 —
+      # apps/web/src/lib/auth/cookies.ts의 `APP_BASE_URL ?? NEXT_PUBLIC_APP_URL` 폴백
+      # 사슬 덕에 지금까지는 두 환경 다 결과적으로 동작해왔을 뿐(secure 쿠키 판정용),
+      # prod의 APP_BASE_URL은 수동 주입값이라 다음 전체 env 교체 배포가 조용히 지울 수
+      # 있는 시한 위험이었다. `_NEXT_PUBLIC_APP_URL`(이미 dev="https://dev-app.sprintable.ai"·
+      # prod="https://app.sprintable.ai"로 정확히 분기돼 있음, GHA cloud-build.yml 참고)를
+      # 재사용해 두 키 다 이 스텝에서 명시 배선 — 폴백 우선순위상 APP_BASE_URL이 먼저
+      # 읽히므로 그 값을 정본으로 통일하고 NEXT_PUBLIC_APP_URL은 이미 그 값을 쓰던 dev의
+      # 하위호환(레거시 Amplify override 축, app-url.ts 주석 참고)으로 같이 채운다.
+      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN},APP_BASE_URL=${_NEXT_PUBLIC_APP_URL},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}
       - --quiet
     waitFor: [push-frontend]
 
