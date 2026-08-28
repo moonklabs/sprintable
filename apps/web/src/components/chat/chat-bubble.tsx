@@ -76,9 +76,11 @@ interface ChatBubbleProps {
    * 동일 패턴). 생략하면(undefined) 이벤트 메시지도 BE 제네릭 폴백 텍스트로 안전하게 그려진다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
   /** story #5ace2e84 — chat-view.tsx가 대화 단위로 배치조회한 gate_id→상태 캐시(entityStatusByKey와
-   * 동일 물려받기 패턴, use-gate-batch.ts). ApprovalRequestCard의 initialGate로 그대로
-   * 넘어가 독립 fetchGate() N+1을 없앤다. 생략하면(undefined) 카드가 기존처럼 개별 fetch로
-   * 안전 폴백(회귀 0). */
+   * 동일 물려받기 패턴, use-gate-batch.ts). ApprovalRequestCard에 맵 «전체»를 그대로 넘긴다
+   * (단건 lookup을 여기서 미리 뽑지 않는다 — 그러면 "항목 없음"과 "맵 자체가 없음"이
+   * undefined 하나로 뭉개져 첫 마운트 레이스가 재발한다, approval-request-card.tsx의
+   * gateByKey prop 문서 참고). 생략하면(undefined) 카드가 기존처럼 개별 fetch로 안전 폴백
+   * (회귀 0). */
   gateByKey?: Record<string, CardState>;
   /** story #2766(레인 A) — ChatView가 물려주면 doc 임베드 미리보기·비-이미지 첨부 클릭이
    * 중앙 모달/새 탭 대신 우측 ReadingPanel을 연다. 생략하면(undefined, ThreadPanel 등 아직
@@ -590,7 +592,7 @@ export function ChatBubble({
             <ApprovalRequestCard
               target={approvalTarget}
               eventDefinitionsByKey={eventDefinitionsByKey}
-              initialGate={gateByKey?.[approvalTarget.gate_id]}
+              gateByKey={gateByKey}
             />
           ) : eventTarget && eventBlockTemplate ? (
             <EventBlockCard
