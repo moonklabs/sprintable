@@ -107,6 +107,32 @@ async def test_metering_is_scheduled_as_background_task_not_awaited_inline(monke
 
 
 @pytest.mark.anyio
+async def test_spawned_task_is_strongly_referenced_until_done(monkeypatch):
+    """페드루 PO 리뷰(PR#3579) — `asyncio.create_task()`의 반환값을 안 잡아두면 이벤트루프가
+    약참조로만 들고 있어 완료 前 GC될 수 있다(ruff RUF006 클래스). `_spawn_background()`가
+    모듈 레벨 set에 강한 참조를 잡아뒀다가 완료 시에만 비우는지 직접 확認한다."""
+    import app.services.au_metering as au_metering
+
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def _slow(org_id, delta):
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(au_metering, "record_au_usage", AsyncMock(side_effect=_slow))
+
+    assert len(au_metering._background_tasks) == 0
+    au_metering._spawn_background(au_metering._record_au_usage_safe(uuid.uuid4(), 1))
+    await started.wait()
+    assert len(au_metering._background_tasks) == 1, "spawn 직후엔 강한 참조가 set에 있어야 함"
+
+    release.set()
+    await _drain_background_tasks()
+    assert len(au_metering._background_tasks) == 0, "완료 후엔 done_callback이 discard해야 함"
+
+
+@pytest.mark.anyio
 async def test_agent_read_success_records_one_au(monkeypatch):
     client, recorded = _build_app(monkeypatch, au_actor="agent")
     async with client:

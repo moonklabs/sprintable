@@ -136,6 +136,20 @@ async def _record_au_usage_safe(org_id: uuid.UUID, delta: int) -> None:
         logger.error("AU metering failed org_id=%s delta=%s", org_id, delta, exc_info=True)
 
 
+# 페드루 PO 리뷰(PR#3579, 2026-08-28) — `asyncio.create_task()`의 반환값을 아무 데도 안
+# 잡아두면 이벤트루프가 그 태스크를 약참조로만 들고 있어, 완료 前에 GC될 수 있다(파이썬
+# 공식 문서 명시 경고 — ruff RUF006이 잡는 클래스). 이 경로에서 그게 터지면 로그 한 줄
+# 없는 무흔적 유실이라 "조용한 실패 금지" 원칙에 정면으로 걸린다 — 표준 처방(강한 참조
+# set + 완료 시 자기 자신을 discard)으로 막는다.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 class AUMeteringMiddleware(BaseHTTPMiddleware):
     """story #3173 — 응답 완료 후 에이전트 트래픽만 골라 AU를 usage_meters에 쌓는다.
 
@@ -148,9 +162,10 @@ class AUMeteringMiddleware(BaseHTTPMiddleware):
     advisory lock 포함)를 `dispatch()` 안에서 inline `await`해, 설계(§6 "fire-and-forget")와
     어긋나게 **모든 에이전트 요청**에 계측 DB 왕복을 응답 임계경로에 직렬로 얹고 있었다 —
     평시엔 무해하지만 같은 org 동시 버스트 시 advisory lock 직렬화가 꼬리 지연을 문다. 지금은
-    「무엇을 셀지」(동기·순수 판단, `_should_meter`/`_au_weight_for` — I/O 없음)와 「실제로
-    쓰는 것」(`_record_au_usage_safe`, DB 왕복)을 분리해, 후자만 `asyncio.create_task`로
-    응답 반환 밖으로 던진다 — 클라이언트는 계측을 기다리지 않는다."""
+    「무엇을 셀지」(동기·순수 판단, `_plan_metering`/`_au_weight_for` — I/O 없음)와 「실제로
+    쓰는 것」(`_record_au_usage_safe`, DB 왕복)을 분리해, 후자만 `_spawn_background()`
+    (강한 참조 유지 — 아래 참고)로 응답 반환 밖으로 던진다 — 클라이언트는 계측을
+    기다리지 않는다."""
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
@@ -160,7 +175,7 @@ class AUMeteringMiddleware(BaseHTTPMiddleware):
         try:
             org_id, weight = self._plan_metering(request, response)
             if org_id is not None and weight > 0:
-                asyncio.create_task(_record_au_usage_safe(org_id, weight))
+                _spawn_background(_record_au_usage_safe(org_id, weight))
         except Exception:
             logger.error(
                 "AU metering planning failed path=%s method=%s", request.url.path, request.method,
