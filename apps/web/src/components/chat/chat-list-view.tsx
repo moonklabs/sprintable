@@ -13,6 +13,7 @@ import { queuePendingToast } from './cross-project-toast-provider';
 import { Avatar } from '@/components/shared/avatar';
 import { Button } from '@/components/ui/button';
 import { NowStrip } from './now-strip';
+import { PulseCard } from './pulse-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -311,6 +312,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
 
+  // story #3178(S3b) AC2 — 「지금」 스트립 vs pulse 카드 합산 불변식(최대 1 expand). 단일
+  // 값이라 구조적으로 둘이 동시에 펼쳐질 수 없다(하나를 펼치면 다른 값으로 덮어써 자동 접힘).
+  const [expandedSurface, setExpandedSurface] = useState<'strip' | 'pulse' | null>(null);
+
   // story #2168 PR-② — 프로젝트 밖 최근 대화(최대 5개).
   const [outsideProjectConvs, setOutsideProjectConvs] = useState<OutsideProjectConversation[]>([]);
 
@@ -571,10 +576,19 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   return (
     <div className="flex h-full flex-col">
-      {/* story #3177(S3a) — chat 구심점 최상단 고정 「지금」 스트립(대화 스크롤과 분리,
-          훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게 항상 상단 고정. */}
-      <div className="px-2 pt-2">
-        <NowStrip />
+      {/* story #3177(S3a)+#3178(S3b) — chat 구심점 최상단 고정 「지금」 스트립+pulse 카드
+          (대화 스크롤과 분리, 훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게
+          항상 상단 고정. AC2 합산 불변식(#3178) — expandedSurface 하나로 둘 중 최대 1개만
+          펼쳐지게 끌어올린다(하나를 펼치면 다른 하나는 자동 접힘). */}
+      <div className="space-y-2 px-2 pt-2">
+        <NowStrip
+          expanded={expandedSurface === 'strip'}
+          onExpandedChange={(v) => setExpandedSurface(v ? 'strip' : null)}
+        />
+        <PulseCard
+          expanded={expandedSurface === 'pulse'}
+          onExpandedChange={(v) => setExpandedSurface(v ? 'pulse' : null)}
+        />
       </div>
       {isAdminOrOwner ? (
         <Tabs defaultValue="my" onValueChange={(v) => { if (v === 'agent') loadAgentConversationsOnce(); }} className="flex min-h-0 flex-1 flex-col">

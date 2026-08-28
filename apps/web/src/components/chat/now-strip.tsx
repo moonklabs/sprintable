@@ -101,13 +101,23 @@ export interface NowStripProps {
   /** agent_stuck 라벨용(action-zone.tsx와 동일 계약) — 없으면 attentionEntityLabel 자체의
    * entity_type 폴백(no-fiction)으로 떨어진다, 필수 아님. */
   resolveName?: (id: string | null | undefined) => string | null;
+  /** story #3178(S3b) AC2 — 「지금」 스트립+pulse 카드 합산 불변식(최대 1 expand)을 위해
+   * 부모(chat-list-view.tsx)가 펼침 상태를 끌어올려 통제할 수 있게 한다. 둘 다 생략하면
+   * (S3a 단독 시절과 동일) 내부 state로 자율 동작 — 하이브리드 controlled/uncontrolled. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
-export function NowStrip({ resolveName }: NowStripProps) {
+export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange }: NowStripProps) {
   const t = useTranslations('chats');
   const tDashboard = useTranslations('dashboard');
   const [items, setItems] = useState<AttentionItem[] | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expandedState, setExpandedState] = useState(false);
+  const expanded = expandedProp ?? expandedState;
+  const setExpanded = useCallback(
+    (next: boolean) => { if (onExpandedChange) onExpandedChange(next); else setExpandedState(next); },
+    [onExpandedChange],
+  );
 
   const load = useCallback(async () => {
     try {
@@ -143,7 +153,7 @@ export function NowStrip({ resolveName }: NowStripProps) {
       <Button
         type="button"
         variant="ghost"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded(!expanded)}
         className="h-auto w-full items-center justify-start gap-2.5 rounded-b-none px-3 py-2.5 text-left font-normal hover:bg-muted/40"
         aria-expanded={expanded}
       >
