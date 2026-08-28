@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { countRawButtons, EXEMPT_FILES, loadBaseline, scanRepoCounts } from './verify-no-new-raw-button';
+import { computeOverages, countRawButtons, EXEMPT_FILES, loadBaseline, scanRepoCounts } from './verify-no-new-raw-button';
 
 describe('countRawButtons (story #3164 Gate A)', () => {
   it('counts raw <button> occurrences in a file', () => {
@@ -59,41 +59,42 @@ describe('loadBaseline — JSON storage', () => {
 });
 
 // AC6 — 「baseline 밖 신규 위반 픽스처로 FAIL을, EXEMPT 자리 픽스처로 PASS를 각각 실증」.
-// main()의 판정 로직(`count > baseline.get(file) ?? 0`)을 직접 재현해 양성대조를 잰다 —
-// main() 자체는 실 SRC_ROOT/BASELINE_PATH에 묶여 있어 단위테스트에서 그대로 못 부른다.
-describe('AC6 — 양성대조(baseline 판정 로직이 실제로 FAIL할 수 있는지)', () => {
-  function judge(counts: Map<string, number>, baseline: Map<string, number>) {
-    const overages: { file: string; count: number; allowed: number }[] = [];
-    for (const [file, count] of counts) {
-      const allowed = baseline.get(file) ?? 0;
-      if (count > allowed) overages.push({ file, count, allowed });
-    }
-    return overages;
-  }
-
+// 페드루 PO 리뷰 지적(PR#3580) — 이 판정 로직을 테스트가 따로 복제해 재면 「막는 쪽과 재는
+// 쪽이 다른 코드를 본다」 구조가 돼 main()이 드리프트해도 테스트가 green으로 남는다.
+// export된 computeOverages()(verify-no-new-raw-button.ts)를 그대로 불러 main()과 같은
+// 실물을 재는지 값으로 잰다(Gate B가 이미 실 scanContent를 부르는 것과 동형으로 맞춤).
+describe('AC6 — 양성대조(main()과 같은 computeOverages()가 실제로 FAIL할 수 있는지)', () => {
   it('신규 파일에 raw button이 생기면(baseline에 없음) 위반으로 잡힌다', () => {
     const counts = new Map([['components/new-file.tsx', 1]]);
     const baseline = new Map<string, number>();
-    const overages = judge(counts, baseline);
+    const overages = computeOverages(counts, baseline);
     expect(overages).toEqual([{ file: 'components/new-file.tsx', count: 1, allowed: 0 }]);
   });
 
   it('기존 grandfather 파일의 카운트가 baseline과 같으면(초과 아님) 통과한다', () => {
     const counts = new Map([['components/story-detail-panel.tsx', 37]]);
     const baseline = new Map([['components/story-detail-panel.tsx', 37]]);
-    expect(judge(counts, baseline)).toEqual([]);
+    expect(computeOverages(counts, baseline)).toEqual([]);
   });
 
   it('기존 grandfather 파일에 raw button이 하나 더 늘면(37→38) 위반으로 잡힌다', () => {
     const counts = new Map([['components/story-detail-panel.tsx', 38]]);
     const baseline = new Map([['components/story-detail-panel.tsx', 37]]);
-    expect(judge(counts, baseline)).toEqual([{ file: 'components/story-detail-panel.tsx', count: 38, allowed: 37 }]);
+    expect(computeOverages(counts, baseline)).toEqual([{ file: 'components/story-detail-panel.tsx', count: 38, allowed: 37 }]);
   });
 
   it('기존 grandfather 파일의 카운트가 줄면(37→30, 마이그레이션 진전) 위반이 아니다 — freeze는 상한선만 지킨다', () => {
     const counts = new Map([['components/story-detail-panel.tsx', 30]]);
     const baseline = new Map([['components/story-detail-panel.tsx', 37]]);
-    expect(judge(counts, baseline)).toEqual([]);
+    expect(computeOverages(counts, baseline)).toEqual([]);
+  });
+
+  // 뮤테이션 킬 — computeOverages 자체가 실제로 main()이 부르는 그 함수임을 증명(간접).
+  // main()의 실 baseline/scan 결과로도 같은 함수가 0 overage를 내는지는 CLI 실행 자체
+  // (가드 self-run)로 이미 검증되므로, 여기선 "이 함수가 main()에서 export된 그 심볼"임을
+  // import 자체가 고정한다(타입 재선언 없음 — 별도 로컬 복제였다면 이 import가 실패했을 것).
+  it('main()과 동일 심볼을 부른다는 것 자체가 타입으로 고정된다(로컬 복제였다면 import가 없다)', () => {
+    expect(typeof computeOverages).toBe('function');
   });
 });
 

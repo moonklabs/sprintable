@@ -108,6 +108,25 @@ export function loadBaseline(filePath: string): Map<string, number> {
   }
 }
 
+export interface Overage {
+  file: string;
+  count: number;
+  allowed: number;
+}
+
+// 페드루 PO 리뷰 지적(PR#3580) — main()의 초과판정 루프를 테스트가 따로 복제(judge())해
+// 재고 있으면 「막는 쪽과 재는 쪽이 다른 코드를 본다」 구조가 돼, main() 로직이 드리프트해도
+// 테스트는 계속 green으로 남는다(Gate B는 이미 실 scanContent를 부르므로 이 함정이 없었다).
+// export해 main()과 .test.ts가 같은 실물을 부르게 한다.
+export function computeOverages(counts: Map<string, number>, baseline: Map<string, number>): Overage[] {
+  const overages: Overage[] = [];
+  for (const [file, count] of counts) {
+    const allowed = baseline.get(file) ?? 0;
+    if (count > allowed) overages.push({ file, count, allowed });
+  }
+  return overages;
+}
+
 function main(): number {
   let counts: Map<string, number>;
   try {
@@ -124,11 +143,7 @@ function main(): number {
       `baseline(grandfather) ${baseline.size}개 파일`,
   );
 
-  const overages: { file: string; count: number; allowed: number }[] = [];
-  for (const [file, count] of counts) {
-    const allowed = baseline.get(file) ?? 0;
-    if (count > allowed) overages.push({ file, count, allowed });
-  }
+  const overages = computeOverages(counts, baseline);
 
   const staleBaseline = [...baseline.keys()].filter((f) => !counts.has(f));
   if (staleBaseline.length > 0) {
