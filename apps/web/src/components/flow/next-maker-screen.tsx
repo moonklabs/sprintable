@@ -30,6 +30,12 @@ interface NextMakerScreenProps {
    * 이 목표가 30일 무변화로 접힘 대상이었어도 강제로 펼침(카드 폭발 회피를 «구조»로 —
    * 다른 레인은 안 건드리고 이 레인 «하나»만 예외로 편다) + 그 레인으로 스크롤+하이라이트. */
   focusGoalId?: string | null;
+  /** story #3169(P2·prod 실사용) — flow-client.tsx가 FlowNodeStoryPanel의 삭제 성공을 받아
+   * 올리는 로컬 카운터(bumpOrgSyncVersion과 별개 — 그건 "org 전환 직후" 전용 계약이라 이
+   * 페이지 스코프 이벤트에 재사용하지 않는다, orgSyncVersion 사용 부분 참고). 값이 바뀔
+   * 때마다 아래 로드 effect가 재요청돼 방금 삭제된 스토리가 노드에서 빠진다. 생략하면
+   * (undefined) 기존 동작 그대로(회귀 0). */
+  refetchToken?: number;
 }
 
 interface Envelope<T> { data: T; meta?: unknown }
@@ -129,7 +135,7 @@ type LoadState =
  *
  * ⛔done 스토리는 이 화면에서 fetch하지 않는다(goals.total_stories/done_stories로 충분).
  */
-export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null, focusGoalId = null }: NextMakerScreenProps) {
+export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null, focusGoalId = null, refetchToken = 0 }: NextMakerScreenProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 이
@@ -189,7 +195,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId, orgSyncVersion]);
+  }, [projectId, orgSyncVersion, refetchToken]);
 
   // 까심 QA REQUEST_CHANGES(2026-07-31) 후속 — 「다음으로」는 backlog→ready-for-dev로 상태를
   // 바꾸는 동작이라 되돌릴 길이 없으면 누르기가 무서워진다. 되돌리기 자체도 진짜 서버 PATCH이지
