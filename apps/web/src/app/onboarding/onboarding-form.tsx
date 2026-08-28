@@ -159,12 +159,12 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     }
   };
 
-  // E-ONB S5: 온보딩 완료 후 /dashboard 이동 전 토큰 refresh.
+  // E-ONB S5: 온보딩 완료 후 홈(chat, story #3179 S3c) 이동 전 토큰 refresh.
   // register JWT는 app_metadata 비어(org_id 없음) — TeamMember는 project 생성 시 최초 생기므로,
   // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
-  const finishToDashboard = async () => {
+  const finishToHome = async () => {
     await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-    window.location.href = '/dashboard';
+    window.location.href = '/chats';
   };
 
   const handleCreateProject = async () => {
@@ -216,7 +216,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       }).catch(() => null);
 
       if (initialStep === 'project') {
-        await finishToDashboard();
+        await finishToHome();
         return;
       }
       setStep('agent');
@@ -274,7 +274,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   };
 
   const handleFinish = () => {
-    void finishToDashboard();
+    void finishToHome();
   };
 
   return (

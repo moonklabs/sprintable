@@ -40,7 +40,8 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
         setResult({ type: 'error', text: inviteErrorMessage(tInvite, json.error?.code, 'acceptFailed') });
       } else {
         setResult({ type: 'success', text: `${tInvite('success')} ${tInvite('redirecting')}` });
-        setTimeout(() => { window.location.href = '/dashboard'; }, 1500);
+        // story #3179(S3c) 후속(카디르 QA 발견) — /dashboard 폐합, 홈=chat 재조준.
+        setTimeout(() => { window.location.href = '/chats'; }, 1500);
       }
     } finally {
       setAccepting(false);

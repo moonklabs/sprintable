@@ -127,8 +127,8 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
 
   it('create-agent 실패 — raw/하드코딩 영문 대신 번역 문구(#2484)', async () => {
     // initialStep="project" prop은 컴포넌트 자체 로직상 "새로고침 재개"를 뜻해 프로젝트
-    // 생성 성공 時 agent 단계로 안 가고 바로 대시보드로 finishToDashboard()한다 — agent
-    // 단계에 실제 projectId를 갖고 도달하려면 org→project 전 과정을 그대로 밟아야 한다.
+    // 생성 성공 時 agent 단계로 안 가고 바로 홈으로 finishToHome()한다(story #3179 S3c) —
+    // agent 단계에 실제 projectId를 갖고 도달하려면 org→project 전 과정을 그대로 밟아야 한다.
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
       if (url === '/api/organizations') return { ok: true, json: async () => ({ data: { id: 'org-1' } }) };
