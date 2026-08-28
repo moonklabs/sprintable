@@ -7,7 +7,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import and_, func, select, text, tuple_, update
 from sqlalchemy.exc import IntegrityError
@@ -1852,6 +1852,7 @@ async def list_messages(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    response: Response = None,  # type: ignore[assignment]
 ) -> dict:
     """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션.
 
@@ -1907,6 +1908,9 @@ async def list_messages(
         for m in msgs
     ]
 
+    # story #3176 선행조건②(읽기 100개 초과 AU 계측): X-Result-Count = 실제 반환 건수.
+    if response is not None:
+        response.headers["X-Result-Count"] = str(len(data))
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
 
 

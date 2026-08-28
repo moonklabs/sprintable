@@ -222,6 +222,8 @@ async def list_stories(
         except ValueError:
             raise HTTPException(status_code=422, detail="invalid story id in ids")
         if not story_ids:
+            if response is not None:
+                response.headers["X-Result-Count"] = "0"
             return []
         if len(story_ids) > 200:  # 워크플로우-라인 배치와 동형 방어(과대 IN 금지).
             raise HTTPException(status_code=422, detail="too many ids (max 200)")
@@ -236,6 +238,8 @@ async def list_stories(
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
         await _attach_trust_stage(repo.session, repo.org_id, stories)
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(stories))
         return [StoryResponse.model_validate(s) for s in stories]
 
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
@@ -264,6 +268,7 @@ async def list_stories(
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
+            response.headers["X-Result-Count"] = str(len(stories))
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
@@ -290,6 +295,7 @@ async def list_stories(
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
+            response.headers["X-Result-Count"] = str(len(stories))
             if stories:
                 response.headers["X-Next-Cursor"] = stories[-1].created_at.isoformat()
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
@@ -323,6 +329,7 @@ async def list_stories(
     )
     if response is not None:
         response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Result-Count"] = str(len(stories))
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
     # ⛔일반 함정(2026-07-29, PO 지적 — "측정 경로 ≠ 실행 경로"): `Query(default=None, ...)`
@@ -1834,7 +1841,18 @@ async def bulk_update_stories(
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
+    response: Response = None,  # type: ignore[assignment]
 ) -> list[StoryResponse]:
+    # story #3176 선행조건①(payload-배치 AU 계측): X-Affected-Entities = len(updated). 이
+    # updated는 "찾았고+project 접근권 통과한" 항목 전부(게이트 차단으로 실제 필드변경은 스킵된
+    # item도 포함 — goals.py bulk_update_goals와 동형 정의) — AU는 처리 부하 과금이라 "실제로
+    # 값이 달라졌는지"가 아니라 "서버가 실제로 처리한 대상 수"가 맞는 축. not-found/미접근으로
+    # continue된 item(요청엔 있었지만 처리 안 됨)은 애초에 여기 안 들어와 과다계상 안 됨.
+    # AUMeteringMiddleware가 이 헤더를 읽어 5×N AU로 계상(au_metering.py 참고). ⚠️response를
+    # 맨 끝 optional kwarg로 둔다 — 기존 직접호출 테스트 다수(test_2131_*·test_2172_*·
+    # test_2521_*·test_stories_bulk_body_contract.py)가 `(payload, MagicMock(), db, repo,
+    # auth=...)` 형태로 위치인자를 쓴다 — 중간에 필수 위치인자를 끼워 넣으면 그 뒤 인자들이
+    # 전부 한 칸씩 밀려 조용히 잘못 바인딩된다(list_stories의 response=None 패턴과 동형 이유).
     # #2176 AC1: 요청 수신 시각 — emit_story_status_changed에 그대로 넘겨 "요청 수신→emit 착수"
     # 구간을 잰다(칸반 드래그/컬럼메뉴가 이 라우트를 타므로 미르코 실측 4,754ms의 서버측 성분을
     # 여기서 갈라낸다). 순수 time.time() 캡처라 무부하.
@@ -2053,6 +2071,8 @@ async def bulk_update_stories(
                 logger.error(
                     "bulk assignee_changed emit 실패(story=%s)", s.id, exc_info=True,
                 )
+    if response is not None:
+        response.headers["X-Affected-Entities"] = str(len(updated))
     return results
 
 

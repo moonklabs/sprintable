@@ -8,17 +8,24 @@ doc `pricing-policy-proposal-v1` §4.5: AU는 **MCP/API(에이전트) 트래픽�
 ⛔한도 «집행»(차단/경고)은 이 스토리 범위 밖 — 여기는 usage_meters에 값을 쌓는 계측
 축만 담당한다(story #d43ea270 선례: 한도값은 어드민 가변 데이터, 이 모듈은 손 안 댐).
 
-⚠️Phase 1 알려진 축소(스펙 §4.5 원문과의 편차 — **한도 집행을 켜기 前 반드시 보완**,
-story #3173 본문 "필수 보완" 조건 참고):
-  - 쓰기는 항상 엔티티 1개(5 AU)로 계상한다. 진짜 배치 엔드포인트(다건 동시 변경)가
-    응답 헤더 `X-Affected-Entities: N`을 명시하면 그 값을 쓴다 — 헤더 없으면 1(과소계상
-    방향, 자동 초과 청구 없음 철학과 정합·과금 안전측). 지금 어떤 엔드포인트도 이
-    헤더를 안 보낸다 — 배치 엔드포인트 전수 조사·헤더 배선은 후속.
-  - 읽기의 "100개 초과 반환 시 100개마다 +1" 규칙은 Phase 1 미구현(항상 1 AU) — 같은
-    이유(84개 라우터 파일이 응답 봉투가 제각각이라 범용 파싱 불가, 그라운딩 doc
-    `au-metering-grounding-3173` §4 참고).
+story #3176 선행조건 ①+②(설계 doc `au-metering-phase2-prereq-3176`, 페드루 PO 승인
+2026-08-28)로 아래 두 축소를 보완했다:
+  - 쓰기: `payload-배치`(요청 바디가 `items: list[...]`를 명시 — `PATCH /goals/bulk`·
+    `PATCH /stories/bulk` 2곳뿐, doc §1)가 `X-Affected-Entities: N`을 실제로 보낸다(N=
+    서버가 실처리한 대상 수). `효과-배치`(단일 WHERE절 `.update()`로 N행에 부수효과 —
+    `mark_all_read`류)는 헤더를 **의도적으로** 안 보낸다 — flat 5AU 유지가 판정(과금
+    취지: "읽음 전체 표시"는 단일 논리 행동이라 5×N을 물리면 사용자 의도와 어긋난다).
+  - 읽기: `X-Result-Count: N` 옵트인 헤더(doc §2, 4개 엔드포인트 배선 — `GET /docs`·
+    `GET /stories`·`GET /conversations/{id}/messages`·`GET /events/pending`)를 읽어
+    `1 + floor(max(0, N-100)/100)` AU로 계상. 헤더 없는 엔드포인트는 여전히 flat 1AU
+    (옵트인 미배선=과소계상 방향, 틀린 방향 아님).
+
+⚠️Phase 1에서 남은 알려진 축소(§4.5 원문과의 편차, doc §3에서 재평가 완료 — 지금 안
+짓는 게 맞다는 판정):
   - 성공 응답이 클라이언트에 못 닿고(네트워크 유실) 재시도되는 경우 멱등키 부재로 진짜
-    이중계상 가능(Toss `orderId`류 대응물 없음) — Phase 2 idempotency-key 후속 필요.
+    이중계상 가능(Toss `orderId`류 대응물 없음) — v2.1 §11.1 "자동 초과 청구 없음"이
+    블라스트 반경을 이미 막아줘 Phase 2로 유지(재오픈 신호: 운영 로그에 동일 org·동일
+    weight가 단시간 내 중복 기록되는 패턴이 관측되면 그때).
 """
 from __future__ import annotations
 
@@ -118,11 +125,33 @@ def _affected_entities(response: Response) -> int:
     return n if n > 0 else 1
 
 
+def _result_count(response: Response) -> int | None:
+    """§4.5 읽기 100개 초과 옵트인 — 배선된 엔드포인트가 `X-Result-Count` 응답 헤더로 명시한
+    실제 반환 건수. 헤더 없거나 파싱 불가면 None(호출부가 flat 1AU로 폴백 — 과소계상 방향)."""
+    raw = response.headers.get("X-Result-Count")
+    if not raw:
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    return n if n >= 0 else None
+
+
 def _au_weight_for(method: str, response: Response) -> int:
     if method in _WRITE_METHODS:
         return AU_WEIGHTS["write"] * _affected_entities(response)
     if method in _READ_METHODS:
-        return AU_WEIGHTS["read"]
+        n = _result_count(response)
+        if n is None:
+            return AU_WEIGHTS["read"]
+        # §4.5 "100개마다 +1" — floor((N-100)/100), ceiling 아님. 밴드(test_3176_au_weight_
+        # read_formula.py 뮤테이션 검증 완료): N∈[0,199]→1AU(기본, 100 넘겨도 199까지는 «완전한
+        # 추가 100블록»이 아직 안 채워짐) · N∈[200,299]→2AU(+1) · N∈[300,399]→3AU(+2, 여기서부터
+        # +2 — 251이 아니라 300). ⚠️페드루 PO 정정(2026-08-28, PR#3584 리뷰): 이전 주석이
+        # "N=101~200→+1(2AU)"·"251개째부터 +2"로 잘못 적혀 있었다 — 결제 경로 주석이라 밴드
+        # 오독이 후속 집행(#3176 본체) 구현자의 과금 경계 오류로 이어질 수 있어 정정.
+        return AU_WEIGHTS["read"] + max(0, (n - 100) // 100)
     return 0
 
 
