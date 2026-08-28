@@ -90,7 +90,7 @@ async function mount() {
 // entry가 없어 nav서 빼면 진짜 orphan이 됐다(sprints와 달리). 「자동 리듬 표면」(doc B2, 구현
 // PO)이 아직 없어 생긴 커플링이라 표면이 설 때까지 nav에 남긴다(②=ⓐ→되돌림, 유나 QA 처방).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
-  { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림', '대시보드'] },
+  { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림'] },
   { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
@@ -99,13 +99,14 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 ];
 
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
-// 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다(라벨 목록 자체는 안 바뀌므로). 21항목(챗
-// center 제외 20 + 챗 center 1, 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그
+// 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다(라벨 목록 자체는 안 바뀌므로). 19항목(챗
+// center 제외 18 + 챗 center 1, 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그
 // 구멍을 닫는다 — org/project slug 없는 테스트 환경이라 resource 항목은 bare `/${resource}`로
 // 폴백한 값(기존 resourceLink()와 동일 규칙). story #2930 — '신뢰'→'신뢰 센터'로 키 갱신
 // (org-trust 라벨 개명, href 자체는 불변). I3 — '흐름'+'스프린트'가 '보드'(href는 옛 흐름의
 // '/flow' 그대로) 하나로 접혔다. 스탠드업/회고는 CI orphan 가드가 막아 nav에 그대로 남았다
-// (위 EXPECTED_GROUPS 주석 참고).
+// (위 EXPECTED_GROUPS 주석 참고). story #3179(S3c) — '대시보드'(/dashboard) 항목 자체가
+// nav에서 빠져(chat으로 이사·중복 목적지 제거) 챗 제외 19→18항목.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '구성원': '/organization/members',
   '워크포스': '/organization/workforce',
@@ -115,7 +116,6 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '이벤트': '/organization/events',
   '조직 브리핑': '/org-briefing',
   '알림': '/inbox',
-  '대시보드': '/dashboard',
   '보드': '/flow',
   '목표': '/goals',
   '실험실': '/loops',
@@ -152,7 +152,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
 
   it('리소스 항목(작업 그룹, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
     await mount();
-    // startsWith — '대시보드'가 '보드'를 부분문자열로 포함해 includes()로는 오매칭된다.
+    // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
     const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     expect(boardLink?.getAttribute('href')).toBe('/flow');
   });
@@ -204,16 +204,16 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
-  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 19항목
+  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 18항목
   // (챗 center 자체 href는 별도 스위트에서 대조 — I2로 21→20, I3로 flow+sprints가 board로
-  // 접혀 20→19, 스탠드업/회고는 CI orphan 가드로 되돌려 그대로 잔존) 전부를 라벨→href 쌍으로
-  // 개별 대조해 "라벨은 맞는데 목적지가 틀림"을 확실히 막는다.
-  it('전 19항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+  // 접혀 20→19, 스탠드업/회고는 CI orphan 가드로 되돌려 그대로 잔존, story #3179(S3c)로
+  // '대시보드' 제거돼 19→18) 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데 목적지가
+  // 틀림"을 확실히 막는다.
+  it('전 18항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
-      // startsWith — story #2930 I3부터 '보드'가 '대시보드'의 부분문자열이라 includes()는
-      // 오매칭된다(kbd 힌트 접미사가 있는 항목도 있어 정확한 === 매칭은 못 쓴다).
+      // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
       const link = links.find((a) => a.textContent?.startsWith(label));
       expect(link, `링크 "${label}"를 찾지 못함`).toBeDefined();
       expect(link!.getAttribute('href'), `"${label}"의 href`).toBe(expectedHref);

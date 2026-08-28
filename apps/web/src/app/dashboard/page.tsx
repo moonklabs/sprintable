@@ -1,57 +1,12 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getServerSession } from '@/lib/db/server';
-import { fastapiCall } from '@sprintable/storage-api';
-import { getTranslations } from 'next-intl/server';
-import { EmptyState } from '@/components/ui/empty-state';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Button } from '@/components/ui/button';
-import { CommandCenter } from '@/components/dashboard/command-center/command-center';
 
-// E-MODERN [Track C/command-center] 커맨드 센터로 교체(현 vanity 위젯 제거). 헤더+2구역·canonical
-// 부품·pending_data graceful. ⚠️이 "Track C"는 command-center라는 «조각» 이름이지, E-MODERN
-// 블루프린트(doc: e-modern-modernization-blueprint)의 전략 Track C("UI 갈아엎기" 전체)가 아니다
-// — 같은 글자가 두 다른 체계에서 쓰여 "Track C 했다"가 어느 쪽인지 헷갈리던 것을 정정(2026-07-30).
-// 데이터는 CommandCenter(client)가 org-scope BE 2엔드포인트로 자체 fetch — 서버 prefetch 불요.
-export default async function DashboardPage() {
-  const t = await getTranslations('dashboard');
-
-  const session = await getServerSession();
-  if (!session) redirect('/login');
-
-  const me = await fastapiCall<{ id: string; org_id: string; project_id: string; project_name: string | null }>(
-    'GET', '/api/v2/me', session.access_token,
-  ).catch(() => null);
-  if (!me) redirect('/login');
-
-  const projectId = me.project_id;
-
-  // 0746: 0-프로젝트 org(전환 후 stale 쿠키 clear)는 빈상태 일급 처리(무한로딩 방지).
-  if (!projectId) {
-    return (
-      <div className="min-h-full p-4 lg:p-6">
-        <div className="mx-auto max-w-7xl space-y-5">
-          <TopBarSlot title={<h1 className="text-sm font-medium">{t('commandCenter')}</h1>} showContextChip />
-          <EmptyState
-            title={t('noProjectTitle')}
-            description={t('noProjectDescription')}
-            action={
-              <Button asChild size="sm">
-                <Link href={`/onboarding?step=project&orgId=${me.org_id}`}>{t('noProjectAction')}</Link>
-              </Button>
-            }
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-full p-4 lg:p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('commandCenter')}</h1>} showContextChip />
-        <CommandCenter projectName={me.project_name} />
-      </div>
-    </div>
-  );
+// story #3179(S3c·SID 3179) — /dashboard(command-center) 폐합. attention(S3a #3177)·
+// project pulse(S3b #3178)가 chat 구심점(/chats)으로 이사해 이 화면은 소임을 다했다
+// (S3 와이어 심화 doc §2d). AC3 — 외부 실링크(북마크/메일/앱 딥링크) 존재를 이 리포 안에서는
+// 반증도 확定도 못 했다(sprintable-landing 등 별도 리포·서버 접근 로그는 이 워크스페이스 밖
+// — grep으로 증명 불가한 부재). 그래서 workforce/hitl·workforce/recruiter·dashboard/settings와
+// 동일한 통 A 규율(「은퇴 주소 살아있는 클래스」 — 확信 없으면 폐기 아닌 redirect)을 따라
+// 기존 사용자를 빈 화면 대신 새 홈으로 안내한다.
+export default function DashboardRedirect() {
+  redirect('/chats');
 }

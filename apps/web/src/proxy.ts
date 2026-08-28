@@ -558,11 +558,12 @@ async function resolveAndRespond(
     }
   }
 
-  if (pathname === '/login') {
-    const url = request.nextUrl.clone();
-    url.pathname = '/inbox';
-    return NextResponse.redirect(url);
-  }
+  // story #3179(S3c) 조사 — 이 분기는 죽은 코드였다: '/login'은 PUBLIC_EXACT에 있어(§L587-591)
+  // proxy()가 항상 그 앞에서 조기 반환한다 — resolveAndRespond까지 「이미 로그인된 채 /login
+  // 방문」 요청이 도달할 길이 없다(그래서 원래도 '/inbox' 타깃이 실제로 한 번도 안 쓰였다). 로그인
+  // 랜딩(AC2)의 진짜 메커니즘은 lib/auth/session-redirect.ts의 safeNextPath/buildLoginRedirect
+  // (login/page.tsx의 router.replace(safeNextPath(nextParam)) 소비) — 거기를 고쳤다. 여기 죽은
+  // 분기는 혼동을 남기지 않게 제거한다.
 
   return response;
 }

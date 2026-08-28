@@ -83,7 +83,7 @@ export default function InvitePage() {
     });
     if (res.ok) {
       setPageState('success');
-      setTimeout(() => router.push('/dashboard'), 1500);
+      setTimeout(() => router.push('/chats'), 1500); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준.
     } else {
       const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
       setPageState('preview-error');
@@ -134,7 +134,7 @@ export default function InvitePage() {
       }
       if (authMode === 'signup') {
         setPageState('success');
-        setTimeout(() => router.push('/dashboard'), 1500);
+        setTimeout(() => router.push('/chats'), 1500); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준.
       } else {
         await acceptInvite(token);
       }

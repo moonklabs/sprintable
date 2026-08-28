@@ -54,14 +54,14 @@ describe('GET /api/auth/callback/[provider] — native OAuth-handoff branch', ()
     );
   }
 
-  it('without a native challenge cookie: legacy flow is fully unchanged (regression guard) — sets sp_at/sp_rt, redirects to /inbox', async () => {
+  it('without a native challenge cookie: legacy flow is fully unchanged (regression guard) — sets sp_at/sp_rt, redirects to /chats', async () => {
     stubCookies();
     mockFetch.mockResolvedValueOnce({
       ok: true, json: async () => ({ data: { access_token: 'legacy-at', refresh_token: 'legacy-rt' } }),
     });
     const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
     expect(res.status).toBe(307);
-    expect(res.headers.get('location')).toBe('http://localhost:3108/inbox');
+    expect(res.headers.get('location')).toBe('http://localhost:3108/chats');
     const allCookies = res.cookies.getAll();
     expect(allCookies.find((c) => c.name === 'sp_at')?.value).toBe('legacy-at');
     expect(allCookies.find((c) => c.name === 'sp_rt')?.value).toBe('legacy-rt');
