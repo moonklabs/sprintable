@@ -6,6 +6,7 @@ import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
+import { AuUsageBanner } from '@/ee/components/billing/au-usage-banner';
 
 interface MemberContext {
   id: string;
@@ -162,7 +163,10 @@ export default async function AuthenticatedLayout({
       pathProjectId={pathProjectId}
     >
       <StorageCapacityToastProvider>
-        <CrossProjectToastProvider>{children}</CrossProjectToastProvider>
+        <CrossProjectToastProvider>
+          <AuUsageBanner />
+          {children}
+        </CrossProjectToastProvider>
       </StorageCapacityToastProvider>
     </DashboardShell>
   );

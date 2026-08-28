@@ -2499,7 +2499,16 @@
     "statusBilled": "Paid",
     "statusPending": "Pending",
     "statusRefunded": "Refunded",
-    "statusFailed": "Failed"
+    "statusFailed": "Failed",
+    "auWarnTitle": "Automation usage has reached {pct}%",
+    "auWarnDesc": "This month's automation (AU) usage has passed 80% of your limit. Upgrade your plan or wait for next month's reset.",
+    "auWarn90Title": "Automation usage near limit ({pct}%) — admins notified by email",
+    "auWarn90Desc": "This month's automation (AU) usage has passed 90% of your limit — admins have been notified by email. MCP/API writes and automation will pause once the limit is exceeded.",
+    "auPausedTitle": "Automation usage limit exceeded · MCP/API automation is paused",
+    "auPausedDesc": "This month's automation (AU) limit has been exceeded, so MCP/API writes and automation are paused. Wait for next month's reset or upgrade your plan. Human web UI usage and reading existing data remain available.",
+    "auUsage": "<b>{used}</b> / {limit} AU used · {pct}%",
+    "auUpgrade": "Upgrade Plan",
+    "auDismiss": "Hide for this session"
   },
   "pricingPlans": {
     "statePendingBanner": "We're preparing our pricing plans. We'll let you know when they're public. Every team can use the Free plan for now.",

@@ -2499,7 +2499,16 @@
     "statusBilled": "결제 완료",
     "statusPending": "대기 중",
     "statusRefunded": "환불됨",
-    "statusFailed": "실패"
+    "statusFailed": "실패",
+    "auWarnTitle": "자동화 사용량이 {pct}%에 도달했습니다",
+    "auWarnDesc": "이번 달 자동화(AU) 사용량이 한도의 80%를 넘었습니다. 플랜을 업그레이드하거나 다음 달 초기화를 기다려 주세요.",
+    "auWarn90Title": "자동화 사용량 한도 임박({pct}%) — 담당자에게 안내 메일 발송됨",
+    "auWarn90Desc": "이번 달 자동화(AU) 사용량이 한도의 90%를 넘어 관리자에게 안내 메일을 보냈습니다. 한도를 초과하면 MCP/API 쓰기와 자동화가 일시중지됩니다.",
+    "auPausedTitle": "자동화 사용량 한도 초과 · MCP/API 자동화가 일시중지되었습니다",
+    "auPausedDesc": "이번 달 자동화 사용량(AU) 한도를 초과해 MCP/API 쓰기와 자동화가 일시중지되었습니다. 다음 달 초기화를 기다리시거나 플랜을 업그레이드해 주세요. 사람 웹 UI 사용과 기존 데이터 읽기는 계속 가능합니다.",
+    "auUsage": "<b>{used}</b> / {limit} AU 사용 중 · {pct}%",
+    "auUpgrade": "플랜 업그레이드",
+    "auDismiss": "이번 세션 동안 숨기기"
   },
   "pricingPlans": {
     "statePendingBanner": "요금제를 준비하고 있습니다. 공개되면 안내드립니다. 지금은 모든 팀이 Free 플랜으로 이용하실 수 있습니다.",
