@@ -3667,6 +3667,8 @@
     "noMessages": "첫 메시지를 보내보세요",
     "connectionLost": "연결이 끊겼어요",
     "refreshNow": "새로고침",
+    "agentNotConnectedBanner": "{name}이(가) 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.",
+    "agentNotConnectedBannerMulti": "에이전트 {count}명이 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.",
     "create": "대화 시작",
     "myChatsTab": "내 대화",
     "agentChatsTab": "에이전트 대화",

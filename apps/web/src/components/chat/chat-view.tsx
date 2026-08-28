@@ -1,7 +1,8 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, RefreshCw, WifiOff } from 'lucide-react';
+import { ChevronLeft, RefreshCw, WifiOff, UserX } from 'lucide-react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
@@ -55,7 +56,10 @@ interface ChatViewProps {
   // (doc steer-event-axis-design-2927 §4) POST /events/publish의 conversation_id 오버라이드
   // fail-closed(§2 보강, 422 conversation_target_mismatch)를 애초에 안 만난다. 없으면(구
   // 호출부·비-2942 화면) STEER 토글 자체를 숨긴다(graceful — 신규 표면 0 강제 아님).
-  participants?: { member_id: string; name: string | null }[];
+  // story #3194 — type/verified 추가(둘 다 optional·graceful). verified는 agent_verify.py::
+  // get_verified_map()과 같은 정의(#2751 설계②가 워크포스 "연결 안 됨" 배지에 쓰는 그 판별자,
+  // 발명 0) — false=stdio verify 미완주. undefined/null/human이면 미연결 배너 미표시.
+  participants?: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[];
 }
 
 interface MessageGroup {
@@ -97,10 +101,27 @@ export function resolveBackfillMarkReadIso(latest: ChatMessage[] | undefined, ne
   return latest[latest.length - 1]!.created_at;
 }
 
+// story #3194 — 미연결 에이전트 참가자(본인 제외) 판별을 순수함수로 뽑아 직접 단위테스트
+// 가능하게 한다(mergeBackfilledMessages/resolveBackfillMarkReadIso와 동형 관례). verified
+// ===false만 대상(undefined/null=판별 불가라 배너 미표시 — agent-management-tab.tsx와 동일
+// 안전 방향, 침묵 실패보다 과소표시가 낫다). 판정 자체는 #2751 get_verified_map 그대로(발명
+// 0) — 이 함수는 그 결과를 소비만 한다.
+export function filterUnconnectedAgentParticipants(
+  participants: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[] | undefined,
+  currentTeamMemberId: string,
+): { member_id: string; name: string | null; type?: string; verified?: boolean | null }[] {
+  return (participants ?? []).filter(
+    (p) => p.member_id !== currentTeamMemberId && p.type === 'agent' && p.verified === false,
+  );
+}
+
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
+  // story #3194 — 'agents' 네임스페이스의 viewConnectionSettings 키를 그대로 재사용(발명 0,
+  // agent-management-tab.tsx의 동일 CTA와 문구 일치).
+  const ta = useTranslations('agents');
   const isMobile = useIsMobile();
   const { toasts, addToast, dismissToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -819,6 +840,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const isMobileReadingView = readingPanelStack.length > 0;
   const isMobileRightPanelView = isMobileThreadView || isMobileReadingView;
 
+  const unconnectedAgentParticipants = filterUnconnectedAgentParticipants(participants, currentTeamMemberId);
+
   // story #461e9a54(P0) — 채팅 하위 트리 전체(메시지·입력창 포함)를 이 Provider로 감싼다.
   // EntityChip(embed-card.tsx)·approval-request-card.tsx가 이 값을 useReadingPanel()로
   // 직접 소비 — prop-drilling 없이도 새 임베드 소비처가 자동으로 패널行 된다.
@@ -867,6 +890,28 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                 <RefreshCw className="h-3 w-3" />
                 {t('refreshNow')}
               </button>
+            </div>
+          )}
+          {/* story #3194(PO 신규 회원 친절도 실측) — 미연결 에이전트에게 첫 메시지를 보내도
+              화면 어디에도 신호가 없어 "제품이 죽었다"로 읽히던 결함. 판별자(verified===false)
+              는 #2751이 워크포스 목록에 쓰는 get_verified_map 그대로(발명 0) — 여기서 새
+              판정을 만들지 않는다. 연결되면(다음 폴링 사이클, page.tsx fetchPresence 15s)
+              participants의 verified가 갱신돼 이 배너는 조건이 저절로 꺼진다(자연 소멸,
+              별도 dismiss 상태 불요). */}
+          {unconnectedAgentParticipants.length > 0 && (
+            <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
+              <UserX className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="flex-1">
+                {unconnectedAgentParticipants.length === 1
+                  ? t('agentNotConnectedBanner', { name: unconnectedAgentParticipants[0]!.name ?? '?' })
+                  : t('agentNotConnectedBannerMulti', { count: unconnectedAgentParticipants.length })}
+              </span>
+              <Link
+                href={`/organization/workforce/${unconnectedAgentParticipants[0]!.member_id}`}
+                className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
+              >
+                {ta('viewConnectionSettings')}
+              </Link>
             </div>
           )}
           {/* Messages */}
