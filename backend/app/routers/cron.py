@@ -650,6 +650,13 @@ async def score_hypotheses_cron(
     try:
         summary = await score_hypotheses(session)
         await session.commit()
+        # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish. 배치가
+        # 여러 org에 걸칠 수 있어(measure_after 도래 가설 전역 쿼리) org별 1회 push(과다발화
+        # 방지 — score_hypotheses가 이미 dedup된 집합을 반환).
+        for _org_id in summary.get("attention_org_ids", []):
+            from app.services.attention_events import notify_attention_changed
+
+            await notify_attention_changed(_org_id)
         return _ok(summary)
     except Exception as exc:
         logger.exception("score-hypotheses cron error: %s", exc)

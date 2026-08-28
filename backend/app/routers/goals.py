@@ -411,11 +411,14 @@ async def update_goal(
     goal = await repo.update(id, **data)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    # story #3180(S3 후속) — status 전이 없이도 measure_after 재계획은 loop_overdue_goal(도과
-    # 기준선 이동) 파생의 실 입력이다(전용 transition 엔드포인트 밖의 유일한 그 변경 경로).
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish로 정렬
+    # (dependencies.py 3곳과 동일 근거 — get_db implicit commit보다 먼저 push하면 FE 재조회가
+    # 아직 안 보이는 상태를 읽는다). measure_after 재계획은 loop_overdue_goal(도과 기준선
+    # 이동) 파생의 실 입력이다(전용 transition 엔드포인트 밖의 유일한 그 변경 경로).
     if "measure_after" in data:
         from app.services.attention_events import notify_attention_changed
 
+        await repo.session.commit()
         await notify_attention_changed(repo.org_id)
     await _attach_org_project_slugs(repo.session, repo.org_id, [goal])
     return GoalResponse.model_validate(goal)

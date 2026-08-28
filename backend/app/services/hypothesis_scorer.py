@@ -154,11 +154,10 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
         else:
             pending.append(str(hyp.id))  # measuring 유지
 
-    if _attention_org_ids:
-        from app.services.attention_events import notify_attention_changed
-
-        for _org_id in _attention_org_ids:
-            await notify_attention_changed(_org_id)
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — 여기서 직접 push하지 않는다. 이
+    # 함수 자신의 docstring 계약대로 "호출자(cron route)가 commit한다" — 커밋 前에 push하면
+    # FE 재조회가 아직 안 보이는 배치 결과를 읽는다. org_id 집합만 반환해 호출자
+    # (routers/cron.py::score_hypotheses_cron)가 자기 commit 後에 push하게 한다.
 
     return {
         "to_measuring": to_measuring,
@@ -167,6 +166,7 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
         "pending": pending,
         "failed": failed,
         "total": len(hyps),
+        "attention_org_ids": sorted(_attention_org_ids),
         # HO-S4(AC②): outcome verdict 배선 결과를 cron response에 노출.
         "verdicts_recorded": verdicts_recorded,
         # S7: loop outcome 귀속 결과를 cron response에 노출(관측 정직성).

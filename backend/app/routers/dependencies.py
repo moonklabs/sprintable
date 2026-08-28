@@ -119,10 +119,17 @@ async def create_dependency(
             session, org_id, body.to_id, _trust_before, actor_id=user_id
         )
 
-    # story #3180(S3 후속) — 새 blocks 의존성 = unanswered_blocker 파생의 생성 입력(attention).
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — «attention.changed»는 FE가 수신
+    # 즉시 my-actions를 재조회한다. get_db가 커밋을 핸들러 반환 後(implicit, app/dependencies/
+    # database.py::get_db)로 미루므로, 여기서 커밋 前에 push하면 재조회가 아직 안 보이는 상태를
+    # 읽어 마치 «해소 안 됐다»처럼 보이는 창이 생긴다 — 폴백 폴링이 그 실패를 가려 조용히
+    # 넘어가던 것(REQUEST_CHANGES 근거). 이 라우트는 이 지점 이후 추가 쓰기가 없으므로 명시
+    # commit으로 반환-前 확定 후에만 push한다(session async_session_factory는 expire_on_commit
+    # =False라 이후 model_validate(dep) 접근에 안전 — app/core/database.py 확認).
     if body.item_type == "story" and body.dep_type == "blocks":
         from app.services.attention_events import notify_attention_changed
 
+        await session.commit()
         await notify_attention_changed(org_id)
 
     return DependencyResponse.model_validate(dep)
@@ -179,11 +186,13 @@ async def update_dependency(
             repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
         )
 
-    # story #3180(S3 후속) — dep_type이 어느 방향으로든 blocks를 넘나들면(생성·해소 둘 다)
-    # unanswered_blocker 파생의 입력이 바뀐 것 — 위 trust_before 게이팅과 동일 조건.
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish로 정렬(create_
+    # dependency와 동일 근거 — 이 지점 이후 추가 쓰기 없음, expire_on_commit=False라 이후
+    # model_validate(updated) 접근 안전).
     if dep.item_type == "story" and (dep.dep_type == "blocks" or body.dep_type == "blocks"):
         from app.services.attention_events import notify_attention_changed
 
+        await repo.session.commit()
         await notify_attention_changed(repo.org_id)
 
     return DependencyResponse.model_validate(updated)
@@ -222,10 +231,13 @@ async def delete_dependency(
             repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
         )
 
-    # story #3180(S3 후속) — blocks 의존성 삭제 = unanswered_blocker 해소(attention 파생 입력).
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish로 정렬(위
+    # create/update와 동일 근거). 삭제된 `dep`은 model_validate 대상이 아니라 여기선 그냥
+    # {"ok": True} 반환이라 커밋 순서가 응답 직렬화에 영향 없음 — push 타이밍만의 문제.
     if dep.item_type == "story" and dep.dep_type == "blocks":
         from app.services.attention_events import notify_attention_changed
 
+        await repo.session.commit()
         await notify_attention_changed(repo.org_id)
 
     return {"ok": True}
