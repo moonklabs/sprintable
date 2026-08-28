@@ -411,6 +411,12 @@ async def update_goal(
     goal = await repo.update(id, **data)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
+    # story #3180(S3 후속) — status 전이 없이도 measure_after 재계획은 loop_overdue_goal(도과
+    # 기준선 이동) 파생의 실 입력이다(전용 transition 엔드포인트 밖의 유일한 그 변경 경로).
+    if "measure_after" in data:
+        from app.services.attention_events import notify_attention_changed
+
+        await notify_attention_changed(repo.org_id)
     await _attach_org_project_slugs(repo.session, repo.org_id, [goal])
     return GoalResponse.model_validate(goal)
 

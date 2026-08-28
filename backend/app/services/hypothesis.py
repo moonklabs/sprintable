@@ -543,6 +543,12 @@ async def transition_hypothesis(
         await record_outcome_verdicts(session, updated)
         await attribute_loop_outcome(session, updated)
 
+    # story #3180(S3 후속) — hypothesis status 전이는 hypothesis_falsified(falsified 도달)·
+    # loop_overdue_hypothesis(active/measuring 이탈) 파생의 실 입력.
+    from app.services.attention_events import notify_attention_changed
+
+    await notify_attention_changed(org_id)
+
     return await _to_response(repo, updated)
 
 

@@ -82,6 +82,10 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
     verdicts_skipped: list[dict] = []
     # E-LOOP-LEDGER S7: 해소 직후 loop outcome 귀속 배선 결과(복리 되먹임 고리).
     loops_attributed: list[dict] = []
+    # story #3180(S3 후속) — 자동채점 verified/falsified도 hypothesis_falsified·
+    # loop_overdue_hypothesis 파생의 입력이다(transition_hypothesis 수동경로와 동형). 배치
+    # 전역 쿼리라 org별로 한 번만 push하도록 모은다(과다발화 방지 — 필수는 아니나 값싼 절약).
+    _attention_org_ids: set[str] = set()
     from app.services.hypothesis_outcome_verdict import record_outcome_verdicts
     from app.services.loop_outcome_attribution import attribute_loop_outcome
 
@@ -127,6 +131,10 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
             hyp.status = new_status
             hyp.outcome_result = scoring["outcome_result"]
             (verified if new_status == "verified" else falsified).append(str(hyp.id))
+            _hyp_org_id = getattr(hyp, "org_id", None)  # getattr — 일부 단위테스트가 org_id
+            # 없는 duck-type fixture(SimpleNamespace)로 hyp를 흉내낸다(실 ORM 행은 항상 있음).
+            if _hyp_org_id:
+                _attention_org_ids.add(str(_hyp_org_id))
             # HO-S4(AC①): 해소 직후 outcome→verdict 배선(체인: scorer→verdict→trust 닫힘).
             # manual/pending은 여기 도달 안 함(new_status None)이라 verdict 0(AC④).
             vres = await record_outcome_verdicts(session, hyp)
@@ -145,6 +153,12 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
                 loops_attributed.append({"hypothesis_id": str(hyp.id), "loop_ids": lres["attributed"]})
         else:
             pending.append(str(hyp.id))  # measuring 유지
+
+    if _attention_org_ids:
+        from app.services.attention_events import notify_attention_changed
+
+        for _org_id in _attention_org_ids:
+            await notify_attention_changed(_org_id)
 
     return {
         "to_measuring": to_measuring,

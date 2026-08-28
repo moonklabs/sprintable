@@ -236,6 +236,12 @@ async def emit_story_status_changed(
         except Exception:  # noqa: BLE001 — 계측 실패가 이미 발화된 side-effect를 되돌리면 안 됨.
             pass
 
+    # story #3180(S3 후속) — attention(«지금» 스트립) 재조회 트리거. story status 변화는
+    # story_stalled(어느 상태변화든 updated_at 갱신)·unanswered_blocker(블로킹 대상이 done
+    # 전이) 파생의 실 입력이다. notify_attention_changed 자신이 best-effort(내부 try/except).
+    from app.services.attention_events import notify_attention_changed
+    await notify_attention_changed(org_id)
+
     try:
         # AC2: story.status_changed 의 member-bound webhook 은 관련자(notify_ids)만 수신 → org-wide
         # 과다 fan-out 차단. member_id=null 진짜 activity-feed 브로드캐스트는 보존(preserve_broadcast).

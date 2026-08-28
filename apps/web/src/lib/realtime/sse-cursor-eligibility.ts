@@ -13,11 +13,16 @@
  * 않는다 — B계열이 오기 전 마지막으로 승격된(A계열) id가 그대로 유지되어, 다음 재연결도
  * 해소 가능한 커서로 나간다.
  *
- * ⚠️ 알려진 B계열만 명시한다(추측 금지 — story #2162 조사에서 실제로 확認된 두 이름뿐이다).
+ * ⚠️ 알려진 B계열만 명시한다(추측 금지 — story #2162 조사에서 실제로 확認된 두 이름 + story
+ * #3180이 추가한 세 번째뿐이다).
  * 새로운 transient(DB-row 없는) named 이벤트를 추가할 땐 **반드시 여기에도 추가할 것** —
  * 안 그러면 목록에 없는 이름은 전부 "커서 승격 가능"으로 취급돼 이 버그가 조용히 재발한다.
+ *
+ * story #3180 — `attention.changed`(backend/app/services/attention_events.py::
+ * notify_attention_changed → push_to_org_members(..., {})) 도 presence와 동일 모양의 B계열
+ * (Event DB row 0, payload 없음)이라 여기 편입한다.
  */
-const TRANSIENT_EVENT_NAMES = new Set(['presence', 'conversation.working']);
+const TRANSIENT_EVENT_NAMES = new Set(['presence', 'conversation.working', 'attention.changed']);
 
 /**
  * true면 이 이벤트의 네이티브 SSE id를 재개 커서로 승격해도 안전(DB로 해소 가능하다고 알려짐

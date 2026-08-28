@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
   buildNowFace, parseCompletionNotifications, parseMyActions,
   type NowFaceItem, type NowFaceTranslator,
@@ -124,6 +125,8 @@ export function NowFace() {
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const viewer = useMemo<ViewerContext>(() => ({ orgSlug, activeProjectId: projectId }), [orgSlug, projectId]);
 
+  const mux = useSseMultiplexerContext();
+
   useEffect(() => {
     const load = async () => {
       const result = await loadNowFace(t, viewer);
@@ -134,8 +137,17 @@ export function NowFace() {
     };
     void load();
     const id = setInterval(() => void load(), REFRESH_MS);
-    return () => clearInterval(id);
-  }, [t, viewer]);
+    // story #3180(S3 후속) — 「지금」 스트립의 attention 소비 축. 폴링(REFRESH_MS)은 그대로
+    // 폴백 유지(AC3 — mux가 null이거나 신호가 안 오면 이 subscribe는 그냥 무동작이고 기존
+    // 폴링만 돈다). 신호 수신 시 폴링 주기 대기 없이 즉시 1회 재조회(AC2). payload 미사용 —
+    // presence(use-team-presence.ts)와 동형 트리거뿐이라 dedup 불필요(재배달돼도 재조회
+    // 1회 더 도는 것뿐, 멱등).
+    const unsubAttention = mux?.subscribe('attention.changed', () => { void load(); });
+    return () => {
+      clearInterval(id);
+      unsubAttention?.();
+    };
+  }, [t, viewer, mux]);
 
   const list = items ?? [];
   const shown = expanded ? list : list.slice(0, CAP);

@@ -119,6 +119,12 @@ async def create_dependency(
             session, org_id, body.to_id, _trust_before, actor_id=user_id
         )
 
+    # story #3180(S3 후속) — 새 blocks 의존성 = unanswered_blocker 파생의 생성 입력(attention).
+    if body.item_type == "story" and body.dep_type == "blocks":
+        from app.services.attention_events import notify_attention_changed
+
+        await notify_attention_changed(org_id)
+
     return DependencyResponse.model_validate(dep)
 
 
@@ -173,6 +179,13 @@ async def update_dependency(
             repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
         )
 
+    # story #3180(S3 후속) — dep_type이 어느 방향으로든 blocks를 넘나들면(생성·해소 둘 다)
+    # unanswered_blocker 파생의 입력이 바뀐 것 — 위 trust_before 게이팅과 동일 조건.
+    if dep.item_type == "story" and (dep.dep_type == "blocks" or body.dep_type == "blocks"):
+        from app.services.attention_events import notify_attention_changed
+
+        await notify_attention_changed(repo.org_id)
+
     return DependencyResponse.model_validate(updated)
 
 
@@ -208,6 +221,12 @@ async def delete_dependency(
         await maybe_emit_trust_stage_changed(
             repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
         )
+
+    # story #3180(S3 후속) — blocks 의존성 삭제 = unanswered_blocker 해소(attention 파생 입력).
+    if dep.item_type == "story" and dep.dep_type == "blocks":
+        from app.services.attention_events import notify_attention_changed
+
+        await notify_attention_changed(repo.org_id)
 
     return {"ok": True}
 
