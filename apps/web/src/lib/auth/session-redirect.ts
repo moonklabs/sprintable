@@ -6,18 +6,19 @@ export const SESSION_EXPIRED_REASON = 'session_expired';
 
 /** 현재 경로(pathname+search)를 next 로 보존한 /login redirect 경로. */
 export function buildLoginRedirect(currentPathAndSearch: string): string {
-  const target = currentPathAndSearch && currentPathAndSearch.startsWith('/') ? currentPathAndSearch : '/inbox';
+  const target = currentPathAndSearch && currentPathAndSearch.startsWith('/') ? currentPathAndSearch : '/chats';
   return `/login?next=${encodeURIComponent(target)}&reason=${SESSION_EXPIRED_REASON}`;
 }
 
 /**
  * 오픈 리다이렉트 가드 — next 가 **내부 절대경로**(`/` 시작·`//`(프로토콜-상대)·`/\` 아님)일 때만 허용,
- * 아니면 `/inbox`. login 성공/콜백 복귀 시 외부 도메인 유도(`//evil.com`·`http://`)를 차단.
+ * 아니면 `/chats`(story #3179 S3c AC2 — 로그인 랜딩=chat, 「홈=chat」 확定 반영). login 성공/콜백
+ * 복귀 시 외부 도메인 유도(`//evil.com`·`http://`)를 차단.
  */
 export function safeNextPath(next: string | null | undefined): string {
-  if (!next) return '/inbox';
+  if (!next) return '/chats';
   let decoded: string;
-  try { decoded = decodeURIComponent(next); } catch { return '/inbox'; }
-  if (!decoded.startsWith('/') || decoded.startsWith('//') || decoded.startsWith('/\\')) return '/inbox';
+  try { decoded = decodeURIComponent(next); } catch { return '/chats'; }
+  if (!decoded.startsWith('/') || decoded.startsWith('//') || decoded.startsWith('/\\')) return '/chats';
   return decoded;
 }

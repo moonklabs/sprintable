@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { inviteErrorMessage } from '@/lib/invite-error-message';
@@ -99,16 +100,15 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
             >
               {accepting ? tInvite('accepting') : tInvite('accept')}
             </Button>
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2:
-                app/(authenticated)/[ws]/[proj]/ 도입 후 이 규칙이 무관 파일에 오탐(2단 중첩
-                dynamic segment와의 상호작용, [ws]/[proj] 부재 시 오탐 재현 0으로 직접 확인) —
-                pre-existing 코드 자체는 무변경. */}
-            <a
-              href="/dashboard"
+            {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. 이전 eslint-disable(story
+                a539c649 S2, href="/dashboard"에 대한 no-html-link-for-pages 오탐)은 href="/chats"
+                에서는 오탐이 아니라 실 위반으로 밝혀져 <a>→<Link> 전환으로 근본 해결한다. */}
+            <Link
+              href="/chats"
               className="block text-center text-sm text-muted-foreground hover:text-foreground/70"
             >
               {tInvite('decline')}
-            </a>
+            </Link>
           </div>
         )}
       </div>

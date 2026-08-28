@@ -154,7 +154,7 @@ describe('POST /auth/native', () => {
 
     const res = await POST(makeJsonRequest({ code: 'valid-code' }));
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('http://localhost/inbox'); // safeNextPath 기본 폴백
+    expect(res.headers.get('location')).toBe('http://localhost/chats'); // safeNextPath 기본 폴백
     expect(res.headers.get('cache-control')).toBe('no-store');
     expect(res.headers.get('referrer-policy')).toBe('no-referrer');
 
@@ -181,7 +181,7 @@ describe('POST /auth/native', () => {
     process.env['FIREBASE_AUTH_MOBILE_ISSUE'] = 'true';
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ session_cookie: 'c' }) });
     const res = await POST(makeJsonRequest({ code: 'x', redirect_path: '//evil.com/phish' }));
-    expect(res.headers.get('location')).toBe('http://localhost/inbox');
+    expect(res.headers.get('location')).toBe('http://localhost/chats');
     expect(res.headers.get('location')).not.toContain('evil.com');
   });
 
@@ -258,7 +258,7 @@ describe('POST /auth/native', () => {
     const res = await POST(internalHostRequest);
 
     const location = res.headers.get('location') ?? '';
-    expect(location).toBe('https://dev-app.sprintable.ai/inbox');
+    expect(location).toBe('https://dev-app.sprintable.ai/chats');
     expect(location).not.toContain('run.app');
   });
 });
