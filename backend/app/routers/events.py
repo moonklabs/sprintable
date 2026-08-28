@@ -870,6 +870,7 @@ async def get_pending_events(
 
     if response is not None:
         response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Result-Count"] = str(len(events))
         if events:
             response.headers["X-Next-Cursor"] = events[-1].created_at.isoformat()
     return [EventResponse.model_validate(e) for e in events]

@@ -62,6 +62,11 @@ def _build_app(monkeypatch, *, au_actor: str | None, org_id: str | None = "11111
     async def read_missing():
         return JSONResponse({"error": "nope"}, status_code=404)
 
+    @app.get("/api/v2/widgets/many")
+    async def read_many():
+        # story #3176 선행조건② — X-Result-Count 옵트인 헤더 소비 경로.
+        return JSONResponse({"data": []}, headers={"X-Result-Count": "250"})
+
     @app.get("/api/v2/events/stream")
     async def stream():
         return JSONResponse({"data": "would-be-sse"})
@@ -169,6 +174,29 @@ async def test_agent_batch_write_uses_affected_entities_header(monkeypatch):
     assert recorded == [("11111111-1111-1111-1111-111111111111", 35)], (
         "X-Affected-Entities: 7 -> 5*7=35이어야 함"
     )
+
+
+@pytest.mark.anyio
+async def test_agent_read_many_uses_result_count_header(monkeypatch):
+    """story #3176 선행조건② — X-Result-Count: 250 → floor((250-100)/100)=1 → 1+1=2AU."""
+    client, recorded = _build_app(monkeypatch, au_actor="agent")
+    async with client:
+        resp = await client.get("/api/v2/widgets/many")
+        await _drain_background_tasks()
+    assert resp.status_code == 200
+    assert recorded == [("11111111-1111-1111-1111-111111111111", 2)]
+
+
+@pytest.mark.anyio
+async def test_agent_read_without_result_count_header_stays_flat_one_au(monkeypatch):
+    """대조군 — X-Result-Count 미배선 엔드포인트(/widgets, 위 many와 동일 실제 항목수라도
+    헤더가 없으면)는 여전히 flat 1AU(과소계상 방향, doc §2)."""
+    client, recorded = _build_app(monkeypatch, au_actor="agent")
+    async with client:
+        resp = await client.get("/api/v2/widgets")
+        await _drain_background_tasks()
+    assert resp.status_code == 200
+    assert recorded == [("11111111-1111-1111-1111-111111111111", 1)]
 
 
 @pytest.mark.anyio
