@@ -142,7 +142,7 @@ async def _deliver_one(job: dict) -> None:
                 )
                 await session.commit()
             # ⬇ 이 구간은 세션이 닫혀 있다(커넥션 풀에 반납됨) — 외부 I/O만.
-            await _send_webhook_targets(targets, payload["event"], payload["data"])
+            await _send_webhook_targets(targets, payload["event"], payload["data"], org_id)
         elif kind == "personal_webhook":
             from app.services.notification_dispatch import (
                 _fetch_personal_webhook_targets,
@@ -159,6 +159,7 @@ async def _deliver_one(job: dict) -> None:
                 targets, title=payload["title"], body=payload.get("body"),
                 event_type=payload["event_type"], reference_type=payload.get("reference_type"),
                 reference_id=_uuid_or_none(payload.get("reference_id")), context=payload.get("context"),
+                org_id=org_id,
             )
         elif kind == "expo_push":
             from ee.services.expo_push import (

@@ -134,6 +134,7 @@ async def _deliver_personal_webhooks_now(
     await _send_personal_webhook_targets(
         targets, title=title, body=body, event_type=event_type,
         reference_type=reference_type, reference_id=reference_id, context=context,
+        org_id=org_id,
     )
 
 
@@ -181,8 +182,13 @@ async def _send_personal_webhook_targets(
     reference_type: str | None = None,
     reference_id: uuid.UUID | None = None,
     context: dict | None = None,
+    org_id: uuid.UUID | None = None,
 ) -> None:
-    """세션 없이 순수 HTTP POST만(story #2460 PO 리뷰 F1)."""
+    """세션 없이 순수 HTTP POST만(story #2460 PO 리뷰 F1).
+
+    story #3173(결제②-B) — doc `pricing-policy-proposal-v1` §4.5 "성공한 외부 웹훅 전달 =
+    전달 1건당 1 AU". `_post_with_retry`가 True를 반환한 경우만 계측(webhook_dispatch.py의
+    org webhook 경로와 동형 — org_id 없으면 계측 생략, 실패는 fail-open)."""
     if not targets:
         return
     from app.core.ssrf import validate_webhook_url_async
@@ -214,9 +220,17 @@ async def _send_personal_webhook_targets(
                 "context": context or {},
             }
         try:
-            await _post_with_retry(url, payload, secret, str(member_id))
+            delivered = await _post_with_retry(url, payload, secret, str(member_id))
         except Exception:
             logger.warning("personal webhook POST failed (swallowed) member=%s", member_id)
+            continue
+        if delivered and org_id is not None:
+            try:
+                from app.services.au_metering import record_au_usage
+
+                await record_au_usage(org_id, 1)
+            except Exception:
+                logger.error("AU metering(personal webhook) failed org_id=%s", org_id, exc_info=True)
 
 
 async def dispatch_notification(
