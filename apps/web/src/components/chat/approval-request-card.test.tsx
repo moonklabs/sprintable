@@ -663,12 +663,19 @@ describe('ApprovalRequestCard — story #3151 agent_decision 결정 재료(질�
 });
 
 // story #5ace2e84 — 채팅 결재카드 N+1 처방. chat-view.tsx가 대화 단위로 배치조회한 gate를
-// initialGate prop으로 물려받으면 이 카드는 독립 GET /api/gates/{id}를 안 태워야 한다(PO
+// gateByKey 맵으로 물려받으면 이 카드는 독립 GET /api/gates/{id}를 안 태워야 한다(PO
 // 실측: 대화 진입당 최대 51발 N+1의 직접 원인). use-gate-batch.ts는 별도 단위테스트로
-// 순수함수(collectUnrequestedGateIds)를 커버하므로, 여기서는 소비부(카드)가 initialGate를
+// 순수함수(collectUnrequestedGateIds)를 커버하므로, 여기서는 소비부(카드)가 gateByKey를
 // 실제로 존중하는지만 값으로 단언한다.
-describe('ApprovalRequestCard — initialGate(story #5ace2e84 배치조회 소비)', () => {
-  it('initialGate={kind:ready}면 독립 fetchGate()를 안 태우고 그 값으로 바로 렌더된다', async () => {
+//
+// ⚠️2026-08-28 라이브 재측(AC4)에서 구판(단건 initialGate lookup)의 첫 마운트 레이스를
+// 실측으로 적발했다 — 자식(카드) effect가 부모(useGateBatchFetch) effect보다 먼저 돌아,
+// 맵이 아직 `{}`인 첫 렌더에 모든 카드가 "커버 안 됨"으로 오판해 개별 fetchGate()를 전원
+// 발사했다(대화당 여전히 ~50발, 배치 자체는 정확히 1콜로 묶였는데도). 아래 두 번째 테스트
+// (`gateByKey={{}}`)가 바로 그 레이스의 회귀가드 — 맵 객체가 정의돼 있으면(빈 값이라도)
+// 항목이 아직 없어도 기다려야 한다.
+describe('ApprovalRequestCard — gateByKey 배치조회 소비(story #5ace2e84)', () => {
+  it('gateByKey에 이 gate_id가 {kind:ready}로 있으면 독립 fetchGate()를 안 태우고 그 값으로 바로 렌더된다', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
     vi.stubGlobal('fetch', fetchMock);
     const gateData = gate({ work_item_summary: { title: '배치조회 대조', slug: null } });
@@ -677,7 +684,7 @@ describe('ApprovalRequestCard — initialGate(story #5ace2e84 배치조회 소�
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
           <ApprovalRequestCard
             target={{ work_item_type: gateData.work_item_type, work_item_id: gateData.work_item_id, gate_id: gateData.id, actions: ['approve', 'reject'] }}
-            initialGate={{ kind: 'ready', gate: gateData }}
+            gateByKey={{ [gateData.id]: { kind: 'ready', gate: gateData } }}
           />
         </NextIntlClientProvider>,
       );
@@ -687,7 +694,7 @@ describe('ApprovalRequestCard — initialGate(story #5ace2e84 배치조회 소�
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('initialGate={kind:loading}이면(배치 진행 중) 완료를 기다리고 독립 fetchGate()도 안 태운다', async () => {
+  it('«첫 마운트 레이스» 회귀가드 — gateByKey={{}}(맵은 있으나 이 gate_id 항목이 아직 없음)여도 독립 fetchGate()를 안 태운다', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
     vi.stubGlobal('fetch', fetchMock);
     await act(async () => {
@@ -695,7 +702,7 @@ describe('ApprovalRequestCard — initialGate(story #5ace2e84 배치조회 소�
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
           <ApprovalRequestCard
             target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }}
-            initialGate={{ kind: 'loading' }}
+            gateByKey={{}}
           />
         </NextIntlClientProvider>,
       );
@@ -704,7 +711,24 @@ describe('ApprovalRequestCard — initialGate(story #5ace2e84 배치조회 소�
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('initialGate 미지정(배치 커버 밖)이면 기존처럼 개별 fetchGate()로 폴백한다(회귀 0)', async () => {
+  it('gateByKey에 이 gate_id가 {kind:loading}으로 있으면(배치 진행 중) 완료를 기다리고 독립 fetchGate()도 안 태운다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard
+            target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }}
+            gateByKey={{ 'g-1': { kind: 'loading' } }}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('gateByKey 자체가 미지정(배치 컨텍스트 없음 — approvals-queue.tsx 등)이면 기존처럼 개별 fetchGate()로 폴백한다(회귀 0)', async () => {
     const gateData = gate({ work_item_summary: { title: '개별폴백 대조', slug: null } });
     await mount(gateData);
     expect(container.textContent).toContain('개별폴백 대조');
