@@ -1,7 +1,9 @@
 {
   "_comment": [
     "story #3164(DS 게이트 키스톤) grandfather baseline — 이 가드 첫 도입 시점 develop의 기존 손코딩 카드.",
-    "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 개별 수리는 후속 표면 리팩터 판)."
+    "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 개별 수리는 후속 표면 리팩터 판).",
+    "story #3177(S3a) AC5 순감소 — action-zone.tsx 5건→0건(cardVariants() cva 호출로 전환, 이",
+    "스토리가 그 파일을 건드리며 실측 제거). 269키 → 264키."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2",
@@ -105,11 +107,6 @@
     "components/chat/message-context-menu.tsx::fixed z-50 min-w-[160px] overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-[var(--elev-overlay)]",
     "components/chat/sender-profile-popover.tsx::fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover py-2 shadow-[var(--elev-overlay)]",
     "components/dashboard/activation-checklist-banner.tsx::flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted",
-    "components/dashboard/command-center/action-zone.tsx::flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30",
-    "components/dashboard/command-center/action-zone.tsx::flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30  ",
-    "components/dashboard/command-center/action-zone.tsx::flex items-center gap-2 rounded-lg border border-l-2 border-dashed border-border bg-card p-2.5 text-xs text-muted-foreground",
-    "components/dashboard/command-center/action-zone.tsx::flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 text-xs",
-    "components/dashboard/command-center/action-zone.tsx::space-y-3 rounded-xl border border-border bg-card/40 p-3",
     "components/dashboard/command-center/overview-zone.tsx::space-y-4 rounded-xl border border-border bg-card/40 p-3",
     "components/docs/doc-assignee-control.tsx::absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-popover p-2 shadow-[var(--elev-overlay)]",
     "components/docs/doc-content-renderer.tsx::[&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-border [&_pre]:bg-muted [&_pre]:text-foreground [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6",

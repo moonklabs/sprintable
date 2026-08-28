@@ -3473,6 +3473,13 @@
     "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
+    "nowStripLabel": "지금",
+    "nowStripCount": "· {count}건",
+    "nowStripCollapse": "접기",
+    "nowStripExpand": "펼치기",
+    "nowStripGroupDanger": "행동 필요",
+    "nowStripGroupWarn": "주의",
+    "nowStripGroupInfo": "관찰 · 학습",
     "reportViewFull": "전문 보기 →",
     "reportCollapse": "접기",
     "reportEvidenceLabel": "근거",

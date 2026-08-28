@@ -1,7 +1,9 @@
 {
   "_comment": [
     "story #3164(DS 게이트 키스톤) grandfather baseline — 이 가드 첫 도입 시점 develop의 기존 raw <button>.",
-    "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 개별 수리는 후속 표면 리팩터 판)."
+    "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 개별 수리는 후속 표면 리팩터 판).",
+    "story #3177(S3a) AC5 순감소 — chat-list-view.tsx 4건→0건(<Button> 전환, 이 스토리가 그 파일을",
+    "건드리며 실측 제거). 186f/511occ → 185f/507occ."
   ],
   "counts": {
     "app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx": 3,
@@ -67,7 +69,6 @@
     "components/chat/attachment-media.tsx": 2,
     "components/chat/chat-bubble.tsx": 4,
     "components/chat/chat-input.tsx": 6,
-    "components/chat/chat-list-view.tsx": 4,
     "components/chat/chat-view.tsx": 4,
     "components/chat/citation-compose-bar.tsx": 2,
     "components/chat/delivery-contract-modal.tsx": 2,
