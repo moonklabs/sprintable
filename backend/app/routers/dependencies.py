@@ -130,6 +130,11 @@ async def create_dependency(
         from app.services.attention_events import notify_attention_changed
 
         await session.commit()
+        # story 50662d49(commit-then-model_validate refresh lint, 카디르 QA 재지적) — commit
+        # 직후 model_validate 前 명시 refresh. expire_on_commit=False라 즉시 크래시는 안 나지만
+        # (MissingGreenlet류) 이 레포 성문 규칙은 그 안전판에 기대지 말고 항상 refresh하라는
+        # 것 — 다른 세션/인스턴스가 commit 사이에 같은 행을 바꿨을 stale-read 가능성까지 닫는다.
+        await session.refresh(dep)
         await notify_attention_changed(org_id)
 
     return DependencyResponse.model_validate(dep)
@@ -193,6 +198,8 @@ async def update_dependency(
         from app.services.attention_events import notify_attention_changed
 
         await repo.session.commit()
+        # story 50662d49(commit-then-model_validate refresh lint) — create_dependency와 동형.
+        await repo.session.refresh(updated)
         await notify_attention_changed(repo.org_id)
 
     return DependencyResponse.model_validate(updated)

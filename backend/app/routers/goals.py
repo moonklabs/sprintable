@@ -419,6 +419,8 @@ async def update_goal(
         from app.services.attention_events import notify_attention_changed
 
         await repo.session.commit()
+        # story 50662d49(commit-then-model_validate refresh lint) — dependencies.py와 동형.
+        await repo.session.refresh(goal)
         await notify_attention_changed(repo.org_id)
     await _attach_org_project_slugs(repo.session, repo.org_id, [goal])
     return GoalResponse.model_validate(goal)
