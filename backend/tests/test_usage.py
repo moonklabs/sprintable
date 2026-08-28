@@ -51,7 +51,9 @@ async def test_get_usage_200():
         row.current_value = 3
         row.limit_value = 10
         row.period_start = datetime(2026, 4, 1, tzinfo=timezone.utc)
-        row.period_end = None
+        # story #3175 — period_end는 DB NOT NULL이 정본(ORM도 정렬 완료), None 픽스처는
+        # 이제 실제로 못 나오는 상태를 흉내내는 것이라 실제 기간말 값으로 교체.
+        row.period_end = datetime(2026, 4, 30, 23, 59, 59, tzinfo=timezone.utc)
         mock_result = MagicMock()
         mock_result.all.return_value = [row]
         session.execute = AsyncMock(return_value=mock_result)

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Text
+from sqlalchemy import DateTime, Integer, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,4 +46,17 @@ class UsageMeter(Base):
     current_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     limit_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3175 — 실DB(baseline schema.sql)는 NOT NULL·디폴트 없음이 원본(S48 도입
+    # 커밋부터, 마이그레이션으로 바뀐 적 0건). "미터는 기간이 필수"가 의미상 맞고, 이
+    # 컬럼을 실제로 쓰는 write 경로가 지금 0건이라 정본을 DB→ORM 방향으로 정렬한다
+    # (ORM이 nullable=True로 지어낸 행은 DB가 거부하는데 그 실패가 커밋 시점까지 잠복).
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # story #3175 — 같은 테이블 형제 컬럼 일괄 대조에서 발견: ORM에 아예 없었다(baseline엔
+    # 둘 다 DEFAULT now() NOT NULL로 실재). 읽기 코드가 없어 지금까지 조용했을 뿐 — 다른
+    # 모델들과 동일 스타일(server_default=func.now(), a2a_task.py 등 참고)로 채운다.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
