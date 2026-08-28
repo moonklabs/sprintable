@@ -40,11 +40,25 @@ async def get_owner_org_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | 
 
 
 async def is_org_agent_connected(db: AsyncSession, org_id: uuid.UUID) -> bool:
-    """org 단위 사실 — org에 agent 멤버가 하나라도 있으면 True(누가 연결했든)."""
-    row = (await db.execute(
-        select(TeamMember.id).where(TeamMember.org_id == org_id, TeamMember.type == "agent").limit(1)
-    )).first()
-    return row is not None
+    """org 단위 사실 — 실연결(stdio verify 왕복 완주) 에이전트가 하나라도 있으면 True.
+
+    story #3193 근본수정 — 예전엔 `TeamMember(type='agent')` **존재**만 봤다("레코드 생성"을
+    "연결"로 오판정: 연결 스텝을 건너뛰어도 에이전트 레코드는 남아 체크리스트가 거짓
+    완료를 표시했다). `get_verified_map()`(워크포스 목록 "연결 안 됨" CTA와 완전히 동일한
+    판별자 — story #2751②, `acked_seq >= verify_seq`)을 그대로 재사용한다 — 두 벌 판별자
+    금지(PO 지시). http-transport 에이전트는 이 durable 신호가 없어(agent_verify.py 상단
+    docstring 참고) 실제로 연결됐어도 False로 나올 수 있다 — 기존 CTA와 동형의 알려진
+    안전측(false-negative) 편향이라 이 스토리에서 새로 만드는 문제가 아니다."""
+    agent_ids = [
+        row[0] for row in (await db.execute(
+            select(TeamMember.id).where(TeamMember.org_id == org_id, TeamMember.type == "agent")
+        )).all()
+    ]
+    if not agent_ids:
+        return False
+    from app.services.agent_verify import get_verified_map
+    verified_map = await get_verified_map(db, agent_ids)
+    return any(verified_map.values())
 
 
 async def is_org_first_roundtrip_done(db: AsyncSession, org_id: uuid.UUID) -> bool:

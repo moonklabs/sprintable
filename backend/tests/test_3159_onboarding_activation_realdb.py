@@ -98,7 +98,14 @@ async def test_get_owner_org_id_only_owner_role():
 
 
 @pytest.mark.anyio
-async def test_is_org_agent_connected_requires_agent_member():
+async def test_is_org_agent_connected_requires_real_verify_not_just_member_record():
+    """story #3193 근본수정 — 예전엔 agent 멤버 레코드 **존재**만으로 True였다("생성"을
+    "연결"로 오판정: 연결 스텝을 건너뛰어도 레코드는 남아 체크리스트가 거짓 완료를 표시
+    했다, 실사고 재현). 지금은 get_verified_map()(#2751②, 워크포스 "연결 안 됨" CTA와
+    동일 판별자)의 stdio verify 왕복(acked_seq>=verify_seq)을 요구한다."""
+    from app.services.agent_verify import start_verification
+    from app.models.agent_gateway import AgentEventCursor
+
     eng, Session = await _engine()
     async with Session() as s:
         await _wipe(s, ORG)
@@ -123,6 +130,17 @@ async def test_is_org_agent_connected_requires_agent_member():
             await s.execute(text(
                 f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
             ))
+            await s.commit()
+            # 레코드만 생성 — 연결 스텝을 건너뛴(verify 왕복 0) 정확한 실사고 재현. 예전
+            # 판별자였다면 여기서 True로 거짓 완료를 표시했다.
+            assert (await svc.is_org_agent_connected(s, uuid.UUID(ORG))) is False
+
+            # 실연결 완주(verify Event 발급 + ack) — 이제야 True.
+            seq = await start_verification(
+                s, agent_id=uuid.UUID(agent_member), org_id=uuid.UUID(ORG), project_id=uuid.UUID(proj),
+            )
+            await s.commit()
+            s.add(AgentEventCursor(agent_id=uuid.UUID(agent_member), acked_seq=seq))
             await s.commit()
             assert (await svc.is_org_agent_connected(s, uuid.UUID(ORG))) is True
         finally:
