@@ -552,52 +552,75 @@ code_read_exempt:
 # 파일이 낡은 것).
 code_read_high_baseline:
   - key: AGENT_INBOX_HMAC_SECRET
-    reason: apps/web/src/services/inbox-item.service.ts — 기본값 없음, 미triage.
+    reason: >-
+      apps/web/src/services/inbox-item.service.ts — 기본값 없음, 미triage.
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: APP_BASE_URL
-    reason: apps/web/src/lib/auth/cookies.ts — 기본값 없음, 미triage(Amplify 레거시 override 후보).
+    reason: >-
+      apps/web/src/lib/auth/cookies.ts — 기본값 없음, 미triage(Amplify 레거시 override 후보).
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: FIREBASE_AUTH_ISSUE_SESSION
-    reason: apps/web/src/app/api/auth/firebase/session/route.ts — 기본값 없음, 미triage.
+    reason: >-
+      apps/web/src/app/api/auth/firebase/session/route.ts — 기본값 없음, 미triage.
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: FIREBASE_AUTH_MOBILE_ISSUE
-    reason: apps/web/src/app/auth/native/route.ts — 기본값 없음, 미triage.
+    reason: >-
+      apps/web/src/app/auth/native/route.ts — 기본값 없음, 미triage.
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: FIREBASE_OAUTH_HANDOFF_ENABLED
-    reason: apps/web/src/app/auth/oauth-handoff/route.ts — 기본값 없음, 미triage(기능 플래그 추정).
+    reason: >-
+      apps/web/src/app/auth/oauth-handoff/route.ts — 기본값 없음, 미triage(기능 플래그 추정).
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: MCP_ALLOWED_TOKEN_REFS
-    reason: apps/web/src/lib/mcp-secrets.ts — 기본값 없음, 미triage.
+    reason: >-
+      apps/web/src/lib/mcp-secrets.ts — 기본값 없음, 미triage.
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: NEXT_PUBLIC_APP_URL
-    reason: apps/web/src/lib/auth/cookies.ts 등 — 기본값 없음, 미triage.
+    reason: >-
+      apps/web/src/lib/auth/cookies.ts 등 — 기본값 없음, 미triage.
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: NEXT_PUBLIC_FIREBASE_API_KEY
     reason: >-
       apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage. NEXT_PUBLIC_*
       빌드타임 인라이닝 모호성 있음(AC6 한계 참고).
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: NEXT_PUBLIC_FIREBASE_APP_ID
-    reason: apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(위와 동일 축).
+    reason: >-
+      apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(위와 동일 축).
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
-    reason: apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(위와 동일 축).
+    reason: >-
+      apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(위와 동일 축).
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: NEXT_PUBLIC_FIREBASE_AUTH_ENABLED
-    reason: apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(기능 플래그 추정).
+    reason: >-
+      apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(기능 플래그 추정).
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
   - key: NEXT_PUBLIC_FIREBASE_PROJECT_ID
-    reason: apps/web/src/lib/auth/firebase-client.ts·lib/db/server.ts — 기본값 없음, 미triage(위와 동일 축).
+    reason: >-
+      apps/web/src/lib/auth/firebase-client.ts·lib/db/server.ts — 기본값 없음, 미triage(위와 동일 축).
+      2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: PO
-    until: "2026-08-27"
+    until: "2026-09-26"
