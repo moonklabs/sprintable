@@ -348,6 +348,13 @@ app.add_middleware(
     ],
 )
 
+# story #3173(결제②-B) — AU(automation_units) 계측. app/dependencies/auth.py의
+# get_current_user()가 request.state.au_actor/au_org_id를 심어두면 여기서 응답 완료 후
+# 읽어 usage_meters에 쌓는다. 전체 fail-open(계측 예외가 요청에 영향 0) — 모듈 docstring 참고.
+from app.services.au_metering import AUMeteringMiddleware  # noqa: E402
+
+app.add_middleware(AUMeteringMiddleware)
+
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)

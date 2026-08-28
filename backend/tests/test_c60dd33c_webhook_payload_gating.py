@@ -98,13 +98,20 @@ class _MockClient:
 
     async def post(self, url, content=None, headers=None):
         self._sink.append({"url": url, "body": content, "headers": headers or {}})
-        return MagicMock()
+        # story #3173 — _send_webhook_targets가 이제 resp.status_code를 실제로 읽는다
+        # (AU 계측 성공 판정). 실제 httpx.Response 모양으로 200을 명시.
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
 
 
 def _patches(sink):
     return [
         patch.object(wd.httpx, "AsyncClient", lambda *a, **k: _MockClient(sink)),
         patch.object(wd, "validate_webhook_url_async", new=AsyncMock()),
+        # story #3173 — AU 계측이 실제 DB 세션을 열려 하지 않도록 차단(이 테스트의 관심사는
+        # discord 변환+게이팅이지 AU 계측이 아님 — 그건 test_3173_* 파일들이 전담).
+        patch("app.services.au_metering.record_au_usage", new=AsyncMock()),
     ]
 
 
