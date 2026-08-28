@@ -661,3 +661,52 @@ describe('ApprovalRequestCard — story #3151 agent_decision 결정 재료(질�
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
   });
 });
+
+// story #5ace2e84 — 채팅 결재카드 N+1 처방. chat-view.tsx가 대화 단위로 배치조회한 gate를
+// initialGate prop으로 물려받으면 이 카드는 독립 GET /api/gates/{id}를 안 태워야 한다(PO
+// 실측: 대화 진입당 최대 51발 N+1의 직접 원인). use-gate-batch.ts는 별도 단위테스트로
+// 순수함수(collectUnrequestedGateIds)를 커버하므로, 여기서는 소비부(카드)가 initialGate를
+// 실제로 존중하는지만 값으로 단언한다.
+describe('ApprovalRequestCard — initialGate(story #5ace2e84 배치조회 소비)', () => {
+  it('initialGate={kind:ready}면 독립 fetchGate()를 안 태우고 그 값으로 바로 렌더된다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const gateData = gate({ work_item_summary: { title: '배치조회 대조', slug: null } });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard
+            target={{ work_item_type: gateData.work_item_type, work_item_id: gateData.work_item_id, gate_id: gateData.id, actions: ['approve', 'reject'] }}
+            initialGate={{ kind: 'ready', gate: gateData }}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('배치조회 대조');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('initialGate={kind:loading}이면(배치 진행 중) 완료를 기다리고 독립 fetchGate()도 안 태운다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard
+            target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }}
+            initialGate={{ kind: 'loading' }}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('initialGate 미지정(배치 커버 밖)이면 기존처럼 개별 fetchGate()로 폴백한다(회귀 0)', async () => {
+    const gateData = gate({ work_item_summary: { title: '개별폴백 대조', slug: null } });
+    await mount(gateData);
+    expect(container.textContent).toContain('개별폴백 대조');
+  });
+});
