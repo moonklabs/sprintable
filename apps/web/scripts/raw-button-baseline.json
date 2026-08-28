@@ -3,7 +3,9 @@
     "story #3164(DS 게이트 키스톤) grandfather baseline — 이 가드 첫 도입 시점 develop의 기존 raw <button>.",
     "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 개별 수리는 후속 표면 리팩터 판).",
     "story #3177(S3a) AC5 순감소 — chat-list-view.tsx 4건→0건(<Button> 전환, 이 스토리가 그 파일을",
-    "건드리며 실측 제거). 186f/511occ → 185f/507occ."
+    "건드리며 실측 제거). 186f/511occ → 185f/507occ.",
+    "story #3183(DS 순감소 리팩터 1호) — story-detail-panel.tsx 37건→0건(<Button variant=\"ghost\">",
+    "전량 전환, baseline 단일 파일 최다 채무 소거). 185f/507occ → 184f/470occ."
   ],
   "counts": {
     "app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx": 3,
@@ -142,7 +144,6 @@
     "components/kanban/kanban-list-view.tsx": 1,
     "components/kanban/kanban-trust-column.tsx": 1,
     "components/kanban/story-card.tsx": 6,
-    "components/kanban/story-detail-panel.tsx": 37,
     "components/locale-switcher.tsx": 1,
     "components/loop-queue/loop-queue-client.tsx": 3,
     "components/loops/artifact-preview.tsx": 2,
