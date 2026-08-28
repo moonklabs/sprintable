@@ -124,8 +124,12 @@ export function ActivationChecklistBanner() {
       <ul className="col-start-2 mt-2 space-y-1.5">
         {stepItems.map(({ key, label }) => {
           const met = state.steps[key];
+          // story #3181 — met 항목은 text-foreground. text-success(#1F9D57 계열색)는 info Alert의
+          // blue-soft(#EAEEFF) 배경 위에서 대비 미달(≈2.8:1<4.5·axe color-contrast 신규 위반). #2420
+          // 규율(tint 위 계열색 글자는 text-foreground)·완료 여부는 CircleCheck vs Circle 모양이 전달하므로
+          // 색 의존을 제거해도 신호 손실 0(색맹 접근성↑). 아이콘도 li 색 상속으로 함께 정리.
           return (
-            <li key={key} className={cn('flex items-center gap-1.5 text-sm', met ? 'text-success' : 'text-muted-foreground')}>
+            <li key={key} className={cn('flex items-center gap-1.5 text-sm', met ? 'text-foreground' : 'text-muted-foreground')}>
               {met ? <CircleCheck className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
               <span>{label}</span>
             </li>
