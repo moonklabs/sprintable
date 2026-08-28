@@ -22,6 +22,7 @@ story #3173 본문 "필수 보완" 조건 참고):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -125,13 +126,31 @@ def _au_weight_for(method: str, response: Response) -> int:
     return 0
 
 
+async def _record_au_usage_safe(org_id: uuid.UUID, delta: int) -> None:
+    """`asyncio.create_task`로 던져지는 실제 DB 왕복 — 이 코루틴 자신이 예외를 전부
+    삼켜야 한다(안 그러면 "Task exception was never retrieved" — 아무도 안 기다리는
+    태스크의 예외는 로그 없이 사라지거나 인터프리터 경고로만 남는다)."""
+    try:
+        await record_au_usage(org_id, delta)
+    except Exception:
+        logger.error("AU metering failed org_id=%s delta=%s", org_id, delta, exc_info=True)
+
+
 class AUMeteringMiddleware(BaseHTTPMiddleware):
     """story #3173 — 응답 완료 후 에이전트 트래픽만 골라 AU를 usage_meters에 쌓는다.
 
     ⛔조건ⓐ(페드루 PO, 2026-08-28) — 계측 경로 전체가 fail-open이어야 한다: 이 미들웨어의
     어떤 예외도 원 요청/응답에 영향을 주면 안 된다. `call_next()` 자체의 예외는 그대로
-    전파하되(그건 이 미들웨어의 책임이 아님), 계측 로직(아래 `_meter` 블록)은 통째로
-    try/except로 감싸 로그만 남기고 삼킨다."""
+    전파하되(그건 이 미들웨어의 책임이 아님), 계측 로직은 통째로 try/except로 감싸 로그만
+    남기고 삼킨다.
+
+    ⛔지연 편차 정정(페드루 PO, 2026-08-28, PR#3579 리뷰) — 최초 구현이 `_meter`(DB 왕복+
+    advisory lock 포함)를 `dispatch()` 안에서 inline `await`해, 설계(§6 "fire-and-forget")와
+    어긋나게 **모든 에이전트 요청**에 계측 DB 왕복을 응답 임계경로에 직렬로 얹고 있었다 —
+    평시엔 무해하지만 같은 org 동시 버스트 시 advisory lock 직렬화가 꼬리 지연을 문다. 지금은
+    「무엇을 셀지」(동기·순수 판단, `_should_meter`/`_au_weight_for` — I/O 없음)와 「실제로
+    쓰는 것」(`_record_au_usage_safe`, DB 왕복)을 분리해, 후자만 `asyncio.create_task`로
+    응답 반환 밖으로 던진다 — 클라이언트는 계측을 기다리지 않는다."""
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
@@ -139,26 +158,30 @@ class AUMeteringMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         try:
-            await self._meter(request, response)
+            org_id, weight = self._plan_metering(request, response)
+            if org_id is not None and weight > 0:
+                asyncio.create_task(_record_au_usage_safe(org_id, weight))
         except Exception:
             logger.error(
-                "AU metering failed path=%s method=%s", request.url.path, request.method,
+                "AU metering planning failed path=%s method=%s", request.url.path, request.method,
                 exc_info=True,
             )
         return response
 
-    async def _meter(self, request: Request, response: Response) -> None:
+    def _plan_metering(self, request: Request, response: Response) -> tuple[uuid.UUID | None, int]:
+        """순수 판단(I/O 없음) — 이 요청이 계측 대상인지·몇 AU인지만 정한다. 실제 쓰기는
+        호출부가 별도 태스크로 던진다(위 클래스 docstring 참고)."""
         if request.url.path in _STREAMING_PATHS:
-            return
+            return None, 0
         if response.status_code >= 400:
-            return
+            return None, 0
         au_actor = getattr(request.state, "au_actor", None)
         if au_actor != "agent":
-            return
+            return None, 0
         org_id_raw = getattr(request.state, "au_org_id", None)
         if not org_id_raw:
-            return
+            return None, 0
         weight = _au_weight_for(request.method, response)
         if weight <= 0:
-            return
-        await record_au_usage(uuid.UUID(str(org_id_raw)), weight)
+            return None, 0
+        return uuid.UUID(str(org_id_raw)), weight
