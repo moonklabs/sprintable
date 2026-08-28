@@ -729,3 +729,100 @@ describe('StoryDetailPanel — Workcell Conversation 구획 대화근거 요약 
     expect(container.textContent).toContain('연결된 대화 없음');
   });
 });
+
+// story #3169(P2·prod 실사용·선생님 제보) — prod 실사고 재현: DELETE 200(성공) 4초 뒤 같은
+// id에 재시도 DELETE→404가 handleDelete의 `!res.ok` 무조건 실패 분기(#2485)에 걸려 "이미
+// 지워졌다(=사실상 성공)"인데도 실패 토스트로 표시됐다. 이 스위트는 ①404를 성공 경로와
+// 합류시키는지 ②진짜 실패(5xx)는 여전히 실패로 남는지 ③동기 더블클릭이 fetch를 한 번만
+// 내보내는지(in-flight ref 가드) 값으로 고정한다.
+describe('StoryDetailPanel — 삭제 404/이중발사 처방(story #3169)', () => {
+  async function clickDeleteThenConfirm() {
+    const deleteButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.getAttribute('aria-label') === '스토리 삭제',
+    );
+    await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 확認 다이얼로그는 Dialog(Radix 계열, document.body에 포탈)라 container 안에는 없다.
+    const confirmButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '영구 삭제');
+    return confirmButton;
+  }
+
+  it('DELETE 404(이미 삭제됨) — 실패 토스트 없이 onDeleteSuccess+onClose가 성공과 동일하게 불린다', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url === '/api/stories/s1' && init?.method === 'DELETE') {
+        return { ok: false, status: 404, json: async () => ({ error: 'Story not found' }) };
+      }
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onDeleteSuccess = vi.fn();
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={onClose} onDeleteSuccess={onDeleteSuccess} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const confirmButton = await clickDeleteThenConfirm();
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('스토리 삭제에 실패했습니다.');
+    expect(onDeleteSuccess).toHaveBeenCalledWith('s1');
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('DELETE 500(진짜 실패) — 여전히 실패 토스트가 뜨고 onDeleteSuccess/onClose는 안 불린다(회귀 0)', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url === '/api/stories/s1' && init?.method === 'DELETE') {
+        return { ok: false, status: 500, json: async () => ({ error: 'boom' }) };
+      }
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onDeleteSuccess = vi.fn();
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={onClose} onDeleteSuccess={onDeleteSuccess} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const confirmButton = await clickDeleteThenConfirm();
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('스토리 삭제에 실패했습니다.');
+    expect(onDeleteSuccess).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('확認 버튼이 같은 tick에 두 번(동기 더블클릭) 눌려도 DELETE fetch는 한 번만 나간다(in-flight ref 가드)', async () => {
+    let resolveDelete: (() => void) | null = null;
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url === '/api/stories/s1' && init?.method === 'DELETE') {
+        await new Promise<void>((resolve) => { resolveDelete = resolve; });
+        return { ok: true, status: 200, json: async () => null };
+      }
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const confirmButton = await clickDeleteThenConfirm();
+    // 두 번째 dispatch까지 await 없이 같은 act 안에서 동기로 — deletingRef가 없으면 둘 다
+    // 첫 fetch(아직 in-flight, resolveDelete 미호출)를 지나쳐 두 번째 fetch까지 나간다.
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => url === '/api/stories/s1' && (init as { method?: string } | undefined)?.method === 'DELETE',
+    );
+    expect(deleteCalls.length).toBe(1);
+
+    resolveDelete!();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  });
+});

@@ -487,11 +487,21 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [newLabelColor, setNewLabelColor] = useState<string>(LABEL_PRESET_COLORS[0]);
   const [creatingLabel, setCreatingLabel] = useState(false);
 
+  // story #3169(P2·prod 실사용·선생님 제보) — 확認 다이얼로그 클릭이 React state(`deleting`)
+  // 재렌더 커밋 前에 두 번 처리되면(더블클릭·터치 중복 이벤트 등) `disabled={deleting}`만으론
+  // 못 막는다 — ref는 동기 즉시 반영이라 같은 tick 안 두 번째 호출도 확실히 걸러낸다.
+  const deletingRef = useRef(false);
   const handleDelete = useCallback(async () => {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
     setDeleting(true);
     try {
       const res = await fetch(`/api/stories/${story.id}`, { method: 'DELETE' });
-      if (!res.ok) {
+      // story #3169 — prod 실사고: 이미 삭제된(404) 대상에 재시도 DELETE가 붙으면(이중
+      // 발사·다른 화면의 잔존 표시 재클릭 등) 서버 관점에선 "지금 이 스토리가 없다"는
+      // 목표 상태가 이미 달성돼 있다 — 사용자에게는 성공과 동일한 결과다. 여기서만
+      // generic 실패 토스트(#2485)를 건너뛰고 성공 경로(뷰 제거+패널 닫기)와 합류시킨다.
+      if (!res.ok && res.status !== 404) {
         // story #2485 — backend delete_story()는 generic HTTP상태 코드만 낸다(진짜
         // 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
         addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
@@ -502,6 +512,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     } catch {
       addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
       setShowDeleteConfirm(false);
     }

@@ -19,6 +19,13 @@ const OVERLAY_MAX_HEIGHT_RATIO = 0.5; // AC5 — 뷰포트 절반 이하
 interface FlowNodeStoryPanelProps {
   storyId: string;
   onClose: () => void;
+  /** story #3169(P2·prod 실사용) — StoryDetailPanel의 onDeleteSuccess를 그대로 물려받아
+   * 상위(flow-client.tsx)에 전달한다. 이게 없으면 삭제가 서버에서 실제로 성공해도 갈래
+   * 캔버스(NextMakerScreen)의 자체 fetch 데이터엔 그 스토리가 노드로 그대로 남는다
+   * (「잔존 표시」 표면 — 이 패널은 KanbanBoard의 StoryDetailPanel과 달리 그동안 안 물려주고
+   * 있었다). 생략하면(undefined) 기존처럼 패널만 닫힌다(회귀 0, 다른 호출부 없음 — 이
+   * 컴포넌트는 flow-client.tsx가 유일한 소비처). */
+  onDeleteSuccess?: (storyId: string) => void;
 }
 
 type LoadState =
@@ -67,7 +74,7 @@ function computeOverlayPosition(rect: DOMRect | null, viewportHeight: number): {
  * 뛰고 `StoryDetailPanel`에 overlayPosition을 안 넘긴다 — 그러면 그 컴포넌트가 이미 갖고
  * 있는 전체화면 드로어 모드(KanbanBoard가 쓰는 그 경로 그대로, 새 컴포넌트 아님)로 뜬다.
  */
-export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps) {
+export function FlowNodeStoryPanel({ storyId, onClose, onDeleteSuccess }: FlowNodeStoryPanelProps) {
   const t = useTranslations('flow');
   const isMobile = useIsMobile();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -194,7 +201,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
     // StoryDetailPanel이 이미 갖고 있는 전체화면 드로어 모드로 뜬다(KanbanBoard와 동일 경로).
     return (
       <>
-        <StoryDetailPanel story={state.story} tasks={state.tasks} onClose={onClose} />
+        <StoryDetailPanel story={state.story} tasks={state.tasks} onClose={onClose} onDeleteSuccess={onDeleteSuccess} />
         {reviewEntry}
         {reviewDialog}
       </>
@@ -207,6 +214,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
         story={state.story}
         tasks={state.tasks}
         onClose={onClose}
+        onDeleteSuccess={onDeleteSuccess}
         overlayPosition={{ top: overlayPosition!.top, heightPx: overlayPosition!.heightPx }}
       />
       {reviewEntry}
