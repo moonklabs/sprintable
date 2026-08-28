@@ -1132,6 +1132,7 @@
     "verifyTimeoutTitle": "아직 연결이 확인되지 않았어요",
     "verifyTimeoutHint": "Claude Code를 재시작했는지 확인하고, 위 설정이 올바르게 저장됐는지 점검한 뒤 「다시 시도」를 눌러 주세요.",
     "artifactPending": "연결 설정 생성 중…",
+    "artifactError": "설정을 불러오지 못했습니다 — 다시 시도해 주세요.",
     "artifactRetry": "다시 시도",
     "verifyTitle": "연결 확인",
     "verifyRetry": "다시 테스트",
