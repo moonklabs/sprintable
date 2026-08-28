@@ -20,6 +20,8 @@ import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
 import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
+import { useGateBatchFetch } from '@/hooks/use-gate-batch';
+import type { CardState as GateCardState } from '@/components/chat/approval-request-card';
 import type { EventDefinitionSummary } from '@/lib/block-template';
 import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
@@ -135,6 +137,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 이 값을 읽어 effect의 재실행 여부를 판단하지 않기 때문(state로 하면 setState가 effect를
   // 재트리거해 순환 위험). messages만 dependency로 두고 "새로 보인 참조가 있는가"만 본다.
   const requestedEntityStatusKeysRef = useRef<Set<string>>(new Set());
+  // story #5ace2e84 — 결재카드 gate 배치조회 캐시(entityStatusByKey와 동일 정신·같은
+  // requestedKeysRef 패턴). PO 실측: 카드마다 독립 fetchGate()가 대화당 최대 51발(고유 38·
+  // 중복 13) N+1을 냈다 — 대화 전체 메시지를 한 번에 훑어 `?ids=` 배치(use-gate-batch.ts)로
+  // 수렴시킨다.
+  const [gateByKey, setGateByKey] = useState<Record<string, GateCardState>>({});
+  const requestedGateIdsRef = useRef<Set<string>>(new Set());
   // story #2637 — event_definitions 카탈로그(block_template 포함) 배치조회. entityStatusByKey와
   // 같은 이유로 대화당 1회만 fetch(카탈로그는 event_key 조합에 무관하게 항상 전체를 돌려주는
   // 응답이라, 메시지별로 다시 부를 이유가 없다 — 메시지가 100개여도 fetch는 1회).
@@ -247,6 +255,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 같은 장부·같은 캐시로 잡힌다(PO 지적 2026-08-08 — 이전엔 스레드 전용 참조가 영원히
   // "아직 모름"에 고착됐었다).
   useEntityStatusBatchFetch(messages, requestedEntityStatusKeysRef, setEntityStatusByKey);
+  // story #5ace2e84 — 결재카드 gate 배치조회(위 entityStatusByKey와 동일 패턴). requestedGateIdsRef·
+  // setGateByKey를 ThreadPanel에도 그대로 물려줘(아래 렌더부) 스레드 답글의 결재카드도 같은
+  // 장부·같은 캐시로 잡힌다.
+  useGateBatchFetch(messages, requestedGateIdsRef, setGateByKey);
   // story #1977: mark-read 중복 POST 가드 — 이미 이 up_to까지 보냈으면 재전송 안 함(멱등이라
   // 서버는 안전하지만, 스크롤/신규메시지마다 매번 쏘는 낭비 방지).
   const markedReadUpToRef = useRef<string | null>(null);
@@ -949,6 +961,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             projectId={projectId}
                             entityStatusByKey={entityStatusByKey}
               eventDefinitionsByKey={eventDefinitionsByKey}
+                            gateByKey={gateByKey}
                             onFillComposer={handleFillComposer}
                             hitlAnswer={hitlAnswers.get(msg.id) ?? null}
                             onRespondHitl={(content) => handleSend(content)}
@@ -1075,6 +1088,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               eventDefinitionsByKey={eventDefinitionsByKey}
               requestedEntityStatusKeysRef={requestedEntityStatusKeysRef}
               setEntityStatusByKey={setEntityStatusByKey}
+              gateByKey={gateByKey}
+              requestedGateIdsRef={requestedGateIdsRef}
+              setGateByKey={setGateByKey}
             />
           </div>
         )}
