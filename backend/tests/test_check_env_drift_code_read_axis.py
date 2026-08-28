@@ -325,13 +325,16 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # cloudbuild.yaml build-frontend --build-arg 목록에 부재해 구조적으로 영구 미인라이닝을
     # 코드로 이중 확認, 후자는 FIREBASE_OAUTH_HANDOFF_ENABLED와 동형 안전-닫힘 토글에
     # Cloud Logging 30일 무트래픽 실측 결합) → exempt 23→30·high 11→4(7건 감소). 나머지
-    # 5건(FIREBASE_OAUTH_HANDOFF_ENABLED·NEXT_PUBLIC_APP_URL은 이미 실 IaC substitution으로
-    # covered라 애초에 high가 아니었던 baseline의 중복 등재분 — 제거해도 high 불변,
-    # AGENT_INBOX_HMAC_SECRET·APP_BASE_URL·MCP_ALLOWED_TOKEN_REFS는 값 존부가 아니라
-    # 로드맵/보안 정책 판단 필요해 baseline 잔존)는 high 카운트에 영향 없음 — 남은 high
-    # 4건은 이 3건 + `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
+    # 5건 중 FIREBASE_OAUTH_HANDOFF_ENABLED·NEXT_PUBLIC_APP_URL은 이미 실 IaC substitution으로
+    # covered라 애초에 high가 아니었던 baseline의 중복 등재분(제거해도 high 불변). 페드루
+    # PO가 라이브 env 이름 재실측으로 형제 비대칭(dev=NEXT_PUBLIC_APP_URL만 유·
+    # prod=APP_BASE_URL만 유) 발견 후 APP_BASE_URL도 cloudbuild.yaml deploy-frontend
+    # --update-env-vars에 `_NEXT_PUBLIC_APP_URL`(기존, dev/prod 정확분기)로 명시배선해
+    # IaC-covered 전환 → high 4→3. 남은 AGENT_INBOX_HMAC_SECRET·MCP_ALLOWED_TOKEN_REFS는
+    # 값 존부가 아니라 로드맵/보안 정책 판단 필요해 baseline 잔존 — 남은 high 3건은 이
+    # 2건 + `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
     assert len(highest) == 1, highest
-    assert len(high) == 4, high
+    assert len(high) == 3, high
     assert len(low) == 9, low
     assert len(exempt) == 30
 
@@ -438,13 +441,14 @@ def test_repo_code_read_high_baseline_is_wellformed():
     추가로 14→15, 2026-08-17 — #2728 NEXT_PUBLIC_EE_ENABLED를 cloudbuild.yaml/GHA 배선으로
     해소해 15→14, 2026-08-18 — #e6500272 LICENSE_CONSENT를 backend deploy 스텝 배선으로
     해소해 14→13, 2026-08-18 — #2758 NEXT_PUBLIC_TOSS_CLIENT_KEY를 cloudbuild.yaml build-arg+
-    GHA dev 분기 배선으로 해소해 13→12, 2026-08-28 story #3168 실 triage로 12→3 —
-    7건 code_read_exempt 승격+2건 이미 IaC-covered 중복 제거, 남은 3건은 로드맵/보안
-    판단 대기 — infra/manual-env-allowlist.yml code_read_high_baseline 섹션 머리말
-    참고)이 형식을 지키는지."""
+    GHA dev 분기 배선으로 해소해 13→12, 2026-08-28 story #3168 실 triage로 12→3(7건
+    code_read_exempt 승격+2건 이미 IaC-covered 중복 제거) → 페드루 PO 실측(dev/prod
+    APP_BASE_URL·NEXT_PUBLIC_APP_URL 형제 비대칭)으로 APP_BASE_URL도 cloudbuild.yaml
+    deploy-frontend에 배선해 3→2 — infra/manual-env-allowlist.yml code_read_high_baseline
+    섹션 머리말 참고)이 형식을 지키는지."""
     mod = _load_check_env_drift()
     baseline = mod._load_code_read_high_baseline()
-    assert len(baseline) == 3
+    assert len(baseline) == 2
     for key, entry in baseline.items():
         problem = mod._baseline_entry_expired(entry, mod._today())
         assert problem is None, f"{key}: {problem}"
