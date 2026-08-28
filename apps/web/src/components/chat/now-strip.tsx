@@ -7,9 +7,11 @@
  * 재사용(PO BE 계약 확定 2026-08-28, 신규 BE 0). collapsed/expanded 문법은 embed-group.tsx의
  * GateGroup(S2c③④)을 재사용(신규 패턴 0).
  *
- * ⚠️소멸 타이밍(AC4, PO 조정 2026-08-28): 진짜 실시간(SSE attention-changed)이 아니라
- * useAutoRefresh(전역 RefreshContext 폴링 주기, 기본 30초) 내 무회귀다 — 이벤트 기반 즉시
- * 소멸은 별 후속 스토리(entity:story:2b129e0b-b38d-4597-816a-914f43a5dfb3)로 분리됐다.
+ * ⚠️소멸 타이밍(AC4, PO 조정 2026-08-28) 갱신 — story #3180(위 후속 스토리, S3 트랙 완주 後
+ * 착수)이 착지해 이제 진짜 이벤트 기반 즉시 소멸이 있다: 기존 chat SSE 채널의
+ * `attention.changed` 신호(payload 없음 — 재조회 트리거) 수신 시 아래 `load()`를 즉시
+ * 1회 더 부른다. useAutoRefresh(전역 RefreshContext 폴링, 기본 30초)는 신호를 못 받는
+ * 환경(mux 비활성·SSE 끊김)의 **폴백**으로 그대로 유지한다(무회귀).
  *
  * ⚠️구조/데이터 층 우선(PO 지시 2026-08-28) — 시안(하이파이 mockup)의 좌측 그라데이션
  * 장식바·메타/시간 두 슬롯 분리 같은 미세 픽셀 디테일은 이 커밋에서 실 DS 프리미티브로
@@ -24,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { cardVariants } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAutoRefresh } from '@/hooks/use-auto-refresh';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import type { AttentionItem, MyActions } from '@/components/dashboard/command-center/types';
 import { buildNowStripItems, summarizeSeverity, type NowStripItem, type NowStripSeverity } from './derive-now-strip';
 
@@ -136,6 +139,16 @@ export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
   useAutoRefresh('chat-now-strip', () => { void load(); });
+
+  const mux = useSseMultiplexerContext();
+  useEffect(() => {
+    // story #3180(S3 후속) — 신호 수신 시 폴링 주기(useAutoRefresh) 대기 없이 즉시 재조회
+    // (AC2). payload 미사용 — presence(use-team-presence.ts)와 동형 트리거뿐이라 dedup
+    // 불필요(재배달돼도 재조회 1회 더 도는 것뿐, 멱등). mux가 null이면(플래그 OFF·Provider
+    // 밖) 그냥 무동작 — 위 useAutoRefresh 폴백만 돈다(AC3 하위호환).
+    const unsub = mux?.subscribe('attention.changed', () => { void load(); });
+    return () => unsub?.();
+  }, [mux, load]);
 
   const noopResolveName = useCallback((): string | null => null, []);
   const stripItems = useMemo(

@@ -111,6 +111,24 @@ async def test_trust_pipeline_raise_does_not_propagate():
         )  # 예외 없이 반환.
 
 
+# ── story #3180(S3 후속) — attention.changed 트리거도 다른 side-effect와 동일하게 격리돼야
+#    한다. notify_attention_changed 자신이 이미 내부 try/except로 감싸져 있어(테스트는
+#    tests/test_attention_events.py) 여기선 그 call-site 통합이 새 요구사항을 얹지
+#    않는다는 것만 재확認한다. ────────────────────────────────────────────────────────
+@pytest.mark.anyio
+async def test_attention_changed_raise_does_not_propagate():
+    with ExitStack() as stack:
+        _base_patches(stack)
+        stack.enter_context(patch(
+            "app.routers.events.push_to_org_members",
+            AsyncMock(side_effect=RuntimeError("attention push down")),
+        ))
+        await emit_story_status_changed(
+            AsyncMock(), uuid.uuid4(), _story(), "in-review",
+            actor_id=uuid.uuid4(), actor_type="human",
+        )  # 예외 없이 반환.
+
+
 # ── story #f2b66f32(3025, BE·상태 자가회수) — merge gate 자가회수도 다른 5종과 동일하게
 #    격리돼야 한다(실패해도 done 전이 자체는 무영향). _story()는 status="done" 고정이라 이
 #    side-effect가 실제로 시도되는 경로를 그대로 탄다. ───────────────────────────────────

@@ -10,6 +10,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import { NowFace } from './now-face';
 import koMessages from '../../../messages/ko.json';
 
+// story #3180 — mux는 mock으로 대체(now-strip.test.tsx와 동형 관례). 기본 null 반환이라
+// 기존 테스트 전부(mux 미언급)는 「Provider 밖」 폴백 경로 그대로 무회귀.
+const { useSseMultiplexerContextMock } = vi.hoisted(() => ({ useSseMultiplexerContextMock: vi.fn() }));
+vi.mock('@/components/realtime-provider', () => ({ useSseMultiplexerContext: () => useSseMultiplexerContextMock() }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -27,6 +32,8 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  useSseMultiplexerContextMock.mockReset();
+  useSseMultiplexerContextMock.mockReturnValue(null);
 });
 
 afterEach(async () => {
@@ -154,5 +161,33 @@ describe('NowFace', () => {
     );
     await mount();
     expect(container.textContent).not.toContain('other-proj');
+  });
+});
+
+describe('NowFace — story #3180 attention.changed 신호(AC2 즉시 재조회·AC3 하위호환)', () => {
+  it('mux가 없으면(플래그 OFF·Provider 밖) subscribe를 호출하지 않는다 — 폴링만 남는다', async () => {
+    const subscribe = vi.fn();
+    useSseMultiplexerContextMock.mockReturnValue(null);
+    stubFetch({ action_queue: { items: [] }, attention: { items: [] } }, { data: [] });
+    await mount();
+    expect(subscribe).not.toHaveBeenCalled();
+  });
+
+  it('mux가 있으면 attention.changed를 구독하고, 신호 수신 시 즉시 재조회한다', async () => {
+    let handler: (() => void) | undefined;
+    const subscribe = vi.fn((name: string, fn: () => void) => { handler = fn; return vi.fn(); });
+    useSseMultiplexerContextMock.mockReturnValue({ subscribe, subscribeMessage: vi.fn(), subscribeReconnect: vi.fn(), connected: true });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/dashboard/my-actions')) return { ok: true, json: async () => ({ action_queue: { items: [] }, attention: { items: [] } }) };
+      if (url.includes('/api/notifications')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(subscribe).toHaveBeenCalledWith('attention.changed', expect.any(Function));
+    const callsAfterMount = fetchMock.mock.calls.length;
+    expect(handler).toBeTruthy();
+    await act(async () => { handler!(); await Promise.resolve(); await Promise.resolve(); });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterMount);
   });
 });

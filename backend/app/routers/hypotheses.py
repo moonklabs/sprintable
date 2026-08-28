@@ -270,9 +270,17 @@ async def transition_hypothesis(
             )
         _assert_active_authorized(caller, hyp.owner_member_id, target=body.status)
     try:
-        return await svc.transition_hypothesis(session, org_id, caller, hypothesis_id, body)
+        result = await svc.transition_hypothesis(session, org_id, caller, hypothesis_id, body)
     except svc.HypothesisServiceError as err:
         _raise(err)
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish로 정렬. 이
+    # 직접-human-transition 엔드포인트는 이 지점 이후 추가 쓰기가 없는 유일한 콜사이트라(다른
+    # 3곳은 hypothesis.py::transition_hypothesis 콜사이트 주석 참조) 여기서만 신호를 낸다.
+    from app.services.attention_events import notify_attention_changed
+
+    await session.commit()
+    await notify_attention_changed(org_id)
+    return result
 
 
 @router.post("/{hypothesis_id}/outcome-draft")

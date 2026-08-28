@@ -113,5 +113,13 @@ async def record_auth_failure(raw_key: str) -> None:
                     await sync_agent_profile_presence(s, member_id, agent_status="auth_failed")
 
             await s.commit()
+
+        # story #3180(S3 후속) — agent_auth_failure attention 항목의 생성 입력. org 귀속
+        # 불가(invalid reason)면 애초에 이 org의 attention에 안 뜨므로 무조건 push할 필요는
+        # 없다(command_center.py ④ 정직성과 동형 — org_id 없으면 no-op).
+        if org_id is not None:
+            from app.services.attention_events import notify_attention_changed
+
+            await notify_attention_changed(org_id)
     except Exception:
         logger.warning("record_auth_failure failed(무해 — 401 응답엔 무영향)", exc_info=True)

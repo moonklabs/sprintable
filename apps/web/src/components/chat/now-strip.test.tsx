@@ -11,14 +11,19 @@ import koMessages from '../../../messages/ko.json';
 import { NowStrip } from './now-strip';
 import type { AttentionItem } from '@/components/dashboard/command-center/types';
 
-const { fetchWithAuthMock, useAutoRefreshMock } = vi.hoisted(() => ({
+const { fetchWithAuthMock, useAutoRefreshMock, subscribeMock, useSseMultiplexerContextMock } = vi.hoisted(() => ({
   fetchWithAuthMock: vi.fn(),
   useAutoRefreshMock: vi.fn(),
+  subscribeMock: vi.fn(),
+  useSseMultiplexerContextMock: vi.fn(),
 }));
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
 // story #3177 — 전역 RefreshContext(폴링 주기) 배선 자체는 useAutoRefreshMock 호출 인자로만
 // 검증한다(register 자체를 재구현하지 않는다, chat-list-view.test.tsx와 동일 관례).
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: (key: string, fn: () => void) => useAutoRefreshMock(key, fn) }));
+// story #3180 — mux는 useSseMultiplexerContextMock으로 대체(use-team-presence.test.tsx와
+// 동형 관례가 없어 최소 구현 — subscribe만 검증, 나머지 핸들 필드는 미사용이라 생략).
+vi.mock('@/components/realtime-provider', () => ({ useSseMultiplexerContext: () => useSseMultiplexerContextMock() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -65,6 +70,10 @@ beforeEach(() => {
   root = createRoot(container);
   fetchWithAuthMock.mockReset();
   useAutoRefreshMock.mockReset();
+  subscribeMock.mockReset();
+  useSseMultiplexerContextMock.mockReset();
+  // 기본값 — 플래그 OFF/Provider 밖과 동형(대부분의 기존 테스트는 mux 무관이라 null 폴백).
+  useSseMultiplexerContextMock.mockReturnValue(null);
 });
 
 afterEach(async () => {
@@ -152,5 +161,39 @@ describe('NowStrip — 폴링 배선(AC4 조정: 실시간 아닌 기존 Refresh
     await act(async () => { root.render(wrap(<NowStrip />)); });
     await flush();
     expect(useAutoRefreshMock).toHaveBeenCalledWith('chat-now-strip', expect.any(Function));
+  });
+});
+
+describe('NowStrip — story #3180 attention.changed 신호(AC2 즉시 재조회·AC3 하위호환)', () => {
+  it('mux가 없으면(플래그 OFF·Provider 밖) subscribe를 호출하지 않는다 — 폴링만 남는다', async () => {
+    useSseMultiplexerContextMock.mockReturnValue(null);
+    mockAttention([]);
+    await act(async () => { root.render(wrap(<NowStrip />)); });
+    await flush();
+    expect(subscribeMock).not.toHaveBeenCalled();
+  });
+
+  it('mux가 있으면 attention.changed를 구독한다', async () => {
+    const unsubscribe = vi.fn();
+    subscribeMock.mockReturnValue(unsubscribe);
+    useSseMultiplexerContextMock.mockReturnValue({ subscribe: subscribeMock, subscribeMessage: vi.fn(), subscribeReconnect: vi.fn(), connected: true });
+    mockAttention([]);
+    await act(async () => { root.render(wrap(<NowStrip />)); });
+    await flush();
+    expect(subscribeMock).toHaveBeenCalledWith('attention.changed', expect.any(Function));
+  });
+
+  it('attention.changed 신호 수신 시 폴링 주기 대기 없이 즉시 재조회한다', async () => {
+    let handler: (() => void) | undefined;
+    subscribeMock.mockImplementation((_name: string, fn: () => void) => { handler = fn; return vi.fn(); });
+    useSseMultiplexerContextMock.mockReturnValue({ subscribe: subscribeMock, subscribeMessage: vi.fn(), subscribeReconnect: vi.fn(), connected: true });
+    mockAttention([]);
+    await act(async () => { root.render(wrap(<NowStrip />)); });
+    await flush();
+    const callsAfterMount = fetchWithAuthMock.mock.calls.length;
+    expect(handler).toBeTruthy();
+    await act(async () => { handler!(); });
+    await flush();
+    expect(fetchWithAuthMock.mock.calls.length).toBe(callsAfterMount + 1);
   });
 });

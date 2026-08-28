@@ -102,6 +102,12 @@ async def emit_goal_status_changed(
     event_data["status"] = epic.status
     await _emit(db, org_id, "epic.status_changed", event_data, notify_member_id=epic.assignee_id)
 
+    # story #3180(S3 후속) — goal status 전이는 loop_overdue_goal(active 이탈)·
+    # loop_outcome_missing_goal(done 도달 시 outcome_status 확定) 파생의 실 입력.
+    from app.services.attention_events import notify_attention_changed
+
+    await notify_attention_changed(org_id)
+
 
 async def emit_goal_removed(
     db, org_id: uuid.UUID, epic_id: uuid.UUID, epic_title: str, project_id: uuid.UUID,
