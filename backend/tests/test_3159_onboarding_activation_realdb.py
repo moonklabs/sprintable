@@ -98,7 +98,14 @@ async def test_get_owner_org_id_only_owner_role():
 
 
 @pytest.mark.anyio
-async def test_is_org_agent_connected_requires_agent_member():
+async def test_is_org_agent_connected_requires_real_verify_not_just_member_record():
+    """story #3193 근본수정 — 예전엔 agent 멤버 레코드 **존재**만으로 True였다("생성"을
+    "연결"로 오판정: 연결 스텝을 건너뛰어도 레코드는 남아 체크리스트가 거짓 완료를 표시
+    했다, 실사고 재현). 지금은 get_verified_map()(#2751②, 워크포스 "연결 안 됨" CTA와
+    동일 판별자)의 stdio verify 왕복(acked_seq>=verify_seq)을 요구한다."""
+    from app.services.agent_verify import start_verification
+    from app.models.agent_gateway import AgentEventCursor
+
     eng, Session = await _engine()
     async with Session() as s:
         await _wipe(s, ORG)
@@ -122,6 +129,69 @@ async def test_is_org_agent_connected_requires_agent_member():
             ))
             await s.execute(text(
                 f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
+            ))
+            await s.commit()
+            # 레코드만 생성 — 연결 스텝을 건너뛴(verify 왕복 0) 정확한 실사고 재현. 예전
+            # 판별자였다면 여기서 True로 거짓 완료를 표시했다.
+            assert (await svc.is_org_agent_connected(s, uuid.UUID(ORG))) is False
+
+            # 실연결 완주(verify Event 발급 + ack) — 이제야 True.
+            seq = await start_verification(
+                s, agent_id=uuid.UUID(agent_member), org_id=uuid.UUID(ORG), project_id=uuid.UUID(proj),
+            )
+            await s.commit()
+            s.add(AgentEventCursor(agent_id=uuid.UUID(agent_member), acked_seq=seq))
+            await s.commit()
+            assert (await svc.is_org_agent_connected(s, uuid.UUID(ORG))) is True
+        finally:
+            await _wipe(s, ORG)
+    await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_is_org_agent_connected_falls_back_to_roundtrip_for_http_agents():
+    """PO 스티어(2026-08-28, PR#3595 리뷰) — http-transport(온보딩 권장 탭·주 경로)는
+    get_verified_map의 durable 신호가 애초에 없다. verify 신호 0(get_verified_map 전부
+    False)이어도 첫 왕복(휴먼→에이전트 응답)까지 이미 완주했으면 "연결"은 참이어야 한다
+    (왕복이 연결의 논리적 함의) — 안 그러면 실연결 회원의 체크리스트가 영구 미체크로
+    뒤집힌다(결함 방향 반전, PO 적발)."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj = _uuid()
+            human_member, agent_member = _uuid(), _uuid()
+            app_id = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES "
+                f"('{human_member}','{ORG}','human','H'),('{agent_member}','{ORG}','agent','A')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO project_access (id,project_id,member_id,role) VALUES ('{_uuid()}','{proj}','{human_member}','member')"
+            ))
+            await s.commit()
+            # verify Event/AgentEventCursor 0건(http 시나리오 모사) — get_verified_map 단독이면 False.
+            assert (await svc.is_org_agent_connected(s, uuid.UUID(ORG))) is False
+
+            now = datetime.now(timezone.utc)
+            t0, t1 = now - timedelta(hours=1), now
+            conv = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type) VALUES ('{conv}','{ORG}','{proj}','group')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_messages (id,conversation_id,sender_id,content,created_at) VALUES "
+                f"('{_uuid()}','{conv}','{human_member}','human-first','{t0.isoformat()}'),"
+                f"('{_uuid()}','{conv}','{agent_member}','agent-reply','{t1.isoformat()}')"
             ))
             await s.commit()
             assert (await svc.is_org_agent_connected(s, uuid.UUID(ORG))) is True

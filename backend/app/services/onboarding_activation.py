@@ -2,8 +2,10 @@
 
 단계 정의는 #3157(디디 activation 깔때기 측정)과 1:1 대조 확定(2026-08-27, 페드루 중계):
 ①가입=users.created_at ②이메일인증=users.email_verified ③org생성=org_members role='owner'
-최초 행 ④에이전트연결=그 org의 team_members(type='agent') 존재(owner 필터 없음 — org 단위
-사실, 초대 멤버가 연결해도 그 org는 완주) ⑤첫왕복=그 org conversation에서 휴먼 발신 메시지
+최초 행 ④에이전트연결=그 org에 실연결(stdio verify 왕복 완주 또는 첫 왕복 완주로 함의)된
+에이전트 존재(owner 필터 없음 — org 단위 사실, 초대 멤버가 연결해도 그 org는 완주. story
+#3193 근본수정 — 원래는 team_members(type='agent') **존재**만 봐서 "생성"을 "연결"로
+오판정했다, is_org_agent_connected 참고) ⑤첫왕복=그 org conversation에서 휴먼 발신 메시지
 "이후"에 온 최초 agent 발신 메시지(존재만으론 불충분 — 순서조건, #3157과 동형 판정).
 
 ③만 owner 축 유지 — "이 유저에게 org를 귀속"하는 목적(리마인드 대상 선별)이라 초대 멤버는
@@ -40,11 +42,34 @@ async def get_owner_org_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | 
 
 
 async def is_org_agent_connected(db: AsyncSession, org_id: uuid.UUID) -> bool:
-    """org 단위 사실 — org에 agent 멤버가 하나라도 있으면 True(누가 연결했든)."""
-    row = (await db.execute(
-        select(TeamMember.id).where(TeamMember.org_id == org_id, TeamMember.type == "agent").limit(1)
-    )).first()
-    return row is not None
+    """org 단위 사실 — 실연결(stdio verify 왕복 완주) 에이전트가 하나라도 있거나, 이미
+    첫 왕복(휴먼→에이전트 응답)까지 완주했으면 True.
+
+    story #3193 근본수정 — 예전엔 `TeamMember(type='agent')` **존재**만 봤다("레코드 생성"을
+    "연결"로 오판정: 연결 스텝을 건너뛰어도 에이전트 레코드는 남아 체크리스트가 거짓
+    완료를 표시했다). `get_verified_map()`(워크포스 목록 "연결 안 됨" CTA와 완전히 동일한
+    판별자 — story #2751②, `acked_seq >= verify_seq`)을 그대로 재사용한다 — 두 벌 판별자
+    금지(PO 지시).
+
+    ⛔PO 스티어(2026-08-28, PR#3595 리뷰) — get_verified_map만으로 끝내면 반쪽이었다.
+    http-transport(온보딩 권장 탭·주 경로)는 이 durable 신호가 애초에 없어(agent_verify.py
+    상단 docstring), get_verified_map만 쓰면 **실제로 첫 왕복까지 완주한 org조차 "연결"
+    항목이 영구 미체크**로 뒤집힌다(CTA에선 무해한 위음성이 체크리스트에선 결함 방향이
+    반전). `is_org_first_roundtrip_done()`을 OR로 더한다 — 왕복 완주는 "에이전트가
+    연결됐다"의 논리적 함의(에이전트가 응답하려면 연결돼 있어야 한다)를 이미 갖고 있는
+    **기존 사실의 재사용**이지, 새 판별자 발명이 아니다. 왕복 前·http 위음성 잔여는
+    story #3197(durable http verified 신호 신설)로 분리 — 이 함수 범위 밖."""
+    agent_ids = [
+        row[0] for row in (await db.execute(
+            select(TeamMember.id).where(TeamMember.org_id == org_id, TeamMember.type == "agent")
+        )).all()
+    ]
+    if agent_ids:
+        from app.services.agent_verify import get_verified_map
+        verified_map = await get_verified_map(db, agent_ids)
+        if any(verified_map.values()):
+            return True
+    return await is_org_first_roundtrip_done(db, org_id)
 
 
 async def is_org_first_roundtrip_done(db: AsyncSession, org_id: uuid.UUID) -> bool:
