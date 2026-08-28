@@ -195,8 +195,9 @@ async function handleCallback(request: Request, provider: string, code: string |
     return nativeRes;
   }
 
-  // AC3: 세션 만료로 OAuth 재로그인한 경우 작업 경로 복귀(safeNextPath 가드)·없으면 기존 /inbox.
-  const destination = inviteToken ? `${origin}/dashboard` : `${origin}${safeNextPath(nextCookie)}`;
+  // AC3: 세션 만료로 OAuth 재로그인한 경우 작업 경로 복귀(safeNextPath 가드)·없으면 홈(chat).
+  // story #3179(S3c) 후속(추가 실측 발견) — /dashboard 폐합, 홈=chat 재조준.
+  const destination = inviteToken ? `${origin}/chats` : `${origin}${safeNextPath(nextCookie)}`;
   const res = NextResponse.redirect(destination);
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
