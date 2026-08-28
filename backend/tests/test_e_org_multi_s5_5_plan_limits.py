@@ -111,7 +111,9 @@ def test_team_pro_skips_project_limit_but_not_member_limit():
     assert "free" in project_source
 
     member_source = inspect.getsource(check_member_invite_limit)
-    assert "_KNOWN_TIERS" in member_source  # free 단독분기가 아니라 known-tier 집합 방어
+    # story #3176 — KNOWN_TIERS로 리네임(언더스코어 제거, 모듈 밖 재사용 의도 명시 —
+    # cron.py::au_usage_warn이 이제 이 집합을 가져다 쓴다). 값·의미는 무변경.
+    assert "KNOWN_TIERS" in member_source  # free 단독분기가 아니라 known-tier 집합 방어
     assert '!= "free"' not in member_source and "!= 'free'" not in member_source
 
 
