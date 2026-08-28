@@ -165,8 +165,9 @@ async def test_ack_below_seq_returns_false():
 @pytest.mark.asyncio
 async def test_batch_query_handles_multiple_agents_with_mixed_states_in_constant_queries():
     """N=3 에이전트(각기 다른 상태) — 쿼리 수가 에이전트 수에 비례하지 않는지(fan-out 금지)
-    실측. `session.execute` 호출 횟수를 세어 2회(verify_seq 배치·acked_seq 배치)로 고정임을
-    직접 증명한다(PO가 명시적으로 fan-out 금지를 못박은 조건 — 문서 주장이 아니라 계측)."""
+    실측. `session.execute` 호출 횟수를 세어 3회(verify_seq 배치·acked_seq 배치·story #3197
+    first_connected_at 배치)로 고정임을 직접 증명한다(PO가 명시적으로 fan-out 금지를 못박은
+    조건 — 문서 주장이 아니라 계측)."""
     from unittest.mock import AsyncMock
 
     from app.services.agent_verify import get_verified_map, start_verification
@@ -195,7 +196,7 @@ async def test_batch_query_handles_multiple_agents_with_mixed_states_in_constant
 
             result = await get_verified_map(s, [never_verified, fully_verified, sent_not_acked])
 
-            assert call_count["n"] == 2  # 에이전트 수(3)와 무관 — 상수 쿼리.
+            assert call_count["n"] == 3  # 에이전트 수(3)와 무관 — 상수 쿼리.
             assert result == {
                 never_verified: False,
                 fully_verified: True,
@@ -215,5 +216,63 @@ async def test_empty_agent_ids_returns_empty_dict_without_query():
         async with Session() as s:
             result = await get_verified_map(s, [])
             assert result == {}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_http_agent_first_connected_at_marks_verified_durably():
+    """story #3197(AC1) — http-transport는 verify Event/AgentEventCursor를 아예 안 쓴다
+    (discrete 이벤트 왕복이 구조적으로 불가). `sync_agent_profile_presence`(heartbeat/SSE
+    connect 공용 choke point)로 한 번 online 관측되면 first_connected_at이 채워지고,
+    이후 offline(last_seen_at=None)로 되돌아가도(연결 済·오프라인 상태 모사) 계속 True다
+    (durable — freshness가 아니다)."""
+    from datetime import datetime, timezone
+
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+    from app.services.agent_verify import get_verified_map
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            http_agent = await _seed_agent(s, org_id, project_id)
+
+            # verify Event 0건 — 순수 http 시나리오. stdio 레일만이면 여기서 영구 False.
+            result = await get_verified_map(s, [http_agent])
+            assert result == {http_agent: False}
+
+            # heartbeat 1회(choke point) — first_connected_at 채워짐.
+            await sync_agent_profile_presence(
+                s, http_agent, last_seen_at=datetime.now(timezone.utc), agent_status="online",
+            )
+            await s.commit()
+            result = await get_verified_map(s, [http_agent])
+            assert result == {http_agent: True}
+
+            # 연결 종료(offline) 후에도 durable 유지 — freshness가 아니라 "한 번이라도" 판정.
+            await sync_agent_profile_presence(s, http_agent, last_seen_at=None, agent_status="offline")
+            await s.commit()
+            result = await get_verified_map(s, [http_agent])
+            assert result == {http_agent: True}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_never_connected_agent_stays_false_after_first_connected_column_added():
+    """story #3197(AC3) 음성대조 — 새 컬럼 신설이 기존 «미연결 이탈자=False» 판정을
+    건드리지 않는다(첫 배치조회는 first_connected_at NULL이니 회귀 0)."""
+    from app.services.agent_verify import get_verified_map
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+            result = await get_verified_map(s, [agent_id])
+
+            assert result == {agent_id: False}
     finally:
         await engine.dispose()

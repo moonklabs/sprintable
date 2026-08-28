@@ -108,6 +108,11 @@ class AgentProjectProfile(Base):
     agent_role: Mapped[str | None] = mapped_column(Text, nullable=True)
     fakechat_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3197 — durable "최초 연결 완료" 마커. last_seen_at은 disconnect 시 None으로
+    # 되돌지만(agent_gateway.py _mark_agent_disconnected) 이 컬럼은 한 번 채워지면 지우지
+    # 않는다(sync_agent_profile_presence 참고) — http-transport 에이전트의 "한 번이라도
+    # 연결 완료"를 durable로 남기는 최소 장치(get_verified_map이 OR로 셈).
+    first_connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     active_story_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True
     )
