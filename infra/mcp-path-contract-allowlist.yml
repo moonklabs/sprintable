@@ -39,9 +39,10 @@ declared_indirect:
       경로를 인자로 받는 공용 업로드 헬퍼(client.post(upload_path, ...)). 호출부 3곳 수기 추적:
       docs.py:164(/docs/{id}/attachments) · chat.py:121(/conversations/{id}/attachments) ·
       stories.py:147(/stories/{id}/attachments) — 서버 라우트 3곳(stories.py:578/docs.py:967/
-      conversations.py:2162) 전부 실재 확認됨(2026-07-28)
+      conversations.py:2162) 전부 실재 확認됨(2026-07-28). 2026-08-28 일괄 만료로 파이프라인
+      전면 차단 해소 — 실 triage는 story #3168로 이관.
     declared_by: 까심 아르야
-    until: "2026-08-27"
+    until: "2026-09-26"
   - module: chat
     function: _resolve_mention_content
     reason: >-
@@ -57,6 +58,7 @@ declared_indirect:
       GET /{id}) · /api/v2/visual-artifacts/{id}(visual_artifacts.py:214 GET /{id}) ·
       /api/v2/hypotheses/{id}(hypotheses.py:159 GET /{hypothesis_id}) ·
       /api/v2/evidence/{id}(evidence.py GET /{id}, story #2314 신설) — 여덟 다 실재
-      확認됨(2026-07-29).
+      확認됨(2026-07-29). 2026-08-28 일괄 만료로 파이프라인 전면 차단 해소 — 실 triage는
+      story #3168로 이관.
     declared_by: 디디 은와추쿠
-    until: "2026-08-27"
+    until: "2026-09-26"
