@@ -150,13 +150,31 @@ def test_norm_ignores_path_param_names():
 
 
 def test_repo_allowlist_entries_are_wellformed():
-    """저장소에 실제로 커밋된 선언(infra/mcp-path-contract-allowlist.yml)이 형식을 지키는지."""
+    """저장소에 실제로 커밋된 선언(infra/mcp-path-contract-allowlist.yml)이 형식을 지키는지 —
+    가드 자신의 `_today()`(실시간)로 재야 «지금 이 레포 상태가 유효한가»라는 이 테스트의
+    본뜻과 맞는다(실사고, 2026-08-28 — 구 코드는 `date(2026, 7, 28)`을 얼어붙은 기준일로
+    하드코딩해서, 30일 상한을 그 frozen 날짜 기준으로 재는 바람에 이후 어떤 정당한 `until`
+    연장도 영원히 이 테스트를 못 지나갔다 — until 갱신 자체가 불가능해지는 자기모순)."""
     mod = _load()
+    today = mod._today()
     mismatches, indirect = mod._load_allowlist()
     for kind, entries in (("declared_mismatches", mismatches), ("declared_indirect", indirect)):
         for key, entry in entries.items():
-            problem = mod._expired(entry, date(2026, 7, 28))
+            problem = mod._expired(entry, today)
             assert problem is None, f"{kind}/{key}: {problem}"
+
+
+def test_repo_allowlist_wellformed_check_still_enforces_horizon_cap():
+    """양성대조(페드루 지시, 2026-08-28) — 바로 위 테스트를 frozen date(2026,7,28) 대신
+    `mod._today()`(실시간)로 바꾼 뒤에도 30일 상한 집행 자체가 죽지 않았는지 값으로
+    고정한다: 상한을 넘는(45일 뒤) until을 넣으면 실시간 기준으로도 여전히 FAIL이어야
+    한다(날짜 기준을 동적으로 바꾸면서 상한 집행이 조용히 무력화되는 회귀를 막는다)."""
+    from datetime import timedelta
+    mod = _load()
+    today = mod._today()
+    over_cap = _entry(until=(today + timedelta(days=45)).isoformat())
+    problem = mod._expired(over_cap, today)
+    assert problem is not None and "너무 멀다" in problem
 
 
 def test_repo_current_state_is_green():
