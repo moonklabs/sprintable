@@ -164,7 +164,14 @@ export default async function AuthenticatedLayout({
     >
       <StorageCapacityToastProvider>
         <CrossProjectToastProvider>
-          <AuUsageBanner />
+          {/* 유나 design 스티어(PR#3592, 2026-08-28) — 컴포넌트 자체는 무패딩 유지(선례
+              storage-capacity-banner 동형), 마운트 자리에서 페이지 정합 좌우 패딩(px-3,
+              dashboard-shell.tsx의 ActivationChecklistBanner 래퍼와 동일 값 — 이 children이
+              그 형제로 렌더되는 위치라 시각 정합)+하단 여백을 준다. empty:hidden으로 배너가
+              null일 때 래퍼 자체도 완전히 접힌다(같은 패턴, activation-checklist-banner 선례). */}
+          <div className="px-3 pt-3 mb-3 empty:hidden">
+            <AuUsageBanner />
+          </div>
           {children}
         </CrossProjectToastProvider>
       </StorageCapacityToastProvider>
