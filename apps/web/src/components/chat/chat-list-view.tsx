@@ -11,6 +11,8 @@ import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-ss
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
 import { Avatar } from '@/components/shared/avatar';
+import { Button } from '@/components/ui/button';
+import { NowStrip } from './now-strip';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -173,10 +175,11 @@ function ConversationRow({
   ) : null;
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted"
     >
       {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
@@ -213,7 +216,7 @@ function ConversationRow({
           )}
         </div>
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -241,10 +244,11 @@ function OutsideProjectRow({
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted"
     >
       <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
         conv.type === 'dm' ? 'bg-primary/15 text-primary' : 'bg-info/15 text-info'
@@ -257,7 +261,7 @@ function OutsideProjectRow({
         {/* ⭐AC③ — 프로젝트명 병기("왜 여기 있지"를 그 자리서 답한다) */}
         <p className="truncate text-xs text-muted-foreground">{conv.project_name}</p>
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -507,14 +511,15 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         </div>
       )}
       {conversations.length < myTotal && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => { setLoadingMore(true); void fetchConversations(myOffset, true); }}
           disabled={loadingMore}
-          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+          className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground disabled:opacity-50"
         >
           {loadingMore ? '불러오는 중…' : `더 보기 (${myTotal - conversations.length}건)`}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -552,19 +557,25 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv onClick={() => router.push(`/chats/${conv.id}`)} />
       ))}
       {allConversations.length < agentTotal && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => void fetchAllConversations(agentOffset, true)}
-          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground"
+          className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground"
         >
           더 보기 ({agentTotal - allConversations.length}건)
-        </button>
+        </Button>
       )}
     </div>
   );
 
   return (
     <div className="flex h-full flex-col">
+      {/* story #3177(S3a) — chat 구심점 최상단 고정 「지금」 스트립(대화 스크롤과 분리,
+          훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게 항상 상단 고정. */}
+      <div className="px-2 pt-2">
+        <NowStrip />
+      </div>
       {isAdminOrOwner ? (
         <Tabs defaultValue="my" onValueChange={(v) => { if (v === 'agent') loadAgentConversationsOnce(); }} className="flex min-h-0 flex-1 flex-col">
           <TabsList className="mx-4 mt-2 w-auto self-start">

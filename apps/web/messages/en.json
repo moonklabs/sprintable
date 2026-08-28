@@ -3473,6 +3473,13 @@
     "authFailureTooltipInvalid": "API key not recognized · {n} failures in last 5 min"
   },
   "chats": {
+    "nowStripLabel": "Now",
+    "nowStripCount": "· {count}",
+    "nowStripCollapse": "Collapse",
+    "nowStripExpand": "Expand",
+    "nowStripGroupDanger": "Action needed",
+    "nowStripGroupWarn": "Attention",
+    "nowStripGroupInfo": "Observe · Learn",
     "reportViewFull": "View full →",
     "reportCollapse": "Collapse",
     "reportEvidenceLabel": "Evidence",

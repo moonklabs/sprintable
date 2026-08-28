@@ -6,6 +6,8 @@ import { useTranslations } from 'next-intl';
 import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History, Clock } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
 import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, gateTypeLabelKey, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+import { cn } from '@/lib/utils';
+import { cardVariants } from '@/components/ui/card';
 
 const QUEUE_CAP = 5; // now-face.tsx CAP 관례 재사용(§7-4 잘림-보이기).
 
@@ -32,7 +34,8 @@ function gateLabel(t: ReturnType<typeof useTranslations>, gateType: string | nul
 // 필요(entity_id가 멤버/에픽 id)하고, 나머지 6종은 BE(#2538 계약)가 title/statement/
 // blocked_story_title을 이미 직접 싣는다 — 그 필드를 그대로 쓰면 된다(재해소 시도 자체가
 // 이 버그의 원인이었다: resolveName이 멤버/에픽 id만 알아 story 스코프 항목에서 늘 null).
-function attentionEntityLabel(
+// story #3177(S3a) — chat 「지금」 스트립이 이 계산을 재사용한다(§1b·두 벌 금지). export.
+export function attentionEntityLabel(
   item: AttentionItem,
   resolveName: (id: string | null | undefined) => string | null,
   epicTitles: Record<string, string>,
@@ -57,14 +60,24 @@ function attentionEntityLabel(
 // BE가 실어 보내는 경과일수 필드(타입마다 이름이 다르다 — age_days/falsified_days/
 // overdue_days/done_days) 중 있는 것을 그대로 보여준다(no-fiction: 실측값만, 지어낸 사유
 // 문구 0).
-function attentionDetailText(t: ReturnType<typeof useTranslations>, item: AttentionItem): string {
+// story #3177(S3a) — 7종 중 5종(agent_stuck/agent_auth_failure 제외)의 경과일수 필드는
+// 이름이 다르다(age_days/falsified_days/overdue_days/done_days) — 그 5종에 공통인 「일수」
+// 하나로 추출해 재사용(§1b "attentionDayCount 재사용" 전제 — 두 벌 금지). agent_stuck/
+// agent_auth_failure는 애초에 「일수」 개념이 없어(경과 timestamp·count가 별도 축) null.
+export function attentionDayCount(item: AttentionItem): number | null {
+  if (item.type === 'agent_stuck' || item.type === 'agent_auth_failure') return null;
+  if (item.type === 'unanswered_blocker') return item.age_days;
+  if (item.type === 'hypothesis_falsified') return item.falsified_days;
+  if (item.type === 'loop_overdue_hypothesis' || item.type === 'loop_overdue_goal') return item.overdue_days;
+  return item.done_days; // loop_outcome_missing_goal
+}
+
+// story #3177(S3a) — 「지금」 스트립도 같은 부제 텍스트를 쓴다(attentionEntityLabel/
+// attentionDayCount와 같은 재사용 결 — no-fiction 문구 생성 로직을 두 벌 두지 않는다).
+export function attentionDetailText(t: ReturnType<typeof useTranslations>, item: AttentionItem): string {
   if (item.type === 'agent_stuck') return t('ccAgentStuck', { gate: gateLabel(t, item.gate_type) });
   if (item.type === 'agent_auth_failure') return t('ccAttentionAuthFailure', { count: item.failure_count });
-  const days =
-    item.type === 'unanswered_blocker' ? item.age_days
-    : item.type === 'hypothesis_falsified' ? item.falsified_days
-    : item.type === 'loop_overdue_hypothesis' || item.type === 'loop_overdue_goal' ? item.overdue_days
-    : item.done_days; // loop_outcome_missing_goal
+  const days = attentionDayCount(item);
   return days != null ? t('ccAttentionDays', { days }) : t('ccAttentionGeneric');
 }
 
@@ -94,7 +107,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
     return (
       <Link
         href="/inbox?tab=gates"
-        className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
+        className={cn(cardVariants({ radius: 'card' }), 'flex items-center gap-2 border-l-2 p-2.5 text-xs transition hover:border-muted-foreground/30', PRIORITY_BORDER[item.priority])}
       >
         <ShieldCheck className="size-3.5 shrink-0 text-warning-strong" />
         <span className="min-w-0 flex-1 truncate text-foreground">
@@ -110,7 +123,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
     return (
       <Link
         href={ctx.blocked_story_id ? `/board?story=${ctx.blocked_story_id}` : '/board'}
-        className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
+        className={cn(cardVariants({ radius: 'card' }), 'flex items-center gap-2 border-l-2 p-2.5 text-xs transition hover:border-muted-foreground/30', PRIORITY_BORDER[item.priority])}
       >
         <Ban className="size-3.5 shrink-0 text-warning-strong" />
         <span className="min-w-0 flex-1 truncate text-foreground">
@@ -124,7 +137,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
     return (
       <Link
         href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
-        className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
+        className={cn(cardVariants({ radius: 'card' }), 'flex items-center gap-2 border-l-2 p-2.5 text-xs transition hover:border-muted-foreground/30', PRIORITY_BORDER[item.priority])}
       >
         <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-foreground">
@@ -143,7 +156,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
     console.warn('ActionZone/QueueRow: unrecognized action_queue item type', { type: unknownType });
   }
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-l-2 border-dashed border-border bg-card p-2.5 text-xs text-muted-foreground">
+    <div className={cn(cardVariants({ radius: 'card' }), 'flex items-center gap-2 border-l-2 border-dashed p-2.5 text-xs text-muted-foreground')}>
       <span className="min-w-0 flex-1 truncate">{t('ccQueueUnknownType')}</span>
     </div>
   );
@@ -164,7 +177,7 @@ function WaitingRow({ item }: { item: QueueItem }) {
   return (
     <Link
       href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
-      className="flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30"
+      className={cn(cardVariants({ radius: 'card' }), 'flex items-center gap-2 p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30')}
     >
       <Clock className="size-3.5 shrink-0" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate: gateLabel(t, ctx.gate_type) })}</span>
@@ -181,7 +194,7 @@ function AttentionRow({ item, resolveName, epicTitles }: { item: AttentionItem; 
   const entity = attentionEntityLabel(item, resolveName, epicTitles);
   const detail = attentionDetailText(t, item);
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 text-xs">
+    <div className={cn(cardVariants({ radius: 'card' }), 'flex items-start gap-2 p-2.5 text-xs')}>
       <span className="mt-1 size-1.5 shrink-0 rounded-full bg-info/60" aria-hidden="true" />
       <p className="min-w-0 flex-1 text-foreground">
         <span className="font-medium">{entity}</span>{' '}
@@ -232,7 +245,7 @@ export function ActionZone({ data, resolveName, epicTitles }: {
     : t('ccDayAgo', { n: Math.floor(lastSeenMinutesAgo / 1440) });
 
   return (
-    <section aria-label={t('ccZoneActions')} className="space-y-3 rounded-xl border border-border bg-card/40 p-3">
+    <section aria-label={t('ccZoneActions')} className={cn(cardVariants({ radius: 'compact' }), 'space-y-3 bg-card/40 p-3')}>
       <h3 className="text-sm font-semibold text-foreground">{t('ccZoneActions')}</h3>
 
       {/* 큐+주의 0 & is_clear → 차분한 "괜찮다" 빈 상태(loud X) */}

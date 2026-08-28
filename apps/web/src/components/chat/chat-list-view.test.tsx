@@ -11,6 +11,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatListView } from './chat-list-view';
 
+// story #3177(S3a) — ChatListView가 이제 NowStrip을 항상 마운트한다. 이 테스트의 관심사는
+// 대화 목록 자체(SSE/아바타/URL 조립)라 NowStrip의 전역 RefreshContext 폴링 배선까지
+// 실 provider로 끌고 오지 않는다(useChatSse와 동일 관례 — 교차관심사 훅은 no-op mock).
+vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
+
 const { useDashboardContextMock, pushMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   pushMock: vi.fn(),
