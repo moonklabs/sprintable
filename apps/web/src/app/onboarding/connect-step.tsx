@@ -143,8 +143,19 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         else setInitialError(true);
         return;
       }
-      const json = (await res.json()) as { data?: { content?: string }; content?: string };
-      const content = json?.data?.content ?? json?.content;
+      // story #3192(온보딩·크럭스) — BE 응답 shape이 이미 `{content}` 단일파일에서 `{files[],
+      // mcp_config, api_key}`(agents.py::_connection_artifact, `⚠️BREAKING(dev-only)` 주석
+      // 참조)로 바뀐 뒤였는데 이 fetchArtifact만 옛 `content` 필드를 계속 읽고 있었다 — 신규
+      // 계정은 항상 `content=undefined`라 아티팩트가 절대 안 채워지는(재시도해도 동일 mismatch
+      // 재발) 크럭스였다. agent-connection-settings-section.tsx(story #2751, 같은 BE 응답을
+      // 먼저 새 shape으로 고쳐 소비하던 자매 소비처)의 파싱을 그대로 재사용(발명 0).
+      const json = (await res.json()) as {
+        data?: { files?: { filename: string; content: string }[] };
+        files?: { filename: string; content: string }[];
+      };
+      const payload = json?.data ?? json;
+      const mcpFile = (payload?.files ?? []).find((f) => f.filename === '.mcp.json');
+      const content = mcpFile?.content;
       if (typeof content !== 'string') {
         if (reqTransport) setArtifactErrors((p) => ({ ...p, [reqTransport]: true }));
         else setInitialError(true);
@@ -338,8 +349,11 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
               <div className={cn('h-3 w-1/2 rounded bg-muted', !artifactError && !isHostedUnavailable && 'animate-pulse')} />
               <div className={cn('h-3 w-2/3 rounded bg-muted', !artifactError && !isHostedUnavailable && 'animate-pulse')} />
               <div className="flex items-center gap-2 pt-1">
+                {/* story #3192 ② — api_key:null 200(또는 shape mismatch) 후 실패 상태를 계속
+                    "생성 중…"으로 위장하던 분기 제거. artifactError면 정직하게 실패를 알린다 —
+                    재시도 버튼과 짝을 이루는 문구라야 "눌러도 안 됨"으로 안 읽힌다. */}
                 <p className="text-xs text-muted-foreground">
-                  {isHostedUnavailable ? t('artifactUnavailable') : t('artifactPending')}
+                  {isHostedUnavailable ? t('artifactUnavailable') : artifactError ? t('artifactError') : t('artifactPending')}
                 </p>
                 {artifactError && !isHostedUnavailable && (
                   <Button

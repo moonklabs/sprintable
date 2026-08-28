@@ -1132,6 +1132,7 @@
     "verifyTimeoutTitle": "Not connected yet",
     "verifyTimeoutHint": "Make sure you restarted Claude Code and that the config above was saved correctly, then press Retry.",
     "artifactPending": "Preparing connection config…",
+    "artifactError": "Couldn't load the connection config — please retry.",
     "artifactRetry": "Retry",
     "verifyTitle": "Verify connection",
     "verifyRetry": "Run test",
