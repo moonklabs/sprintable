@@ -42,7 +42,12 @@ async function flush() {
 
 describe('EmbedCard artifact 실 렌더 인라인 — story #2905 S2c①', () => {
   it('artifact detail fetch 성공(latest_version_number 있음) → ArtifactThumbnail 렌더', async () => {
+    // story #3208 — preview(project_id 해소)→detail(X-Project-Id 명시) 2단 왕복이다
+    // (#2168 doc own-href와 동형 근본원인·처방).
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/visual-artifacts/preview?id=art-1') {
+        return { ok: true, json: async () => ({ data: { projectId: 'p-current' } }) };
+      }
       expect(url).toBe('/api/visual-artifacts/art-1');
       return { ok: true, json: async () => ({ data: { latest_version_number: 3, anchor_version: 2 } }) };
     }));

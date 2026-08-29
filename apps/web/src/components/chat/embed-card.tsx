@@ -445,6 +445,36 @@ export function EntityPreviewModal({
       return () => { cancelled = true; };
     }
 
+    if (entityType === 'artifact') {
+      // story #3208(PO customer-zero) — GET /api/visual-artifacts/{id}는 «현재 탭이 보고
+      // 있는» project로 스코프된다(fetch 인터셉터가 X-Project-Id를 그걸로 채움) — 아티팩트가
+      // 다른 project 소속이면(채팅에서 흔함, doc #2168과 동형) 대상이 실재해도 404였다.
+      // preview(org 스코프 조회+has_project_access 검증, BE 신설)로 실제 project_id를 먼저
+      // 알아낸 뒤 그 값을 X-Project-Id로 명시 실어 detail을 정확한 project로 조회한다 —
+      // project-context-client.ts의 fetch 인터셉터는 이미 명시된 X-Project-Id를 안 덮는다
+      // (switcher의 cross-org 로드가 쓰는 것과 동일한 기존 escape hatch, 새 메커니즘 0).
+      void (async () => {
+        try {
+          const previewRes = await fetchWithAuth(`/api/visual-artifacts/preview?id=${encodeURIComponent(entityId)}`);
+          if (!previewRes.ok) throw new Error();
+          const previewJson = (await previewRes.json()) as { data?: { projectId?: string } };
+          const resolvedProjectId = previewJson.data?.projectId;
+          if (!resolvedProjectId) throw new Error();
+          const detailRes = await fetchWithAuth(`/api/visual-artifacts/${entityId}`, {
+            headers: { 'X-Project-Id': resolvedProjectId },
+          });
+          if (!detailRes.ok) throw new Error();
+          const detailJson = (await detailRes.json()) as { data?: Record<string, unknown> };
+          if (!cancelled) setDetail(detailJson.data ?? null);
+        } catch {
+          if (!cancelled) setNotFound(true);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
     const url = ENTITY_API[entityType]?.(entityId);
     if (!url) return; // hypothesis 등 — fetch 전략 자체가 없다(loading도 이미 false로 시작).
     fetch(url)
@@ -720,10 +750,24 @@ export function EmbedCard({
     let cancelled = false;
     const url = ENTITY_API.artifact?.(entity_id);
     if (!url) return;
-    void fetchWithAuth(url)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: { data?: Record<string, unknown> } | null) => { if (!cancelled) setArtifactDetail((json?.data ?? null) as typeof artifactDetail); })
-      .catch(() => { if (!cancelled) setArtifactDetail(null); });
+    // story #3208 — EntityPreviewModal의 detail fetch와 동형 처방(preview로 실제 project_id를
+    // 먼저 알아내 X-Project-Id로 명시). 이 썸네일 fetch는 원래도 실패 시 조용히 폴백(plain
+    // 라벨 폼)이라 하드 실패는 아니었지만, 같은 근본원인(현재 project로만 스코프)이라 같이 고친다.
+    void (async () => {
+      try {
+        const previewRes = await fetchWithAuth(`/api/visual-artifacts/preview?id=${encodeURIComponent(entity_id)}`);
+        if (!previewRes.ok) throw new Error();
+        const previewJson = (await previewRes.json()) as { data?: { projectId?: string } };
+        const resolvedProjectId = previewJson.data?.projectId;
+        if (!resolvedProjectId) throw new Error();
+        const detailRes = await fetchWithAuth(url, { headers: { 'X-Project-Id': resolvedProjectId } });
+        if (!detailRes.ok) throw new Error();
+        const json = (await detailRes.json()) as { data?: Record<string, unknown> };
+        if (!cancelled) setArtifactDetail((json.data ?? null) as typeof artifactDetail);
+      } catch {
+        if (!cancelled) setArtifactDetail(null);
+      }
+    })();
     return () => { cancelled = true; };
   }, [entity_type, entity_id]);
 

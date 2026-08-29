@@ -149,6 +149,32 @@ async function getVerifiedOrgId(fastapiUrl: string, accessToken: string): Promis
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// story #3208(PO customer-zero, 2026-08-29) — bare `/artifacts/{id}` 레거시 리다이렉트가
+// 아래 일반 경로(쿠키/JWT로 «현재» projectId를 추측 → 그 project에서 리소스를 찾는 꼴)를
+// 그대로 타면, 아티팩트가 **다른** project 소속일 때 항상 실패한다(아티팩트는 정확히 하나의
+// project에 속하지 «현재 보고 있는» project에 속하는 게 아니다 — doc의 #2168과 동형 클래스).
+// 아티팩트 자신의 실제 project를 `GET /api/v2/visual-artifacts/preview`(BE 신설, org 스코프
+// 조회 + has_project_access 검증)로 직접 물어 해소한다 — 추측 0, 진짜 위치.
+async function resolveArtifactOwnProject(
+  fastapiUrl: string, orgId: string, artifactId: string, accessToken: string,
+): Promise<{ orgSlug: string; projectSlug: string } | null> {
+  try {
+    const res = await fetch(`${fastapiUrl}/api/v2/visual-artifacts/preview?id=${artifactId}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, 'X-Org-Id': orgId },
+    });
+    if (!res.ok) return null;
+    const json = await res.json() as { data?: { org_slug?: string; project_slug?: string | null } };
+    const orgSlug = json.data?.org_slug;
+    const projectSlug = json.data?.project_slug;
+    if (!orgSlug || !projectSlug) return null;
+    return { orgSlug, projectSlug };
+  } catch {
+    return null;
+  }
+}
+
 // story #1998(급, 선생님 실사용 "보드가 404") — access token의 app_metadata.project_id를
 // CURRENT_PROJECT_COOKIE 부재 시 fallback으로 쓴다. 근본원인: 이 쿠키는 onboarding-form.tsx·
 // switch-project·switch-org 명시 액션에서만 SET되고 평범한 로그인(POST /api/auth/login)에서는
@@ -194,13 +220,29 @@ async function redirectLegacyResourcePath(
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const orgId = await getVerifiedOrgId(fastapiUrl, accessToken);
-  // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
-  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
-    ?? await getProjectIdFromAccessToken(accessToken);
   // orgId조차 없으면(토큰 자체가 org_id를 못 실은 예외적 경우) 개입할 근거가 없어 그대로 통과
   // (Next 자체 404) — verifyAccessToken 통과 후 이론상 가능하나 실사용 재현 없음, story #2212
   // 스코프 밖(그 경우엔 org조차 모르니 org-briefing으로도 못 보낸다).
   if (!orgId) return null;
+
+  // story #3208 — artifacts는 «현재 project 추측»이 아니라 «자기 자신이 속한 project»로
+  // 해소한다(doc #2168과 동형). id가 UUID 모양일 때만 시도하고, 실패하면(대상 없음·접근권
+  // 없음·백엔드 오류) 아래 일반 경로로 자연히 폴백한다(회귀 0 — 기존 동작을 대체하는 게
+  // 아니라 artifacts에 한해 우선순위가 더 높은 해소 경로를 추가하는 것).
+  if (resourceName === 'artifacts' && segments[1] && UUID_RE.test(segments[1])) {
+    const ownSlugs = await resolveArtifactOwnProject(fastapiUrl, orgId, segments[1], accessToken);
+    if (ownSlugs) {
+      const rest = pathname.slice(`/${resourceName}`.length);
+      const url = request.nextUrl.clone();
+      url.pathname = `/${ownSlugs.orgSlug}/${ownSlugs.projectSlug}/${resourceName}${rest}`;
+      url.searchParams.delete(RESOLVE_RETRY_PARAM);
+      return NextResponse.redirect(url, 301);
+    }
+  }
+
+  // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
+  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
+    ?? await getProjectIdFromAccessToken(accessToken);
   // story #2212 — 여기서 그냥 null(→ Next 404)을 주던 것이 결함이었다. "프로젝트를 못 정했다"는
   // 사고가 아니라 코드 주석에 그대로 선언된 설계였지만("해소 불가면 null"), 그 선택 자체가
   // dead-end라 처방 대상이다. org는 확定됐으니 org-briefing(프로젝트 불필요 페이지)으로 보내고
