@@ -21,6 +21,8 @@
 # 못 잡는 것(선언): ⓐ다른 uid가 띄운 PG — 그 postmaster.pid를 못 읽지만, 같은 이유로
 # 커널이 그 uid의 shm을 ipcrm으로부터도 막아주므로 안전(EPERM, 스윕에서 조용히 스킵).
 # ⓑ같은 uid의 PG 아닌 SysV 사용자(다른 도구가 shm을 쓰는 경우) — 이건 진짜 미탐지 리스크.
+# ⓒ data-dir 경로에 공백이 들어가면 `-D` 파싱(sed)이 그 지점에서 끊긴다 — disposable
+# 리그 관례상 실경로엔 공백이 없어 지금은 무해하나, 공백 포함 경로를 쓰게 되면 재점검 필요.
 #
 # 사용:
 #   backend/scripts/disposable_pg.sh <data-dir> <port>              # 세션 모드(Ctrl-C까지 유지)
