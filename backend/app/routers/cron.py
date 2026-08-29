@@ -25,7 +25,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.project import OrgMember
 from app.models.user import User
 from app.services.agent_onboarding_config import resolve_locale
-from app.services.email import send_email
+from app.services.email import render_email_shell, send_email
 from app.services.email_copy import AU_WARN_COPY, STORAGE_WARN_COPY
 from app.services.storage import get_storage_provider
 
@@ -925,9 +925,11 @@ async def storage_usage_warn(
             pct = round(used / cap_bytes * 100, 1)
             # story #3205(AC3) — 어드민 locale 기준 분기(수신자별 개별). 기존엔 en 고정이었다.
             for em, locale_value in recipients:
-                copy = STORAGE_WARN_COPY[resolve_locale(locale_value)]
+                recipient_locale = resolve_locale(locale_value)
+                copy = STORAGE_WARN_COPY[recipient_locale]
                 subject = copy["subject"].format(pct=pct)
-                html = copy["body"].format(pct=pct, used_mb=used // (1024 * 1024), cap_mb=cap_mb)
+                content = copy["body"].format(pct=pct, used_mb=used // (1024 * 1024), cap_mb=cap_mb)
+                html = render_email_shell(content, locale=recipient_locale)
                 try:
                     await asyncio.to_thread(send_email, em, subject, html)
                 except Exception:
@@ -1037,9 +1039,11 @@ async def au_usage_warn(
                     pct_display = round(pct * 100, 1)
                     # story #3205(AC3) — 어드민 locale 기준 분기(수신자별 개별). 기존엔 en 고정.
                     for em, locale_value in recipients:
-                        copy = AU_WARN_COPY[resolve_locale(locale_value)]
+                        recipient_locale = resolve_locale(locale_value)
+                        copy = AU_WARN_COPY[recipient_locale]
                         subject = copy["subject"].format(pct=pct_display)
-                        html = copy["body"].format(pct=pct_display, current=current, au_limit=au_limit)
+                        content = copy["body"].format(pct=pct_display, current=current, au_limit=au_limit)
+                        html = render_email_shell(content, locale=recipient_locale)
                         try:
                             await asyncio.to_thread(send_email, em, subject, html)
                         except Exception:

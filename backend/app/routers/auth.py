@@ -612,7 +612,8 @@ async def register(
         from app.services.email import render_action_email, send_email
         from app.services.email_copy import TRANSACTIONAL_COPY
         # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
-        copy = TRANSACTIONAL_COPY["verify_email"][resolve_locale(user.locale)]
+        locale = resolve_locale(user.locale)
+        copy = TRANSACTIONAL_COPY["verify_email"][locale]
         delivered = send_email(
             to=user.email,
             subject=copy["subject"],
@@ -622,6 +623,7 @@ async def register(
                 cta_url=verify_link,
                 expiry_note=copy["expiry_note"],
                 security_note=copy["security_note"],
+                locale=locale,
                 fallback_label=copy["fallback_label"],
             ),
         )
@@ -1451,7 +1453,8 @@ async def forgot_password(
         from app.services.agent_onboarding_config import resolve_locale
         from app.services.email import render_action_email, send_email
         from app.services.email_copy import TRANSACTIONAL_COPY
-        copy = TRANSACTIONAL_COPY["reset_password"][resolve_locale(user.locale)]
+        locale = resolve_locale(user.locale)
+        copy = TRANSACTIONAL_COPY["reset_password"][locale]
         send_email(
             to=user.email,
             subject=copy["subject"],
@@ -1459,6 +1462,7 @@ async def forgot_password(
                 intro_lines=copy["intro_lines"],
                 cta_label=copy["cta_label"],
                 cta_url=reset_link,
+                locale=locale,
                 expiry_note=copy["expiry_note"],
                 security_note=copy["security_note"],
                 fallback_label=copy["fallback_label"],
@@ -1589,7 +1593,8 @@ async def resend_verification(
     from app.services.agent_onboarding_config import resolve_locale
     from app.services.email import render_action_email, send_email
     from app.services.email_copy import TRANSACTIONAL_COPY
-    copy = TRANSACTIONAL_COPY["verify_email"][resolve_locale(user.locale)]
+    locale = resolve_locale(user.locale)
+    copy = TRANSACTIONAL_COPY["verify_email"][locale]
     delivered = send_email(
         to=user.email,
         subject=copy["subject"],
@@ -1600,6 +1605,7 @@ async def resend_verification(
             expiry_note=copy["expiry_note"],
             security_note=copy["security_note"],
             fallback_label=copy["fallback_label"],
+            locale=locale,
         ),
     )
     if not delivered:

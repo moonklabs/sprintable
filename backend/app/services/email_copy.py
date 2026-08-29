@@ -94,11 +94,12 @@ INVITE_COPY: dict[str, dict[str, str]] = {
         "sub_body": "아래 버튼을 클릭하면 초대를 수락할 수 있습니다. 링크는 7일간 유효합니다.",
         "cta_label": "초대 수락하기",
         "fallback_label": "버튼이 보이지 않으면 아래 주소를 브라우저에 붙여 넣으세요:",
-        # 유나 검수 수정의견①(2026-08-29, doc email-locale-copy-proposal-3205) — 고정 연도 stale
-        # 방지, 동적 {year} 삽입(발송 시점 기준).
-        "footer": "© {year} Sprintable. 이 이메일은 초대 발송으로 자동 생성되었습니다.",
+        # story #3206 — 공용 셸(render_email_shell)이 회사정보·연도·법적 링크 푸터를
+        # 전담하면서 이 필드의 "© {year} Sprintable." 부분은 셸과 중복이라 걷어냈다(유나
+        # doc email-brand-shell-proposal-3206 ③ 수렴 지시). "왜 이 메일을 받았는지"만
+        # 콘텐츠 영역 마지막 줄로 남긴다.
+        "auto_generated_note": "이 이메일은 초대 발송으로 자동 생성되었습니다.",
         "default_inviter": "팀 관리자",
-        "html_lang": "ko",
     },
     "en": {
         "subject": "[Sprintable] You've been invited to {org_name}",
@@ -109,9 +110,8 @@ INVITE_COPY: dict[str, dict[str, str]] = {
         "sub_body": "Click the button below to accept the invitation. This link is valid for 7 days.",
         "cta_label": "Accept invitation",
         "fallback_label": "If the button doesn't work, paste this address into your browser:",
-        "footer": "© {year} Sprintable. This email was sent automatically because you were invited.",
+        "auto_generated_note": "This email was sent automatically because you were invited.",
         "default_inviter": "a team admin",
-        "html_lang": "en",
     },
 }
 
