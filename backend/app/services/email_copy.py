@@ -57,7 +57,8 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "cta_label": "Reset password",
             "expiry_note": "This link is valid for 30 minutes.",
             "security_note": "If you didn't request this, you can safely ignore this email — your password will not be changed.",
-            "fallback_label": "If the button doesn't open, paste this address into your browser:",
+            # 유나 홀름 결선(2026-08-29) — 전 템플릿 work로 통일(open 잔존은 페드루군 지적).
+            "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
 }
