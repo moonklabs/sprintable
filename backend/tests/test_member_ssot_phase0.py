@@ -231,6 +231,25 @@ async def test_lookup_members_falls_back_to_org_member():
     assert result[ORG_MEMBER_ID].avatar_url is None  # story #2901 — OrgMember 소싱, 컬럼 없음
 
 
+@pytest.mark.anyio
+async def test_lookup_members_orphan_name_is_none():
+    """story #3203(선생님 실사고) — TeamMember도 OrgMember도 아닌 진짜 orphan id의
+    placeholder.name은 None이어야 한다. 예전엔 `str(mid)[:8]`로 uuid 앞 8자를 "이름"처럼
+    지어냈고, 이게 대화 리스트 상대명 자리에 raw uuid가 그대로 노출된 표시결함의 근원지
+    중 하나였다(_fetch_conversation_participants가 이 name을 FE로 그대로 흘려보냄 —
+    FE Participant.name은 원래 `string | null`이 계약이었다)."""
+    orphan_id = uuid.uuid4()
+    session = AsyncMock()
+    empty_tm = MagicMock(); empty_tm.scalars.return_value.all.return_value = []
+    empty_om = MagicMock(); empty_om.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(side_effect=[empty_tm, empty_om])  # user 쿼리는 om이 비어 skip
+
+    result = await lookup_members_by_ids({orphan_id}, session)
+    assert orphan_id in result
+    assert result[orphan_id].name is None
+    assert result[orphan_id].org_id == uuid.UUID(int=0)  # orphan sentinel(회귀 확認 겸)
+
+
 # ── _enforce_agent_creator_policy 유닛 테스트 ────────────────────────────────
 
 @pytest.mark.anyio

@@ -674,7 +674,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             >
               <option value="">{t('steerPanelTargetPlaceholder')}</option>
               {steerTargets.map((p) => (
-                <option key={p.member_id} value={p.member_id}>{p.name ?? p.member_id}</option>
+                // story #3203(카디르 QA 블로킹) — BE가 orphan participant.name을 이제 null로
+                // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
+                // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일.
+                <option key={p.member_id} value={p.member_id}>{p.name ?? t('unknownMember')}</option>
               ))}
             </select>
             <div className="relative min-w-0 flex-1">

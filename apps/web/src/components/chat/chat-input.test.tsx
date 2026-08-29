@@ -402,6 +402,28 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     // 패널은 열린 채 유지(재시도 가능 — 대상 재선택 등).
     expect(container.textContent).toContain('방향 전환 지시');
   });
+
+  // story #3203(카디르 QA 블로킹·2026-08-29) — BE가 orphan participant.name을 이제 null로
+  // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐). 대상 select가 `p.name ?? p.member_id`
+  // 폴백을 쓰고 있어 36자 uuid 전체가 옵션 텍스트로 그대로 새는 회귀였다 — 이 PR의 BE 변경이
+  // 처음 깨운 것이라 pin 필수.
+  it('대상 참가자의 name이 null이면(BE orphan 폴백) "알 수 없는 멤버"로 뜬다 — uuid 전체 노출 금지', async () => {
+    const orphanId = '767988e5-df5b-48e8-9964-7062fe84d691';
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput
+          threadId="c1"
+          onSend={vi.fn()}
+          currentTeamMemberId="me"
+          participants={[{ member_id: 'me', name: '나' }, { member_id: orphanId, name: null }]}
+        />,
+      ));
+    });
+    await act(async () => { toggleBtn()!.click(); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect(select.textContent).toContain('알 수 없는 멤버');
+    expect(select.textContent).not.toContain(orphanId);
+  });
 });
 
 // story #3000 로드맵 PR-B(L1) — floating 드롭다운(멘션 등)은 --elev-overlay 토큰이어야 한다

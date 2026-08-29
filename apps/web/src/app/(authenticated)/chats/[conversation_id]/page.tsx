@@ -51,14 +51,16 @@ function isValidProjectId(value: string | null): value is string {
   return !!value && UUID_RE.test(value);
 }
 
-function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): string {
+function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string, t: (key: string) => string): string {
   if (meta.title) return meta.title;
   const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return meta.type === 'dm' ? 'DM' : '그룹 채팅';
-  if (meta.type === 'dm') return others[0]?.name ?? '?';
+  // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, chat-list-view.tsx의
+  // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어).
+  if (meta.type === 'dm') return others[0]?.name ?? t('unknownMember');
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? '?').join(', ');
-  return `${others.slice(0, MAX).map((p) => p.name ?? '?').join(', ')} 외 ${others.length - MAX}명`;
+  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
+  return `${others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ')} 외 ${others.length - MAX}명`;
 }
 
 export default function ConversationPage() {
@@ -201,7 +203,7 @@ export default function ConversationPage() {
   }
 
   const headerTitle = meta
-    ? formatHeaderTitle(meta, currentTeamMemberId)
+    ? formatHeaderTitle(meta, currentTeamMemberId, t)
     : (meta === null ? '채팅' : '로딩 중…');
 
   // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
@@ -214,7 +216,8 @@ export default function ConversationPage() {
   // (S8b 미머지 → runtime_type undefined → commandTargets 빈 배열 → 경고 미표시 graceful.)
   const commandTargets = (meta?.participants ?? [])
     .filter((p) => p.type === 'agent' && p.member_id !== currentTeamMemberId && p.runtime_type !== undefined)
-    .map((p) => ({ agentId: p.member_id, agentName: p.name ?? '?', runtimeType: p.runtime_type ?? null }));
+    // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
+    .map((p) => ({ agentId: p.member_id, agentName: p.name ?? t('unknownMember'), runtimeType: p.runtime_type ?? null }));
 
   return (
     <>
@@ -246,7 +249,8 @@ export default function ConversationPage() {
             </button>
             {headerAvatarParticipant && (
               <Avatar
-                name={headerAvatarParticipant.name ?? '?'}
+                // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
+                name={headerAvatarParticipant.name ?? t('unknownMember')}
                 avatarUrl={headerAvatarParticipant.avatar_url ?? null}
                 actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
                 size={24}
