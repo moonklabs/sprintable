@@ -101,8 +101,11 @@ sweep_orphan_shm() {
   local err rc
   for id in "${candidates[@]}"; do
     _id_in "$id" "$live_ids" && continue
-    if ! err="$(ipcrm -m "$id" 2>&1 >/dev/null)"; then
-      rc=$?
+    # 페드루 코스메틱 지적(PR#3616 재QA) — `if ! err=$(...); then rc=$?` 형태는 `!`가 이미
+    # 조건을 부정한 뒤라 그 안의 `$?`는 항상 0(부정 자체의 성공)을 찍는다. 실제 종료코드는
+    # `&&`/`||`로 조건 밖에서 따로 잡아야 한다.
+    err="$(ipcrm -m "$id" 2>&1 >/dev/null)" && rc=0 || rc=$?
+    if [ "$rc" -ne 0 ]; then
       if ! grep -qiE 'not permitted|permission denied' <<<"$err"; then
         echo "ipcrm -m $id 실패(rc=$rc, EPERM 아님): $err" >&2
       fi

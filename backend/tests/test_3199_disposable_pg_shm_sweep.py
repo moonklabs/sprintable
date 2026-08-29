@@ -149,6 +149,23 @@ def test_sweep_excludes_live_and_concurrent_session_removes_only_orphans(fake_en
     assert "3003" in removed_ids
 
 
+def test_ipcrm_failure_reports_real_exit_code_not_zero(fake_env):
+    """페드루 코스메틱 지적(PR#3616 재QA) — `if ! err=$(...); then rc=$?`는 `!`가 이미
+    부정한 뒤라 그 안의 $?가 항상 0을 찍던 버그. ipcrm이 EPERM 아닌 사유(예: 42)로
+    실패하면 stderr의 «rc=»가 실제 종료코드를 찍어야 한다(0 아님)."""
+    _make_stub(fake_env["tmp_path"] / "bin" / "ipcrm", """
+echo "device or resource busy (fake non-EPERM failure)" >&2
+exit 42
+""")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), str(fake_env["data_dir"]), "55999", "--", "true"],
+        env=fake_env["env"], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "rc=42" in result.stderr, result.stderr
+    assert "rc=0" not in result.stderr
+
+
 @pytest.mark.parametrize("fake_env", [True], indirect=True)
 def test_lazy_sweep_never_runs_when_start_succeeds_on_first_try(fake_env):
     """카디르 QA HIGH② — 평시(첫 시도 성공)엔 스윕이 아예 안 돈다. 무고한 세그를 건드리는
