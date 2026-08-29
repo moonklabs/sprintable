@@ -682,13 +682,10 @@ export function PackPurchaseDialog({
           </Button>
           {/* story #3211 — 실 결제/원장 기입(결제②-C TossAdapter+A2 Ledger)이 배선되기
               전까지 표면 차단(PO 확定 (b)안). 조용한 무동작 금지 — disabled로 "안 눌리는
-              이유"를 explicit하게 보여준다(준비 중 라벨). */}
-          <Button
-            variant="default"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
-            disabled
-            title={t('packDialogComingSoon')}
-          >
+              이유"를 explicit하게 보여준다(준비 중 라벨). 유나 design:changes(PR#3613) —
+              brand fill+opacity-50 조합은 라벨 대비가 양테마 ~2:1로 이 판의 목적(왜 못
+              사는지 읽히기)과 자가당착이라 secondary variant로 교체. */}
+          <Button variant="secondary" disabled title={t('packDialogComingSoon')}>
             {t('packDialogComingSoon')}
           </Button>
         </DialogFooter>
