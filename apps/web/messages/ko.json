@@ -2653,7 +2653,12 @@
     "orderHistoryStatusFailed": "실패",
     "orderHistoryPurposeCharge": "정기결제",
     "orderHistoryPurposePackPurchase": "팩 구매",
-    "orderHistoryReceiptLink": "영수증 보기"
+    "orderHistoryReceiptLink": "영수증 보기",
+    "orderHistoryColDate": "결제일",
+    "orderHistoryColPurpose": "구분",
+    "orderHistoryColAmount": "금액",
+    "orderHistoryColStatus": "상태",
+    "orderHistoryColReceipt": "영수증"
   },
   "usage": {
     "eyebrow": "OPERATOR USAGE",

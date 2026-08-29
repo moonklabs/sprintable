@@ -2653,7 +2653,12 @@
     "orderHistoryStatusFailed": "Failed",
     "orderHistoryPurposeCharge": "Subscription",
     "orderHistoryPurposePackPurchase": "Pack purchase",
-    "orderHistoryReceiptLink": "View receipt"
+    "orderHistoryReceiptLink": "View receipt",
+    "orderHistoryColDate": "Date",
+    "orderHistoryColPurpose": "Type",
+    "orderHistoryColAmount": "Amount",
+    "orderHistoryColStatus": "Status",
+    "orderHistoryColReceipt": "Receipt"
   },
   "usage": {
     "eyebrow": "OPERATOR USAGE",

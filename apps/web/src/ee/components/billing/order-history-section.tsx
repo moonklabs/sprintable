@@ -42,6 +42,15 @@ function purposeKey(purpose: string): 'orderHistoryPurposeCharge' | 'orderHistor
   return null;
 }
 
+// story #3209 유나 design:changes(2026-08-29) — 3상태가 전부 무색이면 실패가 성공과
+// 시각 동일해진다("실패 시도도 보여준다"는 pending/failed 포함 명분과 자가당착). 결제
+// 완료=success 색은 재량으로 payment-method-section.tsx 자매 섹션의 성공 배너와 맞춘다.
+function statusColorClass(status: string): string {
+  if (status === 'confirmed') return 'text-success';
+  if (status === 'failed') return 'text-destructive';
+  return 'text-muted-foreground';
+}
+
 export function OrderHistorySection({ canManage }: { canManage: boolean }) {
   const t = useTranslations('pricingPlans');
   const [orders, setOrders] = useState<BillingOrderItem[] | null | undefined>(undefined);
@@ -80,6 +89,17 @@ export function OrderHistorySection({ canManage }: { canManage: boolean }) {
       {!error && orders != null && orders.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
+            {/* 유나 design:changes — 스크린리더 컬럼 연결(a11y). 시각적으로는 기존 톤(연한
+                muted 헤더)만 얹고 레이아웃엔 관여하지 않는다. */}
+            <thead>
+              <tr className="text-left text-xs text-muted-foreground">
+                <th scope="col" className="pb-1.5 pr-3 font-medium">{t('orderHistoryColDate')}</th>
+                <th scope="col" className="pb-1.5 pr-3 font-medium">{t('orderHistoryColPurpose')}</th>
+                <th scope="col" className="pb-1.5 pr-3 font-medium">{t('orderHistoryColAmount')}</th>
+                <th scope="col" className="pb-1.5 pr-3 font-medium">{t('orderHistoryColStatus')}</th>
+                <th scope="col" className="pb-1.5 font-medium">{t('orderHistoryColReceipt')}</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-border">
               {orders.map((order) => {
                 const sKey = statusKey(order.status);
@@ -89,7 +109,7 @@ export function OrderHistorySection({ canManage }: { canManage: boolean }) {
                     <td className="py-2 pr-3 text-muted-foreground">{order.created_at.slice(0, 10)}</td>
                     <td className="py-2 pr-3 text-muted-foreground">{pKey ? t(pKey) : order.purpose}</td>
                     <td className="py-2 pr-3 font-medium text-foreground">{formatKrw(order.amount_minor)}</td>
-                    <td className="py-2 pr-3 text-muted-foreground">{sKey ? t(sKey) : order.status}</td>
+                    <td className={`py-2 pr-3 ${statusColorClass(order.status)}`}>{sKey ? t(sKey) : order.status}</td>
                     <td className="py-2">
                       {order.receipt_url ? (
                         <a

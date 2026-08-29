@@ -133,12 +133,18 @@ async def list_billing_orders(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
     _ee: None = Depends(_require_ee),
-) -> dict:
+) -> list[dict]:
     """story #3209(PR-1) — 웹 빌링 내역(주문별). /status와 동일 can_manage 축(owner/admin만
     — 결제 금액·영수증은 billing 관리 권한과 같은 민감도로 취급, 이 라우터의 기존
     관례를 그대로 따른다). 최근 순 최대 50건 — pending/failed도 포함(진짜 "내역"이라
     confirmed만 거르면 실패한 시도가 안 보여 사용자가 재시도 여부를 판단 못 한다).
-    receipt_url은 confirmed에서만 값이 있다(billing_charge.py._confirm_with_ledger)."""
+    receipt_url은 confirmed에서만 값이 있다(billing_charge.py._confirm_with_ledger).
+
+    카디르 QA(PR#3605) — flat list로 반환한다(**{"data": [...]}로 감싸지 않음**).
+    FE 프록시(`proxyToFastapiWrapped`)가 이 BE 응답 바디를 그대로 `apiSuccess(raw)`에
+    넘겨 `{data: raw, ...}`로 감싼다 — 여기서 이미 `{"data": [...]}`를 반환하면 FE가
+    받는 최종 모양이 `{data: {data: [...]}}`로 이중래핑돼(화면이 조용히 빈 채/크래시)
+    `/status`(이 라우터의 자매 엔드포인트, 항상 flat dict 반환)와 동일 계약을 따른다."""
     role_result = await session.execute(
         select(OrgMember.role).where(
             OrgMember.org_id == org_id,
@@ -158,20 +164,18 @@ async def list_billing_orders(
             .limit(50)
         )
     ).scalars().all()
-    return {
-        "data": [
-            {
-                "order_id": o.order_id,
-                "created_at": o.created_at.isoformat(),
-                "amount_minor": o.amount_minor,
-                "currency": o.currency,
-                "status": o.status,
-                "purpose": o.purpose,
-                "receipt_url": o.receipt_url,
-            }
-            for o in orders
-        ]
-    }
+    return [
+        {
+            "order_id": o.order_id,
+            "created_at": o.created_at.isoformat(),
+            "amount_minor": o.amount_minor,
+            "currency": o.currency,
+            "status": o.status,
+            "purpose": o.purpose,
+            "receipt_url": o.receipt_url,
+        }
+        for o in orders
+    ]
 
 
 async def _get_au_usage(

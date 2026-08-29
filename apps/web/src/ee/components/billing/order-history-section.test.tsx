@@ -89,6 +89,38 @@ describe('OrderHistorySection(story #3209)', () => {
     expect(container.querySelector('a')).toBeNull();
   });
 
+  // story #3209 유나 design:changes(2026-08-29) — 3상태 전부 무색이면 실패=성공 시각
+  // 구분 불가("실패도 보여준다"는 명분과 자가당착) 지적 반영 pin.
+  it('실패 상태는 text-destructive, 완료 상태는 text-success로 색이 갈린다', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { order_id: 'order-3', created_at: '2026-08-29T10:00:00Z', amount_minor: 49000, currency: 'KRW', status: 'failed', purpose: 'charge', receipt_url: null },
+          { order_id: 'order-4', created_at: '2026-08-28T10:00:00Z', amount_minor: 49000, currency: 'KRW', status: 'confirmed', purpose: 'charge', receipt_url: 'https://dashboard.tosspayments.com/receipt/xyz' },
+        ],
+      }),
+    } as Response);
+    await mount(<OrderHistorySection canManage={true} />);
+    const failedCell = Array.from(container.querySelectorAll('td')).find((td) => td.textContent === koMessages.pricingPlans.orderHistoryStatusFailed);
+    const confirmedCell = Array.from(container.querySelectorAll('td')).find((td) => td.textContent === koMessages.pricingPlans.orderHistoryStatusConfirmed);
+    expect(failedCell?.className).toContain('text-destructive');
+    expect(confirmedCell?.className).toContain('text-success');
+  });
+
+  it('표에 컬럼 헤더(thead)가 있다 — 스크린리더 컬럼 연결', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ order_id: 'order-5', created_at: '2026-08-29T10:00:00Z', amount_minor: 49000, currency: 'KRW', status: 'confirmed', purpose: 'charge', receipt_url: null }],
+      }),
+    } as Response);
+    await mount(<OrderHistorySection canManage={true} />);
+    const headers = Array.from(container.querySelectorAll('th'));
+    expect(headers.length).toBe(5);
+    expect(headers.every((h) => h.getAttribute('scope') === 'col')).toBe(true);
+  });
+
   it('조회 실패(non-ok)면 에러 문구를 보여준다', async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false, status: 500, json: async () => ({}) } as Response);
     await mount(<OrderHistorySection canManage={true} />);
