@@ -474,9 +474,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     };
   }, [handleReconnect]);
 
+  // story #3196 ② — 생성 직후 좌측 리스트가 자기 자신을 다시 안 물어봐 "대화가 없습니다"
+  // 옆에서 새 대화가 진행되는 상태였다(리로드해야 정상). 페이지 이동만 하고 리스트 state
+  // 는 그대로 뒀던 것 — fetchConversations(0, false)는 이미 목록 최신화에 쓰이는 그 함수
+  // 그대로(발명 0, handleReconnect/새 메시지 수신 시와 동일 재조회).
   const handleCreated = (conversationId: string) => {
     setShowModal(false);
     router.push(`/chats/${conversationId}`);
+    void fetchConversations(0, false);
   };
 
   const dmConvs = conversations.filter((c) => c.type === 'dm');
