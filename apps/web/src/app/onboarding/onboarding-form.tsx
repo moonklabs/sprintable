@@ -461,7 +461,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         )}
 
         {step === 'connect' && (
-          <ConnectStep agentId={agentId} apiKey={newApiKey} onFinish={handleFinish} />
+          <ConnectStep agentId={agentId} apiKey={newApiKey} projectId={projectId} onFinish={handleFinish} />
         )}
       </div>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}

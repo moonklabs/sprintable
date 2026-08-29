@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, ChevronUp, Circle, CircleCheck } from 'lucide-react';
+import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
+import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
 
 /**
@@ -32,6 +35,8 @@ interface ActivationState {
   completed: number;
   total: number;
   all_complete: boolean;
+  // story #3201 — 왕복 성사된 대화(또는 org 최초 agent DM) id, 없으면 null.
+  first_instruction_conversation_id: string | null;
 }
 
 function readLocalFlag(key: string): boolean {
@@ -45,8 +50,11 @@ function readLocalFlag(key: string): boolean {
 
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
+  const router = useRouter();
+  const { projectId } = useDashboardContext();
   const [state, setState] = useState<ActivationState | null>(null);
   const [skip] = useState<boolean>(() => readLocalFlag(COMPLETE_KEY));
+  const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -94,6 +102,25 @@ export function ActivationChecklistBanner() {
     }
   };
 
+  // story #3201(AC2) — "첫 지시…" 항목만 클릭 가능(전 항목 클릭화는 범위 밖·#3196 잔존分
+  // 그대로). PO 확定 우선순위: BE first_instruction_conversation_id 있으면 그대로 이동,
+  // 없으면 connect-step CTA와 동일한 신규 DM 생성 경로 재사용(제3경로 발명 금지).
+  const handleFirstInstructionClick = async () => {
+    if (navigatingToInstruction) return;
+    if (state?.first_instruction_conversation_id) {
+      router.push(`/chats/${state.first_instruction_conversation_id}`);
+      return;
+    }
+    if (!projectId) return;
+    setNavigatingToInstruction(true);
+    try {
+      const convId = await createFirstInstructionConversation(projectId);
+      if (convId) router.push(`/chats/${convId}`);
+    } finally {
+      setNavigatingToInstruction(false);
+    }
+  };
+
   const stepItems: { key: keyof ActivationState['steps']; label: string }[] = [
     { key: 'email_verified', label: t('stepEmailVerified') },
     { key: 'org_created', label: t('stepOrgCreated') },
@@ -128,9 +155,31 @@ export function ActivationChecklistBanner() {
           // blue-soft(#EAEEFF) 배경 위에서 대비 미달(≈2.8:1<4.5·axe color-contrast 신규 위반). #2420
           // 규율(tint 위 계열색 글자는 text-foreground)·완료 여부는 CircleCheck vs Circle 모양이 전달하므로
           // 색 의존을 제거해도 신호 손실 0(색맹 접근성↑). 아이콘도 li 색 상속으로 함께 정리.
+          const icon = met ? <CircleCheck className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />;
+          // story #3201(AC2) — "첫 지시…" 항목만 클릭 가능(해당 대화로 이동). 다른 항목은
+          // 기존 그대로 비-인터랙티브 li(스코프 밖, #3196 잔존分).
+          if (key === 'first_roundtrip') {
+            return (
+              <li key={key}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => void handleFirstInstructionClick()}
+                  disabled={navigatingToInstruction || !projectId}
+                  className={cn(
+                    'h-auto w-full min-w-0 justify-start gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline disabled:no-underline',
+                    met ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  {navigatingToInstruction ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : icon}
+                  <span>{label}</span>
+                </Button>
+              </li>
+            );
+          }
           return (
             <li key={key} className={cn('flex items-center gap-1.5 text-sm', met ? 'text-foreground' : 'text-muted-foreground')}>
-              {met ? <CircleCheck className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
+              {icon}
               <span>{label}</span>
             </li>
           );

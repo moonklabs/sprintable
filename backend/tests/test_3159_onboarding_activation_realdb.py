@@ -201,6 +201,87 @@ async def test_is_org_agent_connected_falls_back_to_roundtrip_for_http_agents():
 
 
 @pytest.mark.anyio
+async def test_get_first_instruction_conversation_id_priority_order():
+    """story #3201 — 체크리스트 "첫 지시…" 클릭 딥링크 타겟. PO 확定 우선순위 3단:
+    ①org 대화 0건→None ②DM만 있고 왕복 前→org 최초 agent DM ③왕복 성사된 대화가
+    있으면 그게 최우선(DM 여러 개 중에서도)."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj = _uuid()
+            human_member, agent_member = _uuid(), _uuid()
+            app_id = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES "
+                f"('{human_member}','{ORG}','human','H'),('{agent_member}','{ORG}','agent','A')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO project_access (id,project_id,member_id,role) VALUES ('{_uuid()}','{proj}','{human_member}','member')"
+            ))
+            await s.commit()
+
+            # ① org에 대화 0건 — None.
+            assert (await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))) is None
+
+            # ② DM 1개 생성(왕복 前) — 그 DM이 반환돼야.
+            dm1 = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type,created_at) VALUES "
+                f"('{dm1}','{ORG}','{proj}','dm', now() - interval '2 hours')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{dm1}','{human_member}'),('{_uuid()}','{dm1}','{agent_member}')"
+            ))
+            await s.commit()
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))
+            assert str(result) == dm1
+
+            # ②b DM을 하나 더(더 이른 created_at) 만들면 org 최초(가장 이른) 쪽이 반환돼야.
+            dm0 = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type,created_at) VALUES "
+                f"('{dm0}','{ORG}','{proj}','dm', now() - interval '3 hours')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{dm0}','{human_member}'),('{_uuid()}','{dm0}','{agent_member}')"
+            ))
+            await s.commit()
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))
+            assert str(result) == dm0
+
+            # ③ 왕복(휴먼→에이전트 응답) 성사된 대화가 생기면, DM들보다 우선해 그게 반환돼야.
+            roundtrip_conv = _uuid()
+            now = datetime.now(timezone.utc)
+            t0, t1 = now - timedelta(hours=1), now
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type) VALUES ('{roundtrip_conv}','{ORG}','{proj}','group')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_messages (id,conversation_id,sender_id,content,created_at) VALUES "
+                f"('{_uuid()}','{roundtrip_conv}','{human_member}','hi','{t0.isoformat()}'),"
+                f"('{_uuid()}','{roundtrip_conv}','{agent_member}','hello','{t1.isoformat()}')"
+            ))
+            await s.commit()
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))
+            assert str(result) == roundtrip_conv
+        finally:
+            await _wipe(s, ORG)
+    await eng.dispose()
+
+
+@pytest.mark.anyio
 async def test_is_org_first_roundtrip_order_sensitive():
     """디디 대조 확定 조건(#3157) — 존재만으론 불충분, 휴먼 발신 "이후"에 온 agent 발신이어야."""
     eng, Session = await _engine()

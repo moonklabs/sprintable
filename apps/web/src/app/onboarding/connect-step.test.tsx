@@ -7,6 +7,13 @@ import { ConnectStep, inferTransport, maskApiKey } from './connect-step';
 import { RAIL_ORDER, HTTP_RAIL_ORDER, VERIFY_TIMEOUT_MS } from './verify-rail';
 import ko from '../../../messages/ko.json';
 
+// story #3201 — "첫 지시 보내기" CTA가 쓰는 공유 헬퍼. mock으로 대체해 이 파일의 다른
+// describe(makeFetch 기반)들이 /api/conversations·/api/team-members를 몰라도 안전.
+const createFirstInstructionConversationMock = vi.fn();
+vi.mock('@/lib/onboarding/first-instruction', () => ({
+  createFirstInstructionConversation: (...args: unknown[]) => createFirstInstructionConversationMock(...args),
+}));
+
 describe('inferTransport (E-MCP-OPT S3 — transport 미지정 default-resolve 응답 판별)', () => {
   it('reads type:"http" from a hosted artifact', () => {
     const content = JSON.stringify({
@@ -101,7 +108,7 @@ describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => 
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul">
-          <ConnectStep agentId="a1" apiKey="sk_live_1234" onFinish={() => {}} />
+          <ConnectStep agentId="a1" apiKey="sk_live_1234" projectId="p1" onFinish={() => {}} />
         </NextIntlClientProvider>,
       );
       // 최초 아티팩트 fetch → transport 해소 → 폴 effect → verification-status fetch까지 마이크로태스크 flush.
@@ -183,7 +190,7 @@ describe('ConnectStep — story #3192 (연결 아티팩트 shape 회귀 pin)', (
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul">
-          <ConnectStep agentId="a1" apiKey={REAL_KEY} onFinish={() => {}} />
+          <ConnectStep agentId="a1" apiKey={REAL_KEY} projectId="p1" onFinish={() => {}} />
         </NextIntlClientProvider>,
       );
       await vi.advanceTimersByTimeAsync(100);
@@ -211,5 +218,82 @@ describe('ConnectStep — story #3192 (연결 아티팩트 shape 회귀 pin)', (
     await mount('empty-files');
     expect(container.textContent).not.toContain(PENDING);
     expect(container.textContent).toContain(ERROR);
+  });
+});
+
+// story #3201(activation·절벽 처방) — 1차 깔때기 "연결까지 온 사람 중 첫 왕복 0%" 절벽에
+// 대한 처방. PO 확定: verified 무관 상시 노출.
+describe('ConnectStep — story #3201 ("첫 지시 보내기" CTA)', () => {
+  function makeFetch(verified: boolean) {
+    return vi.fn(async (url: string) => {
+      if (url.includes('connection-artifact')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              files: [{
+                filename: '.mcp.json',
+                content: JSON.stringify({ mcpServers: { 'sprintable-mcp': { type: 'stdio', command: 'uvx', args: ['sprintable-mcp'], env: { AGENT_API_KEY: '<YOUR_AGENT_API_KEY>' } } } }),
+              }],
+              mcp_config: null,
+              api_key: null,
+            },
+          }),
+        };
+      }
+      if (url.includes('verification-status')) {
+        const rail = verified
+          ? [{ state: 'config_copied', status: 'done' }, { state: 'verified', status: 'done' }]
+          : [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'active' }];
+        return { ok: true, json: async () => ({ data: { verified, rail } }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+  }
+
+  let container: HTMLElement;
+  let root: ReturnType<typeof createRoot>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    createFirstInstructionConversationMock.mockReset();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function mount(verified: boolean) {
+    global.fetch = makeFetch(verified);
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul">
+          <ConnectStep agentId="a1" apiKey="sk_live_1234" projectId="p1" onFinish={() => {}} />
+        </NextIntlClientProvider>,
+      );
+      await vi.advanceTimersByTimeAsync(100);
+    });
+  }
+
+  it('미검증 상태에도 CTA가 노출된다(PO 확定: verified 무관 상시 노출)', async () => {
+    await mount(false);
+    const cta = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 지시 보내기'));
+    expect(cta).not.toBeUndefined();
+    expect((cta as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('클릭하면 agentId·projectId를 그대로 넘겨 공유 헬퍼를 호출한다(제3경로 발명 금지)', async () => {
+    createFirstInstructionConversationMock.mockResolvedValue('conv-xyz');
+    await mount(true);
+    const cta = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 지시 보내기')) as HTMLButtonElement;
+    await act(async () => {
+      cta.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(createFirstInstructionConversationMock).toHaveBeenCalledWith('p1', 'a1');
   });
 });

@@ -1148,6 +1148,8 @@
     "advancedSubtitle": "Webhook 알림 · 대체 연결 방식 (HTTP, SSE)",
     "advancedNote": "Webhook 알림과 대체 연결 방식은 나중에 설정할 수 있습니다.",
     "dashboardCta": "대시보드로",
+    "firstInstructionCta": "첫 지시 보내기",
+    "firstInstructionStarting": "대화 여는 중…",
     "connectFooterHint": "확인되면 준비 완료 — 지금 건너뛰어도 됩니다.",
     "transportHosted": "호스팅",
     "transportLocal": "로컬 (uvx)",

@@ -23,7 +23,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.models.conversation import Conversation, ConversationMessage
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.user import User
@@ -104,11 +104,71 @@ async def is_org_first_roundtrip_done(db: AsyncSession, org_id: uuid.UUID) -> bo
     return row is not None
 
 
+async def get_first_instruction_conversation_id(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
+    """story #3201 — 체크리스트 "첫 지시 보내고 회신 받기" 클릭의 딥링크 타겟.
+
+    DM 생성(`POST /api/conversations`)이 의도적으로 always-new라서(EF-S2/db75ecd0,
+    uq_conversations_dm_pair도 과거에 일부러 drop됨) "그 에이전트와의 대화"가 BE에 원래
+    자명하지 않다. PO 확定(2026-08-29) 우선순위 3단:
+      ①왕복(휴먼→에이전트 응답) 성사된 그 대화(가장 이른 것) — is_org_first_roundtrip_done과
+        동일 조인, SELECT 대상만 conversation id로 바꾼 것(두 벌 판정 로직 아님).
+      ②없으면 org 최초(created_at 가장 이른) agent 참여 DM.
+      ③그것도 없으면 None — FE는 None이면 신규 DM 생성 CTA(story #3201 A안)를 그대로
+        재사용한다(제3의 경로 발명 금지, PO 지시).
+    """
+    HumanMsg = aliased(ConversationMessage)
+    HumanSender = aliased(TeamMember)
+    AgentSender = aliased(TeamMember)
+
+    human_before = (
+        select(HumanMsg.id)
+        .join(HumanSender, HumanSender.id == HumanMsg.sender_id)
+        .where(
+            HumanMsg.conversation_id == ConversationMessage.conversation_id,
+            HumanSender.type == "human",
+            HumanMsg.created_at < ConversationMessage.created_at,
+        )
+        .exists()
+    )
+    roundtrip_conv_id = (await db.execute(
+        select(Conversation.id)
+        .join(ConversationMessage, ConversationMessage.conversation_id == Conversation.id)
+        .join(AgentSender, AgentSender.id == ConversationMessage.sender_id)
+        .where(
+            Conversation.org_id == org_id,
+            AgentSender.type == "agent",
+            human_before,
+        )
+        .order_by(ConversationMessage.created_at.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if roundtrip_conv_id is not None:
+        return roundtrip_conv_id
+
+    return (await db.execute(
+        select(Conversation.id)
+        .join(ConversationParticipant, ConversationParticipant.conversation_id == Conversation.id)
+        .join(TeamMember, TeamMember.id == ConversationParticipant.member_id)
+        .where(
+            Conversation.org_id == org_id,
+            Conversation.type == "dm",
+            TeamMember.type == "agent",
+        )
+        .order_by(Conversation.created_at.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
 async def get_activation_state(db: AsyncSession, user: User) -> dict:
     """체크리스트/리마인드 공용 — 5단계 완료 여부 + 요약."""
     org_id = await get_owner_org_id(db, user.id)
     agent_connected = await is_org_agent_connected(db, org_id) if org_id else False
     roundtrip_done = await is_org_first_roundtrip_done(db, org_id) if org_id else False
+    # story #3201 — 체크리스트 "첫 지시…" 항목 클릭 딥링크. org_id 없으면(온보딩 미완주)
+    # 애초에 org 스코프 쿼리 자체가 무의미 — None(FE 신규 DM CTA 폴백).
+    first_instruction_conv_id = (
+        await get_first_instruction_conversation_id(db, org_id) if org_id else None
+    )
     steps = {
         "signed_up": True,
         "email_verified": user.email_verified,
@@ -122,6 +182,9 @@ async def get_activation_state(db: AsyncSession, user: User) -> dict:
         "completed": completed,
         "total": len(steps),
         "all_complete": completed == len(steps),
+        "first_instruction_conversation_id": (
+            str(first_instruction_conv_id) if first_instruction_conv_id else None
+        ),
     }
 
 

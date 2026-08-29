@@ -6,6 +6,20 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ActivationChecklistBanner } from './activation-checklist-banner';
 
+// story #3201 — useDashboardContext(projectId)·useRouter 신규 의존성. storage-capacity-
+// banner.test.tsx와 동일 패턴(실 dashboard-shell.tsx 전체 모듈 그래프를 끌어들이지 않음).
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => ({ projectId: 'proj-1' }),
+}));
+const routerPushMock = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPushMock }),
+}));
+const createFirstInstructionConversationMock = vi.fn();
+vi.mock('@/lib/onboarding/first-instruction', () => ({
+  createFirstInstructionConversation: (...args: unknown[]) => createFirstInstructionConversationMock(...args),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const COMPLETE_KEY = 'sprintable_activation_checklist_complete';
@@ -34,6 +48,8 @@ let root: Root;
 
 beforeEach(() => {
   stubStorages();
+  routerPushMock.mockClear();
+  createFirstInstructionConversationMock.mockReset();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -62,6 +78,7 @@ function stubChecklist(data: {
   completed: number;
   total: number;
   all_complete: boolean;
+  first_instruction_conversation_id?: string | null;
 }) {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data }) })));
 }
@@ -71,6 +88,7 @@ const PARTIAL = {
   completed: 2,
   total: 5,
   all_complete: false,
+  first_instruction_conversation_id: null,
 };
 
 const COMPLETE = {
@@ -150,5 +168,51 @@ describe('ActivationChecklistBanner — 조회 실패 시 미노출', () => {
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();
     expect(container.textContent).toBe('');
+  });
+});
+
+// story #3201(AC2) — "첫 지시…" 항목만 클릭 가능(해당 대화로 이동).
+describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #3201)', () => {
+  it('first_instruction_conversation_id가 있으면 신규 생성 없이 바로 그 대화로 이동한다', async () => {
+    stubChecklist({ ...PARTIAL, first_instruction_conversation_id: 'conv-abc' });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const target = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+    expect(target).not.toBeUndefined();
+    await act(async () => { target.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(createFirstInstructionConversationMock).not.toHaveBeenCalled();
+    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-abc');
+  });
+
+  it('first_instruction_conversation_id가 null이면 신규 DM 생성 경로(connect-step과 동일)를 타 그 대화로 이동한다', async () => {
+    stubChecklist({ ...PARTIAL, first_instruction_conversation_id: null });
+    createFirstInstructionConversationMock.mockResolvedValue('conv-new');
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const target = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+    await act(async () => { target.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(createFirstInstructionConversationMock).toHaveBeenCalledWith('proj-1');
+    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-new');
+  });
+
+  it('다른 항목(예: 이메일 인증하기)은 여전히 클릭 불가능한 li다', async () => {
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const emailItem = Array.from(container.querySelectorAll('li')).find(
+      (li) => li.textContent?.includes('이메일 인증하기'),
+    );
+    expect(emailItem?.querySelector('button')).toBeNull();
   });
 });
