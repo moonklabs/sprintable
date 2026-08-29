@@ -330,11 +330,13 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # PO가 라이브 env 이름 재실측으로 형제 비대칭(dev=NEXT_PUBLIC_APP_URL만 유·
     # prod=APP_BASE_URL만 유) 발견 후 APP_BASE_URL도 cloudbuild.yaml deploy-frontend
     # --update-env-vars에 `_NEXT_PUBLIC_APP_URL`(기존, dev/prod 정확분기)로 명시배선해
-    # IaC-covered 전환 → high 4→3. 남은 AGENT_INBOX_HMAC_SECRET·MCP_ALLOWED_TOKEN_REFS는
-    # 값 존부가 아니라 로드맵/보안 정책 판단 필요해 baseline 잔존 — 남은 high 3건은 이
-    # 2건 + `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
+    # IaC-covered 전환 → high 4→3. story #1969(2026-08-30, PO 최종 판정) — inbox_items 기능
+    # 완전 은퇴로 apps/web/src/services/inbox-item.service.ts 자체가 삭제돼 AGENT_INBOX_HMAC_SECRET
+    # 코드 read가 스캔에서 통째로 사라짐(baseline exemption 불요, 가드가 자연히 green) → high
+    # 3→2. 남은 high 2건은 MCP_ALLOWED_TOKEN_REFS(baseline, 보안 정책 판단 대기) +
+    # `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
     assert len(highest) == 1, highest
-    assert len(high) == 3, high
+    assert len(high) == 2, high
     assert len(low) == 9, low
     assert len(exempt) == 30
 
@@ -444,11 +446,13 @@ def test_repo_code_read_high_baseline_is_wellformed():
     GHA dev 분기 배선으로 해소해 13→12, 2026-08-28 story #3168 실 triage로 12→3(7건
     code_read_exempt 승격+2건 이미 IaC-covered 중복 제거) → 페드루 PO 실측(dev/prod
     APP_BASE_URL·NEXT_PUBLIC_APP_URL 형제 비대칭)으로 APP_BASE_URL도 cloudbuild.yaml
-    deploy-frontend에 배선해 3→2 — infra/manual-env-allowlist.yml code_read_high_baseline
-    섹션 머리말 참고)이 형식을 지키는지."""
+    deploy-frontend에 배선해 3→2, story #1969(2026-08-30, PO 최종 판정) — inbox_items 기능
+    완전 은퇴로 AGENT_INBOX_HMAC_SECRET을 읽던 코드 자체가 삭제돼 baseline entry도 함께
+    걷혀 2→1 — infra/manual-env-allowlist.yml code_read_high_baseline 섹션 머리말 참고)이
+    형식을 지키는지."""
     mod = _load_check_env_drift()
     baseline = mod._load_code_read_high_baseline()
-    assert len(baseline) == 2
+    assert len(baseline) == 1
     for key, entry in baseline.items():
         problem = mod._baseline_entry_expired(entry, mod._today())
         assert problem is None, f"{key}: {problem}"

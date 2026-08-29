@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
-// story #2923(카디르 QA HIGH1·HIGH2, PR#3352 2026-08-22 처방) — HIGH1: /api/inbox 호출에
-// project_id가 실려 다른 프로젝트 항목이 안 새어나오는지. HIGH2: 같은 story의 gate_pending
-// (BE)과 approval(inbox)이 동시에 오면 한 행으로만 뜨는지(Gate 우선, inbox 쪽 drop).
+// story #1969(2026-08-30) — inbox_items 기능 완전 은퇴로 story #2923(카디르 QA HIGH1·HIGH2,
+// PR#3352 2026-08-22 처방)의 /api/inbox project_id 필터·gate_pending/inbox cross-source dedup
+// 테스트는 대상 코드가 사라져 함께 걷었다.
 // story #2923(P0-E AQ3, doc attention-audit-redesign-2923) — 「결재함=완전 목록 overflow·
 // Attention GATE 앵커」. 예전엔 overflow 표시가 순수 텍스트라 캡(3~7) 초과분을 볼 방법이
 // 없었다 — 이 스위트는 그 표시가 실제로 클릭 가능한 앵커(/inbox?tab=gates)로 동작하는지,
@@ -80,75 +80,6 @@ function mockGatePendingOnly() {
     return { ok: true, json: async () => ({ data: [] }) };
   };
 }
-
-describe('AttentionQueueView — HIGH1 project_id 필터(story #2923, 카디르 QA)', () => {
-  it('/api/inbox 호출 URL에 project_id가 실린다(BE attention fetch와 동형)', async () => {
-    const calledUrls: string[] = [];
-    await mount(async (url: string) => {
-      calledUrls.push(url);
-      return { ok: true, json: async () => ({ data: { items: [] } }) };
-    });
-    const inboxCall = calledUrls.find((u) => u.includes('/api/inbox'));
-    expect(inboxCall).toContain('project_id=proj-1');
-  });
-});
-
-describe('AttentionQueueView — HIGH2 cross-source dedup(story #2923, 카디르 QA)', () => {
-  it('같은 story의 gate_pending(BE)과 approval(inbox)이 동시에 오면 한 행만 뜬다(Gate 우선)', async () => {
-    await mount(async (url: string) => {
-      if (url.includes('/api/glance/attention')) {
-        return {
-          ok: true,
-          json: async () => ({
-            data: { items: [{ kind: 'gate_pending', story_id: 's1', title: '가격 콘솔', ref: {}, entered_state_at: null }] },
-          }),
-        };
-      }
-      if (url.includes('/api/inbox')) {
-        return {
-          ok: true,
-          json: async () => ({
-            data: [{
-              id: 'inbox-a1', kind: 'approval', title: '가격 콘솔 결재 요청(중복)',
-              origin_chain: [{ type: 'story', id: 's1' }], created_at: '2026-08-22T00:00:00.000Z',
-            }],
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ data: [] }) };
-    });
-    // 중복 inbox 항목의 claim 텍스트는 안 뜨고(drop됨), BE gate_pending 쪽 claim만 남는다.
-    expect(container.textContent).not.toContain('가격 콘솔 결재 요청(중복)');
-    expect(container.textContent).toContain('가격 콘솔');
-  });
-
-  it('다른 story의 approval은 gate_pending과 안 겹치므로 둘 다 뜬다(과잉 dedup 아님)', async () => {
-    await mount(async (url: string) => {
-      if (url.includes('/api/glance/attention')) {
-        return {
-          ok: true,
-          json: async () => ({
-            data: { items: [{ kind: 'gate_pending', story_id: 's1', title: '가격 콘솔', ref: {}, entered_state_at: null }] },
-          }),
-        };
-      }
-      if (url.includes('/api/inbox')) {
-        return {
-          ok: true,
-          json: async () => ({
-            data: [{
-              id: 'inbox-a1', kind: 'approval', title: '법적고지 결재 요청',
-              origin_chain: [{ type: 'story', id: 's2' }], created_at: '2026-08-22T00:00:00.000Z',
-            }],
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ data: [] }) };
-    });
-    expect(container.textContent).toContain('법적고지 결재 요청');
-    expect(container.textContent).toContain('가격 콘솔');
-  });
-});
 
 describe('AttentionQueueView — overflow anchor (story #2923 AQ3 + MEDIUM① GATE 정밀판정, 카디르 QA PR#3353)', () => {
   it('overflow에 GATE 버킷이 있으면 클릭 가능한 앵커가 뜨고, 클릭하면 /inbox?tab=gates로 이동한다', async () => {
