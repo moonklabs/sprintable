@@ -194,6 +194,68 @@ assert_eq "[6] 동시 인스턴스 B exit=0" "0" "$EXIT_B"
 assert_eq "[6] 원장 중복 없이 정확히 3건" "3" "$(sql1 db_concurrent "SELECT COUNT(*) FROM public._sprintable_migration_ledger")"
 assert_eq "[6] 001 정확히 1회만 생성(중복 CREATE 충돌 없음)" "t" "$(sql1 db_concurrent "SELECT to_regclass('public.conc_marker_one') IS NOT NULL")"
 
+# ── 시나리오 7(카디르 2라운드 ①) — cutoff 기반 "정상 업그레이드": 구 DB(stories 有,
+# 원장 無)에 cutoff **이후** 신규 파일이 이미지에 실려 온 경우, 시딩이 그 신규 파일까지
+# 무실행 처리해버리면 안 된다 — 반드시 실 실행돼야 한다 ──
+echo
+echo "== [7] cutoff 기반 정상 업그레이드(신규 파일은 시딩 대신 실 실행) =="
+createdb -h 127.0.0.1 -p "$PORT" -U postgres db_upgrade
+SB7="$(mk_sandbox sb_upgrade)"
+cat > "$SB7/packages/db/supabase/migrations/001_ok.sql" <<'EOF'
+CREATE TABLE public.upgrade_marker_one (id int);
+EOF
+cat > "$SB7/packages/db/supabase/migrations/002_new.sql" <<'EOF'
+CREATE TABLE public.upgrade_marker_two (id int);
+EOF
+# "예전 모델로 001까지는 이미 실 적용된 구 DB" 상태를 원장 없이 흉내 — stories(센티널)+
+# 001의 물리 효과만 미리 만든다. 002는 이 이미지에 신규로 실려온 파일이라 미적용 상태.
+sql1 db_upgrade "CREATE TABLE public.stories (id int)" > /dev/null
+sql1 db_upgrade "CREATE TABLE public.upgrade_marker_one (id int)" > /dev/null
+
+export SPRINTABLE_MIGRATIONS_SEED_CUTOFF="001_ok.sql"
+run_script "$SB7" db_upgrade
+unset SPRINTABLE_MIGRATIONS_SEED_CUTOFF
+echo "$OUT"
+assert_eq "[7] 정상 업그레이드 exit=0" "0" "$EXIT_CODE"
+assert_eq "[7] 001은 시딩(seeded=true)됨 — 재실행 안 됨" "t" "$(sql1 db_upgrade "SELECT seeded FROM public._sprintable_migration_ledger WHERE filename='001_ok.sql'")"
+assert_eq "[7] 002는 시딩 아닌 실 실행(seeded=false)" "f" "$(sql1 db_upgrade "SELECT seeded FROM public._sprintable_migration_ledger WHERE filename='002_new.sql'")"
+assert_eq "[7] 002가 실제로 실행돼 마커 테이블 생성됨(카디르 회귀의 정면 재현)" "t" "$(sql1 db_upgrade "SELECT to_regclass('public.upgrade_marker_two') IS NOT NULL")"
+
+# ── 시나리오 8(카디르 2라운드 ②) — CONCURRENTLY 인덱스가 이전 시도에서 INVALID로
+# 남은 상태(락 경합·중복키 등)에서 재기동 시, 원인이 해소됐다면 자가치유(DROP 후
+# 재생성)로 valid 상태에 도달해야 한다 ──
+echo
+echo "== [8] INVALID 인덱스 자가치유(cONCURRENTLY 이전 실패 잔재 회복) =="
+createdb -h 127.0.0.1 -p "$PORT" -U postgres db_invalididx
+SB8="$(mk_sandbox sb_invalididx)"
+cat > "$SB8/packages/db/supabase/migrations/001_idx.sql" <<'EOF'
+CREATE TABLE IF NOT EXISTS public.dup_test (id int);
+INSERT INTO public.dup_test (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM public.dup_test WHERE id = 1);
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_dup_test_id ON public.dup_test(id);
+EOF
+# "이전 컨테이너 기동에서 CONCURRENTLY 빌드가 중복키로 실패해 INVALID 인덱스만 남은"
+# 상태를 원장 없이 직접 재현 — 이 시점엔 중복 데이터가 있어 인덱스 빌드가 실패한다.
+sql1 db_invalididx "CREATE TABLE public.dup_test (id int)" > /dev/null
+sql1 db_invalididx "INSERT INTO public.dup_test VALUES (1),(1)" > /dev/null
+psql -h 127.0.0.1 -p "$PORT" -U postgres -d db_invalididx -c \
+  "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_dup_test_id ON public.dup_test(id)" >/dev/null 2>&1 || true
+assert_eq "[8] 사전조건 — 실제로 INVALID 인덱스가 남았음" "f" "$(sql1 db_invalididx "SELECT indisvalid FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relname='idx_dup_test_id'")"
+
+# 데이터 문제 해소(중복 제거) — 이제 재시도하면 성공할 수 있는 상태.
+sql1 db_invalididx "DELETE FROM public.dup_test a USING public.dup_test b WHERE a.ctid < b.ctid AND a.id = b.id" > /dev/null
+
+export SPRINTABLE_MIGRATIONS_NONTX_ALLOWLIST="001_idx.sql"
+run_script "$SB8" db_invalididx
+unset SPRINTABLE_MIGRATIONS_NONTX_ALLOWLIST
+echo "$OUT"
+assert_eq "[8] 자가치유 후 exit=0" "0" "$EXIT_CODE"
+assert_eq "[8] 원장에 정상 기록됨" "1" "$(sql1 db_invalididx "SELECT COUNT(*) FROM public._sprintable_migration_ledger WHERE filename='001_idx.sql'")"
+assert_eq "[8] 인덱스가 최종적으로 VALID" "t" "$(sql1 db_invalididx "SELECT indisvalid FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relname='idx_dup_test_id'")"
+case "$OUT" in
+  *"INVALID 인덱스 감지"*) echo "  ok   [8] 자가치유(선삭제) 로그 확認" ;;
+  *) echo "  FAIL [8] 자가치유 로그 없음 — 선삭제 경로가 안 탔을 수 있음"; FAIL=1 ;;
+esac
+
 kill -TERM "$PG_SESSION_PID" 2>/dev/null || true
 wait "$PG_SESSION_PID" 2>/dev/null || true
 
