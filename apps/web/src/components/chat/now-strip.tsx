@@ -100,6 +100,38 @@ function groupBySeverity(items: NowStripItem[]): { severity: NowStripSeverity; i
     .filter((g) => g.items.length > 0);
 }
 
+// story #3182(S3a 후속) — embed-group.tsx ConciseList(S2c③④)의 「default N + 더보기」
+// 값·기전을 그대로 재사용(PO 지시: 신규 패턴 0). collapsed-default(1차 조항, S2c 불변식)는
+// 이미 groups 자체를 안 그리는 상위 `expanded &&` 가드가 지킨다 — 이건 «펼친 뒤» 그룹당
+// 대량-N일 때의 2차 조항(스크롤 폭탄 방지).
+const GROUP_DEFAULT_VISIBLE = 3;
+
+function NowStripSeverityGroup({ severity, items }: { severity: NowStripSeverity; items: NowStripItem[] }) {
+  const t = useTranslations('chats');
+  const [groupExpanded, setGroupExpanded] = useState(false);
+  const visible = groupExpanded ? items : items.slice(0, GROUP_DEFAULT_VISIBLE);
+  const hiddenCount = items.length - GROUP_DEFAULT_VISIBLE;
+
+  return (
+    <div className="space-y-1">
+      <p className={cn('px-1 pt-1 text-[10.5px] font-semibold tracking-wide uppercase', SEVERITY_GROUP_TEXT[severity])}>
+        {t(SEVERITY_GROUP_LABEL_KEY[severity])}
+      </p>
+      {visible.map((item) => <NowStripCard key={item.key} item={item} />)}
+      {hiddenCount > 0 && (
+        <Button
+          type="button"
+          variant="link"
+          onClick={() => setGroupExpanded((v) => !v)}
+          className="h-auto p-0 px-1 text-[11px] font-medium"
+        >
+          {groupExpanded ? t('nowStripCollapse') : t('nowStripGroupMore', { count: hiddenCount })}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export interface NowStripProps {
   /** agent_stuck 라벨용(action-zone.tsx와 동일 계약) — 없으면 attentionEntityLabel 자체의
    * entity_type 폴백(no-fiction)으로 떨어진다, 필수 아님. */
@@ -198,14 +230,7 @@ export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange
       </Button>
       {expanded && (
         <div className="space-y-2 border-t border-border p-2 pt-1.5">
-          {groups.map((g) => (
-            <div key={g.severity} className="space-y-1">
-              <p className={cn('px-1 pt-1 text-[10.5px] font-semibold tracking-wide uppercase', SEVERITY_GROUP_TEXT[g.severity])}>
-                {t(SEVERITY_GROUP_LABEL_KEY[g.severity])}
-              </p>
-              {g.items.map((item) => <NowStripCard key={item.key} item={item} />)}
-            </div>
-          ))}
+          {groups.map((g) => <NowStripSeverityGroup key={g.severity} severity={g.severity} items={g.items} />)}
         </div>
       )}
     </div>

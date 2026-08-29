@@ -3514,6 +3514,7 @@
     "nowStripGroupDanger": "행동 필요",
     "nowStripGroupWarn": "주의",
     "nowStripGroupInfo": "관찰 · 학습",
+    "nowStripGroupMore": "+{count} 더보기",
     "pulseLabel": "프로젝트 맥박",
     "pulseEpicEmpty": "활성 에픽 없음",
     "pulseCostTrendLabel": "비용 추이",
