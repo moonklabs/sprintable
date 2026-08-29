@@ -88,6 +88,15 @@ describe('StoryOriginSection', () => {
     expect(link?.getAttribute('href')).toBe('/chats/conv1?messageId=msg1');
   });
 
+  it('유나 design:changes(story #3167) — meeting 출처는 링크가 아니라 평문으로 렌더된다(/meetings/[id] 페이지 폐기 — 클릭하면 100% 404였을 자리)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'r1', source_type: 'meeting', source_id: 'm1', created_by: null, created_at: '2026-07-28T00:00:00Z', relation: 'created_from', still_exists: true, doc: null, message: null, meeting: { id: 'm1', title: '킥오프 회의' }, story: null }],
+    }))));
+    await render('s1');
+    expect(container.textContent).toContain('킥오프 회의');
+    expect(container.querySelector('a')).toBeNull();
+  });
+
   it('PO 지적(2026-07-30) — created_from이 둘째 페이지에 있어도 찾아낸다(첫 페이지엔 멘션만 30+건)', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (!url.includes('before=')) {
