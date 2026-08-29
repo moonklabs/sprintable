@@ -109,7 +109,7 @@ def render_action_email(
         f"<p style='font-size:13px;color:#595959;margin:0 0 8px'>{html.escape(expiry_note)}</p>"
         f"<p style='font-size:12px;color:#8b8b8b;margin:0 0 8px'>"
         f"{html.escape(fallback_label)}<br>"
-        f"<a href='{cta_url}' style='color:#3157FF;text-decoration:underline'>{cta_url}</a></p>"
+        f"<a href='{cta_url}' style='color:#3157FF;text-decoration:underline;word-break:break-all'>{cta_url}</a></p>"
         f"<p style='font-size:12px;color:#8b8b8b;margin:0'>{html.escape(security_note)}</p>"
     )
     return render_email_shell(content, locale=locale)

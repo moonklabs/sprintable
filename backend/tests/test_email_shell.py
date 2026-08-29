@@ -88,3 +88,24 @@ def test_render_action_email_button_uses_border_plus_bg_v2_pattern():
     assert "background:#3157FF" in html_body
     # 셸을 통과했는지(헤더 워드마크+푸터 회사정보 존재).
     assert "주식회사 뭉클랩" in html_body
+
+
+def test_fallback_link_word_breaks_long_tokens_no_mobile_overflow():
+    """까디르 QA 지적(2026-08-29, PR#3606 qa:changes) — 초대 폴백 링크의
+    word-break:break-all이 셸 전환 중 탈락(develop 대조 확定, 모바일 넘침+CTA 실패
+    시 복구 경로 기능 영향). 트랜잭셔널 3종 폴백 링크(긴 JWT 토큰 URL, 공백 없음)도
+    같은 위험이라 동시에 넣는다 — pin으로 재발 방지."""
+    from app.services.email import render_action_email
+    from app.services.org_invite_email import _build_invite_html
+
+    action_html = render_action_email(
+        intro_lines=["줄"], cta_label="버튼", cta_url="https://x?token=abc",
+        expiry_note="만료", security_note="보안", fallback_label="폴백",
+    )
+    assert "word-break:break-all" in action_html
+
+    invite_html = _build_invite_html(
+        org_name="Acme", inviter_name="Jay", accept_link="https://x?token=abc",
+        role="admin", locale="ko",
+    )
+    assert "word-break:break-all" in invite_html

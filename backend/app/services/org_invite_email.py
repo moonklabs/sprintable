@@ -43,7 +43,7 @@ def _build_invite_html(*, org_name: str, inviter_name: str, accept_link: str, ro
         f"<p style='margin:20px 0'><a href='{accept_link}' style='{_BUTTON_STYLE}'>{copy['cta_label']}</a></p>"
         f"<p style='margin:0 0 8px;font-size:12px;color:#8b8b8b'>"
         f"{copy['fallback_label']}<br>"
-        f"<a href='{accept_link}' style='color:#3157FF;text-decoration:underline'>{accept_link}</a></p>"
+        f"<a href='{accept_link}' style='color:#3157FF;text-decoration:underline;word-break:break-all'>{accept_link}</a></p>"
         f"<p style='margin:0;font-size:12px;color:#8b8b8b'>{copy['auto_generated_note']}</p>"
     )
     return render_email_shell(content, locale=locale)
