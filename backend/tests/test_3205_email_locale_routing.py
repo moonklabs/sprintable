@@ -68,6 +68,11 @@ async def test_register_captures_locale_from_accept_language_and_sends_en_copy(m
         assert added_user.locale == "en"
         assert sent["subject"] == "Please verify your Sprintable email"
         assert "Verify email" in sent["html_body"]
+        # 까디르 QA(2026-08-29) 재발 방지 — fallback_label이 렌더러에 ko로 하드코딩돼 있어
+        # en 메일에도 "버튼이 열리지 않으면…" 한 줄이 섞이던 결함. en 메일엔 ko가 없어야 한다.
+        assert "버튼이 열리지 않으면" not in sent["html_body"]
+        # html.escape가 작은따옴표를 &#x27;로 바꾸므로 그 형태로 확인.
+        assert "If the button doesn&#x27;t work, paste this address into your browser:" in sent["html_body"]
     finally:
         app.dependency_overrides.clear()
 

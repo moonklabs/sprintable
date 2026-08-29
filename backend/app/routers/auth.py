@@ -622,6 +622,7 @@ async def register(
                 cta_url=verify_link,
                 expiry_note=copy["expiry_note"],
                 security_note=copy["security_note"],
+                fallback_label=copy["fallback_label"],
             ),
         )
         if not delivered:
@@ -1460,6 +1461,7 @@ async def forgot_password(
                 cta_url=reset_link,
                 expiry_note=copy["expiry_note"],
                 security_note=copy["security_note"],
+                fallback_label=copy["fallback_label"],
             ),
         )
     return _ok({"message": "If the email exists, a reset link has been sent"})
@@ -1597,6 +1599,7 @@ async def resend_verification(
             cta_url=verify_link,
             expiry_note=copy["expiry_note"],
             security_note=copy["security_note"],
+            fallback_label=copy["fallback_label"],
         ),
     )
     if not delivered:

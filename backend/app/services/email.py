@@ -16,6 +16,7 @@ def render_action_email(
     cta_url: str,
     expiry_note: str,
     security_note: str,
+    fallback_label: str,
 ) -> str:
     """story #3196-⑤(카피·톤 제안 — 유나 홀름, doc auth-email-copy-proposal-3196) — 인사/
     맥락 → CTA 버튼 → 만료 → 폴백 평문 링크 → 보안 안내, 트랜잭셔널 메일 3종(가입 인증·
@@ -27,8 +28,12 @@ def render_action_email(
     — 이메일 클라이언트 호환을 위해 flexbox/grid 없이 순수 인라인 스타일만 사용.
     cta_url은 이미 서버가 만든 신뢰 URL(app_url + 서버 발급 토큰)만 들어온다 — 사용자
     입력이 아니므로 URL 자체는 escape하지 않되(속성값 내 홑따옴표가 안 섞이는 내부 생성값),
-    사람이 쓰는 텍스트(intro_lines·cta_label·expiry_note·security_note)는 html.escape로
-    XSS/마크업 주입을 방지한다.
+    사람이 쓰는 텍스트(intro_lines·cta_label·expiry_note·security_note·fallback_label)는
+    html.escape로 XSS/마크업 주입을 방지한다.
+
+    story #3205 QA(까디르, 2026-08-29) — fallback_label이 예전엔 렌더러 내부에 ko로
+    하드코딩돼 있어 en 메일에도 한국어 한 줄이 섞였다(호출자가 카피를 100% 못 갈아끼우는
+    구조적 결함). 다른 4개 필드와 동형으로 파라미터화.
     """
     intro_html = "".join(f"<p>{html.escape(line)}</p>" for line in intro_lines)
     return (
@@ -40,7 +45,7 @@ def render_action_email(
         f"{html.escape(cta_label)}</a></p>"
         f"<p>{html.escape(expiry_note)}</p>"
         f"<p style='font-size:12px;color:#595959'>"
-        f"버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:<br>"
+        f"{html.escape(fallback_label)}<br>"
         f"<a href='{cta_url}'>{cta_url}</a></p>"
         f"<p style='font-size:12px;color:#595959'>{html.escape(security_note)}</p>"
     )

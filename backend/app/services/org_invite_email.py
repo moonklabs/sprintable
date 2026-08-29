@@ -19,6 +19,8 @@ def _en_role_with_article(role: str) -> str:
     """유나 검수 수정의견②(2026-08-29) — role은 소문자 raw 값(member/admin/owner)이라
     영어에서 관사 없이는 어색("as admin"). 첫 글자 발음 기준 a/an만 판단(그 외 문법
     보정은 발명하지 않는다 — 이 3개 role 외 값이 생기면 별도 검토)."""
+    if not role:
+        return role
     article = "an" if role[:1].lower() in "aeiou" else "a"
     return f"{article} {role}"
 

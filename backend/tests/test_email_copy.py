@@ -21,6 +21,7 @@ def test_transactional_copy_has_both_locales_and_required_fields():
             assert copy["cta_label"]
             assert copy["expiry_note"]
             assert copy["security_note"]
+            assert copy["fallback_label"]
 
 
 def test_reminder_copy_has_both_locales():

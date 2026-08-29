@@ -21,6 +21,7 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "cta_label": "이메일 인증하기",
             "expiry_note": "이 링크는 24시간 동안 유효합니다.",
             "security_note": "본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.",
+            "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
             "subject": "Please verify your Sprintable email",
@@ -31,6 +32,8 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "cta_label": "Verify email",
             "expiry_note": "This link is valid for 24 hours.",
             "security_note": "If you didn't sign up for this, you can safely ignore this email.",
+            # 유나 홀름 결선(2026-08-29) — 초대 메일 기존 en 폴백과 자구 정렬(work/open 통일).
+            "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
     "reset_password": {
@@ -43,6 +46,7 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "cta_label": "비밀번호 재설정",
             "expiry_note": "이 링크는 30분 동안 유효합니다.",
             "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 변경되지 않습니다.",
+            "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
             "subject": "Reset your Sprintable password",
@@ -53,6 +57,7 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "cta_label": "Reset password",
             "expiry_note": "This link is valid for 30 minutes.",
             "security_note": "If you didn't request this, you can safely ignore this email — your password will not be changed.",
+            "fallback_label": "If the button doesn't open, paste this address into your browser:",
         },
     },
 }

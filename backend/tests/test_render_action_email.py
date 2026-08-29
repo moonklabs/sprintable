@@ -2,6 +2,9 @@
 
 트랜잭셔널 메일 3종(가입 인증·인증 재발송·비밀번호 재설정)이 전부 이 함수를 쓴다 — 골격
 (인사/맥락→CTA 버튼→만료→폴백 링크→보안 안내)과 escape 정직성만 순수 단위테스트로 고정.
+
+story #3205 QA(까디르, 2026-08-29) — fallback_label이 렌더러 내부 ko 하드코딩이라 en
+메일에도 한국어가 섞이던 결함 수정 후, 파라미터화됨(다른 4개 필드와 동형).
 """
 from __future__ import annotations
 
@@ -15,8 +18,9 @@ def test_renders_all_sections_in_order():
         cta_url="https://app.sprintable.ai/verify-email?token=abc",
         expiry_note="24시간 유효",
         security_note="요청 안 했으면 무시하세요",
+        fallback_label="버튼이 열리지 않으면:",
     )
-    for expected in ("첫 줄", "둘째 줄", "버튼 라벨", "24시간 유효", "요청 안 했으면 무시하세요"):
+    for expected in ("첫 줄", "둘째 줄", "버튼 라벨", "24시간 유효", "요청 안 했으면 무시하세요", "버튼이 열리지 않으면:"):
         assert expected in html_body
     # cta_url이 버튼 href·폴백 링크 href·폴백 링크의 가시 텍스트 3곳에 실린다(버튼이 안
     # 뜨는 클라이언트 대비 — 폴백은 href뿐 아니라 사람이 직접 복사할 수 있게 텍스트로도 보임).
@@ -39,11 +43,14 @@ def test_escapes_html_in_user_facing_text_but_not_url():
         cta_url="https://app.sprintable.ai/x?token=a&b=1",
         expiry_note="<i>만료</i>",
         security_note="<u>보안</u>",
+        fallback_label="<em>폴백</em>",
     )
     assert "<script>" not in html_body
     assert "&lt;script&gt;" in html_body
     assert "<b>버튼</b>" not in html_body
     assert "&lt;b&gt;버튼&lt;/b&gt;" in html_body
+    assert "<em>폴백</em>" not in html_body
+    assert "&lt;em&gt;폴백&lt;/em&gt;" in html_body
     # URL 자체는 그대로(escape로 깨지면 안 됨 — & 등이 %26으로 변형되지 않는다).
     assert "https://app.sprintable.ai/x?token=a&b=1" in html_body
 
@@ -51,6 +58,7 @@ def test_escapes_html_in_user_facing_text_but_not_url():
 def test_no_flexbox_or_grid_inline_style_for_email_client_compat():
     html_body = render_action_email(
         intro_lines=["줄"], cta_label="라벨", cta_url="https://x", expiry_note="만료", security_note="보안",
+        fallback_label="폴백",
     )
     assert "display:flex" not in html_body
     assert "display:grid" not in html_body
