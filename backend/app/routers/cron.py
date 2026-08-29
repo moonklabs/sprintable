@@ -399,18 +399,6 @@ async def zero_referenced_entities_check(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
-# ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
-
-@router.get("/inbox-outbox")
-async def inbox_outbox(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    verify_cron(request)
-    # inbox-outbox 처리 — 현재 SQLAlchemy 기반 구현에서는 no-op (Supabase pg_cron 대체)
-    return _ok({"processed": 0, "dispatched": 0})
-
-
 # ─── GET /api/v2/internal/cron/retry-agent-runs ────────────────────────────────
 
 @router.get("/retry-agent-runs")
