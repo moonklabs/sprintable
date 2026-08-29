@@ -16,7 +16,7 @@ def anyio_backend():
 
 async def _register_client():
     from app.main import app
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     mock_session = AsyncMock()
     mock_result = MagicMock()
@@ -31,7 +31,8 @@ async def _register_client():
     async def override_db():
         yield mock_session
 
-    app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3) — get_db만 걸고 get_read_db를 잊는 회귀 방지, 공용 헬퍼 경유.
+    override_db_and_read(app, override_db)
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
 
 
@@ -102,8 +103,8 @@ async def test_register_defaults_to_ko_without_accept_language_header(monkeypatc
 @pytest.mark.anyio
 async def test_forgot_password_sends_locale_matched_copy(monkeypatch):
     from app.main import app
-    from app.dependencies.database import get_db
     from app.models.user import User
+    from tests.conftest import override_db_and_read
 
     en_user = User(
         id=uuid.uuid4(), email="en-user@example.com", hashed_password="x",
@@ -124,7 +125,8 @@ async def test_forgot_password_sends_locale_matched_copy(monkeypatch):
         return True
 
     monkeypatch.setattr("app.services.email.send_email", _fake_send_email)
-    app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3) — get_db만 걸고 get_read_db를 잊는 회귀 방지, 공용 헬퍼 경유.
+    override_db_and_read(app, override_db)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post("/api/v2/auth/forgot-password", json={"email": en_user.email})
