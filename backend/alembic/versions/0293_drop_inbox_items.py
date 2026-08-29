@@ -30,8 +30,41 @@ depends_on = None
 _ARCHIVE_TABLE = "inbox_items_archived_1969"
 
 
+# 카디르 QA 3라운드(2026-08-30, 페드루 정정) — moonklabs 실 Supabase DB에는 Operator
+# Cockpit Phase A RPC 3종(resolve/dismiss/reassign_inbox_item, packages/db/supabase/
+# migrations/20260426170300_inbox_resolve_fn.sql)이 `RETURNS public.inbox_items`
+# composite 타입 의존으로 남아 있어 DROP TABLE이 DependentObjectsStillExist로 거부된다
+# (disposable PG에 그 SQL을 실제로 심어 재현 확認). CASCADE 대신 명시 DROP FUNCTION —
+# 혹시 다른 미확인 의존이 있으면 CASCADE처럼 조용히 삼키지 않고 크게 실패해야 한다.
+# 호출부는 레포 전체 0건(rpc 호출 grep 0) — 순수 정리, 기능 손실 없음.
+# validate_inbox_item_from_agent는 inbox_items 자신의 트리거 함수(생성 파일:
+# 20260426170000_inbox_items.sql) — 테이블 drop이 트리거는 같이 지워도 함수 객체는
+# 안 지워 고아로 남기므로 트리거를 먼저 명시 제거한 뒤 같이 정리한다.
+_LEGACY_RPC_FUNCTIONS = (
+    "resolve_inbox_item",
+    "dismiss_inbox_item",
+    "reassign_inbox_item",
+)
+_LEGACY_TRIGGER_FUNCTIONS = ("validate_inbox_item_from_agent",)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+    bind.execute(sa.text(
+        "DROP TRIGGER IF EXISTS trg_inbox_items_validate_agent ON inbox_items"
+    ))
+    for fn in _LEGACY_RPC_FUNCTIONS + _LEGACY_TRIGGER_FUNCTIONS:
+        bind.execute(sa.text(f"DROP FUNCTION IF EXISTS public.{fn}"))
+    # 자체호스팅(packages/db/supabase) 스키마 실측(disposable PG 재현)으로 발견 — 그
+    # 스키마의 inbox_outbox.inbox_item_id는 실 FK로 inbox_items를 참조한다. 이 SaaS
+    # 스키마(baseline schema.sql)엔 그 FK가 없는 것으로 보이나, 그 파일 자체가 알려진
+    # stale 덤프(test_check_env_drift 이력 참고)라 확신할 수 없다 — 0293이 0294보다
+    # 먼저 도는 고정 순서(down_revision 체인)라도 FK가 실재하면 안전하도록, 있으면 그
+    # 제약만(테이블 자체는 안 건드림) 선제 제거한다. IF EXISTS라 없으면 완전 무해.
+    bind.execute(sa.text(
+        "ALTER TABLE IF EXISTS inbox_outbox "
+        "DROP CONSTRAINT IF EXISTS inbox_outbox_inbox_item_id_fkey"
+    ))
     count = bind.execute(sa.text("SELECT COUNT(*) FROM inbox_items")).scalar_one()
     if count == 0:
         op.drop_table("inbox_items")

@@ -26,12 +26,32 @@ depends_on = None
 
 _ARCHIVE_TABLE = "inbox_outbox_archived_1969"
 
+# 카디르 QA 3라운드(2026-08-30, 페드루 정정) — 0293과 동형 이유: moonklabs 실 Supabase
+# DB에 남은 outbox claim/처리 RPC 4종(packages/db/supabase/migrations/
+# 20260427100000_inbox_outbox_claim_fn.sql)이 `RETURNS public.inbox_outbox`
+# composite(claim_pending_outbox는 SETOF) 의존이라 DROP TABLE을 거부한다. CASCADE 대신
+# 명시 DROP FUNCTION. 호출부는 레포 전체 0건. touch_inbox_outbox_updated_at은 자신의
+# 트리거 함수(생성 파일 20260426170200_inbox_outbox.sql) — 0293과 동형으로 트리거
+# 먼저 명시 제거 후 같이 정리(고아 방지).
+_LEGACY_RPC_FUNCTIONS = (
+    "claim_pending_outbox",
+    "mark_outbox_delivered",
+    "mark_outbox_failed",
+    "mark_outbox_dead",
+)
+_LEGACY_TRIGGER_FUNCTIONS = ("touch_inbox_outbox_updated_at",)
+
 
 def upgrade() -> None:
     # 0293과 동일 문법 — 저자는 dev 전용이라 prod를 단정 안 함(feedback_no_prod_access_
     # no_prod_claims). 이 마이그가 실제로 prod에 적용되는 순간 그 시점의 실 row 수를 직접
     # 세어 분기한다.
     bind = op.get_bind()
+    bind.execute(sa.text(
+        "DROP TRIGGER IF EXISTS trg_inbox_outbox_touch_updated_at ON inbox_outbox"
+    ))
+    for fn in _LEGACY_RPC_FUNCTIONS + _LEGACY_TRIGGER_FUNCTIONS:
+        bind.execute(sa.text(f"DROP FUNCTION IF EXISTS public.{fn}"))
     count = bind.execute(sa.text("SELECT COUNT(*) FROM inbox_outbox")).scalar_one()
     if count == 0:
         op.drop_table("inbox_outbox")
