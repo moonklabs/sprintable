@@ -603,13 +603,20 @@ async def register(
         verification_token = create_email_verification_token(str(user.id))
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         verify_link = f"{app_url}/verify-email?token={verification_token}"
-        from app.services.email import send_email
+        from app.services.email import render_action_email, send_email
         delivered = send_email(
             to=user.email,
-            subject="Sprintable 이메일 인증",
-            html_body=(
-                f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
-                f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+            # story #3196-⑤(유나 카피·톤 제안) — 기존 "Sprintable 이메일 인증"에서 행위형으로.
+            subject="Sprintable 이메일 인증을 완료해 주세요",
+            html_body=render_action_email(
+                intro_lines=[
+                    "Sprintable에 가입해 주셔서 감사합니다.",
+                    "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있습니다.",
+                ],
+                cta_label="이메일 인증하기",
+                cta_url=verify_link,
+                expiry_note="이 링크는 24시간 동안 유효합니다.",
+                security_note="본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.",
             ),
         )
         if not delivered:
@@ -1431,14 +1438,20 @@ async def forgot_password(
         token = create_password_reset_token(str(user.id), user.hashed_password)
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         reset_link = f"{app_url}/reset-password?token={token}"
-        from app.services.email import send_email
+        from app.services.email import render_action_email, send_email
         send_email(
             to=user.email,
-            subject="Sprintable 비밀번호 재설정",
-            html_body=(
-                f"<p>비밀번호 재설정 링크입니다. 30분 내에 사용 바랍니다.</p>"
-                f"<p><a href='{reset_link}'>비밀번호 재설정</a></p>"
-                f"<p>요청하지 않으셨다면 이 메일을 무시하세요.</p>"
+            # story #3196-⑤(유나 카피·톤 제안)
+            subject="Sprintable 비밀번호 재설정 안내",
+            html_body=render_action_email(
+                intro_lines=[
+                    "비밀번호 재설정을 요청하셨습니다.",
+                    "아래 버튼을 눌러 새 비밀번호를 설정해 주세요.",
+                ],
+                cta_label="비밀번호 재설정",
+                cta_url=reset_link,
+                expiry_note="이 링크는 30분 동안 유효합니다.",
+                security_note="본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 변경되지 않습니다.",
             ),
         )
     return _ok({"message": "If the email exists, a reset link has been sent"})
@@ -1560,13 +1573,21 @@ async def resend_verification(
     verification_token = create_email_verification_token(str(user.id))
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     verify_link = f"{app_url}/verify-email?token={verification_token}"
-    from app.services.email import send_email
+    # story #3196-⑤ — register()의 인증메일과 동일 카피/렌더러(발명 0, 같은 내용의 재발송이라
+    # 두 벌 카피를 유지할 이유가 없다 — 여태 문자 그대로 중복이었던 자리 그대로 정합).
+    from app.services.email import render_action_email, send_email
     delivered = send_email(
         to=user.email,
-        subject="Sprintable 이메일 인증",
-        html_body=(
-            f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
-            f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+        subject="Sprintable 이메일 인증을 완료해 주세요",
+        html_body=render_action_email(
+            intro_lines=[
+                "Sprintable에 가입해 주셔서 감사합니다.",
+                "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있습니다.",
+            ],
+            cta_label="이메일 인증하기",
+            cta_url=verify_link,
+            expiry_note="이 링크는 24시간 동안 유효합니다.",
+            security_note="본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.",
         ),
     )
     if not delivered:
