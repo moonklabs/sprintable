@@ -27,8 +27,10 @@ def _make_stub(path: Path, body: str) -> None:
 
 @pytest.fixture
 def fake_env(tmp_path):
-    """ipcs -m이 live(1001)+orphan(2002,3003) 3개 세그를 보고하는 가짜 호스트.
-    live postmaster.pid는 1001을 자기 shmid로 자체 기록(7번째 줄, PG 실물 포맷)."""
+    """ipcs -m이 live(1001, 자기 data-dir)+병행 세션 live(4004, **다른** data-dir·PR#3616
+    카디르 QA 지적 축)+orphan(2002,3003) 4개 세그를 보고하는 가짜 호스트. 각 live
+    postmaster.pid는 자기 shmid를 7번째 줄에 자체 기록(PG 실물 포맷). ps -axwwo command도
+    스텁해 "well-known 경로 추정이 아니라 실행 중인 postmaster 전수 스캔"을 그대로 태운다."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "ipcrm_calls.log"
@@ -39,6 +41,7 @@ if [ "$1" = "-m" ]; then
   echo "T     ID     KEY        MODE       OWNER    GROUP"
   echo "Shared Memory:"
   echo "m 1001 0x00000000 --rw------- fakeuser  fakeuser"
+  echo "m 4004 0x33333333 --rw------- fakeuser  fakeuser"
   echo "m 2002 0x11111111 --rw------- fakeuser  fakeuser"
   echo "m 3003 0x22222222 --rw------- fakeuser  fakeuser"
 fi
@@ -61,13 +64,33 @@ exit 0
         "12345\n/fake/data\n1700000000\n55999\n/tmp\nlocalhost\n 999999     1001\nready\n"
     )
 
+    # 병행 저자 세션(예: 미르코 리그·다른 data-dir) 시뮬레이션 — well-known 경로가 아닌
+    # 임의 위치, 다른 shmid(4004).
+    other_data_dir = tmp_path / "other-session-data"
+    other_data_dir.mkdir()
+    (other_data_dir / "postmaster.pid").write_text(
+        "22222\n/fake/other\n1700000001\n55440\n/tmp\nlocalhost\n 888888     4004\nready\n"
+    )
+
+    # ps -axwwo command 스텁 — 두 live 클러스터의 postmaster 커맨드라인만 보고한다
+    # (checkpointer 등 워커 프로세스는 -D가 없어 실제로도 이 grep에 안 걸림 — 재현 안 함).
+    _make_stub(bin_dir / "ps", f"""
+if [ "$1" = "-axwwo" ]; then
+  echo "/usr/local/bin/postgres -D {data_dir}"
+  echo "/usr/local/bin/postgres -D {other_data_dir}"
+fi
+""")
+
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    return {"env": env, "data_dir": data_dir, "log": log, "tmp_path": tmp_path}
+    return {
+        "env": env, "data_dir": data_dir, "other_data_dir": other_data_dir,
+        "log": log, "tmp_path": tmp_path,
+    }
 
 
 def test_sweep_removes_orphans_but_excludes_live_shmid(fake_env):
-    """live(1001, postmaster.pid 실물 기록)는 ipcrm 대상에서 빠지고 orphan(2002·3003)만
+    """live(1001, 자기 postmaster.pid 실물 기록)는 ipcrm 대상에서 빠지고 orphan(2002·3003)만
     지워진다 — postmaster.pid 판별이 실제로 작동함을 고정."""
     result = subprocess.run(
         ["bash", str(SCRIPT), str(fake_env["data_dir"]), "55999", "--", "true"],
@@ -76,6 +99,24 @@ def test_sweep_removes_orphans_but_excludes_live_shmid(fake_env):
     assert result.returncode == 0, result.stderr
 
     removed_ids = fake_env["log"].read_text().split()
+    assert "1001" not in removed_ids
+    assert "2002" in removed_ids
+    assert "3003" in removed_ids
+
+
+def test_sweep_excludes_concurrent_session_in_unrelated_data_dir(fake_env):
+    """PR#3616 카디르 QA 지적(진짜 블로커) — 병행 저자 세션이 well-known 경로가 아닌
+    임의 data-dir(4004)에서 띄운 live PG도 실행 중인 postmaster 전수 스캔(ps)으로 잡혀
+    스윕에서 제외돼야 한다. 이 스토리의 발단 자체가 «두 저자 동형 재현»이라 병행은
+    실사용 경로 — well-known 경로 추정으로 회귀하면 다른 세션의 DB를 침범한다."""
+    result = subprocess.run(
+        ["bash", str(SCRIPT), str(fake_env["data_dir"]), "55999", "--", "true"],
+        env=fake_env["env"], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+    removed_ids = fake_env["log"].read_text().split()
+    assert "4004" not in removed_ids
     assert "1001" not in removed_ids
     assert "2002" in removed_ids
     assert "3003" in removed_ids

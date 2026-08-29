@@ -9,10 +9,18 @@
 # 기동 전 이 호스트의 "죽은 disposable PG 잔재" shm 세그를 non-root ipcrm으로 스윕한다.
 # 판별은 추정이 아니라 실물 대조: PG postmaster는 자기 SysV 세그의 key/shmid를
 # postmaster.pid 7번째 줄에 스스로 기록하므로(PG≥10 표준 포맷, 같은 uid라 읽기 가능),
-# 살아있는 모든 PG 클러스터(이 스크립트가 관리하는 데이터 디렉터리 + 호스트에 이미 떠
-# 있는 다른 PG들, 예: brew services 상시구동 클러스터)의 shmid를 실물로 모아 제외하고
-# 나머지만 지운다. IPC_RMID는 마지막 detach 후 파괴라(POSIX 표준 동작) 혹시 살아있는
-# 세그를 잘못 걸어도 attach 중인 프로세스는 안 죽는다 — 죽는 건 nattch=0 고아뿐.
+# 그걸로 살아있는 클러스터를 실물 확認해 제외하고 나머지만 지운다. IPC_RMID는 마지막
+# detach 후 파괴라(POSIX 표준 동작) 혹시 살아있는 세그를 잘못 걸어도 attach 중인
+# 프로세스는 안 죽는다 — 죽는 건 nattch=0 고아뿐.
+#
+# live 클러스터 탐색은 well-known 경로 추정(brew 경로 등)이 아니라 **실행 중인 postmaster
+# 전수**로 한다 — 이 스토리의 발단 자체가 «두 저자 동형 재현»(병행 세션)이라, 다른 세션이
+# 임의 data-dir에서 띄운 disposable PG도 실사용 경로다(페드루 QA 지적, PR#3616). `ps`로
+# `postgres -D <dir>` 커맨드라인 전부를 찾아 그 dir들의 postmaster.pid를 전부 읽는다 —
+# brew 경로는 이 일반 스캔에 자연히 흡수되어 더 이상 특례가 아니다.
+# 못 잡는 것(선언): ⓐ다른 uid가 띄운 PG — 그 postmaster.pid를 못 읽지만, 같은 이유로
+# 커널이 그 uid의 shm을 ipcrm으로부터도 막아주므로 안전(EPERM, 스윕에서 조용히 스킵).
+# ⓑ같은 uid의 PG 아닌 SysV 사용자(다른 도구가 shm을 쓰는 경우) — 이건 진짜 미탐지 리스크.
 #
 # 사용:
 #   backend/scripts/disposable_pg.sh <data-dir> <port>              # 세션 모드(Ctrl-C까지 유지)
@@ -38,13 +46,16 @@ PG_BIN_DIR="$(dirname "$(command -v postgres 2>/dev/null || echo /opt/homebrew/o
 export PATH="$PG_BIN_DIR:$PATH"
 
 _live_shmids() {
-  local pidfile line7
-  for pidfile in /opt/homebrew/var/postgresql@*/postmaster.pid "$DATA_DIR/postmaster.pid"; do
+  local line dir pidfile line7
+  while IFS= read -r line; do
+    dir="$(sed -n 's/.* -D  *\([^ ]*\).*/\1/p' <<<"$line")"
+    [ -n "$dir" ] || continue
+    pidfile="$dir/postmaster.pid"
     [ -f "$pidfile" ] || continue
     line7="$(sed -n '7p' "$pidfile" 2>/dev/null || true)"
     [ -n "$line7" ] || continue
     awk '{print $2}' <<<"$line7"
-  done
+  done < <(ps -axwwo command 2>/dev/null | grep -E '/postgres( |$)' | grep -F ' -D ')
 }
 
 sweep_orphan_shm() {
