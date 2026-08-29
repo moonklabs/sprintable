@@ -259,40 +259,19 @@ esac
 kill -TERM "$PG_SESSION_PID" 2>/dev/null || true
 wait "$PG_SESSION_PID" 2>/dev/null || true
 
-# ── 시나리오 9(카디르 재검토 前 페드루 지적) — NONTX_ALLOWLIST 트립와이어. cutoff(①)와
-# 달리 이 목록은 새 CONCURRENTLY 파일이 생길 때마다 실제로 갱신 의무가 남는 자리라, PG
-# 없이도 실 코퍼스를 정적 스캔해 "CONCURRENTLY 포함 파일 ⊆ (allowlist ∪ 함수본문-전용
-# 선언목록)"을 매번 재확인한다 — 사람이 새 파일 분류를 깜빡하면 RED로 강제한다 ──
+# ── 시나리오 9(카디르 재검토) — NONTX_ALLOWLIST 트립와이어. 3라운드(카디르)에서 이
+# 트립와이어가 .test.sh 안에만 살고 CI 어디에도 안 걸려 있다는 지적을 받아, 실제 검증
+# 로직은 scripts/lint_migrations_nontx_allowlist.sh로 뽑아 CI job(.github/workflows/
+# ci.yml의 migrations-nontx-allowlist-lint)과 이 자리 양쪽이 그 스크립트 하나를 공유
+# 호출한다(로직 이중화·드리프트 방지) — 여기서는 그 스크립트를 실제로 실행해 exit code로
+# 판정한다 ──
 echo
-echo "== [9] NONTX_ALLOWLIST 트립와이어(실 코퍼스 CONCURRENTLY 미분류 파일 검사) =="
-REAL_MIGRATIONS_DIR="$SCRIPT_DIR/../packages/db/supabase/migrations"
-SCRIPT_NONTX_ALLOWLIST="$(grep -oE "SPRINTABLE_MIGRATIONS_NONTX_ALLOWLIST:-[^}]*" "$SCRIPT" | sed 's/^[^:]*:-//')"
-# 실측(2026-08-30)으로 CONCURRENTLY가 BEGIN...END 함수 본문 **안**에만 있어 top-level이
-# 아님을 직접 확인한 파일 — 새로 추가되는 파일은 여기 없으니 트립와이어가 반드시 잡는다.
-FUNCTION_BODY_ONLY_DECLARED="20260407110000_monthly_agent_usage_view.sql 20260408092000_agent_hitl_pending_status.sql 20260425140000_reward_balances_view.sql"
-
-if [ -z "$SCRIPT_NONTX_ALLOWLIST" ]; then
-  echo "  FAIL [9] 스크립트에서 NONTX_ALLOWLIST 기본값을 추출하지 못함(정규식 drift?)"
-  FAIL=1
-fi
-
-UNACCOUNTED=""
-for f in "$REAL_MIGRATIONS_DIR"/*.sql; do
-  name="$(basename "$f")"
-  if grep -q "CONCURRENTLY" "$f"; then
-    accounted=false
-    for known in $SCRIPT_NONTX_ALLOWLIST $FUNCTION_BODY_ONLY_DECLARED; do
-      if [ "$known" = "$name" ]; then
-        accounted=true
-        break
-      fi
-    done
-    if [ "$accounted" = false ]; then
-      UNACCOUNTED="$UNACCOUNTED $name"
-    fi
-  fi
-done
-assert_eq "[9] CONCURRENTLY 포함 파일 전부 allowlist∪함수본문-선언에 계정됨" "" "$UNACCOUNTED"
+echo "== [9] NONTX_ALLOWLIST 트립와이어(공유 스크립트 호출, CI에도 동일 배선) =="
+LINT_SCRIPT="$SCRIPT_DIR/lint_migrations_nontx_allowlist.sh"
+LINT_OUT="$(sh "$LINT_SCRIPT" 2>&1)"
+LINT_EXIT=$?
+echo "$LINT_OUT"
+assert_eq "[9] 실 코퍼스 CONCURRENTLY 분류 lint exit=0" "0" "$LINT_EXIT"
 
 echo
 if [ "$FAIL" -eq 0 ]; then
