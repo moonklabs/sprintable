@@ -1479,7 +1479,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onClick={() => setViewMode('board')}
               title="Board view"
               className={`size-7 min-h-0 min-w-0 rounded-none ${
-                viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+                viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
               <LayoutGrid className="size-3.5" />
@@ -1490,7 +1490,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onClick={() => setViewMode('list')}
               title="List view"
               className={`size-7 min-h-0 min-w-0 rounded-none ${
-                viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+                viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
               <LayoutList className="size-3.5" />
