@@ -41,7 +41,8 @@ def render_email_shell(content_html: str, *, locale: str = "ko") -> str:
     privacy_url = f"{app_url}/privacy"
     return f"""<!DOCTYPE html>
 <html lang="{locale}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"></head>
 <body style="margin:0;padding:0;background:#e9e7e1;font-family:-apple-system,'Segoe UI',Roboto,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e9e7e1;padding:24px 0;">
     <tr><td align="center">

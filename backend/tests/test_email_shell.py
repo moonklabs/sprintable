@@ -48,6 +48,15 @@ def test_footer_links_to_real_routes_only_no_invented_help_page():
     assert "/help" not in html_body
 
 
+def test_declares_color_scheme_meta_for_dark_mode_aware_clients():
+    """PO 리뷰 지적(2026-08-29, doc email-brand-shell-proposal-3206 ④) — 다크 클라이언트가
+    팔레트 판단에 쓰는 신호. color-scheme(표준)과 supported-color-schemes(Apple Mail 등
+    구현체 페어)를 함께 선언한다."""
+    html_body = render_email_shell("<p>x</p>")
+    assert '<meta name="color-scheme" content="light dark">' in html_body
+    assert '<meta name="supported-color-schemes" content="light dark">' in html_body
+
+
 def test_locale_sets_html_lang_attribute():
     assert 'lang="ko"' in render_email_shell("<p>x</p>", locale="ko")
     assert 'lang="en"' in render_email_shell("<p>x</p>", locale="en")
