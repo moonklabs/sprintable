@@ -140,17 +140,28 @@ describe('ContextSwitcherChip — story #2076', () => {
 // 발견 6결함 해소: 44px 트리거+행·검색·3층 위계(프로젝트→조직→계정)·계정 divider 분리·
 // 데스크톱 무회귀.
 describe('ContextSwitcherChip — story #3147/#3146 재설계(44px·검색·3층·계정)', () => {
-  it('트리거가 min-h-11(44px)이고 조직/프로젝트 2줄로 표시된다', async () => {
+  it('트리거가 h-11(44px 고정)이고 조직/프로젝트 2줄로 표시된다', async () => {
     await act(async () => {
       root.render(wrap(
         <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
       ));
     });
     const trigger = container.querySelector('button');
-    expect(trigger?.className).toContain('min-h-11');
+    // story #3202(선생님 실기기 픽셀 붕괴) 핀 — min-h-11(최솟값)이던 시절엔 2단 라벨의
+    // line-height가 예산을 넘기면 트리거 실높이가 부모 TopBar(h-12=48px)를 초과해 자기
+    // border/bg가 헤더 행을 뚫고 나온 것처럼 보였다(dev 라이브 실측: 48.5px·상단 -0.75px로
+    // 실제 초과 확認). h-11(고정 44px)+overflow-hidden으로 어떤 폰트 렌더링에서도 그 예산을
+    // 못 넘게 하드캡한다 — min-h-11 회귀(다시 growable해지는 것)를 여기서 막는다.
+    expect(trigger?.className).toContain('h-11');
+    expect(trigger?.className).not.toContain('min-h-11');
+    expect(trigger?.className).toContain('overflow-hidden');
     const spans = trigger!.querySelectorAll('span > span');
     expect(spans[0]?.textContent).toBe('뭉클랩');
     expect(spans[1]?.textContent).toBe('Sprintable');
+    // 두 라벨 span 모두 leading-none(타이트 line-height)로 실높이 예산을 하드캡 — 안드로이드
+    // 폰트 부스트 등 렌더링 조건과 무관하게 44px 안에 들어오게 하는 축.
+    expect(spans[0]?.className).toContain('leading-none');
+    expect(spans[1]?.className).toContain('leading-none');
   });
 
   it('시트 안 프로젝트 행이 min-h-11(44px)이다', async () => {

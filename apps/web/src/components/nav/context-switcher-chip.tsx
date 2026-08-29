@@ -80,18 +80,25 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
       <Sheet open={s.open} onOpenChange={s.setOpen}>
         {/* story #3147 §② — 26px 단행 칩 → 44px 2단(조직 위·프로젝트 아래) 상시 트리거.
             폭 상한은 #2076 실측(120px 단행 기준)과 다른 레이아웃이라 재실측(190px 기준
-            390px 뷰포트에서 우측 아이콘 클러스터와 안 겹침, 헤더 실렌더로 확認). */}
+            390px 뷰포트에서 우측 아이콘 클러스터와 안 겹침, 헤더 실렌더로 확認).
+            story #3202(선생님 실기기 픽셀 붕괴) — `min-h-11`은 최솟값일 뿐이라, 2단 라벨의
+            line-height가 (특히 안드로이드 폰트 부스트 하에서) 44px+padding 예산을 넘겨
+            버튼 실높이가 부모 TopBar(h-12=48px)를 넘어서면 자기 border/bg가 헤더 행을
+            뚫고 나온 것처럼 보였다(실측: 헤더 h-12(48px) 안에서 트리거 실제 렌더 높이
+            48.5px·상단 -0.75px로 이미 초과 확認). `h-11`(고정 44px)+`overflow-hidden`+
+            라벨 `leading-none`으로 실높이를 44px에 하드캡 — 터치 타겟(44px)은 그대로
+            유지하면서(AC2) 어떤 폰트 렌더링 조건에서도 48px 행을 못 넘게 한다. */}
         <button
           type="button"
           onClick={() => s.setOpen(true)}
           disabled={s.pending}
-          className="flex min-h-11 min-w-0 max-w-[190px] shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-2 py-1.5 text-left transition hover:bg-muted disabled:opacity-60 lg:hidden"
+          className="flex h-11 min-w-0 max-w-[190px] shrink-0 items-center gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left transition hover:bg-muted disabled:opacity-60 lg:hidden"
           aria-label={t('switcherMobileTriggerAria')}
         >
           <OrgInitial name={s.displayOrg} className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-brand text-xs font-semibold text-brand-foreground" />
-          <span className="flex min-w-0 flex-1 flex-col items-start">
-            <span className="w-full truncate text-[10px] font-semibold text-muted-foreground">{s.displayOrg}</span>
-            <span className="w-full truncate text-[13px] font-bold text-foreground">{chipLabel}</span>
+          <span className="flex min-w-0 flex-1 flex-col items-start justify-center gap-0.5">
+            <span className="w-full truncate text-[10px] font-semibold leading-none text-muted-foreground">{s.displayOrg}</span>
+            <span className="w-full truncate text-[13px] font-bold leading-none text-foreground">{chipLabel}</span>
           </span>
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
         </button>
