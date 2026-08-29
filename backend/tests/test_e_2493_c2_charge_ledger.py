@@ -522,3 +522,88 @@ async def test_charge_org_duplicated_order_id_not_done_marks_failed(monkeypatch)
 
     assert result.status == "failed"
     svc.record_ledger_entry.assert_not_awaited()
+
+
+# ─── story #3209 PR-2 — _confirm_with_ledger의 결제 완료 메일 배선 ──────────
+
+def _rowcount_result(rowcount: int, refetch_row=None) -> MagicMock:
+    """update() 실행 결과 mock — rowcount만 쓴다(_claimed_result와 동형, 이름만 이 파일
+    문맥에 맞게)."""
+    r = MagicMock()
+    r.rowcount = rowcount
+    return r
+
+
+@pytest.mark.anyio
+async def test_confirm_with_ledger_sends_receipt_email_on_first_confirmation(monkeypatch):
+    """rowcount==1(실제로 이번 호출이 confirmed로 전이시킴)이면 결제 완료 메일을 정확한
+    kwargs로 1회 발송한다."""
+    import app.services.billing_charge as svc
+    import app.services.billing_receipt_email as email_svc
+
+    org_id = uuid.uuid4()
+    confirmed_row = MagicMock()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_rowcount_result(1), _row_result(confirmed_row)])
+
+    monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
+    send_mock = AsyncMock()
+    monkeypatch.setattr(email_svc, "send_payment_receipt_email", send_mock)
+
+    result = await svc._confirm_with_ledger(
+        session, org_id=org_id, order_id="ord-1", amount_minor=49000, currency="krw",
+        payment_key="pay_1", receipt_url="https://dashboard.tosspayments.com/receipt/abc",
+    )
+
+    assert result is confirmed_row
+    send_mock.assert_awaited_once_with(
+        session, org_id=org_id, receipt_url="https://dashboard.tosspayments.com/receipt/abc",
+        amount_minor=49000, currency="krw",
+    )
+
+
+@pytest.mark.anyio
+async def test_confirm_with_ledger_skips_email_on_idempotent_reentry(monkeypatch):
+    """rowcount==0(이미 confirmed였던 order — 재시도/중복 진입)이면 재발송하지 않는다.
+    별도 dedup 플래그 없이 claim/confirmed-update의 WHERE 가드 자체가 이 신호다."""
+    import app.services.billing_charge as svc
+    import app.services.billing_receipt_email as email_svc
+
+    org_id = uuid.uuid4()
+    already_confirmed_row = MagicMock()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_rowcount_result(0), _row_result(already_confirmed_row)])
+
+    monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
+    send_mock = AsyncMock()
+    monkeypatch.setattr(email_svc, "send_payment_receipt_email", send_mock)
+
+    result = await svc._confirm_with_ledger(
+        session, org_id=org_id, order_id="ord-2", amount_minor=49000, currency="krw",
+        payment_key="pay_2", receipt_url="https://dashboard.tosspayments.com/receipt/xyz",
+    )
+
+    assert result is already_confirmed_row
+    send_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_confirm_with_ledger_email_failure_does_not_break_confirmation(monkeypatch):
+    """메일 발송 실패(예외)가 결제 확정 자체를 되돌리지 않는다 — 돈은 이미 움직였다."""
+    import app.services.billing_charge as svc
+    import app.services.billing_receipt_email as email_svc
+
+    org_id = uuid.uuid4()
+    confirmed_row = MagicMock()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_rowcount_result(1), _row_result(confirmed_row)])
+
+    monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
+    monkeypatch.setattr(email_svc, "send_payment_receipt_email", AsyncMock(side_effect=RuntimeError("smtp down")))
+
+    result = await svc._confirm_with_ledger(
+        session, org_id=org_id, order_id="ord-3", amount_minor=49000, currency="krw",
+        payment_key="pay_3", receipt_url="https://dashboard.tosspayments.com/receipt/qwe",
+    )
+
+    assert result is confirmed_row  # 예외가 새지 않고, confirmed 결과가 그대로 반환된다.
