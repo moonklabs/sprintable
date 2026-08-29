@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.billing_order import BillingOrder
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
@@ -123,6 +124,53 @@ async def get_billing_status(
         "au_current": au_current,
         "au_limit": au_limit,
         "au_paused": sub.au_paused_at is not None,
+    }
+
+
+@router.get("/orders")
+async def list_billing_orders(
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    _ee: None = Depends(_require_ee),
+) -> dict:
+    """story #3209(PR-1) — 웹 빌링 내역(주문별). /status와 동일 can_manage 축(owner/admin만
+    — 결제 금액·영수증은 billing 관리 권한과 같은 민감도로 취급, 이 라우터의 기존
+    관례를 그대로 따른다). 최근 순 최대 50건 — pending/failed도 포함(진짜 "내역"이라
+    confirmed만 거르면 실패한 시도가 안 보여 사용자가 재시도 여부를 판단 못 한다).
+    receipt_url은 confirmed에서만 값이 있다(billing_charge.py._confirm_with_ledger)."""
+    role_result = await session.execute(
+        select(OrgMember.role).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == uuid.UUID(auth.user_id),
+            OrgMember.deleted_at.is_(None),
+        )
+    )
+    caller_role = role_result.scalar_one_or_none() or "member"
+    if caller_role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="billing history requires owner/admin role")
+
+    orders = (
+        await session.execute(
+            select(BillingOrder)
+            .where(BillingOrder.org_id == org_id)
+            .order_by(BillingOrder.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    return {
+        "data": [
+            {
+                "order_id": o.order_id,
+                "created_at": o.created_at.isoformat(),
+                "amount_minor": o.amount_minor,
+                "currency": o.currency,
+                "status": o.status,
+                "purpose": o.purpose,
+                "receipt_url": o.receipt_url,
+            }
+            for o in orders
+        ]
     }
 
 
