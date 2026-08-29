@@ -5,7 +5,10 @@
     "story #3177(S3a) AC5 순감소 — chat-list-view.tsx 4건→0건(<Button> 전환, 이 스토리가 그 파일을",
     "건드리며 실측 제거). 186f/511occ → 185f/507occ.",
     "story #3183(DS 순감소 리팩터 1호) — story-detail-panel.tsx 37건→0건(<Button variant=\"ghost\">",
-    "전량 전환, baseline 단일 파일 최다 채무 소거). 185f/507occ → 184f/470occ."
+    "전량 전환, baseline 단일 파일 최다 채무 소거). 185f/507occ → 184f/470occ.",
+    "story #3215(DS 순감소 리팩터 2호) — context-switcher-chip.tsx 11건+kanban-board.tsx 10건",
+    "→ 0건(<Button variant=\"ghost\"> 전량 전환, h-auto/min-h-0/min-w-0/font-normal/rounded-none",
+    "개별 보정은 1호와 동형 패턴). 184f/470occ → 182f/449occ."
   ],
   "counts": {
     "app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx": 3,
@@ -139,7 +142,6 @@
     "components/hypotheses/story-hypotheses-section.tsx": 4,
     "components/inbox/approvals-queue.tsx": 5,
     "components/integrations/pr-link-section.tsx": 1,
-    "components/kanban/kanban-board.tsx": 10,
     "components/kanban/kanban-column.tsx": 5,
     "components/kanban/kanban-list-view.tsx": 1,
     "components/kanban/kanban-trust-column.tsx": 1,
@@ -152,7 +154,6 @@
     "components/meetings/audio-recorder.tsx": 2,
     "components/nav/app-sidebar.tsx": 1,
     "components/nav/business-info-disclosure.tsx": 1,
-    "components/nav/context-switcher-chip.tsx": 11,
     "components/nav/notification-bell.tsx": 7,
     "components/nav/theme-toggle.tsx": 1,
     "components/nav/unified-switcher.tsx": 1,

@@ -1151,18 +1151,19 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             { id: 'human' as const, label: t('filterMembers') },
             { id: 'agent' as const, label: t('filterAgents') },
           ]).map(({ id, label }) => (
-            <button
+            <Button
               key={id || 'all'}
               type="button"
+              variant="ghost"
               onClick={() => setAssigneeTypeFilter(id)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`h-auto min-h-0 min-w-0 rounded-md px-3 py-1.5 text-xs font-medium ${
                 assigneeTypeFilter === id
                   ? 'bg-foreground/10 text-foreground'
                   : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
               }`}
             >
               {label}
-            </button>
+            </Button>
           ))}
 
           <div className="mx-1 h-4 w-px bg-border/60" />
@@ -1171,9 +1172,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           <DropdownMenu onOpenChange={(open) => { if (!open) setSprintSearch(''); }}>
             <DropdownMenuTrigger
               render={
-                <button
+                <Button
                   type="button"
-                  className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+                  variant="ghost"
+                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedSprintId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1183,7 +1185,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     {selectedSprintId ? (sprints.find((s) => s.id === selectedSprintId)?.title ?? t('allSprints')) : t('allSprints')}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
-                </button>
+                </Button>
               }
             />
             <DropdownMenuContent align="start" className="w-56">
@@ -1231,9 +1233,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           <DropdownMenu onOpenChange={(open) => { if (!open) setEpicSearch(''); }}>
             <DropdownMenuTrigger
               render={
-                <button
+                <Button
                   type="button"
-                  className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+                  variant="ghost"
+                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedEpicId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1243,7 +1246,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     {selectedEpicId ? (epics.find((e) => e.id === selectedEpicId)?.title ?? t('allEpics')) : t('allEpics')}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
-                </button>
+                </Button>
               }
             />
             <DropdownMenuContent align="start" className="w-56">
@@ -1291,9 +1294,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           <DropdownMenu onOpenChange={(open) => { if (!open) setAssigneeSearch(''); }}>
             <DropdownMenuTrigger
               render={
-                <button
+                <Button
                   type="button"
-                  className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+                  variant="ghost"
+                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedAssigneeId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1303,7 +1307,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     {selectedAssigneeId ? (members.find((m) => m.id === selectedAssigneeId)?.name ?? t('allAssignees')) : t('allAssignees')}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
-                </button>
+                </Button>
               }
             />
             <DropdownMenuContent align="start" className="w-56">
@@ -1371,9 +1375,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             <DropdownMenu onOpenChange={(open) => { if (!open) setLabelSearch(''); }}>
               <DropdownMenuTrigger
                 render={
-                  <button
+                  <Button
                     type="button"
-                    className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+                    variant="ghost"
+                    className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
                       selectedLabelIds.length > 0
                         ? 'border-primary/40 bg-primary/10 text-primary'
                         : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1383,7 +1388,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                       {selectedLabelIds.length > 0 ? t('labelsActive', { count: selectedLabelIds.length }) : t('allLabels')}
                     </span>
                     <ChevronDown className="size-3 shrink-0" />
-                  </button>
+                  </Button>
                 }
               />
               <DropdownMenuContent align="start" className="w-56">
@@ -1453,40 +1458,43 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               className="h-7 w-36 text-xs"
             />
           ) : (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               title={t('searchPlaceholder')}
               onClick={() => setShowSearch(true)}
-              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+              className={`size-7 min-h-0 min-w-0 rounded-md ${
                 searchQuery ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
               }`}
             >
               <Search className="size-3.5" />
-            </button>
+            </Button>
           )}
 
           {/* Board/List toggle */}
           <div className="flex items-center overflow-hidden rounded-md border border-border/60">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setViewMode('board')}
               title="Board view"
-              className={`flex h-7 w-7 items-center justify-center transition-colors ${
-                viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+              className={`size-7 min-h-0 min-w-0 rounded-none ${
+                viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
               <LayoutGrid className="size-3.5" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setViewMode('list')}
               title="List view"
-              className={`flex h-7 w-7 items-center justify-center transition-colors ${
-                viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+              className={`size-7 min-h-0 min-w-0 rounded-none ${
+                viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
               <LayoutList className="size-3.5" />
-            </button>
+            </Button>
           </div>
 
           {/* story #2933 H4(P0-H, 유나 판정 2026-08-22) — 5-status/6단계 신뢰축 컬럼 축 토글.
@@ -1501,28 +1509,30 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               렌더 전용, 이번 슬라이스 스코프). */}
           {viewMode === 'board' && (
             <div className="flex items-center gap-3 border-b border-border/60" role="tablist" aria-label={t('trustAxisView')}>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 role="tab"
                 aria-selected={axisMode === 'status'}
                 onClick={() => handleSetAxisMode('status')}
-                className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold ${
                   axisMode === 'status' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {t('trustClassicView')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="ghost"
                 role="tab"
                 aria-selected={axisMode === 'trust'}
                 onClick={() => handleSetAxisMode('trust')}
-                className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold ${
                   axisMode === 'trust' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {t('trustAxisView')}
-              </button>
+              </Button>
             </div>
           )}
         </div>

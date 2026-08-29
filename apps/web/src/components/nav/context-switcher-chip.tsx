@@ -94,11 +94,12 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             2~3x 폰트부스트 조건에선 2~3 device px 절단으로 관측). `leading-tight`로
             교체 — 버튼 자체는 이미 h-11+overflow-hidden이 하드캡이므로 라벨은 안전하게
             느슨해질 수 있다(2단 실높이 leading-tight 기준 ~30.75px < 예산 32px, 안착). */}
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => s.setOpen(true)}
           disabled={s.pending}
-          className="flex h-11 min-w-0 max-w-[190px] shrink-0 items-center gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left transition hover:bg-muted disabled:opacity-60 lg:hidden"
+          className="h-11 min-h-0 min-w-0 max-w-[190px] shrink-0 justify-start gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left font-normal hover:bg-muted disabled:opacity-60 lg:hidden"
           aria-label={t('switcherMobileTriggerAria')}
         >
           <OrgInitial name={s.displayOrg} className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-brand text-xs font-semibold text-brand-foreground" />
@@ -107,19 +108,20 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             <span className="w-full truncate text-[13px] font-bold leading-tight text-foreground">{chipLabel}</span>
           </span>
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-        </button>
+        </Button>
 
         <SheetContent side="bottom" className="max-h-[80vh] rounded-t-2xl p-0">
           <SheetHeader className="flex-row items-center justify-between border-b pb-3">
             <SheetTitle>{t('switcherMobileSheetTitle')}</SheetTitle>
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => { window.location.href = '/settings?tab=organization'; }}
-              className="flex size-11 items-center justify-center rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="size-11 min-h-0 min-w-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label={t('switcherOrgSettingsAria')}
             >
               <Settings className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </SheetHeader>
 
           <div className="focus-inset flex-1 overflow-y-auto px-2 pb-4">
@@ -153,12 +155,13 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               s.filteredCurrentOrgProjects.map((project) => {
                 const isCurrent = project.projectId === s.currentProjectId;
                 return (
-                  <button
+                  <Button
                     key={project.projectId}
                     type="button"
+                    variant="ghost"
                     disabled={s.pending}
                     onClick={() => void s.switchProject(project.projectId)}
-                    className={`flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-left transition hover:bg-accent disabled:opacity-60 ${isCurrent ? 'bg-brand/10' : ''}`}
+                    className={`min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60 ${isCurrent ? 'bg-brand/10' : ''}`}
                   >
                     <OrgInitial
                       name={project.projectName}
@@ -167,18 +170,19 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                     <span className="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{project.projectName}</span>
                     {/* 유나 규격 — 색만 의존 금지(브랜드 배경+글리프 이중 표식). */}
                     {isCurrent && <Check className="h-4 w-4 shrink-0 text-brand" />}
-                  </button>
+                  </Button>
                 );
               })
             )}
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => s.setCreateProjectOpen(true)}
-              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-brand transition hover:bg-accent"
+              className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand hover:bg-accent hover:text-brand"
             >
               <Plus className="h-4 w-4 shrink-0" />
               <span className="text-sm">{t('switcherNewProject')}</span>
-            </button>
+            </Button>
 
             {/* 다른 조직들 — 섹션 라벨 신설(§③). */}
             {s.otherOrgs.length > 0 && (
@@ -203,41 +207,44 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                     </div>
                   ) : orgProjects && orgProjects.length > 0 ? (
                     orgProjects.map((project) => (
-                      <button
+                      <Button
                         key={project.projectId}
                         type="button"
+                        variant="ghost"
                         disabled={s.pending}
                         onClick={() => void s.switchOrgAndProject(org.orgId, project.projectId)}
-                        className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-left transition hover:bg-accent disabled:opacity-60"
+                        className="min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60"
                       >
                         <span className="min-w-0 flex-1 truncate text-[13.5px]">{project.projectName}</span>
                         <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                      </button>
+                      </Button>
                     ))
                   ) : (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       disabled={s.pending}
                       onClick={() => void s.switchOrg(org.orgId)}
-                      className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-left text-muted-foreground transition hover:bg-accent disabled:opacity-60"
+                      className="min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal text-muted-foreground hover:bg-accent hover:text-muted-foreground disabled:opacity-60"
                     >
                       <span className="flex-1 text-[13.5px]">{t('switcherSwitchToOrg')}</span>
                       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                    </button>
+                    </Button>
                   )}
                 </div>
               );
             })}
 
             <div className="mt-2 border-t pt-2">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => s.setCreateOrgOpen(true)}
-                className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left transition hover:bg-accent"
+                className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent"
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 <span className="text-sm">{t('switcherNewOrganization')}</span>
-              </button>
+              </Button>
             </div>
 
             {/* story #3146 §③ 계정층(신규) — divider로 시각 분리(무거운 조작·우발 탭 방지,
@@ -256,12 +263,13 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   const isExpired = account.status === 'expired';
                   const label = account.name ?? account.email ?? acc.tc('unknown');
                   return (
-                    <button
+                    <Button
                       key={account.account_id}
                       type="button"
+                      variant="ghost"
                       disabled={acc.busy !== null || isActive}
                       onClick={() => void acc.handleSwitch(account)}
-                      className={`flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-left transition hover:bg-accent disabled:opacity-60 ${isActive ? 'bg-brand/10' : ''}`}
+                      className={`min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60 ${isActive ? 'bg-brand/10' : ''}`}
                     >
                       <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
                         {label.charAt(0).toUpperCase()}
@@ -278,38 +286,41 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                       </span>
                       {isActive && <Check className="h-4 w-4 shrink-0 text-brand" />}
                       {acc.busy === account.account_id && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
-                    </button>
+                    </Button>
                   );
                 })}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   disabled={acc.atCap || acc.busy !== null}
                   onClick={() => void acc.handleAdd()}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-brand transition hover:bg-accent disabled:opacity-60"
+                  className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand hover:bg-accent hover:text-brand disabled:opacity-60"
                 >
                   {acc.busy === 'add' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                   <span className="flex-1 text-sm">{acc.t('addAccount')}</span>
                   {acc.atCap && <span className="text-xs text-muted-foreground">{acc.t('capReached')}</span>}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
                   disabled={acc.busy !== null}
                   onClick={() => void acc.handleSignOut('this')}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-destructive transition hover:bg-muted"
+                  className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-destructive hover:bg-muted"
                 >
                   <LogOut className="size-4" />
                   <span className="text-sm">{acc.others.length > 0 ? acc.t('signOutThis') : acc.tc('logout')}</span>
-                </button>
+                </Button>
                 {acc.others.length > 0 && (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     disabled={acc.busy !== null}
                     onClick={() => void acc.handleSignOut('all')}
-                    className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3.5 py-2.5 text-left text-destructive transition hover:bg-muted"
+                    className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-destructive hover:bg-muted"
                   >
                     <LogOut className="size-4" />
                     <span className="text-sm">{acc.t('signOutAll')}</span>
-                  </button>
+                  </Button>
                 )}
               </>
             )}
