@@ -90,8 +90,10 @@ describe('OrderHistorySection(story #3209)', () => {
   });
 
   // story #3209 유나 design:changes(2026-08-29) — 3상태 전부 무색이면 실패=성공 시각
-  // 구분 불가("실패도 보여준다"는 명분과 자가당착) 지적 반영 pin.
-  it('실패 상태는 text-destructive, 완료 상태는 text-success로 색이 갈린다', async () => {
+  // 구분 불가("실패도 보여준다"는 명분과 자가당착) 지적 반영. 유나 재확認 정정 —
+  // confirmed=text-success는 라이트 AA 미달(3.49:1<4.5 실측)이라 PO 판정으로 드롭,
+  // muted 원복(failed=destructive만 유지).
+  it('실패 상태는 text-destructive, 완료 상태는 muted(색 없음)다', async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -105,7 +107,8 @@ describe('OrderHistorySection(story #3209)', () => {
     const failedCell = Array.from(container.querySelectorAll('td')).find((td) => td.textContent === koMessages.pricingPlans.orderHistoryStatusFailed);
     const confirmedCell = Array.from(container.querySelectorAll('td')).find((td) => td.textContent === koMessages.pricingPlans.orderHistoryStatusConfirmed);
     expect(failedCell?.className).toContain('text-destructive');
-    expect(confirmedCell?.className).toContain('text-success');
+    expect(confirmedCell?.className).toContain('text-muted-foreground');
+    expect(confirmedCell?.className).not.toContain('text-success');
   });
 
   it('표에 컬럼 헤더(thead)가 있다 — 스크린리더 컬럼 연결', async () => {

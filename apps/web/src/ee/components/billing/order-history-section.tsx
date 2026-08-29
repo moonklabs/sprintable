@@ -46,7 +46,9 @@ function purposeKey(purpose: string): 'orderHistoryPurposeCharge' | 'orderHistor
 // 시각 동일해진다("실패 시도도 보여준다"는 pending/failed 포함 명분과 자가당착). 결제
 // 완료=success 색은 재량으로 payment-method-section.tsx 자매 섹션의 성공 배너와 맞춘다.
 function statusColorClass(status: string): string {
-  if (status === 'confirmed') return 'text-success';
+  // 유나 재확認 정정(2026-08-29) — confirmed=text-success는 라이트 AA 미달(3.49:1<4.5,
+  // 실측). PO 판정(유나 ①안) — confirmed 색 드롭, muted 원복. failed=destructive만
+  // 유지(실패 스캔 목적은 그걸로 이미 달성, 완료는 기본값이라 색 불요).
   if (status === 'failed') return 'text-destructive';
   return 'text-muted-foreground';
 }
