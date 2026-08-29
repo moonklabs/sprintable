@@ -78,6 +78,12 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   const [orgSlug, setOrgSlug] = useState('');
   // story #3195 — draft 저장/복원 키는 uid가 확정돼야(=/api/auth/me 응답 後) 정해진다.
   const [draftUid, setDraftUid] = useState<string | null>(null);
+  // 유나 design:changes(PR#3617) — draft 복원이 post-mount effect라 응답 前엔 입력창이
+  // 항상 empty로 뜬 뒤 draft로 채워지는 깜빡임이 실측됐다("입력이 그대로 있다"는 인상이
+  // 이 스토리의 AC 자체). uid 해소(성공·실패 무관) 前까지 org 입력 2개를 게이팅해 빈
+  // 화면이 찍히는 순간 자체를 없앤다(PO 선택 ⓐ — lazy-init 무키 폴백(ⓑ)은 前 계정 draft가
+  // 잠깐 보일 위험이 있어 계정격리 축과 상충).
+  const [identityResolved, setIdentityResolved] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
@@ -126,16 +132,22 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         if (json?.data?.email_verified === false) setEmailVerifyBlocked(true);
 
         const uid = json?.data?.member_id;
-        if (!uid) return;
+        if (!uid) { setIdentityResolved(true); return; }
         setDraftUid(uid);
         // 유저가 이 응답을 기다리는 동안 이미 타이핑을 시작했으면(레이스) 덮어쓰지 않는다
         // — 함수형 업데이트로 "지금 이 순간의" 실제 값을 보고 판단(클로저 stale 없음).
         const draft = loadOrgDraft(uid);
-        if (!draft) return;
-        setOrgName((prev) => prev || draft.orgName);
-        setOrgSlug((prev) => prev || draft.orgSlug);
+        if (draft) {
+          setOrgName((prev) => prev || draft.orgName);
+          setOrgSlug((prev) => prev || draft.orgSlug);
+        }
+        setIdentityResolved(true);
       })
-      .catch(() => { /* 조용히 폴백 — 제출 시 400 분기가 그대로 안전망, draft 복원도 스킵 */ });
+      .catch(() => {
+        // 조용히 폴백 — 제출 시 400 분기가 그대로 안전망, draft 복원도 스킵. 실패해도
+        // 게이팅을 영영 풀지 않으면 폼 자체가 막히므로 반드시 resolved 처리한다.
+        if (!cancelled) setIdentityResolved(true);
+      });
     return () => { cancelled = true; };
   }, [step]);
 
@@ -443,6 +455,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
 
         {step === 'org' && (
           <div className="space-y-4">
+            {/* 유나 design:changes(PR#3617) — draft 복원(uid 확定 後 별도 effect)이 응답
+                前엔 항상 empty로 뜬 뒤 채워지는 깜빡임을 만들었다("입력이 그대로 있다"는
+                인상이 AC 자체). identityResolved 前까지 두 입력을 disabled로 게이팅해 그
+                순간 자체를 없앤다. */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">{t('orgName')}</label>
               <OperatorInput
@@ -450,6 +466,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 value={orgName}
                 onChange={(e) => handleOrgNameChange(e.target.value)}
                 placeholder={t('orgNamePlaceholder')}
+                disabled={!identityResolved}
               />
             </div>
             <div className="space-y-1.5">
@@ -459,6 +476,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 value={orgSlug}
                 onChange={(e) => handleOrgSlugChange(e.target.value)}
                 placeholder={t('slugPlaceholder')}
+                disabled={!identityResolved}
               />
               {orgSlug && !slugValid ? (
                 // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,

@@ -145,6 +145,42 @@ describe('OnboardingForm — 1/4 입력값 sessionStorage draft 영속(story #31
   });
 });
 
+describe('OnboardingForm — identityResolved 前 입력 게이팅(유나 design:changes, PR#3617)', () => {
+  it('/api/auth/me 미해소 동안 조직명·슬러그 입력이 disabled — 빈 값이 순간이라도 안 채워지는 깜빡임 방지', async () => {
+    let resolveMe!: (v: { ok: true; json: () => Promise<unknown> }) => void;
+    const mePromise = new Promise<{ ok: true; json: () => Promise<unknown> }>((r) => { resolveMe = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/me') return mePromise;
+      if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) } as Response;
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap()); });
+
+    const inputs = container.querySelectorAll('input');
+    expect((inputs[0] as HTMLInputElement).disabled).toBe(true);
+    expect((inputs[1] as HTMLInputElement).disabled).toBe(true);
+
+    await act(async () => {
+      resolveMe({ ok: true, json: async () => ({ data: { member_id: UID_A, org_id: null, email_verified: true } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect((container.querySelectorAll('input')[0] as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('/api/auth/me 조회 실패해도 게이팅이 영영 안 풀리는 게 아니라 해제된다(폼 영구 잠김 방지)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/me') throw new Error('network down');
+      if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) } as Response;
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap()); });
+    await flush();
+
+    expect((container.querySelectorAll('input')[0] as HTMLInputElement).disabled).toBe(false);
+  });
+});
+
 describe('OnboardingForm — 계정간 draft 격리(codex MED, PR#3617)', () => {
   it('A 계정의 draft가 sessionStorage에 있어도, B 계정으로 마운트하면 B 화면엔 안 새 나간다', async () => {
     sessionStorage.setItem(DRAFT_PREFIX + UID_A, JSON.stringify({ orgName: '유출되면안됨', orgSlug: 'leak' }));
