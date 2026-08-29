@@ -3667,6 +3667,8 @@
     "noMessages": "Send the first message",
     "connectionLost": "Connection lost",
     "refreshNow": "Refresh",
+    "agentNotConnectedBanner": "{name} isn't connected yet — your message may not go through.",
+    "agentNotConnectedBannerMulti": "{count} agents aren't connected yet — your messages may not go through.",
     "create": "Start chat",
     "myChatsTab": "My Chats",
     "agentChatsTab": "Agent Chats",

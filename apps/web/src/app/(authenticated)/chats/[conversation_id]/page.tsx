@@ -23,6 +23,9 @@ interface Participant {
   type?: string;
   // S8b: list participants 직렬화에 runtime_type 노출(미머지 시 필드 부재=undefined → #2 경고 미표시 graceful).
   runtime_type?: string | null;
+  // story #3194 — 미연결 배너 판별용(아래 fetchPresence가 채움). conversation 응답 자체엔
+  // 없는 필드라 항상 undefined로 시작 — merge된 값만 ChatView에 내려간다(mutate 아님).
+  verified?: boolean | null;
 }
 
 interface ConversationMeta {
@@ -146,18 +149,25 @@ export default function ConversationPage() {
 
   // 1aeecdde P2: 에이전트 presence_status(연결축 dot) 폴링 — P1 진실값. 15s 갱신(시간 기반 상태).
   const [presenceById, setPresenceById] = useState<Record<string, PresenceStatus>>({});
+  // story #3194 — 같은 응답의 verified(#2751 get_verified_map, 발명 0)도 같이 읽는다 — 별도
+  // fetch를 새로 만들지 않고 이미 15s마다 도는 이 폴링에 얹는다(연결되면 다음 사이클에
+  // 자연 갱신 → 배너 자연 소멸, AC2).
+  const [verifiedById, setVerifiedById] = useState<Record<string, boolean | null>>({});
   const fetchPresence = useCallback(async () => {
     try {
       const res = await fetchWithAuth('/api/team-members?type=agent');
       if (!res.ok) return;
-      const json = await res.json() as { data?: Array<{ id: string; presence_status?: string | null }> };
+      const json = await res.json() as { data?: Array<{ id: string; presence_status?: string | null; verified?: boolean | null }> };
       const map: Record<string, PresenceStatus> = {};
+      const vMap: Record<string, boolean | null> = {};
       for (const m of json.data ?? []) {
         if (m.presence_status === 'online' || m.presence_status === 'idle' || m.presence_status === 'offline') {
           map[m.id] = m.presence_status;
         }
+        vMap[m.id] = m.verified ?? null;
       }
       setPresenceById(map);
+      setVerifiedById(vMap);
     } catch { /* non-critical */ }
   }, []);
 
@@ -335,7 +345,7 @@ export default function ConversationPage() {
             presenceById={presenceById}
             scrollToMessageId={scrollToMessageId}
             initialLastReadAt={meta ? meta.lastReadAt : undefined}
-            participants={meta?.participants ?? []}
+            participants={(meta?.participants ?? []).map((p) => ({ ...p, verified: verifiedById[p.member_id] }))}
           />
         )}
       </div>
