@@ -227,16 +227,16 @@ async def get_verified_map(db: AsyncSession, agent_ids: list[uuid.UUID]) -> dict
     `get_verification_state()`와 **같은 정의**(``acked_seq >= verify_seq``, stdio 레일) —
     두 번째 판정 기준을 새로 만들지 않는다. 다만 목록은 에이전트 수에 비례해 N번 호출하면
     안 되므로(fan-out 금지, PO 확定 — `_inject_active_stories()`의 `Story.id.in_()` 배치와
-    동형 패턴) GROUP BY로 agent_ids 전체를 한 번에 집계한다(상수 쿼리 2회 — agent 수 무관).
+    동형 패턴) GROUP BY로 agent_ids 전체를 한 번에 집계한다(상수 쿼리 3회 — agent 수 무관).
     요청한 agent_ids 전원에 대해 키가 채워진다(verify 자체를 한 번도 안 한 이탈자도
     False — 그게 이 CTA가 잡으려는 정확히 그 집단이다).
 
-    ⚠️scope: stdio 전용(`acked_seq >= verify_seq`는 durable — 한 번 참이면 영구 유지). http
-    transport는 heartbeat freshness(`_has_fresh_heartbeat`)가 유일한 신호인데 그건 "현재
-    도달 가능"이지 "한 번이라도 연결 완료"의 durable 기록이 아니다 — http 에이전트의 durable
-    verified 신호는 신규 컬럼 없이는 못 만들어 이번 스코프 밖. 지금은 실제로 정상 연결된
-    http 에이전트가 이 map에서 False로 나올 수 있다(false positive 방향 — "이미 괜찮은데
-    CTA가 뜬다"는 눈에 띄지만 안전한 실패 모드, 반대(진짜 이탈자를 숨김)보다 낫다)."""
+    story #3197(2026-08-29) — stdio 레일 OR `agent_project_profiles.first_connected_at IS
+    NOT NULL`. http-transport(온보딩 권장 탭·주 경로)는 `acked_seq >= verify_seq`를 만들
+    discrete 이벤트 왕복 자체가 없어(모듈 docstring) stdio 레일만으론 실연결 http 에이전트가
+    영구 False였다(#2751 당시 스코프 밖 처리 — 이번에 닫음). `first_connected_at`은 transport
+    무관 공용 컬럼(sync_agent_profile_presence choke point에서 한 번 채워지면 안 지워짐)이라
+    stdio 에이전트도 자연히 같은 조건으로 커버된다 — 판별 로직은 여전히 이 함수 한 곳."""
     if not agent_ids:
         return {}
 
@@ -256,11 +256,22 @@ async def get_verified_map(db: AsyncSession, agent_ids: list[uuid.UUID]) -> dict
     )).all()
     acked_seq_map = {row[0]: row[1] for row in acked_seq_rows}
 
+    first_connected_rows = (await db.execute(
+        select(AgentProjectProfile.member_id).where(
+            AgentProjectProfile.member_id.in_(agent_ids),
+            AgentProjectProfile.first_connected_at.isnot(None),
+        )
+    )).all()
+    ever_connected = {row[0] for row in first_connected_rows}
+
     return {
         agent_id: (
-            agent_id in verify_seq_map
-            and agent_id in acked_seq_map
-            and acked_seq_map[agent_id] >= verify_seq_map[agent_id]
+            agent_id in ever_connected
+            or (
+                agent_id in verify_seq_map
+                and agent_id in acked_seq_map
+                and acked_seq_map[agent_id] >= verify_seq_map[agent_id]
+            )
         )
         for agent_id in agent_ids
     }
