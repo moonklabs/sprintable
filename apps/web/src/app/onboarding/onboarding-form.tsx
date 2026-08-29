@@ -5,8 +5,43 @@ import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
+import { fetchWithAuth } from '@/lib/db/client';
 import { ConnectStep } from './connect-step';
 import { emitOnboardingEvent } from './onboarding-telemetry';
+
+// story #3195 — 이메일 인증 왕복(가입 → 1/4 입력 → EMAIL_VERIFICATION_REQUIRED 400 →
+// 메일함에서 링크 클릭 → verify-email 페이지 → 「시작하기」로 복귀)이 풀 페이지 네비게이션이라
+// 이 컴포넌트가 통째로 리마운트돼 React state(orgName/orgSlug)가 사라졌다. sessionStorage는
+// 같은 탭 내 네비게이션 전체에서 살아남는다(탭을 아예 새로 열면 못 살리는 게 정상 — 메일
+// 클라이언트가 링크를 새 탭에서 열어도 verify-email 자체 접근엔 로그인 세션만 있으면 되고,
+// 왕복 자체가 "같은 탭"이어야 이 값이 필요한 시나리오라 sessionStorage로 충분하다).
+const ORG_DRAFT_STORAGE_KEY = 'sp_onboarding_org_draft';
+
+function loadOrgDraft(): { orgName: string; orgSlug: string } | null {
+  if (typeof window === 'undefined') return null; // SSR — 이 lazy initializer가 서버에서도 한 번 돈다.
+  try {
+    const raw = sessionStorage.getItem(ORG_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { orgName?: unknown; orgSlug?: unknown };
+    if (typeof parsed.orgName !== 'string' || typeof parsed.orgSlug !== 'string') return null;
+    return { orgName: parsed.orgName, orgSlug: parsed.orgSlug };
+  } catch {
+    return null;
+  }
+}
+
+function saveOrgDraft(orgName: string, orgSlug: string): void {
+  try {
+    if (!orgName && !orgSlug) { sessionStorage.removeItem(ORG_DRAFT_STORAGE_KEY); return; }
+    sessionStorage.setItem(ORG_DRAFT_STORAGE_KEY, JSON.stringify({ orgName, orgSlug }));
+  } catch {
+    // 시크릿 모드 등 sessionStorage 차단 — 이 스토리 前과 동일(비영속) 동작으로 조용히 저하.
+  }
+}
+
+function clearOrgDraft(): void {
+  try { sessionStorage.removeItem(ORG_DRAFT_STORAGE_KEY); } catch { /* no-op */ }
+}
 
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 // story #3196 ⑥ — 값(BE role 필드, 영문 enum 그대로 무변경)과 표시 라벨을 분리. 예전엔
@@ -32,8 +67,8 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   const t = useTranslations('onboarding');
 
   const [step, setStep] = useState<Step>(initialStep ?? 'org');
-  const [orgName, setOrgName] = useState('');
-  const [orgSlug, setOrgSlug] = useState('');
+  const [orgName, setOrgName] = useState(() => loadOrgDraft()?.orgName ?? '');
+  const [orgSlug, setOrgSlug] = useState(() => loadOrgDraft()?.orgSlug ?? '');
   const [projectName, setProjectName] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
@@ -62,6 +97,30 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   useEffect(() => {
     emitOnboardingEvent('onboarding_started');
   }, []);
+
+  // story #3195 — 매 키입력마다 draft 저장(디바운스 불요 — sessionStorage 쓰기는 로컬·저비용).
+  // org 단계를 이미 지났으면(step advance 후 재입력 없음) 더 쓸 이유가 없어 스킵.
+  useEffect(() => {
+    if (step !== 'org') return;
+    saveOrgDraft(orgName, orgSlug);
+  }, [step, orgName, orgSlug]);
+
+  // story #3195 AC2 — «이메일 인증 필요»를 제출(400) 前에 선제 고지. /api/me가 신설한
+  // email_verified가 명시 false일 때만 배너를 띄운다(true·null 둘 다 무표시 — null은 조회
+  // 실패/API키 컨텍스트로 판정 불가란 뜻이라, 이전처럼 "제출해봐야 아는" 폴백으로 자연스럽게
+  // 저하할 뿐 새로운 오탐을 만들지 않는다).
+  useEffect(() => {
+    if (step !== 'org') return;
+    let cancelled = false;
+    fetchWithAuth('/api/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { data?: { email_verified?: boolean | null } } | null) => {
+        if (cancelled) return;
+        if (json?.data?.email_verified === false) setEmailVerifyBlocked(true);
+      })
+      .catch(() => { /* 조용히 폴백 — 제출 시 400 분기가 그대로 안전망 */ });
+    return () => { cancelled = true; };
+  }, [step]);
 
   const handleOrgNameChange = (name: string) => {
     setOrgName(name);
@@ -128,6 +187,9 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       }
 
       setOrgId(json.data.id);
+      // story #3195 — 조직 생성 성공(=이 값들이 이제 쓸모 없어짐) 시점에만 draft를 지운다.
+      // 실패(EMAIL_VERIFICATION_REQUIRED 포함) 시엔 절대 안 지운다 — 왕복 중 그대로 살아야 함.
+      clearOrgDraft();
       // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
       // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
       // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).

@@ -17,6 +17,21 @@ export default function VerifyEmailPage() {
     () => (token ? '' : '유효하지 않은 인증 링크입니다.')
   );
 
+  // story #3195 — «시작하기»가 org 유무와 무관하게 항상 /inbox로 갔다. 온보딩 도중(org
+  // 미생성) 이메일 인증 벽에 걸린 유저는 org가 없어 /inbox가 막다른 곳이었다(온보딩
+  // 1/4로 돌아가야 sessionStorage draft도 복원된다) — register/page.tsx와 동일 패턴
+  // (org_id 유무로 목적지 분기)으로 통일.
+  const [destination, setDestination] = useState('/inbox');
+  useEffect(() => {
+    fetch('/api/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { data?: { org_id?: string | null } } | null) => {
+        if (json?.data?.org_id) setDestination('/inbox');
+        else setDestination('/onboarding');
+      })
+      .catch(() => { /* 기본값 /inbox 유지 — 조회 실패는 이전 동작으로 저하 */ });
+  }, []);
+
   useEffect(() => {
     if (!token) return;
 
@@ -71,7 +86,7 @@ export default function VerifyEmailPage() {
           <div className="space-y-4">
             <p className="text-sm font-medium text-success" role="status" aria-live="polite" aria-atomic="true">{message}</p>
             <button
-              onClick={() => router.push('/inbox')}
+              onClick={() => router.push(destination)}
               className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
             >
               시작하기

@@ -8,8 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: pushMock }),
   useSearchParams: () => new URLSearchParams('token=tok-1'),
 }));
 
@@ -29,6 +30,7 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
   vi.resetModules();
+  pushMock.mockClear();
 });
 
 async function mountAndWait() {
@@ -81,5 +83,32 @@ describe('VerifyEmailPage — error.code 분기 (story #2484)', () => {
     await mountAndWait();
     expect(container.textContent).not.toContain('brand new raw string');
     expect(container.textContent).toContain('인증에 실패했습니다.');
+  });
+});
+
+// story #3195 — «시작하기»가 org 유무와 무관하게 항상 /inbox로 갔다. 온보딩 도중(org
+// 미생성) 이메일 인증 벽에 걸린 유저는 org가 없어 /inbox가 막다른 곳이었다.
+describe('VerifyEmailPage — 「시작하기」 목적지가 org_id 유무로 갈린다(story #3195)', () => {
+  function mockFetchByUrl(orgId: string | null) {
+    return vi.fn(async (url: string) => {
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { org_id: orgId } }) };
+      return { json: async () => ({ data: { message: 'Email verified successfully' } }) };
+    });
+  }
+
+  it('org_id 있음 — 「시작하기」가 /inbox로 이동', async () => {
+    vi.stubGlobal('fetch', mockFetchByUrl('org-1'));
+    await mountAndWait();
+    const startBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '시작하기');
+    await act(async () => { startBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/inbox');
+  });
+
+  it('org_id 없음(온보딩 미완주) — 「시작하기」가 /onboarding으로 이동(전엔 /inbox 막다른 곳)', async () => {
+    vi.stubGlobal('fetch', mockFetchByUrl(null));
+    await mountAndWait();
+    const startBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '시작하기');
+    await act(async () => { startBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/onboarding');
   });
 });
