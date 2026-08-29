@@ -162,32 +162,40 @@ async def cancel_pending_downgrade(session: AsyncSession, *, org_id: uuid.UUID) 
 
 async def _notify_downgrade_auto_cancelled(session: AsyncSession, *, org_id: uuid.UUID, tier: str, seat_count: int, included_seats: int) -> None:
     """③ — 좌석초과로 하향이 자동 취소됐음을 owner/admin에게 통지(storage-usage-warn과
-    동형 best-effort 이메일 패턴, 재구현 0)."""
-    emails = [
-        r[0] for r in (
+    동형 best-effort 이메일 패턴, 재구현 0).
+
+    story #3207 — 과거 PR#3308에서 유나가 "로케일별 분기 정책이 아직 없다"는 이유로
+    en 카피를 반려하고 ko 단일로 남긴 자리(그 코멘트 원문은 아래 보존). #3205가 그
+    전제(정책 부재)를 채웠으므로 이제 email_copy.DOWNGRADE_AUTO_CANCEL_COPY+
+    resolve_locale 경유로 편입, 수신자별 locale 분기(storage/AU 임계와 동형)."""
+    from app.services.agent_onboarding_config import resolve_locale
+    from app.services.email import render_email_shell
+    from app.services.email_copy import DOWNGRADE_AUTO_CANCEL_COPY
+
+    recipients = [
+        r for r in (
             await session.execute(
-                select(User.email)
+                select(User.email, User.locale)
                 .join(OrgMember, User.id == OrgMember.user_id)
                 .where(OrgMember.org_id == org_id, OrgMember.role.in_(["owner", "admin"]), OrgMember.deleted_at.is_(None))
             )
         ).all()
     ]
-    # 유나양 design 반려(PR#3308, 2026-08-21) — 영문 메일이 제품의 기존 한국어 메일
-    # (초대·#3316 dunning)과 보이스가 갈렸다. 로케일별 분기 정책은 아직 없음(PO 확認) —
+    # 유나양 design 반려(PR#3308, 2026-08-21, 이력 보존) — 영문 메일이 제품의 기존 한국어
+    # 메일(초대·#3316 dunning)과 보이스가 갈렸다. 로케일별 분기 정책은 아직 없음(PO 확認) —
     # 기존 메일 관례대로 한국어 단일. 문안은 design이 첨부한 원문 그대로(#3316 톤 매칭).
-    subject = "[Sprintable] 예약된 하향 전환이 취소되었습니다 — 좌석 한도 초과"
-    html = (
-        f"<p>안녕하세요, Sprintable입니다.</p>"
-        f"<p>예약하신 {tier} 플랜으로의 하향 전환이 자동으로 취소되었습니다. 현재 조직 "
-        f"멤버가 {seat_count}명으로, 해당 플랜의 포함 좌석({included_seats}석)을 초과하기 "
-        f"때문입니다.</p>"
-        f"<p>기존 멤버는 제거되지 않았습니다. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, "
-        f"하향 전환이 여전히 필요하시면 다시 예약해 주세요.</p>"
-        f"<p>문의사항이 있으시면 언제든 회신해 주세요.</p>"
-    )
-    for em in emails:
+    for em, locale_value in recipients:
+        recipient_locale = resolve_locale(locale_value)
+        copy = DOWNGRADE_AUTO_CANCEL_COPY[recipient_locale]
+        content = (
+            f"<p>{copy['greeting']}</p>"
+            f"<p>{copy['body1'].format(tier=tier, seat_count=seat_count, included_seats=included_seats)}</p>"
+            f"<p>{copy['body2']}</p>"
+            f"<p>{copy['closing']}</p>"
+        )
+        html = render_email_shell(content, locale=recipient_locale)
         try:
-            send_email(em, subject, html)
+            send_email(em, copy["subject"], html)
         except Exception:
             logger.warning("downgrade auto-cancel notify 실패 org=%s", org_id, exc_info=True)
 
