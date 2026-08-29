@@ -94,6 +94,59 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
+    # story #3212(구독 라이프사이클 메일 공백, 2026-08-29) — 하향/취소 «예약 확인» 2종.
+    # payment_receipt와 동일 골격(render_action_email 그대로, 발명 0). {tier}/{apply_date}
+    # 자리표시자는 org_subscription_downgrade.py가 .format()으로 채운다. cta_url은
+    # 빌링 설정 페이지(기존 예약 철회 UI가 이미 거기 있다 — 새 공개 원클릭 철회 엔드포인트
+    # 발명 안 함, 로그인 후 기존 버튼 그대로 사용).
+    "subscription_downgrade_reserved": {
+        "ko": {
+            "subject": "[Sprintable] {tier} 플랜으로 변경이 예약됐습니다",
+            "intro_lines": [
+                "플랜 변경이 예약됐습니다.",
+                "{apply_date}부터 {tier} 플랜으로 전환됩니다.",
+            ],
+            "cta_label": "예약 확인·철회하기",
+            "expiry_note": "적용 전까지 언제든 예약을 철회하고 현재 플랜을 유지하실 수 있습니다.",
+            "security_note": "본인이 요청하지 않으셨다면 즉시 고객센터로 문의해 주세요.",
+            "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
+        },
+        "en": {
+            "subject": "[Sprintable] Your plan change to {tier} is scheduled",
+            "intro_lines": [
+                "A plan change has been scheduled.",
+                "You'll switch to the {tier} plan on {apply_date}.",
+            ],
+            "cta_label": "Review or cancel",
+            "expiry_note": "You can cancel this scheduled change and keep your current plan anytime before it takes effect.",
+            "security_note": "If you didn't request this, please contact support immediately.",
+            "fallback_label": "If the button doesn't work, paste this address into your browser:",
+        },
+    },
+    "subscription_cancel_reserved": {
+        "ko": {
+            "subject": "[Sprintable] 구독 해지가 예약됐습니다",
+            "intro_lines": [
+                "구독 해지가 예약됐습니다.",
+                "{apply_date}까지는 현재 플랜을 그대로 이용하실 수 있고, 그 이후 Free 플랜으로 전환됩니다.",
+            ],
+            "cta_label": "예약 확인·철회하기",
+            "expiry_note": "적용 전까지 언제든 예약을 철회하고 구독을 유지하실 수 있습니다.",
+            "security_note": "본인이 요청하지 않으셨다면 즉시 고객센터로 문의해 주세요.",
+            "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
+        },
+        "en": {
+            "subject": "[Sprintable] Your subscription cancellation is scheduled",
+            "intro_lines": [
+                "Your subscription cancellation has been scheduled.",
+                "You'll keep your current plan until {apply_date}, then switch to the Free plan.",
+            ],
+            "cta_label": "Review or cancel",
+            "expiry_note": "You can cancel this scheduled cancellation and keep your subscription anytime before it takes effect.",
+            "security_note": "If you didn't request this, please contact support immediately.",
+            "fallback_label": "If the button doesn't work, paste this address into your browser:",
+        },
+    },
 }
 
 REMINDER_COPY: dict[str, dict[str, str]] = {
@@ -234,6 +287,42 @@ DOWNGRADE_AUTO_CANCEL_COPY: dict[str, dict[str, str]] = {
         "greeting": "Hello, this is Sprintable.",
         "body1": "Your scheduled downgrade to the {tier} plan was automatically canceled. Your organization currently has {seat_count} members, which exceeds that plan's included seats ({included_seats}).",
         "body2": "No existing members were removed. Reduce your team size or keep your current plan, then schedule the downgrade again if you still need it.",
+        "closing": "If you have any questions, feel free to reply to this email anytime.",
+    },
+}
+
+# story #3212 — 하향/취소 «적용 완료» 2종. 액션 불요(정보성)라 DOWNGRADE_AUTO_CANCEL_COPY와
+# 동형(greeting/body1/body2/closing, render_email_shell 직접 사용 — CTA 버튼 없음).
+SUBSCRIPTION_DOWNGRADE_APPLIED_COPY: dict[str, dict[str, str]] = {
+    "ko": {
+        "subject": "[Sprintable] {tier} 플랜으로 전환이 완료됐습니다",
+        "greeting": "안녕하세요, Sprintable입니다.",
+        "body1": "예약하신 {tier} 플랜으로 전환이 완료됐습니다.",
+        "body2": "기존 데이터는 삭제되지 않고 그대로 보존되며, 변경된 플랜 한도 내에서 계속 이용하실 수 있습니다.",
+        "closing": "문의사항이 있으시면 언제든 회신해 주세요.",
+    },
+    "en": {
+        "subject": "[Sprintable] Your plan change to {tier} is complete",
+        "greeting": "Hello, this is Sprintable.",
+        "body1": "Your scheduled plan change to {tier} is now complete.",
+        "body2": "Your existing data hasn't been deleted and remains available, within the limits of your new plan.",
+        "closing": "If you have any questions, feel free to reply to this email anytime.",
+    },
+}
+
+SUBSCRIPTION_CANCEL_APPLIED_COPY: dict[str, dict[str, str]] = {
+    "ko": {
+        "subject": "[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐습니다",
+        "greeting": "안녕하세요, Sprintable입니다.",
+        "body1": "예약하신 구독 해지가 적용되어 Free 플랜으로 전환됐습니다.",
+        "body2": "기존 데이터와 콘텐츠는 삭제되지 않고 그대로 보존됩니다 — 언제든 다시 업그레이드해 이어서 이용하실 수 있습니다.",
+        "closing": "문의사항이 있으시면 언제든 회신해 주세요.",
+    },
+    "en": {
+        "subject": "[Sprintable] Your subscription has ended — you're now on the Free plan",
+        "greeting": "Hello, this is Sprintable.",
+        "body1": "Your scheduled cancellation is now complete and you've been switched to the Free plan.",
+        "body2": "Your existing data and content haven't been deleted and remain available — you can upgrade again anytime to pick up where you left off.",
         "closing": "If you have any questions, feel free to reply to this email anytime.",
     },
 }
