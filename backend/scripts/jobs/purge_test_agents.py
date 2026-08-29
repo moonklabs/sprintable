@@ -128,7 +128,6 @@ DELETE_SPECS: list[tuple[str, list[str]]] = [
     # 까심 RC 재-QA 추가분(2026-07-07) — schema.sql 전체 스윕, ORM 모델 없는 supabase/Node 소유 테이블 포함.
     ("story_assignees", ["member_id"]),
     ("notification_settings", ["member_id"]),
-    ("inbox_items", ["assignee_member_id"]),
     ("memo_assignees", ["member_id"]),
     ("memo_reads", ["team_member_id"]),
     ("memo_replies", ["created_by"]),
@@ -184,7 +183,6 @@ NULLIFY_SPECS: list[tuple[str, list[str]]] = [
     ("agent_personas", ["created_by"]),
     ("agent_routing_rules", ["created_by"]),
     ("agent_sessions", ["created_by"]),
-    ("inbox_items", ["from_agent_id", "resolved_by"]),
     ("memo_assignees", ["assigned_by"]),
     ("memo_doc_links", ["created_by"]),
     ("memos", ["resolved_by"]),

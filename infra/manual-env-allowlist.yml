@@ -607,25 +607,16 @@ code_read_exempt:
 # --update-env-vars에 두 키 다 기존 `_NEXT_PUBLIC_APP_URL`(이미 dev/prod 정확 분기)로
 # 명시 배선해 근본 해소(cloudbuild.yaml 해당 커밋 참고, prod의 수동주입값이 다음 전체
 # 배포에 조용히 지워질 시한위험도 같이 닫힘)) — 남은 2건 중 1건(AGENT_INBOX_HMAC_SECRET)은
-# 값 존부가 아니라 로드맵 판단 필요, 1건(MCP_ALLOWED_TOKEN_REFS)은 별도 보안 스토리
-# (#3174)로 이관돼 그 스토리가 SSOT다. ⚠️1차 판정 정정(2026-08-28, 회귀테스트가 직접
-# 잡음) — `services:`(위 카테고리C, ①②키집합 축)에 라이브로 등재돼 있다는 사실이 이
+# story #1969(2026-08-30, PO 최종 판정 — inbox_items/외부 에이전트 인바운드 표면 완전
+# 은퇴)로 코드 자체가 사라져 이 baseline 항목도 함께 걷었다(exemption 불요 — 코드가
+# env를 안 읽으면 가드가 자연히 green). 남은 1건(MCP_ALLOWED_TOKEN_REFS)은 별도 보안
+# 스토리(#3174)로 이관돼 그 스토리가 SSOT다. ⚠️1차 판정 정정(2026-08-28, 회귀테스트가
+# 직접 잡음) — `services:`(위 카테고리C, ①②키집합 축)에 라이브로 등재돼 있다는 사실이 이
 # ⑤(code-read) 축의 covered 여부와 무관함을 처음엔 놓쳤다(covered-set 계산은
 # `_iac_covered_keys_for_service | live_keys_for_web`뿐 — manual-env-allowlist.yml의
 # services: 목록은 전혀 안 들어간다). check_env_drift.py 실행 로그의 "⑤㉠ baseline"
-# 카운트가 이 숫자(2)와 일치해야 정상.
+# 카운트가 이 숫자(1)와 일치해야 정상.
 code_read_high_baseline:
-  - key: AGENT_INBOX_HMAC_SECRET
-    reason: >-
-      apps/web/src/services/inbox-item.service.ts:95 — 미설정 시 fail-closed(전부 거부).
-      story #3168 실측(2026-08-28): 외부 에이전트 인바운드 표면(설계상 외부 에이전트가
-      POST하는 웹훅) · Cloud Logging 30일 dev/prod 둘 다 POST /api/inbox/incoming 요청
-      0건(무트래픽) · cloudbuild.yaml·infra/cloudbuild-secret-manifest.txt 어디에도 이
-      키 없음(시크릿 미배선). 값을 지어낼 근거가 없음 — 은퇴/로드맵 판정 대기(담당 PO,
-      차기 기한 아래 until·선생님께 다음 통합보고에서 질문 예정, #2423류 "지금 쓰나"는
-      코드로 못 잼).
-    declared_by: PO
-    until: "2026-09-26"
   - key: MCP_ALLOWED_TOKEN_REFS
     reason: >-
       story #3168에서 발견됐으나 연장이 아니라 이관 — 정식 처방 스토리 #3174
