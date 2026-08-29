@@ -294,3 +294,47 @@ async def test_threshold_crossing_sets_agent_status_not_before():
             _dbmod.async_session_factory = _orig
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_threshold_crossing_does_not_stamp_first_connected_at():
+    """story #3197 PO 핀 지시①(2026-08-29, 카디르 뮤테이션 실측 재교체) — 이전 버전
+    (sync_agent_profile_presence를 직접 호출하는 흉내 테스트)은 가짜 양성대조였다: 실
+    호출부(record_auth_failure.py)에 last_seen_at을 추가하는 회귀(뮤테이션A)를 넣어도
+    호출부를 안 거치니 GREEN을 유지했다. 이 테스트는 위 threshold-crossing 리그를 그대로
+    재사용해 `record_auth_failure()` 자체를 end-to-end로 호출 — 임계 도달로 agent_status가
+    "auth_failed"로 바뀌어도(=실 호출부가 진짜 도는지 확인) first_connected_at은 절대
+    채워지면 안 된다("인증 실패가 연결 완료로 둔갑"하는 제품 판정 오염 클래스)."""
+    from sqlalchemy import select
+
+    from app.services.agent_auth_failure import AUTH_FAILURE_THRESHOLD, record_auth_failure
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_agent_key(s, revoked=True)
+            s.add(AgentProjectProfile(
+                id=uuid.uuid4(), member_id=seeded["member_id"], project_id=seeded["project_id"],
+                agent_status="online",
+            ))
+            await s.commit()
+
+        import app.core.database as _dbmod
+        _orig = _dbmod.async_session_factory
+        _dbmod.async_session_factory = Session
+        try:
+            for _ in range(AUTH_FAILURE_THRESHOLD):
+                await record_auth_failure(seeded["raw_key"])
+
+            async with Session() as s:
+                prof = (await s.execute(
+                    select(AgentProjectProfile).where(AgentProjectProfile.member_id == seeded["member_id"])
+                )).scalar_one()
+                # 임계 실제로 넘었는지(=이 테스트가 진짜 경로를 탔는지) 먼저 확認 — 도달
+                # 못 했으면 아래 first_connected_at 단언이 우연히 통과하는 거짓양성이 된다.
+                assert prof.agent_status == "auth_failed"
+                assert prof.first_connected_at is None
+        finally:
+            _dbmod.async_session_factory = _orig
+    finally:
+        await engine.dispose()
