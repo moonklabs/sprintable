@@ -97,6 +97,27 @@ def test_extract_chat_title_with_escaped_paren_and_backslash_still_matches():
     assert extract_chat_entity_mentions(content) == [("doc", doc_id)]
 
 
+def test_extract_chat_hand_typed_unescaped_bracket_title_intentionally_fails():
+    """story #3213 그라운딩(2026-08-29) — 위 두 테스트가 고정한 «escape된» 토큰과 대조군.
+    사람이 `build_reference_token`/FE `applyEntity`를 거치지 않고 **원문 그대로**(백슬래시
+    escape 없이) 손으로 토큰을 짓거나 붙여넣으면(이 조직의 실제 명명 관례 `[TAG] 제목`이
+    정확히 이 모양) 여전히 매치 실패한다 — 이건 #2282 미해결이 아니라 **설계 그대로**다.
+
+    이 정규식을 완전한 bracket-balancing 파서로 바꾸면(원문 그대로도 파싱되게) #2282가
+    막은 바로 그 phishing 위험(escape 안 된 `]`/`(` 조합으로 링크 구조를 변조)이 다시
+    열린다(reference_token.py 모듈 docstring 참조) — 그래서 백엔드는 고치지 않는다.
+
+    실제 처방(story #3213 AC2)은 FE 쪽이다: 등록 실패(references 미저장)가 "대상이
+    없습니다"로 오표기되던 걸 정직한 폴백(클릭 시 실 fetch로 존재판정)으로 바꿨다 —
+    `apps/web/src/components/chat/embed-card.tsx`의 EntityChip ghost 분기 참조."""
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    story_id = uuid.uuid4()
+    unescaped_title = "[빌링·메일] 구독 취소 확인 메일 부재"
+    content = f"[{unescaped_title}](entity:story:{story_id})"
+    assert extract_chat_entity_mentions(content) == []
+
+
 @pytest.mark.parametrize("raw_title", [
     "🚀 Launch Plan [Q3] 🎯",
     "Say \"Hello\" and 'Bye'",
