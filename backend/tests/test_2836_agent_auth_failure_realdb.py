@@ -307,6 +307,7 @@ async def test_threshold_crossing_does_not_stamp_first_connected_at():
     채워지면 안 된다("인증 실패가 연결 완료로 둔갑"하는 제품 판정 오염 클래스)."""
     from sqlalchemy import select
 
+    from app.models.member import AgentProjectProfile
     from app.services.agent_auth_failure import AUTH_FAILURE_THRESHOLD, record_auth_failure
 
     engine, Session = await _session_factory()
