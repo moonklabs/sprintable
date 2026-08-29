@@ -26,11 +26,18 @@ interface TossConversation {
 // 동형(DM은 상대 1인, group은 최대 3인+나머지 카운트) — 별도 모듈로 뽑지 않고 이 파일 소비
 // 범위만 최소 재구현한다(chat-list-view.tsx도 이미 호출부 2곳에 동형 로직을 각자 갖는
 // 관례 — 이 파일이 그 세 번째 자리라 해도 기존 컨벤션과 어긋나지 않는다).
-function conversationDisplayName(conv: TossConversation, currentTeamMemberId: string): string {
+function conversationDisplayName(
+  conv: TossConversation,
+  currentTeamMemberId: string,
+  t: (key: string) => string,
+): string {
   if (conv.title) return conv.title;
   const others = (conv.participants ?? []).filter((p) => p.member_id !== currentTeamMemberId);
-  if (others.length === 0) return conv.type === 'dm' ? 'DM' : conv.id.slice(0, 8);
-  return others.map((p) => p.name ?? '?').join(', ');
+  // story #3203 — group 무참가자 폴백이 conv.id 앞 8자를 지어냈다(uuid 노출 표시결함,
+  // chat-list-view.tsx의 formatParticipantNames와 동형 fix — unknownMember로 통일).
+  // 참가자 이름 해석 실패(BE participant.name=null)도 '?' 대신 같은 문구.
+  if (others.length === 0) return conv.type === 'dm' ? 'DM' : t('unknownMember');
+  return others.map((p) => p.name ?? t('unknownMember')).join(', ');
 }
 
 export interface TossSheetProps {
@@ -100,8 +107,8 @@ export function TossSheet({
     );
     const q = query.trim().toLowerCase();
     if (!q) return list;
-    return list.filter((c) => conversationDisplayName(c, currentTeamMemberId).toLowerCase().includes(q));
-  }, [conversations, designatedApproverId, query, currentTeamMemberId]);
+    return list.filter((c) => conversationDisplayName(c, currentTeamMemberId, t).toLowerCase().includes(q));
+  }, [conversations, designatedApproverId, query, currentTeamMemberId, t]);
 
   const submit = async () => {
     if (!selectedId) return;
@@ -119,7 +126,7 @@ export function TossSheet({
         const inserted = body?.inserted ?? true;
         setAlreadyThereIds((prev) => new Set(prev).add(selectedId));
         onOpenChange(false);
-        onTossed(target ? conversationDisplayName(target, currentTeamMemberId) : '', inserted);
+        onTossed(target ? conversationDisplayName(target, currentTeamMemberId, t) : '', inserted);
         return;
       }
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
@@ -136,7 +143,8 @@ export function TossSheet({
     }
   };
 
-  const approverLabel = designatedApproverName ?? designatedApproverId.slice(0, 8);
+  // story #3203 — 결재자 이름 미해석 폴백도 같은 사람언어 문구로(예전엔 id 앞 8자 노출).
+  const approverLabel = designatedApproverName ?? t('unknownMember');
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -163,7 +171,7 @@ export function TossSheet({
             />
           ) : (
             candidates.map((c) => {
-              const name = conversationDisplayName(c, currentTeamMemberId);
+              const name = conversationDisplayName(c, currentTeamMemberId, t);
               const selected = selectedId === c.id;
               // story #3094(유나 규격 §2 .pick.done) — 이 세션에서 이미 토스 시도한 대상.
               const alreadyThere = alreadyThereIds.has(c.id);

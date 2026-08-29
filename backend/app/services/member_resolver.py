@@ -27,10 +27,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ResolvedMember:
-    """통합 멤버 신원 — 휴먼(org_member.id) 또는 에이전트(team_member.id)."""
+    """통합 멤버 신원 — 휴먼(org_member.id) 또는 에이전트(team_member.id).
+
+    story #3203 — name은 orphan/삭제 멤버(TM도 OrgMember도 아닌 id, org_id=
+    uuid.UUID(int=0) sentinel) fallback에서 None일 수 있다. 예전엔 `str(id)[:8]`
+    (uuid 앞 8자)로 "이름처럼 보이는" 값을 지어냈으나, 그건 FE 화면에 raw 식별자가
+    그대로 새는 표시결함이었다(#3203 실사고 — 대화 리스트 상대명 자리에 uuid 노출).
+    소비처 4곳 전수 확認: gates.py/activity_logs.py는 이미 `if rm and rm.name`
+    truthy 가드, backlinks.py는 org_id sentinel로 orphan을 name 읽기 前에 걸러냄
+    (셋 다 None 안전) — conversations.py(_fetch_conversation_participants)만 FE로
+    그대로 흘려보내는데, FE Participant.name은 원래 `string | null`이었다(폴백
+    로직이 처음부터 null을 전제하고 설계돼 있었다는 뜻 — 이 fix는 그 계약을
+    실제로 채우는 것)."""
     id: uuid.UUID
     user_id: uuid.UUID | None      # users.id (휴먼) | None (에이전트)
-    name: str
+    name: str | None
     type: str                      # "human" | "agent"
     role: str
     org_id: uuid.UUID
@@ -290,12 +301,14 @@ async def _lookup_members_by_ids_legacy(
                 project_id=None,
             )
 
-    # orphan/삭제 멤버: TM도 OrgMember도 아닌 ID → fallback(크래시 방지)
+    # orphan/삭제 멤버: TM도 OrgMember도 아닌 ID → fallback(크래시 방지). story #3203 —
+    # name=None(예전엔 str(mid)[:8] — uuid 노출 표시결함 원인지 중 하나, ResolvedMember
+    # 클래스 docstring 참고).
     for mid in ids:
         if mid not in result:
             result[mid] = ResolvedMember(
                 id=mid, user_id=None,
-                name=str(mid)[:8],
+                name=None,
                 type="human", role="member",
                 org_id=uuid.UUID(int=0),
                 project_id=None,
@@ -388,11 +401,12 @@ async def _lookup_members_by_ids_anchor(
                 avatar_url=m.avatar_url,
             )
 
-    # 3. 진짜 orphan(member/alias 모두 없음) — telemetry-only + 크래시 방지 placeholder
+    # 3. 진짜 orphan(member/alias 모두 없음) — telemetry-only + 크래시 방지 placeholder.
+    # story #3203 — name=None(legacy 경로와 동형 fix, ResolvedMember docstring 참고).
     for oid in ids - set(result.keys()):
         logger.warning("member_resolver(anchor): unresolved orphan id=%s — no member/alias", oid)
         result[oid] = ResolvedMember(
-            id=oid, user_id=None, name=str(oid)[:8],
+            id=oid, user_id=None, name=None,
             type="human", role="member", org_id=uuid.UUID(int=0), project_id=None,
         )
 

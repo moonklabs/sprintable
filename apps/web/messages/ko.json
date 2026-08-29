@@ -3666,6 +3666,7 @@
     "groupTitle": "그룹 이름 (선택)",
     "groupTitlePlaceholder": "그룹 채팅 이름",
     "dmWith": "DM",
+    "unknownMember": "알 수 없는 멤버",
     "noMessages": "첫 메시지를 보내보세요",
     "connectionLost": "연결이 끊겼어요",
     "refreshNow": "새로고침",

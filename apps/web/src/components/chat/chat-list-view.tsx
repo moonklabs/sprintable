@@ -77,10 +77,13 @@ function formatParticipantNames(
 ): string {
   const others = participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return type === 'dm' ? 'DM' : t('groupSection');
-  if (type === 'dm') return others[0]?.name ?? '?';
+  // story #3203 — 이름 해석 실패(orphan/삭제 멤버, BE participant.name=null) 폴백은
+  // '?' 1글자가 아니라 사람 언어 문구로("uuid 노출" 실사고 재발 방지 축 — BE는 raw
+  // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다).
+  if (type === 'dm') return others[0]?.name ?? t('unknownMember');
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? '?').join(', ');
-  const visible = others.slice(0, MAX).map((p) => p.name ?? '?').join(', ');
+  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
+  const visible = others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ');
   return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
 }
 

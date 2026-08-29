@@ -3666,6 +3666,7 @@
     "groupTitle": "Group name (optional)",
     "groupTitlePlaceholder": "Group chat name",
     "dmWith": "DM",
+    "unknownMember": "Unknown member",
     "noMessages": "Send the first message",
     "connectionLost": "Connection lost",
     "refreshNow": "Refresh",
