@@ -195,9 +195,11 @@ DOWNGRADE_AUTO_CANCEL_COPY: dict[str, dict[str, str]] = {
         "closing": "문의사항이 있으시면 언제든 회신해 주세요.",
     },
     "en": {
-        "subject": "[Sprintable] Your scheduled downgrade was cancelled — seat limit exceeded",
+        # 유나 검수 수정의견②(2026-08-29) — apps/web/messages/en.json의 기존 관례
+        # (checkoutCanceled)와 자구 정렬, 미국식 단일-L.
+        "subject": "[Sprintable] Your scheduled downgrade was canceled — seat limit exceeded",
         "greeting": "Hello, this is Sprintable.",
-        "body1": "Your scheduled downgrade to the {tier} plan was automatically cancelled. Your organization currently has {seat_count} members, which exceeds that plan's included seats ({included_seats}).",
+        "body1": "Your scheduled downgrade to the {tier} plan was automatically canceled. Your organization currently has {seat_count} members, which exceeds that plan's included seats ({included_seats}).",
         "body2": "No existing members were removed. Reduce your team size or keep your current plan, then schedule the downgrade again if you still need it.",
         "closing": "If you have any questions, feel free to reply to this email anytime.",
     },
