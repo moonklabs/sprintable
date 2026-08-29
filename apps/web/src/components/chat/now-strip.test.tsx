@@ -197,3 +197,68 @@ describe('NowStrip — story #3180 attention.changed 신호(AC2 즉시 재조회
     expect(fetchWithAuthMock.mock.calls.length).toBe(callsAfterMount + 1);
   });
 });
+
+// story #3182(S3a 후속) — expanded 상태에서 severity 그룹별 대량-N일 때 스크롤 폭탄 방지.
+// S2c③④(embed-group.tsx ConciseList) 선례 그대로 그룹당 기본 3건 + 「+N 더보기」.
+describe('NowStrip — story #3182 그룹별 expand cap(2차 조항, S2c 선례 재사용)', () => {
+  function makeAgentStuckItems(n: number): AttentionItem[] {
+    return Array.from({ length: n }, (_, i) => ({
+      type: 'agent_stuck' as const, severity: 'warn' as const, auto_detected: true,
+      entity_type: 'story' as const, entity_id: `s-${i}`, gate_type: 'merge' as const, stuck_since: null,
+    }));
+  }
+
+  it('실측 38건 시나리오 — 한 그룹(warn) 38건이어도 펼친 직후엔 3건만 렌더되고 「+35 더보기」가 뜬다', async () => {
+    mockAttention(makeAgentStuckItems(38));
+    await act(async () => { root.render(wrap(<NowStrip />)); });
+    await flush();
+    const header = container.querySelector('button[aria-expanded]')!;
+    await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const cards = container.querySelectorAll('a[href^="/board?story="]');
+    expect(cards.length).toBe(3);
+    expect(container.textContent).toContain('+35 더보기');
+  });
+
+  it('「더보기」를 누르면 그룹 전체(38건)가 펼쳐지고, 카드는 여전히 원탭 도달 링크를 유지한다(AC2)', async () => {
+    mockAttention(makeAgentStuckItems(38));
+    await act(async () => { root.render(wrap(<NowStrip />)); });
+    await flush();
+    const header = container.querySelector('button[aria-expanded]')!;
+    await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const moreBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '+35 더보기')!;
+    await act(async () => { moreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const cards = container.querySelectorAll('a[href^="/board?story="]');
+    expect(cards.length).toBe(38);
+    expect(container.querySelector('a[href="/board?story=s-0"]')).toBeTruthy();
+    expect(container.querySelector('a[href="/board?story=s-37"]')).toBeTruthy();
+  });
+
+  it('회귀(AC3) — 소량(그룹당 3건 이하)에서는 「더보기」가 안 뜬다(불필요 UI 0)', async () => {
+    mockAttention(makeAgentStuckItems(3));
+    await act(async () => { root.render(wrap(<NowStrip />)); });
+    await flush();
+    const header = container.querySelector('button[aria-expanded]')!;
+    await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(container.querySelectorAll('a[href^="/board?story="]').length).toBe(3);
+    expect(container.textContent).not.toContain('더보기');
+  });
+
+  it('그룹별 독립 — danger 그룹이 대량이어도 warn 그룹(소량)엔 영향 없다(각 그룹 자체 cap)', async () => {
+    const danger: AttentionItem[] = Array.from({ length: 10 }, (_, i) => ({
+      type: 'agent_auth_failure' as const, severity: 'danger' as const, auto_detected: true,
+      member_id: `m-${i}`, reason: 'revoked' as const, failure_count: 1, first_failed_at: null, last_failed_at: null,
+    }));
+    mockAttention([...danger, AGENT_STUCK]);
+    await act(async () => { root.render(wrap(<NowStrip />)); });
+    await flush();
+    const header = container.querySelector('button[aria-expanded]')!;
+    await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(container.textContent).toContain('+7 더보기'); // danger 10건 → 3+더보기7
+    expect(container.querySelector('a[href="/board?story=s-1"]')).toBeTruthy(); // warn 1건은 cap 미적용(3건 미만)
+  });
+});

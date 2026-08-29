@@ -3512,6 +3512,7 @@
     "nowStripGroupDanger": "Action needed",
     "nowStripGroupWarn": "Attention",
     "nowStripGroupInfo": "Observe · Learn",
+    "nowStripGroupMore": "+{count} more",
     "pulseLabel": "Project pulse",
     "pulseEpicEmpty": "No active epic",
     "pulseCostTrendLabel": "Cost trend",
