@@ -111,4 +111,28 @@ describe('VerifyEmailPage — 「시작하기」 목적지가 org_id 유무로 �
     await act(async () => { startBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/onboarding');
   });
+
+  // 유나 design:pass 비차단 ①(2026-08-29) — /api/me 응답 前 빠른 클릭 레이스. 이전엔
+  // useState 기본값(/inbox)이 그대로 나가 no-org 유저가 막다른 곳으로 갔다. 지금은 클릭이
+  // 판정을 "기다렸다" 라우팅해야 한다.
+  it('/api/me 응답 前 클릭해도(레이스) — 응답 도착 후 올바른 목적지(/onboarding)로 이동한다', async () => {
+    let resolveMe!: (v: { ok: true; json: () => Promise<unknown> }) => void;
+    const mePromise = new Promise<{ ok: true; json: () => Promise<unknown> }>((r) => { resolveMe = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return mePromise;
+      return { json: async () => ({ data: { message: 'Email verified successfully' } }) };
+    }));
+    await mountAndWait();
+
+    const startBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '시작하기');
+    // /api/me가 아직 안 끝난 시점에 클릭 — 예전엔 여기서 이미 /inbox로 나갔다.
+    await act(async () => { startBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveMe({ ok: true, json: async () => ({ data: { org_id: null } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(pushMock).toHaveBeenCalledWith('/onboarding');
+  });
 });
