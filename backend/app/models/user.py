@@ -30,6 +30,15 @@ class User(Base):
     # 발송 전용 신호. nullable, 가입 시 Accept-Language로 1회 포착. None이면
     # resolve_locale()이 DEFAULT_LOCALE("ko")로 폴백한다(추측 백필 없음).
     locale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3204(acquisition 계측) — 가입 시점 1회 포착(locale과 동형 패턴, 재작성 없음).
+    # proxy.ts의 first-touch 쿠키(첫 랜딩의 utm_*/referrer, 재방문 덮어쓰기 안 함)를
+    # register()/oauth_callback() 신규 유저 생성 시점에 그대로 옮겨 담는다. 코호트별
+    # 채널 분석이 목적이라 반복 이벤트가 아닌 1회성 불변 속성 — event meta가 아니라
+    # 이 테이블의 직접 컬럼으로 둔다(PO 확定, doc story #3204).
+    signup_utm_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signup_utm_medium: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signup_utm_campaign: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signup_referrer: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
     # story #2155(2026-07-23): GitHub 로그인 자체를 제거했다(app/routers/auth.py — provider
     # dispatch에서 "github" 삭제). 이 컬럼은 로그인 외 용도가 0곳(PO grep 확認 — 커밋 귀속·

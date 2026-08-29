@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
-import { SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 import { resolveAppUrl } from '@/services/app-url';
 import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
@@ -133,11 +133,24 @@ async function handleCallback(request: Request, provider: string, code: string |
     return NextResponse.redirect(`${origin}/settings?linked=${provider}`);
   }
 
+  // story #3204 — proxy.ts가 랜딩 시점에 심어둔 first-touch 귀속 쿠키를 그대로 BE로 relay
+  // (register route.ts와 동일 계약). 신규 유저 생성 분기에서만 BE가 실제로 사용한다.
+  const utmSource = cookieStore.get('sp_attr_src')?.value;
+  const utmMedium = cookieStore.get('sp_attr_medium')?.value;
+  const utmCampaign = cookieStore.get('sp_attr_campaign')?.value;
+  const attrReferrer = cookieStore.get('sp_attr_ref')?.value;
+
   // FastAPI OAuth callback
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, code, state, tos_accepted: tosAccepted, invite_token: inviteToken }),
+    body: JSON.stringify({
+      provider, code, state, tos_accepted: tosAccepted, invite_token: inviteToken,
+      ...(utmSource ? { signup_utm_source: utmSource } : {}),
+      ...(utmMedium ? { signup_utm_medium: utmMedium } : {}),
+      ...(utmCampaign ? { signup_utm_campaign: utmCampaign } : {}),
+      ...(attrReferrer ? { signup_referrer: attrReferrer } : {}),
+    }),
   }).catch(() => null);
 
   if (!fastapiRes?.ok) {
@@ -146,8 +159,8 @@ async function handleCallback(request: Request, provider: string, code: string |
     return NextResponse.redirect(`${origin}/login?error=${errCode}`);
   }
 
-  const json = await fastapiRes.json() as { data?: { access_token: string; refresh_token: string } };
-  const { access_token, refresh_token } = json.data ?? {};
+  const json = await fastapiRes.json() as { data?: { access_token: string; refresh_token: string; is_new_user?: boolean } };
+  const { access_token, refresh_token, is_new_user: isNewUser } = json.data ?? {};
 
   if (!access_token || !refresh_token) {
     return NextResponse.redirect(`${origin}/login?error=oauth_no_token`);
@@ -197,10 +210,26 @@ async function handleCallback(request: Request, provider: string, code: string |
 
   // AC3: 세션 만료로 OAuth 재로그인한 경우 작업 경로 복귀(safeNextPath 가드)·없으면 홈(chat).
   // story #3179(S3c) 후속(추가 실측 발견) — /dashboard 폐합, 홈=chat 재조준.
-  const destination = inviteToken ? `${origin}/chats` : `${origin}${safeNextPath(nextCookie)}`;
+  const destinationUrl = new URL(
+    inviteToken ? `${origin}/chats` : `${origin}${safeNextPath(nextCookie)}`,
+  );
+  // story #3204 — register/page.tsx(email 경로)와 동일 파라미터로 발화 지점을 하나로
+  // 모은다(google-analytics.tsx route-change effect가 소비). is_new_user=false(로그인)면
+  // 안 붙인다 — 재로그인마다 가입 이벤트가 중복 잡히면 안 됨.
+  if (isNewUser) destinationUrl.searchParams.set('signup', '1');
+  const destination = destinationUrl.toString();
   const res = NextResponse.redirect(destination);
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
+  // 카디르 QA(PR#3612) — register route.ts와 동일 이유. is_new_user일 때만(신규 계정이
+  // 실제로 이 귀속을 소비했을 때만) 지운다 — 기존 유저 로그인은 애초에 이 값을 안 썼으니
+  // 지울 이유가 없다(다음 진짜 첫 방문 신호를 위해 남겨 둔다는 의미는 아니고, 그냥 소비
+  // 안 한 값을 건드릴 이유가 없다는 뜻 — 어느 쪽이든 이후 실제 가입 시점에 갱신/소비됨).
+  if (isNewUser) {
+    for (const name of SIGNUP_ATTRIBUTION_COOKIE_NAMES) {
+      res.cookies.set(name, '', { ...cookieBase(), maxAge: 0 });
+    }
+  }
   return res;
 }
 

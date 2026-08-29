@@ -14,6 +14,15 @@ function isSecureScheme(): boolean {
   return appUrl.startsWith('https://');
 }
 
+/** story #3204 — 가입 출처 first-touch 쿠키 이름(proxy.ts가 세팅·register/oauth 콜백
+ * route.ts가 읽고 BE로 relay). 카디르 QA(PR#3612) — 가입 성공 직후 반드시 지워야 한다
+ * (안 지우면 같은 브라우저에서 재가입 시 前 계정의 옛 귀속이 새 계정에 오염된다). 이름을
+ * 한 곳에 두어 세팅(proxy.ts)·소비+삭제(register/oauth route.ts) 세 자리가 드리프트하지
+ * 않게 한다. */
+export const SIGNUP_ATTRIBUTION_COOKIE_NAMES = [
+  'sp_attr_src', 'sp_attr_medium', 'sp_attr_campaign', 'sp_attr_ref',
+] as const;
+
 export function cookieBase(): {
   httpOnly: boolean;
   secure: boolean;
