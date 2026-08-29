@@ -76,6 +76,10 @@ async def test_notify_dunning_failure_sends_locale_matched_copy_per_recipient(mo
 
 @pytest.mark.anyio
 async def test_notify_downgrade_auto_cancelled_sends_locale_matched_copy_per_recipient(monkeypatch):
+    """까디르 QA 지적(2026-08-29, PR#3608 qa:changes) — 이전 fixture가 ("en@example.com",
+    None)이라 None→ko 폴백 때문에 두 수신자 다 실제로는 ko 카피를 받았다(«틀릴 수 없는
+    무효 오라클» — locale 분기가 깨져도 GREEN). en 수신자는 실제 "en" 값으로 넣고 en
+    고유 문구로 판별한다."""
     import app.services.org_subscription_downgrade as mod
 
     sent = []
@@ -87,7 +91,7 @@ async def test_notify_downgrade_auto_cancelled_sends_locale_matched_copy_per_rec
     monkeypatch.setattr(mod, "send_email", _fake_send_email)
 
     result = MagicMock()
-    result.all.return_value = [("ko@example.com", "ko"), ("en@example.com", None)]
+    result.all.return_value = [("ko@example.com", "ko"), ("en@example.com", "en")]
     session = AsyncMock()
     session.execute = AsyncMock(return_value=result)
 
@@ -98,7 +102,35 @@ async def test_notify_downgrade_auto_cancelled_sends_locale_matched_copy_per_rec
     assert len(sent) == 2
     ko_sent = next(s for s in sent if s["to"] == "ko@example.com")
     en_sent = next(s for s in sent if s["to"] == "en@example.com")
-    # locale=None → resolve_locale이 DEFAULT_LOCALE(ko)로 폴백.
     assert "취소되었습니다" in ko_sent["subject"]
-    assert "취소되었습니다" in en_sent["subject"]
+    assert "취소되었습니다" not in en_sent["subject"]
+    assert "seat limit exceeded" in en_sent["subject"]
     assert "주식회사 뭉클랩" in ko_sent["html"]
+    assert "주식회사 뭉클랩" in en_sent["html"]  # 회사정보 푸터는 locale 무관 고정.
+
+
+@pytest.mark.anyio
+async def test_notify_downgrade_auto_cancelled_none_locale_falls_back_to_ko(monkeypatch):
+    """locale=None(판별원 없는 기존 유저)인 수신자는 DEFAULT_LOCALE(ko)로 폴백 — 위
+    locale 분기 테스트와 분리된 별도 케이스(둘을 합치면 위 케이스처럼 무효 오라클이 된다)."""
+    import app.services.org_subscription_downgrade as mod
+
+    sent = []
+
+    def _fake_send_email(to, subject, html):
+        sent.append({"to": to, "subject": subject, "html": html})
+        return True
+
+    monkeypatch.setattr(mod, "send_email", _fake_send_email)
+
+    result = MagicMock()
+    result.all.return_value = [("noloc@example.com", None)]
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+
+    await mod._notify_downgrade_auto_cancelled(
+        session, org_id=uuid.uuid4(), tier="team", seat_count=12, included_seats=10,
+    )
+
+    assert len(sent) == 1
+    assert "취소되었습니다" in sent[0]["subject"]
