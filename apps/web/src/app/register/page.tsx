@@ -66,7 +66,11 @@ export default function RegisterPage() {
       }
       const meRes = await fetch('/api/me');
       const meJson = await meRes.json() as { data?: { org_id?: string } };
-      router.push(meJson.data?.org_id ? '/inbox' : '/onboarding');
+      // story #3204 — sign_up 전환 이벤트 발화 신호(google-analytics.tsx의 route-change
+      // effect가 소비). OAuth 경로(api/auth/callback/[provider]/route.ts)와 동일 파라미터로
+      // 통일해 발화 지점을 하나로 모은다(SSOT).
+      const destination = meJson.data?.org_id ? '/inbox' : '/onboarding';
+      router.push(`${destination}?signup=1`);
       router.refresh();
     } catch {
       setError(t('registrationFailed'));

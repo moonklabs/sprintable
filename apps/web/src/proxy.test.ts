@@ -1004,3 +1004,46 @@ describe('proxy — story #2595 connect-guide locale rewrite', () => {
     }
   });
 });
+
+// story #3204(acquisition 계측) — 가입 출처 first-touch 캡처. public path에서만 도는
+// 독립 분기(기존 인증/세션 흐름과 무관) — makeRequest에 headers 옵션이 없어 이 describe
+// 안에서만 쓰는 로컬 헬퍼로 referer 헤더를 얹는다.
+function makeRequestWithReferer(path: string, referer: string, cookies: Record<string, string> = {}): NextRequest {
+  const req = new NextRequest(`https://app.example.com${path}`, { headers: { referer } });
+  for (const [name, value] of Object.entries(cookies)) {
+    req.cookies.set(name, value);
+  }
+  return req;
+}
+
+describe('proxy — 가입 출처 first-touch 캡처(story #3204)', () => {
+  it('utm_source/medium/campaign 쿼리가 있으면 각각 쿠키로 저장한다', async () => {
+    const response = await middleware(makeRequest('/?utm_source=google&utm_medium=cpc&utm_campaign=launch'));
+    expect(response.cookies.get('sp_attr_src')?.value).toBe('google');
+    expect(response.cookies.get('sp_attr_medium')?.value).toBe('cpc');
+    expect(response.cookies.get('sp_attr_campaign')?.value).toBe('launch');
+  });
+
+  it('외부 referer는 저장하지만 동일 출처 referer는 저장하지 않는다', async () => {
+    const external = await middleware(makeRequestWithReferer('/', 'https://twitter.com/some/post'));
+    expect(external.cookies.get('sp_attr_ref')?.value).toBe('https://twitter.com/some/post');
+
+    const internal = await middleware(makeRequestWithReferer('/register', 'https://app.example.com/login'));
+    expect(internal.cookies.get('sp_attr_ref')?.value).toBeUndefined();
+  });
+
+  it('utm도 referer도 없으면(direct) 쿠키를 남기지 않는다', async () => {
+    const response = await middleware(makeRequest('/'));
+    expect(response.cookies.get('sp_attr_src')?.value).toBeUndefined();
+    expect(response.cookies.get('sp_attr_ref')?.value).toBeUndefined();
+  });
+
+  it('first-touch — 이미 귀속 쿠키가 있으면 재방문 시 새 utm으로 덮어쓰지 않는다', async () => {
+    const response = await middleware(
+      makeRequest('/?utm_source=facebook&utm_medium=social', { sp_attr_src: 'google' }),
+    );
+    // 응답에 이 쿠키를 새로 set하지 않았어야 한다(요청에 이미 있던 값이 그대로 유지 —
+    // set-cookie 자체가 없으므로 get()이 undefined).
+    expect(response.cookies.get('sp_attr_medium')?.value).toBeUndefined();
+  });
+});

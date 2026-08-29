@@ -569,6 +569,48 @@ async function resolveAndRespond(
   return response;
 }
 
+// story #3204(acquisition 계측) — 가입 출처 first-touch 캡처. 기존 oauth_state_*/
+// oauth_tos_* 등과 동형 관례(별개 단순 쿠키 4개, JSON blob 발명 없음). 30일(=sp_rt와
+// 동일 윈도우) — 그 안에 가입하면 register()/oauth_callback()이 이 값을 users 컬럼에
+// 1회 옮겨 담는다. **first-touch**: 이미 하나라도 세팅돼 있으면 재방문에 덮어쓰지
+// 않는다(첫 유입 채널만 귀속). httpOnly(FE JS가 아니라 register/oauth 콜백 route.ts만
+// 읽는다) — 클라 조작 표면을 줄인다.
+const SIGNUP_ATTRIBUTION_COOKIES = {
+  source: 'sp_attr_src', medium: 'sp_attr_medium', campaign: 'sp_attr_campaign', referrer: 'sp_attr_ref',
+} as const;
+const SIGNUP_ATTRIBUTION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+function captureSignupAttribution(request: NextRequest, response: NextResponse): void {
+  const alreadyCaptured = Object.values(SIGNUP_ATTRIBUTION_COOKIES).some(
+    (name) => request.cookies.get(name)?.value,
+  );
+  if (alreadyCaptured) return; // first-touch만 — 재방문 덮어쓰기 안 함.
+
+  const params = request.nextUrl.searchParams;
+  const utmSource = params.get('utm_source');
+  const utmMedium = params.get('utm_medium');
+  const utmCampaign = params.get('utm_campaign');
+
+  // 동일 출처 내부 이동은 "출처"가 아니다(예: 로그인→가입 링크 클릭) — 외부 referer만.
+  let externalReferrer: string | null = null;
+  const referer = request.headers.get('referer');
+  if (referer) {
+    try {
+      externalReferrer = new URL(referer).origin === request.nextUrl.origin ? null : referer;
+    } catch {
+      externalReferrer = null;
+    }
+  }
+
+  if (!utmSource && !utmMedium && !utmCampaign && !externalReferrer) return; // 신호 없음(direct) — 쿠키 안 남김.
+
+  const base = { ...cookieBase(), maxAge: SIGNUP_ATTRIBUTION_MAX_AGE_SECONDS };
+  if (utmSource) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.source, utmSource, base);
+  if (utmMedium) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.medium, utmMedium, base);
+  if (utmCampaign) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.campaign, utmCampaign, base);
+  if (externalReferrer) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.referrer, externalReferrer, base);
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -588,7 +630,9 @@ export async function proxy(request: NextRequest) {
     PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
 
   if (isPublicPath) {
-    return NextResponse.next({ request });
+    const response = NextResponse.next({ request });
+    captureSignupAttribution(request, response);
+    return response;
   }
 
   // Authenticated API routes — try token refresh but never redirect to /login

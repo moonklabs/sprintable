@@ -117,6 +117,12 @@ class RegisterRequest(BaseModel):
     display_name: str  # AC3: 필수
     tos_accepted: bool = False
     invite_token: str | None = None  # AC2: 초대 토큰 (가입 후 자동 수락)
+    # story #3204(acquisition 계측) — proxy.ts의 first-touch 쿠키를 FE route.ts가 그대로
+    # 실어 보낸다(신뢰 경계 밖 값, 자유 텍스트로만 취급 — 인가/조회 키로 안 씀).
+    signup_utm_source: str | None = None
+    signup_utm_medium: str | None = None
+    signup_utm_campaign: str | None = None
+    signup_referrer: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -580,6 +586,11 @@ async def register(
         # 동일 헬퍼 재사용, 새 파서 발명 없음). FE 명시 전달값은 없음(가입 폼에 locale
         # 필드가 없다) — 브라우저가 항상 보내는 헤더뿐이라 FE 변경 불요.
         locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
+        # story #3204 — 1회 포착(locale과 동형), 소급 없음.
+        signup_utm_source=body.signup_utm_source,
+        signup_utm_medium=body.signup_utm_medium,
+        signup_utm_campaign=body.signup_utm_campaign,
+        signup_referrer=body.signup_referrer,
     )
     session.add(user)
     try:
@@ -1170,6 +1181,12 @@ class OAuthCallbackRequest(BaseModel):
     state: str
     tos_accepted: bool = False
     invite_token: str | None = None  # AC4: OAuth 가입 시 초대 자동 수락
+    # story #3204 — register()와 동일 계약(신뢰 경계 밖 자유 텍스트, 신규 유저 생성
+    # 분기에서만 사용 — 기존 유저 매칭/링크 분기는 무시한다, 재가입이 아니므로).
+    signup_utm_source: str | None = None
+    signup_utm_medium: str | None = None
+    signup_utm_campaign: str | None = None
+    signup_referrer: str | None = None
 
 
 @router.get("/oauth/{provider}/authorize")
@@ -1232,6 +1249,10 @@ async def oauth_callback(
     id_col = getattr(User, f"{provider}_id")
     result = await session.execute(select(User).where(id_col == oauth_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
+    # story #3204 — sign_up 전환 이벤트 발화 신호. "신규 유저 생성" 분기(아래)에서만
+    # true — 기존 유저를 provider_id/email로 찾아 링크만 한 경우는 로그인이지 가입이
+    # 아니다(재가입 아님).
+    is_new_user = False
 
     if not user:
         # story #3118(PO 확定 2026-08-26, private relay 이메일 특성) — Apple은 이메일 자동
@@ -1263,6 +1284,11 @@ async def oauth_callback(
                 tos_accepted_at=datetime.now(timezone.utc),
                 # story #3205 — register()와 동일 포착(발명 0).
                 locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
+                # story #3204 — register()와 동일 포착(발명 0).
+                signup_utm_source=body.signup_utm_source,
+                signup_utm_medium=body.signup_utm_medium,
+                signup_utm_campaign=body.signup_utm_campaign,
+                signup_referrer=body.signup_referrer,
                 **{f"{provider}_id": oauth_id},
             )
             session.add(user)
@@ -1271,6 +1297,7 @@ async def oauth_callback(
             except IntegrityError:
                 await session.rollback()
                 return _err("EMAIL_CONFLICT", "Email already registered", 409)
+            is_new_user = True
 
             # AC4: invite_token 있으면 신규 OAuth 유저도 자동 수락
             if body.invite_token:
@@ -1296,6 +1323,10 @@ async def oauth_callback(
         "refresh_token": raw_refresh,
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        # story #3204 — FE route.ts가 이 값으로 목적지 URL에 sign_up 이벤트 발화 신호를
+        # 붙인다(?signup=1). 본인 인증 응답 안이라 계정 존재 여부를 타인에게 누출하지
+        # 않는다(PO 확認 2026-08-29).
+        "is_new_user": is_new_user,
     })
 
 

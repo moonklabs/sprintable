@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
@@ -12,6 +13,13 @@ export async function POST(request: Request) {
 
   const body = await request.json() as { email: string; password: string; display_name?: string; tos_accepted?: boolean; invite_token?: string };
 
+  // story #3204 — proxy.ts가 랜딩 시점에 심어둔 first-touch 귀속 쿠키를 그대로 BE로 relay.
+  const cookieStore = await cookies();
+  const utmSource = cookieStore.get('sp_attr_src')?.value;
+  const utmMedium = cookieStore.get('sp_attr_medium')?.value;
+  const utmCampaign = cookieStore.get('sp_attr_campaign')?.value;
+  const referrer = cookieStore.get('sp_attr_ref')?.value;
+
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -21,6 +29,10 @@ export async function POST(request: Request) {
       display_name: body.display_name ?? body.email.split('@')[0],
       tos_accepted: body.tos_accepted ?? false,
       ...(body.invite_token ? { invite_token: body.invite_token } : {}),
+      ...(utmSource ? { signup_utm_source: utmSource } : {}),
+      ...(utmMedium ? { signup_utm_medium: utmMedium } : {}),
+      ...(utmCampaign ? { signup_utm_campaign: utmCampaign } : {}),
+      ...(referrer ? { signup_referrer: referrer } : {}),
     }),
   });
 

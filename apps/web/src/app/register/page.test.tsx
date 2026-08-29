@@ -13,8 +13,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
+const { pushMock, refreshMock } = vi.hoisted(() => ({ pushMock: vi.fn(), refreshMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: pushMock, refresh: refreshMock }),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -144,5 +145,54 @@ describe('RegisterPage — error.code 분기 (story #2484)', () => {
     const alertEl = container.querySelector('[role="alert"]');
     expect(alertEl?.textContent).not.toContain('brand new raw string');
     expect(alertEl?.textContent).toBe(koMessages.register.registrationFailed);
+  });
+});
+
+// story #3204(acquisition 계측) — 가입 완료 시 목적지 URL에 sign_up 이벤트 발화 신호
+// (?signup=1)를 붙인다. OAuth 경로(api/auth/callback/[provider]/route.ts)와 동일
+// 파라미터로 통일해 google-analytics.tsx 한 곳에서만 발화하는 SSOT 계약.
+describe('RegisterPage — sign_up 이벤트 발화 신호(story #3204)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); pushMock.mockClear(); });
+
+  async function fillAndSubmit() {
+    const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
+    const pwInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => {
+      setNativeValue(nameInput, 'Test User');
+      setNativeValue(emailInput, 'a@b.com');
+      setNativeValue(pwInput, 'Abc123!!');
+      tosCheckbox.click();
+    });
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.register.submit);
+    await act(async () => {
+      submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('가입 성공 → org_id 있으면 /inbox?signup=1로 이동', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/register') return { ok: true, json: async () => ({ data: { ok: true } }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { org_id: 'org-1' } }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await mount('ko');
+    await fillAndSubmit();
+    expect(pushMock).toHaveBeenCalledWith('/inbox?signup=1');
+  });
+
+  it('가입 성공 → org_id 없으면 /onboarding?signup=1로 이동', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/register') return { ok: true, json: async () => ({ data: { ok: true } }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: {} }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await mount('ko');
+    await fillAndSubmit();
+    expect(pushMock).toHaveBeenCalledWith('/onboarding?signup=1');
   });
 });
