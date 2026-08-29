@@ -24,7 +24,9 @@ from app.models.hitl import HitlRequest
 from app.models.org_subscription import OrgSubscription
 from app.models.project import OrgMember
 from app.models.user import User
+from app.services.agent_onboarding_config import resolve_locale
 from app.services.email import send_email
+from app.services.email_copy import AU_WARN_COPY, STORAGE_WARN_COPY
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
@@ -909,9 +911,9 @@ async def storage_usage_warn(
                 and (now - sub.storage_warn_notified_at) < _STORAGE_WARN_COOLDOWN
             ):
                 continue  # cooldown 내 — 재발송 금지(dedup)
-            emails = [
-                r[0] for r in (await session.execute(
-                    select(User.email)
+            recipients = [
+                r for r in (await session.execute(
+                    select(User.email, User.locale)
                     .join(OrgMember, User.id == OrgMember.user_id)
                     .where(
                         OrgMember.org_id == sub.org_id,
@@ -921,13 +923,11 @@ async def storage_usage_warn(
                 )).all()
             ]
             pct = round(used / cap_bytes * 100, 1)
-            subject = f"[Sprintable] Storage usage at {pct}%"
-            html = (
-                f"<p>Your organization's storage usage has reached <b>{pct}%</b> "
-                f"({used // (1024 * 1024)}MB / {cap_mb}MB).</p>"
-                f"<p>Free up space (delete unused files) or upgrade your plan to avoid upload limits.</p>"
-            )
-            for em in emails:
+            # story #3205(AC3) — 어드민 locale 기준 분기(수신자별 개별). 기존엔 en 고정이었다.
+            for em, locale_value in recipients:
+                copy = STORAGE_WARN_COPY[resolve_locale(locale_value)]
+                subject = copy["subject"].format(pct=pct)
+                html = copy["body"].format(pct=pct, used_mb=used // (1024 * 1024), cap_mb=cap_mb)
                 try:
                     await asyncio.to_thread(send_email, em, subject, html)
                 except Exception:
@@ -1023,9 +1023,9 @@ async def au_usage_warn(
                     sub.au_warn_90_notified_at is None
                     or (now - sub.au_warn_90_notified_at) >= _AU_WARN_90_COOLDOWN
                 ):
-                    emails = [
-                        r[0] for r in (await session.execute(
-                            select(User.email)
+                    recipients = [
+                        r for r in (await session.execute(
+                            select(User.email, User.locale)
                             .join(OrgMember, User.id == OrgMember.user_id)
                             .where(
                                 OrgMember.org_id == sub.org_id,
@@ -1035,14 +1035,11 @@ async def au_usage_warn(
                         )).all()
                     ]
                     pct_display = round(pct * 100, 1)
-                    subject = f"[Sprintable] Automation usage (AU) at {pct_display}%"
-                    html = (
-                        f"<p>Your organization's automation usage (AU) has reached "
-                        f"<b>{pct_display}%</b> ({current} / {au_limit} AU this month).</p>"
-                        f"<p>At 100% MCP/API writes and automation will pause (reads and human "
-                        f"UI stay available). Consider upgrading before the limit is reached.</p>"
-                    )
-                    for em in emails:
+                    # story #3205(AC3) — 어드민 locale 기준 분기(수신자별 개별). 기존엔 en 고정.
+                    for em, locale_value in recipients:
+                        copy = AU_WARN_COPY[resolve_locale(locale_value)]
+                        subject = copy["subject"].format(pct=pct_display)
+                        html = copy["body"].format(pct=pct_display, current=current, au_limit=au_limit)
                         try:
                             await asyncio.to_thread(send_email, em, subject, html)
                         except Exception:

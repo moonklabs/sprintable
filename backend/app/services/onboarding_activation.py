@@ -216,16 +216,16 @@ async def find_reminder_candidates(db: AsyncSession, *, now: datetime | None = N
     return candidates
 
 
-def _reminder_email_body(*, app_url: str, unsub_link: str) -> str:
+def _reminder_email_body(*, app_url: str, unsub_link: str, locale: str) -> str:
+    from app.services.email_copy import REMINDER_COPY
+    copy = REMINDER_COPY[locale]
     return (
-        "<p>Sprintable 가입을 환영합니다. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요"
-        " — 몇 분이면 끝나는 남은 단계를 마무리하면 Sprintable의 진짜 가치를 바로 확인하실 수"
-        " 있습니다.</p>"
-        f"<p><a href='{app_url}'>이어서 진행하기</a></p>"
+        f"<p>{copy['intro']}</p>"
+        f"<p><a href='{app_url}'>{copy['cta_label']}</a></p>"
         # 유나 design:pass 권장(2026-08-27) — #888은 흰 배경 대비 3.5:1로 AA(4.5) 미달.
         # #595959로 7:1(AAA) 확保.
         "<p style='font-size:12px;color:#595959'>"
-        f"<a href='{unsub_link}'>이런 안내를 더 이상 받고 싶지 않다면 여기를 눌러 주세요</a></p>"
+        f"<a href='{unsub_link}'>{copy['unsub_label']}</a></p>"
     )
 
 
@@ -233,16 +233,20 @@ async def send_activation_reminder(db: AsyncSession, user: User) -> bool:
     """이력 스탬프는 발송 시도 여부와 무관하게 항상 기록(재시도 폭주 방지 — email.py의
     False 반환도 "재시도 가능한 일시 실패"가 아니라 "provider 미설정"이라 재시도해도 무의미)."""
     from app.core.security import create_email_unsubscribe_token
+    from app.services.agent_onboarding_config import resolve_locale
     from app.services.email import send_email
+    from app.services.email_copy import REMINDER_COPY
 
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     unsub_token = create_email_unsubscribe_token(str(user.id))
     unsub_link = f"{app_url}/unsubscribe?token={unsub_token}"
+    # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
+    locale = resolve_locale(user.locale)
     delivered = send_email(
         to=user.email,
         # 유나 design:pass 권장(2026-08-27) — 해요체("완료예요") → 합니다체 정합.
-        subject="Sprintable — 가입 완료까지 몇 단계 남았습니다",
-        html_body=_reminder_email_body(app_url=app_url, unsub_link=unsub_link),
+        subject=REMINDER_COPY[locale]["subject"],
+        html_body=_reminder_email_body(app_url=app_url, unsub_link=unsub_link, locale=locale),
     )
     user.onboarding_reminder_sent_at = datetime.now(timezone.utc)
     db.add(user)

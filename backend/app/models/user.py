@@ -25,6 +25,11 @@ class User(Base):
     totp_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     totp_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3205 — 발송 메일 로케일 분기 판별원. FE 라이브 렌더링 locale은 여전히 쿠키
+    # 전용(story 11f1087c 크루스 무회귀) — 이건 요청 밖(cron 등)에서도 읽을 수 있는
+    # 발송 전용 신호. nullable, 가입 시 Accept-Language로 1회 포착. None이면
+    # resolve_locale()이 DEFAULT_LOCALE("ko")로 폴백한다(추측 백필 없음).
+    locale: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
     # story #2155(2026-07-23): GitHub 로그인 자체를 제거했다(app/routers/auth.py — provider
     # dispatch에서 "github" 삭제). 이 컬럼은 로그인 외 용도가 0곳(PO grep 확認 — 커밋 귀속·

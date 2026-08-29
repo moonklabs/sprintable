@@ -56,6 +56,11 @@ async def _client(user_id: uuid.UUID = USER_ID):
     ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
 
     mock_session = AsyncMock()
+    # story #3205: create/resend invite가 _resolve_invitee_locale()로 session.execute()를
+    # 추가 호출한다 — 기본은 "기존 유저 없음"(None → DEFAULT_LOCALE, 기존 ko 무회귀).
+    _execute_result = MagicMock()
+    _execute_result.scalar_one_or_none.return_value = None
+    mock_session.execute = AsyncMock(return_value=_execute_result)
 
     async def override_db():
         yield mock_session
