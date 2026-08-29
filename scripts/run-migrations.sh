@@ -32,8 +32,17 @@
 # 과거 실패가 방치된 채) 여러 릴리스를 건너뛰어 이 이미지로 바로 점프하면, 그 결손은
 # 이 설계로 못 닫는다 — 그런 DB는 "pre-ledger 마지막 릴리스를 최소 한 번은 정상 기동해
 # 통과시킨 뒤" 이 이미지로 올라오는 것을 전제한다(문서화 요구사항, 자동 검증 불가).
-# SEED_CUTOFF는 새 supabase migration 파일이 develop에 머지될 때마다 최신값으로 갱신
-# 필요 — 이 상수를 안 올리면 새 파일이 오분류로 시딩될 위험이 있다.
+#
+# SEED_CUTOFF는 **이후 절대 전진시키지 않는다**(페드루 지적, 2026-08-30 — 최초 처방의
+# "새 파일 머지마다 갱신" 문구 자체가 ①버그 재도입이었다). 이유: «원장이 없는 DB»는
+# 정의상 이 원장 기반 스크립트를 단 한 번도 부팅한 적 없는 DB뿐이다(원장 있는 이미지는
+# 첫 부팅에 반드시 원장 테이블을 만들어, 그 뒤로는 needs_seed가 영원히 false가 되므로).
+# 그런 DB가 "원장 도입 이후에" 추가된 파일을 실제로 적용했을 가능성은 구조적으로 0이다
+# — 그 파일들은 원장 없는 이미지로는 애초에 실려올 수 없었기 때문. cutoff를 나중에
+# 전진시키면 "원장 도입 이후 새로 추가된, 아직 아무 DB도 실행한 적 없는 파일"까지
+# "이미 적용됨"으로 시딩해버려 straggler 오분류(①버그)를 그대로 재도입한다. cutoff는
+# **이 PR(원장 도입 시점) 파일셋에 영구 동결**된 역사적 상수이며, 손대야 할 미래
+# 시나리오는 존재하지 않는다.
 #
 # ②[HIGH] INVALID 인덱스 마스킹 — CREATE INDEX CONCURRENTLY가 (락 경합·중복키 등으로)
 # 도중 실패하면 Postgres는 롤백하지 않고 그 인덱스를 INVALID 상태로 **남겨둔다**. 같은
@@ -52,10 +61,15 @@
 # 범용 파서 없이 안전하게 하긴 어려우므로, 실측으로 확定한 **명시 allowlist**로
 # 대체한다(카디르 승인 방식) — 이 목록은 실제로 top-level에서 CREATE INDEX CONCURRENTLY
 # 를 쓰는 파일 2개(20260414182300_performance_indexes.sql,
-# 20260408133000_hot_query_indexes.sql)뿐이다. ⚠️ 재실측 조건: 이 디렉터리에 top-level
-# CONCURRENTLY 구문(CREATE INDEX CONCURRENTLY, DROP INDEX CONCURRENTLY, REINDEX
-# CONCURRENTLY 등)을 쓰는 새 파일이 추가되면 이 allowlist도 같이 갱신해야 한다 —
-# `grep -B2 -A2 "CONCURRENTLY" <file>`로 BEGIN...END 함수 본문 밖인지 직접 눈으로 확인.
+# 20260408133000_hot_query_indexes.sql)뿐이다. ⚠️ 재실측 조건(SEED_CUTOFF와 달리 이
+# allowlist는 새 CONCURRENTLY 파일이 생길 때마다 실제로 갱신 의무가 남는 자리다) — 이
+# 디렉터리에 top-level CONCURRENTLY 구문(CREATE INDEX CONCURRENTLY, DROP INDEX
+# CONCURRENTLY, REINDEX CONCURRENTLY 등)을 쓰는 새 파일이 추가되면 이 allowlist도 같이
+# 갱신해야 한다 — `grep -B2 -A2 "CONCURRENTLY" <file>`로 BEGIN...END 함수 본문 밖인지
+# 직접 눈으로 확인. 사람이 깜빡해도 조용히 안 넘어가도록 run-migrations.test.sh
+# 시나리오 [9]가 "실 코퍼스의 CONCURRENTLY 포함 파일 ⊆ (이 allowlist ∪ 함수본문-전용으로
+# 수동 검증된 선언 목록)"을 매번 재확인하는 트립와이어다 — 새 파일을 놓치면 그 시나리오가
+# RED로 재분류를 강제한다(페드루 지적, 2026-08-30).
 
 set -eu
 
@@ -87,8 +101,9 @@ SENTINEL_TABLE="public.stories"
 
 # ①의 cutoff — 이 PR(#3219) 머지 시점 기준 packages/db/supabase/migrations의 최신
 # 파일명(2026-08-30, `ls packages/db/supabase/migrations/*.sql | sort | tail -1`로
-# 실측 확定, origin/develop과 동기 확인 후 고정). 테스트에서만
-# SPRINTABLE_MIGRATIONS_SEED_CUTOFF로 오버라이드(합성 파일명 대응).
+# 실측 확定, origin/develop과 동기 확인 후 고정). **영구 동결 — 위 ①단락 근거로 이후
+# 다시 전진시키지 않는다.** 테스트에서만 SPRINTABLE_MIGRATIONS_SEED_CUTOFF로
+# 오버라이드(합성 파일명 대응).
 SEED_CUTOFF="${SPRINTABLE_MIGRATIONS_SEED_CUTOFF:-20260830000000_retire_inbox_items_and_outbox.sql}"
 
 # ③의 allowlist — 위 헤더 코멘트 참고. 테스트에서만

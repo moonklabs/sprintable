@@ -259,6 +259,41 @@ esac
 kill -TERM "$PG_SESSION_PID" 2>/dev/null || true
 wait "$PG_SESSION_PID" 2>/dev/null || true
 
+# ── 시나리오 9(카디르 재검토 前 페드루 지적) — NONTX_ALLOWLIST 트립와이어. cutoff(①)와
+# 달리 이 목록은 새 CONCURRENTLY 파일이 생길 때마다 실제로 갱신 의무가 남는 자리라, PG
+# 없이도 실 코퍼스를 정적 스캔해 "CONCURRENTLY 포함 파일 ⊆ (allowlist ∪ 함수본문-전용
+# 선언목록)"을 매번 재확인한다 — 사람이 새 파일 분류를 깜빡하면 RED로 강제한다 ──
+echo
+echo "== [9] NONTX_ALLOWLIST 트립와이어(실 코퍼스 CONCURRENTLY 미분류 파일 검사) =="
+REAL_MIGRATIONS_DIR="$SCRIPT_DIR/../packages/db/supabase/migrations"
+SCRIPT_NONTX_ALLOWLIST="$(grep -oE "SPRINTABLE_MIGRATIONS_NONTX_ALLOWLIST:-[^}]*" "$SCRIPT" | sed 's/^[^:]*:-//')"
+# 실측(2026-08-30)으로 CONCURRENTLY가 BEGIN...END 함수 본문 **안**에만 있어 top-level이
+# 아님을 직접 확인한 파일 — 새로 추가되는 파일은 여기 없으니 트립와이어가 반드시 잡는다.
+FUNCTION_BODY_ONLY_DECLARED="20260407110000_monthly_agent_usage_view.sql 20260408092000_agent_hitl_pending_status.sql 20260425140000_reward_balances_view.sql"
+
+if [ -z "$SCRIPT_NONTX_ALLOWLIST" ]; then
+  echo "  FAIL [9] 스크립트에서 NONTX_ALLOWLIST 기본값을 추출하지 못함(정규식 drift?)"
+  FAIL=1
+fi
+
+UNACCOUNTED=""
+for f in "$REAL_MIGRATIONS_DIR"/*.sql; do
+  name="$(basename "$f")"
+  if grep -q "CONCURRENTLY" "$f"; then
+    accounted=false
+    for known in $SCRIPT_NONTX_ALLOWLIST $FUNCTION_BODY_ONLY_DECLARED; do
+      if [ "$known" = "$name" ]; then
+        accounted=true
+        break
+      fi
+    done
+    if [ "$accounted" = false ]; then
+      UNACCOUNTED="$UNACCOUNTED $name"
+    fi
+  fi
+done
+assert_eq "[9] CONCURRENTLY 포함 파일 전부 allowlist∪함수본문-선언에 계정됨" "" "$UNACCOUNTED"
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
