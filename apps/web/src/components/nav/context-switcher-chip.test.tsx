@@ -158,10 +158,15 @@ describe('ContextSwitcherChip — story #3147/#3146 재설계(44px·검색·3층
     const spans = trigger!.querySelectorAll('span > span');
     expect(spans[0]?.textContent).toBe('뭉클랩');
     expect(spans[1]?.textContent).toBe('Sprintable');
-    // 두 라벨 span 모두 leading-none(타이트 line-height)로 실높이 예산을 하드캡 — 안드로이드
-    // 폰트 부스트 등 렌더링 조건과 무관하게 44px 안에 들어오게 하는 축.
-    expect(spans[0]?.className).toContain('leading-none');
-    expect(spans[1]?.className).toContain('leading-none');
+    // 유나 design:changes(2026-08-29) — 두 라벨 span 모두 leading-tight. 처음엔
+    // leading-none(line-height:1)이었으나 Pretendard ascent+descent(1.19em)가 1em 박스+
+    // truncate의 overflow-hidden에서 디센더(p·g·y)를 잘랐다(실기기 폰트부스트에선 2~3
+    // device px 절단). 버튼 자체(h-11+overflow-hidden)가 이미 하드캡이라 라벨은
+    // leading-tight로 느슨해져도 예산(~30.75px<32px) 안에 안착 — leading-none 회귀를 막는다.
+    expect(spans[0]?.className).toContain('leading-tight');
+    expect(spans[1]?.className).toContain('leading-tight');
+    expect(spans[0]?.className).not.toContain('leading-none');
+    expect(spans[1]?.className).not.toContain('leading-none');
   });
 
   it('시트 안 프로젝트 행이 min-h-11(44px)이다', async () => {
