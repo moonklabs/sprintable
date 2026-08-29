@@ -9,6 +9,16 @@ import { ConnectStep } from './connect-step';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
+// story #3196 ⑥ — 값(BE role 필드, 영문 enum 그대로 무변경)과 표시 라벨을 분리. 예전엔
+// AGENT_ROLES를 <option> 라벨로도 그대로 썼어(value===label) 한국어 온보딩 흐름 한복판에
+// "developer" 등 영문이 그대로 노출됐다.
+const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
+  developer: 'roleDeveloper',
+  designer: 'roleDesigner',
+  pm: 'rolePm',
+  qa: 'roleQa',
+  devops: 'roleDevops',
+};
 
 type Step = 'org' | 'project' | 'agent' | 'connect';
 const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
@@ -28,7 +38,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   const [projectDesc, setProjectDesc] = useState('');
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [agentName, setAgentName] = useState('My Agent');
+  // story #3196 ⑥ — 하드코딩 영문 기본값 제거. 빈 값으로 두면 이미 로컬라이즈돼 있던
+  // agentNamePlaceholder(t('agentNamePlaceholder'))가 정상 노출된다(placeholder는 value가
+  // 있으면 안 보이는 표준 동작이라, value 자체를 채워두면 placeholder 번역이 무의미해짐).
+  const [agentName, setAgentName] = useState('');
   const [agentRole, setAgentRole] = useState('developer');
   const [agentId, setAgentId] = useState<string | null>(null);
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
@@ -436,7 +449,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 onChange={(e) => setAgentRole(e.target.value)}
               >
                 {AGENT_ROLES.map((r) => (
-                  <option key={r} value={r}>{r}</option>
+                  <option key={r} value={r}>{t(AGENT_ROLE_LABEL_KEYS[r] ?? r)}</option>
                 ))}
               </OperatorSelect>
             </div>

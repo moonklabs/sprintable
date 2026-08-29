@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from 'lucide-react';
@@ -121,7 +122,12 @@ export function ActivationChecklistBanner() {
     }
   };
 
+  // story #3196 ④ — BE steps는 5개(signed_up 포함)인데 이 목록은 4개만 그려 "4/5 완료"
+  // 진행률과 눈에 보이는 항목 수가 안 맞았다(5번째가 뭔지 화면이 말 안 함). signed_up은
+  // 이 배너에 도달했다는 사실 자체가 이미 참(비인터랙티브 li로만 — 첫 지시 항목과 달리
+  // 딥링크 대상이 없다, 이미 지난 단계).
   const stepItems: { key: keyof ActivationState['steps']; label: string }[] = [
+    { key: 'signed_up', label: t('stepSignedUp') },
     { key: 'email_verified', label: t('stepEmailVerified') },
     { key: 'org_created', label: t('stepOrgCreated') },
     { key: 'agent_connected', label: t('stepAgentConnected') },
@@ -174,6 +180,27 @@ export function ActivationChecklistBanner() {
                   {navigatingToInstruction ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : icon}
                   <span>{label}</span>
                 </Button>
+              </li>
+            );
+          }
+          // story #3196 ③ 잔존分 — "에이전트 연결하기" 딥링크 부재. 워크포스 목록(#3194가
+          // 이미 "연결 안 됨" 배지+연결설정 CTA를 갖춘 그 화면)으로 보낸다 — 아직 특정
+          // 에이전트가 없을 수도 있어(연결 대상 자체가 미확定) agent-specific 딥링크
+          // (#3194의 /organization/workforce/{id})가 아니라 리스트로(발명 0 — 새 목적지
+          // 안 만듦, 기존 화면 재사용).
+          if (key === 'agent_connected') {
+            return (
+              <li key={key}>
+                <Link
+                  href="/organization/workforce"
+                  className={cn(
+                    'flex h-auto w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline',
+                    met ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  {icon}
+                  <span>{label}</span>
+                </Link>
               </li>
             );
           }
