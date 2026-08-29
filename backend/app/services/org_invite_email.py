@@ -4,14 +4,16 @@ from __future__ import annotations
 import logging
 import os
 
-from app.services.email import send_email
+from app.services.email import render_email_shell, send_email
 from app.services.email_copy import INVITE_COPY
 
 logger = logging.getLogger(__name__)
 
+# story #3206 — 트랜잭셔널 3종·리마인드와 동형 버튼(bg+테두리 병용, Gmail 다크 bg 소실
+# 대응). 기존 #6366f1(인디고) 단색 버튼은 v2 브랜드색(#3157FF)+셸 공통 톤으로 정합.
 _BUTTON_STYLE = (
-    "display:inline-block;padding:12px 28px;background:#6366f1;color:#ffffff;"
-    "text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;"
+    "display:inline-block;padding:12px 24px;background:#3157FF;border:2px solid #3157FF;"
+    "color:#ffffff;text-decoration:none;border-radius:6px;font-weight:700;font-size:14px;"
 )
 
 
@@ -26,50 +28,25 @@ def _en_role_with_article(role: str) -> str:
 
 
 def _build_invite_html(*, org_name: str, inviter_name: str, accept_link: str, role: str, locale: str) -> str:
-    from datetime import datetime, timezone
-
+    """story #3206 — 공용 셸(render_email_shell)이 헤더/푸터를 전담. 이 함수는 콘텐츠
+    영역(제목·본문·버튼·폴백 링크·자동생성 안내)만 만든다 — 예전엔 이 함수가 DOCTYPE/
+    body/헤더바(#6366f1)/카드/tint 푸터까지 전부 자체 소유했는데(v1 스타일), 유나 v2
+    시안이 그 인디고 헤더 바 자체를 실기기 반증으로 폐기했고(색 fill 위계 → 구분선
+    위계) 푸터도 회사정보 SSOT가 중복되던 걸 셸 쪽으로 수렴시켰다."""
     copy = INVITE_COPY[locale]
     role_display = _en_role_with_article(role) if locale == "en" else role
     body = copy["body"].format(inviter_name=inviter_name, org_name=org_name, role=role, role_display=role_display)
-    footer = copy["footer"].format(year=datetime.now(timezone.utc).year)
-    return f"""<!DOCTYPE html>
-<html lang="{copy['html_lang']}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 0;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1);">
-        <!-- Header -->
-        <tr><td style="background:#6366f1;padding:28px 40px;">
-          <span style="color:#ffffff;font-size:20px;font-weight:700;">Sprintable</span>
-        </td></tr>
-        <!-- Body -->
-        <tr><td style="padding:40px 40px 32px;">
-          <h2 style="margin:0 0 16px;font-size:22px;color:#111827;">{copy['heading']}</h2>
-          <p style="margin:0 0 12px;color:#374151;line-height:1.6;">
-            {body}
-          </p>
-          <p style="margin:0 0 32px;color:#6b7280;font-size:14px;line-height:1.6;">
-            {copy['sub_body']}
-          </p>
-          <a href="{accept_link}" style="{_BUTTON_STYLE}">{copy['cta_label']}</a>
-          <hr style="margin:32px 0;border:none;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#9ca3af;font-size:13px;line-height:1.6;">
-            {copy['fallback_label']}<br>
-            <a href="{accept_link}" style="color:#6366f1;word-break:break-all;">{accept_link}</a>
-          </p>
-        </td></tr>
-        <!-- Footer -->
-        <tr><td style="background:#f9fafb;padding:20px 40px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#9ca3af;font-size:12px;">
-            {footer}
-          </p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>"""
+    content = (
+        f"<h2 style='margin:0 0 16px;font-size:20px;color:#1a1a1a'>{copy['heading']}</h2>"
+        f"<p style='margin:0 0 12px'>{body}</p>"
+        f"<p style='margin:0 0 20px;font-size:13px;color:#595959'>{copy['sub_body']}</p>"
+        f"<p style='margin:20px 0'><a href='{accept_link}' style='{_BUTTON_STYLE}'>{copy['cta_label']}</a></p>"
+        f"<p style='margin:0 0 8px;font-size:12px;color:#8b8b8b'>"
+        f"{copy['fallback_label']}<br>"
+        f"<a href='{accept_link}' style='color:#3157FF;text-decoration:underline;word-break:break-all'>{accept_link}</a></p>"
+        f"<p style='margin:0;font-size:12px;color:#8b8b8b'>{copy['auto_generated_note']}</p>"
+    )
+    return render_email_shell(content, locale=locale)
 
 
 def send_invite_email(

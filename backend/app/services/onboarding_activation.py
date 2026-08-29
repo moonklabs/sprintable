@@ -217,16 +217,22 @@ async def find_reminder_candidates(db: AsyncSession, *, now: datetime | None = N
 
 
 def _reminder_email_body(*, app_url: str, unsub_link: str, locale: str) -> str:
+    from app.services.email import render_email_shell
     from app.services.email_copy import REMINDER_COPY
     copy = REMINDER_COPY[locale]
-    return (
-        f"<p>{copy['intro']}</p>"
-        f"<p><a href='{app_url}'>{copy['cta_label']}</a></p>"
+    # story #3206 — 트랜잭셔널 3종과 동형 버튼(bg+테두리, Gmail 다크 bg 소실에도 상자로 식별).
+    content = (
+        f"<p style='margin:0 0 10px'>{copy['intro']}</p>"
+        f"<p style='margin:20px 0'>"
+        f"<a href='{app_url}' style='display:inline-block;padding:12px 24px;background:#3157FF;"
+        f"border:2px solid #3157FF;color:#ffffff;text-decoration:none;border-radius:6px;"
+        f"font-weight:700;font-size:14px'>{copy['cta_label']}</a></p>"
         # 유나 design:pass 권장(2026-08-27) — #888은 흰 배경 대비 3.5:1로 AA(4.5) 미달.
         # #595959로 7:1(AAA) 확保.
-        "<p style='font-size:12px;color:#595959'>"
-        f"<a href='{unsub_link}'>{copy['unsub_label']}</a></p>"
+        "<p style='font-size:12px;color:#595959;margin:0'>"
+        f"<a href='{unsub_link}' style='color:#595959'>{copy['unsub_label']}</a></p>"
     )
+    return render_email_shell(content, locale=locale)
 
 
 async def send_activation_reminder(db: AsyncSession, user: User) -> bool:

@@ -35,11 +35,11 @@ def test_invite_copy_formats_without_error_both_locales():
         copy = INVITE_COPY[locale]
         subject = copy["subject"].format(org_name="Acme")
         body = copy["body"].format(inviter_name="Jay", org_name="Acme", role="admin", role_display="an admin")
-        footer = copy["footer"].format(year=2026)
         assert "Acme" in subject
         assert "Jay" in body and "admin" in body
-        assert "2026" in footer
-        assert copy["html_lang"] == locale
+        # story #3206 — 연도/회사정보 footer는 render_email_shell이 전담(중복 제거),
+        # 이 필드는 "왜 이 메일을 받았는지"만 남는다.
+        assert copy["auto_generated_note"]
 
 
 def test_storage_warn_copy_formats_without_error_both_locales():

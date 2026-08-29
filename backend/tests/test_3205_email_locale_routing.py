@@ -162,6 +162,9 @@ async def test_send_activation_reminder_uses_user_locale(monkeypatch):
     assert "이어서 진행하기" in sent[0]["html_body"]
     assert sent[1]["subject"] == "Sprintable — a few steps left to finish setup"
     assert "Continue setup" in sent[1]["html_body"]
+    # story #3206(AC1) — 리마인드도 공용 셸 경유(회사정보 푸터 존재로 확認).
+    assert "주식회사 뭉클랩" in sent[0]["html_body"]
+    assert "주식회사 뭉클랩" in sent[1]["html_body"]
 
 
 def test_send_invite_email_uses_locale_param(monkeypatch):
@@ -188,7 +191,13 @@ def test_send_invite_email_uses_locale_param(monkeypatch):
     assert "as an admin" in sent["html_body"]
     # 유나 검수 수정의견①: footer 연도가 고정 2025가 아니라 동적.
     assert "© 2025 Sprintable" not in sent["html_body"]
-    assert "Sprintable. This email was sent automatically" in sent["html_body"]
+    # story #3206 — 셸 공용 푸터가 연도/회사정보를 전담(중복 제거), 이 카피는
+    # "왜 이 메일을 받았는지"만 남는다.
+    assert "This email was sent automatically because you were invited." in sent["html_body"]
+    # story #3206(AC1) — 초대도 공용 셸 경유(v1 자체 인디고 헤더바/tint 푸터가 아니라
+    # 셸의 회사정보 푸터로 대체됐는지).
+    assert "주식회사 뭉클랩" in sent["html_body"]
+    assert "background:#6366f1" not in sent["html_body"]
 
 
 def test_send_invite_email_defaults_to_ko(monkeypatch):
