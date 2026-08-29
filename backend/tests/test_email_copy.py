@@ -33,9 +33,11 @@ def test_invite_copy_formats_without_error_both_locales():
     for locale in _LOCALES:
         copy = INVITE_COPY[locale]
         subject = copy["subject"].format(org_name="Acme")
-        body = copy["body"].format(inviter_name="Jay", org_name="Acme", role="admin")
+        body = copy["body"].format(inviter_name="Jay", org_name="Acme", role="admin", role_display="an admin")
+        footer = copy["footer"].format(year=2026)
         assert "Acme" in subject
         assert "Jay" in body and "admin" in body
+        assert "2026" in footer
         assert copy["html_lang"] == locale
 
 

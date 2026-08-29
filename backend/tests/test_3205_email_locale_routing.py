@@ -177,6 +177,11 @@ def test_send_invite_email_uses_locale_param(monkeypatch):
     assert "You're invited!" in sent["html_body"]
     assert "Jay" in sent["html_body"] and "Acme" in sent["html_body"]
     assert 'lang="en"' in sent["html_body"]
+    # 유나 검수 수정의견②: raw role(admin)에 관사가 붙어야 자연스러움.
+    assert "as an admin" in sent["html_body"]
+    # 유나 검수 수정의견①: footer 연도가 고정 2025가 아니라 동적.
+    assert "© 2025 Sprintable" not in sent["html_body"]
+    assert "Sprintable. This email was sent automatically" in sent["html_body"]
 
 
 def test_send_invite_email_defaults_to_ko(monkeypatch):

@@ -88,18 +88,22 @@ INVITE_COPY: dict[str, dict[str, str]] = {
         "sub_body": "아래 버튼을 클릭하면 초대를 수락할 수 있습니다. 링크는 7일간 유효합니다.",
         "cta_label": "초대 수락하기",
         "fallback_label": "버튼이 보이지 않으면 아래 주소를 브라우저에 붙여 넣으세요:",
-        "footer": "© 2025 Sprintable. 이 이메일은 초대 발송으로 자동 생성되었습니다.",
+        # 유나 검수 수정의견①(2026-08-29, doc email-locale-copy-proposal-3205) — 고정 연도 stale
+        # 방지, 동적 {year} 삽입(발송 시점 기준).
+        "footer": "© {year} Sprintable. 이 이메일은 초대 발송으로 자동 생성되었습니다.",
         "default_inviter": "팀 관리자",
         "html_lang": "ko",
     },
     "en": {
         "subject": "[Sprintable] You've been invited to {org_name}",
         "heading": "You're invited!",
-        "body": "<strong>{inviter_name}</strong> invited you to join <strong>{org_name}</strong> as <strong>{role}</strong>.",
+        # 유나 검수 수정의견②(2026-08-29) — role은 소문자 raw 값(member/admin/owner)이라
+        # 관사 없이 "as admin"은 어색. _build_invite_html이 관사 붙인 role_display를 넘긴다.
+        "body": "<strong>{inviter_name}</strong> invited you to join <strong>{org_name}</strong> as {role_display}.",
         "sub_body": "Click the button below to accept the invitation. This link is valid for 7 days.",
         "cta_label": "Accept invitation",
         "fallback_label": "If the button doesn't work, paste this address into your browser:",
-        "footer": "© 2025 Sprintable. This email was sent automatically because you were invited.",
+        "footer": "© {year} Sprintable. This email was sent automatically because you were invited.",
         "default_inviter": "a team admin",
         "html_lang": "en",
     },
@@ -119,6 +123,7 @@ STORAGE_WARN_COPY: dict[str, dict[str, str]] = {
     "en": {
         "subject": "[Sprintable] Storage usage at {pct}%",
         "body": (
+            "<p>Hello, this is Sprintable.</p>"
             "<p>Your organization's storage usage has reached <b>{pct}%</b>"
             " ({used_mb}MB / {cap_mb}MB).</p>"
             "<p>Free up space (delete unused files) or upgrade your plan to avoid upload limits.</p>"
@@ -140,6 +145,7 @@ AU_WARN_COPY: dict[str, dict[str, str]] = {
     "en": {
         "subject": "[Sprintable] Automation usage (AU) at {pct}%",
         "body": (
+            "<p>Hello, this is Sprintable.</p>"
             "<p>Your organization's automation usage (AU) has reached <b>{pct}%</b>"
             " ({current} / {au_limit} AU this month).</p>"
             "<p>At 100% MCP/API writes and automation will pause (reads and human UI stay"

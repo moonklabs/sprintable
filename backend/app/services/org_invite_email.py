@@ -15,9 +15,21 @@ _BUTTON_STYLE = (
 )
 
 
+def _en_role_with_article(role: str) -> str:
+    """유나 검수 수정의견②(2026-08-29) — role은 소문자 raw 값(member/admin/owner)이라
+    영어에서 관사 없이는 어색("as admin"). 첫 글자 발음 기준 a/an만 판단(그 외 문법
+    보정은 발명하지 않는다 — 이 3개 role 외 값이 생기면 별도 검토)."""
+    article = "an" if role[:1].lower() in "aeiou" else "a"
+    return f"{article} {role}"
+
+
 def _build_invite_html(*, org_name: str, inviter_name: str, accept_link: str, role: str, locale: str) -> str:
+    from datetime import datetime, timezone
+
     copy = INVITE_COPY[locale]
-    body = copy["body"].format(inviter_name=inviter_name, org_name=org_name, role=role)
+    role_display = _en_role_with_article(role) if locale == "en" else role
+    body = copy["body"].format(inviter_name=inviter_name, org_name=org_name, role=role, role_display=role_display)
+    footer = copy["footer"].format(year=datetime.now(timezone.utc).year)
     return f"""<!DOCTYPE html>
 <html lang="{copy['html_lang']}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -48,7 +60,7 @@ def _build_invite_html(*, org_name: str, inviter_name: str, accept_link: str, ro
         <!-- Footer -->
         <tr><td style="background:#f9fafb;padding:20px 40px;border-top:1px solid #e5e7eb;">
           <p style="margin:0;color:#9ca3af;font-size:12px;">
-            {copy['footer']}
+            {footer}
           </p>
         </td></tr>
       </table>
