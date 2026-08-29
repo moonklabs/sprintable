@@ -195,6 +195,36 @@ def test_start_failure_unrelated_to_shm_does_not_trigger_sweep(fake_env):
     assert not fake_env["log"].exists() or fake_env["log"].read_text().strip() == ""
 
 
+def test_stale_shmget_line_from_prior_attempt_does_not_permanently_trigger_sweep(fake_env):
+    """카디르 QA 3라운드 지적(PR#3616 head eeb2f6926) — `pg_ctl -l`은 append라, data-dir를
+    재사용하는 이전 시도의 shmget 흔적이 로그에 영구히 남으면 「이번 시도가 shm 실패인가」가
+    아니라 「이 파일에 그런 적 있었나」를 재게 된다. 옛 흔적을 미리 심어두고, 이번 실패는
+    완전히 무관한 사유(포트 충돌)로 만들어 스윕이 잘못 발동하지 않아야 함을 고정 —
+    카디르 재현 시나리오 그대로."""
+    (fake_env["data_dir"] / "log.txt").write_text(
+        "FATAL:  could not create shared memory segment: shmget(...) failed: "
+        "No space left on device\n"
+    )
+    _make_stub(fake_env["tmp_path"] / "bin" / "pg_ctl", """
+args=("$@")
+for a in "${args[@]}"; do [ "$a" = "stop" ] && exit 0; done
+logfile=""
+prev=""
+for a in "${args[@]}"; do
+  if [ "$prev" = "-l" ]; then logfile="$a"; fi
+  prev="$a"
+done
+echo "FATAL:  could not bind IPv4 address: Address already in use" >> "$logfile"
+exit 1
+""")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), str(fake_env["data_dir"]), "55999", "--", "true"],
+        env=fake_env["env"], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode != 0
+    assert not fake_env["log"].exists() or fake_env["log"].read_text().strip() == ""
+
+
 def test_one_shot_mode_runs_command_and_propagates_exit_code(fake_env):
     """`-- <command>` 원샷 모드 — 명령의 종료코드를 그대로 반환한다."""
     result = subprocess.run(

@@ -139,6 +139,12 @@ fi
 # unix_socket_directories는 짧은 고정 경로로 — scratchpad 등 긴 경로는 유닉스 소켓 경로
 # 103바이트 상한(macOS)을 넘겨 기동 자체가 실패한다(story #3199 재현 시 실제로 걸림).
 _start_pg() {
+  # 카디르 QA 3라운드 지적(PR#3616) — pg_ctl -l은 append라, data-dir를 재사용하는 이전
+  # 시도의 shmget 흔적이 로그에 영구히 남으면 「이번 시도가 shm 실패인가」가 아니라
+  # 「이 파일에 그런 적 있었나」를 재게 된다(포트 충돌 등 무관한 실패에도 파괴적 스윕이
+  # 잘못 발동). PG가 아직 안 떠 있는 시점이라 truncate에 경합이 없다 — 시도 직전 항상
+  # 비운다.
+  : > "$DATA_DIR/log.txt"
   pg_ctl -D "$DATA_DIR" -o "-p $PORT -c unix_socket_directories=/tmp" -l "$DATA_DIR/log.txt" start
 }
 
