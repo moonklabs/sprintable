@@ -140,17 +140,33 @@ describe('ContextSwitcherChip — story #2076', () => {
 // 발견 6결함 해소: 44px 트리거+행·검색·3층 위계(프로젝트→조직→계정)·계정 divider 분리·
 // 데스크톱 무회귀.
 describe('ContextSwitcherChip — story #3147/#3146 재설계(44px·검색·3층·계정)', () => {
-  it('트리거가 min-h-11(44px)이고 조직/프로젝트 2줄로 표시된다', async () => {
+  it('트리거가 h-11(44px 고정)이고 조직/프로젝트 2줄로 표시된다', async () => {
     await act(async () => {
       root.render(wrap(
         <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
       ));
     });
     const trigger = container.querySelector('button');
-    expect(trigger?.className).toContain('min-h-11');
+    // story #3202(선생님 실기기 픽셀 붕괴) 핀 — min-h-11(최솟값)이던 시절엔 2단 라벨의
+    // line-height가 예산을 넘기면 트리거 실높이가 부모 TopBar(h-12=48px)를 초과해 자기
+    // border/bg가 헤더 행을 뚫고 나온 것처럼 보였다(dev 라이브 실측: 48.5px·상단 -0.75px로
+    // 실제 초과 확認). h-11(고정 44px)+overflow-hidden으로 어떤 폰트 렌더링에서도 그 예산을
+    // 못 넘게 하드캡한다 — min-h-11 회귀(다시 growable해지는 것)를 여기서 막는다.
+    expect(trigger?.className).toContain('h-11');
+    expect(trigger?.className).not.toContain('min-h-11');
+    expect(trigger?.className).toContain('overflow-hidden');
     const spans = trigger!.querySelectorAll('span > span');
     expect(spans[0]?.textContent).toBe('뭉클랩');
     expect(spans[1]?.textContent).toBe('Sprintable');
+    // 유나 design:changes(2026-08-29) — 두 라벨 span 모두 leading-tight. 처음엔
+    // leading-none(line-height:1)이었으나 Pretendard ascent+descent(1.19em)가 1em 박스+
+    // truncate의 overflow-hidden에서 디센더(p·g·y)를 잘랐다(실기기 폰트부스트에선 2~3
+    // device px 절단). 버튼 자체(h-11+overflow-hidden)가 이미 하드캡이라 라벨은
+    // leading-tight로 느슨해져도 예산(~30.75px<32px) 안에 안착 — leading-none 회귀를 막는다.
+    expect(spans[0]?.className).toContain('leading-tight');
+    expect(spans[1]?.className).toContain('leading-tight');
+    expect(spans[0]?.className).not.toContain('leading-none');
+    expect(spans[1]?.className).not.toContain('leading-none');
   });
 
   it('시트 안 프로젝트 행이 min-h-11(44px)이다', async () => {
