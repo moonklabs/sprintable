@@ -1148,6 +1148,8 @@
     "advancedSubtitle": "Webhook notifications · alternate transports (HTTP, SSE)",
     "advancedNote": "Configure webhook notifications and alternate connection methods later.",
     "dashboardCta": "Go to dashboard",
+    "firstInstructionCta": "Send your first instruction",
+    "firstInstructionStarting": "Opening chat…",
     "connectFooterHint": "Once verified you're ready — you can skip for now.",
     "transportHosted": "Hosted",
     "transportLocal": "Local (uvx)",
