@@ -36,3 +36,7 @@ class BillingOrder(Base, TimestampMixin, OrgScopedMixin):
     # 원 charge(status='confirmed')를 되돌리지 않는다(선생님 지시) — 그래서 실패 표기는
     # status가 아니라 이 별도 필드다.
     refund_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3209(PR-1) — Toss 결제 승인 응답의 `receipt.url`(호스팅 매출전표 등, 공식
+    # 문서 §Payment). confirmed 시점에만 채워짐(pending/failed는 NULL) — billing_charge.py의
+    # _confirm_with_ledger 단일 지점에서만 쓴다(신규 발급 로직 없이 Toss URL 그대로 저장).
+    receipt_url: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -32,6 +32,7 @@ import { PricingLimitsTable } from './pricing-limits-table';
 import { PricingPacks, type PackKind } from './pricing-packs';
 import { completeCheckout, startBillingAuth, type CheckoutOutcome } from './toss-checkout';
 import { PaymentMethodSection } from './payment-method-section';
+import { OrderHistorySection } from './order-history-section';
 import {
   cancelSubscription,
   changeTier,
@@ -235,6 +236,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
       )}
 
       <PaymentMethodSection canManage={canManage} />
+      <OrderHistorySection canManage={canManage} />
 
       {isPricePublic && (
         <Tabs value={cycle} onValueChange={(v) => setCycle(v as 'monthly' | 'yearly')}>
