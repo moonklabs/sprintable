@@ -89,6 +89,32 @@ const ENTITY_API: Record<string, (id: string) => string> = {
   hypothesis: (id) => `/api/hypotheses/${id}`,
 };
 
+// story #3208(PO customer-zero) — GET /api/visual-artifacts/{id}는 «현재 탭이 보고 있는»
+// project로 스코프된다(fetch 인터셉터가 X-Project-Id를 그걸로 채움) — 아티팩트가 다른
+// project 소속이면(채팅에서 흔함, doc #2168과 동형) 대상이 실재해도 404였다. preview
+// (org 스코프 조회+has_project_access 검증, BE 신설)로 실제 project_id를 먼저 알아낸 뒤
+// 그 값을 X-Project-Id로 명시 실어 detail을 정확한 project로 조회한다 —
+// project-context-client.ts의 fetch 인터셉터는 이미 명시된 X-Project-Id를 안 덮는다
+// (switcher의 cross-org 로드가 쓰는 것과 동일한 기존 escape hatch, 새 메커니즘 0).
+//
+// ⛔까디르 QA 지적(2026-08-29, PR#3611 qa:changes) — 이 로직이 EntityPreviewModal
+// (모달 detail fetch)·EmbedCard(인라인 썸네일 fetch) 두 곳에 독립 구현으로 처음 들어갔다가
+// 한쪽(EntityChip 클릭→모달 경로, 스토리 원 시나리오)이 pin 없이 방치될 뻔했다 — 공용
+// 함수 하나로 모아 "두 곳이 각자 옳게 짜는" 대신 "한 곳이 옳으면 둘 다 옳다"로 만든다.
+async function fetchArtifactCrossProjectDetail(artifactId: string): Promise<Record<string, unknown> | null> {
+  const previewRes = await fetchWithAuth(`/api/visual-artifacts/preview?id=${encodeURIComponent(artifactId)}`);
+  if (!previewRes.ok) throw new Error('artifact preview fetch failed');
+  const previewJson = (await previewRes.json()) as { data?: { projectId?: string } };
+  const resolvedProjectId = previewJson.data?.projectId;
+  if (!resolvedProjectId) throw new Error('artifact preview missing projectId');
+  const detailRes = await fetchWithAuth(`/api/visual-artifacts/${artifactId}`, {
+    headers: { 'X-Project-Id': resolvedProjectId },
+  });
+  if (!detailRes.ok) throw new Error('artifact detail fetch failed');
+  const detailJson = (await detailRes.json()) as { data?: Record<string, unknown> };
+  return detailJson.data ?? null;
+}
+
 // story #2614 AC2 — 멘션 합성 가능 8타입(story/doc/epic/task/sprint/artifact/hypothesis/
 // evidence) 전수표. 이 Set에 없는 타입은 "이 엔티티는 별도 미리보기가 없습니다"로 떨어진다 —
 // 그게 이 스토리가 고친 결함(만들 수는 있는데 몸통에서 아무것도 못 얻는 반쪽)이었다. sprint는
@@ -445,6 +471,23 @@ export function EntityPreviewModal({
       return () => { cancelled = true; };
     }
 
+    if (entityType === 'artifact') {
+      // story #3208 — 공용 헬퍼(위 fetchArtifactCrossProjectDetail) 경유. EmbedCard의
+      // 인라인 썸네일 fetch와 동일 로직을 공유한다(까디르 QA 지적, 두 곳 독립구현이던
+      // 것을 한 곳으로 수렴).
+      void (async () => {
+        try {
+          const data = await fetchArtifactCrossProjectDetail(entityId);
+          if (!cancelled) setDetail(data);
+        } catch {
+          if (!cancelled) setNotFound(true);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
     const url = ENTITY_API[entityType]?.(entityId);
     if (!url) return; // hypothesis 등 — fetch 전략 자체가 없다(loading도 이미 false로 시작).
     fetch(url)
@@ -718,12 +761,17 @@ export function EmbedCard({
   useEffect(() => {
     if (entity_type !== 'artifact') return;
     let cancelled = false;
-    const url = ENTITY_API.artifact?.(entity_id);
-    if (!url) return;
-    void fetchWithAuth(url)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: { data?: Record<string, unknown> } | null) => { if (!cancelled) setArtifactDetail((json?.data ?? null) as typeof artifactDetail); })
-      .catch(() => { if (!cancelled) setArtifactDetail(null); });
+    // story #3208 — 공용 헬퍼(fetchArtifactCrossProjectDetail) 경유, EntityPreviewModal의
+    // detail fetch와 동일 로직 공유(까디르 QA 지적). 이 썸네일 fetch는 원래도 실패 시
+    // 조용히 폴백(plain 라벨 폼)이라 하드 실패는 아니었지만, 같은 근본원인이라 같이 고친다.
+    void (async () => {
+      try {
+        const data = await fetchArtifactCrossProjectDetail(entity_id);
+        if (!cancelled) setArtifactDetail(data as typeof artifactDetail);
+      } catch {
+        if (!cancelled) setArtifactDetail(null);
+      }
+    })();
     return () => { cancelled = true; };
   }, [entity_type, entity_id]);
 

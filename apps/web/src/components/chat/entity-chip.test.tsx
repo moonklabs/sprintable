@@ -113,6 +113,34 @@ describe('EntityChip ghost — story #3213(미등록≠비존재, "대상이 없
   });
 });
 
+describe('EntityChip — story #3208(PO customer-zero, 카디르 QA #3611 지적) — 클릭→모달의 detail fetch는 아티팩트 자기 project로 스코프된다', () => {
+  it('클릭 시 EntityPreviewModal이 preview로 해소한 project_id를 X-Project-Id로 명시 실어 detail을 조회한다 — «채팅 공유받은 사람이 클릭」한 원 시나리오', async () => {
+    // 까디르 QA(PR#3611) — embed-card.link-states.test.tsx의 X-Project-Id pin은 EmbedCard의
+    // 독립 썸네일 fetch(마운트 시점에 먼저 도착)에 가려 EntityChip 클릭→모달 경로(스토리 원
+    // 사건: 채팅으로 공유받은 사람이 다른 project를 보다가 클릭) 자체는 pin 없이 방치될
+    // 뻔했다 — 이 테스트는 EntityChip 단독(EmbedCard 썸네일 효과가 없는 컴포넌트)이라 그
+    // 혼선이 구조적으로 없다.
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((v, k) => { headers[k] = v; });
+      calls.push({ url, headers });
+      if (url.includes('/api/visual-artifacts/preview')) {
+        return { ok: true, json: async () => ({ data: { projectId: 'p-owning' } }) };
+      }
+      return { ok: true, json: async () => ({ data: {} }) };
+    }));
+    await act(async () => {
+      root.render(<EntityChip entityType="artifact" entityId="art-cross" label="크로스 목업" href={null} />);
+    });
+    await act(async () => { container.querySelector('button')!.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const detailCall = calls.find((c) => c.url === '/api/visual-artifacts/art-cross');
+    expect(detailCall).toBeDefined();
+    expect(detailCall!.headers['x-project-id']).toBe('p-owning');
+  });
+});
+
 // story #461e9a54(P0) — 채팅 임베드는 전부 우측 ReadingPanel로(모달 0). ReadingPanelProvider
 // 유무로 갈리는 두 경로를 각각 고정한다.
 describe('EntityChip — story #461e9a54 ReadingPanel 라우팅', () => {

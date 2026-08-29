@@ -328,6 +328,55 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
     )
 
 
+@router.get("/preview")
+async def get_artifact_preview(
+    id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story #3208 — 아티팩트 직URL/채팅 임베드가 호출자의 «현재» project_id로만
+    스코프된 `GET /{id}`(SEC-S8, project_id 필수 필터)에 의존하다 보니, 다른 프로젝트를
+    보던 중 링크를 열면 대상이 실재해도 project_id 불일치로 404였다(`docs.py::
+    get_doc_preview`와 동형 갭 — #2168이 doc에서 이미 고친 그 문제).
+
+    처방도 doc과 동형: **org 스코프로만** 먼저 찾고, 그 artifact가 실제로 속한
+    project에 대해 `has_project_access`로 **진짜 접근권**을 검증한 뒤에만 위치정보
+    (project_id·org_slug·project_slug)를 내준다 — org 멤버라고 무조건 열어주면
+    SEC-S8이 막은 것과 같은 계열의 IDOR이 되므로, project_id 필터를 없애는 게 아니라
+    "어느 project인지 먼저 알아낸 뒤 그 project 접근권을 확認"으로 순서를 바꾼 것뿐이다
+    (본문은 안 실어 나른다 — 위치만, 실제 상세는 여전히 `GET /{id}`가 그 project_id로
+    스코프해 낸다).
+
+    무권한/미존재는 404로 통일(존재 비노출 규율, doc과 동일 — story #2322/#2342)."""
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+    from app.services.project_auth import has_project_access
+
+    org_id = scope["org_id"]
+    if not org_id:
+        return _err("FORBIDDEN", "org_id required", 403)
+
+    artifact = (await session.execute(
+        select(VisualArtifact).where(
+            VisualArtifact.id == id, VisualArtifact.org_id == org_id,
+            VisualArtifact.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    if not await has_project_access(session, uuid.UUID(auth.user_id), artifact.project_id, org_id):
+        return _err("NOT_FOUND", "Artifact not found", 404)
+
+    org_slug = await resolve_org_slug(session, artifact.org_id)
+    project_slug_map = await resolve_project_slugs(session, {artifact.project_id})
+    return _ok({
+        "id": str(artifact.id),
+        "project_id": str(artifact.project_id),
+        "org_slug": org_slug,
+        "project_slug": project_slug_map.get(artifact.project_id),
+    })
+
+
 @router.get("/{id}")
 async def get_artifact(
     id: uuid.UUID,
