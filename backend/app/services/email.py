@@ -2,6 +2,7 @@
 import html
 import logging
 import os
+import re
 import smtplib
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
@@ -115,6 +116,23 @@ def render_action_email(
     return render_email_shell(content, locale=locale)
 
 
+# story #3210 — 발송 경로 어느 홉이든(Resend/SES/구글그룹스 재배포 등, 정확히 어느
+# 홉인지는 우리 쪽에서 확인 불가) HTML 본문의 리터럴 「=[hex][hex]」를 quoted-printable
+# 이스케이프로 오해석해 그 두 글자를 삼킨다 — 실기기 재현으로 확인(viewport meta
+# 「width=device-width」 중 「=de」가 손상, 「=1"」은 유효 hex쌍이 아니라 무사).
+# `&#61;`는 QP 디코딩(전송 단계) 이전엔 평문이라 오해석되지 않고, 브라우저의 HTML
+# 파싱(렌더 단계, href 속성값 포함)에서 `=`로 복원돼 시각·기능 영향이 없다. 구조적
+# `=`(속성 대입, 예: name="viewport")는 항상 따옴표가 뒤따라 hex와 매치되지 않으므로
+# 안전 — 즉 이 치환은 항상 텍스트/속성값 안의 리터럴 `=hex`만 잡는다. 정적 viewport
+# meta뿐 아니라 향후 동적 콘텐츠(쿠폰 코드·해시 등)에도 동일 클래스가 재발할 수 있어
+# 발송 직전 이 한 지점에서 전수 방어한다(개별 호출부마다 알아서 피하게 하지 않음).
+_QP_HEX_COLLISION_RE = re.compile(r"=(?=[0-9a-fA-F]{2})")
+
+
+def _neutralize_qp_hex_collisions(html_body: str) -> str:
+    return _QP_HEX_COLLISION_RE.sub("&#61;", html_body)
+
+
 def send_email(to: str, subject: str, html_body: str) -> bool:
     """이메일 발송.
 
@@ -123,6 +141,7 @@ def send_email(to: str, subject: str, html_body: str) -> bool:
     provider 발송 실패 시 예외를 re-raise — 호출자가 오류 처리 책임.
     (E-ONBOARDING S4: False/예외를 호출자가 '미발송'으로 surface해 무음 성공을 차단.)
     """
+    html_body = _neutralize_qp_hex_collisions(html_body)
     resend_key = os.getenv("RESEND_API_KEY", "")
     if resend_key:
         _send_via_resend(to=to, subject=subject, html_body=html_body, api_key=resend_key)
