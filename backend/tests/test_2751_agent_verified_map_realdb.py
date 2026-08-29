@@ -276,3 +276,74 @@ async def test_never_connected_agent_stays_false_after_first_connected_column_ad
             assert result == {agent_id: False}
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_auth_failed_write_does_not_stamp_first_connected_at():
+    """PO 핀 지시①(2026-08-28, 카디르 뮤테이션 실측 — 현재 코드는 정확하나 회귀테스트 0건
+    이었던 안전 속성). `sync_agent_profile_presence(..., agent_status="auth_failed")`
+    (record_auth_failure.py 실 호출부와 동형 — last_seen_at 키 자체를 안 실음)는
+    first_connected_at을 채우면 안 된다. 안 그러면 "인증 실패가 연결 완료로 둔갑"하는
+    제품 판정 오염 클래스(pin 없이 두면 다음 리팩터가 조용히 깨뜨릴 수 있다)."""
+    from sqlalchemy import select
+
+    from app.models.member import AgentProjectProfile
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+            # record_auth_failure.py 실 호출부와 정확히 동형 — agent_status만, last_seen_at 없음.
+            await sync_agent_profile_presence(s, agent_id, agent_status="auth_failed")
+            await s.commit()
+
+            first_connected_at = (await s.execute(
+                select(AgentProjectProfile.first_connected_at).where(
+                    AgentProjectProfile.member_id == agent_id
+                )
+            )).scalar_one()
+            assert first_connected_at is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_first_connected_at_coalesce_never_overwrites_existing_value():
+    """PO 핀 지시②(2026-08-28, 카디르 뮤테이션 실측). t1에 처음 online 관측되면
+    first_connected_at=t1. 이후(t2>t1) 재차 online 갱신이 와도 COALESCE가 기존 값을
+    우선해 first_connected_at은 t1 그대로여야 한다(durable = "최초" 시각, 매 heartbeat마다
+    갱신되는 last_seen_at과 혼동 금지)."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select
+
+    from app.models.member import AgentProjectProfile
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+            t1 = datetime.now(timezone.utc) - timedelta(hours=2)
+            await sync_agent_profile_presence(s, agent_id, last_seen_at=t1, agent_status="online")
+            await s.commit()
+
+            t2 = datetime.now(timezone.utc)
+            await sync_agent_profile_presence(s, agent_id, last_seen_at=t2, agent_status="online")
+            await s.commit()
+
+            row = (await s.execute(
+                select(AgentProjectProfile.first_connected_at, AgentProjectProfile.last_seen_at).where(
+                    AgentProjectProfile.member_id == agent_id
+                )
+            )).one()
+            first_connected_at, last_seen_at = row
+            assert first_connected_at == t1  # 최초 관측 시각 그대로 — t2로 덮이지 않음.
+            assert last_seen_at == t2  # last_seen_at은 매번 갱신(대조군 — 회귀 아님을 확인).
+    finally:
+        await engine.dispose()
