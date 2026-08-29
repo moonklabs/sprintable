@@ -980,10 +980,18 @@ export function EntityChip({
   const inner = (
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} className="size-3 shrink-0" />
-      {/* AC3 — truncate된 라벨의 전체 텍스트를 title(native)로도 보장(가장 낮은 공통분모
-          접근성 폴백 — 아래 커스텀 tooltip과 별개, JS 없이도 동작). */}
-      <span className={entityChipLabelVariants({ variant })} title={ghost ? undefined : label}>
-        {ghost ? '대상이 없습니다' : label}
+      {/* story #3213 — ghost 두 하위축을 가른다: entityId가 있으면(=본문 토큰이 UUID까지
+          파싱됐는데 이번 메시지의 stored 참조와만 매칭 안 됨 — 예: 손으로 친 토큰이 backend
+          파서 한계로 등록 실패) "대상이 없습니다"를 더 이상 안 쓴다. #2263 AC6 당시엔 #2302
+          AC4(진짜 존재하지 않는 대상)의 문구를 그대로 재사용했지만, 미등록≠비존재라는 걸 이
+          스토리의 실측(PO 발신 메시지, 대상 story 실재 확認)이 보였다 — 실제로 파싱된 라벨
+          (대체로 진짜 제목)을 그대로 보여준다(회색으로만 "미확認" 표시, 아래 클릭 가능
+          분기가 진짜 존재판정을 진다). entityId가 없으면(예: bare #<번호>가 아예 해소 안 된
+          story-detail-panel.tsx 케이스 — 가리킬 UUID 자체가 없다) 이 스토리의 대상이 아니다
+          — 클릭할 것도 없으므로 기존 "대상이 없습니다"(시제 중립 문구, 발명 0) 그대로 유지.
+          AC3 — truncate된 라벨의 전체 텍스트를 title(native)로도 보장. */}
+      <span className={entityChipLabelVariants({ variant })} title={ghost && !entityId ? undefined : label}>
+        {ghost && !entityId ? '대상이 없습니다' : label}
       </span>
       {/* AC1 — 사실성(상수 "관찰됨": entity_references 자체가 관찰됨 tier) · 표면 · 지점.
           ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). inline-meta 변형에서만
@@ -997,9 +1005,11 @@ export function EntityChip({
     </span>
   );
 
-  if (ghost) {
-    return <span className="inline-flex cursor-default no-underline">{inner}</span>;
-  }
+  // story #3213 — ghost도 이제 클릭 가능(예전 "행동 0" 정책 철회). #2302 AC4의 실
+  // not-found 판정(EntityPreviewModal의 실 fetch)이 이미 정직한 존재판정을 갖고 있으니,
+  // 그걸 재사용하는 게 "모른다"를 그대로 미확認 상태로 두는 것보다 정직하다(모르면
+  // 확인해 본다 — 지어내지 않는다는 이 코드베이스의 반복 원칙과 동형). entityId가 UUID
+  // 모양으로 파싱됐다는 것 자체가 이미 "클릭해서 확인해 볼 가치"의 최소 근거.
 
   // story #2886(S2b) AC2 — 격납 메타(관찰됨·form·point·status)를 hover/focus tooltip으로.
   // base-ui Tooltip은 hover+focus 둘 다 기본 지원(키보드 Tab으로 트리거에 도달 가능) — 별도

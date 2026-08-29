@@ -96,13 +96,20 @@ describe('EntityChip variant=inline-meta — 기존 전개 그대로(escape hatc
   });
 });
 
-describe('EntityChip ghost — variant 무관 무동작 유지', () => {
-  it('ghost는 inline이든 inline-meta든 항상 "대상이 없습니다"·클릭 없음', async () => {
+describe('EntityChip ghost — story #3213(미등록≠비존재, "대상이 없습니다" 정적 단정 제거)', () => {
+  it('ghost는 "대상이 없습니다"를 더 이상 안 쓰고 실 라벨을 보인다', async () => {
     await act(async () => {
       root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} ghost referenceMeta={META} />);
     });
-    expect(container.textContent).toContain('대상이 없습니다');
-    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).toContain(LONG_LABEL);
+  });
+
+  it('ghost도 클릭 가능(EntityPreviewModal의 실 fetch로 진짜 존재판정 위임)', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label="스토리 제목" href={null} ghost />);
+    });
+    expect(container.querySelector('button')).not.toBeNull();
   });
 });
 
