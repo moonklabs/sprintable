@@ -568,6 +568,7 @@ async def register(
     if existing:
         return _err("EMAIL_TAKEN", "Email already registered", 409)
 
+    from app.services.agent_onboarding_config import resolve_locale_from_request
     user = User(
         email=body.email,
         hashed_password=hash_password(body.password),
@@ -575,6 +576,10 @@ async def register(
         is_active=True,
         email_verified=False,
         tos_accepted_at=datetime.now(timezone.utc),
+        # story #3205 — 가입 시 Accept-Language 1회 포착(agents.py 등 기존 엔드포인트와
+        # 동일 헬퍼 재사용, 새 파서 발명 없음). FE 명시 전달값은 없음(가입 폼에 locale
+        # 필드가 없다) — 브라우저가 항상 보내는 헤더뿐이라 FE 변경 불요.
+        locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
     )
     session.add(user)
     try:
@@ -603,20 +608,21 @@ async def register(
         verification_token = create_email_verification_token(str(user.id))
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         verify_link = f"{app_url}/verify-email?token={verification_token}"
+        from app.services.agent_onboarding_config import resolve_locale
         from app.services.email import render_action_email, send_email
+        from app.services.email_copy import TRANSACTIONAL_COPY
+        # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
+        copy = TRANSACTIONAL_COPY["verify_email"][resolve_locale(user.locale)]
         delivered = send_email(
             to=user.email,
-            # story #3196-⑤(유나 카피·톤 제안) — 기존 "Sprintable 이메일 인증"에서 행위형으로.
-            subject="Sprintable 이메일 인증을 완료해 주세요",
+            subject=copy["subject"],
             html_body=render_action_email(
-                intro_lines=[
-                    "Sprintable에 가입해 주셔서 감사합니다.",
-                    "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있습니다.",
-                ],
-                cta_label="이메일 인증하기",
+                intro_lines=copy["intro_lines"],
+                cta_label=copy["cta_label"],
                 cta_url=verify_link,
-                expiry_note="이 링크는 24시간 동안 유효합니다.",
-                security_note="본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.",
+                expiry_note=copy["expiry_note"],
+                security_note=copy["security_note"],
+                fallback_label=copy["fallback_label"],
             ),
         )
         if not delivered:
@@ -1192,6 +1198,7 @@ async def oauth_authorize(provider: str) -> JSONResponse:
 
 @router.post("/oauth/callback")
 async def oauth_callback(
+    request: Request,
     body: OAuthCallbackRequest,
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -1245,12 +1252,15 @@ async def oauth_callback(
             # 신규 유저 생성 (비밀번호 없음 — OAuth 전용, 이메일 인증 완료)
             if not body.tos_accepted:
                 return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
+            from app.services.agent_onboarding_config import resolve_locale_from_request
             user = User(
                 email=email,
                 hashed_password="",
                 is_active=True,
                 email_verified=True,
                 tos_accepted_at=datetime.now(timezone.utc),
+                # story #3205 — register()와 동일 포착(발명 0).
+                locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
                 **{f"{provider}_id": oauth_id},
             )
             session.add(user)
@@ -1438,20 +1448,20 @@ async def forgot_password(
         token = create_password_reset_token(str(user.id), user.hashed_password)
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         reset_link = f"{app_url}/reset-password?token={token}"
+        from app.services.agent_onboarding_config import resolve_locale
         from app.services.email import render_action_email, send_email
+        from app.services.email_copy import TRANSACTIONAL_COPY
+        copy = TRANSACTIONAL_COPY["reset_password"][resolve_locale(user.locale)]
         send_email(
             to=user.email,
-            # story #3196-⑤(유나 카피·톤 제안)
-            subject="Sprintable 비밀번호 재설정 안내",
+            subject=copy["subject"],
             html_body=render_action_email(
-                intro_lines=[
-                    "비밀번호 재설정을 요청하셨습니다.",
-                    "아래 버튼을 눌러 새 비밀번호를 설정해 주세요.",
-                ],
-                cta_label="비밀번호 재설정",
+                intro_lines=copy["intro_lines"],
+                cta_label=copy["cta_label"],
                 cta_url=reset_link,
-                expiry_note="이 링크는 30분 동안 유효합니다.",
-                security_note="본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 변경되지 않습니다.",
+                expiry_note=copy["expiry_note"],
+                security_note=copy["security_note"],
+                fallback_label=copy["fallback_label"],
             ),
         )
     return _ok({"message": "If the email exists, a reset link has been sent"})
@@ -1575,19 +1585,21 @@ async def resend_verification(
     verify_link = f"{app_url}/verify-email?token={verification_token}"
     # story #3196-⑤ — register()의 인증메일과 동일 카피/렌더러(발명 0, 같은 내용의 재발송이라
     # 두 벌 카피를 유지할 이유가 없다 — 여태 문자 그대로 중복이었던 자리 그대로 정합).
+    # story #3205 — locale 분기도 register()와 동일 사전(TRANSACTIONAL_COPY) 재사용.
+    from app.services.agent_onboarding_config import resolve_locale
     from app.services.email import render_action_email, send_email
+    from app.services.email_copy import TRANSACTIONAL_COPY
+    copy = TRANSACTIONAL_COPY["verify_email"][resolve_locale(user.locale)]
     delivered = send_email(
         to=user.email,
-        subject="Sprintable 이메일 인증을 완료해 주세요",
+        subject=copy["subject"],
         html_body=render_action_email(
-            intro_lines=[
-                "Sprintable에 가입해 주셔서 감사합니다.",
-                "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있습니다.",
-            ],
-            cta_label="이메일 인증하기",
+            intro_lines=copy["intro_lines"],
+            cta_label=copy["cta_label"],
             cta_url=verify_link,
-            expiry_note="이 링크는 24시간 동안 유효합니다.",
-            security_note="본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.",
+            expiry_note=copy["expiry_note"],
+            security_note=copy["security_note"],
+            fallback_label=copy["fallback_label"],
         ),
     )
     if not delivered:
