@@ -100,6 +100,23 @@ def _err(code: str, message: str, status_code: int = 400) -> JSONResponse:
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 
+# story #3204(카디르 QA, PR#3612) — UTM/referrer는 유저(브라우저)가 URL 쿼리로 완전히
+# 통제하는 값이라 무제한 저장 금지. 422 거부가 아니라 **클램프**(잘라서 저장) — 이상한
+# UTM 값 하나로 가입 자체가 막히면(422) 신규 유저 유입 경로를 스스로 차단하는 꼴이라
+# 서비스 목적에 반한다. 값 상한은 PO 확定(2026-08-29): utm 3종 각 256자, referrer는
+# URL이라 더 길 수 있어 1024자.
+_ATTRIBUTION_UTM_MAX_LEN = 256
+_ATTRIBUTION_REFERRER_MAX_LEN = 1024
+
+
+def _clamp_attribution_utm(v: str | None) -> str | None:
+    return v[:_ATTRIBUTION_UTM_MAX_LEN] if v else v
+
+
+def _clamp_attribution_referrer(v: str | None) -> str | None:
+    return v[:_ATTRIBUTION_REFERRER_MAX_LEN] if v else v
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -123,6 +140,16 @@ class RegisterRequest(BaseModel):
     signup_utm_medium: str | None = None
     signup_utm_campaign: str | None = None
     signup_referrer: str | None = None
+
+    @field_validator("signup_utm_source", "signup_utm_medium", "signup_utm_campaign")
+    @classmethod
+    def clamp_utm(cls, v: str | None) -> str | None:
+        return _clamp_attribution_utm(v)
+
+    @field_validator("signup_referrer")
+    @classmethod
+    def clamp_referrer(cls, v: str | None) -> str | None:
+        return _clamp_attribution_referrer(v)
 
     @field_validator("email")
     @classmethod
@@ -1187,6 +1214,16 @@ class OAuthCallbackRequest(BaseModel):
     signup_utm_medium: str | None = None
     signup_utm_campaign: str | None = None
     signup_referrer: str | None = None
+
+    @field_validator("signup_utm_source", "signup_utm_medium", "signup_utm_campaign")
+    @classmethod
+    def clamp_utm(cls, v: str | None) -> str | None:
+        return _clamp_attribution_utm(v)
+
+    @field_validator("signup_referrer")
+    @classmethod
+    def clamp_referrer(cls, v: str | None) -> str | None:
+        return _clamp_attribution_referrer(v)
 
 
 @router.get("/oauth/{provider}/authorize")

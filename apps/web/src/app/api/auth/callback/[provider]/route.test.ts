@@ -340,4 +340,28 @@ describe('GET /api/auth/callback/[provider] — sign_up 전환 신호 + 귀속 �
     expect(body).not.toHaveProperty('signup_utm_source');
     expect(body).not.toHaveProperty('signup_referrer');
   });
+
+  it('카디르 QA(PR#3612) — is_new_user=true(신규 가입)면 귀속 쿠키 4개를 지운다(maxAge=0)', async () => {
+    stubCookies({ sp_attr_src: 'google', sp_attr_ref: 'https://twitter.com/x' });
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: true } }),
+    });
+    const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+
+    for (const name of ['sp_attr_src', 'sp_attr_medium', 'sp_attr_campaign', 'sp_attr_ref']) {
+      const cookie = res.cookies.get(name);
+      expect(cookie?.value).toBe('');
+      expect(cookie?.maxAge).toBe(0);
+    }
+  });
+
+  it('is_new_user=false(기존 유저 로그인)면 귀속 쿠키를 안 건드린다 — 아직 소비 안 됨', async () => {
+    stubCookies({ sp_attr_src: 'google' });
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: false } }),
+    });
+    const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+
+    expect(res.cookies.get('sp_attr_src')).toBeUndefined();
+  });
 });

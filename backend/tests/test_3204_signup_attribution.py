@@ -17,9 +17,12 @@ def anyio_backend():
 # ─── register() — signup_utm_*/signup_referrer 영속화 ──────────────────────────
 
 async def _register_client():
+    """카디르 QA(PR#3612) — raw get_db 오버라이드는 get_read_db를 놓치는 회귀 클래스
+    (story #2451 §6 Phase3, 4차 재발). override_db_and_read 경유로 두 dependency key를
+    구조적으로 함께 건다."""
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     mock_session = AsyncMock()
     mock_result = MagicMock()
@@ -39,7 +42,7 @@ async def _register_client():
         ctx.user_id = str(uuid.uuid4())
         return ctx
 
-    app.dependency_overrides[get_db] = override_db
+    override_db_and_read(app, override_db)
     app.dependency_overrides[get_current_user] = override_auth
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
 
@@ -93,16 +96,38 @@ async def test_register_without_attribution_fields_leaves_them_none():
         app.dependency_overrides.clear()
 
 
+@pytest.mark.anyio
+async def test_register_clamps_oversized_attribution_fields():
+    """카디르 QA(PR#3612) — UTM/referrer는 유저(브라우저)가 URL 쿼리로 완전히 통제하는
+    값이라 무제한 저장 금지. 422 거부가 아니라 클램프(가입 자체는 막지 않는다)."""
+    import app.routers.auth as auth_router
+
+    client, session, app = await _register_client()
+    try:
+        async with client as c:
+            resp = await c.post("/api/v2/auth/register", json=_register_payload(
+                signup_utm_source="x" * 500,
+                signup_referrer="https://example.com/" + ("y" * 2000),
+            ))
+        assert resp.status_code == 201
+        user = _added_user(session)
+        assert len(user.signup_utm_source) == auth_router._ATTRIBUTION_UTM_MAX_LEN
+        assert len(user.signup_referrer) == auth_router._ATTRIBUTION_REFERRER_MAX_LEN
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ─── oauth_callback() — is_new_user + signup_utm_*/signup_referrer 영속화 ──────
 
 async def _oauth_client(session: AsyncMock):
+    """카디르 QA(PR#3612) — _register_client와 동일 fix(override_db_and_read 경유)."""
     from app.main import app
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def override_db():
         yield session
 
-    app.dependency_overrides[get_db] = override_db
+    override_db_and_read(app, override_db)
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 

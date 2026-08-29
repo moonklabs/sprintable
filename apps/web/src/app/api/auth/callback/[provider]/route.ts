@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
-import { SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 import { resolveAppUrl } from '@/services/app-url';
 import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
@@ -221,6 +221,15 @@ async function handleCallback(request: Request, provider: string, code: string |
   const res = NextResponse.redirect(destination);
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
+  // 카디르 QA(PR#3612) — register route.ts와 동일 이유. is_new_user일 때만(신규 계정이
+  // 실제로 이 귀속을 소비했을 때만) 지운다 — 기존 유저 로그인은 애초에 이 값을 안 썼으니
+  // 지울 이유가 없다(다음 진짜 첫 방문 신호를 위해 남겨 둔다는 의미는 아니고, 그냥 소비
+  // 안 한 값을 건드릴 이유가 없다는 뜻 — 어느 쪽이든 이후 실제 가입 시점에 갱신/소비됨).
+  if (isNewUser) {
+    for (const name of SIGNUP_ATTRIBUTION_COOKIE_NAMES) {
+      res.cookies.set(name, '', { ...cookieBase(), maxAge: 0 });
+    }
+  }
   return res;
 }
 

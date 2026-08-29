@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
-import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -45,5 +45,11 @@ export async function POST(request: Request) {
   const res = NextResponse.json({ data: { ok: true } }, { status: 201 });
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
+  // 카디르 QA(PR#3612) — register()는 항상 신규 계정 생성이라(200/201 = 가입 성공,
+  // 재로그인 개념이 없음) 여기 도달하면 예외 없이 소비된 것. 안 지우면 같은 브라우저에서
+  // 재가입(로그아웃 후 다른 이메일 등) 시 이 계정의 옛 귀속이 새 계정에 오염된다.
+  for (const name of SIGNUP_ATTRIBUTION_COOKIE_NAMES) {
+    res.cookies.set(name, '', { ...cookieBase(), maxAge: 0 });
+  }
   return res;
 }
