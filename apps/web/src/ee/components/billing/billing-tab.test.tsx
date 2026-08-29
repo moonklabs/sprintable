@@ -381,3 +381,42 @@ describe('PackPurchaseDialog — 청구 확인창은 VAT 가산액을 그대로 
     expect(document.body.textContent).toContain('부가세 포함');
   });
 });
+
+// story #3211(카디르 발견물 재확인 — 미르코 3209 AC1 라이브 중 실측) — 「구매 확認」이
+// charge_org 미배선인 채로 유저 도달 표면에 떠 있어 눌러도 API 호출 0으로 조용히 닫혔다.
+// PO 확定(b)안 — 배선(a)은 결제②-C+A2 로드맵 순서, 그때까지는 표면 차단(disabled+준비중
+// 명시)으로 "조용한 무동작"을 없앤다.
+describe('PackPurchaseDialog — 「구매 확認」 표면 차단(story #3211, PO (b)안)', () => {
+  it('구매 확認 버튼이 disabled — 클릭해도 onClose가 호출되지 않는다(=API 호출 경로 자체가 없다)', async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <PackPurchaseDialog target={{ kind: 'automation', quantity: 1 }} onClose={onClose} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const confirmBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === koMessages.pricingPlans.packDialogComingSoon);
+    expect(confirmBtn).toBeDefined();
+    expect(confirmBtn?.disabled).toBe(true);
+    await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('«구매 확認» 원문구는 더는 버튼에 안 뜬다(준비 중으로 교체) — 취소는 정상 동작', async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <PackPurchaseDialog target={{ kind: 'storage', quantity: 1 }} onClose={onClose} />
+        </NextIntlClientProvider>,
+      );
+    });
+    expect([...document.querySelectorAll('button')].some((b) => b.textContent === koMessages.pricingPlans.packDialogConfirm)).toBe(false);
+    expect(document.body.textContent).toContain(koMessages.pricingPlans.packDialogComingSoonNote);
+
+    const cancelBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === koMessages.pricingPlans.packDialogCancel);
+    await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
