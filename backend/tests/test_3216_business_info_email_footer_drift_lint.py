@@ -57,6 +57,24 @@ def test_mailordernumber_absence_in_footer_is_not_flagged():
     assert find_drift(BUSINESS_INFO_TS, EMAIL_PY_MATCHING) == []
 
 
+def test_decoy_earlier_match_does_not_silently_pass_a_changed_real_value():
+    """카디르 QA(PR#3621) — re.search(첫 매치)였다면 진짜 선언보다 앞선 decoy(주석 예시·
+    중복 선언)가 "정본"으로 잘못 채택돼, 진짜 값이 바뀌어도(email.py 낡음) decoy 쪽만
+    일치하면 조용히 GREEN이 났을 것이다. 매치 정확히 1건 원칙으로 이런 decoy 자체가
+    "추출실패"(보수적 RED)로 떨어져야 한다."""
+    ts_with_decoy = (
+        "// decoy: companyName: '주식회사 구버전'\n" + BUSINESS_INFO_TS
+    )
+    # decoy와 진짜 선언 둘 다 매치되므로(2건) companyName은 <추출실패>로 떨어져야 한다 —
+    # decoy 값이 "정본"으로 잘못 채택돼 email.py(진짜와 다른 값)와 우연히 일치해 통과하면
+    # 안 된다.
+    stale_email_py = EMAIL_PY_MATCHING.replace('_COMPANY_NAME = "주식회사 뭉클랩"', '_COMPANY_NAME = "주식회사 구버전"')
+    drifted = find_drift(ts_with_decoy, stale_email_py)
+    company_name_drift = [d for d in drifted if d[0] == "companyName"]
+    assert len(company_name_drift) == 1, "decoy 때문에 companyName 드리프트를 놓쳤다 — 우회 재발"
+    assert company_name_drift[0][2] == "<추출실패>"
+
+
 def test_extraction_failure_is_conservatively_flagged_not_silently_passed():
     """정규식이 값을 못 읽으면(파일 구조 변경 등) "일치"로 오판해 조용히 통과시키지 않고
     드리프트로 보수적 보고한다."""

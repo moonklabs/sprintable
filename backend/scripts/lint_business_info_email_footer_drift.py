@@ -39,22 +39,28 @@ FIELD_TO_CONST = {
 
 
 def extract_business_info_fields(text: str) -> dict[str, str]:
-    """business-info.ts의 `key: '값'` 자구를 그대로 뽑는다 — 포맷 정규화 없음(자구 대조)."""
+    """business-info.ts의 `key: '값'` 자구를 그대로 뽑는다 — 포맷 정규화 없음(자구 대조).
+
+    카디르 QA(PR#3621) — `re.search`(첫 매치만)는 SSOT 진짜 선언보다 앞서 나오는 decoy
+    (주석 예시·중복 선언 등)가 생기면 그 decoy 값을 "정본"으로 잘못 채택해 진짜 값 변경이
+    조용히 GREEN 통과하는 우회로가 된다. 매치가 정확히 1건일 때만 채택 — 0건(추출실패)·
+    2건 이상(decoy 발생) 둘 다 그 필드를 스킵해 find_drift가 보수적으로 RED 처리한다."""
     fields: dict[str, str] = {}
     for key in FIELD_TO_CONST:
-        m = re.search(rf"\b{re.escape(key)}\s*:\s*'((?:[^'\\]|\\.)*)'", text)
-        if m:
-            fields[key] = m.group(1)
+        matches = list(re.finditer(rf"\b{re.escape(key)}\s*:\s*'((?:[^'\\]|\\.)*)'", text))
+        if len(matches) == 1:
+            fields[key] = matches[0].group(1)
     return fields
 
 
 def extract_email_py_constants(text: str) -> dict[str, str]:
-    """email.py의 `_COMPANY_X = "값"` 모듈 상수를 그대로 뽑는다."""
+    """email.py의 `_COMPANY_X = "값"` 모듈 상수를 그대로 뽑는다. 매치 정확히 1건 원칙은
+    위 extract_business_info_fields와 동일(decoy 우회 차단)."""
     consts: dict[str, str] = {}
     for const_name in FIELD_TO_CONST.values():
-        m = re.search(rf'^{re.escape(const_name)}\s*=\s*"((?:[^"\\]|\\.)*)"', text, re.MULTILINE)
-        if m:
-            consts[const_name] = m.group(1)
+        matches = list(re.finditer(rf'^{re.escape(const_name)}\s*=\s*"((?:[^"\\]|\\.)*)"', text, re.MULTILINE))
+        if len(matches) == 1:
+            consts[const_name] = matches[0].group(1)
     return consts
 
 
