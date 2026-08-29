@@ -1832,6 +1832,10 @@ class AuthMeResponse(BaseModel):
     resolved_default_project_id: str | None = None
     is_project_ambiguous: bool = False
     accessible_project_ids: list[str] = []
+    # story #3195(온보딩·FE) — 온보딩 1/4가 "이메일 인증 필요"를 제출(400) 前에 선제 고지하려면
+    # 이 신호가 필요했다. api_key 컨텍스트(에이전트)는 User 행이 없어 None(무의미 — 온보딩 게이트
+    # 자체가 인간 전용이라 agent 소비처는 이 필드를 참조하지 않는다).
+    email_verified: bool | None = None
 
 
 async def _resolve_project_default(
@@ -1870,6 +1874,7 @@ async def get_auth_me(
     resolved: str | None = None
     ambiguous = False
     accessible_ids: list[str] = []
+    email_verified: bool | None = None
     if meta.get("api_key_id"):
         try:
             member_id = uuid.UUID(auth.user_id)
@@ -1877,6 +1882,15 @@ async def get_auth_me(
             resolved, ambiguous, accessible_ids = await _resolve_project_default(db, member_id, org_id)
         except Exception:
             logger.warning("get_auth_me: 신규 project default 판정 실패 — 레거시 필드만 반환", exc_info=True)
+    else:
+        # story #3195 — human JWT 세션(auth.user_id == User.id)에 한해서만 조회. api_key
+        # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
+        try:
+            email_verified = (
+                await db.execute(select(User.email_verified).where(User.id == uuid.UUID(auth.user_id)))
+            ).scalar_one_or_none()
+        except Exception:
+            logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
     return AuthMeResponse(
         member_id=auth.user_id,
         org_id=auth.org_id or meta.get("org_id"),
@@ -1884,6 +1898,7 @@ async def get_auth_me(
         resolved_default_project_id=resolved,
         is_project_ambiguous=ambiguous,
         accessible_project_ids=accessible_ids,
+        email_verified=email_verified,
     )
 
 

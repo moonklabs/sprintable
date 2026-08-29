@@ -5,8 +5,50 @@ import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
+import { fetchWithAuth } from '@/lib/db/client';
 import { ConnectStep } from './connect-step';
 import { emitOnboardingEvent } from './onboarding-telemetry';
+
+// story #3195 — 이메일 인증 왕복(가입 → 1/4 입력 → EMAIL_VERIFICATION_REQUIRED 400 →
+// 메일함에서 링크 클릭 → verify-email 페이지 → 「시작하기」로 복귀)이 풀 페이지 네비게이션이라
+// 이 컴포넌트가 통째로 리마운트돼 React state(orgName/orgSlug)가 사라졌다. sessionStorage는
+// 같은 탭 내 네비게이션 전체에서 살아남는다(탭을 아예 새로 열면 못 살리는 게 정상 — 메일
+// 클라이언트가 링크를 새 탭에서 열어도 verify-email 자체 접근엔 로그인 세션만 있으면 되고,
+// 왕복 자체가 "같은 탭"이어야 이 값이 필요한 시나리오라 sessionStorage로 충분하다).
+//
+// 카디르 QA(PR#3617) codex MED — 키가 고정 문자열이면 같은 탭에서 계정 전환(로그아웃→
+// 다른 계정 로그인) 시 前 계정이 타이핑한 값이 새 계정 온보딩 화면에 그대로 새 나간다.
+// member_id(uid)로 키잉해 계정마다 별도 슬롯을 쓴다 — uid는 /api/auth/me 응답이 와야
+// 알 수 있어(비동기) 초기 렌더 시점엔 아직 복원 못 하고, uid 확정 後 별도 effect에서
+// 복원한다(아래 참고).
+const ORG_DRAFT_STORAGE_PREFIX = 'sp_onboarding_org_draft:';
+
+function loadOrgDraft(uid: string): { orgName: string; orgSlug: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(ORG_DRAFT_STORAGE_PREFIX + uid);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { orgName?: unknown; orgSlug?: unknown };
+    if (typeof parsed.orgName !== 'string' || typeof parsed.orgSlug !== 'string') return null;
+    return { orgName: parsed.orgName, orgSlug: parsed.orgSlug };
+  } catch {
+    return null;
+  }
+}
+
+function saveOrgDraft(uid: string, orgName: string, orgSlug: string): void {
+  try {
+    const key = ORG_DRAFT_STORAGE_PREFIX + uid;
+    if (!orgName && !orgSlug) { sessionStorage.removeItem(key); return; }
+    sessionStorage.setItem(key, JSON.stringify({ orgName, orgSlug }));
+  } catch {
+    // 시크릿 모드 등 sessionStorage 차단 — 이 스토리 前과 동일(비영속) 동작으로 조용히 저하.
+  }
+}
+
+function clearOrgDraft(uid: string): void {
+  try { sessionStorage.removeItem(ORG_DRAFT_STORAGE_PREFIX + uid); } catch { /* no-op */ }
+}
 
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 // story #3196 ⑥ — 값(BE role 필드, 영문 enum 그대로 무변경)과 표시 라벨을 분리. 예전엔
@@ -34,6 +76,14 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   const [step, setStep] = useState<Step>(initialStep ?? 'org');
   const [orgName, setOrgName] = useState('');
   const [orgSlug, setOrgSlug] = useState('');
+  // story #3195 — draft 저장/복원 키는 uid가 확정돼야(=/api/auth/me 응답 後) 정해진다.
+  const [draftUid, setDraftUid] = useState<string | null>(null);
+  // 유나 design:changes(PR#3617) — draft 복원이 post-mount effect라 응답 前엔 입력창이
+  // 항상 empty로 뜬 뒤 draft로 채워지는 깜빡임이 실측됐다("입력이 그대로 있다"는 인상이
+  // 이 스토리의 AC 자체). uid 해소(성공·실패 무관) 前까지 org 입력 2개를 게이팅해 빈
+  // 화면이 찍히는 순간 자체를 없앤다(PO 선택 ⓐ — lazy-init 무키 폴백(ⓑ)은 前 계정 draft가
+  // 잠깐 보일 위험이 있어 계정격리 축과 상충).
+  const [identityResolved, setIdentityResolved] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
@@ -62,6 +112,52 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   useEffect(() => {
     emitOnboardingEvent('onboarding_started');
   }, []);
+
+  // story #3195 — org 단계 마운트 시 딱 1회, 신원(uid) + 미인증 여부를 함께 조회한다.
+  // 카디르 QA(PR#3617) 치명 — FE `/api/me`가 실제로 서빙하는 BE는 TeamMember 필수인
+  // `me.py::get_me()`라, 이 스토리가 겨냥하는 바로 그 "무 org" 상태에서 404가 나 email_
+  // verified·org_id 둘 다 못 읽었다(테스트는 mock이라 안 잡힘 — 3605와 동형 "실경로
+  // 미도달" 클래스). 대신 `/api/auth/me`(BFF 신설, BE app.routers.auth.get_auth_me)를
+  // 쓴다 — JWT claims만으로 응답해 TeamMember/무 org 여부와 무관하게 항상 200.
+  useEffect(() => {
+    if (step !== 'org') return;
+    let cancelled = false;
+    fetchWithAuth('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { data?: { member_id?: string; email_verified?: boolean | null } } | null) => {
+        if (cancelled) return;
+        // AC2 — email_verified가 명시 false일 때만 배너를 띄운다(true·null 둘 다 무표시 —
+        // null은 조회 실패/판정 불가란 뜻이라, 이전처럼 "제출해봐야 아는" 폴백으로 자연스럽게
+        // 저하할 뿐 새로운 오탐을 만들지 않는다).
+        if (json?.data?.email_verified === false) setEmailVerifyBlocked(true);
+
+        const uid = json?.data?.member_id;
+        if (!uid) { setIdentityResolved(true); return; }
+        setDraftUid(uid);
+        // 유저가 이 응답을 기다리는 동안 이미 타이핑을 시작했으면(레이스) 덮어쓰지 않는다
+        // — 함수형 업데이트로 "지금 이 순간의" 실제 값을 보고 판단(클로저 stale 없음).
+        const draft = loadOrgDraft(uid);
+        if (draft) {
+          setOrgName((prev) => prev || draft.orgName);
+          setOrgSlug((prev) => prev || draft.orgSlug);
+        }
+        setIdentityResolved(true);
+      })
+      .catch(() => {
+        // 조용히 폴백 — 제출 시 400 분기가 그대로 안전망, draft 복원도 스킵. 실패해도
+        // 게이팅을 영영 풀지 않으면 폼 자체가 막히므로 반드시 resolved 처리한다.
+        if (!cancelled) setIdentityResolved(true);
+      });
+    return () => { cancelled = true; };
+  }, [step]);
+
+  // story #3195 — 매 키입력마다 draft 저장(디바운스 불요 — sessionStorage 쓰기는 로컬·저비용).
+  // uid가 아직 안 잡혔으면(위 fetch 응답 前 짧은 창) 저장을 건너뛴다 — 계정-무관 키로 쓰면
+  // codex MED가 지적한 계정간 누수가 재발한다.
+  useEffect(() => {
+    if (step !== 'org' || !draftUid) return;
+    saveOrgDraft(draftUid, orgName, orgSlug);
+  }, [step, draftUid, orgName, orgSlug]);
 
   const handleOrgNameChange = (name: string) => {
     setOrgName(name);
@@ -128,6 +224,9 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       }
 
       setOrgId(json.data.id);
+      // story #3195 — 조직 생성 성공(=이 값들이 이제 쓸모 없어짐) 시점에만 draft를 지운다.
+      // 실패(EMAIL_VERIFICATION_REQUIRED 포함) 시엔 절대 안 지운다 — 왕복 중 그대로 살아야 함.
+      if (draftUid) clearOrgDraft(draftUid);
       // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
       // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
       // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
@@ -356,6 +455,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
 
         {step === 'org' && (
           <div className="space-y-4">
+            {/* 유나 design:changes(PR#3617) — draft 복원(uid 확定 後 별도 effect)이 응답
+                前엔 항상 empty로 뜬 뒤 채워지는 깜빡임을 만들었다("입력이 그대로 있다"는
+                인상이 AC 자체). identityResolved 前까지 두 입력을 disabled로 게이팅해 그
+                순간 자체를 없앤다. */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">{t('orgName')}</label>
               <OperatorInput
@@ -363,6 +466,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 value={orgName}
                 onChange={(e) => handleOrgNameChange(e.target.value)}
                 placeholder={t('orgNamePlaceholder')}
+                disabled={!identityResolved}
               />
             </div>
             <div className="space-y-1.5">
@@ -372,6 +476,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 value={orgSlug}
                 onChange={(e) => handleOrgSlugChange(e.target.value)}
                 placeholder={t('slugPlaceholder')}
+                disabled={!identityResolved}
               />
               {orgSlug && !slugValid ? (
                 // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,
