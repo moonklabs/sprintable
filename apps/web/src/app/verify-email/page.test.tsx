@@ -91,7 +91,7 @@ describe('VerifyEmailPage — error.code 분기 (story #2484)', () => {
 describe('VerifyEmailPage — 「시작하기」 목적지가 org_id 유무로 갈린다(story #3195)', () => {
   function mockFetchByUrl(orgId: string | null) {
     return vi.fn(async (url: string) => {
-      if (url === '/api/me') return { ok: true, json: async () => ({ data: { org_id: orgId } }) };
+      if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { org_id: orgId } }) };
       return { json: async () => ({ data: { message: 'Email verified successfully' } }) };
     });
   }
@@ -119,7 +119,7 @@ describe('VerifyEmailPage — 「시작하기」 목적지가 org_id 유무로 �
     let resolveMe!: (v: { ok: true; json: () => Promise<unknown> }) => void;
     const mePromise = new Promise<{ ok: true; json: () => Promise<unknown> }>((r) => { resolveMe = r; });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/me') return mePromise;
+      if (url === '/api/auth/me') return mePromise;
       return { json: async () => ({ data: { message: 'Email verified successfully' } }) };
     }));
     await mountAndWait();

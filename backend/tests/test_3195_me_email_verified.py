@@ -1,6 +1,13 @@
-"""story #3195(온보딩·FE) — GET /api/v2/me가 email_verified를 반환해야 온보딩 1/4가
-제출(400) 前에 «인증 필요» 안내를 선제 고지할 수 있다(AC2). 신규 DB 쿼리는 human JWT
-세션(api_key 컨텍스트가 아닐 때)에만 도는지, api_key 컨텍스트는 무영향(None)인지 고정."""
+"""story #3195(온보딩·FE) — GET /api/v2/auth/me(get_auth_me)가 email_verified를 반환해야
+온보딩 1/4가 제출(400) 前에 «인증 필요» 안내를 선제 고지할 수 있다(AC2). 신규 DB 쿼리는
+human JWT 세션(api_key 컨텍스트가 아닐 때)에만 도는지, api_key 컨텍스트는 무영향(None)
+인지 고정.
+
+카디르 QA(PR#3617) 치명 — 이 필드를 처음엔 이 함수(auth.py::get_auth_me)에 붙였는데
+FE가 실제로 부르던 건 `/api/me`(BE me.py::get_me, TeamMember 필수)였다. 이 스토리가
+겨냥하는 "무 org"(온보딩 1/4 진행 중) 상태에서 me.py::get_me는 404를 낸다 — 즉 FE를
+`/api/auth/me`로 옮긴 지금, **이 엔드포인트가 무 org에서도 200을 내는지**가 이 fix
+전체의 성패를 가른다. 아래 무org 200 pin이 그 계약을 고정한다."""
 from __future__ import annotations
 
 import uuid
@@ -29,6 +36,19 @@ def _mock_db(email_verified: bool | None) -> AsyncMock:
 async def test_human_jwt_session_returns_email_verified_false():
     auth = AuthContext(user_id=str(uuid.uuid4()), email="new@example.com", claims={"app_metadata": {}})
     resp = await get_auth_me(auth=auth, db=_mock_db(False))
+    assert resp.email_verified is False
+
+
+@pytest.mark.anyio
+async def test_no_org_human_session_returns_200_with_org_id_none_not_404():
+    """카디르 QA(PR#3617) 필수 pin — 무 org(=이 스토리가 겨냥하는 온보딩 1/4 진행 중)
+    human 세션은 org_id/project_id 클레임 자체가 없다(claims에 org_id 키 없음). 이
+    함수가 me.py::get_me와 달리 TeamMember를 전혀 조회하지 않아 404가 날 수 없고,
+    org_id=None으로 정직하게 200을 낸다는 계약을 고정한다 — verify-email/onboarding
+    두 소비처 모두 이 계약에 기대고 있다."""
+    auth = AuthContext(user_id=str(uuid.uuid4()), email="new@example.com", claims={"app_metadata": {}})
+    resp = await get_auth_me(auth=auth, db=_mock_db(False))
+    assert resp.org_id is None
     assert resp.email_verified is False
 
 
