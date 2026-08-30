@@ -610,7 +610,14 @@ async def delete_avatar_endpoint(
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     await _assert_can_edit_avatar(id, member, session, org_id, auth)
-    await delete_avatar(current_avatar_url=member.avatar_url)
+    # story #2890 — delete_avatar가 이제 버킷 미설정 시 AvatarUploadError(503)를 던진다
+    # (예전엔 조용히 no-op했다). 위 upload-url/confirm 엔드포인트와 동일 패턴으로 잡아
+    # HTTP 503으로 변환 — 안 잡으면 avatar_url을 null化해버려 fail-closed 계약이
+    # 라우터 층에서 다시 새는 걸 막는다.
+    try:
+        await delete_avatar(current_avatar_url=member.avatar_url)
+    except AvatarUploadError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
     await repo.apply_anchor_update(member, {"avatar_url": None})
     session.expire(member)
     updated = await repo.get(id)

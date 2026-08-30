@@ -213,4 +213,20 @@ async def test_delete_avatar_ignores_external_url(avatar_service):
     """우리 버킷이 아닌 avatar_url(레거시/외부값)은 delete_object 호출 없이 그냥 통과 —
     canonical_avatar_object_path가 None을 반환하는 값에 대해 예외 없이 조용히 no-op."""
     await avatar_service.delete_avatar(current_avatar_url="https://example.com/someone-elses-avatar.png")
+
+
+@pytest.mark.asyncio
+async def test_delete_avatar_unconfigured_bucket_is_503(avatar_service_unconfigured):
+    """story #2890(카디르 QA MEDIUM, PR #3297) — delete_avatar만 create_upload_url/
+    confirm_upload와 달리 버킷 미설정 시 예외 없이 조용히 return해 모듈 docstring의
+    계약(⑤미설정 시 503 fail-closed)을 어기고 있었다. 라우터(team_members.py
+    delete_avatar_endpoint)는 그 침묵을 성공과 구별 못 하고 avatar_url을 그대로
+    null化해, storage 객체가 orphan으로 남을 수 있었다(원 재현). 이제 다른 두 함수와
+    동일하게 503+AVATAR_UPLOAD_NOT_CONFIGURED를 던진다."""
+    with pytest.raises(avatar_service_unconfigured.AvatarUploadError) as exc_info:
+        await avatar_service_unconfigured.delete_avatar(
+            current_avatar_url="https://storage.googleapis.com/some-bucket/avatar/x/y/z.png",
+        )
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == "AVATAR_UPLOAD_NOT_CONFIGURED"
     # no exception = pass

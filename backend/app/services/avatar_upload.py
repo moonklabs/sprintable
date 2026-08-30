@@ -121,8 +121,13 @@ async def confirm_upload(
 
 
 async def delete_avatar(*, current_avatar_url: str | None) -> None:
-    if not AVATARS_BUCKET:
-        return
+    # story #2890(카디르 QA MEDIUM, PR #3297) — 이 함수만 버킷 미설정 시 예외 없이 no-op해
+    # 모듈 docstring의 계약("GCS_AVATARS_BUCKET 미설정 시 전 함수 503 fail-closed")을
+    # 어겼다 — 라우터(team_members.py delete_avatar_endpoint)는 그 침묵을 "삭제 성공"과
+    # 구별 못 하고 avatar_url을 그대로 null化해, 미설정 환경(운영 드리프트 시나리오)에서
+    # storage 객체가 orphan으로 남을 수 있었다. create_upload_url/confirm_upload와 동일한
+    # _require_bucket()로 통일 — 계약대로 fail-closed.
+    bucket = _require_bucket()
     old_path = canonical_avatar_object_path(current_avatar_url)
     if old_path:
-        await get_storage_provider().delete_object(AVATARS_BUCKET, old_path)
+        await get_storage_provider().delete_object(bucket, old_path)
