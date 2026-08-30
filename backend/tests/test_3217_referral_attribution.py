@@ -157,6 +157,113 @@ async def test_auto_accept_invitation_now_returns_accept_result_dict():
     assert result == {"ok": True, "org_id": "org-1"}
 
 
+# ─── oauth_callback() 신규 유저 경로 — register()와 동일 계약(카디르 QA, PR#3623) ───
+# 카디르 지적 — register()만 pin됐고 oauth_callback() 경로는 pin 0건이라 가드 제거
+# 뮤테이션에 이 경로 전체가 침묵했다(false-green). register 것과 동형으로 양방향 추가.
+
+async def _oauth_client(session: AsyncMock):
+    """story #3204 test_3204_signup_attribution.py와 동형 패턴(override_db_and_read
+    경유) — 파일 독립성 유지를 위해 재구현(공유 임포트 안 함, 이 코드베이스 관례)."""
+    from app.main import app
+    from tests.conftest import override_db_and_read
+
+    async def override_db():
+        yield session
+
+    override_db_and_read(app, override_db)
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _mock_session_returning_none() -> AsyncMock:
+    """provider_id 조회·email 조회 둘 다 None — 신규 유저 생성 분기로 진입."""
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=result)
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    return session
+
+
+@pytest.mark.anyio
+async def test_oauth_callback_invite_accept_success_overrides_cookie_derived_utm(monkeypatch):
+    """A축 — OAuth 신규 가입 경로도 register()와 동일하게, invite_token 수락 성공 시
+    referral/org_invite/<org_id>가 쿠키 유래 값보다 우선 적용된다."""
+    from app.core.config import settings
+    from app.core.security import create_oauth_state_token
+    import app.routers.auth as auth_router
+    from app.models.user import User
+
+    monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
+    monkeypatch.setattr(
+        auth_router, "_exchange_oauth_code_for_userinfo",
+        AsyncMock(return_value=("google-oauth-id-1", "brand-new@example.com")),
+    )
+    org_id = str(uuid.uuid4())
+    state = create_oauth_state_token("google")
+    session = _mock_session_returning_none()
+    client = await _oauth_client(session)
+    try:
+        with patch(
+            "app.repositories.org_invite.OrgInviteRepository.accept",
+            new=AsyncMock(return_value={"ok": True, "org_id": org_id, "role": "member"}),
+        ):
+            async with client as c:
+                resp = await c.post("/api/v2/auth/oauth/callback", json={
+                    "provider": "google", "code": "code-1", "state": state, "tos_accepted": True,
+                    "invite_token": "tok-1",
+                    "signup_utm_source": "google", "signup_utm_medium": "cpc", "signup_utm_campaign": "launch",
+                })
+        assert resp.status_code == 200
+        assert resp.json()["data"]["is_new_user"] is True
+        user = next(c.args[0] for c in session.add.call_args_list if isinstance(c.args[0], User))
+        assert user.signup_utm_source == "referral"
+        assert user.signup_utm_medium == "org_invite"
+        assert user.signup_utm_campaign == org_id
+    finally:
+        from app.main import app
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_oauth_callback_invite_accept_failure_is_hands_off(monkeypatch):
+    """A축 — OAuth 신규 가입에서 초대 토큰이 무효/만료면 무개입(쿠키 유래 값 보존)."""
+    from app.core.config import settings
+    from app.core.security import create_oauth_state_token
+    import app.routers.auth as auth_router
+    from app.models.user import User
+
+    monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
+    monkeypatch.setattr(
+        auth_router, "_exchange_oauth_code_for_userinfo",
+        AsyncMock(return_value=("google-oauth-id-2", "brand-new-2@example.com")),
+    )
+    state = create_oauth_state_token("google")
+    session = _mock_session_returning_none()
+    client = await _oauth_client(session)
+    try:
+        with patch(
+            "app.repositories.org_invite.OrgInviteRepository.accept",
+            new=AsyncMock(return_value={"ok": False, "reason": "expired"}),
+        ):
+            async with client as c:
+                resp = await c.post("/api/v2/auth/oauth/callback", json={
+                    "provider": "google", "code": "code-1", "state": state, "tos_accepted": True,
+                    "invite_token": "tok-expired",
+                    "signup_utm_source": "google", "signup_utm_medium": "cpc", "signup_utm_campaign": "launch",
+                })
+        assert resp.status_code == 200
+        user = next(c.args[0] for c in session.add.call_args_list if isinstance(c.args[0], User))
+        assert user.signup_utm_source == "google"
+        assert user.signup_utm_medium == "cpc"
+        assert user.signup_utm_campaign == "launch"
+    finally:
+        from app.main import app
+        app.dependency_overrides.clear()
+
+
 # ─── B축 — 초대 메일 accept_link의 utm 부착 ─────────────────────────────────────
 
 def test_send_invite_email_appends_utm_when_org_id_given(monkeypatch):
