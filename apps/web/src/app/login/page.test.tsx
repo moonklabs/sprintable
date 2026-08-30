@@ -11,11 +11,17 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const { loginWithPasswordMock } = vi.hoisted(() => ({ loginWithPasswordMock: vi.fn() }));
+// story #3220 — searchParamsRef를 vi.hoisted로 노출해 테스트별로 next 파라미터를
+// 갈아끼울 수 있게 한다(기존엔 매 호출 새 빈 URLSearchParams라 next 유무를 테스트할
+// 방법이 없었음). beforeEach에서 빈 값으로 리셋 — 다른 기존 테스트엔 무회귀.
+const { loginWithPasswordMock, searchParamsRef } = vi.hoisted(() => ({
+  loginWithPasswordMock: vi.fn(),
+  searchParamsRef: { current: new URLSearchParams() },
+}));
 vi.mock('@/lib/db/client', () => ({ loginWithPassword: loginWithPasswordMock }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsRef.current,
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -36,6 +42,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   loginWithPasswordMock.mockReset();
+  searchParamsRef.current = new URLSearchParams();
 });
 
 afterEach(async () => {
@@ -142,4 +149,29 @@ describe('LoginPage — error.code 분기 (story #2484)', () => {
 
   // 양성대조(AC) — 가드 없이 raw message를 그대로 쓰면 이 테스트가 RED여야 한다.
   // (수동 mutation self-check로 확認 — 아래 PR 설명 참고. 이 테스트 자체가 그 반례 역할.)
+});
+
+// story #3220 — 비로그인 초대수락→회원가입 경로가 여기서 끊겼다: login 페이지 자체는
+// next를 이미 들고 있는데 "회원가입" 링크가 그걸 안 실어 register로 못 넘겼다.
+describe('LoginPage — 회원가입 링크 next 전파(story #3220, 초대수락 여정 단절 fix)', () => {
+  it('next 파라미터가 있으면 회원가입 링크가 그대로 실어 나른다', async () => {
+    searchParamsRef.current = new URLSearchParams(
+      `next=${encodeURIComponent('/invite/accept?token=abc123')}`
+    );
+    await mount();
+    const signUpLink = [...container.querySelectorAll('a')].find(
+      (a) => a.textContent === koMessages.login.signUp
+    );
+    expect(signUpLink?.getAttribute('href')).toBe(
+      `/register?next=${encodeURIComponent('/invite/accept?token=abc123')}`
+    );
+  });
+
+  it('next가 없으면 예전처럼 맨몸 /register — 회귀 없음', async () => {
+    await mount();
+    const signUpLink = [...container.querySelectorAll('a')].find(
+      (a) => a.textContent === koMessages.login.signUp
+    );
+    expect(signUpLink?.getAttribute('href')).toBe('/register');
+  });
 });

@@ -13,9 +13,16 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
-const { pushMock, refreshMock } = vi.hoisted(() => ({ pushMock: vi.fn(), refreshMock: vi.fn() }));
+// story #3220 — searchParamsRef를 vi.hoisted로 노출해 next 파라미터를 테스트별로
+// 갈아끼운다(login/page.test.tsx와 동일 패턴). beforeEach에서 빈 값으로 리셋.
+const { pushMock, refreshMock, searchParamsRef } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  refreshMock: vi.fn(),
+  searchParamsRef: { current: new URLSearchParams() },
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, refresh: refreshMock }),
+  useSearchParams: () => searchParamsRef.current,
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -36,6 +43,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  searchParamsRef.current = new URLSearchParams();
 });
 
 afterEach(async () => {
@@ -194,5 +202,92 @@ describe('RegisterPage — sign_up 이벤트 발화 신호(story #3204)', () => 
     await mount('ko');
     await fillAndSubmit();
     expect(pushMock).toHaveBeenCalledWith('/onboarding?signup=1');
+  });
+});
+
+// story #3220 — 비로그인 초대수락→가입 여정: register 완료 후 org_id 유무만 보고
+// /inbox·/onboarding으로 무조건 미는 대신, next(예: /invite/accept?token=…)가 있으면
+// 그쪽을 우선 복귀시켜야 초대받은 사람이 자기 조직을 만드는 대신 초대받은 조직에
+// 합류할 수 있다.
+describe('RegisterPage — next 우선 복귀(story #3220, 초대수락 여정 단절 fix)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); pushMock.mockClear(); });
+
+  async function fillAndSubmit() {
+    const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
+    const pwInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => {
+      setNativeValue(nameInput, 'Test User');
+      setNativeValue(emailInput, 'a@b.com');
+      setNativeValue(pwInput, 'Abc123!!');
+      tosCheckbox.click();
+    });
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.register.submit);
+    await act(async () => {
+      submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('next가 있으면 org_id 유무와 무관하게 next로 복귀 — 쿼리스트링 구분자(&)도 정확히 붙는다', async () => {
+    searchParamsRef.current = new URLSearchParams(
+      `next=${encodeURIComponent('/invite/accept?token=abc123')}`
+    );
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/register') return { ok: true, json: async () => ({ data: { ok: true } }) };
+      // org_id가 있어도(재가입 엣지케이스와 무관 — 이 값과 무관하게 next 우선) next가 이긴다.
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { org_id: 'org-1' } }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await mount('ko');
+    await fillAndSubmit();
+    expect(pushMock).toHaveBeenCalledWith('/invite/accept?token=abc123&signup=1');
+  });
+
+  it('next가 오픈 리다이렉트 가드에 걸리면(외부 도메인) safeNextPath 폴백(/chats)으로 안전 하강', async () => {
+    searchParamsRef.current = new URLSearchParams(`next=${encodeURIComponent('//evil.com')}`);
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/register') return { ok: true, json: async () => ({ data: { ok: true } }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: {} }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await mount('ko');
+    await fillAndSubmit();
+    expect(pushMock).toHaveBeenCalledWith('/chats?signup=1');
+  });
+
+  it('next가 없으면 예전처럼 org_id 분기만 적용 — 회귀 없음', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/register') return { ok: true, json: async () => ({ data: { ok: true } }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: {} }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await mount('ko');
+    await fillAndSubmit();
+    expect(pushMock).toHaveBeenCalledWith('/onboarding?signup=1');
+  });
+});
+
+// story #3220(fix-on-sight) — Google OAuth 버튼도 login 페이지의 OAuth 버튼들과 같은
+// 결함(next 미전파)이 있었다. NEXT_PUBLIC_OAUTH_ENABLED가 있어야 버튼 자체가 렌더된다.
+describe('RegisterPage — Google OAuth 링크 next 전파(story #3220)', () => {
+  const originalOauthEnabled = process.env['NEXT_PUBLIC_OAUTH_ENABLED'];
+  beforeEach(() => { process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = 'true'; });
+  afterEach(() => { process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = originalOauthEnabled; });
+
+  it('next가 있고 ToS 동의 상태면 Google 링크가 next를 실어 나른다', async () => {
+    searchParamsRef.current = new URLSearchParams(
+      `next=${encodeURIComponent('/invite/accept?token=abc123')}`
+    );
+    await mount('ko');
+    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => { tosCheckbox.click(); });
+    const googleLink = [...container.querySelectorAll('a')].find((a) => a.href.includes('provider=google'));
+    expect(googleLink?.getAttribute('href')).toBe(
+      `/auth/login?provider=google&tos_accepted=true&next=${encodeURIComponent('/invite/accept?token=abc123')}`
+    );
   });
 });

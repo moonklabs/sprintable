@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { LegalFooter } from '@/components/legal/legal-footer';
+import { safeNextPath } from '@/lib/auth/session-redirect';
 
 function checkPasswordRules(pw: string) {
   return {
@@ -24,6 +25,8 @@ function countCategories(rules: ReturnType<typeof checkPasswordRules>) {
 export default function RegisterPage() {
   const t = useTranslations('register');
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextParam = searchParams.get('next');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -69,8 +72,16 @@ export default function RegisterPage() {
       // story #3204 — sign_up 전환 이벤트 발화 신호(google-analytics.tsx의 route-change
       // effect가 소비). OAuth 경로(api/auth/callback/[provider]/route.ts)와 동일 파라미터로
       // 통일해 발화 지점을 하나로 모은다(SSOT).
-      const destination = meJson.data?.org_id ? '/inbox' : '/onboarding';
-      router.push(`${destination}?signup=1`);
+      //
+      // story #3220 — 비로그인 초대수락→가입 여정에서 여기가 org_id 유무만 보고 무조건
+      // /inbox·/onboarding으로 밀어내 accept 복귀가 끊겼다(초대받은 사람이 자기 조직을
+      // 만들게 됨). next가 있으면(오픈 리다이렉트 가드 safeNextPath 통과분만) 그쪽을
+      // 최우선으로 — invite_accept.py 주석(story #3217)이 문서화한 의도된 여정
+      // (login→가입→authenticated accept)과 일치. 목적지가 이미 자체 쿼리스트링을 갖고
+      // 있을 수 있어(예: /invite/accept?token=…) `?signup=1` 고정 대신 구분자를 판별한다.
+      const destination = nextParam ? safeNextPath(nextParam) : (meJson.data?.org_id ? '/inbox' : '/onboarding');
+      const separator = destination.includes('?') ? '&' : '?';
+      router.push(`${destination}${separator}signup=1`);
       router.refresh();
     } catch {
       setError(t('registrationFailed'));
@@ -179,8 +190,11 @@ export default function RegisterPage() {
               <div className="flex-grow border-t border-border/50" />
             </div>
 
+            {/* story #3220 — login/page.tsx의 OAuth 버튼들과 동일 패턴으로 next 전파
+                (/auth/login/route.ts가 이미 next를 읽어 콜백까지 이어준다 — 이 버튼만
+                빠져 있었음, fix-on-sight). */}
             <a
-              href={tosAccepted ? '/auth/login?provider=google&tos_accepted=true' : undefined}
+              href={tosAccepted ? `/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}` : undefined}
               onClick={!tosAccepted ? (e) => { e.preventDefault(); setError(t('tosRequiredError')); } : undefined}
               className={`flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50 ${!tosAccepted ? 'opacity-50 cursor-not-allowed' : ''}`}
             >

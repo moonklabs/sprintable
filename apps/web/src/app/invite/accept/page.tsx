@@ -12,7 +12,11 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
 
   const session = await getServerSession().catch(() => null);
   if (!session) {
-    redirect(`/login?returnUrl=${encodeURIComponent(`/invite/accept?token=${token}`)}`);
+    // story #3220 — 예전엔 `returnUrl`로 실었는데 login/page.tsx는 `next`만 읽는다(양쪽이
+    // 애초에 다른 파라미터명으로 각자 짜여 한 번도 안 이어져 있었음 — 비로그인 사용자는
+    // 로그인해도 여기로 못 돌아왔다). 세션-만료 redirect(session-redirect.ts)와 동일한
+    // `next` 컨벤션으로 통일.
+    redirect(`/login?next=${encodeURIComponent(`/invite/accept?token=${token}`)}`);
   }
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
