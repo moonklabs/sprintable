@@ -883,6 +883,66 @@ async def test_get_single_asset_scoped():
 
 
 @pytest.mark.anyio
+async def test_delete_asset_scoped_soft_delete_and_storage_reflects():
+    """story #3241 — DELETE /assets/{id} 신설. 핵심: 핸들러 부재로 100% 실패하던 걸 soft-delete로
+    실동작화 + get_asset과 동일 _scope_filter 재사용(cross-project=거부 자체가 성립하는지) +
+    storage_usage 즉시 반영(AC2 실증) + 하드삭제 금지(row 존속·deleted_at만 세팅) 4개를 한 번에 편다.
+    """
+    from unittest.mock import MagicMock
+
+    from fastapi import HTTPException
+
+    from app.routers.assets import delete_asset, storage_usage
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            ins = ("INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes)"
+                   " VALUES (:id,:o,:p,:c,:path,:n,:sz)")
+            aid_a = uuid.uuid4()  # PROJ_A: USER granted — 삭제 대상
+            await s.execute(text(ins), {"id": aid_a, "o": ORG, "p": PROJ_A, "c": BUCKET, "path": "da/a", "n": "a.png", "sz": 1000})
+            aid_b = uuid.uuid4()  # PROJ_B: USER 미접근 — 거부 대조군
+            await s.execute(text(ins), {"id": aid_b, "o": ORG, "p": PROJ_B, "c": BUCKET, "path": "da/b", "n": "b.png", "sz": 500})
+            await s.commit()
+
+            auth = MagicMock()
+            auth.user_id = str(USER)
+
+            # 삭제 前 storage_usage = 두 asset 합.
+            before = await storage_usage(db=s, auth=auth, org_id=ORG)
+            assert before.used_bytes == 1500
+
+            # ①양성: 접근권 있는 asset 삭제 성공.
+            r = await delete_asset(str(aid_a), db=s, auth=auth, org_id=ORG)
+            assert r == {"ok": True}
+
+            row = (await s.execute(text("SELECT deleted_at FROM assets WHERE id=:id"), {"id": aid_a})).scalar_one()
+            assert row is not None  # soft-delete = deleted_at 세팅.
+            row_exists = (await s.execute(text("SELECT 1 FROM assets WHERE id=:id"), {"id": aid_a})).scalar_one_or_none()
+            assert row_exists == 1  # 하드삭제 금지 — row 자체는 존속.
+
+            # storage_usage 즉시 반영(AC2) — 삭제분 제외.
+            after = await storage_usage(db=s, auth=auth, org_id=ORG)
+            assert after.used_bytes == 500
+
+            # ②음성(양성대조, story #3241 AC1): 스코프 밖 asset 삭제 시도는 거부되고 실제로
+            # 안 지워진다 — 이 asset이 여전히 storage_usage 합산에 남아있는지로 부작용 0 증명.
+            with pytest.raises(HTTPException) as ei:
+                await delete_asset(str(aid_b), db=s, auth=auth, org_id=ORG)
+            assert ei.value.status_code == 404
+            still = (await s.execute(text("SELECT deleted_at FROM assets WHERE id=:id"), {"id": aid_b})).scalar_one()
+            assert still is None
+            # storage_usage 는 org 전체 합(project 접근권 무관) — aid_b 는 거부됐을 뿐 살아있으므로
+            # 여전히 합산된다(500 그대로, aid_a 삭제분만 빠짐). 이걸로 거부가 "진짜 no-op"임을 증명.
+            unchanged = await storage_usage(db=s, auth=auth, org_id=ORG)
+            assert unchanged.used_bytes == 500
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_grace_cron_hard_deletes_expired_softdeleted(monkeypatch):
     """S8 Phase 2: grace cron — soft-delete 7일 경과만 hard-delete(row+link CASCADE). 최근/live 보존.
     blob delete 성공 시에만 row 삭제(mock provider)."""
