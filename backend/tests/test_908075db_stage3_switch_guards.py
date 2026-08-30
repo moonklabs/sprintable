@@ -47,7 +47,7 @@ async def _run_switch_project(flag: bool, defallback_pid):
     session = AsyncMock()
     captured = {}
 
-    def _ct(uid, email=None, app_metadata=None):
+    def _ct(uid, email=None, app_metadata=None, **kwargs):
         captured["md"] = dict(app_metadata or {})
         return {"access_token": "a", "refresh_token": "r"}
 
@@ -90,7 +90,7 @@ async def _run_switch_org(flag: bool, first_accessible, defallback_pid):
     session.execute = AsyncMock(return_value=mem)
     captured = {}
 
-    def _ct(uid, email=None, app_metadata=None):
+    def _ct(uid, email=None, app_metadata=None, **kwargs):
         captured["md"] = dict(app_metadata or {})
         return {"access_token": "a", "refresh_token": "r"}
 
