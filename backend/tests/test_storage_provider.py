@@ -148,6 +148,35 @@ async def test_gcs_signed_write_url_binds_create_only_header(monkeypatch):
     assert "headers" not in captured[-1]  # 기본값(avatar/canvas 무회귀) — 조건 바인딩 없음.
 
 
+@pytest.mark.anyio
+async def test_s3_signed_write_url_create_only_fails_closed():
+    """story #3249 2라운드(카디르/codex) — S3는 self-host 1급 provider(dead code 아님)인데
+    create_only=True를 실제로 강제 못 하면서 조용히 URL을 내주면 "create-only 보호가 있다"는
+    거짓 보장이 된다(cap 우회 재현). 진짜 구현(If-None-Match) 전까진 URL 자체를 미발급해야
+    한다(호출부가 502로 거부 — silent 성공 금지). create_only=False(기본)는 기존 동작 무회귀."""
+    provider = S3StorageProvider()
+    url = await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png", create_only=True,
+    )
+    assert url is None
+
+
+@pytest.mark.anyio
+async def test_local_signed_write_url_create_only_fails_closed(monkeypatch):
+    """local 은 PUT 수신 자체가 미구현 — create_only=True 는 같은 이유로 fail-closed."""
+    monkeypatch.setenv("STORAGE_LOCAL_SIGNING_SECRET", "shared-secret")
+    provider = LocalStorageProvider()
+    url = await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png", create_only=True,
+    )
+    assert url is None
+    # create_only=False(기본)는 기존 동작 무회귀 — URL 발급 계속됨.
+    url2 = await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png",
+    )
+    assert url2 is not None
+
+
 async def test_local_download_blocks_path_traversal(monkeypatch, tmp_path):
     monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
     with pytest.raises(ValueError, match="traversal"):

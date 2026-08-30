@@ -60,9 +60,16 @@ class S3StorageProvider(StorageProvider):
         self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None,
         create_only: bool = False,
     ) -> str | None:
-        """create_only: S3 는 prod 미가동(모듈 docstring)이라 실제 조건부-쓰기 바인딩(IfNoneMatch)은
-        아직 구현 안 함(GCS 만 story #3249 대상) — 인자는 받되 no-op(다른 provider와 인터페이스
-        정합만 유지, 실사용 시 재검토 필요한 후속 갭으로 남긴다)."""
+        """create_only: 카디르/codex 재발견(story #3249 2라운드) — S3/MinIO는 self-host 배포의
+        정식 1급 provider(factory.py, dead code 아님)라 create_only=True를 조용히 no-op하면
+        "create-only 보호가 있다"는 거짓 보장이 된다(cap 우회 재현 가능). 실제 조건부-쓰기
+        (If-None-Match) 구현 전까지는 **fail-closed** — URL을 아예 미발급(None, 호출부가 502로
+        거부)한다. 진짜 구현은 story dc3d62f4 별건."""
+        if create_only:
+            logger.warning(
+                "s3 storage: create_only 미지원 — URL 미발급(fail-closed) path=%s", object_path
+            )
+            return None
 
         def _blocking() -> str:
             params: dict = {"Bucket": container, "Key": object_path}

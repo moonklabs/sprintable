@@ -91,8 +91,15 @@ class LocalStorageProvider(StorageProvider):
         ⚠️ FE `/api/storage/local/...` serve 라우트가 현재 GET만 문서화돼 있어 PUT 수신을
         지원하려면 FE 측 대응 핸들러가 필요(OSS local provider 후속 — BE 서명 계약만 여기 마련).
 
-        create_only: 인자는 받되 no-op(PUT 수신 자체가 미구현이라 "생성 전용" 조건을 검사할
-        서버측 핸들러가 아직 없음 — story #3249, GCS provider 만 실제 enforce)."""
+        create_only: story #3249 2라운드(카디르/codex) — PUT 수신 자체가 미구현이라 "생성 전용"
+        조건을 검사할 서버측 핸들러가 없다. 조용히 no-op(성공한 것처럼 URL 발급)하면 "create-only
+        보호가 있다"는 거짓 보장이 되므로 **fail-closed**로 URL 자체를 미발급한다(호출부가 502로
+        거부). 진짜 구현은 story dc3d62f4 별건."""
+        if create_only:
+            logger.warning(
+                "local storage: create_only 미지원(PUT 미구현) — URL 미발급(fail-closed) path=%s", object_path
+            )
+            return None
         secret = _signing_secret()
         try:
             base = os.environ.get("STORAGE_LOCAL_SERVE_BASE_URL", _DEFAULT_SERVE_BASE).rstrip("/")
