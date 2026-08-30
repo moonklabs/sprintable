@@ -30,10 +30,17 @@ class StorageProvider(abc.ABC):
 
     @abc.abstractmethod
     async def signed_write_url(
-        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None,
+        create_only: bool = False,
     ) -> str | None:
         """단기 만료 write(PUT) 서명 URL — D3(put=FE) 원칙 유지하며 대용량 바이너리가 BE(Cloud Run)를
-        경유하지 않게 한다(E-CANVAS C1-S5: FE가 캡처한 PNG를 GCS에 직접 PUT). 실패 시 None(best-effort)."""
+        경유하지 않게 한다(E-CANVAS C1-S5: FE가 캡처한 PNG를 GCS에 직접 PUT). 실패 시 None(best-effort).
+
+        story #3249(카디르/codex HIGH) — create_only=True 면 "생성 전용"(기존 객체가 있으면 PUT
+        거부) 조건이 서명에 바인딩된다. 없으면 GCS 기본이 "생성 또는 덮어쓰기"라, confirm이 작은
+        크기로 cap을 통과시킨 뒤 아직 유효한(TTL 內) 같은 signed URL로 더 큰 객체를 재PUT해 DB
+        cap 추적을 우회할 수 있었다(실 storage 는 커지는데 confirm 은 재호출 안 됨). 기본값 False
+        유지 — avatar/canvas 등 기존 호출부는 인자 안 넘기면 기존 동작 그대로(무회귀)."""
 
     @abc.abstractmethod
     async def delete_object(self, container: str, object_path: str) -> bool:

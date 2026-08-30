@@ -57,8 +57,13 @@ class S3StorageProvider(StorageProvider):
             return None
 
     async def signed_write_url(
-        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None,
+        create_only: bool = False,
     ) -> str | None:
+        """create_only: S3 는 prod 미가동(모듈 docstring)이라 실제 조건부-쓰기 바인딩(IfNoneMatch)은
+        아직 구현 안 함(GCS 만 story #3249 대상) — 인자는 받되 no-op(다른 provider와 인터페이스
+        정합만 유지, 실사용 시 재검토 필요한 후속 갭으로 남긴다)."""
+
         def _blocking() -> str:
             params: dict = {"Bucket": container, "Key": object_path}
             if content_type:

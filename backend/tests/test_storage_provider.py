@@ -101,6 +101,53 @@ async def test_local_signed_url_matches_fe_hmac(monkeypatch):
     assert params["sig"] == expected
 
 
+@pytest.mark.anyio
+async def test_gcs_signed_write_url_binds_create_only_header(monkeypatch):
+    """story #3249(카디르/codex HIGH) — create_only=True 면 x-goog-if-generation-match: 0 이
+    generate_signed_url 의 headers kwarg 에 실제로 실려야 한다(이게 GCS 서버가 재PUT을 412로
+    거부하게 만드는 유일한 메커니즘 — 여기가 빠지면 cap 우회 재PUT 체인이 그대로 열린다).
+    create_only=False(기본, avatar/canvas 무회귀)면 headers 자체가 안 실려야 한다."""
+    import google.auth
+    from unittest.mock import MagicMock
+
+    captured: list[dict] = []
+
+    class _FakeBlob:
+        def generate_signed_url(self, **kwargs):
+            captured.append(kwargs)
+            return "https://signed.example/fake"
+
+    class _FakeBucket:
+        def blob(self, path):
+            return _FakeBlob()
+
+    class _FakeClient:
+        def bucket(self, name):
+            return _FakeBucket()
+
+    fake_creds = MagicMock()
+    fake_creds.refresh = MagicMock()
+    fake_creds.service_account_email = "sa@example.iam.gserviceaccount.com"
+    fake_creds.token = "fake-token"
+    monkeypatch.setattr(google.auth, "default", lambda: (fake_creds, "proj"))
+
+    import google.cloud.storage as gcs_storage
+    monkeypatch.setattr(gcs_storage, "Client", _FakeClient)
+
+    provider = GcsStorageProvider()
+
+    await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png", create_only=True,
+    )
+    assert captured[-1].get("headers") == {"x-goog-if-generation-match": "0"}
+
+    captured.clear()
+    await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png",
+    )
+    assert "headers" not in captured[-1]  # 기본값(avatar/canvas 무회귀) — 조건 바인딩 없음.
+
+
 async def test_local_download_blocks_path_traversal(monkeypatch, tmp_path):
     monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
     with pytest.raises(ValueError, match="traversal"):

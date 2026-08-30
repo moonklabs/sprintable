@@ -34,7 +34,7 @@ def anyio_backend():
 
 
 _HEAD_SIZES: dict[str, int | None] = {}
-_SIGNED_URL_CALLS: list[tuple[str, str]] = []
+_SIGNED_URL_CALLS: list[tuple[str, str, bool]] = []
 
 
 @pytest.fixture(autouse=True)
@@ -49,8 +49,8 @@ def _mock_storage(monkeypatch):
     async def _head(container, object_path):
         return _HEAD_SIZES.get(object_path, None)
 
-    async def _signed_write(container, object_path, *, ttl, content_type):
-        _SIGNED_URL_CALLS.append((container, object_path))
+    async def _signed_write(container, object_path, *, ttl, content_type, create_only=False):
+        _SIGNED_URL_CALLS.append((container, object_path, create_only))
         return f"https://signed.example/{object_path}"
 
     prov = MagicMock()
@@ -84,23 +84,23 @@ async def _reset_and_seed(session):
     await session.commit()
 
 
-async def _seed_free_tier_cap(session, *, storage_mb: int, max_file_mb: int = 5000):
-    """offering_versions free-tier 최소 seed — 로컬 create_all DB 는 마이그 seed 데이터가
-    없어(#3241 라운드서 확認된 동일 gap) 테스트 자체 격리를 위해 직접 심는다."""
-    await session.execute(text(
-        "INSERT INTO offering_versions (id,tier,currency,version_label,monthly_price_minor,"
-        "annual_price_minor,included_seats,au_limit,realtime_connection_limit,storage_mb_limit,"
-        "max_file_mb,lab_credit_minor,rate_limit_per_min,automation_rule_limit,webhook_limit,"
-        "event_replay_days,overage_allowed,effective_from,created_by) VALUES "
-        "(gen_random_uuid(),'free','usd','test-3249',0,0,1,1000,10,:storage_mb,:max_file_mb,0,60,10,5,7,"
-        "false,now(),'test-3249')"
-    ), {"storage_mb": storage_mb, "max_file_mb": max_file_mb})
-    await session.commit()
+def _mock_org_storage_limits(monkeypatch, *, storage_mb: int, max_file_mb: int = 5000):
+    """실 offering_versions 조회(_get_org_storage_limits)를 직접 monkeypatch — CI의 real DB엔
+    이미 마이그가 심은 tier='free' 행이 존재해서(로컬 create_all DB엔 없어 #3241 라운드서 직접
+    INSERT로 seed했던 것과 달리) 테스트가 새 행을 추가로 INSERT하면 `ORDER BY currency ASC
+    LIMIT 1`이 어느 행을 집을지 비결정적이 된다(실 seed 값이 이겨 캡이 발동 안 하는 실패 재현,
+    CI에서 실측). 조회 자체를 대체해 seed 데이터 유무와 완전히 무관하게 만든다."""
+    import ee.plan_limits as _plan_limits
+
+    async def _fake(session, tier):
+        return (storage_mb, max_file_mb) if tier == "free" else None
+
+    monkeypatch.setattr(_plan_limits, "_get_org_storage_limits", _fake)
 
 
 @pytest.mark.anyio
 async def test_upload_url_scoped_and_object_path_shape():
-    """접근권 있는 project 는 200+server-구성 prefix, 접근권 없는 project 는 403(URL 미발급)."""
+    """접근권 있는 project 는 200+server-구성 prefix, 접근권 없는 project 는 404(URL 미발급, 존재 비노출)."""
     from app.routers.assets import create_asset_upload_url, AssetUploadUrlRequest
 
     engine = create_async_engine(_ASYNC)
@@ -118,6 +118,9 @@ async def test_upload_url_scoped_and_object_path_shape():
             assert r.object_path.endswith("-a.png")
             assert r.upload_url.startswith("https://signed.example/")
             assert _SIGNED_URL_CALLS[-1][1] == r.object_path
+            # story #3249 카디르/codex HIGH 후속 — create-only 서명 실제 요청+계약 노출 둘 다 확인.
+            assert _SIGNED_URL_CALLS[-1][2] is True
+            assert r.required_put_headers == {"x-goog-if-generation-match": "0"}
 
             from fastapi import HTTPException
             with pytest.raises(HTTPException) as ei:
@@ -268,7 +271,7 @@ async def test_upload_url_rejected_when_org_already_over_cap(monkeypatch):
     try:
         async with Session() as s:
             await _reset_and_seed(s)
-            await _seed_free_tier_cap(s, storage_mb=1)  # 1MB 총량 캡 — 아래로 이미 초과.
+            _mock_org_storage_limits(monkeypatch, storage_mb=1)  # 1MB 총량 캡 — 아래로 이미 초과.
             await s.execute(text(
                 "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes)"
                 " VALUES (gen_random_uuid(),:o,:p,:c,'cap/existing','e',:sz)"
@@ -300,7 +303,7 @@ async def test_confirm_rejects_when_real_size_exceeds_cap(monkeypatch):
     try:
         async with Session() as s:
             await _reset_and_seed(s)
-            await _seed_free_tier_cap(s, storage_mb=1000, max_file_mb=1)  # 파일당 1MB 상한.
+            _mock_org_storage_limits(monkeypatch, storage_mb=1000, max_file_mb=1)  # 파일당 1MB 상한.
             obj = f"org/{ORG}/project/{PROJ_A}/manual/{uuid.uuid4()}-huge.bin"
             _HEAD_SIZES[obj] = 5 * 1024 * 1024  # 5MB > 1MB 파일 상한.
 

@@ -84,11 +84,15 @@ class LocalStorageProvider(StorageProvider):
             return None
 
     async def signed_write_url(
-        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None,
+        create_only: bool = False,
     ) -> str | None:
         """signed_read_url과 동형이나 payload에 method=PUT을 바인딩(read 서명 재사용 방지).
         ⚠️ FE `/api/storage/local/...` serve 라우트가 현재 GET만 문서화돼 있어 PUT 수신을
-        지원하려면 FE 측 대응 핸들러가 필요(OSS local provider 후속 — BE 서명 계약만 여기 마련)."""
+        지원하려면 FE 측 대응 핸들러가 필요(OSS local provider 후속 — BE 서명 계약만 여기 마련).
+
+        create_only: 인자는 받되 no-op(PUT 수신 자체가 미구현이라 "생성 전용" 조건을 검사할
+        서버측 핸들러가 아직 없음 — story #3249, GCS provider 만 실제 enforce)."""
         secret = _signing_secret()
         try:
             base = os.environ.get("STORAGE_LOCAL_SERVE_BASE_URL", _DEFAULT_SERVE_BASE).rstrip("/")

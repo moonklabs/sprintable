@@ -31,7 +31,7 @@ from app.models.pm import Story
 from app.models.team import TeamMember
 from app.services.asset_registry import DEFAULT_CONTAINER
 from app.services.member_resolver import canonicalize_member_id, resolve_member
-from app.services.project_auth import accessible_project_ids_in_org, has_project_access
+from app.services.project_auth import accessible_project_ids_in_org, has_project_access, require_project_access
 
 logger = logging.getLogger(__name__)
 
@@ -574,6 +574,10 @@ class AssetUploadUrlResponse(BaseModel):
     upload_url: str
     object_path: str
     expires_at: datetime
+    # story #3249(카디르/codex HIGH 후속) — create-only 서명(x-goog-if-generation-match: 0)이
+    # PUT 요청에도 정확히 실려야 서명이 valid함(GCS가 헤더를 서명 바인딩에 포함) — FE는 이 헤더를
+    # 그대로 PUT에 붙여야 한다(안 붙이면 403). 응답에 명시해 FE가 하드코딩 대신 서버 계약을 따르게.
+    required_put_headers: dict[str, str] = {}
 
 
 _ASSET_UPLOAD_URL_TTL = timedelta(minutes=10)
@@ -607,9 +611,8 @@ async def create_asset_upload_url(
     null-project 관례와 정합).
     """
     if body.project_id is not None:
-        # story #2322/#2342 판정 — project 접근 거부는 항상 404(존재 비노출), 403 금지.
-        if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
-            raise HTTPException(status_code=404, detail="Project not found")
+        # story #2697 SSOT — require_project_access로 수렴(raw inline 패턴 신규 추가 금지, 실패시 항상 404).
+        await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id)
 
     if settings.is_ee_enabled:
         from ee.plan_limits import reject_if_org_over_storage_cap  # type: ignore[import]
@@ -621,12 +624,14 @@ async def create_asset_upload_url(
 
     upload_url = await get_storage_provider().signed_write_url(
         DEFAULT_CONTAINER, object_path, ttl=_ASSET_UPLOAD_URL_TTL, content_type=body.content_type,
+        create_only=True,
     )
     if upload_url is None:
         raise HTTPException(status_code=502, detail="업로드 URL 서명 실패")
     return AssetUploadUrlResponse(
         upload_url=upload_url, object_path=object_path,
         expires_at=datetime.now(timezone.utc) + _ASSET_UPLOAD_URL_TTL,
+        required_put_headers={"x-goog-if-generation-match": "0"},
     )
 
 
@@ -652,9 +657,8 @@ async def confirm_asset_upload(
     재검사) — check_storage_capacity 가 head_object 실 크기로 authoritative 판정.
     """
     if body.project_id is not None:
-        # story #2322/#2342 판정 — project 접근 거부는 항상 404(존재 비노출), 403 금지.
-        if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
-            raise HTTPException(status_code=404, detail="Project not found")
+        # story #2697 SSOT — require_project_access로 수렴(raw inline 패턴 신규 추가 금지, 실패시 항상 404).
+        await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id)
 
     expected_prefix = (
         f"org/{org_id}/project/{body.project_id}/manual/" if body.project_id is not None
