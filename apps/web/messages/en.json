@@ -4320,6 +4320,7 @@
     "storyPickerSearchPlaceholder": "Search stories",
     "storyPickerLoading": "Loading",
     "storyPickerEmpty": "No matching stories",
+    "storyPickerSkip": "Create without a story",
     "galleryGroupEmpty": "This group doesn't have any artifacts yet.",
     "galleryAnchorPill": "Anchor v{version}",
     "galleryLatestChip": "Up to v{version}",

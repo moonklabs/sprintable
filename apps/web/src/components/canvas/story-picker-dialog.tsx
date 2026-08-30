@@ -22,7 +22,12 @@ interface StoryPickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
-  onSelect: (storyId: string) => void;
+  // story #0692d5a7 — null = 「스토리 없이 만들기」(storyless). BE가 story_id nullable로 완전
+  // 지원하므로 스토리 0개 프로젝트도 데드엔드 없이 산출물을 시작할 수 있다.
+  onSelect: (storyId: string | null) => void;
+  // story #0692d5a7 — 스킵(storyless)이 의미 있는 소비처에서만 켠다. 산출물 갤러리=켬(빈
+  // 프로젝트 언블록)·인용 저장(chat-view)=끔(인용은 반드시 스토리에 귀속). 기본 off.
+  allowSkip?: boolean;
 }
 
 /**
@@ -34,7 +39,7 @@ interface StoryPickerDialogProps {
  * 신규 프록시 라우트 0. 무소속 산출물 사후 재배선(attach)은 BE에 엔드포인트 자체가 없어
  * 여전히 별개 갭(이 컴포넌트의 스코프 아님).
  */
-export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect }: StoryPickerDialogProps) {
+export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect, allowSkip = false }: StoryPickerDialogProps) {
   const t = useTranslations('canvas');
   const [query, setQuery] = useState('');
   const [stories, setStories] = useState<StoryPickerItem[]>([]);
@@ -91,6 +96,19 @@ export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect }: S
             ))
           )}
         </div>
+
+        {/* story #0692d5a7 — allowSkip 소비처에서만 「스토리 없이 만들기」. 스토리 0개면 이게
+            데드엔드(닫기밖에 없던 자리)를 대체하는 유일한 진행 경로·스토리가 있으면 목록 아래
+            추가 옵션이다. null → storyless 산출물 생성(BE 완전 지원). */}
+        {allowSkip ? (
+          <button
+            type="button"
+            onClick={() => onSelect(null)}
+            className="mt-1 w-full rounded-md border border-border px-2.5 py-2 text-center text-[13px] font-medium text-foreground transition-colors hover:bg-muted/60"
+          >
+            {t('storyPickerSkip')}
+          </button>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
