@@ -102,9 +102,20 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   };
 
   useEffect(() => {
+    // story #3231(카디르 버그사냥) — 이 섹션(Members 페이지+settings「org-members」탭
+    // 공용)이 role 무관하게 email 포함 전체 로스터를 항상 렌더해, Member 신분도 조직
+    // 전원의 실명+이메일을 볼 수 있었다. BE(GET /api/v2/org-members)를 admin/owner
+    // 전용 403으로 잠근 것이 실 정본 — 이건 그 서버 거부를 안내 문구로 바꾸는 UX층일
+    // 뿐(FE 숨김이 아니라, 이 체크를 빼도 데이터가 새지는 않는다). 이 컴포넌트 전체가
+    // 초대/역할변경/제거 등 관리 UI라 Member에겐 어떤 하위 데이터도 정당한 용도가
+    // 없어 섹션 전체를 잠근다(부분 마스킹이 아니라 전면).
+    if (!canManage) {
+      setLoading(false);
+      return;
+    }
     void refreshData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId]);
+  }, [orgId, canManage]);
 
   const handleInvite = async () => {
     if (!inviteEmail.trim() || inviting) return;
@@ -189,6 +200,17 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       <div className="space-y-3">
         {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
       </div>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <SectionCard>
+        <SectionCardBody>
+          <p className="text-sm font-medium text-foreground">{t('orgMembersAdminOnly')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('orgMembersAdminOnlyHint')}</p>
+        </SectionCardBody>
+      </SectionCard>
     );
   }
 

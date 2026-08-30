@@ -156,13 +156,23 @@ export function DocGateSection({
   };
 
   // story #3004 — 결재자 픽커 열기(owner/admin·본인 제외 — #3001 위임 픽커와 동형 규율 재사용).
+  // story #3231 2라운드(카디르 QA) — /api/org-members가 admin 전용 403으로 잠기면서
+  // 일반 Member의 이 픽커가 후보 0명으로 파손됐다. 결재자 지정 전용의 별도 엔드포인트
+  // (/api/org-members/eligible-approvers, 어떤 role도 호출 가능·응답은 owner/admin만)로
+  // 교체 — 원 org-members roster(admin 전용)는 안 건드린다. 겸사겸사 res.ok 미확인(카디르
+  // 지적 — 403이어도 res.json()이 조용히 파싱돼 빈 배열로 저하되던 결함)도 고친다: 이제
+  // 실패를 명시 에러로 드러낸다.
   const openApproverPicker = async () => {
     setApproverPickerOpen(true);
     setApproverError(null);
     if (approverOptions.length > 0) return;
     setLoadingApprovers(true);
     try {
-      const res = await fetchWithAuth('/api/org-members');
+      const res = await fetchWithAuth('/api/org-members/eligible-approvers');
+      if (!res.ok) {
+        setApproverError(t('docGateTransitionErrorGeneric'));
+        return;
+      }
       const json = await res.json().catch(() => null) as {
         data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
       } | null;

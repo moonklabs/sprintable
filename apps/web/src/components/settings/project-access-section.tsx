@@ -27,27 +27,39 @@ interface ProjectGrant {
 
 interface ProjectAccessSectionProps {
   projectId: string;
-  currentRole: string;
 }
 
-export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSectionProps) {
+export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [grants, setGrants] = useState<ProjectGrant[]>([]);
   const [loading, setLoading] = useState(true);
+  const [unauthorized, setUnauthorized] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const canManage = currentRole === 'owner' || currentRole === 'admin';
+  // story #3231 4라운드(카디르 QA) — 2라운드에서 이 화면을 org-admin 전용(currentRole
+  // prop 기반)으로 잠갔는데, 실제 인가 경계는 org-admin이 아니라 "이 프로젝트의
+  // effective 관리자"(org owner/admin 플로어 OR project-level owner/admin — additive,
+  // BE _require_owner_or_admin/has_project_role)였다. org-admin은 아니지만 이 project의
+  // admin/owner인 org member가 새로 막혔던 신규 회귀. FE에서 effective 역할을 별도로
+  // 재계산(중복 판정 — 두 곳이 갈리는 사고 클래스)하는 대신, project-access-candidates
+  // 응답 자체(요청한 그 게이트를 서버가 이미 통과시켰는지)로 인가 여부를 판정한다 —
+  // "roster 조회 인가 = 그걸 쓰는 액션의 인가와 동일"(카디르 원칙)이 서버 쪽에서 이미
+  // 성립하므로, 이 fetch가 성공했다는 사실 자체가 곧 canManage다.
+  const canManage = !unauthorized;
 
   const refreshData = async () => {
     setLoading(true);
     const [membersRes, grantsRes] = await Promise.all([
-      fetchWithAuth('/api/org-members').catch(() => null),
+      fetchWithAuth(`/api/projects/${projectId}/access-candidates`).catch(() => null),
       fetchWithAuth(`/api/projects/${projectId}/access`).catch(() => null),
     ]);
     if (membersRes?.ok) {
       const json = await membersRes.json() as { data?: OrgMember[] };
       setOrgMembers(json.data ?? []);
+      setUnauthorized(false);
+    } else {
+      setUnauthorized(true);
     }
     if (grantsRes?.ok) {
       const json = await grantsRes.json() as { data?: ProjectGrant[] };
@@ -120,6 +132,23 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
               </div>
             ))}
           </div>
+        </SectionCardBody>
+      </SectionCard>
+    );
+  }
+
+  if (!canManage) {
+    // canManage=false는 이제 project-access-candidates가 403(또는 실패)했다는 실측
+    // 결과다 — org-level currentRole 추정이 아니라 서버가 이 프로젝트의 effective
+    // 관리자가 아니라고 실제로 거부한 경우에만 이 안내가 뜬다.
+    return (
+      <SectionCard>
+        <SectionCardHeader>
+          <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <p className="text-sm font-medium text-foreground">관리자 전용 페이지입니다</p>
+          <p className="mt-1 text-sm text-muted-foreground">이 프로젝트의 관리자·소유자만 접근 권한을 관리할 수 있습니다.</p>
         </SectionCardBody>
       </SectionCard>
     );

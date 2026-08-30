@@ -1,8 +1,10 @@
 """E-MSG-POLICY S3 (BE): 메시징 정책 관리 endpoints — GET/PUT mode + POST/DELETE allowlist."""
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 _P = "app.routers.agent_message_policy"
 
@@ -86,3 +88,52 @@ async def test_delete_allowlist_member(test_client, mock_session, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json()["allowlist"] == []
+
+
+# story #3231 4라운드(카디르 QA) — org-members roster를 admin 전용 403으로 잠그면서
+# 이 파일이 관리하는 allowlist 피커가 후보 0명으로 파손됐다(Member가 만든 에이전트는
+# 그 생성자 본인도 org-admin이 아니면 막힘). 이 위 모든 엔드포인트와 동일 게이트
+# (assert_agent_owner=생성자 OR org admin/owner)의 전용 후보 엔드포인트를 검증한다.
+def _org_member_row(role: str = "member") -> MagicMock:
+    row = MagicMock()
+    row.id = uuid.uuid4()
+    row.org_id = uuid.uuid4()
+    row.user_id = uuid.uuid4()
+    row.role = role
+    row.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    row.deleted_at = None
+    row.email = "test@example.com"
+    row.name = "Test Member"
+    return row
+
+
+@pytest.mark.anyio
+async def test_list_message_policy_candidates_creator_allowed(test_client, mock_session, monkeypatch):
+    """생성자(org admin 아님)도 assert_agent_owner를 통과하면 후보를 받는다."""
+    _owner(monkeypatch)
+    mock_result = MagicMock()
+    mock_result.__iter__ = MagicMock(return_value=iter([_org_member_row()]))
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/agents/{uuid.uuid4()}/message-policy/candidates")
+
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
+@pytest.mark.anyio
+async def test_list_message_policy_candidates_non_owner_403(test_client, mock_session, monkeypatch):
+    """생성자도 아니고 org admin/owner도 아니면 403 — 로스터 쿼리까지 도달 안 함(원 결함
+    재발 시 감지되도록 session.execute 자체를 감시)."""
+    monkeypatch.setattr(
+        f"{_P}.assert_agent_owner",
+        AsyncMock(side_effect=HTTPException(status_code=403, detail="Not the owner of this agent")),
+    )
+
+    async def _unexpected_execute(*args, **kwargs):
+        raise AssertionError("assert_agent_owner를 통과해 로스터 쿼리까지 도달함 — 원 결함 재발")
+    mock_session.execute = _unexpected_execute
+
+    resp = await test_client.get(f"/api/v2/agents/{uuid.uuid4()}/message-policy/candidates")
+
+    assert resp.status_code == 403
