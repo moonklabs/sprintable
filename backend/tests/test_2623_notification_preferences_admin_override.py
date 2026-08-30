@@ -140,11 +140,11 @@ async def test_self_service_put_and_get_unaffected_no_member_id():
                 s, None, org.id, _agent_auth(agent_id, org.id),
                 [{"scope_type": "global", "channel": "sse", "level": "mentions"}],
             )
-            assert put_result["data"][0]["member_id"] == str(agent_id)
+            assert put_result[0]["member_id"] == str(agent_id)
 
             get_result = await _call_get(s, None, org.id, _agent_auth(agent_id, org.id))
-            assert len(get_result["data"]) == 1
-            assert get_result["data"][0]["level"] == "mentions"
+            assert len(get_result) == 1
+            assert get_result[0]["level"] == "mentions"
     finally:
         await engine.dispose()
 
@@ -168,9 +168,9 @@ async def test_admin_put_then_get_parity_no_reopen_regression():
             get_result = await _call_get(
                 s, agent_id, org.id, _human_auth(admin_user_id, org.id, role="admin"),
             )
-            assert len(get_result["data"]) == 1
-            assert get_result["data"][0]["member_id"] == str(agent_id)
-            assert get_result["data"][0]["level"] == "mute"
+            assert len(get_result) == 1
+            assert get_result[0]["member_id"] == str(agent_id)
+            assert get_result[0]["level"] == "mute"
     finally:
         await engine.dispose()
 
@@ -234,7 +234,7 @@ async def test_owner_role_also_allowed():
                 s, agent_id, org.id, _human_auth(owner_user_id, org.id, role="owner"),
                 [{"scope_type": "global", "channel": "sse", "level": "mentions"}],
             )
-            assert result["data"][0]["member_id"] == str(agent_id)
+            assert result[0]["member_id"] == str(agent_id)
     finally:
         await engine.dispose()
 
@@ -249,7 +249,7 @@ async def test_get_self_via_explicit_member_id_no_admin_check_needed():
 
         async with Session() as s:
             result = await _call_get(s, agent_id, org.id, _agent_auth(agent_id, org.id))
-            assert result["data"] == []  # 403 없이 정상 통과(그냥 자기 것 0건)
+            assert result == []  # 403 없이 정상 통과(그냥 자기 것 0건)
     finally:
         await engine.dispose()
 
@@ -309,6 +309,6 @@ async def test_admin_override_human_target_mute_conversation_allowed():
                 s, target_member_id, org.id, _human_auth(admin_user_id, org.id, role="admin"),
                 [{"scope_type": "conversation", "scope_id": str(uuid.uuid4()), "channel": "sse", "level": "mute"}],
             )
-            assert result["data"][0]["level"] == "mute"
+            assert result[0]["level"] == "mute"
     finally:
         await engine.dispose()

@@ -95,9 +95,15 @@ async def get_preferences(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-) -> dict:
+) -> list[dict]:
     """GET /api/v2/notification-preferences — 현재 멤버(또는 admin override 대상)의 전체
     preference 조회.
+
+    story #3222 — flat list로 반환한다(**{"data": [...]}로 감싸지 않음**). FE 프록시
+    (notification-preferences/route.ts의 apiSuccess)가 이 BE 응답 바디를 그대로
+    `{data: raw, ...}`로 감싸므로, 여기서 이미 {"data": [...]}를 반환하면 FE 최종
+    모양이 {data: {data: [...]}}로 이중래핑된다(설정 화면이 저장해도 조용히 반영
+    안 되는 실사고 — PR#3605의 billing/orders와 동일 계약 정정).
 
     story #2623(2026-08-14) — webhooks.py story 933248fa의 「제1 경고」 그대로 준수: PUT만
     admin override를 넣고 GET을 빠뜨리면 「저장은 되는데 목록에 안 보임」으로 재오픈된다 —
@@ -121,7 +127,7 @@ async def get_preferences(
     rows = (await db.execute(
         select(NotificationPreference).where(NotificationPreference.member_id == scope_member_id)
     )).scalars().all()
-    return {"data": [_pref_to_dict(p) for p in rows]}
+    return [_pref_to_dict(p) for p in rows]
 
 
 @router.put("")
@@ -130,7 +136,7 @@ async def upsert_preferences(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-) -> dict:
+) -> list[dict]:
     """PUT /api/v2/notification-preferences — upsert (INSERT ON CONFLICT UPDATE).
 
     story #2623(2026-08-14) — webhooks.py story 933248fa와 동형 admin override: 산티아고의
@@ -138,7 +144,9 @@ async def upsert_preferences(
     (기존 self-service 무회귀). `body.member_id` 지정 시 caller org 스코프로 서버측 재해소
     (`_resolve_target_member_id` 재사용 — body-claimed org 신뢰 금지) 후, 해소된 target이
     caller 자신과 다르면 admin/owner role 필수(JWT app_metadata.role, 서버 검증된 클레임) —
-    아니면 명시 403(침묵 caller-scope 강제 저장 금지)."""
+    아니면 명시 403(침묵 caller-scope 강제 저장 금지).
+
+    story #3222 — GET과 동일하게 flat list 반환(이중래핑 방지, 위 GET 참고)."""
     member = await _get_member(auth, org_id, db)
 
     target_member_id = member.id
@@ -232,4 +240,4 @@ async def upsert_preferences(
         results.append(_pref_to_dict(row))
 
     await db.commit()
-    return {"data": results}
+    return results
