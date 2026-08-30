@@ -94,3 +94,42 @@ describe('StorageDeleteDialog — #2525 footer sticky', () => {
     expect(document.body.textContent).not.toContain('곳에서 사용 중');
   });
 });
+
+// story #3241 — BE DELETE 핸들러 신설(S7 착지) 회귀 pin + AC4(에러 토스트 카피 분리, 로드-실패
+// 문구 오용 제거) 고정. 성공 시 onDeleted/onOpenChange 호출, 실패 시 삭제 전용 카피(deleteErrorTitle)
+// 노출 — 구 errorTitle(「자산을 불러오지 못했습니다」, 로드-실패 문구)이 아님을 명시적으로 확인.
+describe('StorageDeleteDialog — #3241 삭제 왕복 + 에러 카피', () => {
+  it('DELETE 200 시 onDeleted+onOpenChange(false) 호출된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    const onDeleted = vi.fn();
+    const onOpenChange = vi.fn();
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <StorageDeleteDialog asset={makeAsset(0)} open onOpenChange={onOpenChange} onDeleted={onDeleted} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const deleteButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '삭제');
+    await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onDeleted).toHaveBeenCalledWith('asset-1');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('DELETE 비-2xx 시 삭제 실패 전용 카피가 뜨고(로드-실패 문구 아님) 다이얼로그는 안 닫힌다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+    const onOpenChange = vi.fn();
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <StorageDeleteDialog asset={makeAsset(0)} open onOpenChange={onOpenChange} onDeleted={() => {}} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const deleteButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '삭제');
+    await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.textContent).toContain('자산을 삭제하지 못했습니다');
+    expect(document.body.textContent).not.toContain('자산을 불러오지 못했습니다');
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+});

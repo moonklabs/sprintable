@@ -12,7 +12,7 @@ import base64
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -485,6 +485,35 @@ async def get_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
     enriched = await _enrich(db, org_id, accessible, [asset])
     return enriched[asset.id]
+
+
+@router.delete("/assets/{asset_id}", status_code=200)
+async def delete_asset(
+    asset_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """DELETE /api/v2/assets/{id} — story #3241(핸들러 부재로 100% 실패 fix).
+
+    soft-delete만(`deleted_at` 세팅, 하드삭제 금지) — storage_usage()가 이미 그 필드를 전제하고
+    복구 7일 grace(cron.py storage_usage_warn 인접 잡)까지 문서화돼 있던 설계를 실제로 발동시킨다.
+    authz는 get_asset과 동일 _scope_filter 재사용(IDOR 일관 — 스코프 밖/이미 삭제됨/malformed uuid
+    전부 graceful 404, 존재여부 비노출).
+    """
+    try:
+        aid = uuid.UUID(asset_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    clauses, _accessible = await _scope_filter(db, auth, org_id, None)
+    asset = (await db.execute(
+        select(Asset).where(Asset.id == aid, and_(*clauses))
+    )).scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    asset.deleted_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
 
 
 class AssetTextResponse(BaseModel):
