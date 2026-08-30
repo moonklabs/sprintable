@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Plus, X } from 'lucide-react';
+import { History, Plus, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -202,7 +202,21 @@ export default function RetroPage() {
           ) : loadError ? (
             <EmptyState title={loadError} description={t('surfaceDescription')} />
           ) : sessions.length === 0 ? (
-            <EmptyState title={t('noSessions')} description={t('surfaceDescription')} />
+            // story #3230 — 형제 빈상태(목표=Flag+CTA·실험실=Lightbulb+CTA)와 규범 일치:
+            // 아이콘(History)·전용 warm 설명(범용 surfaceDescription 재사용 대신)·중앙 CTA로
+            // 다음 행동을 빈상태 중심에 둔다. 컨테이너 bg는 공유 EmptyState 기본(형제와 동일)이라
+            // 손대지 않는다(다크 blend는 EmptyState 공통 축·retro 특정 아님).
+            <EmptyState
+              icon={<History className="size-8" />}
+              title={t('noSessions')}
+              description={t('noSessionsDescription')}
+              action={
+                <Button size="sm" onClick={() => setShowCreateForm(true)}>
+                  <Plus className="size-4" />
+                  {t('noSessionsCta')}
+                </Button>
+              }
+            />
           ) : (
             <div className="space-y-2">
               {sessions.map((session) => (
