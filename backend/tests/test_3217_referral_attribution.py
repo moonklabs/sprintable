@@ -264,6 +264,135 @@ async def test_oauth_callback_invite_accept_failure_is_hands_off(monkeypatch):
         app.dependency_overrides.clear()
 
 
+# ─── authenticated accept(/api/v2/invites/accept) — 실 이메일 가입 여정의 진짜 A축 ──
+# PO 착지 후 라이브 probe 발견(2026-08-30) — 이메일 가입은 register()가 invite_token을
+# 받는 게 아니라: 비로그인 수락 → /login?returnUrl → 가입(invite_token 없이) →
+# **이 authenticated accept**로 흘러 register() 훅이 무의미했다(OAuth 경로만 유효).
+# 결정론 규칙: user.created_at >= invite_created_at(초대가 먼저·계정이 뒤=초대 유발
+# 가입)이면 귀속, 계정이 초대보다 오래면(기존 유저 통상 수락) 무기록.
+
+async def _invite_accept_client(user_created_at):
+    """test_e_org_multi_s3_3_invite_accept.py와 동형 패턴(_get_repo 오버라이드)이되,
+    get_db만 걸고 get_read_db를 놓치는 회귀 클래스(story #2451, PR#3617에서도 재발)를
+    피해 override_db_and_read 경유로 교체 — 이 파일의 다른 헬퍼들과 동일 원칙."""
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from tests.conftest import override_db_and_read
+
+    user_id = uuid.uuid4()
+    mock_user = MagicMock()
+    mock_user.id = user_id
+    mock_user.email = "invitee@example.com"
+    mock_user.is_active = True
+    mock_user.created_at = user_created_at
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.commit = AsyncMock()
+
+    async def override_db():
+        yield mock_session
+
+    async def override_auth():
+        ctx = MagicMock()
+        ctx.user_id = str(user_id)
+        return ctx
+
+    override_db_and_read(app, override_db)
+    app.dependency_overrides[get_current_user] = override_auth
+    from httpx import ASGITransport, AsyncClient
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_user, app
+
+
+@pytest.mark.anyio
+async def test_invite_accept_new_signup_after_invite_gets_referral_attribution():
+    """계정 생성이 초대 생성 이후(초대가 유발한 신규 가입) — referral/org_invite/<org_id>
+    가 실착한다."""
+    from datetime import datetime, timedelta, timezone
+    from app.routers.invite_accept import _get_repo
+
+    invite_created_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    user_created_at = invite_created_at + timedelta(hours=1)  # 초대 後 가입
+    org_id = str(uuid.uuid4())
+
+    client, user, app = await _invite_accept_client(user_created_at)
+    try:
+        mock_repo = MagicMock()
+        mock_repo.accept = AsyncMock(return_value={
+            "ok": True, "org_id": org_id, "role": "member", "invite_created_at": invite_created_at,
+        })
+        app.dependency_overrides[_get_repo] = lambda: mock_repo
+
+        async with client as c:
+            resp = await c.post("/api/v2/invites/accept", json={"token": "tok-1"})
+
+        assert resp.status_code == 200
+        assert user.signup_utm_source == "referral"
+        assert user.signup_utm_medium == "org_invite"
+        assert user.signup_utm_campaign == org_id
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_invite_accept_existing_user_before_invite_is_hands_off():
+    """계정이 초대보다 오래됐다(기존 유저의 통상 수락) — 귀속을 안 건드린다(무기록,
+    가입 시점 기존 값 보존 — 여기선 override 호출 자체가 없었음을 signup_utm_source
+    미변경 MagicMock 기본 sentinel로 확認)."""
+    from datetime import datetime, timedelta, timezone
+    from app.routers.invite_accept import _get_repo
+
+    invite_created_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    user_created_at = invite_created_at - timedelta(days=30)  # 계정이 초대보다 훨씬 오래됨
+    org_id = str(uuid.uuid4())
+
+    client, user, app = await _invite_accept_client(user_created_at)
+    # 가입 시점 기존 귀속값(예: 이 유저는 예전에 direct로 가입) — 무기록이면 그대로 남아야 한다.
+    user.signup_utm_source = "direct"
+    user.signup_utm_medium = None
+    user.signup_utm_campaign = None
+    try:
+        mock_repo = MagicMock()
+        mock_repo.accept = AsyncMock(return_value={
+            "ok": True, "org_id": org_id, "role": "member", "invite_created_at": invite_created_at,
+        })
+        app.dependency_overrides[_get_repo] = lambda: mock_repo
+
+        async with client as c:
+            resp = await c.post("/api/v2/invites/accept", json={"token": "tok-1"})
+
+        assert resp.status_code == 200
+        assert user.signup_utm_source == "direct"
+        assert user.signup_utm_medium is None
+        assert user.signup_utm_campaign is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_invite_accept_without_invite_created_at_key_is_hands_off():
+    """기존 accept() 성공 응답(invite_created_at 키 자체가 없는 이전 계약 — 회귀 시나리오
+    시뮬레이션)에서도 크래시 없이 무기록으로 안전하게 저하한다."""
+    from app.routers.invite_accept import _get_repo
+
+    client, user, app = await _invite_accept_client(user_created_at=None)
+    user.signup_utm_source = "direct"
+    try:
+        mock_repo = MagicMock()
+        mock_repo.accept = AsyncMock(return_value={"ok": True, "org_id": str(uuid.uuid4()), "role": "member"})
+        app.dependency_overrides[_get_repo] = lambda: mock_repo
+
+        async with client as c:
+            resp = await c.post("/api/v2/invites/accept", json={"token": "tok-1"})
+
+        assert resp.status_code == 200
+        assert user.signup_utm_source == "direct"
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ─── B축 — 초대 메일 accept_link의 utm 부착 ─────────────────────────────────────
 
 def test_send_invite_email_appends_utm_when_org_id_given(monkeypatch):

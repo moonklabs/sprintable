@@ -220,6 +220,10 @@ class OrgInviteRepository:
                     "org_id": str(invite.organization_id),
                     "role": invite.role,
                     "already_member": True,
+                    # story #3217(Referral 계측) — 호출부(invite_accept.py)가
+                    # user.created_at >= invite_created_at로 "이 초대가 신규 가입을
+                    # 유발했는지"를 판정하는 데 쓴다.
+                    "invite_created_at": invite.created_at,
                 }
             return {"ok": False, "reason": "already_accepted"}
         if invite.status != "pending":
@@ -266,7 +270,8 @@ class OrgInviteRepository:
         invite.accepted_at = datetime.now(timezone.utc)
         await self.session.flush()
 
-        return {"ok": True, "org_id": str(invite.organization_id), "role": invite.role}
+        # story #3217(Referral 계측) — invite_created_at도 함께(위 idempotent 분기와 동일 계약).
+        return {"ok": True, "org_id": str(invite.organization_id), "role": invite.role, "invite_created_at": invite.created_at}
 
     async def _ensure_member_anchor(self, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """수락자(휴먼)의 canonical members 앵커(type='human', id=org_member.id)를 멱등 보장.
