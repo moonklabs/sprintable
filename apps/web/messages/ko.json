@@ -188,6 +188,8 @@
     "typeConversation": "대화",
     "typeManual": "직접 첨부",
     "download": "다운로드",
+    "downloadErrorTitle": "다운로드하지 못했습니다",
+    "downloadErrorDesc": "파일을 받지 못했습니다. 다시 시도해 주세요.",
     "delete": "삭제",
     "cancel": "취소",
     "deleteTitle": "자산을 삭제할까요?",
