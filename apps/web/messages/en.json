@@ -188,6 +188,8 @@
     "typeConversation": "Conversation",
     "typeManual": "Manual",
     "download": "Download",
+    "downloadErrorTitle": "Couldn't download",
+    "downloadErrorDesc": "The file could not be downloaded. Please try again.",
     "delete": "Delete",
     "cancel": "Cancel",
     "deleteTitle": "Delete this asset?",
