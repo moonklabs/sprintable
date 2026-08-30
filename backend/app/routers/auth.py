@@ -186,6 +186,14 @@ class TotpVerifyRequest(BaseModel):
     code: str
 
 
+class TotpDisableRequest(BaseModel):
+    # story #3247 — 해제는 재검증 필수(AC1). 인증기 분실 시에도 끌 수 있어야 하니 두 경로
+    # 중 하나(현행 TOTP 코드 또는 비밀번호)만 요구 — 상호배타 아님(둘 다 와도 code 우선
+    # 검증), 둘 다 없으면 400.
+    code: str | None = None
+    password: str | None = None
+
+
 class ForgotPasswordRequest(BaseModel):
     email: str
 
@@ -1075,6 +1083,46 @@ async def totp_verify(
     )
     await session.commit()
     return _ok({"totp_enabled": True})
+
+
+# ─── POST /api/v2/auth/totp/disable ──────────────────────────────────────────
+# story #3247 — 인벤토리(#3246) 발견 A: FE `/api/v2/auth/2fa/disable`가 이 라우트 부재로
+# 항상 404였다(2fa≠totp 네이밍도 불일치·별도 문제). 이 엔드포인트로 네이밍을 totp 축에
+# 통일(setup/verify와 동형) — FE도 같이 정정한다(PR 본문에 명기).
+
+@router.post("/totp/disable")
+async def totp_disable(
+    body: TotpDisableRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if not user:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    if not user.totp_enabled:
+        return _err("TOTP_NOT_ENABLED", "TOTP is not enabled", 400)
+
+    if body.code:
+        if not verify_totp(user.totp_secret or "", body.code):
+            return _err("INVALID_TOTP", "Invalid TOTP code", 403)
+    elif body.password:
+        if not verify_password(body.password, user.hashed_password):
+            return _err("WRONG_PASSWORD", "Incorrect password", 403)
+    else:
+        return _err("REVERIFICATION_REQUIRED", "TOTP code or password required", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(
+            totp_enabled=False, totp_secret=None,
+        )
+    )
+    await _write_audit(
+        session, "2fa_disabled",
+        user_id=user.id,
+        email=user.email,
+    )
+    await session.commit()
+    return _ok({"totp_enabled": False})
 
 
 # ─── OAuth ────────────────────────────────────────────────────────────────────
