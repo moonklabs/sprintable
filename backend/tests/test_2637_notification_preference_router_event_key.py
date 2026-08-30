@@ -88,9 +88,9 @@ async def test_upsert_event_key_scope_succeeds():
                 ]),
                 db=s, auth=_auth(agent_id, org_id), org_id=org_id,
             )
-            assert resp["data"][0]["event_key"] == "org.acme.widget.made"
-            assert resp["data"][0]["scope_id"] is None
-            assert resp["data"][0]["level"] == "mute"
+            assert resp[0]["event_key"] == "org.acme.widget.made"
+            assert resp[0]["scope_id"] is None
+            assert resp[0]["level"] == "mute"
     finally:
         await engine.dispose()
 
@@ -172,8 +172,8 @@ async def test_upsert_event_key_scope_is_idempotent_update():
                 ]),
                 db=s, auth=_auth(agent_id, org_id), org_id=org_id,
             )
-            assert first["data"][0]["id"] == second["data"][0]["id"]
-            assert second["data"][0]["level"] == "all"
+            assert first[0]["id"] == second[0]["id"]
+            assert second[0]["level"] == "all"
 
             from app.models.notification_preference import NotificationPreference
             from sqlalchemy import select
@@ -213,11 +213,11 @@ async def test_distinct_event_keys_do_not_collide():
                 ]),
                 db=s, auth=_auth(agent_id, org_id), org_id=org_id,
             )
-            assert resp["data"][0]["event_key"] == "org.acme.thing.done"
+            assert resp[0]["event_key"] == "org.acme.thing.done"
 
             from app.routers.notification_preferences import get_preferences
 
             all_prefs = await get_preferences(db=s, auth=_auth(agent_id, org_id), org_id=org_id)
-            assert len(all_prefs["data"]) == 2
+            assert len(all_prefs) == 2
     finally:
         await engine.dispose()
