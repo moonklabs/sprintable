@@ -112,7 +112,7 @@ async def create_org_invite(
     org_name = org.name if org else str(id)
     invitee_locale = await _resolve_invitee_locale(session, invite.email)
     error = send_invite_email(
-        to=invite.email, org_name=org_name, token=invite.token, role=invite.role, locale=invitee_locale,
+        to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
     )
     sent_at = None if error else datetime.now(timezone.utc)
     await invite_repo.update_email_result(invite.id, sent_at=sent_at, error=error)
@@ -146,7 +146,7 @@ async def resend_org_invite(
     org_name = org.name if org else str(id)
     invitee_locale = await _resolve_invitee_locale(session, invite.email)
     error = send_invite_email(
-        to=invite.email, org_name=org_name, token=invite.token, role=invite.role, locale=invitee_locale,
+        to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
     )
     sent_at = None if error else datetime.now(timezone.utc)
     await invite_repo.update_email_result(invite.id, sent_at=sent_at, error=error)

@@ -55,6 +55,7 @@ def send_invite_email(
     org_name: str,
     token: str,
     role: str,
+    org_id: str = "",
     inviter_name: str = "",
     locale: str = "ko",
 ) -> str | None:
@@ -64,9 +65,19 @@ def send_invite_email(
     기존 유저 것이면 그 유저의 locale, 아니면(아직 계정 없는 신규 피초대자) DEFAULT_LOCALE」
     로 판별해 넘긴다 — 여기서는 그 값을 그대로 소비만 한다(추측 0, 기존 무회귀 동작이
     바로 그 else 분기).
+
+    story #3217(AARRR·Referral 계측 B축·보조신호) — accept_link에 utm_source=referral·
+    utm_medium=org_invite·utm_campaign=<org_id>를 부착한다. `/invite`는 proxy.ts
+    PUBLIC_PREFIX라 기존 first-touch 캡처(story #3204 captureSignupAttribution)가 이
+    쿼리를 그대로 주워 쿠키에 심는다(FE/proxy.ts 변경 0 — 이미 있는 회로 재사용). 주
+    신호(A축)는 register()/oauth_callback()의 invite_token **수락 성공** 시점 서버측
+    기록(이 쿠키보다 우선) — 이건 "링크는 눌렀지만 가입은 나중에 다른 경로로" 케이스를
+    잡는 보조축일 뿐이다.
     """
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     accept_link = f"{app_url}/invite/accept?token={token}"
+    if org_id:
+        accept_link += f"&utm_source=referral&utm_medium=org_invite&utm_campaign={org_id}"
     copy = INVITE_COPY[locale]
     display_inviter = inviter_name or copy["default_inviter"]
 

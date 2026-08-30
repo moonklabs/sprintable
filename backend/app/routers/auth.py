@@ -262,15 +262,33 @@ class SetPasswordRequest(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> None:
+async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> dict:
     """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성.
 
     canonical=OrgInvite(org_invites) 단일 경로. accept로 위임 → org_member 생성 +
     선택 프로젝트 project_access(granted) 부여 + status=accepted를 한 경로로 처리한다.
     (구 Invitation 테이블은 d3619e80 cutover로 제거 — #1307에서 pending 토큰 org_invites 이전 完.)
+
+    story #3217(Referral 계측) — 반환값({"ok": bool, "org_id": str, ...})을 호출부에
+    그대로 넘긴다. 기존 두 호출부(register/oauth_callback)는 이 반환값을 버렸었는데,
+    이번에 "수락 성공 시에만" referral 귀속을 적용하려면 성공 여부를 알아야 한다.
     """
     from app.repositories.org_invite import OrgInviteRepository
-    await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
+    return await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
+
+
+def _apply_referral_attribution(user: User, accept_result: dict) -> None:
+    """story #3217(AARRR·Referral 계측 A축·결정론 주신호) — invite_token 수락이
+    **성공**했을 때만 결정론적 귀속을 쿠키 유래 signup_utm_*보다 **우선 적용**(override)
+    한다. 초대 링크 자체가 유입 채널의 확정적 증거라 첫 방문 UTM/referrer 추론(story
+    #3204 first-touch 쿠키)보다 신뢰도가 높다 — 그래서 "덮어쓴다"가 맞는 방향(먼저
+    세팅된 쿠키 값이 있어도 이게 이긴다).
+
+    수락 실패/토큰 무효(ok=False)면 호출 자체를 안 한다(무개입 — 기존 쿠키 경로 그대로,
+    호출부에서 조건부로 호출)."""
+    user.signup_utm_source = "referral"
+    user.signup_utm_medium = "org_invite"
+    user.signup_utm_campaign = accept_result.get("org_id")
 
 
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -628,7 +646,9 @@ async def register(
 
     # AC2: invite_token 있으면 가입 후 자동 수락
     if body.invite_token:
-        await _auto_accept_invitation(session, user, body.invite_token)
+        accept_result = await _auto_accept_invitation(session, user, body.invite_token)
+        if accept_result.get("ok"):
+            _apply_referral_attribution(user, accept_result)
 
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
@@ -1338,7 +1358,9 @@ async def oauth_callback(
 
             # AC4: invite_token 있으면 신규 OAuth 유저도 자동 수락
             if body.invite_token:
-                await _auto_accept_invitation(session, user, body.invite_token)
+                accept_result = await _auto_accept_invitation(session, user, body.invite_token)
+                if accept_result.get("ok"):
+                    _apply_referral_attribution(user, accept_result)
 
             await session.commit()
             await session.refresh(user)
