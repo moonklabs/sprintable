@@ -1237,7 +1237,6 @@ export default function SettingsPage() {
                   <div className="space-y-6">
                     <ProjectAccessSection
                       projectId={currentProjectId}
-                      currentRole={currentOrgRole}
                     />
                     {/* 7519c3ea: 팀원 webhook inline — flat 탭 폐기분을 멤버별 surface(handleSaveWebhookUrl 재사용·status 한눈에). */}
                     <SectionCard>

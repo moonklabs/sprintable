@@ -1,15 +1,20 @@
 """E-MSG-POLICY S3 (BE): 에이전트 메시징 정책 관리 endpoints.
 
 agent별 mode(creator_only/org_wide/list) 조회·변경 + allow_list 멤버 add/remove.
-admin/owner-only(assert_agent_owner)·org-scoped. S1 enforcement가 즉시 반영(다음 conversation-create부터).
-mode는 canonical `members`에 저장(team_members는 0088 projection 뷰라 직접 UPDATE 불가).
+assert_agent_owner 게이트 — **에이전트 생성자 OR org admin/owner**(org-scoped). story
+#3231 4라운드(카디르 QA) — 이 파일 헤더가 예전엔 "admin/owner-only"라고 적어놨었는데
+부정확했다(assert_agent_owner 자체가 창작자를 admin/owner와 OR로 통과시킴) — 실제로
+그 부정확한 서술을 그대로 믿고 Member가 만든 에이전트의 allowlist 피커를 org-admin
+전용으로 잘못 잠갔던 게 회귀 원인이었다. S1 enforcement가 즉시 반영(다음
+conversation-create부터). mode는 canonical `members`에 저장(team_members는 0088
+projection 뷰라 직접 UPDATE 불가).
 """
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +23,7 @@ from app.dependencies.database import get_db
 from app.dependencies.ownership import assert_agent_owner
 from app.models.member import Member
 from app.models.team import AgentMessageAllowlist
+from app.schemas.org_member import OrgMemberResponse
 from app.services.member_resolver import resolve_member_identity
 
 router = APIRouter(prefix="/api/v2", tags=["agent-message-policy", "Organization"])
@@ -68,6 +74,54 @@ async def get_message_policy(
         mode=getattr(agent, "message_policy_mode", None) or "creator_only",
         allowlist=await _allowlist_ids(session, agent_id),
     )
+
+
+@router.get("/agents/{agent_id}/message-policy/candidates", response_model=list[OrgMemberResponse])
+async def list_message_policy_candidates(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[OrgMemberResponse]:
+    """story #3231 4라운드(카디르 QA) — messaging-policy-section.tsx의 allowlist 추가
+    피커가 org-admin 전용 GET /api/v2/org-members(3231 1라운드)에 막혀, Member가 만든
+    에이전트는 그 생성자 본인이 자기 allowlist 후보를 못 봤다(신규 회귀 — 위 헤더의
+    "admin/owner-only" 서술이 실은 부정확했던 게 근본원인). 이 위(get/update/allowlist)
+    엔드포인트들과 동일 게이트(assert_agent_owner=생성자 OR org admin/owner)를 재사용해
+    이 특정 agent_id의 소유자에게만 org 로스터를 준다.
+    """
+    await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    result = await session.execute(
+        text(
+            """
+            SELECT om.id, om.org_id, om.user_id, om.role,
+                   om.created_at, om.deleted_at,
+                   u.email,
+                   COALESCE(m.name, u.display_name, u.email) AS name
+            FROM org_members om
+            LEFT JOIN users u ON u.id = om.user_id
+            LEFT JOIN members m
+                   ON m.org_id = om.org_id AND m.user_id = om.user_id
+                  AND m.type = 'human' AND m.deleted_at IS NULL
+            WHERE om.org_id = :org_id AND om.deleted_at IS NULL
+            ORDER BY om.created_at
+            """
+        ),
+        {"org_id": str(org_id)},
+    )
+    return [
+        OrgMemberResponse(
+            id=row.id,
+            org_id=row.org_id,
+            user_id=row.user_id,
+            role=row.role,
+            created_at=row.created_at,
+            deleted_at=row.deleted_at,
+            email=row.email,
+            name=row.name,
+        )
+        for row in result
+    ]
 
 
 @router.put("/agents/{agent_id}/message-policy", response_model=MessagePolicyResponse)
