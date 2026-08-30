@@ -14,6 +14,10 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3247 — migration 0295. totp/disable password 재검증 우회체인 차단용(그 비밀번호가
+    # 현재 세션 토큰보다 먼저 존재했는지 판별). NULL=제약 신설 이전 기존 유저(무제약, 0290
+    # locale과 동형 논지).
+    password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     login_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     login_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

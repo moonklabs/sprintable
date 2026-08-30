@@ -631,6 +631,7 @@ async def register(
     user = User(
         email=body.email,
         hashed_password=hash_password(body.password),
+        password_set_at=datetime.now(timezone.utc),
         display_name=body.display_name.strip() or body.email.split("@")[0],
         is_active=True,
         email_verified=False,
@@ -1106,6 +1107,17 @@ async def totp_disable(
         if not verify_totp(user.totp_secret or "", body.code):
             return _err("INVALID_TOTP", "Invalid TOTP code", 403)
     elif body.password:
+        # 카디르+codex QA 지적(PR#3634) — 우회체인 실증: OAuth 전용 계정(비밀번호 없음)의
+        # 탈취 세션/API키로 ①set-password(재인증 0, 별건 ab2a503f)로 방금 비밀번호를 심고
+        # → ②그 비밀번호를 여기 제출 → ③서버가 정상 재검증으로 인정해 2FA 해제. 독립
+        # 자격증명 0으로 뚫린다. 처방(PO 방향 A) 최소방어선 2단:
+        #
+        # ① API키(sk_live_/hu_live_) 경로는 password 분기 자체를 불허 — 두 API키 경로
+        # 모두 claims에 iat이 안 실린다(_resolve_api_key/_resolve_human_api_key,
+        # dependencies/auth.py) 그래서 "얼마나 오래된 비밀번호인가"를 판별할 수단이 없다.
+        if "iat" not in auth.claims:
+            return _err("PASSWORD_REVERIFICATION_REQUIRES_SESSION", "Password re-verification requires a browser session, not an API key", 403)
+
         # PO QA 지적(PR#3634) — OAuth 가입 유저는 hashed_password=""(register()의 OAuth
         # 분기, set-password가 그 의미를 문서화)라 verify_password(pw, "")를 그대로
         # 타면 passlib이 빈 해시를 식별 못 해 UnknownHashError(→500, AC1의 "서버 명시
@@ -1114,6 +1126,16 @@ async def totp_disable(
             return _err("PASSWORD_NOT_SET", "This account has no password set", 403)
         if not verify_password(body.password, user.hashed_password):
             return _err("WRONG_PASSWORD", "Incorrect password", 403)
+
+        # ② JWT 경로 — 그 비밀번호가 "지금 세션(토큰 발급 시각)보다 먼저" 존재했을 때만
+        # 유효한 재검증으로 인정. password_set_at이 토큰 iat 이후면(=이 세션 안에서 방금
+        # 심은 비밀번호) 우회체인 그 자체이므로 거부. password_set_at IS NULL(migration
+        # 0295 이전부터 비밀번호를 가진 기존 유저)은 제약 대상 밖(0290 locale과 동형 논지
+        # — 과거 시점을 알 방법이 없어 백필은 거짓 신호, 무제약 유지=무회귀).
+        if user.password_set_at is not None:
+            token_iat = auth.claims.get("iat")
+            if not isinstance(token_iat, int) or user.password_set_at.timestamp() > token_iat:
+                return _err("PASSWORD_TOO_RECENT", "Password was set after this session started — please log in again", 403)
     else:
         return _err("REVERIFICATION_REQUIRED", "TOTP code or password required", 400)
 
@@ -1638,7 +1660,10 @@ async def reset_password(
         return _err("INVALID_TOKEN", "Reset token has already been used", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     return _ok({"message": "Password reset successfully"})
 
@@ -1657,7 +1682,10 @@ async def change_password(
         return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     return _ok({"message": "Password changed successfully"})
 
@@ -1679,7 +1707,10 @@ async def set_password(
         return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     await session.commit()
     return _ok({"message": "Password set successfully"})
