@@ -702,7 +702,15 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
     if (members.length > 0) return;
     setLoadingMembers(true);
     try {
-      const res = await fetchWithAuth('/api/org-members');
+      // story #3231 2라운드(카디르 QA) — /api/org-members가 admin 전용 403으로 잠기면서
+      // 일반 Member의 이 위임 픽커도 doc-gate-section.tsx와 동일하게 후보 0명으로
+      // 파손됐다. 결재자 지정 전용 엔드포인트로 교체(원 org-members roster는 안 건드림)
+      // + res.ok 미확인(403이어도 조용히 빈 배열로 저하되던 결함)도 같이 고친다.
+      const res = await fetchWithAuth('/api/org-members/eligible-approvers');
+      if (!res.ok) {
+        setError(t('hitlSendFailed'));
+        return;
+      }
       const json = await res.json().catch(() => null) as {
         data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
       } | null;

@@ -13,6 +13,38 @@ from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse
 
 router = APIRouter(prefix="/api/v2/org-members", tags=["org-members", "Organization"])
 
+# E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name → email 순.
+# members는 (org_id, user_id) 활성 휴먼으로 LEFT JOIN(없으면 display_name/email 폴백).
+# story #3231 2라운드 — list_org_members(admin 전용)·list_eligible_approvers(owner/admin
+# 필터만 추가) 둘이 공유하는 JOIN 뼈대. ORDER BY는 의도적으로 뺐다 — 뒤에 role 필터를
+# AND로 이어붙이는 호출부가 있어(list_eligible_approvers), ORDER BY가 먼저 있으면 그
+# 자리에 WHERE 절을 못 이어붙인다.
+_ORG_MEMBERS_JOIN_SQL = """
+    SELECT om.id, om.org_id, om.user_id, om.role,
+           om.created_at, om.deleted_at,
+           u.email,
+           COALESCE(m.name, u.display_name, u.email) AS name
+    FROM org_members om
+    LEFT JOIN users u ON u.id = om.user_id
+    LEFT JOIN members m
+           ON m.org_id = om.org_id AND m.user_id = om.user_id
+          AND m.type = 'human' AND m.deleted_at IS NULL
+    WHERE om.org_id = :org_id AND om.deleted_at IS NULL
+"""
+
+
+def _row_to_org_member_response(row) -> OrgMemberResponse:
+    return OrgMemberResponse(
+        id=row.id,
+        org_id=row.org_id,
+        user_id=row.user_id,
+        role=row.role,
+        created_at=row.created_at,
+        deleted_at=row.deleted_at,
+        email=row.email,
+        name=row.name,
+    )
+
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
@@ -51,39 +83,32 @@ async def list_org_members(
     _repo: OrgMemberRepository = Depends(_require_admin),
 ) -> list[OrgMemberResponse]:
     """org_members + users JOIN — email 포함 응답. admin/owner 전용."""
-    # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name → email 순.
-    # members는 (org_id, user_id) 활성 휴먼으로 LEFT JOIN (없으면 display_name/email 폴백).
     result = await session.execute(
-        text(
-            """
-            SELECT om.id, om.org_id, om.user_id, om.role,
-                   om.created_at, om.deleted_at,
-                   u.email,
-                   COALESCE(m.name, u.display_name, u.email) AS name
-            FROM org_members om
-            LEFT JOIN users u ON u.id = om.user_id
-            LEFT JOIN members m
-                   ON m.org_id = om.org_id AND m.user_id = om.user_id
-                  AND m.type = 'human' AND m.deleted_at IS NULL
-            WHERE om.org_id = :org_id AND om.deleted_at IS NULL
-            ORDER BY om.created_at
-            """
-        ),
+        text(f"{_ORG_MEMBERS_JOIN_SQL} ORDER BY om.created_at"),
         {"org_id": str(org_id)},
     )
-    return [
-        OrgMemberResponse(
-            id=row.id,
-            org_id=row.org_id,
-            user_id=row.user_id,
-            role=row.role,
-            created_at=row.created_at,
-            deleted_at=row.deleted_at,
-            email=row.email,
-            name=row.name,
-        )
-        for row in result
-    ]
+    return [_row_to_org_member_response(row) for row in result]
+
+
+@router.get("/eligible-approvers", response_model=list[OrgMemberResponse])
+async def list_eligible_approvers(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[OrgMemberResponse]:
+    """story #3231 2라운드(카디르 QA) — 위 list_org_members를 admin 전용으로 잠그면서
+    doc-gate-section.tsx의 결재자 지정 픽커가 후보 0명으로 연쇄 파손됐다(doc.py가
+    owner/admin을 결재자로 강제하는데 그 목록 조회가 403). 이 엔드포인트는 그 픽커
+    전용 — org의 어떤 role의 Member도 호출 가능(상신하려면 결재 대상을 봐야 하니 정당
+    목적)하되 **owner/admin만** 반환한다(전 Member 로스터 아님 — 원 버그와 노출 범위가
+    다르다). email은 유지한다 — approver-picker-options.ts 주석의 기존 처방(PO 실계정과
+    대행 계정의 동명 오지정 사고, 라벨에 "이름 (이메일)" 병기로 해결)이 email 없이는
+    못 서므로, email 제거는 그 fix를 되돌리는 것과 같다(페드루 판정, 2026-08-30).
+    """
+    result = await session.execute(
+        text(f"{_ORG_MEMBERS_JOIN_SQL} AND om.role IN ('owner', 'admin') ORDER BY om.created_at"),
+        {"org_id": str(org_id)},
+    )
+    return [_row_to_org_member_response(row) for row in result]
 
 
 @router.post("", response_model=OrgMemberResponse, status_code=201)

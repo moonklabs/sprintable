@@ -446,6 +446,60 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
     ]);
     expect(container.textContent).not.toContain(koMessages.chats.approvalRequestDelegateDuplicateWarning);
   });
+
+  // story #3231 2라운드(카디르 QA) — /api/org-members가 admin 전용 403으로 잠기면서
+  // 이 위임 픽커가 doc-gate-section.tsx와 동일하게 후보 0명으로 파손됐다. 전용
+  // 엔드포인트(/api/org-members/eligible-approvers)로 교체 + res.ok 미확인(403이어도
+  // 조용히 빈 배열로 저하되던 결함)도 같이 고쳤다.
+  it('전용 eligible-approvers 엔드포인트를 호출한다(원 roster 엔드포인트 아님)', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.includes('/api/org-members')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'member-2', user_id: 'u-2', name: '올리베이라군', role: 'admin' }] }) };
+      }
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-1' }) }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const delegateBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes(koMessages.chats.approvalRequestDelegate),
+    );
+    await act(async () => { delegateBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(calls.some((u) => u.includes('/api/org-members/eligible-approvers'))).toBe(true);
+  });
+
+  it('403(res.ok=false) — 조용히 빈 배열로 저하되지 않고 에러 문구가 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/org-members')) return { ok: false, status: 403, json: async () => ({ error: { code: 'FORBIDDEN' } }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-1' }) }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const delegateBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes(koMessages.chats.approvalRequestDelegate),
+    );
+    await act(async () => { delegateBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.chats.hitlSendFailed);
+  });
 });
 
 // story #3084(2026-08-25, 유나 픽셀 규격 부록A — 상태 파생표) — 카드 5상태 중 pending 3분기

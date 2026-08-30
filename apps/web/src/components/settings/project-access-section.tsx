@@ -57,9 +57,19 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
   };
 
   useEffect(() => {
+    // story #3231 2라운드(전수 스윕 자체 발견) — 이 섹션이 role 무관하게 email 포함
+    // 전체 org 로스터를 렌더해(MemberRow의 email prop이 canManage와 무관하게 항상
+    // 넘어감), Member 신분도 조직 전원의 실명+이메일을 볼 수 있었다. roles·members·
+    // settings「org-members」탭 3화면과 같은 "관리 화면=전 로스터 열람" 성격이라
+    // 동일 패턴(canManage 전면 게이트)으로 막는다 — BE org-members 자체가 이미
+    // admin/owner 전용 403이라 여기서 fetch를 계속 쏴봐야 헛되이 실패할 뿐이었다.
+    if (!canManage) {
+      setLoading(false);
+      return;
+    }
     void refreshData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, canManage]);
 
   const getGrant = (orgMemberId: string) =>
     grants.find((g) => g.org_member_id === orgMemberId);
@@ -120,6 +130,20 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
               </div>
             ))}
           </div>
+        </SectionCardBody>
+      </SectionCard>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <SectionCard>
+        <SectionCardHeader>
+          <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <p className="text-sm font-medium text-foreground">관리자 전용 페이지입니다</p>
+          <p className="mt-1 text-sm text-muted-foreground">조직 구성원의 이메일이 포함된 전체 명단은 관리자·소유자만 볼 수 있습니다.</p>
         </SectionCardBody>
       </SectionCard>
     );

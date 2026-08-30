@@ -122,12 +122,21 @@ async def test_team_members_list_via_conftest(test_client, mock_session):
 
 @pytest.mark.anyio
 async def test_org_members_list_via_conftest(test_client, mock_session):
-    """GET /api/v2/org-members 200."""
+    """GET /api/v2/org-members 200 — story #3231: 이제 admin/owner 전용(_require_admin)이라
+    caller가 admin인 DB row가 있어야 200에 도달한다(test_org_members.py의 확립된 패턴과
+    동형). auth_ctx.claims의 JWT role="admin"은 _require_admin이 안 보는 값 — 실 DB
+    role만 신뢰한다."""
+    caller_admin = MagicMock()
+    caller_admin.role = "admin"
+
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = []
     mock_session.execute = AsyncMock(return_value=mock_result)
 
-    resp = await test_client.get("/api/v2/org-members")
+    with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+        mock_get_by_user.return_value = caller_admin
+        resp = await test_client.get("/api/v2/org-members")
+
     assert resp.status_code == 200
     assert resp.json() == []
 
