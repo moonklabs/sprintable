@@ -68,6 +68,41 @@ async function mountAndInvite(inviteResponse: { ok: boolean; body: unknown }) {
   await flush();
 }
 
+// story #3231(카디르 버그사냥) — Member 신분에게 email 포함 전체 로스터가 새던 결함.
+// BE가 admin/owner 전용 403으로 잠근 것이 실 정본이고, 여기서는 그 서버 거부를 FE가
+// 안내 문구로 정확히 반영하는지·Member 신분엔 로스터 fetch 자체를 안 쏘는지 검증한다.
+describe('OrgMembersSection — Member 신분엔 관리자 전용 안내(story #3231)', () => {
+  it('currentRole=member — 안내 문구만 보이고 email/멤버 데이터는 아예 안 뜬다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="member" />)); });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.settings.orgMembersAdminOnly);
+    expect(container.textContent).toContain(koMessages.settings.orgMembersAdminOnlyHint);
+    // 하드닝(feedback_guard_must_declare_what_it_misses류) — 안내 문구가 떴다는 것만으론
+    // 부족, 애초에 로스터/초대/프로젝트 fetch 자체를 안 쐈는지까지 직접 확인한다.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('currentRole=admin — 무회귀, 기존처럼 멤버 섹션 정상 렌더', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/org-members') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/organizations/org-1/invites') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      throw new Error('unexpected fetch: ' + url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="admin" />)); });
+    await flush();
+
+    expect(container.textContent).not.toContain(koMessages.settings.orgMembersAdminOnly);
+    expect(fetchMock.mock.calls.some((call) => call[0] === '/api/org-members')).toBe(true);
+  });
+});
+
 describe('OrgMembersSection — error.code 분기 (story #2485)', () => {
   it('PLAN_LIMIT_EXCEEDED — raw 영문 대신 번역 문구', async () => {
     await mountAndInvite({

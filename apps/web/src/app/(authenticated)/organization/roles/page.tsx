@@ -27,6 +27,13 @@ export default function OrganizationRolesPage() {
   const { orgId, orgMemberships } = useDashboardContext();
   const currentRole = orgMemberships.find((o) => o.orgId === orgId)?.role ?? 'member';
   const isOwner = currentRole === 'owner';
+  // story #3231(카디르 버그사냥) — 이 페이지가 email 포함 전체 로스터를 role 무관하게
+  // 항상 렌더해, Member 신분도 조직 전원의 실명+이메일을 볼 수 있었다. BE(GET
+  // /api/v2/org-members)를 admin/owner 전용 403으로 잠근 것이 실 정본이고, 이건 그
+  // 서버 거부를 빈 화면/에러 토스트 대신 명확한 안내로 바꾸는 UX층일 뿐이다(FE 숨김이
+  // 아니라 — 이 체크를 빼도 fetchWithAuth가 그냥 403을 받아 members가 비는 것으로
+  // 저하될 뿐, 데이터가 새지는 않는다).
+  const canView = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('organization');
 
   const [members, setMembers] = useState<OrgMember[]>([]);
@@ -48,9 +55,13 @@ export default function OrganizationRolesPage() {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!canView) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, []);
+  }, [canView]);
 
   const handleChangeRole = async (memberId: string, newRole: 'admin' | 'member') => {
     setChangingId(memberId);
@@ -67,6 +78,19 @@ export default function OrganizationRolesPage() {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
         {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="mx-auto w-full max-w-3xl p-6">
+        <SectionCard>
+          <SectionCardBody>
+            <p className="text-sm font-medium text-foreground">{t('rolesAdminOnly')}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t('rolesAdminOnlyHint')}</p>
+          </SectionCardBody>
+        </SectionCard>
       </div>
     );
   }

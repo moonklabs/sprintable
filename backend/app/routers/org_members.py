@@ -41,8 +41,16 @@ async def list_org_members(
     # (repo 파라미터는 이 함수 본문에서 미사용이라 제거 — 아래 raw SQL이 session을 직접 씀.)
     session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    # story #3231(카디르 버그사냥) — 이 GET에만 _require_admin이 안 붙어있어(POST/PATCH/
+    # DELETE엔 이미 있었음) 일반 Member가 email 포함 전체 로스터를 그대로 조회할 수
+    # 있었다(/organization/roles·/organization/members·settings「org-members」탭 3화면
+    # 공용 소비). 페드루 판정(2026-08-30) — 콜라보용 이름 노출은 GET /api/v2/members?
+    # project_id=(email 필드 자체 없음·project 접근권 스코프)가 이미 정본으로 서 있어,
+    # 이 email 포함 org 전체 로스터는 admin/owner의 관리 행위로만 한정한다(전면 403,
+    # FE 숨김이 아니라 서버 거부가 유일 정본).
+    _repo: OrgMemberRepository = Depends(_require_admin),
 ) -> list[OrgMemberResponse]:
-    """org_members + users JOIN — email 포함 응답."""
+    """org_members + users JOIN — email 포함 응답. admin/owner 전용."""
     # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name → email 순.
     # members는 (org_id, user_id) 활성 휴먼으로 LEFT JOIN (없으면 display_name/email 폴백).
     result = await session.execute(
