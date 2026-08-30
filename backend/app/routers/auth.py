@@ -1106,6 +1106,12 @@ async def totp_disable(
         if not verify_totp(user.totp_secret or "", body.code):
             return _err("INVALID_TOTP", "Invalid TOTP code", 403)
     elif body.password:
+        # PO QA 지적(PR#3634) — OAuth 가입 유저는 hashed_password=""(register()의 OAuth
+        # 분기, set-password가 그 의미를 문서화)라 verify_password(pw, "")를 그대로
+        # 타면 passlib이 빈 해시를 식별 못 해 UnknownHashError(→500, AC1의 "서버 명시
+        # 거부"가 아님)로 샌다 — 비밀번호 자체가 없는 계정은 명시 403으로 먼저 거른다.
+        if not user.hashed_password:
+            return _err("PASSWORD_NOT_SET", "This account has no password set", 403)
         if not verify_password(body.password, user.hashed_password):
             return _err("WRONG_PASSWORD", "Incorrect password", 403)
     else:

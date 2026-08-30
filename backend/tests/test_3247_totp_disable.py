@@ -130,6 +130,23 @@ async def test_disable_with_wrong_password_rejected():
 
 
 @pytest.mark.anyio
+async def test_disable_with_password_when_no_password_set_rejected_not_500():
+    """PO QA 지적(PR#3634) — OAuth 가입 유저(hashed_password="")가 password 경로로 해제
+    시도하면 passlib UnknownHashError(→500)로 새지 않고 명시 403으로 거부돼야 한다."""
+    user = _make_user(totp_enabled=True, totp_secret=pyotp.random_base32(), hashed_password="")
+    client, _session, app = await _disable_client()
+    try:
+        with patch("app.routers.auth._get_user_by_id", new=AsyncMock(return_value=user)):
+            async with client as c:
+                resp = await c.post("/api/v2/auth/totp/disable", json={"password": "anything"})
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "PASSWORD_NOT_SET"
+        assert user.totp_enabled is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_disable_without_reverification_rejected():
     """양성대조(§AC3) — code·password 둘 다 없으면 400, 무인증 해제는 서버가 거부한다."""
     from app.core.security import hash_password
