@@ -57,8 +57,20 @@ class S3StorageProvider(StorageProvider):
             return None
 
     async def signed_write_url(
-        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None,
+        create_only: bool = False,
     ) -> str | None:
+        """create_only: 카디르/codex 재발견(story #3249 2라운드) — S3/MinIO는 self-host 배포의
+        정식 1급 provider(factory.py, dead code 아님)라 create_only=True를 조용히 no-op하면
+        "create-only 보호가 있다"는 거짓 보장이 된다(cap 우회 재현 가능). 실제 조건부-쓰기
+        (If-None-Match) 구현 전까지는 **fail-closed** — URL을 아예 미발급(None, 호출부가 502로
+        거부)한다. 진짜 구현은 story dc3d62f4 별건."""
+        if create_only:
+            logger.warning(
+                "s3 storage: create_only 미지원 — URL 미발급(fail-closed) path=%s", object_path
+            )
+            return None
+
         def _blocking() -> str:
             params: dict = {"Bucket": container, "Key": object_path}
             if content_type:
