@@ -61,12 +61,20 @@ def create_access_token(
     *,
     auth_source: str | None = None,
     device_attested: bool | None = None,
+    session_started_at: int | None = None,
 ) -> str:
     """story 1931(산티아고 §10 재확認 2026-07-16 조건4): `auth_source`/`device_attested`는
     옵션 클레임 — None(기본, 기존 모든 호출부: password/oauth_callback/refresh 등)이면
     payload에 아예 안 실려 기존 토큰 shape byte-identical(무회귀). OAuth-handoff consume만
     명시적으로 채워 넣어 "이 세션이 attestation-gated 능력을 상속하지 않는다"는 assurance
-    seam을 지금 확보한다(§10.5 — 소비하는 라우트는 아직 없음, 향후 attestation 확장 대비)."""
+    seam을 지금 확보한다(§10.5 — 소비하는 라우트는 아직 없음, 향후 attestation 확장 대비).
+
+    story #3247(PO 방향 A, 카디르+codex QA 2라운드) — `session_started_at`도 동일 옵션
+    클레임 seam. `iat`은 refresh가 매번 새로 찍어 "토큰 발급 시각"일 뿐 "이 세션(로그인)이
+    언제 시작됐나"의 대리가 못 된다(refresh 왕복 한 번으로 password-재검증 우회체인이
+    뚫린 실증 원인). 최초 로그인(register/login/oauth_callback)만 지금 시각을 채우고,
+    refresh/switch-account/switch-project/switch-org는 «원 값을 그대로 이월»(호출부
+    책임) — 세션이 실제로 새로 시작하는 지점에서만 갱신된다."""
     now = datetime.now(timezone.utc)
     exp = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     payload: dict[str, Any] = {
@@ -81,6 +89,8 @@ def create_access_token(
         payload["auth_source"] = auth_source
     if device_attested is not None:
         payload["device_attested"] = device_attested
+    if session_started_at is not None:
+        payload["session_started_at"] = session_started_at
     return jwt.encode(payload, _get_secret(), algorithm="HS256")
 
 
@@ -88,6 +98,8 @@ def create_refresh_token(
     user_id: str,
     app_metadata: dict[str, Any] | None = None,
     expires_delta: timedelta | None = None,
+    *,
+    session_started_at: int | None = None,
 ) -> tuple[str, datetime]:
     now = datetime.now(timezone.utc)
     exp = now + (expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
@@ -99,6 +111,8 @@ def create_refresh_token(
         "exp": int(exp.timestamp()),
         "type": "refresh",
     }
+    if session_started_at is not None:
+        payload["session_started_at"] = session_started_at
     token = jwt.encode(payload, _get_secret(), algorithm="HS256")
     return token, exp
 
@@ -110,11 +124,13 @@ def create_tokens(
     *,
     auth_source: str | None = None,
     device_attested: bool | None = None,
+    session_started_at: int | None = None,
 ) -> dict[str, Any]:
     access = create_access_token(
         user_id, email, app_metadata, auth_source=auth_source, device_attested=device_attested,
+        session_started_at=session_started_at,
     )
-    refresh, expires_at = create_refresh_token(user_id, app_metadata)
+    refresh, expires_at = create_refresh_token(user_id, app_metadata, session_started_at=session_started_at)
     return {
         "access_token": access,
         "refresh_token": refresh,
