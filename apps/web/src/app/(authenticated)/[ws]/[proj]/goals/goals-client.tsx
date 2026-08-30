@@ -23,6 +23,10 @@ import { EmptyState } from '@/components/ui/empty-state';
 function GoalGroupHint() {
   return (
     <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground" aria-hidden="true">
+      {/* story #3232 — 점 3개와 원 사이에 연결 요소가 없어 «수렴/그룹핑»이 안 읽히고 별개
+          마크로 보였다(버그헌트 적출). 각 점에서 원으로 향하는 faint 수렴선을 더해 «여럿이
+          하나로 모인다»를 라벨 없이 읽히게 한다(과설명 금지 유지 — 선은 라벨 아님). */}
+      <path d="M4 12 L25 12 M10 8 L25 12 M10 16 L25 12" stroke="currentColor" strokeWidth="1" opacity="0.35" fill="none" />
       <circle cx="10" cy="8" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="10" cy="16" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="4" cy="12" r="2" fill="currentColor" opacity="0.5" />
@@ -310,7 +314,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t('fieldTitlePlaceholder')}
           required
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -321,7 +325,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           onChange={(e) => setDescription(e.target.value)}
           placeholder={t('fieldDescriptionPlaceholder')}
           rows={3}
-          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -331,7 +335,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as GoalPriority)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           >
             <option value="critical">{t('priorityCritical')}</option>
             <option value="high">{t('priorityHigh')}</option>
@@ -348,7 +352,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
       </div>
@@ -359,7 +363,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           type="date"
           value={targetDate}
           onChange={(e) => setTargetDate(e.target.value)}
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -446,7 +450,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -456,7 +460,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
-          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -466,7 +470,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
         <select
           value={priority}
           onChange={(e) => setPriority(e.target.value as GoalPriority)}
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         >
           <option value="critical">{t('priorityCritical')}</option>
           <option value="high">{t('priorityHigh')}</option>
@@ -482,7 +486,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
 
@@ -494,7 +498,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
       </div>
