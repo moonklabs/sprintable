@@ -1,13 +1,26 @@
-// story #3260(지원v1 v1·2위젯) — Support Gateway(story #f2a27d2a, 디디) 세션/메시지 계약이
-// 아직 없다(2026-08-31 착수 시점 grep 확認 — backend/infra 어디에도 support_gateway 자체가
-// 없음). 그 계약이 실 API로 착지하기 전까지 이 훅은 «연결을 흉내내지 않는다» — 페드루
-// 발주(디디와 API 셰이프 선합의 후 코딩)에 따라 정직한 'unavailable' 상태만 반환한다.
-// AC5(§5-3 착지 전 병합 시 서버 정직 응답 — 에코/대기 응답 스텁 무신호 금지)의 정신을
-// 그대로 셸 단계에도 적용: 가짜로 열려있는 척하지 않는다.
+// story #3260 Phase 2(2026-08-31) — Support Gateway(support-gateway/, 디디) 계약이 착지했다
+// (schemas.py/routers/sessions.py, PR#3648 — MessageResponse.content·GET 이력 둘 다 확定).
+// 이 훅이 실 fetch 계층(apps/web/src/lib/support-widget/gateway-client.ts)을 소비한다.
+//
+// ⚠️본체 chat 실시간(realtime-provider.tsx `useSseMultiplexerContext()`)은 절대 구독하지
+// 않는다 — Gateway는 SSE/스트리밍이 아예 없다(동기 왕복 단일 계약, schemas.py
+// MessageExchangeResponse 문서 참고 — "v1: 동기 왕복"). 이중소비·고아 슬롯 결함 클래스가
+// 애초에 재발할 표면 자체가 없다(story #2102급 원칙을 셸 설계 단계에서 이미 충족).
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  createOrResumeGatewaySession,
+  isSupportGatewayConfigured,
+  listGatewayMessages,
+  sendGatewayMessage,
+  type GatewayMessage,
+} from '@/lib/support-widget/gateway-client';
 
+// story #3260 2차(페드루 PO) — unavailable은 «Gateway 미도달(이 빌드에 아예 안 붙어있음)»
+// 딱 하나로 좁힌다. 붙어있는데 연결이 실패한 경우('error')와 뜻이 다르다 — 전자는 재시도
+// 자체가 무의미(설정이 없다)하고 후자는 connect() 재시도가 의미 있다(패널이 이 구분으로
+// 다른 UI를 그린다).
 export type SupportWidgetStatus = 'unavailable' | 'connecting' | 'ready' | 'error';
 
 export interface SupportWidgetMessage {
@@ -15,39 +28,115 @@ export interface SupportWidgetMessage {
   role: 'user' | 'agent';
   content: string;
   createdAt: string;
+  /** agent 메시지 전용 — Gateway가 사람에게 연결했다는 뜻(무신호 아님, 항상 진짜 안내
+   * 텍스트를 동반 — support-gateway/app/no_fiction_guard.py가 지어낸 서술을 구조적으로
+   * 차단하므로 이 플래그가 true여도 content는 항상 정직한 문구다). */
+  escalated?: boolean;
+  /** 낙관적 echo(서버 확認 전) — 실패하지 않았다면 응답 도착 즉시 실 메시지로 교체된다. */
+  pending?: boolean;
+  /** 왕복 자체가 실패(네트워크·5xx)해 서버가 이 메시지를 못 받았을 수 있는 상태 —
+   * "성공한 척" 지우지 않고 실패를 그대로 보여준다(no-fiction). */
+  failed?: boolean;
 }
 
 export interface SupportWidgetSession {
   status: SupportWidgetStatus;
   messages: SupportWidgetMessage[];
-  /** 위젯이 열릴 때만 호출(lazy — 모든 인증 화면에 상주하는 런처가 매 페이지 진입마다
-   * 네트워크를 태우지 않도록). Gateway 계약 착지 전까지는 no-op(status가 이미
-   * 'unavailable'로 고정돼 있어 실질적 의미는 없음 — 인터페이스만 안정화). */
+  /** POST /messages 왕복이 진행 중 — story #3261 실측(~12초)이라 패널이 이 값으로
+   * "생각 중" 지속 신호(경과 초 등)를 그린다(무신호 금지, 페드루 지시). */
+  sending: boolean;
+  /** 가장 최근 실패의 사람 문구 — «사람 연결» 폴백 안내(카디르 지적 승계, 필수 요건). */
+  sendError: string | null;
+  /** 위젯이 열릴 때만 호출(lazy). status가 'connecting'|'ready'면 재호출은 no-op —
+   * 'error'에서는 재시도로 동작한다(사용자가 다시 열거나 재시도 트리거 시). */
   connect: () => void;
   sendMessage: (content: string) => Promise<void>;
+  /** sendError가 있을 때만 의미 있음 — 실패한 마지막 메시지를 같은 내용으로 재전송. */
+  retryLastMessage: () => void;
 }
 
-/**
- * story #3260 — Support Gateway(§5-1) 세션/스트림 계약이 착지하면 이 훅 내부만 교체된다
- * (실 fetch+독립 SSE 연결 — 본체 realtime-provider.tsx의 useSseMultiplexerContext()는
- * 절대 재사용하지 않는다, story #2102급 이중소비/고아 슬롯 결함 클래스 재발 방지 원칙).
- * 호출부(support-widget-panel.tsx)는 이 인터페이스만 알면 되므로 그 교체가 호출부
- * 무변경으로 끝난다.
- */
+function toWidgetMessage(m: GatewayMessage): SupportWidgetMessage {
+  return {
+    id: m.id,
+    role: m.role === 'customer' ? 'user' : 'agent',
+    content: m.content,
+    createdAt: m.created_at,
+  };
+}
+
 export function useSupportWidgetSession(): SupportWidgetSession {
-  const [status] = useState<SupportWidgetStatus>('unavailable');
-  const messages = useMemo<SupportWidgetMessage[]>(() => [], []);
+  const [status, setStatus] = useState<SupportWidgetStatus>('unavailable');
+  const [messages, setMessages] = useState<SupportWidgetMessage[]>([]);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const connectingRef = useRef(false);
+  const lastFailedContentRef = useRef<string | null>(null);
 
   const connect = useCallback(() => {
-    // Gateway 계약 착지 전 — 의도적 no-op.
-  }, []);
+    // Gateway 자체가 이 빌드에 안 붙어있음 — 정직한 'unavailable' 유지, 재시도할 대상이 없다.
+    if (!isSupportGatewayConfigured()) return;
+    if (connectingRef.current || status === 'ready') return;
+    connectingRef.current = true;
+    setStatus('connecting');
+    setSendError(null);
+    void (async () => {
+      try {
+        const session = await createOrResumeGatewaySession();
+        sessionIdRef.current = session.id;
+        const history = await listGatewayMessages(session.id);
+        setMessages(history.map(toWidgetMessage));
+        setStatus('ready');
+      } catch {
+        setStatus('error');
+      } finally {
+        connectingRef.current = false;
+      }
+    })();
+  }, [status]);
 
-  const sendMessage = useCallback(async (_content: string) => {
-    // Gateway 계약 착지 전 — 의도적 no-op(성공한 척 큐잉하지 않음, panel이 status로 막는다).
-  }, []);
+  const sendMessage = useCallback(async (content: string) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || sending) return;
+    const optimisticId = `local-${Date.now()}`;
+    // 낙관적 echo — 실제로 입력한 내용을 그대로 보여줄 뿐(지어낸 응답 아님), ~12초 왕복
+    // 동안 "내가 보낸 게 맞나" 불안을 없앤다. pending 플래그로 서버 확認 전임을 구분.
+    setMessages((prev) => [
+      ...prev,
+      { id: optimisticId, role: 'user', content, createdAt: new Date().toISOString(), pending: true },
+    ]);
+    setSending(true);
+    setSendError(null);
+    lastFailedContentRef.current = null;
+    try {
+      const exchange = await sendGatewayMessage(sessionId, content);
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== optimisticId),
+        toWidgetMessage(exchange.customer_message),
+        { ...toWidgetMessage(exchange.agent_message), escalated: exchange.escalated },
+      ]);
+    } catch {
+      lastFailedContentRef.current = content;
+      setMessages((prev) => prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m)));
+      // 카디르 지적 승계(필수) — 500/무신호 금지. 서버가 무슨 이유로 죽었든(타임아웃·5xx)
+      // 위젯은 항상 이 정직한 «사람 연결» 폴백 문구를 보여준다.
+      setSendError('지금 응답을 받지 못했습니다. 잠시 후 다시 시도하시거나, 담당자에게 직접 문의해 주세요.');
+    } finally {
+      setSending(false);
+    }
+  }, [sending]);
+
+  const retryLastMessage = useCallback(() => {
+    const content = lastFailedContentRef.current;
+    if (!content) return;
+    setMessages((prev) => prev.filter((m) => !(m.failed && m.content === content)));
+    void sendMessage(content);
+  }, [sendMessage]);
 
   // 반환 객체 자체를 안정화 — 호출부(support-widget-launcher.tsx)가 이 객체를 effect
-  // deps에 그대로 넣는다. 매 렌더 새 객체 리터럴이면 status/messages가 안 바뀌어도 매번
-  // effect가 재발화한다(불필요한 connect() 재호출 — 실 연결이 붙으면 낭비가 아니라 버그가 된다).
-  return useMemo(() => ({ status, messages, connect, sendMessage }), [status, messages, connect, sendMessage]);
+  // deps에 그대로 넣는다(값이 안 바뀌면 재렌더가 connect()를 불필요하게 재호출하지 않게).
+  return useMemo(
+    () => ({ status, messages, sending, sendError, connect, sendMessage, retryLastMessage }),
+    [status, messages, sending, sendError, connect, sendMessage, retryLastMessage],
+  );
 }

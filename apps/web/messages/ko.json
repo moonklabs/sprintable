@@ -4428,6 +4428,13 @@
     "closeLabel": "닫기",
     "unavailableTitle": "지원 채팅 준비 중입니다",
     "unavailableBody": "곧 연결됩니다 — 지금은 문의를 접수할 수 없습니다.",
+    "errorTitle": "연결에 실패했습니다",
+    "errorBody": "지원 채팅에 연결하지 못했습니다. 다시 시도해 주세요.",
+    "retryConnect": "다시 연결하기",
+    "thinkingLabel": "생각 중… ({seconds}초)",
+    "escalatedBadge": "담당자에게 연결됨",
+    "messageFailedLabel": "전송하지 못했습니다",
+    "sendErrorRetry": "다시 시도",
     "inputPlaceholder": "메시지를 입력하세요",
     "sendLabel": "보내기"
   }
