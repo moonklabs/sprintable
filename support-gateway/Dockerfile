@@ -12,6 +12,7 @@ RUN uv sync --no-dev --frozen
 COPY app/ app/
 COPY alembic.ini .
 COPY alembic/ alembic/
+COPY scripts/migrate.sh scripts/migrate.sh
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8080
