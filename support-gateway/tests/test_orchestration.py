@@ -109,11 +109,12 @@ async def test_memory_summarized_after_threshold(client, fake_llm, db_engine, mo
 async def test_no_fiction_guard_intercepts_fabricated_escalation_claim(client, fake_llm, db_engine):
     """story #3261 실사고 재현(2026-08-31 dev) — escalate 도구를 안 부르고 "담당자 연결도
     실패했습니다"를 서술하면, 그 텍스트를 그대로 고객에게 보내지 않고 실 에스컬레이션으로
-    정정해야 한다."""
+    정정해야 한다. 카디르 QA 축① 지적(qa:changes) 반영 — 유닛테스트의 실사고 원문 그대로
+    재사용해 "탐지+정정" 엔드투엔드를 한 테스트로 묶는다(원래는 축약 문구를 썼음)."""
+    from tests.test_no_fiction_guard import _REAL_INCIDENT_TEXT
+
     fake_llm.classify_text = "inquiry"
-    fake_llm.interaction_text = (
-        "죄송합니다. 내부 시스템에 오류가 발생하여 담당자 연결도 실패했습니다."
-    )
+    fake_llm.interaction_text = _REAL_INCIDENT_TEXT
     resp = await _post_message(client, OTHER_ORG_ID, content="팀원을 초대하려면 어떻게 하나요?")
     assert resp.status_code == 200
     body = resp.json()
