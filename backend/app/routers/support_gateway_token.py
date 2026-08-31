@@ -1,7 +1,7 @@
 """story #3259(지원v1·1경계) — Support Gateway 위임 토큰 발급. backend 쪽에서 이 스토리가
 건드리는 **유일한** 지점 — 나머지는 전부 support-gateway/ 독립 디렉터리.
 
-이 엔드포인트가 주는 건 {org_id, user_id, exp} 3개 클레임뿐이다. fleet 자격(API key·MCP
+이 엔드포인트가 주는 건 {org_id, user_id, exp, iat} 4개 클레임뿐이다. fleet 자격(API key·MCP
 시크릿·billing 상태 등) 어느 것도 이 토큰에 실리지 않는다 — Support Gateway가 그런 자격을
 받아 들고 있게 되는 순간 "fleet 자격 0" 불변식이 깨지므로, 클레임 셋을 여기서 의도적으로
 좁게 고정한다(확장하고 싶어지면 그 자체가 §2 경계 위반 신호).
