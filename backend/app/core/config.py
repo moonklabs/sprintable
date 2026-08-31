@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     support_gateway_token_secret: str = ""
     support_gateway_token_ttl_seconds: int = 300
 
+    # story #3263(지원v1·5에스컬레이션) — 트랜잭셔널 메일의 "즉시 고객센터로 문의" 문구가
+    # 실재하지 않는 표면(고객센터)을 가리키던 fiction 정정. 위젯(story #3260)이 dev에만 떠
+    # 있고 prod는 아직 미노출(NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED)이라, 메일 카피가 위젯
+    # 승격보다 먼저 prod에 나가면 "가리키는 표면이 고객 화면엔 없는" 새 fiction이 재발한다.
+    # 이 플래그를 위젯 플래그와 **같은 cloudbuild SSOT·같은 승격 커밋**으로 묶어 순서를
+    # 사람 기억이 아니라 구조로 보장한다(페드루 PO 확定, 2026-08-31) — false(기본값·prod)면
+    # 지시문 자체를 지운다("발신 전용" 안내로 대체), true(dev·prod 승격 시)면 위젯을 가리킨다.
+    support_contact_surface_widget: bool = False
+
     # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
     cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
 

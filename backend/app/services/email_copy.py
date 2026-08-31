@@ -79,7 +79,8 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             ],
             "cta_label": "영수증 보기",
             "expiry_note": "영수증은 결제사(Toss)가 제공하며, 이 링크로 언제든 다시 확인하실 수 있습니다.",
-            "security_note": "본인이 결제하지 않으셨다면 즉시 고객센터로 문의해 주세요.",
+            # security_note는 story #3263부터 정적 값이 아니라 resolve_urgent_contact_note()
+            # (이 파일 하단)로 env-분기 해소 — 이유는 그 함수 docstring 참고.
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -90,7 +91,6 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             ],
             "cta_label": "View receipt",
             "expiry_note": "The receipt is provided by our payment processor (Toss) and can be viewed anytime via this link.",
-            "security_note": "If you didn't make this payment, please contact support immediately.",
             "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
@@ -108,7 +108,6 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             ],
             "cta_label": "예약 확인·철회하기",
             "expiry_note": "적용 전까지 언제든 예약을 철회하고 현재 플랜을 유지하실 수 있습니다.",
-            "security_note": "본인이 요청하지 않으셨다면 즉시 고객센터로 문의해 주세요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -119,7 +118,6 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             ],
             "cta_label": "Review or cancel",
             "expiry_note": "You can cancel this scheduled change and keep your current plan anytime before it takes effect.",
-            "security_note": "If you didn't request this, please contact support immediately.",
             "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
@@ -132,7 +130,6 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             ],
             "cta_label": "예약 확인·철회하기",
             "expiry_note": "적용 전까지 언제든 예약을 철회하고 구독을 유지하실 수 있습니다.",
-            "security_note": "본인이 요청하지 않으셨다면 즉시 고객센터로 문의해 주세요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -143,11 +140,63 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             ],
             "cta_label": "Review or cancel",
             "expiry_note": "You can cancel this scheduled cancellation and keep your subscription anytime before it takes effect.",
-            "security_note": "If you didn't request this, please contact support immediately.",
             "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
 }
+
+# story #3263(지원v1·5에스컬레이션, 페드루 PO 확定 2026-08-31) — 위 3종의 옛 security_note는
+# "즉시 고객센터로 문의해 주세요"였다: 실재하지 않는 표면(고객센터)을 가리키는 fiction
+# (발단 story #3214). 실제 이행처는 인앱 지원 위젯(story #3260)이지만 dev에만 떠 있고
+# prod는 NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=false로 아직 미노출 — 이 메일 카피가 위젯
+# 승격보다 먼저 prod에 나가면 "가리키는 표면이 고객 화면엔 없는" 새 fiction이 재발한다.
+#
+# settings.support_contact_surface_widget(위젯과 **같은 cloudbuild SSOT·같은 승격 커밋**으로
+# 묶임 — backend/app/core/config.py 참고)로 갈라, false(기본값·prod 현재값)면 이행처를
+# 지어내지 않고 지시문 자체를 지운다("발신 전용" 사실 고지로 대체) — true(dev·prod 승격
+# 후)면 위젯을 가리킨다. cloudbuild가 두 플래그를 같은 커밋으로 승격시키므로 순서가
+# 사람 기억이 아니라 구조로 보장된다.
+_URGENT_CONTACT_NOTE_WIDGET_ON: dict[str, dict[str, str]] = {
+    "payment_receipt": {
+        "ko": "본인이 결제하지 않으셨다면 Sprintable에 로그인해 화면 하단의 지원 채팅으로 즉시 문의해 주세요.",
+        "en": "If you didn't make this payment, please log in to Sprintable and contact us via the support chat immediately.",
+    },
+    "subscription_downgrade_reserved": {
+        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 화면 하단의 지원 채팅으로 즉시 문의해 주세요.",
+        "en": "If you didn't request this, please log in to Sprintable and contact us via the support chat immediately.",
+    },
+    "subscription_cancel_reserved": {
+        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 화면 하단의 지원 채팅으로 즉시 문의해 주세요.",
+        "en": "If you didn't request this, please log in to Sprintable and contact us via the support chat immediately.",
+    },
+}
+_URGENT_CONTACT_NOTE_WIDGET_OFF: dict[str, dict[str, str]] = {
+    "payment_receipt": {
+        "ko": "본인이 결제하지 않으셨다면 Sprintable에 로그인해 결제 내역을 확인해 주세요. 이 메일은 발신 전용입니다.",
+        "en": "If you didn't make this payment, please log in to Sprintable to review your billing history. This email is sent from an unmonitored address.",
+    },
+    "subscription_downgrade_reserved": {
+        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 플랜 설정을 확인해 주세요. 이 메일은 발신 전용입니다.",
+        "en": "If you didn't request this, please log in to Sprintable to review your plan settings. This email is sent from an unmonitored address.",
+    },
+    "subscription_cancel_reserved": {
+        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 구독 설정을 확인해 주세요. 이 메일은 발신 전용입니다.",
+        "en": "If you didn't request this, please log in to Sprintable to review your subscription settings. This email is sent from an unmonitored address.",
+    },
+}
+
+
+def resolve_urgent_contact_note(template_key: str, locale: str) -> str:
+    """story #3263 — payment_receipt/subscription_downgrade_reserved/subscription_cancel_
+    reserved 3종 전용. TRANSACTIONAL_COPY에서 이 3종만 security_note를 정적 값으로 안 두고
+    이 함수로 해소하는 이유는 이 파일 상단 주석 참고(위젯 prod 미노출 상태에서 위젯을
+    가리키는 fiction 재발 방지 — settings.support_contact_surface_widget과 위젯 자체의
+    NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED가 같은 cloudbuild 커밋으로 승격되므로 이 함수가
+    항상 "실재하는 표면"만 가리킨다)."""
+    from app.core.config import settings
+
+    table = _URGENT_CONTACT_NOTE_WIDGET_ON if settings.support_contact_surface_widget else _URGENT_CONTACT_NOTE_WIDGET_OFF
+    return table[template_key][locale]
 
 REMINDER_COPY: dict[str, dict[str, str]] = {
     "ko": {

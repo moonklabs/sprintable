@@ -121,7 +121,7 @@ async def _notify_downgrade_reserved(
     빌링 설정 페이지(기존 예약 철회 UI가 이미 거기 있다)로 보낸다."""
     from app.services.agent_onboarding_config import resolve_locale
     from app.services.email import render_action_email
-    from app.services.email_copy import TRANSACTIONAL_COPY
+    from app.services.email_copy import TRANSACTIONAL_COPY, resolve_urgent_contact_note
 
     copy_key = "subscription_cancel_reserved" if is_cancellation else "subscription_downgrade_reserved"
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
@@ -144,7 +144,7 @@ async def _notify_downgrade_reserved(
         intro_lines = [line.format(tier=tier_display, apply_date=apply_date_display) for line in copy["intro_lines"]]
         html = render_action_email(
             intro_lines=intro_lines, cta_label=copy["cta_label"], cta_url=billing_url,
-            expiry_note=copy["expiry_note"], security_note=copy["security_note"],
+            expiry_note=copy["expiry_note"], security_note=resolve_urgent_contact_note(copy_key, recipient_locale),
             fallback_label=copy["fallback_label"], locale=recipient_locale,
         )
         try:
