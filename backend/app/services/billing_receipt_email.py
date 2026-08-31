@@ -22,7 +22,7 @@ from app.models.project import OrgMember
 from app.models.user import User
 from app.services.agent_onboarding_config import resolve_locale
 from app.services.email import render_action_email, send_email
-from app.services.email_copy import TRANSACTIONAL_COPY
+from app.services.email_copy import TRANSACTIONAL_COPY, resolve_urgent_contact_note
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ async def send_payment_receipt_email(
             cta_label=copy["cta_label"],
             cta_url=receipt_url,
             expiry_note=copy["expiry_note"],
-            security_note=copy["security_note"],
+            security_note=resolve_urgent_contact_note("payment_receipt", locale),
             fallback_label=copy["fallback_label"],
             locale=locale,
         )
