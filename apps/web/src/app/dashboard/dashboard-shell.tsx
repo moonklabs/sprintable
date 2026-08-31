@@ -15,6 +15,7 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
+import { SupportWidgetLauncher } from '@/components/support-widget/support-widget-launcher';
 import { AppSidebar } from '@/components/nav/app-sidebar';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -401,6 +402,10 @@ export function DashboardShell({
           </SidebarProvider>
         </TopBarProvider>
         <SessionExpiredDialog />
+        {/* story #3260 — 인증 화면 전체를 감싸는 유일 지점(SessionExpiredDialog와 형제)에
+            마운트해 "로그인 후 화면만" 노출을 이 위치 자체로 충족한다(별도 클라 체크 불요 —
+            (authenticated)/layout.tsx가 세션 없으면 여기 도달 전에 이미 redirect). */}
+        <SupportWidgetLauncher />
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
