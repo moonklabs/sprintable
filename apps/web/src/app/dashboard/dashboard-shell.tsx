@@ -400,17 +400,20 @@ export function DashboardShell({
             >
               {children}
             </ShellBody>
+            {/* story #3260 — SidebarProvider 안(ShellBody와 형제)에 마운트해야
+                useSidebar()로 실 사이드바 폭을 읽어 데스크톱 겹침을 피할 수 있다(2차 finding,
+                support-widget-launcher.tsx 문서화 참고) — SidebarProvider 밖에 두면
+                "useSidebar must be used within a SidebarProvider"로 크래시한다. "로그인 후
+                화면만"은 이 자리가 (authenticated)/layout.tsx 하위 DashboardShell 안이라는
+                사실 자체로 성립(별도 클라 체크 불요).
+                페드루 PO 조건부 승인 — isSupportWidgetEnabled() 플래그 뒤(dev on·prod off,
+                lib/ee.ts isEEEnabled()와 동일 컨벤션): Support Gateway 착지·AC2/AC3 실측
+                前까지 항상 unavailable인 런처를 사용자 화면에 노출하지 않는다("UI는 있는데
+                서버가 없음" 결함 클래스 재발 방지). */}
+            {isSupportWidgetEnabled() && <SupportWidgetLauncher />}
           </SidebarProvider>
         </TopBarProvider>
         <SessionExpiredDialog />
-        {/* story #3260 — 인증 화면 전체를 감싸는 유일 지점(SessionExpiredDialog와 형제)에
-            마운트해 "로그인 후 화면만" 노출을 이 위치 자체로 충족한다(별도 클라 체크 불요 —
-            (authenticated)/layout.tsx가 세션 없으면 여기 도달 전에 이미 redirect).
-            페드루 PO 조건부 승인 — isSupportWidgetEnabled() 플래그 뒤(dev on·prod off,
-            lib/ee.ts isEEEnabled()와 동일 컨벤션): Support Gateway 착지·AC2/AC3 실측 前까지
-            항상 unavailable인 런처를 사용자 화면에 노출하지 않는다("UI는 있는데 서버가 없음"
-            결함 클래스 재발 방지). */}
-        {isSupportWidgetEnabled() && <SupportWidgetLauncher />}
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
