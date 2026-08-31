@@ -14,9 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_db
 from app.injection_defense import sanitize_customer_text
+from app.interaction import handle_turn
 from app.models import SupportConversation, SupportMessage, SupportSession
 from app.rate_limit import limiter
-from app.schemas import MessageCreateRequest, MessageResponse, SessionResponse
+from app.schemas import MessageCreateRequest, MessageExchangeResponse, MessageResponse, SessionResponse
 from app.token_verify import DelegatedIdentity, require_delegated_identity
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
@@ -71,7 +72,7 @@ async def create_or_resume_session(
     return SessionResponse(id=session.id, org_id=session.org_id, created_at=session.created_at)
 
 
-@router.post("/sessions/{session_id}/messages", response_model=MessageResponse)
+@router.post("/sessions/{session_id}/messages", response_model=MessageExchangeResponse)
 @limiter.limit(lambda: settings.session_rate_limit)
 async def post_message(
     request: Request,
@@ -79,7 +80,7 @@ async def post_message(
     body: MessageCreateRequest,
     identity: DelegatedIdentity = Depends(require_delegated_identity),
     db: AsyncSession = Depends(get_db),
-) -> MessageResponse:
+) -> MessageExchangeResponse:
     request.state.delegated_org_id = str(identity.org_id)
     # org_id를 WHERE에 태워 스코프 — 타 org의 session_id를 넣어도 0행(404), 존재 노출 없음.
     session = (
@@ -95,15 +96,47 @@ async def post_message(
 
     conv = await _get_or_create_conversation(db, session, identity.org_id)
 
-    message = SupportMessage(
+    customer_message = SupportMessage(
         conversation_id=conv.id,
         org_id=identity.org_id,
         role="customer",
         content=sanitize_customer_text(body.content),
     )
-    db.add(message)
+    db.add(customer_message)
+    await db.flush()
+
+    # story #3261 — 이 턴의 Interaction/Execution 루프. 실패 시(예: Vertex 일시 장애) 500이
+    # 아니라 사람에게 정직하게 넘기는 편이 낫지만, v1은 그 fallback을 별도로 안 만든다 — 예외가
+    # 나면 그대로 전파해 500(고객이 새로고침해 재시도)한다. 조용히 삼켜 "응답 없음"을 만드는
+    # 쪽이 더 나쁘다(에러가 나면 시끄럽게 나야 한다).
+    turn = await handle_turn(
+        db, conversation=conv, org_id=identity.org_id, customer_text=customer_message.content
+    )
+
     await db.commit()
-    await db.refresh(message)
-    return MessageResponse(
-        id=message.id, conversation_id=message.conversation_id, role=message.role, created_at=message.created_at
+    await db.refresh(customer_message)
+
+    agent_message = (
+        await db.execute(
+            select(SupportMessage)
+            .where(SupportMessage.conversation_id == conv.id, SupportMessage.role == "agent")
+            .order_by(SupportMessage.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+
+    return MessageExchangeResponse(
+        customer_message=MessageResponse(
+            id=customer_message.id,
+            conversation_id=customer_message.conversation_id,
+            role=customer_message.role,
+            created_at=customer_message.created_at,
+        ),
+        agent_message=MessageResponse(
+            id=agent_message.id,
+            conversation_id=agent_message.conversation_id,
+            role=agent_message.role,
+            created_at=agent_message.created_at,
+        ),
+        escalated=turn.escalated,
     )

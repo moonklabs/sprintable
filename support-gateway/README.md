@@ -19,6 +19,7 @@ cd support-gateway
 uv sync --group dev
 export SUPPORT_GATEWAY_DATABASE_URL=postgresql+asyncpg://support:support@localhost:5433/support
 export SUPPORT_GATEWAY_TOKEN_SECRET=local-dev-secret-change-me
+export SUPPORT_GATEWAY_VERTEX_PROJECT=sprintable-494803  # story #3261 — Vertex AI SDK 대상 프로젝트
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8081
 ```
@@ -29,10 +30,33 @@ uv run uvicorn app.main:app --reload --port 8081
 uv run pytest
 ```
 
+## 오케스트레이션(story #3261)
+
+`POST /api/v1/sessions/{id}/messages`가 이제 customer 메시지 저장 후 곧바로 한 턴을 돈다
+(`app/interaction.py::handle_turn`):
+
+```
+customer 메시지 → 인입 분류기(Flash-Lite급) → needs_human? → 즉시 에스컬레이션(Interaction 우회)
+                                              → 아니면 비용 상한 확인(초과 시 정직한 지연 안내+에스컬레이션)
+                                              → 아니면 Interaction Agent(Vertex AFC — 지식/org상태/
+                                                에스컬레이션 Task를 도구로 스폰) → 응답 저장 → 메모리 압축(임계치 초과 시)
+```
+
+- 역할별 모델은 `app/model_config.py`(env로 어드민 가변, Blueprint v0.4 §4.3 실측 가격표 동봉).
+- 비용은 `app/cost_cap.py`가 `SUPPORT_GATEWAY_COST_CAP_ORG_DAILY_USD`/`_SESSION_USD`로 org/일·
+  org/세션 상한을 선제 확인 — 초과 시 **모델을 아예 안 부른다**(조용한 강등 금지, 정직한
+  지연 안내+에스컬레이션).
+- `app/execution_tasks.py`의 knowledge_task/org_status_task는 **골격만**(pass-through
+  "아직 연결 안 됨" 응답) — 지식원(story #4)·org 상태 read-only API(story #1 계약은 있으나
+  backend 측 미도입)가 없어서다. escalation_task만 실 구현.
+- 로컬 실행 시 실 Vertex를 부르려면 `gcloud auth application-default login` 필요(Cloud Run
+  배포는 전용 서비스계정 ADC가 자동 처리 — 로컬만의 제약). 테스트는 `tests/conftest.py`의
+  `FakeLLMClient`(autouse)로 실 호출 0.
+
 ## 아직 없는 것 (다른 스토리 스코프)
 
-- 위젯 FE(story #2), Interaction/Execution 오케스트레이션(story #3), 지식원(story #4),
-  에스컬레이션(story #5) — 이 서비스는 그 위에 서는 **경계 API**만.
+- 위젯 FE(story #2 진행 중), 지식원(story #4), 에스컬레이션 본 구현(사람 전달 경로·티켓,
+  story #5) — 이 서비스는 그 위에 서는 **경계 API + 오케스트레이션**까지.
 - `app/injection_defense.py::sanitize_customer_text`는 pass-through 스텁 — 실 방어 내용은
   story #6.
 - 토큰 발급 측(`backend/app/routers/support_gateway_token.py`)은 이 스토리에서 최소 골격만

@@ -15,6 +15,10 @@ dependencies = [
     "alembic>=1.13.0",
     "psycopg2-binary>=2.9.0",
     "slowapi>=0.1.9",
+    # story #3261 AC1 — Vertex AI SDK 직결(Pedro 지시, raw REST 아님). Client(vertexai=True)로
+    # google-genai 통합 SDK가 aiplatform 백엔드를 직접 두드린다(GA 패키지, ADK 등 미도입 —
+    # v0.2 "ADK류는 구현 스파이크 실측 비교 후 채택" 유보 그대로).
+    "google-genai>=1.0.0",
 ]
 
 [dependency-groups]

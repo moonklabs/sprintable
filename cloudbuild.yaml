@@ -962,6 +962,12 @@ steps:
         # story #b96151da(voided 대체) 수선 — 페드루 PO 실측(gcloud describe diff): migrate
         # job과 동일 사유로 서비스도 VPC egress 없이는 Cloud SQL Private IP에 "dial tcp
         # 10.110.0.3:3307: i/o timeout"으로 죽는다(--add-cloudsql-instances 소켓만으론 부족).
+        #
+        # story #3261(오케스트레이션) — SUPPORT_GATEWAY_VERTEX_PROJECT는 비밀 아님(프로젝트
+        # ID 문자열)이라 시크릿이 아니라 env var로. ⚠️PO 레인 팔로우업: 이 서비스의 전용
+        # SA(${_SUPPORT_GATEWAY_SERVICE_ACCOUNT})에 `roles/aiplatform.user` IAM 바인딩이
+        # 아직 없으면 Vertex 호출이 403으로 죽는다 — 코드/배포 스텝은 여기까지만 하고 그
+        # IAM 부여는 backend/support-gateway 최초 프로비저닝과 동형으로 PO가 gcloud로 한다.
         gcloud run deploy support-gateway-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -973,6 +979,7 @@ steps:
           --network=default \
           --subnet=default \
           --vpc-egress=private-ranges-only \
+          --update-env-vars="SUPPORT_GATEWAY_VERTEX_PROJECT=${PROJECT_ID}" \
           --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest" \
           --quiet
     waitFor: [run-support-gateway-migrate-job]
