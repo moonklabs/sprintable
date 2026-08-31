@@ -104,3 +104,42 @@ async def test_memory_summarized_after_threshold(client, fake_llm, db_engine, mo
         conv = (await session.execute(select(SupportConversation).where(SupportConversation.org_id == OTHER_ORG_ID))).scalars().one()
         assert conv.memory_summary is not None
         assert conv.memory_summarized_through_message_id is not None
+
+
+async def test_no_fiction_guard_intercepts_fabricated_escalation_claim(client, fake_llm, db_engine):
+    """story #3261 실사고 재현(2026-08-31 dev) — escalate 도구를 안 부르고 "담당자 연결도
+    실패했습니다"를 서술하면, 그 텍스트를 그대로 고객에게 보내지 않고 실 에스컬레이션으로
+    정정해야 한다. 카디르 QA 축① 지적(qa:changes) 반영 — 유닛테스트의 실사고 원문 그대로
+    재사용해 "탐지+정정" 엔드투엔드를 한 테스트로 묶는다(원래는 축약 문구를 썼음)."""
+    from tests.test_no_fiction_guard import _REAL_INCIDENT_TEXT
+
+    fake_llm.classify_text = "inquiry"
+    fake_llm.interaction_text = _REAL_INCIDENT_TEXT
+    resp = await _post_message(client, OTHER_ORG_ID, content="팀원을 초대하려면 어떻게 하나요?")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["escalated"] is True
+    from app.no_fiction_guard import FALLBACK_REPLY
+
+    assert body["agent_message"]["content"] == FALLBACK_REPLY
+    assert "실패" not in body["agent_message"]["content"]
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        escalations = (await session.execute(select(SupportEscalation))).scalars().all()
+        assert len(escalations) == 1
+        assert escalations[0].reason == "no_fiction_guard"
+        logs = (await session.execute(select(SupportExecutionLog))).scalars().all()
+        assert any(log.task_type == "no_fiction_guard" for log in logs)
+
+
+async def test_no_fiction_guard_does_not_touch_normal_reply(client, fake_llm):
+    fake_llm.classify_text = "inquiry"
+    fake_llm.interaction_text = "새 스프린트는 백로그에서 '스프린트 만들기'로 시작하세요."
+    resp = await _post_message(client, OTHER_ORG_ID)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is False
+    assert body["agent_message"]["content"] == fake_llm.interaction_text
