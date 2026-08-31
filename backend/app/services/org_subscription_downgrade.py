@@ -32,7 +32,6 @@ checkout.py`/`org_subscription_tier_change.py`는 애초에 이 함정을 안 �
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 
@@ -90,9 +89,6 @@ async def _offering_or_raise(session: AsyncSession, *, tier: str, currency: str)
 
 
 async def _reserve_pending_change(session: AsyncSession, *, sub: OrgSubscription, new_tier: str, offering_id: uuid.UUID) -> OrgSubscription:
-    """story #3212 — reserve_downgrade/cancel_subscription 공통 단일 지점(SSOT)이라
-    예약 확인 메일도 여기서 한 번만 쏜다(호출자별 개별 배선 불요, #3209 _confirm_with_ledger와
-    동형 원칙). 메일 실패는 예약 자체를 되돌리지 않는다."""
     await session.execute(
         update(OrgSubscription)
         .where(OrgSubscription.org_id == sub.org_id)
@@ -102,90 +98,7 @@ async def _reserve_pending_change(session: AsyncSession, *, sub: OrgSubscription
         )
     )
     await session.commit()
-    try:
-        await _notify_downgrade_reserved(
-            session, org_id=sub.org_id, new_tier=new_tier,
-            apply_at=sub.current_period_end, is_cancellation=(new_tier == "free"),
-        )
-    except Exception:
-        logger.warning("downgrade reserved notify 실패 org=%s", sub.org_id, exc_info=True)
     return await _refetch_subscription(session, sub.org_id)
-
-
-async def _notify_downgrade_reserved(
-    session: AsyncSession, *, org_id: uuid.UUID, new_tier: str, apply_at: datetime, is_cancellation: bool,
-) -> None:
-    """story #3212 AC1 — 하향/취소 예약 즉시 확인 메일. TRANSACTIONAL_COPY(payment_receipt와
-    동일 골격, render_action_email 그대로) + 수신자별 locale(storage/AU 경고·auto-cancel과
-    동형 owner/admin 전원 조회). CTA는 새 공개 원클릭 철회 엔드포인트를 발명하지 않고
-    빌링 설정 페이지(기존 예약 철회 UI가 이미 거기 있다)로 보낸다."""
-    from app.services.agent_onboarding_config import resolve_locale
-    from app.services.email import render_action_email
-    from app.services.email_copy import TRANSACTIONAL_COPY
-
-    copy_key = "subscription_cancel_reserved" if is_cancellation else "subscription_downgrade_reserved"
-    app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
-    billing_url = f"{app_url}/settings?tab=billing"
-    apply_date_display = apply_at.strftime("%Y-%m-%d")
-    tier_display = new_tier.capitalize()
-
-    recipients = [
-        r for r in (
-            await session.execute(
-                select(User.email, User.locale)
-                .join(OrgMember, User.id == OrgMember.user_id)
-                .where(OrgMember.org_id == org_id, OrgMember.role.in_(["owner", "admin"]), OrgMember.deleted_at.is_(None))
-            )
-        ).all()
-    ]
-    for em, locale_value in recipients:
-        recipient_locale = resolve_locale(locale_value)
-        copy = TRANSACTIONAL_COPY[copy_key][recipient_locale]
-        intro_lines = [line.format(tier=tier_display, apply_date=apply_date_display) for line in copy["intro_lines"]]
-        html = render_action_email(
-            intro_lines=intro_lines, cta_label=copy["cta_label"], cta_url=billing_url,
-            expiry_note=copy["expiry_note"], security_note=copy["security_note"],
-            fallback_label=copy["fallback_label"], locale=recipient_locale,
-        )
-        try:
-            send_email(em, copy["subject"].format(tier=tier_display), html)
-        except Exception:
-            logger.warning("downgrade reserved email 개별 발송 실패 org=%s to=%s", org_id, em, exc_info=True)
-
-
-async def _notify_downgrade_applied(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str, is_cancellation: bool) -> None:
-    """story #3212 AC2 — sweep 적용(갱신일 도래) 시 완료 통지. 액션 불요(정보성)라
-    DOWNGRADE_AUTO_CANCEL_COPY와 동형(greeting/body/closing, render_email_shell 직접)."""
-    from app.services.agent_onboarding_config import resolve_locale
-    from app.services.email import render_email_shell
-    from app.services.email_copy import SUBSCRIPTION_CANCEL_APPLIED_COPY, SUBSCRIPTION_DOWNGRADE_APPLIED_COPY
-
-    copy_dict = SUBSCRIPTION_CANCEL_APPLIED_COPY if is_cancellation else SUBSCRIPTION_DOWNGRADE_APPLIED_COPY
-    tier_display = new_tier.capitalize()
-
-    recipients = [
-        r for r in (
-            await session.execute(
-                select(User.email, User.locale)
-                .join(OrgMember, User.id == OrgMember.user_id)
-                .where(OrgMember.org_id == org_id, OrgMember.role.in_(["owner", "admin"]), OrgMember.deleted_at.is_(None))
-            )
-        ).all()
-    ]
-    for em, locale_value in recipients:
-        recipient_locale = resolve_locale(locale_value)
-        copy = copy_dict[recipient_locale]
-        content = (
-            f"<p>{copy['greeting']}</p>"
-            f"<p>{copy['body1'].format(tier=tier_display)}</p>"
-            f"<p>{copy['body2']}</p>"
-            f"<p>{copy['closing']}</p>"
-        )
-        html = render_email_shell(content, locale=recipient_locale)
-        try:
-            send_email(em, copy["subject"].format(tier=tier_display), html)
-        except Exception:
-            logger.warning("downgrade applied email 개별 발송 실패 org=%s to=%s", org_id, em, exc_info=True)
 
 
 async def reserve_downgrade(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str) -> OrgSubscription:
@@ -342,10 +255,6 @@ async def sweep_pending_tier_downgrades(session: AsyncSession, *, now: datetime 
             cancelled_seat_overage += 1
             continue
 
-        # story #3212 — 아래 UPDATE 직후 identity-map evaluate 동기화로 sub.pending_tier가
-        # None으로 덮인다(위 seat-overage 분기와 동일 함정, 카디르 확定 버그 PR#3308 QA
-        # 참고) — 메일에 넘길 목표 tier를 UPDATE 前에 스냅샷한다.
-        target_tier_snapshot = "free" if is_cancellation else sub.pending_tier
         if is_cancellation:
             # free는 Toss 결제 주기가 없다 — downgrade_to_free(dunning 강제전환)의 free
             # upsert 관례와 동형으로 billing_cycle/period를 비운다(재구현 0).
@@ -365,12 +274,6 @@ async def sweep_pending_tier_downgrades(session: AsyncSession, *, now: datetime 
             update(OrgSubscription).where(OrgSubscription.id == sub.id).values(**update_values)
         )
         await session.commit()
-        try:
-            await _notify_downgrade_applied(
-                session, org_id=sub.org_id, new_tier=target_tier_snapshot, is_cancellation=is_cancellation,
-            )
-        except Exception:
-            logger.warning("downgrade applied notify 실패 org=%s", sub.org_id, exc_info=True)
         applied += 1
 
     return {"pending_seen": len(pending), "applied": applied, "cancelled_seat_overage": cancelled_seat_overage, "skipped": skipped}
