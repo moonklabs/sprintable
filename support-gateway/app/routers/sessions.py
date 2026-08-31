@@ -17,10 +17,26 @@ from app.injection_defense import sanitize_customer_text
 from app.interaction import handle_turn
 from app.models import SupportConversation, SupportMessage, SupportSession
 from app.rate_limit import limiter
-from app.schemas import MessageCreateRequest, MessageExchangeResponse, MessageResponse, SessionResponse
+from app.schemas import (
+    MessageCreateRequest,
+    MessageExchangeResponse,
+    MessageListResponse,
+    MessageResponse,
+    SessionResponse,
+)
 from app.token_verify import DelegatedIdentity, require_delegated_identity
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
+
+
+def _to_message_response(message: SupportMessage) -> MessageResponse:
+    return MessageResponse(
+        id=message.id,
+        conversation_id=message.conversation_id,
+        role=message.role,
+        content=message.content,
+        created_at=message.created_at,
+    )
 
 
 async def _get_or_create_conversation(
@@ -126,17 +142,51 @@ async def post_message(
     ).scalar_one()
 
     return MessageExchangeResponse(
-        customer_message=MessageResponse(
-            id=customer_message.id,
-            conversation_id=customer_message.conversation_id,
-            role=customer_message.role,
-            created_at=customer_message.created_at,
-        ),
-        agent_message=MessageResponse(
-            id=agent_message.id,
-            conversation_id=agent_message.conversation_id,
-            role=agent_message.role,
-            created_at=agent_message.created_at,
-        ),
+        customer_message=_to_message_response(customer_message),
+        agent_message=_to_message_response(agent_message),
         escalated=turn.escalated,
     )
+
+
+@router.get("/sessions/{session_id}/messages", response_model=MessageListResponse)
+@limiter.limit(lambda: settings.session_rate_limit)
+async def list_messages(
+    request: Request,
+    session_id: uuid.UUID,
+    identity: DelegatedIdentity = Depends(require_delegated_identity),
+    db: AsyncSession = Depends(get_db),
+) -> MessageListResponse:
+    """story #3261 보완(2026-08-31, 페드루 PO 실 왕복 실측 지적) — 위젯 재오픈 시 대화 이력
+    복원용. org 스코프는 위와 동형(session 자체를 org_id로 먼저 스코프 — 존재하지 않는
+    session_id/타 org session_id 둘 다 404, 구분 안 됨)."""
+    request.state.delegated_org_id = str(identity.org_id)
+    session = (
+        await db.execute(
+            select(SupportSession).where(
+                SupportSession.id == session_id,
+                SupportSession.org_id == identity.org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    conv = (
+        await db.execute(
+            select(SupportConversation)
+            .where(SupportConversation.org_id == identity.org_id)
+            .order_by(SupportConversation.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if conv is None:
+        return MessageListResponse(messages=[])
+
+    messages = (
+        await db.execute(
+            select(SupportMessage)
+            .where(SupportMessage.conversation_id == conv.id)
+            .order_by(SupportMessage.created_at.asc())
+        )
+    ).scalars().all()
+    return MessageListResponse(messages=[_to_message_response(m) for m in messages])
