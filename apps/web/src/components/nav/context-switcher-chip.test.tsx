@@ -135,3 +135,171 @@ describe('ContextSwitcherChip — story #2076', () => {
     );
   });
 });
+
+// story #3147(doc mobile-switcher-redesign-spec-4758744a, 유나 확定 규격) — 선생님 실사용
+// 발견 6결함 해소: 44px 트리거+행·검색·3층 위계(프로젝트→조직→계정)·계정 divider 분리·
+// 데스크톱 무회귀.
+describe('ContextSwitcherChip — story #3147/#3146 재설계(44px·검색·3층·계정)', () => {
+  it('트리거가 h-11(44px 고정)이고 조직/프로젝트 2줄로 표시된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    // story #3202(선생님 실기기 픽셀 붕괴) 핀 — min-h-11(최솟값)이던 시절엔 2단 라벨의
+    // line-height가 예산을 넘기면 트리거 실높이가 부모 TopBar(h-12=48px)를 초과해 자기
+    // border/bg가 헤더 행을 뚫고 나온 것처럼 보였다(dev 라이브 실측: 48.5px·상단 -0.75px로
+    // 실제 초과 확認). h-11(고정 44px)+overflow-hidden으로 어떤 폰트 렌더링에서도 그 예산을
+    // 못 넘게 하드캡한다 — min-h-11 회귀(다시 growable해지는 것)를 여기서 막는다.
+    expect(trigger?.className).toContain('h-11');
+    expect(trigger?.className).not.toContain('min-h-11');
+    expect(trigger?.className).toContain('overflow-hidden');
+    const spans = trigger!.querySelectorAll('span > span');
+    expect(spans[0]?.textContent).toBe('뭉클랩');
+    expect(spans[1]?.textContent).toBe('Sprintable');
+    // 유나 design:changes(2026-08-29) — 두 라벨 span 모두 leading-tight. 처음엔
+    // leading-none(line-height:1)이었으나 Pretendard ascent+descent(1.19em)가 1em 박스+
+    // truncate의 overflow-hidden에서 디센더(p·g·y)를 잘랐다(실기기 폰트부스트에선 2~3
+    // device px 절단). 버튼 자체(h-11+overflow-hidden)가 이미 하드캡이라 라벨은
+    // leading-tight로 느슨해져도 예산(~30.75px<32px) 안에 안착 — leading-none 회귀를 막는다.
+    expect(spans[0]?.className).toContain('leading-tight');
+    expect(spans[1]?.className).toContain('leading-tight');
+    expect(spans[0]?.className).not.toContain('leading-none');
+    expect(spans[1]?.className).not.toContain('leading-none');
+  });
+
+  it('시트 안 프로젝트 행이 min-h-11(44px)이다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const landingButton = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Landing'));
+    expect(landingButton?.className).toContain('min-h-11');
+  });
+
+  it('검색 입력이 현재 조직 프로젝트를 즉시 필터한다(9+ 대응)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.textContent).toContain('Landing');
+
+    const search = document.querySelector('input[type="search"]') as HTMLInputElement;
+    expect(search).toBeTruthy();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(search, 'Sprint');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain('Sprintable');
+    expect(document.body.textContent).not.toContain('Landing');
+  });
+
+  it('검색어와 일치하는 프로젝트가 없으면 빈 상태 문구가 뜬다(지어낸 목록 없음)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const search = document.querySelector('input[type="search"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(search, '존재하지않는프로젝트이름');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // 트리거 자신도 현재 프로젝트명("Sprintable")을 상시 표시하므로 document.body 전체가
+    // 아니라 시트 스크롤 본문(overflow-y-auto)으로 좁혀 잰다.
+    const sheetBody = document.querySelector('.overflow-y-auto');
+    expect(sheetBody?.textContent).toContain('일치하는 프로젝트가 없습니다');
+    expect(sheetBody?.textContent).not.toContain('Sprintable');
+  });
+
+  it('다른 조직이 있으면 「다른 조직」 섹션 라벨이 뜬다', async () => {
+    const orgsWithOther = [...ORGS, { orgId: 'org-2', orgName: 'E2E Test Corp', orgSlug: 'e2e', role: 'owner' }];
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={orgsWithOther} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.textContent).toContain('다른 조직');
+    expect(document.body.textContent).toContain('E2E Test Corp');
+  });
+
+  it('userName 없으면 계정층 자체가 생략된다(no-fiction — 빈 계정 UI로 지어내지 않음)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.textContent).not.toContain('계정 추가');
+  });
+
+  it('userName 있으면 계정층(divider+계정 라벨+현재 계정+계정 추가+로그아웃)이 뜬다(#73d5ff10 해소)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') {
+        return { ok: true, json: async () => ({ data: PROJECTS.map((p) => ({ id: p.projectId, name: p.projectName })) }) };
+      }
+      if (url === '/api/accounts') {
+        return { ok: true, json: async () => ({ data: { accounts: [
+          { account_id: 'a1', name: '송윤재', email: 'sellerking@moonklabs.com', org_name: null, avatar_url: null, status: 'active' },
+        ] } }) };
+      }
+      return { ok: true, json: async () => ({ data: { ok: true } }) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" userName="송윤재" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const sheetBody = document.querySelector('.overflow-y-auto');
+    expect(sheetBody?.textContent).toContain('계정');
+    expect(sheetBody?.textContent).toContain('송윤재');
+    expect(sheetBody?.textContent).toContain('계정 추가');
+    expect(sheetBody?.textContent).toContain('로그아웃');
+  });
+
+  it('계정 전환 클릭 시 /api/auth/switch-account가 호출된다(profile-menu.tsx와 동일 배선 재사용)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') {
+        return { ok: true, json: async () => ({ data: PROJECTS.map((p) => ({ id: p.projectId, name: p.projectName })) }) };
+      }
+      if (url === '/api/accounts') {
+        return { ok: true, json: async () => ({ data: { accounts: [
+          { account_id: 'a1', name: '송윤재', email: null, org_name: null, avatar_url: null, status: 'active' },
+          { account_id: 'a2', name: '부계정', email: null, org_name: null, avatar_url: null, status: 'inactive' },
+        ] } }) };
+      }
+      return { ok: true, json: async () => ({ data: { ok: true } }) };
+    }));
+    vi.stubGlobal('location', { assign: vi.fn() } as unknown as Location);
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" userName="송윤재" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const otherAccountBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('부계정'));
+    expect(otherAccountBtn).toBeTruthy();
+    await act(async () => { otherAccountBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(global.fetch).toHaveBeenCalledWith('/api/auth/switch-account', expect.objectContaining({ method: 'POST' }));
+  });
+});

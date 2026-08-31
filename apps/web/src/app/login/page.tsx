@@ -256,7 +256,13 @@ export default function LoginPage() {
         </p>
         <p className="text-center text-sm text-muted-foreground">
           {t('noAccount')}{' '}
-          <Link href="/register" className="font-medium text-brand hover:text-brand/80">
+          {/* story #3220 — 이 링크가 nextParam을 안 실어 비로그인 초대수락→회원가입 경로에서
+              복귀 목적지가 여기서 끊겼다(로그인 페이지 자체는 next를 이미 들고 있었는데
+              "회원가입"으로 넘어가는 순간 버려짐). OAuth 버튼들(위)과 동일 패턴으로 전파. */}
+          <Link
+            href={nextParam ? `/register?next=${encodeURIComponent(nextParam)}` : '/register'}
+            className="font-medium text-brand hover:text-brand/80"
+          >
             {t('signUp')}
           </Link>
         </p>

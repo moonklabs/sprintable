@@ -8,19 +8,19 @@ describe('safeNextPath — 오픈 리다이렉트 가드 (AC3)', () => {
     expect(safeNextPath(encodeURIComponent('/board?x=1'))).toBe('/board?x=1');
   });
 
-  it('외부/프로토콜-상대/백슬래시 유도는 /inbox 로 차단', () => {
-    expect(safeNextPath('//evil.com')).toBe('/inbox');
-    expect(safeNextPath('https://evil.com')).toBe('/inbox');
-    expect(safeNextPath('http://evil.com')).toBe('/inbox');
-    expect(safeNextPath('/\\evil.com')).toBe('/inbox');
-    expect(safeNextPath('javascript:alert(1)')).toBe('/inbox');
+  it('외부/프로토콜-상대/백슬래시 유도는 /chats 로 차단', () => {
+    expect(safeNextPath('//evil.com')).toBe('/chats');
+    expect(safeNextPath('https://evil.com')).toBe('/chats');
+    expect(safeNextPath('http://evil.com')).toBe('/chats');
+    expect(safeNextPath('/\\evil.com')).toBe('/chats');
+    expect(safeNextPath('javascript:alert(1)')).toBe('/chats');
   });
 
-  it('빈/누락/디코드 불가는 /inbox', () => {
-    expect(safeNextPath(null)).toBe('/inbox');
-    expect(safeNextPath(undefined)).toBe('/inbox');
-    expect(safeNextPath('')).toBe('/inbox');
-    expect(safeNextPath('%')).toBe('/inbox'); // decodeURIComponent throw
+  it('빈/누락/디코드 불가는 /chats', () => {
+    expect(safeNextPath(null)).toBe('/chats');
+    expect(safeNextPath(undefined)).toBe('/chats');
+    expect(safeNextPath('')).toBe('/chats');
+    expect(safeNextPath('%')).toBe('/chats'); // decodeURIComponent throw
   });
 });
 
@@ -32,7 +32,7 @@ describe('buildLoginRedirect (AC3)', () => {
     expect(r).toContain(`reason=${SESSION_EXPIRED_REASON}`);
   });
 
-  it('내부경로 아니면 /inbox 로 fallback', () => {
-    expect(buildLoginRedirect('')).toContain(`next=${encodeURIComponent('/inbox')}`);
+  it('내부경로 아니면 /chats 로 fallback', () => {
+    expect(buildLoginRedirect('')).toContain(`next=${encodeURIComponent('/chats')}`);
   });
 });

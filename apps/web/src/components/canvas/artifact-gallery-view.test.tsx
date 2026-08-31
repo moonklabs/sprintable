@@ -212,7 +212,7 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
   it('renders the empty state when the project has no artifacts at all', async () => {
     vi.stubGlobal('fetch', stubFetch({ artifacts: [] }));
     await mount();
-    expect(container.textContent).toContain('아직 모인 산출물이 없습니다');
+    expect(container.textContent).toContain('아직 모인 산출물이 없어요');
   });
 });
 

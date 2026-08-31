@@ -54,14 +54,14 @@ describe('GET /api/auth/callback/[provider] — native OAuth-handoff branch', ()
     );
   }
 
-  it('without a native challenge cookie: legacy flow is fully unchanged (regression guard) — sets sp_at/sp_rt, redirects to /inbox', async () => {
+  it('without a native challenge cookie: legacy flow is fully unchanged (regression guard) — sets sp_at/sp_rt, redirects to /chats', async () => {
     stubCookies();
     mockFetch.mockResolvedValueOnce({
       ok: true, json: async () => ({ data: { access_token: 'legacy-at', refresh_token: 'legacy-rt' } }),
     });
     const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
     expect(res.status).toBe(307);
-    expect(res.headers.get('location')).toBe('http://localhost:3108/inbox');
+    expect(res.headers.get('location')).toBe('http://localhost:3108/chats');
     const allCookies = res.cookies.getAll();
     expect(allCookies.find((c) => c.name === 'sp_at')?.value).toBe('legacy-at');
     expect(allCookies.find((c) => c.name === 'sp_rt')?.value).toBe('legacy-rt');
@@ -272,5 +272,96 @@ describe('GET /api/auth/callback/[provider] — state 검증 분기 로그(2026-
     const allLoggedText = warnSpy.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(allLoggedText).not.toContain(secretState);
     expect(allLoggedText).not.toContain(secretStored);
+  });
+});
+
+// story #3204(acquisition 계측) — sign_up 전환 이벤트 발화 신호(?signup=1)+first-touch
+// 귀속 쿠키 relay. register/page.tsx(email 경로)와 동일 파라미터로 발화 지점을 하나로
+// 모으는 SSOT 계약의 OAuth 쪽 절반.
+describe('GET /api/auth/callback/[provider] — sign_up 전환 신호 + 귀속 쿠키 relay(story #3204)', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    h.cookiesGetMock.mockReset();
+    h.cookiesDeleteMock.mockReset();
+    for (const k of ENV_KEYS) delete process.env[k];
+  });
+
+  function stubCookies(overrides: Record<string, string> = {}) {
+    const defaults: Record<string, string> = { oauth_state_google: 'matching-state', ...overrides };
+    h.cookiesGetMock.mockImplementation((name: string) =>
+      name in defaults ? { value: defaults[name] } : undefined,
+    );
+  }
+
+  it('is_new_user=true — 목적지 URL에 ?signup=1이 붙는다', async () => {
+    stubCookies();
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: true } }),
+    });
+    const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+    expect(res.headers.get('location')).toBe('http://localhost:3108/chats?signup=1');
+  });
+
+  it('is_new_user=false(기존 유저 로그인) — signup 파라미터가 안 붙는다(재로그인마다 중복 발화 금지)', async () => {
+    stubCookies();
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: false } }),
+    });
+    const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+    expect(res.headers.get('location')).toBe('http://localhost:3108/chats');
+  });
+
+  it('first-touch 귀속 쿠키가 있으면 BE oauth/callback 요청 바디에 그대로 실려 간다', async () => {
+    stubCookies({
+      sp_attr_src: 'google', sp_attr_medium: 'cpc', sp_attr_campaign: 'launch', sp_attr_ref: 'https://twitter.com/x',
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: true } }),
+    });
+    await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+
+    const call = mockFetch.mock.calls.find((c) => String(c[0]).includes('/api/v2/auth/oauth/callback'));
+    const body = JSON.parse((call?.[1] as { body: string }).body);
+    expect(body).toMatchObject({
+      signup_utm_source: 'google', signup_utm_medium: 'cpc',
+      signup_utm_campaign: 'launch', signup_referrer: 'https://twitter.com/x',
+    });
+  });
+
+  it('귀속 쿠키가 없으면 요청 바디에 그 필드들 자체가 없다(빈 문자열을 지어내지 않음)', async () => {
+    stubCookies();
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: true } }),
+    });
+    await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+
+    const call = mockFetch.mock.calls.find((c) => String(c[0]).includes('/api/v2/auth/oauth/callback'));
+    const body = JSON.parse((call?.[1] as { body: string }).body);
+    expect(body).not.toHaveProperty('signup_utm_source');
+    expect(body).not.toHaveProperty('signup_referrer');
+  });
+
+  it('카디르 QA(PR#3612) — is_new_user=true(신규 가입)면 귀속 쿠키 4개를 지운다(maxAge=0)', async () => {
+    stubCookies({ sp_attr_src: 'google', sp_attr_ref: 'https://twitter.com/x' });
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: true } }),
+    });
+    const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+
+    for (const name of ['sp_attr_src', 'sp_attr_medium', 'sp_attr_campaign', 'sp_attr_ref']) {
+      const cookie = res.cookies.get(name);
+      expect(cookie?.value).toBe('');
+      expect(cookie?.maxAge).toBe(0);
+    }
+  });
+
+  it('is_new_user=false(기존 유저 로그인)면 귀속 쿠키를 안 건드린다 — 아직 소비 안 됨', async () => {
+    stubCookies({ sp_attr_src: 'google' });
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt', is_new_user: false } }),
+    });
+    const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+
+    expect(res.cookies.get('sp_attr_src')).toBeUndefined();
   });
 });

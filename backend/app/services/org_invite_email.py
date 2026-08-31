@@ -4,56 +4,49 @@ from __future__ import annotations
 import logging
 import os
 
-from app.services.email import send_email
+from app.services.email import render_email_shell, send_email
+from app.services.email_copy import INVITE_COPY
 
 logger = logging.getLogger(__name__)
 
+# story #3206 — 트랜잭셔널 3종·리마인드와 동형 버튼(bg+테두리 병용, Gmail 다크 bg 소실
+# 대응). 기존 #6366f1(인디고) 단색 버튼은 v2 브랜드색(#3157FF)+셸 공통 톤으로 정합.
 _BUTTON_STYLE = (
-    "display:inline-block;padding:12px 28px;background:#6366f1;color:#ffffff;"
-    "text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;"
+    "display:inline-block;padding:12px 24px;background:#3157FF;border:2px solid #3157FF;"
+    "color:#ffffff;text-decoration:none;border-radius:6px;font-weight:700;font-size:14px;"
 )
 
 
-def _build_invite_html(*, org_name: str, inviter_name: str, accept_link: str, role: str) -> str:
-    return f"""<!DOCTYPE html>
-<html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 0;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1);">
-        <!-- Header -->
-        <tr><td style="background:#6366f1;padding:28px 40px;">
-          <span style="color:#ffffff;font-size:20px;font-weight:700;">Sprintable</span>
-        </td></tr>
-        <!-- Body -->
-        <tr><td style="padding:40px 40px 32px;">
-          <h2 style="margin:0 0 16px;font-size:22px;color:#111827;">팀에 초대됐어요!</h2>
-          <p style="margin:0 0 12px;color:#374151;line-height:1.6;">
-            <strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에
-            <strong>{role}</strong>로 초대했습니다.
-          </p>
-          <p style="margin:0 0 32px;color:#6b7280;font-size:14px;line-height:1.6;">
-            아래 버튼을 클릭하면 초대를 수락할 수 있습니다. 링크는 7일간 유효합니다.
-          </p>
-          <a href="{accept_link}" style="{_BUTTON_STYLE}">초대 수락하기</a>
-          <hr style="margin:32px 0;border:none;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#9ca3af;font-size:13px;line-height:1.6;">
-            버튼이 보이지 않으면 아래 주소를 브라우저에 붙여 넣으세요:<br>
-            <a href="{accept_link}" style="color:#6366f1;word-break:break-all;">{accept_link}</a>
-          </p>
-        </td></tr>
-        <!-- Footer -->
-        <tr><td style="background:#f9fafb;padding:20px 40px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#9ca3af;font-size:12px;">
-            © 2025 Sprintable. 이 이메일은 초대 발송으로 자동 생성되었습니다.
-          </p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>"""
+def _en_role_with_article(role: str) -> str:
+    """유나 검수 수정의견②(2026-08-29) — role은 소문자 raw 값(member/admin/owner)이라
+    영어에서 관사 없이는 어색("as admin"). 첫 글자 발음 기준 a/an만 판단(그 외 문법
+    보정은 발명하지 않는다 — 이 3개 role 외 값이 생기면 별도 검토)."""
+    if not role:
+        return role
+    article = "an" if role[:1].lower() in "aeiou" else "a"
+    return f"{article} {role}"
+
+
+def _build_invite_html(*, org_name: str, inviter_name: str, accept_link: str, role: str, locale: str) -> str:
+    """story #3206 — 공용 셸(render_email_shell)이 헤더/푸터를 전담. 이 함수는 콘텐츠
+    영역(제목·본문·버튼·폴백 링크·자동생성 안내)만 만든다 — 예전엔 이 함수가 DOCTYPE/
+    body/헤더바(#6366f1)/카드/tint 푸터까지 전부 자체 소유했는데(v1 스타일), 유나 v2
+    시안이 그 인디고 헤더 바 자체를 실기기 반증으로 폐기했고(색 fill 위계 → 구분선
+    위계) 푸터도 회사정보 SSOT가 중복되던 걸 셸 쪽으로 수렴시켰다."""
+    copy = INVITE_COPY[locale]
+    role_display = _en_role_with_article(role) if locale == "en" else role
+    body = copy["body"].format(inviter_name=inviter_name, org_name=org_name, role=role, role_display=role_display)
+    content = (
+        f"<h2 style='margin:0 0 16px;font-size:20px;color:#1a1a1a'>{copy['heading']}</h2>"
+        f"<p style='margin:0 0 12px'>{body}</p>"
+        f"<p style='margin:0 0 20px;font-size:13px;color:#595959'>{copy['sub_body']}</p>"
+        f"<p style='margin:20px 0'><a href='{accept_link}' style='{_BUTTON_STYLE}'>{copy['cta_label']}</a></p>"
+        f"<p style='margin:0 0 8px;font-size:12px;color:#8b8b8b'>"
+        f"{copy['fallback_label']}<br>"
+        f"<a href='{accept_link}' style='color:#3157FF;text-decoration:underline;word-break:break-all'>{accept_link}</a></p>"
+        f"<p style='margin:0;font-size:12px;color:#8b8b8b'>{copy['auto_generated_note']}</p>"
+    )
+    return render_email_shell(content, locale=locale)
 
 
 def send_invite_email(
@@ -62,24 +55,44 @@ def send_invite_email(
     org_name: str,
     token: str,
     role: str,
+    org_id: str = "",
     inviter_name: str = "",
+    locale: str = "ko",
 ) -> str | None:
-    """초대 이메일 발송. 성공 시 None, 실패 시 오류 메시지 반환."""
+    """초대 이메일 발송. 성공 시 None, 실패 시 오류 메시지 반환.
+
+    story #3205 — locale은 호출자(org_invites.py)가 「초대 이메일이 이미 이 플랫폼의
+    기존 유저 것이면 그 유저의 locale, 아니면(아직 계정 없는 신규 피초대자) DEFAULT_LOCALE」
+    로 판별해 넘긴다 — 여기서는 그 값을 그대로 소비만 한다(추측 0, 기존 무회귀 동작이
+    바로 그 else 분기).
+
+    story #3217(AARRR·Referral 계측 B축·보조신호) — accept_link에 utm_source=referral·
+    utm_medium=org_invite·utm_campaign=<org_id>를 부착한다. `/invite`는 proxy.ts
+    PUBLIC_PREFIX라 기존 first-touch 캡처(story #3204 captureSignupAttribution)가 이
+    쿼리를 그대로 주워 쿠키에 심는다(FE/proxy.ts 변경 0 — 이미 있는 회로 재사용). 주
+    신호(A축)는 register()/oauth_callback()의 invite_token **수락 성공** 시점 서버측
+    기록(이 쿠키보다 우선) — 이건 "링크는 눌렀지만 가입은 나중에 다른 경로로" 케이스를
+    잡는 보조축일 뿐이다.
+    """
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     accept_link = f"{app_url}/invite/accept?token={token}"
-    display_inviter = inviter_name or "팀 관리자"
+    if org_id:
+        accept_link += f"&utm_source=referral&utm_medium=org_invite&utm_campaign={org_id}"
+    copy = INVITE_COPY[locale]
+    display_inviter = inviter_name or copy["default_inviter"]
 
     html_body = _build_invite_html(
         org_name=org_name,
         inviter_name=display_inviter,
         accept_link=accept_link,
         role=role,
+        locale=locale,
     )
 
     try:
         delivered = send_email(
             to=to,
-            subject=f"[Sprintable] {org_name} 조직에 초대됐습니다",
+            subject=copy["subject"].format(org_name=org_name),
             html_body=html_body,
         )
         if not delivered:

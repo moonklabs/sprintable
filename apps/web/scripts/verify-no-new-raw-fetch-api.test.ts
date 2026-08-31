@@ -47,11 +47,11 @@ describe('extractRawFetchApiCalls — 순수 판정 함수(AC4)', () => {
 // story #2691 — 선언된 baseline 크기를 고정해 조용한 증감(리뷰 없는 추가/삭제)을 막는다
 // (verify-no-i18n-phrase-collision.ts의 GRANDFATHER_BASELINE_COUNT_TEST와 동일 관례).
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 review 없이 조용히 못 늘어난다(관례 재사용)', () => {
-  it('story #2754 — 죽은 /api/subscription/portal(route.ts 자체가 없어 404로 끝나는 옛 결제 포털) 호출을 지워 163건으로 줄었다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(163);
+  it('PR#3558 — profile-menu.tsx→use-account-switcher.ts 추출로 4건이 3건으로 재등재(accounts는 fetchWithAuth 전환)돼 162건으로 줄었다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(162);
   });
 
-  it('EXEMPT_FILES는 8개 파일(pre-auth·공개 라우트·primitive 구현) 그대로다', () => {
-    expect(EXEMPT_FILES.size).toBe(8);
+  it('EXEMPT_FILES는 9개 파일(pre-auth·공개 라우트·primitive 구현) 그대로다(story #3159 — app/unsubscribe/page.tsx 추가)', () => {
+    expect(EXEMPT_FILES.size).toBe(9);
   });
 });

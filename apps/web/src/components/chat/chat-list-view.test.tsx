@@ -11,6 +11,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatListView } from './chat-list-view';
 
+// story #3177(S3a) — ChatListView가 이제 NowStrip을 항상 마운트한다. 이 테스트의 관심사는
+// 대화 목록 자체(SSE/아바타/URL 조립)라 NowStrip의 전역 RefreshContext 폴링 배선까지
+// 실 provider로 끌고 오지 않는다(useChatSse와 동일 관례 — 교차관심사 훅은 no-op mock).
+vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
+
 const { useDashboardContextMock, pushMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   pushMock: vi.fn(),
@@ -407,5 +412,26 @@ describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
     expect(nameEl).not.toBeUndefined();
     expect(nameEl?.className).toContain('font-semibold');
     expect(nameEl?.className).not.toContain('font-medium');
+  });
+});
+
+// story #3203(선생님 실사고·2026-08-29) — 대화 리스트 상대명 자리에 raw uuid가 노출된
+// 표시결함 pin. 근본원인은 BE resolver의 orphan 폴백이 uuid 앞 8자를 "이름"처럼 지어내던
+// 것(member_resolver.py) — 이제 BE는 name=null을 실어보내고, FE가 그 null을 '?' 1글자가
+// 아니라 사람 언어 문구로 폴백해야 한다.
+describe('ChatListView — 참가자 이름 해석 실패 폴백(story #3203)', () => {
+  it('DM 상대의 name이 null이면(BE orphan 폴백) "알 수 없는 멤버"로 뜬다 — uuid도 물음표도 아니다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-orphan-1', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-29T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: '767988e5-df5b-48e8-9964-7062fe84d691', name: null, avatar_url: null, type: 'human' },
+      ],
+    }]);
+    await mount();
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '알 수 없는 멤버');
+    expect(nameEl).not.toBeUndefined();
+    expect(container.textContent).not.toContain('767988e5');
   });
 });

@@ -8,10 +8,32 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { AttentionClusterBoard } from './attention-cluster-board';
-import type { AuthFailureClusterItem, FalsifiedClusterItem, StalledClusterItem, LoopClusterItem } from './derive-attention-clusters';
+import type { AuthFailureClusterItem, FalsifiedClusterItem, LoopClusterItem } from './derive-attention-clusters';
+import type { SilentStallBucket, SilentStallBucketKey, SilentStallItem } from './derive-silent-stall-clusters';
 
-// story #2830 — falsified/stalled 기존 테스트는 loop 신호와 무관하니 빈 값으로 고정(회귀 0).
+// story #2830 — falsified/silentStall 기존 테스트는 loop 신호와 무관하니 빈 값으로 고정(회귀 0).
 const NO_LOOP = { loop: [] as LoopClusterItem[], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0 };
+
+// story #93b076c8(2250) FE — silentStall은 4구간 요약이지 flat 리스트가 아니다(stalledItem
+// top-3/전체보기 관례를 그대로 못 씀). 빈 클러스터는 이 상수 하나로 통일.
+const EMPTY_SILENT_STALL: { totalCount: number; populationCount: number; buckets: SilentStallBucket[] } = {
+  totalCount: 0, populationCount: 0, buckets: [],
+};
+
+function silentStallItem(overrides: Partial<SilentStallItem> = {}): SilentStallItem {
+  return {
+    id: 's1', title: '스토리', enteredStateAt: '2026-08-25T00:00:00Z', ageHours: 60,
+    assigneeMemberId: null, href: '/board?story=s1', crossProjectLabel: null, ...overrides,
+  };
+}
+
+const BUCKET_KEYS: SilentStallBucketKey[] = ['48h-1w', '1w-2w', '2w-1mo', '1mo+'];
+
+function silentStallClusters(byBucket: Partial<Record<SilentStallBucketKey, SilentStallItem[]>>) {
+  const buckets = BUCKET_KEYS.map((key) => ({ key, items: byBucket[key] ?? [] }));
+  const totalCount = buckets.reduce((sum, b) => sum + b.items.length, 0);
+  return { totalCount, populationCount: totalCount, buckets };
+}
 
 let container: HTMLDivElement;
 let root: Root;
@@ -35,41 +57,19 @@ afterEach(async () => {
   container.remove();
 });
 
-function stalledItem(i: number): StalledClusterItem {
-  return { id: `s${i}`, title: `스토리 ${i}`, days: 10 - i, href: `/board?story=s${i}`, crossProjectLabel: null };
-}
-
 describe('AttentionClusterBoard', () => {
   it('셋 다 비어 있으면 아무것도 렌더하지 않는다', async () => {
-    await act(async () => { root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} />)); });
+    await act(async () => { root.render(wrap(<AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} />)); });
     expect(container.innerHTML).toBe('');
   });
 
   it('데이터 있는 유형만 카드로 그린다(가설 반증 0건이면 그 카드 자체가 없다)', async () => {
     await act(async () => {
-      root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={[stalledItem(0)]} {...NO_LOOP} />));
+      root.render(wrap(<AttentionClusterBoard falsified={[]} silentStall={silentStallClusters({ '48h-1w': [silentStallItem()] })} {...NO_LOOP} />));
     });
-    expect(container.textContent).toContain(koMessages.orgBriefing.clusterStalledTitle);
+    expect(container.textContent).toContain(koMessages.orgBriefing.clusterSilentStallTitle);
     expect(container.textContent).not.toContain(koMessages.orgBriefing.clusterFalsifiedTitle);
     expect(container.textContent).not.toContain(koMessages.orgBriefing.clusterUnclosedTitle);
-  });
-
-  it('story #2541 AC1 — 20건이 top-3만 기본 노출되고 "전체보기"로 나머지가 펼쳐진다', async () => {
-    const items = Array.from({ length: 20 }, (_, i) => stalledItem(i));
-    await act(async () => {
-      root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={items} {...NO_LOOP} />));
-    });
-
-    let rows = container.querySelectorAll('a');
-    expect(rows).toHaveLength(3);
-    expect(container.textContent).toContain('17');
-
-    const toggle = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('전체보기'));
-    expect(toggle).toBeTruthy();
-    await act(async () => { toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-
-    rows = container.querySelectorAll('a');
-    expect(rows).toHaveLength(20);
   });
 
   it('가설 반증 카드는 목표→최종 실측과 대체 가설 유무를 보인다', async () => {
@@ -79,7 +79,7 @@ describe('AttentionClusterBoard', () => {
       crossProjectLabel: null,
     };
     await act(async () => {
-      root.render(wrap(<AttentionClusterBoard falsified={[item]} stalled={[]} {...NO_LOOP} />));
+      root.render(wrap(<AttentionClusterBoard falsified={[item]} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} />));
     });
     expect(container.textContent).toContain('70');
     expect(container.textContent).toContain('41');
@@ -92,10 +92,97 @@ describe('AttentionClusterBoard', () => {
       crossProjectLabel: null,
     };
     await act(async () => {
-      root.render(wrap(<AttentionClusterBoard falsified={[item]} stalled={[]} {...NO_LOOP} />));
+      root.render(wrap(<AttentionClusterBoard falsified={[item]} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} />));
     });
     expect(container.textContent).toContain(koMessages.orgBriefing.clusterBegetUnlinked);
     expect(container.textContent).toContain(koMessages.orgBriefing.clusterFalsifiedResultUnknown);
+  });
+
+  // story #93b076c8(2250) FE — 「침묵의 정체」 4구간 요약(top-N 펼침이 아니라 구간별 접힘행).
+  describe('silent stall cluster (story #93b076c8/#2250)', () => {
+    it('빈 구간은 행 자체를 그리지 않는다(0건을 굳이 그리지 않음)', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} silentStall={silentStallClusters({ '1mo+': [silentStallItem({ id: 's1' })] })} {...NO_LOOP} />,
+        ));
+      });
+      expect(container.textContent).toContain(koMessages.orgBriefing.clusterSilentStallBucket1moPlus);
+      expect(container.textContent).not.toContain(koMessages.orgBriefing.clusterSilentStallBucket48hTo1w);
+      expect(container.textContent).not.toContain(koMessages.orgBriefing.clusterSilentStallBucket1wTo2w);
+      expect(container.textContent).not.toContain(koMessages.orgBriefing.clusterSilentStallBucket2wTo1mo);
+    });
+
+    it('기본은 접힘 — 구간 버튼 클릭 시 항목이 펼쳐지고 다시 누르면 접힌다', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} silentStall={silentStallClusters({ '2w-1mo': [silentStallItem({ id: 's1', title: '펼침 대상' })] })} {...NO_LOOP} />,
+        ));
+      });
+      expect(container.textContent).not.toContain('펼침 대상');
+      const toggle = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+      expect(toggle).toBeTruthy();
+      await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain('펼침 대상');
+      await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).not.toContain('펼침 대상');
+    });
+
+    it('count 배지는 totalCount·보조문구는 populationCount(모집단, 지어내지 않음)를 쓴다', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} silentStall={{ totalCount: 3, populationCount: 42, buckets: [{ key: '1mo+', items: [silentStallItem()] }] }} {...NO_LOOP} />,
+        ));
+      });
+      const countBadge = container.querySelector('.rounded-full.bg-card');
+      expect(countBadge?.textContent).toBe('3');
+      expect(container.textContent).toContain('42');
+    });
+
+    it('최장 배지(extraBadge)는 가장 오래 묵은 비어있지 않은 구간을 가리킨다', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard
+            falsified={[]}
+            silentStall={silentStallClusters({ '48h-1w': [silentStallItem({ id: 's1' })], '1mo+': [silentStallItem({ id: 's2' }), silentStallItem({ id: 's3' })] })}
+            {...NO_LOOP}
+          />,
+        ));
+      });
+      expect(container.textContent).toContain(`${koMessages.orgBriefing.clusterSilentStallBucket1moPlus} 2`);
+    });
+
+    it('담당자 없음(assigneeMemberId=null)이면 미배정 폴백 문구를 쓴다(no-fiction)', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} silentStall={silentStallClusters({ '1mo+': [silentStallItem({ assigneeMemberId: null })] })} {...NO_LOOP} />,
+        ));
+      });
+      const toggle = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+      await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain(koMessages.orgBriefing.clusterSilentStallUnassigned);
+    });
+
+    // story #3153(org-wide 커버리지) — 다른 프로젝트 소속 항목만 프로젝트 태그가 붙는다.
+    it('crossProjectLabel이 있는 항목만 프로젝트 태그가 보인다', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard
+            falsified={[]}
+            silentStall={silentStallClusters({
+              '1mo+': [
+                silentStallItem({ id: 's-same', title: '같은 프로젝트', crossProjectLabel: null }),
+                silentStallItem({ id: 's-other', title: '다른 프로젝트', crossProjectLabel: 'other-proj' }),
+              ],
+            })}
+            {...NO_LOOP}
+          />,
+        ));
+      });
+      const toggle = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+      await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(container.textContent).toContain('other-proj');
+      expect(container.textContent?.match(/other-proj/g)).toHaveLength(1);
+    });
   });
 
   // story #2830 — 「닫힌 적 없는 루프」 클러스터.
@@ -106,7 +193,7 @@ describe('AttentionClusterBoard', () => {
 
     it('N=0이면 카드 자체를 안 그린다(배경음 방지)', async () => {
       await act(async () => {
-        root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={[]} loop={[]} loopTotalCount={0} measurePlanMissingGoalCount={40} unmeasurableGoalCount={0} />));
+        root.render(wrap(<AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={[]} loopTotalCount={0} measurePlanMissingGoalCount={40} unmeasurableGoalCount={0} />));
       });
       // measurePlanMissingGoalCount>0이어도 loopTotalCount=0이면 루프 카드 자체가 없다 — 이
       // 보조 텍스트는 루프 카드 안에서만 존재하는 항목이라 카드가 없으면 텍스트도 없어야 한다.
@@ -116,7 +203,7 @@ describe('AttentionClusterBoard', () => {
     it('배지 색이 destructive(빨강) 아니라 warning 계열이다(방치 신호이지 실패 아님)', async () => {
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === koMessages.orgBriefing.clusterUnclosedBadgeOverdueHypothesis);
@@ -131,7 +218,7 @@ describe('AttentionClusterBoard', () => {
       const items = Array.from({ length: 20 }, (_, i) => loopItem({ id: `g${i}`, kind: 'outcomeMissing', days: i }));
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       expect(container.textContent).toContain('51');
@@ -141,7 +228,7 @@ describe('AttentionClusterBoard', () => {
       const items = Array.from({ length: 20 }, (_, i) => loopItem({ id: `g${i}`, kind: 'outcomeMissing', days: i }));
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       // "전체보기" 문구(clusterViewAll)를 쓰면 안 됨 — "더보기"(clusterUnclosedShowMore)만.
@@ -158,7 +245,7 @@ describe('AttentionClusterBoard', () => {
       const items = Array.from({ length: 20 }, (_, i) => loopItem({ id: `g${i}`, kind: 'outcomeMissing', days: i }));
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       const toggle = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('더보기'));
@@ -171,7 +258,7 @@ describe('AttentionClusterBoard', () => {
     it('measurePlanMissingGoalCount는 N에 안 더해지고 보조 텍스트로만 노출된다', async () => {
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={40} unmeasurableGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={40} unmeasurableGoalCount={0} />,
         ));
       });
       const countBadge = container.querySelector('.rounded-full.bg-card');
@@ -183,7 +270,7 @@ describe('AttentionClusterBoard', () => {
     it('unmeasurableGoalCount도 N에 안 더해지고 보조 텍스트로만 노출된다', async () => {
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={0} unmeasurableGoalCount={7} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={0} unmeasurableGoalCount={7} />,
         ));
       });
       const countBadge = container.querySelector('.rounded-full.bg-card');
@@ -202,7 +289,7 @@ describe('AttentionClusterBoard', () => {
       ];
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={2} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={items} loopTotalCount={2} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
@@ -218,7 +305,7 @@ describe('AttentionClusterBoard', () => {
       ];
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={2} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={items} loopTotalCount={2} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       expect(container.textContent).toContain('other-proj');
@@ -234,7 +321,7 @@ describe('AttentionClusterBoard', () => {
 
     it('N=0이면 카드 자체를 안 그린다(AC4)', async () => {
       await act(async () => {
-        root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[]} />));
+        root.render(wrap(<AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} authFailure={[]} />));
       });
       expect(container.textContent).not.toContain(koMessages.orgBriefing.clusterAuthFailureTitle);
     });
@@ -243,7 +330,7 @@ describe('AttentionClusterBoard', () => {
     it('destructive(빨강)를 쓰지 않고 warning 계열을 쓴다(AC1)', async () => {
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[authFailureItem({})]} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} authFailure={[authFailureItem({})]} />,
         ));
       });
       expect(container.innerHTML).not.toMatch(/bg-destructive/);
@@ -255,7 +342,7 @@ describe('AttentionClusterBoard', () => {
       const memberNames = { m1: '디디 은두카쿠' };
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[authFailureItem({ reason: 'revoked', failureCount: 9 })]} memberNames={memberNames} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} authFailure={[authFailureItem({ reason: 'revoked', failureCount: 9 })]} memberNames={memberNames} />,
         ));
       });
       expect(container.textContent).not.toContain('revoked'); // raw enum 유출 금지
@@ -269,7 +356,7 @@ describe('AttentionClusterBoard', () => {
     it('memberNames에 이름이 없으면(또는 memberId가 null) 이름 폴백 문구를 쓴다(no-fiction)', async () => {
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[authFailureItem({ memberId: null, reason: 'invalid' })]} />,
+          <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} authFailure={[authFailureItem({ memberId: null, reason: 'invalid' })]} />,
         ));
       });
       expect(container.textContent).toContain(koMessages.orgBriefing.clusterAuthFailureUnknownAgent);

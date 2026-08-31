@@ -157,9 +157,24 @@ describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 갑니다")', ()
   });
 });
 
+// story #3208 — 위 own-href(story/epic/asset)와 별개로, artifact의 detail fetch는 이제
+// preview(project_id 해소)→detail(X-Project-Id 명시) 2단 왕복이다(#2168 doc own-href와
+// 동형 근본원인·처방). 이 describe 블록의 모든 stubFetch는 `/preview` 요청에 먼저 응답해야
+// detail fetch까지 도달한다 — 이 헬퍼가 그 반복을 한 곳으로 모은다.
+function stubArtifactPreviewThenDetail(
+  detailImpl: (url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>,
+) {
+  stubFetch(async (url) => {
+    if (url.includes('/api/visual-artifacts/preview')) {
+      return { ok: true, json: async () => ({ data: { projectId: 'p-current' } }) };
+    }
+    return detailImpl(url);
+  });
+}
+
 describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, 전부 없으면 ③)', () => {
   it('story_id가 있는 artifact는 "담긴 곳으로 갑니다"로 그 story로 간다', async () => {
-    stubFetch(async () => ({
+    stubArtifactPreviewThenDetail(async () => ({
       ok: true,
       json: async () => ({ data: { story_id: 's-1', epic_id: null, doc_id: null } }),
     }));
@@ -173,8 +188,30 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     expect(link!.textContent).toContain('담긴 곳으로 갑니다');
   });
 
+  it('story #3208 핵심 처방 — 뷰어가 다른 project를 보던 중이어도 preview가 해소한 project_id를 detail fetch에 X-Project-Id로 명시 실어 보낸다(«현재 project»로 스코프되지 않음)', async () => {
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((v, k) => { headers[k] = v; });
+      calls.push({ url, headers });
+      if (url.includes('/api/visual-artifacts/preview')) {
+        return { ok: true, json: async () => ({ data: { projectId: 'p-owning' } }) };
+      }
+      return { ok: true, json: async () => ({ data: { story_id: null, epic_id: null, doc_id: null } }) };
+    }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="artifact" entity_id="a-cross" title="크로스 목업" status={null} />);
+    });
+    await openCard();
+    await flush();
+    const detailCall = calls.find((c) => c.url === '/api/visual-artifacts/a-cross');
+    expect(detailCall).toBeDefined();
+    // Headers는 이름을 소문자로 정규화한다.
+    expect(detailCall!.headers['x-project-id']).toBe('p-owning');
+  });
+
   it('epic_id만 있으면 그 epic(/goals/)으로 간다', async () => {
-    stubFetch(async () => ({
+    stubArtifactPreviewThenDetail(async () => ({
       ok: true,
       json: async () => ({ data: { story_id: null, epic_id: 'e-9', doc_id: null } }),
     }));
@@ -189,7 +226,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
   // story #2642(BE #3044) — ArtifactResponse는 artifact 자기 행의 org_id/project_id를
   // 직접 싣는다(부모 hop 불필요) — story_id/epic_id 분기 둘 다 이 값을 그대로 쓴다.
   it('story_id + org_slug/project_slug가 있는 artifact는 크로스프로젝트 부모 story로 직행한다', async () => {
-    stubFetch(async () => ({
+    stubArtifactPreviewThenDetail(async () => ({
       ok: true,
       json: async () => ({ data: { story_id: 's-1', epic_id: null, doc_id: null, org_slug: 'acme', project_slug: 'content' } }),
     }));
@@ -203,7 +240,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
   });
 
   it('epic_id + org_slug/project_slug가 있는 artifact는 크로스프로젝트 부모 epic으로 직행한다', async () => {
-    stubFetch(async () => ({
+    stubArtifactPreviewThenDetail(async () => ({
       ok: true,
       json: async () => ({ data: { story_id: null, epic_id: 'e-9', doc_id: null, org_slug: 'acme', project_slug: 'content' } }),
     }));
@@ -222,6 +259,9 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
   // 이 처방이 그 사각도 같이 없앤다).
   it('doc_id가 있는 artifact — 그 doc이 속한 project로 직행한다(#2168 재사용, 새 BE 없음)', async () => {
     stubFetch(async (url) => {
+      if (url.includes('/api/visual-artifacts/preview')) {
+        return { ok: true, json: async () => ({ data: { projectId: 'p-current' } }) };
+      }
       if (url.includes('/api/visual-artifacts/')) {
         if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
         if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
@@ -247,6 +287,9 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
 
   it('doc_id가 있는 artifact — doc preview 조회 실패 시 기존 bare `/docs?id=`로 우아하게 폴백한다(회귀 아님, ④ 원칙)', async () => {
     stubFetch(async (url) => {
+      if (url.includes('/api/visual-artifacts/preview')) {
+        return { ok: true, json: async () => ({ data: { projectId: 'p-current' } }) };
+      }
       if (url.includes('/api/visual-artifacts/')) {
         if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
         if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
@@ -265,7 +308,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
   });
 
   it('전부 null(독립 artifact)이면 회색·행동0 "열 수 있는 화면이 없습니다"(거짓 링크 금지)', async () => {
-    stubFetch(async () => ({
+    stubArtifactPreviewThenDetail(async () => ({
       ok: true,
       json: async () => ({ data: { story_id: null, epic_id: null, doc_id: null } }),
     }));
@@ -318,6 +361,9 @@ describe('story #2614 AC1/AC3 — artifact(부모 없는 독립 목업)는 몸�
     // 내용물이 아니다)로 응답해 ArtifactThumbnail이 안전하게 placeholder로 정착하게 한다.
     stubFetch(async (url) => {
       expect(url).toContain('/api/visual-artifacts/');
+      // story #3208 — EntityPreviewModal의 detail fetch·EmbedCard 자신의 썸네일 fetch 둘 다
+      // 이제 preview(project_id 해소)를 먼저 부른다(#2168 doc own-href와 동형).
+      if (url.includes('/preview')) return { ok: true, json: async () => ({ data: { projectId: 'p-current' } }) };
       if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
       if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
       return {

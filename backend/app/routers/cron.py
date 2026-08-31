@@ -24,7 +24,9 @@ from app.models.hitl import HitlRequest
 from app.models.org_subscription import OrgSubscription
 from app.models.project import OrgMember
 from app.models.user import User
-from app.services.email import send_email
+from app.services.agent_onboarding_config import resolve_locale
+from app.services.email import render_email_shell, send_email
+from app.services.email_copy import AU_WARN_COPY, STORAGE_WARN_COPY
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
@@ -210,6 +212,26 @@ async def onboarding_abandoned_sweep(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/onboarding-reminder-sweep ─────────────────────
+# story #3159(retention·최소층) — [now-48h,24h) 가입자 중 미완주(email 미인증 or agent 미연결
+# or 첫왕복 미완)에게 1회 리마인드 메일. users.onboarding_reminder_sent_at으로 중복 발송 차단.
+
+@router.post("/onboarding-reminder-sweep")
+async def onboarding_reminder_sweep(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.onboarding_activation import run_reminder_sweep
+
+        result = await run_reminder_sweep(session)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error (onboarding-reminder-sweep): %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/workflow-handoff-watchdog ──────────────────────
 # E-DG S8: handoff watchdog + ACK reconciliation(P0-3). silent handoff stall 을 observable
 # incident 로 전환 — ACK 대사 → acked / 10분 미ACK → timed_out(board badge) + fallback notification.
@@ -375,18 +397,6 @@ async def zero_referenced_entities_check(
     except Exception as exc:
         logger.exception("cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
-
-
-# ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
-
-@router.get("/inbox-outbox")
-async def inbox_outbox(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    verify_cron(request)
-    # inbox-outbox 처리 — 현재 SQLAlchemy 기반 구현에서는 no-op (Supabase pg_cron 대체)
-    return _ok({"processed": 0, "dispatched": 0})
 
 
 # ─── GET /api/v2/internal/cron/retry-agent-runs ────────────────────────────────
@@ -630,6 +640,13 @@ async def score_hypotheses_cron(
     try:
         summary = await score_hypotheses(session)
         await session.commit()
+        # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish. 배치가
+        # 여러 org에 걸칠 수 있어(measure_after 도래 가설 전역 쿼리) org별 1회 push(과다발화
+        # 방지 — score_hypotheses가 이미 dedup된 집합을 반환).
+        for _org_id in summary.get("attention_org_ids", []):
+            from app.services.attention_events import notify_attention_changed
+
+            await notify_attention_changed(_org_id)
         return _ok(summary)
     except Exception as exc:
         logger.exception("score-hypotheses cron error: %s", exc)
@@ -882,9 +899,9 @@ async def storage_usage_warn(
                 and (now - sub.storage_warn_notified_at) < _STORAGE_WARN_COOLDOWN
             ):
                 continue  # cooldown 내 — 재발송 금지(dedup)
-            emails = [
-                r[0] for r in (await session.execute(
-                    select(User.email)
+            recipients = [
+                r for r in (await session.execute(
+                    select(User.email, User.locale)
                     .join(OrgMember, User.id == OrgMember.user_id)
                     .where(
                         OrgMember.org_id == sub.org_id,
@@ -894,13 +911,13 @@ async def storage_usage_warn(
                 )).all()
             ]
             pct = round(used / cap_bytes * 100, 1)
-            subject = f"[Sprintable] Storage usage at {pct}%"
-            html = (
-                f"<p>Your organization's storage usage has reached <b>{pct}%</b> "
-                f"({used // (1024 * 1024)}MB / {cap_mb}MB).</p>"
-                f"<p>Free up space (delete unused files) or upgrade your plan to avoid upload limits.</p>"
-            )
-            for em in emails:
+            # story #3205(AC3) — 어드민 locale 기준 분기(수신자별 개별). 기존엔 en 고정이었다.
+            for em, locale_value in recipients:
+                recipient_locale = resolve_locale(locale_value)
+                copy = STORAGE_WARN_COPY[recipient_locale]
+                subject = copy["subject"].format(pct=pct)
+                content = copy["body"].format(pct=pct, used_mb=used // (1024 * 1024), cap_mb=cap_mb)
+                html = render_email_shell(content, locale=recipient_locale)
                 try:
                     await asyncio.to_thread(send_email, em, subject, html)
                 except Exception:

@@ -11,5 +11,4 @@ export { ApiProjectRepository } from './ApiProjectRepository';
 export { ApiSprintRepository } from './ApiSprintRepository';
 export { ApiNotificationRepository } from './ApiNotificationRepository';
 export { ApiTeamMemberRepository } from './ApiTeamMemberRepository';
-export { ApiInboxItemRepository } from './ApiInboxItemRepository';
 export { ApiHypothesisRepository } from './ApiHypothesisRepository';

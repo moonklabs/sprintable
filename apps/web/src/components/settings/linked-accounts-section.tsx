@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -17,9 +18,14 @@ const PROVIDERS: { id: ProviderId; label: string }[] = [
 // 병합이 원천 불가해 항상 신규 계정이 생긴다. PO 확定 정책: 병합은 사용자 주도 수동
 // 연결로. has_password 유무로만 렌더 여부가 갈리는 SetPasswordSection과 달리 이 섹션은
 // has_password와 무관하게 항상 보인다(로그인 방법이 뭐든 추가 provider 연결은 유효한
-// 동작) — SetPasswordSection과 같은 하드코딩 영문 톤(이 컴포넌트군은 next-intl 미배선)을
-// 그대로 따른다.
+// 동작).
+//
+// story #3149(선생님 실사용 발견) — 원 구현이 SetPasswordSection과 같은 하드코딩 영문
+// 톤을 그대로 따랐는데, 그 톤 자체가 선생님 실기기에서 "설정 화면 전체가 한국어인데
+// 여기만 영문"으로 발견된 결함이었다(투자조사: 3rd-party 위젯 아님 — 이 레포 컴포넌트,
+// i18n만 미배선). next-intl로 이관. Google/Apple은 브랜드 고유명사라 번역 대상 제외.
 export function LinkedAccountsSection() {
+  const t = useTranslations('settings');
   const searchParams = useSearchParams();
   const [linkedProviders, setLinkedProviders] = useState<ProviderId[] | null>(null);
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
@@ -42,21 +48,22 @@ export function LinkedAccountsSection() {
     const linked = searchParams.get('linked');
     const linkError = searchParams.get('link_error');
     if (linked) {
-      setMessage({ type: 'success', text: `${linked === 'apple' ? 'Apple' : 'Google'} account connected.` });
+      const providerLabel = linked === 'apple' ? 'Apple' : 'Google';
+      setMessage({ type: 'success', text: t('linkedAccountsLinkedSuccess', { provider: providerLabel }) });
       void refresh();
     } else if (linkError) {
       // story #3122 AC2 — PROVIDER_ALREADY_LINKED는 "이미 연결됨"이 아니라 "다른 계정에
       // 묶여있어 거부됨"이라 문구를 갈라야 사용자가 오해하지 않는다(병합이 아니라는 것).
       const text = linkError === 'PROVIDER_ALREADY_LINKED'
-        ? 'That account is already linked to a different Sprintable account.'
+        ? t('linkedAccountsErrorAlreadyLinked')
         : linkError === 'LINK_SESSION_MISMATCH'
-          ? 'Your session changed during linking. Please try again.'
+          ? t('linkedAccountsErrorSessionMismatch')
           : linkError === 'SESSION_EXPIRED'
-            ? 'Your session expired before linking finished. Please try again.'
-            : 'Failed to connect account.';
+            ? t('linkedAccountsErrorSessionExpired')
+            : t('linkedAccountsErrorConnectFailed');
       setMessage({ type: 'error', text });
     }
-  }, [searchParams]);
+  }, [searchParams, t]);
 
   const handleUnlink = async (provider: ProviderId) => {
     setUnlinking(provider);
@@ -70,12 +77,13 @@ export function LinkedAccountsSection() {
       const json = await res.json() as { error?: { code?: string } };
       if (!res.ok) {
         const text = json.error?.code === 'LAST_LOGIN_METHOD'
-          ? 'This is your only sign-in method — set a password or connect another account before disconnecting.'
-          : 'Failed to disconnect account.';
+          ? t('linkedAccountsErrorLastLoginMethod')
+          : t('linkedAccountsErrorDisconnectFailed');
         setMessage({ type: 'error', text });
         return;
       }
-      setMessage({ type: 'success', text: `${provider === 'apple' ? 'Apple' : 'Google'} account disconnected.` });
+      const providerLabel = provider === 'apple' ? 'Apple' : 'Google';
+      setMessage({ type: 'success', text: t('linkedAccountsUnlinkedSuccess', { provider: providerLabel }) });
       await refresh();
     } finally {
       setUnlinking(null);
@@ -90,10 +98,8 @@ export function LinkedAccountsSection() {
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">Connected Accounts</h2>
-          <p className="text-sm text-muted-foreground">
-            Connect another sign-in method to this account, or disconnect one you no longer use.
-          </p>
+          <h2 className="text-base font-semibold text-foreground">{t('linkedAccountsTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('linkedAccountsDescription')}</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
@@ -121,23 +127,23 @@ export function LinkedAccountsSection() {
               <li key={id} className="flex items-center justify-between py-3">
                 <div>
                   <p className="text-sm font-medium text-foreground">{label}</p>
-                  <p className="text-xs text-muted-foreground">{connected ? 'Connected' : 'Not connected'}</p>
+                  <p className="text-xs text-muted-foreground">{connected ? t('linkedAccountsConnected') : t('linkedAccountsNotConnected')}</p>
                 </div>
                 {connected ? (
                   <button
                     onClick={() => void handleUnlink(id)}
                     disabled={!canUnlink || unlinking === id}
-                    title={canUnlink ? undefined : 'This is your only sign-in method'}
+                    title={canUnlink ? undefined : t('linkedAccountsOnlyMethodTitle')}
                     className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted/50 disabled:opacity-50"
                   >
-                    {unlinking === id ? '...' : 'Disconnect'}
+                    {unlinking === id ? t('linkedAccountsDisconnecting') : t('linkedAccountsDisconnect')}
                   </button>
                 ) : (
                   <a
                     href={`/auth/link?provider=${id}`}
                     className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted/50"
                   >
-                    Connect
+                    {t('linkedAccountsConnect')}
                   </a>
                 )}
               </li>

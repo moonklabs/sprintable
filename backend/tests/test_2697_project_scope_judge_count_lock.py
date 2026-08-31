@@ -73,12 +73,6 @@ _KNOWN_HITS = {
     "app/routers/meetings.py::_get_repo",
     "app/routers/meetings.py::_get_repo_read",
     "app/routers/members.py::list_members",
-    # story #2923(P0-E AQ1, 카디르 QA HIGH1 처방+PO 지시 2026-08-22) — /inbox·/inbox/incoming에
-    # project_id 필터를 추가하며 caller의 project 접근권 검증도 필요했다(activity_logs.py:
-    # list_activity_logs의 기존 raw 인라인 관례 그대로 — require_project_access SSOT로
-    # 안 옮긴 건 그 파일과 동형 이유, 새로 만든 패턴 아님).
-    "app/routers/notifications.py::list_inbox",
-    "app/routers/notifications.py::list_incoming",
     "app/routers/oss.py::oss_seed",
     "app/routers/policy_documents.py::list_policy_documents",
     "app/routers/project_settings.py::get_project_settings",
@@ -104,9 +98,11 @@ _KNOWN_HITS = {
     "app/services/project_auth.py::require_project_access",
     "app/services/workflow_parallel_approval.py::reassign_approver",
 }
-# raw 총량(고유 키 56개 + 위 5개 함수의 내부 중복 5건 = 61) — len(_KNOWN_HITS)와 분리해 명시.
-# story #2923(2026-08-22) — notifications.py::list_inbox/list_incoming 2건 추가로 59→61.
-_RAW_INLINE_RAISE_BASELINE = 61
+# raw 총량(고유 키 54개 + 아래 5개 함수의 내부 중복 5건 = 59) — len(_KNOWN_HITS)와 분리해 명시.
+# story #1969(2026-08-30) — inbox_items 기능 완전 은퇴로 notifications.py::list_inbox/
+# list_incoming 자체가 삭제돼 그 2건의 raw 인라인 패턴도 함께 걷혀 61→59(story #2923이 더했던
+# 값이 정확히 되돌아감).
+_RAW_INLINE_RAISE_BASELINE = 59
 
 
 def _qualname_of(node: ast.AST, parents: dict[int, ast.AST]) -> str:

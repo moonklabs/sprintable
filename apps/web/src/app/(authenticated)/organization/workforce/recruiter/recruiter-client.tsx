@@ -1553,7 +1553,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
-                <Link href="/dashboard" onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
+                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. */}
+                <Link href="/chats" onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
               </div>
             </div>
           )}

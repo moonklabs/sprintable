@@ -311,6 +311,14 @@ steps:
   # iframe이라 무영향)가 origin 불문 전부 차단돼 있었다. `gcloud storage buckets update
   # --cors-file=`은 **전체 교체**라 매 배포 재실행에도 멱등(파일 내용이 그대로면 결과도
   # 그대로) — build/push와 무관해 초반부터 병행 실행.
+  #
+  # 갱신(story #3242, 2026-08-31, 페드루 PO 발주·유나 실측 근거): #886d996f 업로드 기능이
+  # 이 버킷에 서명 PUT을 직접 쏘게 되며 GET/HEAD만 있던 method가 뚫렸다 — PUT 프리플라이트가
+  # Access-Control-Allow-Origin 부재로 net::ERR_FAILED. method에 PUT 추가(OPTIONS는 GCS가
+  # Access-Control-Request-Method 매칭으로 자동 처리 — 명시 금지, 공식문서 확認 완료). PUT은
+  # 항상 create_only=True로 서명(x-goog-if-generation-match: 0 바인딩)·content_type 바인딩이라
+  # responseHeader(=GCS의 Access-Control-Allow-Headers 대응 필드)에 x-goog-if-generation-match를
+  # 추가(Content-Type은 기존에 이미 있었음) — 둘 중 하나라도 빠지면 프리플라이트가 여전히 막힌다.
   - id: apply-gcs-attachments-cors
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
@@ -330,8 +338,7 @@ steps:
         echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
     waitFor: ['-']
 
-  # story #2887 — avatar 전용 버킷 CORS. PUT까지 필요(memo-attachments는 GET/HEAD뿐 — 아바타는
-  # FE가 서명 URL로 직접 PUT하는 업로드 흐름이라 다름). CORS json(infra/gcs-avatars-cors.json)
+  # story #2887 — avatar 전용 버킷 CORS. CORS json(infra/gcs-avatars-cors.json)
   # 자체는 dev/prod origin을 이미 다 실은 공용 파일(memo-attachments와 동일 관례) — 버킷명만
   # env별로 갈린다.
   # story #3117(2026-08-26, prod 실사고 후속) — 여태 dev 전용 게이트(prod 버킷 미프로비저닝)
@@ -492,7 +499,18 @@ steps:
       # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(story 57526f21) — APPLE_TEAM_ID·
       # MOBILE_APP_LINK_ORIGIN 없으면 /.well-known/apple-app-site-association 라우트가
       # 설계대로 500(fail-loud)을 낸다. 같은 --update-env-vars에 동반(additive, 기존 env 보존).
-      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN}
+      # story #3168(2026-08-28, 페드루 PO 실측) — APP_BASE_URL/NEXT_PUBLIC_APP_URL 둘 다
+      # 이 스텝에 한 번도 배선된 적이 없어(순수 수동 category C) dev="NEXT_PUBLIC_APP_URL만
+      # 유"·prod="APP_BASE_URL만 유"로 환경마다 정반대 절반만 우연히 채워져 있었다 —
+      # apps/web/src/lib/auth/cookies.ts의 `APP_BASE_URL ?? NEXT_PUBLIC_APP_URL` 폴백
+      # 사슬 덕에 지금까지는 두 환경 다 결과적으로 동작해왔을 뿐(secure 쿠키 판정용),
+      # prod의 APP_BASE_URL은 수동 주입값이라 다음 전체 env 교체 배포가 조용히 지울 수
+      # 있는 시한 위험이었다. `_NEXT_PUBLIC_APP_URL`(이미 dev="https://dev-app.sprintable.ai"·
+      # prod="https://app.sprintable.ai"로 정확히 분기돼 있음, GHA cloud-build.yml 참고)를
+      # 재사용해 두 키 다 이 스텝에서 명시 배선 — 폴백 우선순위상 APP_BASE_URL이 먼저
+      # 읽히므로 그 값을 정본으로 통일하고 NEXT_PUBLIC_APP_URL은 이미 그 값을 쓰던 dev의
+      # 하위호환(레거시 Amplify override 축, app-url.ts 주석 참고)으로 같이 채운다.
+      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN},APP_BASE_URL=${_NEXT_PUBLIC_APP_URL},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}
       - --quiet
     waitFor: [push-frontend]
 

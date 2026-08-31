@@ -149,6 +149,32 @@ async function getVerifiedOrgId(fastapiUrl: string, accessToken: string): Promis
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// story #3208(PO customer-zero, 2026-08-29) — bare `/artifacts/{id}` 레거시 리다이렉트가
+// 아래 일반 경로(쿠키/JWT로 «현재» projectId를 추측 → 그 project에서 리소스를 찾는 꼴)를
+// 그대로 타면, 아티팩트가 **다른** project 소속일 때 항상 실패한다(아티팩트는 정확히 하나의
+// project에 속하지 «현재 보고 있는» project에 속하는 게 아니다 — doc의 #2168과 동형 클래스).
+// 아티팩트 자신의 실제 project를 `GET /api/v2/visual-artifacts/preview`(BE 신설, org 스코프
+// 조회 + has_project_access 검증)로 직접 물어 해소한다 — 추측 0, 진짜 위치.
+async function resolveArtifactOwnProject(
+  fastapiUrl: string, orgId: string, artifactId: string, accessToken: string,
+): Promise<{ orgSlug: string; projectSlug: string } | null> {
+  try {
+    const res = await fetch(`${fastapiUrl}/api/v2/visual-artifacts/preview?id=${artifactId}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, 'X-Org-Id': orgId },
+    });
+    if (!res.ok) return null;
+    const json = await res.json() as { data?: { org_slug?: string; project_slug?: string | null } };
+    const orgSlug = json.data?.org_slug;
+    const projectSlug = json.data?.project_slug;
+    if (!orgSlug || !projectSlug) return null;
+    return { orgSlug, projectSlug };
+  } catch {
+    return null;
+  }
+}
+
 // story #1998(급, 선생님 실사용 "보드가 404") — access token의 app_metadata.project_id를
 // CURRENT_PROJECT_COOKIE 부재 시 fallback으로 쓴다. 근본원인: 이 쿠키는 onboarding-form.tsx·
 // switch-project·switch-org 명시 액션에서만 SET되고 평범한 로그인(POST /api/auth/login)에서는
@@ -194,13 +220,29 @@ async function redirectLegacyResourcePath(
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const orgId = await getVerifiedOrgId(fastapiUrl, accessToken);
-  // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
-  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
-    ?? await getProjectIdFromAccessToken(accessToken);
   // orgId조차 없으면(토큰 자체가 org_id를 못 실은 예외적 경우) 개입할 근거가 없어 그대로 통과
   // (Next 자체 404) — verifyAccessToken 통과 후 이론상 가능하나 실사용 재현 없음, story #2212
   // 스코프 밖(그 경우엔 org조차 모르니 org-briefing으로도 못 보낸다).
   if (!orgId) return null;
+
+  // story #3208 — artifacts는 «현재 project 추측»이 아니라 «자기 자신이 속한 project»로
+  // 해소한다(doc #2168과 동형). id가 UUID 모양일 때만 시도하고, 실패하면(대상 없음·접근권
+  // 없음·백엔드 오류) 아래 일반 경로로 자연히 폴백한다(회귀 0 — 기존 동작을 대체하는 게
+  // 아니라 artifacts에 한해 우선순위가 더 높은 해소 경로를 추가하는 것).
+  if (resourceName === 'artifacts' && segments[1] && UUID_RE.test(segments[1])) {
+    const ownSlugs = await resolveArtifactOwnProject(fastapiUrl, orgId, segments[1], accessToken);
+    if (ownSlugs) {
+      const rest = pathname.slice(`/${resourceName}`.length);
+      const url = request.nextUrl.clone();
+      url.pathname = `/${ownSlugs.orgSlug}/${ownSlugs.projectSlug}/${resourceName}${rest}`;
+      url.searchParams.delete(RESOLVE_RETRY_PARAM);
+      return NextResponse.redirect(url, 301);
+    }
+  }
+
+  // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
+  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
+    ?? await getProjectIdFromAccessToken(accessToken);
   // story #2212 — 여기서 그냥 null(→ Next 404)을 주던 것이 결함이었다. "프로젝트를 못 정했다"는
   // 사고가 아니라 코드 주석에 그대로 선언된 설계였지만("해소 불가면 null"), 그 선택 자체가
   // dead-end라 처방 대상이다. org는 확定됐으니 org-briefing(프로젝트 불필요 페이지)으로 보내고
@@ -558,13 +600,57 @@ async function resolveAndRespond(
     }
   }
 
-  if (pathname === '/login') {
-    const url = request.nextUrl.clone();
-    url.pathname = '/inbox';
-    return NextResponse.redirect(url);
-  }
+  // story #3179(S3c) 조사(카디르 QA 정정 — 배열명 오기) — 이 분기는 죽은 코드였다: '/login'은
+  // PUBLIC_PREFIX에 있어(§L64 근방, startsWith prefix로 매칭) proxy()가 항상 그 앞에서 조기
+  // 반환한다 — resolveAndRespond까지 「이미 로그인된 채 /login 방문」 요청이 도달할 길이 없다
+  // (그래서 원래도 '/inbox' 타깃이 실제로 한 번도 안 쓰였다). 로그인 랜딩(AC2)의 진짜 메커니즘은
+  // lib/auth/session-redirect.ts의 safeNextPath/buildLoginRedirect(login/page.tsx의
+  // router.replace(safeNextPath(nextParam)) 소비) — 거기를 고쳤다. 여기 죽은 분기는 혼동을
+  // 남기지 않게 제거한다.
 
   return response;
+}
+
+// story #3204(acquisition 계측) — 가입 출처 first-touch 캡처. 기존 oauth_state_*/
+// oauth_tos_* 등과 동형 관례(별개 단순 쿠키 4개, JSON blob 발명 없음). 30일(=sp_rt와
+// 동일 윈도우) — 그 안에 가입하면 register()/oauth_callback()이 이 값을 users 컬럼에
+// 1회 옮겨 담는다. **first-touch**: 이미 하나라도 세팅돼 있으면 재방문에 덮어쓰지
+// 않는다(첫 유입 채널만 귀속). httpOnly(FE JS가 아니라 register/oauth 콜백 route.ts만
+// 읽는다) — 클라 조작 표면을 줄인다.
+const SIGNUP_ATTRIBUTION_COOKIES = {
+  source: 'sp_attr_src', medium: 'sp_attr_medium', campaign: 'sp_attr_campaign', referrer: 'sp_attr_ref',
+} as const;
+const SIGNUP_ATTRIBUTION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+function captureSignupAttribution(request: NextRequest, response: NextResponse): void {
+  const alreadyCaptured = Object.values(SIGNUP_ATTRIBUTION_COOKIES).some(
+    (name) => request.cookies.get(name)?.value,
+  );
+  if (alreadyCaptured) return; // first-touch만 — 재방문 덮어쓰기 안 함.
+
+  const params = request.nextUrl.searchParams;
+  const utmSource = params.get('utm_source');
+  const utmMedium = params.get('utm_medium');
+  const utmCampaign = params.get('utm_campaign');
+
+  // 동일 출처 내부 이동은 "출처"가 아니다(예: 로그인→가입 링크 클릭) — 외부 referer만.
+  let externalReferrer: string | null = null;
+  const referer = request.headers.get('referer');
+  if (referer) {
+    try {
+      externalReferrer = new URL(referer).origin === request.nextUrl.origin ? null : referer;
+    } catch {
+      externalReferrer = null;
+    }
+  }
+
+  if (!utmSource && !utmMedium && !utmCampaign && !externalReferrer) return; // 신호 없음(direct) — 쿠키 안 남김.
+
+  const base = { ...cookieBase(), maxAge: SIGNUP_ATTRIBUTION_MAX_AGE_SECONDS };
+  if (utmSource) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.source, utmSource, base);
+  if (utmMedium) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.medium, utmMedium, base);
+  if (utmCampaign) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.campaign, utmCampaign, base);
+  if (externalReferrer) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.referrer, externalReferrer, base);
 }
 
 export async function proxy(request: NextRequest) {
@@ -586,7 +672,9 @@ export async function proxy(request: NextRequest) {
     PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
 
   if (isPublicPath) {
-    return NextResponse.next({ request });
+    const response = NextResponse.next({ request });
+    captureSignupAttribution(request, response);
+    return response;
   }
 
   // Authenticated API routes — try token refresh but never redirect to /login

@@ -37,6 +37,7 @@ export const EXEMPT_FILES = new Set<string>([
   'app/register/page.tsx', // POST /api/auth/register — 계정 생성 자체, 세션 없음.
   'app/reset-password/page.tsx', // POST /api/auth/reset-password — 로그인 前.
   'app/mfa/page.tsx', // POST /api/auth/2fa/verify — 로그인 2단계(주 세션 아직 미확立).
+  'app/unsubscribe/page.tsx', // GET /api/activation/unsubscribe — 이메일 링크 클릭, 세션 없는 방문자(story #3159).
   'lib/db/client.ts', // fetchWithAuth/refreshAuthTokens 자신의 구현 — raw fetch가 원시 primitive.
   'lib/auth/firebase-login-flow.ts', // POST /api/auth/firebase/session — 로그인 자체(세션 교환 전), fetchWithAuth 전제(기존 세션) 자체가 안 맞음.
 ]);
@@ -215,10 +216,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/nav/create-organization-dialog.tsx::/api/organizations',
   'components/nav/notification-bell.tsx::/api/event-notifications/',
   'components/nav/notification-bell.tsx::/api/event-notifications/read-all',
-  'components/nav/profile-menu.tsx::/api/accounts',
-  'components/nav/profile-menu.tsx::/api/auth/add-account',
-  'components/nav/profile-menu.tsx::/api/auth/signout-account',
-  'components/nav/profile-menu.tsx::/api/auth/switch-account',
   'components/settings/add-member-modal.tsx::/api/organizations/',
   'components/settings/ai-settings.tsx::/api/projects/',
   'components/settings/blocked-users-section.tsx::/api/user-blocks/',
@@ -246,6 +243,9 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/verify/evidence-section.tsx::/api/evidence',
   'components/verify/evidence-section.tsx::/api/evidence?work_item_id=',
   'ee/components/billing/toss-checkout.ts::/api/billing/checkout',
+  'hooks/use-account-switcher.ts::/api/auth/add-account',
+  'hooks/use-account-switcher.ts::/api/auth/signout-account',
+  'hooks/use-account-switcher.ts::/api/auth/switch-account',
   'hooks/use-unified-switcher.ts::/api/projects',
   'hooks/use-unified-switcher.ts::/api/projects/',
   'hooks/use-unified-switcher.ts::/api/switch-org',

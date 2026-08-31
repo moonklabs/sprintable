@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
@@ -16,6 +16,36 @@ export default function VerifyEmailPage() {
   const [message, setMessage] = useState(
     () => (token ? '' : '유효하지 않은 인증 링크입니다.')
   );
+
+  // story #3195 — «시작하기»가 org 유무와 무관하게 항상 /inbox로 갔다. 온보딩 도중(org
+  // 미생성) 이메일 인증 벽에 걸린 유저는 org가 없어 /inbox가 막다른 곳이었다(온보딩
+  // 1/4로 돌아가야 sessionStorage draft도 복원된다) — register/page.tsx와 동일 패턴
+  // (org_id 유무로 목적지 분기)으로 통일.
+  //
+  // 카디르 QA(PR#3617) 치명 — `/api/me`는 BE `me.py::get_me()`(TeamMember 필수)를 서빙해
+  // 무 org(정확히 이 유저 상태)면 404 → org_id를 못 읽어 `/inbox` 폴백으로 떨어지며 막다른
+  // 길이 재생산됐다. `/api/auth/me`(BFF 신설, BE app.routers.auth.get_auth_me)로 교체 —
+  // JWT claims만 읽어 org 유무와 무관하게 항상 200.
+  //
+  // 유나 design:pass 비차단 ①(2026-08-29) — 응답 前 빠른 클릭이면 no-org 유저가 여전히
+  // 막다른 /inbox로 갈 수 있었다(useState 기본값 레이스). ref에 Promise를 캐시해 effect든
+  // 클릭이든 «같은 promise»를 공유·await하게 해 판정 前 클릭도 정확한 목적지를 기다렸다
+  // 라우팅한다(중복 fetch도 안 남).
+  const destinationRef = useRef<Promise<string> | null>(null);
+  function resolveDestination(): Promise<string> {
+    if (!destinationRef.current) {
+      destinationRef.current = fetch('/api/auth/me')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((json: { data?: { org_id?: string | null } } | null) => (json?.data?.org_id ? '/inbox' : '/onboarding'))
+        .catch(() => '/inbox'); // 조회 실패는 이전 동작(/inbox)으로 저하
+    }
+    return destinationRef.current;
+  }
+  useEffect(() => { void resolveDestination(); }, []);
+
+  const handleStart = () => {
+    void resolveDestination().then((destination) => router.push(destination));
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -71,7 +101,7 @@ export default function VerifyEmailPage() {
           <div className="space-y-4">
             <p className="text-sm font-medium text-success" role="status" aria-live="polite" aria-atomic="true">{message}</p>
             <button
-              onClick={() => router.push('/inbox')}
+              onClick={handleStart}
               className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
             >
               시작하기

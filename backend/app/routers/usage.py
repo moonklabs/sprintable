@@ -1,9 +1,9 @@
 """GET /api/v2/usage — org별 사용량 미터 조회.
 
 story #2394: mockups.py에서 분리했다 — 이 엔드포인트/UsageMeter 모델은 mockups 도메인
-전용이 아니다(meter_type CHECK가 허용하는 값은 ai_calls/storage_mb/members/agents/
-stt_minutes이고 'mockups'는 그중에 없다). mockups.py를 통째로 지우면서 이것까지 같이
-지우면 무관한 기능을 스코프 밖에서 없애는 것이라 별도 파일로 옮겨 살려뒀다.
+전용이 아니다(meter_type CHECK가 허용하는 값은 app.models.usage_meter.ALLOWED_METER_TYPES
+참고, 'mockups'는 그중에 없다). mockups.py를 통째로 지우면서 이것까지 같이 지우면
+무관한 기능을 스코프 밖에서 없애는 것이라 별도 파일로 옮겨 살려뒀다.
 """
 from __future__ import annotations
 

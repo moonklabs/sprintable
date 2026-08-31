@@ -52,11 +52,13 @@ describe('ActionZone attention row (command-center-surveillance-reframe-handoff 
   });
 });
 
-// story #3150(시연 리허설 발견) — AttentionItem이 실제로는 8종인데 AttentionRow가
-// 'agent_stuck' 전용 필드(entity_id/entity_type)만 읽어 나머지 7종은 <span class="font-medium">
+// story #3150(시연 리허설 발견) — AttentionItem이 실제로는 (당시)8종인데 AttentionRow가
+// 'agent_stuck' 전용 필드(entity_id/entity_type)만 읽어 나머지는 <span class="font-medium">
 // 이 통째로 공백 렌더되던 것(58건 실측). 각 타입이 BE(#2538 계약)가 이미 싣는 title/
-// statement/blocked_story_title을 그대로 보여주는지 회귀가드.
-describe('ActionZone attention row — story #3150 8종 전수(BE title/statement 폴백 없이 직접 소비)', () => {
+// statement/blocked_story_title을 그대로 보여주는지 회귀가드. ⛔story #3154 — 'story_stalled'
+// 는 BE가 완전 제거해(story #93b076c8, twin 신호 정리) 지금은 7종 → 6종 전수(이 describe
+// 스코프)만 남았다.
+describe('ActionZone attention row — story #3150 6종 전수(BE title/statement 폴백 없이 직접 소비)', () => {
   function attentionData(item: MyActions['attention']['items'][number]): MyActions {
     return {
       action_queue: { scope: 'project', items: [] },
@@ -64,16 +66,6 @@ describe('ActionZone attention row — story #3150 8종 전수(BE title/statemen
       is_clear: false,
     };
   }
-
-  it('story_stalled — title+stalled_days를 그대로 보여준다(공백 아님)', () => {
-    const markup = renderToStaticMarkup(wrap(<ActionZone
-      data={attentionData({ type: 'story_stalled', severity: 'warn', auto_detected: true, title: '결제 마이그레이션 정리', story_id: 's1', stalled_days: 42, project_id: 'p1' })}
-      resolveName={() => null} epicTitles={{}}
-    />));
-    expect(markup).toContain('결제 마이그레이션 정리');
-    expect(markup).toContain('42일째');
-    expect(markup).not.toContain('<span class="font-medium"></span>'); // 회귀가드 — 정확히 이 실측 공백 패턴
-  });
 
   it('unanswered_blocker — blocked_story_title+age_days를 그대로 보여준다', () => {
     const markup = renderToStaticMarkup(wrap(<ActionZone

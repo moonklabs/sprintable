@@ -73,7 +73,7 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // 실측으로 잡았다).
   'native', 'onboarding',
   'org-briefing', 'organization', 'privacy', 'refund-policy', 'register', 'reset-password',
-  'rewards', 'settings', 'share', 'terms', 'verify-email',
+  'rewards', 'settings', 'share', 'terms', 'unsubscribe', 'verify-email',
 ]);
 
 /**

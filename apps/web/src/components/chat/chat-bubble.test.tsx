@@ -105,9 +105,11 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, references: [] }} isMine={false} />));
     });
-    // 유령 칩은 버튼(클릭·모달)이 아니라 행동 0의 span이어야 한다.
-    expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).toContain('대상이 없습니다');
+    // story #3213 — 유령이라도 미등록≠비존재라 "대상이 없습니다"를 더 이상 단정하지 않는다.
+    // 클릭(EntityPreviewModal의 실 fetch)으로 진짜 존재판정을 위임 — 그래서 버튼은 있어야 한다.
+    expect(container.querySelector('button')).not.toBeNull();
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).toContain('제안서.md');
   });
 
   it('음성대조 — references에 본문 토큰과 정확히 일치하는 항목이 있으면 정상 칩 그대로다', async () => {
@@ -1486,7 +1488,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull(); // EmbedCard doc 전용 마커 아님
   });
 
-  it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩(행동 0)이다', async () => {
+  it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩이다(story #3213 — 클릭은 가능, 정적 "대상이 없습니다" 단정은 없음)', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble
@@ -1496,8 +1498,9 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
       ));
     });
     expect(container.querySelector('.rounded-md')).toBeNull();
-    expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).toContain('대상이 없습니다');
+    expect(container.querySelector('button')).not.toBeNull();
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).toContain('제안서.md');
   });
 
   it('asset 토큰은 단독 문단이어도 기존 AssetEmbedCard 그대로다(EmbedCard로 안 새어간다)', async () => {

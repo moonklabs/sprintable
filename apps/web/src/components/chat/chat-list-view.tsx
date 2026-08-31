@@ -11,6 +11,9 @@ import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-ss
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
 import { Avatar } from '@/components/shared/avatar';
+import { Button } from '@/components/ui/button';
+import { NowStrip } from './now-strip';
+import { PulseCard } from './pulse-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -74,10 +77,13 @@ function formatParticipantNames(
 ): string {
   const others = participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return type === 'dm' ? 'DM' : t('groupSection');
-  if (type === 'dm') return others[0]?.name ?? '?';
+  // story #3203 — 이름 해석 실패(orphan/삭제 멤버, BE participant.name=null) 폴백은
+  // '?' 1글자가 아니라 사람 언어 문구로("uuid 노출" 실사고 재발 방지 축 — BE는 raw
+  // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다).
+  if (type === 'dm') return others[0]?.name ?? t('unknownMember');
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? '?').join(', ');
-  const visible = others.slice(0, MAX).map((p) => p.name ?? '?').join(', ');
+  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
+  const visible = others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ');
   return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
 }
 
@@ -131,7 +137,9 @@ function ConversationRow({
         <span className="rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">{t('you')}</span>
         <span>↔</span>
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
-          {others[0]?.name ?? '...'}
+          {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
+              동일 사람언어 폴백으로 통일('...'는 비인간어). */}
+          {others[0]?.name ?? t('unknownMember')}
         </span>
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
@@ -165,7 +173,7 @@ function ConversationRow({
         <span className="truncate">
           {isAgentInConv && agentCount > 0
             ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => p.name ?? '?').join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
+            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => p.name ?? t('unknownMember')).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
           }
         </span>
       </div>
@@ -173,10 +181,11 @@ function ConversationRow({
   ) : null;
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted"
     >
       {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
@@ -213,7 +222,7 @@ function ConversationRow({
           )}
         </div>
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -241,10 +250,11 @@ function OutsideProjectRow({
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted"
     >
       <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
         conv.type === 'dm' ? 'bg-primary/15 text-primary' : 'bg-info/15 text-info'
@@ -257,7 +267,7 @@ function OutsideProjectRow({
         {/* ⭐AC③ — 프로젝트명 병기("왜 여기 있지"를 그 자리서 답한다) */}
         <p className="truncate text-xs text-muted-foreground">{conv.project_name}</p>
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -306,6 +316,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
+
+  // story #3178(S3b) AC2 — 「지금」 스트립 vs pulse 카드 합산 불변식(최대 1 expand). 단일
+  // 값이라 구조적으로 둘이 동시에 펼쳐질 수 없다(하나를 펼치면 다른 값으로 덮어써 자동 접힘).
+  const [expandedSurface, setExpandedSurface] = useState<'strip' | 'pulse' | null>(null);
 
   // story #2168 PR-② — 프로젝트 밖 최근 대화(최대 5개).
   const [outsideProjectConvs, setOutsideProjectConvs] = useState<OutsideProjectConversation[]>([]);
@@ -465,9 +479,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     };
   }, [handleReconnect]);
 
+  // story #3196 ② — 생성 직후 좌측 리스트가 자기 자신을 다시 안 물어봐 "대화가 없습니다"
+  // 옆에서 새 대화가 진행되는 상태였다(리로드해야 정상). 페이지 이동만 하고 리스트 state
+  // 는 그대로 뒀던 것 — fetchConversations(0, false)는 이미 목록 최신화에 쓰이는 그 함수
+  // 그대로(발명 0, handleReconnect/새 메시지 수신 시와 동일 재조회).
   const handleCreated = (conversationId: string) => {
     setShowModal(false);
     router.push(`/chats/${conversationId}`);
+    void fetchConversations(0, false);
   };
 
   const dmConvs = conversations.filter((c) => c.type === 'dm');
@@ -507,14 +526,15 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         </div>
       )}
       {conversations.length < myTotal && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => { setLoadingMore(true); void fetchConversations(myOffset, true); }}
           disabled={loadingMore}
-          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+          className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground disabled:opacity-50"
         >
           {loadingMore ? '불러오는 중…' : `더 보기 (${myTotal - conversations.length}건)`}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -552,19 +572,34 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv onClick={() => router.push(`/chats/${conv.id}`)} />
       ))}
       {allConversations.length < agentTotal && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => void fetchAllConversations(agentOffset, true)}
-          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground"
+          className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground"
         >
           더 보기 ({agentTotal - allConversations.length}건)
-        </button>
+        </Button>
       )}
     </div>
   );
 
   return (
     <div className="flex h-full flex-col">
+      {/* story #3177(S3a)+#3178(S3b) — chat 구심점 최상단 고정 「지금」 스트립+pulse 카드
+          (대화 스크롤과 분리, 훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게
+          항상 상단 고정. AC2 합산 불변식(#3178) — expandedSurface 하나로 둘 중 최대 1개만
+          펼쳐지게 끌어올린다(하나를 펼치면 다른 하나는 자동 접힘). */}
+      <div className="space-y-2 px-2 pt-2">
+        <NowStrip
+          expanded={expandedSurface === 'strip'}
+          onExpandedChange={(v) => setExpandedSurface(v ? 'strip' : null)}
+        />
+        <PulseCard
+          expanded={expandedSurface === 'pulse'}
+          onExpandedChange={(v) => setExpandedSurface(v ? 'pulse' : null)}
+        />
+      </div>
       {isAdminOrOwner ? (
         <Tabs defaultValue="my" onValueChange={(v) => { if (v === 'agent') loadAgentConversationsOnce(); }} className="flex min-h-0 flex-1 flex-col">
           <TabsList className="mx-4 mt-2 w-auto self-start">

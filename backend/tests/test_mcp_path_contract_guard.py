@@ -27,11 +27,14 @@ def _load():
 
 
 def _stub(monkeypatch, mod, *, calls=None, unreadable=None, route_table=None,
-          mismatches=None, indirect=None, today="2026-07-28", fresh=True):
+          mismatches=None, indirect=None, permanent_indirect=None, today="2026-07-28", fresh=True):
     monkeypatch.setattr(mod, "check_ref_freshness", lambda: None if fresh else "테스트로 심은 stale")
     monkeypatch.setattr(mod, "load_route_table", lambda: route_table or {mod.POSITIVE_CONTROL})
     monkeypatch.setattr(mod, "load_mcp_declared", lambda: (calls or [], unreadable or []))
-    monkeypatch.setattr(mod, "_load_allowlist", lambda: (mismatches or {}, indirect or {}))
+    monkeypatch.setattr(
+        mod, "_load_allowlist",
+        lambda: (mismatches or {}, indirect or {}, permanent_indirect or {}),
+    )
     monkeypatch.setattr(mod, "_today", lambda: date.fromisoformat(today))
 
 
@@ -136,6 +139,56 @@ def test_baselined_indirect_helper_passes(monkeypatch, capsys):
     assert "M(1개)" in out and "수기검증됨" in out
 
 
+def test_permanent_indirect_helper_passes_without_until(monkeypatch, capsys):
+    """story #3168(2026-08-28) — declared_permanent_indirect는 until 없이도(reason/
+    declared_by만으로) 통과해야 한다(구조적으로 영구한 간접경로는 시한을 요구 안 함)."""
+    mod = _load()
+    key = ("chat", "_resolve_mention_content")
+    entry = {"reason": "동적 dispatch, 구조적으로 영구", "declared_by": "디디"}
+    _stub(monkeypatch, mod,
+          unreadable=[("chat", "_resolve_mention_content", "GET endpoint")],
+          permanent_indirect={key: entry})
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "M(1개)" in out and "영구선언" in out
+
+
+def test_permanent_indirect_without_reason_fails(monkeypatch, capsys):
+    """reason 없는 영구선언은 until 면제와 무관하게 여전히 FAIL — «사유 없이 영구 예외»는
+    이 카테고리 신설의 취지(사유는 남기되 시한만 면제) 자체를 무력화한다."""
+    mod = _load()
+    key = ("attachments", "upload_attachments")
+    entry = {"declared_by": "까심"}  # reason 누락
+    _stub(monkeypatch, mod,
+          unreadable=[("attachments", "upload_attachments", "POST upload_path")],
+          permanent_indirect={key: entry})
+    assert mod.main() == 1
+    assert "reason" in capsys.readouterr().out
+
+
+def test_permanent_indirect_without_declared_by_fails(monkeypatch, capsys):
+    mod = _load()
+    key = ("attachments", "upload_attachments")
+    entry = {"reason": "동적 dispatch"}  # declared_by 누락
+    _stub(monkeypatch, mod,
+          unreadable=[("attachments", "upload_attachments", "POST upload_path")],
+          permanent_indirect={key: entry})
+    assert mod.main() == 1
+    assert "declared_by" in capsys.readouterr().out
+
+
+def test_unknown_permanent_indirect_key_fails(monkeypatch, capsys):
+    """permanent_indirect에도 declared_indirect에도 없는 새 M은 여전히 하드fail — 새 카테고리
+    신설이 «허용목록에 없어도 통과» 구멍을 만들지 않았는지 확認."""
+    mod = _load()
+    _stub(monkeypatch, mod,
+          unreadable=[("payments", "charge_card", "POST some_var")],
+          permanent_indirect={("unrelated", "func"): {"reason": "r", "declared_by": "PO"}})
+    assert mod.main() == 1
+    out = capsys.readouterr().out
+    assert "신규" in out and "payments" in out
+
+
 def test_stale_checkout_fails(monkeypatch, capsys):
     """⭐ref 신선도 자체 실패(develop과 다름)면 그 자체로 FAIL — 2026-07-28 오보 재발방지 조항."""
     mod = _load()
@@ -157,11 +210,32 @@ def test_repo_allowlist_entries_are_wellformed():
     연장도 영원히 이 테스트를 못 지나갔다 — until 갱신 자체가 불가능해지는 자기모순)."""
     mod = _load()
     today = mod._today()
-    mismatches, indirect = mod._load_allowlist()
+    mismatches, indirect, permanent_indirect = mod._load_allowlist()
     for kind, entries in (("declared_mismatches", mismatches), ("declared_indirect", indirect)):
         for key, entry in entries.items():
             problem = mod._expired(entry, today)
             assert problem is None, f"{kind}/{key}: {problem}"
+    # story #3168 — declared_permanent_indirect는 until 없이도 정상이어야 한다(별도 검사).
+    for key, entry in permanent_indirect.items():
+        problem = mod._permanent_entry_problem(entry)
+        assert problem is None, f"declared_permanent_indirect/{key}: {problem}"
+        assert "until" not in entry, (
+            f"declared_permanent_indirect/{key}: until이 있으면 안 됨(구조적으로 영구한 "
+            "간접경로엔 시한 개념 자체가 안 맞음 — 시한부면 declared_indirect로 내려갈 것)"
+        )
+
+
+def test_repo_allowlist_wellformed_check_still_enforces_horizon_cap():
+    """양성대조(페드루 지시, 2026-08-28) — 바로 위 테스트를 frozen date(2026,7,28) 대신
+    `mod._today()`(실시간)로 바꾼 뒤에도 30일 상한 집행 자체가 죽지 않았는지 값으로
+    고정한다: 상한을 넘는(45일 뒤) until을 넣으면 실시간 기준으로도 여전히 FAIL이어야
+    한다(날짜 기준을 동적으로 바꾸면서 상한 집행이 조용히 무력화되는 회귀를 막는다)."""
+    from datetime import timedelta
+    mod = _load()
+    today = mod._today()
+    over_cap = _entry(until=(today + timedelta(days=45)).isoformat())
+    problem = mod._expired(over_cap, today)
+    assert problem is not None and "너무 멀다" in problem
 
 
 def test_repo_allowlist_wellformed_check_still_enforces_horizon_cap():

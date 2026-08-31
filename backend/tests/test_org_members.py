@@ -58,9 +58,12 @@ async def _client(caller_role: str = "admin"):
 
 
 @pytest.mark.anyio
-async def test_list_org_members_200():
+async def test_list_org_members_200_admin():
+    """story #3231 — admin은 email 포함 전체 로스터를 그대로 받는다(무회귀)."""
     client, session, app, _ = await _client()
     try:
+        caller_admin = _mock_member("admin", user_id=CALLER_ID)
+
         # list_org_members uses raw SQL text() — result is iterable rows with named attrs
         mock_row = MagicMock()
         mock_row.id = MEMBER_ID
@@ -76,13 +79,76 @@ async def test_list_org_members_200():
         mock_result.__iter__ = MagicMock(return_value=iter([mock_row]))
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get("/api/v2/org-members")
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_admin
+
+            async with client as c:
+                resp = await c.get("/api/v2/org-members")
 
         assert resp.status_code == 200
         assert len(resp.json()) == 1
         assert resp.json()[0]["role"] == "member"
         assert resp.json()[0]["email"] == "test@example.com"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_org_members_200_owner():
+    """story #3231 — owner도 admin과 동일하게 통과(무회귀)."""
+    client, session, app, _ = await _client()
+    try:
+        caller_owner = _mock_member("owner", user_id=CALLER_ID)
+
+        mock_row = MagicMock()
+        mock_row.id = MEMBER_ID
+        mock_row.org_id = ORG_ID
+        mock_row.user_id = USER_ID
+        mock_row.role = "member"
+        mock_row.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        mock_row.deleted_at = None
+        mock_row.email = "test@example.com"
+        mock_row.name = "Test Member"
+
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter([mock_row]))
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_owner
+
+            async with client as c:
+                resp = await c.get("/api/v2/org-members")
+
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_org_members_403_non_admin():
+    """story #3231(카디르 버그사냥) 정면 재현 — 일반 Member는 email 포함 전체 로스터를
+    조회할 수 없다(POST/PATCH/DELETE와 동일 경계로 GET도 admin/owner 전용)."""
+    client, session, app, _ = await _client()
+    try:
+        caller_member = _mock_member("member", user_id=CALLER_ID)
+
+        # 403이면 이 아래 raw SQL 로스터 쿼리까지 도달하면 안 된다 — 도달 시 email이
+        # 새는 원 결함이 그대로 재현되므로, session.execute를 못 부르게 감시(호출되면
+        # AssertionError로 즉시 드러나게 설계).
+        async def _unexpected_execute(*args, **kwargs):
+            raise AssertionError("caller_role 검증을 통과해 로스터 쿼리까지 도달함 — 원 결함 재발")
+        session.execute = _unexpected_execute
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_member
+
+            async with client as c:
+                resp = await c.get("/api/v2/org-members")
+
+        assert resp.status_code == 403
+        assert "test@example.com" not in resp.text
     finally:
         app.dependency_overrides.clear()
 

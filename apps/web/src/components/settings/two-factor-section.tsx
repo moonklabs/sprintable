@@ -16,6 +16,10 @@ export function TwoFactorSection() {
   const [otpCode, setOtpCode] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // story #3247 — 인증기 분실 시에도 해제 가능해야 하므로(그게 이 스토리의 존재 이유),
+  // TOTP 코드 대신 비밀번호로 재검증하는 대체 경로.
+  const [disableWithPassword, setDisableWithPassword] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
 
   useEffect(() => {
     // Attempt setup to detect current 2FA state
@@ -94,21 +98,34 @@ export function TwoFactorSection() {
   };
 
   const handleDisable = async () => {
-    if (otpCode.length !== 6) return;
+    if (disableWithPassword ? disablePassword.length === 0 : otpCode.length !== 6) return;
     setBusy(true);
     setMessage(null);
     try {
       const res = await fetch('/api/auth/2fa/disable', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: otpCode }),
+        body: JSON.stringify(
+          disableWithPassword ? { password: disablePassword } : { code: otpCode },
+        ),
       });
-      // story #2485 — 그라운딩(2026-08-06): 이 라우트(POST .../2fa/disable)는 backend에
-      // 존재하지 않아 항상 404다(setup/verify는 있지만 disable만 미구현 — 별도 이슈로
-      // 보고, FE에서 code로 갈라도 해결 안 됨). raw 서버 message 노출만 우선 제거.
-      if (!res.ok) { setMessage({ type: 'error', text: t('twoFactorSetupFailed') }); return; }
+      const json = await res.json() as { error?: { code?: string } };
+      // story #3247 — BE(auth.py totp_disable())가 _err()로 발급하는 안정 code로 분기
+      // (raw message 미노출, 기존 setup/verify 패턴과 동형).
+      if (!res.ok) {
+        if (json.error?.code === 'WRONG_PASSWORD') {
+          setMessage({ type: 'error', text: t('twoFactorWrongPassword') });
+        } else if (json.error?.code === 'INVALID_TOTP') {
+          setMessage({ type: 'error', text: t('twoFactorInvalidCode') });
+        } else {
+          setMessage({ type: 'error', text: t('twoFactorSetupFailed') });
+        }
+        return;
+      }
       setState('disabled');
       setOtpCode('');
+      setDisablePassword('');
+      setDisableWithPassword(false);
       setMessage({ type: 'success', text: t('twoFactorDisabledMsg') });
     } finally {
       setBusy(false);
@@ -184,23 +201,47 @@ export function TwoFactorSection() {
 
         {state === 'enabled' && (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">{t('twoFactorDisableHint')}</p>
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={6}
-              placeholder="000000"
-              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-destructive"
-              value={otpCode}
-              onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            />
-            <button
-              onClick={handleDisable}
-              disabled={busy || otpCode.length !== 6}
-              className="rounded-lg border border-destructive px-4 py-2 text-sm font-medium text-destructive hover:border-destructive hover:text-destructive disabled:opacity-50"
-            >
-              {busy ? '...' : t('twoFactorDisable')}
-            </button>
+            <p className="text-sm text-muted-foreground">
+              {disableWithPassword ? t('twoFactorDisableWithPasswordHint') : t('twoFactorDisableHint')}
+            </p>
+            {disableWithPassword ? (
+              <input
+                type="password"
+                placeholder={t('twoFactorPasswordPlaceholder')}
+                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-destructive"
+                value={disablePassword}
+                onChange={(e) => setDisablePassword(e.target.value)}
+              />
+            ) : (
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000000"
+                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-destructive"
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <button
+                onClick={handleDisable}
+                disabled={busy || (disableWithPassword ? disablePassword.length === 0 : otpCode.length !== 6)}
+                className="rounded-lg border border-destructive px-4 py-2 text-sm font-medium text-destructive hover:border-destructive hover:text-destructive disabled:opacity-50"
+              >
+                {busy ? '...' : t('twoFactorDisable')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDisableWithPassword((v) => !v);
+                  setMessage(null);
+                }}
+                className="text-xs text-muted-foreground underline hover:text-foreground"
+              >
+                {disableWithPassword ? t('twoFactorUseCodeInstead') : t('twoFactorLostDeviceLink')}
+              </button>
+            </div>
           </div>
         )}
       </SectionCardBody>

@@ -91,7 +91,7 @@ describe('DescriptionViewer — entity: 링크가 EntityChip으로 그려지는�
     expect(container.querySelector('button')).toBeTruthy();
   });
 
-  it('references에 없는 대상이면 유령 칩(회색·클릭 불가)으로 그린다', async () => {
+  it('references에 없는 대상이면 유령 칩(회색)으로 그린다 — story #3213: entityId가 있으므로 클릭 가능·실 라벨 유지', async () => {
     await act(async () => {
       root.render(
         <DescriptionViewer
@@ -101,9 +101,11 @@ describe('DescriptionViewer — entity: 링크가 EntityChip으로 그려지는�
       );
     });
 
-    expect(container.textContent).toContain('대상이 없습니다');
-    // 유령 칩은 button(모달 진입)이 없다 — embed-card.tsx EntityChip의 ghost 분기.
-    expect(container.querySelector('button')).toBeFalsy();
+    // entityId가 UUID까지 파싱됐다 — 미등록≠비존재라 "대상이 없습니다" 단정 없이 실 라벨을
+    // 보이고, 클릭(EntityChip→EntityPreviewModal 실 fetch)으로 진짜 존재판정을 위임한다.
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).toContain('스토리 제목');
+    expect(container.querySelector('button')).toBeTruthy();
   });
 
   it('references가 undefined(미로드)면 유령 판정을 보류하고 정상 칩으로 그린다(#2622와 동형 폴백)', async () => {

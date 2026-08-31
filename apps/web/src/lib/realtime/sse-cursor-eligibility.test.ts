@@ -12,6 +12,10 @@ describe('isCursorEligibleEventName', () => {
     expect(isCursorEligibleEventName('conversation.working')).toBe(false);
   });
 
+  it('알려진 B계열(attention.changed, story #3180)은 커서 승격 불가', () => {
+    expect(isCursorEligibleEventName('attention.changed')).toBe(false);
+  });
+
   it('그 외 named 이벤트(예: story.status_changed)는 승격 가능', () => {
     expect(isCursorEligibleEventName('story.status_changed')).toBe(true);
     expect(isCursorEligibleEventName('story.assignee_changed')).toBe(true);

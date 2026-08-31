@@ -14,6 +14,10 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3247 — migration 0295. totp/disable password 재검증 우회체인 차단용(그 비밀번호가
+    # 현재 세션 토큰보다 먼저 존재했는지 판별). NULL=제약 신설 이전 기존 유저(무제약, 0290
+    # locale과 동형 논지).
+    password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     login_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     login_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -25,6 +29,20 @@ class User(Base):
     totp_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     totp_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3205 — 발송 메일 로케일 분기 판별원. FE 라이브 렌더링 locale은 여전히 쿠키
+    # 전용(story 11f1087c 크루스 무회귀) — 이건 요청 밖(cron 등)에서도 읽을 수 있는
+    # 발송 전용 신호. nullable, 가입 시 Accept-Language로 1회 포착. None이면
+    # resolve_locale()이 DEFAULT_LOCALE("ko")로 폴백한다(추측 백필 없음).
+    locale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3204(acquisition 계측) — 가입 시점 1회 포착(locale과 동형 패턴, 재작성 없음).
+    # proxy.ts의 first-touch 쿠키(첫 랜딩의 utm_*/referrer, 재방문 덮어쓰기 안 함)를
+    # register()/oauth_callback() 신규 유저 생성 시점에 그대로 옮겨 담는다. 코호트별
+    # 채널 분석이 목적이라 반복 이벤트가 아닌 1회성 불변 속성 — event meta가 아니라
+    # 이 테이블의 직접 컬럼으로 둔다(PO 확定, doc story #3204).
+    signup_utm_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signup_utm_medium: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signup_utm_campaign: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signup_referrer: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
     # story #2155(2026-07-23): GitHub 로그인 자체를 제거했다(app/routers/auth.py — provider
     # dispatch에서 "github" 삭제). 이 컬럼은 로그인 외 용도가 0곳(PO grep 확認 — 커밋 귀속·
@@ -50,6 +68,9 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # story #3159(retention·최소층) — 미완주 리마인드 메일 중복방지(발송 이력) + 1-클릭 수신거부.
+    onboarding_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    marketing_email_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class RefreshToken(Base):

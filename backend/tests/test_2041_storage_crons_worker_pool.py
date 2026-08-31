@@ -78,7 +78,8 @@ async def test_storage_usage_warn_send_email_runs_off_event_loop_thread():
         lambda r: setattr(r.scalars.return_value.all, "return_value", [sub]),
         lambda r: setattr(r.all, "return_value", [("pro", cap_mb)]),
         lambda r: setattr(r.scalar_one, "return_value", used_bytes),
-        lambda r: setattr(r.all, "return_value", [("owner@example.com",)]),
+        # story #3205: 조회가 (email, locale) 2열로 확장됨.
+        lambda r: setattr(r.all, "return_value", [("owner@example.com", "ko")]),
         lambda r: None,  # UPDATE storage_warn_notified_at — 반환값 미사용.
     ]
     call_count = 0

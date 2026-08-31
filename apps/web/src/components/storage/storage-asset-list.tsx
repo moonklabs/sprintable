@@ -1,5 +1,7 @@
 'use client';
 
+import { useRef } from 'react';
+
 import { ChevronDown, LayoutGrid, LayoutList, Plus, Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -29,7 +31,7 @@ interface StorageAssetListProps {
   onSelectAsset: (asset: Asset) => void;
   onDeleteAsset: (asset: Asset) => void;
   onDownloadAsset: (asset: Asset) => void;
-  onUpload: () => void;
+  onUploadFile: (file: File) => void;
   resolveFolderLabel: (folderId: string | null) => string | null;
   loading: boolean;
   error: boolean;
@@ -54,7 +56,7 @@ export function StorageAssetList({
   onSelectAsset,
   onDeleteAsset,
   onDownloadAsset,
-  onUpload,
+  onUploadFile,
   resolveFolderLabel,
   loading,
   error,
@@ -65,6 +67,7 @@ export function StorageAssetList({
   onLoadMore,
 }: StorageAssetListProps) {
   const t = useTranslations('storage');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sortLabel: Record<AssetSort, string> = {
     date: t('sortRecent'),
@@ -76,10 +79,22 @@ export function StorageAssetList({
     <section className="flex min-h-0 min-w-0 flex-col">
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <Button size="sm" onClick={onUpload}>
+        <Button size="sm" onClick={() => fileInputRef.current?.click()}>
           <Plus className="size-4" />
           {t('upload')}
         </Button>
+        {/* story #886d996f — 업로드 트리거용 hidden file input. 선택 즉시 onUploadFile로 File 전달,
+            value 리셋으로 같은 파일 재선택 가능. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onUploadFile(file);
+            e.target.value = '';
+          }}
+        />
 
         <div className="flex min-w-0 max-w-[300px] flex-1 items-center gap-[7px] rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground">
           <Search className="size-3.5 shrink-0 opacity-60" />

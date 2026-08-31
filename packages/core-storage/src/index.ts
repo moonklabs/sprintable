@@ -115,24 +115,6 @@ export type {
 } from './interfaces/IAgentApiKeyRepository';
 
 export type {
-  IInboxItemRepository,
-  InboxItem,
-  CreateInboxItemInput,
-  InboxListFilters,
-  ResolveInboxItemInput,
-  DismissInboxItemInput,
-  ReassignInboxItemInput,
-  InboxItemCount,
-  InboxKind,
-  InboxState,
-  InboxPriority,
-  InboxSourceType,
-  OutboxEventType,
-  OriginNode,
-  InboxOption,
-} from './interfaces/IInboxItemRepository';
-
-export type {
   IStorageService,
   StorageObjectHead,
   SignReadOptions,

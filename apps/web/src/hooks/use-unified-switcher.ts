@@ -108,6 +108,10 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [creating, setCreating] = useState(false);
 
+  // story #3147(doc mobile-switcher-redesign-spec-4758744a §③) — 검색 state 신규. 데스크톱
+  // UnifiedSwitcher(lg:)는 이 필드를 안 쓰므로(호출부가 안 읽으면 그냥 죽은 값) 회귀 0.
+  const [searchQuery, setSearchQuery] = useState('');
+
   const [otherOrgProjects, setOtherOrgProjects] = useState<Record<string, ProjectSwitcherItem[]>>({});
   const [loadingOrgIds, setLoadingOrgIds] = useState<Set<string>>(new Set());
   // story #2468(P0, 2026-08-06 미르코 라이브 재현) — 프로젝트 생성 「무반응」의 정체는 조용한
@@ -146,6 +150,11 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   const currentOrgProjects = currentOrgFetched ?? projects;
   const currentProject = currentOrgProjects.find((p) => p.projectId === currentProjectId);
   const displayProject = currentProject?.projectName ?? '';
+  // story #3147 — 검색은 표시용 파생일 뿐(currentOrgProjects 원본은 그대로 두고 필터 뷰만
+  // 만든다) — 현재 프로젝트 판정(currentProject 등)이 검색어에 영향받지 않게.
+  const filteredCurrentOrgProjects = searchQuery.trim()
+    ? currentOrgProjects.filter((p) => p.projectName.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    : currentOrgProjects;
 
   useEffect(() => {
     if (!open) return;
@@ -338,6 +347,14 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     window.location.href = `/onboarding?step=project&orgId=${orgId}`;
   }
 
+  // story #3147 — 닫힐 때 검색어를 비운다(다음에 열었을 때 지난 검색이 남아 목록이 이유
+  // 없이 걸러진 채로 보이는 것 방지). 데스크톱(UnifiedSwitcher)은 검색 UI 자체가 없어
+  // searchQuery를 읽지 않으므로 이 초기화가 그쪽엔 아무 영향이 없다.
+  function setOpenAndClearSearch(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) setSearchQuery('');
+  }
+
   // story #2468(b) — 다이얼로그를 열고 닫을 때마다 이전 실패 문구를 지운다. 안 지우면 재시도
   // 성공 뒤 다시 열었을 때(취소→재오픈) 낡은 에러가 새 시도처럼 보일 수 있다.
   function setCreateProjectOpenAndClearError(nextOpen: boolean) {
@@ -347,7 +364,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
 
   return {
     pending,
-    open, setOpen,
+    open, setOpen: setOpenAndClearSearch,
     createOrgOpen, setCreateOrgOpen,
     createProjectOpen, setCreateProjectOpen: setCreateProjectOpenAndClearError,
     createProjectError,
@@ -355,11 +372,13 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
     creating,
+    searchQuery, setSearchQuery,
     otherOrgProjects,
     loadingOrgIds,
     currentOrg,
     currentProject,
     currentOrgProjects,
+    filteredCurrentOrgProjects,
     currentOrgLoading: currentOrgLoading && currentOrgFetched === undefined,
     otherOrgs,
     displayOrg,

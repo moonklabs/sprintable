@@ -23,6 +23,9 @@ interface Participant {
   type?: string;
   // S8b: list participants 직렬화에 runtime_type 노출(미머지 시 필드 부재=undefined → #2 경고 미표시 graceful).
   runtime_type?: string | null;
+  // story #3194 — 미연결 배너 판별용(아래 fetchPresence가 채움). conversation 응답 자체엔
+  // 없는 필드라 항상 undefined로 시작 — merge된 값만 ChatView에 내려간다(mutate 아님).
+  verified?: boolean | null;
 }
 
 interface ConversationMeta {
@@ -48,14 +51,16 @@ function isValidProjectId(value: string | null): value is string {
   return !!value && UUID_RE.test(value);
 }
 
-function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): string {
+function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string, t: (key: string) => string): string {
   if (meta.title) return meta.title;
   const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return meta.type === 'dm' ? 'DM' : '그룹 채팅';
-  if (meta.type === 'dm') return others[0]?.name ?? '?';
+  // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, chat-list-view.tsx의
+  // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어).
+  if (meta.type === 'dm') return others[0]?.name ?? t('unknownMember');
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? '?').join(', ');
-  return `${others.slice(0, MAX).map((p) => p.name ?? '?').join(', ')} 외 ${others.length - MAX}명`;
+  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
+  return `${others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ')} 외 ${others.length - MAX}명`;
 }
 
 export default function ConversationPage() {
@@ -146,18 +151,25 @@ export default function ConversationPage() {
 
   // 1aeecdde P2: 에이전트 presence_status(연결축 dot) 폴링 — P1 진실값. 15s 갱신(시간 기반 상태).
   const [presenceById, setPresenceById] = useState<Record<string, PresenceStatus>>({});
+  // story #3194 — 같은 응답의 verified(#2751 get_verified_map, 발명 0)도 같이 읽는다 — 별도
+  // fetch를 새로 만들지 않고 이미 15s마다 도는 이 폴링에 얹는다(연결되면 다음 사이클에
+  // 자연 갱신 → 배너 자연 소멸, AC2).
+  const [verifiedById, setVerifiedById] = useState<Record<string, boolean | null>>({});
   const fetchPresence = useCallback(async () => {
     try {
       const res = await fetchWithAuth('/api/team-members?type=agent');
       if (!res.ok) return;
-      const json = await res.json() as { data?: Array<{ id: string; presence_status?: string | null }> };
+      const json = await res.json() as { data?: Array<{ id: string; presence_status?: string | null; verified?: boolean | null }> };
       const map: Record<string, PresenceStatus> = {};
+      const vMap: Record<string, boolean | null> = {};
       for (const m of json.data ?? []) {
         if (m.presence_status === 'online' || m.presence_status === 'idle' || m.presence_status === 'offline') {
           map[m.id] = m.presence_status;
         }
+        vMap[m.id] = m.verified ?? null;
       }
       setPresenceById(map);
+      setVerifiedById(vMap);
     } catch { /* non-critical */ }
   }, []);
 
@@ -191,7 +203,7 @@ export default function ConversationPage() {
   }
 
   const headerTitle = meta
-    ? formatHeaderTitle(meta, currentTeamMemberId)
+    ? formatHeaderTitle(meta, currentTeamMemberId, t)
     : (meta === null ? '채팅' : '로딩 중…');
 
   // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
@@ -204,7 +216,8 @@ export default function ConversationPage() {
   // (S8b 미머지 → runtime_type undefined → commandTargets 빈 배열 → 경고 미표시 graceful.)
   const commandTargets = (meta?.participants ?? [])
     .filter((p) => p.type === 'agent' && p.member_id !== currentTeamMemberId && p.runtime_type !== undefined)
-    .map((p) => ({ agentId: p.member_id, agentName: p.name ?? '?', runtimeType: p.runtime_type ?? null }));
+    // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
+    .map((p) => ({ agentId: p.member_id, agentName: p.name ?? t('unknownMember'), runtimeType: p.runtime_type ?? null }));
 
   return (
     <>
@@ -236,7 +249,8 @@ export default function ConversationPage() {
             </button>
             {headerAvatarParticipant && (
               <Avatar
-                name={headerAvatarParticipant.name ?? '?'}
+                // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
+                name={headerAvatarParticipant.name ?? t('unknownMember')}
                 avatarUrl={headerAvatarParticipant.avatar_url ?? null}
                 actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
                 size={24}
@@ -335,7 +349,7 @@ export default function ConversationPage() {
             presenceById={presenceById}
             scrollToMessageId={scrollToMessageId}
             initialLastReadAt={meta ? meta.lastReadAt : undefined}
-            participants={meta?.participants ?? []}
+            participants={(meta?.participants ?? []).map((p) => ({ ...p, verified: verifiedById[p.member_id] }))}
           />
         )}
       </div>

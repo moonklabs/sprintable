@@ -46,6 +46,18 @@ const ALL = '__all__';
 const PAGE_SIZE = 30;
 
 const ENTITY_TYPES = ['story', 'epic', 'sprint', 'memo', 'task', 'agent_run', 'doc', 'meeting'];
+// story #3228(버그사냥, 카디르) — actionFilter가 debounce 없이 buildParams/fetchLogs의
+// useCallback 의존값이라, 타이핑 1글자당 이펙트가 재실행돼 네트워크 요청이 그대로
+// 발사됐다(실측: 50자 타이핑 → /api/activity-logs 요청 정확히 50건, 1:1). 긴 문자열을
+// 빠르게 입력하면(예: 2000자+) 수백~수천 건이 짧은 시간에 몰려 브라우저 커넥션풀이
+// 고갈(ERR_INSUFFICIENT_RESOURCES)되고, 그 요청들이 비동기로 거의 동시에 귀환하며
+// 겹쳐 부르는 setState 폭주가 React #185(Maximum update depth exceeded)로 이어져
+// 페이지 전체가 크래시했다. 근본 처방은 "왜 렌더가 자기를 다시 트리거하는가"를 끊는
+// 디바운스 — 300ms는 이 코드베이스의 다른 텍스트필터(예: 검색창) 관례와 동일 값.
+const ACTION_FILTER_DEBOUNCE_MS = 300;
+// 방어선(2중) — 이 필드는 활동 로그의 action 문자열 필터일 뿐 자유 텍스트 입력이 아니다.
+// 실제 action 값들(예: "created", "updated_status")보다 압도적으로 넉넉한 상한.
+const ACTION_FILTER_MAX_LENGTH = 200;
 
 function getDefaultDates() {
   const to = new Date();
@@ -83,6 +95,14 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   const [actorFilter, setActorFilter] = useState(ALL);
   const [actionFilter, setActionFilter] = useState(ALL);
+  // story #3228 — buildParams/fetchLogs는 이 debounce된 값을 쓴다(원본 actionFilter는
+  // input의 controlled value로만 쓰여 타이핑이 시각적으로는 즉시 반영됨 — 지연되는 건
+  // 네트워크 재조회뿐).
+  const [debouncedActionFilter, setDebouncedActionFilter] = useState(ALL);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedActionFilter(actionFilter), ACTION_FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [actionFilter]);
   const [entityTypeFilter, setEntityTypeFilter] = useState(ALL);
   const [{ from: initFrom, to: initTo }] = useState(getDefaultDates);
   const [fromDate, setFromDate] = useState(initFrom);
@@ -104,13 +124,13 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     (nextOffset = 0) => {
       const p = new URLSearchParams({ project_id: projectId, limit: String(PAGE_SIZE), offset: String(nextOffset) });
       if (actorFilter !== ALL) p.set('actor_id', actorFilter);
-      if (actionFilter !== ALL) p.set('action', actionFilter);
+      if (debouncedActionFilter !== ALL) p.set('action', debouncedActionFilter);
       if (entityTypeFilter !== ALL) p.set('entity_type', entityTypeFilter);
       if (fromDate) p.set('from', `${fromDate}T00:00:00`);
       if (toDate) p.set('to', `${toDate}T23:59:59`);
       return p;
     },
-    [projectId, actorFilter, actionFilter, entityTypeFilter, fromDate, toDate],
+    [projectId, actorFilter, debouncedActionFilter, entityTypeFilter, fromDate, toDate],
   );
 
   const fetchLogs = useCallback(
@@ -226,6 +246,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 value={actionFilter === ALL ? '' : actionFilter}
                 onChange={(e) => setActionFilter(e.target.value || ALL)}
                 placeholder={t('filterAction')}
+                maxLength={ACTION_FILTER_MAX_LENGTH}
                 className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
             </div>

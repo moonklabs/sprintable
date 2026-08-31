@@ -15,6 +15,22 @@ from app.services.org_invite_email import send_invite_email
 router = APIRouter(prefix="/api/v2/organizations", tags=["org-invites", "Organization"])
 
 
+async def _resolve_invitee_locale(session: AsyncSession, email: str) -> str:
+    """story #3205 — 피초대자가 이미 이 플랫폼의 기존 유저(다른 org에서 가입 이력)면
+    그 계정의 locale, 아니면(아직 계정 없는 신규 피초대자 — 절대다수) DEFAULT_LOCALE로
+    폴백한다. 신규 피초대자는 물어볼 곳 자체가 없다(가입 前) — 여기서 추측하지 않고
+    기존 ko 고정 동작을 그대로 유지(무회귀)."""
+    from sqlalchemy import select
+
+    from app.models.user import User
+    from app.services.agent_onboarding_config import resolve_locale
+
+    locale_value = (
+        await session.execute(select(User.locale).where(User.email == email))
+    ).scalar_one_or_none()
+    return resolve_locale(locale_value)
+
+
 def _to_response(invite) -> OrgInviteResponse:
     """Invitation ORM → OrgInviteResponse. pending + 미만료인 경우만 invite_url 세팅."""
     base = OrgInviteResponse.model_validate(invite)
@@ -94,7 +110,10 @@ async def create_org_invite(
         __import__("app.models.organization", fromlist=["Organization"]).Organization, id
     )
     org_name = org.name if org else str(id)
-    error = send_invite_email(to=invite.email, org_name=org_name, token=invite.token, role=invite.role)
+    invitee_locale = await _resolve_invitee_locale(session, invite.email)
+    error = send_invite_email(
+        to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
+    )
     sent_at = None if error else datetime.now(timezone.utc)
     await invite_repo.update_email_result(invite.id, sent_at=sent_at, error=error)
     await session.commit()
@@ -125,7 +144,10 @@ async def resend_org_invite(
         __import__("app.models.organization", fromlist=["Organization"]).Organization, id
     )
     org_name = org.name if org else str(id)
-    error = send_invite_email(to=invite.email, org_name=org_name, token=invite.token, role=invite.role)
+    invitee_locale = await _resolve_invitee_locale(session, invite.email)
+    error = send_invite_email(
+        to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
+    )
     sent_at = None if error else datetime.now(timezone.utc)
     await invite_repo.update_email_result(invite.id, sent_at=sent_at, error=error)
     await session.commit()

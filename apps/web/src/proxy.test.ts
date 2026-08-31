@@ -864,6 +864,89 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
   });
 });
 
+describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니라 자기 project로 해소(story #3208, customer-zero)', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  const ARTIFACT_ID = 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7';
+
+  it('현재 project(쿠키)와 아티팩트의 실제 project가 다르면, «현재»가 아니라 아티팩트 자기 project로 301(핵심 처방)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) {
+        return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      }
+      if (url.includes(`/api/v2/visual-artifacts/preview?id=${ARTIFACT_ID}`)) {
+        // 아티팩트는 실제로 'sprintable' project 소속 — «현재» 쿠키(zerogo)와 다르다.
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { id: ARTIFACT_ID, project_id: 'proj-sprintable', org_slug: 'moonklabs', project_slug: 'sprintable' } }),
+        });
+      }
+      // 일반 경로(projects/{id} 등)가 불렸다면 그건 폴백 경로를 탄 것 — 이 테스트에선 안 불려야 함.
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest(`/artifacts/${ARTIFACT_ID}`, {
+      sp_at: token, sprintable_current_project_id: 'proj-zerogo',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/artifacts/${ARTIFACT_ID}`);
+    // «현재» project(zerogo)를 조회하는 일반 경로(projects/proj-zerogo)는 안 탔어야 한다.
+    expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining('/projects/proj-zerogo'), expect.anything());
+  });
+
+  it('아티팩트 preview가 실패(대상 없음·접근권 없음)하면 기존 «현재 project 추측» 경로로 폴백(회귀 0)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) {
+        return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      }
+      if (url.includes('/api/v2/visual-artifacts/preview')) {
+        return Promise.resolve({ ok: false, status: 404 });
+      }
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest(`/artifacts/${ARTIFACT_ID}`, {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/artifacts/${ARTIFACT_ID}`);
+  });
+
+  it('id가 UUID 모양이 아니면(목록 페이지 /artifacts 등) preview를 안 부르고 기존 경로 그대로', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) {
+        return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      }
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/artifacts', { sp_at: token }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
+    expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining('/visual-artifacts/preview'), expect.anything());
+  });
+});
+
 describe('proxy — 경로 리터럴 rename 301(story 8fc51517): [ws]/[proj]/board/* → [ws]/[proj]/flow/*', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;
@@ -1002,5 +1085,48 @@ describe('proxy — story #2595 connect-guide locale rewrite', () => {
       const response = await middleware(makeRequest(path));
       expect(response.status).toBe(200);
     }
+  });
+});
+
+// story #3204(acquisition 계측) — 가입 출처 first-touch 캡처. public path에서만 도는
+// 독립 분기(기존 인증/세션 흐름과 무관) — makeRequest에 headers 옵션이 없어 이 describe
+// 안에서만 쓰는 로컬 헬퍼로 referer 헤더를 얹는다.
+function makeRequestWithReferer(path: string, referer: string, cookies: Record<string, string> = {}): NextRequest {
+  const req = new NextRequest(`https://app.example.com${path}`, { headers: { referer } });
+  for (const [name, value] of Object.entries(cookies)) {
+    req.cookies.set(name, value);
+  }
+  return req;
+}
+
+describe('proxy — 가입 출처 first-touch 캡처(story #3204)', () => {
+  it('utm_source/medium/campaign 쿼리가 있으면 각각 쿠키로 저장한다', async () => {
+    const response = await middleware(makeRequest('/?utm_source=google&utm_medium=cpc&utm_campaign=launch'));
+    expect(response.cookies.get('sp_attr_src')?.value).toBe('google');
+    expect(response.cookies.get('sp_attr_medium')?.value).toBe('cpc');
+    expect(response.cookies.get('sp_attr_campaign')?.value).toBe('launch');
+  });
+
+  it('외부 referer는 저장하지만 동일 출처 referer는 저장하지 않는다', async () => {
+    const external = await middleware(makeRequestWithReferer('/', 'https://twitter.com/some/post'));
+    expect(external.cookies.get('sp_attr_ref')?.value).toBe('https://twitter.com/some/post');
+
+    const internal = await middleware(makeRequestWithReferer('/register', 'https://app.example.com/login'));
+    expect(internal.cookies.get('sp_attr_ref')?.value).toBeUndefined();
+  });
+
+  it('utm도 referer도 없으면(direct) 쿠키를 남기지 않는다', async () => {
+    const response = await middleware(makeRequest('/'));
+    expect(response.cookies.get('sp_attr_src')?.value).toBeUndefined();
+    expect(response.cookies.get('sp_attr_ref')?.value).toBeUndefined();
+  });
+
+  it('first-touch — 이미 귀속 쿠키가 있으면 재방문 시 새 utm으로 덮어쓰지 않는다', async () => {
+    const response = await middleware(
+      makeRequest('/?utm_source=facebook&utm_medium=social', { sp_attr_src: 'google' }),
+    );
+    // 응답에 이 쿠키를 새로 set하지 않았어야 한다(요청에 이미 있던 값이 그대로 유지 —
+    // set-cookie 자체가 없으므로 get()이 undefined).
+    expect(response.cookies.get('sp_attr_medium')?.value).toBeUndefined();
   });
 });

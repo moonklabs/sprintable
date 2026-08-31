@@ -13,7 +13,8 @@ import {
 } from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
+import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
@@ -35,6 +36,7 @@ export function inferTransport(content: string): Transport {
 interface ConnectStepProps {
   agentId: string | null;
   apiKey: string | null;
+  projectId: string | null;
   onFinish: () => void;
 }
 
@@ -93,7 +95,7 @@ export function HighlightedJson({ text }: { text: string }) {
   );
 }
 
-export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
+export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectStepProps) {
   const t = useTranslations('onboarding');
 
   // transport=null: 최초 default-resolve 응답 대기 中(BE edition 기본 판별 前).
@@ -143,8 +145,19 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         else setInitialError(true);
         return;
       }
-      const json = (await res.json()) as { data?: { content?: string }; content?: string };
-      const content = json?.data?.content ?? json?.content;
+      // story #3192(온보딩·크럭스) — BE 응답 shape이 이미 `{content}` 단일파일에서 `{files[],
+      // mcp_config, api_key}`(agents.py::_connection_artifact, `⚠️BREAKING(dev-only)` 주석
+      // 참조)로 바뀐 뒤였는데 이 fetchArtifact만 옛 `content` 필드를 계속 읽고 있었다 — 신규
+      // 계정은 항상 `content=undefined`라 아티팩트가 절대 안 채워지는(재시도해도 동일 mismatch
+      // 재발) 크럭스였다. agent-connection-settings-section.tsx(story #2751, 같은 BE 응답을
+      // 먼저 새 shape으로 고쳐 소비하던 자매 소비처)의 파싱을 그대로 재사용(발명 0).
+      const json = (await res.json()) as {
+        data?: { files?: { filename: string; content: string }[] };
+        files?: { filename: string; content: string }[];
+      };
+      const payload = json?.data ?? json;
+      const mcpFile = (payload?.files ?? []).find((f) => f.filename === '.mcp.json');
+      const content = mcpFile?.content;
       if (typeof content !== 'string') {
         if (reqTransport) setArtifactErrors((p) => ({ ...p, [reqTransport]: true }));
         else setInitialError(true);
@@ -161,24 +174,18 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   }, [agentId]);
 
   // 최초 마운트 — transport 미지정 요청으로 BE edition 기본 판별.
-  // ⚠️story #2407 정리 中 처음 걸린 lint(react-hooks/set-state-in-effect) — fetchArtifact가
-  // 비동기로 setState하므로 정적분석이 "effect 안 setState"로 잡는다. 이 파일 다른 자리(§2
-  // 아티팩트 fetch 전체)와 동형인 기존 패턴(pristine origin/develop에도 있던 자리 — #2407가
-  // 만든 게 아니라 리팩터로 컴파일러 분석이 더 깊이 들어가면서 드러난 것)이라 이 스토리
-  // 범위에서 effect 아키텍처를 통째로 바꾸지 않는다 — 이 코드베이스 기존 관례(use-swipe-drawer.ts
-  // 등, PO 지적 2026-08-02 기준 이 PR로 여덟 번째)를 따라 disable로 명시한다.
-  // ⛔이 disable은 면제가 아니라 부채다 — «걷을 조건»: 이 세 effect(§아티팩트 fetch) 구조를
-  // 다시 손대는 판이 오면(예: fetchArtifact를 재설계·SWR류로 옮기는 스토리) 이 disable 세 개도
-  // 함께 재평가한다. 조용히 영구화하지 않는다.
+  // story #2407 정리 中 걸렸던 lint(react-hooks/set-state-in-effect, fetchArtifact 비동기
+  // setState를 정적분석이 "effect 안 setState"로 잡던 자리)에 disable 세 개를 부채로
+  // 명시해 뒀었다 — story #3201로 이 컴포넌트에 새 상태/핸들러가 늘며 분석 범위가 바뀌어
+  // (재평가 조건 그대로 발동, 위 원래 주석 참고) eslint가 세 disable 전부 "unused"로 재판정
+  // 했다(재확認: 이 세 effect 자체는 손 안 댐). 부채 걷음 — disable 제거.
   useEffect(() => {
     if (!agentId || !apiKey) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchArtifact();
   }, [agentId, apiKey, fetchArtifact]);
 
   useEffect(() => {
     if (!needsStdioFallback) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNeedsStdioFallback(false);
     void fetchArtifact('stdio');
   }, [needsStdioFallback, fetchArtifact]);
@@ -188,7 +195,6 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     if (!agentId || !apiKey || !transport) return;
     if (artifacts[transport]) return;
     if (transport === 'http' && hostedUnavailable) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchArtifact(transport);
   }, [agentId, apiKey, transport, artifacts, hostedUnavailable, fetchArtifact]);
 
@@ -246,6 +252,33 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
       emitOnboardingEvent('abandoned_explicit', { agent_id: agentId, failure_reason: 'abandoned_explicit', flow: 'onboarding' });
     }
     onFinish();
+  };
+
+  // story #3201(activation·절벽 처방) — 1차 깔때기 "연결까지 온 사람 중 첫 왕복 0%" 절벽.
+  // PO 확定(2026-08-29): verified 무관 상시 노출(미연결인 채 눌러도 새 DM에서 #3194 침묵
+  // 배너가 다음 행동을 안내하는 자기정합 구조). 생성 실패 시 onFinish()로 폴백(제3경로
+  // 발명 대신 기존 대시보드 이동 재사용 — 사용자를 막다른 곳에 두지 않음).
+  const [startingInstruction, setStartingInstruction] = useState(false);
+  const handleFirstInstruction = async () => {
+    if (!projectId || startingInstruction) return;
+    leftRef.current = true;
+    setStartingInstruction(true);
+    try {
+      const convId = await createFirstInstructionConversation(projectId, agentId);
+      if (!convId) {
+        onFinish();
+        return;
+      }
+      // story #2691 가드(verify-no-new-raw-fetch-api) — onboarding-form.tsx::finishToHome()의
+      // auth 토큰 갱신 raw fetch 호출을 그대로 베끼지 않고, 같은 목적의 기존 헬퍼
+      // (lib/db/client.ts의 refreshAuthTokens, callAuthRoute 경유)를 재사용한다.
+      await refreshAuthTokens().catch(() => null);
+      window.location.href = `/chats/${convId}`;
+    } catch {
+      onFinish();
+    } finally {
+      setStartingInstruction(false);
+    }
   };
 
   // 키 발급 실패 폴백(기존 동작 보존) — 아티팩트 없이 멤버 관리로 유도.
@@ -338,8 +371,11 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
               <div className={cn('h-3 w-1/2 rounded bg-muted', !artifactError && !isHostedUnavailable && 'animate-pulse')} />
               <div className={cn('h-3 w-2/3 rounded bg-muted', !artifactError && !isHostedUnavailable && 'animate-pulse')} />
               <div className="flex items-center gap-2 pt-1">
+                {/* story #3192 ② — api_key:null 200(또는 shape mismatch) 후 실패 상태를 계속
+                    "생성 중…"으로 위장하던 분기 제거. artifactError면 정직하게 실패를 알린다 —
+                    재시도 버튼과 짝을 이루는 문구라야 "눌러도 안 됨"으로 안 읽힌다. */}
                 <p className="text-xs text-muted-foreground">
-                  {isHostedUnavailable ? t('artifactUnavailable') : t('artifactPending')}
+                  {isHostedUnavailable ? t('artifactUnavailable') : artifactError ? t('artifactError') : t('artifactPending')}
                 </p>
                 {artifactError && !isHostedUnavailable && (
                   <Button
@@ -472,17 +508,34 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         )}
       </section>
 
-      {/* 푸터 */}
-      <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+      {/* 푸터 — story #3201: "첫 지시 보내기"가 주 CTA(1차 깔때기 절벽 처방), 대시보드 가기는
+          보조. verified 무관 상시 노출(PO 확定 — 미연결인 채 눌러도 새 DM에서 #3194 침묵
+          배너가 다음 행동을 안내). */}
+      <div className="flex flex-col items-stretch gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="min-w-0 text-xs text-muted-foreground">{t('connectFooterHint')}</p>
-        <Button
-          variant={verified ? 'hero' : 'glass'}
-          size="sm"
-          onClick={handleDashboard}
-          className="shrink-0 whitespace-nowrap"
-        >
-          {t('dashboardCta')}
-        </Button>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <Button
+            variant="glass"
+            size="sm"
+            onClick={handleDashboard}
+            className="whitespace-nowrap"
+          >
+            {t('dashboardCta')}
+          </Button>
+          <Button
+            variant="hero"
+            size="sm"
+            onClick={() => void handleFirstInstruction()}
+            disabled={!projectId || startingInstruction}
+            className="whitespace-nowrap"
+          >
+            {startingInstruction ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('firstInstructionStarting')}</>
+            ) : (
+              t('firstInstructionCta')
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -10,16 +10,13 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
-from app.repositories.notification import InboxRepository, NotificationRepository, NotificationSettingRepository
-from app.services.project_auth import has_project_access
+from app.repositories.notification import NotificationRepository, NotificationSettingRepository
 from app.schemas.notification import (
-    InboxItemResponse,
     NotificationResponse,
     NotificationSettingResponse,
-    ResolveInboxItem,
     UpsertNotificationSetting,
 )
-from app.services.member_resolver import assert_caller_is_member, is_caller_member
+from app.services.member_resolver import is_caller_member
 
 router = APIRouter(prefix="/api/v2", tags=["notifications", "Organization"])
 
@@ -79,13 +76,6 @@ def _notif_repo_read(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> NotificationRepository:
     return NotificationRepository(session, org_id)
-
-
-def _inbox_repo(
-    session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-) -> InboxRepository:
-    return InboxRepository(session, org_id)
 
 
 @router.get("/notifications")
@@ -206,107 +196,3 @@ async def upsert_notification_setting(
         enabled=body.enabled,
     )
     return NotificationSettingResponse.model_validate(setting)
-
-
-@router.get("/inbox", response_model=list[InboxItemResponse])
-async def list_inbox(
-    assignee_member_id: uuid.UUID = Query(...),
-    project_id: uuid.UUID = Query(...),
-    state: str | None = Query(default=None),
-    session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-    auth: AuthContext = Depends(get_current_user),
-    repo: InboxRepository = Depends(_inbox_repo),
-) -> list[InboxItemResponse]:
-    """까심 델타 재QA HIGH(S19): 무가드로 남아 타 member의 inbox를 누구나 조회할 수 있었다
-    (정보노출). resolve/dismiss와 동일한 self-or-org-admin 게이트 적용.
-
-    카디르 QA HIGH1(PR#3352, 2026-08-22): project_id 필터 부재로 다른 프로젝트의 inbox 항목이
-    섞여 나왔다 — 필수 쿼리 파라미터로 승격.
-
-    CI 게이트 실패(test_authz_project_scope_coverage, PO 지시 2026-08-22): project_id를
-    받기만 하고 caller가 그 프로젝트에 접근권이 있는지 검증이 없었다 — self-or-org-admin은
-    "이 assignee_member_id가 나(또는 내가 admin인) 것인가"만 보지 "이 project_id에 내가
-    접근권이 있는가"는 별개 축(activity_logs.py의 기존 resource-actual 관례와 동형 처방)."""
-    await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
-    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    items = await repo.list(assignee_member_id=assignee_member_id, project_id=project_id, state=state)
-    return [InboxItemResponse.model_validate(i) for i in items]
-
-
-@router.get("/inbox/incoming", response_model=list[InboxItemResponse])
-async def list_incoming(
-    assignee_member_id: uuid.UUID = Query(...),
-    project_id: uuid.UUID = Query(...),
-    session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-    auth: AuthContext = Depends(get_current_user),
-    repo: InboxRepository = Depends(_inbox_repo),
-) -> list[InboxItemResponse]:
-    """까심 델타 재QA HIGH(S19): list_inbox와 동일 갭 — self-or-org-admin 게이트 적용.
-    카디르 QA HIGH1(PR#3352, 2026-08-22): list_inbox와 동일 project_id 필터 처방.
-    CI 게이트 실패(test_authz_project_scope_coverage, PO 지시 2026-08-22): list_inbox와
-    동일 has_project_access 처방."""
-    await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
-    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    items = await repo.list_incoming(assignee_member_id=assignee_member_id, project_id=project_id)
-    return [InboxItemResponse.model_validate(i) for i in items]
-
-
-@router.post("/inbox/{id}/resolve", response_model=InboxItemResponse)
-async def resolve_inbox_item(
-    id: uuid.UUID,
-    body: ResolveInboxItem,
-    session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-    auth: AuthContext = Depends(get_current_user),
-    repo: InboxRepository = Depends(_inbox_repo),
-) -> InboxItemResponse:
-    """S19(#5 MUST): auth 파라미터 자체가 없어 caller가 이 inbox item의 assignee인지 확인이
-    전혀 없었다 — 누구나 타 member의 inbox item을 resolve할 수 있었고, `resolved_by` 바디값을
-    임의로 스푸핑할 수도 있었다. assignee==caller 강제(axis-safe) + resolved_by는 확인된
-    assignee_member_id에서 서버-파생(바디값 무시 — identity는 서버가 결정, 클라이언트가
-    주장하는 게 아니다). assert_caller_is_member 통과 = caller.id == assignee_member_id가
-    이미 확정이므로 별도 caller 재조회 없이 그 값을 그대로 쓴다."""
-    item = await repo.get(id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="InboxItem not found")
-
-    await assert_caller_is_member(
-        item.assignee_member_id, auth, session, org_id, detail="Not the assignee of this inbox item",
-    )
-
-    resolved = await repo.resolve(
-        id=id,
-        resolved_by=item.assignee_member_id,
-        resolved_option_id=body.resolved_option_id,
-        resolved_note=body.resolved_note,
-    )
-    if resolved is None:
-        raise HTTPException(status_code=404, detail="InboxItem not found")
-    return InboxItemResponse.model_validate(resolved)
-
-
-@router.post("/inbox/{id}/dismiss", response_model=InboxItemResponse)
-async def dismiss_inbox_item(
-    id: uuid.UUID,
-    session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-    auth: AuthContext = Depends(get_current_user),
-    repo: InboxRepository = Depends(_inbox_repo),
-) -> InboxItemResponse:
-    """S19(#6 MUST): resolve와 동일 갭 — assignee==caller 강제(axis-safe)."""
-    item = await repo.get(id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="InboxItem not found")
-
-    await assert_caller_is_member(
-        item.assignee_member_id, auth, session, org_id, detail="Not the assignee of this inbox item",
-    )
-
-    dismissed = await repo.dismiss(id=id)
-    if dismissed is None:
-        raise HTTPException(status_code=404, detail="InboxItem not found")
-    return InboxItemResponse.model_validate(dismissed)

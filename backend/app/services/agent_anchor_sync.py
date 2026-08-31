@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -284,11 +284,21 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
     AC3-4 뷰가 last_seen_at/active_story_id/agent_status를 agent_project_profiles서 읽으므로 cutover 전
     동기 유지. member_id(=agent team_member.id, 1:1)로 단일 profile 행 UPDATE. 행 없으면 0건(무해).
     cutover(2-2) 후 레거시 team_members UPDATE 제거 시 이 경로가 유일 write가 된다.
+
+    story #3197 — 이 함수가 "agent가 online으로 관측됐다"(last_seen_at=NOW 세팅)를 쓰는
+    유일한 choke point다(stdio SSE connect·http heartbeat 둘 다 여기로 수렴). `last_seen_at`이
+    non-None 값으로 오면(=online write, offline인 last_seen_at=None과 구분) 같은 UPDATE에
+    `first_connected_at = COALESCE(first_connected_at, :그 값)`을 얹는다 — 별도 write 0,
+    한 번 채워지면 이후 online 갱신에 덮이지 않는다(COALESCE가 기존 값 우선).
     """
     allowed = {"last_seen_at", "active_story_id", "agent_status"}
     upd = {k: v for k, v in fields.items() if k in allowed}
     if not upd:
         return
+    if upd.get("last_seen_at") is not None:
+        upd["first_connected_at"] = func.coalesce(
+            AgentProjectProfile.__table__.c.first_connected_at, upd["last_seen_at"]
+        )
     await session.execute(
         sa_update(AgentProjectProfile.__table__)
         .where(AgentProjectProfile.__table__.c.member_id == member_id)

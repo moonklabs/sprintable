@@ -96,13 +96,48 @@ describe('EntityChip variant=inline-meta — 기존 전개 그대로(escape hatc
   });
 });
 
-describe('EntityChip ghost — variant 무관 무동작 유지', () => {
-  it('ghost는 inline이든 inline-meta든 항상 "대상이 없습니다"·클릭 없음', async () => {
+describe('EntityChip ghost — story #3213(미등록≠비존재, "대상이 없습니다" 정적 단정 제거)', () => {
+  it('ghost는 "대상이 없습니다"를 더 이상 안 쓰고 실 라벨을 보인다', async () => {
     await act(async () => {
       root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} ghost referenceMeta={META} />);
     });
-    expect(container.textContent).toContain('대상이 없습니다');
-    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).toContain(LONG_LABEL);
+  });
+
+  it('ghost도 클릭 가능(EntityPreviewModal의 실 fetch로 진짜 존재판정 위임)', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label="스토리 제목" href={null} ghost />);
+    });
+    expect(container.querySelector('button')).not.toBeNull();
+  });
+});
+
+describe('EntityChip — story #3208(PO customer-zero, 카디르 QA #3611 지적) — 클릭→모달의 detail fetch는 아티팩트 자기 project로 스코프된다', () => {
+  it('클릭 시 EntityPreviewModal이 preview로 해소한 project_id를 X-Project-Id로 명시 실어 detail을 조회한다 — «채팅 공유받은 사람이 클릭」한 원 시나리오', async () => {
+    // 까디르 QA(PR#3611) — embed-card.link-states.test.tsx의 X-Project-Id pin은 EmbedCard의
+    // 독립 썸네일 fetch(마운트 시점에 먼저 도착)에 가려 EntityChip 클릭→모달 경로(스토리 원
+    // 사건: 채팅으로 공유받은 사람이 다른 project를 보다가 클릭) 자체는 pin 없이 방치될
+    // 뻔했다 — 이 테스트는 EntityChip 단독(EmbedCard 썸네일 효과가 없는 컴포넌트)이라 그
+    // 혼선이 구조적으로 없다.
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((v, k) => { headers[k] = v; });
+      calls.push({ url, headers });
+      if (url.includes('/api/visual-artifacts/preview')) {
+        return { ok: true, json: async () => ({ data: { projectId: 'p-owning' } }) };
+      }
+      return { ok: true, json: async () => ({ data: {} }) };
+    }));
+    await act(async () => {
+      root.render(<EntityChip entityType="artifact" entityId="art-cross" label="크로스 목업" href={null} />);
+    });
+    await act(async () => { container.querySelector('button')!.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const detailCall = calls.find((c) => c.url === '/api/visual-artifacts/art-cross');
+    expect(detailCall).toBeDefined();
+    expect(detailCall!.headers['x-project-id']).toBe('p-owning');
   });
 });
 

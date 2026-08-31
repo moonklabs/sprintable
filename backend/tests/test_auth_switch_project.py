@@ -291,7 +291,7 @@ async def test_switch_project_grant_only_user_token_has_target_project_id(client
 
     captured_metadata = {}
 
-    def mock_create_tokens(user_id, *, email, app_metadata):
+    def mock_create_tokens(user_id, *, email, app_metadata, **kwargs):
         captured_metadata.update(app_metadata)
         return {
             "access_token": "tok",

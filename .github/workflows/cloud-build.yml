@@ -327,15 +327,41 @@ jobs:
             # realtime 쪽 값(EVENT_BROKER_REDIS_DISPATCH_ENABLED 포함)은 cloudbuild.yaml의
             # deploy-realtime 스텝이 이미 dev 전용 가드 안에서 직접 명시(변수 아님).
             echo "redis_url=redis://10.164.120.243:6379" >> "$GITHUB_OUTPUT"
-            # story #2157 해제 판(2026-08-17, 미르코 그라운딩·페드루 확定) — dual_publish는
-            # #2123 cutover(2026-07-25 15:43 KST)의 롤백 안전망이었다. 해제 조건 3개(①72h
-            # 무사고=Redis 배달 오류 신규 클래스 0 ②PG_LISTEN 재활성 0회 ③SSOT 경유) 전부
-            # 실측 PASS(Cloud Logging 21일간 redis 오류 0건·git log 이후 PG_LISTEN 롤백 커밋
-            # 0건) — 3주째 방치돼 있던 조건부 해제를 여기서 dev부터 집행한다. PG_LISTEN이 이미
-            # 꺼져 있어 이 스위치가 켜져 있어도 롤백 경로 자체가 무의미했다(pg_notify는 무조건
-            # 나가지만 듣는 프로세스가 0개 — 원 스토리 ④). prod(위 main 분기)는 별도 판단 —
-            # 여기서 안 건드림.
-            echo "backend_redis_dual_publish_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #3198(2026-08-28, 디캄포 은두카쿠) — #2157(2026-08-17)의 dual_publish=false
+            # 해제 판을 되돌린다. #2157의 전제("PG_LISTEN이 이미 꺼져 있어 이 스위치가 켜져
+            # 있어도 롤백 경로 자체가 무의미 — pg_notify는 나가지만 듣는 프로세스가 0개")가
+            # 틀렸다: main.py의 #2122 정합성 가드(`if _backplane == "redis" and not
+            # (dual_publish_enabled and consume_enabled): _backplane = "pg"`)가 backend-dev
+            # 자신의 dual_publish=false·consume=true 조합을 보고 **backplane을 pg로 강제
+            # 복귀**시킨다 — PG_LISTEN_ENABLED=false 로 배선해도 `resolve_backplane()`이
+            # 자체 판단으로 pg_listen을 도로 켠다는 뜻이라, "듣는 프로세스가 0개"는 사실이
+            # 아니었다(라이브 실측 2026-08-28: backend-dev pg_listen connected, 인스턴스 3개
+            # 전부). 그 안전판 덕에 backend-dev **자기 자신**(에이전트 SSE, #2123이 확認한 대로
+            # 여전히 backend-dev가 서빙)은 무사했지만, dual_publish=false인 한 backend-dev는
+            # Redis 채널에 아무것도 발행하지 않는다 — sprintable-realtime-dev(브라우저가 실제로
+            # 붙는 REALTIME_URL 대상, consume=true·dispatch=true로 이미 정상 대기 중)는 구독할
+            # 채널이 통째로 빈 채였다. 즉 API 쓰기(backend-dev)에서 발생한 라이브 이벤트가
+            # 브라우저(realtime-dev)에 **원천적으로 0% 도달** — attention.changed는 물론
+            # presence·conversation.working 등 B계열 전부, A계열도 즉시성 상실(다음 재접속
+            # DB backfill에만 의존).
+            #
+            # 라이브 재현(디캄포 은두카쿠 agent 키, 2026-08-28): 직결(backend-dev 직접
+            # EventSource)은 attention.changed <1초 즉시 도착·게이트웨이(dev-realtime.
+            # sprintable.ai, 재접속 없이 안정 유지된 연결)는 동일 트리거로 영구 0건 — 재접속
+            # 주기(BFF 55s cap) 가설은 이걸로 기각(연결이 안 끊겨도 원천 미도달이므로 원인이
+            # 아님). #2157의 ②"PG_LISTEN 재활성 0회"는 관측 자체는 맞았다(env var 값은 그대로
+            # false) — 다만 "재활성 없음"과 "실제로 안 도는가"는 다른 질문이었다(resolve_
+            # backplane의 자체-복구 로직을 못 잡은 관측).
+            #
+            # ⚠️[SID 3037] wake_agent() pg_notify-only 크로스인스턴스 폴백의 __wake__ 마커 유실
+            # 결함과의 상호작용 확認 — 이 결함은 FANOUT_WAKE_REDIS_ENABLED=false일 때만 발동하는
+            # dormant 코드고, 이 커밋은 그 플래그를 안 건드린다(dev/prod 둘 다 계속 true) — 재점화
+            # 없음. dual_publish 원복 자체가 FANOUT_WAKE_REDIS_ENABLED 경로 선택에 영향을 주지
+            # 않는다(별개 스위치).
+            #
+            # prod(위 main 분기)는 dual_publish=true 유지 상태라 이 결함 자체가 없었다(#2141
+            # S-a 이후 계속 true) — 이번 되돌림은 dev만 대상.
+            echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
             # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스
             # 배달이 #2122 머지 이후에도 무효였던 이유 — 이 발행측 스위치(agent_gateway.py:224
             # 게이팅)가 꺼져 있어 event_broker를 계속 우회했다(직접 pg_notify만, Redis 미발행).

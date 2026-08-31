@@ -69,5 +69,18 @@ async def accept_invite(
             raise HTTPException(status_code=403, detail="Email does not match invite")
         raise HTTPException(status_code=400, detail="Cannot accept invite")
 
+    # story #3217(Referral 계측, 착지 후 PO 라이브 probe 발견) — 이메일 가입 경로 실
+    # 여정은 register()가 invite_token을 받는 게 아니라: 비로그인 수락 → /login?
+    # returnUrl → 가입 → **이 authenticated accept**로 흐른다(OAuth 경로만 register()
+    # 훅이 유효). register()/oauth_callback()의 A축 훅은 그대로 두고(OAuth·API 클라
+    # 유효), 여기에 결정론 규칙으로 귀속을 보강한다: 계정 생성이 이 초대 생성 **이후**
+    # (invite→signup 인과, `user.created_at >= invite_created_at`)면 이 초대가 유발한
+    # 신규 가입 — referral 기록. 계정이 초대보다 오래면(기존 유저의 통상 수락) 그
+    # 계정의 기존 귀속(가입 시점 값)을 건드리지 않는다(무기록).
+    invite_created_at = result.get("invite_created_at")
+    if invite_created_at is not None and user.created_at >= invite_created_at:
+        from app.routers.auth import _apply_referral_attribution
+        _apply_referral_attribution(user, result)
+
     await session.commit()
     return AcceptInviteResponse(ok=True, org_id=result["org_id"], role=result["role"])

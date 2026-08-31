@@ -20,16 +20,22 @@ sync_cloudbuild_secret_manifest.py=GCP 실물 대조).
    (예: `AGENT_KEY_SECRET`) — 같은 파일 안의 `VAR="LITERAL"` 대입을 찾아 해석한다. 못 찾으면
    **조용히 버리지 않고** unresolved로 반환(호출부가 red로 만들지 declare 할지 결정).
 
-## ⚠️ 선언된 미커버(AC3, 카디르 QA #3549 changes — 이 PR 스코프 밖, 파서 신설 금지)
-`cloudbuild.yaml`(deploy-realtime-gce 스텝, ~L872)이 호출하는
-`backend/scripts/deploy_realtime_gce.sh`는 ②의 3개 스크립트에 안 들어있어 이 모듈이 못 본다.
-그 스크립트는 시크릿을 SECRETS_SPEC류 단순 조립이 아니라 **base64 인코딩된 fetch-secrets
-블록**으로 다루는 별도 형태라, 지금의 정규식/DRY_RUN 파싱으로 못 잡는다(kebab 시크릿 5종
-참조 — 카디르 실측). 실 커버리지 추가는 별도 후속 스토리(#9d1fde0c)의 몫 — 이 모듈은 그
-공백을 **선언**만 하고(`_DECLARED_UNCOVERED_SCRIPTS`), 조용히 완전한 척하지 않는다.
+## ④(story #3549 QA 후속, story #9d1fde0c) — `backend/scripts/deploy_realtime_gce.sh`
+`cloudbuild.yaml`(deploy-realtime-gce 스텝, ~L872)이 호출하는 이 스크립트는 시크릿을
+②의 SECRETS_SPEC류 단순 `KEY=NAME:latest` 조립이 아니라 GCE startup-script 안에 임베드된
+**base64 fetch-secrets 블록**(story #3071 하드닝 산출물)으로 다룬다 — ②의 `_names_from_spec()`
+포맷과 안 맞아 별도 파서가 필요했다.
+
+⛔`SECRET_PAIRS=` DRY_RUN 출력 줄(이미 평문·바로 파싱 가능해 보이는 요약 변수)을 직접 읽지
+않는다 — 이 스크립트 자체의 주석(L610-616, story #2142)이 이미 경고한 함정과 같은 클래스:
+요약 변수와 실제 생성된 산출물(startup-script에 박히는 `_secret_names=(...)` 배열 리터럴)이
+갈라질 수 있다. `GENERATED_FETCH_SECRETS_BLOCK_B64`(진짜 생성된 fetch-secrets.sh 블록 그
+자체, story #3071이 이미 이 원칙으로 이 변수를 만들어 둠)를 디코드해 그 안의 배열 리터럴을
+읽는다 — "진짜 배포될 것"을 검증하는 이 파일의 다른 두 소스(①②)와 같은 신뢰 수준.
 """
 from __future__ import annotations
 
+import base64
 import os
 import re
 import subprocess
@@ -53,16 +59,10 @@ _REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
 _CLOUDBUILD_YAML = _REPO_ROOT / "cloudbuild.yaml"
 _SCRIPTS_DIR = _REPO_ROOT / "backend" / "scripts"
 
-# story #3140(카디르 QA #3549 changes) — 이 모듈이 정적으로 못 보는 시크릿 소스를 명시
-# 선언한다(조용히 완전한 척 안 함). 실 커버리지 추가는 별도 후속 스토리(#9d1fde0c)의 몫 —
-# 이 PR 스코프는 선언까지만(파서 신설 금지, PO 페드루 명시).
-_DECLARED_UNCOVERED_SCRIPTS: dict[str, str] = {
-    "deploy_realtime_gce.sh": (
-        "cloudbuild.yaml deploy-realtime-gce 스텝(~L872)이 호출 — 시크릿을 base64 "
-        "fetch-secrets 블록으로 다뤄 SECRETS_SPEC류 정규식/DRY_RUN 파싱으로 안 잡힘 "
-        "(kebab 시크릿 5종 참조, 카디르 실측). 후속: story #9d1fde0c."
-    ),
-}
+# story #3140 — 이 모듈이 정적으로 못 보는 시크릿 소스를 명시 선언한다(조용히 완전한 척 안
+# 함). story #9d1fde0c에서 deploy_realtime_gce.sh 커버리지가 선언→실제 파서로 승격됐다 —
+# 지금은 빈 사전이지만, 다음에 이 모듈이 또 못 보는 소스가 생기면 여기 등재하는 관례는 유지.
+_DECLARED_UNCOVERED_SCRIPTS: dict[str, str] = {}
 
 # ①: `KEY=VALUE:latest`류 안의 VALUE. VALUE는 리터럴 시크릿명 또는 `$${VAR}`/`${VAR}` 참조 —
 # group(1)="$"가 하나라도 있으면 변수참조(③ 해석 필요), group(2)=이름 본체. `KEY=`가 존재하는
@@ -166,6 +166,38 @@ def extract_script_refs() -> set[str]:
     return names
 
 
+# story #9d1fde0c — 디코드된 fetch-secrets 블록 안의 `_secret_names=( 'a' 'b' ... )` 배열
+# 리터럴만 뽑는다(다른 배열도 있을 수 있어 이름으로 앵커). single-quote 리터럴 파싱이라
+# 배포 스크립트 자신의 생성 관례(L533-542, 항상 단일따옴표로 감쌈)를 그대로 신뢰한다.
+_SECRET_NAMES_ARRAY_RE = re.compile(r"_secret_names=\(([^)]*)\)")
+
+
+def _extract_secret_names_from_fetch_block(decoded_block: str) -> set[str]:
+    match = _SECRET_NAMES_ARRAY_RE.search(decoded_block)
+    if not match:
+        return set()
+    names = set(re.findall(r"'([^']*)'", match.group(1)))
+    # `__AR_TOKEN__`은 Secret Manager 시크릿이 아니라 fetch-secrets.sh 내부 sentinel(이
+    # 이름이 오면 gcloud auth print-access-token으로 분기, story #3071 L524) — manifest
+    # 대조 대상이 아니라서 제외(넣으면 "manifest에 없는 시크릿" 오탐이 뜬다).
+    names.discard("__AR_TOKEN__")
+    return names
+
+
+def extract_realtime_gce_secret_refs() -> set[str]:
+    """④: `deploy_realtime_gce.sh`(dev+prod) — GENERATED_FETCH_SECRETS_BLOCK_B64(story #3071
+    하드닝, "진짜 생성된 산출물" 원칙)를 디코드해 그 안의 `_secret_names=(...)` 배열을 읽는다.
+    ②(`_dry_run_spec`)와 동일 DRY_RUN 경로 재사용(병렬 구현 아님) — script/key만 다르다."""
+    names: set[str] = set()
+    for env in ("dev", "prod"):
+        b64 = _dry_run_spec("deploy_realtime_gce.sh", env, "GENERATED_FETCH_SECRETS_BLOCK_B64")
+        if not b64:
+            continue
+        decoded = base64.b64decode(b64).decode("utf-8", errors="replace")
+        names |= _extract_secret_names_from_fetch_block(decoded)
+    return names
+
+
 @dataclass
 class SecretRefs:
     resolved: set[str] = field(default_factory=set)
@@ -173,9 +205,10 @@ class SecretRefs:
 
 
 def extract_all_secret_refs() -> SecretRefs:
-    """전수 추출 진입점 — ①②③ 전부 합친다. `resolved`=대조 가능한 이름 전체,
+    """전수 추출 진입점 — ①②③④ 전부 합친다. `resolved`=대조 가능한 이름 전체,
     `unresolved`=시크릿 바인딩 자리이긴 한데 정적으로 리터럴을 못 찾은 토큰(가드가 못 잡는
     것으로 별도 선언 — 지어내지 않는다)."""
     inline_resolved, unresolved = extract_cloudbuild_inline_refs()
     script_resolved = extract_script_refs()
-    return SecretRefs(resolved=inline_resolved | script_resolved, unresolved=unresolved)
+    realtime_gce_resolved = extract_realtime_gce_secret_refs()
+    return SecretRefs(resolved=inline_resolved | script_resolved | realtime_gce_resolved, unresolved=unresolved)

@@ -17,7 +17,8 @@ export default function NotFound() {
           <p className="text-sm text-muted-foreground">{t('description')}</p>
         </div>
         <div className="flex justify-center">
-          <Link href="/dashboard" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+          {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. */}
+          <Link href="/chats" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
             {t('cta')}
           </Link>
         </div>

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { X, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { AgentIdentity } from '@/components/ui/agent-identity';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
@@ -14,6 +15,9 @@ interface Member {
   id: string;
   name: string;
   type: string;
+  // story #3194 — /api/members(정본 SSOT)엔 없는 필드라 별도 /api/team-members?type=agent
+  // 조회로 채운다(#2751 get_verified_map 그대로 재사용, 발명 0). human/미조회는 undefined.
+  verified?: boolean | null;
 }
 
 // story #2613 — 정책 거부(AGENT_MESSAGE_POLICY_DENIED)는 대상 에이전트로의 워크포스 설정
@@ -28,7 +32,11 @@ interface NewConversationModalProps {
 
 export function NewConversationModal({ projectId, onClose, onCreated }: NewConversationModalProps) {
   const t = useTranslations('chats');
+  // story #3194 — agentNotConnected 배지 문구 재사용(발명 0, agent-management-tab.tsx와 동일 키).
+  const ta = useTranslations('agents');
   const [members, setMembers] = useState<Member[]>([]);
+  // story #3194 — 별도 state로 둔다(members setter와 순서 경쟁 없이 항상 render에서만 merge).
+  const [verifiedById, setVerifiedById] = useState<Record<string, boolean | null>>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
   const [loading, setLoading] = useState(true);
@@ -41,6 +49,19 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
       .then((json) => setMembers((json.data ?? []) as Member[]))
       .catch(() => {})
       .finally(() => setLoading(false));
+    // story #3194 — 연결 상태(발명 0, #2751 get_verified_map)는 /api/members가 안 실어주는
+    // 필드라 team-members 쪽에서 따로 받는다. 별개 state로 둬 위 members fetch와의 완료
+    // 순서에 안 낚인다(render에서만 merge, 실패해도 배지만 안 뜰 뿐 graceful).
+    fetchWithAuth('/api/team-members?type=agent')
+      .then((r) => r.json())
+      .then((json) => {
+        const vMap: Record<string, boolean | null> = {};
+        for (const m of (json.data ?? []) as Array<{ id: string; verified?: boolean | null }>) {
+          vMap[m.id] = m.verified ?? null;
+        }
+        setVerifiedById(vMap);
+      })
+      .catch(() => {});
   }, [projectId]);
 
   const toggle = (id: string) => {
@@ -122,6 +143,11 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                     {/* story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue
                         신호 dot) 채택, soft-fill 폐지. */}
                     {m.type === 'agent' && <AgentIdentity />}
+                    {/* story #3194(AC3) — 새 대화 상대 선택기에도 연결 상태 노출(발명 0, #2751
+                        get_verified_map 그대로 — agent-management-tab.tsx와 동일 배지). */}
+                    {m.type === 'agent' && verifiedById[m.id] === false ? (
+                      <Badge variant="warning" className="shrink-0">{ta('agentNotConnected')}</Badge>
+                    ) : null}
                     {selected.includes(m.id) && <Check className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
                   </button>
                 </li>

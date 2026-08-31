@@ -11,6 +11,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.project_access import ProjectAccess
 from app.repositories.organization import OrganizationRepository
+from app.schemas.org_member import OrgMemberResponse
 
 router = APIRouter(prefix="/api/v2/projects", tags=["project-access", "Organization"])
 
@@ -79,6 +80,65 @@ async def list_project_access(
         select(ProjectAccess).where(ProjectAccess.project_id == project_id)
     )
     return [ProjectAccessResponse.model_validate(r) for r in result.scalars().all()]
+
+
+@router.get("/{project_id}/access-candidates", response_model=list[OrgMemberResponse])
+async def list_access_candidates(
+    project_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> list[OrgMemberResponse]:
+    """story #3231 4라운드(카디르 QA) — project-access-section.tsx(FE)가 "관리 화면=전
+    로스터 열람" 유형으로 오분류돼 org-admin 전용 GET /api/v2/org-members(3231 1라운드)로
+    잠겼다. 그런데 이 화면이 실제로 미러해야 하는 인가는 org-admin이 아니라
+    _require_owner_or_admin의 **effective 프로젝트 역할**(org owner/admin 플로어 OR
+    project-level owner/admin — additive, has_project_role min_role='admin')이다 —
+    org-admin은 아니지만 이 project의 admin/owner인 org member가 원 버그로 새로 막혔다
+    (신규 회귀). 이 엔드포인트는 list_project_access(위)와 동일 게이트를 재사용하고,
+    "이 project를 관리할 수 있는 사람에게 project_id 스코프로 org 로스터를 보여준다"는
+    원칙(카디르: roster 조회 인가 = 그걸 쓰는 액션의 인가와 동일)만 따른다 — org-members
+    roster(admin 전용 403)는 그대로 두고 안 건드린다.
+    """
+    await _require_owner_or_admin(project_id, auth, session)
+    from sqlalchemy import text
+    org_row = await session.execute(
+        text("SELECT org_id FROM projects WHERE id = :pid AND deleted_at IS NULL"),
+        {"pid": str(project_id)},
+    )
+    row = org_row.first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    result = await session.execute(
+        text(
+            """
+            SELECT om.id, om.org_id, om.user_id, om.role,
+                   om.created_at, om.deleted_at,
+                   u.email,
+                   COALESCE(m.name, u.display_name, u.email) AS name
+            FROM org_members om
+            LEFT JOIN users u ON u.id = om.user_id
+            LEFT JOIN members m
+                   ON m.org_id = om.org_id AND m.user_id = om.user_id
+                  AND m.type = 'human' AND m.deleted_at IS NULL
+            WHERE om.org_id = :org_id AND om.deleted_at IS NULL
+            ORDER BY om.created_at
+            """
+        ),
+        {"org_id": str(row.org_id)},
+    )
+    return [
+        OrgMemberResponse(
+            id=r.id,
+            org_id=r.org_id,
+            user_id=r.user_id,
+            role=r.role,
+            created_at=r.created_at,
+            deleted_at=r.deleted_at,
+            email=r.email,
+            name=r.name,
+        )
+        for r in result
+    ]
 
 
 @router.post("/{project_id}/access", response_model=ProjectAccessResponse, status_code=201)

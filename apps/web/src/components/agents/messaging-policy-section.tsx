@@ -43,9 +43,14 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
   const radioRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const load = useCallback(async () => {
+    // story #3231 4라운드(카디르 QA) — 이 컴포넌트는 이미 부모(workforce/[id]/page.tsx)의
+    // canEdit(생성자 OR org admin/owner — BE assert_agent_owner와 정합)로 렌더 자체가
+    // 게이트돼 있다. 그런데 내부의 이 fetch만 org-admin 전용 org-members roster를 썼던
+    // 게 회귀 원인 — Member가 만든 에이전트는 그 생성자 본인도 403이라 allowlist 후보를
+    // 못 봤다. assert_agent_owner와 동일 게이트의 agent 전용 후보 엔드포인트로 교체.
     const [policyRes, membersRes] = await Promise.all([
       fetchWithAuth(`/api/agents/${agentId}/message-policy`).catch(() => null),
-      fetchWithAuth('/api/org-members').catch(() => null),
+      fetchWithAuth(`/api/agents/${agentId}/message-policy/candidates`).catch(() => null),
     ]);
     if (policyRes?.ok) {
       const json = await policyRes.json() as { data?: { mode?: MessagingMode; allowlist?: string[] } };

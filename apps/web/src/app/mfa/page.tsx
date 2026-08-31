@@ -40,7 +40,7 @@ export default function MfaPage() {
         }
         return;
       }
-      router.push('/dashboard');
+      router.push('/chats'); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준.
     } catch {
       setError('Verification failed. Please try again.');
     } finally {

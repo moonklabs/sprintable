@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Check, Circle } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -19,7 +20,12 @@ function countCategories(rules: ReturnType<typeof checkPasswordRules>) {
   return [rules.upper, rules.lower, rules.digit, rules.special].filter(Boolean).length;
 }
 
+// story #3155(#3149 조사 중 발견 — 원조 갭) — linked-accounts-section.tsx가 "SetPasswordSection과
+// 동일 컨벤션 유지"라고 명시했을 만큼 이쪽이 하드코딩 영문의 원조였다. next-intl로 이관
+// (`setPassword*`, linkedAccounts*와 동형 컨벤션). has_password=false(소셜 로그인 전용)일 때만
+// 렌더돼 노출 빈도가 낮았을 뿐, 소셜 온보딩 신규 사용자에겐 정확히 이 조건이 걸린다.
 export function SetPasswordSection() {
+  const t = useTranslations('settings');
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -60,18 +66,17 @@ export function SetPasswordSection() {
       const json = await res.json() as { data?: { ok: boolean }; error?: { code?: string; message: string } };
       if (!res.ok) {
         // story #2485 — code로 분기(backend auth.py set_password()가 _err()로 직접
-        // 발급하는 안정 값). 이 컴포넌트는 next-intl 미배선(하드코딩 영문)이라 기존
-        // 톤에 맞춰 인라인 영문 문구로 분기한다 — 알려지지 않은 code만 안전 폴백.
+        // 발급하는 안정 값). 알려지지 않은 code만 안전 폴백.
         if (json.error?.code === 'ALREADY_HAS_PASSWORD') {
-          setMessage({ type: 'error', text: 'A password is already set for this account.' });
+          setMessage({ type: 'error', text: t('setPasswordErrorAlreadyHasPassword') });
         } else if (json.error?.code === 'USER_NOT_FOUND') {
-          setMessage({ type: 'error', text: 'We could not find your account.' });
+          setMessage({ type: 'error', text: t('setPasswordErrorUserNotFound') });
         } else {
-          setMessage({ type: 'error', text: 'Failed to set password.' });
+          setMessage({ type: 'error', text: t('setPasswordErrorGeneric') });
         }
         return;
       }
-      setMessage({ type: 'success', text: 'Password set successfully. You can now sign in with email and password.' });
+      setMessage({ type: 'success', text: t('setPasswordSuccess') });
       setDone(true);
     } finally {
       setBusy(false);
@@ -82,10 +87,8 @@ export function SetPasswordSection() {
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">Set Password</h2>
-          <p className="text-sm text-muted-foreground">
-            Your account was created with OAuth. Set a password to also sign in with email and password.
-          </p>
+          <h2 className="text-base font-semibold text-foreground">{t('setPasswordTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('setPasswordDescription')}</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
@@ -105,7 +108,7 @@ export function SetPasswordSection() {
         <div className="space-y-3 max-w-sm">
           <input
             type="password"
-            placeholder="New password"
+            placeholder={t('setPasswordPlaceholderNew')}
             autoComplete="new-password"
             className={`w-full rounded-lg border px-4 py-2 text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
               showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
@@ -116,7 +119,7 @@ export function SetPasswordSection() {
           />
           <input
             type="password"
-            placeholder="Confirm new password"
+            placeholder={t('setPasswordPlaceholderConfirm')}
             autoComplete="new-password"
             className={`w-full rounded-lg border px-4 py-2 text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
               touched && confirm && !isConfirmValid ? 'border-destructive' : 'border-border'
@@ -128,16 +131,16 @@ export function SetPasswordSection() {
 
           {showRules && (
             <ul className="divide-y divide-border text-xs">
-              <PasswordRuleItem met={rules.length} label="At least 8 characters" />
+              <PasswordRuleItem met={rules.length} label={t('setPasswordRuleLength')} />
               <li className={`flex items-center gap-1.5 py-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
                 {categoriesMet >= 3 ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
-                <span>At least 3 of: uppercase, lowercase, digit, special character ({categoriesMet}/3)</span>
+                <span>{t('setPasswordRuleCategories', { count: categoriesMet })}</span>
               </li>
             </ul>
           )}
 
           {touched && confirm && !isConfirmValid && (
-            <p className="text-xs text-destructive">Passwords do not match.</p>
+            <p className="text-xs text-destructive">{t('setPasswordMismatch')}</p>
           )}
 
           <button
@@ -145,7 +148,7 @@ export function SetPasswordSection() {
             disabled={busy || !password || !confirm}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {busy ? '...' : 'Set Password'}
+            {busy ? t('setPasswordSubmitting') : t('setPasswordSubmit')}
           </button>
         </div>
       </SectionCardBody>

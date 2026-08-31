@@ -9,7 +9,6 @@ import {
   HardDrive,
   Inbox,
   Layers,
-  LayoutDashboard,
   MessageSquare,
   Newspaper,
   Settings,
@@ -86,7 +85,9 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     items: [
       { id: 'org-briefing', labelKey: 'orgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' },
       { id: 'inbox', labelKey: 'inbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox' },
-      { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, kind: 'static', path: '/dashboard' },
+      // story #3179(S3c) — 'dashboard'(대시보드, /dashboard) 항목 제거. attention(S3a)·
+      // pulse(S3b)가 chat으로 이전되며 /dashboard는 폐합(redirect-only 스텁)됐다 — 같은
+      // 목적지(chat)로 가는 nav 항목이 CHAT_CENTER_ITEM과 중복될 이유가 없다.
       // chats는 이 배열에 없다 — story #2930 I2가 구역 밖 1급 챗 center로 승격했다(아래
       // CHAT_CENTER_ITEM, app-sidebar.tsx가 NAV_GROUPS 순회와 별개로 직접 소비).
     ],

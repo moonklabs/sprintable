@@ -35,11 +35,10 @@ from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/command-center", tags=["command-center", "Work"])
 
-# 자동 이상감지 임계. step_run pending 정체=에이전트 멈춤·story 무진행=정체·blocker 무응답.
+# 자동 이상감지 임계. step_run pending 정체=에이전트 멈춤·blocker 무응답.
 _AGENT_STUCK_MINUTES = 30
-_STORY_STALLED_DAYS = 3
 _BLOCKER_UNANSWERED_DAYS = 2
-# story #2539: 최근 반증(falsified)된 가설 — story_stalled와 동형 시간창 패턴.
+# story #2539: 최근 반증(falsified)된 가설 — 동일 windowed-COUNT 관측 패턴(agent_stuck 등).
 # ⛔in-flight 이상감지(측정 중 목표 이탈)가 아니다 — hypothesis_scorer.py 실측 확認:
 # outcome_result는 status가 verified/falsified로 "종결"되는 순간에만 채워진다("measuring
 # 이면서 outcome_result가 있는" 상태는 데이터 구조상 존재 안 함). 그래서 이 신호는 "방금
@@ -397,33 +396,15 @@ async def my_actions(
             "first_failed_at": first_at.isoformat() if first_at else None,
             "last_failed_at": last_at.isoformat() if last_at else None,
         })
-    # 2) CC-BE.2 스토리 N일 정체(org-visible 필드만).
-    # story #2538(2026-08-09): title 추가 — FE ko.json "가설이 예상과 다르게 진행됩니다"
-    # 카피가 이 신호(가설과 무관한 제네릭 story 정체 감지)에 잘못 매핑돼 있었다(PO 그라운딩
-    # 확認). 카피 정정+dedup+개별 구별("제목+N일")은 FE 몫, 그 구별에 필요한 title을 여기서
-    # additive로 채운다.
-    stalled = (
-        await session.execute(
-            select(Story.id, Story.updated_at, Story.title, Story.project_id)
-            .where(
-                Story.org_id == org_id,
-                Story.status.not_in(("done", "backlog")),
-                Story.deleted_at.is_(None),
-                Story.is_excluded.is_(False),
-                Story.updated_at < now - timedelta(days=_STORY_STALLED_DAYS),
-            )
-            .order_by(Story.updated_at.asc())
-            .limit(20)
-        )
-    ).all()
-    for sid, updated_at, title, project_id in stalled:
-        attention_items.append({
-            "type": "story_stalled", "severity": "warn", "auto_detected": True,
-            "title": title,
-            "story_id": str(sid),
-            "stalled_days": (now - updated_at).days if updated_at else None,
-            "project_id": str(project_id),
-        })
+    # story #93b076c8(2250, 2026-08-27) — "story_stalled"(org-wide, Story.updated_at 기준
+    # 정체 감지)를 이 자리에서 완전히 걷어냈다. 페드루 PO 판정(같은 날): 이 축은 #8934ba7f
+    # AC1 실측으로 이미 부정확이 확定된 신호(같은 값 재대입에도 Story.updated_at이 bump)라
+    # "폐기했는데 화면에 남는" 클래스였다 — 새로 만든 정확한 축(`/glance/attention`
+    # kind="stalled", StoryActivity(status_changed) 최신 시각 기준)이 org-briefing의
+    # attention-cluster-board.tsx에서 이 자리를 대체한다(FE PR, 같은 스토리). ⚠️커버리지
+    # 갭: 신규 축은 project-scope(활성 프로젝트만)라 이 구 신호의 org-wide 커버리지보다
+    # 좁다 — org-wide 확장은 페드루 판정으로 별도 후속 스토리(§93b076c8 코멘트 참조),
+    # 이 PR 스코프 밖.
     # 3) CC-BE.2 답없는 블로커(enum/ids/age — raw blocker text 0).
     # story #2538: story_stalled와 동형으로 title 추가(막힌 story 제목) — FE 구별용.
     _BlockedU = aliased(Story)

@@ -11,7 +11,6 @@ import type {
   IAgentRunBillingRepository,
   IAgentRunRepository,
   IAgentApiKeyRepository,
-  IInboxItemRepository,
   IHypothesisRepository,
   IStorageService,
 } from '@sprintable/core-storage';
@@ -77,11 +76,6 @@ export async function createNotificationRepository(): Promise<INotificationRepos
 export async function createTeamMemberRepository(): Promise<ITeamMemberRepository> {
   const { ApiTeamMemberRepository } = await import('@sprintable/storage-api');
   return new ApiTeamMemberRepository(await getSpAt());
-}
-
-export async function createInboxItemRepository(): Promise<IInboxItemRepository> {
-  const { ApiInboxItemRepository } = await import('@sprintable/storage-api');
-  return new ApiInboxItemRepository(await getSpAt());
 }
 
 // ============================================================================

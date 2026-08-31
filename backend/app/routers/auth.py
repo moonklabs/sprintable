@@ -100,6 +100,23 @@ def _err(code: str, message: str, status_code: int = 400) -> JSONResponse:
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 
+# story #3204(카디르 QA, PR#3612) — UTM/referrer는 유저(브라우저)가 URL 쿼리로 완전히
+# 통제하는 값이라 무제한 저장 금지. 422 거부가 아니라 **클램프**(잘라서 저장) — 이상한
+# UTM 값 하나로 가입 자체가 막히면(422) 신규 유저 유입 경로를 스스로 차단하는 꼴이라
+# 서비스 목적에 반한다. 값 상한은 PO 확定(2026-08-29): utm 3종 각 256자, referrer는
+# URL이라 더 길 수 있어 1024자.
+_ATTRIBUTION_UTM_MAX_LEN = 256
+_ATTRIBUTION_REFERRER_MAX_LEN = 1024
+
+
+def _clamp_attribution_utm(v: str | None) -> str | None:
+    return v[:_ATTRIBUTION_UTM_MAX_LEN] if v else v
+
+
+def _clamp_attribution_referrer(v: str | None) -> str | None:
+    return v[:_ATTRIBUTION_REFERRER_MAX_LEN] if v else v
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -117,6 +134,22 @@ class RegisterRequest(BaseModel):
     display_name: str  # AC3: 필수
     tos_accepted: bool = False
     invite_token: str | None = None  # AC2: 초대 토큰 (가입 후 자동 수락)
+    # story #3204(acquisition 계측) — proxy.ts의 first-touch 쿠키를 FE route.ts가 그대로
+    # 실어 보낸다(신뢰 경계 밖 값, 자유 텍스트로만 취급 — 인가/조회 키로 안 씀).
+    signup_utm_source: str | None = None
+    signup_utm_medium: str | None = None
+    signup_utm_campaign: str | None = None
+    signup_referrer: str | None = None
+
+    @field_validator("signup_utm_source", "signup_utm_medium", "signup_utm_campaign")
+    @classmethod
+    def clamp_utm(cls, v: str | None) -> str | None:
+        return _clamp_attribution_utm(v)
+
+    @field_validator("signup_referrer")
+    @classmethod
+    def clamp_referrer(cls, v: str | None) -> str | None:
+        return _clamp_attribution_referrer(v)
 
     @field_validator("email")
     @classmethod
@@ -151,6 +184,14 @@ class LogoutRequest(BaseModel):
 
 class TotpVerifyRequest(BaseModel):
     code: str
+
+
+class TotpDisableRequest(BaseModel):
+    # story #3247 — 해제는 재검증 필수(AC1). 인증기 분실 시에도 끌 수 있어야 하니 두 경로
+    # 중 하나(현행 TOTP 코드 또는 비밀번호)만 요구 — 상호배타 아님(둘 다 와도 code 우선
+    # 검증), 둘 다 없으면 400.
+    code: str | None = None
+    password: str | None = None
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -229,15 +270,33 @@ class SetPasswordRequest(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> None:
+async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> dict:
     """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성.
 
     canonical=OrgInvite(org_invites) 단일 경로. accept로 위임 → org_member 생성 +
     선택 프로젝트 project_access(granted) 부여 + status=accepted를 한 경로로 처리한다.
     (구 Invitation 테이블은 d3619e80 cutover로 제거 — #1307에서 pending 토큰 org_invites 이전 完.)
+
+    story #3217(Referral 계측) — 반환값({"ok": bool, "org_id": str, ...})을 호출부에
+    그대로 넘긴다. 기존 두 호출부(register/oauth_callback)는 이 반환값을 버렸었는데,
+    이번에 "수락 성공 시에만" referral 귀속을 적용하려면 성공 여부를 알아야 한다.
     """
     from app.repositories.org_invite import OrgInviteRepository
-    await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
+    return await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
+
+
+def _apply_referral_attribution(user: User, accept_result: dict) -> None:
+    """story #3217(AARRR·Referral 계측 A축·결정론 주신호) — invite_token 수락이
+    **성공**했을 때만 결정론적 귀속을 쿠키 유래 signup_utm_*보다 **우선 적용**(override)
+    한다. 초대 링크 자체가 유입 채널의 확정적 증거라 첫 방문 UTM/referrer 추론(story
+    #3204 first-touch 쿠키)보다 신뢰도가 높다 — 그래서 "덮어쓴다"가 맞는 방향(먼저
+    세팅된 쿠키 값이 있어도 이게 이긴다).
+
+    수락 실패/토큰 무효(ok=False)면 호출 자체를 안 한다(무개입 — 기존 쿠키 경로 그대로,
+    호출부에서 조건부로 호출)."""
+    user.signup_utm_source = "referral"
+    user.signup_utm_medium = "org_invite"
+    user.signup_utm_campaign = accept_result.get("org_id")
 
 
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -568,13 +627,24 @@ async def register(
     if existing:
         return _err("EMAIL_TAKEN", "Email already registered", 409)
 
+    from app.services.agent_onboarding_config import resolve_locale_from_request
     user = User(
         email=body.email,
         hashed_password=hash_password(body.password),
+        password_set_at=datetime.now(timezone.utc),
         display_name=body.display_name.strip() or body.email.split("@")[0],
         is_active=True,
         email_verified=False,
         tos_accepted_at=datetime.now(timezone.utc),
+        # story #3205 — 가입 시 Accept-Language 1회 포착(agents.py 등 기존 엔드포인트와
+        # 동일 헬퍼 재사용, 새 파서 발명 없음). FE 명시 전달값은 없음(가입 폼에 locale
+        # 필드가 없다) — 브라우저가 항상 보내는 헤더뿐이라 FE 변경 불요.
+        locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
+        # story #3204 — 1회 포착(locale과 동형), 소급 없음.
+        signup_utm_source=body.signup_utm_source,
+        signup_utm_medium=body.signup_utm_medium,
+        signup_utm_campaign=body.signup_utm_campaign,
+        signup_referrer=body.signup_referrer,
     )
     session.add(user)
     try:
@@ -585,12 +655,14 @@ async def register(
 
     # AC2: invite_token 있으면 가입 후 자동 수락
     if body.invite_token:
-        await _auto_accept_invitation(session, user, body.invite_token)
+        accept_result = await _auto_accept_invitation(session, user, body.invite_token)
+        if accept_result.get("ok"):
+            _apply_referral_attribution(user, accept_result)
 
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -603,13 +675,23 @@ async def register(
         verification_token = create_email_verification_token(str(user.id))
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         verify_link = f"{app_url}/verify-email?token={verification_token}"
-        from app.services.email import send_email
+        from app.services.agent_onboarding_config import resolve_locale
+        from app.services.email import render_action_email, send_email
+        from app.services.email_copy import TRANSACTIONAL_COPY
+        # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
+        locale = resolve_locale(user.locale)
+        copy = TRANSACTIONAL_COPY["verify_email"][locale]
         delivered = send_email(
             to=user.email,
-            subject="Sprintable 이메일 인증",
-            html_body=(
-                f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
-                f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+            subject=copy["subject"],
+            html_body=render_action_email(
+                intro_lines=copy["intro_lines"],
+                cta_label=copy["cta_label"],
+                cta_url=verify_link,
+                expiry_note=copy["expiry_note"],
+                security_note=copy["security_note"],
+                locale=locale,
+                fallback_label=copy["fallback_label"],
             ),
         )
         if not delivered:
@@ -723,7 +805,7 @@ async def login(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -848,8 +930,18 @@ async def refresh_token(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — session_started_at은 원 refresh 토큰(위에서 이미 decode한 payload)의
+    # 값을 그대로 이월한다(refresh가 이 세션의 "시작"을 다시 찍으면 재검증 우회체인이
+    # 뚫린다 — 카디르+codex 2라운드 QA 실증). 그 토큰에 그 값이 없으면(마이그 이전 구
+    # 토큰) 새 토큰에도 없다 — totp/disable이 그걸 fail-closed(password 경로 불허)로 해석.
+    _session_started_at = payload.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=_md, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
     if won_atomic_rotation:
         # story #2449(회귀 수정): 이 시점엔 새 row가 이미 INSERT+commit 완료라(_store_refresh_
@@ -920,8 +1012,16 @@ async def switch_account(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # last_project_id/last_org_id 영속
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — refresh_token()과 동형(위 §3247 주석 참고) — 타겟 계정의 원 세션 시작
+    # 시각을 그대로 이월.
+    _session_started_at = payload.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=_md, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
     return _ok({
@@ -1002,6 +1102,80 @@ async def totp_verify(
     )
     await session.commit()
     return _ok({"totp_enabled": True})
+
+
+# ─── POST /api/v2/auth/totp/disable ──────────────────────────────────────────
+# story #3247 — 인벤토리(#3246) 발견 A: FE `/api/v2/auth/2fa/disable`가 이 라우트 부재로
+# 항상 404였다(2fa≠totp 네이밍도 불일치·별도 문제). 이 엔드포인트로 네이밍을 totp 축에
+# 통일(setup/verify와 동형) — FE도 같이 정정한다(PR 본문에 명기).
+
+@router.post("/totp/disable")
+async def totp_disable(
+    body: TotpDisableRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if not user:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    if not user.totp_enabled:
+        return _err("TOTP_NOT_ENABLED", "TOTP is not enabled", 400)
+
+    if body.code:
+        if not verify_totp(user.totp_secret or "", body.code):
+            return _err("INVALID_TOTP", "Invalid TOTP code", 403)
+    elif body.password:
+        # 카디르+codex QA 지적(PR#3634) — 우회체인 실증: OAuth 전용 계정(비밀번호 없음)의
+        # 탈취 세션/API키로 ①set-password(재인증 0, 별건 ab2a503f)로 방금 비밀번호를 심고
+        # → ②그 비밀번호를 여기 제출 → ③서버가 정상 재검증으로 인정해 2FA 해제. 독립
+        # 자격증명 0으로 뚫린다. 처방(PO 방향 A) 최소방어선 2단:
+        #
+        # ① 카디르+codex QA 2라운드(PR#3634) — 1라운드 방어(iat 대조)가 refresh 왕복
+        # 한 번에 뚫렸다: iat은 "토큰 발급 시각"이라 /auth/refresh가 매번 새로 찍는데,
+        # ①set-password로 비밀번호를 심고 ②refresh해 iat을 password_set_at보다 뒤로
+        # 밀고 ③그 새 토큰으로 여기 제출하면 통과했다. 필요한 건 refresh가 갱신하지
+        # 않는 "이 세션이 실제로 언제 시작됐나" — session_started_at(security.py 신설
+        # seam, register/login/oauth_callback만 지금 시각을 찍고 refresh/switch-account/
+        # switch-project/switch-org는 원 값을 이월). API키(sk_live_/hu_live_) 경로와
+        # 이 seam 도입 이전 구 토큰 둘 다 이 클레임이 없다 — 판별 수단이 없으니
+        # password 분기 자체를 불허(fail-closed, TOTP 코드 경로는 그대로 열려 있다).
+        if "session_started_at" not in auth.claims:
+            return _err("PASSWORD_REVERIFICATION_REQUIRES_SESSION", "Password re-verification requires a browser session with an up-to-date login", 403)
+
+        # PO QA 지적(PR#3634) — OAuth 가입 유저는 hashed_password=""(register()의 OAuth
+        # 분기, set-password가 그 의미를 문서화)라 verify_password(pw, "")를 그대로
+        # 타면 passlib이 빈 해시를 식별 못 해 UnknownHashError(→500, AC1의 "서버 명시
+        # 거부"가 아님)로 샌다 — 비밀번호 자체가 없는 계정은 명시 403으로 먼저 거른다.
+        if not user.hashed_password:
+            return _err("PASSWORD_NOT_SET", "This account has no password set", 403)
+        if not verify_password(body.password, user.hashed_password):
+            return _err("WRONG_PASSWORD", "Incorrect password", 403)
+
+        # ② 그 비밀번호가 "이 세션이 시작된 시각보다 먼저" 존재했을 때만 유효한
+        # 재검증으로 인정. password_set_at이 session_started_at 이후면(=이 세션이
+        # 시작된 뒤 심어진 비밀번호 — refresh로 우회 불가, 세션 시작 자체는 재로그인
+        # 없이 안 바뀜) 우회체인이므로 거부. password_set_at IS NULL(migration 0295
+        # 이전부터 비밀번호를 가진 기존 유저)은 제약 대상 밖(0290 locale과 동형 논지
+        # — 과거 시점을 알 방법이 없어 백필은 거짓 신호, 무제약 유지=무회귀).
+        if user.password_set_at is not None:
+            session_started_at = auth.claims.get("session_started_at")
+            if not isinstance(session_started_at, int) or user.password_set_at.timestamp() > session_started_at:
+                return _err("PASSWORD_TOO_RECENT", "Password was set after this session started — please log in again", 403)
+    else:
+        return _err("REVERIFICATION_REQUIRED", "TOTP code or password required", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(
+            totp_enabled=False, totp_secret=None,
+        )
+    )
+    await _write_audit(
+        session, "2fa_disabled",
+        user_id=user.id,
+        email=user.email,
+    )
+    await session.commit()
+    return _ok({"totp_enabled": False})
 
 
 # ─── OAuth ────────────────────────────────────────────────────────────────────
@@ -1155,6 +1329,22 @@ class OAuthCallbackRequest(BaseModel):
     state: str
     tos_accepted: bool = False
     invite_token: str | None = None  # AC4: OAuth 가입 시 초대 자동 수락
+    # story #3204 — register()와 동일 계약(신뢰 경계 밖 자유 텍스트, 신규 유저 생성
+    # 분기에서만 사용 — 기존 유저 매칭/링크 분기는 무시한다, 재가입이 아니므로).
+    signup_utm_source: str | None = None
+    signup_utm_medium: str | None = None
+    signup_utm_campaign: str | None = None
+    signup_referrer: str | None = None
+
+    @field_validator("signup_utm_source", "signup_utm_medium", "signup_utm_campaign")
+    @classmethod
+    def clamp_utm(cls, v: str | None) -> str | None:
+        return _clamp_attribution_utm(v)
+
+    @field_validator("signup_referrer")
+    @classmethod
+    def clamp_referrer(cls, v: str | None) -> str | None:
+        return _clamp_attribution_referrer(v)
 
 
 @router.get("/oauth/{provider}/authorize")
@@ -1185,6 +1375,7 @@ async def oauth_authorize(provider: str) -> JSONResponse:
 
 @router.post("/oauth/callback")
 async def oauth_callback(
+    request: Request,
     body: OAuthCallbackRequest,
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -1216,6 +1407,10 @@ async def oauth_callback(
     id_col = getattr(User, f"{provider}_id")
     result = await session.execute(select(User).where(id_col == oauth_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
+    # story #3204 — sign_up 전환 이벤트 발화 신호. "신규 유저 생성" 분기(아래)에서만
+    # true — 기존 유저를 provider_id/email로 찾아 링크만 한 경우는 로그인이지 가입이
+    # 아니다(재가입 아님).
+    is_new_user = False
 
     if not user:
         # story #3118(PO 확定 2026-08-26, private relay 이메일 특성) — Apple은 이메일 자동
@@ -1238,12 +1433,20 @@ async def oauth_callback(
             # 신규 유저 생성 (비밀번호 없음 — OAuth 전용, 이메일 인증 완료)
             if not body.tos_accepted:
                 return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
+            from app.services.agent_onboarding_config import resolve_locale_from_request
             user = User(
                 email=email,
                 hashed_password="",
                 is_active=True,
                 email_verified=True,
                 tos_accepted_at=datetime.now(timezone.utc),
+                # story #3205 — register()와 동일 포착(발명 0).
+                locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
+                # story #3204 — register()와 동일 포착(발명 0).
+                signup_utm_source=body.signup_utm_source,
+                signup_utm_medium=body.signup_utm_medium,
+                signup_utm_campaign=body.signup_utm_campaign,
+                signup_referrer=body.signup_referrer,
                 **{f"{provider}_id": oauth_id},
             )
             session.add(user)
@@ -1252,10 +1455,13 @@ async def oauth_callback(
             except IntegrityError:
                 await session.rollback()
                 return _err("EMAIL_CONFLICT", "Email already registered", 409)
+            is_new_user = True
 
             # AC4: invite_token 있으면 신규 OAuth 유저도 자동 수락
             if body.invite_token:
-                await _auto_accept_invitation(session, user, body.invite_token)
+                accept_result = await _auto_accept_invitation(session, user, body.invite_token)
+                if accept_result.get("ok"):
+                    _apply_referral_attribution(user, accept_result)
 
             await session.commit()
             await session.refresh(user)
@@ -1267,7 +1473,7 @@ async def oauth_callback(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), user.email, _md)
+    tokens = create_tokens(str(user.id), user.email, _md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     raw_refresh = tokens["refresh_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     await _store_refresh_token(session, user, raw_refresh, expires_at)
@@ -1277,6 +1483,10 @@ async def oauth_callback(
         "refresh_token": raw_refresh,
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        # story #3204 — FE route.ts가 이 값으로 목적지 URL에 sign_up 이벤트 발화 신호를
+        # 붙인다(?signup=1). 본인 인증 응답 안이라 계정 존재 여부를 타인에게 누출하지
+        # 않는다(PO 확認 2026-08-29).
+        "is_new_user": is_new_user,
     })
 
 
@@ -1431,14 +1641,22 @@ async def forgot_password(
         token = create_password_reset_token(str(user.id), user.hashed_password)
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         reset_link = f"{app_url}/reset-password?token={token}"
-        from app.services.email import send_email
+        from app.services.agent_onboarding_config import resolve_locale
+        from app.services.email import render_action_email, send_email
+        from app.services.email_copy import TRANSACTIONAL_COPY
+        locale = resolve_locale(user.locale)
+        copy = TRANSACTIONAL_COPY["reset_password"][locale]
         send_email(
             to=user.email,
-            subject="Sprintable 비밀번호 재설정",
-            html_body=(
-                f"<p>비밀번호 재설정 링크입니다. 30분 내에 사용 바랍니다.</p>"
-                f"<p><a href='{reset_link}'>비밀번호 재설정</a></p>"
-                f"<p>요청하지 않으셨다면 이 메일을 무시하세요.</p>"
+            subject=copy["subject"],
+            html_body=render_action_email(
+                intro_lines=copy["intro_lines"],
+                cta_label=copy["cta_label"],
+                cta_url=reset_link,
+                locale=locale,
+                expiry_note=copy["expiry_note"],
+                security_note=copy["security_note"],
+                fallback_label=copy["fallback_label"],
             ),
         )
     return _ok({"message": "If the email exists, a reset link has been sent"})
@@ -1467,7 +1685,10 @@ async def reset_password(
         return _err("INVALID_TOKEN", "Reset token has already been used", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     return _ok({"message": "Password reset successfully"})
 
@@ -1486,7 +1707,10 @@ async def change_password(
         return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     return _ok({"message": "Password changed successfully"})
 
@@ -1508,7 +1732,10 @@ async def set_password(
         return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     await session.commit()
     return _ok({"message": "Password set successfully"})
@@ -1560,13 +1787,25 @@ async def resend_verification(
     verification_token = create_email_verification_token(str(user.id))
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     verify_link = f"{app_url}/verify-email?token={verification_token}"
-    from app.services.email import send_email
+    # story #3196-⑤ — register()의 인증메일과 동일 카피/렌더러(발명 0, 같은 내용의 재발송이라
+    # 두 벌 카피를 유지할 이유가 없다 — 여태 문자 그대로 중복이었던 자리 그대로 정합).
+    # story #3205 — locale 분기도 register()와 동일 사전(TRANSACTIONAL_COPY) 재사용.
+    from app.services.agent_onboarding_config import resolve_locale
+    from app.services.email import render_action_email, send_email
+    from app.services.email_copy import TRANSACTIONAL_COPY
+    locale = resolve_locale(user.locale)
+    copy = TRANSACTIONAL_COPY["verify_email"][locale]
     delivered = send_email(
         to=user.email,
-        subject="Sprintable 이메일 인증",
-        html_body=(
-            f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
-            f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+        subject=copy["subject"],
+        html_body=render_action_email(
+            intro_lines=copy["intro_lines"],
+            cta_label=copy["cta_label"],
+            cta_url=verify_link,
+            expiry_note=copy["expiry_note"],
+            security_note=copy["security_note"],
+            fallback_label=copy["fallback_label"],
+            locale=locale,
         ),
     )
     if not delivered:
@@ -1629,8 +1868,17 @@ async def switch_project(
         app_metadata["project_id"] = str(target_project_id)
         user.last_project_id = target_project_id  # _build_app_metadata가 덮어쓴 경우 재설정
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — switch-project/org는 이미 인증된 세션 안의 컨텍스트 전환이지 새
+    # 로그인이 아니다(refresh_token()/switch_account()와 동형 논지) — 현재 claims의
+    # session_started_at을 그대로 이월.
+    _session_started_at = auth.claims.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=app_metadata, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
     await session.commit()
@@ -1700,8 +1948,17 @@ async def switch_organization(
         # ⚠️0746: 캡처값과 동기 보장(refresh가 cross-org로 재누수하지 않도록).
         user.last_project_id = target_project_id
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — switch-project/org는 이미 인증된 세션 안의 컨텍스트 전환이지 새
+    # 로그인이 아니다(refresh_token()/switch_account()와 동형 논지) — 현재 claims의
+    # session_started_at을 그대로 이월.
+    _session_started_at = auth.claims.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=app_metadata, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
     await session.commit()
@@ -1725,6 +1982,10 @@ class AuthMeResponse(BaseModel):
     resolved_default_project_id: str | None = None
     is_project_ambiguous: bool = False
     accessible_project_ids: list[str] = []
+    # story #3195(온보딩·FE) — 온보딩 1/4가 "이메일 인증 필요"를 제출(400) 前에 선제 고지하려면
+    # 이 신호가 필요했다. api_key 컨텍스트(에이전트)는 User 행이 없어 None(무의미 — 온보딩 게이트
+    # 자체가 인간 전용이라 agent 소비처는 이 필드를 참조하지 않는다).
+    email_verified: bool | None = None
 
 
 async def _resolve_project_default(
@@ -1763,6 +2024,7 @@ async def get_auth_me(
     resolved: str | None = None
     ambiguous = False
     accessible_ids: list[str] = []
+    email_verified: bool | None = None
     if meta.get("api_key_id"):
         try:
             member_id = uuid.UUID(auth.user_id)
@@ -1770,6 +2032,15 @@ async def get_auth_me(
             resolved, ambiguous, accessible_ids = await _resolve_project_default(db, member_id, org_id)
         except Exception:
             logger.warning("get_auth_me: 신규 project default 판정 실패 — 레거시 필드만 반환", exc_info=True)
+    else:
+        # story #3195 — human JWT 세션(auth.user_id == User.id)에 한해서만 조회. api_key
+        # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
+        try:
+            email_verified = (
+                await db.execute(select(User.email_verified).where(User.id == uuid.UUID(auth.user_id)))
+            ).scalar_one_or_none()
+        except Exception:
+            logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
     return AuthMeResponse(
         member_id=auth.user_id,
         org_id=auth.org_id or meta.get("org_id"),
@@ -1777,6 +2048,7 @@ async def get_auth_me(
         resolved_default_project_id=resolved,
         is_project_ambiguous=ambiguous,
         accessible_project_ids=accessible_ids,
+        email_verified=email_verified,
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import time
 import uuid
 from typing import Any
@@ -16,6 +17,8 @@ from app.core.ssrf import validate_webhook_url_async
 from app.models.webhook_config import WebhookConfig
 # c60dd33c: Discord 페이로드 정규화 공용 헬퍼(채팅 경로와 단일화).
 from app.services.discord_webhook import is_discord_url, to_discord_event_payload
+
+logger = logging.getLogger(__name__)
 
 
 def _build_signature_headers(secret: str | None, body: str) -> dict[str, str]:
@@ -105,7 +108,7 @@ async def _fire_webhooks_now(
         session, org_id, event,
         recipient_member_ids=recipient_member_ids, preserve_broadcast=preserve_broadcast,
     )
-    await _send_webhook_targets(targets, event, data)
+    await _send_webhook_targets(targets, event, data, org_id)
 
 
 async def _fetch_webhook_targets(
@@ -142,9 +145,16 @@ async def _fetch_webhook_targets(
     return targets
 
 
-async def _send_webhook_targets(targets: list[dict[str, Any]], event: str, data: dict[str, Any]) -> None:
+async def _send_webhook_targets(
+    targets: list[dict[str, Any]], event: str, data: dict[str, Any], org_id: uuid.UUID | None = None,
+) -> None:
     """세션 없이 순수 HTTP POST만(story #2460 PO 리뷰 F1) — SSRF 재검증도 이 자리(발송
-    직전 재검증이 목적이라 fetch 단계로 옮기면 안 됨 — DNS rebinding 방지 의도가 죽는다)."""
+    직전 재검증이 목적이라 fetch 단계로 옮기면 안 됨 — DNS rebinding 방지 의도가 죽는다).
+
+    story #3173(결제②-B) — doc `pricing-policy-proposal-v1` §4.5 "성공한 외부 웹훅 전달 =
+    전달 1건당 1 AU". `org_id`는 하위호환 위해 선택 인자(기존 호출부 무회귀) — None이면
+    계측 생략(값을 지어내지 않음, 과소계상 방향 안전측). 계측은 기존 예외-삼킴 제어흐름을
+    안 건드리고 완전 별도 try/except로 감싼다(fail-open, 계측 실패가 배달을 막으면 안 됨)."""
     if not targets:
         return
     envelope_body = json.dumps({"event": event, "data": data})
@@ -166,9 +176,16 @@ async def _send_webhook_targets(targets: list[dict[str, Any]], event: str, data:
                 body = envelope_body
                 headers = {"Content-Type": "application/json", **_build_signature_headers(secret, body)}
             try:
-                await client.post(url, content=body, headers=headers)
+                resp = await client.post(url, content=body, headers=headers)
             except Exception:
-                pass
+                continue
+            if org_id is not None and 200 <= resp.status_code < 300:
+                try:
+                    from app.services.au_metering import record_au_usage
+
+                    await record_au_usage(org_id, 1)
+                except Exception:
+                    logger.error("AU metering(webhook) failed org_id=%s", org_id, exc_info=True)
 
 
 async def deliver_test_webhook(url: str, secret: str | None) -> tuple[bool, str | None]:

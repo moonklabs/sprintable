@@ -543,6 +543,14 @@ async def transition_hypothesis(
         await record_outcome_verdicts(session, updated)
         await attribute_loop_outcome(session, updated)
 
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — attention.changed push는 여기서
+    # 하지 않는다. 이 서비스 함수는 호출자가 4곳(routers/hypotheses.py 직접 전이·
+    # services/hypothesis.py 내부 위임 호출·hypothesis_outcome_confirm.py 게이트 해소·
+    # workflow_line_resolution.py)으로 갈리고 커밋 시점이 호출자마다 다르다 — 여기서 커밋해
+    # 버리면 게이트 해소 등 "이후에도 더 쓰기가 남은" 호출자의 원자성을 이 함수가 임의로
+    # 쪼갠다. push는 커밋 시점을 확실히 아는 콜사이트(routers/hypotheses.py의 직접 human
+    # transition 엔드포인트)로 옮겼다 — 나머지 3개 콜사이트는 이번 스코프에서 신호 없음(폴링
+    # 폴백은 그대로 무회귀).
     return await _to_response(repo, updated)
 
 

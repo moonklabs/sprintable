@@ -21,14 +21,6 @@ export interface FalsifiedClusterItem {
   crossProjectLabel: string | null;
 }
 
-export interface StalledClusterItem {
-  id: string;
-  title: string;
-  days: number | null;
-  href: string;
-  crossProjectLabel: string | null;
-}
-
 // story #2829/#2830(loop-closure P0) — 「닫힌 적 없는 루프」 3분류 중 N에 포함되는 2류
 // (도과 가설·도과 goal·outcome 없이 done된 goal). kind로 배지 문구/href 파생을 가른다.
 export type LoopKind = 'overdueHypothesis' | 'overdueGoal' | 'outcomeMissing';
@@ -78,7 +70,6 @@ export function crossProjectLabel(viewer: ViewerContext | undefined, itemProject
 
 export interface AttentionClusters {
   falsified: FalsifiedClusterItem[];
-  stalled: StalledClusterItem[];
   loop: LoopClusterItem[];
   // items[]가 류별 top-20 cap이라(BE PR#3253) count 배지는 이 필드를 반드시 써야 한다 —
   // loop.length(=items 실수신량)와 다를 수 있다(no-fiction: 서로 다른 두 숫자를 구분 유지).
@@ -114,11 +105,16 @@ export interface ClusterTranslator {
 }
 
 /**
- * raw.attention → 두 클러스터. 정렬(AC3): 반증=최근순(falsified_days 오름차순 — 작을수록
- * 최근), 정체=일수순(stalled_days 내림차순 — 오래 묵은 것 먼저, 유나 v4 mockup 예시와 동일).
- * story_id/hypothesis_id가 없는 항목도 no-fiction 원칙상 세지 않을 이유는 없다(BE count와
- * 화면 count가 어긋나면 그게 더 정직하지 않다) — href만 제네릭 폴백으로 둔다(기존
- * buildNowFace의 story_stalled/unanswered_blocker 관례 재사용).
+ * raw.attention → 클러스터. 정렬(AC3): 반증=최근순(falsified_days 오름차순 — 작을수록
+ * 최근). story_id/hypothesis_id가 없는 항목도 no-fiction 원칙상 세지 않을 이유는 없다(BE
+ * count와 화면 count가 어긋나면 그게 더 정직하지 않다) — href만 제네릭 폴백으로 둔다(기존
+ * buildNowFace의 unanswered_blocker 관례 재사용).
+ *
+ * ⛔story #93b076c8(2250, 2026-08-27) — 이 함수가 원래 다루던 'story_stalled' 타입(org-wide,
+ * Story.updated_at 기준)은 완전히 걷어냈다(페드루 PO 판정 — #8934ba7f AC1 실측으로 부정확
+ * 확定, "폐기했는데 화면에 남는" 클래스 방지). 그 자리는 `derive-silent-stall-clusters.ts`
+ * (project-scope, StoryActivity 기반, 별도 BE 엔드포인트 `/glance/attention` kind="stalled")
+ * 가 대체 — 이 파일과는 완전히 분리된 데이터 소스/파생 함수다(raw.attention과 섞지 않는다).
  */
 export function deriveAttentionClusters(
   attention: RawAttentionItem[],
@@ -127,7 +123,6 @@ export function deriveAttentionClusters(
   viewer?: ViewerContext,
 ): AttentionClusters {
   const falsified: { item: FalsifiedClusterItem; days: number | null }[] = [];
-  const stalled: StalledClusterItem[] = [];
   const loop: { item: LoopClusterItem; days: number | null }[] = [];
   const authFailure: { item: AuthFailureClusterItem; lastFailedAt: string | null }[] = [];
 
@@ -195,14 +190,6 @@ export function deriveAttentionClusters(
         },
         days: a.falsified_days,
       });
-    } else if (a.type === 'story_stalled') {
-      stalled.push({
-        id: a.story_id ?? `story_stalled-${idx}`,
-        title: a.title ?? t('signalStalledTitle'),
-        days: a.stalled_days,
-        href: projectHref(viewer, a.project_slug, a.story_id ? `/board?story=${a.story_id}` : '/board'),
-        crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
-      });
     } else if (a.type === 'agent_auth_failure' && a.reason) {
       authFailure.push({
         item: {
@@ -220,16 +207,13 @@ export function deriveAttentionClusters(
 
   // 최근순 = falsified_days 오름차순(작을수록 최근 반증). 값이 없으면(BE 미배선) 뒤로 민다.
   falsified.sort((x, y) => (x.days ?? Infinity) - (y.days ?? Infinity));
-  // 일수순 = stalled_days 내림차순(오래 묵은 것 먼저, 유나 v4 mockup 예시와 동일).
-  stalled.sort((x, y) => (y.days ?? -Infinity) - (x.days ?? -Infinity));
-  // 루프도 정체와 동형(오래 묵을수록 위) — 도과/done 경과 둘 다 "오래 방치될수록 먼저".
+  // 루프도 반증과 다른 축(오래 묵을수록 위) — 도과/done 경과 둘 다 "오래 방치될수록 먼저".
   loop.sort((x, y) => (y.days ?? -Infinity) - (x.days ?? -Infinity));
   // 최근 실패부터(lastFailedAt 내림차순) — 가장 급한(지금도 진행 중일 가능성 높은) 것 먼저.
   authFailure.sort((x, y) => (y.lastFailedAt ?? '').localeCompare(x.lastFailedAt ?? ''));
 
   return {
     falsified: falsified.map((f) => f.item),
-    stalled,
     loop: loop.map((l) => l.item),
     authFailure: authFailure.map((a) => a.item),
     // BE count 필드 3종의 합(§3 갱신, doc a8e73bdb) — items[] top-20 cap과 무관한 참값.

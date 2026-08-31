@@ -166,7 +166,11 @@ async def test_anchor_lookup_alias_canonicalizes(monkeypatch):
 
 @pytest.mark.anyio
 async def test_anchor_lookup_true_orphan_telemetry(monkeypatch):
-    """member·alias 모두 없으면 telemetry-only + 크래시 방지 placeholder (가짜 resolve 아님)."""
+    """member·alias 모두 없으면 telemetry-only + 크래시 방지 placeholder (가짜 resolve 아님).
+
+    story #3203(선생님 실사고) — placeholder.name은 None이어야 한다. 예전엔 `str(id)[:8]`로
+    uuid 앞 8자를 "이름"처럼 지어냈고, 이게 대화 리스트 상대명 자리에 raw uuid가 그대로
+    노출된 표시결함의 근원지 중 하나였다(FE Participant.name은 원래 `string | null`)."""
     import app.services.member_resolver as mr
 
     monkeypatch.setattr(mr.settings, "member_ssot_resolver_shadow", True)
@@ -178,4 +182,5 @@ async def test_anchor_lookup_true_orphan_telemetry(monkeypatch):
     with patch.object(mr.logger, "warning") as mock_warn:
         out = await mr.lookup_members_by_ids({orphan}, session)
     assert orphan in out  # placeholder
+    assert out[orphan].name is None  # story #3203 — uuid 앞 8자 지어내기 금지
     assert mock_warn.called  # telemetry 로그

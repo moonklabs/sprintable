@@ -1,5 +1,11 @@
 """Shared pytest fixtures for backend tests.
 
+⚠️로컬에서 realdb 테스트를 폭넓게(예: `-k realdb`) 돌릴 땐 반드시 `-m "not destructive_schema"`도
+같이 붙여라 — destructive_schema 테스트는 실행 직전 공유 스키마를 DROP SCHEMA로 지우고 재
+마이그레이션 없이 두므로, 마커 없이 섞어 돌리면 나머지 전부가 연쇄로 깨진다(story #3186 실사고).
+아래 `pytest_collection_modifyitems`가 이 혼합을 collection 시점에 즉시 거부한다(README 대용
+— 이 파일이 모든 테스트 실행의 첫 관문이라 여기 적어야 실제로 읽힌다).
+
 ⛔⛔라우터 함수를 직접 호출할 때: `Query(...)`/`Depends(...)` 기본값은 실값이 아니라
 «센티널 객체»다 — 명시로 안 넘기면 그 객체 자체가 그대로 들어간다(story #2191이 2026-07-XX
 `test_2193_doc_summary_created_at_realdb.py`에서 처음 겪었고, #2659(2026-07-30)가 CI 21건
@@ -224,6 +230,13 @@ def _calls_destructive_schema_api(filepath: Path) -> bool:
     return _calls_raw_ddl_literal(tree)
 
 
+# story #3186 — trylast=True 필수(실측으로 발견한 함정): 이 훅이 기본 순서로 등록되면
+# pytest 내장 -k/-m 디셀렉션 훅보다 **먼저** 불려 `items`가 아직 필터링 전 전체 8289건
+# 그대로다. 그 상태로 아래 「혼합 수집 차단」을 재면 -m "not destructive_schema"를 명시해도
+# (필터 적용 前 스냅샷을 보므로) 매번 오탐 차단된다 — CI 두 job(Backend pytest·backend-
+# test-destructive) 자체가 못 돌 뻔한 실사고. trylast=True로 내장 디셀렉션 다음에 돌게
+# 고정해 `items`가 최종 선택 결과를 반영하게 한다.
+@pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(items: list) -> None:
     checked: dict[Path, bool] = {}
     violations: set[str] = set()
@@ -241,6 +254,40 @@ def pytest_collection_modifyitems(items: list) -> None:
             "무관한 테스트를 연쇄 실패시킬 수 있음 — story 8236bbc3/#2643). 파일 최상단에 "
             f"`pytestmark = pytest.mark.{_MARKER_NAME}` 를 추가하세요:\n"
             + "\n".join(sorted(violations))
+        )
+
+    # story #3186(2026-08-28, 카디르 QA·PO 처방) — «혼합 수집 차단» 게이트. 실사고 그라운딩:
+    # destructive_schema 테스트는 실행 직전 _reset_schema_for_destructive_tests(위)가
+    # `DROP SCHEMA public CASCADE`로 전체 스키마를 지우고 **재마이그레이션 없이** 둔다(그
+    # 테스트 자신이 파일 안에서 스스로 create_all/drop_all 하는 걸 전제) — 이게 non-destructive
+    # 테스트와 **같은 세션**에 섞여 수집되면, destructive 항목 하나가 실행된 뒤로 나머지 전부가
+    # "relation ... does not exist"로 연쇄 FAIL한다(실측: `-k realdb`만으로 광범위 수집 시
+    # 1058건 연쇄실패, `-m "not destructive_schema"`로 정확히 배제하면 0건 — 원인은 seed
+    # 헬퍼가 아니라 이 혼합 수집이었다, 스토리 본문 정정 기록 참조).
+    #
+    # 처방(PO 확定 2026-08-28) — README 경고문(안 읽은 사람을 못 막는다)도, 리셋 후 자동
+    # 재마이그레이션(«지원할 이유 없는 실행 모드»를 비싸게 지원하는 과투자)도 아니라, 지원
+    # 안 하는 모드 자체를 **수집 시점에 즉시 거부**한다 — 조용한 대량 오염을 시끄러운 즉시
+    # 실패로 바꾼다. CI의 두 job(Backend pytest=`-m "not destructive_schema"`·
+    # backend-test-destructive=파일별 격리)은 태생적으로 이 조건에 걸리지 않는다(항상 한쪽만
+    # 선택) — 이 가드가 실제로 막는 것은 로컬에서 마커 없이 광범위하게(`-k` 등) 실행하는
+    # 바로 그 위험한 패턴이다.
+    destructive_items = [i for i in items if i.get_closest_marker(_MARKER_NAME) is not None]
+    non_destructive_items = [i for i in items if i.get_closest_marker(_MARKER_NAME) is None]
+    if destructive_items and non_destructive_items:
+        destructive_files = sorted({str(Path(str(i.fspath))) for i in destructive_items})
+        preview = destructive_files[:5]
+        more = f" 외 {len(destructive_files) - 5}개 파일" if len(destructive_files) > 5 else ""
+        raise pytest.UsageError(
+            f"destructive_schema 마커 테스트 {len(destructive_items)}건과 non-destructive 테스트 "
+            f"{len(non_destructive_items)}건이 같은 세션에 함께 수집됐습니다 — 지원하지 않는 실행 "
+            "모드입니다(story #3186 실사고: destructive 테스트가 DROP SCHEMA로 공유 스키마를 "
+            "지운 뒤 재마이그레이션 없이 두어, 이후 모든 non-destructive 테스트가 "
+            "'relation ... does not exist'로 연쇄 실패합니다).\n"
+            "올바른 실행법 — 둘 중 하나만 선택하세요:\n"
+            '  · non-destructive만: uv run pytest -m "not destructive_schema" ...\n'
+            "  · destructive만(파일별 독립 신선 DB 권장): uv run pytest -m destructive_schema ...\n"
+            f"이번 수집에 섞인 destructive 파일{more}:\n" + "\n".join(preview)
         )
 
 

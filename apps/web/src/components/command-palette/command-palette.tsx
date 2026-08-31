@@ -11,7 +11,6 @@ import {
   FolderKanban,
   GitPullRequest,
   Inbox,
-  LayoutDashboard,
   MessageSquareMore,
   Search,
   UserPlus,
@@ -49,7 +48,8 @@ interface StoryTitleResult {
 // (없으면 이 bare '/docs' 로 폴백 — 미들웨어 리다이렉트 안전망이 받는다).
 const STATIC_ITEMS: CommandItem[] = [
   { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
-  { id: 'go-dashboard', group: 'navigate', icon: LayoutDashboard, labelKey: 'goDashboard', href: '/dashboard', shortcut: ['G', 'D'] },
+  // story #3179(S3c) 후속(추가 실측 발견) — 'go-dashboard'(/dashboard) 제거. /dashboard가
+  // 폐합돼 go-chats(아래, G M)와 같은 목적지(/chats)를 가리키는 중복 단축키였다.
   { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
   // story #2930 I3(PO 확定 2026-08-22) — nav-config.ts work 존에서 'sprints'가 'board'로
   // 접혀 사이드바 진입점이 사라진 뒤, 이 리터럴 href가 verify-no-orphan-resource-routes

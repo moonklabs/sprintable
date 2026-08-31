@@ -587,6 +587,36 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_no_script_output_artifacts.py
 
+  # story #3216(위생·가드, 2026-08-29 · #3206 design 리뷰 유나 비차단 기록) — 메일 셸
+  # 푸터의 회사정보(email.py 수동 사본)가 FE business-info.ts(전자상거래법 §10 SSOT)와
+  # 크로스파일이라 정본이 바뀌어도 조용히 낡던 구멍. 자구(문자열 그대로) 대조만, baseline
+  # 없음(도입 시점 위반 0건 — 두 파일이 이미 일치, 스크립트 docstring 참조).
+  business-info-email-footer-drift-lint:
+    name: business-info.ts ↔ email.py footer drift lint (guard, story #3216)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Compare business-info.ts SSOT fields against email.py footer constants
+        working-directory: backend
+        run: python3 scripts/lint_business_info_email_footer_drift.py
+
+  # story #3219(카디르 3라운드, 2026-08-30) — 이 검증은 run-migrations.test.sh 시나리오
+  # [9]로 먼저 만들어졌지만 그 .test.sh는 CI 어디에도 안 걸려 있어(convention 자체가
+  # manual-only) 매 PR에 실제로 도는 자리가 없었다("만들어졌는데 도는 자리 없음" 결함).
+  # PG 불요 정적 스캔이라 여기서 독립 job으로 배선한다 — 로직은 scripts/lint_migrations_
+  # nontx_allowlist.sh 하나만 두고 이 job과 .test.sh [9] 양쪽이 그걸 공유 호출한다.
+  migrations-nontx-allowlist-lint:
+    name: migrations NONTX_ALLOWLIST lint (guard, story #3219)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan packages/db/supabase/migrations for unclassified CONCURRENTLY usage
+        run: sh scripts/lint_migrations_nontx_allowlist.sh
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이

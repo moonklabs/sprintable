@@ -27,16 +27,17 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
     if (!asset) return;
     setDeleting(true);
     try {
-      // S7(서버 delete) 미착지 가능 → 비-2xx/예외는 toast 후 graceful 유지.
+      // story #3241: 서버 DELETE 핸들러 신설됨(S7 착지) — 비-2xx/예외는 삭제 실패 전용 카피로
+      // toast(구 errorTitle/errorDesc는 «자산을 불러오지 못했습니다» 로드-실패 문구라 오용이었음).
       const res = await fetch(`/api/assets/${asset.id}`, { method: 'DELETE' });
       if (!res.ok) {
-        addToast({ title: t('errorTitle'), body: t('errorDesc'), type: 'error' });
+        addToast({ title: t('deleteErrorTitle'), body: t('deleteErrorDesc'), type: 'error' });
         return;
       }
       onDeleted(asset.id);
       onOpenChange(false);
     } catch {
-      addToast({ title: t('errorTitle'), body: t('errorDesc'), type: 'error' });
+      addToast({ title: t('deleteErrorTitle'), body: t('deleteErrorDesc'), type: 'error' });
     } finally {
       setDeleting(false);
     }

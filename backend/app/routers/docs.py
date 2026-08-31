@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -120,9 +120,14 @@ async def list_docs(
     ids: str | None = Query(default=None, description="comma-separated doc ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
     limit: int = Query(default=500, ge=1, le=1000),
     cursor: str | None = Query(default=None, description="(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로"),
+    response: Response = None,  # type: ignore[assignment]
     repo: DocRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    # story #3176 선행조건②(읽기 100개 초과 AU 계측): 이 함수의 모든 return 지점에서
+    # X-Result-Count = 실제 반환 data 건수. list_docs·search_docs MCP 도구 둘 다 이 엔드포인트
+    # 하나를 공유해(위 client.get("/api/v2/docs") 호출부) 여기 한 곳만 배선하면 둘 다 커버.
+    # response가 None일 수 있음(FastAPI 미경유 직접호출 기존 테스트 — stories.py 동형 가드).
     # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링(검색/slug/
     # tags/tree 분기보다 먼저 — 정확한 집합 요청이라 다른 필터와 무관하게 우선).
     # ⭐카디르 QA(PR#2905, 2026-08-07) — Query(default=None, ...) 기본값은 「값」이 아니라
@@ -137,6 +142,8 @@ async def list_docs(
         except ValueError:
             raise HTTPException(status_code=422, detail="invalid doc id in ids")
         if not doc_ids:
+            if response is not None:
+                response.headers["X-Result-Count"] = "0"
             return {"data": [], "meta": {"has_more": False, "next_cursor": None}}
         if len(doc_ids) > 200:
             raise HTTPException(status_code=422, detail="too many ids (max 200)")
@@ -146,6 +153,8 @@ async def list_docs(
         from app.services.project_auth import accessible_project_ids_in_org
         accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
         docs = [d for d in docs if d.project_id in accessible]
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(docs))
         return {
             "data": [DocSummaryResponse.model_validate(d) for d in docs],
             "meta": {"has_more": False, "next_cursor": None},
@@ -160,6 +169,8 @@ async def list_docs(
             DocSummaryResponse.model_validate(doc).model_copy(update={"snippet": snippet})
             for doc, snippet in results
         ]
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(data))
         return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
 
     if slug and project_id:
@@ -171,16 +182,24 @@ async def list_docs(
         # 일반 list/tree/search 분기는 enrich 안 함(다건 N+1 회피·페이로드 과확장 금지).
         # story #2191: 단건 lookup이라 페이지네이션 대상이 아님 — has_more는 구조적으로 항상 False.
         data = [await _enrich_doc_summary(doc, repo.session)] if doc else []
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(data))
         return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
 
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         docs = await repo.search_by_tags(project_id, tag_list, limit=limit + 1, cursor=cursor)
-        return _doc_page_envelope(docs, limit)
+        envelope = _doc_page_envelope(docs, limit)
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(envelope["data"]))
+        return envelope
 
     if project_id and parent_id is not None:
         docs = await repo.list_tree(project_id, parent_id, limit=limit + 1, cursor=cursor)
-        return _doc_page_envelope(docs, limit)
+        envelope = _doc_page_envelope(docs, limit)
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(envelope["data"]))
+        return envelope
 
     filters: dict = {}
     if project_id:
@@ -188,7 +207,10 @@ async def list_docs(
     if doc_type:
         filters["doc_type"] = doc_type
     docs = await repo.list(limit=limit + 1, cursor=cursor, **filters)
-    return _doc_page_envelope(docs, limit)
+    envelope = _doc_page_envelope(docs, limit)
+    if response is not None:
+        response.headers["X-Result-Count"] = str(len(envelope["data"]))
+    return envelope
 
 
 async def _assert_doc_parent_in_project(

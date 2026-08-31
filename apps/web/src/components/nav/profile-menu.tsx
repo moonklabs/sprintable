@@ -2,9 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useCallback, useState } from 'react';
 import { ChevronsUpDown, Settings, LogOut, Plus, Check, Loader2 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -16,21 +14,17 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
-
-interface Account {
-  account_id: string;
-  name: string | null;
-  email: string | null;
-  org_name: string | null;
-  avatar_url: string | null;
-  status: 'active' | 'inactive' | 'expired';
-}
+import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 
 interface ProfileMenuProps {
   name: string;
   email?: string | null;
   avatarUrl?: string | null;
+  /** story #3146(모바일 계정 스위치) — 기본 트리거는 `sidebar-*` 테마 토큰을 쓴다(데스크톱
+   * AppSidebar의 어두운 사이드바 배경 전제). 사이드바 밖(밝은 배경)에 그대로 꽂으면 글자색이
+   * 배경과 거의 안 갈려 사실상 안 보인다 — 그 표면에서만 무채 배경용 클래스로 갈아끼운다
+   * (기본값 생략 시 기존 desktop 클래스 그대로, 회귀 0). */
+  triggerClassName?: string;
 }
 
 function initialOf(label: string | null | undefined): string {
@@ -63,106 +57,19 @@ function Avatar({ url, label, className }: { url?: string | null; label: string;
   );
 }
 
-export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
-  const router = useRouter();
-  const t = useTranslations('accountSwitcher');
-  const tc = useTranslations('common');
+export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuProps) {
   const tn = useTranslations('nav');
-
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [busy, setBusy] = useState<string | null>(null); // account_id | 'add' | 'signout'
-  const [error, setError] = useState<string | null>(null);
-
-  // 드롭다운 열 때 fetch(이벤트 기반 — effect 내 setState 회피·불필요한 상시 호출 방지).
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch('/api/accounts');
-      if (!r.ok) return;
-      const j = (await r.json()) as { data?: { accounts?: Account[] }; accounts?: Account[] };
-      setAccounts(j.data?.accounts ?? j.accounts ?? []);
-    } catch {
-      /* prop fallback 유지 */
-    }
-  }, []);
-
-  const active = accounts.find((a) => a.status === 'active');
-  const others = accounts.filter((a) => a.status !== 'active');
-  const ordered = active ? [active, ...others] : others;
-  const triggerName = active?.name ?? active?.email ?? name;
-  const triggerAvatar = active?.avatar_url ?? avatarUrl ?? null;
-  const atCap = accounts.length >= ACCOUNT_CAP;
-
-  const handleSwitch = async (acc: Account) => {
-    if (busy || acc.status === 'active') return;
-    if (acc.status === 'expired') {
-      window.location.assign('/login'); // 만료 = switch 불가 → 로그인 재진입
-      return;
-    }
-    setBusy(acc.account_id);
-    setError(null);
-    try {
-      const r = await fetch('/api/auth/switch-account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: acc.account_id }),
-      });
-      if (!r.ok) {
-        // 409(전환 중/실패) 포함 graceful — 낙관 전환 안 함·spinner 복구.
-        setError(t('switchFailed'));
-        setBusy(null);
-        return;
-      }
-      window.location.assign('/inbox'); // active 전환 → 풀 리로드로 전 컨텍스트 리셋
-    } catch {
-      setError(t('switchFailed'));
-      setBusy(null);
-    }
-  };
-
-  const handleAdd = async () => {
-    if (atCap || busy) return;
-    setBusy('add');
-    setError(null);
-    try {
-      const r = await fetch('/api/auth/add-account', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-      if (!r.ok) {
-        if (r.status === 401) {
-          window.location.assign('/login'); // corrupt active → 폐기됨·로그인 재진입
-          return;
-        }
-        setError(t('capReached')); // 409 cap(서버 guard·UI 우회 방어) 등
-        setBusy(null);
-        return;
-      }
-      const j = (await r.json().catch(() => null)) as { data?: { redirect?: string } } | null;
-      window.location.assign(j?.data?.redirect ?? '/login');
-    } catch {
-      setBusy(null);
-    }
-  };
-
-  const handleSignOut = async (scope: 'this' | 'all') => {
-    if (busy) return;
-    setBusy('signout');
-    try {
-      const r = await fetch('/api/auth/signout-account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope }),
-      });
-      const j = (await r.json().catch(() => null)) as { data?: { next?: string | null } } | null;
-      window.location.assign(scope === 'this' && j?.data?.next ? '/inbox' : '/login');
-    } catch {
-      router.push('/login');
-    }
-  };
+  const {
+    t, tc, ordered, others, busy, error, atCap,
+    triggerName, triggerAvatar, load, handleSwitch, handleAdd, handleSignOut,
+  } = useAccountSwitcher(name, avatarUrl);
 
   return (
     <DropdownMenu onOpenChange={(open) => { if (open) void load(); }}>
-      <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-sidebar-accent">
+      <DropdownMenuTrigger className={triggerClassName ?? 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-sidebar-accent'}>
         <Avatar url={triggerAvatar} label={triggerName} className="size-7" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-sidebar-foreground">{triggerName}</span>
-        <ChevronsUpDown className="size-3.5 shrink-0 text-sidebar-foreground/60" />
+        <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', triggerClassName ? 'text-foreground' : 'text-sidebar-foreground')}>{triggerName}</span>
+        <ChevronsUpDown className={cn('size-3.5 shrink-0', triggerClassName ? 'text-muted-foreground' : 'text-sidebar-foreground/60')} />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">
         <DropdownMenuGroup>

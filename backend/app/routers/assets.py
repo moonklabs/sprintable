@@ -12,7 +12,7 @@ import base64
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,8 +29,9 @@ from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
 from app.models.pm import Story
 from app.models.team import TeamMember
+from app.services.asset_registry import DEFAULT_CONTAINER
 from app.services.member_resolver import canonicalize_member_id, resolve_member
-from app.services.project_auth import accessible_project_ids_in_org, has_project_access
+from app.services.project_auth import accessible_project_ids_in_org, has_project_access, require_project_access
 
 logger = logging.getLogger(__name__)
 
@@ -487,6 +488,35 @@ async def get_asset(
     return enriched[asset.id]
 
 
+@router.delete("/assets/{asset_id}", status_code=200)
+async def delete_asset(
+    asset_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """DELETE /api/v2/assets/{id} — story #3241(핸들러 부재로 100% 실패 fix).
+
+    soft-delete만(`deleted_at` 세팅, 하드삭제 금지) — storage_usage()가 이미 그 필드를 전제하고
+    복구 7일 grace(cron.py storage_usage_warn 인접 잡)까지 문서화돼 있던 설계를 실제로 발동시킨다.
+    authz는 get_asset과 동일 _scope_filter 재사용(IDOR 일관 — 스코프 밖/이미 삭제됨/malformed uuid
+    전부 graceful 404, 존재여부 비노출).
+    """
+    try:
+        aid = uuid.UUID(asset_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    clauses, _accessible = await _scope_filter(db, auth, org_id, None)
+    asset = (await db.execute(
+        select(Asset).where(Asset.id == aid, and_(*clauses))
+    )).scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    asset.deleted_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
+
+
 class AssetTextResponse(BaseModel):
     asset_id: uuid.UUID
     content_type: str
@@ -532,3 +562,170 @@ async def get_asset_text(
     return AssetTextResponse(
         asset_id=asset.id, content_type=asset.content_type, text_content=data.decode("utf-8", errors="ignore")
     )
+
+
+class AssetUploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str
+    project_id: uuid.UUID | None = None
+
+
+class AssetUploadUrlResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    expires_at: datetime
+    # story #3249(카디르/codex HIGH 후속) — create-only 서명(x-goog-if-generation-match: 0)이
+    # PUT 요청에도 정확히 실려야 서명이 valid함(GCS가 헤더를 서명 바인딩에 포함) — FE는 이 헤더를
+    # 그대로 PUT에 붙여야 한다(안 붙이면 403). 응답에 명시해 FE가 하드코딩 대신 서버 계약을 따르게.
+    required_put_headers: dict[str, str] = {}
+
+
+_ASSET_UPLOAD_URL_TTL = timedelta(minutes=10)
+
+
+def _manual_asset_object_path(org_id: uuid.UUID, project_id: uuid.UUID | None, filename: str) -> str:
+    """서버-구성 object_path(client 가 경로 지정 불가) — manual source_type 은
+    path_in_source_scope(asset_registry.py)가 경로 제약을 안 걸어서(«manual 만 경로 제약
+    없음(신뢰 등록)»), 이 서버-구성 자체가 유일한 IDOR 방벽이다. uuid4 세그먼트로 추측 불가
+    (avatar_upload._object_path 와 동형 원칙)."""
+    from app.services.mcp_attachment_upload import safe_attachment_filename
+
+    safe = safe_attachment_filename(filename)
+    if project_id is not None:
+        return f"org/{org_id}/project/{project_id}/manual/{uuid.uuid4()}-{safe}"
+    return f"org/{org_id}/manual/{uuid.uuid4()}-{safe}"
+
+
+@router.post("/assets/upload-url", response_model=AssetUploadUrlResponse)
+async def create_asset_upload_url(
+    body: AssetUploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> AssetUploadUrlResponse:
+    """POST /api/v2/assets/upload-url — story #3249(#3242 업로드 축 BE 선행분).
+
+    avatar(team_members.py `/avatar/upload-url`)·canvas(visual_artifacts.py export upload-url)와
+    동형 — SSOT `signed_write_url` 재사용(자체 서명 0). project_id 지정 시 has_project_access
+    검증(get_asset 과 동일 IDOR 축), None 이면 org-level 자산(_scope_filter 의 기존 org-level
+    null-project 관례와 정합).
+    """
+    if body.project_id is not None:
+        # story #2697 SSOT — require_project_access로 수렴(raw inline 패턴 신규 추가 금지, 실패시 항상 404).
+        await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id)
+
+    if settings.is_ee_enabled:
+        from ee.plan_limits import reject_if_org_over_storage_cap  # type: ignore[import]
+        await reject_if_org_over_storage_cap(db, org_id)
+
+    object_path = _manual_asset_object_path(org_id, body.project_id, body.filename)
+
+    from app.services.storage import get_storage_provider
+
+    upload_url = await get_storage_provider().signed_write_url(
+        DEFAULT_CONTAINER, object_path, ttl=_ASSET_UPLOAD_URL_TTL, content_type=body.content_type,
+        create_only=True,
+    )
+    if upload_url is None:
+        raise HTTPException(status_code=502, detail="업로드 URL 서명 실패")
+    return AssetUploadUrlResponse(
+        upload_url=upload_url, object_path=object_path,
+        expires_at=datetime.now(timezone.utc) + _ASSET_UPLOAD_URL_TTL,
+        required_put_headers={"x-goog-if-generation-match": "0"},
+    )
+
+
+class AssetUploadConfirmRequest(BaseModel):
+    object_path: str
+    filename: str
+    content_type: str | None = None
+    project_id: uuid.UUID | None = None
+    folder_id: uuid.UUID | None = None
+
+
+@router.post("/assets/upload-confirm", response_model=AssetResponse, status_code=201)
+async def confirm_asset_upload(
+    body: AssetUploadConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> AssetResponse:
+    """POST /api/v2/assets/upload-confirm — story #3249. head_object 실측(존재·실크기)으로
+    Asset row 등록(source_type=manual, avatar_upload.confirm_upload 와 동형 원칙). object_path 는
+    upload-url 이 이 org/project 스코프로 서버-구성한 값과 prefix 일치해야만 함(avatar 의
+    PATH_NOT_SCOPED 와 동형 — 타 org/project 경로로 등록 시도 차단). 용량 cap 재검사(AC3 confirm
+    재검사) — check_storage_capacity 가 head_object 실 크기로 authoritative 판정.
+    """
+    if body.project_id is not None:
+        # story #2697 SSOT — require_project_access로 수렴(raw inline 패턴 신규 추가 금지, 실패시 항상 404).
+        await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id)
+
+    expected_prefix = (
+        f"org/{org_id}/project/{body.project_id}/manual/" if body.project_id is not None
+        else f"org/{org_id}/manual/"
+    )
+    if not body.object_path.startswith(expected_prefix) or "/" in body.object_path[len(expected_prefix):]:
+        raise HTTPException(status_code=403, detail="이 스코프로 발급된 업로드 경로가 아닙니다")
+
+    if body.folder_id is not None:
+        folder = (await db.execute(
+            select(AssetFolder).where(
+                AssetFolder.id == body.folder_id, AssetFolder.org_id == org_id,
+                AssetFolder.project_id == body.project_id, AssetFolder.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if folder is None:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+    from app.services.storage import get_storage_provider
+
+    size_bytes = await get_storage_provider().head_object(DEFAULT_CONTAINER, body.object_path)
+    if size_bytes is None:
+        raise HTTPException(status_code=404, detail="업로드된 객체를 찾을 수 없습니다(PUT 미완료?)")
+
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(db, org_id, [{"url": body.object_path}])
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    created_by: uuid.UUID | None = None
+    try:
+        created_by = (await resolve_member(auth, org_id, db)).id
+    except Exception:  # noqa: BLE001 — created_by 는 비필수(asset.created_by nullable).
+        created_by = None
+
+    base_ins = pg_insert(Asset).values(
+        org_id=org_id, project_id=body.project_id, folder_id=body.folder_id,
+        container=DEFAULT_CONTAINER, object_path=body.object_path,
+        name=body.filename.strip() or "file", content_type=body.content_type,
+        size_bytes=size_bytes, created_by=created_by,
+    )
+    # 까심 R3 동형(asset_registry.sync_attachment_assets) — project_id null/non-null 별
+    # partial unique 로 conflict target 분기(uq_assets_proj_nonnull vs uq_assets_proj_null).
+    if body.project_id is not None:
+        ins = base_ins.on_conflict_do_nothing(
+            index_elements=[Asset.org_id, Asset.project_id, Asset.container, Asset.object_path],
+            index_where=Asset.project_id.isnot(None),
+        ).returning(Asset.id)
+    else:
+        ins = base_ins.on_conflict_do_nothing(
+            index_elements=[Asset.org_id, Asset.container, Asset.object_path],
+            index_where=Asset.project_id.is_(None),
+        ).returning(Asset.id)
+    asset_id = (await db.execute(ins)).scalar_one_or_none()
+    if asset_id is None:
+        sel = select(Asset.id).where(
+            Asset.org_id == org_id, Asset.container == DEFAULT_CONTAINER,
+            Asset.object_path == body.object_path,
+        )
+        sel = sel.where(
+            Asset.project_id == body.project_id if body.project_id is not None else Asset.project_id.is_(None)
+        )
+        asset_id = (await db.execute(sel)).scalar_one()
+    await db.commit()
+
+    asset = (await db.execute(select(Asset).where(Asset.id == asset_id))).scalar_one()
+    accessible = {body.project_id} if body.project_id is not None else set()
+    enriched = await _enrich(db, org_id, accessible, [asset])
+    return enriched[asset.id]

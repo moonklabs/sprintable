@@ -5,8 +5,12 @@
 소스에서 직독해 대조한다. #2271 AC3·AC4의 산출물.
 
 ⭐이 파일은 `infra/check_serving_reality.py`(story #2174)와 같은 자리에 있다 — 같은 이유:
-"정상"과 "알고 있다"를 분리하고(허용목록), 허용목록은 스스로 만료된다(`until` 필수+상한).
-자세한 배경은 `infra/mcp-path-contract-allowlist.yml` 머리말 참조.
+"정상"과 "알고 있다"를 분리하고(허용목록), 대부분의 허용목록은 스스로 만료된다(`until`
+필수+상한). ⚠️story #3168(2026-08-28) 후속 — 구조적으로 영구한 간접경로(코드 패턴 자체가
+항상 M으로 잡히는 것, 호출부가 사라지면 이 실행에서 그 항목 자체가 다시 안 잡히므로
+«기계 재검증»이 매 실행 이미 일어난다)는 예외: `declared_permanent_indirect`는 until을
+요구하지 않는다(reason/declared_by는 여전히 필수). 자세한 배경은
+`infra/mcp-path-contract-allowlist.yml` 머리말 참조.
 
 ⚠️오늘(2026-07-28) 이 축 자체에서 겪은 실패: 최초 수기 audit가 develop보다 뒤처진 로컬
 체크아웃으로 실행돼, 2026-07-15에 이미 fix된 retro.py 7건+list_backlog 1건(총 8건)을
@@ -43,12 +47,15 @@ def norm(path: str) -> str:
     return re.sub(r"\{[^}]+\}", "{*}", path)
 
 
-def _load_allowlist() -> tuple[dict[tuple[str, str, str], dict], dict[tuple[str, str], dict]]:
-    """반환: ({(module, method, norm_path): entry} 경로 불일치 선언, {(module, function): entry} 간접경로 선언).
+def _load_allowlist() -> tuple[
+    dict[tuple[str, str, str], dict], dict[tuple[str, str], dict], dict[tuple[str, str], dict]
+]:
+    """반환: ({(module, method, norm_path): entry} 경로 불일치 선언, {(module, function): entry}
+    시한부 간접경로 선언, {(module, function): entry} 영구 간접경로 선언).
 
     파일이 없으면 빈 선언으로 취급한다 — ⛔"선언 파일이 없으니 검사 생략"은 하지 않는다."""
     if not _ALLOWLIST_PATH.exists():
-        return {}, {}
+        return {}, {}, {}
     import yaml
 
     data = yaml.safe_load(_ALLOWLIST_PATH.read_text()) or {}
@@ -60,7 +67,26 @@ def _load_allowlist() -> tuple[dict[tuple[str, str, str], dict], dict[tuple[str,
     for e in data.get("declared_indirect") or []:
         key = (e["module"], e["function"])
         indirect[key] = e
-    return mismatches, indirect
+    permanent_indirect = {}
+    for e in data.get("declared_permanent_indirect") or []:
+        key = (e["module"], e["function"])
+        permanent_indirect[key] = e
+    return mismatches, indirect, permanent_indirect
+
+
+def _permanent_entry_problem(entry: dict) -> str | None:
+    """story #3168(2026-08-28, 페드루 PO 판정) — declared_permanent_indirect 전용 검사.
+    구조적으로 영구한 간접경로(동적 dispatch가 코드 패턴 자체에 내재)는 `until`을 요구하지
+    않는다 — 이 진입점이 여전히 실재하는지는 매 실행마다 `unreadable` 재스캔이 기계적으로
+    검증하므로(코드가 바뀌어 그 호출부가 사라지면 이 declared 항목 자체가 조회 대상에서
+    빠진다), `until` 시한은 «주기 재검증»에 아무 것도 더하지 못하고 순수 재확認 노동만
+    반복시킨다(declared_indirect의 두 기존 항목이 실제로 겪은 패턴). reason/declared_by는
+    여전히 필수 — «왜 영구히 간접인지»는 사람이 남겨야 한다."""
+    if not entry.get("reason"):
+        return "`reason`(사유)이 없다"
+    if not entry.get("declared_by"):
+        return "`declared_by`(선언자)가 없다"
+    return None
 
 
 def _expired(entry: dict, today: date) -> str | None:
@@ -222,7 +248,7 @@ def main() -> int:
     print(f"양성대조 OK: {POSITIVE_CONTROL} 확認됨 — 대조법 정상\n")
 
     mcp_calls, unreadable = load_mcp_declared()
-    declared_mismatches, declared_indirect = _load_allowlist()
+    declared_mismatches, declared_indirect, declared_permanent_indirect = _load_allowlist()
 
     mismatches = []
     for module, method, path in mcp_calls:
@@ -253,7 +279,21 @@ def main() -> int:
     if unreadable:
         print(f"\nM({len(unreadable)}개) — 이름 명시:")
         for module, func, raw in unreadable:
-            entry = declared_indirect.get((module, func))
+            key = (module, func)
+            # story #3168(2026-08-28, 페드루 PO 판정) — 영구선언 축을 먼저 본다. 구조적으로
+            # 항상 간접인 dispatch 패턴(호출부가 사라지면 애초에 이 unreadable 자체가 이번
+            # 실행에서 다시 안 잡힌다 — 그게 "기계 재검증"의 정체)엔 until을 요구하지 않는다.
+            permanent_entry = declared_permanent_indirect.get(key)
+            if permanent_entry is not None:
+                problem = _permanent_entry_problem(permanent_entry)
+                if problem:
+                    print(f"  🔴 {module}.py:{func}() — {raw} — 영구선언은 돼 있으나 {problem}")
+                    new_indirect.append((module, func, raw))
+                else:
+                    print(f"  ⚪ {module}.py:{func}() — {raw} — 영구선언(permanent, {permanent_entry['reason']})")
+                continue
+
+            entry = declared_indirect.get(key)
             if entry is None:
                 print(f"  🔴 {module}.py:{func}() — {raw} — 허용목록에 없는 신규")
                 new_indirect.append((module, func, raw))
@@ -268,7 +308,9 @@ def main() -> int:
     if new_mismatches or new_indirect:
         print(f"\n🔴 신규(또는 만료된) 항목 {len(new_mismatches) + len(new_indirect)}건 — "
               f"실제 버그면 고치고, 알고 있는 상태로 계속 두려면 "
-              f"infra/mcp-path-contract-allowlist.yml에 reason/declared_by/until과 함께 등재할 것.")
+              f"infra/mcp-path-contract-allowlist.yml의 declared_mismatches/declared_indirect에 "
+              f"reason/declared_by/until과 함께 등재하거나(시한부), 구조적으로 영구 간접이면 "
+              f"declared_permanent_indirect에 reason/declared_by만으로(until 불요, story #3168) 등재할 것.")
         ok = False
 
     print(

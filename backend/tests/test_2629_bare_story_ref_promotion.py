@@ -225,6 +225,82 @@ async def test_promote_skips_existing_entity_token():
         await engine.dispose()
 
 
+# story #3162(채팅·치환 결함) — 인용부호/블록인용 안의 #N은 재인용이지 새 참조 의도가
+# 아니다(디캄포 오늘 밤 재발 실사고: 정정 메시지에서 오염된 원문을 그대로 다시 인용해
+# 재승격됨). 코드블록/인라인코드와 같은 "예시 영역" 원칙을 확장.
+async def test_promote_skips_double_quoted_number():
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
+            content = '방금 메시지의 "#24" 인용은 예시일 뿐인'
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_skips_korean_bracket_quoted_number():
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
+            content = "원문 그대로 재인용하는 — 「#24는 오탈자였는」"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_skips_blockquote_line():
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
+            content = "인용:\n> 예전에 #24라고 썼던\n지금은 아닌"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_bare_ref_outside_quotes_still_promotes_no_regression():
+    """따옴표 밖의 정상 참조는 회귀 0 — 보호구간 확장이 정상 승격까지 죽이지 않는다."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            story = await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
+            content = '"예시"는 무시하고 #24 보드 확인 부탁하는'
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert promoted_ids == {story.id}
+            assert "#24" not in result
+    finally:
+        await engine.dispose()
+
+
 # ── ③ 실 DB resolve ────────────────────────────────────────────────────────────
 async def test_promote_resolves_existing_story_to_entity_token():
     from app.services.story_ref_promoter import promote_bare_story_refs

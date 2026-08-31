@@ -43,7 +43,12 @@ function sourceHref(item: BacklinkItem): string | null {
     case 'story': return item.story ? getEntityHref('story', item.story.id) : null;
     case 'chat_message':
       return item.message ? `/chats/${encodeURIComponent(item.message.conversation_id)}?messageId=${encodeURIComponent(item.message.id)}` : null;
-    case 'meeting': return item.meeting ? `/meetings/${encodeURIComponent(item.meeting.id)}` : null;
+    // story #3167(IA 정리 통 A, 유나 design:changes) — /meetings/[id] 페이지 자체가
+    // notFound 스텁으로 폐기됐다(meeting 데이터·API는 유지 — 카드 자체는 실재 가능).
+    // 링크를 계속 만들면 클릭 시 100% 404라 링크가 아니라 아래 origin ? ... : <span>
+    // 폴백 경로(href=null)로 평문 렌더 — 카드 존재 여부(still_exists)와 무관하게 이제
+    // meeting 출처는 애초에 도달 가능한 목적지가 없다.
+    case 'meeting': return null;
   }
 }
 

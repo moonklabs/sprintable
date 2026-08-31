@@ -253,6 +253,7 @@ class SteerDispatchRequest(BaseModel):
 @router.patch("/bulk", response_model=list[GoalResponse])
 async def bulk_update_goals(
     payload: BulkGoalPositionRequest,
+    response: Response,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -264,6 +265,10 @@ async def bulk_update_goals(
     has_project_access(대상 goal.project_id, resource-actual — body-claimed 아님)로 same-org
     cross-project도 차단(W2). 미접근 item은 not-found와 동형으로 조용히 스킵(존재 비노출·
     나머지 정당 item은 진행).
+
+    story #3176 선행조건①(payload-배치 AU 계측): `X-Affected-Entities` 응답 헤더로 실제
+    반영된 엔티티 수(len(updated) — 요청 개수가 아니라 접근권 스킵 제외한 실처리 수)를
+    명시한다. AUMeteringMiddleware가 이 헤더를 읽어 5×N AU로 계상(au_metering.py 참고).
     """
     from app.models.pm import Goal
 
@@ -296,6 +301,7 @@ async def bulk_update_goals(
     # 인간이 로드맵을 A→B→다시A로 번복하는 사고과정은 사적 초안이라 실시간 이벤트로 새면 안 된다.
     # epic.reordered 발화는 명시적 조타 커밋(POST /goals/steer-dispatch)에서만 1회. 여기선 emit 없음.
     await _attach_org_project_slugs(session, org_id, updated)
+    response.headers["X-Affected-Entities"] = str(len(updated))
     return [GoalResponse.model_validate(e) for e in updated]
 
 
@@ -405,6 +411,17 @@ async def update_goal(
     goal = await repo.update(id, **data)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
+    # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish로 정렬
+    # (dependencies.py 3곳과 동일 근거 — get_db implicit commit보다 먼저 push하면 FE 재조회가
+    # 아직 안 보이는 상태를 읽는다). measure_after 재계획은 loop_overdue_goal(도과 기준선
+    # 이동) 파생의 실 입력이다(전용 transition 엔드포인트 밖의 유일한 그 변경 경로).
+    if "measure_after" in data:
+        from app.services.attention_events import notify_attention_changed
+
+        await repo.session.commit()
+        # story 50662d49(commit-then-model_validate refresh lint) — dependencies.py와 동형.
+        await repo.session.refresh(goal)
+        await notify_attention_changed(repo.org_id)
     await _attach_org_project_slugs(repo.session, repo.org_id, [goal])
     return GoalResponse.model_validate(goal)
 

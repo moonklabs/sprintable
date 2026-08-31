@@ -233,6 +233,28 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
         raise _storage_limit_error("storage", max_storage_mb, tier, used_mb=int(used) / (1024 * 1024))
 
 
+async def reject_if_org_over_storage_cap(session: AsyncSession, org_id) -> None:
+    """story #3249 — 업로드 발급(presigned URL) 시점의 「선검사」. check_storage_capacity 는
+    실 head_object 크기가 있어야(업로드 後) 호출 가능해 발급 단계에선 못 쓴다 — 신규 파일
+    크기를 아직 몰라도 판정 가능한 부분만(현재 사용량이 이미 한도 이상인가) 같은 SSOT
+    (tier→offering_versions)로 검사해 헛발급을 막는다. 파일별/정확한 총량 판정은 여전히
+    confirm 단계의 check_storage_capacity(재검사) 몫."""
+    tier = await _get_org_tier(session, org_id)
+    if tier not in _KNOWN_TIERS:
+        return
+    limits = await _get_org_storage_limits(session, tier)
+    if limits is None:
+        return
+    max_storage_mb, _max_file_mb = limits
+    max_storage_bytes = max_storage_mb * 1024 * 1024
+    used = (await session.execute(
+        text("SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE org_id = :oid AND deleted_at IS NULL"),
+        {"oid": str(org_id)},
+    )).scalar() or 0
+    if int(used) >= max_storage_bytes:
+        raise _storage_limit_error("storage", max_storage_mb, tier, used_mb=int(used) / (1024 * 1024))
+
+
 async def _seat_usage(session: AsyncSession, org_id, *, include_pending_invites: bool) -> int:
     """휴먼 org_members(+옵션: 대기중 미만료 초대) 카운트 — seats 축의 "현재값"(에이전트
     미포함, PO 판정 안B: seats=휴먼 전용)."""

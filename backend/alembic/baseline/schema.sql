@@ -2142,7 +2142,7 @@ CREATE TABLE public.usage_meters (
     period_end timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT usage_meters_meter_type_check CHECK ((meter_type = ANY (ARRAY['ai_calls'::text, 'storage_mb'::text, 'members'::text, 'agents'::text, 'stt_minutes'::text])))
+    CONSTRAINT usage_meters_meter_type_check CHECK ((meter_type = ANY (ARRAY['ai_calls'::text, 'storage_mb'::text, 'members'::text, 'agents'::text, 'stt_minutes'::text, 'automation_units'::text, 'realtime_connections'::text, 'webhooks'::text, 'automation_rules'::text, 'event_replay_days'::text])))
 );
 
 

@@ -448,6 +448,22 @@ async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext
     )
 
 
+def is_au_billable_agent(auth: AuthContext) -> bool:
+    """story #3173(결제②-B) — AU(automation_units) 과금 판별자. doc `pricing-policy-
+    proposal-v1` §4.5: "사람이 웹 UI에서 수행한 작업 = 0 AU(좌석이 이미 받음)" — AU는
+    MCP/API(에이전트) 트래픽만 잰다.
+
+    ⛔단순히 `api_key_id` claim 존재만 보면 안 된다 — `_resolve_human_api_key`(hu_live_*,
+    휴먼 개인 API key)가 `"human_api_key_id"`로 싣고 `"actor_type": "human"`을 명시하는
+    기존 예외 경로가 있다(§6 참고). 그 경로를 에이전트로 오분류하면 사람 UI/개인키
+    작업에 AU를 잘못 부과해 스펙(사람=0)을 위반한다. 판별자는 반드시 이 둘을 함께 본다.
+    """
+    app_metadata = auth.claims.get("app_metadata", {})
+    is_api_key = bool(app_metadata.get("api_key_id"))
+    is_human_claimed = app_metadata.get("actor_type") == "human"
+    return is_api_key and not is_human_claimed
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
@@ -464,6 +480,27 @@ async def get_current_user(
     caller 세션에 write가 남아있었다면 여기서 명시 커밋 없이 `async with`만 쓰는 건 그 write를
     조용히 롤백시키는 회귀였을 것 — 이 순서(② #2457 → #2459) 자체가 안전장치다.
     """
+    auth = await _resolve_current_user_auth_context(
+        credentials=credentials, x_agent_api_key=x_agent_api_key,
+        x_mcp_transport=x_mcp_transport, request=request,
+    )
+    # story #3173(결제②-B) — 소비처: app/middleware/au_metering.py(app/main.py에 등록)가
+    # 응답 완료 후 이 값들을 읽어 AU 계측 대상 여부·귀속 조직을 정한다. FastAPI dependency는
+    # 라우터 안에서만 살고 ASGI 미들웨어 레이어로 안 새어나가므로, 여기서 request.state에
+    # 명시 기록해야 미들웨어가 볼 수 있다. ⛔이 값들의 유일한 소비처가 저 미들웨어다 — 새
+    # 소비처가 생기면 이 주석도 같이 갱신할 것(형제 드리프트 재발 방지, #3175 교훈).
+    if request is not None:
+        request.state.au_actor = "agent" if is_au_billable_agent(auth) else "human"
+        request.state.au_org_id = auth.org_id
+    return auth
+
+
+async def _resolve_current_user_auth_context(
+    credentials: HTTPAuthorizationCredentials | None,
+    x_agent_api_key: str | None,
+    x_mcp_transport: str | None,
+    request: Request,
+) -> AuthContext:
     # x-agent-api-key 헤더 우선 처리 (SSE 브릿지 직접 연결용)
     if x_agent_api_key and x_agent_api_key.startswith("sk_live_"):
         async with async_session_factory() as db:

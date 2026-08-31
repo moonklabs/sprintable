@@ -7,7 +7,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import and_, func, select, text, tuple_, update
 from sqlalchemy.exc import IntegrityError
@@ -406,9 +406,15 @@ async def _fetch_conversation_participants(
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
         resolved = resolved_map.get(r.member_id)
+        # story #3203 — `lookup_members_by_ids`는 요청한 모든 id에 값을 채운다(orphan도
+        # 자체 placeholder ResolvedMember 반환)이라 이 `resolved`가 실제로 None인 경우는
+        # 없다(all_member_ids가 비어 resolved_map={}일 때뿐인데 그럼 p_rows 자체가 없다) —
+        # 이 삼항은 방어적 죽은 분기. 예전엔 여기서도 uuid 앞 8자를 지어냈으나(FE로 그대로
+        # 새는 표시결함 원인지 중 하나), 이제 resolved.name 자체가 orphan이면 None이라
+        # (member_resolver.py 참고) FE Participant.name(`string | null`) 계약과 맞는다.
         conv_participants[r.conversation_id].append({
             "member_id": str(r.member_id),
-            "name": resolved.name if resolved else str(r.member_id)[:8],
+            "name": resolved.name if resolved else None,
             "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
             "type": resolved.type if resolved else "human",
             "runtime_type": runtime_type_map.get(r.member_id),
@@ -1852,6 +1858,7 @@ async def list_messages(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    response: Response = None,  # type: ignore[assignment]
 ) -> dict:
     """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션.
 
@@ -1907,6 +1914,9 @@ async def list_messages(
         for m in msgs
     ]
 
+    # story #3176 선행조건②(읽기 100개 초과 AU 계측): X-Result-Count = 실제 반환 건수.
+    if response is not None:
+        response.headers["X-Result-Count"] = str(len(data))
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
 
 

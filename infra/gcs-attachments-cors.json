@@ -7,8 +7,8 @@
       "https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app",
       "http://localhost:3108"
     ],
-    "method": ["GET", "HEAD"],
-    "responseHeader": ["Content-Type", "Content-Length", "Content-Disposition", "Range"],
+    "method": ["GET", "HEAD", "PUT"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Disposition", "Range", "x-goog-if-generation-match"],
     "maxAgeSeconds": 3600
   }
 ]

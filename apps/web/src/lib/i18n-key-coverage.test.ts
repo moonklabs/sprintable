@@ -17,35 +17,23 @@
 //      디렉터리 자체가 없음, 2026-07-27 확인) 지금은 사실상 구멍이 아니다. 새 앱이
 //      추가되면 이 캐비엇이 다시 유효해진다.
 //
-// 방법론(2026-07-27 교훈, 이 스토리 자체에서 확定): 소스 정적 스캔은 주석 스트립이
-// 첫 단계다 — 안 걷으면 주석 속 옛 코드 설명 문장이 실호출로 오판된다(#2210 조사 중
-// inbox.title 오탐 1건 실측).
+// story #3156 — 이 가드의 파서(stripComments·훅 바인딩 추출·extractKeyUsages)는
+// `scripts/check-i18n-keys.js`(CI 스크립트)와 완전 별개 독립 구현이었다. #3149(PR#3558)에서
+// 실증: 멤버접근 오귀속 결함을 한쪽만 고치자 다른 쪽이 같은 오탐으로 계속 붉혔다 — 파서를
+// `scripts/i18n-key-parser.js`(공유 모듈)로 일원화해 두 소비처가 같은 구현을 import한다.
+// 파서 자체의 회귀가드(extractKeyUsages 멤버접근 제외 등)는 `scripts/i18n-key-parser.test.js`
+// 로 이관됐다 — 여기 남기지 않는다(중복 방지, 그 파일이 정본).
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+// story #3156: repo-root scripts/(node CJS, apps/web 워크스페이스 밖)의 공유 파서.
+// moduleResolution:bundler+allowJs라 vitest/tsc 양쪽에서 해석 가능(tsconfig.json의
+// @sprintable/* 크로스-패키지 import와 동일 패턴).
+import { stripComments, extractHookBindings, extractKeyUsages } from '../../../../scripts/i18n-key-parser.js';
 import ko from '../../messages/ko.json';
 import en from '../../messages/en.json';
 
 const SRC_ROOT = path.resolve(__dirname, '..');
-
-function stripComments(text: string): string {
-  let out = text.replace(/\/\*[\s\S]*?\*\//g, '');
-  out = out
-    .split('\n')
-    .map((line) => {
-      const idx = line.indexOf('//');
-      if (idx === -1) return line;
-      const before = line.slice(0, idx);
-      const quotes = (before.match(/"/g) || []).length
-        + (before.match(/'/g) || []).length
-        + (before.match(/`/g) || []).length;
-      // 대략적 판별 — 앞부분 따옴표 개수 합이 짝수면(문자열 밖) //를 진짜 주석으로 본다.
-      // i18n 호출 라인에는 //가 문자열 속에 섞이는 경우가 사실상 없어 이 근사로 충분하다.
-      return quotes % 2 === 0 ? before : line;
-    })
-    .join('\n');
-  return out;
-}
 
 function collectSourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -71,19 +59,16 @@ function hasKey(messages: unknown, dotted: string): boolean {
   return typeof cur === 'string';
 }
 
-const ASSIGN_RE = /(\w+)\s*=\s*useTranslations\(\s*['"]([\w.]+)['"]\s*\)/g;
-
 function collectMissingKeys(): { key: string; locations: string[] }[] {
   const referenced = new Map<string, Set<string>>();
   for (const file of collectSourceFiles(SRC_ROOT)) {
     const raw = fs.readFileSync(file, 'utf-8');
     const text = stripComments(raw);
-    const assigns = [...text.matchAll(ASSIGN_RE)];
-    if (assigns.length === 0) continue;
+    const bindings = extractHookBindings(text);
+    if (bindings.size === 0) continue;
     const rel = path.relative(SRC_ROOT, file);
-    for (const [, varName, ns] of assigns) {
-      const callRe = new RegExp(`\\b${varName}\\(\\s*['"]([\\w.]+)['"]`, 'g');
-      for (const [, key] of text.matchAll(callRe)) {
+    for (const [varName, ns] of bindings) {
+      for (const key of extractKeyUsages(text, varName)) {
         const full = `${ns}.${key}`;
         if (!referenced.has(full)) referenced.set(full, new Set());
         referenced.get(full)!.add(rel);
@@ -101,7 +86,7 @@ function collectMissingKeys(): { key: string; locations: string[] }[] {
 }
 
 describe('i18n 키 커버리지 — 코드가 참조하는 키는 ko/en 양쪽에 다 있어야 한다 (#2210)', () => {
-  it('apps/web/src의 모든 useTranslations(ns)(\'key\') 호출이 ko.json·en.json에 존재한다', () => {
+  it('apps/web/src의 모든 useTranslations(ns)(\'key\')/getTranslations(ns)(\'key\') 호출이 ko.json·en.json에 존재한다', () => {
     const missing = collectMissingKeys();
     if (missing.length > 0) {
       const report = missing.map((m) => `  ${m.key}  <-  ${m.locations.join(', ')}`).join('\n');
