@@ -61,39 +61,6 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
-    # story #3209(PR-2, 2026-08-29) — 결제 완료 안내. 다른 트랜잭셔널 3종과 골격 동일
-    # (intro_lines/cta_label/expiry_note/security_note/fallback_label — render_action_email
-    # 그대로 재사용, 새 렌더러 발명 없음). intro_lines[1]은 결제액 삽입용 {amount} 자리
-    # 표시자(billing_receipt_email.py가 .format()으로 채움 — STORAGE_WARN_COPY의 {pct}
-    # 등과 동형 관례). expiry_note/security_note는 "만료/보안" 문면 그대로가 아니라 영수증
-    # 맥락에 맞게 내용을 바꿔 채웠다(파라미터 이름은 골격 재사용, 내용은 이 메일의 실제
-    # 의미에 맞춤 — expiry_note 자리엔 "영수증은 Toss가 제공하며 링크로 계속 확인 가능"을,
-    # security_note 자리엔 "본인 결제가 아니면 즉시 문의" 안내를 담는다). en은 유나 검수
-    # 대기 초안(다른 5종과 동일 상태).
-    "payment_receipt": {
-        "ko": {
-            "subject": "Sprintable 결제가 완료됐습니다",
-            "intro_lines": [
-                "결제가 정상적으로 완료됐습니다.",
-                "결제 금액: {amount}",
-            ],
-            "cta_label": "영수증 보기",
-            "expiry_note": "영수증은 결제사(Toss)가 제공하며, 이 링크로 언제든 다시 확인하실 수 있습니다.",
-            "security_note": "본인이 결제하지 않으셨다면 즉시 고객센터로 문의해 주세요.",
-            "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
-        },
-        "en": {
-            "subject": "Your Sprintable payment is complete",
-            "intro_lines": [
-                "Your payment was completed successfully.",
-                "Amount charged: {amount}",
-            ],
-            "cta_label": "View receipt",
-            "expiry_note": "The receipt is provided by our payment processor (Toss) and can be viewed anytime via this link.",
-            "security_note": "If you didn't make this payment, please contact support immediately.",
-            "fallback_label": "If the button doesn't work, paste this address into your browser:",
-        },
-    },
 }
 
 REMINDER_COPY: dict[str, dict[str, str]] = {

@@ -21,7 +21,6 @@ PO 정밀 리뷰(#2882, 2026-08-07) — 「돈 움직이는」 스토리가 지�
 """
 from __future__ import annotations
 
-import logging
 import uuid
 
 from sqlalchemy import func, select, update
@@ -31,8 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.billing_order import BillingOrder
 from app.models.org_billing_key import OrgBillingKey
 from app.services.billing_key_crypto import decrypt_billing_key, ensure_configured
-
-logger = logging.getLogger(__name__)
 from app.services.billing_ledger import record_ledger_entry
 from app.services.payment.toss_adapter import DUPLICATED_ORDER_ID, TossAdapter, TossApiError
 
@@ -69,35 +66,18 @@ async def _confirm_with_ledger(
     receipt_url(story #3209 PR-1): 호출자가 이미 받아둔 Toss payment 응답의
     `receipt.url`을 그대로 전달 — 이 함수가 별도로 Toss를 다시 조회하지 않는다(모든
     호출자가 이미 그 응답을 들고 이 함수에 들어온다, charge_org/_reconcile_duplicated_order/
-    sweep_stale_pending_orders 공통).
-
-    story #3209 PR-2 — 이 UPDATE가 실제로 이 order를 confirmed로 **처음** 전이시켰을
-    때만(rowcount==1) 결제 완료 메일을 발송한다. 이미 confirmed인 order에 재진입(멱등
-    재시도 등)하면 WHERE 가드로 rowcount==0이라 자동으로 재발송을 안 한다 — 별도
-    dedup 플래그 불요, claim/confirmed-update 자체가 이미 그 신호다. 발송 실패는
-    결제 확정 자체를 되돌리지 않는다(try/except, 로그만)."""
+    sweep_stale_pending_orders 공통)."""
     await record_ledger_entry(
         session, org_id=org_id, entry_type=entry_type, amount_minor=amount_minor,
         currency=currency, direction="credit", provider="toss", provider_ref=payment_key,
         metadata=ledger_metadata,
     )
-    update_result = await session.execute(
+    await session.execute(
         update(BillingOrder)
         .where(BillingOrder.order_id == order_id, BillingOrder.status != "confirmed")
         .values(status="confirmed", payment_key=payment_key, receipt_url=receipt_url, updated_at=func.now())
     )
     await session.commit()
-    if update_result.rowcount == 1:
-        try:
-            from app.services.billing_receipt_email import send_payment_receipt_email
-            await send_payment_receipt_email(
-                session, org_id=org_id, receipt_url=receipt_url,
-                amount_minor=amount_minor, currency=currency,
-            )
-        except Exception:
-            logger.exception(
-                "payment receipt email dispatch failed — order_id=%s org_id=%s", order_id, org_id,
-            )
     return await _refetch(session, order_id)
 
 
