@@ -10,6 +10,7 @@ customer 메시지(이미 저장됨, app/routers/sessions.py) → 인입 분류�
 from __future__ import annotations
 
 import logging
+import sys
 import uuid
 from dataclasses import dataclass
 
@@ -36,11 +37,21 @@ logger = logging.getLogger(__name__)
 # 동작했으므로 코드·자격·모델·검색수학 자체는 무죄, Cloud Run 런타임 조립(uvicorn/uvloop
 # 이벤트루프×AFC·asyncpg 세션 상호작용·metadata 자격 경로 등 용의)에서만 재현되는 결함.
 #
-# 1보(이 커밋) = **관측성**: 도구 자체를 try/except로 감싸 SDK가 예외를 볼 기회를 원천
-# 차단하고(SDK 삼킴 버그를 더는 안 만난다), logger.exception으로 실 traceback을 Cloud
-# Logging에 남기고, 고객에게는 "조용한 품질강등" 대신 정직한 실패 신호를 돌려준다. 근본
-# 원인(왜 Cloud Run에서만 raise하는지)은 이 로그가 찍힌 뒤 2보에서 다룬다 — 지금은 증상
-# 봉합이 아니라 "안 보이던 것을 보이게" 하는 단계라는 점을 다음 스텝 판단자가 알아야 한다.
+# 1보(2026-08-31 배포·리비전 00009) = 관측성 시도 — 그런데 **재실측 결과 로그가 0였다**
+# (logger.exception 출력 없이 도구 실패가 그대로 재현). 그 "무발화" 자체가 2보의 1급 단서 —
+# 페드루 PO가 세 갈래로 좁힘: ①CancelledError류(BaseException)가 `except Exception`을
+# 통과했을 가능성 ②SDK가 도구를 디스패치조차 못 해 도구 코드 자체가 안 돌았을 가능성
+# ③logging 설정이 실제로 stderr/Cloud Logging에 안 닿았을 가능성.
+#
+# 2보-a(이 커밋) = **계측 확장**, 아직 근본수정 아님:
+# - `except Exception` 외에 `except BaseException`을 추가해 CancelledError류도 로그로
+#   잡는다 — 단, BaseException은 삼키지 않고 로그 후 **re-raise**한다(취소 시맨틱을 죽이면
+#   안 된다는 표준 원칙 — Exception 하위 실패만 정직 폴백으로 삼킨다).
+# - `logging` 설정 불확실성을 우회하려고 각 도구 진입/성공/예외 지점에 `print(...,
+#   file=sys.stderr, flush=True)`를 직접 심는다("[tool-trace]" 접두 — grep 대상).
+# - `app/vertex_client.py::generate_with_tools`가 SDK 자체의
+#   `resp.automatic_function_calling_history`(SDK가 "도구에 무슨 일이 있었다고 믿는지"의
+#   원장)를 통째로 로그+stderr에 남긴다 — 세 갈래를 한 번의 배포로 가른다.
 _TOOL_FAILURE_HONEST_MESSAGE = "지금 확인이 안 됩니다. 잠시 후 다시 시도해 주세요."
 
 _INTERACTION_SYSTEM_PROMPT = """당신은 이 회사의 고객 지원 담당자입니다. 원칙(BAO/S):
@@ -97,6 +108,7 @@ def _make_tools(
 
     async def knowledge_search(query: str) -> str:
         """고객 문의와 관련된 사내 지식(문서·FAQ)을 검색합니다."""
+        print(f"[tool-trace] knowledge_search 진입 conv={conversation_id} query={query[:80]!r}", file=sys.stderr, flush=True)
         knowledge_state["called"] = True
         try:
             result = await knowledge_task(db, conversation_id=conversation_id, org_id=org_id, query=query, llm=llm)
@@ -107,14 +119,31 @@ def _make_tools(
                 org_id,
                 query[:200],
             )
+            print(f"[tool-trace] knowledge_search Exception — 정직 폴백 반환 conv={conversation_id}", file=sys.stderr, flush=True)
             return _TOOL_FAILURE_HONEST_MESSAGE
+        except BaseException:
+            logger.exception(
+                "knowledge_search 도구 실행 중 BaseException(CancelledError류 추정, re-raise) "
+                "(conversation_id=%s, org_id=%s, query=%r)",
+                conversation_id,
+                org_id,
+                query[:200],
+            )
+            print(f"[tool-trace] knowledge_search BaseException — re-raise conv={conversation_id}", file=sys.stderr, flush=True)
+            raise
         knowledge_state["had_match"] = knowledge_state.get("had_match", False) or result.had_match
+        print(
+            f"[tool-trace] knowledge_search 정상 반환 conv={conversation_id} had_match={result.had_match}",
+            file=sys.stderr,
+            flush=True,
+        )
         return result.answer
 
     async def org_status_lookup(question: str) -> str:
         """이 조직(org)의 현재 상태(플랜·설정 등)를 조회합니다."""
+        print(f"[tool-trace] org_status_lookup 진입 conv={conversation_id} question={question[:80]!r}", file=sys.stderr, flush=True)
         try:
-            return await org_status_task(db, conversation_id=conversation_id, org_id=org_id, question=question)
+            result = await org_status_task(db, conversation_id=conversation_id, org_id=org_id, question=question)
         except Exception:
             logger.exception(
                 "org_status_lookup 도구 실행 중 예외(conversation_id=%s, org_id=%s, question=%r)",
@@ -122,11 +151,25 @@ def _make_tools(
                 org_id,
                 question[:200],
             )
+            print(f"[tool-trace] org_status_lookup Exception — 정직 폴백 반환 conv={conversation_id}", file=sys.stderr, flush=True)
             return _TOOL_FAILURE_HONEST_MESSAGE
+        except BaseException:
+            logger.exception(
+                "org_status_lookup 도구 실행 중 BaseException(CancelledError류 추정, re-raise) "
+                "(conversation_id=%s, org_id=%s, question=%r)",
+                conversation_id,
+                org_id,
+                question[:200],
+            )
+            print(f"[tool-trace] org_status_lookup BaseException — re-raise conv={conversation_id}", file=sys.stderr, flush=True)
+            raise
+        print(f"[tool-trace] org_status_lookup 정상 반환 conv={conversation_id}", file=sys.stderr, flush=True)
+        return result
 
     async def escalate(reason: str) -> str:
         """이 대화를 사람 담당자에게 연결합니다. 고객이 명시적으로 요청했거나, 자동 응대로
         해결이 어렵다고 판단될 때 호출하세요."""
+        print(f"[tool-trace] escalate 진입 conv={conversation_id} reason={reason[:80]!r}", file=sys.stderr, flush=True)
         try:
             result = await escalation_task(
                 db, conversation_id=conversation_id, org_id=org_id, reason="interaction", detail=reason
@@ -138,8 +181,20 @@ def _make_tools(
                 org_id,
                 reason[:200],
             )
+            print(f"[tool-trace] escalate Exception — 정직 폴백 반환 conv={conversation_id}", file=sys.stderr, flush=True)
             return _TOOL_FAILURE_HONEST_MESSAGE
+        except BaseException:
+            logger.exception(
+                "escalate 도구 실행 중 BaseException(CancelledError류 추정, re-raise) "
+                "(conversation_id=%s, org_id=%s, reason=%r)",
+                conversation_id,
+                org_id,
+                reason[:200],
+            )
+            print(f"[tool-trace] escalate BaseException — re-raise conv={conversation_id}", file=sys.stderr, flush=True)
+            raise
         escalation_state["called"] = True
+        print(f"[tool-trace] escalate 정상 반환 conv={conversation_id} escalation_id={result.id}", file=sys.stderr, flush=True)
         return f"escalated:{result.id}"
 
     return [knowledge_search, org_status_lookup, escalate]

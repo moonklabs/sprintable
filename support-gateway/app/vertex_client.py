@@ -8,11 +8,16 @@ location="global" 고정 — Blueprint v0.4 §4.3 AC④ 실측: Pro·Flash-Lite 
 """
 from __future__ import annotations
 
+import json
+import logging
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,22 @@ class VertexLLMClient:
             model=model, config=types.GenerateContentConfig(system_instruction=system_prompt, tools=tools)
         )
         resp = await chat.send_message(user_text)
+
+        # story #3262 2보-a(2026-08-31) — SDK 자체의 "도구에 무슨 일이 있었다고 믿는지" 원장.
+        # 1보(try/except+logger.exception)가 배포됐는데도 재실측에서 로그가 0였다 — 도구
+        # 코드가 아예 안 돌았는지(SDK가 디스패치 자체를 실패), 아니면 다른 이유로 로그가 안
+        # 찍혔는지를 이걸로 가른다. 임시 계측(근본원인 확定 후 걷어낼 코드) — 항상 남기지 않음.
+        afc_history = resp.automatic_function_calling_history
+        afc_summary = (
+            [c.model_dump(mode="json", exclude_none=True) for c in afc_history] if afc_history else []
+        )
+        logger.info("automatic_function_calling_history: %s", json.dumps(afc_summary, ensure_ascii=False))
+        print(
+            f"[tool-trace] automatic_function_calling_history: {json.dumps(afc_summary, ensure_ascii=False)}",
+            file=sys.stderr,
+            flush=True,
+        )
+
         usage = resp.usage_metadata
         return GenerateResult(
             text=resp.text or "",
