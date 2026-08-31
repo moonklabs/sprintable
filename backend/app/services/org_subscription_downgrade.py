@@ -18,16 +18,6 @@ doc `billing-policy-scenario-audit-20260821` 4·5번 갭: 자발 하향 write �
   자체를 구현하진 않는다, 좌석초과 자체가 «하향 무산» 사유일 뿐).
 ④예약 철회(재상향 아닌 단순 취소)는 별도 엔드포인트로 연다 — pending_*만 클리어,
   구독 자체는 원 tier 그대로 무변화.
-
-**fix(story #3171, P1)**: `_offering_or_raise`를 `currency=sub.currency`로 호출하면
-`org_subscriptions.currency`가 NULL인 행(#2471 도입 시 nullable·"기존 행/어댑터
-미기입 행은 NULL"이 설계상 정상 상태, `app/models/org_subscription.py` 참고)에서
-`OfferingVersion.currency == None` → SQLAlchemy가 `IS NULL`로 컴파일 → 활성
-offering_version이 실재해도(전부 currency='krw') 매치 0건 → 400. `org_subscription_
-checkout.py`/`org_subscription_tier_change.py`는 애초에 이 함정을 안 밟는다 —
-신규 구독 생성 경로라 "krw"를 직접 하드코딩하기 때문. 이 모듈은 기존 구독을 다루므로
-같은 하드코딩 대신 `sub.currency or "krw"`로 legacy-NULL 행을 흡수한다(현재 라이브
-통화가 krw 하나뿐이라는 사실은 동일 — provider=통화의 함수, #2471 설계 그대로).
 """
 from __future__ import annotations
 
@@ -115,7 +105,7 @@ async def reserve_downgrade(session: AsyncSession, *, org_id: uuid.UUID, new_tie
             f"{sub.tier!r}→{new_tier!r}는 하향이 아님(상향/동일) — 상향은 story #2880(change-tier)"
         )
 
-    new_offering = await _offering_or_raise(session, tier=new_tier, currency=sub.currency or "krw")
+    new_offering = await _offering_or_raise(session, tier=new_tier, currency=sub.currency)
     return await _reserve_pending_change(session, sub=sub, new_tier=new_tier, offering_id=new_offering.id)
 
 
@@ -137,7 +127,7 @@ async def cancel_subscription(session: AsyncSession, *, org_id: uuid.UUID) -> Or
 
     월납만(연납은 §12의 별도 환불식이 필요해 미착수 — story #2880/#2881과 동일 선례)."""
     sub = await _active_paid_sub_or_raise(session, org_id)
-    free_offering = await _offering_or_raise(session, tier="free", currency=sub.currency or "krw")
+    free_offering = await _offering_or_raise(session, tier="free", currency=sub.currency)
     return await _reserve_pending_change(session, sub=sub, new_tier="free", offering_id=free_offering.id)
 
 
