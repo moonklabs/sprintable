@@ -16,9 +16,7 @@ from app.models.billing_order import BillingOrder
 from app.models.offering_version import OfferingVersion
 from app.models.org_subscription import OrgSubscription
 from app.services.billing_charge import charge_org
-from app.services.billing_charge_amount import apply_vat_minor
 from app.services.payment.toss_adapter import TossApiError
-from app.services.platform_settings import get_platform_settings
 
 
 class PackPurchaseError(Exception):
@@ -39,7 +37,7 @@ def _pack_order_id(org_id: uuid.UUID, resource: str, idempotency_key: str) -> st
 
 
 async def _packs_reserved_this_period(
-    session: AsyncSession, *, org_id: uuid.UUID, resource: str, taxed_price_minor: int,
+    session: AsyncSession, *, org_id: uuid.UUID, resource: str, price_minor: int,
     period_start: datetime, period_end: datetime,
 ) -> int:
     """이번 결제 주기 동안 이 자원의 팩이 몇 개 «예약/구매»됐는지 — billing_orders에서
@@ -49,12 +47,7 @@ async def _packs_reserved_this_period(
     카운트에 안 잡혀 캡을 같이 넘길 수 있었다. pending도 세면(=claim된 순간부터 카운트)
     그 창이 막힌다 — pending으로 남는 order는 실패든 성공이든 이 자원의 «시도 중인
     청구»라 사실상 자리를 차지하는 게 맞다(실패로 끝나면 다음 조회부터 그 order는
-    'failed'가 되어 자연히 카운트에서 빠진다).
-
-    story #3097(선생님 결정 2026-08-26) — `billing_orders.amount_minor`는 purchase_packs가
-    VAT 가산 後 저장한 값(charge_org로 넘어간 실제 청구액)이라, 개수로 역산하려면 divisor도
-    같은 단위(VAT 가산된 개당 가격)여야 한다 — 원가 `price_minor`로 나누면 반올림 누적
-    오차로 수량이 큰 구간(예: q=10)에서 개수를 과다산정할 수 있다(직접 대조로 확認)."""
+    'failed'가 되어 자연히 카운트에서 빠진다)."""
     total_amount = (
         await session.execute(
             text(
@@ -65,7 +58,7 @@ async def _packs_reserved_this_period(
             {"prefix": f"pack:{org_id}:{resource}:%", "start": period_start, "end": period_end},
         )
     ).scalar_one()
-    return int(total_amount) // taxed_price_minor if taxed_price_minor else 0
+    return int(total_amount) // price_minor if price_minor else 0
 
 
 async def purchase_packs(
@@ -102,13 +95,6 @@ async def purchase_packs(
         )
 
     price_minor = pack["price_minor"]
-    settings = await get_platform_settings(session)
-    # story #3097(선생님 결정 2026-08-26) — v2.3 확정가=공급가, 청구는 VAT 가산액. 개당
-    # 가산 後 quantity를 곱한다(가산 後 합산이 아니라) — _packs_reserved_this_period의
-    # 역산(총액÷개당가)이 임의 quantity에서 반올림 잔차 없이 정확히 나누어떨어지도록
-    # 하는 유일하게 안전한 순서(합산 後 가산은 나눗셈 역산 시 큰 quantity에서 드리프트
-    # 위험 — apply_vat_minor 독스트링 옆 계산 참고).
-    taxed_price_minor = apply_vat_minor(price_minor, settings.vat_rate_bp)
     max_packs = pack.get("max_packs")
     if max_packs is not None:
         if sub.current_period_start is None or sub.current_period_end is None:
@@ -126,7 +112,7 @@ async def purchase_packs(
         )
 
         already = await _packs_reserved_this_period(
-            session, org_id=org_id, resource=resource, taxed_price_minor=taxed_price_minor,
+            session, org_id=org_id, resource=resource, price_minor=price_minor,
             period_start=sub.current_period_start, period_end=sub.current_period_end,
         )
         if already + quantity > max_packs:
@@ -137,7 +123,7 @@ async def purchase_packs(
                 f"예약/구매, {quantity}개 추가 요청"
             )
 
-    amount_minor = taxed_price_minor * quantity
+    amount_minor = price_minor * quantity
     order_id = _pack_order_id(org_id, resource, idempotency_key)
 
     try:

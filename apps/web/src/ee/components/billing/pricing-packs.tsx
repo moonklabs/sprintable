@@ -59,10 +59,7 @@ export function PricingPacks({ onBuyPack }: { onBuyPack: (kind: PackKind, quanti
           </p>
           <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
             <QuantityStepper value={automationQty} min={1} max={AUTOMATION_PACK.maxPacks} onChange={setAutomationQty} />
-            <span className="flex flex-col items-end">
-              <span className="text-sm font-semibold">{formatKrw(AUTOMATION_PACK.priceKrwPerPack * automationQty)}</span>
-              <span className="text-[10px] text-muted-foreground">{t('vatExcludedNote')}</span>
-            </span>
+            <span className="text-sm font-semibold">{formatKrw(AUTOMATION_PACK.priceKrwPerPack * automationQty)}</span>
             <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onBuyPack('automation', automationQty)}>
               {t('buyPack')}
             </Button>
@@ -79,10 +76,7 @@ export function PricingPacks({ onBuyPack }: { onBuyPack: (kind: PackKind, quanti
           </p>
           <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
             <QuantityStepper value={storageQty} min={1} max={STORAGE_PACK.maxPacks} onChange={setStorageQty} />
-            <span className="flex flex-col items-end">
-              <span className="text-sm font-semibold">{formatKrw(STORAGE_PACK.priceKrwPerPack * storageQty)}</span>
-              <span className="text-[10px] text-muted-foreground">{t('vatExcludedNote')}</span>
-            </span>
+            <span className="text-sm font-semibold">{formatKrw(STORAGE_PACK.priceKrwPerPack * storageQty)}</span>
             <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onBuyPack('storage', storageQty)}>
               {t('buyPack')}
             </Button>

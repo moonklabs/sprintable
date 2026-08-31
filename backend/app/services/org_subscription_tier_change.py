@@ -45,13 +45,11 @@ from app.models.org_subscription import OrgSubscription
 from app.services.billing_charge import charge_org
 from app.services.billing_charge_amount import (
     ChargeAmountError,
-    apply_vat_minor,
     compute_full_charge_for_new_offering,
     prorate_minor,
 )
 from app.services.billing_period import new_subscription_period
 from app.services.billing_refund import refund_org
-from app.services.platform_settings import get_platform_settings
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 from app.services.payment.toss_adapter import TossApiError
 
@@ -238,15 +236,8 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
         # 직후 잔여 팩분 정산 등 예외 상태) 부분취소할 대상 자체가 없다는 뜻 — charge는
         # 이미 confirmed로 완결됐으니 여기서 실패로 되돌리지 않고 조용히 skip(로그만).
         if old_confirmed_order is not None:
-            # story #3097(선생님 결정 2026-08-26) — old_confirmed_order.amount_minor는
-            # 원래 청구 시점에 이미 VAT 가산된 값이다(compute_full_charge_for_new_offering
-            # 경로가 이 fix로 그렇게 청구한다) — 부분취소도 그 실제로 걷은 금액 기준으로
-            # 일할해야 한다. raw monthly_price_minor(공급가)로 그대로 일할하면 환불액이
-            # VAT분만큼 과소산정된다(실 청구액보다 덜 돌려줌).
-            settings = await get_platform_settings(session)
-            taxed_old_monthly = apply_vat_minor(old_offering.monthly_price_minor, settings.vat_rate_bp)
             refund_amount = prorate_minor(
-                taxed_old_monthly, now=now,
+                old_offering.monthly_price_minor, now=now,
                 period_start=old_period_start, period_end=old_period_end,
             )
             if refund_amount > 0:

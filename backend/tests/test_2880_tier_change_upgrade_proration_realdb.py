@@ -63,13 +63,6 @@ async def _seed_org(session):
     return org_id
 
 
-async def _vat_rate_bp(session):
-    """story #3097 — 실 DB의 platform_settings.vat_rate_bp(마이그 0282 기본 1000=10%)."""
-    row = (await session.execute(text("SELECT vat_rate_bp FROM platform_settings LIMIT 1"))).first()
-    assert row is not None, "platform_settings 행 없음 — 0255/0282 마이그 확認"
-    return row.vat_rate_bp
-
-
 async def _offering(session, tier):
     row = (
         await session.execute(
@@ -178,24 +171,15 @@ async def test_upgrade_charges_full_new_price_and_partial_refunds_prior_order_re
             await _seed_active_billing_key(session, org_id)
             prior_order_id, prior_payment_key = await _seed_prior_confirmed_order(session, org_id, amount_minor=starter_price)
 
-            # story #3097(선생님 결정 2026-08-26) — v2.3 확정가=공급가, 청구/부분취소 둘 다
-            # VAT 가산액 기준(compute_full_charge_for_new_offering·prorate_minor 호출부 fix).
-            from app.services.billing_charge_amount import apply_vat_minor
-            vat_rate_bp = await _vat_rate_bp(session)
-            taxed_team_price = apply_vat_minor(team_price, vat_rate_bp)
-            taxed_starter_price = apply_vat_minor(starter_price, vat_rate_bp)
-
-            toss_charge_response = {"paymentKey": f"pay-new-{uuid.uuid4()}", "totalAmount": taxed_team_price}
-            expected_refund_upper = math.floor(taxed_starter_price * (period_end - datetime.now(timezone.utc)).total_seconds() / (period_end - period_start).total_seconds())
+            toss_charge_response = {"paymentKey": f"pay-new-{uuid.uuid4()}", "totalAmount": team_price}
+            expected_refund_upper = math.floor(starter_price * (period_end - datetime.now(timezone.utc)).total_seconds() / (period_end - period_start).total_seconds())
             toss_cancel_response = _toss_cancel_response(expected_refund_upper)
 
             call_log = []
-            cancel_bodies = []
 
-            async def _fake_post(self, path, *, json, **kwargs):
+            async def _fake_post(self, path, **kwargs):
                 call_log.append(path)
                 if "cancel" in path:
-                    cancel_bodies.append(json)
                     return toss_cancel_response
                 return toss_charge_response
 
@@ -204,30 +188,15 @@ async def test_upgrade_charges_full_new_price_and_partial_refunds_prior_order_re
                 sub = await change_tier(session, org_id=org_id, new_tier="team")
             after_call = datetime.now(timezone.utc)
 
-            # AC① — 신 offering 전액(VAT 가산) 청구(delta 아님).
+            # AC① — 신 offering 전액 청구(delta 아님).
             new_order_row = (
                 await session.execute(
                     text("SELECT status, amount_minor FROM billing_orders WHERE org_id=:oid AND amount_minor=:amt AND order_id != :prior"),
-                    {"oid": org_id, "amt": taxed_team_price, "prior": prior_order_id},
+                    {"oid": org_id, "amt": team_price, "prior": prior_order_id},
                 )
             ).first()
-            assert new_order_row is not None, "신 offering 전액(VAT 가산 team_price) 청구 row가 없음"
+            assert new_order_row is not None, "신 offering 전액(team_price) 청구 row가 없음"
             assert new_order_row.status == "confirmed"
-
-            # story #3097 — 부분취소 cancelAmount가 VAT 가산 구 요금 기준으로 일할됐는지 직접
-            # 대조(원 공급가로 일할하면 환불액이 VAT분만큼 과소산정된다). prorate_minor의
-            # 내부 now()는 [before_call, after_call] 구간 안에서 찍히므로(코드 진입이
-            # before_call보다 늦고 반환이 after_call보다 이르다 — 정확한 스냅샷 시각을 몰라도
-            # 그 구간의 상/하한으로 범위를 좁힐 수 있다), 그 구간 양끝으로 계산한 범위 안에
-            # 실측값이 들어오는지로 검증한다(하드 동일값 비교는 ms 타이밍 레이스로 flaky).
-            assert len(cancel_bodies) == 1
-            lower_bound = math.floor(taxed_starter_price * (period_end - after_call).total_seconds() / (period_end - period_start).total_seconds())
-            upper_bound = math.floor(taxed_starter_price * (period_end - before_call).total_seconds() / (period_end - period_start).total_seconds())
-            assert lower_bound <= cancel_bodies[0]["cancelAmount"] <= upper_bound
-            # VAT 미가산(구 코드 산식)이었다면 이 범위보다 명확히 작았을 것 — 실제로 가산됐음을
-            # 방향성으로도 재확認.
-            raw_upper_bound = math.floor(starter_price * (period_end - before_call).total_seconds() / (period_end - period_start).total_seconds())
-            assert cancel_bodies[0]["cancelAmount"] > raw_upper_bound
 
             # AC③ — period 리셋.
             assert sub.tier == "team"

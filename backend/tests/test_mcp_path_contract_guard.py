@@ -238,6 +238,19 @@ def test_repo_allowlist_wellformed_check_still_enforces_horizon_cap():
     assert problem is not None and "너무 멀다" in problem
 
 
+def test_repo_allowlist_wellformed_check_still_enforces_horizon_cap():
+    """양성대조(페드루 지시, 2026-08-28) — 바로 위 테스트를 frozen date(2026,7,28) 대신
+    `mod._today()`(실시간)로 바꾼 뒤에도 30일 상한 집행 자체가 죽지 않았는지 값으로
+    고정한다: 상한을 넘는(45일 뒤) until을 넣으면 실시간 기준으로도 여전히 FAIL이어야
+    한다(날짜 기준을 동적으로 바꾸면서 상한 집행이 조용히 무력화되는 회귀를 막는다)."""
+    from datetime import timedelta
+    mod = _load()
+    today = mod._today()
+    over_cap = _entry(until=(today + timedelta(days=45)).isoformat())
+    problem = mod._expired(over_cap, today)
+    assert problem is not None and "너무 멀다" in problem
+
+
 def test_repo_current_state_is_green():
     """⭐리포에 실제로 커밋된 코드+허용목록으로 가드를 그대로 돌려서 통과하는지 — 이게 CI에서
     도는 그 실행과 동일하다(가짜 없음, ref 신선도만 이 테스트 환경에선 git 명령이 있어야 함)."""

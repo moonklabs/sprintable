@@ -42,8 +42,3 @@ class PlatformSetting(Base, TimestampMixin):
     # D+dunning_grace_days, downgrade 트리거일=D+dunning_grace_days+1. 하드코딩 금지
     # 원칙(AC6)에 따라 어드민 관리값으로 — 기본 7일(마이그 0270 시드).
     dunning_grace_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("7"))
-    # story #3097(선생님 결정 2026-08-26) — 청구 시점 VAT 가산율(basis points, 1bp=0.01%).
-    # v2.3 확정가=공급가라 charge_org로 넘어가는 최종 amount_minor는 이 값으로 가산된
-    # 금액이어야 한다(billing_charge_amount.py/billing_pack.py 참고). 기본 1000(10%,
-    # 마이그 0282 시드) — 하드코딩 금지 원칙(dunning_grace_days와 동일 선례).
-    vat_rate_bp: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1000"))
