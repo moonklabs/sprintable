@@ -78,5 +78,12 @@ class Settings(BaseSettings):
     # 재사용, backend 자격을 새로 받지 않는다 — Blueprint §2 경계).
     backend_escalation_events_url: str = ""
 
+    # story #3264(지원v1·6방어·계측) AC3/AC4 — 어드민 계측 조회(GET /api/v1/admin/metrics)
+    # 인증. backend의 어떤 admin/fleet 자격도 이 서비스가 몰라야 하므로(zero fleet 자격
+    # 불변식) 완전히 별도의 정적 시크릿 — 고객 위임 토큰(token_secret)과도 다른 신뢰 재료다.
+    # 미설정(빈 문자열) 시 fail-closed — "누구나 조회 가능"이 아니라 "전부 거부"
+    # (feedback_actor_type_failclosed와 동형). prod는 PO가 실 시크릿 프로비저닝.
+    admin_token: str = ""
+
 
 settings = Settings()

@@ -41,3 +41,17 @@ class MessageListResponse(BaseModel):
     """story #3261 보완 — GET /sessions/{id}/messages(대화 이력, 위젯 재오픈 시 복원용)."""
 
     messages: list[MessageResponse]
+
+
+class AdminMetricsResponse(BaseModel):
+    """story #3264 AC3/AC4 — 어드민 계측 조회. 고객 대화 원문은 절대 안 실린다(집계 숫자만)."""
+
+    window_since: datetime
+    org_id: uuid.UUID | None
+    total_turns: int
+    escalated_turns: int
+    resolved_turns: int
+    resolution_rate: float | None
+    escalation_rate: float | None
+    cost_cap_org_daily_usd: float
+    cost_cap_org_session_usd: float
