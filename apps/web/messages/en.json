@@ -4435,6 +4435,7 @@
     "escalatedBadge": "Connected to a human",
     "messageFailedLabel": "Couldn't send",
     "sendErrorRetry": "Retry",
+    "sendErrorFallback": "We couldn't get a response right now. Please try again shortly, or contact us directly.",
     "inputPlaceholder": "Type a message",
     "sendLabel": "Send"
   }

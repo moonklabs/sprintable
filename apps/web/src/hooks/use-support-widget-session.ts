@@ -9,6 +9,7 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import {
   createOrResumeGatewaySession,
   isSupportGatewayConfigured,
@@ -65,6 +66,11 @@ function toWidgetMessage(m: GatewayMessage): SupportWidgetMessage {
 }
 
 export function useSupportWidgetSession(): SupportWidgetSession {
+  // story #3260 2차(유나 design 판정, 2026-08-31) — 이 문구가 하드코딩 한글이라 i18n
+  // leak이었다(en 빌드에서도 한글이 그대로 뜨는 결함). 훅이 next-intl useTranslations()를
+  // 직접 불러 'chats'류 다른 훅과 동일하게 t()로 렌더한다(패널이 아니라 훅이 소유 —
+  // sendError는 이미 "완성된 표시용 문구" 계약이라 패널에 원인 코드를 별도로 안 넘긴다).
+  const t = useTranslations('supportWidget');
   const [status, setStatus] = useState<SupportWidgetStatus>('unavailable');
   const [messages, setMessages] = useState<SupportWidgetMessage[]>([]);
   const [sending, setSending] = useState(false);
@@ -120,11 +126,11 @@ export function useSupportWidgetSession(): SupportWidgetSession {
       setMessages((prev) => prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m)));
       // 카디르 지적 승계(필수) — 500/무신호 금지. 서버가 무슨 이유로 죽었든(타임아웃·5xx)
       // 위젯은 항상 이 정직한 «사람 연결» 폴백 문구를 보여준다.
-      setSendError('지금 응답을 받지 못했습니다. 잠시 후 다시 시도하시거나, 담당자에게 직접 문의해 주세요.');
+      setSendError(t('sendErrorFallback'));
     } finally {
       setSending(false);
     }
-  }, [sending]);
+  }, [sending, t]);
 
   const retryLastMessage = useCallback(() => {
     const content = lastFailedContentRef.current;

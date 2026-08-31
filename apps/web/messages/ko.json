@@ -4435,6 +4435,7 @@
     "escalatedBadge": "담당자에게 연결됨",
     "messageFailedLabel": "전송하지 못했습니다",
     "sendErrorRetry": "다시 시도",
+    "sendErrorFallback": "지금 응답을 받지 못했습니다. 잠시 후 다시 시도하시거나, 담당자에게 직접 문의해 주세요.",
     "inputPlaceholder": "메시지를 입력하세요",
     "sendLabel": "보내기"
   }

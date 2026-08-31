@@ -7,6 +7,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../messages/ko.json';
 import { useSupportWidgetSession } from './use-support-widget-session';
 
 const isSupportGatewayConfiguredMock = vi.fn();
@@ -63,7 +65,13 @@ function Harness() {
 }
 
 async function mount() {
-  await act(async () => { root.render(<Harness />); });
+  await act(async () => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <Harness />
+      </NextIntlClientProvider>,
+    );
+  });
 }
 
 function statusText() { return container.querySelector('[data-testid="status"]')!.textContent; }
@@ -125,7 +133,9 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
     await mount();
     await click('connect');
     await click('send');
-    expect(container.querySelector('[data-testid="send-error"]')!.textContent).not.toBe('');
+    // story #3260 2차(유나 design 판정) — 하드코딩 한글 문구 leak 회귀가드. i18n 키
+    // (supportWidget.sendErrorFallback)로 렌더된 실 값과 정확히 일치해야 한다.
+    expect(container.querySelector('[data-testid="send-error"]')!.textContent).toBe(koMessages.supportWidget.sendErrorFallback);
     expect(container.querySelector('[data-failed="true"]')).not.toBeNull();
   });
 
