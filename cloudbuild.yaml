@@ -154,6 +154,17 @@ substitutions:
   # override는 존재하지 않음 — 확認 후 아래 GHA 워크플로우도 함께 배선함).
   _BACKEND_TIMEOUT: '3600'
 
+  # story #3259(지원v1·1경계) — Support Gateway. deploy-realtime과 동일 하드게이트 컨벤션:
+  # 기본 skip(false), PO가 전용 서비스계정·전용 Cloud SQL 인스턴스·Secret Manager 값(아래
+  # _SUPPORT_GATEWAY_SERVICE_ACCOUNT/DATABASE_URL/TOKEN_SECRET 시크릿명)을 실제로 프로비저닝한
+  # 뒤 이 값을 'true'로 뒤집는다(README.md "프로비저닝(PO 레인)" 참고). ⛔fleet 서비스 계정
+  # (backend-dev 런타임 SA)을 여기 재사용하지 않는다 — 그러면 "fleet 자격 0"이 배포 시점에
+  # 깨진다. 시크릿도 backend의 DATABASE_URL_*/JWT_SECRET과 별개 이름만 쓴다.
+  _SUPPORT_GATEWAY_DEPLOY_ENABLED: 'false'
+  _SUPPORT_GATEWAY_SERVICE_ACCOUNT: ''
+  _SUPPORT_GATEWAY_MIN_INSTANCES: '0'
+  _SUPPORT_GATEWAY_MAX_INSTANCES: '2'
+
   # E-ARCH 1단계(story #2078·PR #2358 PG_LISTEN_ENABLED 배선): SSE/LISTEN 전용
   # `sprintable-realtime-${_DEPLOY_ENV}` 서비스 — REST(`sprintable-backend-*`)와 같은 이미지,
   # PG_LISTEN_ENABLED만 다르다(realtime=true·api는 FE 전환 후 PO가 별도로 false 배선 예정,
@@ -424,6 +435,27 @@ steps:
     env:
       - DOCKER_BUILDKIT=1
 
+  # ─── Support Gateway (story #3259, 지원v1·1경계) ───────────────────────────
+  # 독립 디렉터리·독립 이미지 — backend 레이어를 전혀 상속하지 않는다(build context가
+  # ./support-gateway뿐, backend/의 어떤 파일도 이 이미지에 안 들어간다).
+  - id: build-support-gateway
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - support-gateway/Dockerfile
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA}
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:latest-${_DEPLOY_ENV}
+      - --cache-from
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:latest-${_DEPLOY_ENV}
+      - --build-arg
+      - BUILDKIT_INLINE_CACHE=1
+      - ./support-gateway
+    env:
+      - DOCKER_BUILDKIT=1
+
   # ─── Push images ──────────────────────────────────────────────────────────
   - id: push-frontend
     name: gcr.io/cloud-builders/docker
@@ -440,6 +472,14 @@ steps:
       - --all-tags
       - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend
     waitFor: [build-backend]
+
+  - id: push-support-gateway
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway
+    waitFor: [build-support-gateway]
 
   # ─── Migrate DB (story dbda0baf, E-RECRUIT S13) ────────────────────────────
   # 근본원인(2026-07-05 dev 인시던트): migrate 잡이 파이프라인과 완전히 분리돼 있어 ⓐ
@@ -853,6 +893,35 @@ steps:
         echo "OK: sprintable-mcp-${_DEPLOY_ENV} = backend:${COMMIT_SHA}"
         echo "OK: sprintable-mcp-${_DEPLOY_ENV} env names = $names"
     waitFor: [run-migrate-job]
+
+  # story #3259(지원v1·1경계) — Support Gateway 배포. 하드게이트 기본 off(README.md "프로비저닝
+  # (PO 레인)" 참고) — 전용 서비스계정·전용 DB·시크릿이 실제로 만들어지기 전엔 이 스텝이
+  # 돌면 존재하지 않는 자원을 가리키다 실패하거나(안전) 최악엔 fleet 서비스계정으로
+  # 잘못 뜨는 사고를 만들 수 있어 명시적 opt-in만 허용한다. --update-secrets는 backend 스텝의
+  # DATABASE_URL_*/JWT_SECRET과 이름이 겹치지 않는 전용 시크릿만 참조 — fleet 시크릿을
+  # 이 서비스가 상속(preserve)할 수 있는 `gcloud run deploy`의 "미지정=기존값 유지" 함정
+  # (위 backend 스텝 주석 참고)을 피하려 매 배포마다 --update-secrets를 명시 지정한다.
+  - id: deploy-support-gateway
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_SUPPORT_GATEWAY_DEPLOY_ENABLED}" != "true" ]; then
+          echo "skip deploy-support-gateway: _SUPPORT_GATEWAY_DEPLOY_ENABLED != true (story #3259, PO 프로비저닝 대기)"
+          exit 0
+        fi
+        gcloud run deploy support-gateway-${_DEPLOY_ENV} \
+          --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA} \
+          --region=${_AR_REGION} \
+          --service-account=${_SUPPORT_GATEWAY_SERVICE_ACCOUNT} \
+          --min-instances=${_SUPPORT_GATEWAY_MIN_INSTANCES} \
+          --max-instances=${_SUPPORT_GATEWAY_MAX_INSTANCES} \
+          --allow-unauthenticated \
+          --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest" \
+          --quiet
+    waitFor: [push-support-gateway]
 
   # story #2185(2026-07-27) — GCE MIG(realtime-gateway) 자동배포. deploy-realtime(위, Cloud
   # Run 폴백)과 별개 타깃이다. ⛔dev 전용 하드게이트 — prod GCE 는 실사용 중(48h 정상응답
