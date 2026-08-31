@@ -212,8 +212,7 @@ async def test_team_tier_member_invite_now_enforced_via_catalog():
 
 @pytest.mark.asyncio
 async def test_unknown_tier_fails_open_not_blocked():
-    """org_subscriptions.tier가 KNOWN_TIERS(story #3176 리네임, 구 _KNOWN_TIERS) 밖(예: 0257
-    백필 누락/미래 값)이면 조용히
+    """org_subscriptions.tier가 _KNOWN_TIERS 밖(예: 0257 백필 누락/미래 값)이면 조용히
     free로 오분류해 부당 차단하지 않고, fail-open(무제한 통과)해야 한다 — PO 판정 pin."""
     from ee.plan_limits import check_agent_add_limit, check_member_invite_limit
 

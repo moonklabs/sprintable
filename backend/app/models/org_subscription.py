@@ -60,17 +60,6 @@ class OrgSubscription(Base):
         UUID(as_uuid=True), ForeignKey("offering_versions.id"), nullable=True
     )
     pending_change_apply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # story #3176(결제②-C, doc au-limit-enforcement-grounding-3176 §1.3) — AU는 storage_
-    # warn_notified_at과 달리 2단계 경고(80%/90%)+유예(110%/7일)라 크론(`au-usage-warn`)이
-    # 계산할 상태가 더 필요하다. paused 여부는 요청마다 재계산하지 않고 크론이 캐시에
-    # 박아두는 값만 읽는다(au_metering.py::check_au_not_paused) — au_eval_at은 크론이 매
-    # 실행마다 무조건 갱신하는 last-evaluated 마커로, 이게 stale이면(크론이 죽으면) 캐시된
-    # au_paused_at을 신뢰하지 않고 fail-open한다(페드루 PO 조건, 2026-08-28).
-    au_warn_80_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    au_warn_90_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    au_grace_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    au_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    au_eval_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

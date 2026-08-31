@@ -15,17 +15,10 @@ Member/Agent 제한(story #2776, 2026-08-18 — 가격표 정본 `offering_versi
     team/business) 밖의 값이면(예: 0228 마이그가 놓친 'pro' 잔존값) 조용히 free로
     취급하지 않는다(유료 org를 잘못 막을 위험) — fail loud 로그 + 그 요청은 무제한
     통과(안전측 — «막는 사고»보다 «캡 미검사 통과»가 안전).
-
-AU 집행(story #3176, doc `au-limit-enforcement-grounding-3176` §1) — 위 5종과 달리
-**요청마다 재계산하지 않는다.** 크론(`cron.py::au_usage_warn`)이 80%/90% 경고+100%+유예
-(110%/7일)를 주기적으로 계산해 `org_subscriptions.au_paused_at`에 캐시하고,
-`check_au_not_paused()`는 그 캐시만 읽는다 — `au_eval_at`(크론 최종 평가 시각)이 stale이면
-(크론이 죽으면) 캐시를 신뢰하지 않고 fail-open한다(페드루 PO 조건, 2026-08-28).
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import text
@@ -41,7 +34,7 @@ FREE_LIMITS: dict[str, int] = {
 # org_subscriptions.tier로 실제 나타날 수 있는, offering_versions가 정의하는 tier 집합.
 # 'overage'는 구독 tier가 아니라 사용량과금 축이라 여기 포함 안 됨(구독 tier로 저장되는
 # 값이 아님 — 그라운딩 확認).
-KNOWN_TIERS = frozenset({"free", "starter", "team", "business"})
+_KNOWN_TIERS = frozenset({"free", "starter", "team", "business"})
 
 # API 초과 과금 정책 (per call, USD)
 API_OVERAGE_RATES: dict[str, float] = {
@@ -202,7 +195,7 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
     if not attachments:
         return
     tier = await _get_org_tier(session, org_id)
-    if tier not in KNOWN_TIERS:
+    if tier not in _KNOWN_TIERS:
         logger.error("check_storage_capacity: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
         return
     limits = await _get_org_storage_limits(session, tier)
@@ -293,7 +286,7 @@ async def check_member_invite_limit(session: AsyncSession, org_id) -> None:
     선차단해 애초에 캡을 넘길 만큼의 초대가 쌓이지 못하게 한다.
     """
     tier = await _get_org_tier(session, org_id)
-    if tier not in KNOWN_TIERS:
+    if tier not in _KNOWN_TIERS:
         logger.error("check_member_invite_limit: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
         return
     offering = await _get_offering_limits(session, tier)
@@ -317,7 +310,7 @@ async def check_member_accept_limit(session: AsyncSession, org_id) -> None:
     함수가 아니라 호출부의 락이 담당).
     """
     tier = await _get_org_tier(session, org_id)
-    if tier not in KNOWN_TIERS:
+    if tier not in _KNOWN_TIERS:
         logger.error("check_member_accept_limit: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
         return
     offering = await _get_offering_limits(session, tier)
@@ -335,7 +328,7 @@ async def check_agent_add_limit(session: AsyncSession, org_id) -> None:
     read 0이던 그 값). None=무제한(free만 유한 3). 미지 tier/미시드 offering은 §미지tier
     방어와 동일 원칙(fail-open+로그) — 유료 org를 잘못 막지 않는다."""
     tier = await _get_org_tier(session, org_id)
-    if tier not in KNOWN_TIERS:
+    if tier not in _KNOWN_TIERS:
         logger.error("check_agent_add_limit: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
         return
     offering = await _get_offering_limits(session, tier)
@@ -354,63 +347,3 @@ async def check_agent_add_limit(session: AsyncSession, org_id) -> None:
     )).scalar() or 0
     if count >= max_agents:
         raise _plan_limit_error("agent", max_agents, current=count, tier=tier)
-
-
-# story #3176 — 크론 주기(5분, cron.py::au_usage_warn) 대비 3배 여유. 이 창 안에서 크론이
-# 재실행 못 했으면 캐시를 신뢰하지 않는다(페드루 PO 조건 — fail-open).
-_AU_PAUSE_CACHE_STALENESS = timedelta(minutes=15)
-
-
-def _au_paused_error(tier: str) -> HTTPException:
-    """§2906 관례(선생님 확定 2026-08-21) 그대로 — 고객 대면 문구는 한국어로 「무슨 일이
-    일어났는지 + 무엇을 하면 되는지」. business는 업그레이드할 상위 tier가 없어(유나양 지적,
-    _storage_limit_error와 동형) 안내를 갈음한다."""
-    upgrade_required = tier != "business"
-    if upgrade_required:
-        msg = (
-            f"이번 달 자동화 사용량(AU) 한도를 초과해 MCP/API 쓰기와 자동화가 일시중지되었습니다"
-            f"({tier} 플랜). 다음 달 초기화를 기다리시거나 플랜을 업그레이드해 주세요. "
-            f"사람 웹 UI 사용과 기존 데이터 읽기는 계속 가능합니다."
-        )
-    else:
-        msg = (
-            "이번 달 자동화 사용량(AU) 한도를 초과해 MCP/API 쓰기와 자동화가 일시중지되었습니다. "
-            "다음 달 초기화를 기다려 주세요. 사람 웹 UI 사용과 기존 데이터 읽기는 계속 가능합니다."
-        )
-    return HTTPException(
-        status_code=402,
-        detail={
-            "code": "PLAN_LIMIT_EXCEEDED",
-            "resource": "automation_units",
-            "tier": tier,
-            "upgrade_required": upgrade_required,
-            "message": msg,
-        },
-    )
-
-
-async def check_au_not_paused(session: AsyncSession, org_id) -> None:
-    """story #3176(결제②-C) — AU 100%+유예(110%/7일) 초과로 크론이 paused 캐시해둔 org의
-    MCP/API 쓰기·자동화를 402로 막는다. 호출부(`app/dependencies/auth.py::get_current_user`)
-    가 이미 「agent+write+非스트리밍」만 걸러 부른다(doc §1.4) — 여기는 순수 캐시 조회.
-
-    ⛔재계산 안 함 — paused 여부는 크론이 이미 계산해 `au_paused_at`에 박아둔 값을 그대로
-    믿는다(요청 경로에 usage_meters 집계 쿼리를 얹지 않기 위한 PO 승인 (b)안, doc §1.3).
-    `au_eval_at`이 stale(크론 정지 추정)이면 캐시를 신뢰하지 않고 통과시킨다 — 결제 차단은
-    잘못 «켜지는» 쪽이 위험하다(다른 5종 미지-tier/미시드-offering fail-open과 동형 철학)."""
-    row = (await session.execute(
-        text("SELECT tier, au_paused_at, au_eval_at FROM org_subscriptions WHERE org_id = :oid"),
-        {"oid": str(org_id)},
-    )).first()
-    if row is None:
-        return  # 구독 행 자체가 없음(온보딩 갭 등) — fail-open
-    tier, paused_at, eval_at = row
-    if paused_at is None or eval_at is None:
-        return  # 크론이 아직 이 org를 평가 안 했거나 지금은 paused 아님
-    if datetime.now(timezone.utc) - eval_at > _AU_PAUSE_CACHE_STALENESS:
-        logger.warning(
-            "check_au_not_paused: stale au_eval_at(%s) for org_id=%s — skipping pause(fail-open)",
-            eval_at, org_id,
-        )
-        return
-    raise _au_paused_error(tier or "free")

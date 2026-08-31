@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session_factory
 from app.core.security import JWTError, decode_jwt, hash_token
 from app.dependencies.database import get_db
-from app.services.au_metering import STREAMING_PATHS as _AU_STREAMING_PATHS
 
 logger = logging.getLogger(__name__)
 
@@ -485,30 +484,14 @@ async def get_current_user(
         credentials=credentials, x_agent_api_key=x_agent_api_key,
         x_mcp_transport=x_mcp_transport, request=request,
     )
-    # story #3173(결제②-B) — 소비처①: app/services/au_metering.py(AUMeteringMiddleware,
-    # app/main.py에 등록)가 응답 완료 후 이 값들을 읽어 AU 계측 대상 여부·귀속 조직을 정한다.
-    # FastAPI dependency는 라우터 안에서만 살고 ASGI 미들웨어 레이어로 안 새어나가므로,
-    # 여기서 request.state에 명시 기록해야 미들웨어가 볼 수 있다.
-    # ⛔소비처②(story #3176, 결제②-C, 2026-08-28 추가): AU 한도 집행(check_au_not_paused)도
-    # 여기서 직접 부른다 — AUMeteringMiddleware.dispatch()에 얹지 못한 이유는 그 미들웨어가
-    # `call_next()`(=이 dependency 포함 전체 라우팅)보다 **먼저** 실행돼 request.state.
-    # au_actor 자체가 아직 없는 시점이기 때문(doc `au-limit-enforcement-grounding-3176` §1.4
-    # 원안은 미들웨어 사전체크였으나, 실제 타이밍 제약 확認 후 이 지점으로 옮김). 새 소비처가
-    # 또 생기면 이 주석도 같이 갱신할 것(형제 드리프트 재발 방지, #3175 교훈).
+    # story #3173(결제②-B) — 소비처: app/middleware/au_metering.py(app/main.py에 등록)가
+    # 응답 완료 후 이 값들을 읽어 AU 계측 대상 여부·귀속 조직을 정한다. FastAPI dependency는
+    # 라우터 안에서만 살고 ASGI 미들웨어 레이어로 안 새어나가므로, 여기서 request.state에
+    # 명시 기록해야 미들웨어가 볼 수 있다. ⛔이 값들의 유일한 소비처가 저 미들웨어다 — 새
+    # 소비처가 생기면 이 주석도 같이 갱신할 것(형제 드리프트 재발 방지, #3175 교훈).
     if request is not None:
         request.state.au_actor = "agent" if is_au_billable_agent(auth) else "human"
         request.state.au_org_id = auth.org_id
-        if (
-            request.state.au_actor == "agent"
-            and request.method in _WRITE_METHODS
-            and request.url.path not in _AU_STREAMING_PATHS
-            and auth.org_id
-        ):
-            from app.core.config import settings as _settings
-            if _settings.is_ee_enabled:
-                from ee.plan_limits import check_au_not_paused  # type: ignore[import]
-                async with async_session_factory() as _au_session:
-                    await check_au_not_paused(_au_session, uuid.UUID(auth.org_id))
     return auth
 
 
