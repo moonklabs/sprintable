@@ -34,6 +34,17 @@ if [ -z "${COMMIT_SHA:-}" ] && [ "${DRY_RUN}" != "1" ]; then
     exit 1
 fi
 
+# story #b96151da(voided 대체) 수선 — 페드루 PO 실측(gcloud describe diff, 2026-08-31):
+# 이 잡이 최초 배포 시 VPC 어노테이션·전용 SA 둘 다 없어 "dial tcp 10.110.0.3:3307:
+# i/o timeout"으로 죽었다. Cloud SQL Auth Proxy(--set-cloudsql-instances)가 unix socket을
+# 앱에 내주더라도, 그 프록시 자신이 인스턴스의 Private IP에 닿으려면 이 프로젝트 네트워킹
+# 구성상 VPC egress가 별도로 필요하다(성공하는 sprintable-migrate-dev도 cloudsql-instances +
+# network-interfaces + vpc-access-egress 셋 다 갖춤 — 소켓만으론 부족, 실측 확認).
+if [ -z "${SUPPORT_GATEWAY_SERVICE_ACCOUNT:-}" ] && [ "${DRY_RUN}" != "1" ]; then
+    echo "ERROR: SUPPORT_GATEWAY_SERVICE_ACCOUNT is not set — fleet 자격 0 경계 위반 방지(기본 compute SA로 조용히 fallback 금지)." >&2
+    exit 1
+fi
+
 JOB_NAME="sprintable-support-gateway-migrate-${ENV}"
 IMAGE_TAG="${COMMIT_SHA:-latest-${ENV}}"
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/support-gateway:${IMAGE_TAG}"
@@ -58,6 +69,8 @@ JOB_NAME=${JOB_NAME}
 IMAGE=${IMAGE}
 CLOUD_SQL_INSTANCE=${CLOUD_SQL_INSTANCE}
 DB_SECRET_NAME=${DB_SECRET_NAME}
+SERVICE_ACCOUNT=${SUPPORT_GATEWAY_SERVICE_ACCOUNT:-<unset>}
+VPC=network=default,subnet=default,egress=private-ranges-only
 COMMAND=/app/scripts/migrate.sh
 EOF
     exit 0
@@ -68,8 +81,12 @@ gcloud run jobs deploy "${JOB_NAME}" \
     --region="${GCP_REGION}" \
     --project="${GCP_PROJECT}" \
     --command="/app/scripts/migrate.sh" \
+    --service-account="${SUPPORT_GATEWAY_SERVICE_ACCOUNT}" \
     --set-secrets="SUPPORT_GATEWAY_DATABASE_URL=${DB_SECRET_NAME}:latest" \
     --set-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
+    --network=default \
+    --subnet=default \
+    --vpc-egress=private-ranges-only \
     --execution-environment=gen2 \
     --max-retries=1 \
     --task-timeout=300
