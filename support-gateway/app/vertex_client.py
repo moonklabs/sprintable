@@ -22,6 +22,16 @@ class GenerateResult:
     output_tokens: int
 
 
+@dataclass(frozen=True)
+class EmbedResult:
+    """story #3262(지원v1·4지식원) — 임베딩은 생성 모델과 과금 단위 자체가 다르다(토큰이
+    아니라 문자수, 실측 확認 — `EmbedContentResponse.metadata.billable_character_count`).
+    GenerateResult를 억지로 재사용하면 "input_tokens"라는 이름이 거짓말이 된다."""
+
+    vectors: list[list[float]]
+    billable_character_count: int
+
+
 class LLMClient(Protocol):
     async def generate(self, *, model: str, system_prompt: str, user_text: str) -> GenerateResult: ...
 
@@ -32,6 +42,12 @@ class LLMClient(Protocol):
         function calling, google-genai Chat)로 tools의 async 함수들을 모델이 필요할 때 직접
         호출·결과를 받아 계속 진행한다 — 호출 루프 자체는 SDK가 관리(app/interaction.py는
         도구 목록만 넘긴다)."""
+        ...
+
+    async def embed(self, *, model: str, texts: list[str], task_type: str) -> EmbedResult:
+        """story #3262 — 지식 검색층. task_type은 google-genai `EmbedContentConfig.task_type`
+        그대로("RETRIEVAL_QUERY" 질의용 vs "RETRIEVAL_DOCUMENT" 문서색인용 — 둘을 섞으면
+        검색 품질이 떨어진다, Vertex 공식 권고)."""
         ...
 
 
@@ -77,6 +93,16 @@ class VertexLLMClient:
             input_tokens=usage.prompt_token_count or 0 if usage else 0,
             output_tokens=usage.candidates_token_count or 0 if usage else 0,
         )
+
+    async def embed(self, *, model: str, texts: list[str], task_type: str) -> EmbedResult:
+        from google.genai import types
+
+        resp = await self._client.aio.models.embed_content(
+            model=model, contents=texts, config=types.EmbedContentConfig(task_type=task_type)
+        )
+        vectors = [list(e.values) for e in resp.embeddings]
+        billable = (resp.metadata.billable_character_count if resp.metadata else None) or 0
+        return EmbedResult(vectors=vectors, billable_character_count=billable)
 
 
 _client: LLMClient | None = None

@@ -19,6 +19,7 @@ class Role:
     ORG_STATUS = "org_status"
     ESCALATION = "escalation"
     CLASSIFIER = "classifier"
+    EMBEDDING = "embedding"
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ def model_for(role: str) -> str:
         Role.ORG_STATUS: settings.model_org_status,
         Role.ESCALATION: settings.model_escalation,
         Role.CLASSIFIER: settings.model_classifier,
+        Role.EMBEDDING: settings.model_embedding,
     }[role]
 
 
@@ -55,3 +57,20 @@ def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> floa
     if price is None:
         return None
     return (input_tokens / 1_000_000) * price.input_per_million + (output_tokens / 1_000_000) * price.output_per_million
+
+
+# story #3262(지원v1·4지식원) — 임베딩은 $/1M **문자**(토큰 아님, google-genai
+# EmbedContentResponse.metadata.billable_character_count 실측 확認). PRICE_TABLE(토큰 단가)에
+# 섞으면 단위가 달라 estimate_cost_usd가 조용히 틀린 값을 낸다 — 그래서 별도 상수+함수.
+# gemini-embedding-001 = "Large Text Embedding Model - Predictions" SKU(Cloud Billing Catalog
+# 실조회, skuId=E4FB-7AE2-9CAE) — Blueprint §4.3 임베딩 행 1후보와 일치.
+EMBEDDING_PRICE_PER_MILLION_CHARS: dict[str, float] = {
+    "gemini-embedding-001": 0.15,
+}
+
+
+def estimate_embedding_cost_usd(model: str, billable_character_count: int) -> float | None:
+    price = EMBEDDING_PRICE_PER_MILLION_CHARS.get(model)
+    if price is None:
+        return None
+    return (billable_character_count / 1_000_000) * price

@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     model_escalation: str = "gemini-2.5-flash-lite"
     model_classifier: str = "gemini-2.5-flash-lite"
 
+    # story #3262(지원v1·4지식원) — 지식 검색층 임베딩 모델. Blueprint §4.3 임베딩 행 2후보
+    # ("Large Text Embedding Model" $0.15/1M · "Gemini MM Embedding – Text" $0.20/1M) 중
+    # gemini-embedding-001로 확定(SDK 실호출 확認 — dim=3072, "Large Text Embedding Model"
+    # SKU에 대응. Gemini MM Embedding 계열은 텍스트만 다루는 이 유스케이스엔 모달리티가
+    # 안 맞아 제외 — app/knowledge_search.py 상단 주석 참고).
+    model_embedding: str = "gemini-embedding-001"
+
     # story #3261 AC5 — 비용 상한(어드민 가변값). 초과 시 "정직한 지연 안내+사람 에스컬레이션"
     # (app/cost_cap.py) — 조용한 모델 강등 금지(Blueprint §4.3 원칙 그대로).
     cost_cap_org_daily_usd: float = 5.0
