@@ -78,11 +78,21 @@ export function useSupportWidgetSession(): SupportWidgetSession {
   const sessionIdRef = useRef<string | null>(null);
   const connectingRef = useRef(false);
   const lastFailedContentRef = useRef<string | null>(null);
+  // story #3260 2차 finding(유나 라이브 실측 FAIL — 재시도 스톰, 2026-08-31) — 호출부
+  // (support-widget-launcher.tsx)의 effect deps 축소가 1차 방어. 이건 2차 방어(백오프) —
+  // connect()를 부르는 다른 경로가 미래에 또 생겨도, 최근 시도로부터 이 시간 안이면
+  // 무조건 no-op(네트워크를 새로 안 태움). CSP 차단처럼 즉시 실패하는 케이스는 재시도
+  // 간격이 사실상 0이 될 수 있어(왕복 지연 없음) 이 가드가 없으면 순수 동기 루프가 된다.
+  const lastAttemptAtRef = useRef(0);
+  const MIN_RETRY_INTERVAL_MS = 1000;
 
   const connect = useCallback(() => {
     // Gateway 자체가 이 빌드에 안 붙어있음 — 정직한 'unavailable' 유지, 재시도할 대상이 없다.
     if (!isSupportGatewayConfigured()) return;
     if (connectingRef.current || status === 'ready') return;
+    const now = Date.now();
+    if (now - lastAttemptAtRef.current < MIN_RETRY_INTERVAL_MS) return;
+    lastAttemptAtRef.current = now;
     connectingRef.current = true;
     setStatus('connecting');
     setSendError(null);

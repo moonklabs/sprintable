@@ -5,7 +5,7 @@
 // (story #2050) — media-src만 빠져 있었던 것을 여기서 고정한다.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const CONFIG_SOURCE = readFileSync(path.resolve(__dirname, 'next.config.ts'), 'utf-8');
 
@@ -48,5 +48,48 @@ describe('CSP frame-src (story #2809 regression guard)', () => {
 
   it('does not blanket-open storage.googleapis.com (GCS는 임의 콘텐츠를 끼울 수 있어 exact-origin allowlist 부적합 — toss-checkout 선례)', () => {
     expect(extractDirective('frame-src')).not.toContain('storage.googleapis.com');
+  });
+});
+
+// story #3260 2차(유나 design 라이브 실측 FAIL, 2026-08-31) — CORS(서버측 허용)는 이미
+// 열려있었는데 이 앱 자체의 CSP connect-src(문서측 outbound 제한)가 별개 층이라 위젯의
+// 브라우저 직접 fetch가 fetch를 보내기도 전에 막혔다. 위 파일의 static-source-regex
+// 방식(extractDirective)은 connect-src가 이제 env 기반 계산식이라 못 잡는다 — 실제로
+// 다른 env로 모듈을 재평가해 결과 헤더값을 대조한다.
+describe('CSP connect-src — Support Gateway origin (story #3260 2차 회귀가드)', () => {
+  const ENV_KEY = 'NEXT_PUBLIC_SUPPORT_GATEWAY_URL';
+  const original = process.env[ENV_KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = original;
+  });
+
+  async function cspHeaderValue(): Promise<string> {
+    vi.resetModules();
+    const mod = await import('./next.config');
+    const config = mod.default as { headers?: () => Promise<Array<{ headers: Array<{ key: string; value: string }> }>> };
+    const groups = await config.headers!();
+    return groups[0]!.headers.find((h) => h.key === 'Content-Security-Policy')!.value;
+  }
+
+  it('NEXT_PUBLIC_SUPPORT_GATEWAY_URL이 설정되면 그 origin이 connect-src에 실린다(위젯 fetch가 CSP에 막히던 실사고 회귀가드)', async () => {
+    process.env[ENV_KEY] = 'https://support-gateway-dev-57iommnikq-du.a.run.app';
+    const csp = await cspHeaderValue();
+    expect(csp).toContain('https://support-gateway-dev-57iommnikq-du.a.run.app');
+  });
+
+  it('미설정(prod류 — 위젯 자체가 안 뜨는 빌드)이면 하드코딩 origin 없이 connect-src가 원래 값 그대로다', async () => {
+    delete process.env[ENV_KEY];
+    const csp = await cspHeaderValue();
+    expect(csp).not.toContain('run.app');
+    expect(csp).toContain("connect-src 'self' https://*.googleapis.com https://*.tosspayments.com");
+  });
+
+  it('URL로 파싱 안 되는 값이면 CSP 문법을 깨지 않고 안전하게 무시한다(정직한 부재 취급)', async () => {
+    process.env[ENV_KEY] = 'not-a-valid-url';
+    const csp = await cspHeaderValue();
+    expect(csp).toContain("connect-src 'self' https://*.googleapis.com https://*.tosspayments.com");
+    expect(csp).not.toContain('not-a-valid-url');
   });
 });
