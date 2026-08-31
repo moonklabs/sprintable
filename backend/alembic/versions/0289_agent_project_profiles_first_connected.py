@@ -10,7 +10,7 @@ durable이지만, http-transport(온보딩 권장 탭·주 경로)는 heartbeat 
 새 판별자를 transport별로 쪼개지 않는다, PO "판별 로직 한 곳 유지" 지시).
 
 Revision ID: 0289
-Revises: 0288
+Revises: 0287
 Create Date: 2026-08-29
 
 """
@@ -20,7 +20,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0289"
-down_revision = "0288"
+down_revision = "0287"
 branch_labels = None
 depends_on = None
 

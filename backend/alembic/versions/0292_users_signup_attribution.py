@@ -6,7 +6,7 @@ proxy.ts의 first-touch 쿠키(첫 랜딩의 utm_source/medium/campaign·referre
 NULL로 남는다(소급 채움 없음).
 
 Revision ID: 0292
-Revises: 0291
+Revises: 0290
 Create Date: 2026-08-29
 
 """
@@ -16,7 +16,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0292"
-down_revision = "0291"
+down_revision = "0290"
 branch_labels = None
 depends_on = None
 
