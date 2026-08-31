@@ -6,7 +6,9 @@ doc 의 native status(0128·doc-specific 값)를 hypothesis 와 동형 패턴으
 """
 from __future__ import annotations
 
+import difflib
 import logging
+import re
 import uuid
 
 from sqlalchemy import select
@@ -20,6 +22,47 @@ logger = logging.getLogger(__name__)
 # E-DG doc-gate(48f064e5): doc 결재 인앱 게이트. work_item_type='doc'·gate_type='doc_approval'.
 DOC_GATE_WORK_ITEM_TYPE = "doc"
 DOC_GATE_TYPE = "doc_approval"
+
+_DOC_SUMMARY_LIMIT = 220
+# story #3258(customer-zero 2차) — 결재 카드가 채팅 밖으로 안 나가고 결정 가능하려면 본문
+# 요약이 필요하다(AC1). 마크다운 저작 원문(content_format="markdown", schemas/doc.py)에서
+# 흔한 구문만 걷어낸 거친 발췌 — 완전한 마크다운 파서가 아니다(그럴 필요 없음: 사람이
+# 한눈에 훑을 한 줄짜리 미리보기가 목적이라 과한 정확도는 낭비).
+_MD_CODE_FENCE = re.compile(r"```.*?```", re.DOTALL)
+_MD_HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_EMPHASIS = re.compile(r"(\*\*|__|\*|_)")
+_MD_WHITESPACE = re.compile(r"\s+")
+
+
+def _doc_excerpt(content: str, limit: int = _DOC_SUMMARY_LIMIT) -> str:
+    """카드 본문용 거친 발췌 — 마크다운 크롬(코드펜스·헤딩·링크·강조)만 벗기고 공백을
+    접는다. 빈 문서는 빈 문자열(지어내지 않음 — FE가 그 자리에서 렌더를 건너뛴다)."""
+    stripped = _MD_CODE_FENCE.sub(" ", content)
+    stripped = _MD_HEADING.sub("", stripped)
+    stripped = _MD_LINK.sub(r"\1", stripped)
+    stripped = _MD_EMPHASIS.sub("", stripped)
+    stripped = _MD_WHITESPACE.sub(" ", stripped).strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[:limit].rstrip() + "…"
+
+
+def _line_diff_counts(old_content: str, new_content: str) -> dict[str, int]:
+    """story #3258 AC4 — 재상신 카드에 「무엇이 바뀌었나」를 라인 add/del 카운트로 싣는다
+    (ProofCapsule의 기존 evidence.diff={add,del} 슬롯과 동일 shape — 신규 표현부 안 만듦).
+    difflib.SequenceMatcher opcodes 기반 — replace는 양쪽에 다 잡힌다(완전한 unified diff가
+    아니라 "얼마나 바뀌었는지" 규모 신호가 목적)."""
+    old_lines = old_content.splitlines()
+    new_lines = new_content.splitlines()
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines)
+    add = del_ = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("replace", "delete"):
+            del_ += i2 - i1
+        if tag in ("replace", "insert"):
+            add += j2 - j1
+    return {"add": add, "del": del_}
 
 
 async def _notify_doc_approval_requested(
@@ -172,8 +215,32 @@ async def transition_doc(
         _facts = dict(gate.neutral_facts or {})
         _facts["requested_by_member_id"] = str(caller.id)
         _facts.setdefault("doc_title", doc.title)
-        # 재상신(terminal gate) re-open: 이전 결재 이력 append + 해소필드 clear(새 사이클·산티아고 audit).
-        # pending/held(admin hold)면 status 유지·requester 만 재stamp(위 forged 덮어쓰기 포함).
+        # story #3258(customer-zero 2차) AC1 — 카드가 채팅 밖으로 안 나가고 결정 가능하려면
+        # 본문 요약이 필요하다. 매 상신(신규·재상신 둘 다)마다 "지금 이 순간"의 content로
+        # 갱신 — 재상신 사이에 저자가 다시 고쳤을 수 있어(도 항상 최신값이 정직).
+        _facts["doc_summary"] = _doc_excerpt(doc.content) if isinstance(doc.content, str) else ""
+        # story #3258 AC4 — 「무엇이 바뀌었나」. 반려→개정 사이클을 거친 doc은 denied→draft
+        # 전이(위 234-241행)가 반려본 content를 DocRevision에 스냅샷해뒀다(story #3028) — 가장
+        # 최근 revision 대비 지금 content를 diff한다.
+        # ⚠️gate.status로 "재상신인지" 판별하지 않는다 — create_gate()가 rejected 슬롯을
+        # 내부에서 이미 _reopen_rejected_gate()로 pending 재오픈해 반환하므로(gate_service.py),
+        # 이 시점 gate.status는 'rejected'가 아니라 이미 'pending'이다(재현 실측 확認). 대신
+        # DocRevision 존재 자체를 "이 doc은 최소 1회 반려→개정을 거쳤다"는 정직한 신호로 쓴다
+        # — revision이 없으면(최초 상신) 지어내지 않고 스킵.
+        _latest_revision_content = (await session.execute(
+            select(DocRevision.content)
+            .where(DocRevision.doc_id == doc.id, DocRevision.org_id == org_id)
+            .order_by(DocRevision.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if isinstance(_latest_revision_content, str) and isinstance(doc.content, str):
+            _facts["doc_diff"] = _line_diff_counts(_latest_revision_content, doc.content)
+        else:
+            _facts.pop("doc_diff", None)
+        # 그 외 terminal(approved/auto_passed/voided) re-open: create_gate()는 이 셋을 안
+        # 건드리고 그대로 반환하므로(_reopen_rejected_gate는 rejected 전용) 이력 append+해소
+        # 필드 clear는 doc.py 이 자리가 유일한 지점 — pending/held(admin hold)면 status
+        # 유지·requester만 재stamp(위 forged 덮어쓰기 포함).
         if gate.status in ("approved", "rejected", "auto_passed", "voided"):
             _prior = {
                 "status": gate.status,
