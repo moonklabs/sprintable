@@ -240,7 +240,7 @@ async def reject_if_org_over_storage_cap(session: AsyncSession, org_id) -> None:
     (tier→offering_versions)로 검사해 헛발급을 막는다. 파일별/정확한 총량 판정은 여전히
     confirm 단계의 check_storage_capacity(재검사) 몫."""
     tier = await _get_org_tier(session, org_id)
-    if tier not in KNOWN_TIERS:
+    if tier not in _KNOWN_TIERS:
         return
     limits = await _get_org_storage_limits(session, tier)
     if limits is None:
