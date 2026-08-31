@@ -158,6 +158,36 @@ describe('installProjectHeaderInterceptor — X-Project-Id 옆에 X-Org-Id가 �
     const [, init] = baseFetch.mock.calls[0] as [string, RequestInit | undefined];
     expect(init?.headers).toBeUndefined();
   });
+
+  // story #3260 4차 finding(2026-08-31, 유나 5축 라이브 재검) — 절대 URL이 path만 `/api/`로
+  // 시작하면 origin/host를 안 보고 same-origin 취급했다. Support Gateway(별도 Cloud Run,
+  // Bearer 위임토큰만 신뢰하는 경계 서비스)의 `https://support-gateway-dev-.../api/v1/
+  // sessions`가 정확히 이 모양이라, cross-origin인데도 X-Project-Id/X-Org-Id가 실려 나가
+  // Gateway CORS 프리플라이트(ACAH에 없는 헤더)가 400으로 거부했다.
+  it('회귀가드(4차) — cross-origin 절대 URL(path가 /api/로 시작해도)에는 컨텍스트 헤더를 안 싣는다(Gateway 경계 보존)', async () => {
+    setEffectiveProjectId('proj-1');
+    setEffectiveOrgId('org-1');
+    await window.fetch('https://support-gateway-dev-57iommnikq-du.a.run.app/api/v1/sessions', {
+      headers: { Authorization: 'Bearer delegated-token' },
+    });
+
+    const [, init] = baseFetch.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.has('X-Project-Id')).toBe(false);
+    expect(headers.has('X-Org-Id')).toBe(false);
+    expect(headers.get('Authorization')).toBe('Bearer delegated-token'); // 명시 헤더는 그대로 통과
+  });
+
+  it('양성대조 — 이 앱 자신을 절대 URL(같은 origin)로 명시해 불러도 여전히 주입된다(과교정 아님)', async () => {
+    setEffectiveProjectId('proj-1');
+    setEffectiveOrgId('org-1');
+    await window.fetch(`${window.location.origin}/api/projects`);
+
+    const [, init] = baseFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Headers;
+    expect(headers.get('X-Project-Id')).toBe('proj-1');
+    expect(headers.get('X-Org-Id')).toBe('org-1');
+  });
 });
 
 describe('resolveEffectiveOrgId (story #2873 — 0-프로젝트 org 전환 후 침묵 오배달 재발방지)', () => {
