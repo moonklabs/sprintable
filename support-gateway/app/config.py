@@ -33,5 +33,29 @@ class Settings(BaseSettings):
 
     cors_allow_origins: list[str] = []
 
+    # story #3261(지원v1·3오케스트레이션) — Vertex AI SDK 접속 좌표. GCP credit 경계
+    # 안(Blueprint §4.1) — Claude 등 파트너 모델은 이 서비스가 아예 모른다(SDK가 vertexai=True
+    # 백엔드만 두드림). location="global" — AC④ 실측 확定(Pro·Flash-Lite가 asia-northeast3
+    # 리전 엔드포인트에서 404, global에서만 200 — Blueprint v0.4 §4.3 참고). Cloud Run 배포
+    # 시엔 이 값들 위에 전용 서비스계정의 ADC(메타데이터 서버)가 자동 인증 — 별도 시크릿 불요.
+    vertex_project: str = ""
+    vertex_location: str = "global"
+
+    # story #3261 §4.3(v0.4 실측) 역할별 모델 계층 — 어드민 가변값 축(AC1). 절약후보로
+    # 기본값을 잡는다(비용 우선 — PO가 품질 필요시 1후보로 승격 설정).
+    model_interaction: str = "gemini-2.5-pro"
+    model_knowledge: str = "gemini-2.5-flash"
+    model_org_status: str = "gemini-2.5-flash-lite"
+    model_escalation: str = "gemini-2.5-flash-lite"
+    model_classifier: str = "gemini-2.5-flash-lite"
+
+    # story #3261 AC5 — 비용 상한(어드민 가변값). 초과 시 "정직한 지연 안내+사람 에스컬레이션"
+    # (app/cost_cap.py) — 조용한 모델 강등 금지(Blueprint §4.3 원칙 그대로).
+    cost_cap_org_daily_usd: float = 5.0
+    cost_cap_org_session_usd: float = 1.0
+
+    # story #3261 AC3 — org별 대화 메모리 요약 압축 트리거(메시지 개수 기준, v1 단순 휴리스틱).
+    memory_summarize_after_messages: int = 20
+
 
 settings = Settings()
