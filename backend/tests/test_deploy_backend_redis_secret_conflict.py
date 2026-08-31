@@ -151,6 +151,11 @@ _DECLARED_SUBSTITUTIONS = {
     # story #3263(지원v1·5에스컬레이션) — 메일 «고객센터» fiction 정정, 위젯 prod 승격과
     # 같은 커밋으로 묶는 env 분기. deploy-backend ENV_VARS가 이제 이 값을 직접 참조.
     "_SUPPORT_CONTACT_SURFACE_WIDGET",
+    # story #3263(같은 스토리 AC1/2) — 에스컬레이션 게이트/DM 배선(requester·approver
+    # team_members.id·moonklabs org/project slug). deploy-backend ENV_VARS가 이제 이 4개를
+    # 직접 참조.
+    "_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID", "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID",
+    "_SUPPORT_ESCALATION_TARGET_ORG_SLUG", "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -237,6 +242,12 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         # story #3263 — set -u라 미설정이면 스크립트가 죽는다(APPLE_TEAM_ID 등과 동일 이유).
         # 값은 cloudbuild.yaml substitutions 기본값과 정합(prod 현재값 — 위젯 미승격 상태).
         "_SUPPORT_CONTACT_SURFACE_WIDGET": "false",
+        # story #3263(같은 스토리 AC1/2) — 값은 cloudbuild.yaml substitutions 기본값과 정합
+        # (빈 문자열 — PO가 dev 배선 시 채움).
+        "_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID": "",
+        "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID": "",
+        "_SUPPORT_ESCALATION_TARGET_ORG_SLUG": "moonklabs",
+        "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG": "sprintable",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -455,9 +466,12 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story #3118 — 베이스 ENV_VARS 조립 문자열의 맨 끝(FIREBASE_OAUTH_HANDOFF_ENABLED
         # 다음)에 이어붙는다 — REDIS_URL/ADMIN_OPERATOR_*/GCS_AVATARS_BUCKET은 그 뒤에
         # 조건부로 append되는 후속 라인이라 실제 순서상 APPLE_*·SUPPORT_CONTACT_SURFACE_
-        # WIDGET(story #3263, 베이스 문자열 맨 끝에 추가)가 먼저 온다.
+        # WIDGET(story #3263 AC3)·SUPPORT_ESCALATION_*(같은 스토리 AC1/2, 베이스 문자열
+        # 맨 끝에 순서대로 추가)가 먼저 온다.
         "APPLE_SERVICES_ID=ai.sprintable.web,APPLE_KEY_ID=DF2G3UV649,APPLE_TEAM_ID=JN798BC4KC,"
         "SUPPORT_CONTACT_SURFACE_WIDGET=false,"
+        "SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=,SUPPORT_ESCALATION_APPROVER_MEMBER_ID=,"
+        "SUPPORT_ESCALATION_TARGET_ORG_SLUG=moonklabs,SUPPORT_ESCALATION_TARGET_PROJECT_SLUG=sprintable,"
         "REDIS_URL=redis://10.164.120.243:6379,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"

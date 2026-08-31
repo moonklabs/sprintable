@@ -126,7 +126,8 @@ async def post_message(
     # 나면 그대로 전파해 500(고객이 새로고침해 재시도)한다. 조용히 삼켜 "응답 없음"을 만드는
     # 쪽이 더 나쁘다(에러가 나면 시끄럽게 나야 한다).
     turn = await handle_turn(
-        db, conversation=conv, org_id=identity.org_id, customer_text=customer_message.content
+        db, conversation=conv, org_id=identity.org_id, user_id=identity.user_id,
+        customer_text=customer_message.content,
     )
 
     await db.commit()

@@ -32,6 +32,18 @@ def verify_delegated_token(token: str) -> DelegatedIdentity:
         claims = jwt.decode(token, settings.token_secret, algorithms=["HS256"])
     except jwt.PyJWTError as exc:
         raise DelegatedTokenError(str(exc)) from exc
+    # story #3263(지원v1·5에스컬레이션, 페드루 PO 조건①) — 같은 대칭키(SUPPORT_GATEWAY_
+    # TOKEN_SECRET)로 위임 토큰(이 함수)과 에스컬 이벤트 토큰(backend가 검증, escalation_
+    # delivery.py) 두 종이 공존한다. 위임 토큰은 원래 aud 클레임이 없다(support_gateway_
+    # token.py 발급 계약 그대로, 4클레임 고정) — 에스컬 토큰만 aud="backend:escalation-
+    # events"를 싣는다. ⚠️실측(2026-08-31): PyJWT는 decode()에 audience=를 안 넘겨도 토큰에
+    # aud 클레임이 «있으면» 자동으로 InvalidAudienceError를 던진다(라이브러리 기본 동작 —
+    # 위 except jwt.PyJWTError가 이미 이걸로 잡는다, 직접 확認: 아래 가드를 지워도 여전히
+    # 거부됨). 아래 명시 체크는 그 1차 방어가 사라지거나(PyJWT 버전업 등) 우회되는 경우를
+    # 겨냥한 2차 방어+에러 원인을 클레임 이름으로 못박아 디버깅을 쉽게 하는 목적
+    # (defense-in-depth, 단독 방어선이 아니다).
+    if claims.get("aud") is not None:
+        raise DelegatedTokenError(f"unexpected aud claim for delegated token: {claims.get('aud')!r}")
     try:
         org_id = uuid.UUID(claims["org_id"])
         user_id = uuid.UUID(claims["user_id"])

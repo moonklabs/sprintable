@@ -71,5 +71,12 @@ class Settings(BaseSettings):
     # story #3261 AC3 — org별 대화 메모리 요약 압축 트리거(메시지 개수 기준, v1 단순 휴리스틱).
     memory_summarize_after_messages: int = 20
 
+    # story #3263(지원v1·5에스컬레이션) — escalation_task가 사람 전달 이벤트를 던지는 backend
+    # 엔드포인트 절대 URL(예: https://sprintable-backend-dev-xxx.run.app/api/v2/support/
+    # escalation-events). 미설정이면 배달을 정직하게 skip한다(SupportEscalation 행 생성 자체는
+    # 막지 않음 — escalation_delivery.py 참고). token_secret과 짝(같은 대칭키를 역방향으로
+    # 재사용, backend 자격을 새로 받지 않는다 — Blueprint §2 경계).
+    backend_escalation_events_url: str = ""
+
 
 settings = Settings()

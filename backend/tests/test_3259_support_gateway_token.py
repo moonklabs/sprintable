@@ -64,3 +64,161 @@ async def test_no_org_context_rejected(monkeypatch):
     assert resp.status_code == 400
     from app.main import app
     app.dependency_overrides.clear()
+
+
+# story #3263(지원v1·5에스컬레이션, 페드루 PO 조건①) — session-token 발급(위임 토큰, aud
+# 없음)과 escalation-events 검증(에스컬 배달 토큰, aud="backend:escalation-events") 두 종이
+# 같은 대칭키를 공유한다. 교차 사용은 구조적으로 죽어야 한다 — 이 파일은 위임 토큰이
+# escalation 검증기로 잘못 흘러들어온 방향(반대 방향은 support-gateway/tests/test_token_
+# verify.py가 대칭으로 커버)을 고정한다.
+def test_delegated_session_token_rejected_by_escalation_delivery_verifier():
+    from app.routers.support_gateway_token import EscalationDeliveryError, verify_escalation_delivery_token
+    from app.core.config import settings
+
+    secret = "test-secret-padded-to-32-bytes-min"
+    settings_backup = settings.support_gateway_token_secret
+    settings.support_gateway_token_secret = secret
+    try:
+        # session-token.py가 실제로 발급하는 정확한 모양(aud 클레임 없음, 4개뿐).
+        delegated_token = jose_jwt.encode(
+            {"org_id": str(uuid.uuid4()), "user_id": str(uuid.uuid4())}, secret, algorithm="HS256",
+        )
+        with pytest.raises(EscalationDeliveryError):
+            verify_escalation_delivery_token(delegated_token)
+    finally:
+        settings.support_gateway_token_secret = settings_backup
+
+
+def test_escalation_delivery_token_with_correct_aud_verifies_and_returns_claims():
+    from app.routers.support_gateway_token import verify_escalation_delivery_token, ESCALATION_DELIVERY_AUD
+    from app.core.config import settings
+
+    secret = "test-secret-padded-to-32-bytes-min"
+    settings_backup = settings.support_gateway_token_secret
+    settings.support_gateway_token_secret = secret
+    try:
+        escalation_id, org_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        token = jose_jwt.encode(
+            {
+                "aud": ESCALATION_DELIVERY_AUD,
+                "escalation_id": str(escalation_id),
+                "org_id": str(org_id),
+                "user_id": str(user_id),
+                "reason": "classifier",
+                "detail": "인입 분류기가 사람 필요로 판정",
+                "conversation_summary": "고객: 문의합니다",
+            },
+            secret,
+            algorithm="HS256",
+        )
+        claims = verify_escalation_delivery_token(token)
+        assert claims.escalation_id == escalation_id
+        assert claims.org_id == org_id
+        assert claims.user_id == user_id
+        assert claims.reason == "classifier"
+        assert claims.detail == "인입 분류기가 사람 필요로 판정"
+        assert claims.conversation_summary == "고객: 문의합니다"
+    finally:
+        settings.support_gateway_token_secret = settings_backup
+
+
+def test_escalation_delivery_verifier_fails_closed_when_secret_unconfigured():
+    from app.routers.support_gateway_token import (
+        EscalationDeliveryError, ESCALATION_DELIVERY_AUD, verify_escalation_delivery_token,
+    )
+    from app.core.config import settings
+
+    settings_backup = settings.support_gateway_token_secret
+    settings.support_gateway_token_secret = ""
+    try:
+        token = jose_jwt.encode(
+            {
+                "aud": ESCALATION_DELIVERY_AUD, "escalation_id": str(uuid.uuid4()), "org_id": str(uuid.uuid4()),
+                "user_id": str(uuid.uuid4()), "reason": "classifier", "detail": "d", "conversation_summary": "s",
+            },
+            "some-other-secret-padded-to-32-bytes",
+            algorithm="HS256",
+        )
+        with pytest.raises(EscalationDeliveryError):
+            verify_escalation_delivery_token(token)
+    finally:
+        settings.support_gateway_token_secret = settings_backup
+
+
+# story #3263(지원v1·5에스컬레이션) AC1/AC2 — POST /api/v2/support/escalation-events. 이
+# 섹션은 DB에 닿기 전에 끝나는 fail-closed 분기만 커버(requester/approver 미설정) — 실 게이트
+# 생성(org/project 해소+create_gate+카드배달)은 real PG 필요라 test_3263_support_escalation_
+# events_realdb.py(별도 파일, PARITY/ALEMBIC_DATABASE_URL 게이트)에서 검증한다.
+async def _escalation_client(*, secret: str, requester_id: str, approver_id: str, monkeypatch):
+    from app.core.config import settings
+    from app.main import app
+
+    monkeypatch.setattr(settings, "support_gateway_token_secret", secret)
+    monkeypatch.setattr(settings, "support_escalation_requester_member_id", requester_id)
+    monkeypatch.setattr(settings, "support_escalation_approver_member_id", approver_id)
+
+    from httpx import ASGITransport, AsyncClient
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _make_escalation_token(secret: str) -> str:
+    from app.routers.support_gateway_token import ESCALATION_DELIVERY_AUD
+
+    return jose_jwt.encode(
+        {
+            "aud": ESCALATION_DELIVERY_AUD,
+            "escalation_id": str(uuid.uuid4()),
+            "org_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "reason": "classifier",
+            "detail": "인입 분류기가 사람 필요로 판정",
+            "conversation_summary": "고객: 문의합니다",
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+
+@pytest.mark.anyio
+async def test_escalation_events_fails_closed_when_requester_not_configured(monkeypatch):
+    secret = "test-secret-padded-to-32-bytes-min"
+    async with await _escalation_client(secret=secret, requester_id="", approver_id=str(uuid.uuid4()), monkeypatch=monkeypatch) as ac:
+        resp = await ac.post(
+            "/api/v2/support/escalation-events",
+            headers={"Authorization": f"Bearer {_make_escalation_token(secret)}"},
+        )
+    assert resp.status_code == 503
+
+
+@pytest.mark.anyio
+async def test_escalation_events_fails_closed_when_approver_not_configured(monkeypatch):
+    secret = "test-secret-padded-to-32-bytes-min"
+    async with await _escalation_client(secret=secret, requester_id=str(uuid.uuid4()), approver_id="", monkeypatch=monkeypatch) as ac:
+        resp = await ac.post(
+            "/api/v2/support/escalation-events",
+            headers={"Authorization": f"Bearer {_make_escalation_token(secret)}"},
+        )
+    assert resp.status_code == 503
+
+
+@pytest.mark.anyio
+async def test_escalation_events_rejects_missing_bearer_token(monkeypatch):
+    secret = "test-secret-padded-to-32-bytes-min"
+    async with await _escalation_client(secret=secret, requester_id=str(uuid.uuid4()), approver_id=str(uuid.uuid4()), monkeypatch=monkeypatch) as ac:
+        resp = await ac.post("/api/v2/support/escalation-events")
+    assert resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_escalation_events_rejects_delegated_session_token_not_escalation_token(monkeypatch):
+    """페드루 PO 조건① — 위임 토큰(aud 없음)을 이 엔드포인트에 던지면 401."""
+    secret = "test-secret-padded-to-32-bytes-min"
+    delegated_token = jose_jwt.encode(
+        {"org_id": str(uuid.uuid4()), "user_id": str(uuid.uuid4())}, secret, algorithm="HS256",
+    )
+    async with await _escalation_client(secret=secret, requester_id=str(uuid.uuid4()), approver_id=str(uuid.uuid4()), monkeypatch=monkeypatch) as ac:
+        resp = await ac.post(
+            "/api/v2/support/escalation-events",
+            headers={"Authorization": f"Bearer {delegated_token}"},
+        )
+    assert resp.status_code == 401

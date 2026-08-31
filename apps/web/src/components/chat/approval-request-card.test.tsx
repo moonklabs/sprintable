@@ -716,6 +716,84 @@ describe('ApprovalRequestCard — story #3151 agent_decision 결정 재료(질�
   });
 });
 
+// story #3263(지원v1·5에스컬레이션) AC1 — 페드루 PO 조건② "카드 본문에 요약·org·reason이
+// 실물로 실려야"(스텁 금지). docSummary/decisionQuestion과 동일 회귀가드 패턴 — no-fiction
+// (neutral_facts에 실린 값만 그대로).
+describe('ApprovalRequestCard — story #3263 support_escalation 카드 본문(요약·org·reason)', () => {
+  async function mountEscalation(neutralFacts: Record<string, unknown> | null) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('/api/gates/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: gate({ work_item_type: 'support_escalation', work_item_summary: null, neutral_facts: neutralFacts }),
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'support_escalation', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('org명·reason·detail·conversation_summary 전부 실물로 렌더된다 — "가서 보라" 스텁 회귀가드', async () => {
+    await mountEscalation({
+      support_escalation_id: 'esc-123',
+      customer_org_name: '고객사 A',
+      reason: 'classifier',
+      detail: '인입 분류기가 사람 필요로 판정',
+      conversation_summary: '고객: 결제가 안 돼요\n에이전트: 담당자에게 연결해 드릴게요',
+    });
+    expect(container.textContent).toContain('고객사 A');
+    expect(container.textContent).toContain('classifier');
+    expect(container.textContent).toContain('인입 분류기가 사람 필요로 판정');
+    expect(container.textContent).toContain('고객: 결제가 안 돼요');
+    // 페드루 PO 확定 — escalation_id는 상세추적용, 사람이 읽는 카드 본문엔 안 보인다.
+    expect(container.textContent).not.toContain('esc-123');
+  });
+
+  it('neutral_facts가 없으면(비-support_escalation 등) 블록 자체가 안 뜬다(no-fiction)', async () => {
+    await mountEscalation(null);
+    expect(container.textContent).not.toContain('고객사');
+  });
+
+  it('resolved(회신) 상태에서도 카드 본문이 그대로 보인다(docSummary·decisionQuestion과 동일 계약)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/gates/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: gate({
+              work_item_type: 'support_escalation', work_item_summary: null, status: 'approved', resolver_id: 'member-1',
+              neutral_facts: { customer_org_name: '고객사 B', reason: 'cost_cap', detail: 'd', conversation_summary: 's' },
+            }),
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'support_escalation', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('고객사 B');
+  });
+});
+
 // story #5ace2e84 — 채팅 결재카드 N+1 처방. chat-view.tsx가 대화 단위로 배치조회한 gate를
 // gateByKey 맵으로 물려받으면 이 카드는 독립 GET /api/gates/{id}를 안 태워야 한다(PO
 // 실측: 대화 진입당 최대 51발 N+1의 직접 원인). use-gate-batch.ts는 별도 단위테스트로

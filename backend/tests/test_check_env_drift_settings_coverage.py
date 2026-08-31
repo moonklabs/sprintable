@@ -210,4 +210,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 신설(메일 «고객센터» fiction 정정 — 위젯 prod 승격과 같은 커밋으로 묶는 env 분기)로
     # 109→110. 가드가 신규 필드를 설계대로 잡은 것.
     assert "SUPPORT_CONTACT_SURFACE_WIDGET" in keys
-    assert len(keys) == 110
+    # story #3263(지원v1·5에스컬레이션, 2026-08-31, 같은 스토리 AC1/2): support_escalation_
+    # requester_member_id·support_escalation_target_org_slug·support_escalation_target_
+    # project_slug·support_escalation_approver_member_id 4필드 추가 신설(에스컬레이션 게이트/
+    # DM 배선 — 이 파일 상단 config.py 주석 참고)로 110→114. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_ESCALATION_REQUESTER_MEMBER_ID" in keys and "SUPPORT_ESCALATION_APPROVER_MEMBER_ID" in keys
+    assert "SUPPORT_ESCALATION_TARGET_ORG_SLUG" in keys and "SUPPORT_ESCALATION_TARGET_PROJECT_SLUG" in keys
+    assert len(keys) == 114

@@ -34,11 +34,13 @@ import re
 import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.escalation_delivery import deliver_escalation_event
 from app.knowledge_search import search
 from app.model_config import Role, estimate_cost_usd, estimate_embedding_cost_usd, model_for
-from app.models import SupportEscalation, SupportExecutionLog
+from app.models import SupportConversation, SupportEscalation, SupportExecutionLog, SupportMessage
 from app.vertex_client import LLMClient
 
 NO_MATCH_MESSAGE = (
@@ -159,8 +161,31 @@ async def org_status_task(db: AsyncSession, *, conversation_id: uuid.UUID, org_i
     return "아직 조직 상태 조회 기능이 연결되지 않았습니다."
 
 
+async def _build_conversation_summary(db: AsyncSession, *, conversation_id: uuid.UUID) -> str:
+    """story #3263 AC1 — 티켓 초안이 실을 "대화 요약". 새 LLM 호출을 발명하지 않는다 —
+    §1.3 다층 메모리(SupportConversation.memory_summary, app/memory.py가 이미 압축 유지)가
+    있으면 그대로 쓰고, 아직 압축 전(짧은 대화)이면 원문 메시지 마지막 몇 개를 그대로
+    발췌한다(둘 다 "이미 있는 사실"의 재사용 — 지어내지 않는다)."""
+    conversation = await db.get(SupportConversation, conversation_id)
+    if conversation is not None and conversation.memory_summary:
+        return conversation.memory_summary
+
+    recent = (
+        await db.execute(
+            select(SupportMessage)
+            .where(SupportMessage.conversation_id == conversation_id)
+            .order_by(SupportMessage.created_at.desc())
+            .limit(6)
+        )
+    ).scalars().all()
+    if not recent:
+        return "(대화 이력 없음)"
+    lines = [f"{m.role}: {m.content[:300]}" for m in reversed(recent)]
+    return "\n".join(lines)
+
+
 async def escalation_task(
-    db: AsyncSession, *, conversation_id: uuid.UUID, org_id: uuid.UUID, reason: str, detail: str
+    db: AsyncSession, *, conversation_id: uuid.UUID, org_id: uuid.UUID, user_id: uuid.UUID, reason: str, detail: str
 ) -> SupportEscalation:
     escalation = SupportEscalation(conversation_id=conversation_id, org_id=org_id, reason=reason, detail=detail)
     db.add(escalation)
@@ -172,4 +197,16 @@ async def escalation_task(
         summary=f"reason={reason} detail={detail[:80]!r}",
     )
     db.add(log)
+    # story #3263 AC1/AC2 — 사람 전달. escalation.id는 default=uuid.uuid4가 ORM flush 시점에
+    # 채워지는 Python-side default라, 배달 페이로드에 쓰기 전에 명시 flush로 확定시킨다.
+    await db.flush()
+    conversation_summary = await _build_conversation_summary(db, conversation_id=conversation_id)
+    await deliver_escalation_event(
+        escalation_id=escalation.id,
+        org_id=org_id,
+        user_id=user_id,
+        reason=reason,
+        detail=detail,
+        conversation_summary=conversation_summary,
+    )
     return escalation

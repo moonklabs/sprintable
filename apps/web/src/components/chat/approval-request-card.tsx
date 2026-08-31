@@ -530,6 +530,19 @@ function ApprovalRequestBody({
     && (gate.neutral_facts['doc_summary'] as string).length > 0
     ? (gate.neutral_facts['doc_summary'] as string) : null;
 
+  // story #3263(지원v1·5에스컬레이션) AC1 — 페드루 PO 조건② "카드 본문에 요약·org·reason이
+  // 실물로 실려야" — docSummary/decisionQuestion과 동일 원칙(no-fiction, neutral_facts에
+  // 실린 값만 그대로). support_gateway_token.py::receive_escalation_event가 심은 필드.
+  const isEscalationGate = gate.work_item_type === 'support_escalation';
+  const escalationOrgName = isEscalationGate && typeof gate.neutral_facts?.['customer_org_name'] === 'string'
+    ? (gate.neutral_facts['customer_org_name'] as string) : null;
+  const escalationSummary = isEscalationGate && typeof gate.neutral_facts?.['conversation_summary'] === 'string'
+    ? (gate.neutral_facts['conversation_summary'] as string) : null;
+  const escalationDetail = isEscalationGate && typeof gate.neutral_facts?.['detail'] === 'string'
+    ? (gate.neutral_facts['detail'] as string) : null;
+  const escalationReason = isEscalationGate && typeof gate.neutral_facts?.['reason'] === 'string'
+    ? (gate.neutral_facts['reason'] as string) : null;
+
   return (
     <div className="space-y-2">
       {/* story #2926(P0-F F1) — 제목(claim)·미리보기 진입점·EntityPreviewModal은 이제 바깥
@@ -546,6 +559,29 @@ function ApprovalRequestBody({
       {docSummary ? (
         <div className="min-w-0 rounded-lg border border-border bg-muted/40 p-2 text-xs text-foreground [overflow-wrap:anywhere]">
           {docSummary}
+        </div>
+      ) : null}
+
+      {/* story #3263(지원v1·5에스컬레이션) AC1 — 고객 지원 에스컬레이션 티켓 초안. 페드루 PO
+          조건② "카드 본문에 요약·org·reason이 실물로 실려야"(스텁 금지) — docSummary와
+          동일 원칙, no-fiction(support_gateway_token.py::receive_escalation_event가 심은
+          값만 그대로). 고객 개인정보는
+          org명만(PO 확定, PII 0) — escalation_id는 상세 추적용(사람이 직접 읽는 정보 아님,
+          카드엔 안 보임). */}
+      {isEscalationGate ? (
+        <div className="min-w-0 space-y-1 rounded-lg border border-border bg-muted/40 p-2 [overflow-wrap:anywhere]">
+          {escalationOrgName ? (
+            <p className="text-xs font-medium text-foreground">{t('approvalRequestEscalationOrg', { orgName: escalationOrgName })}</p>
+          ) : null}
+          {escalationReason ? (
+            <p className="text-[11px] text-muted-foreground">{t('approvalRequestEscalationReason', { reason: escalationReason })}</p>
+          ) : null}
+          {escalationDetail ? (
+            <p className="text-xs text-foreground">{escalationDetail}</p>
+          ) : null}
+          {escalationSummary ? (
+            <p className="text-[11px] text-muted-foreground [white-space:pre-wrap]">{escalationSummary}</p>
+          ) : null}
         </div>
       ) : null}
 

@@ -19,13 +19,17 @@ dependencies = [
     # google-genai 통합 SDK가 aiplatform 백엔드를 직접 두드린다(GA 패키지, ADK 등 미도입 —
     # v0.2 "ADK류는 구현 스파이크 실측 비교 후 채택" 유보 그대로).
     "google-genai>=1.0.0",
+    # story #3263(지원v1·5에스컬레이션) — Gateway→backend 에스컬레이션 배달(escalation_
+    # delivery.py)의 실 outbound HTTP 클라이언트. 전엔 dev-group에만 있어(TestClient용) 런타임
+    # 배포 이미지엔 안 들어갔다 — 이 서비스가 처음으로 outbound HTTP를 실제로 거는 경로라 main
+    # dependencies로 승격한다(dev-group 중복 선언은 제거).
+    "httpx>=0.27.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
-    "httpx>=0.27.0",
     "aiosqlite>=0.20.0",
 ]
 

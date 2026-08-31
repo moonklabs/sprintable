@@ -106,6 +106,7 @@ def _make_tools(
     *,
     conversation_id: uuid.UUID,
     org_id: uuid.UUID,
+    user_id: uuid.UUID,
     escalation_state: dict,
     knowledge_state: dict,
     llm: LLMClient,
@@ -185,7 +186,7 @@ def _make_tools(
         print(f"[tool-trace] escalate 진입 conv={conversation_id} reason={reason[:80]!r}", file=sys.stderr, flush=True)
         try:
             result = await escalation_task(
-                db, conversation_id=conversation_id, org_id=org_id, reason="interaction", detail=reason
+                db, conversation_id=conversation_id, org_id=org_id, user_id=user_id, reason="interaction", detail=reason
             )
         except Exception:
             logger.exception(
@@ -218,6 +219,7 @@ async def handle_turn(
     *,
     conversation: SupportConversation,
     org_id: uuid.UUID,
+    user_id: uuid.UUID,
     customer_text: str,
     llm: LLMClient | None = None,
 ) -> TurnResult:
@@ -240,6 +242,7 @@ async def handle_turn(
             db,
             conversation_id=conversation.id,
             org_id=org_id,
+            user_id=user_id,
             reason="classifier",
             detail="인입 분류기가 사람 필요로 판정",
         )
@@ -254,6 +257,7 @@ async def handle_turn(
             db,
             conversation_id=conversation.id,
             org_id=org_id,
+            user_id=user_id,
             reason="cost_cap",
             detail=f"scope={cap_status.scope}",
         )
@@ -268,6 +272,7 @@ async def handle_turn(
         db,
         conversation_id=conversation.id,
         org_id=org_id,
+        user_id=user_id,
         escalation_state=escalation_state,
         knowledge_state=knowledge_state,
         llm=llm,
@@ -297,6 +302,7 @@ async def handle_turn(
             db,
             conversation_id=conversation.id,
             org_id=org_id,
+            user_id=user_id,
             reason="no_fiction_guard",
             detail=f"모델이 escalate 미호출 상태로 연결/실패를 서술함: {reply_text[:200]!r}",
         )
@@ -322,6 +328,7 @@ async def handle_turn(
             db,
             conversation_id=conversation.id,
             org_id=org_id,
+            user_id=user_id,
             reason="knowledge_fiction_guard",
             detail=(
                 f"모델이 knowledge_search 무매치/미호출(called={knowledge_state['called']}) 상태로 "
