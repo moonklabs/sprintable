@@ -535,6 +535,7 @@ steps:
           exit 0
         fi
         GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" AR_REPO="${_AR_REPO}" COMMIT_SHA="${COMMIT_SHA}" \
+          SUPPORT_GATEWAY_SERVICE_ACCOUNT="${_SUPPORT_GATEWAY_SERVICE_ACCOUNT}" \
           bash support-gateway/scripts/provision_migrate_job.sh ${_DEPLOY_ENV}
     waitFor: [push-support-gateway]
 
@@ -958,6 +959,9 @@ steps:
           echo "skip deploy-support-gateway: _SUPPORT_GATEWAY_DEPLOY_ENABLED != true (story #3259, PO 프로비저닝 대기)"
           exit 0
         fi
+        # story #b96151da(voided 대체) 수선 — 페드루 PO 실측(gcloud describe diff): migrate
+        # job과 동일 사유로 서비스도 VPC egress 없이는 Cloud SQL Private IP에 "dial tcp
+        # 10.110.0.3:3307: i/o timeout"으로 죽는다(--add-cloudsql-instances 소켓만으론 부족).
         gcloud run deploy support-gateway-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -966,6 +970,9 @@ steps:
           --max-instances=${_SUPPORT_GATEWAY_MAX_INSTANCES} \
           --allow-unauthenticated \
           --add-cloudsql-instances=${PROJECT_ID}:${_AR_REGION}:sprintable-${_DEPLOY_ENV} \
+          --network=default \
+          --subnet=default \
+          --vpc-egress=private-ranges-only \
           --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest" \
           --quiet
     waitFor: [run-support-gateway-migrate-job]
