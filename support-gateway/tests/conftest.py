@@ -37,7 +37,7 @@ class FakeLLMClient:
         interaction_text: str = "안녕하세요, 도와드릴게요.",
         input_tokens: int = 10,
         output_tokens: int = 5,
-        knowledge_text: str = "(참고 문서 답변)",
+        knowledge_text: str = "1",
         call_tool_name: str | None = None,
         call_tool_kwargs: dict | None = None,
     ) -> None:
@@ -56,10 +56,12 @@ class FakeLLMClient:
 
     async def generate(self, *, model: str, system_prompt: str, user_text: str) -> GenerateResult:
         self.calls.append(("generate", model))
-        # classifier·memory summarizer·지식 판독 셋 다 이 메서드를 쓴다 — 시스템 프롬프트로 구분.
+        # classifier·memory summarizer·지식 관련성 판정 셋 다 이 메서드를 쓴다 — 시스템
+        # 프롬프트로 구분. knowledge_text 기본값 "1"=후보 1번 선택(story #3262 2차실측 이후
+        # 선택형 재설계 — app/execution_tasks.py::_KNOWLEDGE_RELEVANCE_SYSTEM_PROMPT 참고).
         if "카테고리" in system_prompt or "라우터" in system_prompt:
             return GenerateResult(text=self.classify_text, input_tokens=self.input_tokens, output_tokens=1)
-        if "참고 문서" in system_prompt:
+        if "후보 문서" in system_prompt:
             return GenerateResult(text=self.knowledge_text, input_tokens=self.input_tokens, output_tokens=self.output_tokens)
         return GenerateResult(text="(요약)", input_tokens=self.input_tokens, output_tokens=self.output_tokens)
 
