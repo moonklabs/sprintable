@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../messages/ko.json';
+import enMessages from '../../messages/en.json';
 import { useSupportWidgetSession } from './use-support-widget-session';
 
 const isSupportGatewayConfiguredMock = vi.fn();
@@ -64,10 +65,11 @@ function Harness() {
   );
 }
 
-async function mount() {
+async function mount(locale: 'ko' | 'en' = 'ko') {
+  const messages = locale === 'ko' ? koMessages : enMessages;
   await act(async () => {
     root.render(
-      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
         <Harness />
       </NextIntlClientProvider>,
     );
@@ -137,6 +139,18 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
     // (supportWidget.sendErrorFallback)로 렌더된 실 값과 정확히 일치해야 한다.
     expect(container.querySelector('[data-testid="send-error"]')!.textContent).toBe(koMessages.supportWidget.sendErrorFallback);
     expect(container.querySelector('[data-failed="true"]')).not.toBeNull();
+  });
+
+  it('EN 로케일 크로스체크(카디르 QA 뮤테이션 실증 반영) — ko/en 양쪽이 같은 값을 참조해 동어반복이던 갭을 닫는다. locale=en으로 마운트하면 영문 문구가 뜬다 — 하드코딩 한글로 되돌리는 회귀는 이 테스트에서 반드시 red가 된다(ko 대조 테스트만으론 t() 걷어내도 green이었던 뮤테이션 갭).', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue([]);
+    sendGatewayMessageMock.mockRejectedValue(new Error('HTTP 500'));
+    await mount('en');
+    await click('connect');
+    await click('send');
+    const rendered = container.querySelector('[data-testid="send-error"]')!.textContent;
+    expect(rendered).toBe(enMessages.supportWidget.sendErrorFallback);
+    expect(rendered).not.toBe(koMessages.supportWidget.sendErrorFallback);
   });
 
   it('retryLastMessage — 실패한 메시지를 같은 내용으로 재전송하고 성공하면 실패 마커가 지워진다', async () => {
