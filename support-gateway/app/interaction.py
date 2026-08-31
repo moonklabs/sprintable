@@ -9,6 +9,7 @@ customer 메시지(이미 저장됨, app/routers/sessions.py) → 인입 분류�
 어떤 세부사항(분류기·비용상한·Vertex AFC)도 몰라도 된다."""
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -24,6 +25,23 @@ from app.model_config import Role, estimate_cost_usd, model_for
 from app.models import SupportConversation, SupportExecutionLog, SupportMessage
 from app.no_fiction_guard import FALLBACK_REPLY, looks_like_fabricated_handoff_claim
 from app.vertex_client import LLMClient, get_llm_client
+
+logger = logging.getLogger(__name__)
+
+# story #3262 3차 dev 실측(2026-08-31, 페드루 PO 근인조사) — 코퍼스 내 질문 7/7 근거 답 0건
+# (에러 3·에스컬 3·날조 1), 로그엔 아무 흔적도 없었다. 근인: **도구(_make_tools 클로저)가
+# raise하면 google-genai SDK의 AFC 디스패치가 그 예외를 삼키고**, Interaction 모델이 마치
+# 시스템 프롬프트에 그런 문구가 있었다는 듯 "죄송합니다, 현재 시스템에 오류가 발생하여..."류
+# 정형 사과문을 생성한다 — 로컬(실 코드+SA 토큰, knowledge_task 단독 실행)에선 완벽히
+# 동작했으므로 코드·자격·모델·검색수학 자체는 무죄, Cloud Run 런타임 조립(uvicorn/uvloop
+# 이벤트루프×AFC·asyncpg 세션 상호작용·metadata 자격 경로 등 용의)에서만 재현되는 결함.
+#
+# 1보(이 커밋) = **관측성**: 도구 자체를 try/except로 감싸 SDK가 예외를 볼 기회를 원천
+# 차단하고(SDK 삼킴 버그를 더는 안 만난다), logger.exception으로 실 traceback을 Cloud
+# Logging에 남기고, 고객에게는 "조용한 품질강등" 대신 정직한 실패 신호를 돌려준다. 근본
+# 원인(왜 Cloud Run에서만 raise하는지)은 이 로그가 찍힌 뒤 2보에서 다룬다 — 지금은 증상
+# 봉합이 아니라 "안 보이던 것을 보이게" 하는 단계라는 점을 다음 스텝 판단자가 알아야 한다.
+_TOOL_FAILURE_HONEST_MESSAGE = "지금 확인이 안 됩니다. 잠시 후 다시 시도해 주세요."
 
 _INTERACTION_SYSTEM_PROMPT = """당신은 이 회사의 고객 지원 담당자입니다. 원칙(BAO/S):
 1. 고객이 직접 한다 — 당신이 대신 실행하지 않고, 방법을 안내합니다(v1은 쓰기 액션 0).
@@ -79,21 +97,48 @@ def _make_tools(
 
     async def knowledge_search(query: str) -> str:
         """고객 문의와 관련된 사내 지식(문서·FAQ)을 검색합니다."""
-        result = await knowledge_task(db, conversation_id=conversation_id, org_id=org_id, query=query, llm=llm)
         knowledge_state["called"] = True
+        try:
+            result = await knowledge_task(db, conversation_id=conversation_id, org_id=org_id, query=query, llm=llm)
+        except Exception:
+            logger.exception(
+                "knowledge_search 도구 실행 중 예외(conversation_id=%s, org_id=%s, query=%r)",
+                conversation_id,
+                org_id,
+                query[:200],
+            )
+            return _TOOL_FAILURE_HONEST_MESSAGE
         knowledge_state["had_match"] = knowledge_state.get("had_match", False) or result.had_match
         return result.answer
 
     async def org_status_lookup(question: str) -> str:
         """이 조직(org)의 현재 상태(플랜·설정 등)를 조회합니다."""
-        return await org_status_task(db, conversation_id=conversation_id, org_id=org_id, question=question)
+        try:
+            return await org_status_task(db, conversation_id=conversation_id, org_id=org_id, question=question)
+        except Exception:
+            logger.exception(
+                "org_status_lookup 도구 실행 중 예외(conversation_id=%s, org_id=%s, question=%r)",
+                conversation_id,
+                org_id,
+                question[:200],
+            )
+            return _TOOL_FAILURE_HONEST_MESSAGE
 
     async def escalate(reason: str) -> str:
         """이 대화를 사람 담당자에게 연결합니다. 고객이 명시적으로 요청했거나, 자동 응대로
         해결이 어렵다고 판단될 때 호출하세요."""
-        result = await escalation_task(
-            db, conversation_id=conversation_id, org_id=org_id, reason="interaction", detail=reason
-        )
+        try:
+            result = await escalation_task(
+                db, conversation_id=conversation_id, org_id=org_id, reason="interaction", detail=reason
+            )
+        except Exception:
+            logger.exception(
+                "escalate 도구 실행 중 예외(conversation_id=%s, org_id=%s, reason=%r)",
+                conversation_id,
+                org_id,
+                reason[:200],
+            )
+            return _TOOL_FAILURE_HONEST_MESSAGE
         escalation_state["called"] = True
         return f"escalated:{result.id}"
 
