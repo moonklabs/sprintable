@@ -675,18 +675,14 @@ export function PackPurchaseDialog({
             <dd className="font-semibold">{t('packDialogAppliesValue')}</dd>
           </div>
         </dl>
-        <p className="text-[11px] text-muted-foreground">{t('packDialogComingSoonNote')}</p>
+        <p className="text-[11px] text-muted-foreground">{t('packDialogNote')}</p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             {t('packDialogCancel')}
           </Button>
-          {/* story #3211 — 실 결제/원장 기입(결제②-C TossAdapter+A2 Ledger)이 배선되기
-              전까지 표면 차단(PO 확定 (b)안). 조용한 무동작 금지 — disabled로 "안 눌리는
-              이유"를 explicit하게 보여준다(준비 중 라벨). 유나 design:changes(PR#3613) —
-              brand fill+opacity-50 조합은 라벨 대비가 양테마 ~2:1로 이 판의 목적(왜 못
-              사는지 읽히기)과 자가당착이라 secondary variant로 교체. */}
-          <Button variant="secondary" disabled title={t('packDialogComingSoon')}>
-            {t('packDialogComingSoon')}
+          {/* 실 결제/원장 기입은 결제②-C(TossAdapter)+A2(Ledger) 범위 — 셸 확인용으로 닫는다. */}
+          <Button variant="default" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={onClose}>
+            {t('packDialogConfirm')}
           </Button>
         </DialogFooter>
       </DialogContent>
