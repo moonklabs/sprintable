@@ -13,6 +13,26 @@ import koMessages from '../../../messages/ko.json';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { SupportWidgetLauncher } from './support-widget-launcher';
 
+// story #3260 2차 finding(유나 라이브 실측 FAIL — 재시도 스톰, 2026-08-31) 회귀가드용 —
+// isSupportGatewayConfiguredMock 기본값은 false(기존 테스트 전부가 'unavailable'을 가정
+// — 이 목이 파일 전체에 적용돼도 회귀 0). 스톰 테스트 describe만 true로 뒤집는다.
+const isSupportGatewayConfiguredMock = vi.fn(() => false);
+const createOrResumeGatewaySessionMock = vi.fn();
+vi.mock('@/lib/support-widget/gateway-client', () => ({
+  isSupportGatewayConfigured: () => isSupportGatewayConfiguredMock(),
+  createOrResumeGatewaySession: (...args: unknown[]) => createOrResumeGatewaySessionMock(...args),
+  listGatewayMessages: vi.fn(),
+  sendGatewayMessage: vi.fn(),
+}));
+
+// story #3260 3차 finding(선생님 실기기 적발→유나 design 확定, 2026-08-31) — 모바일 채팅-상세
+// (/chats/{id})에서만 런처를 숨긴다. 기본값은 chats/layout.test.tsx의 isListRoute 판정과
+// 무관한 일반 라우트로 둬서(기존 테스트 전부가 "런처는 언제나 뜬다"를 가정) 회귀 0.
+const usePathnameMock = vi.fn(() => '/board');
+vi.mock('next/navigation', () => ({
+  usePathname: () => usePathnameMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -38,6 +58,9 @@ beforeEach(() => {
   root = createRoot(container);
   stubLocalStorage();
   setInnerWidth(1280); // 데스크톱 기본값(각 데스크톱 테스트가 이 값을 가정)
+  isSupportGatewayConfiguredMock.mockReset().mockReturnValue(false);
+  createOrResumeGatewaySessionMock.mockReset();
+  usePathnameMock.mockReset().mockReturnValue('/board');
 });
 
 afterEach(async () => {
@@ -151,5 +174,100 @@ describe('SupportWidgetLauncher — story #3260 2차: 사이드바 실 폭 기�
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const panel = container.querySelector('[role="dialog"]') as HTMLElement;
     expect(panel.style.left).toBe('272px');
+  });
+});
+
+// story #3260 2차 finding(2026-08-31, 유나 라이브 실측 FAIL) — CSP가 Gateway fetch를
+// 막는 상황(즉시·동기에 가깝게 실패)에서 connect()가 4초에 87회(~22/s) 발화했다. 원인은
+// launcher의 mount effect가 [open, session] deps라 session(훅 반환 객체, status 변경마다
+// 새 참조)이 바뀔 때마다 재발화했던 것 — deps를 [open]으로 좁혀 open 전이 1회만 부르게
+// 고쳤다(+훅 쪽 1초 백오프는 2차 방어). 여기서는 실패가 반복돼도 시도 자체가 1회로
+// 그치는지를 호출 횟수로 직접 고정한다(회귀 시 이 숫자가 바로 커진다 — 재발이 red가 되는
+// 구조).
+describe('SupportWidgetLauncher — story #3260 2차: 재시도 스톰 회귀가드', () => {
+  it('connect()가 계속 실패해도(예: CSP 차단) 열려있는 동안 세션 발급 시도는 1회로 그친다', async () => {
+    isSupportGatewayConfiguredMock.mockReturnValue(true);
+    createOrResumeGatewaySessionMock.mockRejectedValue(new Error('Refused to connect: violates CSP directive'));
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 실패 후 status가 'error'로 바뀌며 훅 반환 객체가 새 참조가 되는 렌더가 몇 차례
+    // 더 도는데, 그 렌더들 자체가 재시도를 유발하지 않아야 한다.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.supportWidget.errorTitle);
+    expect(createOrResumeGatewaySessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('닫았다 곧바로 다시 열어도(1초 백오프 안) — 훅의 2차 방어가 여전히 막아 1회 그대로다', async () => {
+    isSupportGatewayConfiguredMock.mockReturnValue(true);
+    createOrResumeGatewaySessionMock.mockRejectedValue(new Error('network down'));
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // open
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // close
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // reopen(즉시)
+    await act(async () => { await Promise.resolve(); });
+    expect(createOrResumeGatewaySessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('백오프 창(1초)이 지난 뒤 다시 열면(정당한 사용자 재시도) — 2번째 호출이 나온다', async () => {
+    vi.useFakeTimers();
+    try {
+      isSupportGatewayConfiguredMock.mockReturnValue(true);
+      createOrResumeGatewaySessionMock.mockRejectedValue(new Error('network down'));
+      await mount();
+      const btn = container.querySelector('button') as HTMLButtonElement;
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // open
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // close
+      await act(async () => { vi.advanceTimersByTime(1100); }); // 백오프 창 경과
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // reopen
+      await act(async () => { await Promise.resolve(); });
+      expect(createOrResumeGatewaySessionMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// story #3260 3차 finding(2026-08-31, 선생님 실기기 적발→유나 design 확定) — 모바일 채팅
+// 상세(/chats/{id})는 자체 하단 첨부/전송 아이콘 열이 있어 런처(bottom-20 left-5)가 그 위에
+// 그대로 겹쳤다(실기기 스크린샷 실증, entity:artifact:13c9e4cb). 리스트(/chats, id 없음)는
+// 그 열이 없어 무관 — chats/layout.tsx의 isListRoute = pathname === '/chats' 판정과 대칭.
+// 페드루 PO 발주 pin 3종: 모바일 상세=DOM 0 / 모바일 리스트·보드=기존 그대로 / 데스크톱=라우트
+// 무관 불변.
+describe('SupportWidgetLauncher — story #3260 3차: 모바일 채팅-상세 숨김', () => {
+  it('모바일 + 채팅-상세(/chats/conv-123) — 런처 DOM 자체가 없다(겹침 원천 차단)', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('모바일 + 채팅-리스트(/chats, id 없음) — 기존처럼 bottom-20에 그대로 뜬다', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats');
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.className).toContain('bottom-20');
+  });
+
+  it('모바일 + 채팅과 무관한 라우트(/board) — 기존처럼 그대로 뜬다(채팅-상세만 예외)', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/board');
+    await mount();
+    expect(container.querySelector('button')).toBeTruthy();
+  });
+
+  it('데스크톱 — 채팅-상세 라우트여도 사이드바 폭+16px 배치가 그대로다(데스크톱은 스플릿뷰라 무관)', async () => {
+    setInnerWidth(1280);
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.style.left).toBe('272px'); // 256(기본 사이드바 폭)+16
   });
 });

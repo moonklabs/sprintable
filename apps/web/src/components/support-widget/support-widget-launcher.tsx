@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LifeBuoy, X } from 'lucide-react';
 import { useSidebar } from '@/components/ui/sidebar';
@@ -45,16 +46,41 @@ const DESKTOP_SIDEBAR_GAP_PX = 16;
  * 다시 겹치는 "폭 가변" 함정) — `useSidebar()`가 그 실시간 폭을 그대로 노출하므로 정적 추정
  * 대신 이 값을 직접 소비한다. `collapsible="offcanvas"`(app-sidebar.tsx)라 collapsed 상태는
  * 사이드바가 화면 밖으로 완전히 밀려나(가시 폭 0) 별도 처리 불요 — left-5 그대로 안전.
+ *
+ * ⚠️story #3260 3차 finding(2026-08-31, 선생님 실기기 적발→유나 design 확定) — 모바일
+ * 채팅-상세 화면(`/chats/{id}`)은 자체 하단 첨부/전송 아이콘 열이 있어, 이 런처(bottom-20
+ * left-5)가 그 위에 그대로 겹쳤다(실기기 스크린샷 실증). `/chats`(id 없는 리스트)는 그런
+ * 하단 열이 없어 겹치지 않는다 — 그래서 "모바일 전체 숨김"이 아니라 **채팅-상세 라우트에서만**
+ * render null 한다(데스크톱은 스플릿뷰라 리스트+상세가 항상 같이 보여 무관, chats/layout.tsx의
+ * `isListRoute = pathname === '/chats'` 판정과 대칭 — 상세는 그 나머지 `/chats/*`).
  */
 export function SupportWidgetLauncher() {
   const t = useTranslations('supportWidget');
   const [open, setOpen] = useState(false);
   const session = useSupportWidgetSession();
   const { isMobile, state: sidebarState, width: sidebarWidth } = useSidebar();
+  const pathname = usePathname();
+  const isMobileChatDetailRoute = isMobile && pathname !== '/chats' && pathname.startsWith('/chats/');
 
+  // ⚠️story #3260 2차 finding(2026-08-31, 유나 라이브 실측 FAIL — 재시도 스톰) — 이 effect가
+  // 예전엔 [open, session] deps였다. session은 status가 바뀔 때마다(connect()가 실패해
+  // 'error'로 떨어질 때 포함) useSupportWidgetSession()의 useMemo가 새 객체를 반환하므로,
+  // session 참조 변경 자체가 이 effect를 재발화시켜 connect()를 다시 불렀다 — CSP가 Gateway
+  // fetch를 막는 상황에서는 그 실패가 즉시(네트워크 왕복 없이) 나므로 "실패→재발화→재시도"가
+  // 사실상 동기 루프로 돌아 4초에 87회(~22/s)를 쳤다(POST /api/support/session-token 실측).
+  // 처방: deps를 `open` 하나로 좁히고, connect의 "최신 함수"는 ref로 우회 참조한다 — 이러면
+  // open이 실제로 false→true로 바뀔 때만 1회 호출되고, 내부 상태(status) 변화로는 절대
+  // 재발화하지 않는다('error' 이후 재시도는 패널의 명시 "다시 연결하기" 버튼(session.connect()
+  // 직접 호출)으로만 — 사용자 행동 1회=시도 1회, 자동 루프 0). 훅 쪽에도 최소시도간격(1초)
+  // 백오프를 별도로 걸어둔다(use-support-widget-session.ts) — 이 effect 밖의 다른 호출
+  // 경로가 생겨도 스톰이 구조적으로 재발 못 하게 하는 2중 방어.
+  const connectRef = useRef(session.connect);
   useEffect(() => {
-    if (open) session.connect();
-  }, [open, session]);
+    connectRef.current = session.connect;
+  });
+  useEffect(() => {
+    if (open) connectRef.current();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -64,6 +90,11 @@ export function SupportWidgetLauncher() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open]);
+
+  // 모든 hook 호출 뒤에만 조건부 반환한다(hook 호출 순서는 렌더마다 불변이어야 하는 React
+  // 규칙) — 모바일 채팅-상세에서는 통째로 숨긴다(패널이 열려있었다면 그것도 함께 사라짐,
+  // 겹치는 화면 자체를 안 그리는 게 옳다).
+  if (isMobileChatDetailRoute) return null;
 
   // 모바일: 사이드바가 화면 폭을 안 먹어 기본 left-5(className) 그대로 — style override 없음.
   // 데스크톱·사이드바 열림: 실 폭(리사이즈 반영) + 여백만큼 오른쪽으로.
