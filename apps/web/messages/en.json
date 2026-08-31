@@ -4428,6 +4428,14 @@
     "closeLabel": "Close",
     "unavailableTitle": "Support chat is coming soon",
     "unavailableBody": "We're connecting this — you can't send a message yet.",
+    "errorTitle": "Couldn't connect",
+    "errorBody": "We couldn't connect to support chat. Please try again.",
+    "retryConnect": "Reconnect",
+    "thinkingLabel": "Thinking… ({seconds}s)",
+    "escalatedBadge": "Connected to a human",
+    "messageFailedLabel": "Couldn't send",
+    "sendErrorRetry": "Retry",
+    "sendErrorFallback": "We couldn't get a response right now. Please try again shortly, or contact us directly.",
     "inputPlaceholder": "Type a message",
     "sendLabel": "Send"
   }
