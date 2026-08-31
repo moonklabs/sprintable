@@ -95,6 +95,11 @@ substitutions:
   # 재발 방지: Support Gateway(#f2a27d2a) 착지·AC2/AC3 실측 前까지 위젯 런처를 prod에
   # 노출하지 않는다. EE_ENABLED와 동일 컨벤션 — dev-safe 기본값 false, GHA가 dev만 true 주입.
   _SUPPORT_WIDGET_ENABLED: "false"
+  # story #3260 Phase 2 — 위젯이 Support Gateway를 직접 호출(BFF 프록시 없음)하려면 FE
+  # 빌드가 그 서비스 origin을 알아야 한다. 빈 문자열 기본값(dev-safe — GHA가 dev 분기에서만
+  # 실 Gateway URL 주입, prod는 위젯 자체가 아직 안 뜨므로(SUPPORT_WIDGET_ENABLED=false)
+  # 무접촉).
+  _NEXT_PUBLIC_SUPPORT_GATEWAY_URL: ""
   # story #2758(2026-08-18, 페드루 PO 지시 — EE_ENABLED·LICENSE_CONSENT와 동형 「등재≠배선」
   # 3번째, 미르코 2754 라이브 실증이 이 마디에서 잡음) — apps/web/src/ee/components/billing/
   # toss-checkout.ts(story #2510)가 읽는 Toss 결제위젯 clientKey가 manual-env-allowlist.yml에
@@ -168,6 +173,10 @@ substitutions:
   _SUPPORT_GATEWAY_SERVICE_ACCOUNT: ''
   _SUPPORT_GATEWAY_MIN_INSTANCES: '0'
   _SUPPORT_GATEWAY_MAX_INSTANCES: '2'
+  # story #3260(위젯 셸) — 브라우저가 이 서비스를 직접 호출(BFF 프록시 없음)하므로 실
+  # CORS preflight가 돈다. `|`-구분 기본값(빈 문자열=미설정) — deploy-support-gateway
+  # 스텝에서 `,`로 변환(cloudbuild.yaml MCP_ALLOWED_HOSTS 선례와 동일 2-layer 콤마 함정 회피).
+  _SUPPORT_GATEWAY_CORS_ORIGINS: ''
 
   # E-ARCH 1단계(story #2078·PR #2358 PG_LISTEN_ENABLED 배선): SSE/LISTEN 전용
   # `sprintable-realtime-${_DEPLOY_ENV}` 서비스 — REST(`sprintable-backend-*`)와 같은 이미지,
@@ -416,6 +425,8 @@ steps:
       - NEXT_PUBLIC_EE_ENABLED=${_EE_ENABLED}
       - --build-arg
       - NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=${_SUPPORT_WIDGET_ENABLED}
+      - --build-arg
+      - NEXT_PUBLIC_SUPPORT_GATEWAY_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}
       - --build-arg
       - NEXT_PUBLIC_TOSS_CLIENT_KEY=${_TOSS_CLIENT_KEY}
       - .
@@ -968,6 +979,15 @@ steps:
         # SA(${_SUPPORT_GATEWAY_SERVICE_ACCOUNT})에 `roles/aiplatform.user` IAM 바인딩이
         # 아직 없으면 Vertex 호출이 403으로 죽는다 — 코드/배포 스텝은 여기까지만 하고 그
         # IAM 부여는 backend/support-gateway 최초 프로비저닝과 동형으로 PO가 gcloud로 한다.
+        # story #3260 — CORS_ORIGINS 값(콤마 구분 origin 목록)이 이 --update-env-vars 자체의
+        # ArgDict 구분자(,)와 충돌한다(cloudbuild.yaml MCP_ALLOWED_HOSTS 선례와 동일 함정) —
+        # `^;^` 커스텀 구분자 이스케이프로 이 플래그의 구분자를 ,에서 ;로 바꾼다(gcloud topic
+        # escaping). GHA는 `|`-구분으로 여기까지 값을 나르므로(위 GHA 주석) 먼저 ,로 되돌린다.
+        ENV_VARS="SUPPORT_GATEWAY_VERTEX_PROJECT=${PROJECT_ID}"
+        if [ -n "${_SUPPORT_GATEWAY_CORS_ORIGINS}" ]; then
+          CORS_ORIGINS_COMMA=$(printf '%s' "${_SUPPORT_GATEWAY_CORS_ORIGINS}" | tr '|' ',')
+          ENV_VARS="$${ENV_VARS};SUPPORT_GATEWAY_CORS_ORIGINS=$${CORS_ORIGINS_COMMA}"
+        fi
         gcloud run deploy support-gateway-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -979,7 +999,7 @@ steps:
           --network=default \
           --subnet=default \
           --vpc-egress=private-ranges-only \
-          --update-env-vars="SUPPORT_GATEWAY_VERTEX_PROJECT=${PROJECT_ID}" \
+          --update-env-vars="^;^$${ENV_VARS}" \
           --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest" \
           --quiet
     waitFor: [run-support-gateway-migrate-job]

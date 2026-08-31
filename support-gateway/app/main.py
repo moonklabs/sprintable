@@ -22,14 +22,17 @@ async def _rate_limit_handler(request, exc):  # noqa: ANN001 — slowapi 시그�
     return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
 
 
-if settings.cors_allow_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_allow_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "Content-Type"],
-    )
+# story #3260 — backend/app/main.py의 CORSMiddleware 배선과 동형(항상 마운트, 빈
+# origins면 실질적으로 전부 거부 — "설정 자체가 없다"와 "빈 배열"을 다르게 다루려던 옛
+# 분기(`if settings.cors_allow_origins:`)를 걷어낸다, 이 서비스는 브라우저 직접 호출이라
+# CORSMiddleware가 실제로 매 요청 경로에 있다).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 app.include_router(sessions_router)
 
