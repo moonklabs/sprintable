@@ -6,8 +6,21 @@ customer 메시지(이미 저장됨, app/routers/sessions.py) → 인입 분류�
 스폰·지휘, Blueprint §1.1/§1.2) → 응답 저장 → 메모리 압축 트리거(AC3).
 
 이 함수는 라우터(app/routers/sessions.py)가 호출하는 유일한 진입점 — 라우터는 이 안의
-어떤 세부사항(분류기·비용상한·Vertex AFC)도 몰라도 된다."""
-from __future__ import annotations
+어떤 세부사항(분류기·비용상한·Vertex AFC)도 몰라도 된다.
+
+⛔`from __future__ import annotations`(PEP 563)를 이 파일에 절대 넣지 않는다 — story #3262
+2보-b 근인 확定(2026-08-31, 페드루 PO+디디 교차실측): PEP 563이 이 모듈의 함수 어노테이션을
+전부 지연 평가 문자열로 바꾸면, `_make_tools`가 만드는 도구 클로저(knowledge_search 등)의
+`inspect.signature(...).parameters[...].annotation`도 문자열이 된다. google-genai SDK
+2.20.0의 실제 인자변환 경로(`google.genai._extra_utils.convert_argument_from_function` →
+`convert_if_exist_pydantic_model`)는 그 값을 `typing.get_type_hints()`로 재해석하지 않고
+그대로 `isinstance(value, annotation)`에 넘겨 `TypeError`를 던진다 — **선언(스키마 생성)은
+멀쩡히 성공하지만(FunctionDeclaration.from_callable_with_api_option은 무사), 실 호출
+디스패치 단계에서만 조용히 깨진다**(SDK가 그 TypeError를 삼키고 도구를 아예 호출 안 한
+채 모델이 정형 사과문을 대신 생성 — 실사고 그대로). 로컬 A/B 실측(같은 클로저를
+future-import 있는/없는 모듈에 각각 심어 실 Vertex AFC 라운드트립)으로 재현·반증 완료 —
+tests/test_afc_argument_conversion_regression.py가 이 정확한 실패 클래스를 SDK 내부
+함수로 직접 고정한다(스키마 non-empty 검사로는 이 결함이 안 잡힌다 — 그 접근은 기각됨)."""
 
 import logging
 import sys
