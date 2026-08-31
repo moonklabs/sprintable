@@ -2662,21 +2662,7 @@
     "paymentMethodDeleteSuccess": "결제수단이 삭제되었습니다.",
     "paymentMethodDeleteBlocked": "활성 유료 구독({tier})이 있어 결제수단을 삭제할 수 없습니다.",
     "paymentMethodDeleteBlockedUntil": "활성 유료 구독({tier})은 {date}까지 유효합니다. 그 이후에 결제수단을 삭제할 수 있어요.",
-    "paymentMethodDeleteError": "결제수단 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.",
-    "orderHistoryTitle": "결제 내역",
-    "orderHistoryEmpty": "결제 내역이 없습니다.",
-    "orderHistoryLoadError": "결제 내역을 불러올 수 없습니다.",
-    "orderHistoryStatusConfirmed": "결제 완료",
-    "orderHistoryStatusPending": "처리 중",
-    "orderHistoryStatusFailed": "실패",
-    "orderHistoryPurposeCharge": "정기결제",
-    "orderHistoryPurposePackPurchase": "팩 구매",
-    "orderHistoryReceiptLink": "영수증 보기",
-    "orderHistoryColDate": "결제일",
-    "orderHistoryColPurpose": "구분",
-    "orderHistoryColAmount": "금액",
-    "orderHistoryColStatus": "상태",
-    "orderHistoryColReceipt": "영수증"
+    "paymentMethodDeleteError": "결제수단 삭제에 실패했습니다. 잠시 후 다시 시도해주세요."
   },
   "usage": {
     "eyebrow": "OPERATOR USAGE",

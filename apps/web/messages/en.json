@@ -2662,21 +2662,7 @@
     "paymentMethodDeleteSuccess": "Payment method removed.",
     "paymentMethodDeleteBlocked": "You have an active paid subscription ({tier}) — you can't remove your payment method yet.",
     "paymentMethodDeleteBlockedUntil": "Your active paid subscription ({tier}) runs until {date}. You can remove your payment method after that.",
-    "paymentMethodDeleteError": "Couldn't remove the payment method. Please try again.",
-    "orderHistoryTitle": "Billing history",
-    "orderHistoryEmpty": "No billing history yet.",
-    "orderHistoryLoadError": "Couldn't load billing history.",
-    "orderHistoryStatusConfirmed": "Paid",
-    "orderHistoryStatusPending": "Processing",
-    "orderHistoryStatusFailed": "Failed",
-    "orderHistoryPurposeCharge": "Subscription",
-    "orderHistoryPurposePackPurchase": "Pack purchase",
-    "orderHistoryReceiptLink": "View receipt",
-    "orderHistoryColDate": "Date",
-    "orderHistoryColPurpose": "Type",
-    "orderHistoryColAmount": "Amount",
-    "orderHistoryColStatus": "Status",
-    "orderHistoryColReceipt": "Receipt"
+    "paymentMethodDeleteError": "Couldn't remove the payment method. Please try again."
   },
   "usage": {
     "eyebrow": "OPERATOR USAGE",

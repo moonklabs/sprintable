@@ -376,8 +376,6 @@ async def test_sweep_stale_pending_confirms_when_toss_lookup_done(monkeypatch):
         session, org_id=stale_order.org_id, order_id=stale_order.order_id,
         amount_minor=stale_order.amount_minor, currency=stale_order.currency,
         payment_key="pay_recovered",
-        # story #3209 — lookup 응답에 receipt 키가 없으면(이 테스트 mock) None.
-        receipt_url=None,
     )
     fail_mock.assert_not_awaited()
 

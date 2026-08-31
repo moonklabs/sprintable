@@ -55,18 +55,12 @@ async def _confirm_with_ledger(
     session: AsyncSession, *, org_id: uuid.UUID, order_id: str,
     amount_minor: int, currency: str, payment_key: str,
     entry_type: str = "charge", ledger_metadata: dict | None = None,
-    receipt_url: str | None = None,
 ) -> BillingOrder:
     """⛔블로커2 fix — 원장을 confirmed-update **前**에 먼저(멱등 provider_ref).
 
     entry_type(#2505, story 확장): 기본 "charge"(정기결제)지만 팩 구매처럼 별개
     entry_type으로 원장에 남겨야 하는 호출자를 위해 파라미터화 — direction은 여전히
-    "credit"(돈이 들어옴)로 고정, 팩/정기결제 둘 다 매출이라 방향은 같다.
-
-    receipt_url(story #3209 PR-1): 호출자가 이미 받아둔 Toss payment 응답의
-    `receipt.url`을 그대로 전달 — 이 함수가 별도로 Toss를 다시 조회하지 않는다(모든
-    호출자가 이미 그 응답을 들고 이 함수에 들어온다, charge_org/_reconcile_duplicated_order/
-    sweep_stale_pending_orders 공통)."""
+    "credit"(돈이 들어옴)로 고정, 팩/정기결제 둘 다 매출이라 방향은 같다."""
     await record_ledger_entry(
         session, org_id=org_id, entry_type=entry_type, amount_minor=amount_minor,
         currency=currency, direction="credit", provider="toss", provider_ref=payment_key,
@@ -75,7 +69,7 @@ async def _confirm_with_ledger(
     await session.execute(
         update(BillingOrder)
         .where(BillingOrder.order_id == order_id, BillingOrder.status != "confirmed")
-        .values(status="confirmed", payment_key=payment_key, receipt_url=receipt_url, updated_at=func.now())
+        .values(status="confirmed", payment_key=payment_key, updated_at=func.now())
     )
     await session.commit()
     return await _refetch(session, order_id)
@@ -99,11 +93,9 @@ async def _reconcile_duplicated_order(
         await _mark_failed_if_not_confirmed(session, order_id, "duplicated order lookup missing paymentKey")
         return await _refetch(session, order_id)
 
-    receipt_url = (lookup.get("receipt") or {}).get("url")
     return await _confirm_with_ledger(
         session, org_id=org_id, order_id=order_id, amount_minor=amount_minor,
         currency=currency, payment_key=payment_key, entry_type=entry_type, ledger_metadata=ledger_metadata,
-        receipt_url=receipt_url,
     )
 
 
@@ -205,11 +197,7 @@ async def charge_org(
         await _mark_failed_if_not_confirmed(session, order_id, "Toss charge response missing paymentKey")
         raise RuntimeError("Toss charge response missing paymentKey")
 
-    # story #3209(PR-1) — receipt는 nullable object(공식 문서)라 .get("receipt")가
-    # None일 수 있다 — or {}로 방어.
-    receipt_url = (result.get("receipt") or {}).get("url")
     return await _confirm_with_ledger(
         session, org_id=org_id, order_id=order_id, amount_minor=amount_minor,
         currency=currency, payment_key=payment_key, entry_type=entry_type, ledger_metadata=ledger_metadata,
-        receipt_url=receipt_url,
     )

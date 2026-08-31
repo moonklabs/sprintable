@@ -388,12 +388,10 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
             continue
 
         if lookup.get("status") == "DONE" and lookup.get("paymentKey"):
-            # story #3209(PR-1) — 이 대사 경로로 confirmed되는 order도 동일하게 receipt_url을 채운다.
             await _confirm_with_ledger(
                 session, org_id=order.org_id, order_id=order.order_id,
                 amount_minor=order.amount_minor, currency=order.currency,
                 payment_key=lookup["paymentKey"],
-                receipt_url=(lookup.get("receipt") or {}).get("url"),
             )
             confirmed += 1
         else:
