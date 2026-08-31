@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
-from app.vertex_client import GenerateResult
+from app.vertex_client import EmbedResult, GenerateResult
 
 TEST_TOKEN_SECRET = "test-secret-not-for-prod-padded-to-32-bytes-min"
 
@@ -37,26 +37,47 @@ class FakeLLMClient:
         interaction_text: str = "안녕하세요, 도와드릴게요.",
         input_tokens: int = 10,
         output_tokens: int = 5,
+        knowledge_text: str = "(참고 문서 답변)",
+        call_tool_name: str | None = None,
+        call_tool_kwargs: dict | None = None,
     ) -> None:
         self.classify_text = classify_text
         self.interaction_text = interaction_text
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.knowledge_text = knowledge_text
+        # story #3262 — AFC가 실제로 도구를 부르는 상황(예: knowledge_search가 매치를 찾은
+        # 경우)을 시뮬레이션하고 싶은 테스트용. 설정되면 generate_with_tools가 interaction_text를
+        # 돌려주기 *전에* tools 목록에서 이 이름의 함수를 찾아 한 번 호출한다(AFC 루프의 초소형
+        # 재현 — 진짜 SDK의 도구선택 로직은 안 흉내낸다, "도구가 실제로 불렸다"는 사실만 필요).
+        self.call_tool_name = call_tool_name
+        self.call_tool_kwargs = call_tool_kwargs or {}
         self.calls: list[tuple[str, str]] = []  # (kind, model)
 
     async def generate(self, *, model: str, system_prompt: str, user_text: str) -> GenerateResult:
         self.calls.append(("generate", model))
-        # classifier·memory summarizer 둘 다 이 메서드를 쓴다 — 시스템 프롬프트로 구분.
+        # classifier·memory summarizer·지식 판독 셋 다 이 메서드를 쓴다 — 시스템 프롬프트로 구분.
         if "카테고리" in system_prompt or "라우터" in system_prompt:
             return GenerateResult(text=self.classify_text, input_tokens=self.input_tokens, output_tokens=1)
+        if "참고 문서" in system_prompt:
+            return GenerateResult(text=self.knowledge_text, input_tokens=self.input_tokens, output_tokens=self.output_tokens)
         return GenerateResult(text="(요약)", input_tokens=self.input_tokens, output_tokens=self.output_tokens)
 
     async def generate_with_tools(
         self, *, model: str, system_prompt: str, user_text: str, tools: list[Callable]
     ) -> GenerateResult:
         self.calls.append(("generate_with_tools", model))
+        if self.call_tool_name is not None:
+            tool = next(t for t in tools if t.__name__ == self.call_tool_name)
+            await tool(**self.call_tool_kwargs)
         return GenerateResult(
             text=self.interaction_text, input_tokens=self.input_tokens, output_tokens=self.output_tokens
+        )
+
+    async def embed(self, *, model: str, texts: list[str], task_type: str) -> EmbedResult:
+        self.calls.append(("embed", model))
+        return EmbedResult(
+            vectors=[[0.1, 0.2, 0.3] for _ in texts], billable_character_count=sum(len(t) for t in texts)
         )
 
 
