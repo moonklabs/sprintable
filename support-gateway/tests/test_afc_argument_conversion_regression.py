@@ -34,6 +34,7 @@ def _build_tools():
         _NoopDB(),
         conversation_id=uuid.uuid4(),
         org_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
         escalation_state={"called": False},
         knowledge_state={"called": False, "had_match": False},
         llm=None,

@@ -216,6 +216,11 @@ KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES: frozenset[str] = frozenset({
     # 없어 항상 None을 준다 — 여기 미등재였다면 gates.py의 fail-closed 분기(#2237)가 모든
     # GET /gates/{id}를 404로 거부했을 것(전수 grep으로 발견, 실제 배선 전 확認).
     "agent_decision",
+    # story #3263(지원v1·5에스컬레이션) — support_escalation도 동일 패턴(self-referencing
+    # anchor, support_gateway_token.py::receive_escalation_event가 project_id를 직접 해소해
+    # 넘기므로 resolve_work_item_project_id() 자체는 안 거치지만, GET /gates/{id} 재조회
+    # 경로가 이 함수를 다시 타므로 agent_decision과 동일 이유로 등재 필수).
+    "support_escalation",
 })
 
 
@@ -316,6 +321,11 @@ _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
     {
         "doc_approval", "loop_decision", "artifact_canonicalize", "agent_decision_request",
         "hypothesis_outcome_confirm",
+        # story #3263(지원v1·5에스컬레이션) — 고객 지원 에스컬레이션 티켓 초안. AC1 "자동 등재
+        # 금지" 그 자체가 org posture 무관 항상 인간 검토를 요구한다는 뜻(agent_decision_request
+        # 와 동형 근거 — 판단이 존재 이유인 게이트가 permissive posture로 자동 승인되면 애초에
+        # 만든 이유가 없어진다).
+        "support_escalation_review",
     }
 )
 # ⚠️story #2709 — agent_decision_request가 항상 manual(=posture 무관 항상 pending)인 이유:

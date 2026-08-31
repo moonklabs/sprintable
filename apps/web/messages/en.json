@@ -3614,6 +3614,8 @@
     "approvalRequestResolutionNote": "Reason: {note}",
     "approvalRequestAssumption": "Assumption: {assumption}",
     "approvalRequestRequestedBy": "Requested by: {name}",
+    "approvalRequestEscalationOrg": "Customer org: {orgName}",
+    "approvalRequestEscalationReason": "Reason: {reason}",
     "approvalRequestDelegatedAway": "This approval has been delegated to another approver.",
     "approvalRequestWaitingOn": "Waiting on {name}'s approval",
     "approvalRequestTossTrigger": "Send to another room",
