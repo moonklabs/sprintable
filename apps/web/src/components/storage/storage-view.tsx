@@ -11,6 +11,7 @@ import { useContextualPanelState } from '@/components/ui/contextual-panel-layout
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { formatTotalSize } from '@/lib/storage/format';
+import { uploadStorageAsset } from '@/lib/storage/storage-upload';
 import { StorageCapacityBanner } from './storage-capacity-banner';
 import { StorageFolderTree } from './storage-folder-tree';
 import { StorageAssetList } from './storage-asset-list';
@@ -329,9 +330,21 @@ export function StorageView({ projectId }: { projectId: string }) {
     [addToast, t],
   );
 
-  // 업로드 = BE 선행 대기 (story #d4b371be: POST /assets/upload-url + /upload-confirm 착지 전까지
-  // 배선 불가). 착지 후 이 no-op을 실 업로드(hidden file input→프리사인드 PUT→confirm)로 대체한다.
-  const noopUpload = useCallback(() => {}, []);
+  // 업로드 = 실동작 (story #886d996f 업로드 축). #3637 SSOT 계약 소비 — upload-url→서명 PUT
+  // (Content-Type+required_put_headers)→confirm. 성공 시 신규 Asset을 목록 선두에(id 중복 가드 —
+  // confirm이 on_conflict로 기존 row 반환 가능), 실패는 무신호 금지(toast). 현재 폴더 컨텍스트로 confirm.
+  const handleUploadFile = useCallback(
+    async (file: File) => {
+      try {
+        const asset = await uploadStorageAsset({ file, projectId, folderId: selectedFolderId });
+        setItems((prev) => (prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev]));
+        addToast({ title: t('uploadSuccessTitle'), body: file.name, type: 'success' });
+      } catch {
+        addToast({ title: t('uploadErrorTitle'), body: t('uploadErrorDesc'), type: 'error' });
+      }
+    },
+    [projectId, selectedFolderId, addToast, t],
+  );
 
   const folderMap = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
   const resolveFolderLabel = useCallback(
@@ -416,7 +429,7 @@ export function StorageView({ projectId }: { projectId: string }) {
           onSelectAsset={handleSelectAsset}
           onDeleteAsset={handleRequestDelete}
           onDownloadAsset={handleDownloadAsset}
-          onUpload={noopUpload}
+          onUploadFile={handleUploadFile}
           resolveFolderLabel={resolveFolderLabel}
           loading={loading}
           error={error}
