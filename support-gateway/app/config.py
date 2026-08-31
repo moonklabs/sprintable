@@ -31,7 +31,14 @@ class Settings(BaseSettings):
     # 위임 토큰 만료(초) — 짧게: 유출돼도 피해 창을 최소화.
     token_ttl_seconds: int = 300
 
-    cors_allow_origins: list[str] = []
+    # story #3260(위젯 셸) — 브라우저가 이 서비스를 **직접** 호출한다(Next.js BFF 프록시
+    # 경유 아님, 별도 Cloud Run 오리진이라 실제 CORS preflight가 돈다 — backend/app/core/
+    # config.py의 cors_origins는 대부분 서버사이드 프록시 경유라 사실상 미사용인 것과 다름).
+    # list[str] 대신 backend와 동일하게 comma-구분 문자열로 받는다 — pydantic-settings의
+    # list[str] env 파싱은 JSON을 기대해, 값 안의 콤마가 gcloud --update-env-vars의 comma-
+    # 구분 ArgDict 파싱과 이중으로 충돌한다(cloudbuild.yaml MCP_ALLOWED_HOSTS 선례와 동일
+    # 함정 — 이 필드 자체를 그 함정 밖으로 뺀다).
+    cors_origins: str = ""
 
     # story #3261(지원v1·3오케스트레이션) — Vertex AI SDK 접속 좌표. GCP credit 경계
     # 안(Blueprint §4.1) — Claude 등 파트너 모델은 이 서비스가 아예 모른다(SDK가 vertexai=True
