@@ -89,6 +89,36 @@ def test_delegated_session_token_rejected_by_escalation_delivery_verifier():
         settings.support_gateway_token_secret = settings_backup
 
 
+# story #3263 2차(카디르 QA 격리테스트, 2026-08-31) — jose는 **토큰에 aud 클레임이 아예
+# 없으면** decode()의 audience= 인자를 조용히 건너뛴다(불일치 거부가 아니라 "비교할 대상이
+# 없으니 통과"). 위 test_delegated_session_token_rejected_by_escalation_delivery_verifier가
+# 통과하는 건 위임 토큰이 escalation_id 등 필드도 없어 우연히 KeyError로 걸리는 것뿐 —
+# aud 클레임 부재 자체를 겨냥해 거부하는지는 그 테스트로 증명이 안 된다. 이 테스트는
+# escalation 토큰의 **다른 모든 필드는 정확한 채로 aud만 빠뜨린** 케이스를 직접 겨냥한다
+# (필드 모양이 우연히 다른 경우를 배제 — aud 부재 자체가 거부 사유임을 고립 증명).
+def test_escalation_shaped_token_without_aud_claim_is_rejected_not_silently_accepted():
+    from app.routers.support_gateway_token import EscalationDeliveryError, verify_escalation_delivery_token
+    from app.core.config import settings
+
+    secret = "test-secret-padded-to-32-bytes-min"
+    settings_backup = settings.support_gateway_token_secret
+    settings.support_gateway_token_secret = secret
+    try:
+        # aud만 빼고 나머지 필드는 정확한 escalation 배달 토큰 모양 그대로.
+        no_aud_token = jose_jwt.encode(
+            {
+                "escalation_id": str(uuid.uuid4()), "org_id": str(uuid.uuid4()), "user_id": str(uuid.uuid4()),
+                "reason": "classifier", "detail": "d", "conversation_summary": "s",
+            },
+            secret,
+            algorithm="HS256",
+        )
+        with pytest.raises(EscalationDeliveryError):
+            verify_escalation_delivery_token(no_aud_token)
+    finally:
+        settings.support_gateway_token_secret = settings_backup
+
+
 def test_escalation_delivery_token_with_correct_aud_verifies_and_returns_claims():
     from app.routers.support_gateway_token import verify_escalation_delivery_token, ESCALATION_DELIVERY_AUD
     from app.core.config import settings

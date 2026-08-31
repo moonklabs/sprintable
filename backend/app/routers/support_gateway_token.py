@@ -53,17 +53,32 @@ class EscalationDeliveryClaims:
 
 def verify_escalation_delivery_token(token: str) -> EscalationDeliveryClaims:
     """Gateway→backend 배달 토큰 검증 — session-token 발급과 **같은 대칭키**(역방향)를
-    audience= 필수 지정으로 검증한다. 위임 토큰(aud 없음)이 여기로 잘못 흘러들어오면
-    jose가 audience 불일치로 거부한다(대칭짝: support-gateway/app/token_verify.py가 이
-    반대 방향을 막는 것과 동형)."""
+    audience= 지정으로 검증한다.
+
+    ⚠️실측 정정(카디르 QA 격리테스트, 2026-08-31 — 이전 docstring의 "jose가 audience
+    불일치로 거부한다"는 서술은 틀렸다): jose는 **토큰에 aud 클레임이 아예 없으면**
+    decode()의 audience= 인자를 조용히 건너뛴다(불일치 거부가 아니라 "비교할 대상이
+    없으니 통과") — PyJWT(support-gateway/app/token_verify.py 반대 방향)와 다른 라이브러리
+    동작. 위임 토큰(session-token.py 발급, aud 클레임 자체가 없음)이 이 함수로 들어오면
+    jose 레벨에선 통과하고, 그 뒤 escalation_id 등 필드가 없어 KeyError로 우연히 걸릴
+    뿐이었다 — «우연한 필드 모양 차이»에 기댄 방어였다(위임 토큰에 우연히 escalation_id류
+    필드가 늘면 뚫릴 수 있는 구조 구멍, 페드루 PO 조건① "구조적 분리" 기준 미달). 아래
+    명시 가드가 진짜 방어선 — aud 클레임의 **존재+정확 일치**를 jose 호출과 무관하게
+    직접 확認한다."""
     if not settings.support_gateway_token_secret:
         raise EscalationDeliveryError("SUPPORT_GATEWAY_TOKEN_SECRET not configured")
     try:
+        # audience=를 여전히 넘긴다(aud가 있는데 값이 다르면 jose가 정상적으로 거부하는
+        # 축은 그대로 활용) — 다만 그 하나만으론 부족하므로(위 실측) claims 자체에서
+        # aud 존재+일치를 아래에서 다시 명시 확認한다(단독 방어선이 아니라 필수 1차 관문).
         claims = jose_jwt.decode(
             token, settings.support_gateway_token_secret, algorithms=["HS256"], audience=ESCALATION_DELIVERY_AUD,
         )
     except JoseJWTError as exc:
         raise EscalationDeliveryError(str(exc)) from exc
+    if claims.get("aud") != ESCALATION_DELIVERY_AUD:
+        # aud 클레임이 아예 없거나(위 jose 조용한 skip 정확히 이 경우) 다른 값이면 거부.
+        raise EscalationDeliveryError(f"missing or mismatched aud claim: {claims.get('aud')!r}")
     try:
         return EscalationDeliveryClaims(
             escalation_id=uuid.UUID(claims["escalation_id"]),

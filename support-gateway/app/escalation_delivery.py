@@ -73,9 +73,12 @@ async def deliver_escalation_event(
         "exp": now + timedelta(seconds=_DELIVERY_TOKEN_TTL_SECONDS),
         "iat": now,
     }
-    token = jwt.encode(claims, settings.token_secret, algorithm="HS256")
-
     try:
+        # story #3263 3차(페드루 PO 조건③) — jwt.encode()도 try 안으로: "배달 실패는 절대
+        # 예외로 전파하지 않는다"는 이 함수의 계약을 서명 단계까지 완전히 감싸(이론상
+        # 틈 봉합 — 인코딩 자체가 실패할 확률은 낮지만, 이 함수의 존재 이유가 정확히
+        # "무슨 이유로든 실패해도 호출부를 절대 안 깨뜨린다"이므로 부분 커버는 계약 위반).
+        token = jwt.encode(claims, settings.token_secret, algorithm="HS256")
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 settings.backend_escalation_events_url,

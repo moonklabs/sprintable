@@ -67,7 +67,11 @@ def _client_for(app):
 
 
 async def _setup_app(app, Session):
-    from app.dependencies.database import get_db
+    # story #3263 2차(카디르 QA) — get_db만 걸고 get_read_db를 잊는 whack-a-mole 회귀
+    # 클래스(story #2451 §6 Phase3, A1/A2 두 번 재발) 가드. raw dependency_overrides[get_db]
+    # 대신 이 헬퍼 하나만 거쳐야 구조적으로 못 빠뜨린다 — conftest.py::override_db_and_read
+    # docstring 참고.
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -78,7 +82,7 @@ async def _setup_app(app, Session):
                 await s.rollback()
                 raise
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
 
 
 def _escalation_token(*, escalation_id, org_id, user_id, reason="classifier", detail="d", summary="s") -> str:
