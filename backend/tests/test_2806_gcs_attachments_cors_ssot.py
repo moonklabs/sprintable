@@ -64,6 +64,30 @@ def test_cors_file_allows_get_for_signed_url_fetch():
     assert "GET" in all_methods
 
 
+def test_cors_file_allows_put_for_signed_upload_and_excludes_options():
+    """story #3242(2026-08-31, 유나 실측·페드루 PO 발주) — #886d996f 업로드가 이 버킷에 서명
+    PUT을 직접 쏘는데 method가 GET/HEAD뿐이라 프리플라이트가 Access-Control-Allow-Origin
+    부재로 net::ERR_FAILED. OPTIONS는 GCS가 Access-Control-Request-Method 매칭으로 자동
+    처리하므로 명시하면 안 된다(공식문서: "you shouldn't specify OPTIONS in your CORS
+    configuration")."""
+    rules = _load_cors_rules()
+    all_methods = {m for rule in rules for m in rule.get("method", [])}
+    assert "PUT" in all_methods
+    assert "OPTIONS" not in all_methods
+
+
+def test_cors_file_allows_required_put_headers():
+    """assets.py create_asset_upload_url이 signed_write_url(create_only=True, content_type=...)
+    로 서명해 모든 업로드 PUT에 Content-Type과 x-goog-if-generation-match를 항상 바인딩한다
+    (안 보내면 403 SignatureDoesNotMatch). GCS responseHeader는 preflight의
+    Access-Control-Allow-Headers에 대응(Expose-Headers 아님) — 여기 없으면 프리플라이트 자체가
+    막힌다. Content-Type은 #2806부터 이미 있었으나 x-goog-if-generation-match는 없었다."""
+    rules = _load_cors_rules()
+    all_headers = {h for rule in rules for h in rule.get("responseHeader", [])}
+    assert "Content-Type" in all_headers
+    assert "x-goog-if-generation-match" in all_headers
+
+
 def test_cloudbuild_apply_step_references_the_cors_file_exactly():
     """⭐선언 정합성 — cloudbuild.yaml의 apply-gcs-attachments-cors 스텝이 참조하는
     --cors-file 경로가 실제 이 파일과 정확히 일치하는지(파일명 드리프트 방지)."""
