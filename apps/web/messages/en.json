@@ -4420,5 +4420,15 @@
     "prevPage": "Previous",
     "nextPage": "Next",
     "loopQueueUntitled": "Untitled item"
+  },
+  "supportWidget": {
+    "launcherLabel": "Contact Sprintable support",
+    "panelTitle": "Sprintable Support",
+    "panelSubtitle": "This conversation goes to Sprintable directly, not your organization",
+    "closeLabel": "Close",
+    "unavailableTitle": "Support chat is coming soon",
+    "unavailableBody": "We're connecting this — you can't send a message yet.",
+    "inputPlaceholder": "Type a message",
+    "sendLabel": "Send"
   }
 }

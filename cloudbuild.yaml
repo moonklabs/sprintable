@@ -91,6 +91,10 @@ substitutions:
   # 기본값 'false'(SSE_MULTIPLEX_ENABLED와 동일 컨벤션) — GHA가 dev 브랜치에서만 'true' 주입,
   # prod는 이 커밋으로 무접촉(기존 동작 그대로 유지, 명시 false로 durable화만).
   _EE_ENABLED: "false"
+  # story #3260(2026-08-31, 페드루 PO 조건부 승인) — 「UI는 있는데 서버가 없음」 결함 클래스
+  # 재발 방지: Support Gateway(#f2a27d2a) 착지·AC2/AC3 실측 前까지 위젯 런처를 prod에
+  # 노출하지 않는다. EE_ENABLED와 동일 컨벤션 — dev-safe 기본값 false, GHA가 dev만 true 주입.
+  _SUPPORT_WIDGET_ENABLED: "false"
   # story #2758(2026-08-18, 페드루 PO 지시 — EE_ENABLED·LICENSE_CONSENT와 동형 「등재≠배선」
   # 3번째, 미르코 2754 라이브 실증이 이 마디에서 잡음) — apps/web/src/ee/components/billing/
   # toss-checkout.ts(story #2510)가 읽는 Toss 결제위젯 clientKey가 manual-env-allowlist.yml에
@@ -410,6 +414,8 @@ steps:
       - NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${_SSE_MULTIPLEX_ENABLED}
       - --build-arg
       - NEXT_PUBLIC_EE_ENABLED=${_EE_ENABLED}
+      - --build-arg
+      - NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=${_SUPPORT_WIDGET_ENABLED}
       - --build-arg
       - NEXT_PUBLIC_TOSS_CLIENT_KEY=${_TOSS_CLIENT_KEY}
       - .

@@ -15,6 +15,8 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
+import { SupportWidgetLauncher } from '@/components/support-widget/support-widget-launcher';
+import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
 import { AppSidebar } from '@/components/nav/app-sidebar';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -401,6 +403,14 @@ export function DashboardShell({
           </SidebarProvider>
         </TopBarProvider>
         <SessionExpiredDialog />
+        {/* story #3260 — 인증 화면 전체를 감싸는 유일 지점(SessionExpiredDialog와 형제)에
+            마운트해 "로그인 후 화면만" 노출을 이 위치 자체로 충족한다(별도 클라 체크 불요 —
+            (authenticated)/layout.tsx가 세션 없으면 여기 도달 전에 이미 redirect).
+            페드루 PO 조건부 승인 — isSupportWidgetEnabled() 플래그 뒤(dev on·prod off,
+            lib/ee.ts isEEEnabled()와 동일 컨벤션): Support Gateway 착지·AC2/AC3 실측 前까지
+            항상 unavailable인 런처를 사용자 화면에 노출하지 않는다("UI는 있는데 서버가 없음"
+            결함 클래스 재발 방지). */}
+        {isSupportWidgetEnabled() && <SupportWidgetLauncher />}
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
