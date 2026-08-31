@@ -201,4 +201,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 가드가 신규 필드를 설계대로 잡은 것.
     assert "APPLE_TEAM_ID" in keys and "APPLE_SERVICES_ID" in keys
     assert "APPLE_KEY_ID" in keys and "APPLE_PRIVATE_KEY" in keys
-    assert len(keys) == 107
+    # story #3259(지원v1·1경계, 2026-08-31): support_gateway_token_secret·
+    # support_gateway_token_ttl_seconds 2필드 신설(Support Gateway 위임 토큰 발급용,
+    # backend의 jwt_secret과 의도적으로 분리된 별도 시크릿 — support-gateway/README.md
+    # 참고)로 107→109. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_GATEWAY_TOKEN_SECRET" in keys and "SUPPORT_GATEWAY_TOKEN_TTL_SECONDS" in keys
+    assert len(keys) == 109

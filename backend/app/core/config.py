@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = ""
 
+    # story #3259(지원v1·1경계) — Support Gateway 위임 토큰 서명 시크릿. jwt_secret과 **의도적으로
+    # 분리**(별도 값) — 이 시크릿이 유출돼도 fleet JWT_SECRET과는 무관(반대도 동일). Support
+    # Gateway는 이 시크릿의 검증만 하고 jwt_secret은 아예 모른다(support-gateway/app/config.py).
+    support_gateway_token_secret: str = ""
+    support_gateway_token_ttl_seconds: int = 300
+
     # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
     cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
 
