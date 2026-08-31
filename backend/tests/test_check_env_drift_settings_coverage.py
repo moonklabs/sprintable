@@ -206,4 +206,8 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # backend의 jwt_secret과 의도적으로 분리된 별도 시크릿 — support-gateway/README.md
     # 참고)로 107→109. 가드가 신규 필드를 설계대로 잡은 것.
     assert "SUPPORT_GATEWAY_TOKEN_SECRET" in keys and "SUPPORT_GATEWAY_TOKEN_TTL_SECONDS" in keys
-    assert len(keys) == 109
+    # story #3263(지원v1·5에스컬레이션, 2026-08-31): support_contact_surface_widget 1필드
+    # 신설(메일 «고객센터» fiction 정정 — 위젯 prod 승격과 같은 커밋으로 묶는 env 분기)로
+    # 109→110. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_CONTACT_SURFACE_WIDGET" in keys
+    assert len(keys) == 110

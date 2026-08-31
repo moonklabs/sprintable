@@ -148,6 +148,9 @@ _DECLARED_SUBSTITUTIONS = {
     # 이 가드가 스캔하는 4개 bash 스텝 밖)에서만 쓰여 이 목록에 없어도 무해했으나, backend
     # 쪽으로도 재사용하며 처음 걸린다.
     "_APPLE_SERVICES_ID", "_APPLE_KEY_ID", "_APPLE_TEAM_ID",
+    # story #3263(지원v1·5에스컬레이션) — 메일 «고객센터» fiction 정정, 위젯 prod 승격과
+    # 같은 커밋으로 묶는 env 분기. deploy-backend ENV_VARS가 이제 이 값을 직접 참조.
+    "_SUPPORT_CONTACT_SURFACE_WIDGET",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -231,6 +234,9 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         "_APPLE_SERVICES_ID": "ai.sprintable.web",
         "_APPLE_KEY_ID": "DF2G3UV649",
         "_APPLE_TEAM_ID": "JN798BC4KC",
+        # story #3263 — set -u라 미설정이면 스크립트가 죽는다(APPLE_TEAM_ID 등과 동일 이유).
+        # 값은 cloudbuild.yaml substitutions 기본값과 정합(prod 현재값 — 위젯 미승격 상태).
+        "_SUPPORT_CONTACT_SURFACE_WIDGET": "false",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -448,8 +454,10 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "FIREBASE_OAUTH_HANDOFF_ENABLED=false,"
         # story #3118 — 베이스 ENV_VARS 조립 문자열의 맨 끝(FIREBASE_OAUTH_HANDOFF_ENABLED
         # 다음)에 이어붙는다 — REDIS_URL/ADMIN_OPERATOR_*/GCS_AVATARS_BUCKET은 그 뒤에
-        # 조건부로 append되는 후속 라인이라 실제 순서상 APPLE_*가 먼저 온다.
+        # 조건부로 append되는 후속 라인이라 실제 순서상 APPLE_*·SUPPORT_CONTACT_SURFACE_
+        # WIDGET(story #3263, 베이스 문자열 맨 끝에 추가)가 먼저 온다.
         "APPLE_SERVICES_ID=ai.sprintable.web,APPLE_KEY_ID=DF2G3UV649,APPLE_TEAM_ID=JN798BC4KC,"
+        "SUPPORT_CONTACT_SURFACE_WIDGET=false,"
         "REDIS_URL=redis://10.164.120.243:6379,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
