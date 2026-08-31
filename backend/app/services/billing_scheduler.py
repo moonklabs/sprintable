@@ -105,46 +105,40 @@ def _renewal_order_id(org_id: uuid.UUID, offering_version_id: uuid.UUID, period_
 _TIER_DISPLAY_NAMES = {"free": "Free", "starter": "Starter", "team": "Team", "business": "Business"}
 
 
-def _dunning_email_content(*, tier: str, grace_expires_at, locale: str = "ko") -> tuple[str, str]:
+def _dunning_email_content(*, tier: str, grace_expires_at) -> tuple[str, str]:
     """story #2907 AC3 — 매 실패마다 발송할 문안. 「언제(grace 만료일)」·「어떻게(free
     전이+신규 업로드만 차단·데이터 삭제 없음)」를 명시. tone=nice(선생님 지시) — 고객
     대면 문구라 개야갤 톤 사용 금지.
 
     fast-follow(유나양 design 비차단 권고, 2026-08-21) — ①raw enum(tier) 대신 표시명
     ②billing 페이지(`/settings?tab=billing`, FE `BillingTab` 딥링크 확認) CTA 링크
-    추가. `NEXT_PUBLIC_APP_URL`은 `org_invite_email.py`가 이미 쓰는 동일 패턴 재사용.
-
-    story #3207 — locale 분기(email_copy.DUNNING_COPY 경유, #3205와 동형)+공용 셸
-    (render_email_shell)로 감싼다."""
-    from app.services.email import render_email_shell
-    from app.services.email_copy import DUNNING_COPY
-
+    추가. `NEXT_PUBLIC_APP_URL`은 `org_invite_email.py`가 이미 쓰는 동일 패턴 재사용."""
     grace_date_str = grace_expires_at.strftime("%Y-%m-%d")
     tier_display = _TIER_DISPLAY_NAMES.get(tier, tier)
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     billing_link = f"{app_url}/settings?tab=billing"
-    copy = DUNNING_COPY[locale]
-    grace_note = copy["grace_note"].format(grace_date=grace_date_str, tier_display=tier_display)
-    content = (
-        f"<p>{copy['greeting']}</p>"
-        f"<p>{copy['intro']}</p>"
-        f"<p>{grace_note}</p>"
-        f"<p><a href=\"{billing_link}\">{copy['cta_label']}</a></p>"
-        f"<p>{copy['closing']}</p>"
+    subject = "[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요"
+    html_body = (
+        f"<p>안녕하세요, Sprintable입니다.</p>"
+        f"<p>정기결제 시도가 처리되지 않았습니다. 저희 쪽에서 매일 자동으로 재시도하고 "
+        f"있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠습니다.</p>"
+        f"<p><b>{grace_date_str}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 "
+        f"Free로 전환됩니다. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, "
+        f"신규 업로드만 제한됩니다. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 "
+        f"복귀합니다.</p>"
+        f"<p><a href=\"{billing_link}\">결제 정보 확인하러 가기</a></p>"
+        f"<p>문의사항이 있으시면 언제든 회신해 주세요.</p>"
     )
-    return copy["subject"], render_email_shell(content, locale=locale)
+    return subject, html_body
 
 
 async def _notify_dunning_failure(session: AsyncSession, org_id: uuid.UUID, *, tier: str, grace_expires_at) -> None:
     """실패 통보 메일 — org owner/admin 전원 수신(storage-usage-warn과 동일 조회 패턴,
-    S8). best-effort(개별 흡수) — 메일 실패가 스윕 자체를 막으면 안 된다.
-
-    story #3207 — 수신자별 locale 분기(storage/AU 임계 알림과 동형, users.locale 기준)."""
-    from app.services.agent_onboarding_config import resolve_locale
-
-    recipients = [
-        r for r in (await session.execute(
-            select(User.email, User.locale)
+    S8). best-effort(개별 흡수) — 메일 실패가 스윕 자체를 막으면 안 된다."""
+    subject, html_body = _dunning_email_content(tier=tier, grace_expires_at=grace_expires_at)
+    emails = [
+        r[0] for r in (await session.execute(
+            select(User.email)
             .join(OrgMember, User.id == OrgMember.user_id)
             .where(
                 OrgMember.org_id == org_id,
@@ -153,9 +147,7 @@ async def _notify_dunning_failure(session: AsyncSession, org_id: uuid.UUID, *, t
             )
         )).all()
     ]
-    for em, locale_value in recipients:
-        recipient_locale = resolve_locale(locale_value)
-        subject, html_body = _dunning_email_content(tier=tier, grace_expires_at=grace_expires_at, locale=recipient_locale)
+    for em in emails:
         try:
             send_email(em, subject, html_body)
         except Exception:
