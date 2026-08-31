@@ -311,6 +311,14 @@ steps:
   # iframe이라 무영향)가 origin 불문 전부 차단돼 있었다. `gcloud storage buckets update
   # --cors-file=`은 **전체 교체**라 매 배포 재실행에도 멱등(파일 내용이 그대로면 결과도
   # 그대로) — build/push와 무관해 초반부터 병행 실행.
+  #
+  # 갱신(story #3242, 2026-08-31, 페드루 PO 발주·유나 실측 근거): #886d996f 업로드 기능이
+  # 이 버킷에 서명 PUT을 직접 쏘게 되며 GET/HEAD만 있던 method가 뚫렸다 — PUT 프리플라이트가
+  # Access-Control-Allow-Origin 부재로 net::ERR_FAILED. method에 PUT 추가(OPTIONS는 GCS가
+  # Access-Control-Request-Method 매칭으로 자동 처리 — 명시 금지, 공식문서 확認 완료). PUT은
+  # 항상 create_only=True로 서명(x-goog-if-generation-match: 0 바인딩)·content_type 바인딩이라
+  # responseHeader(=GCS의 Access-Control-Allow-Headers 대응 필드)에 x-goog-if-generation-match를
+  # 추가(Content-Type은 기존에 이미 있었음) — 둘 중 하나라도 빠지면 프리플라이트가 여전히 막힌다.
   - id: apply-gcs-attachments-cors
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
@@ -330,8 +338,7 @@ steps:
         echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
     waitFor: ['-']
 
-  # story #2887 — avatar 전용 버킷 CORS. PUT까지 필요(memo-attachments는 GET/HEAD뿐 — 아바타는
-  # FE가 서명 URL로 직접 PUT하는 업로드 흐름이라 다름). CORS json(infra/gcs-avatars-cors.json)
+  # story #2887 — avatar 전용 버킷 CORS. CORS json(infra/gcs-avatars-cors.json)
   # 자체는 dev/prod origin을 이미 다 실은 공용 파일(memo-attachments와 동일 관례) — 버킷명만
   # env별로 갈린다.
   # story #3117(2026-08-26, prod 실사고 후속) — 여태 dev 전용 게이트(prod 버킷 미프로비저닝)
