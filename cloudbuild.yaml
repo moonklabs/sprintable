@@ -520,6 +520,40 @@ steps:
       - --wait
     waitFor: [update-migrate-job]
 
+  # ─── Migrate Support Gateway DB (story #f2a27d2a, flip PR AC4) ─────────────
+  # backend의 run-migrate-job과 동형 fail-closed 계약 — 배포 하드게이트(false)일 때도 이
+  # 두 스텝은 그냥 스킵(잡 자체가 없거나 provision만 하고 execute는 건너뜀)해 깨지지 않는다.
+  - id: update-support-gateway-migrate-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_SUPPORT_GATEWAY_DEPLOY_ENABLED}" != "true" ]; then
+          echo "skip update-support-gateway-migrate-job: _SUPPORT_GATEWAY_DEPLOY_ENABLED != true"
+          exit 0
+        fi
+        GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" AR_REPO="${_AR_REPO}" COMMIT_SHA="${COMMIT_SHA}" \
+          bash support-gateway/scripts/provision_migrate_job.sh ${_DEPLOY_ENV}
+    waitFor: [push-support-gateway]
+
+  - id: run-support-gateway-migrate-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_SUPPORT_GATEWAY_DEPLOY_ENABLED}" != "true" ]; then
+          echo "skip run-support-gateway-migrate-job: _SUPPORT_GATEWAY_DEPLOY_ENABLED != true"
+          exit 0
+        fi
+        gcloud run jobs execute sprintable-support-gateway-migrate-${_DEPLOY_ENV} \
+          --region=${_AR_REGION} \
+          --wait
+    waitFor: [update-support-gateway-migrate-job]
+
   # ─── Deploy to Cloud Run ───────────────────────────────────────────────────
   - id: deploy-frontend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -671,9 +705,15 @@ steps:
         # APPLE_PRIVATE_KEY 시크릿 바인딩. dev pgbouncer 경유분은 #3110 2보(userlist에 sprintable
         # 유저 등재+DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE 시크릿 신설, PO 집행)로 sprintable
         # 유저 전환 완료 — dev 서빙이 postgres 수퍼유저 DSN을 쓰는 자리가 이제 0개.
+        # story #f2a27d2a(지원v1·1경계) flip PR — SUPPORT_GATEWAY_TOKEN_SECRET을 **dev
+        # 분기에만** 추가한다. prod용 시크릿(SUPPORT_GATEWAY_TOKEN_SECRET_PROD)은 아직
+        # Secret Manager에 없다(prod 자원 미프로비저닝) — prod SECRETS_FLAG에 넣으면 이
+        # 이미 live인 backend prod 배포 자체가 "secret not found"로 깨진다. backend
+        # 코드 쪽은 이미 이 값 미설정 시 fail-closed 503(support_gateway_token.py)이라
+        # 시크릿을 아예 안 실어도 안전 — prod가 그 상태다.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_dev:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         fi
@@ -925,9 +965,10 @@ steps:
           --min-instances=${_SUPPORT_GATEWAY_MIN_INSTANCES} \
           --max-instances=${_SUPPORT_GATEWAY_MAX_INSTANCES} \
           --allow-unauthenticated \
+          --add-cloudsql-instances=${PROJECT_ID}:${_AR_REGION}:sprintable-${_DEPLOY_ENV} \
           --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest" \
           --quiet
-    waitFor: [push-support-gateway]
+    waitFor: [run-support-gateway-migrate-job]
 
   # story #2185(2026-07-27) — GCE MIG(realtime-gateway) 자동배포. deploy-realtime(위, Cloud
   # Run 폴백)과 별개 타깃이다. ⛔dev 전용 하드게이트 — prod GCE 는 실사용 중(48h 정상응답
