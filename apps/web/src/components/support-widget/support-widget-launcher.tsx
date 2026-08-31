@@ -29,7 +29,18 @@ const PANEL_ID = 'support-widget-panel';
  * 모바일(<lg=1024)에서는 MobileTabBar(mobile-tab-bar.tsx, `h-16` = 64px, 일반 flow — fixed
  * 아니지만 화면 최하단 전폭을 차지)가 lg:hidden으로 뜬다. 이 컴포넌트는 fixed(뷰포트 기준)
  * 라 문서 흐름과 무관하게 겹칠 수 있어, 모바일에서만 bottom 오프셋을 탭바 높이+여백만큼
- * 올린다(bottom-20 = 5rem = 64px+16px). lg+ 는 탭바가 없어 원래 여백(bottom-5)으로 되돌아간다.
+ * 올린다(bottom-20 = 5rem = 64px+16px).
+ *
+ * ⚠️story #3260 후속(2026-08-31, 유나 post-deploy 라이브 실측 finding) — lg+(데스크톱)를
+ * bottom-5로 되돌리면 AppSidebar(ui/sidebar.tsx)의 SidebarFooter(profile-menu.tsx
+ * +locale-switcher.tsx+theme-toggle.tsx+business-info-disclosure.tsx, `space-y-2 p-2`)가
+ * 항상 화면 좌하단에 그려지는데(사이드바 폭은 200~360px 사용자 조절 가능이지만 이 footer
+ * 높이는 폭과 무관하게 고정) 그 위를 이 fixed 런처가 그대로 덮어 로케일/테마 토글이 가려지고
+ * 「Business Information」(법적 표기) 행까지 피복했다 — 사이드바가 「선점 없음」 판정이었던
+ * 최초 grep은 fixed 요소만 찾아 일반 flow인 이 footer를 놓쳤다. footer 실측 높이(profile
+ * 40px+locale/theme 32px+business-info 28px+p-2·gap 32px ≈ 132px) 위로 넉넉히 띄운다
+ * (lg:bottom-40=160px, ~28px 여유) — 모바일처럼 탭바 폭 무관 원칙과 동형(footer 높이도
+ * 사이드바 폭과 무관).
  */
 export function SupportWidgetLauncher() {
   const t = useTranslations('supportWidget');
@@ -57,7 +68,7 @@ export function SupportWidgetLauncher() {
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label={open ? t('closeLabel') : t('launcherLabel')}
-        className="fixed bottom-20 left-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 lg:bottom-5"
+        className="fixed bottom-20 left-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 lg:bottom-40"
       >
         {open ? <X className="h-5 w-5" aria-hidden /> : <LifeBuoy className="h-5 w-5" aria-hidden />}
       </button>
@@ -66,7 +77,7 @@ export function SupportWidgetLauncher() {
           id={PANEL_ID}
           role="dialog"
           aria-label={t('panelTitle')}
-          className="fixed bottom-[8.75rem] left-5 z-40 flex h-[min(480px,calc(100vh-11rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl lg:bottom-20 lg:h-[min(480px,calc(100vh-6rem))]"
+          className="fixed bottom-[8.75rem] left-5 z-40 flex h-[min(480px,calc(100vh-11rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl lg:bottom-56 lg:h-[min(480px,calc(100vh-15rem))]"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />
