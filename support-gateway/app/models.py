@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Text, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Text, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # SQLAlchemy 2.0 제네릭 Uuid — PG는 native UUID로, SQLite(테스트 전용, aiosqlite)는 CHAR(32)로
@@ -49,6 +49,14 @@ class SupportConversation(Base):
     별개 축이다(상담을 종료해도 열린 에스컬레이션은 안 건드린다, 그 반대도 마찬가지)."""
 
     __tablename__ = "support_conversations"
+    # story #3285(지원v1·후속, 2026-09-01) — realdb 드리프트 게이트가 처음 실행되며 발견한
+    # 별개 사전 존재 드리프트(operator role과 무관). migration 0003이 실제로 만든 건
+    # (org_id, external_user_id) 복합 인덱스 하나(그 조합으로 "활성 상담" 조회, 위 docstring)
+    # 인데, 모델은 external_user_id에 `index=True`만 붙여 실제 배포엔 없는 단일 컬럼 인덱스를
+    # 따로 선언하고 있었다(compare_metadata 실측으로 적발). 실 배포 스키마에 맞춰 정정.
+    __table_args__ = (
+        Index("ix_support_conversations_org_user_active", "org_id", "external_user_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
@@ -57,7 +65,7 @@ class SupportConversation(Base):
     )
     # NULL=레거시 봉인 행(위 docstring). 신규 생성 경로(_get_or_create_active_conversation 등)는
     # 항상 값을 채운다 — 코드 레벨 불변식, DB NOT NULL 제약은 아니다(레거시 행 공존 때문).
-    external_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    external_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -71,11 +79,32 @@ class SupportConversation(Base):
     )
 
 
+# story #3285(지원v1·후속, 2026-09-01) — #3672가 이 값 목록을 코드(app/routers/operator_replies.py
+# role="operator")에서 먼저 넓혔는데 마이그레이션(ck_support_messages_role, migration 0001)은
+# 그대로였다 — dev PG에서 실제로 IntegrityError 500(#3279 실왕복). 이 상수가 "코드가 믿는
+# 유효 role 집합"의 유일한 출처다 — CheckConstraint도, 아래 realdb 드리프트 프로브
+# (tests/test_gateway_schema_drift_realdb.py)도 전부 이 상수 하나를 순회/참조한다. 새 role을
+# 추가할 땐 여기만 고치면 되고, 그 순간 프로브가 자동으로 그 값을 실제 INSERT해 마이그레이션
+# 누락을 구조적으로 잡는다(하드코딩된 별도 목록을 테스트에 두면 갱신을 잊는 바로 그 실수가
+# 재발한다 — PO 확定).
+#
+# ⚠️migration 0004(story #3279 핫픽스, PR#3678)가 실 제약을 이 4개 값으로 넓히기 전까지는
+# 이 선언과 dev/prod 배포 상태가 불일치한다 — 그동안은 realdb 드리프트 테스트가 **의도적으로
+# RED**다(정확히 이 사고를 재현·증명하는 것). #3678 머지 전까지 이 PR은 머지 보류.
+ALLOWED_ROLES: tuple[str, ...] = ("customer", "agent", "system", "operator")
+
+
 class SupportMessage(Base):
     """고객 텍스트 저장 — role='customer'인 행은 항상 injection_defense.sanitize_customer_text()를
     거친 *이후* 값이어야 한다(app/injection_defense.py·story #3259 AC5 골격, 본 방어는 story #6)."""
 
     __tablename__ = "support_messages"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN (" + ", ".join(f"'{r}'" for r in ALLOWED_ROLES) + ")",
+            name="ck_support_messages_role",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id: Mapped[uuid.UUID] = mapped_column(
@@ -83,9 +112,11 @@ class SupportMessage(Base):
     )
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     # story #3279 핫픽스(2026-09-01, 마이그 0004) — 'operator' 편입 전엔 DB CHECK 제약이
-    # 이 role을 몰라 실 PG에서 500이었다(app/routers/operator_replies.py가 이미 쓰고
-    # 있었음에도). 이 주석과 alembic/versions/0004의 CHECK을 항상 같이 갱신할 것.
-    role: Mapped[str] = mapped_column(Text, nullable=False)  # 'customer' | 'agent' | 'system' | 'operator'
+    # 이 role을 몰라 실 PG에서 500이었다. story #3285가 "주석과 마이그레이션을 항상 같이
+    # 갱신할 것"이라는 수동 규율을 구조로 대체 — 이제 이 컬럼의 유효값은 ALLOWED_ROLES
+    # 상수(위)가 유일한 출처이고, CheckConstraint도 realdb 드리프트 프로브도 전부 거기서
+    # 도출된다. 새 role 추가 시 여기(주석 아님, ALLOWED_ROLES)만 고칠 것.
+    role: Mapped[str] = mapped_column(Text, nullable=False)  # ALLOWED_ROLES 중 하나 — 위 상수 참고.
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
