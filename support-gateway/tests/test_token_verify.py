@@ -6,7 +6,13 @@ import jwt
 import pytest
 
 from app.config import settings
-from app.token_verify import DelegatedTokenError, verify_delegated_token
+from app.token_verify import (
+    OPERATOR_REPLY_AUD,
+    DelegatedTokenError,
+    OperatorReplyTokenError,
+    verify_delegated_token,
+    verify_operator_reply_token,
+)
 from tests.conftest import TEST_TOKEN_SECRET
 
 
@@ -75,3 +81,79 @@ def test_escalation_delivery_token_rejected_here_cross_kind_defense(monkeypatch)
     )
     with pytest.raises(DelegatedTokenError):
         verify_delegated_token(token)
+
+
+# --- story #3279 — 운영자 회신 토큰(backend→gateway, escalation_delivery.py 반대 방향) -----
+
+
+def test_operator_reply_token_valid_roundtrip():
+    escalation_id = uuid.uuid4()
+    token = jwt.encode(
+        {"aud": OPERATOR_REPLY_AUD, "escalation_id": str(escalation_id), "content": "확인했습니다, 답변드릴게요."},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    claims = verify_operator_reply_token(token)
+    assert claims.escalation_id == escalation_id
+    assert claims.content == "확인했습니다, 답변드릴게요."
+
+
+def test_operator_reply_token_missing_aud_rejected():
+    """페드루 PO 지시(2026-09-01, story #3661 클래스 재발 방지) — aud 클레임 자체가 없는
+    토큰은 반드시 거부돼야 한다(부재를 "검증 대상 없음=통과"로 오판하면 안 된다)."""
+    token = jwt.encode(
+        {"escalation_id": str(uuid.uuid4()), "content": "aud 없이 서명된 토큰"},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(OperatorReplyTokenError):
+        verify_operator_reply_token(token)
+
+
+def test_operator_reply_token_wrong_aud_rejected():
+    """aud가 있지만 다른 값(예: 위임 토큰·에스컬레이션 배달 토큰과 교차 오용)이면 거부."""
+    token = jwt.encode(
+        {"aud": "backend:escalation-events", "escalation_id": str(uuid.uuid4()), "content": "잘못된 aud"},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(OperatorReplyTokenError):
+        verify_operator_reply_token(token)
+
+
+def test_operator_reply_token_delegated_token_rejected_here_cross_kind_defense():
+    """위임 토큰(aud 없음)을 이 검증기에 잘못 던져도 거부돼야 한다."""
+    token = jwt.encode(
+        {"org_id": str(uuid.uuid4()), "user_id": str(uuid.uuid4())}, TEST_TOKEN_SECRET, algorithm="HS256"
+    )
+    with pytest.raises(OperatorReplyTokenError):
+        verify_operator_reply_token(token)
+
+
+def test_operator_reply_token_missing_content_rejected():
+    token = jwt.encode(
+        {"aud": OPERATOR_REPLY_AUD, "escalation_id": str(uuid.uuid4())}, TEST_TOKEN_SECRET, algorithm="HS256"
+    )
+    with pytest.raises(OperatorReplyTokenError):
+        verify_operator_reply_token(token)
+
+
+def test_operator_reply_token_empty_content_rejected():
+    token = jwt.encode(
+        {"aud": OPERATOR_REPLY_AUD, "escalation_id": str(uuid.uuid4()), "content": "   "},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(OperatorReplyTokenError):
+        verify_operator_reply_token(token)
+
+
+def test_operator_reply_token_unconfigured_secret_fails_closed(monkeypatch):
+    monkeypatch.setattr(settings, "token_secret", "")
+    token = jwt.encode(
+        {"aud": OPERATOR_REPLY_AUD, "escalation_id": str(uuid.uuid4()), "content": "x"},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(OperatorReplyTokenError):
+        verify_operator_reply_token(token)
