@@ -116,6 +116,7 @@ def test_tool_signature_has_no_org_override_parameter(tool_name, allowed_params)
         user_id=uuid.uuid4(),
         escalation_state={"called": False},
         knowledge_state={"called": False, "had_match": False},
+        tool_reply_state={"called": False, "answers": []},
         llm=None,
     )
     tool = next(t for t in tools if t.__name__ == tool_name)
@@ -137,6 +138,7 @@ def test_v1_tool_surface_is_exactly_the_known_read_or_log_only_set():
         user_id=uuid.uuid4(),
         escalation_state={"called": False},
         knowledge_state={"called": False, "had_match": False},
+        tool_reply_state={"called": False, "answers": []},
         llm=None,
     )
     assert {t.__name__ for t in tools} == {"knowledge_search", "org_status_lookup", "escalate"}
