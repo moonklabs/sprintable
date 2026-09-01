@@ -11,7 +11,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { SidebarProvider } from '@/components/ui/sidebar';
+import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 import { SupportWidgetLauncher } from './support-widget-launcher';
+
+const ACTIVATION_COMPLETE_KEY = 'sprintable_activation_checklist_complete';
 
 // story #3260 2차 finding(유나 라이브 실측 FAIL — 재시도 스톰, 2026-08-31) 회귀가드용 —
 // isSupportGatewayConfiguredMock 기본값은 false(기존 테스트 전부가 'unavailable'을 가정
@@ -61,6 +64,11 @@ beforeEach(() => {
   isSupportGatewayConfiguredMock.mockReset().mockReturnValue(false);
   createOrResumeGatewaySessionMock.mockReset();
   usePathnameMock.mockReset().mockReturnValue('/board');
+  // story #3274 — 런처가 이제 useActivationStatus()도 부른다(온보딩 단계 게이팅). 이
+  // 파일의 기존 테스트 전부는 "런처가 뜬다"를 전제하므로 기본값=미완주(fetch 미설정 시
+  // 실 fetch가 실패해 allComplete=false로 남는 것과 동형, use-activation-status.ts의
+  // fail-closed와 일치) — 게이팅 자체를 겨냥하는 describe만 별도로 완주 상태를 만든다.
+  _resetActivationStatusCacheForTests();
 });
 
 afterEach(async () => {
@@ -135,47 +143,12 @@ describe('SupportWidgetLauncher — story #3260 셸', () => {
   });
 });
 
-// story #3260 2차 finding(2026-08-31, 유나 pre-merge 수치 판정) — 1차 수정(lg:bottom-40)은
-// 「덮는 사이드바 행이 바뀔 뿐」이었다: 런처가 left-5로 사이드바 x-범위 «안»에 있는 한 세로
-// 오프셋은 근본 해소가 아니다. useSidebar()의 실 폭(리사이즈 가능 200~360px)을 읽어 사이드바
-// 밖으로 가로 이동하는지, collapsed(offcanvas·가시폭 0)·모바일(사이드바가 Sheet라 폭을 안
-// 먹음)은 override가 없는지를 고정한다.
-describe('SupportWidgetLauncher — story #3260 2차: 사이드바 실 폭 기반 데스크톱 가로 회피', () => {
-  it('데스크톱·사이드바 기본폭(256px) 확장 상태 — 런처가 256+16=272px 지점으로 이동한다', async () => {
-    await mount();
-    const btn = container.querySelector('button') as HTMLButtonElement;
-    expect(btn.style.left).toBe('272px');
-  });
-
-  it('데스크톱·사이드바 리사이즈된 폭(예: 320px) — 정적 추정이 아니라 실 폭을 그대로 반영한다("폭 가변" 함정 회귀가드)', async () => {
-    window.localStorage.setItem('sidebar_width', '320');
-    await mount();
-    const btn = container.querySelector('button') as HTMLButtonElement;
-    expect(btn.style.left).toBe('336px');
-  });
-
-  it('데스크톱·사이드바 collapsed(offcanvas, 가시폭 0) — 기본 left-5(클래스)로 되돌아가고 인라인 override가 없다', async () => {
-    await mount({ defaultOpen: false });
-    const btn = container.querySelector('button') as HTMLButtonElement;
-    expect(btn.style.left).toBe('');
-    expect(btn.className).toContain('left-5');
-  });
-
-  it('모바일(<1024) — 사이드바가 Sheet(오프캔버스)라 화면 폭을 안 먹으므로 사이드바 폭·상태와 무관하게 override가 없다', async () => {
-    setInnerWidth(500);
-    await mount();
-    const btn = container.querySelector('button') as HTMLButtonElement;
-    expect(btn.style.left).toBe('');
-  });
-
-  it('오버레이 패널도 런처와 동일한 가로 오프셋을 공유한다(같은 x축에서 열려야 자연스럽다)', async () => {
-    await mount();
-    const btn = container.querySelector('button') as HTMLButtonElement;
-    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const panel = container.querySelector('[role="dialog"]') as HTMLElement;
-    expect(panel.style.left).toBe('272px');
-  });
-});
+// story #3274(선생님 확定 2026-09-01) — 좌하단 배치+사이드바 실 폭 회피 로직(위 5건짜리
+// describe, story #3260 2차 finding)을 통째로 걷었다. 걷는 이유: 런처가 우하단으로
+// 옮겨가 좌측 고정 사이드바와 애초에 안 겹치므로 그 회피 자체가 무의미해졌다(사이드바가
+// 없어진 게 아니라 이 컴포넌트가 반대편으로 이동해 그 충돌축이 통째로 사라짐) — 새
+// 충돌축(우하단 toast/저장오류 배너)은 아래 "우하단 배치+토스트 corner 회피" describe가
+// 대신 고정한다.
 
 // story #3260 2차 finding(2026-08-31, 유나 라이브 실측 FAIL) — CSP가 Gateway fetch를
 // 막는 상황(즉시·동기에 가깝게 실패)에서 connect()가 4초에 87회(~22/s) 발화했다. 원인은
@@ -231,13 +204,13 @@ describe('SupportWidgetLauncher — story #3260 2차: 재시도 스톰 회귀가
   });
 });
 
-// story #3260 3차 finding(2026-08-31, 선생님 실기기 적발→유나 design 확定) — 모바일 채팅
-// 상세(/chats/{id})는 자체 하단 첨부/전송 아이콘 열이 있어 런처(bottom-20 left-5)가 그 위에
-// 그대로 겹쳤다(실기기 스크린샷 실증, entity:artifact:13c9e4cb). 리스트(/chats, id 없음)는
-// 그 열이 없어 무관 — chats/layout.tsx의 isListRoute = pathname === '/chats' 판정과 대칭.
-// 페드루 PO 발주 pin 3종: 모바일 상세=DOM 0 / 모바일 리스트·보드=기존 그대로 / 데스크톱=라우트
-// 무관 불변.
-describe('SupportWidgetLauncher — story #3260 3차: 모바일 채팅-상세 숨김', () => {
+// story #3260 3차 finding(2026-08-31, 선생님 실기기 적발→유나 design 확定), story #3274로
+// 위치만 우측 이전 — 모바일 채팅 상세(/chats/{id})는 자체 하단 첨부/전송 아이콘 열이 있어
+// 겹친다는 사실 자체는 좌→우 이동과 무관하게 그대로다(실기기 스크린샷 실증,
+// entity:artifact:13c9e4cb). 리스트(/chats, id 없음)는 그 열이 없어 무관 — chats/layout.tsx의
+// isListRoute = pathname === '/chats' 판정과 대칭. 페드루 PO 발주 pin 3종: 모바일 상세=DOM 0 /
+// 모바일 리스트·보드=기존 그대로 / 데스크톱=라우트 무관 불변.
+describe('SupportWidgetLauncher — story #3260 3차(3274로 우측 이전): 모바일 채팅-상세 숨김', () => {
   it('모바일 + 채팅-상세(/chats/conv-123) — 런처 DOM 자체가 없다(겹침 원천 차단)', async () => {
     setInnerWidth(500);
     usePathnameMock.mockReturnValue('/chats/conv-123');
@@ -262,12 +235,65 @@ describe('SupportWidgetLauncher — story #3260 3차: 모바일 채팅-상세 �
     expect(container.querySelector('button')).toBeTruthy();
   });
 
-  it('데스크톱 — 채팅-상세 라우트여도 사이드바 폭+16px 배치가 그대로다(데스크톱은 스플릿뷰라 무관)', async () => {
+  it('데스크톱 — 채팅-상세 라우트여도 그대로 뜬다(데스크톱은 스플릿뷰라 무관, isMobile 분기 자체를 안 탐)', async () => {
     setInnerWidth(1280);
     usePathnameMock.mockReturnValue('/chats/conv-123');
     await mount();
     const btn = container.querySelector('button') as HTMLButtonElement;
     expect(btn).toBeTruthy();
-    expect(btn.style.left).toBe('272px'); // 256(기본 사이드바 폭)+16
+  });
+});
+
+// story #3274(선생님 확定 2026-09-01) — 우하단 배치+토스트/저장오류 배너 corner 회피.
+// 사이드바 회피 로직을 걷은 대신 새 충돌축(toast.tsx·kanban-board.tsx 둘 다
+// `fixed bottom-4 right-4`)을 bottom-20으로 넘어선다 — 반응형 분기 없이 모바일/데스크톱
+// 동일 값(모바일=탭바 회피와 우연히 같은 값을 재사용).
+describe('SupportWidgetLauncher — story #3274: 우하단 배치+토스트 corner 회피', () => {
+  it('데스크톱 — right-5·bottom-20 클래스로 뜬다(사이드바 관련 인라인 style 없음)', async () => {
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    expect(btn.className).toContain('right-5');
+    expect(btn.className).toContain('bottom-20');
+    expect(btn.style.left).toBe('');
+    expect(btn.style.right).toBe('');
+  });
+
+  it('오버레이 패널도 런처와 같은 우측 오프셋(right-5)을 공유한다', async () => {
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const panel = container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(panel.className).toContain('right-5');
+  });
+});
+
+// story #3274(선생님 확定 2026-09-01) — 상시 플로팅 폐기 핵심 불변식 2건.
+// ① "배너 ⟺ 플로팅": 둘 다 같은 판별자(useActivationStatus().allComplete)를 공유하므로
+//    온보딩 미완주(allComplete=false) 동안엔 항상 같이 뜨고, 완주 즉시 항상 같이 사라진다
+//    (두 벌 판별자 금지 원칙의 실제 증거 — 하나가 뜨는데 하나만 안 뜨는 상태가 없다).
+// ② 완주 후 플로팅 DOM 자체가 0(마운트는 되지만 렌더 결과가 없다 — 조건부 hidden이 아니라
+//    통째로 render null, PR 리뷰 시 "그냥 숨겨져 있을 뿐"과 구분하기 위한 명시 pin).
+describe('SupportWidgetLauncher — story #3274: 온보딩 단계 게이팅(핵심 불변식)', () => {
+  it('activation 미완주(기본값) — 플로팅이 뜬다(온보딩 단계)', async () => {
+    await mount();
+    expect(container.querySelector('button')).toBeTruthy();
+  });
+
+  it('activation 완주(localStorage 플래그) — 플로팅 DOM 자체가 없다(AC④, 조용히 숨김이 아니라 render null)', async () => {
+    window.localStorage.setItem(ACTIVATION_COMPLETE_KEY, '1');
+    await mount();
+    // mount()가 감싸는 SidebarProvider 자체의 wrapper div는 남지만(하니스), 런처가 그리는
+    // 요소(button/dialog)는 정말로 0개여야 한다 — hidden 스타일이 아니라 render null.
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelectorAll('[aria-label]').length).toBe(0);
+  });
+
+  it('완주 상태에서는 모바일이든 데스크톱이든, 어떤 라우트든 플로팅이 뜨지 않는다(라우트/뷰포트보다 게이팅이 우선)', async () => {
+    window.localStorage.setItem(ACTIVATION_COMPLETE_KEY, '1');
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/board');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
   });
 });

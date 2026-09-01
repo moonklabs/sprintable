@@ -17,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { SidebarProvider } from '@/components/ui/sidebar';
+import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
 import { SupportWidgetLauncher } from './support-widget-launcher';
 
@@ -59,11 +60,23 @@ beforeEach(() => {
     removeItem: () => {},
     clear: () => {},
   });
+  // story #3274 — 런처가 이제 useActivationStatus()도 부른다(온보딩 단계 게이팅). 이 파일의
+  // 관심사는 effect deps 회귀 하나뿐이라, activation 조회는 "미완주"(런처가 뜨는 쪽)로
+  // 고정해 무관 변수로 만든다 — 캐시도 파일 간/테스트 간 새지 않게 리셋.
+  _resetActivationStatusCacheForTests();
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ data: {
+      steps: { signed_up: true, email_verified: false, org_created: false, agent_connected: false, first_roundtrip: false },
+      completed: 1, total: 5, all_complete: false, first_instruction_conversation_id: null,
+    } }),
+  })));
 });
 
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 async function mount() {
