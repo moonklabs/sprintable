@@ -277,3 +277,56 @@ def test_sync_against_real_manifest_and_real_gcp_if_available():
     manifest = pr_gate.load_manifest()
     ok, lines = sync_gate.check(manifest, live)
     assert ok, f"manifest가 GCP 실물과 어긋남(정기 갱신 필요) — {lines}"
+
+
+# ── story #3272 — main+develop manifest 합집합(스케줄 가드 배경음화 방지) ────────────────
+
+
+def test_parse_manifest_text_strips_blank_lines_and_comments():
+    text = "A\n# comment\n\nB\n  C  \n"
+    assert sync_gate.parse_manifest_text(text) == {"A", "B", "C"}
+
+
+def test_load_manifest_union_adds_develop_only_names():
+    """⭐핵심 pin — main 매니페스트엔 없고 develop에만 있는(=아직 승격 전) 이름이 union에
+    들어가면, 그 이름이 GCP에 있어도 더 이상 "GCP엔 있는데 manifest에 없음" 드리프트로
+    안 잡힌다(story #3272 실사고: SUPPORT_GATEWAY_*_dev 3종, run 33458117504)."""
+    with patch.object(sync_gate, "load_manifest", return_value={"A"}), \
+         patch.object(sync_gate, "fetch_develop_manifest_text", return_value="A\nSUPPORT_GATEWAY_TOKEN_SECRET_dev\n"):
+        union = sync_gate.load_manifest_union()
+    assert union == {"A", "SUPPORT_GATEWAY_TOKEN_SECRET_dev"}
+
+    ok, lines = sync_gate.check(manifest=union, live={"A", "SUPPORT_GATEWAY_TOKEN_SECRET_dev"})
+    assert ok is True  # union 적용 전이었다면 main={"A"} 단독 대조로 이 케이스가 FAIL이었다.
+
+
+def test_load_manifest_union_falls_back_to_main_only_when_develop_fetch_fails():
+    """develop을 못 읽으면(네트워크 실패 등) 조용히 main 단독으로 폴백 — 완화가 안 걸릴
+    뿐, 이 스크립트 자체가 죽거나 예외를 삼켜 원인불명 성공을 내지는 않는다."""
+    with patch.object(sync_gate, "load_manifest", return_value={"A"}), \
+         patch.object(sync_gate, "fetch_develop_manifest_text", return_value=None):
+        union = sync_gate.load_manifest_union()
+    assert union == {"A"}
+
+
+def test_load_manifest_union_still_catches_true_orphan_secret():
+    """⭐선언 검증 — main·develop 어느 쪽 manifest에도 없는 이름(진짜 고아)은 union
+    적용 후에도 여전히 "GCP엔 있는데 manifest에 없음"으로 잡힌다(이 처방이 넓히는 "정상"
+    범위는 develop이 아는 이름으로 한정된다는 모듈 docstring의 선언 그대로)."""
+    with patch.object(sync_gate, "load_manifest", return_value={"A"}), \
+         patch.object(sync_gate, "fetch_develop_manifest_text", return_value="A\n"):
+        union = sync_gate.load_manifest_union()
+    ok, lines = sync_gate.check(manifest=union, live={"A", "TRULY_ORPHANED_SECRET"})
+    assert ok is False
+    assert any("TRULY_ORPHANED_SECRET" in line for line in lines)
+
+
+def test_load_manifest_union_still_catches_dangerous_axis_deleted_from_gcp():
+    """위험 축(manifest엔 있는데 GCP엔 없음)은 union 적용 후에도 그대로 잡힌다 — 이
+    처방이 손대는 건 저위험 축(GCP엔 있는데 manifest에 없음)뿐이다."""
+    with patch.object(sync_gate, "load_manifest", return_value={"A", "GHOST"}), \
+         patch.object(sync_gate, "fetch_develop_manifest_text", return_value="A\n"):
+        union = sync_gate.load_manifest_union()
+    ok, lines = sync_gate.check(manifest=union, live={"A"})
+    assert ok is False
+    assert any("GHOST" in line for line in lines)
