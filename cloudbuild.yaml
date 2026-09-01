@@ -736,6 +736,17 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
           ENV_VARS="$${ENV_VARS},GOTENBERG_SERVICE_URL=${_GOTENBERG_SERVICE_URL}"
         fi
+        # story #3279(지원v1·후속) — 운영자 회신 배달(backend→support-gateway) 착지 URL.
+        # support-gateway 자체가 아직 dev 전용 프로비저닝(_NEXT_PUBLIC_SUPPORT_GATEWAY_URL이
+        # prod엔 빈 문자열, deploy-frontend 스텝 주석 참고)이라 같은 조건으로 게이트 — 빈
+        # 값이면 아예 안 싣는다(GOTENBERG_SERVICE_URL과 동일 원칙, 안 실으면 코드 쪽
+        # settings.support_gateway_operator_reply_url=""가 fail-closed로 배달을 정직하게
+        # skip한다 — operator_reply_delivery.py). SUPPORT_GATEWAY_TOKEN_SECRET은 이미 이
+        # 스텝의 SECRETS_FLAG(dev 분기)에 바인딩돼 있어 별도 시크릿 추가 불요(같은 대칭키
+        # 재사용 — aud로만 구조적 분리, escalation_delivery.py 반대 방향과 동형).
+        if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}" ]; then
+          ENV_VARS="$${ENV_VARS},SUPPORT_GATEWAY_OPERATOR_REPLY_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}/api/v1/internal/operator-replies"
+        fi
         # story #2445/#3110/#3118 — DATABASE_URL(PgBouncer, dev/prod 둘 다 sprintable 앱유저)·
         # DATABASE_URL_DIRECT(dev=sprintable 앱유저·prod=postgres 직결)·DATABASE_URL_READ(prod만)·
         # APPLE_PRIVATE_KEY 시크릿 바인딩. dev pgbouncer 경유분은 #3110 2보(userlist에 sprintable

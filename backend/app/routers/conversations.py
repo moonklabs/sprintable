@@ -684,6 +684,28 @@ def _approval_payload(msg: "ConversationMessage") -> dict:
     return {"approval_target": target if isinstance(target, dict) else None}
 
 
+def _operator_reply_target_gate_id(root_msg: "ConversationMessage | None") -> uuid.UUID | None:
+    """story #3279(지원v1·후속) — root_msg(스레드 답장의 부모, 이미 explicit SELECT로 로드된
+    값)가 support 에스컬레이션 카드(approval_delivery.py가 만드는 approval_target.work_item_type
+    =="support_escalation")면 그 gate_id를 돌려준다. 카드가 아니거나 gate_id가 없거나
+    malformed면 None(=배달 대상 아님) — send_message()가 이 값이 있을 때만 background task를
+    큐잉한다. _approval_payload와 달리 root_msg는 이 요청 안에서 방금 로드한 값이라
+    msg_metadata가 이미 채워져 있음이 보장된다(__dict__ 우회 불필요, 직접 속성 접근 안전)."""
+    if root_msg is None or not root_msg.msg_metadata:
+        return None
+    approval_target = root_msg.msg_metadata.get("approval_target")
+    if not isinstance(approval_target, dict) or approval_target.get("work_item_type") != "support_escalation":
+        return None
+    gate_id_raw = approval_target.get("gate_id")
+    if not gate_id_raw:
+        return None
+    try:
+        return uuid.UUID(str(gate_id_raw))
+    except ValueError:
+        logger.warning("operator reply skip — malformed gate_id in approval_target=%r", gate_id_raw)
+        return None
+
+
 def _event_payload(msg: "ConversationMessage") -> dict:
     """story #2637 AC 0-a: msg_metadata['event'] → payload top-level(없으면 None).
     _approval_payload와 동형(additive·__dict__ 전용 read — 동일 greenlet_spawn 회피 이유).
@@ -3055,6 +3077,25 @@ async def send_message(
         message_id=msg.id,
         org_id=org_id,
     )
+
+    # story #3279(지원v1·후속) — 운영자 회신 배달 훅. 이 메시지가 support 에스컬레이션 카드에
+    # 대한 **스레드 답장**이면, 그 내용을 support-gateway의 해당 대화로 배달한다(background
+    # task — 배달 실패가 이 챗 전송 자체를 절대 안 깨뜨린다). ⛔카드 최상위(스레드 아닌)
+    # 텍스트 답은 이 분기를 안 탄다 — approval_delivery.py의 기존 정책("챗 텍스트는 게이트를
+    # 해소하지 않는다 — 카드 액션만 유효")과 별개 트리거라 그 정책을 안 건드린다.
+    # ⚠️카디르 QA ⑥축(2026-09-01) — sender_id를 반드시 넘긴다. deliver_operator_reply_for_gate가
+    # Gate.designated_approver_id와 대조해 비승인자 답장을 소리내며 거부한다(조용한 드롭 금지
+    # — "카드가 audience 한정이라 비승인자는 애초에 답장을 못 쓴다"는 가정이 배달 층에선
+    # 틀렸었다, 프로젝트 접근권 있는 아무 휴먼이 이 DM에 스레드 답장을 쓸 수 있었다).
+    operator_reply_gate_id = _operator_reply_target_gate_id(root_msg)
+    if operator_reply_gate_id is not None:
+        from app.services.operator_reply_delivery import deliver_operator_reply_for_gate
+        background_tasks.add_task(
+            deliver_operator_reply_for_gate,
+            gate_id=operator_reply_gate_id,
+            content=body.content,
+            sender_id=sender.id,
+        )
 
     # S-COMM-12 AC1: agent 답신 시 해당 conversation의 최근 gateway_accepted delivery → agent_replied
     if sender.type == "agent":
