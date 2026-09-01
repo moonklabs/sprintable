@@ -35,6 +35,7 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "lint_commit_before_validate.py",             # story #2459 — CI lint 게이트(AST 정적분석, 운영 DB 무접속)
     "lint_dependency_override_get_read_db.py",    # story #2451 — CI lint 게이트(tests/ override 스캔, 운영 DB 무접속)
     "lint_destructive_test_sql.py",               # story #2786 — CI lint 게이트(tests/ 재귀 AST 스캔, 운영 DB 무접속)
+    "lint_legacy_subscriptions_reuse.py",         # story #2476 — CI lint 게이트(app/ 재귀 정적 스캔, 운영 DB 무접속)
     "lint_project_access_403.py",                 # story #2342 AC7 — CI lint 게이트
     "lint_query_sentinel_direct_calls.py",        # story #2335 — CI lint 게이트
     "lint_no_script_output_artifacts.py",         # story #3008 — CI lint 게이트(scripts/ 파일명·내용 정적 스캔, 운영 DB 무접속)
