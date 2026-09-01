@@ -4449,6 +4449,7 @@
     "conversationListEmpty": "No past conversations yet",
     "conversationActiveBadge": "Active",
     "conversationEndedBanner": "This conversation has ended. Start a new one to keep chatting.",
-    "endConversation": "End conversation"
+    "endConversation": "End conversation",
+    "operatorSenderLabel": "Support team"
   }
 }

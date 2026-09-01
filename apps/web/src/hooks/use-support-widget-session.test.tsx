@@ -136,6 +136,24 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
     expect(container.querySelector('[data-testid="escalation-status"]')!.textContent).toBe('open');
   });
 
+  it('story #3279 — role="operator" 메시지는 "agent"로 안 뭉개지고 그대로 재오픈 복원된다', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({
+      messages: [
+        { id: 'm1', conversation_id: 'c1', role: 'operator', content: '확인했습니다, 답변드릴게요.', created_at: 't1' },
+        { id: 'm2', conversation_id: 'c1', role: 'agent', content: 'AI 자동 응답', created_at: 't2' },
+      ],
+      escalationStatus: 'open',
+    });
+    await mount();
+    await click('connect');
+    const items = Array.from(container.querySelectorAll('li'));
+    const operatorItem = items.find((li) => li.textContent === '확인했습니다, 답변드릴게요.');
+    const agentItem = items.find((li) => li.textContent === 'AI 자동 응답');
+    expect(operatorItem?.getAttribute('data-role')).toBe('operator');
+    expect(agentItem?.getAttribute('data-role')).toBe('agent'); // operator 매핑이 agent 쪽을 오염시키지 않는다.
+  });
+
   it('connect() 실패 — error 상태로 전환된다(unavailable과 구분)', async () => {
     createOrResumeGatewaySessionMock.mockRejectedValue(new Error('network down'));
     await mount();
