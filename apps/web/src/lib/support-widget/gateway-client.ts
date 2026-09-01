@@ -34,6 +34,19 @@ export interface GatewayMessageExchange {
 export interface GatewayMessageHistory {
   messages: GatewayMessage[];
   escalationStatus: GatewayEscalationStatus;
+  /** story #3276 — 이 이력이 속한 상담 id·종료 시각. 상담이 아직 하나도 없으면(신규
+   * 사용자) 둘 다 null(messages도 빈 배열). */
+  conversationId: string | null;
+  endedAt: string | null;
+}
+
+/** story #3276 — 상담 1건의 요약(목록·시작·종료 응답 공통 shape, support-gateway/app/
+ * schemas.py::ConversationResponse와 1:1 대응). */
+export interface GatewayConversation {
+  id: string;
+  created_at: string;
+  ended_at: string | null;
+  escalation_status: GatewayEscalationStatus;
 }
 
 function gatewayBaseUrl(): string | null {
@@ -73,16 +86,76 @@ export async function createOrResumeGatewaySession(): Promise<GatewaySession> {
   return (await res.json()) as GatewaySession;
 }
 
-export async function listGatewayMessages(sessionId: string): Promise<GatewayMessageHistory> {
+/** story #3276 — `conversationId`를 주면 그 특정(종료된 것 포함) 상담을 읽기 전용으로
+ * 본다(support-gateway GET .../messages?conversation_id=... 쿼리). 생략하면 현재 활성
+ * 상담(없으면 빈 이력) — connect() 시의 기본 동작 그대로 하위호환. */
+export async function listGatewayMessages(
+  sessionId: string,
+  conversationId?: string,
+): Promise<GatewayMessageHistory> {
   const base = gatewayBaseUrl();
   if (!base) throw new Error('Support Gateway not configured');
   const token = await issueDelegatedToken();
-  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/messages`, {
+  const url = new URL(`${base}/api/v1/sessions/${sessionId}/messages`);
+  if (conversationId) url.searchParams.set('conversation_id', conversationId);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`gateway history failed: HTTP ${res.status}`);
+  const json = (await res.json()) as {
+    messages: GatewayMessage[];
+    escalation_status: GatewayEscalationStatus;
+    conversation_id: string | null;
+    ended_at: string | null;
+  };
+  return {
+    messages: json.messages,
+    escalationStatus: json.escalation_status,
+    conversationId: json.conversation_id,
+    endedAt: json.ended_at,
+  };
+}
+
+/** story #3276 AC3 — 위젯 대화 목록(자기 것만, 통례 수준). */
+export async function listGatewayConversations(sessionId: string): Promise<GatewayConversation[]> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/conversations`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`gateway history failed: HTTP ${res.status}`);
-  const json = (await res.json()) as { messages: GatewayMessage[]; escalation_status: GatewayEscalationStatus };
-  return { messages: json.messages, escalationStatus: json.escalation_status };
+  if (!res.ok) throw new Error(`gateway conversation list failed: HTTP ${res.status}`);
+  const json = (await res.json()) as { conversations: GatewayConversation[] };
+  return json.conversations;
+}
+
+/** story #3276 AC2 — "새 상담 시작"(현재 활성 상담이 있으면 서버가 먼저 종료하고 새로
+ * 만든다, support-gateway 쪽 단일 원자적 처리 — 클라이언트는 end+create를 따로 안 부른다). */
+export async function startNewGatewayConversation(sessionId: string): Promise<GatewayConversation> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/conversations/start`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`gateway start conversation failed: HTTP ${res.status}`);
+  return (await res.json()) as GatewayConversation;
+}
+
+/** story #3276 AC2 — "상담 종료"(멱등 — 이미 종료된 상담을 다시 불러도 200, 최초 종료
+ * 시각 보존). SupportEscalation.status는 손대지 않는다(완전히 별개 축). */
+export async function endGatewayConversation(
+  sessionId: string,
+  conversationId: string,
+): Promise<GatewayConversation> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/conversations/${conversationId}/end`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`gateway end conversation failed: HTTP ${res.status}`);
+  return (await res.json()) as GatewayConversation;
 }
 
 /** story #3261(오케스트레이션) 실측(Pedro, 2026-08-31) — 이 왕복은 동기 처리라 ~12초까지

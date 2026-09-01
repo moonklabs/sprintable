@@ -12,9 +12,13 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   createOrResumeGatewaySession,
+  endGatewayConversation,
   isSupportGatewayConfigured,
+  listGatewayConversations,
   listGatewayMessages,
   sendGatewayMessage,
+  startNewGatewayConversation,
+  type GatewayConversation,
   type GatewayEscalationStatus,
   type GatewayMessage,
 } from '@/lib/support-widget/gateway-client';
@@ -48,6 +52,13 @@ export interface SupportWidgetSession {
    * `escalated` 배지와 달리 위젯을 닫았다 재오픈해도(connect() 재호출) 살아있다 —
    * connect() 완료 시 GET 이력 응답에서, sendMessage 완료 시 그 왕복 응답에서 갱신. */
   escalationStatus: GatewayEscalationStatus;
+  /** story #3276 — 지금 보고 있는 상담의 id(상담이 아예 없으면 null — 신규 사용자). */
+  conversationId: string | null;
+  /** story #3276 AC2 — 지금 보고 있는 상담이 종료됐는지(읽기 전용 이력이면 값 있음).
+   * true면 입력창을 비활성화해야 한다 — 다시 쓰려면 startNewConversation(). */
+  isEnded: boolean;
+  /** story #3276 AC3 — 자기 대화 목록(null=아직 안 불러옴, loadConversations()로 지연 로드). */
+  conversations: GatewayConversation[] | null;
   /** POST /messages 왕복이 진행 중 — story #3261 실측(~12초)이라 패널이 이 값으로
    * "생각 중" 지속 신호(경과 초 등)를 그린다(무신호 금지, 페드루 지시). */
   sending: boolean;
@@ -59,6 +70,16 @@ export interface SupportWidgetSession {
   sendMessage: (content: string) => Promise<void>;
   /** sendError가 있을 때만 의미 있음 — 실패한 마지막 메시지를 같은 내용으로 재전송. */
   retryLastMessage: () => void;
+  /** story #3276 AC2 — "새 상담 시작"(서버가 현재 활성 상담을 먼저 종료하고 새로 연다). */
+  startNewConversation: () => Promise<void>;
+  /** story #3276 AC2 — "상담 종료"(지금 보고 있는 상담을 종료, 멱등). */
+  endConversation: () => Promise<void>;
+  /** story #3276 AC3 — 목록에서 과거 상담 하나를 골라 읽기 전용으로 본다. */
+  selectConversation: (conversationId: string) => Promise<void>;
+  /** story #3276 AC3 — 과거 상담을 보다가 지금 활성 상담으로 돌아간다. */
+  viewActiveConversation: () => Promise<void>;
+  /** story #3276 AC3 — 목록 지연 로드(목록 UI를 열 때만 호출, 미리 안 불러온다). */
+  loadConversations: () => Promise<void>;
 }
 
 function toWidgetMessage(m: GatewayMessage): SupportWidgetMessage {
@@ -79,6 +100,9 @@ export function useSupportWidgetSession(): SupportWidgetSession {
   const [status, setStatus] = useState<SupportWidgetStatus>('unavailable');
   const [messages, setMessages] = useState<SupportWidgetMessage[]>([]);
   const [escalationStatus, setEscalationStatus] = useState<GatewayEscalationStatus>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [endedAt, setEndedAt] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<GatewayConversation[] | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -109,6 +133,8 @@ export function useSupportWidgetSession(): SupportWidgetSession {
         const history = await listGatewayMessages(session.id);
         setMessages(history.messages.map(toWidgetMessage));
         setEscalationStatus(history.escalationStatus);
+        setConversationId(history.conversationId);
+        setEndedAt(history.endedAt);
         setStatus('ready');
       } catch {
         setStatus('error');
@@ -120,7 +146,11 @@ export function useSupportWidgetSession(): SupportWidgetSession {
 
   const sendMessage = useCallback(async (content: string) => {
     const sessionId = sessionIdRef.current;
-    if (!sessionId || sending) return;
+    // story #3276 — 종료된(읽기 전용) 상담을 보는 중엔 보내지 않는다. 서버 post_message는
+    // 항상 "현재 활성 상담"을 대상으로 하므로, 여기서 보내면 메시지가 지금 화면(종료된
+    // 과거 상담)이 아니라 다른(새로) 활성 상담에 가서 붙어 "보낸 게 안 보이는" 불일치가
+    // 생긴다 — 입력창 disabled(패널)가 1차 방어, 이건 2차 방어(직접 훅 호출 경로 대비).
+    if (!sessionId || sending || endedAt) return;
     const optimisticId = `local-${Date.now()}`;
     // 낙관적 echo — 실제로 입력한 내용을 그대로 보여줄 뿐(지어낸 응답 아님), ~12초 왕복
     // 동안 "내가 보낸 게 맞나" 불안을 없앤다. pending 플래그로 서버 확認 전임을 구분.
@@ -139,6 +169,9 @@ export function useSupportWidgetSession(): SupportWidgetSession {
         { ...toWidgetMessage(exchange.agent_message), escalated: exchange.escalated },
       ]);
       setEscalationStatus(exchange.escalation_status);
+      // 서버가 (드물게) 활성 상담을 새로 열었을 수 있다 — 응답의 실제 conversation_id를
+      // 그대로 신뢰(클라이언트가 미리 알던 값과 다를 수 있음, no-fiction 원칙 동형).
+      setConversationId(exchange.customer_message.conversation_id);
     } catch {
       lastFailedContentRef.current = content;
       setMessages((prev) => prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m)));
@@ -148,7 +181,7 @@ export function useSupportWidgetSession(): SupportWidgetSession {
     } finally {
       setSending(false);
     }
-  }, [sending, t]);
+  }, [sending, endedAt, t]);
 
   const retryLastMessage = useCallback(() => {
     const content = lastFailedContentRef.current;
@@ -157,10 +190,94 @@ export function useSupportWidgetSession(): SupportWidgetSession {
     void sendMessage(content);
   }, [sendMessage]);
 
+  const startNewConversation = useCallback(async () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    const conv = await startNewGatewayConversation(sessionId);
+    setConversationId(conv.id);
+    setEndedAt(conv.ended_at);
+    setEscalationStatus(conv.escalation_status);
+    setMessages([]);
+    setSendError(null);
+    // 목록을 이미 불러온 적 있으면 낡은 채로 두지 않는다 — 다음 loadConversations()
+    // 호출이 서버에서 다시 받아오게 캐시를 비운다(수동 배열 패치보다 단순·정직).
+    setConversations(null);
+  }, []);
+
+  const endConversation = useCallback(async () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || !conversationId) return;
+    const conv = await endGatewayConversation(sessionId, conversationId);
+    setEndedAt(conv.ended_at);
+    setEscalationStatus(conv.escalation_status);
+    setConversations(null);
+  }, [conversationId]);
+
+  const selectConversation = useCallback(async (targetConversationId: string) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    const history = await listGatewayMessages(sessionId, targetConversationId);
+    setMessages(history.messages.map(toWidgetMessage));
+    setEscalationStatus(history.escalationStatus);
+    setConversationId(history.conversationId);
+    setEndedAt(history.endedAt);
+  }, []);
+
+  const viewActiveConversation = useCallback(async () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    const history = await listGatewayMessages(sessionId);
+    setMessages(history.messages.map(toWidgetMessage));
+    setEscalationStatus(history.escalationStatus);
+    setConversationId(history.conversationId);
+    setEndedAt(history.endedAt);
+  }, []);
+
+  const loadConversations = useCallback(async () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    const list = await listGatewayConversations(sessionId);
+    setConversations(list);
+  }, []);
+
   // 반환 객체 자체를 안정화 — 호출부(support-widget-launcher.tsx)가 이 객체를 effect
   // deps에 그대로 넣는다(값이 안 바뀌면 재렌더가 connect()를 불필요하게 재호출하지 않게).
   return useMemo(
-    () => ({ status, messages, escalationStatus, sending, sendError, connect, sendMessage, retryLastMessage }),
-    [status, messages, escalationStatus, sending, sendError, connect, sendMessage, retryLastMessage],
+    () => ({
+      status,
+      messages,
+      escalationStatus,
+      conversationId,
+      isEnded: Boolean(endedAt),
+      conversations,
+      sending,
+      sendError,
+      connect,
+      sendMessage,
+      retryLastMessage,
+      startNewConversation,
+      endConversation,
+      selectConversation,
+      viewActiveConversation,
+      loadConversations,
+    }),
+    [
+      status,
+      messages,
+      escalationStatus,
+      conversationId,
+      endedAt,
+      conversations,
+      sending,
+      sendError,
+      connect,
+      sendMessage,
+      retryLastMessage,
+      startNewConversation,
+      endConversation,
+      selectConversation,
+      viewActiveConversation,
+      loadConversations,
+    ],
   );
 }

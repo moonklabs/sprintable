@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Send, UserRound, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { History, Plus, Send, UserRound, X } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
 
 /**
@@ -60,6 +66,81 @@ function ThinkingIndicator() {
 }
 
 /**
+ * story #3276(지원v1·후속) AC2/AC3 — 상담 수명주기 툴바: "새 상담" 버튼 + 자기 대화 목록
+ * 드롭다운(지연 로드 — 열 때만 loadConversations() 호출, 미리 안 당겨온다). 종료된(읽기
+ * 전용) 상담을 보는 중엔 "활성 상담으로" 항목이 추가로 뜬다(session.isEnded로 판정 —
+ * 지금 보는 게 활성인지 과거 이력인지의 유일한 신호).
+ */
+function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
+  const t = useTranslations('supportWidget');
+  const [listOpen, setListOpen] = useState(false);
+
+  return (
+    <div className="flex shrink-0 items-center justify-end gap-1 border-b border-border px-2 py-1.5">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1 px-2 text-xs"
+        onClick={() => void session.startNewConversation()}
+      >
+        <Plus className="h-3.5 w-3.5" aria-hidden />
+        {t('startNewConversation')}
+      </Button>
+      <DropdownMenu
+        open={listOpen}
+        onOpenChange={(open) => {
+          setListOpen(open);
+          if (open && session.conversations === null) void session.loadConversations();
+        }}
+      >
+        <DropdownMenuTrigger
+          className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'h-7 gap-1 px-2 text-xs' })}
+        >
+          <History className="h-3.5 w-3.5" aria-hidden />
+          {t('conversationHistory')}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          {session.isEnded ? (
+            <DropdownMenuItem
+              onClick={() => {
+                setListOpen(false);
+                void session.viewActiveConversation();
+              }}
+            >
+              {t('backToActiveConversation')}
+            </DropdownMenuItem>
+          ) : null}
+          {session.conversations === null ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('conversationListLoading')}</div>
+          ) : session.conversations.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('conversationListEmpty')}</div>
+          ) : (
+            session.conversations.map((conv) => (
+              <DropdownMenuItem
+                key={conv.id}
+                onClick={() => {
+                  setListOpen(false);
+                  void session.selectConversation(conv.id);
+                }}
+                className="flex items-center justify-between gap-2"
+              >
+                <span className={conv.id === session.conversationId ? 'font-medium text-foreground' : undefined}>
+                  {new Date(conv.created_at).toLocaleString()}
+                </span>
+                {conv.ended_at === null ? (
+                  <span className="text-[11px] text-muted-foreground">{t('conversationActiveBadge')}</span>
+                ) : null}
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/**
  * story #3260 Phase 2 — status 4종을 각각 다른 화면으로 그린다:
  * - 'unavailable': Gateway가 이 빌드에 아예 안 붙어있음(재시도 대상 없음, 정직한 "준비 중").
  * - 'error': 붙어있는데 연결 자체가 실패(재시도 버튼 — connect() 재호출로 의미 있음).
@@ -92,10 +173,29 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
     );
   }
 
-  const canSend = draft.trim().length > 0 && session.status === 'ready' && !session.sending;
+  const canSend =
+    draft.trim().length > 0 && session.status === 'ready' && !session.sending && !session.isEnded;
 
   return (
     <>
+      <ConversationToolbar session={session} />
+      {session.isEnded ? (
+        <div
+          role="status"
+          className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-foreground"
+        >
+          <span>{t('conversationEndedBanner')}</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => void session.startNewConversation()}
+          >
+            {t('startNewConversation')}
+          </Button>
+        </div>
+      ) : null}
       {session.escalationStatus === 'open' ? (
         <div
           role="status"
@@ -150,9 +250,20 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t('inputPlaceholder')}
-          disabled={session.status !== 'ready' || session.sending}
+          disabled={session.status !== 'ready' || session.sending || session.isEnded}
           className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
         />
+        {!session.isEnded && session.conversationId !== null ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="shrink-0 text-[11px]"
+            onClick={() => void session.endConversation()}
+          >
+            {t('endConversation')}
+          </Button>
+        ) : null}
         <Button type="submit" size="sm" disabled={!canSend} aria-label={t('sendLabel')}>
           <Send className="h-3.5 w-3.5" aria-hidden />
         </Button>

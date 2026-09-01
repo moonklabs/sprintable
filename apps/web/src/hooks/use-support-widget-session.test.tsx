@@ -16,12 +16,18 @@ const isSupportGatewayConfiguredMock = vi.fn();
 const createOrResumeGatewaySessionMock = vi.fn();
 const listGatewayMessagesMock = vi.fn();
 const sendGatewayMessageMock = vi.fn();
+const listGatewayConversationsMock = vi.fn();
+const startNewGatewayConversationMock = vi.fn();
+const endGatewayConversationMock = vi.fn();
 
 vi.mock('@/lib/support-widget/gateway-client', () => ({
   isSupportGatewayConfigured: () => isSupportGatewayConfiguredMock(),
   createOrResumeGatewaySession: (...args: unknown[]) => createOrResumeGatewaySessionMock(...args),
   listGatewayMessages: (...args: unknown[]) => listGatewayMessagesMock(...args),
   sendGatewayMessage: (...args: unknown[]) => sendGatewayMessageMock(...args),
+  listGatewayConversations: (...args: unknown[]) => listGatewayConversationsMock(...args),
+  startNewGatewayConversation: (...args: unknown[]) => startNewGatewayConversationMock(...args),
+  endGatewayConversation: (...args: unknown[]) => endGatewayConversationMock(...args),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,6 +43,9 @@ beforeEach(() => {
   createOrResumeGatewaySessionMock.mockReset();
   listGatewayMessagesMock.mockReset();
   sendGatewayMessageMock.mockReset();
+  listGatewayConversationsMock.mockReset();
+  startNewGatewayConversationMock.mockReset();
+  endGatewayConversationMock.mockReset();
 });
 
 afterEach(async () => {
@@ -52,6 +61,9 @@ function Harness() {
       <span data-testid="escalation-status">{session.escalationStatus ?? ''}</span>
       <span data-testid="sending">{String(session.sending)}</span>
       <span data-testid="send-error">{session.sendError ?? ''}</span>
+      <span data-testid="conversation-id">{session.conversationId ?? ''}</span>
+      <span data-testid="is-ended">{String(session.isEnded)}</span>
+      <span data-testid="conversations-count">{session.conversations === null ? 'null' : String(session.conversations.length)}</span>
       <ul>
         {session.messages.map((m) => (
           <li key={m.id} data-role={m.role} data-pending={m.pending} data-failed={m.failed} data-escalated={m.escalated}>
@@ -62,6 +74,11 @@ function Harness() {
       <button type="button" onClick={() => session.connect()}>connect</button>
       <button type="button" onClick={() => void session.sendMessage('안녕하세요')}>send</button>
       <button type="button" onClick={() => session.retryLastMessage()}>retry</button>
+      <button type="button" onClick={() => void session.startNewConversation()}>start-new</button>
+      <button type="button" onClick={() => void session.endConversation()}>end</button>
+      <button type="button" onClick={() => void session.selectConversation('conv-old')}>select-old</button>
+      <button type="button" onClick={() => void session.viewActiveConversation()}>view-active</button>
+      <button type="button" onClick={() => void session.loadConversations()}>load-conversations</button>
     </div>
   );
 }
@@ -186,5 +203,105 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
     await click('retry');
     expect(container.querySelector('[data-failed="true"]')).toBeNull();
     expect(container.textContent).toContain('재시도 성공');
+  });
+});
+
+describe('useSupportWidgetSession — story #3276 상담 수명주기', () => {
+  function convId() { return container.querySelector('[data-testid="conversation-id"]')!.textContent; }
+  function isEndedText() { return container.querySelector('[data-testid="is-ended"]')!.textContent; }
+
+  it('connect() 이력 응답의 conversationId/endedAt을 상태로 반영한다', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({
+      messages: [], escalationStatus: null, conversationId: 'conv-1', endedAt: null,
+    });
+    await mount();
+    await click('connect');
+    expect(convId()).toBe('conv-1');
+    expect(isEndedText()).toBe('false');
+  });
+
+  it('startNewConversation — 서버가 돌려준 새 상담으로 전환되고 메시지 목록이 비워진다(옛 상담과 안 섞임)', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({
+      messages: [{ id: 'm1', conversation_id: 'conv-old', role: 'customer', content: '옛 상담', created_at: 't1' }],
+      escalationStatus: 'open', conversationId: 'conv-old', endedAt: null,
+    });
+    startNewGatewayConversationMock.mockResolvedValue({ id: 'conv-new', created_at: 't', ended_at: null, escalation_status: null });
+    await mount();
+    await click('connect');
+    expect(container.textContent).toContain('옛 상담');
+    await click('start-new');
+    expect(convId()).toBe('conv-new');
+    expect(container.textContent).not.toContain('옛 상담');
+    expect(container.querySelector('[data-testid="escalation-status"]')!.textContent).toBe(''); // 새 상담은 에스컬 이력 0.
+  });
+
+  it('endConversation — isEnded가 true로 바뀌고, SupportEscalation 상태(escalation_status)는 서버 응답 그대로 유지한다(종료≠에스컬 해소, 별개 축)', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({
+      messages: [], escalationStatus: 'open', conversationId: 'conv-1', endedAt: null,
+    });
+    endGatewayConversationMock.mockResolvedValue({ id: 'conv-1', created_at: 't', ended_at: 't2', escalation_status: 'open' });
+    await mount();
+    await click('connect');
+    await click('end');
+    expect(isEndedText()).toBe('true');
+    expect(container.querySelector('[data-testid="escalation-status"]')!.textContent).toBe('open');
+    expect(endGatewayConversationMock).toHaveBeenCalledWith('sess-1', 'conv-1');
+  });
+
+  it('종료된 상담을 보는 중엔 sendMessage()가 no-op이다(서버가 다른 활성 상담에 붙여 "보낸 게 사라지는" 불일치 방지 — 2차 방어)', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({
+      messages: [], escalationStatus: null, conversationId: 'conv-1', endedAt: '종료시각',
+    });
+    await mount();
+    await click('connect');
+    expect(isEndedText()).toBe('true');
+    await click('send');
+    expect(sendGatewayMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('selectConversation — 과거 상담을 골라 그 메시지로 교체하고 isEnded를 그 상담 상태로 갱신한다', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValueOnce({
+      messages: [{ id: 'm1', conversation_id: 'conv-active', role: 'customer', content: '활성 상담', created_at: 't1' }],
+      escalationStatus: null, conversationId: 'conv-active', endedAt: null,
+    });
+    listGatewayMessagesMock.mockResolvedValueOnce({
+      messages: [{ id: 'm2', conversation_id: 'conv-old', role: 'customer', content: '과거 상담', created_at: 't0' }],
+      escalationStatus: 'resolved', conversationId: 'conv-old', endedAt: 't-ended',
+    });
+    await mount();
+    await click('connect');
+    await click('select-old');
+    expect(listGatewayMessagesMock).toHaveBeenLastCalledWith('sess-1', 'conv-old');
+    expect(container.textContent).toContain('과거 상담');
+    expect(container.textContent).not.toContain('활성 상담');
+    expect(isEndedText()).toBe('true');
+  });
+
+  it('viewActiveConversation — 활성 상담으로 돌아가면 conversation_id 없이 재조회한다', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({ messages: [], escalationStatus: null, conversationId: 'conv-1', endedAt: null });
+    await mount();
+    await click('connect');
+    listGatewayMessagesMock.mockClear();
+    await click('view-active');
+    expect(listGatewayMessagesMock).toHaveBeenLastCalledWith('sess-1');
+  });
+
+  it('loadConversations — 목록을 지연 로드한다(마운트·connect 직후엔 안 부름)', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({ messages: [], escalationStatus: null, conversationId: 'conv-1', endedAt: null });
+    listGatewayConversationsMock.mockResolvedValue([
+      { id: 'conv-1', created_at: 't', ended_at: null, escalation_status: null },
+    ]);
+    await mount();
+    await click('connect');
+    expect(listGatewayConversationsMock).not.toHaveBeenCalled(); // 지연 로드 — connect만으론 안 부름.
+    await click('load-conversations');
+    expect(listGatewayConversationsMock).toHaveBeenCalledWith('sess-1');
   });
 });
