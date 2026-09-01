@@ -120,7 +120,7 @@ export function WorkflowTemplateGallerySection({
     setApplying(true);
     setApplyResult(null);
     try {
-      const res = await fetch(`/api/events/definitions/${selected.id}/apply`, {
+      const res = await fetchWithAuth(`/api/events/definitions/${selected.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId, role_mapping: roleMapping }),
