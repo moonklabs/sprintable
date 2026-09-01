@@ -109,4 +109,150 @@ async def test_knowledge_guard_does_not_block_when_real_match_found(client, fake
     assert resp.status_code == 200
     body = resp.json()
     assert body["escalated"] is False
-    assert body["agent_message"]["content"] == _GROUNDED_LOOKING_TEXT
+    # content 자체(모델 재서술이 최종 표면에 실제로 나가는지)는 story #3270 이후 아래
+    # test_matched_turn_discards_model_narration_and_delivers_knowledge_task_answer_with_citation가
+    # 검증한다 — 이 테스트는 "가드가 오탐으로 escalate하지 않는다"는 원래 관심사만 남긴다.
+
+
+async def test_matched_turn_discards_model_narration_and_delivers_knowledge_task_answer_with_citation(
+    client, fake_llm, monkeypatch
+):
+    """story #3270(지원v1·후속) AC1/AC2 통합 재설계 핵심 회귀 — knowledge_search가 매치를 찾은
+    턴은 모델이 뭐라고 재서술했든(`fake_llm.interaction_text` = `_GROUNDED_LOOKING_TEXT`,
+    인용도 없고 지식 원문과 문구도 다름) 고객에게 나가는 최종 답은 항상 knowledge_task가
+    code로 조립한 원문+인용이어야 한다 — 모델의 재서술 결과는 완전히 버려진다(구 AC2 "인용
+    표면 소실"·구 AC1 "{N} 플레이스홀더 재추정 사고"를 같은 재서술-배제 메커니즘으로 봉쇄)."""
+    _patch_search_real_match(monkeypatch)
+    fake_llm.classify_text = "inquiry"
+    fake_llm.call_tool_name = "knowledge_search"
+    fake_llm.call_tool_kwargs = {"query": "팀원을 초대하려면?"}
+    fake_llm.interaction_text = _GROUNDED_LOOKING_TEXT  # 모델의 이 텍스트는 고객에게 절대 안 나간다.
+
+    resp = await _post_message(client)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is False
+    content = body["agent_message"]["content"]
+    assert content != _GROUNDED_LOOKING_TEXT
+    assert "..." in content  # _patch_search_real_match의 chunk.content 원문 그대로.
+    assert "(참고: 팀원 초대 방법)" in content  # 인용이 구조적으로 보장된다.
+
+
+async def test_mixed_turn_matched_and_no_match_answers_both_survive_in_call_order(client, fake_llm, monkeypatch):
+    """story #3270 조건③ 설계 pin — 한 턴에 knowledge_search가 매치+무매치로 섞여 여러 번
+    불리면(고객이 한 메시지에 두 가지를 물은 경우), 어느 한쪽도 조용히 누락되지 않고 호출
+    순서대로 이어붙여 전달된다. 모델의 자연스러운 연결 서술은 버려진다(위 테스트와 동일 원칙)."""
+    from app.execution_tasks import NO_MATCH_MESSAGE
+
+    chunk = KnowledgeChunk(id="invite-how-to", title="팀원 초대 방법", content="첫 매치 원문 그대로", source_note="test")
+    call_count = {"n": 0}
+
+    def _search(vector, top_k=3):
+        call_count["n"] += 1
+        return [SearchMatch(chunk=chunk, score=0.9)] if call_count["n"] == 1 else []
+
+    monkeypatch.setattr(execution_tasks_module, "search", _search)
+    fake_llm.classify_text = "inquiry"
+    fake_llm.call_tool_calls = [
+        ("knowledge_search", {"query": "팀원을 초대하려면?"}),
+        ("knowledge_search", {"query": "결제 카드를 변경하려면?"}),
+    ]
+    fake_llm.interaction_text = "이 문장은 절대 고객에게 안 나가야 한다."
+
+    resp = await _post_message(client, content="팀원 초대랑 결제 카드 변경 둘 다 어떻게 하나요?")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is False
+    content = body["agent_message"]["content"]
+    assert "이 문장은 절대 고객에게 안 나가야 한다" not in content
+    assert "첫 매치 원문 그대로" in content
+    assert "(참고: 팀원 초대 방법)" in content
+    assert NO_MATCH_MESSAGE in content
+    # 호출 순서 보존 — 매치(1번째 호출) 답이 무매치(2번째 호출) 답보다 앞선다.
+    assert content.index("첫 매치 원문 그대로") < content.index(NO_MATCH_MESSAGE)
+
+
+async def test_repeated_identical_knowledge_answer_in_one_turn_is_deduped(client, fake_llm, monkeypatch):
+    """story #3270 조건③ — 같은 답(예: 같은 무매치 폴백 문구)이 한 턴에 여러 번 나오면
+    한 번만 남긴다(연속 중복 방지 — 순서 보존 dedupe)."""
+    from app.execution_tasks import NO_MATCH_MESSAGE
+
+    _patch_search_no_match(monkeypatch)
+    fake_llm.classify_text = "inquiry"
+    fake_llm.call_tool_calls = [
+        ("knowledge_search", {"query": "질문 A"}),
+        ("knowledge_search", {"query": "질문 B"}),
+    ]
+    fake_llm.interaction_text = "무시될 텍스트"
+
+    resp = await _post_message(client)
+    assert resp.status_code == 200
+    body = resp.json()
+    content = body["agent_message"]["content"]
+    assert content == NO_MATCH_MESSAGE  # 두 번 다 같은 폴백이라 한 번만.
+
+
+async def test_mixed_tool_turn_knowledge_and_org_status_both_survive_in_call_order(client, fake_llm, monkeypatch):
+    """story #3270 조건③ 2차 실측(2026-09-01, 페드루 PO 지적) 회귀 — 첫 구현이 knowledge_search
+    답만 code-조립에 태워, 같은 턴에 org_status_lookup도 불린 "혼합 *도구*" 턴에서
+    org_status 답이 조용히 통째로 사라지는 재발이 있었다. 정보 조회 도구(knowledge_search·
+    org_status_lookup) 전체가 tool_reply_state를 공유해야 한다는 것을 pin."""
+    _patch_search_real_match(monkeypatch)
+    fake_llm.classify_text = "inquiry"
+    fake_llm.call_tool_calls = [
+        ("knowledge_search", {"query": "팀원을 초대하려면?"}),
+        ("org_status_lookup", {"question": "우리 조직 플랜이 뭔가요?"}),
+    ]
+    fake_llm.interaction_text = "이 문장은 절대 고객에게 안 나가야 한다."
+
+    resp = await _post_message(client, content="팀원 초대 방법이랑 지금 플랜 상태 둘 다 알려주세요.")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is False
+    content = body["agent_message"]["content"]
+    assert "이 문장은 절대 고객에게 안 나가야 한다" not in content
+    assert "(참고: 팀원 초대 방법)" in content  # knowledge_search 답 — 조용히 안 사라짐.
+    assert "아직 조직 상태 조회 기능이 연결되지 않았습니다" in content  # org_status_lookup 답도 마찬가지.
+    # 호출 순서 보존 — knowledge_search(1번째)가 org_status_lookup(2번째) 답보다 앞선다.
+    assert content.index("(참고: 팀원 초대 방법)") < content.index("아직 조직 상태 조회 기능이 연결되지 않았습니다")
+
+
+async def test_knowledge_fiction_guard_fires_on_model_raw_text_not_on_assembled_replacement(
+    client, fake_llm, db_engine, monkeypatch
+):
+    """story #3270 조건① 카디르 QA 뮤테이션 보강(2026-09-01) — handle_turn을 실제로 태우는
+    가드-순서-의존성 pin. app/interaction.py의 code-조립 대체 블록을 두 가드보다 *앞*으로
+    옮기는 뮤테이션은 위쪽의 test_knowledge_guard_blocks_fabrication_when_called_but_no_match
+    하나만으로는 안전하게 안 잡힌다는 것을 직접 실측 확認했다 — `NO_MATCH_MESSAGE` 원문
+    자체가 "…찾지 못했습니다"+"담당자에게 연결해…" 어휘를 담고 있어 no_fiction_guard의
+    handoff-claim 패턴(app/no_fiction_guard.py)에 우연히 걸린다. 그래서 뮤테이션 하에서도
+    `escalated`는 여전히 True로 남는다 — **다만 no_fiction_guard가 knowledge_fiction_guard
+    대신 잘못 발화한 것**(reply_text가 이미 code-조립으로 NO_MATCH_MESSAGE로 바뀐 뒤라야
+    벌어지는 일 — 원래 순서라면 두 가드는 항상 모델의 원문만 본다). 그래서 이 테스트는
+    `escalated is True`만으론 부족하고, "어느 가드가·왜 발화했는지"(SupportExecutionLog의
+    task_type, 정확히 knowledge_fiction_guard 1건뿐 — no_fiction_guard 0건)까지 구조적으로
+    확인한다: 순서가 뒤집히면 이 assertion들이 깨진다(no_fiction_guard가 대신 발화하거나,
+    knowledge_fiction_guard 자체가 아예 발화하지 않는다)."""
+    _patch_search_no_match(monkeypatch)
+    fake_llm.classify_text = "inquiry"
+    fake_llm.call_tool_name = "knowledge_search"
+    fake_llm.call_tool_kwargs = {"query": "팀원을 초대하려면?"}
+    fake_llm.interaction_text = _FABRICATED_TEXT
+
+    resp = await _post_message(client)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is True
+    assert body["agent_message"]["content"] == KNOWLEDGE_FALLBACK_REPLY
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        escalations = (await session.execute(select(SupportEscalation))).scalars().all()
+        assert len(escalations) == 1
+        assert escalations[0].reason == "knowledge_fiction_guard"  # no_fiction_guard가 아니라 정확히 이 가드.
+
+        logs = (await session.execute(select(SupportExecutionLog))).scalars().all()
+        task_types = [log.task_type for log in logs]
+        assert task_types.count("knowledge_fiction_guard") == 1
+        assert task_types.count("no_fiction_guard") == 0  # 뮤테이션 하에서만 여기가 1이 된다.

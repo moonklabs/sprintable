@@ -100,13 +100,21 @@ KNOWLEDGE_CHUNKS: list[KnowledgeChunk] = [
         content=(
             "무료 플랜은 초대할 수 있는 멤버 수에 상한이 있습니다(현재 활성 멤버 수 + 아직 "
             "수락되지 않은 대기 중 초대 수를 합산 — AI 에이전트는 이 인원수에 포함되지 않습니다). "
-            "상한을 넘으면 '무료 플랜은 멤버를 {N}명까지 초대할 수 있습니다'라는 안내와 함께 "
-            "초대가 막힙니다. 더 많은 인원을 초대하려면 플랜 업그레이드가 필요합니다."
+            "정확한 상한 값은 플랜 등급마다 다르게 설정돼 있어 이 문서에 고정된 숫자로 적어둘 "
+            "수 없습니다(story #3270 — 정적 문서가 동적 값을 단정하면 그 값이 실제와 달라졌을 "
+            "때 오안내가 된다) — 상한을 넘으면 초대 화면에 정확한 숫자가 포함된 안내 메시지가 "
+            "표시되니, 고객에게는 그 화면에 뜬 숫자가 현재 조직의 정확한 상한이라고 안내하세요. "
+            "더 많은 인원을 초대하려면 플랜 업그레이드가 필요합니다."
         ),
         source_note=(
             "backend/ee/plan_limits.py:286-306(check_member_invite_limit, pending invite 포함 "
             "카운트) + org-members-section.tsx:137-138/add-member-modal.tsx:70-71(memberLimitExceededError). "
-            "2026-08-31 Explore 조사 확認."
+            "2026-08-31 Explore 조사 확認. ⚠️story #3270(2026-09-01) — 원래 이 청크 content가 "
+            "실 에러 메시지 문자열을 '{N}명까지'로 그대로 인용했다가, Interaction 재서술 단계에서 "
+            "모델이 그 미해결 플레이스홀더를 그럴듯한 구체 숫자(10명)로 채워 넣는 사고가 재현됨 "
+            "(완전 새 org·이력 0에서도 재현 — 이력 오염이 아니라 재서술 단계의 독립 재추정). "
+            "정적 값을 아예 안 적는 쪽으로 정정 — tests/test_knowledge_corpus_no_unresolved_"
+            "placeholders.py가 이 클래스의 재발을 구조적으로 잡는다."
         ),
     ),
     KnowledgeChunk(

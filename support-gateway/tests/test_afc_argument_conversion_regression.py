@@ -37,6 +37,7 @@ def _build_tools():
         user_id=uuid.uuid4(),
         escalation_state={"called": False},
         knowledge_state={"called": False, "had_match": False},
+        tool_reply_state={"called": False, "answers": []},
         llm=None,
     )
 

@@ -40,6 +40,7 @@ class FakeLLMClient:
         knowledge_text: str = "1",
         call_tool_name: str | None = None,
         call_tool_kwargs: dict | None = None,
+        call_tool_calls: list[tuple[str, dict]] | None = None,
     ) -> None:
         self.classify_text = classify_text
         self.interaction_text = interaction_text
@@ -52,6 +53,10 @@ class FakeLLMClient:
         # 재현 — 진짜 SDK의 도구선택 로직은 안 흉내낸다, "도구가 실제로 불렸다"는 사실만 필요).
         self.call_tool_name = call_tool_name
         self.call_tool_kwargs = call_tool_kwargs or {}
+        # story #3270 — 한 턴에 도구가 여러 번(예: knowledge_search가 다른 query로 두 번) 불리는
+        # "혼합 질문" 시뮬레이션용. 설정되면 call_tool_name/call_tool_kwargs 단일 호출 대신 이
+        # (이름, kwargs) 목록을 순서대로 전부 호출한다.
+        self.call_tool_calls = call_tool_calls
         self.calls: list[tuple[str, str]] = []  # (kind, model)
 
     async def generate(self, *, model: str, system_prompt: str, user_text: str) -> GenerateResult:
@@ -69,7 +74,11 @@ class FakeLLMClient:
         self, *, model: str, system_prompt: str, user_text: str, tools: list[Callable]
     ) -> GenerateResult:
         self.calls.append(("generate_with_tools", model))
-        if self.call_tool_name is not None:
+        if self.call_tool_calls is not None:
+            for tool_name, tool_kwargs in self.call_tool_calls:
+                tool = next(t for t in tools if t.__name__ == tool_name)
+                await tool(**tool_kwargs)
+        elif self.call_tool_name is not None:
             tool = next(t for t in tools if t.__name__ == self.call_tool_name)
             await tool(**self.call_tool_kwargs)
         return GenerateResult(
