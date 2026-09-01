@@ -247,6 +247,39 @@ def decode_email_verification_token(token: str) -> dict:
     return payload
 
 
+# ─── Set-Password Confirm Token ───────────────────────────────────────────────
+# story #ab2a503f([버그·보안·HIGH] set-password가 재인증 0으로 탈취 세션/API키에 비밀번호를
+# 심는다) — POST /set-password가 get_current_user만 요구해 재인증 0이었다(탈취 세션·API키
+# 단독으로 계정 완전장악 가능, #3247 2FA-disable 우회체인의 STEP1). 새 비밀번호를 즉시
+# 해시해 이 토큰에 실어 "이메일 링크를 클릭하는 그 순간의 사람"만 실제 write(confirm
+# 엔드포인트)를 완결할 수 있게 한다 — 15분(email_verification의 24h보다 훨씬 짧게: "지금
+# 이 순간"을 확인하는 목적이라 하루씩 열어둘 이유가 없다).
+
+SET_PASSWORD_CONFIRM_EXPIRE_MINUTES = 15
+
+
+def create_set_password_confirm_token(user_id: str, new_password_hash: str) -> str:
+    """15분 만료 set-password 확인 토큰. 평문 비밀번호는 절대 안 싣는다(해시만)."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=SET_PASSWORD_CONFIRM_EXPIRE_MINUTES)
+    payload = {
+        "sub": user_id,
+        "type": "set_password_confirm",
+        "new_password_hash": new_password_hash,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_set_password_confirm_token(token: str) -> dict:
+    """Set-password confirm token 검증. 만료/타입 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "set_password_confirm":
+        raise JWTError("Invalid token type")
+    return payload
+
+
 # ─── Email Unsubscribe Token ──────────────────────────────────────────────────
 # story #3159(retention·최소층) — 리마인드 메일 1-클릭 해제 링크. 반복 발송이 아니라 1회성
 # 안내라 만료를 짧게 둘 이유가 없다(수신자가 메일을 나중에 열어도 링크가 죽어있으면 안 됨) —
