@@ -5,8 +5,15 @@ name: Cloud Build (GCP)
 # Submit 스텝에 인라인 나열 금지. 주석에도 리터럴 표현식 토큰 쓰지 말 것.
 
 on:
+  # story #3297(2026-09-01, 선생님 지시 — 배포 케이던스가 워크플로우 병목) — develop을 push
+  # 트리거에서 뺀다. 실측: develop 머지 31건 = Cloud Build 31회(머지마다 dev 전체 배포).
+  # dev 배포는 이제 workflow_dispatch로 PO가 「머지 묶음 완주+CI green+정정 0」일 때 1회
+  # (운용 규칙, 코드 밖). main(prod 승격 경로)은 무변 — push 트리거 그대로 유지.
+  # env 도출은 "Set deploy environment" 스텝이 github.ref_name만 보고 분기한다(아래
+  # inputs.env는 참조되지 않음 — dispatch 시에도 대상 ref가 dev/prod를 가른다는 뜻이라,
+  # develop ref로 dispatch하면 이 로직이 그대로 target=dev를 도출한다. 별도 배선 불요).
   push:
-    branches: [main, develop]
+    branches: [main]
   workflow_dispatch:
     inputs:
       env:
