@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -112,6 +113,31 @@ async def _get_active_conversation(
     ).scalar_one_or_none()
 
 
+async def _create_active_conversation_racesafe(
+    db: AsyncSession, *, session: SupportSession, org_id: uuid.UUID, external_user_id: uuid.UUID
+) -> SupportConversation:
+    """story #3278 — check-then-insert(호출부가 먼저 "활성 없음"을 확인한 뒤 여기로 옴)는
+    동시 요청 레이스에서 둘 다 "없음"을 보고 둘 다 insert를 시도할 수 있다. 이제
+    `ux_support_conversations_org_user_active`(partial unique index, migration 0005)가
+    그 레이스의 패자를 DB 레벨에서 실제로 막는다 — 패자는 여기서 IntegrityError를 500으로
+    흘려보내지 않고, 승자의 행을 조용히 재사용한다(스토리 처방 "위반 시 앱 레벨 우아한
+    처리" 그대로). 사용자 입장에선 "내가 만들었나 남이 만들었나"가 무관하고, 활성 상담이
+    정확히 1개만 존재하면 된다."""
+    conv = SupportConversation(org_id=org_id, session_id=session.id, external_user_id=external_user_id)
+    db.add(conv)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        winner = await _get_active_conversation(db, org_id=org_id, external_user_id=external_user_id)
+        if winner is None:
+            # 이론상 도달 불가(우리가 진 경쟁이면 승자 행이 반드시 있어야 한다) — 방어적
+            # 재-raise(조용히 삼켜 원인불명 500/무한루프보다 원래 에러가 낫다).
+            raise
+        return winner
+    return conv
+
+
 async def _get_or_create_active_conversation(
     db: AsyncSession, *, session: SupportSession, org_id: uuid.UUID, external_user_id: uuid.UUID
 ) -> SupportConversation:
@@ -122,10 +148,9 @@ async def _get_or_create_active_conversation(
     existing = await _get_active_conversation(db, org_id=org_id, external_user_id=external_user_id)
     if existing is not None:
         return existing
-    conv = SupportConversation(org_id=org_id, session_id=session.id, external_user_id=external_user_id)
-    db.add(conv)
-    await db.flush()
-    return conv
+    return await _create_active_conversation_racesafe(
+        db, session=session, org_id=org_id, external_user_id=external_user_id
+    )
 
 
 async def _get_owned_conversation_or_404(
@@ -323,8 +348,12 @@ async def start_new_conversation(
     if active is not None:
         active.ended_at = datetime.now(timezone.utc)
 
-    conv = SupportConversation(org_id=identity.org_id, session_id=session.id, external_user_id=identity.user_id)
-    db.add(conv)
+    # story #3278 — 동시 "새 상담 시작" 레이스도 같은 partial unique index에 걸린다(위
+    # _create_active_conversation_racesafe docstring 참고). 패자는 승자가 만든 상담을
+    # 그대로 돌려받는다 — "새 상담 시작"을 두 번 눌러도 활성 상담은 항상 정확히 1개.
+    conv = await _create_active_conversation_racesafe(
+        db, session=session, org_id=identity.org_id, external_user_id=identity.user_id
+    )
     await db.commit()
     await db.refresh(conv)
     return _to_conversation_response(conv, escalation_status=None)
