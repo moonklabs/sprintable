@@ -91,6 +91,9 @@ class GcsStorageProvider(StorageProvider):
             logger.warning("gcs storage: signed write url 생성 실패 path=%s", object_path, exc_info=True)
             return None
 
+    def required_write_headers(self, *, create_only: bool = False) -> dict[str, str]:
+        return {"x-goog-if-generation-match": "0"} if create_only else {}
+
     async def delete_object(self, container: str, object_path: str) -> bool:
         def _blocking() -> bool:
             from google.cloud import storage

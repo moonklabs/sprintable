@@ -56,6 +56,10 @@ def _mock_storage(monkeypatch):
     prov = MagicMock()
     prov.head_object = AsyncMock(side_effect=_head)
     prov.signed_write_url = AsyncMock(side_effect=_signed_write)
+    # story dc3d62f4 — required_write_headers는 provider별 실 반환값이 있어야 한다(MagicMock
+    # 기본값은 Mock 객체라 Pydantic dict[str,str] 검증에 안 맞음). 이 파일은 GCS 배포를
+    # 가정하고 작성됐으니 GCS 실제 반환값과 동일하게 고정.
+    prov.required_write_headers = MagicMock(return_value={"x-goog-if-generation-match": "0"})
     monkeypatch.setattr(_storage_mod, "get_storage_provider", lambda: prov)
     yield
 

@@ -574,9 +574,11 @@ class AssetUploadUrlResponse(BaseModel):
     upload_url: str
     object_path: str
     expires_at: datetime
-    # story #3249(카디르/codex HIGH 후속) — create-only 서명(x-goog-if-generation-match: 0)이
-    # PUT 요청에도 정확히 실려야 서명이 valid함(GCS가 헤더를 서명 바인딩에 포함) — FE는 이 헤더를
-    # 그대로 PUT에 붙여야 한다(안 붙이면 403). 응답에 명시해 FE가 하드코딩 대신 서버 계약을 따르게.
+    # story #3249/dc3d62f4 — create-only 서명(GCS: x-goog-if-generation-match·S3/MinIO:
+    # If-None-Match)이 PUT 요청에도 정확히 실려야 서명이 valid함(provider가 헤더를 서명
+    # 바인딩에 포함) — FE는 이 헤더를 그대로 PUT에 붙여야 한다(안 붙이면 서명 불일치).
+    # provider별로 이름이 다르므로 여기 하드코딩하지 않고 provider.required_write_headers()가
+    # 채운다(아래 호출부).
     required_put_headers: dict[str, str] = {}
 
 
@@ -622,7 +624,8 @@ async def create_asset_upload_url(
 
     from app.services.storage import get_storage_provider
 
-    upload_url = await get_storage_provider().signed_write_url(
+    provider = get_storage_provider()
+    upload_url = await provider.signed_write_url(
         DEFAULT_CONTAINER, object_path, ttl=_ASSET_UPLOAD_URL_TTL, content_type=body.content_type,
         create_only=True,
     )
@@ -631,7 +634,10 @@ async def create_asset_upload_url(
     return AssetUploadUrlResponse(
         upload_url=upload_url, object_path=object_path,
         expires_at=datetime.now(timezone.utc) + _ASSET_UPLOAD_URL_TTL,
-        required_put_headers={"x-goog-if-generation-match": "0"},
+        # story dc3d62f4 — provider별 조건부 헤더 이름이 다르다(GCS: x-goog-if-generation-match·
+        # S3/MinIO: If-None-Match). 하드코딩하면 self-host가 S3/MinIO로 배포됐을 때 FE에 틀린
+        # 헤더 계약을 내려줘 서명 불일치로 PUT 자체가 깨진다 — provider에게 직접 물어본다.
+        required_put_headers=provider.required_write_headers(create_only=True),
     )
 
 
