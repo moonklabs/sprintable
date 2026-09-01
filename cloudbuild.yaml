@@ -979,6 +979,13 @@ steps:
   # DATABASE_URL_*/JWT_SECRET과 이름이 겹치지 않는 전용 시크릿만 참조 — fleet 시크릿을
   # 이 서비스가 상속(preserve)할 수 있는 `gcloud run deploy`의 "미지정=기존값 유지" 함정
   # (위 backend 스텝 주석 참고)을 피하려 매 배포마다 --update-secrets를 명시 지정한다.
+  #
+  # story #3264(지원v1·6방어·계측) — SUPPORT_GATEWAY_ADMIN_TOKEN 추가(어드민 계측 조회 전용
+  # 정적 시크릿, app/token_verify.py::require_admin). 나머지 두 시크릿과 동일 패턴(fail-closed
+  # 하드 참조) — SUPPORT_GATEWAY_ADMIN_TOKEN_${_DEPLOY_ENV} 시크릿 버전이 없으면 이 배포
+  # 스텝 자체가 실패한다(안전측 — 빈 값으로 조용히 뜨는 게 아니다). 페드루 PO가 실물 값을
+  # 프로비저닝하기 전까지는 이 스텝이 그 이유로 막힌다 — 코드/배선은 여기까지, 시크릿 생성은
+  # PO 레인(infra/cloudbuild-secret-manifest.txt에 SUPPORT_GATEWAY_ADMIN_TOKEN_dev 등재 済).
   - id: deploy-support-gateway
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
@@ -1024,7 +1031,7 @@ steps:
           --subnet=default \
           --vpc-egress=private-ranges-only \
           --update-env-vars="^;^$${ENV_VARS}" \
-          --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest" \
+          --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_ADMIN_TOKEN=SUPPORT_GATEWAY_ADMIN_TOKEN_${_DEPLOY_ENV}:latest" \
           --quiet
     waitFor: [run-support-gateway-migrate-job]
 

@@ -62,3 +62,17 @@ async def require_delegated_identity(authorization: str = Header(default="")) ->
         return verify_delegated_token(token)
     except DelegatedTokenError as exc:
         raise HTTPException(status_code=401, detail=f"invalid delegated token: {exc}") from exc
+
+
+async def require_admin(authorization: str = Header(default="")) -> None:
+    """story #3264 AC3/AC4 — 어드민 계측 조회(app/routers/admin.py) 전용. 고객 위임 토큰과
+    완전히 다른 신뢰 재료(settings.admin_token, 정적 비교) — org 클레임이 없으므로 이 경로는
+    org 스코프 개념 자체가 없다(내부 집계 조회일 뿐, 고객 대화 원문을 반환하지 않는다).
+    미설정 시 fail-closed(빈 문자열끼리 비교해 통과하는 사고 방지 — 명시적으로 막는다)."""
+    if not settings.admin_token:
+        raise HTTPException(status_code=401, detail="admin token not configured")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    token = authorization[len("Bearer "):]
+    if token != settings.admin_token:
+        raise HTTPException(status_code=401, detail="invalid admin token")
