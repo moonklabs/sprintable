@@ -105,10 +105,23 @@ class VertexLLMClient:
             if force_tool_names
             else None
         )
+        # story #3283(지원v1·후속, 2026-09-01 PO 라이브 실증) — mode=ANY는 AFC 루프의 매
+        # 스텝에 적용되는 제약이라, 도구가 계속 무매치를 돌려주면 모델은 텍스트도 escalate도
+        # 절대 못 내고 SDK 기본 상한(maximum_remote_calls=10, 실측과 정확히 일치)까지
+        # 반복한다 — 실측 10회·117초. 강제 그라운딩 턴에 한해 이 상한을 2로 좁혀 질의 변주
+        # 1회 재시도의 가치는 보존하되 10x 지연·비용은 차단한다(PO 확定, 1은 과잉 축소로
+        # 기각). force_tool_names가 없는 일반 AUTO 턴은 SDK 기본값(10) 그대로 — 이 스토리
+        # 스코프 밖(PO 확定).
+        automatic_function_calling = (
+            types.AutomaticFunctionCallingConfig(maximum_remote_calls=2) if force_tool_names else None
+        )
         chat = self._client.aio.chats.create(
             model=model,
             config=types.GenerateContentConfig(
-                system_instruction=system_prompt, tools=tools, tool_config=tool_config
+                system_instruction=system_prompt,
+                tools=tools,
+                tool_config=tool_config,
+                automatic_function_calling=automatic_function_calling,
             ),
         )
         resp = await chat.send_message(user_text)

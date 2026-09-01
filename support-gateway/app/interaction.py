@@ -409,6 +409,34 @@ async def handle_turn(
         deduped_answers = [a for a in tool_reply_state["answers"] if not (a in seen or seen.add(a))]
         reply_text = "\n\n".join(deduped_answers)
 
+    # story #3283(지원v1·후속, 2026-09-01 PO 라이브 실증) — force_tool_names(강제 그라운딩)
+    # 턴이 (상한 축소 이후에도) 전 호출 무매치로 끝나면, escalate는 mode=ANY(allowed=
+    # knowledge_search만)에 의해 이번 턴 내내 호출 자체가 봉쇄돼 있었다 — 모델에게 "정직
+    # 무매치 시 사람 연결"을 맡길 재량 자체가 없었다는 뜻. 조립 답변이 이미 "담당자에게
+    # 연결해 드리는 게 정확합니다"라고 말하는데 실제로는 아무도 연결 안 된 채로 끝나는 걸
+    # 막기 위해, 이 경우엔 모델 재량을 거치지 않고 코드가 직접 에스컬레이션을 실행한다
+    # (근접 사다리 #3281의 "재무매치=에스컬" ③단을 강제 턴에서도 구조적으로 이행시키는
+    # 마지막 조각 — AUTO 턴 일반화는 스코프 밖으로 유보, PO 확定).
+    if force_tool_names and not escalated and not knowledge_state["had_match"]:
+        await escalation_task(
+            db,
+            conversation_id=conversation.id,
+            org_id=org_id,
+            user_id=user_id,
+            reason="forced_grounding_no_match",
+            detail=f"강제 knowledge_search가 전 호출 무매치로 종결 — 코드가 직접 에스컬: {customer_text[:120]!r}",
+        )
+        db.add(
+            SupportExecutionLog(
+                conversation_id=conversation.id,
+                org_id=org_id,
+                task_type="forced_grounding_escalation",
+                model=model,
+                summary="forced grounding turn ended with no match — code-escalated",
+            )
+        )
+        escalated = True
+
     _store_agent_message(db, conversation=conversation, org_id=org_id, text=reply_text, cost_usd=cost)
     await maybe_summarize(db, conversation=conversation, llm=llm)
     return TurnResult(reply_text=reply_text, escalated=escalated)

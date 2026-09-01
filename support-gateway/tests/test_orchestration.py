@@ -183,3 +183,66 @@ async def test_needs_grounding_reverse_mutation_pin(client, fake_llm):
     assert forced == ["knowledge_search"]
     assert not_forced is None
     assert forced != not_forced
+
+
+# story #3283(지원v1·후속, 2026-09-01 PO 라이브 실증) — 강제 그라운딩 턴이 전 호출 무매치로
+# 끝나면 escalate 자체가 mode=ANY(allowed=knowledge_search만)에 의해 봉쇄돼 모델 재량으로는
+# 절대 못 부른다 — 조립 문구("연결해 드리는 게 정확합니다")가 실제 행동과 어긋나지 않도록
+# 코드가 직접 에스컬레이션을 실행해야 한다.
+async def test_forced_grounding_turn_ending_no_match_code_escalates(client, fake_llm, db_engine, monkeypatch):
+    import app.execution_tasks as execution_tasks_module
+
+    monkeypatch.setattr(execution_tasks_module, "search", lambda vector, top_k=3, min_score=None: [])
+
+    fake_llm.classify_text = "inquiry"
+    fake_llm.classify_needs_grounding = True
+    fake_llm.call_tool_name = "knowledge_search"
+    fake_llm.call_tool_kwargs = {"query": "에이전트 로컬 설정 방법"}
+    resp = await _post_message(client, OTHER_ORG_ID, content="에이전트 로컬 설정 방법")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["escalated"] is True
+    from app.execution_tasks import NO_MATCH_MESSAGE
+
+    assert body["agent_message"]["content"] == NO_MATCH_MESSAGE  # 문구는 그대로, 실동작만 이행.
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        escalations = (await session.execute(select(SupportEscalation))).scalars().all()
+        assert len(escalations) == 1
+        assert escalations[0].reason == "forced_grounding_no_match"
+        logs = (await session.execute(select(SupportExecutionLog))).scalars().all()
+        assert any(log.task_type == "forced_grounding_escalation" for log in logs)
+
+
+async def test_forced_grounding_turn_with_near_miss_does_not_code_escalate(client, fake_llm, db_engine, monkeypatch):
+    """근접 매치(had_match=True)가 있으면 코드 강제 에스컬이 안 걸려야 한다 — #3281 근접
+    사다리 ②단이 강제 턴에서도 여전히 정상 착지하는지 회귀 방지."""
+    import app.execution_tasks as execution_tasks_module
+    from app.knowledge.corpus import KnowledgeChunk
+    from app.knowledge_search import SearchMatch
+
+    chunk = KnowledgeChunk(id="near-x", title="근접문서", content="근접 내용", source_note="test")
+    monkeypatch.setattr(
+        execution_tasks_module, "search", lambda vector, top_k=3, min_score=None: [SearchMatch(chunk=chunk, score=0.65)]
+    )
+
+    fake_llm.classify_text = "inquiry"
+    fake_llm.classify_needs_grounding = True
+    fake_llm.knowledge_text = "NONE"  # 관련성 판정 LLM이 거부 — 정확 매치가 아니라 근접으로 착지.
+    fake_llm.call_tool_name = "knowledge_search"
+    fake_llm.call_tool_kwargs = {"query": "질문"}
+    resp = await _post_message(client, OTHER_ORG_ID, content="질문")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["escalated"] is False
+    assert "근접 내용" in body["agent_message"]["content"]
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        escalations = (await session.execute(select(SupportEscalation))).scalars().all()
+        assert escalations == []
