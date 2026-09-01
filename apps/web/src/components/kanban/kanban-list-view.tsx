@@ -25,6 +25,9 @@ interface KanbanListViewProps {
   storyGatesMap?: Record<string, { id: string; gate_type: string; status: string }[]>;
   storyLineMap?: Record<string, LineStatusSummary>;
   projectId?: string;
+  /** story #3287 AC4 — org 라벨 오버라이드(useOrgDomainLabels().statusLabel). 없으면
+   * 기존 t(col.i18nKey) 그대로(회귀 0). 그룹 헤더+카드 내부 배지 둘 다에 쓰인다. */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 interface StatusGroupProps {
@@ -41,11 +44,12 @@ interface StatusGroupProps {
   storyGatesMap?: KanbanListViewProps['storyGatesMap'];
   storyLineMap?: KanbanListViewProps['storyLineMap'];
   projectId?: string;
+  getStatusLabel?: KanbanListViewProps['getStatusLabel'];
 }
 
 function StatusGroup({
   columnId, label, stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel,
 }: StatusGroupProps) {
   const [expanded, setExpanded] = useState(columnId !== 'done');
 
@@ -88,6 +92,7 @@ function StatusGroup({
                   gates={storyGatesMap?.[story.id] ?? []}
                   lineStatus={storyLineMap?.[story.id]}
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
+                  getStatusLabel={getStatusLabel}
                 />
               </div>
             ))
@@ -100,7 +105,7 @@ function StatusGroup({
 
 export function KanbanListView({
   stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel,
 }: KanbanListViewProps) {
   const t = useTranslations('board');
 
@@ -112,7 +117,7 @@ export function KanbanListView({
           <StatusGroup
             key={col.id}
             columnId={col.id}
-            label={t(col.i18nKey)}
+            label={getStatusLabel?.(col.id) ?? t(col.i18nKey)}
             stories={colStories}
             epicMap={epicMap}
             memberMap={memberMap}
@@ -124,6 +129,7 @@ export function KanbanListView({
             storyGatesMap={storyGatesMap}
             storyLineMap={storyLineMap}
             projectId={projectId}
+            getStatusLabel={getStatusLabel}
           />
         );
       })}

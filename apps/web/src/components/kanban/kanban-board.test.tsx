@@ -970,3 +970,69 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     expect(container.innerHTML).not.toContain('max-w-[280px]');
   });
 });
+
+// story #3287([도메인탈고정·축1 Phase1] AC4) — org 라벨 오버라이드가 클래식(5-status)
+// 컬럼 헤더 텍스트만 바꾸고, canonical status(드래그·색상·전이 판정에 쓰는 col.id)와
+// 신뢰축(TRUST_COLUMNS, 다른 어휘) 라벨은 절대 안 건드리는지 실 렌더로 고정.
+describe('KanbanBoard — org 라벨 오버라이드 소비(#3287 AC4)', () => {
+  function stubFetchWithDomainLabels(
+    stories: Array<Record<string, unknown> & { status: string }>,
+    labels: Array<{ domain: string; canonical_slug: string; label_ko: string | null; label_en: string | null }>,
+  ) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = stories.filter((s) => s.status === status);
+        return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.includes('/domain-labels')) {
+        return { ok: true, json: async () => labels };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  }
+
+  beforeEach(() => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human',
+    });
+  });
+
+  it('클래식(5-status) 컬럼 헤더는 오버라이드 라벨로 바뀌고, 오버라이드 없는 컬럼은 canonical i18n 그대로다', async () => {
+    stubFetchWithDomainLabels(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }],
+      [{ domain: 'status', canonical_slug: 'backlog', label_ko: '아이디어', label_en: 'Idea' }],
+    );
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    expect(classicBtn, '클래식 토글 버튼을 못 찾음').toBeDefined();
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('아이디어'); // backlog 오버라이드 적용
+    expect(container.textContent).not.toContain('백로그'); // canonical i18n 문구는 더는 안 보임
+    expect(container.textContent).toContain('완료'); // done엔 오버라이드 없음 — canonical i18n 그대로
+  });
+
+  it('오버라이드 미설정(빈 목록)이면 전 컬럼이 기존 canonical i18n 라벨 그대로다(회귀 0)', async () => {
+    stubFetchWithDomainLabels([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }], []);
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('백로그');
+  });
+
+  it('신뢰축(TRUST_COLUMNS) 컬럼 헤더는 자기 어휘 그대로지만, 카드 내부 상태 배지는 story.status 오버라이드를 받는다', async () => {
+    stubFetchWithDomainLabels(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }],
+      [{ domain: 'status', canonical_slug: 'backlog', label_ko: '아이디어', label_en: 'Idea' }],
+    );
+    await mount(); // 기본값=trust축(P0-04) — 클래식 토글 안 누름.
+    // 컬럼 헤더(대기/실행 중/...)는 TRUST_COLUMNS 고유 어휘 그대로 — statusLabel()을 안 씀.
+    expect(container.textContent).toContain('입력 필요');
+    // 카드 내부 배지는 story.status(canonical, 축과 무관)를 보여주므로 오버라이드가 반영된다.
+    expect(container.textContent).toContain('아이디어');
+  });
+});

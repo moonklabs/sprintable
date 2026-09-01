@@ -70,6 +70,8 @@ interface KanbanColumnProps {
   onToggleCollapse?: () => void;
   // f1910a31: ?view=new → 인라인 컴포저 auto-open. nonce가 바뀔 때마다(0→1, 1→2…) 재오픈.
   autoComposeSignal?: number;
+  /** story #3287 AC4 — StoryCard로 그대로 threading(설명은 story-card.tsx 참고). */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 export function KanbanColumn({
@@ -80,7 +82,7 @@ export function KanbanColumn({
   onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
-  autoComposeSignal,
+  autoComposeSignal, getStatusLabel,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -323,6 +325,7 @@ export function KanbanColumn({
                   gates={storyGatesMap?.[story.id] ?? []}
                   lineStatus={storyLineMap?.[story.id]}
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
+                  getStatusLabel={getStatusLabel}
                 />
               ))}
             </div>
