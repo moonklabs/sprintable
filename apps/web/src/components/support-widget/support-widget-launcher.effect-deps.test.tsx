@@ -32,6 +32,7 @@ vi.mock('@/hooks/use-support-widget-session', () => ({
     return {
       status: 'error',
       messages: [],
+      escalationStatus: null,
       sending: false,
       sendError: null,
       connect: connectMock,

@@ -19,10 +19,21 @@ export interface GatewayMessage {
   created_at: string;
 }
 
+/** story #3263 AC4 — 대화 레벨 에스컬레이션 상태(무신호 금지). null=한 번도 에스컬 안 됨,
+ * 'open'=지금 사람에게 넘어가 있음(과거에 resolved된 게 있어도 열린 게 하나라도 있으면
+ * open), 'resolved'=전부 해결됨. */
+export type GatewayEscalationStatus = 'open' | 'resolved' | null;
+
 export interface GatewayMessageExchange {
   customer_message: GatewayMessage;
   agent_message: GatewayMessage;
   escalated: boolean;
+  escalation_status: GatewayEscalationStatus;
+}
+
+export interface GatewayMessageHistory {
+  messages: GatewayMessage[];
+  escalationStatus: GatewayEscalationStatus;
 }
 
 function gatewayBaseUrl(): string | null {
@@ -62,7 +73,7 @@ export async function createOrResumeGatewaySession(): Promise<GatewaySession> {
   return (await res.json()) as GatewaySession;
 }
 
-export async function listGatewayMessages(sessionId: string): Promise<GatewayMessage[]> {
+export async function listGatewayMessages(sessionId: string): Promise<GatewayMessageHistory> {
   const base = gatewayBaseUrl();
   if (!base) throw new Error('Support Gateway not configured');
   const token = await issueDelegatedToken();
@@ -70,8 +81,8 @@ export async function listGatewayMessages(sessionId: string): Promise<GatewayMes
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`gateway history failed: HTTP ${res.status}`);
-  const json = (await res.json()) as { messages: GatewayMessage[] };
-  return json.messages;
+  const json = (await res.json()) as { messages: GatewayMessage[]; escalation_status: GatewayEscalationStatus };
+  return { messages: json.messages, escalationStatus: json.escalation_status };
 }
 
 /** story #3261(오케스트레이션) 실측(Pedro, 2026-08-31) — 이 왕복은 동기 처리라 ~12초까지

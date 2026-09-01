@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Send, X } from 'lucide-react';
+import { Send, UserRound, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
 
@@ -96,6 +96,15 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
 
   return (
     <>
+      {session.escalationStatus === 'open' ? (
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-foreground"
+        >
+          <UserRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          {t('escalationOpenBanner')}
+        </div>
+      ) : null}
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
         {session.status === 'connecting' ? (
           <div className="h-8 animate-pulse rounded-lg bg-muted" />

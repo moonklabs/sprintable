@@ -15,7 +15,7 @@ from app.config import settings
 from app.db import get_db
 from app.injection_defense import sanitize_customer_text
 from app.interaction import handle_turn
-from app.models import SupportConversation, SupportMessage, SupportSession
+from app.models import SupportConversation, SupportEscalation, SupportMessage, SupportSession
 from app.rate_limit import limiter
 from app.schemas import (
     MessageCreateRequest,
@@ -37,6 +37,22 @@ def _to_message_response(message: SupportMessage) -> MessageResponse:
         content=message.content,
         created_at=message.created_at,
     )
+
+
+async def _conversation_escalation_status(db: AsyncSession, conversation_id: uuid.UUID) -> str | None:
+    """story #3263 AC4 — 대화 레벨 에스컬레이션 상태. "가장 최근 1건"이 아니라 "지금 열려있는
+    게 하나라도 있는가"로 판정한다 — created_at 정렬(초 단위 해상도, SQLite CURRENT_TIMESTAMP)
+    로는 근접 시각에 생긴 두 행의 선후를 신뢰할 수 없고, 무엇보다 고객이 실제로 궁금한 건
+    "지금 사람이 아직 보고 있는가"이지 "가장 최근 사건이 뭐였는가"가 아니다 — 열린 게
+    하나라도 있으면 과거에 resolved된 게 더 최근에 안 걸려도 open이 맞다."""
+    statuses = (
+        await db.execute(
+            select(SupportEscalation.status).where(SupportEscalation.conversation_id == conversation_id)
+        )
+    ).scalars().all()
+    if not statuses:
+        return None
+    return "open" if "open" in statuses else "resolved"
 
 
 async def _get_or_create_conversation(
@@ -142,10 +158,13 @@ async def post_message(
         )
     ).scalar_one()
 
+    escalation_status = await _conversation_escalation_status(db, conv.id)
+
     return MessageExchangeResponse(
         customer_message=_to_message_response(customer_message),
         agent_message=_to_message_response(agent_message),
         escalated=turn.escalated,
+        escalation_status=escalation_status,
     )
 
 
@@ -181,7 +200,7 @@ async def list_messages(
         )
     ).scalar_one_or_none()
     if conv is None:
-        return MessageListResponse(messages=[])
+        return MessageListResponse(messages=[], escalation_status=None)
 
     messages = (
         await db.execute(
@@ -190,4 +209,7 @@ async def list_messages(
             .order_by(SupportMessage.created_at.asc())
         )
     ).scalars().all()
-    return MessageListResponse(messages=[_to_message_response(m) for m in messages])
+    escalation_status = await _conversation_escalation_status(db, conv.id)
+    return MessageListResponse(
+        messages=[_to_message_response(m) for m in messages], escalation_status=escalation_status
+    )

@@ -31,6 +31,7 @@ function baseSession(overrides: Partial<SupportWidgetSession> = {}): SupportWidg
   return {
     status: 'ready',
     messages: [],
+    escalationStatus: null,
     sending: false,
     sendError: null,
     connect: vi.fn(),
@@ -68,7 +69,7 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
     expect(input.disabled).toBe(true);
   });
 
-  it('escalated 메시지는 "담당자에게 연결됨" 배지를 함께 보인다', async () => {
+  it('escalated 메시지는 "담당자에게 전달됨" 배지를 함께 보인다', async () => {
     await mount(baseSession({
       messages: [{ id: 'a1', role: 'agent', content: '담당자를 연결해 드릴게요.', createdAt: 't', escalated: true }],
     }));
@@ -85,6 +86,18 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
     const retryBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.supportWidget.sendErrorRetry)!;
     await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(retryLastMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('story #3263 AC4 — escalationStatus가 open이면 지속 배너가 뜬다(턴이 지나간 뒤·재오픈 후에도, 무신호 금지)', async () => {
+    await mount(baseSession({ escalationStatus: 'open', messages: [] }));
+    expect(container.textContent).toContain(koMessages.supportWidget.escalationOpenBanner);
+  });
+
+  it('story #3263 AC4 — escalationStatus가 null/resolved면 지속 배너를 안 띄운다(평시엔 무의미한 배너로 화면을 어지럽히지 않는다)', async () => {
+    await mount(baseSession({ escalationStatus: null }));
+    expect(container.textContent).not.toContain(koMessages.supportWidget.escalationOpenBanner);
+    await mount(baseSession({ escalationStatus: 'resolved' }));
+    expect(container.textContent).not.toContain(koMessages.supportWidget.escalationOpenBanner);
   });
 
   it('failed 메시지는 실패 마커를 보이고 조용히 사라지지 않는다(no-fiction)', async () => {
