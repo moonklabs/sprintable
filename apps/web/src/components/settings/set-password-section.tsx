@@ -69,7 +69,10 @@ export function SetPasswordSection() {
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch('/api/auth/set-password/request', {
+      // 카디르 QA(PR#3688, story #2691 회귀가드) — Settings는 세션 인증을 전제하는 화면
+      // (이미 위 useEffect가 fetchWithAuth('/api/me')를 씀)이라 raw fetch는 401을 재시도
+      // 없이 삼킨다(#2689 근본원인 재발). fetchWithAuth로.
+      const res = await fetchWithAuth('/api/auth/set-password/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_password: password }),
@@ -106,7 +109,8 @@ export function SetPasswordSection() {
     setResending(true);
     setResent(false);
     try {
-      const res = await fetch('/api/auth/set-password/request', {
+      // 카디르 QA(PR#3688, story #2691 회귀가드) — handleSubmit과 동일 이유로 fetchWithAuth.
+      const res = await fetchWithAuth('/api/auth/set-password/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_password: password }),
