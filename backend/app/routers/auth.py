@@ -35,10 +35,12 @@ from app.core.security import (
     create_password_reset_token,
     create_email_verification_token,
     create_oauth_state_token,
+    create_set_password_confirm_token,
     decode_jwt,
     decode_password_reset_token,
     decode_email_verification_token,
     decode_oauth_state_token,
+    decode_set_password_confirm_token,
     generate_totp_secret,
     get_totp_provisioning_uri,
     hash_password,
@@ -1715,30 +1717,114 @@ async def change_password(
     return _ok({"message": "Password changed successfully"})
 
 
-# ─── POST /api/v2/auth/set-password ──────────────────────────────────────────
+# ─── POST /api/v2/auth/set-password/request, GET /api/v2/auth/set-password/confirm ──
+# story #ab2a503f([버그·보안·HIGH] set-password가 재인증 0으로 탈취 세션/API키에 비밀번호를
+# 심는다 — 2FA 해제 우회 체인의 STEP1·계정탈취 발판) — 구 POST /set-password는
+# get_current_user만 요구해 재인증 0이었다. hashed_password == ""(OAuth 전용 계정)만
+# 대상이라 "현재 비밀번호 재확인"(change_password류)이 원천 불가능하므로, 별도 재인증
+# 축이 필요하다 — 이메일 확인 링크 2단계로 "지금 이 순간의 사람"을 증명하게 쪼갠다
+# (verify-email 인프라 재사용, 신규 발명 0). 설계 doc(deecc92c) §① 그대로 구현.
 
-@router.post("/set-password")
-async def set_password(
+
+def _requires_interactive_session(auth: AuthContext) -> bool:
+    """이 작업은 "이메일 링크를 클릭할 사람이 실시간으로 있는가"만 보므로, AU 과금 판별자
+    (is_au_billable_agent, app/dependencies/auth.py)와 다른 축이다 — 그건 human_api_key_id를
+    "사람"으로 예외처리하지만(사람 UI 작업=0 AU 스펙), 여기선 hu_live_*(휴먼 개인키)도
+    sk_live_*(에이전트키)와 동일하게 막아야 한다: 이메일 링크는 API키 세션과 무관하게
+    브라우저에서 별도로 완결되므로 API키가 "인증 강도"에 아무 기여를 안 하고, 스토리 원문이
+    "탈취 세션 또는 API키"를 대칭 위협으로 서술한다 — 한쪽만 막으면 공격자가 그쪽으로 우회."""
+    app_metadata = auth.claims.get("app_metadata", {})
+    return bool(app_metadata.get("api_key_id")) or bool(app_metadata.get("human_api_key_id"))
+
+
+@router.post("/set-password/request")
+@resend_verification_limiter.limit("3/hour")
+async def request_set_password(
+    request: Request,
     body: SetPasswordRequest,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> JSONResponse:
-    """OAuth 전용 사용자 최초 비밀번호 설정 (hashed_password == "" 인 경우만 허용)."""
+    """OAuth 전용 사용자 최초 비밀번호 설정 — 1단계(확인 이메일 발송). 새 비밀번호는 여기서
+    즉시 해시해 토큰에만 싣는다(평문 어디에도 안 남김) — 실제 DB write는 confirm이 한다."""
+    if _requires_interactive_session(auth):
+        return _err("REQUIRES_INTERACTIVE_SESSION", "이 작업은 브라우저 세션에서만 가능합니다", 403)
+
     user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
-
     if user.hashed_password:
+        return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+
+    new_password_hash = hash_password(body.new_password)
+    confirm_token = create_set_password_confirm_token(str(user.id), new_password_hash)
+    app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+    confirm_link = f"{app_url}/set-password/confirm?token={confirm_token}"
+
+    from app.services.agent_onboarding_config import resolve_locale
+    from app.services.email import render_action_email, send_email
+    from app.services.email_copy import TRANSACTIONAL_COPY
+    locale = resolve_locale(user.locale)
+    copy = TRANSACTIONAL_COPY["set_password_confirm"][locale]
+    delivered = send_email(
+        to=user.email,
+        subject=copy["subject"],
+        html_body=render_action_email(
+            intro_lines=copy["intro_lines"],
+            cta_label=copy["cta_label"],
+            cta_url=confirm_link,
+            expiry_note=copy["expiry_note"],
+            security_note=copy["security_note"],
+            fallback_label=copy["fallback_label"],
+            locale=locale,
+        ),
+    )
+    if not delivered:
+        # 콘솔 폴백(미발송)을 "sent"로 거짓 보고하지 않는다(verify-email과 동일 관례).
+        logger.warning(
+            "set-password/request: 확인 이메일 미발송(콘솔 폴백) user_id=%s email=%s 확인 링크: %s",
+            user.id, user.email, confirm_link,
+        )
+        return _ok({"message": "Confirmation email could not be delivered — check email configuration", "delivered": False})
+    return _ok({"message": "Confirmation email sent", "delivered": True})
+
+
+@router.get("/set-password/confirm")
+async def confirm_set_password(
+    token: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """2단계 — 이메일 링크 클릭이 실제 write를 완결한다(verify_email()과 동형: 토큰 자체가
+    증명이라 인증 불요)."""
+    try:
+        payload = decode_set_password_confirm_token(token)
+    except JWTError:
+        return _err("INVALID_TOKEN", "Confirmation link is invalid or expired", 400)
+
+    user_id = payload.get("sub")
+    new_password_hash = payload.get("new_password_hash")
+    user = await _get_user_by_id(session, uuid.UUID(user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    if user.hashed_password:
+        # TOCTOU fail-closed — 토큰 발급 후 15분 사이 다른 경로로 비밀번호가 이미 생겼으면 거부.
         return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
 
     await session.execute(
         update(User).where(User.id == user.id).values(
-            hashed_password=hash_password(body.new_password),
+            hashed_password=new_password_hash,
             password_set_at=datetime.now(timezone.utc),
         )
     )
+    # story #ab2a503f — 탈취 refresh token으로 이후 /auth/refresh가 즉시 401(우회체인 봉합).
+    # switch_project/switch_org(이 파일)와 동일 인라인 패턴 재사용.
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
     await session.commit()
-    return _ok({"message": "Password set successfully"})
+    return _ok({"message": "Password set successfully — please log in with your new password"})
 
 
 # ─── Email Verification ───────────────────────────────────────────────────────
