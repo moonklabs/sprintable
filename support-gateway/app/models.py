@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Text, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Text, Uuid, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # SQLAlchemy 2.0 제네릭 Uuid — PG는 native UUID로, SQLite(테스트 전용, aiosqlite)는 CHAR(32)로
@@ -54,8 +54,27 @@ class SupportConversation(Base):
     # (org_id, external_user_id) 복합 인덱스 하나(그 조합으로 "활성 상담" 조회, 위 docstring)
     # 인데, 모델은 external_user_id에 `index=True`만 붙여 실제 배포엔 없는 단일 컬럼 인덱스를
     # 따로 선언하고 있었다(compare_metadata 실측으로 적발). 실 배포 스키마에 맞춰 정정.
+    #
+    # story #3298(2026-09-02, fleet CI blocker 정정) — migration 0005(story #3278, PR#3681)가
+    # (org_id, external_user_id) WHERE ended_at IS NULL 부분 유니크 인덱스
+    # ux_support_conversations_org_user_active를 실 DB에 추가했으나, 이 모델은 그때 갱신 안
+    # 됨(compare_metadata 실측: DB엔 있고 metadata엔 없어 'remove_index'로 잡힘 — 정본은
+    # migration 쪽, 모델이 뒤처졌던 것). 위 ix_(0003, 비유니크·전체행) 인덱스는 0005가 안
+    # 지웠으므로 DB에 그대로 남아 있다 — 둘 다 선언해야 실 스키마와 일치.
+    # ⛔postgresql_where만 주면 SQLite(테스트 dialect)는 그 kwarg를 무시하고 **전체행** 유니크
+    # 인덱스를 만든다(부분 조건 없이) — 실측으로 걸림: test_conversation_user_scope.py 3건이
+    # "새 상담 시작이 이전 걸 종료 처리"하는 흐름에서 ended_at 무관 유니크 위반으로 깨졌다.
+    # sqlite_where를 나란히 줘야 SQLite에서도 진짜 부분 인덱스(ended_at IS NULL만 대상)가 된다.
     __table_args__ = (
         Index("ix_support_conversations_org_user_active", "org_id", "external_user_id"),
+        Index(
+            "ux_support_conversations_org_user_active",
+            "org_id",
+            "external_user_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL"),
+            sqlite_where=text("ended_at IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
