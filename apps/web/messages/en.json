@@ -4434,7 +4434,7 @@
     "errorBody": "We couldn't connect to support chat. Please try again.",
     "retryConnect": "Reconnect",
     "thinkingLabel": "Thinking… ({seconds}s)",
-    "escalatedBadge": "Connected to a human",
+    "escalatedBadge": "Handed to our team",
     "escalationOpenBanner": "This conversation has been handed to a member of our team — they'll reply right here.",
     "messageFailedLabel": "Couldn't send",
     "sendErrorRetry": "Retry",

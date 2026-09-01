@@ -4434,7 +4434,7 @@
     "errorBody": "지원 채팅에 연결하지 못했습니다. 다시 시도해 주세요.",
     "retryConnect": "다시 연결하기",
     "thinkingLabel": "생각 중… ({seconds}초)",
-    "escalatedBadge": "담당자에게 연결됨",
+    "escalatedBadge": "담당자에게 전달됨",
     "escalationOpenBanner": "이 대화는 담당자에게 전달되어 있습니다. 확인 후 이 대화로 답변드립니다.",
     "messageFailedLabel": "전송하지 못했습니다",
     "sendErrorRetry": "다시 시도",

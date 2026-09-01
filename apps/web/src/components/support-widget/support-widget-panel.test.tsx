@@ -69,7 +69,7 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
     expect(input.disabled).toBe(true);
   });
 
-  it('escalated 메시지는 "담당자에게 연결됨" 배지를 함께 보인다', async () => {
+  it('escalated 메시지는 "담당자에게 전달됨" 배지를 함께 보인다', async () => {
     await mount(baseSession({
       messages: [{ id: 'a1', role: 'agent', content: '담당자를 연결해 드릴게요.', createdAt: 't', escalated: true }],
     }));
