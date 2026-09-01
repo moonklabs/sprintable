@@ -304,7 +304,16 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
     `create_org_level_agent`가 생성 시 항상 세팅해 이 경로에서 NULL을 만날 수 없다)로
     `ensure_agent_project_profile`을 멱등 호출한 뒤 UPDATE를 1회만 재시도한다. 콜사이트 7곳
     (agent_gateway.py×3·team_members.py×3·agent_auth_failure.py×1) 전부를 고치는 대신 이 함수
-    내부에서 닫는 쪽이 더 좁은 경계(PO 확定)."""
+    내부에서 닫는 쪽이 더 좁은 경계(PO 확定).
+
+    ⛔카디르 QA 실사고(2026-09-01, PR#3664 1차) — `agent_project_profiles.member_id`의 실 FK
+    부모는 `team_members`가 아니라 `members`다. `team_members` 행은 있는데 `members` 행이
+    없는 에이전트(정상 생성 경로라면 안 생기지만, 기존 테스트 2개가 정확히 이 모양으로
+    실 SSE 경로 agent_gateway.py를 태운다)에서 위 team_member-존재 체크만으론 못 걸러
+    `ensure_agent_project_profile`의 INSERT가 FK 위반으로 그대로 크래시했다("무해한 0-row"를
+    "즉시 500"으로 악화). `members` 존재를 먼저 확認해 그 경우도 team_member 부재와 동형으로
+    로그만 남기고 조용히 반환한다 — "무음보다 시끄러운 실패가 낫다"는 로그로 시끄럽다는
+    뜻이지 엔드포인트가 죽어도 된다는 뜻이 아니다."""
     allowed = {"last_seen_at", "active_story_id", "agent_status"}
     upd = {k: v for k, v in fields.items() if k in allowed}
     if not upd:
@@ -328,6 +337,19 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
         # team_members 행 자체가 없다(고아 member_id) — self-heal 대상 밖, 소리내어 남긴다.
         logger.warning(
             "sync_agent_profile_presence: no team_member row for member_id=%s — presence write skipped",
+            member_id,
+        )
+        return
+
+    member_exists = (await session.execute(select(Member.id).where(Member.id == member_id))).scalar_one_or_none()
+    if member_exists is None:
+        # agent_project_profiles.member_id의 실 FK 부모(members)가 없다 — team_members는
+        # 있는데 members가 없는 상태(정상 생성 경로에선 안 생김, 데이터 스멜 가능성은 story
+        # #3275 코멘트로 별도 기록). ensure INSERT를 시도하면 FK 위반으로 크래시하므로 먼저
+        # 걸러 조용히 반환(로그로 시끄럽게, 크래시로 시끄럽지 않게).
+        logger.warning(
+            "sync_agent_profile_presence: team_member exists but members row missing for member_id=%s "
+            "— self-heal skipped (FK parent absent)",
             member_id,
         )
         return

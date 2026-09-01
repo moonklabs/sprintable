@@ -171,18 +171,78 @@ async def test_existing_profile_path_unaffected_no_duplicate_row():
 
 
 @pytest.mark.anyio
-async def test_orphan_member_id_logs_and_does_not_raise():
+async def test_orphan_member_id_logs_and_does_not_raise(caplog):
     """team_members 행 자체가 없는 member_id(고아) — self-heal 대상 밖. 예외 없이 조용히
-    반환(무음이 아니라 로그로 신호, 회귀 시 크래시로 드러난다)."""
+    반환(무음이 아니라 로그로 신호, 회귀 시 크래시로 드러난다). 카디르 QA 보강(PR#3664 1차) —
+    "예외 없음"만이 아니라 경고 로그가 실제로 발화하는지까지 assert한다."""
+    import logging
+
     from app.services.agent_anchor_sync import sync_agent_profile_presence
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             from datetime import datetime, timezone
-            await sync_agent_profile_presence(
-                s, uuid.uuid4(), last_seen_at=datetime.now(timezone.utc), agent_status="online"
-            )
+            with caplog.at_level(logging.WARNING, logger="app.services.agent_anchor_sync"):
+                await sync_agent_profile_presence(
+                    s, uuid.uuid4(), last_seen_at=datetime.now(timezone.utc), agent_status="online"
+                )
             await s.commit()  # 예외 없이 끝나야 한다.
+            assert any("presence write skipped" in r.message for r in caplog.records)
+    finally:
+        await engine.dispose()
+
+
+async def _seed_team_member_only_no_member_row(session):
+    """카디르 QA 실사고(PR#3664 1차) 재현 — `agent_project_profiles.member_id`의 실 FK
+    부모는 `members`인데, `team_members`는 있고 `members`는 없는 상태(정상 생성 경로에선
+    안 생기지만 test_2602_sse_lease_lifespan_reclaim.py::_seed_org_project_agent와 동형 —
+    실 SSE 경로 agent_gateway.py:561이 이 상태의 에이전트로도 호출될 수 있음이 실측됨)."""
+    from app.models.organization import Organization
+    from app.models.project import Project
+    from app.models.team import TeamMember
+
+    org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    await session.commit()
+    member_id = uuid.uuid4()
+    session.add(TeamMember(id=member_id, org_id=org.id, project_id=project.id, type="agent", name="Agent"))
+    await session.commit()
+    return {"org_id": org.id, "project_id": project.id, "member_id": member_id}
+
+
+@pytest.mark.anyio
+async def test_members_row_missing_skips_self_heal_without_fk_crash(caplog):
+    """핵심 pin(카디르 QA 지적, PR#3664 1차 회귀 재발 방지) — team_members는 있는데 FK 실부모인
+    members가 없으면, self-heal이 `ensure_agent_project_profile` INSERT를 시도해 FK 위반으로
+    크래시하는 대신 조용히(로그로) 스킵해야 한다. 이 가드를 제거하는 뮤테이션 시 이 테스트가
+    IntegrityError로 정확히 RED가 된다."""
+    import logging
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.models.member import AgentProjectProfile
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_team_member_only_no_member_row(s)
+
+            with caplog.at_level(logging.WARNING, logger="app.services.agent_anchor_sync"):
+                await sync_agent_profile_presence(
+                    s, seeded["member_id"], last_seen_at=datetime.now(timezone.utc), agent_status="online"
+                )
+            await s.commit()  # FK 위반 없이 끝나야 한다(과거 회귀: IntegrityError 그대로 전파).
+
+            assert any("members row missing" in r.message for r in caplog.records)
+            rows = (await s.execute(
+                select(AgentProjectProfile).where(AgentProjectProfile.member_id == seeded["member_id"])
+            )).scalars().all()
+            assert rows == []  # self-heal이 스킵됐으니 profile 행도 안 생겨야 한다.
     finally:
         await engine.dispose()
