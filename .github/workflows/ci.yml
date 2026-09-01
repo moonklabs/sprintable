@@ -1113,6 +1113,14 @@ jobs:
       - name: "Verify no new cross-element tint × family-color-text (story #2590 A regression guard)"
         run: pnpm --filter web verify:cross-element-tint-text
 
+      # story #2420 AC4/AC6/AC7 — 「닫힌 계열」(subtle 알파를 0으로 만든 계열)의 순수 bg-<X>/<n<50>
+      # 재유입 가드. 자매 가드 verify:no-new-tint-color-text는 알파를 «같은 계열 글자와 함께»일 때만
+      # 잡아 순수 bg-<X>/<n>(text 없이)은 놓친다 — 이 스텝이 그 갭을 메운다(PO 지적, 2026-09-01).
+      # CLOSED_FAMILIES=[destructive](이 PR에서 0이 됨). 팬아웃 각 PR이 자기 계열을 0으로 만들 때
+      # 그 PR에서 CLOSED에 추가한다(계약 ③: 死를 계수 가능하게 — 0이 된 시점이 유일하게 옳은 자리).
+      - name: "Verify no closed-family subtle alpha bg re-entry (story #2420 AC4/AC6 — destructive)"
+        run: pnpm --filter web verify:no-subtle-alpha-bg
+
 
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
