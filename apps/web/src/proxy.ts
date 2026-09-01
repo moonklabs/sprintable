@@ -79,6 +79,9 @@ const PUBLIC_PREFIX = [
   '/forgot-password',
   '/reset-password',
   '/verify-email',
+  // story #ab2a503f — 이메일 확인 링크가 여는 착지 페이지. 클릭 시점엔 세션이 없는 게
+  // 정상(위 /verify-email·/reset-password와 동일 이유).
+  '/set-password/confirm',
   '/auth/callback',
   '/auth/login',
   // story 26170479: 세션을 만드는 공개 엔드포인트(호출 시점엔 세션이 없는 게 정상) — 누락
