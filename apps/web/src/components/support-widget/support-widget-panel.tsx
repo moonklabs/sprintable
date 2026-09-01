@@ -226,7 +226,7 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
               } ${m.pending ? 'opacity-60' : ''} ${m.failed ? 'border border-destructive/50' : ''}`}
             >
               {m.role === 'operator' ? (
-                <p className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
+                <p className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-foreground">
                   <UserRound className="h-3 w-3" aria-hidden />
                   {t('operatorSenderLabel')}
                 </p>
