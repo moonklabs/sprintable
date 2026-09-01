@@ -222,4 +222,8 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # substitution을 재사용해 배선, 시크릿은 이미 바인딩된 SUPPORT_GATEWAY_TOKEN_SECRET
     # 재사용이라 신규 시크릿 불요)로 114→115. 가드가 신규 필드를 설계대로 잡은 것.
     assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" in keys
-    assert len(keys) == 115
+    # story #183fe7a5(지원v1·후속, 2026-09-01): support_gateway_escalation_resolution_url
+    # 1필드 신설(게이트 해소→gateway SupportEscalation.status 동기화 콜백 착지 URL —
+    # operator_reply_url과 동일 게이팅 원칙·같은 시크릿 재사용, aud만 분리)로 115→116.
+    assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" in keys
+    assert len(keys) == 116

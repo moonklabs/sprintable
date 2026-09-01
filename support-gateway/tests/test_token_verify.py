@@ -7,10 +7,13 @@ import pytest
 
 from app.config import settings
 from app.token_verify import (
+    ESCALATION_RESOLUTION_AUD,
     OPERATOR_REPLY_AUD,
     DelegatedTokenError,
+    EscalationResolutionTokenError,
     OperatorReplyTokenError,
     verify_delegated_token,
+    verify_escalation_resolution_token,
     verify_operator_reply_token,
 )
 from tests.conftest import TEST_TOKEN_SECRET
@@ -157,3 +160,88 @@ def test_operator_reply_token_unconfigured_secret_fails_closed(monkeypatch):
     )
     with pytest.raises(OperatorReplyTokenError):
         verify_operator_reply_token(token)
+
+
+# --- story #183fe7a5 — 에스컬레이션 해소 동기화 토큰(backend→gateway, escalation_delivery.py
+# 반대 방향, operator-reply와 같은 방향·다른 aud) -------------------------------------------
+
+
+def test_escalation_resolution_token_valid_roundtrip():
+    escalation_id = uuid.uuid4()
+    token = jwt.encode(
+        {"aud": ESCALATION_RESOLUTION_AUD, "escalation_id": str(escalation_id), "resolution": "approved"},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    claims = verify_escalation_resolution_token(token)
+    assert claims.escalation_id == escalation_id
+    assert claims.resolution == "approved"
+
+
+def test_escalation_resolution_token_missing_aud_rejected():
+    token = jwt.encode(
+        {"escalation_id": str(uuid.uuid4()), "resolution": "approved"}, TEST_TOKEN_SECRET, algorithm="HS256"
+    )
+    with pytest.raises(EscalationResolutionTokenError):
+        verify_escalation_resolution_token(token)
+
+
+def test_escalation_resolution_token_wrong_aud_rejected():
+    """교차토큰 방어 — operator-reply aud가 실린 토큰을 이 검증기에 던지면 거부."""
+    token = jwt.encode(
+        {"aud": OPERATOR_REPLY_AUD, "escalation_id": str(uuid.uuid4()), "resolution": "approved"},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(EscalationResolutionTokenError):
+        verify_escalation_resolution_token(token)
+
+
+def test_escalation_resolution_token_delegated_token_rejected_here_cross_kind_defense():
+    """위임 토큰(aud 없음)을 이 검증기에 잘못 던져도 거부돼야 한다."""
+    token = jwt.encode(
+        {"org_id": str(uuid.uuid4()), "user_id": str(uuid.uuid4())}, TEST_TOKEN_SECRET, algorithm="HS256"
+    )
+    with pytest.raises(EscalationResolutionTokenError):
+        verify_escalation_resolution_token(token)
+
+
+def test_operator_reply_token_rejected_by_escalation_resolution_verifier_cross_kind_defense():
+    """반대 방향 교차 — operator-reply 검증기가 이 토큰을 받아도 안 되고(위에서 확인),
+    이 검증기가 operator-reply 토큰을 받아도 안 된다(양방향 pin)."""
+    token = jwt.encode(
+        {"aud": ESCALATION_RESOLUTION_AUD, "escalation_id": str(uuid.uuid4()), "resolution": "rejected"},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(OperatorReplyTokenError):
+        verify_operator_reply_token(token)
+
+
+def test_escalation_resolution_token_missing_resolution_rejected():
+    token = jwt.encode(
+        {"aud": ESCALATION_RESOLUTION_AUD, "escalation_id": str(uuid.uuid4())}, TEST_TOKEN_SECRET, algorithm="HS256"
+    )
+    with pytest.raises(EscalationResolutionTokenError):
+        verify_escalation_resolution_token(token)
+
+
+def test_escalation_resolution_token_empty_resolution_rejected():
+    token = jwt.encode(
+        {"aud": ESCALATION_RESOLUTION_AUD, "escalation_id": str(uuid.uuid4()), "resolution": "   "},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(EscalationResolutionTokenError):
+        verify_escalation_resolution_token(token)
+
+
+def test_escalation_resolution_token_unconfigured_secret_fails_closed(monkeypatch):
+    monkeypatch.setattr(settings, "token_secret", "")
+    token = jwt.encode(
+        {"aud": ESCALATION_RESOLUTION_AUD, "escalation_id": str(uuid.uuid4()), "resolution": "approved"},
+        TEST_TOKEN_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(EscalationResolutionTokenError):
+        verify_escalation_resolution_token(token)

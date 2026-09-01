@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     # 정직하게 skip한다(app/services/operator_reply_delivery.py).
     support_gateway_operator_reply_url: str = ""
 
+    # story #183fe7a5(지원v1·후속) — 게이트 해소(approve/reject) → gateway
+    # SupportEscalation.status 동기화(콜백, backend→support-gateway, operator_reply_url과
+    # 같은 방향·다른 aud). support-gateway/app/routers/escalation_resolution.py의 절대 URL.
+    # 미설정 시 동기화를 정직하게 skip(app/services/escalation_resolution_delivery.py) — 이
+    # 자체가 approve/reject 자체를 막지 않는다(best-effort, AC3).
+    support_gateway_escalation_resolution_url: str = ""
+
     # story #3263(지원v1·5에스컬레이션) — 트랜잭셔널 메일의 "즉시 고객센터로 문의" 문구가
     # 실재하지 않는 표면(고객센터)을 가리키던 fiction 정정. 위젯(story #3260)이 dev에만 떠
     # 있고 prod는 아직 미노출(NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED)이라, 메일 카피가 위젯
