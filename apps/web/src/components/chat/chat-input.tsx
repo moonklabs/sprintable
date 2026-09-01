@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Compass, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -170,6 +172,13 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
   const t = useTranslations('chats');
+  // story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — 「네비」 실측 결과 사이드바/브레드크럼엔
+  // entity_type 렌더지점이 없고, 실제 렌더처는 이 `#` 엔티티 피커(chat-input-entity-tokens.ts
+  // entityTypeLabel())였다. 그 코어 파일은 AC3 판정 대상(diff 0 규율, #2264)이라 손대지
+  // 않고, 소비처인 여기서 kanban-board.tsx와 동형으로 org 오버라이드를 얹는다.
+  const { orgId } = useDashboardContext();
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   // story 1946(PO 실기기 발견): 터치(가상 키보드)엔 Cmd/Shift 조합이 없어 Enter=발송이면 장문
   // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
   // 데스크톱 거동이 자연스러움) — artifact-stage.tsx와 동형 패턴(`(pointer: coarse)` 1회 판정,
@@ -710,7 +719,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                         }}
                         className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-foreground hover:bg-muted"
                       >
-                        <span className="shrink-0 text-muted-foreground">{entityTypeLabel(ent.entity_type)}</span>
+                        <span className="shrink-0 text-muted-foreground">{domainLabels.entityTypeLabel(ent.entity_type) ?? entityTypeLabel(ent.entity_type)}</span>
                         <span className="truncate">{ent.title}</span>
                       </button>
                     </li>
@@ -787,7 +796,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
                   <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {entityTypeLabel(entity.entity_type)}
+                    {domainLabels.entityTypeLabel(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}
                 <button
