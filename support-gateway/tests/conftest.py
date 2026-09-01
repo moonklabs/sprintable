@@ -34,6 +34,7 @@ class FakeLLMClient:
         self,
         *,
         classify_text: str = "inquiry",
+        classify_needs_grounding: bool = False,
         interaction_text: str = "안녕하세요, 도와드릴게요.",
         input_tokens: int = 10,
         output_tokens: int = 5,
@@ -43,6 +44,9 @@ class FakeLLMClient:
         call_tool_calls: list[tuple[str, dict]] | None = None,
     ) -> None:
         self.classify_text = classify_text
+        # story #3277 — classify()가 "<category>|<true|false>" 형식을 파싱하므로, 테스트가
+        # classify_text(카테고리)와 독립적으로 needs_grounding 축을 켤 수 있게 분리한다.
+        self.classify_needs_grounding = classify_needs_grounding
         self.interaction_text = interaction_text
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
@@ -58,6 +62,10 @@ class FakeLLMClient:
         # (이름, kwargs) 목록을 순서대로 전부 호출한다.
         self.call_tool_calls = call_tool_calls
         self.calls: list[tuple[str, str]] = []  # (kind, model)
+        # story #3277 — generate_with_tools에 실제로 전달된 force_tool_names를 테스트가
+        # 확認할 수 있게 마지막 호출 값을 기록한다(호출부 배선 자체를 pin하는 용도 — 이
+        # 페이크는 진짜 Gemini ANY 모드를 흉내내지 않는다, 그건 수동 SDK 스모크 테스트 영역).
+        self.last_force_tool_names: list[str] | None = None
 
     async def generate(self, *, model: str, system_prompt: str, user_text: str) -> GenerateResult:
         self.calls.append(("generate", model))
@@ -65,15 +73,20 @@ class FakeLLMClient:
         # 프롬프트로 구분. knowledge_text 기본값 "1"=후보 1번 선택(story #3262 2차실측 이후
         # 선택형 재설계 — app/execution_tasks.py::_KNOWLEDGE_RELEVANCE_SYSTEM_PROMPT 참고).
         if "카테고리" in system_prompt or "라우터" in system_prompt:
-            return GenerateResult(text=self.classify_text, input_tokens=self.input_tokens, output_tokens=1)
+            grounding = "true" if self.classify_needs_grounding else "false"
+            return GenerateResult(
+                text=f"{self.classify_text}|{grounding}", input_tokens=self.input_tokens, output_tokens=1
+            )
         if "후보 문서" in system_prompt:
             return GenerateResult(text=self.knowledge_text, input_tokens=self.input_tokens, output_tokens=self.output_tokens)
         return GenerateResult(text="(요약)", input_tokens=self.input_tokens, output_tokens=self.output_tokens)
 
     async def generate_with_tools(
-        self, *, model: str, system_prompt: str, user_text: str, tools: list[Callable]
+        self, *, model: str, system_prompt: str, user_text: str, tools: list[Callable],
+        force_tool_names: list[str] | None = None,
     ) -> GenerateResult:
         self.calls.append(("generate_with_tools", model))
+        self.last_force_tool_names = force_tool_names
         if self.call_tool_calls is not None:
             for tool_name, tool_kwargs in self.call_tool_calls:
                 tool = next(t for t in tools if t.__name__ == tool_name)
