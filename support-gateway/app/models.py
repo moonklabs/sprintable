@@ -82,7 +82,10 @@ class SupportMessage(Base):
         UUID(as_uuid=True), ForeignKey("support_conversations.id"), nullable=False, index=True
     )
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    role: Mapped[str] = mapped_column(Text, nullable=False)  # 'customer' | 'agent' | 'system'
+    # story #3279 핫픽스(2026-09-01, 마이그 0004) — 'operator' 편입 전엔 DB CHECK 제약이
+    # 이 role을 몰라 실 PG에서 500이었다(app/routers/operator_replies.py가 이미 쓰고
+    # 있었음에도). 이 주석과 alembic/versions/0004의 CHECK을 항상 같이 갱신할 것.
+    role: Mapped[str] = mapped_column(Text, nullable=False)  # 'customer' | 'agent' | 'system' | 'operator'
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
