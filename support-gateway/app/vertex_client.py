@@ -41,12 +41,19 @@ class LLMClient(Protocol):
     async def generate(self, *, model: str, system_prompt: str, user_text: str) -> GenerateResult: ...
 
     async def generate_with_tools(
-        self, *, model: str, system_prompt: str, user_text: str, tools: list[Callable]
+        self, *, model: str, system_prompt: str, user_text: str, tools: list[Callable],
+        force_tool_names: list[str] | None = None,
     ) -> GenerateResult:
         """story #3261 AC1/AC2 — Interaction Agent 전용(Blueprint §1.1 "스폰·지휘"). AFC(automatic
         function calling, google-genai Chat)로 tools의 async 함수들을 모델이 필요할 때 직접
         호출·결과를 받아 계속 진행한다 — 호출 루프 자체는 SDK가 관리(app/interaction.py는
-        도구 목록만 넘긴다)."""
+        도구 목록만 넘긴다).
+
+        story #3277(지원v1·후속) — `force_tool_names`가 주어지면 AUTO(모델이 알아서 선택)
+        대신 `tool_config.function_calling_config.mode=ANY`(+`allowed_function_names`)로
+        그 목록 중 하나를 **반드시** 호출하게 강제한다. 모델이 도구를 안 부르고 자체 지식으로
+        답해 #3261/#3262/#3270의 code-조립·no-fiction 가드 체인 전체를 우회하던 경로를
+        구조적으로 소거한다(app/classifier.py의 needs_grounding 판정이 이 값을 채운다)."""
         ...
 
     async def embed(self, *, model: str, texts: list[str], task_type: str) -> EmbedResult:
@@ -84,12 +91,25 @@ class VertexLLMClient:
         )
 
     async def generate_with_tools(
-        self, *, model: str, system_prompt: str, user_text: str, tools: list
+        self, *, model: str, system_prompt: str, user_text: str, tools: list,
+        force_tool_names: list[str] | None = None,
     ) -> GenerateResult:
         from google.genai import types
 
+        tool_config = (
+            types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(
+                    mode="ANY", allowed_function_names=force_tool_names
+                )
+            )
+            if force_tool_names
+            else None
+        )
         chat = self._client.aio.chats.create(
-            model=model, config=types.GenerateContentConfig(system_instruction=system_prompt, tools=tools)
+            model=model,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt, tools=tools, tool_config=tool_config
+            ),
         )
         resp = await chat.send_message(user_text)
 

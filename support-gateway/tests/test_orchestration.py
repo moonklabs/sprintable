@@ -143,3 +143,43 @@ async def test_no_fiction_guard_does_not_touch_normal_reply(client, fake_llm):
     body = resp.json()
     assert body["escalated"] is False
     assert body["agent_message"]["content"] == fake_llm.interaction_text
+
+
+# story #3277(지원v1·후속) — "지식 미호출 우회" 처방 배선 pin. classify()의 needs_grounding이
+# handle_turn을 거쳐 generate_with_tools(force_tool_names=...)로 정확히 전달되는지 — 실
+# Gemini ANY 모드 강제 자체(모델이 진짜로 거부 못 하는지)는 페이크로 재현 불가라 수동 SDK
+# 스모크 테스트 영역(기존 관례, conftest.py FakeLLMClient 문서 참고)이고, 이 pin은 그
+# "배선"만 고정한다 — PO 단서① 경계 pin(잡담=강제 안 걸림·제품 절차=강제 걸림) 실제
+# 왕복(HTTP 엔드투엔드) 버전.
+async def test_needs_grounding_true_forces_knowledge_search_tool_config(client, fake_llm):
+    fake_llm.classify_text = "inquiry"
+    fake_llm.classify_needs_grounding = True
+    resp = await _post_message(client, OTHER_ORG_ID, content="팀원을 초대하려면 어떻게 하나요?")
+    assert resp.status_code == 200
+    assert fake_llm.last_force_tool_names == ["knowledge_search"]
+
+
+async def test_needs_grounding_false_does_not_force_tool_config(client, fake_llm):
+    """순수 잡담(needs_grounding=False) — 강제 호출 배선이 안 걸려야 한다(AUTO 그대로)."""
+    fake_llm.classify_text = "inquiry"
+    fake_llm.classify_needs_grounding = False
+    resp = await _post_message(client, OTHER_ORG_ID, content="감사합니다!")
+    assert resp.status_code == 200
+    assert fake_llm.last_force_tool_names is None
+
+
+async def test_needs_grounding_reverse_mutation_pin(client, fake_llm):
+    """반대 분류 뮤테이션 red pin(PO 단서①) — 위 두 테스트가 서로 다른 결과를 내야
+    한다(같은 값으로 뭉치면 배선이 needs_grounding을 실제로 안 읽고 있다는 뜻)."""
+    fake_llm.classify_text = "inquiry"
+    fake_llm.classify_needs_grounding = True
+    await _post_message(client, OTHER_ORG_ID, content="사용법 질문")
+    forced = fake_llm.last_force_tool_names
+
+    fake_llm.classify_needs_grounding = False
+    await _post_message(client, OTHER_ORG_ID, content="고마워요")
+    not_forced = fake_llm.last_force_tool_names
+
+    assert forced == ["knowledge_search"]
+    assert not_forced is None
+    assert forced != not_forced

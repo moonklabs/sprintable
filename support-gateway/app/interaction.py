@@ -303,8 +303,14 @@ async def handle_turn(
         tool_reply_state=tool_reply_state,
         llm=llm,
     )
+    # story #3277(지원v1·후속) — 분류기가 "제품 절차 정보를 요구하는 메시지"로 판정했으면
+    # knowledge_search 호출을 강제한다(mode=ANY). 모델이 도구를 안 부르고 자체 지식으로
+    # 답해 #3261/#3262/#3270 체인 전체를 우회하던 경로의 구조적 소거 — 새 안전장치 발명
+    # 없이 기존 체인(무매치=정직 폴백, 매치=인용 조립)이 강제된 호출에도 그대로 적용된다.
+    force_tool_names = ["knowledge_search"] if classification.needs_grounding else None
     result = await llm.generate_with_tools(
-        model=model, system_prompt=_INTERACTION_SYSTEM_PROMPT, user_text=customer_text, tools=tools
+        model=model, system_prompt=_INTERACTION_SYSTEM_PROMPT, user_text=customer_text, tools=tools,
+        force_tool_names=force_tool_names,
     )
     reply_text = result.text
     cost = estimate_cost_usd(model, result.input_tokens, result.output_tokens)
