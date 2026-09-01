@@ -108,12 +108,16 @@ substitutions:
   # prod는 위젯 자체가 prod에 뜨는 그 커밋에서 함께 true로 바뀐다(그 전까지는 이 값도
   # SUPPORT_WIDGET_ENABLED도 둘 다 false로 정직하게 머문다).
   _SUPPORT_CONTACT_SURFACE_WIDGET: "false"
-  # story #3263(같은 스토리 AC1/2) — 에스컬레이션 게이트/DM의 requester(moonklabs org 안
-  # "Sprintable 지원" 에이전트 멤버)·designated approver(PO) team_members.id. 코드가 정할
-  # 값이 아니라 PO가 운영 액션(POST /api/v2/team-members)으로 만든 뒤 채우는 값이라 GHA
-  # 분기 계산 없이 여기 substitution 기본값(빈 문자열)만 두고, 실 값은 Cloud Build 트리거
-  # substitution override로 PO가 직접 채운다(dev 배선, 2026-08-31 PO 확定). 미설정이면
-  # backend가 정직하게 배달 skip(support_gateway_token.py::receive_escalation_event 503).
+  # story #3263(같은 스토리 AC1/2, 2026-09-01 AC4 커밋에서 GHA 배선으로 정정) — 에스컬레이션
+  # 게이트/DM의 requester(moonklabs org 안 "Sprintable 지원" 에이전트 멤버)·designated
+  # approver(PO) team_members.id. PO가 운영 액션(POST /api/v2/team-members)으로 이미 만든
+  # 값이라 코드가 새로 정하는 건 아니지만, 최초 계획(Cloud Build 트리거 substitution
+  # override로 PO가 수동 유지)은 다른 dev-safe 플래그들과 일관성이 떨어지고 사람이 놓치기
+  # 쉬워 GHA dev 분기 주입으로 통일한다(SUPPORT_WIDGET_ENABLED류와 동일 패턴, 페드루 PO
+  # 확定 2026-09-01) — 여기 substitution 기본값은 빈 문자열(dev-safe) 그대로, 실 값은
+  # .github/workflows/cloud-build.yml dev 분기가 채운다. prod는 무접촉(빈 문자열 유지 —
+  # 이 스토리 스코프가 dev 검증까지). 미설정이면 backend가 정직하게 배달
+  # skip(support_gateway_token.py::receive_escalation_event 503).
   _SUPPORT_ESCALATION_REQUESTER_MEMBER_ID: ""
   _SUPPORT_ESCALATION_APPROVER_MEMBER_ID: ""
   # story #3263 — 게이트/DM이 실릴 moonklabs org/project. slug 기반(환경별 UUID 무관 안정
