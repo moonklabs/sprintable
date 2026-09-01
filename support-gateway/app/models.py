@@ -39,8 +39,14 @@ class SupportSession(Base):
 
 
 class SupportConversation(Base):
-    """org당 1스레드 계승(Blueprint v0.3 §1.1) — org_id별 유니크 제약은 마이그레이션에서
-    건다(story #3259는 저장소 골격까지, 스레드 재사용 정책 자체는 story #3 오케스트레이션 스코프)."""
+    """story #3276(지원v1·후속) — org는 절대 격리 경계(불변)지만, 상담 자체는 **사용자 단위로
+    분리**된다: (org_id, external_user_id)당 활성(ended_at IS NULL) 상담 최대 1개(통례 —
+    인터컴류). external_user_id가 NULL인 행은 이 마이그레이션 *이전* 생성분("org당 1스레드"
+    시절, Blueprint v0.3 §1.1 원 설계) — 봉인(backfill 안 함, 삭제도 안 함): 새 조회 경로는
+    exact (org_id, external_user_id) 매치만 보므로 그 행들은 이제 누구의 조회에도 안 걸린다
+    (감사 목적으로 DB엔 남는다). ended_at이 채워지면 읽기 전용 이력(app/routers/sessions.py
+    ".../conversations/{id}/end") — SupportEscalation.status(사람 연결 완료 여부)와는 완전히
+    별개 축이다(상담을 종료해도 열린 에스컬레이션은 안 건드린다, 그 반대도 마찬가지)."""
 
     __tablename__ = "support_conversations"
 
@@ -49,6 +55,10 @@ class SupportConversation(Base):
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("support_sessions.id"), nullable=False
     )
+    # NULL=레거시 봉인 행(위 docstring). 신규 생성 경로(_get_or_create_active_conversation 등)는
+    # 항상 값을 채운다 — 코드 레벨 불변식, DB NOT NULL 제약은 아니다(레거시 행 공존 때문).
+    external_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # story #3261 AC3 — org별 대화 메모리(요약 압축). app/memory.py가

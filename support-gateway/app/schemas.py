@@ -47,10 +47,33 @@ class MessageListResponse(BaseModel):
 
     story #3263 AC4 — 재오픈 시에도 escalation_status가 살아있어야 한다(무신호 금지). 턴
     단위 `escalated` 배지는 그 순간이 지나면 화면에서 사라지지만, 사람에게 넘어간 사실
-    자체는 위젯을 닫았다 열어도 조용히 사라지면 안 된다."""
+    자체는 위젯을 닫았다 열어도 조용히 사라지면 안 된다.
 
+    story #3276 — `conversation_id`/`ended_at` 추가: 위젯이 지금 보는 상담이 어느 것인지·
+    종료됐는지(=읽기 전용, 입력창 비활성화해야 함)를 알 수 있어야 한다. 상담이 아예 없으면
+    (신규 사용자) 셋 다 None/빈 리스트."""
+
+    conversation_id: uuid.UUID | None
+    ended_at: datetime | None
     messages: list[MessageResponse]
     escalation_status: str | None
+
+
+class ConversationResponse(BaseModel):
+    """story #3276 — 상담 1건의 요약(목록·시작·종료 엔드포인트 공통 응답 shape). 고객 메시지
+    원문은 안 싣는다(AdminMetricsResponse와 같은 절제 원칙 — 필요하면 GET .../messages로
+    별도 조회)."""
+
+    id: uuid.UUID
+    created_at: datetime
+    ended_at: datetime | None
+    escalation_status: str | None
+
+
+class ConversationListResponse(BaseModel):
+    """story #3276 AC3 — GET .../conversations(위젯 대화 목록, 자기 것만). created_at 최신순."""
+
+    conversations: list[ConversationResponse]
 
 
 class AdminMetricsResponse(BaseModel):
