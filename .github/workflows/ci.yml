@@ -345,6 +345,22 @@ jobs:
   # story #2330 AC6 — env.py(PR#2661)의 "autocommit_block()은 이 프로젝트에서 원리적으로
   # 못 쓴다" 주석은 «읽어야» 서는 것이었다(주석만으로는 다음 사람이 또 쓸 수 있다). grep
   # 가드로 승격한다 — 마이그레이션 파일에 그 호출이 들어오면 CI가 빨개진다.
+  # story #2476(결제②-A1후속 재그라운딩, 2026-09-01) — legacy `subscriptions`·
+  # `subscription_checkout_sessions` 테이블은 OSS(이 레포)에서 참조 0건이지만 死 테이블은
+  # 아니다(docs/pk-triage-orm-unmodeled.md, story a74bdc84 — 별도 SaaS 제품이 같은 물리
+  # DB를 라이브로 쓰는 중). OSS 정본은 org_subscriptions뿐 — 이 lint는 「참조 0」을 계수
+  # 가능하게 유지한다(새 코드가 legacy 테이블을 다시 끌어오면 즉시 빨강).
+  legacy-subscriptions-reuse-lint:
+    name: legacy subscriptions reuse lint (guard, story #2476)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/app for legacy subscriptions table reuse
+        working-directory: backend
+        run: python3 scripts/lint_legacy_subscriptions_reuse.py
+
   alembic-no-autocommit-block:
     name: Alembic migrations — no autocommit_block() (guard)
     runs-on: ubuntu-latest

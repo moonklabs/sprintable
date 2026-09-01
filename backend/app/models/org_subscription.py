@@ -9,6 +9,18 @@ from app.core.database import Base
 
 
 class OrgSubscription(Base):
+    """OSS(sprintable backend)의 **유일한** 구독 정본 모델(story #2476, 2026-09-01 재그라운딩).
+
+    ⛔ legacy `subscriptions`·`subscription_checkout_sessions` 테이블은 여기서 안 쓴다 — OSS
+    레포 전수 grep 확認 참조 0건. 그렇다고 死 테이블은 아니다: `docs/pk-triage-orm-unmodeled.md`
+    (story a74bdc84)가 이미 그 둘을 «(보류) SaaS-only 라이브»로 분류해 뒀다(별도 SaaS 제품이
+    같은 물리 DB를 Supabase로 직접 침 — subscriptions 206 refs·subscription_checkout_sessions
+    35 refs). 그래서 DROP은 금지(SaaS prod 데이터 파괴 위험) — 대신 마이그 0298이 `COMMENT ON
+    TABLE`로 그 두 테이블에 같은 사실을 DB 메타데이터 레벨에도 못박아 뒀다. 새 코드가 이
+    ORM 모델 대신 그 legacy 테이블을 다시 참조하려 하면 그게 회귀다(스코프 밖 SaaS 얘기가
+    아닌 한).
+    """
+
     __tablename__ = "org_subscriptions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
