@@ -4441,6 +4441,14 @@
     "sendErrorRetry": "Retry",
     "sendErrorFallback": "We couldn't get a response right now. Please try again shortly, or contact us directly.",
     "inputPlaceholder": "Type a message",
-    "sendLabel": "Send"
+    "sendLabel": "Send",
+    "startNewConversation": "New conversation",
+    "conversationHistory": "History",
+    "backToActiveConversation": "Back to current conversation",
+    "conversationListLoading": "Loading conversations…",
+    "conversationListEmpty": "No past conversations yet",
+    "conversationActiveBadge": "Active",
+    "conversationEndedBanner": "This conversation has ended. Start a new one to keep chatting.",
+    "endConversation": "End conversation"
   }
 }

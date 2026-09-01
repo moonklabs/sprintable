@@ -32,11 +32,19 @@ function baseSession(overrides: Partial<SupportWidgetSession> = {}): SupportWidg
     status: 'ready',
     messages: [],
     escalationStatus: null,
+    conversationId: 'conv-1',
+    isEnded: false,
+    conversations: null,
     sending: false,
     sendError: null,
     connect: vi.fn(),
     sendMessage: vi.fn(async () => {}),
     retryLastMessage: vi.fn(),
+    startNewConversation: vi.fn(async () => {}),
+    endConversation: vi.fn(async () => {}),
+    selectConversation: vi.fn(async () => {}),
+    viewActiveConversation: vi.fn(async () => {}),
+    loadConversations: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -106,5 +114,60 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
     }));
     expect(container.textContent).toContain('안 보내진 메시지');
     expect(container.textContent).toContain(koMessages.supportWidget.messageFailedLabel);
+  });
+
+  describe('story #3276 — 상담 수명주기(새 상담·종료·목록)', () => {
+    it('isEnded=true면 종료 배너가 뜨고 입력창이 비활성화된다(읽기 전용 이력)', async () => {
+      await mount(baseSession({ isEnded: true, messages: [{ id: 'm1', role: 'agent', content: '지난 답변', createdAt: 't' }] }));
+      expect(container.textContent).toContain(koMessages.supportWidget.conversationEndedBanner);
+      const input = container.querySelector('input') as HTMLInputElement;
+      expect(input.disabled).toBe(true);
+    });
+
+    it('isEnded=false면 종료 배너가 없고 입력창이 활성 상태다', async () => {
+      await mount(baseSession({ isEnded: false }));
+      expect(container.textContent).not.toContain(koMessages.supportWidget.conversationEndedBanner);
+      const input = container.querySelector('input') as HTMLInputElement;
+      expect(input.disabled).toBe(false);
+    });
+
+    it('"새 상담" 버튼 클릭 시 startNewConversation()을 부른다', async () => {
+      const startNewConversation = vi.fn(async () => {});
+      await mount(baseSession({ startNewConversation }));
+      const btn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === koMessages.supportWidget.startNewConversation,
+      )!;
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(startNewConversation).toHaveBeenCalledTimes(1);
+    });
+
+    it('종료 배너의 "새 상담 시작" 버튼도 startNewConversation()을 부른다', async () => {
+      const startNewConversation = vi.fn(async () => {});
+      await mount(baseSession({ isEnded: true, startNewConversation }));
+      const buttons = Array.from(container.querySelectorAll('button')).filter(
+        (b) => b.textContent === koMessages.supportWidget.startNewConversation,
+      );
+      expect(buttons.length).toBeGreaterThanOrEqual(2); // 툴바 1개 + 배너 1개.
+      await act(async () => { buttons[buttons.length - 1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(startNewConversation).toHaveBeenCalledTimes(1);
+    });
+
+    it('"상담 종료" 버튼 클릭 시 endConversation()을 부른다(진행 중 상담에서만 뜬다)', async () => {
+      const endConversation = vi.fn(async () => {});
+      await mount(baseSession({ isEnded: false, conversationId: 'conv-1', endConversation }));
+      const btn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === koMessages.supportWidget.endConversation,
+      )!;
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(endConversation).toHaveBeenCalledTimes(1);
+    });
+
+    it('종료된 상담을 보는 중엔 "상담 종료" 버튼이 안 뜬다(이미 종료됐으니 재종료 액션 무의미)', async () => {
+      await mount(baseSession({ isEnded: true }));
+      const btn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === koMessages.supportWidget.endConversation,
+      );
+      expect(btn).toBeUndefined();
+    });
   });
 });

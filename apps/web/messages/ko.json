@@ -4441,6 +4441,14 @@
     "sendErrorRetry": "다시 시도",
     "sendErrorFallback": "지금 응답을 받지 못했습니다. 잠시 후 다시 시도하시거나, 담당자에게 직접 문의해 주세요.",
     "inputPlaceholder": "메시지를 입력하세요",
-    "sendLabel": "보내기"
+    "sendLabel": "보내기",
+    "startNewConversation": "새 상담 시작",
+    "conversationHistory": "이전 상담",
+    "backToActiveConversation": "진행 중인 상담으로 돌아가기",
+    "conversationListLoading": "상담 목록을 불러오는 중…",
+    "conversationListEmpty": "아직 지난 상담이 없습니다",
+    "conversationActiveBadge": "진행 중",
+    "conversationEndedBanner": "이 상담은 종료되었습니다. 계속하려면 새 상담을 시작해 주세요.",
+    "endConversation": "상담 종료"
   }
 }
