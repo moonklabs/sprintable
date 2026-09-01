@@ -24,6 +24,10 @@ DISPOSITIONS = frozenset({"allow_auto", "ask", "deny"})
 # 안 준다 — 순수히 「generic POST /api/v2/gates로 생성 허용」 관문 통과 목적.
 GATE_TYPES = frozenset({
     "pr_review", "qa", "merge", "deploy", "workflow_config_publish", "agent_decision_request",
+    # story #3291(M1·마케팅자동화) — 불가역 외부 발신(SNS/광고 게시). gate_service.py의
+    # _ALWAYS_MANUAL_GATE_TYPES에도 등재해 org posture 무관 항상 pending 강제(순수히
+    # 여기 등재만으론 disposition 자동판정에 영향 없음 — 위 agent_decision_request 주석 참고).
+    "external_publish",
 })
 
 _POSTURE_DEFAULT: dict[str, str] = {
