@@ -490,6 +490,29 @@ def test_deploy_backend_prod_excludes_support_gateway_operator_reply_url_even_wh
     assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" not in result
 
 
+def test_deploy_backend_includes_support_gateway_escalation_resolution_url_when_set():
+    """story #183fe7a5 — operator-reply URL과 같은 게이트(위 세 테스트와 동형 트리플릿)."""
+    result = _run_env_vars_assembly(
+        "dev", "redis://10.164.120.243:6379", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert (
+        "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL="
+        "https://support-gateway-dev.example.run.app/api/v1/internal/escalation-resolution"
+    ) in result
+
+
+def test_deploy_backend_excludes_support_gateway_escalation_resolution_url_when_unset():
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", support_gateway_url="")
+    assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" not in result
+
+
+def test_deploy_backend_prod_excludes_support_gateway_escalation_resolution_url_even_when_set():
+    result = _run_env_vars_assembly(
+        "prod", "", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" not in result
+
+
 def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
     """dev 경로 무회귀 — prod 분기 추가가 dev의 다른 필드에 영향을 주지 않는다."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")

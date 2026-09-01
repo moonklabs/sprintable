@@ -8,6 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.config import settings
 from app.rate_limit import limiter
 from app.routers.admin import router as admin_router
+from app.routers.escalation_resolution import router as escalation_resolution_router
 from app.routers.operator_replies import router as operator_replies_router
 from app.routers.sessions import router as sessions_router
 
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(sessions_router)
 app.include_router(admin_router)
 app.include_router(operator_replies_router)
+app.include_router(escalation_resolution_router)
 
 
 @app.get("/healthz")

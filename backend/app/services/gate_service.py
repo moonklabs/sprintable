@@ -859,6 +859,22 @@ async def transition_gate(
         except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 게이트 해소를 막지 않음.
             logger.warning("gate_resolved 카드 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
 
+        # story #183fe7a5(지원v1·후속) — support_escalation 게이트 해소를 gateway
+        # SupportEscalation.status에 동기화(콜백, AC1/AC2). approve/reject 둘 다 gateway
+        # 쪽엔 'resolved'로 도착한다(escalation_resolution_delivery.py 모듈 docstring의
+        # reject 의미론 판단 참고) — best-effort(AC3, 위 카드 알림과 동일 관례).
+        if gate.work_item_type == "support_escalation":
+            try:
+                from app.services.escalation_resolution_delivery import (
+                    deliver_escalation_resolution_for_gate,
+                )
+                await deliver_escalation_resolution_for_gate(gate=gate, new_status=new_status)
+            except Exception:  # noqa: BLE001 — best-effort, 동기화 실패가 게이트 해소를 막지 않음.
+                logger.warning(
+                    "escalation resolution sync 배선 실패 gate=%s status=%s", gate.id, new_status,
+                    exc_info=True,
+                )
+
     # story #1715(PO 판정 2026-08-24) — 상신자(requested_by_member_id) 회신은 gate_type/
     # line-bound 분기와 무관하게 **이 한 자리에서만** 부른다(아래 if/else 갈리기 전) — 두
     # 경로 양쪽에 각자 호출을 심으면 "구조적으로 배타적"이라는 주장이 코드 두 곳의 일치에

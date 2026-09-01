@@ -119,6 +119,60 @@ async def require_operator_reply_claims(authorization: str = Header(default=""))
         raise HTTPException(status_code=401, detail=f"invalid operator reply token: {exc}") from exc
 
 
+# story #183fe7a5(지원v1·후속) — 게이트 해소(approve/reject)→gateway SupportEscalation.status
+# 동기화 콜백(backend→gateway, escalation_delivery.py의 반대 방향 — OPERATOR_REPLY_AUD와
+# 같은 방향, 같은 대칭키, aud만 다름). backend/app/services/escalation_resolution_delivery.py
+# 발급 계약.
+ESCALATION_RESOLUTION_AUD = "support-gateway:escalation-resolution"
+
+
+class EscalationResolutionTokenError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class EscalationResolutionClaims:
+    escalation_id: uuid.UUID
+    resolution: str
+
+
+def verify_escalation_resolution_token(token: str) -> EscalationResolutionClaims:
+    if not settings.token_secret:
+        raise EscalationResolutionTokenError("SUPPORT_GATEWAY_TOKEN_SECRET not configured")
+    try:
+        # audience= 명시 — PyJWT가 이 시점에 이미 aud 부재/불일치 둘 다 거부(OPERATOR_REPLY_AUD
+        # 검증과 동일 실측 근거).
+        claims = jwt.decode(
+            token, settings.token_secret, algorithms=["HS256"], audience=ESCALATION_RESOLUTION_AUD
+        )
+    except jwt.PyJWTError as exc:
+        raise EscalationResolutionTokenError(str(exc)) from exc
+    # story #3661/#3279 선례 재사용(2026-09-01) — "라이브러리 기본 동작 하나에만 의존하지
+    # 않는다"는 확立된 관례대로 독립 2차 방어를 명시로 남긴다.
+    if claims.get("aud") != ESCALATION_RESOLUTION_AUD:
+        raise EscalationResolutionTokenError(f"missing or mismatched aud claim: {claims.get('aud')!r}")
+    try:
+        escalation_id = uuid.UUID(claims["escalation_id"])
+        resolution = str(claims["resolution"])
+    except (KeyError, ValueError) as exc:
+        raise EscalationResolutionTokenError(f"malformed claims: {exc}") from exc
+    if not resolution.strip():
+        raise EscalationResolutionTokenError("empty resolution")
+    return EscalationResolutionClaims(escalation_id=escalation_id, resolution=resolution)
+
+
+async def require_escalation_resolution_claims(
+    authorization: str = Header(default=""),
+) -> EscalationResolutionClaims:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    token = authorization[len("Bearer "):]
+    try:
+        return verify_escalation_resolution_token(token)
+    except EscalationResolutionTokenError as exc:
+        raise HTTPException(status_code=401, detail=f"invalid escalation resolution token: {exc}") from exc
+
+
 async def require_admin(authorization: str = Header(default="")) -> None:
     """story #3264 AC3/AC4 — 어드민 계측 조회(app/routers/admin.py) 전용. 고객 위임 토큰과
     완전히 다른 신뢰 재료(settings.admin_token, 정적 비교) — org 클레임이 없으므로 이 경로는
