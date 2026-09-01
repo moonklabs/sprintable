@@ -109,6 +109,7 @@ def _make_tools(
     user_id: uuid.UUID,
     escalation_state: dict,
     knowledge_state: dict,
+    tool_reply_state: dict,
     llm: LLMClient,
 ):
     """AFC(automatic function calling)가 모델에 노출하는 시그니처는 이 클로저의 파라미터만 —
@@ -117,13 +118,21 @@ def _make_tools(
     escalation_state — no-fiction 가드(app/no_fiction_guard.py)용: escalate가 *실제로*
     호출됐는지를 호출부(handle_turn)가 턴이 끝난 뒤 확인할 수 있게 이 dict에 기록한다.
 
-    knowledge_state — story #3262 지식 날조 가드(app/knowledge_fiction_guard.py)용 + story
-    #3270(지원v1·후속) AC1/AC2 통합 재설계용: 이번 턴 knowledge_search가 호출됐는지·매치를
-    찾았는지에 더해, 호출된 각 회차의 답(원문+인용, 무매치/예외는 고정 폴백 문구)을 호출
-    순서대로 `answers`에 누적한다 — handle_turn이 턴 끝에 이 리스트로 최종 고객 응답을
-    code-조립해 모델의 자유 재서술을 대체한다(모델이 지식 원문을 재서술하며 인용을 떼거나
-    (구 AC2) 미해결 값을 그럴듯한 숫자로 채워 넣는(구 AC1, {N} 사고) 두 결함이 같은 재서술
-    단계에서 나왔다는 실측 근거 — 재서술 자체를 없애 구조적으로 막는다)."""
+    knowledge_state — story #3262 지식 날조 가드(app/knowledge_fiction_guard.py) 전용: 이번
+    턴 knowledge_search가 호출됐는지·매치를 찾았는지만 추적한다(그 가드는 knowledge_search
+    한정 조건이라 tool_reply_state와 분리 유지).
+
+    tool_reply_state — story #3270(지원v1·후속) AC1/AC2 통합 재설계용: **정보 조회 도구**
+    (knowledge_search·org_status_lookup — escalate는 제외, 그 반환값 "escalated:{id}"는
+    내부 제어 신호일 뿐 고객 표면 문구가 아니다)가 호출될 때마다 호출 순서대로 그 반환값을
+    `answers`에 누적한다. handle_turn이 턴 끝에 이 리스트로 최종 고객 응답을 code-조립해
+    모델의 자유 재서술을 대체한다 — 모델이 지식 원문을 재서술하며 인용을 떼거나(구 AC2)
+    미해결 값을 그럴듯한 숫자로 채워 넣는(구 AC1, {N} 사고) 두 결함이 같은 재서술 단계에서
+    나왔다는 실측 근거로 재서술 자체를 없애 구조적으로 막는다. **2차 실측(2026-09-01, 페드루
+    PO 지적)** — 처음엔 knowledge_search만 이 리스트에 담았더니, 같은 턴에 org_status_lookup도
+    불린 "혼합 도구 턴"에서 org_status 답이 code-조립 과정에서 조용히 통째로 사라졌다(이
+    스토리 자체가 세운 "조용한 누락 금지" 원칙의 도구판 재발) — 정보 조회 도구 전체를 이
+    하나의 리스트로 묶어 해소."""
 
     async def knowledge_search(query: str) -> str:
         """고객 문의와 관련된 사내 지식(문서·FAQ)을 검색합니다."""
@@ -141,7 +150,8 @@ def _make_tools(
             print(f"[tool-trace] knowledge_search Exception — 정직 폴백 반환 conv={conversation_id}", file=sys.stderr, flush=True)
             # 예외도 knowledge_search가 "이번 턴에 실제로 접촉한" 사실이다 — code-조립 답변에서
             # 이 회차가 조용히 누락되지 않도록 고정 폴백 문구를 answers에도 남긴다.
-            knowledge_state["answers"].append(_TOOL_FAILURE_HONEST_MESSAGE)
+            tool_reply_state["called"] = True
+            tool_reply_state["answers"].append(_TOOL_FAILURE_HONEST_MESSAGE)
             return _TOOL_FAILURE_HONEST_MESSAGE
         except BaseException:
             logger.exception(
@@ -154,7 +164,8 @@ def _make_tools(
             print(f"[tool-trace] knowledge_search BaseException — re-raise conv={conversation_id}", file=sys.stderr, flush=True)
             raise
         knowledge_state["had_match"] = knowledge_state.get("had_match", False) or result.had_match
-        knowledge_state["answers"].append(result.answer)
+        tool_reply_state["called"] = True
+        tool_reply_state["answers"].append(result.answer)
         print(
             f"[tool-trace] knowledge_search 정상 반환 conv={conversation_id} had_match={result.had_match}",
             file=sys.stderr,
@@ -175,6 +186,8 @@ def _make_tools(
                 question[:200],
             )
             print(f"[tool-trace] org_status_lookup Exception — 정직 폴백 반환 conv={conversation_id}", file=sys.stderr, flush=True)
+            tool_reply_state["called"] = True
+            tool_reply_state["answers"].append(_TOOL_FAILURE_HONEST_MESSAGE)
             return _TOOL_FAILURE_HONEST_MESSAGE
         except BaseException:
             logger.exception(
@@ -186,6 +199,8 @@ def _make_tools(
             )
             print(f"[tool-trace] org_status_lookup BaseException — re-raise conv={conversation_id}", file=sys.stderr, flush=True)
             raise
+        tool_reply_state["called"] = True
+        tool_reply_state["answers"].append(result)
         print(f"[tool-trace] org_status_lookup 정상 반환 conv={conversation_id}", file=sys.stderr, flush=True)
         return result
 
@@ -276,7 +291,8 @@ async def handle_turn(
 
     model = model_for(Role.INTERACTION)
     escalation_state: dict = {"called": False}
-    knowledge_state: dict = {"called": False, "had_match": False, "answers": []}
+    knowledge_state: dict = {"called": False, "had_match": False}
+    tool_reply_state: dict = {"called": False, "answers": []}
     tools = _make_tools(
         db,
         conversation_id=conversation.id,
@@ -284,6 +300,7 @@ async def handle_turn(
         user_id=user_id,
         escalation_state=escalation_state,
         knowledge_state=knowledge_state,
+        tool_reply_state=tool_reply_state,
         llm=llm,
     )
     result = await llm.generate_with_tools(
@@ -357,13 +374,15 @@ async def handle_turn(
         escalated = True
 
     # story #3270(지원v1·후속) AC1/AC2 통합 재설계(2026-09-01, 페드루 PO 승인) — 위 두 가드를
-    # 통과한(=escalated로 안 떨어진) 턴에서, knowledge_search가 이번 턴에 한 번이라도 불렸으면
-    # Interaction 모델의 자유 재서술을 최종 고객 표면에서 완전히 배제하고 knowledge_task가
-    # code로 조립한 답(원문+인용, 무매치/예외는 고정 폴백 문구)으로 그대로 대체한다 — story
-    # #3262가 knowledge_task *내부*에서 이미 쓴 "모델이 새 문장을 만들 기회 자체를 없앤다"
-    # 원칙을 Interaction *표면*까지 확장. 반드시 위 가드들 *다음*에 실행해야 한다 — 가드는
-    # 모델의 원문(fabrication 시도 자체)을 봐야 탐지·에스컬레이션할 수 있고, 이 대체는 가드를
-    # 통과한 안전한 턴에서 인용/정확도를 마지막으로 굳히는 별도 관심사다.
+    # 통과한(=escalated로 안 떨어진) 턴에서, **정보 조회 도구**(knowledge_search·
+    # org_status_lookup)가 이번 턴에 한 번이라도 불렸으면 Interaction 모델의 자유 재서술을
+    # 최종 고객 표면에서 완전히 배제하고 그 도구들이 code로 조립한 답(원문+인용, 무매치/예외는
+    # 고정 폴백 문구)으로 그대로 대체한다 — story #3262가 knowledge_task *내부*에서 이미 쓴
+    # "모델이 새 문장을 만들 기회 자체를 없앤다" 원칙을 Interaction *표면*까지 확장. 반드시
+    # 위 가드들 *다음*에 실행해야 한다 — 가드는 모델의 원문(fabrication 시도 자체)을 봐야
+    # 탐지·에스컬레이션할 수 있고, 이 대체는 가드를 통과한 안전한 턴에서 인용/정확도를
+    # 마지막으로 굳히는 별도 관심사다. escalate는 이 목록에서 제외된다 — 그 반환값
+    # "escalated:{id}"는 내부 제어 신호일 뿐 고객에게 보일 문구가 아니다.
     #
     # 실측 근거: 3차 배터리에서 지식 Task가 붙인 "(참고: 제목)" 인용이 재서술 중 소실됐고(구
     # AC2), 완전 새 org·이력 0에서도 코퍼스 원문의 미해결 '{N}' 플레이스홀더가 재서술 중
@@ -371,15 +390,17 @@ async def handle_turn(
     # 단계의 독립 재추정으로 판정 정정, 4연속 새 org 실측 중 1건이 그 자리에서 재현) — 둘 다
     # 같은 재서술 단계가 근인이라 재서술 자체를 없애야 둘 다 구조적으로 막힌다.
     #
-    # 혼합 질문 설계(한 턴에 knowledge_search가 매치+무매치 섞여 여러 번 불린 경우, 조건③) —
-    # 모델의 자연스러운 연결 서술은 전부 버리고, 호출 순서대로 각 회차의 답(매치=원문+인용,
-    # 무매치/예외=고정 폴백 문구)을 그대로 이어붙인다. 한쪽만 보여주고 나머지를 조용히 누락하는
-    # 것보다, 로봇처럼 들리더라도 이번 턴에 knowledge_search가 접촉한 모든 사실 주장이 빠짐없이
-    # 원문 그대로(또는 정직한 "모른다")로 남는 쪽이 이 서비스의 정직 원칙과 일치한다. 연속
-    # 중복(같은 답을 두 번 이상 부른 경우)은 순서 보존 dedupe로 한 번만 남긴다.
-    if not escalated and knowledge_state["called"]:
+    # 혼합 질문 설계(조건③) — 한 턴에 정보 조회 도구가 여러 번(매치+무매치, 또는 knowledge_
+    # search+org_status_lookup처럼 서로 다른 도구가 섞여) 불린 경우, 모델의 자연스러운 연결
+    # 서술은 전부 버리고 호출 순서대로 각 회차의 답을 그대로 이어붙인다. 한쪽만 보여주고
+    # 나머지를 조용히 누락하는 것보다(2차 실측 — org_status_lookup도 같은 턴에 불렸는데 처음
+    # 구현이 knowledge_search 답만 남겨 org_status 답을 통째로 삼켰던 재발), 로봇처럼 들리더라도
+    # 이번 턴에 정보 조회 도구가 접촉한 모든 사실 주장이 빠짐없이 원문 그대로(또는 정직한
+    # "모른다")로 남는 쪽이 이 서비스의 정직 원칙과 일치한다. 연속 중복(같은 답을 두 번 이상
+    # 부른 경우)은 순서 보존 dedupe로 한 번만 남긴다.
+    if not escalated and tool_reply_state["called"]:
         seen: set[str] = set()
-        deduped_answers = [a for a in knowledge_state["answers"] if not (a in seen or seen.add(a))]
+        deduped_answers = [a for a in tool_reply_state["answers"] if not (a in seen or seen.add(a))]
         reply_text = "\n\n".join(deduped_answers)
 
     _store_agent_message(db, conversation=conversation, org_id=org_id, text=reply_text, cost_usd=cost)

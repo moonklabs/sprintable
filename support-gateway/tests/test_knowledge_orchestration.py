@@ -190,3 +190,28 @@ async def test_repeated_identical_knowledge_answer_in_one_turn_is_deduped(client
     body = resp.json()
     content = body["agent_message"]["content"]
     assert content == NO_MATCH_MESSAGE  # 두 번 다 같은 폴백이라 한 번만.
+
+
+async def test_mixed_tool_turn_knowledge_and_org_status_both_survive_in_call_order(client, fake_llm, monkeypatch):
+    """story #3270 조건③ 2차 실측(2026-09-01, 페드루 PO 지적) 회귀 — 첫 구현이 knowledge_search
+    답만 code-조립에 태워, 같은 턴에 org_status_lookup도 불린 "혼합 *도구*" 턴에서
+    org_status 답이 조용히 통째로 사라지는 재발이 있었다. 정보 조회 도구(knowledge_search·
+    org_status_lookup) 전체가 tool_reply_state를 공유해야 한다는 것을 pin."""
+    _patch_search_real_match(monkeypatch)
+    fake_llm.classify_text = "inquiry"
+    fake_llm.call_tool_calls = [
+        ("knowledge_search", {"query": "팀원을 초대하려면?"}),
+        ("org_status_lookup", {"question": "우리 조직 플랜이 뭔가요?"}),
+    ]
+    fake_llm.interaction_text = "이 문장은 절대 고객에게 안 나가야 한다."
+
+    resp = await _post_message(client, content="팀원 초대 방법이랑 지금 플랜 상태 둘 다 알려주세요.")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is False
+    content = body["agent_message"]["content"]
+    assert "이 문장은 절대 고객에게 안 나가야 한다" not in content
+    assert "(참고: 팀원 초대 방법)" in content  # knowledge_search 답 — 조용히 안 사라짐.
+    assert "아직 조직 상태 조회 기능이 연결되지 않았습니다" in content  # org_status_lookup 답도 마찬가지.
+    # 호출 순서 보존 — knowledge_search(1번째)가 org_status_lookup(2번째) 답보다 앞선다.
+    assert content.index("(참고: 팀원 초대 방법)") < content.index("아직 조직 상태 조회 기능이 연결되지 않았습니다")
