@@ -218,7 +218,7 @@ async def lifespan(app: FastAPI):
             await worker_engine.dispose()
 
 
-from app.routers import a2a, account, activation, activity_logs, admin_billing, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, context_pack, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activation, activity_logs, admin_billing, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, context_pack, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -467,7 +467,12 @@ app.include_router(integrations.router)
 app.include_router(workflow_versions.router)
 app.include_router(workflow_trigger_types.router)
 app.include_router(workflow_executions.router)
-app.include_router(workflow_templates.router)
+# story #3295(도메인탈고정 축2 후속) — workflow_templates HTTP 라우터 은퇴(FE 소비처 0건,
+# 축2-ⓒ에서 settings 갤러리가 신세대 recipe_role_bindings apply로 이전 完). 모델/
+# 리포지토리/테이블은 존치 — deployment_lifecycle.py가 WorkflowTemplateRepository를
+# fleet 배포 자동 라우팅 규칙 생성의 기본 경로로 여전히 실사용(별개 도메인, 이전 대상
+# 아님). 라우터 파일 자체는 안 지움 — SEC-S8 IDOR 회귀가드가 apply_template 함수를
+# 직접 호출(HTTP 대신)로 이관해 계속 재사용.
 app.include_router(file_locks.router)
 app.include_router(workflow_report.router)
 app.include_router(workflow_trigger.router)
