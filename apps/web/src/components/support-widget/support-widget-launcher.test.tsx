@@ -64,11 +64,19 @@ beforeEach(() => {
   isSupportGatewayConfiguredMock.mockReset().mockReturnValue(false);
   createOrResumeGatewaySessionMock.mockReset();
   usePathnameMock.mockReset().mockReturnValue('/board');
-  // story #3274 — 런처가 이제 useActivationStatus()도 부른다(온보딩 단계 게이팅). 이
-  // 파일의 기존 테스트 전부는 "런처가 뜬다"를 전제하므로 기본값=미완주(fetch 미설정 시
-  // 실 fetch가 실패해 allComplete=false로 남는 것과 동형, use-activation-status.ts의
-  // fail-closed와 일치) — 게이팅 자체를 겨냥하는 describe만 별도로 완주 상태를 만든다.
+  // story #3274(유나 design 리뷰 실블로커 반영, 2026-09-01) — 런처가 이제
+  // useActivationStatus()도 부르는데, `!activationState`(fetch 미해결/실패)도 숨김
+  // 조건이라(배너와 대칭) fetch를 아예 안 갈아치우면 state가 영원히 null로 남아 이
+  // 파일의 기존 테스트 전부(런처가 뜬다는 전제)가 깨진다. 기본값=조회 성공+미완주로
+  // 고정 — 게이팅 자체를 겨냥하는 describe만 완주/로딩-중 상태를 개별적으로 만든다.
   _resetActivationStatusCacheForTests();
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ data: {
+      steps: { signed_up: true, email_verified: false, org_created: false, agent_connected: false, first_roundtrip: false },
+      completed: 1, total: 5, all_complete: false, first_instruction_conversation_id: null,
+    } }),
+  })));
 });
 
 afterEach(async () => {
@@ -295,5 +303,34 @@ describe('SupportWidgetLauncher — story #3274: 온보딩 단계 게이팅(핵�
     usePathnameMock.mockReturnValue('/board');
     await mount();
     expect(container.querySelector('button')).toBeNull();
+  });
+
+  // 유나 design 리뷰 실블로커(PR#3668 1차, 2026-09-01) — `!activationState` 가드가 빠져
+  // fetch 실패/로딩 중(allComplete=false, state=null)에 배너는 숨는데 런처만 fail-open으로
+  // 뜨는 비대칭이 있었다. 배너와 정확히 대칭(둘 다 보수적으로 숨김)임을 pin한다.
+  it('activation 조회 실패(fetch reject) — allComplete=false여도 배너처럼 보수적으로 숨는다(fail-open 회귀가드)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('activation 조회가 아직 안 끝난 순간(마운트 직후, 응답 전) — 배너처럼 잠깐 숨어있다', async () => {
+    let resolveFetch: (v: unknown) => void = () => {};
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; })));
+    await mount();
+    // 아직 fetch가 안 끝난 시점 — state=null이라 런처가 없어야 한다.
+    expect(container.querySelector('button')).toBeNull();
+    await act(async () => {
+      resolveFetch({
+        ok: true,
+        json: async () => ({ data: {
+          steps: { signed_up: true, email_verified: false, org_created: false, agent_connected: false, first_roundtrip: false },
+          completed: 1, total: 5, all_complete: false, first_instruction_conversation_id: null,
+        } }),
+      });
+      await Promise.resolve(); await Promise.resolve();
+    });
+    // 응답 도착 후엔 정상적으로 뜬다(무한 숨김이 아님을 함께 확認).
+    expect(container.querySelector('button')).toBeTruthy();
   });
 });
