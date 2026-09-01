@@ -48,6 +48,34 @@ NO_MATCH_MESSAGE = (
     "담당자에게 연결해 드리는 게 정확합니다."
 )
 
+# story #3281(지원v1·후속, 2026-09-01) — 선생님 customer-zero 지적("왜 대답을 안 하고 바로
+# 에스컬") 처방. 사다리 3단(exact/near_miss/no_match) 중 near_miss 전용 task_type — "이미 한
+# 번 근접 제안을 했는지"를 이 값으로 conversation_id 스코프 조회해 판정한다(신규 컬럼 0,
+# PO 확定 — (a)안 채택).
+NEAR_MISS_TASK_TYPE = "knowledge_near_miss"
+
+# 근접 제시 문구도 조립 원칙 그대로 고정 템플릿(모델 자유생성 0) — 청크 원문+인용만 끼워
+# 넣는다. 역질문은 이 턴에서 딱 1번만 나가고(재호출 시 _near_miss_already_offered가 True가
+# 되어 두 번째부터는 곧장 NO_MATCH_MESSAGE로 떨어져 에스컬 트랙으로 넘어간다).
+_NEAR_MISS_TEMPLATE = (
+    "정확히 그 질문에 답하는 문서를 찾지는 못했지만, 관련될 수 있는 안내를 참고로 드립니다:\n\n"
+    "{content}\n\n(참고: {title})\n\n"
+    "혹시 찾으시는 내용과 다르다면, 어떤 상황에서 이 질문이 나온 건지 조금 더 자세히 말씀해 "
+    "주시겠어요?"
+)
+
+
+async def _near_miss_already_offered(db: AsyncSession, *, conversation_id: uuid.UUID) -> bool:
+    result = await db.execute(
+        select(SupportExecutionLog.id)
+        .where(
+            SupportExecutionLog.conversation_id == conversation_id,
+            SupportExecutionLog.task_type == NEAR_MISS_TASK_TYPE,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
 _KNOWLEDGE_RELEVANCE_SYSTEM_PROMPT = """당신은 고객 질문에 실제로 답이 되는 문서를 고르는
 판정자입니다. 아래 "후보 문서" 목록(번호가 매겨져 있음)을 읽고, 고객 질문에 실제로 정확히
 답하는 문서 번호만 골라 쉼표로 구분해 출력하세요(예: 1,3). 주제만 비슷하고 실제로 이 질문에
@@ -129,13 +157,36 @@ async def knowledge_task(
     ]
 
     if not selected:
+        # story #3281 — 정확 매치는 아니지만(이중 게이트 미달), matches는 search()가
+        # NEAR_MISS_FLOOR 이상만 이미 걸러 담아뒀으니(top=matches[0]도 그 안에 듦, score
+        # 내림차순 정렬) top 후보로 "근접" 사다리 2단을 시도한다. 이 대화에서 이미 한 번
+        # 근접 제안을 했으면(재무매치) 반복하지 않고 곧장 정직한 무매치로 떨어져 에스컬
+        # 트랙으로 넘긴다.
+        top = matches[0]
+        if not await _near_miss_already_offered(db, conversation_id=conversation_id):
+            answer = _NEAR_MISS_TEMPLATE.format(content=top.chunk.content, title=top.chunk.title)
+            db.add(
+                SupportExecutionLog(
+                    conversation_id=conversation_id,
+                    org_id=org_id,
+                    task_type=NEAR_MISS_TASK_TYPE,
+                    model=relevance_model,
+                    summary=f"near-miss offered {top.chunk.id} (score={top.score:.2f}) — query={query[:80]!r}",
+                    cost_usd=total_cost,
+                )
+            )
+            # had_match=True — knowledge_fiction_guard(app/interaction.py)가 `not had_match`
+            # 조건으로 걸리니, 이 code-조립 답(모델 재서술 0)이 그 가드에 잘못 잡혀 조립
+            # 결과 자체가 폐기되고 에스컬로 대체되는 걸 막는다(정확 매치와 동일 이유).
+            return KnowledgeResult(answer=answer, had_match=True, cited_chunk_ids=(top.chunk.id,))
+
         db.add(
             SupportExecutionLog(
                 conversation_id=conversation_id,
                 org_id=org_id,
                 task_type="knowledge",
                 model=relevance_model,
-                summary=f"candidates found but none relevant — query={query[:80]!r}",
+                summary=f"candidates found but none relevant/near-miss exhausted — query={query[:80]!r}",
                 cost_usd=total_cost,
             )
         )

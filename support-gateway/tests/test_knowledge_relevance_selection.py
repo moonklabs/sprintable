@@ -6,9 +6,13 @@ from __future__ import annotations
 
 import uuid
 
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from app.execution_tasks import NO_MATCH_MESSAGE, _parse_relevant_indices, knowledge_task
 from app.knowledge.corpus import KnowledgeChunk
 from app.knowledge_search import SearchMatch
+from app.models import Base
 from app.vertex_client import EmbedResult, GenerateResult
 
 
@@ -61,6 +65,21 @@ class _NoopDB:
         pass
 
 
+@pytest_asyncio.fixture
+async def real_db():
+    """story #3281 — _near_miss_already_offered가 실 SELECT를 태우니 이 파일의 knowledge_task
+    "무매치" 계열 테스트는 더 이상 _NoopDB로 못 버틴다. 인메모리 sqlite 1개(HTTP client 없이
+    knowledge_task만 직접 검증하는 이 파일의 기존 스타일 유지 — conftest.py의 client/db_engine
+    픽스처는 안 씀)."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        yield session
+    await engine.dispose()
+
+
 async def test_knowledge_task_answer_is_verbatim_chunk_content_not_model_prose(monkeypatch):
     """핵심 회귀 — 답변 본문이 항상 청크 원문 그대로여야 한다. relevance_text에 모델이
     (지시를 어기고) 산문을 섞어 보내도 그게 고객이 보는 답이 되면 안 된다."""
@@ -88,17 +107,17 @@ async def test_knowledge_task_answer_is_verbatim_chunk_content_not_model_prose(m
     assert "(참고: 팀원 초대 방법)" in result.answer  # 인용은 코드가 항상 붙인다.
 
 
-async def test_knowledge_task_returns_honest_message_when_llm_says_none_relevant(monkeypatch):
-    """검색이 threshold를 넘겨 후보를 줬어도, 판정 LLM이 "실제로는 무관하다"고 하면 정직한
-    모른다로 떨어져야 한다 — 지식가드 위협모델 2(무관 매치가 가드를 해제)의 완충 효과."""
-    chunk = KnowledgeChunk(id="onboarding-happy-path", title="온보딩", content="...", source_note="test")
+async def test_knowledge_task_returns_honest_message_when_genuinely_no_match(real_db, monkeypatch):
+    """실측 무관 기저(0.52~0.58)에도 못 미치는 진짜 무관 질의 — search() 자체가 아무것도
+    안 돌려주는 경우(NEAR_MISS_FLOOR 미만은 search()가 이미 걸러낸다)엔 근접 제안 사다리도
+    안 타고 곧장 정직한 모른다로 떨어져야 한다."""
     import app.execution_tasks as execution_tasks_module
 
-    monkeypatch.setattr(execution_tasks_module, "search", lambda vector, top_k=3: [SearchMatch(chunk=chunk, score=0.66)])
+    monkeypatch.setattr(execution_tasks_module, "search", lambda vector, top_k=3: [])
 
     llm = _StubLLM(relevance_text="NONE")
     result = await knowledge_task(
-        _NoopDB(), conversation_id=uuid.uuid4(), org_id=uuid.uuid4(), query="오늘 날씨 어때요?", llm=llm
+        real_db, conversation_id=uuid.uuid4(), org_id=uuid.uuid4(), query="오늘 날씨 어때요?", llm=llm
     )
 
     assert result.had_match is False
@@ -106,12 +125,14 @@ async def test_knowledge_task_returns_honest_message_when_llm_says_none_relevant
     assert result.cited_chunk_ids == ()
 
 
-async def test_knowledge_task_llm_wrong_selection_of_irrelevant_low_score_match_is_rejected(monkeypatch):
+async def test_knowledge_task_llm_wrong_selection_falls_to_near_miss_not_silent_match(real_db, monkeypatch):
     """story #3268(지원v1·후속) 이중 게이트 핵심 pin — 카디르 QA(PR#3651) 재현 시나리오
-    그대로: 무관 청크(seat-limit)가 threshold(0.65)는 겨우 넘겼고(score=0.66), 관련성
+    그대로: 무관 청크(seat-limit)가 근접 밴드(0.60~0.70)에 걸렸고(score=0.66), 관련성
     판정 LLM도 주제를 오판해 그 청크를 "1"(선택)로 잘못 골랐다. LLM 선택만으로 채택하면
-    (구 로직) had_match=True가 되지만, 이중 게이트(원시 스코어도 확신 threshold=0.70을
-    넘어야 함)가 이 경계 사례를 독립적으로 걸러 정직한 NO_MATCH로 떨어뜨려야 한다."""
+    (구 로직) had_match=True+정확 매치로 조립되지만, 이중 게이트(원시 스코어도 확신
+    threshold=0.70을 넘어야 함)가 "정확 매치" 취급은 막는다 — 단 story #3281(근접 사다리)
+    도입 후엔 곧장 NO_MATCH가 아니라 "정확한 문서는 아니다" 명시+근접 제안+역질문으로
+    떨어진다(안전 성질은 동일 유지: "이게 확실한 답"이라고 자신있게 말하지 않는다)."""
     seat_chunk = KnowledgeChunk(
         id="invite-seat-limit-free-plan", title="무료 플랜에서 멤버 초대 인원 제한",
         content="무료 플랜은 초대할 수 있는 멤버 수에 상한이 있습니다.", source_note="test",
@@ -123,13 +144,13 @@ async def test_knowledge_task_llm_wrong_selection_of_irrelevant_low_score_match_
     )
     llm = _StubLLM(relevance_text="1")  # LLM이 무관 청크를 (잘못) 관련 있다고 선택
     result = await knowledge_task(
-        _NoopDB(), conversation_id=uuid.uuid4(), org_id=uuid.uuid4(), query="슬랙 연동은 어떻게 하나요?", llm=llm
+        real_db, conversation_id=uuid.uuid4(), org_id=uuid.uuid4(), query="슬랙 연동은 어떻게 하나요?", llm=llm
     )
 
-    assert result.had_match is False
-    assert result.answer == NO_MATCH_MESSAGE
-    assert result.cited_chunk_ids == ()
-    assert seat_chunk.content not in result.answer  # 무관 청크 내용이 답에 안 실린다.
+    assert result.had_match is True  # 근접 제안도 code-조립이라 knowledge_fiction_guard는 안 걸림.
+    assert "정확히 그 질문에 답하는 문서를 찾지는 못했지만" in result.answer  # "확실한 답"이라 안 함.
+    assert seat_chunk.content in result.answer  # 그래도 근접 후보 원문은 참고로 보여준다.
+    assert result.cited_chunk_ids == (seat_chunk.id,)
 
 
 async def test_knowledge_task_high_confidence_real_match_still_passes_dual_gate(monkeypatch):
@@ -153,6 +174,50 @@ async def test_knowledge_task_high_confidence_real_match_still_passes_dual_gate(
     assert result.had_match is True
     assert chunk.content in result.answer
     assert result.cited_chunk_ids == ("invite-how-to",)
+
+
+async def test_knowledge_task_near_miss_not_repeated_second_time_falls_to_escalate_track(real_db, monkeypatch):
+    """story #3281 AC2 — 역질문은 1회 한정. 같은 conversation_id로 근접 후보 상황이 두 번
+    반복되면, 두 번째부터는 근접 제안을 또 하지 않고(무한 되물음 금지) 정직한 무매치로
+    떨어져 에스컬 트랙으로 넘어가야 한다."""
+    chunk = KnowledgeChunk(
+        id="invite-seat-limit-free-plan", title="무료 플랜에서 멤버 초대 인원 제한",
+        content="무료 플랜은 초대할 수 있는 멤버 수에 상한이 있습니다.", source_note="test",
+    )
+    import app.execution_tasks as execution_tasks_module
+
+    monkeypatch.setattr(execution_tasks_module, "search", lambda vector, top_k=3: [SearchMatch(chunk=chunk, score=0.66)])
+    conversation_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    llm = _StubLLM(relevance_text="NONE")
+
+    first = await knowledge_task(real_db, conversation_id=conversation_id, org_id=org_id, query="첫 질문", llm=llm)
+    assert first.had_match is True
+    assert chunk.content in first.answer  # 1회차 — 근접 제안이 나간다.
+
+    second = await knowledge_task(real_db, conversation_id=conversation_id, org_id=org_id, query="또 무관", llm=llm)
+    assert second.had_match is False
+    assert second.answer == NO_MATCH_MESSAGE  # 2회차 — 반복 안 하고 정직한 무매치.
+    assert second.cited_chunk_ids == ()
+
+
+async def test_knowledge_task_near_miss_scoped_to_conversation_not_global(real_db, monkeypatch):
+    """PO 단서 — 조회 스코프는 conversation_id 한정. 다른 대화에선 근접 제안이 "이미 한
+    번 나갔다"는 이유로 막히면 안 된다(전역 로그 오염 금지)."""
+    chunk = KnowledgeChunk(id="x", title="X", content="X 내용", source_note="test")
+    import app.execution_tasks as execution_tasks_module
+
+    monkeypatch.setattr(execution_tasks_module, "search", lambda vector, top_k=3: [SearchMatch(chunk=chunk, score=0.66)])
+    org_id = uuid.uuid4()
+    llm = _StubLLM(relevance_text="NONE")
+
+    await knowledge_task(real_db, conversation_id=uuid.uuid4(), org_id=org_id, query="Q1", llm=llm)
+    other_conversation_result = await knowledge_task(
+        real_db, conversation_id=uuid.uuid4(), org_id=org_id, query="Q2", llm=llm
+    )
+
+    assert other_conversation_result.had_match is True  # 다른 대화는 "1회차"로 취급.
+    assert chunk.content in other_conversation_result.answer
 
 
 async def test_knowledge_task_multi_chunk_selection_cites_each(monkeypatch):
