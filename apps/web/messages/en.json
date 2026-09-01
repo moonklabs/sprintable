@@ -4435,7 +4435,7 @@
     "retryConnect": "Reconnect",
     "thinkingLabel": "Thinking… ({seconds}s)",
     "escalatedBadge": "Connected to a human",
-    "escalationOpenBanner": "This conversation has been handed off to our team — we'll follow up shortly",
+    "escalationOpenBanner": "This conversation has been handed to a member of our team — they'll reply right here.",
     "messageFailedLabel": "Couldn't send",
     "sendErrorRetry": "Retry",
     "sendErrorFallback": "We couldn't get a response right now. Please try again shortly, or contact us directly.",
