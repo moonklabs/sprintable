@@ -198,11 +198,58 @@ async def test_publish_routes_to_bound_agent_via_apply_endpoint():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_org_wide_fallback_does_not_leak_across_org():
+    """카디르 QA(PR#3686) 지적 — 기존 leak 테스트(아래 test_publish_unassigned_stage_
+    yields_no_escalation_no_leak)의 "타 org 바인딩"이 project-scope였던 탓에 org_id 필터를
+    통째로 제거해도 project_id 자체가 안 맞아 우연히 통과했다(리졸버의 두 쿼리 중
+    org-wide(project_id IS NULL) 폴백 쪽을 실제로는 못 겨냥). 이 테스트는 **타 org가 org-wide
+    바인딩**(project_id=None)을 걸어 정밀 겨냥 — org_id 필터가 org-wide 폴백 쿼리에서
+    빠지면 이게 정확히 새어 들어온다."""
+    from app.routers.events import (
+        ApplyRecipeRoleBindingsRequest, EventPublishRequest,
+        apply_recipe_role_bindings, publish_registry_event,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="axis2a-orgwide-a")
+            other_org_id, other_project_id = await _seed_org_project(s, slug="axis2a-orgwide-b")
+            definition = await _seed_cyclic_definition(s)
+            publisher_id = await _seed_human_caller(s, org_id, project_id, name="publisher")
+            story_id = await _seed_story(s, org_id, project_id)
+
+            # 이 org(org_id)는 step_2에 아무 바인딩도 안 건다(project든 org-wide든).
+            # 타 org가 org-wide(project_id=None) 바인딩을 건다 — 정밀 대조군.
+            other_publisher = await _seed_human_caller(s, other_org_id, other_project_id, name="other-publisher")
+            other_agent = await _seed_agent(s, other_org_id, other_project_id, name="other-dev")
+            await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"step_2": str(other_agent)}),
+                db=s, auth=_auth(other_publisher, other_org_id), org_id=other_org_id,
+            )
+
+            body = EventPublishRequest(
+                definition_key=definition.key,
+                payload={"stage": "step_2", "work_item_type": "story", "work_item_id": str(story_id)},
+            )
+            resp = await publish_registry_event(
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+            )
+            assert resp["escalation_member_ids"] == []
+            assert str(other_agent) not in resp["escalation_member_ids"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_publish_unassigned_stage_yields_no_escalation_no_leak():
     """PO 확定 「모르면 안 준다」 — step_2에 바인딩이 없으면 escalation은 빈 채로 나가야
-    한다. **타 org의 같은 (definition_key, stage) 바인딩이 존재해도** 새지 않아야 한다 —
-    org_id 필터가 빠지면 이 테스트가 정확히 그 누출을 잡는다(단순 "바인딩 0건" 케이스보다
-    엄격: 리졸버가 org 스코프 없이 아무 매치나 집어오는 뮤테이션을 여기서 실제로 RED)."""
+    한다. 타 org의 같은 (definition_key, stage) **project-scope** 바인딩이 존재해도 새지
+    않아야 한다(project_id 자체가 안 맞으므로 이 시나리오는 project_id 매칭이 실제
+    방어선 — org-wide 폴백 쿼리의 org_id 누락은 별도 위 test_org_wide_fallback_does_not_
+    leak_across_org가 정밀 겨냥, 카디르 QA #3686 적발로 분리)."""
     from app.routers.events import (
         ApplyRecipeRoleBindingsRequest, EventPublishRequest,
         apply_recipe_role_bindings, publish_registry_event,

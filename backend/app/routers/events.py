@@ -1963,11 +1963,12 @@ async def apply_recipe_role_bindings(
     from app.models.event_definition import EventDefinition
     from app.models.recipe_role_binding import RecipeRoleBinding
     from app.models.team import TeamMember
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
 
     if body.project_id is not None:
-        if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
-            raise HTTPException(status_code=404, detail="Project not found")
+        # story #2697 SSOT — require_project_access로 수렴(raw inline has_project_access+raise
+        # 패턴 신규 추가 금지, 카디르 QA #3686 적발). 실패 시 항상 404(존재 비노출).
+        await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
 
     definition = (await db.execute(
         select(EventDefinition).where(
