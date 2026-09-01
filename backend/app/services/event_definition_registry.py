@@ -31,7 +31,12 @@ _SEGMENT_CHARSET_RE = re.compile(r"^[a-z0-9_]+$")
 # 하므로, 여기 없는 target을 server_derived로 등록하면 해석기가 절대 못 푸는 정의가 만들어진다
 # — validate_event_routing이 등록 시점에 막는다(발행 시점에야 발견되는 것보다 이르게).
 SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner"})
-_ROUTING_KINDS = frozenset({"payload_field", "server_derived"})
+# story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
+# 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
+# payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
+# stage 자체가 payload에 있고(사이클형 정의 표준 필드) 그 stage로 org/project 스코프
+# 바인딩 테이블을 찾는 3번째 해석 방식(event_routing_resolver.py가 실 구현).
+_ROUTING_KINDS = frozenset({"payload_field", "server_derived", "recipe_role_binding"})
 
 
 class InvalidEventDefinitionKeyError(ValueError):
@@ -126,6 +131,18 @@ def _validate_routing_leg(leg: dict, *, leg_name: str, allow_server_derived: boo
         if not leg.get("member_id_field"):
             raise InvalidEventRoutingError(
                 f"routing.{leg_name}.kind='payload_field'는 member_id_field가 필수입니다."
+            )
+        return
+
+    if kind == "recipe_role_binding":
+        # story #3288 — member_id_field/target 둘 다 불요(payload의 stage로 org/project
+        # 스코프 바인딩 테이블을 조회하는 게 해석 방식 전체). org 커스텀 정의도 등록 가능
+        # (자기 org의 바인딩 테이블만 조회하므로 payload_field와 동형 위험도 — server_derived의
+        # "서버가 모르는 파생 역할" 우려와 다른 클래스).
+        if leg.get("member_id_field") or leg.get("target"):
+            raise InvalidEventRoutingError(
+                f"routing.{leg_name}.kind='recipe_role_binding'은 member_id_field/target을 "
+                "가질 수 없습니다(stage 기반 바인딩 조회이므로 추가 파라미터 불요)."
             )
         return
 
