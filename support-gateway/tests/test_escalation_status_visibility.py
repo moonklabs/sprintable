@@ -102,3 +102,33 @@ async def test_latest_escalation_wins_over_earlier_resolved_one(client, fake_llm
 
     resp = await client.get(f"/api/v1/sessions/{session_id}/messages", headers=headers)
     assert resp.json()["escalation_status"] == "open"
+
+
+async def test_open_escalation_still_wins_when_a_later_separate_one_gets_resolved(client, fake_llm, db_engine):
+    """카디르 QA 지적(PR#3662, PR#3663과 동일 클래스 갭) — 위 테스트의 시간축 반대 케이스도
+    pin 한다: open 행이 먼저 생기고, 그보다 나중에 생긴 별개 escalation이 resolved로
+    마감돼도 여전히 open이 이겨야 한다. "가장 최근 1건의 status"로 잘못 구현했다면(과거
+    _latest_escalation_status) 이 케이스에서 resolved를 반환해 RED가 된다 — "지금 열려있는
+    게 하나라도 있는가"가 실제로 순서 무관임을 구조적으로 고정."""
+    fake_llm.classify_text = "needs_human"
+    headers = {"Authorization": f"Bearer {make_token(OTHER_ORG_ID)}"}
+    session = await client.post("/api/v1/sessions", headers=headers)
+    session_id = session.json()["id"]
+
+    # 1번째 에스컬(open으로 남는다) — 시각상 더 이르다.
+    await client.post(f"/api/v1/sessions/{session_id}/messages", json={"content": "첫 문의"}, headers=headers)
+
+    # 2번째 에스컬 — 시각상 더 나중이지만, 이 행만 resolved로 마감된다.
+    await client.post(f"/api/v1/sessions/{session_id}/messages", json={"content": "두번째 문의"}, headers=headers)
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as db:
+        escalations = (
+            await db.execute(select(SupportEscalation).order_by(SupportEscalation.created_at.asc()))
+        ).scalars().all()
+        assert len(escalations) == 2
+        later = escalations[-1]
+        later.status = "resolved"
+        db.add(later)
+        await db.commit()
+
+    resp = await client.get(f"/api/v1/sessions/{session_id}/messages", headers=headers)
+    assert resp.json()["escalation_status"] == "open"
