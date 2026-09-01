@@ -64,6 +64,61 @@ async def require_delegated_identity(authorization: str = Header(default="")) ->
         raise HTTPException(status_code=401, detail=f"invalid delegated token: {exc}") from exc
 
 
+# story #3279(지원v1·후속) — 운영자 회신 배달(backend→gateway, escalation_delivery.py의
+# 반대 방향). 같은 대칭키(SUPPORT_GATEWAY_TOKEN_SECRET)를 backend가 이 aud로 서명해
+# 보낸다(backend/app/services/operator_reply_delivery.py 발급 계약). 위임 토큰(aud 없음)·
+# 에스컬레이션 배달 토큰(aud="backend:escalation-events", backend가 검증)과 셋 다 같은
+# 키를 쓰지만 aud로 구조적으로 분리된 별개 신뢰 재료다.
+OPERATOR_REPLY_AUD = "support-gateway:operator-reply"
+
+
+class OperatorReplyTokenError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class OperatorReplyClaims:
+    escalation_id: uuid.UUID
+    content: str
+
+
+def verify_operator_reply_token(token: str) -> OperatorReplyClaims:
+    if not settings.token_secret:
+        raise OperatorReplyTokenError("SUPPORT_GATEWAY_TOKEN_SECRET not configured")
+    try:
+        # audience= 명시 — PyJWT가 이 시점에 이미 aud 부재/불일치 둘 다 거부한다(부재 시
+        # MissingRequiredClaimError, 불일치 시 InvalidAudienceError — 둘 다 PyJWTError 하위).
+        claims = jwt.decode(token, settings.token_secret, algorithms=["HS256"], audience=OPERATOR_REPLY_AUD)
+    except jwt.PyJWTError as exc:
+        raise OperatorReplyTokenError(str(exc)) from exc
+    # story #3279(페드루 PO 지시, 2026-09-01) — story #3661에서 backend 쪽 jose 검증기가
+    # "토큰에 aud 클레임이 아예 없으면 audience= 인자를 조용히 건너뛴다"는 라이브러리별
+    # 상이 동작으로 뚫릴 뻔한 것과 동형 클래스 재발 방지. 이 함수는 PyJWT(jose 아님)라
+    # 위 audience= 인자가 이미 부재/불일치 둘 다 거부하지만(실측: 가드를 지워도 여전히
+    # 거부됨), "라이브러리 기본 동작 하나에만 의존하지 않는다"는 이 코드베이스의 확立된
+    # 관례대로 독립 2차 방어를 명시로 남긴다 — 부재든 불일치든 이 줄이 한 번 더 잡는다.
+    if claims.get("aud") != OPERATOR_REPLY_AUD:
+        raise OperatorReplyTokenError(f"missing or mismatched aud claim: {claims.get('aud')!r}")
+    try:
+        escalation_id = uuid.UUID(claims["escalation_id"])
+        content = str(claims["content"])
+    except (KeyError, ValueError) as exc:
+        raise OperatorReplyTokenError(f"malformed claims: {exc}") from exc
+    if not content.strip():
+        raise OperatorReplyTokenError("empty content")
+    return OperatorReplyClaims(escalation_id=escalation_id, content=content)
+
+
+async def require_operator_reply_claims(authorization: str = Header(default="")) -> OperatorReplyClaims:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    token = authorization[len("Bearer "):]
+    try:
+        return verify_operator_reply_token(token)
+    except OperatorReplyTokenError as exc:
+        raise HTTPException(status_code=401, detail=f"invalid operator reply token: {exc}") from exc
+
+
 async def require_admin(authorization: str = Header(default="")) -> None:
     """story #3264 AC3/AC4 — 어드민 계측 조회(app/routers/admin.py) 전용. 고객 위임 토큰과
     완전히 다른 신뢰 재료(settings.admin_token, 정적 비교) — org 클레임이 없으므로 이 경로는

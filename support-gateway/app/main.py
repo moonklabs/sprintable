@@ -8,6 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.config import settings
 from app.rate_limit import limiter
 from app.routers.admin import router as admin_router
+from app.routers.operator_replies import router as operator_replies_router
 from app.routers.sessions import router as sessions_router
 
 app = FastAPI(title="Sprintable Support Gateway", version="0.1.0")
@@ -37,6 +38,7 @@ app.add_middleware(
 
 app.include_router(sessions_router)
 app.include_router(admin_router)
+app.include_router(operator_replies_router)
 
 
 @app.get("/healthz")
