@@ -31,13 +31,19 @@ export function SetPasswordSection() {
   const [confirm, setConfirm] = useState('');
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // 유나 design:changes(PR#3688, 2026-09-01) — ALREADY_HAS_PASSWORD는 실패가 아니라
+  // 「이미 완료」라 빨강(destructive)이 부적절 — 'neutral' 톤 추가(text-foreground+role=status).
+  const [message, setMessage] = useState<{ type: 'success' | 'neutral' | 'error'; text: string } | null>(null);
   // story #ab2a503f(2026-09-01) — set-password가 재인증 게이트(이메일 확인 2단계)로
   // 바뀌었다: request 성공은 "완료"가 아니라 "메일함을 확인하세요"다(실제 write는 이메일
   // 링크 클릭이 여는 /set-password/confirm 페이지가 한다). requested=true는 폼을 감추고
   // 그 안내로 치환한다 — has_password는 그 클릭이 있기 전까진 여전히 false라 페이지를
   // 새로고침하면 폼이 다시 보인다(forgot-password 페이지와 동일 관례, 별도 영속 불필요).
   const [requested, setRequested] = useState(false);
+  // 유나 design:changes ② — 「메일 안 왔나요? 재발송」. resending은 초기 submit(busy)과 별개
+  // 로 관리(요청 화면 자체는 이미 안 보이니 버튼 자체 disable만 필요).
+  const [resending, setResending] = useState(false);
+  const [resent, setResent] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -73,7 +79,7 @@ export function SetPasswordSection() {
         // story #2485 — code로 분기(backend auth.py request_set_password()가 _err()로
         // 직접 발급하는 안정 값). 알려지지 않은 code만 안전 폴백.
         if (json.error?.code === 'ALREADY_HAS_PASSWORD') {
-          setMessage({ type: 'error', text: t('setPasswordErrorAlreadyHasPassword') });
+          setMessage({ type: 'neutral', text: t('setPasswordErrorAlreadyHasPassword') });
         } else if (json.error?.code === 'USER_NOT_FOUND') {
           setMessage({ type: 'error', text: t('setPasswordErrorUserNotFound') });
         } else {
@@ -93,6 +99,27 @@ export function SetPasswordSection() {
     }
   };
 
+  // 유나 design:changes(PR#3688) ② — 「메일 안 왔나요? 재발송」. handleSubmit과 동일 요청을
+  // 재사용(같은 password가 state에 이미 남아있음, 폼이 사라졌을 뿐 리셋 안 됨) — 새 15분
+  // 토큰이 다시 발급되니 실제로 "재발송"이다(멱등 아님, BE rate limit이 남용 방지).
+  const handleResend = async () => {
+    setResending(true);
+    setResent(false);
+    try {
+      const res = await fetch('/api/auth/set-password/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_password: password }),
+      });
+      const json = await res.json() as { data?: { delivered?: boolean } };
+      if (res.ok && json.data?.delivered !== false) {
+        setResent(true);
+      }
+    } finally {
+      setResending(false);
+    }
+  };
+
   return (
     <SectionCard>
       <SectionCardHeader>
@@ -103,19 +130,44 @@ export function SetPasswordSection() {
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {requested ? (
-          <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-success">
-            {t('setPasswordRequestSuccessDelivered')}
-          </p>
+          <div className="space-y-2">
+            <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-success">
+              {t('setPasswordRequestSuccessDelivered')}
+            </p>
+            {/* 유나 design:changes(PR#3688) ② — 「메일 안 왔나요? 재발송」. */}
+            <p className="text-xs text-muted-foreground">
+              {t('setPasswordResendPrompt')}{' '}
+              <button
+                type="button"
+                onClick={() => void handleResend()}
+                disabled={resending}
+                className="font-medium text-brand hover:text-brand/80 disabled:opacity-50"
+              >
+                {resending ? t('setPasswordResending') : t('setPasswordResendButton')}
+              </button>
+            </p>
+            {resent && (
+              <p role="status" aria-live="polite" aria-atomic="true" className="text-xs text-success">
+                {t('setPasswordResentConfirmation')}
+              </p>
+            )}
+          </div>
         ) : (
           <>
             {message && (
               // story #2105 2차 — handleSubmit이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매
-              // 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
+              // 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공/neutral=status/polite
+              // (유나 design:changes(PR#3688) ③ — ALREADY_HAS_PASSWORD는 실패가 아니라 「이미
+              // 완료」라 neutral은 success와 같은 role/aria지만 색만 text-foreground로 중립화).
               <p
-                role={message.type === 'success' ? 'status' : 'alert'}
-                aria-live={message.type === 'success' ? 'polite' : 'assertive'}
+                role={message.type === 'error' ? 'alert' : 'status'}
+                aria-live={message.type === 'error' ? 'assertive' : 'polite'}
                 aria-atomic="true"
-                className={`text-sm ${message.type === 'success' ? 'text-success' : 'text-destructive'}`}
+                className={`text-sm ${
+                  message.type === 'success' ? 'text-success'
+                  : message.type === 'neutral' ? 'text-foreground'
+                  : 'text-destructive'
+                }`}
               >
                 {message.text}
               </p>

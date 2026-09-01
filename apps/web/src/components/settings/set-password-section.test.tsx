@@ -76,6 +76,24 @@ describe('SetPasswordSection — error.code 분기 (story #2485)', () => {
     expect(container.textContent).toContain('이 계정에는 이미 비밀번호가 설정되어 있습니다.');
   });
 
+  // 유나 design:changes(PR#3688, 2026-09-01) — ALREADY_HAS_PASSWORD는 실패가 아니라 「이미
+  // 완료」라 빨강(destructive/role=alert)이 부적절 — 중립 톤(text-foreground/role=status).
+  it('ALREADY_HAS_PASSWORD — 실패 톤(destructive/alert)이 아니라 중립 톤(text-foreground/status)', async () => {
+    await submitWithErrorCode('ALREADY_HAS_PASSWORD', 'User already has a password set');
+    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '이 계정에는 이미 비밀번호가 설정되어 있습니다.');
+    expect(msg).not.toBeUndefined();
+    expect(msg?.className).toContain('text-foreground');
+    expect(msg?.className).not.toContain('text-destructive');
+    expect(msg?.getAttribute('role')).toBe('status');
+  });
+
+  it('USER_NOT_FOUND(진짜 실패)는 여전히 destructive/alert 톤 그대로다(회귀 0)', async () => {
+    await submitWithErrorCode('USER_NOT_FOUND', 'User not found');
+    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '계정을 찾을 수 없습니다.');
+    expect(msg?.className).toContain('text-destructive');
+    expect(msg?.getAttribute('role')).toBe('alert');
+  });
+
   it('USER_NOT_FOUND — raw error.message 대신 고정 문구', async () => {
     await submitWithErrorCode('USER_NOT_FOUND', 'User not found');
     expect(container.textContent).not.toContain('User not found');
@@ -184,5 +202,35 @@ describe('SetPasswordSection — 재인증 게이트: request 성공은 "메일�
 
     expect(container.textContent).toContain('확인 이메일 발송에 실패했습니다');
     expect(container.querySelector('input[type="password"]')).not.toBeNull(); // 폼 유지(재시도 가능)
+  });
+
+  // 유나 design:changes(PR#3688, 2026-09-01) — 「메일 안 왔나요? 재발송」 동선.
+  it('「메일함 확인」 화면에서 재발송 버튼을 누르면 request를 다시 호출하고 확인 문구가 뜬다', async () => {
+    let requestCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { has_password: false } }) };
+      if (url === '/api/auth/set-password/request') {
+        requestCallCount += 1;
+        return { ok: true, json: async () => ({ data: { delivered: true } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<SetPasswordSection />)); });
+    await flush();
+    const [pw, confirm] = Array.from(container.querySelectorAll('input[type="password"]')) as HTMLInputElement[];
+    await act(async () => { setNativeValue(pw, 'Str0ng!Pass'); });
+    await act(async () => { setNativeValue(confirm, 'Str0ng!Pass'); });
+    const submitBtn = container.querySelector('button');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(requestCallCount).toBe(1);
+
+    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '재발송');
+    expect(resendBtn, '재발송 버튼을 못 찾음').not.toBeUndefined();
+    await act(async () => { resendBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(requestCallCount).toBe(2); // 실제로 새 15분 토큰이 다시 발급됐다(재발송 실증)
+    expect(container.textContent).toContain('다시 보냈습니다');
   });
 });
