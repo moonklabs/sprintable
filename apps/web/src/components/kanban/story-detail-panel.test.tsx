@@ -129,6 +129,45 @@ describe('StoryDetailPanel — overlayPosition (story #2354, 지도 위에 겹�
   });
 });
 
+// story #3289(도메인탈고정·축1 Phase1 FE잔여, AC1) — getStatusLabel 없으면(undefined) 기존
+// canonical t(...) 그대로(회귀 0, 3687과 동형 폴백), 있으면 그 오버라이드가 배지 텍스트를
+// 대체한다(localStatus 자체·색상 판정은 story-card.tsx와 동일하게 무변경).
+describe('StoryDetailPanel — org 상태 라벨 오버라이드(story #3289 AC1)', () => {
+  it('getStatusLabel 없으면 canonical t(...) 문구 그대로(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({ status: 'backlog' })} tasks={[]} onClose={() => {}} />));
+    });
+    const badgeButton = container.querySelector('[aria-label="상태"]');
+    expect(badgeButton?.textContent).toContain('백로그');
+  });
+
+  it('getStatusLabel이 undefined를 돌려주면(org 미설정) canonical 그대로 폴백', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory({ status: 'backlog' })} tasks={[]} onClose={() => {}} getStatusLabel={() => undefined} />,
+      ));
+    });
+    const badgeButton = container.querySelector('[aria-label="상태"]');
+    expect(badgeButton?.textContent).toContain('백로그');
+  });
+
+  it('getStatusLabel이 값을 돌려주면 배지 텍스트가 그 오버라이드로 바뀐다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'backlog' })}
+          tasks={[]}
+          onClose={() => {}}
+          getStatusLabel={(slug) => (slug === 'backlog' ? '대기열' : undefined)}
+        />,
+      ));
+    });
+    const badgeButton = container.querySelector('[aria-label="상태"]');
+    expect(badgeButton?.textContent).toContain('대기열');
+    expect(badgeButton?.textContent).not.toContain('백로그');
+  });
+});
+
 // story #2528 — 전역 스크롤바 숨김(#2165) 하에 상세패널 본문 스크롤 컨테이너가 예외 목록에
 // 없어 스크롤바가 안 보이던 결함. globals.css 범용 옵트인 `.scrollbar-visible` 클래스 적용
 // 계약을 고정한다. jsdom은 실 스크롤바 렌더를 계산하지 않으므로 실제 가시성은 라이브 QA 몫

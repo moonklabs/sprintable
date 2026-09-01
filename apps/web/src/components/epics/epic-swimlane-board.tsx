@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight, Lock } from 'lucide-react';
 import {
   DndContext, type DragEndEvent, PointerSensor, useDroppable, useSensor, useSensors,
@@ -11,6 +11,8 @@ import { parseCursorMeta } from '@/lib/pagination';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { StoryCard } from '@/components/kanban/story-card';
 import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import {
@@ -240,6 +242,12 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
 
 export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const t = useTranslations('board');
+  // story #3289 — kanban-board.tsx와 동형(useOrgDomainLabels 배선). 이 화면의 StoryDetailPanel
+  // 호출부(아래)에만 소비시킨다 — StoryCard(라인 163 부근) 배지는 이 스토리 AC 밖(3687이
+  // 커버한 건 kanban-board.tsx뿐, 이 스윔레인 카드는 별도 갭 — 별도 스토리로 남긴다).
+  const { orgId } = useDashboardContext();
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
@@ -619,6 +627,8 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
               <StoryDetailPanel
                 story={selectedStory}
                 tasks={storyTasks}
+                getStatusLabel={domainLabels.statusLabel}
+                getEntityTypeLabel={domainLabels.entityTypeLabel}
                 nextTasksCursor={storyTasksNextCursor}
                 loadingMoreTasks={loadingMoreStoryTasks}
                 onLoadMoreTasks={async () => {
