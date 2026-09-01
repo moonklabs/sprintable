@@ -88,3 +88,37 @@ class AdminMetricsResponse(BaseModel):
     escalation_rate: float | None
     cost_cap_org_daily_usd: float
     cost_cap_org_session_usd: float
+
+
+class AdminConversationSummary(BaseModel):
+    """story #3282(지원운영 어드민 관제) — 어드민 콘솔 대화 목록 1건. 고객 원문은 안 싣는다
+    (목록 레벨에선 ConversationResponse와 같은 절제 원칙 — 원문은 .../messages로 별도 조회).
+    escalation_status(문자열)는 일부러 안 담는다: SupportEscalation.status는 영구 'open'
+    결함(story 183fe7a5-08cd-4a75-88f6-8c386ff23bd9)이 있어, 어드민 콘솔의 "에스컬 상태"는
+    internal-api 쪽에서 Gate.status 기준으로 계산한다(설계 doc §3/§4) — escalation_ids만
+    실어 그 Gate 역참조(Gate.neutral_facts.support_escalation_id)를 가능케 한다."""
+
+    id: uuid.UUID
+    org_id: uuid.UUID
+    external_user_id: uuid.UUID | None
+    created_at: datetime
+    ended_at: datetime | None
+    escalation_ids: list[uuid.UUID]
+
+
+class AdminConversationListResponse(BaseModel):
+    """story #3282 — GET /admin/conversations(어드민 전용, 전 org 대상 가능 — org_id 생략
+    시 전체). created_at 최신순."""
+
+    conversations: list[AdminConversationSummary]
+
+
+class AdminConversationMessagesResponse(BaseModel):
+    """story #3282 — GET /admin/conversations/{id}/messages. 원문 전체 반환(에스컬 필터
+    없음 — 선생님 확定 방향①). admin.py 모듈 docstring의 "원문 절대 반환 안 함" 원칙은
+    /metrics(계측 API) 전용이고 이 엔드포인트는 별개 신뢰 표면이라 적용 안 된다(PO 판정,
+    설계 doc §2-b)."""
+
+    conversation_id: uuid.UUID
+    org_id: uuid.UUID
+    messages: list[MessageResponse]
