@@ -108,6 +108,11 @@ interface StoryCardProps {
   /** E-VERIFY P0-04 — story.human_verified_by(UUID)를 호출부가 미리 resolve해 넘긴 것(assignee/
    * assignees와 동일 패턴). 결재자가 현재 담당자가 아닐 수 있어(assigneeList와 별개 조회). */
   verifiedBy?: KanbanMember;
+  /** story #3287([도메인탈고정·축1 Phase1] AC4) — org별 status 라벨 오버라이드 조회 함수
+   * (useOrgDomainLabels().statusLabel). 없으면(undefined) 기존 t(...) canonical 문구 그대로
+   * (회귀 0) — 어떤 축(classic/trust) 카드든 story.status 자체가 바뀌는 게 아니라 여기 표시
+   * 텍스트만 바뀐다. */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
   /** story #2933 H4(P0-H) — 트러스트축 파생 컬럼(needs_input/verified/merge_ready)의 카드는
    * 게이트/증거 사실이 소속을 계산한다(v4 결정⑤ — 빼는 길=게이트 해소뿐). true면 드래그 wiring
    * 자체를 끄고(useSortable disabled, dnd-kit 리스너 미부착 — goals-client.tsx/retro page.tsx의
@@ -121,7 +126,7 @@ interface StoryCardProps {
   className?: string;
 }
 
-export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className, getStatusLabel }: StoryCardProps) {
   const t = useTranslations('board');
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
@@ -315,11 +320,11 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   }, [story.id, onDelete]);
 
   const statuses = [
-    { id: 'backlog', label: t('backlog') },
-    { id: 'ready-for-dev', label: t('readyForDev') },
-    { id: 'in-progress', label: t('inProgress') },
-    { id: 'in-review', label: t('inReview') },
-    { id: 'done', label: t('done') },
+    { id: 'backlog', label: getStatusLabel?.('backlog') ?? t('backlog') },
+    { id: 'ready-for-dev', label: getStatusLabel?.('ready-for-dev') ?? t('readyForDev') },
+    { id: 'in-progress', label: getStatusLabel?.('in-progress') ?? t('inProgress') },
+    { id: 'in-review', label: getStatusLabel?.('in-review') ?? t('inReview') },
+    { id: 'done', label: getStatusLabel?.('done') ?? t('done') },
   ];
 
   const proofState = STATUS_TO_PROOF_STATE[story.status] ?? 'amber';
