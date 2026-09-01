@@ -129,7 +129,7 @@ function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
                   {new Date(conv.created_at).toLocaleString()}
                 </span>
                 {conv.ended_at === null ? (
-                  <span className="text-[10px] text-muted-foreground">{t('conversationActiveBadge')}</span>
+                  <span className="text-[11px] text-muted-foreground">{t('conversationActiveBadge')}</span>
                 ) : null}
               </DropdownMenuItem>
             ))
