@@ -56,11 +56,16 @@ def _make_auth_ctx(user_id: uuid.UUID) -> MagicMock:
     return ctx
 
 
-# ─── POST /api/v2/auth/set-password ──────────────────────────────────────────
+# ─── POST /api/v2/auth/set-password/request ──────────────────────────────────
+# story #ab2a503f(2026-09-01) — 구 POST /set-password(재인증 0으로 즉시 write)는 완전히
+# 제거되고 이메일 확인 2단계(request→confirm)로 대체됐다. 이 파일의 나머지 3건은 구
+# 엔드포인트를 직접 쳤던 자리라 새 request 엔드포인트로 갱신한다 — request/confirm 전체
+# 계약(성공/거부/토큰 왕복/refresh revoke)의 상세 pin은
+# tests/test_ab2a503f_set_password_reauth.py가 전담한다.
 
 @pytest.mark.anyio
 async def test_set_password_success_200():
-    """OAuth 사용자 (hashed_password == '') 비밀번호 설정 성공."""
+    """OAuth 사용자 (hashed_password == '') — request 성공(확인 메일 발송, 아직 비번 미설정)."""
     from app.dependencies.auth import get_current_user
     client, session, app = await _client()
     try:
@@ -72,22 +77,23 @@ async def test_set_password_success_200():
 
         app.dependency_overrides[get_current_user] = override_auth
 
-        with patch("app.routers.auth._get_user_by_id", new_callable=AsyncMock) as mock_user:
+        with patch("app.routers.auth._get_user_by_id", new_callable=AsyncMock) as mock_user, \
+             patch("app.services.email.send_email", return_value=True):
             mock_user.return_value = user
             session.execute = AsyncMock(return_value=MagicMock())
 
             async with client as c:
-                resp = await c.post("/api/v2/auth/set-password", json={"new_password": "NewPass1!"})
+                resp = await c.post("/api/v2/auth/set-password/request", json={"new_password": "NewPass1!"})
 
         assert resp.status_code == 200
-        assert resp.json()["data"]["message"] == "Password set successfully"
+        assert resp.json()["data"]["delivered"] is True
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
 async def test_set_password_already_has_password_400():
-    """이미 비밀번호 있는 사용자 → 400 ALREADY_HAS_PASSWORD."""
+    """이미 비밀번호 있는 사용자 → 400 ALREADY_HAS_PASSWORD(request 단계에서 그대로 유지)."""
     from app.dependencies.auth import get_current_user
     client, session, app = await _client()
     try:
@@ -103,7 +109,7 @@ async def test_set_password_already_has_password_400():
             mock_user.return_value = user
 
             async with client as c:
-                resp = await c.post("/api/v2/auth/set-password", json={"new_password": "NewPass1!"})
+                resp = await c.post("/api/v2/auth/set-password/request", json={"new_password": "NewPass1!"})
 
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "ALREADY_HAS_PASSWORD"
@@ -113,7 +119,7 @@ async def test_set_password_already_has_password_400():
 
 @pytest.mark.anyio
 async def test_set_password_weak_password_422():
-    """비밀번호 validation 실패 (너무 짧음) → 422."""
+    """비밀번호 validation 실패 (너무 짧음) → 422(SetPasswordRequest 그대로 재사용)."""
     from app.dependencies.auth import get_current_user
     client, session, app = await _client()
     try:
@@ -126,7 +132,7 @@ async def test_set_password_weak_password_422():
         app.dependency_overrides[get_current_user] = override_auth
 
         async with client as c:
-            resp = await c.post("/api/v2/auth/set-password", json={"new_password": "abc"})
+            resp = await c.post("/api/v2/auth/set-password/request", json={"new_password": "abc"})
 
         assert resp.status_code == 422
     finally:

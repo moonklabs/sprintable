@@ -38,6 +38,7 @@ export const EXEMPT_FILES = new Set<string>([
   'app/reset-password/page.tsx', // POST /api/auth/reset-password — 로그인 前.
   'app/mfa/page.tsx', // POST /api/auth/2fa/verify — 로그인 2단계(주 세션 아직 미확立).
   'app/unsubscribe/page.tsx', // GET /api/activation/unsubscribe — 이메일 링크 클릭, 세션 없는 방문자(story #3159).
+  'app/set-password/confirm/page.tsx', // POST /api/auth/set-password/confirm — 이메일 링크 클릭, verify-email과 동형(pre-auth, story #ab2a503f).
   'lib/db/client.ts', // fetchWithAuth/refreshAuthTokens 자신의 구현 — raw fetch가 원시 primitive.
   'lib/auth/firebase-login-flow.ts', // POST /api/auth/firebase/session — 로그인 자체(세션 교환 전), fetchWithAuth 전제(기존 세션) 자체가 안 맞음.
 ]);

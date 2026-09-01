@@ -61,6 +61,35 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
+    # story #ab2a503f([버그·보안·HIGH] set-password 재인증 게이트, 2026-09-01) — OAuth 전용
+    # 계정 최초 비밀번호 설정 확인 메일. reset_password와 골격 동일(재사용, 신규 렌더러 0)이나
+    # expiry_note만 15분(SET_PASSWORD_CONFIRM_EXPIRE_MINUTES, security.py)로 더 짧게 — "지금
+    # 이 순간의 사람"을 확인하는 목적이라 하루씩 안 열어둔다. en은 다른 5종과 동일하게 유나
+    # 검수 대기 초안.
+    "set_password_confirm": {
+        "ko": {
+            "subject": "Sprintable 비밀번호 설정을 완료해 주세요",
+            "intro_lines": [
+                "비밀번호 설정을 요청하셨습니다.",
+                "아래 버튼을 눌러 설정을 완료해 주세요.",
+            ],
+            "cta_label": "비밀번호 설정 완료",
+            "expiry_note": "이 링크는 15분 동안 유효합니다.",
+            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 설정되지 않습니다.",
+            "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
+        },
+        "en": {
+            "subject": "Confirm your Sprintable password",
+            "intro_lines": [
+                "We received a request to set your password.",
+                "Click the button below to complete the setup.",
+            ],
+            "cta_label": "Confirm password",
+            "expiry_note": "This link is valid for 15 minutes.",
+            "security_note": "If you didn't request this, you can safely ignore this email — your password will not be set.",
+            "fallback_label": "If the button doesn't work, paste this address into your browser:",
+        },
+    },
     # story #3209(PR-2, 2026-08-29) — 결제 완료 안내. 다른 트랜잭셔널 3종과 골격 동일
     # (intro_lines/cta_label/expiry_note/security_note/fallback_label — render_action_email
     # 그대로 재사용, 새 렌더러 발명 없음). intro_lines[1]은 결제액 삽입용 {amount} 자리
