@@ -941,6 +941,28 @@ jobs:
     # 17~23분+)에 비하면 러너 비용은 무시할 수준 — 그래도 첫 CI 실주행 미지수 여유로 10분.
     timeout-minutes: 10
 
+    # story #3285(지원v1·후속, 2026-09-01) — gateway 스위트는 SQLite 인메모리(conftest.py)라
+    # 실 Postgres 마이그레이션 제약(CHECK/FK) 드리프트를 구조적으로 못 잡는 클래스였다(실증:
+    # #3672가 role을 코드로만 넓혀 dev PG서 500). backend와 같은 pgvector 서비스 패턴을
+    # 재사용 — 비용은 미미(gateway 마이그레이션 3~4개뿐, 수 초).
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_gateway_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      GATEWAY_REALDB_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5433/sprintable_gateway_test
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -951,7 +973,7 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Run pytest (support-gateway — sqlite in-memory, no external services)
+      - name: Run pytest (support-gateway — sqlite in-memory + realdb 드리프트 게이트)
         if: needs.detect-changed-scope.outputs.gateway_relevant != 'false'
         working-directory: support-gateway
         run: |
