@@ -106,6 +106,55 @@ async def test_knowledge_task_returns_honest_message_when_llm_says_none_relevant
     assert result.cited_chunk_ids == ()
 
 
+async def test_knowledge_task_llm_wrong_selection_of_irrelevant_low_score_match_is_rejected(monkeypatch):
+    """story #3268(지원v1·후속) 이중 게이트 핵심 pin — 카디르 QA(PR#3651) 재현 시나리오
+    그대로: 무관 청크(seat-limit)가 threshold(0.65)는 겨우 넘겼고(score=0.66), 관련성
+    판정 LLM도 주제를 오판해 그 청크를 "1"(선택)로 잘못 골랐다. LLM 선택만으로 채택하면
+    (구 로직) had_match=True가 되지만, 이중 게이트(원시 스코어도 확신 threshold=0.70을
+    넘어야 함)가 이 경계 사례를 독립적으로 걸러 정직한 NO_MATCH로 떨어뜨려야 한다."""
+    seat_chunk = KnowledgeChunk(
+        id="invite-seat-limit-free-plan", title="무료 플랜에서 멤버 초대 인원 제한",
+        content="무료 플랜은 초대할 수 있는 멤버 수에 상한이 있습니다.", source_note="test",
+    )
+    import app.execution_tasks as execution_tasks_module
+
+    monkeypatch.setattr(
+        execution_tasks_module, "search", lambda vector, top_k=3: [SearchMatch(chunk=seat_chunk, score=0.66)]
+    )
+    llm = _StubLLM(relevance_text="1")  # LLM이 무관 청크를 (잘못) 관련 있다고 선택
+    result = await knowledge_task(
+        _NoopDB(), conversation_id=uuid.uuid4(), org_id=uuid.uuid4(), query="슬랙 연동은 어떻게 하나요?", llm=llm
+    )
+
+    assert result.had_match is False
+    assert result.answer == NO_MATCH_MESSAGE
+    assert result.cited_chunk_ids == ()
+    assert seat_chunk.content not in result.answer  # 무관 청크 내용이 답에 안 실린다.
+
+
+async def test_knowledge_task_high_confidence_real_match_still_passes_dual_gate(monkeypatch):
+    """정상 케이스 무과탐(AC②) — 실측 관련 질문 분포(0.70~0.80, story #3262 AC4)에 드는
+    진짜 매치는 이중 게이트를 그대로 통과해 매치+인용된다(과탐으로 정직한 답까지 막으면
+    안 됨)."""
+    chunk = KnowledgeChunk(
+        id="invite-how-to", title="팀원 초대 방법",
+        content="조직 > 멤버 페이지에서 이메일과 역할을 입력해 초대하세요.", source_note="test",
+    )
+    import app.execution_tasks as execution_tasks_module
+
+    monkeypatch.setattr(
+        execution_tasks_module, "search", lambda vector, top_k=3: [SearchMatch(chunk=chunk, score=0.75)]
+    )
+    llm = _StubLLM(relevance_text="1")
+    result = await knowledge_task(
+        _NoopDB(), conversation_id=uuid.uuid4(), org_id=uuid.uuid4(), query="팀원을 초대하려면?", llm=llm
+    )
+
+    assert result.had_match is True
+    assert chunk.content in result.answer
+    assert result.cited_chunk_ids == ("invite-how-to",)
+
+
 async def test_knowledge_task_multi_chunk_selection_cites_each(monkeypatch):
     chunk_a = KnowledgeChunk(id="a", title="A문서", content="A 내용", source_note="test")
     chunk_b = KnowledgeChunk(id="b", title="B문서", content="B 내용", source_note="test")

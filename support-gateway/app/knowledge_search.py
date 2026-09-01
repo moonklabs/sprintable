@@ -22,6 +22,14 @@ _EMBEDDINGS_PATH = Path(__file__).parent / "knowledge" / "embeddings.json"
 
 SIMILARITY_THRESHOLD = 0.65
 
+# story #3268(지원v1·후속, 2026-09-01) — LLM 관련성 선택(execution_tasks.py)과 별개인 2차
+# 확신 threshold. 위 AC4 실측(같은 문서 최상단 참고)이 보인 두 군집 — 무관 질문 top1
+# 0.52~0.58 vs 관련 질문 0.70~0.80 — 중 SIMILARITY_THRESHOLD(0.65)는 그 사이 아무 값이라
+# "무관 청크가 threshold를 겨우 넘는"(카디르 QA PR#3651 재현, score=0.66) 경계 사례를
+# 원천 배제 못 한다. LLM이 그 후보를 골라도(주제 오판) 원시 코사인이 이 값 아래면 이중
+# 게이트로 기각 — "LLM 선택 AND 스코어 확신" 둘 다 동의해야 최종 채택(관대한 OR 아님).
+SELECTED_MATCH_CONFIDENCE_THRESHOLD = 0.70
+
 
 @dataclass(frozen=True)
 class SearchMatch:
