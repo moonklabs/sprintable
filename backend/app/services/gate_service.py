@@ -66,7 +66,11 @@ RiskGrade = Literal["low", "high"]
 # 5a34ef7f)가 정확히 이 간극에서 났다 — FE가 note/evidence_viewed를 안 보내는 채로 배선돼
 # 있었는데 그 사실을 아무 코드도 "doc_approval=high"라고 선언하지 않고 있었다. low로
 # 등재하지 않는다(신중 결재 취지 훼손, PO 명시 판단) — high로 명시.
-_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE})
+# story #3291(M1·마케팅자동화, 2026-09-01) — external_publish(불가역 외부 발신) 명시 high
+# 등재. doc_approval 미등재 실사고(위 코멘트) 선례를 그대로 따라 폴백 의존 대신 명시.
+_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset(
+    {"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE, "external_publish"}
+)
 #
 # story #2709(2026-08-17, PO 판정) — agent_decision_request를 명시 low 등재. 미등재=폴백(§2.3
 # 보수적 high)에 기대는 게 안전한 기본값이 아니라는 것을 story #6c89e40d(doc_approval 미등재
@@ -326,6 +330,13 @@ _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
         # 와 동형 근거 — 판단이 존재 이유인 게이트가 permissive posture로 자동 승인되면 애초에
         # 만든 이유가 없어진다).
         "support_escalation_review",
+        # story #3291(M1·마케팅자동화, 2026-09-01, PO 확定) — 불가역 외부 발신(SNS/광고 게시).
+        # 마케팅 레시피가 role→agent 바인딩까지는 자유롭게 자동화해도(축2-ⓐ), 실제 외부로
+        # 나가는 마지막 발걸음만은 org posture(permissive 포함) 무관 항상 사람이 승인해야
+        # 한다 — doc_approval/agent_decision_request와 동형 근거(판단이 존재 이유인 게이트가
+        # 자동 승인되면 만든 이유가 없어진다). ⚠️이 스토리는 게이트 타입 자체가 항상-수동임을
+        # 강제할 뿐 — 실제 발행 직전 gate.status 확인(chokepoint)은 발행 커넥터 스토리 몫.
+        "external_publish",
     }
 )
 # ⚠️story #2709 — agent_decision_request가 항상 manual(=posture 무관 항상 pending)인 이유:
