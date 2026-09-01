@@ -131,51 +131,62 @@ async def fetch_pr_review_rounds(repo: str, pr_number: int) -> int:
         return 0
 
 
+_GATE_CHECK_NAME = "sprintable/gate"
+_FAILURE_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "stale"}
+
+
 async def fetch_status_check_rollup(repo: str, head_sha: str, token: str) -> tuple[str | None, str]:
-    """E-GHAPP Bot-M.1: PR head commit의 집계 CI 상태를 GitHub GraphQL statusCheckRollup으로 조회.
+    """E-GHAPP Bot-M.1: PR head commit의 집계 CI 상태를 REST check-runs 목록에서 직접 계산.
 
     반환 **(ci, reason)** — ci ∈ 'success'|'failure'|None, reason은 unknown(ci=None) 사유 진단용:
       ('success', 'resolved') · ('failure', 'resolved') · (None, 'pending') · (None, 'api_error') ·
       (None, 'not_found') · (None, 'no_token'/'bad_input').
     **token(installation access token)**으로 호출. ⚠️**PAT fallback 없음**(Bot-M.1 게이트). reason은 라이브
     App/권한 진단 + 'unknown 0' 검증용(success 승격 절대 금지). 토큰은 호출자가 org→installation 해소해 전달.
-    """
+
+    story #3253(2026-08-30/31 진단, 2026-09-01 재확認 후 처방) — GitHub GraphQL의 집계
+    `statusCheckRollup{state}`(구현, 아래 기록만 남김)은 커밋에 달린 **모든** 체크런을 합산하는데,
+    그 안에 `sprintable/gate`(이 함수의 호출자 자신이 발행한 체크런)까지 포함돼 있었다. 즉
+    sprintable/gate가 아직 자기 판정을 못 끝내 `in_progress`인 동안은 롤업 자체가 SUCCESS가
+    될 수 없는 **자기참조 순환**이었다 — reevaluate가 `ci_result`를 pass→null로 후퇴시키던
+    진짜 원인(다른 모든 하위 게이트가 success여도 gate 자신의 in_progress가 계속 rollup을
+    오염). 처방: REST `GET /repos/{repo}/commits/{sha}/check-runs`(list_check_runs_for_ref와
+    동일 API축, github_app.py)로 개별 체크런 목록을 직접 받아 `sprintable/gate` 자기 자신을
+    제외하고 이 함수가 직접 집계한다 — 집계 규칙은 원래 GraphQL rollup 의미론과 최대한
+    동형(미완료 체크 존재=pending, 실패류 conclusion 존재=failure, 그 외 전부=success)."""
     if not token:
         return None, "no_token"
     if not repo or "/" not in repo or not head_sha:
         return None, "bad_input"
-    owner, name = repo.split("/", 1)
-    query = (
-        "query($owner:String!,$name:String!,$oid:GitObjectID!){"
-        "repository(owner:$owner,name:$name){object(oid:$oid){"
-        "... on Commit{statusCheckRollup{state}}}}}"
-    )
     try:
         import httpx
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://api.github.com/graphql",
+            resp = await client.get(
+                f"https://api.github.com/repos/{repo}/commits/{head_sha}/check-runs",
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/vnd.github+json",
                 },
-                json={"query": query, "variables": {"owner": owner, "name": name, "oid": head_sha}},
+                params={"per_page": 100},
             )
         if resp.status_code != 200:
             return None, "api_error"
         data = resp.json()
-        obj = (((data.get("data") or {}).get("repository") or {}).get("object")) or {}
-        rollup = (obj.get("statusCheckRollup") if isinstance(obj, dict) else None) or {}
-        state = rollup.get("state")
-        if state == "SUCCESS":
-            return "success", "resolved"
-        if state in ("FAILURE", "ERROR"):
-            return "failure", "resolved"
-        if state in ("PENDING", "EXPECTED"):
+        runs = data.get("check_runs") if isinstance(data, dict) else None
+        if not isinstance(runs, list):
+            return None, "not_found"
+        # 자기 자신(sprintable/gate) 제외 — 자기참조 순환의 근인 처방.
+        relevant = [r for r in runs if isinstance(r, dict) and r.get("name") != _GATE_CHECK_NAME]
+        if not relevant:
+            return None, "not_found"
+        if any(r.get("status") != "completed" for r in relevant):
             return None, "pending"          # 미완료 — 채우지 않음(success 승격 금지).
-        return None, "not_found"            # rollup 없음(체크 미설정/SHA 불일치 등).
+        conclusions = {r.get("conclusion") for r in relevant}
+        if conclusions & _FAILURE_CONCLUSIONS:
+            return "failure", "resolved"
+        return "success", "resolved"        # success/neutral/skipped 전부 통과(원 rollup 의미론과 동형).
     except Exception as exc:  # noqa: BLE001
-        logger.warning("statusCheckRollup fetch failed repo=%s sha=%s: %s", repo, head_sha, exc)
+        logger.warning("check-runs fetch failed repo=%s sha=%s: %s", repo, head_sha, exc)
         return None, "api_error"
 
 
