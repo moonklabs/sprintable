@@ -150,4 +150,33 @@ KNOWLEDGE_CHUNKS: list[KnowledgeChunk] = [
             "주석 확認). 2026-08-31 Explore 조사 확認."
         ),
     ),
+    KnowledgeChunk(
+        id="agent-local-connect-howto",
+        title="AI 에이전트를 내 로컬 머신(Claude Code 등)에 연결하는 방법",
+        content=(
+            "에이전트를 팀원으로 추가하면 API 키와 함께 연결 설정 파일(.mcp.json)이 자동으로 "
+            "만들어집니다. 화면에는 '호스팅(Hosted)'과 '로컬(Local)' 두 방식 탭이 있고, 원하는 "
+            "탭에서 '설정 복사' 버튼을 눌러 그 내용을 그대로 복사하면 됩니다(설정 내용을 직접 "
+            "타이핑하거나 재구성할 필요 없음 — 서버가 만들어 준 그대로 붙여넣으면 됩니다). "
+            "복사한 내용을 로컬 Claude Code의 .mcp.json 설정에 붙여넣은 뒤, 반드시 Claude "
+            "Code를 재시작해야 설정이 적용됩니다(설정만 붙여넣고 재시작을 안 하면 연결이 "
+            "안 됩니다). 재시작 후에는 화면이 자동으로 연결 여부를 확인하며, 연결이 확인되면 "
+            "화면에 완료 표시가 뜹니다. 온보딩 중이 아니어도, 나중에 조직 > 워크포스에서 해당 "
+            "에이전트 상세 화면을 열면 같은 연결 설정 섹션을 다시 볼 수 있습니다(추가 에이전트를 "
+            "붙일 때도 동일한 절차)."
+        ),
+        source_note=(
+            "apps/web/src/app/onboarding/connect-step.tsx:55-56(서버 SSOT, 클라 재조립 안 함),"
+            "223-236(handleCopy),311-338(hosted/stdio 탭),412-417(재시작 필수 안내, "
+            "restartAfterConfig i18n key) + verify-rail.tsx:196,281(polling 검증)+334(verified "
+            "판정) + apps/web/src/app/(authenticated)/organization/workforce/[id]/page.tsx"
+            "(같은 연결 설정 섹션 재사용, connect-step.tsx:44-45 주석 확認). 2026-09-01 Explore "
+            "조사 확認 — 실 API 키 값·정확 JSON 구조·폴링 타임아웃 초수는 서버 생성값/구현 "
+            "디테일이라 의도적으로 미기재(고정 숫자·구조를 인용했다가 재서술 단계에서 날조로 "
+            "채워지는 재발 패턴, invite-seat-limit-free-plan 청크 주석 참고). 2026-09-01 실 "
+            "임베딩 검증(gemini-embedding-001, GOOGLE_OAUTH_ACCESS_TOKEN 경유) — 선생님 원문에 "
+            "가까운 질의 3종 모두 이 청크가 SELECTED_MATCH_CONFIDENCE_THRESHOLD(0.70) 이상으로 "
+            "1위 매치(score 0.73~0.77)."
+        ),
+    ),
 ]
