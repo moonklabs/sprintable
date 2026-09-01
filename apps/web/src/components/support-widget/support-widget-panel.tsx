@@ -96,6 +96,14 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
 
   return (
     <>
+      {session.escalationStatus === 'open' ? (
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
+        >
+          {t('escalationOpenBanner')}
+        </div>
+      ) : null}
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
         {session.status === 'connecting' ? (
           <div className="h-8 animate-pulse rounded-lg bg-muted" />

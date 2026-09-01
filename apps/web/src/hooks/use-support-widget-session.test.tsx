@@ -49,6 +49,7 @@ function Harness() {
   return (
     <div>
       <span data-testid="status">{session.status}</span>
+      <span data-testid="escalation-status">{session.escalationStatus ?? ''}</span>
       <span data-testid="sending">{String(session.sending)}</span>
       <span data-testid="send-error">{session.sendError ?? ''}</span>
       <ul>
@@ -93,15 +94,29 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
 
   it('connect() 성공 — 세션 생성+이력 조회 후 ready로 전환되고 이력이 그대로 렌더된다', async () => {
     createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
-    listGatewayMessagesMock.mockResolvedValue([
-      { id: 'm1', conversation_id: 'c1', role: 'customer', content: '이전 문의', created_at: 't1' },
-      { id: 'm2', conversation_id: 'c1', role: 'agent', content: '이전 응답', created_at: 't2' },
-    ]);
+    listGatewayMessagesMock.mockResolvedValue({
+      messages: [
+        { id: 'm1', conversation_id: 'c1', role: 'customer', content: '이전 문의', created_at: 't1' },
+        { id: 'm2', conversation_id: 'c1', role: 'agent', content: '이전 응답', created_at: 't2' },
+      ],
+      escalationStatus: null,
+    });
     await mount();
     await click('connect');
     expect(statusText()).toBe('ready');
     expect(container.textContent).toContain('이전 문의');
     expect(container.textContent).toContain('이전 응답');
+  });
+
+  it('story #3263 AC4 — connect()가 이미 열려있는 에스컬레이션 상태를 재오픈 시에도 그대로 복원한다(무신호 금지, 턴이 지나간 뒤에도)', async () => {
+    createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
+    listGatewayMessagesMock.mockResolvedValue({
+      messages: [{ id: 'm1', conversation_id: 'c1', role: 'agent', content: '담당자에게 연결해 드릴게요', created_at: 't1' }],
+      escalationStatus: 'open',
+    });
+    await mount();
+    await click('connect');
+    expect(container.querySelector('[data-testid="escalation-status"]')!.textContent).toBe('open');
   });
 
   it('connect() 실패 — error 상태로 전환된다(unavailable과 구분)', async () => {
@@ -113,11 +128,12 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
 
   it('sendMessage 성공 — 낙관적 echo가 실 메시지(+escalated 플래그)로 교체된다', async () => {
     createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
-    listGatewayMessagesMock.mockResolvedValue([]);
+    listGatewayMessagesMock.mockResolvedValue({ messages: [], escalationStatus: null });
     sendGatewayMessageMock.mockResolvedValue({
       customer_message: { id: 'c1', conversation_id: 'conv-1', role: 'customer', content: '안녕하세요', created_at: 't1' },
       agent_message: { id: 'a1', conversation_id: 'conv-1', role: 'agent', content: '무엇을 도와드릴까요?', created_at: 't2' },
       escalated: false,
+      escalation_status: null,
     });
     await mount();
     await click('connect');
@@ -130,7 +146,7 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
 
   it('sendMessage 실패 — 카디르 지적 승계(필수): 500/무신호 대신 sendError 정직 문구+실패 마커가 남는다', async () => {
     createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
-    listGatewayMessagesMock.mockResolvedValue([]);
+    listGatewayMessagesMock.mockResolvedValue({ messages: [], escalationStatus: null });
     sendGatewayMessageMock.mockRejectedValue(new Error('HTTP 500'));
     await mount();
     await click('connect');
@@ -143,7 +159,7 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
 
   it('EN 로케일 크로스체크(카디르 QA 뮤테이션 실증 반영) — ko/en 양쪽이 같은 값을 참조해 동어반복이던 갭을 닫는다. locale=en으로 마운트하면 영문 문구가 뜬다 — 하드코딩 한글로 되돌리는 회귀는 이 테스트에서 반드시 red가 된다(ko 대조 테스트만으론 t() 걷어내도 green이었던 뮤테이션 갭).', async () => {
     createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
-    listGatewayMessagesMock.mockResolvedValue([]);
+    listGatewayMessagesMock.mockResolvedValue({ messages: [], escalationStatus: null });
     sendGatewayMessageMock.mockRejectedValue(new Error('HTTP 500'));
     await mount('en');
     await click('connect');
@@ -155,12 +171,13 @@ describe('useSupportWidgetSession — story #3260 Phase 2', () => {
 
   it('retryLastMessage — 실패한 메시지를 같은 내용으로 재전송하고 성공하면 실패 마커가 지워진다', async () => {
     createOrResumeGatewaySessionMock.mockResolvedValue({ id: 'sess-1', org_id: 'org-1', created_at: 'now' });
-    listGatewayMessagesMock.mockResolvedValue([]);
+    listGatewayMessagesMock.mockResolvedValue({ messages: [], escalationStatus: null });
     sendGatewayMessageMock.mockRejectedValueOnce(new Error('HTTP 500'));
     sendGatewayMessageMock.mockResolvedValueOnce({
       customer_message: { id: 'c1', conversation_id: 'conv-1', role: 'customer', content: '안녕하세요', created_at: 't1' },
       agent_message: { id: 'a1', conversation_id: 'conv-1', role: 'agent', content: '재시도 성공', created_at: 't2' },
       escalated: false,
+      escalation_status: null,
     });
     await mount();
     await click('connect');

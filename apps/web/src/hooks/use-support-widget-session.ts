@@ -15,6 +15,7 @@ import {
   isSupportGatewayConfigured,
   listGatewayMessages,
   sendGatewayMessage,
+  type GatewayEscalationStatus,
   type GatewayMessage,
 } from '@/lib/support-widget/gateway-client';
 
@@ -43,6 +44,10 @@ export interface SupportWidgetMessage {
 export interface SupportWidgetSession {
   status: SupportWidgetStatus;
   messages: SupportWidgetMessage[];
+  /** story #3263 AC4 — 대화 레벨 에스컬레이션 상태(무신호 금지). 턴 단위 메시지의
+   * `escalated` 배지와 달리 위젯을 닫았다 재오픈해도(connect() 재호출) 살아있다 —
+   * connect() 완료 시 GET 이력 응답에서, sendMessage 완료 시 그 왕복 응답에서 갱신. */
+  escalationStatus: GatewayEscalationStatus;
   /** POST /messages 왕복이 진행 중 — story #3261 실측(~12초)이라 패널이 이 값으로
    * "생각 중" 지속 신호(경과 초 등)를 그린다(무신호 금지, 페드루 지시). */
   sending: boolean;
@@ -73,6 +78,7 @@ export function useSupportWidgetSession(): SupportWidgetSession {
   const t = useTranslations('supportWidget');
   const [status, setStatus] = useState<SupportWidgetStatus>('unavailable');
   const [messages, setMessages] = useState<SupportWidgetMessage[]>([]);
+  const [escalationStatus, setEscalationStatus] = useState<GatewayEscalationStatus>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -101,7 +107,8 @@ export function useSupportWidgetSession(): SupportWidgetSession {
         const session = await createOrResumeGatewaySession();
         sessionIdRef.current = session.id;
         const history = await listGatewayMessages(session.id);
-        setMessages(history.map(toWidgetMessage));
+        setMessages(history.messages.map(toWidgetMessage));
+        setEscalationStatus(history.escalationStatus);
         setStatus('ready');
       } catch {
         setStatus('error');
@@ -131,6 +138,7 @@ export function useSupportWidgetSession(): SupportWidgetSession {
         toWidgetMessage(exchange.customer_message),
         { ...toWidgetMessage(exchange.agent_message), escalated: exchange.escalated },
       ]);
+      setEscalationStatus(exchange.escalation_status);
     } catch {
       lastFailedContentRef.current = content;
       setMessages((prev) => prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m)));
@@ -152,7 +160,7 @@ export function useSupportWidgetSession(): SupportWidgetSession {
   // 반환 객체 자체를 안정화 — 호출부(support-widget-launcher.tsx)가 이 객체를 effect
   // deps에 그대로 넣는다(값이 안 바뀌면 재렌더가 connect()를 불필요하게 재호출하지 않게).
   return useMemo(
-    () => ({ status, messages, sending, sendError, connect, sendMessage, retryLastMessage }),
-    [status, messages, sending, sendError, connect, sendMessage, retryLastMessage],
+    () => ({ status, messages, escalationStatus, sending, sendError, connect, sendMessage, retryLastMessage }),
+    [status, messages, escalationStatus, sending, sendError, connect, sendMessage, retryLastMessage],
   );
 }

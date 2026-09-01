@@ -35,12 +35,22 @@ class MessageExchangeResponse(BaseModel):
     customer_message: MessageResponse
     agent_message: MessageResponse
     escalated: bool
+    # story #3263 AC4 — `escalated`는 이 턴 하나의 순간신호일 뿐, 대화 전체가 지금 사람에게
+    # 걸려있는지는 별개 질문이다. escalation_status는 "지금 열려있는 게 하나라도 있는가"로
+    # 판정한다(routers/sessions.py::_conversation_escalation_status) — None(한 번도 에스컬
+    # 안 됨) | "open" | "resolved".
+    escalation_status: str | None
 
 
 class MessageListResponse(BaseModel):
-    """story #3261 보완 — GET /sessions/{id}/messages(대화 이력, 위젯 재오픈 시 복원용)."""
+    """story #3261 보완 — GET /sessions/{id}/messages(대화 이력, 위젯 재오픈 시 복원용).
+
+    story #3263 AC4 — 재오픈 시에도 escalation_status가 살아있어야 한다(무신호 금지). 턴
+    단위 `escalated` 배지는 그 순간이 지나면 화면에서 사라지지만, 사람에게 넘어간 사실
+    자체는 위젯을 닫았다 열어도 조용히 사라지면 안 된다."""
 
     messages: list[MessageResponse]
+    escalation_status: str | None
 
 
 class AdminMetricsResponse(BaseModel):
