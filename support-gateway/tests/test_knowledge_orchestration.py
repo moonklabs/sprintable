@@ -215,3 +215,44 @@ async def test_mixed_tool_turn_knowledge_and_org_status_both_survive_in_call_ord
     assert "아직 조직 상태 조회 기능이 연결되지 않았습니다" in content  # org_status_lookup 답도 마찬가지.
     # 호출 순서 보존 — knowledge_search(1번째)가 org_status_lookup(2번째) 답보다 앞선다.
     assert content.index("(참고: 팀원 초대 방법)") < content.index("아직 조직 상태 조회 기능이 연결되지 않았습니다")
+
+
+async def test_knowledge_fiction_guard_fires_on_model_raw_text_not_on_assembled_replacement(
+    client, fake_llm, db_engine, monkeypatch
+):
+    """story #3270 조건① 카디르 QA 뮤테이션 보강(2026-09-01) — handle_turn을 실제로 태우는
+    가드-순서-의존성 pin. app/interaction.py의 code-조립 대체 블록을 두 가드보다 *앞*으로
+    옮기는 뮤테이션은 위쪽의 test_knowledge_guard_blocks_fabrication_when_called_but_no_match
+    하나만으로는 안전하게 안 잡힌다는 것을 직접 실측 확認했다 — `NO_MATCH_MESSAGE` 원문
+    자체가 "…찾지 못했습니다"+"담당자에게 연결해…" 어휘를 담고 있어 no_fiction_guard의
+    handoff-claim 패턴(app/no_fiction_guard.py)에 우연히 걸린다. 그래서 뮤테이션 하에서도
+    `escalated`는 여전히 True로 남는다 — **다만 no_fiction_guard가 knowledge_fiction_guard
+    대신 잘못 발화한 것**(reply_text가 이미 code-조립으로 NO_MATCH_MESSAGE로 바뀐 뒤라야
+    벌어지는 일 — 원래 순서라면 두 가드는 항상 모델의 원문만 본다). 그래서 이 테스트는
+    `escalated is True`만으론 부족하고, "어느 가드가·왜 발화했는지"(SupportExecutionLog의
+    task_type, 정확히 knowledge_fiction_guard 1건뿐 — no_fiction_guard 0건)까지 구조적으로
+    확인한다: 순서가 뒤집히면 이 assertion들이 깨진다(no_fiction_guard가 대신 발화하거나,
+    knowledge_fiction_guard 자체가 아예 발화하지 않는다)."""
+    _patch_search_no_match(monkeypatch)
+    fake_llm.classify_text = "inquiry"
+    fake_llm.call_tool_name = "knowledge_search"
+    fake_llm.call_tool_kwargs = {"query": "팀원을 초대하려면?"}
+    fake_llm.interaction_text = _FABRICATED_TEXT
+
+    resp = await _post_message(client)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is True
+    assert body["agent_message"]["content"] == KNOWLEDGE_FALLBACK_REPLY
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        escalations = (await session.execute(select(SupportEscalation))).scalars().all()
+        assert len(escalations) == 1
+        assert escalations[0].reason == "knowledge_fiction_guard"  # no_fiction_guard가 아니라 정확히 이 가드.
+
+        logs = (await session.execute(select(SupportExecutionLog))).scalars().all()
+        task_types = [log.task_type for log in logs]
+        assert task_types.count("knowledge_fiction_guard") == 1
+        assert task_types.count("no_fiction_guard") == 0  # 뮤테이션 하에서만 여기가 1이 된다.
