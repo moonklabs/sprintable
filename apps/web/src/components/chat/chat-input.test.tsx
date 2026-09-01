@@ -10,6 +10,13 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatInput } from './chat-input';
 
+// story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — kanban-board.test.tsx와 동형 mock.
+// orgId를 안 주면(기본 beforeEach) useOrgDomainLabels가 no-op이라 기존 44개 테스트는 무회귀.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function withIntl(node: React.ReactNode) {
@@ -44,6 +51,7 @@ let root: Root;
 beforeEach(() => {
   stubLocalStorage();
   stubMatchMedia(false); // 기본은 데스크톱(포인터 정밀) — AC1 대상
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -238,6 +246,77 @@ describe('ChatInput — `#` 엔티티 피커 종류별 그룹화(story #2263 ㉠
     const listbox = container.querySelector('[role="listbox"]');
     expect(listbox!.textContent).toContain('검토 중');
     expect(listbox!.textContent).not.toContain('in-review');
+  });
+});
+
+// story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — 「네비」 실측 결과 사이드바/브레드크럼엔
+// entity_type 렌더지점이 없고, 실제 렌더처가 이 `#` 엔티티 피커였다(kanban-board.test.tsx
+// #3287 AC4와 동형 처방 — 참조 코어 chat-input-entity-tokens.ts는 diff 0, 여기서만 얹는다).
+describe('ChatInput — org 엔티티명 라벨 오버라이드(story #3289 AC2)', () => {
+  function stubFetchWithDomainLabels(
+    entities: Array<{ entity_type: string; entity_id: string; title: string; status: string | null }>,
+    labels: Array<{ domain: string; canonical_slug: string; label_ko: string | null; label_en: string | null }>,
+  ) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({ data: entities }));
+      }
+      if (typeof url === 'string' && url.includes('/domain-labels')) {
+        return new Response(JSON.stringify(labels));
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+  }
+
+  it('오버라이드 없는 org(빈 목록)면 canonical entityTypeLabel() 그대로("스토리", 회귀 0)', async () => {
+    stubFetchWithDomainLabels(
+      [{ entity_type: 'story', entity_id: 's1', title: '스토리 하나', status: null }],
+      [],
+    );
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
+
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" projectId="p1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox!.textContent).toContain('스토리');
+  });
+
+  it('org가 story 라벨을 오버라이드하면 `#` 피커 그룹 헤더가 그 문구로 바뀐다', async () => {
+    // 제목 자체에 "스토리" 문자열이 없어야 group-header 텍스트만 정확히 잰다(entity.title은
+    // 자유 텍스트라 우연히 겹치면 assertion이 오염된다).
+    stubFetchWithDomainLabels(
+      [{ entity_type: 'story', entity_id: 's1', title: '표시용 제목', status: null }],
+      [{ domain: 'entity_type', canonical_slug: 'story', label_ko: '작업건', label_en: null }],
+    );
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
+
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" projectId="p1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // domain-labels 조회(useOrgDomainLabels)와 entity 검색(useEntityPicker, 200ms 디바운스)이
+    // 둘 다 흐를 시간을 준다.
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox!.textContent).toContain('작업건');
+    expect(listbox!.textContent).not.toContain('스토리');
   });
 });
 

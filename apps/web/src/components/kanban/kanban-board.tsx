@@ -1798,6 +1798,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           tasks={storyTasks}
           memberMap={memberMap}
           members={members}
+          getStatusLabel={domainLabels.statusLabel}
+          getEntityTypeLabel={domainLabels.entityTypeLabel}
           nextTasksCursor={storyTasksNextCursor}
           loadingMoreTasks={loadingMoreStoryTasks}
           onLoadMoreTasks={async () => {

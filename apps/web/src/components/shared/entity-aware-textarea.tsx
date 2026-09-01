@@ -17,6 +17,11 @@ interface EntityAwareTextareaProps {
   className?: string;
   autoFocus?: boolean;
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /** story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — org 엔티티명 라벨 오버라이드
+   * (useOrgDomainLabels().entityTypeLabel), story-card.tsx의 getStatusLabel과 동형. 없으면
+   * chat-input-entity-tokens.ts의 canonical entityTypeLabel() 그대로(회귀 0). 참조 코어
+   * 파일(chat-input-entity-tokens.ts) 자체는 diff 0 규율(#2264 AC3)이라 여기 소비처에서만 얹는다. */
+  getEntityTypeLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 /**
@@ -25,7 +30,7 @@ interface EntityAwareTextareaProps {
  * use-entity-picker.ts, 이 파일은 그 위의 얇은 렌더 래퍼 — chat-input.tsx의 entity dropdown
  * JSX를 그대로 재사용). story description/AC(story-detail-panel.tsx)가 첫 소비자.
  */
-export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste }: EntityAwareTextareaProps) {
+export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste, getEntityTypeLabel }: EntityAwareTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const entityPicker = useEntityPicker(projectId);
 
@@ -88,7 +93,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
                   <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {entityTypeLabel(entity.entity_type)}
+                    {getEntityTypeLabel?.(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}
                 {/* ⛔focus-outset을 일부러 안 붙인다(PO 확認, 2026-07-28) — 이 하이라이트(bg-accent)는
