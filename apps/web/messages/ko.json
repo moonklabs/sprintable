@@ -4449,6 +4449,7 @@
     "conversationListEmpty": "아직 이전 상담이 없습니다",
     "conversationActiveBadge": "진행 중",
     "conversationEndedBanner": "이 상담은 종료되었습니다. 계속하려면 새 상담을 시작해 주세요.",
-    "endConversation": "상담 종료"
+    "endConversation": "상담 종료",
+    "operatorSenderLabel": "상담원"
   }
 }

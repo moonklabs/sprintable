@@ -14,7 +14,10 @@ export interface GatewaySession {
 export interface GatewayMessage {
   id: string;
   conversation_id: string;
-  role: 'customer' | 'agent';
+  // story #3279(지원v1·후속) — 'operator'는 사람 운영자가 결재 카드 스레드 답장으로 보낸
+  // 회신(support-gateway PR#3672 착지점, backend PR#3673 배달 훅). AI 'agent' 응답과
+  // 발신자 축 자체가 다르다(자동 응대 vs 사람 개입) — 위젯이 구분 렌더해야 한다.
+  role: 'customer' | 'agent' | 'operator';
   content: string;
   created_at: string;
 }

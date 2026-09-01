@@ -212,10 +212,25 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
           session.messages.map((m) => (
             <div
               key={m.id}
+              data-role={m.role}
               className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
-                m.role === 'user' ? 'ml-auto bg-proof-blue-soft text-foreground' : 'bg-muted text-foreground'
+                m.role === 'user'
+                  ? 'ml-auto bg-proof-blue-soft text-foreground'
+                  // story #3279 — operator(사람 운영자 실 회신)는 agent(AI 자동응대)와 같은
+                  // bg-muted를 쓰되 좌측 강조 보더로 시각 축을 분리한다(발신자가 다르다는
+                  // 신호 — no-fiction 원칙의 렌더 축 대응물: "누가 답했는지"도 지어내면
+                  // 안 된다).
+                  : m.role === 'operator'
+                    ? 'border-l-2 border-l-primary bg-muted text-foreground'
+                    : 'bg-muted text-foreground'
               } ${m.pending ? 'opacity-60' : ''} ${m.failed ? 'border border-destructive/50' : ''}`}
             >
+              {m.role === 'operator' ? (
+                <p className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-foreground">
+                  <UserRound className="h-3 w-3" aria-hidden />
+                  {t('operatorSenderLabel')}
+                </p>
+              ) : null}
               {m.content}
               {m.escalated ? (
                 <p className="mt-1 text-[10px] font-medium text-muted-foreground">{t('escalatedBadge')}</p>

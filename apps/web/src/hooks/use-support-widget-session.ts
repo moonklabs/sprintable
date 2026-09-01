@@ -31,7 +31,10 @@ export type SupportWidgetStatus = 'unavailable' | 'connecting' | 'ready' | 'erro
 
 export interface SupportWidgetMessage {
   id: string;
-  role: 'user' | 'agent';
+  // story #3279(지원v1·후속) — 'operator'는 사람 운영자의 실 회신(GatewayMessage.role
+  // 'operator' 그대로 통과, agent와 값을 안 합친다 — 패널이 이 값으로 "상담원" 라벨을
+  // 구분 렌더한다).
+  role: 'user' | 'agent' | 'operator';
   content: string;
   createdAt: string;
   /** agent 메시지 전용 — Gateway가 사람에게 연결했다는 뜻(무신호 아님, 항상 진짜 안내
@@ -83,9 +86,13 @@ export interface SupportWidgetSession {
 }
 
 function toWidgetMessage(m: GatewayMessage): SupportWidgetMessage {
+  // story #3279 — 'operator'는 'agent'로 뭉개지 않고 그대로 통과시킨다(예전엔 role !==
+  // 'customer'면 전부 'agent'였다 — 이 map을 안 고쳤으면 operator 회신이 조용히 AI 응답
+  // 행세를 했을 것, 페드루 PO가 명시로 짚은 자리).
+  const role = m.role === 'customer' ? 'user' : m.role === 'operator' ? 'operator' : 'agent';
   return {
     id: m.id,
-    role: m.role === 'customer' ? 'user' : 'agent',
+    role,
     content: m.content,
     createdAt: m.created_at,
   };

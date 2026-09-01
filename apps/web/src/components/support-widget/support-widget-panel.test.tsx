@@ -170,4 +170,36 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
       expect(btn).toBeUndefined();
     });
   });
+
+  describe('story #3279 — 운영자 회신 발신자 구분 렌더', () => {
+    it('role="operator" 메시지는 "상담원" 라벨을 보인다', async () => {
+      await mount(baseSession({
+        messages: [{ id: 'op1', role: 'operator', content: '확인했습니다, 답변드릴게요.', createdAt: 't' }],
+      }));
+      expect(container.textContent).toContain(koMessages.supportWidget.operatorSenderLabel);
+      expect(container.textContent).toContain('확인했습니다, 답변드릴게요.');
+    });
+
+    it('role="agent"(AI 자동응대) 메시지는 "상담원" 라벨을 안 보인다(발신자 축이 다르다는 것을 실측)', async () => {
+      await mount(baseSession({
+        messages: [{ id: 'ag1', role: 'agent', content: 'AI 자동 응답입니다.', createdAt: 't' }],
+      }));
+      expect(container.textContent).not.toContain(koMessages.supportWidget.operatorSenderLabel);
+    });
+
+    it('한 대화 안에 operator·agent 메시지가 섞여도 각자 정확히 자기 라벨만 보인다', async () => {
+      await mount(baseSession({
+        messages: [
+          { id: 'ag1', role: 'agent', content: 'AI가 먼저 응대', createdAt: 't1' },
+          { id: 'op1', role: 'operator', content: '운영자가 이어서 답변', createdAt: 't2' },
+        ],
+      }));
+      const opBubble = container.querySelector('[data-role="operator"]');
+      const agBubble = container.querySelector('[data-role="agent"]');
+      expect(opBubble?.textContent).toContain(koMessages.supportWidget.operatorSenderLabel);
+      expect(opBubble?.textContent).toContain('운영자가 이어서 답변');
+      expect(agBubble?.textContent).not.toContain(koMessages.supportWidget.operatorSenderLabel);
+      expect(agBubble?.textContent).toContain('AI가 먼저 응대');
+    });
+  });
 });
