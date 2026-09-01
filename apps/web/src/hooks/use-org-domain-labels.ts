@@ -27,9 +27,18 @@ export interface OrgDomainLabels {
   loading: boolean;
 }
 
+// 유나 design:changes(PR#3687, 2026-09-01) — 빈 문자열("")은 null이 아니라 값이 있는
+// 것으로 취급돼 그대로 반환됐다(?? 는 null/undefined만 거름). 소비처(kanban-board 등)의
+// `statusLabel(...) ?? t(...)` 폴백도 ""는 값으로 보고 폴백 안 타 헤더/배지가 빈칸으로
+// 렌더됐을 것 — trim 후 빈 값이면 undefined로 정규화해 canonical 폴백이 항상 뜨게 한다.
+function normalizeLabel(value: string | null): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function pickLocaleLabel(entry: DomainLabelEntry, locale: string): string | undefined {
-  const preferred = locale.startsWith('ko') ? entry.label_ko : entry.label_en;
-  return preferred ?? entry.label_ko ?? entry.label_en ?? undefined;
+  const preferred = normalizeLabel(locale.startsWith('ko') ? entry.label_ko : entry.label_en);
+  return preferred ?? normalizeLabel(entry.label_ko) ?? normalizeLabel(entry.label_en);
 }
 
 /** orgId가 없으면(아직 로딩 중 등) 빈 오버라이드 — 전부 폴백(회귀 0). locale은 next-intl의

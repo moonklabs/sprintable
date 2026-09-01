@@ -95,6 +95,31 @@ describe('useOrgDomainLabels — 라벨 API 인덱싱+로케일 선택(#3287 AC4
     expect(el.dataset.statusDone).toBe('완료'); // en 없음 → ko 폴백
   });
 
+  // 유나 design:changes(PR#3687, 2026-09-01) — 빈 문자열("")은 null이 아니라서 예전
+  // `preferred ?? entry.label_ko ?? entry.label_en`이 그대로 반환해 소비처의
+  // `statusLabel(...) ?? t(...)` 폴백도 안 타 헤더/배지가 빈칸으로 렌더될 뻔했다.
+  it('빈 문자열 라벨("")은 값이 아니라 undefined로 취급된다(canonical 폴백 트리거)', async () => {
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { domain: 'status', canonical_slug: 'backlog', label_ko: '', label_en: 'Idea' },
+        { domain: 'status', canonical_slug: 'done', label_ko: '   ', label_en: null },
+      ],
+    });
+
+    await act(async () => {
+      root.render(<Harness orgId="org-1" locale="ko" />);
+    });
+    await flush();
+
+    const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
+    // ko 우선인데 label_ko=""(빈 값) — label_en('Idea')로 폴백해야 한다(빈 문자열을
+    // "설정된 라벨"로 오인해 그대로 반환하면 안 됨).
+    expect(el.dataset.statusBacklog).toBe('Idea');
+    // label_ko가 공백뿐이고 label_en도 없음 — 둘 다 무효라 완전히 undefined(canonical 폴백).
+    expect(el.dataset.statusDone).toBe('');
+  });
+
   it('orgId가 없으면 fetch 자체를 호출하지 않고(불필요 네트워크 0) 전부 undefined다', async () => {
     await act(async () => {
       root.render(<Harness orgId={undefined} locale="ko" />);

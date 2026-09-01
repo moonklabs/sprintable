@@ -166,11 +166,15 @@ export function KanbanColumn({
             <>
               {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩
                   (Heading 무게, sans 유지 — 한글이라 caps/mono 금지). 크기(text-xs)는 불변. */}
-              <h3 className="flex items-center gap-2 text-xs font-extrabold text-foreground">
+              {/* 유나 design:changes(PR#3687, 2026-09-01) — org 커스텀 라벨은 길이가
+                  자유(«아이디어 검토 대기열»)라 고정폭 컬럼(w-[280px])에서 wip 카운트·
+                  버튼을 밀어낼 수 있었다. h3에 min-w-0(flex item이 컨텐츠 크기로
+                  안 밀어붙이게)+텍스트 자체에 truncate, 잘려도 title로 전체 문구 확인. */}
+              <h3 className="flex min-w-0 items-center gap-2 text-xs font-extrabold text-foreground">
                 <span className={`size-1.5 shrink-0 rounded-full ${statusColor.dot}`} aria-hidden="true" />
-                {label}
+                <span className="truncate" title={label}>{label}</span>
               </h3>
-              <div className="flex items-center gap-1.5">
+              <div className="flex shrink-0 items-center gap-1.5">
                 {/* AC1: WIP 초과 배지 */}
                 {wipExceeded && (
                   <Badge variant="destructive" className="text-[10px]">

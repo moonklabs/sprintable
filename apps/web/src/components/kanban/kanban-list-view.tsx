@@ -61,10 +61,13 @@ function StatusGroup({
         onClick={() => setExpanded((p) => !p)}
       >
         {expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
-        <span>{label}</span>
+        {/* 유나 design:changes(PR#3687, 2026-09-01) — kanban-column.tsx L169과 동일 구조
+            (label→CountBadge 밀어내기 위험). min-w-0+truncate로 긴 org 라벨을 흡수,
+            title로 전체 문구 확인. */}
+        <span className="min-w-0 truncate" title={label}>{label}</span>
         {/* story #3050(2984-S2, 유나 design PASS 비차단 finding) — CountBadge(S1) 채택,
             bg-muted 채움 폐지. */}
-        <CountBadge count={stories.length} className="ml-auto" />
+        <CountBadge count={stories.length} className="ml-auto shrink-0" />
       </button>
 
       {expanded && (
