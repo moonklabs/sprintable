@@ -52,7 +52,9 @@ async def _seed_org(session, *, slug: str, name: str):
     return org.id
 
 
-async def _seed_support_escalation_gate(session, *, org_id, escalation_id: uuid.UUID | None):
+async def _seed_support_escalation_gate(
+    session, *, org_id, escalation_id: uuid.UUID | None, designated_approver_id: uuid.UUID | None
+):
     """create_gate()를 직접 부르지 않고 Gate 행 자체의 실 컬럼만 심는다(member_id/role_id/
     project_id는 Gate 모델의 컬럼이 아니다 — create_gate() 서비스 함수의 파라미터일 뿐,
     다른 테이블/관계로 해소된다). 이 테스트는 게이트 *생성* 경로(test_3263가 이미 커버)가
@@ -71,6 +73,7 @@ async def _seed_support_escalation_gate(session, *, org_id, escalation_id: uuid.
         gate_type="support_escalation_review",
         status="pending",
         neutral_facts=neutral_facts,
+        designated_approver_id=designated_approver_id,
     )
     session.add(gate)
     await session.commit()
@@ -84,16 +87,21 @@ async def test_deliver_operator_reply_for_gate_resolves_escalation_id_and_delega
     engine, Session = await _session_factory()
     try:
         org_slug = f"org-{uuid.uuid4().hex[:8]}"
+        approver_id = uuid.uuid4()
         async with Session() as s:
             org_id = await _seed_org(s, slug=org_slug, name="테스트 조직")
             escalation_id = uuid.uuid4()
-            gate_id = await _seed_support_escalation_gate(s, org_id=org_id, escalation_id=escalation_id)
+            gate_id = await _seed_support_escalation_gate(
+                s, org_id=org_id, escalation_id=escalation_id, designated_approver_id=approver_id
+            )
 
         monkeypatch.setattr("app.core.database.async_session_factory", Session)
         delegate = AsyncMock(return_value=True)
         monkeypatch.setattr(mod, "deliver_operator_reply", delegate)
 
-        result = await mod.deliver_operator_reply_for_gate(gate_id=gate_id, content="답변 내용입니다.")
+        result = await mod.deliver_operator_reply_for_gate(
+            gate_id=gate_id, content="답변 내용입니다.", sender_id=approver_id
+        )
 
         assert result is True
         delegate.assert_awaited_once_with(escalation_id=escalation_id, content="답변 내용입니다.")
@@ -110,15 +118,18 @@ async def test_deliver_operator_reply_for_gate_missing_escalation_id_skips(monke
     engine, Session = await _session_factory()
     try:
         org_slug = f"org-{uuid.uuid4().hex[:8]}"
+        approver_id = uuid.uuid4()
         async with Session() as s:
             org_id = await _seed_org(s, slug=org_slug, name="테스트 조직")
-            gate_id = await _seed_support_escalation_gate(s, org_id=org_id, escalation_id=None)
+            gate_id = await _seed_support_escalation_gate(
+                s, org_id=org_id, escalation_id=None, designated_approver_id=approver_id
+            )
 
         monkeypatch.setattr("app.core.database.async_session_factory", Session)
         delegate = AsyncMock(return_value=True)
         monkeypatch.setattr(mod, "deliver_operator_reply", delegate)
 
-        result = await mod.deliver_operator_reply_for_gate(gate_id=gate_id, content="x")
+        result = await mod.deliver_operator_reply_for_gate(gate_id=gate_id, content="x", sender_id=approver_id)
 
         assert result is False
         delegate.assert_not_awaited()
@@ -136,7 +147,9 @@ async def test_deliver_operator_reply_for_gate_unknown_gate_id_skips(monkeypatch
         delegate = AsyncMock(return_value=True)
         monkeypatch.setattr(mod, "deliver_operator_reply", delegate)
 
-        result = await mod.deliver_operator_reply_for_gate(gate_id=uuid.uuid4(), content="x")
+        result = await mod.deliver_operator_reply_for_gate(
+            gate_id=uuid.uuid4(), content="x", sender_id=uuid.uuid4()
+        )
 
         assert result is False
         delegate.assert_not_awaited()
@@ -154,6 +167,7 @@ async def test_deliver_operator_reply_for_gate_non_support_escalation_gate_skips
     engine, Session = await _session_factory()
     try:
         org_slug = f"org-{uuid.uuid4().hex[:8]}"
+        approver_id = uuid.uuid4()
         async with Session() as s:
             org_id = await _seed_org(s, slug=org_slug, name="테스트 조직")
             gate_id = uuid.uuid4()
@@ -161,6 +175,7 @@ async def test_deliver_operator_reply_for_gate_non_support_escalation_gate_skips
                 id=gate_id, org_id=org_id, work_item_id=gate_id,
                 work_item_type="doc", gate_type="doc_review", status="pending",
                 neutral_facts={"support_escalation_id": str(uuid.uuid4())},
+                designated_approver_id=approver_id,
             ))
             await s.commit()
 
@@ -168,7 +183,100 @@ async def test_deliver_operator_reply_for_gate_non_support_escalation_gate_skips
         delegate = AsyncMock(return_value=True)
         monkeypatch.setattr(mod, "deliver_operator_reply", delegate)
 
-        result = await mod.deliver_operator_reply_for_gate(gate_id=gate_id, content="x")
+        result = await mod.deliver_operator_reply_for_gate(gate_id=gate_id, content="x", sender_id=approver_id)
+
+        assert result is False
+        delegate.assert_not_awaited()
+    finally:
+        await engine.dispose()
+
+
+# --- 카디르 QA ⑥축(2026-09-01) — sender_id ↔ designated_approver_id 대조 -------------------
+
+
+@pytest.mark.anyio
+async def test_deliver_operator_reply_for_gate_authorized_sender_delivers(monkeypatch):
+    """지정 승인자 본인의 답장 — 정상 배달(회귀 확認, 위 성공 케이스와 별개로 "권한 대조를
+    통과한 정상 경로"라는 관점에서 한 번 더 고정)."""
+    from app.services import operator_reply_delivery as mod
+
+    engine, Session = await _session_factory()
+    try:
+        approver_id = uuid.uuid4()
+        async with Session() as s:
+            org_id = await _seed_org(s, slug=f"org-{uuid.uuid4().hex[:8]}", name="테스트 조직")
+            escalation_id = uuid.uuid4()
+            gate_id = await _seed_support_escalation_gate(
+                s, org_id=org_id, escalation_id=escalation_id, designated_approver_id=approver_id
+            )
+
+        monkeypatch.setattr("app.core.database.async_session_factory", Session)
+        delegate = AsyncMock(return_value=True)
+        monkeypatch.setattr(mod, "deliver_operator_reply", delegate)
+
+        result = await mod.deliver_operator_reply_for_gate(gate_id=gate_id, content="본인 답장", sender_id=approver_id)
+
+        assert result is True
+        delegate.assert_awaited_once()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_deliver_operator_reply_for_gate_unauthorized_sender_skips_loudly(monkeypatch, caplog):
+    """⭐카디르 QA ⑥축 실 finding pin(2026-09-01) — 프로젝트 접근권 있는 아무 휴먼(지정
+    승인자가 아닌 사람)의 스레드 답장은 고객에게 절대 배달되면 안 된다. 조용한 드롭이
+    아니라 경고 로그로 소리내야 한다(진단 가능성 — "왜 답장이 고객한테 안 갔지")."""
+    import logging
+
+    from app.services import operator_reply_delivery as mod
+
+    engine, Session = await _session_factory()
+    try:
+        approver_id = uuid.uuid4()
+        random_project_member_id = uuid.uuid4()  # 지정 승인자가 아닌 제3자.
+        async with Session() as s:
+            org_id = await _seed_org(s, slug=f"org-{uuid.uuid4().hex[:8]}", name="테스트 조직")
+            gate_id = await _seed_support_escalation_gate(
+                s, org_id=org_id, escalation_id=uuid.uuid4(), designated_approver_id=approver_id
+            )
+
+        monkeypatch.setattr("app.core.database.async_session_factory", Session)
+        delegate = AsyncMock(return_value=True)
+        monkeypatch.setattr(mod, "deliver_operator_reply", delegate)
+
+        with caplog.at_level(logging.WARNING, logger="app.services.operator_reply_delivery"):
+            result = await mod.deliver_operator_reply_for_gate(
+                gate_id=gate_id, content="비승인자가 쓴 답장", sender_id=random_project_member_id
+            )
+
+        assert result is False
+        delegate.assert_not_awaited()  # 고객에게 절대 안 나간다 — 핵심 단언.
+        assert any("not the designated approver" in r.message for r in caplog.records)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_deliver_operator_reply_for_gate_no_designated_approver_fails_closed(monkeypatch):
+    """designated_approver_id 자체가 None(v1 예상 밖 상태 — support_gateway_token.py 발급
+    경로는 항상 채우지만, 방어적으로) — "아무나 허용"이 아니라 "전부 거부"(feedback_
+    actor_type_failclosed와 동형 원칙)."""
+    from app.services import operator_reply_delivery as mod
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s, slug=f"org-{uuid.uuid4().hex[:8]}", name="테스트 조직")
+            gate_id = await _seed_support_escalation_gate(
+                s, org_id=org_id, escalation_id=uuid.uuid4(), designated_approver_id=None
+            )
+
+        monkeypatch.setattr("app.core.database.async_session_factory", Session)
+        delegate = AsyncMock(return_value=True)
+        monkeypatch.setattr(mod, "deliver_operator_reply", delegate)
+
+        result = await mod.deliver_operator_reply_for_gate(gate_id=gate_id, content="x", sender_id=uuid.uuid4())
 
         assert result is False
         delegate.assert_not_awaited()

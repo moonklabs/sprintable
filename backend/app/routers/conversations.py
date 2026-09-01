@@ -3083,11 +3083,18 @@ async def send_message(
     # task — 배달 실패가 이 챗 전송 자체를 절대 안 깨뜨린다). ⛔카드 최상위(스레드 아닌)
     # 텍스트 답은 이 분기를 안 탄다 — approval_delivery.py의 기존 정책("챗 텍스트는 게이트를
     # 해소하지 않는다 — 카드 액션만 유효")과 별개 트리거라 그 정책을 안 건드린다.
+    # ⚠️카디르 QA ⑥축(2026-09-01) — sender_id를 반드시 넘긴다. deliver_operator_reply_for_gate가
+    # Gate.designated_approver_id와 대조해 비승인자 답장을 소리내며 거부한다(조용한 드롭 금지
+    # — "카드가 audience 한정이라 비승인자는 애초에 답장을 못 쓴다"는 가정이 배달 층에선
+    # 틀렸었다, 프로젝트 접근권 있는 아무 휴먼이 이 DM에 스레드 답장을 쓸 수 있었다).
     operator_reply_gate_id = _operator_reply_target_gate_id(root_msg)
     if operator_reply_gate_id is not None:
         from app.services.operator_reply_delivery import deliver_operator_reply_for_gate
         background_tasks.add_task(
-            deliver_operator_reply_for_gate, gate_id=operator_reply_gate_id, content=body.content
+            deliver_operator_reply_for_gate,
+            gate_id=operator_reply_gate_id,
+            content=body.content,
+            sender_id=sender.id,
         )
 
     # S-COMM-12 AC1: agent 답신 시 해당 conversation의 최근 gateway_accepted delivery → agent_replied

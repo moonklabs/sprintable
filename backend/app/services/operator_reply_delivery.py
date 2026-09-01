@@ -30,14 +30,22 @@ OPERATOR_REPLY_AUD = "support-gateway:operator-reply"
 _DELIVERY_TOKEN_TTL_SECONDS = 60
 
 
-async def deliver_operator_reply_for_gate(*, gate_id: uuid.UUID, content: str) -> bool:
+async def deliver_operator_reply_for_gate(*, gate_id: uuid.UUID, content: str, sender_id: uuid.UUID) -> bool:
     """카드가 가리키는 gate의 neutral_facts에서 support_escalation_id를 역참조해 배달한다.
 
     호출부(conversations.py::send_message)는 "이 스레드 답장의 부모 메시지가 support
-    카드"까지만 확認하고 gate_id를 넘긴다 — 그 게이트가 실제로 지금도 유효한
-    support_escalation 게이트인지는 여기서 정본(Gate 행)을 다시 읽어 확定한다(부모 메시지의
-    msg_metadata는 카드 배달 시점의 스냅샷이라, 그 사이 게이트가 삭제/변조됐을 가능성까지
-    이 함수가 한 번 더 닫는다)."""
+    카드"까지만 확認하고 gate_id·sender_id를 넘긴다 — 그 게이트가 실제로 지금도 유효한
+    support_escalation 게이트인지·**이 답장을 쓴 사람이 실제로 그 게이트의 지정 승인자인지**
+    는 여기서 정본(Gate 행)을 다시 읽어 확定한다(부모 메시지의 msg_metadata는 카드 배달
+    시점의 스냅샷이라, 그 사이 게이트가 삭제/변조됐을 가능성까지 이 함수가 한 번 더 닫는다).
+
+    ⚠️story #3279 카디르 QA ⑥축 실 finding(2026-09-01, 페드루 PO 자인) — 최초 구현은
+    sender를 전혀 안 봐서, 프로젝트 접근권 있는 아무 휴먼의 스레드 답장이 고객에게
+    "운영자 회신"으로 배달됐다("카드가 audience 한정이라 비승인자는 답장 자체가 안 된다"는
+    가정이 배달 층에선 틀렸다 — non-DM 자동 join까지 겹치면 도달 표면이 넓다). v1은 단일
+    승인자 모델(story #2985 designated_approver_id) 그대로 유지 — 대조 실패는 조용한 드롭이
+    아니라 **소리내는** 스킵(경고 로그, reason 명시)이어야 나중에 "왜 답장이 고객한테
+    안 갔지"를 진단할 수 있다."""
     from sqlalchemy import select
 
     from app.core.database import async_session_factory
@@ -47,6 +55,13 @@ async def deliver_operator_reply_for_gate(*, gate_id: uuid.UUID, content: str) -
         gate = (await db.execute(select(Gate).where(Gate.id == gate_id))).scalar_one_or_none()
         if gate is None or gate.work_item_type != "support_escalation":
             logger.warning("operator reply skip — gate_id=%s not a support_escalation gate", gate_id)
+            return False
+        if gate.designated_approver_id is None or gate.designated_approver_id != sender_id:
+            logger.warning(
+                "operator reply skip — gate_id=%s sender_id=%s is not the designated approver "
+                "(designated_approver_id=%s) — unauthorized reply attempt, dropped loudly not silently",
+                gate_id, sender_id, gate.designated_approver_id,
+            )
             return False
         escalation_id_raw = (gate.neutral_facts or {}).get("support_escalation_id")
         if not escalation_id_raw:
