@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ActivationChecklistBanner } from './activation-checklist-banner';
+import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 
 // story #3201 — useDashboardContext(projectId)·useRouter 신규 의존성. storage-capacity-
 // banner.test.tsx와 동일 패턴(실 dashboard-shell.tsx 전체 모듈 그래프를 끌어들이지 않음).
@@ -50,6 +51,7 @@ beforeEach(() => {
   stubStorages();
   routerPushMock.mockClear();
   createFirstInstructionConversationMock.mockReset();
+  _resetActivationStatusCacheForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
