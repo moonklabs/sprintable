@@ -156,6 +156,11 @@ _DECLARED_SUBSTITUTIONS = {
     # 직접 참조.
     "_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID", "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID",
     "_SUPPORT_ESCALATION_TARGET_ORG_SLUG", "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG",
+    # story #3279(지원v1·후속) — 운영자 회신 배달 착지 URL. _NEXT_PUBLIC_SUPPORT_GATEWAY_URL은
+    # 이전엔 deploy-frontend(순수 gcloud args 리스트 — 이 가드가 스캔하는 4개 bash 스텝 밖)
+    # 에서만 쓰여 이 목록에 없어도 무해했으나(_APPLE_TEAM_ID와 동형 선례), deploy-backend
+    # 쪽으로도 재사용하며 처음 걸린다.
+    "_NEXT_PUBLIC_SUPPORT_GATEWAY_URL",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -196,7 +201,9 @@ def _apply_cloudbuild_escaping(script: str) -> str:
     return script.replace("$$", "$")
 
 
-def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str = "") -> str:
+def _run_env_vars_assembly(
+    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = ""
+) -> str:
     """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
     script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
     # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
@@ -248,6 +255,10 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID": "",
         "_SUPPORT_ESCALATION_TARGET_ORG_SLUG": "moonklabs",
         "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG": "sprintable",
+        # story #3279 — GOTENBERG_SERVICE_URL과 동일 이유(set -u라 미설정이면 스크립트가
+        # 죽는다). 기본 빈 문자열(substitutions 기본값과 정합 — gateway 자체가 아직
+        # dev 전용 프로비저닝이라 prod엔 이 값이 없다).
+        "_NEXT_PUBLIC_SUPPORT_GATEWAY_URL": support_gateway_url,
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -448,6 +459,35 @@ def test_deploy_backend_prod_excludes_gotenberg_service_url_even_when_set():
         "prod", "", gotenberg_url="https://office-converter-dev.example.run.app"
     )
     assert "GOTENBERG_SERVICE_URL" not in result
+
+
+def test_deploy_backend_includes_support_gateway_operator_reply_url_when_set():
+    """story #3279 — support-gateway가 프로비저닝된 뒤(_NEXT_PUBLIC_SUPPORT_GATEWAY_URL
+    채워짐) 운영자 회신 착지 URL이 실린다(기존 값에 경로만 이어붙임)."""
+    result = _run_env_vars_assembly(
+        "dev", "redis://10.164.120.243:6379", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert (
+        "SUPPORT_GATEWAY_OPERATOR_REPLY_URL="
+        "https://support-gateway-dev.example.run.app/api/v1/internal/operator-replies"
+    ) in result
+
+
+def test_deploy_backend_excludes_support_gateway_operator_reply_url_when_unset():
+    """빈 값이면 키 자체를 안 싣는다(operator_reply_delivery.py가 미설정을 fail-closed로
+    처리하므로 이게 안전한 기본 상태 — GOTENBERG_SERVICE_URL과 동일 원칙)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", support_gateway_url="")
+    assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" not in result
+
+
+def test_deploy_backend_prod_excludes_support_gateway_operator_reply_url_even_when_set():
+    """GOTENBERG_SERVICE_URL의 prod 게이트 회귀(카디르 QA 2026-08-19)와 동일 클래스를
+    처음부터 막는다 — 값이 채워져 있어도 prod에서는 키 자체가 없어야 한다(support-gateway
+    자체가 아직 dev 전용 프로비저닝)."""
+    result = _run_env_vars_assembly(
+        "prod", "", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" not in result
 
 
 def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():

@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     support_gateway_token_secret: str = ""
     support_gateway_token_ttl_seconds: int = 300
 
+    # story #3279(지원v1·후속) — 운영자 회신 배달(backend→support-gateway). escalation_events
+    # 배달(gateway→backend, backend_escalation_events_url은 support-gateway 쪽 설정)의 반대
+    # 방향 — support-gateway/app/routers/operator_replies.py의 절대 URL. 미설정 시 배달을
+    # 정직하게 skip한다(app/services/operator_reply_delivery.py).
+    support_gateway_operator_reply_url: str = ""
+
     # story #3263(지원v1·5에스컬레이션) — 트랜잭셔널 메일의 "즉시 고객센터로 문의" 문구가
     # 실재하지 않는 표면(고객센터)을 가리키던 fiction 정정. 위젯(story #3260)이 dev에만 떠
     # 있고 prod는 아직 미노출(NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED)이라, 메일 카피가 위젯

@@ -216,4 +216,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # DM 배선 — 이 파일 상단 config.py 주석 참고)로 110→114. 가드가 신규 필드를 설계대로 잡은 것.
     assert "SUPPORT_ESCALATION_REQUESTER_MEMBER_ID" in keys and "SUPPORT_ESCALATION_APPROVER_MEMBER_ID" in keys
     assert "SUPPORT_ESCALATION_TARGET_ORG_SLUG" in keys and "SUPPORT_ESCALATION_TARGET_PROJECT_SLUG" in keys
-    assert len(keys) == 114
+    # story #3279(지원v1·후속, 2026-09-01): support_gateway_operator_reply_url 1필드 신설
+    # (운영자 회신 배달 — backend→support-gateway, escalation_delivery.py 반대 방향의
+    # 착지 URL. cloudbuild.yaml deploy-backend 스텝에서 기존 _NEXT_PUBLIC_SUPPORT_GATEWAY_URL
+    # substitution을 재사용해 배선, 시크릿은 이미 바인딩된 SUPPORT_GATEWAY_TOKEN_SECRET
+    # 재사용이라 신규 시크릿 불요)로 114→115. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" in keys
+    assert len(keys) == 115
