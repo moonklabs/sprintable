@@ -2034,6 +2034,68 @@ async def apply_recipe_role_bindings(
     return ApplyRecipeRoleBindingsResponse(ok=True, bindings_upserted=upserted)
 
 
+class RecipeRoleBindingsResponse(BaseModel):
+    bindings: dict[str, str]
+
+
+@router.get("/definitions/{definition_id}/bindings", response_model=RecipeRoleBindingsResponse)
+async def get_recipe_role_bindings(
+    definition_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> RecipeRoleBindingsResponse:
+    """GET /api/v2/events/definitions/{id}/bindings — story #3293(축2-ⓒ §B).
+
+    축2-ⓐ(apply, story #3288)는 쓰기(upsert)만 만들었다 — 갤러리 FE가 "이미 배정됨"
+    배지·기존 role_mapping 프리필을 하려면 이 read가 필요(doc
+    axis2c-gallery-migration-map-and-design §3-B). project_id 지정 시 그 project
+    특이성 바인딩이 org 전역보다 우선(event_routing_resolver.py의 조회 우선순위와
+    동형 — 여기도 그대로 병합해 "실제로 발행 시 어느 값이 쓰일지"와 일치하는 뷰를
+    보여준다). project_id 미지정 시 org 전역 바인딩만.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.project_auth import require_project_access
+
+    if project_id is not None:
+        await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.id == definition_id,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalar_one_or_none()
+    if definition is None:
+        raise HTTPException(status_code=404, detail="event definition not found")
+
+    # org 전역(project_id IS NULL) 먼저 채우고, project 특이성으로 덮어써 우선순위를
+    # 정확히 반영(project_scope_clause와 동형 우선순위, resolver의 실 조회 순서와 일치).
+    org_wide = (await db.execute(
+        select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id.is_(None),
+            RecipeRoleBinding.event_definition_key == definition.key,
+        )
+    )).all()
+    bindings: dict[str, str] = {stage: str(agent_id) for stage, agent_id in org_wide}
+
+    if project_id is not None:
+        project_scoped = (await db.execute(
+            select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id == project_id,
+                RecipeRoleBinding.event_definition_key == definition.key,
+            )
+        )).all()
+        for stage, agent_id in project_scoped:
+            bindings[stage] = str(agent_id)
+
+    return RecipeRoleBindingsResponse(bindings=bindings)
+
+
 class EventPublishHistoryItem(BaseModel):
     id: str
     conversation_id: str

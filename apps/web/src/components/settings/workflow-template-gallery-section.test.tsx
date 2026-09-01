@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 //
-// story #2501 — `data.detail`은 실 envelope({data,error,meta})에 없는 필드라 이 분기는
-// 항상 죽어있었다(그라운딩 확認 — backend apply_template()은 generic HTTP상태 코드만
-// 낸다) — 적용 실패 사유가 한 번도 화면에 안 뜨고 항상 '적용 실패'만 보여줬다.
-// `error.message`로 교정한 회귀가드.
+// story #3293(도메인탈고정 축2-ⓒ) — 구세대 workflow_templates 소비를 신세대
+// (EventDefinition/recipe_role_bindings, 축2-ⓐ story #3288) 이전에 맞춰 전면 재작성.
+// story #2501(error.message 분기)·#3010(elev-card 토큰) 회귀가드는 새 fetch 표면
+// (/api/events/definitions 계열)에 맞춰 그대로 보존.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -41,50 +41,55 @@ async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
-// role_ref가 있는 step이 하나도 없어 requiredSteps가 비고, "적용하기" 버튼이 role
-// 매핑 없이 바로 활성화된다 — 이 테스트가 검증하려는 건 apply 실패 응답 처리이지
-// 역할매핑 UI가 아니므로 최소 fixture로 그 표면만 자른다.
-const TEMPLATE = {
-  slug: 'tmpl-1',
-  name: '테스트 템플릿',
+const DEFINITION = {
+  id: 'def-1',
+  key: 'preset.test.recipe',
+  org_id: null,
+  name: '테스트 레시피',
   description: '설명',
-  chain_length: 1,
-  steps: [],
-  presets: {},
-  rules_template: [],
-  is_system: true,
+  payload_schema: { properties: { stage: { enum: ['step_1'] } } },
+  stage_metadata: {},
+  enabled: true,
 };
 
-describe('WorkflowTemplateGallerySection — error.code 분기 (story #2501)', () => {
+function stubFetch(overrides: Record<string, unknown> = {}) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+    if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+    if (url.includes('/api/events/definitions/def-1/bindings')) {
+      // step_1이 이미 배정돼 있어야 requiredStages 검증(빈 매핑 차단)을 통과하고
+      // 실제 apply fetch까지 도달한다 — 이 describe 블록의 관심사는 apply 실패
+      // 응답 렌더링이지 역할매핑 완결성 검증이 아니므로 최소 fixture로 그 표면만 자른다.
+      return { ok: true, json: async () => ({ bindings: { step_1: 'agent-1' } }) };
+    }
+    if (url === '/api/events/definitions/def-1/apply' && overrides['apply']) {
+      return overrides['apply'];
+    }
+    throw new Error('unexpected fetch: ' + url);
+  }));
+}
+
+describe('WorkflowTemplateGallerySection — error.message 분기 (story #2501 계승)', () => {
   it('적용 실패 사유가 raw "적용 실패" 폴백 대신 실 서버 메시지로 뜬다(핵심 회귀가드)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/workflow-templates' && !init) return { ok: true, json: async () => [TEMPLATE] };
-      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
-      if (url.includes('/api/v1/agent-routing-rules')) return { ok: true, json: async () => ({ data: [] }) };
-      if (url === '/api/workflow-templates/tmpl-1' && (!init || init.method === undefined)) {
-        return { ok: true, json: async () => TEMPLATE };
-      }
-      if (url === '/api/workflow-templates/tmpl-1/apply') {
-        return {
-          ok: false,
-          json: async () => ({
-            data: null,
-            error: { code: 'UNPROCESSABLE_ENTITY', message: 'agent(s) not found in this org: abc' },
-            meta: null,
-          }),
-        };
-      }
-      throw new Error('unexpected fetch: ' + url);
-    }));
+    stubFetch({
+      apply: {
+        ok: false,
+        json: async () => ({
+          data: null,
+          error: { code: 'UNPROCESSABLE_ENTITY', message: 'agent(s) not found in this org: abc' },
+          meta: null,
+        }),
+      },
+    });
 
     await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
     await flush();
 
-    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 템플릿'));
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
     await act(async () => { tmplBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '적용하기');
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '재적용(덮어쓰기)');
     expect(applyBtn).not.toBeUndefined();
     await act(async () => { applyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
@@ -94,27 +99,18 @@ describe('WorkflowTemplateGallerySection — error.code 분기 (story #2501)', (
   });
 
   it('backend가 error.message를 안 주면(네트워크 계층 등) 안전 폴백 "적용 실패"로 간다(회귀 없음)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/workflow-templates' && !init) return { ok: true, json: async () => [TEMPLATE] };
-      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
-      if (url.includes('/api/v1/agent-routing-rules')) return { ok: true, json: async () => ({ data: [] }) };
-      if (url === '/api/workflow-templates/tmpl-1' && (!init || init.method === undefined)) {
-        return { ok: true, json: async () => TEMPLATE };
-      }
-      if (url === '/api/workflow-templates/tmpl-1/apply') {
-        return { ok: false, json: async () => ({ data: null, error: {}, meta: null }) };
-      }
-      throw new Error('unexpected fetch: ' + url);
-    }));
+    stubFetch({
+      apply: { ok: false, json: async () => ({ data: null, error: {}, meta: null }) },
+    });
 
     await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
     await flush();
 
-    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 템플릿'));
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
     await act(async () => { tmplBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '적용하기');
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '재적용(덮어쓰기)');
     await act(async () => { applyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
@@ -125,18 +121,49 @@ describe('WorkflowTemplateGallerySection — error.code 분기 (story #2501)', (
 // story #3010(로드맵 P3, L1) — 선택 가능한 템플릿 카드는 인라인 카드라 --elev-card.
 describe('WorkflowTemplateGallerySection — 로드맵 P3 L1(템플릿 카드 elevation 토큰)', () => {
   it('템플릿 카드가 hover:shadow-[var(--elev-card)]를 쓰고 hover:shadow-sm은 안 쓴다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/workflow-templates' && !init) return { ok: true, json: async () => [TEMPLATE] };
-      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
-      if (url.includes('/api/v1/agent-routing-rules')) return { ok: true, json: async () => ({ data: [] }) };
-      throw new Error('unexpected fetch: ' + url);
-    }));
+    stubFetch();
     await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
     await flush();
 
-    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 템플릿'));
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
     expect(tmplBtn).not.toBeUndefined();
     expect(tmplBtn?.className).toContain('hover:shadow-[var(--elev-card)]');
     expect(tmplBtn?.className).not.toMatch(/hover:shadow-sm(\s|$)/);
+  });
+});
+
+// story #3293(축2-ⓒ) 신규 — PO 확定 A: overwrite 확認 다이얼로그 없이 기존 배정값 프리필.
+describe('WorkflowTemplateGallerySection — 축2-ⓒ 프리필(PO 확定 A)', () => {
+  it('기존 배정이 있으면 확認 다이얼로그 없이 드롭다운에 프리필된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) {
+        return { ok: true, json: async () => [{ ...DEFINITION, stage_metadata: { step_1: { role: 'Developer', action: 'do it' } } }] };
+      }
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군', type: 'agent' }] }) };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) {
+        return { ok: true, json: async () => ({ bindings: { step_1: 'agent-1' } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+
+    // "적용됨" 배지가 이미 떠 있어야 한다(bindings 비어있지 않음).
+    expect(container.textContent).toContain('적용됨');
+
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
+    await act(async () => { tmplBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    // 확認 다이얼로그 텍스트가 없어야 한다(PO 확定 A — 다이얼로그 자체를 없앰).
+    expect(container.textContent).not.toContain('교체됩니다');
+    // 대신 select가 기존 배정값으로 프리필돼 있어야 한다.
+    const select = container.querySelector('select');
+    expect(select?.value).toBe('agent-1');
+    // 버튼 라벨도 "재적용" 문구로 이미 적용됨을 알린다.
+    expect(container.textContent).toContain('재적용');
   });
 });

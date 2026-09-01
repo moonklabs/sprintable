@@ -6,23 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 
-interface TemplateStep {
-  pattern: string;
-  role_ref: string;
-  default_label?: string;
-}
-
-interface WorkflowTemplate {
-  slug: string;
-  name: string;
-  description: string;
-  chain_length: number;
-  steps: TemplateStep[];
-  presets: Record<string, Record<string, string>>;
-  rules_template: Record<string, unknown>[];
-  is_system: boolean;
-}
+// story #3293(도메인탈고정 축2-ⓒ) — 구세대 workflow_templates(story #3010 P3 등) 소비를
+// 신세대(EventDefinition/recipe_role_bindings, 축2-ⓐ story #3288)로 이전. doc
+// axis2c-gallery-migration-map-and-design §2/§3 매핑+PO 확定(A/B/C) 그대로:
+// - A: overwrite 확認 다이얼로그 대신 기존 배정값을 드롭다운에 프리필(§B read로 조회).
+// - B: 신규 GET .../bindings 로 "적용됨" 판정+프리필(구세대 agent-routing-rules 스캔 대체).
+// - C: presets(역할명 프리셋) 드롭다운은 스킵 — 저장 로직 무영향, 순수 FE 편의였음.
 
 interface TeamMember {
   id: string;
@@ -31,15 +22,11 @@ interface TeamMember {
   role?: string;
 }
 
-interface AppliedRule {
-  rule_metadata?: { template_slug?: string };
-}
-
-function ChainBadge({ length }: { length: number }) {
+function StageCountBadge({ count }: { count: number }) {
   const labels: Record<number, string> = { 0: 'Kanban', 1: '1-step', 2: '2-step', 3: '3-step' };
   return (
     <Badge variant="secondary" className="text-[10px]">
-      {labels[length] ?? `${length}-step`}
+      {labels[count] ?? `${count}-step`}
     </Badge>
   );
 }
@@ -53,44 +40,46 @@ export function WorkflowTemplateGallerySection({
 }) {
   const _t = useTranslations('settings');
 
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [definitions, setDefinitions] = useState<EventDefinitionResponse[]>([]);
   const [agents, setAgents] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<WorkflowTemplate | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [appliedSlug, setAppliedSlug] = useState<string | null>(null);
+  const [selected, setSelected] = useState<EventDefinitionResponse | null>(null);
+  const [loadingBindings, setLoadingBindings] = useState(false);
+  const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set());
 
   const [roleMapping, setRoleMapping] = useState<Record<string, string>>({});
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [overwriteConfirm, setOverwriteConfirm] = useState(false);
 
-  const requiredSteps = selected
-    ? [...new Set(selected.steps.filter(s => s.role_ref).map(s => s.role_ref))]
-    : [];
+  const cyclicDefinitions = definitions.filter(isCyclicDefinition);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tmplRes, memberRes, rulesRes] = await Promise.all([
-        fetchWithAuth('/api/workflow-templates'),
+      const [defRes, memberRes] = await Promise.all([
+        fetchWithAuth('/api/events/definitions'),
         fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`),
-        fetchWithAuth(`/api/v1/agent-routing-rules?project_id=${projectId}`),
       ]);
-      if (tmplRes.ok) {
-        const data: unknown = await tmplRes.json();
-        setTemplates(Array.isArray(data) ? (data as WorkflowTemplate[]) : []);
+      if (defRes.ok) {
+        const data: unknown = await defRes.json();
+        const defs = Array.isArray(data) ? (data as EventDefinitionResponse[]) : [];
+        setDefinitions(defs);
+        // "적용됨" 배지 — cyclic 정의마다 이 project에 바인딩이 하나라도 있는지 조회.
+        const cyclic = defs.filter(isCyclicDefinition);
+        const applied = new Set<string>();
+        await Promise.all(cyclic.map(async d => {
+          const r = await fetchWithAuth(`/api/events/definitions/${d.id}/bindings?project_id=${projectId}`);
+          if (r.ok) {
+            const j = await r.json() as { bindings?: Record<string, string> };
+            if (Object.keys(j.bindings ?? {}).length > 0) applied.add(d.key);
+          }
+        }));
+        setAppliedKeys(applied);
       }
       if (memberRes.ok) {
         const json = await memberRes.json() as { data?: TeamMember[] } | TeamMember[];
         const members = Array.isArray(json) ? json : ((json as { data?: TeamMember[] }).data ?? []);
         setAgents(members);
-      }
-      if (rulesRes.ok) {
-        const json = await rulesRes.json() as { data?: AppliedRule[] } | AppliedRule[];
-        const rules = Array.isArray(json) ? json : ((json as { data?: AppliedRule[] }).data ?? []);
-        const slug = rules.find(r => r.rule_metadata?.template_slug)?.rule_metadata?.template_slug ?? null;
-        setAppliedSlug(slug);
       }
     } finally {
       setLoading(false);
@@ -99,58 +88,47 @@ export function WorkflowTemplateGallerySection({
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const handleSelectTemplate = async (tmpl: WorkflowTemplate) => {
-    setSelected(null);
-    setRoleMapping({});
+  const handleSelectDefinition = async (def: EventDefinitionResponse) => {
+    setSelected(def);
     setApplyResult(null);
-    setOverwriteConfirm(false);
-    setLoadingDetail(true);
+    setLoadingBindings(true);
     try {
-      const res = await fetchWithAuth(`/api/workflow-templates/${tmpl.slug}`);
+      // PO 확定 A — 기존 배정값을 프리필해 "뭘 덮어쓰는지" 보이게(확認 다이얼로그 대체).
+      const res = await fetchWithAuth(`/api/events/definitions/${def.id}/bindings?project_id=${projectId}`);
       if (res.ok) {
-        const full = await res.json() as WorkflowTemplate;
-        setSelected(full);
+        const j = await res.json() as { bindings?: Record<string, string> };
+        setRoleMapping(j.bindings ?? {});
+      } else {
+        setRoleMapping({});
       }
     } finally {
-      setLoadingDetail(false);
+      setLoadingBindings(false);
     }
   };
 
-  const handleApply = async (overwrite = false) => {
+  const requiredStages = selected ? cyclicStages(selected) : [];
+
+  const handleApply = async () => {
     if (!selected) return;
 
-    const missing = requiredSteps.filter(ref => !roleMapping[ref]);
+    const missing = requiredStages.filter(stage => !roleMapping[stage]);
     if (missing.length > 0) {
       setApplyResult({ ok: false, message: `역할 매핑 필요: ${missing.join(', ')}` });
-      return;
-    }
-
-    if (appliedSlug && !overwrite) {
-      setOverwriteConfirm(true);
       return;
     }
 
     setApplying(true);
     setApplyResult(null);
     try {
-      const res = await fetch(`/api/workflow-templates/${selected.slug}/apply`, {
+      const res = await fetchWithAuth(`/api/events/definitions/${selected.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_id: projectId,
-          role_mapping: roleMapping,
-          overwrite_existing: overwrite || !!appliedSlug,
-        }),
+        body: JSON.stringify({ project_id: projectId, role_mapping: roleMapping }),
       });
-      // story #2500 — `data.detail`은 실 envelope({data,error,meta})에 없는 필드라 이
-      // 분기는 항상 죽어있었다(그라운딩 확認 — backend apply_template()은 generic
-      // HTTP상태 코드만 낸다, dict-coded 아님) — 실패 사유가 한 번도 화면에 안 뜨고
-      // 항상 '적용 실패'만 보여줬다. 올바른 필드(error.message)로 교정.
-      const data = await res.json() as { ok?: boolean; rules_created?: number; error?: { message?: string } };
+      const data = await res.json() as { ok?: boolean; bindings_upserted?: number; error?: { message?: string } };
       if (res.ok && data.ok) {
-        setApplyResult({ ok: true, message: `규칙 ${String(data.rules_created ?? 0)}개 생성 완료` });
-        setAppliedSlug(selected.slug);
-        setOverwriteConfirm(false);
+        setApplyResult({ ok: true, message: `배정 ${String(data.bindings_upserted ?? 0)}건 저장 완료` });
+        setAppliedKeys(prev => new Set(prev).add(selected.key));
       } else {
         setApplyResult({ ok: false, message: data.error?.message ?? '적용 실패' });
       }
@@ -179,76 +157,61 @@ export function WorkflowTemplateGallerySection({
       <SectionCardHeader>
         <div className="space-y-1">
           <h2 className="text-base font-semibold text-foreground">워크플로우 템플릿 갤러리</h2>
-          <p className="text-sm text-muted-foreground">템플릿을 선택해 라우팅 규칙을 자동 생성합니다.</p>
+          <p className="text-sm text-muted-foreground">템플릿을 선택해 단계별 담당 에이전트를 배정합니다.</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {templates.map(tmpl => (
+          {cyclicDefinitions.map(def => (
             <button
-              key={tmpl.slug}
-              onClick={() => void handleSelectTemplate(tmpl)}
-              disabled={loadingDetail}
+              key={def.id}
+              onClick={() => void handleSelectDefinition(def)}
+              disabled={loadingBindings}
               // story #3010(로드맵 P3, L1) — 선택 가능한 인라인 카드는 --elev-card.
               className={`rounded-lg border p-4 text-left transition hover:border-primary/60 hover:shadow-[var(--elev-card)] disabled:opacity-60 ${
-                selected?.slug === tmpl.slug ? 'border-primary bg-primary/5' : 'border-border bg-background'
+                selected?.id === def.id ? 'border-primary bg-primary/5' : 'border-border bg-background'
               }`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm text-foreground truncate">{tmpl.name}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{tmpl.description}</p>
+                  <p className="font-medium text-sm text-foreground truncate">{def.name || def.key}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{def.description}</p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
-                  <ChainBadge length={tmpl.chain_length} />
-                  {appliedSlug === tmpl.slug && (
+                  <StageCountBadge count={cyclicStages(def).length} />
+                  {appliedKeys.has(def.key) && (
                     <Badge variant="success" className="text-[10px]">적용됨</Badge>
                   )}
                 </div>
               </div>
-              <p className="mt-2 text-[10px] text-muted-foreground">
-                프리셋 {Object.keys(tmpl.presets ?? {}).length}종
-              </p>
             </button>
           ))}
         </div>
 
-        {loadingDetail && (
-          <p className="mt-4 text-xs text-muted-foreground">템플릿 로딩 중...</p>
+        {loadingBindings && (
+          <p className="mt-4 text-xs text-muted-foreground">배정 정보 로딩 중...</p>
         )}
 
-        {selected && (
+        {selected && !loadingBindings && (
           <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4 space-y-4">
             <div>
-              <h3 className="font-semibold text-sm text-foreground">{selected.name} — 역할 매핑</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">각 역할에 프로젝트 에이전트를 연결하세요.</p>
+              <h3 className="font-semibold text-sm text-foreground">{selected.name || selected.key} — 역할 매핑</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                각 단계에 프로젝트 에이전트를 연결하세요. 기존 배정이 있으면 아래에 표시됩니다.
+              </p>
             </div>
 
-            {selected.rules_template && selected.rules_template.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-foreground mb-1">생성될 규칙 ({selected.rules_template.length}개)</p>
-                <ul className="space-y-0.5">
-                  {(selected.rules_template as Array<{ name?: string; priority?: number }>).map((r, i) => (
-                    <li key={i} className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span className="font-mono text-[10px] w-5 text-right shrink-0">{r.priority ?? i + 1}</span>
-                      <span className="truncate">{r.name ?? `규칙 ${i + 1}`}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {requiredSteps.map(ref => {
-              const step = selected.steps.find(s => s.role_ref === ref);
+            {requiredStages.map(stage => {
+              const meta = selected.stage_metadata[stage];
               return (
-                <div key={ref} className="flex items-center gap-3">
+                <div key={stage} className="flex items-center gap-3">
                   <span className="w-32 shrink-0 text-xs font-medium text-foreground">
-                    {step?.default_label ?? ref}
+                    {meta?.role ?? stage}
                   </span>
                   <select
                     className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={roleMapping[ref] ?? ''}
-                    onChange={e => setRoleMapping(prev => ({ ...prev, [ref]: e.target.value }))}
+                    value={roleMapping[stage] ?? ''}
+                    onChange={e => setRoleMapping(prev => ({ ...prev, [stage]: e.target.value }))}
                   >
                     <option value="">에이전트 선택...</option>
                     {agents.map(a => (
@@ -270,23 +233,13 @@ export function WorkflowTemplateGallerySection({
               </p>
             )}
 
-            {overwriteConfirm ? (
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-muted-foreground">기존 템플릿 규칙이 교체됩니다. 계속하시겠습니까?</p>
-                <Button size="sm" variant="destructive" disabled={applying} onClick={() => void handleApply(true)}>
-                  교체 적용
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setOverwriteConfirm(false)}>취소</Button>
-              </div>
-            ) : (
-              <Button
-                size="sm"
-                disabled={applying || requiredSteps.some(r => !roleMapping[r])}
-                onClick={() => void handleApply(false)}
-              >
-                {applying ? '적용 중...' : '적용하기'}
-              </Button>
-            )}
+            <Button
+              size="sm"
+              disabled={applying || requiredStages.some(s => !roleMapping[s])}
+              onClick={() => void handleApply()}
+            >
+              {applying ? '적용 중...' : (appliedKeys.has(selected.key) ? '재적용(덮어쓰기)' : '적용하기')}
+            </Button>
           </div>
         )}
       </SectionCardBody>
