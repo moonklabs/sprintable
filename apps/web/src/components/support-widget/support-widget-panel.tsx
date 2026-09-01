@@ -244,7 +244,7 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
         {session.sending ? <ThinkingIndicator /> : null}
       </div>
       {session.sendError ? (
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-destructive/10 px-3 py-2">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-destructive-tint px-3 py-2">
           <p role="alert" aria-live="assertive" className="text-xs text-foreground">{session.sendError}</p>
           <Button type="button" size="sm" variant="outline" onClick={() => session.retryLastMessage()}>
             {t('sendErrorRetry')}

@@ -59,7 +59,7 @@ const AUDIT_META: Record<AuditKind, { dot: string; Icon: typeof Shield; labelKey
   request: { dot: 'bg-info-tint text-info', Icon: Shield, labelKey: 'docGateAuditRequested' },
   resubmit: { dot: 'bg-muted text-muted-foreground', Icon: Pencil, labelKey: 'docGateAuditResubmitted' },
   approved: { dot: 'bg-success-tint text-success', Icon: CheckCircle, labelKey: 'docGateAuditApproved' },
-  rejected: { dot: 'bg-destructive/10 text-destructive', Icon: XCircle, labelKey: 'docGateAuditRejected' },
+  rejected: { dot: 'bg-destructive-tint text-destructive', Icon: XCircle, labelKey: 'docGateAuditRejected' },
 };
 
 function toState(status: string | undefined): DocGateState | null {
@@ -388,7 +388,7 @@ export function DocGateSection({
 
       {/* 반려 섹션: 사유 + 결재자 + 시각(현재 상태 prominent surface). */}
       {state === 'denied' ? (
-        <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive/5 p-2.5">
+        <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive-tint p-2.5">
           <p className="text-xs font-medium text-foreground">{t('docGateDeniedReason')}</p>
           <p className="whitespace-pre-wrap text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">

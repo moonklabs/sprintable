@@ -57,7 +57,7 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
         title={isNotFound ? '문서를 찾을 수 없습니다' : title}
         className={`inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm transition-colors ${
           isNotFound
-            ? 'bg-destructive-tint text-foreground hover:bg-destructive/20'
+            ? 'bg-destructive-tint text-foreground hover:brightness-95'
             : 'text-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground'
         }`}
       >

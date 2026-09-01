@@ -713,7 +713,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
           ) : null}
           <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
-            <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-foreground">
+            <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">
               {t('spExceeded')}
             </span>
           ) : null}
@@ -822,7 +822,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                 <div className="mt-1 flex items-center gap-1.5">
                   <p className="text-sm font-medium text-foreground">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
                   {spExceeded ? (
-                    <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-foreground">{t('spExceeded')}</span>
+                    <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">{t('spExceeded')}</span>
                   ) : null}
                 </div>
               </div>
@@ -845,7 +845,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                   <div className="flex items-center gap-2">
                     <p className="text-xs font-medium text-muted-foreground">{t('spProgress')}</p>
                     {spExceeded ? (
-                      <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-foreground">
+                      <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">
                         {t('spExceededDetail', { total: spProgress.total, target: epic.target_sp ?? 0 })}
                       </span>
                     ) : null}

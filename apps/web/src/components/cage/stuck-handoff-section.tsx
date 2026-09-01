@@ -97,7 +97,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
 
   const btn = {
     idle: { cls: 'bg-destructive text-destructive-foreground hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
-    notifying: { cls: 'bg-destructive/10 text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
+    notifying: { cls: 'bg-destructive-tint text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
     notified: { cls: 'bg-muted text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
     failed: { cls: 'border border-destructive text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
   }[fallback];
@@ -133,7 +133,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
             {t('withdrawn')}
           </div>
         ) : withdraw === 'confirming' ? (
-          <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive/5 p-2">
+          <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive-tint p-2">
             <p className="text-[11px] text-foreground">{t('withdrawIrreversibleWarning')}</p>
             <div className="flex gap-1.5">
               <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={() => setWithdraw('idle')}>

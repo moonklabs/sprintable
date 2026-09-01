@@ -76,7 +76,7 @@ function StateBox({ tone, children }: { tone: 'muted' | 'error'; children: React
   return (
     <div
       className={`relative grid aspect-[4/3] w-full max-w-sm place-items-center overflow-hidden rounded-xl border border-border ${
-        tone === 'error' ? 'bg-destructive/10' : 'bg-muted'
+        tone === 'error' ? 'bg-destructive-tint' : 'bg-muted'
       }`}
     >
       {children}

@@ -124,7 +124,7 @@ export function KanbanColumn({
   const statusColor = STATUS_COLOR[id] ?? STATUS_COLOR['backlog'];
   // AC1: WIP 초과 시 빨간 강조
   const colClass = wipExceeded
-    ? 'bg-destructive/5 ring-1 ring-destructive/30'
+    ? 'bg-destructive-tint ring-1 ring-destructive/30'
     : isOver && isValidTarget
       ? 'bg-primary/5 ring-1 ring-primary/20'
       : isValidTarget

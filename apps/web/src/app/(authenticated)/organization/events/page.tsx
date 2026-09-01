@@ -626,7 +626,7 @@ function EventFormDialog({
             </div>
           )}
           {error ? (
-            <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground">
+            <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
               {error}
             </p>
           ) : null}
@@ -716,7 +716,7 @@ function TestPublishDialog({
         </DialogHeader>
         <JsonField id="event-test-publish-payload" label={t('eventTestPublishPayloadLabel')} value={payload} onChange={setPayload} />
         {error ? (
-          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground">
+          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
             {error}
           </p>
         ) : null}
