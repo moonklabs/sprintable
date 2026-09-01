@@ -8,9 +8,14 @@ project_id nullable — NULL은 org 전역 바인딩(모든 project 적용), NOT
 (조회 시 project 특이성이 org 전역보다 우선 — WebhookConfig의 project_id-nullable-scope
 패턴과 동형).
 
-Revision ID: 0296
-Revises: 0295
+Revision ID: 0297
+Revises: 0296
 Create Date: 2026-09-01
+
+⚠️ 마이그 번호 조정(2026-09-01, PO 조율) — 원래 0296으로 작성했으나 PR#3685(축1·
+0296_org_domain_label)가 먼저 그 번호를 썼다(둘 다 develop 최신 0295에서 분기한 형제
+충돌). 3685가 먼저 develop에 착지하므로 이쪽을 0297로 밀고 down_revision을 0296(3685의
+번호)으로 체인.
 """
 from __future__ import annotations
 
@@ -18,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = "0296"
-down_revision = "0295"
+revision = "0297"
+down_revision = "0296"
 branch_labels = None
 depends_on = None
 
