@@ -334,3 +334,27 @@ describe('SupportWidgetLauncher — story #3274: 온보딩 단계 게이팅(핵�
     expect(container.querySelector('button')).toBeTruthy();
   });
 });
+
+// 유나 design 리뷰 🟡(PR#3668 2차, 2026-09-01) — 설정 > 문의 탭(패널A, 마운트 시 connect)과
+// 이 플로팅(패널B, 클릭 시 connect)이 같은 화면에서 동시에 열리면 세션 훅 인스턴스 2개가
+// 서로 안 보이는 로컬 messages state를 각자 가져 뷰 불일치가 생긴다. isMobileChatDetailRoute와
+// 동형으로 설정 라우트에서 원천 차단(설정 페이지의 상담 진입점은 문의 탭 하나로 충분).
+describe('SupportWidgetLauncher — story #3274 2차: 설정 라우트 숨김(세션 이중 원천 차단)', () => {
+  it('/settings — 플로팅이 안 뜬다(문의 탭과의 이중 세션 방지)', async () => {
+    usePathnameMock.mockReturnValue('/settings');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('/settings/integrations(설정 하위 라우트) — 마찬가지로 안 뜬다', async () => {
+    usePathnameMock.mockReturnValue('/settings/integrations');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('설정과 무관한 라우트(/board) — 영향 없이 그대로 뜬다(무회귀)', async () => {
+    usePathnameMock.mockReturnValue('/board');
+    await mount();
+    expect(container.querySelector('button')).toBeTruthy();
+  });
+});

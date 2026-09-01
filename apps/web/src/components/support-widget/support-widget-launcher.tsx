@@ -53,6 +53,13 @@ export function SupportWidgetLauncher() {
   const pathname = usePathname();
   const { state: activationState, allComplete } = useActivationStatus();
   const isMobileChatDetailRoute = isMobile && pathname !== '/chats' && pathname.startsWith('/chats/');
+  // story #3274(유나 design 리뷰 🟡, 2026-09-01) — 설정 > 문의 탭(support-tab-panel.tsx)이
+  // 마운트 시 자체 세션을 연다. 같은 화면에 이 플로팅까지 열려있으면 세션 훅 인스턴스
+  // 2개가 각자 로컬 messages state를 가져 서로 안 보이는 뷰 불일치가 생긴다(서버는 org+
+  // user당 세션 1개로 멱등이라 데이터 위험은 없지만, 같은 기능의 진입점이 한 화면에 둘
+  // 있는 것 자체도 산만하다). isMobileChatDetailRoute와 동형으로 라우트 게이팅해 원천
+  // 차단 — 설정 페이지의 상담 진입점은 문의 탭 하나로 충분(진입점 0 아님).
+  const isSettingsRoute = pathname != null && (pathname === '/settings' || pathname.startsWith('/settings/'));
 
   // ⚠️story #3260 2차 finding(2026-08-31, 유나 라이브 실측 FAIL — 재시도 스톰) — 이 effect가
   // 예전엔 [open, session] deps였다. session은 status가 바뀔 때마다(connect()가 실패해
@@ -92,7 +99,7 @@ export function SupportWidgetLauncher() {
   // 빠져 있어 fetch 실패/로딩 중(allComplete=false, state=null)에 배너는 숨는데 런처만
   // fail-open으로 뜨는 비대칭이 있었다("배너 ⟺ 플로팅" 불변식 위반). banner와 정확히
   // 대칭시킨다 — 로딩/실패 중엔 둘 다 보수적으로 숨는다(PO 확認 정책).
-  if (allComplete || !activationState || isMobileChatDetailRoute) return null;
+  if (allComplete || !activationState || isMobileChatDetailRoute || isSettingsRoute) return null;
 
   return (
     <>
