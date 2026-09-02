@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 //
 // story #3287([도메인탈고정·축1 Phase1] AC4 FE 소비) — useOrgDomainLabels가 GET
-// /api/v2/organizations/{orgId}/domain-labels 응답을 domain:canonical_slug 키로 인덱싱해
-// statusLabel()/entityTypeLabel()로 조회 가능케 하는지, 로케일 선택(ko 우선, 없으면 en
-// 폴백)과 "오버라이드 미설정 slug는 undefined"(호출부가 canonical 문구로 폴백)를 실 렌더로
-// 고정한다.
+// /api/organizations/{orgId}/domain-labels(BFF, story #3705 P0 핫픽스로 전환) 응답을
+// domain:canonical_slug 키로 인덱싱해 statusLabel()/entityTypeLabel()로 조회 가능케 하는지,
+// 로케일 선택(ko 우선, 없으면 en 폴백)과 "오버라이드 미설정 slug는 undefined"(호출부가
+// canonical 문구로 폴백)를 실 렌더로 고정한다.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -70,7 +70,7 @@ describe('useOrgDomainLabels — 라벨 API 인덱싱+로케일 선택(#3287 AC4
     await flush();
 
     const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
-    expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/v2/organizations/org-1/domain-labels');
+    expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/organizations/org-1/domain-labels');
     expect(el.dataset.statusBacklog).toBe('아이디어');
     expect(el.dataset.statusDone).toBe(''); // 오버라이드 미설정 — undefined(호출부가 canonical 문구로 폴백)
     expect(el.dataset.entityStory).toBe('캠페인');
