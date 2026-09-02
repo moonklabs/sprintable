@@ -12,6 +12,7 @@ core + 단일목적 서비스 호출 컴포지션)와 정합, 테스트도 격�
 동일 원칙, resolve_routing_leg 참조)."""
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import and_, or_, select
@@ -20,6 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.project import OrgMember
 from app.services.event_definition_registry import APPROVER_ROLE_REFERENCES
 from app.services.reference_token import build_reference_token
+
+logger = logging.getLogger(__name__)
 
 # PO 확定(페드루, 2026-09-02, 변경요청①) — 값을 지어내지 않는다: 못 찾은 필드는 이 sentinel로
 # 명시한다("가서 보라" 금지 — story #3312 처방 3과 동형, 결재 카드에 실물이 안 보이면 그
@@ -173,7 +176,20 @@ async def maybe_create_stage_gate(
 
     stage/work_item 정보가 payload에 없거나, 그 stage에 gate 선언이 없으면 완전 no-op —
     선언 없는 정의(다른 레시피)의 stage 이벤트는 이 함수를 거쳐도 아무 부수효과가 없다
-    (AC3 회귀 0)."""
+    (AC3 회귀 0).
+
+    story #3325/#0e3abfaf(PO 확定, 2026-09-02, PR C) — create_gate 뒤 채팅 결재 카드까지
+    이어 보낸다(결재함 탭에만 서고 채팅 알림이 0이던 결함). 범용 create_gate()/
+    _reopen_rejected_gate()는 무변경 — 이 훅(caller) 쪽에서만 기존 게이트 status를
+    호출 전에 먼저 조회해 세 갈래로 가른다:
+      - 기존 없음(신규) 또는 rejected(→ create_gate가 _reopen_rejected_gate로 pending
+        재오픈) → 카드 발송(best-effort, 실패해도 게이트 생성/재오픈 자체는 되돌리지
+        않음 — create_gate의 gate.pending_approval 알림과 동일 관례).
+      - voided(admin이 명시 무효화, #04e69c5f/#2150 AC5 — 자동 재오픈 대상 아님) →
+        create_gate는 그대로 voided 반환(부수효과 0), 이 훅은 명시 로그만 남긴다
+        ("왜 카드가 안 서는지"가 완전 침묵이던 것을 관측 가능하게).
+      - 이미 pending(재발행 반복) → create_gate 그대로 멱등 반환, 카드 재발송 없음
+        (같은 승인 요청을 반복 스팸하지 않는다)."""
     stage = payload.get("stage")
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
@@ -197,13 +213,54 @@ async def maybe_create_stage_gate(
         work_item_type=work_item_type, work_item_id=work_item_id, payload=payload,
     )
 
-    from app.services.gate_service import create_gate
+    from app.services.approval_delivery import dispatch_approval_request_cards
+    from app.services.gate_service import (
+        create_gate,
+        find_gate_slot_with_pr_fallback,
+        resolve_work_item_project_id,
+    )
     from app.services.workflow_line_config import _default_role_id
 
+    gate_type = gate_decl["type"]
+
+    # 카드 발송 여부 판단은 create_gate() 호출 *전* status로만 가능하다 — 호출 후에는
+    # "신규 pending"과 "이미 pending이던 슬롯"이 똑같이 status=="pending"으로 구분이
+    # 안 된다(post-call 값만으론 전이를 모른다).
+    existing = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+        gate_type=gate_type, pr_number=None, repo_full_name=None,
+    )
+    previous_status = existing.status if existing is not None else None
+
     role_id = await _default_role_id(db, org_id) or uuid.uuid4()
-    await create_gate(
-        db, org_id, work_item_id, work_item_type, gate_decl["type"],
+    gate = await create_gate(
+        db, org_id, work_item_id, work_item_type, gate_type,
         requester_member_id, role_id,
         neutral_facts=neutral_facts,
         designated_approver_id=approver_id,
     )
+
+    if gate.status == "voided":
+        logger.info(
+            "recipe stage gate stays voided — admin 판단 필요(자동 재오픈 대상 아님) "
+            "gate_id=%s org_id=%s work_item_type=%s work_item_id=%s stage=%s",
+            gate.id, org_id, work_item_type, work_item_id, stage,
+        )
+        return
+
+    if gate.status != "pending" or previous_status not in (None, "rejected"):
+        return
+
+    project_id = await resolve_work_item_project_id(db, org_id, work_item_type, work_item_id)
+    try:
+        await dispatch_approval_request_cards(
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            project_id=project_id, title=neutral_facts["work_item_title"], gate_id=gate.id,
+            requester_id=requester_member_id, approver_ids=[approver_id],
+            designated_approver_id=approver_id,
+        )
+    except Exception:
+        logger.warning(
+            "recipe stage gate approval card dispatch failed gate_id=%s (best-effort, swallowed)",
+            gate.id, exc_info=True,
+        )
