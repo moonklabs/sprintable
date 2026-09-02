@@ -445,8 +445,11 @@ async def test_discuss_endpoint_non_approver_403_service_not_called():
     from app.routers.gates import request_gate_discussion_endpoint, GateDiscussionRequest
     from fastapi import HTTPException
     caller = _resolved_human()
+    # story #3319 — designated_approver_id: _authorize_gate_approve_equivalent가 이제 이 필드를
+    # _non_doc_can_approve 호출부 kwarg로 읽는다(그 함수 자체는 아래서 mock돼도 kwarg 평가는
+    # mock 이전에 일어나 AttributeError로 터진다) — None(정책 미설정)으로 명시.
     fake_gate = SimpleNamespace(id=uuid.uuid4(), gate_type="merge", work_item_type="story",
-                                work_item_id=uuid.uuid4())
+                                work_item_id=uuid.uuid4(), designated_approver_id=None)
     result = AsyncMock()
     result.scalar_one_or_none = lambda: fake_gate
     discussfn = AsyncMock()
@@ -491,7 +494,7 @@ async def test_discuss_endpoint_forces_actor_from_auth():
     from app.routers.gates import request_gate_discussion_endpoint, GateDiscussionRequest
     caller = _resolved_human()
     fake_gate = SimpleNamespace(id=uuid.uuid4(), gate_type="artifact_canonicalize", work_item_type="visual_artifact",
-                                work_item_id=uuid.uuid4())
+                                work_item_id=uuid.uuid4(), designated_approver_id=None)
     result = SimpleNamespace(scalar_one_or_none=lambda: fake_gate)
     discussfn = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \

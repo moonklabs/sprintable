@@ -32,6 +32,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.gate_mock_factory import make_gate
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 # realdb 섹션이 Base.metadata.create_all 을 호출한다 — conftest.py AST 가드(story 8236bbc3) 대응.
@@ -144,7 +146,10 @@ def _resp(g):
 
 
 def _doc_gate(requester_id, *, gate_id=None, status="pending"):
-    return SimpleNamespace(
+    # story #3319 — SimpleNamespace 대신 make_gate()(tests/gate_mock_factory.py, story #2837
+    # "건드릴 때 이관" 관례): 이 파일을 새로 고치는 김에, Gate에 새 필드(designated_approver_id)가
+    # 늘 때마다 SimpleNamespace가 AttributeError로 재발하던 걸 구조적으로 차단한다.
+    return make_gate(
         id=gate_id or uuid.uuid4(), gate_type="doc_approval", work_item_type="doc",
         work_item_id=uuid.uuid4(),
         neutral_facts={"requested_by_member_id": str(requester_id)} if requester_id else {},
@@ -153,7 +158,7 @@ def _doc_gate(requester_id, *, gate_id=None, status="pending"):
 
 
 def _story_gate(*, gate_type="merge", gate_id=None, status="pending", work_item_id=None):
-    return SimpleNamespace(
+    return make_gate(
         id=gate_id or uuid.uuid4(), gate_type=gate_type, work_item_type="story",
         work_item_id=work_item_id or uuid.uuid4(), neutral_facts={}, status=status,
     )
@@ -161,7 +166,7 @@ def _story_gate(*, gate_type="merge", gate_id=None, status="pending", work_item_
 
 def _org_level_gate(*, gate_id=None, status="pending"):
     """project_id=None 케이스(구조적 project-무관 work_item — wf_line_version 류)."""
-    return SimpleNamespace(
+    return make_gate(
         id=gate_id or uuid.uuid4(), gate_type="workflow_config_publish", work_item_type="wf_line_version",
         work_item_id=uuid.uuid4(), neutral_facts={}, status=status,
     )
