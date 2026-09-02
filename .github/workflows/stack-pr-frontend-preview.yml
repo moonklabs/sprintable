@@ -121,6 +121,9 @@ jobs:
       - name: "Verify no new cross-element tint × family-color-text (story #2590 A regression guard)"
         run: pnpm --filter web verify:cross-element-tint-text
 
+      - name: "Verify no closed-family subtle alpha bg re-entry (story #2420 AC4/AC6 — destructive)"
+        run: pnpm --filter web verify:no-subtle-alpha-bg
+
       - name: "Verify i18n translation keys (story #2371 regression guard)"
         run: pnpm verify:i18n-keys
 

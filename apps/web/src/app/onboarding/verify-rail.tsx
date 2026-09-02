@@ -171,7 +171,7 @@ export function VerifyRail({ steps }: { steps: DisplayStep[] }) {
                   // 하나로(destructive on tint: light 16.72·dark 15.58, 정의 시점 검증은
                   // scripts/verify-tint-foreground-contrast.ts). dark: 짝은 안 붙인다 —
                   // --foreground 자체가 테마마다 값을 가져 이 클래스 하나로 양쪽 다 안전하다.
-                  <div className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-xs text-foreground">
+                  <div className="mt-1.5 rounded-md border border-destructive/20 bg-destructive-tint px-2.5 py-2 text-xs text-foreground">
                     {/* story #2418 — reason 없이 침묵하지 않는다(#2415 이전과 같은 "화면이
                         상태를 못 말하는" 병). BE가 실제로 reason을 못 줄 때만 뜬다(음성대조:
                         done/pending/active엔 이 블록 자체가 없다). */}

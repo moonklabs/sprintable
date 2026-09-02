@@ -777,7 +777,7 @@ export default function SettingsPage() {
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('dangerZone')}</span>
             <TabsTrigger
               value="danger"
-              className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive/10"
+              className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive-tint"
             >
               <Trash2 className="h-4 w-4" />
               {t('deleteAccount')}
@@ -1085,7 +1085,7 @@ export default function SettingsPage() {
                 </div>
               ) : null}
               {currentOrgRole === 'owner' && (
-                <SectionCard className="border-destructive/20 bg-destructive/10 mt-6">
+                <SectionCard className="border-destructive/20 bg-destructive-tint mt-6">
                   <SectionCardHeader className="border-b border-destructive/20">
                     <div className="space-y-1">
                       <h2 className="text-base font-semibold text-destructive">위험 구역</h2>
@@ -1359,7 +1359,7 @@ export default function SettingsPage() {
             )}
 
             <TabsContent value="danger">
-              <SectionCard className="border-destructive/20 bg-destructive/10">
+              <SectionCard className="border-destructive/20 bg-destructive-tint">
                 <SectionCardHeader className="border-b border-destructive/20">
                   <div className="space-y-1">
                     <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>

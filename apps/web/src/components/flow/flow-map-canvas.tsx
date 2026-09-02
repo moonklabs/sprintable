@@ -1172,7 +1172,7 @@ export function FlowMapCanvas({
       {/* story #2353(AC15) — 실패는 토스트로 흘려보내지 않는다(㉦-2, "그 자리에 남는다") —
           여기 고정 배너가 그 "자리"다. message는 서버 원문 그대로(진단을 새로 안 짓는다). */}
       {linkDraft.phase === 'error' ? (
-        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-foreground">
+        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive-tint px-3 py-2 text-[11px] text-foreground">
           <span>{linkDraft.message}</span>
           <button type="button" onClick={resetLinkDraft} className="shrink-0 underline">{t('portLinkErrorDismiss')}</button>
         </div>

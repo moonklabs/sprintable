@@ -1439,7 +1439,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 type="button"
                 variant="ghost"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive/10"
+                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive-tint"
                 aria-label={t('deleteStory')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1757,7 +1757,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           type="button"
                           variant="ghost"
                           onClick={() => void handleRemoveAttachment(att.url)}
-                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive group-hover:block hover:bg-destructive/30"
+                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive-tint p-0.5 text-destructive group-hover:block hover:brightness-95"
                           aria-label="첨부 삭제"
                         >
                           <X className="size-3" />

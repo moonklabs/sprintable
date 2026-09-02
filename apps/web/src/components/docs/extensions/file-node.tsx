@@ -117,7 +117,7 @@ function FileAttachmentView({ node }: ReactNodeViewProps) {
     return (
       <NodeViewWrapper as="div" className="my-3 not-prose">
         <div className={cardBase}>
-          <span className="flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive">
+          <span className="flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md bg-destructive-tint text-destructive">
             <AlertTriangle className="size-4" aria-hidden />
           </span>
           <div className="min-w-0 flex-1">

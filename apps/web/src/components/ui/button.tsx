@@ -21,12 +21,13 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         // story #2419 — rest 상태 bg-destructive/10 위 text-destructive는 3.97(AA 4.5 미달).
-        // story #2420 v3 — text-foreground로 교체(15.58~16.72, 정의 시점 검증은
-        // scripts/verify-tint-foreground-contrast.ts). --foreground 자체가 테마마다 값을
-        // 가져 dark: 짝이 필요 없다. ⚠️hover 알파(light /20·dark /30)는 #2420 1단계 범위
-        // 밖 — 사용처 스윕(AC7)에서 별도 처리한다.
+        // story #2420 v3 — text-foreground로 교체(정의 시점 검증은
+        // scripts/verify-tint-foreground-contrast.ts). story #2420 AC4/AC7(사용처 스윕) — rest
+        // 배경을 ad-hoc 알파(/10·hover /20·dark /20·/30)에서 불투명 토큰 bg-destructive-tint로
+        // 통일. --foreground·--destructive-tint 둘 다 테마별 값이라 dark: 짝이 필요 없다. hover
+        // 진해짐("눌릴 것 같다")은 새 알파 대신 brightness-95 — StatusBadge(interactive) 관례 동형.
         destructive:
-          "bg-destructive/10 text-foreground hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive",
+          "bg-destructive-tint text-foreground hover:brightness-95 focus-visible:border-destructive/40 focus-visible:ring-destructive dark:focus-visible:ring-destructive",
         link: "text-primary underline-offset-4 hover:underline",
         // story #2969 §2 PR-1 — shadow-sm 제거(§1.2: 인라인 표면은 그림자 대신 라인/색).
         // 이 자리는 "색"으로 대응 — hover:bg-primary/90(기존)이 이미 그 축을 맡고 있어

@@ -25,6 +25,7 @@
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
+    "verify:no-subtle-alpha-bg": "tsx scripts/verify-no-subtle-alpha-bg.ts",
     "verify:muted-foreground-contrast": "tsx scripts/verify-muted-foreground-contrast.ts",
     "verify:no-muted-foreground-alpha": "tsx scripts/verify-no-muted-foreground-alpha.ts",
     "verify:no-raw-error-message": "tsx scripts/verify-no-raw-error-message.ts",

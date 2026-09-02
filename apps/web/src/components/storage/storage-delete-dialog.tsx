@@ -54,7 +54,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
             <>
               {/* Header — 고정(scroll 영역 밖) */}
               <div className="flex shrink-0 items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-[15px] font-[650] text-foreground">
-                <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive">
+                <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive-tint text-destructive">
                   <AlertTriangle className="size-[15px]" />
                 </span>
                 {t('deleteTitle')}

@@ -80,7 +80,7 @@ export function GateSignatureApproval({
 
       {error ? (
         <p
-          className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground"
+          className="rounded-lg border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground"
           role="alert"
           aria-live="assertive"
           aria-atomic="true"
