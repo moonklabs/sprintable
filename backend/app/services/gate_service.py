@@ -844,6 +844,14 @@ async def transition_gate(
     # H1-S7: 사람 게이트 해소(approve/reject)를 verdict로 기록 — trust로 환류.
     await _record_gate_review_verdict(session, org_id, gate, new_status, resolver_id)
 
+    # story #3330 — verdict-capture(_GATE_TYPE_TO_VERDICT_SOURCE 소속 여부)와 완전히
+    # 독립적으로, "사람이 판정했다"는 사실 자체를 항상 실행자에게 통지한다(승인·반려
+    # 대칭). 예전엔 preset.gate.verdict 발행이 위 _record_gate_review_verdict 내부,
+    # verdict-capture 게이팅 뒤에 있어서 그 매핑에 없는 gate_type(예: external_publish —
+    # 이 스토리의 실제 사고)은 통지 자체가 안 나갔다(실측: 3바퀴 반려가 어떤 지속 표면에도
+    # 안 남음).
+    await _publish_gate_verdict_notification(session, org_id, gate, new_status, resolver_id)
+
     # HO-S7: cold-start(outcome 표본 부족)에서 사람의 keep/kill 결정을 seed로 기록(trust 본점수
     # 미포함·outcome 해소 후 calibration). merge·cold-start가 아니면 no-op.
     from app.services.cold_start_seed import record_cold_start_seed  # 순환 회피 lazy import.
@@ -1743,9 +1751,31 @@ async def _record_gate_review_verdict(
         facts["rubber_stamp_candidate"] = True
         gate.neutral_facts = facts
 
-    # story #2791(P0, event-workflow-unification-design-2790) — preset.gate.verdict 서버
-    # 자동발행. 위 record_verdict와 동일 게이팅(participation 존재·work_item_type=story)
-    # 스코프 그대로 — best-effort 격리는 호출자(여기) 몫.
+
+async def _publish_gate_verdict_notification(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate: Gate,
+    new_status: str,
+    resolver_id: uuid.UUID | None,
+) -> None:
+    """story #3330 — 게이트 approved/rejected 전이를 항상 실행자(work item 이해관계자)에게
+    통지한다(승인·반려 대칭).
+
+    ⛔이전엔 이 발행이 `_record_gate_review_verdict`(H1-S7, verdict-capture용) 안에 있어
+    `_GATE_TYPE_TO_VERDICT_SOURCE`(qa/deploy/merge/pr_review 4종뿐)에 없는 gate_type —
+    예: 이 스토리의 실제 사고인 external_publish — 는 통지 자체가 발행되지 않았다(3바퀴
+    실측: 반려가 채널·알림·이벤트 conversation 어디에도 안 남음, 승인자에게 내려가는 결재
+    카드 경로(#3325)는 정상인데 실행자에게 돌아오는 길만 비어 있었다). 이 함수는 그
+    verdict-capture 게이팅과 완전히 독립이다 — "사람이 판정했다"는 사실은 그 게이트
+    타입이 verdict-capture 대상인지와 무관하게 항상 통지 대상이다(story #2791이 만든
+    preset.gate.verdict 발행 자체는 그대로 재사용 — 새 경로 발명 0).
+
+    resolver_id 없으면 skip(시스템 auto-transition은 통지 주체가 사람이 아니다 — 기존
+    `_record_gate_review_verdict`의 동일 가드와 같은 이유)."""
+    if new_status not in ("approved", "rejected") or resolver_id is None:
+        return
+
     try:
         from app.routers.events import publish_preset_event
 
@@ -1757,6 +1787,9 @@ async def _record_gate_review_verdict(
                 "gate_type": gate.gate_type,
                 "verdict": new_status,
                 "resolver_member_id": str(resolver_id),
+                # story #3330 AC2 — 반려 사유 문구. 필드 자체는 #2791 스키마에 이미 있었으나
+                # (payload_schema.resolution_note) 값이 한 번도 채워진 적이 없었다.
+                "resolution_note": gate.resolution_note,
             },
         )
     except Exception:

@@ -1267,6 +1267,73 @@ async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID,
     return await _async_regex_sub(_EMBEDDED_HEX8_RE, _replace_prefix, text)
 
 
+async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> str:
+    """story #3330 — `preset.gate.verdict` 전용 렌더. 승인/반려 대상 work item·게이트
+    종류·판정·(반려 시) 사유·대상 산출물 doc 클릭 토큰·다음 행동을 담는다(AC2, #3323이
+    stage 알림에 한 것과 같은 규격). `preset.gate.verdict`는 `stage_metadata`가 없는
+    비사이클형 정의라 `_render_event_message_content`의 사이클 분기를 안 타므로 별도
+    함수로 둔다.
+
+    draft_doc_reference_token은 payload 계약에 없다(스키마 변경 0, AC4 "새 경로 발명
+    0") — `recipe_gate_hooks.py::_build_approval_neutral_facts`가 게이트 생성 시점에
+    이미 계산해 둔 `neutral_facts`를 게이트 행 재조회로 그대로 재사용한다(새로 계산
+    안 함)."""
+    from app.models.gate import Gate
+
+    work_item_type = payload.get("work_item_type")
+    work_item_id_raw = payload.get("work_item_id")
+    gate_type = payload.get("gate_type")
+    verdict = payload.get("verdict")
+    resolution_note = payload.get("resolution_note")
+
+    work_item_id: uuid.UUID | None = None
+    if work_item_id_raw:
+        try:
+            work_item_id = uuid.UUID(str(work_item_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            work_item_id = None
+
+    lines = ["[이벤트] preset.gate.verdict"]
+
+    work_item_ref: str | None = None
+    if work_item_type and work_item_id is not None:
+        work_item_ref = await _render_event_notification_work_item_ref(
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+        )
+    if work_item_ref:
+        lines.append(f"- work item: {work_item_ref}")
+    elif work_item_id_raw:
+        lines.append(f"- work_item_id: {work_item_id_raw}")
+
+    lines.append(f"- 게이트: {gate_type} → {verdict}")
+
+    if verdict == "rejected" and resolution_note:
+        lines.append(f"- 반려 사유: {resolution_note}")
+
+    draft_doc_ref: str | None = None
+    if work_item_type and work_item_id is not None and gate_type:
+        gate_row = (await db.execute(
+            select(Gate).where(
+                Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                Gate.status == verdict,
+            ).order_by(Gate.resolved_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if gate_row is not None:
+            token = (gate_row.neutral_facts or {}).get("draft_doc_reference_token")
+            if token and token != "미확認":
+                draft_doc_ref = token
+    if draft_doc_ref:
+        lines.append(f"- 대상 산출물: {draft_doc_ref}")
+
+    if verdict == "rejected":
+        lines.append("- 다음 행동: 반려 사유를 반영해 수정한 뒤 approve 게이트를 다시 발행하세요.")
+    elif verdict == "approved":
+        lines.append("- 다음 행동: 다음 stage를 진행하세요.")
+
+    return "\n".join(lines)
+
+
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict,
 ) -> str:
@@ -1281,7 +1348,13 @@ async def _render_event_message_content(
     definition_key+payload 골격만(값 없이 구조만). 회귀 0인 두 갈래(둘 다 기존 제네릭
     그대로): ①block_template가 있는 정의(P2 렌더러가 그 정의는 이미 담당) ②stage_metadata가
     비어있는 비사이클형 정의("담당자 없는 stage는 모르면 안 준다" 원칙과 동일 — 지어낼
-    stage_metadata 자체가 없다)."""
+    stage_metadata 자체가 없다).
+
+    story #3330 — `preset.gate.verdict`는 `stage_metadata`가 없는 비사이클형 정의라
+    ②로 떨어져 여태 제네릭 폴백뿐이었다(반려 사유·산출물 링크·다음 행동이 전혀 안
+    실림). 그 키만 전용 렌더(`_render_gate_verdict_message`)로 먼저 갈라낸다."""
+    if definition.key == "preset.gate.verdict":
+        return await _render_gate_verdict_message(db, org_id=org_id, payload=payload)
     if definition.block_template is not None or not definition.stage_metadata:
         return "\n".join(_generic_event_message_lines(definition.key, payload))
 
