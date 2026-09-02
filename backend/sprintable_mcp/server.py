@@ -573,8 +573,11 @@ _TOOL_DEFS: list[tuple] = [
      " 생긴다(story #2282).",
      ListDocsInput, list_docs),
     ("sprintable_get_doc",
-     "[지식] slug로 문서 단건 조회. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
-     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
+     "[지식] slug 또는 doc_id로 문서 단건 조회(둘 중 하나 필수, story #3324) — 이벤트 payload·"
+     "참조 토큰(entity:doc:id)·게이트 neutral_facts가 주는 id를 doc_id에 그대로 넣으면 열린다"
+     "(예전엔 slug만 받아 그 id들로 «Doc not found»가 났다). 응답 reference_token 필드가 이"
+     " 문서를 가리키는 참조 토큰([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가"
+     " 생긴다(story #2282).",
      GetDocInput, get_doc),
     ("sprintable_search_docs",
      "[지식] 문서 제목/본문 검색.",
