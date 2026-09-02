@@ -2652,9 +2652,19 @@ async def send_message(
     # story #2747(2026-08-25, PO 판정) — 이 메시지가 draft 상태 doc을 mention했으면 작성자에게
     # 1회성 넛지(결재 상신 여부를 묻는다). msg_references가 이미 이 메시지의 stored doc
     # 참조를 갖고 있어(위) 재파싱 불요 — target_type=="doc"인 것만 실 Doc 행 조회.
-    _mentioned_doc_ids = {
-        uuid.UUID(r["target_id"]) for r in msg_references if r.get("target_type") == "doc"
-    }
+    #
+    # story d1f4afcb(2026-09-02, 담롱 그라운딩·PO 판정) — ①이 넛지는 **사람의 대화 맥락**
+    # 전용이다. `body.event_context is not None`이면 이 메시지는 publish_registry_event가
+    # 만든 시스템 판정 카드(예: preset.gate.verdict 반려 통지)다 — 그런 메시지가 우연히
+    # draft doc을 참조해도(예: neutral_facts의 draft_doc_reference_token이 텍스트에 실려
+    # auto-mention됨) 사람이 "논의"한 게 아니므로 넛지를 내지 않는다. 반려 통지와 같은 초에
+    # 「결재 상신하시겠습니까?」가 나란히 도착해 실행자를 엉뚱한 경로(submit_for_approval)로
+    # 유인하던 실사고(3바퀴 4바퀴 측정, conv 0b0e61eb)의 처방.
+    _mentioned_doc_ids = (
+        {uuid.UUID(r["target_id"]) for r in msg_references if r.get("target_type") == "doc"}
+        if body.event_context is None
+        else set()
+    )
     if _mentioned_doc_ids and conv.project_id:
         try:
             from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
