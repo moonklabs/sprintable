@@ -44,6 +44,7 @@ class ConnectorResponse(BaseModel):
     channel: str
     fields: list[ConnectorFieldEntry]
     requires_env: list[str]
+    kinds: list[str] | None = None
     org_config: dict
 
 
@@ -52,6 +53,7 @@ class SetConnectorSchemaRequest(BaseModel):
     channel: str
     fields: list[ConnectorFieldEntry]
     requires_env: list[str] = []
+    kinds: list[str] | None = None
 
 
 class SetConnectorConfigRequest(BaseModel):
@@ -62,7 +64,7 @@ def _to_response(row) -> ConnectorResponse:
     return ConnectorResponse(
         connector_key=row.connector_key, version=row.version, channel=row.channel,
         fields=[ConnectorFieldEntry(**f) for f in row.fields], requires_env=row.requires_env,
-        org_config=row.org_config,
+        kinds=row.kinds, org_config=row.org_config,
     )
 
 
@@ -102,7 +104,7 @@ async def post_connector_schema(
         row = await set_org_connector_schema(
             session, org_id=org_id, connector_key=key, version=body.version, channel=body.channel,
             fields=[f.model_dump(exclude_none=True) for f in body.fields], requires_env=body.requires_env,
-            created_by=uuid.UUID(auth.user_id),
+            kinds=body.kinds, created_by=uuid.UUID(auth.user_id),
         )
     except InvalidConnectorSchemaError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

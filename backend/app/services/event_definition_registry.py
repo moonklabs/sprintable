@@ -355,6 +355,31 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                     f"stage_metadata[{slug!r}].gate.approver는 {sorted(APPROVER_ROLE_REFERENCES)} "
                     f"중 하나여야 합니다 — {gate.get('approver')!r}은 닫힌 어휘 밖입니다."
                 )
+        # story #3317 PR B(마케팅자동화·레시피 결함, PO 확定 2026-09-02) — capability도 gate와
+        # 동형: 선택 필드지만 있으면 shape 강제(오타 방치 금지). ⚠️kind는 gate.approver와
+        # 달리 **닫힌 어휘가 아니다** — PO 명시("제품은 능력, 규칙/값은 조직" 그라운드룰):
+        # 'publish' 외 'collect'/'measure'/'read' 등 조직이 뜻을 정하는 값이라 서버는 "비어
+        # 있지 않은 문자열"만 강제하고 뜻은 안 따진다. connector_key는 선택(있으면 그 커넥터
+        # 하나를 지정, 없으면 apply 검증이 org_connector_registry.kinds로 느슨 매칭한다 —
+        # services/connector_registry.py::find_org_connectors_by_kind 참조).
+        if "capability" in meta:
+            capability = meta["capability"]
+            if not isinstance(capability, dict):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability는 object({{kind, connector_key?}})여야 "
+                    f"합니다 — {type(capability).__name__} 아님."
+                )
+            if not isinstance(capability.get("kind"), str) or not capability["kind"]:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability.kind는 비어있지 않은 문자열이어야 합니다."
+                )
+            if "connector_key" in capability and (
+                not isinstance(capability["connector_key"], str) or not capability["connector_key"]
+            ):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability.connector_key는 있으면 비어있지 않은 "
+                    f"문자열이어야 합니다."
+                )
 
 
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:

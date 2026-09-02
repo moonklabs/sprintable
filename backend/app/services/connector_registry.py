@@ -89,6 +89,13 @@ async def get_org_connector(
     )).scalars().one_or_none()
 
 
+def _validate_kinds_shape(kinds: list | None) -> None:
+    if kinds is None:
+        return  # 미제공 커넥터(구 wire·0.7.0) — kind 매칭에서 "미지원"과 동일하게 취급.
+    if not isinstance(kinds, list) or not all(isinstance(k, str) and k for k in kinds):
+        raise InvalidConnectorSchemaError("kinds는 비어있지 않은 문자열의 배열이어야 합니다.")
+
+
 async def set_org_connector_schema(
     session: AsyncSession,
     *,
@@ -98,25 +105,28 @@ async def set_org_connector_schema(
     channel: str,
     fields: list,
     requires_env: list,
+    kinds: list | None = None,
     created_by: uuid.UUID | None,
 ) -> OrgConnectorRegistry:
     """POST /connectors/{key} — describe_connector 반환을 그대로 upsert. 기존 org_config
     값은 보존한다(스키마 재등록이 이미 설정된 값을 지우면 재등록할 때마다 재설정을 강요하는
     회귀가 되므로 — org_domain_label과 달리 이 테이블은 "설정값 저장소"까지 겸하는 자리라
-    schema-only 필드만 갱신)."""
+    schema-only 필드만 갱신). `kinds`(story #3317 PR B, 플러그인 0.8.1)도 스키마 데이터라
+    재등록 시 같이 갱신(org_config와 달리 보존 대상 아님)."""
     _validate_fields_shape(fields)
     _validate_requires_env_shape(requires_env)
+    _validate_kinds_shape(kinds)
 
     vals = dict(
         org_id=org_id, connector_key=connector_key, version=version, channel=channel,
-        fields=fields, requires_env=requires_env, created_by=created_by,
+        fields=fields, requires_env=requires_env, kinds=kinds, created_by=created_by,
     )
     stmt = pg_insert(OrgConnectorRegistry.__table__).values(**vals)
     stmt = stmt.on_conflict_do_update(
         index_elements=["org_id", "connector_key"],
         set_={
             "version": version, "channel": channel, "fields": fields,
-            "requires_env": requires_env, "updated_at": func.now(),
+            "requires_env": requires_env, "kinds": kinds, "updated_at": func.now(),
         },
     )
     await session.execute(stmt)
@@ -163,6 +173,29 @@ def _check_value_type(name: str, value, field: dict) -> None:
                     f"org_config[{name!r}]의 원소는 전부 itemType={item_type!r}이어야 합니다 — "
                     f"어긋난 값: {bad!r}"
                 )
+
+
+def missing_required_org_config(row: OrgConnectorRegistry) -> list[str]:
+    """story #3317 PR B — 그 커넥터의 source=org_config·required=true 필드 중 아직
+    org_config에 값이 없는 이름 목록(apply 검증이 이걸로 warnings[] 문구를 짓는다)."""
+    required_names = [
+        f["name"] for f in row.fields if f.get("source") == "org_config" and f.get("required")
+    ]
+    return [name for name in required_names if name not in row.org_config]
+
+
+async def find_org_connectors_by_kind(
+    session: AsyncSession, *, org_id: uuid.UUID, kind: str,
+) -> list[OrgConnectorRegistry]:
+    """story #3317 PR B — connector_key 없이 capability.kind만 선언된 경우, 이 org에
+    등록된 커넥터 중 `kinds`에 그 kind가 들어있는 것들. `kinds`가 NULL(구 wire·0.7.0
+    등록분)인 행은 후보에서 빠진다(그 kind를 "지원 안 함"으로 취급 — 지어내지 않음).
+    SQLite/Postgres 공용 필터가 어려운 JSONB 배열 포함 검사라 파이썬 레벨에서 거른다(이
+    org의 커넥터 등록 수는 소수라 성능 문제 없음)."""
+    rows = (await session.execute(
+        select(OrgConnectorRegistry).where(OrgConnectorRegistry.org_id == org_id)
+    )).scalars().all()
+    return [r for r in rows if r.kinds and kind in r.kinds]
 
 
 async def set_org_connector_config(
