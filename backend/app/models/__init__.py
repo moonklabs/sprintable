@@ -108,6 +108,7 @@ from app.models.workflow_trigger_type import WorkflowTriggerType
 # 결함 클래스가 그 사이 독립적으로 5번 더 재발한 것). 가드가 스스로를 증명한 사례라 여기서
 # 같이 정리한다(발견 즉시 수정) — FK 의존 없음(전수 확認), 등재 저위험.
 from app.models.billing_order import BillingOrder
+from app.models.connector_registry import OrgConnectorRegistry
 from app.models.domain_label import OrgDomainLabel
 from app.models.org_billing_key import OrgBillingKey
 from app.models.platform_setting import PlatformSetting
@@ -243,6 +244,7 @@ __all__ = [
     "WorkflowTriggerType",
     "BillingOrder",
     "OrgDomainLabel",
+    "OrgConnectorRegistry",
     "OrgBillingKey",
     "PlatformSetting",
     "RejectedRelation",

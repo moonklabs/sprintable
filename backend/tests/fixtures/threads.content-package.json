@@ -1,0 +1,1 @@
+{"connector_key":"threads","version":"1.0.0","channel":"threads","fields":[{"name":"text","type":"string","source":"content","required":true,"constraints":{"maxLength":500}}],"requires_env":["THREADS_ACCESS_TOKEN","THREADS_USER_ID"]}
