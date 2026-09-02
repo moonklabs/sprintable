@@ -55,14 +55,6 @@ async def _project_org_id(session: AsyncSession, project_id: uuid.UUID) -> uuid.
     return row[0]
 
 
-async def _assert_project_write_access(session: AsyncSession, *, actor: uuid.UUID, project_id: uuid.UUID, org_id: uuid.UUID) -> None:
-    if not (
-        (await get_project_role(session, actor, project_id)) == "owner"
-        or await is_org_owner_or_admin(session, actor, org_id)
-    ):
-        raise HTTPException(status_code=403, detail="project owner or org owner/admin required")
-
-
 async def _definition_title(session: AsyncSession, *, org_id: uuid.UUID, key: str) -> str | None:
     from app.models.event_definition import EventDefinition
     from sqlalchemy import or_
@@ -119,7 +111,12 @@ async def list_repeat_schedules(
     session: AsyncSession = Depends(get_db),
 ) -> list[RepeatScheduleResponse]:
     org_id = await _project_org_id(session, project_id)
-    await _assert_project_write_access(session, actor=uuid.UUID(auth.user_id), project_id=project_id, org_id=org_id)
+    actor = uuid.UUID(auth.user_id)
+    if not (
+        (await get_project_role(session, actor, project_id)) == "owner"
+        or await is_org_owner_or_admin(session, actor, org_id)
+    ):
+        raise HTTPException(status_code=403, detail="project owner or org owner/admin required")
 
     rows = (await session.execute(
         select(RecipeRepeatSchedule)
@@ -146,7 +143,12 @@ async def run_repeat_schedule_now(
     from app.services.recipe_repeat_scheduler import _run_one_schedule_cycle
 
     org_id = await _project_org_id(session, project_id)
-    await _assert_project_write_access(session, actor=uuid.UUID(auth.user_id), project_id=project_id, org_id=org_id)
+    actor = uuid.UUID(auth.user_id)
+    if not (
+        (await get_project_role(session, actor, project_id)) == "owner"
+        or await is_org_owner_or_admin(session, actor, org_id)
+    ):
+        raise HTTPException(status_code=403, detail="project owner or org owner/admin required")
 
     try:
         schedule = (await session.execute(
@@ -182,7 +184,12 @@ async def resume_repeat_schedule(
     카운트를 들고 가면 재개 즉시 1~2회만 더 실패해도 다시 3회 문턱에 걸린다)·pause_reason
     클리어(더 이상 paused가 아니므로 "왜 멈췄나"는 무의미)."""
     org_id = await _project_org_id(session, project_id)
-    await _assert_project_write_access(session, actor=uuid.UUID(auth.user_id), project_id=project_id, org_id=org_id)
+    actor = uuid.UUID(auth.user_id)
+    if not (
+        (await get_project_role(session, actor, project_id)) == "owner"
+        or await is_org_owner_or_admin(session, actor, org_id)
+    ):
+        raise HTTPException(status_code=403, detail="project owner or org owner/admin required")
 
     schedule = await _get_schedule_or_404(session, project_id=project_id, schedule_id=schedule_id)
     schedule.status = "active"
@@ -203,7 +210,12 @@ async def pause_repeat_schedule(
 ) -> RepeatScheduleResponse:
     """active→paused(사람이 직접 중지 — 정지 조건 3종과 구별되는 4번째 사유)."""
     org_id = await _project_org_id(session, project_id)
-    await _assert_project_write_access(session, actor=uuid.UUID(auth.user_id), project_id=project_id, org_id=org_id)
+    actor = uuid.UUID(auth.user_id)
+    if not (
+        (await get_project_role(session, actor, project_id)) == "owner"
+        or await is_org_owner_or_admin(session, actor, org_id)
+    ):
+        raise HTTPException(status_code=403, detail="project owner or org owner/admin required")
 
     schedule = await _get_schedule_or_404(session, project_id=project_id, schedule_id=schedule_id)
     schedule.status = "paused"
