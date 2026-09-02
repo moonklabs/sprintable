@@ -244,6 +244,13 @@ async def maybe_create_stage_gate(
         db, org_id=org_id, definition=definition, stage=stage,
         work_item_type=work_item_type, work_item_id=work_item_id, payload=payload,
     )
+    # story #3340(선생님 4바퀴 실사고) — 이 게이트를 만든 stage 이벤트의 발행자를 doc
+    # 게이트와 동일 키(requested_by_member_id)로 기록한다. maybe_create_stage_gate는
+    # requester_member_id를 이미 받고 있었지만(create_gate 호출에만 쓰였다) neutral_facts엔
+    # 안 실려 "게이트 요청자"가 어디에도 안 남았다 — _publish_gate_verdict_notification이
+    # 이 값을 읽어 반려/승인 통지 수신자에 합류시킨다(work_item 미배정 시 그 통지가
+    # «시스템 발행 혼자 있는 방»에 갇히던 결함의 근본 처방).
+    neutral_facts["requested_by_member_id"] = str(requester_member_id)
 
     from app.services.approval_delivery import dispatch_approval_request_cards
     from app.services.gate_service import (

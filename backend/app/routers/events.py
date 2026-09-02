@@ -1654,6 +1654,22 @@ async def _publish_registry_event_core(
 
     participant_ids = {sender.id} | escalation_ids | broadcast_ids
 
+    # story #3340(선생님 4바퀴 실사고, 페드루 PO 확定 — 시스템 발행만 좁힘) — escalation·
+    # broadcast 둘 다 빈 집합이면 참가자는 sender 하나뿐이 된다. 사람이 publish_event를
+    # 직접 호출한 경우는 그 응답의 zero_reach_warning을 읽는 사람이 있으니 현행 유지
+    # (범위 밖) — 여기는 `publish_preset_event`(서버 자동전이, 응답을 아무도 안 읽는다)
+    # 발신만 좁혀서, «시스템 발행 혼자 있는 방»(2026-08-19 생성 group 같은 사례)에 통지가
+    # 쌓이고 아무도 못 보는 경로를 없앤다 — project human owner(project_auth.py::
+    # resolve_project_relay_owner, sprint relay용으로 이미 존재하는 project owner→org
+    # owner→admin 순위 폴백을 그대로 재사용) 없으면 org owner/admin 순으로 대신 넣는다.
+    _is_system_publisher = auth.claims.get("app_metadata", {}).get("api_key_id") == "system-publisher"
+    if _is_system_publisher and not (escalation_ids | broadcast_ids) and project_id is not None:
+        from app.services.project_auth import resolve_project_relay_owner
+
+        _relay_owner_id = await resolve_project_relay_owner(db, project_id, org_id)
+        if _relay_owner_id is not None:
+            participant_ids.add(_relay_owner_id)
+
     if conversation_id is not None:
         # story #2935(설계 doc §2 보강) — 지정 conversation에 바로 발행. sender의 참가자
         # 여부는 send_message()의 기존 인가가 그대로 검증(및 human+non-dm이면 auto-join)한다
