@@ -33,6 +33,7 @@ list_stories(...)`처럼 **직접 호출**하는 테스트가 흔한데(HTTP 왕
 시점에 거치는 자리라, 여기 적어야 «다음 사람도» 읽는다.
 """
 import ast
+import inspect
 import os
 import re
 import uuid
@@ -184,11 +185,20 @@ def _reset_schema_for_destructive_tests(request):
 # 246개 파일에 이미 있는 개별 `_dispose_global_engine_after_test`는 지금 걷어내지 않는다
 # (중복 dispose는 완전히 무해 — 이미 빈 풀을 한 번 더 비우는 것뿐) — 대량 편집은 별도
 # 스토리(a05da51b, 카디르 QA 지적)에서 그 fixture 자체를 걷어내는 정리와 함께.
-@pytest.fixture(autouse=True)
-async def _dispose_global_engine_for_non_destructive_tests(request):
-    if request.node.get_closest_marker(_MARKER_NAME) is not None:
-        yield
-        return
+@pytest.fixture
+async def _dispose_global_engine_for_non_destructive_tests():
+    """story #3330(PR#3711) — 이 fixture 자체는 **autouse가 아니다**(의도적). 아래
+    `pytest_collection_modifyitems`가 non-destructive **async** 테스트에만 collection
+    시점에 `item.fixturenames`로 주입한다.
+
+    ⛔`autouse=True`를 직접 걸었던 초판은 story #2662의 서브프로세스 메타테스트
+    (`test_setup_phase_failure_also_gets_diagnosed`)를 깼다 — pytest-asyncio strict
+    모드가 "async fixture가 autouse로 걸려 있는데 그 테스트가 async 참여를 선언 안
+    했다"를 **fixture 본문 진입 전에**(dispatch 시점) 감지해 `PytestRemovedIn9Warning`을
+    던진다. 본문 안에서 `inspect.iscoroutinefunction` 등으로 걸러도 이미 늦다(본문
+    자체가 실행되기 전에 경고가 남) — sync 테스트엔 이 fixture가 **애초에 요청되지
+    않아야** 한다. autouse를 버리고 collection 시점에 "async 테스트에만" 조건부로
+    끼워 넣는 것으로 근본 해결."""
     yield
     from app.core.database import engine as _global_engine
     await _global_engine.dispose()
@@ -327,6 +337,19 @@ def pytest_collection_modifyitems(items: list) -> None:
             "  · destructive만(파일별 독립 신선 DB 권장): uv run pytest -m destructive_schema ...\n"
             f"이번 수집에 섞인 destructive 파일{more}:\n" + "\n".join(preview)
         )
+
+    # story #3330(PR#3711) — `_dispose_global_engine_for_non_destructive_tests`(위)를
+    # non-destructive **async** 테스트에만 collection 시점에 주입한다. `autouse=True`로
+    # 직접 걸면 sync 테스트도 이 async fixture를 "요청"한 것으로 잡혀 pytest-asyncio
+    # strict 모드가 fixture 본문 진입 前에 `PytestRemovedIn9Warning`을 던진다(story
+    # #2662의 서브프로세스 메타테스트가 이 경고로 진단 출력 형태가 깨져 실측 발견) —
+    # sync 테스트는 이 fixture를 아예 몰라야 한다. `inspect.iscoroutinefunction`으로
+    # "실행 시점에 걸러도" 이미 늦으므로(경고는 dispatch 시점에 남), collection
+    # 시점의 `item.fixturenames` 주입만이 sync 테스트를 완전히 비켜간다.
+    for item in non_destructive_items:
+        test_func = getattr(item, "function", None)
+        if inspect.iscoroutinefunction(test_func):
+            item.fixturenames.append("_dispose_global_engine_for_non_destructive_tests")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
