@@ -47,6 +47,20 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    """PR#3711 CI flake(RuntimeError: Event loop is closed) 조사에서 발견 — 실제로 메시지를
+    발행하는 realdb 테스트(publish_registry_event 경유)는 `send_message`의 background task
+    (`mark_agent_replied`)가 이 테스트의 throwaway 엔진이 아니라 `app.core.database.
+    async_session_factory`(전역·프로세스 수명)를 쓴다. pytest-anyio가 테스트마다 새 이벤트
+    루프를 만들어 dispose 없이 두면 다음 테스트가 "이전 루프에 묶인" 커넥션을 재사용하려다
+    누수 경고/`Event loop is closed`로 이어진다(test_3330_gate_verdict_notification.py에서
+    실측 재현·정정). 이 realdb 하네스 246개 파일이 이미 쓰는 표준 방어 fixture 재사용."""
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
+
+
 # ============================================================================
 # 1부 — validate_block_template_refs 순수 단위 테스트(DB 불요, test_2637_block_template_
 # validation.py와 동형 패턴).
