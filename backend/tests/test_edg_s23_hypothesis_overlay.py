@@ -59,6 +59,12 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     # story #2982 — 이미해소 가드(status!='pending'이면 409)도 MagicMock 오토속성(항상
     # not-None)을 "이미 해소됨"으로 오독한다. "pending"으로 명시해 그 가드도 대상 밖임을 밝힌다.
     _g.status = "pending"
+    # story #3319 — designated_approver_id도 MagicMock 오토속성 함정(바로 위 #2975/#2982와 동형):
+    # None이 아니면 _non_doc_can_approve가 「캐스팅된 담당자만」분기로 먼저 판정해버려, 이 테스트가
+    # 몽키패치한 _non_doc_gate_approvable(항상 True)이 아예 호출되지 않고 403으로 실패한다. 이
+    # 테스트의 관심사(resolver_id 강제)는 designated_approver_id 축과 무관하므로 명시적으로
+    # None(정책 미설정) 고정해 기존 org-role 폴백 경로 그대로 대상 밖임을 밝힌다.
+    _g.designated_approver_id = None
     _gr.scalar_one_or_none.return_value = _g
     _sess.execute = AsyncMock(return_value=_gr)
     from fastapi import BackgroundTasks

@@ -45,6 +45,11 @@ def _non_doc_gate_session():
         # story #2982 — 이미해소 가드(status!='pending'이면 409)도 이 값을 읽는다. SimpleNamespace는
         # 미선언 속성이 AttributeError라 명시 필요 — "pending"으로 그 가드가 대상 밖임을 분명히 한다.
         status="pending", resolver_id=None, resolved_at=None,
+        # story #3319 — _authorize_gate_approve_equivalent(비-doc 분기)가 이제 이 필드를
+        # _non_doc_can_approve 호출부 kwarg로 읽는다(위 다른 None 필드들과 동일 이유로 명시
+        # 필요 — 이 파일의 관심사는 resolver_id 강제이지 designated 정책 판정이 아니므로
+        # None="정책 미설정"으로 그 축을 대상 밖임을 분명히 한다).
+        designated_approver_id=None,
     )
     s.execute = AsyncMock(return_value=gr)
     return s

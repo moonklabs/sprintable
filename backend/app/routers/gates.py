@@ -520,8 +520,28 @@ async def _non_doc_can_approve(
     user_id: uuid.UUID,
     org_id: uuid.UUID,
     project_id: uuid.UUID | None,
+    designated_approver_id: uuid.UUID | None = None,
+    caller_member_id: uuid.UUID | None = None,
 ) -> bool:
     """gate_type 별 규칙 dispatch.
+
+    story #3319(2026-09-02, 선생님 처방 확定) — ``designated_approver_id``가 있으면 gate_type을
+    안 가리고 그 1인에게만 승인 자격을 좁힌다(최우선 단락 — 아래 gate_type별 규칙보다 먼저
+    적용). 실사고: 머지 게이트에 org policy로 지정 승인자를 넣어도(create_gate 호출부만
+    고치면) 이 함수가 그 값을 안 봐서 project/org owner 전원이 여전히 승인 가능했다 —
+    designated_approver_id 배선과는 **별개**의 인가 로직이 필요했다. 영향 범위는 머지뿐 아니라
+    designated_approver_id가 설정된 **모든** gate_type(레시피 external_publish 등)에 미친다 —
+    "지정 승인자만 결정"이 gate_type 무관 단일 규칙이 되는 것이 맞는 의미(PO 확定). 미지정
+    (None, 기본값)은 아래 기존 규칙 그대로 — 회귀 0.
+
+    ⚠️``user_id``는 이 함수 아래쪽 규칙(``is_org_owner_or_admin``/``get_project_role``)이
+    쓰는 **user 축**(org_members.user_id)인 반면, ``Gate.designated_approver_id``는 **member
+    축**(org_members.id/team_members.id, story #2985)이다 — 두 공간이 다르므로
+    ``user_id == designated_approver_id`` 비교는 항상 거짓(다른 uuid 공간)이 되는 조용한
+    버그였다(첫 구현에서 실측으로 발견 — 지정 승인자 본인도 403이 남). 그래서 caller의
+    **member id**(호출부가 이미 ``resolve_member()``로 갖고 있는 ``resolved.id``)를 별도
+    인자로 받는다 — user_id를 여기서 다시 member_id로 해소하는 신규 쿼리를 만들지 않는다
+    (호출부 재사용, N+1 없음).
 
     - artifact_canonicalize: **휴먼 전용**(추가 role 제약 없음). E-CANVAS C4-S8(story a5118cb0)
       설계 주석(visual_artifacts.py propose_canonical_version 바로 위) — "승인/반려는 기존
@@ -532,6 +552,8 @@ async def _non_doc_can_approve(
     - 그 외(merge/pr_review/qa/deploy 등): rule B(``_non_doc_gate_approvable``, story #1974) —
       project owner/admin, project-무관 work_item 은 org owner/admin.
     """
+    if designated_approver_id is not None:
+        return caller_member_id is not None and caller_member_id == designated_approver_id
     if gate_type == "artifact_canonicalize":
         return True
     return await _non_doc_gate_approvable(session, user_id, org_id, project_id)
@@ -571,7 +593,10 @@ async def _authorize_gate_approve_equivalent(
         _project_id = await resolve_work_item_project_id(
             session, org_id, gate.work_item_type, gate.work_item_id,
         )
-        if not await _non_doc_can_approve(session, gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id):
+        if not await _non_doc_can_approve(
+            session, gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id,
+            designated_approver_id=gate.designated_approver_id, caller_member_id=resolved.id,
+        ):
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -848,16 +873,24 @@ async def list_gates(
     # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
     # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
     # 는 project_id 무관 항상 True).
-    approvable_cache: dict[tuple[str, uuid.UUID | None], bool] = {}
+    # story #3319 — designated_approver_id도 키에 편입해야 한다: 같은 (gate_type, project_id)
+    # 조합이라도 게이트마다 designated_approver_id가 다를 수 있어(예: 머지 게이트 A는 정책
+    # 적용 前 생성=None, B는 적용 後 생성=특정 멤버) 이걸 빼면 먼저 계산된 캐시값을 서로 다른
+    # 게이트가 잘못 공유한다(둘 다 project owner인데 A는 승인 가능·B는 designated 아니라
+    # 불가여야 하는데, 캐시가 A의 True를 B에도 돌려주는 사고).
+    approvable_cache: dict[tuple[str, uuid.UUID | None, uuid.UUID | None], bool] = {}
     eligible_ids: set[uuid.UUID] = set()
     if non_doc_gates and resolved is not None and resolved.type == "human":
-        # N+1 방지: gate 여러 건이 같은 (gate_type, project_id) 를 가리켜도 _non_doc_can_approve 는
-        # **고유 조합당 1회**만 호출(캐시) — gate 개수와 무관.
+        # N+1 방지: gate 여러 건이 같은 (gate_type, project_id, designated_approver_id) 를
+        # 가리켜도 _non_doc_can_approve 는 **고유 조합당 1회**만 호출(캐시) — gate 개수와 무관.
         for _resp, g in non_doc_gates:
             pid = project_id_by_work_item.get(g.work_item_id)
-            key = (g.gate_type, pid)
+            key = (g.gate_type, pid, g.designated_approver_id)
             if key not in approvable_cache:
-                approvable_cache[key] = await _non_doc_can_approve(session, g.gate_type, _uid, org_id, pid)
+                approvable_cache[key] = await _non_doc_can_approve(
+                    session, g.gate_type, _uid, org_id, pid,
+                    designated_approver_id=g.designated_approver_id, caller_member_id=resolved.id,
+                )
             if approvable_cache[key]:
                 eligible_ids.add(g.id)
 
@@ -1233,7 +1266,10 @@ async def get_gate_endpoint(
             )
             resp.can_approve = _reason is None and is_valid_transition(gate.status, "approved")
         elif resolved.type == "human":  # rule B 는 human 체크가 없어 여기서 fail-closed(list_gates 와 동형).
-            _approvable = await _non_doc_can_approve(session, gate.gate_type, _uid, org_id, project_id)
+            _approvable = await _non_doc_can_approve(
+                session, gate.gate_type, _uid, org_id, project_id,
+                designated_approver_id=gate.designated_approver_id, caller_member_id=resolved.id,
+            )
             resp.can_approve = _approvable and is_valid_transition(gate.status, "approved")
     return resp
 

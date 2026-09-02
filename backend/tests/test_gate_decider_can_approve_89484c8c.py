@@ -203,7 +203,7 @@ async def _run_non_doc_can_approve(project_role):
     org = uuid.uuid4()
     merge = SimpleNamespace(
         id=uuid.uuid4(), gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
-        neutral_facts={}, status="pending",
+        neutral_facts={}, status="pending", designated_approver_id=None,
     )
     gates_result = MagicMock()
     gates_result.scalars.return_value.all.return_value = [merge]
