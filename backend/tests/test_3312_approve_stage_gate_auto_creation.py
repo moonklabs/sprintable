@@ -133,6 +133,7 @@ _CYCLE_SCHEMA = {
         "stage": {"type": "string", "enum": ["draft", "approve", "publish"]},
         "work_item_type": {"type": "string"},
         "work_item_id": {"type": "string", "format": "uuid"},
+        "channel": {"type": "string"},
     },
 }
 _CYCLE_ROUTING = {
@@ -210,6 +211,81 @@ async def test_approve_stage_event_auto_creates_external_publish_gate():
             assert gate.status == "pending"
             assert gate.designated_approver_id == owner_member_id
             assert gate.org_id == org_id
+
+            # PO 변경요청①(2026-09-02) — neutral_facts가 카드에서 «무엇을 승인하는지» 보이게.
+            # 이 케이스는 channel/링크된 draft doc이 없으므로 그 둘은 «미확認»이어야 한다
+            # (지어내지 않음 — 다음 테스트가 값 있는 happy-path를 커버).
+            facts = gate.neutral_facts
+            assert facts["work_item_title"] == "레시피 산출물"
+            assert facts["work_item_reference_token"] == f"[레시피 산출물](entity:story:{story_id})"
+            assert facts["channel"] == "미확認"
+            assert facts["draft_doc_reference_token"] == "미확認"
+            assert facts["draft_doc_summary"] == "미확認"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_approve_stage_event_neutral_facts_surface_channel_and_linked_draft_doc():
+    """PO 변경요청① happy-path — payload에 channel이 있고 그 story에 draft doc이(entity_references
+    로) 링크돼 있으면 카드가 실 채널·doc 참조 토큰·본문 첫 300자를 담는다."""
+    import datetime as dt
+
+    from app.routers.events import EventPublishRequest, publish_registry_event
+    from app.models.doc import Doc
+    from app.models.gate import Gate
+    from app.models.reference import Reference
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, _owner_member_id = await _seed_org_with_owner(s, slug="acme3312d")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+            doc = Doc(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="9월 캠페인 초안",
+                slug=f"campaign-draft-{uuid.uuid4().hex[:8]}", content="X" * 400,  # 300자 잘림 확인용
+            )
+            s.add(doc)
+            await s.commit()
+            s.add(Reference(
+                id=uuid.uuid4(), org_id=org_id,
+                source_type="doc", source_field="body", source_id=doc.id,
+                target_type="story", target_id=story_id,
+                form="mention", relation="none", created_at=dt.datetime.now(dt.timezone.utc),
+            ))
+            await s.commit()
+
+            definition_key = await _seed_recipe_definition(
+                s, org_id, slug="acme3312d",
+                stage_metadata={
+                    "approve": {
+                        "role": "Approver", "action": "승인",
+                        "gate": {"type": "external_publish", "approver": "org_owner"},
+                    },
+                },
+            )
+            body = EventPublishRequest(
+                definition_key=definition_key,
+                payload={
+                    "stage": "approve", "work_item_type": "story", "work_item_id": str(story_id),
+                    "channel": "twitter",
+                },
+            )
+            await publish_registry_event(
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+            )
+
+            gate = (await s.execute(
+                select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "external_publish")
+            )).scalar_one()
+            facts = gate.neutral_facts
+            assert facts["channel"] == "twitter"
+            assert facts["draft_doc_reference_token"] == f"[9월 캠페인 초안](entity:doc:{doc.id})"
+            assert facts["draft_doc_summary"] == "X" * 300
     finally:
         await engine.dispose()
 
@@ -285,5 +361,62 @@ async def test_stage_event_without_gate_declaration_creates_no_gate():
 
             gates = (await s.execute(select(Gate).where(Gate.work_item_id == story_id))).scalars().all()
             assert gates == []
+    finally:
+        await engine.dispose()
+
+
+# ─── AC5 — 커넥터용 조회 계약 = 기존 GET /api/v2/gates(필터: work_item_id·work_item_type·
+#     gate_type·status·sort). 새 라우트 없음(PO 확定, 2026-09-02) — 아래는 그 계약이 org
+#     스코프 밖 요청에서 0건을 낸다는 실증(카디르 QA 커버리지 요구 반영). ─────────────────
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_list_gates_returns_zero_for_work_item_outside_caller_org_scope():
+    """⭐AC5 — 에이전트 키 caller가 자기 org로 인증했지만 조회 필터(work_item_id)가 **다른
+    org**의 story/게이트를 가리키면 그 게이트가 새지 않는다(설령 그 story_id를 정확히 안다
+    해도). 실측: `list_gates`는 이 경우 빈 리스트가 아니라 `HTTPException(404)`를 낸다
+    (gates.py:673, "존재-비노출" 관례 — get_gate_endpoint 단건조회와 동일 판정축, 모듈
+    docstring 참조) — 그래서 이 테스트는 404를 단언한다(다른 org의 게이트 내용이 응답에
+    한 조각도 안 실림)."""
+    from fastapi import HTTPException
+
+    from app.routers.gates import list_gates
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_a_id, project_a_id, _owner_a = await _seed_org_with_owner(s, slug="acme3312e-a")
+            caller_id = await _seed_agent(s, org_a_id, project_a_id, name="caller")
+
+            org_b_id, project_b_id, owner_b_id = await _seed_org_with_owner(s, slug="acme3312e-b")
+            story_b_id = await _seed_story(s, org_b_id, project_b_id)
+            definition_key_b = await _seed_recipe_definition(
+                s, org_b_id, slug="acme3312eb",
+                stage_metadata={
+                    "approve": {
+                        "role": "Approver", "action": "승인",
+                        "gate": {"type": "external_publish", "approver": "org_owner"},
+                    },
+                },
+            )
+            publisher_b_id = await _seed_agent(s, org_b_id, project_b_id, name="publisher-b")
+            from app.routers.events import EventPublishRequest, publish_registry_event
+
+            await publish_registry_event(
+                EventPublishRequest(
+                    definition_key=definition_key_b,
+                    payload={"stage": "approve", "work_item_type": "story", "work_item_id": str(story_b_id)},
+                ),
+                BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_b_id, org_b_id), org_id=org_b_id,
+            )
+
+            with pytest.raises(HTTPException) as exc:
+                await list_gates(
+                    work_item_id=story_b_id, work_item_type="story", status=None, sort=None,
+                    gate_type="external_publish", assigned_to_me=False,
+                    session=s, org_id=org_a_id, auth=_auth(caller_id, org_a_id),
+                )
+            assert exc.value.status_code == 404, f"org 스코프 밖 게이트가 샜다 — {exc.value!r}"
     finally:
         await engine.dispose()
