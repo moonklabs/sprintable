@@ -166,6 +166,19 @@ async def maybe_upsert_repeat_schedule(
     )).scalar_one_or_none()
     if existing is None:
         return
+    # story #3349(실사고 2026-09-02 14:56Z) — 같은 정의를 다른 work item이 병렬로 발행하면
+    # (예: QA 테스트 스토리의 approve 발행) 이 유니크 키만으로는 "같은 회차"인지 구분이 안 돼
+    # last_story_id/snapshot이 그 work item으로 덮인다. 진행 中인 회차의 정체성은
+    # last_story_id로 이미 고정돼 있으므로, 이번 발행의 work_item이 그것과 다르면 무시한다
+    # (last_story_id가 아직 없는 스케줄엔 비교 축이 없으니 통과 — work_item_type != "story"로
+    # 생성된 케이스의 기존 동작 보존).
+    if existing.last_story_id is not None and existing.last_story_id != work_item_id:
+        logger.info(
+            "recipe_repeat_schedule: work_item=%s는 이 정의의 진행 中인 회차(last_story_id=%s)와 "
+            "다름 — 스냅샷/last_story_id 갱신 skip(정의=%s org=%s)",
+            work_item_id, existing.last_story_id, definition.key, org_id,
+        )
+        return
     snapshot = _snapshot_from_payload(payload)
     if snapshot:
         existing.last_payload_snapshot = {**existing.last_payload_snapshot, **snapshot}
