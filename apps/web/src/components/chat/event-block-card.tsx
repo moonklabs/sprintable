@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock } from '@/lib/block-template';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
-import { getEntityHref } from '@/components/chat/embed-card';
+import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 
 interface EventBlockCardProps {
   /** story #2637 AC2/PO 리뷰(head 80319636c ①) — 파싱은 chat-bubble.tsx가 미리 끝낸다. 이
@@ -41,29 +42,38 @@ const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
 // (`[제목](entity:type:id)`, escape 규칙까지 동일 — reference_token.py/mention_parser.py의
 // FE 미러). 이 카드의 인라인 렌더러는 원래 **bold**/`code`만 알아서, 이 토큰을 그대로 두면
 // 「대상: [제목](entity:doc:UUID)」처럼 UUID가 그대로 텍스트에 노출된다(story #2637 Q2
-// "UUID 노출 금지" 위반, 실측 — chat-bubble.test.tsx 회귀로 발견). 여기서 제목만 뽑아
-// getEntityHref로 얻은 href가 있으면 클릭 가능한 링크로, 없으면(예: task — 부모 조회가
-// 필요해 동기 해소 불가) 제목 텍스트만 보여준다(UUID는 어느 쪽이든 안 보인다).
-const ENTITY_TOKEN_RE = /\[((?:[^\]\\]|\\.)*)\]\(entity:([a-z_]+):([0-9a-fA-F-]+)\)/g;
-
-function unescapeTokenTitle(title: string): string {
-  return title.replace(/\\(.)/g, '$1');
-}
+// "UUID 노출 금지" 위반, 실측 — chat-bubble.test.tsx 회귀로 발견).
+//
+// PO 리뷰(PR#3714) — 채팅·결재 dialog(#3710)·문서·스토리 패널이 전부 같은 토큰 클래스를
+// `EntityChip`(embed-card.tsx SSOT)으로 그린다. 여기만 자체 `<a>`/`<span>`을 새로 짓지
+// 않는다(두 벌 금지) — 토큰 span 자체를 찾는 정규식만 이 파일 몫으로 남기고(ReactMarkdown
+// 없이 직접 정규식으로 훑는 소비부라 span 탐지 자체는 대체할 게 없다 — chat-bubble.tsx 등은
+// ReactMarkdown이 이미 `[title](href)`를 `<a>`로 갈라 주지만 이 렌더러는 그 파서가 없다),
+// href 파싱은 `parseEntityRef`(entity-ref.ts SSOT, 비-UUID는 null → 폴백)·제목 unescape는
+// `unescapeReferenceLabel`(같은 SSOT 파일 — ReactMarkdown이 없는 소비부 전용)·렌더는
+// `EntityChip` 그대로 재사용한다. `references` 사이드밴드가 없는 소비부라(서버가 발행
+// 시점에 계산한 합성 토큰 — 유령 판정 대상 아님) `resolveEmbedDecision` 없이 embed-card.tsx
+// `MdBody`의 references-less 패턴과 동형으로 ghost/referenceMeta 생략 기본값을 그대로 쓴다.
+const ENTITY_TOKEN_SPAN_RE = /\[((?:[^\]\\]|\\.)*)\]\(([^)]*)\)/g;
 
 function renderTextWithEntityTokens(text: string): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let lastEnd = 0;
   let i = 0;
-  for (const m of text.matchAll(ENTITY_TOKEN_RE)) {
-    const [full, rawTitle, entityType, entityId] = m;
+  for (const m of text.matchAll(ENTITY_TOKEN_SPAN_RE)) {
+    const [full, rawTitle, href] = m;
+    const ref = parseEntityRef(href);
+    if (!ref) continue;
     const start = m.index ?? 0;
     if (start > lastEnd) parts.push(<span key={i++}>{renderInlineMarkdown(text.slice(lastEnd, start))}</span>);
-    const title = unescapeTokenTitle(rawTitle);
-    const href = getEntityHref(entityType, entityId);
     parts.push(
-      href
-        ? <a key={i++} href={href} className="font-medium text-primary underline underline-offset-2">{title}</a>
-        : <span key={i++} className="font-medium text-foreground">{title}</span>,
+      <EntityChip
+        key={i++}
+        entityType={ref.entityType}
+        entityId={ref.entityId}
+        label={unescapeReferenceLabel(rawTitle)}
+        href={getEntityHref(ref.entityType, ref.entityId)}
+      />,
     );
     lastEnd = start + full.length;
   }

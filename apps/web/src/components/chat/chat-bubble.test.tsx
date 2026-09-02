@@ -982,17 +982,18 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       expect(container.textContent).toContain('제안서.md');
     });
 
-    it('story #3332 — {{ref.work_item}}이 UUID 없는 클릭 가능 링크(<a href>)로 렌더된다(Q2 UUID 노출 금지를 실제 링크로 만족)', async () => {
+    it('story #3332 — {{ref.work_item}}이 EntityChip(공유 SSOT)으로 렌더된다 — 칩 클릭 버튼·UUID 텍스트 0(PO 리뷰 PR#3714)', async () => {
       stubGate({ status: 'approved', title: '제안서.md', resolution_note: '근거가 충분합니다' });
       await act(async () => {
         root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
       });
-      const links = Array.from(container.querySelectorAll('a')).filter((a) => a.textContent === '제안서.md');
-      expect(links.length).toBeGreaterThan(0);
-      expect(links[0]?.getAttribute('href')).toBe(`/docs?id=${DOC_ID}`);
-      // 링크의 href 속성 안에는 UUID가 있는 게 정상(내비게이션 경로)이다 — textContent에만
-      // 없어야 한다(사람이 읽는 화면에 안 보이는 것이 Q2의 실제 요구, href 자체는 대상 아님).
-      expect(links[0]?.textContent).not.toContain(DOC_ID);
+      // EntityChip은 <a href>가 아니라 클릭 트리거 <button type="button">으로 렌더된다
+      // (embed-card.tsx — readingPanel.open 또는 모달을 여는 JS 핸들러, href는 내비게이션
+      // DOM 속성이 아니라 내부 상태로만 쓰인다). "링크"가 아니라 "칩(버튼)"이 도달 기준.
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('제안서.md'));
+      expect(chipButtons.length).toBeGreaterThan(0);
+      // Q2의 실제 요구: 화면 텍스트 어디에도 UUID가 없어야 한다(href 유무와 무관).
+      expect(container.textContent).not.toContain(DOC_ID);
     });
 
     it('PO 리뷰(head 81f7e4a7e) — resolved + 템플릿 있음 + resolution_note 없음(승인·사유 미기재) — 사유 행 자체가 안 뜬다(⟨missing⟩ 마커 노출 금지, 기존 카드와 동형 비회귀)', async () => {
@@ -1125,7 +1126,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     };
     const catalog = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, block_template: REF_TEMPLATE, enabled: true, version: 1 } };
 
-    it('event.refs에 값이 있으면 UUID 없는 클릭 가능 링크로 렌더된다(실제 배포 경로 — #3330 통지 카드)', async () => {
+    it('event.refs에 값이 있으면 EntityChip(공유 SSOT)으로 렌더된다 — 칩 클릭 버튼·UUID 텍스트 0(실제 배포 경로 — #3330 통지 카드)', async () => {
       const message: ChatMessage = {
         ...baseMessage,
         content: '[이벤트] preset.gate.verdict',
@@ -1140,9 +1141,8 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
         root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
       });
       expect(container.textContent).not.toContain(DOC_ID);
-      const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === 'Threads 포스트 초안');
-      expect(link).not.toBeUndefined();
-      expect(link?.getAttribute('href')).toBe(`/board?story=${DOC_ID}`);
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('Threads 포스트 초안'));
+      expect(chipButtons.length).toBeGreaterThan(0);
     });
 
     it('event.refs 자체가 없으면(구서버·work_item 페어 없는 payload) {{ref.work_item}}이 명시 플레이스홀더로 정직하게 드러난다(지어내지 않음)', async () => {
