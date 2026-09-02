@@ -25,6 +25,12 @@ import ast
 import sys
 from pathlib import Path
 
+# story #2662 AC2 양성대조 전용 픽스처(app/models/_test_only_unregistered_fixture.py) —
+# 의도적으로 영원히 __init__.py에 미등재 상태로 남아야 하는 유일한 예외. 이 파일을 등재하면
+# AC2 양성대조의 전제(app.models 벌크 import에 없다)가 깨진다. 새 운영 모델을 여기 추가하지
+# 말 것 — 그건 이 가드가 정확히 막으려는 결함이다.
+_INTENTIONALLY_UNREGISTERED = {"_test_only_unregistered_fixture"}
+
 
 def _models_with_tablename(models_dir: Path) -> dict[str, str]:
     """{module_stem: tablename} — app/models/*.py를 AST로 정적 스캔(import 0회)."""
@@ -61,7 +67,11 @@ def find_unregistered(models_dir: Path) -> dict[str, str]:
     """{module_stem: tablename} — __tablename__은 있는데 __init__.py에 안 잡힌 모듈만."""
     with_tablename = _models_with_tablename(models_dir)
     imported = _imported_module_stems(models_dir / "__init__.py")
-    return {stem: table for stem, table in with_tablename.items() if stem not in imported}
+    return {
+        stem: table
+        for stem, table in with_tablename.items()
+        if stem not in imported and stem not in _INTENTIONALLY_UNREGISTERED
+    }
 
 
 def main() -> int:

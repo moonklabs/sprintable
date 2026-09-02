@@ -84,3 +84,37 @@ def test_current_repo_has_zero_unregistered_models():
     유지되는지 CI가 도는 그 검사 자체를 pytest로도 한 번 더 고정한다."""
     models_dir = Path(__file__).parent.parent / "app" / "models"
     assert find_unregistered(models_dir) == {}
+
+
+def test_intentionally_unregistered_allowlist_suppresses_detection(tmp_path):
+    """PR#3700 리뷰(페드루, 2026-09-02) — story #2662 AC2 양성대조 픽스처
+    (app/models/_test_only_unregistered_fixture.py)는 __init__.py에 절대 등재하면 안 되는
+    유일한 예외. 허용목록이 이 stem을 정확히 걸러내는지 합성 fixture로 고정."""
+    _write(
+        tmp_path,
+        "_test_only_unregistered_fixture.py",
+        'class Fixture(Base):\n    __tablename__ = "test_2662_ac2_positive_control"\n',
+    )
+    _write(tmp_path, "__init__.py", "# no imports\n")
+    assert find_unregistered(tmp_path) == {}
+
+
+def test_mutation_empty_allowlist_would_have_flagged_the_fixture(tmp_path):
+    """뮤테이션 셀프체크 — 허용목록을 비우면 위 픽스처가 다시 탐지돼야 한다. 이 케이스가
+    실제로 허용목록 로직에 의존함을 증명(허용목록이 아무 효과 없이 늘 통과하는 게 아님)."""
+    import lint_model_registration_completeness as mod
+
+    original = mod._INTENTIONALLY_UNREGISTERED
+    try:
+        mod._INTENTIONALLY_UNREGISTERED = set()
+        _write(
+            tmp_path,
+            "_test_only_unregistered_fixture.py",
+            'class Fixture(Base):\n    __tablename__ = "test_2662_ac2_positive_control"\n',
+        )
+        _write(tmp_path, "__init__.py", "# no imports\n")
+        assert mod.find_unregistered(tmp_path) == {
+            "_test_only_unregistered_fixture": "test_2662_ac2_positive_control"
+        }, "허용목록을 비웠는데도 탐지가 안 되면 허용목록 로직 자체가 무동작이라는 뜻"
+    finally:
+        mod._INTENTIONALLY_UNREGISTERED = original
