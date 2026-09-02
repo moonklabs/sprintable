@@ -89,6 +89,20 @@ async def get_org_connector(
     )).scalars().one_or_none()
 
 
+# story 4180f67f(2026-09-02, PO 확定) — 단건 조회(get_org_connector)만 있고 "이 org에 등록된
+# 커넥터 전체"를 나열할 방법이 없었다(웹 설정 화면이 connector_key를 미리 알 방법이 없다는
+# 갭). connector_key 하드코딩(플러그인 3종)은 PO가 명시 기각 — 다른 조직이 자체 커넥터를
+# register_connector_schema로 올려도 화면에 안 뜨는 조직 상수 클래스가 된다.
+async def list_org_connectors(
+    session: AsyncSession, *, org_id: uuid.UUID,
+) -> list[OrgConnectorRegistry]:
+    return list((await session.execute(
+        select(OrgConnectorRegistry)
+        .where(OrgConnectorRegistry.org_id == org_id)
+        .order_by(OrgConnectorRegistry.connector_key)
+    )).scalars().all())
+
+
 def _validate_kinds_shape(kinds: list | None) -> None:
     if kinds is None:
         return  # 미제공 커넥터(구 wire·0.7.0) — kind 매칭에서 "미지원"과 동일하게 취급.

@@ -11,6 +11,7 @@ import {
   Layers,
   MessageSquare,
   Newspaper,
+  Plug,
   Settings,
   Shield,
   Users,
@@ -139,6 +140,8 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'org-workforce', labelKey: 'workforce', icon: Bot, kind: 'static', path: '/organization/workforce' },
       { id: 'org-roles', labelKey: 'orgRoles', icon: Shield, kind: 'static', path: '/organization/roles' },
       { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events' },
+      // story 4180f67f — 마케팅자동화 발행 커넥터(threads/stibee/instagram 등) org_config 설정 화면.
+      { id: 'org-connectors', labelKey: 'orgConnectors', icon: Plug, kind: 'static', path: '/organization/connectors' },
     ],
   },
   {
