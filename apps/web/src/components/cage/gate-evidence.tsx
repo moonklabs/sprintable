@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
-import { parseEntityRef } from '@/components/chat/entity-ref';
+import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 
 /**
@@ -126,15 +126,21 @@ interface ParsedReferenceToken {
 
 // BE reference_token.py::build_reference_token의 `[제목](entity:타입:id)` 산출물을 다시
 // 쪼갠다 — entity-ref.ts(SSOT)의 href 파서를 그대로 재사용, 제목만 이 자리에서 분리.
+//
+// ⚠️PO 변경요청①(2026-09-02, PR#3710 리뷰) — BE `_escape_title`이 라벨 안의 `\ [ ] ( )`를
+// `\`-escape해 저장한다(reference_token.py). unescapeReferenceLabel(entity-ref.ts SSOT — 원래
+// chat-report-density.ts에만 있던 규칙을 헬퍼로 승격)로 원복하지 않으면 실 제목(예: 이 팀
+// 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려 반영)")이 칩에 `\[...\] ... v2\(...\)`
+// 문자 그대로 새어 나간다 — 초기 구현이 이스케이프 없는 픽스처로만 테스트해 못 잡았던 자리.
 function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
   const s = realString(v);
   if (!s) return null;
   const m = s.match(/^\[(.*)\]\((.*)\)$/);
   if (!m) return null;
-  const [, label, href] = m;
+  const [, rawLabel, href] = m;
   const ref = parseEntityRef(href);
   if (!ref) return null;
-  return { ...ref, label, href: getEntityHref(ref.entityType, ref.entityId) };
+  return { ...ref, label: unescapeReferenceLabel(rawLabel), href: getEntityHref(ref.entityType, ref.entityId) };
 }
 
 interface RecipeApprovalFacts {
@@ -472,6 +478,14 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
  * story #3328 — 레시피 approve 게이트의 승인 대상 실물. work item·draft doc 참조 토큰은
  * EntityChip(entity-ref.ts SSOT 파서 재사용, 채팅과 같은 렌더러)로 클릭 가능하게. 요약은
  * 기본 접힘(카드 공간 절약, AC1 "접기 가능") — 없는 필드는 그냥 생략(지어내지 않음).
+ *
+ * ⚠️PO 변경요청②(2026-09-02, PR#3710 리뷰) — story #2420 규칙(HypothesisOutcomeDraft와
+ * 동일 근거, 위 참조): tint 배경(bg-muted/40) 위에서는 실 값(stage·channel)을 라벨과
+ * 같은 muted 톤으로 두지 않고 text-foreground로 — 두 톤이 겹치면 값이 라벨에 묻힌다.
+ * 라벨(필드명)만 muted 유지. WCAG 대비비 실측(globals.css --proof-ink/-ink-3/-sunk 기반,
+ * bg-muted/40을 카드/페이지 배경에 블렌드): text-foreground 16.2~17.4:1(라이트·다크 공통)
+ * vs 기존 text-muted-foreground 5.1~5.9:1(AA 4.5:1은 이미 통과하던 값이라 접근성 위반은
+ * 아니었으나, 값과 라벨의 시각적 위계가 안 갈렸다 — #2420과 동형 근거로 값을 승격).
  */
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const t = useTranslations('cage');
@@ -479,7 +493,10 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   return (
     <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
       {facts.stage ? (
-        <p className="text-muted-foreground">{t('recipeApprovalStageLabel')} · {facts.stage}</p>
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalStageLabel')} · </span>
+          <span className="text-foreground">{facts.stage}</span>
+        </p>
       ) : null}
       {facts.workItemRef ? (
         <div className="flex flex-wrap items-center gap-1">
@@ -504,7 +521,10 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
         </div>
       ) : null}
       {facts.channel ? (
-        <p className="text-muted-foreground">{t('recipeApprovalChannelLabel')} · {facts.channel}</p>
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalChannelLabel')} · </span>
+          <span className="text-foreground">{facts.channel}</span>
+        </p>
       ) : null}
       {facts.draftDocSummary ? (
         <div>

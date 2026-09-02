@@ -323,6 +323,42 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.querySelectorAll('[role="button"], a, button').length).toBeGreaterThan(0);
   });
 
+  // PO 변경요청①(2026-09-02, PR#3710 리뷰) — BE `_escape_title`(reference_token.py)이 라벨 안
+  // `\ [ ] ( )`를 백슬래시-escape한다. 초기 구현이 escape 없는 픽스처로만 테스트해 못 잡았던
+  // 자리 — 실 게이트 09631e56 제목(팀 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려
+  // 반영)")을 그대로 재현해, 칩 텍스트가 백슬래시 없이 원문 그대로 보이는지 검증한다.
+  it('⭐PO 변경요청① — 라벨 안 대괄호/괄호가 BE escape(\\[ \\] \\()된 실 제목도 백슬래시 없이 원문 그대로 렌더된다', async () => {
+    const gate = recipeApprovalGate({
+      draft_doc_reference_token:
+        '[\\[3바퀴·draft\\] 산출물 v2\\(276/500자·반려 반영\\)](entity:doc:33333333-3333-3333-3333-333333333333)',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('[3바퀴·draft] 산출물 v2(276/500자·반려 반영)');
+    expect(container.textContent).not.toContain('\\[3바퀴');
+    expect(container.textContent).not.toContain('v2\\(');
+  });
+
+  // PO 변경요청②(2026-09-02, PR#3710 리뷰) — story #2420 규칙: bg-muted/40 tint 위에서 값
+  // (stage·channel)은 라벨과 같은 muted 톤에 묻히지 않고 text-foreground여야 한다.
+  it('⭐PO 변경요청② — stage·channel 값은 text-foreground, 라벨만 text-muted-foreground(값이 묻히지 않음)', async () => {
+    const gate = recipeApprovalGate({ stage: 'approve', channel: 'threads' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    const stageValue = Array.from(container.querySelectorAll('.text-foreground'))
+      .find((el) => el.textContent === 'approve');
+    const channelValue = Array.from(container.querySelectorAll('.text-foreground'))
+      .find((el) => el.textContent === 'threads');
+    expect(stageValue).toBeTruthy();
+    expect(channelValue).toBeTruthy();
+  });
+
   it('AC1 — draft_doc_summary는 기본 접힘, 펼치기 클릭 후에만 본문이 DOM에 나타난다', async () => {
     const gate = recipeApprovalGate({
       channel: 'threads', draft_doc_summary: '펼쳐야 보이는 본문 텍스트',
