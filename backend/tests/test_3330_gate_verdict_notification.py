@@ -31,6 +31,22 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    """이 파일의 테스트는 실제로 메시지를 발행해 `send_message`의 background task
+    (`mark_agent_replied`)를 태운다 — 그 task는 이 테스트가 만든 throwaway 엔진이 아니라
+    `app.core.database.async_session_factory`(전역, 프로세스 수명 엔진)를 쓴다. pytest-anyio는
+    테스트 함수마다 새 이벤트 루프를 만드는데, 이 전역 엔진의 커넥션 풀을 dispose 없이 그대로
+    두면 다음 테스트(새 루프)가 그 풀에서 "이전 루프에 묶인" 커넥션을 재사용하려다
+    `Connection._cancel` 미await 경고·`Event loop is closed`로 이어진다(실측 확인 — 이 파일의
+    테스트 2개를 한 세션에서 돌리면 재현). 이 프로젝트 realdb 테스트 246개가 이미 쓰는
+    표준 방어 fixture(예: test_e_mcp_opt_ff6cb90d_multiproject_scoping_realdb.py)를
+    동일하게 적용 — 이 파일에 빠져 있던 것이 결함이었다."""
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
+
+
 async def _realdb_session():
     from sqlalchemy import text as sa_text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
