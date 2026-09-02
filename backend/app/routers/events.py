@@ -1112,10 +1112,20 @@ async def _render_event_message_content(
         # stage가 payload에 없거나 stage_metadata에 등재 안 됨 — 지어내지 않고 기존 폴백.
         return "\n".join(_generic_event_message_lines(definition.key, payload))
 
+    # PO 리뷰(페드루, 2026-09-02) — validate_stage_metadata의 role/action 필수 검증은
+    # 2026-08-19 이후 "쓰기 시점" 가드라, 그 전에 저장된 정의는 role/action이 누락된 채
+    # DB에 있을 수 있다. 직접 인덱싱(stage_meta['role'])하면 그 정의의 publish 자체가
+    # KeyError로 죽는다(알림 개선이 발행 회귀가 되는 자리) — .get()으로 방어, 하나라도
+    # 없으면 지어내지 않고 기존 제네릭 폴백.
+    role = stage_meta.get("role")
+    action = stage_meta.get("action")
+    if not role or not action:
+        return "\n".join(_generic_event_message_lines(definition.key, payload))
+
     lines = [
         f"[이벤트] {definition.key}",
-        f"- stage: {stage} ({stage_meta['role']})",
-        f"- 할 일: {stage_meta['action']}",
+        f"- stage: {stage} ({role})",
+        f"- 할 일: {action}",
     ]
 
     enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []

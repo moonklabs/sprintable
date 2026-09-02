@@ -339,3 +339,31 @@ async def test_stage_not_registered_in_stage_metadata_falls_back_to_generic():
             assert content == _generic_expected(definition_key, payload)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_legacy_stage_metadata_missing_action_falls_back_without_crashing_publish():
+    """⭐PO 리뷰(페드루, 2026-09-02) — validate_stage_metadata의 role/action 필수 검증은
+    2026-08-19 이후 "쓰기 시점" 가드라, 그 전에 저장된 정의는 role/action이 누락된 채 DB에
+    남아있을 수 있다(이 테스트가 그 레거시 shape을 직접 재현). 직접 인덱싱이면 publish 자체가
+    KeyError로 죽어 "알림 개선이 발행 회귀"가 됐을 자리 — .get() 방어로 발행은 성공하고
+    본문은 기존 제네릭으로 안전 폴백해야 한다."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="e3313g")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313g",
+                # action 누락(레거시) — validate_stage_metadata 신설 前 저장됐을 법한 shape.
+                stage_metadata={"monitor": {"role": "Scout"}},
+            )
+            payload = {"stage": "monitor", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )  # KeyError 없이 여기까지 도달하는 것 자체가 핵심 단언.
+            assert content == _generic_expected(definition_key, payload)
+    finally:
+        await engine.dispose()
