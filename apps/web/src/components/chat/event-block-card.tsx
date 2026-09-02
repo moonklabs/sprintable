@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock } from '@/lib/block-template';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
+import { getEntityHref } from '@/components/chat/embed-card';
 
 interface EventBlockCardProps {
   /** story #2637 AC2/PO 리뷰(head 80319636c ①) — 파싱은 chat-bubble.tsx가 미리 끝낸다. 이
@@ -16,6 +17,9 @@ interface EventBlockCardProps {
    * 갖지 않는 이유). */
   template: BlockTemplate;
   payload: Record<string, unknown>;
+  /** story #3332 — 서버가 발행 시점에 계산한 참조 토큰({{ref.X}} 해소용). 생략(구버전 캐시
+   * 등)은 undefined→{} 폴백(block-template.ts renderBlockTemplate 기본값)과 동형. */
+  refs?: Record<string, string | null>;
 }
 
 // story #2637 — 유나 design 스티어 2차(08-14, 재작업 방식까지 PR 前 확定).
@@ -26,10 +30,47 @@ interface EventBlockCardProps {
 // 오파싱될 위험이 있다(마커는 항상 리터럴 텍스트로 유지). renderBlockTemplate은 완성된
 // 문자열을 주므로 여기서 정규식으로 다시 갈라 부분 스타일만 입힌다(block-template.ts 파서
 // 자체는 순수 문자열 계약 그대로 유지 — 세그먼트 구조로 바꾸지 않는다).
-const MISSING_MARKER_RE = /(⟨missing: payload\.[a-zA-Z0-9_]+⟩)/g;
+// story #3332 — {{ref.X}}도 같은 "미해소=명시 마커" 원칙이라 시각적으로 동일하게 구분돼야
+// 한다(payload.와 ref. 두 네임스페이스를 하나의 alternation으로).
+const MISSING_MARKER_RE = /(⟨missing: (?:payload|ref)\.[a-zA-Z0-9_]+⟩)/g;
 // AC0-b 스펙 의도(굵게 `**…**`·코드 `` `…` ``)만 지원하는 최소 인라인 마크다운 — 그 밖의
 // 마크다운 문법(링크·이탤릭 등)은 AC0-b 예시에 없어 v1 범위 밖으로 다루지 않는다.
 const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+
+// story #3332 — {{ref.X}}가 치환하는 값은 BE `build_reference_token`과 정확히 같은 모양
+// (`[제목](entity:type:id)`, escape 규칙까지 동일 — reference_token.py/mention_parser.py의
+// FE 미러). 이 카드의 인라인 렌더러는 원래 **bold**/`code`만 알아서, 이 토큰을 그대로 두면
+// 「대상: [제목](entity:doc:UUID)」처럼 UUID가 그대로 텍스트에 노출된다(story #2637 Q2
+// "UUID 노출 금지" 위반, 실측 — chat-bubble.test.tsx 회귀로 발견). 여기서 제목만 뽑아
+// getEntityHref로 얻은 href가 있으면 클릭 가능한 링크로, 없으면(예: task — 부모 조회가
+// 필요해 동기 해소 불가) 제목 텍스트만 보여준다(UUID는 어느 쪽이든 안 보인다).
+const ENTITY_TOKEN_RE = /\[((?:[^\]\\]|\\.)*)\]\(entity:([a-z_]+):([0-9a-fA-F-]+)\)/g;
+
+function unescapeTokenTitle(title: string): string {
+  return title.replace(/\\(.)/g, '$1');
+}
+
+function renderTextWithEntityTokens(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let lastEnd = 0;
+  let i = 0;
+  for (const m of text.matchAll(ENTITY_TOKEN_RE)) {
+    const [full, rawTitle, entityType, entityId] = m;
+    const start = m.index ?? 0;
+    if (start > lastEnd) parts.push(<span key={i++}>{renderInlineMarkdown(text.slice(lastEnd, start))}</span>);
+    const title = unescapeTokenTitle(rawTitle);
+    const href = getEntityHref(entityType, entityId);
+    parts.push(
+      href
+        ? <a key={i++} href={href} className="font-medium text-primary underline underline-offset-2">{title}</a>
+        : <span key={i++} className="font-medium text-foreground">{title}</span>,
+    );
+    lastEnd = start + full.length;
+  }
+  if (lastEnd === 0) return renderInlineMarkdown(text);
+  if (lastEnd < text.length) parts.push(<span key={i++}>{renderInlineMarkdown(text.slice(lastEnd))}</span>);
+  return parts;
+}
 
 // PO 리뷰(head 57316d4e7, node 재현 첨부) — 예전엔 여기 "전체가 단일 토큰"일 때 렌더를
 // 건너뛰는 fast-path가 있었는데, 그 판별에 모듈 전역 /g 정규식의 .test()를 썼다. /g는
@@ -56,11 +97,11 @@ function renderInlineMarkdown(text: string): React.ReactNode {
 // (홀수 인덱스=캡처된 매치) 공유 정규식 객체의 lastIndex 상태와 완전히 무관하다.
 function renderTextWithMissingMarkers(text: string): React.ReactNode {
   const parts = text.split(MISSING_MARKER_RE);
-  if (parts.length === 1) return renderInlineMarkdown(text);
+  if (parts.length === 1) return renderTextWithEntityTokens(text);
   return parts.map((part, i) =>
     i % 2 === 1
       ? <em key={i} className="italic text-warning-strong">{part}</em>
-      : <span key={i}>{renderInlineMarkdown(part)}</span>,
+      : <span key={i}>{renderTextWithEntityTokens(part)}</span>,
   );
 }
 
@@ -80,11 +121,11 @@ function renderTextWithMissingMarkers(text: string): React.ReactNode {
  * admin/owner — team_members.role, `/api/me`가 내려주는 그 값)이다. 직무 템플릿 slug(예:
  * "backend-engineer")가 아니다 — 이름이 비슷해 헷갈리기 쉬운 축이라 명시한다.
  */
-export function EventBlockCard({ template, payload }: EventBlockCardProps) {
+export function EventBlockCard({ template, payload, refs }: EventBlockCardProps) {
   const t = useTranslations('chats');
   const { currentMemberType, role } = useDashboardContext();
 
-  const blocks = renderBlockTemplate(template, payload);
+  const blocks = renderBlockTemplate(template, payload, refs);
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">

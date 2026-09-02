@@ -19,6 +19,7 @@ import { renderStaticEventBlock } from '@/components/chat/event-block-card';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
+import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
 import { fetchWithAuth } from '@/lib/db/client';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast, ToastContainer } from '@/components/ui/toast';
@@ -484,8 +485,17 @@ function ApprovalRequestBody({
     const payload: Record<string, unknown> = {
       gate_type: gate.gate_type,
       verdict: verdictLabel,
-      work_item_title: title,
       resolution_note: gate.resolution_note ?? null,
+    };
+    // story #3332 — 0301 마이그가 preset.gate.verdict의 "대상" 필드를 {{payload.
+    // work_item_title}}(생 텍스트, payload_schema엔 있었으나 아무 발행처도 채운 적 없어
+    // 항상 ⟨missing⟩이었다)에서 {{ref.work_item}}(클릭 토큰)로 바꿨다. 이 카드는 서버가
+    // 계산해 주는 refs를 못 받으므로(자체 fetchGate() 데이터로 합성하는 카드) 여기서
+    // 직접 만든다 — title은 이 컴포넌트가 이미 쓰는 값(work_item_summary?.title 폴백
+    // 포함) 그대로, escapeMarkdownLinkText는 BE build_reference_token과 동일 escape
+    // 규칙(reference_token.py)의 FE 미러(chat-input-entity-tokens.ts) 재사용.
+    const refs: Record<string, string | null> = {
+      work_item: `[${escapeMarkdownLinkText(title)}](entity:${toEntityType(gate.work_item_type)}:${gate.work_item_id})`,
     };
     // PO 리뷰(head 81f7e4a7e) — resolution_note 없음은 템플릿 저자 실수(⟨missing⟩ 마커
     // 대상)가 아니라 정상적인 「선택값 부재」다(기존 카드도 사유 없으면 그 줄 자체를 안
@@ -497,7 +507,7 @@ function ApprovalRequestBody({
       : parsed.blocks.map((b) => (
         b.type === 'fields' ? { ...b, fields: b.fields.filter((f) => f.value !== '{{payload.resolution_note}}') } : b
       ));
-    return renderBlockTemplate({ blocks: blocksToRender }, payload).filter((b) => b.type === 'text' || b.type === 'fields');
+    return renderBlockTemplate({ blocks: blocksToRender }, payload, refs).filter((b) => b.type === 'text' || b.type === 'fields');
   })() : null;
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);

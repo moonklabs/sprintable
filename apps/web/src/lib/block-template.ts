@@ -69,16 +69,30 @@ export function isKnownBlockType(type: string): type is BlockTemplateBlock['type
   return (BLOCK_TEMPLATE_TYPES as readonly string[]).includes(type);
 }
 
-const MUSTACHE_RE = /\{\{payload\.([a-zA-Z0-9_]+)\}\}/g;
+// story #3332 — `{{ref.X}}`(2번째 머스태시 네임스페이스, `{{payload.X}}`와 병렬) 신설. payload는
+// 발행자가 직접 준 값이지만, ref는 **서버가 발행 시점에 계산한 참조 토큰**(클릭 가능한
+// `[제목](entity:type:id)`, events.py::_publish_registry_event_core의 `refs` — BE
+// event_definition_registry.py::BLOCK_TEMPLATE_REF_VOCAB과 짝인 어휘, 지금은 work_item 1종).
+const MUSTACHE_RE = /\{\{(payload|ref)\.([a-zA-Z0-9_]+)\}\}/g;
 
 /**
- * `{{payload.field}}` 머스태시를 payload 값으로 치환한다. 치환 실패(payload에 그 키가 없거나
- * 값이 null/undefined)는 빈 문자열로 조용히 지우지 않고 `⟨missing: payload.field⟩`를 그대로
- * 남긴다(AC0-b 명시 — 조용한 공백 금지). 값이 문자열이 아니면(숫자·불리언 등) String()으로
- * 직렬화한다 — payload는 JSON이라 임의 타입이 올 수 있다.
+ * `{{payload.field}}`/`{{ref.field}}` 머스태시를 치환한다. `payload`는 payload 값(없거나
+ * null/undefined면 `⟨missing: payload.field⟩`), `ref`는 `refs` 인자의 값(없거나 null이면
+ * `⟨missing: ref.field⟩`) — 둘 다 조용히 공백으로 지우지 않고 실패를 명시한다(AC0-b 원칙의
+ * ref 네임스페이스 확장). 값이 문자열이 아니면(숫자·불리언 등) String()으로 직렬화한다 —
+ * payload는 JSON이라 임의 타입이 올 수 있다(refs는 항상 string | null이라 해당 없음).
  */
-export function substituteMustache(template: string, payload: Record<string, unknown>): string {
-  return template.replace(MUSTACHE_RE, (_match, field: string) => {
+export function substituteMustache(
+  template: string,
+  payload: Record<string, unknown>,
+  refs: Record<string, string | null> = {},
+): string {
+  return template.replace(MUSTACHE_RE, (_match, namespace: string, field: string) => {
+    if (namespace === 'ref') {
+      const value = refs[field];
+      if (value === undefined || value === null) return `⟨missing: ref.${field}⟩`;
+      return value;
+    }
     if (!(field in payload) || payload[field] === null || payload[field] === undefined) {
       return `⟨missing: payload.${field}⟩`;
     }
@@ -87,24 +101,34 @@ export function substituteMustache(template: string, payload: Record<string, unk
 }
 
 /** BlockTemplateFields 하나의 각 field.value에 머스태시 치환을 적용한 새 배열을 만든다. */
-function substituteFieldEntries(fields: BlockTemplateFieldEntry[], payload: Record<string, unknown>): BlockTemplateFieldEntry[] {
-  return fields.map((f) => ({ label: f.label, value: substituteMustache(f.value, payload) }));
+function substituteFieldEntries(
+  fields: BlockTemplateFieldEntry[],
+  payload: Record<string, unknown>,
+  refs: Record<string, string | null>,
+): BlockTemplateFieldEntry[] {
+  return fields.map((f) => ({ label: f.label, value: substituteMustache(f.value, payload, refs) }));
 }
 
 /**
- * 블록 배열 전체에 payload를 치환해 "렌더 준비된" 블록 배열을 만든다(아직 JSX 아님 — 순수
- * 데이터 변환). header/text의 `text`, fields의 각 `value`가 치환 대상이다. actions는 라벨/
- * definition_key가 정적 텍스트라 치환 대상이 아니다(AC0-b 예시에 머스태시가 없음).
+ * 블록 배열 전체에 payload/refs를 치환해 "렌더 준비된" 블록 배열을 만든다(아직 JSX 아님 —
+ * 순수 데이터 변환). header/text의 `text`, fields의 각 `value`가 치환 대상이다. actions는
+ * 라벨/definition_key가 정적 텍스트라 치환 대상이 아니다(AC0-b 예시에 머스태시가 없음).
  * 알 수 없는 type은 스킵한다(등록 게이트를 통과한 template이라면 원래 없어야 하지만, 방어적
- * — 조용히 죽지 않고 렌더 결과에서 빠지는 것으로 정직하게 처리).
+ * — 조용히 죽지 않고 렌더 결과에서 빠지는 것으로 정직하게 처리). `refs` 생략(기존 호출부)은
+ * 완전 additive — `{{ref.X}}`가 없는 템플릿은 그대로, 있는데 refs를 안 주면 명시 플레이스홀더로
+ * 정직하게 드러난다(지어내지 않음).
  */
-export function renderBlockTemplate(template: BlockTemplate, payload: Record<string, unknown>): BlockTemplateBlock[] {
+export function renderBlockTemplate(
+  template: BlockTemplate,
+  payload: Record<string, unknown>,
+  refs: Record<string, string | null> = {},
+): BlockTemplateBlock[] {
   const out: BlockTemplateBlock[] = [];
   for (const block of template.blocks) {
     if (block.type === 'header' || block.type === 'text') {
-      out.push({ type: block.type, text: substituteMustache(block.text, payload) });
+      out.push({ type: block.type, text: substituteMustache(block.text, payload, refs) });
     } else if (block.type === 'fields') {
-      out.push({ type: 'fields', fields: substituteFieldEntries(block.fields, payload) });
+      out.push({ type: 'fields', fields: substituteFieldEntries(block.fields, payload, refs) });
     } else if (block.type === 'actions') {
       out.push(block);
     }

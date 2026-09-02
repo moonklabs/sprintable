@@ -67,6 +67,27 @@ describe('substituteMustache — story #2637 AC0-b', () => {
   });
 });
 
+describe('substituteMustache — story #3332 {{ref.X}} 네임스페이스', () => {
+  it('ref 값이 있으면 그대로 치환(클릭 토큰 문자열)', () => {
+    expect(substituteMustache('대상: {{ref.work_item}}', {}, { work_item: '[제목](entity:story:abc)' }))
+      .toBe('대상: [제목](entity:story:abc)');
+  });
+
+  it('refs 인자를 생략하면(기존 2-인자 호출부) ref 머스태시는 명시 플레이스홀더', () => {
+    expect(substituteMustache('{{ref.work_item}}', {})).toBe('⟨missing: ref.work_item⟩');
+  });
+
+  it('refs에 키가 없거나 값이 null이면 명시 플레이스홀더(payload와 동일 원칙)', () => {
+    expect(substituteMustache('{{ref.work_item}}', {}, {})).toBe('⟨missing: ref.work_item⟩');
+    expect(substituteMustache('{{ref.work_item}}', {}, { work_item: null })).toBe('⟨missing: ref.work_item⟩');
+  });
+
+  it('payload와 ref 두 네임스페이스가 한 문자열에 섞여도 각자 정확히 치환', () => {
+    expect(substituteMustache('{{payload.verdict}} · {{ref.work_item}}', { verdict: 'approved' }, { work_item: '[제목](entity:story:abc)' }))
+      .toBe('approved · [제목](entity:story:abc)');
+  });
+});
+
 describe('parseBlockTemplate — story #2637 AC0-b 실물', () => {
   it('AC0-b 실 예시를 그대로 파싱한다', () => {
     const parsed = parseBlockTemplate(AC0B_EXAMPLE);
@@ -141,5 +162,38 @@ describe('renderBlockTemplate — story #2637 AC0-b', () => {
     const template = { blocks: [{ type: 'header', text: 'ok' }, { type: 'unknown' }] } as unknown as Parameters<typeof renderBlockTemplate>[0];
     const rendered = renderBlockTemplate(template, {});
     expect(rendered).toEqual([{ type: 'header', text: 'ok' }]);
+  });
+
+  it('story #3332 — preset.gate.verdict 0301 마이그 실 예시: {{ref.work_item}}이 fields에서 클릭 토큰으로 치환된다', () => {
+    const template = parseBlockTemplate({
+      blocks: [
+        { type: 'header', text: '게이트 판정' },
+        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
+        {
+          type: 'fields',
+          fields: [
+            { label: '대상', value: '{{ref.work_item}}' },
+            { label: '사유', value: '{{payload.resolution_note}}' },
+          ],
+        },
+      ],
+    })!;
+    const payload = { gate_type: 'external_publish', verdict: 'rejected', resolution_note: '어투 정정' };
+    const refs = { work_item: '[Threads 포스트 초안](entity:story:abc123)' };
+    const rendered = renderBlockTemplate(template, payload, refs);
+
+    expect(rendered[2]).toEqual({
+      type: 'fields',
+      fields: [
+        { label: '대상', value: '[Threads 포스트 초안](entity:story:abc123)' },
+        { label: '사유', value: '어투 정정' },
+      ],
+    });
+  });
+
+  it('refs 인자를 생략해도(구버전 호출부) payload 전용 템플릿은 그대로 회귀 0', () => {
+    const template = parseBlockTemplate(AC0B_EXAMPLE)!;
+    const payload = { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-123' };
+    expect(renderBlockTemplate(template, payload)).toEqual(renderBlockTemplate(template, payload, {}));
   });
 });
