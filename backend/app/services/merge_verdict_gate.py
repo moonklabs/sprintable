@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.gate import Gate, set_gate_evidence_status, set_gate_status
+from app.models.hitl_config import OrgGatePolicy
 from app.models.participation import ParticipationRole
 from app.services.gate_resolver import (
     SOURCE_MEMBER_OVERRIDE,
@@ -520,6 +521,15 @@ async def evaluate_merge_gate(
         gate_type=MERGE_GATE_TYPE, pr_number=db_pr_number, repo_full_name=db_repo_full_name,
     )
     _prior_status = _prior_gate.status if _prior_gate is not None else None
+    # story #3319(2026-09-02, 선생님 처방 확定) — org가 merge_gate_default_approver_member_id를
+    # 설정해 뒀으면 그 멤버로 designated_approver_id를 채운다(gates.py::_non_doc_can_approve의
+    # 새 분기가 이 값이 있으면 project/org owner 전원이 아니라 그 1인에게만 승인 자격을
+    # 좁힌다 — 실사고: QA 前 머지 게이트를 org owner가 승인 가능 상태로 봄). 미설정(기본값)이면
+    # None 그대로 — 현행 무변경(회귀 0).
+    _org_policy = (await session.execute(
+        select(OrgGatePolicy.merge_gate_default_approver_member_id)
+        .where(OrgGatePolicy.org_id == org_id)
+    )).scalar_one_or_none()
     gate = await create_gate(
         session,
         org_id,
@@ -532,6 +542,7 @@ async def evaluate_merge_gate(
         neutral_facts=facts,
         pr_number=db_pr_number,
         repo_full_name=db_repo_full_name,
+        designated_approver_id=_org_policy,
     )
 
     # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable

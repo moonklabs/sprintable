@@ -49,6 +49,17 @@ class OrgGatePolicy(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     posture: Mapped[str] = mapped_column(String(20), nullable=False, server_default="balanced")
+    # story #3319(2026-09-02, 선생님 처방 확定) — 머지 게이트가 designated_approver_id=None으로
+    # 생성돼 rule B(gates.py::_non_doc_gate_approvable)가 project owner/admin 전원(org owner
+    # 포함)에게 «승인 가능»으로 노출했다(실사고: PR#3706 머지 게이트를 QA 前에 선생님이 서명).
+    # 이 값(org 멤버·nullable)을 설정하면 머지 게이트 생성 시 designated_approver_id로 채워져
+    # rule B가 그 멤버 1인에게만 승인 자격을 좁힌다(gates.py::_non_doc_can_approve 변경 참조).
+    # 미설정(None, 기본값)은 현행 무변경(회귀 0). 사람 멤버만 허용(에이전트는 requires_human
+    # 게이트에 구조적으로 서명 불가) — 쓰기 시점(routers/hitl_config.py::upsert_org_policy)에서
+    # is_org_owner_or_admin과 동형 NOT EXISTS 패턴으로 검증(422).
+    merge_gate_default_approver_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
