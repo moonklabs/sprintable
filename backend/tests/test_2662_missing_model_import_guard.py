@@ -153,7 +153,15 @@ def test_ac2_positive_control_missing_import_gets_diagnosed(pytester: pytest.Pyt
     """⭐AC2 핵심 — PR #3067 21파일 사례의 최소 재현. `import app.models.activity_log`가
     빠진 채 transition_gate()류 write를 흉내내는 create_all 테스트를 서브프로세스로 돌려,
     (1) 여전히 실패하고(가드가 실패를 숨기지 않는다) (2) 그 실패 리포트에 이 가드의 진단
-    섹션이 실제로 붙는지(원인이 명확한 메시지로 바뀌는지) 둘 다 확인한다."""
+    섹션이 실제로 붙는지(원인이 명확한 메시지로 바뀌는지) 둘 다 확인한다.
+
+    PR#3700(story #2255) 리뷰(페드루, 2026-09-02) — 이 표본은 원래 실 운영 모델
+    `app.models.activity_log`를 빌려 썼는데, 그 모델이 #2255에서 실제로 `__init__.py`에
+    등재되면서 표본의 전제("app.models 벌크 import에 없다")가 깨져 이 테스트가 거짓
+    GREEN(failed=0)으로 무너졌다. 운영 모델이 아니라 `app/models/_test_only_unregistered_fixture.py`
+    (영구 미등재로 설계된 테스트 전용 모델, `lint_model_registration_completeness.py`의
+    `_INTENTIONALLY_UNREGISTERED` 허용목록으로 AC6 가드에서도 제외됨)를 대상으로 바꿔,
+    앞으로 어떤 운영 모델이 등재되든 이 양성대조는 계속 실패할 수 있다."""
     import os
     import shutil
     from pathlib import Path
@@ -166,8 +174,6 @@ def test_ac2_positive_control_missing_import_gets_diagnosed(pytester: pytest.Pyt
     disposable_url, disposable_name = _create_disposable_pg_database(base_db_url)
     pytester.makepyfile(
         test_repro=f'''
-import os
-import uuid
 import pytest
 
 pytestmark = pytest.mark.destructive_schema
@@ -179,10 +185,11 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-async def test_write_without_activity_log_import():
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+async def test_write_without_fixture_import():
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
     from app.core.database import Base
-    import app.models  # noqa: F401 — 벌크 임포트(activity_log는 여기 없음, #2201 후속)
+    import app.models  # noqa: F401 — 벌크 임포트(story #2662 AC2 픽스처는 영구 미등재라 여기 없음)
 
     url = {disposable_url!r}
     for prefix in ("postgresql+psycopg2://", "postgresql://"):
@@ -192,13 +199,15 @@ async def test_write_without_activity_log_import():
     engine = create_async_engine(url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    Session = async_sessionmaker(engine, expire_on_commit=False)
-    async with Session() as s:
-        from app.services.activity_log import ActivityLogService
-        await ActivityLogService(s).record(
-            org_id=uuid.uuid4(), action="x", actor_id=None, actor_type="human",
+        # story #2662 AC2 픽스처 모듈을 이 프로세스가 절대 import 안 하므로 그 테이블은
+        # Base.metadata에 없다 — create_all()이 만들 수 없는 테이블 이름을 직접 참조해
+        # PR #3067 21파일 사례(모델 미등재 → relation ... does not exist)를 재현.
+        await conn.execute(
+            text(
+                "INSERT INTO test_2662_ac2_positive_control (id) "
+                "VALUES ('00000000-0000-0000-0000-000000000000'::uuid)"
+            )
         )
-        await s.commit()
     await engine.dispose()
 '''
     )
@@ -219,7 +228,7 @@ async def test_write_without_activity_log_import():
         _drop_disposable_pg_database(base_db_url, disposable_name)
     result.assert_outcomes(failed=1)  # 가드가 실패 자체를 숨기면 안 된다 — 여전히 RED.
     output = "\\n".join(result.outlines)
-    assert "app.models.activity_log" in output, (
+    assert "app.models._test_only_unregistered_fixture" in output, (
         f"진단 섹션이 리포트에 안 실렸다 — 21파일 사례가 재현 안 됨.\\noutput={output!r}"
     )
     assert "story #2662" in output

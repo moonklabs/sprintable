@@ -361,6 +361,23 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_legacy_subscriptions_reuse.py
 
+  # story #2255(69d7380e, 2026-07-28~09-02) — app/models/*.py에 __tablename__ 보유 모델이
+  # 새로 생겼는데 app/models/__init__.py에 import 안 되면 create_all()이 그 테이블을 조용히
+  # 안 만든다(#2201이 처음 적발한 결함 클래스, 11개 중 10개가 이 스토리로 뒤늦게 등재됨 —
+  # 등재 도중 이 가드로 5개가 «독립적으로 또» 새 있던 것도 같이 적발돼 함께 정리됨). 정적
+  # AST 스캔뿐(런타임 import 0회) — 정상 경로 오버헤드 없음. story #2662의 실패-시점 진단
+  # 가드와 보완 관계(겹치지 않음, 각 스크립트 docstring 참고).
+  model-registration-completeness-lint:
+    name: model registration completeness lint (guard, story #2255)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan app/models for unregistered __tablename__ models
+        working-directory: backend
+        run: python3 scripts/lint_model_registration_completeness.py
+
   alembic-no-autocommit-block:
     name: Alembic migrations — no autocommit_block() (guard)
     runs-on: ubuntu-latest
