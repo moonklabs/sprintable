@@ -947,13 +947,16 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
   });
 
   describe('story #2637 AC4(PO 08-14 확定) — resolved 분기 preset.gate.verdict block_template 부분 소비', () => {
-    // 0251 마이그(develop 상륙) 실물 그대로 — 대상 필드 value가 work_item_title로 정정된 것.
+    // 0301 마이그(story #3332, develop 상륙) 실물 그대로 — 대상 필드 value가 {{ref.work_item}}
+    // (클릭 토큰)로 정정된 것. 0251의 {{payload.work_item_title}}은 payload_schema엔 있었으나
+    // 어떤 발행처도 채운 적이 없어 항상 ⟨missing⟩이었다(PR#3711 리뷰 실측) — approval-request-
+    // card.tsx가 이제 title로 직접 참조 토큰을 합성해 refs로 넘긴다.
     const GATE_VERDICT_TEMPLATE = {
       blocks: [
         { type: 'header', text: '게이트 판정' },
         { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
         { type: 'fields', fields: [
-          { label: '대상', value: '{{payload.work_item_title}}' },
+          { label: '대상', value: '{{ref.work_item}}' },
           { label: '사유', value: '{{payload.resolution_note}}' },
         ] },
       ],
@@ -977,6 +980,20 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       // '제안서.md'는 카드 상단 제목(기존)과 fields 대상 값(신규) 둘 다에 나타난다 — 중복 등장 자체가
       // 정상(같은 개념 두 자리 표시), 최소 1회 이상만 확認.
       expect(container.textContent).toContain('제안서.md');
+    });
+
+    it('story #3332 — {{ref.work_item}}이 EntityChip(공유 SSOT)으로 렌더된다 — 칩 클릭 버튼·UUID 텍스트 0(PO 리뷰 PR#3714)', async () => {
+      stubGate({ status: 'approved', title: '제안서.md', resolution_note: '근거가 충분합니다' });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      // EntityChip은 <a href>가 아니라 클릭 트리거 <button type="button">으로 렌더된다
+      // (embed-card.tsx — readingPanel.open 또는 모달을 여는 JS 핸들러, href는 내비게이션
+      // DOM 속성이 아니라 내부 상태로만 쓰인다). "링크"가 아니라 "칩(버튼)"이 도달 기준.
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('제안서.md'));
+      expect(chipButtons.length).toBeGreaterThan(0);
+      // Q2의 실제 요구: 화면 텍스트 어디에도 UUID가 없어야 한다(href 유무와 무관).
+      expect(container.textContent).not.toContain(DOC_ID);
     });
 
     it('PO 리뷰(head 81f7e4a7e) — resolved + 템플릿 있음 + resolution_note 없음(승인·사유 미기재) — 사유 행 자체가 안 뜬다(⟨missing⟩ 마커 노출 금지, 기존 카드와 동형 비회귀)', async () => {
@@ -1094,6 +1111,55 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).toContain('S-42');
     // note는 payload에 없다 — 명시 플레이스홀더(조용한 공백 금지, AC0-b).
     expect(container.textContent).toContain('⟨missing: payload.note⟩');
+  });
+
+  describe('story #3332 — {{ref.X}} 네임스페이스(event.refs, publish_registry_event이 계산해 준 참조 토큰)', () => {
+    const REF_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '게이트 판정' },
+        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
+        { type: 'fields', fields: [
+          { label: '대상', value: '{{ref.work_item}}' },
+          { label: '사유', value: '{{payload.resolution_note}}' },
+        ] },
+      ],
+    };
+    const catalog = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, block_template: REF_TEMPLATE, enabled: true, version: 1 } };
+
+    it('event.refs에 값이 있으면 EntityChip(공유 SSOT)으로 렌더된다 — 칩 클릭 버튼·UUID 텍스트 0(실제 배포 경로 — #3330 통지 카드)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.gate.verdict',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.gate.verdict',
+          payload: { gate_type: 'external_publish', verdict: 'rejected', resolution_note: '어투 정정' },
+          refs: { work_item: `[Threads 포스트 초안](entity:story:${DOC_ID})` },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain(DOC_ID);
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('Threads 포스트 초안'));
+      expect(chipButtons.length).toBeGreaterThan(0);
+    });
+
+    it('event.refs 자체가 없으면(구서버·work_item 페어 없는 payload) {{ref.work_item}}이 명시 플레이스홀더로 정직하게 드러난다(지어내지 않음)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.gate.verdict',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.gate.verdict',
+          payload: { gate_type: 'external_publish', verdict: 'approved' },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).toContain('⟨missing: ref.work_item⟩');
+    });
   });
 
   it('유나 design 스티어 2차 — text 블록의 AC0-b 인라인 마크다운(**굵게**·`코드`)이 별표/백틱 리터럴이 아니라 실제 <strong>/<code>로 렌더된다', async () => {

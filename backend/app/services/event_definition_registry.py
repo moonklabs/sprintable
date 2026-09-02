@@ -275,6 +275,75 @@ def validate_block_template(template: dict) -> None:
                         raise InvalidBlockTemplateError(f"blocks[{i}].actions[{j}].auth: {e}") from e
 
 
+_TEMPLATE_MUSTACHE_RE = re.compile(r"\{\{(payload|ref)\.([a-zA-Z0-9_]+)\}\}")
+
+# story #3332(PO 확定 2026-09-02) — `{{ref.X}}`의 닫힌 어휘. `{{payload.X}}`(발행자가 직접
+# 준 값)와 병렬인 두 번째 머스태시 네임스페이스로, 서버가 발행 시점에 계산해 event_context.
+# refs에 싣는 "참조 토큰"(클릭 가능한 `[제목](entity:type:id)`) 전용이다 — 지금은 work_item
+# 1종만(work_item_type/work_item_id 페어를 갖는 payload_schema 전제, events.py::
+# _render_event_notification_work_item_ref 재사용 계산). 새 종류를 열려면 이 어휘 +
+# events.py의 실 계산 로직 둘 다 넓혀야 한다(SERVER_DERIVED_TARGETS와 동형 이중 게이트).
+BLOCK_TEMPLATE_REF_VOCAB = frozenset({"work_item"})
+
+
+def _iter_block_template_texts(template: dict):
+    """block_template.blocks 안에서 머스태시 치환 대상인 문자열만 순서대로 낸다 — FE
+    substituteMustache/renderBlockTemplate이 실제로 치환하는 자리와 정확히 같은 범위
+    (header/text의 text, fields[].value). actions는 라벨/definition_key가 정적 텍스트라
+    치환 대상이 아니다(block-template.ts 주석과 동형 — 여기서 검사 범위를 넓히면 FE가
+    실제로 안 보는 자리까지 검증해 거짓양성을 낸다)."""
+    for block in template.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type in ("header", "text"):
+            text = block.get("text")
+            if isinstance(text, str):
+                yield text
+        elif block_type == "fields":
+            for f in block.get("fields") or []:
+                if isinstance(f, dict) and isinstance(f.get("value"), str):
+                    yield f["value"]
+
+
+def validate_block_template_refs(payload_schema: dict, template: dict) -> None:
+    """story #3332 — block_template이 참조하는 머스태시가 실제로 해소 가능한지 등록/PATCH
+    시점에 강제한다(이전엔 이 교차검증이 전혀 없어 `{{payload.work_item_title}}`처럼
+    payload_schema에 없는 키를 참조해도 등록이 통과했다 — 렌더 시점에야 FE가 `⟨missing:
+    payload.x⟩`로 조용히 드러내는 게 유일한 신호였다, PR#3711 리뷰에서 실측 발견).
+
+    두 네임스페이스를 각자 다른 기준으로 검사한다:
+    - `{{payload.X}}` — X가 `payload_schema.properties`에 실재해야 한다(오타를 등록
+      시점에 막는다 — "오타로 써도 통과하나"가 "아니오"가 되게).
+    - `{{ref.X}}` — X가 `BLOCK_TEMPLATE_REF_VOCAB`(서버가 실제로 계산해 줄 수 있는 종류)
+      안에 있어야 한다.
+
+    `validate_block_template`(구조 게이트)이 이미 통과한 template을 전제로 한다 — 이 함수는
+    그 뒤에 이어서 부르는 두 번째 게이트(내용 교차검증)다."""
+    properties = (payload_schema.get("properties") or {}) if isinstance(payload_schema, dict) else {}
+    unknown_payload_keys: set[str] = set()
+    unknown_ref_keys: set[str] = set()
+    for text in _iter_block_template_texts(template):
+        for namespace, key in _TEMPLATE_MUSTACHE_RE.findall(text):
+            if namespace == "payload" and key not in properties:
+                unknown_payload_keys.add(key)
+            elif namespace == "ref" and key not in BLOCK_TEMPLATE_REF_VOCAB:
+                unknown_ref_keys.add(key)
+    errors: list[str] = []
+    if unknown_payload_keys:
+        errors.append(
+            f"block_template이 payload_schema.properties에 없는 payload 키를 참조합니다: "
+            f"{sorted(unknown_payload_keys)}."
+        )
+    if unknown_ref_keys:
+        errors.append(
+            f"block_template이 지원하지 않는 ref 종류를 참조합니다: {sorted(unknown_ref_keys)} "
+            f"(허용: {sorted(BLOCK_TEMPLATE_REF_VOCAB)})."
+        )
+    if errors:
+        raise InvalidBlockTemplateError(" ".join(errors))
+
+
 def validate_event_payload_schema_shape(payload_schema: dict) -> None:
     """story #2636 AC1: org 커스텀 등록 시점에 payload_schema 자체가 유효한 JSON Schema이고
     top-level `additionalProperties: false`를 명시했는지 강제. 미선언 스키마는 JSON Schema

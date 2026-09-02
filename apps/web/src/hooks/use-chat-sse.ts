@@ -83,7 +83,13 @@ export interface ChatMessage {
    * 발행분이다 — event_key로 event_definitions를 조회해 block_template이 있으면 그걸로,
    * 없으면 content(BE의 제네릭 폴백 텍스트, #2633 _render_event_message_content)를 그대로
    * 렌더한다(비회귀). 구서버/일반 메시지는 `?? null`로 통일(approval_target과 같은 이유). */
-  event?: { event_key: string; payload: Record<string, unknown> } | null;
+  event?: {
+    event_key: string;
+    payload: Record<string, unknown>;
+    /** story #3332 — 서버가 발행 시점에 계산한 참조 토큰(block_template의 {{ref.X}}용).
+     * 구서버는 이 키 자체가 없다 — EventBlockCard가 undefined를 {}로 폴백한다(비회귀). */
+    refs?: Record<string, string | null>;
+  } | null;
   /** story #2985 — 'request'(액션 카드)/'result'(회신 카드) 판별(BE msg_metadata.activation.kind
    * → _activation_payload가 top-level로 노출). story #3001부터 'request_info'는 BE가 더
    * 이상 발행하지 않는다(정보성 카드 폐기 — 카드 자체가 지정자에게만 간다). 구서버(undefined/

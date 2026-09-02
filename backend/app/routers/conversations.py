@@ -642,7 +642,9 @@ def _activation_meta(req: "SendMessageRequest") -> dict | None:
 
 def _event_meta(req: "SendMessageRequest") -> dict | None:
     """story #2637 AC 0-a: req.event_context({"event_key","payload"}) → msg_metadata['event'].
-    없으면 None(완전 additive) — publish_registry_event만 이 필드를 채운다."""
+    story #3332 — "refs"(발행 시점에 서버가 계산한 참조 토큰, block_template의 {{ref.X}}용)도
+    같은 dict에 additive로 실린다. 없으면 None(완전 additive) — publish_registry_event만
+    이 필드를 채운다."""
     return {"event": req.event_context} if isinstance(req.event_context, dict) else None
 
 

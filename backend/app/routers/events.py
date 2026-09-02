@@ -1612,13 +1612,31 @@ async def _publish_registry_event_core(
 
     from app.routers.conversations import SendMessageRequest, send_message
 
+    # story #3332 — block_template의 `{{ref.X}}` 머스태시가 FE에서 해소할 값. `{{payload.X}}`
+    # 와 달리 발행자가 직접 준 값이 아니라 **서버가 발행 시점에 계산**하는 참조 토큰이다 —
+    # 지금은 work_item 1종만(payload에 work_item_type/work_item_id 둘 다 있을 때만 계산,
+    # 기존 함수 재사용 — 새 로직 0). BLOCK_TEMPLATE_REF_VOCAB(event_definition_registry.py)
+    # 과 짝인 어휘라 새 종류를 추가하려면 둘 다 넓혀야 한다.
+    refs: dict[str, str | None] = {}
+    _refs_work_item_type = payload.get("work_item_type")
+    _refs_work_item_id_raw = payload.get("work_item_id")
+    if _refs_work_item_type and _refs_work_item_id_raw:
+        try:
+            _refs_work_item_id = uuid.UUID(str(_refs_work_item_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            _refs_work_item_id = None
+        if _refs_work_item_id is not None:
+            refs["work_item"] = await _render_event_notification_work_item_ref(
+                db, org_id=org_id, work_item_type=_refs_work_item_type, work_item_id=_refs_work_item_id,
+            )
+
     # story #2637 AC 0-a: event_context → msg_metadata['event'](additive) — FE가 이 메시지를
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template
     # 렌더러를 태울 근거. 렌더러 자체는 #2637 FE 레인(이 커밋은 스키마 배선만).
     send_body = SendMessageRequest(
         content=await _render_event_message_content(db, org_id=org_id, definition=definition, payload=payload),
         mentioned_ids=list(escalation_ids),
-        event_context={"event_key": definition.key, "payload": payload},
+        event_context={"event_key": definition.key, "payload": payload, "refs": refs},
     )
     msg_response = await send_message(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
@@ -2066,6 +2084,7 @@ async def create_event_definition(
         InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
+        validate_block_template_refs,
         validate_event_definition_key,
         validate_event_payload_schema_shape,
         validate_event_routing,
@@ -2083,6 +2102,10 @@ async def create_event_definition(
         validate_event_routing(body.routing, allow_server_derived=False)
         if body.block_template is not None:
             validate_block_template(body.block_template)
+            # story #3332 — 구조 게이트(validate_block_template) 통과 뒤, block_template이
+            # 참조하는 {{payload.X}}/{{ref.X}}가 실제로 해소 가능한지 내용 교차검증(오타를
+            # 등록 시점에 막는다 — 이전엔 이 검증이 전혀 없었다, PR#3711 리뷰 실측).
+            validate_block_template_refs(body.payload_schema, body.block_template)
         if body.action_auth is not None:
             validate_action_auth(body.action_auth)
         validate_stage_metadata(body.payload_schema, body.stage_metadata)
@@ -2142,6 +2165,7 @@ async def update_event_definition(
         InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
+        validate_block_template_refs,
         validate_event_payload_schema_shape,
         validate_event_routing,
         validate_stage_metadata,
@@ -2180,6 +2204,26 @@ async def update_event_definition(
             raise HTTPException(
                 status_code=400, detail={"code": "invalid_definition", "message": str(e)},
             ) from e
+
+    # story #3332 — block_template↔payload_schema 교차검증도 위 stage_metadata와 동일
+    # 규율: 둘 중 하나만 바뀌어도 **유효 조합**(새 값 있으면 새 값·없으면 기존 값)으로
+    # 재검증한다 — payload_schema만 줄어들고 block_template을 안 건드리면 그 템플릿이
+    # 참조하던 필드가 조용히 사라질 수 있다. 유효 block_template이 없으면(둘 다 None)
+    # 검증 대상 자체가 없어 스킵.
+    if body.payload_schema is not None or body.block_template is not None:
+        effective_schema_for_template = (
+            body.payload_schema if body.payload_schema is not None else definition.payload_schema
+        )
+        effective_block_template = (
+            body.block_template if body.block_template is not None else definition.block_template
+        )
+        if effective_block_template is not None:
+            try:
+                validate_block_template_refs(effective_schema_for_template, effective_block_template)
+            except InvalidBlockTemplateError as e:
+                raise HTTPException(
+                    status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+                ) from e
 
     content_changed = False
     if body.name is not None:
