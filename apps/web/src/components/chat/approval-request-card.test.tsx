@@ -954,3 +954,55 @@ describe('ApprovalRequestCard — story #3258 doc 요약/diff+논의요청 지�
     expect(container.textContent).toContain('기한 조정 논의');
   });
 });
+
+// story #3334(페드루 PO 리뷰 적출) — 이 카드의 저위험 반려 버튼(gateReject)이 예전엔
+// onReject()를 사유 없이 즉시 호출했다(gates/[id]/page.tsx·approvals-queue.tsx에 이미 적용한
+// "반려는 사유 필수" 처방이 이 세 번째 표면엔 빠져 있었다 — 채팅 결재 카드는 선생님이 가장
+// 많이 쓰는 표면). 클릭은 이제 서명 패널(GateSignatureApproval, 사유 textarea 보유)을 열
+// 뿐이고, 사유를 채워야만 그 안의 「변경 요청」이 풀린다.
+describe('ApprovalRequestCard — 저위험 반려는 사유 패널을 거친다(story #3334)', () => {
+  it('저위험 반려 클릭 → 즉시 POST 0 → 사유 입력 後에만 POST 1(status=rejected)', async () => {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method, body: init?.body as string | undefined });
+      if (init?.method === 'POST' && url.includes('/transition')) return { ok: true, json: async () => ({}) };
+      if (url.includes('/api/gates/')) {
+        return { ok: true, json: async () => ({ data: gate({ id: 'g-low-reject', can_approve: true, risk_grade: 'low' }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-low-reject', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const rejectBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject)) as HTMLButtonElement;
+    expect(rejectBtn).toBeTruthy();
+    await act(async () => { rejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 클릭 직후 — 패널만 열렸다, 아직 POST 0건. 이 패널은 다이얼로그가 아니라 카드 안
+    // 인라인 렌더(container 안)라 document.body 포탈 스코프가 불요.
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    const panelRejectBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    expect(panelRejectBtn).toBeTruthy();
+    expect(panelRejectBtn.disabled).toBe(true); // AC — 사유 입력 前 비활성.
+
+    const textarea = document.getElementById('gate-sig-reason') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '스키마 필드명이 기존 컨벤션과 다릅니다');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(panelRejectBtn.disabled).toBe(false);
+
+    await act(async () => { panelRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postCall = calls.find((c) => c.method === 'POST');
+    expect(postCall?.url).toBe('/api/gates/g-low-reject/transition');
+    expect(JSON.parse(postCall?.body ?? '{}')).toMatchObject({ status: 'rejected', note: '스키마 필드명이 기존 컨벤션과 다릅니다' });
+  });
+});

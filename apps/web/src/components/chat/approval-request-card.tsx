@@ -511,6 +511,15 @@ function ApprovalRequestBody({
   })() : null;
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
+  // story #3334(페드루 PO 리뷰 적출) — 저위험 게이트의 반려(변경 요청)는 예전엔 이 카드가
+  // onReject()를 사유 없이 즉시 호출했다(gates/[id]/page.tsx·approvals-queue.tsx에 적용한
+  // 동형 처방을 이 세 번째 표면엔 빠뜨렸던 것 — 채팅 결재 카드는 선생님이 가장 많이 쓰는
+  // 표면이라 실사용에서 바로 걸림돌이 됐을 자리). 근거열람 없이도 반려 자체는 가능해야
+  // 하므로(승인만 evidence 축) 저위험 게이트를 통째로 서명 플로우로 밀어넣지 않고, "반려
+  // 하려는 의도"일 때만 이 토글로 같은 GateSignatureApproval 패널을 연다.
+  // gate.id는 이 카드 인스턴스의 수명 동안 고정(target.gate_id로 매 폴링/재조회를 같은
+  // 게이트에 거는 구조라 다른 게이트로 안 바뀐다) — 리셋 이펙트 불요.
+  const [rejectPanelOpen, setRejectPanelOpen] = useState(false);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
   // story #3001 — 지정이 걸린 게이트인데 지금 이 카드를 보는 나는 더 이상 그 지정자가
   // 아니다(위임됨). 미지정(broadcast) 게이트는 gate.designated_approver_id가 애초 null이라
@@ -719,23 +728,34 @@ function ApprovalRequestBody({
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
         // "액션 불가" 사유는 무권한뿐이다.
         <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
-      ) : needsFullFlow ? (
+      ) : needsFullFlow || rejectPanelOpen ? (
         // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
         // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
         // 에만 적용되고 이 챗 카드는 빠져 있었다. 같은 컴포넌트·같은 취약(SHA 바뀐 뒤에도
         // 열람체크가 살아있어 재확認 없이 재승인 가능)이라 동형 처방.
-        <GateSignatureApproval
-          key={gate.github_check_run_sha}
-          gate={gate}
-          resolving={resolving}
-          error={transitionError}
-          // story #2027 AC2: GateSignatureApproval의 canSign이 evidenceViewed&&reason로 버튼을
-          // 막아서 이 콜백에 닿았다는 사실 자체가 열람 확인 — gates/[id]/page.tsx와 동일 계약.
-          onApprove={(reason) => onApprove(reason, true)}
-          onReject={onReject}
-          onDiscuss={onDiscuss}
-          compact
-        />
+        <div className="space-y-1.5">
+          <GateSignatureApproval
+            key={gate.github_check_run_sha}
+            gate={gate}
+            resolving={resolving}
+            error={transitionError}
+            // story #2027 AC2: GateSignatureApproval의 canSign이 evidenceViewed&&reason로 버튼을
+            // 막아서 이 콜백에 닿았다는 사실 자체가 열람 확인 — gates/[id]/page.tsx와 동일 계약.
+            onApprove={(reason) => onApprove(reason, true)}
+            onReject={onReject}
+            onDiscuss={onDiscuss}
+            compact
+          />
+          {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래
+              근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈
+              길을 남긴다. 고위험(needsFullFlow) 게이트는 이 패널이 유일한 경로라 취소
+              버튼이 무의미(숨김). */}
+          {!needsFullFlow ? (
+            <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
+              {tCage('cancel')}
+            </Button>
+          ) : null}
+        </div>
       ) : (
         <>
           {transitionError ? (
@@ -748,7 +768,7 @@ function ApprovalRequestBody({
               <Check className="h-3.5 w-3.5" aria-hidden />
               {tCage('gateApprove')}
             </Button>
-            <Button type="button" size="sm" variant="destructive" onClick={() => onReject()} disabled={resolving} className="flex-1">
+            <Button type="button" size="sm" variant="destructive" onClick={() => setRejectPanelOpen(true)} disabled={resolving} className="flex-1">
               <X className="h-3.5 w-3.5" aria-hidden />
               {tCage('gateReject')}
             </Button>

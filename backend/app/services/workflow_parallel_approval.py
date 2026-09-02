@@ -174,13 +174,19 @@ def _quorum_met(approved: int, total_blocking: int, qtype: str, qcount: int | No
 
 async def record_parallel_decision(
     session: AsyncSession, approval_id: uuid.UUID, decision: str, resolver_id: uuid.UUID | None,
+    note: str | None = None,
 ) -> dict[str, Any]:
     """approver row 1건 결정을 기록하고 그룹 quorum 을 재평가한다.
 
     blocking approver-kind row 만 집계(consult/non-blocking 제외). any reject(any_reject_blocks)→
     ``transition_gate(rejected)`` / quorum 충족→``transition_gate(approved)`` / else pending.
     gate 가 이미 terminal 이면 멱등 skip(중복 해소 무시).
-    """
+
+    story #3334(페드루 PO 처방, 전수 grep 대상) — 이 함수는 아직 HTTP 엔드포인트가 없다(라우터
+    미배선, 이 파일의 유일한 호출자는 자기 테스트뿐 — 실 프로덕션 경로 아님). 그래도
+    transition_gate("rejected")에 도달하는 자리라 note 를 받아 그대로 넘긴다 + 이 row 자체의
+    decision_note(모델 컬럼, 지금까지 아무도 안 채우던 미사용 필드)에도 기록 — 엔드포인트가
+    나중에 배선될 때 "reject엔 사유가 필수"라는 계약이 이미 여기 박혀 있게 한다."""
     if decision not in _VALID_DECISIONS:
         raise ValueError(f"invalid decision: {decision}")
     appr = (await session.execute(
@@ -215,6 +221,8 @@ async def record_parallel_decision(
 
     appr.status = decision
     appr.resolved_at = _now()
+    if note:
+        appr.decision_note = note
     await session.flush()
 
     # 그룹의 blocking approver-kind row 로 quorum 재계산(consult/non-blocking 제외·AC④).
@@ -237,7 +245,7 @@ async def record_parallel_decision(
     # target 도달 시 transition_gate 단일 rail 로 해소(gate 는 위에서 non-terminal 확인됨).
     if target is not None and gate is not None:
         from app.services.gate_service import transition_gate
-        await transition_gate(session, appr.org_id, appr.gate_id, target, resolver_id=resolver_id)
+        await transition_gate(session, appr.org_id, appr.gate_id, target, resolver_id=resolver_id, note=note)
         outcome = target
 
     return {"outcome": outcome, "skipped": False, **tally}

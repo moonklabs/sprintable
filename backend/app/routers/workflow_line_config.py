@@ -276,9 +276,26 @@ async def approve_publish(
     return VersionResponse.model_validate(version)
 
 
+class RejectPublishRequest(BaseModel):
+    # story #3334(페드루 PO 처방, 서버 강제 위치 정정) — transition_gate() 서비스층이 이제
+    # rejected 전이에 사유를 gate_type 무관 강제한다. 이 엔드포인트가 note 없이 호출하면
+    # 그 ValueError가 아래 `except ValueError: pass`("gate already resolved")에 조용히
+    # 삼켜져 — version만 rejected로 보이고 gate는 영원히 pending인 채 남는 사고가 났을
+    # 것이다. 여기서 먼저 필수로 막아 그 경로 자체를 없앤다.
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("반려 사유(reason)는 비어있지 않아야 합니다.")
+        return v
+
+
 @router.post("/versions/{version_id}/reject", response_model=VersionResponse)
 async def reject_publish(
     version_id: uuid.UUID,
+    body: RejectPublishRequest,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -288,9 +305,12 @@ async def reject_publish(
     version = await _load_version(session, org_id, version_id)
     if version.review_gate_id is not None:
         try:
-            await transition_gate(session, org_id, version.review_gate_id, "rejected", resolver_id=actor)
+            await transition_gate(
+                session, org_id, version.review_gate_id, "rejected",
+                resolver_id=actor, note=body.reason,
+            )
         except ValueError:
-            pass  # gate already resolved — version 전이만 반영
+            pass  # gate already resolved — version 전이만 반영(body.reason은 위에서 이미 비어있지 않음이 보장됨)
     version = await transition_version(session, version, "rejected")
     await session.commit()
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.

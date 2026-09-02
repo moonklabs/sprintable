@@ -796,6 +796,14 @@ async def transition_gate(
             f"불법 전이: {gate.status} → {new_status}. "
             f"pending에서만 approved|rejected로 전이 가능."
         )
+    # story #3334(선생님 실사용 4바퀴 T1' 적출, 페드루 PO 처방 — 서버 강제 위치 정정) —
+    # rejected 전이는 gate_type 무관 사유(note) 서버측 강제. void_gate(바로 아래 참조)와
+    # 동일 관례(reason 없으면 ValueError→라우터가 422로 재포장)를 여기 서비스층에 둔다 —
+    # 처음엔 router(transition_gate_endpoint)에만 걸었다가, transition_gate()를 직접 부르는
+    # 내부 호출자(workflow_line_config.py::reject_publish 등)가 그 우회로였음을 PO 리뷰가
+    # 잡았다 — "모든 gate_type 서버 거부"라면 모든 호출 경로를 통과하는 이 지점이 맞다.
+    if new_status == "rejected" and not (note or "").strip():
+        raise ValueError("반려(변경 요청) 사유(note) 입력이 필수입니다.")
 
     # P0-04(doc trust-pipeline-be-design §4 훅①): trust_stage mutation 전 스냅샷(story 대상 게이트만).
     _trust_before = None
