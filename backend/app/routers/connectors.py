@@ -3,6 +3,7 @@
 POST   /api/v2/organizations/{org_id}/connectors/{key}         — 스키마 upsert(설정 스킬 호출, org owner/admin write).
 PUT    /api/v2/organizations/{org_id}/connectors/{key}/config  — org_config 값 병합(선언된 키만, org owner/admin write).
 GET    /api/v2/organizations/{org_id}/connectors/{key}         — 스키마+값 조회(org 멤버 read, 에이전트 publish 합성용).
+GET    /api/v2/organizations/{org_id}/connectors                — org에 등록된 커넥터 전체 목록(story 4180f67f, org 멤버 read).
 
 권한 모델은 domain_labels.py와 동형(write=owner/admin, read=org 멤버 전원) — 커넥터 설정도
 그 org 전체가 쓰는 조직 자산이라 같은 축."""
@@ -21,6 +22,7 @@ from app.services.connector_registry import (
     InvalidConnectorConfigError,
     InvalidConnectorSchemaError,
     get_org_connector,
+    list_org_connectors,
     set_org_connector_config,
     set_org_connector_schema,
 )
@@ -66,6 +68,23 @@ def _to_response(row) -> ConnectorResponse:
         fields=[ConnectorFieldEntry(**f) for f in row.fields], requires_env=row.requires_env,
         kinds=row.kinds, org_config=row.org_config,
     )
+
+
+@router.get("/{org_id}/connectors", response_model=list[ConnectorResponse])
+async def list_connectors(
+    org_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ConnectorResponse]:
+    """story 4180f67f(2026-09-02, PO 확定) — org에 등록된 커넥터 전체 목록(빈 배열=0건).
+    단건 GET과 같은 권한 축(org 멤버 read, owner/admin 아니어도 됨) — 조직 설정 화면이
+    connector_key를 미리 몰라도 이 목록으로 카드를 그린다(connector_key 하드코딩 금지,
+    PO 명시 기각)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    rows = await list_org_connectors(session, org_id=org_id)
+    return [_to_response(row) for row in rows]
 
 
 @router.get("/{org_id}/connectors/{key}", response_model=ConnectorResponse)

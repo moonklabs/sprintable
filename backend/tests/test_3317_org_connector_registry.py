@@ -405,6 +405,91 @@ async def test_agent_can_post_schema_but_not_put_config():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_list_connectors_empty_when_none_registered():
+    """story 4180f67f — 0건이면 빈 배열(에러 아님) — 설정 화면이 "등록된 커넥터 없음" 안내로
+    쓸 신호."""
+    from app.routers.connectors import list_connectors
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, owner_id = await _seed_org(s, slug="c3317l")
+            result = await list_connectors(org_id, session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id))
+            assert result == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_list_connectors_returns_all_registered_for_org_sorted_by_key():
+    """⭐핵심 — story 4180f67f. connector_key 하드코딩 없이 이 목록만으로 설정 화면이 카드를
+    그릴 수 있어야 한다(PO 명시 요구: 다른 조직이 자체 커넥터를 register_connector_schema로
+    올려도 화면에 뜬다는 것의 근거)."""
+    from app.routers.connectors import (
+        ConnectorFieldEntry, SetConnectorSchemaRequest, list_connectors, post_connector_schema,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, owner_id = await _seed_org(s, slug="c3317m")
+            await post_connector_schema(
+                org_id, "threads",
+                SetConnectorSchemaRequest(version="1.0.0", channel="threads", fields=[ConnectorFieldEntry(**f) for f in _THREADS_FIELDS]),
+                session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id),
+            )
+            await post_connector_schema(
+                org_id, "stibee",
+                SetConnectorSchemaRequest(version="1.0.0", channel="stibee", fields=[ConnectorFieldEntry(**f) for f in _STIBEE_FIELDS]),
+                session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id),
+            )
+            # 다른 org에 등록된 커넥터도 하나 심어 org 스코프 격리를 함께 고정.
+            other_org_id, other_owner_id = await _seed_org(s, slug="c3317m-other")
+            await post_connector_schema(
+                other_org_id, "instagram",
+                SetConnectorSchemaRequest(version="1.0.0", channel="instagram", fields=[]),
+                session=s, verified_org_id=other_org_id, auth=_auth(other_owner_id, other_org_id),
+            )
+
+            result = await list_connectors(org_id, session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id))
+            assert [c.connector_key for c in result] == ["stibee", "threads"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_list_connectors_non_owner_admin_can_still_read():
+    """단건 GET과 같은 권한 축 — read는 owner/admin 아니어도 org 멤버면 된다."""
+    from app.routers.connectors import (
+        ConnectorFieldEntry, SetConnectorSchemaRequest, list_connectors, post_connector_schema,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, owner_id = await _seed_org(s, slug="c3317n", owner=True)
+            await post_connector_schema(
+                org_id, "threads",
+                SetConnectorSchemaRequest(version="1.0.0", channel="threads", fields=[ConnectorFieldEntry(**f) for f in _THREADS_FIELDS]),
+                session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id),
+            )
+            from app.models.project import OrgMember
+            plain_member_id = uuid.uuid4()
+            s.add(OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=plain_member_id, role="member"))
+            await s.commit()
+
+            result = await list_connectors(
+                org_id, session=s, verified_org_id=org_id, auth=_auth(plain_member_id, org_id),
+            )
+            assert [c.connector_key for c in result] == ["threads"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_post_schema_rejects_secret_like_org_config_field_name():
     """⭐PO 리뷰(2026-09-02②) — 서버는 플러그인의 "시크릿을 org_config로 선언 안 한다"
     규약을 신뢰하지 않는다. org_config 필드 name이 token/secret/password/api_key 패턴이면
