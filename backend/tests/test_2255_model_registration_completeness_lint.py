@@ -106,7 +106,7 @@ def test_mutation_empty_allowlist_would_have_flagged_the_fixture(tmp_path):
 
     original = mod._INTENTIONALLY_UNREGISTERED
     try:
-        mod._INTENTIONALLY_UNREGISTERED = set()
+        mod._INTENTIONALLY_UNREGISTERED = {}
         _write(
             tmp_path,
             "_test_only_unregistered_fixture.py",
@@ -118,3 +118,24 @@ def test_mutation_empty_allowlist_would_have_flagged_the_fixture(tmp_path):
         }, "허용목록을 비웠는데도 탐지가 안 되면 허용목록 로직 자체가 무동작이라는 뜻"
     finally:
         mod._INTENTIONALLY_UNREGISTERED = original
+
+
+def test_allowlist_is_pinned_to_known_fixtures_only():
+    """PO 리뷰(페드루, 2026-09-02) ① — 허용목록이 "이유 명기 없이" 조용히 늘어날 수 있는
+    뒷문이 되면 안 된다. key 집합을 정확히 pin — 새 항목을 추가하려면 이 테스트도 같이
+    고쳐야 하므로 리뷰에서 반드시 눈에 띈다(조용한 확장 불가)."""
+    from lint_model_registration_completeness import _INTENTIONALLY_UNREGISTERED
+
+    assert set(_INTENTIONALLY_UNREGISTERED) == {"_test_only_unregistered_fixture"}
+
+
+def test_allowlist_entries_cite_a_story_reference():
+    """PO 리뷰(페드루, 2026-09-02) ① — 허용목록의 각 항목은 사유가 비어있으면 안 되고,
+    그 사유가 스토리 번호(#NNNN)를 인용해야 한다(등재 회피의 근거 없는 뒷문 방지)."""
+    import re
+
+    from lint_model_registration_completeness import _INTENTIONALLY_UNREGISTERED
+
+    for stem, reason in _INTENTIONALLY_UNREGISTERED.items():
+        assert reason and reason.strip(), f"{stem}의 허용 사유가 비어있다"
+        assert re.search(r"#\d+", reason), f"{stem}의 허용 사유가 스토리 번호를 인용하지 않는다: {reason!r}"

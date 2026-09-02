@@ -25,11 +25,21 @@ import ast
 import sys
 from pathlib import Path
 
-# story #2662 AC2 양성대조 전용 픽스처(app/models/_test_only_unregistered_fixture.py) —
-# 의도적으로 영원히 __init__.py에 미등재 상태로 남아야 하는 유일한 예외. 이 파일을 등재하면
-# AC2 양성대조의 전제(app.models 벌크 import에 없다)가 깨진다. 새 운영 모델을 여기 추가하지
-# 말 것 — 그건 이 가드가 정확히 막으려는 결함이다.
-_INTENTIONALLY_UNREGISTERED = {"_test_only_unregistered_fixture"}
+# PO 리뷰(페드루, 2026-09-02) — "사유 없는 추가"로 등재 회피의 뒷문이 되는 걸 막기 위해
+# set이 아니라 {stem: 사유} dict로 강제한다. 새 항목은 반드시 스토리 번호(#NNNN)를 인용하는
+# 사유를 같이 적어야 하고(test_allowlist_entries_cite_a_story_reference가 강제), 이 dict의
+# key 집합 자체도 tests/test_2255_model_registration_completeness_lint.py의
+# test_allowlist_is_pinned_to_known_fixtures_only에 pin돼 있어 조용히 늘어날 수 없다(둘 다
+# 건드려야 리뷰에서 보임). 새 운영 모델을 여기 추가하지 말 것 — 그건 이 가드가 정확히
+# 막으려는 결함이다. 오직 story #2662 AC2 양성대조처럼 "영원히 미등재 상태로 남아야
+# 검증이 성립하는" 테스트 전용 픽스처만 여기 온다.
+_INTENTIONALLY_UNREGISTERED: dict[str, str] = {
+    "_test_only_unregistered_fixture": (
+        "story #2662 AC2 양성대조 전용 — app.models 벌크 import에 영원히 없어야 그 테스트가 "
+        "운영 모델 등재 상태와 무관하게 계속 자가 실패할 수 있다. "
+        "app/models/_test_only_unregistered_fixture.py 참고."
+    ),
+}
 
 
 def _models_with_tablename(models_dir: Path) -> dict[str, str]:
