@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -8,53 +8,26 @@ import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from 'lucide-rea
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { fetchWithAuth } from '@/lib/db/client';
+import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
 
 /**
  * story #3159(retention·최소층) — 가입 후 남은 activation 단계를 상시 노출(완주 유도).
- * `/api/activation/checklist` 마운트 1회 조회(storage-capacity-banner.tsx와 동형 no-polling
- * 패턴). PO 지시(2026-08-27): 완전 소멸은 완주(all_complete) 시만 — 접기(collapse)는
- * 허용하되 접힌 상태에서도 진행률 칩은 남는다(수동 dismiss로 완전히 숨길 순 없음).
+ * PO 지시(2026-08-27): 완전 소멸은 완주(all_complete) 시만 — 접기(collapse)는 허용하되
+ * 접힌 상태에서도 진행률 칩은 남는다(수동 dismiss로 완전히 숨길 순 없음).
  *
- * 완주를 한 번 관측하면 localStorage에 영구 기록해 이후 세션은 fetch 자체를 건너뛴다
- * (activation은 단조 증가 — 한 번 다 채우면 되돌아가지 않는다. 활성 사용자 전원이 매
- * 세션 이 엔드포인트를 다시 때리는 낭비 방지).
+ * story #3274 — fetch/skip(COMPLETE_KEY) 로직은 `useActivationStatus()`(hooks/use-
+ * activation-status.ts)로 분리했다 — support-widget-launcher.tsx의 온보딩 단계 게이팅과
+ * 같은 조회를 공유한다(두 벌 판별자·중복 네트워크 호출 금지, AC①).
  */
-const COMPLETE_KEY = 'sprintable_activation_checklist_complete';
 const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
-
-interface ActivationState {
-  steps: {
-    signed_up: boolean;
-    email_verified: boolean;
-    org_created: boolean;
-    agent_connected: boolean;
-    first_roundtrip: boolean;
-  };
-  completed: number;
-  total: number;
-  all_complete: boolean;
-  // story #3201 — 왕복 성사된 대화(또는 org 최초 agent DM) id, 없으면 null.
-  first_instruction_conversation_id: string | null;
-}
-
-function readLocalFlag(key: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(key) === '1';
-  } catch {
-    return false;
-  }
-}
 
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
   const router = useRouter();
   const { projectId } = useDashboardContext();
-  const [state, setState] = useState<ActivationState | null>(null);
-  const [skip] = useState<boolean>(() => readLocalFlag(COMPLETE_KEY));
+  const { state, allComplete } = useActivationStatus();
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -65,33 +38,7 @@ export function ActivationChecklistBanner() {
     }
   });
 
-  useEffect(() => {
-    if (skip) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetchWithAuth('/api/activation/checklist');
-        if (!res.ok) return;
-        const json = (await res.json()) as { data?: ActivationState };
-        if (cancelled || !json.data) return;
-        setState(json.data);
-        if (json.data.all_complete) {
-          try {
-            window.localStorage.setItem(COMPLETE_KEY, '1');
-          } catch {
-            // 영속 실패해도 이번 렌더는 정상 동작(단지 다음 세션에 한 번 더 조회할 뿐)
-          }
-        }
-      } catch {
-        // 조회 실패는 치명적이지 않음 — 배너 미노출
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [skip]);
-
-  if (skip || !state || state.all_complete) return null;
+  if (allComplete || !state) return null;
 
   const toggleCollapse = () => {
     const next = !collapsed;

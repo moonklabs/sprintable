@@ -328,7 +328,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                           role="group"
                           aria-live="assertive"
                           aria-label={`${t('webhookDeleteConfirm')} (${ariaScope})`}
-                          className="flex items-center justify-between gap-3 bg-destructive/5 px-3 py-2.5"
+                          className="flex items-center justify-between gap-3 bg-destructive-tint px-3 py-2.5"
                         >
                           {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                           <span className="min-w-0 truncate text-sm text-foreground" title={c.url}>

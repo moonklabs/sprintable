@@ -37,6 +37,7 @@ jobs:
     timeout-minutes: 3
     outputs:
       backend_relevant: ${{ steps.scope.outputs.backend_relevant }}
+      gateway_relevant: ${{ steps.scope.outputs.gateway_relevant }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,7 +56,8 @@ jobs:
           # 컨텍스트에서만 돈다(design-review-gate.yml의 AC8과 같은 fail-closed 원칙).
           if [ -z "${BASE_SHA}" ] || [ -z "${HEAD_SHA}" ]; then
             echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
-            echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드 전량 실행."
+            echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드·gateway 전량 실행."
             exit 0
           fi
           CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
@@ -79,6 +81,22 @@ jobs:
               echo "allowlist 밖 파일:"
               echo "${NON_SAFE}"
             fi
+          fi
+
+          # story #3273(CI사각) — support-gateway는 backend와 반대 방향 필터가 안전하다.
+          # backend는 packages/ 등 넓은 코드베이스에 걸쳐 있어 "안전 확定" allowlist(스킵 대상)를
+          # 좁게 잡는 게 맞지만, support-gateway는 그 자체가 "0 fleet 자격"(app/config.py 상단
+          # 주석) — 자기 디렉토리 밖 어떤 코드도 import하지 않는 게 설계 불변식이다. 그래서
+          # 여기는 "관련 확定" allowlist(실행 대상)를 좁게 잡는 쪽이 더 안전하다 — 이 워크플로
+          # 파일 자체가 바뀔 때도 돈다(자기 안전).
+          GATEWAY_CHANGED="$(printf '%s\n' "${CHANGED}" \
+            | grep -E '^support-gateway/|^\.github/workflows/ci\.yml$' || true)"
+          if [ -n "${GATEWAY_CHANGED}" ] || [ -z "${CHANGED}" ]; then
+            echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "support-gateway/ 변경 있음(또는 변경 0건) — gateway pytest 실행."
+          else
+            echo "gateway_relevant=false" >> "$GITHUB_OUTPUT"
+            echo "support-gateway/ 밖 변경만 있음 — gateway pytest skip 대상."
           fi
 
   alembic-fresh-db:
@@ -327,6 +345,22 @@ jobs:
   # story #2330 AC6 — env.py(PR#2661)의 "autocommit_block()은 이 프로젝트에서 원리적으로
   # 못 쓴다" 주석은 «읽어야» 서는 것이었다(주석만으로는 다음 사람이 또 쓸 수 있다). grep
   # 가드로 승격한다 — 마이그레이션 파일에 그 호출이 들어오면 CI가 빨개진다.
+  # story #2476(결제②-A1후속 재그라운딩, 2026-09-01) — legacy `subscriptions`·
+  # `subscription_checkout_sessions` 테이블은 OSS(이 레포)에서 참조 0건이지만 死 테이블은
+  # 아니다(docs/pk-triage-orm-unmodeled.md, story a74bdc84 — 별도 SaaS 제품이 같은 물리
+  # DB를 라이브로 쓰는 중). OSS 정본은 org_subscriptions뿐 — 이 lint는 「참조 0」을 계수
+  # 가능하게 유지한다(새 코드가 legacy 테이블을 다시 끌어오면 즉시 빨강).
+  legacy-subscriptions-reuse-lint:
+    name: legacy subscriptions reuse lint (guard, story #2476)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/app for legacy subscriptions table reuse
+        working-directory: backend
+        run: python3 scripts/lint_legacy_subscriptions_reuse.py
+
   alembic-no-autocommit-block:
     name: Alembic migrations — no autocommit_block() (guard)
     runs-on: ubuntu-latest
@@ -896,6 +930,82 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # story #3273(CI사각, 2026-09-01 카디르 QA 발견) — support-gateway/ 디렉토리엔 pytest
+  # 스위트(86건 시점 발견, 이 잡 도입 시점 87건)가 있었지만 GHA 어느 워크플로에도 실행 잡이
+  # 없었다 — backend-test와 달리 그동안 이 서비스를 건드린 PR도 "required CI green"이 스위트
+  # 0건 실행으로 통과했고, 검증은 QA의 codex exec 수동 실행에만 의존했다(«CI green≠관문 전부»
+  # 클래스). support-gateway는 story #3259(지원v1·1경계)의 "0 fleet 자격" 설계로 자기
+  # 디렉토리 밖 어떤 코드도 import하지 않는다(app/config.py 상단 주석) — 그래서 이 서비스
+  # 테스트는 backend-test처럼 실PG 서비스가 필요 없다(tests/conftest.py가 sqlite+aiosqlite
+  # 인메모리로 매 테스트를 격리) — 로컬 실측(2026-09-01) 87 passed, 0.94초.
+  #
+  # ⚠️아직 develop 필수 상태 체크가 아니다(페드루 PO 지시, 2026-09-01) — 신설 잡을 곧장
+  # required에 태우면 이 잡 자체의 미지 플레이크가 전 머지를 막는 자리가 된다("게이트에
+  # 머지 뒤에만 아는 것 금지"의 사촌 원칙). develop에서 몇 사이클 돌아 플레이크 0을 확認한
+  # 뒤에만 PO가 branch protection에 수동으로 등재한다(`gh api --method PUT
+  # repos/moonklabs/sprintable/branches/develop/protection/required_status_checks/contexts`
+  # 로 "Support Gateway pytest" 추가 — 관리자 권한 필요, 이 PR이 하는 일 아님).
+  gateway-test:
+    name: Support Gateway pytest
+    needs: [detect-changed-scope]
+    # backend-test·alembic-fresh-db와 동형 이유(위 주석 반복 안 함) — 잡 자체는 항상 돌고
+    # 스텝만 조건부 스킵해 "미실행=스킵"이 "통과"로 잡히는 모호함을 피한다.
+    if: always()
+    runs-on: ubuntu-latest
+    # 실측(2026-09-01, 로컬 87 passed 0.94초) — postgres 서비스 불요·CI 콜드 uv sync 포함해도
+    # 수 분 이내로 예상. backend-test(7~8분, 실PG)·backend-test-destructive(#3269 실측
+    # 17~23분+)에 비하면 러너 비용은 무시할 수준 — 그래도 첫 CI 실주행 미지수 여유로 10분.
+    timeout-minutes: 10
+
+    # story #3285(지원v1·후속, 2026-09-01) — gateway 스위트는 SQLite 인메모리(conftest.py)라
+    # 실 Postgres 마이그레이션 제약(CHECK/FK) 드리프트를 구조적으로 못 잡는 클래스였다(실증:
+    # #3672가 role을 코드로만 넓혀 dev PG서 500). backend와 같은 pgvector 서비스 패턴을
+    # 재사용 — 비용은 미미(gateway 마이그레이션 3~4개뿐, 수 초).
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_gateway_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      GATEWAY_REALDB_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5433/sprintable_gateway_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        if: needs.detect-changed-scope.outputs.gateway_relevant != 'false'
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      - name: Run pytest (support-gateway — sqlite in-memory + realdb 드리프트 게이트)
+        if: needs.detect-changed-scope.outputs.gateway_relevant != 'false'
+        working-directory: support-gateway
+        run: |
+          set -o pipefail
+          uv run pytest -q --durations=20 2>&1 | tee /tmp/gateway_pytest_output.log
+
+      - name: Slowest tests summary
+        if: always()
+        run: |
+          {
+            echo "## Support Gateway pytest — slowest 20"
+            echo '```'
+            awk '/slowest 20 durations/,0' /tmp/gateway_pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — skip됐거나 타임아웃)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # story #2929 — base가 develop/main이 아닌 스택 PR(feat/* 위 feat/*)에는 이 job이 전혀
   # 안 돈다(트리거 `branches: [main, develop]`, 위). 그 갭은 `stack-pr-frontend-preview.yml`
   # (별도 파일, `branches-ignore: [main, develop]`)이 required 체크 이름을 건드리지 않고
@@ -1018,6 +1128,14 @@ jobs:
       # 실 픽셀로 최종 판정한다 — docs/contrast-guard.md AC4 참조.
       - name: "Verify no new cross-element tint × family-color-text (story #2590 A regression guard)"
         run: pnpm --filter web verify:cross-element-tint-text
+
+      # story #2420 AC4/AC6/AC7 — 「닫힌 계열」(subtle 알파를 0으로 만든 계열)의 순수 bg-<X>/<n<50>
+      # 재유입 가드. 자매 가드 verify:no-new-tint-color-text는 알파를 «같은 계열 글자와 함께»일 때만
+      # 잡아 순수 bg-<X>/<n>(text 없이)은 놓친다 — 이 스텝이 그 갭을 메운다(PO 지적, 2026-09-01).
+      # CLOSED_FAMILIES=[destructive](이 PR에서 0이 됨). 팬아웃 각 PR이 자기 계열을 0으로 만들 때
+      # 그 PR에서 CLOSED에 추가한다(계약 ③: 死를 계수 가능하게 — 0이 된 시점이 유일하게 옳은 자리).
+      - name: "Verify no closed-family subtle alpha bg re-entry (story #2420 AC4/AC6 — destructive)"
+        run: pnpm --filter web verify:no-subtle-alpha-bg
 
 
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를

@@ -466,7 +466,7 @@ export function AgentRunDetail({
                       <div key={idx} className="relative flex gap-4 pb-4 pl-9">
                         <div className={`absolute left-2.5 top-1.5 size-3 rounded-full border-2 ${
                           hasError
-                            ? 'border-destructive bg-destructive/20'
+                            ? 'border-destructive bg-destructive-tint'
                             : isLlm
                               ? 'border-info bg-info/20' /* story #2023 AC6: LLM 호출=info(기계 축), 브랜드 블루=인간 서명 전용 */
                               : 'border-success bg-success-tint'

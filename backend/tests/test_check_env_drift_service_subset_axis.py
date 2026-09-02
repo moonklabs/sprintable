@@ -27,10 +27,11 @@ def _load_check_env_drift():
 
 # ── AC1: 마스터 확定 ────────────────────────────────────────────────────────────
 
-def test_service_script_map_is_declared_master_of_eight():
-    """`_SERVICE_SCRIPT_MAP`이 8개 실서비스를 담은 마스터다 — 이 카운트가 바뀌면(신규 서비스
+def test_service_script_map_is_declared_master_of_nine():
+    """`_SERVICE_SCRIPT_MAP`이 9개 실서비스를 담은 마스터다 — 이 카운트가 바뀌면(신규 서비스
     추가/삭제) 알아야 하므로 명시 고정. story #2821(2026-08-19) — office-converter-dev
-    (story #2771, gotenberg 공개 이미지) 편입으로 7→8."""
+    (story #2771, gotenberg 공개 이미지) 편입으로 7→8. story #3263(2026-09-01, 페드루 PO
+    지시) — support-gateway-dev(story #f2a27d2a) 편입으로 8→9."""
     mod = _load_check_env_drift()
     assert set(mod._SERVICE_SCRIPT_MAP) == {
         "sprintable-backend-dev", "sprintable-backend-prod",
@@ -38,6 +39,7 @@ def test_service_script_map_is_declared_master_of_eight():
         "sprintable-mcp-dev", "sprintable-mcp-prod",
         "sprintable-realtime-dev",
         "office-converter-dev",
+        "support-gateway-dev",
     }
 
 

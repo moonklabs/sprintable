@@ -87,3 +87,60 @@ describe('SettingsPage — 전역 법적 고지 푸터 (story #2865)', () => {
     expect(termsLinks).toHaveLength(1);
   });
 });
+
+// story #3274(지원v1·후속, 선생님 확定 2026-09-01) — 상시 플로팅 폐기 후 "일반 상황" 유일
+// 진입점. isSupportWidgetEnabled() 뒤 게이팅(dev on·prod off, EE_ENABLED와 동일 컨벤션)과
+// ?tab=support 딥링크 폴백 둘 다 고정한다.
+describe('SettingsPage — story #3274: 설정 > 문의 탭', () => {
+  const ORIGINAL_FLAG = process.env['NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED'];
+
+  afterEach(() => {
+    if (ORIGINAL_FLAG === undefined) delete process.env['NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED'];
+    else process.env['NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED'] = ORIGINAL_FLAG;
+  });
+
+  it('flag off(prod 기본값) — 문의 탭 트리거 자체가 없다', async () => {
+    delete process.env['NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED'];
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    expect(container.textContent).not.toContain(koMessages.settings.tabSupport);
+  });
+
+  it('flag on — 문의 탭 트리거가 뜨고, 클릭하면 위젯 패널(panelTitle)이 인라인 렌더된다', async () => {
+    process.env['NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED'] = 'true';
+    // 파일 최상단 hoisted mock의 useSearchParams()는 호출마다 `new URLSearchParams(...)`를
+    // 새로 만들어 참조가 매 렌더 달라진다 — 실 Next.js useSearchParams()는 네비게이션이
+    // 실제로 안 바뀌면 안정적인 참조를 주는데, 이 목은 그렇지 않아 페이지의
+    // `useEffect(() => setActiveTab(...), [searchParamsHook])`가 매 렌더 재발화해 클릭으로
+    // 바꾼 activeTab을 url의 tab=appearance로 즉시 되돌려버린다(목 아티팩트 — 실 프로덕션
+    // 동작이 아님). 이 테스트만 안정 참조로 override.
+    const stableParams = new URLSearchParams('tab=appearance');
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => stableParams,
+      usePathname: () => '/settings',
+    }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+
+    const trigger = Array.from(container.querySelectorAll('[role="tab"]')).find(
+      (el) => el.textContent?.includes(koMessages.settings.tabSupport),
+    ) as HTMLElement;
+    expect(trigger).not.toBeUndefined();
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(container.textContent).toContain(koMessages.supportWidget.panelTitle);
+  });
+
+  it('flag off인데 ?tab=support로 직접 진입해도 기본 탭(profile)으로 폴백한다(빈 화면 방지)', async () => {
+    delete process.env['NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED'];
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=support'),
+      usePathname: () => '/settings',
+    }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    expect(container.textContent).not.toContain(koMessages.supportWidget.panelTitle);
+  });
+});

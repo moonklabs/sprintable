@@ -1,0 +1,44 @@
+[project]
+name = "sprintable-support-gateway"
+version = "0.1.0"
+description = "지원·활성화 에이전트 v1 경계 서비스 — 고객 org 데이터·fleet 자격과 물리 분리된 독립 Cloud Run 서비스 (Blueprint v0.3 §5-1)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "pyjwt>=2.9.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "alembic>=1.13.0",
+    "psycopg2-binary>=2.9.0",
+    "slowapi>=0.1.9",
+    # story #3261 AC1 — Vertex AI SDK 직결(Pedro 지시, raw REST 아님). Client(vertexai=True)로
+    # google-genai 통합 SDK가 aiplatform 백엔드를 직접 두드린다(GA 패키지, ADK 등 미도입 —
+    # v0.2 "ADK류는 구현 스파이크 실측 비교 후 채택" 유보 그대로).
+    "google-genai>=1.0.0",
+    # story #3263(지원v1·5에스컬레이션) — Gateway→backend 에스컬레이션 배달(escalation_
+    # delivery.py)의 실 outbound HTTP 클라이언트. 전엔 dev-group에만 있어(TestClient용) 런타임
+    # 배포 이미지엔 안 들어갔다 — 이 서비스가 처음으로 outbound HTTP를 실제로 거는 경로라 main
+    # dependencies로 승격한다(dev-group 중복 선언은 제거).
+    "httpx>=0.27.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "aiosqlite>=0.20.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

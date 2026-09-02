@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+
+import jwt
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.config import settings
+from app.vertex_client import EmbedResult, GenerateResult
+
+TEST_TOKEN_SECRET = "test-secret-not-for-prod-padded-to-32-bytes-min"
+
+# story #3259 AC4 — moonklabs 실 org id를 테스트에 실 참여자로 쓴다(특례 없음을 증명하려면
+# 이 id로 정확히 같은 코드 경로를 태워봐야 한다). memory reference: list_team_members 실측.
+MOONKLABS_ORG_ID = uuid.UUID("54bac162-5c0d-49fa-8e49-85977063a091")
+OTHER_ORG_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+
+def make_token(org_id: uuid.UUID, user_id: uuid.UUID | None = None, secret: str = TEST_TOKEN_SECRET) -> str:
+    user_id = user_id or uuid.uuid4()
+    return jwt.encode({"org_id": str(org_id), "user_id": str(user_id)}, secret, algorithm="HS256")
+
+
+class FakeLLMClient:
+    """story #3261 — 실 Vertex 호출 0. classify_text/interaction_text를 테스트가 미리 정해
+    orchestration 로직(app/interaction.py)만 검증한다. AFC(도구 호출) 자체는 SDK 스모크
+    테스트로 별도 검증 완료(수동, 이 스위트엔 안 실음 — 비용·네트워크 의존 배제)."""
+
+    def __init__(
+        self,
+        *,
+        classify_text: str = "inquiry",
+        classify_needs_grounding: bool = False,
+        interaction_text: str = "안녕하세요, 도와드릴게요.",
+        input_tokens: int = 10,
+        output_tokens: int = 5,
+        knowledge_text: str = "1",
+        call_tool_name: str | None = None,
+        call_tool_kwargs: dict | None = None,
+        call_tool_calls: list[tuple[str, dict]] | None = None,
+    ) -> None:
+        self.classify_text = classify_text
+        # story #3277 — classify()가 "<category>|<true|false>" 형식을 파싱하므로, 테스트가
+        # classify_text(카테고리)와 독립적으로 needs_grounding 축을 켤 수 있게 분리한다.
+        self.classify_needs_grounding = classify_needs_grounding
+        self.interaction_text = interaction_text
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.knowledge_text = knowledge_text
+        # story #3262 — AFC가 실제로 도구를 부르는 상황(예: knowledge_search가 매치를 찾은
+        # 경우)을 시뮬레이션하고 싶은 테스트용. 설정되면 generate_with_tools가 interaction_text를
+        # 돌려주기 *전에* tools 목록에서 이 이름의 함수를 찾아 한 번 호출한다(AFC 루프의 초소형
+        # 재현 — 진짜 SDK의 도구선택 로직은 안 흉내낸다, "도구가 실제로 불렸다"는 사실만 필요).
+        self.call_tool_name = call_tool_name
+        self.call_tool_kwargs = call_tool_kwargs or {}
+        # story #3270 — 한 턴에 도구가 여러 번(예: knowledge_search가 다른 query로 두 번) 불리는
+        # "혼합 질문" 시뮬레이션용. 설정되면 call_tool_name/call_tool_kwargs 단일 호출 대신 이
+        # (이름, kwargs) 목록을 순서대로 전부 호출한다.
+        self.call_tool_calls = call_tool_calls
+        self.calls: list[tuple[str, str]] = []  # (kind, model)
+        # story #3277 — generate_with_tools에 실제로 전달된 force_tool_names를 테스트가
+        # 확認할 수 있게 마지막 호출 값을 기록한다(호출부 배선 자체를 pin하는 용도 — 이
+        # 페이크는 진짜 Gemini ANY 모드를 흉내내지 않는다, 그건 수동 SDK 스모크 테스트 영역).
+        self.last_force_tool_names: list[str] | None = None
+
+    async def generate(self, *, model: str, system_prompt: str, user_text: str) -> GenerateResult:
+        self.calls.append(("generate", model))
+        # classifier·memory summarizer·지식 관련성 판정 셋 다 이 메서드를 쓴다 — 시스템
+        # 프롬프트로 구분. knowledge_text 기본값 "1"=후보 1번 선택(story #3262 2차실측 이후
+        # 선택형 재설계 — app/execution_tasks.py::_KNOWLEDGE_RELEVANCE_SYSTEM_PROMPT 참고).
+        if "카테고리" in system_prompt or "라우터" in system_prompt:
+            grounding = "true" if self.classify_needs_grounding else "false"
+            return GenerateResult(
+                text=f"{self.classify_text}|{grounding}", input_tokens=self.input_tokens, output_tokens=1
+            )
+        if "후보 문서" in system_prompt:
+            return GenerateResult(text=self.knowledge_text, input_tokens=self.input_tokens, output_tokens=self.output_tokens)
+        return GenerateResult(text="(요약)", input_tokens=self.input_tokens, output_tokens=self.output_tokens)
+
+    async def generate_with_tools(
+        self, *, model: str, system_prompt: str, user_text: str, tools: list[Callable],
+        force_tool_names: list[str] | None = None,
+    ) -> GenerateResult:
+        self.calls.append(("generate_with_tools", model))
+        self.last_force_tool_names = force_tool_names
+        if self.call_tool_calls is not None:
+            for tool_name, tool_kwargs in self.call_tool_calls:
+                tool = next(t for t in tools if t.__name__ == tool_name)
+                await tool(**tool_kwargs)
+        elif self.call_tool_name is not None:
+            tool = next(t for t in tools if t.__name__ == self.call_tool_name)
+            await tool(**self.call_tool_kwargs)
+        return GenerateResult(
+            text=self.interaction_text, input_tokens=self.input_tokens, output_tokens=self.output_tokens
+        )
+
+    async def embed(self, *, model: str, texts: list[str], task_type: str) -> EmbedResult:
+        self.calls.append(("embed", model))
+        return EmbedResult(
+            vectors=[[0.1, 0.2, 0.3] for _ in texts], billable_character_count=sum(len(t) for t in texts)
+        )
+
+
+@pytest.fixture(autouse=True)
+def fake_llm(monkeypatch):
+    """autouse — story #3261부터 POST /messages가 항상 LLM 경로(분류기 최소)를 태우므로,
+    story #3259 시절 테스트(LLM을 모르던 코드)까지 전부 이 목이 없으면 실 VertexLLMClient
+    생성을 시도해 깨진다. 개별 테스트가 `fake_llm` 파라미터로 받아 classify_text/
+    interaction_text를 조정할 수 있다(기본값은 무해한 "inquiry" 분류)."""
+    import app.vertex_client as vertex_client_module
+
+    fake = FakeLLMClient()
+    monkeypatch.setattr(vertex_client_module, "_client", fake)
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def _configure_settings(monkeypatch, tmp_path):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{db_path}")
+    monkeypatch.setattr(settings, "token_secret", TEST_TOKEN_SECRET)
+    monkeypatch.setattr(settings, "session_rate_limit", "1000/minute")
+
+
+@pytest_asyncio.fixture
+async def db_engine():
+    from app.models import Base
+
+    engine = create_async_engine(settings.database_url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def client(db_engine, monkeypatch):
+    import app.db as db_module
+    from app.main import app
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr(db_module, "async_session_factory", session_factory)
+
+    async def _override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[db_module.get_db] = _override_get_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()

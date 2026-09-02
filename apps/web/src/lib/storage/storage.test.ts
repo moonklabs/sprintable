@@ -34,6 +34,24 @@ describe('local-sign HMAC', () => {
     const sig = signLocalObject(secret, container, path, exp);
     expect(verifyLocalObject(secret, container, 'chat/p1/c1/other.png', exp, sig)).toBe(false);
   });
+
+  // story dc3d62f4 — BE local.py::signed_write_url이 write payload에 PUT: 접두어를 이미
+  // 묶고 있었는데(read와 시그니처 공간을 분리하려는 의도) 이 FE 파일이 method를 몰라 그
+  // 의도가 실제로는 전혀 구현이 안 돼 있었다(read 서명 payload와 완전히 같은 문자열이었다면
+  // read 토큰으로 write도 통과했을 것). method 인자 도입 후 read/write 시그니처가 실제로
+  // 갈리는지 고정.
+  it('method=PUT 서명은 method=GET(기본값)으로 검증 실패(시그니처 공간 분리)', () => {
+    const exp = Date.now() + 60_000;
+    const writeSig = signLocalObject(secret, container, path, exp, 'PUT');
+    expect(verifyLocalObject(secret, container, path, exp, writeSig)).toBe(false);
+    expect(verifyLocalObject(secret, container, path, exp, writeSig, 'PUT')).toBe(true);
+  });
+
+  it('method=GET 서명은 method=PUT으로 검증 실패(역방향도 분리)', () => {
+    const exp = Date.now() + 60_000;
+    const readSig = signLocalObject(secret, container, path, exp, 'GET');
+    expect(verifyLocalObject(secret, container, path, exp, readSig, 'PUT')).toBe(false);
+  });
 });
 
 describe('LocalDiskStorageService roundtrip', () => {

@@ -1,0 +1,288 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { History, Plus, Send, UserRound, X } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
+
+/**
+ * story #3260 — 헤더가 반전 톤(bg-foreground/text-background, tooltip.tsx·avatar.tsx와 동일
+ * 고대비 페어링 재사용)인 이유: 「자기 org 안 대화가 아니라 Sprintable에 말하는 별도 창」임을
+ * 픽셀에서 드러내라는 선생님 지시(Blueprint v0.3) — 이 앱의 일반 헤더(연한 배경)와 시각적으로
+ * 확실히 갈라 넣는다.
+ */
+export function SupportWidgetPanelHeader({ onClose }: { onClose: () => void }) {
+  const t = useTranslations('supportWidget');
+  return (
+    <div className="flex shrink-0 items-start justify-between gap-2 bg-foreground px-4 py-3 text-background">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold leading-tight">{t('panelTitle')}</p>
+        <p className="mt-0.5 text-[11px] leading-snug text-background/70">{t('panelSubtitle')}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t('closeLabel')}
+        className="shrink-0 rounded-md p-1 text-background/70 hover:bg-background/10 hover:text-background"
+      >
+        <X className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * story #3260 Phase 2(2026-08-31, 페드루 PO 실 왕복 실측 지적) — support-gateway의
+ * Interaction/Execution 루프는 동기 처리라 ~12초까지 걸린다(story #3261). 정적 스피너는
+ * "멈춘 건지 도는 건지" 구분이 안 돼 무신호와 다를 바 없다 — 경과 초를 1초마다 갱신해
+ * 살아있다는 신호를 지속적으로 준다.
+ */
+function ThinkingIndicator() {
+  const t = useTranslations('supportWidget');
+  // 이 컴포넌트는 sending===true인 동안만 마운트되므로(호출부의 조건부 렌더) 매 등장이
+  // 곧 새 왕복의 시작 — 0에서 다시 세는 것이 초기 useState(0)만으로 이미 정확하다.
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="flex items-center gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
+      <span className="flex gap-0.5" aria-hidden>
+        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60" />
+      </span>
+      {t('thinkingLabel', { seconds })}
+    </div>
+  );
+}
+
+/**
+ * story #3276(지원v1·후속) AC2/AC3 — 상담 수명주기 툴바: "새 상담" 버튼 + 자기 대화 목록
+ * 드롭다운(지연 로드 — 열 때만 loadConversations() 호출, 미리 안 당겨온다). 종료된(읽기
+ * 전용) 상담을 보는 중엔 "활성 상담으로" 항목이 추가로 뜬다(session.isEnded로 판정 —
+ * 지금 보는 게 활성인지 과거 이력인지의 유일한 신호).
+ */
+function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
+  const t = useTranslations('supportWidget');
+  const [listOpen, setListOpen] = useState(false);
+
+  return (
+    <div className="flex shrink-0 items-center justify-end gap-1 border-b border-border px-2 py-1.5">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1 px-2 text-xs"
+        onClick={() => void session.startNewConversation()}
+      >
+        <Plus className="h-3.5 w-3.5" aria-hidden />
+        {t('startNewConversation')}
+      </Button>
+      <DropdownMenu
+        open={listOpen}
+        onOpenChange={(open) => {
+          setListOpen(open);
+          if (open && session.conversations === null) void session.loadConversations();
+        }}
+      >
+        <DropdownMenuTrigger
+          className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'h-7 gap-1 px-2 text-xs' })}
+        >
+          <History className="h-3.5 w-3.5" aria-hidden />
+          {t('conversationHistory')}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          {session.isEnded ? (
+            <DropdownMenuItem
+              onClick={() => {
+                setListOpen(false);
+                void session.viewActiveConversation();
+              }}
+            >
+              {t('backToActiveConversation')}
+            </DropdownMenuItem>
+          ) : null}
+          {session.conversations === null ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('conversationListLoading')}</div>
+          ) : session.conversations.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('conversationListEmpty')}</div>
+          ) : (
+            session.conversations.map((conv) => (
+              <DropdownMenuItem
+                key={conv.id}
+                onClick={() => {
+                  setListOpen(false);
+                  void session.selectConversation(conv.id);
+                }}
+                className="flex items-center justify-between gap-2"
+              >
+                <span className={conv.id === session.conversationId ? 'font-medium text-foreground' : undefined}>
+                  {new Date(conv.created_at).toLocaleString()}
+                </span>
+                {conv.ended_at === null ? (
+                  <span className="text-[11px] text-muted-foreground">{t('conversationActiveBadge')}</span>
+                ) : null}
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/**
+ * story #3260 Phase 2 — status 4종을 각각 다른 화면으로 그린다:
+ * - 'unavailable': Gateway가 이 빌드에 아예 안 붙어있음(재시도 대상 없음, 정직한 "준비 중").
+ * - 'error': 붙어있는데 연결 자체가 실패(재시도 버튼 — connect() 재호출로 의미 있음).
+ * - 'connecting': 세션+이력 로딩 중.
+ * - 'ready': 실 대화. sending 중엔 ThinkingIndicator, sendError면 «사람 연결» 폴백 배너
+ *   (카디르 지적 승계 — 500/무신호 금지 필수 요건).
+ */
+export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSession }) {
+  const t = useTranslations('supportWidget');
+  const [draft, setDraft] = useState('');
+
+  if (session.status === 'unavailable') {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-6 text-center">
+        <p className="text-sm font-medium text-foreground">{t('unavailableTitle')}</p>
+        <p className="text-xs text-muted-foreground">{t('unavailableBody')}</p>
+      </div>
+    );
+  }
+
+  if (session.status === 'error') {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+        <p className="text-sm font-medium text-foreground">{t('errorTitle')}</p>
+        <p className="text-xs text-muted-foreground">{t('errorBody')}</p>
+        <Button type="button" size="sm" variant="secondary" onClick={() => session.connect()}>
+          {t('retryConnect')}
+        </Button>
+      </div>
+    );
+  }
+
+  const canSend =
+    draft.trim().length > 0 && session.status === 'ready' && !session.sending && !session.isEnded;
+
+  return (
+    <>
+      <ConversationToolbar session={session} />
+      {session.isEnded ? (
+        <div
+          role="status"
+          className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-foreground"
+        >
+          <span>{t('conversationEndedBanner')}</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => void session.startNewConversation()}
+          >
+            {t('startNewConversation')}
+          </Button>
+        </div>
+      ) : null}
+      {session.escalationStatus === 'open' ? (
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-foreground"
+        >
+          <UserRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          {t('escalationOpenBanner')}
+        </div>
+      ) : null}
+      <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+        {session.status === 'connecting' ? (
+          <div className="h-8 animate-pulse rounded-lg bg-muted" />
+        ) : (
+          session.messages.map((m) => (
+            <div
+              key={m.id}
+              data-role={m.role}
+              className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
+                m.role === 'user'
+                  ? 'ml-auto bg-proof-blue-soft text-foreground'
+                  // story #3279 — operator(사람 운영자 실 회신)는 agent(AI 자동응대)와 같은
+                  // bg-muted를 쓰되 좌측 강조 보더로 시각 축을 분리한다(발신자가 다르다는
+                  // 신호 — no-fiction 원칙의 렌더 축 대응물: "누가 답했는지"도 지어내면
+                  // 안 된다).
+                  : m.role === 'operator'
+                    ? 'border-l-2 border-l-primary bg-muted text-foreground'
+                    : 'bg-muted text-foreground'
+              } ${m.pending ? 'opacity-60' : ''} ${m.failed ? 'border border-destructive/50' : ''}`}
+            >
+              {m.role === 'operator' ? (
+                <p className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-foreground">
+                  <UserRound className="h-3 w-3" aria-hidden />
+                  {t('operatorSenderLabel')}
+                </p>
+              ) : null}
+              {m.content}
+              {m.escalated ? (
+                <p className="mt-1 text-[10px] font-medium text-muted-foreground">{t('escalatedBadge')}</p>
+              ) : null}
+              {m.failed ? (
+                <p role="alert" className="mt-1 text-[10px] font-medium text-destructive">{t('messageFailedLabel')}</p>
+              ) : null}
+            </div>
+          ))
+        )}
+        {session.sending ? <ThinkingIndicator /> : null}
+      </div>
+      {session.sendError ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-destructive-tint px-3 py-2">
+          <p role="alert" aria-live="assertive" className="text-xs text-foreground">{session.sendError}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => session.retryLastMessage()}>
+            {t('sendErrorRetry')}
+          </Button>
+        </div>
+      ) : null}
+      <form
+        className="flex shrink-0 items-center gap-1.5 border-t border-border p-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!canSend) return;
+          void session.sendMessage(draft.trim());
+          setDraft('');
+        }}
+      >
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={t('inputPlaceholder')}
+          disabled={session.status !== 'ready' || session.sending || session.isEnded}
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+        />
+        {!session.isEnded && session.conversationId !== null ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="shrink-0 text-[11px]"
+            onClick={() => void session.endConversation()}
+          >
+            {t('endConversation')}
+          </Button>
+        ) : null}
+        <Button type="submit" size="sm" disabled={!canSend} aria-label={t('sendLabel')}>
+          <Send className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+      </form>
+    </>
+  );
+}

@@ -338,26 +338,59 @@ async def test_native_ci_not_pulled_when_event_has_conclusion():
 
 @pytest.mark.anyio
 async def test_fetch_status_check_rollup_returns_ci_and_reason():
-    """statusCheckRollup → (ci, reason). token 없음=(None,no_token)·state별 매핑·PAT 인자 없음."""
+    """story #3253 — REST check-runs 목록에서 직접 집계 → (ci, reason). token 없음=(None,no_token)·
+    conclusion별 매핑·sprintable/gate 자기 자신은 항상 집계에서 제외됨."""
     assert await _svc.fetch_status_check_rollup("o/r", "sha", "") == (None, "no_token")
     assert await _svc.fetch_status_check_rollup("badrepo", "sha", "tok") == (None, "bad_input")
 
-    def _resp(status, state):
+    def _run(name, status, conclusion):
+        return {"name": name, "status": status, "conclusion": conclusion}
+
+    def _resp(status_code, check_runs):
         r = MagicMock()
-        r.status_code = status
-        r.json.return_value = {"data": {"repository": {"object": {"statusCheckRollup": ({"state": state} if state else None)}}}}
+        r.status_code = status_code
+        r.json.return_value = {"check_runs": check_runs} if check_runs is not None else {}
         return r
 
     import httpx
+
     cases = [
-        (200, "SUCCESS", ("success", "resolved")),
-        (200, "FAILURE", ("failure", "resolved")),
-        (200, "ERROR", ("failure", "resolved")),
-        (200, "PENDING", (None, "pending")),
-        (200, "EXPECTED", (None, "pending")),
+        (200, [_run("CI", "completed", "success")], ("success", "resolved")),
+        (200, [_run("CI", "completed", "failure")], ("failure", "resolved")),
+        (200, [_run("CI", "completed", "timed_out")], ("failure", "resolved")),
+        (200, [_run("CI", "in_progress", None)], (None, "pending")),
+        (200, [], (None, "not_found")),
         (200, None, (None, "not_found")),
-        (500, "SUCCESS", (None, "api_error")),
+        (500, [_run("CI", "completed", "success")], (None, "api_error")),
     ]
-    for status, state, expected in cases:
-        with patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=_resp(status, state))):
+    for status_code, check_runs, expected in cases:
+        with patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=_resp(status_code, check_runs))):
             assert await _svc.fetch_status_check_rollup("moonklabs/sprintable", "abc", "inst-tok") == expected
+
+
+@pytest.mark.anyio
+async def test_fetch_status_check_rollup_excludes_gate_self_reference():
+    """story #3253 핵심 회귀 pin — 자기참조 순환 재현·처방 검증. sprintable/gate 자기 자신이
+    아직 in_progress인데 나머지 하위 체크(CI 등)는 전부 success면, 예전 GraphQL rollup
+    집계식으로는 (None,'pending')이었을 상황(gate 포함 전체가 완료돼야 SUCCESS)을 이 함수는
+    gate 자신을 제외하고 계산해 ('success','resolved')로 정확히 판정해야 한다 — CI가 100%
+    green인데도 gate가 영구히 자기 자신을 기다리는 사고가 이 pin으로 구조적으로 막힌다."""
+
+    def _resp(check_runs):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = {"check_runs": check_runs}
+        return r
+
+    import httpx
+
+    check_runs = [
+        {"name": "sprintable/gate", "status": "in_progress", "conclusion": None},
+        {"name": "CI", "status": "completed", "conclusion": "success"},
+        {"name": "QA review gate", "status": "completed", "conclusion": "success"},
+    ]
+    with patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=_resp(check_runs))):
+        assert await _svc.fetch_status_check_rollup("moonklabs/sprintable", "abc", "inst-tok") == (
+            "success",
+            "resolved",
+        )

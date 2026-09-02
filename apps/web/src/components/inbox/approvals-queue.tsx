@@ -626,7 +626,7 @@ export function ApprovalsQueue() {
             {decisionExpandSection}
             {gateErrors[gate.id] ? (
               <p
-                className="mt-2 rounded-lg border border-destructive/30 bg-destructive/8 px-2.5 py-1.5 text-[11px] text-foreground"
+                className="mt-2 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-[11px] text-foreground"
                 role="alert"
                 aria-live="assertive"
               >

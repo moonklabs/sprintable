@@ -30,10 +30,26 @@ class StorageProvider(abc.ABC):
 
     @abc.abstractmethod
     async def signed_write_url(
-        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None,
+        create_only: bool = False,
     ) -> str | None:
         """단기 만료 write(PUT) 서명 URL — D3(put=FE) 원칙 유지하며 대용량 바이너리가 BE(Cloud Run)를
-        경유하지 않게 한다(E-CANVAS C1-S5: FE가 캡처한 PNG를 GCS에 직접 PUT). 실패 시 None(best-effort)."""
+        경유하지 않게 한다(E-CANVAS C1-S5: FE가 캡처한 PNG를 GCS에 직접 PUT). 실패 시 None(best-effort).
+
+        story #3249(카디르/codex HIGH) — create_only=True 면 "생성 전용"(기존 객체가 있으면 PUT
+        거부) 조건이 서명에 바인딩된다. 없으면 GCS 기본이 "생성 또는 덮어쓰기"라, confirm이 작은
+        크기로 cap을 통과시킨 뒤 아직 유효한(TTL 內) 같은 signed URL로 더 큰 객체를 재PUT해 DB
+        cap 추적을 우회할 수 있었다(실 storage 는 커지는데 confirm 은 재호출 안 됨). 기본값 False
+        유지 — avatar/canvas 등 기존 호출부는 인자 안 넘기면 기존 동작 그대로(무회귀)."""
+
+    @abc.abstractmethod
+    def required_write_headers(self, *, create_only: bool = False) -> dict[str, str]:
+        """create_only=True인 signed_write_url의 PUT에 클라이언트가 반드시 실어야 하는 헤더 —
+        조건부 쓰기를 서명에 바인딩하는 방식이 provider마다 이름이 다르다(GCS는
+        `x-goog-if-generation-match`, S3/MinIO는 `If-None-Match`). story dc3d62f4 — 호출부
+        (assets.py 등)가 이 헤더를 하드코딩하면 provider가 바뀌어도 응답이 안 바뀌어 실제완
+        다른 provider로 배포된 self-host가 FE에 틀린 헤더 계약을 내려준다(서명 불일치로
+        PUT 자체가 깨짐). 순수함수(I/O 없음) — provider 인스턴스의 정적 속성일 뿐이라 sync."""
 
     @abc.abstractmethod
     async def delete_object(self, container: str, object_path: str) -> bool:

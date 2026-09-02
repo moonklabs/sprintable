@@ -105,6 +105,11 @@ PATH_ID_PARAM_RE = re.compile(r"^(?:id|[a-z][a-z0-9]*_id)$")
 # **project_id= 키워드로 호출됐을 때만** 가드로 인정(sprints.delete 등 정당 사용 보존).
 ID_MUTATION_PROJECT_GUARDS: frozenset[str] = frozenset(PROJECT_GUARD_FUNCTIONS - {"resolve_member"}) | {
     "assert_target_in_caller_org",
+    # story #3241 — assets.py 모듈-로컬 헬퍼(has_id_mutation_guard 는 has_guard 와 달리 1-hop 바디
+    # 헬퍼를 안 들여다봄 — 이 축은 이름을 직접 알아야 함). get_asset(GET, 기존)이 이미 이 헬퍼로
+    # project 접근권을 검증하던 동일 IDOR 경계를 delete_asset(신규 DELETE)이 재사용한다 — 이름이
+    # assets.py 에만 있음을 확인 후 편입(grep 0건, 타 모듈 동명 함수와 충돌 리스크 없음).
+    "_scope_filter",
 }
 
 # Depends(...) 콜러블 — 결과 id가 caller auth에서 서버-파생돼 클라이언트가 스푸핑할 여지가

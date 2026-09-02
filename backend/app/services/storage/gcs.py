@@ -53,10 +53,16 @@ class GcsStorageProvider(StorageProvider):
             return None
 
     async def signed_write_url(
-        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None,
+        create_only: bool = False,
     ) -> str | None:
         """signed_read_url과 동형(IAM SignBlob V4) — method="PUT". content_type 지정 시 서명에
-        바인딩돼 FE PUT 요청의 Content-Type 헤더가 반드시 일치해야 한다(임의 타입 업로드 방지)."""
+        바인딩돼 FE PUT 요청의 Content-Type 헤더가 반드시 일치해야 한다(임의 타입 업로드 방지).
+
+        create_only=True 면 `x-goog-if-generation-match: 0`을 서명에 바인딩(story #3249) —
+        GCS 는 이 조건을 "객체가 아직 없을 때만 생성"으로 해석해, 같은 signed URL로 재PUT하면
+        412 Precondition Failed 로 거부한다(cap 우회 재PUT 체인 차단). 이 헤더도 서명에 굽힌
+        값이라 클라이언트 PUT 요청이 정확히 이 헤더를 포함해야 함(안 보내면 403 SignatureDoesNotMatch)."""
 
         def _blocking() -> str:
             import google.auth
@@ -75,6 +81,8 @@ class GcsStorageProvider(StorageProvider):
             }
             if content_type:
                 kwargs["content_type"] = content_type
+            if create_only:
+                kwargs["headers"] = {"x-goog-if-generation-match": "0"}
             return blob.generate_signed_url(**kwargs)
 
         try:
@@ -82,6 +90,9 @@ class GcsStorageProvider(StorageProvider):
         except Exception:
             logger.warning("gcs storage: signed write url 생성 실패 path=%s", object_path, exc_info=True)
             return None
+
+    def required_write_headers(self, *, create_only: bool = False) -> dict[str, str]:
+        return {"x-goog-if-generation-match": "0"} if create_only else {}
 
     async def delete_object(self, container: str, object_path: str) -> bool:
         def _blocking() -> bool:

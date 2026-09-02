@@ -1181,9 +1181,11 @@ async def _publish_registry_event_core(
     try:
         escalation_ids = await resolve_routing_leg(
             definition.routing["escalation"], payload=payload, org_id=org_id, db=db,
+            definition_key=definition.key,
         )
         broadcast_ids = await resolve_routing_leg(
             definition.routing["broadcast"], payload=payload, org_id=org_id, db=db,
+            definition_key=definition.key,
         )
     except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError, UnknownRoutingMemberError) as e:
         raise HTTPException(
@@ -1924,6 +1926,174 @@ async def update_event_definition(
     await db.commit()
     await db.refresh(definition)
     return _event_definition_detail(definition)
+
+
+class ApplyRecipeRoleBindingsRequest(BaseModel):
+    project_id: uuid.UUID | None = None
+    # story #3288(축2-ⓐ) — stage_slug → TeamMember.id(str). None project_id = org 전역
+    # 바인딩(모든 project 적용, 특정 project 바인딩이 있으면 그쪽이 우선 — 조회는
+    # event_routing_resolver.py의 project-먼저 순서로 이미 강제).
+    role_mapping: dict[str, str]
+
+
+class ApplyRecipeRoleBindingsResponse(BaseModel):
+    ok: bool
+    bindings_upserted: int
+
+
+@router.post(
+    "/definitions/{definition_id}/apply", response_model=ApplyRecipeRoleBindingsResponse, status_code=201,
+)
+async def apply_recipe_role_bindings(
+    definition_id: uuid.UUID,
+    body: ApplyRecipeRoleBindingsRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> ApplyRecipeRoleBindingsResponse:
+    """POST /api/v2/events/definitions/{id}/apply — story #3288(축2-ⓐ).
+
+    구 `workflow_templates.py::apply_template`의 검증 체인을 이식(생성 로직 자체는 폐기 —
+    doc axis2-recipe-mechanism-event-definitions-design §설계정정 참고, AgentRoutingRule을
+    만들지 않고 recipe_role_bindings에 upsert만 한다):
+    ①project_id 지정 시 has_project_access 선검증(SEC-S8 CRITICAL 재발 방지 — 이 사고가 난
+    그 자리) ②role_mapping 키 집합이 정의의 stage_metadata.keys()(=사실상 stage enum) ⊇
+    하는지 검증 ③agent_id가 실제로 이 org의 TeamMember인지 검증.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.models.team import TeamMember
+    from app.services.project_auth import require_project_access
+
+    if body.project_id is not None:
+        # story #2697 SSOT — require_project_access로 수렴(raw inline has_project_access+raise
+        # 패턴 신규 추가 금지, 카디르 QA #3686 적발). 실패 시 항상 404(존재 비노출).
+        await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.id == definition_id,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalar_one_or_none()
+    if definition is None:
+        raise HTTPException(status_code=404, detail="event definition not found")
+
+    valid_stages = set(definition.stage_metadata.keys())
+    unknown_stages = sorted(set(body.role_mapping.keys()) - valid_stages)
+    if unknown_stages:
+        raise HTTPException(
+            status_code=422,
+            detail=f"role_mapping에 이 정의의 stage_metadata에 없는 stage가 있습니다: {unknown_stages}",
+        )
+
+    agent_ids = {uuid.UUID(v) for v in body.role_mapping.values()}
+    valid_agents = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(agent_ids), TeamMember.org_id == org_id)
+    )).scalars().all())
+    missing_agents = [v for v in body.role_mapping.values() if uuid.UUID(v) not in valid_agents]
+    if missing_agents:
+        raise HTTPException(
+            status_code=422,
+            detail=f"agent(s) not found in this org: {missing_agents}",
+        )
+
+    actor_id: uuid.UUID | None = None
+    try:
+        actor_id = uuid.UUID(str(auth.user_id))
+    except Exception:
+        pass
+
+    # SQL NULL은 `= NULL`로 안 잡힌다(IS NULL 필요) — project_id 스코프 절을 조건부로 구성.
+    project_scope_clause = (
+        RecipeRoleBinding.project_id.is_(None) if body.project_id is None
+        else RecipeRoleBinding.project_id == body.project_id
+    )
+
+    upserted = 0
+    for stage, agent_id_str in body.role_mapping.items():
+        agent_id = uuid.UUID(agent_id_str)
+        existing = (await db.execute(
+            select(RecipeRoleBinding).where(
+                RecipeRoleBinding.org_id == org_id,
+                project_scope_clause,
+                RecipeRoleBinding.event_definition_key == definition.key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            existing.agent_member_id = agent_id
+        else:
+            db.add(RecipeRoleBinding(
+                org_id=org_id, project_id=body.project_id, event_definition_key=definition.key,
+                stage=stage, agent_member_id=agent_id, created_by=actor_id,
+            ))
+        upserted += 1
+
+    await db.commit()
+    return ApplyRecipeRoleBindingsResponse(ok=True, bindings_upserted=upserted)
+
+
+class RecipeRoleBindingsResponse(BaseModel):
+    bindings: dict[str, str]
+
+
+@router.get("/definitions/{definition_id}/bindings", response_model=RecipeRoleBindingsResponse)
+async def get_recipe_role_bindings(
+    definition_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> RecipeRoleBindingsResponse:
+    """GET /api/v2/events/definitions/{id}/bindings — story #3293(축2-ⓒ §B).
+
+    축2-ⓐ(apply, story #3288)는 쓰기(upsert)만 만들었다 — 갤러리 FE가 "이미 배정됨"
+    배지·기존 role_mapping 프리필을 하려면 이 read가 필요(doc
+    axis2c-gallery-migration-map-and-design §3-B). project_id 지정 시 그 project
+    특이성 바인딩이 org 전역보다 우선(event_routing_resolver.py의 조회 우선순위와
+    동형 — 여기도 그대로 병합해 "실제로 발행 시 어느 값이 쓰일지"와 일치하는 뷰를
+    보여준다). project_id 미지정 시 org 전역 바인딩만.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.project_auth import require_project_access
+
+    if project_id is not None:
+        await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.id == definition_id,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalar_one_or_none()
+    if definition is None:
+        raise HTTPException(status_code=404, detail="event definition not found")
+
+    # org 전역(project_id IS NULL) 먼저 채우고, project 특이성으로 덮어써 우선순위를
+    # 정확히 반영(project_scope_clause와 동형 우선순위, resolver의 실 조회 순서와 일치).
+    org_wide = (await db.execute(
+        select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id.is_(None),
+            RecipeRoleBinding.event_definition_key == definition.key,
+        )
+    )).all()
+    bindings: dict[str, str] = {stage: str(agent_id) for stage, agent_id in org_wide}
+
+    if project_id is not None:
+        project_scoped = (await db.execute(
+            select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id == project_id,
+                RecipeRoleBinding.event_definition_key == definition.key,
+            )
+        )).all()
+        for stage, agent_id in project_scoped:
+            bindings[stage] = str(agent_id)
+
+    return RecipeRoleBindingsResponse(bindings=bindings)
 
 
 class EventPublishHistoryItem(BaseModel):

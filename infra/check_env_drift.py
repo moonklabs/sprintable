@@ -169,6 +169,13 @@ _SERVICE_SCRIPT_MAP: dict[str, list[str]] = {
     # 스텝이 env 플래그 자체를 안 실어(공통 파싱에 이미 포함) 전용 스크립트가 없다 —
     # sprintable-realtime-dev([])와 동일 패턴.
     "office-converter-dev": [],
+    # story #3263(지원v1·5에스컬레이션, 2026-08-31, 페드루 PO 지시) — support-gateway-dev
+    # (story #f2a27d2a, cloudbuild.yaml deploy-support-gateway 스텝)가 dev 프로비저닝
+    # 완료 후 실행 CI에서 "매핑 안 된 신규 서비스"로 FAIL을 냈다(run 33456055351) — 여기
+    # 미등재였을 뿐(office-converter-dev와 동일 클래스). 전용 배포 스크립트가 없다
+    # (gcloud run deploy를 cloudbuild.yaml 스텝이 직접 실행) — office-converter-dev([])와
+    # 동일 패턴.
+    "support-gateway-dev": [],
 }
 
 # ② 값 대조 대상 — DRY_RUN=1로 ENV_VARS_SPEC을 stdout에 뽑아낼 수 있는 스크립트만.

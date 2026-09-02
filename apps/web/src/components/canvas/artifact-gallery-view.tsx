@@ -159,11 +159,14 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
    * 플로우(ArtifactSection.handleCreateCommit과 동일 패턴)를 그대로 재사용 —
    * createArtifact(storyId,...) 시그니처 무변경. */
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [creatingStoryId, setCreatingStoryId] = useState<string | null>(null);
+  // story #0692d5a7 — 「활성 여부」와 「귀속 스토리(nullable)」를 분리한다. 예전엔 creatingStoryId:
+  // string|null 하나가 두 역할을 겸해(null=비활성) storyless 생성(null=활성인데 스토리 없음)을
+  // 표현할 수 없었다. { storyId: string|null }|null 로 감싸 null=비활성·객체=활성(storyId는 그 안에서 nullable).
+  const [creating, setCreating] = useState<{ storyId: string | null } | null>(null);
   /** story 64010b05 — 임포트도 갤러리에선 같은 스토리 피커를 경유해야 한다(귀속 필요, 083176e8과
    * 동일 이유). 피커는 공유하되 선택 후 어느 플로우로 갈지만 이 intent로 분기한다. */
   const [pickerIntent, setPickerIntent] = useState<'create' | 'import'>('create');
-  const [importingStoryId, setImportingStoryId] = useState<string | null>(null);
+  const [importing, setImporting] = useState<{ storyId: string | null } | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -218,13 +221,13 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
 
   /** story 083176e8 — ArtifactSection.handleCreateCommit과 동일 규율: 실패는 silent 금지(로깅+
    * 생성 모드 유지, 재시도 가능), 성공 시 갤러리 데이터를 다시 받아 새 산출물이 즉시 보이게 한다. */
-  async function handleCreateCommit(storyId: string, nodes: Parameters<typeof createArtifact>[2], summary: string) {
+  async function handleCreateCommit(storyId: string | null, nodes: Parameters<typeof createArtifact>[2], summary: string) {
     const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, summary || undefined);
     if (!detail) {
       console.error('[canvas-gallery-create] artifact create commit failed', storyId);
       return;
     }
-    setCreatingStoryId(null);
+    setCreating(null);
     if (!projectId) return;
     setLoading(true);
     const result = await fetchGalleryData(projectId);
@@ -234,13 +237,13 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
   }
 
   /** story 64010b05 — handleCreateCommit과 동형이나 source='imported'만 다르다. */
-  async function handleImportCommit(storyId: string, nodes: Parameters<typeof createArtifact>[2]): Promise<boolean> {
+  async function handleImportCommit(storyId: string | null, nodes: Parameters<typeof createArtifact>[2]): Promise<boolean> {
     const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, undefined, 'imported');
     if (!detail) {
       console.error('[canvas-gallery-import] artifact import commit failed', storyId);
       return false;
     }
-    setImportingStoryId(null);
+    setImporting(null);
     if (projectId) {
       setLoading(true);
       const result = await fetchGalleryData(projectId);
@@ -310,18 +313,18 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
         <p className="mt-0.5 text-xs text-muted-foreground">{t('gallerySubtitle')}</p>
       </div>
 
-      {creatingStoryId ? (
+      {creating ? (
         <ArtifactEditor
           title={t('untitledArtifact')}
           initialNodes={[]}
-          onCommit={(committed, summary) => void handleCreateCommit(creatingStoryId, committed, summary)}
-          onDone={() => setCreatingStoryId(null)}
+          onCommit={(committed, summary) => void handleCreateCommit(creating.storyId, committed, summary)}
+          onDone={() => setCreating(null)}
         />
-      ) : importingStoryId ? (
+      ) : importing ? (
         <ImportArtifactDialog
           open
-          onOpenChange={(next) => { if (!next) setImportingStoryId(null); }}
-          onImport={(nodes) => handleImportCommit(importingStoryId, nodes)}
+          onOpenChange={(next) => { if (!next) setImporting(null); }}
+          onImport={(nodes) => handleImportCommit(importing.storyId, nodes)}
         />
       ) : loading ? (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
@@ -409,9 +412,10 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           open={pickerOpen}
           onOpenChange={setPickerOpen}
           projectId={projectId}
+          allowSkip
           onSelect={(storyId) => {
             setPickerOpen(false);
-            if (pickerIntent === 'import') setImportingStoryId(storyId); else setCreatingStoryId(storyId);
+            if (pickerIntent === 'import') setImporting({ storyId }); else setCreating({ storyId });
           }}
         />
       ) : null}

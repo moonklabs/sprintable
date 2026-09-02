@@ -18,6 +18,11 @@ _STATUS_ORDER = [
 
 _STATUS_RANK: dict[str, int] = {s: i for i, s in enumerate(_STATUS_ORDER)}
 
+# story #3287([도메인탈고정·축1 Phase1]) — org_domain_label(app/models/domain_label.py)이
+# canonical status slug 검증에 이 순서를 그대로 재사용한다(새 어휘 발명 0). 이 모듈의 판정
+# 로직(check_transition 등)은 무변경 — 공개 별칭만 추가(값 자체는 이 파일 소유 그대로).
+STATUS_ORDER = _STATUS_ORDER
+
 
 @dataclass
 class ViolationResult:

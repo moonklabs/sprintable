@@ -125,7 +125,7 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
         <DropdownMenuItem
           disabled={busy !== null}
           onClick={() => void handleSignOut('this')}
-          className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+          className="flex items-center gap-2 text-destructive focus:bg-destructive-tint focus:text-destructive"
         >
           <LogOut className="size-4" />
           {others.length > 0 ? t('signOutThis') : tc('logout')}
@@ -134,7 +134,7 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
           <DropdownMenuItem
             disabled={busy !== null}
             onClick={() => void handleSignOut('all')}
-            className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+            className="flex items-center gap-2 text-destructive focus:bg-destructive-tint focus:text-destructive"
           >
             <LogOut className="size-4" />
             {t('signOutAll')}

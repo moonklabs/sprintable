@@ -243,7 +243,10 @@ export async function getArtifactVersionDetail(
  * 이 함수가 그 필드를 그냥 안 보내고 있었을 뿐(그리기 호출부는 여전히 미지정 그대로 무변경).
  */
 export async function createArtifact(
-  storyId: string, title: string, nodes: ArtifactNode[], summary?: string, source?: 'created' | 'imported',
+  // story #0692d5a7 — storyId는 nullable. BE(visual_artifact.story_id nullable·CreateArtifactRequest
+  // Optional·scope 검증 None-skip)가 storyless 산출물을 완전 지원 → 스토리 0개 프로젝트도 첫
+  // 산출물을 만들 수 있다(스토리 강제는 데이터 요구 아닌 FE 게이트 인공물이었다).
+  storyId: string | null, title: string, nodes: ArtifactNode[], summary?: string, source?: 'created' | 'imported',
 ): Promise<BeVisualArtifactDetail | null> {
   try {
     const res = await fetch('/api/visual-artifacts', {

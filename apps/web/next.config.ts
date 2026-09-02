@@ -4,6 +4,24 @@ import path from 'path';
 
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
+// story #3260 2차(유나 design 라이브 실측 FAIL, 2026-08-31) — 지원 위젯이 Support
+// Gateway를 브라우저에서 직접 호출(BFF 프록시 없음, gateway-client.ts)하는데, CORS(story
+// #3242/#3649·서버측 "누구를 받아줄지" 허용)를 열어도 이 앱 자체의 CSP connect-src("우리
+// 문서가 어디로 나갈 수 있는지" 허용)가 별개 층이라 브라우저가 fetch 자체를 보내기도
+// 전에 차단했다(콘솔 실측: "violates CSP directive: connect-src"). NEXT_PUBLIC_
+// SUPPORT_GATEWAY_URL(cloudbuild.yaml·Dockerfile 배선, story #3260 1차)이 이미 진실원
+// (dev만 실 URL·prod는 빈 문자열)이라 그대로 파생한다 — dev/prod origin을 여기 하드코딩
+// 하지 않는다(그 값 자체가 두 번째 SSOT가 되는 함정 회피).
+const _SUPPORT_GATEWAY_CSP_ORIGIN = (() => {
+  const raw = process.env['NEXT_PUBLIC_SUPPORT_GATEWAY_URL'];
+  if (!raw) return null; // 미설정(prod·위젯 미노출 빌드)이면 CSP도 그대로 안 연다.
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null; // 정직한 값 부재 취급 — CSP 문법을 깨느니 안 여는 쪽이 안전측.
+  }
+})();
+
 const _CSP = [
   "default-src 'self'",
   // story #2510 — Toss 결제위젯 SDK(js.tosspayments.com)가 script-src에 없으면 카드
@@ -15,8 +33,13 @@ const _CSP = [
   "img-src 'self' data: blob: https://storage.googleapis.com https://*.googleusercontent.com https://avatars.githubusercontent.com",
   "font-src 'self' data:",
   // API 호출 (self = Next.js rewrites 경유, googleapis = Cloud KMS/AI, tosspayments = 결제
-  // 위젯 SDK 자체 통신 — story #2510)
-  "connect-src 'self' https://*.googleapis.com https://*.tosspayments.com",
+  // 위젯 SDK 자체 통신 — story #2510). Support Gateway origin은 위 상수 참고 — 브라우저가
+  // 직접 호출하는 유일한 비-self API 오리진(다른 모든 데이터 fetch는 Next.js BFF 프록시
+  // 경유라 'self'로 충분, 위젯만 예외).
+  [
+    "connect-src 'self' https://*.googleapis.com https://*.tosspayments.com",
+    _SUPPORT_GATEWAY_CSP_ORIGIN,
+  ].filter(Boolean).join(' '),
   // story #2083 — 채팅 첨부 영상(GCS 서명 URL)이 <video>로 로드될 때 media-src에
   // storage.googleapis.com이 없어 CSP가 통째로 차단하고 있었다(콘솔 실측). img-src에는
   // 이미 같은 호스트가 허용돼 있다(story #2050, 서명 URL·노출 축 동일) — 새 origin을

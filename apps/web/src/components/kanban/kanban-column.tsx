@@ -70,6 +70,8 @@ interface KanbanColumnProps {
   onToggleCollapse?: () => void;
   // f1910a31: ?view=new → 인라인 컴포저 auto-open. nonce가 바뀔 때마다(0→1, 1→2…) 재오픈.
   autoComposeSignal?: number;
+  /** story #3287 AC4 — StoryCard로 그대로 threading(설명은 story-card.tsx 참고). */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 export function KanbanColumn({
@@ -80,7 +82,7 @@ export function KanbanColumn({
   onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
-  autoComposeSignal,
+  autoComposeSignal, getStatusLabel,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -122,7 +124,7 @@ export function KanbanColumn({
   const statusColor = STATUS_COLOR[id] ?? STATUS_COLOR['backlog'];
   // AC1: WIP 초과 시 빨간 강조
   const colClass = wipExceeded
-    ? 'bg-destructive/5 ring-1 ring-destructive/30'
+    ? 'bg-destructive-tint ring-1 ring-destructive/30'
     : isOver && isValidTarget
       ? 'bg-primary/5 ring-1 ring-primary/20'
       : isValidTarget
@@ -164,11 +166,15 @@ export function KanbanColumn({
             <>
               {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩
                   (Heading 무게, sans 유지 — 한글이라 caps/mono 금지). 크기(text-xs)는 불변. */}
-              <h3 className="flex items-center gap-2 text-xs font-extrabold text-foreground">
+              {/* 유나 design:changes(PR#3687, 2026-09-01) — org 커스텀 라벨은 길이가
+                  자유(«아이디어 검토 대기열»)라 고정폭 컬럼(w-[280px])에서 wip 카운트·
+                  버튼을 밀어낼 수 있었다. h3에 min-w-0(flex item이 컨텐츠 크기로
+                  안 밀어붙이게)+텍스트 자체에 truncate, 잘려도 title로 전체 문구 확인. */}
+              <h3 className="flex min-w-0 items-center gap-2 text-xs font-extrabold text-foreground">
                 <span className={`size-1.5 shrink-0 rounded-full ${statusColor.dot}`} aria-hidden="true" />
-                {label}
+                <span className="truncate" title={label}>{label}</span>
               </h3>
-              <div className="flex items-center gap-1.5">
+              <div className="flex shrink-0 items-center gap-1.5">
                 {/* AC1: WIP 초과 배지 */}
                 {wipExceeded && (
                   <Badge variant="destructive" className="text-[10px]">
@@ -323,6 +329,7 @@ export function KanbanColumn({
                   gates={storyGatesMap?.[story.id] ?? []}
                   lineStatus={storyLineMap?.[story.id]}
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
+                  getStatusLabel={getStatusLabel}
                 />
               ))}
             </div>

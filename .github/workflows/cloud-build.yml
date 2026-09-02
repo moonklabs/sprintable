@@ -5,8 +5,15 @@ name: Cloud Build (GCP)
 # Submit 스텝에 인라인 나열 금지. 주석에도 리터럴 표현식 토큰 쓰지 말 것.
 
 on:
+  # story #3297(2026-09-01, 선생님 지시 — 배포 케이던스가 워크플로우 병목) — develop을 push
+  # 트리거에서 뺀다. 실측: develop 머지 31건 = Cloud Build 31회(머지마다 dev 전체 배포).
+  # dev 배포는 이제 workflow_dispatch로 PO가 「머지 묶음 완주+CI green+정정 0」일 때 1회
+  # (운용 규칙, 코드 밖). main(prod 승격 경로)은 무변 — push 트리거 그대로 유지.
+  # env 도출은 "Set deploy environment" 스텝이 github.ref_name만 보고 분기한다(아래
+  # inputs.env는 참조되지 않음 — dispatch 시에도 대상 ref가 dev/prod를 가른다는 뜻이라,
+  # develop ref로 dispatch하면 이 로직이 그대로 target=dev를 도출한다. 별도 배선 불요).
   push:
-    branches: [main, develop]
+    branches: [main]
   workflow_dispatch:
     inputs:
       env:
@@ -169,6 +176,29 @@ jobs:
             # 명시 false로 durable화만 — Toss 심사 前 결제 표면은 여전히 이 값과 무관하게
             # platform_settings.billing_checkout_enabled 서버측 게이트가 막는다, #2728 별건 PR).
             echo "ee_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #3260(2026-08-31, 페드루 PO 조건부 승인 — "UI는 있는데 서버가 없음"
+            # 결함 클래스 재발 방지) — Support Gateway(#f2a27d2a) 착지·AC2/AC3(Gateway
+            # 경유·본체 SSE와 분리) 실측 통과 前까지 prod는 명시 false(무접촉).
+            echo "support_widget_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #3263(지원v1·5에스컬레이션, 페드루 PO 확定 2026-08-31) — 메일 카피가
+            # 위젯 승격보다 먼저 위젯을 가리키면 새 fiction이 재발한다. 위 support_widget_
+            # enabled와 같은 커밋·같은 분기에서 함께 false → 위젯 prod 승격 때 함께 true로.
+            echo "support_contact_surface_widget=false" >> "$GITHUB_OUTPUT"
+            # story #3260 Phase 2(2026-08-31) — Support Gateway prod 미배포(아래
+            # support_gateway_deploy_enabled=false) 상태라 CORS·widget URL 둘 다 무접촉.
+            echo "support_gateway_cors_origins=" >> "$GITHUB_OUTPUT"
+            echo "next_public_support_gateway_url=" >> "$GITHUB_OUTPUT"
+            # story #f2a27d2a(지원v1·1경계, 2026-08-31 페드루 PO — Gateway flip PR) — prod
+            # 자원(전용 SA·전용 DB·시크릿) 미프로비저닝 상태라 명시 false(무접촉). dev만
+            # 프로비저닝 완료(support-gateway-dev@sprintable-494803.iam.gserviceaccount.com·
+            # sprintable-dev 인스턴스 내 전용 database support_gateway+전용 user support_gw).
+            echo "support_gateway_deploy_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "support_gateway_service_account=" >> "$GITHUB_OUTPUT"
+            # story #3263 AC4(2026-09-01, 페드루 PO 지시) — 에스컬레이션 게이트/DM
+            # requester/approver team_members.id. prod는 support_gateway_deploy_enabled와
+            # 동형 무접촉(빈 문자열 — 이 스토리 스코프가 dev 검증까지).
+            echo "support_escalation_requester_member_id=" >> "$GITHUB_OUTPUT"
+            echo "support_escalation_approver_member_id=" >> "$GITHUB_OUTPUT"
             # story #e6500272 후속(2026-08-18, 페드루 PO 지시 — #3188과 동형 발견) — backend
             # `settings.is_ee_enabled`가 읽는 LICENSE_CONSENT도 배포 SSOT 어디에도 배선된 적이
             # 없었다(cloudbuild.yaml·GHA·Dockerfile 전부 무배선). dev·prod 둘 다 현재 수동 env로만
@@ -379,6 +409,32 @@ jobs:
             # billing 표면(settings/page.tsx의 isEEEnabled() 게이트)이 아예 렌더 안 됐다 — dev만
             # 켠다(prod는 위 main 분기에서 명시 false, 무접촉).
             echo "ee_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #3260(2026-08-31, 페드루 PO 조건부 승인) — 위젯 셸(approval-request-card
+            # 급 결재 UI가 아니라 지원v1 문의 위젯)이 항상 unavailable 상태만 반환하는 동안은
+            # dev에서만 켜서 검증한다(prod는 위 main 분기에서 명시 false).
+            echo "support_widget_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #3263 — dev에서 위젯과 함께 실 표면(지원 채팅)을 가리키도록 켠다.
+            echo "support_contact_surface_widget=true" >> "$GITHUB_OUTPUT"
+            # story #3260 Phase 2(2026-08-31) — 위젯이 Support Gateway를 브라우저에서 직접
+            # 호출하는 데 필요한 CORS allowlist+base URL. origin 목록은 infra/gcs-attachments-
+            # cors.json(story #3242, 같은 dev FE origin 집합 — 이 값들이 이미 검증된 dev FE
+            # 표면 SSOT)과 동일 값 재사용(새 값 지어내지 않음) — `|`-구분(cloudbuild.yaml
+            # deploy-support-gateway 스텝에서 `,`로 변환, MCP_ALLOWED_HOSTS와 동형). Gateway
+            # URL은 실측(`gcloud run services describe support-gateway-dev --region=
+            # asia-northeast3 --format='value(status.url)'`, 2026-08-31).
+            echo "support_gateway_cors_origins=https://dev-app.sprintable.ai|https://sprintable-frontend-dev-57iommnikq-du.a.run.app|https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app|http://localhost:3108" >> "$GITHUB_OUTPUT"
+            echo "next_public_support_gateway_url=https://support-gateway-dev-57iommnikq-du.a.run.app" >> "$GITHUB_OUTPUT"
+            # story #f2a27d2a(지원v1·1경계, 2026-08-31 페드루 PO — Gateway flip PR) — dev 전용
+            # 자원 프로비저닝 완료(SA·전용 DB·Secret Manager 2종, 사부님 보고 済) — dev만 켠다.
+            echo "support_gateway_deploy_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "support_gateway_service_account=support-gateway-dev@sprintable-494803.iam.gserviceaccount.com" >> "$GITHUB_OUTPUT"
+            # story #3263 AC4(2026-09-01, 페드루 PO 지시) — 에스컬레이션 게이트/DM
+            # requester("Sprintable 지원" 에이전트 멤버)·approver(PO) team_members.id, dev
+            # 배선 실 값(PO가 POST /api/v2/team-members로 이미 프로비저닝). 미설정이면
+            # backend가 정직하게 배달 skip이라(503) 여태 AC1/AC2가 dev에서도 조용히 no-op
+            # 이었다 — 이 커밋으로 실제 배달 경로가 dev에서 처음 켜진다.
+            echo "support_escalation_requester_member_id=80e0cdd2-1913-4972-a603-fc0bb0a9bc85" >> "$GITHUB_OUTPUT"
+            echo "support_escalation_approver_member_id=05f52181-ea2a-42be-b9a8-9a418b72feb1" >> "$GITHUB_OUTPUT"
             # story #e6500272 후속(2026-08-18, 페드루 PO 지시) — LICENSE_CONSENT(backend
             # `settings.is_ee_enabled` 게이트)도 EE_ENABLED와 동형 미배선이었다. dev 현재값도
             # 'agreed'(수동 env) — 여기서도 값 변경 0, 현행값만 durable화(prod 위 main 분기와
@@ -576,6 +632,14 @@ jobs:
           V_BACKEND_FANOUT_WAKE_REDIS_ENABLED: ${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}
           V_SSE_MULTIPLEX_ENABLED: ${{ steps.env.outputs.sse_multiplex_enabled }}
           V_EE_ENABLED: ${{ steps.env.outputs.ee_enabled }}
+          V_SUPPORT_WIDGET_ENABLED: ${{ steps.env.outputs.support_widget_enabled }}
+          V_SUPPORT_CONTACT_SURFACE_WIDGET: ${{ steps.env.outputs.support_contact_surface_widget }}
+          V_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID: ${{ steps.env.outputs.support_escalation_requester_member_id }}
+          V_SUPPORT_ESCALATION_APPROVER_MEMBER_ID: ${{ steps.env.outputs.support_escalation_approver_member_id }}
+          V_SUPPORT_GATEWAY_CORS_ORIGINS: ${{ steps.env.outputs.support_gateway_cors_origins }}
+          V_NEXT_PUBLIC_SUPPORT_GATEWAY_URL: ${{ steps.env.outputs.next_public_support_gateway_url }}
+          V_SUPPORT_GATEWAY_DEPLOY_ENABLED: ${{ steps.env.outputs.support_gateway_deploy_enabled }}
+          V_SUPPORT_GATEWAY_SERVICE_ACCOUNT: ${{ steps.env.outputs.support_gateway_service_account }}
           V_LICENSE_CONSENT: ${{ steps.env.outputs.license_consent }}
           V_TOSS_CLIENT_KEY: ${{ steps.env.outputs.toss_client_key }}
           V_NEXT_PUBLIC_APP_URL: ${{ steps.env.outputs.next_public_app_url }}
@@ -598,7 +662,7 @@ jobs:
           # 쪽은 정확히 "true" 문자열만 스킵으로 취급하므로 다른 값은 전부 안전측(배포)이다.
           V_REALTIME_GCE_SKIP="${V_REALTIME_GCE_SKIP:-false}"
           V_REALTIME_CLOUDRUN_SKIP="${V_REALTIME_CLOUDRUN_SKIP:-false}"
-          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\",_REALTIME_GCE_SKIP=\"${V_REALTIME_GCE_SKIP}\",_REALTIME_CLOUDRUN_SKIP=\"${V_REALTIME_CLOUDRUN_SKIP}\",_APPLE_TEAM_ID=\"${V_APPLE_TEAM_ID}\",_MOBILE_APP_LINK_ORIGIN=\"${V_MOBILE_APP_LINK_ORIGIN}\",_FIREBASE_OAUTH_HANDOFF_ENABLED=\"${V_FIREBASE_OAUTH_HANDOFF_ENABLED}\""
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_SUPPORT_WIDGET_ENABLED=\"${V_SUPPORT_WIDGET_ENABLED}\",_SUPPORT_CONTACT_SURFACE_WIDGET=\"${V_SUPPORT_CONTACT_SURFACE_WIDGET}\",_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=\"${V_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID}\",_SUPPORT_ESCALATION_APPROVER_MEMBER_ID=\"${V_SUPPORT_ESCALATION_APPROVER_MEMBER_ID}\",_SUPPORT_GATEWAY_DEPLOY_ENABLED=\"${V_SUPPORT_GATEWAY_DEPLOY_ENABLED}\",_SUPPORT_GATEWAY_SERVICE_ACCOUNT=\"${V_SUPPORT_GATEWAY_SERVICE_ACCOUNT}\",_SUPPORT_GATEWAY_CORS_ORIGINS=\"${V_SUPPORT_GATEWAY_CORS_ORIGINS}\",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL=\"${V_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\",_REALTIME_GCE_SKIP=\"${V_REALTIME_GCE_SKIP}\",_REALTIME_CLOUDRUN_SKIP=\"${V_REALTIME_CLOUDRUN_SKIP}\",_APPLE_TEAM_ID=\"${V_APPLE_TEAM_ID}\",_MOBILE_APP_LINK_ORIGIN=\"${V_MOBILE_APP_LINK_ORIGIN}\",_FIREBASE_OAUTH_HANDOFF_ENABLED=\"${V_FIREBASE_OAUTH_HANDOFF_ENABLED}\""
           echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
 
       - name: Submit Cloud Build

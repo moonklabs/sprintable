@@ -38,6 +38,7 @@ export const EXEMPT_FILES = new Set<string>([
   'app/reset-password/page.tsx', // POST /api/auth/reset-password — 로그인 前.
   'app/mfa/page.tsx', // POST /api/auth/2fa/verify — 로그인 2단계(주 세션 아직 미확立).
   'app/unsubscribe/page.tsx', // GET /api/activation/unsubscribe — 이메일 링크 클릭, 세션 없는 방문자(story #3159).
+  'app/set-password/confirm/page.tsx', // POST /api/auth/set-password/confirm — 이메일 링크 클릭, verify-email과 동형(pre-auth, story #ab2a503f).
   'lib/db/client.ts', // fetchWithAuth/refreshAuthTokens 자신의 구현 — raw fetch가 원시 primitive.
   'lib/auth/firebase-login-flow.ts', // POST /api/auth/firebase/session — 로그인 자체(세션 교환 전), fetchWithAuth 전제(기존 세션) 자체가 안 맞음.
 ]);
@@ -232,7 +233,10 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/settings/workflow-line-editor-section.tsx::/api/workflow-line-config/versions',
   'components/settings/workflow-line-editor-section.tsx::/api/workflow-line-config/versions/',
   'components/settings/workflow-policy-simulator-section.tsx::/api/workflow-line-config/resolve-preview',
-  'components/settings/workflow-template-gallery-section.tsx::/api/workflow-templates/',
+  // story #3295 — workflow-template-gallery-section.tsx의 grandfather 항목 제거: 축2-ⓒ
+  // (PR#3690)가 이 컴포넌트를 신세대(/api/events/definitions/...)로 이전+fetchWithAuth로
+  // 교체하며 이 raw fetch 자체가 없어졌다(재확인 grep: 0건). 죽은 채무를 목록에 남겨두지
+  // 않는다.
   'components/settings/workflow-trigger-types-section.tsx::/api/workflow-trigger-types/',
   'components/shared/rejected-relations-section.tsx::/api/stories/',
   'components/sprints/hypothesis-declaration-card.tsx::/api/context-pack/search?project_id=',

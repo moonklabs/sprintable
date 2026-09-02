@@ -1,0 +1,178 @@
+// story #3260 Phase 2 — Support Gateway(support-gateway/, story #f2a27d2a)를 브라우저가
+// **직접** 호출한다(이 앱의 다른 모든 데이터 fetch와 달리 Next.js BFF 프록시를 거치지
+// 않는다 — Gateway는 물리적으로 다른 Cloud Run 서비스라 fetchWithAuth의 쿠키 기반 인증이
+// 애초에 안 먹는다, Bearer 위임 토큰 스킴). 계약은 support-gateway/app/schemas.py·
+// routers/sessions.py(2026-08-31, 디디 PR#3648)를 그대로 따른다.
+import { fetchWithAuth } from '@/lib/db/client';
+
+export interface GatewaySession {
+  id: string;
+  org_id: string;
+  created_at: string;
+}
+
+export interface GatewayMessage {
+  id: string;
+  conversation_id: string;
+  // story #3279(지원v1·후속) — 'operator'는 사람 운영자가 결재 카드 스레드 답장으로 보낸
+  // 회신(support-gateway PR#3672 착지점, backend PR#3673 배달 훅). AI 'agent' 응답과
+  // 발신자 축 자체가 다르다(자동 응대 vs 사람 개입) — 위젯이 구분 렌더해야 한다.
+  role: 'customer' | 'agent' | 'operator';
+  content: string;
+  created_at: string;
+}
+
+/** story #3263 AC4 — 대화 레벨 에스컬레이션 상태(무신호 금지). null=한 번도 에스컬 안 됨,
+ * 'open'=지금 사람에게 넘어가 있음(과거에 resolved된 게 있어도 열린 게 하나라도 있으면
+ * open), 'resolved'=전부 해결됨. */
+export type GatewayEscalationStatus = 'open' | 'resolved' | null;
+
+export interface GatewayMessageExchange {
+  customer_message: GatewayMessage;
+  agent_message: GatewayMessage;
+  escalated: boolean;
+  escalation_status: GatewayEscalationStatus;
+}
+
+export interface GatewayMessageHistory {
+  messages: GatewayMessage[];
+  escalationStatus: GatewayEscalationStatus;
+  /** story #3276 — 이 이력이 속한 상담 id·종료 시각. 상담이 아직 하나도 없으면(신규
+   * 사용자) 둘 다 null(messages도 빈 배열). */
+  conversationId: string | null;
+  endedAt: string | null;
+}
+
+/** story #3276 — 상담 1건의 요약(목록·시작·종료 응답 공통 shape, support-gateway/app/
+ * schemas.py::ConversationResponse와 1:1 대응). */
+export interface GatewayConversation {
+  id: string;
+  created_at: string;
+  ended_at: string | null;
+  escalation_status: GatewayEscalationStatus;
+}
+
+function gatewayBaseUrl(): string | null {
+  const url = process.env['NEXT_PUBLIC_SUPPORT_GATEWAY_URL'];
+  return url && url.length > 0 ? url : null;
+}
+
+export function isSupportGatewayConfigured(): boolean {
+  return gatewayBaseUrl() !== null;
+}
+
+/** 본체 backend(POST /api/v2/support/session-token, backend/app/routers/
+ * support_gateway_token.py)가 발급하는 org-스코프 위임 토큰 — 이 앱 자체 인증(쿠키)은
+ * 여기까지만 쓰인다(Next.js 프록시 경유, fetchWithAuth). 이후 Gateway 호출은 전부 이
+ * 토큰을 Bearer로 붙인 직접 fetch. */
+async function issueDelegatedToken(): Promise<string> {
+  const res = await fetchWithAuth('/api/support/session-token', { method: 'POST' });
+  if (!res.ok) throw new Error(`session-token failed: HTTP ${res.status}`);
+  const json = await res.json().catch(() => null) as { data?: { token?: string } } | { token?: string } | null;
+  const token = (json && 'data' in json ? json.data?.token : (json as { token?: string } | null)?.token);
+  if (!token) throw new Error('session-token response missing token');
+  return token;
+}
+
+/** 세션 발급(멱등 — org+user당 1개, 기존 세션 재사용). 매 왕복 직전 새 위임 토큰을 발급해
+ * 붙인다(token_ttl_seconds=300 만료 추적 대신 "쓸 때마다 새로 발급"으로 단순화 — 발급
+ * 자체가 가벼운 본체 backend 호출이라 이 트레이드오프가 낫다, 별도 만료 타이머 불필요). */
+export async function createOrResumeGatewaySession(): Promise<GatewaySession> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`gateway session failed: HTTP ${res.status}`);
+  return (await res.json()) as GatewaySession;
+}
+
+/** story #3276 — `conversationId`를 주면 그 특정(종료된 것 포함) 상담을 읽기 전용으로
+ * 본다(support-gateway GET .../messages?conversation_id=... 쿼리). 생략하면 현재 활성
+ * 상담(없으면 빈 이력) — connect() 시의 기본 동작 그대로 하위호환. */
+export async function listGatewayMessages(
+  sessionId: string,
+  conversationId?: string,
+): Promise<GatewayMessageHistory> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const url = new URL(`${base}/api/v1/sessions/${sessionId}/messages`);
+  if (conversationId) url.searchParams.set('conversation_id', conversationId);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`gateway history failed: HTTP ${res.status}`);
+  const json = (await res.json()) as {
+    messages: GatewayMessage[];
+    escalation_status: GatewayEscalationStatus;
+    conversation_id: string | null;
+    ended_at: string | null;
+  };
+  return {
+    messages: json.messages,
+    escalationStatus: json.escalation_status,
+    conversationId: json.conversation_id,
+    endedAt: json.ended_at,
+  };
+}
+
+/** story #3276 AC3 — 위젯 대화 목록(자기 것만, 통례 수준). */
+export async function listGatewayConversations(sessionId: string): Promise<GatewayConversation[]> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/conversations`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`gateway conversation list failed: HTTP ${res.status}`);
+  const json = (await res.json()) as { conversations: GatewayConversation[] };
+  return json.conversations;
+}
+
+/** story #3276 AC2 — "새 상담 시작"(현재 활성 상담이 있으면 서버가 먼저 종료하고 새로
+ * 만든다, support-gateway 쪽 단일 원자적 처리 — 클라이언트는 end+create를 따로 안 부른다). */
+export async function startNewGatewayConversation(sessionId: string): Promise<GatewayConversation> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/conversations/start`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`gateway start conversation failed: HTTP ${res.status}`);
+  return (await res.json()) as GatewayConversation;
+}
+
+/** story #3276 AC2 — "상담 종료"(멱등 — 이미 종료된 상담을 다시 불러도 200, 최초 종료
+ * 시각 보존). SupportEscalation.status는 손대지 않는다(완전히 별개 축). */
+export async function endGatewayConversation(
+  sessionId: string,
+  conversationId: string,
+): Promise<GatewayConversation> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/conversations/${conversationId}/end`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`gateway end conversation failed: HTTP ${res.status}`);
+  return (await res.json()) as GatewayConversation;
+}
+
+/** story #3261(오케스트레이션) 실측(Pedro, 2026-08-31) — 이 왕복은 동기 처리라 ~12초까지
+ * 걸릴 수 있다(분류→비용상한 확인→Vertex 대화 루프). 호출부(use-support-widget-session.ts)가
+ * 이 지연 동안 "생각 중" 지속 신호를 책임진다 — 여기는 순수 네트워크 계약만. */
+export async function sendGatewayMessage(sessionId: string, content: string): Promise<GatewayMessageExchange> {
+  const base = gatewayBaseUrl();
+  if (!base) throw new Error('Support Gateway not configured');
+  const token = await issueDelegatedToken();
+  const res = await fetch(`${base}/api/v1/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(`gateway message failed: HTTP ${res.status}`);
+  return (await res.json()) as GatewayMessageExchange;
+}

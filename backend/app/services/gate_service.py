@@ -66,7 +66,11 @@ RiskGrade = Literal["low", "high"]
 # 5a34ef7f)가 정확히 이 간극에서 났다 — FE가 note/evidence_viewed를 안 보내는 채로 배선돼
 # 있었는데 그 사실을 아무 코드도 "doc_approval=high"라고 선언하지 않고 있었다. low로
 # 등재하지 않는다(신중 결재 취지 훼손, PO 명시 판단) — high로 명시.
-_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE})
+# story #3291(M1·마케팅자동화, 2026-09-01) — external_publish(불가역 외부 발신) 명시 high
+# 등재. doc_approval 미등재 실사고(위 코멘트) 선례를 그대로 따라 폴백 의존 대신 명시.
+_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset(
+    {"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE, "external_publish"}
+)
 #
 # story #2709(2026-08-17, PO 판정) — agent_decision_request를 명시 low 등재. 미등재=폴백(§2.3
 # 보수적 high)에 기대는 게 안전한 기본값이 아니라는 것을 story #6c89e40d(doc_approval 미등재
@@ -216,6 +220,11 @@ KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES: frozenset[str] = frozenset({
     # 없어 항상 None을 준다 — 여기 미등재였다면 gates.py의 fail-closed 분기(#2237)가 모든
     # GET /gates/{id}를 404로 거부했을 것(전수 grep으로 발견, 실제 배선 전 확認).
     "agent_decision",
+    # story #3263(지원v1·5에스컬레이션) — support_escalation도 동일 패턴(self-referencing
+    # anchor, support_gateway_token.py::receive_escalation_event가 project_id를 직접 해소해
+    # 넘기므로 resolve_work_item_project_id() 자체는 안 거치지만, GET /gates/{id} 재조회
+    # 경로가 이 함수를 다시 타므로 agent_decision과 동일 이유로 등재 필수).
+    "support_escalation",
 })
 
 
@@ -316,6 +325,18 @@ _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
     {
         "doc_approval", "loop_decision", "artifact_canonicalize", "agent_decision_request",
         "hypothesis_outcome_confirm",
+        # story #3263(지원v1·5에스컬레이션) — 고객 지원 에스컬레이션 티켓 초안. AC1 "자동 등재
+        # 금지" 그 자체가 org posture 무관 항상 인간 검토를 요구한다는 뜻(agent_decision_request
+        # 와 동형 근거 — 판단이 존재 이유인 게이트가 permissive posture로 자동 승인되면 애초에
+        # 만든 이유가 없어진다).
+        "support_escalation_review",
+        # story #3291(M1·마케팅자동화, 2026-09-01, PO 확定) — 불가역 외부 발신(SNS/광고 게시).
+        # 마케팅 레시피가 role→agent 바인딩까지는 자유롭게 자동화해도(축2-ⓐ), 실제 외부로
+        # 나가는 마지막 발걸음만은 org posture(permissive 포함) 무관 항상 사람이 승인해야
+        # 한다 — doc_approval/agent_decision_request와 동형 근거(판단이 존재 이유인 게이트가
+        # 자동 승인되면 만든 이유가 없어진다). ⚠️이 스토리는 게이트 타입 자체가 항상-수동임을
+        # 강제할 뿐 — 실제 발행 직전 gate.status 확인(chokepoint)은 발행 커넥터 스토리 몫.
+        "external_publish",
     }
 )
 # ⚠️story #2709 — agent_decision_request가 항상 manual(=posture 무관 항상 pending)인 이유:
@@ -848,6 +869,22 @@ async def transition_gate(
                     pending_deliveries.append({"sse_push": {"pid_str": _pid_str, "payload": _sse_payload}})
         except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 게이트 해소를 막지 않음.
             logger.warning("gate_resolved 카드 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
+
+        # story #183fe7a5(지원v1·후속) — support_escalation 게이트 해소를 gateway
+        # SupportEscalation.status에 동기화(콜백, AC1/AC2). approve/reject 둘 다 gateway
+        # 쪽엔 'resolved'로 도착한다(escalation_resolution_delivery.py 모듈 docstring의
+        # reject 의미론 판단 참고) — best-effort(AC3, 위 카드 알림과 동일 관례).
+        if gate.work_item_type == "support_escalation":
+            try:
+                from app.services.escalation_resolution_delivery import (
+                    deliver_escalation_resolution_for_gate,
+                )
+                await deliver_escalation_resolution_for_gate(gate=gate, new_status=new_status)
+            except Exception:  # noqa: BLE001 — best-effort, 동기화 실패가 게이트 해소를 막지 않음.
+                logger.warning(
+                    "escalation resolution sync 배선 실패 gate=%s status=%s", gate.id, new_status,
+                    exc_info=True,
+                )
 
     # story #1715(PO 판정 2026-08-24) — 상신자(requested_by_member_id) 회신은 gate_type/
     # line-bound 분기와 무관하게 **이 한 자리에서만** 부른다(아래 if/else 갈리기 전) — 두

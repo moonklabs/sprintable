@@ -716,6 +716,84 @@ describe('ApprovalRequestCard — story #3151 agent_decision 결정 재료(질�
   });
 });
 
+// story #3263(지원v1·5에스컬레이션) AC1 — 페드루 PO 조건② "카드 본문에 요약·org·reason이
+// 실물로 실려야"(스텁 금지). docSummary/decisionQuestion과 동일 회귀가드 패턴 — no-fiction
+// (neutral_facts에 실린 값만 그대로).
+describe('ApprovalRequestCard — story #3263 support_escalation 카드 본문(요약·org·reason)', () => {
+  async function mountEscalation(neutralFacts: Record<string, unknown> | null) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('/api/gates/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: gate({ work_item_type: 'support_escalation', work_item_summary: null, neutral_facts: neutralFacts }),
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'support_escalation', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('org명·reason·detail·conversation_summary 전부 실물로 렌더된다 — "가서 보라" 스텁 회귀가드', async () => {
+    await mountEscalation({
+      support_escalation_id: 'esc-123',
+      customer_org_name: '고객사 A',
+      reason: 'classifier',
+      detail: '인입 분류기가 사람 필요로 판정',
+      conversation_summary: '고객: 결제가 안 돼요\n에이전트: 담당자에게 연결해 드릴게요',
+    });
+    expect(container.textContent).toContain('고객사 A');
+    expect(container.textContent).toContain('classifier');
+    expect(container.textContent).toContain('인입 분류기가 사람 필요로 판정');
+    expect(container.textContent).toContain('고객: 결제가 안 돼요');
+    // 페드루 PO 확定 — escalation_id는 상세추적용, 사람이 읽는 카드 본문엔 안 보인다.
+    expect(container.textContent).not.toContain('esc-123');
+  });
+
+  it('neutral_facts가 없으면(비-support_escalation 등) 블록 자체가 안 뜬다(no-fiction)', async () => {
+    await mountEscalation(null);
+    expect(container.textContent).not.toContain('고객사');
+  });
+
+  it('resolved(회신) 상태에서도 카드 본문이 그대로 보인다(docSummary·decisionQuestion과 동일 계약)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/gates/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: gate({
+              work_item_type: 'support_escalation', work_item_summary: null, status: 'approved', resolver_id: 'member-1',
+              neutral_facts: { customer_org_name: '고객사 B', reason: 'cost_cap', detail: 'd', conversation_summary: 's' },
+            }),
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'support_escalation', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('고객사 B');
+  });
+});
+
 // story #5ace2e84 — 채팅 결재카드 N+1 처방. chat-view.tsx가 대화 단위로 배치조회한 gate를
 // gateByKey 맵으로 물려받으면 이 카드는 독립 GET /api/gates/{id}를 안 태워야 한다(PO
 // 실측: 대화 진입당 최대 51발 N+1의 직접 원인). use-gate-batch.ts는 별도 단위테스트로
@@ -786,5 +864,93 @@ describe('ApprovalRequestCard — gateByKey 배치조회 소비(story #5ace2e84)
     const gateData = gate({ work_item_summary: { title: '개별폴백 대조', slug: null } });
     await mount(gateData);
     expect(container.textContent).toContain('개별폴백 대조');
+  });
+});
+
+// story #3258(customer-zero 2차) — 결재 카드가 채팅에 «스텁»으로만 게시되던 결함(선생님
+// 실사용 v0.1/v0.2 Blueprint 결재 왕복). BE(doc.py transition_doc)가 이미 심어주는
+// gate.neutral_facts.doc_summary/doc_diff와 request_gate_discussion()의
+// discussion_requested를 이 카드가 실제로 읽어 렌더하는지 검증한다.
+describe('ApprovalRequestCard — story #3258 doc 요약/diff+논의요청 지속 배너(customer-zero 2차)', () => {
+  it('AC1 — doc 결재 카드는 gate.neutral_facts.doc_summary를 그대로 본문에 싣는다(채팅 밖 안 나가고 결정)', async () => {
+    const gateData = gate({
+      work_item_type: 'doc', work_item_summary: { title: 'Blueprint v0.1', slug: 'bp' },
+      neutral_facts: { doc_summary: '제목 본문은 굵게와 링크를 포함한다.' },
+    });
+    await mount(gateData);
+    expect(container.textContent).toContain('제목 본문은 굵게와 링크를 포함한다.');
+  });
+
+  it('doc_summary가 없으면(비-doc 타입 등) 요약 블록 자체가 생략된다(no-fiction)', async () => {
+    const gateData = gate({ work_item_type: 'story', neutral_facts: null });
+    await mount(gateData);
+    expect(container.textContent).not.toContain('undefined');
+  });
+
+  it('AC4 — 재상신 카드는 gate.neutral_facts.doc_diff를 ProofCapsule evidence.diff로 노출한다(사본 분화 금지)', async () => {
+    const gateData = gate({
+      work_item_type: 'doc', work_item_summary: { title: 'Blueprint v0.2', slug: 'bp' },
+      neutral_facts: { doc_summary: '개정본', doc_diff: { add: 2, del: 1 } },
+    });
+    await mount(gateData);
+    expect(container.textContent).toContain('+2');
+  });
+
+  it('AC3 — discussion_requested가 있으면 pending 동안 지속 배너로 사유가 남는다(3연발 클릭의 근본 처방)', async () => {
+    const gateData = gate({
+      neutral_facts: {
+        discussion_requested: { reason: '예산 재확인 필요', requested_by_member_id: 'member-1', requested_at: new Date().toISOString() },
+      },
+    });
+    await mount(gateData);
+    expect(container.textContent).toContain('예산 재확인 필요');
+  });
+
+  it('AC3 — 논의 요청 성공 시 토스트가 뜨고, 재조회된 gate의 discussion_requested가 배너로 지속된다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST' && url.includes('/discuss')) {
+        return { ok: true, json: async () => ({ data: null }) };
+      }
+      if (url.includes('/api/gates/')) {
+        getCount += 1;
+        const neutral_facts = getCount === 1 ? null : {
+          discussion_requested: { reason: '기한 조정 논의', requested_by_member_id: 'member-1', requested_at: new Date().toISOString() },
+        };
+        return { ok: true, json: async () => ({ data: gate({ neutral_facts }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const discussOpenBtn = Array.from(container.querySelectorAll('button'))
+      .find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    await act(async () => { discussOpenBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); });
+
+    const textarea = document.getElementById('gate-discuss-reason') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '기한 조정 논의');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const submitBtn = Array.from(document.querySelectorAll('button'))
+      .find((b) => b.textContent === koMessages.cage.gateDiscussSubmit && !discussOpenBtn?.isSameNode(b));
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // 즉시 신호(토스트) — «눌러도 반응이 안 보임» 3연발 재현의 직접 처방.
+    expect(document.body.textContent).toContain(koMessages.chats.approvalRequestDiscussSuccessToast);
+    // 지속 신호(배너) — fetchGate() 재조회로 받은 discussion_requested가 그대로 남는다.
+    expect(container.textContent).toContain('기한 조정 논의');
   });
 });

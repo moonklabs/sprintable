@@ -92,6 +92,14 @@ interface StoryDetailPanelProps {
   sprintMap?: Record<string, string>;
   onNavigate?: (storyId: string) => void;
   projectId?: string;
+  /** story #3289(도메인탈고정·축1 Phase1 FE잔여) — org별 status 라벨 오버라이드 조회 함수
+   * (useOrgDomainLabels().statusLabel), story-card.tsx의 getStatusLabel과 동형. 없으면
+   * (undefined) 기존 t(...) canonical 문구 그대로(회귀 0) — localStatus 자체(판정/색상)는
+   * 안 바뀐다, 표시 텍스트만. */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  /** story #3289 AC2 — org 엔티티명 라벨 오버라이드(useOrgDomainLabels().entityTypeLabel).
+   * description/AC 편집기의 `#` 피커(EntityAwareTextarea)로 그대로 물려준다. */
+  getEntityTypeLabel?: (canonicalSlug: string) => string | undefined;
   /** story #2354 — 갈래 보기의 «지도 위에 겹치는» 소형 팝오버 모드. 생략하면 기존 전체화면
    * 드로어(칸반 그대로, 회귀 없음). 값을 주면 배경 딤을 없애고(지도를 «가리지» 않는다),
    * «top+height 확정값»만 받아 그대로 스타일에 적용한다 — 위/아래 반전 판단(클릭한 노드가
@@ -331,7 +339,7 @@ export function DescriptionViewer({
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
@@ -823,7 +831,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     done: 'done',
   };
   const statusKey = statusKeyMap[localStatus];
-  const statusLabel = statusKey ? t(statusKey) : localStatus;
+  // story #3289 — org 라벨 오버라이드 우선(story-card.tsx와 동형 `?? t(...)` 폴백), 아래
+  // Workcell run.now/stage/nextNeed·배지가 전부 이 값 하나로 수렴하므로 여기 한 곳만 바꾸면
+  // 표시 텍스트가 전체 소비처에 퍼진다(localStatus 자체·판정/색상은 무변경).
+  const statusLabel = getStatusLabel?.(localStatus) ?? (statusKey ? t(statusKey) : localStatus);
 
   // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
   // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
@@ -1367,7 +1378,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                         onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
                       >
                         <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
-                        {t(statusKeyMap[col.id] ?? col.i18nKey)}
+                        {getStatusLabel?.(col.id) ?? t(statusKeyMap[col.id] ?? col.i18nKey)}
                       </DropdownMenuItem>
                     );
                   })}
@@ -1428,7 +1439,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 type="button"
                 variant="ghost"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive/10"
+                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive-tint"
                 aria-label={t('deleteStory')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1609,6 +1620,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
+                    getEntityTypeLabel={getEntityTypeLabel}
                   />
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveDescription} disabled={savingDescription}>
@@ -1667,6 +1679,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
+                    getEntityTypeLabel={getEntityTypeLabel}
                   />
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
@@ -1744,7 +1757,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           type="button"
                           variant="ghost"
                           onClick={() => void handleRemoveAttachment(att.url)}
-                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive group-hover:block hover:bg-destructive/30"
+                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive-tint p-0.5 text-destructive group-hover:block hover:brightness-95"
                           aria-label="첨부 삭제"
                         >
                           <X className="size-3" />

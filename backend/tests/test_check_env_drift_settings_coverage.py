@@ -201,4 +201,29 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 가드가 신규 필드를 설계대로 잡은 것.
     assert "APPLE_TEAM_ID" in keys and "APPLE_SERVICES_ID" in keys
     assert "APPLE_KEY_ID" in keys and "APPLE_PRIVATE_KEY" in keys
-    assert len(keys) == 107
+    # story #3259(지원v1·1경계, 2026-08-31): support_gateway_token_secret·
+    # support_gateway_token_ttl_seconds 2필드 신설(Support Gateway 위임 토큰 발급용,
+    # backend의 jwt_secret과 의도적으로 분리된 별도 시크릿 — support-gateway/README.md
+    # 참고)로 107→109. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_GATEWAY_TOKEN_SECRET" in keys and "SUPPORT_GATEWAY_TOKEN_TTL_SECONDS" in keys
+    # story #3263(지원v1·5에스컬레이션, 2026-08-31): support_contact_surface_widget 1필드
+    # 신설(메일 «고객센터» fiction 정정 — 위젯 prod 승격과 같은 커밋으로 묶는 env 분기)로
+    # 109→110. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_CONTACT_SURFACE_WIDGET" in keys
+    # story #3263(지원v1·5에스컬레이션, 2026-08-31, 같은 스토리 AC1/2): support_escalation_
+    # requester_member_id·support_escalation_target_org_slug·support_escalation_target_
+    # project_slug·support_escalation_approver_member_id 4필드 추가 신설(에스컬레이션 게이트/
+    # DM 배선 — 이 파일 상단 config.py 주석 참고)로 110→114. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_ESCALATION_REQUESTER_MEMBER_ID" in keys and "SUPPORT_ESCALATION_APPROVER_MEMBER_ID" in keys
+    assert "SUPPORT_ESCALATION_TARGET_ORG_SLUG" in keys and "SUPPORT_ESCALATION_TARGET_PROJECT_SLUG" in keys
+    # story #3279(지원v1·후속, 2026-09-01): support_gateway_operator_reply_url 1필드 신설
+    # (운영자 회신 배달 — backend→support-gateway, escalation_delivery.py 반대 방향의
+    # 착지 URL. cloudbuild.yaml deploy-backend 스텝에서 기존 _NEXT_PUBLIC_SUPPORT_GATEWAY_URL
+    # substitution을 재사용해 배선, 시크릿은 이미 바인딩된 SUPPORT_GATEWAY_TOKEN_SECRET
+    # 재사용이라 신규 시크릿 불요)로 114→115. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" in keys
+    # story #183fe7a5(지원v1·후속, 2026-09-01): support_gateway_escalation_resolution_url
+    # 1필드 신설(게이트 해소→gateway SupportEscalation.status 동기화 콜백 착지 URL —
+    # operator_reply_url과 동일 게이팅 원칙·같은 시크릿 재사용, aud만 분리)로 115→116.
+    assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" in keys
+    assert len(keys) == 116

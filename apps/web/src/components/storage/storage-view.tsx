@@ -6,10 +6,12 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { formatTotalSize } from '@/lib/storage/format';
+import { uploadStorageAsset } from '@/lib/storage/storage-upload';
 import { StorageCapacityBanner } from './storage-capacity-banner';
 import { StorageFolderTree } from './storage-folder-tree';
 import { StorageAssetList } from './storage-asset-list';
@@ -57,6 +59,7 @@ export function resolveAssetDeepLinkAction(params: {
 // projectName 은 순수 표시용(폴더 트리 헤더)이라 전역 컨텍스트 그대로 유지(artifacts와 동형).
 export function StorageView({ projectId }: { projectId: string }) {
   const t = useTranslations('storage');
+  const { toasts, addToast, dismissToast } = useToast();
   const { projectName } = useDashboardContext();
   const searchParams = useSearchParams();
 
@@ -301,9 +304,47 @@ export function StorageView({ projectId }: { projectId: string }) {
     [],
   );
 
-  // 다운로드/업로드 = 어포던스 (S3/S7 미착지 → 컨트롤만 렌더, no-op)
-  const noopAsset = useCallback((_asset: Asset) => {}, []);
-  const noopUpload = useCallback(() => {}, []);
+  // 다운로드 = 실동작 (story #886d996f). 기존 sign 경로(/api/attachments/sign?asset_id) 재사용 —
+  // BE가 asset_id로 container/object_path를 서버측 재도출·storage.signRead(SSOT, 자체 서명 0).
+  // asset.id만 넘기고, 실패 경로는 무신호 금지(toast). disposition=attachment로 인라인 아닌 저장.
+  const handleDownloadAsset = useCallback(
+    async (asset: Asset) => {
+      try {
+        const res = await fetchWithAuth(
+          `/api/attachments/sign?asset_id=${encodeURIComponent(asset.id)}&disposition=attachment`,
+        );
+        if (!res.ok) throw new Error(`sign failed: ${res.status}`);
+        const { data } = (await res.json()) as { data?: { url?: string } };
+        if (!data?.url) throw new Error('sign returned no url');
+        const a = document.createElement('a');
+        a.href = data.url;
+        a.rel = 'noopener';
+        a.download = asset.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch {
+        addToast({ title: t('downloadErrorTitle'), body: t('downloadErrorDesc'), type: 'error' });
+      }
+    },
+    [addToast, t],
+  );
+
+  // 업로드 = 실동작 (story #886d996f 업로드 축). #3637 SSOT 계약 소비 — upload-url→서명 PUT
+  // (Content-Type+required_put_headers)→confirm. 성공 시 신규 Asset을 목록 선두에(id 중복 가드 —
+  // confirm이 on_conflict로 기존 row 반환 가능), 실패는 무신호 금지(toast). 현재 폴더 컨텍스트로 confirm.
+  const handleUploadFile = useCallback(
+    async (file: File) => {
+      try {
+        const asset = await uploadStorageAsset({ file, projectId, folderId: selectedFolderId });
+        setItems((prev) => (prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev]));
+        addToast({ title: t('uploadSuccessTitle'), body: file.name, type: 'success' });
+      } catch {
+        addToast({ title: t('uploadErrorTitle'), body: t('uploadErrorDesc'), type: 'error' });
+      }
+    },
+    [projectId, selectedFolderId, addToast, t],
+  );
 
   const folderMap = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
   const resolveFolderLabel = useCallback(
@@ -387,8 +428,8 @@ export function StorageView({ projectId }: { projectId: string }) {
           selectedAssetId={selectedAssetId}
           onSelectAsset={handleSelectAsset}
           onDeleteAsset={handleRequestDelete}
-          onDownloadAsset={noopAsset}
-          onUpload={noopUpload}
+          onDownloadAsset={handleDownloadAsset}
+          onUploadFile={handleUploadFile}
           resolveFolderLabel={resolveFolderLabel}
           loading={loading}
           error={error}
@@ -403,7 +444,7 @@ export function StorageView({ projectId }: { projectId: string }) {
           <StorageDetailPanel
             asset={selectedAsset}
             folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}
-            onDownload={noopAsset}
+            onDownload={handleDownloadAsset}
             onRequestDelete={handleRequestDelete}
           />
         ) : null}
@@ -429,7 +470,7 @@ export function StorageView({ projectId }: { projectId: string }) {
             <StorageDetailPanel
               asset={selectedAsset}
               folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}
-              onDownload={noopAsset}
+              onDownload={handleDownloadAsset}
               onRequestDelete={handleRequestDelete}
               onClose={() => detailPanel.setDrawerOpen(false)}
             />
@@ -443,6 +484,8 @@ export function StorageView({ projectId }: { projectId: string }) {
         onOpenChange={setDeleteOpen}
         onDeleted={handleDeleted}
       />
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

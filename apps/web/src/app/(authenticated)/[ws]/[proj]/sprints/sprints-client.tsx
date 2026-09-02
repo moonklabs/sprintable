@@ -361,7 +361,7 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
     <Dialog open onOpenChange={(open) => { if (!open && !deleting) onClose(); }}>
       <DialogContent role="alertdialog" className="max-w-sm" showCloseButton={false}>
         <div className="mb-3 flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive-tint text-destructive">
             <AlertTriangle className="size-5" />
           </span>
           <div className="min-w-0">

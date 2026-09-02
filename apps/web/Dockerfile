@@ -49,6 +49,16 @@ ENV NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED}
 # 였다 — 기본값 false(미설정 시 dev-safe fallback, SSE_MULTIPLEX_ENABLED와 동일 컨벤션).
 ARG NEXT_PUBLIC_EE_ENABLED=false
 ENV NEXT_PUBLIC_EE_ENABLED=${NEXT_PUBLIC_EE_ENABLED}
+# story #3260(2026-08-31, 페드루 PO 조건부 승인) — apps/web/src/lib/support-widget-flag.ts의
+# isSupportWidgetEnabled()가 읽는 빌드타임 인라인 값. EE_ENABLED와 동일 컨벤션 — 기본값
+# false(미설정 시 dev-safe fallback). Support Gateway(#f2a27d2a) 착지·AC2/AC3 실측 前까지
+# 항상 unavailable인 런처를 화면에 노출하지 않기 위한 게이트.
+ARG NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=false
+ENV NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=${NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED}
+# story #3260 Phase 2 — 위젯이 Support Gateway를 브라우저에서 직접 호출(BFF 프록시 없음)하는
+# 데 필요한 그 서비스의 base URL. 기본값 빈 문자열(dev-safe fallback, 위 컨벤션과 동일).
+ARG NEXT_PUBLIC_SUPPORT_GATEWAY_URL=""
+ENV NEXT_PUBLIC_SUPPORT_GATEWAY_URL=${NEXT_PUBLIC_SUPPORT_GATEWAY_URL}
 # story #2758(2026-08-18) — apps/web/src/ee/components/billing/toss-checkout.ts(story #2510)가
 # 읽는 Toss 결제위젯 clientKey. manual-env-allowlist.yml에 declared_by:PO로 「등재」만 되고
 # ARG/ENV 어디에도 배선된 적이 없어(EE_ENABLED·LICENSE_CONSENT와 동형 「등재≠배선」 3번째)

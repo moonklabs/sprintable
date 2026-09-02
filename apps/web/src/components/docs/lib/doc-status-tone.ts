@@ -8,7 +8,7 @@ export type DocStatusFilter = 'draft' | 'pending' | 'confirmed' | 'denied';
 export const DOC_STATUS_TONE: Record<DocStatusFilter, { bg: string; dot: string; text: string }> = {
   confirmed: { bg: 'bg-success-tint', dot: 'bg-success', text: 'text-foreground' },
   pending: { bg: 'bg-warning-tint', dot: 'bg-warning', text: 'text-foreground' },
-  denied: { bg: 'bg-destructive/10', dot: 'bg-destructive', text: 'text-foreground' },
+  denied: { bg: 'bg-destructive-tint', dot: 'bg-destructive', text: 'text-foreground' },
   draft: { bg: 'bg-muted', dot: 'bg-muted-foreground', text: 'text-muted-foreground' },
 };
 

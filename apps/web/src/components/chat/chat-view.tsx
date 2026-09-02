@@ -1108,7 +1108,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               open={citationPickerOpen}
               onOpenChange={setCitationPickerOpen}
               projectId={projectId}
-              onSelect={(storyId) => void handleSaveCitation(storyId)}
+              onSelect={(storyId) => { if (storyId) void handleSaveCitation(storyId); }}
             />
           )}
         </div>

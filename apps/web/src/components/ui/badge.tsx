@@ -31,8 +31,11 @@ const badgeVariants = cva(
         // story #2969 §2 PR-1(유나 판정, 2026-08-23) — 형제 tint variant(success/info/warning)는
         // 전부 border-{color}-border+tint bg인데 destructive만 border 없이 shadow 의존이라
         // shadow-sm 제거 후 odd-one-out이었다. --destructive-border(=proof-red, 既존 토큰)로 닫는다.
+        // story #2420 AC4 — rest bg를 ad-hoc 알파(/10·dark /20)에서 형제와 같은 불투명 토큰
+        // bg-destructive-tint로 통일. anchor hover 진해짐은 새 알파 대신 brightness-95(interactive
+        // 관례, 새 토큰 없음).
         destructive:
-          "border-destructive-border bg-destructive/10 text-foreground focus-visible:ring-destructive dark:bg-destructive/20 dark:focus-visible:ring-destructive [a]:hover:bg-destructive/20",
+          "border-destructive-border bg-destructive-tint text-foreground focus-visible:ring-destructive dark:focus-visible:ring-destructive [a]:hover:brightness-95",
         outline:
           "border-border/80 bg-background text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:

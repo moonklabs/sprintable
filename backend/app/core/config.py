@@ -86,6 +86,57 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = ""
 
+    # story #3259(지원v1·1경계) — Support Gateway 위임 토큰 서명 시크릿. jwt_secret과 **의도적으로
+    # 분리**(별도 값) — 이 시크릿이 유출돼도 fleet JWT_SECRET과는 무관(반대도 동일). Support
+    # Gateway는 이 시크릿의 검증만 하고 jwt_secret은 아예 모른다(support-gateway/app/config.py).
+    support_gateway_token_secret: str = ""
+    support_gateway_token_ttl_seconds: int = 300
+
+    # story #3279(지원v1·후속) — 운영자 회신 배달(backend→support-gateway). escalation_events
+    # 배달(gateway→backend, backend_escalation_events_url은 support-gateway 쪽 설정)의 반대
+    # 방향 — support-gateway/app/routers/operator_replies.py의 절대 URL. 미설정 시 배달을
+    # 정직하게 skip한다(app/services/operator_reply_delivery.py).
+    support_gateway_operator_reply_url: str = ""
+
+    # story #183fe7a5(지원v1·후속) — 게이트 해소(approve/reject) → gateway
+    # SupportEscalation.status 동기화(콜백, backend→support-gateway, operator_reply_url과
+    # 같은 방향·다른 aud). support-gateway/app/routers/escalation_resolution.py의 절대 URL.
+    # 미설정 시 동기화를 정직하게 skip(app/services/escalation_resolution_delivery.py) — 이
+    # 자체가 approve/reject 자체를 막지 않는다(best-effort, AC3).
+    support_gateway_escalation_resolution_url: str = ""
+
+    # story #3263(지원v1·5에스컬레이션) — 트랜잭셔널 메일의 "즉시 고객센터로 문의" 문구가
+    # 실재하지 않는 표면(고객센터)을 가리키던 fiction 정정. 위젯(story #3260)이 dev에만 떠
+    # 있고 prod는 아직 미노출(NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED)이라, 메일 카피가 위젯
+    # 승격보다 먼저 prod에 나가면 "가리키는 표면이 고객 화면엔 없는" 새 fiction이 재발한다.
+    # 이 플래그를 위젯 플래그와 **같은 cloudbuild SSOT·같은 승격 커밋**으로 묶어 순서를
+    # 사람 기억이 아니라 구조로 보장한다(페드루 PO 확定, 2026-08-31) — false(기본값·prod)면
+    # 지시문 자체를 지운다("발신 전용" 안내로 대체), true(dev·prod 승격 시)면 위젯을 가리킨다.
+    support_contact_surface_widget: bool = False
+
+    # story #3263(지원v1·5에스컬레이션, 페드루 PO 확定 2026-08-31) — 에스컬레이션 게이트/DM의
+    # requester. 고객 org_member를 moonklabs 스코프 Gate/Conversation에 그대로 꽂으면 org
+    # 경계 위반(신원 오염)이라 기각됐다(Gate·ConversationParticipant는 단일 org 스코프).
+    # approver(PO) 겸용도 "요청자를 잘못 기록"이라 기각. 정본=moonklabs org 안의 "Sprintable
+    # 지원" 에이전트 멤버(제품이 실제로 티켓을 상신하는 실체 — 거짓 없는 서사, PO와 별개라
+    # 자기승인도 아님). PO가 운영 액션(POST /api/v2/team-members)으로 이미 생성(dev,
+    # 2026-08-31) — 값은 그 **team_members.id**(agent 멤버는 org_members 행이 아예 없다 —
+    # member_resolver.py::resolve_member의 "휴먼=org_member.id / 에이전트=team_member.id"
+    # 통합 신원 계약 그대로, 별도 변환 불요). 미설정이면 에스컬레이션 배달을 정직하게
+    # skip한다(SupportEscalation 행 자체는 그대로 보존 — support-gateway 쪽과 동일한
+    # "배달 실패는 원본 기록을 막지 않는다" 원칙).
+    support_escalation_requester_member_id: str = ""
+    # story #3263 — 게이트/DM이 실릴 moonklabs org/project. slug로 참조(환경별 UUID가 달라도
+    # 안정적 — organizations.slug/projects.slug가 전역·org-scope 유일 SSOT).
+    support_escalation_target_org_slug: str = "moonklabs"
+    support_escalation_target_project_slug: str = "sprintable"
+    # story #3263 — 지정 결재자(designated_approver_id). v1은 PO(페드루) 1인 — "고객 문의
+    # 에스컬 카드가 전부 선생님 결재함에 꽂히면 안 된다"(PO 확定) — org owner/admin은 결재
+    # 자격 자체는 그대로 있되(dispatch_approval_request_cards 기존 관례) 액션 카드는 이
+    # 1인에게만. 페드루군도 agent 멤버(email 축 없음)라 이메일 해소 대신 team_members.id를
+    # 직접 주입(PO 본인 지시, 2026-08-31 — email 방식보다 견고).
+    support_escalation_approver_member_id: str = ""
+
     # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
     cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
 

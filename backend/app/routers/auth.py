@@ -35,10 +35,12 @@ from app.core.security import (
     create_password_reset_token,
     create_email_verification_token,
     create_oauth_state_token,
+    create_set_password_confirm_token,
     decode_jwt,
     decode_password_reset_token,
     decode_email_verification_token,
     decode_oauth_state_token,
+    decode_set_password_confirm_token,
     generate_totp_secret,
     get_totp_provisioning_uri,
     hash_password,
@@ -184,6 +186,14 @@ class LogoutRequest(BaseModel):
 
 class TotpVerifyRequest(BaseModel):
     code: str
+
+
+class TotpDisableRequest(BaseModel):
+    # story #3247 — 해제는 재검증 필수(AC1). 인증기 분실 시에도 끌 수 있어야 하니 두 경로
+    # 중 하나(현행 TOTP 코드 또는 비밀번호)만 요구 — 상호배타 아님(둘 다 와도 code 우선
+    # 검증), 둘 다 없으면 400.
+    code: str | None = None
+    password: str | None = None
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -623,6 +633,7 @@ async def register(
     user = User(
         email=body.email,
         hashed_password=hash_password(body.password),
+        password_set_at=datetime.now(timezone.utc),
         display_name=body.display_name.strip() or body.email.split("@")[0],
         is_active=True,
         email_verified=False,
@@ -653,7 +664,7 @@ async def register(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -796,7 +807,7 @@ async def login(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -921,8 +932,18 @@ async def refresh_token(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — session_started_at은 원 refresh 토큰(위에서 이미 decode한 payload)의
+    # 값을 그대로 이월한다(refresh가 이 세션의 "시작"을 다시 찍으면 재검증 우회체인이
+    # 뚫린다 — 카디르+codex 2라운드 QA 실증). 그 토큰에 그 값이 없으면(마이그 이전 구
+    # 토큰) 새 토큰에도 없다 — totp/disable이 그걸 fail-closed(password 경로 불허)로 해석.
+    _session_started_at = payload.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=_md, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
     if won_atomic_rotation:
         # story #2449(회귀 수정): 이 시점엔 새 row가 이미 INSERT+commit 완료라(_store_refresh_
@@ -993,8 +1014,16 @@ async def switch_account(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # last_project_id/last_org_id 영속
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — refresh_token()과 동형(위 §3247 주석 참고) — 타겟 계정의 원 세션 시작
+    # 시각을 그대로 이월.
+    _session_started_at = payload.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=_md, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
     return _ok({
@@ -1075,6 +1104,80 @@ async def totp_verify(
     )
     await session.commit()
     return _ok({"totp_enabled": True})
+
+
+# ─── POST /api/v2/auth/totp/disable ──────────────────────────────────────────
+# story #3247 — 인벤토리(#3246) 발견 A: FE `/api/v2/auth/2fa/disable`가 이 라우트 부재로
+# 항상 404였다(2fa≠totp 네이밍도 불일치·별도 문제). 이 엔드포인트로 네이밍을 totp 축에
+# 통일(setup/verify와 동형) — FE도 같이 정정한다(PR 본문에 명기).
+
+@router.post("/totp/disable")
+async def totp_disable(
+    body: TotpDisableRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if not user:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    if not user.totp_enabled:
+        return _err("TOTP_NOT_ENABLED", "TOTP is not enabled", 400)
+
+    if body.code:
+        if not verify_totp(user.totp_secret or "", body.code):
+            return _err("INVALID_TOTP", "Invalid TOTP code", 403)
+    elif body.password:
+        # 카디르+codex QA 지적(PR#3634) — 우회체인 실증: OAuth 전용 계정(비밀번호 없음)의
+        # 탈취 세션/API키로 ①set-password(재인증 0, 별건 ab2a503f)로 방금 비밀번호를 심고
+        # → ②그 비밀번호를 여기 제출 → ③서버가 정상 재검증으로 인정해 2FA 해제. 독립
+        # 자격증명 0으로 뚫린다. 처방(PO 방향 A) 최소방어선 2단:
+        #
+        # ① 카디르+codex QA 2라운드(PR#3634) — 1라운드 방어(iat 대조)가 refresh 왕복
+        # 한 번에 뚫렸다: iat은 "토큰 발급 시각"이라 /auth/refresh가 매번 새로 찍는데,
+        # ①set-password로 비밀번호를 심고 ②refresh해 iat을 password_set_at보다 뒤로
+        # 밀고 ③그 새 토큰으로 여기 제출하면 통과했다. 필요한 건 refresh가 갱신하지
+        # 않는 "이 세션이 실제로 언제 시작됐나" — session_started_at(security.py 신설
+        # seam, register/login/oauth_callback만 지금 시각을 찍고 refresh/switch-account/
+        # switch-project/switch-org는 원 값을 이월). API키(sk_live_/hu_live_) 경로와
+        # 이 seam 도입 이전 구 토큰 둘 다 이 클레임이 없다 — 판별 수단이 없으니
+        # password 분기 자체를 불허(fail-closed, TOTP 코드 경로는 그대로 열려 있다).
+        if "session_started_at" not in auth.claims:
+            return _err("PASSWORD_REVERIFICATION_REQUIRES_SESSION", "Password re-verification requires a browser session with an up-to-date login", 403)
+
+        # PO QA 지적(PR#3634) — OAuth 가입 유저는 hashed_password=""(register()의 OAuth
+        # 분기, set-password가 그 의미를 문서화)라 verify_password(pw, "")를 그대로
+        # 타면 passlib이 빈 해시를 식별 못 해 UnknownHashError(→500, AC1의 "서버 명시
+        # 거부"가 아님)로 샌다 — 비밀번호 자체가 없는 계정은 명시 403으로 먼저 거른다.
+        if not user.hashed_password:
+            return _err("PASSWORD_NOT_SET", "This account has no password set", 403)
+        if not verify_password(body.password, user.hashed_password):
+            return _err("WRONG_PASSWORD", "Incorrect password", 403)
+
+        # ② 그 비밀번호가 "이 세션이 시작된 시각보다 먼저" 존재했을 때만 유효한
+        # 재검증으로 인정. password_set_at이 session_started_at 이후면(=이 세션이
+        # 시작된 뒤 심어진 비밀번호 — refresh로 우회 불가, 세션 시작 자체는 재로그인
+        # 없이 안 바뀜) 우회체인이므로 거부. password_set_at IS NULL(migration 0295
+        # 이전부터 비밀번호를 가진 기존 유저)은 제약 대상 밖(0290 locale과 동형 논지
+        # — 과거 시점을 알 방법이 없어 백필은 거짓 신호, 무제약 유지=무회귀).
+        if user.password_set_at is not None:
+            session_started_at = auth.claims.get("session_started_at")
+            if not isinstance(session_started_at, int) or user.password_set_at.timestamp() > session_started_at:
+                return _err("PASSWORD_TOO_RECENT", "Password was set after this session started — please log in again", 403)
+    else:
+        return _err("REVERIFICATION_REQUIRED", "TOTP code or password required", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(
+            totp_enabled=False, totp_secret=None,
+        )
+    )
+    await _write_audit(
+        session, "2fa_disabled",
+        user_id=user.id,
+        email=user.email,
+    )
+    await session.commit()
+    return _ok({"totp_enabled": False})
 
 
 # ─── OAuth ────────────────────────────────────────────────────────────────────
@@ -1372,7 +1475,7 @@ async def oauth_callback(
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
-    tokens = create_tokens(str(user.id), user.email, _md)
+    tokens = create_tokens(str(user.id), user.email, _md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     raw_refresh = tokens["refresh_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     await _store_refresh_token(session, user, raw_refresh, expires_at)
@@ -1584,7 +1687,10 @@ async def reset_password(
         return _err("INVALID_TOKEN", "Reset token has already been used", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     return _ok({"message": "Password reset successfully"})
 
@@ -1603,32 +1709,122 @@ async def change_password(
         return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
 
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=hash_password(body.new_password),
+            password_set_at=datetime.now(timezone.utc),
+        )
     )
     return _ok({"message": "Password changed successfully"})
 
 
-# ─── POST /api/v2/auth/set-password ──────────────────────────────────────────
+# ─── POST /api/v2/auth/set-password/request, GET /api/v2/auth/set-password/confirm ──
+# story #ab2a503f([버그·보안·HIGH] set-password가 재인증 0으로 탈취 세션/API키에 비밀번호를
+# 심는다 — 2FA 해제 우회 체인의 STEP1·계정탈취 발판) — 구 POST /set-password는
+# get_current_user만 요구해 재인증 0이었다. hashed_password == ""(OAuth 전용 계정)만
+# 대상이라 "현재 비밀번호 재확인"(change_password류)이 원천 불가능하므로, 별도 재인증
+# 축이 필요하다 — 이메일 확인 링크 2단계로 "지금 이 순간의 사람"을 증명하게 쪼갠다
+# (verify-email 인프라 재사용, 신규 발명 0). 설계 doc(deecc92c) §① 그대로 구현.
 
-@router.post("/set-password")
-async def set_password(
+
+def _requires_interactive_session(auth: AuthContext) -> bool:
+    """이 작업은 "이메일 링크를 클릭할 사람이 실시간으로 있는가"만 보므로, AU 과금 판별자
+    (is_au_billable_agent, app/dependencies/auth.py)와 다른 축이다 — 그건 human_api_key_id를
+    "사람"으로 예외처리하지만(사람 UI 작업=0 AU 스펙), 여기선 hu_live_*(휴먼 개인키)도
+    sk_live_*(에이전트키)와 동일하게 막아야 한다: 이메일 링크는 API키 세션과 무관하게
+    브라우저에서 별도로 완결되므로 API키가 "인증 강도"에 아무 기여를 안 하고, 스토리 원문이
+    "탈취 세션 또는 API키"를 대칭 위협으로 서술한다 — 한쪽만 막으면 공격자가 그쪽으로 우회."""
+    app_metadata = auth.claims.get("app_metadata", {})
+    return bool(app_metadata.get("api_key_id")) or bool(app_metadata.get("human_api_key_id"))
+
+
+@router.post("/set-password/request")
+@resend_verification_limiter.limit("3/hour")
+async def request_set_password(
+    request: Request,
     body: SetPasswordRequest,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> JSONResponse:
-    """OAuth 전용 사용자 최초 비밀번호 설정 (hashed_password == "" 인 경우만 허용)."""
+    """OAuth 전용 사용자 최초 비밀번호 설정 — 1단계(확인 이메일 발송). 새 비밀번호는 여기서
+    즉시 해시해 토큰에만 싣는다(평문 어디에도 안 남김) — 실제 DB write는 confirm이 한다."""
+    if _requires_interactive_session(auth):
+        return _err("REQUIRES_INTERACTIVE_SESSION", "이 작업은 브라우저 세션에서만 가능합니다", 403)
+
     user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
-
     if user.hashed_password:
         return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
 
+    new_password_hash = hash_password(body.new_password)
+    confirm_token = create_set_password_confirm_token(str(user.id), new_password_hash)
+    app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+    confirm_link = f"{app_url}/set-password/confirm?token={confirm_token}"
+
+    from app.services.agent_onboarding_config import resolve_locale
+    from app.services.email import render_action_email, send_email
+    from app.services.email_copy import TRANSACTIONAL_COPY
+    locale = resolve_locale(user.locale)
+    copy = TRANSACTIONAL_COPY["set_password_confirm"][locale]
+    delivered = send_email(
+        to=user.email,
+        subject=copy["subject"],
+        html_body=render_action_email(
+            intro_lines=copy["intro_lines"],
+            cta_label=copy["cta_label"],
+            cta_url=confirm_link,
+            expiry_note=copy["expiry_note"],
+            security_note=copy["security_note"],
+            fallback_label=copy["fallback_label"],
+            locale=locale,
+        ),
+    )
+    if not delivered:
+        # 콘솔 폴백(미발송)을 "sent"로 거짓 보고하지 않는다(verify-email과 동일 관례).
+        logger.warning(
+            "set-password/request: 확인 이메일 미발송(콘솔 폴백) user_id=%s email=%s 확인 링크: %s",
+            user.id, user.email, confirm_link,
+        )
+        return _ok({"message": "Confirmation email could not be delivered — check email configuration", "delivered": False})
+    return _ok({"message": "Confirmation email sent", "delivered": True})
+
+
+@router.get("/set-password/confirm")
+async def confirm_set_password(
+    token: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """2단계 — 이메일 링크 클릭이 실제 write를 완결한다(verify_email()과 동형: 토큰 자체가
+    증명이라 인증 불요)."""
+    try:
+        payload = decode_set_password_confirm_token(token)
+    except JWTError:
+        return _err("INVALID_TOKEN", "Confirmation link is invalid or expired", 400)
+
+    user_id = payload.get("sub")
+    new_password_hash = payload.get("new_password_hash")
+    user = await _get_user_by_id(session, uuid.UUID(user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    if user.hashed_password:
+        # TOCTOU fail-closed — 토큰 발급 후 15분 사이 다른 경로로 비밀번호가 이미 생겼으면 거부.
+        return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(
+            hashed_password=new_password_hash,
+            password_set_at=datetime.now(timezone.utc),
+        )
+    )
+    # story #ab2a503f — 탈취 refresh token으로 이후 /auth/refresh가 즉시 401(우회체인 봉합).
+    # switch_project/switch_org(이 파일)와 동일 인라인 패턴 재사용.
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
     )
     await session.commit()
-    return _ok({"message": "Password set successfully"})
+    return _ok({"message": "Password set successfully — please log in with your new password"})
 
 
 # ─── Email Verification ───────────────────────────────────────────────────────
@@ -1758,8 +1954,17 @@ async def switch_project(
         app_metadata["project_id"] = str(target_project_id)
         user.last_project_id = target_project_id  # _build_app_metadata가 덮어쓴 경우 재설정
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — switch-project/org는 이미 인증된 세션 안의 컨텍스트 전환이지 새
+    # 로그인이 아니다(refresh_token()/switch_account()와 동형 논지) — 현재 claims의
+    # session_started_at을 그대로 이월.
+    _session_started_at = auth.claims.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=app_metadata, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
     await session.commit()
@@ -1829,8 +2034,17 @@ async def switch_organization(
         # ⚠️0746: 캡처값과 동기 보장(refresh가 cross-org로 재누수하지 않도록).
         user.last_project_id = target_project_id
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
-    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    # story #3247 — switch-project/org는 이미 인증된 세션 안의 컨텍스트 전환이지 새
+    # 로그인이 아니다(refresh_token()/switch_account()와 동형 논지) — 현재 claims의
+    # session_started_at을 그대로 이월.
+    _session_started_at = auth.claims.get("session_started_at")
+    tokens = create_tokens(
+        str(user.id), email=user.email, app_metadata=app_metadata, session_started_at=_session_started_at,
+    )
+    _, refresh_exp = create_refresh_token(
+        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        session_started_at=_session_started_at,
+    )
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
     await session.commit()

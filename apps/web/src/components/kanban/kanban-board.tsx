@@ -3,7 +3,7 @@
 import type { ComponentType } from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -139,6 +140,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 동일 패턴 — orgSyncVersion을 트리거 effect 의존성에 얹는다.
   const orgSyncVersion = useOrgSyncVersion();
   const t = useTranslations('board');
+  const locale = useLocale();
   const { toasts, addToast, dismissToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
   // story #2154 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도 直前에
@@ -305,7 +307,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
   // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, orgId } = useDashboardContext();
+  // story #3287([도메인탈고정·축1 Phase1]) — org별 표시 라벨 오버라이드. canonical
+  // status(col.id, drag/전이/색상 전부 이걸로 판정)는 절대 안 바뀐다 — statusLabel()이
+  // 있으면 그 문구로 컬럼 헤더 텍스트만 치환하고, 없으면(오버라이드 미설정) 기존
+  // t(col.i18nKey) 그대로(회귀 0).
+  const domainLabels = useOrgDomainLabels(orgId, locale);
 
   // story #2137 — 카드(stories 배열)와 상세 패널(selectedStory)이 별도 state라, SSE 패치를
   // stories에만 적용하면 패널만 옛값에 고정된다(#2384·#2130과 같은 클래스의 3번째 재발 — 이번엔
@@ -1586,6 +1593,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               storyGatesMap={storyGatesMap}
               storyLineMap={storyLineMap}
               projectId={projectId}
+              getStatusLabel={domainLabels.statusLabel}
             />
           </div>
         ) : axisMode === 'trust' ? (
@@ -1625,6 +1633,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     isDragging={activeId != null}
                     onCreateStory={handleCreateStoryTrust}
                     autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 );
               })}
@@ -1640,6 +1649,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onClick={() => {}}
                     lineStatus={storyLineMap[activeStory.id]}
                     verifiedBy={activeStory.human_verified_by ? memberMap[activeStory.human_verified_by] : undefined}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 </div>
               )}
@@ -1665,7 +1675,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   <KanbanColumn
                     key={col.id}
                     id={col.id}
-                    label={t(col.i18nKey)}
+                    label={domainLabels.statusLabel(col.id) ?? t(col.i18nKey)}
                     stories={colStories}
                     epicMap={epicMap}
                     memberMap={memberMap}
@@ -1698,6 +1708,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
                     onToggleCollapse={col.id === 'done' ? handleToggleDoneCollapse : undefined}
                     autoComposeSignal={col.id === 'backlog' ? autoComposeNonce : 0}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 );
               })}
@@ -1713,6 +1724,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onClick={() => {}}
                     lineStatus={storyLineMap[activeStory.id]}
                     verifiedBy={activeStory.human_verified_by ? memberMap[activeStory.human_verified_by] : undefined}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 </div>
               )}
@@ -1786,6 +1798,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           tasks={storyTasks}
           memberMap={memberMap}
           members={members}
+          getStatusLabel={domainLabels.statusLabel}
+          getEntityTypeLabel={domainLabels.entityTypeLabel}
           nextTasksCursor={storyTasksNextCursor}
           loadingMoreTasks={loadingMoreStoryTasks}
           onLoadMoreTasks={async () => {

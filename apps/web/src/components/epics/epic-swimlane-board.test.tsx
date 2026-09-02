@@ -55,8 +55,12 @@ vi.mock('next/navigation', () => ({
 // HumanOnlyAction(useDashboardContext().currentMemberType==='human')로 감싸여 있다
 // (kanban-board.test.tsx와 동형 관례). Provider 없이는 기본 컨텍스트값에 currentMemberType이
 // 아예 없어(fail-closed) 버튼이 항상 숨는다 — onDeleteSuccess 배선을 실제로 증명하려면 human으로 스텁.
+// story #3299(3687/3694 후속) — org statusLabel 오버라이드 테스트가 orgId를 바꿔 넣어야
+// 해서 정적 객체 리터럴 mock을 kanban-board.test.tsx와 동형의 vi.hoisted 모킹 함수로 바꾼다.
+// 기본 반환값(orgId 없음)은 기존 동작과 동일 — 다른 describe 블록은 무회귀.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' }),
+  useDashboardContext: () => useDashboardContextMock(),
 }));
 
 const { capturedDragEndHandlers, capturedDragStartHandlers } = vi.hoisted(() => ({
@@ -89,6 +93,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -151,6 +156,8 @@ type FetchStub = {
   // 실 fetch·delete 성공 시 카드 제거). story_id별 태스크 목록.
   tasksByStoryId?: Record<string, Array<Record<string, unknown>>>;
   deleteStorySpy?: (id: string) => void;
+  // story #3299 — kanban-board.test.tsx #3287 AC4와 동형(domain-labels 응답 스텁).
+  domainLabels?: Array<{ domain: string; canonical_slug: string; label_ko: string | null; label_en: string | null }>;
 };
 
 // ⚠️QA changes 4R(PR#3377, 카디르+codex, 2026-08-22) — CI 실행 명령까지 정확 재현해 8+1회
@@ -177,12 +184,15 @@ function withDefaultTrustStage(list: Array<Record<string, unknown>>): Array<Reco
   return list.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(String(s['status'])) }));
 }
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false, tasksByStoryId = {}, deleteStorySpy }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false, tasksByStoryId = {}, deleteStorySpy, domainLabels }: FetchStub) {
   stories = withDefaultTrustStage(stories);
   storyPages = storyPages?.map((page) => ({ ...page, stories: withDefaultTrustStage(page.stories) }));
   callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
+    if (typeof url === 'string' && url.includes('/domain-labels')) {
+      return { ok: true, json: async () => domainLabels ?? [] };
+    }
     if (typeof url === 'string' && url.startsWith('/api/stories/bulk') && init?.method === 'PATCH') {
       bulkPatchSpy?.(JSON.parse(init.body ?? '{}'));
       if (!bulkPatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
@@ -900,5 +910,33 @@ describe('EpicSwimlaneBoard — 스코프 축소(story #3019)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// story #3299(3687/3694 후속) — 인라인 StoryCard 배지(ProofCapsule stateLabel, 카드 클릭 전
+// 항상 보이는 텍스트라 axisMode 토글과 무관)가 org statusLabel 오버라이드를 소비하는지.
+// kanban-board.test.tsx #3287 AC4와 동형 처방 — canonical status(색·판정)는 절대 무변경.
+describe('EpicSwimlaneBoard — 인라인 StoryCard 배지 org 라벨 오버라이드(story #3299)', () => {
+  beforeEach(() => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human',
+    });
+  });
+
+  it('오버라이드 미설정(빈 목록)이면 카드 배지가 canonical i18n 그대로다(회귀 0)', async () => {
+    await mount({
+      stories: [{ id: 's1', title: '주인없는카드', status: 'backlog', priority: 'medium', epic_id: null }],
+      domainLabels: [],
+    });
+    expect(container.textContent).toContain('백로그');
+  });
+
+  it('org가 backlog 라벨을 오버라이드하면 스윔레인 인라인 카드 배지가 그 문구로 바뀐다', async () => {
+    await mount({
+      stories: [{ id: 's1', title: '주인없는카드', status: 'backlog', priority: 'medium', epic_id: null }],
+      domainLabels: [{ domain: 'status', canonical_slug: 'backlog', label_ko: '아이디어', label_en: 'Idea' }],
+    });
+    expect(container.textContent).toContain('아이디어');
+    expect(container.textContent).not.toContain('백로그');
   });
 });

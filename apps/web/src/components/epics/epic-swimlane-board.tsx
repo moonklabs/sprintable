@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight, Lock } from 'lucide-react';
 import {
   DndContext, type DragEndEvent, PointerSensor, useDroppable, useSensor, useSensors,
@@ -11,6 +11,8 @@ import { parseCursorMeta } from '@/lib/pagination';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { StoryCard } from '@/components/kanban/story-card';
 import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import {
@@ -141,13 +143,16 @@ interface SwimlaneCellProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   isDragging: boolean;
+  /** story #3299(3687/3694 후속) — org status 라벨 오버라이드(useOrgDomainLabels().statusLabel),
+   * kanban-board.tsx의 StoryCard prop threading과 동형. 없으면 canonical t(...) 그대로. */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 // story #2954(유나 처방·H4 kanban-trust-column.tsx:86,92 문법 이식) — 드래그 中엔 잠긴
 // (파생) 열이 "지금 못 놓는다"는 게 정적 상태만으론 안 드러났다(handleDragEnd:333의
 // targetLocked 방어는 침묵 실패 — 드롭해도 조용히 무효화). opacity-45로 드래그 중에만
 // 어둡게 해 시각이 그 침묵을 메운다.
-function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick, isDragging }: SwimlaneCellProps) {
+function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick, isDragging, getStatusLabel }: SwimlaneCellProps) {
   const { setNodeRef, isOver } = useDroppable({ id: `${laneId}::${columnId}`, disabled: locked });
   const closedDuringDrag = locked && isDragging;
   return (
@@ -165,6 +170,7 @@ function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryCli
           assignees={(story.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
           onClick={() => onStoryClick(story)}
           locked={locked}
+          getStatusLabel={getStatusLabel}
         />
       ))}
     </div>
@@ -200,9 +206,11 @@ interface SwimlaneRowProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   isDragging: boolean;
+  /** story #3299 — SwimlaneCell로 그대로 물려준다(위 주석과 동형). */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
-function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick, isDragging }: SwimlaneRowProps) {
+function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick, isDragging, getStatusLabel }: SwimlaneRowProps) {
   const byColumn = useMemo(() => {
     const map: Record<string, KanbanStory[]> = {};
     for (const col of columns) map[col.id] = [];
@@ -231,6 +239,7 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
             memberMap={memberMap}
             onStoryClick={onStoryClick}
             isDragging={isDragging}
+            getStatusLabel={getStatusLabel}
           />
         ))}
       </div>
@@ -240,6 +249,12 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
 
 export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const t = useTranslations('board');
+  // story #3289 — kanban-board.tsx와 동형(useOrgDomainLabels 배선). story #3299(3687/3694
+  // 후속) — 그때 StoryDetailPanel에만 물렸던 domainLabels를 이제 인라인 StoryCard 배지
+  // (SwimlaneRow→SwimlaneCell→StoryCard prop threading)에도 물린다. 새 훅 배선 없음(재사용).
+  const { orgId } = useDashboardContext();
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
@@ -573,6 +588,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                     memberMap={memberMap}
                     onStoryClick={(s) => setSelectedStoryId(s.id)}
                     isDragging={draggingActive}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 ))}
 
@@ -597,6 +613,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                         memberMap={memberMap}
                         onStoryClick={(s) => setSelectedStoryId(s.id)}
                         isDragging={draggingActive}
+                        getStatusLabel={domainLabels.statusLabel}
                       />
                     ))}
                   </div>
@@ -611,6 +628,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                   memberMap={memberMap}
                   onStoryClick={(s) => setSelectedStoryId(s.id)}
                   isDragging={draggingActive}
+                  getStatusLabel={domainLabels.statusLabel}
                 />
               </div>
             </DndContext>
@@ -619,6 +637,8 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
               <StoryDetailPanel
                 story={selectedStory}
                 tasks={storyTasks}
+                getStatusLabel={domainLabels.statusLabel}
+                getEntityTypeLabel={domainLabels.entityTypeLabel}
                 nextTasksCursor={storyTasksNextCursor}
                 loadingMoreTasks={loadingMoreStoryTasks}
                 onLoadMoreTasks={async () => {
