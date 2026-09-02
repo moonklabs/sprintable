@@ -1593,6 +1593,13 @@ async def _publish_registry_event_core(
         db, org_id=org_id, definition=definition, payload=payload, requester_member_id=sender.id,
     )
 
+    # story #3337(선생님 4바퀴 실사고) — 위 게이트 훅과 같은 컴포지션 지점, 같은 원칙(정의에
+    # 해당 없으면 완전 no-op). 첫 stage가 payload.repeat를 실었으면 반복 스케줄을 세우고,
+    # 이후 매 stage 발행마다 다음 회차 입력 스냅샷을 최신화한다.
+    from app.services.recipe_repeat_schedule import maybe_upsert_repeat_schedule
+
+    await maybe_upsert_repeat_schedule(db, org_id=org_id, definition=definition, payload=payload)
+
     if extra_broadcast_member_ids:
         # story #2693(AC2): payload_field routing과 동일 검증 — 예전엔 filter_org_member_ids로
         # 비회원 id를 조용히 걸러내고(silent drop) 발행을 그대로 진행했다. AC1의 원자성
