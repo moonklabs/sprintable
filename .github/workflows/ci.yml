@@ -627,6 +627,26 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
 
+  # story a05da51b(2026-09-02, story #3330/PR#3711 CI flake 후속) — destructive_schema
+  # 마커 파일이 publish_registry_event/publish_preset_event/transition_gate/send_message
+  # (전역 엔진 app.core.database.engine의 background task 경로를 실제로 태우는 진입점)를
+  # 호출하면서 `_dispose_global_engine_after_test` 표준 fixture가 없으면 커밋 시점에 잡는다.
+  # 스크립트 docstring(scripts/lint_destructive_publish_path_dispose_fixture.py) 참조 —
+  # baseline 없음(도입 시점 위반 17건 전부 이 스토리에서 정리 후 켰다, grandfather 목록
+  # 없음 — PO 판정: "썩는 목록"). non-destructive 파일은 이 가드 대상이 아니다(story #3330의
+  # conftest.py 전역 autouse가 이미 구조적으로 커버 — test_a05da51b_dispose_fixture_
+  # guards.py가 그 메커니즘 자체의 회귀가드).
+  destructive-publish-path-dispose-fixture-lint:
+    name: destructive publish-path dispose fixture lint (guard, story a05da51b)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan tests/ for destructive files that publish without the global-engine dispose fixture
+        working-directory: backend
+        run: python3 scripts/lint_destructive_publish_path_dispose_fixture.py
+
   no-script-output-artifacts-lint:
     name: no script output artifacts lint (guard, story #3008)
     runs-on: ubuntu-latest
