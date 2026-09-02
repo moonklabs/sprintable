@@ -1088,6 +1088,32 @@ async def _render_event_notification_work_item_ref(
     return build_reference_token(work_item_type, work_item_id, title)
 
 
+async def _render_event_notification_doc_ref(
+    db: AsyncSession, *, org_id: uuid.UUID, doc_id_raw: str,
+) -> str | None:
+    """story #3323 AC1/AC3 — payload의 `*_doc_id` 값(uuid 문자열)을 doc 클릭 참조 토큰으로.
+    파싱 실패·같은 org에 존재하지 않는 doc은 None(지어내지 않음 — 호출부가 raw 값 폴백)."""
+    from app.models.doc import Doc
+    from app.services.reference_token import build_reference_token
+
+    try:
+        doc_id = uuid.UUID(str(doc_id_raw))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    title = (await db.execute(
+        select(Doc.title).where(Doc.id == doc_id, Doc.org_id == org_id)
+    )).scalar_one_or_none()
+    if not title:
+        return None
+    return build_reference_token("doc", doc_id, title)
+
+
+# story #3323 — previous_output_doc_id는 일반 *_doc_id 토큰화와 같은 해소·폴백 규칙을 따르되
+# (present+해소 실패 시 raw 폴백, 부재 시 줄 자체 없음 — AC1/AC3 공통), 사람이 읽는 레이블만
+# 「앞 단계 산출물」로 특별 표기한다(승인자가 «이게 뭘 검토하는지» 한눈에 보게, 처방 1).
+_DOC_ID_PAYLOAD_LABELS: dict[str, str] = {"previous_output_doc_id": "앞 단계 산출물"}
+
+
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict,
 ) -> str:
@@ -1168,7 +1194,15 @@ async def _render_event_message_content(
                 lines.append(f"- {k}: {payload[k]}")
 
     shown_keys = {"stage", "work_item_type", "work_item_id"}
-    lines += [f"- {k}: {v}" for k, v in payload.items() if k not in shown_keys]
+    for k, v in payload.items():
+        if k in shown_keys:
+            continue
+        if k.endswith("_doc_id") and isinstance(v, str) and v:
+            doc_ref = await _render_event_notification_doc_ref(db, org_id=org_id, doc_id_raw=v)
+            if doc_ref:
+                lines.append(f"- {_DOC_ID_PAYLOAD_LABELS.get(k, k)}: {doc_ref}")
+                continue
+        lines.append(f"- {k}: {v}")
 
     return "\n".join(lines)
 
