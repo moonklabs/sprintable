@@ -1326,10 +1326,22 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
     if draft_doc_ref:
         lines.append(f"- 대상 산출물: {draft_doc_ref}")
 
+    # 페드루 리뷰(PR#3711) — "approve 게이트를 다시 발행"은 실재하지 않는 동작(게이트는
+    # 발행 대상이 아니라 이벤트 발행의 부산물)이라 최저 지능 에이전트가 그대로 따라도
+    # 실패하지 않을 실제 동작으로 정정: rejected는 「산출물 수정→같은 정의의 approve
+    # stage 이벤트 재발행(게이트는 그 발행에 자동 재오픈됨)」, approved는 「이 정의의
+    # 다음 stage 이벤트 발행」.
     if verdict == "rejected":
-        lines.append("- 다음 행동: 반려 사유를 반영해 수정한 뒤 approve 게이트를 다시 발행하세요.")
+        lines.append(
+            "- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 "
+            "다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 "
+            "발행으로 자동 재오픈됩니다."
+        )
     elif verdict == "approved":
-        lines.append("- 다음 행동: 다음 stage를 진행하세요.")
+        lines.append(
+            "- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 "
+            "승인 게이트를 확認하는 발행 도구를 쓰세요)."
+        )
 
     return "\n".join(lines)
 

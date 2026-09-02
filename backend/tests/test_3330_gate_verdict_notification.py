@@ -249,7 +249,7 @@ async def test_rejected_gate_reaches_work_item_assignee_with_reason_and_next_act
             assert "- 게이트: external_publish → rejected" in content
             assert "- 반려 사유: 어투가 너무 딱딱함 — 다시" in content
             assert f"[Threads 포스트 초안 v1](entity:doc:{doc_id})" in content
-            assert "다시 발행하세요" in content
+            assert "approve stage 이벤트를 다시 발행하세요" in content
     finally:
         await engine.dispose()
 
@@ -276,7 +276,7 @@ async def test_approved_gate_also_reaches_work_item_assignee():
             content = await _latest_message_content_for(s, executor_id, org_id)
             assert content is not None
             assert "- 게이트: external_publish → approved" in content
-            assert "다음 stage를 진행하세요" in content
+            assert "다음 stage 이벤트를 발행하세요" in content
     finally:
         await engine.dispose()
 
