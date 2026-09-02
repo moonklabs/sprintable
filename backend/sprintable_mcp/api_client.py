@@ -354,6 +354,14 @@ class SprintableClient:
         (대소문자 무관 접근)."""
         return await self.request("GET", path, params=params, return_headers=True)
 
+    async def get_full(self, path: str, *, params: dict | None = None) -> Any:
+        """story #3331 — get()과 동일하되 `{data: T, ...sibling}` 래핑을 풀지 않고 그대로
+        반환한다(post_full()의 GET 짝 — sibling 키(total·limit·offset 등 body 기반
+        페이지네이션 메타)가 필요한 소수 호출부(list_conversations)용). X-Total-Count 같은
+        헤더 기반 페이지네이션은 get_with_headers()가 이미 담당 — 이건 body-embedded 메타
+        전용."""
+        return await self.request("GET", path, params=params, unwrap=False)
+
     async def post(self, path: str, *, json: dict | None = None) -> Any:
         return await self.request("POST", path, json=json or {})
 

@@ -97,8 +97,9 @@ from .tools.meetings import (
     trigger_ai_summary, update_meeting,
 )
 from .tools.chat import (
-    CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, SendChatInput,
-    create_conversation, get_chat_message, list_chat_messages, send_chat_message,
+    CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, ListConversationsInput,
+    SendChatInput, create_conversation, get_chat_message, list_chat_messages,
+    list_conversations, send_chat_message,
 )
 from .tools.notifications import (
     CheckNotificationsInput, MarkAllNotificationsReadInput, MarkNotificationReadInput,
@@ -795,7 +796,19 @@ _TOOL_DEFS: list[tuple] = [
      "[신뢰] 이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼. ⭐이 버전이 확定될"
      " 준비가 됐다고 판단될 때 휴먼 승인을 요청.",
      ProposeCanonicalInput, propose_canonical_version),
-    # Chat (4)
+    # Chat (5)
+    ("sprintable_list_conversations",
+     "[조직] 내가 참여한 방 목록 — 알림이 안 왔어도 스스로 점검하는 백스톱(story #3331)."
+     " id를 몰라도 되는 유일한 대화 발견 경로다(단, project_id 단위 목록 — API 자체가"
+     " project_id 필수라 «기본 프로젝트 안의 내 방»만 보인다, 여러 프로젝트를 훑으려면"
+     " project_id를 바꿔 반복 호출할 것) — send/list_chat_messages/get_chat_message는"
+     " conversation_id를 이미 알아야 하는데, 그 id를 얻을 방법이 이 도구뿐이었다(채널로"
+     " 밀려오지 않은 방은 존재 자체를 몰랐다). 세션 시작 시·긴 정지 후 재기동 시 «내 앞으로"
+     " 뭐가 왔는지» 먼저 이걸로 훑을 것. id·type·title·participants·last_read_at·"
+     " unread_count·latest_message를 준다. ⛔`create_conversation`은 조회가 아니라 매번"
+     " 새 방을 만드는 도구다(dedup 없음) — 기존 방이 있는지 확인할 땐 이걸 먼저 쓸 것,"
+     " create_conversation을 조회 우회로 쓰면 빈 방만 하나 더 생긴다.",
+     ListConversationsInput, list_conversations),
     ("sprintable_send_chat_message",
      "[조직] conversation thread에 채팅 메시지 발송. conversation_id로 대화를 지정(thread_id는"
      " 폐기 예정 별칭 — story #2427: 이 도구들의 «응답» thread_id는 대화 ID가 아니라 회신 스레드"
@@ -807,7 +820,9 @@ _TOOL_DEFS: list[tuple] = [
      " 메시지에서도 링크/backlink가 동작하게 한다.",
      SendChatInput, send_chat_message),
     ("sprintable_create_conversation",
-     "[조직] 새 conversation thread 생성.",
+     "[조직] 새 conversation thread **생성**(조회 아님 — dedup 없이 매 호출 신규 방을 만든다,"
+     " story #3331). 이 방이 이미 있는지 확인하고 싶으면 먼저 `sprintable_list_conversations`를"
+     " 쓸 것 — 이 도구를 조회 우회로 쓰면 빈 방만 하나 더 생긴다.",
      CreateConversationInput, create_conversation),
     ("sprintable_list_chat_messages",
      "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"

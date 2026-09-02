@@ -1,4 +1,4 @@
-"""채팅 MCP 도구 (3개)."""
+"""채팅 MCP 도구 (5개)."""
 from __future__ import annotations
 
 import logging
@@ -207,6 +207,35 @@ class ListChatMessagesInput(ConversationScopedInput):
     before: str | None = None
 
 
+class ListConversationsInput(SprintableInput):
+    """story #3331 — 에이전트가 자기 conversation 목록을 조회할 도구가 없어(id를 이미 알아야
+    읽히는 send/list_chat_messages/get_chat_message뿐) «채널로 밀려온 방」 밖의 존재를 아예
+    몰랐다(실사고: 담롱↔선생님 DM 896235be에 담롱 앞 결재 카드 2장이 있었는데도 세션 내내
+    발견 못 함). `GET /api/v2/conversations`(agent 키 호환 확認 完 — 이 라우터의 다른
+    엔드포인트와 동일 `get_current_user` 의존성)를 그대로 노출 — 새 REST·새 인증 0.
+
+    ⚠️이 REST가 받는 파라미터는 project_id(필수)·include_agent_conversations·limit·offset
+    뿐이다(conversations.py::list_conversations 실측) — `since`나 참여자 필터는 API 자체에
+    없어 지어내지 않는다(story 처방 2/3은 이 PR 스코프 밖, API 확장이 별도 필요).
+
+    ⚠️PO 변경요청①(2026-09-02, PR#3712 리뷰) — project_id가 REST 필수라(미지정 시 422, PO
+    실측) 이 목록은 «내가 참여한 방 전부»가 아니라 **«기본 프로젝트 안의 내 방»**이다 —
+    다중 프로젝트 org에선 조용히 좁아질 수 있다. `project_id`는 (베이스 클래스 `SprintableInput`
+    상속 필드) 다른 chat 도구와 동형인 선택적 per-call override(E-MCP-OPT ff6cb90d 관례,
+    미지정 시 client.require_project_id() 현행) — 여러 프로젝트를 훑으려면 project_id를
+    바꿔가며 반복 호출할 것."""
+
+    include_agent_conversations: bool = Field(
+        default=False,
+        description=(
+            "org owner/admin 키에서만 유효 — agent끼리만 있는(휴먼 미참여) 대화까지 포함한다. "
+            "그 외 role은 서버가 403을 낸다."
+        ),
+    )
+    limit: int | None = None
+    offset: int | None = None
+
+
 class GetChatMessageInput(ConversationScopedInput):
     message_id: str
 
@@ -327,8 +356,29 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         return err(str(exc))
 
 
+async def list_conversations(args: ListConversationsInput) -> list[TextContent]:
+    """내가 참여 중인 conversation 목록 — id·제목·참여자·마지막 메시지·미읽음 수. 알림이 안
+    왔어도(채널 미도달·이벤트 conversation 부재 등) 스스로 «내 앞으로 뭐가 왔는지» 점검하는
+    백스톱(story #3331) — id를 몰라도 되는 유일한 대화 발견 경로. `create_conversation`은
+    조회가 아니라 매번 새 방을 만드는 도구이니(dedup 없음) 기존 방이 있는지 먼저 이걸로
+    확인할 것."""
+    try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.include_agent_conversations:
+            params["include_agent_conversations"] = "true"
+        if args.limit is not None:
+            params["limit"] = str(args.limit)
+        if args.offset is not None:
+            params["offset"] = str(args.offset)
+        return ok(await client.get_full("/api/v2/conversations", params=params))
+    except Exception as exc:
+        return err(str(exc))
+
+
 async def create_conversation(args: CreateConversationInput) -> list[TextContent]:
-    """새 conversation thread 생성."""
+    """새 conversation thread **생성**(조회 아님 — dedup 없이 매 호출 신규 방을 만든다, story
+    #3331). 이 방이 이미 있는지 확인하고 싶으면 먼저 `list_conversations`를 쓸 것 — 이 도구를
+    조회 우회로 쓰면 빈 방만 하나 더 생긴다."""
     try:
         body: dict = {
             "type": "group",

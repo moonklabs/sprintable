@@ -56,7 +56,9 @@ EXPECTED_TOOLS = {
     # core (4) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     "sprintable_list_team_members", "sprintable_my_dashboard",
     "sprintable_list_projects", "sprintable_set_default_project",
-    # chat (4) — story 3cf50d90: get_chat_message(단건 원문 조회) 추가.
+    # chat (5) — story 3cf50d90: get_chat_message(단건 원문 조회) 추가. story #3331:
+    # list_conversations(내 참여 방 목록 — 알림 미도달 백스톱) 추가.
+    "sprintable_list_conversations",
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
     "sprintable_get_chat_message",
     # meetings (6)
@@ -139,7 +141,8 @@ def test_total_tool_count():
     # 119→121. story #2668(B3): sprintable_submit_for_approval 1종 신설(문서 결재 상신
     # REST를 MCP로 노출 — 도구 목록에 없어 에이전트가 발견 못 하던 것) — 121→122.
     # story #2709: sprintable_request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 122→123.
-    assert len(_TOOLS) == 124  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    # story #3331: sprintable_list_conversations 1종 신설(내 참여 방 목록 — 알림 미도달 백스톱) — 124→125.
+    assert len(_TOOLS) == 125  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():
