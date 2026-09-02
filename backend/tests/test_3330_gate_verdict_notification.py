@@ -263,7 +263,9 @@ async def test_rejected_gate_reaches_work_item_assignee_with_reason_and_next_act
             content = await _latest_message_content_for(s, executor_id, org_id)
             assert content is not None, "executor에게 도달한 메시지가 없다(AC1 실패)"
             assert "- 게이트: external_publish → rejected" in content
-            assert "- 반려 사유: 어투가 너무 딱딱함 — 다시" in content
+            # story 1cd72bfc — 라벨을 verdict 무관 "사유"로 통일(이전 "반려 사유"는 approved에
+            # 사유가 있어도 원천 차단하던 게이트의 부산물이었다, 아래 테스트가 그 정정을 pin).
+            assert "- 사유: 어투가 너무 딱딱함 — 다시" in content
             assert f"[Threads 포스트 초안 v1](entity:doc:{doc_id})" in content
             assert "approve stage 이벤트를 다시 발행하세요" in content
     finally:
@@ -293,6 +295,37 @@ async def test_approved_gate_also_reaches_work_item_assignee():
             assert content is not None
             assert "- 게이트: external_publish → approved" in content
             assert "다음 stage 이벤트를 발행하세요" in content
+            # story 1cd72bfc AC(음성대조) — 사유 없이 승인하면 사유 줄 자체가 없다(지어내지 않음).
+            assert "- 사유:" not in content
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_approved_gate_with_note_shows_reason_line():
+    """⭐story 1cd72bfc — 담롱 4바퀴 승인 실측 재현: approved 판정에도 note가 있으면 사유
+    줄이 실행자에게 도달한 메시지에 실린다(이전엔 verdict=="rejected" 게이트가 승인 사유를
+    원천 차단했다 — 이게 그 실 결함의 재현+정정 pin)."""
+    from app.services.gate_service import transition_gate
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_with_owner(s, slug="e3330c")
+            await _seed_preset_gate_verdict_definition(s)
+            await _seed_system_publisher(s, org_id, project_id)
+            executor_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=executor_id)
+            gate = await _seed_gate(s, org_id, work_item_id=story_id)
+
+            await transition_gate(s, org_id, gate.id, "approved", resolver_id=owner_id, note="Ddddd")
+            await s.commit()
+
+            content = await _latest_message_content_for(s, executor_id, org_id)
+            assert content is not None
+            assert "- 게이트: external_publish → approved" in content
+            assert "- 사유: Ddddd" in content
     finally:
         await engine.dispose()
 

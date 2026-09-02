@@ -1307,8 +1307,13 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
 
     lines.append(f"- 게이트: {gate_type} → {verdict}")
 
-    if verdict == "rejected" and resolution_note:
-        lines.append(f"- 반려 사유: {resolution_note}")
+    # story 1cd72bfc(2026-09-02, 담롱 4바퀴 승인 실측·PO 확定) — 이전엔 verdict=="rejected"
+    # 게이트가 있어 승인(approved) 판정에 사유가 있어도(예: "Ddddd") 원천 차단됐다.
+    # 에이전트 표면(MCP message.content)에서는 이 함수가 사유 노출의 전부다(사람 표면인
+    # block_template의 "사유" 필드는 별개 — chat-bubble.tsx event-block-card, 이 스토리
+    # 스코프 밖). 값 없으면 줄 자체를 생략(승인·반려 공통 — 지어내지 않는다).
+    if resolution_note:
+        lines.append(f"- 사유: {resolution_note}")
 
     draft_doc_ref: str | None = None
     if work_item_type and work_item_id is not None and gate_type:
