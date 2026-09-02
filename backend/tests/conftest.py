@@ -33,6 +33,7 @@ list_stories(...)`처럼 **직접 호출**하는 테스트가 흔한데(HTTP 왕
 시점에 거치는 자리라, 여기 적어야 «다음 사람도» 읽는다.
 """
 import ast
+import inspect
 import os
 import re
 import uuid
@@ -154,6 +155,53 @@ def _reset_schema_for_destructive_tests(request):
     if url:
         _reset_public_schema(url)
     yield
+
+
+# story #3330(PR#3711) CI 재현 — `_MARKER_NAME`(destructive_schema) 미부여 테스트 전체(=
+# non-destructive realdb 스위트, "Backend pytest" job) 대상 conftest autouse 승격. 근본원인
+# (실측 확認, CI와 동일 스택트레이스로 로컬 재현): `app.core.database.engine`(전역·프로세스
+# 수명)을 거치는 어떤 경로든(예: send_message의 background task `mark_agent_replied`, GET
+# /auth/me 등 실 HTTP 경유 라우터) 그 커넥션 풀에 "이전 pytest-anyio 이벤트 루프에 묶인"
+# 커넥션이 dispose 없이 남을 수 있다. pytest-anyio가 테스트마다 새 이벤트 루프를 만들기
+# 때문에, 다음 테스트가 pool_pre_ping으로 그 죽은 루프의 커넥션을 검사하려는 순간
+# `RuntimeError: ... got Future ... attached to a different loop`(asyncpg 취소 경로가
+# 이미 닫힌 루프에 task를 만들려다 남)로 죽는다.
+#
+# ⛔어느 특정 테스트 파일이 "범인"인지는 구조적으로 예측 불가능하다 — 전역 엔진 경로를
+# 타는지 여부는 그 테스트가 호출하는 프로덕션 코드의 내부 구현(예: transition_gate가
+# 어떤 gate_type에서 알림을 발행하는지)에 달려 있고, 그 프로덕션 코드는 테스트 작성자가
+# 매번 추적할 수 있는 게 아니다 — 파일 단위 opt-in fixture(`_dispose_global_engine_
+# after_test`, 246개 파일이 개별로 붙여 옴)는 "그 파일 작성자가 이 위험을 알고 있었는가"에
+# 의존하는 구조적 구멍이다(story #3330 PR#3711 CI flake가 정확히 이 구멍으로 재현 — 무관한
+# 다른 non-destructive 테스트가 새 프로덕션 코드 경로를 처음 타면서 dispose 없이 커넥션을
+# 남기고, 알파벳 순 다음 테스트가 그 죽은 커넥션을 집어 죽었다). 파일 단위 fixture를 계속
+# 개별 추가하는 대신, **모든** non-destructive 테스트 뒤에 무조건 dispose하는 쪽이 근본
+# 처방이다 — "이 테스트가 전역 엔진을 쓰는지"를 작성자가 몰라도 안전하다.
+#
+# destructive_schema 마커 테스트(별도 job, 파일별 완전 격리 프로세스)는 스코프 밖 — 이미
+# 프로세스 경계로 격리돼 있어 이 문제 자체가 발생하지 않는다(no-op으로 남겨 그 job의 기존
+# 동작을 그대로 유지).
+#
+# 246개 파일에 이미 있는 개별 `_dispose_global_engine_after_test`는 지금 걷어내지 않는다
+# (중복 dispose는 완전히 무해 — 이미 빈 풀을 한 번 더 비우는 것뿐) — 대량 편집은 별도
+# 스토리(a05da51b, 카디르 QA 지적)에서 그 fixture 자체를 걷어내는 정리와 함께.
+@pytest.fixture
+async def _dispose_global_engine_for_non_destructive_tests():
+    """story #3330(PR#3711) — 이 fixture 자체는 **autouse가 아니다**(의도적). 아래
+    `pytest_collection_modifyitems`가 non-destructive **async** 테스트에만 collection
+    시점에 `item.fixturenames`로 주입한다.
+
+    ⛔`autouse=True`를 직접 걸었던 초판은 story #2662의 서브프로세스 메타테스트
+    (`test_setup_phase_failure_also_gets_diagnosed`)를 깼다 — pytest-asyncio strict
+    모드가 "async fixture가 autouse로 걸려 있는데 그 테스트가 async 참여를 선언 안
+    했다"를 **fixture 본문 진입 전에**(dispatch 시점) 감지해 `PytestRemovedIn9Warning`을
+    던진다. 본문 안에서 `inspect.iscoroutinefunction` 등으로 걸러도 이미 늦다(본문
+    자체가 실행되기 전에 경고가 남) — sync 테스트엔 이 fixture가 **애초에 요청되지
+    않아야** 한다. autouse를 버리고 collection 시점에 "async 테스트에만" 조건부로
+    끼워 넣는 것으로 근본 해결."""
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
 
 
 # story 8236bbc3: destructive_schema 마커 drift 자기표면화 가드(PO crux 게이트②, 2026-07-03).
@@ -289,6 +337,19 @@ def pytest_collection_modifyitems(items: list) -> None:
             "  · destructive만(파일별 독립 신선 DB 권장): uv run pytest -m destructive_schema ...\n"
             f"이번 수집에 섞인 destructive 파일{more}:\n" + "\n".join(preview)
         )
+
+    # story #3330(PR#3711) — `_dispose_global_engine_for_non_destructive_tests`(위)를
+    # non-destructive **async** 테스트에만 collection 시점에 주입한다. `autouse=True`로
+    # 직접 걸면 sync 테스트도 이 async fixture를 "요청"한 것으로 잡혀 pytest-asyncio
+    # strict 모드가 fixture 본문 진입 前에 `PytestRemovedIn9Warning`을 던진다(story
+    # #2662의 서브프로세스 메타테스트가 이 경고로 진단 출력 형태가 깨져 실측 발견) —
+    # sync 테스트는 이 fixture를 아예 몰라야 한다. `inspect.iscoroutinefunction`으로
+    # "실행 시점에 걸러도" 이미 늦으므로(경고는 dispatch 시점에 남), collection
+    # 시점의 `item.fixturenames` 주입만이 sync 테스트를 완전히 비켜간다.
+    for item in non_destructive_items:
+        test_func = getattr(item, "function", None)
+        if inspect.iscoroutinefunction(test_func):
+            item.fixturenames.append("_dispose_global_engine_for_non_destructive_tests")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
