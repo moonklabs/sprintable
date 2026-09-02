@@ -274,6 +274,28 @@ async def workflow_sla(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/recipe-repeat-tick ─────────────────────────────
+# story #3337(선생님 4바퀴 실사고, 페드루 PO 설계 확定 2026-09-02) — 사이클형 레시피 정의의
+# 반복(payload.repeat)을 제품이 직접 발행. GCP Cloud Scheduler가 직접 침(레포 밖 SSOT,
+# workflow-sla와 동형 — Next.js /api/cron 프록시 불요). 잡 이름·주기는 PR 본문 참조(PO 등록).
+
+@router.get("/recipe-repeat-tick")
+async def recipe_repeat_tick(
+    request: Request,
+    # workflow_sla/workflow_handoff_watchdog와 동일 근거 — FOR UPDATE SKIP LOCKED 배치가
+    # 요청 primary 풀 예산을 소모하지 않게 전용 워커풀.
+    session: AsyncSession = Depends(get_worker_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.recipe_repeat_scheduler import process_recipe_repeat_ticks
+        counts = await process_recipe_repeat_ticks(session)
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/workflow-grandfather-backfill ──────────────────
 # E-DG S19(P0-5): line enable 시점 in-flight story grandfather backfill(read-only·Gate 0·
 # idempotent). allowlist(=명시 enable) org 만 대상. board freeze 0.

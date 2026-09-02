@@ -128,6 +128,7 @@ from app.models.chain_escalation_org_config import ChainEscalationOrgConfig
 from app.models.chain_circuit_breaker import ChainCircuitBreaker
 from app.models.event_definition import EventDefinition
 from app.models.recipe_role_binding import RecipeRoleBinding
+from app.models.recipe_repeat_schedule import RecipeRepeatSchedule
 
 __all__ = [
     "RoleTemplate",
