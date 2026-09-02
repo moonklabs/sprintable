@@ -6,6 +6,8 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
+import { parseEntityRef } from '@/components/chat/entity-ref';
+import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -103,6 +105,60 @@ function hypothesisOutcomeDraft(gate: GateItem): HypothesisOutcomeDraftFacts | n
   };
 }
 
+// story #3328(3바퀴 라이브 결함 · db967a77) — 레시피 approve 게이트(external_publish 등,
+// backend/app/services/recipe_gate_hooks.py::_build_approval_neutral_facts)의 neutral_facts
+// shape은 이 파일의 기존 신호(ci_result·trust·cold_start_seed 등, 전부 머지/가설 게이트
+// 전용)와 완전히 다르다 — work_item_reference_token·draft_doc_reference_token·channel·
+// draft_doc_summary·stage. `미확認`(BE sentinel, 값을 못 찾았다는 명시 표기)은 실 증거가
+// 아니므로 걸러낸다(지어내지 않음 — realString).
+const _UNCONFIRMED = '미확認';
+
+function realString(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 && v !== _UNCONFIRMED ? v : null;
+}
+
+interface ParsedReferenceToken {
+  entityType: string;
+  entityId: string;
+  label: string;
+  href: string | null;
+}
+
+// BE reference_token.py::build_reference_token의 `[제목](entity:타입:id)` 산출물을 다시
+// 쪼갠다 — entity-ref.ts(SSOT)의 href 파서를 그대로 재사용, 제목만 이 자리에서 분리.
+function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
+  const s = realString(v);
+  if (!s) return null;
+  const m = s.match(/^\[(.*)\]\((.*)\)$/);
+  if (!m) return null;
+  const [, label, href] = m;
+  const ref = parseEntityRef(href);
+  if (!ref) return null;
+  return { ...ref, label, href: getEntityHref(ref.entityType, ref.entityId) };
+}
+
+interface RecipeApprovalFacts {
+  workItemRef: ParsedReferenceToken | null;
+  draftDocRef: ParsedReferenceToken | null;
+  draftDocSummary: string | null;
+  channel: string | null;
+  stage: string | null;
+}
+
+function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
+  const f = gate.neutral_facts;
+  if (!f) return null;
+  const facts: RecipeApprovalFacts = {
+    workItemRef: parseReferenceToken(f['work_item_reference_token']),
+    draftDocRef: parseReferenceToken(f['draft_doc_reference_token']),
+    draftDocSummary: realString(f['draft_doc_summary']),
+    channel: realString(f['channel']),
+    stage: realString(f['stage']),
+  };
+  const hasAny = facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage;
+  return hasAny ? facts : null;
+}
+
 /**
  * 카드에 사람이 평가할 '실 증거'가 있는가. 빈/cold-start 구분의 단일 소스.
  * self_report_only 단독은 증거 아님(trust 실값에 붙는 qualifier로만 — 빈카드 도배 원인 제거).
@@ -119,7 +175,11 @@ export function gateHasEvidence(gate: GateItem): boolean {
   // story #2862 — 측정 판정 초안도 실 증거다(같은 이유, 안 그러면 hypothesis_outcome_confirm
   // 게이트가 State A 빈 카드로 가라앉아 사람이 판정 초안을 아예 못 본다).
   const hasDraft = hypothesisOutcomeDraft(gate) !== null;
-  return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft;
+  // story #3328 — 레시피 approve 게이트의 승인 대상 실물(work item·draft doc·channel)도
+  // 실 증거다(같은 이유 — 안 그러면 external_publish 게이트가 State A로 가라앉아 승인자가
+  // 뭘 승인하는지 dialog 안에서 전혀 못 본다).
+  const hasRecipeApproval = recipeApprovalFacts(gate) !== null;
+  return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft || hasRecipeApproval;
 }
 
 type GithubCheckState = 'not_published' | 'in_progress' | 'success' | 'failure';
@@ -408,6 +468,62 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
   );
 }
 
+/**
+ * story #3328 — 레시피 approve 게이트의 승인 대상 실물. work item·draft doc 참조 토큰은
+ * EntityChip(entity-ref.ts SSOT 파서 재사용, 채팅과 같은 렌더러)로 클릭 가능하게. 요약은
+ * 기본 접힘(카드 공간 절약, AC1 "접기 가능") — 없는 필드는 그냥 생략(지어내지 않음).
+ */
+function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
+  const t = useTranslations('cage');
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
+      {facts.stage ? (
+        <p className="text-muted-foreground">{t('recipeApprovalStageLabel')} · {facts.stage}</p>
+      ) : null}
+      {facts.workItemRef ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-muted-foreground">{t('recipeApprovalWorkItemLabel')}</span>
+          <EntityChip
+            entityType={facts.workItemRef.entityType}
+            entityId={facts.workItemRef.entityId}
+            label={facts.workItemRef.label}
+            href={facts.workItemRef.href}
+          />
+        </div>
+      ) : null}
+      {facts.draftDocRef ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-muted-foreground">{t('recipeApprovalDraftLabel')}</span>
+          <EntityChip
+            entityType={facts.draftDocRef.entityType}
+            entityId={facts.draftDocRef.entityId}
+            label={facts.draftDocRef.label}
+            href={facts.draftDocRef.href}
+          />
+        </div>
+      ) : null}
+      {facts.channel ? (
+        <p className="text-muted-foreground">{t('recipeApprovalChannelLabel')} · {facts.channel}</p>
+      ) : null}
+      {facts.draftDocSummary ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-muted-foreground underline underline-offset-2"
+          >
+            {expanded ? t('recipeApprovalSummaryCollapse') : t('recipeApprovalSummaryExpand')}
+          </button>
+          {expanded ? (
+            <p className="mt-1 whitespace-pre-wrap text-foreground">{facts.draftDocSummary}</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function GateEvidence({ gate, className }: { gate: GateItem; className?: string }) {
   const t = useTranslations('cage');
   const decision = gateDecision(gate);
@@ -430,6 +546,8 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   // story #2862 — hypothesis_outcome_confirm 게이트는 ci/trust/cold_start_seed가 없어 항상
   // State B(부분증거)로 떨어진다 — rich(State C) 분기엔 안 걸리므로 거기는 안 건드린다.
   const draft = hypothesisOutcomeDraft(gate);
+  // story #3328 — 레시피 approve 게이트도 동형(ci/trust/cold_start_seed 없음) — State B로.
+  const recipeFacts = recipeApprovalFacts(gate);
 
   const DecisionMark = decision ? DECISION_META[decision].mark : null;
   const decisionBadge = decision ? (
@@ -510,6 +628,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       ) : null}
       {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
       {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
+      {recipeFacts ? <RecipeApprovalFactsBlock facts={recipeFacts} /> : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}
