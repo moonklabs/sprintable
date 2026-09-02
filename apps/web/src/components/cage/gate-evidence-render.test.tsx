@@ -289,6 +289,122 @@ describe('GateEvidence — 측정 판정 초안 렌더(story #2862)', () => {
   });
 });
 
+// story #3328(3바퀴 라이브 결함 · db967a77) — 레시피 approve 게이트(external_publish)의 실
+// neutral_facts(BE recipe_gate_hooks.py::_build_approval_neutral_facts 산출물 그대로) 마운트.
+// 실사고: 게이트 09631e56은 이 필드들이 전부 채워져 있었는데도 dialog가 «근거 데이터 없음»을
+// 그렸다 — 순수함수 테스트(gateHasEvidence)만으론 참조 토큰이 실제로 클릭 가능한 칩으로
+// 그려지는지 못 잡으므로(entity-ref.ts 파싱+EntityChip 마운트 자체가 검증 대상) 여기서 실제
+// DOM 마운트로 검증한다.
+describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌더(story #3328)', () => {
+  function recipeApprovalGate(neutralFacts: Record<string, unknown>): GateItem {
+    return realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'pending',
+      github_check_run_id: null, neutral_facts: neutralFacts,
+    });
+  }
+
+  it('⭐AC1 핵심 — work item·draft doc 참조 토큰이 클릭 가능한 칩으로, channel·stage가 텍스트로 실제 DOM에 나타난다(«근거 데이터 없음» 소멸)', async () => {
+    const gate = recipeApprovalGate({
+      work_item_title: '9월 캠페인', work_item_reference_token: '[9월 캠페인](entity:story:11111111-1111-1111-1111-111111111111)',
+      channel: 'threads', draft_doc_reference_token: '[캠페인 초안 v1](entity:doc:22222222-2222-2222-2222-222222222222)',
+      draft_doc_summary: '이번 캠페인은 신규 유저 확보에 초점을 맞춘다.', stage: 'approve',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.evidenceNonePrompt);
+    expect(container.textContent).toContain('9월 캠페인');
+    expect(container.textContent).toContain('캠페인 초안 v1');
+    expect(container.textContent).toContain('threads');
+    expect(container.textContent).toContain('approve');
+    // EntityChip이 실제로 클릭 가능한 요소(role=button, entity-ref.ts 파싱 성공의 증거)로 그려졌는지.
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBeGreaterThan(0);
+  });
+
+  // PO 변경요청①(2026-09-02, PR#3710 리뷰) — BE `_escape_title`(reference_token.py)이 라벨 안
+  // `\ [ ] ( )`를 백슬래시-escape한다. 초기 구현이 escape 없는 픽스처로만 테스트해 못 잡았던
+  // 자리 — 실 게이트 09631e56 제목(팀 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려
+  // 반영)")을 그대로 재현해, 칩 텍스트가 백슬래시 없이 원문 그대로 보이는지 검증한다.
+  it('⭐PO 변경요청① — 라벨 안 대괄호/괄호가 BE escape(\\[ \\] \\()된 실 제목도 백슬래시 없이 원문 그대로 렌더된다', async () => {
+    const gate = recipeApprovalGate({
+      draft_doc_reference_token:
+        '[\\[3바퀴·draft\\] 산출물 v2\\(276/500자·반려 반영\\)](entity:doc:33333333-3333-3333-3333-333333333333)',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('[3바퀴·draft] 산출물 v2(276/500자·반려 반영)');
+    expect(container.textContent).not.toContain('\\[3바퀴');
+    expect(container.textContent).not.toContain('v2\\(');
+  });
+
+  // PO 변경요청②(2026-09-02, PR#3710 리뷰) — story #2420 규칙: bg-muted/40 tint 위에서 값
+  // (stage·channel)은 라벨과 같은 muted 톤에 묻히지 않고 text-foreground여야 한다.
+  it('⭐PO 변경요청② — stage·channel 값은 text-foreground, 라벨만 text-muted-foreground(값이 묻히지 않음)', async () => {
+    const gate = recipeApprovalGate({ stage: 'approve', channel: 'threads' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    const stageValue = Array.from(container.querySelectorAll('.text-foreground'))
+      .find((el) => el.textContent === 'approve');
+    const channelValue = Array.from(container.querySelectorAll('.text-foreground'))
+      .find((el) => el.textContent === 'threads');
+    expect(stageValue).toBeTruthy();
+    expect(channelValue).toBeTruthy();
+  });
+
+  it('AC1 — draft_doc_summary는 기본 접힘, 펼치기 클릭 후에만 본문이 DOM에 나타난다', async () => {
+    const gate = recipeApprovalGate({
+      channel: 'threads', draft_doc_summary: '펼쳐야 보이는 본문 텍스트',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain('펼쳐야 보이는 본문 텍스트');
+    const toggle = container.querySelector('button');
+    expect(toggle).toBeTruthy();
+    await act(async () => { toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('펼쳐야 보이는 본문 텍스트');
+  });
+
+  it('AC2 — neutral_facts가 전부 BE sentinel(«미확認»)이면 여전히 «근거 데이터 없음»(진짜 빈 카드는 지어내지 않는다)', async () => {
+    const gate = recipeApprovalGate({
+      work_item_title: '미확認', work_item_reference_token: '미확認', channel: '미확認',
+      draft_doc_reference_token: '미확認', draft_doc_summary: '미확認',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.evidenceNonePrompt);
+  });
+
+  // AC4 — 머지 게이트(neutral_facts에 ci_result/trust만 있는 기존 shape)는 이 신규 분기가
+  // 안 걸려 회귀 0이어야 한다(레시피 전용 신규 키를 찾다가 기존 렌더를 흔들면 안 됨).
+  it('AC4 회귀 0 — 머지 게이트(ci_result/trust)는 레시피 블록이 안 뜨고 기존 렌더 그대로', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'merge', status: 'pending', github_check_run_id: null,
+      neutral_facts: { ci_result: 'pass', trust: 0.9 },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.ciPass);
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDraftLabel);
+  });
+});
+
 // story #2975 AC4(PO 확定 2026-08-24) — 결재 이력(GET /gates/{id}/activity) 실 응답 shape
 // 마운트. gates.py GateActivityItem과 정합(id/action/actor_id/actor_name/context/created_at).
 describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story #2975 AC4)', () => {
