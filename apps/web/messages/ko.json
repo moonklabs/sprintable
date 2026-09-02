@@ -3904,6 +3904,23 @@
     "reverted": "조직 기본값으로 되돌렸습니다.",
     "noProjectForOrgEdit": "조직 기본값을 설정하려면 프로젝트가 하나 이상 필요합니다."
   },
+  "orgGatePolicy": {
+    "title": "결재 태세 및 기본 승인자",
+    "description": "조직 전체의 게이트 판정 태세와, 머지 게이트에 승인자가 지정되지 않았을 때 쓰일 기본 승인자를 설정합니다.",
+    "postureLabel": "결재 태세",
+    "postureConservative": "보수적",
+    "postureBalanced": "균형",
+    "posturePermissive": "관대",
+    "approverLabel": "머지 게이트 기본 승인자",
+    "approverUnset": "미지정 (현행)",
+    "approverPickPlaceholder": "승인자를 선택하세요",
+    "approverLoading": "불러오는 중…",
+    "save": "저장",
+    "saving": "저장 중…",
+    "saved": "저장됐습니다.",
+    "saveFailed": "저장에 실패했습니다.",
+    "loadFailed": "정책을 불러오지 못했습니다."
+  },
   "githubLinks": {
     "sectionLabel": "PR 연결",
     "loading": "불러오는 중…",
