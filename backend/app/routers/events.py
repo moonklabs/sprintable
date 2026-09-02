@@ -2058,6 +2058,12 @@ class ApplyRecipeRoleBindingsRequest(BaseModel):
 class ApplyRecipeRoleBindingsResponse(BaseModel):
     ok: bool
     bindings_upserted: int
+    # story #3317 PR B(마케팅자동화·레시피 결함, PO 확定 2026-09-02) — capability(publish:
+    # <channel> 등) 요구 stage의 커넥터가 org_connector_registry에 미등록이거나 필수
+    # org_config가 미충족이면 여기 담긴다. apply 자체는 안 막는다(경고뿐 — role_mapping이
+    # 이미 정상 upsert됐는데 커넥터 설정이 늦어졌다고 그 upsert를 막을 이유가 없다는 PO
+    # 판단). additive·기존 호출부 무회귀(default 빈 배열).
+    warnings: list[str] = []
 
 
 @router.post(
@@ -2117,6 +2123,47 @@ async def apply_recipe_role_bindings(
             detail=f"agent(s) not found in this org: {missing_agents}",
         )
 
+    # story #3317 PR B — capability(publish:<channel> 등) 요구 stage의 커넥터 준비 상태를
+    # 경고로만 알린다(apply 자체는 안 막음, PO 확定). capability 선언 없는 stage는 완전
+    # no-op(무선언 정의 회귀 0).
+    from app.services.connector_registry import (
+        find_org_connectors_by_kind, get_org_connector, missing_required_org_config,
+    )
+
+    warnings: list[str] = []
+    for stage in body.role_mapping:
+        capability = (definition.stage_metadata.get(stage) or {}).get("capability")
+        if not capability:
+            continue
+        kind = capability["kind"]
+        connector_key = capability.get("connector_key")
+        if connector_key:
+            row = await get_org_connector(db, org_id=org_id, connector_key=connector_key)
+            if row is None:
+                warnings.append(
+                    f"stage={stage!r}: connector_key={connector_key!r} 커넥터가 등록돼 있지 "
+                    f"않습니다 — 설정 스킬을 먼저 실행하세요."
+                )
+                continue
+            missing = missing_required_org_config(row)
+            if missing:
+                warnings.append(
+                    f"stage={stage!r}: connector_key={connector_key!r}의 필수 설정값이 비어 "
+                    f"있습니다 — {missing} (설정 화면에서 등록하세요)."
+                )
+        else:
+            candidates = await find_org_connectors_by_kind(db, org_id=org_id, kind=kind)
+            if not candidates:
+                warnings.append(
+                    f"stage={stage!r}: kind={kind!r}을 지원하는 커넥터가 이 org에 등록돼 있지 "
+                    f"않습니다 — 설정 스킬을 먼저 실행하세요."
+                )
+            elif not any(not missing_required_org_config(c) for c in candidates):
+                warnings.append(
+                    f"stage={stage!r}: kind={kind!r} 커넥터는 등록돼 있지만 필수 설정값이 "
+                    f"아직 비어 있습니다 — 설정 화면에서 등록하세요."
+                )
+
     actor_id: uuid.UUID | None = None
     try:
         actor_id = uuid.UUID(str(auth.user_id))
@@ -2150,7 +2197,7 @@ async def apply_recipe_role_bindings(
         upserted += 1
 
     await db.commit()
-    return ApplyRecipeRoleBindingsResponse(ok=True, bindings_upserted=upserted)
+    return ApplyRecipeRoleBindingsResponse(ok=True, bindings_upserted=upserted, warnings=warnings)
 
 
 class RecipeRoleBindingsResponse(BaseModel):

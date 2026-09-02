@@ -105,7 +105,7 @@ async def test_post_schema_then_get_roundtrip_matches_plugin_fixture(fixture):
             body = SetConnectorSchemaRequest(
                 version=fixture["version"], channel=fixture["channel"],
                 fields=[ConnectorFieldEntry(**f) for f in fixture["fields"]],
-                requires_env=fixture["requires_env"],
+                requires_env=fixture["requires_env"], kinds=fixture.get("kinds"),
             )
             created = await post_connector_schema(
                 org_id, fixture["connector_key"], body,
@@ -115,6 +115,7 @@ async def test_post_schema_then_get_roundtrip_matches_plugin_fixture(fixture):
             assert created.version == fixture["version"]
             assert created.channel == fixture["channel"]
             assert created.requires_env == fixture["requires_env"]
+            assert created.kinds == fixture.get("kinds")
 
             fetched = await get_connector(
                 org_id, fixture["connector_key"], session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id),

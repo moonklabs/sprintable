@@ -39,6 +39,13 @@ class OrgConnectorRegistry(Base):
     connector_key: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3317 PR B(2026-09-02, 미르코군 플러그인 0.8.1) — 이 커넥터가 지원하는 kind
+    # 목록(예: ["publish", "measure"]). connector_key 없이 레시피 정의의 capability.kind만
+    # 아는 apply 검증이 "이 org에 그 kind를 만족하는 커넥터가 있는가"를 찾을 때 씀
+    # (services/connector_registry.py::find_org_connectors_by_kind 참조). nullable — 0300
+    # 이전 등록분/kinds 미제공 커넥터는 NULL(그 kind 매칭에서 "미지원"과 동일하게 취급,
+    # 지어내지 않음).
+    kinds: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # [{name, source: "content"|"org_config", type, required, constraints, setup_hint}] —
     # describe_connector 반환 그대로(플러그인·서버 양쪽이 같은 shape을 pin 테스트로 대조,
     # PO 지침). name은 dot-path("create.senderEmail")여도 서버는 쪼개지 않고 문자열 그대로
