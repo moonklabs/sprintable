@@ -1201,17 +1201,45 @@ async def _async_regex_sub(pattern: "re.Pattern[str]", async_replacer, text: str
     return "".join(parts)
 
 
+def _protected_reference_token_spans(text: str) -> list[tuple[int, int]]:
+    """PO 리뷰(PR#3713, 2026-09-02) — 이미 참조 토큰인 구간(`[제목](entity:type:id)`)의
+    **제목 부분**엔 커밋 sha·다른 엔티티의 8자 prefix·전체 UUID가 우연히 들어있을 수 있다
+    (정의 문구·스토리 제목에 sha 언급이 흔함). 그 구간까지 훑으면 "토큰 속 토큰"(중첩 마크다운
+    링크로 구조가 깨짐)을 만든다 — 기존 하이픈 제외 방어(`(?![0-9a-zA-Z-])`)는 `entity:
+    doc:XXXXXXXX-...`의 **첫 세그먼트만** 막지, 토큰 앞쪽 제목 텍스트는 못 막는다.
+
+    파싱은 이 조직의 기존 SSOT(`mention_parser.py::_CHAT_TOKEN_RE` — FE `applyEntity`가
+    만드는 정확한 토큰 모양, escape된 대괄호까지 인식하도록 여러 사고를 거쳐 다듬어진 정규식)를
+    그대로 재사용한다(새 정규식 발명 0). 호출부가 이 span 안에서 시작하는 매치를 스킵한다."""
+    from app.services.mention_parser import _CHAT_TOKEN_RE
+
+    return [(m.start(), m.end()) for m in _CHAT_TOKEN_RE.finditer(text)]
+
+
+def _starts_within_spans(pos: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start <= pos < end for start, end in spans)
+
+
 async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID, text: str) -> str:
     """story #3329 — stage_metadata.action 같은 자유 문구 안에 박힌 org 내 doc/story
     UUID(전체 또는 8자 prefix)를 클릭 참조 토큰으로 치환한다. 실재하는 엔티티로 해소될
     때만 바꾸고(없으면·모호하면 원문 그대로 둔다) — AC1 "오탐 0"의 직접 구현. 전체 UUID
-    패스를 먼저 끝내고 나서 8자 prefix 패스를 돈다 — 전체 UUID가 이미 토큰(`entity:doc:
-    XXXXXXXX-...`)으로 바뀐 뒤라 그 안의 첫 8자가 하이픈 바로 앞이라 8자 정규식 자체가
-    스스로 제외한다(이중 치환 없음, 별도 마스킹 불요)."""
+    패스를 먼저 끝내고 나서 8자 prefix 패스를 돈다.
+
+    PO 리뷰(PR#3713) — 각 패스 직전에 `_protected_reference_token_spans`로 "이미 토큰인
+    구간"을 다시 계산해, 그 구간 **안에서 시작하는** 매치는 건드리지 않는다. 전체 UUID
+    패스는 원문 기준 보호구간(원문에 이미 있던 토큰의 제목 안 UUID 방어) — 8자 prefix
+    패스는 **전체 UUID 패스가 끝난 뒤의 텍스트** 기준으로 보호구간을 다시 계산한다(방금
+    만든 새 토큰의 제목 안 8자 hex까지 함께 방어 — 재계산이 핵심, 원문 기준 보호구간을
+    재사용하면 새로 생긴 토큰은 못 막는다)."""
     from app.services.reference_token import build_reference_token
+
+    protected = _protected_reference_token_spans(text)
 
     async def _replace_full(match: re.Match) -> str:
         raw = match.group(0)
+        if _starts_within_spans(match.start(), protected):
+            return raw
         try:
             entity_id = uuid.UUID(raw)
         except ValueError:
@@ -1224,8 +1252,12 @@ async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID,
 
     text = await _async_regex_sub(_EMBEDDED_FULL_UUID_RE, _replace_full, text)
 
+    protected = _protected_reference_token_spans(text)
+
     async def _replace_prefix(match: re.Match) -> str:
         raw = match.group(0)
+        if _starts_within_spans(match.start(), protected):
+            return raw
         resolved = await _resolve_doc_or_story_by_hex8_prefix(db, org_id=org_id, prefix=raw)
         if resolved is None:
             return raw

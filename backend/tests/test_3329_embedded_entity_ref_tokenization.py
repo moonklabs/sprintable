@@ -355,6 +355,63 @@ async def test_multiple_embedded_refs_in_one_action_both_tokenized():
 
 @_REAL_DB_SKIP
 @pytest.mark.anyio
+async def test_existing_token_title_hex8_untouched():
+    """⭐PO 리뷰(PR#3713, 2026-09-02) — action 문구에 **이미** 참조 토큰이 박혀 있고, 그
+    토큰의 제목 안에 다른(실재하는) doc의 8자 prefix와 우연히 같은 hex8 문자열이 들어있어도
+    건드리지 않는다("토큰 속 토큰" 금지). trap 문서(E1)가 실재해 그 prefix로 해소 가능한데도
+    보호구간이 막아야 한다 — trap이 없으면 이 테스트는 아무것도 증명하지 못한다."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, _owner = await _seed_org_with_owner(s, slug="e3329j")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            outer_doc_id = uuid.UUID("aaaa1111-0000-4000-8000-000000000001")
+            await _seed_doc(s, org_id, project_id, doc_id=outer_doc_id, title="커밋 bbbb2222 반영본")
+            trap_doc_id = uuid.UUID("bbbb2222-0000-4000-8000-000000000001")
+            await _seed_doc(s, org_id, project_id, doc_id=trap_doc_id, title="함정 문서")
+
+            existing_token = f"[커밋 bbbb2222 반영본](entity:doc:{outer_doc_id})"
+            content = await _publish_draft_and_get_content(
+                s, org_id, project_id, publisher_id, slug="e3329j",
+                action_text=f"{existing_token} 확인 요망",
+            )
+            assert existing_token in content
+            assert f"entity:doc:{trap_doc_id}" not in content
+            assert content.count("entity:doc:") == 1
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_new_token_title_hex8_prefix_no_nested_substitution():
+    """⭐PO 리뷰(PR#3713, 2026-09-02) — 전체 UUID 패스가 **방금 만든** 새 토큰의 제목 안에
+    다른(실재하는) doc의 8자 prefix와 같은 hex8 문자열이 들어있어도, 뒤이은 8자 prefix 패스가
+    그 안까지 훑어 중첩 치환하지 않는다. trap 문서(E2)가 실재해 그 prefix로 해소 가능한데도
+    막아야 한다."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, _owner = await _seed_org_with_owner(s, slug="e3329k")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            outer_doc_id = uuid.UUID("cccc3333-0000-4000-8000-000000000001")
+            await _seed_doc(s, org_id, project_id, doc_id=outer_doc_id, title="커밋 dddd4444 반영")
+            trap_doc_id = uuid.UUID("dddd4444-0000-4000-8000-000000000001")
+            await _seed_doc(s, org_id, project_id, doc_id=trap_doc_id, title="함정 문서2")
+
+            content = await _publish_draft_and_get_content(
+                s, org_id, project_id, publisher_id, slug="e3329k",
+                action_text=f"doc {outer_doc_id}를 참고하세요",
+            )
+            assert f"[커밋 dddd4444 반영](entity:doc:{outer_doc_id})" in content
+            assert f"entity:doc:{trap_doc_id}" not in content
+            assert content.count("entity:doc:") == 1
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
 async def test_cross_org_doc_prefix_does_not_leak():
     """AC1 경계 — 다른 org에만 존재하는 8자 prefix는 이 org에선 0건이라(존재판정 org
     스코프) 원문 그대로 — IDOR류 누수 없음(#3323의 org 경계 원칙과 동형)."""
