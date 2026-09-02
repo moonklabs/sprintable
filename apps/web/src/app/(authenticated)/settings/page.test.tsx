@@ -10,6 +10,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
+import { buildCreateProjectBody } from './page';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -142,5 +143,26 @@ describe('SettingsPage — story #3274: 설정 > 문의 탭', () => {
     const { default: SettingsPage } = await import('./page');
     await mount(<SettingsPage />);
     expect(container.textContent).not.toContain(koMessages.supportWidget.panelTitle);
+  });
+});
+
+// story #3309(도메인탈고정·축2-ⓓ FE 파트, AC2) — 순수 판정 함수. 이 파일은 huge prop
+// surface라 전체 마운트 테스트가 비실용적(story-detail-panel.tsx류 관례와 동일 이유) —
+// "레시피 선택 시 definition_key 포함·미선택 시 완전 무변경"을 값으로 고정한다.
+describe('buildCreateProjectBody — 레시피 선택 payload 합성(story #3309 AC2)', () => {
+  it('레시피 미선택(빈 문자열)이면 definition_key 필드 자체가 없다(기존 동작 회귀 0)', () => {
+    const body = buildCreateProjectBody('org-1', '새 프로젝트', '설명', '');
+    expect(body).toEqual({ org_id: 'org-1', name: '새 프로젝트', description: '설명' });
+    expect('definition_key' in body).toBe(false);
+  });
+
+  it('레시피 선택 시 definition_key가 그 key로 실린다', () => {
+    const body = buildCreateProjectBody('org-1', '새 프로젝트', '설명', 'content-review-cycle');
+    expect(body.definition_key).toBe('content-review-cycle');
+  });
+
+  it('description 미입력(빈 문자열)이면 null로 정규화된다(기존 동작 그대로)', () => {
+    const body = buildCreateProjectBody('org-1', '새 프로젝트', '', '');
+    expect(body.description).toBeNull();
   });
 });

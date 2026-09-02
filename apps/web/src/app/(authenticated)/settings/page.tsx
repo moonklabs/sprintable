@@ -45,6 +45,7 @@ import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -72,6 +73,26 @@ interface ProjectOption {
   id: string;
   name: string;
   description?: string | null;
+}
+
+// story #3309(도메인탈고정·축2-ⓓ FE 파트, AC2) — export: 이 파일은 huge prop surface라
+// 전체 마운트 테스트가 비실용적(다른 story-detail-panel.tsx류 관례와 동일 이유) — 순수
+// 판정 함수로 빼 "레시피 선택 시 definition_key 포함·미선택 시 완전 무변경"을 값으로 고정.
+// recipeKey가 빈 문자열이면 필드 자체를 안 실어(undefined 대입이 아니라 key 부재) 기존
+// JSON.stringify 결과와 바이트까지 동일하게 만든다(회귀 0).
+export function buildCreateProjectBody(
+  orgId: string,
+  name: string,
+  description: string,
+  recipeKey: string,
+): { org_id: string; name: string; description: string | null; definition_key?: string } {
+  const body: { org_id: string; name: string; description: string | null; definition_key?: string } = {
+    org_id: orgId,
+    name,
+    description: description || null,
+  };
+  if (recipeKey) body.definition_key = recipeKey;
+  return body;
 }
 
 interface ProjectMember {
@@ -178,6 +199,10 @@ export default function SettingsPage() {
   const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
+  // story #3309(도메인탈고정·축2-ⓓ FE 파트) — 생성 시점 레시피 선택(선택사항). 미선택이면
+  // buildCreateProjectBody가 definition_key를 아예 안 실어 기존 동작 무변경(AC2).
+  const [recipeDefinitions, setRecipeDefinitions] = useState<EventDefinitionResponse[]>([]);
+  const [selectedRecipeKey, setSelectedRecipeKey] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectActionMessage, setProjectActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -419,6 +444,22 @@ export default function SettingsPage() {
     void refreshMemberData(memberProjectId).catch((err) => { console.error('멤버 데이터 로드 실패', err); });
   }, [memberProjectId]);
 
+  // story #3309(축2-ⓓ FE 파트) — 생성 폼의 레시피 선택 목록. workflow-template-gallery-section.tsx
+  // (#3690)와 동일 소스(GET /api/events/definitions)+동일 cyclic 판별(isCyclicDefinition).
+  // isAdmin(생성 폼 자체의 게이트)에 종속 — 어차피 admin 아니면 폼이 안 뜬다.
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetchWithAuth('/api/events/definitions').catch(() => null);
+      if (cancelled || !res?.ok) return;
+      const data: unknown = await res.json();
+      const defs = Array.isArray(data) ? (data as EventDefinitionResponse[]) : [];
+      setRecipeDefinitions(defs.filter(isCyclicDefinition));
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin]);
+
   // api-keys 탭 접근 시 /agents(관리 탭)으로 자동 전환 (레거시 리다이렉트)
   useEffect(() => {
     // 에이전트 관리 IA 통일(story d63d3f73) — Members 서브탭 흡수, /agents(관리 탭)으로 재타겟.
@@ -562,11 +603,7 @@ export default function SettingsPage() {
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        org_id: orgId,
-        name: newProjectName.trim(),
-        description: newProjectDescription.trim() || null,
-      }),
+      body: JSON.stringify(buildCreateProjectBody(orgId, newProjectName.trim(), newProjectDescription.trim(), selectedRecipeKey)),
     });
 
     const json = await res.json().catch(() => null) as {
@@ -603,6 +640,7 @@ export default function SettingsPage() {
     setMemberProjectId(project.id);
     setNewProjectName('');
     setNewProjectDescription('');
+    setSelectedRecipeKey('');
     setProjectActionMessage({ type: 'success', text: t('projectCreated', { name: project.name }) });
 
     await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
@@ -1228,7 +1266,40 @@ export default function SettingsPage() {
                         {creatingProject ? '...' : t('createProjectAction')}
                       </Button>
                     </div>
-                  ) : adminChecked ? (
+                  ) : null}
+                  {/* story #3309(축2-ⓓ FE 파트) — 선택사항. workflow-template-gallery-section.tsx
+                      (#3690)와 동일 카드-버튼 선택 관례(신규 시각 언어 발명 0) — 여긴 role
+                      매핑 없이 "어느 레시피"만 고른다(그 매핑은 프로젝트가 실제로 생겨야
+                      가능한 후속 단계, PO 처방 그대로). */}
+                  {isAdmin && recipeDefinitions.length > 0 ? (
+                    <div className="mt-3">
+                      <p className="mb-1.5 text-xs text-muted-foreground">{t('projectRecipeLabel')}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRecipeKey('')}
+                          className={`rounded-full border px-3 py-1 text-xs transition ${
+                            selectedRecipeKey === '' ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-primary/60'
+                          }`}
+                        >
+                          {t('projectRecipeNone')}
+                        </button>
+                        {recipeDefinitions.map((def) => (
+                          <button
+                            key={def.key}
+                            type="button"
+                            onClick={() => setSelectedRecipeKey(def.key)}
+                            className={`rounded-full border px-3 py-1 text-xs transition ${
+                              selectedRecipeKey === def.key ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-primary/60'
+                            }`}
+                          >
+                            {def.name || def.key}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {adminChecked && !isAdmin ? (
                     <Alert variant="warning">
                       <AlertDescription>{t('projectAdminRequired')}</AlertDescription>
                     </Alert>

@@ -1373,6 +1373,8 @@
     "currentProjectBadge": "현재 프로젝트",
     "projectNamePlaceholder": "프로젝트 이름",
     "projectDescriptionPlaceholder": "프로젝트 설명 (선택)",
+    "projectRecipeLabel": "레시피 선택 (선택)",
+    "projectRecipeNone": "없음",
     "createProjectAction": "프로젝트 만들기",
     "projectCreateFailed": "프로젝트 생성에 실패했습니다",
     "projectCreated": "{name} 프로젝트를 만들고 작업 공간에 바로 반영했습니다.",

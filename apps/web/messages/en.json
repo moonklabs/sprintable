@@ -1373,6 +1373,8 @@
     "currentProjectBadge": "Current",
     "projectNamePlaceholder": "Project name",
     "projectDescriptionPlaceholder": "Project description (optional)",
+    "projectRecipeLabel": "Recipe (optional)",
+    "projectRecipeNone": "None",
     "createProjectAction": "Create project",
     "projectCreateFailed": "Failed to create project",
     "projectCreated": "Project {name} created and added to your workspace.",
