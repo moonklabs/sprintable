@@ -1,17 +1,14 @@
 """story #3337(선생님 4바퀴 실사고, 페드루 PO 설계 확定 2026-09-02) — 사이클형 레시피 정의의
 반복 스케줄 테이블(recipe_repeat_schedules) 신설.
 
-⚠️번호 의존성(임시) — story #3340(PR#3723, `0303_preset_gate_verdict_requester_field.py`)이
-QA 큐 순번상 이 PR보다 먼저 머지될 예정(페드루 확定)이라 논리적으로는 0303 뒤를 잇는 게
-맞다. 그런데 그 파일은 **이 브랜치엔 아직 없다**(develop에 아직 머지 前) — CI의 "Alembic
-upgrade head" 가 존재하지 않는 down_revision을 못 찾아 그대로는 fail한다(실측 확認, 이 PR
-자체에서). 그래서 지금은 이 브랜치의 실제 최신(0302)을 가리키게 임시로 둔다 — **#3340이
-먼저 머지되면 이 PR을 origin/develop 위로 rebase하며 down_revision을 0303으로, revision
-번호가 그때 다른 PR과 또 겹치면 그 시점의 실제 head+1로 재정렬**한다(병합 전 마지막 단계,
-페드루 확定). 데이터 충돌 없음(둘 다 순수 additive).
+story #3340(PR#3723, `0303_preset_gate_verdict_requester_field.py`)이 develop에 먼저 머지됐다
+(39e4f2c33, 2026-09-02 14:06Z 확認) — 이 파일은 한때 CI의 "Alembic upgrade head"가 존재하지
+않는 down_revision을 못 찾는 문제(0303이 이 브랜치에 아직 없던 시점) 때문에 임시로 0302를
+가리켰으나, #3340 머지 직후 origin/develop 위로 rebase하며 아래처럼 원래 의도(0303 뒤를
+잇는)로 복원했다(페드루 확定, 데이터 충돌 없음 — 둘 다 순수 additive).
 
 Revision ID: 0304
-Revises: 0302
+Revises: 0303
 Create Date: 2026-09-02
 """
 from __future__ import annotations
@@ -21,7 +18,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0304"
-down_revision = "0302"
+down_revision = "0303"
 branch_labels = None
 depends_on = None
 
