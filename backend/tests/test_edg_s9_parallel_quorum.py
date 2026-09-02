@@ -217,10 +217,12 @@ async def test_any_reject_blocks_rejects_gate():
         rid = (await s.execute(select(WorkflowLineStepApproval.id).where(
             WorkflowLineStepApproval.approver_member_id == a1["member_id"]))).scalar_one()
         # 1명 reject → any_reject_blocks → 즉시 rejected(나머지 대기 안 함)
-        r = await record_parallel_decision(s, rid, "rejected", a1["member_id"])
+        # story #3334 — transition_gate("rejected")가 이제 사유 필수라 note를 실어 보낸다.
+        r = await record_parallel_decision(s, rid, "rejected", a1["member_id"], note="블로커 이슈 확인 필요")
         assert r["outcome"] == "rejected" and r["rejected"] == 1
         g = (await s.execute(select(Gate).where(Gate.id == gate.id))).scalar_one()
         assert g.status == "rejected"
+        assert g.resolution_note == "블로커 이슈 확인 필요"
     await engine.dispose()
 
 

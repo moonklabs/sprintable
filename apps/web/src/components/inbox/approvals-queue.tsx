@@ -609,10 +609,12 @@ export function ApprovalsQueue() {
           // 필드 없이 기존 자유텍스트 필드 재사용 — 결과 조회 시 "어느 안"이었는지 그대로 읽힌다).
           else void resolveGate(gate.id, 'approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption }) : null);
         };
-        const rejectOnClick = () => {
-          if (isSigFlow) setSignatureTargetId(gate.id);
-          else void resolveGate(gate.id, 'rejected');
-        };
+        // story #3334(선생님 실사용 4바퀴 T1' 적출) — 반려(변경 요청)는 이제 gate_type/위험도
+        // 무관 사유 필수(서버 422, gates.py transition_gate_endpoint). 예전엔 저위험 게이트만
+        // 이 else 분기로 사유 없이 즉시 반려됐다 — 그 즉시제출 경로를 없애고 반려는 항상 이미
+        // 있는 서명 다이얼로그(GateSignatureApproval, 사유 textarea 보유)로 통일한다. 승인은
+        // 기존처럼 저위험 원탭 그대로(primaryOnClick, 변경 없음 — 이 스토리는 반려 축만 다룬다).
+        const rejectOnClick = () => setSignatureTargetId(gate.id);
 
         return (
           <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">

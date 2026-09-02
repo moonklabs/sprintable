@@ -561,13 +561,35 @@ describe('ApprovalsQueue', () => {
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
   });
 
-  it('변경 요청 클릭 시(저위험) status=rejected로 호출하고 반려됨 배지를 보인다', async () => {
+  // story #3334(선생님 실사용 4바퀴 T1' 적출, 처방 확定) — 저위험이라도 반려는 이제 사유
+  // 필수(서버 gate_type 무관 422 강제). 예전엔 이 카드의 "변경 요청" 클릭이 사유 없이 즉시
+  // POST했다(이 테스트가 그 낡은 계약을 pin하고 있었다) — 지금은 클릭 즉시 제출 대신 서명
+  // 다이얼로그(GateSignatureApproval, document.body 포탈)를 열고, 사유를 채워야만 그 안의
+  // "변경 요청" 버튼이 풀린다.
+  it('변경 요청 클릭 시(저위험) 사유 다이얼로그를 열고, 사유 입력 後에만 status=rejected로 호출한다', async () => {
     const calls = mockFetches([lowRiskActionable({ id: 'g-rej' })], []);
     await mount();
     const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 다이얼로그가 열렸다 — 즉시 POST는 아직 안 나갔다.
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    expect(dialogRejectBtn.disabled).toBe(true); // AC — 사유 입력 前 비활성.
+
+    const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '스키마 필드명이 기존 컨벤션과 다릅니다');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(dialogRejectBtn.disabled).toBe(false);
+
+    await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null, evidence_viewed: false, reviewed_head_sha: null });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({
+      status: 'rejected', note: '스키마 필드명이 기존 컨벤션과 다릅니다', evidence_viewed: false, reviewed_head_sha: null,
+    });
     expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
   });
 
@@ -707,12 +729,25 @@ describe('ApprovalsQueue', () => {
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
   });
 
-  it('AC 음성대조 — 반려 직후(아직 승인/취소 안 됨)엔 취소 버튼이 즉시 뜨지 않다가, 반려 완료 후엔 뜬다', async () => {
+  // story #3334 — "반려 직후"의 의미가 바뀌었다: 클릭은 이제 다이얼로그를 열 뿐(즉시 반려
+  // 아님) — 취소 버튼은 사유 입력 後 다이얼로그 안에서 실제로 제출해야만 뜬다.
+  it('AC 음성대조 — 반려 클릭은 다이얼로그만 열고(취소 버튼 안 뜸), 사유 입력 後 제출해야 취소 버튼이 뜬다', async () => {
     mockFetches([lowRiskActionable({ id: 'g-reject-undo' })], []);
     await mount();
     const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 다이얼로그만 열렸다 — 아직 반려되지 않았으므로 취소 버튼은 여전히 없다.
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
+
+    const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '재작업 필요');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
   });
 
@@ -1153,14 +1188,29 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect(approveBtn.disabled).toBe(false);
   });
 
-  it('거절은 안 선택 없이도 즉시 가능하다(반려는 안을 고르는 행위가 아님)', async () => {
+  // story #3334 — 반려는 여전히 "안 선택" 없이 가능하다(옵션 축과 무관, 그 AC는 안 바뀜). 다만
+  // 반려 자체가 이제 사유 없이 "즉시"는 아니다(gate_type 무관 사유 필수) — 클릭은 다이얼로그를
+  // 열 뿐이고, 옵션을 고르지 않은 채로도 그 다이얼로그에 진입할 수 있음(=안 선택 무관)만 남는다.
+  it('거절 버튼은 안 선택 없이도 눌리지만(반려는 안을 고르는 행위가 아님), 사유 다이얼로그를 거쳐야 제출된다', async () => {
     const calls = mockFetches([decisionGate()], []);
     await mount();
     const rejectBtn = Array.from(container.querySelectorAll('button')).find(
       (b) => b.textContent?.includes(koMessages.cage.sigRequestChanges),
     ) as HTMLButtonElement;
-    expect(rejectBtn.disabled).toBe(false);
+    expect(rejectBtn.disabled).toBe(false); // 옵션 미선택 상태에서도 클릭 자체는 가능.
     await act(async () => { rejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0); // 즉시 제출은 안 됨.
+
+    const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '보류(C안)로 다시 검토 요청');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find(
+      (b) => b.textContent?.includes(koMessages.cage.sigRequestChanges),
+    ) as HTMLButtonElement;
+    await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
     expect(JSON.parse(postCall?.body ?? '{}').status).toBe('rejected');
   });

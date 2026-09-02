@@ -464,7 +464,9 @@ export function DocGateSection({
                 variant="ghost"
                 size="sm"
                 className="gap-1 text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                disabled={busy}
+                // story #3334 — 반려 사유(note) 서버측 필수 강제(gates.py 422)와 짝 — 예전엔
+                // busy만 봐서 빈 textarea로도 즉시 제출됐다(서버 무검증이던 시절 그대로 방치).
+                disabled={busy || !note.trim()}
                 onClick={() => void submitReject()}
               >
                 <ShieldX className="size-3.5" />

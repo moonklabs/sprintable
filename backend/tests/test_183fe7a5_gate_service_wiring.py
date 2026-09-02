@@ -75,7 +75,9 @@ async def test_reject_also_triggers_escalation_resolution_delivery():
         "app.services.escalation_resolution_delivery.deliver_escalation_resolution_for_gate",
         new_callable=AsyncMock,
     ) as delegate:
-        await transition_gate(session, ORG_ID, GATE_ID, "rejected", MEMBER_ID)
+        # story #3334 — transition_gate("rejected")가 이제 사유 필수(서비스층 강제). 이
+        # 테스트의 관심사(escalation 동기화 훅 발화)와 무관하므로 명시로 실어 대상 밖임을 밝힌다.
+        await transition_gate(session, ORG_ID, GATE_ID, "rejected", MEMBER_ID, "에스컬레이션 재현 사유")
 
     delegate.assert_awaited_once()
     _, kwargs = delegate.call_args

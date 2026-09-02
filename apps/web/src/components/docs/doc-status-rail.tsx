@@ -185,10 +185,15 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         </Button>
       ) : isApprover ? (
         <div className="flex shrink-0 gap-2">
-          <Button size="sm" variant="ghost" disabled={busy} className="gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-            onClick={() => currentTeamMemberId && void gateTransition({ status: 'rejected', resolver_id: currentTeamMemberId }, onTransitioned)}
-          >
-            <XCircle className="size-3.5" />{t('docGateReject')}
+          {/* story #3334 — 반려(변경 요청)는 gate_type 무관 사유 필수(서버 422). 저위험이라도
+              이 리더 헤더엔 사유 입력창이 없으므로, 반려는 사유 모달을 가진 에디터
+              (doc-gate-section.tsx의 rejectOpen 다이얼로그)로 유도한다 — 위 고위험 분기와
+              같은 원칙("여기서 직행 처리 안 함, 반려는 비대칭 예외 없이 동일 취급"). 승인은
+              사유가 필요 없으므로 기존처럼 원탭 그대로. */}
+          <Button asChild size="sm" variant="ghost" className="gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60">
+            <Link href={editHref}>
+              <XCircle className="size-3.5" />{t('docGateReject')}
+            </Link>
           </Button>
           <Button size="sm" variant="ghost" disabled={busy} className="gap-1 text-success hover:ring-1 hover:ring-inset hover:ring-success/60"
             onClick={() => currentTeamMemberId && void gateTransition({ status: 'approved', resolver_id: currentTeamMemberId }, onTransitioned)}

@@ -168,6 +168,13 @@ export default function GateDetailPage() {
   const decisionFacts = gate && isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
   const requiresOptionChoice = decisionFacts !== null && decisionFacts.options.length > 0;
   const isSigFlowGate = !!gate && usesSignatureFlow(deriveRiskLevel(gate));
+  // story #3334 — 저위험 게이트의 반려(변경 요청)는 예전엔 사유 입력창 자체가 없는 인라인
+  // 버튼이라 클릭 즉시 빈 사유로 제출됐다(선생님 4바퀴 T1' 실사고 재현 그 자체). 근거열람
+  // 없이도 반려 자체는 가능해야 하므로(승인만 evidence 축) 저위험 게이트를 통째로 서명
+  // 플로우로 밀어넣지 않고, "반려하려는 의도"일 때만 이 토글로 같은 GateSignatureApproval
+  // 패널을 연다 — 승인은 기존처럼 원탭 그대로(이 스토리는 반려 축만 다룬다).
+  const [rejectPanelOpen, setRejectPanelOpen] = useState(false);
+  useEffect(() => { setRejectPanelOpen(false); }, [gate?.id]);
 
   const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     if (!gate) return;
@@ -404,7 +411,7 @@ export default function GateDetailPage() {
                         : t('gateReadonlyNotAuthorized')}
                     </p>
                   </div>
-                ) : isSigFlowGate ? (
+                ) : isSigFlowGate || rejectPanelOpen ? (
                   // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
                   // 후 fetchGate() 재조회로 gate.github_check_run_sha가 바뀌어도, key 없이는 이
                   // 컴포넌트가 그대로 살아있어 evidenceViewed/reason state가 안 리셋된다 —
@@ -413,15 +420,26 @@ export default function GateDetailPage() {
                   // key={SHA}로 SHA가 바뀔 때마다 강제 remount — 세밀한 useEffect 리셋 목록은
                   // 미래 state 추가마다 리셋 누락 사각을 만드는 구조(이번 사고와 동형 클래스)라
                   // PO가 명시 기각, remount가 미래 state까지 구조적으로 안전(최소안 채택).
-                  <GateSignatureApproval
-                    key={gate.github_check_run_sha}
-                    gate={gate}
-                    resolving={resolving}
-                    error={transitionError}
-                    onApprove={(reason) => void transition('approved', reason, true)}
-                    onReject={(reason) => void transition('rejected', reason)}
-                    onDiscuss={(reason) => void discuss(reason)}
-                  />
+                  <div className="space-y-2">
+                    <GateSignatureApproval
+                      key={gate.github_check_run_sha}
+                      gate={gate}
+                      resolving={resolving}
+                      error={transitionError}
+                      onApprove={(reason) => void transition('approved', reason, true)}
+                      onReject={(reason) => void transition('rejected', reason)}
+                      onDiscuss={(reason) => void discuss(reason)}
+                    />
+                    {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다
+                        (원래 근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로
+                        되돌아갈 길을 남긴다. 고위험(isSigFlowGate) 게이트는 이 패널이 유일한
+                        경로라 취소 버튼 자체가 무의미(숨김).*/}
+                    {!isSigFlowGate ? (
+                      <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
+                        {t('cancel')}
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
@@ -440,7 +458,7 @@ export default function GateDetailPage() {
                         variant="outline"
                         className="min-h-12 flex-1 gap-1.5"
                         disabled={resolving}
-                        onClick={() => void transition('rejected')}
+                        onClick={() => setRejectPanelOpen(true)}
                       >
                         <XCircle className="size-4" />
                         {t('gateReject')}

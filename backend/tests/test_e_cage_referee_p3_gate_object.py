@@ -542,8 +542,12 @@ async def test_transition_approved_saves_note():
 
 
 @pytest.mark.anyio
-async def test_transition_rejected_empty_note_graceful():
-    """rejected 전이 시 note=None이면 resolution_note 건드리지 않음."""
+async def test_transition_rejected_empty_note_now_rejected_by_server():
+    """story #3334(선생님 4바퀴 실사고) — 이 테스트는 예전엔 "note=None이면 graceful하게
+    통과·resolution_note 안 건드림"을 고정했었다. 그 전제 자체가 이 스토리의 처방(반려는
+    gate_type 무관 사유 필수)과 정면 충돌 — 사유 없는 반려가 «무엇을 고칠지» 없이 조용히
+    통과하던 그 정확한 경로다. 낡은 계약을 지우는 대신 새 계약(ValueError→422)으로 뒤집어
+    같은 자리를 계속 지킨다(gate mutate 0도 함께 확인)."""
     from app.services.gate_service import transition_gate
 
     gate = MagicMock()
@@ -559,8 +563,9 @@ async def test_transition_rejected_empty_note_graceful():
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
 
-    await transition_gate(session, ORG_ID, GATE_ID, "rejected", MEMBER_ID, None)
-    assert gate.status == "rejected"
+    with pytest.raises(ValueError, match="사유"):
+        await transition_gate(session, ORG_ID, GATE_ID, "rejected", MEMBER_ID, None)
+    assert gate.status == "pending"  # 뮤테이션 0 — status가 여전히 원래 값.
     assert gate.resolution_note is None
 
 
