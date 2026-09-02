@@ -740,3 +740,86 @@ describe('OrganizationEventsPage — 정의 상세보기 사람 언어 기본(st
     expect(container.textContent).toContain(koMessages.organization.definerFormat_measure);
   });
 });
+
+// story #3316 — 카탈로그에 「프로젝트에 적용」 진입점이 없던 갭 + stage_metadata(role/action/
+// gate/capability) 상세뷰 부재. cyclicStages()(loop-create-dialog.tsx SSOT) 판별과 동형으로
+// payload_schema.properties.stage.enum이 있는 정의만 "적용" 버튼/상세뷰를 얻어야 한다.
+describe('OrganizationEventsPage — 카탈로그 적용 진입점 + stage_metadata 상세(story #3316)', () => {
+  function cyclicCustom(overrides: Record<string, unknown> = {}) {
+    return customWithId({
+      id: 'def-cyclic-1',
+      key: 'org.moonklabs.recipe.cyclic',
+      name: '사이클 레시피',
+      payload_schema: {
+        type: 'object',
+        properties: { stage: { type: 'string', enum: ['draft', 'review'] } },
+        required: ['stage'],
+        additionalProperties: false,
+      },
+      stage_metadata: {
+        draft: { role: 'Writer', action: '초안 작성' },
+        review: {
+          role: 'Reviewer', action: '검토',
+          gate: { type: 'qa', approver: 'assignee' },
+          capability: { kind: 'publish', connector_key: 'slack' },
+        },
+      },
+      ...overrides,
+    });
+  }
+
+  function expandRow(key: string) {
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === key)!;
+    return act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  }
+
+  it('사이클형 정의는 펼치면 stage별 role/action과 gate/capability가 사람 언어로 뜬다', async () => {
+    mockFetches([cyclicCustom()]);
+    await mount();
+    await expandRow('org.moonklabs.recipe.cyclic');
+
+    expect(container.textContent).toContain('초안 작성');
+    expect(container.textContent).toContain('Writer');
+    expect(container.textContent).toContain('검토');
+    expect(container.textContent).toContain('Reviewer');
+    expect(container.textContent).toContain('qa');
+    expect(container.textContent).toContain('publish');
+  });
+
+  it('사이클형 정의는 「프로젝트에 적용」 버튼이 뜨고, 클릭하면 적용 다이얼로그가 열린다', async () => {
+    mockFetches([cyclicCustom()]);
+    await mount();
+
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventApplyCta);
+    expect(applyBtn).not.toBeUndefined();
+    await act(async () => { applyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(document.body.textContent).toContain(
+      koMessages.organization.eventApplyDialogTitle.replace('{name}', '사이클 레시피'),
+    );
+  });
+
+  it('신호/측정형(stage.enum 없음) 정의는 「프로젝트에 적용」 버튼이 안 뜬다(AC — 적용할 stage가 없음)', async () => {
+    // measureCustom()은 story #2677 describe 블록 로컬 스코프라(switchToAdvancedTab이 남긴
+    // 실사고 메모 그대로 재발 방지 — 모듈 스코프가 아니면 딴 describe에서 못 씀) 여기선
+    // customWithId()에 stage.enum 없는 payload_schema를 직접 얹어 동형 픽스처를 만든다.
+    mockFetches([customWithId({
+      id: 'def-measure-1', key: 'org.moonklabs.measure.thing', name: '측정형',
+      payload_schema: { type: 'object', properties: { metric_value: { type: 'number' } }, required: ['metric_value'], additionalProperties: false },
+      stage_metadata: {},
+    })]);
+    await mount();
+
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventApplyCta);
+    expect(applyBtn).toBeUndefined();
+  });
+
+  it('프리셋(org_id=null)도 사이클형이면 「프로젝트에 적용」이 뜬다(읽기전용은 정의 수정만 막지, 적용은 별개)', async () => {
+    mockFetches([cyclicCustom({ org_id: null, key: 'preset.recipe.cyclic', name: '프리셋 사이클 레시피' })]);
+    await mount();
+
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventApplyCta);
+    expect(applyBtn).not.toBeUndefined();
+  });
+});
