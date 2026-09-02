@@ -23,6 +23,11 @@ _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 _FIELD_TYPES = frozenset({"string", "number", "boolean", "array"})
 
+# PO 리뷰(페드루, 2026-09-02②) — 서버 측 시크릿 이름 가드. 플러그인 쪽도 org_config 필드에
+# 시크릿을 선언 못 하게 막지만(규약), 서버는 그 규약을 신뢰하지 않는다("플러그인을 믿지 않는다")
+# — org_config로 선언된 필드 name 자체가 시크릿류 패턴이면 등록 시점에 명시 거부.
+_SECRET_LIKE_FIELD_NAME_RE = re.compile(r"(token|secret|password|api[_-]?key)", re.IGNORECASE)
+
 
 class InvalidConnectorSchemaError(ValueError):
     """스키마 upsert(POST) shape 위반 — fields/requires_env 모양이 계약과 다름."""
@@ -55,6 +60,11 @@ def _validate_fields_shape(fields: list) -> None:
         if "type" in f and f["type"] not in _FIELD_TYPES:
             raise InvalidConnectorSchemaError(
                 f"fields[{f.get('name')!r}].type은 {sorted(_FIELD_TYPES)} 중 하나여야 합니다 — {f['type']!r}"
+            )
+        if f.get("source") == "org_config" and _SECRET_LIKE_FIELD_NAME_RE.search(f["name"]):
+            raise InvalidConnectorSchemaError(
+                f"fields[{f['name']!r}]는 시크릿류 이름 패턴(token/secret/password/api_key)이라 "
+                f"org_config로 등록할 수 없습니다 — 시크릿은 플러그인 로컬 env(requires_env)에만 둡니다."
             )
 
 

@@ -91,10 +91,12 @@ async def post_connector_schema(
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> ConnectorResponse:
+    """PO 리뷰(페드루, 2026-09-02①) — 이 POST를 부르는 건 설정 스킬을 실행하는 org
+    member(에이전트)다. owner/admin 전용이면 그 흐름이 첫 호출에서 403으로 죽는다 — 스키마
+    등록은 org 멤버(get_verified_org_id가 이미 그 org 소속임을 강제) 누구나 가능. PUT
+    config(실 조직 설정값 변경)만 owner/admin 유지(아래)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
-        raise HTTPException(status_code=403, detail="org owner/admin required to register connector")
 
     try:
         row = await set_org_connector_schema(

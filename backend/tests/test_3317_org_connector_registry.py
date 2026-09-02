@@ -60,6 +60,22 @@ async def _seed_org(session, *, slug, owner=True):
     return org.id, user_id
 
 
+async def _seed_agent(session, org_id, *, name="agent"):
+    """PO 리뷰(2026-09-02①) — POST 스키마 등록을 실제로 부르는 caller(설정 스킬 실행 에이전트)
+    재현용. TeamMember(agent)는 OrgMember가 아니므로 is_org_owner_or_admin은 False — PUT
+    config(owner/admin 전용)는 여전히 403이어야 한다는 것도 이 seed로 같이 검증한다."""
+    from app.models.project import Project
+    from app.models.team import TeamMember
+
+    project = Project(id=uuid.uuid4(), org_id=org_id, name="P")
+    session.add(project)
+    await session.commit()
+    m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project.id, type="agent", name=name, is_active=True)
+    session.add(m)
+    await session.commit()
+    return m.id
+
+
 def _auth(user_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
     from app.dependencies.auth import AuthContext
     return AuthContext(user_id=str(user_id), email="x@example.com", claims={}, org_id=str(org_id))
@@ -300,21 +316,30 @@ async def test_reregistering_schema_preserves_existing_org_config():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_non_owner_admin_cannot_write():
-    """org member(owner/admin 아님)는 스키마 등록·config 설정 둘 다 403."""
+async def test_non_owner_admin_can_post_schema_but_not_put_config():
+    """PO 확定(2026-09-02①) 반영 — POST(스키마 등록)는 org 멤버(owner/admin 아니어도) 가능
+    하도록 완화됐다(설정 스킬을 실행하는 게 에이전트/일반 멤버일 수 있어서). PUT config(실
+    조직 설정값 변경)만 owner/admin 유지 — 그 축은 여전히 403."""
     from fastapi import HTTPException
     from app.routers.connectors import (
-        ConnectorFieldEntry, SetConnectorSchemaRequest, post_connector_schema,
+        ConnectorFieldEntry, SetConnectorConfigRequest, SetConnectorSchemaRequest,
+        post_connector_schema, put_connector_config,
     )
 
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
             org_id, member_id = await _seed_org(s, slug="c3317g", owner=False)
+            created = await post_connector_schema(
+                org_id, "threads",
+                SetConnectorSchemaRequest(version="1.0.0", channel="threads", fields=[ConnectorFieldEntry(**f) for f in _THREADS_FIELDS]),
+                session=s, verified_org_id=org_id, auth=_auth(member_id, org_id),
+            )
+            assert created.connector_key == "threads"
+
             with pytest.raises(HTTPException) as exc:
-                await post_connector_schema(
-                    org_id, "threads",
-                    SetConnectorSchemaRequest(version="1.0.0", channel="threads", fields=[ConnectorFieldEntry(**f) for f in _THREADS_FIELDS]),
+                await put_connector_config(
+                    org_id, "threads", SetConnectorConfigRequest(config={}),
                     session=s, verified_org_id=org_id, auth=_auth(member_id, org_id),
                 )
             assert exc.value.status_code == 403
@@ -338,5 +363,69 @@ async def test_put_config_before_schema_registered_is_404():
                     session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id),
                 )
             assert exc.value.status_code == 404
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_agent_can_post_schema_but_not_put_config():
+    """⭐PO 리뷰(2026-09-02①) — POST(스키마 등록)를 실제로 부르는 건 설정 스킬을 실행하는
+    org member(에이전트)다. owner/admin 전용이면 그 흐름이 첫 호출에서 403으로 죽는다 —
+    스키마 등록은 org 멤버 누구나(201), PUT config(실 조직 설정값)는 owner/admin 유지(403)."""
+    from fastapi import HTTPException
+    from app.routers.connectors import (
+        ConnectorFieldEntry, SetConnectorConfigRequest, SetConnectorSchemaRequest,
+        post_connector_schema, put_connector_config,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, _owner_id = await _seed_org(s, slug="c3317j")
+            agent_id = await _seed_agent(s, org_id)
+
+            created = await post_connector_schema(
+                org_id, "stibee",
+                SetConnectorSchemaRequest(version="1.0.0", channel="stibee", fields=[ConnectorFieldEntry(**f) for f in _STIBEE_FIELDS]),
+                session=s, verified_org_id=org_id, auth=_auth(agent_id, org_id),
+            )
+            assert created.connector_key == "stibee"  # 201(no raise) — 함수가 정상 반환.
+
+            with pytest.raises(HTTPException) as exc:
+                await put_connector_config(
+                    org_id, "stibee", SetConnectorConfigRequest(config={"create.senderEmail": "a@b.com"}),
+                    session=s, verified_org_id=org_id, auth=_auth(agent_id, org_id),
+                )
+            assert exc.value.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_post_schema_rejects_secret_like_org_config_field_name():
+    """⭐PO 리뷰(2026-09-02②) — 서버는 플러그인의 "시크릿을 org_config로 선언 안 한다"
+    규약을 신뢰하지 않는다. org_config 필드 name이 token/secret/password/api_key 패턴이면
+    등록 시점에 422로 거부(플러그인 가드가 뚫려도 서버가 2차 방어선)."""
+    from fastapi import HTTPException
+    from app.routers.connectors import ConnectorFieldEntry, SetConnectorSchemaRequest, post_connector_schema
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, owner_id = await _seed_org(s, slug="c3317k")
+            with pytest.raises(HTTPException) as exc:
+                await post_connector_schema(
+                    org_id, "evil",
+                    SetConnectorSchemaRequest(
+                        version="1.0.0", channel="evil",
+                        fields=[ConnectorFieldEntry(
+                            name="apiSecretToken", source="org_config", type="string", required=True,
+                        )],
+                    ),
+                    session=s, verified_org_id=org_id, auth=_auth(owner_id, org_id),
+                )
+            assert exc.value.status_code == 422
     finally:
         await engine.dispose()
