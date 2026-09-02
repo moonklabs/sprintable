@@ -25,6 +25,7 @@ import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
+import { OrgGatePolicySection } from '@/components/settings/org-gate-policy-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
@@ -1082,6 +1083,14 @@ export default function SettingsPage() {
                     orgId={orgInfo.id}
                     canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
                   />
+                </div>
+              ) : null}
+              {/* story e0c1b24c — org 게이트 정책(posture·머지 게이트 기본 승인자). #3319/PR#3716로
+                  백엔드(GET/PUT /api/v2/gate-config/policy)는 착지했으나 값 넣을 화면이 없었다 —
+                  GateLevelMatrix(work_type×actor_type 매트릭스, 별개 개념)와 나란히 둔다. */}
+              {orgInfo ? (
+                <div className="mt-6">
+                  <OrgGatePolicySection canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'} />
                 </div>
               ) : null}
               {currentOrgRole === 'owner' && (

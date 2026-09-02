@@ -3904,6 +3904,23 @@
     "reverted": "Reverted to org default.",
     "noProjectForOrgEdit": "At least one project is required to set organization defaults."
   },
+  "orgGatePolicy": {
+    "title": "Approval Posture & Default Approver",
+    "description": "Set the organization-wide gate judgment posture, and the default approver used when a merge gate has none assigned.",
+    "postureLabel": "Posture",
+    "postureConservative": "Conservative",
+    "postureBalanced": "Balanced",
+    "posturePermissive": "Permissive",
+    "approverLabel": "Merge Gate Default Approver",
+    "approverUnset": "Unset (current)",
+    "approverPickPlaceholder": "Select an approver",
+    "approverLoading": "Loading…",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved.",
+    "saveFailed": "Failed to save.",
+    "loadFailed": "Failed to load policy."
+  },
   "githubLinks": {
     "sectionLabel": "PR links",
     "loading": "Loading…",
