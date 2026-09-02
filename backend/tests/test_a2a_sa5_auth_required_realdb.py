@@ -276,7 +276,9 @@ async def test_reject_from_auth_required_transitions_to_rejected():
             app.dependency_overrides.clear()
 
         async with Session() as s:
-            await transition_gate(s, org_id, gate_id, "rejected", resolver_id=uuid.uuid4())
+            # story #3334 — transition_gate("rejected")가 이제 사유 필수. 이 테스트의
+            # 관심사(A2ATask 상태 동기화)와 무관하므로 명시로 실어 대상 밖임을 밝힌다.
+            await transition_gate(s, org_id, gate_id, "rejected", resolver_id=uuid.uuid4(), note="a2a 인가 거부")
             await s.commit()
 
         async with Session() as s:
