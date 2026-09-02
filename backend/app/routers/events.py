@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 import uuid
 from collections import defaultdict
@@ -26,7 +27,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import String, and_, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -1114,6 +1115,126 @@ async def _render_event_notification_doc_ref(
 _DOC_ID_PAYLOAD_LABELS: dict[str, str] = {"previous_output_doc_id": "앞 단계 산출물"}
 
 
+# story #3329 — stage_metadata.action 같은 자유 문구 안에 "박힌" UUID/8자 prefix를 찾는다.
+# ⚠️`\b`(Python re 기본 Unicode 워드 경계)는 한글을 워드 문자로 쳐서 "20808e14의"처럼
+# hex 뒤에 한글 조사가 바로 붙으면 경계가 안 생겨 매치 자체가 실패한다(실측 확인, 이
+# 스토리의 정확히 그 실패 사례) — 그래서 ASCII 영숫자만 보는 lookaround로 직접 짠다.
+# 전체 UUID를 8자 alt보다 먼저 두어, 8자 alt가 UUID의 첫 세그먼트만 따로 집어가지
+# 않게 한다(추가로 8자 alt는 뒤에 `-`가 오면 자체적으로 제외 — 이중 방어).
+_EMBEDDED_FULL_UUID_RE = re.compile(
+    r"(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    re.IGNORECASE,
+)
+_EMBEDDED_HEX8_RE = re.compile(
+    r"(?<![0-9a-zA-Z])[0-9a-f]{8}(?![0-9a-zA-Z-])",
+    re.IGNORECASE,
+)
+
+
+async def _resolve_doc_or_story_by_id(
+    db: AsyncSession, *, org_id: uuid.UUID, entity_id: uuid.UUID,
+) -> tuple[str, str] | None:
+    """entity_id가 이 org의 doc 또는 story로 실재하면 (entity_type, title). doc을 먼저 본다
+    (story #3329 실사례가 doc뿐이나 AC 문구가 doc/story 둘 다 명시 — doc/story id가 서로
+    겹칠 확률은 사실상 0이라 우선순위 자체는 결과에 영향 없음)."""
+    from app.models.doc import Doc
+
+    doc_title = (await db.execute(
+        select(Doc.title).where(Doc.id == entity_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc_title:
+        return ("doc", doc_title)
+
+    from app.models.pm import Story
+
+    story_title = (await db.execute(
+        select(Story.title).where(Story.id == entity_id, Story.org_id == org_id, Story.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if story_title:
+        return ("story", story_title)
+    return None
+
+
+async def _resolve_doc_or_story_by_hex8_prefix(
+    db: AsyncSession, *, org_id: uuid.UUID, prefix: str,
+) -> tuple[str, uuid.UUID, str] | None:
+    """story #3329 AC2 — 8자 hex prefix는 그 자체로 유일하지 않을 수 있다. doc+story를 합쳐
+    이 org에서 그 prefix로 시작하는 id가 **정확히 1건**일 때만 치환 대상으로 인정한다
+    (0건="그런 거 없음"·2건 이상="어느 쪽인지 모름" — 둘 다 원문 유지가 안전하다, AC1
+    "오탐 0"의 직접 구현). 대소문자 무관 매칭(id는 소문자로 저장되지만 문구엔 대문자로
+    적혔을 가능성 방어)."""
+    from app.models.doc import Doc
+    from app.models.pm import Story
+
+    like_pattern = f"{prefix.lower()}%"
+    doc_rows = (await db.execute(
+        select(Doc.id, Doc.title).where(
+            Doc.org_id == org_id, Doc.deleted_at.is_(None),
+            cast(Doc.id, String).like(like_pattern),
+        )
+    )).all()
+    story_rows = (await db.execute(
+        select(Story.id, Story.title).where(
+            Story.org_id == org_id, Story.deleted_at.is_(None),
+            cast(Story.id, String).like(like_pattern),
+        )
+    )).all()
+    candidates: list[tuple[str, uuid.UUID, str]] = (
+        [("doc", r.id, r.title) for r in doc_rows] + [("story", r.id, r.title) for r in story_rows]
+    )
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+async def _async_regex_sub(pattern: "re.Pattern[str]", async_replacer, text: str) -> str:
+    """`re.sub`의 async 버전 — stdlib엔 없다(콜백이 동기 함수만 허용). 매치를 순서대로
+    돌며 각 자리를 `await async_replacer(match)`의 결과로 채운다(non-overlapping은
+    `finditer`가 이미 보장)."""
+    parts: list[str] = []
+    last_end = 0
+    for m in pattern.finditer(text):
+        parts.append(text[last_end:m.start()])
+        parts.append(await async_replacer(m))
+        last_end = m.end()
+    parts.append(text[last_end:])
+    return "".join(parts)
+
+
+async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID, text: str) -> str:
+    """story #3329 — stage_metadata.action 같은 자유 문구 안에 박힌 org 내 doc/story
+    UUID(전체 또는 8자 prefix)를 클릭 참조 토큰으로 치환한다. 실재하는 엔티티로 해소될
+    때만 바꾸고(없으면·모호하면 원문 그대로 둔다) — AC1 "오탐 0"의 직접 구현. 전체 UUID
+    패스를 먼저 끝내고 나서 8자 prefix 패스를 돈다 — 전체 UUID가 이미 토큰(`entity:doc:
+    XXXXXXXX-...`)으로 바뀐 뒤라 그 안의 첫 8자가 하이픈 바로 앞이라 8자 정규식 자체가
+    스스로 제외한다(이중 치환 없음, 별도 마스킹 불요)."""
+    from app.services.reference_token import build_reference_token
+
+    async def _replace_full(match: re.Match) -> str:
+        raw = match.group(0)
+        try:
+            entity_id = uuid.UUID(raw)
+        except ValueError:
+            return raw
+        resolved = await _resolve_doc_or_story_by_id(db, org_id=org_id, entity_id=entity_id)
+        if resolved is None:
+            return raw
+        entity_type, title = resolved
+        return build_reference_token(entity_type, entity_id, title) or raw
+
+    text = await _async_regex_sub(_EMBEDDED_FULL_UUID_RE, _replace_full, text)
+
+    async def _replace_prefix(match: re.Match) -> str:
+        raw = match.group(0)
+        resolved = await _resolve_doc_or_story_by_hex8_prefix(db, org_id=org_id, prefix=raw)
+        if resolved is None:
+            return raw
+        entity_type, entity_id, title = resolved
+        return build_reference_token(entity_type, entity_id, title) or raw
+
+    return await _async_regex_sub(_EMBEDDED_HEX8_RE, _replace_prefix, text)
+
+
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict,
 ) -> str:
@@ -1148,10 +1269,14 @@ async def _render_event_message_content(
     if not role or not action:
         return "\n".join(_generic_event_message_lines(definition.key, payload))
 
+    # story #3329 — action 문구 안에 박힌 doc/story UUID(전체 또는 8자 prefix)를 참조
+    # 토큰으로. work_item_ref/*_doc_id와 같은 "실재하는 것만" 원칙(없으면 원문 그대로).
+    rendered_action = await _tokenize_embedded_entity_refs(db, org_id=org_id, text=action)
+
     lines = [
         f"[이벤트] {definition.key}",
         f"- stage: {stage} ({role})",
-        f"- 할 일: {action}",
+        f"- 할 일: {rendered_action}",
     ]
 
     enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
