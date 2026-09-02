@@ -22,6 +22,16 @@ export function notifyContentPainted() {
   window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'content-painted' }));
 }
 
+// story #3302(#2459 진단 (c) 갈래) — 브릿지 계약의 발신 절반. 셸(sprintable-mobile App.js:370
+// AppState 백그라운드 flush + :798 session-changed flush)은 2026-07-21 P0 대응으로 이미
+// 배선됐으나, 웹이 이 신호를 한 번도 보낸 적이 없었다(그 사이 grep 0건). 로그인·세션 회전·
+// 갱신 직후 호출하면 셸이 즉시 쿠키를 디스크로 내려(그 전엔 백그라운드 진입 때까지 대기 —
+// "포그라운드 유지한 채 바로 강제종료"하는 경우를 못 잡던 그 창을 닫는다). content-painted와
+// 동일 관례 — 네이티브 셸 밖에서는 조용히 아무 일도 안 한다.
+export function notifySessionChanged() {
+  window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'session-changed' }));
+}
+
 // story #2766(레인 A) §A5 — 다운로드 버튼 환경 분기의 판별 신호. 서버사이드(SSR)에서
 // 호출하면 항상 false(window 없음).
 export function isNativeShell(): boolean {

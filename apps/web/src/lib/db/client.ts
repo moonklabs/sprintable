@@ -1,6 +1,7 @@
 'use client';
 
 import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/session-expired-signal';
+import { notifySessionChanged } from '@/lib/native-shell-bridge';
 
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
@@ -25,6 +26,10 @@ async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
   if (!res.ok) {
     return { data: null, error: json.error ?? { code: 'UNKNOWN', message: 'Unknown error' } };
   }
+  // story #3302(#2459 진단 (c)) — login/register/refresh 공통 choke point. 성공은 항상
+  // sp_at/sp_rt 쿠키가 새로 세워졌다는 뜻(각 route.ts가 Set-Cookie) — 네이티브 셸에 즉시
+  // 알려 디스크로 내리게 한다(강제종료 시 갱신 쿠키 유실 방지, AC1).
+  notifySessionChanged();
   return { data: json.data as AuthTokens, error: null };
 }
 
