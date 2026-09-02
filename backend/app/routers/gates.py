@@ -1488,6 +1488,16 @@ async def transition_gate_endpoint(
                 "resolved_at": _gate.resolved_at.isoformat() if _gate.resolved_at else None,
             },
         )
+    # story #3334(선생님 실사용 4바퀴 T1' 적출) — rejected(변경 요청) 전이는 gate_type 무관 사유
+    # (note) 서버측 강제. 반려는 실행자에게 «무엇을 고칠지»를 주는 게 목적(#3330 AC2 반려 통지가
+    # 그 사유를 싣는다) — 사유 없는 반려는 「승인 대기와 구분되는 멈춤」만 만들고 실행자를 그대로
+    # 막아세운다. 아래 approved+고위험 강제(#2027)와 결을 맞추되, 그쪽은 risk_grade=="high"에서만
+    # 도는 반면 이건 **항상**(위험도 무관) — 처방 문서 원문 "모든 gate_type" 그대로.
+    if body.status == "rejected" and not (body.note or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="반려(변경 요청) 사유(note) 입력이 필수입니다.",
+        )
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
     # 강제 — void_gate/override_gate 기존 관례(reason 없으면 ValueError→422, void_gate 참고)에
     # 맞추는 작업이다(신규 규칙 아님). 이전엔 FE 버튼 disable(evidenceViewed && reason.trim())만

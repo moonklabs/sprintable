@@ -47,6 +47,10 @@ export function GateSignatureApproval({
   const canSign = evidenceViewed && reason.trim().length > 0 && !resolving;
   // discuss는 근거 열람 불필요(승인이 아니므로) — 사유만 있으면 된다.
   const canDiscuss = reason.trim().length > 0 && !resolving;
+  // story #3334(선생님 실사용 4바퀴 T1' 적출) — 반려(변경 요청)는 근거 열람과 무관하게(승인이
+  // 아니므로 canSign과 다른 축) 사유만 필수. 예전엔 이 버튼이 resolving만 봐서 사유 빈 채로도
+  // 즉시 제출됐다(서버도 무검증이라 그대로 저장 — 반려 통지가 사유 없이 나감, #3330 AC2 무력화).
+  const canReject = reason.trim().length > 0 && !resolving;
 
   return (
     <div className="space-y-4">
@@ -95,7 +99,7 @@ export function GateSignatureApproval({
           <Button
             variant="outline"
             className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-1 gap-1.5'}
-            disabled={resolving}
+            disabled={!canReject}
             onClick={() => onReject(reason)}
           >
             <Pencil className="size-4" />
