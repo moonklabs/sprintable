@@ -129,6 +129,30 @@ async def _latest_linked_draft_doc(
     return doc_id, doc_title, doc_content or ""
 
 
+async def _resolve_doc_by_id(
+    db: AsyncSession, *, org_id: uuid.UUID, doc_id_raw: object,
+) -> tuple[uuid.UUID, str, str] | None:
+    """story #3323 AC2 — payload.previous_output_doc_id(문자열 uuid)를 그 org의 실 doc으로
+    직접 해소한다. 파싱 실패·존재하지 않는 doc(다른 org 포함)은 None(지어내지 않음 — 호출부가
+    `_latest_linked_draft_doc` 폴백으로 이어받는다)."""
+    if not isinstance(doc_id_raw, str) or not doc_id_raw:
+        return None
+    try:
+        doc_id = uuid.UUID(doc_id_raw)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+    from app.models.doc import Doc
+
+    doc_row = (await db.execute(
+        select(Doc.title, Doc.content).where(Doc.id == doc_id, Doc.org_id == org_id)
+    )).first()
+    if doc_row is None:
+        return None
+    doc_title, doc_content = doc_row
+    return doc_id, doc_title, doc_content or ""
+
+
 async def _build_approval_neutral_facts(
     db: AsyncSession, *, org_id: uuid.UUID, definition, stage: str, work_item_type: str,
     work_item_id: uuid.UUID, payload: dict,
@@ -136,7 +160,13 @@ async def _build_approval_neutral_facts(
     """PO 변경요청①(페드루, 2026-09-02) — 결재함 카드가 승인자에게 «무엇을 승인하는지»를
     실물로 보여줘야 한다(story 처방 3, "가서 보라" 금지). work item 제목+참조 토큰·payload
     채널·그 work item에 링크된 최신 산출물 doc(직전 draft) 참조+텍스트 요약(첫 300자)을
-    채운다 — 못 찾은 값은 _UNCONFIRMED로 명시(침묵도 지어냄도 아님)."""
+    채운다 — 못 찾은 값은 _UNCONFIRMED로 명시(침묵도 지어냄도 아님).
+
+    story #3323 AC2 — draft doc 해소는 3경로 우선순위다: ①payload.previous_output_doc_id
+    (발행자가 이번 stage의 산출물을 직접 지목 — 가장 정확) ②entity_references 최신 링크
+    (#3312 원래 경로, work item↔doc이 나중에 링크되는 경우) ③미확認(둘 다 없음, 지어내지
+    않음). 게이트 생성 시점엔 아직 entity_references가 없는 게 정상 경로(에이전트가 doc을
+    나중에 스토리에 링크)라, ①이 그 갭을 메운다."""
     facts: dict = {"triggered_by_event": definition.key, "stage": stage}
 
     title = await _work_item_title(db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id)
@@ -148,9 +178,11 @@ async def _build_approval_neutral_facts(
     channel = payload.get("channel")
     facts["channel"] = channel if isinstance(channel, str) and channel else _UNCONFIRMED
 
-    draft = await _latest_linked_draft_doc(
-        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
-    )
+    draft = await _resolve_doc_by_id(db, org_id=org_id, doc_id_raw=payload.get("previous_output_doc_id"))
+    if draft is None:
+        draft = await _latest_linked_draft_doc(
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+        )
     if draft is None:
         facts["draft_doc_reference_token"] = _UNCONFIRMED
         facts["draft_doc_summary"] = _UNCONFIRMED
