@@ -31,6 +31,13 @@ _SEGMENT_CHARSET_RE = re.compile(r"^[a-z0-9_]+$")
 # 하므로, 여기 없는 target을 server_derived로 등록하면 해석기가 절대 못 푸는 정의가 만들어진다
 # — validate_event_routing이 등록 시점에 막는다(발행 시점에야 발견되는 것보다 이르게).
 SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner"})
+# story #3312(M1→M3·마케팅자동화) — stage_metadata[stage].gate.approver의 닫힌 어휘.
+# SERVER_DERIVED_TARGETS와 동형 설계: PO 확定(페드루, 2026-09-02) "approver는 역할 참조로만
+# 선언(조직 상수 0) — 다른 org가 같은 정의를 apply해도 그 org 자신의 owner가 승인자". 실제
+# member_id 해석은 recipe_gate_hooks.py(발행 시점)의 몫 — 그 모듈이 이 어휘 전체를 커버하는
+# resolver를 갖는지 모듈 로드 시점에 assert로 고정한다(event_routing_resolver.py의
+# _SERVER_DERIVED_RESOLVERS 완결성 assert와 동일 패턴).
+APPROVER_ROLE_REFERENCES = frozenset({"org_owner"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
@@ -327,6 +334,26 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
             if not isinstance(meta.get(field), str) or not meta[field]:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].{field}는 비어있지 않은 문자열이어야 합니다."
+                )
+        # story #3312(M1→M3·마케팅자동화, PO 확定 2026-09-02②) — gate는 선택 필드지만, «막지
+        # 않는다고 검증 안 하면 오타가 조용히 무시»되는 자리라(recipe_gate_hooks.py가 gate
+        # 키가 없으면 그냥 no-op하므로, 오타 난 gate 선언은 "게이트가 영원히 안 생기는" 채로
+        # 조용히 죽는다 — story #2793류 실버그와 동일 클래스) 있으면 shape을 명시 강제한다.
+        if "gate" in meta:
+            gate = meta["gate"]
+            if not isinstance(gate, dict):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].gate는 object({{type, approver}})여야 합니다 — "
+                    f"{type(gate).__name__} 아님."
+                )
+            if not isinstance(gate.get("type"), str) or not gate["type"]:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].gate.type은 비어있지 않은 문자열이어야 합니다."
+                )
+            if gate.get("approver") not in APPROVER_ROLE_REFERENCES:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].gate.approver는 {sorted(APPROVER_ROLE_REFERENCES)} "
+                    f"중 하나여야 합니다 — {gate.get('approver')!r}은 닫힌 어휘 밖입니다."
                 )
 
 

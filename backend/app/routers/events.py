@@ -1193,6 +1193,15 @@ async def _publish_registry_event_core(
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
 
+    # story #3312(M1→M3·마케팅자동화) — routing 해석 직후, 메시지 발송 이전에 게이트 부수효과를
+    # 먼저 정착시킨다(routing_resolver 호출과 동일 컴포지션 스타일 — 인라인 분기 아님).
+    # definition에 이 stage의 gate 선언이 없으면 완전 no-op(AC3 회귀 0).
+    from app.services.recipe_gate_hooks import maybe_create_stage_gate
+
+    await maybe_create_stage_gate(
+        db, org_id=org_id, definition=definition, payload=payload, requester_member_id=sender.id,
+    )
+
     if extra_broadcast_member_ids:
         # story #2693(AC2): payload_field routing과 동일 검증 — 예전엔 filter_org_member_ids로
         # 비회원 id를 조용히 걸러내고(silent drop) 발행을 그대로 진행했다. AC1의 원자성
