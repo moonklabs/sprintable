@@ -56,11 +56,23 @@ async def _resolve_work_item_stakeholders(
 ) -> set[uuid.UUID]:
     """work_item_type/work_item_id → 그 작업의 이해관계자(담당자·human owner·복수 assignee).
     타입별 필드가 제각각이라(story/task/goal 전부 다른 모델) 여기서 타입별 분기 — 코드베이스에
-    범용 헬퍼가 없어 이 스토리에서 신설(그라운딩 확認, #2620/#2617류 재사용 대상 없음)."""
+    범용 헬퍼가 없어 이 스토리에서 신설(그라운딩 확認, #2620/#2617류 재사용 대상 없음).
+
+    story #3340(선생님 4바퀴 실사고) — payload에 ``gate_requester_member_id``가 실려 있으면
+    (지금은 preset.gate.verdict 하나뿐, gate_service.py::_publish_gate_verdict_notification이
+    싣는다 — neutral_facts.requested_by_member_id 출처) work_item_type 분기와 무관하게 항상
+    이해관계자 집합에 합류시킨다. work item이 미배정이라 stakeholders가 빈 집합이어도 "이
+    게이트를 요청한 사람"에겐 도달해야 한다는 원칙 — 제네릭 키라 다른 이벤트도 같은 키를
+    실으면 별도 코드 없이 같이 커버된다."""
+    ids: set[uuid.UUID] = set()
+    _requester_raw = payload.get("gate_requester_member_id")
+    if isinstance(_requester_raw, str) and _requester_raw:
+        ids.add(_parse_uuid(_requester_raw, field_name="gate_requester_member_id"))
+
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
     if not work_item_type or not work_item_id_raw:
-        return set()
+        return ids
     work_item_id = _parse_uuid(work_item_id_raw, field_name="work_item_id")
 
     if work_item_type == "story":
@@ -72,7 +84,6 @@ async def _resolve_work_item_stakeholders(
                 Story.id == work_item_id, Story.org_id == org_id,
             )
         )).one_or_none()
-        ids: set[uuid.UUID] = set()
         if row is not None:
             ids |= {m for m in row if m is not None}
         extra = (await db.execute(
@@ -87,7 +98,9 @@ async def _resolve_work_item_stakeholders(
         assignee = (await db.execute(
             select(Task.assignee_id).where(Task.id == work_item_id, Task.org_id == org_id)
         )).scalar_one_or_none()
-        return {assignee} if assignee else set()
+        if assignee:
+            ids.add(assignee)
+        return ids
 
     if work_item_type in ("goal", "epic"):
         from app.models.pm import Goal
@@ -95,15 +108,18 @@ async def _resolve_work_item_stakeholders(
         assignee = (await db.execute(
             select(Goal.assignee_id).where(Goal.id == work_item_id, Goal.org_id == org_id)
         )).scalar_one_or_none()
-        return {assignee} if assignee else set()
+        if assignee:
+            ids.add(assignee)
+        return ids
 
-    # 미지원 work_item_type — fail-open(빈 집합)·경고 로그만. 발행 자체를 막지 않는다(전파선
-    # 해석 실패가 escalation까지 막으면 안 된다는 게 이 함수의 실패 정책 — best-effort).
+    # 미지원 work_item_type — fail-open(빈 집합·요청자만)·경고 로그만. 발행 자체를 막지
+    # 않는다(전파선 해석 실패가 escalation까지 막으면 안 된다는 게 이 함수의 실패 정책 —
+    # best-effort).
     logger.warning(
         "event_routing_resolver: unsupported work_item_type=%s for work_item_stakeholders",
         work_item_type,
     )
-    return set()
+    return ids
 
 
 async def _resolve_goal_owner(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> set[uuid.UUID]:

@@ -1779,19 +1779,27 @@ async def _publish_gate_verdict_notification(
     try:
         from app.routers.events import publish_preset_event
 
-        await publish_preset_event(
-            session, org_id, "preset.gate.verdict",
-            {
-                "work_item_type": gate.work_item_type,
-                "work_item_id": str(gate.work_item_id),
-                "gate_type": gate.gate_type,
-                "verdict": new_status,
-                "resolver_member_id": str(resolver_id),
-                # story #3330 AC2 — 반려 사유 문구. 필드 자체는 #2791 스키마에 이미 있었으나
-                # (payload_schema.resolution_note) 값이 한 번도 채워진 적이 없었다.
-                "resolution_note": gate.resolution_note,
-            },
-        )
+        _verdict_payload = {
+            "work_item_type": gate.work_item_type,
+            "work_item_id": str(gate.work_item_id),
+            "gate_type": gate.gate_type,
+            "verdict": new_status,
+            "resolver_member_id": str(resolver_id),
+            # story #3330 AC2 — 반려 사유 문구. 필드 자체는 #2791 스키마에 이미 있었으나
+            # (payload_schema.resolution_note) 값이 한 번도 채워진 적이 없었다.
+            "resolution_note": gate.resolution_note,
+        }
+        # story #3340(선생님 4바퀴 실사고) — 게이트 요청자(neutral_facts.requested_by_
+        # member_id, recipe_gate_hooks.py가 채움)를 실으면 event_routing_resolver.py의
+        # _resolve_work_item_stakeholders가 이 키를 보고 수신자 합집합에 합류시킨다(work
+        # item 미배정이라 stakeholders가 빈 집합이어도 요청자에겐 도달). 값이 없는(레거시/
+        # doc 게이트가 아닌 다른 경로로 생성된) 게이트는 이 키 자체를 안 실어 스키마의
+        # string/uuid-format 제약과 충돌하지 않는다(None을 그대로 실으면 422).
+        _requester_raw = (gate.neutral_facts or {}).get("requested_by_member_id")
+        if isinstance(_requester_raw, str) and _requester_raw:
+            _verdict_payload["gate_requester_member_id"] = _requester_raw
+
+        await publish_preset_event(session, org_id, "preset.gate.verdict", _verdict_payload)
     except Exception:
         logger.warning(
             "preset.gate.verdict 자동발행 실패(gate=%s org=%s)", gate.id, org_id, exc_info=True,
