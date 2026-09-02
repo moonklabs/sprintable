@@ -216,7 +216,14 @@ class ListConversationsInput(SprintableInput):
 
     ⚠️이 REST가 받는 파라미터는 project_id(필수)·include_agent_conversations·limit·offset
     뿐이다(conversations.py::list_conversations 실측) — `since`나 참여자 필터는 API 자체에
-    없어 지어내지 않는다(story 처방 2/3은 이 PR 스코프 밖, API 확장이 별도 필요)."""
+    없어 지어내지 않는다(story 처방 2/3은 이 PR 스코프 밖, API 확장이 별도 필요).
+
+    ⚠️PO 변경요청①(2026-09-02, PR#3712 리뷰) — project_id가 REST 필수라(미지정 시 422, PO
+    실측) 이 목록은 «내가 참여한 방 전부»가 아니라 **«기본 프로젝트 안의 내 방»**이다 —
+    다중 프로젝트 org에선 조용히 좁아질 수 있다. `project_id`는 (베이스 클래스 `SprintableInput`
+    상속 필드) 다른 chat 도구와 동형인 선택적 per-call override(E-MCP-OPT ff6cb90d 관례,
+    미지정 시 client.require_project_id() 현행) — 여러 프로젝트를 훑으려면 project_id를
+    바꿔가며 반복 호출할 것."""
 
     include_agent_conversations: bool = Field(
         default=False,

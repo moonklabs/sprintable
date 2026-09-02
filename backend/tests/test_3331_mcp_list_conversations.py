@@ -125,6 +125,37 @@ async def test_list_conversations_limit_offset_stringified_and_passed():
 
 
 @pytest.mark.anyio
+async def test_list_conversations_project_id_override_reaches_query_string():
+    """⭐PO 변경요청①(2026-09-02, PR#3712 리뷰) — API가 project_id 필수(422·PO 실측)라 이
+    도구는 «내가 참여한 방 전부»가 아니라 «기본 프로젝트 안의 내 방»이다(다중 프로젝트
+    org에선 조용히 좁아짐). per-call project_id override(SprintableInput 상속 필드,
+    E-MCP-OPT ff6cb90d 관례 — server.py wrapper가 kwargs["project_id"]를 contextvar로
+    태운다)가 실제로 쿼리스트링에 반영되는지 실증. client를 통째로 mock하면 진짜
+    require_project_id()의 override-우선 로직을 타지 않으므로, 여기선 get_full만 patch하고
+    나머지는 실 client 싱글턴을 그대로 쓴다."""
+    from sprintable_mcp.api_client import reset_project_override, set_project_override
+    from sprintable_mcp.tools import chat as chat_mod
+
+    calls: list[tuple[str, dict | None]] = []
+
+    async def fake_get_full(path, params=None):
+        calls.append((path, params))
+        return _LIST_RESP
+
+    original_project_id = chat_mod.client._project_id
+    chat_mod.client._project_id = "default-project"
+    tok = set_project_override("override-project")
+    try:
+        with patch.object(chat_mod.client, "get_full", new=AsyncMock(side_effect=fake_get_full)):
+            await chat_mod.list_conversations(chat_mod.ListConversationsInput())
+    finally:
+        reset_project_override(tok)
+        chat_mod.client._project_id = original_project_id
+
+    assert calls[0][1]["project_id"] == "override-project"
+
+
+@pytest.mark.anyio
 async def test_list_conversations_error_surfaces():
     """project_id ambiguous 등 client.require_project_id()가 던지는 SprintableApiError도
     다른 도구와 동형으로 err()에 담겨 나간다(create_conversation과 동일 관례)."""
