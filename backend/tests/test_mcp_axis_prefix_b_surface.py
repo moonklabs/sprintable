@@ -80,6 +80,8 @@ def test_tool_names_and_param_models_untouched():
     2종 신설(org 커스텀 이벤트 등록/수정) — 118→120. story #2668(B3): sprintable_submit_
     for_approval 1종 신설(문서 결재 상신 MCP 발견 경로) — 120→121. story #2709: sprintable_
     request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 121→122. story b6b9c52d(#2707
-    부수): sprintable_import_image_artifact 1종 신설(base64 원콜 이미지 임포트) — 122→123."""
-    assert len(_TOOL_DEFS) == 123
+    부수): sprintable_import_image_artifact 1종 신설(base64 원콜 이미지 임포트) — 122→123.
+    story #3331: sprintable_list_conversations 1종 신설(내 참여 방 목록 — 알림 미도달
+    백스톱) — 123→124."""
+    assert len(_TOOL_DEFS) == 124
     assert all(name.startswith("sprintable_") for name in _TOOLS)
