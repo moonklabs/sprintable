@@ -989,6 +989,32 @@ async def notify_gate_tossed(
     return pushes
 
 
+async def _has_open_external_publish_gate_for_doc(
+    db: AsyncSession, *, org_id: uuid.UUID, doc_id: uuid.UUID,
+) -> bool:
+    """story d1f4afcb AC2 — 이 doc이 이미 열린(pending/rejected) `external_publish` 게이트의
+    대상 산출물인지. Gate는 doc을 직접 work_item으로 갖지 않는다(work_item_type/id는 그
+    게이트를 만든 레시피의 work item — 보통 story — 이고, doc은 `neutral_facts.
+    draft_doc_reference_token`에 참조 토큰으로만 실린다, `recipe_gate_hooks.py::
+    _build_approval_neutral_facts` 참조 — payload.previous_output_doc_id 우선·entity_
+    references 폴백 두 경로 모두 이 필드로 수렴하므로 여기서도 이 필드 하나만 보면
+    충분하다, 새 경로 발명 0). 토큰 포맷은 `reference_token.py::build_reference_token`이
+    고정한 `[title](entity:doc:<uuid>)` — 그 안의 `entity:doc:<uuid>` 부분 문자열로 매치
+    (UUID는 LIKE 메타문자를 포함하지 않아 이스케이프 불요)."""
+    from app.models.gate import Gate
+
+    marker = f"entity:doc:{doc_id}"
+    row = (await db.execute(
+        select(Gate.id).where(
+            Gate.org_id == org_id,
+            Gate.gate_type == "external_publish",
+            Gate.status.in_(("pending", "rejected")),
+            Gate.neutral_facts["draft_doc_reference_token"].astext.like(f"%{marker}%"),
+        ).limit(1)
+    )).first()
+    return row is not None
+
+
 async def maybe_nudge_draft_doc_shared_in_chat(
     db: AsyncSession,
     *,
@@ -1019,11 +1045,25 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     row INSERT**로 바꾼다 — 실패(IntegrityError=이미 있음)하면 DB가 직렬화해 준
     사실 그대로 조용히 skip(app 레벨 락/텍스트비교 아닌 실 제약, PO 지시 그대로 새
     테이블 도입).
+
+    story d1f4afcb(2026-09-02, 담롱 그라운딩·PO 판정) — ③이 doc에 이미 **열린 external_
+    publish 게이트**(pending·rejected)가 있으면 넛지를 내지 않는다(`_has_open_external_
+    publish_gate_for_doc`) — 그 게이트가 이미 이 doc의 발행/반려를 관장 중인데 별도 문서
+    결재를 권하면 실행자를 다른 경로로 오도한다. ④이 함수를 트리거하는 채팅 메시지가
+    **시스템/이벤트 발신**(`msg_metadata['event']` 보유)이면 애초에 호출부(conversations.py
+    ::send_message)가 이 함수를 부르지 않는다(사람의 대화 맥락에서만 넛지가 뜬다는
+    전제 — 호출부 주석 참조).
     """
     if doc_status != "draft" or not doc_author_id or not project_id:
         return
     if doc_author_id == sender_id:
         return  # 본인이 스스로 공유한 것 — 자기-알림 스킵(기존 관례 동형).
+
+    if await _has_open_external_publish_gate_for_doc(db, org_id=org_id, doc_id=doc_id):
+        return  # story d1f4afcb AC2 — 이 doc은 이미 external_publish 게이트가 발행/반려를
+        # 관장 중이다. 별도 문서 결재(submit_for_approval) 상신을 권하면 그 게이트와
+        # 모순되는 두 번째 경로를 만들어 실행자를 오도한다(레시피 발행/재발행이 정답 경로 —
+        # #3330 preset.gate.verdict 통지가 그 길을 이미 안내한다, 새 경로 발명 0).
 
     from sqlalchemy.exc import IntegrityError
 
