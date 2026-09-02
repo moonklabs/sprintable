@@ -29,6 +29,24 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    """story a05da51b — 이 파일의 테스트는 실제로 메시지를 발행해(`_publish` →
+    `publish_registry_event`) `send_message`의 background task(`mark_agent_replied`)를
+    태운다. 그 task는 이 파일의 throwaway 엔진이 아니라 `app.core.database.
+    async_session_factory`(전역·프로세스 수명)를 쓴다. destructive_schema 마커 파일이라
+    story #3330의 conftest.py 전역 autouse(non-destructive 전용, 프로세스 격리로 이미
+    안전한 destructive는 스코프 밖)의 적용 대상이 아니다 — 이 파일 자신의 여러 테스트가
+    **한 pytest 세션 안에서** 순차 실행되며 같은 전역 엔진을 반복 사용하므로, dispose
+    없이 두면 pytest-anyio의 테스트별 새 이벤트 루프 사이에서 커넥션 누수/`Event loop is
+    closed`로 이어질 수 있다(실측 확인 — test_3330_gate_verdict_notification.py에서
+    최초 재현, 이 파일도 같은 위험을 이미 갖고 있었음이 회귀 재확認 중 발견됨). 이
+    realdb 하네스가 destructive 파일에 이미 쓰는 표준 방어 fixture 재사용(새 로직 0)."""
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
+
+
 async def _realdb_session():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.core.database import Base
