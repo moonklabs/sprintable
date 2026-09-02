@@ -1054,12 +1054,122 @@ async def _get_or_create_event_conversation(
     )
 
 
-def _render_event_message_content(definition_key: str, payload: dict) -> str:
+def _generic_event_message_lines(definition_key: str, payload: dict) -> list[str]:
     """P2(story #2637)의 block_template 렌더러가 상륙하기 전 제네릭 폴백 — model.py docstring의
     "템플릿 없으면 제네릭 카드"와 동형 원칙을 메시지 본문 레벨에서 지금 구현. 필드 순서는
     payload dict 삽입 순서(파이썬 3.7+ 보장) 그대로 — 임의 정렬로 무의미하게 흔들지 않는다."""
     lines = [f"[이벤트] {definition_key}"]
     lines += [f"- {k}: {v}" for k, v in payload.items()]
+    return lines
+
+
+async def _render_event_notification_work_item_ref(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> str | None:
+    """work_item을 클릭되는 참조 토큰으로(story #3313 AC2) — 지원 타입만, 못 찾으면 None
+    (지어내지 않음, 호출부가 raw id 폴백으로 이어받는다)."""
+    from app.services.reference_token import build_reference_token
+
+    title: str | None = None
+    if work_item_type == "story":
+        from app.models.pm import Story
+
+        title = (await db.execute(
+            select(Story.title).where(Story.id == work_item_id, Story.org_id == org_id)
+        )).scalar_one_or_none()
+    elif work_item_type == "task":
+        from app.models.pm import Task
+
+        title = (await db.execute(
+            select(Task.title).where(Task.id == work_item_id, Task.org_id == org_id)
+        )).scalar_one_or_none()
+    if not title:
+        return None
+    return build_reference_token(work_item_type, work_item_id, title)
+
+
+async def _render_event_message_content(
+    db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict,
+) -> str:
+    """story #3313(마케팅자동화·온보딩 결함) — `block_template`가 없는 사이클형 정의(stage
+    이벤트)의 알림 본문이 "stage/work_item_id뿐"이라 수신 에이전트가 `list_event_definitions`
+    조회+스토리 정독 없이는 못 움직였다(담롱 실측, "최저 지능 LLM도 이벤트만 보고 척척" 온보딩
+    철학 미달). `stage_metadata[stage]`에 이미 있는 role/action과 `payload_schema.stage.enum`
+    순서로 뽑은 다음 stage+발행 예시를 본문에 싣는다.
+
+    ⚠️PO 확定(2026-09-02) — 조직 규칙/우리 문구를 기본값으로 박지 않는다: role/action은
+    정의(stage_metadata)에 이미 적힌 값을 그대로 옮길 뿐 새 문구를 짓지 않고, 발행 예시도
+    definition_key+payload 골격만(값 없이 구조만). 회귀 0인 두 갈래(둘 다 기존 제네릭
+    그대로): ①block_template가 있는 정의(P2 렌더러가 그 정의는 이미 담당) ②stage_metadata가
+    비어있는 비사이클형 정의("담당자 없는 stage는 모르면 안 준다" 원칙과 동일 — 지어낼
+    stage_metadata 자체가 없다)."""
+    if definition.block_template is not None or not definition.stage_metadata:
+        return "\n".join(_generic_event_message_lines(definition.key, payload))
+
+    stage = payload.get("stage")
+    stage_meta = definition.stage_metadata.get(stage) if stage else None
+    if stage_meta is None:
+        # stage가 payload에 없거나 stage_metadata에 등재 안 됨 — 지어내지 않고 기존 폴백.
+        return "\n".join(_generic_event_message_lines(definition.key, payload))
+
+    # PO 리뷰(페드루, 2026-09-02) — validate_stage_metadata의 role/action 필수 검증은
+    # 2026-08-19 이후 "쓰기 시점" 가드라, 그 전에 저장된 정의는 role/action이 누락된 채
+    # DB에 있을 수 있다. 직접 인덱싱(stage_meta['role'])하면 그 정의의 publish 자체가
+    # KeyError로 죽는다(알림 개선이 발행 회귀가 되는 자리) — .get()으로 방어, 하나라도
+    # 없으면 지어내지 않고 기존 제네릭 폴백.
+    role = stage_meta.get("role")
+    action = stage_meta.get("action")
+    if not role or not action:
+        return "\n".join(_generic_event_message_lines(definition.key, payload))
+
+    lines = [
+        f"[이벤트] {definition.key}",
+        f"- stage: {stage} ({role})",
+        f"- 할 일: {action}",
+    ]
+
+    enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+    next_stage = None
+    if stage in enum:
+        idx = enum.index(stage)
+        if idx + 1 < len(enum):
+            next_stage = enum[idx + 1]
+    if next_stage is not None:
+        next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
+        lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
+        next_payload = {k: v for k, v in payload.items() if k != "stage"}
+        next_payload["stage"] = next_stage
+        example = json.dumps(
+            {"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False,
+        )
+        lines.append(f"- 다음 단계로 넘기는 발행 예시: publish_event({example})")
+    else:
+        lines.append("- 다음 단계: 없음(마지막 stage)")
+
+    work_item_type = payload.get("work_item_type")
+    work_item_id_raw = payload.get("work_item_id")
+    work_item_ref: str | None = None
+    if work_item_type and work_item_id_raw:
+        try:
+            work_item_id = uuid.UUID(str(work_item_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            work_item_id = None
+        if work_item_id is not None:
+            work_item_ref = await _render_event_notification_work_item_ref(
+                db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            )
+    if work_item_ref:
+        lines.append(f"- work item: {work_item_ref}")
+    else:
+        # 참조 토큰을 못 만들었으면(타입 미지원·존재 안 함 등) raw 값을 그대로 남긴다 —
+        # 기존 폴백이 주던 정보(원시 id)를 잃지 않는다(지어내지 않음).
+        for k in ("work_item_type", "work_item_id"):
+            if k in payload:
+                lines.append(f"- {k}: {payload[k]}")
+
+    shown_keys = {"stage", "work_item_type", "work_item_id"}
+    lines += [f"- {k}: {v}" for k, v in payload.items() if k not in shown_keys]
+
     return "\n".join(lines)
 
 
@@ -1315,7 +1425,7 @@ async def _publish_registry_event_core(
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template
     # 렌더러를 태울 근거. 렌더러 자체는 #2637 FE 레인(이 커밋은 스키마 배선만).
     send_body = SendMessageRequest(
-        content=_render_event_message_content(definition.key, payload),
+        content=await _render_event_message_content(db, org_id=org_id, definition=definition, payload=payload),
         mentioned_ids=list(escalation_ids),
         event_context={"event_key": definition.key, "payload": payload},
     )
