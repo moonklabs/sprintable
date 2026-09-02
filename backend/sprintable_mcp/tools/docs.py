@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Literal
 
 from mcp.types import TextContent
+from pydantic import model_validator
 
 from ..api_client import client
 from ..response import err, ok
@@ -19,7 +20,21 @@ class ListDocsInput(SprintableInput):
 
 
 class GetDocInput(SprintableInput):
-    slug: str
+    """story #3324 — 이벤트 payload·참조 토큰(`entity:doc:id`)·게이트 neutral_facts는 전부
+    doc id를 주는데, 이 도구는 slug만 받아 «Doc not found»로 막혔다(담롱·PO 둘 다 오늘 같은
+    자리에서 걸림 — PO는 search_docs로 slug를 되짚어야 했다). `doc_id`(uuid)를 주면 slug
+    해소 단계 자체를 건너뛰고 `GET /api/v2/docs/{doc_id}`로 직행 — REST는 이미 있어 MCP
+    인자 배선만(신규 REST 0). slug/doc_id는 택1(ConversationScopedInput의 conversation_id/
+    thread_id 검증과 동형 관례) — 둘 다 없으면 조용히 통과시키지 않고 명시 에러."""
+
+    slug: str | None = None
+    doc_id: str | None = None
+
+    @model_validator(mode="after")
+    def _require_slug_or_doc_id(self) -> "GetDocInput":
+        if not self.slug and not self.doc_id:
+            raise ValueError("slug 또는 doc_id 중 하나가 필요합니다.")
+        return self
 
 
 class SearchDocsInput(SprintableInput):
@@ -101,7 +116,7 @@ async def list_docs(args: ListDocsInput) -> list[TextContent]:
 
 
 async def get_doc(args: GetDocInput) -> list[TextContent]:
-    """slug로 문서 단건 조회 — 본문(content) 포함.
+    """slug 또는 doc_id로 문서 단건 조회 — 본문(content) 포함.
 
     8a8e881a: list 엔드포인트(/api/v2/docs?slug=)는 DocSummary(메타·snippet만·content 미포함)를
     반환해 에이전트가 서로의 doc 본문을 못 읽었다. slug→id 해소 후 GET /{id}(DocResponse·content
@@ -110,8 +125,14 @@ async def get_doc(args: GetDocInput) -> list[TextContent]:
 
     story #2191: slug 조회 자체는 BE에서도 항상 {data,meta} 봉투로 오므로(단건이라도) 여기서
     같은 방식으로 언랩한다 — 안 하면 summaries[0]이 dict를 정수 인덱싱하려다 터진다.
+
+    story #3324: `doc_id`가 오면 slug 해소 단계(list+필터) 자체를 건너뛰고 `GET /{id}`로
+    직행한다 — 이벤트 payload·참조 토큰이 주는 id를 그대로 열 수 있게. `doc_id`가 없으면
+    (기존 계약대로) slug로 해소.
     """
     try:
+        if args.doc_id:
+            return ok(await client.get(f"/api/v2/docs/{args.doc_id}"))
         result = await client.get(
             "/api/v2/docs", params={"project_id": client.require_project_id(), "slug": args.slug}
         )
