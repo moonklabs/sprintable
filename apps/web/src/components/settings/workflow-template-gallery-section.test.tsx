@@ -167,3 +167,54 @@ describe('WorkflowTemplateGallerySection — 축2-ⓒ 프리필(PO 확定 A)', (
     expect(container.textContent).toContain('재적용');
   });
 });
+
+// story #3316 — apply 응답 warnings[]가 지금까지 이 갤러리에서 destructure조차 안 돼(응답 필드
+// 자체가 빠짐) 조용히 버려지고 있었다(회귀 없음 확인 + 재발 방지 핀).
+describe('WorkflowTemplateGallerySection — apply warnings[] 렌더(story #3316 회귀수정)', () => {
+  it('apply 응답에 warnings가 있으면 화면에 그려진다', async () => {
+    stubFetch({
+      // story #3288 route.ts — /apply는 apiSuccess로 감싸지 않는 raw proxyToFastapi 그대로라
+      // 응답 필드(ok/bindings_upserted/warnings)가 top-level에 온다(위 실패 케이스 fixture의
+      // data:null은 죽은 키 — 컴포넌트가 안 읽음. 여기선 애초에 안 넣어 그 함정을 반복 안 함).
+      apply: {
+        ok: true,
+        json: async () => ({ ok: true, bindings_upserted: 1, warnings: ['connector "slack" 미해소 — 수동 확인 필요'] }),
+      },
+    });
+
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
+    await act(async () => { tmplBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '재적용(덮어쓰기)');
+    await act(async () => { applyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.textContent).toContain('connector "slack" 미해소 — 수동 확인 필요');
+  });
+
+  it('apply 응답에 warnings가 없으면(정상 케이스) 주의 블록 자체가 안 그려진다', async () => {
+    stubFetch({
+      apply: {
+        ok: true,
+        json: async () => ({ ok: true, bindings_upserted: 1, warnings: [] }),
+      },
+    });
+
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
+    await act(async () => { tmplBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '재적용(덮어쓰기)');
+    await act(async () => { applyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.textContent).not.toContain('주의');
+  });
+});

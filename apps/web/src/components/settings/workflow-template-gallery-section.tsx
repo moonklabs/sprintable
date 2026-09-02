@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
+import { RecipeRoleMappingFields } from '@/components/organization/recipe-role-mapping-fields';
 
 // story #3293(도메인탈고정 축2-ⓒ) — 구세대 workflow_templates(story #3010 P3 등) 소비를
 // 신세대(EventDefinition/recipe_role_bindings, 축2-ⓐ story #3288)로 이전. doc
@@ -50,6 +51,10 @@ export function WorkflowTemplateGallerySection({
   const [roleMapping, setRoleMapping] = useState<Record<string, string>>({});
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<{ ok: boolean; message: string } | null>(null);
+  // story #3316 — apply 응답의 warnings[](예: capability.connector_key 미해소류 비차단
+  // 경고)가 여태 이 갤러리에서 아예 안 그려지고 있었다(응답 destructure 자체가 빠짐) — "적용은
+  // 됐는데 뭔가 놓쳤을 수 있다"는 신호가 조용히 버려지던 회귀를 여기서 같이 고친다.
+  const [applyWarnings, setApplyWarnings] = useState<string[]>([]);
 
   const cyclicDefinitions = definitions.filter(isCyclicDefinition);
 
@@ -91,6 +96,7 @@ export function WorkflowTemplateGallerySection({
   const handleSelectDefinition = async (def: EventDefinitionResponse) => {
     setSelected(def);
     setApplyResult(null);
+    setApplyWarnings([]);
     setLoadingBindings(true);
     try {
       // PO 확定 A — 기존 배정값을 프리필해 "뭘 덮어쓰는지" 보이게(확認 다이얼로그 대체).
@@ -119,15 +125,19 @@ export function WorkflowTemplateGallerySection({
 
     setApplying(true);
     setApplyResult(null);
+    setApplyWarnings([]);
     try {
       const res = await fetchWithAuth(`/api/events/definitions/${selected.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId, role_mapping: roleMapping }),
       });
-      const data = await res.json() as { ok?: boolean; bindings_upserted?: number; error?: { message?: string } };
+      const data = await res.json() as {
+        ok?: boolean; bindings_upserted?: number; warnings?: string[]; error?: { message?: string };
+      };
       if (res.ok && data.ok) {
         setApplyResult({ ok: true, message: `배정 ${String(data.bindings_upserted ?? 0)}건 저장 완료` });
+        setApplyWarnings(data.warnings ?? []);
         setAppliedKeys(prev => new Set(prev).add(selected.key));
       } else {
         setApplyResult({ ok: false, message: data.error?.message ?? '적용 실패' });
@@ -201,26 +211,26 @@ export function WorkflowTemplateGallerySection({
               </p>
             </div>
 
-            {requiredStages.map(stage => {
-              const meta = selected.stage_metadata[stage];
-              return (
-                <div key={stage} className="flex items-center gap-3">
-                  <span className="w-32 shrink-0 text-xs font-medium text-foreground">
-                    {meta?.role ?? stage}
-                  </span>
-                  <select
-                    className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={roleMapping[stage] ?? ''}
-                    onChange={e => setRoleMapping(prev => ({ ...prev, [stage]: e.target.value }))}
-                  >
-                    <option value="">에이전트 선택...</option>
-                    {agents.map(a => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </select>
-                </div>
-              );
-            })}
+            <RecipeRoleMappingFields
+              stages={requiredStages}
+              stageMetadata={selected.stage_metadata}
+              agents={agents}
+              roleMapping={roleMapping}
+              onChange={(stage, agentId) => setRoleMapping(prev => ({ ...prev, [stage]: agentId }))}
+              agentPlaceholder="에이전트 선택..."
+            />
+
+            {applyWarnings.length > 0 && (
+              // story #2590(TIER1) — text-warning은 tint 배경 대비 AA 미달(실측) → 본문은
+              // text-foreground, 강조만 text-warning-strong(my-notification-channel-section.tsx
+              // 동형 패턴).
+              <div className="space-y-1 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground">
+                <p className="font-medium text-warning-strong">주의</p>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {applyWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
 
             {applyResult && (
               <p

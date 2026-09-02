@@ -16,16 +16,25 @@ import {
   type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
 } from '@/components/organization/event-definer-logic';
 import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
+import { ApplyRecipeDialog } from '@/components/organization/apply-recipe-dialog';
+import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
 // 머지되는 순간 이 화면은 코드 변경 없이 그 즉시 전 항목에서 수정/비활성이 열린다(forward-compat).
-interface EventDefinition {
+// story #3316 — name/description/stage_metadata를 loops/loop-create-dialog.tsx의
+// EventDefinitionResponse(SSOT)에서 그대로 얹는다(중복 선언 대신 재사용) — 카탈로그 상세 뷰가
+// 사이클형 정의의 stage_metadata(role/action/gate/capability)를 렌더링하고, "프로젝트에 적용"
+// 진입점(ApplyRecipeDialog)이 cyclicStages()/isCyclicDefinition() 판별을 그대로 재사용한다.
+interface EventDefinition extends Pick<EventDefinitionResponse, 'name' | 'description' | 'stage_metadata'> {
   id?: string;
   key: string;
   org_id: string | null;
-  payload_schema: Record<string, unknown>;
+  // cyclicStages()/isCyclicDefinition()(loop-create-dialog.tsx SSOT)이 요구하는
+  // properties.stage.enum 형태와 EventDefinitionSummary가 요구하는 Record<string, unknown>을
+  // 교집합으로 동시에 만족 — 이 화면이 두 소비처(요약 렌더러+사이클 판별)에 같은 필드를 넘긴다.
+  payload_schema: EventDefinitionResponse['payload_schema'] & Record<string, unknown>;
   routing: Record<string, unknown>;
   block_template: Record<string, unknown> | null;
   action_auth?: Record<string, unknown> | null;
@@ -70,6 +79,7 @@ export default function OrganizationEventsPage() {
   const [editTarget, setEditTarget] = useState<EventDefinition | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<EventDefinition | null>(null);
   const [publishTarget, setPublishTarget] = useState<EventDefinition | null>(null);
+  const [applyTarget, setApplyTarget] = useState<EventDefinition | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -152,6 +162,7 @@ export default function OrganizationEventsPage() {
                       onEdit={() => setEditTarget(def)}
                       onDeactivate={() => setDeactivateTarget(def)}
                       onTestPublish={() => setPublishTarget(def)}
+                      onApply={() => setApplyTarget(def)}
                       t={t}
                     />
                   ))}
@@ -180,6 +191,10 @@ export default function OrganizationEventsPage() {
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly
                       isAdmin={isAdmin}
+                      // story #3316 — 프리셋도 사이클형이면 gallery와 동형으로 "프로젝트에
+                      // 적용" 가능(프리셋=읽기전용은 "정의 자체 수정 불가"만 뜻함, 프로젝트
+                      // 바인딩 적용은 별개 축).
+                      onApply={() => setApplyTarget(def)}
                       t={t}
                     />
                   ))}
@@ -233,13 +248,21 @@ export default function OrganizationEventsPage() {
         tc={tc}
         addToast={addToast}
       />
+      <ApplyRecipeDialog
+        target={applyTarget && applyTarget.id ? { ...applyTarget, id: applyTarget.id } : null}
+        open={applyTarget !== null}
+        onOpenChange={(open) => { if (!open) setApplyTarget(null); }}
+        t={t}
+        tc={tc}
+        addToast={addToast}
+      />
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
 
 function EventDefRow({
-  def, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, t,
+  def, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, onApply, t,
 }: {
   def: EventDefinition;
   expanded: boolean;
@@ -249,11 +272,16 @@ function EventDefRow({
   onEdit?: () => void;
   onDeactivate?: () => void;
   onTestPublish?: () => void;
+  onApply?: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
   // story #2664 — id 없는(구 목록 API, #2663 머지 전) 항목은 수정/비활성 버튼을 숨긴다(그릴 수
   // 없는 액션을 보여주는 게 UX상 더 나쁘다) — id가 실리는 순간 자동으로 나타난다.
   const canMutate = !readonly && isAdmin && !!def.id;
+  // story #3316 — "적용"은 사이클형(stage.enum이 있는) 정의에서만 의미가 있다(role_mapping이
+  // 붙을 stage가 아예 없으면 적용할 게 없다) — isCyclicDefinition()(loop-create-dialog SSOT)
+  // 그대로 재사용. id 필요조건은 canMutate와 동일 이유(ApplyRecipeDialog가 /apply 호출에 id 필요).
+  const canApply = isAdmin && !!def.id && isCyclicDefinition(def as unknown as EventDefinitionResponse);
   return (
     <div className="p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -278,6 +306,9 @@ function EventDefRow({
               {t('eventTestPublishCta')}
             </Button>
           ) : null}
+          {canApply ? (
+            <Button size="sm" variant="outline" onClick={onApply}>{t('eventApplyCta')}</Button>
+          ) : null}
           {canMutate ? (
             <>
               <Button size="sm" variant="outline" onClick={onEdit}>{t('eventEditCta')}</Button>
@@ -299,6 +330,28 @@ function EventDefRow({
             actionAuth={def.action_auth}
             blockTemplate={def.block_template}
           />
+          {/* story #3316 — 사이클형 정의의 stage_metadata(role/action/gate/capability)를
+              카탈로그 상세에도 노출한다(loop-create-dialog.tsx:295-310 렌더 패턴 재사용) —
+              지금까지는 loop 생성 다이얼로그 미리보기에서만 보였고, 그 stage 목록이 정확히
+              무엇을 뜻하는지 확인할 곳이 카탈로그 자체엔 없었다. */}
+          {cyclicStages(def as unknown as EventDefinitionResponse).length > 0 ? (
+            <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-[10.5px] text-muted-foreground">
+              <p className="font-medium text-foreground">{t('eventStageMetaLabel')}</p>
+              <ol className="list-decimal space-y-1 pl-4">
+                {cyclicStages(def as unknown as EventDefinitionResponse).map((stage) => {
+                  const meta = def.stage_metadata[stage];
+                  return (
+                    <li key={stage} className="break-words">
+                      <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
+                      {meta?.role ? <> ({meta.role})</> : null}
+                      {meta?.gate ? <div>{t('eventStageMetaGateLabel', { type: meta.gate.type ?? '' })}</div> : null}
+                      {meta?.capability ? <div>{t('eventStageMetaCapabilityLabel', { kind: meta.capability.kind ?? '' })}</div> : null}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          ) : null}
           {/* PR#3087 — 이 조회 자체가 BE org admin/owner 게이트라, 일반 멤버는 조회하면
               항상 403이라 아예 안 그린다(모두가 여는 매 행마다 헛된 실패 fetch 방지). */}
           {isAdmin ? <PublishHistorySection definitionKey={def.key} t={t} /> : null}

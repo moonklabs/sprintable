@@ -42,7 +42,16 @@ export interface EventDefinitionResponse {
   name: string;
   description: string | null;
   payload_schema: { properties?: { stage?: { enum?: string[] } } };
-  stage_metadata: Record<string, { role?: string; action?: string }>;
+  // story #3316 — gate/capability는 BE validate_stage_metadata(event_definition_registry.py)
+  // 가 선택 필드로 허용하는 shape 그대로(둘 다 optional) — 카탈로그 상세 뷰가 role/action 외에
+  // 이 두 필드도 사람이 읽을 수 있게 보여줘야 해서 여기(SSOT)에 얹는다. 기존 소비처(loop-create
+  // 미리보기·gallery)는 두 필드를 안 쓰므로 하위호환(추가만, 파괴적 변경 없음).
+  stage_metadata: Record<string, {
+    role?: string;
+    action?: string;
+    gate?: { type?: string; approver?: string };
+    capability?: { kind?: string; connector_key?: string };
+  }>;
   enabled: boolean;
 }
 
