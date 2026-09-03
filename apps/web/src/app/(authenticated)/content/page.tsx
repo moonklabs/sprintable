@@ -127,13 +127,27 @@ export default function ContentPostListPage() {
             </thead>
             <tbody className="divide-y divide-border">
               {drafts.map((draft) => {
-                const { status } = deriveContentPostStatus({
-                  gateStatus: toGateStatus(draft.gate_status),
-                  reapprovalRequired: draft.reapproval_required ?? undefined,
-                  sealedBodySha256: realStr(draft.sealed_content_sha256),
-                  currentBodySha256: draft.body_sha256,
-                  hasPublishedSitePost: draft.published_at != null,
-                });
+                // 페드루 PO 리뷰(2026-09-03) — `draft.published_at != null`은 값이 null이든
+                // 키 자체가 없든(구 백엔드·응답 결손) 똑같이 false가 되어 "발행 안 됐다"로
+                // 단정한다. `'published_at' in draft`로 키 존재를 먼저 물어 키가 없으면
+                // undefined(모른다)를 넘긴다 — deriveContentPostStatus의 AC6 분기가 이걸
+                // 받아 status를 비운다(§3-1-1 "모른다≠다르다", AC4).
+                //
+                // gate_status는 그 축의 "모른다" 신호를 deriveContentPostStatus 자체가
+                // 표현하지 못한다(게이트 부재=draft와 게이트 신호 결손=모른다를 함수 안에서
+                // 구별할 방법이 없다) — 그래서 그 판단은 여기서 앞서 가로챈다: 계약 필드
+                // (gate_status) 자체가 없으면 파생을 아예 부르지 않고 행 전체를 판별
+                // 불가(undefined)로 둔다.
+                const hasGateContract = 'gate_status' in draft;
+                const { status } = hasGateContract
+                  ? deriveContentPostStatus({
+                      gateStatus: toGateStatus(draft.gate_status),
+                      reapprovalRequired: draft.reapproval_required ?? undefined,
+                      sealedBodySha256: realStr(draft.sealed_content_sha256),
+                      currentBodySha256: draft.body_sha256,
+                      hasPublishedSitePost: 'published_at' in draft ? draft.published_at != null : undefined,
+                    })
+                  : { status: undefined };
                 return (
                   <tr key={draft.draft_id} data-testid="content-list-row">
                     <td className="px-3 py-2.5 font-medium text-foreground">

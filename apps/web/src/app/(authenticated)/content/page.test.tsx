@@ -165,6 +165,28 @@ describe('ContentPostListPage (story #3368)', () => {
     expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('reapproval_needed');
   });
 
+  // 페드루 PO 리뷰(2026-09-03) — `draft.published_at != null`은 값이 null이든 계약
+  // 필드(gate_status·published_at) 자체가 응답에서 통째로 빠졌든 똑같이 false가 되어
+  // "발행 안 됐다"로 단정한다(초안/승인됨 색 칩을 그린다). AC4는 그 경우 색 칩이 아니라
+  // "—"여야 한다(§3-1-1 "모른다≠다르다") — `...DRAFT_A, gate_status: undefined}`처럼
+  // 스프레드로 얹으면 JS 객체엔 키가 여전히 남아(값만 undefined) 이 결함을 재현하지
+  // 못한다. 구조분해 할당으로 키 자체를 제거해야 실제 "계약 결손" 응답을 흉내낸다.
+  it('⭐계약 필드(gate_status·published_at) 자체가 응답에 없음 — 색 있는 칩 0, "—"로 렌더된다(AC4)', async () => {
+    const { gate_status: _gs, published_at: _pa, ...draftMissingContract } = DRAFT_A;
+    stubFetch([draftMissingContract]);
+    await act(async () => {
+      root.render(wrap(<ContentPostListPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-status-chip]')).toBeNull();
+    // origin_author_kind 열도 같은 문구("—")를 쓰므로(별개 fail-closed 축, 위 테스트
+    // 참조) row 전체가 아니라 상태 칸(두 번째 td)으로 정확히 scope한다 — 아니면 그
+    // 열의 기존 "—"에 편승한 공허통과가 된다.
+    const statusCell = container.querySelectorAll('[data-testid="content-list-row"] td')[1];
+    expect(statusCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
+  });
+
   it('로드 실패 — 에러 안내(성공 목록으로 오인 표시하지 않는다)', async () => {
     stubFetch({ status: 500 });
     await act(async () => {
