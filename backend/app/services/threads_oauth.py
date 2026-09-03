@@ -8,6 +8,15 @@
 `test_connection()`(§ 아래) 또는 실 콜백 왕복에서 즉시 드러난다 — PO/QA가 실 Meta 앱으로
 1회 왕복 검증 전에는 "코드는 정확한 형태로 존재하되 라이브 미검증" 상태로 남는다.
 
+⚠️PKCE 수용 여부도 이 미확인에 포함된다(페드루 PO 리뷰 2026-09-03 07:26Z) — Threads가
+`code_challenge`/`code_challenge_method` 쿼리 파라미터를 인식하는지 문헌상 확실치 않다.
+실 왕복에서 Meta가 이 파라미터를 거부하면(예: `invalid_request`) `build_authorize_url()`의
+`code_challenge`/`code_challenge_method` 두 줄만 제거하면 되도록 다른 로직과 분리해 뒀다 —
+CSRF·재사용 방지는 `channel_oauth_state.py`의 HS256 서명 state(+nonce+TTL)가 PKCE와
+독립적으로 이미 담당하므로, PKCE가 거부돼도 보안 축 자체는 무너지지 않는다(PKCE는 심층
+방어층 하나가 빠지는 것뿐). `exchange_code_for_short_lived_token()`의 `code_verifier`
+전달도 같은 이유로 이 함수 안에 격리(제거 시 파급 0).
+
 흐름: authorize(코드 부여, PKCE) → callback(단기 토큰 교환) → 단기→장기(60일) 토큰 교환 →
 (만료 임박마다) 장기 토큰 재발급(refresh_mode="reissue_from_access_token", refresh_token 불요)."""
 from __future__ import annotations

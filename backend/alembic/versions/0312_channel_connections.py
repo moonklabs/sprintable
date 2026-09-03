@@ -2,13 +2,17 @@
 channel_connections: 조직이 연결한 외부 채널 계정의 암호화 credential 원장. 신설 — org_
 connector_registry(비밀 저장 금지 설계)와 별개, FK 없음(그라운딩 §9 확定).
 
-⚠️번호 의존성 — story #3367(S2, PR#3733)이 이 시점 아직 develop에 안 머지됐고 0310을 쓰고
-있다(sibling-PR). 이 revision은 그 자리를 피해 0311로 잡고 develop 최신(0309) 위에 얹는다 —
-S2가 먼저 머지되면 down_revision을 0310으로 rebase(0308→0309 사고와 동형 패턴, 페드루 PO
-확定 2026-09-03 06:39Z 선례 그대로 재적용할 것 — 착수 시 확인).
+⚠️번호 의존성(페드루 PO 확定 2026-09-03 07:26Z) — 이 시점 develop은 아직 0309까지만
+머지됐고, S2(story #3367, PR#3733)가 0310(revision 5cb28dfe5)·S3(story #3369, PR#3734,
+feature/3369-publish-projection)가 0311(commit 80337e0ab)을 sibling-PR로 각각 쓰고
+있다. 머지 순서는 S2(0310) → S3(0311) → 이 PR이라 down_revision을 0311로 미리 잡는다
+— S2·S3 두 브랜치를 로컬에 fetch해 0309→0310→0311→0312 전체 사슬 upgrade/downgrade/
+re-upgrade 왕복까지 실PG로 확認 완료(둘 다 develop에 아직 없어 로컬 임시 사본으로
+검증, 커밋엔 포함 안 함 — 실제 파일은 그 PR들이 머지되며 develop에 들어온다). 실
+머지 순서가 이 스냅샷과 달라지면(예: S3가 rebase로 번호가 바뀌면) 착수 시 재확認할 것.
 
-Revision ID: 0311
-Revises: 0309
+Revision ID: 0312
+Revises: 0311
 Create Date: 2026-09-03
 """
 from __future__ import annotations
@@ -17,8 +21,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0311"
-down_revision = "0309"
+revision = "0312"
+down_revision = "0311"
 branch_labels = None
 depends_on = None
 

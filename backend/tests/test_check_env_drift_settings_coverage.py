@@ -226,4 +226,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 1필드 신설(게이트 해소→gateway SupportEscalation.status 동기화 콜백 착지 URL —
     # operator_reply_url과 동일 게이팅 원칙·같은 시크릿 재사용, aud만 분리)로 115→116.
     assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" in keys
-    assert len(keys) == 116
+    # story #3373(Phase1·마케팅운영, 2026-09-03): channel_credential_encryption_key·
+    # channel_oauth_state_secret·threads_app_id·threads_app_secret 4필드 신설(채널 연결
+    # 서비스 — MultiFernet 암호화 키·OAuth state 서명 키·Threads 공용 앱 자격증명, 전부
+    # infra/manual-env-allowlist.yml에도 등재)로 116→120. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "CHANNEL_CREDENTIAL_ENCRYPTION_KEY" in keys and "CHANNEL_OAUTH_STATE_SECRET" in keys
+    assert "THREADS_APP_ID" in keys and "THREADS_APP_SECRET" in keys
+    assert len(keys) == 120
