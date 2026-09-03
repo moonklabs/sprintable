@@ -226,6 +226,35 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s10-error-shell.png'), fullPage: true });
   });
 
+  // story #3385(Phase0 결함, PO 실사용 2026-09-03 2회 재현) — 토스트는 성공인데 칩이
+  // 리로드 전까지 이전 상태로 남던 결함. ⛔이 assertion은 리로드를 하지 않는다 — 리로드
+  // 하면 통과하는 테스트는 이 결함을 못 잡는다(AC2 명시). S2/S3 착지 뒤라 오늘은 승인
+  // 요청이 실제로 성공(gate_id 발급)한다는 전제 — 이미 상신된 초안이면 스킵(고정 실 데이터
+  // 의존 없이 "초안" 행을 그때그때 찾는다).
+  test('S5 — 승인 요청 성공 뒤 리로드 없이 칩이 «승인 대기»로 바뀐다(story #3385 회귀가드)', async ({ page }) => {
+    await page.goto('/content');
+    await page.waitForLoadState('networkidle');
+
+    const draftRow = page.locator('[data-testid="content-list-row"]').filter({ has: page.locator('[data-status-chip="draft"]') }).first();
+    if ((await draftRow.count()) === 0) {
+      test.skip(true, '이 org에 «초안» 상태 글이 없다(전부 이미 상신됨) — 초안 fixture가 있는 세션에서 재실행');
+      return;
+    }
+    await draftRow.locator('a').first().click();
+    await page.waitForURL(/\/content\/.+/);
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.locator('[data-status-chip]'), '상신 전 칩=초안').toHaveAttribute('data-status-chip', 'draft');
+
+    await page.getByRole('button', { name: '승인 요청' }).click();
+    await expect(page.getByText('승인 요청을 보냈습니다'), '성공 토스트가 뜬다').toBeVisible({ timeout: 10_000 });
+
+    // ⛔page.reload() 호출 없음 — 여기가 이 테스트의 핵심.
+    await expect(page.locator('[data-status-chip]'), '리로드 없이 칩이 승인 대기로 바뀐다').toHaveAttribute('data-status-chip', 'pending', { timeout: 10_000 });
+
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s5-submit-no-reload.png'), fullPage: true });
+  });
+
   test.skip('S10(진짜) — 403 "external_publish 게이트가 승인되지 않았습니다(gate_id=…)" 원문이 접힌 상세에 보존된다', () => {
     // TODO(S2·S3 착지 후): 승인되지 않은 게이트가 달린 draftId로 "발행"을 직접 호출(또는
     // 승인 요청이 실제 게이트를 만든 뒤 미승인 상태에서 발행 시도)해 실 403을 재현한다.

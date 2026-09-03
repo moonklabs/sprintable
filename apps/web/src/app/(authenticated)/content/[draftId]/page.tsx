@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -167,30 +167,32 @@ export default function ContentPostEditPage() {
   const latest = versions[versions.length - 1];
   const workItemId = latest?.source_story_id;
 
-  useEffect(() => {
+  // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
+  // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·
+  // 발행 핸들러의 성공 분기가 파생 입력(gate)을 다시 읽을 방법 자체가 없었다(로컬 state를
+  // 손으로 지어내는 대신 서버를 다시 물어 진짜 상태를 받는다 — no-fiction). useCallback으로
+  // 뽑아 마운트 시 useEffect와 각 핸들러 성공 분기 양쪽에서 부른다.
+  const loadGate = useCallback(async () => {
     if (!orgId || !workItemId) return;
-    let cancelled = false;
-    async function loadGate() {
-      try {
-        const res = await fetchWithAuth(`/api/gates?work_item_id=${workItemId}&work_item_type=story`);
-        if (cancelled || !res.ok) return;
-        const list = (await res.json().catch(() => [])) as GateInfo[];
-        const candidates = Array.isArray(list) ? list : [];
-        // doc-gate-section.tsx::load()와 동형 관례 — 반려/대기 중인 게이트를 우선(진행
-        // 상태가 있는 쪽이 사용자에게 더 중요), 없으면 최신(배열 첫 항목, 서버가
-        // created_at desc로 준다는 기존 게이트 목록 관례 그대로).
-        const picked = candidates.find((g) => g.status === 'pending' || g.status === 'rejected') ?? candidates[0] ?? null;
-        setGate(picked);
-      } catch {
-        // best-effort — 게이트 조회 실패는 상태를 'draft'로 안전하게 떨어뜨릴 뿐 화면
-        // 전체를 막지 않는다(목록/편집 자체는 게이트 유무와 무관하게 동작해야 함).
-      }
+    try {
+      const res = await fetchWithAuth(`/api/gates?work_item_id=${workItemId}&work_item_type=story`);
+      if (!res.ok) return;
+      const list = (await res.json().catch(() => [])) as GateInfo[];
+      const candidates = Array.isArray(list) ? list : [];
+      // doc-gate-section.tsx::load()와 동형 관례 — 반려/대기 중인 게이트를 우선(진행
+      // 상태가 있는 쪽이 사용자에게 더 중요), 없으면 최신(배열 첫 항목, 서버가
+      // created_at desc로 준다는 기존 게이트 목록 관례 그대로).
+      const picked = candidates.find((g) => g.status === 'pending' || g.status === 'rejected') ?? candidates[0] ?? null;
+      setGate(picked);
+    } catch {
+      // best-effort — 게이트 조회 실패는 상태를 'draft'로 안전하게 떨어뜨릴 뿐 화면
+      // 전체를 막지 않는다(목록/편집 자체는 게이트 유무와 무관하게 동작해야 함).
     }
-    void loadGate();
-    return () => {
-      cancelled = true;
-    };
   }, [orgId, workItemId]);
+
+  useEffect(() => {
+    void loadGate();
+  }, [loadGate]);
 
   // story #3368 §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 재승인 필요는 gate.
   // reapproval_required(서버 판정)를 그대로 읽는다. sealed_content_sha256은 이제 approved
@@ -229,6 +231,10 @@ export default function ContentPostEditPage() {
           const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
           if (json?.data) setVersions(json.data);
         }
+        // story #3385(AC1) — approved 게이트를 편집하면 서버가 즉시 pending+reapproval_
+        // required로 되돌린다(§3-1-2-1). 새 버전만 반영하고 게이트를 안 다시 읽으면 화면은
+        // 여전히 옛 승인 상태를 보여준다 — 저장도 "상태를 바꾸는 액션"이다.
+        void loadGate();
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
@@ -263,6 +269,9 @@ export default function ContentPostEditPage() {
         const gateId = json?.data?.gate_id;
         if (gateId) {
           setSubmitResult({ type: 'success', gateId });
+          // story #3385(핵심 회귀) — 서버 게이트는 이미 pending인데 화면은 리로드 전까지
+          // 이전 상태(초안·재승인 필요)를 그대로 보였다. 상신 직후 파생 입력을 다시 읽는다.
+          void loadGate();
         } else {
           setSubmitResult({ type: 'error', text: t('submitFailed'), raw: JSON.stringify(json) });
         }
@@ -308,6 +317,8 @@ export default function ContentPostEditPage() {
         const url = json?.data?.url;
         if (publishedAt && url) {
           setPublishResult({ type: 'success', publishedAt, url });
+          // story #3385(AC1) — 발행 뒤에도 같은 규칙: 파생 입력을 다시 읽는다.
+          void loadGate();
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }

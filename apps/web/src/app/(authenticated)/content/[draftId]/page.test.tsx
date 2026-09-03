@@ -217,6 +217,77 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.textContent).toContain('MEDIA_NOT_SUPPORTED_PHASE0'); // 원문 보존(접힘 <details> 안)
   });
 
+  // story #3385(Phase0 결함, PO 실사용 2026-09-03 2회 재현) — 토스트는 성공인데 칩·안내
+  // 박스가 리로드 전까지 이전 상태로 남던 결함. 리로드를 흉내내지 않는다(리로드하면 통과
+  // 하는 테스트는 이 결함을 못 잡는다는 게 AC2의 명시 — /api/gates 응답을 호출 순서로
+  // 갈아 끼워 "상신 직후, 리로드 없이" 그 자리에서 재조회되는지를 그대로 잰다.
+  it('⭐AC1 — 승인 요청 성공 뒤 리로드 없이 칩이 «초안»→«승인 대기»로 바뀐다', async () => {
+    let gateCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+        return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+      }
+      if (url.startsWith('/api/gates?work_item_id=')) {
+        gateCallCount += 1;
+        // 1번째 호출(마운트) = 게이트 없음(초안) · 2번째 호출(상신 직후 재조회) = pending.
+        const gates = gateCallCount === 1 ? [] : [{ id: 'gate-42', status: 'pending', reapproval_required: false }];
+        return { ok: true, status: 200, json: async () => gates };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit` && init?.method === 'POST') {
+        return { ok: true, status: 200, json: async () => ({ data: { gate_id: 'gate-42' }, error: null, meta: null }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('draft');
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(gateCallCount).toBe(2); // 마운트 1회 + 상신 성공 뒤 재조회 1회 — 리로드가 아니라 이 재조회로 갱신됐음을 고정.
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('pending');
+    expect(container.textContent).toContain(koMessages.content.contentStatusPending);
+  });
+
+  // AC 본문 "2회차가 더 나쁘다" — 재상신 뒤에도 안내 박스가 안 지워지면 사람이 같은 행동을
+  // 반복하거나 상신이 안 됐다고 믿는다.
+  it('⭐AC1 — 재상신 성공 뒤 리로드 없이 «재승인 필요» 안내 박스가 사라지고 칩이 «승인 대기»로 바뀐다', async () => {
+    let gateCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+        return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+      }
+      if (url.startsWith('/api/gates?work_item_id=')) {
+        gateCallCount += 1;
+        const gates = gateCallCount === 1
+          ? [{ id: 'gate-42', status: 'pending', reapproval_required: true, sealed_content_sha256: 'h0' }]
+          : [{ id: 'gate-42', status: 'pending', reapproval_required: false, sealed_content_sha256: 'h1' }];
+        return { ok: true, status: 200, json: async () => gates };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit` && init?.method === 'POST') {
+        return { ok: true, status: 200, json: async () => ({ data: { gate_id: 'gate-42' }, error: null, meta: null }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('reapproval_needed');
+    expect(container.textContent).toContain(koMessages.content.reapprovalNeededNotice);
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('pending');
+    expect(container.textContent).not.toContain(koMessages.content.reapprovalNeededNotice);
+  });
+
   it('⭐승인 요청 성공 — gate_id로 /gates/{id} 딥링크가 뜬다(AC3)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, () => ({
       status: 200, body: { gate_id: 'gate-42', version_id: 'v1', content_sha256: 'h1', status: 'pending' },
