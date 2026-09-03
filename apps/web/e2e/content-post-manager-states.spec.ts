@@ -150,11 +150,25 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
     const titleCell = firstRow.locator('td').first();
     await expect(titleCell).not.toHaveText('');
 
-    // 상태 칩 — data-status-chip이 다섯 상태 중 하나(오늘은 게이트 신호가 없어 'draft'만
-    // 가능·post-status.ts::ContentPostStatus와 어휘 동일).
+    // 상태 칩 — data-status-chip이 다섯 상태 중 하나(post-status.ts::ContentPostStatus와
+    // 어휘 동일).
     const statusChip = firstRow.locator('[data-status-chip]');
     await expect(statusChip, '상태 칩이 보인다').toBeVisible();
     await expect(statusChip).toHaveAttribute('data-status-chip', /draft|pending|approved|published|reapproval_needed/);
+
+    // story #3384(결함 회귀 방지) — 첫 행 하나만 보면 "모든 행이 항상 draft"인 결함이
+    // 그대로 통과한다(공허 검증 — 바로 그 결함이 이 assertion을 처음부터 무의미하게
+    // 만들었다). dev 환경엔 이미 비-draft 행(심사 대기 중인 smoke 초안·발행된 2호 글)이
+    // 있다고 PO가 확認했다 — 목록 전체 행의 칩 값을 모아 최소 하나는 'draft'가 아님을
+    // 직접 pin한다(#3384 결함의 정반대 명제).
+    const allChipStates = await page.locator('[data-status-chip]').evaluateAll(
+      (els) => els.map((el) => el.getAttribute('data-status-chip')),
+    );
+    expect(allChipStates.length, '상태 칩이 최소 1개 보인다').toBeGreaterThan(0);
+    expect(
+      allChipStates.some((s) => s !== 'draft'),
+      '모든 행이 draft로 뭉개지지 않는다(#3384: 목록 상태 칩이 항상 초안으로만 뜨던 결함 회귀 방지)',
+    ).toBe(true);
 
     // 버전 — "v" + 숫자.
     await expect(firstRow, '버전 배지(v숫자)가 보인다').toContainText(/v\d+/);
