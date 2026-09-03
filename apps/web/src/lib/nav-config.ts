@@ -4,6 +4,7 @@ import {
   Bot,
   Brain,
   ClipboardList,
+  FileText,
   FlaskConical,
   GalleryVerticalEnd,
   HardDrive,
@@ -102,6 +103,14 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops' },
       { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S' },
       { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R' },
+      // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §5-2) — 호스팅
+      // 블로그 「글 관리」. site-posts drafts는 org 스코프(프로젝트 무관, backend
+      // organizations/{org_id}/site-posts/drafts)라 org-connectors(/organization/connectors)와
+      // 동형으로 kind:'static'·top-level 경로다. 「지식」 문서 트리(parent_id 계층) 밑에 두지
+      // 않는 이유는 §5-2 그대로 — 상태·발행 URL 열을 가진 목록이 문서 하나로 오독되는 것을
+      // 막기 위함. 「관리」 구역의 org-connectors로도 옮기지 않는다 — 연결은 owner의 설정
+      // 행위, 운영은 마케터의 일상 행위라는 가름(§5-2)이 그대로 적용된다.
+      { id: 'content', labelKey: 'content', icon: FileText, kind: 'static', path: '/content' },
     ],
   },
   {

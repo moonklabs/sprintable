@@ -228,6 +228,39 @@ describe('ApprovalsQueue', () => {
     expect(text).not.toContain('파일');
   });
 
+  // story #3369(§3-1-2-1, 페드루 PO 2026-09-03 06:56Z) — reapproval_required=true인
+  // external_publish 게이트는 서버가 이미 approve를 409 SITE_POST_RESUBMIT_REQUIRED로
+  // 막아 둔다("할 일 없는 카드"). 승인·반려 둘 다 비활성 + 안내 문구.
+  it('⭐reapproval_required=true — 재상신 대기 안내가 뜨고 승인·반려 버튼이 비활성된다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-resubmit', gate_type: 'external_publish', can_approve: true, requires_human: true,
+        reapproval_required: true,
+      })],
+      [],
+    );
+    await mount();
+    expect(container.textContent).toContain(koMessages.cage.gateReapprovalResubmitWaiting);
+    const approveButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const rejectButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
+    expect(approveButton?.hasAttribute('disabled')).toBe(true);
+    expect(rejectButton?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('reapproval_required=false(정상 상신)인 external_publish 게이트는 재상신 대기 안내가 안 뜨고 버튼이 활성', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-normal', gate_type: 'external_publish', can_approve: true, requires_human: true,
+        reapproval_required: false,
+      })],
+      [],
+    );
+    await mount();
+    expect(container.textContent).not.toContain(koMessages.cage.gateReapprovalResubmitWaiting);
+    const approveButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    expect(approveButton?.hasAttribute('disabled')).toBe(false);
+  });
+
   it('story #3038 AC4(PO #3188 오서명 실사고) — 같은 work_item의 merge 게이트 2장이 pr_number로 서로 구분된다', async () => {
     mockFetches(
       [

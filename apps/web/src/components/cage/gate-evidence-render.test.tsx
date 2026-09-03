@@ -296,10 +296,11 @@ describe('GateEvidence — 측정 판정 초안 렌더(story #2862)', () => {
 // 그려지는지 못 잡으므로(entity-ref.ts 파싱+EntityChip 마운트 자체가 검증 대상) 여기서 실제
 // DOM 마운트로 검증한다.
 describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌더(story #3328)', () => {
-  function recipeApprovalGate(neutralFacts: Record<string, unknown>): GateItem {
+  function recipeApprovalGate(neutralFacts: Record<string, unknown>, sealed?: Partial<GateItem>): GateItem {
     return realApiShapedGate({
       gate_type: 'external_publish', work_item_type: 'story', status: 'pending',
       github_check_run_id: null, neutral_facts: neutralFacts,
+      ...sealed,
     });
   }
 
@@ -402,6 +403,55 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
     expect(container.textContent).toContain(koMessages.cage.ciPass);
     expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDraftLabel);
+  });
+
+  // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §4-3③·§6-3) —
+  // 글 관리 승인 요청이 채우는 봉인 필드. draft_doc_summary(300자 절단, 접힘 기본)와 달리
+  // 이쪽은 "전문"이라 접힘 없이 항상 보인다. ⚠️BE 계약 정정(S2 실물, PR#3733) —
+  // neutral_facts가 아니라 Gate 전용 컬럼(sealed_content_*, GateItem top-level)이다.
+  it('⭐S4 §6-3 — content_body는 접힘 없이 항상 전문이 보이고, 버전·봉인 해시 앞 12자가 나란히 뜬다', async () => {
+    const gate = recipeApprovalGate(
+      { channel: 'hosted_site', stage: 'approve' },
+      {
+        sealed_content_body: '펼치지 않아도 항상 보이는 전문 본문입니다.',
+        sealed_content_version: 2,
+        sealed_content_sha256: 'abcdef0123456789fedcba9876543210',
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    // 접힘 버튼 클릭 없이 바로 텍스트가 보인다(draft_doc_summary와의 핵심 차이).
+    expect(container.textContent).toContain('펼치지 않아도 항상 보이는 전문 본문입니다.');
+    expect(container.textContent).toContain('v2');
+    expect(container.textContent).toContain('abcdef012345'); // 앞 12자만(전체 해시를 카드에 그대로 늘어놓지 않음)
+    expect(container.textContent).not.toContain('abcdef0123456789fedcba9876543210'); // 전체 해시는 아님
+  });
+
+  it('content_body가 없으면(S2 미착지 — 지금 실제 상태) 버전·해시 줄 자체가 안 뜬다(지어내지 않음)', async () => {
+    const gate = recipeApprovalGate({ channel: 'hosted_site', stage: 'approve' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalVersionLabel);
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedHashLabel);
+  });
+
+  it('AC4 회귀 0 재확認 — content_version=0(falsy이지만 유효한 버전 번호)도 정확히 렌더된다', async () => {
+    const gate = recipeApprovalGate(
+      { channel: 'hosted_site' },
+      { sealed_content_version: 0, sealed_content_sha256: 'h' },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('v0'); // !== null 체크라 0도 통과해야 함(falsy 트랩 회귀 방지)
   });
 });
 
