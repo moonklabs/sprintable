@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
-import { MousePointerClick } from 'lucide-react';
+import { ExternalLink, MousePointerClick } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ArtifactStage, isResponsiveHtml, RESPONSIVE_PREVIEW_BREAKPOINTS, type ResponsivePreviewBreakpoint } from './artifact-stage';
 import { ArtifactGalleryTimeline, type GalleryTimelineVersion } from './artifact-gallery-timeline';
@@ -26,6 +27,13 @@ interface ArtifactExpandDialogProps {
   versions?: GalleryTimelineVersion[];
   selectedVersion?: number;
   onSelectVersion?: (versionNumber: number) => void;
+  /** story #3378(결함·customer-zero) — 이 다이얼로그가 막다른 길이었다(닫기·버전 점·전체
+   * 보기/실제 크기만, 내보내기·정본 제안·코멘트가 있는 상세로 갈 길 0). 갤러리에서 열 때만
+   * 넘긴다 — 이미 상세 페이지 안(artifact-viewer.tsx)에서 열린 다이얼로그는 그 자리로
+   * 다시 링크할 이유가 없어 생략(prop 부재=미노출, no-fiction). `/artifacts/{id}`(ws/proj
+   * 없는 bare 경로)로 링크하면 proxy.ts의 레거시 리다이렉트(story #3208과 동일 메커니즘)가
+   * 이 아티팩트의 실제 소속 project로 직접 해소한다 — 클라에서 ws/proj를 추측하지 않는다. */
+  artifactId?: string;
 }
 
 /**
@@ -36,7 +44,7 @@ interface ArtifactExpandDialogProps {
  * 큰 뷰포트다(인라인 카드도 동일 컴포넌트, 크기만 다름). 신규 뷰어 0 — 기존 컴포넌트 재사용.
  */
 export function ArtifactExpandDialog({
-  open, onOpenChange, title, format, content, canvasBounds, versions, selectedVersion, onSelectVersion,
+  open, onOpenChange, title, format, content, canvasBounds, versions, selectedVersion, onSelectVersion, artifactId,
 }: ArtifactExpandDialogProps) {
   const t = useTranslations('canvas');
   // story 3d0d60a3 — 반응형 미리보기. @media 판정=html 포맷에서만(유나 1순위·값싼 소스 파싱,
@@ -77,35 +85,43 @@ export function ArtifactExpandDialog({
             <DialogPrimitive.Title className="truncate text-sm font-semibold text-foreground">
               {title}
             </DialogPrimitive.Title>
-            {format === 'html' ? (
-              <button
-                type="button"
-                onClick={() => setHtmlInteractive((v) => !v)}
-                aria-pressed={htmlInteractive}
-                title={t(htmlInteractive ? 'artifactInteractiveOnHint' : 'artifactInteractiveOffHint')}
-                className={cn(
-                  'ml-auto flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium',
-                  htmlInteractive
-                    ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground',
-                )}
+            {/* 유나 design verdict(41e70eee7) — 오른쪽 정렬 액션들이 각자 ml-auto를 가지면
+             * flex auto 마진이 남은 공간을 나눠 가져 가운데로 뜬다. ml-auto는 이 그룹
+             * 컨테이너 하나에만 두고, 안의 형제들은 gap으로만 벌린다(항목이 늘어도 안전). */}
+            <div className="ml-auto flex items-center gap-2">
+              {artifactId ? (
+                <Link
+                  href={`/artifacts/${artifactId}`}
+                  title={t('artifactDetailPageLinkHint')}
+                  className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <ExternalLink className="size-3" aria-hidden />
+                  {t('artifactDetailPageLink')}
+                </Link>
+              ) : null}
+              {format === 'html' ? (
+                <button
+                  type="button"
+                  onClick={() => setHtmlInteractive((v) => !v)}
+                  aria-pressed={htmlInteractive}
+                  title={t(htmlInteractive ? 'artifactInteractiveOnHint' : 'artifactInteractiveOffHint')}
+                  className={cn(
+                    'flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium',
+                    htmlInteractive
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground',
+                  )}
+                >
+                  <MousePointerClick className="size-3" aria-hidden />
+                  {t(htmlInteractive ? 'artifactInteractiveOn' : 'artifactInteractiveOff')}
+                </button>
+              ) : null}
+              <DialogPrimitive.Close
+                className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
               >
-                <MousePointerClick className="size-3" aria-hidden />
-                {t(htmlInteractive ? 'artifactInteractiveOn' : 'artifactInteractiveOff')}
-              </button>
-            ) : null}
-            <DialogPrimitive.Close
-              className={cn(
-                'rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
-                // 유나 design verdict(41e70eee7) — 토글과 Close가 둘 다 ml-auto면 flex auto
-                // 마진이 남은 공간을 반씩 나눠 토글이 헤더 가운데로 뜬다. ml-auto는 항상
-                // 정확히 하나(가장 왼쪽의 오른쪽-정렬 요소)만 갖는다 — html이면 토글이,
-                // 아니면(토글 부재) Close 자신이 그 자리를 맡는다.
-                format === 'html' ? '' : 'ml-auto',
-              )}
-            >
-              {t('closeAction')}
-            </DialogPrimitive.Close>
+                {t('closeAction')}
+              </DialogPrimitive.Close>
+            </div>
           </div>
           {showBreakpointSelector ? (
             <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-4 py-2">

@@ -300,6 +300,32 @@ describe('ArtifactGalleryView — story 3d888ba2 (실물 열람 + 그리드 시�
   });
 });
 
+// story #3378(결함·customer-zero, 선생님 실사용) — 카드가 «크게 보기» 다이얼로그로만
+// 이어지고 상세 페이지(내보내기·정본 제안·코멘트·버전)로 갈 길이 없던 결함.
+describe('ArtifactGalleryView — 상세 페이지 진입(story #3378)', () => {
+  it('the card title is a real link to /artifacts/{id} — a click reaches the detail route in ≤2 clicks from the gallery', async () => {
+    await mount();
+    const titleLink = container.querySelector('a[href="/artifacts/a1"]');
+    expect(titleLink).not.toBeNull();
+    expect(titleLink!.textContent).toBe('웰컴 이메일 시안');
+  });
+
+  it('the expand dialog carries a 「상세 페이지로」 link so it is no longer a dead end', async () => {
+    vi.stubGlobal('fetch', stubFetch({
+      versionDetailByArtifact: { a1: versionDetail('a1', 3) },
+    }));
+    await mount();
+    const thumbBtn = container.querySelector('[title="산출물 열기"]') as HTMLButtonElement;
+    await act(async () => { thumbBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    // 카드 제목 링크(container 안)와 다이얼로그 링크(base-ui Portal, container 밖)가 둘 다
+    // href="/artifacts/a1"이라 container 밖 것만 골라야 다이얼로그 쪽을 잡는다.
+    const detailLink = [...document.body.querySelectorAll('a[href="/artifacts/a1"]')].find((el) => !container.contains(el));
+    expect(detailLink).not.toBeUndefined();
+    expect(detailLink!.textContent).toBe('상세 페이지로');
+  });
+});
+
 describe('ArtifactGalleryView 빈상태 — 그리기|임포트 co-located 진입점(story 64010b05)', () => {
   it('shows both entry points, and "임포트" routes the shared story picker to the import dialog', async () => {
     vi.stubGlobal('fetch', stubFetch({ artifacts: [], stories: [{ id: 's1', title: '온보딩 개선' }] }));

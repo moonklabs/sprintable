@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Frame } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -92,21 +93,27 @@ function ArtifactCard({
   onOpen: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={axisT('galleryOpenArtifactAction')}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-primary/40"
-    >
-      <ArtifactThumbnail
-        artifactId={artifact.id}
-        latestVersionNumber={artifact.latestVersionNumber}
-        anchorVersion={artifact.anchorVersion}
-        className="aspect-[8/5] w-full rounded-none border-0 border-b border-border"
-      />
-      <span className="min-w-0 truncate px-3 pt-2.5 text-[13px] font-semibold text-foreground">
+    // story #3378(결함·customer-zero, 선생님 실사용) — 카드 전체가 <button>이라 크게 보기
+    // 다이얼로그 말고는 갈 곳이 없었다(다이얼로그 자체도 막다른 길이었다). <a>는 <button>
+    // 안에 못 들어가(중첩 상호작용 콘텐츠, 무효 HTML)라 바깥 컨테이너를 button에서 div로
+    // 내리고, 썸네일만 여전히 다이얼로그를 여는 button, 제목은 실제 <Link>로 상세 페이지에
+    // 간다(스토리 문구 "카드 제목 링크" 그대로).
+    <div className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-colors hover:border-primary/40">
+      <button type="button" onClick={onOpen} title={axisT('galleryOpenArtifactAction')} className="block w-full text-left">
+        <ArtifactThumbnail
+          artifactId={artifact.id}
+          latestVersionNumber={artifact.latestVersionNumber}
+          anchorVersion={artifact.anchorVersion}
+          className="aspect-[8/5] w-full rounded-none border-0 border-b border-border"
+        />
+      </button>
+      <Link
+        href={`/artifacts/${artifact.id}`}
+        title={axisT('galleryOpenDetailAction')}
+        className="min-w-0 truncate px-3 pt-2.5 text-[13px] font-semibold text-foreground hover:underline"
+      >
         {artifact.title}
-      </span>
+      </Link>
       <div className="flex items-center gap-1.5 px-3 pb-3 pt-1.5">
         {artifact.anchorVersion != null ? (
           <span className="shrink-0 rounded border border-success px-1.5 py-0.5 text-[9px] font-extrabold text-success">
@@ -126,7 +133,7 @@ function ArtifactCard({
           </span>
         ) : null}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -405,6 +412,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           versions={expandTarget.versions}
           selectedVersion={expandTarget.versionNumber}
           onSelectVersion={(versionNumber) => void handleOpenArtifact(expandTarget.artifactId, versionNumber, expandTarget.title)}
+          artifactId={expandTarget.artifactId}
         />
       ) : null}
       {projectId ? (
