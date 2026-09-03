@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -105,7 +105,7 @@ function RawDetailsToggle({ raw, label }: { raw: string | undefined; label: stri
 
 export default function ContentPostEditPage() {
   const { draftId } = useParams<{ draftId: string }>();
-  const { orgId } = useDashboardContext();
+  const { orgId, role } = useDashboardContext();
   const t = useTranslations('content');
 
   const [versions, setVersions] = useState<SitePostVersion[]>([]);
@@ -144,6 +144,11 @@ export default function ContentPostEditPage() {
   // 실패(best-effort — gate 조회와 동형, 화면 전체를 막지 않는다), 객체=성공(발행 안 됐어도
   // 전부 null 필드로 옴 — 그 자체가 "안다"는 신호라 undefined와는 다르다, AC6).
   const [publication, setPublication] = useState<SitePostPublicationInfo | null | undefined>(undefined);
+  // 페드루 PO 리뷰(2026-09-03, 유나 design verdict) — 발행자가 UUID 그대로 보이는 문제.
+  // gates/[id]/page.tsx의 memberNames 관례(id→이름, /api/team-members, 못 찾으면 앞 8자
+  // 폴백) 그대로 재사용한다 — publication 계약을 늘리지 않는다(이름 필드를 새로 추가하지
+  // 않는다).
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
   const [unpublishing, setUnpublishing] = useState(false);
   const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
   const [unpublishResult, setUnpublishResult] = useState<
@@ -235,6 +240,25 @@ export default function ContentPostEditPage() {
     void loadPublication();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId, draftId]);
+
+  // gates/[id]/page.tsx:110-127과 동형 — published_by_member_id별로 한 번만 시도(ref로
+  // 추적, 응답 목록에 없는 id면 setMemberNames가 매번 새 객체를 만들어 무한 재실행되는
+  // 사전 버그를 그쪽에서 이미 겪었다).
+  const fetchedPublisherIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = publication?.published_by_member_id;
+    if (!id || fetchedPublisherIdRef.current === id) return;
+    fetchedPublisherIdRef.current = id;
+    void fetchWithAuth('/api/team-members')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: { id: string; name: string }[] } | null) => {
+        if (!json?.data) return;
+        const names: Record<string, string> = {};
+        for (const m of json.data) names[m.id] = m.name;
+        setMemberNames((prev) => ({ ...prev, ...names }));
+      })
+      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+  }, [publication?.published_by_member_id]);
 
   // story #3368 §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 재승인 필요는 gate.
   // reapproval_required(서버 판정)를 그대로 읽는다. sealed_content_sha256은 이제 approved
@@ -435,6 +459,14 @@ export default function ContentPostEditPage() {
   const status = derivedStatus;
   const canPublish = publishable;
   const sealedHash = realStr(gate?.sealed_content_sha256);
+  // 페드루 PO 리뷰(2026-09-03) — [82d79b81] AC: "owner/admin만 활성 · member는 비활성 +
+  // 이유 문구(버튼 밖)". 서버 403(SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY)은 방어이지
+  // 안내가 아니다 — settings/page.tsx:330·org-members-section.tsx:343와 같은 role 소스
+  // (useDashboardContext().role)를 재사용한다, 새 조회를 만들지 않는다.
+  const canUnpublish = role === 'owner' || role === 'admin';
+  const publisherName = publication?.published_by_member_id
+    ? memberNames[publication.published_by_member_id] ?? publication.published_by_member_id.slice(0, 8)
+    : '—';
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
@@ -490,17 +522,20 @@ export default function ContentPostEditPage() {
           </div>
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
-            {publication.published_by_member_id ?? '—'}
+            {publisherName}
           </div>
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => setUnpublishConfirmOpen(true)}
-            disabled={unpublishing}
+            disabled={!canUnpublish || unpublishing}
           >
             {unpublishing ? t('unpublishingCta') : t('unpublishCta')}
           </Button>
+          {!canUnpublish ? (
+            <p className="text-xs text-muted-foreground">{t('unpublishDisabledReason')}</p>
+          ) : null}
         </div>
       ) : null}
 

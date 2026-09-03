@@ -2126,6 +2126,7 @@
     "unpublishConfirmAction": "발행 취소",
     "unpublishSuccess": "발행을 취소했습니다.",
     "unpublishFailed": "발행 취소를 하지 못했습니다.",
+    "unpublishDisabledReason": "owner/admin만 발행을 취소할 수 있습니다.",
     "errorMediaNotSupported": "지금 단계에서는 이미지·영상 첨부를 지원하지 않습니다.",
     "errorPublishHumanOnly": "발행은 휴먼 멤버만 할 수 있습니다.",
     "errorApprovalRequired": "승인이 끝나야 발행할 수 있습니다.",

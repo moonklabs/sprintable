@@ -2126,6 +2126,7 @@
     "unpublishConfirmAction": "Unpublish",
     "unpublishSuccess": "Unpublished.",
     "unpublishFailed": "Failed to unpublish.",
+    "unpublishDisabledReason": "Only the organization owner or an admin can unpublish.",
     "errorMediaNotSupported": "Image and video attachments aren't supported yet.",
     "errorPublishHumanOnly": "Only human members can publish.",
     "errorApprovalRequired": "This must be approved before it can be published.",
