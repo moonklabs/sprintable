@@ -91,7 +91,7 @@ async function mount() {
 // PO)이 아직 없어 생긴 커플링이라 표면이 설 때까지 nav에 남긴다(②=ⓐ→되돌림, 유나 QA 처방).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림'] },
-  { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고'] },
+  { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고', '콘텐츠'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
   { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터'] },
@@ -107,7 +107,8 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // '/flow' 그대로) 하나로 접혔다. 스탠드업/회고는 CI orphan 가드가 막아 nav에 그대로 남았다
 // (위 EXPECTED_GROUPS 주석 참고). story #3179(S3c) — '대시보드'(/dashboard) 항목 자체가
 // nav에서 빠져(chat으로 이사·중복 목적지 제거) 챗 제외 19→18항목. story 4180f67f — 조직
-// 그룹에 '커넥터'(/organization/connectors) 추가돼 챗 제외 18→19항목.
+// 그룹에 '커넥터'(/organization/connectors) 추가돼 챗 제외 18→19항목. story #3368 — 워크
+// 그룹에 '콘텐츠'(/content) 추가돼 챗 제외 19→20항목.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '구성원': '/organization/members',
   '워크포스': '/organization/workforce',
@@ -123,6 +124,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '실험실': '/loops',
   '스탠드업': '/standup',
   '회고': '/retro',
+  '콘텐츠': '/content',
   '활동 로그': '/activity',
   '문서': '/docs',
   '산출물': '/artifacts',
@@ -206,12 +208,13 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
-  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 19항목
+  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 20항목
   // (챗 center 자체 href는 별도 스위트에서 대조 — I2로 21→20, I3로 flow+sprints가 board로
   // 접혀 20→19, 스탠드업/회고는 CI orphan 가드로 되돌려 그대로 잔존, story #3179(S3c)로
-  // '대시보드' 제거돼 19→18, story 4180f67f로 조직 그룹에 '커넥터' 추가돼 18→19) 전부를
-  // 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데 목적지가 틀림"을 확실히 막는다.
-  it('전 19항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+  // '대시보드' 제거돼 19→18, story 4180f67f로 조직 그룹에 '커넥터' 추가돼 18→19, story #3368로
+  // 워크 그룹에 '콘텐츠' 추가돼 19→20) 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데
+  // 목적지가 틀림"을 확실히 막는다.
+  it('전 20항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {

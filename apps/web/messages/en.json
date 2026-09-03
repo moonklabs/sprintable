@@ -103,6 +103,7 @@
     "goals": "Goals",
     "loops": "Lab",
     "storage": "Storage",
+    "content": "Content",
     "zoneNow": "Today",
     "zoneWork": "Workspace",
     "zoneTrust": "Trust",
@@ -2059,6 +2060,25 @@
     "publicLinkInvalid": "This link is not valid.",
     "attachmentUnavailable": "Attachment unavailable in public view",
     "imageUnavailable": "Image unavailable in public view"
+  },
+  "content": {
+    "title": "Content",
+    "description": "Manage drafts, approvals, and publishing for hosted blog posts.",
+    "loadFailed": "Failed to load posts.",
+    "emptyTitle": "No drafts yet",
+    "emptyDescription": "Drafts submitted by agents will appear here.",
+    "columnTitle": "Title",
+    "columnStatus": "Status",
+    "columnVersion": "Version",
+    "columnAuthor": "Last edited by",
+    "columnUpdatedAt": "Updated",
+    "authorAgent": "Agent",
+    "authorHuman": "Human",
+    "contentStatusDraft": "Draft",
+    "contentStatusPending": "Pending approval",
+    "contentStatusApproved": "Approved",
+    "contentStatusPublished": "Published",
+    "contentStatusReapprovalNeeded": "Reapproval needed"
   },
   "docs": {
     "title": "Documentation",

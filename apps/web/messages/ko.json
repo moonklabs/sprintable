@@ -103,6 +103,7 @@
     "goals": "목표",
     "loops": "실험실",
     "storage": "스토리지",
+    "content": "콘텐츠",
     "zoneNow": "오늘",
     "zoneWork": "워크스페이스",
     "zoneTrust": "신뢰",
@@ -2059,6 +2060,25 @@
     "publicLinkInvalid": "유효하지 않은 링크입니다.",
     "attachmentUnavailable": "공개 보기에서 첨부를 표시할 수 없습니다",
     "imageUnavailable": "공개 보기에서 이미지를 표시할 수 없습니다"
+  },
+  "content": {
+    "title": "글 관리",
+    "description": "호스팅 블로그에 실릴 글의 초안·승인·발행을 관리합니다.",
+    "loadFailed": "글 목록을 불러오지 못했습니다.",
+    "emptyTitle": "아직 초안이 없습니다",
+    "emptyDescription": "에이전트가 제출한 초안이 여기에 나타납니다.",
+    "columnTitle": "제목",
+    "columnStatus": "상태",
+    "columnVersion": "버전",
+    "columnAuthor": "최종 수정 주체",
+    "columnUpdatedAt": "수정 시각",
+    "authorAgent": "에이전트",
+    "authorHuman": "휴먼",
+    "contentStatusDraft": "초안",
+    "contentStatusPending": "승인 대기",
+    "contentStatusApproved": "승인됨",
+    "contentStatusPublished": "발행됨",
+    "contentStatusReapprovalNeeded": "재승인 필요"
   },
   "docs": {
     "title": "문서",
