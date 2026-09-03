@@ -42,6 +42,12 @@ class ThreadsOAuthError(Exception):
 
 
 def build_authorize_url(*, redirect_uri: str, state: str, code_challenge: str) -> str:
+    """PKCE 거부 대응(페드루 PO 2026-09-03 07:26Z·07:56Z) — `settings.threads_pkce_enabled`
+    (기본 True)가 False면 `code_challenge`/`code_challenge_method`를 아예 안 싣는다. Meta가
+    실왕복에서 이 파라미터를 거부하면(문헌상 미확認, threads_oauth.py 상단 docstring 참고)
+    PO가 이 설정값 하나만 끄면 되고, 재배포 없이 플래그로 즉시 되돌릴 수 있다(코드 삭제·
+    재배포 불요) — CSRF·재사용 방지는 `channel_oauth_state.py`의 state 서명이 PKCE와
+    독립적으로 이미 담당하므로 꺼도 그 축은 무너지지 않는다."""
     from urllib.parse import urlencode
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
@@ -52,27 +58,31 @@ def build_authorize_url(*, redirect_uri: str, state: str, code_challenge: str) -
         "scope": cfg.scope,
         "response_type": "code",
         "state": state,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
     }
+    if settings.threads_pkce_enabled:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
     return f"{cfg.authorize_url}?{urlencode(params)}"
 
 
 async def exchange_code_for_short_lived_token(
     client: httpx.AsyncClient, *, code: str, redirect_uri: str, code_verifier: str,
 ) -> tuple[str, str]:
-    """authorization code → (access_token, threads_user_id). 단기 토큰(~1h)."""
-    resp = await client.post(
-        _TOKEN_URL,
-        data={
-            "client_id": settings.threads_app_id,
-            "client_secret": settings.threads_app_secret,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-            "code": code,
-            "code_verifier": code_verifier,
-        },
-    )
+    """authorization code → (access_token, threads_user_id). 단기 토큰(~1h).
+
+    `settings.threads_pkce_enabled=False`면 `code_verifier`를 아예 안 보낸다 —
+    `build_authorize_url()`의 동일 플래그와 짝(그쪽에서 code_challenge를 안 보냈으면 여기서도
+    검증자를 보내면 Meta가 오히려 거부할 수 있다 — 두 자리가 항상 같이 켜지고 같이 꺼진다)."""
+    data = {
+        "client_id": settings.threads_app_id,
+        "client_secret": settings.threads_app_secret,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+        "code": code,
+    }
+    if settings.threads_pkce_enabled:
+        data["code_verifier"] = code_verifier
+    resp = await client.post(_TOKEN_URL, data=data)
     if resp.status_code != 200:
         raise ThreadsOAuthError("THREADS_TOKEN_EXCHANGE_FAILED", resp.text[:500])
     body = resp.json()

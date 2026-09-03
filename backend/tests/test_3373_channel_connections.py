@@ -582,3 +582,84 @@ async def test_plaintext_token_never_appears_in_any_json_response():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── PKCE fallback flag(페드루 PO 2026-09-03 07:56Z — Meta가 code_challenge를 거부할 때
+# 재배포 없이 끄는 자리) ────────────────────────────────────────────────────────
+
+def test_build_authorize_url_includes_pkce_params_by_default(monkeypatch):
+    import app.core.config as config_module
+    monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", True)
+    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
+
+    from app.services.threads_oauth import build_authorize_url
+
+    url = build_authorize_url(redirect_uri="https://x/callback", state="s", code_challenge="chal123")
+    assert "code_challenge=chal123" in url
+    assert "code_challenge_method=S256" in url
+
+
+def test_build_authorize_url_omits_pkce_params_when_flag_disabled(monkeypatch):
+    import app.core.config as config_module
+    monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", False)
+    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
+
+    from app.services.threads_oauth import build_authorize_url
+
+    url = build_authorize_url(redirect_uri="https://x/callback", state="s", code_challenge="chal123")
+    assert "code_challenge" not in url
+    assert "chal123" not in url
+
+
+@pytest.mark.anyio
+async def test_short_lived_token_exchange_omits_code_verifier_when_pkce_disabled(monkeypatch):
+    import app.core.config as config_module
+    monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", False)
+    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
+    monkeypatch.setattr(config_module.settings, "threads_app_secret", "app-secret")
+
+    from app.services.threads_oauth import exchange_code_for_short_lived_token
+
+    captured = {}
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"access_token": "tok", "user_id": "acc-1"}
+
+    class _FakeClient:
+        async def post(self, url, *, data):
+            captured["data"] = data
+            return _FakeResponse()
+
+    await exchange_code_for_short_lived_token(
+        _FakeClient(), code="c", redirect_uri="https://x/callback", code_verifier="verifier123",
+    )
+    assert "code_verifier" not in captured["data"]
+
+
+@pytest.mark.anyio
+async def test_short_lived_token_exchange_includes_code_verifier_by_default(monkeypatch):
+    import app.core.config as config_module
+    monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", True)
+    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
+    monkeypatch.setattr(config_module.settings, "threads_app_secret", "app-secret")
+
+    from app.services.threads_oauth import exchange_code_for_short_lived_token
+
+    captured = {}
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"access_token": "tok", "user_id": "acc-1"}
+
+    class _FakeClient:
+        async def post(self, url, *, data):
+            captured["data"] = data
+            return _FakeResponse()
+
+    await exchange_code_for_short_lived_token(
+        _FakeClient(), code="c", redirect_uri="https://x/callback", code_verifier="verifier123",
+    )
+    assert captured["data"]["code_verifier"] == "verifier123"

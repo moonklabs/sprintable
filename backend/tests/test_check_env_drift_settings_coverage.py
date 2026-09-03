@@ -232,4 +232,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # infra/manual-env-allowlist.yml에도 등재)로 116→120. 가드가 신규 필드를 설계대로 잡은 것.
     assert "CHANNEL_CREDENTIAL_ENCRYPTION_KEY" in keys and "CHANNEL_OAUTH_STATE_SECRET" in keys
     assert "THREADS_APP_ID" in keys and "THREADS_APP_SECRET" in keys
-    assert len(keys) == 120
+    # story #3373(Phase1·마케팅운영, 2026-09-03 07:56Z 페드루 PO 리뷰): threads_pkce_enabled
+    # 1필드 추가 신설(PKCE code_challenge를 Meta가 거부할 때 재배포 없이 끄는 런타임
+    # 플래그, threads_oauth.py 참고)로 120→121. manual-env-allowlist.yml엔 미등재(시크릿이
+    # 아닌 bool 플래그라 cloudbuild.yaml --update-env-vars로 직접 배선 예정).
+    assert "THREADS_PKCE_ENABLED" in keys
+    assert len(keys) == 121

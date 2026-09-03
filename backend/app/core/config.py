@@ -360,6 +360,10 @@ class Settings(BaseSettings):
     # Threads(Meta) 서버 OAuth — Sprintable 공용 앱 1개, 조직별 토큰(channel_connections에 암호화 보관).
     threads_app_id: str = ""
     threads_app_secret: str = ""
+    # 페드루 PO 리뷰(2026-09-03 07:26Z·07:56Z) — Threads의 PKCE(code_challenge) 수용 여부가
+    # 문헌상 미확認이라, 실왕복에서 Meta가 거부하면(threads_oauth.py 참고) 재배포 없이 끄는
+    # 자리. 기본 True(PKCE 시도) — dev 실왕복 검증에서 거부되면 False로.
+    threads_pkce_enabled: bool = True
 
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
