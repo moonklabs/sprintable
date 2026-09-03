@@ -189,7 +189,12 @@ async def test_get_verified_org_id_403_on_foreign_org():
     auth = _make_auth(org_id=None, user_id=caller_id)  # JWT에 org_id 없음 → 헤더 fallback
 
     mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = None  # 멤버 아님
+    mock_result.scalar_one_or_none.return_value = None  # org_members 멤버 아님
+    # story f84227b5(2026-09-03) — _verify_org_membership이 이제 org_members 미스 시 agent
+    # TeamMember로 재확인한다(같은 mock_db.execute가 두 쿼리 다 처리). .first()도 None으로
+    # 명시해야 이 두 번째 쿼리가 "TeamMember도 없음"을 정확히 시뮬레이션한다 — 안 그러면
+    # MagicMock 기본 auto-mock이 truthy라 「멤버 아님」이 「멤버임」으로 새는 회귀(가드 무력화).
+    mock_result.first.return_value = None
     mock_db = AsyncMock()
     mock_db.execute = AsyncMock(return_value=mock_result)
     mock_request = MagicMock()
