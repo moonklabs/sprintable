@@ -467,6 +467,14 @@ async def publish_channel_post_draft(
     else:
         text_to_post = latest.text
 
+    # 페드루 PO 확定(2026-09-03) — draft 저장 시점(create_channel_post_draft_version)의
+    # 길이 검사는 `text`만 잰다. 발행 시점엔 UTM 태그된 링크가 덧붙어 실제 전송 문자열
+    # (`text_to_post`)이 더 길다 — 승인된 본문 혼자는 한도 밑이어도 링크 부착 후 넘을 수
+    # 있다(blocking, 그라운딩 §③에서 「재검사 확定 필요」로 남겼던 자리). 여기서 합성된
+    # 실제 전송 문자열을 재검사해 Threads 호출(한도 조회 포함) 0건으로 fail-closed —
+    # 기존 ChannelTextTooLongError를 그대로 재사용한다(max·current 둘 다 실림).
+    _validate_text_length(channel=draft.channel, text=text_to_post)
+
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             try:

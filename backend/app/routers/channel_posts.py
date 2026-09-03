@@ -283,6 +283,17 @@ async def publish_channel_post_draft_endpoint(
             status_code=403,
             detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
         ) from exc
+    except ChannelTextTooLongError as exc:
+        # 페드루 PO 확定(2026-09-03) — 발행 시점 재검사(UTM 태그된 링크가 붙은 실제 전송
+        # 문자열 기준). draft 생성 시점의 매핑(422·max_length·current_length)과 동형 —
+        # 코드 하나가 두 HTTP status를 갖지 않게 유지.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_TEXT_TOO_LONG", "message": str(exc),
+                "max_length": exc.max_length, "current_length": exc.current_length,
+            },
+        ) from exc
     except ChannelPostSealMissingError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "SITE_POST_SEAL_MISSING", "message": str(exc)},

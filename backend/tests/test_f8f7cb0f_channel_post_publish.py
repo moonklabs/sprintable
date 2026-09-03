@@ -863,3 +863,69 @@ async def test_no_token_leaks_in_response_or_error_bodies():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_time_length_recheck_with_utm_link_returns_422_zero_provider_calls():
+    """페드루 PO 확定(2026-09-03, #3752 blocking 리뷰) — draft 저장 시점(#3374)의 길이
+    검사는 `text`만 잰다. 발행 시점엔 UTM 태그된 link_url이 덧붙어 실제 전송 문자열이
+    더 길어질 수 있다 — 승인된 480자 본문 혼자는 한도(500) 밑이어도 링크 부착 후 넘으면
+    Threads 호출 0건·422 CHANNEL_TEXT_TOO_LONG으로 fail-closed(한도 조회보다 앞에서)."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.main import app
+
+    call_count = {"n": 0}
+
+    async def _fail_if_called(*args, **kwargs):
+        call_count["n"] += 1
+        raise AssertionError("Threads provider가 호출되면 안 된다 — 길이 재검사가 먼저 막아야 한다")
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        long_text = "가" * 480  # 단독으로는 한도(500) 밑 — draft 저장 시점 검사를 통과한다.
+        long_link = "https://sprintable.ai/ko/blog/" + "x" * 60  # UTM 부착 뒤 100자 이상 추가된다.
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            draft_id, gate_id = await _seed_and_submit_and_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                text=long_text, link_url=long_link,
+            )
+
+        with (
+            patch.object(tp, "get_publishing_limit", AsyncMock(side_effect=_fail_if_called)),
+            patch.object(tp, "create_container", AsyncMock(side_effect=_fail_if_called)),
+            patch.object(tp, "publish_container", AsyncMock(side_effect=_fail_if_called)),
+        ):
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+            async with _client_for(app) as client:
+                r_publish = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+        assert r_publish.status_code == 422, r_publish.text
+        body = r_publish.json()
+        assert body["error"]["code"] == "CHANNEL_TEXT_TOO_LONG"
+        assert body["error"]["max_length"] == 500
+        assert body["error"]["current_length"] > 500
+        assert call_count["n"] == 0, "Threads provider 호출이 0건이어야 한다(한도 조회 포함)"
+
+        async with Session() as s:
+            from app.models.channel_publication import ChannelPublication
+            from sqlalchemy import select
+
+            rows = (await s.execute(select(ChannelPublication).where(
+                ChannelPublication.gate_id == gate_id,
+            ))).scalars().all()
+        assert rows == [], "provider 호출 전 거부됐으므로 ChannelPublication 행이 생기면 안 된다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
