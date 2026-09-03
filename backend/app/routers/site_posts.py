@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from app.services.site_posts import (
     list_site_post_draft_versions,
     list_site_post_drafts,
     publish_site_post,
+    publish_site_post_from_draft,
     submit_site_post_draft,
 )
 
@@ -297,4 +298,66 @@ async def submit_site_post_draft_endpoint(
     return SubmitSitePostDraftResponse(
         gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
         status=gate.status,
+    )
+
+
+class PublishSitePostFromDraftResponse(BaseModel):
+    url: str
+    published_at: str
+    version_id: uuid.UUID
+
+
+@router.post(
+    "/{org_id}/site-posts/drafts/{draft_id}/publish", response_model=PublishSitePostFromDraftResponse,
+)
+async def publish_site_post_from_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> PublishSitePostFromDraftResponse:
+    """story #3369(Phase0 S3) — 휴먼이 승인된 최신 버전을 공개한다. draft_id 하나로 서버가
+    직접 최신 버전·게이트를 읽는다(발행 화면이 본문을 다시 보낼 필요 없음 — S4 계약).
+
+    가드 순서(AC2·AC3): ①에이전트 호출자 차단(SITE_POST_PUBLISH_HUMAN_ONLY) → ②게이트
+    approved 재검증(EXTERNAL_PUBLISH_APPROVAL_REQUIRED, auto_passed도 거부) → ③봉인
+    재검증(SEAL_MISSING/REAPPROVAL_REQUIRED)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    if await is_agent_caller(db, org_id=org_id, member_id=uuid.UUID(auth.user_id)):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "SITE_POST_PUBLISH_HUMAN_ONLY",
+                "message": "글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출).",
+            },
+        )
+
+    try:
+        post, url, version_id = await publish_site_post_from_draft(
+            db, org_id=org_id, draft_id=draft_id, published_by_member_id=uuid.UUID(auth.user_id),
+            backend_base_url=str(request.base_url),
+        )
+    except SitePostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ExternalPublishGateNotApprovedError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+    except SitePostSealMissingError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "SITE_POST_SEAL_MISSING", "message": str(exc)},
+        ) from exc
+    except SitePostReapprovalRequiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+
+    return PublishSitePostFromDraftResponse(
+        url=url, published_at=post.published_at.isoformat(), version_id=version_id,
     )

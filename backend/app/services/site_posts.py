@@ -173,24 +173,47 @@ async def publish_site_post(
     if current_hash != gate.sealed_content_sha256:
         raise SitePostReapprovalRequiredError(gate_id=gate.id)
 
+    row = await _upsert_site_post_row(
+        db, org_id=org_id, work_item_id=work_item_id, gate_id=gate.id, title=title, slug=slug,
+        lang=lang, summary=summary, tags=tags, body_md=body_md, created_by_member_id=created_by_member_id,
+    )
+    await db.commit()
+    return row
+
+
+async def _upsert_site_post_row(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    work_item_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    title: str,
+    slug: str,
+    lang: str,
+    summary: str,
+    tags: list,
+    body_md: str,
+    created_by_member_id: uuid.UUID,
+) -> SitePost:
+    """story #3369(Phase0 S3) 추출 — publish_site_post(레거시 endpoint)와
+    publish_site_post_from_draft(신규 draft 기반 endpoint) 둘 다 같은 upsert가 필요해
+    갈랐다. commit은 호출자 몫(신규 경로는 같은 트랜잭션에 activity_log를 얹는다)."""
     now = datetime.now(timezone.utc)
     stmt = pg_insert(SitePost).values(
         id=uuid.uuid4(), org_id=org_id, lang=lang, slug=slug, title=title, summary=summary,
         tags=tags, body_md=body_md, published_at=now, source_story_id=work_item_id,
-        gate_id=gate.id, created_by_member_id=created_by_member_id, unpublished_at=None,
+        gate_id=gate_id, created_by_member_id=created_by_member_id, unpublished_at=None,
     )
     stmt = stmt.on_conflict_do_update(
         constraint="uq_site_posts_org_lang_slug",
         set_={
             "title": title, "summary": summary, "tags": tags, "body_md": body_md,
-            "published_at": now, "source_story_id": work_item_id, "gate_id": gate.id,
+            "published_at": now, "source_story_id": work_item_id, "gate_id": gate_id,
             "unpublished_at": None, "updated_at": now,
             # created_by_member_id는 최초 발행자 그대로 — 재발행이 저자를 안 바꾼다.
         },
     ).returning(SitePost)
-    row = (await db.execute(stmt)).scalar_one()
-    await db.commit()
-    return row
+    return (await db.execute(stmt)).scalar_one()
 
 
 async def get_published_site_post(db: AsyncSession, *, org_id: uuid.UUID, lang: str, slug: str) -> SitePost | None:
@@ -487,3 +510,110 @@ async def submit_site_post_draft(
     await db.commit()
     await db.refresh(gate)
     return gate, target.id
+
+
+# ─── story #3369(Phase0 S3) — 승인본만 서버가 공개, URL, platform 감사 ─────────────
+
+async def _resolve_public_url(
+    db: AsyncSession, *, org_id: uuid.UUID, lang: str, slug: str, backend_base_url: str,
+) -> str:
+    """사람용 URL 조립 — 조직 설정 `site` 커넥터의 org_config.site_base_url이 있으면
+    그것 + `/{lang}/blog/{slug}`(PO 보정, doc 62fc03ee §4). 없으면(오늘은 어느 org도
+    `site` 커넥터를 등록하지 않았다 — 실측 확認) 공개 API URL로 fallback한다(AC4: "설정이
+    없으면 공개 API URL을 반환"). 새 env 상수를 만들지 않는다 — 공개 API가 이 백엔드
+    자신이 서빙하는 라우트라 호출 시점의 `request.base_url`(backend_base_url)로 충분하다."""
+    from app.services.connector_registry import get_org_connector
+
+    connector = await get_org_connector(db, org_id=org_id, connector_key="site")
+    site_base_url = None
+    if connector is not None:
+        raw = connector.org_config.get("site_base_url")
+        if isinstance(raw, str) and raw.strip():
+            site_base_url = raw.rstrip("/")
+
+    if site_base_url is not None:
+        return f"{site_base_url}/{lang}/blog/{slug}"
+
+    from app.services.pageview_counter import get_or_create_active_key
+
+    public_key = await get_or_create_active_key(db, org_id=org_id)
+    return f"{backend_base_url.rstrip('/')}/api/v2/public/site-posts/{slug}?public_key={public_key}&lang={lang}"
+
+
+async def publish_site_post_from_draft(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    published_by_member_id: uuid.UUID,
+    backend_base_url: str,
+) -> tuple[SitePost, str, uuid.UUID]:
+    """story #3369(Phase0 S3) AC1~AC5 — draft의 최신 버전을, 그 버전을 봉인한
+    external_publish 게이트가 실제로 `approved`일 때만 공개 projection에 반영한다.
+
+    레거시 `publish_site_post`(POST /site-posts, 호출자가 본문 전체를 다시 보낸다)와
+    달리 이 경로는 draft_id 하나로 최신 버전을 서버가 직접 읽는다(위조 불가). 게이트
+    상태는 `approved` **정확히 일치**로만 인정한다(`auto_passed`도 거부 — 뮤테이션
+    대상: 이 검사를 `_APPROVED_STATUSES` 세트로 완화하면 회귀 테스트가 반드시 실패해야
+    한다. 레거시 경로가 auto_passed를 허용하는 것과 의도적으로 다르다 — Phase 0
+    external_publish는 항상-수동 게이트라 auto_passed 분기가 원래 도달 불가능하지만
+    (S1 doc 62fc03ee §3-1 각주), 이 새 endpoint 자신의 계약으로 한 번 더 못박는다).
+
+    봉인 재검증(SitePostSealMissingError/SitePostReapprovalRequiredError)은 레거시
+    publish_site_post와 이제 완전히 같은 규칙이다(페드루 PO 리뷰 2026-09-03 05:59Z로
+    레거시도 fail-closed가 됐다 — 최초 구현 당시엔 레거시가 더 관대했으나 그 차이는
+    리뷰로 없어졌다). gates.py의 approve 전이 가드(SITE_POST_RESUBMIT_REQUIRED, 페드루
+    PO 06:06Z)가 이미 "옛 봉인을 승인"하는 경로 자체를 막아, approved인데 해시가 다른
+    행은 정상 경로로 이중으로 도달 불가능하다 — 그래도 방어망으로 남긴다."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+
+    versions = await list_site_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise SitePostDraftNotFoundError(draft_id)
+    latest = versions[-1]
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    gate = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type="external_publish", pr_number=None, repo_full_name=None,
+    )
+    if gate is None or gate.status != "approved":
+        raise ExternalPublishGateNotApprovedError(
+            gate_id=gate.id if gate is not None else None,
+            status=gate.status if gate is not None else None,
+        )
+
+    if gate.sealed_content_sha256 is None:
+        raise SitePostSealMissingError(gate_id=gate.id)
+    if gate.sealed_content_sha256 != latest.body_sha256:
+        raise SitePostReapprovalRequiredError(gate_id=gate.id)
+
+    post = await _upsert_site_post_row(
+        db, org_id=org_id, work_item_id=draft.work_item_id, gate_id=gate.id,
+        title=latest.title, slug=draft.slug, lang=latest.lang, summary=latest.summary,
+        tags=latest.tags, body_md=latest.body_md, created_by_member_id=published_by_member_id,
+    )
+    url = await _resolve_public_url(
+        db, org_id=org_id, lang=latest.lang, slug=draft.slug, backend_base_url=backend_base_url,
+    )
+
+    # AC5 — 승인 actor(human)는 게이트 승인 시점에 이미 별도로 기록된다(gate_service.py 몫,
+    # 이 함수가 새로 만들지 않는다). 여기서 기록하는 것은 "공개 projection 반영"이라는
+    # platform의 기계적 실행 그 자체 — actor_type=platform·actor_id=None(사람이 아니라
+    # 플랫폼이 한 일이라는 구분이 AC의 핵심), 누가 눌렀는지는 context에 보존한다.
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="site_post_published", actor_type="platform", actor_id=None,
+        entity_type="site_post", entity_id=post.id,
+        context={
+            "gate_id": str(gate.id), "version_id": str(latest.id), "url": url,
+            "published_by_member_id": str(published_by_member_id),
+        },
+    )
+    await db.commit()
+    await db.refresh(post)
+    return post, url, latest.id
