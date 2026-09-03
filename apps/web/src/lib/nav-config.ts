@@ -14,6 +14,7 @@ import {
   Newspaper,
   Plug,
   Settings,
+  Share2,
   Shield,
   Users,
   Users2,
@@ -151,6 +152,10 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events' },
       // story 4180f67f — 마케팅자동화 발행 커넥터(threads/stibee/instagram 등) org_config 설정 화면.
       { id: 'org-connectors', labelKey: 'orgConnectors', icon: Plug, kind: 'static', path: '/organization/connectors' },
+      // story #3376(PO 확定, 2026-09-03) — 소셜 채널 OAuth 연결(조직이 소유한 외부 계정·토큰).
+      // org-connectors(위, «에이전트가 쓰는 도구 계약»)와 주체·수명이 달라 별도 라우트로
+      // 분리한다 — 한 페이지 탭으로 섞으면 "연결"이라는 같은 말을 두 뜻으로 읽는다(PO 판단).
+      { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels' },
     ],
   },
   {

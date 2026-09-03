@@ -16,9 +16,16 @@ import {
  *
  * ⚠️opacity를 절대 쓰지 않는다(§8-3 "이 절이 고치는 내 앞선 말" — computed style은
  * opacity를 합성 못 해 측정이 조용히 새는 자리다).
+ *
+ * story #3386(2026-09-03) — status===undefined(판별 불가, deriveContentPostStatus의 AC6
+ * 분기)면 색 있는 칩이 아니라 AuthorKindBadge와 같은 평문 「—」를 그린다(같은 번역 키
+ * originAuthorUnknown 재사용 — "모른다"는 도메인 무관 같은 말이라 두 벌을 안 둔다).
  */
-export function StatusChip({ status }: { status: ContentPostStatus }) {
+export function StatusChip({ status }: { status: ContentPostStatus | undefined }) {
   const t = useTranslations('content');
+  if (status === undefined) {
+    return <span className="text-sm text-muted-foreground">{t('originAuthorUnknown')}</span>;
+  }
   const tone = CONTENT_POST_STATUS_TONE[status];
   return (
     <span

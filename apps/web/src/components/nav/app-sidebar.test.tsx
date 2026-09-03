@@ -94,7 +94,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고', '콘텐츠'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
-  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터'] },
+  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터', '채널'] },
   { labelKey: null, labels: ['설정'] },
 ];
 
@@ -108,7 +108,8 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // (위 EXPECTED_GROUPS 주석 참고). story #3179(S3c) — '대시보드'(/dashboard) 항목 자체가
 // nav에서 빠져(chat으로 이사·중복 목적지 제거) 챗 제외 19→18항목. story 4180f67f — 조직
 // 그룹에 '커넥터'(/organization/connectors) 추가돼 챗 제외 18→19항목. story #3368 — 워크
-// 그룹에 '콘텐츠'(/content) 추가돼 챗 제외 19→20항목.
+// 그룹에 '콘텐츠'(/content) 추가돼 챗 제외 19→20항목. story #3376 — 조직 그룹에 '채널'
+// (/organization/channels) 추가돼 챗 제외 20→21항목.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '구성원': '/organization/members',
   '워크포스': '/organization/workforce',
@@ -117,6 +118,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '기억': '/organization/memory',
   '이벤트': '/organization/events',
   '커넥터': '/organization/connectors',
+  '채널': '/organization/channels',
   '조직 브리핑': '/org-briefing',
   '알림': '/inbox',
   '보드': '/flow',

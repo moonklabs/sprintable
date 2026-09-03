@@ -765,12 +765,26 @@ jobs:
 
   # story #2293(2026-07-28) — destructive_schema 94개 파일 순차 격리 루프(파일마다 fresh
   # throwaway DB 생성/드롭)가 25분 천장에 붙었다(PR #2576 conclusion=cancelled, 77/94까지
-  # 전부 pass하고 시간만 모자라 잘림 — 빨간 것은 0건). 개별 테스트는 안 느리다(2026-07-28
-  # 실측 최대 16.24초, `infra/destructive-schema-shard-weights.json`) — 파일마다 붙는
-  # dropdb/createdb/CREATE EXTENSION 오버헤드가 94번 누적된 것이 벽시계 대부분이었다.
-  # `backend/scripts/shard_destructive_tests.py`가 그 오버헤드를 4-way로 병렬화한다
-  # (`test_shard_destructive_tests.py::test_partition_is_lossless_for_any_input`이 무손실을
-  # 고정 — 파일이 조용히 안 도는 샤드 경계 실패를 막는다).
+  # 전부 pass하고 시간만 모자라 잘림 — 빨간 것은 0건). 개별 테스트는 안 느리다 — 파일마다
+  # 붙는 dropdb/createdb/CREATE EXTENSION/create_all() 오버헤드가 누적된 것이 벽시계
+  # 대부분이었다. `backend/scripts/shard_destructive_tests.py`가 그 오버헤드를 4-way로
+  # 병렬화한다(`test_shard_destructive_tests.py::test_partition_is_lossless_for_any_input`이
+  # 무손실을 고정 — 파일이 조용히 안 도는 샤드 경계 실패를 막는다).
+  #
+  # story #3383(2026-09-03) — 파일 수가 94→200으로 늘며(+113%, 재측정 기준 (a) 자동 위반)
+  # create_all() 반복 자체가 다시 벽시계를 지배했다. "Build destructive-schema template DB"
+  # 스텝이 스키마를 샤드당 한 번만 만들어 템플릿으로 굳히고, 이후 매 파일은 그 템플릿을
+  # `createdb -T`로 복제(파일시스템 레벨, 초 단위)한다 — 자세한 이유는 그 스텝의 주석·
+  # `scripts/build_destructive_schema_template.py` docstring. **가중치 재측정 규칙**(AC2)
+  # — `infra/destructive-schema-shard-weights.json`은 실시간 측정이 아니다:
+  #   (a) discover 파일 수가 스냅샷 대비 +20% 이상 늘면(`shard_destructive_tests.py`의
+  #       `check_staleness()`가 매 실행 stderr에 경고를 찍는다 — CI를 막지는 않는다),
+  #   (b) 어느 샤드의 CI 벽시계가 다른 샤드 대비 1.5배 이상 벌어지면,
+  #   (c) 25분 천장 대비 여유가 다시 좁아지면(p95 15분 초과 — story #2285 AC4 기준 계승)
+  #   — 셋 중 하나라도 해당하면 재측정한다. 방법: 이 job의 "Run pytest" 스텝이 각 파일
+  #   실행 직전/직후 `date +%s`로 잰 elapsed를 로그에 남긴다(위 루프의 `_elapsed` 변수) —
+  #   그 값을 파일별로 모아 weights.json의 `files` 배열과 `total_files`/`total_sec`/
+  #   `measured_at`을 갱신한다(사람 손으로, 또는 로그 파싱 스크립트로 — 지금은 수동).
   #
   # ⛔이 job은 develop 필수 상태 체크가 아니다(파울로군 실측, 2026-07-28: 필수 체크는
   # "Backend pytest"·"Lint, Type Check, Test, Build"·"Alembic upgrade head (fresh DB)" 셋
@@ -785,12 +799,12 @@ jobs:
     # (backend-test의 필수 판정 근거) cascade로 스킵된다.
     if: always()
     runs-on: ubuntu-latest
-    # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 각 샤드 4~6분 → 천장 25분 대비
-    # 여유 19~21분. 이 값은 story #2293(destructive-schema를 이 job으로 4-way 샤딩)이 옮겨온
-    # 뒤의 실측이라, 그 전(같은 job이 94개를 순차로 다 돌던 시절, 15m58s~18m32s·여유 6.5분)과
-    # 는 다른 상태다. 재검 기준: 이 샤드의 p95가 15분을 넘으면 값을 다시 본다(⛔"자주 터지니
-    # 올린다"가 아니라 근거 먼저 — story #2285 AC4).
-    timeout-minutes: 25
+    # story #3383 AC3/AC4(2026-09-03 실측, 이 PR CI run 33750476433, 템플릿 DB 적용 후):
+    # 4샤드 9m31s·10m8s·9m21s·8m58s — 최대 10m8s·편차 1m10s(AC3 기준 12분/3분 이내 통과).
+    # 천장은 실측 최대의 2배 이내로(AC4 — 25 유지 금지: 한도가 헐거우면 다음 편중을 늦게
+    # 안다). 재검 기준(story #2285 AC4 계승): 이 샤드의 p95가 15분을 넘으면 값을 다시 본다
+    # (⛔"자주 터지니 올린다"가 아니라 근거 먼저).
+    timeout-minutes: 20
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
       matrix:
@@ -836,11 +850,31 @@ jobs:
             > /tmp/shard_files.txt
           echo "이 샤드(${{ matrix.shard }}) 파일 수: $(wc -l < /tmp/shard_files.txt)"
 
+      # story #3383(AC1) — destructive_schema 파일이 94→200개로 늘며(2026-07-28→09-03)
+      # 파일마다 자기 안에서 부르는 `Base.metadata.create_all()`(전체 스키마, 161개 테이블)
+      # 반복이 벽시계를 지배하게 됐다(로컬 재현: 파일당 create_all이 setup 시간의 대부분).
+      # 이 스키마를 이 샤드에서 딱 한 번만 만들어 템플릿으로 굳혀 두면, 이후 매 파일은
+      # `createdb -T`(파일시스템 레벨 복제, 초 단위)로 이미 스키마 있는 DB를 받는다 — 파일
+      # 자신의 create_all() 호출은 SQLAlchemy 기본 checkfirst=True라 그대로 안전하게 no-op이
+      # 된다(테스트 파일은 한 줄도 안 고친다).
+      - name: Build destructive-schema template DB (story #3383)
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        working-directory: backend
+        run: |
+          PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_tpl
+          PGPASSWORD=sprintable createdb -h localhost -U sprintable sprintable_test_tpl
+          PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test_tpl \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_tpl \
+          uv run python scripts/build_destructive_schema_template.py
+
       # story 8236bbc3: destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체
       # 스키마 직접 관리)은 alembic-migrated 공유 DB에서 절대 실행하지 않는다 — 실측대로
       # drop_all()이 DB를 오염시켜 같은 세션 후속 테스트 전부를 연쇄 실패시킬 수 있다.
       # 파일마다 독립 throwaway DB(sprintable_test_iso)로 완전 격리한다(샤딩 전과 동일 원칙 —
-      # 바뀐 것은 «몇 개를 도는가»이지 «어떻게 격리하는가»가 아니다).
+      # 바뀐 것은 «몇 개를 도는가»이지 «어떻게 격리하는가»가 아니다). story #3383: 이제 그
+      # throwaway DB를 맨바닥(createdb+CREATE EXTENSION)이 아니라 위에서 만든 템플릿에서
+      # 복제한다(sprintable_test_tpl) — 격리 보장은 그대로(파일마다 독립 DB, 끝나면 drop).
       - name: Run pytest (destructive schema — isolated fresh DB per file, this shard)
         if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
@@ -851,20 +885,33 @@ jobs:
           mapfile -t files < /tmp/shard_files.txt
           echo "destructive files (shard ${{ matrix.shard }}): ${#files[@]}"
           failed_files=()
+          # story #3383(AC5) — 파일 하나가 60초를 넘으면 경고가 아니라 실패로 알린다. 이
+          # 가드는 "이 샤드 안에서 순차 실행되는 한 파일의 벽시계"만 잰다 — pytest-xdist 등
+          # 파일 내부 병렬화가 생기면 이 측정 단위 자체가 안 맞아진다(그 경우는 여기서
+          # 못 잡는다, 지금은 파일 내부가 순차라 유효).
+          slow_files=()
           for f in "${files[@]}"; do
             echo "::group::isolated $f"
             PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
-            PGPASSWORD=sprintable createdb -h localhost -U sprintable sprintable_test_iso
-            PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test_iso \
-              -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+            PGPASSWORD=sprintable createdb -h localhost -U sprintable -T sprintable_test_tpl sprintable_test_iso
+            _t0=$(date +%s)
             ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             uv run pytest -q "$f" || failed_files+=("$f")
+            _elapsed=$(( $(date +%s) - _t0 ))
+            echo "elapsed: ${_elapsed}s"
+            if [ "$_elapsed" -gt 60 ]; then
+              slow_files+=("$f (${_elapsed}s)")
+            fi
             echo "::endgroup::"
           done
           if [ "${#failed_files[@]}" -gt 0 ]; then
             echo "FAILED files: ${failed_files[*]}"
+            exit 1
+          fi
+          if [ "${#slow_files[@]}" -gt 0 ]; then
+            echo "::error::60초 한도 초과 파일(story #3383 AC5): ${slow_files[*]}"
             exit 1
           fi
           echo "OK: all ${#files[@]} isolated destructive-schema files passed (shard ${{ matrix.shard }})"
