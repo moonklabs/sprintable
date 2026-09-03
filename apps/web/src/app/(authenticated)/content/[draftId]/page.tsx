@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -16,6 +16,7 @@ import {
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -65,6 +66,16 @@ interface GateInfo {
   reapproval_required?: boolean;
 }
 
+// story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — GET .../drafts/{draftId}/publication.
+// 발행된 적 없으면(또는 unpublish됐으면) 서버가 전부 null을 준다(200 — 404는 draft 자체가
+// 없을 때만, "모른다"와 "발행 안 됐다"를 구별하는 서버측 신호).
+interface SitePostPublicationInfo {
+  published_at: string | null;
+  url: string | null;
+  published_by_member_id: string | null;
+  published_body_sha256: string | null;
+}
+
 function realStr(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
@@ -94,7 +105,7 @@ function RawDetailsToggle({ raw, label }: { raw: string | undefined; label: stri
 
 export default function ContentPostEditPage() {
   const { draftId } = useParams<{ draftId: string }>();
-  const { orgId } = useDashboardContext();
+  const { orgId, role } = useDashboardContext();
   const t = useTranslations('content');
 
   const [versions, setVersions] = useState<SitePostVersion[]>([]);
@@ -127,6 +138,21 @@ export default function ContentPostEditPage() {
     // 해시·latest 현재 해시) 그걸로 병치한다 — 서버 응답을 지어내지 않는다.
     | { type: 'error'; text: string; raw?: string; reapprovalHashes?: { sealed?: string; current: string } }
     | null
+  >(null);
+
+  // story #3386 — S8(발행됨·URL·행위자). undefined=아직 안 물어봤다(첫 렌더), null=물어봤는데
+  // 실패(best-effort — gate 조회와 동형, 화면 전체를 막지 않는다), 객체=성공(발행 안 됐어도
+  // 전부 null 필드로 옴 — 그 자체가 "안다"는 신호라 undefined와는 다르다, AC6).
+  const [publication, setPublication] = useState<SitePostPublicationInfo | null | undefined>(undefined);
+  // 페드루 PO 리뷰(2026-09-03, 유나 design verdict) — 발행자가 UUID 그대로 보이는 문제.
+  // gates/[id]/page.tsx의 memberNames 관례(id→이름, /api/team-members, 못 찾으면 앞 8자
+  // 폴백) 그대로 재사용한다 — publication 계약을 늘리지 않는다(이름 필드를 새로 추가하지
+  // 않는다).
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  const [unpublishing, setUnpublishing] = useState(false);
+  const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
+  const [unpublishResult, setUnpublishResult] = useState<
+    { type: 'success' } | { type: 'error'; text: string; raw?: string } | null
   >(null);
 
   useEffect(() => {
@@ -190,21 +216,69 @@ export default function ContentPostEditPage() {
     }
   }, [orgId, workItemId]);
 
+  // story #3386 — 원인 진단이 지목한 그 자리(FE가 hasPublishedSitePost를 undefined로
+  // 고정해 두던 계약 갭)를 여기서 채운다. best-effort(gate 조회와 동형) — 실패해도
+  // publication=null(=모른다)로 남을 뿐 화면 전체를 막지 않는다.
+  //
+  // story #3385(PO 병합 지시 2026-09-03 13:23Z) — loadGate와 같은 이유로 useCallback화:
+  // «발행됨→재승인 필요» 전환도 저장·상신·발행 성공 뒤 리로드 없이 보여야 한다(AC1 「상태를
+  // 바꾸는 모든 액션 뒤 파생 입력을 다시 읽는다」는 gate 하나만의 규칙이 아니다).
+  const loadPublication = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publication`);
+      if (!res.ok) {
+        setPublication(null);
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: SitePostPublicationInfo } | null;
+      setPublication(json?.data ?? null);
+    } catch {
+      setPublication(null);
+    }
+  }, [orgId, draftId]);
+
   useEffect(() => {
     void loadGate();
-  }, [loadGate]);
+    void loadPublication();
+  }, [loadGate, loadPublication]);
+
+  // gates/[id]/page.tsx:110-127과 동형 — published_by_member_id별로 한 번만 시도(ref로
+  // 추적, 응답 목록에 없는 id면 setMemberNames가 매번 새 객체를 만들어 무한 재실행되는
+  // 사전 버그를 그쪽에서 이미 겪었다).
+  const fetchedPublisherIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = publication?.published_by_member_id;
+    if (!id || fetchedPublisherIdRef.current === id) return;
+    fetchedPublisherIdRef.current = id;
+    void fetchWithAuth('/api/team-members')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: { id: string; name: string }[] } | null) => {
+        if (!json?.data) return;
+        const names: Record<string, string> = {};
+        for (const m of json.data) names[m.id] = m.name;
+        setMemberNames((prev) => ({ ...prev, ...names }));
+      })
+      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+  }, [publication?.published_by_member_id]);
 
   // story #3368 §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 재승인 필요는 gate.
   // reapproval_required(서버 판정)를 그대로 읽는다. sealed_content_sha256은 이제 approved
   // 분기의 방어망 전용(정상 경로로는 도달 불가 — gates.py 가드가 이중 차단)이다.
   // publishable·blockedReason은 status와 다른 축: approved인데 봉인 값이 없어 "확인 불가"
   // 인 경우도 status는 approved로 남고 publishable만 false다(SEAL_MISSING).
-  const { status: derivedStatus, publishable, blockedReason } = deriveContentPostStatus({
+  //
+  // story #3386 — hasPublishedSitePost는 이제 undefined 고정이 아니다: publication이
+  // 아직 안 왔거나(undefined) 조회가 실패했으면(null) 여전히 undefined(=모른다, AC6)로
+  // 넘기고, 실제로 온 뒤에야 published_at!=null로 판정한다. publishedBodySha256도 같은
+  // 축(재발행 가능 여부, AC2).
+  const { status: derivedStatus, publishable, isRepublish, blockedReason } = deriveContentPostStatus({
     gateStatus: toGateStatus(gate?.status),
     reapprovalRequired: gate?.reapproval_required,
     sealedBodySha256: realStr(gate?.sealed_content_sha256),
     currentBodySha256: latest?.body_sha256,
-    hasPublishedSitePost: undefined, // S3(공개 projection) 착지 전 — 아직 판별 근거가 없다.
+    hasPublishedSitePost: publication ? publication.published_at != null : undefined,
+    publishedBodySha256: publication ? realStr(publication.published_body_sha256) : undefined,
   });
 
   const handleSave = async () => {
@@ -231,10 +305,11 @@ export default function ContentPostEditPage() {
           const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
           if (json?.data) setVersions(json.data);
         }
-        // story #3385(AC1) — approved 게이트를 편집하면 서버가 즉시 pending+reapproval_
-        // required로 되돌린다(§3-1-2-1). 새 버전만 반영하고 게이트를 안 다시 읽으면 화면은
-        // 여전히 옛 승인 상태를 보여준다 — 저장도 "상태를 바꾸는 액션"이다.
+        // story #3385(AC1)+#3386 — approved 게이트를 편집하면 서버가 즉시 pending+
+        // reapproval_required로 되돌린다(§3-1-2-1). 게이트뿐 아니라 발행 블록도 같은 훅으로
+        // 묶는다(PO 2026-09-03 13:23Z) — 저장도 "상태를 바꾸는 액션"이다.
         void loadGate();
+        void loadPublication();
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
@@ -269,9 +344,11 @@ export default function ContentPostEditPage() {
         const gateId = json?.data?.gate_id;
         if (gateId) {
           setSubmitResult({ type: 'success', gateId });
-          // story #3385(핵심 회귀) — 서버 게이트는 이미 pending인데 화면은 리로드 전까지
-          // 이전 상태(초안·재승인 필요)를 그대로 보였다. 상신 직후 파생 입력을 다시 읽는다.
+          // story #3385(핵심 회귀)+#3386 — 서버 게이트는 이미 pending인데 화면은 리로드
+          // 전까지 이전 상태(초안·재승인 필요)를 그대로 보였다. 상신 직후 두 파생 입력을
+          // 함께 다시 읽는다(PO 2026-09-03 13:23Z — 같은 훅으로 묶는다).
           void loadGate();
+          void loadPublication();
         } else {
           setSubmitResult({ type: 'error', text: t('submitFailed'), raw: JSON.stringify(json) });
         }
@@ -317,8 +394,11 @@ export default function ContentPostEditPage() {
         const url = json?.data?.url;
         if (publishedAt && url) {
           setPublishResult({ type: 'success', publishedAt, url });
-          // story #3385(AC1) — 발행 뒤에도 같은 규칙: 파생 입력을 다시 읽는다.
+          // story #3385(AC1)+#3386 — 발행 뒤에도 같은 규칙: 두 파생 입력을 함께 다시 읽는다
+          // (PO 병합 지시 2026-09-03 13:23Z — «발행됨→재승인 필요» 전환도 리로드 없이 보여야
+          // gate·publication이 같은 화면에서 서로 어긋나지 않는다).
           void loadGate();
+          void loadPublication();
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }
@@ -338,6 +418,38 @@ export default function ContentPostEditPage() {
       setPublishResult({ type: 'error', text: t('publishFailed') });
     } finally {
       setPublishing(false);
+    }
+  };
+
+  // story #3386(AC1 참고 — S8이 이 스토리와 짝인 story #3381/PR#3739의 엔드포인트를 부르는
+  // 것까지 요구) — 발행 취소. ConfirmDialog(story #2416 — native confirm() 금지)로 확인
+  // 받은 뒤에만 호출한다. 성공하면 publication을 다시 읽어 URL·버튼 상태가 즉시 반영되게
+  // 한다(페이지 새로고침 없이).
+  const handleUnpublish = async () => {
+    if (!orgId) return;
+    setUnpublishConfirmOpen(false);
+    setUnpublishing(true);
+    setUnpublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/unpublish`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setUnpublishResult({ type: 'success' });
+        void loadPublication();
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setUnpublishResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('unpublishFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setUnpublishResult({ type: 'error', text: t('unpublishFailed') });
+    } finally {
+      setUnpublishing(false);
     }
   };
 
@@ -363,6 +475,14 @@ export default function ContentPostEditPage() {
   const status = derivedStatus;
   const canPublish = publishable;
   const sealedHash = realStr(gate?.sealed_content_sha256);
+  // 페드루 PO 리뷰(2026-09-03) — [82d79b81] AC: "owner/admin만 활성 · member는 비활성 +
+  // 이유 문구(버튼 밖)". 서버 403(SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY)은 방어이지
+  // 안내가 아니다 — settings/page.tsx:330·org-members-section.tsx:343와 같은 role 소스
+  // (useDashboardContext().role)를 재사용한다, 새 조회를 만들지 않는다.
+  const canUnpublish = role === 'owner' || role === 'admin';
+  const publisherName = publication?.published_by_member_id
+    ? memberNames[publication.published_by_member_id] ?? publication.published_by_member_id.slice(0, 8)
+    : '—';
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
@@ -393,6 +513,71 @@ export default function ContentPostEditPage() {
           </AlertDescription>
         </Alert>
       ) : null}
+
+      {/* story #3386 AC1·AC3 — 공개 URL·발행 시각·행위자. status와 무관하게 publication이
+          있으면 보인다(AC3 "상태와 공개 여부는 두 축" — reapproval_needed여도 옛 버전은
+          여전히 공개 중이다). */}
+      {publication?.published_at ? (
+        <div
+          data-testid="content-publication-info"
+          className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm"
+        >
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
+            {publication.url ? (
+              <a href={publication.url} target="_blank" rel="noopener noreferrer" className="underline">
+                {publication.url}
+              </a>
+            ) : (
+              '—'
+            )}
+          </div>
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
+            {new Date(publication.published_at).toLocaleString()}
+          </div>
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
+            {publisherName}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setUnpublishConfirmOpen(true)}
+            disabled={!canUnpublish || unpublishing}
+          >
+            {unpublishing ? t('unpublishingCta') : t('unpublishCta')}
+          </Button>
+          {!canUnpublish ? (
+            <p className="text-xs text-muted-foreground">{t('unpublishDisabledReason')}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={unpublishConfirmOpen}
+        onOpenChange={setUnpublishConfirmOpen}
+        title={t('unpublishConfirmTitle')}
+        description={t('unpublishConfirmDescription')}
+        cancelLabel={t('unpublishConfirmCancel')}
+        confirmLabel={t('unpublishConfirmAction')}
+        onConfirm={() => void handleUnpublish()}
+      />
+
+      {unpublishResult && (
+        <Alert
+          variant={unpublishResult.type === 'success' ? 'success' : 'destructive'}
+          role={unpublishResult.type === 'success' ? 'status' : 'alert'}
+          aria-live={unpublishResult.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>
+            {unpublishResult.type === 'success' ? t('unpublishSuccess') : unpublishResult.text}
+          </AlertDescription>
+          {unpublishResult.type === 'error' ? <RawDetailsToggle raw={unpublishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
 
       {saveMessage && (
         <Alert
@@ -504,8 +689,12 @@ export default function ContentPostEditPage() {
             <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting}>
               {submitting ? t('submitPendingCta') : t('submitCta')}
             </Button>
+            {/* story #3386 AC2 — 발행된 글은 기본 잠금(canPublish=false), 재승인된 새
+                버전이 있을 때만(isRepublish) 다시 열리고 라벨이 「재발행」으로 바뀐다. */}
             <Button type="button" variant="outline" onClick={() => void handlePublish()} disabled={!canPublish || publishing}>
-              {publishing ? t('publishPendingCta') : t('publishCta')}
+              {publishing
+                ? (isRepublish ? t('publishRepublishingCta') : t('publishPendingCta'))
+                : (isRepublish ? t('publishRepublishCta') : t('publishCta'))}
             </Button>
           </div>
           {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
@@ -513,7 +702,11 @@ export default function ContentPostEditPage() {
               foreground on card 실측 5.92 — 통과, doc §6-2-1 그대로). */}
           {!canPublish ? (
             <p className="text-xs text-muted-foreground">
-              {blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+              {blockedReason === 'SEAL_MISSING'
+                ? t('publishDisabledReasonSealMissing')
+                : status === 'published'
+                  ? t('publishDisabledReasonAlreadyPublished')
+                  : t('publishDisabledReason')}
             </p>
           ) : null}
         </div>

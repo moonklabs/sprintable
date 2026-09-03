@@ -14,6 +14,21 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
     expect(result.humanMessageKey).toBe('errorPublishHumanOnly');
   });
 
+  // story #3386 — 「발행 취소」 버튼(story #3381, PR#3739)의 두 권한 오류.
+  test('알려진 코드(SITE_POST_UNPUBLISH_HUMAN_ONLY)', () => {
+    const result = parseSitePostApiError({ detail: { code: 'SITE_POST_UNPUBLISH_HUMAN_ONLY', message: '발행 취소는 휴먼 멤버만 가능합니다' } });
+    expect(result.humanMessageKey).toBe('errorUnpublishHumanOnly');
+    expect(result.kind).toBe('permission');
+  });
+
+  test('알려진 코드(SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY)', () => {
+    const result = parseSitePostApiError({
+      detail: { code: 'SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY', message: '발행 취소는 조직 owner 또는 admin만 가능합니다' },
+    });
+    expect(result.humanMessageKey).toBe('errorUnpublishOwnerOrAdminOnly');
+    expect(result.kind).toBe('permission');
+  });
+
   test('⭐모르는 코드 — 지어낸 문구로 덮지 않고 서버 원문 메시지를 그대로 fallback에 담는다', () => {
     const result = parseSitePostApiError({ detail: { code: 'SOME_FUTURE_S2_CODE', message: '아직 모르는 에러' } });
     expect(result.humanMessageKey).toBeUndefined();

@@ -21,6 +21,11 @@ from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
 from app.models.team import TeamMember
+from app.services.gate_seal import (
+    GateReapprovalRequiredError as SitePostReapprovalRequiredError,
+    GateSealMissingError as SitePostSealMissingError,
+    compute_seal_hash,
+)
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _LANG_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
@@ -49,28 +54,6 @@ class ExternalPublishGateNotApprovedError(Exception):
             else "이 work item에 승인된 external_publish 게이트가 없습니다"
         )
         super().__init__(detail)
-
-
-class SitePostReapprovalRequiredError(Exception):
-    """story #3365(Phase0 S2) AC6 — 승인된 버전(gate.sealed_content_sha256)과 지금 공개하려는
-    내용의 해시가 다르다."""
-
-    def __init__(self, *, gate_id: uuid.UUID):
-        self.gate_id = gate_id
-        super().__init__(f"승인된 버전과 현재 내용이 다릅니다(gate_id={gate_id}) — 재승인이 필요합니다")
-
-
-class SitePostSealMissingError(Exception):
-    """story #3365(Phase0 S2, 페드루 PO 리뷰 2026-09-03 05:59Z) — fail-closed. gate.status가
-    approved/auto_passed인데 sealed_content_sha256이 None(제출→봉인 없이 승인된 구식/우회
-    게이트)이면, "무엇이 승인됐는지 서버가 모른다"는 뜻이라 REAPPROVAL_REQUIRED(내용이
-    다르다는 걸 안다)와는 다른 별개 코드로 거부한다(유나 설계 §3-1-1 "모른다≠다르다").
-    S2 이전 이미 공개된 SitePost 행은 이 검사와 무관(projection 자체는 안 건드림) — 이
-    게이트로 다시 발행을 시도할 때만 막힌다(재발행은 submit()으로 재상신해 봉인부터)."""
-
-    def __init__(self, *, gate_id: uuid.UUID):
-        self.gate_id = gate_id
-        super().__init__(f"이 게이트는 봉인된 버전이 없습니다(gate_id={gate_id}) — 재상신 후 다시 승인받아야 합니다")
 
 
 class SitePostApproverRoleMissingError(Exception):
@@ -262,12 +245,10 @@ async def is_agent_caller(db: AsyncSession, *, org_id: uuid.UUID, member_id: uui
 
 def compute_body_sha256(*, title: str, lang: str, summary: str, tags: list, body_md: str) -> str:
     """canonical payload hash — S2가 승인 대상 버전을 봉인할 때(gate.sealed_content_sha256)
-    재사용할 같은 계산(페드루 PO 확定, 문서 62fc03ee §4-3: "content_sha256"이 이 값 그대로)."""
-    canonical = json.dumps(
-        {"title": title, "lang": lang, "summary": summary, "tags": tags, "body_md": body_md},
-        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    재사용할 같은 계산(페드루 PO 확定, 문서 62fc03ee §4-3: "content_sha256"이 이 값 그대로).
+    story #3374 — 실 계산은 gate_seal.compute_seal_hash(공용)로 옮기고, 여기는 site_posts
+    도메인의 payload dict 조립부(title/lang/summary/tags/body_md 서명)만 남는다."""
+    return compute_seal_hash({"title": title, "lang": lang, "summary": summary, "tags": tags, "body_md": body_md})
 
 
 # story #3365(Phase0 S2) — Phase 0엔 미디어가 없어(S1) manifest는 항상 빈 배열 → 이 해시는
@@ -627,6 +608,76 @@ async def publish_site_post_from_draft(
     await db.commit()
     await db.refresh(post)
     return post, url, latest.id
+
+
+class SitePostPublicationInfo:
+    """story #3386(Phase0 결함, 유나 원인 진단·페드루 PO 확定 2026-09-03) — 상세 화면 S8
+    (발행됨·URL·행위자) 계약. 필드명은 목록 계약(story 0b72a300)과 한 벌: `published_at`
+    하나로 발행 여부가 서고 별도 boolean은 두지 않는다."""
+
+    __slots__ = ("published_at", "url", "published_by_member_id", "published_body_sha256")
+
+    def __init__(
+        self, *, published_at: datetime | None, url: str | None,
+        published_by_member_id: uuid.UUID | None, published_body_sha256: str | None,
+    ):
+        self.published_at = published_at
+        self.url = url
+        self.published_by_member_id = published_by_member_id
+        self.published_body_sha256 = published_body_sha256
+
+
+_EMPTY_PUBLICATION_INFO = SitePostPublicationInfo(
+    published_at=None, url=None, published_by_member_id=None, published_body_sha256=None,
+)
+
+
+async def get_site_post_publication_info(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, backend_base_url: str,
+) -> SitePostPublicationInfo:
+    """이 draft의 현재 공개 상태를 상세 화면이 그대로 그릴 수 있는 형태로 반환한다.
+    발행된 적이 없으면(또는 이미 unpublish됐으면) 전부 None — 404가 아니라 200(draft 자체가
+    없는 경우만 SitePostDraftNotFoundError, §AC6 "파생 입력이 없으면 단정하지 않는다"의
+    서버측 대응 — FE가 "모른다"와 "발행 안 됐다"를 구별하려면 이 둘이 서로 다른 신호여야
+    한다: draft 자체가 없다=404, 발행 안 됐다=200+null 전부).
+
+    조회 축은 unpublish_site_post()(story #3381)와 동일 — draft.slug + 최신 버전 lang이
+    _upsert_site_post_row가 실제 쓰는 유일키 (org_id, lang, slug) 그대로다(다국어 행 혼선
+    방지, 페드루 PO 코드리뷰 2026-09-03 11:02Z 그 자리).
+
+    `published_body_sha256`은 목록/상세 어느 계약표에도 없던 신규 필드(디디 판단, AC2
+    "재발행" 버튼 활성화 조건을 풀려면 "지금 라이브인 본문"과 "지금 승인된(sealed) 본문"이
+    다른지 비교할 축이 하나 더 필요하다 — gate_status/reapproval_required만으로는 "막
+    발행했다"와 "재승인 후 아직 재발행 안 눌렀다"를 구별 못 한다, 두 경우 다 approved+
+    hasPublishedSitePost=true로 동일하게 보인다)."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+
+    versions = await list_site_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        return _EMPTY_PUBLICATION_INFO
+    latest_lang = versions[-1].lang
+
+    post = (await db.execute(
+        select(SitePost).where(
+            SitePost.org_id == org_id, SitePost.lang == latest_lang, SitePost.slug == draft.slug,
+            SitePost.unpublished_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if post is None:
+        return _EMPTY_PUBLICATION_INFO
+
+    url = await _resolve_public_url(
+        db, org_id=org_id, lang=post.lang, slug=post.slug, backend_base_url=backend_base_url,
+    )
+    published_body_sha256 = compute_body_sha256(
+        title=post.title, lang=post.lang, summary=post.summary, tags=post.tags, body_md=post.body_md,
+    )
+    return SitePostPublicationInfo(
+        published_at=post.published_at, url=url,
+        published_by_member_id=post.created_by_member_id, published_body_sha256=published_body_sha256,
+    )
 
 
 # ─── story #3381(Phase0 후속·결함) — 발행 취소(비공개) ─────────────────────────────

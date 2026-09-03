@@ -136,6 +136,8 @@ from app.models.org_pageview_daily import OrgPageviewDaily
 from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
+from app.models.channel_post_draft import ChannelPostDraft
+from app.models.channel_post_version import ChannelPostVersion
 
 __all__ = [
     "RoleTemplate",

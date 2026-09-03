@@ -37,7 +37,10 @@ const ORG_ID = 'org-1';
 const DRAFT_ID = 'd1';
 
 beforeEach(() => {
-  useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [] });
+  // 페드루 PO 리뷰(2026-09-03) — 발행 취소 버튼 role 게이팅 기본값은 'owner'(기존 22개
+  // 테스트가 전부 "권한 있음" 전제로 버튼 클릭을 검증해 왔다). member 케이스는 개별
+  // 테스트가 이 값을 owner/admin이 아닌 값으로 덮어쓴다.
+  useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'owner' });
   useParamsMock.mockReturnValue({ draftId: DRAFT_ID });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -70,7 +73,19 @@ function stubFetchWithVersions(
   versions: unknown[],
   onSave?: (body: unknown) => { status: number; body: unknown },
   onSubmit?: (body: unknown) => { status: number; body: unknown },
-  opts?: { gates?: unknown[]; onPublish?: () => { status: number; body: unknown } },
+  opts?: {
+    gates?: unknown[];
+    onPublish?: () => { status: number; body: unknown };
+    // story #3386 — 기본값은 "발행 안 됨"(전부 null). 개별 테스트가 발행됨 상태를
+    // 재현하려면 이 필드를 넘긴다.
+    publication?: { published_at: string | null; url: string | null; published_by_member_id: string | null; published_body_sha256: string | null };
+    onUnpublish?: () => { status: number; body: unknown };
+    // 페드루 PO 리뷰(2026-09-03) — 발행자 UUID→이름 해소(gates/[id]/page.tsx의
+    // memberNames 관례 재사용). 기본값 빈 배열 — 개별 테스트가 필요할 때만 넘긴다(넘기지
+    // 않으면 published_by_member_id가 그대로 앞 8자 폴백으로 렌더된다, 그 자체도 유효한
+    // graceful-degradation 케이스).
+    teamMembers?: { id: string; name: string }[];
+  },
 ) {
   vi.stubGlobal(
     'fetch',
@@ -105,6 +120,22 @@ function stubFetchWithVersions(
         };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+        // story #3386 — 기본은 "발행 안 됨"(전부 null), 개별 테스트가 opts.publication으로
+        // 덮는다.
+        const body = opts?.publication ?? {
+          published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        };
+        return { ok: true, status: 200, json: async () => ({ data: body, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/unpublish` && init?.method === 'POST') {
+        const result = opts?.onUnpublish?.() ?? { status: 200, body: { id: 'p1', slug: '2ho-blog', unpublished_at: '2026-09-05T01:00:00Z' } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === '/api/team-members') {
+        return { ok: true, status: 200, json: async () => ({ data: opts?.teamMembers ?? [], error: null, meta: null }) };
       }
       throw new Error('unexpected fetch: ' + url);
     }),
@@ -479,5 +510,248 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.textContent).toContain(koMessages.content.contentStatusDraft);
     const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
     expect(publishButton?.hasAttribute('disabled')).toBe(true);
+  });
+});
+
+// story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — 원인 진단이 지목한 그 자리
+// (hasPublishedSitePost가 항상 undefined였던 계약 갭)를 GET .../publication으로 채운다.
+describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', () => {
+  const APPROVED_GATE = [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }];
+
+  it('⭐발행됨 — 상태 칩 "발행됨"·URL 링크·발행 시각이 보이고 발행 버튼은 기본 잠금(AC1·AC2)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+      teamMembers: [{ id: 'human-1', name: '윤재' }],
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusPublished);
+    const link = container.querySelector<HTMLAnchorElement>('a[href="https://sprintable.ai/ko/blog/2ho-blog"]');
+    expect(link).not.toBeNull();
+    expect(container.textContent).toContain(koMessages.content.publishedInfoAtLabel);
+
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    expect(publishButton?.hasAttribute('disabled')).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.publishDisabledReasonAlreadyPublished);
+
+    // 페드루 PO 리뷰(2026-09-03, 유나 design verdict) — 발행자는 UUID가 아니라 이름으로
+    // 보여야 한다(AC1). gates/[id]/page.tsx의 memberNames 관례를 재사용해 해소한다.
+    expect(container.textContent).toContain('윤재');
+    expect(container.textContent).not.toContain('human-1');
+  });
+
+  it('발행자 이름 해소 실패(team-members 목록에 없음) — UUID 앞 8자로 graceful 폴백한다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-unknown-999', published_body_sha256: 'h1',
+      },
+      teamMembers: [],
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain('human-un');
+  });
+
+  it('⭐발행됨 + 재승인된 새 버전(라이브 해시≠승인 해시) — 「재발행」 라벨로 버튼이 다시 열린다(AC2)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE, // sealed_content_sha256='h1' — VERSION_1.body_sha256도 'h1'
+      publication: {
+        // 라이브(published_body_sha256)는 아직 옛 버전('old-hash') — 재승인된 h1과 다르다.
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'old-hash',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusPublished);
+    const republishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishRepublishCta);
+    expect(republishButton).not.toBeUndefined();
+    expect(republishButton?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('⭐AC6 — publication 조회가 실패하면(네트워크 에러) 「승인됨」으로 단정하지 않고 「—」를 그린다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { gates: APPROVED_GATE, onUnpublish: undefined });
+    // publication 엔드포인트만 별도로 실패하게 fetch를 재정의.
+    const originalFetch = (globalThis as { fetch: typeof fetch }).fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+        throw new Error('network error');
+      }
+      return originalFetch(input, init);
+    }));
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).not.toContain(koMessages.content.contentStatusApproved);
+    expect(container.textContent).not.toContain(koMessages.content.contentStatusPublished);
+    expect(container.querySelector('[data-status-chip]')).toBeNull();
+  });
+
+  it('⭐발행 취소 — 확인 다이얼로그 승인 뒤 unpublish를 호출하고 publication을 다시 읽는다(AC — #3739 엔드포인트)', async () => {
+    let unpublishCalled = false;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+      onUnpublish: () => {
+        unpublishCalled = true;
+        return { status: 200, body: { id: 'p1', slug: '2ho-blog', unpublished_at: '2026-09-03T19:00:00Z' } };
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    expect(unpublishTrigger).not.toBeUndefined();
+    await act(async () => {
+      unpublishTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    // ConfirmDialog는 Portal(base-ui)이라 container 밖(document.body)에 뜬다 — 트리거와
+    // 같은 라벨("발행 취소")이라 트리거 자신은 참조로 제외하고 나머지를 확인 버튼으로 잡는다.
+    const bodyButtons = [...document.body.querySelectorAll('button')].filter((b) => b !== unpublishTrigger);
+    const confirmButton = bodyButtons.find((b) => b.textContent === koMessages.content.unpublishConfirmAction);
+    expect(confirmButton).not.toBeUndefined();
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await flush();
+
+    expect(unpublishCalled).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.unpublishSuccess);
+  });
+
+  it('발행 취소 권한 오류(403) — 사람 말 문구로 뜬다(지어낸 성공 없음)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+      onUnpublish: () => ({
+        status: 403,
+        body: { data: null, error: { code: 'SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY', message: '발행 취소는 조직 owner 또는 admin만 가능합니다' }, meta: null },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    await act(async () => {
+      unpublishTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const bodyButtons = [...document.body.querySelectorAll('button')].filter((b) => b !== unpublishTrigger);
+    const confirmButton = bodyButtons.find((b) => b.textContent === koMessages.content.unpublishConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.errorUnpublishOwnerOrAdminOnly);
+    expect(container.textContent).not.toContain(koMessages.content.unpublishSuccess);
+  });
+
+  it('AC3 — 재승인 필요(reapproval_needed) 상태여도 이미 공개 중이면 URL·발행 취소 버튼은 그대로 보인다', async () => {
+    stubFetchWithVersions(
+      [VERSION_1, { ...VERSION_1, version_id: 'v2', version: 2, body_sha256: 'h2' }],
+      undefined, undefined,
+      {
+        gates: [{ id: 'g1', status: 'pending', gate_type: 'external_publish', reapproval_required: true, sealed_content_sha256: 'h1' }],
+        publication: {
+          published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+          published_by_member_id: 'human-1', published_body_sha256: 'h1',
+        },
+      },
+    );
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusReapprovalNeeded);
+    const link = container.querySelector<HTMLAnchorElement>('a[href="https://sprintable.ai/ko/blog/2ho-blog"]');
+    expect(link).not.toBeNull();
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    expect(unpublishTrigger).not.toBeUndefined();
+  });
+
+  // 페드루 PO 리뷰(2026-09-03) — [82d79b81] AC "owner/admin만 활성 · member는 비활성 +
+  // 이유 문구(버튼 밖)". role은 useDashboardContext().role(settings/page.tsx·org-members-
+  // section.tsx와 같은 소스)에서 온다 — 새 조회 없음.
+  it('발행 취소 role 게이팅 — member는 버튼이 비활성이고 버튼 밖에 이유 문구가 보인다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    expect(unpublishTrigger).not.toBeUndefined();
+    expect(unpublishTrigger?.hasAttribute('disabled')).toBe(true);
+    // 이유 문구는 버튼 자체의 텍스트가 아니라 버튼 밖 별도 엘리먼트(AC 문구 그대로).
+    expect(unpublishTrigger?.textContent).toBe(koMessages.content.unpublishCta);
+    expect(container.textContent).toContain(koMessages.content.unpublishDisabledReason);
+  });
+
+  it('발행 취소 role 게이팅 — admin은 owner와 동형으로 버튼이 활성이고 이유 문구가 없다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'admin' });
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    expect(unpublishTrigger?.hasAttribute('disabled')).toBe(false);
+    expect(container.textContent).not.toContain(koMessages.content.unpublishDisabledReason);
   });
 });
