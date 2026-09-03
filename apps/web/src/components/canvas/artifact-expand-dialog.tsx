@@ -95,7 +95,14 @@ export function ArtifactExpandDialog({
               </button>
             ) : null}
             <DialogPrimitive.Close
-              className="ml-auto rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              className={cn(
+                'rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
+                // 유나 design verdict(41e70eee7) — 토글과 Close가 둘 다 ml-auto면 flex auto
+                // 마진이 남은 공간을 반씩 나눠 토글이 헤더 가운데로 뜬다. ml-auto는 항상
+                // 정확히 하나(가장 왼쪽의 오른쪽-정렬 요소)만 갖는다 — html이면 토글이,
+                // 아니면(토글 부재) Close 자신이 그 자리를 맡는다.
+                format === 'html' ? '' : 'ml-auto',
+              )}
             >
               {t('closeAction')}
             </DialogPrimitive.Close>

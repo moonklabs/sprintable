@@ -121,6 +121,24 @@ describe('ArtifactExpandDialog — 「상호작용」 토글(story #3377)', () =
     expect([...document.body.querySelectorAll('button')].map((b) => b.textContent)).not.toContain('상호작용 켬');
   });
 
+  // 유나 design verdict(41e70eee7) — 토글·Close가 둘 다 ml-auto면 flex auto 마진이 반씩
+  // 나뉘어 토글이 헤더 가운데로 뜬다. ml-auto는 언제나 정확히 하나만 갖는다.
+  it('exactly one of [toggle, Close] carries ml-auto — never both, never neither (헤더 레이아웃 회귀 가드)', async () => {
+    await mount(); // html — 토글 노출
+    const toggleBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '상호작용 켬')!;
+    const closeBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '닫기')!;
+    expect(toggleBtn.className).toContain('ml-auto');
+    expect(closeBtn.className).not.toContain('ml-auto');
+
+    await act(async () => {
+      root.render(wrap(
+        <ArtifactExpandDialog open onOpenChange={vi.fn()} title="t" format="tree" content="[]" canvasBounds={{ w: 1280, h: 800 }} />,
+      ));
+    });
+    const closeBtnNoToggle = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '닫기')!;
+    expect(closeBtnNoToggle.className).toContain('ml-auto');
+  });
+
   it('switching to a different artifact resets the toggle to the new format default (같은 원칙 — 브레이크포인트 리셋과 동일 블록)', async () => {
     await mount();
     const offBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '상호작용 켬')!;
