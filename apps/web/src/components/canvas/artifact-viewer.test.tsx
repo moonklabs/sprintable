@@ -42,6 +42,18 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     expect(markup).not.toContain('allow-same-origin');
   });
 
+  it('shows the 「크게 보기 → 상호작용」 hint for html format only (story #3377 — 인라인 스테이지는 클릭을 안 받는다는 안내)', () => {
+    const htmlMarkup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(htmlMarkup).toContain('클릭해서 흐름을 따라가려면 크게 보기 → 상호작용');
+
+    const treeMarkup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={{ ...MOCK_ARTIFACT, format: 'tree' }} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(treeMarkup).not.toContain('클릭해서 흐름을 따라가려면');
+  });
+
   it('omits the anchor badge entirely when the artifact has no anchor version yet (초안 중립·낙인 금지)', () => {
     const draftArtifact = { ...MOCK_ARTIFACT, anchor_version: null };
     const markup = renderToStaticMarkup(
