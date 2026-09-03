@@ -109,6 +109,18 @@ async def _seed_human(session, org_id, *, role="member"):
     return user.id
 
 
+async def _org_member_id(session, *, org_id, user_id) -> str:
+    """story 194acb63(배포 11 실측) — published_by_member_id/created_by_member_id는 이제
+    org_member.id다(auth.user_id/User.id가 아니다) — 시드 결과를 되짚어 읽는다."""
+    from app.models.project import OrgMember
+    from sqlalchemy import select
+
+    member_id = (await session.execute(
+        select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )).scalar_one()
+    return str(member_id)
+
+
 async def _seed_story(session, org_id, project_id, *, title="2호 글"):
     from app.models.pm import Story
 
@@ -251,7 +263,12 @@ async def test_publish_success_matching_seal_creates_public_projection_and_platf
         assert log.context["gate_id"] == str(gate_id)
         assert log.context["version_id"] == version_id
         assert log.context["url"] == payload["url"]
-        assert log.context["published_by_member_id"] == str(human_id)
+        # story 194acb63(배포 11 실측) — published_by_member_id는 org_member.id다(User.id
+        # 그대로면 그게 그 결함이다).
+        async with Session() as s:
+            expected_member_id = await _org_member_id(s, org_id=org_id, user_id=human_id)
+        assert log.context["published_by_member_id"] == expected_member_id
+        assert log.context["published_by_member_id"] != str(human_id)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

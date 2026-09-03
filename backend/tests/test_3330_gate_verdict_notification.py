@@ -267,7 +267,12 @@ async def test_rejected_gate_reaches_work_item_assignee_with_reason_and_next_act
             # 사유가 있어도 원천 차단하던 게이트의 부산물이었다, 아래 테스트가 그 정정을 pin).
             assert "- 사유: 어투가 너무 딱딱함 — 다시" in content
             assert f"[Threads 포스트 초안 v1](entity:doc:{doc_id})" in content
-            assert "approve stage 이벤트를 다시 발행하세요" in content
+            # story #3387 — "어투가 너무 딱딱함 — 다시"엔 폐기/중단 신호가 없다. 옛 문구
+            # ("approve stage 이벤트를 다시 발행하세요")는 gate_type=merge 등 external_publish
+            # 이외 전용으로 갈라졌다(test_gate_type_outside_verdict_capture_mapping_still_notifies
+            # 가 그쪽을 그대로 pin) — 여기는 external_publish 신 문구를 pin한다.
+            assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다." in content
+            assert "approve stage 이벤트를 다시 발행하세요" not in content
     finally:
         await engine.dispose()
 
@@ -294,7 +299,10 @@ async def test_approved_gate_also_reaches_work_item_assignee():
             content = await _latest_message_content_for(s, executor_id, org_id)
             assert content is not None
             assert "- 게이트: external_publish → approved" in content
-            assert "다음 stage 이벤트를 발행하세요" in content
+            # story #3387 — external_publish approved는 신 문구(실행 동사 0, 화면 실 버튼과
+            # 헷갈릴 여지 자체를 없앤다). 옛 문구는 이제 다른 gate_type 전용이다.
+            assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in content
+            assert "다음 stage 이벤트를 발행하세요" not in content
             # story 1cd72bfc AC(음성대조) — 사유 없이 승인하면 사유 줄 자체가 없다(지어내지 않음).
             assert "- 사유:" not in content
     finally:

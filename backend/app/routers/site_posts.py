@@ -165,12 +165,16 @@ async def post_site_post(
                 "message": "글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출).",
             },
         )
+    # story 194acb63(배포 11 실측) — created_by_member_id는 member-bound 리소스 축이라
+    # auth.user_id(users.id)가 아니라 resolve_member()가 돌려주는 org_member.id를 써야
+    # 한다(위 is_agent_caller가 이미 human을 확認했으니 여기선 항상 human 분기로 해소).
+    resolved = await resolve_member(auth, org_id, db)
 
     try:
         post = await publish_site_post(
             db, org_id=org_id, work_item_id=body.work_item_id, gate_id=body.gate_id,
             title=body.title, slug=body.slug, lang=body.lang, summary=body.summary,
-            tags=body.tags, body_md=body.body_md, created_by_member_id=uuid.UUID(auth.user_id),
+            tags=body.tags, body_md=body.body_md, created_by_member_id=resolved.id,
         )
     except InvalidSitePostInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -363,10 +367,13 @@ async def publish_site_post_from_draft_endpoint(
                 "message": "글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출).",
             },
         )
+    # story 194acb63(배포 11 실측) — 위 post_site_post와 동형 정정: auth.user_id가 아니라
+    # resolve_member()의 org_member.id.
+    resolved = await resolve_member(auth, org_id, db)
 
     try:
         post, url, version_id = await publish_site_post_from_draft(
-            db, org_id=org_id, draft_id=draft_id, published_by_member_id=uuid.UUID(auth.user_id),
+            db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
             backend_base_url=str(request.base_url),
         )
     except SitePostDraftNotFoundError as exc:
@@ -404,7 +411,6 @@ class SitePostPublicationResponse(BaseModel):
 async def get_site_post_publication_endpoint(
     org_id: uuid.UUID,
     draft_id: uuid.UUID,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -412,14 +418,15 @@ async def get_site_post_publication_endpoint(
     """story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — 상세 화면이 «승인됨»·URL 없음·
     «발행» 버튼 재활성으로 잘못 그리던 원인(FE의 hasPublishedSitePost가 항상 undefined)의
     서버측 계약. 조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 목록 계약(list_site_post_drafts_
-    endpoint)과 동일하게 발행 여부 열람은 승인·발행 경계 밖."""
+    endpoint)과 동일하게 발행 여부 열람은 승인·발행 경계 밖.
+
+    story 194acb63(배포 11 실측) — url 조립에 request.base_url을 더 쓰지 않는다(그
+    자체가 결함의 재료였다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     try:
-        info = await get_site_post_publication_info(
-            db, org_id=org_id, draft_id=draft_id, backend_base_url=str(request.base_url),
-        )
+        info = await get_site_post_publication_info(db, org_id=org_id, draft_id=draft_id)
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
