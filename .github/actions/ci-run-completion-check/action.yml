@@ -1,0 +1,71 @@
+name: CI workflow run completion check
+description: >
+  qa/design review gate 공용 — head SHA에 대한 CI 워크플로 run 자체가 completed+success인지
+  직접 대조한다(체크런 목록만 보는 기존 판정이 "체크런 자체가 아직 안 생긴" 워크플로를 못
+  잡는 구멍을 메운다). story #3346(qa-review-gate.yml 최초 적용)·#3400(design-review-gate.yml
+  로 확장하며 컴포지트 액션으로 추출) 참고.
+
+# story #3346(2026-09-02 실사고, PR#3725 head a9c9322eb) — "qa:pass인데 안 끝난 비-advisory
+# 체크가 있으면 fail" 판정이 commits/{sha}/check-runs 목록만 봐서, force-push 직후
+# concurrency로 queued 상태이던 CI(잡이 아직 안 시작해 체크런 자체가 없음)를 «미완 0건»으로
+# 오판했다 — "미완인 체크런을 찾는" 로직은 "체크런 자체가 없다"는 신호를 원리적으로 못
+# 잡는다(없는 것과 통과한 것을 구별 못 함).
+#
+# 처방 — 이 리포의 필수 체크 넷(Backend pytest·Lint·Alembic·Support Gateway)이 전부 «CI»라는
+# 단일 워크플로(ci.yml) 안의 잡이라는 실측 사실에 기대, "체크런 목록"이 아니라 "그 워크플로
+# 자체의 run 상태"를 head에 대해 직접 물어 fail-closed로 판정한다: run이 하나도 없으면(아직
+# 큐잉조차 안 됐거나 조회 실패) «미완»으로 실패, 있으면 최신 run의 status가 completed이고
+# conclusion이 success인지를 요구한다.
+#
+# ⛔branch protection의 required_status_checks를 직접 읽는 방법(더 근본적인 SSOT)도
+# 검토했으나 GITHUB_TOKEN에는 그 API 자체에 대한 권한 스코프가 없다(actionlint가
+# "administration"을 유효하지 않은 permission으로 거부 — GitHub REST "Get branch
+# protection"은 애초에 GITHUB_TOKEN으로 접근 불가한 엔드포인트다). 이 액션을 쓰는 워크플로는
+# `permissions.actions: read`를 선언해야 한다(호출부 책임 — 컴포지트 액션은 자신의
+# permissions를 선언할 수 없다).
+#
+# story #3400 — qa-review-gate.yml(#3346)·design-review-gate.yml 둘 다 이 판정이 그대로
+# 필요해 verdict-head-check와 같은 자리(공유 컴포지트 액션)로 추출했다. label-name만 소비자별
+# 에러 메시지 표기용으로 받고, 판정 로직 자체(워크플로 파일명 "ci.yml"·필수 잡 이름)는
+# 공유한다 — 두 게이트가 같은 CI를 같은 기준으로 재는 것이 맞다(verdict-head-check가
+# header/head-extract 정규식을 소비자별로 다르게 «유지»한 것과는 반대 판단 — 그쪽은 리뷰어별
+# 실제 코멘트 관행이 갈려서 통일하면 진짜 회귀가 났지만, 이쪽은 "같은 CI를 재는 것"이라
+# 갈릴 이유가 없다).
+
+inputs:
+  label-name:
+    description: 판정 라벨 이름(예 qa:pass·design:pass) — 에러 메시지 표기용.
+    required: true
+  gh-token:
+    description: gh api 호출용 토큰.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        LABEL_NAME: ${{ inputs.label-name }}
+      run: |
+        set -euo pipefail
+        RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${HEAD_SHA}&per_page=20" --paginate --slurp \
+          | jq '[.[].workflow_runs[]]')"
+        LATEST="$(echo "${RUNS_JSON}" | jq 'sort_by(.run_started_at) | last')"
+        if [ "${LATEST}" = "null" ]; then
+          echo "::error title=CI workflow run not found::${LABEL_NAME}가 붙어 있지만 head(${HEAD_SHA})에 대한 CI 워크플로 run이 하나도 없다 — 아직 큐잉조차 안 됐을 수 있다(체크런 부재와 같은 증상). 모르면 통과가 아니라 실패다(fail-closed)."
+          exit 1
+        fi
+        STATUS="$(echo "${LATEST}" | jq -r '.status')"
+        CONCLUSION="$(echo "${LATEST}" | jq -r '.conclusion')"
+        RUN_URL="$(echo "${LATEST}" | jq -r '.html_url')"
+        if [ "${STATUS}" != "completed" ]; then
+          echo "::error title=CI workflow run not completed::${LABEL_NAME}가 붙어 있지만 head(${HEAD_SHA})의 CI 워크플로 run이 아직 «${STATUS}»다(예: queued — force-push 직후 이전 head의 run과 concurrency 대기 중일 수 있다, 실사고 story #3346). 체크런이 없는 상태라 체크런 목록 기반 판정이 못 잡는다 — 이 스텝이 그 자리를 메운다. ${RUN_URL}"
+          exit 1
+        fi
+        if [ "${CONCLUSION}" != "success" ]; then
+          echo "::error title=CI workflow run not success::${LABEL_NAME}가 붙어 있지만 head(${HEAD_SHA})의 CI 워크플로 run이 completed지만 conclusion이 «${CONCLUSION}»(success 아님). ${RUN_URL}"
+          exit 1
+        fi
+        echo "CI workflow run completed+success for ${HEAD_SHA}: ${RUN_URL}"
