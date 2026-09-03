@@ -936,12 +936,19 @@ jobs:
           echo "unweighted 초과판정선: ${overage_threshold}s(story #3392) · unweighted 파일 ${#unweighted_files[@]}개"
 
           failed_files=()
-          # story #3383(AC5) — 파일 하나가 60초를 넘으면 경고가 아니라 실패로 알린다. 이
-          # 가드는 "이 샤드 안에서 순차 실행되는 한 파일의 벽시계"만 잰다 — pytest-xdist 등
-          # 파일 내부 병렬화가 생기면 이 측정 단위 자체가 안 맞아진다(그 경우는 여기서
-          # 못 잡는다, 지금은 파일 내부가 순차라 유효).
-          slow_files=()
           overage_files=()
+          # story #3396 — 60초 절대 가드(story #3383 AC5)가 story #3393이 정식화한
+          # "느린 러너 표본"(median 4.45x~max 12.18x)과 정면으로 부딪혔다: PR #3753 run
+          # 33773872963 shard 0에서 test_3373_channel_connections.py가 168s(가중치
+          # 20.1s=8.4x)로 이 가드에 걸려 fail 났는데, 같은 shard의 다른 24개 파일도 전부
+          # median 5.91x로 튀어 있었다 — 그 파일 하나가 아니라 러너 전체가 느렸다는
+          # 뜻이다. 판정선을 이제 그 run 자신의 elapsed/weight 중앙값 배율로 스케일한다
+          # (shard_destructive_tests.py::slow_files_normalized, 표본 3개 미만이면 절대
+          # 60초로 폴백) — 이 판정은 그 run의 전체 표본이 있어야 계산되므로(파일 단위
+          # 즉시 판정이 원리적으로 불가능) 루프 안에서는 elapsed만 기록해 두고 루프가
+          # 끝난 뒤 한 번에 판정한다. exit 1은 여전히 여기서만 나므로 #2293/#3392의
+          # "실측 가능한 만큼은 계속 잰다" 철학은 무변화.
+          elapsed_file=$(mktemp)
           for f in "${files[@]}"; do
             echo "::group::isolated $f"
             PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
@@ -953,13 +960,11 @@ jobs:
             uv run pytest -q "$f" || failed_files+=("$f")
             _elapsed=$(( $(date +%s) - _t0 ))
             echo "elapsed: ${_elapsed}s"
-            if [ "$_elapsed" -gt 60 ]; then
-              slow_files+=("$f (${_elapsed}s)")
-              echo "::error::60초 한도 초과 파일(story #3383 AC5): $f (${_elapsed}s)"
-            fi
+            printf '%s\t%s\n' "$f" "$_elapsed" >> "$elapsed_file"
             # story #3392(AC1) — unweighted 파일이 평균의 배수(threshold)를 실측으로
             # 넘으면 경고가 아니라 실패다. weights.json에 없다는 이유로 "몰랐다"가 통하면
-            # 다음 신규 파일도 같은 사고를 반복한다.
+            # 다음 신규 파일도 같은 사고를 반복한다. (unweighted 파일은 story #3396의
+            # 정규화 표본·판정 대상 모두에서 빠진다 — 이 가드가 계속 전담한다.)
             for uw in "${unweighted_files[@]+"${unweighted_files[@]}"}"; do
               if [ "$uw" = "$f" ] && [ "$_elapsed" -gt "$overage_threshold" ]; then
                 overage_files+=("$f (${_elapsed}s > ${overage_threshold}s)")
@@ -972,12 +977,15 @@ jobs:
             echo "FAILED files: ${failed_files[*]}"
             exit 1
           fi
-          if [ "${#slow_files[@]}" -gt 0 ]; then
-            echo "60초 한도 초과 파일(story #3383 AC5, 위 ::error:: 참고): ${slow_files[*]}"
-            exit 1
-          fi
           if [ "${#overage_files[@]}" -gt 0 ]; then
             echo "unweighted 초과 파일(story #3392 AC1, 위 ::error:: 참고): ${overage_files[*]}"
+            exit 1
+          fi
+          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file"
+          slow_exit=$?
+          rm -f "$elapsed_file"
+          if [ "$slow_exit" -ne 0 ]; then
+            echo "러너 정규화 60초 가드 초과(story #3396, 위 ::error:: 참고)"
             exit 1
           fi
           echo "OK: all ${#files[@]} isolated destructive-schema files passed (shard ${{ matrix.shard }})"
