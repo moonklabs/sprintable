@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""story #2293 — destructive_schema 94개 파일을 CI 매트릭스 샤드로 나눈다.
+"""story #2293 — destructive_schema 파일(2026-07-28엔 94개·2026-09-03 실측 200개)을
+CI 매트릭스 샤드로 나눈다.
 
-왜: 순차 94개(파일마다 독립 fresh DB 생성/드롭 — story 8236bbc3)가 25분 천장에 붙었다
+왜: 순차 실행(파일마다 독립 fresh DB 생성/드롭 — story 8236bbc3)이 25분 천장에 붙었다
 (PR #2576 conclusion=cancelled, 77/94까지 진행하고 잘림 — 실패는 0건, 시간만 모자랐다).
-개별 테스트는 안 느리다(2026-07-28 실측 최대 16.24초, `infra/destructive-schema-shard-
-weights.json` 참고) — 파일마다 붙는 dropdb/createdb/CREATE EXTENSION 오버헤드가 94번
-누적된 것이 벽시계의 대부분이다. 샤딩은 그 오버헤드를 병렬로 나눈다.
+개별 테스트는 안 느리다 — 파일마다 붙는 dropdb/createdb/CREATE EXTENSION/create_all()
+오버헤드가 누적된 것이 벽시계의 대부분이다. 샤딩은 그 오버헤드를 병렬로 나눈다(story
+#3383은 ci.yml의 템플릿 DB 스텝으로 create_all() 반복 자체를 없애 오버헤드 크기 자체를
+줄인다 — 이 파일의 배분 로직과는 직교하는 별개 처방, 둘 다 필요).
 
 `infra/destructive-schema-shard-weights.json`(2026-07-28 스냅샷, 파일별 pytest 실행초)을
 greedy LPT(Longest Processing Time first)로 읽어 균형 배분한다. 스냅샷에 없는 새 파일은

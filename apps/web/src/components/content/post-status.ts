@@ -39,15 +39,29 @@ export interface ContentPostStatusInput {
   sealedBodySha256?: string;
   /** 방어망 전용 — 지금 이 초안의 최신 버전 본문 해시. */
   currentBodySha256?: string;
-  /** 공개 site_posts 행이 있는지(발행 완료 여부, S3 착지 후 채워짐). */
+  /** 공개 site_posts 행이 있는지(발행 완료 여부, S3 착지 후 채워짐). undefined=아직
+   * 모른다(서버 계약 미배선·요청 진행 중) — false(미발행)와 다른 신호다. story #3386
+   * AC6: undefined일 때 이 함수는 status 자체를 비운다(«승인됨»으로 단정하지 않는다). */
   hasPublishedSitePost?: boolean;
+  /** story #3386(신규, 목록·상세 계약표엔 없던 필드 — 디디 판단) — 지금 라이브인
+   * site_posts 행 본문의 해시. sealedBodySha256(지금 승인된 본문)과 달라지는 순간이
+   * "재승인은 됐는데 아직 재발행 버튼을 안 눌렀다" — «발행»을 다시 열어야 하는 유일한
+   * 신호다. hasPublishedSitePost=true일 때만 의미 있다. */
+  publishedBodySha256?: string;
 }
 
 export interface ContentPostStatusResult {
-  status: ContentPostStatus;
+  /** undefined = 판별 불가(입력 부족, 주로 hasPublishedSitePost===undefined) — 화면은
+   * 색 있는 칩 대신 「—」를 그린다(§3-1-1 "모른다≠다르다", AuthorKindBadge와 동일 규율
+   * — story #3386 AC6·0b72a300 AC4, 두 표면이 같은 말을 한다). */
+  status: ContentPostStatus | undefined;
   /** "발행" 버튼을 눌러도 되는가 — status만으로 못 정한다(방어망 분기: approved인데 봉인
    * 값이 없어 확인 불가한 경우도 publishable=false다). */
   publishable: boolean;
+  /** true면 이미 발행된 글에 "재승인된 새 버전"이 있어 버튼을 다시 열어야 하는 경우
+   * (story #3386 AC2) — 라벨을 「발행」이 아니라 「재발행」으로 바꾸는 신호. status===
+   * 'published'일 때만 의미 있다(그 밖엔 항상 undefined). */
+  isRepublish?: boolean;
   /** publishable===false일 때만 채워진다. 화면은 이 값으로 문구를 가른다 — "확인 불가"와
    * "실제로 바뀜"은 다른 문장이어야 한다(§3-1-1 처방, 방어망 분기에서만 쓰인다). */
   blockedReason?: ContentPostBlockedReason;
@@ -61,6 +75,12 @@ export interface ContentPostStatusResult {
  * 가드가 이미 막는다)만 남는다. rejected는 다섯 상태 밖(디자인 문서가 다루지 않음 — 거절된
  * 게이트는 재상신 전까지 화면상 '초안'과 동형으로 취급: 유효한 승인 대상이 없다는 점에서
  * 게이트 없음과 같다).
+ *
+ * story #3386(2026-09-03, 원인 진단·PO 확定) — approved 분기 끝에서 hasPublishedSitePost가
+ * undefined면(계약 미배선·요청 중) 「승인됨」으로 단정하지 않고 status를 비운다(AC6). true면
+ * published — 이때 publishedBodySha256이 sealedBodySha256과 다르면(재승인된 새 버전이
+ * 아직 안 나갔다) publishable·isRepublish를 true로 열어 「재발행」을 허용한다(AC2) — 둘이
+ * 같으면(막 발행했거나 이미 최신을 반영했다) publishable=false로 기본 잠금.
  */
 export function deriveContentPostStatus(input: ContentPostStatusInput): ContentPostStatusResult {
   if (input.gateStatus === 'pending') {
@@ -79,9 +99,18 @@ export function deriveContentPostStatus(input: ContentPostStatusInput): ContentP
     return { status: 'approved', publishable: false, blockedReason: 'SEAL_MISSING' };
   }
 
-  return input.hasPublishedSitePost
-    ? { status: 'published', publishable: true }
-    : { status: 'approved', publishable: true };
+  if (input.hasPublishedSitePost === undefined) {
+    // AC6(0a9c73c3)·목록 AC4(0b72a300) — 발행 여부를 모르는 동안 「승인됨」이라 단정하지
+    // 않는다. status 자체를 비워 StatusChip이 「—」를 그리게 한다.
+    return { status: undefined, publishable: false };
+  }
+  if (!input.hasPublishedSitePost) {
+    return { status: 'approved', publishable: true };
+  }
+
+  const hasUnpublishedApproval = input.publishedBodySha256 !== undefined
+    && input.publishedBodySha256 !== input.sealedBodySha256;
+  return { status: 'published', publishable: hasUnpublishedApproval, isRepublish: hasUnpublishedApproval };
 }
 
 // §6-2 색 매핑 — DOC_STATUS_TONE(components/docs/lib/doc-status-tone.ts)과 같은 규율(배경

@@ -61,6 +61,19 @@ services:
         value_check: skip
         reason: 908075db de-fallback 단계 플래그(단계4 미착수) — 수동 토글, IaC 편입 시기 아직 아님.
         owner: TBD
+      - key: CHANNEL_CREDENTIAL_ENCRYPTION_KEY
+        reason: >-
+          story #3373(Phase1·마케팅운영) MultiFernet 암호화 키 — channel_connections.
+          encrypted_access_token/encrypted_refresh_token 봉인용(channel_credential_
+          crypto.py, ORG_BILLING_KEY_ENCRYPTION_KEY와 동형·독립 시크릿). Secret Manager
+          등록·Cloud Run env 배선 PO 수동 프로비저닝(2026-09-03) — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: CHANNEL_OAUTH_STATE_SECRET
+        reason: >-
+          story #3373 채널 연결 OAuth state(CSRF+org 바인딩+PKCE verifier) 서명 키
+          (channel_oauth_state.py, GITHUB_APP_STATE_SECRET과 동형·독립 시크릿). Secret
+          Manager 등록 PO 수동 프로비저닝(2026-09-03) — 부트스트랩 스크립트 미편입.
+        owner: TBD
       - key: CRON_SECRET
         reason: cron 엔드포인트 인증 시크릿 — 부트스트랩 스크립트 미편입, 수동 시크릿.
         owner: TBD

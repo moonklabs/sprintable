@@ -34,9 +34,35 @@ const CASES: Array<{ name: string; input: ContentPostStatusInput; expected: Cont
     expected: { status: 'approved', publishable: true },
   },
   {
-    name: 'approved + 해시 일치 + 발행됨',
+    // story #3386(2026-09-03) 정정 — 이전엔 이 케이스가 publishable:true였다(발행된 글도
+    // «발행» 버튼이 계속 열려 있던 실사고 그 자체, 원인 진단이 확認한 버그). 라이브 본문
+    // 해시(publishedBodySha256)를 아직 모르면(구 계약처럼 안 넘기면) 안전 기본값은 이제
+    // false다 — «재발행할 게 있는지 모르면 열지 않는다»(AC2·§3-1-1 "모른다≠다르다"와 같은
+    // 원칙을 approved 방어망뿐 아니라 published 분기에도 적용).
+    name: 'approved + 해시 일치 + 발행됨(라이브 해시 모름) → 발행됨이지만 기본 잠금',
     input: { gateStatus: 'approved', sealedBodySha256: 'abc', currentBodySha256: 'abc', hasPublishedSitePost: true },
-    expected: { status: 'published', publishable: true },
+    expected: { status: 'published', publishable: false, isRepublish: false },
+  },
+  {
+    name: '⭐발행됨 + 라이브 해시=승인 해시(막 발행했거나 최신 그대로) → 재발행 불필요, 버튼 잠금',
+    input: {
+      gateStatus: 'approved', sealedBodySha256: 'abc', currentBodySha256: 'abc',
+      hasPublishedSitePost: true, publishedBodySha256: 'abc',
+    },
+    expected: { status: 'published', publishable: false, isRepublish: false },
+  },
+  {
+    name: '⭐발행됨 + 라이브 해시≠승인 해시(재승인된 새 버전이 아직 안 나갔다) → 재발행 가능',
+    input: {
+      gateStatus: 'approved', sealedBodySha256: 'new-hash', currentBodySha256: 'new-hash',
+      hasPublishedSitePost: true, publishedBodySha256: 'old-hash',
+    },
+    expected: { status: 'published', publishable: true, isRepublish: true },
+  },
+  {
+    name: '⭐AC6 — approved + hasPublishedSitePost=undefined(모름) → status를 비운다(«승인됨» 단정 금지)',
+    input: { gateStatus: 'approved', sealedBodySha256: 'abc', currentBodySha256: 'abc' },
+    expected: { status: undefined, publishable: false },
   },
   {
     name: '방어망 — approved인데 해시 갈림(정상 경로로 도달 불가, gates.py 가드가 이중 차단)',
