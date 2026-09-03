@@ -402,16 +402,22 @@ async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID
 
 async def list_site_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
-) -> list[tuple[SitePostDraft, SitePostVersion, SitePostVersion]]:
+) -> list[tuple[SitePostDraft, SitePostVersion, SitePostVersion, Gate | None, SitePost | None]]:
     """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — 조직 스코프 초안 목록. S4
     화면이 열릴 때 draft_id를 미리 알 방법이 없어 만든 자리 — 항목마다 최신 버전(title·lang·
     version·author_kind)과 원안 버전(version 1, origin_author_kind — «에이전트가 쓰고 사람이
     고친 글» vs «사람이 쓴 글» 구별용, 페드루 PO 후속 2026-09-03 05:33Z)을 붙인다. "최신"은
     draft.updated_at이 아니라 최신 버전의 created_at으로 정렬한다 — draft 행 자체는 버전 추가
-    시 갱신되지 않아(SSOT는 버전 쪽) 이 값이 실제 최근 활동을 반영한다. 게이트 상태·봉인
-    필드는 여기서 지어내지 않는다(라우터가 별도로 필요하면 gate를 따로 조회).
+    시 갱신되지 않아(SSOT는 버전 쪽) 이 값이 실제 최근 활동을 반영한다.
 
-    반환: (draft, latest_version, origin_version) 튜플 리스트."""
+    story #3384(Phase0 결함, 유나 원인 진단·페드루 PO 확定 2026-09-03) — 게이트·발행 파생
+    입력을 이제 지어내지 않고 여기서 배치 조회해 붙인다(AC1 "FE가 행마다 게이트를 따로
+    조회하는 N+1 금지"). 페이지 쿼리 1건 + 게이트 배치 1건 + site_posts 배치 1건, 총 3건
+    고정(행 수 무관) — 상세 페이지(story #3386 GET .../publication)와 정확히 같은 조회 축
+    (work_item_id→gate, (org_id,lang,slug)→site_posts)을 페이지 단위로 배치한 것뿐이다.
+
+    반환: (draft, latest_version, origin_version, gate, site_post) 튜플 리스트 — gate·
+    site_post는 없으면 None(그 draft가 아직 상신/발행 전이라는 뜻, 지어내지 않는다)."""
     latest_version_ids = (
         select(
             SitePostVersion.draft_id,
@@ -449,7 +455,39 @@ async def list_site_post_drafts(
         .limit(limit)
         .offset(offset)
     )
-    return [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
+    page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
+    if not page_rows:
+        return []
+
+    work_item_ids = [draft.work_item_id for draft, _, _ in page_rows]
+    slugs = [draft.slug for draft, _, _ in page_rows]
+
+    # 배치 ②: work_item당 external_publish 게이트 — story #3360 §2 관례상 사실상 1개뿐이지만
+    # 재제출 리셋 등으로 여럿이면 최신(created_at desc)이 이긴다(dict 조립 순서로 구현).
+    gates_by_work_item: dict[uuid.UUID, Gate] = {}
+    gate_rows = (await db.execute(
+        select(Gate)
+        .where(Gate.org_id == org_id, Gate.work_item_id.in_(work_item_ids), Gate.gate_type == "external_publish")
+        .order_by(Gate.created_at.desc())
+    )).scalars().all()
+    for g in gate_rows:
+        gates_by_work_item.setdefault(g.work_item_id, g)
+
+    # 배치 ③: 공개 site_posts — 유일키 (org_id, lang, slug)라 draft.slug + latest.lang으로
+    # 되찾는다(story #3381/#3386과 동일 조회 축).
+    posts_by_key: dict[tuple[str, str], SitePost] = {}
+    post_rows = (await db.execute(
+        select(SitePost).where(
+            SitePost.org_id == org_id, SitePost.slug.in_(slugs), SitePost.unpublished_at.is_(None),
+        )
+    )).scalars().all()
+    for p in post_rows:
+        posts_by_key[(p.lang, p.slug)] = p
+
+    return [
+        (draft, latest_v, origin_v, gates_by_work_item.get(draft.work_item_id), posts_by_key.get((latest_v.lang, draft.slug)))
+        for draft, latest_v, origin_v in page_rows
+    ]
 
 
 async def submit_site_post_draft(
