@@ -2,14 +2,12 @@
 channel_connections: 조직이 연결한 외부 채널 계정의 암호화 credential 원장. 신설 — org_
 connector_registry(비밀 저장 금지 설계)와 별개, FK 없음(그라운딩 §9 확定).
 
-⚠️번호 의존성(페드루 PO 확定 2026-09-03 07:26Z) — 이 시점 develop은 아직 0309까지만
-머지됐고, S2(story #3367, PR#3733)가 0310(revision 5cb28dfe5)·S3(story #3369, PR#3734,
-feature/3369-publish-projection)가 0311(commit 80337e0ab)을 sibling-PR로 각각 쓰고
-있다. 머지 순서는 S2(0310) → S3(0311) → 이 PR이라 down_revision을 0311로 미리 잡는다
-— S2·S3 두 브랜치를 로컬에 fetch해 0309→0310→0311→0312 전체 사슬 upgrade/downgrade/
-re-upgrade 왕복까지 실PG로 확認 완료(둘 다 develop에 아직 없어 로컬 임시 사본으로
-검증, 커밋엔 포함 안 함 — 실제 파일은 그 PR들이 머지되며 develop에 들어온다). 실
-머지 순서가 이 스냅샷과 달라지면(예: S3가 rebase로 번호가 바뀌면) 착수 시 재확認할 것.
+번호 의존성 — S2(story #3367, PR#3733, 0310)·S3(story #3369, PR#3734, 0311) 둘 다
+develop에 머지 완료(2026-09-03, develop head ac37ceed5). down_revision=0311은 머지 전
+로컬 사본 왕복 검증(S2·S3 두 브랜치를 임시로 fetch해 0309→0310→0311→0312 전체 사슬
+upgrade/downgrade/re-upgrade)으로 미리 잡아 둔 값 그대로였고, rebase(2026-09-03) 뒤
+실제 develop 위에서도 그대로 유효함을 재확認했다(0311의 실제 revision id·down_revision
+둘 다 이 브랜치의 가정과 일치).
 
 Revision ID: 0312
 Revises: 0311
