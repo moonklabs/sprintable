@@ -296,10 +296,11 @@ describe('GateEvidence — 측정 판정 초안 렌더(story #2862)', () => {
 // 그려지는지 못 잡으므로(entity-ref.ts 파싱+EntityChip 마운트 자체가 검증 대상) 여기서 실제
 // DOM 마운트로 검증한다.
 describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌더(story #3328)', () => {
-  function recipeApprovalGate(neutralFacts: Record<string, unknown>): GateItem {
+  function recipeApprovalGate(neutralFacts: Record<string, unknown>, sealed?: Partial<GateItem>): GateItem {
     return realApiShapedGate({
       gate_type: 'external_publish', work_item_type: 'story', status: 'pending',
       github_check_run_id: null, neutral_facts: neutralFacts,
+      ...sealed,
     });
   }
 
@@ -405,15 +406,18 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
   });
 
   // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §4-3③·§6-3) —
-  // 글 관리 승인 요청(S2 봉인 착지 後)이 채우는 content_body/content_version/content_sha256.
-  // draft_doc_summary(300자 절단, 접힘 기본)와 달리 이쪽은 "전문"이라 접힘 없이 항상 보인다.
+  // 글 관리 승인 요청이 채우는 봉인 필드. draft_doc_summary(300자 절단, 접힘 기본)와 달리
+  // 이쪽은 "전문"이라 접힘 없이 항상 보인다. ⚠️BE 계약 정정(S2 실물, PR#3733) —
+  // neutral_facts가 아니라 Gate 전용 컬럼(sealed_content_*, GateItem top-level)이다.
   it('⭐S4 §6-3 — content_body는 접힘 없이 항상 전문이 보이고, 버전·봉인 해시 앞 12자가 나란히 뜬다', async () => {
-    const gate = recipeApprovalGate({
-      channel: 'hosted_site', stage: 'approve',
-      content_body: '펼치지 않아도 항상 보이는 전문 본문입니다.',
-      content_version: 2,
-      content_sha256: 'abcdef0123456789fedcba9876543210',
-    });
+    const gate = recipeApprovalGate(
+      { channel: 'hosted_site', stage: 'approve' },
+      {
+        sealed_content_body: '펼치지 않아도 항상 보이는 전문 본문입니다.',
+        sealed_content_version: 2,
+        sealed_content_sha256: 'abcdef0123456789fedcba9876543210',
+      },
+    );
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -438,7 +442,10 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
   });
 
   it('AC4 회귀 0 재확認 — content_version=0(falsy이지만 유효한 버전 번호)도 정확히 렌더된다', async () => {
-    const gate = recipeApprovalGate({ channel: 'hosted_site', content_version: 0, content_sha256: 'h' });
+    const gate = recipeApprovalGate(
+      { channel: 'hosted_site' },
+      { sealed_content_version: 0, sealed_content_sha256: 'h' },
+    );
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

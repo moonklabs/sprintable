@@ -601,7 +601,12 @@ export function ApprovalsQueue() {
         // 자체를 반려"라는 뜻이라 안 선택을 요구하지 않는다.
         const requiresOptionChoice = decisionFacts !== null && decisionFacts.options.length > 0;
         const selectedOption = selectedOptionByGateId[gate.id];
-        const disabled = resolvingIds.has(gate.id);
+        // story #3369(§3-1-2-1, 페드루 PO 2026-09-03 06:56Z) — reapproval_required=true는
+        // 작성자가 재상신하기 전까지 승인 자체가 서버에서 409 SITE_POST_RESUBMIT_REQUIRED로
+        // 막힌다(gates.py). "할 일 없는 카드"를 "할 일 있는 카드"처럼 두지 않는다 — 승인·반려
+        // 둘 다 비활성.
+        const isResubmitWaiting = gate.reapproval_required === true;
+        const disabled = resolvingIds.has(gate.id) || isResubmitWaiting;
         const primaryLabel = isSigFlow ? t('sigApproveAndSign') : t('gateApprove');
         const primaryOnClick = () => {
           if (isSigFlow) setSignatureTargetId(gate.id);
@@ -626,6 +631,13 @@ export function ApprovalsQueue() {
               {gateBody}
             </button>
             {decisionExpandSection}
+            {isResubmitWaiting ? (
+              // §3-1-2-1 — 판정이 아니라 관측(§3-2와 같은 원칙): 작성자가 손볼 차례라는
+              // 사실만 전달하고, 승인/반려 버튼은 아래에서 비활성으로 그 사실을 강제한다.
+              <p className="mt-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                {t('gateReapprovalResubmitWaiting')}
+              </p>
+            ) : null}
             {gateErrors[gate.id] ? (
               <p
                 className="mt-2 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-[11px] text-foreground"

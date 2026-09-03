@@ -2115,6 +2115,8 @@
     "errorPublishHumanOnly": "발행은 휴먼 멤버만 할 수 있습니다.",
     "errorApprovalRequired": "승인이 끝나야 발행할 수 있습니다.",
     "errorReapprovalRequired": "승인 뒤 본문이 바뀌었습니다 — 다시 승인을 받아야 발행할 수 있습니다.",
+    "errorSealMissing": "승인된 버전을 확인할 수 없습니다 — 재상신 후 다시 승인받아야 합니다.",
+    "errorResubmitRequired": "승인 뒤 내용이 바뀌었습니다 — 재상신한 뒤 다시 승인해야 합니다.",
     "errorRawDetailsToggle": "서버 응답 보기"
   },
   "docs": {
@@ -4233,6 +4235,7 @@
     "sigConsequenceNote": "승인은 당신의 서명으로 기록됩니다",
     "sigRequestChanges": "변경 요청",
     "sigApproveAndSign": "승인하고 서명",
+    "gateReapprovalResubmitWaiting": "작성자가 본문을 수정해 재상신을 기다리는 중입니다.",
     "gateActivityHistoryTitle": "결재 이력",
     "gateActivityActorFallback": "알 수 없음",
     "gateActivityEmpty": "결재 이력 없음",

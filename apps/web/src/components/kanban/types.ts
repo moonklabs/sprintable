@@ -117,6 +117,15 @@ export interface GateItem {
   // false(관측모드 확定)를 구분해야 하므로 optional·nullable 그대로 둔다(1단 run_id 휴리스틱과
   // 병용 — gate-evidence.tsx#githubCheckState 참조).
   github_check_enforced?: boolean | null;
+  // story #3367(Phase0 S2, PR#3733) — external_publish 전용 sealing(github_check_run_sha·
+  // approved_head_sha와 동형 축). 다른 gate_type은 전부 undefined/null(additive·하위호환).
+  // gate-evidence.tsx::recipeApprovalFacts가 승인 카드 본문 전문·버전·해시 표시에 쓴다.
+  sealed_content_version?: number | null;
+  sealed_content_sha256?: string | null;
+  sealed_content_body?: string | null;
+  // 승인 뒤 편집으로 pending 재오픈된 게이트인지(사람이 처음 상신한 pending과 구분) — S4가
+  // "재승인 필요" 배지·재상신 대기 카드를 그릴 신호. 다른 gate_type은 항상 false.
+  reapproval_required?: boolean;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE

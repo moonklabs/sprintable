@@ -252,7 +252,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 
   it('⭐게이트 status=approved + 해시 일치 — 상태 칩 "승인됨", 발행 버튼 활성', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
-      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'h1' } }],
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }],
     });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -267,7 +267,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 
   it('⭐게이트 status=approved인데 해시 불일치 — 재승인 필요 배너·발행 버튼 비활성(§3-2 핵심)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
-      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'stale-hash' } }],
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'stale-hash' }],
     });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -287,7 +287,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
   // "본문이 바뀌었다"가 아니라 "확인할 수 없다"여야 한다. 이 회귀가 실제로 있었다.
   it('⭐게이트 status=approved인데 봉인 해시 자체가 없음(SEAL_MISSING) — "승인됨" 유지·재승인 배너 없음·확인불가 문구', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
-      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: {} }],
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish' }],
     });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -306,7 +306,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 
   it('⭐발행 성공 — 발행 시각·공개 URL 링크가 뜬다(AC5)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
-      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'h1' } }],
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }],
       onPublish: () => ({ status: 201, body: { id: 'p1', published_at: '2026-09-05T00:00:00Z', url: '/ko/blog/2ho-blog' } }),
     });
     await act(async () => {
@@ -327,7 +327,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 
   it('발행 실패(403 — 승인 필요) — 원문이 접힌 상세로 보존되고 성공으로 오인 표시하지 않는다(S10)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
-      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'h1' } }],
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }],
       onPublish: () => ({ status: 403, body: { detail: { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: '승인이 필요합니다' } } }),
     });
     await act(async () => {

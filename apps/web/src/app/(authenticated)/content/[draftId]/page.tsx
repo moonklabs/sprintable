@@ -50,16 +50,18 @@ interface SitePostVersion {
   created_at: string;
 }
 
-// story #3368 §8-1 4단 준비(페드루 지시 2026-09-03, S2 계약 전제로 미리 배선) — 이 work
-// item의 external_publish 게이트. GET /api/gates?work_item_id=&work_item_type=는 기존
-// 범용 라우트(doc-gate-section.tsx와 동형 재사용, 새 엔드포인트 0). neutral_facts.
-// content_sha256/content_version은 S2가 아직 안 채워 지금은 항상 undefined다 — 그
-// 경우 deriveContentPostStatus가 안전측(reapproval_needed)으로 fail-closed하므로 이
-// 배선 자체는 S2 착지 전에도 무해하다.
+// story #3368 §8-1 4단(페드루 지시 2026-09-03) — 이 work item의 external_publish
+// 게이트. GET /api/gates?work_item_id=&work_item_type=는 기존 범용 라우트(doc-gate-
+// section.tsx와 동형 재사용, 새 엔드포인트 0). 봉인 필드는 neutral_facts가 아니라 Gate
+// 전용 컬럼 4종이다(S2, PR#3733 — GateResponse가 Gate ORM 컬럼명 그대로 top-level에
+// 얹는다, gates.py::GateResponse).
 interface GateInfo {
   id: string;
   status: string;
-  neutral_facts?: Record<string, unknown> | null;
+  sealed_content_version?: number | null;
+  sealed_content_sha256?: string | null;
+  sealed_content_body?: string | null;
+  reapproval_required?: boolean;
 }
 
 function realStr(v: unknown): string | undefined {
@@ -187,12 +189,15 @@ export default function ContentPostEditPage() {
     };
   }, [orgId, workItemId]);
 
-  // story #3368 §3-1-1(유나 실측) — publishable·blockedReason은 status와 다른 축이다:
-  // approved인데 봉인 값이 없어 "확인 불가"인 경우도 status는 approved로 남고 publishable
-  // 만 false다(SEAL_MISSING) — status==='approved'로 발행 가능 여부를 판단하면 안 된다.
+  // story #3368 §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 재승인 필요는 gate.
+  // reapproval_required(서버 판정)를 그대로 읽는다. sealed_content_sha256은 이제 approved
+  // 분기의 방어망 전용(정상 경로로는 도달 불가 — gates.py 가드가 이중 차단)이다.
+  // publishable·blockedReason은 status와 다른 축: approved인데 봉인 값이 없어 "확인 불가"
+  // 인 경우도 status는 approved로 남고 publishable만 false다(SEAL_MISSING).
   const { status: derivedStatus, publishable, blockedReason } = deriveContentPostStatus({
     gateStatus: toGateStatus(gate?.status),
-    sealedBodySha256: realStr(gate?.neutral_facts?.['content_sha256']),
+    reapprovalRequired: gate?.reapproval_required,
+    sealedBodySha256: realStr(gate?.sealed_content_sha256),
     currentBodySha256: latest?.body_sha256,
     hasPublishedSitePost: undefined, // S3(공개 projection) 착지 전 — 아직 판별 근거가 없다.
   });
@@ -346,7 +351,7 @@ export default function ContentPostEditPage() {
 
   const status = derivedStatus;
   const canPublish = publishable;
-  const sealedHash = realStr(gate?.neutral_facts?.['content_sha256']);
+  const sealedHash = realStr(gate?.sealed_content_sha256);
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">

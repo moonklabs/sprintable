@@ -2115,6 +2115,8 @@
     "errorPublishHumanOnly": "Only human members can publish.",
     "errorApprovalRequired": "This must be approved before it can be published.",
     "errorReapprovalRequired": "The body changed after approval — it must be re-approved before publishing.",
+    "errorSealMissing": "Can't verify the approved version — it must be resubmitted and re-approved.",
+    "errorResubmitRequired": "The content changed after approval — resubmit it before approving again.",
     "errorRawDetailsToggle": "View server response"
   },
   "docs": {
@@ -4233,6 +4235,7 @@
     "sigConsequenceNote": "Approving records your signature",
     "sigRequestChanges": "Request changes",
     "sigApproveAndSign": "Approve & sign",
+    "gateReapprovalResubmitWaiting": "The author is revising the content and needs to resubmit for approval.",
     "gateActivityHistoryTitle": "Approval history",
     "gateActivityActorFallback": "Unknown",
     "gateActivityEmpty": "No approval history yet",

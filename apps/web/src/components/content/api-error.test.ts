@@ -34,8 +34,8 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
   });
 
   // 페드루 PO 지시(2026-09-03, doc §8-3④-1) — 403/409를 한 문구로 뭉치지 않는다. 사람이
-  // 되돌릴 행동이 갈래마다 다르다(기다린다/권한 요청/재상신). kind 4칸 표.
-  test('⭐kind 4칸 — 승인 미완료(approval_required)·권한 없음(permission)·재승인 필요(reapproval_required)·모름(unknown)이 서로 다른 kind로 갈린다', () => {
+  // 되돌릴 행동이 갈래마다 다르다(기다린다/권한 요청/재상신/봉인없음/재상신대기).
+  test('⭐kind 6칸 — 서로 다른 갈래가 서로 다른 kind로 갈린다', () => {
     const approvalRequired = parseSitePostApiError({
       detail: { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: 'gate_id=g1, status=pending' },
     });
@@ -53,17 +53,34 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
     expect(reapprovalRequired.kind).toBe('reapproval_required');
     expect(reapprovalRequired.humanMessageKey).toBe('errorReapprovalRequired');
 
+    const sealMissing = parseSitePostApiError({
+      detail: { code: 'SITE_POST_SEAL_MISSING', message: 'gate_id=g1' },
+    });
+    expect(sealMissing.kind).toBe('seal_missing');
+    expect(sealMissing.humanMessageKey).toBe('errorSealMissing');
+
+    const resubmitRequired = parseSitePostApiError({
+      detail: { code: 'SITE_POST_RESUBMIT_REQUIRED', message: '승인 뒤 내용이 바뀌었습니다' },
+    });
+    expect(resubmitRequired.kind).toBe('resubmit_required');
+    expect(resubmitRequired.humanMessageKey).toBe('errorResubmitRequired');
+
     const unknown = parseSitePostApiError({ detail: { code: 'SOME_FUTURE_CODE', message: '모름' } });
     expect(unknown.kind).toBe('unknown');
 
-    // 넷 다 서로 다른 값 — 하나로 뭉쳐지지 않는다(§8-3④-1 핵심).
-    const kinds = new Set([approvalRequired.kind, permission.kind, reapprovalRequired.kind, unknown.kind]);
-    expect(kinds.size).toBe(4);
+    // 여섯 다 서로 다른 값 — 하나로 뭉쳐지지 않는다(§8-3④-1 핵심).
+    const kinds = new Set([
+      approvalRequired.kind, permission.kind, reapprovalRequired.kind,
+      sealMissing.kind, resubmitRequired.kind, unknown.kind,
+    ]);
+    expect(kinds.size).toBe(6);
   });
 
-  test('오늘(S3 착지 前) — EXTERNAL_PUBLISH_APPROVAL_REQUIRED는 아직 구조화 code가 아니라 평문 문자열이라 kind=unknown으로 안전하게 떨어진다', () => {
-    // site_posts.py::ExternalPublishGateNotApprovedError는 지금 detail=str(exc)로 평문을
-    // 낸다(code 필드 자체가 없다) — 이 테스트는 그 실물과의 괴리를 회귀로 고정한다.
+  test('레거시 endpoint(POST /site-posts)의 EXTERNAL_PUBLISH 403은 여전히 평문 문자열이라 kind=unknown', () => {
+    // site_posts.py::post_site_post(구 agent 스크립트 경로)는 ExternalPublishGateNotApprovedError를
+    // 여전히 detail=str(exc)로 감싼다(code 필드 없음) — S3의 신규 draft 기반 endpoint만 구조화
+    // 코드를 낸다. 이 차이 자체가 실물이라 회귀로 고정한다(§8-1 5단 발행 화면은 신규 endpoint만
+    // 쓰므로 영향 없음).
     const result = parseSitePostApiError({ detail: 'external_publish 게이트가 승인되지 않았습니다(gate_id=g1, status=pending)' });
     expect(result.kind).toBe('unknown');
     expect(result.humanMessageFallback).toContain('gate_id=g1');

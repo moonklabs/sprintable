@@ -7,11 +7,19 @@
 //
 // 페드루 PO 지시(2026-09-03, doc §8-3④-1) — 403/409를 하나의 "발행 오류" 문구로
 // 뭉치지 않는다. 사람이 되돌릴 행동이 서로 다르기 때문이다:
-//   ①승인 미완료(기다린다) ②발행 자격 없음(권한 요청) ③승인 뒤 본문 변경(재상신).
-// `kind`가 그 세 갈래 + SEAL_MISSING(서버 응답이 아니라 클라이언트 판정,
-// post-status.ts::ContentPostBlockedReason이 이미 그 자리를 진다 — 이 파일은 서버가
-// 실제로 돌려준 에러만 다룬다)와 화면(S9/S10)을 잇는다.
-export type SitePostApiErrorKind = 'approval_required' | 'permission' | 'reapproval_required' | 'unknown';
+//   ①승인 미완료(기다린다) ②발행 자격 없음(권한 요청) ③승인 뒤 본문 변경(재상신)
+//   ④봉인 자체가 없음(재상신부터) ⑤재승인 대기 중 승인 시도(작성자의 재상신을 기다린다).
+// `kind`가 그 다섯 갈래 + unknown과 화면(S9/S10)을 잇는다. post-status.ts::
+// ContentPostBlockedReason은 이와 별개 축 — 그쪽은 "발행 시도 전 화면이 스스로 판단한
+// 상태"이고, 여기는 "서버가 실제로 거부하며 돌려준 응답"이다(둘 다 SEAL_MISSING/
+// HASH_MISMATCH 계열을 다루지만 시점과 출처가 다르다).
+export type SitePostApiErrorKind =
+  | 'approval_required'
+  | 'permission'
+  | 'reapproval_required'
+  | 'seal_missing'
+  | 'resubmit_required'
+  | 'unknown';
 
 export interface SitePostApiErrorInfo {
   /** 사람이 읽을 문장. 알려진 코드면 번역 키, 모르면 서버 원문 메시지 그대로. */
@@ -28,20 +36,20 @@ interface KnownError {
   kind: SitePostApiErrorKind;
 }
 
-// 오늘(S4 편집·상신·발행 슬라이스) 시점에 실제로 만날 수 있는 코드만 "라이브"로 등재한다.
-// EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_REAPPROVAL_REQUIRED 둘은 아직 서버가
-// 구조화 code로 안 낸다(오늘은 detail이 평문 문자열 — `site_posts.py::
-// ExternalPublishGateNotApprovedError`를 `str(exc)`로 감싼다, code 필드 자체가 없다).
-// 페드루 PO가 지정한 미래 계약(S3 착지 예정)을 여기 미리 등재해 둔다 — 코드가 도착하면
-// 이 표만 그대로 걸리고, 그 전에는 code 없는 문자열이라 그냥 "모름"(raw fallback)으로
-// 안전하게 떨어진다(지어낸 성공 0, 지어낸 매핑도 0).
+// S3(story #3369, PR#3734) 착지 실물로 확인된 구조화 코드 — 발행 endpoint
+// (POST .../drafts/{draft_id}/publish)가 실제로 이 셋을 {code,message} 구조로 낸다
+// (site_posts.py::publish_site_post_from_draft·라우터의 except 매핑 그대로).
+// SITE_POST_RESUBMIT_REQUIRED는 S2(gates.py 승인 전이 가드)가 내는 별도 코드 —
+// 승인 화면(approvals-queue.tsx)이 reapproval_required 플래그로 이미 버튼을 막아 두므로
+// 정상 경로로는 도달 드물지만(레이스 방어), 도달 시 "재상신을 기다려야 한다"는 이 발행
+// 화면과 같은 문구를 쓴다.
 const KNOWN_ERRORS: Record<string, KnownError> = {
   MEDIA_NOT_SUPPORTED_PHASE0: { labelKey: 'errorMediaNotSupported', kind: 'unknown' },
   SITE_POST_PUBLISH_HUMAN_ONLY: { labelKey: 'errorPublishHumanOnly', kind: 'permission' },
-  // TODO(S3 착지 후): 서버가 이 code를 구조화해 내면(지금은 평문 메시지만) 실물과
-  // 대조해 라벨을 재확인한다 — 지금은 페드루 PO 지정 계약을 앞서 배선만 해 둔다.
   EXTERNAL_PUBLISH_APPROVAL_REQUIRED: { labelKey: 'errorApprovalRequired', kind: 'approval_required' },
   SITE_POST_REAPPROVAL_REQUIRED: { labelKey: 'errorReapprovalRequired', kind: 'reapproval_required' },
+  SITE_POST_SEAL_MISSING: { labelKey: 'errorSealMissing', kind: 'seal_missing' },
+  SITE_POST_RESUBMIT_REQUIRED: { labelKey: 'errorResubmitRequired', kind: 'resubmit_required' },
 };
 
 function extractCodeAndMessage(detail: unknown): { code?: string; message?: string } {
