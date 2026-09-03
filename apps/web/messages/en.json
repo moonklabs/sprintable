@@ -4509,7 +4509,11 @@
     "viewerActualSizeAction": "Actual size",
     "responsivePreviewDesktop": "Desktop",
     "responsivePreviewTablet": "Tablet",
-    "responsivePreviewMobile": "Mobile"
+    "responsivePreviewMobile": "Mobile",
+    "artifactInteractiveOn": "Interactive on",
+    "artifactInteractiveOff": "Interactive off",
+    "artifactInteractiveOnHint": "Clicks reach the artifact's own buttons · turn off to pan the canvas instead",
+    "artifactInteractiveOffHint": "The artifact isn't clickable right now · turn on to press its buttons"
   },
   "releaseNotes": {
     "whatsNew": "What's new",

@@ -34,12 +34,11 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     expect(markup).toContain('정본 v3');
   });
 
-  it('fully locks down the html stage sandbox (no allow-scripts, no allow-same-origin — 유나 디자인 가디언 보안 지적 반영)', () => {
+  it('runs scripts but never grants allow-same-origin on the inline stage (story #3377 — sandbox=""가 스크립트까지 막던 결함 수정, 유나 디자인 가디언 보안 지적은 same-origin 미부여로 유지)', () => {
     const markup = renderToStaticMarkup(
       wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
     );
-    expect(markup).toContain('sandbox=""');
-    expect(markup).not.toContain('allow-scripts');
+    expect(markup).toContain('sandbox="allow-scripts"');
     expect(markup).not.toContain('allow-same-origin');
   });
 

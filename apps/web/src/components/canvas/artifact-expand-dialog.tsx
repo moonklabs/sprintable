@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
+import { MousePointerClick } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ArtifactStage, isResponsiveHtml, RESPONSIVE_PREVIEW_BREAKPOINTS, type ResponsivePreviewBreakpoint } from './artifact-stage';
 import { ArtifactGalleryTimeline, type GalleryTimelineVersion } from './artifact-gallery-timeline';
@@ -46,9 +47,16 @@ export function ArtifactExpandDialog({
   // 이유가 없다 — 매번 데스크톱(=원본 canvas_bounds)으로 리셋. effect가 아니라 렌더 중 조정
   // (React 공식 "prop 변경 시 state 리셋" 패턴) — set-state-in-effect lint 대상이 아니다.
   const [prevContent, setPrevContent] = useState(content);
+  // story #3377(결함·customer-zero) — 캔버스 인라인 스테이지는 pan/드래그 설계 보존을 위해
+  // 항상 클릭을 안 받지만(ArtifactStage htmlInteractive 기본 false), 이 다이얼로그는 pan
+  // 캔버스로 안 쓰이므로(overlay 미사용) html_blob에서 기본 ON — PO 확定(2026-09-03).
+  const [htmlInteractive, setHtmlInteractive] = useState(format === 'html');
   if (content !== prevContent) {
     setPrevContent(content);
     setBreakpoint('desktop');
+    // 다른 아티팩트로 전환되면 이전 상호작용 토글이 새 콘텐츠에 새지 않도록 기본값(해당
+    // 포맷이 html이면 ON)으로 되돌린다 — 위 브레이크포인트 리셋과 동일 원칙, 같은 블록.
+    setHtmlInteractive(format === 'html');
   }
   const previewWidth = breakpoint === 'desktop' ? undefined : RESPONSIVE_PREVIEW_BREAKPOINTS[breakpoint];
 
@@ -69,6 +77,23 @@ export function ArtifactExpandDialog({
             <DialogPrimitive.Title className="truncate text-sm font-semibold text-foreground">
               {title}
             </DialogPrimitive.Title>
+            {format === 'html' ? (
+              <button
+                type="button"
+                onClick={() => setHtmlInteractive((v) => !v)}
+                aria-pressed={htmlInteractive}
+                title={t(htmlInteractive ? 'artifactInteractiveOnHint' : 'artifactInteractiveOffHint')}
+                className={cn(
+                  'ml-auto flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium',
+                  htmlInteractive
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
+              >
+                <MousePointerClick className="size-3" aria-hidden />
+                {t(htmlInteractive ? 'artifactInteractiveOn' : 'artifactInteractiveOff')}
+              </button>
+            ) : null}
             <DialogPrimitive.Close
               className="ml-auto rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
@@ -101,7 +126,10 @@ export function ArtifactExpandDialog({
             />
           ) : null}
           <div className="min-h-0 flex-1 overflow-hidden p-4">
-            <ArtifactStage format={format} content={content} title={title} canvasBounds={canvasBounds} previewWidth={previewWidth} />
+            <ArtifactStage
+              format={format} content={content} title={title} canvasBounds={canvasBounds} previewWidth={previewWidth}
+              htmlInteractive={format === 'html' && htmlInteractive}
+            />
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>

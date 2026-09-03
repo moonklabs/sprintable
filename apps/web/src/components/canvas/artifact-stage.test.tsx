@@ -52,12 +52,32 @@ function readTransform(el: HTMLElement) {
 }
 
 describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
-  it('locks down the html sandbox and marks content pointer-events:none (crux — 상시 캡처 오버레이 폐기)', async () => {
+  it('runs scripts (allow-scripts) but keeps content pointer-events:none by default (story #3377 — 결함: sandbox=""가 스크립트까지 막아 정지 화면으로 보이던 것 수정, pan/드래그 설계는 그대로)', async () => {
     await mount();
     const iframe = container.querySelector('iframe') as HTMLIFrameElement;
     expect(iframe).not.toBeNull();
-    expect(iframe.getAttribute('sandbox')).toBe('');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
     expect(iframe.className).toContain('pointer-events-none');
+  });
+
+  // story #3377 — 뮤테이션 대상 축: allow-same-origin을 주면 부모 DOM·쿠키·스토리지에
+  // 닿을 수 있어 반드시 없어야 한다(iframe 내부 script는 여전히 cross-origin 격리).
+  it('never grants allow-same-origin regardless of htmlInteractive (보안 표면 — 부모 접근 차단 유지)', async () => {
+    await mount({ htmlInteractive: true });
+    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
+  });
+
+  it('htmlInteractive=true makes the iframe clickable (pointer-events:auto) — only where the caller opts in (ArtifactExpandDialog)', async () => {
+    await mount({ htmlInteractive: true });
+    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
+    expect(iframe.className).not.toContain('pointer-events-none');
+  });
+
+  it('non-html formats are unaffected by htmlInteractive (이미지/tree 포맷엔 iframe 자체가 없음)', async () => {
+    await mount({ format: 'image', content: 'https://example.com/x.png', htmlInteractive: true });
+    expect(container.querySelector('iframe')).toBeNull();
   });
 
   it('never renders the v1~v2.1 scroll/overlay remnants (data-artifact-stage-scroll·data-pan-overlay)', async () => {
