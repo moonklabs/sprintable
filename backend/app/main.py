@@ -218,7 +218,7 @@ async def lifespan(app: FastAPI):
             await worker_engine.dispose()
 
 
-from app.routers import a2a, account, activation, activity_logs, admin_billing, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, context_pack, connectors, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activation, activity_logs, admin_billing, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, context_pack, connectors, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -348,6 +348,13 @@ app.add_middleware(
     ],
 )
 
+# story #3354(마케팅자동화·측정) — 공개 beacon 라우트 하나만 CORS 완전 개방(app 전체
+# allowlist는 안 건드림). 전역 CORSMiddleware보다 나중에 add_middleware해 바깥쪽(요청을
+# 먼저 가로챔)에 둬야 preflight OPTIONS가 전역 allowlist 판정에 안 걸린다.
+from app.routers.public_pageview import PublicPageviewCorsMiddleware  # noqa: E402
+
+app.add_middleware(PublicPageviewCorsMiddleware)
+
 # story #3173(결제②-B) — AU(automation_units) 계측. app/dependencies/auth.py의
 # get_current_user()가 request.state.au_actor/au_org_id를 심어두면 여기서 응답 완료 후
 # 읽어 usage_meters에 쌓는다. 전체 fail-open(계측 예외가 요청에 영향 0) — 모듈 docstring 참고.
@@ -399,6 +406,7 @@ app.include_router(workflow_line_config.router)
 app.include_router(tasks.router)
 app.include_router(docs.router)
 app.include_router(public_docs.router)
+app.include_router(public_pageview.router)
 app.include_router(meetings.router)
 app.include_router(stories.router)
 app.include_router(projects.router)
@@ -433,6 +441,7 @@ app.include_router(runtime_capabilities.router)
 app.include_router(members.router)
 app.include_router(merge_gate.router)
 app.include_router(organizations.router)
+app.include_router(pageview_metering.router)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)

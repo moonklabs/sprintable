@@ -129,6 +129,8 @@ from app.models.chain_circuit_breaker import ChainCircuitBreaker
 from app.models.event_definition import EventDefinition
 from app.models.recipe_role_binding import RecipeRoleBinding
 from app.models.recipe_repeat_schedule import RecipeRepeatSchedule
+from app.models.org_metering_key import OrgMeteringKey
+from app.models.org_pageview_daily import OrgPageviewDaily
 
 __all__ = [
     "RoleTemplate",
