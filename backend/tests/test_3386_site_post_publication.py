@@ -171,11 +171,32 @@ async def _submit_and_approve(client, session, *, org_id, draft_id, status="appr
     return gate_id
 
 
+async def _org_member_id(session, *, org_id, user_id) -> str:
+    """story 194acb63 — published_by_member_id는 이제 org_member.id다(auth.user_id/User.id
+    가 아니다). 테스트가 실제로 그 값을 검증하려면 시드 결과를 되짚어 읽어야 한다(#3739
+    리뷰의 _org_member_id() 패턴 그대로)."""
+    from app.models.project import OrgMember
+    from sqlalchemy import select
+
+    member_id = (await session.execute(
+        select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )).scalar_one()
+    return str(member_id)
+
+
 @pytest.mark.anyio
 async def test_publication_info_all_fields_present_when_published():
+    """story 194acb63(배포 11 실측) 정정 반영 — url은 이제 발행 액션 자체의 url(백엔드
+    API 주소 폴백, `_resolve_public_url`)과 더는 같지 않다(그게 결함이었다). 이 endpoint의
+    url은 `settings.public_site_base_url`(랜딩 베이스) 전용 경로로 따로 조립된다 —
+    테스트는 그 설정을 직접 주입해 실제 랜딩 URL 패턴을 검증한다. published_by_member_id도
+    org_member.id로 정정."""
+    from app.core.config import settings as app_settings
     from app.main import app
 
     engine, Session = await _session_factory()
+    original_base_url = app_settings.public_site_base_url
+    app_settings.public_site_base_url = "https://sprintable.ai"
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
@@ -203,10 +224,68 @@ async def test_publication_info_all_fields_present_when_published():
         assert r_info.status_code == 200, r_info.text
         body = r_info.json()
         assert body["published_at"] == r_pub.json()["published_at"]
-        assert body["url"] == r_pub.json()["url"]
-        assert body["published_by_member_id"] == str(human_id)
+        assert body["url"] == "https://sprintable.ai/ko/blog/2ho-blog"
+        assert "public_key" not in body["url"] and "run.app" not in body["url"], (
+            "공개 URL이 백엔드 API 주소로 새면 안 된다(배포 11 실사고 재현 방지)"
+        )
+        async with Session() as s:
+            from app.models.project import OrgMember
+            from sqlalchemy import select
+
+            expected_member_id = await _org_member_id(s, org_id=org_id, user_id=human_id)
+            exists = (await s.execute(
+                select(OrgMember.id).where(OrgMember.id == uuid.UUID(body["published_by_member_id"]))
+            )).scalar_one_or_none()
+        assert exists is not None, "AC — published_by_member_id는 org_members 테이블에 실존해야 한다"
+        assert body["published_by_member_id"] == expected_member_id
+        assert body["published_by_member_id"] != str(human_id), (
+            "published_by_member_id가 User.id 그대로면 안 된다(org_member.id여야 한다)"
+        )
         assert body["published_body_sha256"]  # 실값(빈 문자열/None 아님)
     finally:
+        app_settings.public_site_base_url = original_base_url
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publication_url_null_when_public_site_base_url_unset():
+    """AC1 — 랜딩 베이스(settings.public_site_base_url)가 미설정이면(오늘 dev의 실제
+    기본값, deploy SSOT로 아직 안 채워졌던 상태와 동형) url은 지어내지 않고 null이다 —
+    백엔드 API 주소로 몰래 폴백하지 않는다(그게 바로 배포 11 결함이었다)."""
+    from app.core.config import settings as app_settings
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    original_base_url = app_settings.public_site_base_url
+    app_settings.public_site_base_url = ""
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts", json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            await _submit_and_approve(client, s, org_id=org_id, draft_id=draft_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_pub = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publish")
+        assert r_pub.status_code == 200, r_pub.text
+
+        async with _client_for(app) as client:
+            r_info = await client.get(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publication")
+        assert r_info.status_code == 200, r_info.text
+        assert r_info.json()["url"] is None, "랜딩 베이스 미설정이면 url은 null이어야 한다(지어내지 않는다)"
+    finally:
+        app_settings.public_site_base_url = original_base_url
         app.dependency_overrides.clear()
         await engine.dispose()
 

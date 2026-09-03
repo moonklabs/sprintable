@@ -243,4 +243,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # threads_platform_app_id/encrypted_app_secret) 몫으로 옮겨갔다 — 이 두 env var
     # 경로는 이제 아예 없다(infra/manual-env-allowlist.yml에서도 두 줄 제거).
     assert "THREADS_APP_ID" not in keys and "THREADS_APP_SECRET" not in keys
-    assert len(keys) == 119
+    # story 194acb63(Phase0 결함·S8 후속, 2026-09-03) — public_site_base_url 1필드 신설
+    # (발행 글 상세의 "공개 URL"이 백엔드 API 주소로 새던 결함 — 랜딩 베이스 deploy SSOT
+    # 배선. 시크릿 아님, cloudbuild.yaml _PUBLIC_SITE_BASE_URL substitution으로 직접
+    # 배선·manual-env-allowlist.yml 미등재)로 119→120. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "PUBLIC_SITE_BASE_URL" in keys
+    assert len(keys) == 120
