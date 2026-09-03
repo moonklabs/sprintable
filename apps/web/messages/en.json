@@ -4516,7 +4516,6 @@
     "artifactInteractiveOnHint": "Clicks reach the artifact's own buttons · turn off to pan the canvas instead",
     "artifactInteractiveOffHint": "The artifact isn't clickable right now · turn on to press its buttons",
     "artifactStageInteractiveHint": "To click through the flow, open Expand → Interactive",
-    "artifactDetailPageLink": "Open detail page",
     "artifactDetailPageLinkHint": "Export, propose canonical, comments, and version lineage live on the detail page"
   },
   "releaseNotes": {

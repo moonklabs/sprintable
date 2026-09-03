@@ -307,7 +307,16 @@ describe('ArtifactGalleryView — 상세 페이지 진입(story #3378)', () => {
     await mount();
     const titleLink = container.querySelector('a[href="/artifacts/a1"]');
     expect(titleLink).not.toBeNull();
-    expect(titleLink!.textContent).toBe('웰컴 이메일 시안');
+    expect(titleLink!.textContent).toContain('웰컴 이메일 시안');
+  });
+
+  // 유나 design verdict(ad31d9449) — 배지행이 제목 Link 밖에 있으면 카드 하단이 hover:border로
+  // «눌린다»는 인상을 주면서 실제로는 아무 데도 안 이어지는 죽은 면적이 된다. 배지도 이제
+  // 같은 Link 안에 있어야 한다(제목+메타 전체가 상세로 가는 클릭 가능 영역).
+  it('the badge row (anchor/latest chips) sits inside the same detail link — no dead-click area below the title (design verdict)', async () => {
+    await mount();
+    const titleLink = container.querySelector('a[href="/artifacts/a1"]');
+    expect(titleLink?.textContent).toContain('v3까지'); // galleryLatestChip
   });
 
   it('the expand dialog carries a 「상세 페이지로」 link so it is no longer a dead end', async () => {

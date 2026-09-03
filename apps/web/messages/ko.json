@@ -4516,7 +4516,6 @@
     "artifactInteractiveOnHint": "클릭하면 산출물 안 버튼이 눌립니다 · 끄면 캔버스 이동으로 바뀝니다",
     "artifactInteractiveOffHint": "지금은 산출물이 눌리지 않습니다 · 켜면 안 버튼을 누를 수 있습니다",
     "artifactStageInteractiveHint": "클릭해서 흐름을 따라가려면 크게 보기 → 상호작용",
-    "artifactDetailPageLink": "상세 페이지로",
     "artifactDetailPageLinkHint": "내보내기·정본 제안·코멘트·버전 lineage는 상세 페이지에 있습니다"
   },
   "releaseNotes": {

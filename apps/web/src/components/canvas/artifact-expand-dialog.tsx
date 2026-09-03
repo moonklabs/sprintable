@@ -96,7 +96,7 @@ export function ArtifactExpandDialog({
                   className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <ExternalLink className="size-3" aria-hidden />
-                  {t('artifactDetailPageLink')}
+                  {t('galleryOpenDetailAction')}
                 </Link>
               ) : null}
               {format === 'html' ? (

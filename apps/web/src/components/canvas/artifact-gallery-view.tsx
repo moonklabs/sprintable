@@ -98,6 +98,10 @@ function ArtifactCard({
     // 안에 못 들어가(중첩 상호작용 콘텐츠, 무효 HTML)라 바깥 컨테이너를 button에서 div로
     // 내리고, 썸네일만 여전히 다이얼로그를 여는 button, 제목은 실제 <Link>로 상세 페이지에
     // 간다(스토리 문구 "카드 제목 링크" 그대로).
+    // 유나 design verdict(ad31d9449) — 배지행을 별도 div로 두면 hover:border(카드 전체)가
+    // "눌린다"는 인상을 주면서 실제로는 아무 데도 안 이어지는 죽은 36px 면적(카드의 16.4%)이
+    // 된다. 배지는 전부 span이라 중첩 문제가 없으므로 제목 Link 안으로 옮겨 "제목+메타=상세
+    // 링크 영역" 전체가 실제로 클릭 가능하게 한다(죽은 면적 0).
     <div className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-colors hover:border-primary/40">
       <button type="button" onClick={onOpen} title={axisT('galleryOpenArtifactAction')} className="block w-full text-left">
         <ArtifactThumbnail
@@ -110,29 +114,29 @@ function ArtifactCard({
       <Link
         href={`/artifacts/${artifact.id}`}
         title={axisT('galleryOpenDetailAction')}
-        className="min-w-0 truncate px-3 pt-2.5 text-[13px] font-semibold text-foreground hover:underline"
+        className="flex flex-col gap-1.5 px-3 pt-2.5 pb-3 hover:underline"
       >
-        {artifact.title}
-      </Link>
-      <div className="flex items-center gap-1.5 px-3 pb-3 pt-1.5">
-        {artifact.anchorVersion != null ? (
-          <span className="shrink-0 rounded border border-success px-1.5 py-0.5 text-[9px] font-extrabold text-success">
-            {axisT('galleryAnchorPill', { version: artifact.anchorVersion })}
+        <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{artifact.title}</span>
+        <span className="flex items-center gap-1.5 no-underline">
+          {artifact.anchorVersion != null ? (
+            <span className="shrink-0 rounded border border-success px-1.5 py-0.5 text-[9px] font-extrabold text-success">
+              {axisT('galleryAnchorPill', { version: artifact.anchorVersion })}
+            </span>
+          ) : null}
+          <span className="shrink-0 rounded border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-muted-foreground">
+            {axisT('galleryLatestChip', { version: artifact.latestVersionNumber })}
           </span>
-        ) : null}
-        <span className="shrink-0 rounded border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-muted-foreground">
-          {axisT('galleryLatestChip', { version: artifact.latestVersionNumber })}
+          {/* story #2724(2026-08-17, 페드루 PO 판정) — 카드 레벨 미연결 배지. 사이드바 "무소속"
+           * 그룹 라벨(축 기준)과는 다른 축의 정보(story_id·doc_id 원자값 기준, 위 GalleryArtifact
+           * Summary 주석 참조)라 중복 아님 — 그리드 스크롤만으로 바로 보이는 게 목적(발견성).
+           * ⚠️표현(색·아이콘·문구 톤)은 스케치 — 유나 design 게이트에서 다듬어짐 전제. */}
+          {artifact.unlinked ? (
+            <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium italic text-muted-foreground">
+              {axisT('galleryUnlinkedBadge')}
+            </span>
+          ) : null}
         </span>
-        {/* story #2724(2026-08-17, 페드루 PO 판정) — 카드 레벨 미연결 배지. 사이드바 "무소속"
-         * 그룹 라벨(축 기준)과는 다른 축의 정보(story_id·doc_id 원자값 기준, 위 GalleryArtifact
-         * Summary 주석 참조)라 중복 아님 — 그리드 스크롤만으로 바로 보이는 게 목적(발견성).
-         * ⚠️표현(색·아이콘·문구 톤)은 스케치 — 유나 design 게이트에서 다듬어짐 전제. */}
-        {artifact.unlinked ? (
-          <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium italic text-muted-foreground">
-            {axisT('galleryUnlinkedBadge')}
-          </span>
-        ) : null}
-      </div>
+      </Link>
     </div>
   );
 }
