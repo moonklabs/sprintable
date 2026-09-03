@@ -368,6 +368,15 @@ class Settings(BaseSettings):
     # 자리. 기본 True(PKCE 시도) — dev 실왕복 검증에서 거부되면 False로.
     threads_pkce_enabled: bool = True
 
+    # story 194acb63(Phase0 결함·S8 후속, 배포 11 실측) — 발행된 글의 "공개 URL"(S8 상세
+    # 화면)이 백엔드 자기 주소(+public_key 쿼리)로 새던 결함의 근본 원인: 랜딩 베이스가
+    # env가 아니라 org별 site 커넥터 설정에만 있어(오늘은 어느 org도 등록 안 함) 항상
+    # API 주소로 폴백했다. deploy SSOT(cloudbuild.yaml)로 배선하는 전역 기본값 — 미설정
+    # 이면 이 URL을 아예 안 만든다(null, 화면은 「—」·지어내지 않는다, AC1). site 커넥터
+    # (조직별 재정의)는 `_resolve_public_url`(발행 액션 자체의 URL, 이 결함 범위 밖)이
+    # 여전히 우선한다 — 이 설정은 S8 표시 전용의 별도 해소 경로다.
+    public_site_base_url: str = ""
+
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
 

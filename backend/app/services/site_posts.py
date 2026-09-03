@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.config import settings
 from app.models.gate import Gate, set_gate_status
 from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
@@ -637,8 +638,19 @@ _EMPTY_PUBLICATION_INFO = SitePostPublicationInfo(
 )
 
 
+def _resolve_public_site_display_url(*, lang: str, slug: str) -> str | None:
+    """story 194acb63(배포 11 실측) — S8 상세 화면 전용 URL 해소. `_resolve_public_url`
+    (발행 액션 자체가 조립하는 URL, org별 site 커넥터 우선 + 백엔드 API 폴백)과 의도적으로
+    분리한다 — 그 함수의 폴백(API 주소+public_key)이 바로 이 결함의 원인이라, 표시 전용
+    경로는 그 폴백을 아예 밟지 않는다. `settings.public_site_base_url`(deploy SSOT)
+    하나만 본다 — 미설정이면 None(화면은 「—」, 지어내지 않는다)."""
+    if not settings.public_site_base_url:
+        return None
+    return f"{settings.public_site_base_url.rstrip('/')}/{lang}/blog/{slug}"
+
+
 async def get_site_post_publication_info(
-    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, backend_base_url: str,
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
 ) -> SitePostPublicationInfo:
     """이 draft의 현재 공개 상태를 상세 화면이 그대로 그릴 수 있는 형태로 반환한다.
     발행된 적이 없으면(또는 이미 unpublish됐으면) 전부 None — 404가 아니라 200(draft 자체가
@@ -654,7 +666,10 @@ async def get_site_post_publication_info(
     "재발행" 버튼 활성화 조건을 풀려면 "지금 라이브인 본문"과 "지금 승인된(sealed) 본문"이
     다른지 비교할 축이 하나 더 필요하다 — gate_status/reapproval_required만으로는 "막
     발행했다"와 "재승인 후 아직 재발행 안 눌렀다"를 구별 못 한다, 두 경우 다 approved+
-    hasPublishedSitePost=true로 동일하게 보인다)."""
+    hasPublishedSitePost=true로 동일하게 보인다).
+
+    story 194acb63(배포 11 실측) — url은 `backend_base_url`을 더 받지 않는다(그 파라미터
+    자체가 결함의 재료였다 — 백엔드 자기 주소로 URL을 조립하는 경로를 아예 없앤다)."""
     draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None:
         raise SitePostDraftNotFoundError(draft_id)
@@ -673,9 +688,7 @@ async def get_site_post_publication_info(
     if post is None:
         return _EMPTY_PUBLICATION_INFO
 
-    url = await _resolve_public_url(
-        db, org_id=org_id, lang=post.lang, slug=post.slug, backend_base_url=backend_base_url,
-    )
+    url = _resolve_public_site_display_url(lang=post.lang, slug=post.slug)
     published_body_sha256 = compute_body_sha256(
         title=post.title, lang=post.lang, summary=post.summary, tags=post.tags, body_md=post.body_md,
     )
