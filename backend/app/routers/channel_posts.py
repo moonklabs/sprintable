@@ -22,6 +22,7 @@ from app.services.channel_posts import (
     ChannelTextTooLongError,
     ChannelTokenExpiredError,
     ExternalPublishGateNotApprovedError,
+    build_tagged_link,
     create_channel_post_draft_version,
     get_channel_post_draft,
     is_agent_caller,
@@ -64,6 +65,9 @@ class ChannelPostDraftVersionResponse(BaseModel):
     version: int
     author_kind: str
     body_sha256: str
+    # story #3394(AC5) — link_url이 있을 때만 채워진다(없으면 null, 지어내지 않는다).
+    # publish_channel_post_draft가 실제 발행에 쓰는 것과 같은 값(build_tagged_link 공용).
+    tagged_link_preview: str | None = None
 
 
 class ChannelPostDraftListItem(BaseModel):
@@ -75,6 +79,21 @@ class ChannelPostDraftListItem(BaseModel):
     latest_author_kind: str
     origin_author_kind: str
     updated_at: str
+    # story #3394(AC1·AC3) — site_posts.SitePostDraftListItem(#3742)과 같은 이름·의미로
+    # 미러. gate 없으면 전부 None("모른다≠다르다" — 아직 상신 전이라는 뜻).
+    gate_status: str | None = None
+    reapproval_required: bool | None = None
+    sealed_content_sha256: str | None = None
+    body_sha256: str
+    published_at: str | None = None
+    published_body_sha256: str | None = None
+    # story #3394(AC2) — 채널 고유. publication_status·error_code는 "최신 버전"의
+    # publication 행 기준(T9 이어서 발행), published_at·permalink·external_id는 "가장 최근
+    # published" 기준(버전 무관) — 두 축이 다른 이유는 서비스 docstring 참고.
+    publication_status: str | None = None
+    permalink: str | None = None
+    external_id: str | None = None
+    error_code: str | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -87,6 +106,7 @@ class ChannelPostVersionHistoryItem(BaseModel):
     author_member_id: uuid.UUID
     author_kind: str
     created_at: str
+    tagged_link_preview: str | None = None
 
 
 class SubmitChannelPostDraftRequest(BaseModel):
@@ -120,7 +140,7 @@ async def post_channel_post_draft_version(
     actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
 
     try:
-        version = await create_channel_post_draft_version(
+        version, channel = await create_channel_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, connection_id=body.connection_id,
             text=body.text, link_url=body.link_url, author_member_id=member_id, author_kind=actor_type,
         )
@@ -141,9 +161,14 @@ async def post_channel_post_draft_version(
             },
         ) from exc
 
+    tagged_link_preview = (
+        build_tagged_link(channel=channel, link_url=body.link_url, draft_id=version.draft_id)
+        if body.link_url else None
+    )
     return ChannelPostDraftVersionResponse(
         draft_id=version.draft_id, version_id=version.id, version=version.version,
         author_kind=version.author_kind, body_sha256=version.body_sha256,
+        tagged_link_preview=tagged_link_preview,
     )
 
 
@@ -168,8 +193,18 @@ async def list_channel_post_drafts_endpoint(
             connection_id=draft.connection_id, current_version=latest.version,
             latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
             updated_at=latest.created_at.isoformat(),
+            body_sha256=latest.body_sha256,
+            gate_status=gate.status if gate else None,
+            reapproval_required=gate.reapproval_required if gate else None,
+            sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
+            published_at=published_pub.published_at.isoformat() if published_pub else None,
+            published_body_sha256=published_body_sha256,
+            publication_status=latest_pub.status if latest_pub else None,
+            permalink=published_pub.permalink if published_pub else None,
+            external_id=published_pub.external_id if published_pub else None,
+            error_code=latest_pub.error_code if latest_pub else None,
         )
-        for draft, latest, origin in rows
+        for draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256 in rows
     ]
 
 
@@ -196,6 +231,10 @@ async def list_channel_post_draft_version_history(
             version_id=v.id, version=v.version, draft_id=draft.id, text=v.text, link_url=v.link_url,
             body_sha256=v.body_sha256, author_member_id=v.author_member_id, author_kind=v.author_kind,
             created_at=v.created_at.isoformat(),
+            tagged_link_preview=(
+                build_tagged_link(channel=draft.channel, link_url=v.link_url, draft_id=draft.id)
+                if v.link_url else None
+            ),
         )
         for v in versions
     ]

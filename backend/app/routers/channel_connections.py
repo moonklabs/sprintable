@@ -92,9 +92,15 @@ class ChannelConnectionResponse(BaseModel):
     connected_by: uuid.UUID | None
     created_at: str
     updated_at: str
+    # story #3394(AC4, S2c BE 선행) — 어댑터가 선언한 글자 수 한도(Threads=500). FE가
+    # 하드코딩하면 다른 채널이 붙을 때 값이 틀리는 재발(담롱군 §4-6)이 난다 — 선언 안 한
+    # 채널이면 null("한도 미확認", 지어내지 않는다).
+    max_text_length: int | None = None
 
 
 def _to_response(row) -> ChannelConnectionResponse:
+    adapter = get_channel_adapter(row.channel)
+    max_text_length = adapter.max_text_length if adapter is not None and adapter.max_text_length > 0 else None
     return ChannelConnectionResponse(
         id=row.id, channel=row.channel, account_id=row.account_id, account_label=row.account_label,
         credential_kind=row.credential_kind, status=row.status,
@@ -102,6 +108,7 @@ def _to_response(row) -> ChannelConnectionResponse:
         last_refreshed_at=row.last_refreshed_at.isoformat() if row.last_refreshed_at else None,
         last_error=row.last_error, can_auto_refresh=can_auto_refresh(row.refresh_mode),
         connected_by=row.connected_by, created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
+        max_text_length=max_text_length,
     )
 
 
