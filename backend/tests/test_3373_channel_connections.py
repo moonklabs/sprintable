@@ -221,6 +221,44 @@ def test_channel_oauth_state_wrong_channel_rejected():
     assert verify_channel_oauth_state(state, expected_channel="instagram") is None
 
 
+def test_channel_oauth_state_expired_but_correctly_signed_rejected():
+    """카디르 QA 갭(2026-09-03 09:03Z) — 기존 위조 테스트는 malformed 문자열만 썼다. 정상
+    형태 JWT(모든 필드 채워짐)·정서명(config_module의 실제 시크릿)·다만 exp가 과거인 케이스를
+    실제로 만들어 거부되는지 잰다(뮤테이션 대상 — verify_exp를 끄면 이 테스트가 RED)."""
+    import time
+    from jose import jwt as jose_jwt
+
+    import app.core.config as config_module
+    from app.services.channel_oauth_state import verify_channel_oauth_state
+
+    now = int(time.time())
+    claims = {
+        "org_id": str(uuid.uuid4()), "requester_member_id": str(uuid.uuid4()),
+        "channel": "threads", "code_verifier": "v", "connection_id": None,
+        "jti": uuid.uuid4().hex, "iat": now - 1000, "exp": now - 1, "aud": "channel-oauth",
+    }
+    token = jose_jwt.encode(claims, config_module.settings.channel_oauth_state_secret, algorithm="HS256")
+    assert verify_channel_oauth_state(token, expected_channel="threads") is None
+
+
+def test_channel_oauth_state_wrong_signature_but_well_formed_rejected():
+    """카디르 QA 갭(2026-09-03 09:03Z) — 정상 형태(모든 필드·exp 유효) + 다른 키로 서명한
+    토큰이 거부되는지 잰다(뮤테이션 대상 — verify_signature를 끄면 이 테스트가 RED)."""
+    import time
+    from jose import jwt as jose_jwt
+
+    from app.services.channel_oauth_state import verify_channel_oauth_state
+
+    now = int(time.time())
+    claims = {
+        "org_id": str(uuid.uuid4()), "requester_member_id": str(uuid.uuid4()),
+        "channel": "threads", "code_verifier": "v", "connection_id": None,
+        "jti": uuid.uuid4().hex, "iat": now, "exp": now + 600, "aud": "channel-oauth",
+    }
+    token = jose_jwt.encode(claims, "a-completely-different-wrong-secret-xyz", algorithm="HS256")
+    assert verify_channel_oauth_state(token, expected_channel="threads") is None
+
+
 # ─── router: agent 403 (AC6) ───────────────────────────────────────────────
 
 @pytest.mark.anyio
