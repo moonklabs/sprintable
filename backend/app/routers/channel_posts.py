@@ -14,6 +14,7 @@ from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
     ChannelPostApproverRoleMissingError,
     ChannelPostDraftNotFoundError,
+    ChannelPostGateAlreadyHeldError,
     ChannelPostReapprovalRequiredError,
     ChannelPostSealMissingError,
     ChannelPostVersionNotFoundError,
@@ -279,6 +280,18 @@ async def submit_channel_post_draft_endpoint(
         raise HTTPException(
             status_code=409,
             detail={"code": "CHANNEL_POST_APPROVER_ROLE_MISSING", "message": str(exc)},
+        ) from exc
+    except ChannelPostGateAlreadyHeldError as exc:
+        # story #3404 — site_posts.py의 SITE_POST_GATE_ALREADY_HELD와 동형 상태코드·모양.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CHANNEL_POST_GATE_ALREADY_HELD",
+                "message": str(exc),
+                "holding_draft_id": str(exc.holding_draft_id),
+                "holding_channel": exc.holding_channel,
+                "holding_connection_id": str(exc.holding_connection_id),
+            },
         ) from exc
 
     return SubmitChannelPostDraftResponse(

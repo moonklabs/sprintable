@@ -578,6 +578,34 @@ async def find_gate_slot_with_pr_fallback(
     ).scalar_one_or_none()
 
 
+def resolve_gate_holder_draft_id(
+    existing_gate: Gate | None, *, this_draft_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """story #3404(site_posts.py의 story f6d14476 처방을 channel_posts.py로도 미러하며
+    추출) — 「이 게이트를 이미 다른 초안이 쥐고 있는가」 판정을 한 곳에 모은다. site_posts.py
+    ·channel_posts.py 둘 다 external_publish 게이트 슬롯이 work_item 단위(draft 단위가
+    아니다)라 같은 work_item에 초안이 둘 이상이면 뒤늦은 상신이 앞선 승인을 조용히
+    pending으로 되돌릴 수 있다 — 그 판정 로직 자체(neutral_facts.draft_id 대조)는 두 도메인
+    이 완전히 동일해 두 벌로 유지하면 드리프트 표면이 된다(한쪽만 고치고 잊는 사고). 던지는
+    에러(SitePostGateAlreadyHeldError/ChannelPostGateAlreadyHeldError)는 도메인마다
+    필드가 달라(lang/slug vs channel/connection_id) 여기서 만들지 않는다 — 호출부가 이
+    함수의 반환값(막고 있는 draft_id, 또는 없으면 None)만 받아 자기 도메인 에러를 짓는다.
+
+    None을 반환하는 경우 전부 "막지 않는다"는 뜻이다: 게이트가 없음(신규) · pending/
+    approved가 아님(rejected/voided 등 — 걱정할 보유자가 없다) · neutral_facts에
+    draft_id가 아예 없음(이 판정이 생기기 前의 레거시 게이트, "모른다≠다르다" — 모르면
+    막지 않는다) · this_draft_id와 같음(자기 자신, 재상신은 언제나 허용)."""
+    if existing_gate is None or existing_gate.status not in ("pending", "approved"):
+        return None
+    holding_raw = (existing_gate.neutral_facts or {}).get("draft_id")
+    if holding_raw is None:
+        return None
+    holding_id = uuid.UUID(holding_raw)
+    if holding_id == this_draft_id:
+        return None
+    return holding_id
+
+
 async def find_pending_merge_gates_by_head_sha(
     session: AsyncSession, *, org_id: uuid.UUID, head_sha: str,
 ) -> list[Gate]:
