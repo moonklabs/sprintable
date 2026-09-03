@@ -7,7 +7,14 @@
 res.ok만 보고 본문은 안 읽음) — 앱 전역 HTTPException 봉투 그대로 검증한다.
 
 seed 하네스는 test_3354_pageview_counter.py 패턴(httpx ASGITransport+override_db_and_read+
-claims에 org_id 직접 주입) 재사용."""
+claims에 org_id 직접 주입) 재사용.
+
+⚠️story #3365(Phase0 S1, 2026-09-03) 회귀 — 이 POST 엔드포인트는 이제 휴먼 전용이다(agent
+호출은 403 SITE_POST_PUBLISH_HUMAN_ONLY, 신규 test_3365_site_post_drafts.py 참고). 이 파일의
+기존 "성공 발행" 테스트들은 그 경계가 생기기 전 작성돼 caller로 agent를 썼던 것 — 이제
+휴먼(`_seed_human`)으로 바꿔 각 테스트가 원래 의도(게이트/slug/upsert/공개 조회 chokepoint)를
+계속 정확히 검증하게 한다(안 바꾸면 새 agent-차단이 먼저 걸려 원래 검증하려던 경로를 더 이상
+안 타면서도 같은 403으로 조용히 통과해버린다)."""
 from __future__ import annotations
 
 import os
@@ -79,6 +86,23 @@ async def _seed_agent(session, org_id, project_id, *, name="publisher"):
     session.add(m)
     await session.commit()
     return m.id
+
+
+async def _seed_human(session, org_id, *, role="member"):
+    """story #3365 — POST site-posts는 이제 휴먼 전용. 실제 JWT 휴먼과 동형인 User+OrgMember
+    조합(TeamMember 없음 → is_agent_caller()가 False로 판정)."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user = User(
+        id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x",
+    )
+    session.add(user)
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
+    session.add(om)
+    await session.commit()
+    return user.id
 
 
 async def _seed_story(session, org_id, project_id, *, title="1호 글"):
@@ -168,10 +192,10 @@ async def test_post_with_unapproved_gate_returns_403_and_creates_zero_rows():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_gate(s, org_id, story_id, status="pending")
-        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
             r = await client.post(
@@ -188,8 +212,12 @@ async def test_post_with_unapproved_gate_returns_403_and_creates_zero_rows():
 
 
 @pytest.mark.anyio
-async def test_post_with_approved_gate_returns_201_and_public_api_reflects():
+async def test_agent_publish_returns_403_site_post_publish_human_only_even_with_approved_gate():
+    """story #3365(Phase0 S1) AC4 — 게이트가 approved여도 agent 호출은 공개를 못 만든다.
+    뮤테이션 대상: 이 체크를 제거하면 아래 assert가 201로 반드시 실패한다."""
     from app.main import app
+    from app.models.site_post import SitePost
+    from sqlalchemy import func, select
 
     engine, Session = await _session_factory()
     try:
@@ -198,8 +226,37 @@ async def test_post_with_approved_gate_returns_201_and_public_api_reflects():
             agent_id = await _seed_agent(s, org_id, project_id)
             story_id = await _seed_story(s, org_id, project_id)
             gate_id = await _seed_gate(s, org_id, story_id, status="approved")
-            public_key = await _seed_metering_key(s, org_id)
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json=_publish_body(work_item_id=story_id, gate_id=gate_id),
+            )
+        assert r.status_code == 403, r.text
+        assert r.json()["error"]["code"] == "SITE_POST_PUBLISH_HUMAN_ONLY", r.text
+
+        async with Session() as s:
+            count = (await s.execute(select(func.count()).select_from(SitePost))).scalar_one()
+        assert count == 0, "agent 호출인데 공개 행이 생겼다(휴먼 전용 경계 회귀)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_post_with_approved_gate_returns_201_and_public_api_reflects():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            gate_id = await _seed_gate(s, org_id, story_id, status="approved")
+            public_key = await _seed_metering_key(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
             r = await client.post(
@@ -246,10 +303,10 @@ async def test_auto_passed_gate_also_counts_as_approved():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_gate(s, org_id, story_id, status="auto_passed")
-        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
             r = await client.post(
@@ -269,10 +326,10 @@ async def test_invalid_slug_rejected_422():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_gate(s, org_id, story_id, status="approved")
-        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
             r = await client.post(
@@ -295,10 +352,10 @@ async def test_republish_same_org_lang_slug_upserts_single_row():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
             gate_id = await _seed_gate(s, org_id, story_id, status="approved")
-        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
             await client.post(
@@ -392,11 +449,11 @@ async def test_unpublished_post_excluded_from_public_reads():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
             gate_id = await _seed_gate(s, org_id, story_id, status="approved")
             public_key = await _seed_metering_key(s, org_id)
-        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
             await client.post(
