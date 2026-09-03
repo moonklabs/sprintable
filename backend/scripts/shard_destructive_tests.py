@@ -87,11 +87,19 @@ def check_staleness(
     「존재 자체」가 위험 신호다. ⛔partition()에서 unweighted 파일에 «평균» 대신 «최대»
     가중치를 가정하는 대안도 검토했으나 채택 안 함(PR 본문에 근거) — 가벼운 신규 파일까지
     최댓값으로 과대평가해 샤드 균형을 오히려 해칠 수 있고, 이 경고+ci.yml의 실측 가드
-    (AC1/AC2)가 이미 "무거운 unweighted 파일"을 실측 그 자리에서 하드 실패로 잡는다."""
+    (AC1/AC2)가 이미 "무거운 unweighted 파일"을 실측 그 자리에서 하드 실패로 잡는다.
+
+    story #3397(CI 후속) — 스냅샷의 파일 개수는 이제 `total_files` 필드가 아니라
+    `len(files)`에서 파생한다. `total_files`/`total_sec`는 `files` 배열에서 그대로
+    계산 가능한 값인데 JSON에 별도로 기록해 뒀던 것이 원인이었다 — 서로 다른 PR이
+    각자 파일을 추가하며 그 합계 필드를 각자 갱신해, git이 "같은 줄이 양쪽에서 다르게
+    바뀜"으로 보고 매 PR 병합마다 충돌을 냈다(#3742·#3752 실사고, #3752는 하루에 2회).
+    `files` 배열에 새 항목을 append만 하는 건 서로 다른 줄이라 자동 병합되므로, 파생
+    가능한 합계 자체를 저장하지 않으면 이 충돌 소지가 원천 봉쇄된다."""
     if not weights_path.exists():
         return None
     data = json.loads(weights_path.read_text())
-    snapshot_total = data.get("total_files")
+    snapshot_total = len(data.get("files", []))
     if not snapshot_total:
         return None
     growth = (discovered_count - snapshot_total) / snapshot_total

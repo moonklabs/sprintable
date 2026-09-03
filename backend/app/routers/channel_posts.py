@@ -17,6 +17,7 @@ from app.services.channel_posts import (
     ChannelPostReapprovalRequiredError,
     ChannelPostSealMissingError,
     ChannelPostVersionNotFoundError,
+    ChannelPublishInProgressError,
     ChannelPublishProviderError,
     ChannelRateLimitedError,
     ChannelTextTooLongError,
@@ -361,6 +362,15 @@ async def publish_channel_post_draft_endpoint(
         raise HTTPException(
             status_code=502,
             detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)},
+        ) from exc
+    except ChannelPublishInProgressError as exc:
+        # story #3395 — 같은 (gate_id, version_id) 동시 요청 경합에서 진 쪽이 이긴 쪽의
+        # 완료를 기다렸는데도 못 끝났다(약 3초). 거짓 200도 무단 500도 아닌 정직한
+        # "잠시 후 다시" — 클라이언트 재시도는 그때 남은 container_created 행으로 기존
+        # 부분성공 재시도 경로를 그대로 탄다.
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_PUBLISH_IN_PROGRESS", "message": str(exc)},
         ) from exc
 
     return PublishChannelPostResponse(

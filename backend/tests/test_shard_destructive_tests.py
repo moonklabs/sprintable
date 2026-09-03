@@ -83,10 +83,15 @@ def test_load_weights_reads_repo_snapshot_shape():
 
 def test_repo_weights_file_is_wellformed():
     """저장소에 실제로 커밋된 스냅샷(infra/destructive-schema-shard-weights.json)이 형식을
-    지키는지 — total_files/total_sec가 files 배열과 실제로 맞아떨어지는지."""
+    지키는지 — 중복 파일 항목이 없는지.
+
+    story #3397 — total_files/total_sec는 files 배열에서 파생 가능한 값이라 이제 JSON에
+    기록하지 않는다(각 PR이 이 두 필드를 각자 갱신해 병합 충돌을 내던 것이 원인 —
+    #3742·#3752 실사고). 이 필드들이 «없어야 함»을 여기서 고정해 둔다 — 누가 다시
+    넣으면 이 테스트가 그 회귀를 잡는다."""
     data = json.loads(_WEIGHTS_PATH.read_text())
-    assert data["total_files"] == len(data["files"])
-    assert abs(data["total_sec"] - sum(e["sec"] for e in data["files"])) < 0.5
+    assert "total_files" not in data, "total_files는 len(files)에서 파생한다 — 다시 기록하지 않는다(story #3397)"
+    assert "total_sec" not in data, "total_sec는 sum(files[].sec)에서 파생한다 — 다시 기록하지 않는다(story #3397)"
     assert len(data["files"]) == len({e["file"] for e in data["files"]}), "중복 파일 항목 없어야 함"
 
 
@@ -96,12 +101,18 @@ def test_shard_index_out_of_range_is_rejected():
         mod.partition(["a"], {}, shard_count=0)
 
 
+def _fake_weight_entries(n: int) -> list[dict]:
+    """story #3397 — check_staleness()가 이제 len(files)로 스냅샷 파일 수를 판정하므로,
+    이 테스트들의 «가짜 과거 스냅샷 파일 수»는 files 배열 길이 자체로 표현한다(예전엔
+    total_files 필드 숫자만 바꾸면 됐다 — 그 필드가 사라진 대신 이렇게 만든다)."""
+    return [{"file": f"tests/test_fake_{i:03d}.py", "sec": 5.0} for i in range(n)]
+
+
 def test_check_staleness_flags_20pct_file_growth(tmp_path):
     mod = _load()
     weights_path = tmp_path / "weights.json"
     weights_path.write_text(json.dumps({
-        "measured_at": "2026-01-01", "total_files": 100, "total_sec": 500.0,
-        "files": [{"file": "tests/test_a.py", "sec": 5.0}],
+        "measured_at": "2026-01-01", "files": _fake_weight_entries(100),
     }))
     assert mod.check_staleness(119, weights_path) is None, "19% 증가는 아직 경고 아님"
     warning = mod.check_staleness(120, weights_path)
@@ -112,7 +123,7 @@ def test_check_staleness_silent_when_stable(tmp_path):
     mod = _load()
     weights_path = tmp_path / "weights.json"
     weights_path.write_text(json.dumps({
-        "measured_at": "2026-01-01", "total_files": 94, "total_sec": 534.7, "files": [],
+        "measured_at": "2026-01-01", "files": _fake_weight_entries(94),
     }))
     assert mod.check_staleness(94, weights_path) is None
     assert mod.check_staleness(80, weights_path) is None, "줄어든 것은 경고 대상 아님"
@@ -131,7 +142,7 @@ def test_check_staleness_flags_unweighted_file_even_without_20pct_growth(tmp_pat
     mod = _load()
     weights_path = tmp_path / "weights.json"
     weights_path.write_text(json.dumps({
-        "measured_at": "2026-01-01", "total_files": 200, "total_sec": 1000.0, "files": [],
+        "measured_at": "2026-01-01", "files": _fake_weight_entries(200),
     }))
     assert mod.check_staleness(200, weights_path, unweighted_count=0) is None
     warning = mod.check_staleness(200, weights_path, unweighted_count=1)
@@ -142,7 +153,7 @@ def test_check_staleness_combines_both_reasons(tmp_path):
     mod = _load()
     weights_path = tmp_path / "weights.json"
     weights_path.write_text(json.dumps({
-        "measured_at": "2026-01-01", "total_files": 100, "total_sec": 500.0, "files": [],
+        "measured_at": "2026-01-01", "files": _fake_weight_entries(100),
     }))
     warning = mod.check_staleness(130, weights_path, unweighted_count=2)
     assert "+30%" in warning
