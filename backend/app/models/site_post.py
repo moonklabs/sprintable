@@ -33,7 +33,11 @@ class SitePost(Base):
     # source_story_id(다른 work_item_type이 생기면 그때 컬럼을 넓힌다 — 지금 지어내지 않음).
     source_story_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     gate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_by_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # story 194acb63(Phase0 결함·S8 후속, 배포 11 실측) — nullable로 정정(0315). 새 쓰기는
+    # 항상 resolve_member()가 돌려주는 org_member.id를 넣는다(라우터가 강제) — nullable은
+    # 과거 오기입(auth.user_id를 그대로 저장한 행) 중 org_member로 되돌릴 수 없던 것만을
+    # 위한 자리다(백필로도 못 살리면 null, 지어내지 않는다).
+    created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     unpublished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
