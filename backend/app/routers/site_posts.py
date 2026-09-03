@@ -22,6 +22,7 @@ from app.services.site_posts import (
     MediaNotSupportedPhase0Error,
     SitePostApproverRoleMissingError,
     SitePostDraftNotFoundError,
+    SitePostGateAlreadyHeldError,
     SitePostNotPublishedError,
     SitePostReapprovalRequiredError,
     SitePostSealMissingError,
@@ -94,6 +95,15 @@ class SitePostDraftListItem(BaseModel):
     latest_author_kind: str
     origin_author_kind: str
     updated_at: str
+    # story #3384(Phase0 결함, 유나 원인 진단·페드루 PO 확定 2026-09-03) — 목록 상태 칩이
+    # 항상 "초안"으로만 뜨던 결함의 근본 수정. 필드명은 상세 계약(story #3386)과 한 벌 —
+    # 게이트 없음/발행 이력 없음이면 각각 None(지어내지 않는다, deriveContentPostStatus의
+    # fail-safe가 그대로 「—」로 받는다).
+    gate_status: str | None = None
+    reapproval_required: bool | None = None
+    sealed_content_sha256: str | None = None
+    body_sha256: str
+    published_at: str | None = None
 
 
 class SubmitSitePostDraftRequest(BaseModel):
@@ -258,8 +268,13 @@ async def list_site_post_drafts_endpoint(
             lang=latest.lang, title=latest.title, current_version=latest.version,
             latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
             updated_at=latest.created_at.isoformat(),
+            body_sha256=latest.body_sha256,
+            gate_status=gate.status if gate else None,
+            reapproval_required=gate.reapproval_required if gate else None,
+            sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
+            published_at=post.published_at.isoformat() if post else None,
         )
-        for draft, latest, origin in rows
+        for draft, latest, origin, gate, post in rows
     ]
 
 
@@ -325,6 +340,17 @@ async def submit_site_post_draft_endpoint(
         raise HTTPException(
             status_code=409,
             detail={"code": "SITE_POST_APPROVER_ROLE_MISSING", "message": str(exc)},
+        ) from exc
+    except SitePostGateAlreadyHeldError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SITE_POST_GATE_ALREADY_HELD",
+                "message": str(exc),
+                "holding_draft_id": str(exc.holding_draft_id),
+                "holding_lang": exc.holding_lang,
+                "holding_slug": exc.holding_slug,
+            },
         ) from exc
 
     return SubmitSitePostDraftResponse(

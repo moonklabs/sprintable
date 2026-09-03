@@ -7,7 +7,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { fetchWithAuth } from '@/lib/db/client';
-import { deriveContentPostStatus } from '@/components/content/post-status';
+import { deriveContentPostStatus, type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 
@@ -17,11 +17,11 @@ import { AuthorKindBadge } from '@/components/content/author-kind-badge';
  * organization/connectors/page.tsx와 동형으로 useDashboardContext()의 orgId 하나만
  * 갖고 그린다(project 슬러그 불필요).
  *
- * ⚠️오늘 시점(S1 목록 계약만 착지, S2 봉인 해시·S3 공개 projection 전) — 목록 응답에
- * 게이트·해시·발행 신호가 아직 없어 모든 행이 deriveContentPostStatus({})→'draft'로만
- * 파생된다. §8-1 4·6번(승인 카드 확장·재승인 화면)은 그 신호가 착지한 뒤 이 화면에
- * 상태 열을 마저 채운다 — 파생 로직 자체(post-status.ts)는 이미 다섯 상태 전부 정의돼
- * 있어 여기서 다시 손댈 필요가 없다.
+ * story #3384(Phase0 결함, 유나 원인 진단·페드루 PO 확定 2026-09-03) — 목록 상태 칩이
+ * 게이트·발행 신호와 무관하게 항상 "초안"으로만 뜨던 결함(deriveContentPostStatus({})를
+ * 빈 입력으로 호출)의 근본 수정. 목록 응답이 이제 상세 계약(story #3386)과 같은 필드명
+ * (gate_status·reapproval_required·sealed_content_sha256·body_sha256·published_at)을
+ * 배치로 실어온다 — 행마다 별도 조회 없음(N+1 금지, list_site_post_drafts() 참조).
  */
 
 interface SitePostDraftListItem {
@@ -39,6 +39,22 @@ interface SitePostDraftListItem {
   // undefined — fail-closed로 "—"만 보인다(지어내지 않음).
   origin_author_kind?: 'agent' | 'human' | null;
   updated_at: string;
+  gate_status?: string | null;
+  reapproval_required?: boolean | null;
+  sealed_content_sha256?: string | null;
+  body_sha256: string;
+  published_at?: string | null;
+}
+
+// content/[draftId]/page.tsx::toGateStatus와 동형 — external_publish는 휴먼 승인만
+// 인정(auto_passed 도달 불가), pending/approved/rejected 밖은 "유효한 승인 대상 없음"과
+// 동형으로 undefined 처리해 deriveContentPostStatus가 'draft'로 안전하게 떨어지게 한다.
+function toGateStatus(status: string | null | undefined): ContentPostStatusInput['gateStatus'] {
+  return status === 'pending' || status === 'approved' || status === 'rejected' ? status : undefined;
+}
+
+function realStr(v: string | null | undefined): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
 
@@ -111,7 +127,27 @@ export default function ContentPostListPage() {
             </thead>
             <tbody className="divide-y divide-border">
               {drafts.map((draft) => {
-                const { status } = deriveContentPostStatus({});
+                // 페드루 PO 리뷰(2026-09-03) — `draft.published_at != null`은 값이 null이든
+                // 키 자체가 없든(구 백엔드·응답 결손) 똑같이 false가 되어 "발행 안 됐다"로
+                // 단정한다. `'published_at' in draft`로 키 존재를 먼저 물어 키가 없으면
+                // undefined(모른다)를 넘긴다 — deriveContentPostStatus의 AC6 분기가 이걸
+                // 받아 status를 비운다(§3-1-1 "모른다≠다르다", AC4).
+                //
+                // gate_status는 그 축의 "모른다" 신호를 deriveContentPostStatus 자체가
+                // 표현하지 못한다(게이트 부재=draft와 게이트 신호 결손=모른다를 함수 안에서
+                // 구별할 방법이 없다) — 그래서 그 판단은 여기서 앞서 가로챈다: 계약 필드
+                // (gate_status) 자체가 없으면 파생을 아예 부르지 않고 행 전체를 판별
+                // 불가(undefined)로 둔다.
+                const hasGateContract = 'gate_status' in draft;
+                const { status } = hasGateContract
+                  ? deriveContentPostStatus({
+                      gateStatus: toGateStatus(draft.gate_status),
+                      reapprovalRequired: draft.reapproval_required ?? undefined,
+                      sealedBodySha256: realStr(draft.sealed_content_sha256),
+                      currentBodySha256: draft.body_sha256,
+                      hasPublishedSitePost: 'published_at' in draft ? draft.published_at != null : undefined,
+                    })
+                  : { status: undefined };
                 return (
                   <tr key={draft.draft_id} data-testid="content-list-row">
                     <td className="px-3 py-2.5 font-medium text-foreground">
