@@ -117,7 +117,9 @@ export default function ContentPostEditPage() {
   const [gate, setGate] = useState<GateInfo | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<
-    | { type: 'success'; url: string | null; publishedAt: string }
+    // S3(story #3369) 계약 — url은 항상 온다(발행 URL을 서버가 조립·보증, 화면이 지어내지
+    // 않는다). string | null이던 것은 레거시 endpoint(url 필드 자체가 없던 시절)의 흔적.
+    | { type: 'success'; url: string; publishedAt: string }
     // reapprovalHashes — §8-3④-1(페드루 PO): 409 SITE_POST_REAPPROVAL_REQUIRED는 S10의
     // 일반 오류가 아니라 S9와 같은 처리(문구+해시 병치)여야 한다. 서버가 해시 값 자체를
     // 돌려주지 않아도(계약 미확정) 클라이언트가 이미 양쪽 해시를 갖고 있으니(gate 봉인
@@ -279,35 +281,32 @@ export default function ContentPostEditPage() {
     }
   };
 
-  // story #3368 §8-1 5단(와이어프레임 S7·S8) — 발행. canPublish==='approved'일 때만 호출
-  // 가능하게 UI가 막지만(아래 렌더), 서버(site_posts.py::post_site_post)가 최종 판정
-  // 이다 — 화면 판단은 안내이지 방어가 아니다(§3-2). latest.* 값을 그대로 보낸다(폼의
-  // 미저장 편집 상태가 아니라 "승인된 바로 그 버전"을 발행 대상으로 고정).
+  // story #3368 §8-1 5단(와이어프레임 S7·S8)/#3369(S3) — 발행. canPublish===true일 때만
+  // 호출 가능하게 UI가 막지만(아래 렌더), 서버(site_posts.py::publish_site_post_from_draft)
+  // 가 최종 판정이다 — 화면 판단은 안내이지 방어가 아니다(§3-2).
+  //
+  // ⚠️페드루 PO 리뷰 정정(2026-09-03) — 레거시 `POST /organizations/{org}/site-posts`
+  // (호출자가 본문 전체를 다시 보내는 agent 스크립트 시대 API, work_item_id/title/body_md
+  // 등을 여기서 재조립)로 잘못 가고 있었다. 휴먼 발행은 draft 기반 신규 endpoint
+  // (`.../drafts/{draftId}/publish`, S3)로 가야 한다 — 서버가 draft_id 하나로 최신 버전을
+  // 직접 읽어 봉인을 재검증하므로 body가 필요 없다(화면이 본문을 다시 보낼수록 위조·구버전
+  // 발행 위험만 는다). 성공 응답 {url, published_at, version_id}의 url은 이제 항상 온다
+  // (S3 계약) — 지어내거나 옵셔널로 방어할 필요가 없다.
   const handlePublish = async () => {
-    if (!orgId || !latest || !gate) return;
+    if (!orgId || !latest) return;
     setPublishing(true);
     setPublishResult(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts`, {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publish`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          work_item_id: latest.source_story_id, gate_id: gate.id,
-          title: latest.title, slug: latest.slug, lang: latest.lang,
-          summary: latest.summary, tags: latest.tags, body_md: latest.body_md,
-        }),
       });
       if (res.ok) {
-        // ⚠️응답에 url 필드가 아직 없다(backend SitePostResponse — S3 착지 전, doc
-        // phase0-post-manager-screen-design §4-2 갭 표 그대로). site_base_url+/{lang}/
-        // blog/{slug} 공식은 S3 AC4의 계약이지 이 화면이 임의로 지어낼 값이 아니다 — url이
-        // 오면 그대로 쓰고, 없으면 링크 없이 발행 시각만 보인다(성공을 지어내지 않되
-        // 과소 주장도 안 함).
         const json = (await res.json().catch(() => null)) as
-          { data?: { published_at?: string; url?: string } } | null;
+          { data?: { url?: string; published_at?: string; version_id?: string } } | null;
         const publishedAt = json?.data?.published_at;
-        if (publishedAt) {
-          setPublishResult({ type: 'success', publishedAt, url: json?.data?.url ?? null });
+        const url = json?.data?.url;
+        if (publishedAt && url) {
+          setPublishResult({ type: 'success', publishedAt, url });
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }
@@ -513,14 +512,10 @@ export default function ContentPostEditPage() {
             {publishResult.type === 'success' ? (
               <>
                 {t('publishSuccess', { time: new Date(publishResult.publishedAt).toLocaleString() })}
-                {publishResult.url ? (
-                  <>
-                    {' '}
-                    <a href={publishResult.url} target="_blank" rel="noopener noreferrer" className="underline">
-                      {t('publishViewLink')}
-                    </a>
-                  </>
-                ) : null}
+                {' '}
+                <a href={publishResult.url} target="_blank" rel="noopener noreferrer" className="underline">
+                  {t('publishViewLink')}
+                </a>
               </>
             ) : (
               <>

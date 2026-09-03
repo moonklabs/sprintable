@@ -70,7 +70,7 @@ function stubFetchWithVersions(
   versions: unknown[],
   onSave?: (body: unknown) => { status: number; body: unknown },
   onSubmit?: (body: unknown) => { status: number; body: unknown },
-  opts?: { gates?: unknown[]; onPublish?: (body: unknown) => { status: number; body: unknown } },
+  opts?: { gates?: unknown[]; onPublish?: () => { status: number; body: unknown } },
 ) {
   vi.stubGlobal(
     'fetch',
@@ -97,9 +97,12 @@ function stubFetchWithVersions(
         // 동일 관례).
         return { ok: true, status: 200, json: async () => opts?.gates ?? [] };
       }
-      if (url === `/api/organizations/${ORG_ID}/site-posts` && init?.method === 'POST') {
-        const body = JSON.parse(String(init.body ?? '{}'));
-        const result = opts?.onPublish?.(body) ?? { status: 201, body: { id: 'p1', published_at: '2026-09-05T00:00:00Z' } };
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publish` && init?.method === 'POST') {
+        // S3(story #3369) — draft_id 하나로 서버가 발행한다, body 없음(레거시 endpoint와 달리
+        // 화면이 본문을 재조립해 보내지 않는다).
+        const result = opts?.onPublish?.() ?? {
+          status: 200, body: { url: 'https://sprintable.ai/ko/blog/2ho-blog', published_at: '2026-09-05T00:00:00Z', version_id: 'v1' },
+        };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -307,7 +310,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
   it('⭐발행 성공 — 발행 시각·공개 URL 링크가 뜬다(AC5)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }],
-      onPublish: () => ({ status: 201, body: { id: 'p1', published_at: '2026-09-05T00:00:00Z', url: '/ko/blog/2ho-blog' } }),
+      onPublish: () => ({ status: 200, body: { url: '/ko/blog/2ho-blog', published_at: '2026-09-05T00:00:00Z', version_id: 'v1' } }),
     });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -325,10 +328,40 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(link).not.toBeNull();
   });
 
+  it('⭐발행 호출은 draft 기반 신규 endpoint로 가고 body를 재조립해 보내지 않는다(레거시 endpoint 회귀 방지)', async () => {
+    let publishCallInit: RequestInit | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }],
+      onPublish: () => ({ status: 200, body: { url: 'https://sprintable.ai/ko/blog/2ho-blog', published_at: '2026-09-05T00:00:00Z', version_id: 'v1' } }),
+    });
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publish`) {
+        publishCallInit = init;
+      }
+      return realFetch(input, init);
+    }));
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    await act(async () => {
+      publishButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(publishCallInit).toBeDefined();
+    expect(publishCallInit?.body).toBeUndefined();
+  });
+
   it('발행 실패(403 — 승인 필요) — 원문이 접힌 상세로 보존되고 성공으로 오인 표시하지 않는다(S10)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }],
-      onPublish: () => ({ status: 403, body: { detail: { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: '승인이 필요합니다' } } }),
+      // 실 backend 에러 봉투(글로벌 예외 핸들러, 2026-09-03 curl 실측) — {data:null, error:{...}}.
+      onPublish: () => ({ status: 403, body: { data: null, error: { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: '승인이 필요합니다' }, meta: null } }),
     });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
