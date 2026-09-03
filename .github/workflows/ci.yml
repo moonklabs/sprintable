@@ -799,16 +799,34 @@ jobs:
     # (backend-test의 필수 판정 근거) cascade로 스킵된다.
     if: always()
     runs-on: ubuntu-latest
-    # story #3383 AC3/AC4(2026-09-03 실측, 이 PR CI run 33750476433, 템플릿 DB 적용 후):
+    # story #3383 AC3/AC4(2026-09-03 실측, PR CI run 33750476433, 템플릿 DB 적용 후):
     # 4샤드 9m31s·10m8s·9m21s·8m58s — 최대 10m8s·편차 1m10s(AC3 기준 12분/3분 이내 통과).
-    # 천장은 실측 최대의 2배 이내로(AC4 — 25 유지 금지: 한도가 헐거우면 다음 편중을 늦게
-    # 안다). 재검 기준(story #2285 AC4 계승): 이 샤드의 p95가 15분을 넘으면 값을 다시 본다
-    # (⛔"자주 터지니 올린다"가 아니라 근거 먼저).
+    #
+    # story #3393(2026-09-03, 페드루 PO 착수 결정) — 4샤드는 develop 본류에서만 이 숫자를
+    # 낸다. #3742 shard 3(run 33760329991)·#3749 shard 0(run 33765617468)가 같은 날
+    # 20분대 timeout cancel(실패 파일 0건 — 순수 시간 부족)됐고, 그 두 run의 파일별 실측을
+    # weights.json 가중치와 대조하니 러너 배율 median 4.45x·mean 4.94x·p90 8.41x·max
+    # 12.18x(n=58). 이 배율을 현재 weights.json에 곱해 4~8샤드로 LPT 재시뮬레이션한 결과:
+    # 4샤드는 median 배율 하나만으로 예상 최대 20.8분(=실측 사고 두 건과 거의 일치, 우연한
+    # 극단 표본이 아니라 "이 정도 느린 러너는 4샤드에서 이미 한도에 붙는 상태"라는 뜻).
+    # 6샤드는 median에서만 살고(13.9분) p90(8.41x)에서 26.3분으로 다시 넘는다 — 8샤드는
+    # p90에서도 19.7분으로 버틴다(median 10.4분·mean 11.6분 여유 큼). "가끔 느린 러너"까지
+    # 방어하려면 median 아니라 p90을 기준으로 골라야 한다는 게 이 선택의 근거.
+    # ⛔천장을 올리는 처방은 기각(story a47e553a의 원 원칙, #2293)했다 — mean/p90 배율
+    # (23분/39분)까지 감안하면 천장을 얼마나 올려도 다음 느린 표본에서 다시 붙는다.
+    # 가중치 재실측도 기각 — weights.json은 파일 간 *상대* 비중이라 러너 전체가 느려지는
+    # *절대* 배율 문제엔 안 듣는다. 샤드 수 확대(설정값 변경만, 로직 무변화)가 유일하게
+    # 싸고 근본적인 처방.
+    #
+    # timeout-minutes는 8샤드 첫 실측(정상 표본) 뒤 그 값의 2배 이내로 재조정한다(AC4
+    # 계승 — 헐거운 천장 금지, #3383와 동일 원칙). 지금은 4샤드 때 값(20)을 그대로 이어
+    # 두되, 8-way 분할이면 각 샤드 파일수/가중치총합이 거의 절반이라 정상 표본에서는
+    # 4샤드의 절반(~5분대)에 가까울 것으로 예상 — 실측 뒤 이 주석과 함께 갱신한다.
     timeout-minutes: 20
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
 
     services:
       postgres:
@@ -845,12 +863,19 @@ jobs:
       # 으로도 내보낸다("Run pytest" 스텝이 파일 완주 즉시 대조한다). --print-summary가 이미
       # unweighted 목록을 stderr(=이 스텝 로그)에 찍으므로 AC1의 "로그 상단에 낸다(0건이면
       # 그 사실도)"는 별도 echo 없이 여기서 충족된다.
+      # story #3393(페드루 PO 리뷰 정정, 2026-09-03 15:01Z) — matrix.shard 배열 길이와
+      # --shard-count가 각자 리터럴이면 한쪽만 바뀌어도 조용히 안 맞을 수 있다("한 곳에서만
+      # 파생"이 아니면 나는 사고 — 애초 별도 assert 스텝을 뒀으나 그 assert 자신의 리터럴도
+      # 셋째 지점이 돼 대조가 불완전했다). matrix.shard가 유일한 원천이 되도록
+      # `strategy.job-total`(matrix가 낳은 실제 job 수)을 --shard-count에 직접 흘려보낸다 —
+      # matrix.shard 배열 길이를 바꾸면 --shard-count가 자동으로 같은 값을 받으므로 별도
+      # assert가 불요하다.
       - name: Determine this shard's file list
         if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           uv run python scripts/shard_destructive_tests.py \
-            --shard-index ${{ matrix.shard }} --shard-count 4 --print-summary \
+            --shard-index ${{ matrix.shard }} --shard-count ${{ strategy.job-total }} --print-summary \
             --meta-out /tmp/shard_meta.json \
             > /tmp/shard_files.txt
           echo "이 샤드(${{ matrix.shard }}) 파일 수: $(wc -l < /tmp/shard_files.txt)"
