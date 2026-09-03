@@ -130,6 +130,19 @@ def compute_channel_post_hash(*, text: str, link_url: str | None) -> str:
     return compute_seal_hash({"text": text, "link_url": link_url})
 
 
+def build_tagged_link(*, channel: str, link_url: str, draft_id: uuid.UUID) -> str | None:
+    """story #3394(S2c BE 선행) AC5·`publish_channel_post_draft` 공용 — UTM 태그된 최종
+    링크 조립. **미리보기(편집·버전이력 응답)와 실제 발행이 반드시 같은 값을 내야 한다** —
+    로직을 두 곳에 따로 두면 "미리보기가 거짓말"하는 자리가 생긴다(그래서 publish_channel_
+    post_draft도 이 함수로 옮겼다, 신규 로직 아님). 어댑터가 없는 채널이면 None(지어내지
+    않는다 — 발행 자체도 이 경우 별도 가드로 막힌다)."""
+    adapter = get_channel_adapter(channel)
+    if adapter is None:
+        return None
+    campaign = resolve_utm_campaign(link_url, fallback_draft_id=draft_id)
+    return attach_utm(link_url, source=adapter.utm_source, medium=adapter.utm_medium, campaign=campaign)
+
+
 async def _get_active_connection(
     db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID,
 ) -> ChannelConnection:
@@ -161,9 +174,14 @@ async def create_channel_post_draft_version(
     link_url: str | None,
     author_member_id: uuid.UUID,
     author_kind: str,
-) -> ChannelPostVersion:
+) -> tuple[ChannelPostVersion, str]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
-    site_posts.create_site_post_draft_version과 1:1 대응(AC1)."""
+    site_posts.create_site_post_draft_version과 1:1 대응(AC1).
+
+    story #3394 — 반환을 `(version, channel)` 튜플로 넓혔다(회귀 0, 유일한 호출부인
+    라우터가 곧바로 unpack하도록 같이 바꾼다) — 라우터가 `tagged_link_preview`(AC5)를
+    조립하려면 이 draft의 channel을 알아야 하는데, 여기서 이미 조회한 `connection.channel`을
+    그대로 돌려주는 편이 라우터가 별도 쿼리로 다시 찾는 것보다 싸다."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
 
@@ -203,7 +221,7 @@ async def create_channel_post_draft_version(
 
     await db.commit()
     await db.refresh(version)
-    return version
+    return version, connection.channel
 
 
 async def _reseal_gate_on_new_version(
@@ -256,9 +274,35 @@ async def list_channel_post_draft_versions(
 
 async def list_channel_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
-) -> list[tuple[ChannelPostDraft, ChannelPostVersion, ChannelPostVersion]]:
+) -> list[
+    tuple[
+        ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
+        Gate | None, ChannelPublication | None, ChannelPublication | None, str | None,
+    ]
+]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
-    버전의 created_at 기준) — API 경로 제안 §③ "site S4 후속과 동형"."""
+    버전의 created_at 기준) — API 경로 제안 §③ "site S4 후속과 동형".
+
+    story #3394(S2c BE 선행, 페드루 PO 확定 2026-09-04) — 상태 파생·발행 상태 필드를 여기서
+    배치 조회해 붙인다(site_posts.list_site_post_drafts의 #3384 확장과 동형 패턴, N+1 금지 —
+    페이지 쿼리 1건 + gate 배치 1건 + publication 배치 2건 + version 해시 배치 1건, 총 5건
+    고정, draft 수 무관).
+
+    **조인 축이 둘로 갈린다**(PO 지시, site와 의미가 다른 자리) — 한 축으로 뭉치면 "발행
+    뒤 편집·재승인"이 목록에서 발행 이력째 사라진다:
+    - `latest_version_publication`(6번째 원소) — **최신 버전**의 publication 행(gate_id +
+      최신 version_id로 조인). `publication_status`·`error_code`의 출처 — T9 "이어서 발행"은
+      최신 버전에 대한 부분 성공만 뜻한다.
+    - `published_publication`(5번째 원소) — 이 게이트의 **가장 최근 `status='published'`**
+      publication(버전 무관, published_at 최대). `published_at`·`permalink`·`external_id`의
+      출처 — "지금 Threads에 살아 있는 것"은 최신 버전이 아직 재발행 전이어도 남아야 한다.
+    - `published_body_sha256`(7번째 원소, str) — `published_publication`의 `version_id`로
+      `channel_post_versions.body_sha256`을 조인한 값(그 publication이 없으면 None) —
+      channel_publications 자체엔 본문 해시 컬럼이 없다.
+
+    반환: (draft, latest_version, origin_version, gate, published_publication,
+    latest_version_publication, published_body_sha256) — gate·publication 계열은 없으면
+    None(지어내지 않는다, "모른다≠다르다")."""
     latest_version_ids = (
         select(
             ChannelPostVersion.draft_id,
@@ -296,7 +340,73 @@ async def list_channel_post_drafts(
         .limit(limit)
         .offset(offset)
     )
-    return [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
+    page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
+    if not page_rows:
+        return []
+
+    work_item_ids = [draft.work_item_id for draft, _, _ in page_rows]
+
+    # 배치 ②: work_item당 external_publish 게이트(site_posts.list_site_post_drafts와 동형 —
+    # 사실상 1개뿐이지만 여럿이면 최신 created_at이 이긴다).
+    gates_by_work_item: dict[uuid.UUID, Gate] = {}
+    gate_rows = (await db.execute(
+        select(Gate)
+        .where(Gate.org_id == org_id, Gate.work_item_id.in_(work_item_ids), Gate.gate_type == "external_publish")
+        .order_by(Gate.created_at.desc())
+    )).scalars().all()
+    for g in gate_rows:
+        gates_by_work_item.setdefault(g.work_item_id, g)
+
+    gate_ids = [g.id for g in gates_by_work_item.values()]
+    latest_version_id_by_gate = {
+        gates_by_work_item[draft.work_item_id].id: latest_v.id
+        for draft, latest_v, _ in page_rows
+        if draft.work_item_id in gates_by_work_item
+    }
+
+    latest_version_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
+    published_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
+    published_version_ids: set[uuid.UUID] = set()
+    if gate_ids:
+        # 배치 ③: 최신 버전의 publication 행(publication_status·error_code 축).
+        pub_rows = (await db.execute(
+            select(ChannelPublication).where(ChannelPublication.gate_id.in_(gate_ids))
+        )).scalars().all()
+        for p in pub_rows:
+            if latest_version_id_by_gate.get(p.gate_id) == p.version_id:
+                latest_version_pub_by_gate[p.gate_id] = p
+
+        # 배치 ④: 가장 최근 published 상태(published_at·permalink·external_id 축) —
+        # published_at desc로 이미 정렬돼 오므로 setdefault로 최신만 남는다.
+        published_rows = (await db.execute(
+            select(ChannelPublication)
+            .where(ChannelPublication.gate_id.in_(gate_ids), ChannelPublication.status == "published")
+            .order_by(ChannelPublication.published_at.desc())
+        )).scalars().all()
+        for p in published_rows:
+            published_pub_by_gate.setdefault(p.gate_id, p)
+            published_version_ids.add(p.version_id)
+
+    # 배치 ⑤: published_publication이 가리키는 버전의 본문 해시(published_body_sha256).
+    body_sha256_by_version_id: dict[uuid.UUID, str] = {}
+    if published_version_ids:
+        version_rows = (await db.execute(
+            select(ChannelPostVersion.id, ChannelPostVersion.body_sha256).where(
+                ChannelPostVersion.id.in_(published_version_ids)
+            )
+        )).all()
+        body_sha256_by_version_id = {row[0]: row[1] for row in version_rows}
+
+    result = []
+    for draft, latest_v, origin_v in page_rows:
+        gate = gates_by_work_item.get(draft.work_item_id)
+        published_pub = published_pub_by_gate.get(gate.id) if gate else None
+        latest_pub = latest_version_pub_by_gate.get(gate.id) if gate else None
+        published_body_sha256 = (
+            body_sha256_by_version_id.get(published_pub.version_id) if published_pub else None
+        )
+        result.append((draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256))
+    return result
 
 
 async def submit_channel_post_draft(
@@ -457,15 +567,11 @@ async def publish_channel_post_draft(
         publish_container,
     )
 
-    adapter = get_channel_adapter(draft.channel)
-    if latest.link_url and adapter is not None:
-        campaign = resolve_utm_campaign(latest.link_url, fallback_draft_id=draft.id)
-        tagged_link = attach_utm(
-            latest.link_url, source=adapter.utm_source, medium=adapter.utm_medium, campaign=campaign,
-        )
-        text_to_post = f"{latest.text}\n\n{tagged_link}"
-    else:
-        text_to_post = latest.text
+    tagged_link = (
+        build_tagged_link(channel=draft.channel, link_url=latest.link_url, draft_id=draft.id)
+        if latest.link_url else None
+    )
+    text_to_post = f"{latest.text}\n\n{tagged_link}" if tagged_link else latest.text
 
     # 페드루 PO 확定(2026-09-03) — draft 저장 시점(create_channel_post_draft_version)의
     # 길이 검사는 `text`만 잰다. 발행 시점엔 UTM 태그된 링크가 덧붙어 실제 전송 문자열
