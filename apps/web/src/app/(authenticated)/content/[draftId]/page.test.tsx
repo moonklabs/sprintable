@@ -66,7 +66,11 @@ const VERSION_1 = {
   body_sha256: 'h1', author_member_id: 'agent-1', author_kind: 'agent', created_at: '2026-09-03T03:50:00+00:00',
 };
 
-function stubFetchWithVersions(versions: unknown[], onSave?: (body: unknown) => { status: number; body: unknown }) {
+function stubFetchWithVersions(
+  versions: unknown[],
+  onSave?: (body: unknown) => { status: number; body: unknown },
+  onSubmit?: (body: unknown) => { status: number; body: unknown },
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -77,7 +81,15 @@ function stubFetchWithVersions(versions: unknown[], onSave?: (body: unknown) => 
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         const result = onSave?.(body) ?? { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } };
-        return { ok: result.status < 400, status: result.status, json: async () => ({ data: result.body, error: null, meta: null }) };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = onSubmit?.(body) ?? { status: 404, body: { detail: 'Not Found' } };
+        const ok = result.status < 400;
+        // 실제 BFF: !ok는 백엔드 원문을 그대로 pass-through(래핑 0), ok는 apiSuccess({data}) 래핑.
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       throw new Error('unexpected fetch: ' + url);
     }),
@@ -152,8 +164,10 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(capturedBody?.lang).toBe('ko');
   });
 
-  it('저장 실패(422) — 성공 메시지가 아니라 에러 안내가 뜬다', async () => {
-    stubFetchWithVersions([VERSION_1], () => ({ status: 422, body: { code: 'MEDIA_NOT_SUPPORTED_PHASE0' } }));
+  it('저장 실패(422) — 성공 메시지 대신 서버 코드가 사람 말로 렌더된다(§4-1 — 지어내지 않고 매핑)', async () => {
+    stubFetchWithVersions([VERSION_1], () => ({
+      status: 422, body: { detail: { code: 'MEDIA_NOT_SUPPORTED_PHASE0', message: 'Phase 0은 미디어 입력을 지원하지 않습니다' } },
+    }));
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
     });
@@ -166,5 +180,44 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     await flush();
 
     expect(container.textContent).not.toContain(koMessages.content.editSaved);
+    expect(container.textContent).toContain(koMessages.content.errorMediaNotSupported);
+    expect(container.textContent).toContain('MEDIA_NOT_SUPPORTED_PHASE0'); // 원문 보존(접힘 <details> 안)
+  });
+
+  it('⭐승인 요청 성공 — gate_id로 /gates/{id} 딥링크가 뜬다(AC3)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, () => ({
+      status: 200, body: { gate_id: 'gate-42', version_id: 'v1', content_sha256: 'h1', status: 'pending' },
+    }));
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.submitSuccess);
+    const gateLink = container.querySelector<HTMLAnchorElement>('a[href="/gates/gate-42"]');
+    expect(gateLink).not.toBeNull();
+  });
+
+  it('승인 요청 — S2 미착지(404)도 다른 에러와 동형으로 "지어낸 성공"으로 안 덮는다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, () => ({ status: 404, body: { detail: 'Not Found' } }));
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).not.toContain(koMessages.content.submitSuccess);
+    expect(container.querySelector('a[href^="/gates/"]')).toBeNull();
   });
 });

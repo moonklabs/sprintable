@@ -2091,8 +2091,17 @@
     "fieldTags": "태그",
     "fieldTagsPlaceholder": "쉼표로 구분",
     "fieldBody": "본문(Markdown)",
-    "fieldSlugLangLocked": "slug · 언어(잠김 — 첫 버전 이후 변경 불가)",
-    "fieldLastEditedBy": "최종 수정 주체"
+    "fieldSlugLangLocked": "slug · 언어",
+    "fieldSlugLangLockedHint": "첫 버전 이후 잠깁니다 — 바꾸면 새 초안으로 분리되어 이력이 갈라집니다.",
+    "fieldLastEditedBy": "최종 수정 주체",
+    "submitCta": "승인 요청",
+    "submitPendingCta": "요청 중…",
+    "submitSuccess": "승인 요청을 보냈습니다.",
+    "submitFailed": "승인 요청을 보내지 못했습니다.",
+    "submitGateLink": "결재함에서 보기",
+    "errorMediaNotSupported": "지금 단계에서는 이미지·영상 첨부를 지원하지 않습니다.",
+    "errorPublishHumanOnly": "발행은 휴먼 멤버만 할 수 있습니다.",
+    "errorRawDetailsToggle": "원문 보기"
   },
   "docs": {
     "title": "문서",

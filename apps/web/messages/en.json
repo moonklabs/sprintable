@@ -2091,8 +2091,17 @@
     "fieldTags": "Tags",
     "fieldTagsPlaceholder": "Comma-separated",
     "fieldBody": "Body (Markdown)",
-    "fieldSlugLangLocked": "Slug · language (locked after the first version)",
-    "fieldLastEditedBy": "Last edited by"
+    "fieldSlugLangLocked": "Slug · language",
+    "fieldSlugLangLockedHint": "Locked after the first version — changing it would split off a new draft and fork the history.",
+    "fieldLastEditedBy": "Last edited by",
+    "submitCta": "Request approval",
+    "submitPendingCta": "Requesting…",
+    "submitSuccess": "Approval request sent.",
+    "submitFailed": "Failed to send the approval request.",
+    "submitGateLink": "View in approvals",
+    "errorMediaNotSupported": "Image and video attachments aren't supported yet.",
+    "errorPublishHumanOnly": "Only human members can publish.",
+    "errorRawDetailsToggle": "Show raw details"
   },
   "docs": {
     "title": "Documentation",

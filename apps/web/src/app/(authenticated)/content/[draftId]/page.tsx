@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -13,6 +14,7 @@ import {
   contentPostStatusLabelKey,
   CONTENT_POST_STATUS_TONE,
 } from '@/components/content/post-status';
+import { parseSitePostApiError } from '@/components/content/api-error';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -23,12 +25,13 @@ import {
  * ⚠️원안/수정본 대조 패널(와이어프레임 S4)은 이 슬라이스에 없다 — §8-1 명시: "4·6이 봉인
  * 해시(BE §4-3 3번)에 걸려 있다 ... 4·6은 BE 봉인이 착지한 뒤에 시작한다." 오늘은 최신
  * 버전 단일 폼만 그린다.
- * ⚠️승인 요청(와이어프레임 S5) 버튼도 이 슬라이스에 없다 — generic `POST /gates`가
- * `role_id`를 필수로 요구하는데(backend/app/routers/gates.py::GateCreateRequest)
- * `/api/org-members/eligible-approvers` 응답엔 role_id가 없다(owner/admin/member
- * 문자열 role만). doc은 자기 전용 `/api/docs/{id}/transition`이 서버 쪽에서 role_id를
- * 대신 해소해 이 문제를 안 겪는다 — site-posts엔 그 동형 엔드포인트가 아직 없다(계약 갭,
- * 페드루·디디군 확認 대기). 추측으로 role_id를 지어 넣지 않는다.
+ *
+ * 승인 요청(와이어프레임 S5) — 페드루 PO 판정(2026-09-03): FE가 generic `POST /gates`에
+ * role_id를 지어 넣지 않는다(계약 갭, gates.py::GateCreateRequest가 role_id 필수인데
+ * eligible-approvers 응답엔 없음). 대신 디디군 S2 전용 엔드포인트 계약으로 stub 배선한다
+ * (`POST .../drafts/{draft_id}/submit`, role_id 해소·게이트 pending 생성·봉인은 전부
+ * 서버 책임) — S2 착지 전까지는 404가 그대로 뜬다(정상, 계약 stub). 성공하면 gate_id로
+ * `/gates/{id}` 딥링크(§6-1 재사용 목록, 게이트 상세)한다.
  */
 
 interface SitePostVersion {
@@ -47,6 +50,21 @@ interface SitePostVersion {
   created_at: string;
 }
 
+// §4-1 "원문을 접어서 함께 보존한다" — gate_id 등 추적 정보를 사람 말 문구가 지워버리지
+// 않게, 서버 원문(code+message)을 기본 접힌 <details>로 항상 옆에 둔다.
+// col-start-2 — Alert의 grid-cols-[auto_1fr] 레이아웃에서 AlertDescription과 같은 칸에
+// 서게 맞춘다. AlertDescription 자체는 <p>라 <details>(block)를 그 안에 못 넣는다(HTML
+// 무효화) — 그래서 <p> 형제로 둔다.
+function RawDetailsToggle({ raw, label }: { raw: string | undefined; label: string }) {
+  if (!raw) return null;
+  return (
+    <details className="col-start-2 mt-1">
+      <summary className="cursor-pointer text-xs text-muted-foreground">{label}</summary>
+      <pre className="mt-1 overflow-x-auto rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{raw}</pre>
+    </details>
+  );
+}
+
 export default function ContentPostEditPage() {
   const { draftId } = useParams<{ draftId: string }>();
   const { orgId } = useDashboardContext();
@@ -61,7 +79,14 @@ export default function ContentPostEditPage() {
   const [tagsText, setTagsText] = useState('');
   const [bodyMd, setBodyMd] = useState('');
   const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saveMessage, setSaveMessage] = useState<
+    { type: 'success'; text: string } | { type: 'error'; text: string; raw?: string } | null
+  >(null);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<
+    { type: 'success'; gateId: string } | { type: 'error'; text: string; raw?: string } | null
+  >(null);
 
   useEffect(() => {
     if (!orgId) return;
@@ -125,17 +150,55 @@ export default function ContentPostEditPage() {
           if (json?.data) setVersions(json.data);
         }
       } else {
-        const body = (await res.json().catch(() => null)) as { detail?: unknown; error?: { message?: string } } | null;
-        const detail = body?.detail;
-        const message =
-          typeof detail === 'string' ? detail
-            : (detail as { message?: string } | undefined)?.message ?? body?.error?.message ?? t('editSaveFailed');
-        setSaveMessage({ type: 'error', text: message });
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setSaveMessage({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('editSaveFailed')),
+          raw: info.raw,
+        });
       }
     } catch {
       setSaveMessage({ type: 'error', text: t('editSaveFailed') });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // story #3368 — 승인 요청(S5) 계약 stub(페드루 PO 판정 2026-09-03). 디디군 S2 착지 전까지
+  // 404가 정상 응답이다 — 그 경우도 다른 에러와 동일하게 "사람 말+원문 보존"으로 렌더한다
+  // (지어낸 성공 메시지로 덮지 않는다, AC7).
+  const handleSubmitForApproval = async () => {
+    if (!orgId || !latest) return;
+    setSubmitting(true);
+    setSubmitResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version_id: latest.version_id }),
+      });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as { data?: { gate_id?: string } } | null;
+        const gateId = json?.data?.gate_id;
+        if (gateId) {
+          setSubmitResult({ type: 'success', gateId });
+        } else {
+          setSubmitResult({ type: 'error', text: t('submitFailed'), raw: JSON.stringify(json) });
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setSubmitResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('submitFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setSubmitResult({ type: 'error', text: t('submitFailed') });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -186,6 +249,28 @@ export default function ContentPostEditPage() {
           aria-atomic="true"
         >
           <AlertDescription>{saveMessage.text}</AlertDescription>
+          {saveMessage.type === 'error' ? <RawDetailsToggle raw={saveMessage.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
+
+      {submitResult && (
+        <Alert
+          variant={submitResult.type === 'success' ? 'success' : 'destructive'}
+          role={submitResult.type === 'success' ? 'status' : 'alert'}
+          aria-live={submitResult.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>
+            {submitResult.type === 'success' ? (
+              <>
+                {t('submitSuccess')}{' '}
+                <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+              </>
+            ) : (
+              submitResult.text
+            )}
+          </AlertDescription>
+          {submitResult.type === 'error' ? <RawDetailsToggle raw={submitResult.raw} label={t('errorRawDetailsToggle')} /> : null}
         </Alert>
       )}
 
@@ -242,6 +327,7 @@ export default function ContentPostEditPage() {
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">{t('fieldSlugLangLocked')}</p>
           <p className="text-sm text-muted-foreground">{latest.slug} · {latest.lang}</p>
+          <p className="text-xs text-muted-foreground">{t('fieldSlugLangLockedHint')}</p>
         </div>
 
         <div className="space-y-1">
@@ -251,9 +337,14 @@ export default function ContentPostEditPage() {
           </p>
         </div>
 
-        <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-          {saving ? t('editSavingCta') : t('editSaveCta')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={() => void handleSave()} disabled={saving}>
+            {saving ? t('editSavingCta') : t('editSaveCta')}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting}>
+            {submitting ? t('submitPendingCta') : t('submitCta')}
+          </Button>
+        </div>
       </div>
     </div>
   );
