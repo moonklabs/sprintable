@@ -19,6 +19,7 @@ story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실
 발행까지 한 파일에 담는 것과 동형 관례(draft→submit→publish 한 도메인 서비스 파일)."""
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -96,6 +97,27 @@ class ChannelPublishProviderError(Exception):
         self.provider_code = provider_code
         self.provider_message = provider_message
         super().__init__(f"발행 provider 호출 실패({provider_code}): {provider_message}")
+
+
+# story #3395 — 동시 요청 경합에서 진 쪽이 이긴 쪽의 완료를 기다리는 최대 시간
+# (attempts × interval ≈ 3초). "발행 버튼 더블클릭" 수준의 드문 경합이고 남은 작업이
+# Threads 호출 최대 2건뿐이라 3초면 정상 케이스 대부분을 덮는다 — 그보다 오래 걸리면
+# ChannelPublishInProgressError로 정직하게 알리고, 재시도는 그때 남아있는 container_
+# created 행으로 기존 부분성공 재시도 경로를 그대로 탄다(새 폴링을 또 하지 않는다).
+_CONCURRENT_PUBLISH_POLL_ATTEMPTS = 10
+_CONCURRENT_PUBLISH_POLL_INTERVAL_SEC = 0.3
+
+
+class ChannelPublishInProgressError(Exception):
+    """story #3395 — 같은 (gate_id, version_id)로 동시 요청 2건이 들어와 진 쪽이 이긴
+    쪽의 완료를 짧게 기다렸는데도(POLL_ATTEMPTS×POLL_INTERVAL_SEC) 이긴 쪽이 아직
+    끝내지 못했다. 진 쪽이 여기서 이어 발행을 시도하면 이긴 쪽이 처리 중인 컨테이너를
+    이중 publish할 위험이 있어(AC2), 대신 "다른 요청이 처리 중"임을 그대로 알린다 —
+    거짓 200(아직 안 끝난 걸 끝난 것처럼)도, 무단 500도 아닌 정직한 응답."""
+
+    def __init__(self, *, gate_id: uuid.UUID):
+        self.gate_id = gate_id
+        super().__init__(f"같은 발행이 다른 요청에서 처리 중입니다(gate_id={gate_id}) — 잠시 후 다시 시도하세요")
 
 
 class ChannelPostApproverRoleMissingError(Exception):
@@ -601,8 +623,77 @@ async def publish_channel_post_draft(
                     id=uuid.uuid4(), org_id=org_id, gate_id=gate.id, version_id=latest.id,
                     connection_id=connection.id, channel=draft.channel, status="container_created",
                 )
-                db.add(row)
-                await db.flush()
+                # story #3395(디디 코드 리뷰 발견, PR#3752) — 같은 (gate_id, version_id)로
+                # 진짜 동시 요청 2건이 들어오면 둘 다 위 existing 조회에서 None을 본 뒤 각자
+                # INSERT를 시도한다. 먼저 커밋되는 쪽은 성공, 진 쪽은 uq_channel_publications_
+                # gate_version 위반으로 IntegrityError → 잡히지 않으면 500. SAVEPOINT(begin_
+                # nested)로 감싸면 위반 시 이 INSERT만 롤백되고 바깥 트랜잭션(gate/draft 등
+                # 이미 읽은 상태)은 오염되지 않는다(participation_helpers.py::
+                # ensure_default_participation_role과 동형 관용구).
+                from sqlalchemy.exc import IntegrityError
+                try:
+                    async with db.begin_nested():
+                        db.add(row)
+                        await db.flush()
+                except IntegrityError as exc:
+                    # approval_delivery.py QA 4R/5R 교훈 — constraint 이름을 확인하지 않고
+                    # "IntegrityError면 무조건 경합"으로 삼키면 진짜 다른 원인(예: 미래에
+                    # FK가 추가된다면 그 위반)까지 조용히 오판할 수 있다. 이 테이블엔 FK가
+                    # 없어(그라운딩 §9) 지금은 이 uq 하나뿐이지만, 방어적으로 이름을 짚는다.
+                    _orig = getattr(exc, "orig", None)
+                    constraint = getattr(_orig, "constraint_name", None) or getattr(
+                        getattr(_orig, "__cause__", None), "constraint_name", None,
+                    )
+                    if constraint != "uq_channel_publications_gate_version":
+                        raise
+                    # 진 쪽 — Threads 실 호출은 이긴 쪽에게 맡긴다(이 자리에서 이어 부르면
+                    # 이긴 쪽이 아직 처리 중인 컨테이너를 이중으로 publish할 위험이 있다).
+                    # 라우터(publish_channel_post_draft_endpoint)는 이 함수가 "완결된"
+                    # 행(published_at 등)을 돌려준다고 가정한다 — 그래서 그 자리에서 바로
+                    # 반환하지 않고, 이긴 쪽이 끝낼 때까지 짧게 폴링한다(실측: 폴링 없이
+                    # 바로 반환하면 아직 container_created인 행의 published_at=None을
+                    # 라우터가 그대로 .isoformat() 해 500이 재발했다 — 이 폴링이 그 재발을
+                    # 막는 부분이다).
+                    row = (await db.execute(
+                        select(ChannelPublication).where(
+                            ChannelPublication.gate_id == gate.id, ChannelPublication.version_id == latest.id,
+                        )
+                    )).scalar_one()
+                    # ⚠️실측 함정 — 이 row는 이제 세션 identity map에 들어가 있다. 이후
+                    # 같은 select()를 반복해도 SQLAlchemy가 "이미 아는 행"이라 판단해
+                    # DB에서 새로 읽은 컬럼값으로 덮어쓰지 않고 캐시된 파이썬 객체를 그대로
+                    # 돌려준다(row.status가 영원히 최초 값에 멈춰 폴링이 매번 타임아웃
+                    # 나던 것이 이 함정이었다) — `db.refresh(row)`로 명시적으로 다시
+                    # 읽어야 이긴 쪽 세션이 커밋한 값이 보인다.
+                    for _ in range(_CONCURRENT_PUBLISH_POLL_ATTEMPTS):
+                        if row.status in ("published", "failed"):
+                            break
+                        await db.refresh(row)
+                        if row.status in ("published", "failed"):
+                            break
+                        await asyncio.sleep(_CONCURRENT_PUBLISH_POLL_INTERVAL_SEC)
+                    if row.status == "published":
+                        return row
+                    if row.status == "failed":
+                        # 이긴 쪽이 이미 실패로 끝냈다 — 그 실패를 이 요청도 같은 모양으로
+                        # 알린다(성공한 것처럼 200을 돌려주면 거짓이다). row에는 원본
+                        # ThreadsPublishError 객체가 없어(안정 코드+메시지만 저장) 완전히
+                        # 같은 예외를 재현할 순 없지만, 라우터의 기존 두 핸들러(토큰 만료·
+                        # provider 오류)로 그대로 매핑되는 동종 예외를 다시 만든다.
+                        if row.error_code == "CHANNEL_TOKEN_EXPIRED":
+                            raise ChannelTokenExpiredError(
+                                connection_id=connection.id, provider_message=row.last_error or "",
+                            )
+                        raise ChannelPublishProviderError(
+                            provider_code=row.error_code or "UNKNOWN", provider_message=row.last_error or "",
+                        )
+                    # 폴링 시간 안에 끝나지 않았다 — 아직 진행 중이라는 뜻(이긴 쪽 프로세스가
+                    # 죽어 영영 안 끝날 수도 있으나, 그 복구는 이 스토리 스코프 밖이다:
+                    # 재시도가 그때는 existing.status=="container_created"인 채로 다시 이
+                    # 함수에 들어와 그 컨테이너로 publish만 이어간다 — 기존 부분성공 재시도
+                    # 경로 그대로).
+                    raise ChannelPublishInProgressError(gate_id=gate.id)
+                    return row
 
             if row.external_container_id is None:
                 try:

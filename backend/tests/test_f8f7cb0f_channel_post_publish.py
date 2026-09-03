@@ -929,3 +929,86 @@ async def test_publish_time_length_recheck_with_utm_link_returns_422_zero_provid
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_true_concurrent_publish_requests_no_500_single_provider_call():
+    """story #3395(디디 코드 리뷰 발견, PR#3752) — 같은 (gate_id, version_id)로 진짜
+    동시에(asyncio.gather, 실 HTTP 2건 — 각 요청이 FastAPI 의존성 주입으로 별도 세션을
+    받는다) 발행 요청이 오면 둘 다 `existing=None`을 본 뒤 각자 INSERT를 시도해 UNIQUE
+    (gate_id, version_id) 위반이 500으로 새던 것을 고친다.
+
+    barrier(asyncio.Event)로 두 요청을 INSERT 직전 지점(get_publishing_limit)에서
+    강제로 동시 대기시킨 뒤 같이 풀어준다 — 이게 없으면 로컬 실행 순서가 우연히 순차가
+    돼 버려 레이스 자체가 재현 안 될 수 있다.
+
+    AC — 둘 다 200, ChannelPublication 행 정확히 1개, Threads 실 호출(create_container·
+    publish_container)은 정확히 1회씩만(진 쪽이 이어서 부르면 이긴 쪽이 처리 중인
+    컨테이너를 이중 publish할 위험 — 그래서 진 쪽은 재조회한 행을 그대로 반환하고
+    끝낸다)."""
+    import asyncio as _asyncio
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            draft_id, gate_id = await _seed_and_submit_and_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+            )
+
+        arrived = _asyncio.Event()
+        arrived_count = 0
+
+        async def _barrier_get_publishing_limit(*args, **kwargs):
+            nonlocal arrived_count
+            arrived_count += 1
+            if arrived_count >= 2:
+                arrived.set()
+            await arrived.wait()  # 둘 다 여기 도착해야 둘 다 통과 — INSERT 직전 지점을 강제로 겹치게 한다.
+            return (1, 250, 86400)
+
+        create_mock = AsyncMock(return_value="creation-race")
+        publish_mock = AsyncMock(return_value="media-race")
+        with (
+            patch.object(tp, "create_container", create_mock),
+            patch.object(tp, "publish_container", publish_mock),
+            patch.object(tp, "get_publishing_limit", AsyncMock(side_effect=_barrier_get_publishing_limit)),
+            patch.object(tp, "get_permalink", AsyncMock(return_value=None)),
+        ):
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+            async with _client_for(app) as client:
+                async def _call():
+                    return await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+
+                r1, r2 = await _asyncio.gather(_call(), _call())
+
+        assert r1.status_code == 200, r1.text
+        assert r2.status_code == 200, r2.text
+        assert create_mock.call_count == 1, f"이중 POST — create_container {create_mock.call_count}회"
+        assert publish_mock.call_count == 1, f"이중 POST — publish_container {publish_mock.call_count}회"
+
+        async with Session() as s:
+            from app.models.channel_publication import ChannelPublication
+            from sqlalchemy import select
+
+            rows = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_id)
+            )).scalars().all()
+        assert len(rows) == 1, f"UNIQUE(gate_id, version_id) 위반이 두 행을 만들었다: {len(rows)}개"
+        assert r1.json()["external_id"] == r2.json()["external_id"] == "media-race"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
