@@ -279,6 +279,14 @@ export function ArtifactViewer({
                 />
               </div>
             ) : null}
+            {/* story #3377 — 인라인 스테이지는 pan/드래그 설계 보존을 위해 클릭을 안 받는다
+             * (htmlInteractive 기본 false). html_blob이 실제로 상호작용(버튼 클릭 등)을
+             * 요구하는 산출물일 수 있어, 그 경로가 「크게 보기」임을 명시한다. */}
+            {artifact.format === 'html' ? (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                {t('artifactStageInteractiveHint')}
+              </p>
+            ) : null}
           </div>
           <ArtifactVersionRail
             artifact={artifact}

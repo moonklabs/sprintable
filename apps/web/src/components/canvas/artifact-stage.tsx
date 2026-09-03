@@ -15,11 +15,14 @@ import type { ArtifactFormat } from '@/services/canvas';
  * - 뷰포트 = `transform: translate(tx,ty) scale(s)` 하나 — pan은 전방향(가로/세로 구분 없음)·
  *   "잘림" 상태 자체가 없다(콘텐츠는 항상 캔버스 위 어딘가에 있고, 안 보이면 이동하면 그만).
  * - 휠=pan·⌘/Ctrl+휠(트랙패드 핀치와 동일 신호)=커서 중심 줌.
- * - **crux(v2.1 오류 교정)**: 상시 전면 캡처 오버레이를 폐기 — iframe/img/tree 콘텐츠는 항상
- *   `pointer-events:none`(렌더된 오브젝트일 뿐, 상호작용 대상이 아님). 핀 등 우리 DOM 오버레이만
- *   `pointer-events:auto`로 상호작용 가능 — 이동-임계값(4px) 초과 드래그 중엔 오버레이도
- *   pointer-events:none으로 전환해 "핀 위에서 시작한 드래그가 pan으로 해석"을 순수 CSS로
- *   구현한다(핀 자체의 onClick은 무변경 — 임계 미달=일반 클릭이 그대로 발화).
+ * - **crux(v2.1 오류 교정)**: 상시 전면 캡처 오버레이를 폐기 — iframe/img/tree 콘텐츠는 기본
+ *   `pointer-events:none`(렌더된 오브젝트일 뿐, 상호작용 대상이 아님 — 이 스테이지 자체의 pan/
+ *   드래그 설계는 그대로다). 핀 등 우리 DOM 오버레이만 `pointer-events:auto`로 상호작용
+ *   가능 — 이동-임계값(4px) 초과 드래그 중엔 오버레이도 pointer-events:none으로 전환해
+ *   "핀 위에서 시작한 드래그가 pan으로 해석"을 순수 CSS로 구현한다(핀 자체의 onClick은
+ *   무변경 — 임계 미달=일반 클릭이 그대로 발화). story #3377 — html_blob만 `htmlInteractive`
+ *   prop으로 이 기본을 뒤집을 수 있다(`ArtifactExpandDialog`의 「상호작용」 토글 전용, 이
+ *   스테이지가 pan 캔버스로 안 쓰이는 그 컨텍스트에서만).
  *
  * story 74d6047e — 모바일 터치(2-finger 핀치 줌·더블탭 fit/100% 토글) 추가. 1-finger는 이미
  * 제네릭 Pointer Events pan 경로가 그대로 작동해 신규 로직 불필요(선생님 실사용 지적으로
@@ -104,6 +107,14 @@ interface ArtifactStageProps {
   format: ArtifactFormat;
   content: string;
   title: string;
+  /** story #3377(결함·customer-zero) — html_blob iframe이 pointer-events:auto가 되고
+   * `sandbox="allow-scripts"`(allow-same-origin 없음)로 실제 클릭을 받는지 여부. 기본
+   * false(캔버스 pan/드래그 설계 보존 — 인라인 스테이지는 항상 false). true는 지금
+   * `ArtifactExpandDialog`의 「상호작용」 토글(html_blob 기본 ON)에서만 넘어온다 — 그
+   * 컨텍스트엔 pan 캔버스가 없어(overlay 미사용) iframe이 클릭을 받아도 드래그 제스처와
+   * 충돌할 자리가 없다. false여도 스크립트 자체는 항상 돈다(아래 sandbox 참고) — 막히는
+   * 건 클릭이 iframe에 닿는 것 하나뿐이라 정적 렌더는 인라인에서도 정상이다. */
+  htmlInteractive?: boolean;
   /** story 1948d19d §4(BE #2135) — 선언된 아트보드 크기(그 버전의 불변 스냅샷). null/undefined
    * (레거시·미선언·#2135 착지 전)면 포맷별 기본 아트보드로 폴백(가짜 추정 0 — 측정이 아니라
    * 선언된 규약). image 포맷은 이 값과 무관하게 로드 후 실측 자연 크기를 우선한다. */
@@ -130,6 +141,8 @@ interface ArtifactStageProps {
    * 원인 회피 — 그라운딩 결론 그대로). 높이는 canvas_bounds.h 유지(iframe이 sandbox=""라
    * 리플로우 후 실제 콘텐츠 높이를 부모가 측정할 방법이 없음 — cross-origin 격리, 정직 단순화).
    * 저작 시점 canvasBounds 자체는 건드리지 않는다(핀 좌표·썸네일 등 다른 소비처와 무관).
+   * story #3377 — sandbox가 allow-scripts인 지금도 cross-origin 격리 자체는 안 풀렸으니
+   * 이 높이 미측정 제약은 그대로 유효하다.
    */
   previewWidth?: number;
   /** story #2725 — 좌표 픽 모드. true면 커서가 crosshair로 바뀌고, pan-드래그가 아닌 순수
@@ -144,12 +157,14 @@ interface ArtifactStageProps {
 /**
  * story 1948d19d — transform 캔버스 뷰포트 엔진. 3포맷(html/image/tree) 공유 — "전 표면 통일"의
  * 핵심은 이 하나의 pan/zoom/선택 계약이지 포맷별 렌더 방식이 아니다(포맷은 콘텐츠 레이어
- * 안쪽만 다름). sandbox 무완화 유지(iframe은 여전히 `sandbox=""`) — pointer-events:none이라
- * 상호작용 레이어와 물리적으로 분리되므로 완화할 필요 자체가 없다.
+ * 안쪽만 다름). sandbox는 `allow-scripts`(story #3377, allow-same-origin 없음 — 부모
+ * DOM·쿠키·스토리지는 여전히 못 닿는다)로 스크립트는 항상 돈다. 클릭이 iframe에 닿는지는
+ * `htmlInteractive`로 별도 게이팅(기본 false=pointer-events:none, 상호작용 레이어와
+ * 물리적으로 분리 — pan/드래그 설계 보존).
  */
 function CanvasViewport({
   format, content, title, canvasBounds, overlay, mode = 'view', contentRef, previewWidth,
-  pinAddMode, onPickCoordinate,
+  pinAddMode, onPickCoordinate, htmlInteractive = false,
 }: {
   format: ArtifactFormat; content: string; title: string;
   canvasBounds?: { w: number; h: number } | null; overlay?: React.ReactNode; mode?: 'view' | 'edit';
@@ -157,6 +172,7 @@ function CanvasViewport({
   previewWidth?: number;
   pinAddMode?: boolean;
   onPickCoordinate?: (xPercent: number, yPercent: number) => void;
+  htmlInteractive?: boolean;
 }) {
   const t = useTranslations('canvas');
   // story 70a06b22 — 어제(74d6047e) 만든 터치 핀치/더블탭이 힌트 카피에 반영 안 된 발견성 갭
@@ -472,8 +488,8 @@ function CanvasViewport({
             <iframe
               title={title}
               srcDoc={content}
-              sandbox=""
-              className="pointer-events-none rounded-lg bg-background"
+              sandbox="allow-scripts"
+              className={htmlInteractive ? 'rounded-lg bg-background' : 'pointer-events-none rounded-lg bg-background'}
               style={{ width: bounds.w, height: bounds.h }}
             />
           ) : format === 'image' ? (
@@ -540,17 +556,22 @@ function TreeStageContent(
 
 /**
  * 포맷별 렌더 스테이지 — 이제 3포맷 전부 같은 `CanvasViewport` 엔진(transform pan/zoom)을
- * 공유한다(story 1948d19d §1~§3). 완전 잠금 샌드박스 iframe(`sandbox=""` — allow-scripts·
- * allow-same-origin 둘 다 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 반영) 유지 —
- * pointer-events:none이 상호작용 레이어와 물리적으로 분리해 완화가 애초에 불필요.
+ * 공유한다(story 1948d19d §1~§3). html_blob iframe은 `sandbox="allow-scripts"`(allow-same-origin
+ * 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 유지 — 부모 DOM·쿠키·스토리지엔 여전히
+ * 못 닿는다)로 스크립트는 항상 돈다(story #3377 — 예전엔 `sandbox=""`라 스크립트까지 막혀
+ * 인터랙티브 프로토타입이 정지 화면으로 보였다). 클릭이 iframe에 닿는지(pointer-events)는
+ * `htmlInteractive`로 별도 게이팅 — 기본 false(캔버스 pan/드래그 설계 보존), true는
+ * `ArtifactExpandDialog`의 「상호작용」 토글에서만.
  */
 export function ArtifactStage({
   format, content, title, canvasBounds, overlay, mode, contentRef, previewWidth, pinAddMode, onPickCoordinate,
+  htmlInteractive,
 }: ArtifactStageProps) {
   return (
     <CanvasViewport
       format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} mode={mode}
       contentRef={contentRef} previewWidth={previewWidth} pinAddMode={pinAddMode} onPickCoordinate={onPickCoordinate}
+      htmlInteractive={htmlInteractive}
     />
   );
 }

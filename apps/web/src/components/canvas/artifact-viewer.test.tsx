@@ -34,13 +34,24 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     expect(markup).toContain('정본 v3');
   });
 
-  it('fully locks down the html stage sandbox (no allow-scripts, no allow-same-origin — 유나 디자인 가디언 보안 지적 반영)', () => {
+  it('runs scripts but never grants allow-same-origin on the inline stage (story #3377 — sandbox=""가 스크립트까지 막던 결함 수정, 유나 디자인 가디언 보안 지적은 same-origin 미부여로 유지)', () => {
     const markup = renderToStaticMarkup(
       wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
     );
-    expect(markup).toContain('sandbox=""');
-    expect(markup).not.toContain('allow-scripts');
+    expect(markup).toContain('sandbox="allow-scripts"');
     expect(markup).not.toContain('allow-same-origin');
+  });
+
+  it('shows the 「크게 보기 → 상호작용」 hint for html format only (story #3377 — 인라인 스테이지는 클릭을 안 받는다는 안내)', () => {
+    const htmlMarkup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(htmlMarkup).toContain('클릭해서 흐름을 따라가려면 크게 보기 → 상호작용');
+
+    const treeMarkup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={{ ...MOCK_ARTIFACT, format: 'tree' }} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(treeMarkup).not.toContain('클릭해서 흐름을 따라가려면');
   });
 
   it('omits the anchor badge entirely when the artifact has no anchor version yet (초안 중립·낙인 금지)', () => {
