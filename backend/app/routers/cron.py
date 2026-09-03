@@ -1222,3 +1222,46 @@ async def toss_daily_reconciliation(
     except Exception as exc:
         logger.exception("toss-daily-reconciliation cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/refresh-channel-tokens ──────────────────────────
+# story #3373(Phase1·마케팅운영) — channel_connections 만료 임박 토큰 자동 갱신(AC4). 만료
+# 실패는 status='expired'로 전이(owner 알림은 후속 FE 스토리 몫 — 이 잡은 상태 전이까지만).
+@router.get("/refresh-channel-tokens")
+async def refresh_channel_tokens(
+    request: Request,
+    session: AsyncSession = Depends(get_worker_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        import httpx as _httpx
+        from app.services.channel_connection import (
+            apply_refresh_failure, apply_refresh_result, decrypt_for_use, list_connections_due_for_refresh,
+        )
+        from app.services.threads_oauth import ThreadsOAuthError, refresh_long_lived_token
+
+        rows = await list_connections_due_for_refresh(session, now=datetime.now(timezone.utc))
+        refreshed, failed = 0, 0
+        async with _httpx.AsyncClient(timeout=15) as client:
+            for row in rows:
+                if row.channel != "threads":
+                    continue  # Phase1 범위: threads만 구현(다른 채널은 후속 스토리)
+                current_token = decrypt_for_use(row)
+                if current_token is None:
+                    await apply_refresh_failure(session, connection=row, error_message="no stored access token")
+                    failed += 1
+                    continue
+                try:
+                    new_token, expires_in = await refresh_long_lived_token(client, current_token=current_token)
+                except ThreadsOAuthError as exc:
+                    await apply_refresh_failure(session, connection=row, error_message=exc.message)
+                    failed += 1
+                    continue
+                finally:
+                    del current_token
+                await apply_refresh_result(session, connection=row, new_access_token=new_token, expires_in_seconds=expires_in)
+                refreshed += 1
+        return _ok({"checked": len(rows), "refreshed": refreshed, "failed": failed})
+    except Exception as exc:
+        logger.exception("refresh-channel-tokens cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)

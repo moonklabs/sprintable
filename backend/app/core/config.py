@@ -350,6 +350,24 @@ class Settings(BaseSettings):
     # 존재해야 한다 — 로그·API 응답·DB 어디에도 남기지 않는다(app/services/billing_key_crypto.py).
     org_billing_key_encryption_key: str = ""
 
+    # story #3373(Phase1·마케팅운영) — channel_connections.encrypted_*(OAuth 토큰) 암호화
+    # 키(들). org_billing_key_encryption_key와 동일 패턴(MultiFernet 회전, 콤마구분)이지만
+    # 독립 시크릿 — 결제 키 회전이 채널 토큰에 영향 주지 않는다(도메인 분리, PO 확定).
+    channel_credential_encryption_key: str = ""
+    # OAuth state(CSRF+org 바인딩+PKCE verifier+nonce+TTL) 서명 키 — github_app_state_secret과
+    # 동형(별도 시크릿, auth.py의 로그인용 OAuth state 키와 분리·그라운딩 §9 "기본=분리" 확定).
+    channel_oauth_state_secret: str = ""
+    # Threads(Meta) 서버 OAuth의 앱 id/secret은 env var가 **아니다**(페드루 PO 정정
+    # 2026-09-03 08:40Z, 블루프린트 §8) — 조직별 자격은 channel_app_credentials 테이블,
+    # SaaS 기본 공용 앱 자격은 platform_settings.threads_platform_app_id/
+    # encrypted_app_secret(어드민 관리, app/services/channel_app_credentials.py의 3단
+    # 우선순위 참고). 여기 Settings에는 대응 필드가 없다 — 만들지 않는다(선생님 결정③,
+    # "코드 배포 없이 바뀌어야 하는 값은 env var 금지" 원칙 그대로 적용).
+    # 페드루 PO 리뷰(2026-09-03 07:26Z·07:56Z) — Threads의 PKCE(code_challenge) 수용 여부가
+    # 문헌상 미확認이라, 실왕복에서 Meta가 거부하면(threads_oauth.py 참고) 재배포 없이 끄는
+    # 자리. 기본 True(PKCE 시도) — dev 실왕복 검증에서 거부되면 False로.
+    threads_pkce_enabled: bool = True
+
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
 
