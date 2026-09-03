@@ -5,16 +5,21 @@ auto_passed가 아니면 발행 자체가 안 된다 — git 커밋이 승인 �
 gate_id·created_at이 그대로 대신한다."""
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
 from app.models.site_post import SitePost
+from app.models.site_post_draft import SitePostDraft
+from app.models.site_post_version import SitePostVersion
+from app.models.team import TeamMember
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _LANG_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
@@ -24,6 +29,10 @@ _APPROVED_STATUSES = ("approved", "auto_passed")
 
 class InvalidSitePostInputError(ValueError):
     """slug/lang이 서버 형식 규칙을 어김(422)."""
+
+
+class MediaNotSupportedPhase0Error(ValueError):
+    """Phase 0엔 미디어 입력이 없다 — manifest가 비어 있지 않으면 422(story #3365 AC5)."""
 
 
 class ExternalPublishGateNotApprovedError(Exception):
@@ -139,5 +148,101 @@ async def list_published_site_posts(db: AsyncSession, *, org_id: uuid.UUID, lang
         select(SitePost)
         .where(SitePost.org_id == org_id, SitePost.lang == lang, SitePost.unpublished_at.is_(None))
         .order_by(SitePost.published_at.desc())
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+# ─── story #3365(Phase0 S1) — 초안·불변 버전 ────────────────────────────────────
+
+async def is_agent_caller(db: AsyncSession, *, org_id: uuid.UUID, member_id: uuid.UUID) -> bool:
+    """이 caller가 이 org의 agent TeamMember인지 — auth.py `_verify_org_membership`의 OrgMember∪
+    TeamMember 재확인 축(story f84227b5, PR#3730)과 동형: 클레임(``api_key_id``)을 신뢰하지 않고
+    DB의 실제 멤버 타입으로 판정한다(actor_type fail-closed — 클레임 위조·테스트 하네스의 클레임
+    누락 둘 다에 안전)."""
+    result = await db.execute(
+        select(TeamMember.id).where(
+            TeamMember.org_id == org_id, TeamMember.id == member_id, TeamMember.type == "agent",
+            TeamMember.is_active.is_(True),
+        ).limit(1)
+    )
+    return result.first() is not None
+
+
+def compute_body_sha256(*, title: str, lang: str, summary: str, tags: list, body_md: str) -> str:
+    """canonical payload hash — S2가 승인 대상 버전을 봉인할 때(gate neutral_facts) 재사용할
+    같은 계산(페드루 PO 확定, 문서 62fc03ee §4-3: "content_sha256"이 이 값 그대로)."""
+    canonical = json.dumps(
+        {"title": title, "lang": lang, "summary": summary, "tags": tags, "body_md": body_md},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def create_site_post_draft_version(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    work_item_id: uuid.UUID,
+    slug: str,
+    lang: str,
+    title: str,
+    summary: str,
+    tags: list,
+    body_md: str,
+    media_manifest: list,
+    author_member_id: uuid.UUID,
+    author_kind: str,
+) -> SitePostVersion:
+    """초안을 (org, work_item, slug)로 upsert하고 새 불변 버전을 추가한다. 기존 버전은 절대
+    덮어쓰지 않는다(AC3) — 에이전트 원안·휴먼 개정본이 별도 행으로 남는다(AC6). 공개 `SitePost`
+    행은 여기서 절대 만들지 않는다(AC1) — 승인·발행은 별개 게이트·엔드포인트(S2·S3) 몫."""
+    _validate_slug(slug)
+    _validate_lang(lang)
+    if media_manifest:
+        raise MediaNotSupportedPhase0Error("Phase 0은 미디어 입력을 지원하지 않습니다")
+
+    draft = (await db.execute(
+        select(SitePostDraft)
+        .where(
+            SitePostDraft.org_id == org_id, SitePostDraft.work_item_id == work_item_id,
+            SitePostDraft.slug == slug,
+        )
+        .with_for_update()
+    )).scalar_one_or_none()
+    if draft is None:
+        draft = SitePostDraft(id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, slug=slug)
+        db.add(draft)
+        await db.flush()
+        next_version = 1
+    else:
+        next_version = (await db.execute(
+            select(func.coalesce(func.max(SitePostVersion.version), 0)).where(
+                SitePostVersion.draft_id == draft.id
+            )
+        )).scalar_one() + 1
+
+    version = SitePostVersion(
+        id=uuid.uuid4(), draft_id=draft.id, version=next_version,
+        title=title, lang=lang, summary=summary, tags=tags, body_md=body_md,
+        body_sha256=compute_body_sha256(title=title, lang=lang, summary=summary, tags=tags, body_md=body_md),
+        author_member_id=author_member_id, author_kind=author_kind,
+    )
+    db.add(version)
+    await db.commit()
+    await db.refresh(version)
+    return version
+
+
+async def get_site_post_draft(db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID) -> SitePostDraft | None:
+    return (await db.execute(
+        select(SitePostDraft).where(SitePostDraft.id == draft_id, SitePostDraft.org_id == org_id)
+    )).scalar_one_or_none()
+
+
+async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID) -> list[SitePostVersion]:
+    stmt = (
+        select(SitePostVersion)
+        .where(SitePostVersion.draft_id == draft_id)
+        .order_by(SitePostVersion.version.asc())
     )
     return list((await db.execute(stmt)).scalars().all())
