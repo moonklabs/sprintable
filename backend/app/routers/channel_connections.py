@@ -21,6 +21,7 @@ from app.services.channel_adapters import can_auto_refresh, get_channel_adapter
 from app.services.channel_app_credentials import (
     get_channel_app_credentials,
     resolve_app_credentials,
+    resolve_app_credentials_source,
     upsert_channel_app_credentials,
 )
 from app.services.channel_connection import (
@@ -133,11 +134,18 @@ class AppCredentialsPutResponse(BaseModel):
 
 
 class AppCredentialsStatusResponse(BaseModel):
-    """GET 응답 — app_id는 끝 4자리만(페드루 PO 지시)."""
+    """GET 응답 — app_id는 끝 4자리만(페드루 PO 지시).
+
+    `effective_source`(페드루 PO 2026-09-03 11:19Z, 유나 화면설계 실측) — resolve_app_
+    credentials()의 3단 해석 결과 그대로("org"|"platform"|"none"). `configured`(=조직이
+    직접 등록했나)와는 다른 축 — configured=false라도 effective_source="platform"이면
+    화면은 「공용 앱으로 연결 가능」을 보여줄 수 있고, "none"이면 authorize가 409로 막힌다는
+    뜻이라 그 사실을 미리 알려야 한다."""
     configured: bool
     app_id_suffix: str | None = None
     updated_by: uuid.UUID | None = None
     updated_at: str | None = None
+    effective_source: str = "none"
 
 
 def _app_id_suffix(app_id: str) -> str:
@@ -371,9 +379,11 @@ async def get_channel_app_credentials_status(
         raise HTTPException(status_code=403, detail="org_id mismatch")
     await _require_human(db, auth, org_id)
     row = await get_channel_app_credentials(db, org_id=org_id, channel=channel)
+    effective_source = await resolve_app_credentials_source(db, org_id=org_id, channel=channel)
     if row is None:
-        return AppCredentialsStatusResponse(configured=False)
+        return AppCredentialsStatusResponse(configured=False, effective_source=effective_source)
     return AppCredentialsStatusResponse(
         configured=True, app_id_suffix=_app_id_suffix(row.app_id),
         updated_by=row.updated_by, updated_at=row.updated_at.isoformat(),
+        effective_source=effective_source,
     )

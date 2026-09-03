@@ -78,3 +78,24 @@ async def resolve_app_credentials(
         if app_id and encrypted_secret:
             return app_id, decrypt_channel_credential(encrypted_secret)
     return None
+
+
+async def resolve_app_credentials_source(db: AsyncSession, *, org_id: uuid.UUID, channel: str) -> str:
+    """story #3373 후속(페드루 PO 2026-09-03 11:19Z, 유나 화면설계 실측) — GET 상태 응답에
+    필요한 «어디서 왔나» 신호. `resolve_app_credentials()`와 정확히 같은 3단 순서를
+    따르지만 secret을 복호화하지 않는다(존재 확認만 필요 — 불필요한 decrypt 호출 0).
+    반환값 "org"|"platform"|"none" — `configured=false`일 때(조직 미등록) 화면이 「공용
+    앱으로 연결 가능」("platform")과 「연결 불가, 409로 막힘」("none")을 이걸로 가른다."""
+    row = await get_channel_app_credentials(db, org_id=org_id, channel=channel)
+    if row is not None:
+        return "org"
+
+    columns = _PLATFORM_SETTINGS_COLUMNS.get(channel)
+    if columns is not None:
+        from app.services.platform_settings import get_platform_settings
+
+        app_id_col, encrypted_secret_col = columns
+        platform = await get_platform_settings(db)
+        if getattr(platform, app_id_col) and getattr(platform, encrypted_secret_col):
+            return "platform"
+    return "none"

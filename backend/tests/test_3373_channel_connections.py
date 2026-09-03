@@ -845,12 +845,17 @@ async def test_app_secret_stored_encrypted_not_plaintext_and_status_endpoint_sho
 
 @pytest.mark.anyio
 async def test_get_app_credentials_status_configured_false_when_unset():
+    """이 테스트만 platform_threads_app_id/secret도 비운다 — 순수 «둘 다 없음» 상태
+    (effective_source='none')를 재현. _seed_org 기본값(platform-fallback-*)을 그대로 두면
+    configured=false여도 effective_source='platform'이 나온다(그건 아래 별도 테스트)."""
     from app.main import app
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org_id, project_id = await _seed_org(s)
+            org_id, project_id = await _seed_org(
+                s, platform_threads_app_id=None, platform_threads_app_secret=None,
+            )
             member_id = await _seed_human(s, org_id, role="member")
         _setup_org_scoped_app(app, Session, org_id, user_id=member_id)
 
@@ -859,7 +864,87 @@ async def test_get_app_credentials_status_configured_false_when_unset():
         assert r.status_code == 200, r.text
         assert r.json() == {
             "configured": False, "app_id_suffix": None, "updated_by": None, "updated_at": None,
+            "effective_source": "none",
         }
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── effective_source(페드루 PO 2026-09-03 11:19Z, 유나 화면설계 실측 — GET 상태 응답에
+# «어디서 왔나» 신호 추가) ────────────────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_get_app_credentials_status_effective_source_org_when_org_registered():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)  # 플랫폼 기본값도 함께 시드됨(기본 인자)
+            owner_id = await _seed_human(s, org_id, role="owner")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        async with _client_for(app) as client:
+            r_put = await client.put(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials",
+                json={"app_id": "org-app-id", "app_secret": "org-secret"},
+            )
+        assert r_put.status_code == 200, r_put.text
+
+        async with _client_for(app) as client:
+            r_get = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials")
+        assert r_get.status_code == 200, r_get.text
+        assert r_get.json()["configured"] is True
+        assert r_get.json()["effective_source"] == "org", (
+            "조직이 직접 등록했으면 플랫폼 공용 앱이 있어도 org가 우선(3단 우선순위 그대로)"
+        )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_app_credentials_status_effective_source_platform_when_org_unregistered():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(
+                s, platform_threads_app_id="platform-wide-app-id", platform_threads_app_secret="platform-secret",
+            )
+            member_id = await _seed_human(s, org_id, role="member")
+        _setup_org_scoped_app(app, Session, org_id, user_id=member_id)
+
+        async with _client_for(app) as client:
+            r_get = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials")
+        assert r_get.status_code == 200, r_get.text
+        assert r_get.json()["configured"] is False, "조직 등록은 없다 — 플랫폼 fallback뿐"
+        assert r_get.json()["effective_source"] == "platform"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_app_credentials_status_effective_source_none_when_neither():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(
+                s, platform_threads_app_id=None, platform_threads_app_secret=None,
+            )
+            member_id = await _seed_human(s, org_id, role="member")
+        _setup_org_scoped_app(app, Session, org_id, user_id=member_id)
+
+        async with _client_for(app) as client:
+            r_get = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials")
+        assert r_get.status_code == 200, r_get.text
+        assert r_get.json()["configured"] is False
+        assert r_get.json()["effective_source"] == "none"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
