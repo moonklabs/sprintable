@@ -89,10 +89,14 @@ async def _work_item_title(
 
 async def _latest_linked_draft_doc(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
-) -> tuple[uuid.UUID, str, str] | None:
+) -> tuple[uuid.UUID, str, str, uuid.UUID | None] | None:
     """이 work item과 doc 사이의 가장 최근 entity_references 행(어느 방향이든 — 산출물 doc이
     work item을 참조했을 수도, work item쪽 텍스트가 doc을 참조했을 수도 있다)을 찾아 그 doc의
-    (id, title, content)를 반환. 없으면 None(지어내지 않음)."""
+    (id, title, content, created_by)를 반환. 없으면 None(지어내지 않음).
+
+    story #3370(Phase0·마케팅운영 S5) — created_by를 4번째 원소로 추가(#3323이 만든 (id,
+    title, content) 3-tuple 확장) — 「초안 원작성자」 통지 수신자 집합에 합류시키는 데
+    쓴다(_build_approval_neutral_facts 참조)."""
     from app.models.reference import Reference
 
     row = (await db.execute(
@@ -121,20 +125,22 @@ async def _latest_linked_draft_doc(
     from app.models.doc import Doc
 
     doc_row = (await db.execute(
-        select(Doc.title, Doc.content).where(Doc.id == doc_id, Doc.org_id == org_id)
+        select(Doc.title, Doc.content, Doc.created_by).where(Doc.id == doc_id, Doc.org_id == org_id)
     )).first()
     if doc_row is None:
         return None
-    doc_title, doc_content = doc_row
-    return doc_id, doc_title, doc_content or ""
+    doc_title, doc_content, created_by = doc_row
+    return doc_id, doc_title, doc_content or "", created_by
 
 
 async def _resolve_doc_by_id(
     db: AsyncSession, *, org_id: uuid.UUID, doc_id_raw: object,
-) -> tuple[uuid.UUID, str, str] | None:
+) -> tuple[uuid.UUID, str, str, uuid.UUID | None] | None:
     """story #3323 AC2 — payload.previous_output_doc_id(문자열 uuid)를 그 org의 실 doc으로
     직접 해소한다. 파싱 실패·존재하지 않는 doc(다른 org 포함)은 None(지어내지 않음 — 호출부가
-    `_latest_linked_draft_doc` 폴백으로 이어받는다)."""
+    `_latest_linked_draft_doc` 폴백으로 이어받는다).
+
+    story #3370 — created_by를 4번째 원소로 추가(_latest_linked_draft_doc과 동형 확장)."""
     if not isinstance(doc_id_raw, str) or not doc_id_raw:
         return None
     try:
@@ -145,12 +151,12 @@ async def _resolve_doc_by_id(
     from app.models.doc import Doc
 
     doc_row = (await db.execute(
-        select(Doc.title, Doc.content).where(Doc.id == doc_id, Doc.org_id == org_id)
+        select(Doc.title, Doc.content, Doc.created_by).where(Doc.id == doc_id, Doc.org_id == org_id)
     )).first()
     if doc_row is None:
         return None
-    doc_title, doc_content = doc_row
-    return doc_id, doc_title, doc_content or ""
+    doc_title, doc_content, created_by = doc_row
+    return doc_id, doc_title, doc_content or "", created_by
 
 
 async def _build_approval_neutral_facts(
@@ -187,9 +193,19 @@ async def _build_approval_neutral_facts(
         facts["draft_doc_reference_token"] = _UNCONFIRMED
         facts["draft_doc_summary"] = _UNCONFIRMED
     else:
-        doc_id, doc_title, doc_content = draft
+        doc_id, doc_title, doc_content, draft_author_id = draft
         facts["draft_doc_reference_token"] = build_reference_token("doc", doc_id, doc_title) or _UNCONFIRMED
         facts["draft_doc_summary"] = doc_content[:300] or _UNCONFIRMED
+        # story #3370(Phase0·마케팅운영 S5) AC1 — 초안 원작성자(대개 담롱류 고객 에이전트)를
+        # 판정 통지 수신자 집합에 합류시킨다(gate_service.py::_publish_gate_verdict_
+        # notification이 이 키를 읽어 payload.gate_draft_author_member_id로 싣고,
+        # event_routing_resolver.py::_resolve_work_item_stakeholders가 합류시킨다 —
+        # requested_by_member_id·gate_requester_member_id와 동형 3단 파이프, story #3340
+        # 선례 그대로). _UNCONFIRMED 문자열 sentinel을 쓰지 않는다 — 이 필드는 사람이 읽는
+        # 표시용이 아니라 프로그램이 소비하는 UUID라, 가짜 문자열이 섞이면 하류가 그걸
+        # UUID로 파싱하려다 깨진다(다른 fact들과 다른 성격 — 값이 없으면 키 자체를 안 싣는다).
+        if draft_author_id is not None:
+            facts["draft_author_member_id"] = str(draft_author_id)
 
     return facts
 

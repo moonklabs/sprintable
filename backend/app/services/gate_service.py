@@ -1807,6 +1807,16 @@ async def _publish_gate_verdict_notification(
         if isinstance(_requester_raw, str) and _requester_raw:
             _verdict_payload["gate_requester_member_id"] = _requester_raw
 
+        # story #3370(Phase0·마케팅운영 S5) AC1 — 초안 원작성자(neutral_facts.
+        # draft_author_member_id, recipe_gate_hooks.py::_build_approval_neutral_facts가
+        # 채움)도 위 요청자와 동일 관례로 싣는다 — event_routing_resolver.py의
+        # _resolve_work_item_stakeholders가 이 키를 보고 수신자 합집합에 합류시킨다. 값이
+        # 없는(작성자 미해소·doc 링크 없음) 게이트는 이 키 자체를 안 실어 스키마의
+        # string/uuid-format 제약과 충돌하지 않는다(요청자 필드와 동일 원칙).
+        _author_raw = (gate.neutral_facts or {}).get("draft_author_member_id")
+        if isinstance(_author_raw, str) and _author_raw:
+            _verdict_payload["gate_draft_author_member_id"] = _author_raw
+
         await publish_preset_event(session, org_id, "preset.gate.verdict", _verdict_payload)
     except Exception:
         logger.warning(

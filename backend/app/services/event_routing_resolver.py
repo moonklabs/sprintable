@@ -63,11 +63,20 @@ async def _resolve_work_item_stakeholders(
     싣는다 — neutral_facts.requested_by_member_id 출처) work_item_type 분기와 무관하게 항상
     이해관계자 집합에 합류시킨다. work item이 미배정이라 stakeholders가 빈 집합이어도 "이
     게이트를 요청한 사람"에겐 도달해야 한다는 원칙 — 제네릭 키라 다른 이벤트도 같은 키를
-    실으면 별도 코드 없이 같이 커버된다."""
+    실으면 별도 코드 없이 같이 커버된다.
+
+    story #3370(Phase0·마케팅운영 S5) AC1 — ``gate_draft_author_member_id``(neutral_facts.
+    draft_author_member_id 출처, recipe_gate_hooks.py::_build_approval_neutral_facts가
+    doc.created_by에서 채움)도 동일 관례로 합류시킨다 — "이 초안을 쓴 사람"도 판정 결과를
+    받아야 한다(§PO-2). ``ids``가 set이라 assignee·requester·author가 같은 사람이어도
+    구조적으로 한 번만 남는다(AC1 "동일 멤버는 한 번만 포함")."""
     ids: set[uuid.UUID] = set()
     _requester_raw = payload.get("gate_requester_member_id")
     if isinstance(_requester_raw, str) and _requester_raw:
         ids.add(_parse_uuid(_requester_raw, field_name="gate_requester_member_id"))
+    _author_raw = payload.get("gate_draft_author_member_id")
+    if isinstance(_author_raw, str) and _author_raw:
+        ids.add(_parse_uuid(_author_raw, field_name="gate_draft_author_member_id"))
 
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
