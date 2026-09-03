@@ -16,6 +16,7 @@ import {
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -63,6 +64,16 @@ interface GateInfo {
   sealed_content_sha256?: string | null;
   sealed_content_body?: string | null;
   reapproval_required?: boolean;
+}
+
+// story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — GET .../drafts/{draftId}/publication.
+// 발행된 적 없으면(또는 unpublish됐으면) 서버가 전부 null을 준다(200 — 404는 draft 자체가
+// 없을 때만, "모른다"와 "발행 안 됐다"를 구별하는 서버측 신호).
+interface SitePostPublicationInfo {
+  published_at: string | null;
+  url: string | null;
+  published_by_member_id: string | null;
+  published_body_sha256: string | null;
 }
 
 function realStr(v: unknown): string | undefined {
@@ -129,6 +140,16 @@ export default function ContentPostEditPage() {
     | null
   >(null);
 
+  // story #3386 — S8(발행됨·URL·행위자). undefined=아직 안 물어봤다(첫 렌더), null=물어봤는데
+  // 실패(best-effort — gate 조회와 동형, 화면 전체를 막지 않는다), 객체=성공(발행 안 됐어도
+  // 전부 null 필드로 옴 — 그 자체가 "안다"는 신호라 undefined와는 다르다, AC6).
+  const [publication, setPublication] = useState<SitePostPublicationInfo | null | undefined>(undefined);
+  const [unpublishing, setUnpublishing] = useState(false);
+  const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
+  const [unpublishResult, setUnpublishResult] = useState<
+    { type: 'success' } | { type: 'error'; text: string; raw?: string } | null
+  >(null);
+
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
@@ -192,17 +213,46 @@ export default function ContentPostEditPage() {
     };
   }, [orgId, workItemId]);
 
+  // story #3386 — 원인 진단이 지목한 그 자리(FE가 hasPublishedSitePost를 undefined로
+  // 고정해 두던 계약 갭)를 여기서 채운다. best-effort(gate 조회와 동형) — 실패해도
+  // publication=null(=모른다)로 남을 뿐 화면 전체를 막지 않는다.
+  const loadPublication = async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publication`);
+      if (!res.ok) {
+        setPublication(null);
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: SitePostPublicationInfo } | null;
+      setPublication(json?.data ?? null);
+    } catch {
+      setPublication(null);
+    }
+  };
+
+  useEffect(() => {
+    void loadPublication();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, draftId]);
+
   // story #3368 §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 재승인 필요는 gate.
   // reapproval_required(서버 판정)를 그대로 읽는다. sealed_content_sha256은 이제 approved
   // 분기의 방어망 전용(정상 경로로는 도달 불가 — gates.py 가드가 이중 차단)이다.
   // publishable·blockedReason은 status와 다른 축: approved인데 봉인 값이 없어 "확인 불가"
   // 인 경우도 status는 approved로 남고 publishable만 false다(SEAL_MISSING).
-  const { status: derivedStatus, publishable, blockedReason } = deriveContentPostStatus({
+  //
+  // story #3386 — hasPublishedSitePost는 이제 undefined 고정이 아니다: publication이
+  // 아직 안 왔거나(undefined) 조회가 실패했으면(null) 여전히 undefined(=모른다, AC6)로
+  // 넘기고, 실제로 온 뒤에야 published_at!=null로 판정한다. publishedBodySha256도 같은
+  // 축(재발행 가능 여부, AC2).
+  const { status: derivedStatus, publishable, isRepublish, blockedReason } = deriveContentPostStatus({
     gateStatus: toGateStatus(gate?.status),
     reapprovalRequired: gate?.reapproval_required,
     sealedBodySha256: realStr(gate?.sealed_content_sha256),
     currentBodySha256: latest?.body_sha256,
-    hasPublishedSitePost: undefined, // S3(공개 projection) 착지 전 — 아직 판별 근거가 없다.
+    hasPublishedSitePost: publication ? publication.published_at != null : undefined,
+    publishedBodySha256: publication ? realStr(publication.published_body_sha256) : undefined,
   });
 
   const handleSave = async () => {
@@ -308,6 +358,7 @@ export default function ContentPostEditPage() {
         const url = json?.data?.url;
         if (publishedAt && url) {
           setPublishResult({ type: 'success', publishedAt, url });
+          void loadPublication(); // story #3386 — 발행 직후 URL·시각·행위자 블록을 갱신.
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }
@@ -327,6 +378,38 @@ export default function ContentPostEditPage() {
       setPublishResult({ type: 'error', text: t('publishFailed') });
     } finally {
       setPublishing(false);
+    }
+  };
+
+  // story #3386(AC1 참고 — S8이 이 스토리와 짝인 story #3381/PR#3739의 엔드포인트를 부르는
+  // 것까지 요구) — 발행 취소. ConfirmDialog(story #2416 — native confirm() 금지)로 확인
+  // 받은 뒤에만 호출한다. 성공하면 publication을 다시 읽어 URL·버튼 상태가 즉시 반영되게
+  // 한다(페이지 새로고침 없이).
+  const handleUnpublish = async () => {
+    if (!orgId) return;
+    setUnpublishConfirmOpen(false);
+    setUnpublishing(true);
+    setUnpublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/unpublish`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setUnpublishResult({ type: 'success' });
+        void loadPublication();
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setUnpublishResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('unpublishFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setUnpublishResult({ type: 'error', text: t('unpublishFailed') });
+    } finally {
+      setUnpublishing(false);
     }
   };
 
@@ -382,6 +465,68 @@ export default function ContentPostEditPage() {
           </AlertDescription>
         </Alert>
       ) : null}
+
+      {/* story #3386 AC1·AC3 — 공개 URL·발행 시각·행위자. status와 무관하게 publication이
+          있으면 보인다(AC3 "상태와 공개 여부는 두 축" — reapproval_needed여도 옛 버전은
+          여전히 공개 중이다). */}
+      {publication?.published_at ? (
+        <div
+          data-testid="content-publication-info"
+          className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm"
+        >
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
+            {publication.url ? (
+              <a href={publication.url} target="_blank" rel="noopener noreferrer" className="underline">
+                {publication.url}
+              </a>
+            ) : (
+              '—'
+            )}
+          </div>
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
+            {new Date(publication.published_at).toLocaleString()}
+          </div>
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
+            {publication.published_by_member_id ?? '—'}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setUnpublishConfirmOpen(true)}
+            disabled={unpublishing}
+          >
+            {unpublishing ? t('unpublishingCta') : t('unpublishCta')}
+          </Button>
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={unpublishConfirmOpen}
+        onOpenChange={setUnpublishConfirmOpen}
+        title={t('unpublishConfirmTitle')}
+        description={t('unpublishConfirmDescription')}
+        cancelLabel={t('unpublishConfirmCancel')}
+        confirmLabel={t('unpublishConfirmAction')}
+        onConfirm={() => void handleUnpublish()}
+      />
+
+      {unpublishResult && (
+        <Alert
+          variant={unpublishResult.type === 'success' ? 'success' : 'destructive'}
+          role={unpublishResult.type === 'success' ? 'status' : 'alert'}
+          aria-live={unpublishResult.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>
+            {unpublishResult.type === 'success' ? t('unpublishSuccess') : unpublishResult.text}
+          </AlertDescription>
+          {unpublishResult.type === 'error' ? <RawDetailsToggle raw={unpublishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
 
       {saveMessage && (
         <Alert
@@ -493,8 +638,12 @@ export default function ContentPostEditPage() {
             <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting}>
               {submitting ? t('submitPendingCta') : t('submitCta')}
             </Button>
+            {/* story #3386 AC2 — 발행된 글은 기본 잠금(canPublish=false), 재승인된 새
+                버전이 있을 때만(isRepublish) 다시 열리고 라벨이 「재발행」으로 바뀐다. */}
             <Button type="button" variant="outline" onClick={() => void handlePublish()} disabled={!canPublish || publishing}>
-              {publishing ? t('publishPendingCta') : t('publishCta')}
+              {publishing
+                ? (isRepublish ? t('publishRepublishingCta') : t('publishPendingCta'))
+                : (isRepublish ? t('publishRepublishCta') : t('publishCta'))}
             </Button>
           </div>
           {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
@@ -502,7 +651,11 @@ export default function ContentPostEditPage() {
               foreground on card 실측 5.92 — 통과, doc §6-2-1 그대로). */}
           {!canPublish ? (
             <p className="text-xs text-muted-foreground">
-              {blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+              {blockedReason === 'SEAL_MISSING'
+                ? t('publishDisabledReasonSealMissing')
+                : status === 'published'
+                  ? t('publishDisabledReasonAlreadyPublished')
+                  : t('publishDisabledReason')}
             </p>
           ) : null}
         </div>

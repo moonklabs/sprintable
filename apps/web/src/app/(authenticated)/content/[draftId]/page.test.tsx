@@ -70,7 +70,14 @@ function stubFetchWithVersions(
   versions: unknown[],
   onSave?: (body: unknown) => { status: number; body: unknown },
   onSubmit?: (body: unknown) => { status: number; body: unknown },
-  opts?: { gates?: unknown[]; onPublish?: () => { status: number; body: unknown } },
+  opts?: {
+    gates?: unknown[];
+    onPublish?: () => { status: number; body: unknown };
+    // story #3386 — 기본값은 "발행 안 됨"(전부 null). 개별 테스트가 발행됨 상태를
+    // 재현하려면 이 필드를 넘긴다.
+    publication?: { published_at: string | null; url: string | null; published_by_member_id: string | null; published_body_sha256: string | null };
+    onUnpublish?: () => { status: number; body: unknown };
+  },
 ) {
   vi.stubGlobal(
     'fetch',
@@ -103,6 +110,19 @@ function stubFetchWithVersions(
         const result = opts?.onPublish?.() ?? {
           status: 200, body: { url: 'https://sprintable.ai/ko/blog/2ho-blog', published_at: '2026-09-05T00:00:00Z', version_id: 'v1' },
         };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+        // story #3386 — 기본은 "발행 안 됨"(전부 null), 개별 테스트가 opts.publication으로
+        // 덮는다.
+        const body = opts?.publication ?? {
+          published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        };
+        return { ok: true, status: 200, json: async () => ({ data: body, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/unpublish` && init?.method === 'POST') {
+        const result = opts?.onUnpublish?.() ?? { status: 200, body: { id: 'p1', slug: '2ho-blog', unpublished_at: '2026-09-05T01:00:00Z' } };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -408,5 +428,178 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.textContent).toContain(koMessages.content.contentStatusDraft);
     const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
     expect(publishButton?.hasAttribute('disabled')).toBe(true);
+  });
+});
+
+// story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — 원인 진단이 지목한 그 자리
+// (hasPublishedSitePost가 항상 undefined였던 계약 갭)를 GET .../publication으로 채운다.
+describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', () => {
+  const APPROVED_GATE = [{ id: 'g1', status: 'approved', gate_type: 'external_publish', sealed_content_sha256: 'h1' }];
+
+  it('⭐발행됨 — 상태 칩 "발행됨"·URL 링크·발행 시각이 보이고 발행 버튼은 기본 잠금(AC1·AC2)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusPublished);
+    const link = container.querySelector<HTMLAnchorElement>('a[href="https://sprintable.ai/ko/blog/2ho-blog"]');
+    expect(link).not.toBeNull();
+    expect(container.textContent).toContain(koMessages.content.publishedInfoAtLabel);
+
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    expect(publishButton?.hasAttribute('disabled')).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.publishDisabledReasonAlreadyPublished);
+  });
+
+  it('⭐발행됨 + 재승인된 새 버전(라이브 해시≠승인 해시) — 「재발행」 라벨로 버튼이 다시 열린다(AC2)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE, // sealed_content_sha256='h1' — VERSION_1.body_sha256도 'h1'
+      publication: {
+        // 라이브(published_body_sha256)는 아직 옛 버전('old-hash') — 재승인된 h1과 다르다.
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'old-hash',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusPublished);
+    const republishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishRepublishCta);
+    expect(republishButton).not.toBeUndefined();
+    expect(republishButton?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('⭐AC6 — publication 조회가 실패하면(네트워크 에러) 「승인됨」으로 단정하지 않고 「—」를 그린다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { gates: APPROVED_GATE, onUnpublish: undefined });
+    // publication 엔드포인트만 별도로 실패하게 fetch를 재정의.
+    const originalFetch = (globalThis as { fetch: typeof fetch }).fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+        throw new Error('network error');
+      }
+      return originalFetch(input, init);
+    }));
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).not.toContain(koMessages.content.contentStatusApproved);
+    expect(container.textContent).not.toContain(koMessages.content.contentStatusPublished);
+    expect(container.querySelector('[data-status-chip]')).toBeNull();
+  });
+
+  it('⭐발행 취소 — 확인 다이얼로그 승인 뒤 unpublish를 호출하고 publication을 다시 읽는다(AC — #3739 엔드포인트)', async () => {
+    let unpublishCalled = false;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+      onUnpublish: () => {
+        unpublishCalled = true;
+        return { status: 200, body: { id: 'p1', slug: '2ho-blog', unpublished_at: '2026-09-03T19:00:00Z' } };
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    expect(unpublishTrigger).not.toBeUndefined();
+    await act(async () => {
+      unpublishTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    // ConfirmDialog는 Portal(base-ui)이라 container 밖(document.body)에 뜬다 — 트리거와
+    // 같은 라벨("발행 취소")이라 트리거 자신은 참조로 제외하고 나머지를 확인 버튼으로 잡는다.
+    const bodyButtons = [...document.body.querySelectorAll('button')].filter((b) => b !== unpublishTrigger);
+    const confirmButton = bodyButtons.find((b) => b.textContent === koMessages.content.unpublishConfirmAction);
+    expect(confirmButton).not.toBeUndefined();
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await flush();
+
+    expect(unpublishCalled).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.unpublishSuccess);
+  });
+
+  it('발행 취소 권한 오류(403) — 사람 말 문구로 뜬다(지어낸 성공 없음)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: APPROVED_GATE,
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: 'human-1', published_body_sha256: 'h1',
+      },
+      onUnpublish: () => ({
+        status: 403,
+        body: { data: null, error: { code: 'SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY', message: '발행 취소는 조직 owner 또는 admin만 가능합니다' }, meta: null },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    await act(async () => {
+      unpublishTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const bodyButtons = [...document.body.querySelectorAll('button')].filter((b) => b !== unpublishTrigger);
+    const confirmButton = bodyButtons.find((b) => b.textContent === koMessages.content.unpublishConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.errorUnpublishOwnerOrAdminOnly);
+    expect(container.textContent).not.toContain(koMessages.content.unpublishSuccess);
+  });
+
+  it('AC3 — 재승인 필요(reapproval_needed) 상태여도 이미 공개 중이면 URL·발행 취소 버튼은 그대로 보인다', async () => {
+    stubFetchWithVersions(
+      [VERSION_1, { ...VERSION_1, version_id: 'v2', version: 2, body_sha256: 'h2' }],
+      undefined, undefined,
+      {
+        gates: [{ id: 'g1', status: 'pending', gate_type: 'external_publish', reapproval_required: true, sealed_content_sha256: 'h1' }],
+        publication: {
+          published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+          published_by_member_id: 'human-1', published_body_sha256: 'h1',
+        },
+      },
+    );
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusReapprovalNeeded);
+    const link = container.querySelector<HTMLAnchorElement>('a[href="https://sprintable.ai/ko/blog/2ho-blog"]');
+    expect(link).not.toBeNull();
+    const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
+    expect(unpublishTrigger).not.toBeUndefined();
   });
 });

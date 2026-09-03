@@ -26,6 +26,7 @@ from app.services.site_posts import (
     SitePostVersionNotFoundError,
     create_site_post_draft_version,
     get_site_post_draft,
+    get_site_post_publication_info,
     is_agent_caller,
     list_site_post_draft_versions,
     list_site_post_drafts,
@@ -360,4 +361,43 @@ async def publish_site_post_from_draft_endpoint(
 
     return PublishSitePostFromDraftResponse(
         url=url, published_at=post.published_at.isoformat(), version_id=version_id,
+    )
+
+
+class SitePostPublicationResponse(BaseModel):
+    published_at: str | None
+    url: str | None
+    published_by_member_id: uuid.UUID | None
+    published_body_sha256: str | None
+
+
+@router.get(
+    "/{org_id}/site-posts/drafts/{draft_id}/publication", response_model=SitePostPublicationResponse,
+)
+async def get_site_post_publication_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> SitePostPublicationResponse:
+    """story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — 상세 화면이 «승인됨»·URL 없음·
+    «발행» 버튼 재활성으로 잘못 그리던 원인(FE의 hasPublishedSitePost가 항상 undefined)의
+    서버측 계약. 조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 목록 계약(list_site_post_drafts_
+    endpoint)과 동일하게 발행 여부 열람은 승인·발행 경계 밖."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    try:
+        info = await get_site_post_publication_info(
+            db, org_id=org_id, draft_id=draft_id, backend_base_url=str(request.base_url),
+        )
+    except SitePostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return SitePostPublicationResponse(
+        published_at=info.published_at.isoformat() if info.published_at else None,
+        url=info.url, published_by_member_id=info.published_by_member_id,
+        published_body_sha256=info.published_body_sha256,
     )

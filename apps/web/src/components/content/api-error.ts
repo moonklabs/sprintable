@@ -50,6 +50,11 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   SITE_POST_REAPPROVAL_REQUIRED: { labelKey: 'errorReapprovalRequired', kind: 'reapproval_required' },
   SITE_POST_SEAL_MISSING: { labelKey: 'errorSealMissing', kind: 'seal_missing' },
   SITE_POST_RESUBMIT_REQUIRED: { labelKey: 'errorResubmitRequired', kind: 'resubmit_required' },
+  // story #3386 — 「발행 취소」 버튼이 부르는 story #3381(PR#3739, 이 브랜치 착수 시점
+  // 미병합) 엔드포인트의 에러 코드. 병합 전엔 그 라우트 자체가 없어 404(pass-through
+  // raw fallback으로 뜬다 — 다른 계약 stub 자리와 동형 관례, S2 착지 전 submit()과 동일).
+  SITE_POST_UNPUBLISH_HUMAN_ONLY: { labelKey: 'errorUnpublishHumanOnly', kind: 'permission' },
+  SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY: { labelKey: 'errorUnpublishOwnerOrAdminOnly', kind: 'permission' },
 };
 
 function extractCodeAndMessage(detail: unknown): { code?: string; message?: string } {
