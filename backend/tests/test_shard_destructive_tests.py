@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -119,3 +120,102 @@ def test_check_staleness_silent_when_stable(tmp_path):
 def test_check_staleness_missing_file_is_silent(tmp_path):
     mod = _load()
     assert mod.check_staleness(94, tmp_path / "nope.json") is None
+
+
+# ── story #3392(CI 후속) — unweighted 파일 가드 ─────────────────────────────
+
+def test_check_staleness_flags_unweighted_file_even_without_20pct_growth(tmp_path):
+    """PR #3742 실사고 — 파일 수는 20% 안 늘었는데 unweighted 파일 1개가 shard를
+    timeout으로 끌고 갔다. «비율»이 아니라 «존재 자체»가 신호여야 한다."""
+    mod = _load()
+    weights_path = tmp_path / "weights.json"
+    weights_path.write_text(json.dumps({
+        "measured_at": "2026-01-01", "total_files": 200, "total_sec": 1000.0, "files": [],
+    }))
+    assert mod.check_staleness(200, weights_path, unweighted_count=0) is None
+    warning = mod.check_staleness(200, weights_path, unweighted_count=1)
+    assert warning is not None and "unweighted 파일 1개" in warning
+
+
+def test_check_staleness_combines_both_reasons(tmp_path):
+    mod = _load()
+    weights_path = tmp_path / "weights.json"
+    weights_path.write_text(json.dumps({
+        "measured_at": "2026-01-01", "total_files": 100, "total_sec": 500.0, "files": [],
+    }))
+    warning = mod.check_staleness(130, weights_path, unweighted_count=2)
+    assert "+30%" in warning
+    assert "unweighted 파일 2개" in warning
+
+
+def test_unweighted_files_in_finds_only_missing_from_weights():
+    mod = _load()
+    files = ["tests/a.py", "tests/b.py", "tests/c.py"]
+    weights = {"tests/a.py": 5.0}
+    assert mod.unweighted_files_in(files, weights) == ["tests/b.py", "tests/c.py"]
+
+
+def test_unweighted_files_in_empty_when_all_weighted():
+    mod = _load()
+    files = ["tests/a.py"]
+    weights = {"tests/a.py": 5.0}
+    assert mod.unweighted_files_in(files, weights) == []
+
+
+def test_average_weight_matches_partition_fallback():
+    """단일 SSOT 확인 — partition()이 unweighted 파일에 실제로 쓰는 폴백값과
+    average_weight()가 같은 값을 낸다(두 계산이 갈라지지 않는다)."""
+    mod = _load()
+    weights = {"tests/a.py": 10.0, "tests/b.py": 20.0}
+    avg = mod.average_weight(weights)
+    assert avg == 15.0
+    shards, totals = mod.partition(["tests/a.py", "tests/b.py", "tests/new.py"], weights, shard_count=1)
+    # 유일한 샤드의 총합 = 10+20+avg(15) = 45
+    assert totals[0] == 45.0
+
+
+def test_average_weight_of_empty_weights_is_one():
+    mod = _load()
+    assert mod.average_weight({}) == 1.0
+
+
+def test_main_writes_meta_out_with_unweighted_files_and_threshold(tmp_path, monkeypatch):
+    """story #3392 AC1 — --meta-out이 이 샤드의 unweighted 파일·평균·초과판정선을
+    실제로 내보내는지, main()을 통째로 돌려 확인한다(discover_files는 무겁고 이 저장소
+    실측과 무관하므로 fake로 대체)."""
+    mod = _load()
+    fake_files = ["tests/test_known.py", "tests/test_brand_new.py"]
+    monkeypatch.setattr(mod, "discover_files", lambda: fake_files)
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/test_known.py": 10.0})
+    meta_path = tmp_path / "meta.json"
+    monkeypatch.setattr(
+        sys, "argv",
+        ["shard_destructive_tests.py", "--shard-index", "0", "--shard-count", "1", "--meta-out", str(meta_path)],
+    )
+    import io
+    captured_stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", captured_stdout)
+    exit_code = mod.main()
+    assert exit_code == 0
+    meta = json.loads(meta_path.read_text())
+    assert meta["unweighted_files"] == ["tests/test_brand_new.py"]
+    assert meta["avg_weight_sec"] == 10.0
+    assert meta["unweighted_overage_multiplier"] == mod.UNWEIGHTED_OVERAGE_MULTIPLIER
+    assert meta["unweighted_overage_threshold_sec"] == 10.0 * mod.UNWEIGHTED_OVERAGE_MULTIPLIER
+
+
+def test_main_meta_out_empty_list_when_shard_fully_weighted(tmp_path, monkeypatch):
+    mod = _load()
+    fake_files = ["tests/test_known.py"]
+    monkeypatch.setattr(mod, "discover_files", lambda: fake_files)
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/test_known.py": 10.0})
+    meta_path = tmp_path / "meta.json"
+    monkeypatch.setattr(
+        sys, "argv",
+        ["shard_destructive_tests.py", "--shard-index", "0", "--shard-count", "1", "--meta-out", str(meta_path)],
+    )
+    import io
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    mod.main()
+    meta = json.loads(meta_path.read_text())
+    assert meta["unweighted_files"] == []
