@@ -123,7 +123,11 @@ export default function ContentPostEditPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
-    { type: 'success'; gateId: string } | { type: 'error'; text: string; raw?: string } | null
+    | { type: 'success'; gateId: string }
+    // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD는 원인 문구만이 아니라 그 게이트를
+    // 쥔 상대 초안 링크까지 보여야 한다 — heldByDraftId가 있을 때만 렌더한다.
+    | { type: 'error'; text: string; raw?: string; heldByDraftId?: string }
+    | null
   >(null);
 
   const [gate, setGate] = useState<GateInfo | null>(null);
@@ -355,11 +359,38 @@ export default function ContentPostEditPage() {
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
-        setSubmitResult({
-          type: 'error',
-          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('submitFailed')),
-          raw: info.raw,
-        });
+        // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD 전용 분기. 서버는 상대 초안의
+        // draft_id·lang·slug만 준다(title 없음) — 여기서 그 초안의 최신 버전을 별도
+        // 조회해 제목을 채운다(best-effort, gates/[id]/page.tsx의 memberNames 관례와 동형
+        // — 실패해도 slug/id 폴백으로 문구는 그대로 그린다, 지어내지 않되 화면을 막지도
+        // 않는다).
+        if (info.kind === 'gate_already_held' && info.heldByDraftId) {
+          let holdingTitle = info.heldBySlug ?? info.heldByDraftId.slice(0, 8);
+          try {
+            const vRes = await fetchWithAuth(
+              `/api/organizations/${orgId}/site-posts/drafts/${info.heldByDraftId}/versions`,
+            );
+            if (vRes.ok) {
+              const vJson = (await vRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+              const vLatest = vJson?.data?.[vJson.data.length - 1];
+              if (vLatest?.title) holdingTitle = vLatest.title;
+            }
+          } catch {
+            // best-effort — 조회 실패는 위 폴백 문구로 graceful.
+          }
+          setSubmitResult({
+            type: 'error',
+            text: t('errorGateAlreadyHeld', { title: holdingTitle, lang: info.heldByLang ?? '—' }),
+            raw: info.raw,
+            heldByDraftId: info.heldByDraftId,
+          });
+        } else {
+          setSubmitResult({
+            type: 'error',
+            text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('submitFailed')),
+            raw: info.raw,
+          });
+        }
       }
     } catch {
       setSubmitResult({ type: 'error', text: t('submitFailed') });
@@ -603,6 +634,13 @@ export default function ContentPostEditPage() {
               <>
                 {t('submitSuccess')}{' '}
                 <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+              </>
+            ) : submitResult.heldByDraftId ? (
+              <>
+                {submitResult.text}{' '}
+                <Link href={`/content/${submitResult.heldByDraftId}`} className="underline">
+                  {t('errorGateAlreadyHeldLink')}
+                </Link>
               </>
             ) : (
               submitResult.text

@@ -19,6 +19,7 @@ export type SitePostApiErrorKind =
   | 'reapproval_required'
   | 'seal_missing'
   | 'resubmit_required'
+  | 'gate_already_held'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -29,6 +30,12 @@ export interface SitePostApiErrorInfo {
   raw: string;
   /** 화면이 어느 처리로 갈지(S9 재승인 배너 재사용 vs S10 일반 오류) — §8-3④-1. */
   kind: SitePostApiErrorKind;
+  // story f6d14476 AC3 — SITE_POST_GATE_ALREADY_HELD가 실어 오는, 게이트를 쥔 상대 초안
+  // 식별자. 서버는 title을 안 준다(neutral_facts엔 title이 없다) — 화면이 이 draft_id로
+  // 별도 조회해 제목을 채운다(§8-1의 "지어내지 않는다" 규율 — id 그대로 노출 대신).
+  heldByDraftId?: string;
+  heldByLang?: string | null;
+  heldBySlug?: string;
 }
 
 interface KnownError {
@@ -55,15 +62,27 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // raw fallback으로 뜬다 — 다른 계약 stub 자리와 동형 관례, S2 착지 전 submit()과 동일).
   SITE_POST_UNPUBLISH_HUMAN_ONLY: { labelKey: 'errorUnpublishHumanOnly', kind: 'permission' },
   SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY: { labelKey: 'errorUnpublishOwnerOrAdminOnly', kind: 'permission' },
+  // story f6d14476(AC1·AC3) — 같은 work_item의 다른 초안이 이미 게이트를 쥐고 있어 상신이
+  // 막힘(submit endpoint 전용). labelKey는 일부러 비운다 — 이 문구는 {title}·{lang} 보간이
+  // 필요한데 title은 서버가 안 준다(heldByDraftId로 화면이 별도 조회해 채운 뒤에야 완성
+  // 가능) — 그래서 kind로만 분기하고 실제 문구 조립은 page.tsx가 한다.
+  SITE_POST_GATE_ALREADY_HELD: { labelKey: '', kind: 'gate_already_held' },
 };
 
-function extractCodeAndMessage(detail: unknown): { code?: string; message?: string } {
+function extractCodeAndMessage(
+  detail: unknown,
+): { code?: string; message?: string; heldByDraftId?: string; heldByLang?: string | null; heldBySlug?: string } {
   if (typeof detail === 'string') return { message: detail };
   if (detail && typeof detail === 'object') {
-    const d = detail as { code?: unknown; message?: unknown };
+    const d = detail as Record<string, unknown>;
     return {
       code: typeof d.code === 'string' ? d.code : undefined,
       message: typeof d.message === 'string' ? d.message : undefined,
+      // story f6d14476 — SITE_POST_GATE_ALREADY_HELD 전용 부가 필드. 다른 코드엔 이 키들이
+      // 없어 전부 undefined로 조용히 빠진다(다른 에러 처리 경로엔 영향 없음).
+      heldByDraftId: typeof d.holding_draft_id === 'string' ? d.holding_draft_id : undefined,
+      heldByLang: typeof d.holding_lang === 'string' || d.holding_lang === null ? (d.holding_lang as string | null) : undefined,
+      heldBySlug: typeof d.holding_slug === 'string' ? d.holding_slug : undefined,
     };
   }
   return {};
@@ -74,18 +93,28 @@ function extractCodeAndMessage(detail: unknown): { code?: string; message?: stri
  * `{"detail": ...}` 형상, 우리 자체 라우트의 `{error:{message}}` 형상도 방어).
  */
 export function parseSitePostApiError(
-  body: { detail?: unknown; error?: { code?: string; message?: string } } | null,
+  body: { detail?: unknown; error?: Record<string, unknown> } | null,
 ): SitePostApiErrorInfo {
+  // main.py::http_exception_handler의 실제 응답 봉투는 {"data":null,"error":{code,message,
+  // ...},"meta":null}다 — "detail"이 아니라 "error" 쪽이 실물이다. FastAPI raw shape
+  // ({"detail":...})도 방어적으로 함께 읽는다(프록시 경유 등 다른 경로 대비, 회귀 0).
   const fromDetail = extractCodeAndMessage(body?.detail);
-  const code = fromDetail.code ?? body?.error?.code;
-  const message = fromDetail.message ?? body?.error?.message;
+  const fromError = extractCodeAndMessage(body?.error);
+  const code = fromDetail.code ?? fromError.code;
+  const message = fromDetail.message ?? fromError.message;
+  const heldByDraftId = fromDetail.heldByDraftId ?? fromError.heldByDraftId;
+  const heldByLang = fromDetail.heldByLang ?? fromError.heldByLang;
+  const heldBySlug = fromDetail.heldBySlug ?? fromError.heldBySlug;
   const raw = JSON.stringify({ code: code ?? null, message: message ?? null });
 
   const known = code ? KNOWN_ERRORS[code] : undefined;
   return {
-    humanMessageKey: known?.labelKey,
+    humanMessageKey: known?.labelKey || undefined,
     humanMessageFallback: message ?? '',
     raw,
     kind: known?.kind ?? 'unknown',
+    heldByDraftId,
+    heldByLang,
+    heldBySlug,
   };
 }

@@ -82,6 +82,25 @@ class SitePostVersionNotFoundError(Exception):
         super().__init__(f"버전을 찾을 수 없습니다: {version_id}")
 
 
+class SitePostGateAlreadyHeldError(Exception):
+    """story f6d14476(Phase0 결함, PO 결정 2026-09-03 20:12 KST ②) — external_publish
+    게이트 슬롯은 work_item 단위(draft 단위가 아니다). 같은 work_item에 언어별 초안이
+    둘 이상 있을 때, 이미 다른 초안이 그 게이트를 쥐고(pending/approved) 있으면 이
+    초안의 상신을 명시 거부한다 — 조용히 되밟아 먼저 승인된 게이트를 pending으로
+    되돌리는 사고(원 발견 맥락, #3739 리뷰)를 서버가 원천 차단한다. 어느 초안이
+    쥐고 있는지(draft_id·lang·slug)를 실어 화면이 "다른 초안이 승인 절차 중" 문구+
+    링크를 그릴 수 있게 한다(AC3)."""
+
+    def __init__(self, *, holding_draft_id: uuid.UUID, holding_lang: str | None, holding_slug: str):
+        self.holding_draft_id = holding_draft_id
+        self.holding_lang = holding_lang
+        self.holding_slug = holding_slug
+        super().__init__(
+            f"이 work item은 다른 초안이 이미 승인 절차 중입니다"
+            f"(holding_draft_id={holding_draft_id}, lang={holding_lang}, slug={holding_slug})"
+        )
+
+
 class SitePostNotPublishedError(Exception):
     """story #3381(Phase0 후속·결함) — 이 draft의 work_item으로 현재 공개된(unpublished_at
     IS NULL) SitePost 행이 없다(애초에 발행된 적 없거나 이미 비공개됨) — 비공개할 대상 자체가
@@ -339,6 +358,16 @@ async def _reseal_gate_on_new_version(
     )).scalar_one_or_none()
     if gate is None:
         return
+    # story f6d14476(발견 즉시 수정, AC1과 동일한 corruption class) — 이 훅은
+    # work_item_id만으로 게이트를 찾는다(draft 무관). 승인 대상이 아닌 다른 초안을
+    # 편집(새 버전 생성)했을 뿐인데 여기서 그 게이트를 되돌리거나(approved→pending)
+    # 조용히 재봉인하면(pending 유지) submit()을 거치지 않고도 동일한 파괴가 일어난다.
+    # neutral_facts.draft_id로 "이 게이트를 쥔 초안"을 확인해, 값이 있고 이 버전의
+    # draft와 다르면 건드리지 않는다(레거시·draft_id 미기록 게이트는 §3-1-1
+    # "모른다≠다르다"에 따라 그대로 통과 — submit() 경로와 동일한 판단 기준).
+    holding_draft_id_raw = (gate.neutral_facts or {}).get("draft_id")
+    if holding_draft_id_raw is not None and holding_draft_id_raw != str(version.draft_id):
+        return
     if gate.status == "approved":
         # 승인된 뒤 편집 — pending으로 되돌리기만 한다. sealed_content_*는 절대 안 건드린다
         # (여기서 건드리면 "무엇이 승인됐었나" 기록이 사라진다 — 재봉인은 submit() 재호출 몫).
@@ -461,6 +490,24 @@ async def submit_site_post_draft(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
     )
+
+    # story f6d14476(PO 결정②) — 게이트 슬롯은 work_item 단위라, 이미 다른 초안이 그
+    # 게이트를 쥐고(pending/approved) 있으면 이 초안의 상신을 막는다(AC1). 「다른 초안」
+    # 판정은 neutral_facts.draft_id로 한다 — 이 값이 없는(이 스토리 착지 前에 만들어진)
+    # 레거시 게이트는 누가 쥐고 있는지 알 수 없어 차단하지 않는다(§3-1-1 "모른다≠다르다"
+    # — 모르면 막지 않는다, AC2가 요구하는 "같은 초안 재상신은 그대로 허용"을 레거시
+    # 게이트에서도 조용히 깨뜨리지 않기 위한 안전장치).
+    if existing is not None and existing.status in ("pending", "approved"):
+        holding_draft_id_raw = (existing.neutral_facts or {}).get("draft_id")
+        if holding_draft_id_raw is not None and holding_draft_id_raw != str(draft.id):
+            holder = await get_site_post_draft(db, org_id=org_id, draft_id=uuid.UUID(holding_draft_id_raw))
+            if holder is not None:
+                holder_versions = await list_site_post_draft_versions(db, draft_id=holder.id)
+                holder_lang = holder_versions[-1].lang if holder_versions else None
+                raise SitePostGateAlreadyHeldError(
+                    holding_draft_id=holder.id, holding_lang=holder_lang, holding_slug=holder.slug,
+                )
+
     if (
         existing is not None
         and existing.sealed_content_sha256 == target.body_sha256
@@ -473,10 +520,13 @@ async def submit_site_post_draft(
         "media_manifest_hash": _EMPTY_MEDIA_MANIFEST_HASH,
         "draft_author_member_id": str(origin_author_member_id),
         "requested_by_member_id": str(requester_member_id),
-        # story #3387 — 이 게이트가 가리키는 글 관리 화면(apps/web /content/{draft_id})을
-        # 에이전트 알림(_render_gate_verdict_message)이 참조로 실을 수 있도록. 게이트 자체엔
-        # draft_id 컬럼이 없어(그라운딩 완료) 기존 필드들과 동형으로 neutral_facts에 얹는다
-        # — 링크가 아니라 참조 정보다(PO 2026-09-03 13:33Z, 에이전트에겐 실행 권유 아님).
+        # story f6d14476 — 이 게이트 슬롯을 "쥔" 초안 식별(위 차단 판정의 유일한 근거,
+        # AC1). 재상신·재승인 요청도 매번 같은 값을 다시 써 넣는다(no-op이지만 명시).
+        # story #3387(같은 값, 다른 소비처) — 이 게이트가 가리키는 글 관리 화면(apps/web
+        # /content/{draft_id})을 에이전트 알림(_render_gate_verdict_message)이 참조로
+        # 실을 수 있도록. 게이트 자체엔 draft_id 컬럼이 없어(그라운딩 완료) 기존
+        # 필드들과 동형으로 neutral_facts에 얹는다 — 링크가 아니라 참조 정보다(PO
+        # 2026-09-03 13:33Z, 에이전트에겐 실행 권유 아님).
         "draft_id": str(draft.id),
     }
 

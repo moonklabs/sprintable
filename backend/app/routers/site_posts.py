@@ -22,6 +22,7 @@ from app.services.site_posts import (
     MediaNotSupportedPhase0Error,
     SitePostApproverRoleMissingError,
     SitePostDraftNotFoundError,
+    SitePostGateAlreadyHeldError,
     SitePostNotPublishedError,
     SitePostReapprovalRequiredError,
     SitePostSealMissingError,
@@ -325,6 +326,17 @@ async def submit_site_post_draft_endpoint(
         raise HTTPException(
             status_code=409,
             detail={"code": "SITE_POST_APPROVER_ROLE_MISSING", "message": str(exc)},
+        ) from exc
+    except SitePostGateAlreadyHeldError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SITE_POST_GATE_ALREADY_HELD",
+                "message": str(exc),
+                "holding_draft_id": str(exc.holding_draft_id),
+                "holding_lang": exc.holding_lang,
+                "holding_slug": exc.holding_slug,
+            },
         ) from exc
 
     return SubmitSitePostDraftResponse(

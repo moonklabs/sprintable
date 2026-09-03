@@ -100,4 +100,46 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
     expect(result.kind).toBe('unknown');
     expect(result.humanMessageFallback).toContain('gate_id=g1');
   });
+
+  // story f6d14476(AC1·AC3) — SITE_POST_GATE_ALREADY_HELD. main.py::http_exception_handler의
+  // 실제 응답 봉투는 "error"(not "detail") — 그 형상으로 읽는다. labelKey는 일부러 비운다
+  // (title은 서버가 안 준다, page.tsx가 heldByDraftId로 별도 조회해 문구를 조립한다) — 그래서
+  // humanMessageKey는 undefined, kind와 heldBy* 필드만으로 화면이 판단한다.
+  test('⭐SITE_POST_GATE_ALREADY_HELD(error 봉투) — kind·heldBy* 필드가 채워지고 humanMessageKey는 비워둔다(title은 화면이 채운다)', () => {
+    const result = parseSitePostApiError({
+      error: {
+        code: 'SITE_POST_GATE_ALREADY_HELD',
+        message: '이 work item은 다른 초안이 이미 승인 절차 중입니다(holding_draft_id=d1, lang=ko, slug=a-blog)',
+        holding_draft_id: 'd1', holding_lang: 'ko', holding_slug: 'a-blog',
+      },
+    });
+    expect(result.kind).toBe('gate_already_held');
+    expect(result.humanMessageKey).toBeUndefined();
+    expect(result.heldByDraftId).toBe('d1');
+    expect(result.heldByLang).toBe('ko');
+    expect(result.heldBySlug).toBe('a-blog');
+    expect(result.raw).toContain('SITE_POST_GATE_ALREADY_HELD');
+  });
+
+  test('SITE_POST_GATE_ALREADY_HELD — detail 형상(방어 경로)에서도 동일하게 파싱된다', () => {
+    const result = parseSitePostApiError({
+      detail: {
+        code: 'SITE_POST_GATE_ALREADY_HELD', message: '…',
+        holding_draft_id: 'd2', holding_lang: 'en', holding_slug: 'b-blog',
+      },
+    });
+    expect(result.kind).toBe('gate_already_held');
+    expect(result.heldByDraftId).toBe('d2');
+    expect(result.heldByLang).toBe('en');
+    expect(result.heldBySlug).toBe('b-blog');
+  });
+
+  test('다른 코드엔 heldBy* 필드가 전혀 안 실린다(회귀 방지)', () => {
+    const result = parseSitePostApiError({
+      error: { code: 'SITE_POST_REAPPROVAL_REQUIRED', message: '…' },
+    });
+    expect(result.heldByDraftId).toBeUndefined();
+    expect(result.heldByLang).toBeUndefined();
+    expect(result.heldBySlug).toBeUndefined();
+  });
 });
