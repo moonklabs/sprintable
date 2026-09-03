@@ -66,6 +66,9 @@ def main() -> int:
             print(proc.stderr[-2000:], file=sys.stderr)
 
     total_sec = sum(r["sec"] for r in results)
+    # story #3397 — total_files/total_sec는 더 이상 기록하지 않는다(files 배열에서
+    # 파생 가능한 값을 별도로 저장했던 것이 매 PR 병합마다 git 충돌을 냈다 — #3742·
+    # #3752 실사고). check_staleness()는 이제 len(files)로 직접 판정한다.
     payload = {
         "_snapshot_policy": (
             "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 "
@@ -75,8 +78,6 @@ def main() -> int:
         ),
         "source_run": "local-post-template-optimization",
         "measured_at": "2026-09-03",
-        "total_files": len(results),
-        "total_sec": round(total_sec, 1),
         "files": sorted(results, key=lambda r: -r["sec"]),
     }
     WEIGHTS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
