@@ -149,6 +149,14 @@ interface RecipeApprovalFacts {
   draftDocSummary: string | null;
   channel: string | null;
   stage: string | null;
+  // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §4-3③·§6-3) —
+  // 글 관리 화면의 승인 요청(S2 봉인 착지 後)이 채우는 필드. draft_doc_summary(300자 截단,
+  // doc 기반 채널용)와 별개 — 이쪽은 "전문"이라 접힘 없이 항상 펼쳐 보인다(§6-3 "요약 →
+  // 전문" 확장 그대로). BE 계약(§4-3③, 페드루 PO 확定 2026-09-03): neutral_facts.
+  // content_sha256·content_version·content_body — S2가 아직 안 채워 지금은 전부 null이다.
+  contentBody: string | null;
+  contentVersion: number | null;
+  contentSha256: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -160,8 +168,13 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     draftDocSummary: realString(f['draft_doc_summary']),
     channel: realString(f['channel']),
     stage: realString(f['stage']),
+    contentBody: realString(f['content_body']),
+    contentVersion: typeof f['content_version'] === 'number' ? f['content_version'] : null,
+    contentSha256: realString(f['content_sha256']),
   };
-  const hasAny = facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage;
+  const hasAny =
+    facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
+    facts.contentBody || facts.contentVersion !== null || facts.contentSha256;
   return hasAny ? facts : null;
 }
 
@@ -539,6 +552,18 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <p className="mt-1 whitespace-pre-wrap text-foreground">{facts.draftDocSummary}</p>
           ) : null}
         </div>
+      ) : null}
+      {facts.contentVersion !== null || facts.contentSha256 ? (
+        <p className="font-mono text-muted-foreground">
+          {facts.contentVersion !== null ? `${t('recipeApprovalVersionLabel')} v${facts.contentVersion}` : null}
+          {facts.contentVersion !== null && facts.contentSha256 ? ' · ' : null}
+          {facts.contentSha256 ? `${t('recipeApprovalSealedHashLabel')} ${facts.contentSha256.slice(0, 12)}…` : null}
+        </p>
+      ) : null}
+      {facts.contentBody ? (
+        // §6-3 "요약 → 전문" — draftDocSummary와 달리 접힘 없이 항상 전문을 보인다(승인자가
+        // 무엇을 승인하는지 클릭 한 번 없이 바로 보여야 한다는 processing #3328 원칙의 연장).
+        <p className="mt-1 whitespace-pre-wrap text-foreground">{facts.contentBody}</p>
       ) : null}
     </div>
   );

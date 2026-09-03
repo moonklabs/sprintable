@@ -13,6 +13,7 @@ import {
   deriveContentPostStatus,
   contentPostStatusLabelKey,
   CONTENT_POST_STATUS_TONE,
+  type ContentPostStatusInput,
 } from '@/components/content/post-status';
 import { parseSitePostApiError } from '@/components/content/api-error';
 
@@ -48,6 +49,30 @@ interface SitePostVersion {
   author_member_id: string;
   author_kind: 'agent' | 'human';
   created_at: string;
+}
+
+// story #3368 §8-1 4단 준비(페드루 지시 2026-09-03, S2 계약 전제로 미리 배선) — 이 work
+// item의 external_publish 게이트. GET /api/gates?work_item_id=&work_item_type=는 기존
+// 범용 라우트(doc-gate-section.tsx와 동형 재사용, 새 엔드포인트 0). neutral_facts.
+// content_sha256/content_version은 S2가 아직 안 채워 지금은 항상 undefined다 — 그
+// 경우 deriveContentPostStatus가 안전측(reapproval_needed)으로 fail-closed하므로 이
+// 배선 자체는 S2 착지 전에도 무해하다.
+interface GateInfo {
+  id: string;
+  status: string;
+  neutral_facts?: Record<string, unknown> | null;
+}
+
+function realStr(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+// Gate.status는 auto_passed/voided/held 등도 가질 수 있지만 Phase 0 external_publish는
+// 휴먼 승인만 인정(auto_passed 도달 불가, doc phase0-post-manager-screen-design §3-1
+// 각주) — pending/approved/rejected 셋 밖은 "유효한 승인 대상 없음"과 동형으로 undefined
+// 처리해 deriveContentPostStatus가 'draft'로 안전하게 떨어지게 한다.
+function toGateStatus(status: string | undefined): ContentPostStatusInput['gateStatus'] {
+  return status === 'pending' || status === 'approved' || status === 'rejected' ? status : undefined;
 }
 
 // §4-1 "원문을 접어서 함께 보존한다" — gate_id 등 추적 정보를 사람 말 문구가 지워버리지
@@ -88,6 +113,12 @@ export default function ContentPostEditPage() {
     { type: 'success'; gateId: string } | { type: 'error'; text: string; raw?: string } | null
   >(null);
 
+  const [gate, setGate] = useState<GateInfo | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<
+    { type: 'success'; url: string | null; publishedAt: string } | { type: 'error'; text: string; raw?: string } | null
+  >(null);
+
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
@@ -124,6 +155,39 @@ export default function ContentPostEditPage() {
   }, [orgId, draftId]);
 
   const latest = versions[versions.length - 1];
+  const workItemId = latest?.source_story_id;
+
+  useEffect(() => {
+    if (!orgId || !workItemId) return;
+    let cancelled = false;
+    async function loadGate() {
+      try {
+        const res = await fetchWithAuth(`/api/gates?work_item_id=${workItemId}&work_item_type=story`);
+        if (cancelled || !res.ok) return;
+        const list = (await res.json().catch(() => [])) as GateInfo[];
+        const candidates = Array.isArray(list) ? list : [];
+        // doc-gate-section.tsx::load()와 동형 관례 — 반려/대기 중인 게이트를 우선(진행
+        // 상태가 있는 쪽이 사용자에게 더 중요), 없으면 최신(배열 첫 항목, 서버가
+        // created_at desc로 준다는 기존 게이트 목록 관례 그대로).
+        const picked = candidates.find((g) => g.status === 'pending' || g.status === 'rejected') ?? candidates[0] ?? null;
+        setGate(picked);
+      } catch {
+        // best-effort — 게이트 조회 실패는 상태를 'draft'로 안전하게 떨어뜨릴 뿐 화면
+        // 전체를 막지 않는다(목록/편집 자체는 게이트 유무와 무관하게 동작해야 함).
+      }
+    }
+    void loadGate();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, workItemId]);
+
+  const derivedStatus = deriveContentPostStatus({
+    gateStatus: toGateStatus(gate?.status),
+    sealedBodySha256: realStr(gate?.neutral_facts?.['content_sha256']),
+    currentBodySha256: latest?.body_sha256,
+    hasPublishedSitePost: undefined, // S3(공개 projection) 착지 전 — 아직 판별 근거가 없다.
+  });
 
   const handleSave = async () => {
     if (!orgId || !latest) return;
@@ -202,6 +266,54 @@ export default function ContentPostEditPage() {
     }
   };
 
+  // story #3368 §8-1 5단(와이어프레임 S7·S8) — 발행. canPublish==='approved'일 때만 호출
+  // 가능하게 UI가 막지만(아래 렌더), 서버(site_posts.py::post_site_post)가 최종 판정
+  // 이다 — 화면 판단은 안내이지 방어가 아니다(§3-2). latest.* 값을 그대로 보낸다(폼의
+  // 미저장 편집 상태가 아니라 "승인된 바로 그 버전"을 발행 대상으로 고정).
+  const handlePublish = async () => {
+    if (!orgId || !latest || !gate) return;
+    setPublishing(true);
+    setPublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          work_item_id: latest.source_story_id, gate_id: gate.id,
+          title: latest.title, slug: latest.slug, lang: latest.lang,
+          summary: latest.summary, tags: latest.tags, body_md: latest.body_md,
+        }),
+      });
+      if (res.ok) {
+        // ⚠️응답에 url 필드가 아직 없다(backend SitePostResponse — S3 착지 전, doc
+        // phase0-post-manager-screen-design §4-2 갭 표 그대로). site_base_url+/{lang}/
+        // blog/{slug} 공식은 S3 AC4의 계약이지 이 화면이 임의로 지어낼 값이 아니다 — url이
+        // 오면 그대로 쓰고, 없으면 링크 없이 발행 시각만 보인다(성공을 지어내지 않되
+        // 과소 주장도 안 함).
+        const json = (await res.json().catch(() => null)) as
+          { data?: { published_at?: string; url?: string } } | null;
+        const publishedAt = json?.data?.published_at;
+        if (publishedAt) {
+          setPublishResult({ type: 'success', publishedAt, url: json?.data?.url ?? null });
+        } else {
+          setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setPublishResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setPublishResult({ type: 'error', text: t('publishFailed') });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-4 p-6">
@@ -221,9 +333,10 @@ export default function ContentPostEditPage() {
     );
   }
 
-  // 오늘 시점(S2 봉인 전) — 게이트 신호가 아직 없어 항상 'draft'로 파생된다(post-status.ts 참조).
-  const status = deriveContentPostStatus({});
+  const status = derivedStatus;
   const tone = CONTENT_POST_STATUS_TONE[status];
+  const canPublish = status === 'approved';
+  const sealedHash = realStr(gate?.neutral_facts?.['content_sha256']);
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
@@ -240,6 +353,23 @@ export default function ContentPostEditPage() {
           {t('editMeta', { slug: latest.slug, lang: latest.lang })}
         </p>
       </div>
+
+      {status === 'reapproval_needed' ? (
+        // §3-2 — "판정이 아니라 관측이다. 해시 두 개를 나란히 보여주면 사람이 스스로
+        // 확인한다." 서버가 이미 게이트로 재승인을 강제한다(S3 착지 後) — 이 배너는
+        // 방어가 아니라 안내다.
+        <Alert variant="warning" role="status" aria-live="polite" aria-atomic="true">
+          <AlertDescription>
+            {t('reapprovalNeededNotice')}
+            <br />
+            <span className="font-mono text-xs">
+              {t('reapprovalSealedHash')} {sealedHash ? `${sealedHash.slice(0, 12)}…` : '—'}
+              {' · '}
+              {t('reapprovalCurrentHash')} {latest.body_sha256.slice(0, 12)}…
+            </span>
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {saveMessage && (
         <Alert
@@ -337,15 +467,52 @@ export default function ContentPostEditPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-            {saving ? t('editSavingCta') : t('editSaveCta')}
-          </Button>
-          <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting}>
-            {submitting ? t('submitPendingCta') : t('submitCta')}
-          </Button>
+        <div className="space-y-1">
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={() => void handleSave()} disabled={saving}>
+              {saving ? t('editSavingCta') : t('editSaveCta')}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting}>
+              {submitting ? t('submitPendingCta') : t('submitCta')}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void handlePublish()} disabled={!canPublish || publishing}>
+              {publishing ? t('publishPendingCta') : t('publishCta')}
+            </Button>
+          </div>
+          {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
+              이유"를 옆에 두는 이 문구는 실제 정보라 4.5:1 판정 대상이다(text-muted-
+              foreground on card 실측 5.92 — 통과, doc §6-2-1 그대로). */}
+          {!canPublish ? <p className="text-xs text-muted-foreground">{t('publishDisabledReason')}</p> : null}
         </div>
       </div>
+
+      {publishResult && (
+        <Alert
+          variant={publishResult.type === 'success' ? 'success' : 'destructive'}
+          role={publishResult.type === 'success' ? 'status' : 'alert'}
+          aria-live={publishResult.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>
+            {publishResult.type === 'success' ? (
+              <>
+                {t('publishSuccess', { time: new Date(publishResult.publishedAt).toLocaleString() })}
+                {publishResult.url ? (
+                  <>
+                    {' '}
+                    <a href={publishResult.url} target="_blank" rel="noopener noreferrer" className="underline">
+                      {t('publishViewLink')}
+                    </a>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              publishResult.text
+            )}
+          </AlertDescription>
+          {publishResult.type === 'error' ? <RawDetailsToggle raw={publishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
     </div>
   );
 }

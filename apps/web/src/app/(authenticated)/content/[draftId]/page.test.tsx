@@ -70,6 +70,7 @@ function stubFetchWithVersions(
   versions: unknown[],
   onSave?: (body: unknown) => { status: number; body: unknown },
   onSubmit?: (body: unknown) => { status: number; body: unknown },
+  opts?: { gates?: unknown[]; onPublish?: (body: unknown) => { status: number; body: unknown } },
 ) {
   vi.stubGlobal(
     'fetch',
@@ -89,6 +90,17 @@ function stubFetchWithVersions(
         const result = onSubmit?.(body) ?? { status: 404, body: { detail: 'Not Found' } };
         const ok = result.status < 400;
         // 실제 BFF: !ok는 백엔드 원문을 그대로 pass-through(래핑 0), ok는 apiSuccess({data}) 래핑.
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url.startsWith('/api/gates?work_item_id=')) {
+        // /api/gates는 BFF가 그대로 배열을 pass-through(래핑 없음, doc-gate-section.tsx와
+        // 동일 관례).
+        return { ok: true, status: 200, json: async () => opts?.gates ?? [] };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts?.onPublish?.(body) ?? { status: 201, body: { id: 'p1', published_at: '2026-09-05T00:00:00Z' } };
+        const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       throw new Error('unexpected fetch: ' + url);
@@ -219,5 +231,109 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 
     expect(container.textContent).not.toContain(koMessages.content.submitSuccess);
     expect(container.querySelector('a[href^="/gates/"]')).toBeNull();
+  });
+
+  // story #3368 §8-1 4단(페드루 지시 2026-09-03, S2 계약 전제로 미리 배선) — 실 게이트
+  // 신호가 있을 때 상태·발행 버튼이 정확히 파생되는지.
+  it('⭐게이트 status=pending — 상태 칩이 "승인 대기"로 뜨고 발행 버튼은 비활성', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: [{ id: 'g1', status: 'pending', gate_type: 'external_publish' }],
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusPending);
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    expect(publishButton?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('⭐게이트 status=approved + 해시 일치 — 상태 칩 "승인됨", 발행 버튼 활성', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'h1' } }],
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusApproved);
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    expect(publishButton?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('⭐게이트 status=approved인데 해시 불일치 — 재승인 필요 배너·발행 버튼 비활성(§3-2 핵심)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'stale-hash' } }],
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusReapprovalNeeded);
+    expect(container.textContent).toContain(koMessages.content.reapprovalNeededNotice);
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    expect(publishButton?.hasAttribute('disabled')).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.publishDisabledReason);
+  });
+
+  it('⭐발행 성공 — 발행 시각·공개 URL 링크가 뜬다(AC5)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'h1' } }],
+      onPublish: () => ({ status: 201, body: { id: 'p1', published_at: '2026-09-05T00:00:00Z', url: '/ko/blog/2ho-blog' } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    await act(async () => {
+      publishButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    const link = container.querySelector<HTMLAnchorElement>('a[href="/ko/blog/2ho-blog"]');
+    expect(link).not.toBeNull();
+  });
+
+  it('발행 실패(403 — 승인 필요) — 원문이 접힌 상세로 보존되고 성공으로 오인 표시하지 않는다(S10)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'h1' } }],
+      onPublish: () => ({ status: 403, body: { detail: { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: '승인이 필요합니다' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    await act(async () => {
+      publishButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).not.toContain(koMessages.content.publishViewLink);
+    expect(container.textContent).toContain('승인이 필요합니다');
+  });
+
+  it('게이트 없음(초안 상태) — 발행 버튼은 항상 비활성', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { gates: [] });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusDraft);
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    expect(publishButton?.hasAttribute('disabled')).toBe(true);
   });
 });
