@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { deriveContentPostStatus } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
+import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 2번) —
@@ -120,15 +121,11 @@ export default function ContentPostListPage() {
                     </td>
                     <td className="px-3 py-2.5"><StatusChip status={status} /></td>
                     <td className="px-3 py-2.5 text-muted-foreground">v{draft.current_version}</td>
-                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="content-origin-author">
-                      {draft.origin_author_kind === 'agent'
-                        ? t('authorAgent')
-                        : draft.origin_author_kind === 'human'
-                          ? t('authorHuman')
-                          : t('originAuthorUnknown')}
+                    <td className="px-3 py-2.5" data-testid="content-origin-author">
+                      <AuthorKindBadge kind={draft.origin_author_kind} />
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {draft.latest_author_kind === 'agent' ? t('authorAgent') : t('authorHuman')}
+                    <td className="px-3 py-2.5" data-testid="content-latest-author">
+                      <AuthorKindBadge kind={draft.latest_author_kind} />
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
                       {new Date(draft.updated_at).toLocaleString()}

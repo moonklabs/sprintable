@@ -2095,6 +2095,7 @@
     "fieldBody": "Body (Markdown)",
     "fieldSlugLangLocked": "Slug · language",
     "fieldSlugLangLockedHint": "Locked after the first version — changing it would split off a new draft and fork the history.",
+    "fieldOriginAuthor": "Original author",
     "fieldLastEditedBy": "Last edited by",
     "submitCta": "Request approval",
     "submitPendingCta": "Requesting…",

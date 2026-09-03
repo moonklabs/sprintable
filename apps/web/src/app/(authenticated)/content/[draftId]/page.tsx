@@ -14,6 +14,7 @@ import {
   type ContentPostStatusInput,
 } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
+import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
 
 /**
@@ -471,11 +472,17 @@ export default function ContentPostEditPage() {
           <p className="text-xs text-muted-foreground">{t('fieldSlugLangLockedHint')}</p>
         </div>
 
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-muted-foreground">{t('fieldLastEditedBy')}</p>
-          <p className="text-sm text-muted-foreground">
-            {latest.author_kind === 'agent' ? t('authorAgent') : t('authorHuman')}
-          </p>
+        <div className="flex flex-wrap gap-6">
+          {/* 유나 §6-3-1 지적(2026-09-03 라이브 검수) — 목록엔 원작성·최종수정 둘 다 있는데
+              편집 화면엔 최종수정만 있어 "원안이 에이전트였다"가 편집 중 안 보였다. */}
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">{t('fieldOriginAuthor')}</p>
+            <AuthorKindBadge kind={versions[0]?.author_kind} />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">{t('fieldLastEditedBy')}</p>
+            <AuthorKindBadge kind={latest.author_kind} />
+          </div>
         </div>
 
         <div className="space-y-1">

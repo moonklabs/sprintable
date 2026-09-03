@@ -159,4 +159,20 @@ describe('ContentPostListPage (story #3368)', () => {
     // 케이스가 목록에서 구별된다(§6-3-1이 고치려던 정확히 그 자리).
     expect(container.textContent).toContain(koMessages.content.authorHuman);
   });
+
+  // 유나 라이브 검수(2026-09-03, head 6f575809b) — 실물이 평문 <td>텍스트</td>였다(칩 아님).
+  // 시안 S1·스토리 AC1 본문("원작성 주체·최종 수정 주체를 확인할 수 있다")은 두 칩을
+  // 명시한다 — 텍스트로는 목록을 훑을 때 "누가 썼나"가 눈에 안 걸린다.
+  it('⭐원작성·최종수정 주체는 평문이 아니라 칩(배지)으로 렌더된다(§6-3-1 AC1 정정)', async () => {
+    stubFetch([{ ...DRAFT_A, origin_author_kind: 'agent', latest_author_kind: 'human' }]);
+    await act(async () => {
+      root.render(wrap(<ContentPostListPage />));
+    });
+    await flush();
+
+    const originCell = container.querySelector('[data-testid="content-origin-author"]');
+    const latestCell = container.querySelector('[data-testid="content-latest-author"]');
+    expect(originCell?.querySelector('.proof-surface')).not.toBeNull();
+    expect(latestCell?.querySelector('.proof-surface')).not.toBeNull();
+  });
 });

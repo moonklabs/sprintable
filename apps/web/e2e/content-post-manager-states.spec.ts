@@ -57,18 +57,44 @@ async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
  * 풀게 한다, oklch 토큰을 rgb 정규식으로 파싱하려다 null을 통과시키는 함정을 피한다).
  * 파싱 실패·opacity≠1은 조용히 넘기지 않고 던진다(무음 통과 금지).
  */
+// §8-3-1(유나 실측, 2026-09-03 라이브에서 잡음) — 최초 판은 배경 한 겹만 읽어 알파
+// 배경(예: thead의 bg-muted/50, 알파 0.5)을 그 색 하나로 재면 거짓 FAIL이 났다
+// (thead 헤더 6개가 실측 5.10인데 2.44로 나옴). 부모부터 겹쳐 칠해 실제로 «보이는 색»을
+// 만든 뒤 재는 것으로 교체 — 구현엔 결함이 없었고 이 헬퍼가 틀렸었다.
 async function measureChip(page: Page, chipSel: string): Promise<{ label: number; dot: number }> {
   return page.$eval(chipSel, (chip) => {
     const cv = document.createElement('canvas');
     cv.width = cv.height = 1;
     const ctx = cv.getContext('2d', { willReadFrequently: true })!;
-    const toRgb = (css: string): [number, number, number] => {
-      ctx.fillStyle = '#000';
-      ctx.fillStyle = css;
-      if (ctx.fillStyle === '#000000' && !/^(#000000|rgb\(0,\s*0,\s*0\)|black)$/.test(css.trim())) {
-        throw new Error(`색 파싱 실패: ${css}`);
+    const isOpaque = (c: string) =>
+      !/\/\s*[\d.]+\s*\)/.test(c) && !/rgba\([^)]*,\s*(0?\.\d+|0)\s*\)/.test(c);
+    // 요소 위로 올라가며 배경을 모은다 — 불투명한 색을 만나면 멈춘다(그 위는 안 보인다).
+    const bgStack = (el: Element): string[] => {
+      const s: string[] = [];
+      let e: Element | null = el;
+      while (e) {
+        const bg = getComputedStyle(e).backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+          s.push(bg);
+          if (isOpaque(bg)) break;
+        }
+        e = e.parentElement;
       }
+      return s.reverse(); // 아래(부모)부터
+    };
+    // 캔버스에 실제로 겹쳐 칠해 "보이는 색"을 얻는다. oklch·color-mix도 브라우저가 푼다.
+    const paint = (colors: string[]): [number, number, number] => {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = getComputedStyle(document.body).backgroundColor || '#ffffff';
       ctx.fillRect(0, 0, 1, 1);
+      for (const c of colors) {
+        ctx.fillStyle = '#000';
+        ctx.fillStyle = c;
+        if (ctx.fillStyle === '#000000' && !/^(#000000|rgb\(0,\s*0,\s*0\)|black)$/.test(c.trim())) {
+          throw new Error(`색 파싱 실패: ${c}`); // 무음 통과 금지
+        }
+        ctx.fillRect(0, 0, 1, 1);
+      }
       const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
       return [r, g, b];
     };
@@ -82,19 +108,19 @@ async function measureChip(page: Page, chipSel: string): Promise<{ label: number
       const lb = L(b);
       const hi = Math.max(la, lb);
       const lo = Math.min(la, lb);
-      return (hi + 0.05) / (lo + 0.05);
+      return +((hi + 0.05) / (lo + 0.05)).toFixed(2);
     };
-    const cs = getComputedStyle(chip);
     const dotEl = chip.querySelector('[data-chip-dot]');
     if (!dotEl) throw new Error('dot 요소 없음 — data-chip-dot 필요');
     for (const el of [chip, dotEl as HTMLElement]) {
       const op = getComputedStyle(el).opacity;
-      if (op !== '1') throw new Error(`칩에 opacity(${op})가 걸려 있다 — computed로는 실색을 못 잰다`);
+      if (op !== '1') throw new Error(`opacity(${op})가 걸려 있다 — computed로는 실색을 못 잰다`);
     }
-    const bg = toRgb(cs.backgroundColor);
+    const stack = bgStack(chip);
+    const bg = paint(stack);
     return {
-      label: +cr(toRgb(cs.color), bg).toFixed(2),
-      dot: +cr(toRgb(getComputedStyle(dotEl).backgroundColor), bg).toFixed(2),
+      label: cr(paint([...stack, getComputedStyle(chip).color]), bg),
+      dot: cr(paint([...stack, getComputedStyle(dotEl).backgroundColor]), bg),
     };
   });
 }

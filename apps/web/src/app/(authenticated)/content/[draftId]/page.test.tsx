@@ -125,6 +125,24 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.textContent).toContain(koMessages.content.authorAgent);
   });
 
+  // 유나 라이브 검수(2026-09-03, head 6f575809b) — 편집 화면엔 최종 수정 주체만 있고
+  // 원작성 주체가 없어 "원안이 에이전트였다"가 편집 중 안 보였다.
+  it('⭐원작성 주체(versions[0])와 최종 수정 주체(latest)가 각각 뜬다(에이전트 원안 → 휴먼 개정)', async () => {
+    stubFetchWithVersions([
+      VERSION_1,
+      { ...VERSION_1, version_id: 'v2', version: 2, author_kind: 'human', author_member_id: 'human-1' },
+    ]);
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.fieldOriginAuthor);
+    expect(container.textContent).toContain(koMessages.content.fieldLastEditedBy);
+    expect(container.textContent).toContain(koMessages.content.authorAgent);
+    expect(container.textContent).toContain(koMessages.content.authorHuman);
+  });
+
   it('slug·lang은 입력란 없이 표시만 된다(잠김)', async () => {
     stubFetchWithVersions([VERSION_1]);
     await act(async () => {

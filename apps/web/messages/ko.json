@@ -2095,6 +2095,7 @@
     "fieldBody": "본문(Markdown)",
     "fieldSlugLangLocked": "slug · 언어",
     "fieldSlugLangLockedHint": "첫 버전 이후 잠깁니다 — 바꾸면 새 초안으로 분리되어 이력이 갈라집니다.",
+    "fieldOriginAuthor": "원작성 주체",
     "fieldLastEditedBy": "최종 수정 주체",
     "submitCta": "승인 요청",
     "submitPendingCta": "요청 중…",
