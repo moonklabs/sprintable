@@ -5,7 +5,9 @@
 `public_key`(비밀 아닌 공개 식별자, org_metering_keys 참고) — 모르는 키는 침묵 204(존재
 유출 안 함, public_docs.py의 unknown→에러 노출과 달리 이쪽은 beacon이라 클라이언트가 응답을
 안 읽으므로 오히려 구분 없는 204가 더 안전한 선택).
-"""
+
+CORS는 `app/core/public_api_cors.py::PublicApiCorsMiddleware`(공개 API 공용, story #3360이
+`/site-posts` 추가하며 일반화)가 담당 — 이 파일엔 CORS 로직 없음."""
 from __future__ import annotations
 
 import hashlib
@@ -15,7 +17,6 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.dependencies.database import get_db
 from app.services.pageview_counter import record_pageview, resolve_org_by_public_key
@@ -66,29 +67,3 @@ async def post_pageview(
     today = datetime.now(timezone.utc).date()
     await record_pageview(db, org_id=org_id, path=body.path, day=today)
     return Response(status_code=204)
-
-
-_PUBLIC_PAGEVIEW_PATH = "/api/v2/public/pageview"
-
-
-class PublicPageviewCorsMiddleware(BaseHTTPMiddleware):
-    """beacon은 blog 정적 사이트(app 도메인과 다른 origin)에서 호출된다. 전역 CORSMiddleware
-    (main.py)의 allow_origins는 인증 API 표면 보호용 고정 allowlist라 이 경로만 완전 개방
-    (PO "CORS는 이 라우트만" 확定) — 쿠키 0·무인증이라 allow_credentials 없이 origin "*"과
-    궁합 문제 없음. main.py에서 전역 CORSMiddleware보다 나중에 add_middleware해 바깥쪽(요청
-    먼저 통과)에 두면, preflight OPTIONS를 전역 CORSMiddleware의 allowlist 판정 전에 여기서
-    가로챈다."""
-
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path != _PUBLIC_PAGEVIEW_PATH:
-            return await call_next(request)
-        if request.method == "OPTIONS":
-            return Response(status_code=204, headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Max-Age": "86400",
-            })
-        response = await call_next(request)
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        return response
