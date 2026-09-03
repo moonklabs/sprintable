@@ -47,6 +47,11 @@ class RecipeRepeatSchedule(Base):
     last_payload_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     consecutive_failure_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    # story c7abdf42(2026-09-02, PO 확定①) — 정지 그 순간의 사유를 영속(#3337 원판은
+    # 담롱 DM에만 휘발성으로 실어 행엔 안 남겼다 — GET 시점 재판정은 "그때 왜 멈췄나"가
+    # 아니라 "지금 다시 보면 이렇다"로 갈려 나중에 조건이 바뀌면 실제 정지사유와 어긋난다).
+    # NULL = 이 컬럼 신설 전에 이미 paused였던 구 행("미기록") — 지어내지 않는다.
+    pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 직전 회차에 생성된 Story — 다음 회차 Story의 assignee 승계 출처(story #3340 도달 원칙과
     # 정합: 새 Story도 미배정으로 태어나지 않는다).

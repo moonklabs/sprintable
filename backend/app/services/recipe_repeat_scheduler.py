@@ -180,6 +180,104 @@ async def _create_next_story(db: AsyncSession, *, org_id: uuid.UUID, project_id:
     return story.id
 
 
+async def _run_one_schedule_cycle(db: AsyncSession, schedule: RecipeRepeatSchedule) -> str:
+    """story c7abdf42(2026-09-02, PO 확定②) — process_recipe_repeat_ticks의 루프 바디를
+    그대로(동작 변경 0) 뽑아낸 것. tick(SKIP LOCKED 배치)과 신설 «지금 한 회차» 수동
+    트리거(단건 FOR UPDATE) 둘 다 이 함수 하나로 회차를 돌린다 — 새 로직 발명 0, 정지
+    사유 3종·발행·실패 카운팅 전부 리팩터 전과 문자 그대로 동일.
+
+    반환값은 process_recipe_repeat_ticks의 counts 딕셔너리 키와 동일한 문자열
+    ("fired"·"paused_definition_disabled"·"paused_project_deleted"·"paused_max_failures"·
+    "failed") — 호출부가 그대로 counts[결과] += 1 하거나 HTTP 응답에 실어 쓴다.
+
+    story c7abdf42 PO 확定① — pause_reason을 정지 그 순간에 영속한다(구 행은 마이그레이션이
+    값 없이 두므로 None="미기록"으로 자연히 구별된다)."""
+    definition = await _resolve_definition(db, org_id=schedule.org_id, key=schedule.definition_key)
+    if definition is None or not definition.enabled:
+        reason = "정의가 비활성화되었거나 삭제되었습니다"
+        schedule.status = "paused"
+        schedule.pause_reason = reason
+        await db.commit()
+        await _notify_owner_paused(
+            db, org_id=schedule.org_id, project_id=schedule.project_id,
+            definition_key=schedule.definition_key, reason=reason,
+        )
+        await db.commit()
+        return "paused_definition_disabled"
+
+    if not await _resolve_project_active(db, project_id=schedule.project_id):
+        reason = "프로젝트가 삭제(archive)되었습니다"
+        schedule.status = "paused"
+        schedule.pause_reason = reason
+        await db.commit()
+        await _notify_owner_paused(
+            db, org_id=schedule.org_id, project_id=schedule.project_id,
+            definition_key=schedule.definition_key, reason=reason,
+        )
+        await db.commit()
+        return "paused_project_deleted"
+
+    stage_prop = (definition.payload_schema.get("properties") or {}).get("stage") or {}
+    enum = stage_prop.get("enum")
+    first_stage = enum[0] if isinstance(enum, list) and enum else None
+    if first_stage is None:
+        # 정의가 그새 사이클형이 아니게(payload_schema 수정) — 스케줄 자체가 무의미해짐.
+        reason = "정의가 더 이상 사이클형이 아닙니다"
+        schedule.status = "paused"
+        schedule.pause_reason = reason
+        await db.commit()
+        await _notify_owner_paused(
+            db, org_id=schedule.org_id, project_id=schedule.project_id,
+            definition_key=schedule.definition_key, reason=reason,
+        )
+        await db.commit()
+        return "paused_definition_disabled"
+
+    # story #3337(실측 확認) — rollback()은 세션의 모든 객체를 expire한다. except 블록에서
+    # schedule.* 를 다시 읽으면 SQLAlchemy가 동기 컨텍스트에서 lazy-reload를 시도해
+    # MissingGreenlet으로 죽는다 — rollback 前에 필요한 값을 평범한 로컬 변수로 미리 뽑아둔다.
+    _schedule_id, _org_id, _definition_key = schedule.id, schedule.org_id, schedule.definition_key
+    try:
+        new_story_id = await _create_next_story(
+            db, org_id=schedule.org_id, project_id=schedule.project_id, schedule=schedule,
+            definition_name=definition.name or definition.key,
+        )
+        payload = await _build_next_collect_payload(schedule, new_work_item_id=new_story_id, stage=first_stage)
+
+        await _publish_next_collect_event(
+            db, org_id=schedule.org_id, definition_key=schedule.definition_key, payload=payload,
+        )
+        await db.commit()
+        return "fired"
+    except Exception:
+        await db.rollback()
+        logger.warning(
+            "recipe_repeat_scheduler: 회차 발행 실패(schedule_id=%s definition=%s org=%s)",
+            _schedule_id, _definition_key, _org_id, exc_info=True,
+        )
+        # rollback이 이전 SELECT...FOR UPDATE 잠금까지 풀어버린다 — 실패 카운터 증가는
+        # 별도의 짧은 재조회+갱신 트랜잭션으로(그 잠금 없이도 안전 — 이 tick 배치 자체가
+        # SKIP LOCKED라 동시 tick이 같은 행을 다시 잡으면 그쪽이 자연히 skip한다).
+        refreshed = (await db.execute(
+            select(RecipeRepeatSchedule).where(RecipeRepeatSchedule.id == _schedule_id)
+        )).scalar_one_or_none()
+        if refreshed is not None:
+            refreshed.consecutive_failure_count += 1
+            if refreshed.consecutive_failure_count >= 3:
+                reason = f"연속 {refreshed.consecutive_failure_count}회 발행 실패"
+                refreshed.status = "paused"
+                refreshed.pause_reason = reason
+                await db.commit()
+                await _notify_owner_paused(
+                    db, org_id=refreshed.org_id, project_id=refreshed.project_id,
+                    definition_key=refreshed.definition_key, reason=reason,
+                )
+                await db.commit()
+                return "paused_max_failures"
+            await db.commit()
+        return "failed"
+
+
 async def process_recipe_repeat_ticks(db: AsyncSession) -> dict[str, int]:
     """cron 진입점 — 만료된(next_run_at<=now) active 스케줄을 훑어 다음 회차를 발행한다.
     SKIP LOCKED로 동시 tick 겹침을 방어(workflow_sla_processor.py와 동형 관례) — 같은 행을
@@ -202,86 +300,7 @@ async def process_recipe_repeat_ticks(db: AsyncSession) -> dict[str, int]:
     # top-level commit/rollback 단위로 격리한다 — 앞선 행이 이미 commit된 뒤에는 뒷행의
     # rollback이 앞행을 되돌릴 수 없다(각자 자기 트랜잭션에서 끝남).
     for schedule in rows:
-        definition = await _resolve_definition(db, org_id=schedule.org_id, key=schedule.definition_key)
-        if definition is None or not definition.enabled:
-            schedule.status = "paused"
-            await db.commit()
-            await _notify_owner_paused(
-                db, org_id=schedule.org_id, project_id=schedule.project_id,
-                definition_key=schedule.definition_key, reason="정의가 비활성화되었거나 삭제되었습니다",
-            )
-            await db.commit()
-            counts["paused_definition_disabled"] += 1
-            continue
-
-        if not await _resolve_project_active(db, project_id=schedule.project_id):
-            schedule.status = "paused"
-            await db.commit()
-            await _notify_owner_paused(
-                db, org_id=schedule.org_id, project_id=schedule.project_id,
-                definition_key=schedule.definition_key, reason="프로젝트가 삭제(archive)되었습니다",
-            )
-            await db.commit()
-            counts["paused_project_deleted"] += 1
-            continue
-
-        stage_prop = (definition.payload_schema.get("properties") or {}).get("stage") or {}
-        enum = stage_prop.get("enum")
-        first_stage = enum[0] if isinstance(enum, list) and enum else None
-        if first_stage is None:
-            # 정의가 그새 사이클형이 아니게(payload_schema 수정) — 스케줄 자체가 무의미해짐.
-            schedule.status = "paused"
-            await db.commit()
-            await _notify_owner_paused(
-                db, org_id=schedule.org_id, project_id=schedule.project_id,
-                definition_key=schedule.definition_key, reason="정의가 더 이상 사이클형이 아닙니다",
-            )
-            await db.commit()
-            counts["paused_definition_disabled"] += 1
-            continue
-
-        # story #3337(실측 확認) — rollback()은 세션의 모든 객체를 expire한다. except 블록에서
-        # schedule.* 를 다시 읽으면 SQLAlchemy가 동기 컨텍스트에서 lazy-reload를 시도해
-        # MissingGreenlet으로 죽는다 — rollback 前에 필요한 값을 평범한 로컬 변수로 미리 뽑아둔다.
-        _schedule_id, _org_id, _definition_key = schedule.id, schedule.org_id, schedule.definition_key
-        try:
-            new_story_id = await _create_next_story(
-                db, org_id=schedule.org_id, project_id=schedule.project_id, schedule=schedule,
-                definition_name=definition.name or definition.key,
-            )
-            payload = await _build_next_collect_payload(schedule, new_work_item_id=new_story_id, stage=first_stage)
-
-            await _publish_next_collect_event(
-                db, org_id=schedule.org_id, definition_key=schedule.definition_key, payload=payload,
-            )
-            await db.commit()
-            counts["fired"] += 1
-        except Exception:
-            await db.rollback()
-            logger.warning(
-                "recipe_repeat_scheduler: 회차 발행 실패(schedule_id=%s definition=%s org=%s)",
-                _schedule_id, _definition_key, _org_id, exc_info=True,
-            )
-            # rollback이 이전 SELECT...FOR UPDATE 잠금까지 풀어버린다 — 실패 카운터 증가는
-            # 별도의 짧은 재조회+갱신 트랜잭션으로(그 잠금 없이도 안전 — 이 tick 배치 자체가
-            # SKIP LOCKED라 동시 tick이 같은 행을 다시 잡으면 그쪽이 자연히 skip한다).
-            refreshed = (await db.execute(
-                select(RecipeRepeatSchedule).where(RecipeRepeatSchedule.id == _schedule_id)
-            )).scalar_one_or_none()
-            if refreshed is not None:
-                refreshed.consecutive_failure_count += 1
-                if refreshed.consecutive_failure_count >= 3:
-                    refreshed.status = "paused"
-                    await db.commit()
-                    await _notify_owner_paused(
-                        db, org_id=refreshed.org_id, project_id=refreshed.project_id,
-                        definition_key=refreshed.definition_key,
-                        reason=f"연속 {refreshed.consecutive_failure_count}회 발행 실패",
-                    )
-                    await db.commit()
-                    counts["paused_max_failures"] += 1
-                else:
-                    await db.commit()
-            counts["failed"] += 1
+        result = await _run_one_schedule_cycle(db, schedule)
+        counts[result] += 1
 
     return counts
