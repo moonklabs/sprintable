@@ -1501,9 +1501,17 @@ async def transition_gate_endpoint(
     # (site_posts.py `_reseal_gate_on_new_version` 참고 — 승인 기록을 조용히 덮지 않는다). 이
     # 옛 봉인을 그대로 승인하면 site_posts.py의 409 비교 기준점만 갱신될 뿐 실제로는 아무 새
     # 내용도 승인받지 못한 채 "승인됨"으로 보이는 막다른 길이 열린다 — 재봉인(submit() 재호출)
-    # 없이는 approve 전이 자체를 막는다. reapproval_required는 다른 gate_type엔 항상 False라
-    # 이 체크는 site-post 게이트 밖에서 무해(additive).
-    if body.status == "approved" and _gate is not None and _gate.reapproval_required:
+    # 없이는 approve 전이 자체를 막는다.
+    # ⚠️페드루 PO 실측(2026-09-03 07:11Z, CI shard 3 실패) — gate_type 스코프 없이
+    # `_gate.reapproval_required`만 보면 bare MagicMock 기반 테스트(예:
+    # test_edg_s23_hypothesis_overlay.py — gate_type="merge"만 명시하고 이 필드는 안 건드림)의
+    # auto-attribute가 항상 truthy MagicMock이라 site-post와 무관한 gate_type까지 이 가드에
+    # 걸린다(#2975/#2982/#3319와 동형 MagicMock 함정 재발). gate_type=="external_publish"로
+    # 명시 스코프해 그 클래스의 오탐을 원천 차단한다 — 다른 gate_type은 이 필드를 절대 안 본다.
+    if (
+        body.status == "approved" and _gate is not None
+        and _gate.gate_type == "external_publish" and _gate.reapproval_required
+    ):
         raise HTTPException(
             status_code=409,
             detail={
