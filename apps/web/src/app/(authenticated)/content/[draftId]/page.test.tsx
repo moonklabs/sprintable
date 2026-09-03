@@ -282,6 +282,28 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.textContent).toContain(koMessages.content.publishDisabledReason);
   });
 
+  // story #3368 §3-1-1(유나 실측) — approved인데 봉인 해시가 아예 없는 경우("모른다")는
+  // reapproval_needed(§3-2 배너)가 아니라 "승인됨" 상태를 유지하되 발행만 막고, 문구도
+  // "본문이 바뀌었다"가 아니라 "확인할 수 없다"여야 한다. 이 회귀가 실제로 있었다.
+  it('⭐게이트 status=approved인데 봉인 해시 자체가 없음(SEAL_MISSING) — "승인됨" 유지·재승인 배너 없음·확인불가 문구', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: {} }],
+    });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.contentStatusApproved);
+    expect(container.textContent).not.toContain(koMessages.content.contentStatusReapprovalNeeded);
+    expect(container.textContent).not.toContain(koMessages.content.reapprovalNeededNotice);
+    const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
+    expect(publishButton?.hasAttribute('disabled')).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.publishDisabledReasonSealMissing);
+    expect(container.textContent).not.toContain(koMessages.content.publishDisabledReason);
+  });
+
   it('⭐발행 성공 — 발행 시각·공개 URL 링크가 뜬다(AC5)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       gates: [{ id: 'g1', status: 'approved', gate_type: 'external_publish', neutral_facts: { content_sha256: 'h1' } }],

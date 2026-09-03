@@ -2070,8 +2070,10 @@
     "columnTitle": "Title",
     "columnStatus": "Status",
     "columnVersion": "Version",
+    "columnOriginAuthor": "Original author",
     "columnAuthor": "Last edited by",
     "columnUpdatedAt": "Updated",
+    "originAuthorUnknown": "—",
     "authorAgent": "Agent",
     "authorHuman": "Human",
     "contentStatusDraft": "Draft",
@@ -2105,12 +2107,15 @@
     "publishFailed": "Failed to publish.",
     "publishViewLink": "View published post",
     "publishDisabledReason": "Only the latest approved version can be published.",
+    "publishDisabledReasonSealMissing": "Can't verify the approved version, so it can't be published.",
     "reapprovalNeededNotice": "The previous approval is no longer valid — the approved body and the current body have different hashes. It must be re-approved before publishing.",
     "reapprovalSealedHash": "Approved hash",
     "reapprovalCurrentHash": "Current hash",
     "errorMediaNotSupported": "Image and video attachments aren't supported yet.",
     "errorPublishHumanOnly": "Only human members can publish.",
-    "errorRawDetailsToggle": "Show raw details"
+    "errorApprovalRequired": "This must be approved before it can be published.",
+    "errorReapprovalRequired": "The body changed after approval — it must be re-approved before publishing.",
+    "errorRawDetailsToggle": "View server response"
   },
   "docs": {
     "title": "Documentation",

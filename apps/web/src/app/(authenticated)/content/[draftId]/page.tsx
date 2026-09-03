@@ -11,10 +11,9 @@ import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import {
   deriveContentPostStatus,
-  contentPostStatusLabelKey,
-  CONTENT_POST_STATUS_TONE,
   type ContentPostStatusInput,
 } from '@/components/content/post-status';
+import { StatusChip } from '@/components/content/status-chip';
 import { parseSitePostApiError } from '@/components/content/api-error';
 
 /**
@@ -116,7 +115,13 @@ export default function ContentPostEditPage() {
   const [gate, setGate] = useState<GateInfo | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<
-    { type: 'success'; url: string | null; publishedAt: string } | { type: 'error'; text: string; raw?: string } | null
+    | { type: 'success'; url: string | null; publishedAt: string }
+    // reapprovalHashes — §8-3④-1(페드루 PO): 409 SITE_POST_REAPPROVAL_REQUIRED는 S10의
+    // 일반 오류가 아니라 S9와 같은 처리(문구+해시 병치)여야 한다. 서버가 해시 값 자체를
+    // 돌려주지 않아도(계약 미확정) 클라이언트가 이미 양쪽 해시를 갖고 있으니(gate 봉인
+    // 해시·latest 현재 해시) 그걸로 병치한다 — 서버 응답을 지어내지 않는다.
+    | { type: 'error'; text: string; raw?: string; reapprovalHashes?: { sealed?: string; current: string } }
+    | null
   >(null);
 
   useEffect(() => {
@@ -182,7 +187,10 @@ export default function ContentPostEditPage() {
     };
   }, [orgId, workItemId]);
 
-  const derivedStatus = deriveContentPostStatus({
+  // story #3368 §3-1-1(유나 실측) — publishable·blockedReason은 status와 다른 축이다:
+  // approved인데 봉인 값이 없어 "확인 불가"인 경우도 status는 approved로 남고 publishable
+  // 만 false다(SEAL_MISSING) — status==='approved'로 발행 가능 여부를 판단하면 안 된다.
+  const { status: derivedStatus, publishable, blockedReason } = deriveContentPostStatus({
     gateStatus: toGateStatus(gate?.status),
     sealedBodySha256: realStr(gate?.neutral_facts?.['content_sha256']),
     currentBodySha256: latest?.body_sha256,
@@ -305,6 +313,9 @@ export default function ContentPostEditPage() {
           type: 'error',
           text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed')),
           raw: info.raw,
+          reapprovalHashes: info.kind === 'reapproval_required'
+            ? { sealed: sealedHash, current: latest.body_sha256 }
+            : undefined,
         });
       }
     } catch {
@@ -334,8 +345,7 @@ export default function ContentPostEditPage() {
   }
 
   const status = derivedStatus;
-  const tone = CONTENT_POST_STATUS_TONE[status];
-  const canPublish = status === 'approved';
+  const canPublish = publishable;
   const sealedHash = realStr(gate?.neutral_facts?.['content_sha256']);
 
   return (
@@ -343,10 +353,7 @@ export default function ContentPostEditPage() {
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold text-foreground">{t('editTitle')}</h1>
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.text}`}>
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
-            {t(contentPostStatusLabelKey(status))}
-          </span>
+          <StatusChip status={status} />
           <Badge variant="outline">v{latest.version}</Badge>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -482,7 +489,11 @@ export default function ContentPostEditPage() {
           {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
               이유"를 옆에 두는 이 문구는 실제 정보라 4.5:1 판정 대상이다(text-muted-
               foreground on card 실측 5.92 — 통과, doc §6-2-1 그대로). */}
-          {!canPublish ? <p className="text-xs text-muted-foreground">{t('publishDisabledReason')}</p> : null}
+          {!canPublish ? (
+            <p className="text-xs text-muted-foreground">
+              {blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -507,7 +518,22 @@ export default function ContentPostEditPage() {
                 ) : null}
               </>
             ) : (
-              publishResult.text
+              <>
+                {publishResult.text}
+                {publishResult.reapprovalHashes ? (
+                  // §8-3④-1 — 409 SITE_POST_REAPPROVAL_REQUIRED는 S10 일반 오류가 아니라
+                  // S9와 같은 처리(문구+해시 병치)다. 판정이 아니라 관측(§3-2)이라 여기서도
+                  // 그대로 — 해시 두 개를 나란히 보여주고 사람이 스스로 확인하게 한다.
+                  <>
+                    <br />
+                    <span className="font-mono text-xs">
+                      {t('reapprovalSealedHash')} {publishResult.reapprovalHashes.sealed ? `${publishResult.reapprovalHashes.sealed.slice(0, 12)}…` : '—'}
+                      {' · '}
+                      {t('reapprovalCurrentHash')} {publishResult.reapprovalHashes.current.slice(0, 12)}…
+                    </span>
+                  </>
+                ) : null}
+              </>
             )}
           </AlertDescription>
           {publishResult.type === 'error' ? <RawDetailsToggle raw={publishResult.raw} label={t('errorRawDetailsToggle')} /> : null}

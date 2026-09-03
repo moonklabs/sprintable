@@ -130,4 +130,33 @@ describe('ContentPostListPage (story #3368)', () => {
 
     expect(container.textContent).toContain(koMessages.content.authorAgent);
   });
+
+  // story #3368 §6-3-1(유나 실측, 페드루 PO 확定) — origin_author_kind는 디디군 S2 PR
+  // 도착 前엔 응답에 없다(옵셔널). 없는 것을 있는 것처럼 지어내면(예: latest_author_kind로
+  // 대체) "에이전트가 쓰고 사람이 고침"과 "사람이 처음부터 씀"이 다시 구별 불가능해진다 —
+  // fail-closed로 "—"만 보여야 한다.
+  it('⭐origin_author_kind 필드가 아직 없음(S2 도착 前) — 원작성 주체 열에 "—"(fail-closed)', async () => {
+    stubFetch([DRAFT_A]);
+    await act(async () => {
+      root.render(wrap(<ContentPostListPage />));
+    });
+    await flush();
+
+    const originCell = container.querySelector('[data-testid="content-origin-author"]');
+    expect(originCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
+  });
+
+  it('⭐origin_author_kind=agent·latest_author_kind=human(에이전트가 쓰고 사람이 고친 글) — 두 열이 서로 다른 값을 보인다', async () => {
+    stubFetch([{ ...DRAFT_A, origin_author_kind: 'agent', latest_author_kind: 'human' }]);
+    await act(async () => {
+      root.render(wrap(<ContentPostListPage />));
+    });
+    await flush();
+
+    const originCell = container.querySelector('[data-testid="content-origin-author"]');
+    expect(originCell?.textContent).toBe(koMessages.content.authorAgent);
+    // 최종 수정 주체 칸(다음 형제 td)은 여전히 "휴먼" — 원작성과 최종수정이 갈리는 실제
+    // 케이스가 목록에서 구별된다(§6-3-1이 고치려던 정확히 그 자리).
+    expect(container.textContent).toContain(koMessages.content.authorHuman);
+  });
 });

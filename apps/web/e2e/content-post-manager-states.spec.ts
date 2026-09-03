@@ -1,14 +1,21 @@
 /**
  * story #3368(Phase0·마케팅운영 S4) AC8(UX 검수, 유나) — 글 관리 화면 다섯 상태의 실제
- * 렌더 캡처. doc phase0-post-manager-screen-design §8-2: "컴포넌트 스냅샷은 합격으로
- * 치지 않는다 — DOM 텍스트 assertion과 브라우저 스크린샷을 함께 남긴다."
+ * 렌더 캡처. doc phase0-post-manager-screen-design §8-2/§8-3(유나 2026-09-03 리뷰).
  *
- * 페드루 PO 지시(2026-09-03) — 오늘(S2 미착지) 돌릴 수 있는 세 상태(목록·편집 완료·서버
- * 오류)는 실제로 실행하고, 나머지 두 상태(승인 카드·재승인 필요, 원래 AC8의 승인카드·
- * 재승인 다섯 목록 그대로)는 S2(neutral_facts.content_sha256·content_version)가
- * 실제로 값을 채운 뒤 fixture(work item·draft·gate id)만 채워 넣으면 바로 돌게 자리를
- * 비워 둔다(test.skip — 이 파일 자체는 완결, 값만 없다). AC8 원 목록의 "발행 URL"(S8)도
- * 같은 이유로 S2·S3(공개 projection) 둘 다 필요해 여기 포함.
+ * §8-2: "컴포넌트 스냅샷은 합격으로 치지 않는다 — DOM 텍스트 assertion과 브라우저
+ * 스크린샷을 함께 남긴다."
+ * §8-3: 유나 리뷰 5건 전부 반영 — ①canvas 정규화 대비 측정(oklch 토큰은 rgb 정규식
+ * 파서가 null을 내고 그 null을 통과로 치면 "검사 안 된 초록"이 된다) ②다크 경로(rest
+ * 스캔은 contrast-guard.spec.ts가 담당, 이 파일은 비텍스트 3:1 dot 판정만) ③테스트
+ * 이름=assertion(넓힌 이름엔 그만큼 실제 검증을 세운다) ④S10은 오늘 404(계약 stub)만
+ * 재고 진짜 403 보존 검증은 S2·S3 뒤로 명시 분리 ⑤어휘를 시안("서버 응답 보기")에 맞춤.
+ * 상태 칩은 opacity를 안 쓴다(components/content/status-chip.tsx) — computed style이
+ * opacity를 합성 못 해 대비 측정이 조용히 새는 자리이기 때문.
+ *
+ * 페드루 PO 지시(2026-09-03) — 오늘(S2 미착지) 돌릴 수 있는 상태(목록·편집 완료·오류
+ * UI 골격·대비)는 실제로 실행하고, 나머지(승인 카드·발행 URL·재승인 필요, 그리고 S10의
+ * 진짜 403 보존)는 S2(content_sha256·content_version)·S3(공개 projection) 착지 뒤
+ * fixture(work item·draft·gate id)만 채우면 되게 자리를 비워 둔다.
  *
  * 계정: **일반 sellerking 세션만**(카디르 QA 관례, PO스크립트 금지 — customer-zero
  * 원칙). owner.json(global-setup.ts)이 아니라 이 파일 전용 sellerking 로그인을 쓴다 —
@@ -37,6 +44,61 @@ async function loginAsSellerking(page: Page): Promise<void> {
   }
 }
 
+// contrast-guard.spec.ts(story #2590/#2607)와 동일 실 토글 헬퍼 재사용(§8-3②, 새 로직
+// 발명 0) — 다크 경로는 이 함수 하나로 재현한다.
+async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((t) => window.localStorage.setItem('theme', t), theme);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1200);
+}
+
+/**
+ * §8-3① 유나 처방 그대로 — canvas 정규화(어떤 CSS 색 문자열이든 브라우저 자신에게
+ * 풀게 한다, oklch 토큰을 rgb 정규식으로 파싱하려다 null을 통과시키는 함정을 피한다).
+ * 파싱 실패·opacity≠1은 조용히 넘기지 않고 던진다(무음 통과 금지).
+ */
+async function measureChip(page: Page, chipSel: string): Promise<{ label: number; dot: number }> {
+  return page.$eval(chipSel, (chip) => {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 1;
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+    const toRgb = (css: string): [number, number, number] => {
+      ctx.fillStyle = '#000';
+      ctx.fillStyle = css;
+      if (ctx.fillStyle === '#000000' && !/^(#000000|rgb\(0,\s*0,\s*0\)|black)$/.test(css.trim())) {
+        throw new Error(`색 파싱 실패: ${css}`);
+      }
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+      return [r, g, b];
+    };
+    const lin = (c: number) => {
+      c /= 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const L = ([r, g, b]: [number, number, number]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    const cr = (a: [number, number, number], b: [number, number, number]) => {
+      const la = L(a);
+      const lb = L(b);
+      const hi = Math.max(la, lb);
+      const lo = Math.min(la, lb);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const cs = getComputedStyle(chip);
+    const dotEl = chip.querySelector('[data-chip-dot]');
+    if (!dotEl) throw new Error('dot 요소 없음 — data-chip-dot 필요');
+    for (const el of [chip, dotEl as HTMLElement]) {
+      const op = getComputedStyle(el).opacity;
+      if (op !== '1') throw new Error(`칩에 opacity(${op})가 걸려 있다 — computed로는 실색을 못 잰다`);
+    }
+    const bg = toRgb(cs.backgroundColor);
+    return {
+      label: +cr(toRgb(cs.color), bg).toFixed(2),
+      dot: +cr(toRgb(getComputedStyle(dotEl).backgroundColor), bg).toFixed(2),
+    };
+  });
+}
+
 test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전용)', () => {
   test.beforeEach(async ({ page }) => {
     if (!HAS_SELLERKING_CREDS) {
@@ -47,24 +109,40 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
   });
 
   // ── S1 — 글 목록 ────────────────────────────────────────────────────────
-  test('S1 — 목록: 초안 목록에 제목·상태·버전·원작성 주체가 보인다', async ({ page }) => {
-    test.skip(!HAS_SELLERKING_CREDS, '위 beforeEach와 동일 사유');
+  // §8-3③ — 이름이 약속하는 네 가지(제목·상태·버전·원작성 주체)를 각각 assertion으로
+  // 세운다. 원작성 주체는 §4-2에서 "서버에 없는 값"이라 했으나 S1(list) 계약의
+  // latest_author_kind는 이미 있다 — dev 배포 뒤엔 이 값도 실측 대상이다.
+  test('S1 — 목록: 제목·상태 칩·버전·원작성 주체가 각각 실제로 보인다', async ({ page }) => {
     const response = await page.goto('/content');
     expect(response?.status(), '/content 200').toBe(200);
     await page.waitForLoadState('networkidle');
 
-    // AC1 — DOM 텍스트 assertion(§8-2, 스냅샷만으론 합격 아님). 담롱군의 2호 콘텐츠가
-    // 이미 초안으로 있어야 이 화면이 빈 상태가 아니다(customer-zero 종료 판정 §4-1
-    // 흐름의 결과물을 그대로 재사용 — 새 fixture 발명 0).
     const firstRow = page.locator('[data-testid="content-list-row"]').first();
     await expect(firstRow, '초안 행이 최소 1건 보인다').toBeVisible({ timeout: 10_000 });
+
+    // 제목 — 빈 문자열이 아닌 실 텍스트.
+    const titleCell = firstRow.locator('td').first();
+    await expect(titleCell).not.toHaveText('');
+
+    // 상태 칩 — data-status-chip이 다섯 상태 중 하나(오늘은 게이트 신호가 없어 'draft'만
+    // 가능·post-status.ts::ContentPostStatus와 어휘 동일).
+    const statusChip = firstRow.locator('[data-status-chip]');
+    await expect(statusChip, '상태 칩이 보인다').toBeVisible();
+    await expect(statusChip).toHaveAttribute('data-status-chip', /draft|pending|approved|published|reapproval_needed/);
+
+    // 버전 — "v" + 숫자.
+    await expect(firstRow, '버전 배지(v숫자)가 보인다').toContainText(/v\d+/);
+
+    // 원작성 주체 — content.authorAgent("에이전트")/authorHuman("휴먼") 둘 중 하나.
+    await expect(firstRow, '원작성 주체(에이전트/휴먼)가 보인다').toContainText(/에이전트|휴먼/);
 
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s1-list.png'), fullPage: true });
   });
 
   // ── S3/S4 — 편집 완료 ───────────────────────────────────────────────────
-  test('S3/S4 — 편집 완료: 본문 수정·저장 후 새 버전·"미상신" 상태가 보인다(AC2)', async ({ page }) => {
-    test.skip(!HAS_SELLERKING_CREDS, '위 beforeEach와 동일 사유');
+  // §8-3③ — 저장 토스트만 보지 않는다. 버전 번호가 실제로 올라가고, 상태 칩이 "초안"
+  // (미상신 — 새로 생긴 버전엔 아직 게이트가 없다)으로 보이는지 각각 확인한다.
+  test('S3/S4 — 편집 완료: 새 버전 번호와 "초안"(미상신) 상태 칩이 실제로 갱신된다(AC2)', async ({ page }) => {
     await page.goto('/content');
     await page.waitForLoadState('networkidle');
 
@@ -73,6 +151,8 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
     await page.waitForURL(/\/content\/.+/);
     await page.waitForLoadState('networkidle');
 
+    const versionBadgeBefore = await page.getByText(/^v\d+$/).first().textContent();
+
     const bodyField = page.locator('#post-body');
     await expect(bodyField, '본문 textarea가 보인다').toBeVisible();
     const before = await bodyField.inputValue();
@@ -80,73 +160,92 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
 
     const saveButton = page.getByRole('button', { name: '저장' });
     await saveButton.click();
-    // 저장 성공 alert(§handleSave) — 새 버전 반영까지 기다린다.
-    await expect(page.getByRole('status')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('status'), '저장 성공 alert').toBeVisible({ timeout: 10_000 });
+
+    // 버전 번호가 실제로 올라갔다(before와 다른 값).
+    const versionBadgeAfter = page.getByText(/^v\d+$/).first();
+    await expect(versionBadgeAfter, '버전 배지가 갱신된다').not.toHaveText(versionBadgeBefore ?? '');
+
+    // 새 버전엔 게이트가 없다 — 상태 칩이 "초안"(contentStatusDraft, 미상신과 동형)이어야
+    // 한다. 지어낸 성공(예: 승인/발행)으로 뜨지 않는지가 이 assertion의 핵심.
+    const statusChip = page.locator('[data-status-chip]').first();
+    await expect(statusChip, '상태 칩=draft').toHaveAttribute('data-status-chip', 'draft');
+    await expect(statusChip, '상태 칩 라벨="초안"').toContainText('초안');
 
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s3-edit-complete.png'), fullPage: true });
   });
 
-  // ── S10 — 오류(서버 원문 보존) ──────────────────────────────────────────
-  test('S10 — 오류: 승인 요청 클릭 시(S2 미착지) 서버 오류가 사람 말+원문 접힘으로 렌더된다', async ({ page }) => {
-    test.skip(!HAS_SELLERKING_CREDS, '위 beforeEach와 동일 사유');
+  // ── S10 — 오류 UI 골격 ──────────────────────────────────────────────────
+  // §8-3④ — 이름을 "오류 UI 골격이 선다"로 좁힌다. 오늘 재는 것은 404(계약 stub, 라우트
+  // 부재)지 AC가 보존하려는 403("external_publish 게이트가 승인되지 않았습니다
+  // (gate_id=…, status=…)")이 아니다 — 그 진짜 문구 보존 검증은 아래 별도 test.skip.
+  test('S10 — 오류 UI 골격이 선다: 승인 요청 클릭 시 오류 alert+"서버 응답 보기" 접힘이 뜬다(오늘은 404)', async ({ page }) => {
     await page.goto('/content');
     await page.waitForLoadState('networkidle');
     await page.locator('[data-testid="content-list-row"] a').first().click();
     await page.waitForURL(/\/content\/.+/);
     await page.waitForLoadState('networkidle');
 
-    // 오늘 시점(S2 미착지) — 이 클릭은 실제 dev 백엔드가 404를 낸다(계약 stub, 지어낸
-    // 라우트 아님). §4-1 규율(사람 말 위·원문 접힘)이 실제로 지켜지는지 라이브로 확인.
     const submitButton = page.getByRole('button', { name: '승인 요청' });
     await submitButton.click();
     const errorAlert = page.getByRole('alert');
     await expect(errorAlert, '오류 alert가 뜬다').toBeVisible({ timeout: 10_000 });
 
-    const rawToggle = page.getByText('원문 보기');
-    await expect(rawToggle, '원문 접힘 토글이 있다(§4-1 — gate_id 등 추적정보 보존)').toBeVisible();
+    // §8-3⑤ — 시안 어휘로 정렬("원문 보기" → "서버 응답 보기", ko.json::content.
+    // errorRawDetailsToggle).
+    const rawToggle = page.getByText('서버 응답 보기');
+    await expect(rawToggle, '서버 응답 보기 접힘 토글이 있다(§4-1 — gate_id 등 추적정보 보존)').toBeVisible();
     await rawToggle.click();
 
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s10-error.png'), fullPage: true });
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s10-error-shell.png'), fullPage: true });
   });
 
+  test.skip('S10(진짜) — 403 "external_publish 게이트가 승인되지 않았습니다(gate_id=…)" 원문이 접힌 상세에 보존된다', () => {
+    // TODO(S2·S3 착지 후): 승인되지 않은 게이트가 달린 draftId로 "발행"을 직접 호출(또는
+    // 승인 요청이 실제 게이트를 만든 뒤 미승인 상태에서 발행 시도)해 실 403을 재현한다.
+    // 원문에 gate_id·status가 들어있는지, 접힌 <details>가 그것을 그대로 보존하는지
+    // 확인한다 — 사람 말로만 바꿔 두면 추적이 끊긴다는 §4-1 규율의 실측.
+  });
+
+  // ── 대비 실측(§8-3①②) — canvas 정규화, 두 층 × 두 테마 ───────────────────
+  for (const theme of ['light', 'dark'] as const) {
+    test(`대비(상태 칩) [${theme}] — dot↔배경 3:1·라벨↔배경 4.5:1(canvas 정규화, oklch 안전)`, async ({ page }) => {
+      await page.goto('/content', { waitUntil: 'domcontentloaded' });
+      await setTheme(page, theme);
+      await page.waitForLoadState('networkidle');
+
+      const chip = page.locator('[data-status-chip]').first();
+      if ((await chip.count()) === 0) {
+        test.skip(true, '이 org에 초안이 없어 상태 칩이 안 뜬다(빈 상태) — customer-zero 데이터가 있는 세션에서 재실행');
+        return;
+      }
+      await expect(chip).toBeVisible();
+
+      const { dot, label } = await measureChip(page, '[data-status-chip]');
+      // 목표값은 doc §6-2-1 실측표 그대로(경계값 — 라이트 draft dot 4.91, 다크 5.74 등
+      // 전부 3:1 이상). 판정선만 여기 고정한다 — 목표 수치는 doc이 SSOT.
+      expect(dot, `dot↔배경 3:1 [${theme}]`).toBeGreaterThanOrEqual(3.0);
+      expect(label, `라벨↔배경 4.5:1 [${theme}]`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
   // ── S6 — 승인 카드(S2 착지 후 fixture만 채우면 실행) ───────────────────
-  test('S6 — 승인 카드: 본문 전문·버전·봉인 해시가 카드에 보인다', async ({ page }) => {
-    // TODO(S2 착지 후): 아래 세 값을 실 fixture로 채우고 이 test.skip 줄만 지운다.
+  test.skip('S6 — 승인 카드: 본문 전문·버전·봉인 해시가 카드에 보인다', () => {
+    // TODO(S2 착지 후): 아래 값을 실 fixture로 채우고 이 test.skip을 test로 바꾼다.
     //   1) draftId — content_sha256/content_version이 채워진 실 게이트를 낳은 초안 id
     //   2) 그 초안을 승인 요청까지 진행(§handleSubmitForApproval)해 gate_id 확보
-    //   3) 아래 gateId 변수에 그 값을 대입
-    test.skip(true, 'S2(neutral_facts.content_sha256·content_version) 착지 대기 — fixture 자리만 비워 둠');
-    const gateId = ''; // TODO: 실 gate id
-    await page.goto(`/gates/${gateId}`);
-    await page.waitForLoadState('networkidle');
-    await expect(page.getByText('버전').first()).toBeVisible();
-    await expect(page.getByText('봉인 해시').first()).toBeVisible();
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s6-approval-card.png'), fullPage: true });
+    //   3) page.goto(`/gates/${gateId}`) → getByText('버전')·getByText('봉인 해시') 확인
   });
 
   // ── S8 — 발행 URL(S2+S3 착지 후 fixture만 채우면 실행) ─────────────────
-  test('S8 — 발행 URL: 발행 성공 후 공개 URL·발행 시각이 보인다', async ({ page }) => {
-    // TODO(S2·S3 착지 후): 승인된 draftId로 편집 화면을 열고 "발행" 클릭 → 공개 URL 캡처.
-    test.skip(true, 'S2(승인 파이프)·S3(공개 projection·url 필드) 둘 다 착지 대기');
-    const draftId = ''; // TODO: 승인 완료된 실 draft id
-    await page.goto(`/content/${draftId}`);
-    await page.waitForLoadState('networkidle');
-    const publishButton = page.getByRole('button', { name: '발행' });
-    await publishButton.click();
-    await expect(page.getByRole('link', { name: '발행된 글 보기' })).toBeVisible({ timeout: 10_000 });
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s8-published.png'), fullPage: true });
+  test.skip('S8 — 발행 URL: 발행 성공 후 공개 URL·발행 시각이 보인다', () => {
+    // TODO(S2·S3 착지 후): 승인된 draftId로 편집 화면을 열고 "발행" 클릭 → getByRole('link',
+    // { name: '발행된 글 보기' }) 확인.
   });
 
   // ── S9 — 재승인 필요(S2 착지 후 fixture만 채우면 실행) ──────────────────
-  test('S9 — 재승인 필요: 승인된 해시·현재 해시가 나란히 보이고 발행 버튼이 비활성', async ({ page }) => {
-    // TODO(S2 착지 후): 승인까지 갔다가 본문을 다시 수정해 해시가 갈라진 draftId를 만든다.
-    test.skip(true, 'S2(봉인 해시) 착지 대기 — fixture 자리만 비워 둠');
-    const draftId = ''; // TODO: 승인 후 재수정된 실 draft id
-    await page.goto(`/content/${draftId}`);
-    await page.waitForLoadState('networkidle');
-    await expect(page.getByText('이전 승인은 더 이상 유효하지 않습니다')).toBeVisible();
-    const publishButton = page.getByRole('button', { name: '발행' });
-    await expect(publishButton).toBeDisabled();
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'content-s9-reapproval-needed.png'), fullPage: true });
+  test.skip('S9 — 재승인 필요: 승인된 해시·현재 해시가 나란히 보이고 발행 버튼이 비활성', () => {
+    // TODO(S2 착지 후): 승인까지 갔다가 본문을 다시 수정해 해시가 갈라진 draftId로
+    // getByText('이전 승인은 더 이상 유효하지 않습니다')·발행 버튼 disabled 확인.
   });
 });

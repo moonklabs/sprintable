@@ -7,12 +7,8 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { fetchWithAuth } from '@/lib/db/client';
-import {
-  deriveContentPostStatus,
-  contentPostStatusLabelKey,
-  CONTENT_POST_STATUS_TONE,
-  type ContentPostStatus,
-} from '@/components/content/post-status';
+import { deriveContentPostStatus } from '@/components/content/post-status';
+import { StatusChip } from '@/components/content/status-chip';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 2번) —
@@ -35,18 +31,15 @@ interface SitePostDraftListItem {
   title: string;
   current_version: number;
   latest_author_kind: 'agent' | 'human';
+  // story #3368 §6-3-1(유나 실측, 페드루 PO 확定 2026-09-03) — latest_author_kind 하나만
+  // 보이면 "에이전트가 쓰고 사람이 고친 글"과 "사람이 처음부터 쓴 글"이 목록에서
+  // 똑같이 human으로 보인다. 원작성 주체(1번 버전의 author_kind)를 별도 열로 분리한다
+  // — 디디군 S2 PR에 이 필드를 목록 항목에 얹으라 지시됨. 도착 前(지금)엔 옵셔널이라
+  // undefined — fail-closed로 "—"만 보인다(지어내지 않음).
+  origin_author_kind?: 'agent' | 'human' | null;
   updated_at: string;
 }
 
-function StatusChip({ status, t }: { status: ContentPostStatus; t: ReturnType<typeof useTranslations> }) {
-  const tone = CONTENT_POST_STATUS_TONE[status];
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.text}`}>
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
-      {t(contentPostStatusLabelKey(status))}
-    </span>
-  );
-}
 
 export default function ContentPostListPage() {
   const { orgId } = useDashboardContext();
@@ -110,13 +103,14 @@ export default function ContentPostListPage() {
                 <th className="px-3 py-2 text-left font-medium">{t('columnTitle')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('columnStatus')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('columnVersion')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('columnOriginAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('columnAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('columnUpdatedAt')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {drafts.map((draft) => {
-                const status = deriveContentPostStatus({});
+                const { status } = deriveContentPostStatus({});
                 return (
                   <tr key={draft.draft_id} data-testid="content-list-row">
                     <td className="px-3 py-2.5 font-medium text-foreground">
@@ -124,8 +118,15 @@ export default function ContentPostListPage() {
                         {draft.title}
                       </Link>
                     </td>
-                    <td className="px-3 py-2.5"><StatusChip status={status} t={t} /></td>
+                    <td className="px-3 py-2.5"><StatusChip status={status} /></td>
                     <td className="px-3 py-2.5 text-muted-foreground">v{draft.current_version}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="content-origin-author">
+                      {draft.origin_author_kind === 'agent'
+                        ? t('authorAgent')
+                        : draft.origin_author_kind === 'human'
+                          ? t('authorHuman')
+                          : t('originAuthorUnknown')}
+                    </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
                       {draft.latest_author_kind === 'agent' ? t('authorAgent') : t('authorHuman')}
                     </td>

@@ -74,6 +74,12 @@ const PAGES: Array<{ path: string; label: string }> = [
   { path: '/onboarding', label: 'onboarding(connect-step info-tint)' },
   { path: '/dashboard', label: 'dashboard(status/tint 위젯)' },
   { path: '/inbox', label: 'inbox(decisions-waiting warning·approvals-queue tint)' },
+  // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-3②) —
+  // 유나 지시: 등록은 회귀 감시용, 상태 칩의 비텍스트 3:1(dot)은 axe color-contrast가
+  // 안 보므로 content-post-manager-states.spec.ts::measureChip이 그 자리 판정을 진다.
+  // CI e2e owner는 빈 org라(§ 상단 ⚠️ 참조) 칩 자체가 안 뜰 수 있다 — 그래도 항상
+  // 렌더되는 목록 셸(빈 상태·헤더)의 회귀는 이 등록으로 잡힌다.
+  { path: '/content', label: 'content(글 관리 — 목록 셸·EmptyState)' },
 ];
 const THEMES = ['light', 'dark'] as const;
 
