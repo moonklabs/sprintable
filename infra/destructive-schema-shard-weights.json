@@ -1,385 +1,809 @@
 {
-  "_snapshot_policy": "story #2293(2026-07-28) — 이건 그 시점의 스냅샷이지 실시간 측정이 아니다. backend/scripts/shard_destructive_tests.py의 partition()이 이 가중치로 샤드 4개를 균형배분한다 — 스위트가 자라거나(새 destructive_schema 파일 추가) 특정 파일이 눈에 띄게 느려지면 이 스냅샷은 조용히 낡고 샤드 균형도 조용히 무너진다(discover 자체는 항상 최신이라 파일이 빠지진 않지만, 무거운 새 파일이 '평균 가중치'로만 잡혀 한 샤드에 쏠릴 수 있다). 재측정 시점 기준: (a) destructive_schema 파일 수가 이 스냅샷 대비 +20% 이상 늘었을 때, (b) 어느 한 샤드의 CI 벽시계가 다른 샤드 대비 눈에 띄게(체감상 1.5배 이상) 벌어질 때, (c) 25분 천장 대비 여유가 다시 좁아지는 게 느껴질 때. 재측정 방법: PR run의 'Backend destructive-schema (shard)' 각 job 로그에서 파일별 pytest 실행시간을 다시 뽑아 이 files 배열과 total_files/total_sec/measured_at을 갱신.",
-  "source_run": 30360717358,
-  "measured_at": "2026-07-28",
-  "total_files": 94,
-  "total_sec": 534.7,
+  "_snapshot_policy": "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 ~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐.",
+  "source_run": "local-post-template-optimization",
+  "measured_at": "2026-09-03",
+  "total_files": 200,
+  "total_sec": 1074.1,
   "files": [
     {
+      "file": "tests/test_3317_org_connector_registry.py",
+      "sec": 19.63
+    },
+    {
+      "file": "tests/test_2813_gate_github_check_realdb.py",
+      "sec": 17.72
+    },
+    {
+      "file": "tests/test_3360_site_posts.py",
+      "sec": 15.7
+    },
+    {
+      "file": "tests/test_3332_block_template_payload_ref_contract.py",
+      "sec": 15.33
+    },
+    {
       "file": "tests/test_2161_agent_run_reaper.py",
-      "sec": 16.24
+      "sec": 14.19
     },
     {
-      "file": "tests/test_edg_s9_parallel_quorum.py",
-      "sec": 13.1
-    },
-    {
-      "file": "tests/test_edg_s18_runtime_mode.py",
-      "sec": 11.19
-    },
-    {
-      "file": "tests/test_2054_gate_inbox.py",
-      "sec": 10.72
-    },
-    {
-      "file": "tests/test_2043_ac3_hitl_reason_enforce.py",
-      "sec": 10.7
-    },
-    {
-      "file": "tests/test_a2a_sa3_link_gate_to_task_realdb.py",
-      "sec": 10.61
-    },
-    {
-      "file": "tests/test_e_recruit_s5_connection_artifact_realdb.py",
-      "sec": 10.6
-    },
-    {
-      "file": "tests/test_edg_s14_role_resolver.py",
-      "sec": 10.49
-    },
-    {
-      "file": "tests/test_1970_gate_single_get.py",
-      "sec": 10.24
-    },
-    {
-      "file": "tests/test_1972_gate_risk_grade.py",
-      "sec": 10.14
-    },
-    {
-      "file": "tests/test_2172_assignee_position_events.py",
-      "sec": 9.82
-    },
-    {
-      "file": "tests/test_a2a_sa5_auth_required_realdb.py",
-      "sec": 9.73
-    },
-    {
-      "file": "tests/test_2038_hypothesis_outcome_result_enforce.py",
-      "sec": 9.62
-    },
-    {
-      "file": "tests/test_2181_mockup_model_db_drift.py",
-      "sec": 9.55
-    },
-    {
-      "file": "tests/test_project_relay_owner.py",
-      "sec": 9.32
-    },
-    {
-      "file": "tests/test_e_recruit_s3_recruit_service_realdb.py",
-      "sec": 8.7
-    },
-    {
-      "file": "tests/test_1974_gate_assigned_to_me.py",
-      "sec": 8.59
-    },
-    {
-      "file": "tests/test_2131_bulk_status_changed_sse_realdb.py",
-      "sec": 8.49
-    },
-    {
-      "file": "tests/test_a2a_sa1_deadline_sweeper_realdb.py",
-      "sec": 8.28
-    },
-    {
-      "file": "tests/test_1973_gate_urgency_sort.py",
-      "sec": 7.89
-    },
-    {
-      "file": "tests/test_2027_gate_approval_reason_enforce.py",
-      "sec": 7.76
-    },
-    {
-      "file": "tests/test_e_loop_ledger_s26_context_pack_synthesis.py",
-      "sec": 7.64
-    },
-    {
-      "file": "tests/test_2039_project_slug_ascii.py",
-      "sec": 7.24
-    },
-    {
-      "file": "tests/test_edg_s13_sla_processor.py",
-      "sec": 7.11
-    },
-    {
-      "file": "tests/test_edg_s32_reassign.py",
-      "sec": 7.02
-    },
-    {
-      "file": "tests/test_edg_s7_handoff_relay.py",
-      "sec": 6.78
-    },
-    {
-      "file": "tests/test_2201_sse_backfill_degraded_signal_realdb.py",
-      "sec": 6.75
-    },
-    {
-      "file": "tests/test_edg_s3_engine.py",
-      "sec": 6.68
-    },
-    {
-      "file": "tests/test_edg_s4_resolver.py",
-      "sec": 6.66
-    },
-    {
-      "file": "tests/test_2082_artifact_canonicalize_gate_inbox.py",
-      "sec": 6.62
-    },
-    {
-      "file": "tests/test_edg_s6_gate_hook.py",
-      "sec": 6.62
-    },
-    {
-      "file": "tests/test_edg_s19_grandfather.py",
-      "sec": 6.57
+      "file": "tests/test_2932_gate_slot_hardening_realdb.py",
+      "sec": 13.17
     },
     {
       "file": "tests/test_edg_s8_watchdog.py",
-      "sec": 6.56
-    },
-    {
-      "file": "tests/test_edg_s10_status_api.py",
-      "sec": 6.46
-    },
-    {
-      "file": "tests/test_2078_event_outbox_realdb.py",
-      "sec": 6.1
-    },
-    {
-      "file": "tests/test_edg_s23_hypothesis_overlay.py",
-      "sec": 5.91
-    },
-    {
-      "file": "tests/test_2086_assignee_changed_sse.py",
-      "sec": 5.88
-    },
-    {
-      "file": "tests/test_h1_s9_merge_gate_metrics.py",
-      "sec": 5.83
-    },
-    {
-      "file": "tests/test_1983_doc_gate_assigned_to_me_who_state.py",
-      "sec": 5.81
-    },
-    {
-      "file": "tests/test_2058_hitl_human_only.py",
-      "sec": 5.8
-    },
-    {
-      "file": "tests/test_edg_s5_merge_gate.py",
-      "sec": 5.69
-    },
-    {
-      "file": "tests/test_edg_s12be_recipient_fallback.py",
-      "sec": 5.54
-    },
-    {
-      "file": "tests/test_agent_access_matrix_realdb.py",
-      "sec": 5.42
-    },
-    {
-      "file": "tests/test_2047_explicit_ask_gate.py",
-      "sec": 5.39
-    },
-    {
-      "file": "tests/test_e_loop_ledger_p1_s11_dispatch_context_pack_realdb.py",
-      "sec": 5.23
-    },
-    {
-      "file": "tests/test_edg_s31_hold.py",
-      "sec": 5.21
-    },
-    {
-      "file": "tests/test_edg_s33_override.py",
-      "sec": 5.17
-    },
-    {
-      "file": "tests/test_edg_s30_void_recovery.py",
-      "sec": 5.16
-    },
-    {
-      "file": "tests/test_edg_s22_doc_overlay.py",
-      "sec": 5.03
-    },
-    {
-      "file": "tests/test_edg_s34_line_versions.py",
-      "sec": 4.98
-    },
-    {
-      "file": "tests/test_2004_a2a_sendmessage_idempotency_realdb.py",
-      "sec": 4.92
+      "sec": 12.83
     },
     {
       "file": "tests/test_edg_s26_sprint_overlay.py",
-      "sec": 4.9
+      "sec": 12.32
     },
     {
-      "file": "tests/test_edg_s17_recall.py",
-      "sec": 4.67
+      "file": "tests/test_2631_gate_undo_discuss.py",
+      "sec": 11.72
     },
     {
-      "file": "tests/test_edg_s16_seed.py",
-      "sec": 4.66
+      "file": "tests/test_3143_chat_server_command_catalog.py",
+      "sec": 11.48
     },
     {
-      "file": "tests/test_2249_gate_entered_at_realdb.py",
-      "sec": 4.59
+      "file": "tests/test_2636_custom_event_registration.py",
+      "sec": 11.39
     },
     {
-      "file": "tests/test_edg_batch_line_status.py",
-      "sec": 4.56
+      "file": "tests/test_2826_gate_pr_lifecycle_creation_realdb.py",
+      "sec": 11.31
     },
     {
-      "file": "tests/test_edg_s15_metrics.py",
-      "sec": 4.56
+      "file": "tests/test_edg_s32_reassign.py",
+      "sec": 10.42
     },
     {
-      "file": "tests/test_1968_gate_project_id_threading.py",
-      "sec": 4.48
+      "file": "tests/test_2893_pr4_late_participation_gate_creation_realdb.py",
+      "sec": 9.83
     },
     {
-      "file": "tests/test_e_loop_ledger_s27_context_pack_recommendation.py",
-      "sec": 4.41
+      "file": "tests/test_3329_embedded_entity_ref_tokenization.py",
+      "sec": 9.75
     },
     {
-      "file": "tests/test_2078_publish_atomic.py",
-      "sec": 4.38
+      "file": "tests/test_2172_assignee_position_events.py",
+      "sec": 9.53
     },
     {
-      "file": "tests/test_merge_verdict_gate.py",
-      "sec": 4.34
+      "file": "tests/test_3369_publish_site_post_from_draft.py",
+      "sec": 9.38
     },
     {
-      "file": "tests/test_ho_s9_e2e_closed_loop.py",
-      "sec": 4.31
+      "file": "tests/test_1940_human_api_keys.py",
+      "sec": 9.28
+    },
+    {
+      "file": "tests/test_3323_prev_output_doc_chain.py",
+      "sec": 9.28
+    },
+    {
+      "file": "tests/test_3367_site_post_submit_gate_seal.py",
+      "sec": 8.82
+    },
+    {
+      "file": "tests/test_2944_api_key_issuance_replace_semantics_realdb.py",
+      "sec": 8.81
+    },
+    {
+      "file": "tests/test_2250_stalled_signal_realdb.py",
+      "sec": 8.8
+    },
+    {
+      "file": "tests/test_2043_ac3_hitl_reason_enforce.py",
+      "sec": 8.72
+    },
+    {
+      "file": "tests/test_2027_gate_approval_reason_enforce.py",
+      "sec": 8.58
+    },
+    {
+      "file": "tests/test_1972_gate_risk_grade.py",
+      "sec": 8.52
+    },
+    {
+      "file": "tests/test_edg_s9_parallel_quorum.py",
+      "sec": 8.35
+    },
+    {
+      "file": "tests/test_2604_approval_request_cards.py",
+      "sec": 8.24
+    },
+    {
+      "file": "tests/test_2843_goal_outcome_verdict_realdb.py",
+      "sec": 8.24
+    },
+    {
+      "file": "tests/test_2815_gate_github_check_events_endpoint_realdb.py",
+      "sec": 8.21
+    },
+    {
+      "file": "tests/test_2630_circuit_breaker.py",
+      "sec": 8.2
+    },
+    {
+      "file": "tests/test_3354_pageview_counter.py",
+      "sec": 8.18
+    },
+    {
+      "file": "tests/test_2038_hypothesis_outcome_result_enforce.py",
+      "sec": 8.05
+    },
+    {
+      "file": "tests/test_2633_event_publish.py",
+      "sec": 7.93
+    },
+    {
+      "file": "tests/test_1973_gate_urgency_sort.py",
+      "sec": 7.84
+    },
+    {
+      "file": "tests/test_edg_s14_role_resolver.py",
+      "sec": 7.83
+    },
+    {
+      "file": "tests/test_2131_bulk_status_changed_sse_realdb.py",
+      "sec": 7.77
+    },
+    {
+      "file": "tests/test_e_recruit_s5_connection_artifact_realdb.py",
+      "sec": 7.77
+    },
+    {
+      "file": "tests/test_2893_gate_null_slot_promotion_realdb.py",
+      "sec": 7.64
+    },
+    {
+      "file": "tests/test_3084_gate_toss_realdb.py",
+      "sec": 7.57
+    },
+    {
+      "file": "tests/test_2893_pr4_label_alignment_gate_creation_realdb.py",
+      "sec": 7.55
+    },
+    {
+      "file": "tests/test_2836_agent_auth_failure_realdb.py",
+      "sec": 7.51
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s12_context_pack_items_realdb.py",
-      "sec": 4.2
+      "sec": 7.46
     },
     {
-      "file": "tests/test_edg_s25_epic_overlay.py",
-      "sec": 4.17
+      "file": "tests/test_2853_gate_check_revocation_realdb.py",
+      "sec": 7.4
     },
     {
-      "file": "tests/test_edg_s2_config_governance.py",
-      "sec": 4.13
+      "file": "tests/test_edg_s18_runtime_mode.py",
+      "sec": 7.36
     },
     {
-      "file": "tests/test_2049_default_participation_roles.py",
-      "sec": 4.1
+      "file": "tests/test_c7abdf42_repeat_schedule_endpoints.py",
+      "sec": 7.18
     },
     {
-      "file": "tests/test_ccbcd9da_gate_wake_wiring_realdb.py",
-      "sec": 4.07
+      "file": "tests/test_2078_event_outbox_realdb.py",
+      "sec": 7.02
     },
     {
-      "file": "tests/test_e_loop_ledger_p1_s3_embed_backlog_realdb.py",
-      "sec": 4.04
+      "file": "tests/test_2087_agent_api_key_usage_audit_trail_realdb.py",
+      "sec": 7.02
     },
     {
-      "file": "tests/test_org_create_seeds_default_participation_role.py",
-      "sec": 4.01
+      "file": "tests/test_merge_verdict_gate.py",
+      "sec": 6.93
+    },
+    {
+      "file": "tests/test_1974_gate_assigned_to_me.py",
+      "sec": 6.89
+    },
+    {
+      "file": "tests/test_3313_recipe_notification_render.py",
+      "sec": 6.89
+    },
+    {
+      "file": "tests/test_2054_gate_inbox.py",
+      "sec": 6.88
+    },
+    {
+      "file": "tests/test_2893_pr3_gate_reevaluate_realdb.py",
+      "sec": 6.83
+    },
+    {
+      "file": "tests/test_2953_agent_inactive_project_access_realdb.py",
+      "sec": 6.79
+    },
+    {
+      "file": "tests/test_2747_draft_doc_chat_nudge_realdb.py",
+      "sec": 6.68
+    },
+    {
+      "file": "tests/test_2893_pr2_sha_repending_label_unlabel_realdb.py",
+      "sec": 6.67
+    },
+    {
+      "file": "tests/test_a2a_sa3_link_gate_to_task_realdb.py",
+      "sec": 6.63
+    },
+    {
+      "file": "tests/test_1970_gate_single_get.py",
+      "sec": 6.59
+    },
+    {
+      "file": "tests/test_3365_site_post_drafts.py",
+      "sec": 6.51
+    },
+    {
+      "file": "tests/test_f6d1bbaa_stamp_integrity_guard.py",
+      "sec": 6.45
+    },
+    {
+      "file": "tests/test_2156_merge_gate_evidence_realdb.py",
+      "sec": 6.39
+    },
+    {
+      "file": "tests/test_3337_recipe_repeat_scheduler.py",
+      "sec": 6.39
+    },
+    {
+      "file": "tests/test_2004_a2a_sendmessage_idempotency_realdb.py",
+      "sec": 6.28
+    },
+    {
+      "file": "tests/test_3334_gate_reject_reason_enforce.py",
+      "sec": 6.27
+    },
+    {
+      "file": "tests/test_project_relay_owner.py",
+      "sec": 6.25
+    },
+    {
+      "file": "tests/test_3153_glance_org_stalled_realdb.py",
+      "sec": 6.12
+    },
+    {
+      "file": "tests/test_a2a_sa5_auth_required_realdb.py",
+      "sec": 6.12
+    },
+    {
+      "file": "tests/test_2893_gate_pr_scoped_isolation_realdb.py",
+      "sec": 5.99
+    },
+    {
+      "file": "tests/test_3001_gate_delegate_realdb.py",
+      "sec": 5.94
     },
     {
       "file": "tests/test_a2a_sa4_streaming_realdb.py",
-      "sec": 3.93
+      "sec": 5.91
     },
     {
-      "file": "tests/test_edg_s28_doc_resubmit.py",
-      "sec": 3.81
+      "file": "tests/test_2201_sse_backfill_degraded_signal_realdb.py",
+      "sec": 5.84
     },
     {
-      "file": "tests/test_edg_s29_dryrun_preview.py",
-      "sec": 3.29
+      "file": "tests/test_e_recruit_s3_recruit_service_realdb.py",
+      "sec": 5.8
     },
     {
-      "file": "tests/test_merge_gate_reject_resubmit_reopen.py",
-      "sec": 3.2
+      "file": "tests/test_2637_action_auth_enforcement.py",
+      "sec": 5.67
     },
     {
-      "file": "tests/test_2101_sse_recent_delivered_backfill_realdb.py",
-      "sec": 3.0
+      "file": "tests/test_2935_steer_conversation_override.py",
+      "sec": 5.66
     },
     {
-      "file": "tests/test_claim_participation.py",
-      "sec": 2.94
+      "file": "tests/test_2039_project_slug_ascii.py",
+      "sec": 5.62
     },
     {
-      "file": "tests/test_doc_gate_cascade_scope_realdb.py",
-      "sec": 2.9
+      "file": "tests/test_3039_merge_gate_ci_reeval_webhook_realdb.py",
+      "sec": 5.56
     },
     {
-      "file": "tests/test_s29_active_line_get.py",
-      "sec": 2.7
+      "file": "tests/test_3288_recipe_role_bindings.py",
+      "sec": 5.55
+    },
+    {
+      "file": "tests/test_2082_artifact_canonicalize_gate_inbox.py",
+      "sec": 5.54
+    },
+    {
+      "file": "tests/test_2832_gate_reapproval_anchor_realdb.py",
+      "sec": 5.48
+    },
+    {
+      "file": "tests/test_2626_chain_escalation_episode.py",
+      "sec": 5.38
+    },
+    {
+      "file": "tests/test_2118_merge_gate_approval_cards_realdb.py",
+      "sec": 5.37
+    },
+    {
+      "file": "tests/test_3340_gate_verdict_notify_reach.py",
+      "sec": 5.36
+    },
+    {
+      "file": "tests/test_e_loop_ledger_s26_context_pack_synthesis.py",
+      "sec": 5.36
+    },
+    {
+      "file": "tests/test_2249_gate_entered_at_realdb.py",
+      "sec": 5.34
+    },
+    {
+      "file": "tests/test_3330_gate_verdict_notification.py",
+      "sec": 5.26
+    },
+    {
+      "file": "tests/test_3035_late_participation_pr_result_explicit_realdb.py",
+      "sec": 5.25
+    },
+    {
+      "file": "tests/test_3370_gate_notify_recipients.py",
+      "sec": 5.24
+    },
+    {
+      "file": "tests/test_2628_approval_dm_participant_set_lookup.py",
+      "sec": 5.23
+    },
+    {
+      "file": "tests/test_2975_gate_activity_audit_trail_realdb.py",
+      "sec": 5.22
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s11_dispatch_context_pack_realdb.py",
+      "sec": 5.2
+    },
+    {
+      "file": "tests/test_2838_api_key_expiry_no_silent_default_realdb.py",
+      "sec": 5.15
+    },
+    {
+      "file": "tests/test_2975_gate_approval_sha_race_realdb.py",
+      "sec": 5.15
+    },
+    {
+      "file": "tests/test_2985_gate_designated_approver_line.py",
+      "sec": 5.14
+    },
+    {
+      "file": "tests/test_2982_gate_already_resolved_realdb.py",
+      "sec": 5.13
+    },
+    {
+      "file": "tests/test_3325_recipe_gate_card_reopen.py",
+      "sec": 5.13
+    },
+    {
+      "file": "tests/test_edg_s3_engine.py",
+      "sec": 5.11
+    },
+    {
+      "file": "tests/test_2693_publish_event_unknown_member_400.py",
+      "sec": 5.09
+    },
+    {
+      "file": "tests/test_1983_doc_gate_assigned_to_me_who_state.py",
+      "sec": 5.06
+    },
+    {
+      "file": "tests/test_edg_s7_handoff_relay.py",
+      "sec": 5.03
+    },
+    {
+      "file": "tests/test_edg_s13_sla_processor.py",
+      "sec": 5.01
+    },
+    {
+      "file": "tests/test_2606_legal_document_current.py",
+      "sec": 4.95
+    },
+    {
+      "file": "tests/test_f84227b5_agent_org_header_membership.py",
+      "sec": 4.91
+    },
+    {
+      "file": "tests/test_edg_s10_status_api.py",
+      "sec": 4.88
+    },
+    {
+      "file": "tests/test_2665_event_publish_history.py",
+      "sec": 4.84
+    },
+    {
+      "file": "tests/test_3312_approve_stage_gate_auto_creation.py",
+      "sec": 4.83
+    },
+    {
+      "file": "tests/test_1715_merge_gate_requester_notify_realdb.py",
+      "sec": 4.78
+    },
+    {
+      "file": "tests/test_2078_publish_atomic.py",
+      "sec": 4.78
+    },
+    {
+      "file": "tests/test_d1f4afcb_draft_nudge_gate_and_event_suppress.py",
+      "sec": 4.75
+    },
+    {
+      "file": "tests/test_edg_s19_grandfather.py",
+      "sec": 4.75
+    },
+    {
+      "file": "tests/test_a2a_sa1_deadline_sweeper_realdb.py",
+      "sec": 4.69
+    },
+    {
+      "file": "tests/test_2835_gate_approval_publish_self_sufficient_realdb.py",
+      "sec": 4.55
+    },
+    {
+      "file": "tests/test_2086_assignee_changed_sse.py",
+      "sec": 4.53
+    },
+    {
+      "file": "tests/test_3033_merge_gate_sha_fallback_realdb.py",
+      "sec": 4.53
+    },
+    {
+      "file": "tests/test_edg_batch_line_status.py",
+      "sec": 4.5
+    },
+    {
+      "file": "tests/test_2624_approval_result_reply.py",
+      "sec": 4.49
+    },
+    {
+      "file": "tests/test_3317b_recipe_capability_apply_check.py",
+      "sec": 4.48
+    },
+    {
+      "file": "tests/test_3025_gate_self_reclamation_realdb.py",
+      "sec": 4.34
+    },
+    {
+      "file": "tests/test_m2_recipe_role_binding_routing_realdb.py",
+      "sec": 4.33
+    },
+    {
+      "file": "tests/test_2637_block_template_registration.py",
+      "sec": 4.32
+    },
+    {
+      "file": "tests/test_agent_access_matrix_realdb.py",
+      "sec": 4.26
+    },
+    {
+      "file": "tests/test_3115_late_link_gate_creation_realdb.py",
+      "sec": 4.25
+    },
+    {
+      "file": "tests/test_e_loop_ledger_s27_context_pack_recommendation.py",
+      "sec": 4.25
     },
     {
       "file": "tests/test_2128_sse_lifespan_cap.py",
-      "sec": 2.65
+      "sec": 4.22
     },
     {
-      "file": "tests/test_h1_s7_gate_verdict.py",
-      "sec": 2.65
+      "file": "tests/test_3293_recipe_role_bindings_read.py",
+      "sec": 4.22
+    },
+    {
+      "file": "tests/test_edg_s5_merge_gate.py",
+      "sec": 4.21
+    },
+    {
+      "file": "tests/test_edg_s4_resolver.py",
+      "sec": 4.17
+    },
+    {
+      "file": "tests/test_edg_s16_seed.py",
+      "sec": 4.14
+    },
+    {
+      "file": "tests/test_2634_event_definitions_list.py",
+      "sec": 4.02
+    },
+    {
+      "file": "tests/test_2058_hitl_human_only.py",
+      "sec": 4.01
+    },
+    {
+      "file": "tests/test_2381_wake_after_commit_race_realdb.py",
+      "sec": 4.0
+    },
+    {
+      "file": "tests/test_2637_notification_preference_router_event_key.py",
+      "sec": 3.97
+    },
+    {
+      "file": "tests/test_edg_s23_hypothesis_overlay.py",
+      "sec": 3.89
+    },
+    {
+      "file": "tests/test_edg_s6_gate_hook.py",
+      "sec": 3.76
+    },
+    {
+      "file": "tests/test_edg_s17_recall.py",
+      "sec": 3.69
+    },
+    {
+      "file": "tests/test_edg_s33_override.py",
+      "sec": 3.68
+    },
+    {
+      "file": "tests/test_2087_api_key_logs_endpoint_realdb.py",
+      "sec": 3.67
+    },
+    {
+      "file": "tests/test_2637_notification_preference_event_key.py",
+      "sec": 3.58
+    },
+    {
+      "file": "tests/test_2381_ac4_live_wake_delivery_realdb.py",
+      "sec": 3.56
+    },
+    {
+      "file": "tests/test_2834_link_evidence_merge_semantics_realdb.py",
+      "sec": 3.56
+    },
+    {
+      "file": "tests/test_edg_s25_epic_overlay.py",
+      "sec": 3.55
+    },
+    {
+      "file": "tests/test_3275_presence_profile_selfheal_realdb.py",
+      "sec": 3.53
+    },
+    {
+      "file": "tests/test_2941_apikey_scope_resync_realdb.py",
+      "sec": 3.52
+    },
+    {
+      "file": "tests/test_edg_s2_config_governance.py",
+      "sec": 3.52
+    },
+    {
+      "file": "tests/test_ccbcd9da_gate_wake_wiring_realdb.py",
+      "sec": 3.47
+    },
+    {
+      "file": "tests/test_2632_event_definitions.py",
+      "sec": 3.46
+    },
+    {
+      "file": "tests/test_3349_repeat_schedule_cycle_guard.py",
+      "sec": 3.46
+    },
+    {
+      "file": "tests/test_edg_s28_doc_resubmit.py",
+      "sec": 3.44
+    },
+    {
+      "file": "tests/test_edg_s34_line_versions.py",
+      "sec": 3.44
+    },
+    {
+      "file": "tests/test_edg_s12be_recipient_fallback.py",
+      "sec": 3.43
+    },
+    {
+      "file": "tests/test_2608_chain_depth.py",
+      "sec": 3.42
+    },
+    {
+      "file": "tests/test_ho_s9_e2e_closed_loop.py",
+      "sec": 3.38
+    },
+    {
+      "file": "tests/test_2047_explicit_ask_gate.py",
+      "sec": 3.34
+    },
+    {
+      "file": "tests/test_h1_s9_merge_gate_metrics.py",
+      "sec": 3.32
+    },
+    {
+      "file": "tests/test_edg_s22_doc_overlay.py",
+      "sec": 3.27
+    },
+    {
+      "file": "tests/test_org_create_seeds_default_participation_role.py",
+      "sec": 3.26
+    },
+    {
+      "file": "tests/test_edg_s15_metrics.py",
+      "sec": 3.19
+    },
+    {
+      "file": "tests/test_edg_s31_hold.py",
+      "sec": 3.18
     },
     {
       "file": "tests/test_h1_fix2_approve_advances_done.py",
-      "sec": 2.46
+      "sec": 3.01
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s3_embed_backlog_realdb.py",
+      "sec": 3.0
+    },
+    {
+      "file": "tests/test_2049_default_participation_roles.py",
+      "sec": 2.97
+    },
+    {
+      "file": "tests/test_2675_publish_event_malformed_uuid_400.py",
+      "sec": 2.97
+    },
+    {
+      "file": "tests/test_1968_gate_project_id_threading.py",
+      "sec": 2.93
+    },
+    {
+      "file": "tests/test_2636_publish_zero_reach_warning.py",
+      "sec": 2.93
+    },
+    {
+      "file": "tests/test_2524_gate_reopen_requires_human.py",
+      "sec": 2.78
+    },
+    {
+      "file": "tests/test_edg_s30_void_recovery.py",
+      "sec": 2.66
     },
     {
       "file": "tests/test_h1_s10_e2e.py",
-      "sec": 2.38
+      "sec": 2.65
     },
     {
-      "file": "tests/test_ho_gate_done_side_effects.py",
-      "sec": 2.31
+      "file": "tests/test_2101_sse_recent_delivered_backfill_realdb.py",
+      "sec": 2.63
     },
     {
-      "file": "tests/test_ho_s2_outcome_verdict.py",
-      "sec": 2.28
+      "file": "tests/test_edg_s29_dryrun_preview.py",
+      "sec": 2.6
     },
     {
-      "file": "tests/test_ho_s7_cold_start_seed.py",
-      "sec": 2.23
+      "file": "tests/test_2667_recruit_defer_key_issuance_realdb.py",
+      "sec": 2.54
     },
     {
-      "file": "tests/test_a2a_p1_s1_recruit_card_contract_realdb.py",
-      "sec": 2.2
+      "file": "tests/test_2602_sse_lease_lifespan_reclaim.py",
+      "sec": 2.48
     },
     {
-      "file": "tests/test_e_recruit_s16_rotate_idor_realdb.py",
-      "sec": 2.16
+      "file": "tests/test_claim_participation.py",
+      "sec": 2.37
     },
     {
-      "file": "tests/test_cron_retry_dry_run.py",
-      "sec": 2.1
+      "file": "tests/test_2620_a2a_webhook_fallback_regression.py",
+      "sec": 2.34
     },
     {
-      "file": "tests/test_e_loop_ledger_p1_s3f_poison_pill_terminal.py",
-      "sec": 2.07
+      "file": "tests/test_2617_chain_escalation.py",
+      "sec": 2.33
+    },
+    {
+      "file": "tests/test_2637_event_msg_metadata_tagging.py",
+      "sec": 2.3
+    },
+    {
+      "file": "tests/test_3258_doc_gate_card_content_realdb.py",
+      "sec": 2.3
     },
     {
       "file": "tests/test_ho_s4_scorer_verdict_wiring.py",
-      "sec": 2.07
+      "sec": 2.28
     },
     {
-      "file": "tests/test_ho_s1_score_hypotheses_smoke.py",
-      "sec": 1.89
+      "file": "tests/test_doc_gate_cascade_scope_realdb.py",
+      "sec": 2.25
     },
     {
-      "file": "tests/test_e_loop_ledger_p1_s3g_score_hypotheses_savepoint_realdb.py",
-      "sec": 1.86
+      "file": "tests/test_ho_s7_cold_start_seed.py",
+      "sec": 2.25
+    },
+    {
+      "file": "tests/test_merge_gate_reject_resubmit_reopen.py",
+      "sec": 2.05
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s5_embedding_backfill_realdb.py",
-      "sec": 1.86
+      "sec": 2.02
     },
     {
-      "file": "tests/test_e_loop_ledger_p1_s6_context_pack_search_realdb.py",
-      "sec": 1.86
+      "file": "tests/test_s29_active_line_get.py",
+      "sec": 1.91
+    },
+    {
+      "file": "tests/test_2428_list_backlog_total_count_realdb.py",
+      "sec": 1.9
     },
     {
       "file": "tests/test_2216_workflow_fallback_notify_owner_floor_realdb.py",
-      "sec": 1.76
+      "sec": 1.88
+    },
+    {
+      "file": "tests/test_h1_s7_gate_verdict.py",
+      "sec": 1.84
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s6_context_pack_search_realdb.py",
+      "sec": 1.8
+    },
+    {
+      "file": "tests/test_a2a_p1_s1_recruit_card_contract_realdb.py",
+      "sec": 1.74
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s3f_poison_pill_terminal.py",
+      "sec": 1.73
+    },
+    {
+      "file": "tests/test_e_recruit_s16_rotate_idor_realdb.py",
+      "sec": 1.68
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s3g_score_hypotheses_savepoint_realdb.py",
+      "sec": 1.65
+    },
+    {
+      "file": "tests/test_ho_s1_score_hypotheses_smoke.py",
+      "sec": 1.57
+    },
+    {
+      "file": "tests/test_cron_retry_dry_run.py",
+      "sec": 1.53
+    },
+    {
+      "file": "tests/test_2520_line_merge_gate_reconcile.py",
+      "sec": 1.47
+    },
+    {
+      "file": "tests/test_ho_s2_outcome_verdict.py",
+      "sec": 1.36
+    },
+    {
+      "file": "tests/test_3287_domain_label_realdb.py",
+      "sec": 1.16
+    },
+    {
+      "file": "tests/test_2635_agent_api_keys_events_backfill.py",
+      "sec": 0.91
+    },
+    {
+      "file": "tests/test_2635_role_templates_events_scope.py",
+      "sec": 0.84
+    },
+    {
+      "file": "tests/test_2648_fix_legacy_scope_events_overreach.py",
+      "sec": 0.81
+    },
+    {
+      "file": "tests/test_2637_preset_block_template_seed.py",
+      "sec": 0.62
+    },
+    {
+      "file": "tests/test_2637_gate_verdict_title_fix.py",
+      "sec": 0.53
+    },
+    {
+      "file": "tests/test_ho_s3_hypothesis_owner_seed.py",
+      "sec": 0.53
+    },
+    {
+      "file": "tests/test_member_ssot_parity_realdb.py",
+      "sec": 0.31
     }
   ]
 }

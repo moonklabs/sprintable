@@ -43,6 +43,13 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "lint_no_script_output_artifacts.py",         # story #3008 — CI lint 게이트(scripts/ 파일명·내용 정적 스캔, 운영 DB 무접속)
     "model_db_drift_audit.py",                    # story #2181 — 로컬 1회성 감사(읽기 전용)
     "shard_destructive_tests.py",                 # story #2293 — CI 매트릭스 샤딩 유틸
+    "build_destructive_schema_template.py",       # story #3383 — CI 전용, backend-test-destructive
+                                                   # 잡이 샤드마다 부르는 스텝(ci.yml). 접속 대상은
+                                                   # CI/로컬 Postgres 서비스 컨테이너의 throwaway
+                                                   # DB(sprintable_test_tpl)뿐 — 운영 DB 무접속.
+    "measure_destructive_durations_local.py",     # story #3383 — 로컬 1회성 재측정 도구
+                                                   # (model_db_drift_audit.py와 동일 범주). 운영
+                                                   # DB 무접속, throwaway 로컬 DB만 왕복.
 })
 
 
