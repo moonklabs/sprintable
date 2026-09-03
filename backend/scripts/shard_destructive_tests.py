@@ -22,12 +22,24 @@ story #3392(CI 후속, 2026-09-03) — PR #3742가 unweighted 신규 파일(평�
 1건짜리 사각을 못 잡는다. 이 스크립트는 이제 각 샤드가 가진 unweighted 파일 목록·평균
 가중치·(평균×배수) 초과 판정선을 `--meta-out`으로 내보내 ci.yml의 pytest 루프가 그
 자리에서(파일 완주 즉시, 샤드 timeout보다 먼저) 실측 소요를 판정선과 대조하게 한다.
+
+story #3396(CI 후속, 2026-09-03) — story #3383 AC5의 절대 60초 가드가 story #3393이
+정식화한 "느린 러너 표본"(median 4.45x~max 12.18x)과 정면으로 부딪혔다: PR #3753 run
+33773872963 shard 0에서 `test_3373_channel_connections.py`가 168s(가중치 20.1s=8.4x)로
+60초 가드에 걸려 fail 났는데, **같은 shard의 다른 24개 파일도 전부** median 5.91x로
+튀어 있었다(이 파일 하나가 갑자기 무거워진 게 아니라 그 run 자체가 느린 러너였다).
+`--check-elapsed`가 이 정규화 판정을 담당한다 — weighted 파일만으로 그 run 자신의
+elapsed/weight 중앙값 배율을 구해 60초 판정선을 스케일한다(느린 러너면 판정선도 같이
+늘어 오탐이 안 나고, 러너가 정상인데 그 파일 하나만 느려진 진짜 회귀는 배율이 1 근처라
+그대로 잡힌다). unweighted 파일은 이 배율 표본·판정 대상 모두에서 제외 — 그쪽은 이미
+`--meta-out`의 unweighted 초과 가드(#3392)가 별도로 담당한다.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -118,6 +130,50 @@ def unweighted_files_in(files: list[str], weights: dict[str, float]) -> list[str
     return [f for f in files if f not in weights]
 
 
+# story #3396(AC3) — 이 표본 수 미만이면 중앙값을 못 믿고 절대 60초로 폴백한다. 3을
+# 고른 이유: 중앙값이 "가운데 값"이 되려면 양옆에 최소 1개씩은 있어야 한다 — 표본 2개
+# 이하는 사실상 평균과 다르지 않아 "이 run의 전형적인 배율"이라 부르기 이르다.
+MIN_RATIO_SAMPLE = 3
+
+
+def weighted_ratios(elapsed_by_file: dict[str, float], weights: dict[str, float]) -> list[float]:
+    """story #3396(AC2) — weights에 있는(=weighted) 파일만으로 elapsed/weight 배율을
+    낸다. unweighted 파일은 이 비율 자체가 "평균 가중치로 나눈 값"이라 그 파일의 진짜
+    무게와 무관해 표본에 넣으면 배율 추정이 오염된다(#3392의 unweighted-폴백 오염과
+    같은 함정) — 그 파일들의 슬로우 판정은 이미 #3392의 unweighted 초과 가드가 맡는다."""
+    return [elapsed_by_file[f] / weights[f] for f in elapsed_by_file if f in weights and weights[f] > 0]
+
+
+def normalized_slow_threshold_sec(ratios: list[float], *, base_seconds: float = 60.0) -> float:
+    """story #3396(AC1/AC3) — 그 run 자신의 elapsed/weight 중앙값 배율로 60초를
+    스케일한다. 표본이 MIN_RATIO_SAMPLE 미만이면 중앙값을 못 믿고 절대 60초로 폴백한다
+    (PO 확定, 2026-09-03 15:59Z).
+
+    AC6(무한정 관대해지는 사각) — 중앙값 배율 자체에 상한(예: #3393의 max 12.18x)을
+    두는 것은 일부러 안 했다: 배율이 그 이상으로 튈 만큼 극단적으로 느린 run이면 이
+    shard는 이 가드가 판정을 내리기 전에 이미 story #3393의 shard 전체 20분 timeout에
+    걸려 cancel될 가능성이 높다(이 판정 자체가 루프 완주 «후»에만 실행되므로, 루프가
+    끝까지 못 돌면 여기 도달하지 않는다) — 즉 "극단적으로 느린 run"은 이미 다른
+    메커니즘(shard timeout)이 잡는다. 여기에 또 다른 절대 상한을 두면 이 스토리가
+    없애려는 바로 그 "임의의 매직 넘버"를 하나 더 추가하는 셈이라 채택하지 않았다."""
+    if len(ratios) < MIN_RATIO_SAMPLE:
+        return base_seconds
+    return statistics.median(ratios) * base_seconds
+
+
+def slow_files_normalized(
+    elapsed_by_file: dict[str, float], weights: dict[str, float], *, base_seconds: float = 60.0,
+) -> tuple[list[str], float, int]:
+    """story #3396 — weighted 파일만 대상으로 러너 정규화 60초 가드를 판정한다.
+    반환: (초과한 파일 목록·정렬, 실제로 쓴 판정선(초), 배율 표본 크기). unweighted
+    파일은 대상에서 아예 빠진다(#3392가 별도로 담당 — 두 가드가 같은 파일을 다른
+    기준으로 두 번 재는 혼선을 막는다)."""
+    ratios = weighted_ratios(elapsed_by_file, weights)
+    threshold = normalized_slow_threshold_sec(ratios, base_seconds=base_seconds)
+    slow = [f for f, elapsed in elapsed_by_file.items() if f in weights and elapsed > threshold]
+    return sorted(slow), threshold, len(ratios)
+
+
 def partition(files: list[str], weights: dict[str, float], shard_count: int) -> tuple[list[list[str]], list[float]]:
     """greedy LPT — 무거운 순으로 정렬해 매번 «지금 가장 가벼운 샤드」에 넣는다.
     ⭐이 함수는 무손실이다(모든 파일이 정확히 하나의 샤드에 들어간다) —
@@ -135,17 +191,76 @@ def partition(files: list[str], weights: dict[str, float], shard_count: int) -> 
     return shards, totals
 
 
+def _parse_elapsed_file(path: Path) -> dict[str, float]:
+    """`<file>\\t<elapsed_sec>` 줄 형식(ci.yml의 pytest 루프가 파일 완주마다 append) —
+    JSON이 아니라 이 형식을 고른 이유: bash에서 안전하게 append-only로 쓸 수 있는
+    포맷이 그것뿐이다(JSON은 배열 닫는 대괄호를 매번 다시 써야 해 마지막에 잘리면
+    깨진다)."""
+    result: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        file_name, _, elapsed = line.partition("\t")
+        result[file_name] = float(elapsed)
+    return result
+
+
+def _check_elapsed_mode(elapsed_path: Path) -> int:
+    """story #3396 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
+    호출한다(중앙값은 그 run 전체 표본이 있어야 나온다 — 파일 단위 즉시 판정이 애초에
+    불가능한 가드다)."""
+    elapsed_by_file = _parse_elapsed_file(elapsed_path)
+    weights = load_weights()
+    slow, threshold, sample_size = slow_files_normalized(elapsed_by_file, weights)
+
+    if sample_size < MIN_RATIO_SAMPLE:
+        print(
+            f"러너 정규화 표본 {sample_size}개 < {MIN_RATIO_SAMPLE} — 절대 {threshold:.0f}초로 폴백(story #3396 AC3)",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"러너 정규화 판정선: {threshold:.1f}초(표본 {sample_size}개 · 중앙값 배율 "
+            f"×{threshold / 60.0:.2f}, story #3396 AC1)",
+            file=sys.stderr,
+        )
+
+    if slow:
+        for f in slow:
+            print(
+                f"::error::러너 정규화 60초 가드 초과(story #3396): {f} "
+                f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s — 같은 run의 다른 파일 대비로도 무거워졌다)"
+            )
+        return 1
+
+    print(f"OK: 러너 정규화 가드 통과({sample_size}개 표본 기준)", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shard-index", type=int, required=True)
-    ap.add_argument("--shard-count", type=int, required=True)
+    ap.add_argument("--shard-index", type=int, default=None)
+    ap.add_argument("--shard-count", type=int, default=None)
     ap.add_argument("--print-summary", action="store_true", help="전체 샤드 분배를 stderr에 찍는다")
     ap.add_argument(
         "--meta-out", type=Path, default=None,
         help="story #3392 — 이 샤드의 unweighted 파일 목록·평균 가중치·초과판정선을 JSON으로 "
              "써 둔다. ci.yml의 pytest 루프가 파일 완주 즉시(샤드 timeout보다 먼저) 대조한다.",
     )
+    ap.add_argument(
+        "--check-elapsed", type=Path, default=None,
+        help="story #3396 — <file>\\t<elapsed_sec> 줄로 된 파일을 읽어 러너 정규화 60초 "
+             "가드를 판정하고 끝낸다(discover/partition 없음 — ci.yml의 pytest 루프가 이 "
+             "샤드의 모든 파일을 다 돈 뒤 한 번 호출한다, 중앙값은 그 run 전체를 봐야 나온다).",
+    )
     args = ap.parse_args()
+
+    if args.check_elapsed is not None:
+        return _check_elapsed_mode(args.check_elapsed)
+
+    if args.shard_index is None or args.shard_count is None:
+        print("--shard-index/--shard-count는 --check-elapsed 없이는 필수", file=sys.stderr)
+        return 2
     if not (0 <= args.shard_index < args.shard_count):
         print(f"shard-index {args.shard_index}가 shard-count {args.shard_count} 범위 밖", file=sys.stderr)
         return 2
