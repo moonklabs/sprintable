@@ -11,13 +11,16 @@
 (게이트 봉인 필드에 site의 `body_md` 대신 이 도메인의 `text`를 싣는다는 것 외엔 site
 버전과 동형 — story 본문이 "3종 밖"이라 명시한 부분).
 
-**이 스토리 범위**: 초안 생성/수정·상신(=게이트 pending 생성+봉인)까지. 승인은 gates.py의
-기존 범용 transition 엔드포인트(신규 코드 0), 실제 발행(Threads API 호출)은 다음 스토리
-[서버 Threads 발행 실행](entity:story:f8f7cb0f-6271-48bd-8a4d-a329b16b9167) 몫이다."""
+초안 생성/수정·상신(=게이트 pending 생성+봉인)까지는 story #3374 몫. 승인은 gates.py의
+기존 범용 transition 엔드포인트(신규 코드 0).
+
+story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실제 발행(Threads API
+2-호출) 오케스트레이션(`publish_channel_post_draft`)을 이어 붙인다. site_posts.py가
+발행까지 한 파일에 담는 것과 동형 관례(draft→submit→publish 한 도메인 서비스 파일)."""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,14 +29,20 @@ from sqlalchemy.orm import aliased
 from app.models.channel_connection import ChannelConnection
 from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_post_version import ChannelPostVersion
+from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate, set_gate_status
 from app.services.channel_adapters import get_channel_adapter
+from app.services.channel_connection import decrypt_for_use
 from app.services.gate_seal import (
     GateReapprovalRequiredError as ChannelPostReapprovalRequiredError,  # noqa: F401 (재-export, 라우터가 import)
     GateSealMissingError as ChannelPostSealMissingError,  # noqa: F401 (재-export, 라우터가 import)
     compute_seal_hash,
 )
-from app.services.site_posts import is_agent_caller  # noqa: F401 (재-export 편의 — 채널 라우터도 재사용)
+from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채널 라우터도 재사용)
+    ExternalPublishGateNotApprovedError,
+    is_agent_caller,
+)
+from app.services.utm import attach_utm, resolve_utm_campaign
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
 
@@ -54,6 +63,39 @@ class ChannelTextTooLongError(ValueError):
         self.max_length = max_length
         self.current_length = current_length
         super().__init__(f"본문이 한도를 넘었습니다(한도 {max_length}자, 현재 {current_length}자)")
+
+
+class ChannelTokenExpiredError(Exception):
+    """story #f8f7cb0f — provider가 401/403(인증 실패)로 응답 — 토큰이 만료/철회됐다는
+    뜻. `apply_refresh_failure`와 동형으로 connection.status를 expired로 내려 재인증을
+    유도한다(호출부가 처리)."""
+
+    def __init__(self, *, connection_id: uuid.UUID, provider_message: str):
+        self.connection_id = connection_id
+        self.provider_message = provider_message
+        super().__init__(f"연결 토큰이 만료됐습니다(connection_id={connection_id}) — 재인증이 필요합니다")
+
+
+class ChannelRateLimitedError(Exception):
+    """story #f8f7cb0f — 발행 직전 재조회한 한도 잔량이 0. `reset_at`은
+    `now + quota_duration`으로 근사(Meta가 명시적 reset 타임스탬프를 안 줌, threads_
+    publish.py 참고) — 화면이 "N시 이후 가능" 문구·예약 기본값으로 쓴다(AC)."""
+
+    def __init__(self, *, reset_at: datetime):
+        self.reset_at = reset_at
+        super().__init__(f"발행 한도를 초과했습니다 — {reset_at.isoformat()} 이후 재시도하세요")
+
+
+class ChannelPublishProviderError(Exception):
+    """story #f8f7cb0f — 위 목록(승인/봉인/연결/토큰/한도) 어디에도 안 걸리는 Threads API
+    실패(컨테이너 생성·publish 호출 자체가 2xx 아님). provider 원문은 `last_error`에,
+    안정 코드 하나는 응답에 — "막혔다"와 "막는 장치를 쟀다"를 기계가 구별해야 한다는
+    담롱 요구(그라운딩 §③) 그대로."""
+
+    def __init__(self, *, provider_code: str, provider_message: str):
+        self.provider_code = provider_code
+        self.provider_message = provider_message
+        super().__init__(f"발행 provider 호출 실패({provider_code}): {provider_message}")
 
 
 class ChannelPostApproverRoleMissingError(Exception):
@@ -326,3 +368,193 @@ async def submit_channel_post_draft(
     await db.commit()
     await db.refresh(gate)
     return gate, target.id
+
+
+# ─── story #f8f7cb0f(Phase1·마케팅운영) — 서버 Threads 발행 실행 ───────────────────────
+# UTM 조립(link_url이 있으면 본문 끝에 태그된 링크를 덧붙인다)은 publish_channel_post_
+# draft() 안에서 draft.channel(어댑터 조회 축)을 안 상태로 직접 한다 — 원본 latest.text/
+# latest.link_url은 절대 바꾸지 않는다(봉인 해시가 이미 그 원본 쌍으로 계산돼 있다, #3374).
+# UTM은 발행 시점에만 조립되는 배달 계층 부가물이지 승인 대상 내용이 아니다.
+
+
+def _classify_threads_error(
+    exc: "ThreadsPublishError", *, connection_id: uuid.UUID,
+) -> tuple[str, Exception]:
+    """provider 실패를 안정 코드+예외로 분류. 401/403은 토큰 만료(재인증 유도), 그 외는
+    미분류 provider 오류(502) — 담롱 요구 "«막혔다»와 «막는 장치를 쟀다»는 다르다"
+    그대로(그라운딩 §③)."""
+    if exc.status_code in (401, 403):
+        return "CHANNEL_TOKEN_EXPIRED", ChannelTokenExpiredError(
+            connection_id=connection_id, provider_message=exc.message,
+        )
+    return "CHANNEL_PUBLISH_PROVIDER_ERROR", ChannelPublishProviderError(
+        provider_code=exc.code, provider_message=exc.message,
+    )
+
+
+async def publish_channel_post_draft(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, published_by_member_id: uuid.UUID,
+) -> ChannelPublication:
+    """AC1~AC4 — 승인·봉인 재검증 뒤 연결 토큰으로 Threads 2-호출 발행. 멱등
+    (UNIQUE(gate_id, version_id)) — 같은 (gate, version) 재요청은 Threads에 새 POST 없이
+    기존 완료 행을 그대로 반환. 부분 성공(컨테이너 생성 후 publish 실패)은
+    container_created로 남고 재시도는 그 컨테이너로 publish만 다시 — 컨테이너 생성
+    자체가 실패해도 새 행을 만들지 않고 같은 (gate_id, version_id) 행을 그 자리에서
+    갱신한다(PO 결정②).
+
+    human-only 가드(CHANNEL_POST_PUBLISH_HUMAN_ONLY)는 라우터 책임(site_posts.py
+    발행 엔드포인트와 동형 관례 — 서비스 함수 자체엔 actor_type 가드가 없다)."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    gate = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
+    )
+    if gate is None or gate.status != "approved":
+        raise ExternalPublishGateNotApprovedError(
+            gate_id=gate.id if gate is not None else None,
+            status=gate.status if gate is not None else None,
+        )
+
+    versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    latest = versions[-1]
+
+    # 발행 직전 재검증②(봉인) — site_posts.publish_site_post_from_draft와 동형 규율.
+    if gate.sealed_content_sha256 is None:
+        raise ChannelPostSealMissingError(gate_id=gate.id)
+    if gate.sealed_content_sha256 != latest.body_sha256:
+        raise ChannelPostReapprovalRequiredError(gate_id=gate.id)
+
+    # 멱등 — 이미 완료된 발행이면 새 POST 없이 그대로 반환(뮤테이션 대상: 이 UNIQUE
+    # 조회를 제거하면 같은 버전 재요청이 Threads에 두 번 POST된다).
+    existing = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.gate_id == gate.id, ChannelPublication.version_id == latest.id,
+        )
+    )).scalar_one_or_none()
+    if existing is not None and existing.status == "published":
+        return existing
+
+    # 발행 직전 재검증③(연결 활성) — 초안 생성/상신과 같은 헬퍼.
+    connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise ChannelConnectionNotActiveError(connection_id=connection.id)
+
+    import httpx
+    from app.services.channel_connection import apply_refresh_failure
+    from app.services.threads_publish import (
+        ThreadsPublishError,
+        create_container,
+        get_permalink,
+        get_publishing_limit,
+        publish_container,
+    )
+
+    adapter = get_channel_adapter(draft.channel)
+    if latest.link_url and adapter is not None:
+        campaign = resolve_utm_campaign(latest.link_url, fallback_draft_id=draft.id)
+        tagged_link = attach_utm(
+            latest.link_url, source=adapter.utm_source, medium=adapter.utm_medium, campaign=campaign,
+        )
+        text_to_post = f"{latest.text}\n\n{tagged_link}"
+    else:
+        text_to_post = latest.text
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                quota_usage, quota_total, quota_duration = await get_publishing_limit(
+                    client, access_token=access_token, threads_user_id=connection.account_id,
+                )
+            except ThreadsPublishError as exc:
+                _, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                raise mapped_exc from exc
+            if quota_usage >= quota_total:
+                raise ChannelRateLimitedError(
+                    reset_at=datetime.now(timezone.utc) + timedelta(seconds=quota_duration),
+                )
+
+            row = existing
+            if row is None:
+                row = ChannelPublication(
+                    id=uuid.uuid4(), org_id=org_id, gate_id=gate.id, version_id=latest.id,
+                    connection_id=connection.id, channel=draft.channel, status="container_created",
+                )
+                db.add(row)
+                await db.flush()
+
+            if row.external_container_id is None:
+                try:
+                    container_id = await create_container(
+                        client, access_token=access_token, threads_user_id=connection.account_id,
+                        text=text_to_post,
+                    )
+                except ThreadsPublishError as exc:
+                    error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                    row.status = "failed"
+                    row.error_code = error_code
+                    row.last_error = exc.message
+                    await db.commit()
+                    if error_code == "CHANNEL_TOKEN_EXPIRED":
+                        await apply_refresh_failure(db, connection=connection, error_message=exc.message)
+                    raise mapped_exc from exc
+                row.external_container_id = container_id
+                row.status = "container_created"
+                row.error_code = None
+                row.last_error = None
+                await db.commit()
+
+            try:
+                media_id = await publish_container(
+                    client, access_token=access_token, threads_user_id=connection.account_id,
+                    creation_id=row.external_container_id,
+                )
+            except ThreadsPublishError as exc:
+                error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                row.status = "failed"
+                row.error_code = error_code
+                row.last_error = exc.message
+                await db.commit()
+                if error_code == "CHANNEL_TOKEN_EXPIRED":
+                    await apply_refresh_failure(db, connection=connection, error_message=exc.message)
+                raise mapped_exc from exc
+
+            row.external_id = media_id
+            row.status = "published"
+            row.published_at = datetime.now(timezone.utc)
+            row.error_code = None
+            row.last_error = None
+
+            try:
+                permalink = await get_permalink(client, access_token=access_token, media_id=media_id)
+            except ThreadsPublishError:
+                # 발행 자체는 성공(media_id 확보) — permalink 조회 실패는 비치명(threads_
+                # publish.py::get_permalink 독스트링 참고, None 허용).
+                permalink = None
+            row.permalink = permalink
+    finally:
+        del access_token  # ⛔즉시 소비 후 폐기 — channel_connections.py 관례와 동일.
+
+    await db.commit()
+    await db.refresh(row)
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="channel_post_published", actor_type="platform", actor_id=None,
+        entity_type="channel_publication", entity_id=row.id,
+        context={
+            "gate_id": str(gate.id), "version_id": str(latest.id),
+            "permalink": row.permalink, "external_id": row.external_id,
+            "published_by_member_id": str(published_by_member_id),
+        },
+    )
+    await db.commit()
+    return row

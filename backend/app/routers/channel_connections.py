@@ -387,3 +387,65 @@ async def get_channel_app_credentials_status(
         updated_by=row.updated_by, updated_at=row.updated_at.isoformat(),
         effective_source=effective_source,
     )
+
+
+class PublishingLimitResponse(BaseModel):
+    quota_usage: int
+    quota_total: int
+    quota_duration_seconds: int
+
+
+@router.get(
+    "/{org_id}/channel-connections/{connection_id}/publishing-limit", response_model=PublishingLimitResponse,
+)
+async def get_channel_publishing_limit(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> PublishingLimitResponse:
+    """story #f8f7cb0f(Phase1·마케팅운영) — 발행 한도 잔량(UI 표시용, provider 실조회).
+    휴먼 전용(test_channel_connection과 동형 — member 이상이면 충분, owner 제한 없음).
+    발행 직전 서버 내부 재조회(channel_posts.publish_channel_post_draft)와 같은 함수
+    (threads_publish.get_publishing_limit)를 쓴다 — 단일 조회 경로."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+
+    row = await get_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="channel connection not found")
+
+    access_token = decrypt_for_use(row)
+    if access_token is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": "연결에 저장된 토큰이 없습니다."},
+        )
+
+    from app.services.threads_publish import ThreadsPublishError, get_publishing_limit
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            try:
+                quota_usage, quota_total, quota_duration = await get_publishing_limit(
+                    client, access_token=access_token, threads_user_id=row.account_id,
+                )
+            except ThreadsPublishError as exc:
+                if exc.status_code in (401, 403):
+                    await apply_refresh_failure(db, connection=row, error_message=exc.message)
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": exc.message},
+                    ) from exc
+                raise HTTPException(
+                    status_code=502,
+                    detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": exc.message},
+                ) from exc
+    finally:
+        del access_token  # ⛔즉시 소비 후 폐기 — test_channel_connection과 동일 관례.
+
+    return PublishingLimitResponse(
+        quota_usage=quota_usage, quota_total=quota_total, quota_duration_seconds=quota_duration,
+    )
