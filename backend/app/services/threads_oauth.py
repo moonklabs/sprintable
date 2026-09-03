@@ -1,7 +1,8 @@
-"""story #3373(Phase1·마케팅운영) — Threads(Meta) 서버 OAuth 교환. Sprintable 공용 앱
-(threads_app_id/secret) + 조직별 토큰. 기존 `plugins/sprintable/connectors/threads.ts`
-(sprintable-agent-plugins, story #3311)엔 발행 API 호출만 있고 OAuth 교환 로직 자체가
-없다(그라운딩 doc 6766a399 §5) — 이 파일이 신규다.
+"""story #3373(Phase1·마케팅운영) — Threads(Meta) 서버 OAuth 교환. 앱 id/secret은 호출부
+(app/services/channel_app_credentials.py의 3단 우선순위 — 조직 등록 → platform_settings
+공용 앱 → 없음)가 해석해 넘긴다(페드루 PO 정정 2026-09-03 08:29Z·08:40Z, 블루프린트 §8).
+기존 `plugins/sprintable/connectors/threads.ts`(sprintable-agent-plugins, story #3311)엔
+발행 API 호출만 있고 OAuth 교환 로직 자체가 없다(그라운딩 doc 6766a399 §5) — 이 파일이 신규다.
 
 ⚠️미확인(그라운딩 §9, 착수 시 재확인 필요) — 아래 엔드포인트·파라미터명은 Meta Threads API
 공개 문서(지식 컷오프 2026-01) 기준 최선 추정이다. Meta가 스펙을 바꿨거나 이 구현이 틀렸으면
@@ -50,9 +51,9 @@ def build_authorize_url(*, redirect_uri: str, state: str, code_challenge: str, a
     독립적으로 이미 담당하므로 꺼도 그 축은 무너지지 않는다.
 
     `app_id`는 호출부(라우터)가 `channel_app_credentials.resolve_app_credentials()`로
-    미리 해석해 넘긴다(선생님 지적·페드루 PO 정정 2026-09-03 08:29Z) — 이 함수는 조직별
-    자격 조회 자체를 모른다(그 책임은 라우터/서비스 계층), `settings.threads_app_id`를
-    직접 읽지 않는다(그 값은 이제 org 미설정 시의 플랫폼 기본값 fallback일 뿐)."""
+    미리 해석해 넘긴다(선생님 지적·페드루 PO 정정 2026-09-03 08:29Z·08:40Z) — 이 함수는
+    조직 등록/플랫폼 공용 앱(3단 우선순위) 조회 자체를 모른다(그 책임은 라우터/서비스
+    계층), env var를 직접 읽지 않는다."""
     from urllib.parse import urlencode
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 

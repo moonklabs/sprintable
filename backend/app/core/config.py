@@ -357,13 +357,12 @@ class Settings(BaseSettings):
     # OAuth state(CSRF+org 바인딩+PKCE verifier+nonce+TTL) 서명 키 — github_app_state_secret과
     # 동형(별도 시크릿, auth.py의 로그인용 OAuth state 키와 분리·그라운딩 §9 "기본=분리" 확定).
     channel_oauth_state_secret: str = ""
-    # Threads(Meta) 서버 OAuth. 선생님 지적·페드루 PO 정정(2026-09-03 08:29Z) — "Sprintable
-    # 공용 앱 1개"였던 이전 설계는 틀린 전제. Meta 앱은 조직마다 자기 것을 등록해 쓴다
-    # (channel_app_credentials, app/services/channel_app_credentials.py). 이 두 값은 이제
-    # org 자격이 없을 때만 쓰는 «플랫폼 기본값» fallback — 비워 두면 fallback도 없다는 뜻
-    # (org가 미등록이면 authorize에서 409 CHANNEL_APP_CREDENTIALS_MISSING).
-    threads_app_id: str = ""
-    threads_app_secret: str = ""
+    # Threads(Meta) 서버 OAuth의 앱 id/secret은 env var가 **아니다**(페드루 PO 정정
+    # 2026-09-03 08:40Z, 블루프린트 §8) — 조직별 자격은 channel_app_credentials 테이블,
+    # SaaS 기본 공용 앱 자격은 platform_settings.threads_platform_app_id/
+    # encrypted_app_secret(어드민 관리, app/services/channel_app_credentials.py의 3단
+    # 우선순위 참고). 여기 Settings에는 대응 필드가 없다 — 만들지 않는다(선생님 결정③,
+    # "코드 배포 없이 바뀌어야 하는 값은 env var 금지" 원칙 그대로 적용).
     # 페드루 PO 리뷰(2026-09-03 07:26Z·07:56Z) — Threads의 PKCE(code_challenge) 수용 여부가
     # 문헌상 미확認이라, 실왕복에서 Meta가 거부하면(threads_oauth.py 참고) 재배포 없이 끄는
     # 자리. 기본 True(PKCE 시도) — dev 실왕복 검증에서 거부되면 False로.

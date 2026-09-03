@@ -47,3 +47,13 @@ class PlatformSetting(Base, TimestampMixin):
     # 금액이어야 한다(billing_charge_amount.py/billing_pack.py 참고). 기본 1000(10%,
     # 마이그 0282 시드) — 하드코딩 금지 원칙(dunning_grace_days와 동일 선례).
     vat_rate_bp: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1000"))
+    # story #3373(Phase1·마케팅운영, 페드루 PO 정정 2026-09-03 08:40Z) — SaaS 기본 제공되는
+    # «공용 Threads(Meta) 앱» 자격. 블루프린트 §8: 조직별 자격(channel_app_credentials)은
+    # 옵션이고, 공용 앱이 기본 경로다. env var(threads_app_id/secret 설정값)로 두지 않는다
+    # (이 파일 모듈 docstring의 선생님 결정③ — 코드 배포 없이 바뀌어야 하는 값은 어드민
+    # 관리, env var는 재배포가 있어야 바뀜). 둘 다 nullable — 미설정이면(NULL) 공용 앱
+    # fallback도 없다는 뜻(app/services/channel_app_credentials.py의 3단 우선순위:
+    # 조직 자격 → 이 값 → 없음=409). secret은 channel_credential_crypto.py로 암호화
+    # (channel_app_credentials.encrypted_app_secret과 동일 키·동일 함수 재사용).
+    threads_platform_app_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    threads_platform_encrypted_app_secret: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -51,8 +51,6 @@ def _configure_secrets(monkeypatch):
     import app.core.config as config_module
     monkeypatch.setattr(config_module.settings, "channel_credential_encryption_key", Fernet.generate_key().decode())
     monkeypatch.setattr(config_module.settings, "channel_oauth_state_secret", "test-channel-oauth-state-secret")
-    monkeypatch.setattr(config_module.settings, "threads_app_id", "test-app-id")
-    monkeypatch.setattr(config_module.settings, "threads_app_secret", "test-app-secret")
 
     import app.services.channel_credential_crypto as crypto_module
     importlib.reload(crypto_module)
@@ -84,10 +82,35 @@ async def _session_factory():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _seed_org(session, *, slug=None):
+async def _seed_platform_settings(session, *, threads_app_id="platform-fallback-app-id", threads_app_secret="platform-fallback-secret"):
+    """platform_settings 싱글턴 행 시드 — 실 마이그(0255)가 항상 이 행을 시드하므로 테스트
+    DB도 실제 배포 상태를 그대로 반영한다(빈 테이블은 실제로 일어나지 않는 상태).
+    threads_app_id/secret=None이면 미설정 상태(공용 앱 fallback도 없음)를 재현한다."""
+    from app.models.platform_setting import PlatformSetting
+    from app.services.channel_credential_crypto import encrypt_channel_credential
+
+    row = PlatformSetting(
+        id=uuid.uuid4(),
+        threads_platform_app_id=threads_app_id,
+        threads_platform_encrypted_app_secret=(
+            encrypt_channel_credential(threads_app_secret) if threads_app_secret is not None else None
+        ),
+    )
+    session.add(row)
+    await session.commit()
+    return row
+
+
+async def _seed_org(
+    session, *, slug=None, platform_threads_app_id="platform-fallback-app-id",
+    platform_threads_app_secret="platform-fallback-secret",
+):
     from app.models.organization import Organization
     from app.models.project import Project
 
+    await _seed_platform_settings(
+        session, threads_app_id=platform_threads_app_id, threads_app_secret=platform_threads_app_secret,
+    )
     org = Organization(id=uuid.uuid4(), name="Channel Test Org", slug=slug or f"org-{uuid.uuid4().hex[:8]}")
     session.add(org)
     await session.commit()
@@ -662,20 +685,20 @@ async def test_member_role_gets_403_setting_app_credentials_only_owner_can():
         await engine.dispose()
 
 
-@pytest.mark.anyio
-async def test_authorize_without_org_credentials_or_platform_fallback_returns_409(monkeypatch):
-    from app.main import app
-    import app.core.config as config_module
+# ─── 3단 우선순위(페드루 PO 확定 2026-09-03 08:40Z, 블루프린트 §8) — 조직 등록 →
+# 플랫폼 공용 앱(platform_settings) → 없음(409) ─────────────────────────────────
 
-    # 이 테스트만 플랫폼 기본값도 비운다(autouse 픽스처가 채워 둔 test-app-id/secret을
-    # 무효화) — org 자격도 fallback도 둘 다 없는 상태를 정확히 재현.
-    monkeypatch.setattr(config_module.settings, "threads_app_id", "")
-    monkeypatch.setattr(config_module.settings, "threads_app_secret", "")
+@pytest.mark.anyio
+async def test_authorize_without_org_credentials_or_platform_fallback_returns_409():
+    """3단 中 ③ — 조직 자격도 플랫폼 공용 앱도 둘 다 없으면 409(Meta 호출 0건)."""
+    from app.main import app
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org_id, project_id = await _seed_org(s)
+            org_id, project_id = await _seed_org(
+                s, platform_threads_app_id=None, platform_threads_app_secret=None,
+            )
             owner_id = await _seed_human(s, org_id, role="owner")
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
 
@@ -689,15 +712,38 @@ async def test_authorize_without_org_credentials_or_platform_fallback_returns_40
 
 
 @pytest.mark.anyio
-async def test_authorize_after_setting_credentials_uses_org_app_id_not_platform_fallback():
-    """설정 뒤 authorize URL에 그 app_id(페드루 PO 지시) — 플랫폼 기본값(test-app-id,
-    autouse 픽스처)이 아니라 org가 방금 등록한 값이 실제로 쓰인다는 것까지 잰다."""
+async def test_authorize_uses_platform_wide_app_when_org_has_no_credentials():
+    """3단 中 ② — 조직 자격이 없으면 platform_settings의 공용 앱(SaaS 기본)을 쓴다."""
     from app.main import app
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org_id, project_id = await _seed_org(s)
+            org_id, project_id = await _seed_org(
+                s, platform_threads_app_id="platform-wide-app-id", platform_threads_app_secret="platform-secret",
+            )
+            owner_id = await _seed_human(s, org_id, role="owner")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        async with _client_for(app) as client:
+            r_auth = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/threads/authorize")
+        assert r_auth.status_code == 200, r_auth.text
+        assert "client_id=platform-wide-app-id" in r_auth.json()["url"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_authorize_after_setting_org_credentials_uses_org_app_id_not_platform_fallback():
+    """3단 中 ① — 조직 자격이 있으면 platform_settings 공용 앱이 있어도(_seed_org 기본
+    seed) 조직 값이 우선한다(페드루 PO 지시 — 설정 뒤 authorize URL에 그 app_id)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)  # 플랫폼 기본값도 함께 시드됨(기본 인자)
             owner_id = await _seed_human(s, org_id, role="owner")
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
 
@@ -712,7 +758,7 @@ async def test_authorize_after_setting_credentials_uses_org_app_id_not_platform_
             r_auth = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/threads/authorize")
         assert r_auth.status_code == 200, r_auth.text
         assert "client_id=org-registered-app-id-999" in r_auth.json()["url"]
-        assert "test-app-id" not in r_auth.json()["url"]
+        assert "platform-fallback-app-id" not in r_auth.json()["url"]
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

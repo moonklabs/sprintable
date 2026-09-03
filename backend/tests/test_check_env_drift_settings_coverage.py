@@ -231,10 +231,16 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 서비스 — MultiFernet 암호화 키·OAuth state 서명 키·Threads 공용 앱 자격증명, 전부
     # infra/manual-env-allowlist.yml에도 등재)로 116→120. 가드가 신규 필드를 설계대로 잡은 것.
     assert "CHANNEL_CREDENTIAL_ENCRYPTION_KEY" in keys and "CHANNEL_OAUTH_STATE_SECRET" in keys
-    assert "THREADS_APP_ID" in keys and "THREADS_APP_SECRET" in keys
     # story #3373(Phase1·마케팅운영, 2026-09-03 07:56Z 페드루 PO 리뷰): threads_pkce_enabled
     # 1필드 추가 신설(PKCE code_challenge를 Meta가 거부할 때 재배포 없이 끄는 런타임
     # 플래그, threads_oauth.py 참고)로 120→121. manual-env-allowlist.yml엔 미등재(시크릿이
     # 아닌 bool 플래그라 cloudbuild.yaml --update-env-vars로 직접 배선 예정).
     assert "THREADS_PKCE_ENABLED" in keys
-    assert len(keys) == 121
+    # story #3373(Phase1·마케팅운영, 2026-09-03 08:40Z 페드루 PO 정정, 블루프린트 §8) —
+    # threads_app_id·threads_app_secret 2필드 **제거**(121→119). "Sprintable 공용 앱
+    # 1개"였던 전제가 틀렸다는 08:29Z 정정에 이어, 08:40Z 재정정으로 SaaS 기본 공용 앱
+    # 자격 자체가 env var가 아니라 platform_settings(어드민 관리 싱글턴, DB 암호화 컬럼
+    # threads_platform_app_id/encrypted_app_secret) 몫으로 옮겨갔다 — 이 두 env var
+    # 경로는 이제 아예 없다(infra/manual-env-allowlist.yml에서도 두 줄 제거).
+    assert "THREADS_APP_ID" not in keys and "THREADS_APP_SECRET" not in keys
+    assert len(keys) == 119

@@ -190,19 +190,6 @@ services:
         value_check: skip
         reason: 스토리지 프로바이더 선택 플래그 — 수동 토글.
         owner: TBD
-      - key: THREADS_APP_ID
-        value_check: skip
-        reason: >-
-          story #3373 Threads(Meta) 서버 OAuth — 선택 표기(페드루 PO 정정 2026-09-03
-          08:29Z). "Sprintable 공용 앱 1개"였던 이전 설계는 틀린 전제 — Meta 앱은
-          조직마다 channel_app_credentials(암호화 DB 저장)에 자기 것을 등록해 쓴다.
-          이 값은 org 미등록 시에만 쓰는 플랫폼 기본값 fallback이라 비워 둬도 무방
-          (threads_oauth.py·channel_app_credentials.py 참고).
-        owner: TBD
-      - key: THREADS_APP_SECRET
-        value_check: skip
-        reason: 위와 동일 — 선택 표기, org 미등록 시 fallback용 client secret.
-        owner: TBD
       - key: TOSS_PAYMENTS_CLIENT_KEY
         reason: >-
           결제②-C0(#2491) Toss Payments 클라이언트 키 — state/shared/credentials/
