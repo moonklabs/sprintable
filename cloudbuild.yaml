@@ -766,9 +766,15 @@ steps:
         # 이미 live인 backend prod 배포 자체가 "secret not found"로 깨진다. backend
         # 코드 쪽은 이미 이 값 미설정 시 fail-closed 503(support_gateway_token.py)이라
         # 시크릿을 아예 안 실어도 안전 — prod가 그 상태다.
+        # story f56bd418(#3390, Phase1·인프라) — CHANNEL_CREDENTIAL_ENCRYPTION_KEY·
+        # CHANNEL_OAUTH_STATE_SECRET(story #3373 채널 연결 골격, config.py의
+        # channel_credential_encryption_key·channel_oauth_state_secret)을 **dev
+        # 분기에만** 추가한다. prod는 별도 결정(prod 시크릿 미생성 — SUPPORT_GATEWAY_
+        # TOKEN_SECRET과 동일 선례: 값 미설정 시 fail-closed라 시크릿을 아예 안 실어도
+        # 안전, prod SECRETS_FLAG에 넣으면 존재하지 않는 시크릿으로 배포 자체가 깨진다).
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_dev:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_dev:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_DEV:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest"
         fi
