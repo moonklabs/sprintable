@@ -3,7 +3,8 @@
 공개 API 계약은 story 15a18511(랜딩) 본문이 정본 — 이 테스트는 그 절의 필드명·상태코드를
 그대로 assert한다(list `{"posts":[{slug,title,summary,tags,lang,published_at}]}`, detail
 `{slug,title,summary,tags,lang,published_at,body_md,source_story_id}`, unknown public_key/slug
-→404 `{"detail":"not found"}`, lang 누락 →400).
+→404, lang 누락 →400). 오류 본문 형상은 계약 밖(PO 판정 2026-09-03 — 미르코군 랜딩은
+res.ok만 보고 본문은 안 읽음) — 앱 전역 HTTPException 봉투 그대로 검증한다.
 
 seed 하네스는 test_3354_pageview_counter.py 패턴(httpx ASGITransport+override_db_and_read+
 claims에 org_id 직접 주입) 재사용."""
@@ -332,9 +333,9 @@ async def test_unknown_public_key_returns_404_not_found():
                 "/api/v2/public/site-posts/hello-world", params={"public_key": "garbage", "lang": "ko"},
             )
         assert r_list.status_code == 404
-        assert r_list.json() == {"detail": "not found"}
+        assert r_list.json() == {"data": None, "error": {"code": "NOT_FOUND", "message": "not found"}, "meta": None}
         assert r_detail.status_code == 404
-        assert r_detail.json() == {"detail": "not found"}
+        assert r_detail.json() == {"data": None, "error": {"code": "NOT_FOUND", "message": "not found"}, "meta": None}
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -356,7 +357,7 @@ async def test_unknown_slug_returns_404():
                 "/api/v2/public/site-posts/does-not-exist", params={"public_key": public_key, "lang": "ko"},
             )
         assert r.status_code == 404
-        assert r.json() == {"detail": "not found"}
+        assert r.json() == {"data": None, "error": {"code": "NOT_FOUND", "message": "not found"}, "meta": None}
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
