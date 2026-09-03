@@ -118,6 +118,17 @@ class Gate(Base):
     # 단조증가) 워터마크. reopen_gate_if_new_sha가 이걸로 stale/순서역전 웹훅 배달을
     # 걸러 이미 최신 SHA로 승인된 게이트를 옛 배달로 부당 재-pending시키지 않는다.
     pr_head_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3365(Phase0 S2, 마케팅운영) — external_publish 전용 sealing. approved_head_sha
+    # (위, merge gate)와 동형 축: "이 승인이 귀속된 대상"을 서버가 상신 시점에 한 번 기록하고
+    # 그 뒤로는 **비교만** 한다(어떤 갱신 경로도 열지 않는다 — story 본문 «봉인 값 불변» AC).
+    # 최신 site_post_versions 행과 다르면(즉 승인 뒤 수정) 공개 서비스가 409로 거부하고,
+    # 그 새 버전을 만든 트랜잭션이 이 gate를 pending으로 되돌린다(site_posts.py 참고).
+    sealed_content_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sealed_content_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_content_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
+    # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
+    reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

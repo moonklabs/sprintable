@@ -50,6 +50,10 @@ def _non_doc_gate_session():
         # 필요 — 이 파일의 관심사는 resolver_id 강제이지 designated 정책 판정이 아니므로
         # None="정책 미설정"으로 그 축을 대상 밖임을 분명히 한다).
         designated_approver_id=None,
+        # story #3365(Phase0 S2) — external_publish 전용 막다른 길 가드(gates.py)가 이제 이
+        # 필드를 읽는다(위 다른 None 필드들과 동일 이유 — 이 파일의 관심사는 resolver_id 강제,
+        # site-post 재승인 판정이 아니므로 False="일반 게이트, 그 축 대상 밖"으로 명시한다).
+        reapproval_required=False,
     )
     s.execute = AsyncMock(return_value=gr)
     return s

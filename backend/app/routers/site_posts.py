@@ -19,12 +19,18 @@ from app.services.site_posts import (
     ExternalPublishGateNotApprovedError,
     InvalidSitePostInputError,
     MediaNotSupportedPhase0Error,
+    SitePostApproverRoleMissingError,
+    SitePostDraftNotFoundError,
+    SitePostReapprovalRequiredError,
+    SitePostSealMissingError,
+    SitePostVersionNotFoundError,
     create_site_post_draft_version,
     get_site_post_draft,
     is_agent_caller,
     list_site_post_draft_versions,
     list_site_post_drafts,
     publish_site_post,
+    submit_site_post_draft,
 )
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["site-posts"])
@@ -45,6 +51,8 @@ class SitePostDraftVersionResponse(BaseModel):
     draft_id: uuid.UUID
     version_id: uuid.UUID
     version: int
+    author_kind: str
+    body_sha256: str
 
 
 class SitePostDraftListItem(BaseModel):
@@ -55,7 +63,19 @@ class SitePostDraftListItem(BaseModel):
     title: str
     current_version: int
     latest_author_kind: str
+    origin_author_kind: str
     updated_at: str
+
+
+class SubmitSitePostDraftRequest(BaseModel):
+    version_id: uuid.UUID | None = None
+
+
+class SubmitSitePostDraftResponse(BaseModel):
+    gate_id: uuid.UUID
+    version_id: uuid.UUID
+    content_sha256: str
+    status: str
 
 
 class SitePostVersionHistoryItem(BaseModel):
@@ -127,6 +147,16 @@ async def post_site_post(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ExternalPublishGateNotApprovedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except SitePostReapprovalRequiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+    except SitePostSealMissingError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SITE_POST_SEAL_MISSING", "message": str(exc)},
+        ) from exc
 
     return SitePostResponse(
         id=post.id, slug=post.slug, title=post.title, lang=post.lang,
@@ -169,6 +199,7 @@ async def post_site_post_draft_version(
 
     return SitePostDraftVersionResponse(
         draft_id=version.draft_id, version_id=version.id, version=version.version,
+        author_kind=version.author_kind, body_sha256=version.body_sha256,
     )
 
 
@@ -191,10 +222,11 @@ async def list_site_post_drafts_endpoint(
     return [
         SitePostDraftListItem(
             draft_id=draft.id, work_item_id=draft.work_item_id, slug=draft.slug,
-            lang=version.lang, title=version.title, current_version=version.version,
-            latest_author_kind=version.author_kind, updated_at=version.created_at.isoformat(),
+            lang=latest.lang, title=latest.title, current_version=latest.version,
+            latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
+            updated_at=latest.created_at.isoformat(),
         )
-        for draft, version in rows
+        for draft, latest, origin in rows
     ]
 
 
@@ -227,3 +259,42 @@ async def list_site_post_draft_version_history(
         )
         for v in versions
     ]
+
+
+@router.post(
+    "/{org_id}/site-posts/drafts/{draft_id}/submit", response_model=SubmitSitePostDraftResponse,
+)
+async def submit_site_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    body: SubmitSitePostDraftRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> SubmitSitePostDraftResponse:
+    """story #3365(Phase0 S2) — 초안 버전을 external_publish 게이트에 상신(PO 계약 확定
+    2026-09-03 04:26Z). body.version_id 생략 시 최신 버전. 에이전트 키도 호출 가능 — 게이트
+    생성까지만 허용되고(AC2), external_publish는 항상 human-only 승인 대상(기존 gates.py
+    transition_gate_endpoint의 human-only 가드가 그대로 적용, 신규 코드 없음)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    try:
+        gate, version_id = await submit_site_post_draft(
+            db, org_id=org_id, draft_id=draft_id, version_id=body.version_id,
+            requester_member_id=uuid.UUID(auth.user_id),
+        )
+    except SitePostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SitePostVersionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SitePostApproverRoleMissingError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SITE_POST_APPROVER_ROLE_MISSING", "message": str(exc)},
+        ) from exc
+
+    return SubmitSitePostDraftResponse(
+        gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
+        status=gate.status,
+    )

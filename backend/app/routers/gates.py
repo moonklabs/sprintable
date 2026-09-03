@@ -216,6 +216,14 @@ class GateResponse(BaseModel):
     # 등 타 엔드포인트는 PR 링크 N+1 조회 비용 때문에 스코프 밖, risk_grade/can_approve와 동일
     # 선례 — Gate ORM에 이 속성이 없어 from_attributes 기본값으로 조용히 통과).
     github_check_enforced: bool | None = None
+    # story #3367(Phase0 S2, 페드루 PO 리뷰 2026-09-03 05:59Z) — external_publish 전용 sealing.
+    # S4 승인 카드(본문 전문·버전·해시)·재승인 배지(봉인 해시 vs 현재 해시 파생)가 이걸 읽는다.
+    # github_check_run_sha/approved_head_sha와 동일 선례 — Gate ORM 컬럼명과 일치라
+    # from_attributes로 자동 채워짐(다른 gate_type은 전부 None, additive·하위호환).
+    sealed_content_version: int | None = None
+    sealed_content_sha256: str | None = None
+    sealed_content_body: str | None = None
+    reapproval_required: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -1486,6 +1494,29 @@ async def transition_gate_endpoint(
                 "current_status": _gate.status,
                 "resolver_id": str(_gate.resolver_id) if _gate.resolver_id else None,
                 "resolved_at": _gate.resolved_at.isoformat() if _gate.resolved_at else None,
+            },
+        )
+    # story #3365(Phase0 S2, 페드루 PO 재정정 2026-09-03 06:06Z) — external_publish 전용 막다른
+    # 길 차단. 승인 뒤 편집으로 pending 재오픈된 게이트는 sealed_content_*가 옛 버전 그대로다
+    # (site_posts.py `_reseal_gate_on_new_version` 참고 — 승인 기록을 조용히 덮지 않는다). 이
+    # 옛 봉인을 그대로 승인하면 site_posts.py의 409 비교 기준점만 갱신될 뿐 실제로는 아무 새
+    # 내용도 승인받지 못한 채 "승인됨"으로 보이는 막다른 길이 열린다 — 재봉인(submit() 재호출)
+    # 없이는 approve 전이 자체를 막는다.
+    # ⚠️페드루 PO 실측(2026-09-03 07:11Z, CI shard 3 실패) — gate_type 스코프 없이
+    # `_gate.reapproval_required`만 보면 bare MagicMock 기반 테스트(예:
+    # test_edg_s23_hypothesis_overlay.py — gate_type="merge"만 명시하고 이 필드는 안 건드림)의
+    # auto-attribute가 항상 truthy MagicMock이라 site-post와 무관한 gate_type까지 이 가드에
+    # 걸린다(#2975/#2982/#3319와 동형 MagicMock 함정 재발). gate_type=="external_publish"로
+    # 명시 스코프해 그 클래스의 오탐을 원천 차단한다 — 다른 gate_type은 이 필드를 절대 안 본다.
+    if (
+        body.status == "approved" and _gate is not None
+        and _gate.gate_type == "external_publish" and _gate.reapproval_required
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SITE_POST_RESUBMIT_REQUIRED",
+                "message": "승인 뒤 내용이 바뀌었습니다. 재상신(submit)한 뒤 다시 승인해주세요.",
             },
         )
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
