@@ -14,23 +14,41 @@ from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
     ChannelPostApproverRoleMissingError,
     ChannelPostDraftNotFoundError,
+    ChannelPostReapprovalRequiredError,
+    ChannelPostSealMissingError,
     ChannelPostVersionNotFoundError,
+    ChannelPublishProviderError,
+    ChannelRateLimitedError,
     ChannelTextTooLongError,
+    ChannelTokenExpiredError,
+    ExternalPublishGateNotApprovedError,
     create_channel_post_draft_version,
     get_channel_post_draft,
     is_agent_caller,
     list_channel_post_draft_versions,
     list_channel_post_drafts,
+    publish_channel_post_draft,
     submit_channel_post_draft,
 )
-
-# story f8f7cb0f(서버 Threads 발행 실행, 다음 스토리) — publish 엔드포인트가 여기 추가되면
-# ChannelPostSealMissingError/ChannelPostReapprovalRequiredError(gate_seal.py 공용 헬퍼,
-# app.services.channel_posts가 재-export)를 잡아 SITE_POST_SEAL_MISSING/
-# SITE_POST_REAPPROVAL_REQUIRED로 매핑한다(site_posts.py와 문자열 공유, PO 확定
-# 2026-09-03 09:02Z) — 이번 스토리(초안·상신 봉인까지)엔 발행이 없어 아직 안 씀.
+from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-posts"])
+
+
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """AC1(발행 human-only) — channel_connections.py::_require_human과 동형(별도 role
+    제한 없음, publish보다 좁은 owner/admin 축이 아니다 — site_posts.py의 publish
+    엔드포인트와 같은 권한 폭: org 멤버인 휴먼이면 누구나)."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_POST_PUBLISH_HUMAN_ONLY",
+                "message": "채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
+            },
+        )
+    return resolved
 
 
 class CreateChannelPostDraftVersionRequest(BaseModel):
@@ -226,4 +244,87 @@ async def submit_channel_post_draft_endpoint(
     return SubmitChannelPostDraftResponse(
         gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
         status=gate.status,
+    )
+
+
+class PublishChannelPostResponse(BaseModel):
+    permalink: str | None
+    external_id: str | None
+    published_at: str
+    version_id: uuid.UUID
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/publish", response_model=PublishChannelPostResponse,
+)
+async def publish_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> PublishChannelPostResponse:
+    """story #f8f7cb0f — 휴먼 전용(AC1). 발행 직전 게이트 approved·봉인 일치·connection
+    active 셋을 재검증(fail-closed)한 뒤 연결 토큰으로 Threads에 2-호출 발행한다. 같은
+    (gate, version) 재요청은 멱등(새 POST 없이 기존 완료 행 반환)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await _require_human(db, auth, org_id)
+
+    try:
+        row = await publish_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ExternalPublishGateNotApprovedError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+    except ChannelTextTooLongError as exc:
+        # 페드루 PO 확定(2026-09-03) — 발행 시점 재검사(UTM 태그된 링크가 붙은 실제 전송
+        # 문자열 기준). draft 생성 시점의 매핑(422·max_length·current_length)과 동형 —
+        # 코드 하나가 두 HTTP status를 갖지 않게 유지.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_TEXT_TOO_LONG", "message": str(exc),
+                "max_length": exc.max_length, "current_length": exc.current_length,
+            },
+        ) from exc
+    except ChannelPostSealMissingError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "SITE_POST_SEAL_MISSING", "message": str(exc)},
+        ) from exc
+    except ChannelPostReapprovalRequiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+    except ChannelConnectionNotActiveError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
+        ) from exc
+    except ChannelTokenExpiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": str(exc)},
+        ) from exc
+    except ChannelRateLimitedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "CHANNEL_RATE_LIMITED", "message": str(exc), "reset_at": exc.reset_at.isoformat()},
+        ) from exc
+    except ChannelPublishProviderError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)},
+        ) from exc
+
+    return PublishChannelPostResponse(
+        permalink=row.permalink, external_id=row.external_id,
+        published_at=row.published_at.isoformat(), version_id=row.version_id,
     )

@@ -1,9 +1,9 @@
 {
   "_snapshot_policy": "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 ~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐.",
-  "source_run": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge",
+  "source_run": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge",
   "measured_at": "2026-09-03",
-  "total_files": 205,
-  "total_sec": 1127.44,
+  "total_files": 206,
+  "total_sec": 1139.41,
   "files": [
     {
       "file": "tests/test_3373_channel_connections.py",
@@ -824,6 +824,10 @@
     {
       "file": "tests/test_3384_site_post_list_status.py",
       "sec": 4.25
+    },
+    {
+      "file": "tests/test_f8f7cb0f_channel_post_publish.py",
+      "sec": 11.97
     }
   ]
 }
