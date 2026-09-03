@@ -594,13 +594,25 @@ def resolve_gate_holder_draft_id(
     None을 반환하는 경우 전부 "막지 않는다"는 뜻이다: 게이트가 없음(신규) · pending/
     approved가 아님(rejected/voided 등 — 걱정할 보유자가 없다) · neutral_facts에
     draft_id가 아예 없음(이 판정이 생기기 前의 레거시 게이트, "모른다≠다르다" — 모르면
-    막지 않는다) · this_draft_id와 같음(자기 자신, 재상신은 언제나 허용)."""
+    막지 않는다) · this_draft_id와 같음(자기 자신, 재상신은 언제나 허용) · neutral_facts.
+    draft_id 값이 유효한 UUID가 아님(페드루 PO 리뷰, PR#3764 — 옛 코드(리팩터 前)는
+    문자열 그대로 비교해 이 자리서 절대 안 터졌는데, `uuid.UUID(...)` 파싱을 여기로
+    끌어오며 생긴 신규 실패 축이었다: 이 함수는 가드다 — 가드가 깨진 데이터 때문에
+    500을 내면 안 된다. 못 읽으면 "모른다"로 취급해 막지 않고 warning만 남긴다)."""
     if existing_gate is None or existing_gate.status not in ("pending", "approved"):
         return None
     holding_raw = (existing_gate.neutral_facts or {}).get("draft_id")
     if holding_raw is None:
         return None
-    holding_id = uuid.UUID(holding_raw)
+    try:
+        holding_id = uuid.UUID(holding_raw)
+    except (ValueError, TypeError, AttributeError):
+        logger.warning(
+            "gate.neutral_facts.draft_id is not a valid UUID (gate_id=%s, value=%r) — "
+            "treating as unknown holder, not blocking",
+            existing_gate.id, holding_raw,
+        )
+        return None
     if holding_id == this_draft_id:
         return None
     return holding_id

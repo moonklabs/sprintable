@@ -388,3 +388,61 @@ async def test_legacy_gate_without_draft_id_in_neutral_facts_does_not_block():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_corrupted_draft_id_in_neutral_facts_does_not_block_or_500():
+    """⭐페드루 PO 리뷰(PR#3764) — neutral_facts.draft_id가 유효한 UUID가 아니면(데이터
+    손상) resolve_gate_holder_draft_id가 500을 내지 않는다 — "모른다"로 취급해 막지 않고
+    상신은 그대로 200이어야 한다(가드가 깨진 데이터로 서비스를 죽이면 안 된다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_a = await _seed_connection(s, org_id, account_id="acct-a")
+            connection_b = await _seed_connection(s, org_id, account_id="acct-b")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r_draft_a = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_a),
+            )
+            assert r_draft_a.status_code == 201, r_draft_a.text
+
+            r_submit_a = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{r_draft_a.json()['draft_id']}/submit",
+                json={},
+            )
+            assert r_submit_a.status_code == 200, r_submit_a.text
+            gate_id = uuid.UUID(r_submit_a.json()["gate_id"])
+
+        # 손상 재현 — draft_id 값을 유효하지 않은 문자열로 덮어쓴다.
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.neutral_facts = {**gate.neutral_facts, "draft_id": "not-a-uuid"}
+            await s.commit()
+
+        async with _client_for(app) as client:
+            r_draft_b = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_b),
+            )
+            assert r_draft_b.status_code == 201, r_draft_b.text
+
+            r_submit_b = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{r_draft_b.json()['draft_id']}/submit",
+                json={},
+            )
+            assert r_submit_b.status_code == 200, r_submit_b.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
