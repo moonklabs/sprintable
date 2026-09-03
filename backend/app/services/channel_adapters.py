@@ -24,6 +24,10 @@ class ChannelAdapterConfig:
     # access_token으로 재발급, refresh_token 불요) | "manual"(자동 갱신 불가 — 재인증 유도).
     refresh_mode: str
     credential_kind: str = "oauth"  # "oauth" | "pasted_secret" | "none"
+    # story #3374(Phase1·마케팅운영, PO 결정) — 채널 포스트 초안 text 상한. 상수를 서비스/
+    # 라우터에 하드코딩하지 않고 여기 한 곳에 선언(담롱 요구 — "상수 하드코딩 X·선언·표시",
+    # 초안 저장 422 응답에 이 값을 그대로 실어 보낸다).
+    max_text_length: int = 0
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -33,6 +37,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         scope="threads_basic,threads_content_publish",
         refresh_mode="reissue_from_access_token",
         credential_kind="oauth",
+        # sprintable-agent-plugins/plugins/sprintable/connectors/threads.ts:27의
+        # MAX_TEXT_LENGTH=500 그대로(story #3311, Meta 공식 문서 페이지 직접 실측 — 추정값
+        # 아님).
+        max_text_length=500,
     ),
 }
 

@@ -21,6 +21,11 @@ from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
 from app.models.team import TeamMember
+from app.services.gate_seal import (
+    GateReapprovalRequiredError as SitePostReapprovalRequiredError,
+    GateSealMissingError as SitePostSealMissingError,
+    compute_seal_hash,
+)
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _LANG_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
@@ -49,28 +54,6 @@ class ExternalPublishGateNotApprovedError(Exception):
             else "이 work item에 승인된 external_publish 게이트가 없습니다"
         )
         super().__init__(detail)
-
-
-class SitePostReapprovalRequiredError(Exception):
-    """story #3365(Phase0 S2) AC6 — 승인된 버전(gate.sealed_content_sha256)과 지금 공개하려는
-    내용의 해시가 다르다."""
-
-    def __init__(self, *, gate_id: uuid.UUID):
-        self.gate_id = gate_id
-        super().__init__(f"승인된 버전과 현재 내용이 다릅니다(gate_id={gate_id}) — 재승인이 필요합니다")
-
-
-class SitePostSealMissingError(Exception):
-    """story #3365(Phase0 S2, 페드루 PO 리뷰 2026-09-03 05:59Z) — fail-closed. gate.status가
-    approved/auto_passed인데 sealed_content_sha256이 None(제출→봉인 없이 승인된 구식/우회
-    게이트)이면, "무엇이 승인됐는지 서버가 모른다"는 뜻이라 REAPPROVAL_REQUIRED(내용이
-    다르다는 걸 안다)와는 다른 별개 코드로 거부한다(유나 설계 §3-1-1 "모른다≠다르다").
-    S2 이전 이미 공개된 SitePost 행은 이 검사와 무관(projection 자체는 안 건드림) — 이
-    게이트로 다시 발행을 시도할 때만 막힌다(재발행은 submit()으로 재상신해 봉인부터)."""
-
-    def __init__(self, *, gate_id: uuid.UUID):
-        self.gate_id = gate_id
-        super().__init__(f"이 게이트는 봉인된 버전이 없습니다(gate_id={gate_id}) — 재상신 후 다시 승인받아야 합니다")
 
 
 class SitePostApproverRoleMissingError(Exception):
@@ -262,12 +245,10 @@ async def is_agent_caller(db: AsyncSession, *, org_id: uuid.UUID, member_id: uui
 
 def compute_body_sha256(*, title: str, lang: str, summary: str, tags: list, body_md: str) -> str:
     """canonical payload hash — S2가 승인 대상 버전을 봉인할 때(gate.sealed_content_sha256)
-    재사용할 같은 계산(페드루 PO 확定, 문서 62fc03ee §4-3: "content_sha256"이 이 값 그대로)."""
-    canonical = json.dumps(
-        {"title": title, "lang": lang, "summary": summary, "tags": tags, "body_md": body_md},
-        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    재사용할 같은 계산(페드루 PO 확定, 문서 62fc03ee §4-3: "content_sha256"이 이 값 그대로).
+    story #3374 — 실 계산은 gate_seal.compute_seal_hash(공용)로 옮기고, 여기는 site_posts
+    도메인의 payload dict 조립부(title/lang/summary/tags/body_md 서명)만 남는다."""
+    return compute_seal_hash({"title": title, "lang": lang, "summary": summary, "tags": tags, "body_md": body_md})
 
 
 # story #3365(Phase0 S2) — Phase 0엔 미디어가 없어(S1) manifest는 항상 빈 배열 → 이 해시는
