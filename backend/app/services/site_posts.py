@@ -472,6 +472,11 @@ async def submit_site_post_draft(
         "media_manifest_hash": _EMPTY_MEDIA_MANIFEST_HASH,
         "draft_author_member_id": str(origin_author_member_id),
         "requested_by_member_id": str(requester_member_id),
+        # story #3387 — 이 게이트가 가리키는 글 관리 화면(apps/web /content/{draft_id})을
+        # 에이전트 알림(_render_gate_verdict_message)이 참조로 실을 수 있도록. 게이트 자체엔
+        # draft_id 컬럼이 없어(그라운딩 완료) 기존 필드들과 동형으로 neutral_facts에 얹는다
+        # — 링크가 아니라 참조 정보다(PO 2026-09-03 13:33Z, 에이전트에겐 실행 권유 아님).
+        "draft_id": str(draft.id),
     }
 
     # 페드루 PO 리뷰(2026-09-03 05:59Z) — 기본 역할이 없으면 가짜 uuid로 게이트를 만드는
