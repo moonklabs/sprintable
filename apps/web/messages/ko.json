@@ -2078,7 +2078,21 @@
     "contentStatusPending": "승인 대기",
     "contentStatusApproved": "승인됨",
     "contentStatusPublished": "발행됨",
-    "contentStatusReapprovalNeeded": "재승인 필요"
+    "contentStatusReapprovalNeeded": "재승인 필요",
+    "editTitle": "글 편집",
+    "editMeta": "slug: {slug} · 언어: {lang}",
+    "editSaved": "저장했습니다. 새 버전이 생성됐습니다.",
+    "editSaveFailed": "저장하지 못했습니다.",
+    "editLoadFailed": "글을 불러오지 못했습니다.",
+    "editSaveCta": "저장",
+    "editSavingCta": "저장 중…",
+    "fieldTitle": "제목",
+    "fieldSummary": "요약",
+    "fieldTags": "태그",
+    "fieldTagsPlaceholder": "쉼표로 구분",
+    "fieldBody": "본문(Markdown)",
+    "fieldSlugLangLocked": "slug · 언어(잠김 — 첫 버전 이후 변경 불가)",
+    "fieldLastEditedBy": "최종 수정 주체"
   },
   "docs": {
     "title": "문서",

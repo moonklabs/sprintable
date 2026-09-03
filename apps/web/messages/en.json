@@ -2078,7 +2078,21 @@
     "contentStatusPending": "Pending approval",
     "contentStatusApproved": "Approved",
     "contentStatusPublished": "Published",
-    "contentStatusReapprovalNeeded": "Reapproval needed"
+    "contentStatusReapprovalNeeded": "Reapproval needed",
+    "editTitle": "Edit post",
+    "editMeta": "slug: {slug} · lang: {lang}",
+    "editSaved": "Saved. A new version was created.",
+    "editSaveFailed": "Failed to save.",
+    "editLoadFailed": "Failed to load the post.",
+    "editSaveCta": "Save",
+    "editSavingCta": "Saving…",
+    "fieldTitle": "Title",
+    "fieldSummary": "Summary",
+    "fieldTags": "Tags",
+    "fieldTagsPlaceholder": "Comma-separated",
+    "fieldBody": "Body (Markdown)",
+    "fieldSlugLangLocked": "Slug · language (locked after the first version)",
+    "fieldLastEditedBy": "Last edited by"
   },
   "docs": {
     "title": "Documentation",

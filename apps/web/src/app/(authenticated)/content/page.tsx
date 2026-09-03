@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -118,7 +119,11 @@ export default function ContentPostListPage() {
                 const status = deriveContentPostStatus({});
                 return (
                   <tr key={draft.draft_id} data-testid="content-list-row">
-                    <td className="px-3 py-2.5 font-medium text-foreground">{draft.title}</td>
+                    <td className="px-3 py-2.5 font-medium text-foreground">
+                      <Link href={`/content/${draft.draft_id}`} className="hover:underline">
+                        {draft.title}
+                      </Link>
+                    </td>
                     <td className="px-3 py-2.5"><StatusChip status={status} t={t} /></td>
                     <td className="px-3 py-2.5 text-muted-foreground">v{draft.current_version}</td>
                     <td className="px-3 py-2.5 text-muted-foreground">
