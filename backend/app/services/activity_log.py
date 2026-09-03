@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ActorType = Literal["agent", "human"]
+# story #3369(Phase0 S3, 마케팅운영) — "platform"은 서버 자신이 기계적으로 실행한 행위
+# (승인은 human이 결정했지만 공개 projection 반영 자체는 platform이 한다, 도크 4b580094
+# AC5)를 human/agent 어느 쪽도 아닌 제3의 행위자로 구분하기 위한 신규 값. 마이그레이션
+# 0311이 activity_logs.actor_type CHECK 제약을 이 값까지 넓힌다.
+ActorType = Literal["agent", "human", "platform"]
 
 
 async def record_activity_bg(
@@ -111,8 +115,8 @@ class ActivityLogService:
         context: dict | None = None,
     ) -> ActivityLog:
         """activity_logs row 생성. immutable — update/delete 없음. (AC2, AC3, AC4, AC5)"""
-        if actor_type not in ("agent", "human"):
-            raise ValueError(f"actor_type must be 'agent' or 'human', got {actor_type!r}")
+        if actor_type not in ("agent", "human", "platform"):
+            raise ValueError(f"actor_type must be 'agent', 'human', or 'platform', got {actor_type!r}")
 
         log = ActivityLog(
             org_id=org_id,
