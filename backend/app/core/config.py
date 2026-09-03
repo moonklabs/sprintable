@@ -350,6 +350,17 @@ class Settings(BaseSettings):
     # 존재해야 한다 — 로그·API 응답·DB 어디에도 남기지 않는다(app/services/billing_key_crypto.py).
     org_billing_key_encryption_key: str = ""
 
+    # story #3373(Phase1·마케팅운영) — channel_connections.encrypted_*(OAuth 토큰) 암호화
+    # 키(들). org_billing_key_encryption_key와 동일 패턴(MultiFernet 회전, 콤마구분)이지만
+    # 독립 시크릿 — 결제 키 회전이 채널 토큰에 영향 주지 않는다(도메인 분리, PO 확定).
+    channel_credential_encryption_key: str = ""
+    # OAuth state(CSRF+org 바인딩+PKCE verifier+nonce+TTL) 서명 키 — github_app_state_secret과
+    # 동형(별도 시크릿, auth.py의 로그인용 OAuth state 키와 분리·그라운딩 §9 "기본=분리" 확定).
+    channel_oauth_state_secret: str = ""
+    # Threads(Meta) 서버 OAuth — Sprintable 공용 앱 1개, 조직별 토큰(channel_connections에 암호화 보관).
+    threads_app_id: str = ""
+    threads_app_secret: str = ""
+
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
 
