@@ -14,7 +14,17 @@ claims에 org_id 직접 주입) 재사용.
 기존 "성공 발행" 테스트들은 그 경계가 생기기 전 작성돼 caller로 agent를 썼던 것 — 이제
 휴먼(`_seed_human`)으로 바꿔 각 테스트가 원래 의도(게이트/slug/upsert/공개 조회 chokepoint)를
 계속 정확히 검증하게 한다(안 바꾸면 새 agent-차단이 먼저 걸려 원래 검증하려던 경로를 더 이상
-안 타면서도 같은 403으로 조용히 통과해버린다)."""
+안 타면서도 같은 403으로 조용히 통과해버린다).
+
+⚠️story #3367(Phase0 S2, 2026-09-03) 회귀 — 페드루 PO 리뷰(fail-closed)로 승인된 게이트도
+`sealed_content_sha256`이 없으면(S2 이전 방식으로 직접 approved 시드) 공개가 409
+SITE_POST_SEAL_MISSING으로 막힌다. 이 파일의 "성공 발행" 테스트는 `_seed_gate`에
+`seal_for=_publish_body(...)`를 넘겨 봉인까지 시드한다 — 이 파일의 관심사는 seal 자체가
+아니라 게이트/slug/upsert/공개 조회 chokepoint이므로, seal은 "이미 submit()을 거친 정상
+게이트"를 흉내 내는 전제 조건일 뿐이다(seal 자체의 회귀는 test_3367_site_post_submit_gate_
+seal.py 관할). `test_republish_...`는 재발행 시 본문을 바꾸지 않는다 — 승인 후 다른 본문
+publish는 이제 그 자체가 회귀 대상(같은 파일의 새 테스트가 별도로 검증)이라 원래 이 테스트가
+검증하려던 "upsert가 행을 안 늘린다"만 그대로 남긴다."""
 from __future__ import annotations
 
 import os
@@ -114,12 +124,25 @@ async def _seed_story(session, org_id, project_id, *, title="1호 글"):
     return story.id
 
 
-async def _seed_gate(session, org_id, work_item_id, *, status="pending", gate_type="external_publish"):
+async def _seed_gate(
+    session, org_id, work_item_id, *, status="pending", gate_type="external_publish", seal_for=None,
+):
+    """seal_for: story #3367(Phase0 S2) — 넘기면 그 `_publish_body(...)` dict의 canonical
+    해시로 `sealed_content_sha256`을 채운다(fail-closed 회귀 — 승인 게이트도 봉인 없인 공개
+    안 됨). None(기본)이면 예전처럼 미봉인 — pending/미승인 케이스는 seal 자체가 무관하다."""
     from app.models.gate import Gate
+
+    sealed_content_sha256 = None
+    if seal_for is not None:
+        from app.services.site_posts import compute_body_sha256
+        sealed_content_sha256 = compute_body_sha256(
+            title=seal_for["title"], lang=seal_for["lang"], summary=seal_for["summary"],
+            tags=seal_for["tags"], body_md=seal_for["body_md"],
+        )
 
     gate = Gate(
         id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, work_item_type="story",
-        gate_type=gate_type, status=status,
+        gate_type=gate_type, status=status, sealed_content_sha256=sealed_content_sha256,
     )
     session.add(gate)
     await session.commit()
@@ -254,7 +277,8 @@ async def test_post_with_approved_gate_returns_201_and_public_api_reflects():
             org_id, project_id = await _seed_org(s)
             human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
-            gate_id = await _seed_gate(s, org_id, story_id, status="approved")
+            _body = _publish_body(work_item_id=story_id)
+            gate_id = await _seed_gate(s, org_id, story_id, status="approved", seal_for=_body)
             public_key = await _seed_metering_key(s, org_id)
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
@@ -305,7 +329,8 @@ async def test_auto_passed_gate_also_counts_as_approved():
             org_id, project_id = await _seed_org(s)
             human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
-            await _seed_gate(s, org_id, story_id, status="auto_passed")
+            _body = _publish_body(work_item_id=story_id)
+            await _seed_gate(s, org_id, story_id, status="auto_passed", seal_for=_body)
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
@@ -344,6 +369,10 @@ async def test_invalid_slug_rejected_422():
 
 @pytest.mark.anyio
 async def test_republish_same_org_lang_slug_upserts_single_row():
+    """story #3367(Phase0 S2) 후속 정정 — 재발행은 봉인된 것과 **같은** 내용으로만 성공한다
+    (다른 본문 재발행은 이제 409 SITE_POST_REAPPROVAL_REQUIRED/SEAL_MISSING이 정상 동작 —
+    별도 테스트가 그걸 검증한다). 이 테스트의 관심사는 그대로 upsert 자체(같은 슬러그 재호출이
+    행을 안 늘리는 것)다."""
     from app.main import app
     from app.models.site_post import SitePost
     from sqlalchemy import func, select
@@ -354,7 +383,8 @@ async def test_republish_same_org_lang_slug_upserts_single_row():
             org_id, project_id = await _seed_org(s)
             human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
-            gate_id = await _seed_gate(s, org_id, story_id, status="approved")
+            _body = _publish_body(work_item_id=story_id)
+            gate_id = await _seed_gate(s, org_id, story_id, status="approved", seal_for=_body)
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 
         async with _client_for(app) as client:
@@ -362,16 +392,17 @@ async def test_republish_same_org_lang_slug_upserts_single_row():
                 f"/api/v2/organizations/{org_id}/site-posts",
                 json=_publish_body(work_item_id=story_id, gate_id=gate_id),
             )
-            body2 = _publish_body(work_item_id=story_id, gate_id=gate_id)
-            body2["title"] = "제목 수정판"
-            r2 = await client.post(f"/api/v2/organizations/{org_id}/site-posts", json=body2)
+            r2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json=_publish_body(work_item_id=story_id, gate_id=gate_id),
+            )
         assert r2.status_code == 201, r2.text
 
         async with Session() as s:
             count = (await s.execute(select(func.count()).select_from(SitePost))).scalar_one()
             row = (await s.execute(select(SitePost).where(SitePost.slug == "hello-world"))).scalar_one()
         assert count == 1, "재발행인데 행이 늘었다(upsert 회귀)"
-        assert row.title == "제목 수정판"
+        assert row.title == "AI가 «몰라요»라고 말할 때"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -451,7 +482,8 @@ async def test_unpublished_post_excluded_from_public_reads():
             org_id, project_id = await _seed_org(s)
             human_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
-            gate_id = await _seed_gate(s, org_id, story_id, status="approved")
+            _body = _publish_body(work_item_id=story_id)
+            gate_id = await _seed_gate(s, org_id, story_id, status="approved", seal_for=_body)
             public_key = await _seed_metering_key(s, org_id)
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
 

@@ -19,8 +19,10 @@ from app.services.site_posts import (
     ExternalPublishGateNotApprovedError,
     InvalidSitePostInputError,
     MediaNotSupportedPhase0Error,
+    SitePostApproverRoleMissingError,
     SitePostDraftNotFoundError,
     SitePostReapprovalRequiredError,
+    SitePostSealMissingError,
     SitePostVersionNotFoundError,
     create_site_post_draft_version,
     get_site_post_draft,
@@ -149,6 +151,11 @@ async def post_site_post(
         raise HTTPException(
             status_code=409,
             detail={"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+    except SitePostSealMissingError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SITE_POST_SEAL_MISSING", "message": str(exc)},
         ) from exc
 
     return SitePostResponse(
@@ -281,6 +288,11 @@ async def submit_site_post_draft_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SitePostVersionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SitePostApproverRoleMissingError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SITE_POST_APPROVER_ROLE_MISSING", "message": str(exc)},
+        ) from exc
 
     return SubmitSitePostDraftResponse(
         gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
