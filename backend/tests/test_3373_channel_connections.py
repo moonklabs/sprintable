@@ -584,29 +584,225 @@ async def test_plaintext_token_never_appears_in_any_json_response():
         await engine.dispose()
 
 
+# ─── 조직별 채널 앱 자격(선생님 지적·페드루 PO 정정 2026-09-03 08:29Z) ───────────────
+# «Threads 앱 id/secret은 Sprintable 공용 시크릿 하나»였던 이전 설계는 틀린 전제 — Meta
+# 앱은 조직마다 자기 것을 등록해 쓴다.
+
+@pytest.mark.anyio
+async def test_owner_can_set_app_credentials_response_has_no_secret():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        secret = "meta-app-secret-UNIQUELY-IDENTIFIABLE-123"
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials",
+                json={"app_id": "org-meta-app-id", "app_secret": secret},
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["configured"] is True
+        assert body["app_id"] == "org-meta-app-id"
+        assert "app_secret" not in body
+        assert secret not in r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_gets_403_setting_app_credentials():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials",
+                json={"app_id": "x", "app_secret": "y"},
+            )
+        assert r.status_code == 403, r.text
+        assert r.json()["error"]["code"] == "CHANNEL_CONNECTION_HUMAN_ONLY", r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_member_role_gets_403_setting_app_credentials_only_owner_can():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            member_id = await _seed_human(s, org_id, role="member")
+        _setup_org_scoped_app(app, Session, org_id, user_id=member_id)
+
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials",
+                json={"app_id": "x", "app_secret": "y"},
+            )
+        assert r.status_code == 403, r.text
+        assert r.json()["error"]["code"] == "CHANNEL_CONNECTION_OWNER_ONLY", r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_authorize_without_org_credentials_or_platform_fallback_returns_409(monkeypatch):
+    from app.main import app
+    import app.core.config as config_module
+
+    # 이 테스트만 플랫폼 기본값도 비운다(autouse 픽스처가 채워 둔 test-app-id/secret을
+    # 무효화) — org 자격도 fallback도 둘 다 없는 상태를 정확히 재현.
+    monkeypatch.setattr(config_module.settings, "threads_app_id", "")
+    monkeypatch.setattr(config_module.settings, "threads_app_secret", "")
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/threads/authorize")
+        assert r.status_code == 409, r.text
+        assert r.json()["error"]["code"] == "CHANNEL_APP_CREDENTIALS_MISSING", r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_authorize_after_setting_credentials_uses_org_app_id_not_platform_fallback():
+    """설정 뒤 authorize URL에 그 app_id(페드루 PO 지시) — 플랫폼 기본값(test-app-id,
+    autouse 픽스처)이 아니라 org가 방금 등록한 값이 실제로 쓰인다는 것까지 잰다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        async with _client_for(app) as client:
+            r_put = await client.put(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials",
+                json={"app_id": "org-registered-app-id-999", "app_secret": "org-secret"},
+            )
+        assert r_put.status_code == 200, r_put.text
+
+        async with _client_for(app) as client:
+            r_auth = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/threads/authorize")
+        assert r_auth.status_code == 200, r_auth.text
+        assert "client_id=org-registered-app-id-999" in r_auth.json()["url"]
+        assert "test-app-id" not in r_auth.json()["url"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_app_secret_stored_encrypted_not_plaintext_and_status_endpoint_shows_suffix_only():
+    from app.main import app
+    from app.models.channel_app_credential import ChannelAppCredentials
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        secret = "meta-app-secret-UNIQUELY-IDENTIFIABLE-456"
+        async with _client_for(app) as client:
+            r_put = await client.put(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials",
+                json={"app_id": "org-app-id-suffix-WXYZ", "app_secret": secret},
+            )
+        assert r_put.status_code == 200, r_put.text
+
+        async with Session() as s:
+            row = (await s.execute(
+                select(ChannelAppCredentials).where(ChannelAppCredentials.org_id == org_id)
+            )).scalar_one()
+        assert row.encrypted_app_secret != secret
+        assert secret not in row.encrypted_app_secret
+
+        async with _client_for(app) as client:
+            r_get = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials")
+        assert r_get.status_code == 200, r_get.text
+        body = r_get.json()
+        assert body["configured"] is True
+        assert body["app_id_suffix"] == "WXYZ"
+        assert secret not in r_get.text
+        assert "org-app-id-suffix-WXYZ" not in r_get.text  # 끝4자리만, 전체 app_id는 아님
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_app_credentials_status_configured_false_when_unset():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            member_id = await _seed_human(s, org_id, role="member")
+        _setup_org_scoped_app(app, Session, org_id, user_id=member_id)
+
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/threads/app-credentials")
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "configured": False, "app_id_suffix": None, "updated_by": None, "updated_at": None,
+        }
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ─── PKCE fallback flag(페드루 PO 2026-09-03 07:56Z — Meta가 code_challenge를 거부할 때
 # 재배포 없이 끄는 자리) ────────────────────────────────────────────────────────
 
 def test_build_authorize_url_includes_pkce_params_by_default(monkeypatch):
     import app.core.config as config_module
     monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", True)
-    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
 
     from app.services.threads_oauth import build_authorize_url
 
-    url = build_authorize_url(redirect_uri="https://x/callback", state="s", code_challenge="chal123")
+    url = build_authorize_url(redirect_uri="https://x/callback", state="s", code_challenge="chal123", app_id="app-id")
     assert "code_challenge=chal123" in url
     assert "code_challenge_method=S256" in url
+    assert "client_id=app-id" in url
 
 
 def test_build_authorize_url_omits_pkce_params_when_flag_disabled(monkeypatch):
     import app.core.config as config_module
     monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", False)
-    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
 
     from app.services.threads_oauth import build_authorize_url
 
-    url = build_authorize_url(redirect_uri="https://x/callback", state="s", code_challenge="chal123")
+    url = build_authorize_url(redirect_uri="https://x/callback", state="s", code_challenge="chal123", app_id="app-id")
     assert "code_challenge" not in url
     assert "chal123" not in url
 
@@ -615,8 +811,6 @@ def test_build_authorize_url_omits_pkce_params_when_flag_disabled(monkeypatch):
 async def test_short_lived_token_exchange_omits_code_verifier_when_pkce_disabled(monkeypatch):
     import app.core.config as config_module
     monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", False)
-    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
-    monkeypatch.setattr(config_module.settings, "threads_app_secret", "app-secret")
 
     from app.services.threads_oauth import exchange_code_for_short_lived_token
 
@@ -634,6 +828,7 @@ async def test_short_lived_token_exchange_omits_code_verifier_when_pkce_disabled
 
     await exchange_code_for_short_lived_token(
         _FakeClient(), code="c", redirect_uri="https://x/callback", code_verifier="verifier123",
+        app_id="app-id", app_secret="app-secret",
     )
     assert "code_verifier" not in captured["data"]
 
@@ -642,8 +837,6 @@ async def test_short_lived_token_exchange_omits_code_verifier_when_pkce_disabled
 async def test_short_lived_token_exchange_includes_code_verifier_by_default(monkeypatch):
     import app.core.config as config_module
     monkeypatch.setattr(config_module.settings, "threads_pkce_enabled", True)
-    monkeypatch.setattr(config_module.settings, "threads_app_id", "app-id")
-    monkeypatch.setattr(config_module.settings, "threads_app_secret", "app-secret")
 
     from app.services.threads_oauth import exchange_code_for_short_lived_token
 
@@ -661,5 +854,8 @@ async def test_short_lived_token_exchange_includes_code_verifier_by_default(monk
 
     await exchange_code_for_short_lived_token(
         _FakeClient(), code="c", redirect_uri="https://x/callback", code_verifier="verifier123",
+        app_id="app-id", app_secret="app-secret",
     )
     assert captured["data"]["code_verifier"] == "verifier123"
+    assert captured["data"]["client_id"] == "app-id"
+    assert captured["data"]["client_secret"] == "app-secret"

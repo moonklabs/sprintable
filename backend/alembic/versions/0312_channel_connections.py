@@ -2,6 +2,11 @@
 channel_connections: 조직이 연결한 외부 채널 계정의 암호화 credential 원장. 신설 — org_
 connector_registry(비밀 저장 금지 설계)와 별개, FK 없음(그라운딩 §9 확定).
 
+channel_app_credentials(선생님 지적·페드루 PO 정정 2026-09-03 08:29Z, 같은 리비전에
+동반 추가) — "Threads 앱 id/secret은 Sprintable 공용 시크릿 하나"였던 이전 설계가 틀린
+전제였다: Meta 앱은 조직마다 자기 것을 등록해 쓴다. app/models/channel_app_credential.py
+참고 — FK 없음(channel_connections와 동일 근거), (org_id, channel) UNIQUE.
+
 번호 의존성 — S2(story #3367, PR#3733, 0310)·S3(story #3369, PR#3734, 0311) 둘 다
 develop에 머지 완료(2026-09-03, develop head ac37ceed5). down_revision=0311은 머지 전
 로컬 사본 왕복 검증(S2·S3 두 브랜치를 임시로 fetch해 0309→0310→0311→0312 전체 사슬
@@ -54,8 +59,25 @@ def upgrade() -> None:
         postgresql_where=sa.text("status = 'active'"),
     )
 
+    op.create_table(
+        "channel_app_credentials",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("org_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("channel", sa.Text(), nullable=False),
+        sa.Column("app_id", sa.Text(), nullable=False),
+        sa.Column("encrypted_app_secret", sa.Text(), nullable=False),
+        sa.Column("updated_by", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.UniqueConstraint("org_id", "channel", name="uq_channel_app_credentials_org_channel"),
+    )
+    op.create_index("ix_channel_app_credentials_org_id", "channel_app_credentials", ["org_id"])
+
 
 def downgrade() -> None:
+    op.drop_index("ix_channel_app_credentials_org_id", table_name="channel_app_credentials")
+    op.drop_table("channel_app_credentials")
+
     op.drop_index("ix_channel_connections_token_expires_at", table_name="channel_connections")
     op.drop_index("ix_channel_connections_org_id", table_name="channel_connections")
     op.drop_table("channel_connections")

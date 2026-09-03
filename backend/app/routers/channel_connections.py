@@ -18,6 +18,11 @@ from pydantic import BaseModel
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.channel_adapters import can_auto_refresh, get_channel_adapter
+from app.services.channel_app_credentials import (
+    get_channel_app_credentials,
+    resolve_app_credentials,
+    upsert_channel_app_credentials,
+)
 from app.services.channel_connection import (
     ChannelConnectionNotFoundError,
     apply_refresh_failure,
@@ -115,6 +120,30 @@ class TestConnectionResponse(BaseModel):
     error: str | None = None
 
 
+class AppCredentialsRequest(BaseModel):
+    app_id: str
+    app_secret: str
+
+
+class AppCredentialsPutResponse(BaseModel):
+    """PUT 응답 — secret은 절대 안 실림(페드루 PO 2026-09-03 08:29Z). app_id는 owner가 방금
+    직접 입력한 값을 그대로 되돌려줄 뿐이라 비밀이 아니다(GET과 달리 끝4자리로 자르지 않음)."""
+    configured: bool
+    app_id: str
+
+
+class AppCredentialsStatusResponse(BaseModel):
+    """GET 응답 — app_id는 끝 4자리만(페드루 PO 지시)."""
+    configured: bool
+    app_id_suffix: str | None = None
+    updated_by: uuid.UUID | None = None
+    updated_at: str | None = None
+
+
+def _app_id_suffix(app_id: str) -> str:
+    return app_id[-4:] if len(app_id) >= 4 else app_id
+
+
 @router.get("/{org_id}/channel-connections", response_model=list[ChannelConnectionResponse])
 async def list_channel_connections_endpoint(
     org_id: uuid.UUID,
@@ -145,6 +174,20 @@ async def authorize_channel_connection(
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
+    # 선생님 지적·페드루 PO 정정(2026-09-03 08:29Z) — 조직이 자기 채널 앱 자격을 등록 안
+    # 했으면(플랫폼 기본값도 없으면) authorize 진입 자체를 여기서 막는다. Meta 호출 0건.
+    app_credentials = await resolve_app_credentials(db, org_id=org_id, channel=channel)
+    if app_credentials is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CHANNEL_APP_CREDENTIALS_MISSING",
+                "message": "이 조직에 등록된 채널 앱 자격이 없습니다. 먼저 앱 자격을 등록해주세요.",
+            },
+        )
+    app_id, _app_secret = app_credentials
+    del _app_secret  # authorize엔 app_id만 필요 — secret은 여기서 즉시 폐기(콜백 단계에서 다시 조회).
+
     code_verifier, code_challenge = generate_pkce_pair()
     try:
         state = sign_channel_oauth_state(
@@ -155,7 +198,9 @@ async def authorize_channel_connection(
 
     if channel == "threads":
         from app.services.threads_oauth import build_authorize_url
-        url = build_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge)
+        url = build_authorize_url(
+            redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
+        )
     else:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
     return AuthorizeResponse(url=url, state=state)
@@ -194,20 +239,36 @@ async def channel_connection_callback(
     if channel != "threads":
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
+    # authorize 단계와 별도로 다시 조회 — 콜백은 브라우저 왕복(수초~수분) 뒤라 그 사이 owner가
+    # 자격을 바꿨을 수 있고, authorize에서 app_secret을 굳이 이 함수 스코프까지 들고 있지
+    # 않게 한 설계(위 authorize 참고)의 자연스러운 대응.
+    app_credentials = await resolve_app_credentials(db, org_id=org_id, channel=channel)
+    if app_credentials is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CHANNEL_APP_CREDENTIALS_MISSING",
+                "message": "이 조직에 등록된 채널 앱 자격이 없습니다. 먼저 앱 자격을 등록해주세요.",
+            },
+        )
+    app_id, app_secret = app_credentials
+
     from app.services.threads_oauth import exchange_code_for_short_lived_token, exchange_for_long_lived_token, test_connection
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
             short_lived_token, external_account_id = await exchange_code_for_short_lived_token(
                 client, code=body.code, redirect_uri=_redirect_uri(org_id, channel),
-                code_verifier=oauth_state.code_verifier,
+                code_verifier=oauth_state.code_verifier, app_id=app_id, app_secret=app_secret,
             )
             long_lived_token, expires_in = await exchange_for_long_lived_token(
-                client, short_lived_token=short_lived_token,
+                client, short_lived_token=short_lived_token, app_secret=app_secret,
             )
             account = await test_connection(client, access_token=long_lived_token)
         except ThreadsOAuthError as exc:
             raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다.
 
     row = await upsert_channel_connection(
         db, org_id=org_id, channel=channel, account_id=external_account_id,
@@ -272,3 +333,47 @@ async def test_channel_connection(
             return TestConnectionResponse(ok=False, error=exc.message)
     del access_token  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다.
     return TestConnectionResponse(ok=True, account=account)
+
+
+@router.put("/{org_id}/channel-connections/{channel}/app-credentials", response_model=AppCredentialsPutResponse)
+async def set_channel_app_credentials(
+    org_id: uuid.UUID,
+    channel: str,
+    body: AppCredentialsRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> AppCredentialsPutResponse:
+    """선생님 지적·페드루 PO 정정(2026-09-03 08:29Z) — 조직별 채널 앱(Meta 등) 자격 등록.
+    owner 전용(에이전트는 _require_owner→_require_human 체인에서 403). 응답에 secret은
+    절대 안 실린다(AppCredentialsPutResponse에 필드 자체가 없음)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+    row = await upsert_channel_app_credentials(
+        db, org_id=org_id, channel=channel, app_id=body.app_id, app_secret=body.app_secret, updated_by=resolved.id,
+    )
+    return AppCredentialsPutResponse(configured=True, app_id=row.app_id)
+
+
+@router.get("/{org_id}/channel-connections/{channel}/app-credentials", response_model=AppCredentialsStatusResponse)
+async def get_channel_app_credentials_status(
+    org_id: uuid.UUID,
+    channel: str,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> AppCredentialsStatusResponse:
+    """유나 «설정 미완» 상태의 서버 근거(페드루 PO 2026-09-03 08:29Z) — member 이상이면 조회
+    가능(list_channel_connections_endpoint와 동일 tier — 응답에 secret·app_id 전체 어느
+    것도 없다, 끝 4자리뿐이라 비밀 노출 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+    row = await get_channel_app_credentials(db, org_id=org_id, channel=channel)
+    if row is None:
+        return AppCredentialsStatusResponse(configured=False)
+    return AppCredentialsStatusResponse(
+        configured=True, app_id_suffix=_app_id_suffix(row.app_id),
+        updated_by=row.updated_by, updated_at=row.updated_at.isoformat(),
+    )

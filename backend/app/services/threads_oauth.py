@@ -41,19 +41,24 @@ class ThreadsOAuthError(Exception):
         super().__init__(message)
 
 
-def build_authorize_url(*, redirect_uri: str, state: str, code_challenge: str) -> str:
+def build_authorize_url(*, redirect_uri: str, state: str, code_challenge: str, app_id: str) -> str:
     """PKCE 거부 대응(페드루 PO 2026-09-03 07:26Z·07:56Z) — `settings.threads_pkce_enabled`
     (기본 True)가 False면 `code_challenge`/`code_challenge_method`를 아예 안 싣는다. Meta가
     실왕복에서 이 파라미터를 거부하면(문헌상 미확認, threads_oauth.py 상단 docstring 참고)
     PO가 이 설정값 하나만 끄면 되고, 재배포 없이 플래그로 즉시 되돌릴 수 있다(코드 삭제·
     재배포 불요) — CSRF·재사용 방지는 `channel_oauth_state.py`의 state 서명이 PKCE와
-    독립적으로 이미 담당하므로 꺼도 그 축은 무너지지 않는다."""
+    독립적으로 이미 담당하므로 꺼도 그 축은 무너지지 않는다.
+
+    `app_id`는 호출부(라우터)가 `channel_app_credentials.resolve_app_credentials()`로
+    미리 해석해 넘긴다(선생님 지적·페드루 PO 정정 2026-09-03 08:29Z) — 이 함수는 조직별
+    자격 조회 자체를 모른다(그 책임은 라우터/서비스 계층), `settings.threads_app_id`를
+    직접 읽지 않는다(그 값은 이제 org 미설정 시의 플랫폼 기본값 fallback일 뿐)."""
     from urllib.parse import urlencode
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
     cfg = CHANNEL_ADAPTERS["threads"]
     params = {
-        "client_id": settings.threads_app_id,
+        "client_id": app_id,
         "redirect_uri": redirect_uri,
         "scope": cfg.scope,
         "response_type": "code",
@@ -66,16 +71,18 @@ def build_authorize_url(*, redirect_uri: str, state: str, code_challenge: str) -
 
 
 async def exchange_code_for_short_lived_token(
-    client: httpx.AsyncClient, *, code: str, redirect_uri: str, code_verifier: str,
+    client: httpx.AsyncClient, *, code: str, redirect_uri: str, code_verifier: str, app_id: str, app_secret: str,
 ) -> tuple[str, str]:
     """authorization code → (access_token, threads_user_id). 단기 토큰(~1h).
 
     `settings.threads_pkce_enabled=False`면 `code_verifier`를 아예 안 보낸다 —
     `build_authorize_url()`의 동일 플래그와 짝(그쪽에서 code_challenge를 안 보냈으면 여기서도
-    검증자를 보내면 Meta가 오히려 거부할 수 있다 — 두 자리가 항상 같이 켜지고 같이 꺼진다)."""
+    검증자를 보내면 Meta가 오히려 거부할 수 있다 — 두 자리가 항상 같이 켜지고 같이 꺼진다).
+
+    `app_id`/`app_secret`는 build_authorize_url()과 동형 이유로 호출부가 해석해 넘긴다."""
     data = {
-        "client_id": settings.threads_app_id,
-        "client_secret": settings.threads_app_secret,
+        "client_id": app_id,
+        "client_secret": app_secret,
         "grant_type": "authorization_code",
         "redirect_uri": redirect_uri,
         "code": code,
@@ -94,14 +101,16 @@ async def exchange_code_for_short_lived_token(
 
 
 async def exchange_for_long_lived_token(
-    client: httpx.AsyncClient, *, short_lived_token: str,
+    client: httpx.AsyncClient, *, short_lived_token: str, app_secret: str,
 ) -> tuple[str, int]:
-    """단기 토큰 → (장기 access_token, expires_in초). 장기 토큰은 ~60일."""
+    """단기 토큰 → (장기 access_token, expires_in초). 장기 토큰은 ~60일.
+
+    `app_secret`는 build_authorize_url()과 동형 이유로 호출부가 해석해 넘긴다."""
     resp = await client.get(
         _EXCHANGE_URL,
         params={
             "grant_type": "th_exchange_token",
-            "client_secret": settings.threads_app_secret,
+            "client_secret": app_secret,
             "access_token": short_lived_token,
         },
     )

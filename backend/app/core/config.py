@@ -357,7 +357,11 @@ class Settings(BaseSettings):
     # OAuth state(CSRF+org 바인딩+PKCE verifier+nonce+TTL) 서명 키 — github_app_state_secret과
     # 동형(별도 시크릿, auth.py의 로그인용 OAuth state 키와 분리·그라운딩 §9 "기본=분리" 확定).
     channel_oauth_state_secret: str = ""
-    # Threads(Meta) 서버 OAuth — Sprintable 공용 앱 1개, 조직별 토큰(channel_connections에 암호화 보관).
+    # Threads(Meta) 서버 OAuth. 선생님 지적·페드루 PO 정정(2026-09-03 08:29Z) — "Sprintable
+    # 공용 앱 1개"였던 이전 설계는 틀린 전제. Meta 앱은 조직마다 자기 것을 등록해 쓴다
+    # (channel_app_credentials, app/services/channel_app_credentials.py). 이 두 값은 이제
+    # org 자격이 없을 때만 쓰는 «플랫폼 기본값» fallback — 비워 두면 fallback도 없다는 뜻
+    # (org가 미등록이면 authorize에서 409 CHANNEL_APP_CREDENTIALS_MISSING).
     threads_app_id: str = ""
     threads_app_secret: str = ""
     # 페드루 PO 리뷰(2026-09-03 07:26Z·07:56Z) — Threads의 PKCE(code_challenge) 수용 여부가

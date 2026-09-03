@@ -20,6 +20,7 @@ from app.models.event import Event
 from app.models.event_outbox import EventOutbox
 from app.models.delivery_job import DeliveryJob
 from app.models.channel_connection import ChannelConnection
+from app.models.channel_app_credential import ChannelAppCredentials
 from app.models.gate import Gate
 from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
