@@ -18,7 +18,7 @@ AC 매핑(스토리 acceptance_criteria):
   자체가 깨지면 site·channel 양쪽에서 「승인 뒤 편집분」 봉인 갱신이 깨진다는 것을
   뮤테이션으로 pin한다(아래 뮤테이션 섹션).
 - AC6: connection_id가 이 org의 channel_connections 행이 아니거나 status≠active면 초안
-  생성/상신에서 422 CHANNEL_CONNECTION_NOT_ACTIVE.
+  생성/상신에서 409 CHANNEL_CONNECTION_NOT_ACTIVE(f8f7cb0f 발행 결정표와 HTTP status 통일).
 - AC7: 마이그레이션 upgrade/downgrade/re-upgrade 왕복 — 별도로 CLI 검증 완료(PR 본문에 로그
   첨부), 이 파일은 담지 않는다(destructive_schema 테스트는 Base.metadata.create_all로
   스키마를 세운다 — alembic 자체를 구동하지 않는 관례, test_3365 등과 동형).
@@ -279,7 +279,7 @@ async def test_text_too_long_returns_422_with_limit_and_current_length():
 
 
 @pytest.mark.anyio
-async def test_connection_not_found_returns_422_channel_connection_not_active():
+async def test_connection_not_found_returns_409_channel_connection_not_active():
     """AC6 — 존재하지 않는 connection_id."""
     from app.main import app
 
@@ -296,7 +296,7 @@ async def test_connection_not_found_returns_422_channel_connection_not_active():
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts",
                 json=_draft_body(work_item_id=story_id, connection_id=uuid.uuid4()),
             )
-        assert r.status_code == 422, r.text
+        assert r.status_code == 409, r.text
         assert r.json()["error"]["code"] == "CHANNEL_CONNECTION_NOT_ACTIVE"
     finally:
         app.dependency_overrides.clear()
@@ -304,7 +304,7 @@ async def test_connection_not_found_returns_422_channel_connection_not_active():
 
 
 @pytest.mark.anyio
-async def test_connection_revoked_between_draft_and_submit_returns_422_at_submit():
+async def test_connection_revoked_between_draft_and_submit_returns_409_at_submit():
     """AC6 — 생성 시점엔 active였지만 상신 시점에 revoke된 connection은 상신에서 재검증돼
     막힌다(생성 시점 검증만으로는 안 된다는 것을 직접 pin)."""
     from app.main import app
@@ -340,7 +340,7 @@ async def test_connection_revoked_between_draft_and_submit_returns_422_at_submit
             r_submit = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
             )
-        assert r_submit.status_code == 422, r_submit.text
+        assert r_submit.status_code == 409, r_submit.text
         assert r_submit.json()["error"]["code"] == "CHANNEL_CONNECTION_NOT_ACTIVE"
     finally:
         app.dependency_overrides.clear()

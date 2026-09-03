@@ -107,8 +107,11 @@ async def post_channel_post_draft_version(
             text=body.text, link_url=body.link_url, author_member_id=member_id, author_kind=actor_type,
         )
     except ChannelConnectionNotActiveError as exc:
+        # 페드루 PO 리뷰(2026-09-03) — 발행 스토리(f8f7cb0f) 결정표가 이 코드를 409(상태
+        # 충돌·재연결 필요)로 정했다 — 같은 코드에 HTTP status가 갈리면 FE 매핑이 두 벌이
+        # 된다. 422는 입력 형태 오류에만 남긴다(CHANNEL_TEXT_TOO_LONG처럼).
         raise HTTPException(
-            status_code=422,
+            status_code=409,
             detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
         ) from exc
     except ChannelTextTooLongError as exc:
@@ -207,8 +210,11 @@ async def submit_channel_post_draft_endpoint(
     except ChannelPostVersionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChannelConnectionNotActiveError as exc:
+        # 페드루 PO 리뷰(2026-09-03) — 발행 스토리(f8f7cb0f) 결정표가 이 코드를 409(상태
+        # 충돌·재연결 필요)로 정했다 — 같은 코드에 HTTP status가 갈리면 FE 매핑이 두 벌이
+        # 된다. 422는 입력 형태 오류에만 남긴다(CHANNEL_TEXT_TOO_LONG처럼).
         raise HTTPException(
-            status_code=422,
+            status_code=409,
             detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
         ) from exc
     except ChannelPostApproverRoleMissingError as exc:
