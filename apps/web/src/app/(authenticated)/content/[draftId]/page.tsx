@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -123,7 +123,11 @@ export default function ContentPostEditPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
-    { type: 'success'; gateId: string } | { type: 'error'; text: string; raw?: string } | null
+    | { type: 'success'; gateId: string }
+    // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD는 원인 문구만이 아니라 그 게이트를
+    // 쥔 상대 초안 링크까지 보여야 한다 — heldByDraftId가 있을 때만 렌더한다.
+    | { type: 'error'; text: string; raw?: string; heldByDraftId?: string }
+    | null
   >(null);
 
   const [gate, setGate] = useState<GateInfo | null>(null);
@@ -193,35 +197,37 @@ export default function ContentPostEditPage() {
   const latest = versions[versions.length - 1];
   const workItemId = latest?.source_story_id;
 
-  useEffect(() => {
+  // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
+  // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·
+  // 발행 핸들러의 성공 분기가 파생 입력(gate)을 다시 읽을 방법 자체가 없었다(로컬 state를
+  // 손으로 지어내는 대신 서버를 다시 물어 진짜 상태를 받는다 — no-fiction). useCallback으로
+  // 뽑아 마운트 시 useEffect와 각 핸들러 성공 분기 양쪽에서 부른다.
+  const loadGate = useCallback(async () => {
     if (!orgId || !workItemId) return;
-    let cancelled = false;
-    async function loadGate() {
-      try {
-        const res = await fetchWithAuth(`/api/gates?work_item_id=${workItemId}&work_item_type=story`);
-        if (cancelled || !res.ok) return;
-        const list = (await res.json().catch(() => [])) as GateInfo[];
-        const candidates = Array.isArray(list) ? list : [];
-        // doc-gate-section.tsx::load()와 동형 관례 — 반려/대기 중인 게이트를 우선(진행
-        // 상태가 있는 쪽이 사용자에게 더 중요), 없으면 최신(배열 첫 항목, 서버가
-        // created_at desc로 준다는 기존 게이트 목록 관례 그대로).
-        const picked = candidates.find((g) => g.status === 'pending' || g.status === 'rejected') ?? candidates[0] ?? null;
-        setGate(picked);
-      } catch {
-        // best-effort — 게이트 조회 실패는 상태를 'draft'로 안전하게 떨어뜨릴 뿐 화면
-        // 전체를 막지 않는다(목록/편집 자체는 게이트 유무와 무관하게 동작해야 함).
-      }
+    try {
+      const res = await fetchWithAuth(`/api/gates?work_item_id=${workItemId}&work_item_type=story`);
+      if (!res.ok) return;
+      const list = (await res.json().catch(() => [])) as GateInfo[];
+      const candidates = Array.isArray(list) ? list : [];
+      // doc-gate-section.tsx::load()와 동형 관례 — 반려/대기 중인 게이트를 우선(진행
+      // 상태가 있는 쪽이 사용자에게 더 중요), 없으면 최신(배열 첫 항목, 서버가
+      // created_at desc로 준다는 기존 게이트 목록 관례 그대로).
+      const picked = candidates.find((g) => g.status === 'pending' || g.status === 'rejected') ?? candidates[0] ?? null;
+      setGate(picked);
+    } catch {
+      // best-effort — 게이트 조회 실패는 상태를 'draft'로 안전하게 떨어뜨릴 뿐 화면
+      // 전체를 막지 않는다(목록/편집 자체는 게이트 유무와 무관하게 동작해야 함).
     }
-    void loadGate();
-    return () => {
-      cancelled = true;
-    };
   }, [orgId, workItemId]);
 
   // story #3386 — 원인 진단이 지목한 그 자리(FE가 hasPublishedSitePost를 undefined로
   // 고정해 두던 계약 갭)를 여기서 채운다. best-effort(gate 조회와 동형) — 실패해도
   // publication=null(=모른다)로 남을 뿐 화면 전체를 막지 않는다.
-  const loadPublication = async () => {
+  //
+  // story #3385(PO 병합 지시 2026-09-03 13:23Z) — loadGate와 같은 이유로 useCallback화:
+  // «발행됨→재승인 필요» 전환도 저장·상신·발행 성공 뒤 리로드 없이 보여야 한다(AC1 「상태를
+  // 바꾸는 모든 액션 뒤 파생 입력을 다시 읽는다」는 gate 하나만의 규칙이 아니다).
+  const loadPublication = useCallback(async () => {
     if (!orgId) return;
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publication`);
@@ -234,12 +240,12 @@ export default function ContentPostEditPage() {
     } catch {
       setPublication(null);
     }
-  };
+  }, [orgId, draftId]);
 
   useEffect(() => {
+    void loadGate();
     void loadPublication();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, draftId]);
+  }, [loadGate, loadPublication]);
 
   // gates/[id]/page.tsx:110-127과 동형 — published_by_member_id별로 한 번만 시도(ref로
   // 추적, 응답 목록에 없는 id면 setMemberNames가 매번 새 객체를 만들어 무한 재실행되는
@@ -303,6 +309,11 @@ export default function ContentPostEditPage() {
           const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
           if (json?.data) setVersions(json.data);
         }
+        // story #3385(AC1)+#3386 — approved 게이트를 편집하면 서버가 즉시 pending+
+        // reapproval_required로 되돌린다(§3-1-2-1). 게이트뿐 아니라 발행 블록도 같은 훅으로
+        // 묶는다(PO 2026-09-03 13:23Z) — 저장도 "상태를 바꾸는 액션"이다.
+        void loadGate();
+        void loadPublication();
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
@@ -337,17 +348,49 @@ export default function ContentPostEditPage() {
         const gateId = json?.data?.gate_id;
         if (gateId) {
           setSubmitResult({ type: 'success', gateId });
+          // story #3385(핵심 회귀)+#3386 — 서버 게이트는 이미 pending인데 화면은 리로드
+          // 전까지 이전 상태(초안·재승인 필요)를 그대로 보였다. 상신 직후 두 파생 입력을
+          // 함께 다시 읽는다(PO 2026-09-03 13:23Z — 같은 훅으로 묶는다).
+          void loadGate();
+          void loadPublication();
         } else {
           setSubmitResult({ type: 'error', text: t('submitFailed'), raw: JSON.stringify(json) });
         }
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
-        setSubmitResult({
-          type: 'error',
-          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('submitFailed')),
-          raw: info.raw,
-        });
+        // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD 전용 분기. 서버는 상대 초안의
+        // draft_id·lang·slug만 준다(title 없음) — 여기서 그 초안의 최신 버전을 별도
+        // 조회해 제목을 채운다(best-effort, gates/[id]/page.tsx의 memberNames 관례와 동형
+        // — 실패해도 slug/id 폴백으로 문구는 그대로 그린다, 지어내지 않되 화면을 막지도
+        // 않는다).
+        if (info.kind === 'gate_already_held' && info.heldByDraftId) {
+          let holdingTitle = info.heldBySlug ?? info.heldByDraftId.slice(0, 8);
+          try {
+            const vRes = await fetchWithAuth(
+              `/api/organizations/${orgId}/site-posts/drafts/${info.heldByDraftId}/versions`,
+            );
+            if (vRes.ok) {
+              const vJson = (await vRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+              const vLatest = vJson?.data?.[vJson.data.length - 1];
+              if (vLatest?.title) holdingTitle = vLatest.title;
+            }
+          } catch {
+            // best-effort — 조회 실패는 위 폴백 문구로 graceful.
+          }
+          setSubmitResult({
+            type: 'error',
+            text: t('errorGateAlreadyHeld', { title: holdingTitle, lang: info.heldByLang ?? '—' }),
+            raw: info.raw,
+            heldByDraftId: info.heldByDraftId,
+          });
+        } else {
+          setSubmitResult({
+            type: 'error',
+            text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('submitFailed')),
+            raw: info.raw,
+          });
+        }
       }
     } catch {
       setSubmitResult({ type: 'error', text: t('submitFailed') });
@@ -382,7 +425,11 @@ export default function ContentPostEditPage() {
         const url = json?.data?.url;
         if (publishedAt && url) {
           setPublishResult({ type: 'success', publishedAt, url });
-          void loadPublication(); // story #3386 — 발행 직후 URL·시각·행위자 블록을 갱신.
+          // story #3385(AC1)+#3386 — 발행 뒤에도 같은 규칙: 두 파생 입력을 함께 다시 읽는다
+          // (PO 병합 지시 2026-09-03 13:23Z — «발행됨→재승인 필요» 전환도 리로드 없이 보여야
+          // gate·publication이 같은 화면에서 서로 어긋나지 않는다).
+          void loadGate();
+          void loadPublication();
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }
@@ -587,6 +634,13 @@ export default function ContentPostEditPage() {
               <>
                 {t('submitSuccess')}{' '}
                 <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+              </>
+            ) : submitResult.heldByDraftId ? (
+              <>
+                {submitResult.text}{' '}
+                <Link href={`/content/${submitResult.heldByDraftId}`} className="underline">
+                  {t('errorGateAlreadyHeldLink')}
+                </Link>
               </>
             ) : (
               submitResult.text

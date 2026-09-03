@@ -248,6 +248,77 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.textContent).toContain('MEDIA_NOT_SUPPORTED_PHASE0'); // 원문 보존(접힘 <details> 안)
   });
 
+  // story #3385(Phase0 결함, PO 실사용 2026-09-03 2회 재현) — 토스트는 성공인데 칩·안내
+  // 박스가 리로드 전까지 이전 상태로 남던 결함. 리로드를 흉내내지 않는다(리로드하면 통과
+  // 하는 테스트는 이 결함을 못 잡는다는 게 AC2의 명시 — /api/gates 응답을 호출 순서로
+  // 갈아 끼워 "상신 직후, 리로드 없이" 그 자리에서 재조회되는지를 그대로 잰다.
+  it('⭐AC1 — 승인 요청 성공 뒤 리로드 없이 칩이 «초안»→«승인 대기»로 바뀐다', async () => {
+    let gateCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+        return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+      }
+      if (url.startsWith('/api/gates?work_item_id=')) {
+        gateCallCount += 1;
+        // 1번째 호출(마운트) = 게이트 없음(초안) · 2번째 호출(상신 직후 재조회) = pending.
+        const gates = gateCallCount === 1 ? [] : [{ id: 'gate-42', status: 'pending', reapproval_required: false }];
+        return { ok: true, status: 200, json: async () => gates };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit` && init?.method === 'POST') {
+        return { ok: true, status: 200, json: async () => ({ data: { gate_id: 'gate-42' }, error: null, meta: null }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('draft');
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(gateCallCount).toBe(2); // 마운트 1회 + 상신 성공 뒤 재조회 1회 — 리로드가 아니라 이 재조회로 갱신됐음을 고정.
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('pending');
+    expect(container.textContent).toContain(koMessages.content.contentStatusPending);
+  });
+
+  // AC 본문 "2회차가 더 나쁘다" — 재상신 뒤에도 안내 박스가 안 지워지면 사람이 같은 행동을
+  // 반복하거나 상신이 안 됐다고 믿는다.
+  it('⭐AC1 — 재상신 성공 뒤 리로드 없이 «재승인 필요» 안내 박스가 사라지고 칩이 «승인 대기»로 바뀐다', async () => {
+    let gateCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+        return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+      }
+      if (url.startsWith('/api/gates?work_item_id=')) {
+        gateCallCount += 1;
+        const gates = gateCallCount === 1
+          ? [{ id: 'gate-42', status: 'pending', reapproval_required: true, sealed_content_sha256: 'h0' }]
+          : [{ id: 'gate-42', status: 'pending', reapproval_required: false, sealed_content_sha256: 'h1' }];
+        return { ok: true, status: 200, json: async () => gates };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit` && init?.method === 'POST') {
+        return { ok: true, status: 200, json: async () => ({ data: { gate_id: 'gate-42' }, error: null, meta: null }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('reapproval_needed');
+    expect(container.textContent).toContain(koMessages.content.reapprovalNeededNotice);
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('pending');
+    expect(container.textContent).not.toContain(koMessages.content.reapprovalNeededNotice);
+  });
+
   it('⭐승인 요청 성공 — gate_id로 /gates/{id} 딥링크가 뜬다(AC3)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, () => ({
       status: 200, body: { gate_id: 'gate-42', version_id: 'v1', content_sha256: 'h1', status: 'pending' },
@@ -283,6 +354,118 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 
     expect(container.textContent).not.toContain(koMessages.content.submitSuccess);
     expect(container.querySelector('a[href^="/gates/"]')).toBeNull();
+  });
+
+  // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD 409는 다른 에러와 다르게 상대 초안의
+  // 제목을 별도 조회해 「이 항목은 다른 초안(«제목» · lang)이 승인 절차 중입니다」로 렌더하고
+  // 그 초안(/content/{holding_draft_id})으로 가는 링크를 붙인다. stubFetchWithVersions는
+  // DRAFT_ID 하나만 알므로(다른 초안 동시 존재는 이 helper의 전제 밖) 이 두 테스트는 전용
+  // fetch 스텁을 직접 쓴다.
+  it('⭐AC3 — 409 SITE_POST_GATE_ALREADY_HELD는 상대 초안 제목을 채워 문구를 조립하고 그 초안 링크를 보여준다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+          return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+        }
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit`) {
+          return {
+            ok: false, status: 409,
+            json: async () => ({
+              data: null,
+              error: {
+                code: 'SITE_POST_GATE_ALREADY_HELD',
+                message: '이 work item은 다른 초안이 이미 승인 절차 중입니다(holding_draft_id=d-other, lang=en, slug=a-blog-en)',
+                holding_draft_id: 'd-other', holding_lang: 'en', holding_slug: 'a-blog-en',
+              },
+              meta: null,
+            }),
+          };
+        }
+        if (url === '/api/organizations/org-1/site-posts/drafts/d-other/versions') {
+          return {
+            ok: true, status: 200,
+            json: async () => ({ data: [{ ...VERSION_1, version_id: 'v-other', title: '2호 글(영문판)' }], error: null, meta: null }),
+          };
+        }
+        if (url.startsWith('/api/gates?work_item_id=')) return { ok: true, status: 200, json: async () => [] };
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+          return {
+            ok: true, status: 200,
+            json: async () => ({ data: { published_at: null, url: null, published_by_member_id: null, published_body_sha256: null }, error: null, meta: null }),
+          };
+        }
+        throw new Error('unexpected fetch: ' + url);
+      }),
+    );
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain('2호 글(영문판)');
+    expect(container.textContent).toContain('en');
+    const holdingLink = container.querySelector<HTMLAnchorElement>('a[href="/content/d-other"]');
+    expect(holdingLink).not.toBeNull();
+  });
+
+  it('AC3 — 상대 초안 제목 조회 실패해도(best-effort) slug 폴백 문구+링크는 그대로 뜬다(지어내지 않되 막지 않는다)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+          return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+        }
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit`) {
+          return {
+            ok: false, status: 409,
+            json: async () => ({
+              data: null,
+              error: {
+                code: 'SITE_POST_GATE_ALREADY_HELD', message: '…',
+                holding_draft_id: 'd-other', holding_lang: 'en', holding_slug: 'a-blog-en',
+              },
+              meta: null,
+            }),
+          };
+        }
+        if (url === '/api/organizations/org-1/site-posts/drafts/d-other/versions') {
+          return { ok: false, status: 404, json: async () => ({ detail: 'not found' }) };
+        }
+        if (url.startsWith('/api/gates?work_item_id=')) return { ok: true, status: 200, json: async () => [] };
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+          return {
+            ok: true, status: 200,
+            json: async () => ({ data: { published_at: null, url: null, published_by_member_id: null, published_body_sha256: null }, error: null, meta: null }),
+          };
+        }
+        throw new Error('unexpected fetch: ' + url);
+      }),
+    );
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain('a-blog-en'); // slug 폴백(제목 조회 실패)
+    const holdingLink = container.querySelector<HTMLAnchorElement>('a[href="/content/d-other"]');
+    expect(holdingLink).not.toBeNull();
   });
 
   // story #3368 §8-1 4단(페드루 지시 2026-09-03, S2 계약 전제로 미리 배선) — 실 게이트

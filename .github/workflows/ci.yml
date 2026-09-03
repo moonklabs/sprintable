@@ -841,12 +841,17 @@ jobs:
         with:
           version: 'latest'
 
+      # story #3392(CI 후속) — unweighted 파일 목록·평균 가중치·초과판정선을 /tmp/shard_meta.json
+      # 으로도 내보낸다("Run pytest" 스텝이 파일 완주 즉시 대조한다). --print-summary가 이미
+      # unweighted 목록을 stderr(=이 스텝 로그)에 찍으므로 AC1의 "로그 상단에 낸다(0건이면
+      # 그 사실도)"는 별도 echo 없이 여기서 충족된다.
       - name: Determine this shard's file list
         if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           uv run python scripts/shard_destructive_tests.py \
             --shard-index ${{ matrix.shard }} --shard-count 4 --print-summary \
+            --meta-out /tmp/shard_meta.json \
             > /tmp/shard_files.txt
           echo "이 샤드(${{ matrix.shard }}) 파일 수: $(wc -l < /tmp/shard_files.txt)"
 
@@ -875,6 +880,13 @@ jobs:
       # 바뀐 것은 «몇 개를 도는가»이지 «어떻게 격리하는가»가 아니다). story #3383: 이제 그
       # throwaway DB를 맨바닥(createdb+CREATE EXTENSION)이 아니라 위에서 만든 템플릿에서
       # 복제한다(sprintable_test_tpl) — 격리 보장은 그대로(파일마다 독립 DB, 끝나면 drop).
+      # story #3392(AC2) — PR #3742 run 33760329991에서 60초 가드의 ::error::가 로그에
+      # 전혀 없었다: 이전 버전은 for 루프가 "전부" 끝난 뒤에야 slow_files를 출력했는데,
+      # 그 루프 도중 shard 자체가 20분 timeout으로 cancel되면 루프 뒤 코드는 영원히
+      # 실행되지 않는다 — 가드가 있어도 말할 기회 자체가 없었다. 이제 파일 완주 «즉시»
+      # (같은 반복 안에서) ::error::를 낸다 — 그 직후 shard가 cancel되더라도 이 줄은 이미
+      # 로그에 남는다. exit 1은 여전히 루프 뒤로 미룬다(#2293 철학 그대로 — 한 파일 때문에
+      # 나머지가 "조용히 미실행"되면 안 된다, 실측 가능한 만큼은 계속 잰다).
       - name: Run pytest (destructive schema — isolated fresh DB per file, this shard)
         if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
@@ -884,12 +896,27 @@ jobs:
           # 파일은 조용히 미실행된 것과 동일한 결과가 된다(#2293이 막으려는 바로 그 실패 유형).
           mapfile -t files < /tmp/shard_files.txt
           echo "destructive files (shard ${{ matrix.shard }}): ${#files[@]}"
+
+          # story #3392(AC1) — "Determine this shard's file list" 스텝이 써 둔 unweighted
+          # 목록·초과판정선을 읽는다. meta 파일이 없거나 못 읽으면(방어적) 초과판정은
+          # 건너뛴다(0건 취급) — 이 가드의 부재가 기존 실패/60초 가드까지 죽이면 안 된다.
+          overage_threshold=999999
+          overage_multiplier="?"
+          unweighted_files=()
+          if [ -f /tmp/shard_meta.json ]; then
+            overage_threshold=$(jq -r '(.unweighted_overage_threshold_sec // 999999) | floor' /tmp/shard_meta.json 2>/dev/null || echo 999999)
+            overage_multiplier=$(jq -r '.unweighted_overage_multiplier // "?"' /tmp/shard_meta.json 2>/dev/null || echo "?")
+            mapfile -t unweighted_files < <(jq -r '.unweighted_files[]? // empty' /tmp/shard_meta.json 2>/dev/null)
+          fi
+          echo "unweighted 초과판정선: ${overage_threshold}s(story #3392) · unweighted 파일 ${#unweighted_files[@]}개"
+
           failed_files=()
           # story #3383(AC5) — 파일 하나가 60초를 넘으면 경고가 아니라 실패로 알린다. 이
           # 가드는 "이 샤드 안에서 순차 실행되는 한 파일의 벽시계"만 잰다 — pytest-xdist 등
           # 파일 내부 병렬화가 생기면 이 측정 단위 자체가 안 맞아진다(그 경우는 여기서
           # 못 잡는다, 지금은 파일 내부가 순차라 유효).
           slow_files=()
+          overage_files=()
           for f in "${files[@]}"; do
             echo "::group::isolated $f"
             PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
@@ -903,7 +930,17 @@ jobs:
             echo "elapsed: ${_elapsed}s"
             if [ "$_elapsed" -gt 60 ]; then
               slow_files+=("$f (${_elapsed}s)")
+              echo "::error::60초 한도 초과 파일(story #3383 AC5): $f (${_elapsed}s)"
             fi
+            # story #3392(AC1) — unweighted 파일이 평균의 배수(threshold)를 실측으로
+            # 넘으면 경고가 아니라 실패다. weights.json에 없다는 이유로 "몰랐다"가 통하면
+            # 다음 신규 파일도 같은 사고를 반복한다.
+            for uw in "${unweighted_files[@]+"${unweighted_files[@]}"}"; do
+              if [ "$uw" = "$f" ] && [ "$_elapsed" -gt "$overage_threshold" ]; then
+                overage_files+=("$f (${_elapsed}s > ${overage_threshold}s)")
+                echo "::error::unweighted 파일이 평균의 ${overage_multiplier}배를 넘었다(story #3392 AC1): $f (${_elapsed}s > ${overage_threshold}s) — infra/destructive-schema-shard-weights.json에 이 값을 추가하라."
+              fi
+            done
             echo "::endgroup::"
           done
           if [ "${#failed_files[@]}" -gt 0 ]; then
@@ -911,7 +948,11 @@ jobs:
             exit 1
           fi
           if [ "${#slow_files[@]}" -gt 0 ]; then
-            echo "::error::60초 한도 초과 파일(story #3383 AC5): ${slow_files[*]}"
+            echo "60초 한도 초과 파일(story #3383 AC5, 위 ::error:: 참고): ${slow_files[*]}"
+            exit 1
+          fi
+          if [ "${#overage_files[@]}" -gt 0 ]; then
+            echo "unweighted 초과 파일(story #3392 AC1, 위 ::error:: 참고): ${overage_files[*]}"
             exit 1
           fi
           echo "OK: all ${#files[@]} isolated destructive-schema files passed (shard ${{ matrix.shard }})"
