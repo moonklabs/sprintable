@@ -863,26 +863,19 @@ jobs:
       # 으로도 내보낸다("Run pytest" 스텝이 파일 완주 즉시 대조한다). --print-summary가 이미
       # unweighted 목록을 stderr(=이 스텝 로그)에 찍으므로 AC1의 "로그 상단에 낸다(0건이면
       # 그 사실도)"는 별도 echo 없이 여기서 충족된다.
-      # story #3393 — matrix.shard 배열 길이와 아래 --shard-count 리터럴은 GH Actions
-      # matrix가 값 파생을 지원하지 않아 두 곳에 각각 적을 수밖에 없다("한 곳에서만 바꾸고
-      # 다른 한 곳을 깜빡하면" partition()이 실제 매트릭스 job 수와 다른 shard_count로
-      # 나눠 몇몇 shard-index가 비거나 겹치는데도 조용히 통과한다 — 이 자리가 그 사고를
-      # 잡는다). `strategy.job-total`(matrix가 낳은 실제 job 수)과 스크립트에 넘기는
-      # --shard-count를 여기서 직접 대조한다.
-      - name: Assert matrix.shard length matches --shard-count (story #3393)
-        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
-        run: |
-          if [ "${{ strategy.job-total }}" != "8" ]; then
-            echo "::error::matrix.shard 배열 길이(${{ strategy.job-total }})와 --shard-count(8)가 다르다 — 둘 중 하나만 바꾸고 다른 하나를 깜빡한 것. ci.yml의 matrix.shard와 다음 스텝의 --shard-count를 같이 고쳐라."
-            exit 1
-          fi
-
+      # story #3393(페드루 PO 리뷰 정정, 2026-09-03 15:01Z) — matrix.shard 배열 길이와
+      # --shard-count가 각자 리터럴이면 한쪽만 바뀌어도 조용히 안 맞을 수 있다("한 곳에서만
+      # 파생"이 아니면 나는 사고 — 애초 별도 assert 스텝을 뒀으나 그 assert 자신의 리터럴도
+      # 셋째 지점이 돼 대조가 불완전했다). matrix.shard가 유일한 원천이 되도록
+      # `strategy.job-total`(matrix가 낳은 실제 job 수)을 --shard-count에 직접 흘려보낸다 —
+      # matrix.shard 배열 길이를 바꾸면 --shard-count가 자동으로 같은 값을 받으므로 별도
+      # assert가 불요하다.
       - name: Determine this shard's file list
         if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           uv run python scripts/shard_destructive_tests.py \
-            --shard-index ${{ matrix.shard }} --shard-count 8 --print-summary \
+            --shard-index ${{ matrix.shard }} --shard-count ${{ strategy.job-total }} --print-summary \
             --meta-out /tmp/shard_meta.json \
             > /tmp/shard_files.txt
           echo "이 샤드(${{ matrix.shard }}) 파일 수: $(wc -l < /tmp/shard_files.txt)"
