@@ -173,6 +173,45 @@ async def list_channel_connections_endpoint(
     return [_to_response(r) for r in rows]
 
 
+class ChannelConnectionAgentVisibleItem(BaseModel):
+    """story #3399(AC8) — 채널 포스트 초안(#3374)을 만들려면 `connection_id`가 필요한데,
+    전체 목록(`GET .../channel-connections`)은 human-only(AC6, 토큰 인접 필드까지 실린다)라
+    에이전트는 지금 그 id를 알 방법이 없다. 이 자리는 **별도 엔드포인트**로 연다(기존
+    human-only 엔드포인트를 열어젖히지 않는다 — pin된 `test_agent_gets_403_on_every_
+    endpoint` 회귀 방지) — 필드는 발행 도구가 채널을 골라 초안을 만드는 데 필요한 최소
+    (id·channel·account_label·status)뿐, 토큰·`token_expires_at`·`last_error`·
+    `connected_by` 등은 절대 안 싣는다."""
+    id: uuid.UUID
+    channel: str
+    account_label: str | None
+    status: str
+
+
+def _to_agent_visible_item(row) -> ChannelConnectionAgentVisibleItem:
+    return ChannelConnectionAgentVisibleItem(
+        id=row.id, channel=row.channel, account_label=row.account_label, status=row.status,
+    )
+
+
+@router.get(
+    "/{org_id}/channel-connections/agent-visible", response_model=list[ChannelConnectionAgentVisibleItem],
+)
+async def list_channel_connections_agent_visible_endpoint(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelConnectionAgentVisibleItem]:
+    """story #3399(AC8) — 휴먼·에이전트 둘 다 호출 가능(초안 API·목록 API와 동형 —
+    actor_type 가드 없음, `get_verified_org_id`만으로 org 스코프 충분). 전체 목록
+    엔드포인트(위)와 달리 `_require_human()`을 안 부른다 — 그게 이 엔드포인트의 존재
+    이유다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    rows = await list_channel_connections(db, org_id=org_id)
+    return [_to_agent_visible_item(r) for r in rows]
+
+
 @router.post("/{org_id}/channel-connections/{channel}/authorize", response_model=AuthorizeResponse)
 async def authorize_channel_connection(
     org_id: uuid.UUID,
