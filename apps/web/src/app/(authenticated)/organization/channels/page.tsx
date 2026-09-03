@@ -99,7 +99,14 @@ function ConnectionRow({
         </details>
       ) : null}
       {testResult ? (
-        <p className={`text-xs ${testResult.ok ? 'text-success' : 'text-destructive'}`}>
+        // 유나 design verdict(f9cab0c23) — 소형 텍스트에 계열색 직접은 라이트 대비 미달
+        // (성공 #1F9D57 on white = 3.49, 4.5 미달). ChannelStatusChip과 같은 원칙 —
+        // 성패는 dot으로, 텍스트는 항상 text-foreground.
+        <p className="flex items-center gap-1.5 text-xs text-foreground">
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${testResult.ok ? 'bg-success' : 'bg-destructive'}`}
+            aria-hidden="true"
+          />
           {testResult.ok
             ? t('channelTestOk', { account: String(testResult.account?.['username'] ?? conn.account_id) })
             : t('channelTestFailed', { error: testResult.error ?? '' })}

@@ -79,7 +79,9 @@ export function AppCredentialsCard({
             <AlertDescription>{t('appCredentialsPlatformActive')}</AlertDescription>
           </Alert>
         ) : (
-          <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+          // 유나 design verdict(f9cab0c23) — "설정 미완"은 「아직 안 한 것」이지 실패가
+          // 아니다(같은 화면 not_connected 칩도 bg-muted 중립). org/platform과 같은 톤으로.
+          <Alert variant="default" role="status">
             <AlertDescription>{t('appCredentialsNone')}</AlertDescription>
           </Alert>
         )}
