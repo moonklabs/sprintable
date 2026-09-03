@@ -187,6 +187,37 @@ describe('ContentPostListPage (story #3368)', () => {
     expect(statusCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
   });
 
+  // 카디르군 QA 뮤테이션(2026-09-03) — 위 테스트는 gate_status·published_at 키를 항상
+  // 같이 빼서, published_at 판정 하나만 떼어내도(둘 다 없다는 결합 조건에 편승) 초록이
+  // 나오는 공허통과 위험이 있었다. 두 축을 독립적으로 pin한다.
+  it('⭐gate_status는 정상(approved+해시일치)인데 published_at 키만 없음 — "—"(AC4, published_at 축 단독)', async () => {
+    const { published_at: _pa, ...draftApprovedNoPublishedAtKey } = {
+      ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1',
+    };
+    stubFetch([draftApprovedNoPublishedAtKey]);
+    await act(async () => {
+      root.render(wrap(<ContentPostListPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-status-chip]')).toBeNull();
+    const statusCell = container.querySelectorAll('[data-testid="content-list-row"] td')[1];
+    expect(statusCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
+  });
+
+  it('⭐published_at 키는 있음(null 포함)인데 gate_status 키만 없음 — "—"(AC4, gate_status 축 단독)', async () => {
+    const { gate_status: _gs, ...draftNoGateStatusKey } = { ...DRAFT_A, published_at: null };
+    stubFetch([draftNoGateStatusKey]);
+    await act(async () => {
+      root.render(wrap(<ContentPostListPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-status-chip]')).toBeNull();
+    const statusCell = container.querySelectorAll('[data-testid="content-list-row"] td')[1];
+    expect(statusCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
+  });
+
   it('로드 실패 — 에러 안내(성공 목록으로 오인 표시하지 않는다)', async () => {
     stubFetch({ status: 500 });
     await act(async () => {
