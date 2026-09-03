@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.gate import Gate
 from app.models.site_post import SitePost
@@ -246,3 +247,36 @@ async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID
         .order_by(SitePostVersion.version.asc())
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+async def list_site_post_drafts(
+    db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
+) -> list[tuple[SitePostDraft, SitePostVersion]]:
+    """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — 조직 스코프 초안 목록. S4
+    화면이 열릴 때 draft_id를 미리 알 방법이 없어 만든 자리 — 항목마다 최신 버전(title·lang·
+    version·author_kind)을 붙인다. "최신"은 draft.updated_at이 아니라 최신 버전의
+    created_at으로 정렬한다 — draft 행 자체는 버전 추가 시 갱신되지 않아(SSOT는 버전 쪽)
+    이 값이 실제 최근 활동을 반영한다. 게이트 상태·봉인 필드는 S2 몫 — 여기서 지어내지 않는다."""
+    latest_version_ids = (
+        select(
+            SitePostVersion.draft_id,
+            func.max(SitePostVersion.version).label("max_version"),
+        )
+        .group_by(SitePostVersion.draft_id)
+        .subquery()
+    )
+    latest = aliased(SitePostVersion)
+    stmt = (
+        select(SitePostDraft, latest)
+        .join(latest_version_ids, latest_version_ids.c.draft_id == SitePostDraft.id)
+        .join(
+            latest,
+            (latest.draft_id == latest_version_ids.c.draft_id)
+            & (latest.version == latest_version_ids.c.max_version),
+        )
+        .where(SitePostDraft.org_id == org_id)
+        .order_by(latest.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return [(row[0], row[1]) for row in (await db.execute(stmt)).all()]

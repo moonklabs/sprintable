@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.services.site_posts import (
     get_site_post_draft,
     is_agent_caller,
     list_site_post_draft_versions,
+    list_site_post_drafts,
     publish_site_post,
 )
 
@@ -44,6 +45,17 @@ class SitePostDraftVersionResponse(BaseModel):
     draft_id: uuid.UUID
     version_id: uuid.UUID
     version: int
+
+
+class SitePostDraftListItem(BaseModel):
+    draft_id: uuid.UUID
+    work_item_id: uuid.UUID
+    slug: str
+    lang: str
+    title: str
+    current_version: int
+    latest_author_kind: str
+    updated_at: str
 
 
 class SitePostVersionHistoryItem(BaseModel):
@@ -158,6 +170,32 @@ async def post_site_post_draft_version(
     return SitePostDraftVersionResponse(
         draft_id=version.draft_id, version_id=version.id, version=version.version,
     )
+
+
+@router.get("/{org_id}/site-posts/drafts", response_model=list[SitePostDraftListItem])
+async def list_site_post_drafts_endpoint(
+    org_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[SitePostDraftListItem]:
+    """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — S4 글 관리 화면이 열릴 때
+    draft_id를 미리 알 방법이 없어 신설. 조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 목록 조회는
+    승인·발행 경계 밖이라 human-only 제약 없음."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    rows = await list_site_post_drafts(db, org_id=org_id, limit=limit, offset=offset)
+    return [
+        SitePostDraftListItem(
+            draft_id=draft.id, work_item_id=draft.work_item_id, slug=draft.slug,
+            lang=version.lang, title=version.title, current_version=version.version,
+            latest_author_kind=version.author_kind, updated_at=version.created_at.isoformat(),
+        )
+        for draft, version in rows
+    ]
 
 
 @router.get(

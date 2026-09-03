@@ -274,3 +274,59 @@ async def test_unknown_draft_id_versions_returns_404():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_list_drafts_scoped_to_org_and_ordered_by_latest_activity():
+    """페드루 PO 후속 요청(2026-09-03, S4 계약 갭) — 조직 스코프 목록 엔드포인트. 타 org 초안이
+    새어 들어오면 안 되고(cross-org 격리), 최근에 버전이 붙은 초안이 먼저 와야 한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_a_id, project_a_id = await _seed_org(s, slug="org-a")
+            org_b_id, project_b_id = await _seed_org(s, slug="org-b")
+            agent_a_id = await _seed_agent(s, org_a_id, project_a_id)
+            agent_b_id = await _seed_agent(s, org_b_id, project_b_id)
+            story_a1 = await _seed_story(s, org_a_id, project_a_id, title="A-1호 글")
+            story_a2 = await _seed_story(s, org_a_id, project_a_id, title="A-2호 글")
+            story_b1 = await _seed_story(s, org_b_id, project_b_id, title="B-1호 글")
+
+        _setup_org_scoped_app(app, Session, org_a_id, user_id=agent_a_id)
+        async with _client_for(app) as client:
+            await client.post(
+                f"/api/v2/organizations/{org_a_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_a1, slug="a-one", title="A 글 1"),
+            )
+            r_first = await client.post(
+                f"/api/v2/organizations/{org_a_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_a2, slug="a-two", title="A 글 2"),
+            )
+            # a-one에 버전을 하나 더 붙여 "최근 활동"을 a-one 쪽으로 옮긴다.
+            await client.post(
+                f"/api/v2/organizations/{org_a_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_a1, slug="a-one", title="A 글 1(개정)"),
+            )
+        assert r_first.status_code == 201, r_first.text
+
+        _setup_org_scoped_app(app, Session, org_b_id, user_id=agent_b_id)
+        async with _client_for(app) as client:
+            await client.post(
+                f"/api/v2/organizations/{org_b_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_b1, slug="b-one", title="B 글 1"),
+            )
+
+        _setup_org_scoped_app(app, Session, org_a_id, user_id=agent_a_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_a_id}/site-posts/drafts")
+        assert r.status_code == 200, r.text
+        items = r.json()
+        assert {item["slug"] for item in items} == {"a-one", "a-two"}, "타 org(org-b) 초안이 새어 들어왔다"
+        assert items[0]["slug"] == "a-one", "최근 버전이 붙은 초안이 먼저 와야 한다(updated_at desc)"
+        assert items[0]["title"] == "A 글 1(개정)"
+        assert items[0]["current_version"] == 2
+        assert items[0]["latest_author_kind"] == "agent"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
