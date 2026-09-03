@@ -1,16 +1,15 @@
 // story #3376(Phase1·마케팅운영, doc phase1-channel-connect-screen-design §3-0) — 화면 상태
-// 다섯은 저장하지 않고 서버가 이미 주는 신호(status·token_expires_at·can_auto_refresh·
-// last_error)에서 파생한다(Phase 0 post-status.ts와 같은 원칙 — 두 벌로 갈리는 판정을
-// 만들지 않는다). PO 확定(story #3376 본문) — 파생 입력은 정확히 이 네 필드다.
+// 다섯은 저장하지 않고 서버가 이미 주는 신호에서 파생한다(Phase 0 post-status.ts와 같은
+// 원칙 — 두 벌로 갈리는 판정을 만들지 않는다).
 //
-// ⚠️'config_incomplete'(설정 미완)는 다섯 상태 어휘에는 있지만, 이 파생 함수의 네 입력
-// 만으로는 만들어지지 않는다 — Phase 1이 구현하는 유일한 채널(Threads, PR#3736 본문
-// "channel text NOT NULL -- threads(Phase1은 이거 하나만 구현)")은 credential_kind가
-// 항상 'oauth'라 필수 org_config 값 개념 자체가 없다(연결이 되면 즉시 유효한 토큰이고,
-// 안 되면 행 자체가 없어 '미연결'이다). 여섯 번째 축(missingRequiredFieldNames류)이
-// 필요해지는 시점은 pasted_secret/설정값 채널이 추가될 때이고, 그때 이 파생 함수에
-// 새 입력을 추가한다 — 지금 지어내지 않는다(Phase 0 SEAL_MISSING과 같은 "여섯 번째
-// 상태를 만들지 않는다" 판단 축).
+// 'config_incomplete'(설정 미완) 정정 이력 — 최초엔 "Threads는 credential_kind가 항상
+// oauth라 필수값 개념이 없다"고 보고 이 상태를 파생 불가로 문서화했었다. PR#3736이 실제로
+// 「채널 앱 자격」(GET .../app-credentials → effective_source: 'org'|'platform'|'none')을
+// 얹으며 그 전제가 깨졌다 — Sprintable 공용 앱(platform)도 조직 자격(org)도 없으면
+// (`effective_source==='none'`) authorize가 409 CHANNEL_APP_CREDENTIALS_MISSING을 낸다.
+// 이 신호는 **연결 행이 아예 없을 때만** 최종 상태에 영향을 준다 — 이미 연결된 행이
+// 있다는 것 자체가 그 연결을 만든 시점엔 자격이 있었다는 뜻이라(연결 뒤 자격을 지워도
+// 기존 연결은 안 끊긴다, PR#3736 스코프) 재판정하지 않는다.
 export type ChannelConnectionStatus =
   | 'not_connected'
   | 'config_incomplete'
@@ -29,6 +28,10 @@ export interface ChannelConnectionStatusInput {
   /** 만료 임박 판정 임계값(ms) — 테스트가 시각을 주입할 수 있게 now도 분리. */
   now?: Date;
   expiringSoonThresholdMs?: number;
+  /** GET .../app-credentials의 effective_source. serverStatus가 undefined(연결 행 없음)일
+   * 때만 참조한다 — 'none'이면 '설정 미완'(연결 시작 자체가 막힘), 'org'/'platform'이면
+   * 그냥 '미연결'(자격은 있으니 버튼만 누르면 된다). */
+  effectiveSource?: 'org' | 'platform' | 'none';
 }
 
 export interface ChannelConnectionStatusResult {
@@ -50,6 +53,7 @@ export function deriveChannelConnectionStatus(
   input: ChannelConnectionStatusInput,
 ): ChannelConnectionStatusResult {
   if (input.serverStatus === undefined) {
+    if (input.effectiveSource === 'none') return { status: 'config_incomplete' };
     return { status: 'not_connected' };
   }
   if (input.serverStatus === 'expired') {

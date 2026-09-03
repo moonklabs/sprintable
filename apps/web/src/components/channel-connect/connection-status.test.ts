@@ -16,6 +16,26 @@ const iso = (hoursFromNow: number) => new Date(NOW.getTime() + hoursFromNow * 60
 const CASES: Array<{ name: string; input: ChannelConnectionStatusInput; expected: ChannelConnectionStatusResult }> = [
   { name: '연결 행 없음 → 미연결', input: {}, expected: { status: 'not_connected' } },
   {
+    name: '⭐연결 행 없음 + effective_source=none(앱 자격 전무) → 설정 미완',
+    input: { effectiveSource: 'none', now: NOW },
+    expected: { status: 'config_incomplete' },
+  },
+  {
+    name: '연결 행 없음 + effective_source=platform(공용 앱) → 그냥 미연결(자격은 있음)',
+    input: { effectiveSource: 'platform', now: NOW },
+    expected: { status: 'not_connected' },
+  },
+  {
+    name: '연결 행 없음 + effective_source=org(조직 자격) → 그냥 미연결',
+    input: { effectiveSource: 'org', now: NOW },
+    expected: { status: 'not_connected' },
+  },
+  {
+    name: '이미 연결된 행(active)은 effective_source=none이어도 재판정하지 않는다(연결 뒤 자격 삭제 시나리오)',
+    input: { serverStatus: 'active', effectiveSource: 'none', now: NOW },
+    expected: { status: 'connected' },
+  },
+  {
     name: 'active + 만료 없음(=WordPress 앱 비밀번호류) → 연결됨',
     input: { serverStatus: 'active', tokenExpiresAt: null, now: NOW },
     expected: { status: 'connected' },

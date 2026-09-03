@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -248,6 +249,14 @@ export default function OrganizationConnectorsPage() {
         <h1 className="text-lg font-semibold text-foreground">{t('connectorsTitle')}</h1>
         <p className="text-sm text-muted-foreground">{t('connectorsDescription')}</p>
       </div>
+
+      {/* story #3376(PO 확定) — 소셜 채널 OAuth 연결은 주체·수명이 달라 별도 라우트
+       * (/organization/channels)로 분리됐다. 이 페이지 자체는 손대지 않고 링크 한 줄만. */}
+      <p className="text-sm text-muted-foreground">
+        {t.rich('connectorsChannelsLinkHint', {
+          link: (chunks) => <Link href="/organization/channels" className="text-foreground underline">{chunks}</Link>,
+        })}
+      </p>
 
       {!isAdmin ? <p className="text-sm text-muted-foreground">{t('connectorsReadonlyNotAdmin')}</p> : null}
 
