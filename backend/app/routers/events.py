@@ -1279,6 +1279,7 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
     이미 계산해 둔 `neutral_facts`를 게이트 행 재조회로 그대로 재사용한다(새로 계산
     안 함)."""
     from app.models.gate import Gate
+    from app.services.gate_reason_signal import has_discontinue_signal
 
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
@@ -1316,6 +1317,7 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
         lines.append(f"- 사유: {resolution_note}")
 
     draft_doc_ref: str | None = None
+    draft_id: str | None = None
     if work_item_type and work_item_id is not None and gate_type:
         gate_row = (await db.execute(
             select(Gate).where(
@@ -1325,18 +1327,48 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
             ).order_by(Gate.resolved_at.desc()).limit(1)
         )).scalar_one_or_none()
         if gate_row is not None:
-            token = (gate_row.neutral_facts or {}).get("draft_doc_reference_token")
+            facts = gate_row.neutral_facts or {}
+            token = facts.get("draft_doc_reference_token")
             if token and token != "미확認":
                 draft_doc_ref = token
+            # story #3387 — site_posts.py 흐름(external_publish)이 stamp한 draft_id.
+            # 레시피 흐름의 draft_doc_reference_token과는 상호배타(한 게이트가 두 흐름
+            # 모두에서 만들어지지 않는다) — 링크가 아니라 참조로만 싣는다(PO 2026-09-03
+            # 13:33Z, 실행 권유 아님).
+            draft_id = facts.get("draft_id")
     if draft_doc_ref:
         lines.append(f"- 대상 산출물: {draft_doc_ref}")
+    if draft_id:
+        lines.append(f"- draft_id: {draft_id}")
 
+    # story #3387(결함·오도 문구, PO 2026-09-03 13:33Z 스코프 확定) — gate_type=
+    # external_publish는 이 아래 레시피 전용 문구(다른 gate_type용, 변경 없음)를 타지
+    # 않는다. 담롱 실사례 5건(온찬 eb9e797d) 전부 이 분기의 옛 문구와 문자 그대로
+    # 일치했다 — verdict만 보고 gate_type을 안 봐 "발행 도구"(제품에 없음)를 approved에
+    # 권하고, rejected엔 사유 무관 재상신을 권해 «폐기 대상» 반려와 정면으로 모순됐다.
+    #
+    # 유나 8칸 표(2026-09-03) 중 에이전트 칸(3·4·6·8)만 여기서 구현한다 — 휴먼 칸
+    # (1·2·5·7)은 이 함수의 스코프 밖(agent-only MCP 표면, 휴먼 3표면엔 다음 행동 문구를
+    # 신설하지 않기로 PO가 확定, 화면 실 버튼이 있는데 문구를 더하면 새 오도 자리가 된다).
+    # 실행 동사 0건 규율: "할 일 없음"으로 시작 — 이 표면 수신자는 항상 에이전트라
+    # "누르세요/쓰세요/발행하세요"류를 전부 금지한다(사람 표면 버튼과 헷갈릴 여지 자체를
+    # 없앤다).
+    if gate_type == "external_publish":
+        if verdict == "approved":
+            lines.append("- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.")
+        elif verdict == "rejected":
+            # AC3 — 사유에 «폐기/중단» 신호가 있으면 다음 행동 자체를 비운다(침묵도
+            # 문구다). 재상신을 권하면 카드가 사람의 결정과 정면으로 반대되는 행동을
+            # 시킨다(스토리 관측 사례 5).
+            if not has_discontinue_signal(resolution_note):
+                lines.append("- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.")
     # 페드루 리뷰(PR#3711) — "approve 게이트를 다시 발행"은 실재하지 않는 동작(게이트는
     # 발행 대상이 아니라 이벤트 발행의 부산물)이라 최저 지능 에이전트가 그대로 따라도
     # 실패하지 않을 실제 동작으로 정정: rejected는 「산출물 수정→같은 정의의 approve
     # stage 이벤트 재발행(게이트는 그 발행에 자동 재오픈됨)」, approved는 「이 정의의
-    # 다음 stage 이벤트 발행」.
-    if verdict == "rejected":
+    # 다음 stage 이벤트 발행」. ⚠️story #3387 — 이 갈래는 external_publish 이외
+    # gate_type 전용이다(회귀 0, 위에서 이미 갈라냈다).
+    elif verdict == "rejected":
         lines.append(
             "- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 "
             "다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 "

@@ -1,13 +1,13 @@
 {
   "_snapshot_policy": "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 ~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐.",
-  "source_run": "local-post-template-optimization",
+  "source_run": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge",
   "measured_at": "2026-09-03",
-  "total_files": 204,
-  "total_sec": 1121.8,
+  "total_files": 205,
+  "total_sec": 1127.44,
   "files": [
     {
       "file": "tests/test_3373_channel_connections.py",
-      "sec": 20.55
+      "sec": 20.1
     },
     {
       "file": "tests/test_3317_org_connector_registry.py",
@@ -38,10 +38,6 @@
       "sec": 12.83
     },
     {
-      "file": "tests/test_3381_site_post_unpublish.py",
-      "sec": 12.61
-    },
-    {
       "file": "tests/test_edg_s26_sprint_overlay.py",
       "sec": 12.32
     },
@@ -54,6 +50,10 @@
       "sec": 11.48
     },
     {
+      "file": "tests/test_3374_channel_posts.py",
+      "sec": 11.42
+    },
+    {
       "file": "tests/test_2636_custom_event_registration.py",
       "sec": 11.39
     },
@@ -62,12 +62,12 @@
       "sec": 11.31
     },
     {
-      "file": "tests/test_edg_s32_reassign.py",
-      "sec": 10.42
+      "file": "tests/test_3381_site_post_unpublish.py",
+      "sec": 10.7
     },
     {
-      "file": "tests/test_3386_site_post_publication.py",
-      "sec": 10.27
+      "file": "tests/test_edg_s32_reassign.py",
+      "sec": 10.42
     },
     {
       "file": "tests/test_2893_pr4_late_participation_gate_creation_realdb.py",
@@ -219,6 +219,10 @@
     },
     {
       "file": "tests/test_2054_gate_inbox.py",
+      "sec": 6.88
+    },
+    {
+      "file": "tests/test_3386_site_post_publication.py",
       "sec": 6.88
     },
     {
@@ -499,10 +503,6 @@
     },
     {
       "file": "tests/test_e_loop_ledger_s27_context_pack_recommendation.py",
-      "sec": 4.25
-    },
-    {
-      "file": "tests/test_3384_site_post_list_status.py",
       "sec": 4.25
     },
     {
@@ -820,6 +820,10 @@
     {
       "file": "tests/test_member_ssot_parity_realdb.py",
       "sec": 0.31
+    },
+    {
+      "file": "tests/test_3384_site_post_list_status.py",
+      "sec": 4.25
     }
   ]
 }

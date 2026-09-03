@@ -161,6 +161,9 @@ _DECLARED_SUBSTITUTIONS = {
     # 에서만 쓰여 이 목록에 없어도 무해했으나(_APPLE_TEAM_ID와 동형 선례), deploy-backend
     # 쪽으로도 재사용하며 처음 걸린다.
     "_NEXT_PUBLIC_SUPPORT_GATEWAY_URL",
+    # story 194acb63(Phase0 결함·S8 후속) — 발행 글 공개 URL의 랜딩 베이스(dev/prod 동일값,
+    # 별개 마케팅 사이트 도메인). deploy-backend ENV_VARS가 이제 이 값을 직접 참조.
+    "_PUBLIC_SITE_BASE_URL",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -259,6 +262,10 @@ def _run_env_vars_assembly(
         # 죽는다). 기본 빈 문자열(substitutions 기본값과 정합 — gateway 자체가 아직
         # dev 전용 프로비저닝이라 prod엔 이 값이 없다).
         "_NEXT_PUBLIC_SUPPORT_GATEWAY_URL": support_gateway_url,
+        # story 194acb63 — set -u라 미설정이면 스크립트가 죽는다(다른 신규 substitution들과
+        # 동일 이유). 값은 cloudbuild.yaml substitutions 기본값과 정합(dev/prod 동일,
+        # 시크릿 아님).
+        "_PUBLIC_SITE_BASE_URL": "https://sprintable.ai",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -418,6 +425,16 @@ def test_deploy_backend_prod_excludes_admin_operator_env_vars():
     assert "ADMIN_OPERATOR_ALLOWLIST" not in result
 
 
+def test_deploy_backend_dev_and_prod_both_include_public_site_base_url():
+    """story 194acb63 — PUBLIC_SITE_BASE_URL은 REDIS_URL/ADMIN_OPERATOR_*와 달리 dev·prod
+    분기 없이 베이스 문자열에 무조건 실린다(별개 마케팅 사이트 도메인, dev/prod 백엔드 어느
+    쪽이든 같은 랜딩이 공개 API를 읽는다 — 이 스토리의 계약)."""
+    dev_result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    prod_result = _run_env_vars_assembly("prod", "")
+    assert "PUBLIC_SITE_BASE_URL=https://sprintable.ai" in dev_result
+    assert "PUBLIC_SITE_BASE_URL=https://sprintable.ai" in prod_result
+
+
 def test_deploy_backend_dev_includes_avatars_bucket_env_var():
     """story #2887 — dev는 GCS_AVATARS_BUCKET을 plain env로 넘긴다(ADMIN_OPERATOR_*와 동일 배선)."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
@@ -535,6 +552,9 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "SUPPORT_CONTACT_SURFACE_WIDGET=false,"
         "SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=,SUPPORT_ESCALATION_APPROVER_MEMBER_ID=,"
         "SUPPORT_ESCALATION_TARGET_ORG_SLUG=moonklabs,SUPPORT_ESCALATION_TARGET_PROJECT_SLUG=sprintable,"
+        # story 194acb63 — 베이스 문자열 맨 끝(SUPPORT_ESCALATION_TARGET_PROJECT_SLUG 다음)에
+        # 이어붙는다 — REDIS_URL 등 조건부 append는 그 뒤.
+        "PUBLIC_SITE_BASE_URL=https://sprintable.ai,"
         "REDIS_URL=redis://10.164.120.243:6379,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
