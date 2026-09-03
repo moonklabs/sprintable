@@ -105,6 +105,17 @@ async def _seed_story(session, org_id, project_id, *, title="2호 글"):
     return story.id
 
 
+async def _org_member_id(session, org_id, user_id):
+    """휴먼의 auth.user_id(users.id)가 아니라 org_member.id를 잰다 — resolve_member()가
+    감사 로그 귀속에 실제로 쓰는 축(member-bound 리소스 관례)."""
+    from app.models.project import OrgMember
+    from sqlalchemy import select
+
+    return (await session.execute(
+        select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )).scalar_one()
+
+
 async def _seed_default_role(session, org_id):
     from app.models.participation import ParticipationRole
 
@@ -353,7 +364,15 @@ async def test_unpublish_writes_platform_activity_log_with_human_actor():
         log = logs[0]
         assert log.actor_type == "platform"
         assert log.actor_id is None
-        assert log.context["unpublished_by_member_id"] == str(human_id)
+        async with Session() as s:
+            expected_member_id = await _org_member_id(s, org_id, human_id)
+        assert log.context["unpublished_by_member_id"] == str(expected_member_id), (
+            "member id(org_member.id)가 아니라 user id를 기록하면 안 된다(member-bound 축)"
+        )
+        assert log.context["unpublished_by_member_id"] != str(human_id), (
+            "user_id를 그대로 기록했다면(리그레션) 이 assertion이 잡는다 — "
+            "human_id(users.id)와 org_member.id는 다른 값이어야 정상"
+        )
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -513,6 +532,88 @@ async def test_double_unpublish_returns_409_second_time():
             r2 = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/unpublish")
         assert r2.status_code == 409, r2.text
         assert r2.json()["error"]["code"] == "SITE_POST_NOT_PUBLISHED"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_two_languages_published_for_same_work_item_unpublish_only_targets_its_own_draft():
+    """페드루 PO 코드리뷰(2026-09-03 11:02Z) 회귀 — 같은 work_item에 서로 다른 slug·lang의
+    글 둘이 발행돼 있을 때(_upsert_site_post_row의 유일키는 (org_id,lang,slug)라 둘 다
+    별개 행) 한쪽만 unpublish해도 MultipleResultsFound(500) 없이 정확히 그 draft의 행만
+    비공개되고 다른 언어는 그대로 공개 유지돼야 한다.
+
+    두 SitePost 행을 직접 시드한다(HTTP 왕복 아님) — 이 시스템의 게이트는 work_item_id
+    하나당 1개뿐이라(submit_site_post_draft가 work_item_id로만 게이트를 찾는다) 같은
+    work_item의 두 draft를 정상 submit→approve→publish 왕복으로 각각 승인시키면 나중
+    submit이 먼저 승인된 게이트를 되밟아 pending으로 되돌려 버린다(이 자체가 이 스토리
+    범위 밖의 별개 기존 결함 후보 — 이 테스트는 그와 무관하게 «두 언어 행이 이미 공존하는
+    상태에서 unpublish의 조회 축이 유일한지»만 검증한다)."""
+    from app.main import app
+    from app.models.site_post import SitePost
+    from app.models.site_post_draft import SitePostDraft
+    from app.models.site_post_version import SitePostVersion
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+            gate_id = uuid.uuid4()
+            fake_author = uuid.uuid4()
+
+            draft_ko = SitePostDraft(id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, slug="2ho-blog-ko")
+            draft_en = SitePostDraft(id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, slug="2ho-blog-en")
+            s.add_all([draft_ko, draft_en])
+            await s.flush()
+
+            s.add_all([
+                SitePostVersion(
+                    id=uuid.uuid4(), draft_id=draft_ko.id, version=1, title="2호 글(ko)", lang="ko",
+                    summary="요약", tags=[], body_md="한국어 본문", body_sha256="ko-sha",
+                    author_member_id=fake_author, author_kind="human",
+                ),
+                SitePostVersion(
+                    id=uuid.uuid4(), draft_id=draft_en.id, version=1, title="2호 글(en)", lang="en",
+                    summary="summary", tags=[], body_md="English body", body_sha256="en-sha",
+                    author_member_id=fake_author, author_kind="human",
+                ),
+            ])
+
+            s.add_all([
+                SitePost(
+                    id=uuid.uuid4(), org_id=org_id, lang="ko", slug="2ho-blog-ko", title="2호 글(ko)",
+                    summary="요약", tags=[], body_md="한국어 본문", published_at=datetime.now(timezone.utc),
+                    source_story_id=story_id, gate_id=gate_id, created_by_member_id=fake_author,
+                    unpublished_at=None,
+                ),
+                SitePost(
+                    id=uuid.uuid4(), org_id=org_id, lang="en", slug="2ho-blog-en", title="2호 글(en)",
+                    summary="summary", tags=[], body_md="English body", published_at=datetime.now(timezone.utc),
+                    source_story_id=story_id, gate_id=gate_id, created_by_member_id=fake_author,
+                    unpublished_at=None,
+                ),
+            ])
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_unpub = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_ko.id}/unpublish")
+        assert r_unpub.status_code == 200, r_unpub.text  # MultipleResultsFound(500)면 여기서 잡힌다
+
+        async with Session() as s:
+            from sqlalchemy import select
+            ko_post = (await s.execute(
+                select(SitePost).where(SitePost.org_id == org_id, SitePost.slug == "2ho-blog-ko")
+            )).scalar_one()
+            en_post = (await s.execute(
+                select(SitePost).where(SitePost.org_id == org_id, SitePost.slug == "2ho-blog-en")
+            )).scalar_one()
+        assert ko_post.unpublished_at is not None, "ko만 비공개 대상이었다"
+        assert en_post.unpublished_at is None, "en은 건드리면 안 된다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -407,15 +407,20 @@ async def unpublish_site_post_endpoint(
     auth: AuthContext = Depends(get_current_user),
 ) -> UnpublishSitePostResponse:
     """story #3381(Phase0 후속·결함) — 공개된 글을 비공개로(행 삭제 아님, 감사 보존·재발행
-    가능). owner/admin 전용(publish보다 좁은 권한 — 되돌릴 수 있는 파괴적 액션)."""
+    가능). owner/admin 전용(publish보다 좁은 권한 — 되돌릴 수 있는 파괴적 액션).
+
+    페드루 PO 코드리뷰(2026-09-03 11:02Z) — 감사 로그 귀속은 `auth.user_id`(휴먼이면
+    users.id)가 아니라 `resolve_member()`가 돌려주는 member id(org_member.id)를 써야 한다
+    (member-bound 리소스 축, channel_connections.py의 connected_by와 동일 관례) — 이전엔
+    `_require_owner_or_admin`의 반환값을 버리고 auth.user_id를 그대로 썼다."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    await _require_owner_or_admin(db, auth, org_id)
+    resolved = await _require_owner_or_admin(db, auth, org_id)
 
     try:
         post = await unpublish_site_post(
-            db, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=uuid.UUID(auth.user_id),
+            db, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=resolved.id,
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

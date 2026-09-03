@@ -635,22 +635,29 @@ async def unpublish_site_post(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, unpublished_by_member_id: uuid.UUID,
 ) -> SitePost:
     """공개 SitePost 행을 비공개로(상태 전환 — 행 삭제 아님, AC 명시). `source_story_id`가
-    draft.work_item_id로 채워지는 것(_upsert_site_post_row)을 그대로 재사용해 draft→post를
-    역추적한다 — gate_id 경유 조회보다 한 단계 적고, 레거시 publish_site_post(POST
-    /site-posts)로 발행된 행도 같은 축으로 잡힌다(그 경로도 work_item_id=source_story_id를
-    똑같이 채운다).
-
     게이트는 건드리지 않는다(PO 결정) — 승인 자체는 여전히 유효(sealed_content_sha256도
     그대로)라 재발행(같은 publish_site_post_from_draft 재호출)이 내용 불변이면 그 승인을
     그대로 재사용한다(_upsert_site_post_row의 upsert가 unpublished_at을 다시 NULL로 되돌림
-    — 신규 코드 불요, 기존 publish 경로가 이미 이 역할을 한다)."""
+    — 신규 코드 불요, 기존 publish 경로가 이미 이 역할을 한다).
+
+    페드루 PO 코드리뷰(2026-09-03 11:02Z) — 원래 `source_story_id == work_item_id`만으로
+    조회했더니 같은 work_item에 두 언어(예: ko·en, 서로 다른 slug의 별도 draft)가 각각
+    발행돼 있으면 두 행이 걸려 `MultipleResultsFound`(500)였다. 공개 행의 실제 유일키는
+    `(org_id, lang, slug)`(_upsert_site_post_row가 쓰는 그 축 그대로) — draft의 slug는
+    고정이고 lang은 최신 버전 것을 쓴다(발행 시점에 실제로 이 축으로 upsert됐으므로 draft
+    하나 = 행 하나가 정확히 선다)."""
     draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None:
         raise SitePostDraftNotFoundError(draft_id)
 
+    versions = await list_site_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise SitePostNotPublishedError(draft_id)
+    latest_lang = versions[-1].lang
+
     post = (await db.execute(
         select(SitePost).where(
-            SitePost.org_id == org_id, SitePost.source_story_id == draft.work_item_id,
+            SitePost.org_id == org_id, SitePost.lang == latest_lang, SitePost.slug == draft.slug,
             SitePost.unpublished_at.is_(None),
         )
     )).scalar_one_or_none()
