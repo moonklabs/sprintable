@@ -13,5 +13,8 @@ export async function POST(request: Request, { params }: RouteParams) {
   const { id } = await params;
   const _r = await proxyToFastapiWithParams(request, '/api/v2/organizations/[id]/site-posts', { id });
   if (!_r.ok) return _r;
-  return apiSuccess(await _r.json());
+  // 라이브 dev 검증(2026-09-03, 페드루 지시 ①)에서 잡힌 실사고 — backend는 status_code=201
+  // (site_posts.py::post_site_post)인데 status를 안 넘기면 apiSuccess가 200으로 깔아
+  // 조용히 드롭한다(drafts POST 라우트에서 이미 한 번 겪은 같은 패턴, PR#3731 대조).
+  return apiSuccess(await _r.json(), undefined, _r.status);
 }
