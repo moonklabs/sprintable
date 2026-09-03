@@ -16,15 +16,15 @@ payload_schema는 `additionalProperties: false`라 이 필드가 스키마에 �
 422로 거부된다 — 0303(gate_requester_member_id 추가) 선례와 동일한 additive-only 변경.
 
 Revision ID: 0309
-Revises: 0307
+Revises: 0308
 Create Date: 2026-09-03
 
 ⚠️번호 재부여 이력 — 최초 0308로 열었으나 CI(alembic sibling-PR revision collision guard)가
 PR#3731(story #3365, S1 site_posts 초안)의 `0308_site_post_drafts.py`와 번호 중복을
-잡아 0309로 재부여했다(페드루 PO 확認 2026-09-03). PR#3731이 develop에 먼저 머지되면
-그 뒤 이 브랜치를 rebase해 down_revision을 실제 병합된 0308로 갱신한다 — 두 변경은
-도메인이 완전히 달라(마케팅 통지 파이프 vs site-posts 초안) 순서 자체는 무의미, 체인만
-선형으로 맞추면 된다.
+잡아 0309로 재부여했다(페드루 PO 확認 2026-09-03). PR#3731이 develop에 머지돼(2026-09-03,
+647b8fe43) down_revision을 실제 병합된 0308로 갱신 — 이 브랜치를 develop 위로 rebase한
+직후 반영한 것. 두 변경은 도메인이 완전히 달라(마케팅 통지 파이프 vs site-posts 초안)
+순서 자체는 무의미, 체인만 선형으로 맞춘다.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0309"
-down_revision = "0307"
+down_revision = "0308"
 branch_labels = None
 depends_on = None
 
