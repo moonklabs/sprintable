@@ -15,12 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.services.member_resolver import resolve_member
 from app.services.site_posts import (
     ExternalPublishGateNotApprovedError,
     InvalidSitePostInputError,
     MediaNotSupportedPhase0Error,
     SitePostApproverRoleMissingError,
     SitePostDraftNotFoundError,
+    SitePostNotPublishedError,
     SitePostReapprovalRequiredError,
     SitePostSealMissingError,
     SitePostVersionNotFoundError,
@@ -32,9 +34,34 @@ from app.services.site_posts import (
     publish_site_post,
     publish_site_post_from_draft,
     submit_site_post_draft,
+    unpublish_site_post,
 )
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["site-posts"])
+
+
+async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story #3381 — 발행 취소(비공개)는 owner/admin 전용(PO 결정, publish보다 좁다 —
+    publish는 org 멤버 누구나·이 액션은 되돌릴 수 있는 파괴적 상태전환이라 한 단계 더).
+    channel_connections.py의 _require_owner와 동형 2단(human→role) 패턴."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "SITE_POST_UNPUBLISH_HUMAN_ONLY",
+                "message": "발행 취소는 휴먼 멤버만 가능합니다.",
+            },
+        )
+    if resolved.role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY",
+                "message": "발행 취소는 조직 owner 또는 admin만 가능합니다.",
+            },
+        )
+    return resolved
 
 
 class CreateSitePostDraftVersionRequest(BaseModel):
@@ -360,4 +387,48 @@ async def publish_site_post_from_draft_endpoint(
 
     return PublishSitePostFromDraftResponse(
         url=url, published_at=post.published_at.isoformat(), version_id=version_id,
+    )
+
+
+class UnpublishSitePostResponse(BaseModel):
+    id: uuid.UUID
+    slug: str
+    unpublished_at: str
+
+
+@router.post(
+    "/{org_id}/site-posts/drafts/{draft_id}/unpublish", response_model=UnpublishSitePostResponse,
+)
+async def unpublish_site_post_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> UnpublishSitePostResponse:
+    """story #3381(Phase0 후속·결함) — 공개된 글을 비공개로(행 삭제 아님, 감사 보존·재발행
+    가능). owner/admin 전용(publish보다 좁은 권한 — 되돌릴 수 있는 파괴적 액션).
+
+    페드루 PO 코드리뷰(2026-09-03 11:02Z) — 감사 로그 귀속은 `auth.user_id`(휴먼이면
+    users.id)가 아니라 `resolve_member()`가 돌려주는 member id(org_member.id)를 써야 한다
+    (member-bound 리소스 축, channel_connections.py의 connected_by와 동일 관례) — 이전엔
+    `_require_owner_or_admin`의 반환값을 버리고 auth.user_id를 그대로 썼다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    try:
+        post = await unpublish_site_post(
+            db, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=resolved.id,
+        )
+    except SitePostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SitePostNotPublishedError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "SITE_POST_NOT_PUBLISHED", "message": str(exc)},
+        ) from exc
+
+    return UnpublishSitePostResponse(
+        id=post.id, slug=post.slug, unpublished_at=post.unpublished_at.isoformat(),
     )

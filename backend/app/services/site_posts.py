@@ -98,6 +98,16 @@ class SitePostVersionNotFoundError(Exception):
         super().__init__(f"버전을 찾을 수 없습니다: {version_id}")
 
 
+class SitePostNotPublishedError(Exception):
+    """story #3381(Phase0 후속·결함) — 이 draft의 work_item으로 현재 공개된(unpublished_at
+    IS NULL) SitePost 행이 없다(애초에 발행된 적 없거나 이미 비공개됨) — 비공개할 대상 자체가
+    없다는 뜻이라 409로 명시 거부한다."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"이 draft에 현재 공개된 글이 없습니다: {draft_id}")
+
+
 def _validate_slug(slug: str) -> None:
     if not _SLUG_RE.match(slug):
         raise InvalidSitePostInputError(f"slug 형식이 올바르지 않습니다: {slug!r}")
@@ -617,3 +627,54 @@ async def publish_site_post_from_draft(
     await db.commit()
     await db.refresh(post)
     return post, url, latest.id
+
+
+# ─── story #3381(Phase0 후속·결함) — 발행 취소(비공개) ─────────────────────────────
+
+async def unpublish_site_post(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, unpublished_by_member_id: uuid.UUID,
+) -> SitePost:
+    """공개 SitePost 행을 비공개로(상태 전환 — 행 삭제 아님, AC 명시). `source_story_id`가
+    게이트는 건드리지 않는다(PO 결정) — 승인 자체는 여전히 유효(sealed_content_sha256도
+    그대로)라 재발행(같은 publish_site_post_from_draft 재호출)이 내용 불변이면 그 승인을
+    그대로 재사용한다(_upsert_site_post_row의 upsert가 unpublished_at을 다시 NULL로 되돌림
+    — 신규 코드 불요, 기존 publish 경로가 이미 이 역할을 한다).
+
+    페드루 PO 코드리뷰(2026-09-03 11:02Z) — 원래 `source_story_id == work_item_id`만으로
+    조회했더니 같은 work_item에 두 언어(예: ko·en, 서로 다른 slug의 별도 draft)가 각각
+    발행돼 있으면 두 행이 걸려 `MultipleResultsFound`(500)였다. 공개 행의 실제 유일키는
+    `(org_id, lang, slug)`(_upsert_site_post_row가 쓰는 그 축 그대로) — draft의 slug는
+    고정이고 lang은 최신 버전 것을 쓴다(발행 시점에 실제로 이 축으로 upsert됐으므로 draft
+    하나 = 행 하나가 정확히 선다)."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+
+    versions = await list_site_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise SitePostNotPublishedError(draft_id)
+    latest_lang = versions[-1].lang
+
+    post = (await db.execute(
+        select(SitePost).where(
+            SitePost.org_id == org_id, SitePost.lang == latest_lang, SitePost.slug == draft.slug,
+            SitePost.unpublished_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if post is None:
+        raise SitePostNotPublishedError(draft_id)
+
+    post.unpublished_at = datetime.now(timezone.utc)
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="site_post_unpublished", actor_type="platform", actor_id=None,
+        entity_type="site_post", entity_id=post.id,
+        context={
+            "gate_id": str(post.gate_id), "unpublished_by_member_id": str(unpublished_by_member_id),
+        },
+    )
+    await db.commit()
+    await db.refresh(post)
+    return post
