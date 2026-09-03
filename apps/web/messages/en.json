@@ -2180,6 +2180,8 @@
     "errorResubmitRequired": "The content changed after approval — resubmit it before approving again.",
     "errorUnpublishHumanOnly": "Only human members can unpublish.",
     "errorUnpublishOwnerOrAdminOnly": "Only the organization owner or an admin can unpublish.",
+    "errorGateAlreadyHeld": "Another draft («{title}» · {lang}) is already in approval — only one draft per item can be submitted at a time.",
+    "errorGateAlreadyHeldLink": "View that draft",
     "errorRawDetailsToggle": "View server response"
   },
   "docs": {

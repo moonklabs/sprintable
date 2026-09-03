@@ -285,6 +285,118 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.querySelector('a[href^="/gates/"]')).toBeNull();
   });
 
+  // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD 409는 다른 에러와 다르게 상대 초안의
+  // 제목을 별도 조회해 「이 항목은 다른 초안(«제목» · lang)이 승인 절차 중입니다」로 렌더하고
+  // 그 초안(/content/{holding_draft_id})으로 가는 링크를 붙인다. stubFetchWithVersions는
+  // DRAFT_ID 하나만 알므로(다른 초안 동시 존재는 이 helper의 전제 밖) 이 두 테스트는 전용
+  // fetch 스텁을 직접 쓴다.
+  it('⭐AC3 — 409 SITE_POST_GATE_ALREADY_HELD는 상대 초안 제목을 채워 문구를 조립하고 그 초안 링크를 보여준다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+          return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+        }
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit`) {
+          return {
+            ok: false, status: 409,
+            json: async () => ({
+              data: null,
+              error: {
+                code: 'SITE_POST_GATE_ALREADY_HELD',
+                message: '이 work item은 다른 초안이 이미 승인 절차 중입니다(holding_draft_id=d-other, lang=en, slug=a-blog-en)',
+                holding_draft_id: 'd-other', holding_lang: 'en', holding_slug: 'a-blog-en',
+              },
+              meta: null,
+            }),
+          };
+        }
+        if (url === '/api/organizations/org-1/site-posts/drafts/d-other/versions') {
+          return {
+            ok: true, status: 200,
+            json: async () => ({ data: [{ ...VERSION_1, version_id: 'v-other', title: '2호 글(영문판)' }], error: null, meta: null }),
+          };
+        }
+        if (url.startsWith('/api/gates?work_item_id=')) return { ok: true, status: 200, json: async () => [] };
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+          return {
+            ok: true, status: 200,
+            json: async () => ({ data: { published_at: null, url: null, published_by_member_id: null, published_body_sha256: null }, error: null, meta: null }),
+          };
+        }
+        throw new Error('unexpected fetch: ' + url);
+      }),
+    );
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain('2호 글(영문판)');
+    expect(container.textContent).toContain('en');
+    const holdingLink = container.querySelector<HTMLAnchorElement>('a[href="/content/d-other"]');
+    expect(holdingLink).not.toBeNull();
+  });
+
+  it('AC3 — 상대 초안 제목 조회 실패해도(best-effort) slug 폴백 문구+링크는 그대로 뜬다(지어내지 않되 막지 않는다)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+          return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+        }
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/submit`) {
+          return {
+            ok: false, status: 409,
+            json: async () => ({
+              data: null,
+              error: {
+                code: 'SITE_POST_GATE_ALREADY_HELD', message: '…',
+                holding_draft_id: 'd-other', holding_lang: 'en', holding_slug: 'a-blog-en',
+              },
+              meta: null,
+            }),
+          };
+        }
+        if (url === '/api/organizations/org-1/site-posts/drafts/d-other/versions') {
+          return { ok: false, status: 404, json: async () => ({ detail: 'not found' }) };
+        }
+        if (url.startsWith('/api/gates?work_item_id=')) return { ok: true, status: 200, json: async () => [] };
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+          return {
+            ok: true, status: 200,
+            json: async () => ({ data: { published_at: null, url: null, published_by_member_id: null, published_body_sha256: null }, error: null, meta: null }),
+          };
+        }
+        throw new Error('unexpected fetch: ' + url);
+      }),
+    );
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain('a-blog-en'); // slug 폴백(제목 조회 실패)
+    const holdingLink = container.querySelector<HTMLAnchorElement>('a[href="/content/d-other"]');
+    expect(holdingLink).not.toBeNull();
+  });
+
   // story #3368 §8-1 4단(페드루 지시 2026-09-03, S2 계약 전제로 미리 배선) — 실 게이트
   // 신호가 있을 때 상태·발행 버튼이 정확히 파생되는지.
   it('⭐게이트 status=pending — 상태 칩이 "승인 대기"로 뜨고 발행 버튼은 비활성', async () => {
