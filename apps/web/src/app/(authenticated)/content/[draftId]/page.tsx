@@ -18,6 +18,7 @@ import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -97,6 +98,7 @@ interface ActiveConnectionOption {
 interface ChannelPostVariantItem {
   draft_id: string;
   channel: string;
+  connection_id: string;
   gate_status?: string | null;
   reapproval_required?: boolean | null;
   sealed_content_sha256?: string | null;
@@ -191,8 +193,14 @@ export default function ContentPostEditPage() {
   const [variants, setVariants] = useState<ChannelPostVariantItem[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [creatingVariant, setCreatingVariant] = useState(false);
-  const [createVariantResult, setCreateVariantResult] = useState<{ type: 'error'; text: string } | null>(null);
+  // 유나 사전 스티어(2026-09-04, PR#3799 head)④ — raw는 여기서 담아 둔다. 토글 배선은
+  // #3801(RawDetailsToggle 공용화)이 착지한 뒤 한 줄로 잇는다(지금은 그 컴포넌트가
+  // develop에 없다 — PO 판단대로 raw 캡처만 먼저).
+  const [createVariantResult, setCreateVariantResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
   const router = useRouter();
+  // 유나 사전 스티어② — 변형 행의 published_at 표시. 조직 tz 폴백 관례는 channel-posts
+  // 상세 화면과 동형(resolveDisplayTimezone()의 기본 인자 규약 그대로 재사용).
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   useEffect(() => {
     if (!orgId) return;
@@ -300,6 +308,7 @@ export default function ContentPostEditPage() {
       setCreateVariantResult({
         type: 'error',
         text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCreateVariantFailed')),
+        raw: info.raw,
       });
     } catch {
       setCreateVariantResult({ type: 'error', text: t('channelPostsCreateVariantFailed') });
@@ -744,26 +753,42 @@ export default function ContentPostEditPage() {
           있으면 그 자리 자체를 안 그린다. */}
       {variants.length > 0 ? (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-variants-list">
-          <p className="text-xs font-medium text-muted-foreground">{t('channelPostsVariantsListLabel')}</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {t('channelPostsVariantsListLabel')} ({variants.length})
+          </p>
           <ul className="space-y-1.5">
-            {variants.map((v) => (
-              <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
-                <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
-                  {v.channel === 'threads' ? t('channelThreads') : v.channel}
-                </Link>
-                <StatusChip
-                  status={deriveChannelPostView({
-                    gateStatus: toGateStatus(v.gate_status ?? undefined),
-                    reapprovalRequired: v.reapproval_required ?? undefined,
-                    sealedBodySha256: realStr(v.sealed_content_sha256),
-                    currentBodySha256: v.body_sha256,
-                    publicationStatus: v.publication_status as ChannelPublicationStatus | null | undefined,
-                    errorCode: v.error_code,
-                    publishedAt: v.published_at,
-                  }).status}
-                />
-              </li>
-            ))}
+            {variants.map((v) => {
+              // 유나 사전 스티어③ — 같은 채널 계정이 둘이면 채널명만으론 안 갈린다.
+              // activeConnections(이미 든 값)에서 connection_id로 잇는다 — 못 이으면
+              // (연결이 회수됐거나 비활성) 채널명만(지어내지 않는다).
+              const accountLabel = activeConnections.find((c) => c.id === v.connection_id)?.account_label;
+              return (
+                <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
+                  <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
+                    {v.channel === 'threads' ? t('channelThreads') : v.channel}
+                    {accountLabel ? ` · ${accountLabel}` : ''}
+                  </Link>
+                  <span className="flex items-center gap-2">
+                    {v.published_at ? (
+                      <span className="text-xs text-muted-foreground" data-testid="content-variants-list-item-published-at">
+                        {formatScheduledAt(v.published_at, displayTimezone).display}
+                      </span>
+                    ) : null}
+                    <StatusChip
+                      status={deriveChannelPostView({
+                        gateStatus: toGateStatus(v.gate_status ?? undefined),
+                        reapprovalRequired: v.reapproval_required ?? undefined,
+                        sealedBodySha256: realStr(v.sealed_content_sha256),
+                        currentBodySha256: v.body_sha256,
+                        publicationStatus: v.publication_status as ChannelPublicationStatus | null | undefined,
+                        errorCode: v.error_code,
+                        publishedAt: v.published_at,
+                      }).status}
+                    />
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

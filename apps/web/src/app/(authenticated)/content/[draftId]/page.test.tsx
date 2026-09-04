@@ -1031,4 +1031,60 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
     expect(item?.textContent).toContain(koMessages.content.channelThreads);
     expect(item?.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('approved');
   });
+
+  // 유나 사전 스티어(2026-09-04, PR#3799 head)① — 목록 머리에 개수를 보인다.
+  it('목록 머리에 변형 개수가 보인다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      variants: [
+        { draft_id: 'cp-1', channel: 'threads', connection_id: 'conn-1', gate_status: null, body_sha256: 'h1', publication_status: null, published_at: null },
+        { draft_id: 'cp-2', channel: 'threads', connection_id: 'conn-2', gate_status: null, body_sha256: 'h2', publication_status: null, published_at: null },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="content-variants-list"] p')?.textContent)
+      .toBe(`${koMessages.content.channelPostsVariantsListLabel} (2)`);
+  });
+
+  // 유나 사전 스티어② — published_at이 있으면 그 시각을 보인다(없으면 안 그림).
+  it('published_at이 있는 변형은 발행 시각이 함께 보인다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      variants: [
+        {
+          draft_id: 'cp-1', channel: 'threads', connection_id: 'conn-1', gate_status: 'approved',
+          sealed_content_sha256: 'h1', body_sha256: 'h1', publication_status: 'published',
+          published_at: '2026-09-04T00:00:00Z',
+        },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    const el = container.querySelector('[data-testid="content-variants-list-item-published-at"]');
+    expect(el).not.toBeNull();
+    expect(el?.textContent).not.toBe('');
+  });
+
+  // 유나 사전 스티어③ — 같은 채널의 연결이 둘이면 activeConnections에서 connection_id로
+  // account_label을 이어 갈라 보인다(못 이으면 채널명만).
+  it('⭐같은 채널 연결이 둘이면 account_label로 갈라 보이고, 연결을 못 찾으면 채널명만 보인다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      activeConnections: [
+        { id: 'conn-1', channel: 'threads', account_label: '@brand_a', status: 'active' },
+        { id: 'conn-2', channel: 'threads', account_label: '@brand_b', status: 'active' },
+      ],
+      variants: [
+        { draft_id: 'cp-1', channel: 'threads', connection_id: 'conn-1', gate_status: null, body_sha256: 'h1', publication_status: null, published_at: null },
+        { draft_id: 'cp-2', channel: 'threads', connection_id: 'conn-2', gate_status: null, body_sha256: 'h2', publication_status: null, published_at: null },
+        { draft_id: 'cp-3', channel: 'threads', connection_id: 'conn-revoked', gate_status: null, body_sha256: 'h3', publication_status: null, published_at: null },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const items = [...container.querySelectorAll('[data-testid="content-variants-list-item"]')];
+    expect(items[0]?.textContent).toContain('@brand_a');
+    expect(items[1]?.textContent).toContain('@brand_b');
+    expect(items[2]?.textContent).not.toContain('@brand');
+    expect(items[2]?.textContent).toContain(koMessages.content.channelThreads);
+  });
 });
