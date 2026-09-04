@@ -44,6 +44,20 @@ def test_build_text_preview_does_not_split_zwj_family_emoji_at_boundary():
     assert preview.endswith("👩‍💻")
 
 
+def test_build_text_preview_does_not_split_when_cut_lands_exactly_on_zwj_itself():
+    """⭐페드루 리뷰(2026-09-04) — cut 지점이 ZWJ **자신**(text[cut])에 떨어지는 경우.
+    79 filler(인덱스0..78) + 「👩‍💻」(👩=인덱스79·ZWJ=인덱스80·💻=인덱스81, 총 82자).
+    80에서 자르면 text[80]이 정확히 ZWJ 그 자체 — 결과가 👩‍💻 전체를 포함하거나 아예
+    제외해야지, 👩만 남기고 끊기면(반토막) 안 된다."""
+    text = "x" * 79 + "👩‍💻"
+    assert len(text) == 82
+    preview = build_text_preview(text)
+    assert not preview.endswith("👩"), "ZWJ 직전(👩만 남기고)에서 끊기면 클러스터가 반토막 남"
+    assert preview == text or preview == "x" * 79, (
+        "결과는 클러스터 전체 포함(text 그대로) 또는 클러스터 전체 제외(79 filler만) 중 하나여야 함"
+    )
+
+
 def test_build_text_preview_does_not_split_variation_selector():
     """AC2 — VS16(U+FE0F) 직전에서 자르면 그 선택자까지 포함한다. 79 filler(0..78)+
     "❤"(U+2764, 인덱스79)+VS16(U+FE0F, 인덱스80) = 81자. 80에서 자르면 ❤ 바로 뒤(VS16

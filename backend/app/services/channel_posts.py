@@ -219,13 +219,20 @@ def _continues_prior_grapheme_cluster(ch: str, prev: str) -> bool:
     """story #3411 — ch가 prev와 하나의 grapheme cluster를 이루는 확장자인지. 완전한
     UAX#29 세그멘테이션이 아니라 유나 design이 명시한 3축만 처리한다(선언, 범위 밖):
     결합 문자(unicodedata combining class≠0)·variation selector(U+FE0E/FE0F)·ZWJ(U+200D)
-    직후·한글 결합 자모(중성/종성, U+1160~U+11FF). 이 3축 밖의 결합(예: 국가 국기 이모지의
-    regional indicator 쌍)은 여전히 쪼개질 수 있다."""
+    자신 또는 그 직후·한글 결합 자모(중성/종성, U+1160~U+11FF). 이 3축 밖의 결합(예:
+    국가 국기 이모지의 regional indicator 쌍)은 여전히 쪼개질 수 있다.
+
+    페드루 리뷰(2026-09-04) — cut 지점이 ZWJ **자신**에 떨어지는 경우(`ch == _ZWJ`)를
+    처음엔 놓쳤다: `prev == _ZWJ`만 보면 "ZWJ 다음 글자"는 이어 붙이지만, cut이 ZWJ
+    코드포인트 그 자체를 가리킬 때는 아직 뒤에 이어질 문자를 안 봐서 여기서 멈춰버려
+    앞 글자(예: 👩)만 남고 클러스터(👩‍💻)가 반토막 났다 — `ch == _ZWJ`도 True로 둬서
+    ZWJ 자체를 포함하고, 다음 반복에서 `prev == _ZWJ` 조건이 그 뒤 문자까지 마저
+    끌고 오게 한다(연쇄)."""
     if unicodedata.combining(ch) != 0:
         return True
     if ch in _VARIATION_SELECTORS:
         return True
-    if prev == _ZWJ:
+    if ch == _ZWJ or prev == _ZWJ:
         return True
     cp = ord(ch)
     if _HANGUL_JUNGSEONG_JONGSEONG_START <= cp <= _HANGUL_JUNGSEONG_JONGSEONG_END:
