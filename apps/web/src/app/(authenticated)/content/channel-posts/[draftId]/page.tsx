@@ -19,6 +19,7 @@ import { parseScheduledAtServerError } from '@/components/content/validate-sched
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 
 /**
@@ -787,7 +788,11 @@ export default function ChannelPostEditPage() {
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
-        <h1 className="text-lg font-semibold text-foreground">{t('editTitle')}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-lg font-semibold text-foreground">{t('editTitle')}</h1>
+          {/* story f30da19a AC5 — T3(상세 머리). */}
+          {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
+        </div>
         <p className="text-sm text-muted-foreground">
           {draft.channel === 'threads' ? t('channelThreads') : draft.channel} · v{draft.current_version}
         </p>

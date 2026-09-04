@@ -103,6 +103,28 @@ describe('ChannelPostListPage (story #3402)', () => {
       .toBe('/content/channel-posts/calendar');
   });
 
+  // story f30da19a AC5 — T1(목록).
+  it('⭐AC5 — channel=sandbox면 칩 옆에 「테스트」 배지가 뜬다', async () => {
+    stubFetch([{ ...DRAFT_A, channel: 'sandbox' }]);
+    await act(async () => {
+      root.render(wrap(<ChannelPostListPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-sandbox-test-badge"]')?.textContent)
+      .toBe(koMessages.content.channelPostsSandboxTestBadge);
+  });
+
+  it('AC5 — channel=threads(실채널)면 배지가 없다', async () => {
+    stubFetch([DRAFT_A]);
+    await act(async () => {
+      root.render(wrap(<ChannelPostListPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-sandbox-test-badge"]')).toBeNull();
+  });
+
   it('⭐목록 응답의 채널·버전·작성 주체·수정 시각이 화면에 그대로 나온다(AC1)', async () => {
     stubFetch([DRAFT_A]);
     await act(async () => {

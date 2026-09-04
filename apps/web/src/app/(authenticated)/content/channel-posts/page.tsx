@@ -11,6 +11,7 @@ import { deriveChannelPostView, type ChannelPublicationStatus } from '@/componen
 import { type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
+import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 
 /**
  * story #3402(Phase1·마케팅운영, AC1/AC2/AC3, doc phase1-threads-post-manager-screen-design
@@ -193,7 +194,15 @@ export default function ChannelPostListPage() {
                     <td className="px-3 py-2.5 text-muted-foreground">
                       {draft.channel === 'threads' ? t('channelThreads') : draft.channel}
                     </td>
-                    <td className="px-3 py-2.5"><StatusChip status={view.status} /></td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusChip status={view.status} />
+                        {/* story f30da19a AC5 — T1(목록). §17-1 오버레이(칩은 그대로,
+                            얹는다) — sandbox 연결로 만든 초안임을 진짜 초안과 나란히
+                            구별한다(승인·발행 게이트 오통과 방지). */}
+                        {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
+                      </div>
+                    </td>
                     <td className="px-3 py-2.5 text-muted-foreground">v{draft.current_version}</td>
                     <td className="px-3 py-2.5 text-muted-foreground" data-testid="channel-post-text-length">
                       {hasTextLength ? draft.text_length : t('originAuthorUnknown')}
