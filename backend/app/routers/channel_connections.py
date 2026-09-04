@@ -96,11 +96,20 @@ class ChannelConnectionResponse(BaseModel):
     # 하드코딩하면 다른 채널이 붙을 때 값이 틀리는 재발(담롱군 §4-6)이 난다 — 선언 안 한
     # 채널이면 null("한도 미확認", 지어내지 않는다).
     max_text_length: int | None = None
+    # story #3419(AC4) — 「이 연결로 지금 발행 글을 회수할 수 있나」의 최종 판정값(어댑터
+    # `supports_unpublish` ∧ 연결 `scopes`에 필요 스코프 포함, PO 확定 산식 그대로). FE가
+    # 이 값 하나로 버튼을 그리거나 안 그린다 — scopes 원본을 노출해 FE가 다시 판정하게
+    # 만들지 않는다(판정 로직 단일 지점).
+    can_unpublish: bool = False
 
 
 def _to_response(row) -> ChannelConnectionResponse:
     adapter = get_channel_adapter(row.channel)
     max_text_length = adapter.max_text_length if adapter is not None and adapter.max_text_length > 0 else None
+    can_unpublish = bool(
+        adapter is not None and adapter.supports_unpublish
+        and adapter.unpublish_required_scope in (row.scopes or [])
+    )
     return ChannelConnectionResponse(
         id=row.id, channel=row.channel, account_id=row.account_id, account_label=row.account_label,
         credential_kind=row.credential_kind, status=row.status,
@@ -108,7 +117,7 @@ def _to_response(row) -> ChannelConnectionResponse:
         last_refreshed_at=row.last_refreshed_at.isoformat() if row.last_refreshed_at else None,
         last_error=row.last_error, can_auto_refresh=can_auto_refresh(row.refresh_mode),
         connected_by=row.connected_by, created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
-        max_text_length=max_text_length,
+        max_text_length=max_text_length, can_unpublish=can_unpublish,
     )
 
 

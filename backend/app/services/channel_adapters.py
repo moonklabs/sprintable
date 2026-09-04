@@ -32,13 +32,30 @@ class ChannelAdapterConfig:
     # 대상 글마다 달라 여기 선언 대상이 아니다, app/services/utm.py::resolve_utm_campaign).
     utm_source: str = ""
     utm_medium: str = ""
+    # story #3419(Phase1·마케팅운영, PO 결정 2026-09-04) — 발행된 글을 채널에서 회수(삭제
+    # API 호출) 가능한지. max_text_length·can_auto_refresh와 동형 관례(채널의 성질을 여기
+    # 선언하고 목록 API가 그대로 노출 → FE가 버튼 렌더 여부를 판단, 신규 판정 로직 불요).
+    supports_unpublish: bool = False
+    # 회수를 실제로 실행하려면 연결이 이 스코프를 갖고 있어야 한다(None=이 어댑터는 스코프
+    # 요구 없음 — supports_unpublish=False면 애초에 의미 없는 값). `ChannelConnection.scopes`
+    # 는 연결 시점에 이 어댑터의 `scope` 문자열을 그대로 저장한 값이다(그라운딩 확認 —
+    # Threads 토큰 교환 응답에 별도 "실제 부여된 스코프" 필드가 없어, 이 코드베이스 기존
+    # 관례(`channel_connections.py::channel_connection_callback`)가 이미 "요청한 스코프"를
+    # "이 연결의 스코프"로 기록해 왔다 — 새 컬럼·새 메커니즘 불요, 이 필드를 `scope`에 포함시
+    # 키기만 하면 기존 저장 경로가 그대로 반영한다. 기존 연결은 이 값 없이 저장돼 있어
+    # 자동으로 "부족"으로 판정된다 — 재인증해야 새 scope가 반영).
+    unpublish_required_scope: str | None = None
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
     "threads": ChannelAdapterConfig(
         authorize_url="https://threads.net/oauth/authorize",
         token_url="https://graph.threads.net/oauth/access_token",
-        scope="threads_basic,threads_content_publish",
+        # story #3419 — threads_delete 추가(회수 API 스코프, Meta 공식 문서 실측
+        # developers.facebook.com/docs/threads/posts/delete-posts/ 2026-09-04). 기존
+        # 연결은 이 스코프 없이 이미 저장돼 있어 재인증 전까지 회수가 막힌다(의도, PO
+        # 확定 — 새 연결부터 자동 해소).
+        scope="threads_basic,threads_content_publish,threads_delete",
         refresh_mode="reissue_from_access_token",
         credential_kind="oauth",
         # sprintable-agent-plugins/plugins/sprintable/connectors/threads.ts:27의
@@ -47,6 +64,8 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         max_text_length=500,
         utm_source="threads",
         utm_medium="social",
+        supports_unpublish=True,
+        unpublish_required_scope="threads_delete",
     ),
 }
 
