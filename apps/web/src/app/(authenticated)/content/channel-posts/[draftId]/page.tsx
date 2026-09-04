@@ -516,7 +516,13 @@ export default function ChannelPostEditPage() {
       <div className="space-y-2">
         <div className="flex gap-2">
           <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
-            {publishing ? t('publishPendingCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
+            {/* story #3402 PR2 ②-c(T9·doc §4-1/§17-4) — 부분 성공(container_created)이면
+                기본 행동이 "다시"가 아니라 "이어서 발행"이다(처음부터 하면 컨테이너가
+                하나 더 생겨 같은 글이 두 번 나갈 수 있다, §4-1). partialSuccess 분기가
+                site-posts의 isRepublish(재승인 뒤 재발행) 분기보다 먼저다 — 둘 다 참일
+                일은 없지만(부분성공은 채널 고유 신호, isRepublish는 사이트 공유 파생)
+                우선순위를 명시해 둔다. */}
+            {publishing ? t('publishPendingCta') : view.partialSuccess ? t('channelPostsPublishContinueCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
           </Button>
         </div>
         {!canPublish ? (

@@ -423,6 +423,10 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    // doc §4-1/§17-4 — 부분 성공의 기본 행동은 "다시"가 아니라 "이어서 발행"이다(처음부터
+    // 하면 컨테이너가 하나 더 생겨 같은 글이 두 번 나갈 수 있다).
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).textContent)
+      .toBe(koMessages.content.channelPostsPublishContinueCta);
   });
 
   it('⭐publication_status=failed — 실패 안내가 보인다', async () => {
