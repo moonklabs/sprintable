@@ -30,6 +30,7 @@ from sqlalchemy.orm import aliased
 
 from app.models.channel_connection import ChannelConnection
 from app.models.channel_post_draft import ChannelPostDraft
+from app.models.channel_post_image import ChannelPostImage
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate, set_gate_status
@@ -505,7 +506,7 @@ async def list_channel_post_drafts(
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
         Gate | None, ChannelPublication | None, ChannelPublication | None, str | None,
-        PublicationCommand | None,
+        PublicationCommand | None, ChannelPostImage | None,
     ]
 ]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
@@ -519,8 +520,9 @@ async def list_channel_post_drafts(
 
     story #3394(S2c BE 선행, 페드루 PO 확定 2026-09-04) — 상태 파생·발행 상태 필드를 여기서
     배치 조회해 붙인다(site_posts.list_site_post_drafts의 #3384 확장과 동형 패턴, N+1 금지 —
-    페이지 쿼리 1건 + gate 배치 1건 + publication 배치 2건 + version 해시 배치 1건 + command
-    배치 1건(story #3415), 총 6건 고정, draft 수 무관).
+    페이지 쿼리 1건 + gate 배치 1건 + publication 배치 2건(조건부) + version 해시 배치 1건
+    (조건부) + command 배치 1건(story #3415) + image 배치 1건(story 620beefc), 최대 7건,
+    draft 수 무관).
 
     **조인 축이 둘로 갈린다**(PO 지시, site와 의미가 다른 자리) — 한 축으로 뭉치면 "발행
     뒤 편집·재승인"이 목록에서 발행 이력째 사라진다:
@@ -541,8 +543,11 @@ async def list_channel_post_drafts(
       "이 게이트의 아무 행이나≠이 게이트의 최신 행").
 
     반환: (draft, latest_version, origin_version, gate, published_publication,
-    latest_version_publication, published_body_sha256, latest_command) — gate·publication·
-    command 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
+    latest_version_publication, published_body_sha256, latest_command, latest_image) —
+    gate·publication·command·image 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
+    `latest_image`(9번째 원소, story 620beefc)는 **최신 버전**에 붙은 `ChannelPostImage`
+    (없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처, latest_command와
+    같은 "최신 버전/게이트 기준" 원칙.
 
     story #3423(캘린더 #3422 선행) — `scheduled_from`/`scheduled_to`/`unscheduled`.
     기준 컬럼은 **`gate.sealed_scheduled_at`**(승인된 예약 시각) — `publication_command.
@@ -690,6 +695,18 @@ async def list_channel_post_drafts(
         for c in command_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)
 
+    # 배치 ⑦(story 620beefc, AC6) — 최신 버전당 첨부 이미지(있으면). version_id UNIQUE
+    # (Phase1 1건/버전)라 setdefault 불요 — 단순 dict 매핑. 썸네일 URL·§17-14 배지
+    # 재료(원본/최종 width·bytes)의 출처.
+    image_by_version: dict[uuid.UUID, ChannelPostImage] = {}
+    latest_version_ids_in_page = [latest_v.id for _, latest_v, _ in page_rows]
+    if latest_version_ids_in_page:
+        image_rows = (await db.execute(
+            select(ChannelPostImage).where(ChannelPostImage.version_id.in_(latest_version_ids_in_page))
+        )).scalars().all()
+        for img in image_rows:
+            image_by_version[img.version_id] = img
+
     result = []
     for draft, latest_v, origin_v in page_rows:
         gate = gates_by_work_item.get(draft.work_item_id)
@@ -699,9 +716,10 @@ async def list_channel_post_drafts(
             body_sha256_by_version_id.get(published_pub.version_id) if published_pub else None
         )
         latest_command = latest_command_by_gate.get(gate.id) if gate else None
+        latest_image = image_by_version.get(latest_v.id)
         result.append((
             draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256,
-            latest_command,
+            latest_command, latest_image,
         ))
     return result
 

@@ -172,6 +172,23 @@ class ChannelPostDraftListItem(BaseModel):
     # 시점 스냅샷이라 재승인 뒤 갱신 안 됨, story #3414). 화면 캘린더(§11-1)가 보는 "지금
     # 승인된 예약 시각"은 이 값.
     scheduled_at: str | None = None
+    # story 620beefc(AC6·§17-14) — 최신 버전에 이미지가 붙어 있으면 그 「나가는 파생본」
+    # 공개 URL(카드 썸네일). 없으면 null. 원본/최종 width·bytes 둘 다 실어야 화면이
+    # "너비 4000px → 1440px · 용량 12.4MB → 3.1MB" 배지 문구를 조립할 수 있다(서버는
+    # 문구를 짓지 않고 값만 낸다 — was_converted=false면 원본=최종이라 배지 자체를 안
+    # 그린다는 판단은 화면 몫).
+    thumbnail_url: str | None = None
+    image_original_width: int | None = None
+    image_original_bytes: int | None = None
+    image_final_width: int | None = None
+    image_final_bytes: int | None = None
+    image_was_converted: bool | None = None
+    # story 620beefc(AC5·§17-15, 페드루 PO 決定) — command_status=pending ∧
+    # publication_status=container_created를 서버가 이 값 하나로 파생(판정식은 여기
+    # 한 곳에만 — 화면마다 두 필드를 조합판정하지 않는다). 'awaiting_container'=
+    # IMAGE 컨테이너가 비동기로 이어서 처리 中(§17-15 "자동으로 이어서 처리 중입니다").
+    # 그 외에는 항상 null.
+    processing_kind: str | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -464,7 +481,18 @@ def _to_draft_list_item(
     """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
     번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를
     똑같이 지원하는 것과 동형 사상)."""
-    draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256, latest_command = row
+    (
+        draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
+        latest_command, latest_image,
+    ) = row
+    command_status = latest_command.status if latest_command else None
+    publication_status = latest_pub.status if latest_pub else None
+    # story 620beefc(AC5·§17-15, 페드루 PO 決定) — 판정식은 이 자리 한 곳에서만.
+    processing_kind = (
+        "awaiting_container"
+        if command_status == "pending" and publication_status == "container_created"
+        else None
+    )
     return ChannelPostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
         connection_id=draft.connection_id, current_version=latest.version,
@@ -477,7 +505,7 @@ def _to_draft_list_item(
         sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
         published_at=published_pub.published_at.isoformat() if published_pub else None,
         published_body_sha256=published_body_sha256,
-        publication_status=latest_pub.status if latest_pub else None,
+        publication_status=publication_status,
         permalink=published_pub.permalink if published_pub else None,
         external_id=published_pub.external_id if published_pub else None,
         error_code=latest_pub.error_code if latest_pub else None,
@@ -491,8 +519,15 @@ def _to_draft_list_item(
             if latest_command and latest_command.dead_letter_at else None
         ),
         scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
-        command_status=latest_command.status if latest_command else None,
+        command_status=command_status,
         command_reason_code=latest_command.reason_code if latest_command else None,
+        thumbnail_url=public_url_for_object_path(latest_image.final_object_path) if latest_image else None,
+        image_original_width=latest_image.original_width if latest_image else None,
+        image_original_bytes=latest_image.original_bytes if latest_image else None,
+        image_final_width=latest_image.final_width if latest_image else None,
+        image_final_bytes=latest_image.final_bytes if latest_image else None,
+        image_was_converted=latest_image.was_converted if latest_image else None,
+        processing_kind=processing_kind,
     )
 
 
