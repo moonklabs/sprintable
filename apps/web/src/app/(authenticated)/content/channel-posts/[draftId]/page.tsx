@@ -20,6 +20,7 @@ import { deriveFailureAction, type CommandStatus } from '@/components/content/fa
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
+import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 
 /**
@@ -248,11 +249,15 @@ export default function ChannelPostEditPage() {
   // 전환이라 ConfirmDialog를 거친다(site-posts::handleUnpublish와 동형 — story #2416).
   const [cancelScheduledConfirmOpen, setCancelScheduledConfirmOpen] = useState(false);
   const [cancellingScheduled, setCancellingScheduled] = useState(false);
-  const [cancelScheduledResult, setCancelScheduledResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
+  // story #3454(유나 Design FAIL, PR#3801) — 8곳 중 이 state만 raw가 없었다. 같은
+  // 패턴으로 마저 닫는다.
+  const [cancelScheduledResult, setCancelScheduledResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
 
   const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
-  const [unpublishResult, setUnpublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
+  // story #3454(retryResult와 같은 발견 — 티켓 범위 밖이지만 같은 파일·같은 버그 종류라
+  // 함께 고친다, PO 보고에 별도 표기) — 이 state도 raw 자체가 없었다.
+  const [unpublishResult, setUnpublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
 
   // story f061c1a3(#3422 AC3 잔여) — 실패 배지 「재시도」 클릭 배선. dead_letter·
   // needs_check 둘 다 같은 다이얼로그를 쓴다 — needs_check만 추가로 「확認했습니다」
@@ -260,7 +265,10 @@ export default function ChannelPostEditPage() {
   const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
   const [retryChecklistConfirmed, setRetryChecklistConfirmed] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [retryResult, setRetryResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
+  // story #3454(유나 지적, PR#3798 Design review) — 다른 여섯 결과 state와 동형으로
+  // raw를 담는다(§4-1 "원문을 접어서 함께 보존한다" — 이 state만 raw 자체가 없어서 재시도
+  // 실패 시에만 원문이 안 남던 것을 맞춘다).
+  const [retryResult, setRetryResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
 
   useEffect(() => {
     if (!orgId || !draftId) return;
@@ -661,7 +669,7 @@ export default function ChannelPostEditPage() {
         const text = info.kind === 'command_not_cancellable' && info.currentStatus
           ? t('channelPostsCommandNotCancellable', { status: info.currentStatus })
           : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCancelScheduledFailed'));
-        setCancelScheduledResult({ type: 'error', text });
+        setCancelScheduledResult({ type: 'error', text, raw: info.raw });
       }
     } catch {
       setCancelScheduledResult({ type: 'error', text: t('channelPostsCancelScheduledFailed') });
@@ -703,7 +711,7 @@ export default function ChannelPostEditPage() {
         const text = info.kind === 'scope_insufficient'
           ? (role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientNonOwner'))
           : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsUnpublishFailed'));
-        setUnpublishResult({ type: 'error', text });
+        setUnpublishResult({ type: 'error', text, raw: info.raw });
       }
     } catch {
       setUnpublishResult({ type: 'error', text: t('channelPostsUnpublishFailed') });
@@ -739,6 +747,7 @@ export default function ChannelPostEditPage() {
         setRetryResult({
           type: 'error',
           text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsRetryFailed')),
+          raw: info.raw,
         });
       }
     } catch {
@@ -938,6 +947,7 @@ export default function ChannelPostEditPage() {
             <AlertDescription>
               {retryResult.type === 'success' ? t('channelPostsRetrySuccess') : retryResult.text}
             </AlertDescription>
+            {retryResult.type === 'error' ? <RawDetailsToggle raw={retryResult.raw} label={t('errorRawDetailsToggle')} /> : null}
           </Alert>
         ) : null}
         {/* AC9 — 나가는 계정. */}
@@ -1174,6 +1184,7 @@ export default function ChannelPostEditPage() {
                     </>
                   )}
             </AlertDescription>
+            {publishResult.type === 'error' ? <RawDetailsToggle raw={publishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
           </Alert>
         ) : null}
 
@@ -1203,6 +1214,7 @@ export default function ChannelPostEditPage() {
             <AlertDescription>
               {cancelScheduledResult.type === 'success' ? t('channelPostsCancelScheduledSuccess') : cancelScheduledResult.text}
             </AlertDescription>
+            {cancelScheduledResult.type === 'error' ? <RawDetailsToggle raw={cancelScheduledResult.raw} label={t('errorRawDetailsToggle')} /> : null}
           </Alert>
         ) : null}
         {/* 페드루 PO 블로커(2026-09-04 09:02Z) — 성공 배너만으로는 §17-10 "취소됨"
@@ -1236,6 +1248,7 @@ export default function ChannelPostEditPage() {
             <AlertDescription>
               {unpublishResult.type === 'success' ? t('channelPostsUnpublishSuccess') : unpublishResult.text}
             </AlertDescription>
+            {unpublishResult.type === 'error' ? <RawDetailsToggle raw={unpublishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
           </Alert>
         ) : null}
       </div>
@@ -1356,6 +1369,7 @@ export default function ChannelPostEditPage() {
           {imageUploadStatus.phase === 'error' ? (
             <Alert variant="destructive" role="alert" data-testid="channel-post-image-upload-error">
               <AlertDescription>{imageUploadStatus.text}</AlertDescription>
+              <RawDetailsToggle raw={imageUploadStatus.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}
         </div>
@@ -1364,6 +1378,7 @@ export default function ChannelPostEditPage() {
       {saveMessage ? (
         <Alert variant={saveMessage.type === 'error' ? 'destructive' : 'default'} role="status">
           <AlertDescription>{saveMessage.text}</AlertDescription>
+          {saveMessage.type === 'error' ? <RawDetailsToggle raw={saveMessage.raw} label={t('errorRawDetailsToggle')} /> : null}
         </Alert>
       ) : null}
 
@@ -1439,6 +1454,7 @@ export default function ChannelPostEditPage() {
                 </>
               ) : null}
             </AlertDescription>
+            <RawDetailsToggle raw={submitResult.raw} label={t('errorRawDetailsToggle')} />
           </Alert>
         )
       ) : null}

@@ -964,7 +964,9 @@ describe('ContentPostEditPage — 변형 만들기(story 15e481ce AC1)', () => {
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    expect(container.querySelector('[data-testid="content-create-variant-error"]')?.textContent)
+    // story #3454(#3801 착지분) — raw 토글이 이제 같은 Alert에 형제로 붙어 textContent가
+    // 늘었다. AlertDescription(<p>)만 짚어 사람 문장만 본다.
+    expect(container.querySelector('[data-testid="content-create-variant-error"] p')?.textContent)
       .toBe('원문을 찾을 수 없습니다: d1');
     expect(routerPushMock).not.toHaveBeenCalled();
   });

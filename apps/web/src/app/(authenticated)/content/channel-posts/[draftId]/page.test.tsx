@@ -1447,7 +1447,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       await flush();
 
-      expect(container.querySelector('[data-testid="channel-post-retry-result"]')?.textContent)
+      // story #3454 — raw 토글이 이제 같은 Alert 안에 형제로 붙어 textContent가 늘었다
+      // (AlertDescription 자체를 짚어 사람 문장만 본다, 토글 텍스트와 안 섞는다).
+      expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent)
         .toBe(koMessages.content.errorChannelPublishHumanOnly);
     });
 
@@ -1938,5 +1940,168 @@ describe('ChannelPostEditPage — 같은 스토리의 글(story 15e481ce AC2, §
     expect(el?.textContent).toContain(koMessages.content.channelPostsSourceLabel);
     expect(el?.textContent).toContain('9월 실험 회고');
     expect(el?.querySelector('a')?.getAttribute('href')).toBe('/content/site-1');
+  });
+});
+
+// story #3454(유나 발견, PR#3798 Design review) — 서버 원문 raw가 8곳(저장·상신·이미지
+// 업로드·발행·회수·재시도 + 유나가 안 짚은 회수 하나까지 §4-1과 같은 결함이라 함께 고침)
+// 전부에서 담기만 하고 그리는 자리가 없던 것을 RawDetailsToggle(공용, content/[draftId]
+// /page.tsx §4-1에서 뽑음)로 채운다. raw가 있으면 접힌 토글 렌더·펼치면 원문 노출·raw가
+// 없으면(네트워크 예외 등) 토글 자체가 없는 것까지 각 자리에서 pin한다.
+describe('ChannelPostEditPage — 서버 원문 접기(RawDetailsToggle, story #3454)', () => {
+  function findRawToggle(root: ParentNode) {
+    return [...root.querySelectorAll('details')].find(
+      (d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle,
+    );
+  }
+
+  it('⭐저장 실패 — raw 토글이 접힌 채로 뜨고, 펼치면 서버 원문(code+message)이 그대로 보인다', async () => {
+    stubFetch({
+      onSave: () => ({ status: 422, body: { detail: { code: 'SOME_SAVE_ERROR', message: '저장 실패 원문' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const saveBtn = container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const toggle = findRawToggle(container);
+    expect(toggle).not.toBeUndefined();
+    expect(toggle?.hasAttribute('open')).toBe(false);
+    expect(toggle?.querySelector('pre')?.textContent).toBe(JSON.stringify({ code: 'SOME_SAVE_ERROR', message: '저장 실패 원문' }));
+  });
+
+  it('상신 실패(비-GATE_ALREADY_HELD) — raw 토글이 뜬다', async () => {
+    stubFetch({
+      onSubmit: () => ({ status: 500, body: { detail: { code: 'SOME_SUBMIT_ERROR', message: '상신 실패 원문' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
+  it('이미지 업로드 실패 — raw 토글이 뜬다', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageUploadUrl: () => ({ status: 422, body: { detail: { code: 'CHANNEL_IMAGE_UNSUPPORTED_FORMAT', message: '…', content_type: 'image/gif', allowed_formats: ['image/png'] } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.gif', { type: 'image/gif' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
+  it('발행 실패 — raw 토글이 뜬다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 502, body: { detail: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: '발행 실패 원문' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+
+    expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
+  // 유나 Design FAIL(PR#3801 코멘트 5543611743, 페드루 PO 실물 대조) — 8곳 중
+  // cancelScheduledResult 하나가 raw 자체를 안 담았다(핸들러가 info를 쥐고도 버림).
+  it('⭐예약 취소 실패 — raw 토글이 뜬다(유나 FAIL — 8번째 자리)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => ({ status: 500, body: { detail: { code: 'SOME_CANCEL_ERROR', message: '예약 취소 실패 원문' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
+  it('⭐회수 실패 — raw 토글이 뜬다(티켓 밖 발견 — retryResult와 같은 결함이라 같이 고침)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      onUnpublish: () => ({ status: 500, body: { detail: { code: 'SOME_UNPUBLISH_ERROR', message: '회수 실패 원문' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
+  it('⭐재시도 실패 — raw 토글이 뜬다(retryResult에 raw 필드 자체가 없던 것을 이 스토리에서 추가)', async () => {
+    stubFetch({
+      draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+      onRetry: () => ({ status: 403, body: { detail: { code: 'CHANNEL_POST_PUBLISH_HUMAN_ONLY', message: '재시도 실패 원문' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+    await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
+  it('네트워크 예외(raw 자체가 없음) — 토글이 그려지지 않는다(지어내지 않는다)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`) {
+        return { ok: true, status: 200, json: async () => ({ data: DRAFT_DETAIL, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`) {
+        return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
+        return { ok: true, status: 200, json: async () => ({ data: [], error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts` && init?.method === 'POST') {
+        throw new Error('network down');
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const saveBtn = container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editSaveFailed);
+    expect(findRawToggle(container)).toBeUndefined();
   });
 });
