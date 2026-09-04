@@ -486,6 +486,118 @@ async def create_sandbox_channel_connection(
     return _to_response(row)
 
 
+class CreatePastedSecretConnectionRequest(BaseModel):
+    """story e4fc29fa(조각⑤, 페드루 PO 確定 2026-09-04) — WordPress(site_url·username·
+    app_password)·webhook(target_url·secret) 공용 요청 바디. 채널마다 실제로 쓰는
+    필드가 다르다(WordPress 3개·webhook 2개) — 한 모델에 전부 Optional로 얹고 라우터가
+    channel별로 필수 필드를 검사한다(available-channels가 "이 채널이 뭘 요구하는지"
+    선언하지 않는 것과 같은 층위 — 연결 화면(미르코 후속)이 channel별 폼을 그린다)."""
+    site_url: str | None = None
+    username: str | None = None
+    app_password: str | None = None
+    target_url: str | None = None
+    secret: str | None = None
+
+
+@router.post("/{org_id}/channel-connections/{channel}", response_model=ChannelConnectionResponse, status_code=201)
+async def create_pasted_secret_channel_connection(
+    org_id: uuid.UUID,
+    channel: str,
+    body: CreatePastedSecretConnectionRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story e4fc29fa(조각⑤, 페드루 PO 確定 2026-09-04) — WordPress·webhook 등
+    pasted_secret 어댑터의 연결 생성. AC2/AC3("휴먼이 연결 API로 등록") 실 경로 —
+    이 조각 전까지는 이 경로 자체가 없어 발행 오케스트레이션(③b·③c·④)이 테스트
+    픽스처(직접 INSERT)로만 성립했다("만들어졌는데 도는 자리 없음"의 반대쪽 갭).
+
+    owner/admin(`create_sandbox_channel_connection`과 동형 폭 — 실 고객 자격이지만
+    OAuth보다는 "붙여넣기"라 owner 전용보다 한 단계 넓게, PO 明示). 에이전트는
+    `_require_owner_or_admin`→`_require_human`에서 403(AC6과 동형 — 자격을 읽거나
+    다룰 수 없다).
+
+    등록 시점에도 `assert_destination_url_safe`를 친다(발행 시점 검사만으론 SSRF
+    목적지를 연결에 저장해 두고 나중에야 걸리는 지연 발견 갭이 남는다 — 여기서
+    먼저 막으면 애초에 저장이 안 된다). loopback은 각 모듈의 dev 스텁 플래그가
+    켜졌을 때만 예외(런북 절차용 — prod에선 항상 거부).
+
+    `upsert_channel_connection`(story #3373 AC8 기존 함수, 신규 로직 0) 재사용 —
+    같은 (org, channel, account_id) 재호출은 새 행이 아니라 기존 행 갱신(멱등)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    adapter = get_channel_adapter(channel)
+    if adapter is None or adapter.credential_kind != "pasted_secret":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_NOT_PASTED_SECRET",
+                "message": f"channel={channel!r}는 붙여넣기형 연결 대상이 아닙니다.",
+            },
+        )
+
+    from app.services.destination_url_safety import DestinationURLUnsafeError, assert_destination_url_safe
+
+    if channel == "wordpress":
+        if not body.site_url or not body.username or not body.app_password:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "WORDPRESS_FIELDS_REQUIRED",
+                    "message": "site_url·username·app_password가 모두 필요합니다.",
+                },
+            )
+        from app.services.wordpress_publish import wordpress_stub_enabled
+
+        try:
+            site_url = await assert_destination_url_safe(body.site_url, allow_loopback=wordpress_stub_enabled())
+        except DestinationURLUnsafeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "CHANNEL_CONNECTION_DESTINATION_INSECURE", "message": str(exc)},
+            ) from exc
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="wordpress", account_id=site_url, account_label=body.username,
+            credential_kind="pasted_secret", access_token=body.app_password, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+        )
+        return _to_response(row)
+
+    if channel == "webhook":
+        if not body.target_url or not body.secret:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "WEBHOOK_FIELDS_REQUIRED", "message": "target_url·secret이 모두 필요합니다."},
+            )
+        from app.services.webhook_publish import webhook_stub_enabled
+
+        try:
+            target_url = await assert_destination_url_safe(body.target_url, allow_loopback=webhook_stub_enabled())
+        except DestinationURLUnsafeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "CHANNEL_CONNECTION_DESTINATION_INSECURE", "message": str(exc)},
+            ) from exc
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="webhook", account_id=target_url, account_label=None,
+            credential_kind="pasted_secret", access_token=body.secret, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+        )
+        return _to_response(row)
+
+    # story e4fc29fa(조각⑤) — 위 credential_kind 가드가 이미 wordpress/webhook 외의
+    # 모든 채널을 걸렀다(현재 pasted_secret 채널은 이 둘뿐) — 새 pasted_secret 채널이
+    # 추가되고 여기 분기가 안 늘면 이 자리로 떨어져 fail-closed(조용히 threads류로
+    # 새지 않는다).
+    raise HTTPException(
+        status_code=404,
+        detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={channel!r}는 아직 지원하지 않습니다."},
+    )
+
+
 @router.post("/{org_id}/channel-connections/{connection_id}/disconnect", response_model=ChannelConnectionResponse)
 async def disconnect_channel_connection(
     org_id: uuid.UUID,

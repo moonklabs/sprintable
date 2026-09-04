@@ -24,6 +24,18 @@ from urllib.parse import urlsplit
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
 
 
+def _resolve_host(host: str, port: int | None) -> list:
+    """story e4fc29fa(조각⑤ 발견·즉시수정) — `socket.getaddrinfo`를 직접 참조하지
+    않고 이 얇은 함수 뒤로 감싼다. 테스트가 DNS 해석을 결정적으로 통제하려고
+    `socket.getaddrinfo` 자체를 monkeypatch하면(가장 직관적인 방법처럼 보인다)
+    **프로세스 전역**이 바뀌어 같은 테스트 안의 asyncpg(Postgres 커넥션도 내부에서
+    호스트를 해석한다)까지 오작동해 DB 커넥션이 타임아웃난다(실측 확認 — 이 조각의
+    connection-creation 테스트가 dns_stub과 실 DB를 같이 쓰다가 처음 이 증상을
+    냈다). 이 함수 하나만 patch 대상으로 삼으면(tests/conftest.py::dns_stub) 다른
+    소켓 사용처는 전혀 안 건드린다."""
+    return socket.getaddrinfo(host, port)
+
+
 class DestinationURLUnsafeError(ValueError):
     """목적지 URL이 https://가 아니거나, 해석된 IP가 사설/loopback/link-local 등
     내부망 대역이다(SSRF fail-closed)."""
@@ -73,7 +85,7 @@ async def assert_destination_url_safe(url: str, *, allow_loopback: bool = False)
 
     loop = asyncio.get_running_loop()
     try:
-        infos = await loop.run_in_executor(None, socket.getaddrinfo, host, None)
+        infos = await loop.run_in_executor(None, _resolve_host, host, None)
     except socket.gaierror as exc:
         raise DestinationURLUnsafeError(url=url, reason=f"DNS 해석 실패: {exc}") from exc
 
