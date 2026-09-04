@@ -1135,8 +1135,15 @@ export default function ChannelPostEditPage() {
           </p>
         ) : null}
         {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌
-            경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘). */}
-        {canPublish && blockedByCommandInFlight ? (
+            경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘).
+            story #3458 페드루 PO 실물 확認(2026-09-04 17:22Z) — blocked는 canPublish에
+            매달면 안 된다: 발행 済 글의 unpublish 명령이 만료 토큰으로 blocked인 조합은
+            publishable=false(canPublish=false)라 이 사유줄이 안 뜨는데, 그 상태에선
+            FailureActionBadge(짧은 명사구로 줄인 지금)에도 링크가 없어 "연결 화면"이
+            화면 어디에도 안 남는다 — 불변식 "blocked 배지가 뜨면 링크 사유줄도 뜬다"를
+            지키려면 blocked는 canPublish와 무관하게 독립 렌더해야 한다. pending은 링크
+            대상이 없어 그대로 canPublish 안에 둔다. */}
+        {draft.command_status === 'blocked' || (canPublish && blockedByCommandInFlight) ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
             {t.rich(commandInFlightReasonKey, {
               link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,

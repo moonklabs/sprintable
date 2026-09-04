@@ -1564,6 +1564,27 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(link?.getAttribute('href')).toBe('/organization/channels');
     });
 
+    // 페드루 PO 실물 확認(2026-09-04 17:22Z) — 이미 발행된 글의 회수(unpublish) 명령이
+    // 만료 토큰으로 blocked면 canPublish(=view.publishable)가 false다(재발행 대상이
+    // 아니므로). 이전 코드는 이 사유줄을 canPublish에 매달아 이 조합에서 "연결 화면"
+    // 링크가 화면 어디에도 안 남았다 — blocked는 canPublish와 무관하게 뜬다.
+    it('⭐발행 済 + command_status=blocked(unpublish 명령) — canPublish=false여도 링크 사유줄이 뜬다', async () => {
+      stubFetch({
+        draftDetail: {
+          gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+          publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+          command_status: 'blocked',
+        },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+      const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
+      expect(reason).not.toBeNull();
+      expect(reason?.querySelector('a')?.getAttribute('href')).toBe('/organization/channels');
+    });
+
     it('dead_letter — 예외라 발행 버튼이 그대로 활성(f061c1a3 前까지 유일한 재시도 경로)', async () => {
       stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'dead_letter' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
