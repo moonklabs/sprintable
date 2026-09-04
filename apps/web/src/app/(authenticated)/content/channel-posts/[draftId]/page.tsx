@@ -401,8 +401,9 @@ export default function ChannelPostEditPage() {
   };
 
   // story #3426 ①-c(BE #3419) — 예약 취소. 성공하면 command_status를 로컬로 'cancelled'
-  // 로 갱신(리로드 없이) — doc AC4. 실패(409 PUBLICATION_COMMAND_NOT_CANCELLABLE 등)는
-  // 서버 문구를 그대로 보인다(labelKey는 ①-d에서 채운다 — 지금은 fallback 원문).
+  // 로 갱신(리로드 없이, §17-10 "취소됨" 오버레이) — doc AC4. 실패는 ①-d가 채운 오류
+  // 6종 labelKey(사람 말) 체인을 통과한다 — PUBLICATION_COMMAND_NOT_CANCELLABLE만
+  // current_status를 실어 조립(아래).
   const handleCancelScheduled = async () => {
     if (!orgId) return;
     setCancelScheduledConfirmOpen(false);
@@ -433,12 +434,11 @@ export default function ChannelPostEditPage() {
     }
   };
 
-  // story #3426 ①-c(BE #3419) — 회수(Threads 실 삭제, 되돌릴 수 없다). 성공해도
-  // publication_status를 로컬로 바꾸지 않는다 — channel_publications.status의 4번째 값
-  // 'unpublished'(doc §17-10②)를 5상태 파생(hasPublishedSitePost)에 어떻게 반영할지는
-  // published_at 축과의 상호작용(§4-2 두 조인축)까지 걸린 별도 설계 결정이 필요해서
-  // 이 조각 스코프 밖으로 명시 — 대신 결과 배너로만 "회수했습니다"를 보이고, 진짜 최신
-  // 상태는 다음 로드/새로고침이 정직하게 채운다(지어내지 않는다).
+  // story #3426 ①-c(BE #3419, 페드루 PO 정정 2026-09-04 08:40Z) — 회수(Threads 실 삭제,
+  // 되돌릴 수 없다). 성공하면 서버가 다음 로드에서 줄 값과 같은 모양으로 로컬을 미러한다
+  // — publication_status='unpublished'·published_at=null·permalink=null(아래), 오버레이
+  // "회수됨"이 뜬다(doc §17-10②). "배너만"은 반쪽짜리였다 — 지금은 5상태 파생과
+  // 정확히 같은 값으로 갱신한다(지어내지 않는다).
   const handleUnpublish = async () => {
     if (!orgId) return;
     setUnpublishConfirmOpen(false);
@@ -465,7 +465,7 @@ export default function ChannelPostEditPage() {
         // 여기 오는 건 레이스(그 사이 스코프가 바뀜) 방어다 — 같은 §17-11 role 분기
         // 정본 문구를 그대로 재사용(labelKey는 비워 둠, KNOWN_ERRORS 주석 참고).
         const text = info.kind === 'scope_insufficient'
-          ? (role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientMember'))
+          ? (role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientNonOwner'))
           : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsUnpublishFailed'));
         setUnpublishResult({ type: 'error', text });
       }
@@ -656,12 +656,8 @@ export default function ChannelPostEditPage() {
 
       {/* story #3402 PR2 ②-a/②-b — 발행 버튼. AC5 — 비활성 사유 문구는 버튼 밖에 둔다
           (라벨 안에 넣으면 disabled:opacity-50에 워시된다, Phase 0 실측 그대로 재사용).
-          ⚠️발행 취소 버튼은 PR2에서 화면에 렌더하지 않는다(페드루 PO 판정, 2026-09-04
-          05:37Z) — backend/app/routers/channel_posts.py에 unpublish 엔드포인트
-          자체가 없어(grep 0건, site-posts만 있음) 게이팅만 선 죽은 버튼을 표면에
-          두면 안 된다는 판단. canUnpublish 변수·테스트는 남겨 둔다(BE 경로가 오면
-          이 조건 하나로 버튼을 다시 켠다 — 예약 명령 취소+발행 글 회수 두 경로,
-          PR#3769 뒤 디디군 착수 예정). */}
+          story #3426 — 예약 취소·회수 버튼은 BE #3419(PR#3774) 착지로 복원됨(cancel-
+          scheduled·unpublish 엔드포인트 신설·can_unpublish 판정값) — 아래 두 버튼. */}
       <div className="space-y-2">
         <div className="flex gap-2">
           <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
@@ -713,7 +709,13 @@ export default function ChannelPostEditPage() {
           </p>
         ) : showUnpublish && canUnpublish && unpublishGate?.blockedReason === 'scope_insufficient' ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
-            {role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientMember')}
+            {role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientNonOwner')}
+          </p>
+        ) : showUnpublish && canUnpublish && unpublishGate === undefined ? (
+          // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 자체가 실패/아직 안 끝났으면
+          // "모른다"인데 버튼만 비활성이고 이유가 없었다(AC1 "사유는 버튼 밖" 규율 위반).
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+            {t('channelPostsUnpublishGateUnknown')}
           </p>
         ) : null}
         {publishResult ? (

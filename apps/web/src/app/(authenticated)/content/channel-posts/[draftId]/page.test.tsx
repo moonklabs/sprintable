@@ -103,6 +103,7 @@ function stubFetch(opts: {
   // 안 다루므로 기본은 열려 있는 쪽이 자연스럽다) — 개별 테스트가 덮어써 막힌 경우를 본다.
   canUnpublish?: boolean;
   unpublishBlockedReason?: 'unsupported' | 'scope_insufficient' | null;
+  connectionsOk?: boolean;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -124,6 +125,9 @@ function stubFetch(opts: {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
+        // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 자체가 실패하면 unpublishGate가
+        // undefined로 남는다("모른다") — 그 경로를 재현하는 스위치.
+        if (opts.connectionsOk === false) return { ok: false, status: 500, json: async () => ({}) };
         // ⚠️`??`는 null도 nullish라 여기서 쓰면 "명시적으로 null을 넘긴" 테스트 케이스가
         // 조용히 500으로 되돌아간다 — 호출부가 필드 자체를 안 넘겼을 때만 500 기본값.
         const maxTextLength = 'maxTextLength' in opts ? opts.maxTextLength : 500;
@@ -558,6 +562,27 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
   });
 
+  // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 실패로 unpublishGate가 "모른다"(undefined)
+  // 로 남으면 버튼은 비활성인데 사유가 없었다(AC1 "사유는 버튼 밖" 위반). role은 owner라
+  // 통과했지만 연결 판정 자체를 못 받아 그 사유가 떠야 한다.
+  it('⭐회수 버튼 — 연결 조회 실패(unpublishGate=모른다)면 비활성화되고 "확認하지 못했습니다" 사유가 보인다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      connectionsOk: false,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishGateUnknown);
+  });
+
   it('⭐회수 버튼 — role=member면 비활성화되고 owner/admin 전용 사유가 보인다', async () => {
     useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
     stubFetch({
@@ -650,7 +675,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // role==='owner'가 아니므로 member쪽 문구(요청)가 나온다(admin도 재연결 owner전용이라
     // "요청" 갈래 — 페이지 코드가 role==='owner'만 owner문구, 그 외 전부 요청문구).
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
-      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientMember);
+      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientNonOwner);
   });
 
   // story #3426 — 예약 취소 버튼.
@@ -811,7 +836,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
   });
 
-  it('⭐회수 실패(422 CHANNEL_SCOPE_INSUFFICIENT) — 서버 문구가 보인다', async () => {
+  // 페드루 PO nit(2026-09-04 09:07Z) — 이전 판 테스트명이 "서버 문구가 보인다"였지만
+  // 실제로는 서버 원문이 아니라 §17-11 FE 정본 문구가 뜬다(role='owner' 분기) — 이름 정정.
+  it('⭐회수 실패(422 CHANNEL_SCOPE_INSUFFICIENT) — 서버 원문 대신 §17-11 FE 정본 문구(owner 분기)가 보인다', async () => {
     stubFetch({
       draftDetail: {
         gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
