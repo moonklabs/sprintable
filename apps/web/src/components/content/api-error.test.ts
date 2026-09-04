@@ -142,4 +142,101 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
     expect(result.heldByLang).toBeUndefined();
     expect(result.heldBySlug).toBeUndefined();
   });
+
+  // story #3402(Phase1·마케팅운영, 유나 doc §5 v8 정본) — 채널 포스트 화면 12행. 각 코드가
+  // 서로 다른 kind로 갈리고(사람이 되돌릴 행동이 다르므로), 부가 필드(reset_at 등)가 실린다.
+  describe('채널 포스트 12행(story #3402, doc §5 v8)', () => {
+    test('CHANNEL_RATE_LIMITED — kind=rate_limited·resetAt이 실린다', () => {
+      const result = parseSitePostApiError({
+        error: { code: 'CHANNEL_RATE_LIMITED', message: '한도 초과', reset_at: '2026-09-05T00:00:00Z' },
+      });
+      expect(result.kind).toBe('rate_limited');
+      expect(result.humanMessageKey).toBe('errorChannelRateLimited');
+      expect(result.resetAt).toBe('2026-09-05T00:00:00Z');
+    });
+
+    test('CHANNEL_TOKEN_EXPIRED — kind=token_expired', () => {
+      const result = parseSitePostApiError({ error: { code: 'CHANNEL_TOKEN_EXPIRED', message: '토큰 만료' } });
+      expect(result.kind).toBe('token_expired');
+      expect(result.humanMessageKey).toBe('errorChannelTokenExpired');
+    });
+
+    test('CHANNEL_CONNECTION_NOT_ACTIVE — kind=connection_not_active', () => {
+      const result = parseSitePostApiError({ error: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: '연결 비활성' } });
+      expect(result.kind).toBe('connection_not_active');
+      expect(result.humanMessageKey).toBe('errorChannelConnectionNotActive');
+    });
+
+    test('CHANNEL_POST_APPROVER_ROLE_MISSING — kind=approver_role_missing', () => {
+      const result = parseSitePostApiError({ error: { code: 'CHANNEL_POST_APPROVER_ROLE_MISSING', message: '승인자 없음' } });
+      expect(result.kind).toBe('approver_role_missing');
+      expect(result.humanMessageKey).toBe('errorChannelApproverRoleMissing');
+    });
+
+    test('CHANNEL_POST_PUBLISH_HUMAN_ONLY — kind=permission(site와 동일 갈래 공유)', () => {
+      const result = parseSitePostApiError({ error: { code: 'CHANNEL_POST_PUBLISH_HUMAN_ONLY', message: '휴먼 전용' } });
+      expect(result.kind).toBe('permission');
+      expect(result.humanMessageKey).toBe('errorChannelPublishHumanOnly');
+    });
+
+    test('CHANNEL_PUBLISH_IN_PROGRESS(story #3395) — kind=publish_in_progress', () => {
+      const result = parseSitePostApiError({ error: { code: 'CHANNEL_PUBLISH_IN_PROGRESS', message: '경합 처리 중' } });
+      expect(result.kind).toBe('publish_in_progress');
+      expect(result.humanMessageKey).toBe('errorChannelPublishInProgress');
+    });
+
+    test('CHANNEL_TEXT_TOO_LONG — kind=text_too_long·maxLength/currentLength가 실리고 humanMessageKey는 비워 page.tsx가 조립', () => {
+      const result = parseSitePostApiError({
+        error: { code: 'CHANNEL_TEXT_TOO_LONG', message: '한도 초과', max_length: 500, current_length: 517 },
+      });
+      expect(result.kind).toBe('text_too_long');
+      expect(result.humanMessageKey).toBeUndefined();
+      expect(result.maxLength).toBe(500);
+      expect(result.currentLength).toBe(517);
+    });
+
+    test('EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED — site 항목을 그대로 재사용(doc §9-4)', () => {
+      expect(parseSitePostApiError({ error: { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: '…' } }).kind).toBe('approval_required');
+      expect(parseSitePostApiError({ error: { code: 'SITE_POST_SEAL_MISSING', message: '…' } }).kind).toBe('seal_missing');
+      expect(parseSitePostApiError({ error: { code: 'SITE_POST_REAPPROVAL_REQUIRED', message: '…' } }).kind).toBe('reapproval_required');
+    });
+
+    test('CHANNEL_PUBLISH_PROVIDER_ERROR — kind=provider_error', () => {
+      const result = parseSitePostApiError({ error: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: 'provider 원문' } });
+      expect(result.kind).toBe('provider_error');
+      expect(result.humanMessageKey).toBe('errorChannelPublishProviderError');
+      expect(result.humanMessageFallback).toBe('provider 원문');
+    });
+
+    // story #3402·PR#3764 c6049add1 — CHANNEL_POST_GATE_ALREADY_HELD. site와 kind는 같지만
+    // (같은 "그 초안 보기" 분기) 부가 필드가 다르다 — slug/lang 없음, channel/connection_id 대신.
+    test('⭐CHANNEL_POST_GATE_ALREADY_HELD — kind=gate_already_held(site와 공유)·heldByChannel/heldByConnectionId가 실리고 heldBySlug/heldByLang은 없다', () => {
+      const result = parseSitePostApiError({
+        error: {
+          code: 'CHANNEL_POST_GATE_ALREADY_HELD',
+          message: '같은 work item의 다른 초안이 승인 절차 중',
+          holding_draft_id: 'd3', holding_channel: 'threads', holding_connection_id: 'conn1',
+        },
+      });
+      expect(result.kind).toBe('gate_already_held');
+      expect(result.humanMessageKey).toBeUndefined();
+      expect(result.heldByDraftId).toBe('d3');
+      expect(result.heldByChannel).toBe('threads');
+      expect(result.heldByConnectionId).toBe('conn1');
+      expect(result.heldBySlug).toBeUndefined();
+      expect(result.heldByLang).toBeUndefined();
+    });
+
+    test('12행 전부 서로 다른 kind이거나(고유 코드) site와 의도적으로 공유하는 kind(permission·gate_already_held·approval_required·seal_missing·reapproval_required)뿐이다', () => {
+      const codes = [
+        'CHANNEL_RATE_LIMITED', 'CHANNEL_TOKEN_EXPIRED', 'CHANNEL_CONNECTION_NOT_ACTIVE',
+        'CHANNEL_POST_APPROVER_ROLE_MISSING', 'CHANNEL_POST_PUBLISH_HUMAN_ONLY', 'CHANNEL_PUBLISH_IN_PROGRESS',
+        'CHANNEL_TEXT_TOO_LONG', 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', 'SITE_POST_SEAL_MISSING',
+        'SITE_POST_REAPPROVAL_REQUIRED', 'CHANNEL_POST_GATE_ALREADY_HELD', 'CHANNEL_PUBLISH_PROVIDER_ERROR',
+      ];
+      const kinds = codes.map((code) => parseSitePostApiError({ error: { code, message: '…' } }).kind);
+      expect(kinds).not.toContain('unknown');
+      expect(kinds).toHaveLength(12);
+    });
+  });
 });
