@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CreateOrganization(BaseModel):
@@ -52,8 +52,10 @@ class UpdateOrganization(BaseModel):
     # story 46da6450 — IANA 이름. 필드 자체를 생략하면 무변경, 명시적으로 null을 보내면
     # 해제(name/slug와 달리 "생략=무변경"과 "null=해제"를 구별해야 하므로 라우터가
     # `"timezone" in body.model_fields_set`로 판정 — None이면 그냥 스킵하는 기존
-    # name/slug 패턴을 그대로 쓰면 해제가 영원히 불가능해진다).
-    timezone: str | None = None
+    # name/slug 패턴을 그대로 쓰면 해제가 영원히 불가능해진다). max_length=64(페드루
+    # 리뷰 N1) — 가장 긴 실 IANA 이름도 40자 미만(예: America/Argentina/ComodRivadavia
+    # 32자)이라 여유 있게 상한, zoneinfo 검증 前에 극단적으로 긴 문자열을 앞단에서 거른다.
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class OrgImpactResponse(BaseModel):

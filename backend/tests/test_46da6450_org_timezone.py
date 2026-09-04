@@ -217,6 +217,31 @@ async def test_omitted_timezone_field_leaves_value_unchanged():
 
 
 @pytest.mark.anyio
+async def test_overlong_timezone_string_rejected_422():
+    """페드루 리뷰 N1 — max_length=64(Field 레벨, ZoneInfo 검증보다 앞단). 이 응답은
+    pydantic RequestValidationError 기본 shape(`{"detail": [...]}`)라 ORG_TIMEZONE_
+    INVALID 커스텀 shape과 다르다 — 그 차이 자체를 여기서 고정."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_app(app, Session, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.patch(
+                f"/api/v2/organizations/{org_id}", json={"timezone": "A" * 65},
+            )
+        assert r.status_code == 422, r.text
+        assert "detail" in r.json()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_member_role_gets_403_setting_timezone():
     from app.main import app
 
