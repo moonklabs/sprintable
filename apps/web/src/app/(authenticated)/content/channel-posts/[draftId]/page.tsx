@@ -19,7 +19,7 @@ import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
@@ -634,7 +634,7 @@ export default function ChannelPostEditPage() {
         const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
           ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
           : info.kind === 'rate_limited' && info.resetAt
-            ? t('channelPostsRateLimitedUntil', { time: new Date(info.resetAt).toLocaleString() })
+            ? t('channelPostsRateLimitedUntil', { time: formatScheduledAt(info.resetAt, displayTimezone).display })
             : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
         // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
         // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
@@ -1041,7 +1041,7 @@ export default function ChannelPostEditPage() {
               {draft.published_at ? (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>
-                  <span>{new Date(draft.published_at).toLocaleString()}</span>
+                  <span>{formatScheduledAt(draft.published_at, displayTimezone).display}</span>
                 </div>
               ) : null}
               {draft.external_id ? (
@@ -1204,9 +1204,9 @@ export default function ChannelPostEditPage() {
           <Alert variant={publishResult.type === 'error' ? 'destructive' : 'default'} role={publishResult.type === 'error' ? 'alert' : 'status'} data-testid="channel-post-publish-result">
             <AlertDescription>
               {publishResult.type === 'success'
-                ? t('publishSuccess', { time: draft.published_at ? new Date(draft.published_at).toLocaleString() : '' })
+                ? t('publishSuccess', { time: draft.published_at ? formatScheduledAt(draft.published_at, displayTimezone).display : '' })
                 : publishResult.type === 'scheduled'
-                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? new Date(publishResult.scheduledAt).toLocaleString() : t('originAuthorUnknown') })
+                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? formatScheduledAt(publishResult.scheduledAt, displayTimezone).display : t('originAuthorUnknown') })
                   : (
                     // story #3402 AC11(doc §5-1) — "왜 막혔나"(text)와 "밖으로 나갔나"
                     // (externalImpact)는 서로 다른 사실이라 별도 텍스트 노드로 따로 둔다

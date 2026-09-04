@@ -927,7 +927,7 @@ export default function ContentPostEditPage() {
           </div>
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
-            {new Date(publication.published_at).toLocaleString()}
+            {formatScheduledAt(publication.published_at, displayTimezone).display}
           </div>
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
@@ -1210,7 +1210,7 @@ export default function ContentPostEditPage() {
           <AlertDescription>
             {publishResult.type === 'success' ? (
               <>
-                {t('publishSuccess', { time: new Date(publishResult.publishedAt).toLocaleString() })}
+                {t('publishSuccess', { time: formatScheduledAt(publishResult.publishedAt, displayTimezone).display })}
                 {' '}
                 <a href={publishResult.url} target="_blank" rel="noopener noreferrer" className="underline">
                   {t('publishViewLink')}

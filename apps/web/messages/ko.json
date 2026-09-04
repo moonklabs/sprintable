@@ -4770,7 +4770,7 @@
     "artifactDetailPageLinkHint": "내보내기·정본 제안·코멘트·버전 lineage는 상세 페이지에 있습니다"
   },
   "releaseNotes": {
-    "whatsNew": "What's new",
+    "whatsNew": "새 소식",
     "openButtonAriaLabel": "새 소식",
     "title": "릴리즈 노트",
     "emptyDescription": "아직 새로운 소식이 없어요. 업데이트가 준비되면 여기에서 알려드릴게요.",

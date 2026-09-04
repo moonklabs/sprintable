@@ -7,6 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 const { useParamsMock } = vi.hoisted(() => ({ useParamsMock: vi.fn() }));
@@ -690,6 +691,10 @@ describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', ()
     const link = container.querySelector<HTMLAnchorElement>('a[href="https://sprintable.ai/ko/blog/2ho-blog"]');
     expect(link).not.toBeNull();
     expect(container.textContent).toContain(koMessages.content.publishedInfoAtLabel);
+    // story 3436(묶음 5) — 발행 시각이 이 화면 다른 곳(변형 목록 등)과 같은 §11-2
+    // 정본 형식(formatScheduledAt)을 쓰는지 pin — 브라우저 toLocaleString() 잔존 방지.
+    const expectedTz = resolveDisplayTimezone().tz;
+    expect(container.textContent).toContain(formatScheduledAt('2026-09-03T18:44:00Z', expectedTz).display);
 
     const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
     expect(publishButton?.hasAttribute('disabled')).toBe(true);
