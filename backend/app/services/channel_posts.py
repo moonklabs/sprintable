@@ -146,6 +146,26 @@ class ChannelPostVersionNotFoundError(Exception):
         super().__init__(f"버전을 찾을 수 없습니다: {version_id}")
 
 
+class ChannelPostGateAlreadyHeldError(Exception):
+    """story #3404(Phase1 결함, site_posts.py::SitePostGateAlreadyHeldError·story f6d14476
+    미러) — external_publish 게이트 슬롯은 work_item 단위(draft 단위가 아니다). 같은
+    work_item에 채널 포스트 초안이 둘 이상(예: 서로 다른 connection_id) 있을 때, 이미 다른
+    초안이 그 게이트를 쥐고(pending/approved) 있으면 이 초안의 상신을 명시 거부한다 —
+    조용히 되밟아 먼저 승인된 게이트를 pending으로 되돌리는 사고를 서버가 원천 차단한다.
+    어느 초안이 쥐고 있는지(draft_id·channel·connection_id)를 실어 화면이 "다른 초안이
+    승인 절차 중" 문구+링크를 그릴 수 있게 한다."""
+
+    def __init__(self, *, holding_draft_id: uuid.UUID, holding_channel: str, holding_connection_id: uuid.UUID):
+        self.holding_draft_id = holding_draft_id
+        self.holding_channel = holding_channel
+        self.holding_connection_id = holding_connection_id
+        super().__init__(
+            f"이 work item은 다른 초안이 이미 승인 절차 중입니다"
+            f"(holding_draft_id={holding_draft_id}, channel={holding_channel}, "
+            f"connection_id={holding_connection_id})"
+        )
+
+
 def compute_channel_post_hash(*, text: str, link_url: str | None) -> str:
     """gate_seal.compute_seal_hash 위 얇은 payload 조립부(site_posts.compute_body_sha256과
     동형 역할) — channel은 draft 고정값(배달 경로)이라 해시에 안 섞는다(모델 docstring 참고)."""
@@ -251,7 +271,17 @@ async def _reseal_gate_on_new_version(
 ) -> None:
     """site_posts.py::_reseal_gate_on_new_version과 동형 규칙(§3-1-2), 봉인 본문만 이
     도메인의 `text`를 쓴다: pending 中 편집 → 즉시 재봉인, approved 뒤 편집 → pending
-    재오픈+reapproval_required=True(옛 봉인은 그대로 보존)."""
+    재오픈+reapproval_required=True(옛 봉인은 그대로 보존).
+
+    story #3404(디디 코드 확認 2026-09-03·페드루 PO 지시 2026-09-04) — 이 훅은
+    work_item_id만으로 게이트를 찾는다(draft 무관). 승인 대상이 아닌 다른 초안을
+    편집(새 버전 생성 — 새 draft 최초 생성 포함, 그 자체가 버전 1 생성)했을 뿐인데
+    여기서 그 게이트를 되돌리거나(approved→pending) 조용히 재봉인하면 submit()의
+    가드(resolve_gate_holder_draft_id)를 거치지 않고도 동일한 파괴가 일어난다 —
+    site_posts.py가 f6d14476에서 이미 막은 것과 정확히 같은 결함 클래스가 이 파일에
+    그대로 남아 있었다(직접 재현 확認). submit()과 같은 판정 함수를 그대로 쓴다."""
+    from app.services.gate_service import resolve_gate_holder_draft_id
+
     gate = (await db.execute(
         select(Gate)
         .where(
@@ -261,6 +291,8 @@ async def _reseal_gate_on_new_version(
         .with_for_update()
     )).scalar_one_or_none()
     if gate is None:
+        return
+    if resolve_gate_holder_draft_id(gate, this_draft_id=version.draft_id) is not None:
         return
     if gate.status == "approved":
         set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
@@ -468,13 +500,26 @@ async def submit_channel_post_draft(
         raise ChannelPostVersionNotFoundError(version_id)
     origin_author_member_id = versions[0].author_member_id
 
-    from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback
+    from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id
 
     existing = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
     )
+
+    # story #3404(site_posts.py f6d14476 미러, 판정 로직은 gate_service.py::
+    # resolve_gate_holder_draft_id로 공유) — 게이트 슬롯은 work_item 단위라, 이미 다른
+    # 초안이 그 게이트를 쥐고(pending/approved) 있으면 이 초안의 상신을 막는다.
+    holding_draft_id = resolve_gate_holder_draft_id(existing, this_draft_id=draft.id)
+    if holding_draft_id is not None:
+        holder = await get_channel_post_draft(db, org_id=org_id, draft_id=holding_draft_id)
+        if holder is not None:
+            raise ChannelPostGateAlreadyHeldError(
+                holding_draft_id=holder.id, holding_channel=holder.channel,
+                holding_connection_id=holder.connection_id,
+            )
+
     if (
         existing is not None
         and existing.sealed_content_sha256 == target.body_sha256
@@ -486,6 +531,9 @@ async def submit_channel_post_draft(
         "destination": draft.channel,
         "draft_author_member_id": str(origin_author_member_id),
         "requested_by_member_id": str(requester_member_id),
+        # story #3404 — 이 게이트 슬롯을 "쥔" 초안 식별(위 차단 판정의 유일한 근거).
+        # 재상신·재승인 요청도 매번 같은 값을 다시 써 넣는다(no-op이지만 명시).
+        "draft_id": str(draft.id),
     }
 
     role_id = await _default_role_id(db, org_id)

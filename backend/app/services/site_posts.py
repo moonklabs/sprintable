@@ -362,11 +362,12 @@ async def _reseal_gate_on_new_version(
     # work_item_id만으로 게이트를 찾는다(draft 무관). 승인 대상이 아닌 다른 초안을
     # 편집(새 버전 생성)했을 뿐인데 여기서 그 게이트를 되돌리거나(approved→pending)
     # 조용히 재봉인하면(pending 유지) submit()을 거치지 않고도 동일한 파괴가 일어난다.
-    # neutral_facts.draft_id로 "이 게이트를 쥔 초안"을 확인해, 값이 있고 이 버전의
-    # draft와 다르면 건드리지 않는다(레거시·draft_id 미기록 게이트는 §3-1-1
-    # "모른다≠다르다"에 따라 그대로 통과 — submit() 경로와 동일한 판단 기준).
-    holding_draft_id_raw = (gate.neutral_facts or {}).get("draft_id")
-    if holding_draft_id_raw is not None and holding_draft_id_raw != str(version.draft_id):
+    # 판정은 submit()과 같은 함수로 한다(story #3404에서 gate_service.py::
+    # resolve_gate_holder_draft_id로 추출 — channel_posts.py가 이 함수의 동형 훅에서도
+    # 같은 결함 클래스를 갖고 있어 공유하게 됐다).
+    from app.services.gate_service import resolve_gate_holder_draft_id
+
+    if resolve_gate_holder_draft_id(gate, this_draft_id=version.draft_id) is not None:
         return
     if gate.status == "approved":
         # 승인된 뒤 편집 — pending으로 되돌리기만 한다. sealed_content_*는 절대 안 건드린다
@@ -521,7 +522,7 @@ async def submit_site_post_draft(
         raise SitePostVersionNotFoundError(version_id)
     origin_author_member_id = versions[0].author_member_id
 
-    from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback
+    from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id
 
     existing = await find_gate_slot_with_pr_fallback(
@@ -529,22 +530,20 @@ async def submit_site_post_draft(
         gate_type="external_publish", pr_number=None, repo_full_name=None,
     )
 
-    # story f6d14476(PO 결정②) — 게이트 슬롯은 work_item 단위라, 이미 다른 초안이 그
-    # 게이트를 쥐고(pending/approved) 있으면 이 초안의 상신을 막는다(AC1). 「다른 초안」
-    # 판정은 neutral_facts.draft_id로 한다 — 이 값이 없는(이 스토리 착지 前에 만들어진)
-    # 레거시 게이트는 누가 쥐고 있는지 알 수 없어 차단하지 않는다(§3-1-1 "모른다≠다르다"
-    # — 모르면 막지 않는다, AC2가 요구하는 "같은 초안 재상신은 그대로 허용"을 레거시
-    # 게이트에서도 조용히 깨뜨리지 않기 위한 안전장치).
-    if existing is not None and existing.status in ("pending", "approved"):
-        holding_draft_id_raw = (existing.neutral_facts or {}).get("draft_id")
-        if holding_draft_id_raw is not None and holding_draft_id_raw != str(draft.id):
-            holder = await get_site_post_draft(db, org_id=org_id, draft_id=uuid.UUID(holding_draft_id_raw))
-            if holder is not None:
-                holder_versions = await list_site_post_draft_versions(db, draft_id=holder.id)
-                holder_lang = holder_versions[-1].lang if holder_versions else None
-                raise SitePostGateAlreadyHeldError(
-                    holding_draft_id=holder.id, holding_lang=holder_lang, holding_slug=holder.slug,
-                )
+    # story f6d14476(PO 결정②, AC1) — 게이트 슬롯은 work_item 단위라, 이미 다른 초안이 그
+    # 게이트를 쥐고(pending/approved) 있으면 이 초안의 상신을 막는다. 판정 로직 자체는
+    # story #3404에서 gate_service.py::resolve_gate_holder_draft_id로 뽑아 channel_
+    # posts.py와 공유한다("모른다≠다르다"·자기 자신 재상신 허용 규칙 포함, 그 함수
+    # docstring 참고) — 여기선 그 판정 결과로 이 도메인 전용 에러(lang/slug)만 짓는다.
+    holding_draft_id = resolve_gate_holder_draft_id(existing, this_draft_id=draft.id)
+    if holding_draft_id is not None:
+        holder = await get_site_post_draft(db, org_id=org_id, draft_id=holding_draft_id)
+        if holder is not None:
+            holder_versions = await list_site_post_draft_versions(db, draft_id=holder.id)
+            holder_lang = holder_versions[-1].lang if holder_versions else None
+            raise SitePostGateAlreadyHeldError(
+                holding_draft_id=holder.id, holding_lang=holder_lang, holding_slug=holder.slug,
+            )
 
     if (
         existing is not None
