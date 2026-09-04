@@ -944,6 +944,16 @@ async def transition_gate(
     if note:
         gate.resolution_note = note
 
+    # story #3443(AC1, 페드루 PO 지시 2026-09-04 14:11Z·카디르 QA 블로커 5541652858) —
+    # `_publish_gate_verdict_notification`(아래)보다 **반드시 먼저** 와야 한다. draft
+    # 해석 실패 시 이 훅이 `gate.resolution_note`에 남기는 "보이는 실패" 한 줄이 그
+    # 통지 payload(`resolution_note` 필드)에 실리려면, 통지가 이 값을 읽는 시점(아래
+    # `_publish_gate_verdict_notification` 호출) 前에 이미 값이 있어야 한다 — 원래
+    # 이 훅을 함수 끝(session.flush() 직전)에 뒀더니 통지가 이미 나간 뒤라 note가
+    # 조용히 안 실렸다(뮤테이션 재현: 순서를 되돌리면 아래 신규 테스트가 RED).
+    if new_status == "approved":
+        await _maybe_create_scheduled_publication_command(session, gate, resolver_id)
+
     # story #2631(PO 판정 ①, 2026-08-15): 게이트 해소 계열 액션(approve/reject/undo/
     # discuss-request)을 ActivityLog(immutable)에 처음으로 구조화 기록 — 지금까지 gate 행
     # (resolver_id/resolved_at/resolution_note)이 "현재 상태"만 담아, 취소(undo_gate_resolution
@@ -1084,11 +1094,6 @@ async def transition_gate(
     from app.services.evidence_service import create_gate_approval_evidence_if_applicable
 
     await create_gate_approval_evidence_if_applicable(session, gate, new_status, resolver_id)
-
-    # story #3443(AC1) — 예약(sealed_scheduled_at) external_publish 게이트가 승인되는
-    # 순간 publication_command 자동 생성(자체 gate_type/필드 가드, no-op 그 외).
-    if new_status == "approved":
-        await _maybe_create_scheduled_publication_command(session, gate, resolver_id)
 
     await session.flush()
     await session.refresh(gate)

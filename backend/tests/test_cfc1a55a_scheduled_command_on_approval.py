@@ -505,3 +505,61 @@ async def test_draft_resolution_failure_does_not_block_approval_and_leaves_visib
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_draft_resolution_failure_note_reaches_verdict_notification_payload():
+    """카디르 QA 블로커 5541652858(2026-09-04) — draft 해석 실패 note가 gate.resolution_
+    note에는 남아도, `_publish_gate_verdict_notification`이 그보다 먼저 실행되면 그
+    통지 payload엔 안 실린다("보이는 실패"가 실제로는 안 보인다). 훅 호출 순서를
+    set_gate_status 직후(통지 前)로 고정 — 뮤테이션 대상: 순서를 다시 뒤로 돌리면
+    이 assert가 RED(mock이 잡은 payload의 resolution_note가 None이 된다)."""
+    from unittest.mock import AsyncMock, patch
+    from app.services.gate_service import (
+        _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE,
+        transition_gate,
+    )
+    from app.main import app
+    import app.routers.events as events_module
+
+    scheduled_at = datetime.now(timezone.utc) + timedelta(days=1)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id, gate_id = await _submit_draft(
+                client, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=scheduled_at,
+            )
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.neutral_facts = {**(gate.neutral_facts or {}), "draft_id": "not-a-uuid"}
+            await s.commit()
+
+        mock_publish = AsyncMock(return_value=None)
+        with patch.object(events_module, "publish_preset_event", mock_publish):
+            async with Session() as s:
+                await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+                await s.commit()
+
+        assert mock_publish.await_count == 1, "preset.gate.verdict 통지가 발행되지 않았다"
+        _call_args = mock_publish.await_args
+        payload = _call_args.args[3] if len(_call_args.args) >= 4 else _call_args.kwargs["payload"]
+        assert payload["resolution_note"] is not None, "통지 payload에 resolution_note 자체가 안 실렸다"
+        assert _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE in payload["resolution_note"], (
+            "draft 해석 실패 note가 통지 payload보다 늦게 쓰여 「보이는 실패」가 실제로는 안 보인다"
+        )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
