@@ -136,6 +136,14 @@ class Gate(Base):
     # 비교해 "승인 후 이미지 교체=재승인, 사유=MEDIA_CHANGED"를 sealed_content_sha256(본문)
     # 축과 독립적으로 판정하기 위함(AC4 판정 축 세분화 content|schedule|media).
     sealed_media_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각③a) — external_
+    # publish 전용 네 번째 봉인 축(위 세 축과 같은 공유-nullable 관례). site_post_drafts.
+    # connection_id(null=hosted_site)와 비교해 "승인 후 목적지 변경=재승인"(블루프린트
+    # §3 "목적지·불변 버전·예약 시각·예산을 참조 — 승인 후 변경 시 무효화")을 content/
+    # schedule/media 축과 독립적으로 판정한다.
+    sealed_destination_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

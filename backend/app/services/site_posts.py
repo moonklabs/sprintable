@@ -83,6 +83,31 @@ class SitePostVersionNotFoundError(Exception):
         super().__init__(f"버전을 찾을 수 없습니다: {version_id}")
 
 
+class SitePostConnectionNotFoundError(ValueError):
+    """story e4fc29fa(조각③a, 페드루 PO 確定 2026-09-04) — connection_id가 이 org의
+    channel_connections 행이 아니다(존재 안 함 또는 다른 org 소속) — org_id 조건이
+    이미 두 경우를 같은 결과(None)로 합쳐 다룬다(이 도메인 전체 "존재 비노출" 관례,
+    channel_posts.py::ChannelPostSourceContentItemNotFoundError와 동형)."""
+
+    def __init__(self, *, connection_id: uuid.UUID):
+        self.connection_id = connection_id
+        super().__init__(f"연결을 찾을 수 없습니다: {connection_id}")
+
+
+class SitePostDestinationKindMismatchError(ValueError):
+    """story e4fc29fa(조각③a, 페드루 리뷰 B1, 2026-09-04) — connection_id가 가리키는
+    채널이 blog kind가 아니다(예: Threads 같은 social 연결을 블로그 목적지로 지정).
+    fail-closed — 초안 생성 시점에 막지 않으면 상신·봉인·승인까지 조용히 통과하고
+    발행(아직 미배선)에서야 걸린다."""
+
+    def __init__(self, *, connection_id: uuid.UUID, channel: str):
+        self.connection_id = connection_id
+        self.channel = channel
+        super().__init__(
+            f"connection_id={connection_id}(channel={channel!r})는 블로그 목적지가 아닙니다"
+        )
+
+
 class SitePostGateAlreadyHeldError(Exception):
     """story f6d14476(Phase0 결함, PO 결정 2026-09-03 20:12 KST ②) — external_publish
     게이트 슬롯은 work_item 단위(draft 단위가 아니다). 같은 work_item에 언어별 초안이
@@ -254,6 +279,11 @@ _SITE_POST_DESTINATION = "hosted_site"
 # 한 번에 조용히 풀린다. image_sha256 캐리포워드(channel_posts.py)와 동형 센티널로
 # "생략(유지)"·"명시 null(해제)"·"값(변경)" 세 갈래를 구분한다.
 _CAMPAIGN_ID_CARRY_FORWARD = object()
+# story e4fc29fa(페드루 PO 確定 2026-09-04, 조각③a) — 3437의 campaign_id 캐리포워드
+# (페드루 리뷰 B1)와 동형 센티널. connection_id도 draft-level 필드라 같은 함정
+# (campaign 개념을 모르는 호출자가 이 키를 생략하면 목적지가 조용히 hosted_site로
+# 되돌아간다)을 그대로 갖는다 — 이번엔 처음부터 캐리포워드로 짠다.
+_CONNECTION_ID_CARRY_FORWARD = object()
 
 
 async def create_site_post_draft_version(
@@ -271,6 +301,7 @@ async def create_site_post_draft_version(
     author_member_id: uuid.UUID,
     author_kind: str,
     campaign_id: uuid.UUID | None = _CAMPAIGN_ID_CARRY_FORWARD,  # type: ignore[assignment]
+    connection_id: uuid.UUID | None = _CONNECTION_ID_CARRY_FORWARD,  # type: ignore[assignment]
 ) -> SitePostVersion:
     """초안을 (org, work_item, slug)로 upsert하고 새 불변 버전을 추가한다. 기존 버전은 절대
     덮어쓰지 않는다(AC3) — 에이전트 원안·휴먼 개정본이 별도 행으로 남는다(AC6). 공개 `SitePost`
@@ -280,7 +311,12 @@ async def create_site_post_draft_version(
     시 draft의 기존 campaign_id를 그대로 캐리포워드한다(신규 draft는 None). 라우터가
     요청 body에 `campaign_id` 키가 실제로 있었을 때만(pydantic `model_fields_set`)
     이 인자를 명시로 넘긴다 — 명시 null=해제, 값=변경. 존재하지 않거나 다른 org의
-    campaign이면 CampaignNotFoundError(422)."""
+    campaign이면 CampaignNotFoundError(422).
+
+    story e4fc29fa(조각③a, 페드루 PO 確定 2026-09-04) — `connection_id` 생략(기본값)
+    시 draft의 기존 값을 그대로 캐리포워드한다(신규 draft는 None=hosted_site). None을
+    명시하면 hosted_site로 되돌린다(해제). 존재하지 않거나 다른 org의 connection이면
+    SitePostConnectionNotFoundError(422)."""
     _validate_slug(slug)
     _validate_lang(lang)
     if media_manifest:
@@ -291,6 +327,28 @@ async def create_site_post_draft_version(
         and await get_campaign(db, org_id=org_id, campaign_id=campaign_id) is None
     ):
         raise CampaignNotFoundError(campaign_id=campaign_id)
+    explicit_connection_id = connection_id is not _CONNECTION_ID_CARRY_FORWARD
+    if explicit_connection_id and connection_id is not None:
+        from app.models.channel_connection import ChannelConnection
+
+        connection = (await db.execute(
+            select(ChannelConnection).where(
+                ChannelConnection.id == connection_id, ChannelConnection.org_id == org_id,
+            )
+        )).scalar_one_or_none()
+        if connection is None:
+            raise SitePostConnectionNotFoundError(connection_id=connection_id)
+        # story e4fc29fa(조각③a, 페드루 리뷰 B1) — social(Threads) 연결을 블로그 목적지로
+        # 넣으면 초안·상신·봉인은 조용히 통과하고 발행에서야(그것도 아직 미배선) 막힌다 —
+        # 지금 이 자리에서 fail-closed. kind는 channel_adapters.py의 유일한 SSOT(연결 자체엔
+        # kind 컬럼이 없다 — connection.channel로 레지스트리를 조회해야 안다).
+        from app.services.channel_adapters import get_channel_adapter
+
+        adapter = get_channel_adapter(connection.channel)
+        if adapter is None or adapter.kind != "blog":
+            raise SitePostDestinationKindMismatchError(
+                connection_id=connection_id, channel=connection.channel,
+            )
 
     draft = (await db.execute(
         select(SitePostDraft)
@@ -304,6 +362,7 @@ async def create_site_post_draft_version(
         draft = SitePostDraft(
             id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, slug=slug,
             campaign_id=(campaign_id if explicit_campaign_id else None),
+            connection_id=(connection_id if explicit_connection_id else None),
         )
         db.add(draft)
         await db.flush()
@@ -311,6 +370,8 @@ async def create_site_post_draft_version(
     else:
         if explicit_campaign_id:
             draft.campaign_id = campaign_id
+        if explicit_connection_id:
+            draft.connection_id = connection_id
         next_version = (await db.execute(
             select(func.coalesce(func.max(SitePostVersion.version), 0)).where(
                 SitePostVersion.draft_id == draft.id
@@ -335,7 +396,7 @@ async def create_site_post_draft_version(
     #     그대로 유지**(재봉인은 submit_site_post_draft의 명시 재호출만이 한다 — gates.py의
     #     approve 전이가 reapproval_required=True인 동안 409로 막혀 "옛 봉인을 승인하는" 막다른
     #     길 자체를 차단한다).
-    await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version)
+    await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version, draft=draft)
 
     await db.commit()
     await db.refresh(version)
@@ -344,6 +405,7 @@ async def create_site_post_draft_version(
 
 async def _reseal_gate_on_new_version(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, version: SitePostVersion,
+    draft: SitePostDraft,
 ) -> None:
     gate = (await db.execute(
         select(Gate)
@@ -381,6 +443,11 @@ async def _reseal_gate_on_new_version(
     gate.sealed_content_version = version.version
     gate.sealed_content_sha256 = version.body_sha256
     gate.sealed_content_body = version.body_md
+    # story e4fc29fa(조각③a) — 목적지 축도 content 축과 동형으로 pending 中엔 매 편집마다
+    # 최신 draft.connection_id로 계속 동기화한다(재상신 왕복 불요, content_version과 같은
+    # 이유). approved 뒤 편집은 위 분기에서 이미 이 대입 자체에 도달 안 함(sealed_content_*
+    # 와 동일하게 "무엇이 승인됐었나" 보존 — 재봉인은 submit() 재호출 몫).
+    gate.sealed_destination_connection_id = draft.connection_id
 
 
 async def get_site_post_draft(db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID) -> SitePostDraft | None:
@@ -545,9 +612,13 @@ async def submit_site_post_draft(
     if (
         existing is not None
         and existing.sealed_content_sha256 == target.body_sha256
+        # story e4fc29fa(조각③a) — 목적지도 봉인 축이다(sealed_scheduled_at·sealed_media_
+        # sha256과 동형, AC "판정 축 세분화"). content가 그대로여도 destination이 바뀌었으면
+        # "이미 이 정확한 상태로 봉인돼 있다"가 아니다 — 재봉인(아래)을 타야 한다.
+        and existing.sealed_destination_connection_id == draft.connection_id
         and existing.status in ("pending", "approved")
     ):
-        return existing, target.id  # 이미 이 정확한 내용으로 봉인돼 있다 — 재봉인하지 않는다(불변).
+        return existing, target.id  # 이미 이 정확한 내용+목적지로 봉인돼 있다 — 재봉인하지 않는다(불변).
 
     neutral_facts = {
         "destination": _SITE_POST_DESTINATION,
@@ -587,6 +658,9 @@ async def submit_site_post_draft(
     gate.sealed_content_version = target.version
     gate.sealed_content_sha256 = target.body_sha256
     gate.sealed_content_body = target.body_md
+    # story e4fc29fa(조각③a) — 목적지 봉인도 여기서 명시적으로 (재)봉인한다(위 sha+
+    # destination 동일성 조기 return을 안 탔다는 건 둘 중 하나가 달라졌거나 신규라는 뜻).
+    gate.sealed_destination_connection_id = draft.connection_id
     gate.reapproval_required = False
     await db.commit()
     await db.refresh(gate)

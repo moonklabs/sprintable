@@ -22,6 +22,8 @@ from app.services.site_posts import (
     InvalidSitePostInputError,
     MediaNotSupportedPhase0Error,
     SitePostApproverRoleMissingError,
+    SitePostConnectionNotFoundError,
+    SitePostDestinationKindMismatchError,
     SitePostDraftNotFoundError,
     SitePostGateAlreadyHeldError,
     SitePostNotPublishedError,
@@ -80,6 +82,11 @@ class CreateSitePostDraftVersionRequest(BaseModel):
     # 필수 아님(단독 글 허용). 다른 필드와 동형으로 매 호출 전량 재반영(서비스 계층
     # docstring 참고, 캐리포워드 없음).
     campaign_id: uuid.UUID | None = None
+    # story e4fc29fa(조각③a, 페드루 PO 確定 2026-09-04) — 이 content_item이 나가는
+    # 목적지(channel_connections 행). 생략=캐리포워드, 명시 null=hosted_site로 해제,
+    # 값=변경(라우터가 model_fields_set으로 생략/명시null을 구분 — 3437의 campaign_id
+    # B1 처방과 동형 센티널 계약, 아래 엔드포인트 참고).
+    connection_id: uuid.UUID | None = None
 
 
 class SitePostDraftVersionResponse(BaseModel):
@@ -238,12 +245,18 @@ async def post_site_post_draft_version(
     campaign_kwargs = (
         {"campaign_id": body.campaign_id} if "campaign_id" in body.model_fields_set else {}
     )
+    # story e4fc29fa(조각③a, 페드루 리뷰 B1의 3437 처방과 동형) — 요청 body에
+    # connection_id 키가 실제로 있었을 때만 서비스에 명시로 넘긴다(model_fields_set) —
+    # 생략은 캐리포워드, 서비스 기본 센티널이 그 뜻을 안다.
+    connection_kwargs = (
+        {"connection_id": body.connection_id} if "connection_id" in body.model_fields_set else {}
+    )
     try:
         version = await create_site_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, slug=body.slug, lang=body.lang,
             title=body.title, summary=body.summary, tags=body.tags, body_md=body.body_md,
             media_manifest=body.media_manifest, author_member_id=member_id, author_kind=actor_type,
-            **campaign_kwargs,
+            **campaign_kwargs, **connection_kwargs,
         )
     except MediaNotSupportedPhase0Error as exc:
         raise HTTPException(
@@ -252,6 +265,15 @@ async def post_site_post_draft_version(
     except CampaignNotFoundError as exc:
         raise HTTPException(
             status_code=422, detail={"code": "CAMPAIGN_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except SitePostConnectionNotFoundError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "SITE_POST_CONNECTION_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except SitePostDestinationKindMismatchError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "SITE_POST_DESTINATION_KIND_MISMATCH", "message": str(exc)},
         ) from exc
     except InvalidSitePostInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
