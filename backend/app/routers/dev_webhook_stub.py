@@ -8,6 +8,12 @@ HTTP 왕복을 검증할 대상이 없던 문제를 채운다.
 고정 시크릿 — 실서비스 고객 자격이 아니라 우리 스스로 만든 테스트 연결의 공유 비밀).
 `(connection_id, nonce)` 재전송은 `webhook_delivery_nonces` UNIQUE 위반으로 409.
 
+**timestamp 창**(정본 §4 "timestamp 창" 明示, 페드루 리뷰 B2, 2026-09-04) — 서명
+자체가 유효해도 `|now − timestamp| > _TIMESTAMP_WINDOW_SECONDS`(300s)면 401로
+거부한다. nonce 하나만으로는 "같은 요청이 영원히 유효한 채로 어딘가에 유출되면
+그 시점 이후 언제든 재생 가능"이라는 잔여 위험이 남는다 — 창을 두면 유출된 요청도
+5분이 지나면 저절로 무력화된다(nonce 원장이 영구히 안 커지는 부수 효과도 있다).
+
 URL 경로에 `connection_id`를 심는다(`/deliver/{connection_id}`) — 우리가 만드는
 테스트 connection의 target_url 자체를 이렇게 구성해 두면(우리가 통제하는 값이라
 가능) 스텁이 별도 헤더 없이 어느 연결의 발송인지 안다. 실 고객 서버는 이 관례를
@@ -22,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -33,6 +40,13 @@ from app.dependencies.database import get_db
 router = APIRouter(prefix="/api/dev/webhook-stub", tags=["dev-webhook-stub"])
 
 _DEFAULT_TEST_SECRET = "dev-webhook-stub-shared-secret"  # dev 전용 고정값(실 자격 아님).
+# story e4fc29fa(조각④, 페드루 리뷰 B2) — 정본 §4가 明示한 "timestamp 창". 서명
+# 자체는 유효해도 timestamp가 지금과 너무 동떨어져 있으면 거부한다 — 어딘가로
+# 유출된 요청(서명·nonce 포함 그대로)이 nonce 원장 조회 전에도 무한정 재생 가능한
+# 잔여 위험을 좁힌다. 300s는 임의값 — 정상 네트워크 지연을 여유 있게 흡수하면서도
+# "영원히 유효"보다는 훨씬 좁다(webhook_publish.py는 매 호출마다 새 timestamp를
+# 싣는다 — 재시도가 이 창에 걸릴 일은 없다, 이 창은 순수 replay-window 방어).
+_TIMESTAMP_WINDOW_SECONDS = 300
 
 
 def webhook_stub_enabled() -> bool:
@@ -71,6 +85,18 @@ async def deliver(
         raise HTTPException(status_code=401, detail={"code": "signature_missing", "message": "서명 헤더가 없습니다"})
     if not x_sprintable_timestamp or not x_sprintable_nonce:
         raise HTTPException(status_code=401, detail={"code": "headers_missing", "message": "timestamp/nonce 헤더가 없습니다"})
+
+    try:
+        timestamp_value = int(x_sprintable_timestamp)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=401, detail={"code": "timestamp_invalid", "message": "timestamp가 정수가 아닙니다"},
+        ) from exc
+    if abs(time.time() - timestamp_value) > _TIMESTAMP_WINDOW_SECONDS:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "timestamp_out_of_window", "message": f"timestamp가 {_TIMESTAMP_WINDOW_SECONDS}s 창을 벗어났습니다"},
+        )
 
     expected = hmac.new(stub_test_secret().encode(), body, hashlib.sha256).hexdigest()
     got = x_sprintable_signature.removeprefix("sha256=")

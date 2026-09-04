@@ -880,6 +880,7 @@ async def test_worker_publish_webhook_replay_rejected_by_live_stub(live_webhook_
     2회 POST해 409를 증명한다(발신측 재시도 로직과 무관하게 스텁 자신의 방어를 잰다)."""
     import hashlib
     import hmac
+    import time
 
     import httpx
 
@@ -895,8 +896,11 @@ async def test_worker_publish_webhook_replay_rejected_by_live_stub(live_webhook_
         body = b'{"event":"publish","slug":"replay-test"}'
         secret = stub_test_secret()
         signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        # story e4fc29fa(조각④, 페드루 리뷰 B2) — timestamp 창(300s) 신설 뒤로는 지금
+        # 시각이어야 이 재전송 시나리오 자체가 통과선을 넘는다(창 자체는 별도 테스트가
+        # 잰다).
         headers = {
-            "X-Sprintable-Signature": signature, "X-Sprintable-Timestamp": "1700000000",
+            "X-Sprintable-Signature": signature, "X-Sprintable-Timestamp": str(int(time.time())),
             "X-Sprintable-Nonce": "fixed-nonce-for-replay-test", "Content-Type": "application/json",
         }
 
@@ -908,3 +912,32 @@ async def test_worker_publish_webhook_replay_rejected_by_live_stub(live_webhook_
             assert r2.json()["detail"]["code"] == "replay_rejected"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_webhook_stub_rejects_timestamp_outside_window(live_webhook_stub):
+    """story e4fc29fa(조각④, 페드루 리뷰 B2) — 정본 §4 "timestamp 창" 明示. 서명
+    자체는 유효해도 timestamp가 지금과 300s 넘게 벌어져 있으면 401(timestamp_out_of_
+    window)로 거부한다. 뮤테이션 대상: 이 창 검사를 지우면(존재만 확인하던 이전
+    구현) 유출된 서명된 요청이 시간 무관하게 영원히 재생 가능해진다."""
+    import hashlib
+    import hmac
+
+    import httpx
+
+    from app.routers.dev_webhook_stub import stub_test_secret
+
+    connection_id = uuid.uuid4()
+    body = b'{"event":"publish","slug":"stale-timestamp-test"}'
+    secret = stub_test_secret()
+    signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    stale_timestamp = "1700000000"  # 2023년 — 지금 시각과 300s를 훌쩍 넘게 벌어져 있다.
+    headers = {
+        "X-Sprintable-Signature": signature, "X-Sprintable-Timestamp": stale_timestamp,
+        "X-Sprintable-Nonce": "nonce-for-stale-timestamp-test", "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{live_webhook_stub}/deliver/{connection_id}", content=body, headers=headers)
+    assert r.status_code == 401, r.text
+    assert r.json()["detail"]["code"] == "timestamp_out_of_window"
