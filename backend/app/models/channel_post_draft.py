@@ -45,6 +45,15 @@ class ChannelPostDraft(Base):
     source_content_item_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
+    # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — source_content_item_id가 «어느
+    # draft에서 파생됐나»(draft 축)만 가리키는 것과 달리, 이 컬럼은 «그 draft의 몇 번
+    # 버전에서 파생됐나»(버전 축)를 초안 생성 시점에 고정한다. 원문이 그 뒤 새 버전을
+    # 내도 이 값은 안 바뀐다 — staleness("원문이 파생 이후 개정됨") 판별의 기준점.
+    # FK 없음(source_content_item_id와 같은 이유) — nullable(source_content_item_id가
+    # null이면 이것도 항상 null).
+    source_site_post_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

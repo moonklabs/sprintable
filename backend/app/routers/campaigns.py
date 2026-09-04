@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -38,6 +38,16 @@ class CreateCampaignRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=300)
     starts_at: datetime | None = None
     ends_at: datetime | None = None
+
+    # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — conversations.py:1259-1265 정본
+    # 미러(새 패턴 발명 0).
+    @field_validator("name")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
 
 
 class CampaignResponse(BaseModel):
@@ -135,11 +145,14 @@ async def get_campaign_detail_endpoint(
         variant_rows = await list_channel_post_drafts(
             db, org_id=org_id, source_content_item_id=draft.id, limit=200,
         )
+        # story #3437(후속 묶음) — 이 루프의 draft/latest_version이 이미 이 content_item의
+        # 원문+latest version이라 배치 쿼리 불요 — 그대로 조립.
+        source_titles = {draft.id: (latest_version.title, latest_version.id)}
         content_items.append(CampaignContentItemItem(
             content_item_id=draft.id, slug=draft.slug, lang=latest_version.lang,
             title=latest_version.title, current_version=latest_version.version,
             updated_at=latest_version.created_at.isoformat(),
-            variants=[_to_draft_list_item(row) for row in variant_rows],
+            variants=[_to_draft_list_item(row, source_titles) for row in variant_rows],
         ))
 
     return CampaignDetailResponse(
