@@ -6,6 +6,9 @@ const KNOWN_CONNECT_ERROR_KEYS: Record<string, string> = {
   CHANNEL_OAUTH_STATE_INVALID: 'channelConnectErrorStateInvalid',
   CHANNEL_CONNECTION_OWNER_ONLY: 'channelConnectErrorOwnerOnly',
   OAUTH_MISSING_PARAMS: 'channelConnectErrorGeneric',
+  // story #3407 — 사용자가 Meta 권한 화면에서 명시적으로 거부(error=access_denied 등)한
+  // 경우 전용 문구. OAUTH_MISSING_PARAMS(일반 실패)로 오진단되던 자리를 분리한다.
+  OAUTH_PROVIDER_DENIED: 'channelConnectErrorProviderDenied',
   SESSION_EXPIRED: 'channelConnectErrorSessionExpired',
   INVALID_REQUEST: 'channelConnectErrorGeneric',
   CHANNEL_AUTHORIZE_FAILED: 'channelConnectErrorGeneric',

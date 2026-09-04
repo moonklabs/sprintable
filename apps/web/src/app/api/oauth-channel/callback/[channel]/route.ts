@@ -23,6 +23,22 @@ export async function GET(request: Request, { params }: RouteParams) {
   const orgId = cookieStore.get(`oauth_channel_org_${channel}`)?.value;
   cookieStore.delete(`oauth_channel_org_${channel}`);
 
+  // story #3407 — Meta가 사용자 거부 시 code 없이 `?error=access_denied&state=...`로
+  // 돌려준다. 아래 code/state/orgId 체크보다 먼저 봐야 한다 — 안 그러면 "파라미터
+  // 누락"(OAUTH_MISSING_PARAMS, 일반 실패 문구)으로 오진단돼, 사용자가 명시적으로 거부한
+  // 것이 마치 시스템 오류처럼 보인다(페드루 PO 라이브 실측). error_description/
+  // error_reason은 서버 로그에만 — URL 쿼리에는 Meta 원문을 절대 안 싣는다.
+  const providerError = searchParams.get('error');
+  if (providerError) {
+    console.error('[oauth-channel/callback] provider denied', {
+      channel,
+      error: providerError,
+      error_description: searchParams.get('error_description'),
+      error_reason: searchParams.get('error_reason'),
+    });
+    return NextResponse.redirect(`${origin}/organization/channels?connect_error=OAUTH_PROVIDER_DENIED`);
+  }
+
   if (!code || !state || !orgId) {
     return NextResponse.redirect(`${origin}/organization/channels?connect_error=OAUTH_MISSING_PARAMS`);
   }

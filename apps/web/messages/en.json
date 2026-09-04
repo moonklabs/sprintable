@@ -2094,6 +2094,7 @@
     "channelConnectErrorStateInvalid": "The connection request expired or is invalid — please try again.",
     "channelConnectErrorOwnerOnly": "Only owners can do this.",
     "channelConnectErrorSessionExpired": "Your session expired — please sign in again.",
+    "channelConnectErrorProviderDenied": "Permission was denied — please reconnect.",
     "appCredentialsTitle": "{channel} app credentials",
     "appCredentialsOrgActive": "Connecting with this organization's app · ID ends in {suffix}",
     "appCredentialsPlatformActive": "Connecting with Sprintable's shared app (default)",
