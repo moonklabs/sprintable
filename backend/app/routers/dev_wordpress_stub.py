@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import base64
 import itertools
-import os
 
 from fastapi import APIRouter, Header, HTTPException
+
+from app.services.wordpress_publish import wordpress_stub_enabled
 
 router = APIRouter(prefix="/api/dev/wordpress-stub/wp-json/wp/v2", tags=["dev-wordpress-stub"])
 
@@ -60,10 +61,6 @@ async def update_post(post_id: int, body: dict, authorization: str | None = Head
         raise HTTPException(status_code=404, detail={"code": "rest_post_invalid_id", "message": "Invalid post ID."})
     row.update({k: v for k, v in body.items() if k in ("title", "content", "excerpt", "slug", "status")})
     return {"id": row["id"], "link": row["link"], "status": row["status"]}
-
-
-def wordpress_stub_enabled() -> bool:
-    return os.environ.get("WORDPRESS_TEST_STUB_ENABLED", "").strip().lower() == "true"
 
 
 def assert_wordpress_stub_not_registered_in_prod() -> None:

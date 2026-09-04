@@ -53,7 +53,7 @@ def _configure_secrets(monkeypatch):
 
 
 @pytest.fixture
-async def live_wordpress_stub():
+async def live_wordpress_stub(monkeypatch):
     """dev_wordpress_stub.router만 얹은 최소 FastAPI 앱을 실 uvicorn 서버(127.0.0.1,
     임시 포트)로, 테스트 이벤트 루프와 별도인 **백그라운드 스레드**(자기 자신의 asyncio
     루프)에서 띄운다 — 메인 앱(app.main.app)의 lifespan/DB 설정과 완전히 격리되고,
@@ -72,6 +72,10 @@ async def live_wordpress_stub():
 
     from app.routers.dev_wordpress_stub import _POSTS, router as stub_router
 
+    # 페드루 리뷰 B1(2026-09-04) — loopback HTTPS 예외는 이 플래그가 켜졌을 때만 산다
+    # (SSRF 방지, wordpress_publish.py 참고). 이 라이브 스텁 자체가 그 플래그의 유일한
+    # 실사용처라 여기서 켠다.
+    monkeypatch.setenv("WORDPRESS_TEST_STUB_ENABLED", "true")
     _POSTS.clear()
     stub_app = FastAPI()
     stub_app.include_router(stub_router)

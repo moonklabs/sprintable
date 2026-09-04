@@ -106,10 +106,13 @@ async def test_publish_rejects_http_site_url_no_call_made():
 
 
 @pytest.mark.anyio
-async def test_publish_allows_loopback_http_site_url():
+async def test_publish_allows_loopback_http_site_url_when_stub_flag_on(monkeypatch):
     """조각③c — dev_wordpress_stub.py(실 uvicorn, TLS 없음) 대상 AC7 실왕복 테스트가
-    걸리지 않도록 http://127.0.0.1·http://localhost는 HTTPS 강제 예외(RFC 8252 §7.3
-    동형 사상). 뮤테이션 대상: 이 예외를 지우면 loopback 왕복 테스트가 전부 RED."""
+    걸리지 않도록 http://127.0.0.1·http://localhost는 WORDPRESS_TEST_STUB_ENABLED=true
+    일 때만 HTTPS 강제 예외(RFC 8252 §7.3 동형 사상, 페드루 리뷰 B1로 플래그 게이트
+    추가). 뮤테이션 대상: 이 예외를 지우면 loopback 왕복 테스트가 전부 RED."""
+    monkeypatch.setenv("WORDPRESS_TEST_STUB_ENABLED", "true")
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(201, json={"id": 1, "link": "http://127.0.0.1:9/post-1/"})
 
@@ -119,6 +122,25 @@ async def test_publish_allows_loopback_http_site_url():
             app_password="pw", title="제목", body_md="본문", summary="요약", slug="slug",
         )
     assert external_id == "1"
+
+
+@pytest.mark.anyio
+async def test_publish_rejects_loopback_http_site_url_when_stub_flag_off(monkeypatch):
+    """조각③c(페드루 리뷰 B1, 2026-09-04) — SSRF 방지: prod처럼 플래그가 꺼진 상태에서는
+    loopback도 예외 없이 거부한다. 뮤테이션 대상: 플래그 게이트(`and wordpress_stub_
+    enabled()`)를 지우면 prod에서도 site_url=http://127.0.0.1:.../가 통과해 워커가
+    우리 컨테이너 자신의 loopback에 Basic auth를 실어 진짜로 친다(SSRF)."""
+    monkeypatch.delenv("WORDPRESS_TEST_STUB_ENABLED", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("플래그 off인데 loopback으로 실제 요청이 나갔다")
+
+    async with httpx.AsyncClient(transport=_transport(handler)) as client:
+        with pytest.raises(WordPressSiteURLInsecureError):
+            await publish(
+                client, site_url="http://127.0.0.1:9", username="editor",
+                app_password="pw", title="제목", body_md="본문", summary="요약", slug="slug",
+            )
 
 
 @pytest.mark.anyio
