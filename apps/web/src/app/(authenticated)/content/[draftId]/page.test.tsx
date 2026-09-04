@@ -94,6 +94,11 @@ function stubFetchWithVersions(
     activeConnections?: { id: string; channel: string; account_label: string | null; status: string }[];
     variants?: unknown[];
     onCreateVariant?: (body: unknown) => { status: number; body: unknown };
+    // story 1db41045(#3457) — 기존 campaign 목록·새로 만들기.
+    campaigns?: unknown[];
+    onCreateCampaign?: (body: unknown) => { status: number; body: unknown };
+    // PATCH .../campaign(버전 0·게이트 무접촉 — 유나 정적 판정 뒤 저장 POST에서 전환).
+    onPatchCampaign?: (body: unknown) => { status: number; body: unknown };
   },
 ) {
   vi.stubGlobal(
@@ -105,6 +110,21 @@ function stubFetchWithVersions(
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/variants`) {
         return { ok: true, status: 200, json: async () => ({ data: opts?.variants ?? [], error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/campaign` && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts?.onPatchCampaign?.(body) ?? { status: 200, body: { draft_id: DRAFT_ID, campaign_id: body.campaign_id, campaign_name: body.campaign_id ? '9월 캠페인' : null } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/campaigns` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts?.onCreateCampaign?.(body) ?? { status: 201, body: { id: 'c1', name: body.name, starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/campaigns`) {
+        return { ok: true, status: 200, json: async () => ({ data: opts?.campaigns ?? [], error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
         return { ok: true, status: 200, json: async () => ({ data: opts?.activeConnections ?? [], error: null, meta: null }) };
@@ -964,10 +984,16 @@ describe('ContentPostEditPage — 변형 만들기(story 15e481ce AC1)', () => {
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    // story #3454(#3801 착지분) — raw 토글이 이제 같은 Alert에 형제로 붙어 textContent가
-    // 늘었다. AlertDescription(<p>)만 짚어 사람 문장만 본다.
+    // story 1db41045(#3457) — 유나 #3801 재판정 기록: 토글을 지워도 이전엔 이 테스트가
+    // 초록이던 자리(raw는 캡처했지만 렌더 단언이 없었다). AlertDescription(<p>)으로
+    // 사람 문장만 짚고, 토글 존재 자체도 별도로 pin한다.
     expect(container.querySelector('[data-testid="content-create-variant-error"] p')?.textContent)
       .toBe('원문을 찾을 수 없습니다: d1');
+    const toggle = container.querySelector('[data-testid="content-create-variant-error"] details');
+    expect(toggle?.querySelector('summary')?.textContent).toBe(koMessages.content.errorRawDetailsToggle);
+    expect(toggle?.querySelector('pre')?.textContent).toBe(
+      JSON.stringify({ code: 'CHANNEL_POST_SOURCE_CONTENT_ITEM_NOT_FOUND', message: '원문을 찾을 수 없습니다: d1' }),
+    );
     expect(routerPushMock).not.toHaveBeenCalled();
   });
 
@@ -1088,5 +1114,212 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
     expect(items[1]?.textContent).toContain('@brand_b');
     expect(items[2]?.textContent).not.toContain('@brand');
     expect(items[2]?.textContent).toContain(koMessages.content.channelThreads);
+  });
+});
+
+// story 1db41045(#3457) — 「캠페인 만들기/붙이기」.
+describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)', () => {
+  it('⭐campaign_id가 이미 있으면 "현재 캠페인" 이름+링크만 보이고, 만들기/붙이기 폼은 안 뜬다', async () => {
+    stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const el = container.querySelector('[data-testid="content-campaign-current"]');
+    expect(el?.textContent).toContain('9월 캠페인');
+    expect(el?.querySelector('a')?.getAttribute('href')).toBe('/campaigns/c1');
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).toBeNull();
+  });
+
+  it('campaign_id가 없으면 만들기/붙이기 폼이 뜬다', async () => {
+    stubFetchWithVersions([VERSION_1]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
+  });
+
+  // 유나 정적 판정·PO 확認(2026-09-04 17:50Z) — 처음엔 site-posts 저장 POST(새
+  // 버전)로 campaign_id를 실었으나 그 경로가 _reseal_gate_on_new_version으로
+  // 승인을 무른다는 것이 드러나 PATCH .../campaign(버전 0·게이트 무접촉)로
+  // 전환했다. PATCH body는 campaign_id 하나뿐이라 에디터 미저장 편집이
+  // 구조적으로 아예 안 실린다(title 필드 자체가 body에 없다).
+  it('⭐붙이기는 PATCH .../campaign을 부르고, body에 campaign_id 외 에디터 필드가 없다', async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      onCreateCampaign: () => ({ status: 201, body: { id: 'c1', name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' } }),
+      onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    // 저장하지 않고 제목만 편집(미저장 상태 재현) — PATCH body 구조상 애초에 안 실린다.
+    const titleInput = container.querySelector<HTMLInputElement>('#post-title');
+    const titleSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    titleSetter?.call(titleInput, '미저장 편집 제목');
+    titleInput?.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const nameInput = container.querySelector('[data-testid="content-campaign-new-name-input"]') as HTMLInputElement;
+    const nameSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    nameSetter?.call(nameInput, '9월 캠페인');
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const btn = container.querySelector('[data-testid="content-campaign-attach-button"]') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(patchBody).toEqual({ campaign_id: 'c1' });
+    // PATCH 성공 응답의 campaign_name이 그대로 "현재 캠페인" 표시에 반영된다(재조회 없이).
+    expect(container.querySelector('[data-testid="content-campaign-current"]')?.textContent).toContain('9월 캠페인');
+  });
+
+  it('⭐새 이름을 입력해 만들면 POST /campaigns 뒤 그 id로 PATCH .../campaign이 불린다', async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    let createBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      onCreateCampaign: (body) => { createBody = body as Record<string, unknown>; return { status: 201, body: { id: 'c1', name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' } }; },
+      onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="content-campaign-new-name-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, '9월 캠페인');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const btn = container.querySelector('[data-testid="content-campaign-attach-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(createBody?.name).toBe('9월 캠페인');
+    expect(patchBody).toEqual({ campaign_id: 'c1' });
+  });
+
+  it('기존 캠페인을 select로 고르면(새 이름 없이) 그 campaign_id로 PATCH가 불리고, 만들기 POST는 안 부른다', async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    let createCalled = false;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      campaigns: [{ id: 'c1', name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' }],
+      onCreateCampaign: () => { createCalled = true; return { status: 201, body: {} }; },
+      onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="content-campaign-select"]') as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+    setter?.call(select, 'c1');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const btn = container.querySelector('[data-testid="content-campaign-attach-button"]') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(createCalled).toBe(false);
+    expect(patchBody).toEqual({ campaign_id: 'c1' });
+  });
+
+  it('⭐새 이름을 넣었는데 생성이 실패(422)하면 에러가 보이고 PATCH는 안 부른다', async () => {
+    let patchCalled = false;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      onCreateCampaign: () => ({ status: 422, body: { detail: { code: 'SOME_CAMPAIGN_ERROR', message: '캠페인 생성 실패 원문' } } }),
+      onPatchCampaign: () => { patchCalled = true; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="content-campaign-new-name-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, '9월 캠페인');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const btn = container.querySelector('[data-testid="content-campaign-attach-button"]') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(patchCalled).toBe(false);
+    expect(container.querySelector('[data-testid="content-campaign-attach-error"] p')?.textContent).toBe('캠페인 생성 실패 원문');
+  });
+
+  it('붙이기 버튼은 이름도 안 쓰고 기존도 안 고르면 비활성이다', async () => {
+    stubFetchWithVersions([VERSION_1]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="content-campaign-attach-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  // 페드루 PO N1 — campaign_name이 없으면 UUID를 사람 문장에 그대로 보이지 않는다.
+  it('campaign_name이 없으면 UUID 대신 "이름 확인 불가" 문구가 보인다', async () => {
+    stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: null }]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const el = container.querySelector('[data-testid="content-campaign-current"]');
+    expect(el?.textContent).toContain(koMessages.content.campaignNameUnknown);
+    expect(el?.textContent).not.toContain('c1');
+  });
+});
+
+// 페드루 PO B2(2026-09-04 17:39Z) — 붙인 뒤 「변경」·「해제」 표면.
+describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', () => {
+  it('⭐campaign_id가 있으면 "변경"·"해제" 버튼이 뜬다', async () => {
+    stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-campaign-change-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-detach-button"]')).not.toBeNull();
+  });
+
+  // 페드루 PO 재판정(2026-09-04 18:12Z) — 처음엔 「변경」이 현재 캠페인 줄을 폼으로
+  // 통째로 대체해 "무엇에서 무엇으로"가 사라졌다. 지금은 변경 중에도 현재 캠페인
+  // 줄(이름+링크)은 남고 그 아래 폼이 더 뜬다 — 변경/해제 버튼만 그 사이엔 숨는다.
+  it('⭐"변경"을 누르면 현재 캠페인 줄은 남은 채 그 아래 붙이기 폼이 더 뜨고(취소 가능)', async () => {
+    stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const changeBtn = container.querySelector('[data-testid="content-campaign-change-button"]') as HTMLButtonElement;
+    await act(async () => { changeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).not.toBeNull();
+    const current = container.querySelector('[data-testid="content-campaign-current"]');
+    expect(current).not.toBeNull();
+    expect(current?.textContent).toContain('9월 캠페인');
+    // 변경 중엔 변경/해제 버튼은 숨는다(같은 화면에 "지금 바꾸는 중"과 "바꾸기/
+    // 해제" 액션이 겹쳐 뜨지 않게).
+    expect(container.querySelector('[data-testid="content-campaign-change-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-detach-button"]')).toBeNull();
+
+    const cancelBtn = container.querySelector('[data-testid="content-campaign-cancel-change-button"]') as HTMLButtonElement;
+    await act(async () => { cancelBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-campaign-current"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-change-button"]')).not.toBeNull();
+  });
+
+  it('⭐"해제"를 누르면 PATCH .../campaign에 campaign_id: null을 명시로 보낸다(버전 0)', async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions(
+      [{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }],
+      undefined, undefined,
+      { onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: null, campaign_name: null } }; } },
+    );
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const detachBtn = container.querySelector('[data-testid="content-campaign-detach-button"]') as HTMLButtonElement;
+    await act(async () => { detachBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(patchBody).toEqual({ campaign_id: null });
+    // 해제 성공 응답이 그대로 반영돼 붙이기 폼이 다시 보인다(재조회 없이).
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
   });
 });

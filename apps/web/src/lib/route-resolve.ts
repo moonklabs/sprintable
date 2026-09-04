@@ -65,7 +65,7 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // `app/(authenticated)/*`, `[ws]`/`(authenticated)` 제외) + Next.js 메타데이터 파일
   // 라우트. `scripts/verify-reserved-first-segments-sync.ts`가 어긋남을 CI에서 잡는다.
   '.well-known', 'activity', 'api', 'apple-app-site-association', 'apple-icon.png', 'auth',
-  'channel', 'chats', 'content', 'dashboard',
+  'campaigns', 'channel', 'chats', 'content', 'dashboard',
   'favicon.ico', 'forgot-password', 'gates', 'icon.svg', 'inbox', 'internal-dogfood',
   'invite', 'login', 'loop-queue', 'manifest.webmanifest', 'meetings', 'mfa', 'more',
   // [P1] iOS TestFlight 구글 로그인 후 404 인시던트 — AASA(.well-known/apple-app-site-association)
