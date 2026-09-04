@@ -502,3 +502,156 @@ async def test_worker_unpublish_site_post_command_against_live_wordpress_stub(li
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_publish_second_draft_same_connection_does_not_overwrite_first(live_wordpress_stub):
+    """카디르·PO 실물 확認(2026-09-04, PR#3797 블로커) — 같은 WordPress connection에
+    글이 둘(draft A·B)이면, 수정 전 코드는 connection_id로만 좁힌 조회가 "가장 최근
+    published"를 A/B 구분 없이 집어 B 첫 발행이 A의 external_id를 prior로 잡아
+    WordPress update 경로를 태워 A를 B 내용으로 덮어썼다. 이 테스트는 그 회귀를
+    고정한다 — B 첫 발행은 항상 create(신규 post_id)여야 하고, A의 publication
+    행·스텁 원장 둘 다 무변(양성대조: A 자신의 값이 그대로 남는다)."""
+    from app.services.gate_service import transition_gate
+    from app.services.publication_command import process_due_publication_commands
+    from app.models.channel_publication import ChannelPublication
+    from app.routers.dev_wordpress_stub import _POSTS
+    from app.main import app
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_a = await _seed_story(s, org_id, project_id, title="A")
+            story_b = await _seed_story(s, org_id, project_id, title="B")
+            connection_id = await _seed_wordpress_connection(s, org_id, site_url=live_wordpress_stub)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_a, gate_a = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_a, connection_id=connection_id, slug="post-a",
+            )
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_a, "approved", resolver_id=human_id)
+            await s.commit()
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            pub_a_before = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_a)
+            )).scalar_one()
+            a_external_id, a_permalink = pub_a_before.external_id, pub_a_before.permalink
+        assert a_external_id is not None
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_b, gate_b = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_b, connection_id=connection_id, slug="post-b",
+            )
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_b, "approved", resolver_id=human_id)
+            await s.commit()
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            pub_b = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_b)
+            )).scalar_one()
+            pub_a_after = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_a)
+            )).scalar_one()
+
+        # B는 A와 별개의 post(신규 create) — prior_external_id를 A에서 잘못 물려받지 않았다.
+        assert pub_b.external_id is not None
+        assert pub_b.external_id != a_external_id
+        # A 자신의 행은 B 발행 뒤에도 그대로(양성대조).
+        assert pub_a_after.external_id == a_external_id
+        assert pub_a_after.permalink == a_permalink
+        # 스텁 원장(진짜 HTTP 왕복 결과) 레벨에서도 A가 B 내용으로 덮이지 않았다.
+        assert _POSTS[int(a_external_id)]["slug"] == "post-a"
+        assert _POSTS[int(pub_b.external_id)]["slug"] == "post-b"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_unpublish_first_draft_same_connection_does_not_touch_second(live_wordpress_stub):
+    """카디르·PO 실물 확認(2026-09-04, PR#3797 블로커) — 같은 connection에 글이
+    둘(A·B) 발행된 상태에서 A 회수 요청이, 수정 전 코드는 connection_id로만 좁힌
+    "가장 최근 published"를 집어 더 최근인 B를 회수해 버렸다. 이 테스트는 그 회귀를
+    고정한다 — A 회수는 A 자신의 publication 행만 unpublished로 바꾸고, B는
+    published로 그대로 남는다(양성대조)."""
+    from app.services.gate_service import transition_gate
+    from app.services.publication_command import process_due_publication_commands
+    from app.services.site_posts import request_site_post_external_unpublish
+    from app.models.channel_publication import ChannelPublication
+    from app.main import app
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_a = await _seed_story(s, org_id, project_id, title="A")
+            story_b = await _seed_story(s, org_id, project_id, title="B")
+            connection_id = await _seed_wordpress_connection(s, org_id, site_url=live_wordpress_stub)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_a, gate_a = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_a, connection_id=connection_id, slug="post-a",
+            )
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_a, "approved", resolver_id=human_id)
+            await s.commit()
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        # B가 A보다 나중에 발행돼야 "가장 최근 published"가 B가 되는(수정 전 버그 재현
+        # 조건)을 확실히 만든다.
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_b, gate_b = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_b, connection_id=connection_id, slug="post-b",
+            )
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_b, "approved", resolver_id=human_id)
+            await s.commit()
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            await request_site_post_external_unpublish(
+                s, org_id=org_id, draft_id=draft_a, requested_by_member_id=human_id,
+            )
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            pub_a = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_a)
+            )).scalar_one()
+            pub_b = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_b)
+            )).scalar_one()
+
+        assert pub_a.status == "unpublished"
+        assert pub_b.status == "published"  # 양성대조 — B는 A 회수에 건드려지지 않는다.
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

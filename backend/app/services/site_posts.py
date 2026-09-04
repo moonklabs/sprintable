@@ -896,21 +896,29 @@ async def request_site_post_external_unpublish(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, requested_by_member_id: uuid.UUID,
 ) -> "PublicationCommand":
     """story e4fc29fa(조각③c) — 외부 목적지 회수 요청. 지금 살아 있는(status="published")
-    `channel_publications` 행(connection_id로 좁힘)을 되짚어 그 (gate_id, version_id)로
-    operation="unpublish" 커맨드를 upsert한다 — publish와 같은 멱등키 구조(gate_id+
-    version_id는 그대로, operation만 다르니 별도 행)."""
+    `channel_publications` 행을 되짚어 그 (gate_id, version_id)로 operation="unpublish"
+    커맨드를 upsert한다 — publish와 같은 멱등키 구조(gate_id+version_id는 그대로,
+    operation만 다르니 별도 행).
+
+    카디르·PO 실물 확認(2026-09-04, PR#3797 블로커) — 같은 WordPress connection에
+    글이 둘(draft A·B)이면 connection_id만으로 좁힌 조회가 "가장 최근 published"를
+    A/B 구분 없이 집어, A 회수 요청이 더 최근 발행된 B를 회수해 버렸다. `version_id`를
+    이 draft 자신의 `site_post_versions`로 좁혀 계보를 벗어난 행을 원천 배제한다."""
     draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None or draft.connection_id is None:
         raise SitePostDraftNotFoundError(draft_id)
 
     from app.models.channel_publication import ChannelPublication
+    from app.models.site_post_version import SitePostVersion
 
+    own_version_ids = select(SitePostVersion.id).where(SitePostVersion.draft_id == draft_id)
     published = (await db.execute(
         select(ChannelPublication)
         .where(
             ChannelPublication.org_id == org_id,
             ChannelPublication.connection_id == draft.connection_id,
             ChannelPublication.status == "published",
+            ChannelPublication.version_id.in_(own_version_ids),
         )
         .order_by(ChannelPublication.created_at.desc())
         .limit(1)
@@ -970,9 +978,18 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
 
     module = get_blog_destination_module(connection_id=connection.id, channel=connection.channel)
 
+    # 카디르·PO 실물 확認(2026-09-04, PR#3797 블로커) — connection_id만으로 좁힌 조회가
+    # 같은 connection의 다른 draft(B) 첫 발행 시 다른 draft(A)의 external_id를
+    # "prior"로 집어 WordPress update 경로를 태워 A를 B 내용으로 덮어썼다(데이터 오염).
+    # version_id를 이 draft 자신의 site_post_versions로 좁혀 계보 밖 행을 배제한다.
+    own_version_ids = select(SitePostVersion.id).where(SitePostVersion.draft_id == draft.id)
     existing_pub = (await db.execute(
         select(ChannelPublication)
-        .where(ChannelPublication.connection_id == connection.id, ChannelPublication.external_id.isnot(None))
+        .where(
+            ChannelPublication.connection_id == connection.id,
+            ChannelPublication.external_id.isnot(None),
+            ChannelPublication.version_id.in_(own_version_ids),
+        )
         .order_by(ChannelPublication.created_at.desc())
         .limit(1)
     )).scalar_one_or_none()
