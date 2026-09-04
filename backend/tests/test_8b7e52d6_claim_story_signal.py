@@ -56,9 +56,27 @@ async def _seed_org(session, *, slug=None):
     # 실 org 생성 경로(OrganizationRepository.create)는 default participation role을
     # 자동 시드한다 — 여기 직접 ORM construct는 그걸 건너뛰므로 명시 호출(안 하면
     # ensure_implementation_participation이 "default role 미시드"로 skip=False를 내
-    # participation.created 검증이 실제 프로덕션 경로와 다른 값을 관측하게 된다).
+    # participation.ensured 검증이 실제 프로덕션 경로와 다른 값을 관측하게 된다).
     from app.services.participation_helpers import seed_default_participation_role
     await seed_default_participation_role(session, org.id)
+    return org.id, project.id
+
+
+async def _seed_org_without_default_role(session, *, slug=None):
+    """페드루 리뷰 N1 후속 — participation.ensured=False 경로 재현용. 정상 org라면
+    존재할 default participation role을 일부러 안 심는다(실 프로덕션에서는
+    OrganizationRepository.create()가 자동 시드하므로, 이 상태는 그 경로를 우회해
+    수동 구성된 org에서만 나타나는 이상 상태 — warning 필드가 정확히 그 경우에만
+    떠야 한다는 걸 이 헬퍼로 재현)."""
+    from app.models.organization import Organization
+    from app.models.project import Project
+
+    org = Organization(id=uuid.uuid4(), name="8b7e52d6 No-Role Org", slug=slug or f"org-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    await session.commit()
     return org.id, project.id
 
 
@@ -109,7 +127,7 @@ def _setup_app(app, Session, *, org_id, user_id):
 @pytest.mark.anyio
 async def test_claim_response_has_empty_assignee_ids_and_hint_when_unassigned():
     """AC1 — assignee 없는 스토리를 claim하면 assignee_ids=[]·hint 존재·
-    assignee_changed=False·participation.created=True."""
+    assignee_changed=False·participation.ensured=True."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -129,7 +147,7 @@ async def test_claim_response_has_empty_assignee_ids_and_hint_when_unassigned():
         assert body["claimed"] is True
         assert body["assignee_changed"] is False
         assert body["assignee_ids"] == []
-        assert body["participation"]["created"] is True
+        assert body["participation"]["ensured"] is True
         assert "hint" in body
         assert "assignee" in body["hint"]
     finally:
@@ -190,6 +208,36 @@ async def test_claim_does_not_change_assignee_regression_3414b6d7():
             from app.models.pm import Story
             story = await s.get(Story, story_id)
             assert story.assignee_id is None, "claim이 assignee_id를 채워선 안 된다(3414b6d7 결정)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_claim_response_has_warning_when_org_has_no_default_participation_role():
+    """페드루 리뷰 N1 후속 — participation.ensured=False(이 org에 default
+    participation role이 없음, 정상 org에선 안 생기는 이상 상태)일 때만 warning이
+    응답에 실려야 한다. 정상 경로(다른 테스트들, role 있음)에선 warning이 없어야
+    노이즈가 안 된다 — 그 비대칭을 여기서 고정."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_without_default_role(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=None)
+
+        _setup_app(app, Session, org_id=org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/team-members/{agent_id}/claim", json={"story_id": str(story_id)},
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["participation"]["ensured"] is False
+        assert "warning" in body
+        assert "participation" in body["warning"]
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

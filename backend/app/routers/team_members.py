@@ -741,7 +741,7 @@ async def claim_story(
     # 3414b6d7: claim=일 시작=실작업자 → implementation participation 멱등 생성(게이트/verdict
     # attribution). assignee(board)는 안 건드림 — participation만(claim만 하고 done해도 평가 가능).
     from app.services.participation_helpers import ensure_implementation_participation
-    participation_created = await ensure_implementation_participation(session, org_id, body.story_id, id)
+    participation_ensured = await ensure_implementation_participation(session, org_id, body.story_id, id)
 
     # story 8b7e52d6(PO 재정의, 2026-09-04) — "신호 보정": claim_story의 실제 동작(위)은
     # story 3414b6d7 결정 그대로 assignee/board를 절대 안 건드린다 — 그런데 기존 응답
@@ -756,13 +756,13 @@ async def claim_story(
     result: dict = {
         "claimed": True,
         "story_id": str(body.story_id),
-        # 페드루 리뷰 N1(2026-09-04) — "ensured"는 False가 실패로 읽힌다는 지적으로
-        # "created"로 개명. ⚠️정확한 의미는 "새로 만들었다"가 아니다 —
-        # ensure_implementation_participation은 이미 있던 행이든 방금 만든 행이든
-        # 똑같이 True를 반환한다(멱등, participation_helpers.py 참고). False는 "이미
-        # 있었다"가 아니라 **이 조직에 default participation role 자체가 시드 안 돼
-        # 있어 참여 보장 자체가 스킵됐다**는 뜻 — 정상 org에선 사실상 항상 True다.
-        "participation": {"created": participation_created},
+        # 페드루 리뷰 N1 재정정(2026-09-04) — "created"는 거짓 이름이었다(디디 지적
+        # 반영, 원래 이름이 맞았다) — ensure_implementation_participation은 이미 있던
+        # 행이든 방금 만든 행이든 똑같이 True를 반환하는 멱등 함수라 "새로 만들었다"는
+        # 뜻이 아니다. "ensured"로 되돌리고, False일 때만(=이 org에 default
+        # participation role 자체가 없어 참여 보장이 스킵된 진짜 이상 상태 — 정상
+        # org에선 안 뜨는 필드) 아래 warning으로 명시.
+        "participation": {"ensured": participation_ensured},
         "assignee_changed": False,
         "assignee_ids": assignee_ids,
     }
@@ -770,6 +770,11 @@ async def claim_story(
         result["hint"] = (
             "assignee는 별도입니다(update_story의 assignee_id/assignee_ids) — "
             "보드 배정 표시·통지 수신자는 claim이 아니라 assignee 기준입니다."
+        )
+    if not participation_ensured:
+        result["warning"] = (
+            "participation 미보장 — 이 org에 기본 participation role이 없어 "
+            "게이트/verdict attribution이 안 잡힘(관리자 확인 필요)"
         )
     return result
 
