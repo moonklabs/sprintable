@@ -655,7 +655,7 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] 현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지. "
      "⚠️story 8b7e52d6: assignee/board는 안 건드립니다(participation만 생성) — "
      "보드 배정 표시·통지 수신자는 이 호출이 아니라 assignee 기준입니다(update_story의 "
-     "assignee_id/assignee_ids). 응답의 assignee_ids/hint로 현재 상태를 확認하세요.",
+     "assignee_id/assignee_ids). 응답의 assignee_ids/hint로 현재 상태를 확인하세요.",
      ClaimStoryInput, claim_story),
     ("sprintable_unclaim_story",
      "[일감] 작업 중인 스토리 claim 해제 — active_story_id = NULL.",

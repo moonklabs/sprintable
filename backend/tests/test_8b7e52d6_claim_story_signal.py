@@ -56,7 +56,7 @@ async def _seed_org(session, *, slug=None):
     # 실 org 생성 경로(OrganizationRepository.create)는 default participation role을
     # 자동 시드한다 — 여기 직접 ORM construct는 그걸 건너뛰므로 명시 호출(안 하면
     # ensure_implementation_participation이 "default role 미시드"로 skip=False를 내
-    # participation.ensured 검증이 실제 프로덕션 경로와 다른 값을 관측하게 된다).
+    # participation.created 검증이 실제 프로덕션 경로와 다른 값을 관측하게 된다).
     from app.services.participation_helpers import seed_default_participation_role
     await seed_default_participation_role(session, org.id)
     return org.id, project.id
@@ -109,7 +109,7 @@ def _setup_app(app, Session, *, org_id, user_id):
 @pytest.mark.anyio
 async def test_claim_response_has_empty_assignee_ids_and_hint_when_unassigned():
     """AC1 — assignee 없는 스토리를 claim하면 assignee_ids=[]·hint 존재·
-    assignee_changed=False·participation.ensured=True."""
+    assignee_changed=False·participation.created=True."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -129,7 +129,7 @@ async def test_claim_response_has_empty_assignee_ids_and_hint_when_unassigned():
         assert body["claimed"] is True
         assert body["assignee_changed"] is False
         assert body["assignee_ids"] == []
-        assert body["participation"]["ensured"] is True
+        assert body["participation"]["created"] is True
         assert "hint" in body
         assert "assignee" in body["hint"]
     finally:
