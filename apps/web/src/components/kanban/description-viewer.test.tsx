@@ -8,9 +8,22 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { DescriptionViewer } from './story-detail-panel';
+// story 3436(묶음 1) — DialogContent가 이제 useTranslations('common')을 쓴다. 이
+// 파일에서 칩 클릭이 EntityPreviewModal(Dialog 기반)을 여는 두 테스트만 감싼다
+// (embed-card.link-states.test.tsx와 같은 관례 — 안 여는 나머지는 그대로 무변경).
+import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 let container: HTMLDivElement;
 let root: Root;
@@ -122,14 +135,14 @@ describe('DescriptionViewer — entity: 링크가 EntityChip으로 그려지는�
   it('entity: 링크 클릭도 부모(편집모드 진입) onClick으로 안 샌다', async () => {
     let parentClicked = false;
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <div onClick={() => { parentClicked = true; }}>
           <DescriptionViewer
             description={`[스토리 제목](entity:story:${STORY_ID})`}
             references={[{ target_type: 'story', target_id: STORY_ID }]}
           />
         </div>,
-      );
+      ));
     });
 
     const button = container.querySelector('button') as HTMLButtonElement;
@@ -263,11 +276,11 @@ describe('DescriptionViewer — bare #<번호>가 bareNumberTargets로 렌더되
   it('bare-number: 링크 클릭도 부모(편집모드 진입) onClick으로 안 샌다', async () => {
     let parentClicked = false;
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <div onClick={() => { parentClicked = true; }}>
           <DescriptionViewer description="#2258" bareNumberTargets={{ '2258': TARGET_ID }} />
         </div>,
-      );
+      ));
     });
 
     const button = container.querySelector('button') as HTMLButtonElement;

@@ -4,6 +4,7 @@ import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
+import { useTranslations } from "next-intl"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
@@ -260,6 +261,9 @@ function SidebarTrigger({
   ...props
 }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar } = useSidebar()
+  // story 3436(묶음 1) — nav.toggleSidebar는 새 키(공용) — 묶음 4 #13(settings:800
+  // 「Toggle navigation」)이 같은 행동이라 같은 키로 잇는다(페드루 PO 지시).
+  const t = useTranslations("nav")
 
   return (
     <Button
@@ -275,13 +279,15 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{t("toggleSidebar")}</span>
     </Button>
   )
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const { toggleSidebar, setWidth, setIsResizing } = useSidebar()
+  // story 3436(묶음 1) — SidebarTrigger와 같은 정본 키(nav.toggleSidebar).
+  const t = useTranslations("nav")
   const didDragRef = React.useRef(false)
   const dragRef = React.useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -325,11 +331,11 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     <button
       data-sidebar="rail"
       data-slot="sidebar-rail"
-      aria-label="Toggle Sidebar"
+      aria-label={t("toggleSidebar")}
       tabIndex={-1}
       onClick={handleClick}
       onMouseDown={onMouseDown}
-      title="Toggle Sidebar"
+      title={t("toggleSidebar")}
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-col-resize in-data-[side=right]:cursor-col-resize",

@@ -5,9 +5,21 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { Sheet, SheetContent, SheetTitle } from './sheet';
+// story 3436(묶음 1) — SheetContent가 이제 useTranslations('common')을 쓴다
+// (sr-only "Close" i18n화) — 렌더 트리에 NextIntlClientProvider가 있어야 한다.
+import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 let container: HTMLDivElement;
 let root: Root;
@@ -23,13 +35,13 @@ describe('SheetContent — --elev-overlay + proof-line-strong(story #2969 PR-4)'
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <Sheet open>
           <SheetContent side="right">
             <SheetTitle>제목</SheetTitle>
           </SheetContent>
         </Sheet>,
-      );
+      ));
     });
     const popup = document.querySelector('[data-slot="sheet-content"]');
     expect(popup).not.toBeNull();
@@ -47,13 +59,13 @@ describe('SheetContent — --elev-overlay + proof-line-strong(story #2969 PR-4)'
       document.body.appendChild(container);
       root = createRoot(container);
       await act(async () => {
-        root.render(
+        root.render(wrap(
           <Sheet open>
             <SheetContent side={side}>
               <SheetTitle>제목</SheetTitle>
             </SheetContent>
           </Sheet>,
-        );
+        ));
       });
       const popup = document.querySelector('[data-slot="sheet-content"]');
       expect(popup).not.toBeNull();
@@ -66,4 +78,25 @@ describe('SheetContent — --elev-overlay + proof-line-strong(story #2969 PR-4)'
       expect(popup?.className).toContain(borderSideClass);
     },
   );
+});
+
+// story 3436(묶음 1) — sr-only "Close" 하드코딩 정정(dialog.tsx와 같은 결함).
+describe('SheetContent — 닫기 버튼 sr-only 접근 이름(story 3436)', () => {
+  it('⭐기본(showCloseButton) 닫기 버튼의 sr-only 텍스트가 한국어다', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(
+        <Sheet open>
+          <SheetContent side="right">
+            <SheetTitle>제목</SheetTitle>
+          </SheetContent>
+        </Sheet>,
+      ));
+    });
+    const closeBtn = document.querySelector('[data-slot="sheet-close"]');
+    expect(closeBtn?.querySelector('.sr-only')?.textContent).toBe(koMessages.common.close);
+    expect(closeBtn?.textContent).not.toContain('Close');
+  });
 });

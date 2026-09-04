@@ -6,8 +6,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { EntityChip } from './embed-card';
 import { ReadingPanelProvider } from './reading-panel-context';
+// story 3436(묶음 1) — DialogContent가 이제 useTranslations('common')을 쓴다. 클릭이
+// 모달(Dialog 기반)을 여는 테스트만 감싼다(embed-card.link-states.test.tsx와 같은 관례).
+import koMessages from '../../../messages/ko.json';
+
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectMemberships: [] }),
@@ -131,7 +143,7 @@ describe('EntityChip — story #3208(PO customer-zero, 카디르 QA #3611 지적
       return { ok: true, json: async () => ({ data: {} }) };
     }));
     await act(async () => {
-      root.render(<EntityChip entityType="artifact" entityId="art-cross" label="크로스 목업" href={null} />);
+      root.render(wrap(<EntityChip entityType="artifact" entityId="art-cross" label="크로스 목업" href={null} />));
     });
     await act(async () => { container.querySelector('button')!.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
@@ -162,7 +174,7 @@ describe('EntityChip — story #461e9a54 ReadingPanel 라우팅', () => {
 
   it('Provider 밖(doc-content-renderer·story-detail-panel 등)에서 클릭하면 기존 Dialog 모달이 뜬다(회귀 0)', async () => {
     await act(async () => {
-      root.render(<EntityChip entityType="story" entityId="s-1" label="스토리 제목" href="/board?story=s-1" />);
+      root.render(wrap(<EntityChip entityType="story" entityId="s-1" label="스토리 제목" href="/board?story=s-1" />));
     });
     await act(async () => { container.querySelector('button')!.click(); });
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
