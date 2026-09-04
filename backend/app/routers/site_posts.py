@@ -337,6 +337,16 @@ async def patch_site_post_draft_campaign(
             status_code=422, detail={"code": "CAMPAIGN_NOT_FOUND", "message": str(exc)},
         ) from exc
 
+    # story 5285888c(PATH_ID 뮤테이션 축, 카디르 QA·페드루 PO 지시 2026-09-04) — 위
+    # set_site_post_draft_campaign→get_site_post_draft가 이미 org_id로 조회를 좁혀 실
+    # cross-org 접근은 구조적으로 불가능하지만, has_id_mutation_guard 정적 스캐너는
+    # 2-hop 안쪽 헬퍼를 안 들여다본다(이름을 직접 아는 1-hop만 인식) — meetings.py::
+    # cancel_meeting과 동일 SEC-S6/S7 헬퍼를 라우터 바디에서 직접 호출해 스캐너 가시성을
+    # 확보한다(방어 논리 자체는 이미 있었다, 스캐너 인식만 추가).
+    from app.services.project_auth import assert_target_in_caller_org
+
+    assert_target_in_caller_org(org_id, draft.org_id, not_found_detail="draft를 찾을 수 없습니다")
+
     campaign_name: str | None = None
     if draft.campaign_id is not None:
         campaign = await get_campaign(db, org_id=org_id, campaign_id=draft.campaign_id)
