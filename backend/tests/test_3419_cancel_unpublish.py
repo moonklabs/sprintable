@@ -744,3 +744,97 @@ async def test_unpublish_unsupported_channel_returns_422():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# --- unpublish_blocked_reason(페드루 PO 리뷰, PR#3774) ------------------------------
+
+
+@pytest.mark.anyio
+async def test_connection_list_unpublish_blocked_reason_null_when_can_unpublish():
+    """can_unpublish=true면 unpublish_blocked_reason은 항상 null(막힌 이유가 없다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")
+            connection_id = await _seed_connection(
+                s, org_id, scopes=["threads_basic", "threads_content_publish", "threads_delete"],
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+        assert r.status_code == 200, r.text
+        items = r.json()
+        row = [it for it in items if it["id"] == str(connection_id)][0]
+        assert row["can_unpublish"] is True
+        assert row["unpublish_blocked_reason"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_connection_list_unpublish_blocked_reason_scope_insufficient():
+    """유나 §17-11 대상 — 어댑터는 지원하는데 스코프가 없는 경우(기존 연결 재현,
+    scopes 명시 안 함=server_default)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")
+            connection_id = await _seed_connection(s, org_id)  # scopes 명시 안 함
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+        assert r.status_code == 200, r.text
+        items = r.json()
+        row = [it for it in items if it["id"] == str(connection_id)][0]
+        assert row["can_unpublish"] is False
+        assert row["unpublish_blocked_reason"] == "scope_insufficient"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_connection_list_unpublish_blocked_reason_unsupported_for_adapter_without_support():
+    """어댑터가 아예 supports_unpublish=False로 선언한 채널은 스코프와 무관하게
+    'unsupported' — §17-11 문구 대상이 아니다(재연결해도 안 풀림)."""
+    from unittest.mock import patch
+    from app.main import app
+    import app.routers.channel_connections as cc_module
+    from app.services.channel_adapters import ChannelAdapterConfig
+
+    unsupported_adapter = ChannelAdapterConfig(
+        authorize_url="https://example.test/oauth", token_url="https://example.test/token",
+        scope="basic", refresh_mode="manual", max_text_length=500,
+        supports_unpublish=False,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")
+            connection_id = await _seed_connection(
+                s, org_id, scopes=["threads_basic", "threads_content_publish", "threads_delete"],
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        with patch.object(cc_module, "get_channel_adapter", return_value=unsupported_adapter):
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+        assert r.status_code == 200, r.text
+        items = r.json()
+        row = [it for it in items if it["id"] == str(connection_id)][0]
+        assert row["can_unpublish"] is False
+        assert row["unpublish_blocked_reason"] == "unsupported"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

@@ -101,15 +101,30 @@ class ChannelConnectionResponse(BaseModel):
     # 이 값 하나로 버튼을 그리거나 안 그린다 — scopes 원본을 노출해 FE가 다시 판정하게
     # 만들지 않는다(판정 로직 단일 지점).
     can_unpublish: bool = False
+    # 페드루 PO 리뷰(2026-09-04, PR#3774) — can_unpublish=false 하나로는 FE가 유나
+    # §17-11의 두 문구(「미지원」vs「재연결하면 회수 가능」)를 못 가른다. 어느 쪽인지
+    # 명시하는 판정값 — can_unpublish=true면 항상 null(막힌 이유가 없다).
+    # 'unsupported' = 어댑터가 이 채널에 회수 자체를 선언 안 함(재연결해도 안 풀림,
+    # §17-11 문구 대상 아님 — 그 절 자체가 "스코프 부족"만 다룬다) ·
+    # 'scope_insufficient' = 어댑터는 지원하는데 이 연결에 필요 스코프가 없음(재연결
+    # 하면 풀림 — §17-11 owner/member 문구가 이 값 전용).
+    unpublish_blocked_reason: str | None = None
 
 
 def _to_response(row) -> ChannelConnectionResponse:
     adapter = get_channel_adapter(row.channel)
     max_text_length = adapter.max_text_length if adapter is not None and adapter.max_text_length > 0 else None
-    can_unpublish = bool(
-        adapter is not None and adapter.supports_unpublish
-        and adapter.unpublish_required_scope in (row.scopes or [])
+    supports_unpublish = adapter is not None and adapter.supports_unpublish
+    has_required_scope = bool(
+        supports_unpublish and adapter.unpublish_required_scope in (row.scopes or [])
     )
+    can_unpublish = supports_unpublish and has_required_scope
+    if can_unpublish:
+        unpublish_blocked_reason = None
+    elif not supports_unpublish:
+        unpublish_blocked_reason = "unsupported"
+    else:
+        unpublish_blocked_reason = "scope_insufficient"
     return ChannelConnectionResponse(
         id=row.id, channel=row.channel, account_id=row.account_id, account_label=row.account_label,
         credential_kind=row.credential_kind, status=row.status,
@@ -117,6 +132,7 @@ def _to_response(row) -> ChannelConnectionResponse:
         last_refreshed_at=row.last_refreshed_at.isoformat() if row.last_refreshed_at else None,
         last_error=row.last_error, can_auto_refresh=can_auto_refresh(row.refresh_mode),
         connected_by=row.connected_by, created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
+        unpublish_blocked_reason=unpublish_blocked_reason,
         max_text_length=max_text_length, can_unpublish=can_unpublish,
     )
 
