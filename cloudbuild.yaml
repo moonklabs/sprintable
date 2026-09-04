@@ -778,6 +778,16 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},SANDBOX_CHANNEL_ENABLED=true"
         fi
+        # story e4fc29fa(조각③c/④, 카디르 QA 실측 2026-09-04) — WORDPRESS_TEST_STUB_
+        # ENABLED·WEBHOOK_TEST_STUB_ENABLED(dev만, SANDBOX_CHANNEL_ENABLED와 동형
+        # 게이트). 이 배선이 없으면 dev_wordpress_stub.py/dev_webhook_stub.py 라우터
+        # 자체가 등재 안 돼(app/main.py 조건부 include_router) ③c/④/⑤ 라이브 QA가
+        # 통째로 못 돈다. WEBHOOK_TEST_STUB_SECRET은 여기 안 실음(dev_webhook_stub.py
+        # 파일 기본값으로 동작 — yaml 평문 secret 금지 관례, 런북 2bbafa37에 이미
+        # "미배선=파일 기본값" 경로가 적혀 있다).
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="$${ENV_VARS},WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
+        fi
         # story #2141 원칙 재사용 — GOTENBERG_SERVICE_URL(dev만).
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
           ENV_VARS="$${ENV_VARS},GOTENBERG_SERVICE_URL=${_GOTENBERG_SERVICE_URL}"
