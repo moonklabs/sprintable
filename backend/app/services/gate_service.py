@@ -1095,6 +1095,11 @@ async def transition_gate(
 
     await create_gate_approval_evidence_if_applicable(session, gate, new_status, resolver_id)
 
+    # story #3443(AC1) — 예약(sealed_scheduled_at) external_publish 게이트가 승인되는
+    # 순간 publication_command 자동 생성(자체 gate_type/필드 가드, no-op 그 외).
+    if new_status == "approved":
+        await _maybe_create_scheduled_publication_command(session, gate, resolver_id)
+
     await session.flush()
     await session.refresh(gate)
 
