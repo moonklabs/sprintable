@@ -2152,6 +2152,8 @@
     "campaignDetachFailed": "Couldn't remove the campaign link.",
     "campaignCancelChangeCta": "Cancel",
     "campaignNotFound": "Couldn't find this campaign.",
+    "campaignLoadFailed": "Couldn't load this campaign.",
+    "campaignStatusActive": "Active",
     "campaignNoContentItems": "No posts are attached to this campaign yet.",
     "editSaved": "Saved. A new version was created.",
     "editSaveFailed": "Failed to save.",

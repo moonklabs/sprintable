@@ -57,6 +57,14 @@ function realStr(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+// 유나 정적 판정(2026-09-04 17:50Z) — status 원문 영문값("active")을 그대로 노출했다.
+// backend/app/models/campaign.py::status는 제약 없는 Text(server_default="active") —
+// 지금은 값이 하나뿐이지만 라벨 키를 미리 두고, 모르는 값은 지어내지 않고 원문 그대로
+// 보인다(§17 값+라벨 관례).
+const CAMPAIGN_STATUS_LABEL_KEYS: Record<string, string> = {
+  active: 'campaignStatusActive',
+};
+
 export default function CampaignDetailPage() {
   const { campaignId } = useParams<{ campaignId: string }>();
   const { orgId } = useDashboardContext();
@@ -65,6 +73,10 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // 유나 정적 판정(2026-09-04 17:50Z) — notFound||!campaign 하나로 500·네트워크
+  // 실패까지 "찾을 수 없습니다"로 뭉뚱그렸다. editLoadFailed 선례처럼 "존재 안 함"
+  // (404)과 "조회 실패"(그 외)를 가른다 — 지어낸 판정 없이 서버가 준 상태 그대로.
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!orgId) return;
@@ -72,6 +84,7 @@ export default function CampaignDetailPage() {
     async function load() {
       setLoading(true);
       setNotFound(false);
+      setLoadError(false);
       try {
         const res = await fetchWithAuth(`/api/organizations/${orgId}/campaigns/${campaignId}`);
         if (cancelled) return;
@@ -81,8 +94,16 @@ export default function CampaignDetailPage() {
         }
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as { data?: CampaignDetail } | null;
-          setCampaign(json?.data ?? null);
+          if (json?.data) {
+            setCampaign(json.data);
+          } else {
+            setLoadError(true);
+          }
+        } else {
+          setLoadError(true);
         }
+      } catch {
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -99,11 +120,20 @@ export default function CampaignDetailPage() {
       </div>
     );
   }
-  if (notFound || !campaign) {
+  if (notFound) {
     return (
       <div className="mx-auto w-full max-w-3xl p-6">
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
           <AlertDescription>{t('campaignNotFound')}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+  if (loadError || !campaign) {
+    return (
+      <div className="mx-auto w-full max-w-3xl p-6">
+        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+          <AlertDescription>{t('campaignLoadFailed')}</AlertDescription>
         </Alert>
       </div>
     );
@@ -114,7 +144,9 @@ export default function CampaignDetailPage() {
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold text-foreground" data-testid="campaign-detail-name">{campaign.name}</h1>
-          <Badge variant="outline">{campaign.status}</Badge>
+          <Badge variant="outline">
+            {CAMPAIGN_STATUS_LABEL_KEYS[campaign.status] ? t(CAMPAIGN_STATUS_LABEL_KEYS[campaign.status]) : campaign.status}
+          </Badge>
         </div>
       </div>
 

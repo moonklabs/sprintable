@@ -97,6 +97,8 @@ function stubFetchWithVersions(
     // story 1db41045(#3457) — 기존 campaign 목록·새로 만들기.
     campaigns?: unknown[];
     onCreateCampaign?: (body: unknown) => { status: number; body: unknown };
+    // PATCH .../campaign(버전 0·게이트 무접촉 — 유나 정적 판정 뒤 저장 POST에서 전환).
+    onPatchCampaign?: (body: unknown) => { status: number; body: unknown };
   },
 ) {
   vi.stubGlobal(
@@ -108,6 +110,12 @@ function stubFetchWithVersions(
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/variants`) {
         return { ok: true, status: 200, json: async () => ({ data: opts?.variants ?? [], error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/campaign` && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts?.onPatchCampaign?.(body) ?? { status: 200, body: { draft_id: DRAFT_ID, campaign_id: body.campaign_id, campaign_name: body.campaign_id ? '9월 캠페인' : null } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/campaigns` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body ?? '{}'));
@@ -1131,18 +1139,21 @@ describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)'
     expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
   });
 
-  // 페드루 PO B1(2026-09-04 17:39Z) — 「붙이기」가 에디터 상태로 POST하면 미저장
-  // 편집이 같이 굳는다. 에디터 본문을 저장본과 다르게 만든 채 붙이기를 눌러도
-  // POST body는 저장본(latest) 값 그대로여야 한다.
-  it('⭐붙이기는 에디터의 미저장 편집이 아니라 저장본(latest) 값으로 POST한다', async () => {
-    let saveBody: Record<string, unknown> | undefined;
-    stubFetchWithVersions([VERSION_1], (body) => { saveBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; }, undefined, {
+  // 유나 정적 판정·PO 확認(2026-09-04 17:50Z) — 처음엔 site-posts 저장 POST(새
+  // 버전)로 campaign_id를 실었으나 그 경로가 _reseal_gate_on_new_version으로
+  // 승인을 무른다는 것이 드러나 PATCH .../campaign(버전 0·게이트 무접촉)로
+  // 전환했다. PATCH body는 campaign_id 하나뿐이라 에디터 미저장 편집이
+  // 구조적으로 아예 안 실린다(title 필드 자체가 body에 없다).
+  it('⭐붙이기는 PATCH .../campaign을 부르고, body에 campaign_id 외 에디터 필드가 없다', async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
       onCreateCampaign: () => ({ status: 201, body: { id: 'c1', name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' } }),
+      onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
     });
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
 
-    // 저장하지 않고 제목만 편집(미저장 상태 재현).
+    // 저장하지 않고 제목만 편집(미저장 상태 재현) — PATCH body 구조상 애초에 안 실린다.
     const titleInput = container.querySelector<HTMLInputElement>('#post-title');
     const titleSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
     titleSetter?.call(titleInput, '미저장 편집 제목');
@@ -1157,16 +1168,17 @@ describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)'
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    expect(saveBody?.title).toBe(VERSION_1.title);
-    expect(saveBody?.title).not.toBe('미저장 편집 제목');
-    expect(saveBody?.campaign_id).toBe('c1');
+    expect(patchBody).toEqual({ campaign_id: 'c1' });
+    // PATCH 성공 응답의 campaign_name이 그대로 "현재 캠페인" 표시에 반영된다(재조회 없이).
+    expect(container.querySelector('[data-testid="content-campaign-current"]')?.textContent).toContain('9월 캠페인');
   });
 
-  it('⭐새 이름을 입력해 만들면 POST /campaigns 뒤 그 id로 site-posts 저장 POST에 campaign_id가 실린다', async () => {
-    let saveBody: Record<string, unknown> | undefined;
+  it('⭐새 이름을 입력해 만들면 POST /campaigns 뒤 그 id로 PATCH .../campaign이 불린다', async () => {
+    let patchBody: Record<string, unknown> | undefined;
     let createBody: Record<string, unknown> | undefined;
-    stubFetchWithVersions([VERSION_1], (body) => { saveBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; }, undefined, {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
       onCreateCampaign: (body) => { createBody = body as Record<string, unknown>; return { status: 201, body: { id: 'c1', name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' } }; },
+      onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
     });
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
@@ -1182,18 +1194,16 @@ describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)'
     await flush();
 
     expect(createBody?.name).toBe('9월 캠페인');
-    expect(saveBody?.campaign_id).toBe('c1');
-    // 저장 POST는 다른 필드도 전부 재전송(잠긴 slug·lang·work_item_id 포함, handleSave와 동형).
-    expect(saveBody?.slug).toBe('2ho-blog');
-    expect(saveBody?.work_item_id).toBe('w1');
+    expect(patchBody).toEqual({ campaign_id: 'c1' });
   });
 
-  it('기존 캠페인을 select로 고르면(새 이름 없이) 그 campaign_id 그대로 저장 POST에 실리고, 만들기 POST는 안 부른다', async () => {
-    let saveBody: Record<string, unknown> | undefined;
+  it('기존 캠페인을 select로 고르면(새 이름 없이) 그 campaign_id로 PATCH가 불리고, 만들기 POST는 안 부른다', async () => {
+    let patchBody: Record<string, unknown> | undefined;
     let createCalled = false;
-    stubFetchWithVersions([VERSION_1], (body) => { saveBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; }, undefined, {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
       campaigns: [{ id: 'c1', name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' }],
       onCreateCampaign: () => { createCalled = true; return { status: 201, body: {} }; },
+      onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
     });
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
@@ -1208,13 +1218,14 @@ describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)'
     await flush();
 
     expect(createCalled).toBe(false);
-    expect(saveBody?.campaign_id).toBe('c1');
+    expect(patchBody).toEqual({ campaign_id: 'c1' });
   });
 
-  it('⭐새 이름을 넣었는데 생성이 실패(422)하면 에러가 보이고 저장 POST는 안 부른다', async () => {
-    let saveCalled = false;
-    stubFetchWithVersions([VERSION_1], () => { saveCalled = true; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; }, undefined, {
+  it('⭐새 이름을 넣었는데 생성이 실패(422)하면 에러가 보이고 PATCH는 안 부른다', async () => {
+    let patchCalled = false;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
       onCreateCampaign: () => ({ status: 422, body: { detail: { code: 'SOME_CAMPAIGN_ERROR', message: '캠페인 생성 실패 원문' } } }),
+      onPatchCampaign: () => { patchCalled = true; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: 'c1', campaign_name: '9월 캠페인' } }; },
     });
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
@@ -1227,7 +1238,7 @@ describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)'
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    expect(saveCalled).toBe(false);
+    expect(patchCalled).toBe(false);
     expect(container.querySelector('[data-testid="content-campaign-attach-error"] p')?.textContent).toBe('캠페인 생성 실패 원문');
   });
 
@@ -1282,11 +1293,12 @@ describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', (
     expect(container.querySelector('[data-testid="content-campaign-attach"]')).toBeNull();
   });
 
-  it('⭐"해제"를 누르면 campaign_id: null을 명시로 보내고, 다른 필드는 저장본(latest) 값 그대로다', async () => {
-    let saveBody: Record<string, unknown> | undefined;
+  it('⭐"해제"를 누르면 PATCH .../campaign에 campaign_id: null을 명시로 보낸다(버전 0)', async () => {
+    let patchBody: Record<string, unknown> | undefined;
     stubFetchWithVersions(
       [{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }],
-      (body) => { saveBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; },
+      undefined, undefined,
+      { onPatchCampaign: (body) => { patchBody = body as Record<string, unknown>; return { status: 200, body: { draft_id: DRAFT_ID, campaign_id: null, campaign_name: null } }; } },
     );
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
@@ -1295,9 +1307,9 @@ describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', (
     await act(async () => { detachBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    expect(saveBody).not.toBeUndefined();
-    expect(saveBody?.campaign_id).toBeNull();
-    expect(saveBody?.title).toBe(VERSION_1.title);
-    expect(saveBody?.slug).toBe(VERSION_1.slug);
+    expect(patchBody).toEqual({ campaign_id: null });
+    // 해제 성공 응답이 그대로 반영돼 붙이기 폼이 다시 보인다(재조회 없이).
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
   });
 });

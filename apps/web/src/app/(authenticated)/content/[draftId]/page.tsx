@@ -349,12 +349,29 @@ export default function ContentPostEditPage() {
     }
   }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t]);
 
+  // 유나 정적 판정·PO 확認(2026-09-04 17:50Z) — 처음엔 site-posts 저장 POST(새
+  // 버전 생성)로 campaign_id를 실었으나, 그 경로는 _reseal_gate_on_new_version이
+  // 본문 해시를 안 보고 approved→pending·reapproval_required로 되돌려 승인을
+  // 무른다(+본문 무변 버전이 이력에 낌). 디디 BE 소형 후속(PATCH .../campaign)은
+  // 버전을 안 만들고 게이트를 안 건드린다 — campaign_id 하나만 바꾼다. 응답이
+  // {draft_id, campaign_id, campaign_name}을 바로 주므로 별도 재조회 없이 그
+  // 값으로 versions의 마지막 항목만 국소 patch한다(단건 GET 라우트 자체가 없다
+  // — 그라운딩 확認, PATCH 응답을 신뢰하는 편이 없는 엔드포인트를 지어내는
+  // 것보다 정직하다).
+  const applyCampaignPatchResult = useCallback((result: { campaign_id: string | null; campaign_name: string | null }) => {
+    setVersions((prev) => {
+      if (prev.length === 0) return prev;
+      const next = [...prev];
+      next[next.length - 1] = { ...next[next.length - 1], campaign_id: result.campaign_id, campaign_name: result.campaign_name };
+      return next;
+    });
+  }, []);
+
   // story 1db41045(#3457) — 「캠페인 만들기/붙이기」. 새 이름을 입력했으면 먼저
   // POST /campaigns로 만들고(휴먼 전용, BE _require_human — 이 화면은 role을
-  // 더 좁히지 않는다, 페드루 PO 정정 2026-09-04 17:03Z), 그 campaign_id로 이
-  // 원문을 저장한다(site-posts 저장 POST가 이미 campaign_id를 model_fields_set
-  // 캐리포워드로 받는다 — handleSave와 같은 필드 전부 재전송 + campaign_id만
-  // 추가). 새 이름이 비어 있으면 select로 고른 기존 campaign_id를 그대로 쓴다.
+  // 더 좁히지 않는다, 페드루 PO 정정 2026-09-04 17:03Z), 그 campaign_id를 PATCH
+  // .../campaign으로 붙인다. 새 이름이 비어 있으면 select로 고른 기존
+  // campaign_id를 그대로 쓴다.
   const handleAttachCampaign = useCallback(async () => {
     if (!orgId || !latest) return;
     const trimmedName = newCampaignName.trim();
@@ -387,30 +404,17 @@ export default function ContentPostEditPage() {
         campaignId = createJson.data.id;
       }
 
-      // 페드루 PO B1(2026-09-04 17:39Z) — 「붙이기」는 campaign_id만 바꾸는 액션이지
-      // "지금 폼에 뭐가 써 있든 그걸로 저장"이 아니다. 에디터 상태(title/summary/
-      // bodyMd/tagsText)를 쓰면 미저장 편집이 붙이기 클릭 한 번에 같이 굳어 버린다
-      // — latest(이미 저장된 값) 그대로 재전송해 campaign_id 하나만 바뀌게 한다.
-      // media_manifest — 이 화면엔 미디어 입력 자체가 없다(handleSave도 항상 []).
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts`, {
-        method: 'POST',
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/campaign`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          work_item_id: latest.source_story_id, slug: latest.slug, lang: latest.lang,
-          title: latest.title, summary: latest.summary, tags: latest.tags, body_md: latest.body_md,
-          media_manifest: [],
-          campaign_id: campaignId,
-        }),
+        body: JSON.stringify({ campaign_id: campaignId }),
       });
       if (res.ok) {
         setNewCampaignName('');
         setSelectedCampaignId('');
         setChangingCampaign(false);
-        const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
-        if (versionsRes.ok) {
-          const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
-          if (json?.data) setVersions(json.data);
-        }
+        const json = (await res.json().catch(() => null)) as { data?: { campaign_id: string | null; campaign_name: string | null } } | null;
+        if (json?.data) applyCampaignPatchResult(json.data);
         void loadCampaigns();
       } else {
         const body = await res.json().catch(() => null);
@@ -426,32 +430,23 @@ export default function ContentPostEditPage() {
     } finally {
       setAttachingCampaign(false);
     }
-  }, [orgId, latest, newCampaignName, selectedCampaignId, draftId, loadCampaigns, t]);
+  }, [orgId, latest, newCampaignName, selectedCampaignId, draftId, loadCampaigns, applyCampaignPatchResult, t]);
 
-  // 페드루 PO B2 — 「해제」. campaign_id: null을 명시로 보낸다(model_fields_set
-  // 캐리포워드 계약 — 생략=유지·명시 null=해제, 이미 attach가 확認한 계약 그대로).
-  // B1과 같은 이유로 latest(저장본) 필드를 그대로 재전송한다.
+  // 페드루 PO B2·PATCH 전환(2026-09-04 17:50Z) — 「해제」도 같은 PATCH .../campaign,
+  // campaign_id: null을 명시로 보낸다(BE 계약: null=해제). 버전 0·게이트 무접촉.
   const handleDetachCampaign = useCallback(async () => {
     if (!orgId || !latest) return;
     setDetachingCampaign(true);
     setDetachCampaignResult(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts`, {
-        method: 'POST',
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/campaign`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          work_item_id: latest.source_story_id, slug: latest.slug, lang: latest.lang,
-          title: latest.title, summary: latest.summary, tags: latest.tags, body_md: latest.body_md,
-          media_manifest: [],
-          campaign_id: null,
-        }),
+        body: JSON.stringify({ campaign_id: null }),
       });
       if (res.ok) {
-        const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
-        if (versionsRes.ok) {
-          const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
-          if (json?.data) setVersions(json.data);
-        }
+        const json = (await res.json().catch(() => null)) as { data?: { campaign_id: string | null; campaign_name: string | null } } | null;
+        if (json?.data) applyCampaignPatchResult(json.data);
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
@@ -466,7 +461,7 @@ export default function ContentPostEditPage() {
     } finally {
       setDetachingCampaign(false);
     }
-  }, [orgId, latest, draftId, t]);
+  }, [orgId, latest, draftId, applyCampaignPatchResult, t]);
 
   // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
   // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·

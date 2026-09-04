@@ -111,4 +111,37 @@ describe('CampaignDetailPage(story 1db41045)', () => {
 
     expect(container.textContent).toContain(koMessages.content.campaignNotFound);
   });
+
+  // 유나 정적 판정(2026-09-04 17:50Z) — notFound||!campaign 하나로 500·네트워크
+  // 실패까지 "찾을 수 없습니다"(존재 안 함)로 뭉뚱그렸다. "조회 실패"는 다른 사실이다.
+  it('⭐500은 "찾을 수 없습니다"가 아니라 "불러오지 못했습니다"를 보인다', async () => {
+    stubFetch(500, { detail: 'internal error' });
+    await act(async () => { root.render(wrap(<CampaignDetailPage />)); });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.campaignLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.content.campaignNotFound);
+  });
+
+  it('⭐네트워크 예외도 "불러오지 못했습니다"를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
+    await act(async () => { root.render(wrap(<CampaignDetailPage />)); });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.campaignLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.content.campaignNotFound);
+  });
+
+  // 유나 정적 판정 — status 원문 영문값("active")을 그대로 노출했다.
+  it('⭐상태 배지는 원문 영문값이 아니라 라벨 문구를 보인다', async () => {
+    stubFetch(200, {
+      id: CAMPAIGN_ID, name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active',
+      created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00', content_items: [],
+    });
+    await act(async () => { root.render(wrap(<CampaignDetailPage />)); });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.campaignStatusActive);
+    expect(container.textContent).not.toContain('active');
+  });
 });
