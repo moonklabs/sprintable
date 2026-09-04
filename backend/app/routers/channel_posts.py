@@ -112,6 +112,12 @@ class ChannelPostDraftListItem(BaseModel):
     failure_kind: str | None = None
     next_retry_at: str | None = None
     dead_letter_at: str | None = None
+    # 페드루 PO 리뷰(2026-09-04, PR#3773) — voided(재승인으로 무효)·pending(예약 대기)·
+    # blocked가 위 세 필드만으로는 전부 None/None/None로 구별이 안 됐다. 유나 §17-10
+    # 정본(command_status 값+라벨 표) 그대로 노출 — 이름은 PR#3769 즉시발행 실패 응답
+    # body의 `command_status`와 동일(같은 latest_command 행, 같은 뜻).
+    command_status: str | None = None
+    command_reason_code: str | None = None
     # gate.sealed_scheduled_at — publication_command.scheduled_at이 아니다(그 값은 요청
     # 시점 스냅샷이라 재승인 뒤 갱신 안 됨, story #3414). 화면 캘린더(§11-1)가 보는 "지금
     # 승인된 예약 시각"은 이 값.
@@ -251,6 +257,8 @@ def _to_draft_list_item(
             if latest_command and latest_command.dead_letter_at else None
         ),
         scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
+        command_status=latest_command.status if latest_command else None,
+        command_reason_code=latest_command.reason_code if latest_command else None,
     )
 
 

@@ -244,6 +244,87 @@ async def test_no_command_yet_all_new_fields_null():
         assert row["next_retry_at"] is None
         assert row["dead_letter_at"] is None
         assert row["scheduled_at"] is None
+        assert row["command_status"] is None
+        assert row["command_reason_code"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_command_status_and_reason_code_distinguish_voided_pending_blocked():
+    """페드루 PO 리뷰(2026-09-04, PR#3773) — voided(재승인 무효)·pending(예약 대기)·
+    blocked(연결 문제 멈춤)가 failure_kind/next_retry_at/dead_letter_at만으로는 전부
+    None/None/None로 구별 안 됐다. command_status(+reason_code)가 유나 §17-10 값
+    그대로 이 셋을 가른다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_pending = await _seed_story(s, org_id, project_id, title="pending")
+            draft_pending, gate_pending = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_pending,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+            story_voided = await _seed_story(s, org_id, project_id, title="voided")
+            draft_voided, gate_voided = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_voided,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+            story_blocked = await _seed_story(s, org_id, project_id, title="blocked")
+            draft_blocked, gate_blocked = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_blocked,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+
+            s.add_all([
+                PublicationCommand(
+                    id=uuid.uuid4(), org_id=org_id, gate_id=gate_pending, destination=connection_id,
+                    approved_version=uuid.uuid4(), operation="publish", scheduled_at=None,
+                    status="pending", requested_by_member_id=agent_id, created_at=now,
+                ),
+                PublicationCommand(
+                    id=uuid.uuid4(), org_id=org_id, gate_id=gate_voided, destination=connection_id,
+                    approved_version=uuid.uuid4(), operation="publish", scheduled_at=None,
+                    status="voided", reason_code="CONTENT_CHANGED",
+                    requested_by_member_id=agent_id, created_at=now,
+                ),
+                PublicationCommand(
+                    id=uuid.uuid4(), org_id=org_id, gate_id=gate_blocked, destination=connection_id,
+                    approved_version=uuid.uuid4(), operation="publish", scheduled_at=None,
+                    status="blocked", failure_kind="connection",
+                    requested_by_member_id=agent_id, created_at=now,
+                ),
+            ])
+            await s.commit()
+
+        async with _client_for(app) as client:
+            r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
+        items = r_list.json()
+        row_pending = _row_for(items, draft_pending)
+        row_voided = _row_for(items, draft_voided)
+        row_blocked = _row_for(items, draft_blocked)
+
+        assert row_pending["command_status"] == "pending"
+        assert row_voided["command_status"] == "voided"
+        assert row_voided["command_reason_code"] == "CONTENT_CHANGED"
+        assert row_blocked["command_status"] == "blocked"
+        # 셋 다 failure_kind/next_retry_at/dead_letter_at만으로는 안 갈린다는 걸 재확認
+        # (blocked만 failure_kind가 있고 나머지 둘은 여전히 None — command_status가 없으면
+        # pending과 voided를 화면이 구별할 길이 없었다).
+        assert row_pending["failure_kind"] is None and row_voided["failure_kind"] is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -524,7 +605,10 @@ async def test_list_and_detail_parity_for_new_fields():
             r_detail = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
         list_row = _row_for(r_list.json(), draft_id)
         detail_row = r_detail.json()
-        for key in ("failure_kind", "next_retry_at", "dead_letter_at", "scheduled_at"):
+        for key in (
+            "failure_kind", "next_retry_at", "dead_letter_at", "scheduled_at",
+            "command_status", "command_reason_code",
+        ):
             assert list_row[key] == detail_row[key], (
                 f"{key} 목록↔단건 불일치: list={list_row[key]!r} detail={detail_row[key]!r}"
             )
