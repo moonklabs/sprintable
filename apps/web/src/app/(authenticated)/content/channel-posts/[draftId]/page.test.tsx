@@ -65,6 +65,10 @@ async function flush() {
 const DRAFT_DETAIL = {
   draft_id: DRAFT_ID, work_item_id: 'w1', channel: 'threads', connection_id: 'c1', current_version: 1,
   gate_status: null as string | null, reapproval_required: null as boolean | null,
+  sealed_content_sha256: null as string | null, body_sha256: 'h1',
+  publication_status: null as 'container_created' | 'published' | 'failed' | null,
+  permalink: null as string | null, external_id: null as string | null, error_code: null as string | null,
+  published_at: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -375,6 +379,63 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
     expect(container.querySelector('[data-testid="channel-post-tagged-link-preview"]')).toBeNull();
+  });
+
+  // story #3402 PR2(T7/T9) — 발행됨/부분성공/실패 표시(발행 버튼 배선은 다음 조각).
+  it('⭐T7 — publication_status=published+permalink — 재진입해도 permalink·published_at·external_id가 보인다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+        published_at: '2026-09-04T00:00:00Z',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const info = container.querySelector('[data-testid="channel-post-published-info"]');
+    expect(info).not.toBeNull();
+    expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-external-id"]')?.textContent).toBe('media-1');
+  });
+
+  it('⭐T9 — publication_status=container_created(부분 성공) — "이어서 발행" 안내가 보인다(발행됨 카드는 안 보임)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'container_created' },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+  });
+
+  it('⭐publication_status=failed — 실패 안내가 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'failed', error_code: 'CHANNEL_PUBLISH_PROVIDER_ERROR' },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).not.toBeNull();
+  });
+
+  it('publication_status=null(발행 이력 없음) — 발행/부분성공/실패 블록이 전부 안 보인다(회귀 방지)', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
   });
 
   it('로드 실패 — 오류 알림을 보인다', async () => {

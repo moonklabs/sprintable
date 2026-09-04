@@ -38,9 +38,16 @@ interface ChannelPostDraftDetail {
   reapproval_required?: boolean | null;
   sealed_content_sha256?: string | null;
   body_sha256?: string;
+  // story #3402 PR2(T7/T9) — 발행 상태. publication_status/error_code는 "최신 버전"
+  // 기준, published_at/permalink/external_id는 "가장 최근 published" 기준(두 조인 축이
+  // 다른 이유는 #3394 AC2 서비스 docstring 참고 — 편집→재승인 사이에도 과거 발행 이력이
+  // 살아있어야 한다).
   publication_status?: ChannelPublicationStatus | null;
-  published_at?: string | null;
+  permalink?: string | null;
+  external_id?: string | null;
   error_code?: string | null;
+  published_at?: string | null;
+  published_body_sha256?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -376,6 +383,55 @@ export default function ChannelPostEditPage() {
           </div>
         ) : null}
       </div>
+
+      {/* story #3402 PR2(T7/T9) — publication_status는 다섯 상태 밖의 신호라
+          deriveChannelPostView가 별도 필드로 얹어 준다(WIP1과 동일 함수, 재사용). T7 —
+          발행됨이면 재진입해도 permalink·published_at·external_id가 그대로 보인다(doc
+          §4-2 "게시 ID로 동일성을 눈에 보이게"). T9 — 부분 성공(container_created)이면
+          "이어서 발행"이 기본 행동임을 미리 안다(발행 버튼 자체의 배선은 이 조각 스코프
+          밖 — 다음 조각). PR1 rebase 반영(2026-09-04) — 위 승인 카드가 이미 계산해 둔
+          `view`를 그대로 재사용한다(같은 함수를 두 번 부르지 않는다 — rebase 전엔 이
+          블록이 자체 IIFE로 따로 계산했으나, PR1의 hasGateContract 가드가 상위로
+          올라오며 중복이 됐다). */}
+      {(() => {
+        if (view.status === 'published' && draft.permalink) {
+          return (
+            <div className="space-y-2 rounded-md border border-border p-4 text-sm" data-testid="channel-post-published-info">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
+                <a href={draft.permalink} target="_blank" rel="noreferrer" className="underline">{draft.permalink}</a>
+              </div>
+              {draft.published_at ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>
+                  <span>{new Date(draft.published_at).toLocaleString()}</span>
+                </div>
+              ) : null}
+              {draft.external_id ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground" data-testid="channel-post-external-id-label">{t('channelPostsExternalIdLabel')}</span>
+                  <span data-testid="channel-post-external-id">{draft.external_id}</span>
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+        if (view.partialSuccess) {
+          return (
+            <Alert role="status" data-testid="channel-post-partial-success-notice">
+              <AlertDescription>{t('channelPostsPartialSuccessNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
+        if (view.publicationFailed) {
+          return (
+            <Alert variant="destructive" role="alert" data-testid="channel-post-publication-failed-notice">
+              <AlertDescription>{t('channelPostsPublicationFailedNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
+        return null;
+      })()}
 
       <div className="space-y-2">
         <textarea
