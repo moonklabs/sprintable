@@ -41,6 +41,10 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "lint_project_access_403.py",                 # story #2342 AC7 — CI lint 게이트
     "lint_query_sentinel_direct_calls.py",        # story #2335 — CI lint 게이트
     "lint_no_script_output_artifacts.py",         # story #3008 — CI lint 게이트(scripts/ 파일명·내용 정적 스캔, 운영 DB 무접속)
+    "lint_destructive_schema_weights_registered.py",  # story 23bf1913 — CI lint 게이트(pytest
+                                                   # --collect-only + infra/destructive-schema-shard-
+                                                   # weights.json 정적 대조, Postgres·운영 DB 무접속 —
+                                                   # 그 자신의 docstring에 실측 확認 명시).
     "model_db_drift_audit.py",                    # story #2181 — 로컬 1회성 감사(읽기 전용)
     "shard_destructive_tests.py",                 # story #2293 — CI 매트릭스 샤딩 유틸
     "build_destructive_schema_template.py",       # story #3383 — CI 전용, backend-test-destructive
