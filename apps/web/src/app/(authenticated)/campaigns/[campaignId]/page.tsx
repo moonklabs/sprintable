@@ -8,6 +8,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import type { ContentPostStatusInput } from '@/components/content/post-status';
@@ -164,7 +165,7 @@ export default function CampaignDetailPage() {
                   {item.variants.map((v) => (
                     <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="campaign-detail-variant-item">
                       <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
-                        {v.channel === 'threads' ? t('channelThreads') : v.channel}
+                        {channelLabel(v.channel, t)}
                       </Link>
                       <StatusChip
                         status={deriveChannelPostView({
