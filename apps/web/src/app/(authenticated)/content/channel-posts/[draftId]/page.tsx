@@ -235,23 +235,36 @@ export default function ChannelPostEditPage() {
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
-        // story #3402·PR#3764 — CHANNEL_POST_GATE_ALREADY_HELD. site와 kind는 공유하되
-        // slug/lang이 없다(채널 포스트 모델 자체에 title이 없다) — heldByChannel+
-        // heldByConnectionId 앞 4자로 "Threads 초안 ····a1b2" 폴백을 조립한다(doc §5 각주,
-        // 전체 UUID는 화면에 안 남긴다). ⛔"합치기"류 문구는 쓰지 않는다(제품에 없는
-        // 동작 — doc §5 각주 명시).
+        // story #3402·PR#3764/#3767 — CHANNEL_POST_GATE_ALREADY_HELD. site와 kind는
+        // 공유하되 slug/lang이 없다(채널 포스트 모델 자체에 title이 없다) — 페드루 PO
+        // 정정(2026-09-04 02:00Z, doc §5 12행 정본): ①best-effort로 상대 초안
+        // GET drafts/{holding_draft_id}의 text_preview(story #3767, 곧 착지·필드
+        // 부재면 자연히 ②로 떨어진다)를 먼저 시도 ②실패/부재 시 "Threads 초안
+        // ····<4자>" 폴백. **4자는 holding_draft_id 앞 4자**다(connection_id는 그
+        // 초안을 쥔 다른 초안 전부가 같은 값이라 식별력이 0 — 링크 대상과 같은
+        // 식별자를 써야 사람이 "이 문구가 저 링크"라고 알 수 있다). ⛔"합치기"류
+        // 문구는 쓰지 않는다(제품에 없는 동작 — doc §5 각주 명시).
         if (info.kind === 'gate_already_held' && info.heldByDraftId) {
-          const shortId = info.heldByConnectionId ? info.heldByConnectionId.slice(0, 4) : info.heldByDraftId.slice(0, 4);
-          // ⚠️heldByChannel은 서버 원문 채널 코드('threads', 소문자)다 — 화면 다른 자리와
-          // 같은 표시 매핑(channel==='threads' ? t('channelThreads') : channel)을 거치지
-          // 않으면 이 문구만 원문 코드가 그대로 새는 불일치가 생긴다(테스트가 실제로 잡음).
+          const holdingDraftId = info.heldByDraftId;
           const channelLabel = info.heldByChannel === 'threads' ? t('channelThreads') : (info.heldByChannel ?? t('channelThreads'));
-          const fallbackLabel = `${channelLabel} 초안 ····${shortId}`;
+          let holdingLabel = `${channelLabel} 초안 ····${holdingDraftId.slice(0, 4)}`;
+          try {
+            const holdingRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${holdingDraftId}`);
+            if (holdingRes.ok) {
+              const holdingJson = (await holdingRes.json().catch(() => null)) as
+                { data?: { text_preview?: string | null } } | null;
+              const preview = holdingJson?.data?.text_preview;
+              if (preview) holdingLabel = preview;
+            }
+          } catch {
+            // best-effort — 조회 실패는 위 폴백 문구로 graceful(지어내지 않되 화면을
+            // 막지도 않는다, gates/[id]/page.tsx memberNames 관례와 동형).
+          }
           setSubmitResult({
             type: 'error',
-            text: fallbackLabel,
+            text: holdingLabel,
             raw: info.raw,
-            heldByDraftId: info.heldByDraftId,
+            heldByDraftId: holdingDraftId,
           });
         } else {
           setSubmitResult({

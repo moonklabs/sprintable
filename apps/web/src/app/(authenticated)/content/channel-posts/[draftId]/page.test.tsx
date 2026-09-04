@@ -79,6 +79,10 @@ function stubFetch(opts: {
   draftDetail?: Partial<typeof DRAFT_DETAIL>;
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
+  // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — GATE_ALREADY_HELD의
+  // best-effort 상대 초안 조회. undefined=엔드포인트 자체가 404(구 계약, #3767 착지 전
+  // 상황 재현) · { text_preview: null }=필드는 있는데 값이 없음 · 값 있으면 그 미리보기.
+  holdingDraft?: { text_preview: string | null } | undefined;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -88,6 +92,12 @@ function stubFetch(opts: {
       const url = String(input);
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`) {
         return { ok: true, status: 200, json: async () => ({ data: draftDetail, error: null, meta: null }) };
+      }
+      // story #3402·PR#3767 — GATE_ALREADY_HELD best-effort 상대 초안 단건 조회. 테스트의
+      // holding_draft_id는 항상 'd9'(현재 편집 중인 DRAFT_ID와 다른 값)로 고정한다.
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/d9`) {
+        if (opts.holdingDraft === undefined) return { ok: false, status: 404, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({ data: opts.holdingDraft, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
@@ -206,11 +216,15 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('a[href="/gates/g1"]')).not.toBeNull();
   });
 
-  // story #3402·PR#3764 — CHANNEL_POST_GATE_ALREADY_HELD. site와 달리 slug/lang이 없어
-  // heldByChannel+heldByConnectionId 앞 4자로 폴백 문구를 조립한다. "합치기" 문구가
-  // 없어야 한다(doc §5 각주 — 제품에 없는 동작을 권하지 않는다).
-  it('⭐CHANNEL_POST_GATE_ALREADY_HELD — "Threads 초안 ····<4자>" 폴백 문구+그 초안 링크, "합치기" 문구는 없다', async () => {
+  // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — CHANNEL_POST_GATE_
+  // ALREADY_HELD. AC10 12행 정본: ①best-effort로 상대 초안 GET drafts/{holding_draft_id}
+  // 의 text_preview 우선 ②실패/부재 시 "Threads 초안 ····<holding_draft_id 앞4자>" 폴백
+  // (connection_id 아님 — 그 초안을 쥔 다른 초안 전부가 같은 connection이라 식별력 0,
+  // 링크 대상과 같은 식별자를 써야 문구와 링크가 같은 것을 가리킨다는 게 보인다).
+  // "합치기" 문구가 없어야 한다(doc §5 각주 — 제품에 없는 동작을 권하지 않는다).
+  function stubGateAlreadyHeld(holdingDraft: { text_preview: string | null } | undefined) {
     stubFetch({
+      holdingDraft,
       onSubmit: () => ({
         status: 409,
         body: {
@@ -221,18 +235,42 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         },
       }),
     });
-    await act(async () => {
-      root.render(wrap(<ChannelPostEditPage />));
-    });
-    await flush();
+  }
 
+  async function clickSubmit() {
     const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
     await act(async () => {
       submitBtn.click();
     });
     await flush();
+  }
 
-    expect(container.textContent).toContain('Threads 초안 ····conn');
+  it('⭐GATE_ALREADY_HELD best-effort 성공 — 상대 초안의 text_preview를 그대로 보인다(4자 폴백 아님)', async () => {
+    stubGateAlreadyHeld({ text_preview: '마케팅 자동화가 실제로 아끼는 시간은…' });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    await clickSubmit();
+
+    expect(container.textContent).toContain('마케팅 자동화가 실제로 아끼는 시간은…');
+    expect(container.textContent).not.toContain('합치기');
+    expect(container.querySelector('a[href="/content/channel-posts/d9"]')).not.toBeNull();
+  });
+
+  it('⭐GATE_ALREADY_HELD best-effort 실패/부재 — "Threads 초안 ····<holding_draft_id 4자>" 폴백(connection_id 아님)', async () => {
+    stubGateAlreadyHeld(undefined); // 단건 GET 자체가 404(#3767 착지 전 구 계약 재현).
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    await clickSubmit();
+
+    // holding_draft_id='d9' 앞 4자는 "d9"(2자뿐이라 slice(0,4)가 그대로 "d9") — 실 UUID
+    // 환경에서는 4자가 온전히 나온다. 핵심은 connection_id('conn12345')의 "conn"이 아니라
+    // holding_draft_id 쪽에서 왔다는 것이다.
+    expect(container.textContent).toContain('Threads 초안 ····d9');
+    expect(container.textContent).not.toContain('····conn');
     expect(container.textContent).not.toContain('합치기');
     expect(container.querySelector('a[href="/content/channel-posts/d9"]')).not.toBeNull();
   });
