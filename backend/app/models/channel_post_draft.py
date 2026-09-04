@@ -9,7 +9,11 @@
 정정, 제안 당시 스냅샷과 다름). `channel` 컬럼은 초안 생성 시 `connection_id`로 조회한
 `ChannelConnection.channel`을 그대로 복사해 둔 것 — 목록·필터가 매번 조인하지 않아도 되게
 하는 denormalize다(connection 삭제 후에도 "무슨 채널이었는지"가 남는다).
-"""
+
+`source_content_item_id`(story #3437, 페드루 PO 確定 2026-09-04) — 이 채널 변형이 파생된
+content_item(=SitePostDraft.id). FK 없음(이 도메인 전체 관례) — org 일치는 서비스 계층이
+초안 생성 시 검증한다(다른 조직 원문 참조는 422). nullable — 소스 없는 단독 채널 초안도
+기존처럼 허용(회귀, AC6)."""
 from __future__ import annotations
 
 import uuid
@@ -38,6 +42,9 @@ class ChannelPostDraft(Base):
     # 검증은 서비스 층에서 매번(초안 생성·상신 시점) 한다.
     connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    source_content_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -17,6 +17,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member
 from app.services.site_posts import (
+    CampaignNotFoundError,
     ExternalPublishGateNotApprovedError,
     InvalidSitePostInputError,
     MediaNotSupportedPhase0Error,
@@ -75,6 +76,10 @@ class CreateSitePostDraftVersionRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     body_md: str = Field(..., min_length=1)
     media_manifest: list = Field(default_factory=list)
+    # story #3437(AC3, 페드루 PO 確定 2026-09-04) — 이 content_item이 속하는 campaign.
+    # 필수 아님(단독 글 허용). 다른 필드와 동형으로 매 호출 전량 재반영(서비스 계층
+    # docstring 참고, 캐리포워드 없음).
+    campaign_id: uuid.UUID | None = None
 
 
 class SitePostDraftVersionResponse(BaseModel):
@@ -232,10 +237,15 @@ async def post_site_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, slug=body.slug, lang=body.lang,
             title=body.title, summary=body.summary, tags=body.tags, body_md=body.body_md,
             media_manifest=body.media_manifest, author_member_id=member_id, author_kind=actor_type,
+            campaign_id=body.campaign_id,
         )
     except MediaNotSupportedPhase0Error as exc:
         raise HTTPException(
             status_code=422, detail={"code": "MEDIA_NOT_SUPPORTED_PHASE0", "message": str(exc)},
+        ) from exc
+    except CampaignNotFoundError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CAMPAIGN_NOT_FOUND", "message": str(exc)},
         ) from exc
     except InvalidSitePostInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

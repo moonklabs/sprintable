@@ -22,6 +22,7 @@ from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
 from app.models.team import TeamMember
 from app.services import hosted_site_publish
+from app.services.campaigns import CampaignNotFoundError, get_campaign  # noqa: F401 (재-export, 라우터가 import)
 from app.services.gate_seal import (
     GateReapprovalRequiredError as SitePostReapprovalRequiredError,
     GateSealMissingError as SitePostSealMissingError,
@@ -259,14 +260,23 @@ async def create_site_post_draft_version(
     media_manifest: list,
     author_member_id: uuid.UUID,
     author_kind: str,
+    campaign_id: uuid.UUID | None = None,
 ) -> SitePostVersion:
     """초안을 (org, work_item, slug)로 upsert하고 새 불변 버전을 추가한다. 기존 버전은 절대
     덮어쓰지 않는다(AC3) — 에이전트 원안·휴먼 개정본이 별도 행으로 남는다(AC6). 공개 `SitePost`
-    행은 여기서 절대 만들지 않는다(AC1) — 승인·발행은 별개 게이트·엔드포인트(S2·S3) 몫."""
+    행은 여기서 절대 만들지 않는다(AC1) — 승인·발행은 별개 게이트·엔드포인트(S2·S3) 몫.
+
+    story #3437(AC3, 페드루 PO 確定 2026-09-04) — `campaign_id`는 이 엔드포인트의 다른
+    필드(title/summary/tags/body_md)와 동형으로 매 호출 전량 재반영한다(캐리포워드 없음
+    — 이 초안 생성 엔드포인트 자체가 "매번 전체 상태를 다시 보낸다"는 기존 계약이라
+    campaign_id만 예외로 만들지 않는다). None이면 campaign 소속 해제(AC3 "단독 글 허용").
+    존재하지 않거나 다른 org의 campaign이면 CampaignNotFoundError(422)."""
     _validate_slug(slug)
     _validate_lang(lang)
     if media_manifest:
         raise MediaNotSupportedPhase0Error("Phase 0은 미디어 입력을 지원하지 않습니다")
+    if campaign_id is not None and await get_campaign(db, org_id=org_id, campaign_id=campaign_id) is None:
+        raise CampaignNotFoundError(campaign_id=campaign_id)
 
     draft = (await db.execute(
         select(SitePostDraft)
@@ -277,11 +287,15 @@ async def create_site_post_draft_version(
         .with_for_update()
     )).scalar_one_or_none()
     if draft is None:
-        draft = SitePostDraft(id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, slug=slug)
+        draft = SitePostDraft(
+            id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, slug=slug,
+            campaign_id=campaign_id,
+        )
         db.add(draft)
         await db.flush()
         next_version = 1
     else:
+        draft.campaign_id = campaign_id
         next_version = (await db.execute(
             select(func.coalesce(func.max(SitePostVersion.version), 0)).where(
                 SitePostVersion.draft_id == draft.id
