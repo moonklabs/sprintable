@@ -201,6 +201,56 @@ async def test_owner_put_content_rules_reflected_in_get_and_version_plus_one():
 
 
 @pytest.mark.anyio
+async def test_put_string_banned_terms_returns_422_not_char_by_char():
+    """페드루 PO 리뷰 보정(2026-09-05, PR#3825) — banned_terms에 문자열을 그대로
+    보내면(리스트가 아니라) 예전엔 글자 단위(s·p·a·m)로 쪼개져 조용히 통과했다 —
+    이제 pydantic이 422로 거부한다(「오타로 써도 통과하나」의 자리)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": "spam"}},
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "CONTENT_RULES_INVALID"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_put_unknown_key_returns_422():
+    """오타로 다른 철자를 쳐도(예: `bannned_terms`) 조용히 무시되는 대신 422로 알린다
+    (`extra="forbid"`, 페드루 PO 리뷰 보정)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"bannned_terms": ["오타"]}},
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "CONTENT_RULES_INVALID"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_member_put_returns_403_owner_field_untouched():
     from app.main import app
 

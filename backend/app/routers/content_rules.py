@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -36,6 +36,23 @@ class ContentRulesResponse(BaseModel):
     org_id: uuid.UUID
     rules: dict
     version: int
+
+
+class ContentRulesFields(BaseModel):
+    """페드루 PO 리뷰 보정(2026-09-05, PR#3825) — `rules: dict`가 무형식이라
+    `banned_terms`에 문자열 "spam"을 그대로 넣으면 `lint_content()`의
+    `for term in banned_terms`가 글자 단위(s·p·a·m)로 돌아 오타가 조용히 통과했다
+    (「오타로 써도 통과하나」의 자리). `extra="forbid"`로 모르는 키도 거부 —
+    휴먼이 실수로 다른 철자를 쳐도 그 값이 조용히 무시되는 대신 422로 알린다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    banned_terms: list[str] = []
+    require_utm: bool = False
+    tone: str | None = None
+    taxonomy: list[str] = []
+    channel_priority: list[str] = []
+    brand_kit: dict | None = None
 
 
 class PutContentRulesRequest(BaseModel):
@@ -76,7 +93,14 @@ async def put_content_rules_endpoint(
     # 재발 방지, 실 동작은 무변).
     assert_target_in_caller_org(org_id, org_id)
 
+    try:
+        validated = ContentRulesFields.model_validate(body.rules)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CONTENT_RULES_INVALID", "message": str(exc)},
+        ) from exc
+
     row = await put_org_content_rules(
-        db, org_id=org_id, rules=body.rules, updated_by_member_id=resolved.id,
+        db, org_id=org_id, rules=validated.model_dump(), updated_by_member_id=resolved.id,
     )
     return ContentRulesResponse(org_id=row.org_id, rules=row.rules, version=row.version)

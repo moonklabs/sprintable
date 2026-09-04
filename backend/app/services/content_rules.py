@@ -15,6 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.org_content_rule import OrgContentRule
 
 _REQUIRED_UTM_PARAMS = ("utm_source", "utm_medium", "utm_campaign")
+# 페드루 PO 정정(2026-09-05, #3825 리뷰) — 3471 본문 최초값 `/settings/content-rules`가
+# 틀렸다(FE org 설정 자리는 `/organization/...` 동형, `/organization/channels`와 짝 —
+# 3472 본문에서 이미 고쳐짐). 이 파일이 유일한 발신처라 상수 한 곳으로 고정.
+_SETTINGS_PATH = "/organization/content-rules"
 
 
 class ContentRuleViolationError(Exception):
@@ -71,10 +75,14 @@ def lint_content(rules: dict | None, *, text: str, link_url: str | None) -> list
     banned_terms = rules.get("banned_terms") or []
     text_lower = text.lower()
     for term in banned_terms:
-        if term and term.lower() in text_lower:
+        # 페드루 PO 정정(2026-09-05, #3825 리뷰) — PutContentRulesRequest가 이제
+        # banned_terms: list[str]를 pydantic으로 강제하지만, 방어를 이 순수 함수
+        # 자체에도 한 줄 둔다(호출부가 라우터를 안 거치는 경로가 생겨도 비문자열이
+        # .lower()에서 500을 내지 않게).
+        if isinstance(term, str) and term and term.lower() in text_lower:
             violations.append({
                 "code": "banned_term", "field": "text", "value": term,
-                "hint_key": "content_rules.banned_term", "settings_path": "/settings/content-rules",
+                "hint_key": "content_rules.banned_term", "settings_path": _SETTINGS_PATH,
             })
 
     if rules.get("require_utm") and link_url:
@@ -82,7 +90,7 @@ def lint_content(rules: dict | None, *, text: str, link_url: str | None) -> list
         if missing:
             violations.append({
                 "code": "utm_missing", "field": "link_url", "value": ",".join(missing),
-                "hint_key": "content_rules.utm_missing", "settings_path": "/settings/content-rules",
+                "hint_key": "content_rules.utm_missing", "settings_path": _SETTINGS_PATH,
             })
 
     return violations

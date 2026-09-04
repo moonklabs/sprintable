@@ -32,7 +32,7 @@ def test_lint_banned_term_case_insensitive_and_substring_match():
     assert violations[0]["code"] == "banned_term"
     assert violations[0]["field"] == "text"
     assert violations[0]["value"] == "대출"
-    assert violations[0]["settings_path"] == "/settings/content-rules"
+    assert violations[0]["settings_path"] == "/organization/content-rules"
 
     # 대소문자 무시(영문 금칙어).
     rules_en = {"banned_terms": ["GUARANTEED"]}
@@ -43,6 +43,16 @@ def test_lint_banned_term_absent_returns_zero_violations():
     """음성대조 — 금칙어가 실제로 없으면 위반도 없다."""
     rules = {"banned_terms": ["대출"]}
     assert lint_content(rules, text="평범한 안내문입니다", link_url=None) == []
+
+
+def test_lint_non_string_term_does_not_crash():
+    """페드루 PO 리뷰 보정(2026-09-05, PR#3825) — 라우터의 pydantic 검증이 주된
+    방어(list[str] 강제)지만, 이 순수 함수 자체에도 방어를 한 줄 둔다(호출부가
+    라우터를 안 거치는 경로가 생겨도 비문자열이 .lower()에서 500을 안 내게)."""
+    rules = {"banned_terms": [123, None, "대출"]}
+    violations = lint_content(rules, text="대출 안내", link_url=None)
+    assert len(violations) == 1
+    assert violations[0]["value"] == "대출"
 
 
 def test_lint_require_utm_missing_one_of_three_params():
