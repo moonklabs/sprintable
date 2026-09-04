@@ -29,6 +29,10 @@ class _OrgRow:
     slug: str
     plan: str
     role: str
+    # story 46da6450 — repo.list_for_user()가 raw row에서 직접 .timezone을 읽는다
+    # (OrganizationWithRole 생성 前). 기본값 없으면 이 mock row 자체가 매 호출마다
+    # 명시 필요해진다 — 실제 DB row는 nullable 컬럼이라 None이 자연스러운 기본값.
+    timezone: str | None = None
 
 
 def _make_org_row(
@@ -37,8 +41,9 @@ def _make_org_row(
     slug: str = "test-org",
     plan: str = "free",
     role: str = "owner",
+    timezone: str | None = None,
 ) -> _OrgRow:
-    return _OrgRow(id=org_id, name=name, slug=slug, plan=plan, role=role)
+    return _OrgRow(id=org_id, name=name, slug=slug, plan=plan, role=role, timezone=timezone)
 
 
 @pytest.fixture

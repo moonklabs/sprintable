@@ -1,6 +1,6 @@
 {
   "_snapshot_policy": "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 ~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐.",
-  "source_run": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held+story-3414-publication-command(로컬 raw pytest 실측, 템플릿 DB 스크립트 아님 — 페드루 리뷰 nit N)+story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)+story-3419-cancel-unpublish(CI shard(6) unweighted-guard 실측 31s, run 33847827818/job 100943850339, 2026-09-04 — PR#3774)+story-3423-scheduled-filter(CI shard(2) unweighted-guard 실측 23s, run 33849386492/job 100950217041, 2026-09-04 — PR#3775)+story-620beefc-threads-image(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 28.2s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-5b27b32f-sandbox-channel-adapter(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 19.03s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 115s 잠정값, 실 CI 샤드 로그로 재확認 필요)",
+  "source_run": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held+story-3414-publication-command(로컬 raw pytest 실측, 템플릿 DB 스크립트 아님 — 페드루 리뷰 nit N)+story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)+story-3419-cancel-unpublish(CI shard(6) unweighted-guard 실측 31s, run 33847827818/job 100943850339, 2026-09-04 — PR#3774)+story-3423-scheduled-filter(CI shard(2) unweighted-guard 실측 23s, run 33849386492/job 100950217041, 2026-09-04 — PR#3775)+story-620beefc-threads-image(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 28.2s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-5b27b32f-sandbox-channel-adapter(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 19.03s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 115s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-8b7e52d6-claim-story-signal(PR 개설 前 선제 등재, story 23bf1913 조기가드 학습 반영 — 로컬 raw pytest 15.30s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 92s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-46da6450-org-timezone(PR 개설 前 선제 등재, 페드루 리뷰 B1 — 로컬 raw pytest 15.86s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 95s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-f30da19a-available-channels(페드루 리뷰 B1 후속, PR#3784 — 로컬 raw pytest 17.74s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 110s 잠정값, 실 CI 샤드 로그로 재확認 필요)",
   "measured_at": "2026-09-03",
   "files": [
     {
@@ -874,6 +874,18 @@
     {
       "file": "tests/test_5b27b32f_sandbox_channel.py",
       "sec": 115.0
+    },
+    {
+      "file": "tests/test_8b7e52d6_claim_story_signal.py",
+      "sec": 92.0
+    },
+    {
+      "file": "tests/test_46da6450_org_timezone.py",
+      "sec": 95.0
+    },
+    {
+      "file": "tests/test_f30da19a_available_channels.py",
+      "sec": 110.0
     }
   ]
 }

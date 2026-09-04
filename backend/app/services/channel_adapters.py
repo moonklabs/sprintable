@@ -24,6 +24,14 @@ class ChannelAdapterConfig:
     # "refresh_token"(표준 grant) | "reissue_from_access_token"(Threads류 — 현재 유효한
     # access_token으로 재발급, refresh_token 불요) | "manual"(자동 갱신 불가 — 재인증 유도).
     refresh_mode: str
+    # story f30da19a(Phase1·FE, PO 확定 2026-09-04) — 「연결 만들기」 버튼 라벨(FE는
+    # 하드코딩 X, `GET .../channel-connections/available-channels`가 이 값을 그대로
+    # 노출). 채널의 성질이라 여기 한 곳에 선언(max_text_length·can_auto_refresh와 동형
+    # 관례). 페드루 리뷰 N1(2026-09-04) — 기본값 ""를 제거해 필수 인자로: 라벨 없는
+    # 어댑터를 등재하면 그 즉시(import 시점) TypeError로 죽는다 — 화면에 빈 버튼이
+    # 뜨는 대신 배포 자체가 안 되게(fail-closed, 다른 필수 필드 authorize_url/token_url/
+    # scope/refresh_mode와 동열).
+    display_name: str
     credential_kind: str = "oauth"  # "oauth" | "pasted_secret" | "none"
     # story #3374(Phase1·마케팅운영, PO 결정) — 채널 포스트 초안 text 상한. 상수를 서비스/
     # 라우터에 하드코딩하지 않고 여기 한 곳에 선언(담롱 요구 — "상수 하드코딩 X·선언·표시",
@@ -70,6 +78,7 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         scope="threads_basic,threads_content_publish,threads_delete",
         refresh_mode="reissue_from_access_token",
         credential_kind="oauth",
+        display_name="Threads",
         # sprintable-agent-plugins/plugins/sprintable/connectors/threads.ts:27의
         # MAX_TEXT_LENGTH=500 그대로(story #3311, Meta 공식 문서 페이지 직접 실측 — 추정값
         # 아님).
@@ -112,6 +121,7 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         scope="sandbox_publish,sandbox_delete",
         refresh_mode="manual",  # 더미 토큰이라 자동 갱신 개념 자체가 없음.
         credential_kind="none",
+        display_name="Sandbox",
         max_text_length=500,  # Threads와 동형(그라운딩 §1 실측 재사용, 새 한도를 지어내지 않는다).
         utm_source="sandbox",
         utm_medium="test",

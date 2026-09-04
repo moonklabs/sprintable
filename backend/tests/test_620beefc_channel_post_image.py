@@ -484,7 +484,7 @@ async def test_upload_url_unsupported_channel_returns_422():
 
         no_image_adapter = adapters_mod.ChannelAdapterConfig(
             authorize_url="https://example.com/auth", token_url="https://example.com/token",
-            scope="basic", refresh_mode="manual",
+            scope="basic", refresh_mode="manual", display_name="No Image Channel",
         )
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
         with patch.dict(adapters_mod.CHANNEL_ADAPTERS, {"no-image-channel": no_image_adapter}):

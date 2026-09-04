@@ -272,6 +272,46 @@ async def list_channel_connections_agent_visible_endpoint(
     return [_to_agent_visible_item(r) for r in rows]
 
 
+class AvailableChannelItem(BaseModel):
+    """story f30da19a(AC1, 페드루 PO 확定 2026-09-04) — 「연결 만들기」 버튼이 FE에서
+    하드코딩/env 분기 없이 그릴 수 있게 `CHANNEL_ADAPTERS` 레지스트리를 그대로 노출.
+    sandbox는 그 레지스트리 자체가 `SANDBOX_CHANNEL_ENABLED`일 때만 항목을 갖고 있어
+    (channel_adapters.py 상단 조건부 등재) prod에서는 자동으로 빠진다 — 이 엔드포인트에
+    별도 필터링 로직이 없다.
+
+    페드루 리뷰 B2(2026-09-04) — 원래 AC의 `oauth: bool`을 `credential_kind: str`
+    그대로 노출으로 정정. `bool`이면 "oauth vs 그 외"만 구별되는데, 미래에
+    `credential_kind="pasted_secret"`인 채널이 추가되면 그것도 `oauth=false`가 돼
+    FE가 sandbox와 같은 BFF POST 분기(§경계 AC2)로 잘못 보낸다 — "oauth|pasted_secret|
+    none" 3값 자체가 FE 분기의 SSOT라 값을 지어내지 않고 그대로 넘긴다."""
+    channel: str
+    display_name: str
+    credential_kind: str
+
+
+@router.get(
+    "/{org_id}/channel-connections/available-channels", response_model=list[AvailableChannelItem],
+)
+async def list_available_channels_endpoint(
+    org_id: uuid.UUID,
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[AvailableChannelItem]:
+    """story f30da19a(AC1) — 목록 엔드포인트(`agent-visible`)와 동형: `_require_human()`을
+    안 부른다(org 멤버면 에이전트도 조회 가능 — 이 응답엔 토큰 인접 필드가 아예 없어
+    AC6의 human-only 근거가 적용되지 않는다). DB 조회 0 — 레지스트리 자체가 SSOT라
+    org마다 다른 값이 없다(org_id는 스코프 검증에만 쓴다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    return [
+        AvailableChannelItem(
+            channel=channel, display_name=cfg.display_name, credential_kind=cfg.credential_kind,
+        )
+        for channel, cfg in CHANNEL_ADAPTERS.items()
+    ]
+
+
 @router.post("/{org_id}/channel-connections/{channel}/authorize", response_model=AuthorizeResponse)
 async def authorize_channel_connection(
     org_id: uuid.UUID,
