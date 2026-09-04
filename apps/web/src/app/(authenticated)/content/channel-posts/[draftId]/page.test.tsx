@@ -73,6 +73,7 @@ const DRAFT_DETAIL = {
   permalink: null as string | null, external_id: null as string | null, error_code: null as string | null,
   published_at: null as string | null,
   published_body_sha256: null as string | null,
+  command_status: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -96,6 +97,10 @@ function stubFetch(opts: {
   // 위에 스프레드 병합되므로 override 쪽에서 키를 빼도 base의 값이 살아남는다(고전
   // 함정) — 병합 "후"에 명시적으로 delete해야 진짜 키 부재를 재현한다.
   omitGateStatusKey?: boolean;
+  // story #3426 — 연결의 회수 판정값. 기본값은 "회수 가능"(대부분 테스트가 게이팅 자체를
+  // 안 다루므로 기본은 열려 있는 쪽이 자연스럽다) — 개별 테스트가 덮어써 막힌 경우를 본다.
+  canUnpublish?: boolean;
+  unpublishBlockedReason?: 'unsupported' | 'scope_insufficient' | null;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -121,10 +126,15 @@ function stubFetch(opts: {
         // 조용히 500으로 되돌아간다 — 호출부가 필드 자체를 안 넘겼을 때만 500 기본값.
         const maxTextLength = 'maxTextLength' in opts ? opts.maxTextLength : 500;
         const accountLabel = 'accountLabel' in opts ? opts.accountLabel : 'Marketing Bot';
+        const canUnpublish = opts.canUnpublish ?? true;
+        const unpublishBlockedReason = opts.unpublishBlockedReason ?? null;
         return {
           ok: true, status: 200,
           json: async () => ({
-            data: [{ id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1' }],
+            data: [{
+              id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
+              can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason,
+            }],
             error: null, meta: null,
           }),
         };
@@ -508,7 +518,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // 게이팅만 선 죽은 버튼을 표면에 두지 않는다. canUnpublish 변수는 BE 선행(PR#3769
   // 뒤)이 착지하면 이 자리를 다시 켜는 용도로 남겨 두되, 지금은 role·publication_status
   // 어떤 조합이어도 버튼 자체가 렌더되지 않아야 한다.
-  it('⭐발행 취소 버튼 — PR2에서는 화면에 아예 렌더하지 않는다(publication_status=published+owner여도)', async () => {
+  // story #3426(BE #3419 착지) — PR2에서 렌더 보류했던 회수 버튼을 복원. 기본 stubFetch는
+  // canUnpublish=true·role='owner'라 활성 상태로 뜬다.
+  it('⭐회수 버튼 — publication_status=published+owner+연결 can_unpublish=true면 활성화된다', async () => {
     stubFetch({
       draftDetail: {
         gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
@@ -519,8 +531,133 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       root.render(wrap(<ChannelPostEditPage />));
     });
     await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
+  });
+
+  it('⭐회수 버튼 — publication_status가 published가 아니면 렌더되지 않는다', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', publication_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
+  });
+
+  it('⭐회수 버튼 — role=member면 비활성화되고 owner/admin 전용 사유가 보인다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
+  });
+
+  it('⭐회수 버튼 — unpublish_blocked_reason=unsupported면 버튼도 사유도 렌더되지 않는다(§17-11 대상 아님)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'unsupported',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
+  });
+
+  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+owner면 "연결을 다시 하면" 문구가 보인다(doc §17-11 정본)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'scope_insufficient',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientOwner);
+  });
+
+  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+member면 "owner에게 요청" 문구가 보인다(doc §17-11 정본, role 분기)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'scope_insufficient',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    // member는 owner/admin 게이팅이 scope_insufficient보다 먼저 걸린다(§17-11은 "권한은
+    // 있는데 스코프가 없다"는 경우 전용) — role 사유가 우선해야 맞다.
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
+  });
+
+  // story #3426 — 예약 취소 버튼.
+  it('⭐예약 취소 버튼 — command_status=pending이면 활성화된다(owner)', async () => {
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+  });
+
+  it.each(['blocked', 'dead_letter'])('⭐예약 취소 버튼 — command_status=%s도 렌더된다', async (status) => {
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: status } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).not.toBeNull();
+  });
+
+  it.each(['completed', 'cancelled', 'voided', 'in_progress'])('⭐예약 취소 버튼 — command_status=%s면 렌더되지 않는다(이미 나갔거나 끝난 것)', async (status) => {
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: status } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).toBeNull();
+  });
+
+  it('⭐예약 취소 버튼 — role=member면 비활성화되고 owner/admin 전용 사유가 보인다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
   });
 
   // story #3402 PR2 ②-b(T7) — 발행 버튼 클릭 배선.

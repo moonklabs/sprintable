@@ -49,6 +49,13 @@ interface ChannelPostDraftDetail {
   error_code?: string | null;
   published_at?: string | null;
   published_body_sha256?: string | null;
+  // story #3426(BE #3419/#3415, PR#3773) — 예약·재시도 상태. command_status는 최신
+  // publication_command의 상태(pending/blocked/dead_letter면 「예약 취소」 버튼 대상 —
+  // §17-10 정본). scheduled_at은 gate.sealed_scheduled_at(승인된 예약 시각, command의
+  // scheduled_at 스냅샷과 다르다 — 재승인 뒤 갱신된다).
+  command_status?: string | null;
+  command_reason_code?: string | null;
+  scheduled_at?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -70,6 +77,11 @@ interface ChannelConnectionInfo {
   // (지어내지 않는다, doc §3-4).
   account_label: string | null;
   account_id: string;
+  // story #3426(BE #3419) — 「회수」 판정값. FE는 이 값 하나로 버튼을 그리거나 안 그린다
+  // (scopes 원본을 다시 판정하지 않는다 — BE 단일 판정 지점, 그라운딩 확認). true면
+  // unpublish_blocked_reason은 항상 null.
+  can_unpublish: boolean;
+  unpublish_blocked_reason: 'unsupported' | 'scope_insufficient' | null;
 }
 
 // story #3402 ④(AC7) — 한도 잔량은 조회값이고 조회 실패도 상태다. success=false는
@@ -93,6 +105,11 @@ export default function ChannelPostEditPage() {
   // 적는다. undefined="아직 모른다"(연결 조회 전/실패) — accountId 자체가 없다는 뜻은
   // 아니다(그 값은 findConnection이 못 찾은 경우에만 undefined로 남는다).
   const [accountLabel, setAccountLabel] = useState<string | undefined>(undefined);
+  // story #3426 — undefined="연결 조회 전/실패, 아직 모른다"(§3-2와 같은 축) · 조회 성공하면
+  // 연결의 can_unpublish/unpublish_blocked_reason 그대로.
+  const [unpublishGate, setUnpublishGate] = useState<
+    { canUnpublish: boolean; blockedReason: 'unsupported' | 'scope_insufficient' | null } | undefined
+  >(undefined);
   const [limit, setLimit] = useState<PublishingLimitState>({ status: 'loading' });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -154,6 +171,9 @@ export default function ChannelPostEditPage() {
             setMaxTextLength(conn ? conn.max_text_length : undefined);
             // AC9 — account_label 없으면 account_id로 폴백(지어내지 않는다).
             if (conn) setAccountLabel(conn.account_label ?? conn.account_id);
+            // story #3426 — can_unpublish/unpublish_blocked_reason은 draft가 아니라
+            // 이 연결 응답에 실린다(그라운딩 확認) — 새 왕복을 만들지 않고 같은 응답에서 읽는다.
+            if (conn) setUnpublishGate({ canUnpublish: conn.can_unpublish, blockedReason: conn.unpublish_blocked_reason });
           }
 
           // AC7 — 한도 잔량은 별도 왕복(휴먼 전용 엔드포인트, provider 실조회라 느릴 수
@@ -423,6 +443,20 @@ export default function ChannelPostEditPage() {
   const canPublish = view.publishable;
   const canUnpublish = role === 'owner' || role === 'admin';
 
+  // story #3426(BE #3419, doc §17-10/§17-11) — 예약 취소는 command_status가 대기·멈춤
+  // 상태일 때만(그 외는 이미 나갔거나 끝난 것 — 취소할 대상이 없다). role 게이팅은
+  // canUnpublish와 같은 축(owner/admin — 되돌릴 수 있는 파괴적 전환이라 발행보다 한 단계
+  // 더 좁다, cancel-scheduled BFF 그라운딩 그대로).
+  const cancellableCommandStatuses = new Set(['pending', 'blocked', 'dead_letter']);
+  const showCancelScheduled = !!draft.command_status && cancellableCommandStatuses.has(draft.command_status);
+  const canCancelScheduled = canUnpublish;
+
+  // 회수 버튼 — 발행됨 상태 + 연결이 이 채널의 회수를 지원(can_unpublish) + role 게이팅.
+  // unpublishGate===undefined(연결 조회 전/실패)면 "모른다"로 두고 버튼을 비활성화한다
+  // (§3-2와 같은 축 — 모르는 것을 근거로 허용하지 않는다, fail-closed).
+  const showUnpublish = draft.publication_status === 'published';
+  const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true;
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
@@ -542,10 +576,40 @@ export default function ChannelPostEditPage() {
                 우선순위를 명시해 둔다. */}
             {publishing ? t('publishPendingCta') : view.partialSuccess ? t('channelPostsPublishContinueCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
           </Button>
+          {/* story #3426 ①-b — 예약 취소·회수 버튼(게이팅만, API 배선은 ①-c). PR2에서
+              렌더 보류했던 「발행 취소」 버튼을 BE #3419 착지로 복원한다. */}
+          {showCancelScheduled ? (
+            <Button variant="outline" disabled={!canCancelScheduled} data-testid="channel-post-cancel-scheduled-button">
+              {t('channelPostsCancelScheduledCta')}
+            </Button>
+          ) : null}
+          {showUnpublish && unpublishGate?.blockedReason !== 'unsupported' ? (
+            <Button variant="outline" disabled={!canUnpublishNow} data-testid="channel-post-unpublish-button">
+              {t('channelPostsUnpublishCta')}
+            </Button>
+          ) : null}
         </div>
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
             {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {showCancelScheduled && !canCancelScheduled ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-cancel-scheduled-disabled-reason">
+            {t('channelPostsCancelUnpublishOwnerOrAdminOnly')}
+          </p>
+        ) : null}
+        {/* doc §17-11 정본 — unsupported는 대상 아님(문구 없음, 버튼도 없음 — 없는 자리를
+            안 그린다). scope_insufficient만 role별 두 문장(owner: 재연결하면 풀림 /
+            member: owner에게 요청). role 게이팅(owner/admin 아님)이 blocked_reason보다
+            먼저 걸리면 그 사유가 우선(§17-11은 "권한은 있는데 스코프가 없다"는 경우 전용). */}
+        {showUnpublish && !canUnpublish ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+            {t('channelPostsCancelUnpublishOwnerOrAdminOnly')}
+          </p>
+        ) : showUnpublish && canUnpublish && unpublishGate?.blockedReason === 'scope_insufficient' ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+            {role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientMember')}
           </p>
         ) : null}
         {publishResult ? (
