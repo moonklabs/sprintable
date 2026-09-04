@@ -80,6 +80,12 @@ const PAGES: Array<{ path: string; label: string }> = [
   // CI e2e owner는 빈 org라(§ 상단 ⚠️ 참조) 칩 자체가 안 뜰 수 있다 — 그래도 항상
   // 렌더되는 목록 셸(빈 상태·헤더)의 회귀는 이 등록으로 잡힌다.
   { path: '/content', label: 'content(글 관리 — 목록 셸·EmptyState)' },
+  // story #3402(Phase1·마케팅운영, AC15·카디르 QA 2026-09-04) — 채널 포스트 목록·편집
+  // 화면. 위 /content와 동일 근거(v1은 항상 렌더되는 셸의 회귀 감시용, 상태 칩 비텍스트
+  // 3:1은 measureChip 몫) — CI e2e owner가 빈 org라 목록은 EmptyState, 상세는 draft_id
+  // 미존재로 오류 알림(editLoadFailed) 셸만 뜨지만 그 표면도 대비 회귀 감시 대상이다.
+  { path: '/content/channel-posts', label: 'channel-posts(목록 셸·EmptyState)' },
+  { path: '/content/channel-posts/nonexistent-draft-id', label: 'channel-posts detail(오류 알림 셸 — draft 미존재)' },
 ];
 const THEMES = ['light', 'dark'] as const;
 
