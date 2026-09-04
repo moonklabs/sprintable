@@ -488,8 +488,19 @@ def test_get_blog_destination_module_wordpress_returns_wordpress_publish():
     )
 
 
-def test_get_blog_destination_module_non_wordpress_not_implemented_yet():
-    """webhook(조각④) 등 wordpress가 아닌 non-null 목적지는 여전히 fail-closed —
+def test_get_blog_destination_module_webhook_returns_webhook_publish():
+    """조각④ — webhook_publish.py 배선(webhook도 wordpress와 나란히 실 구현체가 됐다)."""
+    from app.services import webhook_publish
+    from app.services.blog_destinations import get_blog_destination_module
+
+    assert (
+        get_blog_destination_module(connection_id=uuid.uuid4(), channel="webhook")
+        is webhook_publish
+    )
+
+
+def test_get_blog_destination_module_unknown_channel_not_implemented_yet():
+    """wordpress·webhook 둘 다 아닌(아직 존재하지 않는) 목적지는 여전히 fail-closed —
     뮤테이션 대상: 이 가드를 지우면 존재하지 않는 목적지가 조용히 어떤 모듈로든
     (예: hosted_site) 떨어질 수 있다."""
     from app.services.blog_destinations import (
@@ -498,4 +509,4 @@ def test_get_blog_destination_module_non_wordpress_not_implemented_yet():
     )
 
     with pytest.raises(BlogDestinationNotImplementedError):
-        get_blog_destination_module(connection_id=uuid.uuid4(), channel="webhook")
+        get_blog_destination_module(connection_id=uuid.uuid4(), channel="some-future-channel")

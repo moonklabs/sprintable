@@ -51,7 +51,15 @@ FAILURE_KIND_TRANSIENT = "transient"
 # story #3414 — 어떤 서버 error code가 어느 failure_kind인지의 유일한 매핑 표. 새 코드가
 # 추가되면 여기 등재하지 않는 한 자동으로 needs_check(fail-closed)로 떨어진다 — "일단
 # transient로"류 추측 금지(story #3405/#3406 "미지 code는 추측 안 함" 원칙과 동일 사상).
-_CONNECTION_BLOCKED_CODES = frozenset({"CHANNEL_TOKEN_EXPIRED", "CHANNEL_CONNECTION_NOT_ACTIVE"})
+_CONNECTION_BLOCKED_CODES = frozenset({
+    "CHANNEL_TOKEN_EXPIRED", "CHANNEL_CONNECTION_NOT_ACTIVE",
+    # story e4fc29fa(조각④) — wordpress/webhook 어댑터가 401/403을 돌려주면(잘못된
+    # Application Password·공유 비밀) "일시적 provider 오류"가 아니라 자격 자체가
+    # 틀렸다는 뜻 — CHANNEL_TOKEN_EXPIRED와 같은 결로 connection을 blocked/expired로
+    # 승격하고 무한 백오프 재시도 대신 사람의 재연결을 기다린다(site_posts.py::
+    # publish_site_post_external_command가 상태코드 401/403일 때만 이 코드를 쓴다).
+    "CHANNEL_PUBLISH_AUTH_REJECTED",
+})
 # story 620beefc(PO 決定, 2026-09-04) — IMAGE 컨테이너가 Threads 쪽에서 ERROR/EXPIRED로
 # 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라
 # needs_check(사람 재시도, AC5)로 바로 보낸다.

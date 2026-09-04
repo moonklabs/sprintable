@@ -92,6 +92,8 @@ async def lifespan(app: FastAPI):
     assert_sandbox_channel_not_registered_in_prod()  # story 5b27b32f AC5: prod에 sandbox 채널 등재=기동 실패(fail-closed).
     from app.routers.dev_wordpress_stub import assert_wordpress_stub_not_registered_in_prod
     assert_wordpress_stub_not_registered_in_prod()  # story e4fc29fa 조각③c: prod에 WordPress 스텁 등재=기동 실패(fail-closed).
+    from app.routers.dev_webhook_stub import assert_webhook_stub_not_registered_in_prod
+    assert_webhook_stub_not_registered_in_prod()  # story e4fc29fa 조각④: prod에 webhook 스텁 등재=기동 실패(fail-closed).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
@@ -461,6 +463,11 @@ from app.routers import dev_wordpress_stub as _dev_wordpress_stub  # noqa: E402
 
 if _dev_wordpress_stub.wordpress_stub_enabled():
     app.include_router(_dev_wordpress_stub.router)
+# story e4fc29fa(조각④) — dev 전용 signed webhook 수신 스텁. 위와 같은 이중방어 사상.
+from app.routers import dev_webhook_stub as _dev_webhook_stub  # noqa: E402
+
+if _dev_webhook_stub.webhook_stub_enabled():
+    app.include_router(_dev_webhook_stub.router)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)
