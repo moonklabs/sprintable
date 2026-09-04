@@ -741,8 +741,31 @@ async def claim_story(
     # 3414b6d7: claim=일 시작=실작업자 → implementation participation 멱등 생성(게이트/verdict
     # attribution). assignee(board)는 안 건드림 — participation만(claim만 하고 done해도 평가 가능).
     from app.services.participation_helpers import ensure_implementation_participation
-    await ensure_implementation_participation(session, org_id, body.story_id, id)
-    return {"claimed": True, "story_id": str(body.story_id)}
+    participation_ensured = await ensure_implementation_participation(session, org_id, body.story_id, id)
+
+    # story 8b7e52d6(PO 재정의, 2026-09-04) — "신호 보정": claim_story의 실제 동작(위)은
+    # story 3414b6d7 결정 그대로 assignee/board를 절대 안 건드린다 — 그런데 기존 응답
+    # `{"claimed": True}` 한 줄만으로는 호출자가 "claim=내 것이 됨(assignee·board 반영)"
+    # 으로 합리적으로 오독한다(디디 그라운딩 실사례 — 0845cb03에서 본인이 그렇게 오독했다).
+    # 행동은 그대로 두고 응답에 실제 스코프(participation만 바뀌었고 assignee는 무변경)를
+    # 명시해 그 오독을 원천 차단한다.
+    from app.routers.stories import _attach_assignee_ids
+    await _attach_assignee_ids(session, org_id, [story])
+    assignee_ids = [str(a) for a in story.assignee_ids]
+
+    result: dict = {
+        "claimed": True,
+        "story_id": str(body.story_id),
+        "participation": {"ensured": participation_ensured},
+        "assignee_changed": False,
+        "assignee_ids": assignee_ids,
+    }
+    if not assignee_ids:
+        result["hint"] = (
+            "assignee는 별도입니다(update_story의 assignee_id/assignee_ids) — "
+            "보드 배정 표시·통지 수신자는 claim이 아니라 assignee 기준입니다."
+        )
+    return result
 
 
 @router.post("/{id}/unclaim")
