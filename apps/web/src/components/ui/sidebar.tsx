@@ -260,7 +260,7 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, open, openMobile, isMobile } = useSidebar()
   // story 3436(묶음 1) — nav.toggleSidebar는 새 키(공용) — 묶음 4 #13(settings:800
   // 「Toggle navigation」)이 같은 행동이라 같은 키로 잇는다(페드루 PO 지시).
   const t = useTranslations("nav")
@@ -271,6 +271,11 @@ function SidebarTrigger({
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon-sm"
+      // story 3436(묶음 9, PO 지적) — 접근 이름은 있었지만 펼침/접힘 상태를 스크린리더가
+      // 못 읽었다(아침 sr-only "Close"류와 같은 클래스, 다른 얼굴). toggleSidebar()가
+      // 모바일/데스크톱에서 다른 state를 토글하므로(107행) isMobile로 어느 쪽을 읽을지 갈라야
+      // 이 버튼이 실제로 제어하는 state와 aria-expanded가 일치한다.
+      aria-expanded={isMobile ? openMobile : open}
       className={cn(className)}
       onClick={(event) => {
         onClick?.(event)
@@ -285,7 +290,7 @@ function SidebarTrigger({
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
-  const { toggleSidebar, setWidth, setIsResizing } = useSidebar()
+  const { toggleSidebar, setWidth, setIsResizing, open, openMobile, isMobile } = useSidebar()
   // story 3436(묶음 1) — SidebarTrigger와 같은 정본 키(nav.toggleSidebar).
   const t = useTranslations("nav")
   const didDragRef = React.useRef(false)
@@ -332,6 +337,8 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       data-sidebar="rail"
       data-slot="sidebar-rail"
       aria-label={t("toggleSidebar")}
+      // story 3436(묶음 9) — SidebarTrigger와 같은 이유·같은 처방.
+      aria-expanded={isMobile ? openMobile : open}
       tabIndex={-1}
       onClick={handleClick}
       onMouseDown={onMouseDown}

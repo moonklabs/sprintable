@@ -2098,7 +2098,7 @@
     "channelTestOk": "OK · {account}",
     "channelTestFailed": "Failed · {error}",
     "channelLastErrorToggle": "View server response",
-    "channelOwnerOnlyReason": "Ask an owner — only owners can do this.",
+    "channelOwnerOnlyReason": "Only owners can do this.",
     "channelConfigIncompleteReason": "App credentials must be set up before you can start connecting.",
     "channelExpiringInfoNote": "This renews automatically.",
     "channelExpiringActionNote": "This does not renew automatically — you'll need to reconnect it yourself.",
