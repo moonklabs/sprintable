@@ -722,8 +722,12 @@ steps:
         # story #2141 — REDIS_URL: prod는 Secret Manager 바인딩과 동명 키 충돌 방지로 여기서 안 넘김.
         # ⛔story #2423 — 셸 변수는 반드시 $$로 이스케이프(단일 $는 Cloud Build 자신의 substitution
         # 파서가 args 전체를 먼저 훑어 build submit 자체를 INVALID_ARGUMENT로 거부 — 예시로도 금지).
+        # story #3418(카디르 실측 2026-09-04) — RATE_LIMIT_BACKEND=redis를 REDIS_URL과 같은 dev
+        # 분기에 묶는다(rate_limiter.py::get_rate_limiter가 이 값 있어야 RedisRateLimiter로 감 —
+        # REDIS_URL만 있고 이게 없으면 기본값 memory라 인스턴스별로 계속 갈라진다). prod는 PO가
+        # 선생님 결재 뒤 별도로.
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
-          ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
+          ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL},RATE_LIMIT_BACKEND=redis"
         fi
         # story #2777 — ADMIN_OPERATOR_*: prod는 키 자체가 없어야 안전(require_admin_operator
         # fail-closed 503, 대표승인 前 prod 결제개입 전면금지 태세와 정합).
