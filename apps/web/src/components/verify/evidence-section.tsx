@@ -5,9 +5,10 @@ import {
   Check, ChevronDown, ChevronUp, ExternalLink, Link2, Paperclip, Plus,
   GitPullRequest, Rocket, TrendingUp, FileText, CheckCircle2, Frame,
 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { deriveTrustStage, type EvidenceItem, type EvidenceType } from '@/services/verify';
 import {
   adaptArtifactDetail, getArtifactVersionDetail,
@@ -75,6 +76,8 @@ export function EvidenceSection({
 }: EvidenceSectionProps) {
   const t = useTranslations('verify');
   const tCommon = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [expanded, setExpanded] = useState(false);
   const [items, setItems] = useState<EvidenceItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -185,7 +188,7 @@ export function EvidenceSection({
   // human_verified_by 실명(who), claimed는 "에이전트 주장"(self_reported엔 who가 없어 일반화,
   // §3 계약 그대로). 과거 무조건 초록 체크였던 자리 — human 미검증 건은 여기서 amber로 정정된다.
   const verifiedByName = humanVerifiedBy ? (memberMap[humanVerifiedBy]?.name ?? humanVerifiedBy.slice(0, 6)) : null;
-  const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt) : null;
+  const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
   const sealLabel = trustStage === 'verified'
     ? (verifiedByName ? `${t('trustSealVerifiedBy', { name: verifiedByName })}${verifiedWhen ? ` · ${verifiedWhen}` : ''}` : t('provenCompletion'))
     : t('trustSealClaimedBy');

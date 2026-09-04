@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface BacklinkMember { id: string; name: string; type: string }
@@ -122,6 +123,8 @@ interface LoadedResult {
 
 export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinksSectionProps) {
   const t = useTranslations('board');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story-detail-panel처럼 entityId만 바뀌고 이 컴포넌트가 리마운트 안 되는 호출부가 있을 수
   // 있다 — 결과에 entityType+entityId를 같이 담아 렌더 시점에 일치 여부로 판정한다(전환-누출
   // 방지, #2299 원본 회귀테스트와 동형. 동기 setState-in-effect도 그래서 안 씀).
@@ -183,7 +186,7 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
                   )}
                   <div className="text-[10px] text-muted-foreground">
                     {creatorName ? `${creatorName} · ` : ''}
-                    {formatRelativeTime(item.created_at)}
+                    {formatRelativeTime(item.created_at, locale, displayTimezone)}
                   </div>
                 </div>
               </li>

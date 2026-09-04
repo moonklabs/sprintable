@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { parseCursorMeta } from '@/lib/pagination';
 import type { BacklinkItem } from './entity-backlinks-section';
@@ -113,6 +114,8 @@ async function findOriginAcrossPages(storyId: string, signal: { cancelled: boole
  */
 export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
   const t = useTranslations('board');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [result, setResult] = useState<LoadedResult | 'failed' | null>(null);
 
   useEffect(() => {
@@ -153,7 +156,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
                 )}
                 <span className="block text-[10px] text-muted-foreground">
                   {creatorName ? `${creatorName} · ` : ''}
-                  {formatRelativeTime(origin.created_at)}
+                  {formatRelativeTime(origin.created_at, locale, displayTimezone)}
                 </span>
               </span>
             </span>

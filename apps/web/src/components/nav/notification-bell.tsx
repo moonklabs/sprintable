@@ -10,10 +10,12 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
@@ -91,17 +93,6 @@ function getEventIcon(eventType: string) {
   if (eventType === 'dispatched') return <Zap className="size-4" />;
   if (eventType.startsWith('doc')) return <BookOpen className="size-4" />;
   return <Bell className="size-4" />;
-}
-
-function timeAgo(dateStr: string, t: ReturnType<typeof useTranslations>): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return t('justNow');
-  if (mins < 60) return `${mins}${t('minutesAgo')}`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}${t('hoursAgo')}`;
-  const days = Math.floor(hours / 24);
-  return `${days}${t('daysAgo')}`;
 }
 
 // story #2192 — 30건에서 조용히 잘리던 결함의 회귀가드. NOTIFICATIONS_PAGE_SIZE만큼 요청해
@@ -197,6 +188,8 @@ function NotificationPanel({
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
@@ -333,7 +326,7 @@ function NotificationPanel({
                       </p>
                     ) : null}
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {timeAgo(n.created_at, t)}
+                      {formatRelativeTime(n.created_at, locale, displayTimezone)}
                     </p>
                   </div>
                   {!n.read_at && (

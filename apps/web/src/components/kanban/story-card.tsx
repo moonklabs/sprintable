@@ -4,8 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
@@ -128,6 +129,8 @@ interface StoryCardProps {
 
 export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className, getStatusLabel }: StoryCardProps) {
   const t = useTranslations('board');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
   const hasAgent = assigneeList.some((m) => m.type === 'agent');
@@ -456,7 +459,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   <TrustSeal
                     variant="verified"
                     humanName={verifiedBy.name}
-                    when={story.human_verified_at ? formatRelativeTime(story.human_verified_at) : ''}
+                    when={story.human_verified_at ? formatRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
                   />
                 ) : story.status === 'done' && trustStage === 'claimed' ? (
                   <TrustSeal variant="claimed" agentInitial={trustAgent ? getInitials(trustAgent.name) : undefined} />
