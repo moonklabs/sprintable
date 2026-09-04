@@ -969,12 +969,39 @@ describe('ContentPostEditPage — 변형 만들기(story 15e481ce AC1)', () => {
     expect(routerPushMock).not.toHaveBeenCalled();
   });
 
-  it('만들기 버튼은 연결을 고르기 前엔 비활성이다', async () => {
+  it('만들기 버튼은 연결을 고르기 전엔 비활성이다', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, { activeConnections: [ACTIVE_CONNECTION] });
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
     const createBtn = container.querySelector('[data-testid="content-create-variant-button"]') as HTMLButtonElement;
     expect(createBtn.disabled).toBe(true);
+  });
+
+  // 카디르 QA REQUEST_CHANGES(2026-09-04, PR#3799) — summary·title이 둘 다 공백뿐이면
+  // (trim 前) title도 안 trim해 공백 1글자가 BE min_length=1을 그대로 통과해 버렸다.
+  // 지금은 trim 후 둘 다 비면 POST 자체를 안 부르고 버튼 밖에 사유를 보인다.
+  it('⭐summary·title이 공백뿐이면 POST를 안 부르고 버튼 밖에 사유가 뜬다(공백 1글자 통과 방지)', async () => {
+    let createVariantCalled = false;
+    stubFetchWithVersions([{ ...VERSION_1, summary: '   ', title: '   ' }], undefined, undefined, {
+      activeConnections: [ACTIVE_CONNECTION],
+      onCreateVariant: () => { createVariantCalled = true; return { status: 201, body: { draft_id: 'cp-1', version_id: 'cpv-1', version: 1 } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="content-create-variant-connection-select"]') as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+    setter?.call(select, 'conn-1');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const createBtn = container.querySelector('[data-testid="content-create-variant-button"]') as HTMLButtonElement;
+    expect(createBtn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="content-create-variant-text-empty-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCreateVariantTextEmptyReason);
+
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(createVariantCalled).toBe(false);
   });
 });
 

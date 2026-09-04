@@ -2245,6 +2245,7 @@
     "channelPostsCreateVariantCta": "변형 만들기",
     "channelPostsCreateVariantPendingCta": "만드는 중…",
     "channelPostsCreateVariantFailed": "변형을 만들지 못했습니다.",
+    "channelPostsCreateVariantTextEmptyReason": "원문에 제목이나 요약이 없어 변형을 만들 수 없습니다.",
     "channelPostsVariantsListLabel": "같은 스토리의 채널 글",
     "channelPostsScheduleAtDialogTitle": "예약 시각",
     "channelPostsScheduleAtDialogDescription": "정한 시각에 자동으로 발행합니다. 승인 뒤 시각을 바꾸면 다시 상신해야 합니다.",

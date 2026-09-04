@@ -2245,6 +2245,7 @@
     "channelPostsCreateVariantCta": "Create variant",
     "channelPostsCreateVariantPendingCta": "Creating…",
     "channelPostsCreateVariantFailed": "Couldn't create the variant.",
+    "channelPostsCreateVariantTextEmptyReason": "This post has no title or summary, so a variant can't be created.",
     "channelPostsVariantsListLabel": "Channel posts from the same story",
     "channelPostsScheduleAtDialogTitle": "Schedule time",
     "channelPostsScheduleAtDialogDescription": "This publishes automatically at the time you set. Changing the time after approval requires resubmitting.",

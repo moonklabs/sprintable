@@ -264,10 +264,16 @@ export default function ContentPostEditPage() {
 
   // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. text는 min_length=1(BE 검증) —
   // 빈 문자열을 보낼 수 없어 summary를 채워 넣고, summary도 비어 있으면 title로
-  // 폴백한다(title은 항상 non-empty, BE 자체 검증). link_url은 발행된 URL이 있으면
-  // 그 값(없으면 null — 지어내지 않는다).
+  // 폴백한다. link_url은 발행된 URL이 있으면 그 값(없으면 null — 지어내지 않는다).
+  //
+  // 카디르 QA 지적(2026-09-04, PR#3799) — title도 trim 없이 그대로 썼다. summary·
+  // title 둘 다 공백뿐이면 trim 전엔 공백 문자열이 BE min_length=1을 그대로 통과해
+  // 버린다(공백 1글자도 "길이 1"). 그래서 title도 trim하고, 결과가 그래도 비면
+  // 아예 POST를 안 보낸다(버튼도 비활성 — variantTextEmpty, 아래 렌더 참고).
+  const variantText = (latest?.summary.trim() || latest?.title.trim()) ?? '';
+  const variantTextEmpty = latest !== undefined && variantText === '';
   const handleCreateVariant = useCallback(async () => {
-    if (!orgId || !workItemId || !selectedConnectionId || !latest) return;
+    if (!orgId || !workItemId || !selectedConnectionId || !latest || !variantText) return;
     setCreatingVariant(true);
     setCreateVariantResult(null);
     try {
@@ -277,7 +283,7 @@ export default function ContentPostEditPage() {
         body: JSON.stringify({
           work_item_id: workItemId,
           connection_id: selectedConnectionId,
-          text: latest.summary.trim() || latest.title,
+          text: variantText,
           link_url: publication?.url ?? null,
           source_content_item_id: draftId,
         }),
@@ -300,7 +306,7 @@ export default function ContentPostEditPage() {
     } finally {
       setCreatingVariant(false);
     }
-  }, [orgId, workItemId, selectedConnectionId, latest, publication, draftId, router, t]);
+  }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t]);
 
   // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
   // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·
@@ -715,12 +721,17 @@ export default function ContentPostEditPage() {
             <Button
               type="button" size="sm"
               onClick={() => void handleCreateVariant()}
-              disabled={!selectedConnectionId || creatingVariant}
+              disabled={!selectedConnectionId || creatingVariant || variantTextEmpty}
               data-testid="content-create-variant-button"
             >
               {creatingVariant ? t('channelPostsCreateVariantPendingCta') : t('channelPostsCreateVariantCta')}
             </Button>
           </div>
+          {variantTextEmpty ? (
+            <p className="text-xs text-muted-foreground" data-testid="content-create-variant-text-empty-reason">
+              {t('channelPostsCreateVariantTextEmptyReason')}
+            </p>
+          ) : null}
           {createVariantResult ? (
             <Alert variant="destructive" role="alert" data-testid="content-create-variant-error">
               <AlertDescription>{createVariantResult.text}</AlertDescription>
