@@ -132,10 +132,13 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   });
 
   it('?connect_error=로 알려진 코드는 사람 말로, 모르는 코드는 일반 실패 문구로 뜬다', async () => {
+    // story #3409 — 이 코드는 owner에게도 뜨므로 isOwner 분기로 owner용 키를 그린다.
+    // 문자열을 하드코딩하면 문구 개정마다 이 테스트가 깨진다 — 메시지 키(koMessages)로
+    // 대조해 "그 키가 렌더됐는가"만 본다(문구 자체는 i18n 파일이 정본).
     useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=CHANNEL_APP_CREDENTIALS_MISSING'));
     stubFetch({ connections: [] });
     await mount('owner');
-    expect(container.textContent).toContain('앱 자격이 설정되지 않아');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelConnectErrorAppCredentialsMissing);
 
     await act(async () => { root.unmount(); });
     container.remove();
@@ -144,7 +147,15 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     root = createRoot(container);
     useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=SOME_UNKNOWN_CODE'));
     await mount('owner');
-    expect(container.textContent).toContain('연결에 실패했습니다');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelConnectErrorGeneric);
+  });
+
+  it('⭐story #3409 — CHANNEL_APP_CREDENTIALS_MISSING을 member가 보면 owner에게 요청하라는 별도 키가 뜬다(owner용 화면 안 문구는 안 뜸)', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=CHANNEL_APP_CREDENTIALS_MISSING'));
+    stubFetch({ connections: [] });
+    await mount('member');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelConnectErrorAppCredentialsMissingMember);
+    expect(container.textContent).not.toContain(koMessages.channelConnect.channelConnectErrorAppCredentialsMissing);
   });
 
   it('채널 행 상태는 계정 중 최악으로 승격된다(정상+재인증필요 → 재인증필요)', async () => {
