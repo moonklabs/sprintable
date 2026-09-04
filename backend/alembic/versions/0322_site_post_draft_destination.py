@@ -11,8 +11,8 @@ site_posts.py::_reseal_gate_on_new_version 확장, 이 마이그는 그 축의 �
 FK 없음 — site_post_drafts/channel_post_drafts/channel_connections를 포함한 이
 도메인 전체 관례(그라운딩 §9) 그대로.
 
-Revision ID: 0321
-Revises: 0320
+Revision ID: 0322
+Revises: 0321
 Create Date: 2026-09-04
 """
 from __future__ import annotations
@@ -21,8 +21,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0321"
-down_revision = "0320"
+revision = "0322"
+down_revision = "0321"
 branch_labels = None
 depends_on = None
 
