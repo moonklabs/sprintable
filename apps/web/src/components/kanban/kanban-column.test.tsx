@@ -76,6 +76,57 @@ describe('KanbanColumn — story #2062 포커스 링 클리핑', () => {
   });
 });
 
+// story 3436(묶음 4) — done 칼럼 펼치기/접기 버튼 aria-label 하드코딩 영문("Expand/Collapse
+// done column") 정정 pin.
+describe('KanbanColumn — 접기/펼치기 버튼 접근 이름(story 3436)', () => {
+  it('⭐collapsed=true면 펼치기 버튼의 aria-label이 한국어다', async () => {
+    await act(async () => {
+      root.render(
+        wrap(
+          <KanbanColumn
+            id="done"
+            label="완료"
+            stories={[]}
+            epicMap={{}}
+            memberMap={{}}
+            onStoryClick={vi.fn()}
+            collapsed
+            onToggleCollapse={vi.fn()}
+          />,
+        ),
+      );
+    });
+
+    const btn = container.querySelector('button[aria-label]');
+    expect(btn?.getAttribute('aria-label')).toBe(koMessages.board.expandDoneColumn);
+    expect(btn?.getAttribute('aria-label')).not.toContain('Expand');
+  });
+
+  it('collapsed=false면 접기 버튼의 aria-label이 한국어다', async () => {
+    await act(async () => {
+      root.render(
+        wrap(
+          <KanbanColumn
+            id="done"
+            label="완료"
+            stories={[]}
+            epicMap={{}}
+            memberMap={{}}
+            onStoryClick={vi.fn()}
+            collapsed={false}
+            onToggleCollapse={vi.fn()}
+          />,
+        ),
+      );
+    });
+
+    const btn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.getAttribute('aria-label') === koMessages.board.collapseDoneColumn,
+    );
+    expect(btn).toBeTruthy();
+  });
+});
+
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩(Heading
 // 무게로 재분류·크기/sans 불변, 한글이라 caps/mono 금지).
 describe('KanbanColumn — 컬럼헤더 소헤딩(story #2969 PR-5)', () => {

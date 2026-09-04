@@ -125,6 +125,7 @@ function resolveSettingsTab(tab: string | null): string {
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const tNav = useTranslations('nav');
   const tLegal = useTranslations('legal');
   // story #2485 — projectLimitExceededError는 onboarding-form.tsx(#2484)와 동일 개념
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
@@ -797,7 +798,7 @@ export default function SettingsPage() {
               type="button"
               onClick={() => setLnbOpen((v) => !v)}
               className="md:hidden rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Toggle navigation"
+              aria-label={tNav('toggleSidebar')}
             >
               {lnbOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>

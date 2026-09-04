@@ -1484,7 +1484,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               type="button"
               variant="ghost"
               onClick={() => setViewMode('board')}
-              title="Board view"
+              aria-label={t('boardViewLabel')}
+              title={t('boardViewLabel')}
               className={`size-7 min-h-0 min-w-0 rounded-none ${
                 viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
@@ -1495,7 +1496,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               type="button"
               variant="ghost"
               onClick={() => setViewMode('list')}
-              title="List view"
+              aria-label={t('listViewLabel')}
+              title={t('listViewLabel')}
               className={`size-7 min-h-0 min-w-0 rounded-none ${
                 viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
