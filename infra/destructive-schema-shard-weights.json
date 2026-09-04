@@ -906,6 +906,10 @@
     {
       "file": "tests/test_e4fc29fa_destination_axis.py",
       "sec": 40.0
+    },
+    {
+      "file": "tests/test_3457_campaigns_list_and_version_campaign_fields.py",
+      "sec": 90.0
     }
   ]
 }
