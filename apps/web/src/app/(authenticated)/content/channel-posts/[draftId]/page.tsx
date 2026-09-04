@@ -557,19 +557,23 @@ export default function ChannelPostEditPage() {
                   ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? new Date(publishResult.scheduledAt).toLocaleString() : t('originAuthorUnknown') })
                   : (
                     // story #3402 AC11(doc §5-1) — "왜 막혔나"(text)와 "밖으로 나갔나"
-                    // (externalImpact)는 서로 다른 사실이라 두 <p>로 따로 둔다(카디르 QA
-                    // 계획 ④ — 겹치는 단어로 한 문장에 뭉쳐 정규식 하나로 통과하는 함정
-                    // 방지, 별도 텍스트 노드로 개별 assert 가능하게).
+                    // (externalImpact)는 서로 다른 사실이라 별도 텍스트 노드로 따로 둔다
+                    // (카디르 QA 계획 ④ — 겹치는 단어로 한 문장에 뭉쳐 정규식 하나로 통과
+                    // 하는 함정 방지, 개별 assert 가능하게). 카디르 QA 실결함 지적
+                    // (2026-09-04) — 이 블록의 부모가 AlertDescription(=<p>)이라 여기서
+                    // <p>를 또 쓰면 p 안에 p가 중첩돼 HTML 무효+Next hydration 에러가
+                    // 실제로 났다(jsdom 테스트는 관대해서 안 잡음). <span className="block">
+                    // 로 교체 — 줄바꿈은 유지하되 유효한 중첩.
                     <>
-                      <p data-testid="channel-post-publish-error-reason">{publishResult.text}</p>
+                      <span className="block" data-testid="channel-post-publish-error-reason">{publishResult.text}</span>
                       {publishResult.externalImpact ? (
-                        <p data-testid="channel-post-publish-external-impact">
+                        <span className="block" data-testid="channel-post-publish-external-impact">
                           {publishResult.externalImpact === 'reached_provider'
                             ? t('channelPostsExternalImpactReachedProvider')
                             : publishResult.externalImpact === 'unknown'
                               ? t('channelPostsExternalImpactUnknown')
                               : t('channelPostsExternalImpactNotSent')}
-                        </p>
+                        </span>
                       ) : null}
                     </>
                   )}

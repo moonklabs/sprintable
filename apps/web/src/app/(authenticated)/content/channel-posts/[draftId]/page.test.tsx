@@ -704,6 +704,12 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(impact?.textContent).toBe(koMessages.content.channelPostsExternalImpactNotSent);
     // 두 문장이 진짜 별개 DOM 노드인지(하나로 뭉쳐 겹치는 키워드만 있는 게 아닌지) 확인.
     expect(reason).not.toBe(impact);
+    // 카디르 QA 실결함(2026-09-04) — 이 블록의 부모가 AlertDescription(=<p>)이다. <p> 안에
+    // <p>를 또 두면 HTML 무효+Next hydration 에러가 실제로 났다(jsdom 테스트는 관대해서
+    // DOM은 만들어 주지만 실브라우저/hydration은 안 봐준다) — 구조 자체를 assert한다.
+    expect(container.querySelectorAll('p p').length).toBe(0);
+    expect(reason?.tagName).not.toBe('P');
+    expect(impact?.tagName).not.toBe('P');
   });
 
   it('⭐AC11 — 502(PROVIDER_ERROR)는 "요청은 나갔다" 별도 안내가 보인다(4xx와 다른 문구)', async () => {
