@@ -40,3 +40,70 @@ export function formatScheduledAt(iso: string, tz: string): { display: string; u
   const utcNote = `= ${iso.slice(5, 16).replace('T', ' ')} UTC`;
   return { display, utcNote };
 }
+
+// story #3422 B1(페드루 PO 재판정, 2026-09-04 12:4x) — 캘린더 range 경계를 UTC 자정으로
+// 잡으면(구 defaultRange) KST 같은 양의 오프셋 tz에서 UTC 오늘 00:00=KST 오늘 09:00이라
+// ① 첫 열(KST 오늘 00:00~08:59에 예약된 것)이 BE scheduled_from 필터에 안 걸려 빠지고
+// ② 마지막 열도 같은 이유로 여드레째 이른 시각까지 걸려 8열(부분 표본)이 된다. 경계는
+// «display tz의 자정»이어야 그리드 열 키(toDateKey, 같은 tz)와 어긋나지 않는다 —
+// 이 파일이 tz↔UTC 변환의 유일한 출처(resolveDisplayTimezone·toDateKey와 동형 원칙).
+
+/** utcInstant 시점에 tz가 UTC보다 얼마나 앞서 있는지(ms). DST 등으로 절기마다 바뀔 수
+ * 있어 고정 상수로 못 쓴다 — 매번 그 시각 기준으로 다시 잰다. */
+function tzOffsetMs(utcInstant: Date, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(utcInstant);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
+  // hour12:false에서 자정이 '24'로 나오는 로케일 방어(en-US는 보통 '00'이지만 방어적으로).
+  const asUtcIfSameWallClock = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+  // Intl.formatToParts는 밀리초를 안 준다 — utcInstant를 ms 그대로 빼면(예: .999) 초 단위로
+  // 반올림된 asUtcIfSameWallClock(.000)과 최대 999ms 가짜 오프셋이 섞여 날짜가 하루
+  // 밀리는 사고가 났다(실측, B1 회귀). 초 단위로 내림해 같은 정밀도끼리 비교한다 — tz
+  // 오프셋 자체는 초 단위 이하로 안 바뀌므로 이 반올림은 결과에 영향이 없다.
+  const utcInstantWholeSecond = Math.floor(utcInstant.getTime() / 1000) * 1000;
+  return asUtcIfSameWallClock - utcInstantWholeSecond;
+}
+
+/** dateKey(YYYY-MM-DD)의 그 tz 벽시계 hh:mm:ss.mmm을 UTC ISO로 변환. addCalendarDays로
+ * 만든 날짜 키와 짝지어 «그 tz에서의 자정/자정 직전»을 정확히 만든다. */
+function zonedWallClockToIso(dateKey: string, hh: number, mm: number, ss: number, ms: number, tz: string): string {
+  const [y, mo, d] = dateKey.split('-').map(Number);
+  const utcGuess = Date.UTC(y, (mo ?? 1) - 1, d, hh, mm, ss, ms);
+  const offset = tzOffsetMs(new Date(utcGuess), tz);
+  return new Date(utcGuess - offset).toISOString();
+}
+
+/** dateKey에 달력일 기준으로 n일을 더한다(시각 정보 없는 순수 날짜 산술 — DST·tz 무관,
+ * B1③ shiftRange가 ms 산술로 DST tz에서 하루 밀리던 것의 근본 수정 재료). */
+function addCalendarDays(dateKey: string, days: number): string {
+  const [y, mo, d] = dateKey.split('-').map(Number);
+  const noon = Date.UTC(y, (mo ?? 1) - 1, d, 12); // 정오 기준 — 자정 근처 반올림 오차 회피.
+  const shifted = new Date(noon + days * 86400000);
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** 캘린더 기본 range — tz 기준 «오늘 00:00 ~ +6일 23:59:59.999»(7일). 그리드 열 키
+ * (toDateKey)와 같은 tz 산술을 써야 정확히 7열이 선다(B1②). */
+export function defaultCalendarRange(tz: string, now: Date = new Date()): { from: string; to: string } {
+  const todayKey = toDateKey(now.toISOString(), tz);
+  const endKey = addCalendarDays(todayKey, 6);
+  return {
+    from: zonedWallClockToIso(todayKey, 0, 0, 0, 0, tz),
+    to: zonedWallClockToIso(endKey, 23, 59, 59, 999, tz),
+  };
+}
+
+/** range를 tz 기준 달력일 단위로 deltaDays만큼 이동(B1③ — ms 산술 대신 날짜 키 산술이라
+ * DST 전환일을 넘어가도 열이 안 밀린다). */
+export function shiftCalendarRange(
+  range: { from: string; to: string }, tz: string, deltaDays: number,
+): { from: string; to: string } {
+  const fromKey = addCalendarDays(toDateKey(range.from, tz), deltaDays);
+  const toKey = addCalendarDays(toDateKey(range.to, tz), deltaDays);
+  return {
+    from: zonedWallClockToIso(fromKey, 0, 0, 0, 0, tz),
+    to: zonedWallClockToIso(toKey, 23, 59, 59, 999, tz),
+  };
+}

@@ -103,4 +103,22 @@ describe('ScheduleAtDialog — story #3422 ②-d 2/N', () => {
     await flush();
     expect(document.body.querySelector('[data-testid="channel-post-schedule-at-error"]')).toBeNull();
   });
+
+  // 페드루 PO 지적(N1, 2026-09-04 12:3x) — 빈 값인 채로 확認을 누르면 아무 피드백도
+  // 없었다(showError가 value==='' 를 제외해 버려서). 확認 클릭 자체가 "손댐"이므로
+  // 그 뒤엔 에러가 떠야 한다.
+  it('⭐N1 — 빈 값인 채로 확認을 누르면 에러가 뜬다(무피드백 회귀가드)', async () => {
+    let called: string | null = null;
+    await act(async () => {
+      root.render(wrap(<ScheduleAtDialog open onOpenChange={() => {}} onSubmit={(iso) => { called = iso; }} />));
+    });
+    await flush();
+    const confirm = document.body.querySelector('[data-testid="channel-post-schedule-at-confirm"]') as HTMLButtonElement;
+    await act(async () => {
+      confirm.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(called).toBeNull();
+    expect(document.body.querySelector('[data-testid="channel-post-schedule-at-error"]')?.textContent)
+      .toBe(koMessages.content.channelPostsScheduleAtErrorInvalid);
+  });
 });

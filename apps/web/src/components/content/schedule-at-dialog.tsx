@@ -26,7 +26,11 @@ export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting, ser
   const [touched, setTouched] = useState(false);
 
   const validation = validateScheduledAt(value);
-  const showError = touched && !validation.valid && value !== '';
+  // 페드루 PO 지적(N1, 2026-09-04 12:3x) — value==='' 제외 조건 탓에 빈 값인 채로
+  // 확인을 눌러도(touched=true·validation.valid=false) 아무 피드백이 없었다(버튼도
+  // 안 막고 오류도 안 뜨고 onSubmit도 안 불림 — 사용자가 클릭이 씹혔다고 느낀다).
+  // validateScheduledAt은 빈 값도 reason:'invalid'로 판정하므로 그 값을 그대로 쓴다.
+  const showError = touched && !validation.valid;
 
   const handleConfirm = () => {
     setTouched(true);

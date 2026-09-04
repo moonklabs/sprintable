@@ -11,6 +11,7 @@ import { useChannelPostCalendarData } from '@/components/content/use-channel-pos
 import { CalendarGrid, type CalendarChannel } from '@/components/content/calendar-grid';
 import { UnscheduledLane } from '@/components/content/unscheduled-lane';
 import { CalendarRangeControls } from '@/components/content/calendar-range-controls';
+import { defaultCalendarRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * story #3422(Phase1·마케팅운영, doc §11 T8/T9) — 채널 포스트 캘린더. ③ 조립 조각 —
@@ -24,13 +25,6 @@ import { CalendarRangeControls } from '@/components/content/calendar-range-contr
  * 이 한 줄(orgTimezone 값의 출처)만 바꾸면 된다 — 그 외 배선은 이미 tz 인자 구조로
  * 흡수돼 있다.
  */
-function defaultRange(): { from: string; to: string } {
-  const now = new Date();
-  const from = new Date(now); from.setUTCHours(0, 0, 0, 0);
-  const to = new Date(from.getTime() + 6 * 86400000); to.setUTCHours(23, 59, 59, 999);
-  return { from: from.toISOString(), to: to.toISOString() };
-}
-
 interface ChannelConnectionSummary {
   id: string;
   account_label: string | null;
@@ -41,10 +35,16 @@ export default function ChannelPostCalendarPage() {
   const { orgId } = useDashboardContext();
   const t = useTranslations('content');
 
-  const [range, setRange] = useState(defaultRange);
+  const orgTimezone = undefined; // BE #46da6450 착지 前 — 위 docstring 참고.
+  // story #3422 B1(페드루 PO 재판정) — range 경계는 display tz 기준이어야 한다(UTC
+  // 자정 기준이면 KST 등 양의 오프셋 tz에서 첫/끝 열이 부분 표본이 된다 —
+  // schedule-format.ts::defaultCalendarRange 상단 주석 참고). orgTimezone은
+  // resolveDisplayTimezone과 무관하게 range보다 먼저 정해져야 하므로 훅 호출 전에
+  // 직접 계산한다(useChannelPostCalendarData 내부에서도 같은 함수로 다시 계산 —
+  // 순수함수라 중복 호출 비용 무시할 수준, 상태를 두 곳이 나눠 갖지 않는다).
+  const [range, setRange] = useState(() => defaultCalendarRange(resolveDisplayTimezone(orgTimezone).tz));
   const [connections, setConnections] = useState<ChannelConnectionSummary[]>([]);
   const [connectionsError, setConnectionsError] = useState(false);
-  const orgTimezone = undefined; // BE #46da6450 착지 前 — 위 docstring 참고.
 
   const data = useChannelPostCalendarData(orgId, range, undefined, orgTimezone);
 
@@ -83,7 +83,7 @@ export default function ChannelPostCalendarPage() {
             {t('channelPostsCalendarBackToListCta')}
           </Link>
         </div>
-        <CalendarRangeControls range={range} onRangeChange={setRange} />
+        <CalendarRangeControls range={range} onRangeChange={setRange} displayTimezone={data.displayTimezone.tz} />
       </div>
 
       {data.error || connectionsError ? (

@@ -30,9 +30,9 @@ function wrap(node: React.ReactNode) {
   return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">{node}</NextIntlClientProvider>;
 }
 
-async function render(action: FailureAction) {
+async function render(action: FailureAction, displayTimezone = 'UTC') {
   await act(async () => {
-    root.render(wrap(<FailureActionBadge action={action} />));
+    root.render(wrap(<FailureActionBadge action={action} displayTimezone={displayTimezone} />));
   });
 }
 
@@ -52,7 +52,16 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('⭐auto_retry — 버튼 없음(§17-13 "자동 재시도가 예정되면 수동 버튼 없음"), next_retry_at 보간', async () => {
     await render({ kind: 'auto_retry', nextRetryAt: '2026-09-05T00:00:00Z' });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
-    expect(container.textContent).toBe(koMessages.content.channelPostsFailureAutoRetryAt.replace('{time}', '2026-09-05T00:00:00Z'));
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureAutoRetryAt.replace('{time}', '09-05 00:00 UTC'));
+  });
+
+  // B2(페드루 PO 지적, 2026-09-04) — scheduled_at(ChannelPostCard)과 같은 카드 안에서
+  // next_retry_at만 ISO 원문으로 뜨던 결함. formatScheduledAt을 거쳐 같은 형식(MM-DD
+  // HH:mm TZ)이어야 하고, ISO 원문(끊긴 T·Z 포함 문자열)이 DOM에 남으면 안 된다.
+  it('⭐B2 — next_retry_at은 ISO 원문이 아니라 displayTimezone 기준 formatScheduledAt 형식으로 뜬다', async () => {
+    await render({ kind: 'auto_retry', nextRetryAt: '2026-09-05T21:30:00Z' }, 'Asia/Seoul');
+    expect(container.textContent).not.toContain('2026-09-05T21:30:00Z');
+    expect(container.textContent).toContain('09-06 06:30');
   });
 
   it('⭐dead_letter — 버튼 있음(수동 재시도, 휴먼 전용은 소비부 게이팅 몫)', async () => {
@@ -61,15 +70,26 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
       .toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
-  it('⭐voided — 버튼 없음, 사유 보간', async () => {
-    await render({ kind: 'voided', reasonCode: 'draft_edited' });
+  // N2(페드루 PO 지적, 2026-09-04) — CONTENT_CHANGED는 실측 BE reason_code(channel_posts.py
+  // 재승인 트리거) 중 하나 — 맵에 있으니 라벨로 보인다(원시 코드 노출 금지).
+  it('⭐voided — 버튼 없음, 맵에 있는 사유는 라벨로 보인다(원시 코드 아님)', async () => {
+    await render({ kind: 'voided', reasonCode: 'CONTENT_CHANGED' });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
-    expect(container.textContent).toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', 'draft_edited'));
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', '본문이 바뀜'));
+    expect(container.textContent).not.toContain('CONTENT_CHANGED');
   });
 
   it('voided인데 사유가 없으면 사유 없는 폴백 문구', async () => {
     await render({ kind: 'voided', reasonCode: null });
     expect(container.textContent).toBe(koMessages.content.channelPostsFailureVoided);
+  });
+
+  // N2 — 맵에 없는(미지) reason_code는 원시값을 그대로 노출하지 않고 사유 없는 폴백으로
+  // 떨어진다(entity-status-labels.ts::translateEntityStatus와 동형 규율).
+  it('⭐N2 — 맵에 없는 reason_code는 원시값 노출 대신 사유 없는 「무효가 됨」으로 떨어진다', async () => {
+    await render({ kind: 'voided', reasonCode: 'SOME_FUTURE_REASON_CODE' });
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureVoided);
+    expect(container.textContent).not.toContain('SOME_FUTURE_REASON_CODE');
   });
 
   it('⭐processing(§17-15) — 버튼 없음, transient와 다른 문구', async () => {
@@ -82,7 +102,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('onRetryClick이 dead_letter 재시도 버튼 클릭 시 호출된다', async () => {
     let clicked = false;
     await act(async () => {
-      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter' }} onRetryClick={() => { clicked = true; }} />));
+      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter' }} onRetryClick={() => { clicked = true; }} displayTimezone="UTC" />));
     });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     await act(async () => {

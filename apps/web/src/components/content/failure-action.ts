@@ -23,6 +23,20 @@ export type FailureAction =
   // 묶지 않는다(§17-15 "모양은 같고 뜻은 다르다").
   | { kind: 'processing' };
 
+// story #3422 N2(페드루 PO 지적, 2026-09-04 12:41Z) — command_reason_code 원시값을
+// 화면에 그대로 노출하지 않는다(entity-status-labels.ts::STATUS_LABELS와 동형 규율 —
+// "맵에 없는 값이 오면 칸을 비운다, 원시값을 그대로 노출하지 않는다"). 실측 3종
+// (backend/app/services/channel_posts.py — 재승인 트리거 시 무엇이 바뀌었는지 그대로).
+// CANCELLED_BY_HUMAN(cancelled 축)은 deriveFailureAction이 그 이전에 undefined로
+// 걸러(commandStatus==='cancelled') 이 배지 경로엔 실제로 안 오지만, 실 BE 값이라 맵엔
+// 올려 둔다(§17-10 정본이 늘어도 이 한 곳만 늘리면 되게).
+export const CHANNEL_POST_VOID_REASON_LABELS: Record<string, string> = {
+  CONTENT_CHANGED: '본문이 바뀜',
+  SCHEDULE_CHANGED: '예약 시각이 바뀜',
+  MEDIA_CHANGED: '이미지가 바뀜',
+  CANCELLED_BY_HUMAN: '취소됨',
+};
+
 export interface FailureActionInput {
   commandStatus?: CommandStatus | null;
   failureKind?: FailureKind | string | null;
