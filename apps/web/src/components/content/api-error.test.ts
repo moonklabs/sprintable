@@ -195,6 +195,34 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       expect(result.currentLength).toBe(517);
     });
 
+    // 카디르 라이브 실측(2026-09-04, 별도 플러그인 결함 — 그 소비부가 detail로 잘못 읽던
+    // 것과는 무관) — 이 함수 자체는 실제 BE 봉투 원문(main.py::http_exception_handler,
+    // {"data":null,"error":{...},"meta":null})으로도 정확히 파싱되는지 손 mock이 아니라
+    // 와이어 그대로의 JSON 문자열을 파싱해 재확認한다.
+    test('⭐실 BE 봉투 원문(JSON.parse, error 층) — CHANNEL_CONNECTION_NOT_ACTIVE가 정확히 파싱된다', () => {
+      const wire = '{"data":null,"error":{"code":"CHANNEL_CONNECTION_NOT_ACTIVE","message":"연결을 찾을 수 없거나 비활성 상태입니다: 11111111-1111-1111-1111-111111111111"},"meta":null}';
+      const result = parseSitePostApiError(JSON.parse(wire));
+      expect(result.kind).toBe('connection_not_active');
+      expect(result.humanMessageKey).toBe('errorChannelConnectionNotActive');
+      expect(result.humanMessageFallback).toContain('연결을 찾을 수 없거나');
+    });
+
+    test('⭐실 BE 봉투 원문 — reset_at·max_length 같은 부가 필드도 error 층에서 정확히 읽힌다', () => {
+      const rateLimitedWire = '{"data":null,"error":{"code":"CHANNEL_RATE_LIMITED","message":"한도 초과","reset_at":"2026-09-05T09:00:00Z"},"meta":null}';
+      expect(parseSitePostApiError(JSON.parse(rateLimitedWire)).resetAt).toBe('2026-09-05T09:00:00Z');
+
+      const textTooLongWire = '{"data":null,"error":{"code":"CHANNEL_TEXT_TOO_LONG","message":"한도 초과","max_length":500,"current_length":517},"meta":null}';
+      const textTooLong = parseSitePostApiError(JSON.parse(textTooLongWire));
+      expect(textTooLong.maxLength).toBe(500);
+      expect(textTooLong.currentLength).toBe(517);
+
+      const heldWire = '{"data":null,"error":{"code":"CHANNEL_POST_GATE_ALREADY_HELD","message":"…","holding_draft_id":"d9","holding_channel":"threads","holding_connection_id":"c9"},"meta":null}';
+      const held = parseSitePostApiError(JSON.parse(heldWire));
+      expect(held.heldByDraftId).toBe('d9');
+      expect(held.heldByChannel).toBe('threads');
+      expect(held.heldByConnectionId).toBe('c9');
+    });
+
     test('EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED — site 항목을 그대로 재사용(doc §9-4)', () => {
       expect(parseSitePostApiError({ error: { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: '…' } }).kind).toBe('approval_required');
       expect(parseSitePostApiError({ error: { code: 'SITE_POST_SEAL_MISSING', message: '…' } }).kind).toBe('seal_missing');
