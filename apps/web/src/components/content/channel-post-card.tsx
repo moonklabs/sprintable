@@ -2,12 +2,14 @@ import Link from 'next/link';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { formatScheduledAt } from '@/components/content/schedule-format';
+import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
 
 // story #3422(doc §11 T8) — 캘린더 격자 셀과 「날짜 미정」 레인이 공유하는 유일한 렌더
 // 단위(설계 코멘트 "ChannelPostCard가 유일한 렌더 단위" 그대로). deriveChannelPostView를
 // 그대로 재사용해 칩을 만든다(§17-1 — 새 파생 금지). 실패/회수 오버레이(§17-2·§17-10)는
-// ②-c가 FailureActionBadge로 얹는다 — 이 조각은 칩+시각까지만.
+// B3(페드루 PO, 2026-09-04 13:14Z)에서 FailureActionBadge로 얹는다 — 칩 바로 아래.
 export interface ChannelPostCardProps {
   item: ChannelPostCalendarItem;
   /** 그리드/레인이 공유하는 단일 tz 출처(schedule-format.ts::resolveDisplayTimezone) —
@@ -31,6 +33,16 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
       })
     : { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false, errorCode: undefined, unpublished: false, isRepublish: undefined, blockedReason: undefined };
 
+  // B3(페드루 PO, 2026-09-04 13:14Z) — [draftId]/page.tsx와 동형 재사용(같은 함수·같은
+  // 진리표, §17-2 "화면이 갈래를 다시 안 짠다").
+  const failureAction = deriveFailureAction({
+    commandStatus: item.command_status as CommandStatus | null | undefined,
+    failureKind: item.failure_kind,
+    nextRetryAt: item.next_retry_at,
+    reasonCode: item.command_reason_code,
+    processingKind: item.processing_kind,
+  });
+
   return (
     <Link
       href={`/content/channel-posts/${item.draft_id}`}
@@ -46,6 +58,7 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
           </span>
         ) : null}
       </div>
+      {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} /> : null}
       {item.text_preview ? (
         <p className="truncate text-foreground" data-testid="channel-post-calendar-card-preview">{item.text_preview}</p>
       ) : null}

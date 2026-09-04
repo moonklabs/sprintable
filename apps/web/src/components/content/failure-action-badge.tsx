@@ -1,14 +1,17 @@
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { CHANNEL_POST_VOID_REASON_LABELS, type FailureAction } from '@/components/content/failure-action';
+import { CHANNEL_POST_VOID_REASON_MESSAGE_KEYS, type FailureAction } from '@/components/content/failure-action';
 import { formatScheduledAt } from '@/components/content/schedule-format';
 
 // story #3422 ②-c 2/N(doc §17-13) — 실패 5종 렌더 매핑. 버튼 유무표 그대로:
 //   blocked=버튼 없음(연결 고치기로) · needs_check=2단계(확認→재시도) ·
 //   auto_retry=버튼 없음(next_retry_at 표시) · dead_letter=수동 재시도 버튼(휴먼) ·
 //   voided=사유만(행동 없음).
-// ⚠️버튼 클릭 배선(재시도 API 호출·확認 다이얼로그)은 이 조각 스코프 밖 — 라벨·버튼
-// 유무까지만(PR2 ②-a "게이팅만, API는 별도"와 동형 관례).
+// B3(페드루 PO, 2026-09-04 13:14Z) — 재시도 «클릭» 배선(재시도 API 호출·확認 다이얼로그)
+// 은 BE가 command_id를 아직 응답에 안 실어(openapi 실측) 이 조각 스코프 밖이다. BE
+// 노출(story 0e960006) 뒤 FE 배선(story f061c1a3)이 후속. onRetryClick이 안 넘어오면
+// (지금 모든 호출부가 그렇다) 버튼을 안 그리거나 눌리는데 no-op으로 두지 않는다 —
+// disabled+title로 「곧 열린다」를 알린다(화면이 거짓말하지 않는다).
 export interface FailureActionBadgeProps {
   action: FailureAction;
   onRetryClick?: () => void;
@@ -32,7 +35,11 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone }: Fa
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p className="text-xs text-muted-foreground">{t('channelPostsFailureNeedsCheck')}</p>
-        <Button variant="outline" size="sm" onClick={onRetryClick} data-testid="channel-post-failure-retry-button">
+        <Button
+          variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+          title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
+          data-testid="channel-post-failure-retry-button"
+        >
           {t('channelPostsFailureCheckedRetryCta')}
         </Button>
       </div>
@@ -53,7 +60,11 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone }: Fa
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p className="text-xs text-destructive">{t('channelPostsFailureDeadLetter')}</p>
-        <Button variant="outline" size="sm" onClick={onRetryClick} data-testid="channel-post-failure-retry-button">
+        <Button
+          variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+          title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
+          data-testid="channel-post-failure-retry-button"
+        >
           {t('channelPostsFailureRetryCta')}
         </Button>
       </div>
@@ -66,13 +77,14 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone }: Fa
       </p>
     );
   }
-  // action.kind === 'voided'. N2(페드루 PO 지적) — command_reason_code 원시값을 그대로
-  // 보간하지 않는다(entity-status-labels.ts 규율과 동형: 맵에 있으면 라벨, 없으면 사유
-  // 없이 「무효가 됨」— 원시 코드 노출 금지).
-  const voidReasonLabel = action.reasonCode ? CHANNEL_POST_VOID_REASON_LABELS[action.reasonCode] : undefined;
+  // action.kind === 'voided'. N2(페드루 PO 지적·유나 재판정) — command_reason_code
+  // 원시값을 그대로 보간하지 않는다(entity-status-labels.ts 규율과 동형: 맵에 있으면
+  // 라벨, 없으면 사유 없이 「무효가 됨」— 원시 코드 노출 금지). 맵은 한글 리터럴이 아니라
+  // 메시지 키를 들고, 여기서 t(key)로 풀어야 en 로케일에서 사유만 한글로 남지 않는다.
+  const voidReasonKey = action.reasonCode ? CHANNEL_POST_VOID_REASON_MESSAGE_KEYS[action.reasonCode] : undefined;
   return (
     <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
-      {voidReasonLabel ? t('channelPostsFailureVoidedWithReason', { reason: voidReasonLabel }) : t('channelPostsFailureVoided')}
+      {voidReasonKey ? t('channelPostsFailureVoidedWithReason', { reason: t(voidReasonKey) }) : t('channelPostsFailureVoided')}
     </p>
   );
 }

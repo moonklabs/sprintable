@@ -49,6 +49,16 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
       .toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
   });
 
+  // B3(페드루 PO, 2026-09-04 13:14Z) — 재시도 클릭 배선은 story f061c1a3 후속(BE
+  // command_id 노출 뒤). 그 前까지 onRetryClick 미배선 상태로는 disabled+title로만
+  // 렌더한다(눌리는데 아무 일 없는 버튼 금지).
+  it('⭐B3 — needs_check 재시도 버튼은 onRetryClick 미배선이면 disabled+title', async () => {
+    await render({ kind: 'needs_check' });
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+  });
+
   it('⭐auto_retry — 버튼 없음(§17-13 "자동 재시도가 예정되면 수동 버튼 없음"), next_retry_at 보간', async () => {
     await render({ kind: 'auto_retry', nextRetryAt: '2026-09-05T00:00:00Z' });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
@@ -68,6 +78,13 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     await render({ kind: 'dead_letter' });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
       .toBe(koMessages.content.channelPostsFailureRetryCta);
+  });
+
+  it('⭐B3 — dead_letter 재시도 버튼은 onRetryClick 미배선이면 disabled+title', async () => {
+    await render({ kind: 'dead_letter' });
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toBe(koMessages.content.channelPostsFailureRetryComingSoon);
   });
 
   // N2(페드루 PO 지적, 2026-09-04) — CONTENT_CHANGED는 실측 BE reason_code(channel_posts.py

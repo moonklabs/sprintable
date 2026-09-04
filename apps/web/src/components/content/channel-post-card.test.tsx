@@ -82,4 +82,59 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
     });
     expect(container.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/d1');
   });
+
+  // B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고 캘린더 셀·레인
+  // 어디에도 mount 안 돼 있던 갭. 표본 5종이 카드에서 실제로 「보인다」를 pin한다(존재
+  // 여부가 아니라 렌더 여부 — deriveFailureAction을 다시 짜지 않고 그대로 재사용).
+  describe('⭐B3 — 실패 배지 5종이 카드에서 보인다', () => {
+    it('blocked', async () => {
+      await act(async () => {
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'blocked' }} displayTimezone="Asia/Seoul" />));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureBlocked);
+    });
+
+    it('needs_check', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <ChannelPostCard item={{ ...BASE_ITEM, command_status: 'pending', failure_kind: 'needs_check' }} displayTimezone="Asia/Seoul" />,
+        ));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
+    });
+
+    it('auto_retry', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <ChannelPostCard
+            item={{ ...BASE_ITEM, command_status: 'pending', failure_kind: 'transient', next_retry_at: '2026-09-05T00:00:00Z' }}
+            displayTimezone="Asia/Seoul"
+          />,
+        ));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    });
+
+    it('dead_letter', async () => {
+      await act(async () => {
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'dead_letter' }} displayTimezone="Asia/Seoul" />));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureRetryCta);
+    });
+
+    it('voided', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <ChannelPostCard item={{ ...BASE_ITEM, command_status: 'voided', command_reason_code: 'CONTENT_CHANGED' }} displayTimezone="Asia/Seoul" />,
+        ));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', '본문이 바뀜'));
+    });
+  });
 });

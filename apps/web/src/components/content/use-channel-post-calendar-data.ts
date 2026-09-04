@@ -24,6 +24,11 @@ export interface ChannelPostCalendarItem {
   scheduled_at?: string | null;
   command_status?: string | null;
   command_reason_code?: string | null;
+  // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — ChannelPostCard의 실패 배지 mount에
+  // 필요한 나머지 필드. BE 목록 응답(ChannelPostDraftListItem)이 이미 낸다.
+  failure_kind?: string | null;
+  next_retry_at?: string | null;
+  processing_kind?: string | null;
   text_preview?: string;
 }
 

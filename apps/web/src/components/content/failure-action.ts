@@ -30,11 +30,16 @@ export type FailureAction =
 // CANCELLED_BY_HUMAN(cancelled 축)은 deriveFailureAction이 그 이전에 undefined로
 // 걸러(commandStatus==='cancelled') 이 배지 경로엔 실제로 안 오지만, 실 BE 값이라 맵엔
 // 올려 둔다(§17-10 정본이 늘어도 이 한 곳만 늘리면 되게).
-export const CHANNEL_POST_VOID_REASON_LABELS: Record<string, string> = {
-  CONTENT_CHANGED: '본문이 바뀜',
-  SCHEDULE_CHANGED: '예약 시각이 바뀜',
-  MEDIA_CHANGED: '이미지가 바뀜',
-  CANCELLED_BY_HUMAN: '취소됨',
+//
+// 유나 재판정(2026-09-04 13:08Z) — 처음엔 이 맵이 한글 리터럴이었다. en 로케일에서
+// `channelPostsFailureVoidedWithReason`("Voided · {reason}")과 합성되면 "Voided ·
+// 본문이 바뀜"처럼 문장은 영어인데 사유만 한글로 남는다. 값을 메시지 키로 바꿔
+// 렌더 시점에 t(key)로 푼다 — «맵에 없으면 사유 없이» 규율은 그대로.
+export const CHANNEL_POST_VOID_REASON_MESSAGE_KEYS: Record<string, string> = {
+  CONTENT_CHANGED: 'channelPostsVoidReasonContentChanged',
+  SCHEDULE_CHANGED: 'channelPostsVoidReasonScheduleChanged',
+  MEDIA_CHANGED: 'channelPostsVoidReasonMediaChanged',
+  CANCELLED_BY_HUMAN: 'channelPostsVoidReasonCancelledByHuman',
 };
 
 export interface FailureActionInput {

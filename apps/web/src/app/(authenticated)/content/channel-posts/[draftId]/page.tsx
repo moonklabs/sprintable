@@ -16,6 +16,9 @@ import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
 import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
+import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -59,6 +62,12 @@ interface ChannelPostDraftDetail {
   command_status?: string | null;
   command_reason_code?: string | null;
   scheduled_at?: string | null;
+  // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지(FailureActionBadge)가 이
+  // 화면에 mount 안 된 채로 남아 있던 갭. 단건 GET(ChannelPostDraftListItem과 동형
+  // shape, backend/app/routers/channel_posts.py)이 이미 내는 필드.
+  failure_kind?: string | null;
+  next_retry_at?: string | null;
+  processing_kind?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -565,6 +574,18 @@ export default function ChannelPostEditPage() {
   const showUnpublish = draft.publication_status === 'published';
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true;
 
+  // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
+  // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
+  // 동형(failure-action.ts 우선순위 진리표 그대로 재사용 — 화면이 갈래를 다시 안 짠다).
+  const failureAction = deriveFailureAction({
+    commandStatus: draft.command_status as CommandStatus | null | undefined,
+    failureKind: draft.failure_kind,
+    nextRetryAt: draft.next_retry_at,
+    reasonCode: draft.command_reason_code,
+    processingKind: draft.processing_kind,
+  });
+  const displayTimezone = resolveDisplayTimezone().tz;
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
@@ -587,6 +608,9 @@ export default function ChannelPostEditPage() {
             {view.status === undefined ? t('originAuthorUnknown') : t(contentPostStatusLabelKey(view.status))}
           </span>
         </div>
+        {/* B3(페드루 PO) — 실패 배지는 칩(위 상태 줄) 바로 아래(§17-2 오버레이 규율).
+            failureAction===undefined면(정상 대기·완료 등) 아예 안 그린다. */}
+        {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} /> : null}
         {/* AC9 — 나가는 계정. */}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalAccountLabel')}</span>

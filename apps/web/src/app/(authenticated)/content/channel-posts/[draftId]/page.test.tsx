@@ -74,6 +74,11 @@ const DRAFT_DETAIL = {
   published_at: null as string | null,
   published_body_sha256: null as string | null,
   command_status: null as string | null,
+  // B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지 mount에 쓰는 나머지 필드.
+  command_reason_code: null as string | null,
+  failure_kind: null as string | null,
+  next_retry_at: null as string | null,
+  processing_kind: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -1224,5 +1229,51 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+  });
+
+  // B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고 이 화면엔
+  // mount 안 돼 있던 갭(#3422 AC3). 표본 5종이 상세에서 실제로 「보인다」를 pin한다.
+  describe('⭐B3 — 실패 배지 5종이 상세에서 보인다', () => {
+    it('blocked', async () => {
+      stubFetch({ draftDetail: { command_status: 'blocked' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureBlocked);
+    });
+
+    it('needs_check', async () => {
+      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
+    });
+
+    it('auto_retry', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'pending', failure_kind: 'transient', next_retry_at: '2026-09-05T00:00:00Z' },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    });
+
+    it('dead_letter', async () => {
+      stubFetch({ draftDetail: { command_status: 'dead_letter' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureRetryCta);
+    });
+
+    it('voided', async () => {
+      stubFetch({ draftDetail: { command_status: 'voided', command_reason_code: 'CONTENT_CHANGED' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', '본문이 바뀜'));
+    });
   });
 });
