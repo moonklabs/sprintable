@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.routers.channel_posts import ChannelPostDraftListItem, _to_draft_list_item
-from app.services.campaigns import create_campaign, get_campaign, list_content_items_for_campaign
+from app.services.campaigns import create_campaign, get_campaign, list_campaigns, list_content_items_for_campaign
 from app.services.channel_posts import list_channel_post_drafts
 from app.services.member_resolver import resolve_member
 
@@ -77,6 +77,23 @@ async def post_campaign(
         created_by_member_id=resolved.id,
     )
     return _campaign_response(campaign)
+
+
+@router.get("/{org_id}/campaigns", response_model=list[CampaignResponse])
+async def list_campaigns_endpoint(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[CampaignResponse]:
+    """story #3457(Phase1·FE, 페드루 PO 確定 2026-09-04) — "기존 campaign 선택"
+    드롭다운 데이터원(3457 AC2). `GET /{campaign_id}`와 동일 권한 폭 — 조직 멤버
+    (휴먼·에이전트 모두) 읽기 가능, 생성만 human-only(이 도메인 전체 관례). 응답
+    모양은 `CampaignResponse` 그대로 재사용(새 모양 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    campaigns = await list_campaigns(db, org_id=org_id)
+    return [_campaign_response(c) for c in campaigns]
 
 
 class CampaignContentItemItem(BaseModel):
