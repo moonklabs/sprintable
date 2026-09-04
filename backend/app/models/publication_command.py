@@ -43,6 +43,10 @@ class PublicationCommand(Base):
     destination: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     approved_version: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     operation: Mapped[str] = mapped_column(Text, nullable=False, server_default="publish")
+    # story e4fc29fa(조각③c) — 'channel_post'|'site_post'. approved_version이 어느
+    # 테이블(ChannelPostVersion|SitePostVersion)을 가리키는지의 유일한 판별축(워커
+    # 분기) — FK 없음 관례라 이 컬럼 없이는 워커가 두 도메인을 못 구분한다.
+    content_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="channel_post")
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 'pending'|'in_progress'|'completed'|'failed'|'dead_letter'|'voided'|'blocked'
     # (blocked=connection 복구 대기, PO 정정2 추가② — 일반 재시도 큐 밖).

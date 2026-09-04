@@ -106,6 +106,22 @@ async def test_publish_rejects_http_site_url_no_call_made():
 
 
 @pytest.mark.anyio
+async def test_publish_allows_loopback_http_site_url():
+    """조각③c — dev_wordpress_stub.py(실 uvicorn, TLS 없음) 대상 AC7 실왕복 테스트가
+    걸리지 않도록 http://127.0.0.1·http://localhost는 HTTPS 강제 예외(RFC 8252 §7.3
+    동형 사상). 뮤테이션 대상: 이 예외를 지우면 loopback 왕복 테스트가 전부 RED."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201, json={"id": 1, "link": "http://127.0.0.1:9/post-1/"})
+
+    async with httpx.AsyncClient(transport=_transport(handler)) as client:
+        external_id, _ = await publish(
+            client, site_url="http://127.0.0.1:9", username="editor",
+            app_password="pw", title="제목", body_md="본문", summary="요약", slug="slug",
+        )
+    assert external_id == "1"
+
+
+@pytest.mark.anyio
 async def test_unpublish_sets_status_draft():
     captured = {}
 

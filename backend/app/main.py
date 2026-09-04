@@ -90,6 +90,8 @@ async def lifespan(app: FastAPI):
     warn_if_rate_limit_backend_is_memory()  # story #3418: 인스턴스 다중+memory=레이트리밋 인스턴스별 분리, 경고만(fail-closed 아님).
     from app.services.channel_adapters import assert_sandbox_channel_not_registered_in_prod
     assert_sandbox_channel_not_registered_in_prod()  # story 5b27b32f AC5: prod에 sandbox 채널 등재=기동 실패(fail-closed).
+    from app.routers.dev_wordpress_stub import assert_wordpress_stub_not_registered_in_prod
+    assert_wordpress_stub_not_registered_in_prod()  # story e4fc29fa 조각③c: prod에 WordPress 스텁 등재=기동 실패(fail-closed).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
@@ -451,6 +453,14 @@ app.include_router(merge_gate.router)
 app.include_router(organizations.router)
 app.include_router(pageview_metering.router)
 app.include_router(site_posts.router)
+# story e4fc29fa(조각③c) — dev 전용 WordPress REST 모의(AC7 실왕복 표본 대상).
+# sandbox_publish.py 등재 조건(SANDBOX_CHANNEL_ENABLED)과 같은 사상 — 이 라우터 자체가
+# 조건부 등재(①층 방어), assert_wordpress_stub_not_registered_in_prod()가 기동 시
+# prod 오조작을 잡는다(②층, lifespan에서 호출).
+from app.routers import dev_wordpress_stub as _dev_wordpress_stub  # noqa: E402
+
+if _dev_wordpress_stub.wordpress_stub_enabled():
+    app.include_router(_dev_wordpress_stub.router)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)

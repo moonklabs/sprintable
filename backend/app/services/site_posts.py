@@ -641,7 +641,12 @@ async def submit_site_post_draft(
         return existing, target.id  # 이미 이 정확한 내용+목적지로 봉인돼 있다 — 재봉인하지 않는다(불변).
 
     neutral_facts = {
-        "destination": _SITE_POST_DESTINATION,
+        # story e4fc29fa(조각③c) — 이전엔 이 값이 destination과 무관하게 항상 "hosted_site"
+        # 상수였다(그라운딩에서 발견). 실제 목적지 채널을 실어야 ①승인 훅(gate_service.py::
+        # _maybe_create_scheduled_publication_command)이 CHANNEL_ADAPTERS[destination].kind
+        # 로 channel_post/site_post 게이트를 구분할 수 있고 ②사람이 보는 승인 화면이 실제
+        # 목적지를 안다.
+        "destination": await _resolve_destination_channel(db, org_id=org_id, draft=draft),
         "media_manifest_hash": _EMPTY_MEDIA_MANIFEST_HASH,
         "draft_author_member_id": str(origin_author_member_id),
         "requested_by_member_id": str(requester_member_id),
@@ -792,6 +797,286 @@ async def publish_site_post_from_draft(
     await db.commit()
     await db.refresh(post)
     return post, url, latest.id
+
+
+async def _resolve_destination_channel(db: AsyncSession, *, org_id: uuid.UUID, draft: SitePostDraft) -> str:
+    """story e4fc29fa(조각③c) — gate.neutral_facts["destination"]에 실을 값. connection_id
+    가 None이면 `_SITE_POST_DESTINATION`("hosted_site") 그대로, 있으면 그 connection의
+    실제 channel 문자열(예: "wordpress"). 승인 훅(gate_service.py)이 이 값으로
+    `CHANNEL_ADAPTERS[destination].kind`를 조회해 channel_post/site_post 게이트를
+    구분한다 — connection이 그 사이 지워졌으면(이례적) hosted_site로 안전하게 폴백
+    (fail-closed로 훅이 스킵되는 쪽이 존재하지 않는 채널명을 싣는 것보다 낫다)."""
+    if draft.connection_id is None:
+        return _SITE_POST_DESTINATION
+    from app.models.channel_connection import ChannelConnection
+
+    connection = (await db.execute(
+        select(ChannelConnection.channel).where(
+            ChannelConnection.id == draft.connection_id, ChannelConnection.org_id == org_id,
+        )
+    )).scalar_one_or_none()
+    return connection if connection is not None else _SITE_POST_DESTINATION
+
+
+async def _get_active_blog_connection(db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID):
+    """`channel_posts.py::_get_active_connection`과 동형(로직 복제, 순환 import 회피 —
+    channel_posts.py가 이미 이 파일을 모듈 최상단에서 import해서 그 반대 방향은 못
+    연다)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_posts import ChannelConnectionNotActiveError
+
+    conn = (await db.execute(
+        select(ChannelConnection).where(
+            ChannelConnection.id == connection_id, ChannelConnection.org_id == org_id,
+        )
+    )).scalar_one_or_none()
+    if conn is None or conn.status != "active":
+        raise ChannelConnectionNotActiveError(connection_id=connection_id)
+    return conn
+
+
+class SitePostExternalPublishError(Exception):
+    """story e4fc29fa(조각③c) — 외부 목적지(WordPress 등) 발행/회수 실패. error_code로
+    워커가 failure_kind(connection/needs_check/transient)를 분류한다(publication_
+    command.py::classify_failure_kind — channel_posts.py와 같은 매핑표를 공유하므로
+    새 표를 안 만들고 기존 error_code 문자열을 그대로 재사용한다)."""
+
+    def __init__(self, *, error_code: str, message: str):
+        self.error_code = error_code
+        super().__init__(message)
+
+
+async def request_site_post_external_publish(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, requested_by_member_id: uuid.UUID,
+) -> "PublicationCommand":
+    """story e4fc29fa(조각③c) — draft.connection_id가 non-null(외부 목적지)일 때의 발행
+    요청. `publish_site_post_from_draft`와 같은 3중 재검증(게이트 approved·봉인 일치)을
+    거치되, 내부 저장 대신 publication_command를 upsert만 하고 반환한다 — 실제 외부
+    HTTP는 워커(`process_due_publication_commands`)가 한다. site_post는 scheduled_at
+    개념이 없어(그라운딩 확認) 이 요청은 항상 `scheduled_at=None`으로 커맨드를 만든다
+    — channel_posts의 "즉시" 분기와 달리 이 경로 자체는 동기 완결이 아니다(PO 確定 —
+    응답은 command_id+status="pending", 실제 결과는 워커가 채운다)."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+
+    versions = await list_site_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise SitePostDraftNotFoundError(draft_id)
+    latest = versions[-1]
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    gate = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type="external_publish", pr_number=None, repo_full_name=None,
+    )
+    if gate is None or gate.status != "approved":
+        raise ExternalPublishGateNotApprovedError(
+            gate_id=gate.id if gate is not None else None,
+            status=gate.status if gate is not None else None,
+        )
+    if gate.sealed_content_sha256 is None:
+        raise SitePostSealMissingError(gate_id=gate.id)
+    if gate.sealed_content_sha256 != latest.body_sha256:
+        raise SitePostReapprovalRequiredError(gate_id=gate.id)
+
+    from app.services.publication_command import create_or_get_publication_command
+
+    command, _ = await create_or_get_publication_command(
+        db, org_id=org_id, gate_id=gate.id, destination=draft.connection_id,
+        approved_version=latest.id, requested_by_member_id=requested_by_member_id,
+        scheduled_at=None, content_kind="site_post",
+    )
+    await db.commit()
+    return command
+
+
+async def request_site_post_external_unpublish(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, requested_by_member_id: uuid.UUID,
+) -> "PublicationCommand":
+    """story e4fc29fa(조각③c) — 외부 목적지 회수 요청. 지금 살아 있는(status="published")
+    `channel_publications` 행(connection_id로 좁힘)을 되짚어 그 (gate_id, version_id)로
+    operation="unpublish" 커맨드를 upsert한다 — publish와 같은 멱등키 구조(gate_id+
+    version_id는 그대로, operation만 다르니 별도 행)."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None or draft.connection_id is None:
+        raise SitePostDraftNotFoundError(draft_id)
+
+    from app.models.channel_publication import ChannelPublication
+
+    published = (await db.execute(
+        select(ChannelPublication)
+        .where(
+            ChannelPublication.org_id == org_id,
+            ChannelPublication.connection_id == draft.connection_id,
+            ChannelPublication.status == "published",
+        )
+        .order_by(ChannelPublication.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if published is None:
+        raise SitePostNotPublishedError(draft_id)
+
+    from app.services.publication_command import create_or_get_publication_command
+
+    command, _ = await create_or_get_publication_command(
+        db, org_id=org_id, gate_id=published.gate_id, destination=draft.connection_id,
+        approved_version=published.version_id, requested_by_member_id=requested_by_member_id,
+        scheduled_at=None, content_kind="site_post", operation="unpublish",
+    )
+    await db.commit()
+    return command
+
+
+async def publish_site_post_external_command(db: AsyncSession, command: "PublicationCommand"):
+    """워커(`publication_command.py::_process_one_command`)의 site_post 분기 —
+    `command.approved_version`(SitePostVersion.id)→draft→connection을 되짚어
+    `blog_destinations` 디스패치로 실 HTTP를 친다. 성공 결과는 `channel_publications`에
+    기록(정본 §3 "재사용" — hosted_site는 이 테이블을 안 쓰는 것과 별개, 이 함수는
+    connection_id가 있는 draft 전용). 재발행(같은 connection의 기존 external_id가
+    있으면 그 글을 갱신)해 WordPress에 중복 글이 안 쌓인다."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.site_post_version import SitePostVersion
+    from app.services.blog_destinations import get_blog_destination_module
+    from app.services.channel_connection import decrypt_for_use
+    from app.services.channel_posts import ChannelConnectionNotActiveError
+    from app.services.wordpress_publish import WordPressPublishError, WordPressSiteURLInsecureError
+
+    version = (await db.execute(
+        select(SitePostVersion).where(SitePostVersion.id == command.approved_version)
+    )).scalar_one_or_none()
+    if version is None:
+        raise SitePostExternalPublishError(
+            error_code="SITE_POST_DRAFT_NOT_FOUND", message=f"버전을 찾을 수 없습니다: {command.approved_version}",
+        )
+
+    draft = await get_site_post_draft(db, org_id=command.org_id, draft_id=version.draft_id)
+    if draft is None or draft.connection_id is None:
+        raise SitePostExternalPublishError(
+            error_code="SITE_POST_DRAFT_NOT_FOUND", message=f"draft를 찾을 수 없습니다: {version.draft_id}",
+        )
+
+    try:
+        connection = await _get_active_blog_connection(db, org_id=command.org_id, connection_id=draft.connection_id)
+    except ChannelConnectionNotActiveError as exc:
+        raise SitePostExternalPublishError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=str(exc)) from exc
+
+    app_password = decrypt_for_use(connection)
+    if app_password is None:
+        raise SitePostExternalPublishError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결에 자격이 없습니다: {connection.id}",
+        )
+
+    module = get_blog_destination_module(connection_id=connection.id, channel=connection.channel)
+
+    existing_pub = (await db.execute(
+        select(ChannelPublication)
+        .where(ChannelPublication.connection_id == connection.id, ChannelPublication.external_id.isnot(None))
+        .order_by(ChannelPublication.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    prior_external_id = existing_pub.external_id if existing_pub is not None else None
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as client:
+            external_id, permalink = await module.publish(
+                client, site_url=connection.account_id, username=connection.account_label or "",
+                app_password=app_password, title=version.title, body_md=version.body_md,
+                summary=version.summary, slug=draft.slug, external_id=prior_external_id,
+            )
+    except WordPressSiteURLInsecureError as exc:
+        raise SitePostExternalPublishError(error_code="SITE_POST_DESTINATION_INSECURE", message=str(exc)) from exc
+    except WordPressPublishError as exc:
+        raise SitePostExternalPublishError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
+
+    # story #3395/#3757 동형 SAVEPOINT 관용구(동시 처리 방어) — (gate_id, version_id) UNIQUE 재사용.
+    from sqlalchemy.exc import IntegrityError
+
+    now = datetime.now(timezone.utc)
+    row = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.gate_id == command.gate_id, ChannelPublication.version_id == version.id,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        row = ChannelPublication(
+            id=uuid.uuid4(), org_id=command.org_id, gate_id=command.gate_id, version_id=version.id,
+            connection_id=connection.id, channel=connection.channel, status="published",
+            external_id=external_id, permalink=permalink, published_at=now,
+        )
+        try:
+            async with db.begin_nested():
+                db.add(row)
+                await db.flush()
+        except IntegrityError as exc:
+            _orig = getattr(exc, "orig", None)
+            constraint = getattr(_orig, "constraint_name", None) or getattr(
+                getattr(_orig, "__cause__", None), "constraint_name", None,
+            )
+            if constraint != "uq_channel_publications_gate_version":
+                raise
+            row = (await db.execute(
+                select(ChannelPublication).where(
+                    ChannelPublication.gate_id == command.gate_id, ChannelPublication.version_id == version.id,
+                )
+            )).scalar_one()
+            row.status, row.external_id, row.permalink, row.published_at = "published", external_id, permalink, now
+    else:
+        row.status, row.external_id, row.permalink, row.published_at = "published", external_id, permalink, now
+    return row
+
+
+async def unpublish_site_post_external_command(db: AsyncSession, command: "PublicationCommand"):
+    """워커의 site_post unpublish 분기 — `command.gate_id`+`approved_version`으로 원
+    `channel_publications` 행(external_id 보유)을 되짚어 `wordpress_publish.unpublish()`
+    를 친다(status=draft 전환, 비파괴). 성공 시 그 행 status="unpublished"(channel_
+    publications 기존 3값 container_created|published|failed에 이 조각이 4번째 값을
+    보탠다 — CHECK 제약 없는 Text 컬럼이라 마이그 불요)."""
+    from app.models.channel_publication import ChannelPublication
+    from app.services.blog_destinations import get_blog_destination_module
+    from app.services.channel_connection import decrypt_for_use
+    from app.services.channel_posts import ChannelConnectionNotActiveError
+    from app.services.wordpress_publish import WordPressPublishError, WordPressSiteURLInsecureError
+
+    row = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.gate_id == command.gate_id, ChannelPublication.version_id == command.approved_version,
+        )
+    )).scalar_one_or_none()
+    if row is None or row.external_id is None:
+        raise SitePostExternalPublishError(error_code="SITE_POST_NOT_PUBLISHED", message="회수할 발행 기록이 없습니다")
+
+    try:
+        connection = await _get_active_blog_connection(db, org_id=command.org_id, connection_id=row.connection_id)
+    except ChannelConnectionNotActiveError as exc:
+        raise SitePostExternalPublishError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=str(exc)) from exc
+
+    app_password = decrypt_for_use(connection)
+    if app_password is None:
+        raise SitePostExternalPublishError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결에 자격이 없습니다: {connection.id}",
+        )
+
+    module = get_blog_destination_module(connection_id=connection.id, channel=connection.channel)
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as client:
+            await module.unpublish(
+                client, site_url=connection.account_id, username=connection.account_label or "",
+                app_password=app_password, external_id=row.external_id,
+            )
+    except WordPressSiteURLInsecureError as exc:
+        raise SitePostExternalPublishError(error_code="SITE_POST_DESTINATION_INSECURE", message=str(exc)) from exc
+    except WordPressPublishError as exc:
+        raise SitePostExternalPublishError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
+
+    row.status = "unpublished"
+    return row
 
 
 class SitePostPublicationInfo:

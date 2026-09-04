@@ -39,6 +39,8 @@ from app.services.site_posts import (
     list_site_post_drafts,
     publish_site_post,
     publish_site_post_from_draft,
+    request_site_post_external_publish,
+    request_site_post_external_unpublish,
     set_site_post_draft_campaign,
     submit_site_post_draft,
     unpublish_site_post,
@@ -479,9 +481,16 @@ async def submit_site_post_draft_endpoint(
 
 
 class PublishSitePostFromDraftResponse(BaseModel):
-    url: str
-    published_at: str
+    # story e4fc29fa(조각③c) — 외부 목적지(connection_id != None)는 이 요청 시점엔 아직
+    # 결과가 없다(url/published_at은 워커가 나중에 채우는 channel_publications 몫이지
+    # 이 응답의 몫이 아니다) — hosted_site 기존 응답과의 회귀 0을 위해 둘 다 Optional로
+    # 바꾸되 hosted_site 분기는 여전히 항상 채워 보낸다(channel_posts publish 응답의
+    # scheduled=true 모양과 동형 사상 — 새 필드만 추가, 기존 필드 의미 무변경).
+    url: str | None = None
+    published_at: str | None = None
     version_id: uuid.UUID
+    command_id: uuid.UUID | None = None
+    status: str | None = None  # "pending" — 외부 목적지 경로에서만 채워진다.
 
 
 @router.post(
@@ -495,12 +504,19 @@ async def publish_site_post_from_draft_endpoint(
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> PublishSitePostFromDraftResponse:
-    """story #3369(Phase0 S3) — 휴먼이 승인된 최신 버전을 공개한다. draft_id 하나로 서버가
-    직접 최신 버전·게이트를 읽는다(발행 화면이 본문을 다시 보낼 필요 없음 — S4 계약).
+    """story #3369(Phase0 S3)·e4fc29fa(조각③c 확장) — 휴먼이 승인된 최신 버전을
+    공개한다. draft_id 하나로 서버가 직접 최신 버전·게이트를 읽는다(발행 화면이
+    본문을 다시 보낼 필요 없음 — S4 계약).
 
     가드 순서(AC2·AC3): ①에이전트 호출자 차단(SITE_POST_PUBLISH_HUMAN_ONLY) → ②게이트
     approved 재검증(EXTERNAL_PUBLISH_APPROVAL_REQUIRED, auto_passed도 거부) → ③봉인
-    재검증(SEAL_MISSING/REAPPROVAL_REQUIRED)."""
+    재검증(SEAL_MISSING/REAPPROVAL_REQUIRED).
+
+    조각③c — 사용자는 "목적지를 골랐지 내부/외부를 고른 게 아니다"(페드루 확定,
+    별도 엔드포인트 신설 거부) — draft의 봉인된 목적지(connection_id)로 이 하나의
+    엔드포인트가 분기한다. null(hosted_site)이면 기존 동기 내부 저장 그대로. 값이
+    있으면(WordPress 등) publication_command만 만들고 반환 — 실제 발행은 워커가
+    한다(channel_posts publish의 "예약" 분기와 같은 응답 모양, command_id+status)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
@@ -516,10 +532,25 @@ async def publish_site_post_from_draft_endpoint(
     # resolve_member()의 org_member.id.
     resolved = await resolve_member(auth, org_id, db)
 
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+
     try:
-        post, url, version_id = await publish_site_post_from_draft(
-            db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
-            backend_base_url=str(request.base_url),
+        if draft.connection_id is None:
+            post, url, version_id = await publish_site_post_from_draft(
+                db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
+                backend_base_url=str(request.base_url),
+            )
+            return PublishSitePostFromDraftResponse(
+                url=url, published_at=post.published_at.isoformat(), version_id=version_id,
+            )
+
+        command = await request_site_post_external_publish(
+            db, org_id=org_id, draft_id=draft_id, requested_by_member_id=resolved.id,
+        )
+        return PublishSitePostFromDraftResponse(
+            version_id=command.approved_version, command_id=command.id, status=command.status,
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -537,10 +568,6 @@ async def publish_site_post_from_draft_endpoint(
             status_code=409,
             detail={"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)},
         ) from exc
-
-    return PublishSitePostFromDraftResponse(
-        url=url, published_at=post.published_at.isoformat(), version_id=version_id,
-    )
 
 
 class SitePostPublicationResponse(BaseModel):
@@ -583,9 +610,13 @@ async def get_site_post_publication_endpoint(
 
 
 class UnpublishSitePostResponse(BaseModel):
-    id: uuid.UUID
-    slug: str
-    unpublished_at: str
+    # story e4fc29fa(조각③c) — publish 응답과 동형 확장(외부 목적지는 이 요청 시점엔
+    # 아직 결과가 없다). hosted_site 분기는 기존 그대로 셋 다 채워 보낸다.
+    id: uuid.UUID | None = None
+    slug: str | None = None
+    unpublished_at: str | None = None
+    command_id: uuid.UUID | None = None
+    status: str | None = None
 
 
 @router.post(
@@ -610,17 +641,26 @@ async def unpublish_site_post_endpoint(
 
     resolved = await _require_owner_or_admin(db, auth, org_id)
 
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+
     try:
-        post = await unpublish_site_post(
-            db, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=resolved.id,
+        if draft.connection_id is None:
+            post = await unpublish_site_post(
+                db, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=resolved.id,
+            )
+            return UnpublishSitePostResponse(
+                id=post.id, slug=post.slug, unpublished_at=post.unpublished_at.isoformat(),
+            )
+
+        command = await request_site_post_external_unpublish(
+            db, org_id=org_id, draft_id=draft_id, requested_by_member_id=resolved.id,
         )
+        return UnpublishSitePostResponse(command_id=command.id, status=command.status)
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SitePostNotPublishedError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "SITE_POST_NOT_PUBLISHED", "message": str(exc)},
         ) from exc
-
-    return UnpublishSitePostResponse(
-        id=post.id, slug=post.slug, unpublished_at=post.unpublished_at.isoformat(),
-    )

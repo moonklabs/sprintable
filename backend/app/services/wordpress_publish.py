@@ -10,7 +10,11 @@ credential_kind 선언만 하고 이 모듈은 안 다룬다(사람 의존 앱 �
 `app_password`를 그대로 `httpx.BasicAuth`에 넘긴다(OAuth 토큰류가 아니라 재사용 가능한
 비밀번호 자체라 refresh 개념이 없다 — connection.refresh_mode="manual"과 부합).
 `site_url`은 HTTPS 강제(스토리 AC2 明示) — http://는 자격이 평문으로 오가므로 호출
-자체를 거부한다(fail-closed).
+자체를 거부한다(fail-closed). 예외 하나 — loopback(`http://127.0.0.1`·`http://
+localhost`)은 허용한다(RFC 8252 §7.3과 동일 사상: 네트워크를 안 거치는 루프백은
+평문 노출 경로 자체가 없다) — 조각③c의 dev_wordpress_stub.py(실 uvicorn, TLS 없음)
+가 이 예외의 유일한 실사용처다. 고객의 실 WordPress 사이트가 loopback일 수는 없어
+이 예외가 실서비스 자격을 위협하지 않는다.
 
 `tags`는 이번 조각 스코프 밖 — WordPress REST API는 태그를 이름이 아니라 term ID
 배열로 요구해(taxonomy 조회/생성 API 별도 호출 필요) 지금 페이로드엔 안 싣는다
@@ -44,10 +48,13 @@ class WordPressPublishError(Exception):
         super().__init__(f"WordPress REST API 오류(status={status_code}): {body}")
 
 
+_LOOPBACK_PREFIXES = ("http://127.0.0.1", "http://localhost")
+
+
 def _validate_https(site_url: str) -> str:
-    if not site_url.startswith("https://"):
-        raise WordPressSiteURLInsecureError(site_url=site_url)
-    return site_url.rstrip("/")
+    if site_url.startswith("https://") or site_url.startswith(_LOOPBACK_PREFIXES):
+        return site_url.rstrip("/")
+    raise WordPressSiteURLInsecureError(site_url=site_url)
 
 
 async def publish(

@@ -1,0 +1,500 @@
+"""story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각③c) — 외부 목적지
+(WordPress 등) 발행 오케스트레이션. site_post 승인이 publication_command를 자동
+생성하고(gate_service.py 훅 확장), 워커(`process_due_publication_commands`)가
+`content_kind="site_post"` 커맨드를 blog_destinations 디스패치로 처리한다.
+
+이 파일의 승인 경로는 cfc1a55a(#3443) 선례와 동형으로 `gate_service.py::
+transition_gate()`를 직접 호출한다(`_approve_gate_directly` 우회는 훅을 안 태운다).
+
+AC7 "실왕복" — `httpx.MockTransport`가 아니라 `dev_wordpress_stub.py`를 실 uvicorn
+서버로 띄워(진짜 소켓) `wordpress_publish.py`가 그 서버에 진짜 HTTP를 치는지 증명한다
+(페드루 明示 — MockTransport는 AC7이 아니다)."""
+from __future__ import annotations
+
+import asyncio
+import os
+import uuid
+from datetime import datetime, timezone
+
+import pytest
+
+_REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+
+pytestmark = [
+    pytest.mark.destructive_schema,
+    pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요"),
+]
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _configure_secrets(monkeypatch):
+    import importlib
+    from cryptography.fernet import Fernet
+
+    import app.core.config as config_module
+    monkeypatch.setattr(config_module.settings, "channel_credential_encryption_key", Fernet.generate_key().decode())
+
+    import app.services.channel_credential_crypto as crypto_module
+    importlib.reload(crypto_module)
+    yield
+    importlib.reload(crypto_module)
+
+
+@pytest.fixture
+async def live_wordpress_stub():
+    """dev_wordpress_stub.router만 얹은 최소 FastAPI 앱을 실 uvicorn 서버(127.0.0.1,
+    임시 포트)로, 테스트 이벤트 루프와 별도인 **백그라운드 스레드**(자기 자신의 asyncio
+    루프)에서 띄운다 — 메인 앱(app.main.app)의 lifespan/DB 설정과 완전히 격리되고,
+    테스트의 무거운 DB 세션 활동과 같은 루프를 공유하지 않아(공유 루프 기아 방지)
+    진짜 소켓으로 왕복한다(MockTransport 아님).
+
+    라우터의 실제 마운트 경로(`/api/dev/wordpress-stub/wp-json/wp/v2`, app/main.py가
+    실 배포에서 등재하는 그 경로 그대로 — 페드루 확定 예시)를 이 테스트 전용 앱에도
+    그대로 유지한다(스텁 코드 자체는 무변경) — 그래서 `site_url`은 origin이 아니라
+    `{origin}/api/dev/wordpress-stub`(wordpress_publish.py가 여기 뒤에 `/wp-json/wp/v2/
+    posts`를 붙인다)."""
+    import threading
+
+    import uvicorn
+    from fastapi import FastAPI
+
+    from app.routers.dev_wordpress_stub import _POSTS, router as stub_router
+
+    _POSTS.clear()
+    stub_app = FastAPI()
+    stub_app.include_router(stub_router)
+    config = uvicorn.Config(stub_app, host="127.0.0.1", port=0, log_level="warning")
+    server = uvicorn.Server(config)
+
+    def _run() -> None:
+        asyncio.run(server.serve())
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    for _ in range(500):
+        if server.started:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise RuntimeError("dev_wordpress_stub 라이브 서버가 기동하지 않았습니다")
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        yield f"http://127.0.0.1:{port}/api/dev/wordpress-stub"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        _POSTS.clear()
+
+
+def _async_url() -> str:
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix):]
+    return url
+
+
+async def _session_factory():
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.core.database import Base
+    import app.models  # noqa: F401
+
+    engine = create_async_engine(_async_url())
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(sa_text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_members_org_system_publisher "
+            "ON members (org_id) WHERE (runtime_type = 'system-publisher' AND type = 'agent')"
+        ))
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def _seed_org(session):
+    from app.models.organization import Organization
+    from app.models.project import Project
+
+    org = Organization(id=uuid.uuid4(), name="Site Post Orchestration Test Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    await session.commit()
+    return org.id, project.id
+
+
+async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+    from app.models.team import TeamMember
+
+    m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
+    session.add(m)
+    await session.commit()
+    return m.id
+
+
+async def _seed_human(session, org_id, *, role="owner"):
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user = User(id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+    session.add(user)
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
+    session.add(om)
+    await session.commit()
+    return user.id, om.id
+
+
+async def _seed_story(session, org_id, project_id, *, title="사이트 포스트"):
+    from app.models.pm import Story
+
+    story = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title)
+    session.add(story)
+    await session.commit()
+    return story.id
+
+
+async def _seed_default_role(session, org_id):
+    from app.models.participation import ParticipationRole
+
+    role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+    session.add(role)
+    await session.commit()
+    return role.id
+
+
+async def _seed_wordpress_connection(session, org_id, *, site_url, username="editor", app_password="app-pw-abcd-1234"):
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_credential_crypto import encrypt_channel_credential
+
+    conn = ChannelConnection(
+        id=uuid.uuid4(), org_id=org_id, channel="wordpress", account_id=site_url, account_label=username,
+        status="active", credential_kind="pasted_secret", refresh_mode="manual",
+        encrypted_access_token=encrypt_channel_credential(app_password),
+    )
+    session.add(conn)
+    await session.commit()
+    return conn.id
+
+
+def _client_for(app):
+    from httpx import AsyncClient, ASGITransport
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _setup_org_scoped_app(app, Session, org_id, *, user_id, agent: bool = False):
+    from app.dependencies.auth import AuthContext, get_current_user
+
+    async def _db():
+        async with Session() as s:
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
+    async def _auth():
+        claims = {"app_metadata": {"org_id": str(org_id)}}
+        if agent:
+            claims["app_metadata"]["api_key_id"] = "test-agent-key"
+        return AuthContext(user_id=str(user_id), email="caller@test", claims=claims)
+
+    from tests.conftest import override_db_and_read
+    override_db_and_read(app, _db)
+    app.dependency_overrides[get_current_user] = _auth
+
+
+async def _create_and_submit_site_post_draft(
+    client, *, org_id, story_id, connection_id, slug=None,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    slug = slug or f"post-{uuid.uuid4().hex[:8]}"
+    r = await client.post(
+        f"/api/v2/organizations/{org_id}/site-posts/drafts",
+        json={
+            "work_item_id": str(story_id), "title": "제목", "slug": slug, "lang": "ko",
+            "summary": "요약", "tags": [], "body_md": "본문", "media_manifest": [],
+            "connection_id": str(connection_id),
+        },
+    )
+    assert r.status_code == 201, r.text
+    draft_id = uuid.UUID(r.json()["draft_id"])
+    r_submit = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={})
+    assert r_submit.status_code == 200, r_submit.text
+    gate_id = uuid.UUID(r_submit.json()["gate_id"])
+    return draft_id, gate_id
+
+
+@pytest.mark.anyio
+async def test_approval_of_blog_destination_gate_auto_creates_site_post_command():
+    """훅(gate_service.py) 확장 — wordpress 목적지 site_post 게이트가 approved로
+    전이되면 즉시(scheduled_at=None) content_kind="site_post" 커맨드가 생긴다. 뮤테이션
+    대상: 훅의 site_post 분기를 지우면 이 assert가 RED."""
+    from app.services.gate_service import transition_gate
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_wordpress_connection(s, org_id, site_url="https://customer-blog.example.com")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id, gate_id = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_id,
+            )
+
+        async with Session() as s:
+            gate = await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+            await s.commit()
+            assert gate.status == "approved"
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.site_post_version import SitePostVersion
+            from sqlalchemy import select
+
+            rows = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalars().all()
+            assert len(rows) == 1, "승인 즉시 site_post publication_command가 자동 생성되지 않았다"
+            cmd = rows[0]
+            assert cmd.status == "pending"
+            assert cmd.content_kind == "site_post"
+            assert cmd.operation == "publish"
+            assert cmd.destination == connection_id
+            assert cmd.scheduled_at is None
+            assert cmd.requested_by_member_id == human_id
+
+            latest_version_id = (await s.execute(
+                select(SitePostVersion.id)
+                .where(SitePostVersion.draft_id == draft_id)
+                .order_by(SitePostVersion.version.desc()).limit(1)
+            )).scalar_one()
+            assert cmd.approved_version == latest_version_id
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_approval_of_hosted_site_gate_does_not_create_command():
+    """hosted_site(connection_id=None)는 훅이 스킵한다 — 기존 내부 동기 경로 그대로.
+    뮤테이션 대상: 이 가드가 없으면 hosted_site 승인마다 불필요한 command가 생긴다."""
+    from app.services.gate_service import transition_gate
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json={
+                    "work_item_id": str(story_id), "title": "제목", "slug": "hosted-post",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문", "media_manifest": [],
+                },
+            )
+            assert r.status_code == 201, r.text
+            draft_id = uuid.UUID(r.json()["draft_id"])
+            r_submit = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={})
+            assert r_submit.status_code == 200, r_submit.text
+            gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        async with Session() as s:
+            gate = await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+            await s.commit()
+            assert gate.status == "approved"
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+
+            rows = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalars().all()
+            assert rows == []
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_endpoint_returns_pending_command_for_external_destination():
+    """라우터 분기 — connection_id != None인 draft의 /publish는 200(외부는 새 리소스가
+    아니라 커맨드라 201이 아니다)+command_id+status="pending"을 돌려주고 url/
+    published_at은 비운다. 실제 발행은 워커 몫(이 테스트는 라우터 분기만 잰다)."""
+    from app.services.gate_service import transition_gate
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_wordpress_connection(s, org_id, site_url="https://customer-blog.example.com")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id, gate_id = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_id,
+            )
+
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_user_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publish")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["command_id"] is not None
+        assert body["status"] == "pending"
+        assert body["url"] is None
+        assert body["published_at"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_publishes_site_post_command_against_live_wordpress_stub(live_wordpress_stub):
+    """AC7 실왕복 — 승인이 만든 command를 워커(process_due_publication_commands)가
+    처리하면 wordpress_publish.publish()가 실 uvicorn 서버(dev_wordpress_stub)에 진짜
+    HTTP POST를 치고, 그 응답(id/link)이 channel_publications에 그대로 기록된다."""
+    from app.services.gate_service import transition_gate
+    from app.services.publication_command import process_due_publication_commands
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_wordpress_connection(s, org_id, site_url=live_wordpress_stub)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id, gate_id = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_id,
+            )
+
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+            await s.commit()
+
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_publication import ChannelPublication
+            from sqlalchemy import select
+
+            cmd = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalar_one()
+            assert cmd.status == "completed"
+
+            pub = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_id)
+            )).scalar_one()
+            assert pub.status == "published"
+            assert pub.external_id is not None
+            assert pub.permalink is not None and pub.permalink.startswith("https://dev-wordpress-stub.internal/")
+            assert pub.connection_id == connection_id
+            assert pub.channel == "wordpress"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_unpublish_site_post_command_against_live_wordpress_stub(live_wordpress_stub):
+    """AC2 unpublish=status draft 전환 — 발행 뒤 회수 요청도 같은 커맨드 경로를 타고,
+    워커가 wordpress_publish.unpublish()로 실 스텁에 status=draft를 친다."""
+    from app.services.gate_service import transition_gate
+    from app.services.publication_command import process_due_publication_commands
+    from app.services.site_posts import request_site_post_external_unpublish
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_wordpress_connection(s, org_id, site_url=live_wordpress_stub)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id, gate_id = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_id,
+            )
+
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+            await s.commit()
+
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            await request_site_post_external_unpublish(
+                s, org_id=org_id, draft_id=draft_id, requested_by_member_id=human_id,
+            )
+
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            from app.models.channel_publication import ChannelPublication
+            from sqlalchemy import select
+
+            pub = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_id)
+            )).scalar_one()
+            assert pub.status == "unpublished"
+
+        from app.routers.dev_wordpress_stub import _POSTS
+        stub_row = _POSTS[int(pub.external_id)]
+        assert stub_row["status"] == "draft"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
