@@ -524,9 +524,12 @@ async def test_resubmit_identical_content_and_schedule_is_noop():
 @pytest.mark.anyio
 async def test_resubmit_schedule_change_after_approval_triggers_reapproval_and_voids_only_pending_command():
     """PO 정정3 (B) + 카디르 QA③ — 본문은 그대로, scheduled_at만 바뀐 재상신도 승인을
-    되돌리고(reapproval_required=True) 대기 중 command를 voided(SCHEDULE_CHANGED)로
-    무효화한다. 양성대조: 같은 gate에 이미 completed 상태인 옛 행이 하나 더 있어도
-    그 행은 안 건드리는지(gate_id만으로 뭉개면 다른 행까지 오염되는 결함을 잡는다)."""
+    되돌리고(gate.status를 pending으로) 대기 중 command를 voided(SCHEDULE_CHANGED)로
+    무효화한다. 페드루 리뷰 nit K — reapproval_required 자체는 False로 남는다(Gate
+    모델 문서화 계약: 그건 "시스템이 조용히 되돌렸다"는 신호고, 이건 사람이 방금
+    명시적으로 재상신한 경로라 True가 될 이유가 없다 — 아래 assert 참고). 양성대조:
+    같은 gate에 이미 completed 상태인 옛 행이 하나 더 있어도 그 행은 안 건드리는지
+    (gate_id만으로 뭉개면 다른 행까지 오염되는 결함을 잡는다)."""
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
     from app.main import app
@@ -594,7 +597,9 @@ async def test_resubmit_schedule_change_after_approval_triggers_reapproval_and_v
             # 계약) — 이건 사람이 방금 명시적으로 재상신한 경로라 False로 복귀하는 게
             # 기존 설계 그대로(submit_channel_post_draft 재상신은 항상 False로 리셋).
             assert gate.reapproval_required is False
-            assert gate.sealed_scheduled_at is not None
+            # 페드루 리뷰 nit K — "not None"만으론 값 자체가 새 요청(scheduled_at_2)로
+            # 갱신됐는지 증명 못 한다(옛 값이 그대로 남아도 통과). 정확한 값 대조.
+            assert gate.sealed_scheduled_at == scheduled_at_2
 
             voided = (await s.execute(
                 select(PublicationCommand).where(PublicationCommand.id == pending_command_id)
@@ -857,8 +862,12 @@ async def test_cron_rate_limited_uses_retry_after_value_not_default_backoff():
             cmd_id = cmd.id
 
         # get_publishing_limit이 quota_usage>=quota_total로 보이게 해 ChannelRateLimitedError
-        # 를 유도(reset_at 확정값으로 — quota_duration=120초).
-        with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 120))):
+        # 를 유도(reset_at 확정값으로 — quota_duration=300초). 페드루 리뷰 블로커D —
+        # 원래 120초는 attempt_count=1의 기본 백오프(60*2^1=120)와 **같은 값**이라
+        # 헤더를 무시해도 이 테스트가 통과했다(우연히 안 틀릴 수 없는 값). 기본
+        # 백오프 어느 attempt_count와도 안 겹치는 300초로 바꿔 헤더가 실제로 읽혔을
+        # 때만 통과하게 한다.
+        with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 300))):
             async with Session() as s:
                 await process_due_publication_commands(s, now=now)
 
@@ -867,9 +876,9 @@ async def test_cron_rate_limited_uses_retry_after_value_not_default_backoff():
             from sqlalchemy import select
             cmd = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
             assert cmd.failure_kind == "transient"
-            expected = now + timedelta(seconds=120)
+            expected = now + timedelta(seconds=300)
             delta = abs((cmd.next_attempt_at - expected).total_seconds())
-            assert delta < 5, f"next_attempt_at이 Retry-After(120s) 값을 안 썼다: {cmd.next_attempt_at} vs {expected}"
+            assert delta < 5, f"next_attempt_at이 Retry-After(300s) 값을 안 썼다: {cmd.next_attempt_at} vs {expected}"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -1101,6 +1110,351 @@ async def test_retry_non_dead_letter_command_returns_404():
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/publication-commands/{cmd_id}/retry")
         assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_batch_claim_holds_lock_until_whole_batch_marked_in_progress_no_double_processing():
+    """페드루 리뷰 블로커A — 겹친 두 tick이 같은 배치의 뒷 순번 행을 이중 처리하지
+    않는지, 실제 두 세션의 동시 호출로 검증한다(순차 호출로는 이 결함이 재현되지
+    않는다 — 첫 tick이 완전히 끝난 뒤 둘째 tick이 시작되면 첫 tick이 이미 다 처리해
+    버려 겹칠 여지가 없다).
+
+    시나리오: 배치에 cmd_1(먼저 처리됨)·cmd_2(나중 처리됨) 두 건. tick_a가 cmd_1을
+    처리·commit한 직후 — 배치 클레임이 통짜 commit으로 이미 끝났다면 이 시점에 cmd_2는
+    이미 DB에 in_progress로 박혀 있다 — 바로 그 순간 tick_b를 동시에 돌린다. 클레임이
+    건별 commit이던 원래 구조라면 cmd_1의 per-item commit이 트랜잭션을 끝내며 cmd_2의
+    락도 함께 풀려버려(cmd_2는 아직 손 안 댄 채 'pending'), tick_b가 cmd_2를 마저 집어
+    이중 처리한다."""
+    from unittest.mock import AsyncMock, patch
+    import asyncio
+    import app.services.threads_publish as tp
+    import app.services.publication_command as pc_module
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_1 = await _seed_story(s, org_id, project_id, title="배치1")
+            story_2 = await _seed_story(s, org_id, project_id, title="배치2")
+            draft_1, gate_1 = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_1,
+                text="배치1 본문", scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+            draft_2, gate_2 = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_2,
+                text="배치2 본문", scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+
+            async def _version_id_for(draft_id):
+                return (await s.execute(
+                    select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+                )).scalar_one()
+
+            # created_at을 명시적으로 벌려 order_by(created_at.asc())가 cmd_1을 먼저
+            # 집도록 고정한다(사람 눈에도 결정적인 순서로 재현 가능하게).
+            cmd_1 = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_1, destination=connection_id,
+                approved_version=await _version_id_for(draft_1), operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+                created_at=now - timedelta(seconds=2),
+            )
+            cmd_2 = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_2, destination=connection_id,
+                approved_version=await _version_id_for(draft_2), operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+                created_at=now - timedelta(seconds=1),
+            )
+            s.add_all([cmd_1, cmd_2])
+            await s.commit()
+            cmd_1_id, cmd_2_id = cmd_1.id, cmd_2.id
+
+        cmd2_about_to_process = asyncio.Event()
+        release_tick_b_result = asyncio.Event()
+        process_calls: list[uuid.UUID] = []
+        real_process_one = pc_module._process_one_command
+        paused_once = False
+
+        async def _tracking_process_one(db, command, *, now):
+            nonlocal paused_once
+            if command.id == cmd_2_id and not paused_once:
+                paused_once = True
+                cmd2_about_to_process.set()
+                await asyncio.wait_for(release_tick_b_result.wait(), timeout=10)
+            process_calls.append(command.id)
+            await real_process_one(db, command, now=now)
+
+        async def _tick_a():
+            async with Session() as s:
+                return await pc_module.process_due_publication_commands(s, now=now)
+
+        async def _tick_b():
+            await asyncio.wait_for(cmd2_about_to_process.wait(), timeout=10)
+            async with Session() as s:
+                result = await pc_module.process_due_publication_commands(s, now=now)
+            release_tick_b_result.set()
+            return result
+
+        with (
+            patch.object(tp, "create_container", AsyncMock(return_value="creation-batch")),
+            patch.object(tp, "publish_container", AsyncMock(return_value="media-batch")),
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(tp, "get_permalink", AsyncMock(return_value="https://www.threads.net/@demo/post/media-batch")),
+            patch.object(pc_module, "_process_one_command", _tracking_process_one),
+        ):
+            await asyncio.wait_for(asyncio.gather(_tick_a(), _tick_b()), timeout=20)
+
+        assert process_calls.count(cmd_2_id) == 1, (
+            f"cmd_2가 겹친 tick에 이중 처리됐다(배치 클레임 commit이 건별로 쪼개져 있었다는 뜻): {process_calls}"
+        )
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+            cmd_1_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_1_id))).scalar_one()
+            cmd_2_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_2_id))).scalar_one()
+            assert cmd_1_row.status == "completed"
+            assert cmd_2_row.status == "completed"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_deterministic_failure_goes_straight_to_dead_letter_no_auto_retry():
+    """페드루 리뷰 블로커C — 결정적 실패(매핑표 밖 error_code라 fail-closed로
+    needs_check로 떨어진 것들 포함)는 transient처럼 지수 백오프 재시도 큐에 들어가지
+    않고 즉시 dead_letter로 멈춘다(자동 재시도 0회 — attempt_count는 1에서 멈춘다).
+    양성대조: 두 번째 cron tick을 더 돌려도 재시도 시도조차 없어야 한다(next_attempt_at
+    이 애초에 None이라 WHERE절에서 안 잡히는지)."""
+    from app.services.publication_command import process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from app.models.gate import Gate
+            from sqlalchemy import select
+
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+            )
+            s.add(cmd)
+            # 결정적 실패 유도 — 게이트가 승인 상태를 잃었다(void_pending_commands_for_gate
+            # 훅이 보통 이 경합을 선점하지만, 놓친 경우를 워커가 마지막으로 만나는
+            # 시나리오를 직접 DB 조작으로 재현한다). publish_channel_post_draft가 자체
+            # 재검증에서 ExternalPublishGateNotApprovedError를 던진다 — 그 error_code
+            # (EXTERNAL_PUBLISH_APPROVAL_REQUIRED)는 매핑표 밖이라 needs_check.
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.status = "pending"
+            await s.commit()
+            cmd_id = cmd.id
+
+        async with Session() as s:
+            await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+            cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd_row.status == "dead_letter"
+            assert cmd_row.failure_kind == "needs_check"
+            assert cmd_row.attempt_count == 1
+            assert cmd_row.dead_letter_at is not None
+            assert cmd_row.next_attempt_at is None
+
+        # 양성대조 — 두 번째 tick을 더 돌려도(자동으로는) 아무 것도 안 바뀐다.
+        async with Session() as s:
+            await process_due_publication_commands(s, now=now + timedelta(hours=1))
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+            cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd_row.status == "dead_letter", "결정적 실패가 두 번째 tick에서 조용히 재시도됐다"
+            assert cmd_row.attempt_count == 1
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_retry_endpoint_accepts_blocked_command_then_next_cron_tick_reprocesses():
+    """페드루 리뷰 블로커B — dead_letter만 받던 수동 재시도가 blocked(연결 복구 대기)도
+    받는지, 카디르 QA⑤와 동형으로 status만 바뀌는 게 아니라 다음 cron tick이 실제로
+    재처리하는지까지 본다(토큰 재인증 등으로 연결이 복구됐다고 가정한 시나리오)."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.publication_command import process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(hours=1), status="blocked", failure_kind="connection",
+                last_error="token expired(seed)", attempt_count=1, requested_by_member_id=agent_id,
+            )
+            s.add(cmd)
+            await s.commit()
+            cmd_id = cmd.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_retry = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/publication-commands/{cmd_id}/retry",
+            )
+            assert r_retry.status_code == 200, r_retry.text
+            body = r_retry.json().get("data") or r_retry.json()
+            assert body["status"] == "pending"
+
+        with (
+            patch.object(tp, "create_container", AsyncMock(return_value="creation-z")),
+            patch.object(tp, "publish_container", AsyncMock(return_value="media-z")),
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(tp, "get_permalink", AsyncMock(return_value="https://www.threads.net/@demo/post/media-z")),
+        ):
+            async with Session() as s:
+                await process_due_publication_commands(s, now=datetime.now(timezone.utc))
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+            cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd_row.status == "completed", "retry 뒤 status만 pending이 됐을 뿐 다음 cron tick에서 실제로 재처리되지 않았다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_immediate_rate_limited_returns_retry_after_header_and_command_state():
+    """페드루 리뷰 블로커E·F — 즉시 발행이 429(quota)로 실패하면 응답에 Retry-After
+    헤더(실값)가 실리고, body(error 객체)에도 command_status·next_attempt_at이 함께
+    나가 사람이 "언제 자동 재시도되는지" 알 수 있는지."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app as _app
+        _setup_org_scoped_app(_app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(_app) as client, Session() as s:
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+            )
+
+        with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 300))):
+            _setup_org_scoped_app(_app, Session, org_id, user_id=human_id)
+            async with _client_for(_app) as client:
+                r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+
+        assert r_pub.status_code == 429, r_pub.text
+        assert r_pub.headers.get("retry-after") == "300", dict(r_pub.headers)
+        body = r_pub.json()
+        error = body.get("error") or body
+        assert error["command_status"] == "pending"
+        assert error["next_attempt_at"] is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_retry_command_endpoint_agent_caller_forbidden():
+    """페드루 리뷰 nit L — 발행 엔드포인트처럼 retry도 human-only(_require_human)인지
+    에이전트 키 호출로 확인(기존엔 발행 human-only 테스트만 있고 retry는 없었다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=uuid.uuid4(), destination=uuid.uuid4(),
+                approved_version=uuid.uuid4(), operation="publish", status="dead_letter",
+                requested_by_member_id=uuid.uuid4(),
+            )
+            s.add(cmd)
+            await s.commit()
+            cmd_id = cmd.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/publication-commands/{cmd_id}/retry")
+        assert r.status_code == 403, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

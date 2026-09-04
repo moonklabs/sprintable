@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 # 동형 사상 — 상한 없는 SKIP LOCKED 배치는 그 자체가 위험, story #2461 finding #5).
 BATCH_SIZE = 50
 MAX_RETRIES = 5
-_BACKOFF_BASE_SECONDS = 60  # 1분→2분→4분→8분→16분(마지막 실패면 dead_letter).
+# attempt_count는 실패마다 먼저 증가한 뒤 백오프를 계산한다(1부터 시작) — 그래서 실제
+# 지연 순서는 2분(2^1)→4분→8분→16분이다(다음 겹증가인 5번째 실패에서 MAX_RETRIES
+# 도달·dead_letter, 그 시점엔 next_attempt_at을 아예 안 만든다). 페드루 리뷰 nit H —
+# 이전 주석의 "1분→..."은 attempt_count가 0부터 쓰인다고 잘못 적은 것.
+_BACKOFF_BASE_SECONDS = 60
 
 # story #3414 PO 정정3 — 유나 design §11-5 정본. 매핑 안 되는 error_code는 반드시
 # 'needs_check'로 떨어진다(아래 _UNMAPPED_FAILURE_KIND) — "재시도해도 되는지 모른다"를
@@ -142,9 +146,10 @@ def compute_next_attempt_at(
     *, attempt_count: int, now: datetime, retry_after_seconds: int | None = None,
 ) -> datetime:
     """story #3414 — dispatch_router.py::_post_with_retry와 동형 사상의 지수 백오프
-    (1분→2분→4분→8분→16분). `Retry-After` 헤더가 있으면 그 값을 그대로 쓴다(기본
-    백오프보다 우선 — 카디르 QA④: 헤더를 실제로 읽었는지 증명하려면 기본값과 다른
-    값으로 검증해야 한다는 지적 반영, 여기서 헤더값을 무조건 우선)."""
+    (2분→4분→8분→16분, attempt_count가 1부터 들어오므로 — 위 _BACKOFF_BASE_SECONDS
+    주석 참고). `Retry-After` 헤더가 있으면 그 값을 그대로 쓴다(기본 백오프보다 우선 —
+    카디르 QA④: 헤더를 실제로 읽었는지 증명하려면 기본값과 다른 값으로 검증해야
+    한다는 지적 반영, 여기서 헤더값을 무조건 우선)."""
     if retry_after_seconds is not None and retry_after_seconds > 0:
         return now + timedelta(seconds=retry_after_seconds)
     delay = _BACKOFF_BASE_SECONDS * (2 ** attempt_count)
@@ -152,16 +157,24 @@ def compute_next_attempt_at(
 
 
 async def retry_dead_letter_command(db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID) -> PublicationCommand | None:
-    """story #3414 AC5 — dead_letter 상태인 command를 사람이 다시 큐에 올린다.
+    """story #3414 AC5 — `dead_letter` **또는 `blocked`**(연결 복구 대기) 상태인 command를
+    사람이 다시 큐에 올린다. 페드루 리뷰 블로커B — 원래 `dead_letter`만 받았는데,
+    토큰 만료로 `blocked`된 **예약** 명령은 owner가 재인증한 뒤에도 갈 길이 없었다
+    (이 함수가 거부·같은 gate로 재-publish 요청해도 멱등이라 같은 blocked 행을 그대로
+    반환할 뿐 — 막다른 길). 연결이 실제로 복구됐는지는 이 함수가 판단하지 않는다 —
+    pending으로 되돌리기만 하면 다음 cron tick(또는 즉시 재-publish)의
+    `publish_channel_post_draft` 3중 재검증이 그대로 판정한다(안 고쳐졌으면 다시
+    같은 실패로 돌아올 뿐이라 안전).
+
     attempt_count는 리셋하지 않는다(이력 보존, PO 권장 그대로) — next_attempt_at을
-    now로 되돌려야 cron이 이 행을 다시 집는다(status만 pending으로 바꾸고 next_attempt_at
+    null로 되돌려야 cron이 이 행을 다시 집는다(status만 pending으로 바꾸고 next_attempt_at
     이 미래에 멈춰 있으면 WHERE절에서 계속 빠진다 — 카디르 QA⑤ 지적)."""
     command = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.id == command_id, PublicationCommand.org_id == org_id,
         ).with_for_update()
     )).scalar_one_or_none()
-    if command is None or command.status != "dead_letter":
+    if command is None or command.status not in ("dead_letter", "blocked"):
         return None
     command.status = "pending"
     command.next_attempt_at = None
@@ -175,7 +188,11 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     """단건 처리 — 알려진 실패는 여기서 전부 잡아 `command`에 결과를 남기고 정상
     반환한다(예외를 밖으로 던지지 않는다). 호출부(`process_due_publication_commands`)가
     그래도 한 번 더 try/except로 감싸는 건 진짜 미분류 버그에 대한 2중 방어(AC4
-    격리 — 이 command 하나의 실패가 배치의 나머지를 막으면 안 된다)."""
+    격리 — 이 command 하나의 실패가 배치의 나머지를 막으면 안 된다).
+
+    `command.status`는 이미 `in_progress`다 — 호출부가 배치 클레임 단계에서 이미
+    표시·commit했다(블로커A, 아래 `process_due_publication_commands` 참고). 여기서
+    다시 대입하지 않는다(중복)."""
     from app.models.channel_post_version import ChannelPostVersion
     from app.services.channel_posts import (
         ChannelConnectionNotActiveError,
@@ -191,9 +208,6 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         get_channel_post_draft,
         publish_channel_post_draft,
     )
-
-    command.status = "in_progress"
-    await db.flush()
 
     error_code: str | None = None
     last_error: str | None = None
@@ -267,19 +281,42 @@ async def apply_command_failure(
     if failure_kind == FAILURE_KIND_CONNECTION:
         # story #3414 PO 정정2 추가② — 재시도 백오프 큐가 아니라 연결 상태를 승격하고
         # 이 command는 "연결 복구 대기"(blocked)로 멈춘다. 연결이 다시 active가 되는
-        # 것(owner 재인증 등)은 이 스토리 스코프 밖 — 그 뒤 사람이 수동 재시도(AC5)로
-        # 이어간다. apply_refresh_failure()를 직접 부르지 않는 이유 — 그 함수가
-        # 내부에서 즉시 commit해 호출부의 커밋 경계와 어긋난다(같은 필드 대입만 여기서
-        # 직접 한다, 새 로직 발명 아님).
+        # 것(owner 재인증 등)은 이 스토리 스코프 밖 — 그 뒤 사람이 수동 재시도(AC5,
+        # 블로커B로 blocked도 받는다)로 이어간다. apply_refresh_failure()를 직접
+        # 부르지 않는 이유 — 그 함수가 내부에서 즉시 commit해 호출부의 커밋 경계와
+        # 어긋난다(같은 필드 대입만 여기서 직접 한다, 새 로직 발명 아님).
+        #
+        # 페드루 리뷰 nit G — `error_code == "CHANNEL_RATE_LIMITED"`분기로 만든
+        # "quota_exceeded" 상태값은 죽은 코드였다(CHANNEL_RATE_LIMITED는 _TRANSIENT_
+        # CODES라 애초에 이 분기(connection)에 못 옴 — 아래처럼 백오프 재시도로 간다).
+        # ChannelConnection.status enum(active|expired|revoked|error)에도 없는 값이라
+        # 제거. 이미 revoked/error로 더 구체적인 종결 상태면 그걸 expired로 덮어쓰지
+        # 않는다(더 약한 정보로 되돌리지 않기).
         from app.models.channel_connection import ChannelConnection
 
         connection = await db.get(ChannelConnection, command.destination)
         if connection is not None:
-            connection.status = "quota_exceeded" if error_code == "CHANNEL_RATE_LIMITED" else "expired"
             connection.last_error = (last_error or "")[:2000]
+            if connection.status not in ("revoked", "error"):
+                connection.status = "expired"
         command.status = "blocked"
         return
 
+    if failure_kind == FAILURE_KIND_NEEDS_CHECK:
+        # story #3414 페드루 리뷰 블로커C — 결정적 실패(입력 형태 오류·승인 필요·초안
+        # 없음 등, 매핑표 밖이라 fail-closed로 여기 떨어진 것들 포함 — 예:
+        # CHANNEL_TEXT_TOO_LONG·SITE_POST_SEAL_MISSING·EXTERNAL_PUBLISH_APPROVAL_
+        # REQUIRED·CHANNEL_POST_DRAFT_NOT_FOUND)는 재시도해도 그대로 다시 실패한다.
+        # transient와 같은 백오프 큐에 넣으면(원래 버그) 모듈 docstring의 fail-closed
+        # 취지와 반대로 "모른다"를 "재시도해도 된다"로 지어낸 것이 된다 — 즉시
+        # dead_letter로 보내 사람 재시도(AC5)만 받는다.
+        command.attempt_count += 1
+        command.status = "dead_letter"
+        command.dead_letter_at = now
+        command.next_attempt_at = None
+        return
+
+    # transient만 지수 백오프 재시도 큐로.
     command.attempt_count += 1
     if command.attempt_count >= MAX_RETRIES:
         command.status = "dead_letter"
@@ -296,12 +333,20 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
     """story #3414 AC3 — cron 워커의 유일한 진입점. `scheduled_at`(예약 시각, null=즉시라
     이미 동기 경로가 처리했어야 함 — 여기 남아 있다면 그 동기 경로가 중간에 죽은
     것이라 자가치유 대상)이 도래했고, 재시도 대기 중(`next_attempt_at`)이면 그것도
-    도래한 `status='pending'` command를 SKIP LOCKED 배치로 클레임한다
-    (`workflow_sla_processor.py::process_sla`와 동형 — 상한 있는 배치, cron 겹침 시
-    중복 처리 방지).
+    도래한 `status='pending'` command를 SKIP LOCKED 배치로 클레임한다.
 
-    각 command는 개별 트랜잭션(커밋 경계)으로 처리 — 한 건의 실패(또는 진짜 미분류
-    버그)가 배치의 나머지 org·command를 막지 않는다(AC4 격리)."""
+    페드루 리뷰 블로커A — 클레임(집기)과 처리(commit)를 분리한 2단계다. `SELECT ...
+    FOR UPDATE SKIP LOCKED`의 행 락은 **그 SELECT를 실행한 트랜잭션이 끝나야**
+    풀린다(commit/rollback). 원래 구조는 건마다 `db.commit()`을 해 첫 건이 끝나는
+    순간 트랜잭션이 종료되면서 나머지 클레임 행의 락까지 전부 풀렸다 — 그 행들은
+    여전히 `status='pending'`이라, 그 사이 겹쳐 도는 다른 tick이 같은 행을 다시
+    클레임해 이중 처리할 수 있었다(`workflow_sla_processor.py::process_sla`가 "루프
+    *뒤* 1회 commit"으로 겹침을 막는 것과 이 지점이 정확히 달랐다 — "동형"이라던
+    원래 주석이 틀렸다). 아래처럼 클레임한 행 전부를 `in_progress`로 표시하고 **그
+    표시만** 한 번에 commit해 락을 여기서 놓는다 — 그 뒤로는 이 행들이 `status=
+    'pending'` 조건에 안 걸려 겹친 tick이 아예 못 다시 집는다. 그 다음에야 건별로
+    개별 트랜잭션(커밋 경계)으로 처리 — 한 건의 실패(또는 진짜 미분류 버그)가 배치의
+    나머지 org·command를 막지 않는다(AC4 격리, 이 축은 원래 구조 그대로)."""
     now = now or datetime.now(timezone.utc)
     rows = (await db.execute(
         select(PublicationCommand).where(
@@ -312,6 +357,10 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
         .limit(BATCH_SIZE)
         .with_for_update(skip_locked=True)
     )).scalars().all()
+
+    for command in rows:
+        command.status = "in_progress"
+    await db.commit()
 
     counts = {
         "completed": 0, "pending_retry": 0, "dead_letter": 0, "blocked": 0, "voided": 0, "error": 0,
