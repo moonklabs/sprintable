@@ -1797,8 +1797,8 @@ async def _resolve_artifact_canonicalize_gate(session: AsyncSession, gate: Gate,
             await dispatch_notification(
                 session, org_id=gate.org_id, event_type="artifact.canonicalized",
                 target_member_ids=list(target_ids),
-                title=f"정본 확定: {artifact.title}",
-                body=f"v{version_number}이(가) 정본으로 확定됐습니다." if version_number else None,
+                title=f"정본 확정: {artifact.title}",
+                body=f"v{version_number}이(가) 정본으로 확정됐습니다." if version_number else None,
                 reference_type="visual_artifact", reference_id=artifact.id,
                 source_project_id=artifact.project_id,
                 # story #2694: #2688(create_gate 2콜)과 동일 결함 클래스 — 이 호출부(transition_gate

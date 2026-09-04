@@ -185,7 +185,7 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
     )
     await session.commit()
     if claim_result.rowcount == 0:
-        raise TierChangeInProgress(f"org_id={org_id}에 다른 결제 작업이 이미 진행 中 — 완료 후 재시도")
+        raise TierChangeInProgress(f"org_id={org_id}에 다른 결제 작업이 이미 진행 중 — 완료 후 재시도")
 
     try:
         # ⛔카디르 MEDIUM(2026-08-21, PR#3306 리뷰) — 이전 버전은 이 조회가 try 밖이라
