@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,11 @@ class ChannelAdapterConfig:
     # 뜨는 대신 배포 자체가 안 되게(fail-closed, 다른 필수 필드 authorize_url/token_url/
     # scope/refresh_mode와 동열).
     display_name: str
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — 이 채널이 짧은 글
+    # (channel_post·Threads류)인지 블로그(site_post·hosted_site/wordpress/webhook류)
+    # 인지. available-channels가 이 값을 그대로 노출해 FE가 "채널 연결"과 "블로그 목적지"
+    # 화면을 분기한다(kind 자체가 SSOT — 문자열 목록을 어디서도 하드코딩하지 않는다).
+    kind: Literal["social", "blog"] = "social"
     credential_kind: str = "oauth"  # "oauth" | "pasted_secret" | "none"
     # story #3374(Phase1·마케팅운영, PO 결정) — 채널 포스트 초안 text 상한. 상수를 서비스/
     # 라우터에 하드코딩하지 않고 여기 한 곳에 선언(담롱 요구 — "상수 하드코딩 X·선언·표시",
@@ -99,6 +105,26 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_width_max=1440,
         image_color_space="sRGB",
         image_max_count=1,
+    ),
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
+    # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
+    # 발행 흐름(`publish_site_post_from_draft` 등)은 지금처럼 내부 `site_posts` 테이블에
+    # 직접 쓴다(어댑터 dispatch·publication_command 경로를 안 탄다, PO 確定 ③). 이 항목은
+    # 순수 선언(레지스트리 등재)일 뿐 — available-channels·kind 필드로 존재를 노출하는
+    # 것 외에 아무 기존 코드 경로도 건드리지 않는다. credential_kind="none"(연결 불요,
+    # 항상 사용 가능) — OAuth 필드는 sandbox와 동형으로 빈 문자열.
+    "hosted_site": ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        refresh_mode="manual",
+        credential_kind="none",
+        display_name="Sprintable 호스팅 블로그",
+        kind="blog",
+        # site_posts.py::unpublish_site_post가 이미 존재(story #3381) — 선언은 그
+        # 사실을 정확히 반영할 뿐(신규 동작 아님). 외부 스코프 개념이 없어(credential
+        # 자체가 없다) unpublish_required_scope는 비운다.
+        supports_unpublish=True,
     ),
 }
 

@@ -124,6 +124,14 @@ async def test_sandbox_absent_when_flag_off():
         threads_row = next(row for row in rows if row["channel"] == "threads")
         assert threads_row["display_name"] == "Threads"
         assert threads_row["credential_kind"] == "oauth"
+        assert threads_row["kind"] == "social"
+
+        # story e4fc29fa(조각①) — hosted_site가 blog kind로 항상(env 무관) 등재돼 있다.
+        # 뮤테이션 대상: channel_adapters.py의 hosted_site 등재를 지우면 이 assert가 RED.
+        assert "hosted_site" in channels
+        hosted_site_row = next(row for row in rows if row["channel"] == "hosted_site")
+        assert hosted_site_row["kind"] == "blog"
+        assert hosted_site_row["credential_kind"] == "none"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -181,7 +189,10 @@ async def test_agent_gets_200_not_403():
         async with _client_for(app) as client:
             r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/available-channels")
         assert r.status_code == 200, r.text
-        assert set(r.json()[0].keys()) == {"channel", "display_name", "credential_kind"}
+        # story e4fc29fa(조각①) — kind 필드 additive 추가(토큰 인접 필드 아님, 응답
+        # 계약 확장 — "no extra field" 계약이 아니라 정확한 필드 집합 계약이었으므로
+        # 여기서 함께 갱신한다).
+        assert set(r.json()[0].keys()) == {"channel", "display_name", "credential_kind", "kind"}
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
