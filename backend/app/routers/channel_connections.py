@@ -109,6 +109,17 @@ class ChannelConnectionResponse(BaseModel):
     # 'scope_insufficient' = 어댑터는 지원하는데 이 연결에 필요 스코프가 없음(재연결
     # 하면 풀림 — §17-11 owner/member 문구가 이 값 전용).
     unpublish_blocked_reason: str | None = None
+    # story 620beefc(AC2) — 어댑터 이미지 규격 선언 노출(§13 규격 문구 3요소 중 "무엇이·
+    # 얼마까지" 축 — FE가 하드코딩하지 않고 이 값으로 문구를 조립한다. max_text_length와
+    # 동형 관례: 이미지 미지원 채널(image_max_count=0)이면 image_max_count=0으로 그대로
+    # 노출(null이 아니다 — "0건 허용"과 "모른다"는 다르다, 이 필드는 항상 선언돼 있다).
+    image_formats: list[str] = []
+    image_max_bytes: int = 0
+    image_aspect_max: float = 0.0
+    image_width_min: int = 0
+    image_width_max: int = 0
+    image_color_space: str = ""
+    image_max_count: int = 0
 
 
 def _to_response(row) -> ChannelConnectionResponse:
@@ -134,6 +145,13 @@ def _to_response(row) -> ChannelConnectionResponse:
         connected_by=row.connected_by, created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
         unpublish_blocked_reason=unpublish_blocked_reason,
         max_text_length=max_text_length, can_unpublish=can_unpublish,
+        image_formats=list(adapter.image_formats) if adapter is not None else [],
+        image_max_bytes=adapter.image_max_bytes if adapter is not None else 0,
+        image_aspect_max=adapter.image_aspect_max if adapter is not None else 0.0,
+        image_width_min=adapter.image_width_min if adapter is not None else 0,
+        image_width_max=adapter.image_width_max if adapter is not None else 0,
+        image_color_space=adapter.image_color_space if adapter is not None else "",
+        image_max_count=adapter.image_max_count if adapter is not None else 0,
     )
 
 
