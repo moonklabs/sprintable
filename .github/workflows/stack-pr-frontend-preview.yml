@@ -41,9 +41,21 @@ name: Frontend preview (stack PR)
 #      `ci` job(Lint/Type/Test/Build — TS/lint/vitest/next build, develop 상태에 안 걸림)
 #      **하나만** 복제한다 — 스토리가 named한 갭 중 가장 저비용·최고가치인 축.
 #
-# ⛔이 워크플로가 못 잡는 것: 백엔드 Python 변경(lint/type/pytest/alembic) 전부, Contrast
-# guard(axe e2e, story #2590 B) — 둘 다 최종 develop 재타겟 시점의 required 체크가 여전히
-# 유일한 검증처다. 이 워크플로 하나로 "스택 PR도 이제 다 검증된다"로 읽으면 안 된다.
+# story 3436(묶음 7, 2026-09-05 — 카디르 지적·PO 승인) — #3802 검수에서 베이스 브랜치의
+# 커밋이 소실되며(스택 재정렬 사고) 이 PR 자신의 마이그레이션 파일셋이 조용히 끊긴 체인이
+# 됐는데, 위 ④가 배제한 검증("develop head 대비 최신성")과는 **다른 물음**이라 안 걸렸다.
+# ⑤ `alembic-migration-chain-smoke` job — 「이 브랜치 파일셋만으로 마이그레이션 체인이
+#    닫히는가」(develop head가 그 사이 움직여도 답이 안 바뀐다, ④의 "구조적으로 의미
+#    없음" 논지와 충돌하지 않는다) 하나만 잰다: 빈 postgres에 `alembic upgrade heads` +
+#    `alembic heads`가 정확히 1개인지(다중/분기 head=끊긴·소실된 체인의 신호, #3802급
+#    사고와 같은 클래스). alembic-fresh-db(ci.yml)의 baseline parity·existing-DB no-op
+#    같은 무거운 스텝은 그대로 이관 안 함 — 순수 체인-닫힘 smoke 하나.
+#
+# ⛔이 워크플로가 못 잡는 것(갱신, alembic은 위 ⑤로 «체인 닫힘»만 좁게 커버 — develop
+# 대비 최신성·baseline parity·existing-DB no-op·실제 마이그레이션 SQL 내용은 여전히 못
+# 잡는다): 백엔드 Python lint/type/pytest 전부, Contrast guard(axe e2e, story #2590 B).
+# 이 셋은 최종 develop 재타겟 시점의 required 체크가 여전히 유일한 검증처다. 이 워크플로
+# 하나로 "스택 PR도 이제 다 검증된다"로 읽으면 안 된다.
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
@@ -153,3 +165,62 @@ jobs:
 
       - name: Verify build schema integrity (story d3dd358b regression guard)
         run: pnpm --filter web verify:build-schema-integrity
+
+  alembic-migration-chain-smoke:
+    name: "Alembic migration chain smoke (stack preview — chain-closure only, not develop-merge verification)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        # alembic-fresh-db(ci.yml)와 같은 이미지 — 베이스라인 스냅샷이 pgvector 확장을 쓴다.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      # 이 브랜치(스택 중간 base 포함) 자신의 파일셋만으로 빈 DB에서 처음부터 끝까지
+      # 재생 가능한지 — develop head 상태와 무관(위 §④/§⑤ 주석). #3802급 사고(베이스
+      # 브랜치 커밋 소실로 마이그레이션 파일 일부가 빠짐)는 여기서 alembic이 참조를
+      # 못 찾거나 체인이 갈라져 실패/다중 head로 드러난다.
+      - name: alembic upgrade heads (fresh DB → this branch's own fileset)
+        working-directory: backend
+        run: uv run alembic upgrade heads
+
+      # 다중/분기 head = 체인이 어딘가에서 끊기거나 갈라졌다는 신호(정상 상태는 항상
+      # 단일 head — 실측, 2026-09-05 기준 develop `alembic heads`도 1개). alembic-
+      # fresh-db(ci.yml)처럼 diff/집합비교가 아니라 단순 개수 검사인 것은 의도적 — 이
+      # smoke가 재는 것은 "이 브랜치가 지금 다중 head 상태로 깨져 있는가" 하나뿐이다.
+      - name: Verify exactly one migration head (chain not broken/forked)
+        working-directory: backend
+        run: |
+          set -e
+          heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+' | sort -u)
+          count=$(printf '%s\n' "$heads" | grep -c .)
+          echo "heads:"
+          echo "$heads"
+          if [ "$count" -ne 1 ]; then
+            echo "FAIL: expected exactly 1 migration head, found $count — chain broken or forked (e.g. lost base-branch commit, #3802-class incident)."
+            exit 1
+          fi
+          echo "OK: single head, chain closed."
