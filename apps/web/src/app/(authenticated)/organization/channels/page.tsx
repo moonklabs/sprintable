@@ -221,7 +221,10 @@ function ChannelSection({
       <SectionCardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">{channelLabel(channel, t)}</h2>
-          <ChannelStatusChip status={channelStatus} />
+          {/* story dd29e6dd(유나 5회차 관찰) — rollup 칩은 여러 연결의 «최악»을 요약하는
+              것이 존재 이유라, 연결이 1개면 요약할 것이 없어 행 칩과 같은 문장을 두 번
+              보여줬다(0개일 때는 애초에 행 칩 자체가 없어 중복이 안 남). 연결 ≥2일 때만. */}
+          {connections.length >= 2 ? <ChannelStatusChip status={channelStatus} /> : null}
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">

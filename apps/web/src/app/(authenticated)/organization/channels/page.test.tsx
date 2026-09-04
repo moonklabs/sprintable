@@ -198,6 +198,41 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   });
 });
 
+// story dd29e6dd(유나 5회차 관찰) — 헤더 rollup 칩이 연결 1개일 때 행 칩과 같은
+// 문장을 두 번 보여주던 것. 처방=헤더 칩은 연결 ≥2일 때만. 3표본(0/1/2개) 그대로 pin.
+describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6dd)', () => {
+  it('⭐연결 0개 — 헤더 칩 부재(회귀 pin, 행도 없음)', async () => {
+    stubFetch({ connections: [] });
+    await mount('owner');
+    expect(container.querySelectorAll('[data-status-chip]')).toHaveLength(0);
+  });
+
+  it('⭐연결 1개 — 헤더 칩 없이 행 칩 1개만(같은 문장 두 번 안 남)', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE] });
+    await mount('owner');
+    const chips = container.querySelectorAll('[data-status-chip]');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.getAttribute('data-status-chip')).toBe('connected');
+  });
+
+  it('⭐연결 2개(active+expired) — 헤더에 최악(expired) 요약 + 행 칩 2개(현행 유지)', async () => {
+    stubFetch({
+      connections: [
+        CONNECTION_ACTIVE,
+        { ...CONNECTION_ACTIVE, id: 'conn-2', account_id: 'acc-2', account_label: '@second', status: 'expired', token_expires_at: '2020-01-01T00:00:00Z' },
+      ],
+    });
+    await mount('owner');
+    const chips = [...container.querySelectorAll('[data-status-chip]')];
+    expect(chips).toHaveLength(3);
+    // 헤더 칩은 채널명 <h2>의 형제(SectionCardHeader의 flex 컨테이너 안) — 행 칩(둘 다
+    // 'reauth_required'/'connected'일 수 있는 값 자체로는 헤더/행을 못 가른다, DOM
+    // 구조로 가른다.
+    const headerChip = container.querySelector('h2 ~ [data-status-chip]');
+    expect(headerChip?.getAttribute('data-status-chip')).toBe('reauth_required');
+  });
+});
+
 describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
   it('org 자격이면 끝 4자리를, platform이면 공용 앱 문구를 보여준다(섞지 않는다)', async () => {
     stubFetch({ connections: [], credentials: { configured: true, app_id_suffix: 'ab12', effective_source: 'org' } });
