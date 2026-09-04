@@ -298,16 +298,65 @@ async def list_channel_post_drafts_endpoint(
     org_id: uuid.UUID,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    scheduled_from: datetime | None = Query(
+        default=None,
+        description="예약 시각 범위 시작(tz-aware ISO, gate.sealed_scheduled_at 기준 — "
+        "publication_command의 스냅샷 값이 아니다). unscheduled와 함께 줄 수 없다.",
+    ),
+    scheduled_to: datetime | None = Query(
+        default=None,
+        description="예약 시각 범위 끝(tz-aware ISO, gate.sealed_scheduled_at 기준). "
+        "unscheduled와 함께 줄 수 없다.",
+    ),
+    unscheduled: bool = Query(
+        default=False,
+        description="true면 gate.sealed_scheduled_at이 null인 draft만(캘린더 「날짜 미정」 "
+        "레인). scheduled_from/scheduled_to와 상호 배타.",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[ChannelPostDraftListItem]:
     """조직 멤버(휴먼·에이전트 모두) 읽기 가능 — site_posts 목록과 동형(승인·발행 경계
-    밖이라 human-only 제약 없음)."""
+    밖이라 human-only 제약 없음).
+
+    story #3423(캘린더 #3422 선행) — 날짜 필터 셋(scheduled_from/scheduled_to/
+    unscheduled)이 없으면 기존 응답과 완전히 동일(회귀 0). 있으면 tz-aware를
+    강제(naive는 비교 결과가 항상 어긋나는 #3414 nit J와 동일 함정)하고, unscheduled는
+    범위 파라미터와 상호 배타(둘 다 주면 "무엇을 원하는지" 모호해진다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    rows = await list_channel_post_drafts(db, org_id=org_id, limit=limit, offset=offset)
+    if unscheduled and (scheduled_from is not None or scheduled_to is not None):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_POST_LIST_FILTER_CONFLICT",
+                "message": "unscheduled는 scheduled_from/scheduled_to와 함께 줄 수 없습니다.",
+            },
+        )
+    for _label, _value in (("scheduled_from", scheduled_from), ("scheduled_to", scheduled_to)):
+        if _value is not None and _value.tzinfo is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "CHANNEL_POST_LIST_FILTER_NAIVE_DATETIME",
+                    "message": f"{_label}은 timezone 정보가 있어야 합니다(예: Z 또는 +09:00).",
+                },
+            )
+    if scheduled_from is not None and scheduled_to is not None and scheduled_from > scheduled_to:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_POST_LIST_FILTER_RANGE_INVALID",
+                "message": "scheduled_from은 scheduled_to보다 늦을 수 없습니다.",
+            },
+        )
+
+    rows = await list_channel_post_drafts(
+        db, org_id=org_id, limit=limit, offset=offset,
+        scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
+    )
     return [_to_draft_list_item(row) for row in rows]
 
 
