@@ -174,6 +174,31 @@ async def post_channel_post_draft_version(
     )
 
 
+def _to_draft_list_item(
+    row: tuple,
+) -> ChannelPostDraftListItem:
+    """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
+    번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를
+    똑같이 지원하는 것과 동형 사상)."""
+    draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256 = row
+    return ChannelPostDraftListItem(
+        draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
+        connection_id=draft.connection_id, current_version=latest.version,
+        latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
+        updated_at=latest.created_at.isoformat(),
+        body_sha256=latest.body_sha256,
+        gate_status=gate.status if gate else None,
+        reapproval_required=gate.reapproval_required if gate else None,
+        sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
+        published_at=published_pub.published_at.isoformat() if published_pub else None,
+        published_body_sha256=published_body_sha256,
+        publication_status=latest_pub.status if latest_pub else None,
+        permalink=published_pub.permalink if published_pub else None,
+        external_id=published_pub.external_id if published_pub else None,
+        error_code=latest_pub.error_code if latest_pub else None,
+    )
+
+
 @router.get("/{org_id}/channel-posts/drafts", response_model=list[ChannelPostDraftListItem])
 async def list_channel_post_drafts_endpoint(
     org_id: uuid.UUID,
@@ -189,25 +214,31 @@ async def list_channel_post_drafts_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     rows = await list_channel_post_drafts(db, org_id=org_id, limit=limit, offset=offset)
-    return [
-        ChannelPostDraftListItem(
-            draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
-            connection_id=draft.connection_id, current_version=latest.version,
-            latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
-            updated_at=latest.created_at.isoformat(),
-            body_sha256=latest.body_sha256,
-            gate_status=gate.status if gate else None,
-            reapproval_required=gate.reapproval_required if gate else None,
-            sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
-            published_at=published_pub.published_at.isoformat() if published_pub else None,
-            published_body_sha256=published_body_sha256,
-            publication_status=latest_pub.status if latest_pub else None,
-            permalink=published_pub.permalink if published_pub else None,
-            external_id=published_pub.external_id if published_pub else None,
-            error_code=latest_pub.error_code if latest_pub else None,
-        )
-        for draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256 in rows
-    ]
+    return [_to_draft_list_item(row) for row in rows]
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}", response_model=ChannelPostDraftListItem,
+)
+async def get_channel_post_draft_detail_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostDraftListItem:
+    """story #3403 — 단건 조회. 목록 항목(`ChannelPostDraftListItem`)과 완전히 같은
+    shape·같은 직렬화 경로(`_to_draft_list_item`) — `list_channel_post_drafts()`를
+    draft_id 필터로 그대로 재사용해 조인 축 드리프트가 구조적으로 없다. 권한도 목록과
+    동일(휴먼·에이전트 둘 다, `_require_human()` 안 부름). org 스코프 밖이거나 존재하지
+    않으면 404("존재 비노출" 관례, site_posts detail과 동형)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    rows = await list_channel_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    return _to_draft_list_item(rows[0])
 
 
 @router.get(

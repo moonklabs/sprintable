@@ -328,6 +328,7 @@ async def list_channel_post_draft_versions(
 
 async def list_channel_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
+    draft_id: uuid.UUID | None = None,
 ) -> list[
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
@@ -336,6 +337,12 @@ async def list_channel_post_drafts(
 ]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
     버전의 created_at 기준) — API 경로 제안 §③ "site S4 후속과 동형".
+
+    story #3403 — `draft_id`를 주면 페이지 쿼리에 단건 필터가 추가될 뿐, 그 아래 배치
+    ②~⑤(gate·publication·버전해시 조회)는 손대지 않는다 — 이미 work_item_id/gate_id
+    키로 동작해 draft 수와 무관하다. 단건 조회(`GET .../drafts/{draft_id}`)가 이 함수를
+    그대로 재사용하는 이유 — 두 번째 쿼리 경로를 새로 짜면 목록과 단건이 다른 값을
+    낼 드리프트 표면이 생긴다.
 
     story #3394(S2c BE 선행, 페드루 PO 확定 2026-09-04) — 상태 파생·발행 상태 필드를 여기서
     배치 조회해 붙인다(site_posts.list_site_post_drafts의 #3384 확장과 동형 패턴, N+1 금지 —
@@ -394,6 +401,8 @@ async def list_channel_post_drafts(
         .limit(limit)
         .offset(offset)
     )
+    if draft_id is not None:
+        stmt = stmt.where(ChannelPostDraft.id == draft_id)
     page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
     if not page_rows:
         return []
