@@ -71,6 +71,16 @@ function stubFetch(opts: { connections?: unknown[] | { status: number }; schedul
 }
 
 describe('ChannelPostCalendarPage (story #3422 ③)', () => {
+  // story #3422 ③-b — 목록으로 돌아가는 링크.
+  it('⭐목록으로 링크가 /content/channel-posts를 가리킨다', async () => {
+    stubFetch({ connections: [] });
+    await act(async () => {
+      root.render(wrap(<ChannelPostCalendarPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-posts-list-link"]')?.getAttribute('href')).toBe('/content/channel-posts');
+  });
+
   it('⭐연결된 채널이 없으면 빈 상태를 보인다(격자·레인 자체를 안 그린다)', async () => {
     stubFetch({ connections: [] });
     await act(async () => {

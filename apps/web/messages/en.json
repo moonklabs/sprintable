@@ -2238,6 +2238,8 @@
     "channelPostsCalendarLoading": "Loading…",
     "channelPostsCalendarNoChannelsTitle": "No channels connected",
     "channelPostsCalendarNoChannelsDescription": "Connect a channel to see scheduled and published posts here.",
+    "channelPostsCalendarLinkCta": "View calendar",
+    "channelPostsCalendarBackToListCta": "Back to list",
     "channelPostsCharLimitUnknown": "Limit unknown",
     "channelPostsOverLimitReason": "Over the limit — you can't submit until the text is shorter.",
     "channelPostsTextTooLong": "The limit is {max} characters, but this is {current} — shorten it and resubmit.",

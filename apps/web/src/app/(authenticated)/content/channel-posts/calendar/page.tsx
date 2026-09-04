@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -75,8 +76,13 @@ export default function ChannelPostCalendarPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="font-heading text-lg font-medium text-foreground">{t('channelPostsCalendarPageTitle')}</h1>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <h1 className="font-heading text-lg font-medium text-foreground">{t('channelPostsCalendarPageTitle')}</h1>
+          <Link href="/content/channel-posts" className="text-sm text-muted-foreground underline underline-offset-4" data-testid="channel-posts-list-link">
+            {t('channelPostsCalendarBackToListCta')}
+          </Link>
+        </div>
         <CalendarRangeControls range={range} onRangeChange={setRange} />
       </div>
 
