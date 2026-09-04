@@ -477,13 +477,25 @@ def test_get_blog_destination_module_none_returns_hosted_site():
     assert get_blog_destination_module(connection_id=None) is hosted_site_publish
 
 
-def test_get_blog_destination_module_non_null_not_implemented_yet():
-    """조각③b·④ 전까지 fail-closed — 뮤테이션 대상: 이 가드를 지우면 존재하지 않는
-    목적지가 조용히 어떤 모듈로든(예: hosted_site) 떨어질 수 있다."""
+def test_get_blog_destination_module_wordpress_returns_wordpress_publish():
+    """조각③b — wordpress_publish.py 배선."""
+    from app.services import wordpress_publish
+    from app.services.blog_destinations import get_blog_destination_module
+
+    assert (
+        get_blog_destination_module(connection_id=uuid.uuid4(), channel="wordpress")
+        is wordpress_publish
+    )
+
+
+def test_get_blog_destination_module_non_wordpress_not_implemented_yet():
+    """webhook(조각④) 등 wordpress가 아닌 non-null 목적지는 여전히 fail-closed —
+    뮤테이션 대상: 이 가드를 지우면 존재하지 않는 목적지가 조용히 어떤 모듈로든
+    (예: hosted_site) 떨어질 수 있다."""
     from app.services.blog_destinations import (
         BlogDestinationNotImplementedError,
         get_blog_destination_module,
     )
 
     with pytest.raises(BlogDestinationNotImplementedError):
-        get_blog_destination_module(connection_id=uuid.uuid4())
+        get_blog_destination_module(connection_id=uuid.uuid4(), channel="webhook")

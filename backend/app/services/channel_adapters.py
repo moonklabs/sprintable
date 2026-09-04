@@ -136,6 +136,27 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 자체가 없다) unpublish_required_scope는 비운다.
         supports_unpublish=True,
     ),
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각③b) — WordPress
+    # self-hosted(Application Password) blog kind 어댑터 2호. WordPress.com OAuth2는
+    # 스토리 경계 明示로 이 조각 범위 밖(사람 의존 앱 등록 필요) — credential_kind만
+    # 여기 pasted_secret로 선언, authorize_url/token_url/scope는 threads류 OAuth 흐름을
+    # 안 타 sandbox/hosted_site와 동형으로 빈 문자열.
+    "wordpress": ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        # Application Password는 만료가 없고 refresh 개념 자체가 없다(재발급=휴먼이
+        # WordPress 관리자 화면에서 새 비밀번호를 새로 붙여넣는 것뿐 — connected_by가
+        # 재연결하는 수동 경로).
+        refresh_mode="manual",
+        credential_kind="pasted_secret",
+        display_name="WordPress(self-hosted)",
+        kind="blog",
+        # unpublish=wordpress_publish.unpublish()(status=draft 전환) — Application
+        # Password는 스코프 개념이 없어(전권 아니면 credential 자체가 없다) 여기도
+        # hosted_site와 동형으로 비운다.
+        supports_unpublish=True,
+    ),
 }
 
 # story 5b27b32f(Phase1·BE·테스트 인프라, 페드루 PO 확定 2026-09-04) — dev 전용 샌드박스

@@ -38,11 +38,19 @@ class BlogDestinationNotImplementedError(NotImplementedError):
         )
 
 
-def get_blog_destination_module(*, connection_id: uuid.UUID | None) -> BlogDestinationModule:
+def get_blog_destination_module(
+    *, connection_id: uuid.UUID | None, channel: str | None = None,
+) -> BlogDestinationModule:
     """connection_id=None → hosted_site_publish(항상 사용 가능, credential 불요).
-    non-null은 조각③b·④ 전까지 명시 거부(동작 무변경 — 지금 이 함수를 실제로 호출하는
-    곳은 없다, 조각③b에서 site_posts.py 발행 흐름이 이 디스패치를 쓰기 시작한다)."""
+    non-null이면 그 connection이 가리키는 `channel`로 실 모듈을 고른다(호출자가 이미
+    connection 행을 읽어야 credential을 꺼낼 수 있어 여기선 DB 재조회 없이 channel
+    문자열만 받는다 — channel_adapters.py::get_publish_client_module(channel: str)과
+    같은 사상). wordpress=조각③b(이 조각에서 배선)·그 외(webhook 등)는 조각④ 전까지
+    명시 거부(fail-closed)."""
     if connection_id is None:
         from app.services import hosted_site_publish
         return hosted_site_publish
+    if channel == "wordpress":
+        from app.services import wordpress_publish
+        return wordpress_publish
     raise BlogDestinationNotImplementedError(connection_id=connection_id)
