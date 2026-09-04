@@ -147,4 +147,21 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
         .toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', '본문이 바뀜'));
     });
   });
+
+  // story f30da19a AC5 — T8(캘린더 칸). sandbox 연결로 만든 초안은 진짜 초안과 나란히
+  // 서므로 표기 유무를 pin한다.
+  it('⭐AC5 — channel=sandbox면 「테스트」 배지가 칩 옆에 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, channel: 'sandbox' }} displayTimezone="Asia/Seoul" />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-sandbox-test-badge"]')?.textContent)
+      .toBe(koMessages.content.channelPostsSandboxTestBadge);
+  });
+
+  it('AC5 — channel=threads(실채널)면 「테스트」 배지가 없다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, channel: 'threads' }} displayTimezone="Asia/Seoul" />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-sandbox-test-badge"]')).toBeNull();
+  });
 });

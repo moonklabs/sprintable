@@ -66,13 +66,38 @@ const CONNECTION_ACTIVE = {
   created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
 };
 
+const AVAILABLE_CHANNELS_DEFAULT = [
+  { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+];
+
 function stubFetch(opts: {
   connections?: unknown[];
   credentials?: { configured: boolean; app_id_suffix: string | null; effective_source: 'org' | 'platform' | 'none' };
+  // story f30da19a(AC2) — available-channels 목록을 테스트별로 바꿀 수 있게(sandbox
+  // 포함/미포함·kind='blog' 필터 등).
+  availableChannels?: { channel: string; display_name: string; credential_kind: string; kind: string }[];
+  // story f30da19a — 성공하면 nextConnections로 이후의 목록 재조회(onRefresh→load)가
+  // 새 행을 반영하는지까지 pin할 수 있게 한다.
+  onCreateSandbox?: (init?: RequestInit) => { status: number; body?: unknown; nextConnections?: unknown[] };
 }) {
-  const connections = opts.connections ?? [];
+  let connections = opts.connections ?? [];
   const credentials = opts.credentials ?? { configured: false, app_id_suffix: null, effective_source: 'platform' };
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+  const availableChannels = opts.availableChannels ?? AVAILABLE_CHANNELS_DEFAULT;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    // available-channels가 '/channel-connections'의 부분문자열이라 그 체크보다 먼저 봐야 한다.
+    if (url.includes('/channel-connections/available-channels')) {
+      return { ok: true, status: 200, json: async () => ({ data: availableChannels }) } as Response;
+    }
+    if (url.includes('/channel-connections/sandbox') && init?.method === 'POST') {
+      const result = opts.onCreateSandbox?.(init) ?? {
+        status: 201,
+        body: { id: 'conn-sb-1', channel: 'sandbox', account_id: 'sandbox-org-1', status: 'active' },
+        nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-sb-1', channel: 'sandbox', credential_kind: 'none', account_label: null, account_id: 'sandbox-org-1' }],
+      };
+      const ok = result.status < 400;
+      if (ok && result.nextConnections) connections = result.nextConnections;
+      return { ok, status: result.status, json: async () => (ok ? { data: result.body } : { data: null, error: { code: (result.body as { code?: string })?.code } }) } as Response;
+    }
     if (url.includes('/app-credentials')) {
       return { ok: true, status: 200, json: async () => ({ data: credentials }) } as Response;
     }
@@ -202,5 +227,75 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
     const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
     expect(registerBtn).toBeUndefined();
     expect(container.textContent).toContain('owner에게 알리기');
+  });
+});
+
+// story f30da19a(AC2) — CHANNELS 하드코딩 대신 available-channels 목록으로 렌더한다.
+describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(story f30da19a AC2)', () => {
+  const AVAILABLE_WITH_SANDBOX = [
+    { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+    { channel: 'sandbox', display_name: 'Sandbox', credential_kind: 'none', kind: 'social' },
+  ];
+
+  it('⭐available-channels에 sandbox가 없으면(prod) 그 카드·버튼 자체가 안 그려진다(dev 전용 env 분기 없이 데이터로 성립)', async () => {
+    stubFetch({ connections: [], availableChannels: [{ channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' }] });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
+    expect(container.textContent).not.toContain('Sandbox');
+  });
+
+  it('⭐available-channels에 sandbox가 있으면(dev) owner에게 「연결 만들기」 버튼이 보인다', async () => {
+    stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
+    await mount('owner');
+    const btn = container.querySelector('[data-testid="channel-connect-sandbox-button"]');
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toContain('Sandbox');
+  });
+
+  it('member는 sandbox 버튼 대신 owner 안내 문구를 본다', async () => {
+    stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
+    expect(container.textContent).toContain('owner에게 알리기');
+  });
+
+  it('⭐sandbox 「연결 만들기」를 누르면 BFF POST 성공 뒤 리로드 없이 새 연결 행이 추가된다', async () => {
+    stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
+    await mount('owner');
+    expect(container.textContent).not.toContain('sandbox-org-1');
+
+    const btn = container.querySelector('[data-testid="channel-connect-sandbox-button"]') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.textContent).toContain('sandbox-org-1');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-error"]')).toBeNull();
+  });
+
+  it('sandbox 생성이 CHANNEL_SANDBOX_DISABLED(404)로 실패하면 방어적 사유 문구가 뜬다', async () => {
+    stubFetch({
+      connections: [],
+      availableChannels: AVAILABLE_WITH_SANDBOX,
+      onCreateSandbox: () => ({ status: 404, body: { code: 'CHANNEL_SANDBOX_DISABLED' } }),
+    });
+    await mount('owner');
+    const btn = container.querySelector('[data-testid="channel-connect-sandbox-button"]') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-error"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelSandboxDisabledReason);
+  });
+
+  // story f30da19a(PO 보정 2026-09-04 13:52Z) — kind='blog'는 이 화면 범위 밖.
+  it('kind=blog 항목은(미래 등재 대비) 렌더 대상에서 빠진다', async () => {
+    stubFetch({
+      connections: [],
+      availableChannels: [
+        { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+        { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'oauth', kind: 'blog' },
+      ],
+    });
+    await mount('owner');
+    expect(container.textContent).not.toContain('WordPress');
   });
 });

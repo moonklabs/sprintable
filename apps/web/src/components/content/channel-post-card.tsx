@@ -4,6 +4,7 @@ import { StatusChip } from '@/components/content/status-chip';
 import { formatScheduledAt } from '@/components/content/schedule-format';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
 
 // story #3422(doc §11 T8) — 캘린더 격자 셀과 「날짜 미정」 레인이 공유하는 유일한 렌더
@@ -51,7 +52,11 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
       data-status-chip={view.status ?? 'unknown'}
     >
       <div className="flex items-center justify-between gap-2">
-        <StatusChip status={view.status} />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusChip status={view.status} />
+          {/* story f30da19a AC5 — T8(캘린더 칸). */}
+          {isSandboxChannelDraft(item.channel) ? <SandboxTestBadge /> : null}
+        </div>
         {item.scheduled_at ? (
           <span className="text-muted-foreground" data-testid="channel-post-calendar-card-time">
             {formatScheduledAt(item.scheduled_at, displayTimezone).display}

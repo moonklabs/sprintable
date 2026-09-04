@@ -19,11 +19,18 @@ import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConne
  * connectors, «에이전트가 쓰는 도구 계약»)와 주체·수명이 달라 별도 라우트로 분리됐다(PO
  * 확定 2026-09-03 — 한 페이지 탭으로 섞으면 "연결"이라는 같은 말을 두 뜻으로 읽는다).
  *
- * Phase 1은 Threads 하나만 구현한다(BE PR#3736 channel_adapters.py). 채널이 늘어나면
- * CHANNELS 배열에 추가하는 것 외 이 페이지 로직 변경은 없다(파생·권한 로직이 channel
- * 문자열에 의존하지 않는다).
+ * story f30da19a(페드루 PO 확定 2026-09-04) — 하드코딩 CHANNELS 배열을 걷어내고 BE
+ * `GET .../channel-connections/available-channels`(CHANNEL_ADAPTERS 레지스트리 파생)
+ * 목록으로 무엇을 그릴지 결정한다. sandbox는 그 목록이 dev에서만 포함해 주므로(prod엔
+ * SANDBOX_CHANNEL_ENABLED 자체가 없음) 이 화면에 별도 env 분기가 없다 — 「없는 자리를
+ * 그리지 않는다」(유나 확定 §13-4)가 데이터 자체로 성립한다.
  */
-const CHANNELS = ['threads'] as const;
+interface AvailableChannelItem {
+  channel: string;
+  display_name: string;
+  credential_kind: string;
+  kind: string;
+}
 
 function ExpiringSoonNote({ isAutoRefreshInfo, t }: { isAutoRefreshInfo?: boolean; t: ReturnType<typeof useTranslations> }) {
   return (
@@ -83,7 +90,19 @@ function ConnectionRow({
     <div className="space-y-2 border-b border-border px-3 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">{conn.account_label ?? conn.account_id}</p>
+          <p className="flex flex-wrap items-center gap-1.5 truncate text-sm font-medium text-foreground">
+            {conn.account_label ?? conn.account_id}
+            {/* story f30da19a AC4③(유나 확定) — 연결 카드는 「테스트용 연결」(글 목록/
+                캘린더의 「테스트」와 다른 정본 — 여기는 "이 연결 자체가 테스트"라는 뜻). */}
+            {conn.channel === 'sandbox' ? (
+              <span
+                className="inline-flex items-center rounded-full border border-border px-1.5 py-0.5 text-xs font-normal text-muted-foreground"
+                data-testid="channel-connect-sandbox-connection-badge"
+              >
+                {t('channelSandboxConnectionBadge')}
+              </span>
+            ) : null}
+          </p>
           <p className="text-xs text-muted-foreground">
             {t('channelConnectedBy', { time: new Date(conn.created_at).toLocaleString() })}
           </p>
@@ -138,9 +157,9 @@ function ConnectionRow({
 }
 
 function ChannelSection({
-  channel, connections, credentials, isOwner, orgId, onRefresh, t,
+  item, connections, credentials, isOwner, orgId, onRefresh, t,
 }: {
-  channel: string;
+  item: AvailableChannelItem;
   connections: ChannelConnectionResponse[];
   credentials: AppCredentialsStatusResponse | undefined;
   isOwner: boolean;
@@ -148,22 +167,58 @@ function ChannelSection({
   onRefresh: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const { channel, display_name, credential_kind } = item;
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
       serverStatus: c.status, tokenExpiresAt: c.token_expires_at, canAutoRefresh: c.can_auto_refresh,
     }).status,
   );
   const effectiveSource = credentials?.effective_source ?? 'none';
+  // story f30da19a(AC2) — 앱 자격 미완 게이팅은 credential_kind='oauth'에만 뜻이 있다
+  // (sandbox·future pasted_secret 채널은 애초에 app-credentials 개념이 없다).
+  const canStartConnect = credential_kind !== 'oauth' || effectiveSource !== 'none';
   const channelStatus = connections.length === 0
-    ? deriveChannelConnectionStatus({ effectiveSource }).status
+    ? deriveChannelConnectionStatus({ effectiveSource: credential_kind === 'oauth' ? effectiveSource : 'org' }).status
     : worstChannelConnectionStatus(rowStatuses);
-  const canStartConnect = effectiveSource !== 'none';
+
+  // story f30da19a(AC2) — sandbox(credential_kind='none')는 OAuth authorize 리다이렉트가
+  // 아니라 BFF POST 한 번으로 연결이 즉시 생긴다(멱등, BE 5b27b32f). 성공하면 페이지
+  // 리로드 없이 onRefresh()로 새 행을 반영한다.
+  const [creatingSandbox, setCreatingSandbox] = useState(false);
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
+  const handleCreateSandbox = useCallback(async () => {
+    setCreatingSandbox(true);
+    setSandboxError(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/sandbox`, { method: 'POST' });
+      if (res.ok) {
+        onRefresh();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+      const code = body?.error?.code;
+      setSandboxError(
+        code === 'CHANNEL_CONNECTION_OWNER_OR_ADMIN_ONLY'
+          ? t('channelOwnerOnlyReason')
+          // AC2 — 404 CHANNEL_SANDBOX_DISABLED는 이 버튼이 애초에 안 그려져야 정상이다
+          // (available-channels 목록에 sandbox가 없으면 이 컴포넌트 자체가 안 만들어짐).
+          // 그래도 두 요청 사이에 서버 설정이 바뀌는 경합을 대비한 방어적 문구만.
+          : code === 'CHANNEL_SANDBOX_DISABLED'
+            ? t('channelSandboxDisabledReason')
+            : t('channelSandboxCreateFailed'),
+      );
+    } catch {
+      setSandboxError(t('channelSandboxCreateFailed'));
+    } finally {
+      setCreatingSandbox(false);
+    }
+  }, [orgId, onRefresh, t]);
 
   return (
     <SectionCard>
       <SectionCardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold capitalize text-foreground">{channel}</h2>
+          <h2 className="text-sm font-semibold text-foreground">{display_name}</h2>
           <ChannelStatusChip status={channelStatus} />
         </div>
       </SectionCardHeader>
@@ -178,17 +233,37 @@ function ChannelSection({
           </div>
         )}
         <div className="flex flex-col items-start gap-1">
-          {isOwner ? (
-            <a href={canStartConnect ? `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}` : undefined}>
-              <Button size="sm" disabled={!canStartConnect}>
-                {t('channelConnectAction', { channel })}
+          {credential_kind === 'oauth' ? (
+            isOwner ? (
+              <a href={canStartConnect ? `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}` : undefined}>
+                <Button size="sm" disabled={!canStartConnect}>
+                  {t('channelConnectAction', { channel: display_name })}
+                </Button>
+              </a>
+            ) : (
+              <Button size="sm" disabled>{t('channelConnectAction', { channel: display_name })}</Button>
+            )
+          ) : credential_kind === 'none' ? (
+            isOwner ? (
+              <Button
+                size="sm" onClick={() => void handleCreateSandbox()} disabled={creatingSandbox}
+                data-testid="channel-connect-sandbox-button"
+              >
+                {creatingSandbox ? t('channelConnectSandboxPendingCta') : t('channelConnectSandboxAction', { channel: display_name })}
               </Button>
-            </a>
-          ) : (
-            <Button size="sm" disabled>{t('channelConnectAction', { channel })}</Button>
-          )}
-          {!canStartConnect ? <p className="text-xs text-muted-foreground">{t('channelConfigIncompleteReason')}</p> : null}
-          {!isOwner ? <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p> : null}
+            ) : null
+            // credential_kind==='pasted_secret' — 아직 이 흐름이 없다. 버튼을 disabled로
+            // 두면 "곧 됩니다"로 읽힌다(유나 §13-4) — 자리 자체를 안 그린다.
+          ) : null}
+          {credential_kind === 'oauth' && !canStartConnect ? (
+            <p className="text-xs text-muted-foreground">{t('channelConfigIncompleteReason')}</p>
+          ) : null}
+          {(credential_kind === 'oauth' || credential_kind === 'none') && !isOwner ? (
+            <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p>
+          ) : null}
+          {credential_kind === 'none' && sandboxError ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
+          ) : null}
         </div>
       </SectionCardBody>
     </SectionCard>
@@ -202,6 +277,7 @@ export default function OrganizationChannelsPage() {
   const t = useTranslations('channelConnect');
   const searchParams = useSearchParams();
 
+  const [availableChannels, setAvailableChannels] = useState<AvailableChannelItem[]>([]);
   const [connections, setConnections] = useState<ChannelConnectionResponse[]>([]);
   const [credentialsByChannel, setCredentialsByChannel] = useState<Record<string, AppCredentialsStatusResponse>>({});
   const [loading, setLoading] = useState(true);
@@ -212,22 +288,35 @@ export default function OrganizationChannelsPage() {
     setLoading(true);
     setLoadError(false);
     try {
-      const [connsRes, ...credResList] = await Promise.all([
+      const [availableRes, connsRes] = await Promise.all([
+        fetchWithAuth(`/api/organizations/${orgId}/channel-connections/available-channels`),
         fetchWithAuth(`/api/organizations/${orgId}/channel-connections`),
-        ...CHANNELS.map((ch) => fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${ch}/app-credentials`)),
       ]);
-      if (connsRes.ok) {
-        const json = (await connsRes.json().catch(() => null)) as { data?: ChannelConnectionResponse[] } | null;
-        setConnections(json?.data ?? []);
-      } else {
+      if (!availableRes.ok || !connsRes.ok) {
         setLoadError(true);
+        return;
       }
+      const availableJson = (await availableRes.json().catch(() => null)) as { data?: AvailableChannelItem[] } | null;
+      // story f30da19a(AC2, 페드루 PO 확定 2026-09-04 13:52Z) — kind='blog'(hosted_site·
+      // wordpress·webhook류)는 이 "채널 연결" 화면 범위 밖(그리지 않는다). hosted_site는
+      // BE가 requires_connection=False라 애초에 이 목록에 안 오지만, 후속 blog kind
+      // 채널이 requires_connection=True로 추가될 경우까지 대비해 FE도 kind로 한 번 더
+      // 거른다.
+      const items = (availableJson?.data ?? []).filter((it) => it.kind === 'social');
+      setAvailableChannels(items);
+      const connsJson = (await connsRes.json().catch(() => null)) as { data?: ChannelConnectionResponse[] } | null;
+      setConnections(connsJson?.data ?? []);
+
+      const oauthChannels = items.filter((it) => it.credential_kind === 'oauth');
+      const credResList = await Promise.all(
+        oauthChannels.map((it) => fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${it.channel}/app-credentials`)),
+      );
       const nextCreds: Record<string, AppCredentialsStatusResponse> = {};
-      for (let i = 0; i < CHANNELS.length; i++) {
+      for (let i = 0; i < oauthChannels.length; i++) {
         const res = credResList[i];
         if (res?.ok) {
           const json = (await res.json().catch(() => null)) as { data?: AppCredentialsStatusResponse } | null;
-          if (json?.data) nextCreds[CHANNELS[i]!] = json.data;
+          if (json?.data) nextCreds[oauthChannels[i]!.channel] = json.data;
         }
       }
       setCredentialsByChannel(nextCreds);
@@ -272,22 +361,22 @@ export default function OrganizationChannelsPage() {
         </div>
       ) : (
         <>
-          {CHANNELS.map((channel) => (
+          {availableChannels.filter((it) => it.credential_kind === 'oauth').map((it) => (
             <AppCredentialsCard
-              key={channel}
-              channel={channel}
+              key={it.channel}
+              channel={it.channel}
               orgId={orgId ?? ''}
               isOwner={isOwner}
-              credentials={credentialsByChannel[channel]}
+              credentials={credentialsByChannel[it.channel]}
               onSaved={() => void load()}
             />
           ))}
-          {CHANNELS.map((channel) => (
+          {availableChannels.map((it) => (
             <ChannelSection
-              key={channel}
-              channel={channel}
-              connections={connections.filter((c) => c.channel === channel)}
-              credentials={credentialsByChannel[channel]}
+              key={it.channel}
+              item={it}
+              connections={connections.filter((c) => c.channel === it.channel)}
+              credentials={credentialsByChannel[it.channel]}
               isOwner={isOwner}
               orgId={orgId ?? ''}
               onRefresh={() => void load()}

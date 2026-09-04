@@ -1298,6 +1298,22 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
   });
 
+  // story f30da19a AC5 — T3(상세 머리).
+  it('⭐AC5 — channel=sandbox면 상세 머리에 「테스트」 배지가 뜬다', async () => {
+    stubFetch({ draftDetail: { channel: 'sandbox' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-sandbox-test-badge"]')?.textContent)
+      .toBe(koMessages.content.channelPostsSandboxTestBadge);
+  });
+
+  it('AC5 — channel=threads(실채널)면 배지가 없다', async () => {
+    stubFetch({});
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-sandbox-test-badge"]')).toBeNull();
+  });
+
   // B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고 이 화면엔
   // mount 안 돼 있던 갭(#3422 AC3). 표본 5종이 상세에서 실제로 「보인다」를 pin한다.
   describe('⭐B3 — 실패 배지 5종이 상세에서 보인다', () => {
