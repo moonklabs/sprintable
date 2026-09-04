@@ -19,9 +19,13 @@ export interface FailureActionBadgeProps {
    * tz·형식(formatScheduledAt)으로 보인다. schedule-format.ts::resolveDisplayTimezone이
    * 유일한 tz 출처(ChannelPostCard·CalendarGrid와 동형 원칙). */
   displayTimezone: string;
+  /** N3(페드루 PO, 2026-09-04 13:26Z) — ChannelPostCard는 `<Link>`라 그 안에 이 배지의
+   * `<Button>`을 그대로 넣으면 인터랙티브 요소가 중첩된다(a>button, 무효 HTML). 카드
+   * 소비처는 compact=true로 라벨만 받는다 — 재시도는 상세로 들어가서 한다. */
+  compact?: boolean;
 }
 
-export function FailureActionBadge({ action, onRetryClick, displayTimezone }: FailureActionBadgeProps) {
+export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact }: FailureActionBadgeProps) {
   const t = useTranslations('content');
 
   if (action.kind === 'blocked') {
@@ -35,13 +39,15 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone }: Fa
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p className="text-xs text-muted-foreground">{t('channelPostsFailureNeedsCheck')}</p>
-        <Button
-          variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
-          title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
-          data-testid="channel-post-failure-retry-button"
-        >
-          {t('channelPostsFailureCheckedRetryCta')}
-        </Button>
+        {compact ? null : (
+          <Button
+            variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+            title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
+            data-testid="channel-post-failure-retry-button"
+          >
+            {t('channelPostsFailureCheckedRetryCta')}
+          </Button>
+        )}
       </div>
     );
   }
@@ -60,13 +66,15 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone }: Fa
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p className="text-xs text-destructive">{t('channelPostsFailureDeadLetter')}</p>
-        <Button
-          variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
-          title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
-          data-testid="channel-post-failure-retry-button"
-        >
-          {t('channelPostsFailureRetryCta')}
-        </Button>
+        {compact ? null : (
+          <Button
+            variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+            title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
+            data-testid="channel-post-failure-retry-button"
+          >
+            {t('channelPostsFailureRetryCta')}
+          </Button>
+        )}
       </div>
     );
   }

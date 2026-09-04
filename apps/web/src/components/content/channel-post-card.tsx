@@ -58,7 +58,10 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
           </span>
         ) : null}
       </div>
-      {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} /> : null}
+      {/* N3(페드루 PO, 2026-09-04 13:26Z) — 카드 전체가 <Link>라 그 안에 배지의
+          <Button>을 그대로 두면 인터랙티브 요소가 중첩된다(a>button). compact로 라벨만
+          받는다 — 재시도는 카드를 눌러 상세로 들어간 다음에 한다. */}
+      {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact /> : null}
       {item.text_preview ? (
         <p className="truncate text-foreground" data-testid="channel-post-calendar-card-preview">{item.text_preview}</p>
       ) : null}

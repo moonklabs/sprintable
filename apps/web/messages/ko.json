@@ -2230,6 +2230,7 @@
     "channelPostsVoidReasonCancelledByHuman": "취소됨",
     "channelPostsFailureProcessing": "자동으로 이어서 처리 중입니다.",
     "channelPostsFailureRetryComingSoon": "재시도는 곧 열립니다",
+    "channelPostsCommandInFlightReason": "이미 발행 요청이 진행 중이거나 막혀 있습니다 — 예약을 취소하거나 연결을 확인한 뒤 다시 시도하세요.",
     "channelPostsScheduleAtDialogTitle": "예약 시각",
     "channelPostsScheduleAtDialogDescription": "정한 시각에 자동으로 발행합니다. 승인 뒤 시각을 바꾸면 다시 상신해야 합니다.",
     "channelPostsScheduleAtDialogCancel": "취소",

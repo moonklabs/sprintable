@@ -95,15 +95,15 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
         .toBe(koMessages.content.channelPostsFailureBlocked);
     });
 
-    it('needs_check', async () => {
+    it('needs_check — 카드에선 compact(라벨만, 버튼 없음 — N3)', async () => {
       await act(async () => {
         root.render(wrap(
           <ChannelPostCard item={{ ...BASE_ITEM, command_status: 'pending', failure_kind: 'needs_check' }} displayTimezone="Asia/Seoul" />,
         ));
       });
-      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
-        .toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureNeedsCheck);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
     });
 
     it('auto_retry', async () => {
@@ -119,12 +119,22 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
     });
 
-    it('dead_letter', async () => {
+    it('dead_letter — 카드에선 compact(라벨만, 버튼 없음 — N3)', async () => {
       await act(async () => {
         root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'dead_letter' }} displayTimezone="Asia/Seoul" />));
       });
-      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
-        .toBe(koMessages.content.channelPostsFailureRetryCta);
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureDeadLetter);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    });
+
+    // N3(페드루 PO, 2026-09-04 13:26Z) — 카드 전체가 <Link>다. 실패 배지가 어떤 갈래든
+    // 카드 안에 <button>이 하나도 없어야 인터랙티브 중첩(a>button)이 안 생긴다.
+    it('⭐N3 — needs_check·dead_letter여도 카드 안에 button이 0개(a>button 중첩 금지)', async () => {
+      await act(async () => {
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'dead_letter' }} displayTimezone="Asia/Seoul" />));
+      });
+      expect(container.querySelectorAll('button').length).toBe(0);
     });
 
     it('voided', async () => {

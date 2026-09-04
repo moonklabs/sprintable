@@ -59,6 +59,16 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(btn.title).toBe(koMessages.content.channelPostsFailureRetryComingSoon);
   });
 
+  // N3(페드루 PO, 2026-09-04 13:26Z) — ChannelPostCard(`<Link>`)가 쓰는 모드. 버튼 자체를
+  // 안 그린다(disabled로도 인터랙티브 요소 중첩은 남는다 — a>button 자체를 없앤다).
+  it('⭐N3 — compact=true면 needs_check 재시도 버튼을 아예 안 그린다(라벨만)', async () => {
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={{ kind: 'needs_check' }} displayTimezone="UTC" compact />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureNeedsCheck);
+  });
+
   it('⭐auto_retry — 버튼 없음(§17-13 "자동 재시도가 예정되면 수동 버튼 없음"), next_retry_at 보간', async () => {
     await render({ kind: 'auto_retry', nextRetryAt: '2026-09-05T00:00:00Z' });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
@@ -85,6 +95,14 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+  });
+
+  it('⭐N3 — compact=true면 dead_letter 재시도 버튼을 아예 안 그린다(라벨만)', async () => {
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter' }} displayTimezone="UTC" compact />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureDeadLetter);
   });
 
   // N2(페드루 PO 지적, 2026-09-04) — CONTENT_CHANGED는 실측 BE reason_code(channel_posts.py

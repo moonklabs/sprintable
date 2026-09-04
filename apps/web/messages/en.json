@@ -2230,6 +2230,7 @@
     "channelPostsVoidReasonCancelledByHuman": "cancelled",
     "channelPostsFailureProcessing": "Continuing automatically.",
     "channelPostsFailureRetryComingSoon": "Retry is coming soon",
+    "channelPostsCommandInFlightReason": "A publish request is already in progress or blocked — cancel the schedule or check the connection, then try again.",
     "channelPostsScheduleAtDialogTitle": "Schedule time",
     "channelPostsScheduleAtDialogDescription": "This publishes automatically at the time you set. Changing the time after approval requires resubmitting.",
     "channelPostsScheduleAtDialogCancel": "Cancel",

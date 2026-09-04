@@ -376,7 +376,7 @@ export default function ChannelPostEditPage() {
   // 않는다 — 성공 응답 필드만 병합하고, 진짜 publication_status는 다음 로드/새로고침이
   // 정직하게 채운다(지어내지 않는다).
   const handlePublish = async () => {
-    if (!orgId || !draft || !canPublish) return;
+    if (!orgId || !draft || !canPublish || blockedByCommandInFlight) return;
     setPublishing(true);
     setPublishResult(null);
     try {
@@ -574,6 +574,16 @@ export default function ChannelPostEditPage() {
   const showUnpublish = draft.publication_status === 'published';
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true;
 
+  // story #3422 B4(페드루 PO, 2026-09-04 13:26Z, code-review "auto_retry 아래 발행
+  // 버튼 활성"과 같은 자리) — command_status가 pending(자동 재시도 큐에 있음, awaiting_
+  // container 포함)·blocked(연결 문제)면 새 발행/예약 상신을 막는다 — 이미 진행 중이거나
+  // 고쳐야 할 것이 따로 있는데 사람이 또 시도하면 서버와 경합하거나 헛수고다.
+  // dead_letter는 이 집합에 일부러 안 넣는다 — 재시도 «클릭» 배선(story f061c1a3, BE
+  // command_id 노출 뒤) 前까지는 발행 버튼이 dead_letter의 유일한 수동 재시도 경로다
+  // (지금 막으면 아예 되살릴 방법이 없어진다).
+  const commandInFlightBlocksNewAttempt = new Set(['pending', 'blocked']);
+  const blockedByCommandInFlight = !!draft.command_status && commandInFlightBlocksNewAttempt.has(draft.command_status);
+
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
   // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
   // 동형(failure-action.ts 우선순위 진리표 그대로 재사용 — 화면이 갈래를 다시 안 짠다).
@@ -705,7 +715,11 @@ export default function ChannelPostEditPage() {
           scheduled·unpublish 엔드포인트 신설·can_unpublish 판정값) — 아래 두 버튼. */}
       <div className="space-y-2">
         <div className="flex gap-2">
-          <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
+          <Button
+            onClick={() => void handlePublish()}
+            disabled={!canPublish || publishing || blockedByCommandInFlight}
+            data-testid="channel-post-publish-button"
+          >
             {/* story #3402 PR2 ②-c(T9·doc §4-1/§17-4) — 부분 성공(container_created)이면
                 기본 행동이 "다시"가 아니라 "이어서 발행"이다(처음부터 하면 컨테이너가
                 하나 더 생겨 같은 글이 두 번 나갈 수 있다, §4-1). partialSuccess 분기가
@@ -737,6 +751,13 @@ export default function ChannelPostEditPage() {
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
             {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌
+            경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘). */}
+        {canPublish && blockedByCommandInFlight ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
+            {t('channelPostsCommandInFlightReason')}
           </p>
         ) : null}
         {showCancelScheduled && !canCancelScheduled ? (
@@ -907,11 +928,13 @@ export default function ChannelPostEditPage() {
           {submitting ? t('submitPendingCta') : t('submitCta')}
         </Button>
         {/* story #3422 ②-d — 예약 상신(doc §11 T8 "상신 시 scheduled_at 입력"). 즉시
-            상신과 같은 게이팅(isOverLimit)을 공유 — 한도 초과면 예약도 막는다. */}
+            상신과 같은 게이팅(isOverLimit)을 공유 — 한도 초과면 예약도 막는다. B4(페드루
+            PO, 2026-09-04 13:26Z) — command_status가 pending/blocked면 새 예약도 막는다
+            (즉시 상신은 이 게이팅 밖 — PO 지시가 발행·예약 상신 둘로 명시). */}
         <Button
           variant="outline"
           onClick={() => setScheduleDialogOpen(true)}
-          disabled={submitting || isOverLimit}
+          disabled={submitting || isOverLimit || blockedByCommandInFlight}
           data-testid="channel-post-schedule-submit-button"
         >
           {t('channelPostsScheduleSubmitCta')}
@@ -929,6 +952,11 @@ export default function ChannelPostEditPage() {
       {isOverLimit ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-over-limit-reason">
           {t('channelPostsOverLimitReason')}
+        </p>
+      ) : null}
+      {!isOverLimit && blockedByCommandInFlight ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
+          {t('channelPostsCommandInFlightReason')}
         </p>
       ) : null}
 

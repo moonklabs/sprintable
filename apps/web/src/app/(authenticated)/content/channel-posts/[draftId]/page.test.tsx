@@ -1276,4 +1276,57 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         .toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', '본문이 바뀜'));
     });
   });
+
+  // B4(페드루 PO, 2026-09-04 13:26Z) — command_status가 pending/blocked면 새 발행·예약
+  // 상신을 막는다(이미 진행 중이거나 고쳐야 할 게 따로 있음). dead_letter는 예외
+  // (f061c1a3 前까지 발행이 유일한 수동 재시도 경로) — 아래에서 활성 그대로임을 pin한다.
+  describe('⭐B4 — command_status가 pending/blocked면 발행·예약 상신을 막는다(dead_letter는 예외)', () => {
+    it('pending — 발행·예약 상신 버튼이 비활성화되고 사유가 버튼 밖에 보인다', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'pending' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
+        .toBe(koMessages.content.channelPostsCommandInFlightReason);
+      expect(container.querySelector('[data-testid="channel-post-schedule-submit-command-inflight-reason"]')?.textContent)
+        .toBe(koMessages.content.channelPostsCommandInFlightReason);
+    });
+
+    it('blocked — 발행·예약 상신 버튼이 비활성화된다', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('dead_letter — 예외라 발행 버튼이 그대로 활성(f061c1a3 前까지 유일한 재시도 경로)', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'dead_letter' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
+    });
+
+    it('즉시 상신 버튼은 이 게이팅 밖(PO 지시가 발행·예약 상신 둘로 명시)', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'pending' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('canPublish=false면 command_status와 무관하게 원래 사유(게이트 문제)만 보인다', async () => {
+      stubFetch({ draftDetail: { gate_status: null, command_status: 'pending' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
+    });
+  });
 });
