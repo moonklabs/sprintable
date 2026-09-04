@@ -97,6 +97,39 @@ function isDynamicallyComposed(flatKeyPath) {
 // story #3156 — HOOK_BIND_RE/extractKeyUsages는 i18n-key-parser.js(공유 모듈)로 이관.
 // ㉣(훅 변수명 하드코딩 t 가정 폐기)·㉥(멤버접근 오귀속, story #3149) 둘 다 그쪽에서 관리.
 
+// story #3420(2026-09-04) — ③ 코드→messages, 하지만 방향 ①(HOOK_BIND_RE+extractKeyUsages)
+// 이 원리적으로 못 보는 자리. 위 AC8 docstring이 이미 선언한 "바닥 변수를 그대로 t()에
+// 넘기는 자리 — t(labelKey)류... 리터럴이 전혀 없어 정적으로 «어떤 문자열이 오는지» 알
+// 방법이 없다"가 정확히 PR#3768(api-error.ts::KNOWN_ERRORS)이 밟은 사고 그대로였다 —
+// `t(info.humanMessageKey)`(page.tsx, 호출 자리)는 리터럴이 없어 방향①이 원리적으로 못
+// 보지만, `labelKey: 'errorChannelTokenExpired'`(api-error.ts, 선언 자리)는 여전히 리터럴
+// 이다 — 호출 자리가 아니라 "키를 값으로 드는 테이블 선언" 자리를 스캔하면 이 blind spot을
+// 닫을 수 있다. 방향①(호출부 스캔)의 대체가 아니라 보완 — 같은 "코드→messages missing"
+// 축이므로 별도 스크립트/CI 스텝을 새로 만들지 않고 이 도구에 셋째 방향으로 합친다(페드루
+// PO 판정, 2026-09-04 — "같은 축이면 그쪽 확장, 두 벌 금지").
+//
+// 선언 자리엔 네임스페이스가 없다(어느 useTranslations('content') 등에서 소비될지 그
+// 자리에선 모른다) — 그래서 방향①처럼 "namespace.key" 정확매치가 아니라 "이 리터럴이 어느
+// namespace 아래에든 최소 하나는 있는지"(suffix 매치)로 판정한다. 정확한 namespace까지
+// 좁히려면 소비부(useTranslations 호출부)까지 역추적해야 하는데(AC8급 확장) 이 셋째 방향의
+// 스코프 밖이다(아래 KEY_FIELD_NAMES에 없는 새 "키를 값으로 드는 테이블" 필드 이름도 마찬가지
+// — 새로 추가하면 이 목록에 등록해야 스캔 대상이 된다).
+const KEY_FIELD_NAMES = ['labelKey'];
+const KEY_FIELD_RE = new RegExp(`\\b(?:${KEY_FIELD_NAMES.join('|')}):\\s*['"]([^'"]*)['"]`, 'g');
+
+function extractTableKeyLiterals(content) {
+  const out = [];
+  for (const m of content.matchAll(KEY_FIELD_RE)) {
+    if (m[1] !== '') out.push(m[1]); // 빈 문자열은 "소비부가 문구 직접 조립"이라는 의도적 위임 표시 — 스캔 제외
+  }
+  return out;
+}
+
+function existsInFlat(flat, bareKey) {
+  return Object.prototype.hasOwnProperty.call(flat, bareKey)
+    || Object.keys(flat).some((full) => full.endsWith(`.${bareKey}`));
+}
+
 // main()으로 감싸 CLI 실행(require.main === module)일 때만 돈다 — 그래야 테스트가 순수함수
 // (flatten/stripComments/isDynamicallyComposed)만 require해 쓸 때 이 스캔 전체(파일 I/O·
 // process.exit)가 같이 실행되는 부작용이 없다.
@@ -114,9 +147,21 @@ function main() {
   const issues = [];
   const namespaceUsage = new Map(); // namespace -> Set(key) — 리포트용 요약
   const referencedPaths = new Set(); // 방향② dead-key 스캔이 쓰는 「참조된 전체 경로」 집합
+  const tableReferencedBareKeys = new Set(); // story #3420 — 방향③ 키(네임스페이스 없음, bare)
 
   files.forEach(file => {
     const content = stripComments(fs.readFileSync(path.join(rootDir, file), 'utf8'));
+
+    // story #3420 — 방향③(테이블 선언 리터럴). 훅 바인딩(useTranslations 등) 자체가 없는
+    // 파일(예: api-error.ts — 자신은 t()를 호출하지 않고 다른 파일이 소비할 라벨을 값으로만
+    // 든다)도 스캔해야 하므로, 아래 훅 바인딩 0건 early-return «전에» 돈다.
+    for (const key of extractTableKeyLiterals(content)) {
+      tableReferencedBareKeys.add(key);
+      const enValue = existsInFlat(enFlat, key);
+      const koValue = existsInFlat(koFlat, key);
+      if (!enValue) issues.push({ file, namespace: '(table)', key, fullKey: key, type: 'missing_en' });
+      if (!koValue) issues.push({ file, namespace: '(table)', key, fullKey: key, type: 'missing_ko' });
+    }
 
     const varToNamespace = extractHookBindings(content);
     if (varToNamespace.size === 0) return;
@@ -144,6 +189,10 @@ function main() {
   for (const flatPath of Object.keys(enFlat)) {
     if (referencedPaths.has(flatPath)) continue;
     if (isDynamicallyComposed(flatPath)) continue;
+    // story #3420 — 방향③(테이블 선언, 네임스페이스 없는 bare 키)이 참조하는 키를 dead
+    // 후보에서 뺀다. bare 키는 어느 네임스페이스에도 실릴 수 있어 suffix 매치로 본다.
+    const bareSegment = flatPath.slice(flatPath.lastIndexOf('.') + 1);
+    if (tableReferencedBareKeys.has(bareSegment)) continue;
     deadCandidates.push(flatPath);
   }
 
@@ -191,4 +240,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { flatten, escapeRegExp, stripComments, isDynamicallyComposed, extractKeyUsages, DYNAMIC_KEY_PREFIXES, main };
+module.exports = { flatten, escapeRegExp, stripComments, isDynamicallyComposed, extractKeyUsages, DYNAMIC_KEY_PREFIXES, extractTableKeyLiterals, existsInFlat, main };

@@ -2,7 +2,7 @@
 // (require.main === module 가드) — 그래서 이 테스트는 파일 I/O나 process.exit 부작용 없이
 // flatten/stripComments/isDynamicallyComposed만 직접 잰다.
 import { describe, expect, it } from 'vitest';
-import { flatten, stripComments, isDynamicallyComposed, extractKeyUsages, DYNAMIC_KEY_PREFIXES } from './check-i18n-keys.js';
+import { flatten, stripComments, isDynamicallyComposed, extractKeyUsages, DYNAMIC_KEY_PREFIXES, extractTableKeyLiterals, existsInFlat } from './check-i18n-keys.js';
 
 describe('flatten — ㉢ 2단 이상 중첩 dot-path 평탄화', () => {
   it('flattens arbitrarily deep nesting into dot-joined leaf paths', () => {
@@ -139,5 +139,45 @@ describe('extractKeyUsages — ㉥ 멤버접근(`obj.t(...)`)은 로컬 t() 호�
   it('식별자 끝에 우연히 걸리는 것도 여전히 안 잡힌다(㉠ 기존 워드바운더리 보존 — get(\'x\')의 t(\'x\')류)', () => {
     const content = "const t = useTranslations('nav');\nget('title');";
     expect(extractKeyUsages(content, 't')).toEqual([]);
+  });
+});
+
+// story #3420 — 방향③(테이블 선언 리터럴). 위 AC8 docstring이 이미 선언한 "바닥 변수를
+// 그대로 t()에 넘기는 자리 — t(labelKey)류" blind spot을, 호출 자리(page.tsx의
+// t(info.humanMessageKey))가 아니라 선언 자리(api-error.ts의 labelKey: '...')에서 잡는다
+// (PR#3768이 실제로 낸 사고 — api-error.ts::KNOWN_ERRORS labelKey 6개 실누락).
+describe('extractTableKeyLiterals — story #3420, ③ 테이블 선언 리터럴', () => {
+  it('labelKey: \'...\' 리터럴을 뽑는다(api-error.ts::KNOWN_ERRORS 실제 모양)', () => {
+    const content = `
+      CHANNEL_TOKEN_EXPIRED: { labelKey: 'errorChannelTokenExpired', kind: 'token_expired' },
+      CHANNEL_RATE_LIMITED: { labelKey: 'errorChannelRateLimited', kind: 'rate_limited' },
+    `;
+    expect(extractTableKeyLiterals(content)).toEqual(['errorChannelTokenExpired', 'errorChannelRateLimited']);
+  });
+
+  it('빈 문자열(labelKey: \'\')은 "소비부가 직접 조립"이라는 의도적 위임 표시라 제외한다', () => {
+    const content = "TEXT_TOO_LONG: { labelKey: '', kind: 'text_too_long' },";
+    expect(extractTableKeyLiterals(content)).toEqual([]);
+  });
+
+  it('KEY_FIELD_NAMES에 없는 필드 이름(예: someOtherKey)은 안 잡는다(선언 필요 — AC 목록 참고)', () => {
+    const content = "FOO: { someOtherKey: 'notScanned' },";
+    expect(extractTableKeyLiterals(content)).toEqual([]);
+  });
+});
+
+describe('existsInFlat — 방향③은 namespace 없는 bare 키라 suffix 매치로 본다', () => {
+  const flat = { 'content.errorApprovalRequired': '승인이 끝나야...', 'nav.title': '메뉴' };
+
+  it('정확히 leaf 키와 일치하면 참', () => {
+    expect(existsInFlat(flat, 'errorApprovalRequired')).toBe(true);
+  });
+
+  it('어느 namespace에도 그 leaf가 없으면 거짓', () => {
+    expect(existsInFlat(flat, 'errorChannelTokenExpired')).toBe(false);
+  });
+
+  it('네임스페이스 없이 최상위 키로 직접 있어도 참(hasOwnProperty 경로)', () => {
+    expect(existsInFlat({ bareTop: 'x' }, 'bareTop')).toBe(true);
   });
 });
