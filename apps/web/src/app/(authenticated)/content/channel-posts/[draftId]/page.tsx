@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError } from '@/components/content/api-error';
+import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
+import { contentPostStatusLabelKey } from '@/components/content/post-status';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -34,6 +36,11 @@ interface ChannelPostDraftDetail {
   // 같은 shape를 준다 — 승인 카드가 필요로 하는 게이트 신호도 이미 여기 실려 있다.
   gate_status?: string | null;
   reapproval_required?: boolean | null;
+  sealed_content_sha256?: string | null;
+  body_sha256?: string;
+  publication_status?: ChannelPublicationStatus | null;
+  published_at?: string | null;
+  error_code?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -294,6 +301,31 @@ export default function ChannelPostEditPage() {
     );
   }
 
+  // 카디르 QA(2026-09-04, 유나 정밀화) — 승인 카드가 5상태를 raw gate_status로 직접
+  // 인라인 삼항 판정하면 목록(page.tsx, deriveChannelPostView 사용)과 5상태 파생이
+  // 두 벌이 된다(같은 값을 두 곳에서 각자 만들면 하나만 고쳐질 위험). 목록과 똑같이
+  // deriveChannelPostView를 통과시켜 AC2(hasPublishedSitePost===undefined일 때 status
+  // 자체를 비우는 fail-safe)가 편집 화면에도 그대로 따라오게 한다.
+  //
+  // ⚠️실측 함정(자체 발견, 테스트가 잡음) — `gateStatus`를 "pending/approved/rejected가
+  // 아니면 undefined"로만 매핑하면 "키가 아예 없다"(모른다)와 "gate_status===null"(진짜
+  // 게이트 없음)이 똑같이 undefined가 되어 deriveContentPostStatus가 둘 다 'draft'로
+  // 뭉갠다 — AC2가 지키려는 바로 그 구별이 여기서 사라진다. 목록(page.tsx)의
+  // hasGateContract 가드와 동형으로, 키 자체가 없으면 파생을 아예 부르지 않는다.
+  const hasGateContract = 'gate_status' in draft;
+  const view = hasGateContract
+    ? deriveChannelPostView({
+        gateStatus: draft.gate_status === 'pending' || draft.gate_status === 'approved' || draft.gate_status === 'rejected'
+          ? draft.gate_status : undefined,
+        reapprovalRequired: draft.reapproval_required ?? undefined,
+        sealedBodySha256: draft.sealed_content_sha256 ?? undefined,
+        currentBodySha256: draft.body_sha256,
+        publicationStatus: draft.publication_status ?? undefined,
+        errorCode: draft.error_code,
+        publishedAt: 'published_at' in draft ? draft.published_at : undefined,
+      })
+    : { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false, errorCode: undefined };
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
@@ -304,21 +336,16 @@ export default function ChannelPostEditPage() {
       </div>
 
       {/* story #3402 ④ — 승인 카드(T5/T6). AC8(UTM 미리보기)·AC9(계정 표시)·AC7(한도
-          잔량, 조회 실패도 상태). 게이트 상태 자체는 목록과 같은 gate_status/
-          reapproval_required 신호(#3394)를 그대로 읽는다 — 별도 조회 없음. */}
+          잔량, 조회 실패도 상태). 게이트 상태는 목록과 같은 파생 함수(deriveChannelPostView,
+          위 view)를 그대로 재사용 — 5상태 라벨도 post-status.ts::contentPostStatusLabelKey
+          (StatusChip과 동일 출처)를 그대로 쓴다(같은 개념을 두 벌 번역키로 안 나눈다). */}
       <div className="space-y-2 rounded-md border border-border p-4 text-sm" data-testid="channel-post-approval-card">
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalStatusLabel')}</span>
           <span data-testid="channel-post-gate-status">
-            {draft.gate_status == null
-              ? t('channelPostsApprovalNotSubmitted')
-              : draft.gate_status === 'pending' && draft.reapproval_required
-                ? t('channelPostsApprovalReapprovalNeeded')
-                : draft.gate_status === 'pending'
-                  ? t('channelPostsApprovalPending')
-                  : draft.gate_status === 'approved'
-                    ? t('channelPostsApprovalApproved')
-                    : t('channelPostsApprovalNotSubmitted')}
+            {/* AC2 — view.status===undefined는 "모른다"(계약 필드 부재 등) — 「—」로
+                구별해 「상신 전」(진짜 게이트 없음)과 섞이지 않게 한다. */}
+            {view.status === undefined ? t('originAuthorUnknown') : t(contentPostStatusLabelKey(view.status))}
           </span>
         </div>
         {/* AC9 — 나가는 계정. */}

@@ -83,9 +83,14 @@ function stubFetch(opts: {
   // best-effort 상대 초안 조회. undefined=엔드포인트 자체가 404(구 계약, #3767 착지 전
   // 상황 재현) · { text_preview: null }=필드는 있는데 값이 없음 · 값 있으면 그 미리보기.
   holdingDraft?: { text_preview: string | null } | undefined;
+  // story #3402(카디르 QA 2026-09-04) — AC2 "키 부재" 재현용. `draftDetail`은 DRAFT_DETAIL
+  // 위에 스프레드 병합되므로 override 쪽에서 키를 빼도 base의 값이 살아남는다(고전
+  // 함정) — 병합 "후"에 명시적으로 delete해야 진짜 키 부재를 재현한다.
+  omitGateStatusKey?: boolean;
 }) {
   const versions = opts.versions ?? [VERSION_1];
-  const draftDetail = { ...DRAFT_DETAIL, ...opts.draftDetail };
+  const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
+  if (opts.omitGateStatusKey) delete draftDetail.gate_status;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -317,7 +322,10 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       .toBe(koMessages.content.channelPostsLimitCheckFailed);
   });
 
-  it('⭐게이트 상태 — gate_status=null이면 "상신 전"으로 보인다', async () => {
+  // 카디르 QA(2026-09-04)·유나 정밀화 — 승인 카드의 게이트 상태는 이제 목록과 같은
+  // deriveChannelPostView(post-status.ts 5상태 파생 재사용)를 통과한다 — 라벨도
+  // post-status.ts::contentPostStatusLabelKey(StatusChip과 동일 출처)를 그대로 쓴다.
+  it('⭐게이트 상태 — gate_status=null(진짜 게이트 없음)이면 "초안" 라벨로 보인다(5상태 파생 재사용, contentStatusDraft)', async () => {
     stubFetch({ draftDetail: { gate_status: null, reapproval_required: null } });
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
@@ -325,10 +333,21 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-gate-status"]')?.textContent)
-      .toBe(koMessages.content.channelPostsApprovalNotSubmitted);
+      .toBe(koMessages.content.contentStatusDraft);
   });
 
-  it('⭐게이트 상태 — pending+reapproval_required=true면 "재승인 필요"로 보인다', async () => {
+  it('⭐AC2 핵심 — gate_status 계약 필드 자체가 없으면(키 부재, "모른다") "—"를 보인다(gate_status===null=상신 없음과 구별)', async () => {
+    stubFetch({ omitGateStatusKey: true });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-gate-status"]')?.textContent)
+      .toBe(koMessages.content.originAuthorUnknown);
+  });
+
+  it('⭐게이트 상태 — pending+reapproval_required=true면 "재승인 필요" 라벨로 보인다', async () => {
     stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: true } });
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
@@ -336,7 +355,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-gate-status"]')?.textContent)
-      .toBe(koMessages.content.channelPostsApprovalReapprovalNeeded);
+      .toBe(koMessages.content.contentStatusReapprovalNeeded);
   });
 
   it('⭐AC8 — tagged_link_preview가 있으면 그대로 보인다', async () => {
