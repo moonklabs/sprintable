@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.channel_post_version import ChannelPostVersion
 from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
     ChannelPostApproverRoleMissingError,
@@ -43,6 +45,22 @@ from app.services.channel_posts import (
     submit_channel_post_draft,
     text_char_count,
     unpublish_channel_post,
+)
+from app.services.channel_post_images import (
+    ChannelImageAnimatedUnsupportedError,
+    ChannelImageAspectRatioExceededError,
+    ChannelImageConversionFailedError,
+    ChannelImageObjectNotFoundError,
+    ChannelImagePathNotScopedError,
+    ChannelImageTooLargeError,
+    ChannelImageUnsupportedError,
+    ChannelImageUnsupportedFormatError,
+    ChannelImageUndecodableError,
+    ChannelImageUploadFailedError,
+    confirm_channel_post_image_upload,
+    create_channel_post_image_upload_url,
+    get_channel_post_image_for_version,
+    public_url_for_object_path,
 )
 from app.services.member_resolver import resolve_member
 
@@ -168,6 +186,38 @@ class ChannelPostVersionHistoryItem(BaseModel):
     tagged_link_preview: str | None = None
 
 
+class CreateChannelPostImageUploadUrlRequest(BaseModel):
+    content_type: str
+
+
+class ChannelPostImageUploadUrlResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    expires_at: str
+    max_bytes: int
+
+
+class ConfirmChannelPostImageUploadRequest(BaseModel):
+    object_path: str
+
+
+class ChannelPostImageResponse(BaseModel):
+    draft_id: uuid.UUID
+    version_id: uuid.UUID
+    version: int
+    # story 620beefc(AC6/§17-14) — 원본·최종(파생본 있으면 그것, 없으면 원본) 둘 다
+    # 실어야 화면이 배지 문구("너비 4000px → 1440px · 용량 12.4MB → 3.1MB")를 조립할
+    # 수 있다(페드루 PO §17-14 요구, 서버가 문구를 짓지 않고 값만 낸다).
+    original_width: int
+    original_height: int
+    original_bytes: int
+    final_width: int
+    final_height: int
+    final_bytes: int
+    was_converted: bool
+    image_url: str | None = None
+
+
 class SubmitChannelPostDraftRequest(BaseModel):
     version_id: uuid.UUID | None = None
     # story #3414(PO 確定, 2026-09-04) — 예약 발행 시각도 게이트 봉인 범위(블루프린트
@@ -253,6 +303,158 @@ async def post_channel_post_draft_version(
         author_kind=version.author_kind, body_sha256=version.body_sha256,
         tagged_link_preview=tagged_link_preview,
     )
+
+
+def _image_response(version, image_row) -> ChannelPostImageResponse:
+    return ChannelPostImageResponse(
+        draft_id=version.draft_id, version_id=version.id, version=version.version,
+        original_width=image_row.original_width, original_height=image_row.original_height,
+        original_bytes=image_row.original_bytes,
+        final_width=image_row.final_width, final_height=image_row.final_height,
+        final_bytes=image_row.final_bytes, was_converted=image_row.was_converted,
+        image_url=public_url_for_object_path(image_row.final_object_path),
+    )
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/upload-url",
+    response_model=ChannelPostImageUploadUrlResponse,
+)
+async def post_channel_post_image_upload_url(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: CreateChannelPostImageUploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageUploadUrlResponse:
+    """AC1 — 고객 에이전트·휴먼 공용(초안 제출 엔드포인트와 동형 폭). avatar_upload.py와
+    같은 2단계(signed URL 발급→FE 직접 PUT→confirm) — 대용량 바이너리가 이 서버를
+    경유하지 않는다(storage/base.py D3 원칙)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+
+    try:
+        result = await create_channel_post_image_upload_url(
+            org_id=org_id, draft_id=draft_id, channel=draft.channel, content_type=body.content_type,
+        )
+    except ChannelImageUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelImageUnsupportedFormatError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_UNSUPPORTED_FORMAT", "message": str(exc),
+                "content_type": exc.content_type, "allowed_formats": list(exc.allowed),
+            },
+        ) from exc
+    except ChannelImageUploadFailedError as exc:
+        raise HTTPException(status_code=502, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return ChannelPostImageUploadUrlResponse(**result)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/confirm",
+    response_model=ChannelPostImageResponse, status_code=201,
+)
+async def post_channel_post_image_confirm(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostImageUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """AC1/AC3 — 업로드 확인+자동 변환(필요 시)+계보 기록. 이 호출 자체가 새
+    `ChannelPostVersion`을 만든다(text/link_url은 직전 버전에서 캐리포워드, image_sha256만
+    갱신) — 텍스트 편집과 동형 축(재승인 판정은 create_channel_post_draft_version의
+    기존 재봉인 훅이 그대로 처리, 신규 메커니즘 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    member_id = uuid.UUID(auth.user_id)
+    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    try:
+        version, image_row = await confirm_channel_post_image_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelImageUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelImagePathNotScopedError as exc:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_IMAGE_PATH_NOT_SCOPED", "message": str(exc)}) from exc
+    except ChannelImageObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_IMAGE_OBJECT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelImageTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "CHANNEL_IMAGE_TOO_LARGE", "message": str(exc),
+                "size_bytes": exc.size_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelImageUndecodableError as exc:
+        raise HTTPException(status_code=422, detail={"code": "CHANNEL_IMAGE_UNDECODABLE", "message": str(exc)}) from exc
+    except ChannelImageAnimatedUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_IMAGE_ANIMATED_UNSUPPORTED", "message": str(exc), "frame_count": exc.frame_count},
+        ) from exc
+    except ChannelImageAspectRatioExceededError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED", "message": str(exc),
+                "aspect_ratio": exc.aspect_ratio, "max_aspect_ratio": exc.max_aspect_ratio,
+            },
+        ) from exc
+    except ChannelImageConversionFailedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_CONVERSION_FAILED", "message": str(exc),
+                "final_bytes": exc.final_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelImageUploadFailedError as exc:
+        raise HTTPException(status_code=502, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return _image_response(version, image_row)
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}/versions/{version_id}/asset",
+    response_model=ChannelPostImageResponse,
+)
+async def get_channel_post_image_for_version_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """AC6 — 목록/단건 위젯이 썸네일을 그리려면 어느 버전에 무슨 이미지가 붙었는지가
+    필요하다. 조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 목록 엔드포인트와 동형 권한 폭."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    version = (await db.execute(
+        select(ChannelPostVersion).where(
+            ChannelPostVersion.id == version_id, ChannelPostVersion.draft_id == draft_id,
+        )
+    )).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_VERSION_NOT_FOUND", "message": str(version_id)})
+
+    image_row = await get_channel_post_image_for_version(db, version_id=version_id)
+    if image_row is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_IMAGE_NOT_FOUND", "message": str(version_id)})
+    return _image_response(version, image_row)
 
 
 def _to_draft_list_item(
