@@ -206,6 +206,27 @@ export default function ContentPostEditPage() {
   // 상세 화면과 동형(resolveDisplayTimezone()의 기본 인자 규약 그대로 재사용).
   const displayTimezone = resolveDisplayTimezone().tz;
 
+  // story 1db41045(#3457) — 「캠페인 만들기/붙이기」. 목록(기존 선택)·새 이름(만들기)
+  // 둘 다 이 자리에서 다룬다. 둘 다 지정하면 "새로 만들기"가 우선(사람이 방금 타이핑한
+  // 것이 최신 의도 — select를 초기화 안 해도 자연스럽게 이긴다).
+  const [campaigns, setCampaigns] = useState<CampaignListItem[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [newCampaignName, setNewCampaignName] = useState('');
+  const [attachingCampaign, setAttachingCampaign] = useState(false);
+  const [attachCampaignResult, setAttachCampaignResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
+
+  const loadCampaigns = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/campaigns`);
+      if (!res.ok) return;
+      const json = (await res.json().catch(() => null)) as { data?: CampaignListItem[] } | null;
+      setCampaigns(json?.data ?? []);
+    } catch {
+      // 목록은 부가 정보(선택지 채우기) — 조회 실패로 "새로 만들기"까지 막지 않는다.
+    }
+  }, [orgId]);
+
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
@@ -264,6 +285,7 @@ export default function ContentPostEditPage() {
     if (!orgId) return;
     let cancelled = false;
     void loadVariants();
+    void loadCampaigns();
     fetchWithAuth(`/api/organizations/${orgId}/channel-connections`)
       .then(async (r) => {
         if (cancelled || !r.ok) return;
@@ -272,7 +294,7 @@ export default function ContentPostEditPage() {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [orgId, loadVariants]);
+  }, [orgId, loadVariants, loadCampaigns]);
 
   // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. text는 min_length=1(BE 검증) —
   // 빈 문자열을 보낼 수 없어 summary를 채워 넣고, summary도 비어 있으면 title로
@@ -320,6 +342,79 @@ export default function ContentPostEditPage() {
       setCreatingVariant(false);
     }
   }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t]);
+
+  // story 1db41045(#3457) — 「캠페인 만들기/붙이기」. 새 이름을 입력했으면 먼저
+  // POST /campaigns로 만들고(휴먼 전용, BE _require_human — 이 화면은 role을
+  // 더 좁히지 않는다, 페드루 PO 정정 2026-09-04 17:03Z), 그 campaign_id로 이
+  // 원문을 저장한다(site-posts 저장 POST가 이미 campaign_id를 model_fields_set
+  // 캐리포워드로 받는다 — handleSave와 같은 필드 전부 재전송 + campaign_id만
+  // 추가). 새 이름이 비어 있으면 select로 고른 기존 campaign_id를 그대로 쓴다.
+  const handleAttachCampaign = useCallback(async () => {
+    if (!orgId || !latest) return;
+    const trimmedName = newCampaignName.trim();
+    if (!trimmedName && !selectedCampaignId) return;
+    setAttachingCampaign(true);
+    setAttachCampaignResult(null);
+    try {
+      let campaignId = selectedCampaignId;
+      if (trimmedName) {
+        const createRes = await fetchWithAuth(`/api/organizations/${orgId}/campaigns`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmedName }),
+        });
+        if (!createRes.ok) {
+          const body = await createRes.json().catch(() => null);
+          const info = parseSitePostApiError(body);
+          setAttachCampaignResult({
+            type: 'error',
+            text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('campaignCreateFailed')),
+            raw: info.raw,
+          });
+          return;
+        }
+        const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
+        if (!createJson?.data?.id) {
+          setAttachCampaignResult({ type: 'error', text: t('campaignCreateFailed') });
+          return;
+        }
+        campaignId = createJson.data.id;
+      }
+
+      const tags = tagsText.split(',').map((s) => s.trim()).filter(Boolean);
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          work_item_id: latest.source_story_id, slug: latest.slug, lang: latest.lang,
+          title, summary, tags, body_md: bodyMd, media_manifest: [],
+          campaign_id: campaignId,
+        }),
+      });
+      if (res.ok) {
+        setNewCampaignName('');
+        setSelectedCampaignId('');
+        const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
+        if (versionsRes.ok) {
+          const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+          if (json?.data) setVersions(json.data);
+        }
+        void loadCampaigns();
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setAttachCampaignResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('campaignAttachFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setAttachCampaignResult({ type: 'error', text: t('campaignAttachFailed') });
+    } finally {
+      setAttachingCampaign(false);
+    }
+  }, [orgId, latest, newCampaignName, selectedCampaignId, tagsText, title, summary, bodyMd, draftId, loadCampaigns, t]);
 
   // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
   // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·
@@ -651,6 +746,60 @@ export default function ContentPostEditPage() {
           {t('editMeta', { slug: latest.slug, lang: latest.lang })}
         </p>
       </div>
+
+      {/* story 1db41045(#3457) — 캠페인. 이미 붙어 있으면(campaign_id) 이름+상세
+          링크만(휴먼이 "지금 어디 속했나"를 바로 본다) — 다시 만들기/붙이기 자리를
+          겹쳐 그리지 않는다("칩은 그대로, 얹는다"와 같은 규율: 이미 있는 값을
+          지우고 새 폼을 얹지 않는다). 없을 때만 만들기/붙이기 폼. */}
+      {latest.campaign_id ? (
+        <p className="text-sm text-muted-foreground" data-testid="content-campaign-current">
+          {t('campaignCurrentLabel')}{' '}
+          <Link href={`/campaigns/${latest.campaign_id}`} className="underline">
+            {latest.campaign_name ?? latest.campaign_id}
+          </Link>
+        </p>
+      ) : (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-campaign-attach">
+          <p className="text-xs font-medium text-muted-foreground">{t('campaignAttachLabel')}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {campaigns.length > 0 ? (
+              <select
+                value={selectedCampaignId}
+                onChange={(e) => { setSelectedCampaignId(e.target.value); if (e.target.value) setNewCampaignName(''); }}
+                className="rounded-md border border-border px-2 py-1.5 text-sm"
+                data-testid="content-campaign-select"
+              >
+                <option value="">{t('campaignSelectPlaceholder')}</option>
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            ) : null}
+            <input
+              type="text"
+              value={newCampaignName}
+              onChange={(e) => { setNewCampaignName(e.target.value); if (e.target.value) setSelectedCampaignId(''); }}
+              placeholder={t('campaignNewNamePlaceholder')}
+              className="rounded-md border border-border px-2 py-1.5 text-sm"
+              data-testid="content-campaign-new-name-input"
+            />
+            <Button
+              type="button" size="sm"
+              onClick={() => void handleAttachCampaign()}
+              disabled={(!newCampaignName.trim() && !selectedCampaignId) || attachingCampaign}
+              data-testid="content-campaign-attach-button"
+            >
+              {attachingCampaign ? t('campaignAttachPendingCta') : t('campaignAttachCta')}
+            </Button>
+          </div>
+          {attachCampaignResult ? (
+            <Alert variant="destructive" role="alert" data-testid="content-campaign-attach-error">
+              <AlertDescription>{attachCampaignResult.text}</AlertDescription>
+              <RawDetailsToggle raw={attachCampaignResult.raw} label={t('errorRawDetailsToggle')} />
+            </Alert>
+          ) : null}
+        </div>
+      )}
 
       {status === 'reapproval_needed' ? (
         // §3-2 — "판정이 아니라 관측이다. 해시 두 개를 나란히 보여주면 사람이 스스로
