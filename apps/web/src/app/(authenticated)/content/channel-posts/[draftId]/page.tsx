@@ -11,6 +11,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
+import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
 
 /**
@@ -38,9 +39,16 @@ interface ChannelPostDraftDetail {
   reapproval_required?: boolean | null;
   sealed_content_sha256?: string | null;
   body_sha256?: string;
+  // story #3402 PR2(T7/T9) — 발행 상태. publication_status/error_code는 "최신 버전"
+  // 기준, published_at/permalink/external_id는 "가장 최근 published" 기준(두 조인 축이
+  // 다른 이유는 #3394 AC2 서비스 docstring 참고 — 편집→재승인 사이에도 과거 발행 이력이
+  // 살아있어야 한다).
   publication_status?: ChannelPublicationStatus | null;
-  published_at?: string | null;
+  permalink?: string | null;
+  external_id?: string | null;
   error_code?: string | null;
+  published_at?: string | null;
+  published_body_sha256?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -73,7 +81,7 @@ type PublishingLimitState =
   | { status: 'failed' };
 
 export default function ChannelPostEditPage() {
-  const { orgId } = useDashboardContext();
+  const { orgId, role } = useDashboardContext();
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
@@ -97,6 +105,16 @@ export default function ChannelPostEditPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
     { type: 'success'; gateId: string } | { type: 'error'; text: string; raw?: string; heldByDraftId?: string } | null
+  >(null);
+
+  // story #3402 PR2 ②-b — 발행(T7). confirm 다이얼로그 없음(site-posts와 동형 — 되돌릴 수
+  // 없는 쪽은 발행 취소이지 발행 자체가 아니다, handleUnpublish만 ConfirmDialog를 쓴다).
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<
+    | { type: 'success' }
+    | { type: 'scheduled'; scheduledAt?: string }
+    | { type: 'error'; text: string; raw?: string; externalImpact?: ReturnType<typeof describeExternalImpact> }
+    | null
   >(null);
 
   useEffect(() => {
@@ -288,6 +306,69 @@ export default function ChannelPostEditPage() {
     }
   };
 
+  // story #3402 PR2 ②-b(T7·AC5·AC10) — 발행. draft 상태를 재로드하지 않고 성공 응답
+  // {permalink, external_id, published_at, version_id}(story f8f7cb0f 계약)을 그 자리에서
+  // 병합한다 — site-posts처럼 별도 loadGate/loadPublication 훅이 없다(단건 GET 하나가
+  // 이미 게이트+발행 상태를 같이 준다, story #3394/#3403 설계). publication_status를
+  // 'published'로 직접 세팅하지 않는 이유: 서버가 "최신 버전"과 "가장 최근 published"
+  // 두 축을 조인 축을 다르게 계산하므로(§4-2, story #3394 AC2) 화면이 그 판정을 흉내내지
+  // 않는다 — 성공 응답 필드만 병합하고, 진짜 publication_status는 다음 로드/새로고침이
+  // 정직하게 채운다(지어내지 않는다).
+  const handlePublish = async () => {
+    if (!orgId || !draft || !canPublish) return;
+    setPublishing(true);
+    setPublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as
+          { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string } } | null;
+        const { permalink, external_id, published_at, scheduled, scheduled_at } = json?.data ?? {};
+        // story #3414(PR#3769, 아직 리뷰중 — 계약은 그 PR 스키마 기준) — scheduled=true면
+        // 이 요청은 command만 만들고 실제 발행은 워커가 나중에 한다. permalink/
+        // published_at 셋 다 null인 게 정상이라, 그 null을 "발행됨"으로 그리면 안 된다
+        // (모르는 것을 아는 것처럼 안 보여준다 — 이 파일 전체를 관통하는 AC2 규율과 같은
+        // 축). scheduled 분기를 permalink 존재 분기보다 먼저 검사한다.
+        if (scheduled) {
+          setPublishResult({ type: 'scheduled', scheduledAt: scheduled_at });
+        } else if (permalink && published_at) {
+          setPublishResult({ type: 'success' });
+          setDraft((prev) => prev && { ...prev, permalink, external_id, published_at, publication_status: 'published' });
+        } else {
+          setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG·CHANNEL_RATE_LIMITED는
+        // api-error.ts가 max_length/current_length·reset_at을 실어만 오고 문구 조립은
+        // 소비부 몫으로 남겨 둔 코드다(doc §5 표 — 「500자 한도인데 517자입니다」·
+        // 「내일 09:00 이후 가능합니다」는 값을 실제로 보간해야 하는 문장이라 정적
+        // 번역키 하나로 못 담는다). 나머지 코드는 기존 humanMessageKey/fallback 체인
+        // 그대로.
+        const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
+          ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
+          : info.kind === 'rate_limited' && info.resetAt
+            ? t('channelPostsRateLimitedUntil', { time: new Date(info.resetAt).toLocaleString() })
+            : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
+        // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
+        // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
+        // 판정 축은 http_status 숫자가 아니라 info.kind다(500/503/504·BFF 400·미지
+        // 코드는 parseSitePostApiError가 이미 kind='unknown'으로 fail-closed해 둠 —
+        // describeExternalImpact가 그 kind를 그대로 읽어 "모른다"를 "안 나갔다"로
+        // 단정하지 않는다).
+        setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(info.kind) });
+      }
+    } catch {
+      // 네트워크 예외(fetch 자체가 throw) — 요청이 실제로 Threads까지 갔는지 여부를
+      // 이 지점에서 알 수 없다(전송 도중 끊겼을 수도, 응답만 못 받았을 수도 있다) —
+      // 'unknown'으로 fail-closed(위와 같은 축).
+      setPublishResult({ type: 'error', text: t('publishFailed'), externalImpact: 'unknown' });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
   }
@@ -320,11 +401,27 @@ export default function ChannelPostEditPage() {
         reapprovalRequired: draft.reapproval_required ?? undefined,
         sealedBodySha256: draft.sealed_content_sha256 ?? undefined,
         currentBodySha256: draft.body_sha256,
+        // 페드루 PO 리뷰 nit(2026-09-04) 조사 중 자체 발견 — published_body_sha256이
+        // 인터페이스엔 있었는데 view 계산에 실제로 안 넘어가고 있었다. 그러면
+        // isRepublish(재승인 뒤 재발행 CTA)가 이 화면에서 절대 안 켜진다(hasUnpublishedApproval
+        // 이 input.publishedBodySha256!==undefined를 요구하는데 항상 undefined로 들어갔으므로).
+        publishedBodySha256: draft.published_body_sha256 ?? undefined,
         publicationStatus: draft.publication_status ?? undefined,
         errorCode: draft.error_code,
         publishedAt: 'published_at' in draft ? draft.published_at : undefined,
       })
     : { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false, errorCode: undefined };
+
+  // story #3402 PR2 ②-a(doc §5·AC5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b).
+  // canPublish는 site-posts(content/[draftId]/page.tsx::canPublish)와 동형으로 role
+  // 제약이 아니라 view.publishable(업무 상태) 그대로다 — "승인된 최신 버전에서만
+  // 발행할 수 있다"는 판단은 게이트/봉인 일치 여부이지 누구인지가 아니다. canUnpublish
+  // 만 site와 동일하게 role===owner|admin으로 좁힌다(발행 취소는 더 무거운 되돌릴 수
+  // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
+  // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
+  // "휴먼 게이팅"의 실체는 이 owner/admin 세분화다.
+  const canPublish = view.publishable;
+  const canUnpublish = role === 'owner' || role === 'admin';
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
@@ -374,6 +471,114 @@ export default function ChannelPostEditPage() {
               {versions[versions.length - 1]?.tagged_link_preview}
             </p>
           </div>
+        ) : null}
+      </div>
+
+      {/* story #3402 PR2(T7/T9) — publication_status는 다섯 상태 밖의 신호라
+          deriveChannelPostView가 별도 필드로 얹어 준다(WIP1과 동일 함수, 재사용). T7 —
+          발행됨이면 재진입해도 permalink·published_at·external_id가 그대로 보인다(doc
+          §4-2 "게시 ID로 동일성을 눈에 보이게"). T9 — 부분 성공(container_created)이면
+          "이어서 발행"이 기본 행동임을 미리 안다(발행 버튼 자체의 배선은 이 조각 스코프
+          밖 — 다음 조각). PR1 rebase 반영(2026-09-04) — 위 승인 카드가 이미 계산해 둔
+          `view`를 그대로 재사용한다(같은 함수를 두 번 부르지 않는다 — rebase 전엔 이
+          블록이 자체 IIFE로 따로 계산했으나, PR1의 hasGateContract 가드가 상위로
+          올라오며 중복이 됐다). */}
+      {(() => {
+        if (view.status === 'published' && draft.permalink) {
+          return (
+            <div className="space-y-2 rounded-md border border-border p-4 text-sm" data-testid="channel-post-published-info">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
+                <a href={draft.permalink} target="_blank" rel="noreferrer" className="underline">{draft.permalink}</a>
+              </div>
+              {draft.published_at ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>
+                  <span>{new Date(draft.published_at).toLocaleString()}</span>
+                </div>
+              ) : null}
+              {draft.external_id ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground" data-testid="channel-post-external-id-label">{t('channelPostsExternalIdLabel')}</span>
+                  <span data-testid="channel-post-external-id">{draft.external_id}</span>
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+        if (view.partialSuccess) {
+          return (
+            <Alert role="status" data-testid="channel-post-partial-success-notice">
+              <AlertDescription>{t('channelPostsPartialSuccessNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
+        if (view.publicationFailed) {
+          return (
+            <Alert variant="destructive" role="alert" data-testid="channel-post-publication-failed-notice">
+              <AlertDescription>{t('channelPostsPublicationFailedNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
+        return null;
+      })()}
+
+      {/* story #3402 PR2 ②-a/②-b — 발행 버튼. AC5 — 비활성 사유 문구는 버튼 밖에 둔다
+          (라벨 안에 넣으면 disabled:opacity-50에 워시된다, Phase 0 실측 그대로 재사용).
+          ⚠️발행 취소 버튼은 PR2에서 화면에 렌더하지 않는다(페드루 PO 판정, 2026-09-04
+          05:37Z) — backend/app/routers/channel_posts.py에 unpublish 엔드포인트
+          자체가 없어(grep 0건, site-posts만 있음) 게이팅만 선 죽은 버튼을 표면에
+          두면 안 된다는 판단. canUnpublish 변수·테스트는 남겨 둔다(BE 경로가 오면
+          이 조건 하나로 버튼을 다시 켠다 — 예약 명령 취소+발행 글 회수 두 경로,
+          PR#3769 뒤 디디군 착수 예정). */}
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
+            {/* story #3402 PR2 ②-c(T9·doc §4-1/§17-4) — 부분 성공(container_created)이면
+                기본 행동이 "다시"가 아니라 "이어서 발행"이다(처음부터 하면 컨테이너가
+                하나 더 생겨 같은 글이 두 번 나갈 수 있다, §4-1). partialSuccess 분기가
+                site-posts의 isRepublish(재승인 뒤 재발행) 분기보다 먼저다 — 둘 다 참일
+                일은 없지만(부분성공은 채널 고유 신호, isRepublish는 사이트 공유 파생)
+                우선순위를 명시해 둔다. */}
+            {publishing ? t('publishPendingCta') : view.partialSuccess ? t('channelPostsPublishContinueCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
+          </Button>
+        </div>
+        {!canPublish ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
+            {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {publishResult ? (
+          <Alert variant={publishResult.type === 'error' ? 'destructive' : 'default'} role={publishResult.type === 'error' ? 'alert' : 'status'} data-testid="channel-post-publish-result">
+            <AlertDescription>
+              {publishResult.type === 'success'
+                ? t('publishSuccess', { time: draft.published_at ? new Date(draft.published_at).toLocaleString() : '' })
+                : publishResult.type === 'scheduled'
+                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? new Date(publishResult.scheduledAt).toLocaleString() : t('originAuthorUnknown') })
+                  : (
+                    // story #3402 AC11(doc §5-1) — "왜 막혔나"(text)와 "밖으로 나갔나"
+                    // (externalImpact)는 서로 다른 사실이라 별도 텍스트 노드로 따로 둔다
+                    // (카디르 QA 계획 ④ — 겹치는 단어로 한 문장에 뭉쳐 정규식 하나로 통과
+                    // 하는 함정 방지, 개별 assert 가능하게). 카디르 QA 실결함 지적
+                    // (2026-09-04) — 이 블록의 부모가 AlertDescription(=<p>)이라 여기서
+                    // <p>를 또 쓰면 p 안에 p가 중첩돼 HTML 무효+Next hydration 에러가
+                    // 실제로 났다(jsdom 테스트는 관대해서 안 잡음). <span className="block">
+                    // 로 교체 — 줄바꿈은 유지하되 유효한 중첩.
+                    <>
+                      <span className="block" data-testid="channel-post-publish-error-reason">{publishResult.text}</span>
+                      {publishResult.externalImpact ? (
+                        <span className="block" data-testid="channel-post-publish-external-impact">
+                          {publishResult.externalImpact === 'reached_provider'
+                            ? t('channelPostsExternalImpactReachedProvider')
+                            : publishResult.externalImpact === 'unknown'
+                              ? t('channelPostsExternalImpactUnknown')
+                              : t('channelPostsExternalImpactNotSent')}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+            </AlertDescription>
+          </Alert>
         ) : null}
       </div>
 

@@ -38,7 +38,10 @@ const ORG_ID = 'org-1';
 const DRAFT_ID = 'd1';
 
 beforeEach(() => {
-  useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [] });
+  // story #3402 PR2 ②-a — content/[draftId]/page.test.tsx(site-posts)와 동일 관례:
+  // 발행 취소 버튼 role 게이팅 기본값은 'owner'(기존 테스트 전부가 "권한 있음" 전제).
+  // member 케이스는 개별 테스트가 이 값을 덮어쓴다.
+  useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'owner' });
   useParamsMock.mockReturnValue({ draftId: DRAFT_ID });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -65,6 +68,11 @@ async function flush() {
 const DRAFT_DETAIL = {
   draft_id: DRAFT_ID, work_item_id: 'w1', channel: 'threads', connection_id: 'c1', current_version: 1,
   gate_status: null as string | null, reapproval_required: null as boolean | null,
+  sealed_content_sha256: null as string | null, body_sha256: 'h1',
+  publication_status: null as 'container_created' | 'published' | 'failed' | null,
+  permalink: null as string | null, external_id: null as string | null, error_code: null as string | null,
+  published_at: null as string | null,
+  published_body_sha256: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -79,6 +87,7 @@ function stubFetch(opts: {
   draftDetail?: Partial<typeof DRAFT_DETAIL>;
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
+  onPublish?: () => { status: number; body: unknown };
   // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — GATE_ALREADY_HELD의
   // best-effort 상대 초안 조회. undefined=엔드포인트 자체가 404(구 계약, #3767 착지 전
   // 상황 재현) · { text_preview: null }=필드는 있는데 값이 없음 · 값 있으면 그 미리보기.
@@ -134,6 +143,13 @@ function stubFetch(opts: {
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/submit` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body ?? '{}'));
         const result = opts.onSubmit?.(body) ?? { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/publish` && init?.method === 'POST') {
+        const result = opts.onPublish?.() ?? {
+          status: 200, body: { permalink: 'https://threads.net/@x/1', external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1' },
+        };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -375,6 +391,361 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
     expect(container.querySelector('[data-testid="channel-post-tagged-link-preview"]')).toBeNull();
+  });
+
+  // story #3402 PR2(T7/T9) — 발행됨/부분성공/실패 표시(발행 버튼 배선은 다음 조각).
+  it('⭐T7 — publication_status=published+permalink — 재진입해도 permalink·published_at·external_id가 보인다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+        published_at: '2026-09-04T00:00:00Z',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const info = container.querySelector('[data-testid="channel-post-published-info"]');
+    expect(info).not.toBeNull();
+    expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-external-id"]')?.textContent).toBe('media-1');
+  });
+
+  it('⭐T9 — publication_status=container_created(부분 성공) — "이어서 발행" 안내가 보인다(발행됨 카드는 안 보임)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'container_created' },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    // doc §4-1/§17-4 — 부분 성공의 기본 행동은 "다시"가 아니라 "이어서 발행"이다(처음부터
+    // 하면 컨테이너가 하나 더 생겨 같은 글이 두 번 나갈 수 있다).
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).textContent)
+      .toBe(koMessages.content.channelPostsPublishContinueCta);
+  });
+
+  // 페드루 PO 리뷰 nit(2026-09-04) — partialSuccess와 isRepublish가 동시에 참인 경우
+  // (과거 발행 이력이 있는데 그 뒤 재승인된 새 버전을 다시 발행 시도했다가 부분 성공에
+  // 걸린 것 — 둘 다 실제로 나올 수 있는 조합). 라벨 우선순위(partialSuccess가 이김)를 pin.
+  // 이 테스트를 작성하다가 자체 발견 — published_body_sha256이 인터페이스엔 있었는데
+  // view 계산에 실제로 안 넘어가고 있어(위 handlePublish 근처 수정 참고) isRepublish가
+  // 이 화면에서 원래 절대 안 켜지고 있었다 — 그 자리를 이 테스트가 pin한다.
+  it('⭐T9 우선순위 — partialSuccess&&isRepublish 둘 다 참이어도 "이어서 발행"이 이긴다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'new', body_sha256: 'new',
+        published_body_sha256: 'old', published_at: '2026-09-01T00:00:00Z',
+        publication_status: 'container_created',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).textContent)
+      .toBe(koMessages.content.channelPostsPublishContinueCta);
+  });
+
+  it('⭐publication_status=failed — 실패 안내가 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'failed', error_code: 'CHANNEL_PUBLISH_PROVIDER_ERROR' },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).not.toBeNull();
+  });
+
+  it('publication_status=null(발행 이력 없음) — 발행/부분성공/실패 블록이 전부 안 보인다(회귀 방지)', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
+  });
+
+  // story #3402 PR2 ②-a(AC5·doc §5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b, 이
+  // 조각에선 버튼이 실제 호출을 하지 않는다 — onClick 미배선).
+  it('⭐canPublish=true(승인+해시일치) — 발행 버튼이 활성화되고 비활성 사유가 안 보인다', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).toBeNull();
+  });
+
+  it('⭐canPublish=false(초안, 아직 승인 전) — 발행 버튼이 비활성화되고 사유가 버튼 밖에 보인다', async () => {
+    stubFetch({ draftDetail: { gate_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).not.toBeNull();
+    // AC5 — 비활성 사유 문구가 버튼 "라벨 안"이 아니라 별도 엘리먼트(버튼 밖)에 있다.
+    expect(btn.textContent).not.toContain(koMessages.content.publishDisabledReason);
+  });
+
+  // 페드루 PO 판정(2026-09-04 05:37Z) — unpublish 엔드포인트가 BE에 없어(grep 0건)
+  // 게이팅만 선 죽은 버튼을 표면에 두지 않는다. canUnpublish 변수는 BE 선행(PR#3769
+  // 뒤)이 착지하면 이 자리를 다시 켜는 용도로 남겨 두되, 지금은 role·publication_status
+  // 어떤 조합이어도 버튼 자체가 렌더되지 않아야 한다.
+  it('⭐발행 취소 버튼 — PR2에서는 화면에 아예 렌더하지 않는다(publication_status=published+owner여도)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
+  });
+
+  // story #3402 PR2 ②-b(T7) — 발행 버튼 클릭 배선.
+  it('⭐발행 성공 — permalink/external_id/published_at이 draft에 병합돼 T7 발행됨 정보가 즉시 보인다(재로드 없이)', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.publishSuccess.replace('{time}', '').split('{')[0]);
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
+  });
+
+  // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG은 api-error.ts가 humanMessageKey를
+  // 일부러 비워 두고 max_length/current_length만 실어 오는 코드다 — page.tsx가 doc §5
+  // 표 그대로("500자 한도인데 517자입니다") 값을 실제로 보간해 조립하는지 pin한다.
+  it('⭐발행 실패(CHANNEL_TEXT_TOO_LONG) — max_length/current_length가 실제 값으로 보간된 문구가 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 422, body: { detail: { code: 'CHANNEL_TEXT_TOO_LONG', message: '한도 초과', max_length: 500, current_length: 517 } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain('500자 한도인데 517자입니다');
+  });
+
+  it('⭐발행 실패(CHANNEL_RATE_LIMITED) — reset_at이 실제 시각으로 보간된 문구가 보인다', async () => {
+    const resetAt = '2026-09-05T00:00:00Z';
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 429, body: { detail: { code: 'CHANNEL_RATE_LIMITED', message: '한도 초과', reset_at: resetAt } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain(new Date(resetAt).toLocaleString());
+  });
+
+  // 카디르 QA 계획(2026-09-04) ⑤ — "api-error.ts가 파싱한다"는 사실만으로 화면 렌더까지
+  // 됐다고 넘기지 않는다. AC10 12행 중 GATE_ALREADY_HELD·TEXT_TOO_LONG·RATE_LIMITED를
+  // 뺀 나머지를 각 코드마다 개별 mock 응답으로 주입해 실제 렌더 문구를 pin한다.
+  // ⚠️실측으로 찾은 결함(이 테스트를 쓰다가 발견) — 아래 6개 코드의 labelKey(api-error.ts)
+  // 가 가리키는 번역 키 자체가 messages/*.json에 없었다(정의만 있고 값이 없어 next-intl이
+  // MISSING_MESSAGE로 깨짐) — 이번에 추가해 해소.
+  it.each([
+    ['CHANNEL_TOKEN_EXPIRED', 409, koMessages.content.errorChannelTokenExpired],
+    ['CHANNEL_CONNECTION_NOT_ACTIVE', 409, koMessages.content.errorChannelConnectionNotActive],
+    ['CHANNEL_POST_APPROVER_ROLE_MISSING', 409, koMessages.content.errorChannelApproverRoleMissing],
+    ['CHANNEL_PUBLISH_IN_PROGRESS', 409, koMessages.content.errorChannelPublishInProgress],
+    ['CHANNEL_PUBLISH_PROVIDER_ERROR', 502, koMessages.content.errorChannelPublishProviderError],
+    ['EXTERNAL_PUBLISH_APPROVAL_REQUIRED', 403, koMessages.content.errorApprovalRequired],
+    ['SITE_POST_SEAL_MISSING', 409, koMessages.content.errorSealMissing],
+    ['SITE_POST_REAPPROVAL_REQUIRED', 409, koMessages.content.errorReapprovalRequired],
+  ])('⭐발행 실패(%s, AC10) — 화면에 해당 행의 사람 말이 실제로 렌더된다', async (code, status, expectedText) => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status, body: { detail: { code, message: 'raw' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain(expectedText);
+  });
+
+  // story #3414(PR#3769, 리뷰중) 대조 — 페드루 PO 지적(2026-09-04 05:44Z): scheduled=true
+  // 응답은 permalink/external_id/published_at 셋 다 null이 정상이다(즉시 경로가 아니라
+  // command만 만들고 워커가 나중에 실행). 그 null을 "발행됨"으로 그리면 AC2 규율(모르는
+  // 것을 아는 것처럼 안 보여준다) 위반이라 scheduled 분기가 permalink 분기보다 먼저 와야
+  // 한다 — 이 테스트가 그 순서를 pin한다.
+  it('⭐발행 성공(예약, story #3414) — scheduled=true면 published_at이 null이어도 T7이 아니라 예약 안내가 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({
+        status: 200,
+        body: { permalink: null, external_id: null, published_at: null, version_id: 'v1', scheduled: true, command_id: 'cmd-1', scheduled_at: '2026-09-05T00:00:00Z' },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    const result = container.querySelector('[data-testid="channel-post-publish-result"]');
+    expect(result?.textContent).toContain(new Date('2026-09-05T00:00:00Z').toLocaleString());
+  });
+
+  // 디디군 리뷰 nit(2026-09-04 06:05Z, PR#3769 진행 중 발견) — 재발행 요청이 이번엔
+  // scheduled=true로 응답(permalink/external_id/published_at 셋 다 null)해도, 이미 예전에
+  // 발행돼 draft에 남아있던 published_at·permalink를 지우면 안 된다. handlePublish의
+  // scheduled 분기가 permalink 존재 분기보다 먼저라 setDraft 병합 자체를 안 타는 것으로
+  // 이미 해소돼 있음 — 이 테스트가 그 사실을 pin한다.
+  it('⭐scheduled=true 응답이 기존 발행됨 정보(published_at 등)를 지우지 않는다(디디군 리뷰 대조)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://old-permalink', published_at: '2026-09-01T00:00:00Z', external_id: 'old-id',
+      },
+      onPublish: () => ({
+        status: 200,
+        body: { permalink: null, external_id: null, published_at: null, version_id: 'v2', scheduled: true, command_id: 'cmd-1', scheduled_at: '2026-09-05T00:00:00Z' },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    const info = container.querySelector('[data-testid="channel-post-published-info"]');
+    expect(info?.textContent).toContain('old-permalink');
+    expect(container.querySelector('a[href="https://old-permalink"]')).not.toBeNull();
+  });
+
+  // story #3402 AC11(doc §5-1) — "왜 막혔나"(reason)와 "밖으로 나갔나"(externalImpact)는
+  // 서로 다른 텍스트 노드로 각각 존재해야 한다(카디르 QA 계획 ④ — 겹치는 단어로 한 문장에
+  // 뭉쳐 정규식 하나로 통과하는 함정 방지).
+  it('⭐AC11 — 4xx로 막힌 실패(예: CONNECTION_NOT_ACTIVE)는 "Threads에 아무것도 보내지 않았다"가 별도 노드로 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 409, body: { detail: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    const reason = container.querySelector('[data-testid="channel-post-publish-error-reason"]');
+    const impact = container.querySelector('[data-testid="channel-post-publish-external-impact"]');
+    expect(reason?.textContent).toBe(koMessages.content.errorChannelConnectionNotActive);
+    expect(impact?.textContent).toBe(koMessages.content.channelPostsExternalImpactNotSent);
+    // 두 문장이 진짜 별개 DOM 노드인지(하나로 뭉쳐 겹치는 키워드만 있는 게 아닌지) 확인.
+    expect(reason).not.toBe(impact);
+    // 카디르 QA 실결함(2026-09-04) — 이 블록의 부모가 AlertDescription(=<p>)이다. <p> 안에
+    // <p>를 또 두면 HTML 무효+Next hydration 에러가 실제로 났다(jsdom 테스트는 관대해서
+    // DOM은 만들어 주지만 실브라우저/hydration은 안 봐준다) — 구조 자체를 assert한다.
+    expect(container.querySelectorAll('p p').length).toBe(0);
+    expect(reason?.tagName).not.toBe('P');
+    expect(impact?.tagName).not.toBe('P');
+  });
+
+  it('⭐AC11 — 502(PROVIDER_ERROR)는 "요청은 나갔다" 별도 안내가 보인다(4xx와 다른 문구)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 502, body: { detail: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-publish-external-impact"]')?.textContent)
+      .toBe(koMessages.content.channelPostsExternalImpactReachedProvider);
+  });
+
+  it('canPublish=false면 발행 버튼을 눌러도 아무 일도 안 일어난다(handlePublish 가드)', async () => {
+    stubFetch({ draftDetail: { gate_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
   });
 
   it('로드 실패 — 오류 알림을 보인다', async () => {
