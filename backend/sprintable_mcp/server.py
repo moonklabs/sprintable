@@ -796,7 +796,7 @@ _TOOL_DEFS: list[tuple] = [
      " 만들었거나 빈/중복 산출물을 치울 때(재발행 대신 이걸로 정리).",
      DeleteArtifactInput, delete_artifact),
     ("sprintable_propose_canonical_version",
-     "[신뢰] 이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼. ⭐이 버전이 확定될"
+     "[신뢰] 이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼. ⭐이 버전이 확정될"
      " 준비가 됐다고 판단될 때 휴먼 승인을 요청.",
      ProposeCanonicalInput, propose_canonical_version),
     # Chat (5)
