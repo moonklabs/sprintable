@@ -831,26 +831,86 @@ async def _maybe_create_scheduled_publication_command(
     멱등키(create_or_get_publication_command의 UNIQUE org_id+destination+approved_
     version+operation)는 무변경 — 이미 명령이 있으면 그대로 반환(재생성 0, AC4).
 
-    site_post 게이트는 sealed_scheduled_at을 아예 설정하지 않아(scheduled_at 개념
-    자체가 없음) 이 훅에 진입하는 gate는 항상 channel_post 소속이다(도메인 오판 여지
-    없음, 그라운딩 확認).
+    story e4fc29fa(조각③c, 페드루 PO 確定 2026-09-04) — site_post(블로그) 게이트 확장.
+    site_post는 scheduled_at 개념이 없어(그라운딩 확認) channel_post 분기(scheduled_at
+    있을 때만)와 별개로, "blog kind 목적지(hosted_site 아님)"면 **승인 즉시** 무조건
+    커맨드를 만든다 — site_post엔 channel_post의 "즉시=별도 클릭" 분기가 없다(라우터의
+    `/publish` 엔드포인트는 이미 만들어진 이 커맨드를 idempotent하게 되돌려줄 뿐).
+    `gate.neutral_facts["destination"]`(site_posts.py가 채우는 실제 채널 문자열)을
+    `CHANNEL_ADAPTERS`(kind의 유일한 SSOT)로 조회해 channel_post(social)/site_post
+    (blog)를 구분한다 — 이 필드가 예전엔 site_post 쪽에서 항상 "hosted_site" 상수였고
+    (도메인 오판 여지 없다던 원래 가정), e4fc29fa③c가 실제 채널을 싣도록 site_posts.py
+    를 고쳐 이 구분이 성립한다.
 
-    draft_id를 못 읽으면(파싱 실패·draft/버전 소실·승인자 미상 등 — 이론상 sealed_
-    scheduled_at 도입(0317) 이후로는 불가하지만 방어) **승인 자체는 절대 막지 않는다**
-    (사람의 결정을 서버 부수 효과가 되돌리면 안 된다) — 대신 warning 로그 + `gate.
-    resolution_note`에 사람이 화면에서 보는 한 줄을 남긴다(PO 確定 — 조용히 삼키면
-    정시 발행이 다시 사람 클릭에 매달린다, "보이는 실패")."""
-    if gate.gate_type != "external_publish" or gate.sealed_scheduled_at is None:
+    draft_id를 못 읽으면(파싱 실패·draft/버전 소실·승인자 미상 등) **승인 자체는 절대
+    막지 않는다**(사람의 결정을 서버 부수 효과가 되돌리면 안 된다) — 대신 warning 로그
+    + `gate.resolution_note`에 사람이 화면에서 보는 한 줄을 남긴다(PO 確定 — 조용히
+    삼키면 정시 발행이 다시 사람 클릭에 매달린다, "보이는 실패")."""
+    if gate.gate_type != "external_publish":
         return
 
     def _mark_unresolved() -> None:
         logger.warning(
-            "gate %s approved with sealed_scheduled_at but draft resolution failed — "
-            "scheduled publication_command not created", gate.id,
+            "gate %s approved but draft resolution failed — publication_command not created", gate.id,
         )
         note = _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE
         gate.resolution_note = f"{gate.resolution_note}\n{note}" if gate.resolution_note else note
 
+    destination_channel = (gate.neutral_facts or {}).get("destination")
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    adapter = CHANNEL_ADAPTERS.get(destination_channel)
+    is_blog_gate = adapter is not None and adapter.kind == "blog"
+
+    if is_blog_gate:
+        if destination_channel == "hosted_site":
+            return  # 내부 동기 경로 그대로 — publication_command 불요.
+        if resolver_id is None:
+            _mark_unresolved()
+            return
+        raw_draft_id = (gate.neutral_facts or {}).get("draft_id")
+        if raw_draft_id is None:
+            _mark_unresolved()
+            return
+        try:
+            draft_id = uuid.UUID(raw_draft_id)
+        except (ValueError, TypeError, AttributeError):
+            _mark_unresolved()
+            return
+
+        from app.models.site_post_draft import SitePostDraft
+        from app.models.site_post_version import SitePostVersion
+
+        site_draft = (await session.execute(
+            select(SitePostDraft).where(
+                SitePostDraft.id == draft_id, SitePostDraft.org_id == gate.org_id,
+            )
+        )).scalar_one_or_none()
+        if site_draft is None or site_draft.connection_id is None:
+            _mark_unresolved()
+            return
+        site_latest = (await session.execute(
+            select(SitePostVersion)
+            .where(SitePostVersion.draft_id == site_draft.id)
+            .order_by(SitePostVersion.version.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if site_latest is None:
+            _mark_unresolved()
+            return
+
+        from app.services.publication_command import create_or_get_publication_command
+
+        await create_or_get_publication_command(
+            session, org_id=gate.org_id, gate_id=gate.id, destination=site_draft.connection_id,
+            approved_version=site_latest.id, requested_by_member_id=resolver_id,
+            scheduled_at=None, content_kind="site_post",
+        )
+        return
+
+    # channel_post(social) 경로 — 기존 그대로, scheduled_at 있을 때만.
+    if gate.sealed_scheduled_at is None:
+        return
     if resolver_id is None:
         _mark_unresolved()
         return

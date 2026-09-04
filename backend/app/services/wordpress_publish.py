@@ -10,7 +10,14 @@ credential_kind 선언만 하고 이 모듈은 안 다룬다(사람 의존 앱 �
 `app_password`를 그대로 `httpx.BasicAuth`에 넘긴다(OAuth 토큰류가 아니라 재사용 가능한
 비밀번호 자체라 refresh 개념이 없다 — connection.refresh_mode="manual"과 부합).
 `site_url`은 HTTPS 강제(스토리 AC2 明示) — http://는 자격이 평문으로 오가므로 호출
-자체를 거부한다(fail-closed).
+자체를 거부한다(fail-closed). loopback(`http://127.0.0.1`·`http://localhost`) 예외는
+**`WORDPRESS_TEST_STUB_ENABLED` 플래그가 켜졌을 때만** 산다(페드루 리뷰 B1, 2026-09-04)
+— 플래그 무관 예외였던 최초 구현은 SSRF 클래스였다: prod에서 고객(또는 공격자)이
+site_url=`http://127.0.0.1:8080/…`로 연결을 등록하면 워커가 우리 컨테이너의 loopback에
+Basic auth 자격을 실어 진짜로 친다. prod cloudbuild.yaml이 이 플래그 키 자체를 안 실어
+(sandbox_publish.py·dev_wordpress_stub.py와 같은 env 게이트 관례) prod에서는 이 예외가
+기동조차 안 한다 — 조각③c의 dev_wordpress_stub.py(실 uvicorn, TLS 없음)가 유일한
+실사용처.
 
 `tags`는 이번 조각 스코프 밖 — WordPress REST API는 태그를 이름이 아니라 term ID
 배열로 요구해(taxonomy 조회/생성 API 별도 호출 필요) 지금 페이로드엔 안 싣는다
@@ -18,9 +25,19 @@ credential_kind 선언만 하고 이 모듈은 안 다룬다(사람 의존 앱 �
 필요하면 taxonomy 매핑을 별도로 추가)."""
 from __future__ import annotations
 
+import os
+
 import httpx
 
 _POSTS_PATH = "/wp-json/wp/v2/posts"
+
+
+def wordpress_stub_enabled() -> bool:
+    """story e4fc29fa(조각③c, 페드루 리뷰 B1) — sandbox_publish.py의 SANDBOX_CHANNEL_
+    ENABLED와 동형 env 게이트. 여기(서비스 계층)에 두고 `dev_wordpress_stub.py`(라우터
+    계층)가 이 함수를 가져다 쓴다 — 서비스가 라우터를 import하는 역방향 계층 위반을
+    피한다."""
+    return os.environ.get("WORDPRESS_TEST_STUB_ENABLED", "").strip().lower() == "true"
 
 
 class WordPressSiteURLInsecureError(ValueError):
@@ -44,10 +61,20 @@ class WordPressPublishError(Exception):
         super().__init__(f"WordPress REST API 오류(status={status_code}): {body}")
 
 
+_LOOPBACK_PREFIXES = ("http://127.0.0.1", "http://localhost")
+
+
 def _validate_https(site_url: str) -> str:
-    if not site_url.startswith("https://"):
-        raise WordPressSiteURLInsecureError(site_url=site_url)
-    return site_url.rstrip("/")
+    if site_url.startswith("https://"):
+        return site_url.rstrip("/")
+    # story e4fc29fa(조각③c, 페드루 리뷰 B1) — loopback 예외는 dev 스텁 플래그가 켜져
+    # 있을 때만. 플래그 없이 통과시키면 prod에서 site_url=http://127.0.0.1:.../로
+    # 등록된 연결이 우리 컨테이너 자신의 loopback에 Basic auth를 실어 진짜로 치는
+    # SSRF가 된다(뮤테이션 대상 — 이 and를 지우면 prod에서도 loopback이 통과해야
+    # 하는데, 실은 통과하면 안 된다는 게 이 가드의 존재 이유).
+    if wordpress_stub_enabled() and site_url.startswith(_LOOPBACK_PREFIXES):
+        return site_url.rstrip("/")
+    raise WordPressSiteURLInsecureError(site_url=site_url)
 
 
 async def publish(

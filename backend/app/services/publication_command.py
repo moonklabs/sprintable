@@ -76,7 +76,7 @@ def classify_failure_kind(error_code: str | None) -> str:
 async def create_or_get_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, destination: uuid.UUID,
     approved_version: uuid.UUID, requested_by_member_id: uuid.UUID,
-    scheduled_at: datetime | None, operation: str = "publish",
+    scheduled_at: datetime | None, operation: str = "publish", content_kind: str = "channel_post",
 ) -> tuple[PublicationCommand, bool]:
     """멱등 upsert(블루프린트 §3 키: org_id+destination+approved_version+operation) —
     기존 행이 있으면 그대로 반환(재생성 0, Threads 이중 POST 방지의 근원 축 하나).
@@ -102,7 +102,7 @@ async def create_or_get_publication_command(
     command = PublicationCommand(
         id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=destination,
         approved_version=approved_version, operation=operation, scheduled_at=scheduled_at,
-        status="pending", requested_by_member_id=requested_by_member_id,
+        status="pending", requested_by_member_id=requested_by_member_id, content_kind=content_kind,
     )
     try:
         async with db.begin_nested():
@@ -195,7 +195,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
 
     `command.status`는 이미 `in_progress`다 — 호출부가 배치 클레임 단계에서 이미
     표시·commit했다(블로커A, 아래 `process_due_publication_commands` 참고). 여기서
-    다시 대입하지 않는다(중복)."""
+    다시 대입하지 않는다(중복).
+
+    story e4fc29fa(조각③c) — `content_kind`(SSOT 컬럼)가 "site_post"면 아래 channel_
+    post 전용 로직(ChannelPostVersion·publish_channel_post_draft 하드코딩)을 전혀
+    안 타고 `_process_one_site_post_command`로 넘긴다 — approved_version이 어느
+    테이블을 가리키는지(ChannelPostVersion vs SitePostVersion)의 유일한 판별축."""
+    if command.content_kind == "site_post":
+        await _process_one_site_post_command(db, command, now=now)
+        return
+
     from app.models.channel_post_version import ChannelPostVersion
     from app.services.channel_posts import (
         ChannelConnectionNotActiveError,
@@ -280,6 +289,38 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         db, command, error_code=error_code, last_error=last_error, now=now,
         retry_after_seconds=retry_after_seconds,
     )
+
+
+async def _process_one_site_post_command(db: AsyncSession, command: PublicationCommand, *, now: datetime) -> None:
+    """story e4fc29fa(조각③c) — content_kind="site_post" 커맨드 분기. `operation`으로
+    publish/unpublish를 가른다. 실패 분류는 channel_post와 같은 표(`classify_failure_
+    kind`)를 그대로 재사용 — `site_posts.py::SitePostExternalPublishError.error_code`가
+    그 표의 기존 문자열(CHANNEL_CONNECTION_NOT_ACTIVE 등)을 그대로 쓰므로 새 매핑을
+    안 만든다."""
+    from app.services.site_posts import (
+        SitePostExternalPublishError,
+        publish_site_post_external_command,
+        unpublish_site_post_external_command,
+    )
+
+    error_code: str | None = None
+    last_error: str | None = None
+    try:
+        if command.operation == "unpublish":
+            await unpublish_site_post_external_command(db, command)
+        else:
+            await publish_site_post_external_command(db, command)
+        command.status = "completed"
+        command.last_error = None
+        command.failure_kind = None
+        return
+    except SitePostExternalPublishError as exc:
+        error_code, last_error = exc.error_code, str(exc)
+    except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
+        last_error = str(exc)
+        logger.exception("site_post publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+
+    await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)
 
 
 async def apply_command_failure(
