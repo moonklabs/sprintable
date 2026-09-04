@@ -474,6 +474,166 @@ async def test_site_post_draft_creation_rejects_cross_org_campaign():
 # --- AC5 — 에이전트 API(발행·승인 권한 무변경) -------------------------------------
 
 
+# --- AC3 보정(페드루 PO 리뷰 B1, 2026-09-04) — campaign_id 캐리포워드 3갈래 ------------
+
+
+@pytest.mark.anyio
+async def test_campaign_id_omitted_on_edit_carries_forward_not_cleared():
+    """B1 — campaign 개념을 모르는 호출(예: 본문만 고치는 에이전트)이 campaign_id
+    키를 아예 안 보내면, 휴먼이 이미 묶어 둔 campaign 소속이 조용히 풀리면 안 된다
+    (캐리포워드). 뮤테이션 대상: 라우터의 model_fields_set 분기를 지우면(항상 body.
+    campaign_id를 넘기면) 이 assert가 RED."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            blog_story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_campaign = await client.post(f"/api/v2/organizations/{org_id}/campaigns", json={"name": "겨울 캠페인"})
+            campaign_id = r_campaign.json()["id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json={
+                    "work_item_id": str(blog_story_id), "title": "제목", "slug": "carry-forward-post",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문 v1",
+                    "campaign_id": campaign_id,
+                },
+            )
+            assert r1.status_code == 201, r1.text
+            draft_id = r1.json()["draft_id"]
+
+            # campaign_id 키 자체를 안 보내는 본문 편집 — 구식 플러그인/agent 형태 호출 시뮬레이션.
+            r2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json={
+                    "work_item_id": str(blog_story_id), "title": "제목", "slug": "carry-forward-post",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문 v2(campaign_id 미포함)",
+                },
+            )
+            assert r2.status_code == 201, r2.text
+
+        async with Session() as s:
+            from app.models.site_post_draft import SitePostDraft
+            from sqlalchemy import select
+            draft = (await s.execute(
+                select(SitePostDraft).where(SitePostDraft.id == uuid.UUID(draft_id))
+            )).scalar_one()
+            assert str(draft.campaign_id) == campaign_id, "campaign_id 생략 편집이 기존 소속을 지웠다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_campaign_id_explicit_null_clears_membership():
+    """B1 — 명시적으로 null을 보내면(휴먼이 실제로 해제 의도) campaign 소속이 풀린다
+    (생략과 명시 null이 서로 다른 신호여야 한다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            blog_story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_campaign = await client.post(f"/api/v2/organizations/{org_id}/campaigns", json={"name": "봄 캠페인"})
+            campaign_id = r_campaign.json()["id"]
+
+            r1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json={
+                    "work_item_id": str(blog_story_id), "title": "제목", "slug": "explicit-null-post",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문 v1",
+                    "campaign_id": campaign_id,
+                },
+            )
+            draft_id = r1.json()["draft_id"]
+
+            r2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json={
+                    "work_item_id": str(blog_story_id), "title": "제목", "slug": "explicit-null-post",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문 v2",
+                    "campaign_id": None,
+                },
+            )
+            assert r2.status_code == 201, r2.text
+
+        async with Session() as s:
+            from app.models.site_post_draft import SitePostDraft
+            from sqlalchemy import select
+            draft = (await s.execute(
+                select(SitePostDraft).where(SitePostDraft.id == uuid.UUID(draft_id))
+            )).scalar_one()
+            assert draft.campaign_id is None, "명시적 campaign_id=null 편집이 소속을 안 지웠다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_campaign_id_explicit_value_changes_membership():
+    """B1 — 명시적으로 다른 campaign_id를 보내면 소속이 그 값으로 바뀐다(변경 갈래)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            blog_story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_campaign_a = await client.post(f"/api/v2/organizations/{org_id}/campaigns", json={"name": "캠페인 A"})
+            campaign_a_id = r_campaign_a.json()["id"]
+            r_campaign_b = await client.post(f"/api/v2/organizations/{org_id}/campaigns", json={"name": "캠페인 B"})
+            campaign_b_id = r_campaign_b.json()["id"]
+
+            r1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json={
+                    "work_item_id": str(blog_story_id), "title": "제목", "slug": "value-change-post",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문 v1",
+                    "campaign_id": campaign_a_id,
+                },
+            )
+            draft_id = r1.json()["draft_id"]
+
+            r2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json={
+                    "work_item_id": str(blog_story_id), "title": "제목", "slug": "value-change-post",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문 v2",
+                    "campaign_id": campaign_b_id,
+                },
+            )
+            assert r2.status_code == 201, r2.text
+
+        async with Session() as s:
+            from app.models.site_post_draft import SitePostDraft
+            from sqlalchemy import select
+            draft = (await s.execute(
+                select(SitePostDraft).where(SitePostDraft.id == uuid.UUID(draft_id))
+            )).scalar_one()
+            assert str(draft.campaign_id) == campaign_b_id
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_agent_can_set_source_but_still_cannot_approve_or_publish():
     """AC5 — 에이전트가 source 지정 초안까지는 만들지만, 승인·발행은 여전히 human-only
