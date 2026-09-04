@@ -43,6 +43,7 @@ from app.models.policy_document import PolicyDocument
 from app.models.legal_document import LegalDocumentVersion
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
+from app.models.webhook_delivery_nonce import WebhookDeliveryNonce
 from app.models.push_device import PushDevice
 from app.models.doc import Doc, DocShareToken, DocSlugAlias
 from app.models.mention import Mention
@@ -199,6 +200,7 @@ __all__ = [
     "LegalDocumentVersion",
     "AuditLog",
     "WebhookConfig",
+    "WebhookDeliveryNonce",
     "PushDevice",
     "Doc",
     "Goal",

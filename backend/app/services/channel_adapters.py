@@ -157,6 +157,21 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # hosted_site와 동형으로 비운다.
         supports_unpublish=True,
     ),
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각④) — 고객 자체
+    # 사이트 signed webhook blog kind 어댑터 3호. credential_kind=pasted_secret(공유
+    # 비밀 — wordpress Application Password와 같은 컬럼 재사용, 유나 §8③ 정본).
+    "webhook": ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        refresh_mode="manual",
+        credential_kind="pasted_secret",
+        display_name="고객 웹훅(signed)",
+        kind="blog",
+        # unpublish=webhook_publish.unpublish()(event:"unpublish" 신호 POST) — webhook
+        # 도 스코프 개념이 없다(공유 비밀 하나가 전권).
+        supports_unpublish=True,
+    ),
 }
 
 # story 5b27b32f(Phase1·BE·테스트 인프라, 페드루 PO 확定 2026-09-04) — dev 전용 샌드박스

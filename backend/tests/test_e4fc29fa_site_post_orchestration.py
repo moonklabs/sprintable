@@ -6,9 +6,11 @@
 이 파일의 승인 경로는 cfc1a55a(#3443) 선례와 동형으로 `gate_service.py::
 transition_gate()`를 직접 호출한다(`_approve_gate_directly` 우회는 훅을 안 태운다).
 
-AC7 "실왕복" — `httpx.MockTransport`가 아니라 `dev_wordpress_stub.py`를 실 uvicorn
-서버로 띄워(진짜 소켓) `wordpress_publish.py`가 그 서버에 진짜 HTTP를 치는지 증명한다
-(페드루 明示 — MockTransport는 AC7이 아니다)."""
+AC7 "실왕복" — `httpx.MockTransport`가 아니라 `dev_wordpress_stub.py`/`dev_webhook_
+stub.py`를 실 uvicorn 서버로 띄워(진짜 소켓) 각 publish 모듈이 그 서버에 진짜 HTTP를
+치는지 증명한다(페드루 明示 — MockTransport는 AC7이 아니다). webhook 쪽은 스텁 자신이
+서명을 실제로 재계산해 검증하고 nonce를 실 DB에 남긴다(AC4 明示, wordpress 스텁의
+"헤더 존재만 확인"보다 한 단계 더)."""
 from __future__ import annotations
 
 import asyncio
@@ -102,6 +104,82 @@ async def live_wordpress_stub(monkeypatch):
         _POSTS.clear()
 
 
+@pytest.fixture
+async def live_webhook_stub(monkeypatch):
+    """`dev_webhook_stub.py`를 실 uvicorn 서버(백그라운드 스레드)로 띄운다 —
+    `live_wordpress_stub`과 같은 사상이지만 이 스텁은 서명 검증·nonce 재전송 거부에
+    실 DB가 필요하다(AC4 明示 — wordpress 스텁의 "헤더 존재만 확인"보다 한 단계 더).
+    스텁 전용 SQLAlchemy 엔진을 **스레드 안에서** 만든다 — async 엔진/커넥션은
+    이벤트루프에 묶여(asyncpg) 테스트 메인 루프와 공유하면 위험하다. 같은 Postgres
+    DB(같은 `_REAL_DB_URL`)를 가리키므로 스텁이 쓴 nonce 행을 테스트 쪽 별도 세션으로
+    그대로 읽을 수 있다."""
+    import threading
+
+    import uvicorn
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("WEBHOOK_TEST_STUB_ENABLED", "true")
+
+    server_holder: dict[str, "uvicorn.Server"] = {}
+    port_holder: dict[str, int] = {}
+    error_holder: dict[str, BaseException] = {}
+
+    def _run() -> None:
+        async def _serve() -> None:
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            from app.dependencies.database import get_db
+            from app.routers.dev_webhook_stub import router as stub_router
+
+            engine = create_async_engine(_async_url())
+            Session = async_sessionmaker(engine, expire_on_commit=False)
+
+            async def _db():
+                async with Session() as s:
+                    try:
+                        yield s
+                        await s.commit()
+                    except Exception:
+                        await s.rollback()
+                        raise
+
+            stub_app = FastAPI()
+            stub_app.include_router(stub_router)
+            stub_app.dependency_overrides[get_db] = _db
+
+            config = uvicorn.Config(stub_app, host="127.0.0.1", port=0, log_level="warning")
+            server = uvicorn.Server(config)
+            server_holder["server"] = server
+            try:
+                await server.serve()
+            finally:
+                await engine.dispose()
+
+        try:
+            asyncio.run(_serve())
+        except BaseException as exc:  # noqa: BLE001 — 메인 스레드로 기동 실패를 전달.
+            error_holder["error"] = exc
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    for _ in range(500):
+        if "error" in error_holder:
+            raise error_holder["error"]
+        server = server_holder.get("server")
+        if server is not None and server.started:
+            port_holder["port"] = server.servers[0].sockets[0].getsockname()[1]
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise RuntimeError("dev_webhook_stub 라이브 서버가 기동하지 않았습니다")
+
+    try:
+        yield f"http://127.0.0.1:{port_holder['port']}/api/dev/webhook-stub"
+    finally:
+        server_holder["server"].should_exit = True
+        thread.join(timeout=5)
+
+
 def _async_url() -> str:
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
@@ -187,6 +265,28 @@ async def _seed_wordpress_connection(session, org_id, *, site_url, username="edi
         id=uuid.uuid4(), org_id=org_id, channel="wordpress", account_id=site_url, account_label=username,
         status="active", credential_kind="pasted_secret", refresh_mode="manual",
         encrypted_access_token=encrypt_channel_credential(app_password),
+    )
+    session.add(conn)
+    await session.commit()
+    return conn.id
+
+
+async def _seed_webhook_connection(session, org_id, *, target_url_builder, secret=None):
+    """story e4fc29fa(조각④) — `dev_webhook_stub.py`가 URL 경로(`/deliver/{connection_id}`)
+    로 발신 connection을 식별하므로, 이 connection의 `id`를 먼저 확정한 뒤 그 id를
+    담은 target_url을 조립해야 한다(`target_url_builder(connection_id) -> str`).
+    secret 기본값은 `dev_webhook_stub.py::_DEFAULT_TEST_SECRET`과 동일(스텁이 검증할
+    수 있는 유일한 값)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.routers.dev_webhook_stub import stub_test_secret
+    from app.services.channel_credential_crypto import encrypt_channel_credential
+
+    conn_id = uuid.uuid4()
+    target_url = target_url_builder(conn_id)
+    conn = ChannelConnection(
+        id=conn_id, org_id=org_id, channel="webhook", account_id=target_url,
+        status="active", credential_kind="pasted_secret", refresh_mode="manual",
+        encrypted_access_token=encrypt_channel_credential(secret or stub_test_secret()),
     )
     session.add(conn)
     await session.commit()
@@ -654,4 +754,157 @@ async def test_worker_unpublish_first_draft_same_connection_does_not_touch_secon
         assert pub_b.status == "published"  # 양성대조 — B는 A 회수에 건드려지지 않는다.
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_publishes_webhook_site_post_command_against_live_stub(live_webhook_stub):
+    """story e4fc29fa(조각④) AC7 실왕복 — 승인이 만든 site_post 커맨드를 워커가
+    처리하면 webhook_publish.publish()가 실 uvicorn 서버(dev_webhook_stub)에 서명된
+    POST를 진짜로 치고, 스텁이 서명을 실제로 검증한 뒤(진짜 DB로) 응답한 external_id
+    가 channel_publications에 그대로 기록된다."""
+    from app.services.gate_service import transition_gate
+    from app.services.publication_command import process_due_publication_commands
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_webhook_connection(
+                s, org_id, target_url_builder=lambda cid: f"{live_webhook_stub}/deliver/{cid}",
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id, gate_id = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_id,
+            )
+
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+            await s.commit()
+
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+
+        async with Session() as s:
+            from app.models.channel_publication import ChannelPublication
+            from sqlalchemy import select
+
+            pub = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == gate_id)
+            )).scalar_one()
+            assert pub.status == "published"
+            assert pub.external_id is not None
+            assert pub.external_id.startswith("webhook-")
+            assert pub.connection_id == connection_id
+            assert pub.channel == "webhook"
+
+            from app.models.webhook_delivery_nonce import WebhookDeliveryNonce
+
+            nonce_rows = (await s.execute(
+                select(WebhookDeliveryNonce).where(WebhookDeliveryNonce.connection_id == connection_id)
+            )).scalars().all()
+            assert len(nonce_rows) == 1, "스텁이 서명 검증을 통과한 뒤 nonce를 실제로 기록해야 한다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_publish_webhook_wrong_secret_is_rejected_by_live_stub(live_webhook_stub):
+    """story e4fc29fa(조각④) — 스텁의 서명 검증이 「진짜」임을 증명: 다른 비밀로 서명된
+    요청은 401로 거부되고, 워커는 이를 CHANNEL_PUBLISH_AUTH_REJECTED(connection kind)
+    로 분류해 즉시 blocked로 보낸다(잘못된 자격은 백오프 재시도로 못 고친다 — 사람의
+    재연결이 필요하다는 뜻, site_posts.py::_blog_publish_error_code). 뮤테이션 대상:
+    스텁이 서명을 실제로 검증하지 않으면(존재만 확인) 이 테스트가 실패를 못 만들어
+    RED가 안 된다."""
+    from app.services.gate_service import transition_gate
+    from app.services.publication_command import process_due_publication_commands
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_webhook_connection(
+                s, org_id, target_url_builder=lambda cid: f"{live_webhook_stub}/deliver/{cid}",
+                secret="wrong-secret-not-matching-stub",
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id, gate_id = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_id,
+            )
+
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
+            await s.commit()
+
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["blocked"] == 1, counts
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+
+            cmd = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalar_one()
+            assert cmd.status == "blocked"
+            assert cmd.failure_kind == "connection"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_publish_webhook_replay_rejected_by_live_stub(live_webhook_stub):
+    """story e4fc29fa(조각④) AC3 — 재전송(같은 nonce) 거부를 증명: 같은 승인 커맨드를
+    워커가 두 번 실행하면(정상 운영에선 안 나는 상황이지만, 스텁의 재전송 방어 자체를
+    직접 검증하려고 커맨드를 강제로 pending에 되돌려 재실행) 두 번째 시도는 스텁이
+    새 nonce를 발급해 보내므로(webhook_publish.py가 매 호출마다 uuid4 nonce를 새로
+    만든다) 사실 이 경로로는 재전송을 재현 못 한다 — 대신 스텁에 같은 nonce로 직접
+    2회 POST해 409를 증명한다(발신측 재시도 로직과 무관하게 스텁 자신의 방어를 잰다)."""
+    import hashlib
+    import hmac
+
+    import httpx
+
+    from app.routers.dev_webhook_stub import stub_test_secret
+
+    # 이 테스트는 org/story 등을 안 만들지만, `webhook_delivery_nonces` 테이블은
+    # 있어야 한다 — destructive_schema 마커의 autouse 리셋(tests/conftest.py)이 매
+    # 테스트 시작 전 스키마를 통째로 비우므로, 이 파일의 다른 테스트가 먼저 스키마를
+    # 만들어 뒀다는 보장이 없다(테스트는 서로 독립이어야 한다).
+    engine, _Session = await _session_factory()
+    try:
+        connection_id = uuid.uuid4()
+        body = b'{"event":"publish","slug":"replay-test"}'
+        secret = stub_test_secret()
+        signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        headers = {
+            "X-Sprintable-Signature": signature, "X-Sprintable-Timestamp": "1700000000",
+            "X-Sprintable-Nonce": "fixed-nonce-for-replay-test", "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient() as client:
+            r1 = await client.post(f"{live_webhook_stub}/deliver/{connection_id}", content=body, headers=headers)
+            assert r1.status_code == 200, r1.text
+            r2 = await client.post(f"{live_webhook_stub}/deliver/{connection_id}", content=body, headers=headers)
+            assert r2.status_code == 409, r2.text
+            assert r2.json()["detail"]["code"] == "replay_rejected"
+    finally:
         await engine.dispose()

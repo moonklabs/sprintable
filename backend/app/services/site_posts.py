@@ -835,6 +835,73 @@ async def _get_active_blog_connection(db: AsyncSession, *, org_id: uuid.UUID, co
     return conn
 
 
+def _blog_destination_exception_classes() -> tuple[tuple[type[Exception], ...], tuple[type[Exception], ...]]:
+    """story e4fc29fa(조각④) — wordpress_publish.py·webhook_publish.py 각자 자기
+    공개 예외 타입을 갖는다(호출자 계약 유지, 모듈 재사용 원칙) — 오케스트레이션
+    계층은 둘 다 잡아야 하므로 여기서 한 곳에 모은다(새 모듈이 추가되면 여기 한 줄만
+    늘면 된다)."""
+    from app.services.webhook_publish import WebhookPublishError, WebhookTargetURLInsecureError
+    from app.services.wordpress_publish import WordPressPublishError, WordPressSiteURLInsecureError
+
+    return (
+        (WordPressSiteURLInsecureError, WebhookTargetURLInsecureError),
+        (WordPressPublishError, WebhookPublishError),
+    )
+
+
+_BLOG_DESTINATION_INSECURE_ERRORS, _BLOG_DESTINATION_PUBLISH_ERRORS = _blog_destination_exception_classes()
+
+
+def _blog_publish_error_code(exc: Exception) -> str:
+    """story e4fc29fa(조각④) — 401/403은 "일시적 provider 오류"가 아니라 자격 자체가
+    틀렸다는 뜻(wordpress Application Password·webhook 공유 비밀 오설정). 뮤테이션
+    대상: 이 분기를 지우면 401도 CHANNEL_PUBLISH_PROVIDER_ERROR(transient)로 떨어져
+    고쳐지지 않는 자격으로 무한 백오프 재시도만 반복한다(webhook 라이브 테스트가
+    실제로 이 경로를 잡았다)."""
+    if getattr(exc, "status_code", None) in (401, 403):
+        return "CHANNEL_PUBLISH_AUTH_REJECTED"
+    return "CHANNEL_PUBLISH_PROVIDER_ERROR"
+
+
+async def _call_blog_module_publish(
+    module, client, *, channel: str, connection, app_password: str, title: str, body_md: str,
+    summary: str, tags: list, slug: str, external_id: str | None,
+) -> tuple[str, str | None]:
+    """story e4fc29fa(조각④) — wordpress/webhook 모듈은 이름(publish)은 같아도
+    파라미터 모양이 다르다(BlogDestinationModule Protocol 明示 — 목적지마다 자격
+    형태가 다르다). 이 함수가 channel별 kwargs 조립을 한 곳에 모아, 오케스트레이션
+    본문(publish_site_post_external_command)은 채널을 몰라도 되게 한다."""
+    if channel == "wordpress":
+        return await module.publish(
+            client, site_url=connection.account_id, username=connection.account_label or "",
+            app_password=app_password, title=title, body_md=body_md, summary=summary, slug=slug,
+            external_id=external_id,
+        )
+    if channel == "webhook":
+        return await module.publish(
+            client, target_url=connection.account_id, secret=app_password, title=title, body_md=body_md,
+            summary=summary, tags=tags, slug=slug, external_id=external_id,
+        )
+    raise SitePostExternalPublishError(
+        error_code="SITE_POST_DRAFT_NOT_FOUND", message=f"알 수 없는 blog 채널: {channel!r}",
+    )
+
+
+async def _call_blog_module_unpublish(module, client, *, channel: str, connection, app_password: str, external_id: str) -> None:
+    if channel == "wordpress":
+        await module.unpublish(
+            client, site_url=connection.account_id, username=connection.account_label or "",
+            app_password=app_password, external_id=external_id,
+        )
+        return
+    if channel == "webhook":
+        await module.unpublish(client, target_url=connection.account_id, secret=app_password, external_id=external_id)
+        return
+    raise SitePostExternalPublishError(
+        error_code="SITE_POST_DRAFT_NOT_FOUND", message=f"알 수 없는 blog 채널: {channel!r}",
+    )
+
+
 class SitePostExternalPublishError(Exception):
     """story e4fc29fa(조각③c) — 외부 목적지(WordPress 등) 발행/회수 실패. error_code로
     워커가 failure_kind(connection/needs_check/transient)를 분류한다(publication_
@@ -949,7 +1016,6 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     from app.services.blog_destinations import get_blog_destination_module
     from app.services.channel_connection import decrypt_for_use
     from app.services.channel_posts import ChannelConnectionNotActiveError
-    from app.services.wordpress_publish import WordPressPublishError, WordPressSiteURLInsecureError
 
     version = (await db.execute(
         select(SitePostVersion).where(SitePostVersion.id == command.approved_version)
@@ -999,15 +1065,15 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
 
     try:
         async with httpx.AsyncClient() as client:
-            external_id, permalink = await module.publish(
-                client, site_url=connection.account_id, username=connection.account_label or "",
-                app_password=app_password, title=version.title, body_md=version.body_md,
-                summary=version.summary, slug=draft.slug, external_id=prior_external_id,
+            external_id, permalink = await _call_blog_module_publish(
+                module, client, channel=connection.channel, connection=connection, app_password=app_password,
+                title=version.title, body_md=version.body_md, summary=version.summary, tags=version.tags,
+                slug=draft.slug, external_id=prior_external_id,
             )
-    except WordPressSiteURLInsecureError as exc:
+    except _BLOG_DESTINATION_INSECURE_ERRORS as exc:
         raise SitePostExternalPublishError(error_code="SITE_POST_DESTINATION_INSECURE", message=str(exc)) from exc
-    except WordPressPublishError as exc:
-        raise SitePostExternalPublishError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
+    except _BLOG_DESTINATION_PUBLISH_ERRORS as exc:
+        raise SitePostExternalPublishError(error_code=_blog_publish_error_code(exc), message=str(exc)) from exc
 
     # story #3395/#3757 동형 SAVEPOINT 관용구(동시 처리 방어) — (gate_id, version_id) UNIQUE 재사용.
     from sqlalchemy.exc import IntegrityError
@@ -1056,7 +1122,6 @@ async def unpublish_site_post_external_command(db: AsyncSession, command: "Publi
     from app.services.blog_destinations import get_blog_destination_module
     from app.services.channel_connection import decrypt_for_use
     from app.services.channel_posts import ChannelConnectionNotActiveError
-    from app.services.wordpress_publish import WordPressPublishError, WordPressSiteURLInsecureError
 
     row = (await db.execute(
         select(ChannelPublication).where(
@@ -1083,14 +1148,14 @@ async def unpublish_site_post_external_command(db: AsyncSession, command: "Publi
 
     try:
         async with httpx.AsyncClient() as client:
-            await module.unpublish(
-                client, site_url=connection.account_id, username=connection.account_label or "",
+            await _call_blog_module_unpublish(
+                module, client, channel=connection.channel, connection=connection,
                 app_password=app_password, external_id=row.external_id,
             )
-    except WordPressSiteURLInsecureError as exc:
+    except _BLOG_DESTINATION_INSECURE_ERRORS as exc:
         raise SitePostExternalPublishError(error_code="SITE_POST_DESTINATION_INSECURE", message=str(exc)) from exc
-    except WordPressPublishError as exc:
-        raise SitePostExternalPublishError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
+    except _BLOG_DESTINATION_PUBLISH_ERRORS as exc:
+        raise SitePostExternalPublishError(error_code=_blog_publish_error_code(exc), message=str(exc)) from exc
 
     row.status = "unpublished"
     return row

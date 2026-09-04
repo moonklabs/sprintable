@@ -131,6 +131,15 @@ async def test_sandbox_absent_when_flag_off():
         # credential_kind="none"만 보고 「샌드박스 연결 만들기」를 잘못 탄다. 뮤테이션
         # 대상: 필터를 지우면 이 assert가 RED.
         assert "hosted_site" not in channels
+
+        # story e4fc29fa(조각③b·④) — wordpress·webhook 둘 다 blog kind·pasted_secret로
+        # 나타난다(requires_connection 기본값 True라 hosted_site와 달리 이 목록에 있다).
+        wordpress_row = next(row for row in rows if row["channel"] == "wordpress")
+        assert wordpress_row["kind"] == "blog"
+        assert wordpress_row["credential_kind"] == "pasted_secret"
+        webhook_row = next(row for row in rows if row["channel"] == "webhook")
+        assert webhook_row["kind"] == "blog"
+        assert webhook_row["credential_kind"] == "pasted_secret"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
