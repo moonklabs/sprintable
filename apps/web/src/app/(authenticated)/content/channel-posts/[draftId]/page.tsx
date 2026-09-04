@@ -14,6 +14,11 @@ import { parseSitePostApiError } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
+import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
+import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
+import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -57,6 +62,12 @@ interface ChannelPostDraftDetail {
   command_status?: string | null;
   command_reason_code?: string | null;
   scheduled_at?: string | null;
+  // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지(FailureActionBadge)가 이
+  // 화면에 mount 안 된 채로 남아 있던 갭. 단건 GET(ChannelPostDraftListItem과 동형
+  // shape, backend/app/routers/channel_posts.py)이 이미 내는 필드.
+  failure_kind?: string | null;
+  next_retry_at?: string | null;
+  processing_kind?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -119,6 +130,12 @@ export default function ChannelPostEditPage() {
   const [linkUrl, setLinkUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string; raw?: string } | null>(null);
+
+  // story #3422 ②-d — 예약 상신 다이얼로그. serverError는 클라 검증 통과 뒤에도 상신
+  // 사이 시각이 흘러 서버가 422로 거부하는 경로(parseScheduledAtServerError)만 담는다
+  // — 다이얼로그가 안 닫혀 재선택 가능하게 유지한다.
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleServerError, setScheduleServerError] = useState<'past_or_invalid' | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
@@ -268,19 +285,21 @@ export default function ChannelPostEditPage() {
 
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
-  const handleSubmitForApproval = async () => {
+  const handleSubmitForApproval = async (scheduledAt?: string) => {
     if (!orgId || !draft || isOverLimit) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
+    if (scheduledAt) setScheduleServerError(null);
     setSubmitting(true);
     setSubmitResult(null);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version_id: latest.version_id }),
+        body: JSON.stringify(scheduledAt ? { version_id: latest.version_id, scheduled_at: scheduledAt } : { version_id: latest.version_id }),
       });
       if (res.ok) {
+        if (scheduledAt) setScheduleDialogOpen(false);
         const json = (await res.json().catch(() => null)) as { data?: { gate_id?: string } } | null;
         const gateId = json?.data?.gate_id;
         if (gateId) {
@@ -290,6 +309,17 @@ export default function ChannelPostEditPage() {
         }
       } else {
         const body = await res.json().catch(() => null);
+        // story #3422 ②-d(페드루 PO 지적 2026-09-04 10:49Z) — scheduled_at을 실은
+        // 요청만 이 폴백을 본다(예약 아닌 상신에서 이 shape가 뜰 리 없다 — 그래도
+        // 방어적으로 scheduledAt 유무로 먼저 좁힌다). 감지되면 다이얼로그를 안 닫고
+        // 사람 문장만 갱신 — submitResult(하단 일반 오류 배너)는 안 건드린다.
+        if (scheduledAt) {
+          const scheduleError = parseScheduledAtServerError(body);
+          if (scheduleError) {
+            setScheduleServerError(scheduleError);
+            return;
+          }
+        }
         const info = parseSitePostApiError(body);
         // story #3402·PR#3764/#3767 — CHANNEL_POST_GATE_ALREADY_HELD. site와 kind는
         // 공유하되 slug/lang이 없다(채널 포스트 모델 자체에 title이 없다) — 페드루 PO
@@ -346,7 +376,7 @@ export default function ChannelPostEditPage() {
   // 않는다 — 성공 응답 필드만 병합하고, 진짜 publication_status는 다음 로드/새로고침이
   // 정직하게 채운다(지어내지 않는다).
   const handlePublish = async () => {
-    if (!orgId || !draft || !canPublish) return;
+    if (!orgId || !draft || !canPublish || blockedByCommandInFlight) return;
     setPublishing(true);
     setPublishResult(null);
     try {
@@ -544,6 +574,33 @@ export default function ChannelPostEditPage() {
   const showUnpublish = draft.publication_status === 'published';
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true;
 
+  // story #3422 B4(페드루 PO, 2026-09-04 13:26Z, code-review "auto_retry 아래 발행
+  // 버튼 활성"과 같은 자리) — command_status가 pending(자동 재시도 큐에 있음, awaiting_
+  // container 포함)·blocked(연결 문제)면 새 발행/예약 상신을 막는다 — 이미 진행 중이거나
+  // 고쳐야 할 것이 따로 있는데 사람이 또 시도하면 서버와 경합하거나 헛수고다.
+  // dead_letter는 이 집합에 일부러 안 넣는다 — 재시도 «클릭» 배선(story f061c1a3, BE
+  // command_id 노출 뒤) 前까지는 발행 버튼이 dead_letter의 유일한 수동 재시도 경로다
+  // (지금 막으면 아예 되살릴 방법이 없어진다).
+  const commandInFlightBlocksNewAttempt = new Set(['pending', 'blocked']);
+  const blockedByCommandInFlight = !!draft.command_status && commandInFlightBlocksNewAttempt.has(draft.command_status);
+  // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
+  // 지시가 된다("기다리세요"는 blocked에, "연결을 확인하세요"는 pending에 안 맞는다).
+  // command_status로 정확히 갈라 서로 다른 문장을 낸다.
+  const commandInFlightReasonKey = draft.command_status === 'blocked'
+    ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonPending';
+
+  // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
+  // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
+  // 동형(failure-action.ts 우선순위 진리표 그대로 재사용 — 화면이 갈래를 다시 안 짠다).
+  const failureAction = deriveFailureAction({
+    commandStatus: draft.command_status as CommandStatus | null | undefined,
+    failureKind: draft.failure_kind,
+    nextRetryAt: draft.next_retry_at,
+    reasonCode: draft.command_reason_code,
+    processingKind: draft.processing_kind,
+  });
+  const displayTimezone = resolveDisplayTimezone().tz;
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
@@ -566,6 +623,9 @@ export default function ChannelPostEditPage() {
             {view.status === undefined ? t('originAuthorUnknown') : t(contentPostStatusLabelKey(view.status))}
           </span>
         </div>
+        {/* B3(페드루 PO) — 실패 배지는 칩(위 상태 줄) 바로 아래(§17-2 오버레이 규율).
+            failureAction===undefined면(정상 대기·완료 등) 아예 안 그린다. */}
+        {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} /> : null}
         {/* AC9 — 나가는 계정. */}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalAccountLabel')}</span>
@@ -660,7 +720,11 @@ export default function ChannelPostEditPage() {
           scheduled·unpublish 엔드포인트 신설·can_unpublish 판정값) — 아래 두 버튼. */}
       <div className="space-y-2">
         <div className="flex gap-2">
-          <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
+          <Button
+            onClick={() => void handlePublish()}
+            disabled={!canPublish || publishing || blockedByCommandInFlight}
+            data-testid="channel-post-publish-button"
+          >
             {/* story #3402 PR2 ②-c(T9·doc §4-1/§17-4) — 부분 성공(container_created)이면
                 기본 행동이 "다시"가 아니라 "이어서 발행"이다(처음부터 하면 컨테이너가
                 하나 더 생겨 같은 글이 두 번 나갈 수 있다, §4-1). partialSuccess 분기가
@@ -692,6 +756,13 @@ export default function ChannelPostEditPage() {
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
             {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌
+            경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘). */}
+        {canPublish && blockedByCommandInFlight ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
+            {t(commandInFlightReasonKey)}
           </p>
         ) : null}
         {showCancelScheduled && !canCancelScheduled ? (
@@ -855,18 +926,42 @@ export default function ChannelPostEditPage() {
           {saving ? t('editSavingCta') : t('editSaveCta')}
         </Button>
         <Button
-          onClick={handleSubmitForApproval}
+          onClick={() => void handleSubmitForApproval()}
           disabled={submitting || isOverLimit}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
         </Button>
+        {/* story #3422 ②-d — 예약 상신(doc §11 T8 "상신 시 scheduled_at 입력"). 즉시
+            상신과 같은 게이팅(isOverLimit)을 공유 — 한도 초과면 예약도 막는다. B4(페드루
+            PO, 2026-09-04 13:26Z) — command_status가 pending/blocked면 새 예약도 막는다
+            (즉시 상신은 이 게이팅 밖 — PO 지시가 발행·예약 상신 둘로 명시). */}
+        <Button
+          variant="outline"
+          onClick={() => setScheduleDialogOpen(true)}
+          disabled={submitting || isOverLimit || blockedByCommandInFlight}
+          data-testid="channel-post-schedule-submit-button"
+        >
+          {t('channelPostsScheduleSubmitCta')}
+        </Button>
       </div>
+      <ScheduleAtDialog
+        open={scheduleDialogOpen}
+        onOpenChange={(next) => { setScheduleDialogOpen(next); if (!next) setScheduleServerError(null); }}
+        onSubmit={(iso) => void handleSubmitForApproval(iso)}
+        submitting={submitting}
+        serverError={scheduleServerError}
+      />
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
           워시된다, Phase 0 실측). */}
       {isOverLimit ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-over-limit-reason">
           {t('channelPostsOverLimitReason')}
+        </p>
+      ) : null}
+      {!isOverLimit && blockedByCommandInFlight ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
+          {t(commandInFlightReasonKey)}
         </p>
       ) : null}
 

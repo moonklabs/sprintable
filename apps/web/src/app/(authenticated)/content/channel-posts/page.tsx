@@ -98,9 +98,17 @@ export default function ChannelPostListPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
-      <div className="space-y-1">
-        <h1 className="text-lg font-semibold text-foreground">{t('channelPostsTitle')}</h1>
-        <p className="text-sm text-muted-foreground">{t('channelPostsDescription')}</p>
+      {/* story #3422 ③-b(doc §11 T8) — 캘린더 화면 진입점. 목록/캘린더는 같은 데이터를
+          다른 축(최신순 목록 vs 채널×날짜 격자)으로 보는 것이라 탭이 아니라 링크로
+          충분하다(별도 nav 계층을 새로 안 만든다). */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-lg font-semibold text-foreground">{t('channelPostsTitle')}</h1>
+          <p className="text-sm text-muted-foreground">{t('channelPostsDescription')}</p>
+        </div>
+        <Link href="/content/channel-posts/calendar" className="shrink-0 text-sm text-foreground underline underline-offset-4" data-testid="channel-posts-calendar-link">
+          {t('channelPostsCalendarLinkCta')}
+        </Link>
       </div>
 
       {loadError ? (

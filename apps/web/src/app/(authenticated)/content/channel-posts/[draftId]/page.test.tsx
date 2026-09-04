@@ -74,6 +74,11 @@ const DRAFT_DETAIL = {
   published_at: null as string | null,
   published_body_sha256: null as string | null,
   command_status: null as string | null,
+  // B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지 mount에 쓰는 나머지 필드.
+  command_reason_code: null as string | null,
+  failure_kind: null as string | null,
+  next_retry_at: null as string | null,
+  processing_kind: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -261,6 +266,78 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.textContent).toContain(koMessages.content.submitSuccess);
     expect(container.querySelector('a[href="/gates/g1"]')).not.toBeNull();
+  });
+
+  // story #3422 ②-d(페드루 PO "지금 이 세션에서 조각 하나" 지시, 2026-09-04 11:49Z) —
+  // 예약 상신 버튼 실배선.
+  function setScheduleInput(value: string) {
+    const input = document.body.querySelector('[data-testid="channel-post-schedule-at-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('⭐예약 상신 — 다이얼로그를 거쳐 미래 시각을 확認하면 submit 요청에 scheduled_at이 실린다', async () => {
+    let submittedBody: unknown = null;
+    stubFetch({ onSubmit: (body) => { submittedBody = body; return { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } }; } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const scheduleBtn = container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement;
+    await act(async () => {
+      scheduleBtn.click();
+    });
+    await flush();
+
+    const futureLocal = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16);
+    await act(async () => {
+      setScheduleInput(futureLocal);
+    });
+    const confirmBtn = document.body.querySelector('[data-testid="channel-post-schedule-at-confirm"]') as HTMLButtonElement;
+    await act(async () => {
+      confirmBtn.click();
+    });
+    await flush();
+
+    expect((submittedBody as { scheduled_at?: string } | null)?.scheduled_at).toBeTruthy();
+    expect(container.textContent).toContain(koMessages.content.submitSuccess);
+    // 성공하면 다이얼로그가 닫힌다.
+    expect(document.body.querySelector('[data-testid="channel-post-schedule-at-dialog"]')).toBeNull();
+  });
+
+  it('⭐예약 상신 — 서버가 scheduled_at pydantic 422를 반환하면 다이얼로그가 안 닫히고 사람 문장을 보인다', async () => {
+    stubFetch({
+      onSubmit: () => ({
+        status: 422,
+        body: { detail: [{ loc: ['body', 'scheduled_at'], msg: 'Value error, scheduled_at은 현재 시각 이후여야 합니다', type: 'value_error' }] },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const scheduleBtn = container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement;
+    await act(async () => {
+      scheduleBtn.click();
+    });
+    await flush();
+
+    const futureLocal = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16);
+    await act(async () => {
+      setScheduleInput(futureLocal);
+    });
+    const confirmBtn = document.body.querySelector('[data-testid="channel-post-schedule-at-confirm"]') as HTMLButtonElement;
+    await act(async () => {
+      confirmBtn.click();
+    });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="channel-post-schedule-at-dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="channel-post-schedule-at-server-error"]')?.textContent)
+      .toBe(koMessages.content.channelPostsScheduleAtServerErrorPastOrInvalid);
   });
 
   // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — CHANNEL_POST_GATE_
@@ -1152,5 +1229,111 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+  });
+
+  // B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고 이 화면엔
+  // mount 안 돼 있던 갭(#3422 AC3). 표본 5종이 상세에서 실제로 「보인다」를 pin한다.
+  describe('⭐B3 — 실패 배지 5종이 상세에서 보인다', () => {
+    it('blocked', async () => {
+      stubFetch({ draftDetail: { command_status: 'blocked' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureBlocked);
+    });
+
+    it('needs_check', async () => {
+      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
+    });
+
+    it('auto_retry', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'pending', failure_kind: 'transient', next_retry_at: '2026-09-05T00:00:00Z' },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    });
+
+    it('dead_letter', async () => {
+      stubFetch({ draftDetail: { command_status: 'dead_letter' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureRetryCta);
+    });
+
+    it('voided', async () => {
+      stubFetch({ draftDetail: { command_status: 'voided', command_reason_code: 'CONTENT_CHANGED' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', '본문이 바뀜'));
+    });
+  });
+
+  // B4(페드루 PO, 2026-09-04 13:26Z) — command_status가 pending/blocked면 새 발행·예약
+  // 상신을 막는다(이미 진행 중이거나 고쳐야 할 게 따로 있음). dead_letter는 예외
+  // (f061c1a3 前까지 발행이 유일한 수동 재시도 경로) — 아래에서 활성 그대로임을 pin한다.
+  describe('⭐B4 — command_status가 pending/blocked면 발행·예약 상신을 막는다(dead_letter는 예외)', () => {
+    it('pending — 발행·예약 상신 버튼이 비활성화되고 pending 전용 사유가 버튼 밖에 보인다', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'pending' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
+      expect(container.querySelector('[data-testid="channel-post-schedule-submit-command-inflight-reason"]')?.textContent)
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
+    });
+
+    // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
+    // 지시가 된다. blocked 전용 문구("연결 문제")가 pending 전용 문구("예약/재시도")와
+    // 다른 것을 pin한다.
+    it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 pending과 다르다', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonBlocked);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
+        .not.toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
+    });
+
+    it('dead_letter — 예외라 발행 버튼이 그대로 활성(f061c1a3 前까지 유일한 재시도 경로)', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'dead_letter' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
+    });
+
+    it('즉시 상신 버튼은 이 게이팅 밖(PO 지시가 발행·예약 상신 둘로 명시)', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'pending' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('canPublish=false면 command_status와 무관하게 원래 사유(게이트 문제)만 보인다', async () => {
+      stubFetch({ draftDetail: { gate_status: null, command_status: 'pending' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
+    });
   });
 });

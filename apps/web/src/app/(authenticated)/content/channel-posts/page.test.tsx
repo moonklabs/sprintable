@@ -91,6 +91,18 @@ describe('ChannelPostListPage (story #3402)', () => {
     expect(container.textContent).not.toContain('새 글');
   });
 
+  // story #3422 ③-b — 캘린더 진입점.
+  it('⭐캘린더 링크가 /content/channel-posts/calendar를 가리킨다(0건이어도 항상 보인다)', async () => {
+    stubFetch([]);
+    await act(async () => {
+      root.render(wrap(<ChannelPostListPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-posts-calendar-link"]')?.getAttribute('href'))
+      .toBe('/content/channel-posts/calendar');
+  });
+
   it('⭐목록 응답의 채널·버전·작성 주체·수정 시각이 화면에 그대로 나온다(AC1)', async () => {
     stubFetch([DRAFT_A]);
     await act(async () => {
