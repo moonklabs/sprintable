@@ -174,6 +174,12 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   추가한다. prod는 별도 결정(prod 시크릿 미생성 — `SUPPORT_GATEWAY_TOKEN_SECRET`과 동일
   선례: 값 미설정 시 fail-closed라 시크릿을 아예 안 실어도 안전, prod `SECRETS_FLAG`에
   넣으면 존재하지 않는 시크릿으로 배포 자체가 깨진다).
+- **story e4fc29fa(조각③c/④, 카디르 QA 실측 2026-09-04)**: `WORDPRESS_TEST_STUB_ENABLED`·
+  `WEBHOOK_TEST_STUB_ENABLED`는 `SANDBOX_CHANNEL_ENABLED`와 동형(리터럴, dev만) — 이
+  배선이 없으면 `dev_wordpress_stub.py`/`dev_webhook_stub.py` 라우터가 등재 안 돼
+  (`app/main.py` 조건부 `include_router`) ③c/④/⑤ 라이브 QA가 통째로 못 돈다.
+  `WEBHOOK_TEST_STUB_SECRET`은 여기 안 실음(yaml 평문 secret 금지 관례 — 스텁 파일
+  기본값으로 동작, 런북 2bbafa37에 그 경로 명시).
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
 
@@ -782,5 +788,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev,"
         # story 5b27b32f — GCS_CHANNEL_MEDIA_BUCKET 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
-        "SANDBOX_CHANNEL_ENABLED=true"
+        "SANDBOX_CHANNEL_ENABLED=true,"
+        # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
+        # 삽입 순서 그대로).
+        "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
     )
