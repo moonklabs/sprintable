@@ -54,6 +54,10 @@ interface ChannelPostDraftListItem {
   // 임시 표시가 착지 즉시 자동으로 실제 본문 미리보기로 바뀐다, 이 페이지는 수정 불필요).
   text_preview?: string | null;
   text_length?: number | null;
+  // story #3457 후속(BE #3817 착지분) — "같은 스토리의 글"(§14-2 안전 표기) 보조줄.
+  // source_content_item_id가 없으면(정상값) 그 줄 자체를 안 그린다.
+  source_content_item_id?: string | null;
+  source_title?: string | null;
 }
 
 // content/page.tsx::toGateStatus와 동형.
@@ -194,6 +198,17 @@ export default function ChannelPostListPage() {
                         >
                           {t('channelPostsPublicationFailed')}
                         </span>
+                      ) : null}
+                      {/* story #3457 후속(유나 §14-2 안전 표기, PO 확定 2026-09-04 20:54Z) —
+                          캘린더 카드·목록 행·상세 3곳이 같은 어휘. source_title 없으면(정상값,
+                          단독 글 또는 아직 못 읽음) 이 줄 자체를 안 그린다. */}
+                      {draft.source_content_item_id && draft.source_title ? (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground" data-testid="channel-post-source-link">
+                          {t('channelPostsSourceLabel')}{' '}
+                          <Link href={`/content/${draft.source_content_item_id}`} className="underline">
+                            {t('channelPostsSourceLinkText', { title: draft.source_title })}
+                          </Link>
+                        </p>
                       ) : null}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">

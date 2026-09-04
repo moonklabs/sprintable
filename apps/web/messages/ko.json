@@ -2275,6 +2275,7 @@
     "channelPostsSandboxTestBadge": "테스트",
     "channelPostsSourceLabel": "같은 스토리의 글",
     "channelPostsSourceLinkText": "「{title}」(블로그)",
+    "channelPostsSourceChangedBadge": "만든 뒤 바뀜",
     "channelPostsCreateVariantLabel": "이 글에서 채널 변형 만들기",
     "channelPostsCreateVariantSelectPlaceholder": "연결 선택",
     "channelPostsCreateVariantCta": "변형 만들기",

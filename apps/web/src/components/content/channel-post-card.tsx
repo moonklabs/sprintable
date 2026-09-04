@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { formatScheduledAt } from '@/components/content/schedule-format';
@@ -19,6 +20,7 @@ export interface ChannelPostCardProps {
 }
 
 export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps) {
+  const t = useTranslations('content');
   const hasGateContract = 'gate_status' in item;
   const view = hasGateContract
     ? deriveChannelPostView({
@@ -69,6 +71,15 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
       {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact /> : null}
       {item.text_preview ? (
         <p className="truncate text-foreground" data-testid="channel-post-calendar-card-preview">{item.text_preview}</p>
+      ) : null}
+      {/* story #3457 후속(유나 §14-2 안전 표기, PO 확定 2026-09-04 20:54Z) — 카드 전체가
+          이미 <Link>라 원문 페이지로 가는 중첩 링크는 못 넣는다(a>a 무효 HTML) — 목록/상세와
+          같은 어휘를 평문으로만(카드 클릭 → 상세에서 실제 링크). source_title 없으면
+          (정상값) 이 줄 자체를 안 그린다. */}
+      {item.source_content_item_id && item.source_title ? (
+        <p className="truncate text-muted-foreground" data-testid="channel-post-calendar-card-source">
+          {t('channelPostsSourceLabel')} {t('channelPostsSourceLinkText', { title: item.source_title })}
+        </p>
       ) : null}
     </Link>
   );

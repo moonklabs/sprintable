@@ -236,4 +236,26 @@ describe('ChannelPostListPage (story #3402)', () => {
 
     expect(container.textContent).toContain(koMessages.content.channelPostsLoadFailed);
   });
+
+  // story #3457 후속(유나 §14-2 안전 표기, PO 확定 2026-09-04 20:54Z) — 캘린더 카드·목록
+  // 행·상세 3곳이 같은 어휘. 목록 행은 파생 표기만(배지는 상세 전용, 유나 정본).
+  describe('같은 스토리의 글(목록 행, §14-2)', () => {
+    it('source_content_item_id가 없으면(정상값) 이 줄 자체가 안 그려진다', async () => {
+      stubFetch([DRAFT_A]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-source-link"]')).toBeNull();
+    });
+
+    it('⭐source_title이 있으면 "같은 스토리의 글" 링크가 행 안에 보인다', async () => {
+      stubFetch([{ ...DRAFT_A, source_content_item_id: 'site-1', source_title: '9월 실험 회고' }]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+
+      const el = container.querySelector('[data-testid="channel-post-source-link"]');
+      expect(el?.textContent).toContain(koMessages.content.channelPostsSourceLabel);
+      expect(el?.textContent).toContain('9월 실험 회고');
+      expect(el?.querySelector('a')?.getAttribute('href')).toBe('/content/site-1');
+    });
+  });
 });
