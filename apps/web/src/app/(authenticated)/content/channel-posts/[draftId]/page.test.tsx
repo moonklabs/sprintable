@@ -72,6 +72,7 @@ const DRAFT_DETAIL = {
   publication_status: null as 'container_created' | 'published' | 'failed' | null,
   permalink: null as string | null, external_id: null as string | null, error_code: null as string | null,
   published_at: null as string | null,
+  published_body_sha256: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -425,6 +426,29 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     // doc §4-1/§17-4 — 부분 성공의 기본 행동은 "다시"가 아니라 "이어서 발행"이다(처음부터
     // 하면 컨테이너가 하나 더 생겨 같은 글이 두 번 나갈 수 있다).
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).textContent)
+      .toBe(koMessages.content.channelPostsPublishContinueCta);
+  });
+
+  // 페드루 PO 리뷰 nit(2026-09-04) — partialSuccess와 isRepublish가 동시에 참인 경우
+  // (과거 발행 이력이 있는데 그 뒤 재승인된 새 버전을 다시 발행 시도했다가 부분 성공에
+  // 걸린 것 — 둘 다 실제로 나올 수 있는 조합). 라벨 우선순위(partialSuccess가 이김)를 pin.
+  // 이 테스트를 작성하다가 자체 발견 — published_body_sha256이 인터페이스엔 있었는데
+  // view 계산에 실제로 안 넘어가고 있어(위 handlePublish 근처 수정 참고) isRepublish가
+  // 이 화면에서 원래 절대 안 켜지고 있었다 — 그 자리를 이 테스트가 pin한다.
+  it('⭐T9 우선순위 — partialSuccess&&isRepublish 둘 다 참이어도 "이어서 발행"이 이긴다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'new', body_sha256: 'new',
+        published_body_sha256: 'old', published_at: '2026-09-01T00:00:00Z',
+        publication_status: 'container_created',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
     expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).textContent)
       .toBe(koMessages.content.channelPostsPublishContinueCta);
   });

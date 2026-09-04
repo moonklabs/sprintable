@@ -2218,6 +2218,7 @@
     "channelPostsPublishScheduled": "This goes out exactly as it is now, at {time}.",
     "channelPostsExternalImpactNotSent": "Nothing was sent to Threads — no container was created, and nothing was left on the account.",
     "channelPostsExternalImpactReachedProvider": "The request did reach Threads — something may have been left on the account, so check the channel before trying again.",
+    "channelPostsExternalImpactUnknown": "We couldn't confirm whether this reached Threads — check the channel before trying again.",
     "channelPostsApprovalStatusLabel": "Approval status",
     "channelPostsApprovalAccountLabel": "Publishing account",
     "channelPostsApprovalLimitLabel": "Posts remaining",

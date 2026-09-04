@@ -352,13 +352,18 @@ export default function ChannelPostEditPage() {
             ? t('channelPostsRateLimitedUntil', { time: new Date(info.resetAt).toLocaleString() })
             : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
         // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
-        // 는 뭉치면 안 되는 별개 사실이다. res.status가 실제 HTTP status다(로컬 검증
-        // 실패라 res 자체가 없는 catch 분기는 별도 — 그쪽은 애초에 네트워크를 안 탔으니
-        // "안 나갔다"가 항상 참이라 externalImpact를 안 싣는다, 아래 catch 참고).
-        setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(res.status) });
+        // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
+        // 판정 축은 http_status 숫자가 아니라 info.kind다(500/503/504·BFF 400·미지
+        // 코드는 parseSitePostApiError가 이미 kind='unknown'으로 fail-closed해 둠 —
+        // describeExternalImpact가 그 kind를 그대로 읽어 "모른다"를 "안 나갔다"로
+        // 단정하지 않는다).
+        setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(info.kind) });
       }
     } catch {
-      setPublishResult({ type: 'error', text: t('publishFailed') });
+      // 네트워크 예외(fetch 자체가 throw) — 요청이 실제로 Threads까지 갔는지 여부를
+      // 이 지점에서 알 수 없다(전송 도중 끊겼을 수도, 응답만 못 받았을 수도 있다) —
+      // 'unknown'으로 fail-closed(위와 같은 축).
+      setPublishResult({ type: 'error', text: t('publishFailed'), externalImpact: 'unknown' });
     } finally {
       setPublishing(false);
     }
@@ -396,6 +401,11 @@ export default function ChannelPostEditPage() {
         reapprovalRequired: draft.reapproval_required ?? undefined,
         sealedBodySha256: draft.sealed_content_sha256 ?? undefined,
         currentBodySha256: draft.body_sha256,
+        // 페드루 PO 리뷰 nit(2026-09-04) 조사 중 자체 발견 — published_body_sha256이
+        // 인터페이스엔 있었는데 view 계산에 실제로 안 넘어가고 있었다. 그러면
+        // isRepublish(재승인 뒤 재발행 CTA)가 이 화면에서 절대 안 켜진다(hasUnpublishedApproval
+        // 이 input.publishedBodySha256!==undefined를 요구하는데 항상 undefined로 들어갔으므로).
+        publishedBodySha256: draft.published_body_sha256 ?? undefined,
         publicationStatus: draft.publication_status ?? undefined,
         errorCode: draft.error_code,
         publishedAt: 'published_at' in draft ? draft.published_at : undefined,
@@ -556,7 +566,9 @@ export default function ChannelPostEditPage() {
                         <p data-testid="channel-post-publish-external-impact">
                           {publishResult.externalImpact === 'reached_provider'
                             ? t('channelPostsExternalImpactReachedProvider')
-                            : t('channelPostsExternalImpactNotSent')}
+                            : publishResult.externalImpact === 'unknown'
+                              ? t('channelPostsExternalImpactUnknown')
+                              : t('channelPostsExternalImpactNotSent')}
                         </p>
                       ) : null}
                     </>

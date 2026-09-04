@@ -100,6 +100,17 @@ const CASES: Array<{ name: string; input: ChannelPostViewInput; expected: Partia
     input: { gateStatus: 'approved', sealedBodySha256: 'a', currentBodySha256: 'a' },
     expected: { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false },
   },
+  // 페드루 PO 리뷰 nit(2026-09-04) — 이전 판(WIP1)에 있던 표본을 21케이스 재작성 때
+  // 놓쳤다: publicationStatus='published' 자체가 hasPublishedSitePost를 채우는 축(캐치올의
+  // published_at 축과는 별개 — 둘의 OR가 hasPublishedSitePost다, §4-2 두 조인축).
+  {
+    name: 'publication_status=published가 그 자체로 hasPublishedSitePost를 채운다(published_at 축과 별개)',
+    input: {
+      gateStatus: 'approved', sealedBodySha256: 'a', currentBodySha256: 'a',
+      publicationStatus: 'published', publishedAt: '2026-09-03T00:00:00Z',
+    },
+    expected: { status: 'published', publishable: false, partialSuccess: false, publicationFailed: false },
+  },
   // ── 캐치올 — published_at 있으면 A/B/C를 "가리는" 게 아니라 "중첩"된다(PO 정정) ────
   {
     name: '캐치올 — approved+published_at있음+publication_status=failed(이전 버전 발행 뒤 새 버전 재발행 실패) → 칩은 published, publicationFailed도 동시에 true(중첩, 우선순위 아님)',

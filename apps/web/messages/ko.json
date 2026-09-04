@@ -2218,6 +2218,7 @@
     "channelPostsPublishScheduled": "{time}에 지금 내용 그대로 나갑니다.",
     "channelPostsExternalImpactNotSent": "Threads에 아무것도 보내지 않았습니다 — 컨테이너도 만들어지지 않았고 계정에 흔적이 남지 않았습니다.",
     "channelPostsExternalImpactReachedProvider": "Threads로 요청은 나갔습니다 — 계정에 흔적이 남았을 수 있으니 채널에서 확인한 뒤 다시 시도해 주세요.",
+    "channelPostsExternalImpactUnknown": "Threads로 나갔는지 확인하지 못했습니다 — 채널에서 확인한 뒤 다시 시도해 주세요.",
     "channelPostsApprovalStatusLabel": "승인 상태",
     "channelPostsApprovalAccountLabel": "발행 계정",
     "channelPostsApprovalLimitLabel": "남은 게시",
