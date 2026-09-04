@@ -895,13 +895,19 @@ async def test_worker_publish_webhook_replay_rejected_by_live_stub(live_webhook_
         connection_id = uuid.uuid4()
         body = b'{"event":"publish","slug":"replay-test"}'
         secret = stub_test_secret()
-        signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        # story e4fc29fa(조각④, 카디르 QA 블로커 2026-09-04) — 서명 대상은 body
+        # 단독이 아니라 timestamp·nonce까지 포함(webhook_publish.py::_signed_payload와
+        # 동일 구성) — 이 값들도 서명 안에 고정해야 재전송 방지가 실제로 성립한다.
+        timestamp = str(int(time.time()))
+        nonce = "fixed-nonce-for-replay-test"
+        signed_payload = f"{timestamp}.{nonce}.".encode() + body
+        signature = "sha256=" + hmac.new(secret.encode(), signed_payload, hashlib.sha256).hexdigest()
         # story e4fc29fa(조각④, 페드루 리뷰 B2) — timestamp 창(300s) 신설 뒤로는 지금
         # 시각이어야 이 재전송 시나리오 자체가 통과선을 넘는다(창 자체는 별도 테스트가
         # 잰다).
         headers = {
-            "X-Sprintable-Signature": signature, "X-Sprintable-Timestamp": str(int(time.time())),
-            "X-Sprintable-Nonce": "fixed-nonce-for-replay-test", "Content-Type": "application/json",
+            "X-Sprintable-Signature": signature, "X-Sprintable-Timestamp": timestamp,
+            "X-Sprintable-Nonce": nonce, "Content-Type": "application/json",
         }
 
         async with httpx.AsyncClient() as client:
@@ -910,6 +916,61 @@ async def test_worker_publish_webhook_replay_rejected_by_live_stub(live_webhook_
             r2 = await client.post(f"{live_webhook_stub}/deliver/{connection_id}", content=body, headers=headers)
             assert r2.status_code == 409, r2.text
             assert r2.json()["detail"]["code"] == "replay_rejected"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_webhook_stub_rejects_same_body_resigned_with_new_timestamp_and_nonce(live_webhook_stub):
+    """카디르 QA 블로커(2026-09-04, PR#3800) — 서명 대상이 body 단독이던 최초 형은
+    가로챈 (body, signature)를 새 timestamp·nonce와 함께 재전송하면 timestamp 창·
+    nonce 저장 둘 다 무력화됐다(새 nonce는 원장에 없어 통과, 새 timestamp는 창
+    안이라 통과). 이 테스트는 그 회귀를 고정한다 — 첫 요청(ts1·nonce1로 정상 서명)은
+    200, 같은 body·같은 signature를 그대로 두고 헤더만 새 ts2·nonce2로 바꿔치기한
+    두 번째 요청은 401(signature_mismatch)이어야 한다(서명이 ts1·nonce1에 고정돼
+    있어 ts2·nonce2로는 검증을 통과할 수 없다 — 위조 불가 증명)."""
+    import hashlib
+    import hmac
+    import time
+
+    import httpx
+
+    from app.routers.dev_webhook_stub import stub_test_secret
+
+    # 이 테스트는 org/story 등을 안 만들지만, `webhook_delivery_nonces` 테이블은
+    # 있어야 한다(test_worker_publish_webhook_replay_rejected_by_live_stub과 동일
+    # 이유 — destructive_schema 마커의 autouse 리셋이 매 테스트 시작 전 스키마를
+    # 통째로 비운다, 테스트는 서로 독립이어야 한다).
+    engine, _Session = await _session_factory()
+    try:
+        connection_id = uuid.uuid4()
+        body = b'{"event":"publish","slug":"forge-attempt-test"}'
+        secret = stub_test_secret()
+        timestamp1 = str(int(time.time()))
+        nonce1 = "nonce-1-original-request"
+        signed_payload1 = f"{timestamp1}.{nonce1}.".encode() + body
+        signature1 = "sha256=" + hmac.new(secret.encode(), signed_payload1, hashlib.sha256).hexdigest()
+        headers1 = {
+            "X-Sprintable-Signature": signature1, "X-Sprintable-Timestamp": timestamp1,
+            "X-Sprintable-Nonce": nonce1, "Content-Type": "application/json",
+        }
+
+        # 공격자 시도 — 가로챈 signature1·body를 그대로 두고, timestamp 창·nonce
+        # 저장을 우회하려고 헤더만 새 값으로 바꿔치기(서명은 재계산 안 함 — 못 한다,
+        # secret을 모른다는 게 이 시나리오의 전제).
+        timestamp2 = str(int(time.time()))
+        nonce2 = "nonce-2-forged-replay-attempt"
+        headers2 = {
+            "X-Sprintable-Signature": signature1, "X-Sprintable-Timestamp": timestamp2,
+            "X-Sprintable-Nonce": nonce2, "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient() as client:
+            r1 = await client.post(f"{live_webhook_stub}/deliver/{connection_id}", content=body, headers=headers1)
+            assert r1.status_code == 200, r1.text
+            r2 = await client.post(f"{live_webhook_stub}/deliver/{connection_id}", content=body, headers=headers2)
+        assert r2.status_code == 401, r2.text
+        assert r2.json()["detail"]["code"] == "signature_mismatch"
     finally:
         await engine.dispose()
 

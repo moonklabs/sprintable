@@ -5,13 +5,17 @@ publish.py`(조각③b)와 이름은 같지만(publish/unpublish) **파라미터
 자격 형태가 다르다(WordPress=site_url+username+app_password, webhook=target_url+
 shared secret 하나뿐 — 사용자명 개념이 없다).
 
-서명 계약(정본 §4 확定 그대로) — `conversation_webhook.py::_sign_payload`와 동일한
-HMAC-SHA256(다만 이 조각은 별도 함수로 재구현 — conversation_webhook.py를 import하면
-webhook 발송이라는 무관한 도메인에 결합이 생긴다, 알고리즘만 재사용). 헤더 3종:
-`X-Sprintable-Signature`(`sha256=` prefix)·`X-Sprintable-Timestamp`(unix seconds)·
-`X-Sprintable-Nonce`(uuid4) — 서명 대상은 body 그 자체(timestamp·nonce는 헤더로만
-동행, `_sign_payload` 계약 그대로 재사용). "허용 도메인"은 별도 화이트리스트 컬럼
-불요 — 연결 등록 시 고객이 넣은 target_url 자체가 유일한 신뢰축(정본 明示) +
+서명 계약(카디르 QA·PO 코드 확認 2026-09-04, 정본 §4 재확定 — Stripe/Slack v1 형)
+— HMAC-SHA256, 서명 대상은 `f"{timestamp}.{nonce}.".encode() + body`(timestamp·
+nonce가 헤더로만 동행하고 body만 서명하던 최초 형은 재전송 방지가 공허했다: 서명된
+body를 잡은 쪽이 새 timestamp·새 nonce를 붙여 재전송하면 timestamp 창·nonce 저장
+둘 다 못 막았다 — `conversation_webhook.py::_sign_payload` 알고리즘 차용이 부적합했던
+이유는 그 원본이 애초에 재전송 방지를 주장하지 않아서였다, 이 어댑터는 주장한다).
+헤더 3종은 그대로: `X-Sprintable-Signature`(`sha256=` prefix)·`X-Sprintable-
+Timestamp`(unix seconds)·`X-Sprintable-Nonce`(uuid4) — 이제 그 값들이 서명 자체
+안에도 들어간다(위조 방지: 공격자가 헤더만 새 값으로 바꿔치기해도 서명이 그 새
+값으로 재계산되지 않으면 불일치). "허용 도메인"은 별도 화이트리스트 컬럼 불요 —
+연결 등록 시 고객이 넣은 target_url 자체가 유일한 신뢰축(정본 明示) +
 `destination_url_safety.py`(조각④ part A)가 그 URL을 「해석 시점」에 검증.
 
 unpublish — webhook은 WordPress처럼 "그 글의 상태를 바꾸는" API가 없다(수신측이
@@ -66,8 +70,17 @@ class WebhookPublishError(Exception):
         super().__init__(f"webhook 수신측 오류(status={status_code}): {self.body}")
 
 
-def _sign(secret: str, body: bytes) -> str:
-    digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+def _signed_payload(timestamp: str, nonce: str, body: bytes) -> bytes:
+    """카디르 QA 블로커(2026-09-04) — timestamp·nonce를 서명 대상 안에 고정한다
+    (Stripe/Slack v1 형, 구분자 `.` 고정). body만 서명하면 가로챈 요청에 새
+    timestamp·nonce를 붙여 재전송해도 서명이 그대로 유효해 재전송 방지 두 축
+    (timestamp 창·nonce 저장)이 전부 무력화된다 — 서명 자체가 그 값들을 보증해야
+    "헤더를 바꿔치기하면 서명이 깨진다"가 성립한다."""
+    return f"{timestamp}.{nonce}.".encode() + body
+
+
+def _sign(secret: str, timestamp: str, nonce: str, body: bytes) -> str:
+    digest = hmac.new(secret.encode(), _signed_payload(timestamp, nonce, body), hashlib.sha256).hexdigest()
     return f"sha256={digest}"
 
 
@@ -79,10 +92,12 @@ async def _validate_target(target_url: str) -> str:
 
 
 def _headers_for(secret: str, body: bytes) -> dict[str, str]:
+    timestamp = str(int(time.time()))
+    nonce = str(uuid.uuid4())
     return {
-        _SIGNATURE_HEADER: _sign(secret, body),
-        _TIMESTAMP_HEADER: str(int(time.time())),
-        _NONCE_HEADER: str(uuid.uuid4()),
+        _SIGNATURE_HEADER: _sign(secret, timestamp, nonce, body),
+        _TIMESTAMP_HEADER: timestamp,
+        _NONCE_HEADER: nonce,
         "Content-Type": "application/json",
     }
 

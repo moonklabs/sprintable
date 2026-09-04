@@ -98,7 +98,12 @@ async def deliver(
             detail={"code": "timestamp_out_of_window", "message": f"timestamp가 {_TIMESTAMP_WINDOW_SECONDS}s 창을 벗어났습니다"},
         )
 
-    expected = hmac.new(stub_test_secret().encode(), body, hashlib.sha256).hexdigest()
+    # 카디르 QA 블로커(2026-09-04, 정본 §4 재확定) — 서명 대상은 body 단독이 아니라
+    # timestamp·nonce까지 포함(webhook_publish.py::_signed_payload와 동일 구성) —
+    # 그래야 공격자가 헤더의 timestamp·nonce만 새 값으로 바꿔치기해 재전송해도
+    # 서명이 안 맞아 401로 막힌다(재전송 방지가 실제로 성립하는 계약).
+    signed_payload = f"{x_sprintable_timestamp}.{x_sprintable_nonce}.".encode() + body
+    expected = hmac.new(stub_test_secret().encode(), signed_payload, hashlib.sha256).hexdigest()
     got = x_sprintable_signature.removeprefix("sha256=")
     # verdict_capture.py::_hmac_match와 동형 상수시간 비교(타이밍 사이드채널 방지).
     if not hmac.compare_digest(expected, got):

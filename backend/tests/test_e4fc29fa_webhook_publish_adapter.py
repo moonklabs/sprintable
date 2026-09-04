@@ -57,7 +57,10 @@ async def test_publish_sends_signed_request_with_three_headers(dns_stub):
     assert captured["timestamp"] is not None and captured["timestamp"].isdigit()
     assert captured["nonce"] is not None
 
-    expected_sig = "sha256=" + hmac.new(b"shared-secret", captured["body"], hashlib.sha256).hexdigest()
+    # 카디르 QA 블로커(2026-09-04, 정본 §4 재확定) — 서명 대상은 body 단독이 아니라
+    # timestamp·nonce까지 포함(webhook_publish.py::_signed_payload와 동일 구성).
+    signed_payload = f"{captured['timestamp']}.{captured['nonce']}.".encode() + captured["body"]
+    expected_sig = "sha256=" + hmac.new(b"shared-secret", signed_payload, hashlib.sha256).hexdigest()
     assert captured["signature"] == expected_sig
 
     body_json = json.loads(captured["body"])
