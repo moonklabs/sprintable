@@ -300,6 +300,11 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     expect(alertEl).not.toBeNull();
     expect(alertEl?.textContent).toContain('스토리 추가에 실패했습니다');
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+    // story 3466 후속(무효 유틸 4곳) — 이 배너가 no-op text-destructive-foreground
+    // 대신 실 렌더 색을 갖는지.
+    expect(alertEl?.className).toContain('text-white');
+    expect(alertEl?.className).toContain('dark:text-proof-bg');
+    expect(alertEl?.className).not.toContain('text-destructive-foreground');
   });
 
   // story #2154 — transitionError는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도

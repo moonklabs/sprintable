@@ -58,7 +58,6 @@ const badgeVariants = cva(
         // de-emphasis는 색이 아니라 tint 배경+작은 크기+pill 형태가 담당(다른 tint 변형이
         // 이미 증명) — 무회귀.
         chip: "border-border/80 bg-muted/70 text-foreground",
-        counter: "border-transparent bg-destructive text-destructive-foreground",
       },
     },
     defaultVariants: {

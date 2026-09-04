@@ -96,7 +96,9 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   };
 
   const btn = {
-    idle: { cls: 'bg-destructive text-destructive-foreground hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
+    // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이
+    // 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례와 같은 처방.
+    idle: { cls: 'bg-destructive text-white dark:text-proof-bg hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
     notifying: { cls: 'bg-destructive-tint text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
     notified: { cls: 'bg-muted text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
     failed: { cls: 'border border-destructive text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
