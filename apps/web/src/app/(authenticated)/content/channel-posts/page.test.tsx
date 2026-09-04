@@ -168,6 +168,31 @@ describe('ChannelPostListPage (story #3402)', () => {
     expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('published');
   });
 
+  // story #3402(PO 지시 2026-09-04) — text_preview/text_length는 디디군 후속 PR로 곧 착지.
+  // 착지 전(지금)엔 응답에 필드 자체가 없다 — AC2와 같은 "키 부재≠null" 규율로 「—」를
+  // 그리고, 첫 열 링크는 channel+version으로 폴백한다(navigable 유지).
+  it('⭐text_preview/text_length 계약 필드 부재(착지 전) — 「—」로 떨어지고 첫 열은 channel+version 폴백', async () => {
+    stubFetch([DRAFT_A]);
+    await act(async () => {
+      root.render(wrap(<ChannelPostListPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-text-length"]')?.textContent).toBe(koMessages.content.originAuthorUnknown);
+    expect(container.textContent).toContain(`${koMessages.content.channelThreads} · v2`);
+  });
+
+  it('⭐text_preview/text_length 계약 필드 존재(착지 후) — 본문 미리보기·글자 수가 그대로 보인다', async () => {
+    stubFetch([{ ...DRAFT_A, text_preview: '마케팅 자동화가 실제로 아끼는 시간은…', text_length: 363 }]);
+    await act(async () => {
+      root.render(wrap(<ChannelPostListPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain('마케팅 자동화가 실제로 아끼는 시간은…');
+    expect(container.querySelector('[data-testid="channel-post-text-length"]')?.textContent).toBe('363');
+  });
+
   it('로드 실패 — 오류 알림을 보인다', async () => {
     stubFetch({ status: 500 });
     await act(async () => {

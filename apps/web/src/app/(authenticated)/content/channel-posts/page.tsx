@@ -44,6 +44,12 @@ interface ChannelPostDraftListItem {
   permalink?: string | null;
   external_id?: string | null;
   error_code?: string | null;
+  // story #3402(페드루 PO 지시, 2026-09-04 01:39Z) — 디디군의 작은 후속 PR로 곧 착지 예정인
+  // 계약(80자 본문 첫 줄 미리보기 + 글자 수). 착지 전(지금)엔 두 필드 다 응답에 없다 — AC2와
+  // 같은 규율로 "키 부재≠null": 없으면 지어내지 않고 「—」를 그린다(채널+버전으로만 식별하던
+  // 임시 표시가 착지 즉시 자동으로 실제 본문 미리보기로 바뀐다, 이 페이지는 수정 불필요).
+  text_preview?: string | null;
+  text_length?: number | null;
 }
 
 // content/page.tsx::toGateStatus와 동형.
@@ -115,9 +121,15 @@ export default function ChannelPostListPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-xs text-muted-foreground">
               <tr>
+                {/* story #3402(PO 지시 2026-09-04) — text_preview/text_length는 디디군의
+                    작은 후속 PR로 곧 착지 예정. 착지 전엔 응답에 필드 자체가 없어(AC2와
+                    같은 "키 부재≠null" 규율) 이 두 열은 「—」로 떨어진다 — 착지 즉시 이
+                    페이지 수정 없이 실제 본문 미리보기·글자 수가 자동으로 채워진다. */}
+                <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnPreview')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnChannel')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnStatus')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnVersion')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnTextLength')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnOriginAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnUpdatedAt')}</th>
@@ -139,11 +151,15 @@ export default function ChannelPostListPage() {
                       publishedAt: 'published_at' in draft ? draft.published_at : undefined,
                     })
                   : { status: undefined, partialSuccess: false, publicationFailed: false };
+                const hasTextPreview = 'text_preview' in draft && draft.text_preview != null;
+                const hasTextLength = 'text_length' in draft && draft.text_length != null;
                 return (
                   <tr key={draft.draft_id} data-testid="channel-posts-list-row">
-                    <td className="px-3 py-2.5 font-medium text-foreground">
+                    <td className="max-w-xs truncate px-3 py-2.5 font-medium text-foreground">
                       <Link href={`/content/channel-posts/${draft.draft_id}`} className="hover:underline">
-                        {draft.channel === 'threads' ? t('channelThreads') : draft.channel}
+                        {hasTextPreview
+                          ? draft.text_preview
+                          : `${draft.channel === 'threads' ? t('channelThreads') : draft.channel} · v${draft.current_version}`}
                       </Link>
                       {/* AC3 — 부분 성공/실패는 다섯 상태 밖의 신호라 칩과 별도로 보인다
                           (doc §4-1 "이것은 다섯 상태 어디에도 없다"). */}
@@ -166,8 +182,14 @@ export default function ChannelPostListPage() {
                         </span>
                       ) : null}
                     </td>
+                    <td className="px-3 py-2.5 text-muted-foreground">
+                      {draft.channel === 'threads' ? t('channelThreads') : draft.channel}
+                    </td>
                     <td className="px-3 py-2.5"><StatusChip status={view.status} /></td>
                     <td className="px-3 py-2.5 text-muted-foreground">v{draft.current_version}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="channel-post-text-length">
+                      {hasTextLength ? draft.text_length : t('originAuthorUnknown')}
+                    </td>
                     <td className="px-3 py-2.5" data-testid="channel-post-origin-author">
                       <AuthorKindBadge kind={draft.origin_author_kind} />
                     </td>
