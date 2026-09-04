@@ -109,7 +109,9 @@ export default function ChannelPostEditPage() {
   // story #3402 PR2 ②-b — 발행(T7). confirm 다이얼로그 없음(site-posts와 동형 — 되돌릴 수
   // 없는 쪽은 발행 취소이지 발행 자체가 아니다, handleUnpublish만 ConfirmDialog를 쓴다).
   const [publishing, setPublishing] = useState(false);
-  const [publishResult, setPublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
+  const [publishResult, setPublishResult] = useState<
+    { type: 'success' } | { type: 'scheduled'; scheduledAt?: string } | { type: 'error'; text: string; raw?: string } | null
+  >(null);
 
   useEffect(() => {
     if (!orgId || !draftId) return;
@@ -316,9 +318,16 @@ export default function ChannelPostEditPage() {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as
-          { data?: { permalink?: string; external_id?: string; published_at?: string } } | null;
-        const { permalink, external_id, published_at } = json?.data ?? {};
-        if (permalink && published_at) {
+          { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string } } | null;
+        const { permalink, external_id, published_at, scheduled, scheduled_at } = json?.data ?? {};
+        // story #3414(PR#3769, 아직 리뷰중 — 계약은 그 PR 스키마 기준) — scheduled=true면
+        // 이 요청은 command만 만들고 실제 발행은 워커가 나중에 한다. permalink/
+        // published_at 셋 다 null인 게 정상이라, 그 null을 "발행됨"으로 그리면 안 된다
+        // (모르는 것을 아는 것처럼 안 보여준다 — 이 파일 전체를 관통하는 AC2 규율과 같은
+        // 축). scheduled 분기를 permalink 존재 분기보다 먼저 검사한다.
+        if (scheduled) {
+          setPublishResult({ type: 'scheduled', scheduledAt: scheduled_at });
+        } else if (permalink && published_at) {
           setPublishResult({ type: 'success' });
           setDraft((prev) => prev && { ...prev, permalink, external_id, published_at, publication_status: 'published' });
         } else {
@@ -327,11 +336,18 @@ export default function ChannelPostEditPage() {
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
-        setPublishResult({
-          type: 'error',
-          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed')),
-          raw: info.raw,
-        });
+        // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG·CHANNEL_RATE_LIMITED는
+        // api-error.ts가 max_length/current_length·reset_at을 실어만 오고 문구 조립은
+        // 소비부 몫으로 남겨 둔 코드다(doc §5 표 — 「500자 한도인데 517자입니다」·
+        // 「내일 09:00 이후 가능합니다」는 값을 실제로 보간해야 하는 문장이라 정적
+        // 번역키 하나로 못 담는다). 나머지 코드는 기존 humanMessageKey/fallback 체인
+        // 그대로.
+        const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
+          ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
+          : info.kind === 'rate_limited' && info.resetAt
+            ? t('channelPostsRateLimitedUntil', { time: new Date(info.resetAt).toLocaleString() })
+            : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
+        setPublishResult({ type: 'error', text, raw: info.raw });
       }
     } catch {
       setPublishResult({ type: 'error', text: t('publishFailed') });
@@ -489,36 +505,34 @@ export default function ChannelPostEditPage() {
         return null;
       })()}
 
-      {/* story #3402 PR2 ②-a/②-b — 발행/발행 취소 버튼. AC5 — 비활성 사유 문구는 버튼
-          밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에 워시된다, Phase 0 실측 그대로
-          재사용). 발행 취소는 발행됨 상태에서만 뜬다.
-          ⚠️발행 취소는 이 조각에서 API 미배선 — backend/app/routers/channel_posts.py에
-          unpublish 엔드포인트 자체가 아직 없다(grep 0건, site-posts만 있음). 버튼은
-          게이팅까지만 서고 onClick은 다음 스토리(BE 선행) 대기. */}
+      {/* story #3402 PR2 ②-a/②-b — 발행 버튼. AC5 — 비활성 사유 문구는 버튼 밖에 둔다
+          (라벨 안에 넣으면 disabled:opacity-50에 워시된다, Phase 0 실측 그대로 재사용).
+          ⚠️발행 취소 버튼은 PR2에서 화면에 렌더하지 않는다(페드루 PO 판정, 2026-09-04
+          05:37Z) — backend/app/routers/channel_posts.py에 unpublish 엔드포인트
+          자체가 없어(grep 0건, site-posts만 있음) 게이팅만 선 죽은 버튼을 표면에
+          두면 안 된다는 판단. canUnpublish 변수·테스트는 남겨 둔다(BE 경로가 오면
+          이 조건 하나로 버튼을 다시 켠다 — 예약 명령 취소+발행 글 회수 두 경로,
+          PR#3769 뒤 디디군 착수 예정). */}
       <div className="space-y-2">
         <div className="flex gap-2">
           <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
             {publishing ? t('publishPendingCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
           </Button>
-          {view.status === 'published' ? (
-            <Button variant="outline" disabled={!canUnpublish} data-testid="channel-post-unpublish-button">
-              {t('unpublishCta')}
-            </Button>
-          ) : null}
         </div>
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
             {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
           </p>
         ) : null}
-        {view.status === 'published' && !canUnpublish ? (
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
-            {t('unpublishDisabledReason')}
-          </p>
-        ) : null}
         {publishResult ? (
-          <Alert variant={publishResult.type === 'error' ? 'destructive' : 'default'} role={publishResult.type === 'error' ? 'alert' : 'status'}>
-            <AlertDescription>{publishResult.type === 'success' ? t('publishSuccess', { time: draft.published_at ? new Date(draft.published_at).toLocaleString() : '' }) : publishResult.text}</AlertDescription>
+          <Alert variant={publishResult.type === 'error' ? 'destructive' : 'default'} role={publishResult.type === 'error' ? 'alert' : 'status'} data-testid="channel-post-publish-result">
+            <AlertDescription>
+              {publishResult.type === 'success'
+                ? t('publishSuccess', { time: draft.published_at ? new Date(draft.published_at).toLocaleString() : '' })
+                : publishResult.type === 'scheduled'
+                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? new Date(publishResult.scheduledAt).toLocaleString() : t('originAuthorUnknown') })
+                  : publishResult.text}
+            </AlertDescription>
           </Alert>
         ) : null}
       </div>

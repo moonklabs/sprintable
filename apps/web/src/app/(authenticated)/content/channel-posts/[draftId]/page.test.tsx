@@ -476,47 +476,22 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(btn.textContent).not.toContain(koMessages.content.publishDisabledReason);
   });
 
-  it('⭐발행 취소 버튼 — publication_status=published일 때만 렌더된다(그 외엔 아예 없음)', async () => {
-    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', publication_status: null } });
+  // 페드루 PO 판정(2026-09-04 05:37Z) — unpublish 엔드포인트가 BE에 없어(grep 0건)
+  // 게이팅만 선 죽은 버튼을 표면에 두지 않는다. canUnpublish 변수는 BE 선행(PR#3769
+  // 뒤)이 착지하면 이 자리를 다시 켜는 용도로 남겨 두되, 지금은 role·publication_status
+  // 어떤 조합이어도 버튼 자체가 렌더되지 않아야 한다.
+  it('⭐발행 취소 버튼 — PR2에서는 화면에 아예 렌더하지 않는다(publication_status=published+owner여도)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+    });
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
     });
     await flush();
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
-  });
-
-  it('⭐canUnpublish=false(member 권한) — 발행됨 상태에서 발행 취소 버튼이 비활성화되고 사유가 보인다', async () => {
-    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
-    stubFetch({
-      draftDetail: {
-        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
-        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
-      },
-    });
-    await act(async () => {
-      root.render(wrap(<ChannelPostEditPage />));
-    });
-    await flush();
-
-    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).not.toBeNull();
-  });
-
-  it('⭐canUnpublish=true(owner) — 발행 취소 버튼이 활성화되고 사유가 안 보인다', async () => {
-    stubFetch({
-      draftDetail: {
-        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
-        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
-      },
-    });
-    await act(async () => {
-      root.render(wrap(<ChannelPostEditPage />));
-    });
-    await flush();
-
-    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
   });
 
@@ -539,7 +514,10 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
   });
 
-  it('⭐발행 실패(예: CHANNEL_TEXT_TOO_LONG) — api-error로 파싱된 사람 말이 보인다', async () => {
+  // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG은 api-error.ts가 humanMessageKey를
+  // 일부러 비워 두고 max_length/current_length만 실어 오는 코드다 — page.tsx가 doc §5
+  // 표 그대로("500자 한도인데 517자입니다") 값을 실제로 보간해 조립하는지 pin한다.
+  it('⭐발행 실패(CHANNEL_TEXT_TOO_LONG) — max_length/current_length가 실제 값으로 보간된 문구가 보인다', async () => {
     stubFetch({
       draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
       onPublish: () => ({ status: 422, body: { detail: { code: 'CHANNEL_TEXT_TOO_LONG', message: '한도 초과', max_length: 500, current_length: 517 } } }),
@@ -555,10 +533,56 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
 
-    // CHANNEL_TEXT_TOO_LONG은 api-error.ts에서 humanMessageKey를 일부러 비워 둔다(page.tsx가
-    // max_length/current_length로 문구를 조립해야 하는데 이 조각은 아직 그 조립을 안 함 —
-    // ②-c 몫). 지금은 서버 원문 메시지(humanMessageFallback)로 fallback되는 것만 확인한다.
-    expect(container.textContent).toContain('한도 초과');
+    expect(container.textContent).toContain('500자 한도인데 517자입니다');
+  });
+
+  it('⭐발행 실패(CHANNEL_RATE_LIMITED) — reset_at이 실제 시각으로 보간된 문구가 보인다', async () => {
+    const resetAt = '2026-09-05T00:00:00Z';
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 429, body: { detail: { code: 'CHANNEL_RATE_LIMITED', message: '한도 초과', reset_at: resetAt } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain(new Date(resetAt).toLocaleString());
+  });
+
+  // story #3414(PR#3769, 리뷰중) 대조 — 페드루 PO 지적(2026-09-04 05:44Z): scheduled=true
+  // 응답은 permalink/external_id/published_at 셋 다 null이 정상이다(즉시 경로가 아니라
+  // command만 만들고 워커가 나중에 실행). 그 null을 "발행됨"으로 그리면 AC2 규율(모르는
+  // 것을 아는 것처럼 안 보여준다) 위반이라 scheduled 분기가 permalink 분기보다 먼저 와야
+  // 한다 — 이 테스트가 그 순서를 pin한다.
+  it('⭐발행 성공(예약, story #3414) — scheduled=true면 published_at이 null이어도 T7이 아니라 예약 안내가 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({
+        status: 200,
+        body: { permalink: null, external_id: null, published_at: null, version_id: 'v1', scheduled: true, command_id: 'cmd-1', scheduled_at: '2026-09-05T00:00:00Z' },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    const result = container.querySelector('[data-testid="channel-post-publish-result"]');
+    expect(result?.textContent).toContain(new Date('2026-09-05T00:00:00Z').toLocaleString());
   });
 
   it('canPublish=false면 발행 버튼을 눌러도 아무 일도 안 일어난다(handlePublish 가드)', async () => {
