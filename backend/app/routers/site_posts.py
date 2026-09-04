@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -92,6 +92,17 @@ class CreateSitePostDraftVersionRequest(BaseModel):
     # B1 처방과 동형 센티널 계약, 아래 엔드포인트 참고).
     connection_id: uuid.UUID | None = None
 
+    # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — Pydantic min_length은 strip을
+    # 안 해 공백만("   ")도 통과·저장됐다. conversations.py:1259-1265 정본 패턴 그대로
+    # 미러(새 패턴 발명 0) — 공백만이면 기존 min_length과 동일하게 422.
+    @field_validator("title", "slug", "summary")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
 
 class SitePostDraftVersionResponse(BaseModel):
     draft_id: uuid.UUID
@@ -168,6 +179,16 @@ class PublishSitePostRequest(BaseModel):
     summary: str = Field(..., min_length=1, max_length=1000)
     tags: list[str] = Field(default_factory=list)
     body_md: str = Field(..., min_length=1)
+
+    # story #3437(후속 묶음) — CreateSitePostDraftVersionRequest와 같은 처방(conversations.py
+    # 정본 미러, body_md는 자유서식이라 범위 밖).
+    @field_validator("title", "slug", "summary")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
 
 
 class SitePostResponse(BaseModel):

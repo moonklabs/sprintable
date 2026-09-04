@@ -35,6 +35,8 @@ from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate, set_gate_status
 from app.models.publication_command import PublicationCommand
+from app.models.site_post_draft import SitePostDraft
+from app.models.site_post_version import SitePostVersion
 from app.services.channel_adapters import get_channel_adapter
 from app.services.channel_connection import decrypt_for_use
 from app.services.gate_seal import (
@@ -393,10 +395,24 @@ async def create_channel_post_draft_version(
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
 
+    resolved_source_site_post_version_id: uuid.UUID | None = None
     if source_content_item_id is not None:
         content_item = await get_site_post_draft(db, org_id=org_id, draft_id=source_content_item_id)
         if content_item is None:
             raise ChannelPostSourceContentItemNotFoundError(source_content_item_id=source_content_item_id)
+        # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — 이 시점의 원문 latest
+        # version.id를 고정 저장(버전 축, source_content_item_id의 draft 축과 별개).
+        # source_content_item_id처럼 **초안 생성 시에만** 반영 — 편집(기존 draft) 호출은
+        # source_content_item_id 자체가 무시되므로(위 docstring) 이 값도 함께 무시된다.
+        latest_source_version = (await db.execute(
+            select(SitePostVersion)
+            .where(SitePostVersion.draft_id == source_content_item_id)
+            .order_by(SitePostVersion.version.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        resolved_source_site_post_version_id = (
+            latest_source_version.id if latest_source_version is not None else None
+        )
 
     draft = (await db.execute(
         select(ChannelPostDraft)
@@ -411,6 +427,7 @@ async def create_channel_post_draft_version(
             id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id,
             channel=connection.channel, connection_id=connection_id,
             source_content_item_id=source_content_item_id,
+            source_site_post_version_id=resolved_source_site_post_version_id,
         )
         db.add(draft)
         await db.flush()
@@ -554,6 +571,39 @@ async def list_channel_post_draft_versions(
         .order_by(ChannelPostVersion.version.asc())
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+async def get_source_titles_and_latest_versions(
+    db: AsyncSession, *, org_id: uuid.UUID, content_item_ids: set[uuid.UUID],
+) -> dict[uuid.UUID, tuple[str, uuid.UUID]]:
+    """story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — `source_content_item_id`가
+    있는 channel_post_drafts 행들의 원문(제목 + 현재 latest version.id)을 배치 1건으로
+    조회한다. `campaigns.list_content_items_for_campaign`의 latest-version 서브쿼리와
+    동형(campaign_id 필터 대신 draft_id IN 필터) — 새 조인 패턴 발명 0.
+
+    반환: {content_item_id: (title, latest_version_id)}. content_item_ids가 비어 있으면
+    쿼리 자체를 안 돈다(N+1 방지 — 소스 없는 초안만 있는 페이지에서 빈 쿼리 스킵)."""
+    if not content_item_ids:
+        return {}
+    latest_version_ids = (
+        select(
+            SitePostVersion.draft_id,
+            func.max(SitePostVersion.version).label("max_version"),
+        )
+        .group_by(SitePostVersion.draft_id)
+        .subquery()
+    )
+    stmt = (
+        select(SitePostDraft.id, SitePostVersion.title, SitePostVersion.id)
+        .join(latest_version_ids, latest_version_ids.c.draft_id == SitePostDraft.id)
+        .join(
+            SitePostVersion,
+            (SitePostVersion.draft_id == latest_version_ids.c.draft_id)
+            & (SitePostVersion.version == latest_version_ids.c.max_version),
+        )
+        .where(SitePostDraft.org_id == org_id, SitePostDraft.id.in_(content_item_ids))
+    )
+    return {row[0]: (row[1], row[2]) for row in (await db.execute(stmt)).all()}
 
 
 async def list_channel_post_drafts(

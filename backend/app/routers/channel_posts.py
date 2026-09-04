@@ -41,6 +41,7 @@ from app.services.channel_posts import (
     create_channel_post_draft_version,
     get_channel_post_draft,
     get_site_post_draft,
+    get_source_titles_and_latest_versions,
     is_agent_caller,
     list_channel_post_draft_versions,
     list_channel_post_drafts,
@@ -115,6 +116,17 @@ class CreateChannelPostDraftVersionRequest(BaseModel):
     connection_id: uuid.UUID
     text: str = Field(..., min_length=1)
     link_url: str | None = None
+
+    # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — conversations.py:1259-1265 정본
+    # 미러(새 패턴 발명 0). 채널별 글자수 한도(_validate_text_length, 서비스 계층)는 이
+    # strip 뒤 값을 그대로 잰다 — 공백 패딩이 한도 판정을 왜곡하지 않게 된다(부수 개선).
+    @field_validator("text")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
     # story #3437(AC2·AC5, 페드루 PO 確定 2026-09-04) — 이 채널 변형이 파생된 원문
     # (content_item=site_post_drafts.id). 휴먼·에이전트 동형(둘 다 받는다) — 초안 생성
     # 시에만 반영, 편집(기존 draft) 호출은 무시된다(서비스 계층 docstring 참고).
@@ -204,6 +216,16 @@ class ChannelPostDraftListItem(BaseModel):
     # story #3437(ⓒ, 페드루 PO 確定 2026-09-04) — 단건/목록 응답에 파생 원문 노출.
     # 없으면 null(소스 없는 단독 채널 초안, 기존 회귀 그대로).
     source_content_item_id: uuid.UUID | None = None
+    # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — 원문 제목(배치조회, campaign_name과
+    # 동일 클래스 갭 처방). source_content_item_id가 null이면 이것도 항상 null.
+    source_title: str | None = None
+    # 이 변형이 파생된 시점의 원문 latest version.id(버전 축, 초안 생성 시 고정 — 편집으로는
+    # 안 바뀐다).
+    source_site_post_version_id: uuid.UUID | None = None
+    # 원문의 **지금** latest version.id(배치조회, 매 응답마다 최신값). source_site_post_
+    # version_id와 다르면 "원문이 파생 이후 개정됨" — 서버는 판정 라벨 없이 두 값만 낸다,
+    # 비교·배지 문구는 FE 몫(§11-5).
+    source_current_site_post_version_id: uuid.UUID | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -516,14 +538,26 @@ async def get_channel_post_image_for_version_endpoint(
 
 def _to_draft_list_item(
     row: tuple,
+    source_titles: dict[uuid.UUID, tuple[str, uuid.UUID]] | None = None,
 ) -> ChannelPostDraftListItem:
     """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
     번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를
-    똑같이 지원하는 것과 동형 사상)."""
+    똑같이 지원하는 것과 동형 사상).
+
+    story #3437(후속 묶음) — `source_titles`는 {content_item_id: (title, latest_
+    version_id)} 배치조회 결과(호출부가 미리 구해 넘긴다 — 이 함수 자체는 쿼리를
+    안 돈다, N+1 방지 원칙 유지). None/미스=소스 없거나 조회 결과에 없음(둘 다 null로
+    떨어진다 — "모른다≠다르다" 원칙과 달리 여긴 순수 배치 미스 표현)."""
     (
         draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
         latest_command, latest_image,
     ) = row
+    source_title: str | None = None
+    source_current_site_post_version_id: uuid.UUID | None = None
+    if draft.source_content_item_id is not None and source_titles is not None:
+        entry = source_titles.get(draft.source_content_item_id)
+        if entry is not None:
+            source_title, source_current_site_post_version_id = entry
     command_status = latest_command.status if latest_command else None
     publication_status = latest_pub.status if latest_pub else None
     # story 620beefc(AC5·§17-15, 페드루 PO 決定) — 판정식은 이 자리 한 곳에서만.
@@ -569,6 +603,9 @@ def _to_draft_list_item(
         image_was_converted=latest_image.was_converted if latest_image else None,
         processing_kind=processing_kind,
         source_content_item_id=draft.source_content_item_id,
+        source_title=source_title,
+        source_site_post_version_id=draft.source_site_post_version_id,
+        source_current_site_post_version_id=source_current_site_post_version_id,
     )
 
 
@@ -637,7 +674,11 @@ async def list_channel_post_drafts_endpoint(
         db, org_id=org_id, limit=limit, offset=offset,
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
     )
-    return [_to_draft_list_item(row) for row in rows]
+    source_titles = await get_source_titles_and_latest_versions(
+        db, org_id=org_id,
+        content_item_ids={row[0].source_content_item_id for row in rows if row[0].source_content_item_id},
+    )
+    return [_to_draft_list_item(row, source_titles) for row in rows]
 
 
 @router.get(
@@ -661,7 +702,11 @@ async def get_channel_post_draft_detail_endpoint(
     rows = await list_channel_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1)
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
-    return _to_draft_list_item(rows[0])
+    source_titles = await get_source_titles_and_latest_versions(
+        db, org_id=org_id,
+        content_item_ids={rows[0][0].source_content_item_id} if rows[0][0].source_content_item_id else set(),
+    )
+    return _to_draft_list_item(rows[0], source_titles)
 
 
 @router.get(
@@ -689,7 +734,12 @@ async def list_content_item_variants_endpoint(
     rows = await list_channel_post_drafts(
         db, org_id=org_id, source_content_item_id=content_item_id, limit=200,
     )
-    return [_to_draft_list_item(row) for row in rows]
+    # story #3437(후속 묶음) — 이 엔드포인트는 filter 자체가 content_item_id 단건이라
+    # source_content_item_id가 전부 이 값 하나 — 배치라 해도 실질 단건 조회.
+    source_titles = await get_source_titles_and_latest_versions(
+        db, org_id=org_id, content_item_ids={content_item_id},
+    )
+    return [_to_draft_list_item(row, source_titles) for row in rows]
 
 
 @router.get(
