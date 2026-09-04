@@ -13,11 +13,11 @@ import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function wrap(locale: 'ko' | 'en', node: React.ReactNode) {
+function wrap(locale: 'ko' | 'en', node: React.ReactNode, open?: boolean) {
   const messages = locale === 'ko' ? koMessages : enMessages;
   return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
-      <SidebarProvider>{node}</SidebarProvider>
+      <SidebarProvider open={open}>{node}</SidebarProvider>
     </NextIntlClientProvider>
   );
 }
@@ -67,5 +67,25 @@ describe('SidebarRail — aria-label·title(story 3436)', () => {
     const rail = container.querySelector('[data-slot="sidebar-rail"]');
     expect(rail?.getAttribute('aria-label')).toBe(koMessages.nav.toggleSidebar);
     expect(rail?.getAttribute('title')).toBe(koMessages.nav.toggleSidebar);
+  });
+});
+
+// story 3436(묶음 9, PO 지적 2026-09-04 20:29Z) — 접근 이름은 있었지만 펼침/접힘 상태를
+// 스크린리더가 못 읽었다. open true/false 두 상태 aria-expanded 값 pin.
+describe('SidebarTrigger/SidebarRail — aria-expanded(story 3436 묶음 9)', () => {
+  it('⭐open=true(기본값)면 SidebarTrigger·SidebarRail 둘 다 aria-expanded="true"', async () => {
+    await act(async () => { root.render(wrap('ko', <><SidebarTrigger /><SidebarRail /></>, true)); });
+    const trigger = container.querySelector('[data-slot="sidebar-trigger"]');
+    const rail = container.querySelector('[data-slot="sidebar-rail"]');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(rail?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('open=false면 SidebarTrigger·SidebarRail 둘 다 aria-expanded="false"', async () => {
+    await act(async () => { root.render(wrap('ko', <><SidebarTrigger /><SidebarRail /></>, false)); });
+    const trigger = container.querySelector('[data-slot="sidebar-trigger"]');
+    const rail = container.querySelector('[data-slot="sidebar-rail"]');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(rail?.getAttribute('aria-expanded')).toBe('false');
   });
 });

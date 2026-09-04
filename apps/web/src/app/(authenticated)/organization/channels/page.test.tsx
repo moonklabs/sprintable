@@ -138,7 +138,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await mount('member');
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
     expect(disconnectBtn).toBeUndefined();
-    expect(container.textContent).toContain('owner에게 알리기');
+    expect(container.textContent).toContain('owner만 할 수 있는 작업입니다');
   });
 
   it('member도 연결 시험은 할 수 있다', async () => {
@@ -227,7 +227,7 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
     await mount('member');
     const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
     expect(registerBtn).toBeUndefined();
-    expect(container.textContent).toContain('owner에게 알리기');
+    expect(container.textContent).toContain('owner만 할 수 있는 작업입니다');
   });
 });
 
@@ -259,7 +259,7 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
-    expect(container.textContent).toContain('owner에게 알리기');
+    expect(container.textContent).toContain('owner만 할 수 있는 작업입니다');
   });
 
   it('⭐sandbox 「연결 만들기」를 누르면 BFF POST 성공 뒤 리로드 없이 새 연결 행이 추가된다', async () => {
