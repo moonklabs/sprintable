@@ -623,6 +623,53 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(result?.textContent).toContain(new Date('2026-09-05T00:00:00Z').toLocaleString());
   });
 
+  // story #3402 AC11(doc §5-1) — "왜 막혔나"(reason)와 "밖으로 나갔나"(externalImpact)는
+  // 서로 다른 텍스트 노드로 각각 존재해야 한다(카디르 QA 계획 ④ — 겹치는 단어로 한 문장에
+  // 뭉쳐 정규식 하나로 통과하는 함정 방지).
+  it('⭐AC11 — 4xx로 막힌 실패(예: CONNECTION_NOT_ACTIVE)는 "Threads에 아무것도 보내지 않았다"가 별도 노드로 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 409, body: { detail: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    const reason = container.querySelector('[data-testid="channel-post-publish-error-reason"]');
+    const impact = container.querySelector('[data-testid="channel-post-publish-external-impact"]');
+    expect(reason?.textContent).toBe(koMessages.content.errorChannelConnectionNotActive);
+    expect(impact?.textContent).toBe(koMessages.content.channelPostsExternalImpactNotSent);
+    // 두 문장이 진짜 별개 DOM 노드인지(하나로 뭉쳐 겹치는 키워드만 있는 게 아닌지) 확인.
+    expect(reason).not.toBe(impact);
+  });
+
+  it('⭐AC11 — 502(PROVIDER_ERROR)는 "요청은 나갔다" 별도 안내가 보인다(4xx와 다른 문구)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 502, body: { detail: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-publish-external-impact"]')?.textContent)
+      .toBe(koMessages.content.channelPostsExternalImpactReachedProvider);
+  });
+
   it('canPublish=false면 발행 버튼을 눌러도 아무 일도 안 일어난다(handlePublish 가드)', async () => {
     stubFetch({ draftDetail: { gate_status: null } });
     await act(async () => {

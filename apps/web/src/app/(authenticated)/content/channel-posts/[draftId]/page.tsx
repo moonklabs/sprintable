@@ -11,6 +11,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
+import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
 
 /**
@@ -110,7 +111,10 @@ export default function ChannelPostEditPage() {
   // 없는 쪽은 발행 취소이지 발행 자체가 아니다, handleUnpublish만 ConfirmDialog를 쓴다).
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<
-    { type: 'success' } | { type: 'scheduled'; scheduledAt?: string } | { type: 'error'; text: string; raw?: string } | null
+    | { type: 'success' }
+    | { type: 'scheduled'; scheduledAt?: string }
+    | { type: 'error'; text: string; raw?: string; externalImpact?: ReturnType<typeof describeExternalImpact> }
+    | null
   >(null);
 
   useEffect(() => {
@@ -347,7 +351,11 @@ export default function ChannelPostEditPage() {
           : info.kind === 'rate_limited' && info.resetAt
             ? t('channelPostsRateLimitedUntil', { time: new Date(info.resetAt).toLocaleString() })
             : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
-        setPublishResult({ type: 'error', text, raw: info.raw });
+        // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
+        // 는 뭉치면 안 되는 별개 사실이다. res.status가 실제 HTTP status다(로컬 검증
+        // 실패라 res 자체가 없는 catch 분기는 별도 — 그쪽은 애초에 네트워크를 안 탔으니
+        // "안 나갔다"가 항상 참이라 externalImpact를 안 싣는다, 아래 catch 참고).
+        setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(res.status) });
       }
     } catch {
       setPublishResult({ type: 'error', text: t('publishFailed') });
@@ -537,7 +545,22 @@ export default function ChannelPostEditPage() {
                 ? t('publishSuccess', { time: draft.published_at ? new Date(draft.published_at).toLocaleString() : '' })
                 : publishResult.type === 'scheduled'
                   ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? new Date(publishResult.scheduledAt).toLocaleString() : t('originAuthorUnknown') })
-                  : publishResult.text}
+                  : (
+                    // story #3402 AC11(doc §5-1) — "왜 막혔나"(text)와 "밖으로 나갔나"
+                    // (externalImpact)는 서로 다른 사실이라 두 <p>로 따로 둔다(카디르 QA
+                    // 계획 ④ — 겹치는 단어로 한 문장에 뭉쳐 정규식 하나로 통과하는 함정
+                    // 방지, 별도 텍스트 노드로 개별 assert 가능하게).
+                    <>
+                      <p data-testid="channel-post-publish-error-reason">{publishResult.text}</p>
+                      {publishResult.externalImpact ? (
+                        <p data-testid="channel-post-publish-external-impact">
+                          {publishResult.externalImpact === 'reached_provider'
+                            ? t('channelPostsExternalImpactReachedProvider')
+                            : t('channelPostsExternalImpactNotSent')}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
             </AlertDescription>
           </Alert>
         ) : null}
