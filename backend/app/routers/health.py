@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.database import get_db
 from app.services import realtime_readiness
 
@@ -32,11 +33,15 @@ async def health_check(response: Response, db: AsyncSession = Depends(get_db)):
     except Exception as exc:
         db_status = f"error: {type(exc).__name__}"
 
+    # story #3418(AC2) — rate_limit_backend를 이 사람이 보는 표면에 노출한다. 앱은 인스턴스가
+    # 몇 개인지 모르므로 이 값만으로 "여러 인스턴스+memory"를 스스로 판정할 수는 없다(그건
+    # startup 경고, `warn_if_rate_limit_backend_is_memory()`의 몫) — 여기서는 있는 그대로의
+    # 설정값을 실어 사람이 인스턴스 수와 대조할 수 있게만 한다.
     if db_status != "ok":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return {"status": "error", "version": "v2", "db": db_status}
+        return {"status": "error", "version": "v2", "db": db_status, "rate_limit_backend": settings.rate_limit_backend}
 
-    return {"status": "ok", "version": "v2", "db": db_status}
+    return {"status": "ok", "version": "v2", "db": db_status, "rate_limit_backend": settings.rate_limit_backend}
 
 
 @router.get("/ready")

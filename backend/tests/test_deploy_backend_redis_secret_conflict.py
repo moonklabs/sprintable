@@ -409,6 +409,21 @@ def test_deploy_backend_prod_excludes_plain_redis_url():
     assert "REDIS_URL" not in result
 
 
+def test_deploy_backend_dev_includes_rate_limit_backend_redis():
+    """story #3418(카디르 실측 2026-09-04) — dev는 REDIS_URL과 같은 분기로
+    RATE_LIMIT_BACKEND=redis도 싣는다(REDIS_URL만 있고 이게 없으면 rate_limiter.py::
+    get_rate_limiter가 기본값 memory로 계속 남는다)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "RATE_LIMIT_BACKEND=redis" in result
+
+
+def test_deploy_backend_prod_excludes_rate_limit_backend():
+    """AC1 — prod는 선생님 결재 전까지 손대지 않는다(REDIS_URL과 동일 게이트에 묶었으니
+    자동으로 같이 빠진다 — 그 사실을 이 테스트가 고정)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "RATE_LIMIT_BACKEND" not in result
+
+
 def test_deploy_backend_dev_includes_admin_operator_env_vars():
     """story #2777 — dev는 ADMIN_OPERATOR_AUDIENCE/ALLOWLIST를 plain env로 넘긴다."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
@@ -555,7 +570,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story 194acb63 — 베이스 문자열 맨 끝(SUPPORT_ESCALATION_TARGET_PROJECT_SLUG 다음)에
         # 이어붙는다 — REDIS_URL 등 조건부 append는 그 뒤.
         "PUBLIC_SITE_BASE_URL=https://sprintable.ai,"
-        "REDIS_URL=redis://10.164.120.243:6379,"
+        "REDIS_URL=redis://10.164.120.243:6379,RATE_LIMIT_BACKEND=redis,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
         "GCS_AVATARS_BUCKET=sprintable-avatars-dev"

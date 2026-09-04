@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI):
     from app.services.event_broker import check_outbox_dual_publish_config
     from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
+    from app.services.rate_limiter import warn_if_rate_limit_backend_is_memory
 
     # story c4c72eb1(E-ARCH GCE 이전) PR-A: asyncio.Event는 최초 .wait()/.set() 시점의 실행
     # 루프에 바인딩된다 — 테스트가 TestClient(app)로 lifespan을 여러 번(서로 다른 루프로) 태우는
@@ -86,6 +87,7 @@ async def lifespan(app: FastAPI):
     check_cron_secret_config()  # story #2072: non-local + CRON_SECRET 미설정 fail-closed.
     check_outbox_dual_publish_config()  # story #2138: outbox + dual_publish/dispatch 동시 fail-closed.
     check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
+    warn_if_rate_limit_backend_is_memory()  # story #3418: 인스턴스 다중+memory=레이트리밋 인스턴스별 분리, 경고만(fail-closed 아님).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
