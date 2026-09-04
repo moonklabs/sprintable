@@ -678,3 +678,136 @@ async def test_agent_can_set_source_but_still_cannot_approve_or_publish():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# --- #3453 AC3 후속(유나 §14-4/§14-5, 페드루 PO 確定 2026-09-05) — source_changed ------
+
+
+@pytest.mark.anyio
+async def test_source_changed_false_when_source_not_revised_since_derivation():
+    """원문이 파생 이후 개정 안 됨 — source_site_post_version_id == source_current_
+    site_post_version_id → source_changed=False(같음, "모른다" 아님)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
+            channel_story_id = await _seed_story(s, org_id, project_id, title="채널")
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            content_item_id = await _create_site_post_draft(
+                client, org_id=org_id, work_item_id=blog_story_id, slug="unrevised-post",
+            )
+            r_variant = await _create_channel_post_draft(
+                client, org_id=org_id, work_item_id=channel_story_id, connection_id=connection_id,
+                source_content_item_id=content_item_id,
+            )
+            assert r_variant.status_code == 201, r_variant.text
+            channel_draft_id = r_variant.json()["draft_id"]
+
+            r_detail = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{channel_draft_id}")
+            assert r_detail.status_code == 200, r_detail.text
+            body = r_detail.json()
+            assert body["source_site_post_version_id"] is not None
+            assert body["source_site_post_version_id"] == body["source_current_site_post_version_id"]
+            assert body["source_changed"] is False
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_source_changed_true_when_source_revised_since_derivation():
+    """원문이 파생 이후 새 버전을 냄 — source_site_post_version_id(파생 시점 고정)
+    != source_current_site_post_version_id(지금 최신) → source_changed=True."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
+            channel_story_id = await _seed_story(s, org_id, project_id, title="채널")
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            content_item_id = await _create_site_post_draft(
+                client, org_id=org_id, work_item_id=blog_story_id, slug="revised-post",
+            )
+            r_variant = await _create_channel_post_draft(
+                client, org_id=org_id, work_item_id=channel_story_id, connection_id=connection_id,
+                source_content_item_id=content_item_id,
+            )
+            assert r_variant.status_code == 201, r_variant.text
+            channel_draft_id = r_variant.json()["draft_id"]
+
+            # 원문 새 버전(같은 work_item_id → 같은 draft에 v2 upsert, story #3369 계약).
+            await _create_site_post_draft(
+                client, org_id=org_id, work_item_id=blog_story_id, slug="revised-post",
+            )
+
+            r_detail = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{channel_draft_id}")
+            assert r_detail.status_code == 200, r_detail.text
+            body = r_detail.json()
+            assert body["source_site_post_version_id"] is not None
+            assert body["source_current_site_post_version_id"] is not None
+            assert body["source_site_post_version_id"] != body["source_current_site_post_version_id"]
+            assert body["source_changed"] is True
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_source_changed_none_when_source_site_post_version_id_unknown():
+    """레거시 파생분(#3437 후속 착지 前 생성 — source_site_post_version_id가 null)은
+    "모른다≠다르다" 원칙으로 source_changed=None(True/False 어느 쪽도 단정 안 함)."""
+    from app.main import app
+    from sqlalchemy import text as sa_text
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
+            channel_story_id = await _seed_story(s, org_id, project_id, title="채널")
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            content_item_id = await _create_site_post_draft(
+                client, org_id=org_id, work_item_id=blog_story_id, slug="legacy-post",
+            )
+            r_variant = await _create_channel_post_draft(
+                client, org_id=org_id, work_item_id=channel_story_id, connection_id=connection_id,
+                source_content_item_id=content_item_id,
+            )
+            assert r_variant.status_code == 201, r_variant.text
+            channel_draft_id = r_variant.json()["draft_id"]
+
+        # 레거시 재현 — 직접 DDL로 source_site_post_version_id를 null화(API 경로엔 없음,
+        # #3437 후속 이전에 만들어진 실제 옛 행의 상태를 시뮬레이션).
+        async with Session() as s:
+            await s.execute(sa_text(
+                "UPDATE channel_post_drafts SET source_site_post_version_id = NULL WHERE id = :id",
+            ), {"id": channel_draft_id})
+            await s.commit()
+
+        async with _client_for(app) as client:
+            r_detail = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{channel_draft_id}")
+            assert r_detail.status_code == 200, r_detail.text
+            body = r_detail.json()
+            assert body["source_site_post_version_id"] is None
+            assert body["source_current_site_post_version_id"] is not None
+            assert body["source_changed"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
