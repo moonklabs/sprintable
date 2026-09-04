@@ -31,6 +31,7 @@ from app.services.site_posts import (
     SitePostSealMissingError,
     SitePostVersionNotFoundError,
     create_site_post_draft_version,
+    get_campaign,
     get_site_post_draft,
     get_site_post_publication_info,
     is_agent_caller,
@@ -143,6 +144,16 @@ class SitePostVersionHistoryItem(BaseModel):
     author_member_id: uuid.UUID
     author_kind: str
     created_at: str
+    # story #3457(Phase1·FE, 페드루 PO 確定 2026-09-04) — campaign_id는 이미 쓰기(저장
+    # POST 캐리포워드, story #3437)만 있고 이 읽기 응답엔 필드 자체가 없어 "붙인 뒤
+    # 새로고침하면 어느 campaign인지 못 보는" 갭이었다. campaign_id는 draft 축(story
+    # #3437) — 버전마다 다르지 않다, 그래도 이 계약이 버전 단위 응답이라 매 항목에
+    # 그대로 싣는다(FE가 draft를 별도로 안 들고 다녀도 되게). campaign_name은 표시용
+    # (campaign_id만 있으면 FE가 campaign 목록을 따로 조회해야 이름을 그릴 수 있다 —
+    # #3457 GET .../campaigns 신설이 그 조회를 가능하게 하지만, 이 응답 자체에 이름을
+    # 실으면 그 왕복이 아예 불요해진다).
+    campaign_id: uuid.UUID | None = None
+    campaign_name: str | None = None
 
 
 class PublishSitePostRequest(BaseModel):
@@ -335,13 +346,22 @@ async def list_site_post_draft_version_history(
     if draft is None:
         raise HTTPException(status_code=404, detail="draft not found")
 
+    # story #3457 — campaign_id는 draft 축(버전마다 안 바뀐다)이라 루프 밖에서 한 번만
+    # 조회한다. 존재 비노출 관례상 campaign이 그새 지워졌으면(이례적) None으로 안전
+    # 폴백(campaign_id 자체는 그대로 실어 FE가 상황을 알 수 있게 — 지어내지 않는다,
+    # campaign_name만 모른다는 뜻).
+    campaign_name: str | None = None
+    if draft.campaign_id is not None:
+        campaign = await get_campaign(db, org_id=org_id, campaign_id=draft.campaign_id)
+        campaign_name = campaign.name if campaign is not None else None
+
     versions = await list_site_post_draft_versions(db, draft_id=draft_id)
     return [
         SitePostVersionHistoryItem(
             version_id=v.id, version=v.version, slug=draft.slug, source_story_id=draft.work_item_id,
             title=v.title, lang=v.lang, summary=v.summary, tags=v.tags, body_md=v.body_md,
             body_sha256=v.body_sha256, author_member_id=v.author_member_id, author_kind=v.author_kind,
-            created_at=v.created_at.isoformat(),
+            created_at=v.created_at.isoformat(), campaign_id=draft.campaign_id, campaign_name=campaign_name,
         )
         for v in versions
     ]

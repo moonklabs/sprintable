@@ -35,6 +35,15 @@ async def get_campaign(db: AsyncSession, *, org_id: uuid.UUID, campaign_id: uuid
     )).scalar_one_or_none()
 
 
+async def list_campaigns(db: AsyncSession, *, org_id: uuid.UUID) -> list[Campaign]:
+    """story #3457(Phase1·FE, 페드루 PO 確定 2026-09-04) — "기존 campaign 선택"
+    드롭다운 데이터원. org 전체·created_at desc(신규 campaign이 먼저 보이게) —
+    페이지네이션 없음(org당 campaign 수가 작아 지금은 불요, 필요해지면 후속)."""
+    return list((await db.execute(
+        select(Campaign).where(Campaign.org_id == org_id).order_by(Campaign.created_at.desc())
+    )).scalars().all())
+
+
 async def create_campaign(
     db: AsyncSession,
     *,
