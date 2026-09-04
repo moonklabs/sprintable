@@ -89,6 +89,15 @@ interface ChannelPostDraftDetail {
   // story 15e481ce(#3453 AC2, 3437 위) — 이 채널 변형이 파생된 원문(site-posts draft
   // id). 없으면 null(소스 없는 단독 채널 초안, 정상값 — 유나 §14-3 "null이 정상값").
   source_content_item_id?: string | null;
+  // story #3457 후속(BE #3817 착지분) — 원문 제목(배치조회, 이 필드 하나로 별도 왕복
+  // 제거). source_content_item_id가 null이면 이것도 항상 null.
+  source_title?: string | null;
+  // 이 변형이 파생된 시점의 원문 latest version.id(버전 축, 초안 생성 시 고정).
+  source_site_post_version_id?: string | null;
+  // 원문의 지금 latest version.id(배치조회, 매 응답마다 최신값). 두 값이 다르면(둘 다
+  // non-null일 때만 판정 — "모른다≠다르다") "원문이 파생 이후 개정됨" — 서버는 판정
+  // 라벨 없이 두 값만 낸다, 배지는 화면 몫(§11-5).
+  source_current_site_post_version_id?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -198,11 +207,6 @@ export default function ChannelPostEditPage() {
   const [limit, setLimit] = useState<PublishingLimitState>({ status: 'loading' });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  // story 15e481ce(#3453 AC2) — 유나 §14-2 안전 표기("같은 스토리의 글", "원문" 단정
-  // 아님). source_content_item_id가 있을 때만 그 원문의 제목을 하나 더 읽는다(단건
-  // GET이 없어 versions BFF의 최신판 title로 — 이미 있는 라우트 재사용, 신규 왕복 1개
-  // 뿐 — 목록이 아니라 상세라 §3-2 "행마다 왕복" 금지 대상이 아니다).
-  const [sourceTitle, setSourceTitle] = useState<string | undefined>(undefined);
 
   // story #3428(T3-M·§17-16) — 어댑터가 선언한 이미지 규격(연결 응답에서 읽음).
   // undefined="아직 모른다"(연결 조회 전/실패) — maxCount<=0과 동형으로 첨부 칸을
@@ -302,16 +306,6 @@ export default function ChannelPostEditPage() {
         if (latest) {
           setText(latest.text);
           setLinkUrl(latest.link_url ?? '');
-        }
-        if (d?.source_content_item_id) {
-          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${d.source_content_item_id}/versions`)
-            .then(async (r) => {
-              if (cancelled || !r.ok) return;
-              const json = (await r.json().catch(() => null)) as { data?: { title: string }[] } | null;
-              const sourceLatest = json?.data?.[json.data.length - 1];
-              if (sourceLatest) setSourceTitle(sourceLatest.title);
-            })
-            .catch(() => {});
         }
         if (d) {
           const connRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
@@ -891,14 +885,30 @@ export default function ChannelPostEditPage() {
         </p>
         {/* story 15e481ce(#3453 AC2, 유나 §14-2 안전 표기) — "원문" 단정이 아니라 "같은
             스토리의 글". source_content_item_id 없으면(정상값) 이 줄 자체를 안 그린다.
-            제목을 아직 못 읽었으면(sourceTitle undefined) id 자체는 있지만 이 왕복이
-            느릴 뿐이라 조용히 넘긴다(빈 문장을 지어내지 않는다). */}
-        {draft.source_content_item_id && sourceTitle ? (
-          <p className="text-sm text-muted-foreground" data-testid="channel-post-source-link">
-            {t('channelPostsSourceLabel')}{' '}
-            <Link href={`/content/${draft.source_content_item_id}`} className="underline">
-              {t('channelPostsSourceLinkText', { title: sourceTitle })}
-            </Link>
+            #3457 후속(BE #3817 착지분) — source_title이 이제 이 응답에 직접 실려 별도
+            왕복이 없다.
+            §11-5 staleness 배지(유나 정본 2026-09-04 20:57Z) — 이 줄 옆에만(칩 열이
+            아니라, "원문 줄 없는데 배지만"이 구조적으로 안 나오게). source_site_post_
+            version_id·source_current_site_post_version_id 둘 중 하나라도 null이면
+            "모른다≠다르다" 원칙으로 안 그린다(레거시 파생분=#3817 前 생성, 값 자체가
+            없다). */}
+        {draft.source_content_item_id && draft.source_title ? (
+          <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground" data-testid="channel-post-source-link">
+            <span>
+              {t('channelPostsSourceLabel')}{' '}
+              <Link href={`/content/${draft.source_content_item_id}`} className="underline">
+                {t('channelPostsSourceLinkText', { title: draft.source_title })}
+              </Link>
+            </span>
+            {draft.source_site_post_version_id && draft.source_current_site_post_version_id
+              && draft.source_site_post_version_id !== draft.source_current_site_post_version_id ? (
+              <span
+                className="inline-flex items-center rounded-full border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
+                data-testid="channel-post-source-changed-badge"
+              >
+                {t('channelPostsSourceChangedBadge')}
+              </span>
+            ) : null}
           </p>
         ) : null}
       </div>

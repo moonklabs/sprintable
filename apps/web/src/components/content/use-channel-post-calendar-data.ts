@@ -30,6 +30,10 @@ export interface ChannelPostCalendarItem {
   next_retry_at?: string | null;
   processing_kind?: string | null;
   text_preview?: string;
+  // story #3457 후속(BE #3817 착지분) — "같은 스토리의 글"(§14-2 안전 표기), 목록/상세와
+  // 같은 어휘. source_content_item_id 없으면(정상값) 카드가 이 줄 자체를 안 그린다.
+  source_content_item_id?: string | null;
+  source_title?: string | null;
 }
 
 export interface ChannelPostCalendarData {

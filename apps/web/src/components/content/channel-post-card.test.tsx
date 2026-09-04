@@ -164,4 +164,29 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
     });
     expect(container.querySelector('[data-testid="channel-post-sandbox-test-badge"]')).toBeNull();
   });
+
+  // story #3457 후속(유나 §14-2 안전 표기, PO 확定 2026-09-04 20:54Z) — 카드 전체가 이미
+  // <Link>라 원문 링크는 중첩 불가(a>a 무효 HTML) — 평문으로만. 배지는 상세 전용(유나
+  // 정본) — 카드엔 안 그린다.
+  it('source_content_item_id가 없으면(정상값) "같은 스토리의 글" 줄이 안 그려진다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChannelPostCard item={BASE_ITEM} displayTimezone="Asia/Seoul" />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-calendar-card-source"]')).toBeNull();
+  });
+
+  it('⭐source_title이 있으면 "같은 스토리의 글" 평문(링크 아님, 카드 자체가 이미 링크)이 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChannelPostCard
+          item={{ ...BASE_ITEM, source_content_item_id: 'site-1', source_title: '9월 실험 회고' }}
+          displayTimezone="Asia/Seoul"
+        />,
+      ));
+    });
+    const el = container.querySelector('[data-testid="channel-post-calendar-card-source"]');
+    expect(el?.textContent).toContain(koMessages.content.channelPostsSourceLabel);
+    expect(el?.textContent).toContain('9월 실험 회고');
+    expect(el?.querySelector('a')).toBeNull();
+  });
 });

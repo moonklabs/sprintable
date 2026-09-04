@@ -84,6 +84,10 @@ const DRAFT_DETAIL = {
   command_id: null as string | null,
   // story 15e481ce(#3453 AC2) — 이 채널 변형이 파생된 원문.
   source_content_item_id: null as string | null,
+  // story #3457 후속(BE #3817 착지분) — 원문 제목 + staleness 판정용 버전 id 2종.
+  source_title: null as string | null,
+  source_site_post_version_id: null as string | null,
+  source_current_site_post_version_id: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -134,9 +138,6 @@ function stubFetch(opts: {
   // command_status='pending').
   onRetry?: (commandId: string) => { status: number; body?: unknown };
   draftAfterRetry?: Record<string, unknown>;
-  // story 15e481ce(#3453 AC2) — draft.source_content_item_id가 있을 때 그 원문의 제목을
-  // 읽는 versions 조회(마지막 버전의 title).
-  sourceVersions?: { title: string }[];
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -157,10 +158,6 @@ function stubFetch(opts: {
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
-      }
-      if (opts.draftDetail?.source_content_item_id
-        && url === `/api/organizations/${ORG_ID}/site-posts/drafts/${opts.draftDetail.source_content_item_id}/versions`) {
-        return { ok: true, status: 200, json: async () => ({ data: opts.sourceVersions ?? [{ title: '9월 실험 회고' }], error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
         // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 자체가 실패하면 unpublishGate가
@@ -1999,7 +1996,11 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
 });
 
 // story 15e481ce(#3453 AC2, 유나 §14-2) — "같은 스토리의 글"(정방향, 상세 머리).
-describe('ChannelPostEditPage — 같은 스토리의 글(story 15e481ce AC2, §14-2)', () => {
+// story #3457 후속(BE #3817 착지분) — source_title이 이제 단건 GET 응답에 직접
+// 실려 별도 왕복(구 site-posts/drafts/{id}/versions)이 없다 — 이 스위트가 그 제거를
+// pin한다(네트워크 호출 수 assert). staleness 배지(유나 정본 2026-09-04 20:57Z)는
+// source_site_post_version_id/source_current_site_post_version_id 4개 상태 조합.
+describe('ChannelPostEditPage — 같은 스토리의 글 + 배지(story 15e481ce AC2·#3457 후속, §14-2/§11-5)', () => {
   it('source_content_item_id가 없으면(정상값) 이 줄 자체가 안 그려진다', async () => {
     stubFetch({});
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2007,10 +2008,9 @@ describe('ChannelPostEditPage — 같은 스토리의 글(story 15e481ce AC2, §
     expect(container.querySelector('[data-testid="channel-post-source-link"]')).toBeNull();
   });
 
-  it('⭐source_content_item_id가 있으면 원문 제목을 읽어 "같은 스토리의 글" 링크로 보인다("원문" 단정 아님)', async () => {
+  it('⭐source_title이 응답에 직접 실려 오면 별도 왕복 없이 "같은 스토리의 글" 링크로 보인다("원문" 단정 아님)', async () => {
     stubFetch({
-      draftDetail: { source_content_item_id: 'site-1' },
-      sourceVersions: [{ title: '9월 실험 회고' }],
+      draftDetail: { source_content_item_id: 'site-1', source_title: '9월 실험 회고' },
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
@@ -2019,6 +2019,53 @@ describe('ChannelPostEditPage — 같은 스토리의 글(story 15e481ce AC2, §
     expect(el?.textContent).toContain(koMessages.content.channelPostsSourceLabel);
     expect(el?.textContent).toContain('9월 실험 회고');
     expect(el?.querySelector('a')?.getAttribute('href')).toBe('/content/site-1');
+    // 구 워크어라운드(site-posts/drafts/{id}/versions)로의 호출이 0건 — 왕복 제거 pin.
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(urls.some((u) => u.includes('/site-posts/drafts/site-1/versions'))).toBe(false);
+  });
+
+  it('source_site_post_version_id가 null(레거시 파생분)이면 배지를 안 그린다(모른다≠다르다)', async () => {
+    stubFetch({
+      draftDetail: {
+        source_content_item_id: 'site-1', source_title: '9월 실험 회고',
+        source_site_post_version_id: null, source_current_site_post_version_id: 'v-current',
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-source-changed-badge"]')).toBeNull();
+  });
+
+  it('두 버전 id가 같으면(원문 안 바뀜) 배지를 안 그린다', async () => {
+    stubFetch({
+      draftDetail: {
+        source_content_item_id: 'site-1', source_title: '9월 실험 회고',
+        source_site_post_version_id: 'v-same', source_current_site_post_version_id: 'v-same',
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-source-changed-badge"]')).toBeNull();
+  });
+
+  it('⭐두 버전 id가 다르면(원문이 파생 이후 개정됨) 배지가 "같은 스토리의 글" 줄 옆에 뜬다', async () => {
+    stubFetch({
+      draftDetail: {
+        source_content_item_id: 'site-1', source_title: '9월 실험 회고',
+        source_site_post_version_id: 'v-old', source_current_site_post_version_id: 'v-new',
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const sourceLine = container.querySelector('[data-testid="channel-post-source-link"]');
+    const badge = sourceLine?.querySelector('[data-testid="channel-post-source-changed-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe(koMessages.content.channelPostsSourceChangedBadge);
+    // 유나 정본 — StatusChip 색 톤이 아니라 SandboxTestBadge와 같은 무채 테두리(border-border).
+    expect(badge?.className).toContain('border-border');
+    expect(badge?.className).not.toContain('bg-warning');
+    expect(badge?.className).not.toContain('bg-destructive');
   });
 });
 

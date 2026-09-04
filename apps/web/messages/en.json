@@ -2275,6 +2275,7 @@
     "channelPostsSandboxTestBadge": "Test",
     "channelPostsSourceLabel": "Same story as",
     "channelPostsSourceLinkText": "“{title}” (blog)",
+    "channelPostsSourceChangedBadge": "Changed since",
     "channelPostsCreateVariantLabel": "Create a channel variant from this post",
     "channelPostsCreateVariantSelectPlaceholder": "Choose a connection",
     "channelPostsCreateVariantCta": "Create variant",
