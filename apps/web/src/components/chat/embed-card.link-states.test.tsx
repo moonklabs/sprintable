@@ -13,13 +13,24 @@ import { NextIntlClientProvider } from 'next-intl';
 import { EmbedCard, getEntityHref } from './embed-card';
 import { translateEntityStatus } from './entity-status-labels';
 // story #2614 — artifact 몸통이 이제 ArtifactThumbnail(canvas 네임스페이스 useTranslations)을
-// 렌더하므로, 그 경로를 태우는 테스트만 NextIntlClientProvider로 감싼다(다른 기존 테스트는
-// i18n을 안 타 무변경).
+// 렌더한다.
+// story 3436(묶음 1, 2026-09-04) — EmbedCard가 내부적으로 항상 마운트하는 Dialog가 이제
+// DialogContent에서 useTranslations('common')을 쓴다(base-ui Dialog.Popup은 닫힌
+// 상태에서도 렌더 함수 자체는 돈다) — 그래서 이제 EmbedCard를 렌더하는 모든 테스트가
+// NextIntlClientProvider를 필요로 한다(예전엔 ArtifactThumbnail 경로만 필요했다).
 import koMessages from '../../../messages/ko.json';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
+
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 let container: HTMLDivElement;
 let root: Root;
@@ -69,7 +80,7 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
   it('story — org_slug/project_slug가 실려 오면 뷰어 현재 프로젝트 대신 그 project로 직행한다', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="story" entity_id="s-cross" title="스토리 X" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="story" entity_id="s-cross" title="스토리 X" status={null} />));
     });
     await openCard();
     await flush();
@@ -82,7 +93,7 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
   it('story — fetch 실패/미도착 시 기존 bare href로 우아하게 폴백한다(회귀 아님)', async () => {
     stubFetch(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="story" entity_id="s-fail" title="스토리 Y" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="story" entity_id="s-fail" title="스토리 Y" status={null} />));
     });
     await openCard();
     await flush();
@@ -92,7 +103,7 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
   it('epic — org_slug/project_slug가 실려 오면 그 project의 /goals/{id}로 직행한다', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="epic" entity_id="e-cross" title="에픽 X" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="epic" entity_id="e-cross" title="에픽 X" status={null} />));
     });
     await openCard();
     await flush();
@@ -103,7 +114,7 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
   it('asset — org_slug/project_slug가 실려 오면 그 project의 storage로 직행한다', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="asset" entity_id="ast-cross" title="자산 X" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="asset" entity_id="ast-cross" title="자산 X" status={null} />));
     });
     await openCard();
     await flush();
@@ -114,7 +125,7 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
   it('asset — org-level asset(project_id null→project_slug null)은 bare href로 폴백한다(④ 원칙, org-level은 project 스코프가 없다)', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: null } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="asset" entity_id="ast-org" title="자산 Y" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="asset" entity_id="ast-org" title="자산 Y" status={null} />));
     });
     await openCard();
     await flush();
@@ -129,7 +140,7 @@ describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 갑니다")', ()
       return { ok: true, json: async () => ({ data: { story_id: 's-parent-1' } }) };
     });
     await act(async () => {
-      root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status={null} />));
     });
     await openCard();
     await flush();
@@ -146,7 +157,7 @@ describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 갑니다")', ()
       json: async () => ({ data: { story_id: 's-parent-2', org_slug: 'acme', project_slug: 'content' } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="task" entity_id="t2" title="작업 B" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t2" title="작업 B" status={null} />));
     });
     await openCard();
     await flush();
@@ -179,7 +190,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       json: async () => ({ data: { story_id: 's-1', epic_id: null, doc_id: null } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a1" title="목업 A" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a1" title="목업 A" status={null} />));
     });
     await openCard();
     await flush();
@@ -200,7 +211,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       return { ok: true, json: async () => ({ data: { story_id: null, epic_id: null, doc_id: null } }) };
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a-cross" title="크로스 목업" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a-cross" title="크로스 목업" status={null} />));
     });
     await openCard();
     await flush();
@@ -216,7 +227,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       json: async () => ({ data: { story_id: null, epic_id: 'e-9', doc_id: null } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a2" title="목업 B" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a2" title="목업 B" status={null} />));
     });
     await openCard();
     await flush();
@@ -231,7 +242,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       json: async () => ({ data: { story_id: 's-1', epic_id: null, doc_id: null, org_slug: 'acme', project_slug: 'content' } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a6" title="목업 E" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a6" title="목업 E" status={null} />));
     });
     await openCard();
     await flush();
@@ -245,7 +256,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       json: async () => ({ data: { story_id: null, epic_id: 'e-9', doc_id: null, org_slug: 'acme', project_slug: 'content' } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a7" title="목업 F" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a7" title="목업 F" status={null} />));
     });
     await openCard();
     await flush();
@@ -274,7 +285,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       return { ok: false, json: async () => ({}) };
     });
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a4" title="목업 C" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a4" title="목업 C" status={null} />));
     });
     await openCard();
     await flush(8);
@@ -298,7 +309,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       return { ok: false, json: async () => ({}) }; // /api/docs/preview 도 이걸로 실패.
     });
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a5" title="목업 D" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a5" title="목업 D" status={null} />));
     });
     await openCard();
     await flush(8);
@@ -313,7 +324,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
       json: async () => ({ data: { story_id: null, epic_id: null, doc_id: null } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="artifact" entity_id="a3" title="독립 목업" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="artifact" entity_id="a3" title="독립 목업" status={null} />));
     });
     await openCard();
     await flush();
@@ -330,7 +341,7 @@ describe('story #2614 — hypothesis는 풋터(담긴 곳)는 여전히 없지�
       return { ok: true, json: async () => ({ data: { statement: '이 가설은 검증되면 전환율이 오른다', status: 'proposed' } }) };
     });
     await act(async () => {
-      root.render(<EmbedCard entity_type="hypothesis" entity_id="h1" title="가설 A" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="hypothesis" entity_id="h1" title="가설 A" status={null} />));
     });
     await openCard();
     await flush();
@@ -344,7 +355,7 @@ describe('story #2614 — hypothesis는 풋터(담긴 곳)는 여전히 없지�
   it('hypothesis 조회가 실패하면(대상 사라짐) 여전히 "대상이 없습니다"로 정직하게 갈린다(무한 스피너였던 자체발견 회귀 재확認)', async () => {
     stubFetch(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="hypothesis" entity_id="h-gone" title="사라진 가설" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="hypothesis" entity_id="h-gone" title="사라진 가설" status={null} />));
     });
     await openCard();
     await flush();
@@ -399,7 +410,7 @@ describe('story #2780 — "미리보기 없음" 문구는 "실제로 보여줄 �
   it('sprint(#2780로 RICH 편입) — title 없는 옛 응답 모양(미백필 등)이면 몸통이 공백 아닌 "미리보기 없음"+bare href로 우아하게 폴백한다', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: {} }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="sprint" entity_id="sp1" title="스프린트 3" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="sprint" entity_id="sp1" title="스프린트 3" status={null} />));
     });
     await openCard();
     await flush();
@@ -413,7 +424,7 @@ describe('story #2780 — "미리보기 없음" 문구는 "실제로 보여줄 �
       json: async () => ({ data: { title: '스프린트 5', status: 'active', start_date: '2026-08-01', end_date: '2026-08-14' } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="sprint" entity_id="sp3" title="스프린트 5" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="sprint" entity_id="sp3" title="스프린트 5" status={null} />));
     });
     await openCard();
     await flush();
@@ -424,7 +435,7 @@ describe('story #2780 — "미리보기 없음" 문구는 "실제로 보여줄 �
   it('sprint — fetch 자체가 실패하면(대상 사라짐 등) "대상을 찾을 수 없습니다"로 정직하게 갈린다(#2642로 sprint도 fetch-eligible 승격 — 이전엔 이 갈래가 아예 없었다)', async () => {
     stubFetch(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="sprint" entity_id="sp-gone" title="사라진 스프린트" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="sprint" entity_id="sp-gone" title="사라진 스프린트" status={null} />));
     });
     await openCard();
     await flush();
@@ -437,7 +448,7 @@ describe('story #2780 — "미리보기 없음" 문구는 "실제로 보여줄 �
       return { ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) };
     });
     await act(async () => {
-      root.render(<EmbedCard entity_type="sprint" entity_id="sp2" title="스프린트 4" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="sprint" entity_id="sp2" title="스프린트 4" status={null} />));
     });
     await openCard();
     await flush();
@@ -453,7 +464,7 @@ describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 갑니다", 
       return { ok: true, json: async () => ({ data: { resolved_story_id: 's-parent-2' } }) };
     });
     await act(async () => {
-      root.render(<EmbedCard entity_type="evidence" entity_id="ev1" title="증거 A" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="evidence" entity_id="ev1" title="증거 A" status={null} />));
     });
     await openCard();
     await flush();
@@ -465,7 +476,7 @@ describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 갑니다", 
   it('resolved_story_id가 없으면(예: 부모 task가 사라짐) 회색·행동0 "열 수 있는 화면이 없습니다"(거짓 링크 금지)', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { resolved_story_id: null } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="evidence" entity_id="ev2" title="증거 B" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="evidence" entity_id="ev2" title="증거 B" status={null} />));
     });
     await openCard();
     await flush();
@@ -481,7 +492,7 @@ describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 갑니다", 
       json: async () => ({ data: { resolved_story_id: 's-parent-3', org_slug: 'acme', project_slug: 'content' } }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="evidence" entity_id="ev3" title="증거 C" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="evidence" entity_id="ev3" title="증거 C" status={null} />));
     });
     await openCard();
     await flush();
@@ -496,7 +507,7 @@ describe('AC4 — 조회 실패(대상 사라짐)는 "대상이 없습니다"로
   it('task 상세 fetch가 실패하면 ㉠ "대상이 없습니다"를 보인다(㉡-b "열 수 있는 화면이 없습니다"와 문구가 다르다)', async () => {
     stubFetch(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="task" entity_id="t-gone" title="사라진 작업" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t-gone" title="사라진 작업" status={null} />));
     });
     await openCard();
     await flush();
@@ -517,7 +528,7 @@ describe('story #2262 AC2(2026-08-08, 쉬운 절반) — 모달이 자기 fetch�
       return { ok: true, json: async () => ({ data: { status: 'in-progress', story_id: 's-parent' } }) };
     });
     await act(async () => {
-      root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status={null} />));
     });
     await openCard();
     await flush();
@@ -528,7 +539,7 @@ describe('story #2262 AC2(2026-08-08, 쉬운 절반) — 모달이 자기 fetch�
   it('status prop이 이미 실려 있으면(EmbedCard 자신의 write-response 경로) 그 값을 번역해 헤더가 우선한다', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'done', story_id: 's-parent' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status="todo" />);
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status="todo" />));
     });
     await openCard();
     await flush();
@@ -544,7 +555,7 @@ describe('story #2262 AC2(2026-08-08, 쉬운 절반) — 모달이 자기 fetch�
   it('fetch가 실패해도(대상 없음) status 뱃지를 지어내지 않는다 — 모르는 것을 단정하지 않는다', async () => {
     stubFetch(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="task" entity_id="t-gone" title="사라진 작업" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t-gone" title="사라진 작업" status={null} />));
     });
     await openCard();
     await flush();
@@ -559,7 +570,7 @@ describe('story #2522 — EntityDetail(모달 본문) story·epic 자기 status 
   it('story 본문 status 뱃지가 번역된 말로 뜬다(원시값 in-review 안 남음)', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'in-review', description: '설명' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="story" entity_id="s1" title="스토리 A" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="story" entity_id="s1" title="스토리 A" status={null} />));
     });
     await openCard();
     await flush();
@@ -570,7 +581,7 @@ describe('story #2522 — EntityDetail(모달 본문) story·epic 자기 status 
   it('epic 본문 status 뱃지가 번역된 말로 뜬다(원시값 active 자체는 겹치므로 archived로 격리해 확認)', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'archived', objective: '목표' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="epic" entity_id="e1" title="에픽 A" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="epic" entity_id="e1" title="에픽 A" status={null} />));
     });
     await openCard();
     await flush();
@@ -583,7 +594,7 @@ describe('story #2522 — EntityDetail(모달 본문) story·epic 자기 status 
   it('맵에 없는(미매핑) status는 원시값도 새 라벨도 안 뜬다 — 빈칸', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'some-brand-new-status', description: '설명' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="story" entity_id="s2" title="스토리 B" status={null} />);
+      root.render(wrap(<EmbedCard entity_type="story" entity_id="s2" title="스토리 B" status={null} />));
     });
     await openCard();
     await flush();
