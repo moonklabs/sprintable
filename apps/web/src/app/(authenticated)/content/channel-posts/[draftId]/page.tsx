@@ -57,6 +57,18 @@ interface ChannelPostDraftDetail {
   command_status?: string | null;
   command_reason_code?: string | null;
   scheduled_at?: string | null;
+  // story #3428(BE 620beefc·PR#3776, §17-14/§17-15) — 최신 버전에 이미지가 붙어 있으면
+  // 그 「나가는 파생본」 공개 URL(카드 썸네일)과 원본/최종 width·bytes(배지 문구 조립
+  // 재료). 없으면 전부 null. processing_kind='awaiting_container'는 command_status=
+  // pending ∧ publication_status=container_created를 서버가 이미 파생한 값 — 화면이
+  // 두 필드를 다시 조합판정하지 않는다.
+  thumbnail_url?: string | null;
+  image_original_width?: number | null;
+  image_original_bytes?: number | null;
+  image_final_width?: number | null;
+  image_final_bytes?: number | null;
+  image_was_converted?: boolean | null;
+  processing_kind?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -83,6 +95,16 @@ interface ChannelConnectionInfo {
   // unpublish_blocked_reason은 항상 null.
   can_unpublish: boolean;
   unpublish_blocked_reason: 'unsupported' | 'scope_insufficient' | null;
+  // story #3428(BE 620beefc·PR#3776) — 이 연결(채널)의 이미지 규격 선언(어댑터 성질,
+  // 하드코딩 금지 축 그대로 — T3-M 규격 태그 재료). image_max_count<=0이면 이 채널은
+  // 이미지 미지원(§17-16 — 첨부 칸 자체를 그리지 않는다).
+  image_formats: string[];
+  image_max_bytes: number;
+  image_aspect_max: number;
+  image_width_min: number;
+  image_width_max: number;
+  image_color_space: string;
+  image_max_count: number;
 }
 
 // story #3402 ④(AC7) — 한도 잔량은 조회값이고 조회 실패도 상태다. success=false는
