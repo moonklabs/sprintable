@@ -23,6 +23,7 @@ from app.services.site_posts import (
     MediaNotSupportedPhase0Error,
     SitePostApproverRoleMissingError,
     SitePostConnectionNotFoundError,
+    SitePostDestinationKindMismatchError,
     SitePostDraftNotFoundError,
     SitePostGateAlreadyHeldError,
     SitePostNotPublishedError,
@@ -268,6 +269,11 @@ async def post_site_post_draft_version(
     except SitePostConnectionNotFoundError as exc:
         raise HTTPException(
             status_code=422, detail={"code": "SITE_POST_CONNECTION_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except SitePostDestinationKindMismatchError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "SITE_POST_DESTINATION_KIND_MISMATCH", "message": str(exc)},
         ) from exc
     except InvalidSitePostInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

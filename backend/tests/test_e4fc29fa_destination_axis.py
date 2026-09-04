@@ -34,6 +34,21 @@ async def _dispose_global_engine_after_test():
 
 
 @pytest.fixture(autouse=True)
+def _stub_wordpress_blog_adapter(monkeypatch):
+    """조각③b(wordpress 실 모듈)가 아직 없다 — 이 파일의 테스트가 필요로 하는 건
+    "hosted_site가 아닌, 실재하는 blog kind 채널"뿐이라 test_5b27b32f_sandbox_channel.py
+    선례(monkeypatch.setitem(CHANNEL_ADAPTERS, ...))와 동형으로 임시 등재한다(신규
+    실 어댑터 코드 0 — 이 스텁은 B1 kind 검사 통과 여부만 재는 픽스처다)."""
+    import app.services.channel_adapters as adapters_mod
+
+    stub = adapters_mod.ChannelAdapterConfig(
+        authorize_url="", token_url="", scope="", refresh_mode="manual",
+        credential_kind="pasted_secret", display_name="WordPress(스텁)", kind="blog",
+    )
+    monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "wordpress", stub)
+
+
+@pytest.fixture(autouse=True)
 def _configure_secrets(monkeypatch):
     import importlib
     from cryptography.fernet import Fernet
@@ -314,6 +329,35 @@ async def test_connection_id_cross_org_rejected_422():
             )
             assert r.status_code == 422, r.text
             assert r.json()["error"]["code"] == "SITE_POST_CONNECTION_NOT_FOUND"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_connection_id_social_channel_rejected_422():
+    """페드루 리뷰 B1(2026-09-04) — Threads(social) 연결을 블로그 목적지로 지정하면
+    초안 생성 시점에 즉시 거부한다(fail-closed) — 안 그러면 상신·봉인·승인까지
+    조용히 통과하고 발행(미배선)에서야 걸린다. 뮤테이션 대상: kind 검사를 지우면
+    이 assert가 RED(201로 성공)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            threads_connection_id = await _seed_connection(s, org_id, channel="threads")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=threads_connection_id),
+            )
+            assert r.status_code == 422, r.text
+            assert r.json()["error"]["code"] == "SITE_POST_DESTINATION_KIND_MISMATCH"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

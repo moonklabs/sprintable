@@ -94,6 +94,20 @@ class SitePostConnectionNotFoundError(ValueError):
         super().__init__(f"연결을 찾을 수 없습니다: {connection_id}")
 
 
+class SitePostDestinationKindMismatchError(ValueError):
+    """story e4fc29fa(조각③a, 페드루 리뷰 B1, 2026-09-04) — connection_id가 가리키는
+    채널이 blog kind가 아니다(예: Threads 같은 social 연결을 블로그 목적지로 지정).
+    fail-closed — 초안 생성 시점에 막지 않으면 상신·봉인·승인까지 조용히 통과하고
+    발행(아직 미배선)에서야 걸린다."""
+
+    def __init__(self, *, connection_id: uuid.UUID, channel: str):
+        self.connection_id = connection_id
+        self.channel = channel
+        super().__init__(
+            f"connection_id={connection_id}(channel={channel!r})는 블로그 목적지가 아닙니다"
+        )
+
+
 class SitePostGateAlreadyHeldError(Exception):
     """story f6d14476(Phase0 결함, PO 결정 2026-09-03 20:12 KST ②) — external_publish
     게이트 슬롯은 work_item 단위(draft 단위가 아니다). 같은 work_item에 언어별 초안이
@@ -317,13 +331,24 @@ async def create_site_post_draft_version(
     if explicit_connection_id and connection_id is not None:
         from app.models.channel_connection import ChannelConnection
 
-        exists = (await db.execute(
-            select(ChannelConnection.id).where(
+        connection = (await db.execute(
+            select(ChannelConnection).where(
                 ChannelConnection.id == connection_id, ChannelConnection.org_id == org_id,
             )
         )).scalar_one_or_none()
-        if exists is None:
+        if connection is None:
             raise SitePostConnectionNotFoundError(connection_id=connection_id)
+        # story e4fc29fa(조각③a, 페드루 리뷰 B1) — social(Threads) 연결을 블로그 목적지로
+        # 넣으면 초안·상신·봉인은 조용히 통과하고 발행에서야(그것도 아직 미배선) 막힌다 —
+        # 지금 이 자리에서 fail-closed. kind는 channel_adapters.py의 유일한 SSOT(연결 자체엔
+        # kind 컬럼이 없다 — connection.channel로 레지스트리를 조회해야 안다).
+        from app.services.channel_adapters import get_channel_adapter
+
+        adapter = get_channel_adapter(connection.channel)
+        if adapter is None or adapter.kind != "blog":
+            raise SitePostDestinationKindMismatchError(
+                connection_id=connection_id, channel=connection.channel,
+            )
 
     draft = (await db.execute(
         select(SitePostDraft)
