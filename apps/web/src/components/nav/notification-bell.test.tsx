@@ -449,9 +449,14 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
   it('⭐색 계산 양성대조 — globals.css 실값으로 라이트·다크 둘 다 대비비 ≥4.5(WCAG AA)', async () => {
     const { readFileSync } = await import('node:fs');
     const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
     const { contrastRatio } = await import('@/lib/color-contrast');
 
-    const cssPath = path.resolve(process.cwd(), 'src/app/globals.css');
+    // PO 지적(2026-09-04 22:53Z) — process.cwd() 기준 상대경로는 "검사를 어디서
+    // 돌렸나"에 값이 흔들린다(로컬 apps/web cwd에선 통과, CI 레포 루트 cwd에선
+    // ENOENT). 테스트 파일 자신의 위치 기준으로 고정 — cwd 무관(verify-tint-
+    // foreground-contrast.ts와 같은 관례).
+    const cssPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../app/globals.css');
     const css = readFileSync(cssPath, 'utf-8');
 
     function hexToRgb(hex: string): [number, number, number] {
