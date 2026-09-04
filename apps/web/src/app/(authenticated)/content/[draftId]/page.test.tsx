@@ -1131,6 +1131,37 @@ describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)'
     expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
   });
 
+  // 페드루 PO B1(2026-09-04 17:39Z) — 「붙이기」가 에디터 상태로 POST하면 미저장
+  // 편집이 같이 굳는다. 에디터 본문을 저장본과 다르게 만든 채 붙이기를 눌러도
+  // POST body는 저장본(latest) 값 그대로여야 한다.
+  it('⭐붙이기는 에디터의 미저장 편집이 아니라 저장본(latest) 값으로 POST한다', async () => {
+    let saveBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], (body) => { saveBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; }, undefined, {
+      onCreateCampaign: () => ({ status: 201, body: { id: 'c1', name: '9월 캠페인', starts_at: null, ends_at: null, status: 'active', created_by_member_id: 'm1', created_at: '2026-09-04T00:00:00+00:00' } }),
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    // 저장하지 않고 제목만 편집(미저장 상태 재현).
+    const titleInput = container.querySelector<HTMLInputElement>('#post-title');
+    const titleSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    titleSetter?.call(titleInput, '미저장 편집 제목');
+    titleInput?.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const nameInput = container.querySelector('[data-testid="content-campaign-new-name-input"]') as HTMLInputElement;
+    const nameSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    nameSetter?.call(nameInput, '9월 캠페인');
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const btn = container.querySelector('[data-testid="content-campaign-attach-button"]') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(saveBody?.title).toBe(VERSION_1.title);
+    expect(saveBody?.title).not.toBe('미저장 편집 제목');
+    expect(saveBody?.campaign_id).toBe('c1');
+  });
+
   it('⭐새 이름을 입력해 만들면 POST /campaigns 뒤 그 id로 site-posts 저장 POST에 campaign_id가 실린다', async () => {
     let saveBody: Record<string, unknown> | undefined;
     let createBody: Record<string, unknown> | undefined;
@@ -1206,5 +1237,67 @@ describe('ContentPostEditPage — 캠페인 만들기/붙이기(story 1db41045)'
     await flush();
     const btn = container.querySelector('[data-testid="content-campaign-attach-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+  });
+
+  // 페드루 PO N1 — campaign_name이 없으면 UUID를 사람 문장에 그대로 보이지 않는다.
+  it('campaign_name이 없으면 UUID 대신 "이름 확인 불가" 문구가 보인다', async () => {
+    stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: null }]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const el = container.querySelector('[data-testid="content-campaign-current"]');
+    expect(el?.textContent).toContain(koMessages.content.campaignNameUnknown);
+    expect(el?.textContent).not.toContain('c1');
+  });
+});
+
+// 페드루 PO B2(2026-09-04 17:39Z) — 붙인 뒤 「변경」·「해제」 표면.
+describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', () => {
+  it('⭐campaign_id가 있으면 "변경"·"해제" 버튼이 뜬다', async () => {
+    stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-campaign-change-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-detach-button"]')).not.toBeNull();
+  });
+
+  it('⭐"변경"을 누르면 붙이기 폼이 다시 뜨고(취소 가능), 현재 캠페인 줄은 사라진다', async () => {
+    stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const changeBtn = container.querySelector('[data-testid="content-campaign-change-button"]') as HTMLButtonElement;
+    await act(async () => { changeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
+
+    const cancelBtn = container.querySelector('[data-testid="content-campaign-cancel-change-button"]') as HTMLButtonElement;
+    await act(async () => { cancelBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-campaign-current"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-attach"]')).toBeNull();
+  });
+
+  it('⭐"해제"를 누르면 campaign_id: null을 명시로 보내고, 다른 필드는 저장본(latest) 값 그대로다', async () => {
+    let saveBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions(
+      [{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }],
+      (body) => { saveBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; },
+    );
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const detachBtn = container.querySelector('[data-testid="content-campaign-detach-button"]') as HTMLButtonElement;
+    await act(async () => { detachBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(saveBody).not.toBeUndefined();
+    expect(saveBody?.campaign_id).toBeNull();
+    expect(saveBody?.title).toBe(VERSION_1.title);
+    expect(saveBody?.slug).toBe(VERSION_1.slug);
   });
 });

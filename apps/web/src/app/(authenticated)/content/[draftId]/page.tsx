@@ -214,6 +214,12 @@ export default function ContentPostEditPage() {
   const [newCampaignName, setNewCampaignName] = useState('');
   const [attachingCampaign, setAttachingCampaign] = useState(false);
   const [attachCampaignResult, setAttachCampaignResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
+  // 페드루 PO B2(2026-09-04 17:39Z) — 붙인 뒤에도 「변경」/「해제」 표면이 있어야
+  // AC2("campaign_id 편집")가 첫 1회로 안 끝난다. changingCampaign=true면
+  // campaign_id가 있어도 붙이기 폼을 다시 연다(같은 폼 재사용, 새 컴포넌트 0).
+  const [changingCampaign, setChangingCampaign] = useState(false);
+  const [detachingCampaign, setDetachingCampaign] = useState(false);
+  const [detachCampaignResult, setDetachCampaignResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
 
   const loadCampaigns = useCallback(async () => {
     if (!orgId) return;
@@ -381,19 +387,25 @@ export default function ContentPostEditPage() {
         campaignId = createJson.data.id;
       }
 
-      const tags = tagsText.split(',').map((s) => s.trim()).filter(Boolean);
+      // 페드루 PO B1(2026-09-04 17:39Z) — 「붙이기」는 campaign_id만 바꾸는 액션이지
+      // "지금 폼에 뭐가 써 있든 그걸로 저장"이 아니다. 에디터 상태(title/summary/
+      // bodyMd/tagsText)를 쓰면 미저장 편집이 붙이기 클릭 한 번에 같이 굳어 버린다
+      // — latest(이미 저장된 값) 그대로 재전송해 campaign_id 하나만 바뀌게 한다.
+      // media_manifest — 이 화면엔 미디어 입력 자체가 없다(handleSave도 항상 []).
       const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           work_item_id: latest.source_story_id, slug: latest.slug, lang: latest.lang,
-          title, summary, tags, body_md: bodyMd, media_manifest: [],
+          title: latest.title, summary: latest.summary, tags: latest.tags, body_md: latest.body_md,
+          media_manifest: [],
           campaign_id: campaignId,
         }),
       });
       if (res.ok) {
         setNewCampaignName('');
         setSelectedCampaignId('');
+        setChangingCampaign(false);
         const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
         if (versionsRes.ok) {
           const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
@@ -414,7 +426,47 @@ export default function ContentPostEditPage() {
     } finally {
       setAttachingCampaign(false);
     }
-  }, [orgId, latest, newCampaignName, selectedCampaignId, tagsText, title, summary, bodyMd, draftId, loadCampaigns, t]);
+  }, [orgId, latest, newCampaignName, selectedCampaignId, draftId, loadCampaigns, t]);
+
+  // 페드루 PO B2 — 「해제」. campaign_id: null을 명시로 보낸다(model_fields_set
+  // 캐리포워드 계약 — 생략=유지·명시 null=해제, 이미 attach가 확認한 계약 그대로).
+  // B1과 같은 이유로 latest(저장본) 필드를 그대로 재전송한다.
+  const handleDetachCampaign = useCallback(async () => {
+    if (!orgId || !latest) return;
+    setDetachingCampaign(true);
+    setDetachCampaignResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          work_item_id: latest.source_story_id, slug: latest.slug, lang: latest.lang,
+          title: latest.title, summary: latest.summary, tags: latest.tags, body_md: latest.body_md,
+          media_manifest: [],
+          campaign_id: null,
+        }),
+      });
+      if (res.ok) {
+        const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
+        if (versionsRes.ok) {
+          const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+          if (json?.data) setVersions(json.data);
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setDetachCampaignResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('campaignDetachFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setDetachCampaignResult({ type: 'error', text: t('campaignDetachFailed') });
+    } finally {
+      setDetachingCampaign(false);
+    }
+  }, [orgId, latest, draftId, t]);
 
   // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
   // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·
@@ -748,16 +800,41 @@ export default function ContentPostEditPage() {
       </div>
 
       {/* story 1db41045(#3457) — 캠페인. 이미 붙어 있으면(campaign_id) 이름+상세
-          링크만(휴먼이 "지금 어디 속했나"를 바로 본다) — 다시 만들기/붙이기 자리를
-          겹쳐 그리지 않는다("칩은 그대로, 얹는다"와 같은 규율: 이미 있는 값을
-          지우고 새 폼을 얹지 않는다). 없을 때만 만들기/붙이기 폼. */}
-      {latest.campaign_id ? (
-        <p className="text-sm text-muted-foreground" data-testid="content-campaign-current">
-          {t('campaignCurrentLabel')}{' '}
-          <Link href={`/campaigns/${latest.campaign_id}`} className="underline">
-            {latest.campaign_name ?? latest.campaign_id}
-          </Link>
-        </p>
+          링크·「변경」·「해제」(페드루 PO B2 — 붙인 뒤에도 편집 표면이 있어야
+          한다). 「변경」을 누르면 changingCampaign=true로 같은 붙이기 폼을 다시
+          연다(새 컴포넌트 0). campaign_id가 없거나 변경 중이면 폼. */}
+      {latest.campaign_id && !changingCampaign ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="content-campaign-current">
+          <span>
+            {t('campaignCurrentLabel')}{' '}
+            <Link href={`/campaigns/${latest.campaign_id}`} className="underline">
+              {/* N1(페드루 PO) — campaign_name이 없을 때 UUID를 사람 문장에 그대로
+                  보여주지 않는다(지어내지도, 식별자를 문장으로 위장하지도 않는다). */}
+              {latest.campaign_name ?? t('campaignNameUnknown')}
+            </Link>
+          </span>
+          <Button
+            type="button" variant="outline" size="sm"
+            onClick={() => setChangingCampaign(true)}
+            data-testid="content-campaign-change-button"
+          >
+            {t('campaignChangeCta')}
+          </Button>
+          <Button
+            type="button" variant="outline" size="sm"
+            onClick={() => void handleDetachCampaign()}
+            disabled={detachingCampaign}
+            data-testid="content-campaign-detach-button"
+          >
+            {detachingCampaign ? t('campaignDetachPendingCta') : t('campaignDetachCta')}
+          </Button>
+          {detachCampaignResult ? (
+            <Alert variant="destructive" role="alert" data-testid="content-campaign-detach-error">
+              <AlertDescription>{detachCampaignResult.text}</AlertDescription>
+              <RawDetailsToggle raw={detachCampaignResult.raw} label={t('errorRawDetailsToggle')} />
+            </Alert>
+          ) : null}
+        </div>
       ) : (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-campaign-attach">
           <p className="text-xs font-medium text-muted-foreground">{t('campaignAttachLabel')}</p>
@@ -791,6 +868,15 @@ export default function ContentPostEditPage() {
             >
               {attachingCampaign ? t('campaignAttachPendingCta') : t('campaignAttachCta')}
             </Button>
+            {changingCampaign ? (
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={() => { setChangingCampaign(false); setNewCampaignName(''); setSelectedCampaignId(''); setAttachCampaignResult(null); }}
+                data-testid="content-campaign-cancel-change-button"
+              >
+                {t('campaignCancelChangeCta')}
+              </Button>
+            ) : null}
           </div>
           {attachCampaignResult ? (
             <Alert variant="destructive" role="alert" data-testid="content-campaign-attach-error">
