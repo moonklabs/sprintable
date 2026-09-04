@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 const { useParamsMock } = vi.hoisted(() => ({ useParamsMock: vi.fn() }));
@@ -1194,7 +1195,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain(new Date(resetAt).toLocaleString());
+    // story 3436(묶음 5 확장, PO 지적) — §11-2 정본 형식(formatScheduledAt)으로 pin 이동
+    // (toLocaleString()은 브라우저 로케일 의존이라 이 화면의 다른 시각 표기와도 어긋났다).
+    expect(container.textContent).toContain(formatScheduledAt(resetAt, resolveDisplayTimezone().tz).display);
   });
 
   // 카디르 QA 계획(2026-09-04) ⑤ — "api-error.ts가 파싱한다"는 사실만으로 화면 렌더까지
@@ -1257,7 +1260,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     const result = container.querySelector('[data-testid="channel-post-publish-result"]');
-    expect(result?.textContent).toContain(new Date('2026-09-05T00:00:00Z').toLocaleString());
+    // story 3436(묶음 5 확장) — §11-2 정본 형식으로 pin 이동(회귀 아님).
+    expect(result?.textContent).toContain(formatScheduledAt('2026-09-05T00:00:00Z', resolveDisplayTimezone().tz).display);
   });
 
   // 디디군 리뷰 nit(2026-09-04 06:05Z, PR#3769 진행 중 발견) — 재발행 요청이 이번엔
