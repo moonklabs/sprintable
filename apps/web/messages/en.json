@@ -2125,7 +2125,21 @@
     "appCredentialsAppSecretLabel": "App Secret",
     "appCredentialsSaveAction": "Save",
     "appCredentialsCancelAction": "Cancel",
-    "appCredentialsSaveFailed": "Couldn't save. Please try again in a moment."
+    "appCredentialsSaveFailed": "Couldn't save. Please try again in a moment.",
+    "channelConnectErrorWordpressFieldsRequired": "Please fill in all required fields (site URL, username, app password).",
+    "channelConnectErrorWebhookFieldsRequired": "Please fill in all required fields (target URL, secret).",
+    "channelConnectErrorDestinationInsecure": "This address isn't safe to connect to — please use a different address.",
+    "channelConnectFieldSiteUrl": "Site URL",
+    "channelConnectFieldUsername": "Username",
+    "channelConnectFieldAppPassword": "App password",
+    "channelConnectFieldTargetUrl": "Target URL",
+    "channelConnectFieldSecret": "Secret",
+    "channelConnectPastedSecretAction": "Connect {channel}",
+    "channelConnectPastedSecretSubmitAction": "Connect",
+    "channelConnectPastedSecretPendingCta": "Connecting…",
+    "channelConnectPastedSecretHintWordpress": "Create this in WordPress under Users → Application Passwords, then paste it here.",
+    "channelConnectPastedSecretHintWebhook": "Create this on the receiving server's side (the value it will use to verify requests), then paste it here.",
+    "channelConnectPastedSecretRewriteNote": "You won't be able to see this again after saving — paste a new value to change it."
   },
   "content": {
     "title": "Content",

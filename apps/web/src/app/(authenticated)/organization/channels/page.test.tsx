@@ -289,16 +289,77 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
       .toBe(koMessages.channelConnect.channelSandboxDisabledReason);
   });
 
-  // story f30da19a(PO 보정 2026-09-04 13:52Z) — kind='blog'는 이 화면 범위 밖.
-  it('kind=blog 항목은(미래 등재 대비) 렌더 대상에서 빠진다', async () => {
+  // story #3450 후속(페드루 PO 確定 2026-09-05) — f30da19a(2026-09-04 13:52Z)의
+  // "kind='blog'는 이 화면 범위 밖" 결정을 PO가 직접 뒤집었다. 연결 필요 여부는
+  // BE requires_connection 하나가 결정하고(hosted_site가 그래서 애초에 이 목록에
+  // 안 옴, BE 몫이라 여기서 pin 안 함), FE는 kind로 더는 안 거른다 — kind='blog'
+  // (WordPress·webhook)도 credential_kind에 맞는 카드로 그려져야 정상이다.
+  it('⭐kind=blog+credential_kind=pasted_secret(WordPress) — PastedSecretConnectCard로 그려진다(더는 안 걸러짐)', async () => {
     stubFetch({
       connections: [],
       availableChannels: [
         { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
-        { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'oauth', kind: 'blog' },
+        { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
       ],
     });
     await mount('owner');
-    expect(container.textContent).not.toContain('WordPress');
+    expect(container.textContent).toContain('WordPress');
+    expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).not.toBeNull();
+  });
+
+  it('kind=blog+credential_kind=oauth(WordPress.com류 대비) — oauth 카드로 그려진다', async () => {
+    stubFetch({
+      connections: [],
+      availableChannels: [
+        { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'oauth', kind: 'blog' },
+      ],
+      credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' },
+    });
+    await mount('owner');
+    expect(container.textContent).toContain('WordPress');
+    expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).toBeNull();
+  });
+});
+
+// story #3450 FE 후속(3653a18c §2, 페드루 PO 確定 2026-09-04 23:13Z·23:20Z) —
+// pasted_secret(WordPress·webhook) 자리 채움이 실제로 이 화면에 배선됐는지.
+// 필드 단위 pin은 pasted-secret-connect-card.test.tsx가 다룬다 — 여기서는 이
+// 페이지가 그 컴포넌트를 credential_kind==='pasted_secret'에 정확히 얹는지와
+// AC5(재방문 화면에 secret 끝 4자리조차 없음)만 확인한다.
+describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 FE 후속)', () => {
+  const WORDPRESS_AVAILABLE = [
+    { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
+  ];
+
+  it('⭐credential_kind===pasted_secret 채널에 PastedSecretConnectCard 토글 버튼이 뜬다(owner)', async () => {
+    stubFetch({ connections: [], availableChannels: WORDPRESS_AVAILABLE });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).not.toBeNull();
+  });
+
+  it('member는 버튼 대신 owner 전용 사유만 본다(§5·AC4)', async () => {
+    stubFetch({ connections: [], availableChannels: WORDPRESS_AVAILABLE });
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOnlyReason);
+  });
+
+  it('⭐(AC5) 이미 연결된 WordPress 행에 secret 값·끝 4자리 어느 것도 안 그려진다 — BFF 응답(ChannelConnectionResponse)에 그 필드가 없다', async () => {
+    stubFetch({
+      connections: [{
+        id: 'conn-wp-1', channel: 'wordpress', account_id: 'https://blog.example.com', account_label: 'admin',
+        credential_kind: 'pasted_secret', status: 'active', token_expires_at: null, last_refreshed_at: null,
+        last_error: null, can_auto_refresh: false, connected_by: 'member-1',
+        created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+      }],
+      availableChannels: WORDPRESS_AVAILABLE,
+    });
+    await mount('owner');
+    // 계정 라벨(username)만 보이고(ConnectionRow는 account_label이 있으면 account_id
+    // 대신 그것만 그린다, 정상 기존 동작) — app_password류 흔적(마스킹 문자열 포함)이
+    // 어디에도 없다. 스키마 자체가 그 필드를 안 주므로(types.ts) 이 화면이 지어낼 값
+    // 자체가 없다.
+    expect(container.textContent).toContain('admin');
+    expect(container.textContent).not.toMatch(/•{2,}|\*{2,}/);
   });
 });

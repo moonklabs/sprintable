@@ -12,6 +12,7 @@ import { channelLabel } from '@/lib/channel-label';
 import { ChannelStatusChip } from '@/components/channel-connect/channel-status-chip';
 import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/components/channel-connect/connection-status';
 import { AppCredentialsCard } from '@/components/channel-connect/app-credentials-card';
+import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-secret-connect-card';
 import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 
@@ -253,8 +254,12 @@ function ChannelSection({
                 {creatingSandbox ? t('channelConnectSandboxPendingCta') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) })}
               </Button>
             ) : null
-            // credential_kind==='pasted_secret' — 아직 이 흐름이 없다. 버튼을 disabled로
-            // 두면 "곧 됩니다"로 읽힌다(유나 §13-4) — 자리 자체를 안 그린다.
+          ) : credential_kind === 'pasted_secret' ? (
+            // story #3450 FE 후속(3653a18c §2 "②발급해서 붙여넣기", PO 確定
+            // 2026-09-04 23:13Z) — 자리 채움. isOwner는 이 파일의 owner-or-admin
+            // 상수(oauth/sandbox와 동일 게이팅, §5 "연결·해제는 owner" 취지에 admin
+            // 까지 넓힌 기존 결정 그대로 재사용).
+            <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwner} onConnected={onRefresh} t={t} />
           ) : null}
           {credential_kind === 'oauth' && !canStartConnect ? (
             <p className="text-xs text-muted-foreground">{t('channelConfigIncompleteReason')}</p>
@@ -298,12 +303,12 @@ export default function OrganizationChannelsPage() {
         return;
       }
       const availableJson = (await availableRes.json().catch(() => null)) as { data?: AvailableChannelItem[] } | null;
-      // story f30da19a(AC2, 페드루 PO 확定 2026-09-04 13:52Z) — kind='blog'(hosted_site·
-      // wordpress·webhook류)는 이 "채널 연결" 화면 범위 밖(그리지 않는다). hosted_site는
-      // BE가 requires_connection=False라 애초에 이 목록에 안 오지만, 후속 blog kind
-      // 채널이 requires_connection=True로 추가될 경우까지 대비해 FE도 kind로 한 번 더
-      // 거른다.
-      const items = (availableJson?.data ?? []).filter((it) => it.kind === 'social');
+      // story #3450 후속(페드루 PO 確定 2026-09-05, f30da19a 2026-09-04 13:52Z 결정을
+      // PO가 직접 뒤집음) — 연결 필요 여부는 BE `requires_connection`이 결정한다
+      // (f30da19a AC1, hosted_site=False라 이 목록에 애초에 안 옴). FE는 kind로 한 번
+      // 더 거르지 않는다 — kind='blog'+credential_kind='pasted_secret'(WordPress·
+      // webhook)이 블루프린트 §2(a) 대상인데 그 필터가 조용히 삼키고 있었다.
+      const items = availableJson?.data ?? [];
       setAvailableChannels(items);
       const connsJson = (await connsRes.json().catch(() => null)) as { data?: ChannelConnectionResponse[] } | null;
       setConnections(connsJson?.data ?? []);
