@@ -2213,6 +2213,8 @@
     "channelThreads": "Threads",
     "channelPostsCalendarUnscheduledLaneTitle": "No date set ({count})",
     "channelPostsCalendarUnscheduledLaneLabel": "Drafts without a scheduled date",
+    "channelPostsCalendarRangePrevWeek": "Previous week",
+    "channelPostsCalendarRangeNextWeek": "Next week",
     "channelPostsCharLimitUnknown": "Limit unknown",
     "channelPostsOverLimitReason": "Over the limit — you can't submit until the text is shorter.",
     "channelPostsTextTooLong": "The limit is {max} characters, but this is {current} — shorten it and resubmit.",
