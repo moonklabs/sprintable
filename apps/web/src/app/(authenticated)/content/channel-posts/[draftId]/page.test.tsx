@@ -88,6 +88,8 @@ const DRAFT_DETAIL = {
   source_title: null as string | null,
   source_site_post_version_id: null as string | null,
   source_current_site_post_version_id: null as string | null,
+  // story #3453 AC3 후속(BE 판정 이관) — null=모른다(기본값).
+  source_changed: null as boolean | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -1998,9 +2000,9 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
 // story 15e481ce(#3453 AC2, 유나 §14-2) — "같은 스토리의 글"(정방향, 상세 머리).
 // story #3457 후속(BE #3817 착지분) — source_title이 이제 단건 GET 응답에 직접
 // 실려 별도 왕복(구 site-posts/drafts/{id}/versions)이 없다 — 이 스위트가 그 제거를
-// pin한다(네트워크 호출 수 assert). staleness 배지(유나 정본 2026-09-04 20:57Z)는
-// source_site_post_version_id/source_current_site_post_version_id 4개 상태 조합.
-describe('ChannelPostEditPage — 같은 스토리의 글 + 배지(story 15e481ce AC2·#3457 후속, §14-2/§11-5)', () => {
+// pin한다(네트워크 호출 수 assert). staleness 배지(유나 정본 2026-09-04 20:57Z, #3453
+// AC3 후속 페드루 PO 確定 2026-09-05로 판정 서버 이관) — source_changed 하나만 본다.
+describe('ChannelPostEditPage — 같은 스토리의 글 + 배지(story 15e481ce AC2·#3457/#3453 AC3 후속, §14-2/§11-5)', () => {
   it('source_content_item_id가 없으면(정상값) 이 줄 자체가 안 그려진다', async () => {
     stubFetch({});
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2024,11 +2026,10 @@ describe('ChannelPostEditPage — 같은 스토리의 글 + 배지(story 15e481c
     expect(urls.some((u) => u.includes('/site-posts/drafts/site-1/versions'))).toBe(false);
   });
 
-  it('source_site_post_version_id가 null(레거시 파생분)이면 배지를 안 그린다(모른다≠다르다)', async () => {
+  it('source_changed가 null(모른다, 레거시 파생분)이면 배지를 안 그린다', async () => {
     stubFetch({
       draftDetail: {
-        source_content_item_id: 'site-1', source_title: '9월 실험 회고',
-        source_site_post_version_id: null, source_current_site_post_version_id: 'v-current',
+        source_content_item_id: 'site-1', source_title: '9월 실험 회고', source_changed: null,
       },
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2036,11 +2037,10 @@ describe('ChannelPostEditPage — 같은 스토리의 글 + 배지(story 15e481c
     expect(container.querySelector('[data-testid="channel-post-source-changed-badge"]')).toBeNull();
   });
 
-  it('두 버전 id가 같으면(원문 안 바뀜) 배지를 안 그린다', async () => {
+  it('source_changed가 false(원문 안 바뀜)면 배지를 안 그린다', async () => {
     stubFetch({
       draftDetail: {
-        source_content_item_id: 'site-1', source_title: '9월 실험 회고',
-        source_site_post_version_id: 'v-same', source_current_site_post_version_id: 'v-same',
+        source_content_item_id: 'site-1', source_title: '9월 실험 회고', source_changed: false,
       },
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2048,11 +2048,11 @@ describe('ChannelPostEditPage — 같은 스토리의 글 + 배지(story 15e481c
     expect(container.querySelector('[data-testid="channel-post-source-changed-badge"]')).toBeNull();
   });
 
-  it('⭐두 버전 id가 다르면(원문이 파생 이후 개정됨) 배지가 "같은 스토리의 글" 줄 옆에 뜬다', async () => {
+  it('⭐source_changed=true(미발행)면 「만든 뒤 바뀜」 배지가 "같은 스토리의 글" 줄 옆에 뜬다', async () => {
     stubFetch({
       draftDetail: {
-        source_content_item_id: 'site-1', source_title: '9월 실험 회고',
-        source_site_post_version_id: 'v-old', source_current_site_post_version_id: 'v-new',
+        source_content_item_id: 'site-1', source_title: '9월 실험 회고', source_changed: true,
+        publication_status: null,
       },
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2066,6 +2066,21 @@ describe('ChannelPostEditPage — 같은 스토리의 글 + 배지(story 15e481c
     expect(badge?.className).toContain('border-border');
     expect(badge?.className).not.toContain('bg-warning');
     expect(badge?.className).not.toContain('bg-destructive');
+  });
+
+  it('⭐source_changed=true(발행됨)면 기록형 「만들 때 판 그대로」 배지로 갈린다(유나 §14-4 — "바뀌었습니다"는 고치려 든다)', async () => {
+    stubFetch({
+      draftDetail: {
+        source_content_item_id: 'site-1', source_title: '9월 실험 회고', source_changed: true,
+        publication_status: 'published',
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const badge = container.querySelector('[data-testid="channel-post-source-changed-badge"]');
+    expect(badge?.textContent).toBe(koMessages.content.channelPostsSourceChangedBadgePublished);
+    expect(badge?.textContent).not.toBe(koMessages.content.channelPostsSourceChangedBadge);
   });
 });
 

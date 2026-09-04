@@ -222,10 +222,14 @@ class ChannelPostDraftListItem(BaseModel):
     # 이 변형이 파생된 시점의 원문 latest version.id(버전 축, 초안 생성 시 고정 — 편집으로는
     # 안 바뀐다).
     source_site_post_version_id: uuid.UUID | None = None
-    # 원문의 **지금** latest version.id(배치조회, 매 응답마다 최신값). source_site_post_
-    # version_id와 다르면 "원문이 파생 이후 개정됨" — 서버는 판정 라벨 없이 두 값만 낸다,
-    # 비교·배지 문구는 FE 몫(§11-5).
+    # 원문의 **지금** latest version.id(배치조회, 매 응답마다 최신값).
     source_current_site_post_version_id: uuid.UUID | None = None
+    # story #3453 AC3 후속(유나 §14-4/§14-5, 페드루 PO 確定 2026-09-05) — source_site_
+    # post_version_id/source_current_site_post_version_id 비교 판정을 서버가 한 곳에서
+    # 낸다(FE 4곳이 각자 비교식을 들고 있으면 어긋날 표면이라 위 "비교는 FE 몫" 결정을
+    # 뒤집는다). true=둘 다 non-null이고 서로 다름(원문이 파생 이후 개정됨) · false=둘 다
+    # non-null이고 같음 · None=하나라도 null("모른다" — 레거시 파생분).
+    source_changed: bool | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -558,6 +562,12 @@ def _to_draft_list_item(
         entry = source_titles.get(draft.source_content_item_id)
         if entry is not None:
             source_title, source_current_site_post_version_id = entry
+    # story #3453 AC3 후속 — 판정은 여기 한 곳에서만(FE 4곳이 각자 비교식을 안 들고
+    # 다니게). 하나라도 null이면 "모른다"(레거시 파생분 — source_site_post_version_id가
+    # #3437 후속 착지 前에 만들어진 초안은 항상 null).
+    source_changed: bool | None = None
+    if draft.source_site_post_version_id is not None and source_current_site_post_version_id is not None:
+        source_changed = draft.source_site_post_version_id != source_current_site_post_version_id
     command_status = latest_command.status if latest_command else None
     publication_status = latest_pub.status if latest_pub else None
     # story 620beefc(AC5·§17-15, 페드루 PO 決定) — 판정식은 이 자리 한 곳에서만.
@@ -606,6 +616,7 @@ def _to_draft_list_item(
         source_title=source_title,
         source_site_post_version_id=draft.source_site_post_version_id,
         source_current_site_post_version_id=source_current_site_post_version_id,
+        source_changed=source_changed,
     )
 
 

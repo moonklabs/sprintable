@@ -94,10 +94,12 @@ interface ChannelPostDraftDetail {
   source_title?: string | null;
   // 이 변형이 파생된 시점의 원문 latest version.id(버전 축, 초안 생성 시 고정).
   source_site_post_version_id?: string | null;
-  // 원문의 지금 latest version.id(배치조회, 매 응답마다 최신값). 두 값이 다르면(둘 다
-  // non-null일 때만 판정 — "모른다≠다르다") "원문이 파생 이후 개정됨" — 서버는 판정
-  // 라벨 없이 두 값만 낸다, 배지는 화면 몫(§11-5).
+  // 원문의 지금 latest version.id(배치조회, 매 응답마다 최신값).
   source_current_site_post_version_id?: string | null;
+  // story #3453 AC3 후속(페드루 PO 確定 2026-09-05) — 위 두 값의 비교 판정을 서버가
+  // 한 곳에서 낸다(FE가 직접 비교하지 않는다 — id 비교식은 서버 전용, 이 필드만 본다).
+  // true=원문이 파생 이후 개정됨 · false=안 바뀜 · null=모른다(레거시 파생분).
+  source_changed?: boolean | null;
 }
 
 interface ChannelPostVersion {
@@ -887,11 +889,14 @@ export default function ChannelPostEditPage() {
             스토리의 글". source_content_item_id 없으면(정상값) 이 줄 자체를 안 그린다.
             #3457 후속(BE #3817 착지분) — source_title이 이제 이 응답에 직접 실려 별도
             왕복이 없다.
-            §11-5 staleness 배지(유나 정본 2026-09-04 20:57Z) — 이 줄 옆에만(칩 열이
-            아니라, "원문 줄 없는데 배지만"이 구조적으로 안 나오게). source_site_post_
-            version_id·source_current_site_post_version_id 둘 중 하나라도 null이면
-            "모른다≠다르다" 원칙으로 안 그린다(레거시 파생분=#3817 前 생성, 값 자체가
-            없다). */}
+            §11-5 staleness 배지(유나 정본 2026-09-04 20:57Z, #3453 AC3 후속 페드루 PO
+            確定 2026-09-05로 판정 이관) — 이 줄 옆에만(칩 열이 아니라, "원문 줄 없는데
+            배지만"이 구조적으로 안 나오게). source_changed는 서버가 이미 판정한 값만
+            본다(true일 때만 렌더 — null/false는 "모른다"·"안 바뀜" 둘 다 무배지).
+            문구는 발행 상태로 갈린다(유나 §14-4 — 발행됨에 "바뀌었습니다"만 적으면
+            고치려 든다, 기록형 문구로): publication_status==='published'면
+            channelPostsSourceChangedBadgePublished(「만들 때 판 그대로」류 아니라
+            그 반대 — 판이 바뀐 기록), 그 외 기존 channelPostsSourceChangedBadge. */}
         {draft.source_content_item_id && draft.source_title ? (
           <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground" data-testid="channel-post-source-link">
             <span>
@@ -900,13 +905,14 @@ export default function ChannelPostEditPage() {
                 {t('channelPostsSourceLinkText', { title: draft.source_title })}
               </Link>
             </span>
-            {draft.source_site_post_version_id && draft.source_current_site_post_version_id
-              && draft.source_site_post_version_id !== draft.source_current_site_post_version_id ? (
+            {draft.source_changed === true ? (
               <span
                 className="inline-flex items-center rounded-full border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
                 data-testid="channel-post-source-changed-badge"
               >
-                {t('channelPostsSourceChangedBadge')}
+                {draft.publication_status === 'published'
+                  ? t('channelPostsSourceChangedBadgePublished')
+                  : t('channelPostsSourceChangedBadge')}
               </span>
             ) : null}
           </p>
