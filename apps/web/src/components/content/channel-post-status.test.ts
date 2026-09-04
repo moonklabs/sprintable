@@ -61,6 +61,15 @@ const CASES: Array<{ name: string; input: ChannelPostViewInput; expected: Partia
     },
     expected: { status: 'approved', partialSuccess: false, publicationFailed: true, errorCode: 'CHANNEL_PUBLISH_PROVIDER_ERROR' },
   },
+  // 3-D(4열, 페드루 PO 정정 2026-09-04 08:40Z, story #3426) — 회수 뒤 서버가 다음 로드에서
+  // 주는 값과 같은 모양(published_at=null·publication_status='unpublished'). 승인 자체는
+  // 안 풀린다 — 칩은 「승인됨」 그대로이고 unpublished 오버레이만 얹힌다(캐치올 해제 — 예전
+  // published_at이 있어도 회수 뒤엔 null로 와서 hasPublishedSitePost가 다시 false로 접힌다).
+  {
+    name: '3-D approved×unpublished(회수됨) — 칩은 승인됨 유지, unpublished 오버레이만',
+    input: { gateStatus: 'approved', sealedBodySha256: 'a', currentBodySha256: 'a', publicationStatus: 'unpublished', publishedAt: null },
+    expected: { status: 'approved', publishable: true, partialSuccess: false, publicationFailed: false, unpublished: true },
+  },
   // ── 4행: rejected — PO 확定, deriveContentPostStatus 자체 결과가 정본(새 칩 없음,
   //         gateStatus!=='approved'면 무조건 draft) — 1행과 동형이어야 한다 ──────────
   { name: '4-A rejected×null(1행과 동형이어야 함)', input: { gateStatus: 'rejected', publicationStatus: null }, expected: { status: 'draft', publishable: false } },

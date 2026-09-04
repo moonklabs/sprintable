@@ -2236,6 +2236,7 @@
     "channelPostsUnpublishConfirmAction": "회수",
     "channelPostsUnpublishSuccess": "회수했습니다.",
     "channelPostsUnpublishFailed": "회수하지 못했습니다.",
+    "channelPostsUnpublishedNotice": "회수됨 — 이 글은 더 이상 Threads에 없습니다. 다시 발행하면 새 글로 나갑니다.",
     "channelPostsApprovalStatusLabel": "승인 상태",
     "channelPostsApprovalAccountLabel": "발행 계정",
     "channelPostsApprovalLimitLabel": "남은 게시",

@@ -439,7 +439,16 @@ export default function ChannelPostEditPage() {
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/unpublish`, { method: 'POST' });
       if (res.ok) {
+        // 페드루 PO 정정(2026-09-04 08:40Z) — 회수는 «별도 설계»가 아니라 서버 의미를
+        // 그대로 미러하면 정해진다: 다음 로드에서 서버가 줄 값과 같은 모양으로 로컬을
+        // 맞춘다(publication_status='unpublished'·published_at=null·permalink=null,
+        // external_id는 응답 값을 그대로 — 보존이 아니라 응답이 주는 값 사용).
+        const body = (await res.json().catch(() => null)) as { data?: { external_id?: string | null } } | null;
         setUnpublishResult({ type: 'success' });
+        setDraft((prev) => prev && {
+          ...prev, publication_status: 'unpublished', published_at: null, permalink: null,
+          external_id: body?.data?.external_id ?? null,
+        });
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
@@ -493,7 +502,7 @@ export default function ChannelPostEditPage() {
         errorCode: draft.error_code,
         publishedAt: 'published_at' in draft ? draft.published_at : undefined,
       })
-    : { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false, errorCode: undefined };
+    : { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false, errorCode: undefined, unpublished: false, isRepublish: undefined, blockedReason: undefined };
 
   // story #3402 PR2 ②-a(doc §5·AC5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b).
   // canPublish는 site-posts(content/[draftId]/page.tsx::canPublish)와 동형으로 role
@@ -614,6 +623,16 @@ export default function ChannelPostEditPage() {
           return (
             <Alert variant="destructive" role="alert" data-testid="channel-post-publication-failed-notice">
               <AlertDescription>{t('channelPostsPublicationFailedNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
+        if (view.unpublished) {
+          // story #3426(doc §17-10②) — 회수돼도 승인(gate) 자체는 안 풀린다 — 칩은
+          // 「승인됨」 그대로이고 이 오버레이가 "회수됨"을 얹는다(partialSuccess/
+          // publicationFailed와 같은 자리).
+          return (
+            <Alert role="status" data-testid="channel-post-unpublished-notice">
+              <AlertDescription>{t('channelPostsUnpublishedNotice')}</AlertDescription>
             </Alert>
           );
         }

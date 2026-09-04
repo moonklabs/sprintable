@@ -758,6 +758,13 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(unpublishCalled).toBe(true);
     expect(container.textContent).toContain(koMessages.content.channelPostsUnpublishSuccess);
+    // 페드루 PO 정정(2026-09-04 08:40Z) — 회수 뒤 로컬 상태를 서버가 다음 로드에서 줄 값과
+    // 같은 모양으로 맞춘다: publication_status='unpublished'·published_at=null·permalink=null.
+    // 리로드 없이 「회수됨」 오버레이가 뜨고, 발행됨 정보 카드·회수 버튼은 사라진다.
+    expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishedNotice);
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
   });
 
   it('⭐회수 실패(422 CHANNEL_SCOPE_INSUFFICIENT) — 서버 문구가 보인다', async () => {

@@ -11,7 +11,11 @@ import {
   type ContentPostStatusResult,
 } from './post-status';
 
-export type ChannelPublicationStatus = 'container_created' | 'published' | 'failed';
+// story #3426(페드루 PO 정정 2026-09-04 08:40Z) — 4번째 값 'unpublished'(회수됨,
+// doc §17-10②). 회수 성공 응답 뒤 서버가 다음 로드에서 실제로 주는 값과 같은 모양 —
+// published_at=null·publication_status='unpublished'가 함께 온다(§4-2 두 조인축의
+// "가장 최근 published" 쪽이 이제 없다는 뜻).
+export type ChannelPublicationStatus = 'container_created' | 'published' | 'failed' | 'unpublished';
 
 export interface ChannelPostViewInput extends Omit<ContentPostStatusInput, 'hasPublishedSitePost'> {
   /** channel_publications.status — 최신 버전 publication 행(#3394 AC2 ⓑ). 발행 이력 없으면
@@ -35,6 +39,10 @@ export interface ChannelPostViewResult extends ContentPostStatusResult {
   publicationFailed: boolean;
   /** publicationFailed일 때만 채워진다. */
   errorCode?: string | null;
+  /** story #3426 — true면 회수됨(doc §17-10②). status(5상태)는 이 값과 무관하게 게이트
+   * 축 그대로 파생된다(회수해도 approved 승인 자체는 안 풀린다) — 칩 「승인됨」 위에
+   * 이 오버레이가 「회수됨」을 얹는다(partialSuccess/publicationFailed와 같은 자리). */
+  unpublished: boolean;
 }
 
 /**
@@ -64,5 +72,6 @@ export function deriveChannelPostView(input: ChannelPostViewInput): ChannelPostV
     partialSuccess: publicationStatus === 'container_created',
     publicationFailed: publicationStatus === 'failed',
     errorCode: publicationStatus === 'failed' ? errorCode : undefined,
+    unpublished: publicationStatus === 'unpublished',
   };
 }

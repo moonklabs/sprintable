@@ -2236,6 +2236,7 @@
     "channelPostsUnpublishConfirmAction": "Remove",
     "channelPostsUnpublishSuccess": "Removed.",
     "channelPostsUnpublishFailed": "Couldn't remove the post.",
+    "channelPostsUnpublishedNotice": "Removed — this post is no longer on Threads. Publishing again sends it out as a new post.",
     "channelPostsApprovalStatusLabel": "Approval status",
     "channelPostsApprovalAccountLabel": "Publishing account",
     "channelPostsApprovalLimitLabel": "Posts remaining",
