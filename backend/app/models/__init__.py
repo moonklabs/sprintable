@@ -140,6 +140,7 @@ from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import ChannelPublication
 from app.models.publication_command import PublicationCommand
+from app.models.channel_post_image import ChannelPostImage
 
 __all__ = [
     "RoleTemplate",

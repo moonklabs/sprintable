@@ -52,7 +52,10 @@ FAILURE_KIND_TRANSIENT = "transient"
 # 추가되면 여기 등재하지 않는 한 자동으로 needs_check(fail-closed)로 떨어진다 — "일단
 # transient로"류 추측 금지(story #3405/#3406 "미지 code는 추측 안 함" 원칙과 동일 사상).
 _CONNECTION_BLOCKED_CODES = frozenset({"CHANNEL_TOKEN_EXPIRED", "CHANNEL_CONNECTION_NOT_ACTIVE"})
-_NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS"})
+# story 620beefc(PO 決定, 2026-09-04) — IMAGE 컨테이너가 Threads 쪽에서 ERROR/EXPIRED로
+# 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라
+# needs_check(사람 재시도, AC5)로 바로 보낸다.
+_NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
 _TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED"})
 
 
@@ -196,6 +199,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     from app.models.channel_post_version import ChannelPostVersion
     from app.services.channel_posts import (
         ChannelConnectionNotActiveError,
+        ChannelImageContainerFailedError,
         ChannelPostDraftNotFoundError,
         ChannelPostReapprovalRequiredError,
         ChannelPostSealMissingError,
@@ -222,14 +226,26 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         if draft is None:
             raise ChannelPostDraftNotFoundError(version_row.draft_id)
 
-        await publish_channel_post_draft(
+        publication = await publish_channel_post_draft(
             db, org_id=command.org_id, draft_id=draft.id,
             published_by_member_id=command.requested_by_member_id,
         )
+        if publication.status != "published":
+            # story 620beefc(AC5) — IMAGE 컨테이너가 아직 처리 中(container_created,
+            # 예외 없이 정상 반환됐다는 것 자체가 "아직 안 끝났다"는 신호). 실패가
+            # 아니므로 attempt_count/backoff는 안 건드리고 30초 뒤 다시 이 command를
+            # 집도록 pending에 남긴다(Meta 권장 폴링 간격, threads_publish.py 참고).
+            command.status = "pending"
+            command.next_attempt_at = now + timedelta(seconds=30)
+            command.last_error = None
+            command.failure_kind = None
+            return
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
         return
+    except ChannelImageContainerFailedError as exc:
+        error_code, last_error = "CHANNEL_IMAGE_CONTAINER_FAILED", str(exc)
     except ChannelPostReapprovalRequiredError as exc:
         # story #3414 추가② 이중 방어 — void_pending_commands_for_gate가 보통 이 상황을
         # 이미 선제 처리하지만(제출 시점 즉시), 놓친 경우를 워커가 마지막으로 잡는다.

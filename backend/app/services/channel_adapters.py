@@ -45,6 +45,17 @@ class ChannelAdapterConfig:
     # 키기만 하면 기존 저장 경로가 그대로 반영한다. 기존 연결은 이 값 없이 저장돼 있어
     # 자동으로 "부족"으로 판정된다 — 재인증해야 새 scope가 반영).
     unpublish_required_scope: str | None = None
+    # story 620beefc(Phase1·마케팅운영, PO 決定 2026-09-04) — 이미지 규격 선언(§13 규격
+    # 문구 3요소: 무엇이·얼마까지·지금 얼마 — "무엇이·얼마까지" 축, 값은 실측·출처 주석).
+    # image_max_count=0(기본)=이 채널은 이미지 미지원(threads_delete처럼 채널의 성질을
+    # 여기 한 곳에 선언 — 상수 하드코딩 X, 화면·서비스가 이 값을 그대로 노출/검증에 쓴다).
+    image_formats: tuple[str, ...] = ()
+    image_max_bytes: int = 0
+    image_aspect_max: float = 0.0
+    image_width_min: int = 0
+    image_width_max: int = 0
+    image_color_space: str = ""
+    image_max_count: int = 0
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -66,6 +77,18 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         utm_medium="social",
         supports_unpublish=True,
         unpublish_required_scope="threads_delete",
+        # story 620beefc — Threads IMAGE 미디어 컨테이너 공식 규격(Meta 공식 문서 실측,
+        # developers.facebook.com/docs/threads/posts + developers.facebook.com/docs/
+        # threads/troubleshooting, 조회일 2026-09-04). 형식 JPEG/PNG만·최대 8MB·종횡비
+        # 최대 10:1·너비 320~1440px(범위 밖은 Threads가 스케일하나 이 서버가 선제
+        # 변환)·색공간 sRGB. Phase1은 초안당 이미지 1건(캐러셀 범위 밖, story 본문 명시).
+        image_formats=("image/jpeg", "image/png"),
+        image_max_bytes=8 * 1024 * 1024,
+        image_aspect_max=10.0,
+        image_width_min=320,
+        image_width_max=1440,
+        image_color_space="sRGB",
+        image_max_count=1,
     ),
 }
 

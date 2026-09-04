@@ -37,13 +37,23 @@ class ThreadsPublishError(Exception):
 
 async def create_container(
     client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
+    image_url: str | None = None,
 ) -> str:
-    """text 게시물 컨테이너 생성 → creation_id(부분 성공 재시도의 키, channel_publications.
-    external_container_id에 저장)."""
-    resp = await client.post(
-        _CONTAINER_URL_TMPL.format(user_id=threads_user_id),
-        params={"media_type": "TEXT", "text": text, "access_token": access_token},
-    )
+    """게시물 컨테이너 생성 → creation_id(부분 성공 재시도의 키, channel_publications.
+    external_container_id에 저장). `image_url` 생략(기본, 기존 호출부 전량)이면
+    media_type=TEXT(기존 동작 완전 그대로) — 있으면 media_type=IMAGE로 전환하고
+    `text`는 캡션이 된다(story 620beefc, 그라운딩 §② 실측: image_url은 공개
+    접근 가능해야 하며 Threads가 서버 인증 없이 직접 cURL한다)."""
+    params = {"access_token": access_token}
+    if image_url is not None:
+        params["media_type"] = "IMAGE"
+        params["image_url"] = image_url
+        if text:
+            params["text"] = text
+    else:
+        params["media_type"] = "TEXT"
+        params["text"] = text
+    resp = await client.post(_CONTAINER_URL_TMPL.format(user_id=threads_user_id), params=params)
     if resp.status_code != 200:
         raise ThreadsPublishError(
             "THREADS_CREATE_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
@@ -55,6 +65,37 @@ async def create_container(
             "THREADS_CREATE_CONTAINER_MISSING_ID", "id missing in response", status_code=resp.status_code,
         )
     return str(creation_id)
+
+
+# story 620beefc(그라운딩 §②, developers.facebook.com/docs/threads/troubleshooting,
+# 조회일 2026-09-04) — IMAGE 컨테이너는 비동기 처리. 완료 전 publish 호출은 실패한다.
+_CONTAINER_STATUS_FINISHED = "FINISHED"
+_CONTAINER_STATUS_IN_PROGRESS = "IN_PROGRESS"
+_CONTAINER_STATUS_ERROR = "ERROR"
+_CONTAINER_STATUS_EXPIRED = "EXPIRED"
+_CONTAINER_STATUS_PUBLISHED = "PUBLISHED"
+
+
+async def get_container_status(
+    client: httpx.AsyncClient, *, access_token: str, creation_id: str,
+) -> tuple[str, str | None]:
+    """(status, error_message) — status ∈ {IN_PROGRESS, FINISHED, PUBLISHED, ERROR,
+    EXPIRED}(실측 그대로). `GET /{creation-id}?fields=status,error_message`."""
+    resp = await client.get(
+        _MEDIA_URL_TMPL.format(media_id=creation_id),
+        params={"fields": "status,error_message", "access_token": access_token},
+    )
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "THREADS_CONTAINER_STATUS_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    status = body.get("status")
+    if not status:
+        raise ThreadsPublishError(
+            "THREADS_CONTAINER_STATUS_MISSING_FIELD", "status missing in response", status_code=resp.status_code,
+        )
+    return str(status), body.get("error_message")
 
 
 async def publish_container(

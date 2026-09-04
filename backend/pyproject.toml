@@ -36,6 +36,11 @@ dependencies = [
     "boto3>=1.34.0",
     "pypdf>=5.0.0",
     "python-docx>=1.1.0",
+    # story 620beefc(Phase1·마케팅운영, PO 決定 2026-09-04) — 채널 포스트 이미지 파생본
+    # (다운스케일·재인코딩·sRGB 변환) 생성. 서버 자동 변환 원칙(온보딩 철학 — "최저
+    # 지능 에이전트도 척척") 채택으로 도입, 이 전까지 코드베이스에 이미지 처리
+    # 라이브러리 0건이었음(그라운딩 확認).
+    "pillow>=11.0.0",
     # E-LOOP-LEDGER P1-S1: pgvector SQLAlchemy Vector 타입(embeddings 테이블). extension은 baseline에 이미 활성화됨.
     "pgvector>=0.3.0",
     # E-LOOP-LEDGER P1-S2/S25: Vertex AI(gemini-embedding-001 임베딩 + generate_text 생성형) 클라이언트.

@@ -30,6 +30,7 @@ from sqlalchemy.orm import aliased
 
 from app.models.channel_connection import ChannelConnection
 from app.models.channel_post_draft import ChannelPostDraft
+from app.models.channel_post_image import ChannelPostImage
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate, set_gate_status
@@ -48,6 +49,14 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
 from app.services.utm import attach_utm, resolve_utm_campaign
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
+
+# story 620beefc — create_channel_post_draft_version()의 image_sha256 파라미터 기본값
+# 센티널. text/link_url은 편집 때마다 클라이언트가 매번 다시 보내야 하는 필드지만(그대로
+# 재사용 안 함), 이미지는 별도 엔드포인트(channel_post_images.py)로만 첨부/교체된다 —
+# 일반 텍스트 편집 호출은 이 파라미터를 아예 모르므로, "생략"과 "명시적으로 없앰(None)"을
+# 구별해야 조용히 이미지가 떨어지는 사고를 막는다. 생략=직전 버전 값 캐리포워드,
+# None=명시적 제거(현재 호출부 없음 — Phase1엔 이미지 제거 기능이 없다, 장래 대비).
+_IMAGE_SHA256_CARRY_FORWARD = object()
 
 
 class ChannelConnectionNotActiveError(ValueError):
@@ -108,6 +117,21 @@ class ChannelPublishProviderError(Exception):
 # created 행으로 기존 부분성공 재시도 경로를 그대로 탄다(새 폴링을 또 하지 않는다).
 _CONCURRENT_PUBLISH_POLL_ATTEMPTS = 10
 _CONCURRENT_PUBLISH_POLL_INTERVAL_SEC = 0.3
+
+
+class ChannelImageContainerFailedError(Exception):
+    """story 620beefc(AC5) — Threads IMAGE 컨테이너가 ERROR/EXPIRED로 끝났다(그라운딩
+    §② 실측 상태값). 폴링을 더 반복해도 결과가 안 바뀌는 결정적 실패라 needs_check로
+    분류돼(publication_command.py) 자동 재시도 없이 사람 재시도(AC5)로 넘어간다."""
+
+    def __init__(self, *, gate_id: uuid.UUID, container_status: str, error_message: str | None):
+        self.gate_id = gate_id
+        self.container_status = container_status
+        self.error_message = error_message
+        super().__init__(
+            f"이미지 컨테이너 처리 실패(gate_id={gate_id}, status={container_status}): "
+            f"{error_message or '(no error_message)'}"
+        )
 
 
 class ChannelPublishInProgressError(Exception):
@@ -333,6 +357,7 @@ async def create_channel_post_draft_version(
     link_url: str | None,
     author_member_id: uuid.UUID,
     author_kind: str,
+    image_sha256: str | None = _IMAGE_SHA256_CARRY_FORWARD,  # type: ignore[assignment]
 ) -> tuple[ChannelPostVersion, str]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
     site_posts.create_site_post_draft_version과 1:1 대응(AC1).
@@ -340,7 +365,11 @@ async def create_channel_post_draft_version(
     story #3394 — 반환을 `(version, channel)` 튜플로 넓혔다(회귀 0, 유일한 호출부인
     라우터가 곧바로 unpack하도록 같이 바꾼다) — 라우터가 `tagged_link_preview`(AC5)를
     조립하려면 이 draft의 channel을 알아야 하는데, 여기서 이미 조회한 `connection.channel`을
-    그대로 돌려주는 편이 라우터가 별도 쿼리로 다시 찾는 것보다 싸다."""
+    그대로 돌려주는 편이 라우터가 별도 쿼리로 다시 찾는 것보다 싸다.
+
+    story 620beefc — `image_sha256` 생략(기본값) 시 draft의 직전 최신 버전 값을 그대로
+    캐리포워드한다(§17-14 배지가 「이미지가 텍스트 편집만으로 조용히 사라졌다」를 만들지
+    않도록). `channel_post_images.py`의 이미지 첨부 플로우만 이 값을 명시로 넘긴다."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
 
@@ -360,21 +389,64 @@ async def create_channel_post_draft_version(
         db.add(draft)
         await db.flush()
         next_version = 1
+        carried_image_sha256 = None
+        prior_latest = None
     else:
-        next_version = (await db.execute(
-            select(func.coalesce(func.max(ChannelPostVersion.version), 0)).where(
-                ChannelPostVersion.draft_id == draft.id
-            )
-        )).scalar_one() + 1
+        prior_latest = (await db.execute(
+            select(ChannelPostVersion)
+            .where(ChannelPostVersion.draft_id == draft.id)
+            .order_by(ChannelPostVersion.version.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        next_version = (prior_latest.version if prior_latest is not None else 0) + 1
+        carried_image_sha256 = prior_latest.image_sha256 if prior_latest is not None else None
+
+    resolved_image_sha256 = (
+        carried_image_sha256 if image_sha256 is _IMAGE_SHA256_CARRY_FORWARD else image_sha256
+    )
 
     version = ChannelPostVersion(
         id=uuid.uuid4(), draft_id=draft.id, version=next_version,
         text=text, link_url=link_url,
         body_sha256=compute_channel_post_hash(text=text, link_url=link_url),
+        image_sha256=resolved_image_sha256,
         author_member_id=author_member_id, author_kind=author_kind,
     )
     db.add(version)
     await db.flush()
+
+    # story 620beefc(페드루 리뷰 블로커 B1, 2026-09-04) — image_sha256을 캐리포워드했을
+    # 뿐 실제 `ChannelPostImage` 행은 여전히 직전 버전의 version_id에 남아 있었다. 발행
+    # 시점(publish_channel_post_draft)은 gate가 아니라 latest.id로 이미지 행을 찾으므로
+    # (동일 버전 스코프 확定), 텍스트만 편집한 새 버전은 이 행이 없어 「빈손」 →
+    # image_sha256은 여전히 세팅돼 있어 봉인·재승인은 media 축까지 정확히 도는데
+    # 정작 발행은 이미지 없이 TEXT로 나가고 썸네일도 사라지는 모순이 실측 확認됐다.
+    # 캐리포워드가 확定될 때(호출부가 명시로 새 이미지를 안 넘겼을 때) 행 자체를
+    # 새 version_id로 복제한다 — 파일 재업로드·재변환 없음(object_path·sha256 그대로,
+    # 계보만 이어붙임).
+    if image_sha256 is _IMAGE_SHA256_CARRY_FORWARD and prior_latest is not None:
+        prior_image = (await db.execute(
+            select(ChannelPostImage).where(ChannelPostImage.version_id == prior_latest.id)
+        )).scalar_one_or_none()
+        if prior_image is not None:
+            db.add(ChannelPostImage(
+                id=uuid.uuid4(), org_id=prior_image.org_id, draft_id=prior_image.draft_id,
+                version_id=version.id,
+                original_object_path=prior_image.original_object_path,
+                original_sha256=prior_image.original_sha256,
+                original_content_type=prior_image.original_content_type,
+                original_bytes=prior_image.original_bytes,
+                original_width=prior_image.original_width,
+                original_height=prior_image.original_height,
+                derived_object_path=prior_image.derived_object_path,
+                derived_sha256=prior_image.derived_sha256,
+                derived_content_type=prior_image.derived_content_type,
+                derived_bytes=prior_image.derived_bytes,
+                derived_width=prior_image.derived_width,
+                derived_height=prior_image.derived_height,
+                created_by=prior_image.created_by,
+            ))
+            await db.flush()
 
     await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version)
 
@@ -412,6 +484,15 @@ async def _reseal_gate_on_new_version(
     if resolve_gate_holder_draft_id(gate, this_draft_id=version.draft_id) is not None:
         return
     if gate.status == "approved":
+        # story 620beefc(AC4) — 무엇이 바뀌어 재승인이 필요해졌는지(본문 vs 이미지)를
+        # 되돌리기 전에 판정한다 — submit_channel_post_draft의 content_changed/
+        # media_changed와 동형 축(옛 sealed_* 값은 아래서 갱신 안 하므로 「마지막
+        # 승인값」 그대로 비교 대상).
+        content_changed_here = gate.sealed_content_sha256 != version.body_sha256
+        media_changed_here = gate.sealed_media_sha256 != version.image_sha256
+        reason_code = "CONTENT_CHANGED" if content_changed_here else (
+            "MEDIA_CHANGED" if media_changed_here else "CONTENT_CHANGED"
+        )
         set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
         gate.requires_human = True
         gate.resolver_id = None
@@ -422,11 +503,12 @@ async def _reseal_gate_on_new_version(
         # 생성만으로 approved→pending으로 되돌아간 경우)도 대기 중 명령을 즉시
         # 무효화한다. submit_channel_post_draft의 명시적 재상신 경로와 동형 처방.
         from app.services.publication_command import void_pending_commands_for_gate
-        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code="CONTENT_CHANGED")
+        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code=reason_code)
         return
     gate.sealed_content_version = version.version
     gate.sealed_content_sha256 = version.body_sha256
     gate.sealed_content_body = version.text
+    gate.sealed_media_sha256 = version.image_sha256
 
 
 async def get_channel_post_draft(
@@ -458,7 +540,7 @@ async def list_channel_post_drafts(
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
         Gate | None, ChannelPublication | None, ChannelPublication | None, str | None,
-        PublicationCommand | None,
+        PublicationCommand | None, ChannelPostImage | None,
     ]
 ]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
@@ -472,8 +554,9 @@ async def list_channel_post_drafts(
 
     story #3394(S2c BE 선행, 페드루 PO 확定 2026-09-04) — 상태 파생·발행 상태 필드를 여기서
     배치 조회해 붙인다(site_posts.list_site_post_drafts의 #3384 확장과 동형 패턴, N+1 금지 —
-    페이지 쿼리 1건 + gate 배치 1건 + publication 배치 2건 + version 해시 배치 1건 + command
-    배치 1건(story #3415), 총 6건 고정, draft 수 무관).
+    페이지 쿼리 1건 + gate 배치 1건 + publication 배치 2건(조건부) + version 해시 배치 1건
+    (조건부) + command 배치 1건(story #3415) + image 배치 1건(story 620beefc), 최대 7건,
+    draft 수 무관).
 
     **조인 축이 둘로 갈린다**(PO 지시, site와 의미가 다른 자리) — 한 축으로 뭉치면 "발행
     뒤 편집·재승인"이 목록에서 발행 이력째 사라진다:
@@ -494,8 +577,11 @@ async def list_channel_post_drafts(
       "이 게이트의 아무 행이나≠이 게이트의 최신 행").
 
     반환: (draft, latest_version, origin_version, gate, published_publication,
-    latest_version_publication, published_body_sha256, latest_command) — gate·publication·
-    command 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
+    latest_version_publication, published_body_sha256, latest_command, latest_image) —
+    gate·publication·command·image 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
+    `latest_image`(9번째 원소, story 620beefc)는 **최신 버전**에 붙은 `ChannelPostImage`
+    (없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처, latest_command와
+    같은 "최신 버전/게이트 기준" 원칙.
 
     story #3423(캘린더 #3422 선행) — `scheduled_from`/`scheduled_to`/`unscheduled`.
     기준 컬럼은 **`gate.sealed_scheduled_at`**(승인된 예약 시각) — `publication_command.
@@ -643,6 +729,18 @@ async def list_channel_post_drafts(
         for c in command_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)
 
+    # 배치 ⑦(story 620beefc, AC6) — 최신 버전당 첨부 이미지(있으면). version_id UNIQUE
+    # (Phase1 1건/버전)라 setdefault 불요 — 단순 dict 매핑. 썸네일 URL·§17-14 배지
+    # 재료(원본/최종 width·bytes)의 출처.
+    image_by_version: dict[uuid.UUID, ChannelPostImage] = {}
+    latest_version_ids_in_page = [latest_v.id for _, latest_v, _ in page_rows]
+    if latest_version_ids_in_page:
+        image_rows = (await db.execute(
+            select(ChannelPostImage).where(ChannelPostImage.version_id.in_(latest_version_ids_in_page))
+        )).scalars().all()
+        for img in image_rows:
+            image_by_version[img.version_id] = img
+
     result = []
     for draft, latest_v, origin_v in page_rows:
         gate = gates_by_work_item.get(draft.work_item_id)
@@ -652,9 +750,10 @@ async def list_channel_post_drafts(
             body_sha256_by_version_id.get(published_pub.version_id) if published_pub else None
         )
         latest_command = latest_command_by_gate.get(gate.id) if gate else None
+        latest_image = image_by_version.get(latest_v.id)
         result.append((
             draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256,
-            latest_command,
+            latest_command, latest_image,
         ))
     return result
 
@@ -717,13 +816,18 @@ async def submit_channel_post_draft(
             )
 
     # story #3414 — 무엇이 바뀌었는지(본문 또는 scheduled_at)를 재봉인 前에 먼저
-    # 판정한다. 둘 다 안 바뀌었으면 기존처럼 완전 no-op(short-circuit).
+    # 판정한다. 셋 다 안 바뀌었으면 기존처럼 완전 no-op(short-circuit).
     content_changed = existing is None or existing.sealed_content_sha256 != target.body_sha256
     schedule_changed = existing is None or existing.sealed_scheduled_at != scheduled_at
+    # story 620beefc(AC4) — 세 번째 축. content_changed/schedule_changed와 나란히 두되
+    # 기존 두 축의 판정·no-op short-circuit 조건은 손대지 않는다(회귀 0) — media_changed는
+    # short-circuit 조건에도 추가로 들어가 "이미지만 바뀐" 재상신도 더는 no-op되지 않는다.
+    media_changed = existing is None or existing.sealed_media_sha256 != target.image_sha256
     if (
         existing is not None
         and not content_changed
         and not schedule_changed
+        and not media_changed
         and existing.status in ("pending", "approved")
     ):
         return existing, target.id
@@ -757,6 +861,7 @@ async def submit_channel_post_draft(
     gate.sealed_content_sha256 = target.body_sha256
     gate.sealed_content_body = target.text
     gate.sealed_scheduled_at = scheduled_at
+    gate.sealed_media_sha256 = target.image_sha256
     gate.reapproval_required = False
 
     if was_approved:
@@ -764,9 +869,15 @@ async def submit_channel_post_draft(
         # pending으로 되돌렸다), 그 게이트에 걸린 대기 중 명령을 즉시 무효화한다
         # (워커 tick을 기다리지 않고 화면이 바로 "이 예약은 더 이상 유효하지 않다"를
         # 보일 수 있게). 사유 코드는 실제 무엇이 바뀌었는지 그대로 — 본문이 바뀌었으면
-        # CONTENT_CHANGED, 본문은 그대로고 시각만 바뀌었으면 SCHEDULE_CHANGED.
+        # CONTENT_CHANGED, 본문은 그대로고 시각만 바뀌었으면 SCHEDULE_CHANGED, 본문·
+        # 시각 둘 다 그대로고 이미지만 바뀌었으면 MEDIA_CHANGED(story 620beefc AC4 —
+        # 기존 두 값의 우선순위는 그대로 유지, media는 셋 다 걸릴 때 가장 낮은 우선순위).
         from app.services.publication_command import void_pending_commands_for_gate
-        reason_code = "CONTENT_CHANGED" if content_changed else "SCHEDULE_CHANGED"
+        reason_code = (
+            "CONTENT_CHANGED" if content_changed
+            else "SCHEDULE_CHANGED" if schedule_changed
+            else "MEDIA_CHANGED"
+        )
         await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code=reason_code)
 
     await db.commit()
@@ -874,6 +985,22 @@ async def publish_channel_post_draft(
     if existing is not None and existing.status == "published":
         return existing
 
+    # story 620beefc(AC5) — 이 버전에 이미지가 붙어 있으면 IMAGE 컨테이너 경로(비동기),
+    # 아니면 기존 TEXT 경로(동기, 완전 무변경). 이미지 유무는 channel_post_images 행
+    # (버전당 1건, Phase1)의 존재로 판단 — latest.image_sha256만으로는 「나가는 파생본」
+    # 경로를 못 구하므로 행 자체를 조회한다.
+    image_public_url: str | None = None
+    if latest.image_sha256 is not None:
+        from app.models.channel_post_image import ChannelPostImage
+        from app.services.channel_post_images import public_url_for_object_path
+
+        image_row = (await db.execute(
+            select(ChannelPostImage).where(ChannelPostImage.version_id == latest.id)
+        )).scalar_one_or_none()
+        if image_row is not None:
+            image_public_url = public_url_for_object_path(image_row.final_object_path)
+    has_image = image_public_url is not None
+
     # 발행 직전 재검증③(연결 활성) — 초안 생성/상신과 같은 헬퍼.
     connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
     access_token = decrypt_for_use(connection)
@@ -885,6 +1012,7 @@ async def publish_channel_post_draft(
     from app.services.threads_publish import (
         ThreadsPublishError,
         create_container,
+        get_container_status,
         get_permalink,
         get_publishing_limit,
         publish_container,
@@ -996,11 +1124,12 @@ async def publish_channel_post_draft(
                     raise ChannelPublishInProgressError(gate_id=gate.id)
                     return row
 
-            if row.external_container_id is None:
+            just_created_container = row.external_container_id is None
+            if just_created_container:
                 try:
                     container_id = await create_container(
                         client, access_token=access_token, threads_user_id=connection.account_id,
-                        text=text_to_post,
+                        text=text_to_post, image_url=image_public_url,
                     )
                 except ThreadsPublishError as exc:
                     error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
@@ -1016,6 +1145,65 @@ async def publish_channel_post_draft(
                 row.error_code = None
                 row.last_error = None
                 await db.commit()
+                if has_image:
+                    # story 620beefc(AC5, PO 決定) — IMAGE 컨테이너는 비동기(그라운딩
+                    # §② Meta 권장 "평균 30초 대기"). 막 만든 컨테이너를 이 자리에서
+                    # 곧바로 poll하지 않는다 — container_created 그대로 반환, 호출부
+                    # (cron 워커·즉시발행 라우터 둘 다)가 command를 pending(next_
+                    # attempt_at=+30s)으로 남기면 다음 tick이 이어 폴링한다(새 큐 X,
+                    # 기존 워커 재사용).
+                    return row
+
+            if has_image:
+                # story 620beefc(AC5) — 재진입(다음 tick)마다 컨테이너 상태를 먼저
+                # 확인한다. FINISHED여야만 publish 호출로 진행 — Meta 문서: 완료 前
+                # publish는 실패한다.
+                try:
+                    container_status, container_error_message = await get_container_status(
+                        client, access_token=access_token, creation_id=row.external_container_id,
+                    )
+                except ThreadsPublishError as exc:
+                    error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                    row.status = "failed"
+                    row.error_code = error_code
+                    row.last_error = exc.message
+                    await db.commit()
+                    if error_code == "CHANNEL_TOKEN_EXPIRED":
+                        await apply_refresh_failure(db, connection=connection, error_message=exc.message)
+                    raise mapped_exc from exc
+                if container_status == "IN_PROGRESS":
+                    # story 620beefc(페드루 리뷰 블로커 B3) — Meta 문서(그라운딩 §②):
+                    # 컨테이너 폴링은 "최대 5분"까지만 의미가 있다. 이 상한이 없으면
+                    # command가 attempt_count·backoff 어느 것도 안 건드리는 "처리 中"
+                    # 분기(pending, +30초)로만 계속 재큐잉돼 진짜 무한루프가 된다(워커가
+                    # 절대 dead_letter로 못 빠짐). row.created_at은 이 행이 재사용될 뿐
+                    # 재생성 안 되므로 "최초 컨테이너 생성 시각"의 신뢰할 수 있는 근사치.
+                    elapsed = datetime.now(timezone.utc) - row.created_at
+                    if elapsed > timedelta(minutes=5):
+                        row.status = "failed"
+                        row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"
+                        row.last_error = f"IN_PROGRESS {elapsed.total_seconds():.0f}s > 5분 상한(그라운딩 §②)"
+                        row.external_container_id = None
+                        await db.commit()
+                        raise ChannelImageContainerFailedError(
+                            gate_id=gate.id, container_status="TIMEOUT", error_message=row.last_error,
+                        )
+                    return row  # 아직 처리 中(5분 이내) — 다음 tick이 다시 폴링.
+                if container_status in ("ERROR", "EXPIRED"):
+                    row.status = "failed"
+                    row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"
+                    row.last_error = container_error_message or f"container status={container_status}"
+                    # story 620beefc(페드루 리뷰 블로커 B2) — 지우지 않으면 사람이 AC5
+                    # retry 엔드포인트로 재시도해도 이 죽은 creation_id를 그대로 다시
+                    # poll한다(Threads의 ERROR/EXPIRED 컨테이너는 재활성화되지 않는다 —
+                    # 영구 실패 루프). None으로 되돌려 다음 호출이 just_created_container
+                    # 분기를 다시 타 완전히 새 컨테이너를 만들게 한다.
+                    row.external_container_id = None
+                    await db.commit()
+                    raise ChannelImageContainerFailedError(
+                        gate_id=gate.id, container_status=container_status, error_message=container_error_message,
+                    )
+                # FINISHED(관측되면 PUBLISHED도 안전하게 통과) — 아래로 진행.
 
             try:
                 media_id = await publish_container(

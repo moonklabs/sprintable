@@ -141,6 +141,10 @@ _DECLARED_SUBSTITUTIONS = {
     "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
     # story #2887 — avatar 전용 GCS 버킷, deploy-backend dev 분기(ADMIN_OPERATOR_*와 동일 패턴).
     "_GCS_AVATARS_BUCKET",
+    # story 620beefc(Threads 이미지 발행) — 채널 미디어 전용 GCS 버킷, deploy-backend dev
+    # 분기(ADMIN_OPERATOR_*와 동일 패턴 — prod 버킷 미프로비저닝이라 avatar #3117 이전
+    # 형태 그대로 dev 전용).
+    "_GCS_CHANNEL_MEDIA_BUCKET",
     # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
     "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
     # story #3118(Sign in with Apple) — deploy-backend(bash entrypoint)가 이제 이 3개를
@@ -179,6 +183,10 @@ _DECLARED_SUBSTITUTIONS = {
 # 쓰는 bash entrypoint라 포함.
 _BASH_ENTRYPOINT_STEP_IDS = (
     "deploy-backend", "deploy-realtime", "deploy-office-converter", "apply-gcs-attachments-cors",
+    # story 620beefc — 신규 bash entrypoint 스텝(위 docstring 지시: 새로 생기면 이 목록에
+    # 추가할 것). ${_DEPLOY_ENV}/${_GCS_CHANNEL_MEDIA_BUCKET} 둘 다 이미 _DECLARED_
+    # SUBSTITUTIONS에 있어 스캔 대상에 넣어도 오탐 없음(사전 확認).
+    "apply-gcs-channel-media-cors",
 )
 
 
@@ -241,6 +249,8 @@ def _run_env_vars_assembly(
         "_ADMIN_OPERATOR_ALLOWLIST": "operator@example.iam.gserviceaccount.com",
         # story #2887 — set -u라 미설정이면 스크립트가 죽는다(ADMIN_OPERATOR_*와 동일 이유).
         "_GCS_AVATARS_BUCKET": "sprintable-avatars-dev",
+        # story 620beefc — set -u라 미설정이면 스크립트가 죽는다(GCS_AVATARS_BUCKET과 동일 이유).
+        "_GCS_CHANNEL_MEDIA_BUCKET": "sprintable-channel-media-dev",
         # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
         # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
         "_GOTENBERG_SERVICE_URL": gotenberg_url,
@@ -466,6 +476,22 @@ def test_deploy_backend_prod_includes_avatars_bucket_env_var():
     assert "GCS_AVATARS_BUCKET=sprintable-avatars-prod" in result
 
 
+def test_deploy_backend_dev_includes_channel_media_bucket_env_var():
+    """story 620beefc — dev는 GCS_CHANNEL_MEDIA_BUCKET을 plain env로 넘긴다
+    (ADMIN_OPERATOR_*와 동일 배선 — avatar #3117 이전 형태, prod 버킷 미프로비저닝)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev" in result
+
+
+def test_deploy_backend_prod_excludes_channel_media_bucket_env_var():
+    """story 620beefc — GCS_AVATARS_BUCKET과 달리(#3117로 prod 버킷 프로비저닝 완료) 채널
+    미디어 버킷은 아직 prod가 없다 — ADMIN_OPERATOR_*/GOTENBERG_SERVICE_URL과 동일 원칙으로
+    prod엔 이 키 자체가 없어야 안전(channel_post_images.py::
+    ChannelImageStorageNotConfiguredError→503 fail-closed)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "GCS_CHANNEL_MEDIA_BUCKET" not in result
+
+
 def test_deploy_backend_includes_gotenberg_service_url_when_set():
     """story #2771 — 부트스트랩 후(_GOTENBERG_SERVICE_URL 채워짐) env var가 실린다."""
     result = _run_env_vars_assembly(
@@ -573,5 +599,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "REDIS_URL=redis://10.164.120.243:6379,RATE_LIMIT_BACKEND=redis,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
-        "GCS_AVATARS_BUCKET=sprintable-avatars-dev"
+        "GCS_AVATARS_BUCKET=sprintable-avatars-dev,"
+        # story 620beefc — GCS_AVATARS_BUCKET 조건부 append 바로 뒤에 이어붙는다(cloudbuild.yaml
+        # 삽입 순서 그대로).
+        "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev"
     )

@@ -3,16 +3,19 @@ API. `app/routers/site_posts.py`(story #3365) 형태를 그대로 미러 — 새
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.channel_post_version import ChannelPostVersion
 from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
+    ChannelImageContainerFailedError,
     ChannelPostApproverRoleMissingError,
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
@@ -43,6 +46,23 @@ from app.services.channel_posts import (
     submit_channel_post_draft,
     text_char_count,
     unpublish_channel_post,
+)
+from app.services.channel_post_images import (
+    ChannelImageAnimatedUnsupportedError,
+    ChannelImageAspectRatioExceededError,
+    ChannelImageConversionFailedError,
+    ChannelImageObjectNotFoundError,
+    ChannelImagePathNotScopedError,
+    ChannelImageStorageNotConfiguredError,
+    ChannelImageTooLargeError,
+    ChannelImageUnsupportedError,
+    ChannelImageUnsupportedFormatError,
+    ChannelImageUndecodableError,
+    ChannelImageUploadFailedError,
+    confirm_channel_post_image_upload,
+    create_channel_post_image_upload_url,
+    get_channel_post_image_for_version,
+    public_url_for_object_path,
 )
 from app.services.member_resolver import resolve_member
 
@@ -153,6 +173,23 @@ class ChannelPostDraftListItem(BaseModel):
     # 시점 스냅샷이라 재승인 뒤 갱신 안 됨, story #3414). 화면 캘린더(§11-1)가 보는 "지금
     # 승인된 예약 시각"은 이 값.
     scheduled_at: str | None = None
+    # story 620beefc(AC6·§17-14) — 최신 버전에 이미지가 붙어 있으면 그 「나가는 파생본」
+    # 공개 URL(카드 썸네일). 없으면 null. 원본/최종 width·bytes 둘 다 실어야 화면이
+    # "너비 4000px → 1440px · 용량 12.4MB → 3.1MB" 배지 문구를 조립할 수 있다(서버는
+    # 문구를 짓지 않고 값만 낸다 — was_converted=false면 원본=최종이라 배지 자체를 안
+    # 그린다는 판단은 화면 몫).
+    thumbnail_url: str | None = None
+    image_original_width: int | None = None
+    image_original_bytes: int | None = None
+    image_final_width: int | None = None
+    image_final_bytes: int | None = None
+    image_was_converted: bool | None = None
+    # story 620beefc(AC5·§17-15, 페드루 PO 決定) — command_status=pending ∧
+    # publication_status=container_created를 서버가 이 값 하나로 파생(판정식은 여기
+    # 한 곳에만 — 화면마다 두 필드를 조합판정하지 않는다). 'awaiting_container'=
+    # IMAGE 컨테이너가 비동기로 이어서 처리 中(§17-15 "자동으로 이어서 처리 중입니다").
+    # 그 외에는 항상 null.
+    processing_kind: str | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -166,6 +203,42 @@ class ChannelPostVersionHistoryItem(BaseModel):
     author_kind: str
     created_at: str
     tagged_link_preview: str | None = None
+
+
+class CreateChannelPostImageUploadUrlRequest(BaseModel):
+    content_type: str
+
+
+class ChannelPostImageUploadUrlResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    expires_at: str
+    max_bytes: int
+    # story 620beefc(페드루 리뷰 블로커 B4) — create_only 서명(GCS:
+    # x-goog-if-generation-match)이 PUT 요청에도 정확히 실려야 서명이 valid하다 — FE는
+    # 이 헤더를 그대로 PUT에 붙여야 한다(assets.py AssetUploadUrlResponse와 동형 계약).
+    required_put_headers: dict[str, str] = {}
+
+
+class ConfirmChannelPostImageUploadRequest(BaseModel):
+    object_path: str
+
+
+class ChannelPostImageResponse(BaseModel):
+    draft_id: uuid.UUID
+    version_id: uuid.UUID
+    version: int
+    # story 620beefc(AC6/§17-14) — 원본·최종(파생본 있으면 그것, 없으면 원본) 둘 다
+    # 실어야 화면이 배지 문구("너비 4000px → 1440px · 용량 12.4MB → 3.1MB")를 조립할
+    # 수 있다(페드루 PO §17-14 요구, 서버가 문구를 짓지 않고 값만 낸다).
+    original_width: int
+    original_height: int
+    original_bytes: int
+    final_width: int
+    final_height: int
+    final_bytes: int
+    was_converted: bool
+    image_url: str | None = None
 
 
 class SubmitChannelPostDraftRequest(BaseModel):
@@ -255,13 +328,190 @@ async def post_channel_post_draft_version(
     )
 
 
+def _image_response(version, image_row) -> ChannelPostImageResponse:
+    return ChannelPostImageResponse(
+        draft_id=version.draft_id, version_id=version.id, version=version.version,
+        original_width=image_row.original_width, original_height=image_row.original_height,
+        original_bytes=image_row.original_bytes,
+        final_width=image_row.final_width, final_height=image_row.final_height,
+        final_bytes=image_row.final_bytes, was_converted=image_row.was_converted,
+        image_url=public_url_for_object_path(image_row.final_object_path),
+    )
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/upload-url",
+    response_model=ChannelPostImageUploadUrlResponse,
+)
+async def post_channel_post_image_upload_url(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: CreateChannelPostImageUploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageUploadUrlResponse:
+    """AC1 — 고객 에이전트·휴먼 공용(초안 제출 엔드포인트와 동형 폭). avatar_upload.py와
+    같은 2단계(signed URL 발급→FE 직접 PUT→confirm) — 대용량 바이너리가 이 서버를
+    경유하지 않는다(storage/base.py D3 원칙)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+
+    try:
+        result = await create_channel_post_image_upload_url(
+            org_id=org_id, draft_id=draft_id, channel=draft.channel, content_type=body.content_type,
+        )
+    except ChannelImageStorageNotConfiguredError as exc:
+        # story 620beefc(페드루 리뷰 B5) — avatar_upload.py 503(AVATAR_UPLOAD_NOT_
+        # CONFIGURED)과 동형 축. 채널이 이미지를 지원 안 하는 것(422)과 다른 실패 —
+        # 이 환경(dev/prod)에 GCS_CHANNEL_MEDIA_BUCKET 배선이 아직 안 됐을 뿐(배포 갭).
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except ChannelImageUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelImageUnsupportedFormatError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_UNSUPPORTED_FORMAT", "message": str(exc),
+                "content_type": exc.content_type, "allowed_formats": list(exc.allowed),
+            },
+        ) from exc
+    except ChannelImageUploadFailedError as exc:
+        raise HTTPException(status_code=502, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return ChannelPostImageUploadUrlResponse(**result)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/confirm",
+    response_model=ChannelPostImageResponse, status_code=201,
+)
+async def post_channel_post_image_confirm(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostImageUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """AC1/AC3 — 업로드 확인+자동 변환(필요 시)+계보 기록. 이 호출 자체가 새
+    `ChannelPostVersion`을 만든다(text/link_url은 직전 버전에서 캐리포워드, image_sha256만
+    갱신) — 텍스트 편집과 동형 축(재승인 판정은 create_channel_post_draft_version의
+    기존 재봉인 훅이 그대로 처리, 신규 메커니즘 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    member_id = uuid.UUID(auth.user_id)
+    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    try:
+        version, image_row = await confirm_channel_post_image_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelImageStorageNotConfiguredError as exc:
+        # story 620beefc(페드루 리뷰 B5) — avatar_upload.py 503(AVATAR_UPLOAD_NOT_
+        # CONFIGURED)과 동형 축. 채널이 이미지를 지원 안 하는 것(422)과 다른 실패 —
+        # 이 환경(dev/prod)에 GCS_CHANNEL_MEDIA_BUCKET 배선이 아직 안 됐을 뿐(배포 갭).
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except ChannelImageUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelImagePathNotScopedError as exc:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_IMAGE_PATH_NOT_SCOPED", "message": str(exc)}) from exc
+    except ChannelImageObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_IMAGE_OBJECT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelImageTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "CHANNEL_IMAGE_TOO_LARGE", "message": str(exc),
+                "size_bytes": exc.size_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelImageUndecodableError as exc:
+        raise HTTPException(status_code=422, detail={"code": "CHANNEL_IMAGE_UNDECODABLE", "message": str(exc)}) from exc
+    except ChannelImageAnimatedUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_IMAGE_ANIMATED_UNSUPPORTED", "message": str(exc), "frame_count": exc.frame_count},
+        ) from exc
+    except ChannelImageAspectRatioExceededError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED", "message": str(exc),
+                "aspect_ratio": exc.aspect_ratio, "max_aspect_ratio": exc.max_aspect_ratio,
+            },
+        ) from exc
+    except ChannelImageConversionFailedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_CONVERSION_FAILED", "message": str(exc),
+                "final_bytes": exc.final_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelImageUploadFailedError as exc:
+        raise HTTPException(status_code=502, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return _image_response(version, image_row)
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}/versions/{version_id}/asset",
+    response_model=ChannelPostImageResponse,
+)
+async def get_channel_post_image_for_version_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """AC6 — 목록/단건 위젯이 썸네일을 그리려면 어느 버전에 무슨 이미지가 붙었는지가
+    필요하다. 조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 목록 엔드포인트와 동형 권한 폭."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    version = (await db.execute(
+        select(ChannelPostVersion).where(
+            ChannelPostVersion.id == version_id, ChannelPostVersion.draft_id == draft_id,
+        )
+    )).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_VERSION_NOT_FOUND", "message": str(version_id)})
+
+    image_row = await get_channel_post_image_for_version(db, version_id=version_id)
+    if image_row is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_IMAGE_NOT_FOUND", "message": str(version_id)})
+    return _image_response(version, image_row)
+
+
 def _to_draft_list_item(
     row: tuple,
 ) -> ChannelPostDraftListItem:
     """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
     번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를
     똑같이 지원하는 것과 동형 사상)."""
-    draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256, latest_command = row
+    (
+        draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
+        latest_command, latest_image,
+    ) = row
+    command_status = latest_command.status if latest_command else None
+    publication_status = latest_pub.status if latest_pub else None
+    # story 620beefc(AC5·§17-15, 페드루 PO 決定) — 판정식은 이 자리 한 곳에서만.
+    processing_kind = (
+        "awaiting_container"
+        if command_status == "pending" and publication_status == "container_created"
+        else None
+    )
     return ChannelPostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
         connection_id=draft.connection_id, current_version=latest.version,
@@ -274,7 +524,7 @@ def _to_draft_list_item(
         sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
         published_at=published_pub.published_at.isoformat() if published_pub else None,
         published_body_sha256=published_body_sha256,
-        publication_status=latest_pub.status if latest_pub else None,
+        publication_status=publication_status,
         permalink=published_pub.permalink if published_pub else None,
         external_id=published_pub.external_id if published_pub else None,
         error_code=latest_pub.error_code if latest_pub else None,
@@ -288,8 +538,15 @@ def _to_draft_list_item(
             if latest_command and latest_command.dead_letter_at else None
         ),
         scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
-        command_status=latest_command.status if latest_command else None,
+        command_status=command_status,
         command_reason_code=latest_command.reason_code if latest_command else None,
+        thumbnail_url=public_url_for_object_path(latest_image.final_object_path) if latest_image else None,
+        image_original_width=latest_image.original_width if latest_image else None,
+        image_original_bytes=latest_image.original_bytes if latest_image else None,
+        image_final_width=latest_image.final_width if latest_image else None,
+        image_final_bytes=latest_image.final_bytes if latest_image else None,
+        image_was_converted=latest_image.was_converted if latest_image else None,
+        processing_kind=processing_kind,
     )
 
 
@@ -487,6 +744,11 @@ class PublishChannelPostResponse(BaseModel):
     scheduled: bool = False
     command_id: uuid.UUID | None = None
     scheduled_at: str | None = None
+    # story 620beefc(AC5·§17-15) — IMAGE 컨테이너는 비동기라, 예약이 아닌 "즉시" 요청도
+    # 이 응답 시점엔 아직 발행이 안 끝났을 수 있다(`scheduled`=사용자가 미래 시각을
+    # 지정했다는 뜻과는 다른 축 — 이건 "지금 요청했는데 서버가 자동으로 이어서
+    # 처리 중"). true면 permalink/external_id/published_at은 전부 null(아직 없다).
+    processing: bool = False
 
 
 @router.post(
@@ -683,6 +945,35 @@ async def publish_channel_post_draft_endpoint(
             status_code=409,
             detail=_with_command_state({"code": "CHANNEL_PUBLISH_IN_PROGRESS", "message": str(exc)}),
         ) from exc
+    except ChannelImageContainerFailedError as exc:
+        # story 620beefc(AC5) — Threads가 IMAGE 컨테이너를 ERROR/EXPIRED로 끝냈다(결정적,
+        # 재시도해도 안 바뀐다). needs_check 분류라 자동 재시도 없이 사람 재시도(retry
+        # 엔드포인트, AC5)만 남긴다.
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_IMAGE_CONTAINER_FAILED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=_with_command_state({
+                "code": "CHANNEL_IMAGE_CONTAINER_FAILED", "message": str(exc),
+                "container_status": exc.container_status,
+            }),
+        ) from exc
+
+    if row.status != "published":
+        # story 620beefc(AC5) — IMAGE 컨테이너가 아직 처리 中. 예외가 안 났다는 것
+        # 자체가 "지금까지는 정상, 아직 안 끝났다"는 뜻 — command는 pending에
+        # 남기고(다음 cron tick이 이어 폴링) 사람에게는 "처리 中"임을 그대로 알린다.
+        command.status = "pending"
+        command.next_attempt_at = now + timedelta(seconds=30)
+        command.last_error = None
+        command.failure_kind = None
+        await db.commit()
+        return PublishChannelPostResponse(
+            version_id=row.version_id, scheduled=False, processing=True,
+            command_id=command.id, scheduled_at=None,
+        )
 
     command.status = "completed"
     command.last_error = None

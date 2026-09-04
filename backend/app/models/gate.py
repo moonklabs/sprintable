@@ -131,6 +131,11 @@ class Gate(Base):
     # 없는 다른 gate_type은 항상 null). "승인 후 예약 시각 변경=재승인"(블루프린트 §3)의
     # 비교 기준값. site_posts 등은 이 컬럼을 절대 안 씀.
     sealed_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 620beefc(Phase1·마케팅운영, 페드루 PO 決定 2026-09-04) — external_publish 전용
+    # 세 번째 봉인 축(위 두 축과 같은 공유-nullable 관례). `ChannelPostVersion.image_sha256`과
+    # 비교해 "승인 후 이미지 교체=재승인, 사유=MEDIA_CHANGED"를 sealed_content_sha256(본문)
+    # 축과 독립적으로 판정하기 위함(AC4 판정 축 세분화 content|schedule|media).
+    sealed_media_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
