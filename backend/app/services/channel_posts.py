@@ -20,6 +20,7 @@ story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -198,12 +199,66 @@ async def _get_active_connection(
     return conn
 
 
+def text_char_count(text: str) -> int:
+    """story #3411 — 「글자 수」의 유일한 정의. Python `len(str)`은 코드포인트 수(=JS
+    `[...text].length`와 같은 값) — surrogate pair가 되는 BMP 밖 문자(😀 등)를 이중으로
+    안 센다. `_validate_text_length`(422 검증)와 `ChannelPostDraftListItem.text_length`
+    (목록/단건 응답)가 이 함수 하나를 공유해야 한다 — 각자 세면 같은 문장에 다른 값이
+    나올 수 있다(유나 design §3-1①)."""
+    return len(text)
+
+
+_ZWJ = "\u200d"  # ZERO WIDTH JOINER
+_VARIATION_SELECTORS = {"\ufe0e", "\ufe0f"}  # VS15(text) / VS16(emoji)
+_HANGUL_JUNGSEONG_JONGSEONG_START = 0x1160
+_HANGUL_JUNGSEONG_JONGSEONG_END = 0x11FF
+TEXT_PREVIEW_MAX_LENGTH = 80
+
+
+def _continues_prior_grapheme_cluster(ch: str, prev: str) -> bool:
+    """story #3411 — ch가 prev와 하나의 grapheme cluster를 이루는 확장자인지. 완전한
+    UAX#29 세그멘테이션이 아니라 유나 design이 명시한 3축만 처리한다(선언, 범위 밖):
+    결합 문자(unicodedata combining class≠0)·variation selector(U+FE0E/FE0F)·ZWJ(U+200D)
+    자신 또는 그 직후·한글 결합 자모(중성/종성, U+1160~U+11FF). 이 3축 밖의 결합(예:
+    국가 국기 이모지의 regional indicator 쌍)은 여전히 쪼개질 수 있다.
+
+    페드루 리뷰(2026-09-04) — cut 지점이 ZWJ **자신**에 떨어지는 경우(`ch == _ZWJ`)를
+    처음엔 놓쳤다: `prev == _ZWJ`만 보면 "ZWJ 다음 글자"는 이어 붙이지만, cut이 ZWJ
+    코드포인트 그 자체를 가리킬 때는 아직 뒤에 이어질 문자를 안 봐서 여기서 멈춰버려
+    앞 글자(예: 👩)만 남고 클러스터(👩‍💻)가 반토막 났다 — `ch == _ZWJ`도 True로 둬서
+    ZWJ 자체를 포함하고, 다음 반복에서 `prev == _ZWJ` 조건이 그 뒤 문자까지 마저
+    끌고 오게 한다(연쇄)."""
+    if unicodedata.combining(ch) != 0:
+        return True
+    if ch in _VARIATION_SELECTORS:
+        return True
+    if ch == _ZWJ or prev == _ZWJ:
+        return True
+    cp = ord(ch)
+    if _HANGUL_JUNGSEONG_JONGSEONG_START <= cp <= _HANGUL_JUNGSEONG_JONGSEONG_END:
+        return True
+    return False
+
+
+def build_text_preview(text: str, *, max_length: int = TEXT_PREVIEW_MAX_LENGTH) -> str:
+    """앞 max_length 코드포인트(text_char_count와 동일 셈법)로 자르되, 그 경계가
+    grapheme cluster 중간이면 클러스터가 끝날 때까지 포함한다(쪼개지 않는다) — 유나
+    design §3-1②. max_length 자체(80)는 서버 상수 — FE가 다시 자를지는 FE 몫."""
+    if text_char_count(text) <= max_length:
+        return text
+    cut = max_length
+    while cut < len(text) and _continues_prior_grapheme_cluster(text[cut], text[cut - 1]):
+        cut += 1
+    return text[:cut]
+
+
 def _validate_text_length(*, channel: str, text: str) -> None:
     adapter = get_channel_adapter(channel)
     if adapter is None or adapter.max_text_length <= 0:
         return
-    if len(text) > adapter.max_text_length:
-        raise ChannelTextTooLongError(max_length=adapter.max_text_length, current_length=len(text))
+    current_length = text_char_count(text)
+    if current_length > adapter.max_text_length:
+        raise ChannelTextTooLongError(max_length=adapter.max_text_length, current_length=current_length)
 
 
 async def create_channel_post_draft_version(
