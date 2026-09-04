@@ -23,6 +23,7 @@ from app.services.channel_posts import (
     ChannelPostNotPublishedError,
     ChannelPostReapprovalRequiredError,
     ChannelPostSealMissingError,
+    ChannelPostSourceContentItemNotFoundError,
     ChannelPostVersionNotFoundError,
     ChannelPublishInProgressError,
     ChannelPublishProviderError,
@@ -39,6 +40,7 @@ from app.services.channel_posts import (
     cancel_scheduled_publication,
     create_channel_post_draft_version,
     get_channel_post_draft,
+    get_site_post_draft,
     is_agent_caller,
     list_channel_post_draft_versions,
     list_channel_post_drafts,
@@ -113,6 +115,10 @@ class CreateChannelPostDraftVersionRequest(BaseModel):
     connection_id: uuid.UUID
     text: str = Field(..., min_length=1)
     link_url: str | None = None
+    # story #3437(AC2·AC5, 페드루 PO 確定 2026-09-04) — 이 채널 변형이 파생된 원문
+    # (content_item=site_post_drafts.id). 휴먼·에이전트 동형(둘 다 받는다) — 초안 생성
+    # 시에만 반영, 편집(기존 draft) 호출은 무시된다(서비스 계층 docstring 참고).
+    source_content_item_id: uuid.UUID | None = None
 
 
 class ChannelPostDraftVersionResponse(BaseModel):
@@ -195,6 +201,9 @@ class ChannelPostDraftListItem(BaseModel):
     # IMAGE 컨테이너가 비동기로 이어서 처리 中(§17-15 "자동으로 이어서 처리 중입니다").
     # 그 외에는 항상 null.
     processing_kind: str | None = None
+    # story #3437(ⓒ, 페드루 PO 確定 2026-09-04) — 단건/목록 응답에 파생 원문 노출.
+    # 없으면 null(소스 없는 단독 채널 초안, 기존 회귀 그대로).
+    source_content_item_id: uuid.UUID | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -304,7 +313,13 @@ async def post_channel_post_draft_version(
         version, channel = await create_channel_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, connection_id=body.connection_id,
             text=body.text, link_url=body.link_url, author_member_id=member_id, author_kind=actor_type,
+            source_content_item_id=body.source_content_item_id,
         )
+    except ChannelPostSourceContentItemNotFoundError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_POST_SOURCE_CONTENT_ITEM_NOT_FOUND", "message": str(exc)},
+        ) from exc
     except ChannelConnectionNotActiveError as exc:
         # 페드루 PO 리뷰(2026-09-03) — 발행 스토리(f8f7cb0f) 결정표가 이 코드를 409(상태
         # 충돌·재연결 필요)로 정했다 — 같은 코드에 HTTP status가 갈리면 FE 매핑이 두 벌이
@@ -553,6 +568,7 @@ def _to_draft_list_item(
         image_final_bytes=latest_image.final_bytes if latest_image else None,
         image_was_converted=latest_image.was_converted if latest_image else None,
         processing_kind=processing_kind,
+        source_content_item_id=draft.source_content_item_id,
     )
 
 
@@ -646,6 +662,34 @@ async def get_channel_post_draft_detail_endpoint(
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
     return _to_draft_list_item(rows[0])
+
+
+@router.get(
+    "/{org_id}/site-posts/drafts/{content_item_id}/variants", response_model=list[ChannelPostDraftListItem],
+)
+async def list_content_item_variants_endpoint(
+    org_id: uuid.UUID,
+    content_item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostDraftListItem]:
+    """story #3437(AC2) — 원문(content_item=site_post_drafts.id) 쪽에서 그 원문에서
+    파생된 채널 변형 목록(채널·상태)을 조회한다. `list_channel_post_drafts()`를
+    `source_content_item_id` 필터로 그대로 재사용(`_to_draft_list_item`과 함께 —
+    단건/목록 조회와 조인·직렬화 축 드리프트 0). 조직 멤버(휴먼·에이전트 모두) 읽기
+    가능 — 목록/단건 조회와 동형 권한 폭(승인·발행 경계 밖)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    content_item = await get_site_post_draft(db, org_id=org_id, draft_id=content_item_id)
+    if content_item is None:
+        raise HTTPException(status_code=404, detail=f"원문을 찾을 수 없습니다: {content_item_id}")
+
+    rows = await list_channel_post_drafts(
+        db, org_id=org_id, source_content_item_id=content_item_id, limit=200,
+    )
+    return [_to_draft_list_item(row) for row in rows]
 
 
 @router.get(

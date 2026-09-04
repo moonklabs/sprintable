@@ -17,6 +17,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member
 from app.services.site_posts import (
+    CampaignNotFoundError,
     ExternalPublishGateNotApprovedError,
     InvalidSitePostInputError,
     MediaNotSupportedPhase0Error,
@@ -75,6 +76,10 @@ class CreateSitePostDraftVersionRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     body_md: str = Field(..., min_length=1)
     media_manifest: list = Field(default_factory=list)
+    # story #3437(AC3, 페드루 PO 確定 2026-09-04) — 이 content_item이 속하는 campaign.
+    # 필수 아님(단독 글 허용). 다른 필드와 동형으로 매 호출 전량 재반영(서비스 계층
+    # docstring 참고, 캐리포워드 없음).
+    campaign_id: uuid.UUID | None = None
 
 
 class SitePostDraftVersionResponse(BaseModel):
@@ -227,15 +232,26 @@ async def post_site_post_draft_version(
     member_id = uuid.UUID(auth.user_id)
     actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
 
+    # story #3437(페드루 PO 리뷰 B1) — 요청 body에 campaign_id 키가 실제로 있었을 때만
+    # 서비스에 명시로 넘긴다(model_fields_set) — 생략은 캐리포워드, 서비스 기본 센티널이
+    # 그 뜻을 안다. 이 라우터가 "생략=None"으로 뭉개면 캐리포워드 자체가 무의미해진다.
+    campaign_kwargs = (
+        {"campaign_id": body.campaign_id} if "campaign_id" in body.model_fields_set else {}
+    )
     try:
         version = await create_site_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, slug=body.slug, lang=body.lang,
             title=body.title, summary=body.summary, tags=body.tags, body_md=body.body_md,
             media_manifest=body.media_manifest, author_member_id=member_id, author_kind=actor_type,
+            **campaign_kwargs,
         )
     except MediaNotSupportedPhase0Error as exc:
         raise HTTPException(
             status_code=422, detail={"code": "MEDIA_NOT_SUPPORTED_PHASE0", "message": str(exc)},
+        ) from exc
+    except CampaignNotFoundError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CAMPAIGN_NOT_FOUND", "message": str(exc)},
         ) from exc
     except InvalidSitePostInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

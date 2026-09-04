@@ -22,6 +22,7 @@ from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
 from app.models.team import TeamMember
 from app.services import hosted_site_publish
+from app.services.campaigns import CampaignNotFoundError, get_campaign  # noqa: F401 (재-export, 라우터가 import)
 from app.services.gate_seal import (
     GateReapprovalRequiredError as SitePostReapprovalRequiredError,
     GateSealMissingError as SitePostSealMissingError,
@@ -245,6 +246,16 @@ _EMPTY_MEDIA_MANIFEST_HASH = hashlib.sha256(json.dumps([], separators=(",", ":")
 _SITE_POST_DESTINATION = "hosted_site"
 
 
+
+# story #3437(페드루 PO 리뷰 B1, 2026-09-04) — campaign 소속은 휴먼 값이다(블루프린트
+# §1 주체 모델: campaign 관리는 조직 마케터 휴먼 몫). campaign 개념을 모르는 호출자
+# (예: 본문만 고치는 에이전트·구식 플러그인)가 이 파라미터를 아예 안 보내면, 그걸
+# "campaign_id=None(해제 의도)"로 읽으면 안 된다 — 휴먼이 묶어 둔 소속이 무관한 편집
+# 한 번에 조용히 풀린다. image_sha256 캐리포워드(channel_posts.py)와 동형 센티널로
+# "생략(유지)"·"명시 null(해제)"·"값(변경)" 세 갈래를 구분한다.
+_CAMPAIGN_ID_CARRY_FORWARD = object()
+
+
 async def create_site_post_draft_version(
     db: AsyncSession,
     *,
@@ -259,14 +270,27 @@ async def create_site_post_draft_version(
     media_manifest: list,
     author_member_id: uuid.UUID,
     author_kind: str,
+    campaign_id: uuid.UUID | None = _CAMPAIGN_ID_CARRY_FORWARD,  # type: ignore[assignment]
 ) -> SitePostVersion:
     """초안을 (org, work_item, slug)로 upsert하고 새 불변 버전을 추가한다. 기존 버전은 절대
     덮어쓰지 않는다(AC3) — 에이전트 원안·휴먼 개정본이 별도 행으로 남는다(AC6). 공개 `SitePost`
-    행은 여기서 절대 만들지 않는다(AC1) — 승인·발행은 별개 게이트·엔드포인트(S2·S3) 몫."""
+    행은 여기서 절대 만들지 않는다(AC1) — 승인·발행은 별개 게이트·엔드포인트(S2·S3) 몫.
+
+    story #3437(AC3, 페드루 PO 確定 2026-09-04·리뷰 B1) — `campaign_id` 생략(기본값)
+    시 draft의 기존 campaign_id를 그대로 캐리포워드한다(신규 draft는 None). 라우터가
+    요청 body에 `campaign_id` 키가 실제로 있었을 때만(pydantic `model_fields_set`)
+    이 인자를 명시로 넘긴다 — 명시 null=해제, 값=변경. 존재하지 않거나 다른 org의
+    campaign이면 CampaignNotFoundError(422)."""
     _validate_slug(slug)
     _validate_lang(lang)
     if media_manifest:
         raise MediaNotSupportedPhase0Error("Phase 0은 미디어 입력을 지원하지 않습니다")
+    explicit_campaign_id = campaign_id is not _CAMPAIGN_ID_CARRY_FORWARD
+    if (
+        explicit_campaign_id and campaign_id is not None
+        and await get_campaign(db, org_id=org_id, campaign_id=campaign_id) is None
+    ):
+        raise CampaignNotFoundError(campaign_id=campaign_id)
 
     draft = (await db.execute(
         select(SitePostDraft)
@@ -277,11 +301,16 @@ async def create_site_post_draft_version(
         .with_for_update()
     )).scalar_one_or_none()
     if draft is None:
-        draft = SitePostDraft(id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, slug=slug)
+        draft = SitePostDraft(
+            id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, slug=slug,
+            campaign_id=(campaign_id if explicit_campaign_id else None),
+        )
         db.add(draft)
         await db.flush()
         next_version = 1
     else:
+        if explicit_campaign_id:
+            draft.campaign_id = campaign_id
         next_version = (await db.execute(
             select(func.coalesce(func.max(SitePostVersion.version), 0)).where(
                 SitePostVersion.draft_id == draft.id

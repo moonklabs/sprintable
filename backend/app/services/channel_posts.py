@@ -44,6 +44,7 @@ from app.services.gate_seal import (
 )
 from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채널 라우터도 재사용)
     ExternalPublishGateNotApprovedError,
+    get_site_post_draft,
     is_agent_caller,
 )
 from app.services.utm import attach_utm, resolve_utm_campaign
@@ -65,6 +66,19 @@ class ChannelConnectionNotActiveError(ValueError):
     def __init__(self, *, connection_id: uuid.UUID):
         self.connection_id = connection_id
         super().__init__(f"연결을 찾을 수 없거나 비활성 상태입니다: {connection_id}")
+
+
+class ChannelPostSourceContentItemNotFoundError(ValueError):
+    """story #3437(AC2, 페드루 PO 確定 2026-09-04 보정 ⓐ) — source_content_item_id가 이
+    org의 SitePostDraft가 아니다(존재 안 함 또는 다른 org 소속). get_site_post_draft가
+    org_id 조건으로 조회하는 자리라 "존재 안 함"과 "다른 org"가 이미 같은 결과(None)를
+    낸다 — 두 경우를 굳이 갈라 존재를 비노출한다(이 도메인의 기존 "존재 비노출" 관례
+    그대로). PO 確定대로 422(입력 형태 오류 축, CHANNEL_CONNECTION_NOT_ACTIVE의 409와는
+    다른 축 — 이건 "그런 원문이 없다"는 형태 오류다)."""
+
+    def __init__(self, *, source_content_item_id: uuid.UUID):
+        self.source_content_item_id = source_content_item_id
+        super().__init__(f"원문(content_item)을 찾을 수 없습니다: {source_content_item_id}")
 
 
 class ChannelTextTooLongError(ValueError):
@@ -358,6 +372,7 @@ async def create_channel_post_draft_version(
     author_member_id: uuid.UUID,
     author_kind: str,
     image_sha256: str | None = _IMAGE_SHA256_CARRY_FORWARD,  # type: ignore[assignment]
+    source_content_item_id: uuid.UUID | None = None,
 ) -> tuple[ChannelPostVersion, str]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
     site_posts.create_site_post_draft_version과 1:1 대응(AC1).
@@ -369,9 +384,19 @@ async def create_channel_post_draft_version(
 
     story 620beefc — `image_sha256` 생략(기본값) 시 draft의 직전 최신 버전 값을 그대로
     캐리포워드한다(§17-14 배지가 「이미지가 텍스트 편집만으로 조용히 사라졌다」를 만들지
-    않도록). `channel_post_images.py`의 이미지 첨부 플로우만 이 값을 명시로 넘긴다."""
+    않도록). `channel_post_images.py`의 이미지 첨부 플로우만 이 값을 명시로 넘긴다.
+
+    story #3437(AC2, 페드루 PO 確定 2026-09-04) — `source_content_item_id`는 **초안
+    생성 시에만** 반영한다(channel이 connection_id의 파생값으로 생성 시에만 고정되는
+    것과 동형 축 — 편집마다 다시 보내는 text/link_url과는 다른 종류의 필드). org
+    불일치·존재하지 않는 원문은 `ChannelPostSourceContentItemNotFoundError`(422)."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
+
+    if source_content_item_id is not None:
+        content_item = await get_site_post_draft(db, org_id=org_id, draft_id=source_content_item_id)
+        if content_item is None:
+            raise ChannelPostSourceContentItemNotFoundError(source_content_item_id=source_content_item_id)
 
     draft = (await db.execute(
         select(ChannelPostDraft)
@@ -385,6 +410,7 @@ async def create_channel_post_draft_version(
         draft = ChannelPostDraft(
             id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id,
             channel=connection.channel, connection_id=connection_id,
+            source_content_item_id=source_content_item_id,
         )
         db.add(draft)
         await db.flush()
@@ -536,6 +562,7 @@ async def list_channel_post_drafts(
     scheduled_from: datetime | None = None,
     scheduled_to: datetime | None = None,
     unscheduled: bool = False,
+    source_content_item_id: uuid.UUID | None = None,
 ) -> list[
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
@@ -659,6 +686,10 @@ async def list_channel_post_drafts(
     stmt = stmt.limit(limit).offset(offset)
     if draft_id is not None:
         stmt = stmt.where(ChannelPostDraft.id == draft_id)
+    # story #3437(AC2) — 원문(content_item) 쪽 「파생 변형 목록」조회가 이 함수를 그대로
+    # 재사용(단건 조회가 draft_id로 재사용하는 것과 동형 — 두 번째 조인 축을 새로 안 짠다).
+    if source_content_item_id is not None:
+        stmt = stmt.where(ChannelPostDraft.source_content_item_id == source_content_item_id)
     page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
     if not page_rows:
         return []

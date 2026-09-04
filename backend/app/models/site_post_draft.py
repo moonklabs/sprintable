@@ -4,7 +4,10 @@ site_post.py)와 분리 — 승인·발행 전에는 이 테이블에만 존재�
 
 버전 원문·주체는 SitePostVersion(아래)이 SSOT — 이 draft 행 자체엔 원작성 주체를 중복 저장하지
 않는다(version_number=1이 원작성 버전).
-"""
+
+`campaign_id`(story #3437, 페드루 PO 確定 2026-09-04) — 이 content_item이 속하는
+Campaign(campaign.py). FK 없음(이 도메인 전체 관례). nullable — campaign 없는 단독 글도
+허용(AC3 명시)."""
 from __future__ import annotations
 
 import uuid
@@ -28,6 +31,7 @@ class SitePostDraft(Base):
     work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    campaign_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
