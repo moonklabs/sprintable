@@ -152,7 +152,7 @@ export function KanbanColumn({
             <>
               <button
                 type="button"
-                aria-label="Expand done column"
+                aria-label={t('expandDoneColumn')}
                 onClick={onToggleCollapse}
                 className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
               >
@@ -207,7 +207,7 @@ export function KanbanColumn({
                 {onToggleCollapse && (
                   <button
                     type="button"
-                    aria-label="Collapse done column"
+                    aria-label={t('collapseDoneColumn')}
                     onClick={onToggleCollapse}
                     className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
                   >

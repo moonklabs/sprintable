@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import type { DependencyEdge } from './types';
 
 interface DependencyGraphProps {
@@ -18,6 +19,7 @@ function nodeColor(status: string | undefined, isCurrent: boolean) {
 }
 
 export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: DependencyGraphProps) {
+  const t = useTranslations('board');
   const blockers = deps.filter((d) => d.dep_type === 'blocks' && d.to_id === storyId);
   const blockeds = deps.filter((d) => d.dep_type === 'blocks' && d.from_id === storyId);
   const dependsOn = deps.filter((d) => d.dep_type === 'depends_on' && d.from_id === storyId);
@@ -58,7 +60,8 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
       width="100%"
       style={{ maxHeight: 200 }}
       className="overflow-visible"
-      aria-label="Dependency graph"
+      role="img"
+      aria-label={t('dependencyGraphLabel')}
     >
       {/* Left nodes */}
       {leftVisible.map((d, i) => {

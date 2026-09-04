@@ -948,7 +948,7 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     stubFetch([{ id: 's-toggle', title: '토글카드', status: 'backlog', priority: 'medium' }]);
     await mount();
 
-    const boardToggle = container.querySelector<HTMLButtonElement>('button[title="Board view"]');
+    const boardToggle = container.querySelector<HTMLButtonElement>('button[title="보드 보기"]');
     expect(boardToggle).not.toBeNull();
     await act(async () => { boardToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
