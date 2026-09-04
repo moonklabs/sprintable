@@ -2266,6 +2266,7 @@
     "channelPostsImageAspectRatioExceeded": "종횡비 한도는 {maxAspectRatio}:1인데 {aspectRatio}:1입니다",
     "channelPostsImageConversionFailed": "자동 변환 후에도 한도 {maxBytes}를 넘습니다({finalBytes})",
     "channelPostsImageAnimatedUnsupported": "애니메이션 이미지는 지원하지 않습니다({frameCount}프레임)",
+    "channelPostsImageConvertedBadge": "이 채널 규격에 맞춰 자동 변환됐습니다: 너비 {originalWidth}px → {finalWidth}px · 용량 {originalBytes} → {finalBytes}",
     "channelPostsPublicationFailedNotice": "발행에 실패했습니다 — 이 초안을 다시 발행하면 이 시도를 이어서 처리합니다."
   },
   "docs": {

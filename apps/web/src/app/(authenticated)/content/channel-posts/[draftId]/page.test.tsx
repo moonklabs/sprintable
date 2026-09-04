@@ -1291,3 +1291,55 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(errorText).toContain('25.0MB');
   });
 });
+
+// story #3428(T5-M·§17-14) — 승인 카드 썸네일 + 자동 변환 배지.
+describe('ChannelPostEditPage — 승인 카드 썸네일·배지(T5-M, story #3428)', () => {
+  it('이미지 없는 초안(thumbnail_url=null)은 썸네일·배지 둘 다 안 그린다', async () => {
+    stubFetch({ draftDetail: { thumbnail_url: null } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-converted-badge"]')).toBeNull();
+  });
+
+  it('⭐was_converted=true — 썸네일과 배지가 원본→최종 값 그대로 뜬다', async () => {
+    stubFetch({
+      draftDetail: {
+        thumbnail_url: 'https://storage.googleapis.com/bucket/x.jpg',
+        image_original_width: 4000, image_original_bytes: 12000000,
+        image_final_width: 1440, image_final_bytes: 3100000, image_was_converted: true,
+      } as never,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
+    const badge = container.querySelector('[data-testid="channel-post-image-converted-badge"]')?.textContent ?? '';
+    expect(badge).toContain('4000');
+    expect(badge).toContain('1440');
+    expect(badge).toContain('11.4MB');
+    expect(badge).toContain('3.0MB');
+  });
+
+  it('⭐was_converted=false — 썸네일은 뜨되 배지는 안 뜬다(원본=최종)', async () => {
+    stubFetch({
+      draftDetail: {
+        thumbnail_url: 'https://storage.googleapis.com/bucket/x.jpg',
+        image_original_width: 800, image_original_bytes: 500000,
+        image_final_width: 800, image_final_bytes: 500000, image_was_converted: false,
+      } as never,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-converted-badge"]')).toBeNull();
+  });
+});

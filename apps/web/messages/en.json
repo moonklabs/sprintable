@@ -2266,6 +2266,7 @@
     "channelPostsImageAspectRatioExceeded": "The aspect ratio limit is {maxAspectRatio}:1, but this is {aspectRatio}:1",
     "channelPostsImageConversionFailed": "Even after automatic conversion, this still exceeds the {maxBytes} limit ({finalBytes})",
     "channelPostsImageAnimatedUnsupported": "Animated images aren't supported ({frameCount} frames)",
+    "channelPostsImageConvertedBadge": "Automatically converted to fit this channel's specs: width {originalWidth}px → {finalWidth}px · size {originalBytes} → {finalBytes}",
     "channelPostsPublicationFailedNotice": "Publishing failed — republishing this draft will continue that attempt."
   },
   "docs": {

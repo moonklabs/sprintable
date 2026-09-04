@@ -755,6 +755,29 @@ export default function ChannelPostEditPage() {
             </p>
           </div>
         ) : null}
+        {/* story #3428(T5-M·§17-14) — 썸네일 + 자동 변환 배지. was_converted=false면
+            원본=최종이라 배지 자체를 안 그린다(값은 서버가 낸 것만, 문구 조립만 화면
+            몫 — 판정은 안 함). 이미지 없는 초안(thumbnail_url=null)은 이 블록 전체를
+            건너뛴다. */}
+        {draft.thumbnail_url ? (
+          <div className="space-y-1">
+            {/* eslint-disable-next-line @next/next/no-img-element -- story #3428: public-read GCS 오브젝트 URL(외부 도메인, next/image 대상 밖 — avatar_upload.py 소비부와 동형 관례). */}
+            <img
+              src={draft.thumbnail_url} alt="" className="h-32 w-32 rounded object-cover"
+              data-testid="channel-post-approval-thumbnail"
+            />
+            {draft.image_was_converted ? (
+              <p className="text-xs text-muted-foreground" data-testid="channel-post-image-converted-badge">
+                {t('channelPostsImageConvertedBadge', {
+                  originalWidth: draft.image_original_width ?? 0,
+                  finalWidth: draft.image_final_width ?? 0,
+                  originalBytes: typeof draft.image_original_bytes === 'number' ? formatMegabytes(draft.image_original_bytes) : '',
+                  finalBytes: typeof draft.image_final_bytes === 'number' ? formatMegabytes(draft.image_final_bytes) : '',
+                })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* story #3402 PR2(T7/T9) — publication_status는 다섯 상태 밖의 신호라
