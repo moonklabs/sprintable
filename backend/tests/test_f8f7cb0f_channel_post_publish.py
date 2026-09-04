@@ -277,7 +277,7 @@ async def test_publish_success_full_flow_with_utm_and_audit():
 
         captured_text = {}
 
-        async def _fake_create_container(client, *, access_token, threads_user_id, text):
+        async def _fake_create_container(client, *, access_token, threads_user_id, text, image_url=None):
             captured_text["text"] = text
             assert access_token == "plain-access-token"
             return "creation-123"
@@ -758,7 +758,7 @@ async def test_utm_skipped_when_link_already_has_utm_params():
 
         captured_text = {}
 
-        async def _fake_create_container(client, *, access_token, threads_user_id, text):
+        async def _fake_create_container(client, *, access_token, threads_user_id, text, image_url=None):
             captured_text["text"] = text
             return "creation-utm-skip"
 

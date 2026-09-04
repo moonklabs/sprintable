@@ -3,7 +3,7 @@ API. `app/routers/site_posts.py`(story #3365) 형태를 그대로 미러 — 새
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
@@ -15,6 +15,7 @@ from app.dependencies.database import get_db
 from app.models.channel_post_version import ChannelPostVersion
 from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
+    ChannelImageContainerFailedError,
     ChannelPostApproverRoleMissingError,
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
@@ -689,6 +690,11 @@ class PublishChannelPostResponse(BaseModel):
     scheduled: bool = False
     command_id: uuid.UUID | None = None
     scheduled_at: str | None = None
+    # story 620beefc(AC5·§17-15) — IMAGE 컨테이너는 비동기라, 예약이 아닌 "즉시" 요청도
+    # 이 응답 시점엔 아직 발행이 안 끝났을 수 있다(`scheduled`=사용자가 미래 시각을
+    # 지정했다는 뜻과는 다른 축 — 이건 "지금 요청했는데 서버가 자동으로 이어서
+    # 처리 중"). true면 permalink/external_id/published_at은 전부 null(아직 없다).
+    processing: bool = False
 
 
 @router.post(
@@ -885,6 +891,35 @@ async def publish_channel_post_draft_endpoint(
             status_code=409,
             detail=_with_command_state({"code": "CHANNEL_PUBLISH_IN_PROGRESS", "message": str(exc)}),
         ) from exc
+    except ChannelImageContainerFailedError as exc:
+        # story 620beefc(AC5) — Threads가 IMAGE 컨테이너를 ERROR/EXPIRED로 끝냈다(결정적,
+        # 재시도해도 안 바뀐다). needs_check 분류라 자동 재시도 없이 사람 재시도(retry
+        # 엔드포인트, AC5)만 남긴다.
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_IMAGE_CONTAINER_FAILED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=_with_command_state({
+                "code": "CHANNEL_IMAGE_CONTAINER_FAILED", "message": str(exc),
+                "container_status": exc.container_status,
+            }),
+        ) from exc
+
+    if row.status != "published":
+        # story 620beefc(AC5) — IMAGE 컨테이너가 아직 처리 中. 예외가 안 났다는 것
+        # 자체가 "지금까지는 정상, 아직 안 끝났다"는 뜻 — command는 pending에
+        # 남기고(다음 cron tick이 이어 폴링) 사람에게는 "처리 中"임을 그대로 알린다.
+        command.status = "pending"
+        command.next_attempt_at = now + timedelta(seconds=30)
+        command.last_error = None
+        command.failure_kind = None
+        await db.commit()
+        return PublishChannelPostResponse(
+            version_id=row.version_id, scheduled=False, processing=True,
+            command_id=command.id, scheduled_at=None,
+        )
 
     command.status = "completed"
     command.last_error = None

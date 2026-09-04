@@ -118,6 +118,21 @@ _CONCURRENT_PUBLISH_POLL_ATTEMPTS = 10
 _CONCURRENT_PUBLISH_POLL_INTERVAL_SEC = 0.3
 
 
+class ChannelImageContainerFailedError(Exception):
+    """story 620beefc(AC5) — Threads IMAGE 컨테이너가 ERROR/EXPIRED로 끝났다(그라운딩
+    §② 실측 상태값). 폴링을 더 반복해도 결과가 안 바뀌는 결정적 실패라 needs_check로
+    분류돼(publication_command.py) 자동 재시도 없이 사람 재시도(AC5)로 넘어간다."""
+
+    def __init__(self, *, gate_id: uuid.UUID, container_status: str, error_message: str | None):
+        self.gate_id = gate_id
+        self.container_status = container_status
+        self.error_message = error_message
+        super().__init__(
+            f"이미지 컨테이너 처리 실패(gate_id={gate_id}, status={container_status}): "
+            f"{error_message or '(no error_message)'}"
+        )
+
+
 class ChannelPublishInProgressError(Exception):
     """story #3395 — 같은 (gate_id, version_id)로 동시 요청 2건이 들어와 진 쪽이 이긴
     쪽의 완료를 짧게 기다렸는데도(POLL_ATTEMPTS×POLL_INTERVAL_SEC) 이긴 쪽이 아직
@@ -918,6 +933,22 @@ async def publish_channel_post_draft(
     if existing is not None and existing.status == "published":
         return existing
 
+    # story 620beefc(AC5) — 이 버전에 이미지가 붙어 있으면 IMAGE 컨테이너 경로(비동기),
+    # 아니면 기존 TEXT 경로(동기, 완전 무변경). 이미지 유무는 channel_post_images 행
+    # (버전당 1건, Phase1)의 존재로 판단 — latest.image_sha256만으로는 「나가는 파생본」
+    # 경로를 못 구하므로 행 자체를 조회한다.
+    image_public_url: str | None = None
+    if latest.image_sha256 is not None:
+        from app.models.channel_post_image import ChannelPostImage
+        from app.services.channel_post_images import public_url_for_object_path
+
+        image_row = (await db.execute(
+            select(ChannelPostImage).where(ChannelPostImage.version_id == latest.id)
+        )).scalar_one_or_none()
+        if image_row is not None:
+            image_public_url = public_url_for_object_path(image_row.final_object_path)
+    has_image = image_public_url is not None
+
     # 발행 직전 재검증③(연결 활성) — 초안 생성/상신과 같은 헬퍼.
     connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
     access_token = decrypt_for_use(connection)
@@ -929,6 +960,7 @@ async def publish_channel_post_draft(
     from app.services.threads_publish import (
         ThreadsPublishError,
         create_container,
+        get_container_status,
         get_permalink,
         get_publishing_limit,
         publish_container,
@@ -1040,11 +1072,12 @@ async def publish_channel_post_draft(
                     raise ChannelPublishInProgressError(gate_id=gate.id)
                     return row
 
-            if row.external_container_id is None:
+            just_created_container = row.external_container_id is None
+            if just_created_container:
                 try:
                     container_id = await create_container(
                         client, access_token=access_token, threads_user_id=connection.account_id,
-                        text=text_to_post,
+                        text=text_to_post, image_url=image_public_url,
                     )
                 except ThreadsPublishError as exc:
                     error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
@@ -1060,6 +1093,43 @@ async def publish_channel_post_draft(
                 row.error_code = None
                 row.last_error = None
                 await db.commit()
+                if has_image:
+                    # story 620beefc(AC5, PO 決定) — IMAGE 컨테이너는 비동기(그라운딩
+                    # §② Meta 권장 "평균 30초 대기"). 막 만든 컨테이너를 이 자리에서
+                    # 곧바로 poll하지 않는다 — container_created 그대로 반환, 호출부
+                    # (cron 워커·즉시발행 라우터 둘 다)가 command를 pending(next_
+                    # attempt_at=+30s)으로 남기면 다음 tick이 이어 폴링한다(새 큐 X,
+                    # 기존 워커 재사용).
+                    return row
+
+            if has_image:
+                # story 620beefc(AC5) — 재진입(다음 tick)마다 컨테이너 상태를 먼저
+                # 확인한다. FINISHED여야만 publish 호출로 진행 — Meta 문서: 완료 前
+                # publish는 실패한다.
+                try:
+                    container_status, container_error_message = await get_container_status(
+                        client, access_token=access_token, creation_id=row.external_container_id,
+                    )
+                except ThreadsPublishError as exc:
+                    error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                    row.status = "failed"
+                    row.error_code = error_code
+                    row.last_error = exc.message
+                    await db.commit()
+                    if error_code == "CHANNEL_TOKEN_EXPIRED":
+                        await apply_refresh_failure(db, connection=connection, error_message=exc.message)
+                    raise mapped_exc from exc
+                if container_status == "IN_PROGRESS":
+                    return row  # 아직 처리 中 — 다음 tick이 다시 폴링(호출부가 재큐잉).
+                if container_status in ("ERROR", "EXPIRED"):
+                    row.status = "failed"
+                    row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"
+                    row.last_error = container_error_message or f"container status={container_status}"
+                    await db.commit()
+                    raise ChannelImageContainerFailedError(
+                        gate_id=gate.id, container_status=container_status, error_message=container_error_message,
+                    )
+                # FINISHED(관측되면 PUBLISHED도 안전하게 통과) — 아래로 진행.
 
             try:
                 media_id = await publish_container(
