@@ -272,6 +272,17 @@ export function findSubstringCollisions(
 // 값 자체는 AuditRow가 시각 렌더하지 않는 required prop 채움용, #2955 doc-status-rail.tsx와
 // 동일 관례) 같은 컴포넌트가 goals.trustRailOutcomeJudged="결과 확定 · {label}"도 렌더한다 —
 // 부분문자열은 겹치지만 하나는 애초에 안 보이는 값이라 혼동 여지가 실질 0.
+// story #3402(2026-09-04, 유나 design review·페드루 PO 판정) — content.channelPostsTextTooLong/
+// channelPostsRateLimitedUntil(둘 다 {max}/{current}/{time} 보간이 있어 numberAdjacent=true)
+// <-> content.originAuthorUnknown("—" 한 글자, 보간 없음). 겹치는 건 오직 문장 중간의 「—」
+// 구두점 하나뿐이다 — originAuthorUnknown이 "—"를 값으로 쓰는 건 «값을 모른다»는 자리표시
+// 기호(이 화면 전역에서 「키 부재→—」 관례)이지 이 두 문장이 말하는 "한도"·"reset 시각"과
+// 같은 개념을 가리키는 게 전혀 아니다. #2352/#2365가 잡으려는 "같은 화면의 두 «수»가
+// 헷갈리는" 병이 아니다 — 애초에 originAuthorUnknown 쪽엔 수 자체가 없다(단독 자리표시
+// 기호일 뿐). 유나 design review가 이 두 문구의 "—" 구두점 자체를 정본으로 지정했다(쉼표로
+// 바꾸면 en 쪽이 comma splice가 되는 문법 문제까지 겹쳐 구두점을 굽히지 않는 쪽으로 판정,
+// 페드루 PO 확定 2026-09-04 06:13Z). 다시 볼 때 — 이 가드가 "구두점 자체"를 문제 삼는
+// 방식으로 정교해지면(값 안의 특정 기호 하나만 따로 취급) 재검토.
 export const EXEMPT_PAIRS = new Set<string>([
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
@@ -280,6 +291,8 @@ export const EXEMPT_PAIRS = new Set<string>([
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',
   'settings.memberLimitExceededError <-> settings.roleMember',
+  'content.channelPostsTextTooLong <-> content.originAuthorUnknown',
+  'content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
