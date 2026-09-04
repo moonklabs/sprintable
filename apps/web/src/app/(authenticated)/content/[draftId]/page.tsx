@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -13,6 +13,7 @@ import {
   deriveContentPostStatus,
   type ContentPostStatusInput,
 } from '@/components/content/post-status';
+import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
@@ -78,6 +79,31 @@ interface SitePostPublicationInfo {
 
 function realStr(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+// story 15e481ce(#3453 AC1) — 활성 소셜 연결(어댑터가 사회형이라는 것은 애초에 connection
+// row가 존재한다는 사실 자체로 이미 참이다 — hosted_site는 requires_connection=false라
+// connection row가 없다, backend/app/services/channel_adapters.py 그라운딩). 그래서
+// channel-connections 목록을 kind로 다시 거를 필요가 없다 — status=active만 본다.
+interface ActiveConnectionOption {
+  id: string;
+  channel: string;
+  account_label: string | null;
+  status: string;
+}
+
+// story 15e481ce(#3453 AC2, 유나 §14-2) — 원문 상세의 "같은 스토리의 채널 글" 역방향
+// 목록. §14-2가 요구하는 값만(채널·상태 칩·상세 링크) — 그 이상은 목록 응답에 없다.
+interface ChannelPostVariantItem {
+  draft_id: string;
+  channel: string;
+  gate_status?: string | null;
+  reapproval_required?: boolean | null;
+  sealed_content_sha256?: string | null;
+  body_sha256: string;
+  publication_status?: string | null;
+  error_code?: string;
+  published_at?: string | null;
 }
 
 // Gate.status는 auto_passed/voided/held 등도 가질 수 있지만 Phase 0 external_publish는
@@ -159,6 +185,15 @@ export default function ContentPostEditPage() {
     { type: 'success' } | { type: 'error'; text: string; raw?: string } | null
   >(null);
 
+  // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결 목록·이미 만든 변형
+  // 목록은 서로 다른 조회(연결=channel-connections, 변형=variants) — 같이 로드한다.
+  const [activeConnections, setActiveConnections] = useState<ActiveConnectionOption[]>([]);
+  const [variants, setVariants] = useState<ChannelPostVariantItem[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState('');
+  const [creatingVariant, setCreatingVariant] = useState(false);
+  const [createVariantResult, setCreateVariantResult] = useState<{ type: 'error'; text: string } | null>(null);
+  const router = useRouter();
+
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
@@ -196,6 +231,76 @@ export default function ContentPostEditPage() {
 
   const latest = versions[versions.length - 1];
   const workItemId = latest?.source_story_id;
+
+  // story 15e481ce(#3453 AC1·AC2) — 활성 연결 목록(변형 만들기 선택지)과 이미 만든
+  // 변형 목록(§14-2 "같은 스토리의 채널 글")을 같이 부른다. onRefresh 없이 draftId
+  // 로드 시 한 번(변형 생성 성공 뒤엔 loadVariants만 다시 부른다 — 아래 handleCreateVariant).
+  const loadVariants = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/variants`);
+      if (!res.ok) return;
+      const json = (await res.json().catch(() => null)) as { data?: ChannelPostVariantItem[] } | null;
+      setVariants(json?.data ?? []);
+    } catch {
+      // §14-2 표기는 있으면 보이고 없으면 안 보이는 부가 정보 — 조회 실패로 화면
+      // 전체를 막지 않는다(gate·publication best-effort 조회와 동형 관례).
+    }
+  }, [orgId, draftId]);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    void loadVariants();
+    fetchWithAuth(`/api/organizations/${orgId}/channel-connections`)
+      .then(async (r) => {
+        if (cancelled || !r.ok) return;
+        const json = (await r.json().catch(() => null)) as { data?: ActiveConnectionOption[] } | null;
+        setActiveConnections((json?.data ?? []).filter((c) => c.status === 'active'));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [orgId, loadVariants]);
+
+  // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. text는 min_length=1(BE 검증) —
+  // 빈 문자열을 보낼 수 없어 summary를 채워 넣고, summary도 비어 있으면 title로
+  // 폴백한다(title은 항상 non-empty, BE 자체 검증). link_url은 발행된 URL이 있으면
+  // 그 값(없으면 null — 지어내지 않는다).
+  const handleCreateVariant = useCallback(async () => {
+    if (!orgId || !workItemId || !selectedConnectionId || !latest) return;
+    setCreatingVariant(true);
+    setCreateVariantResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          work_item_id: workItemId,
+          connection_id: selectedConnectionId,
+          text: latest.summary.trim() || latest.title,
+          link_url: publication?.url ?? null,
+          source_content_item_id: draftId,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as { data?: { draft_id: string } } | null;
+        if (json?.data?.draft_id) {
+          router.push(`/content/channel-posts/${json.data.draft_id}`);
+          return;
+        }
+      }
+      const body = await res.json().catch(() => null);
+      const info = parseSitePostApiError(body);
+      setCreateVariantResult({
+        type: 'error',
+        text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCreateVariantFailed')),
+      });
+    } catch {
+      setCreateVariantResult({ type: 'error', text: t('channelPostsCreateVariantFailed') });
+    } finally {
+      setCreatingVariant(false);
+    }
+  }, [orgId, workItemId, selectedConnectionId, latest, publication, draftId, router, t]);
 
   // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
   // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·
@@ -583,6 +688,72 @@ export default function ContentPostEditPage() {
           {!canUnpublish ? (
             <p className="text-xs text-muted-foreground">{t('unpublishDisabledReason')}</p>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결이 0건이면 이
+          자리 자체를 안 그린다(유나 §13-4 "없는 자리를 그리지 않는다" — 비활성 버튼은
+          "곧 됩니다"로 읽힌다). */}
+      {activeConnections.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-create-variant">
+          <p className="text-xs font-medium text-muted-foreground">{t('channelPostsCreateVariantLabel')}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedConnectionId}
+              onChange={(e) => setSelectedConnectionId(e.target.value)}
+              className="rounded-md border border-border px-2 py-1.5 text-sm"
+              data-testid="content-create-variant-connection-select"
+            >
+              <option value="">{t('channelPostsCreateVariantSelectPlaceholder')}</option>
+              {activeConnections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {(c.channel === 'threads' ? t('channelThreads') : c.channel)}
+                  {c.account_label ? ` · ${c.account_label}` : ''}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button" size="sm"
+              onClick={() => void handleCreateVariant()}
+              disabled={!selectedConnectionId || creatingVariant}
+              data-testid="content-create-variant-button"
+            >
+              {creatingVariant ? t('channelPostsCreateVariantPendingCta') : t('channelPostsCreateVariantCta')}
+            </Button>
+          </div>
+          {createVariantResult ? (
+            <Alert variant="destructive" role="alert" data-testid="content-create-variant-error">
+              <AlertDescription>{createVariantResult.text}</AlertDescription>
+            </Alert>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* story 15e481ce(#3453 AC2, 유나 §14-2) — "같은 스토리의 채널 글"(역방향). 비어
+          있으면 그 자리 자체를 안 그린다. */}
+      {variants.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-variants-list">
+          <p className="text-xs font-medium text-muted-foreground">{t('channelPostsVariantsListLabel')}</p>
+          <ul className="space-y-1.5">
+            {variants.map((v) => (
+              <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
+                <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
+                  {v.channel === 'threads' ? t('channelThreads') : v.channel}
+                </Link>
+                <StatusChip
+                  status={deriveChannelPostView({
+                    gateStatus: toGateStatus(v.gate_status ?? undefined),
+                    reapprovalRequired: v.reapproval_required ?? undefined,
+                    sealedBodySha256: realStr(v.sealed_content_sha256),
+                    currentBodySha256: v.body_sha256,
+                    publicationStatus: v.publication_status as ChannelPublicationStatus | null | undefined,
+                    errorCode: v.error_code,
+                    publishedAt: v.published_at,
+                  }).status}
+                />
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

@@ -10,12 +10,15 @@ import koMessages from '../../../../../messages/ko.json';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 const { useParamsMock } = vi.hoisted(() => ({ useParamsMock: vi.fn() }));
+// story 15e481ce(#3453 AC1) — 변형 생성 성공 뒤 router.push로 이동한다.
+const { routerPushMock } = vi.hoisted(() => ({ routerPushMock: vi.fn() }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 vi.mock('next/navigation', () => ({
   useParams: () => useParamsMock(),
+  useRouter: () => ({ push: routerPushMock }),
 }));
 
 import ContentPostEditPage from './page';
@@ -42,6 +45,7 @@ beforeEach(() => {
   // 테스트가 이 값을 owner/admin이 아닌 값으로 덮어쓴다.
   useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'owner' });
   useParamsMock.mockReturnValue({ draftId: DRAFT_ID });
+  routerPushMock.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -85,6 +89,11 @@ function stubFetchWithVersions(
     // 않으면 published_by_member_id가 그대로 앞 8자 폴백으로 렌더된다, 그 자체도 유효한
     // graceful-degradation 케이스).
     teamMembers?: { id: string; name: string }[];
+    // story 15e481ce(#3453 AC1·AC2) — 활성 연결·이미 만든 변형. 기본값 0건(대부분
+    // 테스트가 이 스토리와 무관 — 자리 자체가 안 뜨는 쪽이 기본).
+    activeConnections?: { id: string; channel: string; account_label: string | null; status: string }[];
+    variants?: unknown[];
+    onCreateVariant?: (body: unknown) => { status: number; body: unknown };
   },
 ) {
   vi.stubGlobal(
@@ -93,6 +102,18 @@ function stubFetchWithVersions(
       const url = String(input);
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/variants`) {
+        return { ok: true, status: 200, json: async () => ({ data: opts?.variants ?? [], error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
+        return { ok: true, status: 200, json: async () => ({ data: opts?.activeConnections ?? [], error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts?.onCreateVariant?.(body) ?? { status: 201, body: { draft_id: 'cp-1', version_id: 'cpv-1', version: 1 } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
@@ -865,5 +886,122 @@ describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', ()
     const unpublishTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.unpublishCta);
     expect(unpublishTrigger?.hasAttribute('disabled')).toBe(false);
     expect(container.textContent).not.toContain(koMessages.content.unpublishDisabledReason);
+  });
+});
+
+// story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」.
+describe('ContentPostEditPage — 변형 만들기(story 15e481ce AC1)', () => {
+  const ACTIVE_CONNECTION = { id: 'conn-1', channel: 'threads', account_label: '@sprintable_ai', status: 'active' };
+
+  it('⭐활성 연결이 0건이면 「변형 만들기」 자리 자체가 안 그려진다(없는 자리를 그리지 않는다)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { activeConnections: [] });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="content-create-variant"]')).toBeNull();
+  });
+
+  it('⭐활성 연결이 있으면 선택지에 뜨고, 고른 뒤 만들면 work_item_id 재사용·source_content_item_id·text=summary로 POST된다', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      activeConnections: [ACTIVE_CONNECTION],
+      onCreateVariant: (body) => { capturedBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: 'cp-1', version_id: 'cpv-1', version: 1 } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="content-create-variant-connection-select"]') as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+    setter?.call(select, 'conn-1');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const createBtn = container.querySelector('[data-testid="content-create-variant-button"]') as HTMLButtonElement;
+    expect(createBtn.disabled).toBe(false);
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capturedBody?.work_item_id).toBe('w1');
+    expect(capturedBody?.connection_id).toBe('conn-1');
+    expect(capturedBody?.source_content_item_id).toBe(DRAFT_ID);
+    expect(capturedBody?.text).toBe('요약입니다');
+    expect(routerPushMock).toHaveBeenCalledWith('/content/channel-posts/cp-1');
+  });
+
+  it('summary가 비어 있으면 title로 폴백한다(text는 BE min_length=1이라 빈 문자열을 못 보낸다)', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([{ ...VERSION_1, summary: '' }], undefined, undefined, {
+      activeConnections: [ACTIVE_CONNECTION],
+      onCreateVariant: (body) => { capturedBody = body as Record<string, unknown>; return { status: 201, body: { draft_id: 'cp-1', version_id: 'cpv-1', version: 1 } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="content-create-variant-connection-select"]') as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+    setter?.call(select, 'conn-1');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    const createBtn = container.querySelector('[data-testid="content-create-variant-button"]') as HTMLButtonElement;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capturedBody?.text).toBe('2호 글');
+  });
+
+  it('⭐422(CHANNEL_POST_SOURCE_CONTENT_ITEM_NOT_FOUND)는 서버 문장을 그대로 보인다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      activeConnections: [ACTIVE_CONNECTION],
+      onCreateVariant: () => ({
+        status: 422, body: { detail: { code: 'CHANNEL_POST_SOURCE_CONTENT_ITEM_NOT_FOUND', message: '원문을 찾을 수 없습니다: d1' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="content-create-variant-connection-select"]') as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+    setter?.call(select, 'conn-1');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    const createBtn = container.querySelector('[data-testid="content-create-variant-button"]') as HTMLButtonElement;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-create-variant-error"]')?.textContent)
+      .toBe('원문을 찾을 수 없습니다: d1');
+    expect(routerPushMock).not.toHaveBeenCalled();
+  });
+
+  it('만들기 버튼은 연결을 고르기 前엔 비활성이다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { activeConnections: [ACTIVE_CONNECTION] });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    const createBtn = container.querySelector('[data-testid="content-create-variant-button"]') as HTMLButtonElement;
+    expect(createBtn.disabled).toBe(true);
+  });
+});
+
+// story 15e481ce(#3453 AC2, 유나 §14-2) — "같은 스토리의 채널 글"(역방향 목록).
+describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce AC2, §14-2)', () => {
+  it('⭐변형이 0건이면 그 자리 자체가 안 그려진다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { variants: [] });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="content-variants-list"]')).toBeNull();
+  });
+
+  it('⭐변형이 있으면 채널·상태 칩과 함께 목록으로 뜨고, 각 항목이 그 변형 상세로 링크된다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      variants: [
+        {
+          draft_id: 'cp-1', channel: 'threads', gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+          publication_status: null, published_at: null,
+        },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const item = container.querySelector('[data-testid="content-variants-list-item"]');
+    expect(item?.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/cp-1');
+    expect(item?.textContent).toContain(koMessages.content.channelThreads);
+    expect(item?.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('approved');
   });
 });
