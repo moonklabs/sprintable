@@ -311,7 +311,8 @@ async def list_channel_post_drafts_endpoint(
     unscheduled: bool = Query(
         default=False,
         description="true면 gate.sealed_scheduled_at이 null인 draft만(캘린더 「날짜 미정」 "
-        "레인). scheduled_from/scheduled_to와 상호 배타.",
+        "레인). scheduled_from/scheduled_to와 상호 배타. 게이트 자체가 없는(아직 상신 "
+        "안 한) 순수 초안도 포함한다 — 둘 다 「날짜 미정」이라는 점에서 같은 부류다(유나 §11-1).",
     ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
