@@ -2,11 +2,12 @@
 
 import { useState, type ReactNode } from 'react';
 import { Download, Trash2, X } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { getFileIcon } from '@/lib/file-icon';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 import { fileExtLabel, formatDate, formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StorageUploaderAvatar } from './storage-uploader-avatar';
@@ -35,6 +36,8 @@ function MetaRow({ label, value, last = false }: { label: string; value: ReactNo
 
 export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDelete, onClose }: StorageDetailPanelProps) {
   const t = useTranslations('storage');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [tab, setTab] = useState<'detail' | 'usage'>('detail');
 
   if (!asset) {
@@ -133,7 +136,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
               }
             />
             <MetaRow label={t('metaCreated')} value={formatDate(asset.created_at)} />
-            <MetaRow label={t('metaUpdated')} value={formatRelativeTime(asset.updated_at)} last />
+            <MetaRow label={t('metaUpdated')} value={formatRelativeTime(asset.updated_at, locale, displayTimezone)} last />
 
             {usageCount > 0 ? (
               <>

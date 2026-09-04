@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel } from '@/lib/channel-label';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
@@ -66,6 +68,8 @@ function realStr(v: string | null | undefined): string | undefined {
 export default function ChannelPostListPage() {
   const { orgId } = useDashboardContext();
   const t = useTranslations('content');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const [drafts, setDrafts] = useState<ChannelPostDraftListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -215,7 +219,7 @@ export default function ChannelPostListPage() {
                       <AuthorKindBadge kind={draft.latest_author_kind} />
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
-                      {new Date(draft.updated_at).toLocaleString()}
+                      {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
                     </td>
                   </tr>
                 );

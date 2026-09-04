@@ -5,6 +5,7 @@
 
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
+import { formatScheduledAt } from '@/components/content/schedule-format';
 
 /** 파일 아이콘 틴트 분류 — 목업 `.fic.*` 5종에 1:1 대응. */
 export type FileTint = 'img' | 'pdf' | 'doc' | 'zip' | 'code';
@@ -91,22 +92,31 @@ export function fileExtLabel(contentType: string, name: string): string {
 }
 
 /**
- * KO 상대 시간 — 레포에 export 된 공용 유틸이 없어(notification-bell `timeAgo`는 비-export)
- * 동일 규칙으로 구현. 방금/N분 전/N시간 전/어제/N일 전/날짜.
+ * 상대 시간 — story 3436(묶음 8) 정본. `Intl.RelativeTimeFormat`(선례:
+ * team-activity-view.tsx `relativeTime`)로 로케일 하드코딩을 없앤다. notification-bell
+ * `timeAgo`(구 비-export 중복)를 이 함수로 흡수·통합.
+ *
+ * 7일 초과는 "최신성"이 아니라 "그 시각이 정확히 언제였나"로 질문이 바뀐다 — §11-2 정본
+ * (`formatScheduledAt`, displayTimezone 기준)으로 폴백한다(구현: UTC 슬라이스, tz 무시).
  */
-export function formatRelativeTime(iso: string): string {
+export function formatRelativeTime(iso: string, locale: string, displayTimezone: string): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return '';
-  const diff = Date.now() - t;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return '방금';
-  if (mins < 60) return `${mins}분 전`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return '어제';
-  if (days < 7) return `${days}일 전`;
-  return new Date(iso).toISOString().slice(0, 10);
+  // PO 지적(2026-09-04 20:04Z) — 서버 created_at이 클라이언트 시계보다 몇 초 앞서는 흔한
+  // clock skew에서 diffMs가 음수가 되면 rtf.format(+n, ...)이 "5초 후"/"in 5 seconds"로
+  // 미래형을 낸다(舊 구현은 mins<1 뭉뚱그림이라 이 증상 자체가 없었다). 0으로 clamp해
+  // numeric:'auto'가 "지금"/"now"로 떨어지게 한다.
+  const diffMs = Math.max(0, Date.now() - t);
+  if (diffMs >= 7 * 86400000) return formatScheduledAt(iso, displayTimezone).display;
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const sec = Math.round(diffMs / 1000);
+  const min = Math.round(sec / 60);
+  const hr = Math.round(min / 60);
+  const day = Math.round(hr / 24);
+  if (Math.abs(sec) < 60) return rtf.format(-sec, 'second');
+  if (Math.abs(min) < 60) return rtf.format(-min, 'minute');
+  if (Math.abs(hr) < 24) return rtf.format(-hr, 'hour');
+  return rtf.format(-day, 'day');
 }
 
 /** 합계 크기(요약 칩) — formatFileSize 는 MB 상한이라 GB 까지 커버하는 별도 포맷터. */
