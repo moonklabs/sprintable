@@ -31,6 +31,7 @@ def _mock_org() -> MagicMock:
     o.name = "Test Org"
     o.slug = "test-org"
     o.plan = "free"
+    o.timezone = None
     o.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
     o.updated_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
     return o
