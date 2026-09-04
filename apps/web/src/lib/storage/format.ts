@@ -102,7 +102,11 @@ export function fileExtLabel(contentType: string, name: string): string {
 export function formatRelativeTime(iso: string, locale: string, displayTimezone: string): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return '';
-  const diffMs = Date.now() - t;
+  // PO 지적(2026-09-04 20:04Z) — 서버 created_at이 클라이언트 시계보다 몇 초 앞서는 흔한
+  // clock skew에서 diffMs가 음수가 되면 rtf.format(+n, ...)이 "5초 후"/"in 5 seconds"로
+  // 미래형을 낸다(舊 구현은 mins<1 뭉뚱그림이라 이 증상 자체가 없었다). 0으로 clamp해
+  // numeric:'auto'가 "지금"/"now"로 떨어지게 한다.
+  const diffMs = Math.max(0, Date.now() - t);
   if (diffMs >= 7 * 86400000) return formatScheduledAt(iso, displayTimezone).display;
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const sec = Math.round(diffMs / 1000);

@@ -74,4 +74,12 @@ describe('formatRelativeTime() — 로케일별 Intl.RelativeTimeFormat + 7일 �
   it('잘못된 ISO는 빈 문자열(회귀 0, 舊 구현과 동형)', () => {
     expect(formatRelativeTime('not-a-date', 'ko', 'UTC')).toBe('');
   });
+
+  it('⭐PO 지적(2026-09-04 20:04Z) — 클라 시계보다 앞선 서버 시각(clock skew)은 "5초 후"가 아니라 "지금"으로 clamp된다', () => {
+    const future = new Date(NOW + 5000).toISOString();
+    expect(formatRelativeTime(future, 'ko', 'UTC')).toBe('지금');
+    expect(formatRelativeTime(future, 'ko', 'UTC')).not.toContain('후');
+    expect(formatRelativeTime(future, 'en', 'UTC')).toBe('now');
+    expect(formatRelativeTime(future, 'en', 'UTC')).not.toContain('in ');
+  });
 });
