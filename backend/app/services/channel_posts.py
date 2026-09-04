@@ -33,6 +33,7 @@ from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate, set_gate_status
+from app.models.publication_command import PublicationCommand
 from app.services.channel_adapters import get_channel_adapter
 from app.services.channel_connection import decrypt_for_use
 from app.services.gate_seal import (
@@ -393,6 +394,7 @@ async def list_channel_post_drafts(
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
         Gate | None, ChannelPublication | None, ChannelPublication | None, str | None,
+        PublicationCommand | None,
     ]
 ]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
@@ -406,8 +408,8 @@ async def list_channel_post_drafts(
 
     story #3394(S2c BE 선행, 페드루 PO 확定 2026-09-04) — 상태 파생·발행 상태 필드를 여기서
     배치 조회해 붙인다(site_posts.list_site_post_drafts의 #3384 확장과 동형 패턴, N+1 금지 —
-    페이지 쿼리 1건 + gate 배치 1건 + publication 배치 2건 + version 해시 배치 1건, 총 5건
-    고정, draft 수 무관).
+    페이지 쿼리 1건 + gate 배치 1건 + publication 배치 2건 + version 해시 배치 1건 + command
+    배치 1건(story #3415), 총 6건 고정, draft 수 무관).
 
     **조인 축이 둘로 갈린다**(PO 지시, site와 의미가 다른 자리) — 한 축으로 뭉치면 "발행
     뒤 편집·재승인"이 목록에서 발행 이력째 사라진다:
@@ -420,10 +422,16 @@ async def list_channel_post_drafts(
     - `published_body_sha256`(7번째 원소, str) — `published_publication`의 `version_id`로
       `channel_post_versions.body_sha256`을 조인한 값(그 publication이 없으면 None) —
       channel_publications 자체엔 본문 해시 컬럼이 없다.
+    - `latest_command`(8번째 원소, story #3415) — 이 gate의 **가장 최근 생성된**
+      `publication_command`(created_at 최대, ④의 published_pub_by_gate와 동형 setdefault
+      패턴) — `failure_kind`·`next_attempt_at`(응답 필드명은 `next_retry_at`, 유나 §17
+      어휘)·`dead_letter_at`의 출처. gate에 발행/예약 요청이 여러 번 있었으면(voided 뒤
+      재상신 등) 과거 completed/voided 이력에 안 가려지고 최신 것만 남는다(카디르류 QA —
+      "이 게이트의 아무 행이나≠이 게이트의 최신 행").
 
     반환: (draft, latest_version, origin_version, gate, published_publication,
-    latest_version_publication, published_body_sha256) — gate·publication 계열은 없으면
-    None(지어내지 않는다, "모른다≠다르다")."""
+    latest_version_publication, published_body_sha256, latest_command) — gate·publication·
+    command 계열은 없으면 None(지어내지 않는다, "모른다≠다르다")."""
     latest_version_ids = (
         select(
             ChannelPostVersion.draft_id,
@@ -520,6 +528,19 @@ async def list_channel_post_drafts(
         )).all()
         body_sha256_by_version_id = {row[0]: row[1] for row in version_rows}
 
+    # 배치 ⑥(story #3415) — gate_id당 가장 최근 생성된 publication_command. created_at
+    # desc로 받아 setdefault로 첫 것(=최신)만 남긴다 — ④(published_pub_by_gate)와 동형
+    # 패턴. 과거 이력에 최신 행이 가려지면 안 된다(QA③ 대상).
+    latest_command_by_gate: dict[uuid.UUID, PublicationCommand] = {}
+    if gate_ids:
+        command_rows = (await db.execute(
+            select(PublicationCommand)
+            .where(PublicationCommand.gate_id.in_(gate_ids))
+            .order_by(PublicationCommand.created_at.desc())
+        )).scalars().all()
+        for c in command_rows:
+            latest_command_by_gate.setdefault(c.gate_id, c)
+
     result = []
     for draft, latest_v, origin_v in page_rows:
         gate = gates_by_work_item.get(draft.work_item_id)
@@ -528,7 +549,11 @@ async def list_channel_post_drafts(
         published_body_sha256 = (
             body_sha256_by_version_id.get(published_pub.version_id) if published_pub else None
         )
-        result.append((draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256))
+        latest_command = latest_command_by_gate.get(gate.id) if gate else None
+        result.append((
+            draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256,
+            latest_command,
+        ))
     return result
 
 

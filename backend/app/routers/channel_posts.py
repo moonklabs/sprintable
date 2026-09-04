@@ -104,6 +104,18 @@ class ChannelPostDraftListItem(BaseModel):
     permalink: str | None = None
     external_id: str | None = None
     error_code: str | None = None
+    # story #3415(#3414 범위 절단 후속) — publication_commands(story #3414)의 예약·재시도
+    # 상태를 목록/단건에 노출. 필드명은 유나 §17-2·§11-5(공통 어휘 정본) 그대로:
+    # `next_retry_at`은 DB 컬럼명(`PublicationCommand.next_attempt_at`)과 다르다 — 화면
+    # 계약(§17)이 이긴다, 응답 직렬화 지점에서만 이름을 맞춘다(DB 컬럼 리네임 아님).
+    # 이 gate에 발행/예약 요청이 아직 없으면(command 자체가 없음) 전부 None.
+    failure_kind: str | None = None
+    next_retry_at: str | None = None
+    dead_letter_at: str | None = None
+    # gate.sealed_scheduled_at — publication_command.scheduled_at이 아니다(그 값은 요청
+    # 시점 스냅샷이라 재승인 뒤 갱신 안 됨, story #3414). 화면 캘린더(§11-1)가 보는 "지금
+    # 승인된 예약 시각"은 이 값.
+    scheduled_at: str | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -212,7 +224,7 @@ def _to_draft_list_item(
     """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
     번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를
     똑같이 지원하는 것과 동형 사상)."""
-    draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256 = row
+    draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256, latest_command = row
     return ChannelPostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
         connection_id=draft.connection_id, current_version=latest.version,
@@ -229,6 +241,16 @@ def _to_draft_list_item(
         permalink=published_pub.permalink if published_pub else None,
         external_id=published_pub.external_id if published_pub else None,
         error_code=latest_pub.error_code if latest_pub else None,
+        failure_kind=latest_command.failure_kind if latest_command else None,
+        next_retry_at=(
+            latest_command.next_attempt_at.isoformat()
+            if latest_command and latest_command.next_attempt_at else None
+        ),
+        dead_letter_at=(
+            latest_command.dead_letter_at.isoformat()
+            if latest_command and latest_command.dead_letter_at else None
+        ),
+        scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
     )
 
 
