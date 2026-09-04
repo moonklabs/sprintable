@@ -112,6 +112,12 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 막기 위함. 「관리」 구역의 org-connectors로도 옮기지 않는다 — 연결은 owner의 설정
       // 행위, 운영은 마케터의 일상 행위라는 가름(§5-2)이 그대로 적용된다.
       { id: 'content', labelKey: 'content', icon: FileText, kind: 'static', path: '/content' },
+      // story #3402(Phase1·마케팅운영, PO 결정 2026-09-03 23:17Z) — 채널 포스트(Threads)
+      // 관리 화면. NavItemConfig에 중첩 하위메뉴 구조가 없어(app-sidebar.tsx는 group.items를
+      // 평평하게 순회) "콘텐츠 아래" 배치는 이 배열에서 content 바로 뒤에 두는 것으로
+      // 표현한다 — content(호스팅 블로그, org 스코프)와 같은 이유로 kind:'static'·top-level
+      // 경로(channel_post_drafts도 org 스코프, project 무관).
+      { id: 'channel-posts', labelKey: 'channelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts' },
     ],
   },
   {

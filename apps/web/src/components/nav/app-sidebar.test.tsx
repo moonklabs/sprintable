@@ -91,7 +91,8 @@ async function mount() {
 // PO)이 아직 없어 생긴 커플링이라 표면이 설 때까지 nav에 남긴다(②=ⓐ→되돌림, 유나 QA 처방).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림'] },
-  { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고', '콘텐츠'] },
+  // story #3402 — 워크 그룹에 '채널 포스트'(/content/channel-posts) 추가돼 6→7항목.
+  { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고', '콘텐츠', '채널 포스트'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
   { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터', '채널'] },
@@ -109,8 +110,16 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // nav에서 빠져(chat으로 이사·중복 목적지 제거) 챗 제외 19→18항목. story 4180f67f — 조직
 // 그룹에 '커넥터'(/organization/connectors) 추가돼 챗 제외 18→19항목. story #3368 — 워크
 // 그룹에 '콘텐츠'(/content) 추가돼 챗 제외 19→20항목. story #3376 — 조직 그룹에 '채널'
-// (/organization/channels) 추가돼 챗 제외 20→21항목.
+// (/organization/channels) 추가돼 챗 제외 20→21항목. story #3402 — 워크 그룹에 '채널
+// 포스트'(/content/channel-posts) 추가돼 챗 제외 21→22항목.
+//
+// ⚠️'채널 포스트'는 텍스트가 '채널'로 시작한다 — 아래 매칭 로직의 startsWith 폴백이
+// '채널'을 찾을 때 '채널 포스트' 링크를 먼저 집을 위험이 있었다(페드루 PO 실측,
+// PR#3768 CI red). exact-match-first로 고쳐 해소했다(kbd힌트 항목은 텍스트에 공백
+// 없이 붙어 startsWith가 여전히 필요 — '보드'+'B'='보드B', exact 매치가 없어 정상적으로
+// startsWith로 폴백한다).
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
+  '채널 포스트': '/content/channel-posts',
   '구성원': '/organization/members',
   '워크포스': '/organization/workforce',
   '권한': '/organization/roles',
@@ -216,12 +225,16 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   // '대시보드' 제거돼 19→18, story 4180f67f로 조직 그룹에 '커넥터' 추가돼 18→19, story #3368로
   // 워크 그룹에 '콘텐츠' 추가돼 19→20) 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데
   // 목적지가 틀림"을 확실히 막는다.
-  it('전 20항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+  it('전 22항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
-      // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
-      const link = links.find((a) => a.textContent?.startsWith(label));
+      // story #3402(페드루 PO 실측, PR#3768 CI red) — exact match를 먼저 찾고, 없을
+      // 때만 startsWith로 폴백한다. kbd 힌트 항목은 텍스트에 공백 없이 붙어("보드"+"B"
+      // ="보드B") exact가 안 걸려 여전히 startsWith로 정상 폴백하지만, '채널 포스트'처럼
+      // 두 단어를 공백으로 이은 라벨이 다른 라벨('채널')의 접두어가 되는 경우는 exact
+      // 우선이라야 정확한 항목을 집는다(순서 의존 없이 결정적).
+      const link = links.find((a) => a.textContent === label) ?? links.find((a) => a.textContent?.startsWith(label));
       expect(link, `링크 "${label}"를 찾지 못함`).toBeDefined();
       expect(link!.getAttribute('href'), `"${label}"의 href`).toBe(expectedHref);
     }

@@ -13,6 +13,13 @@
 // ContentPostBlockedReason은 이와 별개 축 — 그쪽은 "발행 시도 전 화면이 스스로 판단한
 // 상태"이고, 여기는 "서버가 실제로 거부하며 돌려준 응답"이다(둘 다 SEAL_MISSING/
 // HASH_MISMATCH 계열을 다루지만 시점과 출처가 다르다).
+// story #3402(Phase1·마케팅운영, 유나 doc §5 v8 정본) — 채널 포스트 화면(§5 표 12행)이
+// 이 파일을 그대로 재사용한다(site와 별도 파일을 만들면 두 벌이 된다). 새 갈래 일곱 —
+// ⑥한도 초과(대기/예약) ⑦연결 끊김(재연결) ⑧연결 비활성(연결화면 확認) ⑨승인자 미지정
+// (역할 배정) ⑩경합 처리 중(재확認) ⑪글자수 초과(줄여서 재상신) ⑫provider 원문 실패
+// (접어서 보존). gate_already_held는 site와 kind를 공유하되(같은 UI 분기 — "그 초안 보기"
+// 하나만) 채널 쪽은 다른 부가 필드(holding_channel·holding_connection_id, slug/lang 없음
+// — 채널 포스트 모델 자체에 title이 없다, doc §5 각주)를 싣는다.
 export type SitePostApiErrorKind =
   | 'approval_required'
   | 'permission'
@@ -20,6 +27,13 @@ export type SitePostApiErrorKind =
   | 'seal_missing'
   | 'resubmit_required'
   | 'gate_already_held'
+  | 'rate_limited'
+  | 'token_expired'
+  | 'connection_not_active'
+  | 'approver_role_missing'
+  | 'publish_in_progress'
+  | 'text_too_long'
+  | 'provider_error'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -36,6 +50,16 @@ export interface SitePostApiErrorInfo {
   heldByDraftId?: string;
   heldByLang?: string | null;
   heldBySlug?: string;
+  // story #3402·PR#3764 c6049add1 — CHANNEL_POST_GATE_ALREADY_HELD 전용. site와 달리
+  // slug/lang이 없다(채널 포스트 모델엔 title 자체가 없다) — 대신 채널·연결 식별자로
+  // "Threads 초안 ····a1b2" 폴백 문구를 조립한다(doc §5 각주, 전체 UUID는 화면에 안 남김).
+  heldByChannel?: string;
+  heldByConnectionId?: string;
+  /** CHANNEL_RATE_LIMITED(429) 전용 — "내일 09:00 이후 가능합니다" 조립·예약 기본값. */
+  resetAt?: string;
+  /** CHANNEL_TEXT_TOO_LONG(422) 전용 — "500자 한도인데 517자입니다" 조립. */
+  maxLength?: number;
+  currentLength?: number;
 }
 
 interface KnownError {
@@ -67,11 +91,37 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 필요한데 title은 서버가 안 준다(heldByDraftId로 화면이 별도 조회해 채운 뒤에야 완성
   // 가능) — 그래서 kind로만 분기하고 실제 문구 조립은 page.tsx가 한다.
   SITE_POST_GATE_ALREADY_HELD: { labelKey: '', kind: 'gate_already_held' },
+
+  // story #3402(Phase1·마케팅운영, 유나 doc §5 v8 정본) — 채널 포스트 화면 12행. HTTP
+  // status·「사람 말」·「다음 행동」은 그 표가 정본(구현: channel_posts.py 라우터
+  // except 매핑, PR#3752 277debe92·#3757 eb55c4221·#3395·PR#3764 c6049add1 실측).
+  CHANNEL_RATE_LIMITED: { labelKey: 'errorChannelRateLimited', kind: 'rate_limited' },
+  CHANNEL_TOKEN_EXPIRED: { labelKey: 'errorChannelTokenExpired', kind: 'token_expired' },
+  CHANNEL_CONNECTION_NOT_ACTIVE: { labelKey: 'errorChannelConnectionNotActive', kind: 'connection_not_active' },
+  CHANNEL_POST_APPROVER_ROLE_MISSING: { labelKey: 'errorChannelApproverRoleMissing', kind: 'approver_role_missing' },
+  // doc §5 v8 — 발행은 사람이 화면에서 한다. 에이전트에겐 이 화면 자체가 없어(AC14)
+  // 정상 경로로 이 화면에 뜨지 않지만, 매핑표는 하나여야 하므로 등록해 둔다.
+  CHANNEL_POST_PUBLISH_HUMAN_ONLY: { labelKey: 'errorChannelPublishHumanOnly', kind: 'permission' },
+  // story #3395 — 동시 발행 요청 경합에서 진 쪽이 받는 응답. "다시 발행"이 아니라
+  // "상태를 다시 확認"이 맞는 다음 행동이다(두 번째 요청이 새 게시를 만들지 않는다).
+  CHANNEL_PUBLISH_IN_PROGRESS: { labelKey: 'errorChannelPublishInProgress', kind: 'publish_in_progress' },
+  CHANNEL_TEXT_TOO_LONG: { labelKey: '', kind: 'text_too_long' }, // maxLength·currentLength로 문구 조립(labelKey는 page.tsx가 보간)
+  // EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED
+  // 는 위 site 항목을 그대로 재사용한다(같은 external_publish 게이트 개념 공유, doc §9-4).
+  // story #3402·PR#3764 — 채널 포스트 전용 GATE_ALREADY_HELD. site와 kind는 같지만
+  // (같은 "그 초안 보기" 분기) 부가 필드가 다르다(slug/lang 없음 — 채널 포스트 모델 자체에
+  // title이 없다). labelKey는 site와 동일하게 비워 page.tsx가 heldByChannel/
+  // heldByConnectionId로 폴백 문구를 조립한다.
+  CHANNEL_POST_GATE_ALREADY_HELD: { labelKey: '', kind: 'gate_already_held' },
+  CHANNEL_PUBLISH_PROVIDER_ERROR: { labelKey: 'errorChannelPublishProviderError', kind: 'provider_error' },
 };
 
-function extractCodeAndMessage(
-  detail: unknown,
-): { code?: string; message?: string; heldByDraftId?: string; heldByLang?: string | null; heldBySlug?: string } {
+function extractCodeAndMessage(detail: unknown): {
+  code?: string; message?: string;
+  heldByDraftId?: string; heldByLang?: string | null; heldBySlug?: string;
+  heldByChannel?: string; heldByConnectionId?: string;
+  resetAt?: string; maxLength?: number; currentLength?: number;
+} {
   if (typeof detail === 'string') return { message: detail };
   if (detail && typeof detail === 'object') {
     const d = detail as Record<string, unknown>;
@@ -83,6 +133,14 @@ function extractCodeAndMessage(
       heldByDraftId: typeof d.holding_draft_id === 'string' ? d.holding_draft_id : undefined,
       heldByLang: typeof d.holding_lang === 'string' || d.holding_lang === null ? (d.holding_lang as string | null) : undefined,
       heldBySlug: typeof d.holding_slug === 'string' ? d.holding_slug : undefined,
+      // story #3402·PR#3764 — CHANNEL_POST_GATE_ALREADY_HELD 전용(slug/lang 대신).
+      heldByChannel: typeof d.holding_channel === 'string' ? d.holding_channel : undefined,
+      heldByConnectionId: typeof d.holding_connection_id === 'string' ? d.holding_connection_id : undefined,
+      // story #3402 — CHANNEL_RATE_LIMITED 전용.
+      resetAt: typeof d.reset_at === 'string' ? d.reset_at : undefined,
+      // story #3402 — CHANNEL_TEXT_TOO_LONG 전용.
+      maxLength: typeof d.max_length === 'number' ? d.max_length : undefined,
+      currentLength: typeof d.current_length === 'number' ? d.current_length : undefined,
     };
   }
   return {};
@@ -105,6 +163,11 @@ export function parseSitePostApiError(
   const heldByDraftId = fromDetail.heldByDraftId ?? fromError.heldByDraftId;
   const heldByLang = fromDetail.heldByLang ?? fromError.heldByLang;
   const heldBySlug = fromDetail.heldBySlug ?? fromError.heldBySlug;
+  const heldByChannel = fromDetail.heldByChannel ?? fromError.heldByChannel;
+  const heldByConnectionId = fromDetail.heldByConnectionId ?? fromError.heldByConnectionId;
+  const resetAt = fromDetail.resetAt ?? fromError.resetAt;
+  const maxLength = fromDetail.maxLength ?? fromError.maxLength;
+  const currentLength = fromDetail.currentLength ?? fromError.currentLength;
   const raw = JSON.stringify({ code: code ?? null, message: message ?? null });
 
   const known = code ? KNOWN_ERRORS[code] : undefined;
@@ -116,5 +179,10 @@ export function parseSitePostApiError(
     heldByDraftId,
     heldByLang,
     heldBySlug,
+    heldByChannel,
+    heldByConnectionId,
+    resetAt,
+    maxLength,
+    currentLength,
   };
 }
