@@ -753,7 +753,15 @@ export default function ChannelPostEditPage() {
           open={cancelScheduledConfirmOpen}
           onOpenChange={setCancelScheduledConfirmOpen}
           title={t('channelPostsCancelScheduledConfirmTitle')}
-          description={t('channelPostsCancelScheduledConfirmDescription')}
+          description={(
+            // 카디르 QA①·유나 §8 — 「무엇이 멈추나」·「되돌릴 수 있나」는 서로 다른 사실이라
+            // 한 노드에 뭉치지 않는다(AC11 두 문장과 같은 규율). DialogDescription이 <p>라
+            // 안쪽도 <span className="block">로 — p 중첩 금지(story #3402 QA 실결함과 동형).
+            <>
+              <span className="block" data-testid="channel-post-cancel-scheduled-confirm-what">{t('channelPostsCancelScheduledConfirmWhat')}</span>
+              <span className="block" data-testid="channel-post-cancel-scheduled-confirm-reversible">{t('channelPostsCancelScheduledConfirmReversible')}</span>
+            </>
+          )}
           cancelLabel={t('channelPostsCancelScheduledConfirmCancel')}
           confirmLabel={t('channelPostsCancelScheduledConfirmAction')}
           onConfirm={() => void handleCancelScheduled()}
@@ -769,12 +777,24 @@ export default function ChannelPostEditPage() {
             </AlertDescription>
           </Alert>
         ) : null}
+        {/* 페드루 PO 블로커(2026-09-04 09:02Z) — 성공 배너만으로는 §17-10 "취소됨"
+            상태가 상세에 안 남는다. 회수됨 Alert와 같은 자리에 오버레이로 얹는다. */}
+        {draft.command_status === 'cancelled' ? (
+          <Alert role="status" data-testid="channel-post-cancelled-notice">
+            <AlertDescription>{t('channelPostsCancelledNotice')}</AlertDescription>
+          </Alert>
+        ) : null}
 
         <ConfirmDialog
           open={unpublishConfirmOpen}
           onOpenChange={setUnpublishConfirmOpen}
           title={t('channelPostsUnpublishConfirmTitle')}
-          description={t('channelPostsUnpublishConfirmDescription')}
+          description={(
+            <>
+              <span className="block" data-testid="channel-post-unpublish-confirm-what">{t('channelPostsUnpublishConfirmWhat')}</span>
+              <span className="block" data-testid="channel-post-unpublish-confirm-reversible">{t('channelPostsUnpublishConfirmReversible')}</span>
+            </>
+          )}
           cancelLabel={t('channelPostsUnpublishConfirmCancel')}
           confirmLabel={t('channelPostsUnpublishConfirmAction')}
           onConfirm={() => void handleUnpublish()}

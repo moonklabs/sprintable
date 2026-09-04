@@ -610,7 +610,11 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientOwner);
   });
 
-  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+member면 "owner에게 요청" 문구가 보인다(doc §17-11 정본, role 분기)', async () => {
+  // 카디르 QA 지적(2026-09-04 09:02Z) — 이전 판 테스트명이 단언과 반대였다("member면
+  // owner에게 요청 문구"라 적었지만 실제 단언은 OwnerOrAdminOnly). member는 owner/admin
+  // 게이팅이 scope_insufficient보다 먼저 걸려 §17-11 role 문구 자체가 안 뜬다 — 이름을
+  // 실제 동작대로 정정한다.
+  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+member면 role 게이팅이 먼저 걸려 owner/admin 전용 사유가 보인다(§17-11 role분기 문구 자체는 안 뜸)', async () => {
     useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
     stubFetch({
       draftDetail: {
@@ -623,10 +627,30 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       root.render(wrap(<ChannelPostEditPage />));
     });
     await flush();
-    // member는 owner/admin 게이팅이 scope_insufficient보다 먼저 걸린다(§17-11은 "권한은
-    // 있는데 스코프가 없다"는 경우 전용) — role 사유가 우선해야 맞다.
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
       .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
+  });
+
+  // 카디르 QA 지적 — §17-11 role 분기 문구가 실제로 렌더되는 경로(role=owner/admin이면서
+  // scope_insufficient)가 테스트 0건이었다. admin으로 그 실렌더 경로를 pin한다.
+  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+admin이면(role게이팅 통과) "요청" 문구가 실제로 렌더된다(doc §17-11 정본, non-owner 분기)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'admin' });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'scope_insufficient',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    // admin은 canUnpublish(role게이팅)를 통과하므로 §17-11 role분기 문구가 실제로 뜬다 —
+    // role==='owner'가 아니므로 member쪽 문구(요청)가 나온다(admin도 재연결 owner전용이라
+    // "요청" 갈래 — 페이지 코드가 role==='owner'만 owner문구, 그 외 전부 요청문구).
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientMember);
   });
 
   // story #3426 — 예약 취소 버튼.
@@ -691,6 +715,14 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     // ConfirmDialog는 Portal이라 document.body에 뜬다(content/[draftId]/page.test.tsx와 동형).
+    // 카디르 QA①·유나 §8 — "무엇이 멈추나"·"되돌릴 수 있나"가 서로 다른 노드인지 확인.
+    const what = document.body.querySelector('[data-testid="channel-post-cancel-scheduled-confirm-what"]');
+    const reversible = document.body.querySelector('[data-testid="channel-post-cancel-scheduled-confirm-reversible"]');
+    expect(what?.textContent).toBe(koMessages.content.channelPostsCancelScheduledConfirmWhat);
+    expect(reversible?.textContent).toBe(koMessages.content.channelPostsCancelScheduledConfirmReversible);
+    expect(what).not.toBe(reversible);
+    expect(document.body.querySelectorAll('p p').length).toBe(0);
+
     const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
     expect(confirmButton).not.toBeUndefined();
     await act(async () => {
@@ -702,6 +734,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.textContent).toContain(koMessages.content.channelPostsCancelScheduledSuccess);
     // 리로드 없이 로컬 갱신 — command_status가 더 이상 취소가능 값이 아니므로 버튼이 사라진다.
     expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).toBeNull();
+    // 페드루 PO 블로커 — 배너뿐 아니라 §17-10 "취소됨" 오버레이도 리로드 없이 선다.
+    expect(container.querySelector('[data-testid="channel-post-cancelled-notice"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelledNotice);
   });
 
   // story #3426 ①-d — PUBLICATION_COMMAND_NOT_CANCELLABLE은 current_status를 실어
@@ -751,6 +786,13 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flush();
+    // 카디르 QA①·유나 §8 — 회수도 "무엇이 멈추나"·"되돌릴 수 있나" 별도 노드 확인.
+    const what = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-what"]');
+    const reversible = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-reversible"]');
+    expect(what?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmWhat);
+    expect(reversible?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmReversible);
+    expect(what).not.toBe(reversible);
+
     const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
     expect(confirmButton).not.toBeUndefined();
     await act(async () => {
