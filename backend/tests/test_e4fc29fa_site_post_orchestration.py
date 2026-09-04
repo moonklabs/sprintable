@@ -128,8 +128,8 @@ async def live_webhook_stub(monkeypatch):
         async def _serve() -> None:
             from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-            from app.dependencies.database import get_db
             from app.routers.dev_webhook_stub import router as stub_router
+            from tests.conftest import override_db_and_read
 
             engine = create_async_engine(_async_url())
             Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -145,7 +145,7 @@ async def live_webhook_stub(monkeypatch):
 
             stub_app = FastAPI()
             stub_app.include_router(stub_router)
-            stub_app.dependency_overrides[get_db] = _db
+            override_db_and_read(stub_app, _db)
 
             config = uvicorn.Config(stub_app, host="127.0.0.1", port=0, log_level="warning")
             server = uvicorn.Server(config)
