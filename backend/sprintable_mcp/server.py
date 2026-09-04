@@ -450,7 +450,10 @@ _TOOL_DEFS: list[tuple] = [
      "같이 보내라. 다른 스토리를 쪼개거나 복제한 것이면 origin_type=\"story\"·"
      "origin_id=<원본 스토리 id>. 회의에서 나온 것이면 origin_type=\"meeting\". "
      "둘 다 줘야 유효(하나만 있으면 조용히 무시된다) — 안 채우면 이 스토리의 출처는 "
-     "영원히 «미수집」으로 남는다(소급 안 됨, story #2267 AC5).",
+     "영원히 «미수집」으로 남는다(소급 안 됨, story #2267 AC5). ⚠️story 8b7e52d6: "
+     "assignee_id를 생략하면 claim_story를 나중에 아무리 호출해도 채워지지 않습니다"
+     "(claim_story는 assignee/board를 안 건드림, participation만) — 생략 시 응답에 "
+     "「통지 수신자 0」 warning이 실립니다.",
      AddStoryInput, add_story),
     ("sprintable_update_story",
      "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
@@ -649,7 +652,10 @@ _TOOL_DEFS: list[tuple] = [
      " 해소됨. 지정 project_id에 접근권 없으면 403.",
      SetDefaultProjectInput, set_default_project),
     ("sprintable_claim_story",
-     "[일감] 현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지.",
+     "[일감] 현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지. "
+     "⚠️story 8b7e52d6: assignee/board는 안 건드립니다(participation만 생성) — "
+     "보드 배정 표시·통지 수신자는 이 호출이 아니라 assignee 기준입니다(update_story의 "
+     "assignee_id/assignee_ids). 응답의 assignee_ids/hint로 현재 상태를 확인하세요.",
      ClaimStoryInput, claim_story),
     ("sprintable_unclaim_story",
      "[일감] 작업 중인 스토리 claim 해제 — active_story_id = NULL.",
