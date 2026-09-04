@@ -1270,6 +1270,13 @@ jobs:
       - name: "Verify no duplicate sibling i18n keys (story #2395 regression guard)"
         run: pnpm --filter web verify:no-duplicate-i18n-keys
 
+      # story #3432 AC2 회귀가드: en.json/ko.json 값(키·주석 제외)에 한자(\p{Script=Han})가
+      # 하나라도 섞여 들어오면 실패한다 — 작업 대화 표기(`확認`·`확定`)가 정본 문구로 그대로
+      # 새는 사고가 8건 실측(2026-09-04)됐다. 예외 목록(HANJA_EXCEPTIONS)은 빈 채로 시작 —
+      # 정말 필요하면 key·char·reason·addedBy를 모두 채워야 등록된다.
+      - name: "Verify no hanja in i18n message values (story #3432 regression guard)"
+        run: pnpm --filter web verify:no-hanja-in-i18n
+
       # story #2420 AC3 회귀가드: globals.css의 `--<family>-tint` 배경 위에서 --foreground가
       # AA(4.5)를 넘는지 «정의 시점»에 계산한다(oklch→sRGB 변환은 Yuna의 실 Chromium canvas
       # 캡처값과 대조 검증된 순수함수 — 브라우저 불요, 빠르고 결정적). 새 계열(예: --info-tint)이
