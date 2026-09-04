@@ -569,8 +569,16 @@ export function NotificationBell() {
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >
         <Bell className="size-4" />
+        {/* story 3466(위생, 유나 5~8회차 4연속 관측) — `text-destructive-foreground`는
+            이 테마에 `--color-destructive-foreground` 매핑 자체가 없는 무효 유틸(조용히
+            no-op)이라 실제 렌더 색이 상속된 `--foreground`로 새 대비 미달(라이트 3.55·
+            다크 3.00, AA 4.5 미달)이었다 — bg-destructive(라이트#C33B3B·다크#E06767)에
+            흰 텍스트는 라이트만 맞고(5.24) 다크는 여전히 부족(3.33, 다크 red가 더 옅은
+            색이라). trust-seal.tsx의 선례(같은 문제 — 작은 배지 텍스트가 테마별로
+            반전돼야 함)를 그대로 따른다: 라이트=흰색(5.24)·다크=--proof-bg(거의 검정,
+            5.88) — 새 토큰 발명 없이 기존 값 재사용, 크기·자리 무변경. */}
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 py-px font-mono text-[9px] font-bold leading-none text-destructive-foreground">
+          <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 py-px font-mono text-[9px] font-bold leading-none text-white dark:text-proof-bg">
             {badgeLabel}
           </span>
         )}

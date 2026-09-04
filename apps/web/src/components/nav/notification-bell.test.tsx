@@ -410,3 +410,75 @@ describe('NotificationBell — story #3074 데스크톱 브리지 notify_show', 
     delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
   });
 });
+
+// story 3466(위생, 유나 5~8회차 4연속 관측) — 「99+」 배지 대비 미달(라이트 3.55·다크
+// 3.00, AA 4.5 미달) 정정. text-destructive-foreground가 이 테마에 매핑 자체가 없는
+// 무효 Tailwind 유틸이라 조용히 no-op였던 것이 근본원인(실제 렌더 색은 상속된
+// --foreground). ⭐두 pin: (a) 실 렌더 className이 새 값(text-white dark:text-proof-bg)
+// 을 갖고 구 무효 유틸이 안 남았는지 (b) 그 값들의 WCAG 대비비가 실제로 두 테마 모두
+// ≥4.5인지(색 계산 자체의 양성대조 — globals.css의 --proof-red/--proof-bg 실값을
+// 읽어 codebase 공용 계산기(color-contrast.ts)로 잰다, 값이 나중에 바뀌어도 그 값
+// 기준으로 재검증).
+describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
+  function stubUnreadCount(count: number) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/event-notifications/unread-count')) {
+        return new Response(JSON.stringify({ count }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('/api/event-notifications?')) {
+        return new Response(JSON.stringify({ data: [], meta: { hasMore: false } }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+  }
+
+  it('⭐배지가 text-white dark:text-proof-bg를 쓰고, 무효 유틸(text-destructive-foreground)이 안 남았다', async () => {
+    stubUnreadCount(150);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '99+');
+    expect(badge).toBeDefined();
+    expect(badge?.className).toContain('text-white');
+    expect(badge?.className).toContain('dark:text-proof-bg');
+    expect(badge?.className).not.toContain('text-destructive-foreground');
+  });
+
+  it('⭐색 계산 양성대조 — globals.css 실값으로 라이트·다크 둘 다 대비비 ≥4.5(WCAG AA)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { contrastRatio } = await import('@/lib/color-contrast');
+
+    // PO 지적(2026-09-04 22:53Z) — process.cwd() 기준 상대경로는 "검사를 어디서
+    // 돌렸나"에 값이 흔들린다(로컬 apps/web cwd에선 통과, CI 레포 루트 cwd에선
+    // ENOENT). 테스트 파일 자신의 위치 기준으로 고정 — cwd 무관(verify-tint-
+    // foreground-contrast.ts와 같은 관례).
+    const cssPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../app/globals.css');
+    const css = readFileSync(cssPath, 'utf-8');
+
+    function hexToRgb(hex: string): [number, number, number] {
+      const n = hex.replace('#', '');
+      return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
+    }
+
+    // :root(라이트)가 먼저, .dark가 그 뒤에 온다(이 파일의 기존 구조) — 두 번째 매치가 dark 값.
+    const proofRedMatches = [...css.matchAll(/--proof-red:\s*(#[0-9a-fA-F]{6})/g)].map((m) => m[1]!);
+    const proofBgMatches = [...css.matchAll(/--proof-bg:\s*(#[0-9a-fA-F]{6})/g)].map((m) => m[1]!);
+    expect(proofRedMatches.length).toBeGreaterThanOrEqual(2);
+    expect(proofBgMatches.length).toBeGreaterThanOrEqual(2);
+
+    const lightRed = hexToRgb(proofRedMatches[0]!);
+    const darkRed = hexToRgb(proofRedMatches[1]!);
+    const darkProofBg = hexToRgb(proofBgMatches[1]!);
+    const white: [number, number, number] = [255, 255, 255];
+
+    const lightContrast = contrastRatio(lightRed, white);
+    const darkContrast = contrastRatio(darkRed, darkProofBg);
+
+    expect(lightContrast).toBeGreaterThanOrEqual(4.5);
+    expect(darkContrast).toBeGreaterThanOrEqual(4.5);
+  });
+});
