@@ -387,3 +387,27 @@ async def test_null_timezone_org_exposed_as_null_not_omitted():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+def test_zoneinfo_resolves_without_os_tzdata():
+    """페드루 리뷰 B2 후속(2026-09-04) — `tzdata` 의존성이 실제로 하는 일을 로컬에서
+    직접 재현해 고정. `backend/Dockerfile`의 `python:3.12-slim`은 OS tz DB
+    (`/usr/share/zoneinfo`)가 없다 — `zoneinfo.reset_tzpath(to=[])`로 그 부재를
+    강제 재현한 뒤(파일시스템 검색 경로를 완전히 비움) `ZoneInfo('Asia/Seoul')`이
+    여전히 성공해야 `tzdata` PyPI 패키지 경유 해소가 실제로 동작한다는 뜻이다.
+    누가 나중에 `tzdata`를 의존성에서 지우면(pyproject.toml/uv.lock) 이 테스트가
+    바로 이 자리에서 빨갛게 — CI 이미지 빌드까지 안 기다린다.
+
+    `reset_tzpath`는 zoneinfo 모듈의 전역 검색 경로를 바꾼다(프로세스 전역 상태) —
+    다른 테스트가 실 OS tzdata 경로에 의존할 수 있으므로 try/finally로 원래 TZPATH를
+    반드시 복원한다."""
+    import zoneinfo
+
+    original_tzpath = zoneinfo.TZPATH
+    try:
+        zoneinfo.reset_tzpath(to=[])
+        assert zoneinfo.TZPATH == ()
+        zi = zoneinfo.ZoneInfo("Asia/Seoul")
+        assert zi.key == "Asia/Seoul"
+    finally:
+        zoneinfo.reset_tzpath(to=original_tzpath)
