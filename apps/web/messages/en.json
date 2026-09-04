@@ -2201,7 +2201,16 @@
     "channelPostsPublicationFailed": "Publish failed",
     "channelThreads": "Threads",
     "channelPostsCharLimitUnknown": "Limit unknown",
-    "channelPostsOverLimitReason": "Over the limit — you can't submit until the text is shorter."
+    "channelPostsOverLimitReason": "Over the limit — you can't submit until the text is shorter.",
+    "channelPostsApprovalStatusLabel": "Approval status",
+    "channelPostsApprovalNotSubmitted": "Not submitted",
+    "channelPostsApprovalPending": "Pending approval",
+    "channelPostsApprovalReapprovalNeeded": "Needs re-approval",
+    "channelPostsApprovalApproved": "Approved",
+    "channelPostsApprovalAccountLabel": "Publishing account",
+    "channelPostsApprovalLimitLabel": "Posts remaining",
+    "channelPostsLimitCheckFailed": "Couldn't check the remaining quota (lookup failed)",
+    "channelPostsApprovalLinkPreviewLabel": "Link that will be attached"
   },
   "docs": {
     "title": "Documentation",

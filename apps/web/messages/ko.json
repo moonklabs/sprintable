@@ -2201,7 +2201,16 @@
     "channelPostsPublicationFailed": "발행 실패",
     "channelThreads": "Threads",
     "channelPostsCharLimitUnknown": "한도 미확認",
-    "channelPostsOverLimitReason": "한도를 넘어 상신할 수 없습니다 — 본문을 줄여 주세요."
+    "channelPostsOverLimitReason": "한도를 넘어 상신할 수 없습니다 — 본문을 줄여 주세요.",
+    "channelPostsApprovalStatusLabel": "승인 상태",
+    "channelPostsApprovalNotSubmitted": "상신 전",
+    "channelPostsApprovalPending": "승인 대기",
+    "channelPostsApprovalReapprovalNeeded": "재승인 필요",
+    "channelPostsApprovalApproved": "승인됨",
+    "channelPostsApprovalAccountLabel": "발행 계정",
+    "channelPostsApprovalLimitLabel": "남은 게시",
+    "channelPostsLimitCheckFailed": "한도 잔량을 확認하지 못했습니다(조회 실패)",
+    "channelPostsApprovalLinkPreviewLabel": "발행 시 붙는 링크"
   },
   "docs": {
     "title": "문서",
