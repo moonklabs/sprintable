@@ -16,13 +16,20 @@ export type FailureAction =
   | { kind: 'needs_check' }
   | { kind: 'auto_retry'; nextRetryAt: string | null }
   | { kind: 'dead_letter' }
-  | { kind: 'voided'; reasonCode: string | null };
+  | { kind: 'voided'; reasonCode: string | null }
+  // 페드루 PO 정정(2026-09-04 09:49Z, BE #3425/PR#3776) — 이미지 글이 컨테이너 생성→
+  // 완료 대기 중일 때. §17-15 "자동으로 이어서 처리 중"(중립·버튼 없음) — transient의
+  // "다시 시도"(실패 후 재시도)와 뜻이 다르다(이건 실패가 아니라 진행 중), 같은 값으로
+  // 묶지 않는다(§17-15 "모양은 같고 뜻은 다르다").
+  | { kind: 'processing' };
 
 export interface FailureActionInput {
   commandStatus?: CommandStatus | null;
   failureKind?: FailureKind | string | null;
   nextRetryAt?: string | null;
   reasonCode?: string | null;
+  /** BE #3425(PR#3776) 서버 파생 — 'awaiting_container'면 이미지 컨테이너 처리 중(§17-15). */
+  processingKind?: 'awaiting_container' | string | null;
 }
 
 /**
@@ -39,6 +46,10 @@ export function deriveFailureAction(input: FailureActionInput): FailureAction | 
   if (input.commandStatus === 'dead_letter') return { kind: 'dead_letter' };
   if (input.commandStatus === 'blocked') return { kind: 'blocked' };
   if (input.commandStatus === 'completed' || input.commandStatus === 'cancelled' || !input.commandStatus) return undefined;
+  // 페드루 PO 정정(2026-09-04 09:49Z) — pending ∧ processing_kind==='awaiting_container'
+  // 는 failure_kind보다 먼저 잡는다. 실패가 아니라 "진행 중"이라 §17-2의 실패 갈래
+  // 축과 아예 다르다(실패 여부를 먼저 걸러야 failure_kind 유무로 오판 안 함).
+  if (input.commandStatus === 'pending' && input.processingKind === 'awaiting_container') return { kind: 'processing' };
   // pending·in_progress — 실패가 아직 자동 재시도 큐에 있는 상태. failure_kind가 없으면
   // (예: 아직 한 번도 실패한 적 없는 정상 대기) 표시할 실패 자체가 없다.
   if (!input.failureKind) return undefined;

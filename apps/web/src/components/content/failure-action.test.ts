@@ -21,6 +21,11 @@ describe('deriveFailureAction', () => {
     expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'needs_check' })).toEqual({ kind: 'blocked' });
   });
 
+  it('⭐pending+processing_kind=awaiting_container — processing이 failure_kind보다 먼저(§17-15, BE #3425/PR#3776)', () => {
+    expect(deriveFailureAction({ commandStatus: 'pending', processingKind: 'awaiting_container', failureKind: 'transient' }))
+      .toEqual({ kind: 'processing' });
+  });
+
   it('⭐pending+failureKind=transient — auto_retry(§17-13 "자동 재시도가 예정되면 수동 버튼 없음"), nextRetryAt을 실어 냄', () => {
     expect(deriveFailureAction({ commandStatus: 'pending', failureKind: 'transient', nextRetryAt: '2026-09-05T00:00:00Z' }))
       .toEqual({ kind: 'auto_retry', nextRetryAt: '2026-09-05T00:00:00Z' });
