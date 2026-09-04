@@ -123,7 +123,7 @@ async def test_sandbox_absent_when_flag_off():
         assert "threads" in channels
         threads_row = next(row for row in rows if row["channel"] == "threads")
         assert threads_row["display_name"] == "Threads"
-        assert threads_row["oauth"] is True
+        assert threads_row["credential_kind"] == "oauth"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -159,7 +159,7 @@ async def test_sandbox_present_when_flag_on():
         rows = r.json()
         sandbox_row = next(row for row in rows if row["channel"] == "sandbox")
         assert sandbox_row["display_name"] == "Sandbox"
-        assert sandbox_row["oauth"] is False, "sandbox는 credential_kind='none' — OAuth 시작 버튼이 아니라 BFF POST 분기로 가야 한다"
+        assert sandbox_row["credential_kind"] == "none", "sandbox는 credential_kind='none' — OAuth 시작 버튼이 아니라 BFF POST 분기로 가야 한다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -181,7 +181,7 @@ async def test_agent_gets_200_not_403():
         async with _client_for(app) as client:
             r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/available-channels")
         assert r.status_code == 200, r.text
-        assert set(r.json()[0].keys()) == {"channel", "display_name", "oauth"}
+        assert set(r.json()[0].keys()) == {"channel", "display_name", "credential_kind"}
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

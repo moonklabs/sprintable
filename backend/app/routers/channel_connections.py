@@ -277,10 +277,16 @@ class AvailableChannelItem(BaseModel):
     하드코딩/env 분기 없이 그릴 수 있게 `CHANNEL_ADAPTERS` 레지스트리를 그대로 노출.
     sandbox는 그 레지스트리 자체가 `SANDBOX_CHANNEL_ENABLED`일 때만 항목을 갖고 있어
     (channel_adapters.py 상단 조건부 등재) prod에서는 자동으로 빠진다 — 이 엔드포인트에
-    별도 필터링 로직이 없다."""
+    별도 필터링 로직이 없다.
+
+    페드루 리뷰 B2(2026-09-04) — 원래 AC의 `oauth: bool`을 `credential_kind: str`
+    그대로 노출으로 정정. `bool`이면 "oauth vs 그 외"만 구별되는데, 미래에
+    `credential_kind="pasted_secret"`인 채널이 추가되면 그것도 `oauth=false`가 돼
+    FE가 sandbox와 같은 BFF POST 분기(§경계 AC2)로 잘못 보낸다 — "oauth|pasted_secret|
+    none" 3값 자체가 FE 분기의 SSOT라 값을 지어내지 않고 그대로 넘긴다."""
     channel: str
     display_name: str
-    oauth: bool
+    credential_kind: str
 
 
 @router.get(
@@ -300,7 +306,7 @@ async def list_available_channels_endpoint(
 
     return [
         AvailableChannelItem(
-            channel=channel, display_name=cfg.display_name, oauth=cfg.credential_kind == "oauth",
+            channel=channel, display_name=cfg.display_name, credential_kind=cfg.credential_kind,
         )
         for channel, cfg in CHANNEL_ADAPTERS.items()
     ]
