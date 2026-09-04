@@ -840,9 +840,12 @@ steps:
           echo "skip deploy-realtime: GHA path-filter(story #3079)가 realtime-관련 경로 변경 없음으로 판정"
           exit 0
         fi
-        # story #2078/#2123/#2135/cd10e123/#2178/#2442 — 아래 ENV_VARS 각 플래그의
-        # on/off·이름 선택 근거는 전부 docstring 아카이브(test_deploy_backend_redis_
-        # secret_conflict.py) 참고.
+        # story #2078/#2123/#2135/cd10e123/#2442 — 아래 ENV_VARS 값 선택 근거는 docstring
+        # 아카이브(test_deploy_backend_redis_secret_conflict.py) 참고.
+        # story #2178 — 플래그 차이 선언: SSE_TRANSIENT_REPLAY_ENABLED·SSE_LEASE_REDIS_ENABLED
+        # 는 진짜 누락이라 배선, PRESENCE_REDIS_ENABLED·PRESENCE_ONLINE_REDIS_ENABLED·
+        # FANOUT_WAKE_REDIS_ENABLED는 의도적 off(전제: 이 서비스엔 브라우저만 붙는다 —
+        # 라우팅이 바뀌면 이 판정 전체 재검토, 근거는 docstring 아카이브).
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
