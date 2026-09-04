@@ -112,6 +112,8 @@ function stubFetch(opts: {
   // 안 다루므로 기본은 열려 있는 쪽이 자연스럽다) — 개별 테스트가 덮어써 막힌 경우를 본다.
   canUnpublish?: boolean;
   unpublishBlockedReason?: 'unsupported' | 'scope_insufficient' | null;
+  // story #3458 — 연결 «상태»(토큰 등). 기본 'active'.
+  connectionStatus?: 'active' | 'expired' | 'revoked' | 'error';
   connectionsOk?: boolean;
   // story #3428 — 이미지 규격(어댑터 성질). 기본값 0 = 이미지 미지원(기존 74건 전부가
   // 이 값을 몰라도 되므로 명시 안 하면 첨부 칸 자체가 안 뜨는 쪽이 자연스러운 기본).
@@ -169,12 +171,15 @@ function stubFetch(opts: {
         const accountLabel = 'accountLabel' in opts ? opts.accountLabel : 'Marketing Bot';
         const canUnpublish = opts.canUnpublish ?? true;
         const unpublishBlockedReason = opts.unpublishBlockedReason ?? null;
+        // story #3458 — 연결 «상태»(토큰 등). 기본값 active(기존 테스트 전부가 "정상
+        // 연결" 전제) — expired/revoked/error는 개별 테스트가 덮어쓴다.
+        const connectionStatus = opts.connectionStatus ?? 'active';
         return {
           ok: true, status: 200,
           json: async () => ({
             data: [{
               id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
-              can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason,
+              can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason, status: connectionStatus,
               image_formats: ['image/jpeg', 'image/png'], image_max_bytes: 8 * 1024 * 1024,
               image_aspect_max: 10, image_width_min: 320, image_width_max: 1440,
               image_color_space: 'sRGB', image_max_count: opts.imageMaxCount ?? 0,
@@ -716,6 +721,43 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
     const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
     expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
+  });
+
+  // story #3458(유나 4회차 2차 발견) — 연결이 expired인데 can_unpublish=true(어댑터
+  // 성질)만 보고 회수 버튼을 열어 누르면 401이 났다. connection.status도 같이 봐야 한다.
+  it('⭐회수 버튼 — 연결이 expired면 can_unpublish=true여도 비활성 + 사유(연결 화면 링크 포함)가 뜬다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      connectionStatus: 'expired',
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(true);
+    const reason = container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]');
+    expect(reason?.textContent).toBe(koMessages.content.channelPostsUnpublishConnectionNotActive.replace(/<\/?link>/g, ''));
+    expect(reason?.querySelector('a')?.getAttribute('href')).toBe('/organization/channels');
+  });
+
+  it('회수 버튼 — 연결이 active면(기본값) 사유가 안 뜨고 활성 상태를 유지한다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      connectionStatus: 'active',
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
   });
@@ -1512,10 +1554,14 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
       expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
       expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+      // story #3458 — 이 문구엔 이제 /organization/channels 인라인 링크(<link>...</link>)가
+      // 있다. 렌더된 textContent엔 태그가 안 남으므로 비교 원문에서도 태그만 벗겨 낸다.
       expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
-        .toBe(koMessages.content.channelPostsCommandInFlightReasonBlocked);
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonBlocked.replace(/<\/?link>/g, ''));
       expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
         .not.toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
+      const link = container.querySelector('[data-testid="channel-post-command-inflight-reason"] a');
+      expect(link?.getAttribute('href')).toBe('/organization/channels');
     });
 
     it('dead_letter — 예외라 발행 버튼이 그대로 활성(f061c1a3 前까지 유일한 재시도 경로)', async () => {
