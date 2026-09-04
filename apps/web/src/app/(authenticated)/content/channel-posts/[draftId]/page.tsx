@@ -583,6 +583,11 @@ export default function ChannelPostEditPage() {
   // (지금 막으면 아예 되살릴 방법이 없어진다).
   const commandInFlightBlocksNewAttempt = new Set(['pending', 'blocked']);
   const blockedByCommandInFlight = !!draft.command_status && commandInFlightBlocksNewAttempt.has(draft.command_status);
+  // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
+  // 지시가 된다("기다리세요"는 blocked에, "연결을 확인하세요"는 pending에 안 맞는다).
+  // command_status로 정확히 갈라 서로 다른 문장을 낸다.
+  const commandInFlightReasonKey = draft.command_status === 'blocked'
+    ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonPending';
 
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
   // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
@@ -757,7 +762,7 @@ export default function ChannelPostEditPage() {
             경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘). */}
         {canPublish && blockedByCommandInFlight ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
-            {t('channelPostsCommandInFlightReason')}
+            {t(commandInFlightReasonKey)}
           </p>
         ) : null}
         {showCancelScheduled && !canCancelScheduled ? (
@@ -956,7 +961,7 @@ export default function ChannelPostEditPage() {
       ) : null}
       {!isOverLimit && blockedByCommandInFlight ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
-          {t('channelPostsCommandInFlightReason')}
+          {t(commandInFlightReasonKey)}
         </p>
       ) : null}
 

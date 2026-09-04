@@ -67,7 +67,14 @@ function tzOffsetMs(utcInstant: Date, tz: string): number {
 }
 
 /** dateKey(YYYY-MM-DD)의 그 tz 벽시계 hh:mm:ss.mmm을 UTC ISO로 변환. addCalendarDays로
- * 만든 날짜 키와 짝지어 «그 tz에서의 자정/자정 직전»을 정확히 만든다. */
+ * 만든 날짜 키와 짝지어 «그 tz에서의 자정/자정 직전»을 정확히 만든다.
+ *
+ * 유나 기록(2026-09-04, blocking 아님) — 오프셋 계산이 1회 통과다(utcGuess로 오프셋을
+ * 한 번 구해 그대로 뺀다). 자정 그 자체에 DST/표준시 전환이 걸리는 시간대(예:
+ * America/Santiago)에서는 hh=0 근방의 utcGuess가 전환 전/후 어느 쪽 오프셋을 잡느냐에
+ * 따라 경계가 최대 한 시간 어긋날 수 있다. 지금 테스트가 고정하는 네 시간대(KST·UTC·
+ * Honolulu·LA)는 전환 시각이 자정이 아니라 이 오차의 영향을 안 받는다 — 조직 시간대
+ * 기능이 열려 자정 전환 tz가 실제로 들어올 때 재검토 대상으로 남겨 둔다. */
 function zonedWallClockToIso(dateKey: string, hh: number, mm: number, ss: number, ms: number, tz: string): string {
   const [y, mo, d] = dateKey.split('-').map(Number);
   const utcGuess = Date.UTC(y, (mo ?? 1) - 1, d, hh, mm, ss, ms);

@@ -1281,7 +1281,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // 상신을 막는다(이미 진행 중이거나 고쳐야 할 게 따로 있음). dead_letter는 예외
   // (f061c1a3 前까지 발행이 유일한 수동 재시도 경로) — 아래에서 활성 그대로임을 pin한다.
   describe('⭐B4 — command_status가 pending/blocked면 발행·예약 상신을 막는다(dead_letter는 예외)', () => {
-    it('pending — 발행·예약 상신 버튼이 비활성화되고 사유가 버튼 밖에 보인다', async () => {
+    it('pending — 발행·예약 상신 버튼이 비활성화되고 pending 전용 사유가 버튼 밖에 보인다', async () => {
       stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'pending' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
@@ -1289,18 +1289,25 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
       expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
       expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
-        .toBe(koMessages.content.channelPostsCommandInFlightReason);
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
       expect(container.querySelector('[data-testid="channel-post-schedule-submit-command-inflight-reason"]')?.textContent)
-        .toBe(koMessages.content.channelPostsCommandInFlightReason);
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
     });
 
-    it('blocked — 발행·예약 상신 버튼이 비활성화된다', async () => {
+    // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
+    // 지시가 된다. blocked 전용 문구("연결 문제")가 pending 전용 문구("예약/재시도")와
+    // 다른 것을 pin한다.
+    it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 pending과 다르다', async () => {
       stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
       expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
       expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonBlocked);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
+        .not.toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
     });
 
     it('dead_letter — 예외라 발행 버튼이 그대로 활성(f061c1a3 前까지 유일한 재시도 경로)', async () => {

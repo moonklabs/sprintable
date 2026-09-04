@@ -11,7 +11,9 @@ import { formatScheduledAt } from '@/components/content/schedule-format';
 // 은 BE가 command_id를 아직 응답에 안 실어(openapi 실측) 이 조각 스코프 밖이다. BE
 // 노출(story 0e960006) 뒤 FE 배선(story f061c1a3)이 후속. onRetryClick이 안 넘어오면
 // (지금 모든 호출부가 그렇다) 버튼을 안 그리거나 눌리는데 no-op으로 두지 않는다 —
-// disabled+title로 「곧 열린다」를 알린다(화면이 거짓말하지 않는다).
+// disabled로 두되 사유는 버튼 밖 <p>로 보인다(유나 재판정 — title은 호버 전용이고
+// disabled 버튼은 탭 순서 밖이라 title로만 두면 이 사유에 도달할 방법이 없다. AC5 관례
+// ·B4의 <p> 사유와 동형 — 이 화면은 비활성 사유를 항상 버튼 밖에 둔다).
 export interface FailureActionBadgeProps {
   action: FailureAction;
   onRetryClick?: () => void;
@@ -40,13 +42,19 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p className="text-xs text-muted-foreground">{t('channelPostsFailureNeedsCheck')}</p>
         {compact ? null : (
-          <Button
-            variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
-            title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
-            data-testid="channel-post-failure-retry-button"
-          >
-            {t('channelPostsFailureCheckedRetryCta')}
-          </Button>
+          <>
+            <Button
+              variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+              data-testid="channel-post-failure-retry-button"
+            >
+              {t('channelPostsFailureCheckedRetryCta')}
+            </Button>
+            {onRetryClick ? null : (
+              <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
+                {t('channelPostsFailureRetryComingSoon')}
+              </p>
+            )}
+          </>
         )}
       </div>
     );
@@ -67,13 +75,19 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p className="text-xs text-destructive">{t('channelPostsFailureDeadLetter')}</p>
         {compact ? null : (
-          <Button
-            variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
-            title={onRetryClick ? undefined : t('channelPostsFailureRetryComingSoon')}
-            data-testid="channel-post-failure-retry-button"
-          >
-            {t('channelPostsFailureRetryCta')}
-          </Button>
+          <>
+            <Button
+              variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+              data-testid="channel-post-failure-retry-button"
+            >
+              {t('channelPostsFailureRetryCta')}
+            </Button>
+            {onRetryClick ? null : (
+              <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
+                {t('channelPostsFailureRetryComingSoon')}
+              </p>
+            )}
+          </>
         )}
       </div>
     );

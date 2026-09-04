@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { CalendarGrid } from './calendar-grid';
+import { defaultCalendarRange } from './schedule-format';
 import type { ChannelPostCalendarItem } from './use-channel-post-calendar-data';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,6 +46,20 @@ describe('CalendarGrid — story #3422 ②-b 3/N-a, 골격(날짜 열·채널 �
     const headers = container.querySelectorAll('[data-testid="channel-post-calendar-date-header"]');
     expect(headers.length).toBe(3);
     expect([...headers].map((h) => h.textContent)).toEqual(['09-05', '09-06', '09-07']);
+  });
+
+  // 유나 기록(2026-09-04, blocking 아님) — "열 수 7은 격자 수준에서 고정되어 있지 않다.
+  // range의 날짜 키와 enumerateDateKeys가 같은 toDateKey를 공유하는 데서 따라올 뿐이다."
+  // defaultCalendarRange(실제 프로덕션 range 생성 함수, schedule-format.ts)로 만든
+  // range를 그대로 먹여 Asia/Seoul에서 열 7개임을 짝으로 고정해 둔다.
+  it('⭐defaultCalendarRange(Asia/Seoul)를 그대로 먹이면 열이 7개(유나 기록 — 이 짝이 갈라지면 열 수가 흔들린다)', async () => {
+    const range = defaultCalendarRange('Asia/Seoul', new Date('2026-09-04T12:00:00Z'));
+    await act(async () => {
+      root.render(wrap(
+        <CalendarGrid scheduled={new Map()} channels={[{ connectionId: 'c1', label: 'Threads @a' }]} range={range} displayTimezone="Asia/Seoul" />,
+      ));
+    });
+    expect(container.querySelectorAll('[data-testid="channel-post-calendar-date-header"]').length).toBe(7);
   });
 
   it('⭐채널마다 한 행씩 낸다', async () => {

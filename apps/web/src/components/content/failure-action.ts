@@ -35,6 +35,11 @@ export type FailureAction =
 // `channelPostsFailureVoidedWithReason`("Voided · {reason}")과 합성되면 "Voided ·
 // 본문이 바뀜"처럼 문장은 영어인데 사유만 한글로 남는다. 값을 메시지 키로 바꿔
 // 렌더 시점에 t(key)로 푼다 — «맵에 없으면 사유 없이» 규율은 그대로.
+//
+// 유나 기록(2026-09-04, blocking 아님) — 이 맵의 값(channelPostsVoidReason*) 4개는
+// failure-action-badge.tsx에서 `t(voidReasonKey)`로 "동적으로" 소비된다. `t('literalKey')`
+// 형태로 문자열 그대로 grep하는 죽은 i18n 키 정리(수동이든 자동이든)가 이 4키를
+// "코드 어디에도 안 쓰인다"고 오판해 지울 수 있다 — 지우지 않는다. 소비처는 이 맵 하나뿐.
 export const CHANNEL_POST_VOID_REASON_MESSAGE_KEYS: Record<string, string> = {
   CONTENT_CHANGED: 'channelPostsVoidReasonContentChanged',
   SCHEDULE_CHANGED: 'channelPostsVoidReasonScheduleChanged',

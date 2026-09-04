@@ -50,13 +50,15 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   });
 
   // B3(페드루 PO, 2026-09-04 13:14Z) — 재시도 클릭 배선은 story f061c1a3 후속(BE
-  // command_id 노출 뒤). 그 前까지 onRetryClick 미배선 상태로는 disabled+title로만
-  // 렌더한다(눌리는데 아무 일 없는 버튼 금지).
-  it('⭐B3 — needs_check 재시도 버튼은 onRetryClick 미배선이면 disabled+title', async () => {
+  // command_id 노출 뒤). 그 前까지 onRetryClick 미배선 상태로는 disabled로 두고 사유는
+  // 버튼 밖 <p>로 보인다(유나 재판정 — title은 호버 전용·disabled 버튼은 탭 순서 밖).
+  it('⭐B3 — needs_check 재시도 버튼은 onRetryClick 미배선이면 disabled+사유가 버튼 밖 <p>', async () => {
     await render({ kind: 'needs_check' });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
-    expect(btn.title).toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+    expect(btn.title).toBe('');
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryComingSoon);
   });
 
   // N3(페드루 PO, 2026-09-04 13:26Z) — ChannelPostCard(`<Link>`)가 쓰는 모드. 버튼 자체를
@@ -90,11 +92,13 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
       .toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
-  it('⭐B3 — dead_letter 재시도 버튼은 onRetryClick 미배선이면 disabled+title', async () => {
+  it('⭐B3 — dead_letter 재시도 버튼은 onRetryClick 미배선이면 disabled+사유가 버튼 밖 <p>', async () => {
     await render({ kind: 'dead_letter' });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
-    expect(btn.title).toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+    expect(btn.title).toBe('');
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryComingSoon);
   });
 
   it('⭐N3 — compact=true면 dead_letter 재시도 버튼을 아예 안 그린다(라벨만)', async () => {
