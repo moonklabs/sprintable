@@ -153,7 +153,8 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads'));
     stubFetch({ connections: [] });
     await mount('owner');
-    expect(container.textContent).toContain('threads 연결이 완료됐습니다');
+    // story 3436(묶음 6) — channelLabel()이 raw 쿼리값을 사람이 읽는 이름으로 정규화한다.
+    expect(container.textContent).toContain('Threads 연결이 완료됐습니다');
   });
 
   it('?connect_error=로 알려진 코드는 사람 말로, 모르는 코드는 일반 실패 문구로 뜬다', async () => {
@@ -249,7 +250,9 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     await mount('owner');
     const btn = container.querySelector('[data-testid="channel-connect-sandbox-button"]');
     expect(btn).not.toBeNull();
-    expect(btn?.textContent).toContain('Sandbox');
+    // story 3436(묶음 6) — display_name("Sandbox") 대신 channelLabel(§13-6 어휘)로 렌더 —
+    // 배지("테스트용 연결")와 버튼 문구가 이제 일치한다.
+    expect(btn?.textContent).toContain('테스트용');
   });
 
   it('member는 sandbox 버튼 대신 owner 안내 문구를 본다', async () => {

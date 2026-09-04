@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError, type SitePostApiErrorInfo } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
@@ -469,8 +470,8 @@ export default function ChannelPostEditPage() {
         // 문구는 쓰지 않는다(제품에 없는 동작 — doc §5 각주 명시).
         if (info.kind === 'gate_already_held' && info.heldByDraftId) {
           const holdingDraftId = info.heldByDraftId;
-          const channelLabel = info.heldByChannel === 'threads' ? t('channelThreads') : (info.heldByChannel ?? t('channelThreads'));
-          let holdingLabel = `${channelLabel} 초안 ····${holdingDraftId.slice(0, 4)}`;
+          const holdingChannelLabel = info.heldByChannel ? channelLabel(info.heldByChannel, t) : t('channelThreads');
+          let holdingLabel = `${holdingChannelLabel} 초안 ····${holdingDraftId.slice(0, 4)}`;
           try {
             const holdingRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${holdingDraftId}`);
             if (holdingRes.ok) {
@@ -886,7 +887,7 @@ export default function ChannelPostEditPage() {
           {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
         </div>
         <p className="text-sm text-muted-foreground">
-          {draft.channel === 'threads' ? t('channelThreads') : draft.channel} · v{draft.current_version}
+          {channelLabel(draft.channel, t)} · v{draft.current_version}
         </p>
         {/* story 15e481ce(#3453 AC2, 유나 §14-2 안전 표기) — "원문" 단정이 아니라 "같은
             스토리의 글". source_content_item_id 없으면(정상값) 이 줄 자체를 안 그린다.
