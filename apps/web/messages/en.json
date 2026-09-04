@@ -2211,6 +2211,8 @@
     "channelPostsPublishContinueCta": "Continue publishing",
     "channelPostsPublicationFailed": "Publish failed",
     "channelThreads": "Threads",
+    "channelPostsCalendarUnscheduledLaneTitle": "No date set ({count})",
+    "channelPostsCalendarUnscheduledLaneLabel": "Drafts without a scheduled date",
     "channelPostsCharLimitUnknown": "Limit unknown",
     "channelPostsOverLimitReason": "Over the limit — you can't submit until the text is shorter.",
     "channelPostsTextTooLong": "The limit is {max} characters, but this is {current} — shorten it and resubmit.",
