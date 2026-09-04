@@ -1115,7 +1115,7 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                     db, org_id=org_id, event_type="doc_draft_discussed_in_chat",
                     target_member_ids=[doc_author_id],
                     title="draft 문서가 채팅에서 논의됐습니다",
-                    body=f"'{doc_title}' — 결재 상신 여부를 확認해 주세요.",
+                    body=f"'{doc_title}' — 결재 상신 여부를 확인해 주세요.",
                     reference_type="doc", reference_id=doc_id,
                     source_project_id=project_id, via_outbox=True,
                 )

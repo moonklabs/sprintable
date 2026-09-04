@@ -1377,7 +1377,7 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
     elif verdict == "approved":
         lines.append(
             "- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 "
-            "승인 게이트를 확認하는 발행 도구를 쓰세요)."
+            "승인 게이트를 확인하는 발행 도구를 쓰세요)."
         )
 
     return "\n".join(lines)
