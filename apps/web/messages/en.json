@@ -2095,6 +2095,7 @@
     "channelConnectErrorOwnerOnly": "Only owners can do this.",
     "channelConnectErrorSessionExpired": "Your session expired — please sign in again.",
     "channelConnectErrorProviderDenied": "Permission was denied — please reconnect.",
+    "channelConnectErrorProviderError": "The channel provider had an error — please try reconnecting shortly.",
     "appCredentialsTitle": "{channel} app credentials",
     "appCredentialsOrgActive": "Connecting with this organization's app · ID ends in {suffix}",
     "appCredentialsPlatformActive": "Connecting with Sprintable's shared app (default)",
