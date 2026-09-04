@@ -109,6 +109,151 @@ Cloud Build 에러 그대로)를 넘겨 dev 배포가 2연속 실패했다. depl
   「수동 바인딩」이라 배포 SSOT 어디에도 선언이 없어 env-drift-guard 축①이 매일 빨강이었다
   (additive `--update-secrets`라 값은 보존됐으나 미선언=fragile: `--set-secrets` 리팩터·서비스
   재생성 時 조용히 소실→reads가 primary로 새 병목 악화). 여기 편입해 durable화.
+
+## deploy-backend 인라인 주석 2차 아카이브 (story #3433, 2026-09-04)
+
+story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story #3118·620beefc 등) 89%
+(8,988B)까지 재소진됐다 — 원인이 된 서사를 다시 여기로 옮기고 cloudbuild.yaml엔 story
+번호+한 줄 포인터만 남긴다(값/로직 무변경, 순수 주석 재배치 — #3124와 동일 스코프). 원문
+(요약 없이 옮김):
+
+- **story #2141**: `REDIS_URL`은 prod에서 Secret Manager 바인딩과 동명 키 충돌 방지로 여기서
+  안 넘긴다(위 본문 ⛔#2423 핫픽스 서사와 동일 사고).
+- **⛔story #2423(2026-07-23, 배포 실패 핫픽스)**: 셸 변수는 반드시 `$$`로 이스케이프 —
+  단일 `$`는 Cloud Build 자신의 substitution 파서가 args 전체를 먼저 훑어 build submit
+  자체를 INVALID_ARGUMENT로 거부한다(설명 예시로 적어도 마찬가지 — 위 본문 §2차 사고
+  서사 참고).
+- **story #3418(카디르 실측 2026-09-04)**: `RATE_LIMIT_BACKEND=redis`를 `REDIS_URL`과 같은
+  dev 분기에 묶는다(`rate_limiter.py::get_rate_limiter`가 이 값 있어야 `RedisRateLimiter`로
+  감 — `REDIS_URL`만 있고 이게 없으면 기본값 memory라 인스턴스별로 계속 갈라진다). prod는
+  PO가 선생님 결재 뒤 별도로.
+- **story #2777**: `ADMIN_OPERATOR_AUDIENCE`/`ALLOWLIST`는 prod에 키 자체가 없어야 안전
+  (`require_admin_operator`가 fail-closed 503, 대표승인 前 prod 결제개입 전면금지 태세와
+  정합).
+- **story #3117**: `GCS_AVATARS_BUCKET`은 `REDIS_URL`/`ADMIN_OPERATOR_*`와 달리 dev/prod
+  둘 다 싣는다(prod 버킷 프로비저닝 완료로 #2887의 「prod엔 키 자체가 없어야 안전」 유보
+  해소).
+- **story 620beefc(페드루 리뷰 B5)**: `GCS_CHANNEL_MEDIA_BUCKET`은 `ADMIN_OPERATOR_*`와
+  동형(avatar #2887 원래 형태, #3117 이전) — prod 버킷 미프로비저닝이라 prod엔 이 키
+  자체가 없어야 안전(미설정 시 `channel_post_images.py::ChannelImageStorageNotConfiguredError`
+  →503 fail-closed).
+- **story 5b27b32f**: `SANDBOX_CHANNEL_ENABLED`는 `RATE_LIMIT_BACKEND`와 동형(리터럴,
+  substitution 불요) — prod는 키 자체가 없어야 안전(`channel_adapters.py` env 게이트가
+  그래서 미등재 → sandbox 어댑터 자체가 등록 안 됨, AC5 fail-closed 가드가 그래도
+  등재됐을 경우까지 이중 방어).
+- **story #2141 원칙 재사용(카디르 QA 2026-08-19)**: `GOTENBERG_SERVICE_URL`도 prod엔 키
+  자체가 없어야 안전(dev 전용 office-converter 하드게이트).
+- **story #3279(지원v1·후속)**: 운영자 회신 배달(backend→support-gateway) 착지 URL
+  (`SUPPORT_GATEWAY_OPERATOR_REPLY_URL`). support-gateway 자체가 아직 dev 전용
+  프로비저닝(`_NEXT_PUBLIC_SUPPORT_GATEWAY_URL`이 prod엔 빈 문자열)이라 같은 조건으로
+  게이트 — 빈 값이면 아예 안 싣는다(GOTENBERG_SERVICE_URL과 동일 원칙, 안 실으면 코드
+  쪽 `settings.support_gateway_operator_reply_url=""`가 fail-closed로 배달을 정직하게
+  skip한다 — `operator_reply_delivery.py`). `SUPPORT_GATEWAY_TOKEN_SECRET`은 이미 이
+  스텝의 `SECRETS_FLAG`(dev 분기)에 바인딩돼 있어 별도 시크릿 추가 불요(같은 대칭키
+  재사용 — aud로만 구조적 분리, `escalation_delivery.py` 반대 방향과 동형).
+- **story #183fe7a5(지원v1·후속)**: 게이트 해소(approve/reject)→gateway
+  `SupportEscalation.status` 동기화 착지 URL(`SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL`).
+  위 operator-reply URL과 완전히 같은 게이팅 원칙(dev 전용, 빈 값이면 안 싣는다 —
+  GOTENBERG_SERVICE_URL 선례 재사용) 재사용 — 같은 `SUPPORT_GATEWAY_TOKEN_SECRET`, aud만
+  다름(`escalation_resolution_delivery.py` 모듈 docstring 참고).
+- **story #2445/#3110/#3118(SECRETS_FLAG)**: `DATABASE_URL`(PgBouncer, dev/prod 둘 다
+  sprintable 앱유저)·`DATABASE_URL_DIRECT`(dev=sprintable 앱유저·prod=postgres 직결)·
+  `DATABASE_URL_READ`(prod만)·`APPLE_PRIVATE_KEY` 시크릿 바인딩. dev pgbouncer 경유분은
+  #3110 2보(userlist에 sprintable 유저 등재+`DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE` 시크릿
+  신설, PO 집행)로 sprintable 유저 전환 완료 — dev 서빙이 postgres 수퍼유저 DSN을 쓰는
+  자리가 이제 0개.
+- **story #f2a27d2a(지원v1·1경계) flip PR**: `SUPPORT_GATEWAY_TOKEN_SECRET`을 **dev
+  분기에만** 추가한다. prod용 시크릿(`SUPPORT_GATEWAY_TOKEN_SECRET_PROD`)은 아직 Secret
+  Manager에 없다(prod 자원 미프로비저닝) — prod `SECRETS_FLAG`에 넣으면 이미 live인 backend
+  prod 배포 자체가 "secret not found"로 깨진다. backend 코드 쪽은 이미 이 값 미설정 시
+  fail-closed 503(`support_gateway_token.py`)이라 시크릿을 아예 안 실어도 안전 — prod가
+  그 상태다.
+- **story f56bd418(#3390, Phase1·인프라)**: `CHANNEL_CREDENTIAL_ENCRYPTION_KEY`·
+  `CHANNEL_OAUTH_STATE_SECRET`(story #3373 채널 연결 골격, `config.py`의
+  `channel_credential_encryption_key`·`channel_oauth_state_secret`)을 **dev 분기에만**
+  추가한다. prod는 별도 결정(prod 시크릿 미생성 — `SUPPORT_GATEWAY_TOKEN_SECRET`과 동일
+  선례: 값 미설정 시 fail-closed라 시크릿을 아예 안 실어도 안전, prod `SECRETS_FLAG`에
+  넣으면 존재하지 않는 시크릿으로 배포 자체가 깨진다).
+
+## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
+
+deploy-backend와 같은 이유로 deploy-realtime도 86%(8,640B)까지 자랐다 — 같은 처방
+(서사 외부화, 값/로직 무변경). 원문(요약 없이 옮김):
+
+- **⛔fail-fast(오르테가군 PO 2026-07-23)**: `_REALTIME_URL` 기본값을 dev URL에서 빈
+  문자열로 내렸다(substitutions 주석 — prod 프론트가 dev realtime을 가리킬 여지 제거).
+  frontend 쪽은 빈 값이 곧 "FASTAPI_URL로 폴백"이라 안전하지만, **여기서는 빈 값이
+  안전하지 않다** — `FASTAPI_URL=${_REALTIME_URL}`이 빈 문자열로 나가면 realtime-dev의
+  self URL이 지워진다. 조용히 깨지는 대신 여기서 멈춘다. 자동 경로(GHA dev 분기)는
+  항상 명시값을 넘기므로 이 가드에 걸릴 일이 없다 — 걸린다면 substitution 없이 수동
+  `gcloud builds submit`한 경우이고, 그건 정말로 멈춰야 하는 상황이다.
+- **story #3079(2026-08-25) 근본수정**: #3031이 여기 심었던 git-diff 기반 path-filter는
+  Cloud Build 워크스페이스에 `.git`이 없어(로컬소스 tarball 업로드, `.gcloudignore`
+  미비로 gcloud 기본 규칙이 `.git` 항상 제외) 단 한 번도 실제로 스킵하지 못했다 — 매번
+  "판별 불가" fail-safe로 떨어져 상시 배포였다(실 로그로 확定). 판정을 Cloud Build 밖
+  (GHA, 실 `.git` 보유 — cloud-build.yml "Resolve realtime deploy path-filter" 스텝)
+  으로 옮기고 결과만 이 substitution으로 받는다.
+- **⚠️story #2078 긴급수정(2026-07-21)**: `PG_LISTEN_ENABLED`가 여기 true로 하드코딩돼
+  있었다 — PO가 라이브에서 손으로 false로 전환(LISTEN 제거·Redis 단독 dispatch 확認
+  완료)했는데, 이 스텝이 명시적으로 true를 다시 밀어넣어 **다음 배포마다 LISTEN이
+  부활**하는 시한폭탄이었다("손 값은 배포가 덮는다" 규율의 역방향 재발 — 이번엔 배포가
+  고침을 지우는 쪽). realtime은 이제 LISTEN이 구조적으로 불필요(Redis가 authoritative
+  dispatch) — false로 durable 고정. `EVENT_BROKER_REDIS_CONSUME_ENABLED=true`도 명시.
+- **⚠️#2123 정정(2026-07-23)**: "api는 구독 불필요"라 여기 적었었으나 틀렸다 — 에이전트
+  SSE가 backend-dev를 직접 서빙해(`agent_onboarding_config.py` 설계) api도 이제
+  consume+dispatch=true다(deploy-backend 스텝 참조). 브라우저(여기, realtime-dev)와
+  에이전트(backend-dev)가 서로 다른 프로세스-로컬 큐만 보므로 중복배달은 없다.
+- **⚠️story #2135(2026-07-23)**: 이 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
+  Settings 필드(`event_broker_redis_consume_enabled`)와 안 맞아 pydantic이 조용히
+  무시했다(여기서는 필드 기본값이 우연히 True라 결과만 의도와 같았음). 실제 필드가
+  기대하는 키로 정정 — 구 키는 `--remove-env-vars`로 명시 제거.
+- **⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발)**: `REDIS_URL`·
+  `EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED`·`EVENT_BROKER_REDIS_DISPATCH_ENABLED` 셋
+  다 여태 여기 없는 순수 수동 Cloud Run env였다 — realtime은 이미 LISTEN이 꺼져있고
+  Redis가 유일한 dispatch 경로라, 이 서비스가 재배포/재생성될 때 이 셋이 기본값
+  (false/None)으로 되돌아가면 두 전송경로 동시 무효화(실시간 전면정지)가 된다. 이
+  스텝은 이미 dev 전용 가드 안이라 true를 직접 명시해도 안전(`PG_LISTEN_ENABLED=false`
+  와 동일 컨벤션) — `REDIS_URL`만 변수(연결문자열은 환경별로 다르므로).
+- **story #2178(2026-07-24, 까심 #2158 회귀검증에서 적발 → PO가 전수로 넓힘)**:
+  deploy-backend는 12키를 넘기는데 이 스텝은 8키뿐이라 backend·realtime 두 서비스가
+  다른 플래그 세트로 돌고 있었다 — 그 차이 자체가 어디에도 선언된 적이 없어 "켰다"고
+  믿는 사고가 반복됐다(#2158 `SSE_TRANSIENT_REPLAY_ENABLED`가 정확히 그 사고:
+  `record()`는 backend-dev에서 돌아 정상이었는데, 실제 브라우저 SSE를 서빙하는 건 이
+  realtime-dev라 `replay()`가 이 서비스에서 한 번도 안 돌고 있었다). 5종 전수 판정
+  (코드 경로 실증, 값보다 "왜 다른지" 선언이 본체):
+  - ⭐`SSE_TRANSIENT_REPLAY_ENABLED` 진짜 누락 — replay 대상 연결이 실제로 여기
+    (realtime-dev의 `agent_event_stream`)에 있다. 즉시 배선.
+  - ⭐`SSE_LEASE_REDIS_ENABLED` 진짜 누락 — `events.py`의 `sse_lease.acquire/refresh/
+    release`가 바로 이 파일의 `agent_event_stream` 안에서 직접 호출된다(연결 시점·30초
+    하트비트마다·해제 시). realtime-dev가 다인스턴스(`_REALTIME_MIN/MAX_INSTANCES`=2~8)
+    라 이게 꺼져 있으면 #2121이 고치려던 전역 429/503 캡이 인스턴스별로 쪼개져 그 결함이
+    이 서비스에서 그대로 재현된다. 즉시 배선.
+  - `PRESENCE_REDIS_ENABLED` 의도적 off(무해) — `chat_presence`는 이 파일(`events.py`)
+    어디에도 import/호출이 없다. 쓰기·읽기 전부 `conversations.py`/`team_presence.py`
+    (REST 라우트)에만 있어 backend-dev에서만 실행된다.
+  - `PRESENCE_ONLINE_REDIS_ENABLED` 의도적 off(무해) — 30초 SSE-틱 hot-path 기록은
+    `agent_gateway.py`의 `/agent/stream`(에이전트 전용, backend-dev가 직접 서빙)에만
+    있다. 이 파일의 `agent_event_stream`(브라우저 전용)엔 presence_online 참조가
+    전혀 없다.
+  - `FANOUT_WAKE_REDIS_ENABLED` 의도적 off(무해) — `wake_agent()`는 REST 뮤테이션
+    라우트에서만 호출되고, 대상 큐(`_agent_connections`)도 에이전트 키인데 에이전트는
+    backend-dev에만 붙는다 — realtime-dev엔 그 큐 자체가 존재한 적이 없다.
+
+  위 두 건(누락)만 배선하고 나머지 셋은 의도적으로 그대로 둔다 — 한 덩어리로 "다 켜자"
+  하지 않는다(PO 지시).
+  - ⚠️이 판정이 딛고 선 전제(오르테가군 PR 리뷰 지적, 2026-07-24) — 위 세 건의 "의도적
+    off" 판정은 **"realtime-dev에는 브라우저만 붙는다"**는 현재 라우팅 전제 위에 서
+    있다. 이 서비스는 backend와 **같은 풀 이미지**를 돌리므로 `/agent/stream`
+    (`agent_gateway.py`) 라우트 자체는 살아 있다 — 지금은 에이전트가 항상 backend-dev
+    로 붙도록 배선돼 있어(`agent_onboarding_config.py::resolve_backend_direct_url`)
+    무해할 뿐이다. **그 라우팅이 바뀌어 에이전트가 realtime-dev에도 붙게 되면 이 판정
+    전체를 재검토할 것** — 오늘 이 사달(#2178)의 근본원인이 정확히 "전제가 어디에도
+    안 적혀 있었던 것"이라, 판정 근거뿐 아니라 판정이 무너지는 조건까지 여기 남긴다.
+- **story #2442(P0)**: 이 스텝은 위에서 이미 dev 아니면 skip하므로 prod 값(20/10)은
+  여기 닿지 않는다(`_DEPLOY_ENV=prod`면 함수 진입 전에 exit 0). 그래도 하드코딩
+  `DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1`을 그대로 뒀었다(PO forensic 적발 — 3곳 하드코딩
+  중 하나) — SSOT 원칙상 "우연히 같은 값"과 "명시로 같은 값"은 다르다. deploy-backend와
+  동일한 substitution으로 교체(dev 기본값 3/1 그대로 — 값 변경 아님, 배선만 정정).
 """
 from __future__ import annotations
 
@@ -369,16 +514,28 @@ def test_bash_entrypoint_steps_under_cloudbuild_arg_byte_limit():
 # under_cloudbuild_arg_byte_limit()의 <10,000 하드 컷은 "이미 넘은 뒤"에만 CI를 빨갛게
 # 한다 — submit 시점까지 아무도 재지 않는 사각과 본질적으로 같은 모양(닥쳐서야 아는 것).
 # 90%(9,000B)를 넘는 순간 CI를 미리 빨갛게 해 "다음 PR이 그냥 넘겨버리는" 걸 막는다.
-_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO = 0.9
+#
+# story #3433(2026-09-04, 페드루 PO 決定) — 90% 임계를 통과했던 deploy-backend(89%)·
+# deploy-realtime(86%)이 그새 다시 임계 밑에서 자라 있었다(story #3118·620beefc·
+# 5b27b32f 등 매 story의 "1~2줄"이 누적) — 90%는 "이미 벼랑 끝"에서야 걸려 예방 효과가
+# 없었다. 60%로 낮춰 훨씬 이른 시점에 CI를 빨갛게 한다(이 스토리에서 deploy-backend
+# 51%·deploy-realtime 17%까지 낮춘 뒤에도 여전히 통과하는 값 — 임계를 낮추는 것 자체가
+# 목적이라 실제로 걸리는 지점이어야 의미가 있다).
+_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO = 0.6
 
 
 def test_bash_entrypoint_steps_have_byte_headroom():
-    """⭐story #3124 — 바이트 한도의 90%(9,000B)를 넘는 bash 스텝이 있으면 실패. 하드 한도
-    (10,000B, 위 테스트)와 별개 축 — 그 테스트는 "이미 넘었다"만 잡고, 이 테스트는 "곧 넘긴다"를
-    미리 잡는다(구조적 여유 확保가 이 스토리의 핵심 AC, 그 여유가 실제로 있는지를 이 테스트가
-    영구히 재확인한다). deploy-backend는 이 스토리에서 9,829→4,391B로 낮췄다(여유
-    5,609B, AC1의 ≥2,000B 목표 초과 달성) — 다른 bash 스텝이 이 임계를 넘으면 그 스텝도
-    같은 방식(서사 주석 외부화)으로 손볼 시점이라는 신호."""
+    """⭐story #3124(90% 최초 도입)·#3433(2026-09-04, 60%로 하향) — 바이트 한도의 60%
+    (6,000B)를 넘는 bash 스텝이 있으면 실패. 하드 한도(10,000B, 위 테스트)와 별개 축 —
+    그 테스트는 "이미 넘었다"만 잡고, 이 테스트는 "곧 넘긴다"를 미리 잡는다(구조적 여유
+    확保가 이 스토리의 핵심 AC, 그 여유가 실제로 있는지를 이 테스트가 영구히 재확인한다).
+
+    ⛔story #3433 재발 교훈 — 90% 임계였을 때 deploy-backend·deploy-realtime 둘 다 이미
+    한 번씩 통과했던(story #3124·이 스토리 직전 상태) 뒤에도 story마다 쌓인 짧은 인라인
+    주석 1~2줄이 다시 89%·86%까지 재소진시켰다 — "통과했으니 안전"이 아니라 "임계에
+    얼마나 가까운가"가 계속 재측정돼야 한다는 뜻. 60%는 이 스토리가 deploy-backend를
+    51%·deploy-realtime을 17%까지 낮춘 뒤 기준으로 고른 값(둘 다 통과하되, 다음 몇 story의
+    짧은 추가 정도로는 다시 안 걸리는 여유)."""
     doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
     bash_steps = [s for s in doc["steps"] if s.get("entrypoint") == "bash"]
     warn_threshold = int(_CLOUDBUILD_STEP_ARG_BYTE_LIMIT * _CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO)
@@ -388,13 +545,16 @@ def test_bash_entrypoint_steps_have_byte_headroom():
         if byte_len >= warn_threshold:
             over_threshold.append(
                 f"{step['id']}: {byte_len}B/{_CLOUDBUILD_STEP_ARG_BYTE_LIMIT}B "
-                f"({byte_len * 100 // _CLOUDBUILD_STEP_ARG_BYTE_LIMIT}%)"
+                f"({byte_len * 100 // _CLOUDBUILD_STEP_ARG_BYTE_LIMIT}%, 임계 "
+                f"{int(_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO * 100)}%) — 처방: 서사 주석을 "
+                f"이 파일의 '{step['id']} 인라인 주석 아카이브' 절(없으면 새로 만들 것)로 "
+                "옮기고 cloudbuild.yaml엔 story번호+한줄 포인터만 남길 것(deploy-backend/"
+                "deploy-realtime이 story #3124/#3433에서 이 패턴을 이미 적용)."
             )
     assert not over_threshold, (
         f"bash 스텝이 바이트 한도의 {int(_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO * 100)}%"
         f"({warn_threshold}B)를 넘었다 — 다음 env/secret 1~2개 추가로 #3031급 submit 실패가 "
-        f"재발할 수 있는 구조: {over_threshold}. 서사 주석을 관련 테스트 파일 docstring으로 "
-        "외부화하거나 스텝을 분할해 여유를 만들 것(story #3124가 deploy-backend에 적용한 패턴)."
+        f"재발할 수 있는 구조:\n" + "\n".join(f"  - {line}" for line in over_threshold)
     )
 
 
