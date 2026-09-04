@@ -26,6 +26,9 @@ const CASES: Array<{ name: string; input: ChannelPostViewInput; expected: Partia
     input: { publicationStatus: 'failed', errorCode: 'CHANNEL_PUBLISH_PROVIDER_ERROR', publishedAt: null },
     expected: { status: 'draft', partialSuccess: false, publicationFailed: true, errorCode: 'CHANNEL_PUBLISH_PROVIDER_ERROR' },
   },
+  // 1-D(4열, 페드루 PO nit 2026-09-04 09:07Z) — 방어적 조합(gate 없어도 unpublished
+  // 플래그 자체는 열의 값 그대로, 1-B/1-C와 같은 축).
+  { name: '1-D 없음×unpublished', input: { publicationStatus: 'unpublished', publishedAt: null }, expected: { status: 'draft', unpublished: true } },
   // ── 2행: pending ──────────────────────────────────────────────────
   {
     name: '2-A pending×null',
@@ -41,6 +44,11 @@ const CASES: Array<{ name: string; input: ChannelPostViewInput; expected: Partia
     name: '2-C pending×failed',
     input: { gateStatus: 'pending', reapprovalRequired: false, publicationStatus: 'failed', publishedAt: null },
     expected: { status: 'pending', partialSuccess: false, publicationFailed: true },
+  },
+  {
+    name: '2-D pending×unpublished(방어적 조합 — 승인 前엔 실제로 안 나올 값이지만 순수함수 계약은 열 그대로 지킨다)',
+    input: { gateStatus: 'pending', reapprovalRequired: false, publicationStatus: 'unpublished', publishedAt: null },
+    expected: { status: 'pending', unpublished: true },
   },
   // ── 3행: approved(published_at 없음) — AC3 핵심, 세 열이 실제로 갈린다 ─────
   {
@@ -60,6 +68,15 @@ const CASES: Array<{ name: string; input: ChannelPostViewInput; expected: Partia
       publicationStatus: 'failed', errorCode: 'CHANNEL_PUBLISH_PROVIDER_ERROR', publishedAt: null,
     },
     expected: { status: 'approved', partialSuccess: false, publicationFailed: true, errorCode: 'CHANNEL_PUBLISH_PROVIDER_ERROR' },
+  },
+  // 3-D(4열, 페드루 PO 정정 2026-09-04 08:40Z, story #3426) — 회수 뒤 서버가 다음 로드에서
+  // 주는 값과 같은 모양(published_at=null·publication_status='unpublished'). 승인 자체는
+  // 안 풀린다 — 칩은 「승인됨」 그대로이고 unpublished 오버레이만 얹힌다(캐치올 해제 — 예전
+  // published_at이 있어도 회수 뒤엔 null로 와서 hasPublishedSitePost가 다시 false로 접힌다).
+  {
+    name: '3-D approved×unpublished(회수됨) — 칩은 승인됨 유지, unpublished 오버레이만',
+    input: { gateStatus: 'approved', sealedBodySha256: 'a', currentBodySha256: 'a', publicationStatus: 'unpublished', publishedAt: null },
+    expected: { status: 'approved', publishable: true, partialSuccess: false, publicationFailed: false, unpublished: true },
   },
   // ── 4행: rejected — PO 확定, deriveContentPostStatus 자체 결과가 정본(새 칩 없음,
   //         gateStatus!=='approved'면 무조건 draft) — 1행과 동형이어야 한다 ──────────
@@ -81,6 +98,11 @@ const CASES: Array<{ name: string; input: ChannelPostViewInput; expected: Partia
     name: '5-C 재승인필요×failed',
     input: { gateStatus: 'pending', reapprovalRequired: true, publicationStatus: 'failed', publishedAt: null },
     expected: { status: 'reapproval_needed', publicationFailed: true },
+  },
+  {
+    name: '5-D 재승인필요×unpublished — 회수됐어도 재승인 필요가 항상 이긴다(§4-1/§17-10 우선순위 그대로)',
+    input: { gateStatus: 'pending', reapprovalRequired: true, publicationStatus: 'unpublished', publishedAt: null },
+    expected: { status: 'reapproval_needed', unpublished: true },
   },
   // ── 키 부재 열(AC2 fail-safe) — gate_status·publication_status 둘 다 계약에 없음
   //    (undefined, null 아님). 5행 전부 「—」(status undefined)로 접혀야 한다 ───────────

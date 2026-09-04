@@ -73,6 +73,7 @@ const DRAFT_DETAIL = {
   permalink: null as string | null, external_id: null as string | null, error_code: null as string | null,
   published_at: null as string | null,
   published_body_sha256: null as string | null,
+  command_status: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -88,6 +89,8 @@ function stubFetch(opts: {
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
   onPublish?: () => { status: number; body: unknown };
+  onCancelScheduled?: () => { status: number; body: unknown };
+  onUnpublish?: () => { status: number; body: unknown };
   // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — GATE_ALREADY_HELD의
   // best-effort 상대 초안 조회. undefined=엔드포인트 자체가 404(구 계약, #3767 착지 전
   // 상황 재현) · { text_preview: null }=필드는 있는데 값이 없음 · 값 있으면 그 미리보기.
@@ -96,6 +99,11 @@ function stubFetch(opts: {
   // 위에 스프레드 병합되므로 override 쪽에서 키를 빼도 base의 값이 살아남는다(고전
   // 함정) — 병합 "후"에 명시적으로 delete해야 진짜 키 부재를 재현한다.
   omitGateStatusKey?: boolean;
+  // story #3426 — 연결의 회수 판정값. 기본값은 "회수 가능"(대부분 테스트가 게이팅 자체를
+  // 안 다루므로 기본은 열려 있는 쪽이 자연스럽다) — 개별 테스트가 덮어써 막힌 경우를 본다.
+  canUnpublish?: boolean;
+  unpublishBlockedReason?: 'unsupported' | 'scope_insufficient' | null;
+  connectionsOk?: boolean;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -117,14 +125,22 @@ function stubFetch(opts: {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
+        // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 자체가 실패하면 unpublishGate가
+        // undefined로 남는다("모른다") — 그 경로를 재현하는 스위치.
+        if (opts.connectionsOk === false) return { ok: false, status: 500, json: async () => ({}) };
         // ⚠️`??`는 null도 nullish라 여기서 쓰면 "명시적으로 null을 넘긴" 테스트 케이스가
         // 조용히 500으로 되돌아간다 — 호출부가 필드 자체를 안 넘겼을 때만 500 기본값.
         const maxTextLength = 'maxTextLength' in opts ? opts.maxTextLength : 500;
         const accountLabel = 'accountLabel' in opts ? opts.accountLabel : 'Marketing Bot';
+        const canUnpublish = opts.canUnpublish ?? true;
+        const unpublishBlockedReason = opts.unpublishBlockedReason ?? null;
         return {
           ok: true, status: 200,
           json: async () => ({
-            data: [{ id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1' }],
+            data: [{
+              id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
+              can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason,
+            }],
             error: null, meta: null,
           }),
         };
@@ -150,6 +166,16 @@ function stubFetch(opts: {
         const result = opts.onPublish?.() ?? {
           status: 200, body: { permalink: 'https://threads.net/@x/1', external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1' },
         };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/cancel-scheduled` && init?.method === 'POST') {
+        const result = opts.onCancelScheduled?.() ?? { status: 200, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: null } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/unpublish` && init?.method === 'POST') {
+        const result = opts.onUnpublish?.() ?? { status: 200, body: { publication_id: 'pub-1', status: 'unpublished', external_id: 'media-1', unpublished_at: '2026-09-04T00:00:00Z' } };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -508,7 +534,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // 게이팅만 선 죽은 버튼을 표면에 두지 않는다. canUnpublish 변수는 BE 선행(PR#3769
   // 뒤)이 착지하면 이 자리를 다시 켜는 용도로 남겨 두되, 지금은 role·publication_status
   // 어떤 조합이어도 버튼 자체가 렌더되지 않아야 한다.
-  it('⭐발행 취소 버튼 — PR2에서는 화면에 아예 렌더하지 않는다(publication_status=published+owner여도)', async () => {
+  // story #3426(BE #3419 착지) — PR2에서 렌더 보류했던 회수 버튼을 복원. 기본 stubFetch는
+  // canUnpublish=true·role='owner'라 활성 상태로 뜬다.
+  it('⭐회수 버튼 — publication_status=published+owner+연결 can_unpublish=true면 활성화된다', async () => {
     stubFetch({
       draftDetail: {
         gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
@@ -519,8 +547,376 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       root.render(wrap(<ChannelPostEditPage />));
     });
     await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
+  });
+
+  it('⭐회수 버튼 — publication_status가 published가 아니면 렌더되지 않는다', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', publication_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
+  });
+
+  // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 실패로 unpublishGate가 "모른다"(undefined)
+  // 로 남으면 버튼은 비활성인데 사유가 없었다(AC1 "사유는 버튼 밖" 위반). role은 owner라
+  // 통과했지만 연결 판정 자체를 못 받아 그 사유가 떠야 한다.
+  it('⭐회수 버튼 — 연결 조회 실패(unpublishGate=모른다)면 비활성화되고 "확認하지 못했습니다" 사유가 보인다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      connectionsOk: false,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishGateUnknown);
+  });
+
+  it('⭐회수 버튼 — role=member면 비활성화되고 owner/admin 전용 사유가 보인다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
+  });
+
+  it('⭐회수 버튼 — unpublish_blocked_reason=unsupported면 버튼도 사유도 렌더되지 않는다(§17-11 대상 아님)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'unsupported',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
+  });
+
+  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+owner면 "연결을 다시 하면" 문구가 보인다(doc §17-11 정본)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'scope_insufficient',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientOwner);
+  });
+
+  // 카디르 QA 지적(2026-09-04 09:02Z) — 이전 판 테스트명이 단언과 반대였다("member면
+  // owner에게 요청 문구"라 적었지만 실제 단언은 OwnerOrAdminOnly). member는 owner/admin
+  // 게이팅이 scope_insufficient보다 먼저 걸려 §17-11 role 문구 자체가 안 뜬다 — 이름을
+  // 실제 동작대로 정정한다.
+  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+member면 role 게이팅이 먼저 걸려 owner/admin 전용 사유가 보인다(§17-11 role분기 문구 자체는 안 뜸)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'scope_insufficient',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
+  });
+
+  // 카디르 QA 지적 — §17-11 role 분기 문구가 실제로 렌더되는 경로(role=owner/admin이면서
+  // scope_insufficient)가 테스트 0건이었다. admin으로 그 실렌더 경로를 pin한다.
+  it('⭐회수 버튼 — unpublish_blocked_reason=scope_insufficient+admin이면(role게이팅 통과) "요청" 문구가 실제로 렌더된다(doc §17-11 정본, non-owner 분기)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'admin' });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      canUnpublish: false, unpublishBlockedReason: 'scope_insufficient',
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    // admin은 canUnpublish(role게이팅)를 통과하므로 §17-11 role분기 문구가 실제로 뜬다 —
+    // role==='owner'가 아니므로 member쪽 문구(요청)가 나온다(admin도 재연결 owner전용이라
+    // "요청" 갈래 — 페이지 코드가 role==='owner'만 owner문구, 그 외 전부 요청문구).
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientNonOwner);
+  });
+
+  // story #3426 — 예약 취소 버튼.
+  it('⭐예약 취소 버튼 — command_status=pending이면 활성화된다(owner)', async () => {
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+  });
+
+  it.each(['blocked', 'dead_letter'])('⭐예약 취소 버튼 — command_status=%s도 렌더된다', async (status) => {
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: status } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).not.toBeNull();
+  });
+
+  it.each(['completed', 'cancelled', 'voided', 'in_progress'])('⭐예약 취소 버튼 — command_status=%s면 렌더되지 않는다(이미 나갔거나 끝난 것)', async (status) => {
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: status } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).toBeNull();
+  });
+
+  it('⭐예약 취소 버튼 — role=member면 비활성화되고 owner/admin 전용 사유가 보인다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetch({ draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
+  });
+
+  // story #3426 ①-c — 예약 취소 클릭→ConfirmDialog→성공, 리로드 없이 command_status 갱신.
+  it('⭐예약 취소 — 확認 다이얼로그를 거쳐 성공하면 리로드 없이 취소 버튼이 사라진다', async () => {
+    let cancelCalled = false;
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => { cancelCalled = true; return { status: 200, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: null } }; },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    // ConfirmDialog는 Portal이라 document.body에 뜬다(content/[draftId]/page.test.tsx와 동형).
+    // 카디르 QA①·유나 §8 — "무엇이 멈추나"·"되돌릴 수 있나"가 서로 다른 노드인지 확인.
+    const what = document.body.querySelector('[data-testid="channel-post-cancel-scheduled-confirm-what"]');
+    const reversible = document.body.querySelector('[data-testid="channel-post-cancel-scheduled-confirm-reversible"]');
+    expect(what?.textContent).toBe(koMessages.content.channelPostsCancelScheduledConfirmWhat);
+    expect(reversible?.textContent).toBe(koMessages.content.channelPostsCancelScheduledConfirmReversible);
+    expect(what).not.toBe(reversible);
+    expect(document.body.querySelectorAll('p p').length).toBe(0);
+
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    expect(confirmButton).not.toBeUndefined();
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(cancelCalled).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.channelPostsCancelScheduledSuccess);
+    // 리로드 없이 로컬 갱신 — command_status가 더 이상 취소가능 값이 아니므로 버튼이 사라진다.
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).toBeNull();
+    // 페드루 PO 블로커 — 배너뿐 아니라 §17-10 "취소됨" 오버레이도 리로드 없이 선다.
+    expect(container.querySelector('[data-testid="channel-post-cancelled-notice"]')?.textContent)
+      .toBe(koMessages.content.channelPostsCancelledNotice);
+  });
+
+  // story #3426 ①-d — PUBLICATION_COMMAND_NOT_CANCELLABLE은 current_status를 실어
+  // "이미 {status} 상태입니다"를 조립한다(labelKey 비움, TEXT_TOO_LONG과 같은 패턴).
+  it('⭐예약 취소 실패(409 PUBLICATION_COMMAND_NOT_CANCELLABLE) — current_status가 보간된 조립 문구가 보이고 버튼은 그대로 남는다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => ({ status: 409, body: { detail: { code: 'PUBLICATION_COMMAND_NOT_CANCELLABLE', message: '이미 실행 중입니다', current_status: 'in_progress' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain('이미 in_progress 상태라 취소할 수 없습니다');
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).not.toBeNull();
+  });
+
+  // story #3426 ①-c — 회수 클릭→ConfirmDialog→성공(리로드 없이 배너만, chip 갱신은 별도 설계 이슈로 명시 보류).
+  it('⭐회수 — 확認 다이얼로그를 거쳐 성공하면 회수 완료 배너가 보인다', async () => {
+    let unpublishCalled = false;
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      onUnpublish: () => { unpublishCalled = true; return { status: 200, body: { publication_id: 'pub-1', status: 'unpublished', external_id: 'media-1', unpublished_at: '2026-09-04T01:00:00Z' } }; },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    // 카디르 QA①·유나 §8 — 회수도 "무엇이 멈추나"·"되돌릴 수 있나" 별도 노드 확인.
+    const what = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-what"]');
+    const reversible = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-reversible"]');
+    expect(what?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmWhat);
+    expect(reversible?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmReversible);
+    expect(what).not.toBe(reversible);
+
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
+    expect(confirmButton).not.toBeUndefined();
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(unpublishCalled).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.channelPostsUnpublishSuccess);
+    // 페드루 PO 정정(2026-09-04 08:40Z) — 회수 뒤 로컬 상태를 서버가 다음 로드에서 줄 값과
+    // 같은 모양으로 맞춘다: publication_status='unpublished'·published_at=null·permalink=null.
+    // 리로드 없이 「회수됨」 오버레이가 뜨고, 발행됨 정보 카드·회수 버튼은 사라진다.
+    expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')?.textContent)
+      .toBe(koMessages.content.channelPostsUnpublishedNotice);
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
+  });
+
+  // 페드루 PO nit(2026-09-04 09:07Z) — 이전 판 테스트명이 "서버 문구가 보인다"였지만
+  // 실제로는 서버 원문이 아니라 §17-11 FE 정본 문구가 뜬다(role='owner' 분기) — 이름 정정.
+  it('⭐회수 실패(422 CHANNEL_SCOPE_INSUFFICIENT) — 서버 원문 대신 §17-11 FE 정본 문구(owner 분기)가 보인다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      onUnpublish: () => ({ status: 422, body: { detail: { code: 'CHANNEL_SCOPE_INSUFFICIENT', message: '스코프가 부족합니다', required_scopes: ['threads_delete'] } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    // story #3426 ①-d(doc §17-11) — CHANNEL_SCOPE_INSUFFICIENT는 서버 원문이 아니라
+    // §17-11 role 분기 정본 문구를 그대로 재사용한다(role='owner' 기본).
+    expect(container.textContent).toContain(koMessages.content.channelPostsUnpublishScopeInsufficientOwner);
+  });
+
+  // story #3426 ①-d(카디르 QA 계획 ⑤ 선례) — "api-error.ts가 파싱한다"는 사실만으로 화면
+  // 렌더까지 됐다고 넘기지 않는다. 나머지 신규 코드도 개별 mock으로 실제 렌더 문구를 pin.
+  it('⭐예약 취소 실패(404 PUBLICATION_COMMAND_NOT_FOUND) — 화면에 사람 말이 실제로 렌더된다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => ({ status: 404, body: { detail: { code: 'PUBLICATION_COMMAND_NOT_FOUND' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain(koMessages.content.errorPublicationCommandNotFound);
+  });
+
+  it.each([
+    ['CHANNEL_POST_NOT_PUBLISHED', 409, 'errorChannelPostNotPublished'],
+    ['CHANNEL_UNPUBLISH_UNSUPPORTED', 422, 'errorChannelUnpublishUnsupported'],
+  ] as const)('⭐회수 실패(%s) — 화면에 사람 말이 실제로 렌더된다', async (code, status, key) => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      onUnpublish: () => ({ status, body: { detail: { code } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain(koMessages.content[key]);
   });
 
   // story #3402 PR2 ②-b(T7) — 발행 버튼 클릭 배선.

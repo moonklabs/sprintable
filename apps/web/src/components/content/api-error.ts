@@ -34,6 +34,12 @@ export type SitePostApiErrorKind =
   | 'publish_in_progress'
   | 'text_too_long'
   | 'provider_error'
+  // story #3426(BE #3419) — 예약 취소·회수 전용 신규 kind 2개.
+  | 'command_not_cancellable'
+  | 'command_not_found'
+  | 'not_published'
+  | 'unpublish_unsupported'
+  | 'scope_insufficient'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -60,6 +66,8 @@ export interface SitePostApiErrorInfo {
   /** CHANNEL_TEXT_TOO_LONG(422) 전용 — "500자 한도인데 517자입니다" 조립. */
   maxLength?: number;
   currentLength?: number;
+  /** PUBLICATION_COMMAND_NOT_CANCELLABLE(409) 전용 — "이미 {current_status} 상태입니다" 조립. */
+  currentStatus?: string;
 }
 
 interface KnownError {
@@ -114,13 +122,28 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // heldByConnectionId로 폴백 문구를 조립한다.
   CHANNEL_POST_GATE_ALREADY_HELD: { labelKey: '', kind: 'gate_already_held' },
   CHANNEL_PUBLISH_PROVIDER_ERROR: { labelKey: 'errorChannelPublishProviderError', kind: 'provider_error' },
+  // story #3426(BE #3419, PR#3774) — 예약 취소·회수 6종(그라운딩 확認·2026-09-04 07:5x).
+  // CANCEL_UNPUBLISH_HUMAN_ONLY/OWNER_OR_ADMIN_ONLY는 site-posts의 UNPUBLISH_* 항목을
+  // 그대로 재사용한다(같은 "발행 취소·회수는 이 역할만" 개념 공유, 문구도 동일).
+  CHANNEL_POST_CANCEL_UNPUBLISH_HUMAN_ONLY: { labelKey: 'errorUnpublishHumanOnly', kind: 'permission' },
+  CHANNEL_POST_CANCEL_UNPUBLISH_OWNER_OR_ADMIN_ONLY: { labelKey: 'errorUnpublishOwnerOrAdminOnly', kind: 'permission' },
+  PUBLICATION_COMMAND_NOT_FOUND: { labelKey: 'errorPublicationCommandNotFound', kind: 'command_not_found' },
+  // current_status로 "이미 {status} 상태입니다"를 조립(labelKey는 page.tsx가 보간).
+  PUBLICATION_COMMAND_NOT_CANCELLABLE: { labelKey: '', kind: 'command_not_cancellable' },
+  CHANNEL_POST_NOT_PUBLISHED: { labelKey: 'errorChannelPostNotPublished', kind: 'not_published' },
+  CHANNEL_UNPUBLISH_UNSUPPORTED: { labelKey: 'errorChannelUnpublishUnsupported', kind: 'unpublish_unsupported' },
+  // scope_insufficient는 편집 화면이 이미 connection 응답의 unpublish_blocked_reason으로
+  // role별 §17-11 정본 문구를 미리 보여 준다(버튼을 disabled로 막는 경로) — 이 코드는 그
+  // 사이 스코프가 바뀌는 레이스 등 방어적 경로다. 같은 §17-11 개념이라 site의 role 분기
+  // 문구를 그대로 재사용(labelKey는 비워 두고 page.tsx가 role로 갈라 조립).
+  CHANNEL_SCOPE_INSUFFICIENT: { labelKey: '', kind: 'scope_insufficient' },
 };
 
 function extractCodeAndMessage(detail: unknown): {
   code?: string; message?: string;
   heldByDraftId?: string; heldByLang?: string | null; heldBySlug?: string;
   heldByChannel?: string; heldByConnectionId?: string;
-  resetAt?: string; maxLength?: number; currentLength?: number;
+  resetAt?: string; maxLength?: number; currentLength?: number; currentStatus?: string;
 } {
   if (typeof detail === 'string') return { message: detail };
   if (detail && typeof detail === 'object') {
@@ -141,6 +164,8 @@ function extractCodeAndMessage(detail: unknown): {
       // story #3402 — CHANNEL_TEXT_TOO_LONG 전용.
       maxLength: typeof d.max_length === 'number' ? d.max_length : undefined,
       currentLength: typeof d.current_length === 'number' ? d.current_length : undefined,
+      // story #3426 — PUBLICATION_COMMAND_NOT_CANCELLABLE 전용.
+      currentStatus: typeof d.current_status === 'string' ? d.current_status : undefined,
     };
   }
   return {};
@@ -168,6 +193,7 @@ export function parseSitePostApiError(
   const resetAt = fromDetail.resetAt ?? fromError.resetAt;
   const maxLength = fromDetail.maxLength ?? fromError.maxLength;
   const currentLength = fromDetail.currentLength ?? fromError.currentLength;
+  const currentStatus = fromDetail.currentStatus ?? fromError.currentStatus;
   const raw = JSON.stringify({ code: code ?? null, message: message ?? null });
 
   const known = code ? KNOWN_ERRORS[code] : undefined;
@@ -184,5 +210,6 @@ export function parseSitePostApiError(
     resetAt,
     maxLength,
     currentLength,
+    currentStatus,
   };
 }
