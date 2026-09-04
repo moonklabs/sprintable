@@ -7,6 +7,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
@@ -168,7 +169,7 @@ export default function ChannelPostListPage() {
                       <Link href={`/content/channel-posts/${draft.draft_id}`} className="hover:underline">
                         {hasTextPreview
                           ? draft.text_preview
-                          : `${draft.channel === 'threads' ? t('channelThreads') : draft.channel} · v${draft.current_version}`}
+                          : `${channelLabel(draft.channel, t)} · v${draft.current_version}`}
                       </Link>
                       {/* AC3 — 부분 성공/실패는 다섯 상태 밖의 신호라 칩과 별도로 보인다
                           (doc §4-1 "이것은 다섯 상태 어디에도 없다"). */}
@@ -192,7 +193,7 @@ export default function ChannelPostListPage() {
                       ) : null}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
-                      {draft.channel === 'threads' ? t('channelThreads') : draft.channel}
+                      {channelLabel(draft.channel, t)}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-wrap items-center gap-1.5">

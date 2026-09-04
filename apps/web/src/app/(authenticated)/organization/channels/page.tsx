@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
 import { ChannelStatusChip } from '@/components/channel-connect/channel-status-chip';
 import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/components/channel-connect/connection-status';
 import { AppCredentialsCard } from '@/components/channel-connect/app-credentials-card';
@@ -167,7 +168,7 @@ function ChannelSection({
   onRefresh: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const { channel, display_name, credential_kind } = item;
+  const { channel, credential_kind } = item;
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
       serverStatus: c.status, tokenExpiresAt: c.token_expires_at, canAutoRefresh: c.can_auto_refresh,
@@ -218,7 +219,7 @@ function ChannelSection({
     <SectionCard>
       <SectionCardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-foreground">{display_name}</h2>
+          <h2 className="text-sm font-semibold text-foreground">{channelLabel(channel, t)}</h2>
           <ChannelStatusChip status={channelStatus} />
         </div>
       </SectionCardHeader>
@@ -237,11 +238,11 @@ function ChannelSection({
             isOwner ? (
               <a href={canStartConnect ? `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}` : undefined}>
                 <Button size="sm" disabled={!canStartConnect}>
-                  {t('channelConnectAction', { channel: display_name })}
+                  {t('channelConnectAction', { channel: channelLabel(channel, t) })}
                 </Button>
               </a>
             ) : (
-              <Button size="sm" disabled>{t('channelConnectAction', { channel: display_name })}</Button>
+              <Button size="sm" disabled>{t('channelConnectAction', { channel: channelLabel(channel, t) })}</Button>
             )
           ) : credential_kind === 'none' ? (
             isOwner ? (
@@ -249,7 +250,7 @@ function ChannelSection({
                 size="sm" onClick={() => void handleCreateSandbox()} disabled={creatingSandbox}
                 data-testid="channel-connect-sandbox-button"
               >
-                {creatingSandbox ? t('channelConnectSandboxPendingCta') : t('channelConnectSandboxAction', { channel: display_name })}
+                {creatingSandbox ? t('channelConnectSandboxPendingCta') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) })}
               </Button>
             ) : null
             // credential_kind==='pasted_secret' — 아직 이 흐름이 없다. 버튼을 disabled로
@@ -341,7 +342,7 @@ export default function OrganizationChannelsPage() {
 
       {connected ? (
         <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
-          <AlertDescription>{t('channelConnectSuccess', { channel: connected })}</AlertDescription>
+          <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected, t) })}</AlertDescription>
         </Alert>
       ) : null}
       {connectError ? (

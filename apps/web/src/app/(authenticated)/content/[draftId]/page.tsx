@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
 import {
   deriveContentPostStatus,
   type ContentPostStatusInput,
@@ -963,7 +964,7 @@ export default function ContentPostEditPage() {
               <option value="">{t('channelPostsCreateVariantSelectPlaceholder')}</option>
               {activeConnections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {(c.channel === 'threads' ? t('channelThreads') : c.channel)}
+                  {channelLabel(c.channel, t)}
                   {c.account_label ? ` · ${c.account_label}` : ''}
                 </option>
               ))}
@@ -1007,7 +1008,7 @@ export default function ContentPostEditPage() {
               return (
                 <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
                   <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
-                    {v.channel === 'threads' ? t('channelThreads') : v.channel}
+                    {channelLabel(v.channel, t)}
                     {accountLabel ? ` · ${accountLabel}` : ''}
                   </Link>
                   <span className="flex items-center gap-2">
