@@ -1,4 +1,5 @@
 import { toDateKey } from '@/components/content/schedule-format';
+import { ChannelPostCard } from '@/components/content/channel-post-card';
 import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
 
 // story #3422(doc §11 T8) — 채널(행) × 날짜(열) 격자. ②-b 3/N-a는 골격만(날짜 열 계산·
@@ -49,11 +50,21 @@ export function CalendarGrid({ scheduled, channels, range, displayTimezone }: Ca
           {channels.map((channel) => (
             <tr key={channel.connectionId} data-testid="channel-post-calendar-channel-row">
               <td className="border-b border-border p-2 font-medium text-foreground">{channel.label}</td>
-              {dateKeys.map((key) => (
-                <td key={key} className="border-b border-border p-2 align-top" data-testid="channel-post-calendar-cell">
-                  {/* 3/N-b가 이 자리에 scheduled.get(key)를 그 채널로 필터링해 ChannelPostCard를 배치한다. */}
-                </td>
-              ))}
+              {dateKeys.map((key) => {
+                // 3/N-b — 그 날짜의 전체 항목 중 이 채널(연결) 것만 이 셀에 놓는다. 같은
+                // (채널, 날짜)에 여러 초안이 있을 수 있다(doc 설계 "보통 0~1, 드물게 여러
+                // 개") — 전부 쌓아 보인다(하나로 뭉개지 않는다).
+                const dayItems = (scheduled.get(key) ?? []).filter((item) => item.connection_id === channel.connectionId);
+                return (
+                  <td key={key} className="border-b border-border p-2 align-top" data-testid="channel-post-calendar-cell">
+                    <div className="space-y-1">
+                      {dayItems.map((item) => (
+                        <ChannelPostCard key={item.draft_id} item={item} displayTimezone={displayTimezone} />
+                      ))}
+                    </div>
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
