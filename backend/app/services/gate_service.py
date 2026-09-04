@@ -24,6 +24,8 @@ from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.models.channel_post_draft import ChannelPostDraft
+from app.models.channel_post_version import ChannelPostVersion
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition, set_gate_status
 from app.models.hitl_config import OrgGatePolicy
@@ -809,6 +811,88 @@ async def create_gate(
     return gate
 
 
+# story #3443(AC1, 페드루 PO 確定 2026-09-04) — draft_id를 못 읽으면 사람이 화면에서
+# 보는 한 줄로 남긴다(조용히 삼키지 않는다 — "승인됐는데 예약이 안 걸린다"가 이 스토리
+# 자체의 사고 클래스라 PO가 "보이는 실패"로 명시 확定).
+_SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE = "예약 명령 미생성(draft 해석 실패)"
+
+
+async def _maybe_create_scheduled_publication_command(
+    session: AsyncSession, gate: Gate, resolver_id: uuid.UUID | None,
+) -> None:
+    """story #3443(AC1, 페드루 PO 確定 2026-09-04) — 예약 상신(gate.sealed_scheduled_at
+    있음)이 approved로 전이되는 순간 publication_command를 자동 생성한다(블루프린트 §3
+    "승인 완료 시 명령 생성" 원문 정합 — 지금까지는 휴먼의 별도 발행 요청만 명령을
+    만들어, 승인 후 클릭이 없으면 예약 시각에 아무것도 안 나갔다).
+
+    destination/approved_version 조립은 `channel_posts.py::resolve_command_target`과
+    동형이다 — "최신 버전=봉인된 버전"이 승인 게이트의 불변식이라(reapproval_required
+    게이트는 애초에 이 approved 전이 자체가 막힌다) 별도 해시 대조 없이 재사용 가능.
+    멱등키(create_or_get_publication_command의 UNIQUE org_id+destination+approved_
+    version+operation)는 무변경 — 이미 명령이 있으면 그대로 반환(재생성 0, AC4).
+
+    site_post 게이트는 sealed_scheduled_at을 아예 설정하지 않아(scheduled_at 개념
+    자체가 없음) 이 훅에 진입하는 gate는 항상 channel_post 소속이다(도메인 오판 여지
+    없음, 그라운딩 확認).
+
+    draft_id를 못 읽으면(파싱 실패·draft/버전 소실·승인자 미상 등 — 이론상 sealed_
+    scheduled_at 도입(0317) 이후로는 불가하지만 방어) **승인 자체는 절대 막지 않는다**
+    (사람의 결정을 서버 부수 효과가 되돌리면 안 된다) — 대신 warning 로그 + `gate.
+    resolution_note`에 사람이 화면에서 보는 한 줄을 남긴다(PO 確定 — 조용히 삼키면
+    정시 발행이 다시 사람 클릭에 매달린다, "보이는 실패")."""
+    if gate.gate_type != "external_publish" or gate.sealed_scheduled_at is None:
+        return
+
+    def _mark_unresolved() -> None:
+        logger.warning(
+            "gate %s approved with sealed_scheduled_at but draft resolution failed — "
+            "scheduled publication_command not created", gate.id,
+        )
+        note = _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE
+        gate.resolution_note = f"{gate.resolution_note}\n{note}" if gate.resolution_note else note
+
+    if resolver_id is None:
+        _mark_unresolved()
+        return
+
+    raw_draft_id = (gate.neutral_facts or {}).get("draft_id")
+    if raw_draft_id is None:
+        _mark_unresolved()
+        return
+    try:
+        draft_id = uuid.UUID(raw_draft_id)
+    except (ValueError, TypeError, AttributeError):
+        _mark_unresolved()
+        return
+
+    draft = (await session.execute(
+        select(ChannelPostDraft).where(
+            ChannelPostDraft.id == draft_id, ChannelPostDraft.org_id == gate.org_id,
+        )
+    )).scalar_one_or_none()
+    if draft is None:
+        _mark_unresolved()
+        return
+
+    latest = (await session.execute(
+        select(ChannelPostVersion)
+        .where(ChannelPostVersion.draft_id == draft.id)
+        .order_by(ChannelPostVersion.version.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if latest is None:
+        _mark_unresolved()
+        return
+
+    from app.services.publication_command import create_or_get_publication_command
+
+    await create_or_get_publication_command(
+        session, org_id=gate.org_id, gate_id=gate.id, destination=draft.connection_id,
+        approved_version=latest.id, requested_by_member_id=resolver_id,
+        scheduled_at=gate.sealed_scheduled_at,
+    )
+
+
 async def transition_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -859,6 +943,16 @@ async def transition_gate(
     # reason·이번 고위험 강제 사유 포함) 조용히 버려졌다(감사 추적 훼손). status 무관 note 있으면 저장.
     if note:
         gate.resolution_note = note
+
+    # story #3443(AC1, 페드루 PO 지시 2026-09-04 14:11Z·카디르 QA 블로커 5541652858) —
+    # `_publish_gate_verdict_notification`(아래)보다 **반드시 먼저** 와야 한다. draft
+    # 해석 실패 시 이 훅이 `gate.resolution_note`에 남기는 "보이는 실패" 한 줄이 그
+    # 통지 payload(`resolution_note` 필드)에 실리려면, 통지가 이 값을 읽는 시점(아래
+    # `_publish_gate_verdict_notification` 호출) 前에 이미 값이 있어야 한다 — 원래
+    # 이 훅을 함수 끝(session.flush() 직전)에 뒀더니 통지가 이미 나간 뒤라 note가
+    # 조용히 안 실렸다(뮤테이션 재현: 순서를 되돌리면 아래 신규 테스트가 RED).
+    if new_status == "approved":
+        await _maybe_create_scheduled_publication_command(session, gate, resolver_id)
 
     # story #2631(PO 판정 ①, 2026-08-15): 게이트 해소 계열 액션(approve/reject/undo/
     # discuss-request)을 ActivityLog(immutable)에 처음으로 구조화 기록 — 지금까지 gate 행
