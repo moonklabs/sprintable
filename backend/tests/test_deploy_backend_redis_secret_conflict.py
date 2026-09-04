@@ -450,6 +450,23 @@ def test_deploy_backend_prod_excludes_admin_operator_env_vars():
     assert "ADMIN_OPERATOR_ALLOWLIST" not in result
 
 
+def test_deploy_backend_dev_includes_sandbox_channel_enabled():
+    """story 5b27b32f — dev는 SANDBOX_CHANNEL_ENABLED=true를 RATE_LIMIT_BACKEND와 동일하게
+    리터럴 plain env로 넘긴다(channel_adapters.py의 env 게이트가 이 값 있어야 sandbox
+    어댑터를 CHANNEL_ADAPTERS에 등재)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "SANDBOX_CHANNEL_ENABLED=true" in result
+
+
+def test_deploy_backend_prod_excludes_sandbox_channel_enabled():
+    """⭐story 5b27b32f AC5 핵심 전제 — prod는 이 키 자체가 없어야 안전(RATE_LIMIT_BACKEND와
+    동일 게이트). 이 키가 prod에 실리면 sandbox 어댑터가 CHANNEL_ADAPTERS에 등재돼
+    assert_sandbox_channel_not_registered_in_prod()가 기동 자체를 죽인다 — 이 테스트가
+    그 전제(prod엔 애초에 이 키가 없다)를 여기서 먼저 고정한다."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "SANDBOX_CHANNEL_ENABLED" not in result
+
+
 def test_deploy_backend_dev_and_prod_both_include_public_site_base_url():
     """story 194acb63 — PUBLIC_SITE_BASE_URL은 REDIS_URL/ADMIN_OPERATOR_*와 달리 dev·prod
     분기 없이 베이스 문자열에 무조건 실린다(별개 마케팅 사이트 도메인, dev/prod 백엔드 어느
@@ -602,5 +619,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "GCS_AVATARS_BUCKET=sprintable-avatars-dev,"
         # story 620beefc — GCS_AVATARS_BUCKET 조건부 append 바로 뒤에 이어붙는다(cloudbuild.yaml
         # 삽입 순서 그대로).
-        "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev"
+        "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev,"
+        # story 5b27b32f — GCS_CHANNEL_MEDIA_BUCKET 조건부 append 바로 뒤(cloudbuild.yaml
+        # 삽입 순서 그대로).
+        "SANDBOX_CHANNEL_ENABLED=true"
     )

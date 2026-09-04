@@ -785,6 +785,9 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},GCS_CHANNEL_MEDIA_BUCKET=${_GCS_CHANNEL_MEDIA_BUCKET}"
         fi
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="$${ENV_VARS},SANDBOX_CHANNEL_ENABLED=true"
+        fi
         # story #2141 원칙 재사용(카디르 QA 2026-08-19) — GOTENBERG_SERVICE_URL도 prod엔 키 자체가
         # 없어야 안전(dev 전용 office-converter 하드게이트).
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then

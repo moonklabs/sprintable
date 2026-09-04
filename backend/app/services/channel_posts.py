@@ -891,16 +891,33 @@ async def submit_channel_post_draft(
 # latest.link_url은 절대 바꾸지 않는다(봉인 해시가 이미 그 원본 쌍으로 계산돼 있다, #3374).
 # UTM은 발행 시점에만 조립되는 배달 계층 부가물이지 승인 대상 내용이 아니다.
 
+# story 5b27b32f(페드루 리뷰 N1) — Threads 429 응답 자체엔 reset 시각이 실려오지 않는다
+# (Meta 문서에 Retry-After류 필드 없음, 그라운딩 §③) — provider가 알려주지 않을 때 쓰는
+# 기본 유예값. 60초는 임의값이 아니라 story #3414 백오프 최소 단위(_BACKOFF_BASE_SECONDS,
+# publication_command.py)와 맞춘 것 — 이보다 짧으면 재시도가 백오프보다 먼저 도래해
+# 의미가 없다.
+_RATE_LIMIT_DEFAULT_RESET_SECONDS = 60
+
 
 def _classify_threads_error(
     exc: "ThreadsPublishError", *, connection_id: uuid.UUID,
 ) -> tuple[str, Exception]:
-    """provider 실패를 안정 코드+예외로 분류. 401/403은 토큰 만료(재인증 유도), 그 외는
-    미분류 provider 오류(502) — 담롱 요구 "«막혔다»와 «막는 장치를 쟀다»는 다르다"
-    그대로(그라운딩 §③)."""
+    """provider 실패를 안정 코드+예외로 분류. 401/403은 토큰 만료(재인증 유도), 429는
+    한도 초과(그라운딩 §③), 그 외는 미분류 provider 오류(502) — 담롱 요구 "«막혔다»와
+    «막는 장치를 쟀다»는 다르다" 그대로.
+
+    story 5b27b32f — 429 분기는 이 스토리에서 처음 추가(샌드박스 [sandbox:429] 마커가
+    create_container 단계에서 429를 내는 걸 정확히 분류하려고 필요해졌다). 기존
+    get_publishing_limit 사전조회가 놓친 경우(예: 조회와 실제 생성 호출 사이 경합)에도
+    이 분기가 동작해 Threads 실 provider가 create_container에서 직접 429를 낼 가능성
+    까지 함께 커버한다 — sandbox 전용 로직이 아니라 일반 강건성 개선."""
     if exc.status_code in (401, 403):
         return "CHANNEL_TOKEN_EXPIRED", ChannelTokenExpiredError(
             connection_id=connection_id, provider_message=exc.message,
+        )
+    if exc.status_code == 429:
+        return "CHANNEL_RATE_LIMITED", ChannelRateLimitedError(
+            reset_at=datetime.now(timezone.utc) + timedelta(seconds=_RATE_LIMIT_DEFAULT_RESET_SECONDS),
         )
     return "CHANNEL_PUBLISH_PROVIDER_ERROR", ChannelPublishProviderError(
         provider_code=exc.code, provider_message=exc.message,
@@ -1008,15 +1025,19 @@ async def publish_channel_post_draft(
         raise ChannelConnectionNotActiveError(connection_id=connection.id)
 
     import httpx
+    from app.services.channel_adapters import get_publish_client_module
     from app.services.channel_connection import apply_refresh_failure
-    from app.services.threads_publish import (
-        ThreadsPublishError,
-        create_container,
-        get_container_status,
-        get_permalink,
-        get_publishing_limit,
-        publish_container,
-    )
+    from app.services.threads_publish import ThreadsPublishError
+
+    # story 5b27b32f — sandbox 채널이면 threads_publish 대신 sandbox_publish(같은
+    # 함수 시그니처)로 우회. 이 한 줄이 sandbox 개입의 유일한 지점 — 아래 로직은 어느
+    # 쪽이 골렸는지 모른다.
+    _publish_client = get_publish_client_module(draft.channel)
+    create_container = _publish_client.create_container
+    get_container_status = _publish_client.get_container_status
+    get_permalink = _publish_client.get_permalink
+    get_publishing_limit = _publish_client.get_publishing_limit
+    publish_container = _publish_client.publish_container
 
     tagged_link = (
         build_tagged_link(channel=draft.channel, link_url=latest.link_url, draft_id=draft.id)
@@ -1370,7 +1391,11 @@ async def unpublish_channel_post(
         )
 
     import httpx
-    from app.services.threads_publish import ThreadsPublishError, delete_media
+    from app.services.channel_adapters import get_publish_client_module
+    from app.services.threads_publish import ThreadsPublishError
+
+    # story 5b27b32f — publish 경로와 동일 디스패치(pub.channel 기준).
+    delete_media = get_publish_client_module(pub.channel).delete_media
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:

@@ -88,6 +88,8 @@ async def lifespan(app: FastAPI):
     check_outbox_dual_publish_config()  # story #2138: outbox + dual_publish/dispatch 동시 fail-closed.
     check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
     warn_if_rate_limit_backend_is_memory()  # story #3418: 인스턴스 다중+memory=레이트리밋 인스턴스별 분리, 경고만(fail-closed 아님).
+    from app.services.channel_adapters import assert_sandbox_channel_not_registered_in_prod
+    assert_sandbox_channel_not_registered_in_prod()  # story 5b27b32f AC5: prod에 sandbox 채널 등재=기동 실패(fail-closed).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).

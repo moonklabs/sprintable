@@ -1137,6 +1137,19 @@ async def unpublish_channel_post_endpoint(
         raise HTTPException(
             status_code=409, detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": str(exc)},
         ) from exc
+    except ChannelRateLimitedError as exc:
+        # story 5b27b32f — 이 핸들러가 원래 빠져 있었다(gap 발견: _classify_threads_error에
+        # 429 분기를 추가하니 delete_media 실패도 이제 이 예외를 낼 수 있는데 unpublish
+        # 엔드포인트만 못 잡고 있었다 — 발행(publish) 엔드포인트의 기존 핸들러와 동형,
+        # 다만 unpublish엔 publication_command가 없어 apply_command_failure 호출은 없다).
+        retry_after_seconds = max(0, int((exc.reset_at - datetime.now(timezone.utc)).total_seconds()))
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "CHANNEL_RATE_LIMITED", "message": str(exc), "reset_at": exc.reset_at.isoformat(),
+            },
+            headers={"Retry-After": str(retry_after_seconds)},
+        ) from exc
     except ChannelPublishProviderError as exc:
         raise HTTPException(
             status_code=502,
