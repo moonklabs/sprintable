@@ -715,7 +715,7 @@ async def test_unpublish_unsupported_channel_returns_422():
 
     unsupported_adapter = ChannelAdapterConfig(
         authorize_url="https://example.test/oauth", token_url="https://example.test/token",
-        scope="basic", refresh_mode="manual", max_text_length=500,
+        scope="basic", refresh_mode="manual", display_name="Unsupported", max_text_length=500,
         supports_unpublish=False,
     )
 
@@ -813,7 +813,7 @@ async def test_connection_list_unpublish_blocked_reason_unsupported_for_adapter_
 
     unsupported_adapter = ChannelAdapterConfig(
         authorize_url="https://example.test/oauth", token_url="https://example.test/token",
-        scope="basic", refresh_mode="manual", max_text_length=500,
+        scope="basic", refresh_mode="manual", display_name="Unsupported", max_text_length=500,
         supports_unpublish=False,
     )
 

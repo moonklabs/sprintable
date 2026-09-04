@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -14,6 +14,12 @@ import { parseSitePostApiError, type SitePostApiErrorInfo } from '@/components/c
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
+import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
+import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
+import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatFileSize } from '@/components/docs/extensions/file-node';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -68,6 +74,11 @@ interface ChannelPostDraftDetail {
   image_final_width?: number | null;
   image_final_bytes?: number | null;
   image_was_converted?: boolean | null;
+  // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지(FailureActionBadge)가 이
+  // 화면에 mount 안 된 채로 남아 있던 갭. 단건 GET(ChannelPostDraftListItem과 동형
+  // shape, backend/app/routers/channel_posts.py)이 이미 내는 필드.
+  failure_kind?: string | null;
+  next_retry_at?: string | null;
   processing_kind?: string | null;
 }
 
@@ -115,9 +126,10 @@ type PublishingLimitState =
   | { status: 'ok'; quotaUsage: number; quotaTotal: number; checkedAt: string }
   | { status: 'failed' };
 
-function formatMegabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+// N(페드루 PO, 2026-09-04 13:27Z·유나 지적) — 바이트 크기는 항상 MB로 나누던 자체
+// formatMegabytes가 1MB 미만 값을 "0.0MB"로 뭉개(변환 결과가 사라진 것처럼 읽힘) 재구현
+// 금지 규율(lib/storage/format.ts 헤더 주석 "파일 크기 포맷은 재구현 금지 → formatFileSize
+// (file-node.tsx) 재사용")까지 어기고 있었다. 그 헬퍼로 교체 — B/KB/MB 자동 스케일.
 
 // story #3428(T3-M·§13 3요소: 무엇이·얼마까지·지금 얼마) — CHANNEL_IMAGE_* 422/413의
 // 부가 필드를 사람 말로 조립한다. api-error.ts는 labelKey를 일부러 비워 뒀다(kind별로
@@ -131,8 +143,8 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
       });
     case 'image_too_large':
       return t('channelPostsImageTooLarge', {
-        maxBytes: typeof info.imageMaxBytes === 'number' ? formatMegabytes(info.imageMaxBytes) : '',
-        sizeBytes: typeof info.imageSizeBytes === 'number' ? formatMegabytes(info.imageSizeBytes) : '',
+        maxBytes: typeof info.imageMaxBytes === 'number' ? formatFileSize(info.imageMaxBytes) : '',
+        sizeBytes: typeof info.imageSizeBytes === 'number' ? formatFileSize(info.imageSizeBytes) : '',
       });
     case 'image_aspect_ratio_exceeded':
       return t('channelPostsImageAspectRatioExceeded', {
@@ -141,8 +153,8 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
       });
     case 'image_conversion_failed':
       return t('channelPostsImageConversionFailed', {
-        maxBytes: typeof info.imageMaxBytes === 'number' ? formatMegabytes(info.imageMaxBytes) : '',
-        finalBytes: typeof info.imageFinalBytes === 'number' ? formatMegabytes(info.imageFinalBytes) : '',
+        maxBytes: typeof info.imageMaxBytes === 'number' ? formatFileSize(info.imageMaxBytes) : '',
+        finalBytes: typeof info.imageFinalBytes === 'number' ? formatFileSize(info.imageFinalBytes) : '',
       });
     case 'image_animated_unsupported':
       return t('channelPostsImageAnimatedUnsupported', { frameCount: info.imageFrameCount ?? '' });
@@ -177,7 +189,11 @@ export default function ChannelPostEditPage() {
   // undefined="아직 모른다"(연결 조회 전/실패) — maxCount<=0과 동형으로 첨부 칸을
   // 그리지 않는다(둘 다 "모른다"와 "미지원"을 같은 쪽으로 fail-closed).
   const [imageSpec, setImageSpec] = useState<
-    { maxCount: number; formats: string[]; maxBytes: number; aspectMax: number; widthMin: number; widthMax: number } | undefined
+    | {
+        maxCount: number; formats: string[]; maxBytes: number; aspectMax: number;
+        widthMin: number; widthMax: number; colorSpace: string;
+      }
+    | undefined
   >(undefined);
   const [imageUploadStatus, setImageUploadStatus] = useState<
     | { phase: 'idle' }
@@ -186,11 +202,20 @@ export default function ChannelPostEditPage() {
     | { phase: 'confirming' }
     | { phase: 'error'; text: string; raw?: string }
   >({ phase: 'idle' });
+  // ②(유나 지적, 2026-09-04) — 실제 파일 선택은 hidden input이 하고, 화면엔 라벨 붙은
+  // Button만 보인다(브라우저 기본 컨트롤 로케일 불일치 회피).
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
 
   const [text, setText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string; raw?: string } | null>(null);
+
+  // story #3422 ②-d — 예약 상신 다이얼로그. serverError는 클라 검증 통과 뒤에도 상신
+  // 사이 시각이 흘러 서버가 422로 거부하는 경로(parseScheduledAtServerError)만 담는다
+  // — 다이얼로그가 안 닫혀 재선택 가능하게 유지한다.
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleServerError, setScheduleServerError] = useState<'past_or_invalid' | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
@@ -262,6 +287,9 @@ export default function ChannelPostEditPage() {
               setImageSpec({
                 maxCount: conn.image_max_count, formats: conn.image_formats, maxBytes: conn.image_max_bytes,
                 aspectMax: conn.image_aspect_max, widthMin: conn.image_width_min, widthMax: conn.image_width_max,
+                // N(페드루 PO, 2026-09-04 13:27Z) — connection 응답에서 이미 읽던 필드가
+                // imageSpec에 안 실려 규격 태그에 한 번도 안 나온 갭.
+                colorSpace: conn.image_color_space,
               });
             }
           }
@@ -308,7 +336,7 @@ export default function ChannelPostEditPage() {
   const isOverLimit = typeof maxTextLength === 'number' && textLength > maxTextLength;
 
   const handleSave = async () => {
-    if (!orgId || !draft) return;
+    if (!orgId || !draft || imageUploadInProgress) return;
     setSaving(true);
     setSaveMessage(null);
     try {
@@ -347,19 +375,21 @@ export default function ChannelPostEditPage() {
 
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
-  const handleSubmitForApproval = async () => {
-    if (!orgId || !draft || isOverLimit) return;
+  const handleSubmitForApproval = async (scheduledAt?: string) => {
+    if (!orgId || !draft || isOverLimit || imageUploadInProgress) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
+    if (scheduledAt) setScheduleServerError(null);
     setSubmitting(true);
     setSubmitResult(null);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version_id: latest.version_id }),
+        body: JSON.stringify(scheduledAt ? { version_id: latest.version_id, scheduled_at: scheduledAt } : { version_id: latest.version_id }),
       });
       if (res.ok) {
+        if (scheduledAt) setScheduleDialogOpen(false);
         const json = (await res.json().catch(() => null)) as { data?: { gate_id?: string } } | null;
         const gateId = json?.data?.gate_id;
         if (gateId) {
@@ -369,6 +399,17 @@ export default function ChannelPostEditPage() {
         }
       } else {
         const body = await res.json().catch(() => null);
+        // story #3422 ②-d(페드루 PO 지적 2026-09-04 10:49Z) — scheduled_at을 실은
+        // 요청만 이 폴백을 본다(예약 아닌 상신에서 이 shape가 뜰 리 없다 — 그래도
+        // 방어적으로 scheduledAt 유무로 먼저 좁힌다). 감지되면 다이얼로그를 안 닫고
+        // 사람 문장만 갱신 — submitResult(하단 일반 오류 배너)는 안 건드린다.
+        if (scheduledAt) {
+          const scheduleError = parseScheduledAtServerError(body);
+          if (scheduleError) {
+            setScheduleServerError(scheduleError);
+            return;
+          }
+        }
         const info = parseSitePostApiError(body);
         // story #3402·PR#3764/#3767 — CHANNEL_POST_GATE_ALREADY_HELD. site와 kind는
         // 공유하되 slug/lang이 없다(채널 포스트 모델 자체에 title이 없다) — 페드루 PO
@@ -478,17 +519,20 @@ export default function ChannelPostEditPage() {
         setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
         return;
       }
-      setDraft((prev) => (prev ? {
-        ...prev,
-        current_version: image.version,
-        thumbnail_url: image.image_url,
-        image_original_width: image.original_width,
-        image_original_bytes: image.original_bytes,
-        image_final_width: image.final_width,
-        image_final_bytes: image.final_bytes,
-        image_was_converted: image.was_converted,
-      } : prev));
-      const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`);
+      // B1(페드루 PO, 2026-09-04 13:26Z) — confirm이 새 버전을 만들며 서버가
+      // _reseal_gate_on_new_version(backend/app/services/channel_posts.py)으로 approved
+      // 게이트를 재오픈+reapproval_required=true로 바꾼다. 이미지 필드만 로컬 병합하면
+      // gate_status/reapproval_required가 낡아 화면은 "승인됨·발행 가능"으로 남는데
+      // 서버는 재승인을 요구한다(눌러야 서버가 거부) — 단건 GET(PR#3788)으로 서버 값을
+      // 통째로 교체한다. text/linkUrl은 별도 state라 입력 중이던 내용은 안 건드린다.
+      const [draftRes, versionsRes] = await Promise.all([
+        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`),
+        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`),
+      ]);
+      if (draftRes.ok) {
+        const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
+        if (draftJson?.data) setDraft(draftJson.data);
+      }
       if (versionsRes.ok) {
         const versionsJson = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
         if (versionsJson?.data) setVersions(versionsJson.data);
@@ -508,7 +552,7 @@ export default function ChannelPostEditPage() {
   // 않는다 — 성공 응답 필드만 병합하고, 진짜 publication_status는 다음 로드/새로고침이
   // 정직하게 채운다(지어내지 않는다).
   const handlePublish = async () => {
-    if (!orgId || !draft || !canPublish) return;
+    if (!orgId || !draft || !canPublish || blockedByCommandInFlight) return;
     setPublishing(true);
     setPublishResult(null);
     try {
@@ -706,6 +750,40 @@ export default function ChannelPostEditPage() {
   const showUnpublish = draft.publication_status === 'published';
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true;
 
+  // story #3422 B4(페드루 PO, 2026-09-04 13:26Z, code-review "auto_retry 아래 발행
+  // 버튼 활성"과 같은 자리) — command_status가 pending(자동 재시도 큐에 있음, awaiting_
+  // container 포함)·blocked(연결 문제)면 새 발행/예약 상신을 막는다 — 이미 진행 중이거나
+  // 고쳐야 할 것이 따로 있는데 사람이 또 시도하면 서버와 경합하거나 헛수고다.
+  // dead_letter는 이 집합에 일부러 안 넣는다 — 재시도 «클릭» 배선(story f061c1a3, BE
+  // command_id 노출 뒤) 前까지는 발행 버튼이 dead_letter의 유일한 수동 재시도 경로다
+  // (지금 막으면 아예 되살릴 방법이 없어진다).
+  const commandInFlightBlocksNewAttempt = new Set(['pending', 'blocked']);
+  const blockedByCommandInFlight = !!draft.command_status && commandInFlightBlocksNewAttempt.has(draft.command_status);
+  // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
+  // 지시가 된다("기다리세요"는 blocked에, "연결을 확인하세요"는 pending에 안 맞는다).
+  // command_status로 정확히 갈라 서로 다른 문장을 낸다.
+  const commandInFlightReasonKey = draft.command_status === 'blocked'
+    ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonPending';
+
+  // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
+  // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
+  // 동형(failure-action.ts 우선순위 진리표 그대로 재사용 — 화면이 갈래를 다시 안 짠다).
+  const failureAction = deriveFailureAction({
+    commandStatus: draft.command_status as CommandStatus | null | undefined,
+    failureKind: draft.failure_kind,
+    nextRetryAt: draft.next_retry_at,
+    reasonCode: draft.command_reason_code,
+    processingKind: draft.processing_kind,
+  });
+  const displayTimezone = resolveDisplayTimezone().tz;
+
+  // B2(페드루 PO, 2026-09-04 13:27Z·code-review 지적) — 이미지 업로드가 confirm까지
+  // 끝나기 전에 저장/상신을 누르면 두 흐름이 독립적으로 각자 새 버전을 만들어 경합한다
+  // (나중에 끝나는 재조회가 먼저 것을 조용히 덮어써 이미지 첨부나 텍스트 수정이 사라진
+  // 것처럼 보인다). 업로드가 진행 중인 동안은 저장/즉시 상신/예약 상신을 막는다.
+  const imageUploadInProgress = imageUploadStatus.phase === 'requesting_url'
+    || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming';
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
@@ -728,6 +806,9 @@ export default function ChannelPostEditPage() {
             {view.status === undefined ? t('originAuthorUnknown') : t(contentPostStatusLabelKey(view.status))}
           </span>
         </div>
+        {/* B3(페드루 PO) — 실패 배지는 칩(위 상태 줄) 바로 아래(§17-2 오버레이 규율).
+            failureAction===undefined면(정상 대기·완료 등) 아예 안 그린다. */}
+        {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} /> : null}
         {/* AC9 — 나가는 계정. */}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalAccountLabel')}</span>
@@ -763,7 +844,7 @@ export default function ChannelPostEditPage() {
           <div className="space-y-1">
             {/* eslint-disable-next-line @next/next/no-img-element -- story #3428: public-read GCS 오브젝트 URL(외부 도메인, next/image 대상 밖 — avatar_upload.py 소비부와 동형 관례). */}
             <img
-              src={draft.thumbnail_url} alt="" className="h-32 w-32 rounded object-cover"
+              src={draft.thumbnail_url} alt={t('channelPostsImageAttachAlt')} className="h-32 w-32 rounded object-cover"
               data-testid="channel-post-approval-thumbnail"
             />
             {draft.image_was_converted ? (
@@ -771,8 +852,8 @@ export default function ChannelPostEditPage() {
                 {t('channelPostsImageConvertedBadge', {
                   originalWidth: draft.image_original_width ?? 0,
                   finalWidth: draft.image_final_width ?? 0,
-                  originalBytes: typeof draft.image_original_bytes === 'number' ? formatMegabytes(draft.image_original_bytes) : '',
-                  finalBytes: typeof draft.image_final_bytes === 'number' ? formatMegabytes(draft.image_final_bytes) : '',
+                  originalBytes: typeof draft.image_original_bytes === 'number' ? formatFileSize(draft.image_original_bytes) : '',
+                  finalBytes: typeof draft.image_final_bytes === 'number' ? formatFileSize(draft.image_final_bytes) : '',
                 })}
               </p>
             ) : null}
@@ -863,7 +944,11 @@ export default function ChannelPostEditPage() {
           scheduled·unpublish 엔드포인트 신설·can_unpublish 판정값) — 아래 두 버튼. */}
       <div className="space-y-2">
         <div className="flex gap-2">
-          <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
+          <Button
+            onClick={() => void handlePublish()}
+            disabled={!canPublish || publishing || blockedByCommandInFlight}
+            data-testid="channel-post-publish-button"
+          >
             {/* story #3402 PR2 ②-c(T9·doc §4-1/§17-4) — 부분 성공(container_created)이면
                 기본 행동이 "다시"가 아니라 "이어서 발행"이다(처음부터 하면 컨테이너가
                 하나 더 생겨 같은 글이 두 번 나갈 수 있다, §4-1). partialSuccess 분기가
@@ -895,6 +980,13 @@ export default function ChannelPostEditPage() {
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
             {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌
+            경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘). */}
+        {canPublish && blockedByCommandInFlight ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
+            {t(commandInFlightReasonKey)}
           </p>
         ) : null}
         {showCancelScheduled && !canCancelScheduled ? (
@@ -1053,33 +1145,75 @@ export default function ChannelPostEditPage() {
       {imageSpec && imageSpec.maxCount > 0 ? (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="channel-post-image-attach">
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">{t('channelPostsImageAttachLabel', { count: imageSpec.maxCount })}</span>
+            {/* B3(페드루 PO·유나 지적, 2026-09-04) — 어댑터가 image_max_count>1을 선언해도
+                이 첨부 칸은 파일 하나만 받는다(input에 multiple 없음·onChange가 files[0]만
+                읽음·confirm이 draft 이미지 필드를 한 장으로 덮어씀 — 진짜 다중첨부가
+                아니다). "{count}장까지"라고 적으면 화면이 실제로 안 하는 일을 약속하는
+                거짓말이 된다 — 개수를 아예 안 적는다. */}
+            <span className="text-muted-foreground">{t('channelPostsImageAttachLabel')}</span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-image-spec-tag">
             {t('channelPostsImageSpecTag', {
               formats: imageSpec.formats.map((f) => f.replace('image/', '').toUpperCase()).join(', '),
-              maxBytes: formatMegabytes(imageSpec.maxBytes),
+              maxBytes: formatFileSize(imageSpec.maxBytes),
               aspectMax: imageSpec.aspectMax,
               widthMin: imageSpec.widthMin,
               widthMax: imageSpec.widthMax,
+              // N(페드루 PO, 2026-09-04 13:27Z) — 연결 응답에서 이미 읽던 image_color_space가
+              // imageSpec까지만 오고 화면엔 한 번도 안 실렸던 갭.
+              colorSpace: imageSpec.colorSpace,
             })}
           </p>
           {draft.thumbnail_url ? (
-            // eslint-disable-next-line @next/next/no-img-element -- story #3428: public-read GCS 오브젝트 URL(외부 도메인, next/image 대상 밖 — avatar_upload.py 소비부와 동형 관례).
-            <img src={draft.thumbnail_url} alt="" className="h-24 w-24 rounded object-cover" data-testid="channel-post-image-preview" />
+            <div className="space-y-1">
+              {/* eslint-disable-next-line @next/next/no-img-element -- story #3428: public-read GCS 오브젝트 URL(외부 도메인, next/image 대상 밖 — avatar_upload.py 소비부와 동형 관례). */}
+              <img
+                src={draft.thumbnail_url} alt={t('channelPostsImageAttachAlt')}
+                className="h-24 w-24 rounded object-cover" data-testid="channel-post-image-preview"
+              />
+              {/* 배지 첨부 칸(페드루 PO, 2026-09-04 13:41Z) — 이 미리보기도 파생본(변환
+                  결과)을 그리므로 image_was_converted일 때 승인 카드(§13-3)와 같은
+                  배지·같은 문구를 함께 보인다(새 문구 없음·false면 안 그림). 승인 카드
+                  =확定 결과 보여주는 자리, 여기=작성자가 지금 첨부가 어떻게 변환됐는지
+                  확인하는 자리 — 둘 다 image_final_object_path 기준이라 같은 값이다.
+                  <img> 2벌은 의도적으로 유지(§13-3 그대로). */}
+              {draft.image_was_converted ? (
+                <p className="text-xs text-muted-foreground" data-testid="channel-post-image-attach-converted-badge">
+                  {t('channelPostsImageConvertedBadge', {
+                    originalWidth: draft.image_original_width ?? 0,
+                    finalWidth: draft.image_final_width ?? 0,
+                    originalBytes: typeof draft.image_original_bytes === 'number' ? formatFileSize(draft.image_original_bytes) : '',
+                    finalBytes: typeof draft.image_final_bytes === 'number' ? formatFileSize(draft.image_final_bytes) : '',
+                  })}
+                </p>
+              ) : null}
+            </div>
           ) : null}
+          {/* ②(유나 지적, 2026-09-04) — <input type=file>는 접근 가능한 이름이 0이고
+              그리는 브라우저 기본 컨트롤 라벨("파일 선택" 등)이 브라우저 로케일을 따라
+              앱 로케일과 어긋난다. 실제로 화면에 그리는 것은 라벨이 붙은 Button — input
+              자체는 hidden으로 접근성 트리 밖에 두고 ref로만 클릭을 위임한다. */}
           <input
+            ref={imageFileInputRef}
             type="file"
             accept={imageSpec.formats.join(',')}
+            hidden
             data-testid="channel-post-image-file-input"
-            disabled={imageUploadStatus.phase === 'requesting_url' || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming'}
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = '';
               if (file) void handleImageFileSelected(file);
             }}
           />
-          {imageUploadStatus.phase === 'requesting_url' || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming' ? (
+          <Button
+            type="button" variant="outline" size="sm"
+            disabled={imageUploadInProgress}
+            onClick={() => imageFileInputRef.current?.click()}
+            data-testid="channel-post-image-attach-trigger"
+          >
+            {t('channelPostsImageAttachTriggerCta')}
+          </Button>
+          {imageUploadInProgress ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-progress">
               {imageUploadStatus.phase === 'requesting_url'
                 ? t('channelPostsImageUploadRequestingUrl')
@@ -1103,22 +1237,53 @@ export default function ChannelPostEditPage() {
       ) : null}
 
       <div className="flex gap-2">
-        <Button onClick={handleSave} disabled={saving} data-testid="channel-post-save-button">
+        <Button onClick={handleSave} disabled={saving || imageUploadInProgress} data-testid="channel-post-save-button">
           {saving ? t('editSavingCta') : t('editSaveCta')}
         </Button>
         <Button
-          onClick={handleSubmitForApproval}
-          disabled={submitting || isOverLimit}
+          onClick={() => void handleSubmitForApproval()}
+          disabled={submitting || isOverLimit || imageUploadInProgress}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
         </Button>
+        {/* story #3422 ②-d — 예약 상신(doc §11 T8 "상신 시 scheduled_at 입력"). 즉시
+            상신과 같은 게이팅(isOverLimit)을 공유 — 한도 초과면 예약도 막는다. B4(페드루
+            PO, 2026-09-04 13:26Z) — command_status가 pending/blocked면 새 예약도 막는다
+            (즉시 상신은 이 게이팅 밖 — PO 지시가 발행·예약 상신 둘로 명시). */}
+        <Button
+          variant="outline"
+          onClick={() => setScheduleDialogOpen(true)}
+          disabled={submitting || isOverLimit || blockedByCommandInFlight || imageUploadInProgress}
+          data-testid="channel-post-schedule-submit-button"
+        >
+          {t('channelPostsScheduleSubmitCta')}
+        </Button>
       </div>
+      <ScheduleAtDialog
+        open={scheduleDialogOpen}
+        onOpenChange={(next) => { setScheduleDialogOpen(next); if (!next) setScheduleServerError(null); }}
+        onSubmit={(iso) => void handleSubmitForApproval(iso)}
+        submitting={submitting}
+        serverError={scheduleServerError}
+      />
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
           워시된다, Phase 0 실측). */}
       {isOverLimit ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-over-limit-reason">
           {t('channelPostsOverLimitReason')}
+        </p>
+      ) : null}
+      {/* B2(페드루 PO, 2026-09-04 13:27Z) — 이미지 업로드 진행 중엔 저장/상신이 왜
+          막혔는지 버튼 밖에 밝힌다(isOverLimit과 동시에 뜰 수 있어 둘 다 없을 때만). */}
+      {!isOverLimit && imageUploadInProgress ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-in-progress-reason">
+          {t('channelPostsImageUploadInProgressReason')}
+        </p>
+      ) : null}
+      {!isOverLimit && blockedByCommandInFlight ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
+          {t(commandInFlightReasonKey)}
         </p>
       ) : null}
 

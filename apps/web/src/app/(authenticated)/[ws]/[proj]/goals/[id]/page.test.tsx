@@ -303,9 +303,9 @@ describe('EpicDetailPage — 결과 캡슐 재조립(§2 이중 신호·§4 신�
     expect(container.textContent).toContain('측정 예정');
   });
 
-  it('신뢰 레일 — 결과 판정 완료(hit)면 "결과 확定" 노드로 전환된다', async () => {
+  it('신뢰 레일 — 결과 판정 완료(hit)면 "결과 확정" 노드로 전환된다', async () => {
     await mountByUrl({ outcome_status: 'hit' });
-    expect(container.textContent).toContain('결과 확定');
+    expect(container.textContent).toContain('결과 확정');
     expect(container.textContent).not.toContain('결과 검증 (예정)');
   });
 

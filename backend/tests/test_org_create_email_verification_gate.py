@@ -24,6 +24,7 @@ def _mock_org():
     org.name = "Fresh Org"
     org.slug = "fresh-org"
     org.plan = "free"
+    org.timezone = None
     org.created_at = datetime(2026, 7, 10, tzinfo=timezone.utc)
     org.updated_at = datetime(2026, 7, 10, tzinfo=timezone.utc)
     return org

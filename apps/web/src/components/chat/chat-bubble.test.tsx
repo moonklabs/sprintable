@@ -231,7 +231,7 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
     });
     // story #2886(S2b) — 상태 라벨은 격납(hover/focus tooltip)으로 이동. 포커스로 열고 확認.
     await act(async () => { container.querySelector('button')!.focus(); });
-    expect(document.body.textContent).toContain('확定');
+    expect(document.body.textContent).toContain('확정');
     expect(document.body.textContent).not.toContain('아직 모름');
   });
 
@@ -1431,7 +1431,7 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재함에서 보기')).toBe(false);
   });
 
-  it('confirmed — 배지가 "확定"으로 뜨고 CTA는 없다', async () => {
+  it('confirmed — 배지가 "확정"으로 뜨고 CTA는 없다', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble
@@ -1444,7 +1444,7 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     });
     // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동.
     await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
-    expect(document.body.textContent).toContain('확定');
+    expect(document.body.textContent).toContain('확정');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
   });
 

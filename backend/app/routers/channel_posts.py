@@ -169,6 +169,11 @@ class ChannelPostDraftListItem(BaseModel):
     # body의 `command_status`와 동일(같은 latest_command 행, 같은 뜻).
     command_status: str | None = None
     command_reason_code: str | None = None
+    # story 0e960006(#3448, 페드루 PO 확定 2026-09-04) — dead_letter 수동 재시도
+    # (POST .../publication-commands/{command_id}/retry)를 화면이 부르려면 어느 명령
+    # 행인지 알아야 한다 — command_status와 같은 latest_command 행에서 id만 additive로
+    # 꺼낸다(신규 조회 0, N+1 없음).
+    command_id: uuid.UUID | None = None
     # gate.sealed_scheduled_at — publication_command.scheduled_at이 아니다(그 값은 요청
     # 시점 스냅샷이라 재승인 뒤 갱신 안 됨, story #3414). 화면 캘린더(§11-1)가 보는 "지금
     # 승인된 예약 시각"은 이 값.
@@ -540,6 +545,7 @@ def _to_draft_list_item(
         scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
         command_status=command_status,
         command_reason_code=latest_command.reason_code if latest_command else None,
+        command_id=latest_command.id if latest_command else None,
         thumbnail_url=public_url_for_object_path(latest_image.final_object_path) if latest_image else None,
         image_original_width=latest_image.original_width if latest_image else None,
         image_original_bytes=latest_image.original_bytes if latest_image else None,

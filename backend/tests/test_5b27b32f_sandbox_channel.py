@@ -59,7 +59,7 @@ def _enable_sandbox_adapter(monkeypatch):
 
     sandbox_config = adapters_mod.ChannelAdapterConfig(
         authorize_url="", token_url="", scope="sandbox_publish,sandbox_delete",
-        refresh_mode="manual", credential_kind="none", max_text_length=500,
+        refresh_mode="manual", display_name="Sandbox", credential_kind="none", max_text_length=500,
         utm_source="sandbox", utm_medium="test", supports_unpublish=True,
         unpublish_required_scope="sandbox_delete",
         image_formats=("image/jpeg", "image/png"), image_max_bytes=8 * 1024 * 1024,

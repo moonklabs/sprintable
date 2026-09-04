@@ -293,6 +293,17 @@ export const EXEMPT_PAIRS = new Set<string>([
   'settings.memberLimitExceededError <-> settings.roleMember',
   'content.channelPostsTextTooLong <-> content.originAuthorUnknown',
   'content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown',
+  // story #3422(2026-09-04, ②-c FailureActionBadge) — channelPostsFailureAutoRetryAt
+  // ({time} 보간 있음) <-> channelPostsFailureRetryCta("다시 시도", 보간 없음). 겹치는
+  // 건 "다시 시도"라는 흔한 동사구 하나뿐 — auto_retry(자동, 버튼 없음)와 dead_letter
+  // (수동 재시도 버튼)는 §17-13에서 의도적으로 다른 kind로 갈라 둔 서로 다른 개념이다.
+  // #2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다.
+  'content.channelPostsFailureAutoRetryAt <-> content.channelPostsFailureRetryCta',
+  // channelPostsFailureVoidedWithReason({reason} 보간) <-> channelPostsFailureVoided
+  // (보간 없음, 사유 자체가 없을 때 폴백). 같은 개념의 "사유 있음/없음" 두 표현이라
+  // 겹치는 게 당연하다(docs.title<->docs.indexDocCount류, "짧은 라벨이 그 라벨을
+  // 포함하는 긴 문구의 폴백/변형"인 정상 패턴).
+  'content.channelPostsFailureVoided <-> content.channelPostsFailureVoidedWithReason',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
