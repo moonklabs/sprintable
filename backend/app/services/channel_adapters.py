@@ -12,6 +12,7 @@ Phase1은 Threads 1개만 구현한다(범위 밖: Instagram/Facebook/X/WordPres
 암호화 로직은 채널 무관 공용)."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 
@@ -92,6 +93,42 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
     ),
 }
 
+# story 5b27b32f(Phase1·BE·테스트 인프라, 페드루 PO 확定 2026-09-04) — dev 전용 샌드박스
+# 채널. dev org에 실 Meta 자격이 없어(채널 연결 0건) publication_command·cron tick·
+# cancel-scheduled·unpublish·429·컨테이너 폴링 경로를 라이브로 한 번도 못 밟던 문제
+# (카디르 배포17 관측) — Threads 어댑터 코드(threads_publish.py)는 그대로 두고, 별도
+# 결정적 가짜 provider(sandbox_publish.py)로 같은 오케스트레이션 경로를 태운다.
+#
+# **fail-closed 이중 방어**(AC1·AC5): ①이 아래 블록 자체가 `SANDBOX_CHANNEL_ENABLED=true`
+# 일 때만 등재한다(cloudbuild.yaml이 dev에만 이 값을 싣고 prod엔 키 자체가 없다 —
+# GCS_CHANNEL_MEDIA_BUCKET 이전의 ADMIN_OPERATOR_* 관례 그대로) ②그래도 잘못 켜졌을 경우
+# (수동 오조작 등)를 대비해 `assert_sandbox_channel_not_registered_in_prod()`가 기동
+# 시점에 `settings.is_prod_deploy`와 대조해 있으면 안 되는데 있으면 즉시 RuntimeError로
+# 기동 자체를 죽인다(app/main.py lifespan에서 호출).
+if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
+    CHANNEL_ADAPTERS["sandbox"] = ChannelAdapterConfig(
+        authorize_url="",  # OAuth 없음(AC2) — 연결은 POST .../channel-connections/sandbox 전용.
+        token_url="",
+        scope="sandbox_publish,sandbox_delete",
+        refresh_mode="manual",  # 더미 토큰이라 자동 갱신 개념 자체가 없음.
+        credential_kind="none",
+        max_text_length=500,  # Threads와 동형(그라운딩 §1 실측 재사용, 새 한도를 지어내지 않는다).
+        utm_source="sandbox",
+        utm_medium="test",
+        supports_unpublish=True,
+        unpublish_required_scope="sandbox_delete",
+        # Threads와 동일 이미지 규격(AC1 "Threads와 같은 모양") — sandbox_publish.py가
+        # 실제로 Pillow 변환 파이프라인을 거치므로(channel_post_images.py는 채널 무관 공용)
+        # 같은 한도가 그대로 의미를 가진다.
+        image_formats=("image/jpeg", "image/png"),
+        image_max_bytes=8 * 1024 * 1024,
+        image_aspect_max=10.0,
+        image_width_min=320,
+        image_width_max=1440,
+        image_color_space="sRGB",
+        image_max_count=1,
+    )
+
 
 def get_channel_adapter(channel: str) -> ChannelAdapterConfig | None:
     return CHANNEL_ADAPTERS.get(channel)
@@ -99,3 +136,31 @@ def get_channel_adapter(channel: str) -> ChannelAdapterConfig | None:
 
 def can_auto_refresh(refresh_mode: str) -> bool:
     return refresh_mode in ("refresh_token", "reissue_from_access_token")
+
+
+def get_publish_client_module(channel: str):
+    """story 5b27b32f — 발행 클라이언트 모듈 디스패치. `sandbox`만 `threads_publish`
+    대신 `sandbox_publish`로 우회한다(같은 함수 시그니처·같은 `ThreadsPublishError`
+    클래스를 그대로 재사용 — sandbox_publish.py가 신규 예외 타입을 만들지 않으므로
+    channel_posts.py의 기존 except절이 그대로 먹힌다, 신규 판정 로직 0). 실 배포 채널
+    (threads 등)은 전부 threads_publish 그대로 — 이 함수가 sandbox 개입의 유일한
+    지점이다(Threads 어댑터 코드 자체는 무변경)."""
+    if channel == "sandbox":
+        from app.services import sandbox_publish
+        return sandbox_publish
+    from app.services import threads_publish
+    return threads_publish
+
+
+def assert_sandbox_channel_not_registered_in_prod() -> None:
+    """story 5b27b32f(AC5) — 기동 시점 fail-closed 방어. env 플래그 게이트(위)가 이미
+    prod cloudbuild.yaml에 `SANDBOX_CHANNEL_ENABLED` 키 자체를 안 실어 정상 배포에서는
+    이 함수가 항상 no-op이다 — 그래도 수동 오조작(예: gcloud run services update로 누가
+    직접 env를 붙임)까지 방어하는 두 번째 층. `app/main.py` lifespan이 기동마다 호출."""
+    from app.core.config import settings
+
+    if settings.is_prod_deploy and "sandbox" in CHANNEL_ADAPTERS:
+        raise RuntimeError(
+            "fail-closed: prod 배포에 sandbox 채널 어댑터가 등재돼 있습니다"
+            "(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story 5b27b32f AC5)."
+        )

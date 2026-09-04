@@ -73,6 +73,23 @@ async def _require_owner(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     return resolved
 
 
+async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story 5b27b32f(AC2) — 샌드박스 연결 생성은 실 OAuth 연결(_require_owner, owner
+    전용)보다 넓은 owner/admin(channel_posts.py::_require_owner_or_admin·site_posts.py와
+    동형 폭 — 테스트 인프라라 취소·회수와 같은 급으로 취급, 실제 외부 계정 자격을
+    다루는 실채널 연결보다는 덜 민감하다는 판단)."""
+    resolved = await _require_human(db, auth, org_id)
+    if resolved.role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_CONNECTION_OWNER_OR_ADMIN_ONLY",
+                "message": "샌드박스 채널 연결은 조직 owner 또는 admin만 가능합니다.",
+            },
+        )
+    return resolved
+
+
 def _redirect_uri(org_id: uuid.UUID, channel: str) -> str:
     from app.core.config import settings
     return f"{settings.app_url}/api/oauth-channel/callback/{channel}"
@@ -377,6 +394,47 @@ async def channel_connection_callback(
     return _to_response(row)
 
 
+@router.post("/{org_id}/channel-connections/sandbox", response_model=ChannelConnectionResponse, status_code=201)
+async def create_sandbox_channel_connection(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story 5b27b32f(AC2) — OAuth 없는 샌드박스 연결 생성. dev org에 실 Meta 자격이
+    없어(채널 연결 0건) 발행 명령·cron tick·cancel·unpublish·429·컨테이너 폴링 경로를
+    dev에서 라이브로 못 밟던 병목을 푼다. `upsert_channel_connection`(story #3373 AC8
+    기존 함수, 신규 로직 0)을 그대로 재사용 — 같은 (org, "sandbox", account_id) 재호출은
+    새 행이 아니라 기존 행 갱신(멱등, 실 OAuth 콜백과 동일 계약).
+
+    이 채널 자체가 `SANDBOX_CHANNEL_ENABLED=true`일 때만 CHANNEL_ADAPTERS에 등재되므로
+    (channel_adapters.py) prod에선 이 엔드포인트를 호출해도 404(어댑터 없음)로 막힌다 —
+    라우트 자체를 조건부로 등록하지 않는 이유는 fail-closed 축을 어댑터 레지스트리 하나로
+    모으기 위함(AC5의 기동 시점 가드와 같은 SSOT)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    adapter = get_channel_adapter("sandbox")
+    if adapter is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_SANDBOX_DISABLED",
+                "message": "이 환경에서 샌드박스 채널이 비활성화돼 있습니다(SANDBOX_CHANNEL_ENABLED).",
+            },
+        )
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel="sandbox", account_id=f"sandbox-{org_id}",
+        account_label="Sandbox", credential_kind=adapter.credential_kind,
+        access_token="sandbox-dummy-access-token", refresh_token=None,
+        token_expires_at=None, refresh_mode=adapter.refresh_mode,
+        scopes=adapter.scope.split(","), connected_by=resolved.id,
+    )
+    return _to_response(row)
+
+
 @router.post("/{org_id}/channel-connections/{connection_id}/disconnect", response_model=ChannelConnectionResponse)
 async def disconnect_channel_connection(
     org_id: uuid.UUID,
@@ -513,7 +571,11 @@ async def get_channel_publishing_limit(
             detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": "연결에 저장된 토큰이 없습니다."},
         )
 
-    from app.services.threads_publish import ThreadsPublishError, get_publishing_limit
+    from app.services.channel_adapters import get_publish_client_module
+    from app.services.threads_publish import ThreadsPublishError
+
+    # story 5b27b32f — sandbox 연결이면 sandbox_publish로 우회(publish 경로와 동일 디스패치).
+    get_publishing_limit = get_publish_client_module(row.channel).get_publishing_limit
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
