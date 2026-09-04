@@ -38,7 +38,10 @@ const ORG_ID = 'org-1';
 const DRAFT_ID = 'd1';
 
 beforeEach(() => {
-  useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [] });
+  // story #3402 PR2 ②-a — content/[draftId]/page.test.tsx(site-posts)와 동일 관례:
+  // 발행 취소 버튼 role 게이팅 기본값은 'owner'(기존 테스트 전부가 "권한 있음" 전제).
+  // member 케이스는 개별 테스트가 이 값을 덮어쓴다.
+  useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'owner' });
   useParamsMock.mockReturnValue({ draftId: DRAFT_ID });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -436,6 +439,77 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
+  });
+
+  // story #3402 PR2 ②-a(AC5·doc §5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b, 이
+  // 조각에선 버튼이 실제 호출을 하지 않는다 — onClick 미배선).
+  it('⭐canPublish=true(승인+해시일치) — 발행 버튼이 활성화되고 비활성 사유가 안 보인다', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).toBeNull();
+  });
+
+  it('⭐canPublish=false(초안, 아직 승인 전) — 발행 버튼이 비활성화되고 사유가 버튼 밖에 보인다', async () => {
+    stubFetch({ draftDetail: { gate_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).not.toBeNull();
+    // AC5 — 비활성 사유 문구가 버튼 "라벨 안"이 아니라 별도 엘리먼트(버튼 밖)에 있다.
+    expect(btn.textContent).not.toContain(koMessages.content.publishDisabledReason);
+  });
+
+  it('⭐발행 취소 버튼 — publication_status=published일 때만 렌더된다(그 외엔 아예 없음)', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', publication_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
+  });
+
+  it('⭐canUnpublish=false(member 권한) — 발행됨 상태에서 발행 취소 버튼이 비활성화되고 사유가 보인다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [], role: 'member' });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).not.toBeNull();
+  });
+
+  it('⭐canUnpublish=true(owner) — 발행 취소 버튼이 활성화되고 사유가 안 보인다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
   });
 
   it('로드 실패 — 오류 알림을 보인다', async () => {

@@ -80,7 +80,7 @@ type PublishingLimitState =
   | { status: 'failed' };
 
 export default function ChannelPostEditPage() {
-  const { orgId } = useDashboardContext();
+  const { orgId, role } = useDashboardContext();
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
@@ -333,6 +333,17 @@ export default function ChannelPostEditPage() {
       })
     : { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false, errorCode: undefined };
 
+  // story #3402 PR2 ②-a(doc §5·AC5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b).
+  // canPublish는 site-posts(content/[draftId]/page.tsx::canPublish)와 동형으로 role
+  // 제약이 아니라 view.publishable(업무 상태) 그대로다 — "승인된 최신 버전에서만
+  // 발행할 수 있다"는 판단은 게이트/봉인 일치 여부이지 누구인지가 아니다. canUnpublish
+  // 만 site와 동일하게 role===owner|admin으로 좁힌다(발행 취소는 더 무거운 되돌릴 수
+  // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
+  // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
+  // "휴먼 게이팅"의 실체는 이 owner/admin 세분화다.
+  const canPublish = view.publishable;
+  const canUnpublish = role === 'owner' || role === 'admin';
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
@@ -432,6 +443,32 @@ export default function ChannelPostEditPage() {
         }
         return null;
       })()}
+
+      {/* story #3402 PR2 ②-a — 발행/발행 취소 버튼(게이팅만, API 배선은 ②-b). AC5 —
+          비활성 사유 문구는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
+          워시된다, Phase 0 실측 그대로 재사용). 발행 취소는 발행됨 상태에서만 뜬다. */}
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Button disabled={!canPublish} data-testid="channel-post-publish-button">
+            {view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
+          </Button>
+          {view.status === 'published' ? (
+            <Button variant="outline" disabled={!canUnpublish} data-testid="channel-post-unpublish-button">
+              {t('unpublishCta')}
+            </Button>
+          ) : null}
+        </div>
+        {!canPublish ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
+            {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {view.status === 'published' && !canUnpublish ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+            {t('unpublishDisabledReason')}
+          </p>
+        ) : null}
+      </div>
 
       <div className="space-y-2">
         <textarea
