@@ -560,6 +560,40 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.textContent).toContain(new Date(resetAt).toLocaleString());
   });
 
+  // 카디르 QA 계획(2026-09-04) ⑤ — "api-error.ts가 파싱한다"는 사실만으로 화면 렌더까지
+  // 됐다고 넘기지 않는다. AC10 12행 중 GATE_ALREADY_HELD·TEXT_TOO_LONG·RATE_LIMITED를
+  // 뺀 나머지를 각 코드마다 개별 mock 응답으로 주입해 실제 렌더 문구를 pin한다.
+  // ⚠️실측으로 찾은 결함(이 테스트를 쓰다가 발견) — 아래 6개 코드의 labelKey(api-error.ts)
+  // 가 가리키는 번역 키 자체가 messages/*.json에 없었다(정의만 있고 값이 없어 next-intl이
+  // MISSING_MESSAGE로 깨짐) — 이번에 추가해 해소.
+  it.each([
+    ['CHANNEL_TOKEN_EXPIRED', 409, koMessages.content.errorChannelTokenExpired],
+    ['CHANNEL_CONNECTION_NOT_ACTIVE', 409, koMessages.content.errorChannelConnectionNotActive],
+    ['CHANNEL_POST_APPROVER_ROLE_MISSING', 409, koMessages.content.errorChannelApproverRoleMissing],
+    ['CHANNEL_PUBLISH_IN_PROGRESS', 409, koMessages.content.errorChannelPublishInProgress],
+    ['CHANNEL_PUBLISH_PROVIDER_ERROR', 502, koMessages.content.errorChannelPublishProviderError],
+    ['EXTERNAL_PUBLISH_APPROVAL_REQUIRED', 403, koMessages.content.errorApprovalRequired],
+    ['SITE_POST_SEAL_MISSING', 409, koMessages.content.errorSealMissing],
+    ['SITE_POST_REAPPROVAL_REQUIRED', 409, koMessages.content.errorReapprovalRequired],
+  ])('⭐발행 실패(%s, AC10) — 화면에 해당 행의 사람 말이 실제로 렌더된다', async (code, status, expectedText) => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status, body: { detail: { code, message: 'raw' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain(expectedText);
+  });
+
   // story #3414(PR#3769, 리뷰중) 대조 — 페드루 PO 지적(2026-09-04 05:44Z): scheduled=true
   // 응답은 permalink/external_id/published_at 셋 다 null이 정상이다(즉시 경로가 아니라
   // command만 만들고 워커가 나중에 실행). 그 null을 "발행됨"으로 그리면 AC2 규율(모르는
