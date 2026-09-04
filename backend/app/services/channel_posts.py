@@ -451,6 +451,9 @@ async def list_channel_post_draft_versions(
 async def list_channel_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
     draft_id: uuid.UUID | None = None,
+    scheduled_from: datetime | None = None,
+    scheduled_to: datetime | None = None,
+    unscheduled: bool = False,
 ) -> list[
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
@@ -492,7 +495,15 @@ async def list_channel_post_drafts(
 
     반환: (draft, latest_version, origin_version, gate, published_publication,
     latest_version_publication, published_body_sha256, latest_command) — gate·publication·
-    command 계열은 없으면 None(지어내지 않는다, "모른다≠다르다")."""
+    command 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
+
+    story #3423(캘린더 #3422 선행) — `scheduled_from`/`scheduled_to`/`unscheduled`.
+    기준 컬럼은 **`gate.sealed_scheduled_at`**(승인된 예약 시각) — `publication_command.
+    scheduled_at`이 아니다(그 값은 요청 시점 스냅샷, story #3414). "그 게이트"의 정의는
+    배치②와 동일(work_item당 가장 최근 생성된 external_publish 게이트) — 필터가
+    사후 필터링이 아니라 **페이지 쿼리 자체**에 들어가야 LIMIT/OFFSET이 필터링된
+    결과 위에서 동작한다(안 그러면 페이지가 좁아지거나 빈 페이지가 나온다). 필터가
+    하나도 없으면 이 조인·정렬 변경 자체를 안 탄다(기존 응답 완전 불변, 회귀 0)."""
     latest_version_ids = (
         select(
             ChannelPostVersion.draft_id,
@@ -526,10 +537,40 @@ async def list_channel_post_drafts(
             & (origin.version == origin_version_ids.c.min_version),
         )
         .where(ChannelPostDraft.org_id == org_id)
-        .order_by(latest.created_at.desc())
-        .limit(limit)
-        .offset(offset)
     )
+
+    schedule_filter_active = unscheduled or scheduled_from is not None or scheduled_to is not None
+    if schedule_filter_active:
+        latest_gate_ids = (
+            select(Gate.work_item_id, func.max(Gate.created_at).label("max_created_at"))
+            .where(Gate.org_id == org_id, Gate.gate_type == _EXTERNAL_PUBLISH_GATE_TYPE)
+            .group_by(Gate.work_item_id)
+            .subquery()
+        )
+        filter_gate = aliased(Gate)
+        stmt = stmt.outerjoin(
+            latest_gate_ids, latest_gate_ids.c.work_item_id == ChannelPostDraft.work_item_id,
+        ).outerjoin(
+            filter_gate,
+            (filter_gate.work_item_id == latest_gate_ids.c.work_item_id)
+            & (filter_gate.created_at == latest_gate_ids.c.max_created_at)
+            & (filter_gate.gate_type == _EXTERNAL_PUBLISH_GATE_TYPE)
+            & (filter_gate.org_id == org_id),
+        )
+        if unscheduled:
+            stmt = stmt.where(filter_gate.sealed_scheduled_at.is_(None))
+        else:
+            if scheduled_from is not None:
+                stmt = stmt.where(filter_gate.sealed_scheduled_at >= scheduled_from)
+            if scheduled_to is not None:
+                stmt = stmt.where(filter_gate.sealed_scheduled_at <= scheduled_to)
+        # AC2 — 필터가 활성일 때만 정렬을 예약 시각 기준으로 바꾼다(미정은 NULLS LAST
+        # 뒤 created_at으로 2차 정렬). 필터 없는 기본 목록의 정렬(최근 편집순)은 안 건드린다.
+        stmt = stmt.order_by(filter_gate.sealed_scheduled_at.asc().nulls_last(), latest.created_at.desc())
+    else:
+        stmt = stmt.order_by(latest.created_at.desc())
+
+    stmt = stmt.limit(limit).offset(offset)
     if draft_id is not None:
         stmt = stmt.where(ChannelPostDraft.id == draft_id)
     page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
