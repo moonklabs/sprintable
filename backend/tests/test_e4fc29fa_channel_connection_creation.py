@@ -335,6 +335,40 @@ async def test_wordpress_insecure_http_site_url_rejected():
 
 
 @pytest.mark.anyio
+async def test_wordpress_site_url_resolving_to_private_ip_rejected(dns_stub):
+    """story e4fc29fa(조각⑤, 페드루 리뷰②) — https://라는 문자열만으론 라우트가
+    `assert_destination_url_safe`를 실제로 부르는지(DNS 해석까지 포함) 증명이 안 된다
+    — 스킴 거부(위 테스트)는 파싱만으로도 통과할 수 있어서다. 이 테스트는 스킴은
+    정상(https)이지만 **해석된 IP가 사설 대역**인 도메인을 등록해, 라우트 층이
+    진짜로 해석기를 호출해 그 결과까지 본다는 것을 잰다. 뮤테이션 대상: 라우트가
+    `assert_destination_url_safe`를 안 부르고 스킴 문자열만 보면 이 assert가 RED."""
+    dns_stub.map("attacker-controlled.example.com", "10.0.0.5")
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/wordpress",
+                json={
+                    "site_url": "https://attacker-controlled.example.com", "username": "editor",
+                    "app_password": "pw",
+                },
+            )
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "CHANNEL_CONNECTION_DESTINATION_INSECURE"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_reconnect_same_site_url_is_idempotent_upsert(dns_stub):
     """story #3373 AC8 재사용 — 같은 (org, wordpress, site_url) 재호출은 새 행이
     아니라 기존 행 갱신(예: 비밀번호를 바꿔 재등록해도 connection id는 그대로)."""
