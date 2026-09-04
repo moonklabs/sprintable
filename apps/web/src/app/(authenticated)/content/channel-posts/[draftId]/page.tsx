@@ -717,8 +717,15 @@ export default function ChannelPostEditPage() {
         // connection 응답(unpublish_blocked_reason)으로 버튼을 막아 두는 정상 경로라
         // 여기 오는 건 레이스(그 사이 스코프가 바뀜) 방어다 — 같은 §17-11 role 분기
         // 정본 문구를 그대로 재사용(labelKey는 비워 둠, KNOWN_ERRORS 주석 참고).
+        // story #3458 — channelPostsUnpublishScopeInsufficientOwner엔 이제 <link> 태그가
+        // 있다(버튼 밖 사유줄 자리는 t.rich로 실 링크를 그린다) — 여기는 plain string
+        // 상태(unpublishResult.text)라 JSX를 못 담는다. plain t()는 태그를 못 지워
+        // FORMATTING_ERROR로 키 이름 자체가 새 버린다(실측) — t.markup으로 태그만
+        // 벗기고 문구는 그대로 얻는다(next-intl 정식 API, 결과가 string).
         const text = info.kind === 'scope_insufficient'
-          ? (role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientNonOwner'))
+          ? (role === 'owner'
+            ? t.markup('channelPostsUnpublishScopeInsufficientOwner', { link: (chunks) => chunks })
+            : t('channelPostsUnpublishScopeInsufficientNonOwner'))
           : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsUnpublishFailed'));
         setUnpublishResult({ type: 'error', text, raw: info.raw });
       }
@@ -1159,19 +1166,28 @@ export default function ChannelPostEditPage() {
             안 그린다). scope_insufficient만 role별 두 문장(owner: 재연결하면 풀림 /
             member: owner에게 요청). role 게이팅(owner/admin 아님)이 blocked_reason보다
             먼저 걸리면 그 사유가 우선(§17-11은 "권한은 있는데 스코프가 없다"는 경우 전용). */}
+        {/* 유나 프로브 실측(2026-09-04 17:28Z) — 네 가지 사유가 같은 testid를 덮어써
+            프로브가 문구 텍스트로 갈래를 구별해야 했다. data-unpublish-reason 안정
+            키를 각 갈래에 하나씩(시각 변화 0) — 프로브·QA가 이 값으로 읽는다. */}
         {showUnpublish && !canUnpublish ? (
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="role">
             {t('channelPostsCancelUnpublishOwnerOrAdminOnly')}
           </p>
         ) : showUnpublish && canUnpublish && unpublishGate?.blockedReason === 'scope_insufficient' ? (
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
-            {role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientNonOwner')}
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="scope_insufficient">
+            {/* owner만 「연결 화면」 링크(재연결이 실제로 갈 곳) — nonOwner 문구는
+                owner에게 요청하라는 안내라 이 화면 안에 갈 곳이 없다(링크 없음 그대로). */}
+            {role === 'owner'
+              ? t.rich('channelPostsUnpublishScopeInsufficientOwner', {
+                link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+              })
+              : t('channelPostsUnpublishScopeInsufficientNonOwner')}
           </p>
         ) : showUnpublish && canUnpublish && unpublishGate?.canUnpublish === true && unpublishGate.connectionStatus !== 'active' ? (
           // story #3458 — can_unpublish(어댑터 성질)는 참인데 연결 상태(토큰 등)가
           // active가 아니라 막힌 경우. 「연결 화면」에 인라인 링크(사람이 할 일이 그
           // 하나뿐인데 전역 내비를 뒤지게 하지 않는다).
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="connection_not_active">
             {t.rich('channelPostsUnpublishConnectionNotActive', {
               link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
             })}
@@ -1179,7 +1195,7 @@ export default function ChannelPostEditPage() {
         ) : showUnpublish && canUnpublish && unpublishGate === undefined ? (
           // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 자체가 실패/아직 안 끝났으면
           // "모른다"인데 버튼만 비활성이고 이유가 없었다(AC1 "사유는 버튼 밖" 규율 위반).
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="unknown">
             {t('channelPostsUnpublishGateUnknown')}
           </p>
         ) : null}

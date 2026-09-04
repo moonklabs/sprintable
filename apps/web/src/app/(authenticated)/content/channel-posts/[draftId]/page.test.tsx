@@ -840,8 +840,14 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
     const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+    // story #3458 — owner 문구엔 이제 /organization/channels 인라인 링크가 있다(태그는
+    // 렌더된 textContent에 안 남는다).
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
-      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientOwner);
+      .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientOwner.replace(/<\/?link>/g, ''));
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.getAttribute('data-unpublish-reason'))
+      .toBe('scope_insufficient');
+    expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"] a')?.getAttribute('href'))
+      .toBe('/organization/channels');
   });
 
   // 카디르 QA 지적(2026-09-04 09:02Z) — 이전 판 테스트명이 단언과 반대였다("member면
@@ -1073,7 +1079,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     // story #3426 ①-d(doc §17-11) — CHANNEL_SCOPE_INSUFFICIENT는 서버 원문이 아니라
     // §17-11 role 분기 정본 문구를 그대로 재사용한다(role='owner' 기본).
-    expect(container.textContent).toContain(koMessages.content.channelPostsUnpublishScopeInsufficientOwner);
+    // story #3458 — 이 결과 배너는 plain string(unpublishResult.text)이라 <link> 태그를
+    // 벗겨서 쓴다(버튼 밖 사유줄만 t.rich로 실 링크).
+    expect(container.textContent).toContain(koMessages.content.channelPostsUnpublishScopeInsufficientOwner.replace(/<\/?link>/g, ''));
   });
 
   // story #3426 ①-d(카디르 QA 계획 ⑤ 선례) — "api-error.ts가 파싱한다"는 사실만으로 화면

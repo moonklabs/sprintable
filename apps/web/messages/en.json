@@ -2274,7 +2274,7 @@
     "channelPostsCancelScheduledCta": "Cancel schedule",
     "channelPostsUnpublishCta": "Remove",
     "channelPostsCancelUnpublishOwnerOrAdminOnly": "Only an organization owner or admin can cancel a scheduled post or remove a published one.",
-    "channelPostsUnpublishScopeInsufficientOwner": "This connection doesn't have permission to remove posts — reconnect it to enable removal.",
+    "channelPostsUnpublishScopeInsufficientOwner": "This connection doesn't have permission to remove posts — reconnect it on the <link>connection screen</link> to enable removal.",
     "channelPostsUnpublishScopeInsufficientNonOwner": "This connection doesn't have permission to remove posts — ask an organization owner to reconnect it.",
     "channelPostsUnpublishGateUnknown": "Couldn't confirm the connection details.",
     "channelPostsCancelScheduledConfirmTitle": "Cancel this schedule?",
