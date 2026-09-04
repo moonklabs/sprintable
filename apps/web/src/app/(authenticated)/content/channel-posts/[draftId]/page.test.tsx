@@ -704,7 +704,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).toBeNull();
   });
 
-  it('⭐예약 취소 실패(409 PUBLICATION_COMMAND_NOT_CANCELLABLE) — 서버 문구가 보이고 버튼은 그대로 남는다', async () => {
+  // story #3426 ①-d — PUBLICATION_COMMAND_NOT_CANCELLABLE은 current_status를 실어
+  // "이미 {status} 상태입니다"를 조립한다(labelKey 비움, TEXT_TOO_LONG과 같은 패턴).
+  it('⭐예약 취소 실패(409 PUBLICATION_COMMAND_NOT_CANCELLABLE) — current_status가 보간된 조립 문구가 보이고 버튼은 그대로 남는다', async () => {
     stubFetch({
       draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
       onCancelScheduled: () => ({ status: 409, body: { detail: { code: 'PUBLICATION_COMMAND_NOT_CANCELLABLE', message: '이미 실행 중입니다', current_status: 'in_progress' } } }),
@@ -725,7 +727,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain('이미 실행 중입니다');
+    expect(container.textContent).toContain('이미 in_progress 상태라 취소할 수 없습니다');
     expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).not.toBeNull();
   });
 
@@ -791,7 +793,61 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain('스코프가 부족합니다');
+    // story #3426 ①-d(doc §17-11) — CHANNEL_SCOPE_INSUFFICIENT는 서버 원문이 아니라
+    // §17-11 role 분기 정본 문구를 그대로 재사용한다(role='owner' 기본).
+    expect(container.textContent).toContain(koMessages.content.channelPostsUnpublishScopeInsufficientOwner);
+  });
+
+  // story #3426 ①-d(카디르 QA 계획 ⑤ 선례) — "api-error.ts가 파싱한다"는 사실만으로 화면
+  // 렌더까지 됐다고 넘기지 않는다. 나머지 신규 코드도 개별 mock으로 실제 렌더 문구를 pin.
+  it('⭐예약 취소 실패(404 PUBLICATION_COMMAND_NOT_FOUND) — 화면에 사람 말이 실제로 렌더된다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => ({ status: 404, body: { detail: { code: 'PUBLICATION_COMMAND_NOT_FOUND' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain(koMessages.content.errorPublicationCommandNotFound);
+  });
+
+  it.each([
+    ['CHANNEL_POST_NOT_PUBLISHED', 409, 'errorChannelPostNotPublished'],
+    ['CHANNEL_UNPUBLISH_UNSUPPORTED', 422, 'errorChannelUnpublishUnsupported'],
+  ] as const)('⭐회수 실패(%s) — 화면에 사람 말이 실제로 렌더된다', async (code, status, key) => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      onUnpublish: () => ({ status, body: { detail: { code } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain(koMessages.content[key]);
   });
 
   // story #3402 PR2 ②-b(T7) — 발행 버튼 클릭 배선.

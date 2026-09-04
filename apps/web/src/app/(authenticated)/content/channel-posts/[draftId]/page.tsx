@@ -416,7 +416,15 @@ export default function ChannelPostEditPage() {
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
-        setCancelScheduledResult({ type: 'error', text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCancelScheduledFailed')) });
+        // story #3426 ①-d — PUBLICATION_COMMAND_NOT_CANCELLABLE은 current_status를 실어
+        // "이미 {status} 상태입니다"를 조립한다(labelKey는 일부러 비움, TEXT_TOO_LONG과
+        // 같은 패턴). §17-10①의 한글 라벨표(대기 중/보내는 중/…)로 옮기는 건 이 조각
+        // 스코프 밖 — 지금은 서버 enum 값을 그대로 보간(레이스에서만 뜨는 방어적 경로라
+        // 드묾, 후속에서 라벨 매핑 추가 가능).
+        const text = info.kind === 'command_not_cancellable' && info.currentStatus
+          ? t('channelPostsCommandNotCancellable', { status: info.currentStatus })
+          : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCancelScheduledFailed'));
+        setCancelScheduledResult({ type: 'error', text });
       }
     } catch {
       setCancelScheduledResult({ type: 'error', text: t('channelPostsCancelScheduledFailed') });
@@ -452,7 +460,14 @@ export default function ChannelPostEditPage() {
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
-        setUnpublishResult({ type: 'error', text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsUnpublishFailed')) });
+        // story #3426 ①-d(doc §17-11) — CHANNEL_SCOPE_INSUFFICIENT는 편집 화면이 이미
+        // connection 응답(unpublish_blocked_reason)으로 버튼을 막아 두는 정상 경로라
+        // 여기 오는 건 레이스(그 사이 스코프가 바뀜) 방어다 — 같은 §17-11 role 분기
+        // 정본 문구를 그대로 재사용(labelKey는 비워 둠, KNOWN_ERRORS 주석 참고).
+        const text = info.kind === 'scope_insufficient'
+          ? (role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientMember'))
+          : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsUnpublishFailed'));
+        setUnpublishResult({ type: 'error', text });
       }
     } catch {
       setUnpublishResult({ type: 'error', text: t('channelPostsUnpublishFailed') });
