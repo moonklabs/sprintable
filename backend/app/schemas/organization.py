@@ -27,6 +27,8 @@ class OrganizationResponse(BaseModel):
     name: str
     slug: str
     plan: str
+    # story 46da6450 — IANA 이름, null=미설정(FE는 브라우저 tz 폴백을 그대로 쓴다).
+    timezone: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -39,12 +41,19 @@ class MyOrganizationResponse(BaseModel):
     slug: str
     plan: str
     role: str
+    # story 46da6450 — OrganizationResponse.timezone과 동일 의미.
+    timezone: str | None = None
 
 
 class UpdateOrganization(BaseModel):
     name: str | None = None
     # story 139d2405(S-slug-infra): workspace rename — 형식/예약어/유일성은 라우터에서(DB 조회 필요).
     slug: str | None = None
+    # story 46da6450 — IANA 이름. 필드 자체를 생략하면 무변경, 명시적으로 null을 보내면
+    # 해제(name/slug와 달리 "생략=무변경"과 "null=해제"를 구별해야 하므로 라우터가
+    # `"timezone" in body.model_fields_set`로 판정 — None이면 그냥 스킵하는 기존
+    # name/slug 패턴을 그대로 쓰면 해제가 영원히 불가능해진다).
+    timezone: str | None = None
 
 
 class OrgImpactResponse(BaseModel):

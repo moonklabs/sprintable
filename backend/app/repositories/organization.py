@@ -48,6 +48,7 @@ class OrganizationWithRole:
     slug: str
     plan: str
     role: str
+    timezone: str | None = None
 
 
 class OrganizationRepository:
@@ -110,6 +111,7 @@ class OrganizationRepository:
                 Organization.name,
                 Organization.slug,
                 Organization.plan,
+                Organization.timezone,
                 OrgMember.role,
             )
             .join(OrgMember, OrgMember.org_id == Organization.id)
@@ -120,7 +122,9 @@ class OrganizationRepository:
             .order_by(Organization.name.asc())
         )
         return [
-            OrganizationWithRole(id=row.id, name=row.name, slug=row.slug, plan=row.plan, role=row.role)
+            OrganizationWithRole(
+                id=row.id, name=row.name, slug=row.slug, plan=row.plan, role=row.role, timezone=row.timezone,
+            )
             for row in result.all()
         ]
 

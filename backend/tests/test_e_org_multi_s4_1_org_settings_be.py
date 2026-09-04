@@ -25,6 +25,9 @@ def _mock_org(name: str = "Test Org") -> MagicMock:
     o.name = name
     o.slug = "test-org"
     o.plan = "free"
+    # story 46da6450 — 신규 필드, 명시 안 하면 MagicMock이 자동생성한 하위 MagicMock이
+    # OrganizationResponse.model_validate(org)에서 str|None 검증 실패로 500을 낸다.
+    o.timezone = None
     o.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     o.updated_at = datetime(2026, 5, 20, tzinfo=timezone.utc)
     return o
