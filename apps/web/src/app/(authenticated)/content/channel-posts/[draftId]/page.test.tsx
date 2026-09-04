@@ -89,6 +89,8 @@ function stubFetch(opts: {
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
   onPublish?: () => { status: number; body: unknown };
+  onCancelScheduled?: () => { status: number; body: unknown };
+  onUnpublish?: () => { status: number; body: unknown };
   // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — GATE_ALREADY_HELD의
   // best-effort 상대 초안 조회. undefined=엔드포인트 자체가 404(구 계약, #3767 착지 전
   // 상황 재현) · { text_preview: null }=필드는 있는데 값이 없음 · 값 있으면 그 미리보기.
@@ -160,6 +162,16 @@ function stubFetch(opts: {
         const result = opts.onPublish?.() ?? {
           status: 200, body: { permalink: 'https://threads.net/@x/1', external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1' },
         };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/cancel-scheduled` && init?.method === 'POST') {
+        const result = opts.onCancelScheduled?.() ?? { status: 200, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: null } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/unpublish` && init?.method === 'POST') {
+        const result = opts.onUnpublish?.() ?? { status: 200, body: { publication_id: 'pub-1', status: 'unpublished', external_id: 'media-1', unpublished_at: '2026-09-04T00:00:00Z' } };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -658,6 +670,121 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(btn.disabled).toBe(true);
     expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-disabled-reason"]')?.textContent)
       .toBe(koMessages.content.channelPostsCancelUnpublishOwnerOrAdminOnly);
+  });
+
+  // story #3426 ①-c — 예약 취소 클릭→ConfirmDialog→성공, 리로드 없이 command_status 갱신.
+  it('⭐예약 취소 — 확認 다이얼로그를 거쳐 성공하면 리로드 없이 취소 버튼이 사라진다', async () => {
+    let cancelCalled = false;
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => { cancelCalled = true; return { status: 200, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: null } }; },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    // ConfirmDialog는 Portal이라 document.body에 뜬다(content/[draftId]/page.test.tsx와 동형).
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    expect(confirmButton).not.toBeUndefined();
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(cancelCalled).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.channelPostsCancelScheduledSuccess);
+    // 리로드 없이 로컬 갱신 — command_status가 더 이상 취소가능 값이 아니므로 버튼이 사라진다.
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).toBeNull();
+  });
+
+  it('⭐예약 취소 실패(409 PUBLICATION_COMMAND_NOT_CANCELLABLE) — 서버 문구가 보이고 버튼은 그대로 남는다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => ({ status: 409, body: { detail: { code: 'PUBLICATION_COMMAND_NOT_CANCELLABLE', message: '이미 실행 중입니다', current_status: 'in_progress' } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain('이미 실행 중입니다');
+    expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).not.toBeNull();
+  });
+
+  // story #3426 ①-c — 회수 클릭→ConfirmDialog→성공(리로드 없이 배너만, chip 갱신은 별도 설계 이슈로 명시 보류).
+  it('⭐회수 — 확認 다이얼로그를 거쳐 성공하면 회수 완료 배너가 보인다', async () => {
+    let unpublishCalled = false;
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      onUnpublish: () => { unpublishCalled = true; return { status: 200, body: { publication_id: 'pub-1', status: 'unpublished', external_id: 'media-1', unpublished_at: '2026-09-04T01:00:00Z' } }; },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
+    expect(confirmButton).not.toBeUndefined();
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(unpublishCalled).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.channelPostsUnpublishSuccess);
+  });
+
+  it('⭐회수 실패(422 CHANNEL_SCOPE_INSUFFICIENT) — 서버 문구가 보인다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      },
+      onUnpublish: () => ({ status: 422, body: { detail: { code: 'CHANNEL_SCOPE_INSUFFICIENT', message: '스코프가 부족합니다', required_scopes: ['threads_delete'] } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsUnpublishConfirmAction);
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain('스코프가 부족합니다');
   });
 
   // story #3402 PR2 ②-b(T7) — 발행 버튼 클릭 배선.

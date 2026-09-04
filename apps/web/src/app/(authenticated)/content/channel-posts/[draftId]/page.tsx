@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError } from '@/components/content/api-error';
@@ -133,6 +134,16 @@ export default function ChannelPostEditPage() {
     | { type: 'error'; text: string; raw?: string; externalImpact?: ReturnType<typeof describeExternalImpact> }
     | null
   >(null);
+
+  // story #3426 ①-c — 예약 취소·회수. 둘 다 되돌릴 수 없는(또는 되돌리기 번거로운) 상태
+  // 전환이라 ConfirmDialog를 거친다(site-posts::handleUnpublish와 동형 — story #2416).
+  const [cancelScheduledConfirmOpen, setCancelScheduledConfirmOpen] = useState(false);
+  const [cancellingScheduled, setCancellingScheduled] = useState(false);
+  const [cancelScheduledResult, setCancelScheduledResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
+
+  const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
+  const [unpublishing, setUnpublishing] = useState(false);
+  const [unpublishResult, setUnpublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (!orgId || !draftId) return;
@@ -389,6 +400,58 @@ export default function ChannelPostEditPage() {
     }
   };
 
+  // story #3426 ①-c(BE #3419) — 예약 취소. 성공하면 command_status를 로컬로 'cancelled'
+  // 로 갱신(리로드 없이) — doc AC4. 실패(409 PUBLICATION_COMMAND_NOT_CANCELLABLE 등)는
+  // 서버 문구를 그대로 보인다(labelKey는 ①-d에서 채운다 — 지금은 fallback 원문).
+  const handleCancelScheduled = async () => {
+    if (!orgId) return;
+    setCancelScheduledConfirmOpen(false);
+    setCancellingScheduled(true);
+    setCancelScheduledResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/cancel-scheduled`, { method: 'POST' });
+      if (res.ok) {
+        setCancelScheduledResult({ type: 'success' });
+        setDraft((prev) => prev && { ...prev, command_status: 'cancelled' });
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setCancelScheduledResult({ type: 'error', text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCancelScheduledFailed')) });
+      }
+    } catch {
+      setCancelScheduledResult({ type: 'error', text: t('channelPostsCancelScheduledFailed') });
+    } finally {
+      setCancellingScheduled(false);
+    }
+  };
+
+  // story #3426 ①-c(BE #3419) — 회수(Threads 실 삭제, 되돌릴 수 없다). 성공해도
+  // publication_status를 로컬로 바꾸지 않는다 — channel_publications.status의 4번째 값
+  // 'unpublished'(doc §17-10②)를 5상태 파생(hasPublishedSitePost)에 어떻게 반영할지는
+  // published_at 축과의 상호작용(§4-2 두 조인축)까지 걸린 별도 설계 결정이 필요해서
+  // 이 조각 스코프 밖으로 명시 — 대신 결과 배너로만 "회수했습니다"를 보이고, 진짜 최신
+  // 상태는 다음 로드/새로고침이 정직하게 채운다(지어내지 않는다).
+  const handleUnpublish = async () => {
+    if (!orgId) return;
+    setUnpublishConfirmOpen(false);
+    setUnpublishing(true);
+    setUnpublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/unpublish`, { method: 'POST' });
+      if (res.ok) {
+        setUnpublishResult({ type: 'success' });
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setUnpublishResult({ type: 'error', text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsUnpublishFailed')) });
+      }
+    } catch {
+      setUnpublishResult({ type: 'error', text: t('channelPostsUnpublishFailed') });
+    } finally {
+      setUnpublishing(false);
+    }
+  };
+
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
   }
@@ -576,15 +639,22 @@ export default function ChannelPostEditPage() {
                 우선순위를 명시해 둔다. */}
             {publishing ? t('publishPendingCta') : view.partialSuccess ? t('channelPostsPublishContinueCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
           </Button>
-          {/* story #3426 ①-b — 예약 취소·회수 버튼(게이팅만, API 배선은 ①-c). PR2에서
-              렌더 보류했던 「발행 취소」 버튼을 BE #3419 착지로 복원한다. */}
+          {/* story #3426 ①-b/①-c — 예약 취소·회수 버튼. PR2에서 렌더 보류했던 「발행
+              취소」 버튼을 BE #3419 착지로 복원한다. 둘 다 되돌리기 번거로운/불가능한
+              전환이라 ConfirmDialog를 거친다(story #2416 — native confirm() 금지). */}
           {showCancelScheduled ? (
-            <Button variant="outline" disabled={!canCancelScheduled} data-testid="channel-post-cancel-scheduled-button">
+            <Button
+              variant="outline" disabled={!canCancelScheduled || cancellingScheduled}
+              onClick={() => setCancelScheduledConfirmOpen(true)} data-testid="channel-post-cancel-scheduled-button"
+            >
               {t('channelPostsCancelScheduledCta')}
             </Button>
           ) : null}
           {showUnpublish && unpublishGate?.blockedReason !== 'unsupported' ? (
-            <Button variant="outline" disabled={!canUnpublishNow} data-testid="channel-post-unpublish-button">
+            <Button
+              variant="outline" disabled={!canUnpublishNow || unpublishing}
+              onClick={() => setUnpublishConfirmOpen(true)} data-testid="channel-post-unpublish-button"
+            >
               {t('channelPostsUnpublishCta')}
             </Button>
           ) : null}
@@ -641,6 +711,48 @@ export default function ChannelPostEditPage() {
                       ) : null}
                     </>
                   )}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        <ConfirmDialog
+          open={cancelScheduledConfirmOpen}
+          onOpenChange={setCancelScheduledConfirmOpen}
+          title={t('channelPostsCancelScheduledConfirmTitle')}
+          description={t('channelPostsCancelScheduledConfirmDescription')}
+          cancelLabel={t('channelPostsCancelScheduledConfirmCancel')}
+          confirmLabel={t('channelPostsCancelScheduledConfirmAction')}
+          onConfirm={() => void handleCancelScheduled()}
+        />
+        {cancelScheduledResult ? (
+          <Alert
+            variant={cancelScheduledResult.type === 'error' ? 'destructive' : 'default'}
+            role={cancelScheduledResult.type === 'error' ? 'alert' : 'status'}
+            data-testid="channel-post-cancel-scheduled-result"
+          >
+            <AlertDescription>
+              {cancelScheduledResult.type === 'success' ? t('channelPostsCancelScheduledSuccess') : cancelScheduledResult.text}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        <ConfirmDialog
+          open={unpublishConfirmOpen}
+          onOpenChange={setUnpublishConfirmOpen}
+          title={t('channelPostsUnpublishConfirmTitle')}
+          description={t('channelPostsUnpublishConfirmDescription')}
+          cancelLabel={t('channelPostsUnpublishConfirmCancel')}
+          confirmLabel={t('channelPostsUnpublishConfirmAction')}
+          onConfirm={() => void handleUnpublish()}
+        />
+        {unpublishResult ? (
+          <Alert
+            variant={unpublishResult.type === 'error' ? 'destructive' : 'default'}
+            role={unpublishResult.type === 'error' ? 'alert' : 'status'}
+            data-testid="channel-post-unpublish-result"
+          >
+            <AlertDescription>
+              {unpublishResult.type === 'success' ? t('channelPostsUnpublishSuccess') : unpublishResult.text}
             </AlertDescription>
           </Alert>
         ) : null}
