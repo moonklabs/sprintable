@@ -49,6 +49,14 @@ from app.services.utm import attach_utm, resolve_utm_campaign
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
 
+# story 620beefc — create_channel_post_draft_version()의 image_sha256 파라미터 기본값
+# 센티널. text/link_url은 편집 때마다 클라이언트가 매번 다시 보내야 하는 필드지만(그대로
+# 재사용 안 함), 이미지는 별도 엔드포인트(channel_post_images.py)로만 첨부/교체된다 —
+# 일반 텍스트 편집 호출은 이 파라미터를 아예 모르므로, "생략"과 "명시적으로 없앰(None)"을
+# 구별해야 조용히 이미지가 떨어지는 사고를 막는다. 생략=직전 버전 값 캐리포워드,
+# None=명시적 제거(현재 호출부 없음 — Phase1엔 이미지 제거 기능이 없다, 장래 대비).
+_IMAGE_SHA256_CARRY_FORWARD = object()
+
 
 class ChannelConnectionNotActiveError(ValueError):
     """AC6 — connection_id가 이 org의 channel_connections 행이 아니거나 status≠active."""
@@ -333,6 +341,7 @@ async def create_channel_post_draft_version(
     link_url: str | None,
     author_member_id: uuid.UUID,
     author_kind: str,
+    image_sha256: str | None = _IMAGE_SHA256_CARRY_FORWARD,  # type: ignore[assignment]
 ) -> tuple[ChannelPostVersion, str]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
     site_posts.create_site_post_draft_version과 1:1 대응(AC1).
@@ -340,7 +349,11 @@ async def create_channel_post_draft_version(
     story #3394 — 반환을 `(version, channel)` 튜플로 넓혔다(회귀 0, 유일한 호출부인
     라우터가 곧바로 unpack하도록 같이 바꾼다) — 라우터가 `tagged_link_preview`(AC5)를
     조립하려면 이 draft의 channel을 알아야 하는데, 여기서 이미 조회한 `connection.channel`을
-    그대로 돌려주는 편이 라우터가 별도 쿼리로 다시 찾는 것보다 싸다."""
+    그대로 돌려주는 편이 라우터가 별도 쿼리로 다시 찾는 것보다 싸다.
+
+    story 620beefc — `image_sha256` 생략(기본값) 시 draft의 직전 최신 버전 값을 그대로
+    캐리포워드한다(§17-14 배지가 「이미지가 텍스트 편집만으로 조용히 사라졌다」를 만들지
+    않도록). `channel_post_images.py`의 이미지 첨부 플로우만 이 값을 명시로 넘긴다."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
 
@@ -360,17 +373,26 @@ async def create_channel_post_draft_version(
         db.add(draft)
         await db.flush()
         next_version = 1
+        carried_image_sha256 = None
     else:
-        next_version = (await db.execute(
-            select(func.coalesce(func.max(ChannelPostVersion.version), 0)).where(
-                ChannelPostVersion.draft_id == draft.id
-            )
-        )).scalar_one() + 1
+        prior_latest = (await db.execute(
+            select(ChannelPostVersion)
+            .where(ChannelPostVersion.draft_id == draft.id)
+            .order_by(ChannelPostVersion.version.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        next_version = (prior_latest.version if prior_latest is not None else 0) + 1
+        carried_image_sha256 = prior_latest.image_sha256 if prior_latest is not None else None
+
+    resolved_image_sha256 = (
+        carried_image_sha256 if image_sha256 is _IMAGE_SHA256_CARRY_FORWARD else image_sha256
+    )
 
     version = ChannelPostVersion(
         id=uuid.uuid4(), draft_id=draft.id, version=next_version,
         text=text, link_url=link_url,
         body_sha256=compute_channel_post_hash(text=text, link_url=link_url),
+        image_sha256=resolved_image_sha256,
         author_member_id=author_member_id, author_kind=author_kind,
     )
     db.add(version)
@@ -412,6 +434,15 @@ async def _reseal_gate_on_new_version(
     if resolve_gate_holder_draft_id(gate, this_draft_id=version.draft_id) is not None:
         return
     if gate.status == "approved":
+        # story 620beefc(AC4) — 무엇이 바뀌어 재승인이 필요해졌는지(본문 vs 이미지)를
+        # 되돌리기 전에 판정한다 — submit_channel_post_draft의 content_changed/
+        # media_changed와 동형 축(옛 sealed_* 값은 아래서 갱신 안 하므로 「마지막
+        # 승인값」 그대로 비교 대상).
+        content_changed_here = gate.sealed_content_sha256 != version.body_sha256
+        media_changed_here = gate.sealed_media_sha256 != version.image_sha256
+        reason_code = "CONTENT_CHANGED" if content_changed_here else (
+            "MEDIA_CHANGED" if media_changed_here else "CONTENT_CHANGED"
+        )
         set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
         gate.requires_human = True
         gate.resolver_id = None
@@ -422,11 +453,12 @@ async def _reseal_gate_on_new_version(
         # 생성만으로 approved→pending으로 되돌아간 경우)도 대기 중 명령을 즉시
         # 무효화한다. submit_channel_post_draft의 명시적 재상신 경로와 동형 처방.
         from app.services.publication_command import void_pending_commands_for_gate
-        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code="CONTENT_CHANGED")
+        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code=reason_code)
         return
     gate.sealed_content_version = version.version
     gate.sealed_content_sha256 = version.body_sha256
     gate.sealed_content_body = version.text
+    gate.sealed_media_sha256 = version.image_sha256
 
 
 async def get_channel_post_draft(
@@ -717,13 +749,18 @@ async def submit_channel_post_draft(
             )
 
     # story #3414 — 무엇이 바뀌었는지(본문 또는 scheduled_at)를 재봉인 前에 먼저
-    # 판정한다. 둘 다 안 바뀌었으면 기존처럼 완전 no-op(short-circuit).
+    # 판정한다. 셋 다 안 바뀌었으면 기존처럼 완전 no-op(short-circuit).
     content_changed = existing is None or existing.sealed_content_sha256 != target.body_sha256
     schedule_changed = existing is None or existing.sealed_scheduled_at != scheduled_at
+    # story 620beefc(AC4) — 세 번째 축. content_changed/schedule_changed와 나란히 두되
+    # 기존 두 축의 판정·no-op short-circuit 조건은 손대지 않는다(회귀 0) — media_changed는
+    # short-circuit 조건에도 추가로 들어가 "이미지만 바뀐" 재상신도 더는 no-op되지 않는다.
+    media_changed = existing is None or existing.sealed_media_sha256 != target.image_sha256
     if (
         existing is not None
         and not content_changed
         and not schedule_changed
+        and not media_changed
         and existing.status in ("pending", "approved")
     ):
         return existing, target.id
@@ -757,6 +794,7 @@ async def submit_channel_post_draft(
     gate.sealed_content_sha256 = target.body_sha256
     gate.sealed_content_body = target.text
     gate.sealed_scheduled_at = scheduled_at
+    gate.sealed_media_sha256 = target.image_sha256
     gate.reapproval_required = False
 
     if was_approved:
@@ -764,9 +802,15 @@ async def submit_channel_post_draft(
         # pending으로 되돌렸다), 그 게이트에 걸린 대기 중 명령을 즉시 무효화한다
         # (워커 tick을 기다리지 않고 화면이 바로 "이 예약은 더 이상 유효하지 않다"를
         # 보일 수 있게). 사유 코드는 실제 무엇이 바뀌었는지 그대로 — 본문이 바뀌었으면
-        # CONTENT_CHANGED, 본문은 그대로고 시각만 바뀌었으면 SCHEDULE_CHANGED.
+        # CONTENT_CHANGED, 본문은 그대로고 시각만 바뀌었으면 SCHEDULE_CHANGED, 본문·
+        # 시각 둘 다 그대로고 이미지만 바뀌었으면 MEDIA_CHANGED(story 620beefc AC4 —
+        # 기존 두 값의 우선순위는 그대로 유지, media는 셋 다 걸릴 때 가장 낮은 우선순위).
         from app.services.publication_command import void_pending_commands_for_gate
-        reason_code = "CONTENT_CHANGED" if content_changed else "SCHEDULE_CHANGED"
+        reason_code = (
+            "CONTENT_CHANGED" if content_changed
+            else "SCHEDULE_CHANGED" if schedule_changed
+            else "MEDIA_CHANGED"
+        )
         await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code=reason_code)
 
     await db.commit()
