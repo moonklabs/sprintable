@@ -39,6 +39,7 @@ from app.services.site_posts import (
     list_site_post_drafts,
     publish_site_post,
     publish_site_post_from_draft,
+    set_site_post_draft_campaign,
     submit_site_post_draft,
     unpublish_site_post,
 )
@@ -292,6 +293,66 @@ async def post_site_post_draft_version(
     return SitePostDraftVersionResponse(
         draft_id=version.draft_id, version_id=version.id, version=version.version,
         author_kind=version.author_kind, body_sha256=version.body_sha256,
+    )
+
+
+class SetSitePostDraftCampaignRequest(BaseModel):
+    campaign_id: uuid.UUID | None
+
+
+class SitePostDraftCampaignResponse(BaseModel):
+    draft_id: uuid.UUID
+    campaign_id: uuid.UUID | None
+    campaign_name: str | None
+
+
+@router.patch(
+    "/{org_id}/site-posts/drafts/{draft_id}/campaign", response_model=SitePostDraftCampaignResponse,
+)
+async def patch_site_post_draft_campaign(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    body: SetSitePostDraftCampaignRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> SitePostDraftCampaignResponse:
+    """story #3437 후속(유나 #3805 정적 판정, 페드루 PO 確定 2026-09-04) — campaign
+    「붙이기/해제」 전용 API. 버전 POST(`post_site_post_draft_version`)로 campaign_id를
+    바꾸면 본문 무변인데도 새 버전이 이력에 끼고 승인된 게이트가 pending·
+    reapproval_required로 되돌아간다(유나 정적 판정) — 이 엔드포인트는 새 버전 0·게이트
+    무접촉으로 `site_post_drafts.campaign_id`만 갱신한다. 권한 폭은 버전 POST와 동일
+    (org 멤버면 human/agent 모두, 추가 role 제한 없음)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    try:
+        draft = await set_site_post_draft_campaign(
+            db, org_id=org_id, draft_id=draft_id, campaign_id=body.campaign_id,
+        )
+    except SitePostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {exc}") from exc
+    except CampaignNotFoundError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CAMPAIGN_NOT_FOUND", "message": str(exc)},
+        ) from exc
+
+    # story 5285888c(PATH_ID 뮤테이션 축, 카디르 QA·페드루 PO 지시 2026-09-04) — 위
+    # set_site_post_draft_campaign→get_site_post_draft가 이미 org_id로 조회를 좁혀 실
+    # cross-org 접근은 구조적으로 불가능하지만, has_id_mutation_guard 정적 스캐너는
+    # 2-hop 안쪽 헬퍼를 안 들여다본다(이름을 직접 아는 1-hop만 인식) — meetings.py::
+    # cancel_meeting과 동일 SEC-S6/S7 헬퍼를 라우터 바디에서 직접 호출해 스캐너 가시성을
+    # 확보한다(방어 논리 자체는 이미 있었다, 스캐너 인식만 추가).
+    from app.services.project_auth import assert_target_in_caller_org
+
+    assert_target_in_caller_org(org_id, draft.org_id, not_found_detail="draft를 찾을 수 없습니다")
+
+    campaign_name: str | None = None
+    if draft.campaign_id is not None:
+        campaign = await get_campaign(db, org_id=org_id, campaign_id=draft.campaign_id)
+        campaign_name = campaign.name if campaign is not None else None
+    return SitePostDraftCampaignResponse(
+        draft_id=draft.id, campaign_id=draft.campaign_id, campaign_name=campaign_name,
     )
 
 
