@@ -263,6 +263,78 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('a[href="/gates/g1"]')).not.toBeNull();
   });
 
+  // story #3422 ②-d(페드루 PO "지금 이 세션에서 조각 하나" 지시, 2026-09-04 11:49Z) —
+  // 예약 상신 버튼 실배선.
+  function setScheduleInput(value: string) {
+    const input = document.body.querySelector('[data-testid="channel-post-schedule-at-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('⭐예약 상신 — 다이얼로그를 거쳐 미래 시각을 확認하면 submit 요청에 scheduled_at이 실린다', async () => {
+    let submittedBody: unknown = null;
+    stubFetch({ onSubmit: (body) => { submittedBody = body; return { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } }; } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const scheduleBtn = container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement;
+    await act(async () => {
+      scheduleBtn.click();
+    });
+    await flush();
+
+    const futureLocal = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16);
+    await act(async () => {
+      setScheduleInput(futureLocal);
+    });
+    const confirmBtn = document.body.querySelector('[data-testid="channel-post-schedule-at-confirm"]') as HTMLButtonElement;
+    await act(async () => {
+      confirmBtn.click();
+    });
+    await flush();
+
+    expect((submittedBody as { scheduled_at?: string } | null)?.scheduled_at).toBeTruthy();
+    expect(container.textContent).toContain(koMessages.content.submitSuccess);
+    // 성공하면 다이얼로그가 닫힌다.
+    expect(document.body.querySelector('[data-testid="channel-post-schedule-at-dialog"]')).toBeNull();
+  });
+
+  it('⭐예약 상신 — 서버가 scheduled_at pydantic 422를 반환하면 다이얼로그가 안 닫히고 사람 문장을 보인다', async () => {
+    stubFetch({
+      onSubmit: () => ({
+        status: 422,
+        body: { detail: [{ loc: ['body', 'scheduled_at'], msg: 'Value error, scheduled_at은 현재 시각 이후여야 합니다', type: 'value_error' }] },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const scheduleBtn = container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement;
+    await act(async () => {
+      scheduleBtn.click();
+    });
+    await flush();
+
+    const futureLocal = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16);
+    await act(async () => {
+      setScheduleInput(futureLocal);
+    });
+    const confirmBtn = document.body.querySelector('[data-testid="channel-post-schedule-at-confirm"]') as HTMLButtonElement;
+    await act(async () => {
+      confirmBtn.click();
+    });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="channel-post-schedule-at-dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="channel-post-schedule-at-server-error"]')?.textContent)
+      .toBe(koMessages.content.channelPostsScheduleAtServerErrorPastOrInvalid);
+  });
+
   // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — CHANNEL_POST_GATE_
   // ALREADY_HELD. AC10 12행 정본: ①best-effort로 상대 초안 GET drafts/{holding_draft_id}
   // 의 text_preview 우선 ②실패/부재 시 "Threads 초안 ····<holding_draft_id 앞4자>" 폴백

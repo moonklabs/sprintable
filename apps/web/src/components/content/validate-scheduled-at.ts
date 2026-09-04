@@ -23,7 +23,7 @@ export type ScheduledAtValidation =
 // 참고)를 그대로 노출하면 "Value error, scheduled_at은…" 같은 내부 문구가 사용자에게
 // 뜬다 — 사람 문장 1개로 접는다. 이 shape가 아니면(다른 종류 422/오류) null을 내
 // 소비부가 다른 오류 처리로 넘기게 한다.
-export function parseScheduledAtServerError(body: unknown): string | null {
+export function parseScheduledAtServerError(body: unknown): 'past_or_invalid' | null {
   if (!body || typeof body !== 'object') return null;
   const detail = (body as { detail?: unknown }).detail;
   if (!Array.isArray(detail)) return null;

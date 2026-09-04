@@ -2232,6 +2232,7 @@
     "channelPostsScheduleAtErrorPast": "Pick a time after now.",
     "channelPostsScheduleAtErrorInvalid": "Enter a valid time.",
     "channelPostsScheduleAtServerErrorPastOrInvalid": "The scheduled time has passed or isn't valid — please pick again.",
+    "channelPostsScheduleSubmitCta": "Schedule submit",
     "channelPostsCharLimitUnknown": "Limit unknown",
     "channelPostsOverLimitReason": "Over the limit — you can't submit until the text is shorter.",
     "channelPostsTextTooLong": "The limit is {max} characters, but this is {current} — shorten it and resubmit.",

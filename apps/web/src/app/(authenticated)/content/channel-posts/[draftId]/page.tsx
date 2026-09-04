@@ -14,6 +14,8 @@ import { parseSitePostApiError } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
+import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
+import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -119,6 +121,12 @@ export default function ChannelPostEditPage() {
   const [linkUrl, setLinkUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string; raw?: string } | null>(null);
+
+  // story #3422 ②-d — 예약 상신 다이얼로그. serverError는 클라 검증 통과 뒤에도 상신
+  // 사이 시각이 흘러 서버가 422로 거부하는 경로(parseScheduledAtServerError)만 담는다
+  // — 다이얼로그가 안 닫혀 재선택 가능하게 유지한다.
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleServerError, setScheduleServerError] = useState<'past_or_invalid' | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
@@ -268,19 +276,21 @@ export default function ChannelPostEditPage() {
 
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
-  const handleSubmitForApproval = async () => {
+  const handleSubmitForApproval = async (scheduledAt?: string) => {
     if (!orgId || !draft || isOverLimit) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
+    if (scheduledAt) setScheduleServerError(null);
     setSubmitting(true);
     setSubmitResult(null);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version_id: latest.version_id }),
+        body: JSON.stringify(scheduledAt ? { version_id: latest.version_id, scheduled_at: scheduledAt } : { version_id: latest.version_id }),
       });
       if (res.ok) {
+        if (scheduledAt) setScheduleDialogOpen(false);
         const json = (await res.json().catch(() => null)) as { data?: { gate_id?: string } } | null;
         const gateId = json?.data?.gate_id;
         if (gateId) {
@@ -290,6 +300,17 @@ export default function ChannelPostEditPage() {
         }
       } else {
         const body = await res.json().catch(() => null);
+        // story #3422 ②-d(페드루 PO 지적 2026-09-04 10:49Z) — scheduled_at을 실은
+        // 요청만 이 폴백을 본다(예약 아닌 상신에서 이 shape가 뜰 리 없다 — 그래도
+        // 방어적으로 scheduledAt 유무로 먼저 좁힌다). 감지되면 다이얼로그를 안 닫고
+        // 사람 문장만 갱신 — submitResult(하단 일반 오류 배너)는 안 건드린다.
+        if (scheduledAt) {
+          const scheduleError = parseScheduledAtServerError(body);
+          if (scheduleError) {
+            setScheduleServerError(scheduleError);
+            return;
+          }
+        }
         const info = parseSitePostApiError(body);
         // story #3402·PR#3764/#3767 — CHANNEL_POST_GATE_ALREADY_HELD. site와 kind는
         // 공유하되 slug/lang이 없다(채널 포스트 모델 자체에 title이 없다) — 페드루 PO
@@ -855,13 +876,30 @@ export default function ChannelPostEditPage() {
           {saving ? t('editSavingCta') : t('editSaveCta')}
         </Button>
         <Button
-          onClick={handleSubmitForApproval}
+          onClick={() => void handleSubmitForApproval()}
           disabled={submitting || isOverLimit}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
         </Button>
+        {/* story #3422 ②-d — 예약 상신(doc §11 T8 "상신 시 scheduled_at 입력"). 즉시
+            상신과 같은 게이팅(isOverLimit)을 공유 — 한도 초과면 예약도 막는다. */}
+        <Button
+          variant="outline"
+          onClick={() => setScheduleDialogOpen(true)}
+          disabled={submitting || isOverLimit}
+          data-testid="channel-post-schedule-submit-button"
+        >
+          {t('channelPostsScheduleSubmitCta')}
+        </Button>
       </div>
+      <ScheduleAtDialog
+        open={scheduleDialogOpen}
+        onOpenChange={(next) => { setScheduleDialogOpen(next); if (!next) setScheduleServerError(null); }}
+        onSubmit={(iso) => void handleSubmitForApproval(iso)}
+        submitting={submitting}
+        serverError={scheduleServerError}
+      />
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
           워시된다, Phase 0 실측). */}
       {isOverLimit ? (
