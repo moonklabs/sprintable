@@ -19,6 +19,7 @@ import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -116,21 +117,6 @@ function toGateStatus(status: string | undefined): ContentPostStatusInput['gateS
   return status === 'pending' || status === 'approved' || status === 'rejected' ? status : undefined;
 }
 
-// §4-1 "원문을 접어서 함께 보존한다" — gate_id 등 추적 정보를 사람 말 문구가 지워버리지
-// 않게, 서버 원문(code+message)을 기본 접힌 <details>로 항상 옆에 둔다.
-// col-start-2 — Alert의 grid-cols-[auto_1fr] 레이아웃에서 AlertDescription과 같은 칸에
-// 서게 맞춘다. AlertDescription 자체는 <p>라 <details>(block)를 그 안에 못 넣는다(HTML
-// 무효화) — 그래서 <p> 형제로 둔다.
-function RawDetailsToggle({ raw, label }: { raw: string | undefined; label: string }) {
-  if (!raw) return null;
-  return (
-    <details className="col-start-2 mt-1">
-      <summary className="cursor-pointer text-xs text-muted-foreground">{label}</summary>
-      <pre className="mt-1 overflow-x-auto rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{raw}</pre>
-    </details>
-  );
-}
-
 export default function ContentPostEditPage() {
   const { draftId } = useParams<{ draftId: string }>();
   const { orgId, role } = useDashboardContext();
@@ -193,9 +179,8 @@ export default function ContentPostEditPage() {
   const [variants, setVariants] = useState<ChannelPostVariantItem[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [creatingVariant, setCreatingVariant] = useState(false);
-  // 유나 사전 스티어(2026-09-04, PR#3799 head)④ — raw는 여기서 담아 둔다. 토글 배선은
-  // #3801(RawDetailsToggle 공용화)이 착지한 뒤 한 줄로 잇는다(지금은 그 컴포넌트가
-  // develop에 없다 — PO 판단대로 raw 캡처만 먼저).
+  // 유나 사전 스티어(2026-09-04, PR#3799 head)④, #3801 착지분 — raw 캡처+토글
+  // (RawDetailsToggle 공용화) 둘 다 이제 여기 있다.
   const [createVariantResult, setCreateVariantResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
   const router = useRouter();
   // 유나 사전 스티어② — 변형 행의 published_at 표시. 조직 tz 폴백 관례는 channel-posts
@@ -744,6 +729,7 @@ export default function ContentPostEditPage() {
           {createVariantResult ? (
             <Alert variant="destructive" role="alert" data-testid="content-create-variant-error">
               <AlertDescription>{createVariantResult.text}</AlertDescription>
+              <RawDetailsToggle raw={createVariantResult.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}
         </div>
