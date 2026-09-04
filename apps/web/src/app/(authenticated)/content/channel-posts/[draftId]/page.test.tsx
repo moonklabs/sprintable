@@ -623,6 +623,38 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(result?.textContent).toContain(new Date('2026-09-05T00:00:00Z').toLocaleString());
   });
 
+  // 디디군 리뷰 nit(2026-09-04 06:05Z, PR#3769 진행 중 발견) — 재발행 요청이 이번엔
+  // scheduled=true로 응답(permalink/external_id/published_at 셋 다 null)해도, 이미 예전에
+  // 발행돼 draft에 남아있던 published_at·permalink를 지우면 안 된다. handlePublish의
+  // scheduled 분기가 permalink 존재 분기보다 먼저라 setDraft 병합 자체를 안 타는 것으로
+  // 이미 해소돼 있음 — 이 테스트가 그 사실을 pin한다.
+  it('⭐scheduled=true 응답이 기존 발행됨 정보(published_at 등)를 지우지 않는다(디디군 리뷰 대조)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://old-permalink', published_at: '2026-09-01T00:00:00Z', external_id: 'old-id',
+      },
+      onPublish: () => ({
+        status: 200,
+        body: { permalink: null, external_id: null, published_at: null, version_id: 'v2', scheduled: true, command_id: 'cmd-1', scheduled_at: '2026-09-05T00:00:00Z' },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    const info = container.querySelector('[data-testid="channel-post-published-info"]');
+    expect(info?.textContent).toContain('old-permalink');
+    expect(container.querySelector('a[href="https://old-permalink"]')).not.toBeNull();
+  });
+
   // story #3402 AC11(doc §5-1) — "왜 막혔나"(reason)와 "밖으로 나갔나"(externalImpact)는
   // 서로 다른 텍스트 노드로 각각 존재해야 한다(카디르 QA 계획 ④ — 겹치는 단어로 한 문장에
   // 뭉쳐 정규식 하나로 통과하는 함정 방지).
