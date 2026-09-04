@@ -2018,6 +2018,26 @@ describe('ChannelPostEditPage — 서버 원문 접기(RawDetailsToggle, story #
     expect(findRawToggle(container)).not.toBeUndefined();
   });
 
+  // 유나 Design FAIL(PR#3801 코멘트 5543611743, 페드루 PO 실물 대조) — 8곳 중
+  // cancelScheduledResult 하나가 raw 자체를 안 담았다(핸들러가 info를 쥐고도 버림).
+  it('⭐예약 취소 실패 — raw 토글이 뜬다(유나 FAIL — 8번째 자리)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'pending', reapproval_required: false, command_status: 'pending' },
+      onCancelScheduled: () => ({ status: 500, body: { detail: { code: 'SOME_CANCEL_ERROR', message: '예약 취소 실패 원문' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]') as HTMLButtonElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsCancelScheduledConfirmAction);
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
   it('⭐회수 실패 — raw 토글이 뜬다(티켓 밖 발견 — retryResult와 같은 결함이라 같이 고침)', async () => {
     stubFetch({
       draftDetail: {

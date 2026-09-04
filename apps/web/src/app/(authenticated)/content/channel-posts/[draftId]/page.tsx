@@ -249,7 +249,9 @@ export default function ChannelPostEditPage() {
   // 전환이라 ConfirmDialog를 거친다(site-posts::handleUnpublish와 동형 — story #2416).
   const [cancelScheduledConfirmOpen, setCancelScheduledConfirmOpen] = useState(false);
   const [cancellingScheduled, setCancellingScheduled] = useState(false);
-  const [cancelScheduledResult, setCancelScheduledResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
+  // story #3454(유나 Design FAIL, PR#3801) — 8곳 중 이 state만 raw가 없었다. 같은
+  // 패턴으로 마저 닫는다.
+  const [cancelScheduledResult, setCancelScheduledResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
 
   const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
@@ -667,7 +669,7 @@ export default function ChannelPostEditPage() {
         const text = info.kind === 'command_not_cancellable' && info.currentStatus
           ? t('channelPostsCommandNotCancellable', { status: info.currentStatus })
           : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCancelScheduledFailed'));
-        setCancelScheduledResult({ type: 'error', text });
+        setCancelScheduledResult({ type: 'error', text, raw: info.raw });
       }
     } catch {
       setCancelScheduledResult({ type: 'error', text: t('channelPostsCancelScheduledFailed') });
@@ -1212,6 +1214,7 @@ export default function ChannelPostEditPage() {
             <AlertDescription>
               {cancelScheduledResult.type === 'success' ? t('channelPostsCancelScheduledSuccess') : cancelScheduledResult.text}
             </AlertDescription>
+            {cancelScheduledResult.type === 'error' ? <RawDetailsToggle raw={cancelScheduledResult.raw} label={t('errorRawDetailsToggle')} /> : null}
           </Alert>
         ) : null}
         {/* 페드루 PO 블로커(2026-09-04 09:02Z) — 성공 배너만으로는 §17-10 "취소됨"
