@@ -79,6 +79,8 @@ const DRAFT_DETAIL = {
   failure_kind: null as string | null,
   next_retry_at: null as string | null,
   processing_kind: null as string | null,
+  // story f061c1a3 — 재시도 BFF가 붙일 대상 command.
+  command_id: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -123,6 +125,10 @@ function stubFetch(opts: {
   // 지정하면 confirm 성공 이후의 단건 GET 응답이 이 값으로 바뀐다(그 前까지는 기본
   // draftDetail 그대로).
   draftAfterImageConfirm?: Record<string, unknown>;
+  // story f061c1a3 — 재시도 BFF 응답+성공 뒤 단건 GET 재조회가 반영할 서버 값(보통
+  // command_status='pending').
+  onRetry?: (commandId: string) => { status: number; body?: unknown };
+  draftAfterRetry?: Record<string, unknown>;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -249,6 +255,14 @@ function stubFetch(opts: {
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/unpublish` && init?.method === 'POST') {
         const result = opts.onUnpublish?.() ?? { status: 200, body: { publication_id: 'pub-1', status: 'unpublished', external_id: 'media-1', unpublished_at: '2026-09-04T00:00:00Z' } };
         const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      const retryMatch = url.match(/\/channel-posts\/publication-commands\/([^/]+)\/retry$/);
+      if (retryMatch && init?.method === 'POST') {
+        const commandId = retryMatch[1] as string;
+        const result = opts.onRetry?.(commandId) ?? { status: 200, body: { id: commandId, status: 'pending' } };
+        const ok = result.status < 400;
+        if (ok) currentDraftDetail = { ...currentDraftDetail, command_status: 'pending', ...opts.draftAfterRetry };
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       throw new Error('unexpected fetch: ' + url + ' ' + (init?.method ?? 'GET'));
@@ -1357,6 +1371,106 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       await flush();
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
         .toBe(koMessages.content.channelPostsFailureVoidedWithReason.replace('{reason}', '본문이 바뀜'));
+    });
+  });
+
+  // story f061c1a3(#3422 AC3 잔여) — 실패 배지 「재시도」 클릭 배선. ConfirmDialog는
+  // Portal이라 document.body에 뜬다(cancel-scheduled·unpublish 다이얼로그 테스트와 동형).
+  describe('⭐f061c1a3 — 재시도 클릭 배선(dead_letter 확認 다이얼로그·needs_check 2단계)', () => {
+    it('⭐AC1 — dead_letter 재시도 버튼 클릭 → 다이얼로그 열림(무엇이·되돌릴 수 있나) → 취소는 호출 0', async () => {
+      let retryCalled = 0;
+      stubFetch({ draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' }, onRetry: () => { retryCalled++; return { status: 200 }; } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      expect(retryBtn.disabled).toBe(false);
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')?.textContent)
+        .toBe(koMessages.content.channelPostsRetryConfirmWhatDeadLetter);
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-reversible"]')?.textContent)
+        .toBe(koMessages.content.channelPostsRetryConfirmReversible);
+      // dead_letter는 체크리스트가 없다(needs_check 전용).
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]')).toBeNull();
+
+      const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmCancel);
+      await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(retryCalled).toBe(0);
+    });
+
+    it('⭐AC1 — dead_letter 확認 시 BFF POST(commandId 그대로) 1회 → 성공 뒤 서버 상태로 배지 갱신(재조회)', async () => {
+      let retryCalled = 0;
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: (commandId) => { retryCalled++; expect(commandId).toBe('cmd-1'); return { status: 200, body: { id: 'cmd-1', status: 'pending' } }; },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(retryCalled).toBe(1);
+      expect(container.querySelector('[data-testid="channel-post-retry-result"]')?.textContent).toBe(koMessages.content.channelPostsRetrySuccess);
+      // 서버가 pending으로 돌렸고 failure_kind는 null(백엔드 retry_dead_letter_command가
+      // 지운다) — deriveFailureAction이 undefined를 내 배지 자체가 사라진다.
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+    });
+
+    it('AC1 — 403(HUMAN_ONLY)은 서버 문장을 그대로 보인다(삼키지 않음)', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 403, body: { detail: { code: 'CHANNEL_POST_PUBLISH_HUMAN_ONLY', message: '채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).' } } }),
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-retry-result"]')?.textContent)
+        .toBe(koMessages.content.errorChannelPublishHumanOnly);
+    });
+
+    // AC2 — needs_check 2단계: 체크 前 확認 버튼 비활성, 체크 後 활성.
+    it('⭐AC2 — needs_check는 체크리스트가 뜨고, 체크 前엔 다이얼로그 확認 버튼이 비활성이다', async () => {
+      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-2' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      const checklist = document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]') as HTMLInputElement;
+      expect(checklist).not.toBeNull();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+      expect(confirmBtn.disabled).toBe(true);
+
+      await act(async () => { checklist.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(confirmBtn.disabled).toBe(false);
+    });
+
+    it('AC2 — needs_check 확認 문구는 dead_letter와 다르다', async () => {
+      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-2' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')?.textContent)
+        .toBe(koMessages.content.channelPostsRetryConfirmWhatNeedsCheck);
     });
   });
 

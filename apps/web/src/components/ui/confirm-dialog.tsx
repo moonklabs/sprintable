@@ -14,6 +14,9 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   /** @default true — most confirm dialogs guard a destructive action. */
   destructive?: boolean;
+  /** story f061c1a3 — 2단계 확認(예: 「채널에서 확認했습니다」 체크)이 끝나기 前까지
+   * 확認 버튼 자체를 누를 수 없게 한다(disabled). @default false */
+  confirmDisabled?: boolean;
 }
 
 // story #2416 — native confirm()은 브라우저 크롬(영문 고정, i18n 불가)이라 앱 카피가 못 들어간다.
@@ -27,6 +30,7 @@ export function ConfirmDialog({
   confirmLabel,
   onConfirm,
   destructive = true,
+  confirmDisabled = false,
 }: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -39,7 +43,7 @@ export function ConfirmDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {cancelLabel}
           </Button>
-          <Button variant={destructive ? 'destructive' : 'default'} onClick={onConfirm}>
+          <Button variant={destructive ? 'destructive' : 'default'} onClick={onConfirm} disabled={confirmDisabled}>
             {confirmLabel}
           </Button>
         </DialogFooter>

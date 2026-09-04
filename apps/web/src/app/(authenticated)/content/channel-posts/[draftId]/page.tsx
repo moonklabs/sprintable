@@ -63,6 +63,9 @@ interface ChannelPostDraftDetail {
   // scheduled_at 스냅샷과 다르다 — 재승인 뒤 갱신된다).
   command_status?: string | null;
   command_reason_code?: string | null;
+  // story f061c1a3(BE 0e960006) — 재시도 BFF가 붙일 대상 command. 목록/단건 응답
+  // (ChannelPostDraftListItem)이 이미 낸다 — command 자체가 없으면 null.
+  command_id?: string | null;
   scheduled_at?: string | null;
   // story #3428(BE 620beefc·PR#3776, §17-14/§17-15) — 최신 버전에 이미지가 붙어 있으면
   // 그 「나가는 파생본」 공개 URL(카드 썸네일)과 원본/최종 width·bytes(배지 문구 조립
@@ -242,6 +245,14 @@ export default function ChannelPostEditPage() {
   const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
   const [unpublishResult, setUnpublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
+
+  // story f061c1a3(#3422 AC3 잔여) — 실패 배지 「재시도」 클릭 배선. dead_letter·
+  // needs_check 둘 다 같은 다이얼로그를 쓴다 — needs_check만 추가로 「확認했습니다」
+  // 체크가 확認 버튼을 잠근다(AC2, 체크 前 비활성·후 활성).
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  const [retryChecklistConfirmed, setRetryChecklistConfirmed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryResult, setRetryResult] = useState<{ type: 'success' } | { type: 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (!orgId || !draftId) return;
@@ -683,6 +694,42 @@ export default function ChannelPostEditPage() {
     }
   };
 
+  // story f061c1a3(#3422 AC3 잔여) — dead_letter 수동 재시도·needs_check 2단계 확認 뒤
+  // 재시도. 성공하면 로컬로 짐작해 만들지 않고 단건 GET을 다시 불러 서버가 낸
+  // command_status(보통 pending)로 배지를 갱신한다(§3-2 "지어내지 않는다"와 같은 축 —
+  // B1(#3428)의 confirm 후 재조회 처방과 동형). 403(HUMAN_ONLY)·404(재시도 대상
+  // 아님)는 서버 문장을 그대로 보인다(BFF가 삼키지 않는다).
+  const handleRetry = async () => {
+    if (!orgId || !draft?.command_id) return;
+    setRetrying(true);
+    setRetryResult(null);
+    try {
+      const res = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/publication-commands/${draft.command_id}/retry`, { method: 'POST' },
+      );
+      if (res.ok) {
+        setRetryConfirmOpen(false);
+        setRetryResult({ type: 'success' });
+        const draftRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`);
+        if (draftRes.ok) {
+          const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
+          if (draftJson?.data) setDraft(draftJson.data);
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setRetryResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsRetryFailed')),
+        });
+      }
+    } catch {
+      setRetryResult({ type: 'error', text: t('channelPostsRetryFailed') });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
   }
@@ -812,8 +859,57 @@ export default function ChannelPostEditPage() {
           </span>
         </div>
         {/* B3(페드루 PO) — 실패 배지는 칩(위 상태 줄) 바로 아래(§17-2 오버레이 규율).
-            failureAction===undefined면(정상 대기·완료 등) 아예 안 그린다. */}
-        {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} /> : null}
+            failureAction===undefined면(정상 대기·완료 등) 아예 안 그린다. story
+            f061c1a3 — onRetryClick은 확認 다이얼로그를 여는 것까지만(실제 BFF 호출은
+            다이얼로그의 onConfirm=handleRetry). dead_letter·needs_check가 아니면 배지가
+            버튼 자체를 안 그려 이 콜백은 안 쓰인다. */}
+        {failureAction ? (
+          <FailureActionBadge
+            action={failureAction} displayTimezone={displayTimezone}
+            onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
+          />
+        ) : null}
+        <ConfirmDialog
+          open={retryConfirmOpen}
+          onOpenChange={(next) => { setRetryConfirmOpen(next); if (!next) setRetryChecklistConfirmed(false); }}
+          title={t('channelPostsRetryConfirmTitle')}
+          description={(
+            // 카디르 QA①·유나 §8과 동형 — 「무엇이·되돌릴 수 있나」는 별도 노드(§17-13).
+            <>
+              <span className="block" data-testid="channel-post-retry-confirm-what">
+                {failureAction?.kind === 'needs_check' ? t('channelPostsRetryConfirmWhatNeedsCheck') : t('channelPostsRetryConfirmWhatDeadLetter')}
+              </span>
+              <span className="block" data-testid="channel-post-retry-confirm-reversible">{t('channelPostsRetryConfirmReversible')}</span>
+              {/* AC2 — needs_check만 2단계: 체크 前엔 확認 버튼 비활성. */}
+              {failureAction?.kind === 'needs_check' ? (
+                <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox" checked={retryChecklistConfirmed}
+                    onChange={(e) => setRetryChecklistConfirmed(e.target.checked)}
+                    data-testid="channel-post-retry-confirm-checklist"
+                  />
+                  {t('channelPostsRetryConfirmChecklist')}
+                </label>
+              ) : null}
+            </>
+          )}
+          cancelLabel={t('channelPostsRetryConfirmCancel')}
+          confirmLabel={retrying ? t('channelPostsRetryConfirmPendingCta') : t('channelPostsRetryConfirmAction')}
+          confirmDisabled={retrying || (failureAction?.kind === 'needs_check' && !retryChecklistConfirmed)}
+          destructive={false}
+          onConfirm={() => void handleRetry()}
+        />
+        {retryResult ? (
+          <Alert
+            variant={retryResult.type === 'error' ? 'destructive' : 'default'}
+            role={retryResult.type === 'error' ? 'alert' : 'status'}
+            data-testid="channel-post-retry-result"
+          >
+            <AlertDescription>
+              {retryResult.type === 'success' ? t('channelPostsRetrySuccess') : retryResult.text}
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {/* AC9 — 나가는 계정. */}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalAccountLabel')}</span>
