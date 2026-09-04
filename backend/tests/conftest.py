@@ -491,6 +491,33 @@ def org_id() -> uuid.UUID:
     return uuid.uuid4()
 
 
+@pytest.fixture
+def dns_stub(monkeypatch):
+    """story e4fc29fa(조각④) — `destination_url_safety.py::assert_destination_url_safe`
+    가 실 `socket.getaddrinfo`로 DNS를 해석한다(SSRF 방지 "해석 시점" 검사) — 그래서
+    이 헬퍼를 쓰는 wordpress/webhook 어댑터 단위 테스트는 가짜 도메인(예:
+    customer-blog.example.com)을 실 네트워크 없이 결정적으로 다뤄야 한다.
+
+    기본은 모든 호스트를 안전한 공인 IP(8.8.8.8 — private/reserved/loopback/link-local
+    전부 아님, Google DNS)로 매핑한다. `dns_stub.map("host", "10.0.0.1")`로 특정
+    호스트만 사설/loopback 등 위험 IP로 오버라이드해 차단 경로를 테스트할 수 있다."""
+    import socket as socket_mod
+
+    mapping: dict[str, str] = {}
+
+    def _fake_getaddrinfo(host, port, *args, **kwargs):
+        ip = mapping.get(host, "8.8.8.8")
+        return [(socket_mod.AF_INET, socket_mod.SOCK_STREAM, 6, "", (ip, port or 0))]
+
+    monkeypatch.setattr(socket_mod, "getaddrinfo", _fake_getaddrinfo)
+
+    class _DNSStubController:
+        def map(self, host: str, ip: str) -> None:
+            mapping[host] = ip
+
+    return _DNSStubController()
+
+
 def override_db_and_read(app, provider) -> None:
     """story #2451(§6 Phase3): DB 세션 오버라이드 «root fix» — get_db 하나만 걸고
     get_read_db 는 잊는 클래스의 회귀가 A1(사후 12건)·A2(사전 스윕에도 legacy alias

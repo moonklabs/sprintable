@@ -2,7 +2,11 @@
 `wordpress_publish.py`(BlogDestinationAdapter 2호 구현체) 직접 단위 테스트.
 
 DB 불요(모듈 자체가 순수 httpx 클라이언트 — hosted_site_publish.py와 달리 site_posts
-테이블에 안 쓴다) — `httpx.MockTransport`로 WordPress REST API 응답을 흉내낸다."""
+테이블에 안 쓴다) — `httpx.MockTransport`로 WordPress REST API 응답을 흉내낸다.
+
+story e4fc29fa(조각④) — `_validate_https`가 이제 destination_url_safety.py로 실
+DNS 해석까지 한다(SSRF 「해석 시점」검사) — https:// 경로를 타는 테스트는 `dns_stub`
+(tests/conftest.py, socket.getaddrinfo 결정적 스텁)이 필요하다."""
 from __future__ import annotations
 
 import json
@@ -28,7 +32,7 @@ def _transport(handler):
 
 
 @pytest.mark.anyio
-async def test_publish_creates_post_returns_external_id_and_permalink():
+async def test_publish_creates_post_returns_external_id_and_permalink(dns_stub):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -56,7 +60,7 @@ async def test_publish_creates_post_returns_external_id_and_permalink():
 
 
 @pytest.mark.anyio
-async def test_publish_with_external_id_updates_existing_post():
+async def test_publish_with_external_id_updates_existing_post(dns_stub):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -75,7 +79,7 @@ async def test_publish_with_external_id_updates_existing_post():
 
 
 @pytest.mark.anyio
-async def test_publish_non_2xx_raises_wordpress_publish_error():
+async def test_publish_non_2xx_raises_wordpress_publish_error(dns_stub):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text='{"code":"rest_cannot_create","message":"Sorry, you are not allowed."}')
 
@@ -144,7 +148,7 @@ async def test_publish_rejects_loopback_http_site_url_when_stub_flag_off(monkeyp
 
 
 @pytest.mark.anyio
-async def test_unpublish_sets_status_draft():
+async def test_unpublish_sets_status_draft(dns_stub):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -163,7 +167,26 @@ async def test_unpublish_sets_status_draft():
 
 
 @pytest.mark.anyio
-async def test_unpublish_non_2xx_raises():
+async def test_publish_rejects_domain_that_resolves_to_private_ip(dns_stub):
+    """story e4fc29fa(조각④) — DNS rebinding류 SSRF: 문자열은 https://평범한-도메인
+    이어도 실제 해석된 IP가 사설 대역이면 거부한다("해석 시점" 검사, 문자열 프리픽스
+    검사만으론 이걸 못 잡는다). 뮤테이션 대상: destination_url_safety.py의 DNS 해석
+    단계를 지우면(스킴만 검사) 이 assert가 RED."""
+    dns_stub.map("attacker-controlled.example.com", "10.0.0.5")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("사설 IP로 해석되는 도메인인데 실제 요청이 나갔다")
+
+    async with httpx.AsyncClient(transport=_transport(handler)) as client:
+        with pytest.raises(WordPressSiteURLInsecureError):
+            await publish(
+                client, site_url="https://attacker-controlled.example.com", username="editor",
+                app_password="pw", title="제목", body_md="본문", summary="요약", slug="slug",
+            )
+
+
+@pytest.mark.anyio
+async def test_unpublish_non_2xx_raises(dns_stub):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="internal error")
 

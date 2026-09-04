@@ -9,15 +9,14 @@ credential_kind 선언만 하고 이 모듈은 안 다룬다(사람 의존 앱 �
 인증: WordPress 5.6+ Application Password(HTTPS Basic, RFC 7617) — `username`+
 `app_password`를 그대로 `httpx.BasicAuth`에 넘긴다(OAuth 토큰류가 아니라 재사용 가능한
 비밀번호 자체라 refresh 개념이 없다 — connection.refresh_mode="manual"과 부합).
-`site_url`은 HTTPS 강제(스토리 AC2 明示) — http://는 자격이 평문으로 오가므로 호출
-자체를 거부한다(fail-closed). loopback(`http://127.0.0.1`·`http://localhost`) 예외는
-**`WORDPRESS_TEST_STUB_ENABLED` 플래그가 켜졌을 때만** 산다(페드루 리뷰 B1, 2026-09-04)
-— 플래그 무관 예외였던 최초 구현은 SSRF 클래스였다: prod에서 고객(또는 공격자)이
-site_url=`http://127.0.0.1:8080/…`로 연결을 등록하면 워커가 우리 컨테이너의 loopback에
-Basic auth 자격을 실어 진짜로 친다. prod cloudbuild.yaml이 이 플래그 키 자체를 안 실어
-(sandbox_publish.py·dev_wordpress_stub.py와 같은 env 게이트 관례) prod에서는 이 예외가
-기동조차 안 한다 — 조각③c의 dev_wordpress_stub.py(실 uvicorn, TLS 없음)가 유일한
-실사용처.
+`site_url`은 `destination_url_safety.py`(조각④, 공용 SSRF 방지 헬퍼 — webhook_publish.py
+도 같은 헬퍼를 쓴다)로 검증한다: HTTPS 강제 + host를 실제로 DNS 해석해 모든 결과 IP가
+사설/loopback/link-local(클라우드 메타데이터 포함)이 아님을 확인("해석 시점" 검사 —
+문자열 프리픽스만 보던 조각③b/③c 구현은 도메인이 나중에 내부 IP로 rebind되는 공격을
+못 잡았다). loopback(`http://127.0.0.1`·`http://localhost`) 예외는 `WORDPRESS_TEST_
+STUB_ENABLED` 플래그가 켜졌을 때만(페드루 리뷰 B1, 2026-09-04) — prod cloudbuild.yaml
+이 이 키를 안 실어 prod에서는 예외 자체가 죽어 있다. 조각③c의 dev_wordpress_stub.py
+(실 uvicorn, TLS 없음)가 유일한 실사용처.
 
 `tags`는 이번 조각 스코프 밖 — WordPress REST API는 태그를 이름이 아니라 term ID
 배열로 요구해(taxonomy 조회/생성 API 별도 호출 필요) 지금 페이로드엔 안 싣는다
@@ -28,6 +27,8 @@ from __future__ import annotations
 import os
 
 import httpx
+
+from app.services.destination_url_safety import DestinationURLUnsafeError, assert_destination_url_safe
 
 _POSTS_PATH = "/wp-json/wp/v2/posts"
 
@@ -61,20 +62,16 @@ class WordPressPublishError(Exception):
         super().__init__(f"WordPress REST API 오류(status={status_code}): {body}")
 
 
-_LOOPBACK_PREFIXES = ("http://127.0.0.1", "http://localhost")
-
-
-def _validate_https(site_url: str) -> str:
-    if site_url.startswith("https://"):
-        return site_url.rstrip("/")
-    # story e4fc29fa(조각③c, 페드루 리뷰 B1) — loopback 예외는 dev 스텁 플래그가 켜져
-    # 있을 때만. 플래그 없이 통과시키면 prod에서 site_url=http://127.0.0.1:.../로
-    # 등록된 연결이 우리 컨테이너 자신의 loopback에 Basic auth를 실어 진짜로 치는
-    # SSRF가 된다(뮤테이션 대상 — 이 and를 지우면 prod에서도 loopback이 통과해야
-    # 하는데, 실은 통과하면 안 된다는 게 이 가드의 존재 이유).
-    if wordpress_stub_enabled() and site_url.startswith(_LOOPBACK_PREFIXES):
-        return site_url.rstrip("/")
-    raise WordPressSiteURLInsecureError(site_url=site_url)
+async def _validate_https(site_url: str) -> str:
+    """story e4fc29fa(조각④) — 공용 헬퍼(destination_url_safety.py)에 위임하고
+    `DestinationURLUnsafeError`를 이 모듈의 기존 공개 예외(`WordPressSiteURLInsecureError`
+    — 호출자 계약 무변경)로 다시 감싼다. `allow_loopback=wordpress_stub_enabled()` —
+    페드루 리뷰 B1의 플래그 게이트 그대로(뮤테이션 대상: 이 인자를 지우면 prod에서도
+    loopback이 통과해야 하는데, 실은 통과하면 안 된다는 게 이 가드의 존재 이유)."""
+    try:
+        return await assert_destination_url_safe(site_url, allow_loopback=wordpress_stub_enabled())
+    except DestinationURLUnsafeError as exc:
+        raise WordPressSiteURLInsecureError(site_url=site_url) from exc
 
 
 async def publish(
@@ -93,7 +90,7 @@ async def publish(
     갱신(WordPress REST는 갱신도 POST) — hosted_site_publish.publish()의 upsert
     사상과 동형(재발행이 새 글을 또 안 만든다). 반환은 (external_id, permalink) —
     응답 JSON의 `id`(정수, 문자열로 캐스팅)·`link`."""
-    base = _validate_https(site_url)
+    base = await _validate_https(site_url)
     path = f"{_POSTS_PATH}/{external_id}" if external_id else _POSTS_PATH
     payload = {"title": title, "content": body_md, "excerpt": summary, "slug": slug, "status": "publish"}
     resp = await client.post(
@@ -112,7 +109,7 @@ async def unpublish(
     publish.unpublish()가 행을 안 지우고 unpublished_at만 세우는 것과 같은 비파괴
     사상). WordPress가 draft 글도 REST 조회 대상에 남기므로 재발행(publish() 재호출)
     으로 되돌릴 수 있다."""
-    base = _validate_https(site_url)
+    base = await _validate_https(site_url)
     resp = await client.post(
         f"{base}{_POSTS_PATH}/{external_id}",
         json={"status": "draft"},
