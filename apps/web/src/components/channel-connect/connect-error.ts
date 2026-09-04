@@ -18,6 +18,13 @@ const KNOWN_CONNECT_ERROR_KEYS: Record<string, string> = {
   INVALID_REQUEST: 'channelConnectErrorGeneric',
   CHANNEL_AUTHORIZE_FAILED: 'channelConnectErrorGeneric',
   CHANNEL_CALLBACK_FAILED: 'channelConnectErrorGeneric',
+  // story #3450 FE 후속(3653a18c §2 "②발급해서 붙여넣기") — WordPress·webhook 연결
+  // 폼(POST .../channel-connections/{wordpress|webhook})의 422/403 응답.
+  WORDPRESS_FIELDS_REQUIRED: 'channelConnectErrorWordpressFieldsRequired',
+  WEBHOOK_FIELDS_REQUIRED: 'channelConnectErrorWebhookFieldsRequired',
+  // 3653a18c §3-0 "사람 말을 위에, 원문은 접어" — SSRF 목적지 거부는 provider 원문
+  // (DestinationURLUnsafeError 메시지, 영문·기술 용어)을 그대로 안 보여준다.
+  CHANNEL_CONNECTION_DESTINATION_INSECURE: 'channelConnectErrorDestinationInsecure',
 };
 
 // story #3409 — CHANNEL_APP_CREDENTIALS_MISSING은 owner에게도 뜬다(앱 자격이 없으면

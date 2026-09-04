@@ -2125,7 +2125,21 @@
     "appCredentialsAppSecretLabel": "App Secret",
     "appCredentialsSaveAction": "저장",
     "appCredentialsCancelAction": "취소",
-    "appCredentialsSaveFailed": "저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    "appCredentialsSaveFailed": "저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "channelConnectErrorWordpressFieldsRequired": "필수값을 모두 입력해 주세요(사이트 주소·아이디·앱 비밀번호).",
+    "channelConnectErrorWebhookFieldsRequired": "필수값을 모두 입력해 주세요(대상 주소·시크릿).",
+    "channelConnectErrorDestinationInsecure": "안전하지 않은 주소입니다 — 다른 주소를 입력해 주세요.",
+    "channelConnectFieldSiteUrl": "사이트 주소",
+    "channelConnectFieldUsername": "아이디",
+    "channelConnectFieldAppPassword": "앱 비밀번호",
+    "channelConnectFieldTargetUrl": "대상 주소",
+    "channelConnectFieldSecret": "시크릿",
+    "channelConnectPastedSecretAction": "{channel} 연결",
+    "channelConnectPastedSecretSubmitAction": "연결",
+    "channelConnectPastedSecretPendingCta": "연결하는 중…",
+    "channelConnectPastedSecretHintWordpress": "WordPress 관리자 → 사용자 → 애플리케이션 비밀번호에서 만들어 붙여넣습니다.",
+    "channelConnectPastedSecretHintWebhook": "받는 서버가 검증에 쓸 비밀값을 그쪽 설정에서 만들어 붙여넣습니다.",
+    "channelConnectPastedSecretRewriteNote": "저장한 뒤에는 다시 볼 수 없습니다 — 바꾸려면 새로 붙여넣습니다."
   },
   "content": {
     "title": "글 관리",

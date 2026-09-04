@@ -32,4 +32,11 @@ describe('connectErrorLabelKey (story #3409)', () => {
     expect(connectErrorLabelKey('SOME_UNKNOWN_CODE', true)).toBe('channelConnectErrorGeneric');
     expect(connectErrorLabelKey('SOME_UNKNOWN_CODE', false)).toBe('channelConnectErrorGeneric');
   });
+
+  // story #3450 FE 후속(3653a18c §2·§3-0) — WordPress·webhook 붙여넣기 폼의 422 3종.
+  it('⭐WORDPRESS_FIELDS_REQUIRED·WEBHOOK_FIELDS_REQUIRED·DESTINATION_INSECURE — 신규 3키', () => {
+    expect(connectErrorLabelKey('WORDPRESS_FIELDS_REQUIRED', true)).toBe('channelConnectErrorWordpressFieldsRequired');
+    expect(connectErrorLabelKey('WEBHOOK_FIELDS_REQUIRED', true)).toBe('channelConnectErrorWebhookFieldsRequired');
+    expect(connectErrorLabelKey('CHANNEL_CONNECTION_DESTINATION_INSECURE', true)).toBe('channelConnectErrorDestinationInsecure');
+  });
 });
