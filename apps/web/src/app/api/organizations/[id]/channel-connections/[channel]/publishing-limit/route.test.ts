@@ -29,4 +29,22 @@ describe('/api/organizations/[id]/channel-connections/[channel]/publishing-limit
     const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1', channel: 'conn-1' }) });
     expect(resp.status).toBe(409);
   });
+
+  // 카디르 QA(2026-09-04)·페드루 PO 방향 정정 — 경계는 BE다(get_channel_publishing_limit
+  // 이 이미 _require_human()으로 에이전트를 403 fail-closed). BFF에 별도 세션전용 가드를
+  // 새로 세우지 않는다(fastapi-proxy.ts::resolveAuthHeader가 플랫폼 전체에서 세션/에이전트
+  // 자격을 동등하게 다루는 얇은 프록시라 이 라우트만 다르게 만들면 어긋난다). BE가 낸
+  // 403/401을 이 라우트가 삼키지 않고 그대로 통과시키는지만 pin한다.
+  it('GET — 에이전트 헤더로 온 요청도 BE의 _require_human 403을 그대로 통과시킨다(삼키지 않음)', async () => {
+    proxyToFastapiWithParams.mockResolvedValue(new Response(JSON.stringify({ detail: 'human only' }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
+    const request = new Request('http://test', { headers: { Authorization: 'Bearer agent-key-123' } });
+    const resp = await GET(request, { params: Promise.resolve({ id: 'org-1', channel: 'conn-1' }) });
+    expect(resp.status).toBe(403);
+  });
+
+  it('GET — 무자격 요청에 대한 BE의 401도 그대로 통과시킨다', async () => {
+    proxyToFastapiWithParams.mockResolvedValue(new Response(null, { status: 401 }));
+    const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1', channel: 'conn-1' }) });
+    expect(resp.status).toBe(401);
+  });
 });
