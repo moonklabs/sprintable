@@ -14,9 +14,13 @@ export interface ScheduleAtDialogProps {
   onOpenChange: (open: boolean) => void;
   onSubmit: (iso: string) => void;
   submitting?: boolean;
+  // 페드루 PO 지적(2026-09-04 10:49Z) — 클라 검증 통과 뒤에도 상신 사이 시각이 흘러
+  // 서버가 422로 거부하는 실제 경로가 있다(parseScheduledAtServerError 참고). 다이얼로그는
+  // 안 닫힌다(다시 선택 가능) — open을 부모가 그대로 유지하면 자연히 재선택 경로가 된다.
+  serverError?: 'past_or_invalid' | null;
 }
 
-export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting }: ScheduleAtDialogProps) {
+export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting, serverError }: ScheduleAtDialogProps) {
   const t = useTranslations('content');
   const [value, setValue] = useState('');
   const [touched, setTouched] = useState(false);
@@ -46,6 +50,11 @@ export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting }: S
         {showError ? (
           <p className="text-xs text-destructive" data-testid="channel-post-schedule-at-error">
             {validation.reason === 'past' ? t('channelPostsScheduleAtErrorPast') : t('channelPostsScheduleAtErrorInvalid')}
+          </p>
+        ) : null}
+        {serverError ? (
+          <p className="text-xs text-destructive" data-testid="channel-post-schedule-at-server-error">
+            {t('channelPostsScheduleAtServerErrorPastOrInvalid')}
           </p>
         ) : null}
         <DialogFooter>

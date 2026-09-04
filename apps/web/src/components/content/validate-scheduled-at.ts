@@ -15,6 +15,22 @@ export type ScheduledAtValidation =
   | { valid: true; iso: string }
   | { valid: false; reason: 'past' | 'invalid' };
 
+// 페드루 PO 지적(2026-09-04 10:49Z) — 클라 검증을 통과해도 입력→상신 사이 시각이
+// 흘러 과거가 되거나(느린 네트워크·다이얼로그 오래 열어둠) 클라-서버 시계 차이가
+// 나면 서버(pydantic field_validator, backend/app/routers/channel_posts.py)가 422로
+// 거부하는 실제 경로가 있다. FastAPI 기본 검증 오류 shape(`{detail: [{loc, msg, type}]}`
+// — 이 프로젝트가 쓰는 앱 오류 shape `{detail: {code, message}}`와 다르다, api-error.ts
+// 참고)를 그대로 노출하면 "Value error, scheduled_at은…" 같은 내부 문구가 사용자에게
+// 뜬다 — 사람 문장 1개로 접는다. 이 shape가 아니면(다른 종류 422/오류) null을 내
+// 소비부가 다른 오류 처리로 넘기게 한다.
+export function parseScheduledAtServerError(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (!Array.isArray(detail)) return null;
+  const hit = detail.find((d) => Array.isArray((d as { loc?: unknown[] })?.loc) && (d as { loc: unknown[] }).loc.includes('scheduled_at'));
+  return hit ? 'past_or_invalid' : null;
+}
+
 export function validateScheduledAt(localValue: string, now: Date = new Date()): ScheduledAtValidation {
   if (!localValue) return { valid: false, reason: 'invalid' };
   const date = new Date(localValue);
