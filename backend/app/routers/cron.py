@@ -1265,3 +1265,26 @@ async def refresh_channel_tokens(
     except Exception as exc:
         logger.exception("refresh-channel-tokens cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/publication-commands ──────────────────────────
+# story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — 발행 명령 워커. 예약(scheduled_
+# at)이 도래했거나 재시도 대기(next_attempt_at)가 도래한 pending publication_commands를
+# SKIP LOCKED 배치로 집어 처리한다. 즉시 발행(scheduled_at 없음)은 보통 그 요청 안에서
+# 동기로 이미 끝나 있어야 하고, 이 워커가 그런 행을 집는다면 그 동기 경로가 중간에
+# 죽은 경우의 자가치유다. workflow_sla_processor.py::process_sla와 동형(상한 있는 배치·
+# cron 겹침 시 중복 처리 방지).
+
+@router.post("/publication-commands")
+async def publication_commands_tick(
+    request: Request,
+    session: AsyncSession = Depends(get_worker_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.publication_command import process_due_publication_commands
+        counts = await process_due_publication_commands(session)
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("publication-commands cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
