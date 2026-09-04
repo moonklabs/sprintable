@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { resolveDisplayTimezone, toDateKey } from './schedule-format';
 
 // story #3422(Phase1·마케팅운영, doc §11 T8) — 캘린더가 필요로 하는 두 축(그리드용 기간
 // 조회·「날짜 미정」 레인용 미예약 조회)은 서로 배타적 필터라(BE #3423/PR#3775 —
@@ -27,17 +28,16 @@ export interface ChannelPostCalendarItem {
 }
 
 export interface ChannelPostCalendarData {
-  /** key = scheduled_at의 UTC 날짜(YYYY-MM-DD). ⚠️조직 타임존 기준 재그룹핑은 스코프
-   * 밖(그라운딩 미확認 — formatScheduledAt·조직 타임존 출처가 착지하면 이 키를 그 값
-   * 기준으로 다시 계산해야 한다, story #3422 설계 코멘트 참고). */
+  /** key = scheduled_at의 날짜(YYYY-MM-DD), displayTimezone 기준 — 표기(formatScheduledAt)
+   * 와 같은 tz를 써야 21:30 KST 예약이 UTC 격자의 전날 칸에 서는 어긋남이 안 난다(페드루
+   * PO 지적 2026-09-04 08:57Z). */
   scheduled: Map<string, ChannelPostCalendarItem[]>;
   unscheduled: ChannelPostCalendarItem[];
   loading: boolean;
   error: boolean;
-}
-
-function utcDateKey(iso: string): string {
-  return iso.slice(0, 10);
+  /** 그룹핑·표기에 실제로 쓴 tz — 조직 타임존 필드가 없어(그라운딩 확認) 브라우저 폴백이다.
+   * isOrgTimezone=false면 소비부가 "브라우저 시간대" 안내를 붙인다. */
+  displayTimezone: { tz: string; isOrgTimezone: boolean };
 }
 
 export function useChannelPostCalendarData(
@@ -49,6 +49,8 @@ export function useChannelPostCalendarData(
   const [unscheduled, setUnscheduled] = useState<ChannelPostCalendarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  // 렌더마다 새 객체를 안 만든다 — effect의 의존 배열에 걸리면 매 렌더 재조회가 된다.
+  const [displayTimezone] = useState(resolveDisplayTimezone);
 
   useEffect(() => {
     if (!orgId) return;
@@ -79,7 +81,7 @@ export function useChannelPostCalendarData(
           // scheduled_at 자체가 없는 항목은 그리드에 놓을 날짜가 없다 — 조용히 건너뛴다
           // (필터가 정확했다면 안 와야 하지만, 계약이 흔들려도 화면이 죽지 않게 방어).
           if (!item.scheduled_at) continue;
-          const key = utcDateKey(item.scheduled_at);
+          const key = toDateKey(item.scheduled_at, displayTimezone.tz);
           const bucket = grouped.get(key) ?? [];
           bucket.push(item);
           grouped.set(key, bucket);
@@ -96,5 +98,5 @@ export function useChannelPostCalendarData(
     return () => { cancelled = true; };
   }, [orgId, range.from, range.to, connectionId]);
 
-  return { scheduled, unscheduled, loading, error };
+  return { scheduled, unscheduled, loading, error, displayTimezone };
 }

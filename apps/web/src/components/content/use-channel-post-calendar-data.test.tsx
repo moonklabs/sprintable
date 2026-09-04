@@ -91,7 +91,12 @@ describe('useChannelPostCalendarData', () => {
 
     expect(container.querySelector('[data-testid="loading"]')?.textContent).toBe('false');
     expect(container.querySelector('[data-testid="error"]')?.textContent).toBe('false');
-    expect(container.querySelector('[data-testid="scheduled-keys"]')?.textContent).toBe('2026-09-05,2026-09-10');
+    // 그룹핑 tz는 브라우저 tz(resolveDisplayTimezone) — 이 실행 환경(테스트러너)의 tz로
+    // 계산해 기대값을 만든다(하드코딩 UTC 가정 금지, 페드루 PO 지적 2026-09-04 08:57Z).
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const fmt = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+    const expectedKeys = [...new Set([fmt('2026-09-05T21:00:00Z'), fmt('2026-09-05T09:00:00Z'), fmt('2026-09-10T00:00:00Z')])].sort().join(',');
+    expect(container.querySelector('[data-testid="scheduled-keys"]')?.textContent).toBe(expectedKeys);
     expect(container.querySelector('[data-testid="scheduled-count"]')?.textContent).toBe('3');
     expect(container.querySelector('[data-testid="unscheduled-count"]')?.textContent).toBe('1');
   });
