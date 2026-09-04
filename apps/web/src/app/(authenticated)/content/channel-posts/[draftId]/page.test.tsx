@@ -109,16 +109,31 @@ function stubFetch(opts: {
   canUnpublish?: boolean;
   unpublishBlockedReason?: 'unsupported' | 'scope_insufficient' | null;
   connectionsOk?: boolean;
+  // story #3428 — 이미지 규격(어댑터 성질). 기본값 0 = 이미지 미지원(기존 74건 전부가
+  // 이 값을 몰라도 되므로 명시 안 하면 첨부 칸 자체가 안 뜨는 쪽이 자연스러운 기본).
+  imageMaxCount?: number;
+  onImageUploadUrl?: (body: unknown) => { status: number; body: unknown };
+  onImagePut?: () => { status: number };
+  onImageConfirm?: (body: unknown) => { status: number; body: unknown };
+  // B2 테스트 전용 — PUT 응답을 이 promise가 풀릴 때까지 붙들어 'uploading' phase에
+  // 머무는 순간을 관찰 가능하게 한다.
+  imagePutGate?: Promise<void>;
+  // B1(페드루 PO, 2026-09-04 13:26Z) — confirm 성공 뒤 단건 GET을 다시 부르는지, 그
+  // 재조회가 서버 값(예: 재오픈된 gate_status)을 통째로 반영하는지 재현하는 스위치.
+  // 지정하면 confirm 성공 이후의 단건 GET 응답이 이 값으로 바뀐다(그 前까지는 기본
+  // draftDetail 그대로).
+  draftAfterImageConfirm?: Record<string, unknown>;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
   if (opts.omitGateStatusKey) delete draftDetail.gate_status;
+  let currentDraftDetail = draftDetail;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`) {
-        return { ok: true, status: 200, json: async () => ({ data: draftDetail, error: null, meta: null }) };
+        return { ok: true, status: 200, json: async () => ({ data: currentDraftDetail, error: null, meta: null }) };
       }
       // story #3402·PR#3767 — GATE_ALREADY_HELD best-effort 상대 초안 단건 조회. 테스트의
       // holding_draft_id는 항상 'd9'(현재 편집 중인 DRAFT_ID와 다른 값)로 고정한다.
@@ -145,6 +160,9 @@ function stubFetch(opts: {
             data: [{
               id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
               can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason,
+              image_formats: ['image/jpeg', 'image/png'], image_max_bytes: 8 * 1024 * 1024,
+              image_aspect_max: 10, image_width_min: 320, image_width_max: 1440,
+              image_color_space: 'sRGB', image_max_count: opts.imageMaxCount ?? 0,
             }],
             error: null, meta: null,
           }),
@@ -154,6 +172,55 @@ function stubFetch(opts: {
         if (opts.limitOk === false) return { ok: false, status: 502, json: async () => ({}) };
         const limit = opts.limitOk ?? { quota_usage: 3, quota_total: 250 };
         return { ok: true, status: 200, json: async () => ({ data: limit, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/upload-url` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onImageUploadUrl?.(body) ?? {
+          status: 200,
+          body: { upload_url: 'https://storage.example/put', object_path: 'channel-media/o/d1/x.jpg', expires_at: '2026-09-04T12:10:00Z', max_bytes: 26214400, required_put_headers: {} },
+        };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === 'https://storage.example/put' && init?.method === 'PUT') {
+        if (opts.imagePutGate) await opts.imagePutGate;
+        const result = opts.onImagePut?.() ?? { status: 200 };
+        return { ok: result.status < 400, status: result.status, json: async () => ({}) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/confirm` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onImageConfirm?.(body) ?? {
+          status: 201,
+          body: {
+            draft_id: DRAFT_ID, version_id: 'v2', version: 2,
+            original_width: 4000, original_height: 3000, original_bytes: 12000000,
+            final_width: 1440, final_height: 1080, final_bytes: 3100000,
+            was_converted: true, image_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.jpg',
+          },
+        };
+        const ok = result.status < 400;
+        if (ok) {
+          // B1 — 실제 백엔드라면 confirm이 반영한 이미지 필드가 그다음 단건 GET에도
+          // 그대로 실린다(같은 draft 행). 목(mock)도 그 사실을 반영해야 재조회 검증이
+          // 뜻이 있다 — 그 위에 draftAfterImageConfirm(게이트 재오픈 등 이 조각이 별도로
+          // 바꾸는 필드)을 덮어쓴다.
+          const confirmed = result.body as {
+            version?: number; image_url?: string | null; original_width?: number; original_bytes?: number;
+            final_width?: number; final_bytes?: number; was_converted?: boolean;
+          };
+          currentDraftDetail = {
+            ...currentDraftDetail,
+            current_version: confirmed.version,
+            thumbnail_url: confirmed.image_url,
+            image_original_width: confirmed.original_width,
+            image_original_bytes: confirmed.original_bytes,
+            image_final_width: confirmed.final_width,
+            image_final_bytes: confirmed.final_bytes,
+            image_was_converted: confirmed.was_converted,
+            ...opts.draftAfterImageConfirm,
+          };
+        }
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
@@ -1335,5 +1402,378 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
     });
+  });
+});
+
+// story #3428(T3-M·§17-16) — 이미지 첨부 UI.
+describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
+  it('⭐§17-16 — image_max_count=0(또는 미지원)이면 첨부 칸 자체를 그리지 않는다', async () => {
+    stubFetch({ imageMaxCount: 0 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-attach"]')).toBeNull();
+  });
+
+  it('⭐AC1 — image_max_count=1이면 첨부 칸이 뜨고 규격 태그가 어댑터 선언값 그대로 보인다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-attach"]')).not.toBeNull();
+    const specTag = container.querySelector('[data-testid="channel-post-image-spec-tag"]')?.textContent ?? '';
+    expect(specTag).toContain('JPEG, PNG');
+    // N(페드루 PO, 2026-09-04 13:27Z) — formatFileSize(재구현 금지 헬퍼 재사용, 자동
+    // 단위)로 교체 — "8.0MB"(공백 없음)가 아니라 "8.0 MB".
+    expect(specTag).toContain('8.0 MB');
+    expect(specTag).toContain('10:1');
+    expect(specTag).toContain('320');
+    expect(specTag).toContain('1440');
+    // N — image_color_space가 imageSpec까지만 오고 화면엔 한 번도 안 실렸던 갭.
+    expect(specTag).toContain('sRGB');
+  });
+
+  it('⭐업로드 성공 — 발급→PUT→confirm 3단계를 순서대로 거쳐 썸네일이 뜬다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-upload-error"]')).toBeNull();
+  });
+
+  // B1(페드루 PO, 2026-09-04 13:26Z) — confirm이 새 버전을 만들며 서버가 approved
+  // 게이트를 재오픈+reapproval_required=true로 바꿀 수 있다. 이미지 필드만 로컬 병합하면
+  // 이 갱신을 놓친다 — 단건 GET을 다시 불러 gate_status/reapproval_required까지 서버
+  // 값으로 통째 교체되는 것을 pin한다.
+  it('⭐B1 — confirm 성공 뒤 단건 GET을 재조회해 gate_status·reapproval_required까지 서버 값으로 갱신된다', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      // confirm이 게이트를 재오픈한 뒤의 서버 진실.
+      draftAfterImageConfirm: { gate_status: 'pending', reapproval_required: true },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    // 업로드 전 — 승인됨이라 발행 버튼이 활성.
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    // 이미지 필드(썸네일)도 여전히 반영되고, 게이트가 재오픈됐다는 서버 진실까지
+    // 같이 들어와 발행 버튼이 다시 막힌다(이미지 필드만 로컬 병합했다면 여전히 활성).
+    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // B2(페드루 PO, 2026-09-04 13:27Z·code-review 지적) — 이미지 업로드가 진행 중인 동안
+  // 저장/즉시 상신/예약 상신 버튼이 막히는지(서로 다른 흐름이 각자 새 버전을 만들어
+  // 경합하는 것을 방지). PUT 응답을 gate로 붙들어 'uploading' phase에 실제로 머무는
+  // 순간을 관찰한다.
+  it('⭐B2 — 이미지 업로드 진행 중(uploading)엔 저장·상신·예약 상신 버튼이 모두 비활성화되고, 끝나면 풀린다', async () => {
+    let releaseUpload: (() => void) | undefined;
+    const imagePutGate = new Promise<void>((resolve) => { releaseUpload = resolve; });
+    stubFetch({ imageMaxCount: 1, imagePutGate });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      // requesting_url→uploading으로 넘어갈 만큼만 마이크로태스크를 흘려보낸다(PUT은
+      // imagePutGate가 안 풀려 여기서 멈춰 있다).
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="channel-post-image-upload-progress"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-image-upload-in-progress-reason"]')).not.toBeNull();
+
+    await act(async () => {
+      releaseUpload?.();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-upload-progress"]')).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // B3(페드루 PO·유나 지적, 2026-09-04) — 첨부 칸은 실제로 파일 1개만 받는데
+  // "{count}장까지"라고 적으면 화면이 안 하는 일을 약속하는 거짓 라벨이 된다.
+  it('⭐B3 — 첨부 칸 라벨이 개수를 약속하지 않는다("장까지" 문구 없음)', async () => {
+    stubFetch({ imageMaxCount: 4 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const attach = container.querySelector('[data-testid="channel-post-image-attach"]');
+    expect(attach?.textContent).not.toContain('장까지');
+    expect(attach?.textContent).toContain(koMessages.content.channelPostsImageAttachLabel);
+  });
+
+  // ②(유나 지적, 2026-09-04) — <input type=file>는 접근 가능한 이름이 없고 브라우저
+  // 기본 컨트롤 라벨이 로케일을 안 따른다. 화면엔 라벨 붙은 Button만 노출되고, input은
+  // hidden이라 접근성 트리 밖에 있어야 한다.
+  it('⭐②-a — 파일 입력은 hidden이고, 라벨 붙은 Button이 대신 트리거한다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    expect(input.hidden).toBe(true);
+    const trigger = container.querySelector('[data-testid="channel-post-image-attach-trigger"]');
+    expect(trigger?.tagName).toBe('BUTTON');
+    expect(trigger?.textContent).toBe(koMessages.content.channelPostsImageAttachTriggerCta);
+  });
+
+  it('②-a — 트리거 Button을 누르면 hidden input의 click이 위임된다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const clickSpy = vi.spyOn(input, 'click');
+    const trigger = container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.click();
+    });
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // ③(유나 지적, 2026-09-04) — 썸네일 alt=""였던 것을 「첨부 이미지」 키로 채운다.
+  it('⭐③ — 첨부 칸 미리보기 alt가 빈 문자열이 아니다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const img = container.querySelector('[data-testid="channel-post-image-preview"]') as HTMLImageElement;
+    expect(img.alt).toBe(koMessages.content.channelPostsImageAttachAlt);
+  });
+
+  // 배지 첨부 칸(페드루 PO, 2026-09-04 13:41Z) — T3-M 미리보기도 파생본을 그리므로
+  // was_converted면 승인 카드와 같은 배지·같은 문구를 함께 보인다.
+  it('⭐배지 첨부 칸 — was_converted=true면 첨부 칸 미리보기 아래에도 승인 카드와 같은 변환 배지가 뜬다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const badge = container.querySelector('[data-testid="channel-post-image-attach-converted-badge"]')?.textContent ?? '';
+    expect(badge).toContain('4000');
+    expect(badge).toContain('1440');
+  });
+
+  it('⭐AC4 — CHANNEL_IMAGE_UNSUPPORTED_FORMAT(422) — 3요소(무엇이·허용목록) 문구가 조립된다', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageUploadUrl: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_IMAGE_UNSUPPORTED_FORMAT', message: '…', content_type: 'image/gif', allowed_formats: ['image/jpeg', 'image/png'] } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.gif', { type: 'image/gif' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('image/gif');
+    expect(errorText).toContain('image/jpeg');
+    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).toBeNull();
+  });
+
+  it('⭐AC4 — CHANNEL_IMAGE_TOO_LARGE(413) — MB 단위로 3요소 문구가 조립된다(confirm 단계에서 실패)', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageConfirm: () => ({
+        status: 413,
+        body: { detail: { code: 'CHANNEL_IMAGE_TOO_LARGE', message: '…', size_bytes: 30000000, max_bytes: 26214400 } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('28.6 MB');
+    expect(errorText).toContain('25.0 MB');
+  });
+});
+
+// story #3428(T5-M·§17-14) — 승인 카드 썸네일 + 자동 변환 배지.
+describe('ChannelPostEditPage — 승인 카드 썸네일·배지(T5-M, story #3428)', () => {
+  it('이미지 없는 초안(thumbnail_url=null)은 썸네일·배지 둘 다 안 그린다', async () => {
+    stubFetch({ draftDetail: { thumbnail_url: null } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-converted-badge"]')).toBeNull();
+  });
+
+  it('⭐was_converted=true — 썸네일과 배지가 원본→최종 값 그대로 뜬다', async () => {
+    stubFetch({
+      draftDetail: {
+        thumbnail_url: 'https://storage.googleapis.com/bucket/x.jpg',
+        image_original_width: 4000, image_original_bytes: 12000000,
+        image_final_width: 1440, image_final_bytes: 3100000, image_was_converted: true,
+      } as never,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
+    const badge = container.querySelector('[data-testid="channel-post-image-converted-badge"]')?.textContent ?? '';
+    expect(badge).toContain('4000');
+    expect(badge).toContain('1440');
+    expect(badge).toContain('11.4 MB');
+    expect(badge).toContain('3.0 MB');
+  });
+
+  it('⭐was_converted=false — 썸네일은 뜨되 배지는 안 뜬다(원본=최종)', async () => {
+    stubFetch({
+      draftDetail: {
+        thumbnail_url: 'https://storage.googleapis.com/bucket/x.jpg',
+        image_original_width: 800, image_original_bytes: 500000,
+        image_final_width: 800, image_final_bytes: 500000, image_was_converted: false,
+      } as never,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-converted-badge"]')).toBeNull();
+  });
+});
+
+// story #3428(§17-15, PO 확定 2026-09-04 12:19Z) — processing_kind 오버레이 우선순위
+// 진리표 4행. processing_kind='awaiting_container'는 실데이터에서 항상 publication_
+// status='container_created'와 함께 온다(BE 620beefc 판정식) — 즉 partialSuccess와
+// 근본 상태를 공유하는 게 실제 겹침이다(행1). 그 겹침이 없을 때(processing_kind=null)
+// 기존 partialSuccess/publicationFailed 분기는 무회귀(행2·3). unpublished는
+// processing_kind와 절대 안 겹쳐야 하지만(published 이후에만 성립) 데이터 결함으로
+// 겹치는 경우까지 unpublished를 우선한다(행4).
+describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순위 진리표(story #3428)', () => {
+  it('행1 — processing_kind=awaiting_container(+container_created) → 이어서 처리 중만, partialSuccess는 억제', async () => {
+    stubFetch({ draftDetail: { publication_status: 'container_created', processing_kind: 'awaiting_container' } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).toBeNull();
+  });
+
+  it('행2 — processing_kind=null·container_created → partialSuccess 그대로(무회귀)', async () => {
+    stubFetch({ draftDetail: { publication_status: 'container_created', processing_kind: null } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
+  });
+
+  it('행3 — processing_kind=null·failed → publicationFailed 그대로(무회귀)', async () => {
+    stubFetch({ draftDetail: { publication_status: 'failed', error_code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', processing_kind: null } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
+  });
+
+  it('행4 — unpublished + processing_kind(데이터 결함으로 동시 참) → unpublished 우선', async () => {
+    stubFetch({ draftDetail: { publication_status: 'unpublished', processing_kind: 'awaiting_container' } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
   });
 });

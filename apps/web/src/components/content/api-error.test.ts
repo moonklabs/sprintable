@@ -266,5 +266,83 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       expect(kinds).not.toContain('unknown');
       expect(kinds).toHaveLength(12);
     });
+
+    // story #3428(BE 620beefc·PR#3776) — CHANNEL_IMAGE_* 9종. channel_posts.py 라우터
+    // except 매핑 실측 그대로(각 코드가 싣는 부가 필드가 다르다).
+    describe('CHANNEL_IMAGE_* (story #3428)', () => {
+      test('CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED(503) — kind=image_storage_not_configured, 고정 문구', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED', message: '…' } });
+        expect(result.kind).toBe('image_storage_not_configured');
+        expect(result.humanMessageKey).toBe('errorChannelImageStorageNotConfigured');
+      });
+
+      test('CHANNEL_IMAGE_UNSUPPORTED(422) — kind=image_unsupported·channel 필드 보존(채널 미지원, 사용자가 못 바꿈)', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_UNSUPPORTED', message: '…', channel: 'threads' } });
+        expect(result.kind).toBe('image_unsupported');
+        expect(result.humanMessageKey).toBe('errorChannelImageUnsupported');
+        expect(result.imageChannel).toBe('threads');
+      });
+
+      test('CHANNEL_IMAGE_UNSUPPORTED_FORMAT(422) — CHANNEL_IMAGE_UNSUPPORTED와 접두 관계지만 다른 kind로 정확히 갈린다(=== 매핑)', () => {
+        const result = parseSitePostApiError({
+          error: { code: 'CHANNEL_IMAGE_UNSUPPORTED_FORMAT', message: '…', content_type: 'image/gif', allowed_formats: ['image/jpeg', 'image/png'] },
+        });
+        expect(result.kind).toBe('image_unsupported_format');
+        expect(result.kind).not.toBe('image_unsupported');
+        expect(result.humanMessageKey).toBeUndefined();
+        expect(result.imageContentType).toBe('image/gif');
+        expect(result.imageAllowedFormats).toEqual(['image/jpeg', 'image/png']);
+      });
+
+      test('CHANNEL_IMAGE_TOO_LARGE(413) — kind=image_too_large·size_bytes/max_bytes 보존', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_TOO_LARGE', message: '…', size_bytes: 30000000, max_bytes: 26214400 } });
+        expect(result.kind).toBe('image_too_large');
+        expect(result.imageSizeBytes).toBe(30000000);
+        expect(result.imageMaxBytes).toBe(26214400);
+      });
+
+      test('CHANNEL_IMAGE_UNDECODABLE(422) — 고정 문구, 부가 필드 없음', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_UNDECODABLE', message: '…' } });
+        expect(result.kind).toBe('image_undecodable');
+        expect(result.humanMessageKey).toBe('errorChannelImageUndecodable');
+      });
+
+      test('CHANNEL_IMAGE_ANIMATED_UNSUPPORTED(422) — frame_count만 보존(§13 "무엇이"만, 얼마까지/지금 얼마는 생략)', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_ANIMATED_UNSUPPORTED', message: '…', frame_count: 12 } });
+        expect(result.kind).toBe('image_animated_unsupported');
+        expect(result.imageFrameCount).toBe(12);
+      });
+
+      test('CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED(422) — aspect_ratio/max_aspect_ratio 보존', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED', message: '…', aspect_ratio: 12.5, max_aspect_ratio: 10.0 } });
+        expect(result.kind).toBe('image_aspect_ratio_exceeded');
+        expect(result.imageAspectRatio).toBe(12.5);
+        expect(result.imageMaxAspectRatio).toBe(10.0);
+      });
+
+      test('CHANNEL_IMAGE_CONVERSION_FAILED(422) — final_bytes/max_bytes 보존', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_CONVERSION_FAILED', message: '…', final_bytes: 9000000, max_bytes: 8388608 } });
+        expect(result.kind).toBe('image_conversion_failed');
+        expect(result.imageFinalBytes).toBe(9000000);
+        expect(result.imageMaxBytes).toBe(8388608);
+      });
+
+      test('CHANNEL_IMAGE_UPLOAD_FAILED(502) — 고정 문구', () => {
+        const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_UPLOAD_FAILED', message: '…' } });
+        expect(result.kind).toBe('image_upload_failed');
+        expect(result.humanMessageKey).toBe('errorChannelImageUploadFailed');
+      });
+
+      test('9종 전부 서로 다른 kind — unknown으로 조용히 안 떨어진다', () => {
+        const codes = [
+          'CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED', 'CHANNEL_IMAGE_UNSUPPORTED', 'CHANNEL_IMAGE_UNSUPPORTED_FORMAT',
+          'CHANNEL_IMAGE_TOO_LARGE', 'CHANNEL_IMAGE_UNDECODABLE', 'CHANNEL_IMAGE_ANIMATED_UNSUPPORTED',
+          'CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED', 'CHANNEL_IMAGE_CONVERSION_FAILED', 'CHANNEL_IMAGE_UPLOAD_FAILED',
+        ];
+        const kinds = codes.map((code) => parseSitePostApiError({ error: { code, message: '…' } }).kind);
+        expect(new Set(kinds).size).toBe(9);
+        expect(kinds).not.toContain('unknown');
+      });
+    });
   });
 });

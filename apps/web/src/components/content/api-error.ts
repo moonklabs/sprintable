@@ -40,6 +40,18 @@ export type SitePostApiErrorKind =
   | 'not_published'
   | 'unpublish_unsupported'
   | 'scope_insufficient'
+  // story #3428(BE 620beefc·PR#3776, §13/§17-16) — 채널 포스트 이미지 첨부 9갈래. 정확
+  // 일치(===)로만 KNOWN_ERRORS를 조회한다 — CHANNEL_IMAGE_UNSUPPORTED ⊂
+  // CHANNEL_IMAGE_UNSUPPORTED_FORMAT 접두 관계라 문자열 부분일치 판정을 쓰면 오매핑된다.
+  | 'image_storage_not_configured'
+  | 'image_unsupported'
+  | 'image_unsupported_format'
+  | 'image_too_large'
+  | 'image_undecodable'
+  | 'image_animated_unsupported'
+  | 'image_aspect_ratio_exceeded'
+  | 'image_conversion_failed'
+  | 'image_upload_failed'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -68,6 +80,18 @@ export interface SitePostApiErrorInfo {
   currentLength?: number;
   /** PUBLICATION_COMMAND_NOT_CANCELLABLE(409) 전용 — "이미 {current_status} 상태입니다" 조립. */
   currentStatus?: string;
+  // story #3428 — CHANNEL_IMAGE_* 9종 전용 부가 필드(§13 3요소: 무엇이·얼마까지·지금
+  // 얼마). 코드마다 실리는 부분집합이 다르다(예: UNDECODABLE은 전부 undefined) — page.tsx가
+  // kind로 분기해 있는 값만 보간한다.
+  imageChannel?: string;
+  imageContentType?: string;
+  imageAllowedFormats?: string[];
+  imageSizeBytes?: number;
+  imageMaxBytes?: number;
+  imageFrameCount?: number;
+  imageAspectRatio?: number;
+  imageMaxAspectRatio?: number;
+  imageFinalBytes?: number;
 }
 
 interface KnownError {
@@ -137,6 +161,20 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 사이 스코프가 바뀌는 레이스 등 방어적 경로다. 같은 §17-11 개념이라 site의 role 분기
   // 문구를 그대로 재사용(labelKey는 비워 두고 page.tsx가 role로 갈라 조립).
   CHANNEL_SCOPE_INSUFFICIENT: { labelKey: '', kind: 'scope_insufficient' },
+
+  // story #3428(BE 620beefc·PR#3776, §13/§17-16 — channel_posts.py assets/upload-url·
+  // assets/confirm 실측). 채널 미지원(사용자가 못 바꾸는 어댑터 성질)과 파일 문제(파일을
+  // 바꾸면 풀리는 것)를 다른 kind·다른 문장으로 가른다. 3요소(무엇이·얼마까지·지금 얼마)가
+  // 필요한 코드는 labelKey를 비우고 page.tsx가 imageXxx 필드로 보간한다.
+  CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED: { labelKey: 'errorChannelImageStorageNotConfigured', kind: 'image_storage_not_configured' },
+  CHANNEL_IMAGE_UNSUPPORTED: { labelKey: 'errorChannelImageUnsupported', kind: 'image_unsupported' },
+  CHANNEL_IMAGE_UNSUPPORTED_FORMAT: { labelKey: '', kind: 'image_unsupported_format' },
+  CHANNEL_IMAGE_TOO_LARGE: { labelKey: '', kind: 'image_too_large' },
+  CHANNEL_IMAGE_UNDECODABLE: { labelKey: 'errorChannelImageUndecodable', kind: 'image_undecodable' },
+  CHANNEL_IMAGE_ANIMATED_UNSUPPORTED: { labelKey: '', kind: 'image_animated_unsupported' },
+  CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED: { labelKey: '', kind: 'image_aspect_ratio_exceeded' },
+  CHANNEL_IMAGE_CONVERSION_FAILED: { labelKey: '', kind: 'image_conversion_failed' },
+  CHANNEL_IMAGE_UPLOAD_FAILED: { labelKey: 'errorChannelImageUploadFailed', kind: 'image_upload_failed' },
 };
 
 function extractCodeAndMessage(detail: unknown): {
@@ -144,6 +182,9 @@ function extractCodeAndMessage(detail: unknown): {
   heldByDraftId?: string; heldByLang?: string | null; heldBySlug?: string;
   heldByChannel?: string; heldByConnectionId?: string;
   resetAt?: string; maxLength?: number; currentLength?: number; currentStatus?: string;
+  imageChannel?: string; imageContentType?: string; imageAllowedFormats?: string[];
+  imageSizeBytes?: number; imageMaxBytes?: number; imageFrameCount?: number;
+  imageAspectRatio?: number; imageMaxAspectRatio?: number; imageFinalBytes?: number;
 } {
   if (typeof detail === 'string') return { message: detail };
   if (detail && typeof detail === 'object') {
@@ -166,6 +207,17 @@ function extractCodeAndMessage(detail: unknown): {
       currentLength: typeof d.current_length === 'number' ? d.current_length : undefined,
       // story #3426 — PUBLICATION_COMMAND_NOT_CANCELLABLE 전용.
       currentStatus: typeof d.current_status === 'string' ? d.current_status : undefined,
+      // story #3428 — CHANNEL_IMAGE_* 9종 전용(channel_posts.py 라우터 except 매핑 실측
+      // 그대로, 코드마다 실리는 부분집합이 다르다).
+      imageChannel: typeof d.channel === 'string' ? d.channel : undefined,
+      imageContentType: typeof d.content_type === 'string' ? d.content_type : undefined,
+      imageAllowedFormats: Array.isArray(d.allowed_formats) ? (d.allowed_formats as string[]) : undefined,
+      imageSizeBytes: typeof d.size_bytes === 'number' ? d.size_bytes : undefined,
+      imageMaxBytes: typeof d.max_bytes === 'number' ? d.max_bytes : undefined,
+      imageFrameCount: typeof d.frame_count === 'number' ? d.frame_count : undefined,
+      imageAspectRatio: typeof d.aspect_ratio === 'number' ? d.aspect_ratio : undefined,
+      imageMaxAspectRatio: typeof d.max_aspect_ratio === 'number' ? d.max_aspect_ratio : undefined,
+      imageFinalBytes: typeof d.final_bytes === 'number' ? d.final_bytes : undefined,
     };
   }
   return {};
@@ -194,6 +246,15 @@ export function parseSitePostApiError(
   const maxLength = fromDetail.maxLength ?? fromError.maxLength;
   const currentLength = fromDetail.currentLength ?? fromError.currentLength;
   const currentStatus = fromDetail.currentStatus ?? fromError.currentStatus;
+  const imageChannel = fromDetail.imageChannel ?? fromError.imageChannel;
+  const imageContentType = fromDetail.imageContentType ?? fromError.imageContentType;
+  const imageAllowedFormats = fromDetail.imageAllowedFormats ?? fromError.imageAllowedFormats;
+  const imageSizeBytes = fromDetail.imageSizeBytes ?? fromError.imageSizeBytes;
+  const imageMaxBytes = fromDetail.imageMaxBytes ?? fromError.imageMaxBytes;
+  const imageFrameCount = fromDetail.imageFrameCount ?? fromError.imageFrameCount;
+  const imageAspectRatio = fromDetail.imageAspectRatio ?? fromError.imageAspectRatio;
+  const imageMaxAspectRatio = fromDetail.imageMaxAspectRatio ?? fromError.imageMaxAspectRatio;
+  const imageFinalBytes = fromDetail.imageFinalBytes ?? fromError.imageFinalBytes;
   const raw = JSON.stringify({ code: code ?? null, message: message ?? null });
 
   const known = code ? KNOWN_ERRORS[code] : undefined;
@@ -211,5 +272,14 @@ export function parseSitePostApiError(
     maxLength,
     currentLength,
     currentStatus,
+    imageChannel,
+    imageContentType,
+    imageAllowedFormats,
+    imageSizeBytes,
+    imageMaxBytes,
+    imageFrameCount,
+    imageAspectRatio,
+    imageMaxAspectRatio,
+    imageFinalBytes,
   };
 }
