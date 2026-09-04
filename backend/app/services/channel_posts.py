@@ -168,6 +168,67 @@ class ChannelPostGateAlreadyHeldError(Exception):
         )
 
 
+class ChannelPostGateNotFoundError(Exception):
+    """story #3419 — 취소·회수 대상을 찾으려면 그 draft가 상신된 적(=게이트가 생긴
+    적)이 있어야 한다. 순수 초안(상신 전)에 취소/회수를 시도하면 이 예외 — 404."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"이 draft는 아직 상신된 적이 없습니다(취소/회수 대상 없음): {draft_id}")
+
+
+class PublicationCommandNotFoundError(Exception):
+    """story #3419 AC1 — 이 draft의 gate에 걸린 publication_command 자체가 없다(발행/예약
+    요청을 한 적이 없음). 404."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"취소할 발행 명령이 없습니다: {draft_id}")
+
+
+class PublicationCommandNotCancellableError(Exception):
+    """story #3419 AC1 — PO 確定 ①-a: 취소 가능 상태는 pending·blocked·dead_letter뿐
+    (사람이 「이 명령을 끝내겠다」는 뜻 — 종결 아닌 상태 전부 허용). in_progress(이미
+    실행 중)·completed·voided·cancelled(이미 종결)는 409."""
+
+    def __init__(self, *, command_id: uuid.UUID, current_status: str):
+        self.command_id = command_id
+        self.current_status = current_status
+        super().__init__(
+            f"이 명령은 취소할 수 없는 상태입니다(command_id={command_id}, status={current_status})"
+        )
+
+
+class ChannelPostNotPublishedError(Exception):
+    """story #3419 AC2 — 회수하려면 이 gate에 status='published' 행이 있어야 한다.
+    발행된 적이 없거나 이미 unpublished면 이 예외 — 409."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"발행된 적이 없거나 이미 회수된 글입니다: {draft_id}")
+
+
+class ChannelUnpublishUnsupportedError(Exception):
+    """story #3419 AC2 — 어댑터가 `supports_unpublish=False`로 선언한 채널. 화면은
+    이 선언값으로 버튼 자체를 안 그리는 게 정상 경로지만(§17-4), 서버도 독립적으로
+    거부한다(FE 우회·구버전 클라이언트 대비) — 422."""
+
+    def __init__(self, *, channel: str):
+        self.channel = channel
+        super().__init__(f"이 채널은 발행 회수를 지원하지 않습니다: {channel}")
+
+
+class ChannelScopeInsufficientError(Exception):
+    """story #3419 AC2·PO 確定 ②-a — 어댑터는 회수를 지원하지만 이 연결에 필요 스코프
+    (예: threads_delete)가 없다. 기존 연결(이 스코프 도입 前 저장분)이 항상 여기 걸린다
+    (의도) — 재인증하면 새 scope 문자열이 반영돼 해소된다. 422, required_scopes를
+    실어 화면이 「재인증하면 회수할 수 있습니다」(유나 §17-11)를 그릴 수 있게 한다."""
+
+    def __init__(self, *, required_scopes: list[str]):
+        self.required_scopes = required_scopes
+        super().__init__(f"이 연결에 필요한 스코프가 없습니다: {required_scopes}")
+
+
 def compute_channel_post_hash(*, text: str, link_url: str | None) -> str:
     """gate_seal.compute_seal_hash 위 얇은 payload 조립부(site_posts.compute_body_sha256과
     동형 역할) — channel은 draft 고정값(배달 경로)이라 해시에 안 섞는다(모델 docstring 참고)."""
@@ -962,3 +1023,149 @@ async def publish_channel_post_draft(
     )
     await db.commit()
     return row
+
+
+# ─── story #3419(Phase1·마케팅운영) — 발행 취소(예약 명령 취소·발행분 회수) ─────────────────
+# 둘 다 draft의 gate를 gate.status와 무관하게 조회한다(publish_channel_post_draft의
+# "승인 상태 재검증"과 다른 축 — 취소·회수는 "지금 그 게이트가 승인 상태인가"가 아니라
+# "이 gate에 걸린 command/publication이 그 자체로 끝낼 수 있는 상태인가"만 본다. 예:
+# 승인 뒤 편집으로 게이트가 다시 pending으로 돌아가도, 그 전에 만들어진 blocked/dead_letter
+# command는 여전히 사람이 명시 취소할 대상이다).
+
+_CANCELLABLE_COMMAND_STATUSES = frozenset({"pending", "blocked", "dead_letter"})
+
+
+async def _resolve_gate_for_draft(db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID) -> tuple[ChannelPostDraft, Gate]:
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    gate = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
+    )
+    if gate is None:
+        raise ChannelPostGateNotFoundError(draft_id)
+    return draft, gate
+
+
+async def cancel_scheduled_publication(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, cancelled_by_member_id: uuid.UUID,
+) -> PublicationCommand:
+    """story #3419 AC1·PO 確定 ①-a — 이 gate의 **가장 최근** publication_command가
+    pending·blocked·dead_letter 중 하나면 `cancelled`(reason_code=CANCELLED_BY_HUMAN)로
+    전이한다. 그 외 상태(in_progress·completed·voided·이미 cancelled)는
+    PublicationCommandNotCancellableError(라우터가 409).
+
+    cron(`process_due_publication_commands`)의 클레임 WHERE절은 `status='pending'`만
+    본다 — cancelled로 바뀌기만 하면 새 배제 로직 없이 구조적으로 다시 안 집힌다(voided·
+    dead_letter·blocked와 동일 원리, story #3414 그라운딩)."""
+    draft, gate = await _resolve_gate_for_draft(db, org_id=org_id, draft_id=draft_id)
+
+    command = (await db.execute(
+        select(PublicationCommand)
+        .where(PublicationCommand.gate_id == gate.id)
+        .order_by(PublicationCommand.created_at.desc())
+        .limit(1)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if command is None:
+        raise PublicationCommandNotFoundError(draft_id)
+    if command.status not in _CANCELLABLE_COMMAND_STATUSES:
+        raise PublicationCommandNotCancellableError(command_id=command.id, current_status=command.status)
+
+    command.status = "cancelled"
+    command.reason_code = "CANCELLED_BY_HUMAN"
+    await db.commit()
+    await db.refresh(command)
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="publication_command_cancelled", actor_type="platform", actor_id=None,
+        entity_type="publication_command", entity_id=command.id,
+        context={
+            "gate_id": str(gate.id), "draft_id": str(draft_id),
+            "cancelled_by_member_id": str(cancelled_by_member_id),
+        },
+    )
+    await db.commit()
+    return command
+
+
+async def unpublish_channel_post(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, unpublished_by_member_id: uuid.UUID,
+) -> ChannelPublication:
+    """story #3419 AC2·PO 確定 ②-a — 이 gate의 **가장 최근 status='published'**
+    channel_publications 행을 Threads 공식 삭제 API로 회수하고 `unpublished`로 전이한다
+    (external_id·permalink는 건드리지 않는다 — "보존", `_to_draft_list_item`의
+    published_pub_by_gate가 status='published'만 걸러서 그 뒤로는 목록에서 자연히
+    "지금 살아 있는 것"이 아니게 된다, 신규 필터링 코드 불요).
+
+    가드 순서(전부 Threads 호출 前): ①gate 존재 ②published 행 존재 ③어댑터
+    supports_unpublish ④연결 활성 ⑤연결 스코프에 필요 스코프 포함. 어느 하나라도
+    실패하면 Threads 호출 0건(fail-closed, publish 경로의 "재검증 뒤 호출" 규율과
+    동형)."""
+    draft, gate = await _resolve_gate_for_draft(db, org_id=org_id, draft_id=draft_id)
+
+    pub = (await db.execute(
+        select(ChannelPublication)
+        .where(ChannelPublication.gate_id == gate.id, ChannelPublication.status == "published")
+        .order_by(ChannelPublication.published_at.desc())
+        .limit(1)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if pub is None:
+        raise ChannelPostNotPublishedError(draft_id)
+
+    adapter = get_channel_adapter(draft.channel)
+    if adapter is None or not adapter.supports_unpublish:
+        raise ChannelUnpublishUnsupportedError(channel=draft.channel)
+
+    connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
+    if adapter.unpublish_required_scope and adapter.unpublish_required_scope not in (connection.scopes or []):
+        raise ChannelScopeInsufficientError(required_scopes=[adapter.unpublish_required_scope])
+
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise ChannelConnectionNotActiveError(connection_id=connection.id)
+
+    if pub.external_id is None:
+        # 이론상 status='published'면 항상 채워져 있다(publish_channel_post_draft가 media
+        # id 확보 뒤에만 published로 전이) — 그래도 발행 provider 호출은 정직한 실패로
+        # 낸다(external_id 없이 삭제 호출을 시도하면 무의미한 요청이 나간다).
+        raise ChannelPublishProviderError(
+            provider_code="MISSING_EXTERNAL_ID", provider_message="published 행에 external_id가 없습니다",
+        )
+
+    import httpx
+    from app.services.threads_publish import ThreadsPublishError, delete_media
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                await delete_media(client, access_token=access_token, media_id=pub.external_id)
+            except ThreadsPublishError as exc:
+                _, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                raise mapped_exc from exc
+    finally:
+        del access_token  # ⛔즉시 소비 후 폐기 — 기존 관례와 동일.
+
+    pub.status = "unpublished"
+    await db.commit()
+    await db.refresh(pub)
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="channel_post_unpublished", actor_type="platform", actor_id=None,
+        entity_type="channel_publication", entity_id=pub.id,
+        context={
+            "gate_id": str(gate.id), "external_id": pub.external_id,
+            "unpublished_by_member_id": str(unpublished_by_member_id),
+        },
+    )
+    await db.commit()
+    return pub

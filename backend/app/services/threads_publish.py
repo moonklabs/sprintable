@@ -112,6 +112,29 @@ async def get_publishing_limit(
     return int(quota_usage), int(quota_total), int(quota_duration)
 
 
+async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> None:
+    """story #3419 — 발행된 글 회수(공식 삭제 API, 실측 2026-09-04·출처
+    developers.facebook.com/docs/threads/posts/delete-posts/): `DELETE
+    /v1.0/{threads-media-id}` — 스코프 `threads_basic`+`threads_delete` 필요, 한도
+    100건/일/계정(rate limit 자체는 이 클라이언트가 사전 조회하지 않는다 — get_
+    publishing_limit과 달리 삭제 잔량 조회 API가 별도로 없음, 초과 시 provider가 직접
+    거부). 성공 응답은 `{"success": true, "deleted_id": ...}` — success가 false거나
+    없으면 실패로 취급(호출부가 "회수됐다"고 잘못 믿지 않게)."""
+    resp = await client.delete(
+        _MEDIA_URL_TMPL.format(media_id=media_id), params={"access_token": access_token},
+    )
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "THREADS_DELETE_MEDIA_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    if not body.get("success"):
+        raise ThreadsPublishError(
+            "THREADS_DELETE_MEDIA_FAILED", f"success=false in response: {resp.text[:500]}",
+            status_code=resp.status_code,
+        )
+
+
 async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> str | None:
     """PO 결정① — `GET /{media-id}?fields=permalink`. 값이 없으면(provider가 아직 못
     붙였을 가능성) None — 호출부가 "발행은 됐는데 permalink만 비었다"로 받아들일 수

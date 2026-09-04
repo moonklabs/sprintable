@@ -16,17 +16,24 @@ from app.services.channel_posts import (
     ChannelPostApproverRoleMissingError,
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
+    ChannelPostGateNotFoundError,
+    ChannelPostNotPublishedError,
     ChannelPostReapprovalRequiredError,
     ChannelPostSealMissingError,
     ChannelPostVersionNotFoundError,
     ChannelPublishInProgressError,
     ChannelPublishProviderError,
     ChannelRateLimitedError,
+    ChannelScopeInsufficientError,
     ChannelTextTooLongError,
     ChannelTokenExpiredError,
+    ChannelUnpublishUnsupportedError,
     ExternalPublishGateNotApprovedError,
+    PublicationCommandNotCancellableError,
+    PublicationCommandNotFoundError,
     build_tagged_link,
     build_text_preview,
+    cancel_scheduled_publication,
     create_channel_post_draft_version,
     get_channel_post_draft,
     is_agent_caller,
@@ -35,6 +42,7 @@ from app.services.channel_posts import (
     publish_channel_post_draft,
     submit_channel_post_draft,
     text_char_count,
+    unpublish_channel_post,
 )
 from app.services.member_resolver import resolve_member
 
@@ -52,6 +60,29 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
             detail={
                 "code": "CHANNEL_POST_PUBLISH_HUMAN_ONLY",
                 "message": "채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
+            },
+        )
+    return resolved
+
+
+async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story #3419 AC3 — 취소·회수는 site_posts.py::_require_owner_or_admin과 동형(발행
+    보다 좁은 권한 — 되돌릴 수 있는 파괴적 상태전환이라 owner/admin 한 단계 더)."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_POST_CANCEL_UNPUBLISH_HUMAN_ONLY",
+                "message": "발행 취소·회수는 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
+            },
+        )
+    if resolved.role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_POST_CANCEL_UNPUBLISH_OWNER_OR_ADMIN_ONLY",
+                "message": "발행 취소·회수는 조직 owner 또는 admin만 가능합니다.",
             },
         )
     return resolved
@@ -650,3 +681,128 @@ async def retry_publication_command_endpoint(
         raise HTTPException(status_code=404, detail="command를 찾을 수 없거나 재시도 대상이 아닙니다")
     await db.commit()
     return RetryPublicationCommandResponse(id=command.id, status=command.status)
+
+
+class CancelScheduledCommandResponse(BaseModel):
+    command_id: uuid.UUID
+    status: str
+    reason_code: str | None = None
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/cancel-scheduled",
+    response_model=CancelScheduledCommandResponse,
+)
+async def cancel_scheduled_command_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> CancelScheduledCommandResponse:
+    """story #3419 AC1 — owner/admin 전용(휴먼 전용 안의 좁은 축, `_require_owner_or_admin`
+    — 되돌릴 수 있는 파괴적 상태전환이라 발행 자체보다 한 단계 더). 이 draft의 gate에
+    걸린 **가장 최근** publication_command가 pending·blocked·dead_letter면 `cancelled`로
+    전이한다. 그 외 상태는 409(코드 명시) — «이미 실행 중/끝난 것을 취소하려 했다»를
+    정직하게 알린다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    try:
+        command = await cancel_scheduled_publication(
+            db, org_id=org_id, draft_id=draft_id, cancelled_by_member_id=resolved.id,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostGateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PublicationCommandNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PUBLICATION_COMMAND_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except PublicationCommandNotCancellableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PUBLICATION_COMMAND_NOT_CANCELLABLE", "message": str(exc),
+                "current_status": exc.current_status,
+            },
+        ) from exc
+
+    return CancelScheduledCommandResponse(
+        command_id=command.id, status=command.status, reason_code=command.reason_code,
+    )
+
+
+class UnpublishChannelPostResponse(BaseModel):
+    publication_id: uuid.UUID
+    status: str
+    external_id: str | None = None
+    unpublished_at: str
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/unpublish", response_model=UnpublishChannelPostResponse,
+)
+async def unpublish_channel_post_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> UnpublishChannelPostResponse:
+    """story #3419 AC2 — owner/admin 전용(site_posts.py unpublish 관례와 동형). 이
+    draft의 gate에서 가장 최근 발행된(status='published') 글을 Threads 공식 삭제
+    API로 회수한다. 어댑터 미지원(422)·연결 스코프 부족(422, required_scopes 실림 —
+    기존 연결은 threads_delete 스코프 없이 저장돼 있어 재인증 前까지 여기 걸린다,
+    PO 確定 ②-a)·연결 비활성(409)·이미 회수/미발행(409)·provider 오류(401/403→토큰
+    만료 409, 그 외→502)를 각각 명시 코드로 구분한다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    try:
+        pub = await unpublish_channel_post(
+            db, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=resolved.id,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostGateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostNotPublishedError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_POST_NOT_PUBLISHED", "message": str(exc)},
+        ) from exc
+    except ChannelUnpublishUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_UNPUBLISH_UNSUPPORTED", "message": str(exc)},
+        ) from exc
+    except ChannelScopeInsufficientError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_SCOPE_INSUFFICIENT", "message": str(exc),
+                "required_scopes": exc.required_scopes,
+            },
+        ) from exc
+    except ChannelConnectionNotActiveError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
+        ) from exc
+    except ChannelTokenExpiredError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": str(exc)},
+        ) from exc
+    except ChannelPublishProviderError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)},
+        ) from exc
+
+    return UnpublishChannelPostResponse(
+        publication_id=pub.id, status=pub.status, external_id=pub.external_id,
+        unpublished_at=pub.updated_at.isoformat(),
+    )
