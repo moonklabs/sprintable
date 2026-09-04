@@ -287,6 +287,10 @@ class AvailableChannelItem(BaseModel):
     channel: str
     display_name: str
     credential_kind: str
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — "social"(짧은 글·
+    # channel_post) vs "blog"(site_post) 구분. FE가 "채널 연결" 화면과 "블로그 목적지"
+    # 화면을 이 값 하나로 분기한다(additive — 기존 필드 무변경).
+    kind: str
 
 
 @router.get(
@@ -299,7 +303,12 @@ async def list_available_channels_endpoint(
     """story f30da19a(AC1) — 목록 엔드포인트(`agent-visible`)와 동형: `_require_human()`을
     안 부른다(org 멤버면 에이전트도 조회 가능 — 이 응답엔 토큰 인접 필드가 아예 없어
     AC6의 human-only 근거가 적용되지 않는다). DB 조회 0 — 레지스트리 자체가 SSOT라
-    org마다 다른 값이 없다(org_id는 스코프 검증에만 쓴다)."""
+    org마다 다른 값이 없다(org_id는 스코프 검증에만 쓴다).
+
+    story e4fc29fa(페드루 PO 리뷰 B1, 2026-09-04) — 이 목록은 "연결 만들기" 버튼 대상
+    이다(엔드포인트 자체 목적, f30da19a AC1). `requires_connection=False`인 채널
+    (hosted_site — 연결 없이 항상 사용 가능)은 목록에서 뺀다 — 안 그러면 FE(#3435
+    AC2)가 credential_kind="none"만 보고 「샌드박스 연결 만들기」 분기를 잘못 탄다."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     from app.services.channel_adapters import CHANNEL_ADAPTERS
@@ -307,8 +316,10 @@ async def list_available_channels_endpoint(
     return [
         AvailableChannelItem(
             channel=channel, display_name=cfg.display_name, credential_kind=cfg.credential_kind,
+            kind=cfg.kind,
         )
         for channel, cfg in CHANNEL_ADAPTERS.items()
+        if cfg.requires_connection
     ]
 
 
