@@ -84,6 +84,9 @@ interface ChannelPostDraftDetail {
   failure_kind?: string | null;
   next_retry_at?: string | null;
   processing_kind?: string | null;
+  // story 15e481ce(#3453 AC2, 3437 위) — 이 채널 변형이 파생된 원문(site-posts draft
+  // id). 없으면 null(소스 없는 단독 채널 초안, 정상값 — 유나 §14-3 "null이 정상값").
+  source_content_item_id?: string | null;
 }
 
 interface ChannelPostVersion {
@@ -188,6 +191,11 @@ export default function ChannelPostEditPage() {
   const [limit, setLimit] = useState<PublishingLimitState>({ status: 'loading' });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // story 15e481ce(#3453 AC2) — 유나 §14-2 안전 표기("같은 스토리의 글", "원문" 단정
+  // 아님). source_content_item_id가 있을 때만 그 원문의 제목을 하나 더 읽는다(단건
+  // GET이 없어 versions BFF의 최신판 title로 — 이미 있는 라우트 재사용, 신규 왕복 1개
+  // 뿐 — 목록이 아니라 상세라 §3-2 "행마다 왕복" 금지 대상이 아니다).
+  const [sourceTitle, setSourceTitle] = useState<string | undefined>(undefined);
 
   // story #3428(T3-M·§17-16) — 어댑터가 선언한 이미지 규격(연결 응답에서 읽음).
   // undefined="아직 모른다"(연결 조회 전/실패) — maxCount<=0과 동형으로 첨부 칸을
@@ -280,6 +288,16 @@ export default function ChannelPostEditPage() {
         if (latest) {
           setText(latest.text);
           setLinkUrl(latest.link_url ?? '');
+        }
+        if (d?.source_content_item_id) {
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${d.source_content_item_id}/versions`)
+            .then(async (r) => {
+              if (cancelled || !r.ok) return;
+              const json = (await r.json().catch(() => null)) as { data?: { title: string }[] } | null;
+              const sourceLatest = json?.data?.[json.data.length - 1];
+              if (sourceLatest) setSourceTitle(sourceLatest.title);
+            })
+            .catch(() => {});
         }
         if (d) {
           const connRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
@@ -843,6 +861,18 @@ export default function ChannelPostEditPage() {
         <p className="text-sm text-muted-foreground">
           {draft.channel === 'threads' ? t('channelThreads') : draft.channel} · v{draft.current_version}
         </p>
+        {/* story 15e481ce(#3453 AC2, 유나 §14-2 안전 표기) — "원문" 단정이 아니라 "같은
+            스토리의 글". source_content_item_id 없으면(정상값) 이 줄 자체를 안 그린다.
+            제목을 아직 못 읽었으면(sourceTitle undefined) id 자체는 있지만 이 왕복이
+            느릴 뿐이라 조용히 넘긴다(빈 문장을 지어내지 않는다). */}
+        {draft.source_content_item_id && sourceTitle ? (
+          <p className="text-sm text-muted-foreground" data-testid="channel-post-source-link">
+            {t('channelPostsSourceLabel')}{' '}
+            <Link href={`/content/${draft.source_content_item_id}`} className="underline">
+              {t('channelPostsSourceLinkText', { title: sourceTitle })}
+            </Link>
+          </p>
+        ) : null}
       </div>
 
       {/* story #3402 ④ — 승인 카드(T5/T6). AC8(UTM 미리보기)·AC9(계정 표시)·AC7(한도

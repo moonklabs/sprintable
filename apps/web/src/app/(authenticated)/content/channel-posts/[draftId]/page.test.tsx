@@ -81,6 +81,8 @@ const DRAFT_DETAIL = {
   processing_kind: null as string | null,
   // story f061c1a3 — 재시도 BFF가 붙일 대상 command.
   command_id: null as string | null,
+  // story 15e481ce(#3453 AC2) — 이 채널 변형이 파생된 원문.
+  source_content_item_id: null as string | null,
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -129,6 +131,9 @@ function stubFetch(opts: {
   // command_status='pending').
   onRetry?: (commandId: string) => { status: number; body?: unknown };
   draftAfterRetry?: Record<string, unknown>;
+  // story 15e481ce(#3453 AC2) — draft.source_content_item_id가 있을 때 그 원문의 제목을
+  // 읽는 versions 조회(마지막 버전의 title).
+  sourceVersions?: { title: string }[];
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -149,6 +154,10 @@ function stubFetch(opts: {
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
+      }
+      if (opts.draftDetail?.source_content_item_id
+        && url === `/api/organizations/${ORG_ID}/site-posts/drafts/${opts.draftDetail.source_content_item_id}/versions`) {
+        return { ok: true, status: 200, json: async () => ({ data: opts.sourceVersions ?? [{ title: '9월 실험 회고' }], error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
         // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 자체가 실패하면 unpublishGate가
@@ -1905,5 +1914,29 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
 
     expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
+  });
+});
+
+// story 15e481ce(#3453 AC2, 유나 §14-2) — "같은 스토리의 글"(정방향, 상세 머리).
+describe('ChannelPostEditPage — 같은 스토리의 글(story 15e481ce AC2, §14-2)', () => {
+  it('source_content_item_id가 없으면(정상값) 이 줄 자체가 안 그려진다', async () => {
+    stubFetch({});
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-source-link"]')).toBeNull();
+  });
+
+  it('⭐source_content_item_id가 있으면 원문 제목을 읽어 "같은 스토리의 글" 링크로 보인다("원문" 단정 아님)', async () => {
+    stubFetch({
+      draftDetail: { source_content_item_id: 'site-1' },
+      sourceVersions: [{ title: '9월 실험 회고' }],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const el = container.querySelector('[data-testid="channel-post-source-link"]');
+    expect(el?.textContent).toContain(koMessages.content.channelPostsSourceLabel);
+    expect(el?.textContent).toContain('9월 실험 회고');
+    expect(el?.querySelector('a')?.getAttribute('href')).toBe('/content/site-1');
   });
 });
