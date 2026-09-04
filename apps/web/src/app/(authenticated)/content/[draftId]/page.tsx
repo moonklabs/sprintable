@@ -53,6 +53,25 @@ interface SitePostVersion {
   author_member_id: string;
   author_kind: 'agent' | 'human';
   created_at: string;
+  // story 1db41045(#3457) — 이 원문이 속한 campaign. 없으면 null(정상값, 단독 글).
+  // 페드루 PO 確定(2026-09-04 17:03Z) — 디디 BE 소형 후속이 이 두 필드를
+  // SitePostVersionHistoryItem에 얹은 뒤에야(source_content_item_id 옆) 이 계약이
+  // 실물과 맞다 — 필드명 대조 없이는 조용히 버려지는 자리라 rebase 뒤 재확認 필수.
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+}
+
+// story 1db41045(#3457) — GET /organizations/{org}/campaigns 응답 1건(디디 BE 소형
+// 후속, CampaignResponse 재사용·GET/{id}와 같은 권한 폭·created_at desc — 페드루 PO
+// 確定 2026-09-04 17:01Z).
+interface CampaignListItem {
+  id: string;
+  name: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: string;
+  created_by_member_id: string;
+  created_at: string;
 }
 
 // story #3368 §8-1 4단(페드루 지시 2026-09-03) — 이 work item의 external_publish
