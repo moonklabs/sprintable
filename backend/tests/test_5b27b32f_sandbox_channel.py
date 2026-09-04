@@ -120,6 +120,16 @@ async def _seed_human(session, org_id, project_id, *, role="owner"):
     return user.id
 
 
+async def _seed_agent(session, org_id, project_id, *, name="agent"):
+    """페드루 리뷰 B1 — test_3373_channel_connections.py::_seed_agent와 동형."""
+    from app.models.team import TeamMember
+
+    m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
+    session.add(m)
+    await session.commit()
+    return m.id
+
+
 async def _seed_story(session, org_id, project_id, *, title="채널 포스트"):
     from app.models.pm import Story
 
@@ -326,6 +336,32 @@ async def test_create_sandbox_connection_as_member_forbidden():
         assert r.status_code == 403, r.text
         error = r.json().get("error") or r.json()
         assert error["code"] == "CHANNEL_CONNECTION_OWNER_OR_ADMIN_ONLY"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_sandbox_connection_as_agent_returns_403():
+    """페드루 리뷰 B1 — 샌드박스 연결은 "OAuth 없이 agent-callable"이 아니다. 실제로는
+    `_require_owner_or_admin`이 `_require_human`을 거치므로(channel_connections.py:76,51)
+    에이전트 키는 사람과 똑같이 403(CHANNEL_CONNECTION_HUMAN_ONLY) — 실 OAuth 연결
+    (test_3373_channel_connections.py::test_agent_gets_403_on_every_endpoint)과 동일
+    가드가 이 신규 endpoint에도 그대로 적용됨을 고정."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/sandbox")
+        assert r.status_code == 403, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "CHANNEL_CONNECTION_HUMAN_ONLY"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -579,6 +615,39 @@ async def test_publish_via_sandbox_container_error_marker_inert_on_text_path():
             draft_id, gate_id = await _create_draft_submit_approve(
                 client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
                 text="TEXT 발행은 폴링이 없다 [sandbox:container-error]",
+            )
+            publication = await publish_channel_post_draft(
+                s, org_id=org_id, draft_id=draft_id, published_by_member_id=human_id,
+            )
+        assert publication.status == "published"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_via_sandbox_container_slow_marker_inert_on_text_path():
+    """페드루 리뷰 B2 — `[sandbox:container-error]`와 동일 이유로 `[sandbox:container-
+    slow]`도 TEXT 경로에서는 폴링 자체가 없어(has_image=False면 get_container_status
+    호출 안 함, story 620beefc B3) 즉시 published여야 한다 — 지연이 전혀 관측되면 안
+    된다(관측되면 TEXT/IMAGE 분기 자체가 깨진 것)."""
+    from app.main import app
+    from app.services.channel_posts import publish_channel_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            connection_id = await _create_sandbox_connection(client, org_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                text="TEXT 발행은 폴링이 없다 [sandbox:container-slow]",
             )
             publication = await publish_channel_post_draft(
                 s, org_id=org_id, draft_id=draft_id, published_by_member_id=human_id,

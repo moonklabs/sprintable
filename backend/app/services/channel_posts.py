@@ -891,6 +891,13 @@ async def submit_channel_post_draft(
 # latest.link_url은 절대 바꾸지 않는다(봉인 해시가 이미 그 원본 쌍으로 계산돼 있다, #3374).
 # UTM은 발행 시점에만 조립되는 배달 계층 부가물이지 승인 대상 내용이 아니다.
 
+# story 5b27b32f(페드루 리뷰 N1) — Threads 429 응답 자체엔 reset 시각이 실려오지 않는다
+# (Meta 문서에 Retry-After류 필드 없음, 그라운딩 §③) — provider가 알려주지 않을 때 쓰는
+# 기본 유예값. 60초는 임의값이 아니라 story #3414 백오프 최소 단위(_BACKOFF_BASE_SECONDS,
+# publication_command.py)와 맞춘 것 — 이보다 짧으면 재시도가 백오프보다 먼저 도래해
+# 의미가 없다.
+_RATE_LIMIT_DEFAULT_RESET_SECONDS = 60
+
 
 def _classify_threads_error(
     exc: "ThreadsPublishError", *, connection_id: uuid.UUID,
@@ -910,7 +917,7 @@ def _classify_threads_error(
         )
     if exc.status_code == 429:
         return "CHANNEL_RATE_LIMITED", ChannelRateLimitedError(
-            reset_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+            reset_at=datetime.now(timezone.utc) + timedelta(seconds=_RATE_LIMIT_DEFAULT_RESET_SECONDS),
         )
     return "CHANNEL_PUBLISH_PROVIDER_ERROR", ChannelPublishProviderError(
         provider_code=exc.code, provider_message=exc.message,

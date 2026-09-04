@@ -29,14 +29,19 @@
 - `[sandbox:expired-token]` — `create_container`가 401로 실패(기존 _classify_threads_
   error가 이미 CHANNEL_TOKEN_EXPIRED로 분류).
 - `[sandbox:container-error]` — 컨테이너 생성 자체는 성공하지만, 폴링(get_container_
-  status)이 ERROR를 낸다(AC3 "컨테이너 ERROR").
+  status)이 ERROR를 낸다(AC3 "컨테이너 ERROR"). ⚠️**이미지 첨부 초안 전용** — 오케스트
+  레이션(channel_posts.py::publish_channel_post_draft)이 `has_image`일 때만 폴링을
+  타므로(story 620beefc AC5), 이미지 없는 TEXT 초안에서는 create_container가 이 마커를
+  creation_id에 인코딩해도 아무도 안 읽어 즉시 published로 끝난다(마커가 조용히
+  inert — 결함 아님, 발행 오케스트레이션의 기존 분기 구조).
 - `[sandbox:container-slow]` — 컨테이너가 즉시 안 끝나고 `_CONTAINER_SLOW_DELAY_SECONDS`
   뒤에야 FINISHED로 전환된다(AC3 "container IN_PROGRESS→FINISHED 2 tick" — 발행 오케스트
   레이션의 최초 30초 대기+이후 폴링 주기를 감안해 첫 poll엔 아직 IN_PROGRESS, 두 번째
-  poll에서 FINISHED가 나오게 지연을 잡았다).
+  poll에서 FINISHED가 나오게 지연을 잡았다). ⚠️위와 동일하게 **이미지 첨부 초안 전용**.
 
 마커는 서로 배타적으로 다루지 않는다(먼저 매치되는 것을 그대로 적용) — 실패 마커 3종은
-텍스트 안 어디에든, 컨테이너 마커 2종과 자유롭게 조합 가능."""
+텍스트 안 어디에든, 컨테이너 마커 2종과 자유롭게 조합 가능(단, 컨테이너 마커 2종은
+이미지 첨부 초안에서만 의미 있음, 위 참고)."""
 from __future__ import annotations
 
 import time
