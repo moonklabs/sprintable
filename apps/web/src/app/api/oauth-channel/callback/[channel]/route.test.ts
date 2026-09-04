@@ -38,6 +38,23 @@ describe('GET /api/oauth-channel/callback/[channel] (story #3376)', () => {
     h.cookiesGetMock.mockImplementation((name: string) => (name in defaults ? { value: defaults[name] } : undefined));
   }
 
+  it('⭐story #3407 — error 파라미터(Meta 거부)가 있으면 code/state 유무와 무관하게 즉시 OAUTH_PROVIDER_DENIED로, BE는 안 부른다', async () => {
+    stubCookies();
+    const res = await GET(makeRequest({ error: 'access_denied', error_reason: 'user_denied', state: 's' }), routeParams());
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(res.headers.get('location')).toContain('connect_error=OAUTH_PROVIDER_DENIED');
+    expect(res.headers.get('location')).not.toContain('access_denied');
+    expect(res.headers.get('location')).not.toContain('user_denied');
+  });
+
+  it('⭐story #3407 페드루 리뷰 — error=server_error(제공자 오류)는 거부가 아니라 OAUTH_PROVIDER_ERROR로 가른다', async () => {
+    stubCookies();
+    const res = await GET(makeRequest({ error: 'server_error', state: 's' }), routeParams());
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(res.headers.get('location')).toContain('connect_error=OAUTH_PROVIDER_ERROR');
+    expect(res.headers.get('location')).not.toContain('server_error');
+  });
+
   it('code·state·org_id 쿠키 중 org_id가 없으면 BE를 부르지 않고 에러 리다이렉트', async () => {
     h.cookiesGetMock.mockReturnValue(undefined); // oauth_channel_org_threads 없음
     const res = await GET(makeRequest({ code: 'c', state: 's' }), routeParams());

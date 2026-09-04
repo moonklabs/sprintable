@@ -2094,6 +2094,8 @@
     "channelConnectErrorStateInvalid": "연결 요청이 만료되었거나 유효하지 않습니다 — 다시 시도해 주세요.",
     "channelConnectErrorOwnerOnly": "이 작업은 owner만 할 수 있습니다.",
     "channelConnectErrorSessionExpired": "세션이 만료되었습니다 — 다시 로그인해 주세요.",
+    "channelConnectErrorProviderDenied": "권한 승인이 취소되었습니다 — 다시 연결해 주세요.",
+    "channelConnectErrorProviderError": "채널 제공자 쪽 오류입니다 — 잠시 후 다시 연결해 주세요.",
     "appCredentialsTitle": "{channel} 앱 자격",
     "appCredentialsOrgActive": "이 조직의 앱으로 연결합니다 · 앱 ID 끝 4자리 {suffix}",
     "appCredentialsPlatformActive": "Sprintable 공용 앱으로 연결합니다(기본)",
