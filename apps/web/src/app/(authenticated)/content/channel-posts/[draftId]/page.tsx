@@ -812,10 +812,31 @@ export default function ChannelPostEditPage() {
             </div>
           );
         }
-        if (view.partialSuccess) {
+        if (view.unpublished) {
+          // story #3426(doc §17-10②) — 회수돼도 승인(gate) 자체는 안 풀린다 — 칩은
+          // 「승인됨」 그대로이고 이 오버레이가 "회수됨"을 얹는다(partialSuccess/
+          // publicationFailed와 같은 자리). story #3428(PO 확定, 2026-09-04 12:19Z) —
+          // unpublished는 published 이후에만 성립하므로 processing_kind(발행 진행 중
+          // 신호)와 동시 불가 — 그래도 겹치면 데이터 결함으로 보고 unpublished를
+          // 우선한다(이 분기가 processing_kind 분기보다 먼저 온다).
           return (
-            <Alert role="status" data-testid="channel-post-partial-success-notice">
-              <AlertDescription>{t('channelPostsPartialSuccessNotice')}</AlertDescription>
+            <Alert role="status" data-testid="channel-post-unpublished-notice">
+              <AlertDescription>{t('channelPostsUnpublishedNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
+        // story #3428(§17-15, PO 확定 2026-09-04 12:19Z) — processing_kind='awaiting_
+        // container'는 command_status=pending ∧ publication_status=container_created를
+        // 서버가 이미 파생한 값(같은 근본 상태를 partialSuccess도 본다) — 명령이 살아
+        // 있으면(=아직 자동 재시도/폴링 중) 실패가 아니므로 이 알림 하나만 보이고
+        // partialSuccess는 그리지 않는다(아래 분기보다 먼저 체크). 명령이 blocked/
+        // dead_letter/needs_check로 전이되면 서버가 processing_kind를 null로 되돌리므로
+        // (BE 620beefc _to_draft_list_item) 이 분기는 자연히 사라지고 실패 알림이 대신
+        // 선다 — 화면이 두 신호를 조합판정하지 않는다.
+        if (draft.processing_kind === 'awaiting_container') {
+          return (
+            <Alert role="status" data-testid="channel-post-awaiting-container-notice">
+              <AlertDescription>{t('channelPostsAwaitingContainerNotice')}</AlertDescription>
             </Alert>
           );
         }
@@ -826,13 +847,10 @@ export default function ChannelPostEditPage() {
             </Alert>
           );
         }
-        if (view.unpublished) {
-          // story #3426(doc §17-10②) — 회수돼도 승인(gate) 자체는 안 풀린다 — 칩은
-          // 「승인됨」 그대로이고 이 오버레이가 "회수됨"을 얹는다(partialSuccess/
-          // publicationFailed와 같은 자리).
+        if (view.partialSuccess) {
           return (
-            <Alert role="status" data-testid="channel-post-unpublished-notice">
-              <AlertDescription>{t('channelPostsUnpublishedNotice')}</AlertDescription>
+            <Alert role="status" data-testid="channel-post-partial-success-notice">
+              <AlertDescription>{t('channelPostsPartialSuccessNotice')}</AlertDescription>
             </Alert>
           );
         }

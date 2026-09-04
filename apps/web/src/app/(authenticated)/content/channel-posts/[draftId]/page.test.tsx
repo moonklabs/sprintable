@@ -1343,3 +1343,56 @@ describe('ChannelPostEditPage — 승인 카드 썸네일·배지(T5-M, story #3
     expect(container.querySelector('[data-testid="channel-post-image-converted-badge"]')).toBeNull();
   });
 });
+
+// story #3428(§17-15, PO 확定 2026-09-04 12:19Z) — processing_kind 오버레이 우선순위
+// 진리표 4행. processing_kind='awaiting_container'는 실데이터에서 항상 publication_
+// status='container_created'와 함께 온다(BE 620beefc 판정식) — 즉 partialSuccess와
+// 근본 상태를 공유하는 게 실제 겹침이다(행1). 그 겹침이 없을 때(processing_kind=null)
+// 기존 partialSuccess/publicationFailed 분기는 무회귀(행2·3). unpublished는
+// processing_kind와 절대 안 겹쳐야 하지만(published 이후에만 성립) 데이터 결함으로
+// 겹치는 경우까지 unpublished를 우선한다(행4).
+describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순위 진리표(story #3428)', () => {
+  it('행1 — processing_kind=awaiting_container(+container_created) → 이어서 처리 중만, partialSuccess는 억제', async () => {
+    stubFetch({ draftDetail: { publication_status: 'container_created', processing_kind: 'awaiting_container' } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).toBeNull();
+  });
+
+  it('행2 — processing_kind=null·container_created → partialSuccess 그대로(무회귀)', async () => {
+    stubFetch({ draftDetail: { publication_status: 'container_created', processing_kind: null } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
+  });
+
+  it('행3 — processing_kind=null·failed → publicationFailed 그대로(무회귀)', async () => {
+    stubFetch({ draftDetail: { publication_status: 'failed', error_code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', processing_kind: null } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
+  });
+
+  it('행4 — unpublished + processing_kind(데이터 결함으로 동시 참) → unpublished 우선', async () => {
+    stubFetch({ draftDetail: { publication_status: 'unpublished', processing_kind: 'awaiting_container' } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
+  });
+});

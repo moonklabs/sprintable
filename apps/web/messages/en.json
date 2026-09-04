@@ -2267,6 +2267,7 @@
     "channelPostsImageConversionFailed": "Even after automatic conversion, this still exceeds the {maxBytes} limit ({finalBytes})",
     "channelPostsImageAnimatedUnsupported": "Animated images aren't supported ({frameCount} frames)",
     "channelPostsImageConvertedBadge": "Automatically converted to fit this channel's specs: width {originalWidth}px → {finalWidth}px · size {originalBytes} → {finalBytes}",
+    "channelPostsAwaitingContainerNotice": "This is being automatically continued. Please check back shortly.",
     "channelPostsPublicationFailedNotice": "Publishing failed — republishing this draft will continue that attempt."
   },
   "docs": {
