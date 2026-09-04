@@ -456,6 +456,26 @@ async def get_site_post_draft(db: AsyncSession, *, org_id: uuid.UUID, draft_id: 
     )).scalar_one_or_none()
 
 
+async def set_site_post_draft_campaign(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, campaign_id: uuid.UUID | None,
+) -> SitePostDraft:
+    """story #3437 후속(유나 #3805 정적 판정, 페드루 PO 確定 2026-09-04) — campaign
+    「붙이기/해제」 전용 경로. `create_site_post_draft_version`을 재사용하면 본문
+    무변인데도 새 버전이 이력에 끼고 `_reseal_gate_on_new_version`이 해시를 안 보고
+    무조건 승인된 게이트를 pending·reapproval_required로 되돌린다 — campaign은 본문이
+    아니라 draft 축이라 버전·게이트 어느 쪽도 건드릴 이유가 없다. 이 함수는 새 버전을
+    만들지 않고 `site_post_drafts.campaign_id`만 갱신한다(게이트 무접촉)."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+    if campaign_id is not None and await get_campaign(db, org_id=org_id, campaign_id=campaign_id) is None:
+        raise CampaignNotFoundError(campaign_id=campaign_id)
+    draft.campaign_id = campaign_id
+    await db.commit()
+    await db.refresh(draft)
+    return draft
+
+
 async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID) -> list[SitePostVersion]:
     stmt = (
         select(SitePostVersion)
