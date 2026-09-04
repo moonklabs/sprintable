@@ -24,6 +24,8 @@ from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.models.channel_post_draft import ChannelPostDraft
+from app.models.channel_post_version import ChannelPostVersion
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition, set_gate_status
 from app.models.hitl_config import OrgGatePolicy
@@ -809,6 +811,88 @@ async def create_gate(
     return gate
 
 
+# story #3443(AC1, 페드루 PO 確定 2026-09-04) — draft_id를 못 읽으면 사람이 화면에서
+# 보는 한 줄로 남긴다(조용히 삼키지 않는다 — "승인됐는데 예약이 안 걸린다"가 이 스토리
+# 자체의 사고 클래스라 PO가 "보이는 실패"로 명시 확定).
+_SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE = "예약 명령 미생성(draft 해석 실패)"
+
+
+async def _maybe_create_scheduled_publication_command(
+    session: AsyncSession, gate: Gate, resolver_id: uuid.UUID | None,
+) -> None:
+    """story #3443(AC1, 페드루 PO 確定 2026-09-04) — 예약 상신(gate.sealed_scheduled_at
+    있음)이 approved로 전이되는 순간 publication_command를 자동 생성한다(블루프린트 §3
+    "승인 완료 시 명령 생성" 원문 정합 — 지금까지는 휴먼의 별도 발행 요청만 명령을
+    만들어, 승인 후 클릭이 없으면 예약 시각에 아무것도 안 나갔다).
+
+    destination/approved_version 조립은 `channel_posts.py::resolve_command_target`과
+    동형이다 — "최신 버전=봉인된 버전"이 승인 게이트의 불변식이라(reapproval_required
+    게이트는 애초에 이 approved 전이 자체가 막힌다) 별도 해시 대조 없이 재사용 가능.
+    멱등키(create_or_get_publication_command의 UNIQUE org_id+destination+approved_
+    version+operation)는 무변경 — 이미 명령이 있으면 그대로 반환(재생성 0, AC4).
+
+    site_post 게이트는 sealed_scheduled_at을 아예 설정하지 않아(scheduled_at 개념
+    자체가 없음) 이 훅에 진입하는 gate는 항상 channel_post 소속이다(도메인 오판 여지
+    없음, 그라운딩 확認).
+
+    draft_id를 못 읽으면(파싱 실패·draft/버전 소실·승인자 미상 등 — 이론상 sealed_
+    scheduled_at 도입(0317) 이후로는 불가하지만 방어) **승인 자체는 절대 막지 않는다**
+    (사람의 결정을 서버 부수 효과가 되돌리면 안 된다) — 대신 warning 로그 + `gate.
+    resolution_note`에 사람이 화면에서 보는 한 줄을 남긴다(PO 確定 — 조용히 삼키면
+    정시 발행이 다시 사람 클릭에 매달린다, "보이는 실패")."""
+    if gate.gate_type != "external_publish" or gate.sealed_scheduled_at is None:
+        return
+
+    def _mark_unresolved() -> None:
+        logger.warning(
+            "gate %s approved with sealed_scheduled_at but draft resolution failed — "
+            "scheduled publication_command not created", gate.id,
+        )
+        note = _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE
+        gate.resolution_note = f"{gate.resolution_note}\n{note}" if gate.resolution_note else note
+
+    if resolver_id is None:
+        _mark_unresolved()
+        return
+
+    raw_draft_id = (gate.neutral_facts or {}).get("draft_id")
+    if raw_draft_id is None:
+        _mark_unresolved()
+        return
+    try:
+        draft_id = uuid.UUID(raw_draft_id)
+    except (ValueError, TypeError, AttributeError):
+        _mark_unresolved()
+        return
+
+    draft = (await session.execute(
+        select(ChannelPostDraft).where(
+            ChannelPostDraft.id == draft_id, ChannelPostDraft.org_id == gate.org_id,
+        )
+    )).scalar_one_or_none()
+    if draft is None:
+        _mark_unresolved()
+        return
+
+    latest = (await session.execute(
+        select(ChannelPostVersion)
+        .where(ChannelPostVersion.draft_id == draft.id)
+        .order_by(ChannelPostVersion.version.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if latest is None:
+        _mark_unresolved()
+        return
+
+    from app.services.publication_command import create_or_get_publication_command
+
+    await create_or_get_publication_command(
+        session, org_id=gate.org_id, gate_id=gate.id, destination=draft.connection_id,
+        approved_version=latest.id, requested_by_member_id=resolver_id,
+        scheduled_at=gate.sealed_scheduled_at,
+    )
+
+
 async def transition_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -1000,6 +1084,11 @@ async def transition_gate(
     from app.services.evidence_service import create_gate_approval_evidence_if_applicable
 
     await create_gate_approval_evidence_if_applicable(session, gate, new_status, resolver_id)
+
+    # story #3443(AC1) — 예약(sealed_scheduled_at) external_publish 게이트가 승인되는
+    # 순간 publication_command 자동 생성(자체 gate_type/필드 가드, no-op 그 외).
+    if new_status == "approved":
+        await _maybe_create_scheduled_publication_command(session, gate, resolver_id)
 
     await session.flush()
     await session.refresh(gate)
