@@ -86,6 +86,7 @@ function stubFetch(opts: {
   draftDetail?: Partial<typeof DRAFT_DETAIL>;
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
+  onPublish?: () => { status: number; body: unknown };
   // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — GATE_ALREADY_HELD의
   // best-effort 상대 초안 조회. undefined=엔드포인트 자체가 404(구 계약, #3767 착지 전
   // 상황 재현) · { text_preview: null }=필드는 있는데 값이 없음 · 값 있으면 그 미리보기.
@@ -141,6 +142,13 @@ function stubFetch(opts: {
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/submit` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body ?? '{}'));
         const result = opts.onSubmit?.(body) ?? { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/publish` && init?.method === 'POST') {
+        const result = opts.onPublish?.() ?? {
+          status: 200, body: { permalink: 'https://threads.net/@x/1', external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1' },
+        };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -510,6 +518,63 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     const btn = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')).toBeNull();
+  });
+
+  // story #3402 PR2 ②-b(T7) — 발행 버튼 클릭 배선.
+  it('⭐발행 성공 — permalink/external_id/published_at이 draft에 병합돼 T7 발행됨 정보가 즉시 보인다(재로드 없이)', async () => {
+    stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.publishSuccess.replace('{time}', '').split('{')[0]);
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
+  });
+
+  it('⭐발행 실패(예: CHANNEL_TEXT_TOO_LONG) — api-error로 파싱된 사람 말이 보인다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 422, body: { detail: { code: 'CHANNEL_TEXT_TOO_LONG', message: '한도 초과', max_length: 500, current_length: 517 } } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    // CHANNEL_TEXT_TOO_LONG은 api-error.ts에서 humanMessageKey를 일부러 비워 둔다(page.tsx가
+    // max_length/current_length로 문구를 조립해야 하는데 이 조각은 아직 그 조립을 안 함 —
+    // ②-c 몫). 지금은 서버 원문 메시지(humanMessageFallback)로 fallback되는 것만 확인한다.
+    expect(container.textContent).toContain('한도 초과');
+  });
+
+  it('canPublish=false면 발행 버튼을 눌러도 아무 일도 안 일어난다(handlePublish 가드)', async () => {
+    stubFetch({ draftDetail: { gate_status: null } });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
   });
 
   it('로드 실패 — 오류 알림을 보인다', async () => {

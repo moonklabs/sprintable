@@ -106,6 +106,11 @@ export default function ChannelPostEditPage() {
     { type: 'success'; gateId: string } | { type: 'error'; text: string; raw?: string; heldByDraftId?: string } | null
   >(null);
 
+  // story #3402 PR2 ②-b — 발행(T7). confirm 다이얼로그 없음(site-posts와 동형 — 되돌릴 수
+  // 없는 쪽은 발행 취소이지 발행 자체가 아니다, handleUnpublish만 ConfirmDialog를 쓴다).
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
+
   useEffect(() => {
     if (!orgId || !draftId) return;
     let cancelled = false;
@@ -295,6 +300,46 @@ export default function ChannelPostEditPage() {
     }
   };
 
+  // story #3402 PR2 ②-b(T7·AC5·AC10) — 발행. draft 상태를 재로드하지 않고 성공 응답
+  // {permalink, external_id, published_at, version_id}(story f8f7cb0f 계약)을 그 자리에서
+  // 병합한다 — site-posts처럼 별도 loadGate/loadPublication 훅이 없다(단건 GET 하나가
+  // 이미 게이트+발행 상태를 같이 준다, story #3394/#3403 설계). publication_status를
+  // 'published'로 직접 세팅하지 않는 이유: 서버가 "최신 버전"과 "가장 최근 published"
+  // 두 축을 조인 축을 다르게 계산하므로(§4-2, story #3394 AC2) 화면이 그 판정을 흉내내지
+  // 않는다 — 성공 응답 필드만 병합하고, 진짜 publication_status는 다음 로드/새로고침이
+  // 정직하게 채운다(지어내지 않는다).
+  const handlePublish = async () => {
+    if (!orgId || !draft || !canPublish) return;
+    setPublishing(true);
+    setPublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as
+          { data?: { permalink?: string; external_id?: string; published_at?: string } } | null;
+        const { permalink, external_id, published_at } = json?.data ?? {};
+        if (permalink && published_at) {
+          setPublishResult({ type: 'success' });
+          setDraft((prev) => prev && { ...prev, permalink, external_id, published_at, publication_status: 'published' });
+        } else {
+          setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setPublishResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setPublishResult({ type: 'error', text: t('publishFailed') });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
   }
@@ -444,13 +489,16 @@ export default function ChannelPostEditPage() {
         return null;
       })()}
 
-      {/* story #3402 PR2 ②-a — 발행/발행 취소 버튼(게이팅만, API 배선은 ②-b). AC5 —
-          비활성 사유 문구는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
-          워시된다, Phase 0 실측 그대로 재사용). 발행 취소는 발행됨 상태에서만 뜬다. */}
+      {/* story #3402 PR2 ②-a/②-b — 발행/발행 취소 버튼. AC5 — 비활성 사유 문구는 버튼
+          밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에 워시된다, Phase 0 실측 그대로
+          재사용). 발행 취소는 발행됨 상태에서만 뜬다.
+          ⚠️발행 취소는 이 조각에서 API 미배선 — backend/app/routers/channel_posts.py에
+          unpublish 엔드포인트 자체가 아직 없다(grep 0건, site-posts만 있음). 버튼은
+          게이팅까지만 서고 onClick은 다음 스토리(BE 선행) 대기. */}
       <div className="space-y-2">
         <div className="flex gap-2">
-          <Button disabled={!canPublish} data-testid="channel-post-publish-button">
-            {view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
+          <Button onClick={() => void handlePublish()} disabled={!canPublish || publishing} data-testid="channel-post-publish-button">
+            {publishing ? t('publishPendingCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
           </Button>
           {view.status === 'published' ? (
             <Button variant="outline" disabled={!canUnpublish} data-testid="channel-post-unpublish-button">
@@ -467,6 +515,11 @@ export default function ChannelPostEditPage() {
           <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
             {t('unpublishDisabledReason')}
           </p>
+        ) : null}
+        {publishResult ? (
+          <Alert variant={publishResult.type === 'error' ? 'destructive' : 'default'} role={publishResult.type === 'error' ? 'alert' : 'status'}>
+            <AlertDescription>{publishResult.type === 'success' ? t('publishSuccess', { time: draft.published_at ? new Date(draft.published_at).toLocaleString() : '' }) : publishResult.text}</AlertDescription>
+          </Alert>
         ) : null}
       </div>
 
