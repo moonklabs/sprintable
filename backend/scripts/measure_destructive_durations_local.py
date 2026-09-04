@@ -30,6 +30,14 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
 WEIGHTS_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.json"
 
+# story #3465 — 이 전체 재측정 실행은 모든 파일을 같은 배치로 잰다(개별 파일마다 다른
+# provenance를 붙일 근거가 없다 — 실행 시각을 SOURCE_LABEL에 박아 최소한 "언제 이
+# 배치가 돌았나"는 항목마다 남긴다). files[]의 개별 source_run 세그먼트를 없애고 항목별
+# source 필드로 바꾼 구조 전환(story #3465) 후 이 전체-재측정 도구의 유일한 provenance
+# 생성 지점 — 실행할 때마다 여기 갱신하면 된다(하드코딩 날짜, 자동 today() 안 씀 —
+# 재현 가능한 값을 스크립트 실행자가 명시로 남기게).
+SOURCE_LABEL = "local-full-remeasure(2026-09-04, story #3465 구조전환 후 최초 재측정)"
+
 sys.path.insert(0, str(BACKEND_DIR / "scripts"))
 from shard_destructive_tests import discover_files
 
@@ -59,7 +67,7 @@ def main() -> int:
         )
         elapsed = time.monotonic() - t0
         ok = proc.returncode == 0
-        results.append({"file": f, "sec": round(elapsed, 2)})
+        results.append({"file": f, "sec": round(elapsed, 2), "source": SOURCE_LABEL})
         print(f"[{i+1}/{len(files)}] {elapsed:6.2f}s {'OK' if ok else 'FAIL'} {f}", file=sys.stderr)
         if not ok:
             print(proc.stdout[-2000:], file=sys.stderr)
@@ -76,7 +84,6 @@ def main() -> int:
             "동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 "
             "1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐."
         ),
-        "source_run": "local-post-template-optimization",
         "measured_at": "2026-09-03",
         "files": sorted(results, key=lambda r: -r["sec"]),
     }

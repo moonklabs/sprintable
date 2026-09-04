@@ -73,6 +73,27 @@ def load_weights(weights_path: Path = WEIGHTS_PATH) -> dict[str, float]:
     return {e["file"]: float(e["sec"]) for e in data.get("files", [])}
 
 
+def load_raw_entries(weights_path: Path = WEIGHTS_PATH) -> list[dict]:
+    """story #3465 — files[] 항목 원본(그대로, `source` 필드 포함) 반환. `load_weights()`는
+    이미 `{file: sec}`로 평탄화해 `source`를 버리므로, 그 필드를 검증하려는 호출자는 이
+    함수를 쓴다(load_weights()의 계약은 그대로 유지 — partition() 등 기존 소비처가 이
+    변경으로 안 흔들린다)."""
+    if not weights_path.exists():
+        return []
+    data = json.loads(weights_path.read_text())
+    return data.get("files", [])
+
+
+def entries_missing_source(entries: list[dict]) -> list[str]:
+    """story #3465 — 단일 `source_run` 문자열을 폐기하고 files[] 항목마다 `source`
+    (provenance)를 필수로 바꾼 뒤의 존재 가드. 오늘(2026-09-04) 하루 rebase 충돌
+    3회(#3797·#3800·#3802)가 전부 그 단일 문자열 한 줄을 여러 PR이 동시에 건드려
+    난 것 — 항목별 필드면 다른 PR이 다른 줄을 건드려 충돌이 구조적으로 사라진다.
+    값의 진위는 검증 안 함(존재 자체만, story 23bf1913의 unweighted_files_in()과
+    동형 관례)."""
+    return [e["file"] for e in entries if not str(e.get("source", "")).strip()]
+
+
 def check_staleness(
     discovered_count: int, weights_path: Path = WEIGHTS_PATH, *, unweighted_count: int = 0,
 ) -> str | None:
