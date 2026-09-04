@@ -114,6 +114,10 @@ interface ChannelConnectionInfo {
   // unpublish_blocked_reason은 항상 null.
   can_unpublish: boolean;
   unpublish_blocked_reason: 'unsupported' | 'scope_insufficient' | null;
+  // story #3458(유나 4회차 2차 발견) — can_unpublish는 어댑터 «성질»(unsupported·
+  // scope_insufficient)만 판정하고 연결 «상태»(토큰 만료 등)는 안 본다. 정본 3653a18c
+  // §3 "자격·범위·토큰 상태 셋 다 서야 초록" 중 토큰 조각이 이 필드다.
+  status: 'active' | 'expired' | 'revoked' | 'error';
   // story #3428(BE 620beefc·PR#3776) — 이 연결(채널)의 이미지 규격 선언(어댑터 성질,
   // 하드코딩 금지 축 그대로 — T3-M 규격 태그 재료). image_max_count<=0이면 이 채널은
   // 이미지 미지원(§17-16 — 첨부 칸 자체를 그리지 않는다).
@@ -186,8 +190,9 @@ export default function ChannelPostEditPage() {
   const [accountLabel, setAccountLabel] = useState<string | undefined>(undefined);
   // story #3426 — undefined="연결 조회 전/실패, 아직 모른다"(§3-2와 같은 축) · 조회 성공하면
   // 연결의 can_unpublish/unpublish_blocked_reason 그대로.
+  // story #3458 — connectionStatus 추가(같은 조회, 새 왕복 0).
   const [unpublishGate, setUnpublishGate] = useState<
-    { canUnpublish: boolean; blockedReason: 'unsupported' | 'scope_insufficient' | null } | undefined
+    { canUnpublish: boolean; blockedReason: 'unsupported' | 'scope_insufficient' | null; connectionStatus: ChannelConnectionInfo['status'] } | undefined
   >(undefined);
   const [limit, setLimit] = useState<PublishingLimitState>({ status: 'loading' });
   const [loading, setLoading] = useState(true);
@@ -319,7 +324,11 @@ export default function ChannelPostEditPage() {
             if (conn) setAccountLabel(conn.account_label ?? conn.account_id);
             // story #3426 — can_unpublish/unpublish_blocked_reason은 draft가 아니라
             // 이 연결 응답에 실린다(그라운딩 확認) — 새 왕복을 만들지 않고 같은 응답에서 읽는다.
-            if (conn) setUnpublishGate({ canUnpublish: conn.can_unpublish, blockedReason: conn.unpublish_blocked_reason });
+            if (conn) {
+              setUnpublishGate({
+                canUnpublish: conn.can_unpublish, blockedReason: conn.unpublish_blocked_reason, connectionStatus: conn.status,
+              });
+            }
             // story #3428(T3-M) — 이미지 규격(어댑터 성질) 그대로 읽는다(하드코딩 금지 축).
             if (conn) {
               setImageSpec({
@@ -708,8 +717,15 @@ export default function ChannelPostEditPage() {
         // connection 응답(unpublish_blocked_reason)으로 버튼을 막아 두는 정상 경로라
         // 여기 오는 건 레이스(그 사이 스코프가 바뀜) 방어다 — 같은 §17-11 role 분기
         // 정본 문구를 그대로 재사용(labelKey는 비워 둠, KNOWN_ERRORS 주석 참고).
+        // story #3458 — channelPostsUnpublishScopeInsufficientOwner엔 이제 <link> 태그가
+        // 있다(버튼 밖 사유줄 자리는 t.rich로 실 링크를 그린다) — 여기는 plain string
+        // 상태(unpublishResult.text)라 JSX를 못 담는다. plain t()는 태그를 못 지워
+        // FORMATTING_ERROR로 키 이름 자체가 새 버린다(실측) — t.markup으로 태그만
+        // 벗기고 문구는 그대로 얻는다(next-intl 정식 API, 결과가 string).
         const text = info.kind === 'scope_insufficient'
-          ? (role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientNonOwner'))
+          ? (role === 'owner'
+            ? t.markup('channelPostsUnpublishScopeInsufficientOwner', { link: (chunks) => chunks })
+            : t('channelPostsUnpublishScopeInsufficientNonOwner'))
           : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsUnpublishFailed'));
         setUnpublishResult({ type: 'error', text, raw: info.raw });
       }
@@ -819,11 +835,13 @@ export default function ChannelPostEditPage() {
   const showCancelScheduled = !!draft.command_status && cancellableCommandStatuses.has(draft.command_status);
   const canCancelScheduled = canUnpublish;
 
-  // 회수 버튼 — 발행됨 상태 + 연결이 이 채널의 회수를 지원(can_unpublish) + role 게이팅.
-  // unpublishGate===undefined(연결 조회 전/실패)면 "모른다"로 두고 버튼을 비활성화한다
-  // (§3-2와 같은 축 — 모르는 것을 근거로 허용하지 않는다, fail-closed).
+  // 회수 버튼 — 발행됨 상태 + 연결이 이 채널의 회수를 지원(can_unpublish) + 연결
+  // «상태»가 active(story #3458 — 토큰 만료 등은 can_unpublish와 다른 축, 정본
+  // 3653a18c §3) + role 게이팅. unpublishGate===undefined(연결 조회 전/실패)면
+  // "모른다"로 두고 버튼을 비활성화한다(§3-2와 같은 축 — 모르는 것을 근거로 허용하지
+  // 않는다, fail-closed).
   const showUnpublish = draft.publication_status === 'published';
-  const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true;
+  const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true && unpublishGate?.connectionStatus === 'active';
 
   // story #3422 B4(페드루 PO, 2026-09-04 13:26Z, code-review "auto_retry 아래 발행
   // 버튼 활성"과 같은 자리) — command_status가 pending(자동 재시도 큐에 있음, awaiting_
@@ -1124,10 +1142,19 @@ export default function ChannelPostEditPage() {
           </p>
         ) : null}
         {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌
-            경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘). */}
-        {canPublish && blockedByCommandInFlight ? (
+            경우는 위와 다른 사유(게이트 문제가 아니라 이미 진행 중이거나 연결이 막힘).
+            story #3458 페드루 PO 실물 확認(2026-09-04 17:22Z) — blocked는 canPublish에
+            매달면 안 된다: 발행 済 글의 unpublish 명령이 만료 토큰으로 blocked인 조합은
+            publishable=false(canPublish=false)라 이 사유줄이 안 뜨는데, 그 상태에선
+            FailureActionBadge(짧은 명사구로 줄인 지금)에도 링크가 없어 "연결 화면"이
+            화면 어디에도 안 남는다 — 불변식 "blocked 배지가 뜨면 링크 사유줄도 뜬다"를
+            지키려면 blocked는 canPublish와 무관하게 독립 렌더해야 한다. pending은 링크
+            대상이 없어 그대로 canPublish 안에 둔다. */}
+        {draft.command_status === 'blocked' || (canPublish && blockedByCommandInFlight) ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
-            {t(commandInFlightReasonKey)}
+            {t.rich(commandInFlightReasonKey, {
+              link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+            })}
           </p>
         ) : null}
         {showCancelScheduled && !canCancelScheduled ? (
@@ -1139,18 +1166,36 @@ export default function ChannelPostEditPage() {
             안 그린다). scope_insufficient만 role별 두 문장(owner: 재연결하면 풀림 /
             member: owner에게 요청). role 게이팅(owner/admin 아님)이 blocked_reason보다
             먼저 걸리면 그 사유가 우선(§17-11은 "권한은 있는데 스코프가 없다"는 경우 전용). */}
+        {/* 유나 프로브 실측(2026-09-04 17:28Z) — 네 가지 사유가 같은 testid를 덮어써
+            프로브가 문구 텍스트로 갈래를 구별해야 했다. data-unpublish-reason 안정
+            키를 각 갈래에 하나씩(시각 변화 0) — 프로브·QA가 이 값으로 읽는다. */}
         {showUnpublish && !canUnpublish ? (
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="role">
             {t('channelPostsCancelUnpublishOwnerOrAdminOnly')}
           </p>
         ) : showUnpublish && canUnpublish && unpublishGate?.blockedReason === 'scope_insufficient' ? (
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
-            {role === 'owner' ? t('channelPostsUnpublishScopeInsufficientOwner') : t('channelPostsUnpublishScopeInsufficientNonOwner')}
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="scope_insufficient">
+            {/* owner만 「연결 화면」 링크(재연결이 실제로 갈 곳) — nonOwner 문구는
+                owner에게 요청하라는 안내라 이 화면 안에 갈 곳이 없다(링크 없음 그대로). */}
+            {role === 'owner'
+              ? t.rich('channelPostsUnpublishScopeInsufficientOwner', {
+                link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+              })
+              : t('channelPostsUnpublishScopeInsufficientNonOwner')}
+          </p>
+        ) : showUnpublish && canUnpublish && unpublishGate?.canUnpublish === true && unpublishGate.connectionStatus !== 'active' ? (
+          // story #3458 — can_unpublish(어댑터 성질)는 참인데 연결 상태(토큰 등)가
+          // active가 아니라 막힌 경우. 「연결 화면」에 인라인 링크(사람이 할 일이 그
+          // 하나뿐인데 전역 내비를 뒤지게 하지 않는다).
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="connection_not_active">
+            {t.rich('channelPostsUnpublishConnectionNotActive', {
+              link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+            })}
           </p>
         ) : showUnpublish && canUnpublish && unpublishGate === undefined ? (
           // 페드루 PO nit(2026-09-04 09:07Z) — 연결 조회 자체가 실패/아직 안 끝났으면
           // "모른다"인데 버튼만 비활성이고 이유가 없었다(AC1 "사유는 버튼 밖" 규율 위반).
-          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason">
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="unknown">
             {t('channelPostsUnpublishGateUnknown')}
           </p>
         ) : null}
@@ -1429,7 +1474,9 @@ export default function ChannelPostEditPage() {
       ) : null}
       {!isOverLimit && blockedByCommandInFlight ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
-          {t(commandInFlightReasonKey)}
+          {t.rich(commandInFlightReasonKey, {
+            link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+          })}
         </p>
       ) : null}
 
