@@ -20,6 +20,13 @@ const KNOWN_CONNECT_ERROR_KEYS: Record<string, string> = {
   CHANNEL_CALLBACK_FAILED: 'channelConnectErrorGeneric',
 };
 
-export function connectErrorLabelKey(code: string): string {
+// story #3409 — CHANNEL_APP_CREDENTIALS_MISSING은 owner에게도 뜬다(앱 자격이 없으면
+// owner도 연결을 시작 못 함). 화면 안(「앱 자격」 카드)을 가리키는 owner용 문구를 member가
+// 읽으면 거짓이 된다(그 카드는 owner 전용, AppCredentialsCard) — role로 갈라 "누구에게
+// 요청하나"를 정확히 말한다. 나머지 코드는 role 무관(테이블 그대로).
+export function connectErrorLabelKey(code: string, isOwner: boolean): string {
+  if (code === 'CHANNEL_APP_CREDENTIALS_MISSING' && !isOwner) {
+    return 'channelConnectErrorAppCredentialsMissingMember';
+  }
   return KNOWN_CONNECT_ERROR_KEYS[code] ?? 'channelConnectErrorGeneric';
 }

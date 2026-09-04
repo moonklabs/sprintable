@@ -257,7 +257,7 @@ export default function OrganizationChannelsPage() {
       ) : null}
       {connectError ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription>{t(connectErrorLabelKey(connectError))}</AlertDescription>
+          <AlertDescription>{t(connectErrorLabelKey(connectError, isOwner))}</AlertDescription>
         </Alert>
       ) : null}
       {loadError ? (
