@@ -846,6 +846,10 @@
     {
       "file": "tests/test_3404_channel_post_gate_already_held.py",
       "sec": 6.0
+    },
+    {
+      "file": "tests/test_3411_channel_post_text_preview.py",
+      "sec": 6.0
     }
   ]
 }

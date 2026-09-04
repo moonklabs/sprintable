@@ -25,6 +25,7 @@ from app.services.channel_posts import (
     ChannelTokenExpiredError,
     ExternalPublishGateNotApprovedError,
     build_tagged_link,
+    build_text_preview,
     create_channel_post_draft_version,
     get_channel_post_draft,
     is_agent_caller,
@@ -32,6 +33,7 @@ from app.services.channel_posts import (
     list_channel_post_drafts,
     publish_channel_post_draft,
     submit_channel_post_draft,
+    text_char_count,
 )
 from app.services.member_resolver import resolve_member
 
@@ -81,6 +83,11 @@ class ChannelPostDraftListItem(BaseModel):
     latest_author_kind: str
     origin_author_kind: str
     updated_at: str
+    # story #3411 — 최신 버전 text에서 파생(추가 쿼리 0, latest는 이미 조인돼 있음).
+    # text_length는 text_char_count()(=len(text), 코드포인트 수)와 반드시 같은 셈법 —
+    # _validate_text_length(422 검증)와 두 곳이 갈리지 않게 헬퍼 하나를 공유한다.
+    text_preview: str
+    text_length: int
     # story #3394(AC1·AC3) — site_posts.SitePostDraftListItem(#3742)과 같은 이름·의미로
     # 미러. gate 없으면 전부 None("모른다≠다르다" — 아직 상신 전이라는 뜻).
     gate_status: str | None = None
@@ -186,6 +193,7 @@ def _to_draft_list_item(
         connection_id=draft.connection_id, current_version=latest.version,
         latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
         updated_at=latest.created_at.isoformat(),
+        text_preview=build_text_preview(latest.text), text_length=text_char_count(latest.text),
         body_sha256=latest.body_sha256,
         gate_status=gate.status if gate else None,
         reapproval_required=gate.reapproval_required if gate else None,
