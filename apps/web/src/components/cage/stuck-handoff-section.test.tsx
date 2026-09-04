@@ -120,4 +120,15 @@ describe('StuckHandoffSection — withdraw(story #2272)', () => {
     expect(container.textContent).toContain('철회에 실패했습니다');
     expect(findButtonByText('요청 철회')).toBeDefined();
   });
+
+  // story 3466 후속(무효 유틸 4곳) — idle 버튼(「소유자에게 재전달」)이 no-op
+  // text-destructive-foreground 대신 실 렌더 색을 갖는지.
+  it('⭐idle 버튼(소유자에게 재전달)이 text-white dark:text-proof-bg를 쓰고 무효 유틸이 안 남았다', async () => {
+    stubFetch(stuckStep(), () => new Response('{}', { status: 200 }));
+    await renderSection();
+    const btn = findButtonByText('소유자에게 재전달');
+    expect(btn?.className).toContain('text-white');
+    expect(btn?.className).toContain('dark:text-proof-bg');
+    expect(btn?.className).not.toContain('text-destructive-foreground');
+  });
 });

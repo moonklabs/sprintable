@@ -1144,7 +1144,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         // bumpTransitionErrorNonce()를 함께 호출해, 4초 내 동일 사유가 재발해도 key가 바뀌어
         // 항상 새 DOM 노드로 재낭독된다(#2400이 남긴 latent gap 해소).
         // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-[var(--elev-overlay)]">
+        // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에
+        // 매핑이 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례.
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-white dark:text-proof-bg shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
         </div>
       )}

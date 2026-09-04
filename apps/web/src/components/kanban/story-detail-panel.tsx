@@ -1818,7 +1818,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                             type="button"
                             variant="ghost"
                             onClick={() => void handleDetachLabel(label.itemLabelId)}
-                            className="h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 hidden items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-destructive-foreground group-hover:flex"
+                            // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는
+                            // 이 테마에 매핑이 없는 no-op. trust-seal.tsx 선례로 hover 상태도
+                            // 테마별 반전(dark:hover:).
+                            className="h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 hidden items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-white dark:hover:text-proof-bg group-hover:flex"
                             aria-label={`Remove ${label.name}`}
                           >
                             <X className="size-2" />
