@@ -124,6 +124,13 @@ async def test_sandbox_absent_when_flag_off():
         threads_row = next(row for row in rows if row["channel"] == "threads")
         assert threads_row["display_name"] == "Threads"
         assert threads_row["credential_kind"] == "oauth"
+        assert threads_row["kind"] == "social"
+
+        # story e4fc29fa(조각①, 페드루 PO 리뷰 B1) — hosted_site는 이 "연결 만들기"
+        # 목록에 안 나온다(requires_connection=False) — 나오면 FE(#3435 AC2)가
+        # credential_kind="none"만 보고 「샌드박스 연결 만들기」를 잘못 탄다. 뮤테이션
+        # 대상: 필터를 지우면 이 assert가 RED.
+        assert "hosted_site" not in channels
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -181,7 +188,10 @@ async def test_agent_gets_200_not_403():
         async with _client_for(app) as client:
             r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/available-channels")
         assert r.status_code == 200, r.text
-        assert set(r.json()[0].keys()) == {"channel", "display_name", "credential_kind"}
+        # story e4fc29fa(조각①) — kind 필드 additive 추가(토큰 인접 필드 아님, 응답
+        # 계약 확장 — "no extra field" 계약이 아니라 정확한 필드 집합 계약이었으므로
+        # 여기서 함께 갱신한다).
+        assert set(r.json()[0].keys()) == {"channel", "display_name", "credential_kind", "kind"}
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -205,3 +215,31 @@ async def test_org_id_mismatch_still_403():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+def test_registry_kind_pin():
+    """story e4fc29fa(조각①, 페드루 PO 리뷰 N1) — CHANNEL_ADAPTERS 레지스트리의 kind
+    값을 직접 pin한다(HTTP 레이어가 아니다 — hosted_site는 B1 필터로 이제 응답 목록에
+    안 나오므로 그 경로로는 kind를 더 이상 확인할 수 없다). threads=social(기본값)·
+    hosted_site=blog·requires_connection=False."""
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    assert CHANNEL_ADAPTERS["threads"].kind == "social"
+    assert CHANNEL_ADAPTERS["threads"].requires_connection is True
+    assert CHANNEL_ADAPTERS["hosted_site"].kind == "blog"
+    assert CHANNEL_ADAPTERS["hosted_site"].requires_connection is False
+    assert CHANNEL_ADAPTERS["hosted_site"].credential_kind == "none"
+
+
+def test_get_publish_client_module_rejects_blog_kind_channel():
+    """story e4fc29fa(조각①, 페드루 PO 리뷰 B2) — kind="blog" 채널은
+    `get_publish_client_module`이 명시 거부한다(수정 前엔 else 분기로 조용히
+    threads_publish로 떨어져, 블로그 발행이 Threads API 코드를 잘못 타는 결함이었다).
+    뮤테이션 대상: B2 가드를 지우면 이 assert가 threads_publish 모듈을 돌려받아 RED."""
+    from app.services.channel_adapters import (
+        BlogChannelDispatchNotImplementedError,
+        get_publish_client_module,
+    )
+
+    with pytest.raises(BlogChannelDispatchNotImplementedError):
+        get_publish_client_module("hosted_site")

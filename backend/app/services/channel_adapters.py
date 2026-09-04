@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,18 @@ class ChannelAdapterConfig:
     # 뜨는 대신 배포 자체가 안 되게(fail-closed, 다른 필수 필드 authorize_url/token_url/
     # scope/refresh_mode와 동열).
     display_name: str
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — 이 채널이 짧은 글
+    # (channel_post·Threads류)인지 블로그(site_post·hosted_site/wordpress/webhook류)
+    # 인지. available-channels가 이 값을 그대로 노출해 FE가 "채널 연결"과 "블로그 목적지"
+    # 화면을 분기한다(kind 자체가 SSOT — 문자열 목록을 어디서도 하드코딩하지 않는다).
+    kind: Literal["social", "blog"] = "social"
+    # story e4fc29fa(페드루 PO 리뷰 B1, 2026-09-04) — available-channels는 "연결 만들기"
+    # 버튼 목록이다(그 엔드포인트 자체 목적). credential_kind="none"을 FE(#3435 AC2)가
+    # 곧바로 "샌드박스 연결 만들기 버튼"으로 읽는다 — hosted_site도 credential_kind="none"
+    # 이라 그 목록에 그냥 나열되면 FE가 hosted_site에 대해 **샌드박스 연결을 만드는**
+    # 잘못된 액션을 탄다. "연결할 게 있는가"와 "credential이 필요한가"는 다른 축이라
+    # 별도 필드로 분리한다 — hosted_site만 False, 나머지(sandbox 포함)는 기본 True.
+    requires_connection: bool = True
     credential_kind: str = "oauth"  # "oauth" | "pasted_secret" | "none"
     # story #3374(Phase1·마케팅운영, PO 결정) — 채널 포스트 초안 text 상한. 상수를 서비스/
     # 라우터에 하드코딩하지 않고 여기 한 곳에 선언(담롱 요구 — "상수 하드코딩 X·선언·표시",
@@ -100,6 +113,29 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_color_space="sRGB",
         image_max_count=1,
     ),
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
+    # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
+    # 발행 흐름(`publish_site_post_from_draft` 등)은 지금처럼 내부 `site_posts` 테이블에
+    # 직접 쓴다(어댑터 dispatch·publication_command 경로를 안 탄다, PO 確定 ③). 이 항목은
+    # 순수 선언(레지스트리 등재)일 뿐 — available-channels·kind 필드로 존재를 노출하는
+    # 것 외에 아무 기존 코드 경로도 건드리지 않는다. credential_kind="none"(연결 불요,
+    # 항상 사용 가능) — OAuth 필드는 sandbox와 동형으로 빈 문자열.
+    "hosted_site": ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        refresh_mode="manual",
+        credential_kind="none",
+        display_name="Sprintable 호스팅 블로그",
+        kind="blog",
+        # story e4fc29fa(페드루 PO 리뷰 B1) — 연결할 게 없다(항상 사용 가능) — available-
+        # channels 목록(연결 만들기 버튼 대상)에서 이 항목이 빠지는 유일한 근거.
+        requires_connection=False,
+        # site_posts.py::unpublish_site_post가 이미 존재(story #3381) — 선언은 그
+        # 사실을 정확히 반영할 뿐(신규 동작 아님). 외부 스코프 개념이 없어(credential
+        # 자체가 없다) unpublish_required_scope는 비운다.
+        supports_unpublish=True,
+    ),
 }
 
 # story 5b27b32f(Phase1·BE·테스트 인프라, 페드루 PO 확定 2026-09-04) — dev 전용 샌드박스
@@ -148,13 +184,35 @@ def can_auto_refresh(refresh_mode: str) -> bool:
     return refresh_mode in ("refresh_token", "reissue_from_access_token")
 
 
+class BlogChannelDispatchNotImplementedError(NotImplementedError):
+    """story e4fc29fa(페드루 PO 리뷰 B2, 2026-09-04) — kind="blog" 채널은 이 함수의
+    디스패치 대상이 아니다(hosted_site는 site_posts.py가 직접 처리·publication_command
+    경로를 안 탄다; wordpress/webhook은 조각②에서 별도 배선). 이 함수가 아무 분기도
+    못 찾으면 조용히 threads_publish로 떨어지던 것(수정 前 결함 — hosted_site가 Threads
+    API 호출 코드를 잘못 타는 사고)을 fail-closed로 막는다."""
+
+    def __init__(self, *, channel: str):
+        self.channel = channel
+        super().__init__(
+            f"channel={channel!r}는 kind='blog'라 get_publish_client_module 디스패치 대상이 "
+            "아닙니다(hosted_site=site_posts.py 직접 처리, wordpress/webhook=조각② 배선 예정)."
+        )
+
+
 def get_publish_client_module(channel: str):
     """story 5b27b32f — 발행 클라이언트 모듈 디스패치. `sandbox`만 `threads_publish`
     대신 `sandbox_publish`로 우회한다(같은 함수 시그니처·같은 `ThreadsPublishError`
     클래스를 그대로 재사용 — sandbox_publish.py가 신규 예외 타입을 만들지 않으므로
     channel_posts.py의 기존 except절이 그대로 먹힌다, 신규 판정 로직 0). 실 배포 채널
     (threads 등)은 전부 threads_publish 그대로 — 이 함수가 sandbox 개입의 유일한
-    지점이다(Threads 어댑터 코드 자체는 무변경)."""
+    지점이다(Threads 어댑터 코드 자체는 무변경).
+
+    story e4fc29fa(페드루 PO 리뷰 B2) — kind="blog" 채널(hosted_site 등)은 여기서
+    명시적으로 거부한다. 이 가드가 없으면 마지막 else가 threads_publish로 조용히
+    떨어져(수정 前 결함) 블로그 발행이 Threads API 코드를 잘못 탄다."""
+    adapter = get_channel_adapter(channel)
+    if adapter is not None and adapter.kind == "blog":
+        raise BlogChannelDispatchNotImplementedError(channel=channel)
     if channel == "sandbox":
         from app.services import sandbox_publish
         return sandbox_publish

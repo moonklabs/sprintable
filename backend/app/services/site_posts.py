@@ -12,7 +12,6 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -22,6 +21,7 @@ from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
 from app.models.team import TeamMember
+from app.services import hosted_site_publish
 from app.services.gate_seal import (
     GateReapprovalRequiredError as SitePostReapprovalRequiredError,
     GateSealMissingError as SitePostSealMissingError,
@@ -186,47 +186,15 @@ async def publish_site_post(
     if current_hash != gate.sealed_content_sha256:
         raise SitePostReapprovalRequiredError(gate_id=gate.id)
 
-    row = await _upsert_site_post_row(
+    # story e4fc29fa(조각②, 페드루 PO 確定 2026-09-04) — hosted_site BlogDestinationAdapter로
+    # 이관(로직 무변경, hosted_site_publish.py 참고). 이 함수 자체는 그대로 site_posts.py에
+    # 남는다 — gate 조회·봉인 재검증은 hosted_site 전용이 아니라 이 도메인 공통 chokepoint.
+    row = await hosted_site_publish.publish(
         db, org_id=org_id, work_item_id=work_item_id, gate_id=gate.id, title=title, slug=slug,
         lang=lang, summary=summary, tags=tags, body_md=body_md, created_by_member_id=created_by_member_id,
     )
     await db.commit()
     return row
-
-
-async def _upsert_site_post_row(
-    db: AsyncSession,
-    *,
-    org_id: uuid.UUID,
-    work_item_id: uuid.UUID,
-    gate_id: uuid.UUID,
-    title: str,
-    slug: str,
-    lang: str,
-    summary: str,
-    tags: list,
-    body_md: str,
-    created_by_member_id: uuid.UUID,
-) -> SitePost:
-    """story #3369(Phase0 S3) 추출 — publish_site_post(레거시 endpoint)와
-    publish_site_post_from_draft(신규 draft 기반 endpoint) 둘 다 같은 upsert가 필요해
-    갈랐다. commit은 호출자 몫(신규 경로는 같은 트랜잭션에 activity_log를 얹는다)."""
-    now = datetime.now(timezone.utc)
-    stmt = pg_insert(SitePost).values(
-        id=uuid.uuid4(), org_id=org_id, lang=lang, slug=slug, title=title, summary=summary,
-        tags=tags, body_md=body_md, published_at=now, source_story_id=work_item_id,
-        gate_id=gate_id, created_by_member_id=created_by_member_id, unpublished_at=None,
-    )
-    stmt = stmt.on_conflict_do_update(
-        constraint="uq_site_posts_org_lang_slug",
-        set_={
-            "title": title, "summary": summary, "tags": tags, "body_md": body_md,
-            "published_at": now, "source_story_id": work_item_id, "gate_id": gate_id,
-            "unpublished_at": None, "updated_at": now,
-            # created_by_member_id는 최초 발행자 그대로 — 재발행이 저자를 안 바꾼다.
-        },
-    ).returning(SitePost)
-    return (await db.execute(stmt)).scalar_one()
 
 
 async def get_published_site_post(db: AsyncSession, *, org_id: uuid.UUID, lang: str, slug: str) -> SitePost | None:
@@ -675,7 +643,7 @@ async def publish_site_post_from_draft(
     if gate.sealed_content_sha256 != latest.body_sha256:
         raise SitePostReapprovalRequiredError(gate_id=gate.id)
 
-    post = await _upsert_site_post_row(
+    post = await hosted_site_publish.publish(
         db, org_id=org_id, work_item_id=draft.work_item_id, gate_id=gate.id,
         title=latest.title, slug=draft.slug, lang=latest.lang, summary=latest.summary,
         tags=latest.tags, body_md=latest.body_md, created_by_member_id=published_by_member_id,
@@ -820,7 +788,9 @@ async def unpublish_site_post(
     if post is None:
         raise SitePostNotPublishedError(draft_id)
 
-    post.unpublished_at = datetime.now(timezone.utc)
+    # story e4fc29fa(조각②) — hosted_site BlogDestinationAdapter.unpublish로 이관
+    # (로직 무변경 — 필드 대입 한 줄 그대로).
+    await hosted_site_publish.unpublish(post=post)
 
     from app.services.activity_log import ActivityLogService
 
