@@ -23,6 +23,7 @@ from app.models.site_post_version import SitePostVersion
 from app.models.team import TeamMember
 from app.services import hosted_site_publish
 from app.services.campaigns import CampaignNotFoundError, get_campaign  # noqa: F401 (재-export, 라우터가 import)
+from app.services.content_rules import ContentRuleViolationError, get_org_content_rules, lint_content  # noqa: F401 (재-export)
 from app.services.gate_seal import (
     GateReapprovalRequiredError as SitePostReapprovalRequiredError,
     GateSealMissingError as SitePostSealMissingError,
@@ -302,7 +303,7 @@ async def create_site_post_draft_version(
     author_kind: str,
     campaign_id: uuid.UUID | None = _CAMPAIGN_ID_CARRY_FORWARD,  # type: ignore[assignment]
     connection_id: uuid.UUID | None = _CONNECTION_ID_CARRY_FORWARD,  # type: ignore[assignment]
-) -> SitePostVersion:
+) -> tuple[SitePostVersion, list[dict]]:
     """초안을 (org, work_item, slug)로 upsert하고 새 불변 버전을 추가한다. 기존 버전은 절대
     덮어쓰지 않는다(AC3) — 에이전트 원안·휴먼 개정본이 별도 행으로 남는다(AC6). 공개 `SitePost`
     행은 여기서 절대 만들지 않는다(AC1) — 승인·발행은 별개 게이트·엔드포인트(S2·S3) 몫.
@@ -398,9 +399,19 @@ async def create_site_post_draft_version(
     #     길 자체를 차단한다).
     await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version, draft=draft)
 
+    # story #3471(페드루 PO 確定 2026-09-05) — channel_posts.py::create_channel_post_
+    # draft_version과 동형(비차단, draft에 스냅샷 저장). site_post는 link_url 필드가
+    # 없어 UTM 필수 검사는 구조적으로 no-op(lint_content가 link_url=None이면 그 축을
+    # 건너뛴다) — banned_terms만 title+summary+body_md 결합 텍스트에 적용한다(제목에
+    # 금칙어가 있어도 잡아야 한다, body_md만 보면 놓친다).
+    rule_row = await get_org_content_rules(db, org_id=org_id)
+    combined_text = f"{title}\n{summary}\n{body_md}"
+    violations = lint_content(rule_row.rules if rule_row else None, text=combined_text, link_url=None)
+    draft.lint_result = {"rules_version": rule_row.version if rule_row else 0, "violations": violations}
+
     await db.commit()
     await db.refresh(version)
-    return version
+    return version, violations
 
 
 async def _reseal_gate_on_new_version(
@@ -605,6 +616,16 @@ async def submit_site_post_draft(
     if target is None:
         raise SitePostVersionNotFoundError(version_id)
     origin_author_member_id = versions[0].author_member_id
+
+    # story #3471(페드루 PO 確定 2026-09-05) — channel_posts.py::submit_channel_post_
+    # draft와 동형(제목·요약·본문 결합 재검사, link_url 없어 UTM 축은 no-op).
+    rule_row = await get_org_content_rules(db, org_id=org_id)
+    submit_combined_text = f"{target.title}\n{target.summary}\n{target.body_md}"
+    submit_violations = lint_content(rule_row.rules if rule_row else None, text=submit_combined_text, link_url=None)
+    if submit_violations:
+        raise ContentRuleViolationError(
+            rules_version=rule_row.version if rule_row else 0, violations=submit_violations,
+        )
 
     from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id

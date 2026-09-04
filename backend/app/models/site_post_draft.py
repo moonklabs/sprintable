@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -39,6 +39,11 @@ class SitePostDraft(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
     campaign_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # story #3471(페드루 PO 確定 2026-09-05) — channel_post_draft.py::lint_result와
+    # 동형(draft 축 스냅샷, 실시간 재계산 아님). site_post는 link_url 필드가 없어 UTM
+    # 필수 검사는 구조적으로 no-op — banned_terms만 title+summary+body_md 결합 텍스트에
+    # 적용(content_rules.py::lint_content 호출부 참고).
+    lint_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

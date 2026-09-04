@@ -32,6 +32,7 @@ from app.services.channel_posts import (
     ChannelTextTooLongError,
     ChannelTokenExpiredError,
     ChannelUnpublishUnsupportedError,
+    ContentRuleViolationError,
     ExternalPublishGateNotApprovedError,
     PublicationCommandNotCancellableError,
     PublicationCommandNotFoundError,
@@ -142,6 +143,10 @@ class ChannelPostDraftVersionResponse(BaseModel):
     # story #3394(AC5) — link_url이 있을 때만 채워진다(없으면 null, 지어내지 않는다).
     # publish_channel_post_draft가 실제 발행에 쓰는 것과 같은 값(build_tagged_link 공용).
     tagged_link_preview: str | None = None
+    # story #3471(페드루 PO 確定 2026-09-05) — 비차단 lint 결과(create/update 시점).
+    # 빈 배열=위반 없음(지어내지 않는다 — organization이 규칙을 아예 안 정했으면 항상
+    # 빈 배열).
+    violations: list[dict] = []
 
 
 class ChannelPostDraftListItem(BaseModel):
@@ -336,7 +341,7 @@ async def post_channel_post_draft_version(
     actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
 
     try:
-        version, channel = await create_channel_post_draft_version(
+        version, channel, violations = await create_channel_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, connection_id=body.connection_id,
             text=body.text, link_url=body.link_url, author_member_id=member_id, author_kind=actor_type,
             source_content_item_id=body.source_content_item_id,
@@ -370,7 +375,7 @@ async def post_channel_post_draft_version(
     return ChannelPostDraftVersionResponse(
         draft_id=version.draft_id, version_id=version.id, version=version.version,
         author_kind=version.author_kind, body_sha256=version.body_sha256,
-        tagged_link_preview=tagged_link_preview,
+        tagged_link_preview=tagged_link_preview, violations=violations,
     )
 
 
@@ -834,6 +839,16 @@ async def submit_channel_post_draft_endpoint(
                 "holding_draft_id": str(exc.holding_draft_id),
                 "holding_channel": exc.holding_channel,
                 "holding_connection_id": str(exc.holding_connection_id),
+            },
+        ) from exc
+    except ContentRuleViolationError as exc:
+        # story #3471(페드루 PO 確定 2026-09-05) — 금지 AC=서버 거부. 422 body는
+        # {code, rules_version, violations[]}(3343 구조화 형 준용, story #3471 확定).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CONTENT_RULE_VIOLATION", "rules_version": exc.rules_version,
+                "violations": exc.violations,
             },
         ) from exc
 

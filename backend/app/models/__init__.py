@@ -143,6 +143,7 @@ from app.models.channel_publication import ChannelPublication
 from app.models.publication_command import PublicationCommand
 from app.models.channel_post_image import ChannelPostImage
 from app.models.campaign import Campaign
+from app.models.org_content_rule import OrgContentRule
 
 __all__ = [
     "RoleTemplate",

@@ -18,6 +18,7 @@ from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member
 from app.services.site_posts import (
     CampaignNotFoundError,
+    ContentRuleViolationError,
     ExternalPublishGateNotApprovedError,
     InvalidSitePostInputError,
     MediaNotSupportedPhase0Error,
@@ -110,6 +111,9 @@ class SitePostDraftVersionResponse(BaseModel):
     version: int
     author_kind: str
     body_sha256: str
+    # story #3471(페드루 PO 確定 2026-09-05) — 비차단 lint 결과(create/update 시점).
+    # channel_posts.py::ChannelPostDraftVersionResponse.violations와 동형.
+    violations: list[dict] = []
 
 
 class SitePostDraftListItem(BaseModel):
@@ -287,7 +291,7 @@ async def post_site_post_draft_version(
         {"connection_id": body.connection_id} if "connection_id" in body.model_fields_set else {}
     )
     try:
-        version = await create_site_post_draft_version(
+        version, violations = await create_site_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, slug=body.slug, lang=body.lang,
             title=body.title, summary=body.summary, tags=body.tags, body_md=body.body_md,
             media_manifest=body.media_manifest, author_member_id=member_id, author_kind=actor_type,
@@ -315,7 +319,7 @@ async def post_site_post_draft_version(
 
     return SitePostDraftVersionResponse(
         draft_id=version.draft_id, version_id=version.id, version=version.version,
-        author_kind=version.author_kind, body_sha256=version.body_sha256,
+        author_kind=version.author_kind, body_sha256=version.body_sha256, violations=violations,
     )
 
 
@@ -492,6 +496,15 @@ async def submit_site_post_draft_endpoint(
                 "holding_draft_id": str(exc.holding_draft_id),
                 "holding_lang": exc.holding_lang,
                 "holding_slug": exc.holding_slug,
+            },
+        ) from exc
+    except ContentRuleViolationError as exc:
+        # story #3471(페드루 PO 確定 2026-09-05) — channel_posts.py와 동형 422 body.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CONTENT_RULE_VIOLATION", "rules_version": exc.rules_version,
+                "violations": exc.violations,
             },
         ) from exc
 

@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -54,6 +54,12 @@ class ChannelPostDraft(Base):
     source_site_post_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # story #3471(페드루 PO 確定 2026-09-05) — 마지막 버전 생성 시점의 lint 결과
+    # 스냅샷(`{rules_version, violations[]}`). 실시간 재계산 아님 — 규칙이 그 뒤 바뀌어도
+    # 이 값은 다음 create/update(새 버전 생성)까지 그대로(AC "과거 evidence 보존").
+    # 비차단(create/update는 저장만, 거부는 submit()만) — content_rules.py::lint_content
+    # 참고.
+    lint_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
