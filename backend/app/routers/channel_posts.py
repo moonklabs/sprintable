@@ -53,6 +53,7 @@ from app.services.channel_post_images import (
     ChannelImageConversionFailedError,
     ChannelImageObjectNotFoundError,
     ChannelImagePathNotScopedError,
+    ChannelImageStorageNotConfiguredError,
     ChannelImageTooLargeError,
     ChannelImageUnsupportedError,
     ChannelImageUnsupportedFormatError,
@@ -213,6 +214,10 @@ class ChannelPostImageUploadUrlResponse(BaseModel):
     object_path: str
     expires_at: str
     max_bytes: int
+    # story 620beefc(페드루 리뷰 블로커 B4) — create_only 서명(GCS:
+    # x-goog-if-generation-match)이 PUT 요청에도 정확히 실려야 서명이 valid하다 — FE는
+    # 이 헤더를 그대로 PUT에 붙여야 한다(assets.py AssetUploadUrlResponse와 동형 계약).
+    required_put_headers: dict[str, str] = {}
 
 
 class ConfirmChannelPostImageUploadRequest(BaseModel):
@@ -358,6 +363,13 @@ async def post_channel_post_image_upload_url(
         result = await create_channel_post_image_upload_url(
             org_id=org_id, draft_id=draft_id, channel=draft.channel, content_type=body.content_type,
         )
+    except ChannelImageStorageNotConfiguredError as exc:
+        # story 620beefc(페드루 리뷰 B5) — avatar_upload.py 503(AVATAR_UPLOAD_NOT_
+        # CONFIGURED)과 동형 축. 채널이 이미지를 지원 안 하는 것(422)과 다른 실패 —
+        # 이 환경(dev/prod)에 GCS_CHANNEL_MEDIA_BUCKET 배선이 아직 안 됐을 뿐(배포 갭).
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
     except ChannelImageUnsupportedError as exc:
         raise HTTPException(
             status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
@@ -402,6 +414,13 @@ async def post_channel_post_image_confirm(
         )
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelImageStorageNotConfiguredError as exc:
+        # story 620beefc(페드루 리뷰 B5) — avatar_upload.py 503(AVATAR_UPLOAD_NOT_
+        # CONFIGURED)과 동형 축. 채널이 이미지를 지원 안 하는 것(422)과 다른 실패 —
+        # 이 환경(dev/prod)에 GCS_CHANNEL_MEDIA_BUCKET 배선이 아직 안 됐을 뿐(배포 갭).
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
     except ChannelImageUnsupportedError as exc:
         raise HTTPException(
             status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},

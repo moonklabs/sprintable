@@ -390,6 +390,7 @@ async def create_channel_post_draft_version(
         await db.flush()
         next_version = 1
         carried_image_sha256 = None
+        prior_latest = None
     else:
         prior_latest = (await db.execute(
             select(ChannelPostVersion)
@@ -413,6 +414,39 @@ async def create_channel_post_draft_version(
     )
     db.add(version)
     await db.flush()
+
+    # story 620beefc(페드루 리뷰 블로커 B1, 2026-09-04) — image_sha256을 캐리포워드했을
+    # 뿐 실제 `ChannelPostImage` 행은 여전히 직전 버전의 version_id에 남아 있었다. 발행
+    # 시점(publish_channel_post_draft)은 gate가 아니라 latest.id로 이미지 행을 찾으므로
+    # (동일 버전 스코프 확定), 텍스트만 편집한 새 버전은 이 행이 없어 「빈손」 →
+    # image_sha256은 여전히 세팅돼 있어 봉인·재승인은 media 축까지 정확히 도는데
+    # 정작 발행은 이미지 없이 TEXT로 나가고 썸네일도 사라지는 모순이 실측 확認됐다.
+    # 캐리포워드가 확定될 때(호출부가 명시로 새 이미지를 안 넘겼을 때) 행 자체를
+    # 새 version_id로 복제한다 — 파일 재업로드·재변환 없음(object_path·sha256 그대로,
+    # 계보만 이어붙임).
+    if image_sha256 is _IMAGE_SHA256_CARRY_FORWARD and prior_latest is not None:
+        prior_image = (await db.execute(
+            select(ChannelPostImage).where(ChannelPostImage.version_id == prior_latest.id)
+        )).scalar_one_or_none()
+        if prior_image is not None:
+            db.add(ChannelPostImage(
+                id=uuid.uuid4(), org_id=prior_image.org_id, draft_id=prior_image.draft_id,
+                version_id=version.id,
+                original_object_path=prior_image.original_object_path,
+                original_sha256=prior_image.original_sha256,
+                original_content_type=prior_image.original_content_type,
+                original_bytes=prior_image.original_bytes,
+                original_width=prior_image.original_width,
+                original_height=prior_image.original_height,
+                derived_object_path=prior_image.derived_object_path,
+                derived_sha256=prior_image.derived_sha256,
+                derived_content_type=prior_image.derived_content_type,
+                derived_bytes=prior_image.derived_bytes,
+                derived_width=prior_image.derived_width,
+                derived_height=prior_image.derived_height,
+                created_by=prior_image.created_by,
+            ))
+            await db.flush()
 
     await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version)
 
@@ -1138,11 +1172,33 @@ async def publish_channel_post_draft(
                         await apply_refresh_failure(db, connection=connection, error_message=exc.message)
                     raise mapped_exc from exc
                 if container_status == "IN_PROGRESS":
-                    return row  # 아직 처리 中 — 다음 tick이 다시 폴링(호출부가 재큐잉).
+                    # story 620beefc(페드루 리뷰 블로커 B3) — Meta 문서(그라운딩 §②):
+                    # 컨테이너 폴링은 "최대 5분"까지만 의미가 있다. 이 상한이 없으면
+                    # command가 attempt_count·backoff 어느 것도 안 건드리는 "처리 中"
+                    # 분기(pending, +30초)로만 계속 재큐잉돼 진짜 무한루프가 된다(워커가
+                    # 절대 dead_letter로 못 빠짐). row.created_at은 이 행이 재사용될 뿐
+                    # 재생성 안 되므로 "최초 컨테이너 생성 시각"의 신뢰할 수 있는 근사치.
+                    elapsed = datetime.now(timezone.utc) - row.created_at
+                    if elapsed > timedelta(minutes=5):
+                        row.status = "failed"
+                        row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"
+                        row.last_error = f"IN_PROGRESS {elapsed.total_seconds():.0f}s > 5분 상한(그라운딩 §②)"
+                        row.external_container_id = None
+                        await db.commit()
+                        raise ChannelImageContainerFailedError(
+                            gate_id=gate.id, container_status="TIMEOUT", error_message=row.last_error,
+                        )
+                    return row  # 아직 처리 中(5분 이내) — 다음 tick이 다시 폴링.
                 if container_status in ("ERROR", "EXPIRED"):
                     row.status = "failed"
                     row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"
                     row.last_error = container_error_message or f"container status={container_status}"
+                    # story 620beefc(페드루 리뷰 블로커 B2) — 지우지 않으면 사람이 AC5
+                    # retry 엔드포인트로 재시도해도 이 죽은 creation_id를 그대로 다시
+                    # poll한다(Threads의 ERROR/EXPIRED 컨테이너는 재활성화되지 않는다 —
+                    # 영구 실패 루프). None으로 되돌려 다음 호출이 just_created_container
+                    # 분기를 다시 타 완전히 새 컨테이너를 만들게 한다.
+                    row.external_container_id = None
                     await db.commit()
                     raise ChannelImageContainerFailedError(
                         gate_id=gate.id, container_status=container_status, error_message=container_error_message,

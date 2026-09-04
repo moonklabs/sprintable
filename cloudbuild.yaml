@@ -36,6 +36,14 @@ substitutions:
   # ADMIN_OPERATOR_*와 달리 이제 dev/prod 둘 다 명시 값으로 싣는다(prod는 substitution이 아닌
   # 버킷명 리터럴 — DATABASE_URL_PROD류처럼 prod 값은 여기 substitutions에 안 둔다).
   _GCS_AVATARS_BUCKET: sprintable-avatars-dev
+  # story 620beefc(Threads 이미지 발행, 페드루 리뷰 B5) — dev 버킷(sprintable-channel-media-
+  # dev, asia-northeast3·public-read·uniform bucket-level access·cloudrun-runtime-dev=
+  # objectAdmin — 페드루가 gcloud로 직접 프로비저닝 완료 2026-09-04). Threads가 image_url을
+  # 서버 인증 없이 직접 curl하므로 avatar와 동일 public-read 축(그라운딩 §①). prod는
+  # avatar #2887 원래 형태(부트스트랩 前, story #3117 이전)와 동일하게 dev 전용 — prod 버킷
+  # 미프로비저닝이라 prod엔 이 키 자체가 없어야 안전(GCS_CHANNEL_MEDIA_BUCKET 미설정 시
+  # ChannelImageStorageNotConfiguredError→503 fail-closed, avatar_upload.py와 동형).
+  _GCS_CHANNEL_MEDIA_BUCKET: sprintable-channel-media-dev
   # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter는 아래 deploy-office-
   # converter 스텝이 매 배포마다 재생성/갱신한다. **부트스트랩 완료(페드루군, 2026-08-19)**:
   # 최초 배포가 --port 누락(Gotenberg는 3000, Cloud Run 헬스체크 기본 8080)으로 Ready 실패
@@ -431,6 +439,35 @@ steps:
         fi
     waitFor: ['-']
 
+  # story 620beefc(Threads 이미지 발행, 페드루 리뷰 B5) — 채널 미디어 전용 버킷 CORS.
+  # avatar #2887 원래 형태(story #3117 이전, dev 전용)와 동형 — prod 버킷 미프로비저닝
+  # 이라 prod 배포에선 이 스텝을 skip한다(avatar처럼 prod 버킷이 생기면 그때 avatar와
+  # 같은 두 갈래 형태로 승격). 버킷 자체는 페드루가 gcloud로 이미 프로비저닝(2026-09-04,
+  # public-read·cloudrun-runtime-dev=objectAdmin) — 이 스텝은 CORS만 멱등 재적용+검증.
+  - id: apply-gcs-channel-media-cors
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" == "prod" ]; then
+          echo "channel-media 버킷은 dev 전용(prod 미프로비저닝, story 620beefc) — skip"
+          exit 0
+        fi
+        BUCKET="${_GCS_CHANNEL_MEDIA_BUCKET}"
+        gcloud storage buckets update gs://$${BUCKET} \
+          --cors-file=infra/gcs-channel-media-cors.json \
+          --quiet
+        applied=$(gcloud storage buckets describe gs://$${BUCKET} --format='value(cors_config)')
+        echo "$${BUCKET} CORS applied = $${applied}"
+        case "$${applied}" in
+          *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
+          *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
+        esac
+        echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
+    waitFor: ['-']
+
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
@@ -740,6 +777,13 @@ steps:
           ENV_VARS="$${ENV_VARS},GCS_AVATARS_BUCKET=sprintable-avatars-prod"
         else
           ENV_VARS="$${ENV_VARS},GCS_AVATARS_BUCKET=${_GCS_AVATARS_BUCKET}"
+        fi
+        # story 620beefc(페드루 리뷰 B5) — GCS_CHANNEL_MEDIA_BUCKET은 ADMIN_OPERATOR_*와
+        # 동형(avatar #2887 원래 형태, story #3117 이전) — prod 버킷 미프로비저닝이라
+        # prod엔 이 키 자체가 없어야 안전(미설정 시 channel_post_images.py::
+        # ChannelImageStorageNotConfiguredError→503 fail-closed).
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="$${ENV_VARS},GCS_CHANNEL_MEDIA_BUCKET=${_GCS_CHANNEL_MEDIA_BUCKET}"
         fi
         # story #2141 원칙 재사용(카디르 QA 2026-08-19) — GOTENBERG_SERVICE_URL도 prod엔 키 자체가
         # 없어야 안전(dev 전용 office-converter 하드게이트).

@@ -233,10 +233,23 @@ async def _request_upload_url(client, org_id, draft_id, *, content_type: str) ->
     return r
 
 
+def _object_path_for(org_id, draft_id, *, content_type: str) -> str:
+    ext = {"image/jpeg": "jpg", "image/png": "png"}.get(content_type, "bin")
+    return f"channel-media/{org_id}/{draft_id}/{uuid.uuid4().hex}.{ext}"
+
+
 async def _upload_and_confirm(client, org_id, draft_id, raw: bytes, *, content_type: str):
-    r_url = await _request_upload_url(client, org_id, draft_id, content_type=content_type)
-    assert r_url.status_code == 200, r_url.text
-    object_path = r_url.json()["object_path"]
+    """story 620beefc(페드루 리뷰 블로커 B4 후속) — create_only=True 서명 뒤로는
+    upload-url 엔드포인트를 실제로 안 거친다. `storage/local.py`는 PUT 수신 자체를
+    구현 안 해(그 모듈 명시 갭) create_only=True 서명이면 fail-closed로 URL을 아예
+    미발급한다 — LocalStorageProvider의 한계일 뿐 confirm()의 파생/봉인 로직과는
+    무관하므로, 이 헬퍼는 "FE가 PUT을 이미 끝냈다"는 상태를 직접 만들어(object_path
+    구성+put_object 직접 호출, `_object_path()`(channel_post_images.py)와 동일 모양)
+    confirm 자체만 실행한다(GIF 양성대조 테스트가 이미 쓰던 것과 동일 기법을 공용
+    헬퍼로 승격). upload-url 엔드포인트 자체의 검증(형식/채널 미지원)은 별도
+    `test_upload_url_*` 테스트가 여전히 실 엔드포인트로 검증한다(그 경로들은
+    signed_write_url 호출 前에 거부돼 이 갭과 무관)."""
+    object_path = _object_path_for(org_id, draft_id, content_type=content_type)
     await _put_raw_object(object_path, raw, content_type=content_type)
     r_confirm = await client.post(
         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/confirm",
@@ -545,9 +558,15 @@ async def test_media_change_after_approval_reopens_gate_with_media_changed_reaso
 
 @pytest.mark.anyio
 async def test_text_edit_after_image_attach_carries_image_forward():
-    """이미지 첨부 뒤 순수 텍스트 편집(이미지 엔드포인트 미경유)이 이미지를 조용히
-    떨어뜨리지 않는다 — image_sha256이 새 버전에도 캐리포워드."""
+    """story 620beefc(페드루 리뷰 블로커 B1) — 이미지 첨부 뒤 순수 텍스트 편집(이미지
+    엔드포인트 미경유)이 이미지를 조용히 떨어뜨리지 않는다. image_sha256이 새 버전에도
+    캐리포워드될 뿐 아니라(원 버그의 절반 — 이건 처음부터 됐었다), **ChannelPostImage
+    행 자체**도 새 version_id로 복제돼야 한다(원 버그의 실체 — publish_channel_post_
+    draft가 gate가 아니라 latest.id로 이미지 행을 찾으므로, 행이 옛 version_id에만
+    남아 있으면 image_sha256은 세팅돼 있는데도 발행 시점엔 이미지를 못 찾아 조용히
+    TEXT로 나가고 썸네일도 사라진다)."""
     from app.main import app
+    from app.models.channel_post_image import ChannelPostImage
     from app.models.channel_post_version import ChannelPostVersion
     from sqlalchemy import select
 
@@ -584,6 +603,82 @@ async def test_text_edit_after_image_attach_carries_image_forward():
             by_id = {v.id: v for v in rows}
             assert by_id[new_version_id].image_sha256 == by_id[image_version_id].image_sha256
             assert by_id[new_version_id].image_sha256 is not None
+
+            # 원 버그의 실체 — 이 assert 없이는 위 두 줄만으로 "고쳐진 것처럼" 보인다.
+            new_version_image = (await s.execute(
+                select(ChannelPostImage).where(ChannelPostImage.version_id == new_version_id)
+            )).scalar_one_or_none()
+            assert new_version_image is not None, (
+                "ChannelPostImage 행이 새 version_id로 복제 안 됨 — publish 시점에 "
+                "latest.id로 조회하면 빈손이라 이미지 없이 TEXT로 나간다(B1 원 버그)"
+            )
+            original_image = (await s.execute(
+                select(ChannelPostImage).where(ChannelPostImage.version_id == image_version_id)
+            )).scalar_one()
+            assert new_version_image.original_sha256 == original_image.original_sha256
+            assert new_version_image.final_sha256 == by_id[new_version_id].image_sha256
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_uses_carried_forward_image_not_silently_text_only():
+    """story 620beefc(페드루 리뷰 블로커 B1, 발행 레벨 실증) — 이미지 첨부 뒤 텍스트만
+    편집한 버전을 실제로 발행하면 IMAGE 컨테이너 경로(image_url 있음)로 나가야 한다 —
+    B1이 있었다면 이 발행은 image_url=None인 TEXT 경로로 조용히 샜다."""
+    from app.main import app
+    from app.services.channel_posts import publish_channel_post_draft
+    import app.services.threads_publish as tp
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            raw = _png_bytes(400, 400)
+            r_img = await _upload_and_confirm(client, org_id, draft_id, raw, content_type="image/png")
+            assert r_img.status_code == 201, r_img.text
+
+            # 이미지 엔드포인트를 안 거치는 순수 텍스트 편집(새 버전 — image_sha256만 캐리포워드).
+            r_edit = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json={
+                    "work_item_id": str(story_id), "connection_id": str(connection_id),
+                    "text": "발행 직전 텍스트만 재편집",
+                },
+            )
+            assert r_edit.status_code == 201, r_edit.text
+
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+            )
+            assert r_submit.status_code == 200, r_submit.text
+            gate_id = uuid.UUID(r_submit.json()["gate_id"])
+            await _approve_gate_directly(s, gate_id)
+
+            captured = {}
+
+            async def _fake_create_container(client_, *, access_token, threads_user_id, text, image_url=None):
+                captured["image_url"] = image_url
+                return "container-carried-forward"
+
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "create_container", AsyncMock(side_effect=_fake_create_container)),
+            ):
+                publication = await publish_channel_post_draft(
+                    s, org_id=org_id, draft_id=draft_id, published_by_member_id=human_id,
+                )
+        assert publication.status == "container_created"  # 비동기 IMAGE 경로 — 즉시 published 아님
+        assert captured["image_url"] is not None, "B1 재발 — 캐리포워드된 이미지가 발행에 안 실림"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -770,6 +865,131 @@ async def test_image_publish_error_status_needs_check_no_auto_retry():
                     await publish_channel_post_draft(
                         s, org_id=org_id, draft_id=draft_id, published_by_member_id=human_id,
                     )
+
+            # story 620beefc(페드루 리뷰 블로커 B2) — external_container_id가 지워져야
+            # 사람의 AC5 재시도가 죽은 컨테이너를 다시 poll하지 않고 완전히 새 컨테이너를
+            # 만든다(안 지우면 ERROR/EXPIRED 컨테이너를 영구히 반복 poll하는 실패 루프).
+            from app.models.channel_publication import ChannelPublication
+            from sqlalchemy import select as sa_select
+
+            pub = (await s.execute(
+                sa_select(ChannelPublication).where(ChannelPublication.org_id == org_id)
+            )).scalar_one()
+            assert pub.status == "failed"
+            assert pub.external_container_id is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_image_publish_error_retry_creates_brand_new_container():
+    """story 620beefc(페드루 리뷰 블로커 B2, 회복 경로 실증) — ERROR 뒤 external_
+    container_id가 지워진 상태에서 재시도하면(다음 publish_channel_post_draft 호출)
+    create_container를 다시 호출해 완전히 새 creation_id를 받는다 — 죽은 컨테이너를
+    또 poll하지 않는다."""
+    from app.main import app
+    from app.services.channel_posts import publish_channel_post_draft, ChannelImageContainerFailedError
+    import app.services.threads_publish as tp
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            draft_id = await _prepare_approved_image_draft(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id, human_id=human_id,
+            )
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "create_container", AsyncMock(return_value="container-dead")),
+            ):
+                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "get_container_status", AsyncMock(return_value=("EXPIRED", None))),
+            ):
+                with pytest.raises(ChannelImageContainerFailedError):
+                    await publish_channel_post_draft(
+                        s, org_id=org_id, draft_id=draft_id, published_by_member_id=human_id,
+                    )
+
+            create_container_retry = AsyncMock(return_value="container-fresh")
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "create_container", create_container_retry),
+            ):
+                publication = await publish_channel_post_draft(
+                    s, org_id=org_id, draft_id=draft_id, published_by_member_id=human_id,
+                )
+            assert publication.status == "container_created"
+            assert publication.external_container_id == "container-fresh"
+            create_container_retry.assert_called_once()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_image_publish_in_progress_beyond_5min_times_out_as_needs_check():
+    """story 620beefc(페드루 리뷰 블로커 B3) — IN_PROGRESS 상한 없이는 command가
+    attempt_count/backoff 어느 것도 안 건드리는 "처리 中" 분기(pending, +30초)로만
+    계속 재큐잉돼 진짜 무한루프가 된다(dead_letter로 절대 못 빠짐). row.created_at을
+    5분보다 오래 전으로 직접 되돌려(최초 컨테이너 생성 시각의 근사) 그 시나리오를
+    재현 — ChannelImageContainerFailedError(needs_check)로 떨어져야 한다."""
+    from datetime import timedelta
+    from app.main import app
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_posts import publish_channel_post_draft, ChannelImageContainerFailedError
+    from sqlalchemy import select as sa_select
+    import app.services.threads_publish as tp
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            draft_id = await _prepare_approved_image_draft(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id, human_id=human_id,
+            )
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "create_container", AsyncMock(return_value="container-stuck")),
+            ):
+                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+
+            pub = (await s.execute(
+                sa_select(ChannelPublication).where(ChannelPublication.org_id == org_id)
+            )).scalar_one()
+            pub.created_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+            await s.commit()
+
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "get_container_status", AsyncMock(return_value=("IN_PROGRESS", None))),
+            ):
+                with pytest.raises(ChannelImageContainerFailedError) as exc_info:
+                    await publish_channel_post_draft(
+                        s, org_id=org_id, draft_id=draft_id, published_by_member_id=human_id,
+                    )
+            assert exc_info.value.container_status == "TIMEOUT"
+
+            await s.refresh(pub)
+            assert pub.status == "failed"
+            assert pub.external_container_id is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -892,6 +1112,50 @@ async def test_connection_response_exposes_threads_image_spec():
         assert row["image_width_max"] == 1440
         assert row["image_color_space"] == "sRGB"
         assert row["image_max_count"] == 1
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── 페드루 리뷰 블로커 B4(보안) — create_only 서명 ──────────────────────────
+
+@pytest.mark.anyio
+async def test_upload_url_requests_create_only_signed_url_and_exposes_required_headers():
+    """story 620beefc(페드루 리뷰 블로커 B4) — create_only=True 없이는 TTL(10분) 안에
+    같은 서명 URL로 원본을 재PUT할 수 있어, confirm()이 이미 읽어 해시·봉인한 뒤 실제
+    GCS 객체가 다른 바이트로 바뀔 수 있다(발행 바이트≠봉인 바이트). provider.
+    signed_write_url이 실제로 create_only=True를 받는지, 응답에 provider가 요구하는
+    헤더가 그대로 실리는지 직접 검증한다(story #3249 assets.py 선례와 동형 계약).
+    LocalStorageProvider는 create_only PUT 수신을 구현 안 해(fail-closed) 이 축은
+    provider를 목으로 대체해 signed_write_url 호출 인자 자체를 검증한다."""
+    from app.main import app
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        fake_provider = MagicMock()
+        fake_provider.signed_write_url = AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url")
+        fake_provider.required_write_headers = MagicMock(return_value={"x-goog-if-generation-match": "0"})
+
+        import app.services.channel_post_images as cpi_mod
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            with patch.object(cpi_mod, "get_storage_provider", return_value=fake_provider):
+                r = await _request_upload_url(client, org_id, draft_id, content_type="image/png")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["required_put_headers"] == {"x-goog-if-generation-match": "0"}
+
+        _, kwargs = fake_provider.signed_write_url.call_args
+        assert kwargs["create_only"] is True
+        fake_provider.required_write_headers.assert_called_once_with(create_only=True)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

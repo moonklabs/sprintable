@@ -69,6 +69,17 @@ class ChannelImageUnsupportedError(Exception):
         super().__init__(f"채널 {channel!r}은 이미지 첨부를 지원하지 않습니다")
 
 
+class ChannelImageStorageNotConfiguredError(Exception):
+    """story 620beefc(페드루 리뷰 B5) — avatar_upload.py::AvatarUploadError(503,
+    "AVATAR_UPLOAD_NOT_CONFIGURED", ...)와 동형 축. `GCS_CHANNEL_MEDIA_BUCKET` 미설정은
+    "이 채널이 이미지를 지원 안 함"(422, ChannelImageUnsupportedError·제품/어댑터 성질)과
+    다른 이유의 실패다 — 채널은 이미지를 지원하는데 **이 환경(dev/prod)이 아직 배선 안
+    됐을 뿐**(배포 설정 갭). fail-closed 503으로 구별한다."""
+
+    def __init__(self):
+        super().__init__("채널 이미지 업로드가 이 환경에 구성되지 않았습니다(GCS_CHANNEL_MEDIA_BUCKET 미설정)")
+
+
 class ChannelImageUnsupportedFormatError(Exception):
     """업로드-URL 발급 시점 content_type이 어댑터 선언 형식 밖."""
 
@@ -139,7 +150,7 @@ class ChannelImageUploadFailedError(Exception):
 
 def _require_bucket() -> str:
     if not CHANNEL_MEDIA_BUCKET:
-        raise ChannelImageUnsupportedError(channel="(GCS_CHANNEL_MEDIA_BUCKET 미설정)")
+        raise ChannelImageStorageNotConfiguredError()
     return CHANNEL_MEDIA_BUCKET
 
 
@@ -160,8 +171,15 @@ async def create_channel_post_image_upload_url(
         raise ChannelImageUnsupportedFormatError(content_type=content_type, allowed=adapter.image_formats)
     ext = _MIME_TO_EXT.get(content_type, "bin")
     object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
-    upload_url = await get_storage_provider().signed_write_url(
-        bucket, object_path, ttl=UPLOAD_URL_TTL, content_type=content_type,
+    provider = get_storage_provider()
+    # story 620beefc(페드루 리뷰 블로커 B4·보안) — create_only=True 없이는 TTL(10분) 안에
+    # 같은 서명 URL로 원본을 재PUT할 수 있다: confirm()이 이미 원본을 읽어 sha256·derive를
+    # 끝낸 **뒤** 다른 바이트로 재PUT되면, 실제로 GCS에 저장된 객체와 우리가 해시·봉인한
+    # 값이 어긋난다(발행되는 바이트≠봉인된 바이트). story #3249(assets.py 선례)와 동일
+    # 처방 — GCS는 `x-goog-if-generation-match: 0`을 서명에 바인딩해 두 번째 PUT을
+    # 412로 거부한다.
+    upload_url = await provider.signed_write_url(
+        bucket, object_path, ttl=UPLOAD_URL_TTL, content_type=content_type, create_only=True,
     )
     if upload_url is None:
         raise ChannelImageUploadFailedError(object_path=object_path)
@@ -170,6 +188,10 @@ async def create_channel_post_image_upload_url(
         "object_path": object_path,
         "expires_at": (datetime.now(timezone.utc) + UPLOAD_URL_TTL).isoformat(),
         "max_bytes": _MAX_ORIGINAL_UPLOAD_BYTES,
+        # story #3249/dc3d62f4 관례 — provider별 조건부 헤더 이름이 다르다(GCS:
+        # x-goog-if-generation-match·S3/MinIO: If-None-Match). FE는 PUT에 이 헤더를
+        # 정확히 실어야 한다(안 실으면 서명 불일치로 PUT 자체가 깨진다).
+        "required_put_headers": provider.required_write_headers(create_only=True),
     }
 
 
@@ -178,16 +200,28 @@ def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int
     derived_width, derived_height, out_format) — 변환 불요면 전부 None.
 
     호출부가 이미 UnidentifiedImageError/애니메이션/종횡비 검사를 마친 뒤에만 부른다
-    (이 함수 자체는 "변환 가능"이 이미 확定된 입력만 다룬다)."""
-    from PIL import Image
+    (이 함수 자체는 "변환 가능"이 이미 확定된 입력만 다룬다).
+
+    story 620beefc(페드루 리뷰 — EXIF 방향) — 휴대폰 카메라가 흔히 심는 EXIF
+    Orientation 태그(회전 90/180/270도 등)를 픽셀에 굽지 않으면, 태그를 존중 안 하는
+    뷰어(Threads가 그럴 것으로 가정 — 공식 문서에 EXIF 존중 언급 없음)에서 옆으로/
+    거꾸로 보인다. `exif_orientation != 1`이면 다른 조건이 전부 규격 안이어도 변환을
+    강제한다. `.format`은 transpose **前**에 챙긴다 — 회전이 실제로 필요하면
+    `ImageOps.exif_transpose`가 새 Image 객체를 반환하는데 그 객체는 `.format`을
+    안 물려받는다(Pillow 자체 동작, 여기서 안 챙기면 이후 전부 None이 된다)."""
+    from PIL import Image, ImageOps
 
     img = Image.open(io.BytesIO(raw))
     img.load()
+    original_format = (img.format or "").upper()
+    exif_orientation = img.getexif().get(0x0112, 1)  # 0x0112 = EXIF Orientation 태그
+    img = ImageOps.exif_transpose(img)  # 방향을 픽셀에 굽는다(회전 불요면 원본 그대로 반환)
     width, height = img.size
-    original_mime = _PIL_FORMAT_TO_MIME.get((img.format or "").upper())
+    original_mime = _PIL_FORMAT_TO_MIME.get(original_format)
     has_icc = "icc_profile" in img.info
     needs_convert = (
-        original_mime not in adapter.image_formats
+        exif_orientation != 1
+        or original_mime not in adapter.image_formats
         or len(raw) > adapter.image_max_bytes
         or width < adapter.image_width_min or width > adapter.image_width_max
         or img.mode not in ("RGB", "RGBA")
@@ -213,6 +247,11 @@ def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int
         target_height = max(1, round(height * (target_width / width)))
         work = work.resize((target_width, target_height), Image.LANCZOS)
 
+    # story 620beefc(페드루 리뷰 — sRGB) — 아래 save() 호출 둘 다 `icc_profile` kwarg를
+    # 의도적으로 안 넘긴다. work가 img.convert("RGB"/"RGBA")로 이미 만들어진 뒤라 원본에
+    # 임베디드 ICC가 있었어도 그 프로파일 자체는 여기서 새로 저장되는 바이트에 실리지
+    # 않는다 — "sRGB로 간주하고 그렇게 저장"(파일 최상단 docstring의 알려진 단순화,
+    # 진짜 색상관리 변환이 아니다)이 여기 이 두 줄에서 실제로 일어나는 지점.
     buf = io.BytesIO()
     if out_format == "JPEG":
         for quality in _JPEG_QUALITY_STEPS:
@@ -271,14 +310,20 @@ async def confirm_channel_post_image_upload(
     if frame_count > 1:
         raise ChannelImageAnimatedUnsupportedError(frame_count=frame_count)
 
+    # story 620beefc(페드루 리뷰 — EXIF 방향) — .format을 transpose 前에 챙긴다(회전이
+    # 실제로 필요하면 exif_transpose가 .format 없는 새 객체를 반환한다, _derive_image와
+    # 동일 함정). 종횡비·저장 메타(original_width/height)는 픽셀 그리드가 아니라 사람이
+    # 보는 방향 기준이어야 정확하다 — 회전된 원본을 안 굽고 재면 종횡비 오판정 가능.
+    original_mime = _PIL_FORMAT_TO_MIME.get((probe.format or "").upper()) or "application/octet-stream"
+    from PIL import ImageOps
+
+    probe = ImageOps.exif_transpose(probe)
     width, height = probe.size
     aspect_ratio = (max(width, height) / min(width, height)) if min(width, height) > 0 else 0.0
     if aspect_ratio > adapter.image_aspect_max:
         raise ChannelImageAspectRatioExceededError(
             aspect_ratio=aspect_ratio, max_aspect_ratio=adapter.image_aspect_max,
         )
-
-    original_mime = _PIL_FORMAT_TO_MIME.get((probe.format or "").upper()) or "application/octet-stream"
 
     derived_bytes, derived_content_type, derived_width, derived_height, _out_format = _derive_image(
         raw, adapter=adapter,
