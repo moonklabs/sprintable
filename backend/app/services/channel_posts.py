@@ -356,6 +356,11 @@ async def _reseal_gate_on_new_version(
         gate.resolution_note = None
         gate.resolved_at = None
         gate.reapproval_required = True
+        # story #3414 추가② — 조용한 무효화 경로(명시적 재상신이 아니라 새 draft 버전
+        # 생성만으로 approved→pending으로 되돌아간 경우)도 대기 중 명령을 즉시
+        # 무효화한다. submit_channel_post_draft의 명시적 재상신 경로와 동형 처방.
+        from app.services.publication_command import void_pending_commands_for_gate
+        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code="CONTENT_CHANGED")
         return
     gate.sealed_content_version = version.version
     gate.sealed_content_sha256 = version.body_sha256
@@ -534,11 +539,20 @@ async def submit_channel_post_draft(
     draft_id: uuid.UUID,
     version_id: uuid.UUID | None,
     requester_member_id: uuid.UUID,
+    scheduled_at: datetime | None = None,
 ) -> tuple[Gate, uuid.UUID]:
     """초안 버전을 external_publish 게이트에 상신 — site_posts.submit_site_post_draft와
     1:1 대응(AC3). **에이전트도 호출 가능**(AC1, 2026-09-03 dev 실측 정정 — site S2와 동일
     실동작: submit은 게이트 생성까지만, 승인·발행이 human-only다. 이 함수 자체엔 actor_type
-    가드가 없다 — 신규 코드 불요)."""
+    가드가 없다 — 신규 코드 불요).
+
+    story #3414(PO 確定 (B), 2026-09-04) — 재승인 판정 지점은 이 함수 하나다. 판정축은
+    본문 해시 **또는** scheduled_at 중 하나라도 봉인값과 다르면 재승인(destination
+    축은 이 도메인에서 draft당 connection_id가 구조적으로 불변이라 실질 검사 대상이
+    아니다). 즉 "본문은 그대로, 예약 시각만 바꾼다"도 이 함수를 다시 불러 처리한다
+    (신규 엔드포인트를 따로 안 만든다 — 판정 지점을 하나로 유지). site_posts는 예약
+    개념이 없어 판정축이 하나뿐이라 이 함수와 대칭이 깨지는데, 대칭보다 판정 단일
+    지점이 우선이라는 게 PO 확定."""
     draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None:
         raise ChannelPostDraftNotFoundError(draft_id)
@@ -575,12 +589,19 @@ async def submit_channel_post_draft(
                 holding_connection_id=holder.connection_id,
             )
 
+    # story #3414 — 무엇이 바뀌었는지(본문 또는 scheduled_at)를 재봉인 前에 먼저
+    # 판정한다. 둘 다 안 바뀌었으면 기존처럼 완전 no-op(short-circuit).
+    content_changed = existing is None or existing.sealed_content_sha256 != target.body_sha256
+    schedule_changed = existing is None or existing.sealed_scheduled_at != scheduled_at
     if (
         existing is not None
-        and existing.sealed_content_sha256 == target.body_sha256
+        and not content_changed
+        and not schedule_changed
         and existing.status in ("pending", "approved")
     ):
         return existing, target.id
+
+    was_approved = existing is not None and existing.status == "approved"
 
     neutral_facts = {
         "destination": draft.channel,
@@ -608,7 +629,19 @@ async def submit_channel_post_draft(
     gate.sealed_content_version = target.version
     gate.sealed_content_sha256 = target.body_sha256
     gate.sealed_content_body = target.text
+    gate.sealed_scheduled_at = scheduled_at
     gate.reapproval_required = False
+
+    if was_approved:
+        # story #3414 추가② — 이 재상신이 이미 승인된 게이트를 되돌린 경우(위에서
+        # pending으로 되돌렸다), 그 게이트에 걸린 대기 중 명령을 즉시 무효화한다
+        # (워커 tick을 기다리지 않고 화면이 바로 "이 예약은 더 이상 유효하지 않다"를
+        # 보일 수 있게). 사유 코드는 실제 무엇이 바뀌었는지 그대로 — 본문이 바뀌었으면
+        # CONTENT_CHANGED, 본문은 그대로고 시각만 바뀌었으면 SCHEDULE_CHANGED.
+        from app.services.publication_command import void_pending_commands_for_gate
+        reason_code = "CONTENT_CHANGED" if content_changed else "SCHEDULE_CHANGED"
+        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code=reason_code)
+
     await db.commit()
     await db.refresh(gate)
     return gate, target.id
@@ -634,6 +667,35 @@ def _classify_threads_error(
     return "CHANNEL_PUBLISH_PROVIDER_ERROR", ChannelPublishProviderError(
         provider_code=exc.code, provider_message=exc.message,
     )
+
+
+async def resolve_command_target(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+) -> tuple[ChannelPostDraft, ChannelPostVersion, Gate]:
+    """story #3414 — `publication_command` 키 조립에 필요한 (draft, latest_version, gate)
+    조회 전용. **`publish_channel_post_draft()`의 재검증(봉인 일치·connection 활성)을
+    재구현하지 않는다** — 그 함수가 실제 발행(즉시든 워커든) 시점에 이미 한다. 여기선
+    "게이트가 이 work_item에 존재하고 approved인지"만 본다(근거 없는 command 생성을
+    막는 최소선)."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    gate = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
+    )
+    if gate is None or gate.status != "approved":
+        raise ExternalPublishGateNotApprovedError(
+            gate_id=gate.id if gate is not None else None,
+            status=gate.status if gate is not None else None,
+        )
+    versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    return draft, versions[-1], gate
 
 
 async def publish_channel_post_draft(

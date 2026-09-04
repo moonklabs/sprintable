@@ -3,6 +3,7 @@ API. `app/routers/site_posts.py`(story #3365) 형태를 그대로 미러 — 새
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -120,6 +121,10 @@ class ChannelPostVersionHistoryItem(BaseModel):
 
 class SubmitChannelPostDraftRequest(BaseModel):
     version_id: uuid.UUID | None = None
+    # story #3414(PO 確定, 2026-09-04) — 예약 발행 시각도 게이트 봉인 범위(블루프린트
+    # v3 §3). 생략/null=즉시. 승인 뒤 이 값만 바꿔도(본문은 그대로) 재승인이 필요하다 —
+    # submit_channel_post_draft가 그 판정을 한다(신규 엔드포인트 없음).
+    scheduled_at: datetime | None = None
 
 
 class SubmitChannelPostDraftResponse(BaseModel):
@@ -127,6 +132,7 @@ class SubmitChannelPostDraftResponse(BaseModel):
     version_id: uuid.UUID
     content_sha256: str
     status: str
+    scheduled_at: str | None = None
 
 
 @router.post(
@@ -301,7 +307,7 @@ async def submit_channel_post_draft_endpoint(
     try:
         gate, version_id = await submit_channel_post_draft(
             db, org_id=org_id, draft_id=draft_id, version_id=body.version_id,
-            requester_member_id=uuid.UUID(auth.user_id),
+            requester_member_id=uuid.UUID(auth.user_id), scheduled_at=body.scheduled_at,
         )
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -336,14 +342,21 @@ async def submit_channel_post_draft_endpoint(
     return SubmitChannelPostDraftResponse(
         gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
         status=gate.status,
+        scheduled_at=gate.sealed_scheduled_at.isoformat() if gate.sealed_scheduled_at else None,
     )
 
 
 class PublishChannelPostResponse(BaseModel):
-    permalink: str | None
-    external_id: str | None
-    published_at: str
+    permalink: str | None = None
+    external_id: str | None = None
+    published_at: str | None = None
     version_id: uuid.UUID
+    # story #3414 — 예약(scheduled_at 봉인됨)이면 이 요청은 command만 만들고 실제
+    # 발행은 워커가 나중에 한다. 기존 필드(permalink 등)는 즉시 경로에서만 채워진다
+    # (회귀 0 — 기존 FE는 이 셋을 그대로 읽는다, scheduled 필드는 새로 봐야 안다).
+    scheduled: bool = False
+    command_id: uuid.UUID | None = None
+    scheduled_at: str | None = None
 
 
 @router.post(
@@ -356,21 +369,71 @@ async def publish_channel_post_draft_endpoint(
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> PublishChannelPostResponse:
-    """story #f8f7cb0f — 휴먼 전용(AC1). 발행 직전 게이트 approved·봉인 일치·connection
-    active 셋을 재검증(fail-closed)한 뒤 연결 토큰으로 Threads에 2-호출 발행한다. 같은
-    (gate, version) 재요청은 멱등(새 POST 없이 기존 완료 행 반환)."""
+    """story #f8f7cb0f·#3414 — 휴먼 전용(AC1). 발행/예약 요청 둘 다 이 엔드포인트 하나
+    (블루프린트 §3 "즉시 발행=scheduled_at 없음인 같은 명령", PO 確定). 게이트가 승인한
+    scheduled_at(gate.sealed_scheduled_at)이 없으면 즉시 — 기존처럼 3중 재검증 뒤
+    동기로 Threads 2-호출까지 완료한다. 있으면 `publication_commands` 행만 만들고
+    반환 — 실제 발행은 cron 워커(AC3)가 그 시각에 처리한다.
+
+    두 경로 다 `publication_command`를 감사·재시도 원장으로 upsert한다(멱등 —
+    같은 draft/version 재요청은 새 행을 안 만든다). command upsert가 **3중
+    재검증(게이트approved·seal일치·connection활성) 뒤**에 오도록 순서를 지킨다
+    (카디르 QA⑥) — 재검증 실패로 요청이 거부되면 command 행 자체가 안 생긴다(고아
+    pending 행이 남아 워커가 엉뚱하게 재시도하는 것을 원천 차단)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     resolved = await _require_human(db, auth, org_id)
+
+    from app.services.channel_posts import resolve_command_target
+    from app.services.publication_command import apply_command_failure, create_or_get_publication_command
+
+    try:
+        draft, latest, gate = await resolve_command_target(db, org_id=org_id, draft_id=draft_id)
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ExternalPublishGateNotApprovedError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+
+    if gate.sealed_scheduled_at is not None:
+        # 예약 — command만 만들고 여기서 끝(워커가 나중에 처리, AC3).
+        command, _ = await create_or_get_publication_command(
+            db, org_id=org_id, gate_id=gate.id, destination=draft.connection_id,
+            approved_version=latest.id, requested_by_member_id=resolved.id,
+            scheduled_at=gate.sealed_scheduled_at,
+        )
+        await db.commit()
+        return PublishChannelPostResponse(
+            version_id=latest.id, scheduled=True, command_id=command.id,
+            scheduled_at=gate.sealed_scheduled_at.isoformat(),
+        )
+
+    # 즉시 — command를 pending으로 upsert한 뒤 기존처럼 동기 실행(AC2, 동기 유지).
+    command, _ = await create_or_get_publication_command(
+        db, org_id=org_id, gate_id=gate.id, destination=draft.connection_id,
+        approved_version=latest.id, requested_by_member_id=resolved.id, scheduled_at=None,
+    )
+    await db.commit()
+    now = datetime.now(timezone.utc)
 
     try:
         row = await publish_channel_post_draft(
             db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
         )
     except ChannelPostDraftNotFoundError as exc:
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_POST_DRAFT_NOT_FOUND", last_error=str(exc), now=now,
+        )
+        await db.commit()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ExternalPublishGateNotApprovedError as exc:
+        await apply_command_failure(
+            db, command, error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc), now=now,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=403,
             detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
@@ -379,6 +442,10 @@ async def publish_channel_post_draft_endpoint(
         # 페드루 PO 확定(2026-09-03) — 발행 시점 재검사(UTM 태그된 링크가 붙은 실제 전송
         # 문자열 기준). draft 생성 시점의 매핑(422·max_length·current_length)과 동형 —
         # 코드 하나가 두 HTTP status를 갖지 않게 유지.
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_TEXT_TOO_LONG", last_error=str(exc), now=now,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=422,
             detail={
@@ -387,30 +454,58 @@ async def publish_channel_post_draft_endpoint(
             },
         ) from exc
     except ChannelPostSealMissingError as exc:
+        await apply_command_failure(
+            db, command, error_code="SITE_POST_SEAL_MISSING", last_error=str(exc), now=now,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=409, detail={"code": "SITE_POST_SEAL_MISSING", "message": str(exc)},
         ) from exc
     except ChannelPostReapprovalRequiredError as exc:
+        # story #3414 — 추가② 훅이 대개 이 상황 전에 command를 이미 voided로 무효화해
+        # 두지만, 놓친 경합 창은 여기서도 잡는다(이중 방어).
+        command.status = "voided"
+        command.reason_code = "CONTENT_CHANGED"
+        command.last_error = str(exc)[:2000]
+        await db.commit()
         raise HTTPException(
             status_code=409,
             detail={"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)},
         ) from exc
     except ChannelConnectionNotActiveError as exc:
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_CONNECTION_NOT_ACTIVE", last_error=str(exc), now=now,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=409,
             detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
         ) from exc
     except ChannelTokenExpiredError as exc:
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_TOKEN_EXPIRED", last_error=str(exc), now=now,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=409,
             detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": str(exc)},
         ) from exc
     except ChannelRateLimitedError as exc:
+        retry_after_seconds = max(0, int((exc.reset_at - now).total_seconds()))
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_RATE_LIMITED", last_error=str(exc), now=now,
+            retry_after_seconds=retry_after_seconds,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=429,
             detail={"code": "CHANNEL_RATE_LIMITED", "message": str(exc), "reset_at": exc.reset_at.isoformat()},
         ) from exc
     except ChannelPublishProviderError as exc:
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", last_error=str(exc), now=now,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=502,
             detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)},
@@ -419,13 +514,55 @@ async def publish_channel_post_draft_endpoint(
         # story #3395 — 같은 (gate_id, version_id) 동시 요청 경합에서 진 쪽이 이긴 쪽의
         # 완료를 기다렸는데도 못 끝났다(약 3초). 거짓 200도 무단 500도 아닌 정직한
         # "잠시 후 다시" — 클라이언트 재시도는 그때 남은 container_created 행으로 기존
-        # 부분성공 재시도 경로를 그대로 탄다.
+        # 부분성공 재시도 경로를 그대로 탄다. command는 아직 in_progress로 남겨둔다
+        # (실패로 단정 안 함 — 이긴 쪽이 곧 끝낼 것이므로).
         raise HTTPException(
             status_code=409,
             detail={"code": "CHANNEL_PUBLISH_IN_PROGRESS", "message": str(exc)},
         ) from exc
 
+    command.status = "completed"
+    command.last_error = None
+    command.failure_kind = None
+    await db.commit()
+
     return PublishChannelPostResponse(
         permalink=row.permalink, external_id=row.external_id,
         published_at=row.published_at.isoformat(), version_id=row.version_id,
+        scheduled=False, command_id=command.id,
     )
+
+
+class RetryPublicationCommandResponse(BaseModel):
+    id: uuid.UUID
+    status: str
+
+
+@router.post(
+    "/{org_id}/channel-posts/publication-commands/{command_id}/retry",
+    response_model=RetryPublicationCommandResponse,
+)
+async def retry_publication_command_endpoint(
+    org_id: uuid.UUID,
+    command_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> RetryPublicationCommandResponse:
+    """story #3414 AC5 — 휴먼 전용(발행 자체가 human-only인 것과 동형). `dead_letter`
+    상태인 command만 다시 큐(`pending`)에 올린다 — 다른 상태(completed·voided·blocked
+    등)는 404로 존재 비노출(카디르 QA와 동형 관례, 상태를 굳이 구별해 알려주지 않는다).
+    `next_attempt_at`을 null로 되돌려야 다음 cron tick이 이 행을 실제로 다시 집는다
+    (status만 바뀌고 next_attempt_at이 미래에 멈춰 있으면 WHERE절에서 계속 빠지는
+    결함 — 카디르 QA⑤ 지적 그대로 반영)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+
+    from app.services.publication_command import retry_dead_letter_command
+
+    command = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id)
+    if command is None:
+        raise HTTPException(status_code=404, detail="command를 찾을 수 없거나 재시도 대상이 아닙니다")
+    await db.commit()
+    return RetryPublicationCommandResponse(id=command.id, status=command.status)

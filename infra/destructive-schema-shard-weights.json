@@ -850,6 +850,10 @@
     {
       "file": "tests/test_3411_channel_post_text_preview.py",
       "sec": 6.0
+    },
+    {
+      "file": "tests/test_3414_publication_command.py",
+      "sec": 18.0
     }
   ]
 }
