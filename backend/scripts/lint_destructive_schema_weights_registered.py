@@ -20,6 +20,12 @@ JWT_SECRET/SECRET_KEY(설정값 검증 통과용, 실제 인증에는 안 쓰임
 `backend-test-destructive`(8-way 매트릭스+Postgres+템플릿 DB 빌드) 전체를 기다릴 필요가
 없다.
 
+story #3465(CI 후속, 2026-09-04) — 두 번째 축 추가: files[] 항목마다 `source`
+(provenance) 필드가 필수다(그 전엔 단일 `source_run` 문자열 하나에 전부 이어붙였다 —
+하루(2026-09-04) rebase 충돌 3회(#3797·#3800·#3802)가 전부 그 한 줄을 여러 PR이 동시에
+건드려 났다). `entries_missing_source()`가 그 존재만 본다(값의 진위는 검증 안 함, 아래
+unweighted 축과 동형 관례).
+
 ⛔이 가드가 못 잡는 것(story #3392의 다른 가드와 축이 다르다 — 명시 선언, 다른 lint
 스크립트들의 관례 그대로):
   · 이미 등재는 됐지만 실측치가 크게 틀린(낡은) 파일 — 그건 story #3392의 unweighted
@@ -43,6 +49,8 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from shard_destructive_tests import (  # noqa: E402
     average_weight,
     discover_files,
+    entries_missing_source,
+    load_raw_entries,
     load_weights,
     unweighted_files_in,
 )
@@ -55,9 +63,22 @@ def main() -> int:
 
     print(f"discover: destructive_schema 파일 {len(files)}개 · weights.json 등재 {len(weights)}개")
 
-    if not missing:
-        print("OK: 신규 미등재 destructive_schema 파일 0건")
+    # story #3465 — 단일 source_run 문자열 폐기 뒤 files[] 항목마다 source가 필수다.
+    # unweighted 판정(위)보다 먼저 볼 이유는 없지만(둘 다 존재-가드, 순서 무관) 나란히
+    # 실패를 한 번에 보고한다 — 재커밋 왕복을 줄인다(이 스크립트 자체의 존재 이유와
+    # 동일 사상).
+    no_source = entries_missing_source(load_raw_entries())
+    if no_source:
+        print(f"FAIL: source 필드가 비었거나 없는 files[] 항목 {len(no_source)}개(story #3465)")
+        for f in no_source:
+            print(f"::error::files[] 항목에 source가 없습니다(story #3465): {f}")
+
+    if not missing and not no_source:
+        print("OK: 신규 미등재 destructive_schema 파일 0건 · source 누락 0건")
         return 0
+
+    if not missing:
+        return 1
 
     avg = average_weight(weights)
     print(f"FAIL: shard-weights.json에 없는 destructive_schema 파일 {len(missing)}개(story 23bf1913)")

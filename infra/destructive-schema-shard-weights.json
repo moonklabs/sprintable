@@ -1,927 +1,1156 @@
 {
   "_snapshot_policy": "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 ~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐.",
-  "source_run": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held+story-3414-publication-command(로컬 raw pytest 실측, 템플릿 DB 스크립트 아님 — 페드루 리뷰 nit N)+story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)+story-3419-cancel-unpublish(CI shard(6) unweighted-guard 실측 31s, run 33847827818/job 100943850339, 2026-09-04 — PR#3774)+story-3423-scheduled-filter(CI shard(2) unweighted-guard 실측 23s, run 33849386492/job 100950217041, 2026-09-04 — PR#3775)+story-620beefc-threads-image(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 28.2s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-5b27b32f-sandbox-channel-adapter(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 19.03s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 115s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-8b7e52d6-claim-story-signal(PR 개설 前 선제 등재, story 23bf1913 조기가드 학습 반영 — 로컬 raw pytest 15.30s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 92s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-46da6450-org-timezone(PR 개설 前 선제 등재, 페드루 리뷰 B1 — 로컬 raw pytest 15.86s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 95s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-f30da19a-available-channels(페드루 리뷰 B1 후속, PR#3784 — 로컬 raw pytest 17.74s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 110s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-0e960006-command-id-exposure(PR 개설 前 선제 등재 — 로컬 raw pytest 6.62s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-e4fc29fa-hosted-site-publish-adapter(PR 개설 前 선제 등재 — 로컬 raw pytest 3.34s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-3437-content-ledger-projection(PR 개설 前 선제 등재 — 로컬 raw pytest 15.26s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-cfc1a55a-scheduled-command-on-approval(PR 개설 前 선제 등재 — 로컬 raw pytest 9.76s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-e4fc29fa-destination-axis(PR 개설 前 선제 등재 — 로컬 raw pytest 6.60s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-3457-campaigns-list-and-version-campaign-fields(PR 개설 前 선제 등재 — 로컬 raw pytest 14.66s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-3437-campaign-patch-no-version-no-gate-touch(PR 개설 前 선제 등재 — 로컬 raw pytest 6.14s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-e4fc29fa-site-post-orchestration(조각③c, PR 개설 前 선제 등재 — 실 uvicorn 라이브 서버 기동 포함 로컬 raw pytest 19.58s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 120s 잠정값, 실 CI 샤드 로그로 재확認 필요)+story-e4fc29fa-channel-connection-creation(조각⑤, PR 개설 前 선제 등재 — 로컬 raw pytest 15.01s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)",
   "measured_at": "2026-09-03",
   "files": [
     {
       "file": "tests/test_3373_channel_connections.py",
-      "sec": 20.1
+      "sec": 20.1,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3317_org_connector_registry.py",
-      "sec": 19.63
+      "sec": 19.63,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2813_gate_github_check_realdb.py",
-      "sec": 17.72
+      "sec": 17.72,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3360_site_posts.py",
-      "sec": 15.7
+      "sec": 15.7,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3332_block_template_payload_ref_contract.py",
-      "sec": 15.33
+      "sec": 15.33,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2161_agent_run_reaper.py",
-      "sec": 14.19
+      "sec": 14.19,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2932_gate_slot_hardening_realdb.py",
-      "sec": 13.17
+      "sec": 13.17,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s8_watchdog.py",
-      "sec": 12.83
+      "sec": 12.83,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s26_sprint_overlay.py",
-      "sec": 12.32
+      "sec": 12.32,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2631_gate_undo_discuss.py",
-      "sec": 11.72
+      "sec": 11.72,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3143_chat_server_command_catalog.py",
-      "sec": 11.48
+      "sec": 11.48,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3374_channel_posts.py",
-      "sec": 11.42
+      "sec": 11.42,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2636_custom_event_registration.py",
-      "sec": 11.39
+      "sec": 11.39,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2826_gate_pr_lifecycle_creation_realdb.py",
-      "sec": 11.31
+      "sec": 11.31,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3381_site_post_unpublish.py",
-      "sec": 10.7
+      "sec": 10.7,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s32_reassign.py",
-      "sec": 10.42
+      "sec": 10.42,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2893_pr4_late_participation_gate_creation_realdb.py",
-      "sec": 9.83
+      "sec": 9.83,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3329_embedded_entity_ref_tokenization.py",
-      "sec": 9.75
+      "sec": 9.75,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2172_assignee_position_events.py",
-      "sec": 9.53
+      "sec": 9.53,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3369_publish_site_post_from_draft.py",
-      "sec": 9.38
+      "sec": 9.38,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1940_human_api_keys.py",
-      "sec": 9.28
+      "sec": 9.28,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3323_prev_output_doc_chain.py",
-      "sec": 9.28
+      "sec": 9.28,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3367_site_post_submit_gate_seal.py",
-      "sec": 8.82
+      "sec": 8.82,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2944_api_key_issuance_replace_semantics_realdb.py",
-      "sec": 8.81
+      "sec": 8.81,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2250_stalled_signal_realdb.py",
-      "sec": 8.8
+      "sec": 8.8,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2043_ac3_hitl_reason_enforce.py",
-      "sec": 8.72
+      "sec": 8.72,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2027_gate_approval_reason_enforce.py",
-      "sec": 8.58
+      "sec": 8.58,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1972_gate_risk_grade.py",
-      "sec": 8.52
+      "sec": 8.52,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s9_parallel_quorum.py",
-      "sec": 8.35
+      "sec": 8.35,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2604_approval_request_cards.py",
-      "sec": 8.24
+      "sec": 8.24,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2843_goal_outcome_verdict_realdb.py",
-      "sec": 8.24
+      "sec": 8.24,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2815_gate_github_check_events_endpoint_realdb.py",
-      "sec": 8.21
+      "sec": 8.21,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2630_circuit_breaker.py",
-      "sec": 8.2
+      "sec": 8.2,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3354_pageview_counter.py",
-      "sec": 8.18
+      "sec": 8.18,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2038_hypothesis_outcome_result_enforce.py",
-      "sec": 8.05
+      "sec": 8.05,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2633_event_publish.py",
-      "sec": 7.93
+      "sec": 7.93,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1973_gate_urgency_sort.py",
-      "sec": 7.84
+      "sec": 7.84,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s14_role_resolver.py",
-      "sec": 7.83
+      "sec": 7.83,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2131_bulk_status_changed_sse_realdb.py",
-      "sec": 7.77
+      "sec": 7.77,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_recruit_s5_connection_artifact_realdb.py",
-      "sec": 7.77
+      "sec": 7.77,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2893_gate_null_slot_promotion_realdb.py",
-      "sec": 7.64
+      "sec": 7.64,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3084_gate_toss_realdb.py",
-      "sec": 7.57
+      "sec": 7.57,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2893_pr4_label_alignment_gate_creation_realdb.py",
-      "sec": 7.55
+      "sec": 7.55,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2836_agent_auth_failure_realdb.py",
-      "sec": 7.51
+      "sec": 7.51,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s12_context_pack_items_realdb.py",
-      "sec": 7.46
+      "sec": 7.46,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2853_gate_check_revocation_realdb.py",
-      "sec": 7.4
+      "sec": 7.4,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s18_runtime_mode.py",
-      "sec": 7.36
+      "sec": 7.36,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_c7abdf42_repeat_schedule_endpoints.py",
-      "sec": 7.18
+      "sec": 7.18,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2078_event_outbox_realdb.py",
-      "sec": 7.02
+      "sec": 7.02,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2087_agent_api_key_usage_audit_trail_realdb.py",
-      "sec": 7.02
+      "sec": 7.02,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_merge_verdict_gate.py",
-      "sec": 6.93
+      "sec": 6.93,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1974_gate_assigned_to_me.py",
-      "sec": 6.89
+      "sec": 6.89,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3313_recipe_notification_render.py",
-      "sec": 6.89
+      "sec": 6.89,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2054_gate_inbox.py",
-      "sec": 6.88
+      "sec": 6.88,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3386_site_post_publication.py",
-      "sec": 6.88
+      "sec": 6.88,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2893_pr3_gate_reevaluate_realdb.py",
-      "sec": 6.83
+      "sec": 6.83,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2953_agent_inactive_project_access_realdb.py",
-      "sec": 6.79
+      "sec": 6.79,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2747_draft_doc_chat_nudge_realdb.py",
-      "sec": 6.68
+      "sec": 6.68,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2893_pr2_sha_repending_label_unlabel_realdb.py",
-      "sec": 6.67
+      "sec": 6.67,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_a2a_sa3_link_gate_to_task_realdb.py",
-      "sec": 6.63
+      "sec": 6.63,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1970_gate_single_get.py",
-      "sec": 6.59
+      "sec": 6.59,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3365_site_post_drafts.py",
-      "sec": 6.51
+      "sec": 6.51,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_f6d1bbaa_stamp_integrity_guard.py",
-      "sec": 6.45
+      "sec": 6.45,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2156_merge_gate_evidence_realdb.py",
-      "sec": 6.39
+      "sec": 6.39,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3337_recipe_repeat_scheduler.py",
-      "sec": 6.39
+      "sec": 6.39,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2004_a2a_sendmessage_idempotency_realdb.py",
-      "sec": 6.28
+      "sec": 6.28,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3334_gate_reject_reason_enforce.py",
-      "sec": 6.27
+      "sec": 6.27,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_project_relay_owner.py",
-      "sec": 6.25
+      "sec": 6.25,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3153_glance_org_stalled_realdb.py",
-      "sec": 6.12
+      "sec": 6.12,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_a2a_sa5_auth_required_realdb.py",
-      "sec": 6.12
+      "sec": 6.12,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2893_gate_pr_scoped_isolation_realdb.py",
-      "sec": 5.99
+      "sec": 5.99,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3001_gate_delegate_realdb.py",
-      "sec": 5.94
+      "sec": 5.94,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_a2a_sa4_streaming_realdb.py",
-      "sec": 5.91
+      "sec": 5.91,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2201_sse_backfill_degraded_signal_realdb.py",
-      "sec": 5.84
+      "sec": 5.84,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_recruit_s3_recruit_service_realdb.py",
-      "sec": 5.8
+      "sec": 5.8,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2637_action_auth_enforcement.py",
-      "sec": 5.67
+      "sec": 5.67,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2935_steer_conversation_override.py",
-      "sec": 5.66
+      "sec": 5.66,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2039_project_slug_ascii.py",
-      "sec": 5.62
+      "sec": 5.62,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3039_merge_gate_ci_reeval_webhook_realdb.py",
-      "sec": 5.56
+      "sec": 5.56,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3288_recipe_role_bindings.py",
-      "sec": 5.55
+      "sec": 5.55,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2082_artifact_canonicalize_gate_inbox.py",
-      "sec": 5.54
+      "sec": 5.54,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2832_gate_reapproval_anchor_realdb.py",
-      "sec": 5.48
+      "sec": 5.48,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2626_chain_escalation_episode.py",
-      "sec": 5.38
+      "sec": 5.38,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2118_merge_gate_approval_cards_realdb.py",
-      "sec": 5.37
+      "sec": 5.37,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3340_gate_verdict_notify_reach.py",
-      "sec": 5.36
+      "sec": 5.36,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_s26_context_pack_synthesis.py",
-      "sec": 5.36
+      "sec": 5.36,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2249_gate_entered_at_realdb.py",
-      "sec": 5.34
+      "sec": 5.34,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3330_gate_verdict_notification.py",
-      "sec": 5.26
+      "sec": 5.26,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3035_late_participation_pr_result_explicit_realdb.py",
-      "sec": 5.25
+      "sec": 5.25,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3370_gate_notify_recipients.py",
-      "sec": 5.24
+      "sec": 5.24,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2628_approval_dm_participant_set_lookup.py",
-      "sec": 5.23
+      "sec": 5.23,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2975_gate_activity_audit_trail_realdb.py",
-      "sec": 5.22
+      "sec": 5.22,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s11_dispatch_context_pack_realdb.py",
-      "sec": 5.2
+      "sec": 5.2,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2838_api_key_expiry_no_silent_default_realdb.py",
-      "sec": 5.15
+      "sec": 5.15,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2975_gate_approval_sha_race_realdb.py",
-      "sec": 5.15
+      "sec": 5.15,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2985_gate_designated_approver_line.py",
-      "sec": 5.14
+      "sec": 5.14,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2982_gate_already_resolved_realdb.py",
-      "sec": 5.13
+      "sec": 5.13,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3325_recipe_gate_card_reopen.py",
-      "sec": 5.13
+      "sec": 5.13,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s3_engine.py",
-      "sec": 5.11
+      "sec": 5.11,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2693_publish_event_unknown_member_400.py",
-      "sec": 5.09
+      "sec": 5.09,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1983_doc_gate_assigned_to_me_who_state.py",
-      "sec": 5.06
+      "sec": 5.06,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s7_handoff_relay.py",
-      "sec": 5.03
+      "sec": 5.03,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s13_sla_processor.py",
-      "sec": 5.01
+      "sec": 5.01,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2606_legal_document_current.py",
-      "sec": 4.95
+      "sec": 4.95,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_f84227b5_agent_org_header_membership.py",
-      "sec": 4.91
+      "sec": 4.91,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s10_status_api.py",
-      "sec": 4.88
+      "sec": 4.88,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2665_event_publish_history.py",
-      "sec": 4.84
+      "sec": 4.84,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3312_approve_stage_gate_auto_creation.py",
-      "sec": 4.83
+      "sec": 4.83,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1715_merge_gate_requester_notify_realdb.py",
-      "sec": 4.78
+      "sec": 4.78,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2078_publish_atomic.py",
-      "sec": 4.78
+      "sec": 4.78,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_d1f4afcb_draft_nudge_gate_and_event_suppress.py",
-      "sec": 4.75
+      "sec": 4.75,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s19_grandfather.py",
-      "sec": 4.75
+      "sec": 4.75,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_a2a_sa1_deadline_sweeper_realdb.py",
-      "sec": 4.69
+      "sec": 4.69,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2835_gate_approval_publish_self_sufficient_realdb.py",
-      "sec": 4.55
+      "sec": 4.55,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2086_assignee_changed_sse.py",
-      "sec": 4.53
+      "sec": 4.53,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3033_merge_gate_sha_fallback_realdb.py",
-      "sec": 4.53
+      "sec": 4.53,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_batch_line_status.py",
-      "sec": 4.5
+      "sec": 4.5,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2624_approval_result_reply.py",
-      "sec": 4.49
+      "sec": 4.49,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3317b_recipe_capability_apply_check.py",
-      "sec": 4.48
+      "sec": 4.48,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3025_gate_self_reclamation_realdb.py",
-      "sec": 4.34
+      "sec": 4.34,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_m2_recipe_role_binding_routing_realdb.py",
-      "sec": 4.33
+      "sec": 4.33,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2637_block_template_registration.py",
-      "sec": 4.32
+      "sec": 4.32,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_agent_access_matrix_realdb.py",
-      "sec": 4.26
+      "sec": 4.26,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3115_late_link_gate_creation_realdb.py",
-      "sec": 4.25
+      "sec": 4.25,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_s27_context_pack_recommendation.py",
-      "sec": 4.25
+      "sec": 4.25,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2128_sse_lifespan_cap.py",
-      "sec": 4.22
+      "sec": 4.22,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3293_recipe_role_bindings_read.py",
-      "sec": 4.22
+      "sec": 4.22,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s5_merge_gate.py",
-      "sec": 4.21
+      "sec": 4.21,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s4_resolver.py",
-      "sec": 4.17
+      "sec": 4.17,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s16_seed.py",
-      "sec": 4.14
+      "sec": 4.14,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2634_event_definitions_list.py",
-      "sec": 4.02
+      "sec": 4.02,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2058_hitl_human_only.py",
-      "sec": 4.01
+      "sec": 4.01,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2381_wake_after_commit_race_realdb.py",
-      "sec": 4.0
+      "sec": 4.0,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2637_notification_preference_router_event_key.py",
-      "sec": 3.97
+      "sec": 3.97,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s23_hypothesis_overlay.py",
-      "sec": 3.89
+      "sec": 3.89,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s6_gate_hook.py",
-      "sec": 3.76
+      "sec": 3.76,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s17_recall.py",
-      "sec": 3.69
+      "sec": 3.69,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s33_override.py",
-      "sec": 3.68
+      "sec": 3.68,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2087_api_key_logs_endpoint_realdb.py",
-      "sec": 3.67
+      "sec": 3.67,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2637_notification_preference_event_key.py",
-      "sec": 3.58
+      "sec": 3.58,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2381_ac4_live_wake_delivery_realdb.py",
-      "sec": 3.56
+      "sec": 3.56,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2834_link_evidence_merge_semantics_realdb.py",
-      "sec": 3.56
+      "sec": 3.56,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s25_epic_overlay.py",
-      "sec": 3.55
+      "sec": 3.55,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3275_presence_profile_selfheal_realdb.py",
-      "sec": 3.53
+      "sec": 3.53,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2941_apikey_scope_resync_realdb.py",
-      "sec": 3.52
+      "sec": 3.52,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s2_config_governance.py",
-      "sec": 3.52
+      "sec": 3.52,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_ccbcd9da_gate_wake_wiring_realdb.py",
-      "sec": 3.47
+      "sec": 3.47,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2632_event_definitions.py",
-      "sec": 3.46
+      "sec": 3.46,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3349_repeat_schedule_cycle_guard.py",
-      "sec": 3.46
+      "sec": 3.46,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s28_doc_resubmit.py",
-      "sec": 3.44
+      "sec": 3.44,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s34_line_versions.py",
-      "sec": 3.44
+      "sec": 3.44,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s12be_recipient_fallback.py",
-      "sec": 3.43
+      "sec": 3.43,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2608_chain_depth.py",
-      "sec": 3.42
+      "sec": 3.42,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_ho_s9_e2e_closed_loop.py",
-      "sec": 3.38
+      "sec": 3.38,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2047_explicit_ask_gate.py",
-      "sec": 3.34
+      "sec": 3.34,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_h1_s9_merge_gate_metrics.py",
-      "sec": 3.32
+      "sec": 3.32,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s22_doc_overlay.py",
-      "sec": 3.27
+      "sec": 3.27,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_org_create_seeds_default_participation_role.py",
-      "sec": 3.26
+      "sec": 3.26,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s15_metrics.py",
-      "sec": 3.19
+      "sec": 3.19,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s31_hold.py",
-      "sec": 3.18
+      "sec": 3.18,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_h1_fix2_approve_advances_done.py",
-      "sec": 3.01
+      "sec": 3.01,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s3_embed_backlog_realdb.py",
-      "sec": 3.0
+      "sec": 3.0,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2049_default_participation_roles.py",
-      "sec": 2.97
+      "sec": 2.97,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2675_publish_event_malformed_uuid_400.py",
-      "sec": 2.97
+      "sec": 2.97,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_1968_gate_project_id_threading.py",
-      "sec": 2.93
+      "sec": 2.93,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2636_publish_zero_reach_warning.py",
-      "sec": 2.93
+      "sec": 2.93,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2524_gate_reopen_requires_human.py",
-      "sec": 2.78
+      "sec": 2.78,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s30_void_recovery.py",
-      "sec": 2.66
+      "sec": 2.66,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_h1_s10_e2e.py",
-      "sec": 2.65
+      "sec": 2.65,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2101_sse_recent_delivered_backfill_realdb.py",
-      "sec": 2.63
+      "sec": 2.63,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_edg_s29_dryrun_preview.py",
-      "sec": 2.6
+      "sec": 2.6,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2667_recruit_defer_key_issuance_realdb.py",
-      "sec": 2.54
+      "sec": 2.54,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2602_sse_lease_lifespan_reclaim.py",
-      "sec": 2.48
+      "sec": 2.48,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_claim_participation.py",
-      "sec": 2.37
+      "sec": 2.37,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2620_a2a_webhook_fallback_regression.py",
-      "sec": 2.34
+      "sec": 2.34,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2617_chain_escalation.py",
-      "sec": 2.33
+      "sec": 2.33,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2637_event_msg_metadata_tagging.py",
-      "sec": 2.3
+      "sec": 2.3,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3258_doc_gate_card_content_realdb.py",
-      "sec": 2.3
+      "sec": 2.3,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_ho_s4_scorer_verdict_wiring.py",
-      "sec": 2.28
+      "sec": 2.28,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_doc_gate_cascade_scope_realdb.py",
-      "sec": 2.25
+      "sec": 2.25,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_ho_s7_cold_start_seed.py",
-      "sec": 2.25
+      "sec": 2.25,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_merge_gate_reject_resubmit_reopen.py",
-      "sec": 2.05
+      "sec": 2.05,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s5_embedding_backfill_realdb.py",
-      "sec": 2.02
+      "sec": 2.02,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_s29_active_line_get.py",
-      "sec": 1.91
+      "sec": 1.91,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2428_list_backlog_total_count_realdb.py",
-      "sec": 1.9
+      "sec": 1.9,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2216_workflow_fallback_notify_owner_floor_realdb.py",
-      "sec": 1.88
+      "sec": 1.88,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_h1_s7_gate_verdict.py",
-      "sec": 1.84
+      "sec": 1.84,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s6_context_pack_search_realdb.py",
-      "sec": 1.8
+      "sec": 1.8,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_a2a_p1_s1_recruit_card_contract_realdb.py",
-      "sec": 1.74
+      "sec": 1.74,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s3f_poison_pill_terminal.py",
-      "sec": 1.73
+      "sec": 1.73,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_recruit_s16_rotate_idor_realdb.py",
-      "sec": 1.68
+      "sec": 1.68,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s3g_score_hypotheses_savepoint_realdb.py",
-      "sec": 1.65
+      "sec": 1.65,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_ho_s1_score_hypotheses_smoke.py",
-      "sec": 1.57
+      "sec": 1.57,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_cron_retry_dry_run.py",
-      "sec": 1.53
+      "sec": 1.53,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2520_line_merge_gate_reconcile.py",
-      "sec": 1.47
+      "sec": 1.47,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_ho_s2_outcome_verdict.py",
-      "sec": 1.36
+      "sec": 1.36,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3287_domain_label_realdb.py",
-      "sec": 1.16
+      "sec": 1.16,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2635_agent_api_keys_events_backfill.py",
-      "sec": 0.91
+      "sec": 0.91,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2635_role_templates_events_scope.py",
-      "sec": 0.84
+      "sec": 0.84,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2648_fix_legacy_scope_events_overreach.py",
-      "sec": 0.81
+      "sec": 0.81,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2637_preset_block_template_seed.py",
-      "sec": 0.62
+      "sec": 0.62,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_2637_gate_verdict_title_fix.py",
-      "sec": 0.53
+      "sec": 0.53,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_ho_s3_hypothesis_owner_seed.py",
-      "sec": 0.53
+      "sec": 0.53,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_member_ssot_parity_realdb.py",
-      "sec": 0.31
+      "sec": 0.31,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3384_site_post_list_status.py",
-      "sec": 4.25
+      "sec": 4.25,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_f8f7cb0f_channel_post_publish.py",
-      "sec": 11.97
+      "sec": 11.97,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3394_channel_post_list_be_fields.py",
-      "sec": 13.33
+      "sec": 13.33,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3399_agent_visible_channel_connections.py",
-      "sec": 5.64
+      "sec": 5.64,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_f6d14476_gate_already_held.py",
-      "sec": 23.0
+      "sec": 23.0,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3403_channel_post_draft_detail.py",
-      "sec": 8.0
+      "sec": 8.0,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3404_channel_post_gate_already_held.py",
-      "sec": 6.0
+      "sec": 6.0,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3411_channel_post_text_preview.py",
-      "sec": 6.0
+      "sec": 6.0,
+      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
       "file": "tests/test_3414_publication_command.py",
-      "sec": 25.9
+      "sec": 25.9,
+      "source": "story-3414-publication-command(로컬 raw pytest 실측, 템플릿 DB 스크립트 아님 — 페드루 리뷰 nit N)"
     },
     {
       "file": "tests/test_3415_channel_post_command_exposure.py",
-      "sec": 19.0
+      "sec": 19.0,
+      "source": "story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)"
     },
     {
       "file": "tests/test_3419_cancel_unpublish.py",
-      "sec": 31.0
+      "sec": 31.0,
+      "source": "story-3419-cancel-unpublish(CI shard(6) unweighted-guard 실측 31s, run 33847827818/job 100943850339, 2026-09-04 — PR#3774)"
     },
     {
       "file": "tests/test_3423_channel_post_scheduled_filter.py",
-      "sec": 23.0
+      "sec": 23.0,
+      "source": "story-3423-scheduled-filter(CI shard(2) unweighted-guard 실측 23s, run 33849386492/job 100950217041, 2026-09-04 — PR#3775)"
     },
     {
       "file": "tests/test_620beefc_channel_post_image.py",
-      "sec": 60.0
+      "sec": 60.0,
+      "source": "story-620beefc-threads-image(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 28.2s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_5b27b32f_sandbox_channel.py",
-      "sec": 115.0
+      "sec": 115.0,
+      "source": "story-5b27b32f-sandbox-channel-adapter(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 19.03s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 115s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_8b7e52d6_claim_story_signal.py",
-      "sec": 92.0
+      "sec": 92.0,
+      "source": "story-8b7e52d6-claim-story-signal(PR 개설 前 선제 등재, story 23bf1913 조기가드 학습 반영 — 로컬 raw pytest 15.30s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 92s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_46da6450_org_timezone.py",
-      "sec": 95.0
+      "sec": 95.0,
+      "source": "story-46da6450-org-timezone(PR 개설 前 선제 등재, 페드루 리뷰 B1 — 로컬 raw pytest 15.86s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 95s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_f30da19a_available_channels.py",
-      "sec": 110.0
+      "sec": 110.0,
+      "source": "story-f30da19a-available-channels(페드루 리뷰 B1 후속, PR#3784 — 로컬 raw pytest 17.74s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 110s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_0e960006_command_id_exposure.py",
-      "sec": 40.0
+      "sec": 40.0,
+      "source": "story-0e960006-command-id-exposure(PR 개설 前 선제 등재 — 로컬 raw pytest 6.62s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_e4fc29fa_hosted_site_publish_adapter.py",
-      "sec": 20.0
+      "sec": 20.0,
+      "source": "story-e4fc29fa-hosted-site-publish-adapter(PR 개설 前 선제 등재 — 로컬 raw pytest 3.34s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3437_content_ledger_projection.py",
-      "sec": 90.0
+      "sec": 90.0,
+      "source": "story-3437-content-ledger-projection(PR 개설 前 선제 등재 — 로컬 raw pytest 15.26s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_cfc1a55a_scheduled_command_on_approval.py",
-      "sec": 60.0
+      "sec": 60.0,
+      "source": "story-cfc1a55a-scheduled-command-on-approval(PR 개설 前 선제 등재 — 로컬 raw pytest 9.76s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_e4fc29fa_destination_axis.py",
-      "sec": 40.0
+      "sec": 40.0,
+      "source": "story-e4fc29fa-destination-axis(PR 개설 前 선제 등재 — 로컬 raw pytest 6.60s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3457_campaigns_list_and_version_campaign_fields.py",
-      "sec": 90.0
+      "sec": 90.0,
+      "source": "story-3457-campaigns-list-and-version-campaign-fields(PR 개설 前 선제 등재 — 로컬 raw pytest 14.66s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3437_campaign_patch_no_version_no_gate_touch.py",
-      "sec": 40.0
+      "sec": 40.0,
+      "source": "story-3437-campaign-patch-no-version-no-gate-touch(PR 개설 前 선제 등재 — 로컬 raw pytest 6.14s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_e4fc29fa_site_post_orchestration.py",
-      "sec": 120.0
+      "sec": 120.0,
+      "source": "story-e4fc29fa-site-post-orchestration(조각③c, PR 개설 前 선제 등재 — 실 uvicorn 라이브 서버 기동 포함 로컬 raw pytest 19.58s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 120s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_e4fc29fa_channel_connection_creation.py",
-      "sec": 90.0
+      "sec": 90.0,
+      "source": "story-e4fc29fa-channel-connection-creation(조각⑤, PR 개설 前 선제 등재 — 로컬 raw pytest 15.01s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
