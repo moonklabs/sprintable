@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toDateKey, formatScheduledAt } from './schedule-format';
+import { resolveDisplayTimezone, toDateKey, formatScheduledAt } from './schedule-format';
 
 // story #3422(doc §11-2, 페드루 PO 지적 2026-09-04 08:57Z) — 그룹핑과 표기가 같은 tz를
 // 써야 한다. 21:30 KST(=UTC 12:30, 같은 날)와 09:00 KST(=UTC 전날 24:00 부근)를 각각
@@ -23,5 +23,30 @@ describe('formatScheduledAt', () => {
     const { display, utcNote } = formatScheduledAt('2026-09-05T12:00:00Z', 'Asia/Seoul');
     expect(display).toMatch(/^09-05 21:00 /); // KST=UTC+9
     expect(utcNote).toBe('= 09-05 12:00 UTC');
+  });
+});
+
+// story #3422 ②-d(페드루 PO 계약 전달 2026-09-04 10:44Z, story #46da6450) — 조직
+// timezone 필드 有/無 두 갈래. BE 머지 前엔 undefined가 온다(필드 자체가 없음).
+describe('resolveDisplayTimezone — 조직 tz 有/無 두 갈래', () => {
+  it('⭐조직 timezone이 있으면 그것을 쓰고 isOrgTimezone=true', () => {
+    expect(resolveDisplayTimezone('Asia/Seoul')).toEqual({ tz: 'Asia/Seoul', isOrgTimezone: true });
+  });
+
+  it('⭐조직 timezone이 null이면(BE 필드는 있지만 조직이 안 정함) 브라우저 폴백, isOrgTimezone=false', () => {
+    const result = resolveDisplayTimezone(null);
+    expect(result.isOrgTimezone).toBe(false);
+    expect(result.tz).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  it('조직 timezone이 undefined면(BE 머지 前, 필드 자체가 없음) null과 동형 — 브라우저 폴백', () => {
+    const result = resolveDisplayTimezone(undefined);
+    expect(result.isOrgTimezone).toBe(false);
+    expect(result.tz).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  it('인자를 아예 안 주면(기존 호출부, 하위 호환) 브라우저 폴백', () => {
+    const result = resolveDisplayTimezone();
+    expect(result.isOrgTimezone).toBe(false);
   });
 });

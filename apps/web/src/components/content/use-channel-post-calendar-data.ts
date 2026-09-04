@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { resolveDisplayTimezone, toDateKey } from './schedule-format';
 
@@ -44,13 +44,18 @@ export function useChannelPostCalendarData(
   orgId: string | undefined,
   range: { from: string; to: string },
   connectionId?: string,
+  // 페드루 PO 계약 전달(2026-09-04 10:44Z, story #46da6450) — 조직 응답의 IANA
+  // `timezone`(nullable) 필드. BE 머지 前엔 필드 자체가 없어 소비부가 optional
+  // chaining으로 undefined를 넘긴다(undefined===null 취급, resolveDisplayTimezone 참고).
+  orgTimezone?: string | null,
 ): ChannelPostCalendarData {
   const [scheduled, setScheduled] = useState<Map<string, ChannelPostCalendarItem[]>>(new Map());
   const [unscheduled, setUnscheduled] = useState<ChannelPostCalendarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  // 렌더마다 새 객체를 안 만든다 — effect의 의존 배열에 걸리면 매 렌더 재조회가 된다.
-  const [displayTimezone] = useState(resolveDisplayTimezone);
+  // orgTimezone이 바뀌면(조직 설정 로드 완료 등) 재계산 — 매 렌더 새 객체를 만들진
+  // 않는다(effect 의존 배열에 걸려 재조회가 안 되게).
+  const displayTimezone = useMemo(() => resolveDisplayTimezone(orgTimezone), [orgTimezone]);
 
   useEffect(() => {
     if (!orgId) return;
@@ -96,7 +101,7 @@ export function useChannelPostCalendarData(
     }
     void load();
     return () => { cancelled = true; };
-  }, [orgId, range.from, range.to, connectionId]);
+  }, [orgId, range.from, range.to, connectionId, displayTimezone.tz]);
 
   return { scheduled, unscheduled, loading, error, displayTimezone };
 }
