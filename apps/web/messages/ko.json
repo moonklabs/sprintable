@@ -2199,7 +2199,9 @@
     "channelPostsColumnUpdatedAt": "수정 시각",
     "channelPostsPartialSuccess": "이어서 발행 필요",
     "channelPostsPublicationFailed": "발행 실패",
-    "channelThreads": "Threads"
+    "channelThreads": "Threads",
+    "channelPostsCharLimitUnknown": "한도 미확認",
+    "channelPostsOverLimitReason": "한도를 넘어 상신할 수 없습니다 — 본문을 줄여 주세요."
   },
   "docs": {
     "title": "문서",
