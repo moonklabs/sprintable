@@ -2256,6 +2256,16 @@
     "channelPostsApprovalLinkPreviewLabel": "Link that will be attached",
     "channelPostsExternalIdLabel": "Post ID",
     "channelPostsPartialSuccessNotice": "The container was created but not yet published — continue publishing it. Starting over could post the same content twice.",
+    "channelPostsImageAttachLabel": "Up to {count} image(s)",
+    "channelPostsImageSpecTag": "{formats} · up to {maxBytes} · max aspect {aspectMax}:1 · width {widthMin}–{widthMax}px",
+    "channelPostsImageUploadRequestingUrl": "Preparing upload…",
+    "channelPostsImageUploading": "Uploading…",
+    "channelPostsImageConfirming": "Confirming…",
+    "channelPostsImageUnsupportedFormat": "Unsupported format — {contentType} (allowed: {allowed})",
+    "channelPostsImageTooLarge": "Only {maxBytes} or less can be attached, but this is {sizeBytes}",
+    "channelPostsImageAspectRatioExceeded": "The aspect ratio limit is {maxAspectRatio}:1, but this is {aspectRatio}:1",
+    "channelPostsImageConversionFailed": "Even after automatic conversion, this still exceeds the {maxBytes} limit ({finalBytes})",
+    "channelPostsImageAnimatedUnsupported": "Animated images aren't supported ({frameCount} frames)",
     "channelPostsPublicationFailedNotice": "Publishing failed — republishing this draft will continue that attempt."
   },
   "docs": {

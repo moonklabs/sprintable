@@ -2256,6 +2256,16 @@
     "channelPostsApprovalLinkPreviewLabel": "발행 시 붙는 링크",
     "channelPostsExternalIdLabel": "게시 ID",
     "channelPostsPartialSuccessNotice": "컨테이너는 생성됐지만 아직 게시되지 않았습니다 — 이어서 발행하세요. 처음부터 다시 발행하면 같은 글이 두 번 나갈 수 있습니다.",
+    "channelPostsImageAttachLabel": "이미지 {count}장까지",
+    "channelPostsImageSpecTag": "{formats} · 최대 {maxBytes} · 비율 최대 {aspectMax}:1 · 너비 {widthMin}–{widthMax}px",
+    "channelPostsImageUploadRequestingUrl": "업로드 준비 중…",
+    "channelPostsImageUploading": "업로드 중…",
+    "channelPostsImageConfirming": "확인 중…",
+    "channelPostsImageUnsupportedFormat": "지원하지 않는 형식입니다: {contentType}(허용: {allowed})",
+    "channelPostsImageTooLarge": "{maxBytes} 이하만 첨부할 수 있는데 {sizeBytes}입니다",
+    "channelPostsImageAspectRatioExceeded": "종횡비 한도는 {maxAspectRatio}:1인데 {aspectRatio}:1입니다",
+    "channelPostsImageConversionFailed": "자동 변환 후에도 한도 {maxBytes}를 넘습니다({finalBytes})",
+    "channelPostsImageAnimatedUnsupported": "애니메이션 이미지는 지원하지 않습니다({frameCount}프레임)",
     "channelPostsPublicationFailedNotice": "발행에 실패했습니다 — 이 초안을 다시 발행하면 이 시도를 이어서 처리합니다."
   },
   "docs": {

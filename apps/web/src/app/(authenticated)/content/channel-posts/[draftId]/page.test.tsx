@@ -104,6 +104,12 @@ function stubFetch(opts: {
   canUnpublish?: boolean;
   unpublishBlockedReason?: 'unsupported' | 'scope_insufficient' | null;
   connectionsOk?: boolean;
+  // story #3428 — 이미지 규격(어댑터 성질). 기본값 0 = 이미지 미지원(기존 74건 전부가
+  // 이 값을 몰라도 되므로 명시 안 하면 첨부 칸 자체가 안 뜨는 쪽이 자연스러운 기본).
+  imageMaxCount?: number;
+  onImageUploadUrl?: (body: unknown) => { status: number; body: unknown };
+  onImagePut?: () => { status: number };
+  onImageConfirm?: (body: unknown) => { status: number; body: unknown };
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -140,6 +146,9 @@ function stubFetch(opts: {
             data: [{
               id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
               can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason,
+              image_formats: ['image/jpeg', 'image/png'], image_max_bytes: 8 * 1024 * 1024,
+              image_aspect_max: 10, image_width_min: 320, image_width_max: 1440,
+              image_color_space: 'sRGB', image_max_count: opts.imageMaxCount ?? 0,
             }],
             error: null, meta: null,
           }),
@@ -149,6 +158,33 @@ function stubFetch(opts: {
         if (opts.limitOk === false) return { ok: false, status: 502, json: async () => ({}) };
         const limit = opts.limitOk ?? { quota_usage: 3, quota_total: 250 };
         return { ok: true, status: 200, json: async () => ({ data: limit, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/upload-url` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onImageUploadUrl?.(body) ?? {
+          status: 200,
+          body: { upload_url: 'https://storage.example/put', object_path: 'channel-media/o/d1/x.jpg', expires_at: '2026-09-04T12:10:00Z', max_bytes: 26214400, required_put_headers: {} },
+        };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === 'https://storage.example/put' && init?.method === 'PUT') {
+        const result = opts.onImagePut?.() ?? { status: 200 };
+        return { ok: result.status < 400, status: result.status, json: async () => ({}) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/confirm` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onImageConfirm?.(body) ?? {
+          status: 201,
+          body: {
+            draft_id: DRAFT_ID, version_id: 'v2', version: 2,
+            original_width: 4000, original_height: 3000, original_bytes: 12000000,
+            final_width: 1440, final_height: 1080, final_bytes: 3100000,
+            was_converted: true, image_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.jpg',
+          },
+        };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
@@ -1152,5 +1188,106 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+  });
+});
+
+// story #3428(T3-M·§17-16) — 이미지 첨부 UI.
+describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
+  it('⭐§17-16 — image_max_count=0(또는 미지원)이면 첨부 칸 자체를 그리지 않는다', async () => {
+    stubFetch({ imageMaxCount: 0 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-attach"]')).toBeNull();
+  });
+
+  it('⭐AC1 — image_max_count=1이면 첨부 칸이 뜨고 규격 태그가 어댑터 선언값 그대로 보인다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-attach"]')).not.toBeNull();
+    const specTag = container.querySelector('[data-testid="channel-post-image-spec-tag"]')?.textContent ?? '';
+    expect(specTag).toContain('JPEG, PNG');
+    expect(specTag).toContain('8.0MB');
+    expect(specTag).toContain('10:1');
+    expect(specTag).toContain('320');
+    expect(specTag).toContain('1440');
+  });
+
+  it('⭐업로드 성공 — 발급→PUT→confirm 3단계를 순서대로 거쳐 썸네일이 뜬다', async () => {
+    stubFetch({ imageMaxCount: 1 });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-upload-error"]')).toBeNull();
+  });
+
+  it('⭐AC4 — CHANNEL_IMAGE_UNSUPPORTED_FORMAT(422) — 3요소(무엇이·허용목록) 문구가 조립된다', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageUploadUrl: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_IMAGE_UNSUPPORTED_FORMAT', message: '…', content_type: 'image/gif', allowed_formats: ['image/jpeg', 'image/png'] } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.gif', { type: 'image/gif' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('image/gif');
+    expect(errorText).toContain('image/jpeg');
+    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).toBeNull();
+  });
+
+  it('⭐AC4 — CHANNEL_IMAGE_TOO_LARGE(413) — MB 단위로 3요소 문구가 조립된다(confirm 단계에서 실패)', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageConfirm: () => ({
+        status: 413,
+        body: { detail: { code: 'CHANNEL_IMAGE_TOO_LARGE', message: '…', size_bytes: 30000000, max_bytes: 26214400 } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('28.6MB');
+    expect(errorText).toContain('25.0MB');
   });
 });

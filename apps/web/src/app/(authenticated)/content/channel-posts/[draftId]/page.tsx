@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelTextLength } from '@/components/content/channel-text-length';
-import { parseSitePostApiError } from '@/components/content/api-error';
+import { parseSitePostApiError, type SitePostApiErrorInfo } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
@@ -115,6 +115,42 @@ type PublishingLimitState =
   | { status: 'ok'; quotaUsage: number; quotaTotal: number; checkedAt: string }
   | { status: 'failed' };
 
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+// story #3428(T3-M·§13 3요소: 무엇이·얼마까지·지금 얼마) — CHANNEL_IMAGE_* 422/413의
+// 부가 필드를 사람 말로 조립한다. api-error.ts는 labelKey를 일부러 비워 뒀다(kind별로
+// 실리는 필드 집합이 달라 화면이 조립해야 한다 — CHANNEL_TEXT_TOO_LONG과 동형 관례).
+function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, values?: Record<string, string | number>) => string): string {
+  switch (info.kind) {
+    case 'image_unsupported_format':
+      return t('channelPostsImageUnsupportedFormat', {
+        contentType: info.imageContentType ?? '',
+        allowed: (info.imageAllowedFormats ?? []).join(', '),
+      });
+    case 'image_too_large':
+      return t('channelPostsImageTooLarge', {
+        maxBytes: typeof info.imageMaxBytes === 'number' ? formatMegabytes(info.imageMaxBytes) : '',
+        sizeBytes: typeof info.imageSizeBytes === 'number' ? formatMegabytes(info.imageSizeBytes) : '',
+      });
+    case 'image_aspect_ratio_exceeded':
+      return t('channelPostsImageAspectRatioExceeded', {
+        maxAspectRatio: info.imageMaxAspectRatio?.toFixed(1) ?? '',
+        aspectRatio: info.imageAspectRatio?.toFixed(2) ?? '',
+      });
+    case 'image_conversion_failed':
+      return t('channelPostsImageConversionFailed', {
+        maxBytes: typeof info.imageMaxBytes === 'number' ? formatMegabytes(info.imageMaxBytes) : '',
+        finalBytes: typeof info.imageFinalBytes === 'number' ? formatMegabytes(info.imageFinalBytes) : '',
+      });
+    case 'image_animated_unsupported':
+      return t('channelPostsImageAnimatedUnsupported', { frameCount: info.imageFrameCount ?? '' });
+    default:
+      return info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('errorChannelImageUploadFailed'));
+  }
+}
+
 export default function ChannelPostEditPage() {
   const { orgId, role } = useDashboardContext();
   const params = useParams();
@@ -136,6 +172,20 @@ export default function ChannelPostEditPage() {
   const [limit, setLimit] = useState<PublishingLimitState>({ status: 'loading' });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+
+  // story #3428(T3-M·§17-16) — 어댑터가 선언한 이미지 규격(연결 응답에서 읽음).
+  // undefined="아직 모른다"(연결 조회 전/실패) — maxCount<=0과 동형으로 첨부 칸을
+  // 그리지 않는다(둘 다 "모른다"와 "미지원"을 같은 쪽으로 fail-closed).
+  const [imageSpec, setImageSpec] = useState<
+    { maxCount: number; formats: string[]; maxBytes: number; aspectMax: number; widthMin: number; widthMax: number } | undefined
+  >(undefined);
+  const [imageUploadStatus, setImageUploadStatus] = useState<
+    | { phase: 'idle' }
+    | { phase: 'requesting_url' }
+    | { phase: 'uploading' }
+    | { phase: 'confirming' }
+    | { phase: 'error'; text: string; raw?: string }
+  >({ phase: 'idle' });
 
   const [text, setText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
@@ -207,6 +257,13 @@ export default function ChannelPostEditPage() {
             // story #3426 — can_unpublish/unpublish_blocked_reason은 draft가 아니라
             // 이 연결 응답에 실린다(그라운딩 확認) — 새 왕복을 만들지 않고 같은 응답에서 읽는다.
             if (conn) setUnpublishGate({ canUnpublish: conn.can_unpublish, blockedReason: conn.unpublish_blocked_reason });
+            // story #3428(T3-M) — 이미지 규격(어댑터 성질) 그대로 읽는다(하드코딩 금지 축).
+            if (conn) {
+              setImageSpec({
+                maxCount: conn.image_max_count, formats: conn.image_formats, maxBytes: conn.image_max_bytes,
+                aspectMax: conn.image_aspect_max, widthMin: conn.image_width_min, widthMax: conn.image_width_max,
+              });
+            }
           }
 
           // AC7 — 한도 잔량은 별도 왕복(휴먼 전용 엔드포인트, provider 실조회라 느릴 수
@@ -356,6 +413,89 @@ export default function ChannelPostEditPage() {
       setSubmitResult({ type: 'error', text: t('submitFailed') });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // story #3428(T3-M) — 이미지 첨부 2단계(발급→PUT→confirm). PUT 자체는 fetchWithAuth를
+  // 안 쓴다(서명 URL 자체가 인증이라 우리 Authorization 헤더를 붙이면 GCS 서명이 깨진다
+  // — avatar_upload.py 소비부와 동형 관례). confirm 성공은 새 버전을 만들므로(BE
+  // 620beefc) draft의 이미지 필드만 그 자리에서 병합하고(handlePublish와 동형 — 응답
+  // 필드만 병합, 재조회 안 함) versions만 재조회한다(text/link_url 입력값은 안 건드려
+  // — 사용자가 아직 저장 안 한 편집 중 텍스트를 잃지 않는다).
+  const handleImageFileSelected = async (file: File) => {
+    if (!orgId || !draft) return;
+    setImageUploadStatus({ phase: 'requesting_url' });
+    try {
+      const urlRes = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/upload-url`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content_type: file.type }) },
+      );
+      if (!urlRes.ok) {
+        const body = await urlRes.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setImageUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const urlJson = (await urlRes.json().catch(() => null)) as
+        { data?: { upload_url: string; object_path: string; required_put_headers: Record<string, string> } } | null;
+      const uploadInfo = urlJson?.data;
+      if (!uploadInfo) {
+        setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
+        return;
+      }
+
+      setImageUploadStatus({ phase: 'uploading' });
+      const putRes = await fetch(uploadInfo.upload_url, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type, ...uploadInfo.required_put_headers },
+        body: file,
+      });
+      if (!putRes.ok) {
+        setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
+        return;
+      }
+
+      setImageUploadStatus({ phase: 'confirming' });
+      const confirmRes = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/confirm`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
+      );
+      if (!confirmRes.ok) {
+        const body = await confirmRes.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setImageUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const confirmJson = (await confirmRes.json().catch(() => null)) as
+        {
+          data?: {
+            version: number; original_width: number; original_bytes: number;
+            final_width: number; final_bytes: number; was_converted: boolean; image_url: string | null;
+          };
+        } | null;
+      const image = confirmJson?.data;
+      if (!image) {
+        setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
+        return;
+      }
+      setDraft((prev) => (prev ? {
+        ...prev,
+        current_version: image.version,
+        thumbnail_url: image.image_url,
+        image_original_width: image.original_width,
+        image_original_bytes: image.original_bytes,
+        image_final_width: image.final_width,
+        image_final_bytes: image.final_bytes,
+        image_was_converted: image.was_converted,
+      } : prev));
+      const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`);
+      if (versionsRes.ok) {
+        const versionsJson = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
+        if (versionsJson?.data) setVersions(versionsJson.data);
+      }
+      setImageUploadStatus({ phase: 'idle' });
+    } catch {
+      setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
     }
   };
 
@@ -865,6 +1005,55 @@ export default function ChannelPostEditPage() {
           data-testid="channel-post-link-field"
         />
       </div>
+
+      {/* story #3428(T3-M·§17-16) — image_max_count<=0(미지원 채널, 또는 아직 모른다)
+          이면 첨부 칸 자체를 그리지 않는다. 규격 태그는 어댑터 선언값 그대로(하드코딩
+          금지 축) — 값을 지어내지 않는다. */}
+      {imageSpec && imageSpec.maxCount > 0 ? (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="channel-post-image-attach">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('channelPostsImageAttachLabel', { count: imageSpec.maxCount })}</span>
+          </div>
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-image-spec-tag">
+            {t('channelPostsImageSpecTag', {
+              formats: imageSpec.formats.map((f) => f.replace('image/', '').toUpperCase()).join(', '),
+              maxBytes: formatMegabytes(imageSpec.maxBytes),
+              aspectMax: imageSpec.aspectMax,
+              widthMin: imageSpec.widthMin,
+              widthMax: imageSpec.widthMax,
+            })}
+          </p>
+          {draft.thumbnail_url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- story #3428: public-read GCS 오브젝트 URL(외부 도메인, next/image 대상 밖 — avatar_upload.py 소비부와 동형 관례).
+            <img src={draft.thumbnail_url} alt="" className="h-24 w-24 rounded object-cover" data-testid="channel-post-image-preview" />
+          ) : null}
+          <input
+            type="file"
+            accept={imageSpec.formats.join(',')}
+            data-testid="channel-post-image-file-input"
+            disabled={imageUploadStatus.phase === 'requesting_url' || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming'}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void handleImageFileSelected(file);
+            }}
+          />
+          {imageUploadStatus.phase === 'requesting_url' || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming' ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-progress">
+              {imageUploadStatus.phase === 'requesting_url'
+                ? t('channelPostsImageUploadRequestingUrl')
+                : imageUploadStatus.phase === 'uploading'
+                  ? t('channelPostsImageUploading')
+                  : t('channelPostsImageConfirming')}
+            </p>
+          ) : null}
+          {imageUploadStatus.phase === 'error' ? (
+            <Alert variant="destructive" role="alert" data-testid="channel-post-image-upload-error">
+              <AlertDescription>{imageUploadStatus.text}</AlertDescription>
+            </Alert>
+          ) : null}
+        </div>
+      ) : null}
 
       {saveMessage ? (
         <Alert variant={saveMessage.type === 'error' ? 'destructive' : 'default'} role="status">
