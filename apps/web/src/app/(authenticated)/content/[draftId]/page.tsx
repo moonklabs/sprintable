@@ -796,9 +796,11 @@ export default function ContentPostEditPage() {
 
       {/* story 1db41045(#3457) — 캠페인. 이미 붙어 있으면(campaign_id) 이름+상세
           링크·「변경」·「해제」(페드루 PO B2 — 붙인 뒤에도 편집 표면이 있어야
-          한다). 「변경」을 누르면 changingCampaign=true로 같은 붙이기 폼을 다시
-          연다(새 컴포넌트 0). campaign_id가 없거나 변경 중이면 폼. */}
-      {latest.campaign_id && !changingCampaign ? (
+          한다). 「변경」을 누르면 changingCampaign=true로 같은 붙이기 폼을 아래에
+          더 연다(새 컴포넌트 0) — 페드루 PO 재판정(2026-09-04 18:12Z): 변경 중에도
+          "현재 캠페인" 줄 자체는 남겨 둔다(폼으로 통째 대체하면 "무엇에서
+          무엇으로"가 사라진다 — 변경/해제 버튼만 그 사이엔 안 보인다). */}
+      {latest.campaign_id ? (
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="content-campaign-current">
           <span>
             {t('campaignCurrentLabel')}{' '}
@@ -808,21 +810,25 @@ export default function ContentPostEditPage() {
               {latest.campaign_name ?? t('campaignNameUnknown')}
             </Link>
           </span>
-          <Button
-            type="button" variant="outline" size="sm"
-            onClick={() => setChangingCampaign(true)}
-            data-testid="content-campaign-change-button"
-          >
-            {t('campaignChangeCta')}
-          </Button>
-          <Button
-            type="button" variant="outline" size="sm"
-            onClick={() => void handleDetachCampaign()}
-            disabled={detachingCampaign}
-            data-testid="content-campaign-detach-button"
-          >
-            {detachingCampaign ? t('campaignDetachPendingCta') : t('campaignDetachCta')}
-          </Button>
+          {!changingCampaign ? (
+            <>
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={() => setChangingCampaign(true)}
+                data-testid="content-campaign-change-button"
+              >
+                {t('campaignChangeCta')}
+              </Button>
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={() => void handleDetachCampaign()}
+                disabled={detachingCampaign}
+                data-testid="content-campaign-detach-button"
+              >
+                {detachingCampaign ? t('campaignDetachPendingCta') : t('campaignDetachCta')}
+              </Button>
+            </>
+          ) : null}
           {detachCampaignResult ? (
             <Alert variant="destructive" role="alert" data-testid="content-campaign-detach-error">
               <AlertDescription>{detachCampaignResult.text}</AlertDescription>
@@ -830,7 +836,8 @@ export default function ContentPostEditPage() {
             </Alert>
           ) : null}
         </div>
-      ) : (
+      ) : null}
+      {!latest.campaign_id || changingCampaign ? (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-campaign-attach">
           <p className="text-xs font-medium text-muted-foreground">{t('campaignAttachLabel')}</p>
           <div className="flex flex-wrap items-center gap-2">
@@ -880,7 +887,7 @@ export default function ContentPostEditPage() {
             </Alert>
           ) : null}
         </div>
-      )}
+      ) : null}
 
       {status === 'reapproval_needed' ? (
         // §3-2 — "판정이 아니라 관측이다. 해시 두 개를 나란히 보여주면 사람이 스스로

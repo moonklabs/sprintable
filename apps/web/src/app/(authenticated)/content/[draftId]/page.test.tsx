@@ -1273,7 +1273,10 @@ describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', (
     expect(container.querySelector('[data-testid="content-campaign-detach-button"]')).not.toBeNull();
   });
 
-  it('⭐"변경"을 누르면 붙이기 폼이 다시 뜨고(취소 가능), 현재 캠페인 줄은 사라진다', async () => {
+  // 페드루 PO 재판정(2026-09-04 18:12Z) — 처음엔 「변경」이 현재 캠페인 줄을 폼으로
+  // 통째로 대체해 "무엇에서 무엇으로"가 사라졌다. 지금은 변경 중에도 현재 캠페인
+  // 줄(이름+링크)은 남고 그 아래 폼이 더 뜬다 — 변경/해제 버튼만 그 사이엔 숨는다.
+  it('⭐"변경"을 누르면 현재 캠페인 줄은 남은 채 그 아래 붙이기 폼이 더 뜨고(취소 가능)', async () => {
     stubFetchWithVersions([{ ...VERSION_1, campaign_id: 'c1', campaign_name: '9월 캠페인' }]);
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
@@ -1283,7 +1286,13 @@ describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', (
     await flush();
 
     expect(container.querySelector('[data-testid="content-campaign-attach"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
+    const current = container.querySelector('[data-testid="content-campaign-current"]');
+    expect(current).not.toBeNull();
+    expect(current?.textContent).toContain('9월 캠페인');
+    // 변경 중엔 변경/해제 버튼은 숨는다(같은 화면에 "지금 바꾸는 중"과 "바꾸기/
+    // 해제" 액션이 겹쳐 뜨지 않게).
+    expect(container.querySelector('[data-testid="content-campaign-change-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-detach-button"]')).toBeNull();
 
     const cancelBtn = container.querySelector('[data-testid="content-campaign-cancel-change-button"]') as HTMLButtonElement;
     await act(async () => { cancelBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1291,6 +1300,7 @@ describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', (
 
     expect(container.querySelector('[data-testid="content-campaign-current"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="content-campaign-attach"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-campaign-change-button"]')).not.toBeNull();
   });
 
   it('⭐"해제"를 누르면 PATCH .../campaign에 campaign_id: null을 명시로 보낸다(버전 0)', async () => {
