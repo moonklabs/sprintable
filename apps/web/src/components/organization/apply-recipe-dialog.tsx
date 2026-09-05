@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,9 @@ export function ApplyRecipeDialog({
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [roleMapping, setRoleMapping] = useState<Record<string, string>>({});
   const [loadingProjectData, setLoadingProjectData] = useState(false);
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — memberRes leg 실패 여부. agents=[]가
+  // 진짜 0명인지 못 불러온 건지 갈라야 select 옆 문구가 정직해진다.
+  const [agentsLoadFailed, setAgentsLoadFailed] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -53,11 +56,12 @@ export function ApplyRecipeDialog({
     })();
   }, [open]);
 
-  useEffect(() => {
-    if (!projectId || !target) { setAgents([]); setRoleMapping({}); return; }
+  const loadProjectData = useCallback(() => {
+    if (!projectId || !target) { setAgents([]); setRoleMapping({}); setAgentsLoadFailed(false); return; }
     setLoadingProjectData(true);
     setError(null);
     setWarnings([]);
+    setAgentsLoadFailed(false);
     void (async () => {
       try {
         // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(ok?채움:빈값)인데 격리
@@ -67,11 +71,15 @@ export function ApplyRecipeDialog({
           fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`).catch(() => null),
           fetchWithAuth(`/api/events/definitions/${target.id}/bindings?project_id=${projectId}`).catch(() => null),
         ]);
+        // story #3521(유나 §22-2, PO 確定 2026-09-05) — memberRes 실패는 "에이전트 없음"
+        // (진짜 0명)과 다른 사실이다. 여기서만 갈린다 — agents가 빈 배열인 건 둘 다
+        // 동일하니 별도 플래그로 원인을 들고 나간다.
         if (memberRes?.ok) {
           const json = await memberRes.json() as { data?: AgentOption[] } | AgentOption[];
           setAgents(Array.isArray(json) ? json : (json.data ?? []));
         } else {
           setAgents([]);
+          setAgentsLoadFailed(true);
         }
         if (bindingsRes?.ok) {
           const j = await bindingsRes.json() as { bindings?: Record<string, string> };
@@ -84,6 +92,8 @@ export function ApplyRecipeDialog({
       }
     })();
   }, [projectId, target]);
+
+  useEffect(() => { loadProjectData(); }, [loadProjectData]);
 
   if (!target) return null;
   const stages = cyclicStages(target);
@@ -154,6 +164,17 @@ export function ApplyRecipeDialog({
           <p className="text-xs text-muted-foreground">{t('eventApplyLoadingBindings')}</p>
         ) : (
           <div className="space-y-2.5">
+            {/* story #3521(유나 §22-2, PO 確定 2026-09-05) — agents=[]의 두 원인(진짜 0명·
+                못 불러옴)을 문구로 갈라 select 옆에 둔다. 지금까지 이 자리엔 어느 쪽도
+                텍스트가 없었다(조용히 빈 드롭다운). */}
+            {agentsLoadFailed ? (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-agents-load-error">
+                <span>{t('eventApplyAgentsLoadError')}</span>
+                <Button variant="outline" size="sm" onClick={loadProjectData}>{t('eventApplyAgentsRetry')}</Button>
+              </div>
+            ) : agents.length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="apply-recipe-agents-empty">{t('eventApplyAgentsEmpty')}</p>
+            ) : null}
             <RecipeRoleMappingFields
               stages={stages}
               stageMetadata={target.stage_metadata}

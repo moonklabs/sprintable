@@ -170,6 +170,109 @@ describe('ApplyRecipeDialog', () => {
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit') as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(false);
     void capture;
+    // story #3521(유나 §22-2) — "응답 없음"(네트워크 reject) 갈래는 못 불러옴 얼굴이 뜨고
+    // "에이전트 없음"은 안 뜬다(진짜 0명이 아니므로 그 문구는 오귀인).
+    expect(document.body.querySelector('[data-testid="apply-recipe-agents-load-error"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="apply-recipe-agents-empty"]')).toBeNull();
+  });
+
+  // story #3521 — "응답 실패"(non-ok status)도 "응답 없음"(위 테스트, network reject)과
+  // 동형으로 못 불러옴 얼굴을 낸다.
+  it('/api/team-members가 403이면(응답은 왔지만 실패) "에이전트 목록을 불러오지 못했습니다" 얼굴이 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: false, status: 403, json: async () => ({ detail: 'forbidden' }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain('eventApplyAgentsLoadError');
+  });
+
+  // story #3521 — 진짜 0명(둘 다 성공, 에이전트 배열만 빈 경우)은 "에이전트 없음"이지
+  // "불러오지 못했습니다"가 아니다 — 두 얼굴이 절대 안 섞여야 한다.
+  it('team-members가 200+빈 배열이면(진짜 0명) "이 프로젝트에 에이전트가 없습니다"만 뜨고 실패 얼굴은 안 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-agents-empty"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="apply-recipe-agents-load-error"]')).toBeNull();
+  });
+
+  // story #3521 — 「다시 시도」가 실제로 재조회한다.
+  it('에이전트 로드 실패 후 「다시 시도」 클릭 — 재조회 성공 시 에이전트 목록이 채워진다', async () => {
+    let teamMembersShouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) {
+        if (teamMembersShouldFail) return { ok: false, status: 500, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    expect(document.body.querySelector('[data-testid="apply-recipe-agents-load-error"]')).not.toBeNull();
+
+    teamMembersShouldFail = false;
+    const retryBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplyAgentsRetry') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-agents-load-error"]')).toBeNull();
+    const roleSelect = [...document.body.querySelectorAll('select')][1] as HTMLSelectElement;
+    expect(roleSelect.textContent).toContain('디디군');
   });
 
   it('apply 응답에 warnings가 있으면 그려진다', async () => {
