@@ -310,6 +310,10 @@ _CAMPAIGN_ID_CARRY_FORWARD = object()
 # (campaign 개념을 모르는 호출자가 이 키를 생략하면 목적지가 조용히 hosted_site로
 # 되돌아간다)을 그대로 갖는다 — 이번엔 처음부터 캐리포워드로 짠다.
 _CONNECTION_ID_CARRY_FORWARD = object()
+# story #3478 후속(카디르 REQUEST_CHANGES 경유 페드루 실측, 2026-09-05) — 브랜드
+# 뉴 draft(버전 1)는 "옛 목적지"가 없다(비교 대상 자체가 없다) — 값 None(hosted_site)
+# 과 구분해야 하는 또 하나의 캐리포워드류 센티널.
+_NO_PRIOR_VERSION = object()
 
 
 async def create_site_post_draft_version(
@@ -393,7 +397,9 @@ async def create_site_post_draft_version(
         db.add(draft)
         await db.flush()
         next_version = 1
+        old_connection_id: uuid.UUID | None | object = _NO_PRIOR_VERSION
     else:
+        old_connection_id = draft.connection_id
         if explicit_campaign_id:
             draft.campaign_id = campaign_id
         if explicit_connection_id:
@@ -422,7 +428,10 @@ async def create_site_post_draft_version(
     #     그대로 유지**(재봉인은 submit_site_post_draft의 명시 재호출만이 한다 — gates.py의
     #     approve 전이가 reapproval_required=True인 동안 409로 막혀 "옛 봉인을 승인하는" 막다른
     #     길 자체를 차단한다).
-    await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version, draft=draft)
+    await _reseal_gate_on_new_version(
+        db, org_id=org_id, work_item_id=work_item_id, version=version, draft=draft,
+        old_connection_id=old_connection_id,
+    )
 
     # story #3471(페드루 PO 確定 2026-09-05)·#3482(필드별, 2026-09-05 후속) —
     # channel_posts.py::create_channel_post_draft_version과 동형(비차단, draft에
@@ -444,8 +453,38 @@ async def create_site_post_draft_version(
 
 async def _reseal_gate_on_new_version(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, version: SitePostVersion,
-    draft: SitePostDraft,
+    draft: SitePostDraft, old_connection_id: "uuid.UUID | None | object" = _NO_PRIOR_VERSION,
 ) -> None:
+    # story #3478 후속(카디르 REQUEST_CHANGES 경유 페드루 실측, 2026-09-05) — destination
+    # (connection_id) 자체가 바뀌면 옛 scope_key 게이트가 새 scope_key 조회(아래)에
+    # 안 걸려 방치됐다: approved인데 목적지를 잃은 채 살아 있거나(봉인 원칙 위반),
+    # 발행 행이 0이라 `_gate_publication_is_live`가 "쥐고 있다"로 보수 판정해 같은
+    # work_item·같은 옛 목적지로의 재상신이 영구 409(3478이 없애려던 것의 사촌)로
+    # 막혔다. approved 뒤 편집(같은 목적지)과 동형으로 pending+reapproval_required로
+    # 되돌린다 — sealed_content_*는 안 건드린다(옛 승인 기록 보존, 재봉인은 그 목적지로
+    # 다시 submit()할 때만). pending이었으면 손대지 않는다(이 새 버전은 그 목적지로
+    # 안 가므로 재봉인할 근거가 없다 — 다음 submit()이 새 scope_key로 별도 게이트를 연다).
+    old_scope_key = None if old_connection_id is _NO_PRIOR_VERSION else str(old_connection_id or "")
+    new_scope_key = str(draft.connection_id or "")
+    if old_scope_key is not None and old_scope_key != new_scope_key:
+        from app.services.gate_service import resolve_gate_holder_draft_id as _resolve_old_holder
+
+        old_gate = (await db.execute(
+            select(Gate)
+            .where(
+                Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
+                Gate.scope_key == old_scope_key, Gate.status == "approved",
+            )
+            .with_for_update()
+        )).scalar_one_or_none()
+        if old_gate is not None and await _resolve_old_holder(db, old_gate, this_draft_id=version.draft_id) is None:
+            set_gate_status(old_gate, "pending", now=datetime.now(timezone.utc))
+            old_gate.requires_human = True
+            old_gate.resolver_id = None
+            old_gate.resolution_note = None
+            old_gate.resolved_at = None
+            old_gate.reapproval_required = True
+
     # story #3478(0328) — scope_key도 필터에 넣는다. 안 넣으면 같은 work_item에 목적지가
     # 다른 게이트가 둘(예: WordPress+webhook) 있을 때 .scalar_one_or_none()이
     # MultipleResultsFound(500)로 죽는다(dual-destination을 가능케 한 이 스토리 자체가

@@ -416,9 +416,15 @@ async def test_destination_change_after_approval_reopens_gate_for_reapproval():
 
 @pytest.mark.anyio
 async def test_resubmit_destination_only_change_reseals_and_is_not_noop():
-    """content는 동일해도 destination만 바뀌면 submit()의 sha 동일성 조기-return을
-    타면 안 된다(위 idempotency 조건에 destination 비교를 뺐으면 이 assert가 RED —
-    재봉인 없이 옛 destination이 그대로 남는다)."""
+    """story #3478 후속(카디르 REQUEST_CHANGES 경유 페드루 실측, 2026-09-05로 불변식
+    갱신) — content는 동일해도 destination이 바뀌면 그 자체가 새 scope_key라 재상신은
+    옛 게이트를 재사용하는 no-op이 아니라 **새 게이트**를 연다(옛 게이트는 그 목적지
+    에서 손 뗀 채 pending으로 남는다 — approved였다면 위 테스트처럼 reapproval_
+    required로 되돌아가지만, 여기선 애초에 approve 자체를 안 해 이미 pending이라
+    무변화가 곧 정답). 옛 gate_id를 그대로 재사용해 재봉인되길 기대하던 옛 pin은
+    #3478의 scope_key 축(같은 work_item·다른 목적지=다른 게이트) 자체와 모순이라
+    폐기 — 새 불변식(새 게이트 생성·그 게이트가 새 목적지로 봉인·옛 게이트 불변)으로
+    교체한다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -441,7 +447,7 @@ async def test_resubmit_destination_only_change_reseals_and_is_not_noop():
                 f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
             )
             assert r_submit1.status_code == 200, r_submit1.text
-            gate_id = uuid.UUID(r_submit1.json()["gate_id"])
+            old_gate_id = uuid.UUID(r_submit1.json()["gate_id"])
 
             # content 그대로, connection_id만 값으로 지정(hosted_site→wordpress).
             r2 = await client.post(
@@ -454,14 +460,24 @@ async def test_resubmit_destination_only_change_reseals_and_is_not_noop():
                 f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
             )
             assert r_submit2.status_code == 200, r_submit2.text
+            new_gate_id = uuid.UUID(r_submit2.json()["gate_id"])
+            assert new_gate_id != old_gate_id, (
+                "destination만 바뀐 재상신이 옛 게이트를 그대로 재사용했다 — no-op으로 흡수된 것"
+            )
 
         async with Session() as s:
             from app.models.gate import Gate
             from sqlalchemy import select
-            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
-            assert gate.sealed_destination_connection_id == connection_id, (
-                "destination만 바뀐 재상신이 재봉인되지 않았다(옛 destination이 그대로 남음)"
+
+            new_gate = (await s.execute(select(Gate).where(Gate.id == new_gate_id))).scalar_one()
+            assert new_gate.status == "pending"
+            assert new_gate.sealed_destination_connection_id == connection_id, (
+                "새 목적지 게이트가 그 목적지로 안 봉인됐다"
             )
+
+            old_gate = (await s.execute(select(Gate).where(Gate.id == old_gate_id))).scalar_one()
+            assert old_gate.status != "approved", "옛(hosted_site) 게이트가 승인 안 됐는데도 approved로 보였다"
+            assert old_gate.sealed_destination_connection_id is None, "옛 게이트가 새 목적지로 잘못 봉인됐다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
