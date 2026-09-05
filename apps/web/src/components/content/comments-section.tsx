@@ -42,6 +42,10 @@ export interface CommentItem {
   /** dead_letter 재시도 호출에 필요 — command_id가 없으면(레이스) 재시도 버튼을
    * 활성화하지 않는다. */
   replyCommandId: string | null;
+  /** story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
+   * 「다시 상신」이 여는 다이얼로그에 «지금 답변»을 prefill하는 데 쓴다(단건 GET
+   * .../replies/{replyId}로 원문을 가져온다). null=이 댓글에 답변 자체가 없다. */
+  replyId: string | null;
 }
 
 // story #3517(유나 §22-②) — 세 얼굴. "미수집"(null)·"댓글 없음"([])·"불러오지 못함"(fetch
@@ -141,6 +145,7 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
       reasonCode: c.reply?.reason_code ?? null,
     }),
     replyCommandId: c.reply?.command_id ?? null,
+    replyId: c.reply?.id ?? null,
   }));
   // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
   // 하나만 본다(comments.length 아님 — 페이지 잘림·지워진 행이 섞이면 틀린다).
@@ -175,6 +180,10 @@ export interface CommentsSectionProps {
   /** story #3544(§22-15) — dead_letter 답변을 공용 publication-commands/{id}/retry로
    * 다시 큐에 올린다(content_kind 무관 기존 엔드포인트, BE 신설 0). */
   onRetryReply: (comment: CommentItem) => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
+  /** story #3544 조각⑧(§22-15 ⑧) — voided(봉인 불일치) 「다시 상신」 전용. 일반
+   * onReply(빈 칸에서 새로 시작)와 달리 다이얼로그를 열기 전에 «지금 답변» 원문을
+   * 먼저 가져와 prefill한다(호출부가 그 조회를 진다). */
+  onResubmitReply: (comment: CommentItem) => void;
 }
 
 function SectionHeader({
@@ -205,7 +214,7 @@ function SectionHeader({
 // story #3517(유나 Design 재리뷰, 2026-09-05) — empty/loaded 둘 다 같은 목록 렌더를
 // 쓴다(§22-9 지워진 행 규칙이 두 얼굴에서 갈리면 안 되므로 한 곳으로 통일).
 function CommentsList({
-  comments, displayTimezone, t, onConvertToTask, onReply, onRetryReply,
+  comments, displayTimezone, t, onConvertToTask, onReply, onRetryReply, onResubmitReply,
 }: {
   comments: CommentItem[];
   displayTimezone: string;
@@ -213,6 +222,7 @@ function CommentsList({
   onConvertToTask: (comment: CommentItem) => void;
   onReply: (comment: CommentItem) => void;
   onRetryReply: (comment: CommentItem) => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
+  onResubmitReply: (comment: CommentItem) => void;
 }) {
   return (
     <ul className="space-y-3">
@@ -289,7 +299,7 @@ function CommentsList({
                 action={comment.replyFailureAction}
                 displayTimezone={displayTimezone}
                 onRetry={comment.replyCommandId ? () => onRetryReply(comment) : undefined}
-                onResubmit={() => onReply(comment)}
+                onResubmit={() => onResubmitReply(comment)}
               />
             ) : null}
             {/* story #3517(BE #3867 조각②, PO 確定 2026-09-05) — §22-9: 지워진
@@ -323,7 +333,7 @@ function CommentsList({
   );
 }
 
-export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToTask, onReply, onRetryReply }: CommentsSectionProps) {
+export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToTask, onReply, onRetryReply, onResubmitReply }: CommentsSectionProps) {
   const t = useTranslations('content');
 
   if (face.kind === 'uncollected') {
@@ -364,7 +374,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
             지워진 행(deleted_count>0)은 §22-9 "원래 자리 그대로" 그린다 — "댓글
             없음" 문구가 지워진 행의 존재 자체를 지우면 안 된다. */}
         {face.comments.length > 0 ? (
-          <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} onRetryReply={onRetryReply} />
+          <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} onRetryReply={onRetryReply} onResubmitReply={onResubmitReply} />
         ) : null}
       </div>
     );
@@ -374,7 +384,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
     <div className="space-y-2 border-t border-border pt-3" data-testid="comments-section">
       <SectionHeader t={t} activeCount={face.activeCount} deletedCount={face.deletedCount} capturedAtDisplay={capturedAtDisplay} />
       <CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={face.nextAllowedAt} />
-      <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} onRetryReply={onRetryReply} />
+      <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} onRetryReply={onRetryReply} onResubmitReply={onResubmitReply} />
     </div>
   );
 }

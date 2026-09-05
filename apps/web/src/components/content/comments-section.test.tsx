@@ -34,6 +34,7 @@ function baseComment(overrides: Partial<CommentItem>): CommentItem {
     replyExternalUrl: null,
     replyFailureAction: undefined,
     replyCommandId: null,
+    replyId: null,
     ...overrides,
   };
 }
@@ -60,7 +61,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('uncollected(null) — "아직 수집 전"만 뜨고 목록·수집시각은 안 뜬다', async () => {
     const face: CommentsFace = { kind: 'uncollected' };
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-face-uncollected"]')?.textContent).toBe('아직 수집 전입니다.');
     expect(container.querySelector('[data-testid="comments-captured-at"]')).toBeNull();
     expect(container.querySelector('[data-testid="comments-item"]')).toBeNull();
@@ -69,14 +70,14 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('error(fetch 실패) — "불러오지 못했습니다"만 뜬다(0건과 다른 문구)', async () => {
     const face: CommentsFace = { kind: 'error' };
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-face-error"]')?.textContent).toBe('댓글을 불러오지 못했습니다.');
   });
 
   it('empty([]) — "댓글이 없습니다"+수집시각+제목에 0건(uncollected/error와 다른 문구·표시)', async () => {
     const face: CommentsFace = { kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0, nextAllowedAt: null };
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
     expect(container.querySelector('[data-testid="comments-captured-at"]')?.textContent).toContain('09-05');
     expect(container.querySelector('h3')?.textContent).toBe('댓글 0');
@@ -85,7 +86,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('loaded(n건) — 목록·수집시각·제목의 카운트 모두 뜬다', async () => {
     const face = loadedFace([baseComment({})]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(1);
     expect(container.querySelector('[data-testid="comments-item-author"]')?.textContent).toBe('홍길동');
     expect(container.querySelector('h3')?.textContent).toBe('댓글 1');
@@ -97,7 +98,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('activeCount는 서버 전체 수를 쓴다(이 페이지의 comments.length가 아니다)', async () => {
     const face = loadedFace([baseComment({})], { activeCount: 42 });
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('h3')?.textContent).toBe('댓글 42');
   });
 
@@ -107,14 +108,14 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('작성자 표시명이 없으면(null) "작성자 정보 없음"(공유 「모름」이 아니다)', async () => {
     const face = loadedFace([baseComment({ authorDisplayName: null })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-author"]')?.textContent).toBe('작성자 정보 없음');
   });
 
   it('externalCreatedAt이 있으면 그 값을 그대로 보인다(작성 시각)', async () => {
     const face = loadedFace([baseComment({ externalCreatedAt: '2026-09-05T09:00:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-authored-at"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="comments-item-captured-at"]')).toBeNull();
   });
@@ -125,7 +126,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('externalCreatedAt이 null이면 capturedAt+"수집" 라벨로 폴백한다(지어내지 않되 자리를 비우지 않는다)', async () => {
     const face = loadedFace([baseComment({ externalCreatedAt: null, capturedAt: '2026-09-05T10:30:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-authored-at"]')).toBeNull();
     const capturedSpan = container.querySelector('[data-testid="comments-item-captured-at"]');
     expect(capturedSpan?.textContent).toContain('수집');
@@ -137,7 +138,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('deletedAt이 있으면 목록에서 안 빠지고 "원본이 지워졌습니다" 안내가 뜬다', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(1);
     expect(container.querySelector('[data-testid="comments-item-deleted-note"]')?.textContent).toBe('원본이 지워졌습니다.');
   });
@@ -146,7 +147,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('사유("원본이 지워졌습니다")가 본문(comment-body-text)보다 DOM에서 먼저 온다', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     const item = container.querySelector('[data-testid="comments-item"]')!;
     const note = item.querySelector('[data-testid="comments-item-deleted-note"]')!;
     const body = item.querySelector('[data-testid="comment-body-text"]')!;
@@ -156,7 +157,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('deletedAt이 null이면 지워짐 안내가 안 뜬다(회귀 0)', async () => {
     const face = loadedFace([baseComment({ deletedAt: null })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-deleted-note"]')).toBeNull();
   });
 
@@ -169,7 +170,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
       baseComment({ id: 'c2', deletedAt: '2026-09-05T11:05:00Z' }),
     ]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
     expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(2);
     expect(container.querySelectorAll('[data-testid="comments-item-deleted-note"]').length).toBe(2);
@@ -183,7 +184,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('지워진 댓글은 짧아도 <summary>에 본문 문자열이 한 글자도 없다(닫힌 채 다 보이는 결함 회귀가드)', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z', bodyText: '짧은 글' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     const body = container.querySelector('[data-testid="comment-body-text"]');
     expect(body?.tagName).toBe('DETAILS');
     const summary = body?.querySelector('summary');
@@ -199,7 +200,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('지워진 댓글엔 작업전환·답변 액션은 안 그려지지만(비활성이 아니라 부재) 답변 상태 칩은 그대로 뜬다', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).toBeNull();
     expect(container.querySelector('[data-testid="comments-item-reply"]')).toBeNull();
     expect(container.querySelector('[data-comment-reply-status-chip]')).not.toBeNull();
@@ -208,14 +209,14 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('deletedCount>0이면 헤더에 "지워진 댓글 {n}건" 안내가 뜬다(서버 전체 수)', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })], { deletedCount: 3 });
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-deleted-count"]')?.textContent).toBe('지워진 댓글 3건');
   });
 
   it('deletedCount=0이면 그 안내 줄 자체가 안 뜬다', async () => {
     const face = loadedFace([baseComment({})], { deletedCount: 0 });
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-deleted-count"]')).toBeNull();
   });
 });
@@ -226,7 +227,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
   it('지워지지 않은 댓글엔 작업전환·답변 버튼과 답변 상태 칩이 함께 뜬다', async () => {
     const face = loadedFace([baseComment({})]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="comments-item-reply"]')).not.toBeNull();
     expect(container.querySelector('[data-comment-reply-status-chip]')?.getAttribute('data-comment-reply-status-chip')).toBe('none');
@@ -238,7 +239,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
   it('replyStatus="published"·replyExternalUrl 있으면 「채널에서 보기」 링크가 뜬다', async () => {
     const face = loadedFace([baseComment({ replyStatus: 'published', replyExternalUrl: 'https://example.com/p/1' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     const link = container.querySelector('[data-testid="comments-item-reply-external-link"]') as HTMLAnchorElement;
     expect(link?.getAttribute('href')).toBe('https://example.com/p/1');
     expect(link?.textContent).toBe('채널에서 보기');
@@ -249,7 +250,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
   it('replyStatus=null(모르는 status)이면 답변 상태 칩 자리 자체가 안 뜬다', async () => {
     const face = loadedFace([baseComment({ replyStatus: null })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-reply-status"]')).toBeNull();
     expect(container.querySelector('[data-comment-reply-status-chip]')).toBeNull();
   });
@@ -257,7 +258,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
   it('replyStatus="submitted"(발행 전)는 replyExternalUrl이 없어야 하고 링크도 안 뜬다', async () => {
     const face = loadedFace([baseComment({ replyStatus: 'submitted' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-reply-external-link"]')).toBeNull();
   });
 
@@ -266,7 +267,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     const onConvertToTask = vi.fn();
     const face = loadedFace([comment]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={onConvertToTask} onReply={() => {}} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={onConvertToTask} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     expect(onConvertToTask).toHaveBeenCalledWith(comment);
@@ -277,7 +278,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     const onReply = vi.fn();
     const face = loadedFace([comment]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={onReply} onRetryReply={async () => ({ ok: true })} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={onReply} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     const btn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     expect(onReply).toHaveBeenCalledWith(comment);
@@ -320,7 +321,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
         externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null,
       }],
     });
   });
@@ -388,7 +389,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: null, bodyText: 'x',
         externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null,
       }],
     });
   });
@@ -421,7 +422,7 @@ describe('CommentsSection — 답변 실패 얼굴(story #3544, 유나 §22-15)'
         <CommentsSection
           face={face} displayTimezone={TZ}
           onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}}
-          onRetryReply={async () => ({ ok: true })}
+          onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}}
         />,
       ));
     });

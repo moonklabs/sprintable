@@ -163,6 +163,12 @@ function stubFetch(opts: {
     comments: {
       id: string; external_comment_id: string; author_display_name: string | null; text: string;
       external_created_at: string | null; captured_at: string; deleted_at: string | null;
+      // story #3544 조각⑧ — 답변 실패 얼굴 테스트용(옵션, 대부분 시나리오는 생략).
+      reply?: {
+        id: string; status: string; external_reply_url: string | null; command_id: string | null;
+        command_status: string | null; failure_kind: string | null;
+        next_attempt_at: string | null; reason_code: string | null;
+      } | null;
     }[];
     active_count: number;
     deleted_count: number;
@@ -176,6 +182,8 @@ function stubFetch(opts: {
   onCommentFollowUp?: (body: unknown) => { status: number; body: unknown };
   onCommentReplyDraft?: (body: unknown) => { status: number; body: unknown };
   onCommentReplySubmit?: () => { status: number; body: unknown };
+  // story #3544 조각⑧ — voided(봉인 불일치) 「다시 상신」의 prefill용 단건 GET.
+  onCommentReplyGet?: () => { status: number; body: unknown };
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -370,6 +378,17 @@ function stubFetch(opts: {
             id: 'reply-1', comment_id: 'c1', text: parsedBody.text, status: 'draft', gate_id: null,
             external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: null,
           },
+        };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      // story #3544 조각⑧ — 단건 GET(prefill). '/submit'로 끝나는 POST 분기보다
+      // 먼저 검사하면 안 된다(둘 다 '/replies/{id}'를 포함) — 이 분기는 GET·
+      // '/submit'로 안 끝나는 경우만 잡도록 뒤에 둔다.
+      if (url.includes('/replies/') && !url.endsWith('/submit') && (!init || init.method === undefined || init.method === 'GET')) {
+        const result = opts.onCommentReplyGet?.() ?? {
+          status: 200,
+          body: { id: 'reply-1', comment_id: 'c1', text: '이전 답변 원문', status: 'failed', gate_id: 'gate-1', external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: null },
         };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
@@ -2975,6 +2994,67 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     await act(async () => { (document.querySelector('[data-testid="comments-reply-submit-button"]') as HTMLButtonElement).click(); });
     await flush();
     expect(document.querySelector('[data-testid="comments-reply-sealed-text"]')?.textContent).toBe('다음 주 월요일에 재입고됩니다');
+  });
+
+  // story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
+  // 「다시 상신」 전용 prefill. 일반 「답변」과 달리 다이얼로그가 열리기 전에
+  // 단건 GET으로 «지금 답변» 원문을 가져와 채운다(BFF passthrough 기존 라우트
+  // 재사용, BE 신설 0). 「승인한 답변」과의 diff는 만들지 않는다(못 하는 것).
+  it('⭐「다시 상신」 클릭 — 단건 GET으로 지금 답변 원문을 가져와 textarea를 prefill한다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'GATE_NOT_APPROVED_OR_RESEALED',
+          },
+        }],
+      },
+      onCommentReplyGet: () => ({
+        status: 200,
+        body: { id: 'reply-1', comment_id: 'c1', text: '승인 뒤 바뀐 지금 답변', status: 'failed', gate_id: 'gate-1', external_reply_id: null, external_reply_url: null, last_error: '봉인 불일치', target_comment_state: null },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const resubmitBtn = container.querySelector('[data-testid="comments-item-reply-resubmit-button"]') as HTMLButtonElement;
+    await act(async () => { resubmitBtn.click(); });
+    await flush();
+
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('승인 뒤 바뀐 지금 답변');
+  });
+
+  it('⭐「다시 상신」인데 단건 GET이 실패하면(레이스) 빈 칸으로 열린다(지어내지 않는다)', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'GATE_NOT_APPROVED_OR_RESEALED',
+          },
+        }],
+      },
+      onCommentReplyGet: () => ({ status: 404, body: { detail: 'not found' } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const resubmitBtn = container.querySelector('[data-testid="comments-item-reply-resubmit-button"]') as HTMLButtonElement;
+    await act(async () => { resubmitBtn.click(); });
+    await flush();
+
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
   });
 
   it('「답변」 상신 409(대상 삭제) — 서버 문구가 그대로 뜬다', async () => {

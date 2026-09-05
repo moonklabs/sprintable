@@ -399,6 +399,32 @@ export default function ChannelPostEditPage() {
       return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
     }
   }, [orgId, loadComments, t]);
+
+  // story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
+  // 「다시 상신」 전용. 일반 「답변」(handleOpenReply)과 갈라 두는 이유: 이쪽만
+  // 다이얼로그를 열기 전에 단건 GET으로 «지금 답변» 원문을 먼저 가져와야 한다
+  // (BFF passthrough 기존 라우트 재사용, BE 신설 0). 「승인한 답변」과의 diff는
+  // 만들지 않는다 — 원문 그 자체를 BE가 아직 안 실어서(additive 前) 지어낼 수
+  // 없다(못 하는 것으로 명기).
+  const [replyPrefillText, setReplyPrefillText] = useState<string | undefined>(undefined);
+  const handleOpenReply = useCallback((comment: CommentItem) => {
+    setReplyPrefillText(undefined);
+    setReplyComment(comment);
+  }, []);
+  const handleResubmitReply = useCallback(async (comment: CommentItem) => {
+    let prefill: string | undefined;
+    if (orgId && comment.replyId) {
+      try {
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${comment.id}/replies/${comment.replyId}`);
+        const body = await res.json().catch(() => null) as { data?: ReplyView } | null;
+        prefill = res.ok ? (body?.data?.text ?? undefined) : undefined;
+      } catch {
+        prefill = undefined;
+      }
+    }
+    setReplyPrefillText(prefill);
+    setReplyComment(comment);
+  }, [orgId]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -1447,8 +1473,9 @@ export default function ChannelPostEditPage() {
             displayTimezone={displayTimezone}
             onRefresh={handleCommentsRefresh}
             onConvertToTask={setConvertToTaskComment}
-            onReply={setReplyComment}
+            onReply={handleOpenReply}
             onRetryReply={handleRetryReply}
+            onResubmitReply={handleResubmitReply}
           />
         </div>
       ) : null}
@@ -1934,9 +1961,10 @@ export default function ChannelPostEditPage() {
       {replyComment ? (
         <CommentReplyDialog
           comment={replyComment}
-          onClose={() => setReplyComment(null)}
+          onClose={() => { setReplyComment(null); setReplyPrefillText(undefined); }}
           onCreateDraft={handleCreateReplyDraft}
           onSubmit={handleSubmitReply}
+          initialText={replyPrefillText}
         />
       ) : null}
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
