@@ -455,35 +455,44 @@ async def _reseal_gate_on_new_version(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, version: SitePostVersion,
     draft: SitePostDraft, old_connection_id: "uuid.UUID | None | object" = _NO_PRIOR_VERSION,
 ) -> None:
-    # story #3478 후속(카디르 REQUEST_CHANGES 경유 페드루 실측, 2026-09-05) — destination
-    # (connection_id) 자체가 바뀌면 옛 scope_key 게이트가 새 scope_key 조회(아래)에
-    # 안 걸려 방치됐다: approved인데 목적지를 잃은 채 살아 있거나(봉인 원칙 위반),
-    # 발행 행이 0이라 `_gate_publication_is_live`가 "쥐고 있다"로 보수 판정해 같은
-    # work_item·같은 옛 목적지로의 재상신이 영구 409(3478이 없애려던 것의 사촌)로
-    # 막혔다. approved 뒤 편집(같은 목적지)과 동형으로 pending+reapproval_required로
-    # 되돌린다 — sealed_content_*는 안 건드린다(옛 승인 기록 보존, 재봉인은 그 목적지로
-    # 다시 submit()할 때만). pending이었으면 손대지 않는다(이 새 버전은 그 목적지로
-    # 안 가므로 재봉인할 근거가 없다 — 다음 submit()이 새 scope_key로 별도 게이트를 연다).
+    # story #3478 후속(카디르 REQUEST_CHANGES BLOCKER 1·REQUIRED 3, 페드루 실측
+    # 2026-09-05) — destination(connection_id) 자체가 바뀌면 옛 scope_key 게이트가
+    # 새 scope_key 조회(아래)에 안 걸려 방치됐다. 최초 처방(pending+reapproval_
+    # required로 되돌리기)은 새 구멍을 냈다 — pending인 채로 두면 결재자가 그 게이트를
+    # "정상적으로" 승인해 버릴 수 있고, `_maybe_create_scheduled_publication_command`가
+    # site_draft.connection_id(=draft의 **현재** 목적지, 이미 새 목적지로 바뀐 값)로
+    # 명령을 만든다 — "옛 목적지용 승인으로 새 목적지에 발행"이 되어 3478이 지키려던
+    # «목적지별 독립 승인» 자체가 뚫린다. voided로 완전히 끝내는 게 정답이다: 그 목적지로
+    # 다시 상신하면 `find_gate_slot_with_pr_fallback`(status 필터 없음)이 이 voided
+    # 행을 그대로 돌려주고, `create_gate()`는 rejected가 아니면 그 행을 재사용하며,
+    # `submit_site_post_draft()`의 기존 "gate.status != pending"이면 되돌리는 분기가
+    # pending 복귀+재봉인+`reapproval_required=False`까지 그대로 처리한다(신규 코드
+    # 불요 — 이미 있는 재사용 경로가 정확히 이 상황을 위해 있었다).
+    #
+    # REQUIRED 3 — 이 게이트를 건드릴 조건은 `resolve_gate_holder_draft_id(...) is
+    # None`("막는 홀더 없음" — 아무도 안 쥐고 있어도 None)이 아니라 「이 draft가 쥔
+    # 게이트」다(neutral_facts.draft_id가 정확히 이 draft.id). 다른 draft A가 쥔 approved
+    # 게이트가 회수 등으로 "안 쥐고 있다"(None) 판정을 받으면, 이 함수는 B의 목적지
+    # 변경만으로 A의 게이트를 건드려선 안 된다 — 건드릴 권한은 "내가 쥔 것"에만 있다.
     old_scope_key = None if old_connection_id is _NO_PRIOR_VERSION else str(old_connection_id or "")
     new_scope_key = str(draft.connection_id or "")
     if old_scope_key is not None and old_scope_key != new_scope_key:
-        from app.services.gate_service import resolve_gate_holder_draft_id as _resolve_old_holder
-
         old_gate = (await db.execute(
             select(Gate)
             .where(
                 Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
-                Gate.scope_key == old_scope_key, Gate.status == "approved",
+                Gate.scope_key == old_scope_key, Gate.status.in_(("pending", "approved")),
             )
             .with_for_update()
         )).scalar_one_or_none()
-        if old_gate is not None and await _resolve_old_holder(db, old_gate, this_draft_id=version.draft_id) is None:
-            set_gate_status(old_gate, "pending", now=datetime.now(timezone.utc))
-            old_gate.requires_human = True
-            old_gate.resolver_id = None
-            old_gate.resolution_note = None
-            old_gate.resolved_at = None
-            old_gate.reapproval_required = True
+        if old_gate is not None and (old_gate.neutral_facts or {}).get("draft_id") == str(version.draft_id):
+            set_gate_status(old_gate, "voided", now=datetime.now(timezone.utc))
+            old_gate.requires_human = False
+            old_gate.resolution_note = (
+                f"목적지 변경으로 자동 해제(destination changed "
+                f"{old_scope_key or 'hosted_site'} → {new_scope_key or 'hosted_site'}, version {version.version})"
+            )
+            old_gate.resolved_at = datetime.now(timezone.utc)
 
     # story #3478(0328) — scope_key도 필터에 넣는다. 안 넣으면 같은 work_item에 목적지가
     # 다른 게이트가 둘(예: WordPress+webhook) 있을 때 .scalar_one_or_none()이
@@ -1162,6 +1171,20 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
         raise SitePostExternalPublishError(
             error_code="SITE_POST_REAPPROVAL_REQUIRED",
             message=f"봉인된 본문과 현재 버전이 다릅니다(gate_id={gate.id})",
+        )
+    # story #3478 후속(BLOCKER 2, 페드루 실측 2026-09-05) — 위 status/sha 검증은 "이
+    # 게이트가 승인된 상태"만 보고 "그 승인이 draft가 지금 향하는 목적지의 승인인지"는
+    # 안 봤다. destination(connection_id)이 승인 이후 바뀌었는데 옛 scope의 approved
+    # 게이트가 어떤 경로로든 살아남으면(void 정리가 정상 동작해도 경합 등으로), 이
+    # 자리가 마지막 방어선 — W용 승인으로 H에 실 HTTP를 치기 直前에 막는다(재시도 대상
+    # 아님, 사람이 새로 승인하면 새 커맨드가 만들어진다).
+    if gate.scope_key != str(draft.connection_id or ""):
+        raise SitePostExternalPublishError(
+            error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED",
+            message=(
+                f"승인된 목적지와 draft의 현재 목적지가 다릅니다"
+                f"(gate_id={gate.id}, gate.scope_key={gate.scope_key!r}, draft.connection_id={draft.connection_id!r})"
+            ),
         )
 
     try:

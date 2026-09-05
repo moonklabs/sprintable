@@ -368,9 +368,12 @@ async def test_connection_id_social_channel_rejected_422():
 
 @pytest.mark.anyio
 async def test_destination_change_after_approval_reopens_gate_for_reapproval():
-    """AC(페드루 PO 지시) — 승인 뒤 connection_id만 바꿔도(본문 그대로) 게이트가
-    pending+reapproval_required로 되돌아간다(sealed_scheduled_at·sealed_media_sha256과
-    동형 축). sealed_content_*는 안 건드린다(기존 관례 재확인)."""
+    """story #3478 후속(카디르 REQUEST_CHANGES BLOCKER 1, 페드루 실측 2026-09-05로
+    불변식 갱신) — 승인 뒤 connection_id만 바꿔도(본문 그대로) 옛 목적지 게이트는
+    **voided**로 끝난다(최초 처방이던 pending+reapproval_required는 그 자체가 새
+    구멍이었다 — 결재자가 그 pending을 "정상 승인"해 버리면 옛 목적지용 승인으로
+    새 목적지에 발행되는 경로가 열린다, BLOCKER 1 참고). sealed_content_*는 안
+    건드린다(옛 승인 기록 보존 — voided라도 "무엇이 승인됐었나"는 지우지 않는다)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -406,9 +409,9 @@ async def test_destination_change_after_approval_reopens_gate_for_reapproval():
             from app.models.gate import Gate
             from sqlalchemy import select
             gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
-            assert gate.status == "pending"
-            assert gate.reapproval_required is True
+            assert gate.status == "voided"
             assert gate.sealed_destination_connection_id is None, "승인된 옛 봉인이 훼손됐다(재봉인은 submit() 재호출 몫)"
+            assert gate.resolution_note, "voided 사유가 안 남았다(사람이 결재함에서 볼 근거)"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -476,10 +479,239 @@ async def test_resubmit_destination_only_change_reseals_and_is_not_noop():
             )
 
             old_gate = (await s.execute(select(Gate).where(Gate.id == old_gate_id))).scalar_one()
-            assert old_gate.status != "approved", "옛(hosted_site) 게이트가 승인 안 됐는데도 approved로 보였다"
+            assert old_gate.status == "voided", "옛(hosted_site) 게이트가 destination 변경으로 voided 처리되지 않았다"
             assert old_gate.sealed_destination_connection_id is None, "옛 게이트가 새 목적지로 잘못 봉인됐다"
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_destination_change_voided_gate_cannot_be_approved_into_wrong_publish():
+    """story #3478 후속(카디르 REQUEST_CHANGES ①, 페드루 실측 2026-09-05 재현 그대로) —
+    B가 W로 상신(G_W pending, 승인 안 함) → 본문 그대로 connection만 H로 바꾼 뒤 상신
+    (G_H pending) → 그 뒤 결재자가 G_W를 승인하려 하면 이미 voided라 illegal transition
+    (ValueError, 게이트 라우터에선 409 gate_already_resolved에 대응)으로 막힌다 — W용
+    승인으로 H에 발행되는 경로 자체가 구조적으로 안 열린다.
+
+    뮤테이션 자가검증: `_reseal_gate_on_new_version`의 void 분기를 임시로 비활성화하면
+    G_W가 pending인 채 남아 approve가 200으로 성공하고, 곧이어
+    `_maybe_create_scheduled_publication_command`가 destination=H로 명령을 만든다
+    (BLOCKER 1이 없으면 벌어지는 정확히 그 사고) — 이 시나리오는 별도로 아래에서
+    직접 재현해 RED를 확인한다(코드를 되돌리지 않고, 같은 로직을 인라인으로 그대로
+    복제해 대조)."""
+    from app.services.gate_service import transition_gate
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_w = await _seed_connection(s, org_id, account_id="w-site")
+            connection_h = await _seed_connection(s, org_id, account_id="h-site")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, body_md="본문 그대로", connection_id=connection_w),
+            )
+            draft_id = r1.json()["draft_id"]
+            r_submit_w = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+            assert r_submit_w.status_code == 200, r_submit_w.text
+            gate_w_id = uuid.UUID(r_submit_w.json()["gate_id"])
+            # 승인 안 함 — 재현 조건 그대로(pending인 채 destination 변경).
+
+            r2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, body_md="본문 그대로", connection_id=connection_h),
+            )
+            assert r2.status_code == 201, r2.text
+            r_submit_h = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+            assert r_submit_h.status_code == 200, r_submit_h.text
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+
+            gate_w = (await s.execute(select(Gate).where(Gate.id == gate_w_id))).scalar_one()
+            assert gate_w.status == "voided", "G_W가 destination 변경으로 voided되지 않았다"
+
+            with pytest.raises(ValueError, match="불법 전이"):
+                await transition_gate(s, org_id, gate_w_id, "approved", resolver_id=uuid.uuid4())
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_scope_mismatch_defense_blocks_command_creation_and_worker_publish():
+    """story #3478 후속(카디르 REQUEST_CHANGES ②, 페드루 실측 2026-09-05) — BLOCKER 1
+    (void 정리)이 정상 동작해도, 어떤 경로로든 gate.scope_key(승인된 목적지)와 draft의
+    **현재** connection_id가 어긋난 상태가 생기면(이 테스트처럼 억지로 그 조합을 만들어
+    격리 재현) 두 방어선이 각각 막는다: ① 승인 훅(`_maybe_create_scheduled_publication_
+    command`)이 명령을 안 만들고 note만 남긴다 ② 워커(`publish_site_post_external_
+    command`)가 설령 명령이 생겼더라도 adapter 호출 直前에 `EXTERNAL_PUBLISH_APPROVAL_
+    REQUIRED`로 막는다(연결 조회·adapter 코드에 아예 안 닿는다)."""
+    import uuid as uuid_mod
+
+    from app.models.gate import Gate
+    from app.models.publication_command import PublicationCommand
+    from app.models.site_post_draft import SitePostDraft
+    from app.models.site_post_version import SitePostVersion
+    from app.services.gate_service import _maybe_create_scheduled_publication_command
+    from app.services.site_posts import SitePostExternalPublishError, publish_site_post_external_command
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_w = await _seed_connection(s, org_id, account_id="mismatch-w")
+            connection_h = await _seed_connection(s, org_id, account_id="mismatch-h")
+
+            draft = SitePostDraft(
+                id=uuid_mod.uuid4(), org_id=org_id, work_item_id=story_id, slug="mismatch-post",
+                connection_id=connection_h,  # draft의 현재 목적지 = H
+            )
+            s.add(draft)
+            await s.flush()
+            version = SitePostVersion(
+                id=uuid_mod.uuid4(), draft_id=draft.id, version=1, title="제목", lang="ko",
+                summary="요약", tags=[], body_md="본문",
+                body_sha256="a" * 64, author_member_id=uuid_mod.uuid4(), author_kind="agent",
+            )
+            s.add(version)
+            await s.flush()
+            # 억지 조합 — scope_key(승인된 목적지) = W, draft의 현재 목적지 = H.
+            gate = Gate(
+                id=uuid_mod.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="external_publish", scope_key=str(connection_w), status="approved",
+                requires_human=True, sealed_content_sha256=version.body_sha256,
+                neutral_facts={"destination": "wordpress", "draft_id": str(draft.id)},
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id, version_id = gate.id, version.id
+
+        # ① 승인 훅 — 명령 0건·note 기록.
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            await _maybe_create_scheduled_publication_command(s, gate, resolver_id=uuid_mod.uuid4())
+            await s.commit()
+        async with Session() as s:
+            commands = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalars().all()
+            assert commands == [], "scope_key 불일치인데도 publication_command가 만들어졌다"
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert gate.resolution_note, "불일치 사유가 안 남았다"
+
+        # ② 워커 — 명령이 (다른 경로로) 이미 있었다고 가정하고 직접 호출, adapter 호출 前 차단.
+        fake_command = PublicationCommand(
+            id=uuid_mod.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_h,
+            approved_version=version_id, operation="publish", content_kind="site_post",
+        )
+        async with Session() as s:
+            with pytest.raises(SitePostExternalPublishError) as exc_info:
+                await publish_site_post_external_command(s, fake_command)
+            assert exc_info.value.error_code == "EXTERNAL_PUBLISH_APPROVAL_REQUIRED"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_destination_change_only_touches_gate_held_by_this_draft():
+    """story #3478 후속(카디르 REQUEST_CHANGES REQUIRED 3, 페드루 실측 2026-09-05) —
+    옛 scope 게이트를 건드릴 조건은 `resolve_gate_holder_draft_id(...) is None`("막는
+    홀더 없음")이 아니라 「이 draft가 쥔 게이트」(neutral_facts.draft_id == 이 draft)
+    여야 한다. `resolve_gate_holder_draft_id`는 "자기 자신"뿐 아니라 "발행이 회수/
+    미배포라 더는 살아있지 않음"(`_gate_publication_is_live`=False)일 때도 None을
+    반환한다(story #3478 決定③) — 다른 draft A가 쥔 approved 게이트가 이 상태면,
+    A가 진짜로 쥐고 있는데도 "홀더 없음"으로 보여 옛(구현) 체크는 B의 destination
+    변경만으로 A의 게이트를 건드린다. 이 테스트는 그 정확한 함정(A의 게이트에 실패한
+    ChannelPublication을 하나 남겨 "안 살아있음"을 만든다)을 재현해 `_reseal_gate_
+    on_new_version`을 직접 호출·이 축만 격리해서 잰다."""
+    import uuid as uuid_mod
+
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+    from app.models.site_post_draft import SitePostDraft
+    from app.models.site_post_version import SitePostVersion
+    from app.services.site_posts import _reseal_gate_on_new_version
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_shared = await _seed_connection(s, org_id, account_id="shared-old-scope")
+            connection_new = await _seed_connection(s, org_id, account_id="b-new-dest")
+
+            draft_a = SitePostDraft(
+                id=uuid_mod.uuid4(), org_id=org_id, work_item_id=story_id, slug="draft-a",
+                connection_id=connection_shared,
+            )
+            draft_b = SitePostDraft(
+                id=uuid_mod.uuid4(), org_id=org_id, work_item_id=story_id, slug="draft-b",
+                connection_id=connection_new,  # B는 이미 새 목적지로 갱신된 뒤라고 가정.
+            )
+            s.add_all([draft_a, draft_b])
+            await s.flush()
+
+            # A가 «옛 scope»(shared)를 실제로 쥔 approved 게이트(neutral_facts.draft_id=A).
+            gate_a = Gate(
+                id=uuid_mod.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="external_publish", scope_key=str(connection_shared), status="approved",
+                requires_human=True, neutral_facts={"draft_id": str(draft_a.id)},
+            )
+            s.add(gate_a)
+            await s.flush()
+            # A의 발행이 실패해 「살아있지 않다」— _gate_publication_is_live(gate_a.id)를
+            # False로 만드는 유일한 방법(story #3478 決定③, resolve_gate_holder_draft_id
+            # docstring 참고). A가 진짜로 쥐고 있는데도 옛 체크는 이걸 "홀더 없음"으로 읽는다.
+            s.add(ChannelPublication(
+                id=uuid_mod.uuid4(), org_id=org_id, gate_id=gate_a.id, version_id=uuid_mod.uuid4(),
+                connection_id=connection_shared, channel="wordpress", status="failed",
+            ))
+
+            b_version = SitePostVersion(
+                id=uuid_mod.uuid4(), draft_id=draft_b.id, version=2, title="제목", lang="ko",
+                summary="요약", tags=[], body_md="본문 v2",
+                body_sha256="b" * 64, author_member_id=uuid_mod.uuid4(), author_kind="agent",
+            )
+            s.add(b_version)
+            await s.commit()
+            gate_a_id = gate_a.id
+
+        async with Session() as s:
+            draft_b_row = (await s.execute(
+                select(SitePostDraft).where(SitePostDraft.id == draft_b.id)
+            )).scalar_one()
+            version_row = (await s.execute(
+                select(SitePostVersion).where(SitePostVersion.id == b_version.id)
+            )).scalar_one()
+            # B가 old_connection_id=shared(A의 scope와 동일한 옛 값)에서 new=connection_new로
+            # 바뀌었다고 가정하고 훅을 직접 호출 — REQUIRED 3의 정확한 대상 시나리오.
+            await _reseal_gate_on_new_version(
+                s, org_id=org_id, work_item_id=story_id, version=version_row, draft=draft_b_row,
+                old_connection_id=connection_shared,
+            )
+            await s.commit()
+
+        async with Session() as s:
+            gate_a_after = (await s.execute(select(Gate).where(Gate.id == gate_a_id))).scalar_one()
+            assert gate_a_after.status == "approved", "B의 destination 변경이 A가 쥔 게이트를 건드렸다"
+    finally:
         await engine.dispose()
 
 

@@ -865,6 +865,14 @@ async def create_gate(
 # 보는 한 줄로 남긴다(조용히 삼키지 않는다 — "승인됐는데 예약이 안 걸린다"가 이 스토리
 # 자체의 사고 클래스라 PO가 "보이는 실패"로 명시 확定).
 _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE = "예약 명령 미생성(draft 해석 실패)"
+# story #3478 후속(BLOCKER 2, 페드루 실측 2026-09-05) — 목적지가 바뀐 뒤 옛 scope의
+# 승인이 살아남으면(예: void 처리 前 경쟁 상태) 이 게이트의 scope_key(승인된 목적지)와
+# draft의 **현재** connection_id(위 site_draft.connection_id, 명령이 실제로 향할
+# 목적지)가 어긋날 수 있다 — 그 상태로 명령을 만들면 「W용 승인으로 H에 발행」이 된다
+# (3478이 막으려던 것 자체를 승인 훅에서 재현). 방어선(belt-and-suspenders) — void
+# 정리(위 _reseal_gate_on_new_version)가 정상 동작해도, 경합·구버전 데이터 등 어떤
+# 경로로든 불일치가 남으면 여기서 한 번 더 막는다.
+_SCHEDULED_COMMAND_SCOPE_MISMATCH_NOTE = "예약 명령 미생성(승인된 목적지와 초안의 현재 목적지 불일치)"
 
 
 async def _maybe_create_scheduled_publication_command(
@@ -904,6 +912,15 @@ async def _maybe_create_scheduled_publication_command(
             "gate %s approved but draft resolution failed — publication_command not created", gate.id,
         )
         note = _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE
+        gate.resolution_note = f"{gate.resolution_note}\n{note}" if gate.resolution_note else note
+
+    def _mark_scope_mismatch() -> None:
+        logger.warning(
+            "gate %s approved for scope_key=%r but draft's current connection_id=%r — "
+            "publication_command not created",
+            gate.id, gate.scope_key, site_draft.connection_id,
+        )
+        note = _SCHEDULED_COMMAND_SCOPE_MISMATCH_NOTE
         gate.resolution_note = f"{gate.resolution_note}\n{note}" if gate.resolution_note else note
 
     destination_channel = (gate.neutral_facts or {}).get("destination")
@@ -947,6 +964,9 @@ async def _maybe_create_scheduled_publication_command(
         )).scalar_one_or_none()
         if site_latest is None:
             _mark_unresolved()
+            return
+        if str(site_draft.connection_id) != gate.scope_key:
+            _mark_scope_mismatch()
             return
 
         from app.services.publication_command import create_or_get_publication_command
