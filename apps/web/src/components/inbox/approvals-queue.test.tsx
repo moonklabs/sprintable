@@ -156,9 +156,15 @@ describe('ApprovalsQueue', () => {
   // story #3519(§16-7 2부, PO 確定 2026-09-05) — fetchGates 내부에 catch가 어디에도
   // 없어(then뿐), 하나(held)가 네트워크단 reject하면 fetchGates() 자체가 throw했고
   // 호출부(useEffect)도 안 잡아 setLoading(false)가 영영 안 불려 무한 스켈레톤(에러
-  // 표시조차 0)이 됐다 — 최악 사례. 이제 leg별 격리+finally 이중 방어로 pending(성공)은
-  // 그대로 뜨고 loading도 반드시 풀린다.
-  it('held가 네트워크 reject해도 pending(성공한 leg)은 뜨고 무한 스켈레톤에 안 걸린다', async () => {
+  // 표시조차 0)이 됐다 — 최악 사례. leg별 격리+finally 이중 방어로 loading은 반드시
+  // 풀린다(무한 스켈레톤 회귀 가드는 유지).
+  //
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — #3519 직후엔 이 자리에서 "성공한 leg는
+  // 그대로 보인다"(부분 degrade)를 단언했으나, PO가 그 설계를 다시 뒤집었다: leg 하나라도
+  // 실패하면 부분 목록이 아니라 "못 불러옴" 얼굴+다시 시도를 낸다(성공한 leg의 항목이
+  // "이게 전부"로 오인되는 걸 막는다 — §22-2 "없음"과 "못 불러옴"을 절대 섞지 않는 원칙의
+  // 연장, 부분 목록도 실은 「못 불러옴」의 일종이다).
+  it('held가 네트워크 reject하면 pending이 성공해도 무한 스켈레톤 없이 "못 불러옴" 얼굴+다시 시도가 뜬다(부분 목록 아님)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
       if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
       if (url.includes('status=pending')) {
@@ -169,7 +175,43 @@ describe('ApprovalsQueue', () => {
     }));
     await mount();
     expect(container.textContent).not.toContain('게이트 조회 중...');
-    expect(container.textContent).toContain('살아남은 항목');
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('살아남은 항목');
+  });
+
+  // story #3521(유나 §22-2) — 「다시 시도」 클릭이 실제로 재조회하고, 이번엔 두 leg 다
+  // 성공하면 정상 목록으로 회복된다(에러 얼굴이 영구 고착 아님).
+  it('「다시 시도」 클릭 — 재조회 성공 시 정상 목록으로 복구된다', async () => {
+    let heldShouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
+      if (url.includes('status=held')) {
+        if (heldShouldFail) throw new Error('network down');
+        return { ok: true, json: async () => [] };
+      }
+      return { ok: true, json: async () => [gate({ id: 'g1', gate_type: 'merge_gate', work_item_summary: { title: '복구된 항목', slug: null } })] };
+    }));
+    await mount();
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+    heldShouldFail = false;
+    const retryBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).toBeNull();
+    expect(container.textContent).toContain('복구된 항목');
+  });
+
+  // story #3521 — "응답 실패"(non-ok status, 네트워크 자체는 살아있음) 갈래도 "응답 없음"
+  // (네트워크 reject, 위 두 테스트)과 동형으로 "못 불러옴" 얼굴을 낸다 — 두 실패 모양이
+  // 다르다고 화면 판정이 갈리면 안 된다(fetchGates의 !r.ok → reject 정규화가 이 동형을 보장).
+  it('pending이 500(응답은 왔지만 실패)이면 held가 정상이어도 "못 불러옴" 얼굴이 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
+      if (url.includes('status=pending')) return { ok: false, status: 500, json: async () => ({ detail: 'boom' }) };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+    expect(container.textContent).toContain(koMessages.cage.gateInboxLoadError);
   });
 
   it('4유형(게이트·문서결재·머지게이트·보류) 모두 렌더하고 gate_type 배지를 표시한다', async () => {

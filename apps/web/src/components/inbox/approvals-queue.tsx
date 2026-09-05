@@ -43,17 +43,31 @@ import { fetchWithAuth } from '@/lib/db/client';
 // HitlRequest 항목은 상세 페이지가 없어(간단한 park 요청이라 `/gates/[id]`급 화면이 불필요)
 // 이 큐 안에서 바로 승인/반려하는 인라인 액션으로 둔다 — Gate 항목은 기존대로 클릭 시
 // `/gates/{id}` 상세로 이동.
-async function fetchGates(): Promise<GateInboxItem[]> {
-  // story #3519(§16-7 2부, PO 確定 2026-09-05) — 두 leg 다 catch가 어디에도 없어(then뿐),
-  // 하나가 네트워크단 reject하면 이 함수 자체가 던졌다. 호출부(useEffect)가 그 reject를
-  // 안 잡아 setLoading(false)가 영영 안 불려 무한 스켈레톤(에러 표시조차 0)이 됐다 — 최악
-  // 사례. leg별로 격리해 하나가 죽어도 나머지는 그대로 보인다(catch(() => [])로 degrade,
-  // 기존 !res.ok 분기와 같은 취급).
-  const [pending, held] = await Promise.all([
-    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])).catch(() => []),
-    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])).catch(() => []),
+interface FetchGatesResult {
+  items: GateInboxItem[];
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — story #3519가 두 leg를 catch(() => [])로
+  // 격리해 무한 스켈레톤은 고쳤지만, 그 결과 "leg 실패"와 "진짜 0건"이 똑같은 빈 배열로
+  // 합류해 화면이 못 갈랐다("없음"과 "못 불러옴"이 같은 빈 카드). leg별 실패를 값으로
+  // 따로 들고 나와 호출부가 셋(있음·없음·못 불러옴)을 갈리게 한다.
+  pendingFailed: boolean;
+  heldFailed: boolean;
+}
+
+async function fetchGates(): Promise<FetchGatesResult> {
+  const [pendingResult, heldResult] = await Promise.allSettled([
+    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true')
+      .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
+    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true')
+      .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
   ]);
-  return [...(pending as GateInboxItem[]), ...(held as GateInboxItem[])];
+  return {
+    items: [
+      ...(pendingResult.status === 'fulfilled' ? pendingResult.value : []),
+      ...(heldResult.status === 'fulfilled' ? heldResult.value : []),
+    ],
+    pendingFailed: pendingResult.status === 'rejected',
+    heldFailed: heldResult.status === 'rejected',
+  };
 }
 
 function isHitl(item: GateInboxItem): item is HitlInboxItem {
@@ -129,6 +143,9 @@ export function ApprovalsQueue() {
   const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — pending/held 둘 중 하나라도 leg 실패면
+  // true. items가 비어도 이 값이 true면 "없음"이 아니라 "못 불러옴" 얼굴을 그린다.
+  const [loadFailed, setLoadFailed] = useState(false);
   // PO 리뷰(PR#2948, 2026-08-12) — 단일 string|null이면 게이트 A in-flight 중 B를 클릭 후
   // A가 먼저 끝나면 finally의 setResolving(null)이 "전역" 값을 지워 B도 아직 in-flight인데
   // B 버튼이 재활성화된다(AC3 "중복 실행 0"이 다중 게이트 동시조작에서 깨지는 창). id별로
@@ -202,17 +219,25 @@ export function ApprovalsQueue() {
     setResolvedAtMs((prev) => { const next = { ...prev }; delete next[id]; return next; });
   };
 
-  useEffect(() => {
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — 「다시 시도」 버튼이 재사용할 수 있게
+  // 마운트 로드를 함수로 뺀다. loading은 여전히 finally에서 해소(feedback-loading-finally
+  // 하우스룰) — fetchGates가 이제 Promise.allSettled라 원리적으로 안 던지지만, 방어선은
+  // 유지한다.
+  const loadGates = useCallback(() => {
     let cancelled = false;
-    // story #3519(§16-7 2부, PO 確定 2026-09-05) — "loading은 finally에서 해소"
-    // 하우스룰(feedback-loading-finally). fetchGates 내부를 격리해도 그 함수가
-    // 원리적으로 던질 수 있는 이상 이 호출부도 방어선을 하나 더 둔다 — setLoading(false)
-    // 를 finally로 옮겨 무한 스켈레톤 재발을 원천 차단.
+    setLoading(true);
+    setLoadFailed(false);
     void fetchGates()
-      .then((rows) => { if (!cancelled) setItems(rows); })
+      .then((result) => {
+        if (cancelled) return;
+        setItems(result.items);
+        setLoadFailed(result.pendingFailed || result.heldFailed);
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => loadGates(), [loadGates]);
 
   // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 큐에 있는 게이트를 먼저
   // 해소하면, 이 화면도 새로고침 없이 갱신된다. resolveGate()가 본인 해소 시 이미 쓰는
@@ -356,6 +381,22 @@ export function ApprovalsQueue() {
   };
 
   if (loading) return <p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p>;
+
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — "없음"보다 먼저 검사한다. leg가 실패했으면
+  // items가 비어 있어도 그건 진짜 0건이 아니라 못 불러온 것 — 다른 문구+다시 시도.
+  if (loadFailed) {
+    return (
+      <div
+        className="rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center"
+        data-testid="gate-inbox-load-error"
+      >
+        <p className="text-sm text-foreground">{t('gateInboxLoadError')}</p>
+        <Button variant="outline" size="sm" className="mt-2" onClick={loadGates}>
+          {t('gateInboxRetry')}
+        </Button>
+      </div>
+    );
+  }
 
   if (items.length === 0) {
     return (

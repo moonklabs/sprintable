@@ -4494,6 +4494,8 @@
     "gateInboxLoading": "게이트 조회 중...",
     "gateInboxEmpty": "대기 중인 게이트 없음",
     "gateInboxEmptyHint": "검수 대기 중인 게이트가 여기 표시됩니다",
+    "gateInboxLoadError": "결재 대기를 불러오지 못했습니다",
+    "gateInboxRetry": "다시 시도",
     "gateTransitionErrorGeneric": "게이트 처리에 실패했습니다. 다시 시도해 주세요.",
     "gateRejectedHistory": "최근 반려 사유",
     "voidAction": "무효화",
