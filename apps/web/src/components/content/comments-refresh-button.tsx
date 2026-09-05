@@ -50,7 +50,7 @@ export function CommentsRefreshButton({ onRefresh, nextAllowedAt }: CommentsRefr
   // 버튼이 사용자 조작 없이 저절로 풀리는 게 이 429 문구의 취지와 안 맞다). "지금
   // 눌러도 되는지"는 로드 시점 스냅샷 하나로 충분 — 다음 로드(새로고침)에서는 반드시
   // 다시 계산돼 풀린다(PO 確定).
-  const [loadTimeBlockedSeconds] = useState<number | null>(() => {
+  const [loadTimeBlockedSeconds, setLoadTimeBlockedSeconds] = useState<number | null>(() => {
     if (!nextAllowedAt) return null;
     const remainingMs = new Date(nextAllowedAt).getTime() - Date.now();
     return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
@@ -62,6 +62,22 @@ export function CommentsRefreshButton({ onRefresh, nextAllowedAt }: CommentsRefr
   // 재렌더 0 — 매초 재렌더하지 않는다, §22-10③ 폴링 금지와 다른 축). 초 모르는 429
   // ("잠시 뒤")는 잴 값이 없어 타이머 대상이 아니다(그대로 유지).
   const [loadTimeBlockedExpired, setLoadTimeBlockedExpired] = useState(false);
+  // story #3517 조각②-b REQUIRED 2(유나 재리뷰·§22-13 마지막 항목, PO 채택
+  // 2026-09-06) — 위 초기화는 "마운트 때 한 번"이라 nextAllowedAt prop이 나중에
+  // 바뀌어도(재수집 성공 → 목록 재조회 → 새 comments_next_allowed_at, +5분) 안
+  // 읽었다 — 창을 «만든 당사자»에게 §22-13①("로드 시점에 미리 안다")이 안 서는
+  // 결함이었다(유나 관찰, PO 첫 PASS 때는 비차단으로 봤다가 REQUIRED로 정정).
+  // prop "값이 바뀔 때"만 다시 판정한다(매 렌더 Date.now() 재기 X·카운트다운 X).
+  useEffect(() => {
+    if (!nextAllowedAt) {
+      setLoadTimeBlockedSeconds(null);
+      setLoadTimeBlockedExpired(false);
+      return;
+    }
+    const remainingMs = new Date(nextAllowedAt).getTime() - Date.now();
+    setLoadTimeBlockedSeconds(remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null);
+    setLoadTimeBlockedExpired(false);
+  }, [nextAllowedAt]);
   useEffect(() => {
     if (loadTimeBlockedSeconds === null) return;
     const timer = setTimeout(() => setLoadTimeBlockedExpired(true), loadTimeBlockedSeconds * 1000);

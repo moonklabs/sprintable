@@ -31,6 +31,10 @@ function mount(node: React.ReactNode) {
   return act(async () => { root.render(wrap(node)); });
 }
 
+function rerender(node: React.ReactNode) {
+  return act(async () => { root.render(wrap(node)); });
+}
+
 describe('CommentsRefreshButton', () => {
   it('클릭 — onRefresh 호출, 성공하면 에러 문구가 없다', async () => {
     const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: true });
@@ -126,6 +130,24 @@ describe('CommentsRefreshButton', () => {
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).toBeNull();
+  });
+
+  // story #3517 조각②-b REQUIRED 2(유나 재리뷰·§22-13 마지막 항목, PO 채택
+  // 2026-09-06) — nextAllowedAt이 마운트 뒤 null→미래로 바뀌는 경우(재수집 성공 →
+  // 목록 재조회 → 새 창)를 최초 구현(useState 초기화, 마운트 때 한 번만)이 놓쳤다 —
+  // 창을 만든 당사자에게 "지금 바로 가능"으로 계속 보이는 역결함.
+  it('nextAllowedAt이 마운트 후 null→미래 시각으로 바뀌면 그 즉시 비활성+문구가 뜬다', async () => {
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>();
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={null} />);
+    let btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+
+    const future = new Date(Date.now() + 5 * 60_000).toISOString();
+    await rerender(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={future} />);
+
+    btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')?.textContent).toBe('5분 뒤에 다시 시도할 수 있습니다.');
   });
 
   // story #3517 조각②-b REQUIRED 1(유나 Design 변경요청, PO 자기정정 2026-09-06) —
