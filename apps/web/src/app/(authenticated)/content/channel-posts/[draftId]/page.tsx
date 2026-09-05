@@ -112,6 +112,10 @@ interface ChannelPostDraftDetail {
   // 한 곳에서 낸다(FE가 직접 비교하지 않는다 — id 비교식은 서버 전용, 이 필드만 본다).
   // true=원문이 파생 이후 개정됨 · false=안 바뀜 · null=모른다(레거시 파생분).
   source_changed?: boolean | null;
+  // story #3514(BE 신설, PO 確定 2026-09-05) — lint-on-read. 단건 GET(이미 이 화면이
+  // 로드 시 부르는 자리)에 규칙 위반 목록을 얹는다 — 저장/상신 응답과 같은 shape,
+  // 계약 없으면(BE 미착지) undefined → 화면은 아무것도 지어내지 않는다.
+  violations?: ContentRuleViolation[];
 }
 
 interface ChannelPostVersion {
@@ -350,6 +354,11 @@ export default function ChannelPostEditPage() {
         const d = draftJson?.data;
         const list = versionsJson?.data ?? [];
         setDraft(d ?? null);
+        // story #3514(doc a0da40c9, PO 確定 2026-09-05) — lint-on-read. 저장/상신
+        // 응답에서만 갱신되던 위반 목록을 로드 시점에도 채운다 — "저장 없이" 위반
+        // 목록·상신 비활성이 선다(§16-7을 읽기까지 넓힘). 계약 없으면(BE 미착지)
+        // undefined → 빈 배열(지어내지 않는다).
+        setViolations(d?.violations ?? []);
         setVersions(list);
         const latest = list[list.length - 1];
         if (latest) {

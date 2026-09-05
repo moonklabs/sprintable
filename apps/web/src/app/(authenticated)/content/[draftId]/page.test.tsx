@@ -121,12 +121,21 @@ function stubFetchWithVersions(
     onPatchCampaign?: (body: unknown) => { status: number; body: unknown };
     // story #3500(BE #3498, 미착지) — 잔량 조회(기본=정책 미설정).
     genBudget?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' };
+    // story #3514(lint-on-read, BE 신설) — 단건 GET의 violations[]. 기본값 빈 배열
+    // (대부분 테스트가 이 스토리와 무관 — "위반 없음"이 기본).
+    draftViolations?: unknown[];
   },
 ) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      // story #3514 — 단건 GET(신설). /versions보다 먼저 걸러야 한다 — 후자가 이
+      // URL을 접두사로 포함한다(정확 일치 비교라 순서 자체는 무해하지만, 나란히
+      // 둬 두 계약이 별개 왕복임을 코드로도 보이게 한다).
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}`) {
+        return { ok: true, status: 200, json: async () => ({ data: { draft_id: DRAFT_ID, violations: opts?.draftViolations ?? [] }, error: null, meta: null }) };
+      }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
       }
@@ -336,6 +345,9 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     let gateCallCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}`) {
+        return { ok: true, status: 200, json: async () => ({ data: { draft_id: DRAFT_ID, violations: [] }, error: null, meta: null }) };
+      }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
       }
@@ -370,6 +382,9 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     let gateCallCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}`) {
+        return { ok: true, status: 200, json: async () => ({ data: { draft_id: DRAFT_ID, violations: [] }, error: null, meta: null }) };
+      }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
       }
@@ -446,6 +461,9 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}`) {
+          return { ok: true, status: 200, json: async () => ({ data: { draft_id: DRAFT_ID, violations: [] }, error: null, meta: null }) };
+        }
         if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
           return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
         }
@@ -502,6 +520,9 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}`) {
+          return { ok: true, status: 200, json: async () => ({ data: { draft_id: DRAFT_ID, violations: [] }, error: null, meta: null }) };
+        }
         if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
           return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
         }
@@ -1438,6 +1459,37 @@ describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §
     await flush();
     expect(container.querySelector('[data-testid="content-rule-violation-title"]')).toBeNull();
     expect(container.querySelector('[data-testid="content-rule-violation-blocked-reason"]')).toBeNull();
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
+  });
+
+  // story #3514(lint-on-read, doc a0da40c9, PO 確定 2026-09-05) — 유나 13회차 ③ 관찰:
+  // 규칙이 바뀐 뒤 기존 초안을 «열기만» 하면(저장·상신 없이) 위반 목록·상신 비활성이
+  // 이미 서야 한다. 위 세 테스트는 전부 저장/상신 응답에서 violations를 갱신하는
+  // 경로만 검증했다 — 이 테스트는 그 축과 별개로 «로드 한 번»만으로 §16-7 픽셀이
+  // 서는지를 잰다(저장·상신 버튼을 누르지 않는다).
+  it('⭐로드만으로(저장·상신 없이) 단건 GET의 violations가 필드 옆 목록·상신 비활성으로 선다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      draftViolations: [
+        { code: 'banned_term', field: 'title', value: '무료체험', hint_key: 'x', settings_path: '/organization/content-rules' },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    // 저장·상신 버튼을 누르지 않았다 — 그런데도 위반이 이미 보인다.
+    expect(container.querySelector('[data-testid="content-rule-violation-title"]')?.textContent).toContain('무료체험');
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="content-rule-violation-blocked-reason"]')?.textContent)
+      .toBe(koMessages.content.contentRuleSubmitBlockedHint.replace('{count}', '1'));
+  });
+
+  it('단건 GET에 violations가 없으면(계약 없음·BE 미착지) 빈 배열로 안전 폴백한다(지어내지 않는다)', async () => {
+    stubFetchWithVersions([VERSION_1]); // draftViolations 생략 — 기본값 [].
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="content-rule-violation-title"]')).toBeNull();
     const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(false);
   });

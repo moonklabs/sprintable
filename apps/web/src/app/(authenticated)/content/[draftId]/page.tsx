@@ -51,6 +51,16 @@ import { GenerationBudgetExceededBanner } from '@/components/content/generation-
  * `/gates/{id}` 딥링크(§6-1 재사용 목록, 게이트 상세)한다.
  */
 
+// story #3514(BE 신설, PO 確定 2026-09-05) — 단건 GET(site_post는 이 스토리 前엔 이
+// 엔드포인트 자체가 없었다, channel-posts/drafts/[draftId] #3445와 같은 갭). 목록
+// 항목(SitePostDraftListItem) shape에 lint-on-read `violations[]`를 얹은 응답 —
+// 이 화면이 지금 당장 쓰는 건 violations뿐이라(제목·본문 등은 여전히 /versions의
+// 최신 항목에서 온다) 그 필드만 타입에 싣는다(ChannelPostDraftDetail처럼 optional).
+interface SitePostDraftDetail {
+  draft_id: string;
+  violations?: ContentRuleViolation[];
+}
+
 interface SitePostVersion {
   version_id: string;
   version: number;
@@ -347,21 +357,32 @@ export default function ContentPostEditPage() {
       setLoading(true);
       setLoadError(false);
       try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
+        // story #3514(doc a0da40c9, PO 確定 2026-09-05) — lint-on-read: 단건 GET을
+        // /versions와 병렬로 부른다(channel-posts/[draftId]/page.tsx :340-341과 동형
+        // 패턴 — site_post는 이 스토리 前까지 단건 GET 자체가 없어 /versions 하나만
+        // 불렀다). 단건 GET의 violations[]로 "저장 없이" 위반 목록·상신 비활성이
+        // 선다(§16-7을 읽기까지 넓힘).
+        const [draftRes, versionsRes] = await Promise.all([
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}`),
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`),
+        ]);
         if (cancelled) return;
-        if (res.ok) {
-          const json = (await res.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
-          const list = json?.data ?? [];
-          setVersions(list);
-          const latest = list[list.length - 1];
-          if (latest) {
-            setTitle(latest.title);
-            setSummary(latest.summary);
-            setTagsText(latest.tags.join(', '));
-            setBodyMd(latest.body_md);
-          }
-        } else {
+        if (!draftRes.ok || !versionsRes.ok) {
           setLoadError(true);
+          return;
+        }
+        const draftJson = (await draftRes.json().catch(() => null)) as { data?: SitePostDraftDetail } | null;
+        setViolations(draftJson?.data?.violations ?? []);
+
+        const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+        const list = json?.data ?? [];
+        setVersions(list);
+        const latest = list[list.length - 1];
+        if (latest) {
+          setTitle(latest.title);
+          setSummary(latest.summary);
+          setTagsText(latest.tags.join(', '));
+          setBodyMd(latest.body_md);
         }
       } catch {
         if (!cancelled) setLoadError(true);
