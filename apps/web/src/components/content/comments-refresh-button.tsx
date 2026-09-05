@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 
@@ -47,14 +47,31 @@ export function CommentsRefreshButton({ onRefresh, nextAllowedAt }: CommentsRefr
   const [unsupported, setUnsupported] = useState(false);
   // story #3517 조각②-b — 로드 시점 창은 컴포넌트 마운트 때 한 번만 판정한다(§22-10③
   // "폴링 금지" 규율의 연장 — 매 렌더마다 Date.now()를 다시 재면 창이 지나는 순간
-  // 버튼이 사용자 조작 없이 저절로 풀리는 게 이 429 문구의 취지와 안 맞다. "지금
-  // 눌러도 되는지"는 로드 시점 스냅샷 하나로 충분 — 창이 지나면 해제되되(타이머는
-  // 안 둔다, 비용 판단) 다음 로드(새로고침)에서는 반드시 다시 계산돼 풀린다(PO 確定).
+  // 버튼이 사용자 조작 없이 저절로 풀리는 게 이 429 문구의 취지와 안 맞다). "지금
+  // 눌러도 되는지"는 로드 시점 스냅샷 하나로 충분 — 다음 로드(새로고침)에서는 반드시
+  // 다시 계산돼 풀린다(PO 確定).
   const [loadTimeBlockedSeconds] = useState<number | null>(() => {
     if (!nextAllowedAt) return null;
     const remainingMs = new Date(nextAllowedAt).getTime() - Date.now();
     return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
   });
+  // story #3517 조각②-b REQUIRED 1(유나 Design 변경요청, PO 자기정정 2026-09-06) —
+  // "타이머는 안 둔다"였던 최초 판단은 «새로고침 없이 페이지에 머무는 사람»을 안
+  // 셌다: 창이 지나도 disabled+문구가 그대로 남으면 "할 수 있는데 못 한다"(§22-13③의
+  // 뒤집힌 형)다. 만료 시각에 setTimeout 하나로 비활성+문구가 함께 사라진다(카운트다운
+  // 재렌더 0 — 매초 재렌더하지 않는다, §22-10③ 폴링 금지와 다른 축). 초 모르는 429
+  // ("잠시 뒤")는 잴 값이 없어 타이머 대상이 아니다(그대로 유지).
+  const [loadTimeBlockedExpired, setLoadTimeBlockedExpired] = useState(false);
+  useEffect(() => {
+    if (loadTimeBlockedSeconds === null) return;
+    const timer = setTimeout(() => setLoadTimeBlockedExpired(true), loadTimeBlockedSeconds * 1000);
+    return () => clearTimeout(timer);
+  }, [loadTimeBlockedSeconds]);
+  useEffect(() => {
+    if (typeof rateLimitedSeconds !== 'number') return;
+    const timer = setTimeout(() => setRateLimitedSeconds(undefined), rateLimitedSeconds * 1000);
+    return () => clearTimeout(timer);
+  }, [rateLimitedSeconds]);
 
   async function handleClick() {
     setSubmitting(true);
@@ -92,7 +109,7 @@ export function CommentsRefreshButton({ onRefresh, nextAllowedAt }: CommentsRefr
   // 사람이 한 번도 안 눌렀어도 비활성 — 429 응답을 받아야만 아는 게 아니라 로드
   // 시점에 미리 안다(§5-2와 동형: "그려진 컨트롤은 할 수 있다는 단정"을 지키려면
   // 못 하는 걸 미리 알 때 disabled로 정직하게 시작해야 한다).
-  const loadTimeBlocked = loadTimeBlockedSeconds !== null;
+  const loadTimeBlocked = loadTimeBlockedSeconds !== null && !loadTimeBlockedExpired;
 
   return (
     <div className="space-y-1">

@@ -128,6 +128,79 @@ describe('CommentsRefreshButton', () => {
     expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).toBeNull();
   });
 
+  // story #3517 조각②-b REQUIRED 1(유나 Design 변경요청, PO 자기정정 2026-09-06) —
+  // "타이머는 안 둔다"였던 최초 판단은 «새로고침 없이 페이지에 머무는 사람»을 안
+  // 셌다: 창이 지나도 disabled+문구가 그대로면 "할 수 있는데 못 한다". 만료 시각에
+  // setTimeout으로 비활성+문구가 함께 사라져야 한다(카운트다운 재렌더는 없다 —
+  // 만료 전/후 두 스냅샷만 확인).
+  describe('로드 시점 창·429(초 있음) 만료 — 해제 경로(REQUIRED 1)', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('nextAllowedAt 만료 전엔 비활성+문구, 만료 시각에 자동으로 활성+문구 부재로 바뀐다', async () => {
+      vi.useFakeTimers();
+      const future = new Date(Date.now() + 30_000).toISOString();
+      const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>();
+      await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={future} />);
+
+      const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).not.toBeNull();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+      expect(btn.disabled).toBe(false);
+      expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).toBeNull();
+      expect(onRefresh).not.toHaveBeenCalled();
+    });
+
+    it('429(초 있음) 만료 전엔 비활성+문구, 만료 시각에 자동으로 활성+문구 부재로 바뀐다', async () => {
+      vi.useFakeTimers();
+      const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'rate_limited', retryAfterSeconds: 20 });
+      await mount(<CommentsRefreshButton onRefresh={onRefresh} />);
+      const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+      await act(async () => { btn.click(); });
+
+      expect(btn.disabled).toBe(true);
+      expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')).not.toBeNull();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+
+      expect(btn.disabled).toBe(false);
+      expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')).toBeNull();
+    });
+
+    it('언마운트 시 로드 시점 창 타이머가 clearTimeout으로 정리된다(누수 0)', async () => {
+      vi.useFakeTimers();
+      const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+      const future = new Date(Date.now() + 30_000).toISOString();
+      await mount(<CommentsRefreshButton onRefresh={vi.fn()} nextAllowedAt={future} />);
+
+      await act(async () => { root.unmount(); });
+      container.remove();
+
+      expect(clearSpy).toHaveBeenCalled();
+      // 언마운트 뒤 타이머를 흘려보내도(누수였다면 여기서 상태 업데이트 시도) 에러 없이 조용해야 한다.
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      clearSpy.mockRestore();
+    });
+
+    it('언마운트 시 429(초 있음) 타이머가 clearTimeout으로 정리된다(누수 0)', async () => {
+      vi.useFakeTimers();
+      const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+      const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'rate_limited', retryAfterSeconds: 20 });
+      await mount(<CommentsRefreshButton onRefresh={onRefresh} />);
+      const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+      await act(async () => { btn.click(); });
+
+      await act(async () => { root.unmount(); });
+      container.remove();
+
+      expect(clearSpy).toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      clearSpy.mockRestore();
+    });
+  });
+
   it('제출 중엔 버튼이 비활성+"수집 중..." 라벨', async () => {
     let resolvePromise: (v: CommentsRefreshOutcome) => void = () => {};
     const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockReturnValue(new Promise((resolve) => { resolvePromise = resolve; }));
