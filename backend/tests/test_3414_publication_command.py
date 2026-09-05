@@ -1240,7 +1240,14 @@ async def test_cron_deterministic_failure_goes_straight_to_dead_letter_no_auto_r
     needs_check로 떨어진 것들 포함)는 transient처럼 지수 백오프 재시도 큐에 들어가지
     않고 즉시 dead_letter로 멈춘다(자동 재시도 0회 — attempt_count는 1에서 멈춘다).
     양성대조: 두 번째 cron tick을 더 돌려도 재시도 시도조차 없어야 한다(next_attempt_at
-    이 애초에 None이라 WHERE절에서 안 잡히는지)."""
+    이 애초에 None이라 WHERE절에서 안 잡히는지).
+
+    story #3474(2026-09-05) 갱신 — 이 테스트가 재현하는 정확히 그 시나리오(게이트가
+    승인을 잃은 뒤 워커가 뒤늦게 발견)가 이제는 매핑표를 거쳐 dead_letter로 가는 게
+    아니라 blocked_unapproved로 즉시 종결한다(재시도 개념 자체가 안 맞는 종류 —
+    apply_command_failure/dead_letter 경로 자체를 안 탄다, attempt_count 무변).
+    publication_attempts 원장에 approval_check='missing'·adapter_called=False 행이
+    남는지도 이 테스트에서 같이 확認한다(디디 그라운딩 대상 시나리오 그대로)."""
     from app.services.publication_command import process_due_publication_commands
 
     engine, Session = await _session_factory()
@@ -1293,11 +1300,24 @@ async def test_cron_deterministic_failure_goes_straight_to_dead_letter_no_auto_r
             from app.models.publication_command import PublicationCommand
             from sqlalchemy import select
             cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
-            assert cmd_row.status == "dead_letter"
-            assert cmd_row.failure_kind == "needs_check"
-            assert cmd_row.attempt_count == 1
-            assert cmd_row.dead_letter_at is not None
+            # story #3474 — 게이트 재검증 실패는 이제 blocked_unapproved로 즉시
+            # 종결한다(apply_command_failure/dead_letter 경로 미진입 — attempt_count
+            # 무변).
+            assert cmd_row.status == "blocked_unapproved"
+            assert cmd_row.attempt_count == 0
+            assert cmd_row.dead_letter_at is None
             assert cmd_row.next_attempt_at is None
+
+        # story #3474 — publication_attempts 원장: 승인 없는 adapter 호출 0건을
+        # 증명하는 그 행(missing·adapter_called=False)이 실제로 남는지.
+        async with Session() as s:
+            from app.models.publication_attempt import PublicationAttempt
+            from sqlalchemy import select
+            attempt = (await s.execute(
+                select(PublicationAttempt).where(PublicationAttempt.command_id == cmd_id)
+            )).scalar_one()
+            assert attempt.approval_check == "missing"
+            assert attempt.adapter_called is False
 
         # 양성대조 — 두 번째 tick을 더 돌려도(자동으로는) 아무 것도 안 바뀐다.
         async with Session() as s:
@@ -1306,8 +1326,8 @@ async def test_cron_deterministic_failure_goes_straight_to_dead_letter_no_auto_r
             from app.models.publication_command import PublicationCommand
             from sqlalchemy import select
             cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
-            assert cmd_row.status == "dead_letter", "결정적 실패가 두 번째 tick에서 조용히 재시도됐다"
-            assert cmd_row.attempt_count == 1
+            assert cmd_row.status == "blocked_unapproved", "결정적 실패가 두 번째 tick에서 조용히 재시도됐다"
+            assert cmd_row.attempt_count == 0
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
