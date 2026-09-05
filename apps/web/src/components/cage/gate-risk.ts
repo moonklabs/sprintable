@@ -104,3 +104,16 @@ export function deriveDecisionFacts(gate: GateItem): DecisionFacts | null {
   const options = Array.isArray(optionsRaw) ? optionsRaw.filter((o): o is string => typeof o === 'string') : [];
   return { question, assumption, options };
 }
+
+// story #3517(유나 §22-⑤, BE #3867 조각②, PO 確定 2026-09-05) — 댓글 답변 게이트
+// 판정(gate_type='external_publish', neutral_facts.kind='comment_reply' —
+// gate_service.py::_maybe_create_scheduled_publication_command 맨 앞 분기와 동형).
+// 이 gate_type은 _HIGH_RISK_GATE_TYPES에 있어(BE gate_service.py) posture가
+// 명시적으로 permissive가 아닌 한 항상 서명 플로우(usesSignatureFlow)를 탄다 —
+// 그래서 승인 카드 자체는 approvals-queue.tsx가 아니라 GateSignatureApproval이
+// 쓰는 GateEvidence(gate-evidence.tsx::recipeApprovalFacts)에 배선한다(decision
+// 게이트가 항상 low-risk라 이 파일의 inline-resolvable 경로만 쓰는 것과 대칭
+// — comment_reply는 반대로 거의 항상 signature 경로만 쓴다).
+export function isCommentReplyGate(gate: GateItem): boolean {
+  return gate.gate_type === 'external_publish' && gate.neutral_facts?.['kind'] === 'comment_reply';
+}

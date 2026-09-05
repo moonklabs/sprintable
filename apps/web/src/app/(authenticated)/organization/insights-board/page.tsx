@@ -19,6 +19,7 @@ import { channelLabel } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
+import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-board-comments-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
 import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
@@ -333,6 +334,7 @@ export default function InsightsBoardPage() {
                   >
                     {t('columnD7')} {metricLabel}
                   </th>
+                  <th className="px-3 py-2 text-left font-medium">{t('columnComments')}</th>
                   <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
                 </tr>
               </thead>
@@ -357,6 +359,9 @@ export default function InsightsBoardPage() {
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
                       <InsightsBoardMetricCell bucket={row.d7} metric={metricParam} tContent={tContent} tBoard={t} />
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="insights-board-comments-cell">
+                      <InsightsBoardCommentsCell row={row} t={t} />
                     </td>
                     <td className="px-3 py-2.5">
                       {canCreateFollowUp ? (
