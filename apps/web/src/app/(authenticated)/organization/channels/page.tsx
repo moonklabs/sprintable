@@ -17,6 +17,7 @@ import { AppCredentialsCard } from '@/components/channel-connect/app-credentials
 import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-secret-connect-card';
 import { ReplaceCredentialCard } from '@/components/channel-connect/replace-credential-card';
 import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
+import { FacebookPageSelectCard, type FacebookPageCandidate } from '@/components/channel-connect/facebook-page-select-card';
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 
 /**
@@ -355,7 +356,7 @@ function ConnectionRow({
 }
 
 function ChannelSection({
-  item, connections, credentials, isOwnerStrict, isOwnerOrAdmin, orgId, onRefresh, t,
+  item, connections, credentials, isOwnerStrict, isOwnerOrAdmin, orgId, onRefresh, t, pendingSelection,
 }: {
   item: AvailableChannelItem;
   connections: ChannelConnectionResponse[];
@@ -365,6 +366,9 @@ function ChannelSection({
   orgId: string;
   onRefresh: () => void;
   t: ReturnType<typeof useTranslations>;
+  // story #3549(§13-8②, 3547 계약) — 콜백이 2개 이상 페이지를 찾아 돌려보낸
+  // 「선택 대기」. candidates=[]는 §13-8③ 0개 실패(원인 둘을 하나로 안 뭉친다).
+  pendingSelection?: { pendingId: string; candidates: FacebookPageCandidate[] };
 }) {
   const { channel, credential_kind } = item;
   const rowStatuses = connections.map((c) =>
@@ -451,7 +455,20 @@ function ChannelSection({
               = _require_owner). 권한을 먼저 판정해 안 그린다(옛 `<Button disabled>`는
               §5-2가 금지한 "권한인데 비활성"이었다 — L275 문제였던 자리) — 그 다음에야
               (owner인 경우에만) 자격 미설정이라는 **상태** 축을 disabled로 표현한다. */}
-          {credential_kind === 'oauth' ? (
+          {credential_kind === 'oauth' && channel === 'facebook' && isOwnerStrict && !pendingSelection ? (
+            // story #3549(유나 §13-8①) — 「우리가 검사할 수 없는 조건」을 연결
+            // 시작 버튼 위에 미리 말한다. 비활성 사유가 아니다(canStartConnect는
+            // 별개 축) — 앱 자격 미등록 문구와 한 문장으로 합치지 않는다.
+            <p className="text-xs text-muted-foreground" data-testid="channel-connect-facebook-app-guidance">
+              {t('channelConnectFacebookAppGuidance')}
+            </p>
+          ) : null}
+          {credential_kind === 'oauth' && channel === 'facebook' && pendingSelection && connections.length === 0 ? (
+            <FacebookPageSelectCard
+              channel={channel} orgId={orgId} pendingId={pendingSelection.pendingId}
+              candidates={pendingSelection.candidates} isOwner={isOwnerStrict} onConnected={onRefresh} t={t}
+            />
+          ) : credential_kind === 'oauth' ? (
             isOwnerStrict ? (
               <a href={canStartConnect ? `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}` : undefined}>
                 <Button size="sm" disabled={!canStartConnect}>
@@ -602,6 +619,24 @@ export default function OrganizationChannelsPage() {
   const connected = searchParams.get('connected');
   const connectError = searchParams.get('connect_error');
 
+  // story #3549(§13-8②, 3547 계약) — 콜백 BFF(api/oauth-channel/callback/[channel])가
+  // 2개 이상 페이지를 찾으면 `?select_pending={channel}&pending_id=...&candidates=...`
+  // 로 돌려보낸다. candidates는 작은 배열(§13-8⑦ "미리보기 없음"과 같은 이유로
+  // 원래도 가벼운 데이터)이라 새 왕복 없이 쿼리에 그대로 실려 온다. JSON.parse
+  // 실패(손상된 쿼리 등)는 빈 배열로 fail-closed — §13-8③ 0개 얼굴과 같은 처리라
+  // 별도 에러 상태를 새로 만들지 않는다.
+  const selectPendingChannel = searchParams.get('select_pending');
+  const selectPendingId = searchParams.get('pending_id');
+  const selectPendingCandidates = (() => {
+    if (!selectPendingChannel || !selectPendingId) return null;
+    try {
+      const parsed = JSON.parse(searchParams.get('candidates') ?? '[]') as unknown;
+      return Array.isArray(parsed) ? (parsed as FacebookPageCandidate[]) : [];
+    } catch {
+      return [];
+    }
+  })();
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
       <div className="space-y-1">
@@ -656,6 +691,11 @@ export default function OrganizationChannelsPage() {
               orgId={orgId ?? ''}
               onRefresh={() => void load()}
               t={t}
+              pendingSelection={
+                selectPendingChannel === it.channel && selectPendingId && selectPendingCandidates
+                  ? { pendingId: selectPendingId, candidates: selectPendingCandidates }
+                  : undefined
+              }
             />
           ))}
           {measurementLoadError ? (

@@ -71,5 +71,26 @@ export async function GET(request: Request, { params }: RouteParams) {
     return NextResponse.redirect(`${origin}/organization/channels?connect_error=${errCode}`);
   }
 
+  // story #3549(3547 BE·디디 계약, 유나 §13-8②, PO 確定 2026-09-06) — Facebook Page가
+  // 2개 이상이면 BE가 연결을 만들지 않고 `{kind:"pending_selection", pending_id,
+  // candidates:[{page_id,name}], expires_at}`을 돌려준다(기존 `ChannelConnectionResponse`
+  // 에 `kind` additive — threads·instagram은 이 필드가 아예 없어 항상 이 분기를
+  // 건너뛴다). 브라우저 리다이렉트는 POST 바디를 못 옮기므로 다음 요청(GET
+  // /organization/channels)이 스스로 다시 그릴 수 있게 후보 목록·만료 시각을 쿼리에
+  // 싣는다 — 크기는 항상 작다(한 Meta 계정이 관리하는 Page 이름·ID뿐, §13-8⑦
+  // "미리보기 없음" 규율과 같은 이유로 원래도 가벼운 데이터).
+  const successBody = await res.json().catch(() => null) as {
+    kind?: string; pending_id?: string; candidates?: { page_id: string; name: string }[]; expires_at?: string;
+  } | null;
+  if (successBody?.kind === 'pending_selection' && successBody.pending_id) {
+    const params = new URLSearchParams({
+      select_pending: channel,
+      pending_id: successBody.pending_id,
+      candidates: JSON.stringify(successBody.candidates ?? []),
+    });
+    if (successBody.expires_at) params.set('expires_at', successBody.expires_at);
+    return NextResponse.redirect(`${origin}/organization/channels?${params.toString()}`);
+  }
+
   return NextResponse.redirect(`${origin}/organization/channels?connected=${channel}`);
 }
