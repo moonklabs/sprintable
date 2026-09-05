@@ -245,6 +245,15 @@ async def publish_site_post(
         db, org_id=org_id, work_item_id=work_item_id, gate_id=gate.id, title=title, slug=slug,
         lang=lang, summary=summary, tags=tags, body_md=body_md, created_by_member_id=created_by_member_id,
     )
+    # story #3497 — 발행 성공 콜백(호출부 몫, hosted_site_publish.publish() 자신은
+    # "동작 무변경" 계약이라 새 부작용을 안 심는다 — activity_log와 같은 이유로 여기).
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=org_id, work_item_id=work_item_id, publication_id=row.id,
+        publication_kind="site_post", channel="hosted_site", external_id=None,
+        anchor_at=row.published_at,
+    )
     await db.commit()
     return row
 
@@ -940,6 +949,14 @@ async def publish_site_post_from_draft(
             "published_by_member_id": str(published_by_member_id),
         },
     )
+    # story #3497 — 발행 성공 콜백.
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=post.id,
+        publication_kind="site_post", channel="hosted_site", external_id=None,
+        anchor_at=post.published_at,
+    )
     await db.commit()
     await db.refresh(post)
     return post, url, latest.id
@@ -1289,6 +1306,16 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
             row.status, row.external_id, row.permalink, row.published_at = "published", external_id, permalink, now
     else:
         row.status, row.external_id, row.permalink, row.published_at = "published", external_id, permalink, now
+
+    # story #3497 — 발행 성공 콜백(같은 트랜잭션, commit은 호출자 몫 — publication_
+    # command.py::_process_one_site_post_command와 동형 경계).
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=command.org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+        publication_kind="channel_publication", channel=connection.channel,
+        external_id=row.external_id, anchor_at=row.published_at,
+    )
     return row
 
 
