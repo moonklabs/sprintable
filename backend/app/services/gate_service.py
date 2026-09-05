@@ -457,6 +457,7 @@ async def find_gate_slot_with_pr_fallback(
     gate_type: str,
     pr_number: int | None,
     repo_full_name: str | None = None,
+    scope_key: str = "",
 ) -> Gate | None:
     """story #2893(§2 A1, 0271) 후속 — 카디르 QA(PR#3349 CI 실 실패 2건, 2026-08-22):
     pr_number를 멱등 키에 편입한 것(정확매치 only)이 「PR 컨텍스트가 나중에 밝혀지는」
@@ -489,6 +490,11 @@ async def find_gate_slot_with_pr_fallback(
     모호성이 원천적으로 없다. repo를 아는 기존 행과는 별개 identity로 남는다(멋대로
     병합하지 않는다 — 어느 쪽이 "진짜"인지 여기서 판단할 근거가 없다).
 
+    scope_key: story #3478(0328) — 멱등 키 네 번째 축(기본값 ""). 거의 모든 호출부는
+    안 넘겨 옛 동작 그대로(""는 "" 하나뿐이라 구분력 무변). `external_publish` 게이트만
+    site_posts.py·channel_posts.py가 목적지(`str(draft.connection_id or "")`)를 넘겨
+    같은 work_item의 여러 draft/목적지가 독립 슬롯을 갖는다.
+
     **동시성**(story #2932 HIGH2): NULL-슬롯 승격은 read-then-write라 동시 웹훅 2개가
     같은 NULL-슬롯을 서로 다른 PR로 경쟁 승격할 수 있었다(나중 커밋이 조용히 덮어씀).
     NULL-슬롯 조회에 `SELECT ... FOR UPDATE`를 걸어 두 번째 트랜잭션이 첫 번째의 커밋을
@@ -514,7 +520,7 @@ async def find_gate_slot_with_pr_fallback(
         exact_conditions = [
             Gate.org_id == org_id, Gate.work_item_id == work_item_id,
             Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
-            Gate.pr_number == pr_number,
+            Gate.scope_key == scope_key, Gate.pr_number == pr_number,
         ]
         # 카디르 QA(story #2932, PR#3359 3라운드, codex 발견) — repo_full_name이 없을 때
         # (호출부가 정말 모름 — report-done류 self-report의 실 경로) repo 필터를 아예
@@ -546,6 +552,7 @@ async def find_gate_slot_with_pr_fallback(
                     select(Gate).where(
                         Gate.org_id == org_id, Gate.work_item_id == work_item_id,
                         Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                        Gate.scope_key == scope_key,
                         Gate.pr_number == pr_number, Gate.repo_full_name.is_(None),
                     ).with_for_update()  # story #2932 HIGH2와 동일 이유 — 동시 승격 경쟁 직렬화.
                 )
@@ -560,7 +567,7 @@ async def find_gate_slot_with_pr_fallback(
                 select(Gate).where(
                     Gate.org_id == org_id, Gate.work_item_id == work_item_id,
                     Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
-                    Gate.pr_number.is_(None),
+                    Gate.scope_key == scope_key, Gate.pr_number.is_(None),
                 ).with_for_update()  # story #2932 HIGH2 — 동시 승격 경쟁 직렬화.
             )
         ).scalar_one_or_none()
@@ -574,24 +581,53 @@ async def find_gate_slot_with_pr_fallback(
             select(Gate).where(
                 Gate.org_id == org_id, Gate.work_item_id == work_item_id,
                 Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
-                Gate.pr_number.is_(None),
+                Gate.scope_key == scope_key, Gate.pr_number.is_(None),
             )
         )
     ).scalar_one_or_none()
 
 
-def resolve_gate_holder_draft_id(
-    existing_gate: Gate | None, *, this_draft_id: uuid.UUID,
+async def _gate_publication_is_live(session: AsyncSession, *, gate_id: uuid.UUID) -> bool:
+    """story #3478(0328, 페드루 PO 決定 ③) — 이 게이트로 승인된 발행이 «지금 실려
+    있는지». hosted_site(site_posts.py — `site_post.gate_id`)든 외부 목적지
+    (channel_publications.gate_id, channel_post·site_post-external 공용)든 이
+    함수는 어느 쪽으로 발행됐는지 몰라도 gate_id 하나로 두 테이블을 순서대로 본다
+    (각 도메인이 이 gate_id로 정확히 한 테이블에만 쓴다 — 겹칠 일이 없다). 둘 다에
+    행이 없으면(승인만 됐지 최초 발행 시도 자체가 아직 없음) "쥐고 있다"로 보수적
+    취급 — 발행 시도 前 상태의 기존 동작과 회귀 0."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.site_post import SitePost
+
+    site_post_row = (await session.execute(
+        select(SitePost.unpublished_at).where(SitePost.gate_id == gate_id).limit(1)
+    )).first()
+    if site_post_row is not None:
+        return site_post_row[0] is None
+
+    latest_channel_pub_status = (await session.execute(
+        select(ChannelPublication.status)
+        .where(ChannelPublication.gate_id == gate_id)
+        .order_by(ChannelPublication.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if latest_channel_pub_status is None:
+        return True
+    return latest_channel_pub_status == "published"
+
+
+async def resolve_gate_holder_draft_id(
+    session: AsyncSession, existing_gate: Gate | None, *, this_draft_id: uuid.UUID,
 ) -> uuid.UUID | None:
     """story #3404(site_posts.py의 story f6d14476 처방을 channel_posts.py로도 미러하며
     추출) — 「이 게이트를 이미 다른 초안이 쥐고 있는가」 판정을 한 곳에 모은다. site_posts.py
-    ·channel_posts.py 둘 다 external_publish 게이트 슬롯이 work_item 단위(draft 단위가
-    아니다)라 같은 work_item에 초안이 둘 이상이면 뒤늦은 상신이 앞선 승인을 조용히
-    pending으로 되돌릴 수 있다 — 그 판정 로직 자체(neutral_facts.draft_id 대조)는 두 도메인
-    이 완전히 동일해 두 벌로 유지하면 드리프트 표면이 된다(한쪽만 고치고 잊는 사고). 던지는
-    에러(SitePostGateAlreadyHeldError/ChannelPostGateAlreadyHeldError)는 도메인마다
-    필드가 달라(lang/slug vs channel/connection_id) 여기서 만들지 않는다 — 호출부가 이
-    함수의 반환값(막고 있는 draft_id, 또는 없으면 None)만 받아 자기 도메인 에러를 짓는다.
+    ·channel_posts.py 둘 다 external_publish 게이트 슬롯이 (work_item, scope_key) 단위
+    (story #3478/0328부터 — 이전엔 work_item 단위뿐)라 같은 (work_item, 목적지)에 초안이
+    둘 이상이면 뒤늦은 상신이 앞선 승인을 조용히 pending으로 되돌릴 수 있다 — 그 판정
+    로직 자체(neutral_facts.draft_id 대조)는 두 도메인이 완전히 동일해 두 벌로 유지하면
+    드리프트 표면이 된다(한쪽만 고치고 잊는 사고). 던지는 에러(SitePostGateAlreadyHeld
+    Error/ChannelPostGateAlreadyHeldError)는 도메인마다 필드가 달라(lang/slug vs
+    channel/connection_id) 여기서 만들지 않는다 — 호출부가 이 함수의 반환값(막고 있는
+    draft_id, 또는 없으면 None)만 받아 자기 도메인 에러를 짓는다.
 
     None을 반환하는 경우 전부 "막지 않는다"는 뜻이다: 게이트가 없음(신규) · pending/
     approved가 아님(rejected/voided 등 — 걱정할 보유자가 없다) · neutral_facts에
@@ -600,7 +636,12 @@ def resolve_gate_holder_draft_id(
     draft_id 값이 유효한 UUID가 아님(페드루 PO 리뷰, PR#3764 — 옛 코드(리팩터 前)는
     문자열 그대로 비교해 이 자리서 절대 안 터졌는데, `uuid.UUID(...)` 파싱을 여기로
     끌어오며 생긴 신규 실패 축이었다: 이 함수는 가드다 — 가드가 깨진 데이터 때문에
-    500을 내면 안 된다. 못 읽으면 "모른다"로 취급해 막지 않고 warning만 남긴다)."""
+    500을 내면 안 된다. 못 읽으면 "모른다"로 취급해 막지 않고 warning만 남긴다) ·
+    story #3478(0328, 페드루 PO 決定 ③) — approved인데 그 발행이 회수(unpublish)됐거나
+    애초에 아직 최초 발행 前이 아닌(=한 번 발행됐다가 지금은 내려간) 경우 — 회수된
+    승인이 같은 목적지로의 재상신을 영구히 막는 건 원래 f6d14476의 의도가 아니었다
+    (재발행 자체는 새 상신·새 승인이 원칙, 봉인 원칙 유지 — 이 함수는 "막을지"만
+    판정하지 봉인을 우회하지 않는다)."""
     if existing_gate is None or existing_gate.status not in ("pending", "approved"):
         return None
     holding_raw = (existing_gate.neutral_facts or {}).get("draft_id")
@@ -616,6 +657,8 @@ def resolve_gate_holder_draft_id(
         )
         return None
     if holding_id == this_draft_id:
+        return None
+    if existing_gate.status == "approved" and not await _gate_publication_is_live(session, gate_id=existing_gate.id):
         return None
     return holding_id
 
@@ -675,8 +718,14 @@ async def create_gate(
     pr_number: int | None = None,
     repo_full_name: str | None = None,
     designated_approver_id: uuid.UUID | None = None,
+    scope_key: str = "",
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
+
+    scope_key: story #3478(0328) — 멱등 키 네 번째 축(기본값 "", 기존 全 호출부
+    무회귀). `external_publish`만 site_posts.py·channel_posts.py가 목적지
+    (`str(draft.connection_id or "")`)를 넘겨 같은 work_item의 여러 draft/목적지가
+    독립 게이트를 갖는다(work_item당 1건 제약의 근본수정 — 그라운딩 참고).
 
     pr_number: story #2893(설계안 §2 A1) — merge-type만 실제로 쓴다(호출부는
     evaluate_merge_gate 하나뿐, 그라운딩 확認). 나머지 7개 호출부는 인자를 안 넘겨
@@ -730,7 +779,7 @@ async def create_gate(
     existing = await find_gate_slot_with_pr_fallback(
         session, org_id=org_id, work_item_id=work_item_id,
         work_item_type=work_item_type, gate_type=gate_type, pr_number=pr_number,
-        repo_full_name=repo_full_name,
+        repo_full_name=repo_full_name, scope_key=scope_key,
     )
     if existing is not None:
         # story #2150 근본수정: rejected는 재제출 시 새 결재 사이클을 연다(그 외 terminal
@@ -761,6 +810,7 @@ async def create_gate(
         gate_type=gate_type,
         pr_number=pr_number,
         repo_full_name=repo_full_name,
+        scope_key=scope_key,
         status=status,
         # #2156 AC3(2026-08-07) — merge-type만 evaluate_merge_gate가 이후 이 필드를 정확히
         # 채웠고(decision 기반), 그 외 gate_type(qa·pr_review·deploy 등)은 create_gate가 여태
@@ -815,6 +865,14 @@ async def create_gate(
 # 보는 한 줄로 남긴다(조용히 삼키지 않는다 — "승인됐는데 예약이 안 걸린다"가 이 스토리
 # 자체의 사고 클래스라 PO가 "보이는 실패"로 명시 확定).
 _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE = "예약 명령 미생성(draft 해석 실패)"
+# story #3478 후속(BLOCKER 2, 페드루 실측 2026-09-05) — 목적지가 바뀐 뒤 옛 scope의
+# 승인이 살아남으면(예: void 처리 前 경쟁 상태) 이 게이트의 scope_key(승인된 목적지)와
+# draft의 **현재** connection_id(위 site_draft.connection_id, 명령이 실제로 향할
+# 목적지)가 어긋날 수 있다 — 그 상태로 명령을 만들면 「W용 승인으로 H에 발행」이 된다
+# (3478이 막으려던 것 자체를 승인 훅에서 재현). 방어선(belt-and-suspenders) — void
+# 정리(위 _reseal_gate_on_new_version)가 정상 동작해도, 경합·구버전 데이터 등 어떤
+# 경로로든 불일치가 남으면 여기서 한 번 더 막는다.
+_SCHEDULED_COMMAND_SCOPE_MISMATCH_NOTE = "예약 명령 미생성(승인된 목적지와 초안의 현재 목적지 불일치)"
 
 
 async def _maybe_create_scheduled_publication_command(
@@ -854,6 +912,15 @@ async def _maybe_create_scheduled_publication_command(
             "gate %s approved but draft resolution failed — publication_command not created", gate.id,
         )
         note = _SCHEDULED_COMMAND_DRAFT_UNRESOLVED_NOTE
+        gate.resolution_note = f"{gate.resolution_note}\n{note}" if gate.resolution_note else note
+
+    def _mark_scope_mismatch() -> None:
+        logger.warning(
+            "gate %s approved for scope_key=%r but draft's current connection_id=%r — "
+            "publication_command not created",
+            gate.id, gate.scope_key, site_draft.connection_id,
+        )
+        note = _SCHEDULED_COMMAND_SCOPE_MISMATCH_NOTE
         gate.resolution_note = f"{gate.resolution_note}\n{note}" if gate.resolution_note else note
 
     destination_channel = (gate.neutral_facts or {}).get("destination")
@@ -897,6 +964,9 @@ async def _maybe_create_scheduled_publication_command(
         )).scalar_one_or_none()
         if site_latest is None:
             _mark_unresolved()
+            return
+        if str(site_draft.connection_id) != gate.scope_key:
+            _mark_scope_mismatch()
             return
 
         from app.services.publication_command import create_or_get_publication_command

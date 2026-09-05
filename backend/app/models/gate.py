@@ -76,6 +76,13 @@ class Gate(Base):
     # 충돌). pr_number와 짝으로 멱등 키에 편입 — find_gate_slot_with_pr_fallback.py 참조.
     # NULL=pr_number와 동형 사유(PR 컨텍스트 없음/레거시 미백필).
     repo_full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3478(0328) — 멱등 키 세 번째 축. 대부분의 gate_type(merge·HITL ask·doc
+    # approval 등)은 이 컬럼이 항상 ""(공유 UNIQUE 인덱스 셋에 이 컬럼을 끼워 넣어도
+    # ""뿐이라 구분력 무변, 회귀 0). `external_publish`만 site_posts.py·channel_posts.py
+    # 호출부가 목적지(`str(draft.connection_id or "")`)를 채운다 — 같은 work_item이
+    # WordPress·webhook 등 여러 목적지로 각각 독립 게이트를 갖게 된다(work_item당 1건
+    # 제약이 site_post의 dual-destination AC를 구조적으로 막던 것의 근본수정).
+    scope_key: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -170,7 +170,13 @@ async def _resolve_approved_gate(
 ) -> Gate:
     """gate_id가 주어지면 그 게이트 자체를 검증(work_item/타입 일치 + 승인 상태). 없으면 이
     work item의 external_publish 게이트를 찾아 검증(가장 최근 것 — story #2150 재제출 리셋
-    관례상 같은 (work_item, gate_type)엔 사실상 행 1개만 산다)."""
+    관례상 같은 (work_item, gate_type, scope_key)엔 사실상 행 1개만 산다).
+
+    story #3478 카디르 REQUEST_CHANGES(2026-09-05) — 이 함수는 hosted_site(자사 사이트)
+    발행 전용 chokepoint라 scope_key는 항상 ""(외부 목적지 축과 별개)여야 한다. 필터가
+    없으면 같은 work_item에 WordPress·webhook용으로 approved된 게이트(scope_key=
+    connection_id)를 이 hosted_site 발행이 대신 통과시켜 버린다 — dual-destination을
+    가능케 한 이 스토리 자체가 자신의 목적(목적지별 독립 승인)을 스스로 뚫을 뻔한 지점."""
     if gate_id is not None:
         gate = (await db.execute(
             select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
@@ -179,6 +185,7 @@ async def _resolve_approved_gate(
             gate is None
             or gate.work_item_id != work_item_id
             or gate.gate_type != "external_publish"
+            or gate.scope_key != ""
             or gate.status not in _APPROVED_STATUSES
         ):
             raise ExternalPublishGateNotApprovedError(
@@ -190,6 +197,7 @@ async def _resolve_approved_gate(
         select(Gate)
         .where(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
+            Gate.scope_key == "",
         )
         .order_by(Gate.created_at.desc())
         .limit(1)
@@ -302,6 +310,10 @@ _CAMPAIGN_ID_CARRY_FORWARD = object()
 # (campaign 개념을 모르는 호출자가 이 키를 생략하면 목적지가 조용히 hosted_site로
 # 되돌아간다)을 그대로 갖는다 — 이번엔 처음부터 캐리포워드로 짠다.
 _CONNECTION_ID_CARRY_FORWARD = object()
+# story #3478 후속(카디르 REQUEST_CHANGES 경유 페드루 실측, 2026-09-05) — 브랜드
+# 뉴 draft(버전 1)는 "옛 목적지"가 없다(비교 대상 자체가 없다) — 값 None(hosted_site)
+# 과 구분해야 하는 또 하나의 캐리포워드류 센티널.
+_NO_PRIOR_VERSION = object()
 
 
 async def create_site_post_draft_version(
@@ -385,7 +397,9 @@ async def create_site_post_draft_version(
         db.add(draft)
         await db.flush()
         next_version = 1
+        old_connection_id: uuid.UUID | None | object = _NO_PRIOR_VERSION
     else:
+        old_connection_id = draft.connection_id
         if explicit_campaign_id:
             draft.campaign_id = campaign_id
         if explicit_connection_id:
@@ -414,7 +428,10 @@ async def create_site_post_draft_version(
     #     그대로 유지**(재봉인은 submit_site_post_draft의 명시 재호출만이 한다 — gates.py의
     #     approve 전이가 reapproval_required=True인 동안 409로 막혀 "옛 봉인을 승인하는" 막다른
     #     길 자체를 차단한다).
-    await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version, draft=draft)
+    await _reseal_gate_on_new_version(
+        db, org_id=org_id, work_item_id=work_item_id, version=version, draft=draft,
+        old_connection_id=old_connection_id,
+    )
 
     # story #3471(페드루 PO 確定 2026-09-05)·#3482(필드별, 2026-09-05 후속) —
     # channel_posts.py::create_channel_post_draft_version과 동형(비차단, draft에
@@ -436,12 +453,56 @@ async def create_site_post_draft_version(
 
 async def _reseal_gate_on_new_version(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, version: SitePostVersion,
-    draft: SitePostDraft,
+    draft: SitePostDraft, old_connection_id: "uuid.UUID | None | object" = _NO_PRIOR_VERSION,
 ) -> None:
+    # story #3478 후속(카디르 REQUEST_CHANGES BLOCKER 1·REQUIRED 3, 페드루 실측
+    # 2026-09-05) — destination(connection_id) 자체가 바뀌면 옛 scope_key 게이트가
+    # 새 scope_key 조회(아래)에 안 걸려 방치됐다. 최초 처방(pending+reapproval_
+    # required로 되돌리기)은 새 구멍을 냈다 — pending인 채로 두면 결재자가 그 게이트를
+    # "정상적으로" 승인해 버릴 수 있고, `_maybe_create_scheduled_publication_command`가
+    # site_draft.connection_id(=draft의 **현재** 목적지, 이미 새 목적지로 바뀐 값)로
+    # 명령을 만든다 — "옛 목적지용 승인으로 새 목적지에 발행"이 되어 3478이 지키려던
+    # «목적지별 독립 승인» 자체가 뚫린다. voided로 완전히 끝내는 게 정답이다: 그 목적지로
+    # 다시 상신하면 `find_gate_slot_with_pr_fallback`(status 필터 없음)이 이 voided
+    # 행을 그대로 돌려주고, `create_gate()`는 rejected가 아니면 그 행을 재사용하며,
+    # `submit_site_post_draft()`의 기존 "gate.status != pending"이면 되돌리는 분기가
+    # pending 복귀+재봉인+`reapproval_required=False`까지 그대로 처리한다(신규 코드
+    # 불요 — 이미 있는 재사용 경로가 정확히 이 상황을 위해 있었다).
+    #
+    # REQUIRED 3 — 이 게이트를 건드릴 조건은 `resolve_gate_holder_draft_id(...) is
+    # None`("막는 홀더 없음" — 아무도 안 쥐고 있어도 None)이 아니라 「이 draft가 쥔
+    # 게이트」다(neutral_facts.draft_id가 정확히 이 draft.id). 다른 draft A가 쥔 approved
+    # 게이트가 회수 등으로 "안 쥐고 있다"(None) 판정을 받으면, 이 함수는 B의 목적지
+    # 변경만으로 A의 게이트를 건드려선 안 된다 — 건드릴 권한은 "내가 쥔 것"에만 있다.
+    old_scope_key = None if old_connection_id is _NO_PRIOR_VERSION else str(old_connection_id or "")
+    new_scope_key = str(draft.connection_id or "")
+    if old_scope_key is not None and old_scope_key != new_scope_key:
+        old_gate = (await db.execute(
+            select(Gate)
+            .where(
+                Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
+                Gate.scope_key == old_scope_key, Gate.status.in_(("pending", "approved")),
+            )
+            .with_for_update()
+        )).scalar_one_or_none()
+        if old_gate is not None and (old_gate.neutral_facts or {}).get("draft_id") == str(version.draft_id):
+            set_gate_status(old_gate, "voided", now=datetime.now(timezone.utc))
+            old_gate.requires_human = False
+            old_gate.resolution_note = (
+                f"목적지 변경으로 자동 해제(destination changed "
+                f"{old_scope_key or 'hosted_site'} → {new_scope_key or 'hosted_site'}, version {version.version})"
+            )
+            old_gate.resolved_at = datetime.now(timezone.utc)
+
+    # story #3478(0328) — scope_key도 필터에 넣는다. 안 넣으면 같은 work_item에 목적지가
+    # 다른 게이트가 둘(예: WordPress+webhook) 있을 때 .scalar_one_or_none()이
+    # MultipleResultsFound(500)로 죽는다(dual-destination을 가능케 한 이 스토리 자체가
+    # 이 자리에서 새 500을 만들 뻔한 지점 — grep 전수 대조로 찾음).
     gate = (await db.execute(
         select(Gate)
         .where(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
+            Gate.scope_key == str(draft.connection_id or ""),
             Gate.status.in_(("pending", "approved")),
         )
         .with_for_update()
@@ -449,15 +510,16 @@ async def _reseal_gate_on_new_version(
     if gate is None:
         return
     # story f6d14476(발견 즉시 수정, AC1과 동일한 corruption class) — 이 훅은
-    # work_item_id만으로 게이트를 찾는다(draft 무관). 승인 대상이 아닌 다른 초안을
-    # 편집(새 버전 생성)했을 뿐인데 여기서 그 게이트를 되돌리거나(approved→pending)
-    # 조용히 재봉인하면(pending 유지) submit()을 거치지 않고도 동일한 파괴가 일어난다.
-    # 판정은 submit()과 같은 함수로 한다(story #3404에서 gate_service.py::
-    # resolve_gate_holder_draft_id로 추출 — channel_posts.py가 이 함수의 동형 훅에서도
-    # 같은 결함 클래스를 갖고 있어 공유하게 됐다).
+    # (work_item_id, scope_key)만으로 게이트를 찾는다(draft 무관, story #3478부터
+    # scope_key도 축에 편입). 승인 대상이 아닌 다른 초안을 편집(새 버전 생성)했을
+    # 뿐인데 여기서 그 게이트를 되돌리거나(approved→pending) 조용히 재봉인하면
+    # (pending 유지) submit()을 거치지 않고도 동일한 파괴가 일어난다. 판정은 submit()과
+    # 같은 함수로 한다(story #3404에서 gate_service.py::resolve_gate_holder_draft_id로
+    # 추출 — channel_posts.py가 이 함수의 동형 훅에서도 같은 결함 클래스를 갖고 있어
+    # 공유하게 됐다).
     from app.services.gate_service import resolve_gate_holder_draft_id
 
-    if resolve_gate_holder_draft_id(gate, this_draft_id=version.draft_id) is not None:
+    if await resolve_gate_holder_draft_id(db, gate, this_draft_id=version.draft_id) is not None:
         return
     if gate.status == "approved":
         # 승인된 뒤 편집 — pending으로 되돌리기만 한다. sealed_content_*는 절대 안 건드린다
@@ -578,16 +640,20 @@ async def list_site_post_drafts(
     work_item_ids = [draft.work_item_id for draft, _, _ in page_rows]
     slugs = [draft.slug for draft, _, _ in page_rows]
 
-    # 배치 ②: work_item당 external_publish 게이트 — story #3360 §2 관례상 사실상 1개뿐이지만
-    # 재제출 리셋 등으로 여럿이면 최신(created_at desc)이 이긴다(dict 조립 순서로 구현).
-    gates_by_work_item: dict[uuid.UUID, Gate] = {}
+    # 배치 ②: (work_item, scope_key)당 external_publish 게이트 — story #3360 §2 관례상
+    # 사실상 1개뿐이지만 재제출 리셋 등으로 여럿이면 최신(created_at desc)이 이긴다(dict
+    # 조립 순서로 구현). story #3478 카디르 REQUEST_CHANGES(2026-09-05) — 예전엔 키가
+    # work_item_id만이라 같은 work_item에 목적지가 다른 draft 둘(WordPress+webhook)이
+    # 있으면 그중 하나의 게이트를 서로 나눠 봤다(scope_key 도입으로 다중 목적지가 실제로
+    # 가능해진 이 스토리 자체가 이 배치 조회에서 새 혼선을 만들 뻔한 지점).
+    gates_by_scope: dict[tuple[uuid.UUID, str], Gate] = {}
     gate_rows = (await db.execute(
         select(Gate)
         .where(Gate.org_id == org_id, Gate.work_item_id.in_(work_item_ids), Gate.gate_type == "external_publish")
         .order_by(Gate.created_at.desc())
     )).scalars().all()
     for g in gate_rows:
-        gates_by_work_item.setdefault(g.work_item_id, g)
+        gates_by_scope.setdefault((g.work_item_id, g.scope_key), g)
 
     # 배치 ③: 공개 site_posts — 유일키 (org_id, lang, slug)라 draft.slug + latest.lang으로
     # 되찾는다(story #3381/#3386과 동일 조회 축).
@@ -601,7 +667,11 @@ async def list_site_post_drafts(
         posts_by_key[(p.lang, p.slug)] = p
 
     return [
-        (draft, latest_v, origin_v, gates_by_work_item.get(draft.work_item_id), posts_by_key.get((latest_v.lang, draft.slug)))
+        (
+            draft, latest_v, origin_v,
+            gates_by_scope.get((draft.work_item_id, str(draft.connection_id or ""))),
+            posts_by_key.get((latest_v.lang, draft.slug)),
+        )
         for draft, latest_v, origin_v in page_rows
     ]
 
@@ -652,17 +722,24 @@ async def submit_site_post_draft(
     from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id
 
+    # story #3478(0328) — scope_key=목적지(connection_id). 같은 work_item이 WordPress·
+    # webhook 등 여러 목적지로 각각 독립 게이트를 갖는다(work_item당 1건이던 제약의
+    # 근본수정 — 그라운딩 대조 결과, 이 슬롯은 channel_post와 공유하는 설계라 두
+    # 도메인 다 같은 규칙을 쓴다).
+    scope_key = str(draft.connection_id or "")
     existing = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
-        gate_type="external_publish", pr_number=None, repo_full_name=None,
+        gate_type="external_publish", pr_number=None, repo_full_name=None, scope_key=scope_key,
     )
 
-    # story f6d14476(PO 결정②, AC1) — 게이트 슬롯은 work_item 단위라, 이미 다른 초안이 그
-    # 게이트를 쥐고(pending/approved) 있으면 이 초안의 상신을 막는다. 판정 로직 자체는
-    # story #3404에서 gate_service.py::resolve_gate_holder_draft_id로 뽑아 channel_
-    # posts.py와 공유한다("모른다≠다르다"·자기 자신 재상신 허용 규칙 포함, 그 함수
-    # docstring 참고) — 여기선 그 판정 결과로 이 도메인 전용 에러(lang/slug)만 짓는다.
-    holding_draft_id = resolve_gate_holder_draft_id(existing, this_draft_id=draft.id)
+    # story f6d14476(PO 결정②, AC1) — 게이트 슬롯은 (work_item, scope_key) 단위(story
+    # #3478부터)라, 같은 목적지를 이미 다른 초안이 그 게이트를 쥐고(pending/approved
+    # 이면서 그 발행이 지금 실려 있음, story #3478 決定③) 있으면 이 초안의 상신을
+    # 막는다. 판정 로직 자체는 story #3404에서 gate_service.py::resolve_gate_holder_
+    # draft_id로 뽑아 channel_posts.py와 공유한다("모른다≠다르다"·자기 자신 재상신
+    # 허용 규칙 포함, 그 함수 docstring 참고) — 여기선 그 판정 결과로 이 도메인 전용
+    # 에러(lang/slug)만 짓는다.
+    holding_draft_id = await resolve_gate_holder_draft_id(db, existing, this_draft_id=draft.id)
     if holding_draft_id is not None:
         holder = await get_site_post_draft(db, org_id=org_id, draft_id=holding_draft_id)
         if holder is not None:
@@ -720,7 +797,7 @@ async def submit_site_post_draft(
         raise SitePostApproverRoleMissingError(org_id=org_id)
     gate = await create_gate(
         db, org_id, draft.work_item_id, "story", "external_publish",
-        requester_member_id, role_id, neutral_facts=neutral_facts,
+        requester_member_id, role_id, neutral_facts=neutral_facts, scope_key=scope_key,
     )
     # create_gate()의 기존-pending/approved 멱등 반환 분기는 neutral_facts 인자를 무시한다
     # (신규 생성·rejected 재오픈 경로에서만 반영) — 위 sha 동일성 조기 return을 안 탔다는 건
@@ -809,9 +886,11 @@ async def publish_site_post_from_draft(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
+    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
+        scope_key=str(draft.connection_id or ""),
     )
     if gate is None or gate.status != "approved":
         raise ExternalPublishGateNotApprovedError(
@@ -987,9 +1066,11 @@ async def request_site_post_external_publish(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
+    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
+        scope_key=str(draft.connection_id or ""),
     )
     if gate is None or gate.status != "approved":
         raise ExternalPublishGateNotApprovedError(
@@ -1100,6 +1181,20 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
         raise SitePostExternalPublishError(
             error_code="SITE_POST_REAPPROVAL_REQUIRED",
             message=f"봉인된 본문과 현재 버전이 다릅니다(gate_id={gate.id})",
+        )
+    # story #3478 후속(BLOCKER 2, 페드루 실측 2026-09-05) — 위 status/sha 검증은 "이
+    # 게이트가 승인된 상태"만 보고 "그 승인이 draft가 지금 향하는 목적지의 승인인지"는
+    # 안 봤다. destination(connection_id)이 승인 이후 바뀌었는데 옛 scope의 approved
+    # 게이트가 어떤 경로로든 살아남으면(void 정리가 정상 동작해도 경합 등으로), 이
+    # 자리가 마지막 방어선 — W용 승인으로 H에 실 HTTP를 치기 直前에 막는다(재시도 대상
+    # 아님, 사람이 새로 승인하면 새 커맨드가 만들어진다).
+    if gate.scope_key != str(draft.connection_id or ""):
+        raise SitePostExternalPublishError(
+            error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED",
+            message=(
+                f"승인된 목적지와 draft의 현재 목적지가 다릅니다"
+                f"(gate_id={gate.id}, gate.scope_key={gate.scope_key!r}, draft.connection_id={draft.connection_id!r})"
+            ),
         )
 
     try:
