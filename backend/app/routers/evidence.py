@@ -73,7 +73,9 @@ class EvidenceResponse(BaseModel):
     ref: str
     source: str | None
     note: str | None
-    created_by: uuid.UUID
+    # story #3497 — nullable(모델과 동형). None=행위자 없는 시스템 기록(인사이트
+    # 스냅샷 evidence 등, payload.recorded_by="platform"이 그 표식).
+    created_by: uuid.UUID | None
     created_at: Any
     resolved_story_id: uuid.UUID | None = None
     """story #2314 AC3② — embed 칩이 evidence의 «담긴 곳»으로 한 번에 건너뛸 자리.
@@ -320,6 +322,9 @@ async def delete_evidence(
         raise HTTPException(status_code=404, detail="Evidence not found")
 
     caller = await resolve_member(auth, org_id, session)
+    # story #3497 — evidence.created_by가 None(행위자 없는 시스템 기록, 예: 인사이트
+    # 스냅샷)이면 이 비교가 항상 참이라 자연히 403으로 떨어진다(caller.id가 None일 수
+    # 없으므로) — 플랫폼이 만든 기록은 어떤 멤버도 "내 것"으로 철회 못 한다(의도).
     if evidence.created_by != caller.id:
         raise HTTPException(status_code=403, detail="Only the creator can retract evidence")
 

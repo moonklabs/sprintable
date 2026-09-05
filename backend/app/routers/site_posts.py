@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member
+from app.routers.insight_snapshots import InsightSnapshotView
+from app.services.insight_snapshots import get_latest_insight_snapshot
 from app.services.site_posts import (
     CampaignNotFoundError,
     ContentRuleViolationError,
@@ -526,6 +528,10 @@ class ChannelPublicationView(BaseModel):
     published_at: str | None = None
     unpublished_at: str | None = None
     last_error: str | None = None
+    # story #3497 조각4(페드루 PO 決定 2026-09-05, 미르코 #3499 그라운딩에서 나온 갭) —
+    # 3497 조회 API(`/publications/{publication_id}/insights`)의 path 파라미터와 같은
+    # 값을 여기서 노출한다(외부 목적지 발행=ChannelPublication.id 축, 그라운딩④와 동형).
+    publication_id: uuid.UUID
 
 
 class PublicationCommandView(BaseModel):
@@ -550,7 +556,7 @@ def _channel_publication_view(pub) -> ChannelPublicationView | None:
         status=pub.status, external_id=pub.external_id, permalink=pub.permalink,
         published_at=pub.published_at.isoformat() if pub.published_at else None,
         unpublished_at=pub.updated_at.isoformat() if pub.status == "unpublished" else None,
-        last_error=pub.last_error,
+        last_error=pub.last_error, publication_id=pub.id,
     )
 
 
@@ -676,6 +682,15 @@ class SitePostPublicationResponse(BaseModel):
     destination: str = "hosted_site"
     channel_publication: ChannelPublicationView | None = None
     command: PublicationCommandView | None = None
+    # story #3497 조각4(페드루 PO 決定 — 미르코 #3499 그라운딩 갭) — 3497 조회 API
+    # (`/publications/{publication_id}/insights`)의 path 파라미터와 같은 값. 목적지로
+    # 갈린다(hosted_site=SitePost.id·외부=ChannelPublication.id) — latest_insight와
+    # 같은 축(insight_publication_id), 발행 이력이 아예 없으면 null.
+    publication_id: uuid.UUID | None = None
+    # story #3497 조각3 — 이 발행의 가장 최근 캡처된 스냅샷 1건(그라운딩 確定④). 아직
+    # 아무것도 안 잡혔으면 None(지어내지 않는다). 전체 이력은 별도 목록 API(insight_
+    # snapshots.py 라우터, `/publications/{publication_id}/insights`)에서.
+    latest_insight: InsightSnapshotView | None = None
 
 
 @router.get(
@@ -706,6 +721,21 @@ async def get_site_post_publication_endpoint(
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    # story #3497 조각3 — publication_id 축은 목적지로 갈린다: hosted_site는
+    # info.id(SitePost.id 자신, schedule_insight_snapshots가 그 값으로 스케줄한다),
+    # 외부(wordpress/webhook)는 publication.id(ChannelPublication.id — publish_site_
+    # post_external_command가 그 값으로 스케줄한다).
+    insight_publication_id = publication.id if publication is not None else info.id
+    latest_insight = None
+    if insight_publication_id is not None:
+        snapshot = await get_latest_insight_snapshot(db, publication_id=insight_publication_id)
+        if snapshot is not None:
+            latest_insight = InsightSnapshotView(
+                id=snapshot.id, channel=snapshot.channel, due_at=snapshot.due_at,
+                captured_at=snapshot.captured_at, status=snapshot.status,
+                normalized=snapshot.normalized, source=snapshot.source, error_code=snapshot.error_code,
+            )
+
     return SitePostPublicationResponse(
         published_at=info.published_at.isoformat() if info.published_at else None,
         url=info.url, published_by_member_id=info.published_by_member_id,
@@ -713,6 +743,8 @@ async def get_site_post_publication_endpoint(
         destination=destination,
         channel_publication=_channel_publication_view(publication),
         command=_publication_command_view(command),
+        publication_id=insight_publication_id,
+        latest_insight=latest_insight,
     )
 
 

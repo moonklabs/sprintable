@@ -1284,6 +1284,16 @@ async def publication_commands_tick(
     try:
         from app.services.publication_command import process_due_publication_commands
         counts = await process_due_publication_commands(session)
+        # story #3497(그라운딩④, 페드루 決定 — 새 Cloud Scheduler 잡 0) — 같은 tick
+        # 안에서 due 인사이트 스냅샷도 이어 처리한다. 독립 try — 이 축의 미분류 버그가
+        # 이미 성공한 publication_commands 결과 응답까지 500으로 덮으면 안 된다(그
+        # 처리 자체는 이미 커밋됐다 — 응답 표시만의 문제).
+        try:
+            from app.services.insight_snapshots import process_due_insight_snapshots
+            counts["insight_snapshots"] = await process_due_insight_snapshots(session)
+        except Exception as exc:
+            logger.exception("insight-snapshots tick error: %s", exc)
+            counts["insight_snapshots"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)

@@ -245,6 +245,15 @@ async def publish_site_post(
         db, org_id=org_id, work_item_id=work_item_id, gate_id=gate.id, title=title, slug=slug,
         lang=lang, summary=summary, tags=tags, body_md=body_md, created_by_member_id=created_by_member_id,
     )
+    # story #3497 — 발행 성공 콜백(호출부 몫, hosted_site_publish.publish() 자신은
+    # "동작 무변경" 계약이라 새 부작용을 안 심는다 — activity_log와 같은 이유로 여기).
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=org_id, work_item_id=work_item_id, publication_id=row.id,
+        publication_kind="site_post", channel="hosted_site", external_id=None,
+        anchor_at=row.published_at,
+    )
     await db.commit()
     return row
 
@@ -824,6 +833,20 @@ async def submit_site_post_draft(
 
 # ─── story #3369(Phase0 S3) — 승인본만 서버가 공개, URL, platform 감사 ─────────────
 
+def _blog_post_path(*, lang: str, slug: str) -> str:
+    """story #3497(페드루 決定, 2026-09-05) — 공개 글 URL의 path 부분(`/{lang}/blog/
+    {slug}`) 단일 조립점. `_resolve_public_url`·`_resolve_public_site_display_url`이
+    각자 이 리터럴을 따로 적고 있었다(드리프트 표면) — 이 스토리가 hosted_site
+    insights 어댑터에서 이 값을 «pageview beacon이 실은 path와 같은 것」으로 가정해
+    `org_pageview_daily`를 조회해야 해 세 번째 자리가 될 뻔했다. 한 곳으로 뽑는다.
+
+    ⚠️이 값이 실제 pageview beacon의 `path`와 일치하는지는 고객 사이트가 이 라우트
+    규칙을 실제로 구현했다는 전제 위에 서 있다(강제 보장 없음) — hosted_site insights
+    어댑터의 "views" 지표는 이 전제가 깨지면 조용히 0으로 보인다(집계 자체가 없어서가
+    아니라 path가 안 맞아서). AC·어댑터 선언 주석에 이 전제를 명시한다."""
+    return f"/{lang}/blog/{slug}"
+
+
 async def _resolve_public_url(
     db: AsyncSession, *, org_id: uuid.UUID, lang: str, slug: str, backend_base_url: str,
 ) -> str:
@@ -842,7 +865,7 @@ async def _resolve_public_url(
             site_base_url = raw.rstrip("/")
 
     if site_base_url is not None:
-        return f"{site_base_url}/{lang}/blog/{slug}"
+        return f"{site_base_url}{_blog_post_path(lang=lang, slug=slug)}"
 
     from app.services.pageview_counter import get_or_create_active_key
 
@@ -925,6 +948,14 @@ async def publish_site_post_from_draft(
             "gate_id": str(gate.id), "version_id": str(latest.id), "url": url,
             "published_by_member_id": str(published_by_member_id),
         },
+    )
+    # story #3497 — 발행 성공 콜백.
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=post.id,
+        publication_kind="site_post", channel="hosted_site", external_id=None,
+        anchor_at=post.published_at,
     )
     await db.commit()
     await db.refresh(post)
@@ -1275,6 +1306,16 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
             row.status, row.external_id, row.permalink, row.published_at = "published", external_id, permalink, now
     else:
         row.status, row.external_id, row.permalink, row.published_at = "published", external_id, permalink, now
+
+    # story #3497 — 발행 성공 콜백(같은 트랜잭션, commit은 호출자 몫 — publication_
+    # command.py::_process_one_site_post_command와 동형 경계).
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=command.org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+        publication_kind="channel_publication", channel=connection.channel,
+        external_id=row.external_id, anchor_at=row.published_at,
+    )
     return row
 
 
@@ -1351,20 +1392,26 @@ class SitePostPublicationInfo:
     (발행됨·URL·행위자) 계약. 필드명은 목록 계약(story 0b72a300)과 한 벌: `published_at`
     하나로 발행 여부가 서고 별도 boolean은 두지 않는다."""
 
-    __slots__ = ("published_at", "url", "published_by_member_id", "published_body_sha256")
+    __slots__ = ("published_at", "url", "published_by_member_id", "published_body_sha256", "id")
 
     def __init__(
         self, *, published_at: datetime | None, url: str | None,
         published_by_member_id: uuid.UUID | None, published_body_sha256: str | None,
+        id: uuid.UUID | None = None,
     ):
         self.published_at = published_at
         self.url = url
         self.published_by_member_id = published_by_member_id
         self.published_body_sha256 = published_body_sha256
+        # story #3497 조각3 — hosted_site 발행의 `insight_snapshots.publication_id`
+        # 축(SitePost.id 자신). 외부 목적지(wordpress/webhook)는 이 필드를 안 쓴다
+        # (그쪽은 ChannelPublication.id를 별도로 들고 있다 — get_site_post_publication_
+        # endpoint에서 destination으로 갈라 쓴다).
+        self.id = id
 
 
 _EMPTY_PUBLICATION_INFO = SitePostPublicationInfo(
-    published_at=None, url=None, published_by_member_id=None, published_body_sha256=None,
+    published_at=None, url=None, published_by_member_id=None, published_body_sha256=None, id=None,
 )
 
 
@@ -1376,7 +1423,7 @@ def _resolve_public_site_display_url(*, lang: str, slug: str) -> str | None:
     하나만 본다 — 미설정이면 None(화면은 「—」, 지어내지 않는다)."""
     if not settings.public_site_base_url:
         return None
-    return f"{settings.public_site_base_url.rstrip('/')}/{lang}/blog/{slug}"
+    return f"{settings.public_site_base_url.rstrip('/')}{_blog_post_path(lang=lang, slug=slug)}"
 
 
 async def get_site_post_publication_info(
@@ -1425,6 +1472,7 @@ async def get_site_post_publication_info(
     return SitePostPublicationInfo(
         published_at=post.published_at, url=url,
         published_by_member_id=post.created_by_member_id, published_body_sha256=published_body_sha256,
+        id=post.id,
     )
 
 

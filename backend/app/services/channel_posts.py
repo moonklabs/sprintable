@@ -1396,6 +1396,16 @@ async def publish_channel_post_draft(
             "published_by_member_id": str(published_by_member_id),
         },
     )
+    # story #3497 — 발행 성공 콜백. 즉시 발행·예약 발행(publication_command.py 워커)
+    # 둘 다 이 함수 하나를 거치므로(그라운딩④, 3중 재검증 재구현 금지와 같은 이유로
+    # 이미 공용) 여기 한 곳이 두 경로 모두를 커버한다.
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+        publication_kind="channel_publication", channel=connection.channel,
+        external_id=row.external_id, anchor_at=row.published_at,
+    )
     await db.commit()
     return row
 

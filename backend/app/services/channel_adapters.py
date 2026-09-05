@@ -78,6 +78,12 @@ class ChannelAdapterConfig:
     image_width_max: int = 0
     image_color_space: str = ""
     image_max_count: int = 0
+    # story #3497(Phase2·마케팅운영, 페드루 決定 2026-09-05) — 이 채널이 실제로 채울 수
+    # 있는 정규화 지표(§2(d) 7키 중 부분집합). image_max_count=0과 동형 관례 — "선언 안
+    # 함"이 곧 "이 채널에선 이 지표가 항상 null"이라는 뜻(0으로 지어내지 않는다, 이
+    # 스토리의 척추). 빈 튜플(기본값)=fetch_insights 자체가 없는 채널(어댑터 미선언
+    # → insight_snapshots.status="unsupported" 즉시, adapter 호출 0).
+    insight_metrics: tuple[str, ...] = ()
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -112,6 +118,13 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_width_max=1440,
         image_color_space="sRGB",
         image_max_count=1,
+        # story #3497 — 페드루 決定③, Meta 문서(developers.facebook.com/docs/threads/
+        # insights, 조회일 2026-09-05) 실측: `GET /{media_id}/insights?metric=views,
+        # likes,replies,reposts,quotes,shares`. views→views 그대로, likes+replies+
+        # reposts+quotes+shares 합산→engagements(§2(d) 7키엔 개별 반응 종류가 없어
+        # 뭉친다). impressions/reach/clicks/spend/conversions는 Threads가 선언 안 함
+        # (광고 계정 지표라 유기 게시물 API엔 없음).
+        insight_metrics=("views", "engagements"),
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
@@ -135,6 +148,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 사실을 정확히 반영할 뿐(신규 동작 아님). 외부 스코프 개념이 없어(credential
         # 자체가 없다) unpublish_required_scope는 비운다.
         supports_unpublish=True,
+        # story #3497 — beacon 집계(org_pageview_daily) 기반 views만. 나머지 6키는
+        # 항상 null(hosted_site는 impressions/reach/engagements/clicks/spend/
+        # conversions 개념 자체가 없다 — 자체 방문자 카운터일 뿐 광고·소셜 API가 아님).
+        insight_metrics=("views",),
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각③b) — WordPress
     # self-hosted(Application Password) blog kind 어댑터 2호. WordPress.com OAuth2는
@@ -209,6 +226,11 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         image_width_max=1440,
         image_color_space="sRGB",
         image_max_count=1,
+        # story #3497 — 테스트 인프라 채널이라 7키 전부 결정적 합성값(실 provider 없이
+        # 정규화·evidence 파이프라인 전체를 라이브로 실측하기 위함, 5b27b32f와 동일 취지).
+        insight_metrics=(
+            "impressions", "reach", "views", "engagements", "clicks", "spend", "conversions",
+        ),
     )
 
 
