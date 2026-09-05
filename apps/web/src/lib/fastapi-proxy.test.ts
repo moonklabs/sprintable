@@ -141,6 +141,34 @@ describe('fastapi-proxy — 응답 헤더 allowlist forward(story #2190)', () =>
     expect(res.headers.get('x-next-cursor')).toBeNull();
     expect(res.headers.get('content-type')).toBe('application/json');
   });
+
+  // story #3517(PO REQUIRED 1, 2026-09-05) — 429 COMMENT_REFRESH_RATE_LIMITED가
+  // Retry-After 초를 들고 오는데 허용목록에 없어 조용히 버려지던 결함의 회귀가드.
+  // proxyToFastapiWithParams를 mock한 route 테스트로는 이 프록시 통과 자체를 못
+  // 재므로, 여기서 실물 fetch stub으로 proxyToFastapi를 직접 검증한다.
+  it('Retry-After는 429 응답에 그대로 실려 나온다(comments/refresh route가 이 값을 읽는다)', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ detail: { code: 'COMMENT_REFRESH_RATE_LIMITED', message: 'x' } }), {
+      status: 429,
+      headers: { 'retry-after': '60' },
+    }));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('60');
+  });
+
+  it('Retry-After가 없으면(429인데 헤더 자체가 없는 응답) null — 초를 지어내지 않는다', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ detail: { code: 'COMMENT_REFRESH_RATE_LIMITED', message: 'x' } }), {
+      status: 429,
+    }));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.headers.get('retry-after')).toBeNull();
+  });
 });
 
 // story #2349 라이브 검증(미르코, 2026-08-03) 실측 — DELETE /api/user-blocks/{id}가 매번 500을

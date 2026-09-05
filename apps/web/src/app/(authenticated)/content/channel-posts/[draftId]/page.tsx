@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -20,6 +20,8 @@ import { parseScheduledAtServerError } from '@/components/content/validate-sched
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
+import { CommentsSection, deriveCommentsFace, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
+import type { CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
@@ -222,6 +224,61 @@ export default function ChannelPostEditPage() {
       .catch(() => { if (!cancelled) setInsightSnapshots([]); });
     return () => { cancelled = true; };
   }, [orgId, draft?.publication_id]);
+  // story #3517(Phase2·FE, BE #3865 조각①, §22-2 삽입 지점 그라운딩) — 발행됨 오버레이
+  // 안, InsightSnapshotBlock과 같은 조건(draft.publication_id 있을 때만)·같은 왕복
+  // 패턴(insights 미러). 부수 데이터(§16-7 2부 원칙 그대로 — 3514/#3864 선례) — reject
+  // 시에도 'error' 얼굴로 안전 착지, 화면 전체를 막지 않는다.
+  const [commentsFace, setCommentsFace] = useState<CommentsFace>({ kind: 'uncollected' });
+  const loadComments = useCallback(() => {
+    if (!orgId || !draft?.publication_id) { setCommentsFace({ kind: 'uncollected' }); return; }
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/comments`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelled) return;
+        const data = (body?.data ?? null) as RawCommentsResponse | null;
+        if (!data) { setCommentsFace({ kind: 'error' }); return; }
+        setCommentsFace(deriveCommentsFace(data));
+      })
+      .catch(() => { if (!cancelled) setCommentsFace({ kind: 'error' }); });
+    return () => { cancelled = true; };
+  }, [orgId, draft?.publication_id]);
+  useEffect(() => loadComments(), [loadComments]);
+  // story #3517(BE #3865 조각①, 유나 §22-10③) — 수동 재수집. 세 갈래로 가른다(전부
+  // 뭉뚱그리면 429/422가 같은 취급을 받는다 — CommentsRefreshButton 주석 참고):
+  // 429는 Retry-After 헤더를 그대로 읽어 초를 준다(지어내지 않는다, 없으면 null).
+  // 422 COMMENT_COLLECTION_UNSUPPORTED는 전용 kind — 버튼이 스스로 접는다. 403
+  // COMMENT_REFRESH_HUMAN_ONLY·502 등은 generic(서버 message 그대로).
+  //
+  // ⚠️구현 규율(유나 §22-10③, 403) — 이 함수는 반드시 사람이 버튼을 눌렀을 때만
+  // 호출된다. 주기 폴링·마운트 시 자동 재수집을 절대 추가하지 않는다(에이전트
+  // 경로로 계속 403이 누적되는 것을 막는다 — 이 규율은 CommentsRefreshButton의
+  // onClick 배선 하나로 이미 지켜지고 있다, 여기 딴 곳에서 이 함수를 부르지 말 것).
+  const handleCommentsRefresh = useCallback(async (): Promise<CommentsRefreshOutcome> => {
+    if (!orgId || !draft?.publication_id) return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/comments/refresh`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        loadComments();
+        return { ok: true };
+      }
+      if (res.status === 429) {
+        const retryAfterHeader = res.headers.get('Retry-After');
+        const retryAfterSeconds = retryAfterHeader !== null ? Number.parseInt(retryAfterHeader, 10) : null;
+        return { ok: false, kind: 'rate_limited', retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null };
+      }
+      const body = await res.json().catch(() => null) as { detail?: { code?: string; message?: string }; code?: string; message?: string } | null;
+      if (body?.detail?.code === 'COMMENT_COLLECTION_UNSUPPORTED') {
+        return { ok: false, kind: 'unsupported' };
+      }
+      const message = body?.detail?.message ?? body?.message ?? t('commentsRefreshErrorGeneric');
+      return { ok: false, kind: 'generic', message };
+    } catch {
+      return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
+    }
+  }, [orgId, draft?.publication_id, loadComments, t]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -1200,6 +1257,13 @@ export default function ChannelPostEditPage() {
               {/* story #3499(Phase2·FE) — publication_id 있을 때만(BE #3844 조각4 의존). */}
               {draft.publication_id ? (
                 <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
+              ) : null}
+              {/* story #3517(Phase2·FE, 그라운딩 ① 자리 그대로 — InsightSnapshotBlock 곁,
+                  같은 draft.publication_id 조건) — 댓글 섹션. 조각①-FE 범위(PO 確定
+                  2026-09-05): 세 얼굴·수집 시각·목록·지워진 댓글(§22-9)만 — 행 액션
+                  (작업으로 전환·답변)은 조각②(답변/작업전환 엔드포인트) PR에서. */}
+              {draft.publication_id ? (
+                <CommentsSection face={commentsFace} displayTimezone={displayTimezone} onRefresh={handleCommentsRefresh} />
               ) : null}
             </div>
           );

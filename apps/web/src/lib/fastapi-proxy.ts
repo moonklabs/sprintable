@@ -93,7 +93,14 @@ export async function proxyToFastapi(
   //   Set-Cookie        백엔드 쿠키가 브라우저로 새어나감 — 보안 표면
   //   Transfer-Encoding 재구성한 응답과 어긋남
   // 다음에 새 헤더가 필요해지면 여기 배열에 명시적으로 추가할 것 — "그냥 다 넘기자"로 되돌리지 말 것.
-  for (const h of ['x-total-count', 'x-next-cursor']) {
+  // story #3517(PO REQUIRED 1, 2026-09-05) — 429 COMMENT_REFRESH_RATE_LIMITED가
+  // Retry-After 초를 들고 오는데, 이 허용목록에 없어 프록시가 조용히 버려 왔다
+  // (comments/refresh route는 res.headers.get('Retry-After')를 읽지만 이 함수를
+  // 거치면 늘 null이었다 — route 단위 테스트는 proxyToFastapiWithParams 자체를
+  // mock해서 이 통과 실패를 못 잡았다). 429를 내는 다른 소비부(예: #3495 발행 429)도
+  // 이 프록시를 거치면 같은 이유로 초를 못 받고 있었을 수 있다 — grep해 영향 범위를
+  // 스토리/PR에 남길 것.
+  for (const h of ['x-total-count', 'x-next-cursor', 'retry-after']) {
     const v = res.headers.get(h);
     if (v) resHeaders[h] = v;
   }
