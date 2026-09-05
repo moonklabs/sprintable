@@ -74,9 +74,19 @@ def _configure_secrets(monkeypatch):
 
 
 async def _put_rules(session, *, org_id, rules):
-    from app.services.content_rules import put_org_content_rules
+    # story #3501(PR#3856, CAS 낙관적 잠금) — expected_version이 필수 인자가 됐다(#3514
+    # 브랜치가 #3856 착지 前에 갈라져 나와 몰랐던 자리, develop CI 핫픽스). 이 헬퍼가
+    # PUT 엔드포인트와 동형으로 "지금 서버 버전"을 먼저 읽어 넘긴다 — 한 테스트 안에서
+    # 같은 org에 두 번 PUT하는 경우(규칙 추가→원복)가 있어 0 하드코딩은 두 번째 호출을
+    # 깬다.
+    from app.services.content_rules import get_org_content_rules, put_org_content_rules
 
-    return await put_org_content_rules(session, org_id=org_id, rules=rules, updated_by_member_id=uuid.uuid4())
+    existing = await get_org_content_rules(session, org_id=org_id)
+    expected_version = existing.version if existing else 0
+    return await put_org_content_rules(
+        session, org_id=org_id, rules=rules, updated_by_member_id=uuid.uuid4(),
+        expected_version=expected_version,
+    )
 
 
 # ─── site_post ────────────────────────────────────────────────────────────────
