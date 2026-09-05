@@ -2289,6 +2289,7 @@
     "reapprovalSealedHash": "Approved hash",
     "reapprovalCurrentHash": "Current hash",
     "publishedInfoUrlLabel": "Public URL",
+    "channelPostsPublishedInfoLastPublishedNotice": "The information below is for the last published version.",
     "externalPublicationDestinationLabel": "Destination",
     "externalPublicationStatusLabel": "Status",
     "externalPublicationStatusPublished": "Published",

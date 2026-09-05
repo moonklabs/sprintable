@@ -88,6 +88,11 @@ async def test_new_version_after_publish_keeps_publication_id_pointing_at_last_p
             async with _client_for(app) as client:
                 r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_publish.status_code == 200, r_publish.text
+                # story #3525 REQUIRED(PO 確定 ③) — publish 응답 자체가 이미
+                # publication_id를 실어야 FE handlePublish의 로컬 병합(재로드 없이
+                # 발행됨 카드가 즉시 열리는 흐름)이 서버 값 없이도 성립한다.
+                publish_publication_id = r_publish.json()["publication_id"]
+                assert publish_publication_id is not None
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
@@ -97,6 +102,7 @@ async def test_new_version_after_publish_keeps_publication_id_pointing_at_last_p
             assert before["publication_id"] is not None
             assert before["published_at"] is not None
             publication_id_after_v1 = before["publication_id"]
+            assert publish_publication_id == publication_id_after_v1, "publish 응답의 publication_id가 그 뒤 GET과 같은 값이어야 함"
 
             # story #3525 재현 — 같은 work_item+connection에 새 draft 생성 요청을
             # 다시 보내면(create_channel_post_draft_version의 upsert 분기) 기존

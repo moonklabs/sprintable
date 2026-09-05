@@ -733,6 +733,9 @@ async def test_image_publish_creates_container_then_waits_no_immediate_publish_c
             body = r.json()
             assert body["processing"] is True
             assert body["permalink"] is None
+            # story #3525(PO 確定) — publication_id도 permalink 등 셋과 동형(아직
+            # 최종 published 행이 없다 — 지어내지 않는다).
+            assert body["publication_id"] is None
             publish_container_mock.assert_not_called()
     finally:
         app.dependency_overrides.clear()
