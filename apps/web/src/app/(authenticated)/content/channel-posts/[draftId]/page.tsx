@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
@@ -73,6 +74,10 @@ interface ChannelPostDraftDetail {
   // story f061c1a3(BE 0e960006) — 재시도 BFF가 붙일 대상 command. 목록/단건 응답
   // (ChannelPostDraftListItem)이 이미 낸다 — command 자체가 없으면 null.
   command_id?: string | null;
+  // story #3499(PO 確定 2026-09-05) — 최신 ChannelPublication.id(BE #3844 조각4 의존,
+  // 이 PR 작성 시점 미착지 — additive, 없으면 undefined). command_id(PublicationCommand
+  // 축)와 다른 테이블이라 혼동 금지.
+  publication_id?: string | null;
   scheduled_at?: string | null;
   // story #3428(BE 620beefc·PR#3776, §17-14/§17-15) — 최신 버전에 이미지가 붙어 있으면
   // 그 「나가는 파생본」 공개 URL(카드 썸네일)과 원본/최종 width·bytes(배지 문구 조립
@@ -197,8 +202,20 @@ export default function ChannelPostEditPage() {
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
+  const locale = useLocale();
 
   const [draft, setDraft] = useState<ChannelPostDraftDetail | null>(null);
+  // story #3499 — draft.publication_id는 BE #3844 조각4 의존(additive, 미착지).
+  const [insightSnapshots, setInsightSnapshots] = useState<InsightSnapshot[]>([]);
+  useEffect(() => {
+    if (!orgId || !draft?.publication_id) { setInsightSnapshots([]); return; }
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/insights`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => { if (!cancelled) setInsightSnapshots(Array.isArray(body?.data) ? body.data : []); })
+      .catch(() => { if (!cancelled) setInsightSnapshots([]); });
+    return () => { cancelled = true; };
+  }, [orgId, draft?.publication_id]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -1093,6 +1110,10 @@ export default function ChannelPostEditPage() {
                   <span className="text-muted-foreground" data-testid="channel-post-external-id-label">{t('channelPostsExternalIdLabel')}</span>
                   <span data-testid="channel-post-external-id">{draft.external_id}</span>
                 </div>
+              ) : null}
+              {/* story #3499(Phase2·FE) — publication_id 있을 때만(BE #3844 조각4 의존). */}
+              {draft.publication_id ? (
+                <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
               ) : null}
             </div>
           );

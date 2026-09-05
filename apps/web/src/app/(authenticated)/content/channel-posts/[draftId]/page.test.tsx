@@ -82,6 +82,9 @@ const DRAFT_DETAIL = {
   processing_kind: null as string | null,
   // story f061c1a3 — 재시도 BFF가 붙일 대상 command.
   command_id: null as string | null,
+  // story #3499(PO 確定 2026-09-05) — 최신 ChannelPublication.id. BE #3844 조각4
+  // (미착지) 의존, 기본값 null(대부분 테스트가 이 스토리와 무관).
+  publication_id: null as string | null,
   // story 15e481ce(#3453 AC2) — 이 채널 변형이 파생된 원문.
   source_content_item_id: null as string | null,
   // story #3457 후속(BE #3817 착지분) — 원문 제목 + staleness 판정용 버전 id 2종.
@@ -140,6 +143,9 @@ function stubFetch(opts: {
   // command_status='pending').
   onRetry?: (commandId: string) => { status: number; body?: unknown };
   draftAfterRetry?: Record<string, unknown>;
+  // story #3499 — /publications/{id}/insights 응답. 넘기지 않으면(대부분 테스트가
+  // publication_id 자체가 null이라 이 fetch를 아예 안 탄다) 빈 배열.
+  insightSnapshots?: unknown[];
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -278,6 +284,9 @@ function stubFetch(opts: {
         const ok = result.status < 400;
         if (ok) currentDraftDetail = { ...currentDraftDetail, command_status: 'pending', ...opts.draftAfterRetry };
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/insights')) {
+        return { ok: true, status: 200, json: async () => ({ data: opts.insightSnapshots ?? [], error: null, meta: null }) };
       }
       throw new Error('unexpected fetch: ' + url + ' ' + (init?.method ?? 'GET'));
     }),
@@ -2356,5 +2365,47 @@ describe('ChannelPostEditPage — 콘텐츠 규칙 위반 표시(story #3472 2�
     expect(container.querySelector('[data-testid="channel-post-rule-violation-text"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-rule-violation-blocked-reason"]')).toBeNull();
     expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('ChannelPostEditPage — 성과 인사이트 블록(story #3499, BE #3844 조각4 의존)', () => {
+  it('publication_id 없음(BE 미착지 응답) — published 상태여도 인사이트 블록을 안 그린다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+        published_at: '2026-09-04T00:00:00Z', publication_id: null,
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-insight-info"]')).toBeNull();
+  });
+
+  it('publication_id 있음 — published 블록 안에 인사이트를 그리고 서버 값을 그대로 보인다(조립·판정 0)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+        published_at: '2026-09-04T00:00:00Z', publication_id: 'cp-1',
+      },
+      insightSnapshots: [
+        {
+          normalized: { impressions: 200, reach: 0, views: null, engagements: null, clicks: null, spend: null, conversions: null },
+          captured_at: '2026-09-05T00:00:00Z', status: 'captured', due_at: '2026-09-05T00:00:00Z', source: 'threads',
+        },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const published = container.querySelector('[data-testid="channel-post-published-info"]')!;
+    const insight = published.querySelector('[data-testid="content-insight-info"]');
+    expect(insight).not.toBeNull();
+    const values = Array.from(insight!.querySelectorAll('[data-testid="insight-metric-value"]')).map((el) => el.textContent);
+    expect(values).toContain('200');
+    expect(values).toContain('0');
   });
 });
