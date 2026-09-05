@@ -692,6 +692,7 @@ async def submit_site_post_draft(
     draft_id: uuid.UUID,
     version_id: uuid.UUID | None,
     requester_member_id: uuid.UUID,
+    estimated_cost_minor: int | None = None,
 ) -> tuple[Gate, uuid.UUID]:
     """story #3365(Phase0 S2) — 초안 버전을 external_publish 게이트에 상신. 대상 버전(생략 시
     최신)의 content_sha256·content_version·본문 스냅샷을 게이트에 봉인(sealed_content_*)한다.
@@ -727,6 +728,12 @@ async def submit_site_post_draft(
         raise ContentRuleViolationError(
             rules_version=rule_row.version if rule_row else 0, violations=submit_violations,
         )
+
+    # story #3498(AC2, 페드루 PO 決定 2026-09-05) — 상신 시점 예산 거부. content-rule
+    # lint와 같은 자리(게이트 mutations 전) — 잔량 초과면 게이트를 손대지 않고 422로
+    # 즉시 거부한다(반쪽 봉인 상태를 만들지 않는다).
+    from app.services.generation_budget import check_generation_budget_or_raise
+    await check_generation_budget_or_raise(db, org_id=org_id, estimated_cost_minor=estimated_cost_minor)
 
     from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id
@@ -765,6 +772,9 @@ async def submit_site_post_draft(
         # sha256과 동형, AC "판정 축 세분화"). content가 그대로여도 destination이 바뀌었으면
         # "이미 이 정확한 상태로 봉인돼 있다"가 아니다 — 재봉인(아래)을 타야 한다.
         and existing.sealed_destination_connection_id == draft.connection_id
+        # story #3498(AC3) — budget 축도 판정 대상이다. content/destination이 그대로여도
+        # estimated_cost_minor가 바뀌면 "이미 이 정확한 상태로 봉인돼 있다"가 아니다.
+        and existing.sealed_estimated_cost_minor == estimated_cost_minor
         and existing.status in ("pending", "approved")
         # story #3496(페드루 실측 2026-09-05) — reapproval_required도 판정 축이다. 승인
         # 뒤 편집(approved→pending+reapproval_required=True, sealed는 옛 버전 보존)한
@@ -825,6 +835,10 @@ async def submit_site_post_draft(
     # story e4fc29fa(조각③a) — 목적지 봉인도 여기서 명시적으로 (재)봉인한다(위 sha+
     # destination 동일성 조기 return을 안 탔다는 건 둘 중 하나가 달라졌거나 신규라는 뜻).
     gate.sealed_destination_connection_id = draft.connection_id
+    # story #3498(AC3) — budget 축 (재)봉인. 위 sha+destination+budget 동일성 조기
+    # return을 안 탔다는 건 셋 중 하나가 달라졌거나 신규라는 뜻(_reseal_gate_on_new_
+    # version은 이 필드를 절대 안 건드린다 — submit() 재호출만이 재봉인 권한을 갖는다).
+    gate.sealed_estimated_cost_minor = estimated_cost_minor
     gate.reapproval_required = False
     await db.commit()
     await db.refresh(gate)
@@ -925,6 +939,14 @@ async def publish_site_post_from_draft(
         raise SitePostSealMissingError(gate_id=gate.id)
     if gate.sealed_content_sha256 != latest.body_sha256:
         raise SitePostReapprovalRequiredError(gate_id=gate.id)
+
+    # story #3498(AC4, 페드루 PO 決定 2026-09-05) — hosted_site도 발행 直前 재검사
+    # (승인 뒤 다른 지출로 잔량이 줄었을 수 있다). 라우터가 GenerationBudgetExceededError
+    # 를 422로 감싼다.
+    from app.services.generation_budget import check_generation_budget_or_raise
+    await check_generation_budget_or_raise(
+        db, org_id=org_id, estimated_cost_minor=gate.sealed_estimated_cost_minor,
+    )
 
     post = await hosted_site_publish.publish(
         db, org_id=org_id, work_item_id=draft.work_item_id, gate_id=gate.id,
@@ -1227,6 +1249,17 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
                 f"(gate_id={gate.id}, gate.scope_key={gate.scope_key!r}, draft.connection_id={draft.connection_id!r})"
             ),
         )
+
+    # story #3498(AC4, 페드루 PO 決定 2026-09-05) — 승인 뒤 다른 지출로 잔량이 줄었을
+    # 수 있다(승인 시점엔 통과했어도 지금은 아닐 수 있음) — module.publish() 호출
+    # (아래) 直前에 다시 잰다. 어댑터 호출 0(위 승인/봉인 재검증과 같은 방어선).
+    from app.services.generation_budget import GenerationBudgetExceededError, check_generation_budget_or_raise
+    try:
+        await check_generation_budget_or_raise(
+            db, org_id=command.org_id, estimated_cost_minor=gate.sealed_estimated_cost_minor,
+        )
+    except GenerationBudgetExceededError as exc:
+        raise SitePostExternalPublishError(error_code="GENERATION_BUDGET_EXCEEDED", message=str(exc)) from exc
 
     try:
         connection = await _get_active_blog_connection(db, org_id=command.org_id, connection_id=draft.connection_id)

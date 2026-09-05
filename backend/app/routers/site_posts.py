@@ -17,6 +17,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member
 from app.routers.insight_snapshots import InsightSnapshotView
+from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.insight_snapshots import get_latest_insight_snapshot
 from app.services.site_posts import (
     CampaignNotFoundError,
@@ -142,6 +143,10 @@ class SitePostDraftListItem(BaseModel):
 
 class SubmitSitePostDraftRequest(BaseModel):
     version_id: uuid.UUID | None = None
+    # story #3498(페드루 PO 決定 2026-09-05) — 예상 생성비용 제시(에이전트가 채운다).
+    # 생략/null=검사 없음(AC2). 게이트 budget 축(sealed_estimated_cost_minor)에 그대로
+    # 봉인된다 — channel_posts.py의 scheduled_at과 동형(submit 전용, draft 컬럼 아님).
+    estimated_cost_minor: int | None = None
 
 
 class SubmitSitePostDraftResponse(BaseModel):
@@ -480,7 +485,18 @@ async def submit_site_post_draft_endpoint(
         gate, version_id = await submit_site_post_draft(
             db, org_id=org_id, draft_id=draft_id, version_id=body.version_id,
             requester_member_id=uuid.UUID(auth.user_id),
+            estimated_cost_minor=body.estimated_cost_minor,
         )
+    except GenerationBudgetExceededError as exc:
+        # story #3498(AC2) — 4값 detail(story 確定 그대로).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GENERATION_BUDGET_EXCEEDED",
+                "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
+                "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
+            },
+        ) from exc
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SitePostVersionNotFoundError as exc:
@@ -656,6 +672,16 @@ async def publish_site_post_from_draft_endpoint(
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GenerationBudgetExceededError as exc:
+        # story #3498(AC4) — 발행 直前 재검사 실패(재시도 아님·사유 코드).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GENERATION_BUDGET_EXCEEDED",
+                "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
+                "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
+            },
+        ) from exc
     except ExternalPublishGateNotApprovedError as exc:
         raise HTTPException(
             status_code=403,

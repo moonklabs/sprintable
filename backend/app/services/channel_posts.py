@@ -867,6 +867,7 @@ async def submit_channel_post_draft(
     version_id: uuid.UUID | None,
     requester_member_id: uuid.UUID,
     scheduled_at: datetime | None = None,
+    estimated_cost_minor: int | None = None,
 ) -> tuple[Gate, uuid.UUID]:
     """초안 버전을 external_publish 게이트에 상신 — site_posts.submit_site_post_draft와
     1:1 대응(AC3). **에이전트도 호출 가능**(AC1, 2026-09-03 dev 실측 정정 — site S2와 동일
@@ -907,6 +908,11 @@ async def submit_channel_post_draft(
             rules_version=rule_row.version if rule_row else 0, violations=submit_violations,
         )
 
+    # story #3498(AC2, 페드루 PO 決定 2026-09-05) — site_posts.py와 동형(게이트
+    # mutations 전에 판정 — 잔량 초과면 반쪽 봉인 없이 즉시 422).
+    from app.services.generation_budget import check_generation_budget_or_raise
+    await check_generation_budget_or_raise(db, org_id=org_id, estimated_cost_minor=estimated_cost_minor)
+
     from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id
 
@@ -939,11 +945,15 @@ async def submit_channel_post_draft(
     # 기존 두 축의 판정·no-op short-circuit 조건은 손대지 않는다(회귀 0) — media_changed는
     # short-circuit 조건에도 추가로 들어가 "이미지만 바뀐" 재상신도 더는 no-op되지 않는다.
     media_changed = existing is None or existing.sealed_media_sha256 != target.image_sha256
+    # story #3498(AC3) — 네 번째 축. 위 세 축과 나란히 두되 기존 판정·short-circuit
+    # 조건은 손대지 않는다(회귀 0) — budget만 바뀐 재상신도 더는 no-op되지 않는다.
+    budget_changed = existing is None or existing.sealed_estimated_cost_minor != estimated_cost_minor
     if (
         existing is not None
         and not content_changed
         and not schedule_changed
         and not media_changed
+        and not budget_changed
         and existing.status in ("pending", "approved")
         # story #3496(site_posts.py와 동형 결함, 페드루 실측 2026-09-05) — reapproval_
         # required도 판정 축이다. 승인 뒤 편집(approved→pending+reapproval_required=
@@ -985,6 +995,7 @@ async def submit_channel_post_draft(
     gate.sealed_content_body = target.text
     gate.sealed_scheduled_at = scheduled_at
     gate.sealed_media_sha256 = target.image_sha256
+    gate.sealed_estimated_cost_minor = estimated_cost_minor
     gate.reapproval_required = False
 
     if was_approved:
@@ -999,7 +1010,10 @@ async def submit_channel_post_draft(
         reason_code = (
             "CONTENT_CHANGED" if content_changed
             else "SCHEDULE_CHANGED" if schedule_changed
-            else "MEDIA_CHANGED"
+            else "MEDIA_CHANGED" if media_changed
+            # story #3498(AC3) — 다섯 번째 우선순위(가장 낮음, media_changed와 동일
+            # 원칙 — 앞 세 축이 전부 그대로일 때만 이 사유가 뜬다).
+            else "BUDGET_CHANGED"
         )
         await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code=reason_code)
 
@@ -1116,6 +1130,14 @@ async def publish_channel_post_draft(
         raise ChannelPostSealMissingError(gate_id=gate.id)
     if gate.sealed_content_sha256 != latest.body_sha256:
         raise ChannelPostReapprovalRequiredError(gate_id=gate.id)
+
+    # story #3498(AC4, 페드루 PO 決定 2026-09-05) — 발행 直前 예산 재검사(승인 뒤 다른
+    # 지출로 잔량이 줄었을 수 있다). site_posts.py와 동형 위치(다른 재검증 바로 옆,
+    # adapter 호출 前).
+    from app.services.generation_budget import check_generation_budget_or_raise
+    await check_generation_budget_or_raise(
+        db, org_id=org_id, estimated_cost_minor=gate.sealed_estimated_cost_minor,
+    )
 
     # 멱등 — 이미 완료된 발행이면 새 POST 없이 그대로 반환(뮤테이션 대상: 이 UNIQUE
     # 조회를 제거하면 같은 버전 재요청이 Threads에 두 번 POST된다).

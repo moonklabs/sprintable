@@ -151,6 +151,15 @@ class Gate(Base):
     sealed_destination_connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # story #3498(Phase2·마케팅운영, 페드루 PO 決定 2026-09-05, migration 0333) —
+    # external_publish 전용 다섯 번째 봉인 축(위 네 축과 같은 공유-nullable 관례).
+    # submit()이 실은 예상 생성비용 추정치 — "승인 후 값 변경=재승인, 사유=BUDGET_
+    # CHANGED"를 content/schedule/media/destination 축과 독립적으로 판정한다(블루프린트
+    # §2 「목적지·불변 버전·예약 시각·예산을 참조 — 승인 후 변경 시 무효화」의 "예산"
+    # 축 — gate.py 자신의 이 예고가 이 스토리 전까지 미구현이었다). `_reseal_gate_
+    # on_new_version`(편집 훅)은 이 필드를 절대 안 건드린다 — submit() 재호출만이
+    # 재봉인 권한을 갖는다(sealed_content_*와 동일 "무엇이 승인됐었나 보존" 원칙).
+    sealed_estimated_cost_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

@@ -34,6 +34,12 @@ class EvidenceCreateRequest(BaseModel):
     # 않는다 — "그 시각의 latest"를 서버가 항상 resolve해 고정한다(③pin 시점 규칙, 클라
     # 위임 시 취지가 샌다).
     artifact_id: uuid.UUID | None = None
+    # story #3498(페드루 PO 決定 2026-09-05) — evidence API가 "지출 기록" 정본이 되려면
+    # 클라이언트가 payload를 실을 수 있어야 한다(이전엔 insight_snapshots.py 등 내부
+    # 서비스만 이 컬럼을 썼다). 스키마는 여기서 강제 안 함(content_rules.py::lint_content
+    # 관례와 동형 — type="metric"·payload.kind="generation_cost"·cost_minor 규약은
+    # generation_budget.py가 읽는 쪽에서만 본다).
+    payload: dict | None = None
 
     @field_validator("work_item_type")
     @classmethod
@@ -76,6 +82,9 @@ class EvidenceResponse(BaseModel):
     # story #3497 — nullable(모델과 동형). None=행위자 없는 시스템 기록(인사이트
     # 스냅샷 evidence 등, payload.recorded_by="platform"이 그 표식).
     created_by: uuid.UUID | None
+    # story #3498 — 생성 시 받은 payload를 그대로 되돌려준다(모델·#3497 payload 컬럼과
+    # 동형, 이전엔 응답에 아예 없었다 — 내부 서비스만 쓰던 컬럼이라 노출 자체가 불요했음).
+    payload: dict | None = None
     created_at: Any
     resolved_story_id: uuid.UUID | None = None
     """story #2314 AC3② — embed 칩이 evidence의 «담긴 곳»으로 한 번에 건너뛸 자리.
@@ -224,6 +233,7 @@ async def create_evidence(
         ref=body.ref,
         source=body.source,
         note=body.note,
+        payload=body.payload,
         created_by=caller.id,
     )
     session.add(evidence)
