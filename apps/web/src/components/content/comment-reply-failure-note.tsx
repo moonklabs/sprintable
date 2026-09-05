@@ -77,11 +77,17 @@ export function CommentReplyFailureNote({ action, displayTimezone, onRetry, onRe
       <div className="space-y-1" data-testid="comments-item-reply-failure-note">
         <div className="flex items-center gap-2">
           <p className="text-xs text-muted-foreground">{t('commentsReplyFailureNeedsResubmit')}</p>
+          {/* 페드루 PO REQUIRED 1(유나 §22-15 확定, 2026-09-06) — 이 CTA는 이미
+              승인된 명령을 다시 큐에 올릴 뿐(재승인 없음)이라 "상신"(§17: 승인
+              요청)이라 부르면 거짓이다. voided(봉인 불일치)의 「다시 상신」과
+              같은 낱말로 묶으면 두 다른 메커니즘이 한 낱말이 된다 — 전용 키로
+              가른다. "다시 시도"도 금지(자동 재시도 문장 「다시 시도합니다」와
+              사람이 누르는 이 버튼이 같은 낱말이 되면 헷갈린다). */}
           <Button
             type="button" variant="outline" size="sm" onClick={() => void handleRetryClick()}
             disabled={!onRetry || retrying} data-testid="comments-item-reply-retry-button"
           >
-            {t('commentsReplyResubmitCta')}
+            {t('commentsReplyRetryCta')}
           </Button>
         </div>
         {retryOutcome === 'ok' ? (

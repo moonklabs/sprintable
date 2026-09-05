@@ -519,4 +519,23 @@ describe('CommentsSection — 답변 실패 얼굴(story #3544, 유나 §22-15)'
     const btn = container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement | null;
     expect(btn?.disabled).toBe(true);
   });
+
+  // story #3544 REQUIRED 1(페드루 PO·유나 §22-15 확定, 2026-09-06) — dead_letter는
+  // 이미 승인된 명령을 다시 큐에 올릴 뿐(재승인 없음)이라 "상신"(§17: 승인 요청)이
+  // 아니다. voided(봉인 불일치)는 재승인이 실제로 필요해 "다시 상신"이 맞다 — 두
+  // 메커니즘이 같은 낱말을 쓰면 안 된다(원 결함 재발 방지 pin).
+  it('dead_letter CTA="다시 보내기"·voided(봉인 불일치) CTA="다시 상신" — 서로 다른 낱말(같으면 회귀)', async () => {
+    const deadLetterContainer = await mountWithReply({
+      ...FAILED_BASE, command_id: 'cmd-1', command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+    });
+    const retryBtn = deadLetterContainer.querySelector('[data-testid="comments-item-reply-retry-button"]');
+    expect(retryBtn?.textContent).toBe('다시 보내기');
+
+    const voidedContainer = await mountWithReply({
+      ...FAILED_BASE, command_id: 'cmd-1', command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'GATE_NOT_APPROVED_OR_RESEALED',
+    });
+    const resubmitBtn = voidedContainer.querySelector('[data-testid="comments-item-reply-resubmit-button"]');
+    expect(resubmitBtn?.textContent).toBe('다시 상신');
+    expect(resubmitBtn?.textContent).not.toBe(retryBtn?.textContent);
+  });
 });
