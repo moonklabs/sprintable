@@ -641,7 +641,16 @@ async def resolve_gate_holder_draft_id(
     애초에 아직 최초 발행 前이 아닌(=한 번 발행됐다가 지금은 내려간) 경우 — 회수된
     승인이 같은 목적지로의 재상신을 영구히 막는 건 원래 f6d14476의 의도가 아니었다
     (재발행 자체는 새 상신·새 승인이 원칙, 봉인 원칙 유지 — 이 함수는 "막을지"만
-    판정하지 봉인을 우회하지 않는다)."""
+    판정하지 봉인을 우회하지 않는다) · story #3511(카디르 3478-B 재실행 실측,
+    2026-09-05) — 위 라이브니스 체크가 `status == "approved"`에만 걸려 있어, 회수
+    뒤 새 draft가 만들어지면(`_reseal_gate_on_new_version`이 이 함수를 먼저 호출해
+    "approved+not_live→통과"로 자기 자신은 pending 전이를 허락받지만, 그 훅 자체는
+    라이브니스와 무관하게 무조건 pending+reapproval_required=True로 되돌린다) 다음
+    번 이 함수 호출 시점엔 이미 status가 "pending"이라 같은 라이브니스 우회가 다시는
+    안 먹어 영구 409가 됐다 — 이 체크를 pending에도 적용한다(status 조건 자체를
+    없앤다). 방금 상신한 «진짜» pending(한 번도 발행된 적 없음)은 `_gate_publication_
+    is_live`가 발행 기록 0건을 보수적으로 "살아있다"로 취급해(위 함수 자체 docstring)
+    여전히 홀드된다 — 그 무조건 True 반환이 이 확장의 유일한 안전판이다."""
     if existing_gate is None or existing_gate.status not in ("pending", "approved"):
         return None
     holding_raw = (existing_gate.neutral_facts or {}).get("draft_id")
@@ -658,7 +667,7 @@ async def resolve_gate_holder_draft_id(
         return None
     if holding_id == this_draft_id:
         return None
-    if existing_gate.status == "approved" and not await _gate_publication_is_live(session, gate_id=existing_gate.id):
+    if not await _gate_publication_is_live(session, gate_id=existing_gate.id):
         return None
     return holding_id
 
