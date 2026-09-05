@@ -19,6 +19,7 @@
 transient=재시도 가능이라 단정하지 않는다)."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -245,6 +246,13 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         await _process_one_site_post_command(db, command, now=now)
         return
 
+    # story #3516 조각②(페드루 PO 確定 2026-09-05) — content_kind="comment_reply"
+    # 분기. approved_version이 channel_post_comment_replies.id를 가리킨다(위 site_
+    # post 분기와 같은 판별축 사상 — SSOT 컬럼 하나로 세 도메인을 가른다).
+    if command.content_kind == "comment_reply":
+        await _process_one_comment_reply_command(db, command, now=now)
+        return
+
     from app.models.channel_post_version import ChannelPostVersion
     from app.services.channel_posts import (
         ChannelConnectionNotActiveError,
@@ -456,6 +464,143 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
     await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)
+
+
+async def _process_one_comment_reply_command(db: AsyncSession, command: PublicationCommand, *, now: datetime) -> None:
+    """story #3516 조각②(페드루 PO 確定 2026-09-05) — content_kind="comment_reply"
+    분기. `_process_one_command`(channel_post 즉시경로)의 재검증 패턴과 동형(게이트
+    approved+seal 일치 재확認 뒤 adapter 호출) — 다만 대상 댓글이 그새 삭제됐으면
+    (AC4, 승인 뒤 워커 도달 前 레이스) 재시도 없이 즉시 voided한다(재시도해도 다시
+    삭제 상태일 뿐이라 needs_check류가 아니라 이 도메인 전용 종결)."""
+    from app.models.channel_post_comment import ChannelPostComment, ChannelPostCommentReply
+    from app.models.gate import Gate
+    from app.services.channel_post_comment_replies import compute_target_comment_state
+
+    error_code: str | None = None
+    last_error: str | None = None
+    attempt_started_at = now
+
+    reply = (await db.execute(
+        select(ChannelPostCommentReply).where(ChannelPostCommentReply.id == command.approved_version)
+    )).scalar_one_or_none()
+    if reply is None:
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code="COMMENT_REPLY_NOT_FOUND",
+        )
+        await apply_command_failure(
+            db, command, error_code="COMMENT_REPLY_NOT_FOUND", last_error="답변 기록을 찾을 수 없습니다", now=now,
+        )
+        return
+
+    gate = await db.get(Gate, command.gate_id) if command.gate_id else None
+    text_sha256 = hashlib.sha256(reply.text.encode("utf-8")).hexdigest()
+    if gate is None or gate.status != "approved" or gate.sealed_content_sha256 != text_sha256:
+        # story #3474와 동형 — 게이트 재검증 실패는 adapter를 안 부른 채 즉시 종결
+        # (재시도 개념 자체가 안 맞는다 — 사람이 다시 승인해야 새 커맨드가 생긴다).
+        await record_publication_attempt(
+            db, command=command, approval_check="version_mismatch", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code=None,
+        )
+        command.status = "voided"
+        command.reason_code = "GATE_NOT_APPROVED_OR_RESEALED"
+        reply.status = "failed"
+        reply.last_error = "게이트가 승인 상태가 아니거나 봉인이 최신 답변과 다릅니다"
+        return
+
+    comment = (await db.execute(
+        select(ChannelPostComment).where(ChannelPostComment.id == reply.comment_id)
+    )).scalar_one_or_none()
+    if comment is None:
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code="COMMENT_NOT_FOUND",
+        )
+        await apply_command_failure(
+            db, command, error_code="COMMENT_NOT_FOUND", last_error="대상 댓글을 찾을 수 없습니다", now=now,
+        )
+        reply.status = "failed"
+        reply.last_error = "대상 댓글을 찾을 수 없습니다"
+        return
+
+    sealed_target_sha = (gate.neutral_facts or {}).get("target_text_sha256")
+    state = compute_target_comment_state(comment=comment, sealed_target_text_sha256=sealed_target_sha)
+    if state == "deleted":
+        # AC4 — 승인 시점엔 안 지워졌는데(gates.py 사전 체크 통과) 워커 도달 前에
+        # 지워진 레이스. 재시도 대상이 아니다(다시 봐도 여전히 삭제 상태일 뿐).
+        await record_publication_attempt(
+            db, command=command, approval_check="version_mismatch", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code=None,
+        )
+        command.status = "voided"
+        command.reason_code = "TARGET_COMMENT_DELETED"
+        reply.status = "failed"
+        reply.last_error = "대상 댓글이 삭제되어 답변을 보내지 못했습니다"
+        return
+
+    try:
+        from app.models.channel_connection import ChannelConnection
+        from app.services.channel_adapters import get_publish_client_module
+        from app.services.channel_connection import decrypt_for_use
+        from app.services.threads_publish import ThreadsPublishError
+
+        connection = await db.get(ChannelConnection, command.destination)
+        if connection is None or connection.status != "active":
+            error_code, last_error = "CHANNEL_CONNECTION_NOT_ACTIVE", f"연결이 활성 상태가 아닙니다: {command.destination}"
+            raise _CommentReplySendFailed()
+        access_token = decrypt_for_use(connection)
+        if access_token is None:
+            error_code, last_error = "CHANNEL_CONNECTION_NOT_ACTIVE", "연결에 자격이 없습니다"
+            raise _CommentReplySendFailed()
+
+        _publish_client = get_publish_client_module(comment.channel)
+        import httpx
+
+        try:
+            async with httpx.AsyncClient() as client:
+                external_reply_id, external_reply_url = await _publish_client.reply(
+                    client, access_token=access_token, threads_user_id=connection.account_id,
+                    reply_to_id=comment.external_comment_id, text=reply.text,
+                )
+        except ThreadsPublishError as exc:
+            if exc.status_code in (401, 403):
+                error_code = "CHANNEL_TOKEN_EXPIRED"
+            elif exc.status_code == 429:
+                error_code = "CHANNEL_RATE_LIMITED"
+            else:
+                error_code = "CHANNEL_PUBLISH_PROVIDER_ERROR"
+            last_error = str(exc)
+            raise _CommentReplySendFailed() from exc
+
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=True,
+            started_at=attempt_started_at, finished_at=now, result_code="published",
+        )
+        reply.status = "sent"
+        reply.external_reply_id = external_reply_id
+        reply.external_reply_url = external_reply_url
+        reply.last_error = None
+        command.status = "completed"
+        command.last_error = None
+        command.failure_kind = None
+        return
+    except _CommentReplySendFailed:
+        pass
+    except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
+        last_error = str(exc)
+        logger.exception("comment_reply publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+
+    await record_publication_attempt(
+        db, command=command, approval_check="ok", adapter_called=error_code is not None,
+        started_at=attempt_started_at, finished_at=now, result_code=error_code,
+    )
+    reply.status = "failed"
+    reply.last_error = (last_error or "")[:2000]
+    await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)
+
+
+class _CommentReplySendFailed(Exception):
+    """워커 내부 제어흐름 전용(에러코드는 이미 위에서 채워 놨다) — 도메인 예외가 아님."""
 
 
 async def apply_command_failure(

@@ -1560,6 +1560,25 @@ async def transition_gate_endpoint(
                     "current_head_sha": _known_head_sha,
                 },
             )
+    # story #3516 조각②(페드루 PO 確定 2026-09-05, AC4) — 댓글 답변 게이트(scope_key=
+    # "comment:{comment_id}")의 승인은, 대상 댓글이 그새 삭제됐으면 명령을 만들지
+    # 않고 즉시 409로 거부한다(위 merge-gate SHA 체크와 동형 위치 — gate_service.py
+    # 의 자동 커맨드 생성 훅은 HTTP 에러를 못 내니 승인 요청 자체를 여기서 막는다).
+    if body.status == "approved" and _gate is not None and _gate.gate_type == "external_publish":
+        from app.services.channel_post_comment_replies import (
+            CommentReplyTargetDeletedError, check_target_comment_not_deleted_or_raise,
+        )
+
+        try:
+            await check_target_comment_not_deleted_or_raise(session, gate=_gate)
+        except CommentReplyTargetDeletedError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "COMMENT_REPLY_TARGET_DELETED",
+                    "message": "답변 대상 댓글이 삭제되어 승인할 수 없습니다.",
+                },
+            ) from exc
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id

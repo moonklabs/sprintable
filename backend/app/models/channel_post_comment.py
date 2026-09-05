@@ -49,7 +49,11 @@ class ChannelPostCommentReply(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     comment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    gate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    # story #3516 조각②(마이그 0339, 페드루 착수 직후 디디 자가발견) — 0338이
+    # gate_id를 NOT NULL로 냈었는데, 답변 흐름은 draft(에이전트도 작성 가능)→submit
+    # (사람, 이 시점에 gate 생성) 2단계라 draft 행 시점엔 gate 자체가 없다. status=
+    # "draft"인 동안은 null, submit이 채운다.
+    gate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     command_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     # 'draft'|'pending'|'approved'|'sent'|'failed' — 조각②가 정의(조각①은 미사용).
