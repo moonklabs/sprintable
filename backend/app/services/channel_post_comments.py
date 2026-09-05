@@ -26,6 +26,23 @@ BATCH_SIZE = 50
 _COLLECTION_OFFSETS = (timedelta(hours=1), timedelta(days=1), timedelta(days=7))
 _REFRESH_MIN_INTERVAL = timedelta(minutes=5)
 
+# story #3528(PO 確定 2026-09-06) — 「지속 폴링」. due 3창(위) 뒤에도 "활성" 게시물은
+# 이 주기로 자기재생성한다(due 3창을 대체하지 않음 — additive, 둘이 겹쳐도 upsert라
+# 무해). 값은 채널 무관 서비스 상수(ChannelAdapterConfig가 아니라 여기).
+_CONTINUOUS_POLL_INTERVAL = timedelta(minutes=30)
+# "활성 게시물" = published_at 이후 이 기간 이내 AND (댓글 0건이거나 마지막 댓글
+# external_created_at으로부터 _ACTIVE_LAST_COMMENT_WITHIN 이내). 둘 다 벗어나면
+# due 3창만(재생성 0, 자연 소멸).
+_ACTIVE_PUBLISHED_WITHIN = timedelta(days=14)
+_ACTIVE_LAST_COMMENT_WITHIN = timedelta(days=7)
+# org당 지속 폴링(30분 주기) 대상 상한 — 초과분(published_at 기준 201번째부터)은
+# due 3창만 유지(재생성 0). Threads/IG rate limit 대비 계산(PR 본문): 상한 200 ×
+# (24h/30분=48회) = org당 하루 최대 9,600회 fetch_replies 호출 — Threads 유기
+# 게시물 API의 일반적인 앱 레벨 한도(수만~수십만/일, 앱 사용량 등급별) 대비 여유.
+_ACTIVE_PUBLICATIONS_ORG_CAP = 200
+# transient(429/5xx) 백오프 — next_attempt_at = now + min(2^attempt_count분, 60분).
+_TRANSIENT_BACKOFF_CAP_MINUTES = 60
+
 
 class CommentFetchError(Exception):
     """어댑터 fetch_replies 실패 통로. error_code는 `publication_command.py::
@@ -253,15 +270,99 @@ async def collect_comments_for_publication(
     }
 
 
+async def _is_publication_active(db: AsyncSession, *, publication_id: uuid.UUID, now: datetime) -> bool:
+    """story #3528 PO 確定 — published_at 이후 14일 이내 AND (댓글 0건이거나 마지막
+    댓글 external_created_at으로부터 7일 이내). publication을 못 찾거나 published_at
+    자체가 없으면(발행 전 상태를 이 경로가 볼 리 없지만 방어) 비활성으로 fail-closed."""
+    from app.models.channel_publication import ChannelPublication
+
+    pub = await db.get(ChannelPublication, publication_id)
+    if pub is None or pub.published_at is None:
+        return False
+    if now - pub.published_at > _ACTIVE_PUBLISHED_WITHIN:
+        return False
+    last_comment_at = (await db.execute(
+        select(func.max(ChannelPostComment.external_created_at)).where(
+            ChannelPostComment.publication_id == publication_id, ChannelPostComment.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if last_comment_at is None:
+        return True
+    return now - last_comment_at <= _ACTIVE_LAST_COMMENT_WITHIN
+
+
+async def _within_org_continuous_poll_cap(
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, now: datetime,
+) -> bool:
+    """story #3528 PO 確定 — org당 상한 200, "최신 발행 순"으로 자른다. 이 publication
+    보다 더 최근에 발행됐고(published_at 내림차순) 아직 14일 활성 창 안인 publication
+    개수를 세어 200개 미만이면(=이 publication의 순위가 200 이내) 통과. 정확한
+    "활성"(마지막 댓글 7일 축까지) 순위가 아니라 published_at만으로 근사 — PO 문구
+    "최신 발행 순"과 일치하고, 매 재생성마다 org 전체의 댓글 최신성까지 다시 계산하는
+    비용을 피한다.
+
+    페드루 PO 비차단①(2026-09-06, #3882 리뷰) — 순위 카운트를 댓글 수집 자체를
+    지원하는 채널(어댑터 `supports_fetch_replies=True`)로 제한한다. 원래 구현은
+    org의 모든 channel_publications(예: hosted_site처럼 댓글 수집이 아예 없는
+    채널)까지 셌는데, 그런 발행물은 이 폴링 자원을 절대 안 쓰니 순위를 부풀려
+    실제로 폴링 대상인 publication이 상한 밖으로 밀리는 왜곡이 있었다."""
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    pub = await db.get(ChannelPublication, publication_id)
+    if pub is None or pub.published_at is None:
+        return False
+    comment_capable_channels = [
+        channel for channel, adapter in CHANNEL_ADAPTERS.items() if adapter.supports_fetch_replies
+    ]
+    more_recent_count = (await db.execute(
+        select(func.count()).select_from(ChannelPublication).where(
+            ChannelPublication.org_id == org_id,
+            ChannelPublication.channel.in_(comment_capable_channels),
+            ChannelPublication.published_at.is_not(None),
+            ChannelPublication.published_at > pub.published_at,
+            ChannelPublication.published_at >= now - _ACTIVE_PUBLISHED_WITHIN,
+        )
+    )).scalar_one()
+    return more_recent_count < _ACTIVE_PUBLICATIONS_ORG_CAP
+
+
+async def _schedule_next_continuous_poll_if_active(
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, channel: str,
+    external_id: str | None, now: datetime,
+) -> None:
+    """story #3528 — due 행이 captured/failed로 끝난 뒤(호출부가 그 경우에만 부른다)
+    이 publication이 아직 활성이고 org 상한 안이면 30분 뒤 다음 due 행을 자기재생성
+    한다. 비활성으로 떨어지거나 상한 밖이면 재생성 0(자연 소멸 — due 3창은 이미
+    끝났으니 더는 아무 행도 안 남는다)."""
+    if not await _is_publication_active(db, publication_id=publication_id, now=now):
+        return
+    if not await _within_org_continuous_poll_cap(db, org_id=org_id, publication_id=publication_id, now=now):
+        return
+    stmt = pg_insert(CommentCollectionSchedule).values(
+        id=uuid.uuid4(), org_id=org_id, publication_id=publication_id, channel=channel,
+        external_id=external_id, due_at=now + _CONTINUOUS_POLL_INTERVAL, status="pending",
+    ).on_conflict_do_nothing(constraint="uq_comment_collection_schedule_publication_due_at")
+    await db.execute(stmt)
+
+
 async def process_due_comment_collections(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """`insight_snapshots.py::process_due_insight_snapshots`와 동형 SKIP LOCKED 2단계
     커밋(클레임 commit → 개별 처리 commit/rollback 격리)."""
     from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION, FAILURE_KIND_TRANSIENT
 
+    from sqlalchemy import or_
+
     now = now or datetime.now(timezone.utc)
     rows = (await db.execute(
         select(CommentCollectionSchedule).where(
             CommentCollectionSchedule.status == "pending", CommentCollectionSchedule.due_at <= now,
+            # story #3528 — transient 백오프 지연 존중(next_attempt_at IS NULL=기존
+            # 행·최초 시도라 그대로 즉시 집힘, 회귀 0).
+            or_(
+                CommentCollectionSchedule.next_attempt_at.is_(None),
+                CommentCollectionSchedule.next_attempt_at <= now,
+            ),
         ).order_by(CommentCollectionSchedule.due_at.asc())
         .limit(BATCH_SIZE)
         .with_for_update(skip_locked=True)
@@ -291,6 +392,10 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
                     await _promote_connection_status(db, publication_id=row.publication_id, channel=row.channel)
                     row.status = "failed"
                     row.error_code = exc.error_code
+                    await _schedule_next_continuous_poll_if_active(
+                        db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
+                        external_id=row.external_id, now=now,
+                    )
                     await db.commit()
                     counts["failed"] += 1
                 elif failure_kind == FAILURE_KIND_TRANSIENT:
@@ -298,15 +403,29 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
                     row.error_code = exc.error_code
                     if row.attempt_count >= 5:
                         row.status = "failed"
+                        await _schedule_next_continuous_poll_if_active(
+                            db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
+                            external_id=row.external_id, now=now,
+                        )
                         await db.commit()
                         counts["failed"] += 1
                     else:
+                        # story #3528 — 지수 백오프(2^attempt_count분, 60분 상한).
+                        # pending_retry는 이 행 자체가 아직 안 끝났으니(재생성 대상
+                        # 아님) 여기선 _schedule_next_continuous_poll_if_active를
+                        # 안 부른다 — 이 행이 나중에 captured/failed로 끝나야 부른다.
                         row.status = "pending"
+                        delay_minutes = min(2 ** row.attempt_count, _TRANSIENT_BACKOFF_CAP_MINUTES)
+                        row.next_attempt_at = now + timedelta(minutes=delay_minutes)
                         await db.commit()
                         counts["pending_retry"] += 1
                 else:
                     row.status = "failed"
                     row.error_code = exc.error_code
+                    await _schedule_next_continuous_poll_if_active(
+                        db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
+                        external_id=row.external_id, now=now,
+                    )
                     await db.commit()
                     counts["failed"] += 1
                 continue
@@ -318,12 +437,20 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
             # upsert 자체는 성공했다 — status는 "captured" 그대로 두고 error_code로만
             # "다 못 봤다"를 남긴다(다음 due 창이 이어서 본다, 실패로 재시도 대상 X).
             row.error_code = None if result["complete"] else "COMMENT_COLLECTION_INCOMPLETE_PAGE"
+            await _schedule_next_continuous_poll_if_active(
+                db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
+                external_id=row.external_id, now=now,
+            )
             await db.commit()
             counts["captured"] += 1
         except Exception:  # noqa: BLE001 — 이 행 하나만 막는다(전체 배치 안 죽음).
             await db.rollback()
             row.status = "failed"
             row.error_code = "COMMENT_COLLECTION_UNCLASSIFIED_ERROR"
+            await _schedule_next_continuous_poll_if_active(
+                db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
+                external_id=row.external_id, now=now,
+            )
             await db.commit()
             counts["failed"] += 1
 

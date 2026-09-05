@@ -91,4 +91,7 @@ class CommentCollectionSchedule(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3528(마이그 0341, additive) — transient 백오프. NULL=대기 없음(기존
+    # 행·최초 시도). tick은 `next_attempt_at IS NULL OR <= now`만 집는다.
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
