@@ -140,6 +140,20 @@ function realStr(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+// story #3479 PO 보정(2026-09-05, PR#3830 리뷰) — ChannelPublication.status 4종
+// (backend/app/models/channel_publication.py 그라운딩: container_created·published·
+// failed·unpublished). 모르는 값은 원문 노출 대신 제네릭 폴백(§17-4 "맵에 없는
+// 값이 오면 원시값을 그대로 노출하지 않는다"와 동형 원칙).
+function externalPublicationStatusLabelKey(status: string): string {
+  switch (status) {
+    case 'published': return 'externalPublicationStatusPublished';
+    case 'unpublished': return 'externalPublicationStatusUnpublished';
+    case 'container_created': return 'externalPublicationStatusPending';
+    case 'failed': return 'externalPublicationStatusFailed';
+    default: return 'externalPublicationStatusUnknown';
+  }
+}
+
 // story 15e481ce(#3453 AC1) — 활성 소셜 연결(어댑터가 사회형이라는 것은 애초에 connection
 // row가 존재한다는 사실 자체로 이미 참이다 — hosted_site는 requires_connection=false라
 // connection row가 없다, backend/app/services/channel_adapters.py 그라운딩). 그래서
@@ -1045,6 +1059,13 @@ export default function ContentPostEditPage() {
           </div>
           {publication.channel_publication ? (
             <>
+              {/* PO 보정(2026-09-05, PR#3830 리뷰) — status를 안 보이면 회수된 글
+                  (b1c2feba·241da9a3, status='unpublished')도 permalink+published_at만
+                  보여 "아직 실려 있다"로 읽힌다. 상태를 별도 한 줄로. */}
+              <div>
+                <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationStatusLabel')}</span>{' '}
+                {t(externalPublicationStatusLabelKey(publication.channel_publication.status))}
+              </div>
               <div>
                 <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
                 {publication.channel_publication.permalink ? (
@@ -1059,6 +1080,12 @@ export default function ContentPostEditPage() {
                 <div>
                   <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
                   {formatScheduledAt(publication.channel_publication.published_at, displayTimezone).display}
+                </div>
+              ) : null}
+              {publication.channel_publication.status === 'unpublished' && publication.channel_publication.unpublished_at ? (
+                <div>
+                  <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationUnpublishedAtLabel')}</span>{' '}
+                  {formatScheduledAt(publication.channel_publication.unpublished_at, displayTimezone).display}
                 </div>
               ) : null}
             </>

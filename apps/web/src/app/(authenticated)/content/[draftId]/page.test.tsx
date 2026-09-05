@@ -1512,4 +1512,29 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     const info = container.querySelector('[data-testid="content-external-publication-info"]')!;
     expect(info.querySelector('a')).toBeNull();
   });
+
+  it('⭐PO 보정(2026-09-05, PR#3830) — 회수된 글(status=unpublished)은 회수됨 문구+회수 시각을 보이고, permalink는 사실이니 그대로 링크로 남는다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'wordpress',
+        channel_publication: {
+          status: 'unpublished', external_id: 'post-123', permalink: 'https://blog.example.com/hello',
+          published_at: '2026-09-01T00:00:00Z', unpublished_at: '2026-09-04T00:00:00Z', last_error: null,
+        },
+        command: null,
+      },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    const info = container.querySelector('[data-testid="content-external-publication-info"]')!;
+    expect(info.textContent).toContain(koMessages.content.externalPublicationStatusUnpublished);
+    // 발행 이후 회수된 것도 사실이라 permalink는 그대로 링크로 남는다("아직 실려
+    // 있다"로 읽히는 것을 막는 건 상태 문구의 몫이지, 링크를 지우는 게 아니다).
+    expect(info.querySelector('a[href="https://blog.example.com/hello"]')).not.toBeNull();
+    const expectedTz = resolveDisplayTimezone().tz;
+    expect(info.textContent).toContain(formatScheduledAt('2026-09-04T00:00:00Z', expectedTz).display);
+  });
 });
