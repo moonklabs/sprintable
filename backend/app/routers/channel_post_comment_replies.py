@@ -112,14 +112,53 @@ class ReplyView(BaseModel):
             "target_comment_state 판정은 여전히 target_text_sha256(비노출)만 쓴다."
         ),
     )
+    # story #3529(additive, 유나 §22-15 채택) — PublicationCommand 4필드 그대로
+    # (새 이름/새 값 0). command_id가 null이면 넷 다 null.
+    command_status: str | None = Field(
+        default=None,
+        description=(
+            "PublicationCommand.status 그대로 — 다음 할 일이 갈리는 네 값(유나 §22-15): "
+            "\"pending\"(백오프 대기 중, 기다리면 자동 재시도) · \"blocked\"(연결 복구 "
+            "필요, 사람이 재인증해야 함) · \"dead_letter\"(자동 재시도 포기, 사람 판단 "
+            "필요) · \"voided\"(전제가 바뀌어 종결, 재시도 개념 자체가 안 맞음). "
+            "그 외 \"completed\" 등은 성공/진행 중."
+        ),
+    )
+    failure_kind: str | None = Field(
+        default=None,
+        description="유나 design §11-5 세 값(connection|needs_check|transient) — 실패 없었으면 null.",
+    )
+    next_attempt_at: str | None = Field(
+        default=None, description="transient 백오프 다음 시도 시각(ISO) — 없으면 null.",
+    )
+    reason_code: str | None = Field(
+        default=None,
+        description=(
+            "voided 사유(실재 값 그대로, 새 이름 짓지 않음) — "
+            "\"GATE_NOT_APPROVED_OR_RESEALED\"(게이트 재검증 실패) 또는 "
+            "\"TARGET_COMMENT_DELETED\"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스). "
+            "voided 아니면 null."
+        ),
+    )
 
 
-def _reply_view(reply, target_comment_state: str | None, target_text: str | None = None) -> ReplyView:
+async def _reply_view(
+    db: AsyncSession, reply, target_comment_state: str | None, target_text: str | None = None,
+) -> ReplyView:
+    command = None
+    if reply.command_id is not None:
+        from app.models.publication_command import PublicationCommand
+
+        command = await db.get(PublicationCommand, reply.command_id)
     return ReplyView(
         id=reply.id, comment_id=reply.comment_id, text=reply.text, status=reply.status, gate_id=reply.gate_id,
         command_id=reply.command_id,
         external_reply_id=reply.external_reply_id, external_reply_url=reply.external_reply_url,
         last_error=reply.last_error, target_comment_state=target_comment_state, target_text=target_text,
+        command_status=command.status if command is not None else None,
+        failure_kind=command.failure_kind if command is not None else None,
+        next_attempt_at=command.next_attempt_at.isoformat() if command is not None and command.next_attempt_at else None,
+        reason_code=command.reason_code if command is not None else None,
     )
 
 
@@ -159,7 +198,7 @@ async def create_comment_reply_draft_endpoint(
         )
     except CommentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"댓글을 찾을 수 없습니다: {comment_id}") from exc
-    return _reply_view(reply, None)
+    return await _reply_view(db, reply, None)
 
 
 @router.post(
@@ -207,7 +246,7 @@ async def submit_comment_reply_endpoint(
         ) from exc
 
     view = await get_comment_reply_view(db, org_id=org_id, reply_id=reply.id)
-    return _reply_view(view["reply"], view["target_comment_state"], view["target_text"])
+    return await _reply_view(db, view["reply"], view["target_comment_state"], view["target_text"])
 
 
 @router.get(
@@ -234,4 +273,4 @@ async def get_comment_reply_endpoint(
         view = await get_comment_reply_view(db, org_id=org_id, reply_id=reply_id)
     except CommentReplyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"답변을 찾을 수 없습니다: {reply_id}") from exc
-    return _reply_view(view["reply"], view["target_comment_state"], view["target_text"])
+    return await _reply_view(db, view["reply"], view["target_comment_state"], view["target_text"])

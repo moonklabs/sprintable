@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -45,6 +45,51 @@ class CommentReplySummary(BaseModel):
     status: str
     external_reply_url: str | None
     command_id: uuid.UUID | None
+    # story #3529(additive, 유나 §22-15 채택) — PublicationCommand 4필드 그대로
+    # (새 이름/새 값 0). command_id가 null이면 넷 다 null.
+    command_status: str | None = Field(
+        default=None,
+        description=(
+            "PublicationCommand.status 그대로 — 다음 할 일이 갈리는 네 값(유나 §22-15): "
+            "\"pending\"(백오프 대기 중, 기다리면 자동 재시도) · \"blocked\"(연결 복구 "
+            "필요, 사람이 재인증해야 함) · \"dead_letter\"(자동 재시도 포기, 사람 판단 "
+            "필요) · \"voided\"(전제가 바뀌어 종결, 재시도 개념 자체가 안 맞음). "
+            "그 외 \"completed\" 등은 성공/진행 중."
+        ),
+    )
+    failure_kind: str | None = Field(
+        default=None,
+        description="유나 design §11-5 세 값(connection|needs_check|transient) — 실패 없었으면 null.",
+    )
+    next_attempt_at: str | None = Field(
+        default=None, description="transient 백오프 다음 시도 시각(ISO) — 없으면 null.",
+    )
+    reason_code: str | None = Field(
+        default=None,
+        description=(
+            "voided 사유(실재 값 그대로, 새 이름 짓지 않음) — "
+            "\"GATE_NOT_APPROVED_OR_RESEALED\"(게이트 재검증 실패) 또는 "
+            "\"TARGET_COMMENT_DELETED\"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스). "
+            "voided 아니면 null."
+        ),
+    )
+
+
+def _comment_reply_summary(reply, command_by_id: dict) -> CommentReplySummary:
+    """story #3529 — command_id가 있으면 배치 조회된 PublicationCommand에서 4필드를
+    그대로 옮긴다(command 행 자체가 없으면(레이스·오탐) 4필드 전부 null — fail-closed,
+    지어내지 않는다)."""
+    command = command_by_id.get(reply.command_id) if reply.command_id is not None else None
+    return CommentReplySummary(
+        id=reply.id, status=reply.status, external_reply_url=reply.external_reply_url,
+        command_id=reply.command_id,
+        command_status=command.status if command is not None else None,
+        failure_kind=command.failure_kind if command is not None else None,
+        next_attempt_at=(
+            command.next_attempt_at.isoformat() if command is not None and command.next_attempt_at else None
+        ),
+        reason_code=command.reason_code if command is not None else None,
+    )
 
 
 class CommentItem(BaseModel):
@@ -105,6 +150,7 @@ async def list_publication_comments_endpoint(
         raise HTTPException(status_code=404, detail=f"발행 기록을 찾을 수 없습니다: {publication_id}") from exc
 
     reply_by_comment_id = result["reply_by_comment_id"]
+    command_by_id = result["command_by_id"]
     return CommentListResponse(
         last_collected_at=result["last_collected_at"].isoformat() if result["last_collected_at"] else None,
         comments=[
@@ -113,11 +159,7 @@ async def list_publication_comments_endpoint(
                 text=c.text, external_created_at=c.external_created_at.isoformat() if c.external_created_at else None,
                 captured_at=c.captured_at.isoformat(), deleted_at=c.deleted_at.isoformat() if c.deleted_at else None,
                 reply=(
-                    CommentReplySummary(
-                        id=reply_by_comment_id[c.id].id, status=reply_by_comment_id[c.id].status,
-                        external_reply_url=reply_by_comment_id[c.id].external_reply_url,
-                        command_id=reply_by_comment_id[c.id].command_id,
-                    )
+                    _comment_reply_summary(reply_by_comment_id[c.id], command_by_id)
                     if c.id in reply_by_comment_id else None
                 ),
             )
