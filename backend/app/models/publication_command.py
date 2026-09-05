@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,16 @@ class PublicationCommand(Base):
         UniqueConstraint(
             "org_id", "destination", "approved_version", "operation",
             name="uq_publication_commands_idempotency",
+        ),
+        # story #3516 조각② 라이브 결함 핫픽스(migration 0340, 2026-09-05) — 이
+        # CHECK가 마이그레이션(0323)에만 있고 여기 없어 `Base.metadata.create_all()`
+        # 기반 로컬 테스트가 "comment_reply" 값 추가 시의 CheckViolation을 한 번도
+        # 못 잡았다(모델↔마이그 패리티 갭). 값을 늘릴 때는 이 줄과 0340류 마이그를
+        # 항상 같이 고칠 것 — 여기만 고치면 실제 DB 제약은 그대로 옛 값이라 똑같은
+        # 사고가 재발한다(반대 방향도 마찬가지).
+        CheckConstraint(
+            "content_kind IN ('channel_post', 'site_post', 'comment_reply')",
+            name="ck_publication_commands_content_kind",
         ),
     )
 
