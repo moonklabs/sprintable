@@ -44,7 +44,7 @@ describe('CSP media-src (story #2083 regression guard)', () => {
   });
 });
 
-// story #3532(PO REQUIRED, 유나 발견 2026-09-06) — 브랜드 킷 로고는 고객이 «자기
+// story #3532(PO REQUIRED — 페드루 발견·유나 검토, 2026-09-06) — 브랜드 킷 로고는 고객이 «자기
 // 사이트»에 올린 임의 URL이다(우리 인프라가 아니다) — GCS/아바타류 exact-origin
 // allowlist로는 애초에 못 맞힌다. img-src가 https: 전체를 안 열면 CSP가 멀쩡한
 // URL을 조용히 막고, <img onError>가 그걸 "죽은 링크"로 오판해 화면이 거짓말을
