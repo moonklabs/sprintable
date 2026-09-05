@@ -72,7 +72,12 @@ def _sync_url(db_name: str) -> str:
         url = url.set(drivername="postgresql+psycopg2")
     elif url.drivername == "postgresql":
         url = url.set(drivername="postgresql+psycopg2")
-    return str(url)
+    # 카디르 CI 발견(2026-09-06) — SQLAlchemy 2.x는 `str(URL)`에서 비밀번호를
+    # `***`로 마스킹한다(repr 안전장치). 로컬(trust 인증·비번 없음)에선 우연히
+    # 통과하고 CI(비번 있는 DB)에서만 인증 실패가 나던 이유 — 여기서 만든
+    # URL은 로그로 안 나가고 subprocess env/엔진 접속에만 쓰이니 마스킹 해제가
+    # 안전하다.
+    return url.render_as_string(hide_password=False)
 
 
 def _admin_engine():
