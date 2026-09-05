@@ -404,7 +404,9 @@ async def test_channel_post_draft_create_reports_violation_then_submit_422_then_
 
 @pytest.mark.anyio
 async def test_site_post_draft_banned_term_in_title_blocks_submit():
-    """site_post는 title+summary+body_md 결합 텍스트로 lint — 제목에 금칙어가 있어도
+    """story #3482(2026-09-05 후속) — site_post는 title·summary·body_md 각각 lint한다
+    (#3471의 결합 텍스트 한 덩이 방식은 폐기 — field가 항상 "text"로 와 site_post
+    화면이 어느 필드 아래인지 못 정했다). 제목에 금칙어가 있으면 field="title"로
     잡혀야 한다(body_md만 보면 놓친다)."""
     from app.main import app
 
@@ -436,6 +438,7 @@ async def test_site_post_draft_banned_term_in_title_blocks_submit():
             )
             assert r_draft.status_code == 201, r_draft.text
             assert len(r_draft.json()["violations"]) == 1
+            assert r_draft.json()["violations"][0]["field"] == "title"
             draft_id = r_draft.json()["draft_id"]
 
             r_submit = await client.post(
@@ -443,6 +446,7 @@ async def test_site_post_draft_banned_term_in_title_blocks_submit():
             )
         assert r_submit.status_code == 422, r_submit.text
         assert r_submit.json()["error"]["code"] == "CONTENT_RULE_VIOLATION"
+        assert r_submit.json()["error"]["violations"][0]["field"] == "title"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
