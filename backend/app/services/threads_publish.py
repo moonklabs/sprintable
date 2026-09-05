@@ -191,3 +191,71 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
     body = resp.json()
     permalink = body.get("permalink")
     return str(permalink) if permalink else None
+
+
+_REPLIES_URL_TMPL = "https://graph.threads.net/v1.0/{media_id}/pending_replies"
+# story #3516(Phase2·마케팅운영, 페드루 PO 確定 2026-09-05) — ⚠️미확認(그라운딩①,
+# threads_publish.py 상단 딱지와 동형): 실 fetch(2026-09-05, developers.facebook.com/
+# docs/threads/reply-management)로 이 엔드포인트·필드·커서 페이지네이션(before/after)은
+# 확認했으나, 그 문서 자체가 "moderation pending queue" 프레이밍이라 "소유 게시물의
+# 모든 댓글"과 정확히 같은 것인지는 라이브 왕복 전엔 확실하지 않다. sandbox까지가 이
+# 스토리 라이브 범위(PO 明示) — Threads 실계정 시점에 재확認 필요.
+_REPLIES_FIELDS = "id,text,username,timestamp,has_replies,is_reply,hide_status,reply_approval_status"
+# 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — 이 media의 댓글이 한 페이지를
+# 넘으면 첫 페이지만 보고 "응답에 없다=삭제됐다"로 리컨실하는 순간 2페이지 이후
+# 댓글이 매 수집마다 조용히 소프트 삭제되는 결함이 있었다(sandbox=항상 2건 고정
+# 이라 테스트가 못 잡던 자리). 이 상한(10페이지)까지 커서를 따라가고, 그 안에서
+# 끝(after 커서 소진)에 닿으면 complete=True, 상한에 걸리면 False — "지속
+# 폴링/커서는 후속"이라는 PO 決定은 유지하되(한도 밖은 다음 due 창이 또 시도),
+# "이번 한 번의 수집이 완전한가"만 이 반환값으로 호출부(리컨실 여부 판단)에 알린다.
+_REPLIES_MAX_PAGES = 10
+
+
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+    """이 media의 댓글 목록 + 완전 수집 여부. `paging.cursors.after`로 최대
+    `_REPLIES_MAX_PAGES`페이지까지 따라간다 — 더 볼 커서가 없으면 (items, True),
+    상한에 걸려 아직 더 남았으면 (items, False)(그 페이지들은 유실이 아니라 다음
+    due 창에 다시 시도)."""
+    items: list[dict] = []
+    after_cursor: str | None = None
+    for _ in range(_REPLIES_MAX_PAGES):
+        params = {"fields": _REPLIES_FIELDS, "access_token": access_token}
+        if after_cursor:
+            params["after"] = after_cursor
+        resp = await client.get(_REPLIES_URL_TMPL.format(media_id=media_id), params=params)
+        if resp.status_code != 200:
+            raise ThreadsPublishError(
+                "THREADS_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
+            )
+        body = resp.json()
+        items.extend(body.get("data") or [])
+        after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
+        if not after_cursor:
+            return items, True
+    return items, False
+
+
+async def reply(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, reply_to_id: str, text: str,
+) -> tuple[str, str | None]:
+    """댓글에 답변 — ⚠️미확認(그라운딩①): 전용 reply 엔드포인트를 문서에서 못 찾아
+    일반 게시물 2-step(컨테이너 생성→publish)에 `reply_to_id`를 얹는 형태로 최선
+    추정한다(Instagram Graph API의 댓글 구조와 동형 관례를 참고한 추정 — Meta
+    공식 문서로 확認된 값 아님). 라이브 왕복 전 미검증 상태 그대로 둔다(create_
+    container/publish_container를 그대로 재사용해 신규 HTTP 로직을 새로 안 짠다)."""
+    params = {"access_token": access_token, "media_type": "TEXT", "text": text, "reply_to_id": reply_to_id}
+    resp = await client.post(_CONTAINER_URL_TMPL.format(user_id=threads_user_id), params=params)
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "THREADS_REPLY_CREATE_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    creation_id = resp.json().get("id")
+    if not creation_id:
+        raise ThreadsPublishError(
+            "THREADS_REPLY_CREATE_CONTAINER_MISSING_ID", "id missing in response", status_code=resp.status_code,
+        )
+    external_reply_id = await publish_container(
+        client, access_token=access_token, threads_user_id=threads_user_id, creation_id=str(creation_id),
+    )
+    permalink = await get_permalink(client, access_token=access_token, media_id=external_reply_id)
+    return external_reply_id, permalink

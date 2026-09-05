@@ -59,6 +59,9 @@ class InsightsBoardRow(BaseModel):
     connection_id: uuid.UUID | None
     d1: InsightSnapshotBucketView | None
     d7: InsightSnapshotBucketView | None
+    # story #3516 — null="site_post(댓글 개념 없음)"·정수="channel_publication의 지금
+    # 댓글 수"(미수집·0건 둘 다 0 — 정밀 구분은 댓글 목록 API 몫).
+    comments_count: int | None = None
 
 
 class InsightsBoardResponse(BaseModel):

@@ -220,6 +220,14 @@ async def list_insights_board(
         for snap in snap_rows:
             snapshots_by_pub.setdefault(snap.publication_id, []).append(snap)
 
+    # story #3516 — comments_count 배치(N+1 회피, 위 스냅샷 배치와 동형). site_post
+    # 행(kind="site_post")은 애초에 이 스토리 범위 밖(hosted_site 댓글 개념 자체가
+    # 없다)이라 null 그대로 — channel_publication 행만 배치 대상.
+    from app.services.channel_post_comments import count_comments_by_publication_ids
+
+    channel_pub_ids = [r.publication_id for r in page if r.kind == "channel_publication"]
+    comments_count_by_pub = await count_comments_by_publication_ids(db, publication_ids=channel_pub_ids)
+
     rows_out = []
     for r in page:
         # due_at은 anchor_at(=published_at) + offset로 스케줄됐다(schedule_insight_
@@ -239,6 +247,11 @@ async def list_insights_board(
             "work_item_id": r.work_item_id, "title": r.title, "published_at": r.published_at,
             "external_url": r.external_url, "connection_id": r.connection_id,
             "d1": _snapshot_view(d1), "d7": _snapshot_view(d7),
+            # null="이 kind는 댓글 개념이 없다(site_post)"·정수="channel_publication의
+            # 지금 안 지워진 댓글 수". 보드는 개요라 «미수집»과 «수집됐는데 0건»을
+            # 안 가른다(둘 다 0) — 그 구분은 댓글 목록 API(list_comments_for_publication
+            # 의 last_collected_at)의 몫으로 남긴다(정밀도가 필요한 자리는 거기).
+            "comments_count": comments_count_by_pub.get(r.publication_id, 0) if r.kind == "channel_publication" else None,
         })
 
     next_cursor = None

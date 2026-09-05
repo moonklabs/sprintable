@@ -1357,6 +1357,15 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
         publication_kind="channel_publication", channel=connection.channel,
         external_id=row.external_id, anchor_at=row.published_at,
     )
+    # story #3516 — 댓글 수집 잡 등록(wordpress/webhook은 supports_fetch_replies
+    # 미선언이라 워커가 즉시 unsupported로 끝난다, channel_posts.py::publish_channel_
+    # post_draft와 동형 처방).
+    from app.services.channel_post_comments import schedule_comment_collection
+
+    await schedule_comment_collection(
+        db, org_id=command.org_id, publication_id=row.id, channel=connection.channel,
+        external_id=row.external_id, anchor_at=row.published_at,
+    )
     return row
 
 
