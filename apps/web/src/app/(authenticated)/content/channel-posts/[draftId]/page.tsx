@@ -206,9 +206,14 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
         sizeBytes: typeof info.imageSizeBytes === 'number' ? formatFileSize(info.imageSizeBytes) : '',
       });
     case 'image_aspect_ratio_exceeded':
+      // story #3530 REQUIRED 2(유나 Design 변경요청 3건, PO 채택 2026-09-06) —
+      // ① 이 갈래도 formatAspectBound로(전엔 toFixed(1)라 IG 1.91이 「1.9」로 태그
+      // 「1.91:1」과 다른 수였다). ③ Threads류(min=0, 정규화 비율이라 방향을 모른다)는
+      // 방향 있는 문구("가로가 너무 깁니다" 류) 금지 — 값을 아는 하한 갈래만 방향을
+      // 말한다(too_narrow의 "세로가 너무 깁니다.").
       return t('channelPostsImageAspectRatioExceeded', {
-        maxAspectRatio: info.imageMaxAspectRatio?.toFixed(1) ?? '',
-        aspectRatio: info.imageAspectRatio?.toFixed(2) ?? '',
+        maxAspectRatio: typeof info.imageMaxAspectRatio === 'number' ? formatAspectBound(info.imageMaxAspectRatio) : '',
+        aspectRatio: typeof info.imageAspectRatio === 'number' ? formatAspectBound(info.imageAspectRatio) : '',
       });
     case 'image_aspect_ratio_too_narrow':
       // story #3530 REQUIRED 1(PO 재대조 2026-09-06) — 하한 미달(세로가 너무 긴

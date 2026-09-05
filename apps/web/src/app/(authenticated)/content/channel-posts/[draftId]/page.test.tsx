@@ -2078,6 +2078,38 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(errorText).not.toContain('0.8');
     expect(errorText).not.toContain('0.56');
   });
+
+  // story #3530 REQUIRED 2(유나 Design 변경요청, PO 채택 2026-09-06) — exceeded
+  // 갈래도 formatAspectBound로(전엔 toFixed(1)라 IG 1.91이 「1.9」로 태그와 다른
+  // 수였다) + 방향 없는 문구("이미지가 너무 길쭉합니다" — "가로가 너무 깁니다"류
+  // 금지, Threads류는 정규화 비율이라 방향을 모른다).
+  it('⭐#3530 REQUIRED 2 — CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED(422) — 태그와 같은 형(「1.91:1」)+방향 없는 문구', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageConfirm: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED', message: '…', aspect_ratio: 12.5, max_aspect_ratio: 1.91 } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('1.91:1');
+    expect(errorText).not.toContain('1.9인데');
+    expect(errorText).not.toContain('가로');
+    expect(errorText).not.toContain('세로');
+  });
 });
 
 // story #3428(T5-M·§17-14) — 승인 카드 썸네일 + 자동 변환 배지.

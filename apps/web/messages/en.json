@@ -2517,7 +2517,7 @@
     "channelPostsImageUploadInProgressReason": "You can't save or submit until the image upload finishes.",
     "channelPostsImageUnsupportedFormat": "Unsupported format — {contentType} (allowed: {allowed})",
     "channelPostsImageTooLarge": "Only {maxBytes} or less can be attached, but this is {sizeBytes}",
-    "channelPostsImageAspectRatioExceeded": "The aspect ratio limit is {maxAspectRatio}:1, but this is {aspectRatio}:1",
+    "channelPostsImageAspectRatioExceeded": "This image is too elongated. The maximum aspect ratio is {maxAspectRatio}, but this is {aspectRatio}",
     "channelPostsImageAspectRatioTooNarrow": "This image is too tall. The minimum aspect ratio is {minAspectRatio}, but this is {aspectRatio}",
     "channelPostsImageConversionFailed": "Even after automatic conversion, this still exceeds the {maxBytes} limit ({finalBytes})",
     "channelPostsImageAnimatedUnsupported": "Animated images aren't supported ({frameCount} frames)",
