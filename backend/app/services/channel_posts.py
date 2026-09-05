@@ -1447,6 +1447,16 @@ async def publish_channel_post_draft(
         publication_kind="channel_publication", channel=connection.channel,
         external_id=row.external_id, anchor_at=row.published_at,
     )
+    # story #3516 — 댓글 수집 잡 등록(channel_publications 축만, hosted_site는 이
+    # 스토리 범위 밖). 어댑터가 supports_fetch_replies를 안 선언했으면 워커가 즉시
+    # unsupported로 끝낸다(insight_snapshots.py의 "빈 insight_metrics" 관례 그대로,
+    # 이 호출부는 채널을 안 가린다 — 판정은 워커/collect 함수 한 곳에만).
+    from app.services.channel_post_comments import schedule_comment_collection
+
+    await schedule_comment_collection(
+        db, org_id=org_id, publication_id=row.id, channel=connection.channel,
+        external_id=row.external_id, anchor_at=row.published_at,
+    )
     await db.commit()
     return row
 

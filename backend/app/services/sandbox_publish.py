@@ -135,3 +135,35 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
     # AC3 "기본 성공" — 회수(unpublish) 실패 시뮬레이션은 이 스토리 스코프 밖으로 명시
     # 배제(story 본문 마커 목록에 unpublish용 마커가 없다).
     return None
+
+
+# story #3516(Phase2·마케팅운영, 페드루 PO 確定 2026-09-05) — 댓글 조회/답변. 결정적
+# (media_id 하나에 항상 같은 2건) — "삭제됨" 상태 재현은 이 함수 자체가 흉내내지 않는다
+# (media_id만 받아 텍스트 마커 채널이 없다). 대신 이 파일의 어느 함수도 서버 메모리를
+# 안 쓰는 설계 그대로 유지하고, 수집 서비스(channel_post_comments.py)가 "이전엔 잡혔는데
+# 이번 fetch엔 없다"를 diff로 판정해 soft-delete한다(테스트는 두 번째 호출을
+# monkeypatch로 comment 하나 뺀 리스트로 바꿔 이 경로를 재현한다) — 일반적인 리컨실
+# 로직이라 sandbox뿐 아니라 실 Threads 응답에도 그대로 먹힌다.
+def _deterministic_comment(*, media_id: str, index: int) -> dict:
+    seed = int(uuid.uuid5(uuid.NAMESPACE_URL, f"{media_id}:{index}").hex[:8], 16)
+    return {
+        "id": f"sandbox-comment-{media_id}-{index}",
+        "text": f"샌드박스 댓글 {index}(seed={seed % 1000})",
+        "username": f"sandbox_user_{index}",
+        "timestamp": "2026-09-05T00:00:00+00:00",
+    }
+
+
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> list[dict]:
+    """AC(조각①) "기본 2건" — media_id 하나엔 항상 같은 2건(순서도 고정, 테스트가
+    인덱스로 단언 가능)."""
+    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)]
+
+
+async def reply(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, reply_to_id: str, text: str,
+) -> tuple[str, str | None]:
+    """조각①은 write 0(선언만) — 이 함수는 조각②가 실제로 호출한다. 시그니처를 지금
+    확정해 두는 이유는 `get_publish_client_module` 디스패치가 이미 이 모듈을 아는
+    채로 조각② 코드가 바로 얹히게(신규 디스패치 로직 0)."""
+    return f"sandbox-reply-{uuid.uuid4().hex}", f"https://sandbox.invalid/reply/{reply_to_id}"

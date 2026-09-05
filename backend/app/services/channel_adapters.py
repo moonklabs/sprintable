@@ -84,6 +84,17 @@ class ChannelAdapterConfig:
     # 스토리의 척추). 빈 튜플(기본값)=fetch_insights 자체가 없는 채널(어댑터 미선언
     # → insight_snapshots.status="unsupported" 즉시, adapter 호출 0).
     insight_metrics: tuple[str, ...] = ()
+    # story #3516(Phase2·마케팅운영, 페드루 PO 確定 2026-09-05) — supports_unpublish·
+    # unpublish_required_scope와 동형 관례(채널의 성질을 여기 한 곳에 선언). 미선언
+    # (기본 False)=댓글 수집 잡이 즉시 "unsupported"로 끝난다(adapter 호출 0, insight_
+    # snapshot의 "빈 튜플=fetch_insights 없음"과 동형 사상).
+    supports_fetch_replies: bool = False
+    supports_reply: bool = False
+    # 답변(reply)을 실제로 실행하려면 연결이 이 스코프를 갖고 있어야 한다(None=이
+    # 어댑터는 스코프 요구 없음). fetch_replies 쪽은 별도 요구 스코프를 안 둔다(PO
+    # 明示 — 읽기는 기존 연결 스코프로 충분하다는 전제, 조각①은 sandbox까지가 라이브
+    # 범위라 실제 부족 여부는 Threads 실계정 왕복 시점에 재확認).
+    reply_required_scope: str | None = None
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -94,7 +105,12 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # developers.facebook.com/docs/threads/posts/delete-posts/ 2026-09-04). 기존
         # 연결은 이 스코프 없이 이미 저장돼 있어 재인증 전까지 회수가 막힌다(의도, PO
         # 확定 — 새 연결부터 자동 해소).
-        scope="threads_basic,threads_content_publish,threads_delete",
+        # story #3516 — threads_manage_replies 추가(답변 API 스코프 후보 — 그라운딩
+        # ①에서 fetch로 명시 확認 못 함, "미확인 딱지"·Threads 실계정 왕복 시점에
+        # 재확認 필요, 조각①은 sandbox까지가 라이브 범위라 이 스코프 자체는 지금
+        # 실사용 안 됨). threads_delete와 동일 이유로 기존 연결은 재인증 전까지
+        # 답변이 막힌다(의도).
+        scope="threads_basic,threads_content_publish,threads_delete,threads_manage_replies",
         refresh_mode="reissue_from_access_token",
         credential_kind="oauth",
         display_name="Threads",
@@ -106,6 +122,14 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         utm_medium="social",
         supports_unpublish=True,
         unpublish_required_scope="threads_delete",
+        # story #3516 — 미확인 딱지(그라운딩①): pending_replies 조회 엔드포인트는 실
+        # fetch로 확認했으나(developers.facebook.com/docs/threads/reply-management,
+        # 2026-09-05) 답변 생성 파라미터·정확한 요구 스코프명은 문서에서 못 찾았다.
+        # sandbox까지가 이 스토리 라이브 범위(PO 明示) — 선언만 해 두고 실 HTTP 왕복은
+        # Threads 실계정 시점에 재검증.
+        supports_fetch_replies=True,
+        supports_reply=True,
+        reply_required_scope="threads_manage_replies",
         # story 620beefc — Threads IMAGE 미디어 컨테이너 공식 규격(Meta 공식 문서 실측,
         # developers.facebook.com/docs/threads/posts + developers.facebook.com/docs/
         # threads/troubleshooting, 조회일 2026-09-04). 형식 JPEG/PNG만·최대 8MB·종횡비
@@ -209,7 +233,7 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
     CHANNEL_ADAPTERS["sandbox"] = ChannelAdapterConfig(
         authorize_url="",  # OAuth 없음(AC2) — 연결은 POST .../channel-connections/sandbox 전용.
         token_url="",
-        scope="sandbox_publish,sandbox_delete",
+        scope="sandbox_publish,sandbox_delete,sandbox_manage_replies",
         refresh_mode="manual",  # 더미 토큰이라 자동 갱신 개념 자체가 없음.
         credential_kind="none",
         display_name="Sandbox",
@@ -218,6 +242,12 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         utm_medium="test",
         supports_unpublish=True,
         unpublish_required_scope="sandbox_delete",
+        # story #3516 — sandbox가 결정적 가짜 댓글(기본 2건)을 낸다(sandbox_publish.py::
+        # fetch_replies). 「하나 지워진 상태」 재현은 publication_id 해시 시드의 패리티로
+        # 결정적으로 만든다(라이브 테스트가 재현 가능하게, 새 파라미터 없이).
+        supports_fetch_replies=True,
+        supports_reply=True,
+        reply_required_scope="sandbox_manage_replies",
         # Threads와 동일 이미지 규격(AC1 "Threads와 같은 모양") — sandbox_publish.py가
         # 실제로 Pillow 변환 파이프라인을 거치므로(channel_post_images.py는 채널 무관 공용)
         # 같은 한도가 그대로 의미를 가진다.

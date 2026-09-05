@@ -191,3 +191,55 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
     body = resp.json()
     permalink = body.get("permalink")
     return str(permalink) if permalink else None
+
+
+_REPLIES_URL_TMPL = "https://graph.threads.net/v1.0/{media_id}/pending_replies"
+# story #3516(Phase2·마케팅운영, 페드루 PO 確定 2026-09-05) — ⚠️미확認(그라운딩①,
+# threads_publish.py 상단 딱지와 동형): 실 fetch(2026-09-05, developers.facebook.com/
+# docs/threads/reply-management)로 이 엔드포인트·필드·커서 페이지네이션(before/after)은
+# 확認했으나, 그 문서 자체가 "moderation pending queue" 프레이밍이라 "소유 게시물의
+# 모든 댓글"과 정확히 같은 것인지는 라이브 왕복 전엔 확실하지 않다. sandbox까지가 이
+# 스토리 라이브 범위(PO 明示) — Threads 실계정 시점에 재확認 필요.
+_REPLIES_FIELDS = "id,text,username,timestamp,has_replies,is_reply,hide_status,reply_approval_status"
+
+
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> list[dict]:
+    """이 media의 댓글 목록. 페이지네이션(`paging.cursors.after`)은 이 조각에선 첫
+    페이지만 본다(PO 決定 — "지속 폴링/커서는 후속", 커서 값 자체는 응답에 있으면
+    호출부가 저장만 해 둔다)."""
+    resp = await client.get(
+        _REPLIES_URL_TMPL.format(media_id=media_id),
+        params={"fields": _REPLIES_FIELDS, "access_token": access_token},
+    )
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "THREADS_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    return list(body.get("data") or [])
+
+
+async def reply(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, reply_to_id: str, text: str,
+) -> tuple[str, str | None]:
+    """댓글에 답변 — ⚠️미확認(그라운딩①): 전용 reply 엔드포인트를 문서에서 못 찾아
+    일반 게시물 2-step(컨테이너 생성→publish)에 `reply_to_id`를 얹는 형태로 최선
+    추정한다(Instagram Graph API의 댓글 구조와 동형 관례를 참고한 추정 — Meta
+    공식 문서로 확認된 값 아님). 라이브 왕복 전 미검증 상태 그대로 둔다(create_
+    container/publish_container를 그대로 재사용해 신규 HTTP 로직을 새로 안 짠다)."""
+    params = {"access_token": access_token, "media_type": "TEXT", "text": text, "reply_to_id": reply_to_id}
+    resp = await client.post(_CONTAINER_URL_TMPL.format(user_id=threads_user_id), params=params)
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "THREADS_REPLY_CREATE_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    creation_id = resp.json().get("id")
+    if not creation_id:
+        raise ThreadsPublishError(
+            "THREADS_REPLY_CREATE_CONTAINER_MISSING_ID", "id missing in response", status_code=resp.status_code,
+        )
+    external_reply_id = await publish_container(
+        client, access_token=access_token, threads_user_id=threads_user_id, creation_id=str(creation_id),
+    )
+    permalink = await get_permalink(client, access_token=access_token, media_id=external_reply_id)
+    return external_reply_id, permalink
