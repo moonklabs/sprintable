@@ -2316,6 +2316,7 @@
     "channelPostsVoidReasonScheduleChanged": "the scheduled time changed",
     "channelPostsVoidReasonMediaChanged": "the image changed",
     "channelPostsVoidReasonCancelledByHuman": "cancelled",
+    "channelPostsVoidReasonGenerationBudgetExceeded": "This exceeds the generation cost budget. An owner or admin can change the limit on the content rules screen.",
     "channelPostsFailureProcessing": "Continuing automatically.",
     "channelPostsFailureRetryComingSoon": "Retry is coming soon",
     "channelPostsCommandInFlightReasonPending": "A schedule or automatic retry is already queued on the server — wait, or cancel the schedule and try again.",
@@ -2433,6 +2434,8 @@
     "generationBudgetEstimatedCostLabel": "Estimated generation cost (optional)",
     "generationBudgetExceededFact": "This exceeds the generation cost budget.",
     "generationBudgetExceededAction": "An owner or admin can change the limit on the content rules screen.",
+    "generationBudgetAmountKrw": "{amount}원",
+    "generationBudgetAmountUsd": "${amount}",
     "channelPostsApprovalLinkPreviewLabel": "Link that will be attached",
     "channelPostsExternalIdLabel": "Post ID",
     "channelPostsPartialSuccessNotice": "The container was created but not yet published — continue publishing it. Starting over could post the same content twice.",
@@ -4983,6 +4986,8 @@
     "generationBudgetPeriodMonth": "month",
     "generationBudgetNotSet": "No policy set",
     "generationBudgetSuspendedReadonly": "Suspended",
-    "generationBudgetHint": "Setting the limit to 0 suspends all generation. Leaving it blank means no policy at all (different from unlimited)."
+    "generationBudgetHint": "Setting the limit to 0 suspends all generation. Leaving it blank means no policy at all (different from unlimited).",
+    "generationBudgetAmountKrw": "{amount}원",
+    "generationBudgetAmountUsd": "${amount}"
   }
 }

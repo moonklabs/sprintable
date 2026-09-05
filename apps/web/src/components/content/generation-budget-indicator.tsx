@@ -1,6 +1,6 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 
 // story #3500(BE #3498, PO 確定 2026-09-05·doc a0da40c9 §19 디자인 유나 確定 —
 // BE 미착지, 계약만 고정) — 생성 비용 한도(크레딧 게이트) 잔량 표시.
@@ -16,10 +16,6 @@ export type GenerationBudgetCurrency = 'KRW' | 'USD';
 
 const CURRENCY_EXPONENTS: Record<GenerationBudgetCurrency, number> = { KRW: 0, USD: 2 };
 
-function commaGroup(intStr: string): string {
-  return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-}
-
 /** 분단위(minor) → 화면에 넣을 큰단위(major) 숫자. 입력/표시는 전부 이 값을 쓴다. */
 export function minorToMajor(amountMinor: number, currency: GenerationBudgetCurrency): number {
   return amountMinor / 10 ** CURRENCY_EXPONENTS[currency];
@@ -30,15 +26,30 @@ export function majorToMinor(amountMajor: number, currency: GenerationBudgetCurr
   return Math.round(amountMajor * 10 ** CURRENCY_EXPONENTS[currency]);
 }
 
-/** KRW → "50,000원"(정수, 콤마) · USD → "$500.00"(소수 2자리, 콤마, $ 접두). */
-export function formatMinorCurrency(amountMinor: number, currency: GenerationBudgetCurrency): string {
+const CURRENCY_AMOUNT_KEYS: Record<GenerationBudgetCurrency, string> = {
+  KRW: 'generationBudgetAmountKrw',
+  USD: 'generationBudgetAmountUsd',
+};
+
+/** PO REQUIRED①(2026-09-05, PR#3848 리뷰) — 수 묶음(콤마)은 로케일에 안 타는 손
+ * 구현(구 commaGroup)이 en 화면에서도 "100,000원"을 그대로 찍는 문제였다. 콤마·자릿수는
+ * `Intl.NumberFormat(locale)`(exponent만큼 소수자리 고정)로, 단위/기호(「원」·「$」)는
+ * i18n 키(`generationBudgetAmountKrw`/`Usd`)로 — 통화 기호 자체는 번역 대상이 아니라
+ * ko/en 두 메시지 파일 모두 같은 접두/접미를 쓰지만, 새 통화가 늘 때 이 표에 한 줄만
+ * 늘리면 되게 한다. exponent 표(CURRENCY_EXPONENTS)는 그대로 정본. */
+export function formatMinorCurrency(
+  amountMinor: number,
+  currency: GenerationBudgetCurrency,
+  locale: string,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
   const major = minorToMajor(amountMinor, currency);
-  if (currency === 'KRW') {
-    return `${commaGroup(Math.round(major).toString())}원`;
-  }
-  const fixed = major.toFixed(2);
-  const [intPart, fracPart] = fixed.split('.');
-  return `$${commaGroup(intPart ?? '0')}.${fracPart}`;
+  const exponent = CURRENCY_EXPONENTS[currency];
+  const amount = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: exponent,
+    maximumFractionDigits: exponent,
+  }).format(major);
+  return t(CURRENCY_AMOUNT_KEYS[currency], { amount });
 }
 
 export type GenerationBudgetState =
@@ -68,6 +79,7 @@ export function GenerationBudgetIndicator({
   variant: 'full' | 'compact';
 }) {
   const t = useTranslations('content');
+  const locale = useLocale();
 
   if (state.status === 'loading') {
     // §19-4 — 로딩은 이 파일 전용 키를 새로 만들지 않는다. status-chip.tsx 등이 이미
@@ -100,14 +112,26 @@ export function GenerationBudgetIndicator({
     );
   }
 
-  const currency = state.currency ?? 'KRW';
-  const remainingMinor = state.remainingMinor ?? state.limitMinor - state.spentMinor;
+  // PO REQUIRED②(2026-09-05, PR#3848 리뷰) — `currency ?? 'KRW'`·`remaining ?? limit-spent`
+  // 조립을 FE에서 하지 않는다. 서버가 limitMinor(정책 있음)를 줬는데 currency나
+  // remainingMinor가 비어 있으면 그건 서버 응답이 불완전한 것이지 FE가 추정해 채울
+  // 값이 아니다 — 특히 currency를 'KRW'로 잘못 추정하면 실은 USD 조직인 경우 §19-1이
+  // 막으려던 바로 그 100배 오차가 조용히 난다. 이 경우 failed와 동형으로 취급한다.
+  if (state.currency === null || state.remainingMinor === null) {
+    return (
+      <span className="text-xs text-muted-foreground" data-testid="generation-budget-failed">
+        {variant === 'full' ? t('generationBudgetCardCheckFailed') : t('generationBudgetSubmitCheckFailed')}
+      </span>
+    );
+  }
+  const currency = state.currency;
+  const remainingMinor = state.remainingMinor;
 
   if (variant === 'compact') {
     // §19-5 — submit 표면은 "남음"만, 분수 아님.
     return (
       <span className="text-xs text-muted-foreground" data-testid="generation-budget-remaining-compact">
-        {t('generationBudgetRemainingCompact', { remaining: formatMinorCurrency(remainingMinor, currency) })}
+        {t('generationBudgetRemainingCompact', { remaining: formatMinorCurrency(remainingMinor, currency, locale, t) })}
       </span>
     );
   }
@@ -117,13 +141,13 @@ export function GenerationBudgetIndicator({
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" data-testid="generation-budget-remaining-full">
       <span className="text-muted-foreground">
-        {t('generationBudgetLimitLabel')} <span className="text-foreground">{formatMinorCurrency(state.limitMinor, currency)} / {t('generationBudgetPeriodMonth')}</span>
+        {t('generationBudgetLimitLabel')} <span className="text-foreground">{formatMinorCurrency(state.limitMinor, currency, locale, t)} / {t('generationBudgetPeriodMonth')}</span>
       </span>
       <span className="text-muted-foreground">
-        {t('generationBudgetSpentLabel')} <span className="text-foreground">{formatMinorCurrency(state.spentMinor, currency)}</span>
+        {t('generationBudgetSpentLabel')} <span className="text-foreground">{formatMinorCurrency(state.spentMinor, currency, locale, t)}</span>
       </span>
       <span className="text-muted-foreground">
-        {t('generationBudgetRemainingLabel')} <span className="text-foreground" data-testid="generation-budget-remaining-value">{formatMinorCurrency(remainingMinor, currency)}</span>
+        {t('generationBudgetRemainingLabel')} <span className="text-foreground" data-testid="generation-budget-remaining-value">{formatMinorCurrency(remainingMinor, currency, locale, t)}</span>
       </span>
     </div>
   );

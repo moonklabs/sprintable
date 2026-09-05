@@ -1,6 +1,6 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 
@@ -24,6 +24,7 @@ export function GenerationBudgetExceededBanner({
   currency: GenerationBudgetCurrency;
 }) {
   const t = useTranslations('content');
+  const locale = useLocale();
   return (
     // AlertDescription 자체가 <p> 루트다(components/ui/alert.tsx) — 그 안에 <p>·<dl>
     // 같은 블록 요소를 또 넣으면 무효 HTML(<p> 안 <p>)이 된다. 전부 <span>/<div>로.
@@ -32,13 +33,13 @@ export function GenerationBudgetExceededBanner({
         <span className="block">{t('generationBudgetExceededFact')}</span>
         <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs" role="list">
           <span className="text-muted-foreground">{t('generationBudgetLimitLabel')}</span>
-          <span data-testid="generation-budget-exceeded-limit">{formatMinorCurrency(limitMinor, currency)}</span>
+          <span data-testid="generation-budget-exceeded-limit">{formatMinorCurrency(limitMinor, currency, locale, t)}</span>
           <span className="text-muted-foreground">{t('generationBudgetSpentLabel')}</span>
-          <span data-testid="generation-budget-exceeded-spent">{formatMinorCurrency(spentMinor, currency)}</span>
+          <span data-testid="generation-budget-exceeded-spent">{formatMinorCurrency(spentMinor, currency, locale, t)}</span>
           <span className="text-muted-foreground">{t('generationBudgetEstimatedLabel')}</span>
-          <span data-testid="generation-budget-exceeded-estimated">{formatMinorCurrency(estimatedCostMinor, currency)}</span>
+          <span data-testid="generation-budget-exceeded-estimated">{formatMinorCurrency(estimatedCostMinor, currency, locale, t)}</span>
           <span className="text-muted-foreground">{t('generationBudgetRemainingLabel')}</span>
-          <span data-testid="generation-budget-exceeded-remaining">{formatMinorCurrency(remainingMinor, currency)}</span>
+          <span data-testid="generation-budget-exceeded-remaining">{formatMinorCurrency(remainingMinor, currency, locale, t)}</span>
         </div>
         <span className="mt-2 block text-xs text-muted-foreground">{t('generationBudgetExceededAction')}</span>
       </AlertDescription>

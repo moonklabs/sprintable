@@ -2442,7 +2442,14 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
 
   it('예상 비용을 입력하면 submit body에 정수로 실린다', async () => {
     let submittedBody: unknown = null;
-    stubFetch({ onSubmit: (body) => { submittedBody = body; return { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } }; } });
+    stubFetch({
+      onSubmit: (body) => { submittedBody = body; return { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } }; },
+      // PO REQUIRED②(2026-09-05) — 입력은 generationBudgetUsable(ok && limit/currency/
+      // remaining 전부 non-null)일 때만 그려진다. 이 mock이 없으면 입력 자체가 안
+      // 그려져 setInputValue가 null에 걸린다(§19-1의 "통화 모르면 입력 안 받는다"
+      // 규율이 테스트에도 그대로 적용된 것 — mock 갱신이지 회귀가 아니다).
+      genBudgetOk: { limit_minor: 500000, spent_minor: 0, remaining_minor: 500000, currency: 'KRW', period: 'month' },
+    });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
 

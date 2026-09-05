@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -174,6 +174,7 @@ export default function ContentRulesPage() {
   // 정정, 채널 연결 화면과 동형 권한 폭).
   const canEditRules = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('contentRules');
+  const locale = useLocale();
 
   const [rules, setRules] = useState<ContentRules>(EMPTY_RULES);
   const [version, setVersion] = useState<number | null>(null);
@@ -534,7 +535,7 @@ export default function ContentRulesPage() {
                   <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-readonly">{t('generationBudgetSuspendedReadonly')}</p>
                 ) : (
                   <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-readonly">
-                    {formatMinorCurrency(rules.generation_budget.limit_minor, rules.generation_budget.currency)}
+                    {formatMinorCurrency(rules.generation_budget.limit_minor, rules.generation_budget.currency, locale, t)}
                   </p>
                 )}
                 {fieldErrors.generation_budget ? <p className="text-xs text-destructive">{fieldErrors.generation_budget}</p> : null}

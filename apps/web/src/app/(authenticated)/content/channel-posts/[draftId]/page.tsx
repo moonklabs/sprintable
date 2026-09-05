@@ -242,7 +242,12 @@ export default function ChannelPostEditPage() {
   const [genBudgetExceeded, setGenBudgetExceeded] = useState<
     { limitMinor: number; spentMinor: number; estimatedCostMinor: number; remainingMinor: number; currency: GenerationBudgetCurrency } | null
   >(null);
-  const generationBudgetCurrency: GenerationBudgetCurrency = genBudget.status === 'ok' && genBudget.currency ? genBudget.currency : 'KRW';
+  // PO REQUIRED②(2026-09-05, PR#3848 리뷰) — `currency ?? 'KRW'` 조립 제거(site_post
+  // 상세와 동형 처방, generation-budget-indicator.tsx 참조).
+  const generationBudgetUsable =
+    genBudget.status === 'ok' && genBudget.limitMinor !== null && genBudget.currency !== null && genBudget.remainingMinor !== null;
+  const generationBudgetCurrency: GenerationBudgetCurrency | null =
+    genBudget.status === 'ok' ? genBudget.currency : null;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -511,8 +516,9 @@ export default function ChannelPostEditPage() {
       };
       if (scheduledAt) submitBody.scheduled_at = scheduledAt;
       // §19-1 — 입력은 큰단위(major), 서버로는 분단위(minor)만 보낸다. 변환은
-      // generation-budget-indicator.tsx::majorToMinor 한 곳에서만.
-      if (estimatedCostInput !== '') {
+      // generation-budget-indicator.tsx::majorToMinor 한 곳에서만. currency가
+      // null이면 입력 자체가 안 그려져 이 값이 채워질 수 없다 — 방어적 재확認.
+      if (estimatedCostInput !== '' && generationBudgetCurrency !== null) {
         submitBody.estimated_cost_minor = majorToMinor(Number(estimatedCostInput), generationBudgetCurrency);
       }
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, {
@@ -587,6 +593,10 @@ export default function ChannelPostEditPage() {
           info.kind === 'generation_budget_exceeded'
           && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
           && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+          // PO REQUIRED②(2026-09-05) — 422 detail엔 currency가 없다(4값뿐). genBudget
+          // GET이 실패/불완전(null)이면 통화를 모른 채 그릴 수 없어 구조화 배너를
+          // 접고 일반 에러 문구로 폴백한다('KRW' 추정 안 함).
+          && generationBudgetCurrency !== null
         ) {
           // doc a0da40c9 §19-8(디자인 유나 確定) — 전용 구조화 배너(사실 문장→4값
           // 두 칸 목록→행동 문장, generic submitResult 텍스트 배너와 다른 자리).
@@ -1578,21 +1588,28 @@ export default function ChannelPostEditPage() {
           깨진다). 별도 다이얼로그가 아닌 plain input(그라운딩 확認 — 이 코드베이스에
           MoneyInput류 0건, ScheduleAtDialog는 datetime 전용). 통화는 조직 정책값을
           라벨로만 보이고 피커는 없다(§19-7). 입력/변환은 큰단위(major) — §19-1. */}
+      {/* PO REQUIRED②(2026-09-05) — 입력은 generationBudgetUsable일 때만(통화를 모르는
+          채 숫자를 입력받지 않는다). GenerationBudgetIndicator는 항상 그린다 — 그
+          컴포넌트가 loading/failed/정책없음/정상을 이미 스스로 갈라 보여준다. */}
       <div className="flex items-center gap-2">
-        <label htmlFor="channel-post-estimated-cost" className="text-xs text-muted-foreground">
-          {t('generationBudgetEstimatedCostLabel')}
-        </label>
-        <input
-          id="channel-post-estimated-cost"
-          type="number"
-          min={0}
-          step={1}
-          value={estimatedCostInput}
-          onChange={(e) => setEstimatedCostInput(e.target.value)}
-          className="w-28 rounded-md border border-border bg-background px-2 py-1 text-sm"
-          data-testid="channel-post-estimated-cost-input"
-        />
-        <span className="text-xs text-muted-foreground">{generationBudgetCurrency}</span>
+        {generationBudgetUsable ? (
+          <>
+            <label htmlFor="channel-post-estimated-cost" className="text-xs text-muted-foreground">
+              {t('generationBudgetEstimatedCostLabel')}
+            </label>
+            <input
+              id="channel-post-estimated-cost"
+              type="number"
+              min={0}
+              step={1}
+              value={estimatedCostInput}
+              onChange={(e) => setEstimatedCostInput(e.target.value)}
+              className="w-28 rounded-md border border-border bg-background px-2 py-1 text-sm"
+              data-testid="channel-post-estimated-cost-input"
+            />
+            <span className="text-xs text-muted-foreground">{generationBudgetCurrency}</span>
+          </>
+        ) : null}
         <GenerationBudgetIndicator state={genBudget} variant="compact" />
       </div>
       <div className="flex gap-2">

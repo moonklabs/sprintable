@@ -45,6 +45,14 @@ export const CHANNEL_POST_VOID_REASON_MESSAGE_KEYS: Record<string, string> = {
   SCHEDULE_CHANGED: 'channelPostsVoidReasonScheduleChanged',
   MEDIA_CHANGED: 'channelPostsVoidReasonMediaChanged',
   CANCELLED_BY_HUMAN: 'channelPostsVoidReasonCancelledByHuman',
+  // story #3500(PO REQUIRED③, 2026-09-05) — doc a0da40c9 §19-8-5: 발행 직전
+  // 재검사(BE #3498 AC4, 승인 뒤 다른 지출로 잔량이 줄어든 경우)의 거부는 상신
+  // 배너가 아니라 이 "발행 실패 사유" 표면에 코드로 온다. 값 4개(한도/사용/예상/
+  // 남음)는 이 표면엔 없다 — §19-8의 사실 문장+행동 문장 둘만 재사용한다(같은
+  // 사실이므로 같은 문구, 자리만 다르다). BE가 이 재검사를 실제로 어떤
+  // command_status/reason_code로 실어 보내는지는 미착지라 미확認 — 이 매핑은
+  // "reason_code가 이 값이면"이라는 계약을 가정한 스켈레톤이다(PR 본문 명시).
+  GENERATION_BUDGET_EXCEEDED: 'channelPostsVoidReasonGenerationBudgetExceeded',
 };
 
 export interface FailureActionInput {
