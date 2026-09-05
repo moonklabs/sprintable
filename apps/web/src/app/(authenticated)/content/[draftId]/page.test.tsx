@@ -87,15 +87,21 @@ function stubFetchWithVersions(
     publication?: {
       published_at: string | null; url: string | null; published_by_member_id: string | null; published_body_sha256: string | null;
       destination?: string;
+      // story #3499 — BE #3844 조각4(미착지) 의존, optional.
+      publication_id?: string | null;
       channel_publication?: {
         status: string; external_id: string | null; permalink: string | null;
         published_at: string | null; unpublished_at: string | null; last_error: string | null;
+        publication_id?: string | null;
       } | null;
       command?: {
         id: string; command_status: string; attempt_count: number; failure_kind: string | null;
         next_retry_at: string | null; dead_letter_at: string | null; command_reason_code: string | null; last_error: string | null;
       } | null;
     };
+    // story #3499 — /publications/{id}/insights 응답. 넘기지 않으면(대부분 테스트가
+    // publication_id 자체가 없어 이 fetch를 아예 안 탄다) 빈 배열.
+    insightSnapshots?: unknown[];
     onUnpublish?: () => { status: number; body: unknown };
     onRetryPublicationCommand?: (commandId: string) => { status: number; body: unknown };
     // 페드루 PO 리뷰(2026-09-03) — 발행자 UUID→이름 해소(gates/[id]/page.tsx의
@@ -201,6 +207,9 @@ function stubFetchWithVersions(
       }
       if (url === '/api/team-members') {
         return { ok: true, status: 200, json: async () => ({ data: opts?.teamMembers ?? [], error: null, meta: null }) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/insights')) {
+        return { ok: true, status: 200, json: async () => ({ data: opts?.insightSnapshots ?? [], error: null, meta: null }) };
       }
       throw new Error('unexpected fetch: ' + url);
     }),
@@ -1538,5 +1547,72 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     expect(info.querySelector('a[href="https://blog.example.com/hello"]')).not.toBeNull();
     const expectedTz = resolveDisplayTimezone().tz;
     expect(info.textContent).toContain(formatScheduledAt('2026-09-04T00:00:00Z', expectedTz).display);
+  });
+});
+
+describe('ContentPostEditPage — 성과 인사이트 블록(story #3499, BE #3844 조각4 의존)', () => {
+  it('publication_id 없음(BE 미착지 응답) — 인사이트 블록 자체를 안 그린다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: null, published_body_sha256: null, destination: 'hosted_site',
+      },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-insight-info"]')).toBeNull();
+  });
+
+  it('hosted_site publication_id 있음 — 인사이트 블록을 그리고 서버 값을 그대로 보인다(조립·판정 0)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: null, published_body_sha256: null, destination: 'hosted_site',
+        publication_id: 'sp-1',
+      },
+      insightSnapshots: [
+        {
+          normalized: { impressions: 100, reach: null, views: 0, engagements: null, clicks: null, spend: null, conversions: null },
+          captured_at: '2026-09-04T00:00:00Z', status: 'captured', due_at: '2026-09-04T00:00:00Z', source: 'hosted_site',
+        },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    const info = container.querySelector('[data-testid="content-insight-info"]');
+    expect(info).not.toBeNull();
+    const values = Array.from(info!.querySelectorAll('[data-testid="insight-metric-value"]')).map((el) => el.textContent);
+    expect(values).toContain('100');
+    expect(values).toContain('0');
+    expect(info!.textContent).toContain(koMessages.content.insightMetricUnavailableDash);
+  });
+
+  it('외부 목적지 publication_id(channel_publication 축) 있음 — 인사이트 블록을 그린다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'wordpress',
+        channel_publication: {
+          status: 'published', external_id: 'post-123', permalink: 'https://blog.example.com/hello',
+          published_at: '2026-09-05T00:00:00Z', unpublished_at: null, last_error: null, publication_id: 'cp-1',
+        },
+        command: null,
+      },
+      insightSnapshots: [
+        {
+          normalized: { impressions: null, reach: null, views: null, engagements: null, clicks: null, spend: null, conversions: null },
+          captured_at: null, status: 'pending', due_at: '2026-09-06T00:00:00Z', source: 'wordpress',
+        },
+      ],
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-insight-info"]')).not.toBeNull();
   });
 });

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -29,6 +29,7 @@ import {
 } from '@/components/content/content-rule-violation';
 import { deriveFailureAction, type CommandStatus, type FailureKind } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -113,6 +114,10 @@ interface ChannelPublicationView {
   published_at: string | null;
   unpublished_at: string | null;
   last_error: string | null;
+  // story #3499(PO 確定 2026-09-05) — BE #3844 조각4(미착지, additive) 의존. 없으면
+  // (구 응답·BE 미배포) undefined — 인사이트 블록을 그리지 않는다(에이전트가 id를
+  // 추정 조립하지 않는다, PO 경계).
+  publication_id?: string | null;
 }
 
 interface PublicationCommandView {
@@ -134,6 +139,9 @@ interface SitePostPublicationInfo {
   destination: string;
   channel_publication: ChannelPublicationView | null;
   command: PublicationCommandView | null;
+  // story #3499(PO 確定 2026-09-05) — hosted_site 축 publication_id(SitePost.id).
+  // BE #3844 조각4 의존, 위 필드와 동일 이유로 optional.
+  publication_id?: string | null;
 }
 
 function realStr(v: unknown): string | undefined {
@@ -266,6 +274,22 @@ export default function ContentPostEditPage() {
   // 유나 사전 스티어② — 변형 행의 published_at 표시. 조직 tz 폴백 관례는 channel-posts
   // 상세 화면과 동형(resolveDisplayTimezone()의 기본 인자 규약 그대로 재사용).
   const displayTimezone = resolveDisplayTimezone().tz;
+  const locale = useLocale();
+
+  // story #3499 — publication_id는 hosted_site(publication.publication_id)·외부목적지
+  // (publication.channel_publication.publication_id) 어느 쪽이든 서버가 낸 값 그대로,
+  // FE가 조립하지 않는다(PO 경계).
+  const insightPublicationId = publication?.publication_id ?? publication?.channel_publication?.publication_id ?? null;
+  const [insightSnapshots, setInsightSnapshots] = useState<InsightSnapshot[]>([]);
+  useEffect(() => {
+    if (!orgId || !insightPublicationId) { setInsightSnapshots([]); return; }
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/publications/${insightPublicationId}/insights`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => { if (!cancelled) setInsightSnapshots(Array.isArray(body?.data) ? body.data : []); })
+      .catch(() => { if (!cancelled) setInsightSnapshots([]); });
+    return () => { cancelled = true; };
+  }, [orgId, insightPublicationId]);
 
   // story 1db41045(#3457) — 「캠페인 만들기/붙이기」. 목록(기존 선택)·새 이름(만들기)
   // 둘 다 이 자리에서 다룬다. 둘 다 지정하면 "새로 만들기"가 우선(사람이 방금 타이핑한
@@ -1099,6 +1123,13 @@ export default function ContentPostEditPage() {
             />
           ) : null}
         </div>
+      ) : null}
+
+      {/* story #3499(Phase2·FE, 게시물 성과 표면 1차) — publication_id가 있을 때만(BE
+          #3844 조각4 의존) 그린다. hosted_site·외부 어느 목적지든 같은 컴포넌트(값
+          조립·판정은 InsightSnapshotBlock 하나에만 있다 — 두 벌 안 만든다, PO 確定). */}
+      {insightPublicationId ? (
+        <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
       ) : null}
 
       {/* story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결이 0건이면 이
