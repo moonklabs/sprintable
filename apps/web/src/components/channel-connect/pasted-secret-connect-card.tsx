@@ -52,11 +52,15 @@ const PASTED_SECRET_HINT_KEY: Record<string, string> = {
 };
 
 export function PastedSecretConnectCard({
-  channel, orgId, isOwner, onConnected, t,
+  channel, orgId, isOwner, connectionCount, onConnected, t,
 }: {
   channel: string;
   orgId: string;
   isOwner: boolean;
+  // story #3436 묶음10(유나 §17-21⑧, PO 確定 2026-09-06) — 이 채널의 기존 연결 수.
+  // 0개면 "연결"(그대로), 1개 이상이면 "연결 추가"로 버튼 낱말이 갈린다(wordpress·
+  // webhook은 둘째 연결이 유의미 — sandbox #3537과 달리 버튼 자체를 숨기지 않는다).
+  connectionCount: number;
   onConnected: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
@@ -72,8 +76,12 @@ export function PastedSecretConnectCard({
   // 버튼은 탭 순서 밖이라 스크린리더가 사유에 못 닿는다). story #3504 — 이 폼은
   // owner|admin 폭(create_pasted_secret_channel_connection = _require_owner_or_admin)
   // 이라 owner 전용 문구(channelOwnerOnlyReason)는 거짓이다 — 두 폭 전용 키로.
+  // story #3436 묶음10(유나 §17-21⑨, PO 確定) — 그 "두 폭 전용 키" 원칙을 이 버튼
+  // 자리에도 한 번 더 적용한다: 공용 channelOwnerOrAdminOnlyReason(다른 자리와도
+  // 공유)이 아니라 이 연결 버튼 전용 channelConnectOwnerOrAdminOnlyReason으로 —
+  // 공용 키를 바꾸면 다른 자리 문구가 조용히 좁아진다.
   if (!isOwner) {
-    return <p className="text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>;
+    return <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel, t) })}</p>;
   }
 
   const allFilled = fields.every((f) => (values[f.name] ?? '').trim().length > 0);
@@ -114,7 +122,7 @@ export function PastedSecretConnectCard({
           onClick={() => setEditing(true)}
           data-testid={`channel-connect-pasted-secret-button-${channel}`}
         >
-          {t('channelConnectPastedSecretAction', { channel: channelLabel(channel, t) })}
+          {t(connectionCount === 0 ? 'channelConnectPastedSecretAction' : 'channelConnectPastedSecretAnotherAction', { channel: channelLabel(channel, t) })}
         </Button>
       ) : (
         <div className="w-full space-y-2" data-testid={`channel-connect-pasted-secret-form-${channel}`}>

@@ -239,6 +239,48 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   });
 });
 
+// story #3436 묶음10(유나 §17-21⑧⑨, PO 確定 2026-09-06) — oauth 갈래 「{channel}
+// 계정 연결」 버튼 낱말. 0개면 그대로·1개 이상이면 「계정 추가」로 갈린다(sandbox
+// #3537과 달리 threads는 둘째 연결이 존재하지 않지만 이 축 자체는 oauth 갈래
+// 공통 — wordpress/webhook 실재를 근거로 oauth에도 같은 원칙 적용). 0개일 때
+// "추가"가 붙으면 거짓이므로 조건이 핵심 — 0/1/2 × owner/member 매트릭스로 pin.
+describe('OrganizationChannelsPage — oauth 연결 버튼 낱말 매트릭스(story #3436 묶음10)', () => {
+  function nConnections(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      ...CONNECTION_ACTIVE, id: `conn-${i}`, account_id: `acc-${i}`, account_label: `@acc${i}`,
+    }));
+  }
+
+  it.each([
+    { count: 0, expectedKey: 'channelConnectAction' as const },
+    { count: 1, expectedKey: 'channelConnectAnotherAction' as const },
+    { count: 2, expectedKey: 'channelConnectAnotherAction' as const },
+  ])('owner·연결 $count개 — 버튼 낱말이 $expectedKey', async ({ count, expectedKey }) => {
+    stubFetch({ connections: nConnections(count) });
+    await mount('owner');
+    // 행마다 "연결 시험"(channelTestAction) 버튼도 "연결" 부분문자열을 포함해
+    // 느슨한 include 매칭은 잘못된 버튼을 집는다 — 기대 전체 문자열과 정확히
+    // 일치하는 버튼을 직접 찾는다.
+    const expectedText = koMessages.channelConnect[expectedKey].replace('{channel}', 'Threads');
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === expectedText);
+    expect(btn).not.toBeUndefined();
+    if (count === 0) expect(btn?.textContent).not.toContain('추가');
+  });
+
+  it.each([0, 1, 2])('member·연결 %i개 — 버튼 없이 전용 사유만(연결 수 무관, owner 전용 폭)', async (count) => {
+    stubFetch({ connections: nConnections(count) });
+    await mount('member');
+    const connectBtn = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === koMessages.channelConnect.channelConnectAction.replace('{channel}', 'Threads')
+        || b.textContent === koMessages.channelConnect.channelConnectAnotherAction.replace('{channel}', 'Threads'),
+    );
+    expect(connectBtn).toBeUndefined();
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOnlyReason.replace('{channel}', 'Threads'),
+    );
+  });
+});
+
 // story dd29e6dd(유나 5회차 관찰) — 헤더 rollup 칩이 연결 1개일 때 행 칩과 같은
 // 문장을 두 번 보여주던 것. 처방=연결 0이면 자격 상태, 그 외(1/≥2)에만 중복 판단
 // (연결 !== 1). 3표본(0/1/2개) 그대로 pin.
@@ -542,10 +584,13 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
     // story #3504 — 붙여넣기 연결 생성은 owner|admin 폭
     // (create_pasted_secret_channel_connection = _require_owner_or_admin)이라
     // owner·admin 문구가 맞다(owner 전용 문구는 이 자리에선 거짓이다).
+    // story #3436 묶음10(유나 §17-21⑨) — 이 버튼 자리 전용 키로 분리.
     stubFetch({ connections: [], availableChannels: WORDPRESS_AVAILABLE });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).toBeNull();
-    expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOrAdminOnlyReason);
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOrAdminOnlyReason.replace('{channel}', 'WordPress'),
+    );
   });
 
   it('story #3504 — admin은 붙여넣기 연결 카드를 실제로 본다(owner|admin 폭)', async () => {

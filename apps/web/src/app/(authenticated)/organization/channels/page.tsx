@@ -307,7 +307,11 @@ function ChannelSection({
             isOwnerStrict ? (
               <a href={canStartConnect ? `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}` : undefined}>
                 <Button size="sm" disabled={!canStartConnect}>
-                  {t('channelConnectAction', { channel: channelLabel(channel, t) })}
+                  {/* story #3436 묶음10(유나 §17-21⑧, PO 確定 2026-09-06) — 두 번째
+                      연결이 유의미한 채널(wordpress·webhook 실재)이라 sandbox(#3537)와
+                      달리 버튼은 유지하되, 연결이 이미 있을 때 "연결"이라는 낱말이
+                      거짓("추가로 생기는 게 없다"는 착각)이 되지 않게 이름을 가른다. */}
+                  {t(connections.length === 0 ? 'channelConnectAction' : 'channelConnectAnotherAction', { channel: channelLabel(channel, t) })}
                 </Button>
               </a>
             ) : null
@@ -332,16 +336,20 @@ function ChannelSection({
             // story #3450 FE 후속(3653a18c §2 "②발급해서 붙여넣기", PO 確定
             // 2026-09-04 23:13Z) — 자리 채움. 붙여넣기 연결은 owner|admin
             // (create_pasted_secret_channel_connection = _require_owner_or_admin).
-            <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwnerOrAdmin} onConnected={onRefresh} t={t} />
+            <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwnerOrAdmin} connectionCount={connections.length} onConnected={onRefresh} t={t} />
           ) : null}
           {credential_kind === 'oauth' && isOwnerStrict && !canStartConnect ? (
             <p className="text-xs text-muted-foreground">{t('channelConfigIncompleteReason')}</p>
           ) : null}
           {/* story #3504 — L297은 «한 자리가 두 폭»이었다(유나 지적). oauth는 owner
               전용 문구, none(sandbox)은 owner|admin 문구 — credential_kind로 갈라야
-              한쪽에서 거짓이 안 남는다. */}
+              한쪽에서 거짓이 안 남는다.
+              story #3436 묶음10(유나 §17-21⑨, PO 確定) — 이 버튼 자리 전용 사유로
+              channelOwnerOnlyReason(재인증·해제 등 6곳 공용)과 분리한다 — 공용 키를
+              바꾸면 그 6곳의 문구가 "이 작업"에서 뜻이 좁아진 문장으로 조용히
+              번져나간다. */}
           {credential_kind === 'oauth' && !isOwnerStrict ? (
-            <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p>
+            <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
           ) : null}
           {/* story #3537 — 액션 자체가 없는 자리(연결 이미 있음)에 권한 사유 문구를
               남기면 "안 보이는 버튼을 왜 못 누르나"는 존재하지 않는 질문에 답하는
