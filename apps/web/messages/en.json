@@ -4988,7 +4988,15 @@
     "generationBudgetPeriodLabel": "Period",
     "generationBudgetNotSet": "No policy set",
     "generationBudgetSuspendedReadonly": "Suspended",
-    "generationBudgetHint": "Setting the limit to 0 suspends all generation. Leaving it blank means no policy at all (different from unlimited)."
+    "generationBudgetHint": "Setting the limit to 0 suspends all generation. Leaving it blank means no policy at all (different from unlimited).",
+    "brandKitLabel": "Brand kit",
+    "versionConflictFact": "The rules changed after you opened this screen.",
+    "versionConflictFactWithName": "{name} saved changes before you.",
+    "versionConflictPriorChanged": "Changed before yours: {list}",
+    "versionConflictMyChanges": "Your unsaved edits: {list}",
+    "versionConflictRolledBack": "Rolled back: {list} — re-enter them if you still need them.",
+    "versionConflictReloadAction": "Reload",
+    "versionConflictSaveDisabledReason": "You can save again after reloading."
   },
   "insightsBoard": {
     "pageTitle": "Performance board",

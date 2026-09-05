@@ -17,9 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.services.content_rules import get_org_content_rules, put_org_content_rules
+from app.services.content_rules import (
+    ContentRulesVersionConflictError, get_org_content_rules, put_org_content_rules,
+)
 from app.services.generation_budget import compute_generation_budget_status
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import resolve_member, resolve_member_identity
 from app.services.project_auth import assert_target_in_caller_org
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["content-rules"])
@@ -101,6 +103,14 @@ class ContentRulesFields(BaseModel):
 
 class PutContentRulesRequest(BaseModel):
     rules: dict
+    # story #3501(PO 確定, doc a0da40c9 §20) — 낙관적 잠금. 필수 필드라 누락 시
+    # pydantic이 자동 422(별도 처리 불필요, AC1 "누락 422"는 이 자체가 답).
+    expected_version: int
+
+
+class ContentRulesUpdatedBy(BaseModel):
+    member_id: uuid.UUID
+    name: str | None
 
 
 @router.get("/{org_id}/content-rules", response_model=ContentRulesResponse)
@@ -144,9 +154,29 @@ async def put_content_rules_endpoint(
             status_code=422, detail={"code": "CONTENT_RULES_INVALID", "message": str(exc)},
         ) from exc
 
-    row = await put_org_content_rules(
-        db, org_id=org_id, rules=validated.model_dump(), updated_by_member_id=resolved.id,
-    )
+    try:
+        row = await put_org_content_rules(
+            db, org_id=org_id, rules=validated.model_dump(), updated_by_member_id=resolved.id,
+            expected_version=body.expected_version,
+        )
+    except ContentRulesVersionConflictError as exc:
+        # story #3501(doc a0da40c9 §20-2) — "서버가 «누가»를 주면 그때 이름을 쓴다"
+        # PO 決定: updated_by_member_id가 있으면 이름을 해소해 싣고, 없으면(row가
+        # 아직 없던 경우, 또는 orphan 멤버라 해소 실패) updated_by를 아예 안 싣는다
+        # — 화면이 "누가"를 지어내지 않는다(§20-2 규율 그대로).
+        updated_by = None
+        if exc.updated_by_member_id is not None:
+            member = await resolve_member_identity(exc.updated_by_member_id, org_id, db)
+            if member is not None:
+                updated_by = ContentRulesUpdatedBy(member_id=member.id, name=member.name)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CONTENT_RULES_VERSION_CONFLICT",
+                "current_version": exc.current_version,
+                "updated_by": updated_by.model_dump(mode="json") if updated_by else None,
+            },
+        ) from exc
     return ContentRulesResponse(org_id=row.org_id, rules=row.rules, version=row.version)
 
 

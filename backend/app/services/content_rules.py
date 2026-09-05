@@ -31,6 +31,21 @@ class ContentRuleViolationError(Exception):
         super().__init__(f"콘텐츠 규칙 위반 {len(violations)}건(rules_version={rules_version})")
 
 
+class ContentRulesVersionConflictError(Exception):
+    """story #3501(PO 確定 2026-09-05, doc a0da40c9 §20) — 낙관적 잠금. PUT이 든
+    `expected_version`이 현재 저장된 `version`과 다르면 이 예외 — 라우터가 409
+    `CONTENT_RULES_VERSION_CONFLICT`로 감싼다. `updated_by_member_id`는 현재
+    행(또는 row가 아직 없으면 None)의 값 그대로 실어 보낸다 — 라우터가 이름
+    해소를 담당한다(이 서비스 함수는 이름을 모른다, member_resolver 책임 분리)."""
+
+    def __init__(self, *, current_version: int, updated_by_member_id: uuid.UUID | None):
+        self.current_version = current_version
+        self.updated_by_member_id = updated_by_member_id
+        super().__init__(
+            f"버전 충돌(current_version={current_version}, updated_by={updated_by_member_id})"
+        )
+
+
 async def get_org_content_rules(db: AsyncSession, *, org_id: uuid.UUID) -> OrgContentRule | None:
     return (await db.execute(
         select(OrgContentRule).where(OrgContentRule.org_id == org_id)
@@ -39,18 +54,29 @@ async def get_org_content_rules(db: AsyncSession, *, org_id: uuid.UUID) -> OrgCo
 
 async def put_org_content_rules(
     db: AsyncSession, *, org_id: uuid.UUID, rules: dict, updated_by_member_id: uuid.UUID,
+    expected_version: int,
 ) -> OrgContentRule:
     """upsert — org당 1행(UNIQUE org_id). PUT마다 `version` +1(이력 테이블 없음, 감사는
     이 값+`updated_by_member_id`로 충분 — story #3397 "파생 가능한 값은 별도 저장 안
-    한다" 원칙과 동형)."""
+    한다" 원칙과 동형).
+
+    story #3501 — `expected_version`이 현재 값과 다르면 저장 0(last-write-wins 차단).
+    row가 아직 없는 조직은 GET이 합성으로 돌려주는 `version=0`이 기준이라
+    `expected_version`도 0이어야 한다(그 자체가 "첫 저장" 신호)."""
     existing = await get_org_content_rules(db, org_id=org_id)
     if existing is None:
+        if expected_version != 0:
+            raise ContentRulesVersionConflictError(current_version=0, updated_by_member_id=None)
         row = OrgContentRule(
             id=uuid.uuid4(), org_id=org_id, rules=rules, version=1,
             updated_by_member_id=updated_by_member_id,
         )
         db.add(row)
     else:
+        if existing.version != expected_version:
+            raise ContentRulesVersionConflictError(
+                current_version=existing.version, updated_by_member_id=existing.updated_by_member_id,
+            )
         existing.rules = rules
         existing.version += 1
         existing.updated_by_member_id = updated_by_member_id

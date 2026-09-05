@@ -187,7 +187,7 @@ async def test_owner_put_content_rules_reflected_in_get_and_version_plus_one():
 
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"banned_terms": ["테스트금칙"], "require_utm": True}},
+                json={"rules": {"banned_terms": ["테스트금칙"], "require_utm": True}, "expected_version": 0},
             )
             assert r_put.status_code == 200, r_put.text
             assert r_put.json()["version"] == 1
@@ -216,7 +216,8 @@ async def test_put_string_banned_terms_returns_422_not_char_by_char():
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r = await client.put(
-                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": "spam"}},
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": "spam"}, "expected_version": 0},
             )
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "CONTENT_RULES_INVALID"
@@ -241,7 +242,7 @@ async def test_put_unknown_key_returns_422():
         async with _client_for(app) as client:
             r = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"bannned_terms": ["오타"]}},
+                json={"rules": {"bannned_terms": ["오타"]}, "expected_version": 0},
             )
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "CONTENT_RULES_INVALID"
@@ -265,7 +266,8 @@ async def test_member_put_returns_403_owner_field_untouched():
         _setup_org_scoped_app(app, Session, org_id, user_id=member_id)
         async with _client_for(app) as client:
             r = await client.put(
-                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": ["x"]}},
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": ["x"]}, "expected_version": 0},
             )
         assert r.status_code == 403, r.text
         assert r.json()["error"]["code"] == "CONTENT_RULES_ADMIN_ONLY"
@@ -291,7 +293,8 @@ async def test_admin_put_content_rules_succeeds():
         _setup_org_scoped_app(app, Session, org_id, user_id=admin_id)
         async with _client_for(app) as client:
             r = await client.put(
-                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": ["금칙어"]}},
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": ["금칙어"]}, "expected_version": 0},
             )
         assert r.status_code == 200, r.text
         assert r.json()["rules"]["banned_terms"] == ["금칙어"]
@@ -316,7 +319,10 @@ async def test_agent_get_sees_declaration_slots_but_put_is_403():
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"tone": "친근한", "taxonomy": ["블로그"], "channel_priority": ["threads"]}},
+                json={
+                    "rules": {"tone": "친근한", "taxonomy": ["블로그"], "channel_priority": ["threads"]},
+                    "expected_version": 0,
+                },
             )
             assert r_put.status_code == 200, r_put.text
 
@@ -328,7 +334,8 @@ async def test_agent_get_sees_declaration_slots_but_put_is_403():
             assert r_get.json()["rules"]["taxonomy"] == ["블로그"]
 
             r_put_agent = await client.put(
-                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"tone": "x"}},
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"tone": "x"}, "expected_version": 1},
             )
         assert r_put_agent.status_code == 403, r_put_agent.text
     finally:
@@ -352,7 +359,8 @@ async def test_cross_org_rules_isolated():
         _setup_org_scoped_app(app, Session, org_a, user_id=owner_a)
         async with _client_for(app) as client:
             r = await client.put(
-                f"/api/v2/organizations/{org_a}/content-rules", json={"rules": {"banned_terms": ["A전용금칙"]}},
+                f"/api/v2/organizations/{org_a}/content-rules",
+                json={"rules": {"banned_terms": ["A전용금칙"]}, "expected_version": 0},
             )
             assert r.status_code == 200, r.text
 
@@ -385,7 +393,7 @@ async def test_channel_post_draft_create_reports_violation_then_submit_422_then_
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"banned_terms": ["테스트금칙"]}},
+                json={"rules": {"banned_terms": ["테스트금칙"]}, "expected_version": 0},
             )
             assert r_put.status_code == 200, r_put.text
 
@@ -451,7 +459,7 @@ async def test_site_post_draft_banned_term_in_title_blocks_submit():
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"banned_terms": ["금지어"]}},
+                json={"rules": {"banned_terms": ["금지어"]}, "expected_version": 0},
             )
             assert r_put.status_code == 200, r_put.text
 
@@ -500,7 +508,8 @@ async def test_lint_result_snapshot_preserves_rules_version_after_later_put():
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r_put1 = await client.put(
-                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": []}},
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": []}, "expected_version": 0},
             )
             assert r_put1.status_code == 200, r_put1.text
             assert r_put1.json()["version"] == 1
@@ -521,7 +530,7 @@ async def test_lint_result_snapshot_preserves_rules_version_after_later_put():
         async with _client_for(app) as client:
             r_put2 = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"banned_terms": ["새로생긴금칙"]}},
+                json={"rules": {"banned_terms": ["새로생긴금칙"]}, "expected_version": 1},
             )
             assert r_put2.status_code == 200, r_put2.text
             assert r_put2.json()["version"] == 2

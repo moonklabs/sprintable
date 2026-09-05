@@ -185,9 +185,12 @@ async def test_put_utm_rules_reflected_in_get():
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"utm_rules": {
-                    "enabled": True, "default_source": "newsletter", "default_medium": "email",
-                }}},
+                json={
+                    "rules": {"utm_rules": {
+                        "enabled": True, "default_source": "newsletter", "default_medium": "email",
+                    }},
+                    "expected_version": 0,
+                },
             )
             assert r_put.status_code == 200, r_put.text
             assert r_put.json()["rules"]["utm_rules"]["enabled"] is True
@@ -217,7 +220,7 @@ async def test_put_utm_rules_unknown_field_returns_422():
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"utm_rules": {"enabled": True, "typo_field": "x"}}},
+                json={"rules": {"utm_rules": {"enabled": True, "typo_field": "x"}}, "expected_version": 0},
             )
         assert r_put.status_code == 422, r_put.text
     finally:
@@ -283,7 +286,7 @@ async def test_channel_post_draft_preview_reflects_org_utm_override():
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"utm_rules": {"enabled": True, "default_source": "newsletter"}}},
+                json={"rules": {"utm_rules": {"enabled": True, "default_source": "newsletter"}}, "expected_version": 0},
             )
             assert r_put.status_code == 200, r_put.text
 
