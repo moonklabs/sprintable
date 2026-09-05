@@ -2742,7 +2742,8 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     await act(async () => { btn.click(); });
     await flush();
     expect(btn.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('60초 뒤에 다시 시도할 수 있습니다.');
+    // story #3517 조각②-b(유나 16회차 보강) — 60초 이상은 분 단위로 올림 표시.
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('1분 뒤에 다시 시도할 수 있습니다.');
   });
 
   it('재수집 429, Retry-After 헤더 없음 — 초를 지어내지 않고 "잠시 뒤"', async () => {

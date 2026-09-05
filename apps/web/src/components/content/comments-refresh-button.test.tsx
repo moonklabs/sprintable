@@ -41,13 +41,24 @@ describe('CommentsRefreshButton', () => {
     expect(container.querySelector('[data-testid="comments-refresh-error"]')).toBeNull();
   });
 
-  it('429 rate_limited(초 있음) — 버튼이 비활성되고 버튼 밖에 "{N}초 뒤에…" 문구', async () => {
-    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'rate_limited', retryAfterSeconds: 60 });
+  it('429 rate_limited(초 있음, 60초 미만) — 버튼이 비활성되고 버튼 밖에 "{N}초 뒤에…" 문구', async () => {
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'rate_limited', retryAfterSeconds: 45 });
     await mount(<CommentsRefreshButton onRefresh={onRefresh} />);
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     expect(btn.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('60초 뒤에 다시 시도할 수 있습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('45초 뒤에 다시 시도할 수 있습니다.');
+  });
+
+  // story #3517 조각②-b(유나 16회차 보강, PO 確定 2026-09-06) — 429도 로드 시점
+  // 차단과 같은 공식을 공유한다: 60초 이상은 분 단위로 올림("300초 뒤"처럼 사람이
+  // 암산해야 하는 숫자를 안 보인다).
+  it('429 rate_limited(60초 이상) — 분 단위로 올림 표시된다', async () => {
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'rate_limited', retryAfterSeconds: 90 });
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} />);
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('2분 뒤에 다시 시도할 수 있습니다.');
   });
 
   it('429 rate_limited(초 모름, Retry-After 헤더 없음) — "잠시 뒤"(초를 지어내지 않는다)', async () => {
@@ -76,24 +87,34 @@ describe('CommentsRefreshButton', () => {
     expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('사람만 다시 수집할 수 있습니다');
   });
 
-  // story #3517 조각②-b(BE #3876, 유나 16회차, PO 確定 2026-09-06) — 로드 시점에
-  // 이미 nextAllowedAt이 미래면 사람이 한 번도 안 눌렀어도 비활성+사유("{시각}까지")
-  // — 429 응답을 받고서야 아는 게 아니라 로드 시점에 미리 안다.
-  it('nextAllowedAt이 미래면(다른 세션이 누른 창) 클릭 없이도 비활성+"{시각}까지" 문구가 뜬다', async () => {
+  // story #3517 조각②-b(BE #3876, 유나 16회차 보강, PO 確定 2026-09-06) — 로드
+  // 시점에 이미 nextAllowedAt이 미래면 사람이 한 번도 안 눌렀어도 비활성+사유 —
+  // 429 응답을 받고서야 아는 게 아니라 로드 시점에 미리 안다. 60초 이상 남으면
+  // 분 단위로 올림 표시(429 문구와 같은 공식 공유, commentsRefreshRateLimitedMinutes).
+  it('nextAllowedAt이 5분 뒤(미래, 60초 이상)면 클릭 없이도 비활성+"{n}분 뒤에…" 문구가 뜬다(초 아님)', async () => {
     const future = new Date(Date.now() + 5 * 60_000).toISOString();
     const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>();
-    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={future} displayTimezone="Asia/Seoul" />);
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={future} />);
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(onRefresh).not.toHaveBeenCalled();
     const blocked = container.querySelector('[data-testid="comments-refresh-load-time-blocked"]');
-    expect(blocked?.textContent).toContain('까지 재수집할 수 없습니다.');
+    expect(blocked?.textContent).toBe('5분 뒤에 다시 시도할 수 있습니다.');
+  });
+
+  it('nextAllowedAt이 30초 뒤(60초 미만)면 초 단위로 뜬다(분으로 뭉개지 않는다)', async () => {
+    const future = new Date(Date.now() + 30_000).toISOString();
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>();
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={future} />);
+    const blocked = container.querySelector('[data-testid="comments-refresh-load-time-blocked"]');
+    expect(blocked?.textContent).toContain('초 뒤에 다시 시도할 수 있습니다.');
+    expect(blocked?.textContent).not.toContain('분 뒤');
   });
 
   it('nextAllowedAt이 과거(이미 지난 창)면 버튼이 정상 활성', async () => {
     const past = new Date(Date.now() - 60_000).toISOString();
     const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: true });
-    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={past} displayTimezone="Asia/Seoul" />);
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={past} />);
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).toBeNull();
@@ -101,7 +122,7 @@ describe('CommentsRefreshButton', () => {
 
   it('nextAllowedAt=null(지금 바로 가능)이면 로드 시점 차단 문구 자체가 없다', async () => {
     const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: true });
-    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={null} displayTimezone="Asia/Seoul" />);
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={null} />);
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).toBeNull();

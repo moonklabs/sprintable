@@ -25,7 +25,10 @@ export interface CommentItem {
   /** null이 아니면 지워진 댓글(§22-9) — 삭제됐어도 목록엔 원래 시간순 자리 그대로
    * 실린다(BE가 지우지 않고 실어 준다, text도 보존돼 온다 — "존재했던 사실"은 남긴다). */
   deletedAt: string | null;
-  replyStatus: CommentReplyStatus;
+  /** null=이 댓글의 reply.status가 알려진 6종 중 어디에도 안 맞는 경우(유나
+   * §22-14 ④) — 칩 자체를 안 그린다(지어내지 않는다, BE가 새 상태를 추가해도
+   * FE가 잘못된 라벨을 우기지 않는다). */
+  replyStatus: CommentReplyStatus | null;
   /** replyStatus==='published'일 때만 뜻이 있다(외부 채널에 실제로 올라간 답변
    * 링크) — 그 외 상태는 항상 null(지어내지 않는다). */
   replyExternalUrl: string | null;
@@ -70,29 +73,34 @@ export interface RawCommentsResponse {
   comments_next_allowed_at?: string | null;
 }
 
-// story #3517 조각②-b(BE #3876, PO 確定 2026-09-06) — reply summary(BE raw status
-// 'draft'|'pending'|'sent'|'failed' + command_id)를 화면 6종 CommentReplyStatus로
-// 파생. §22-② "신호 없으면 자리 자체를 안 그린다" 원칙의 다음 단계 — 이제 신호가
-// 있으니(reply 필드) 지어내지 않고 정직하게 그 값에서만 파생한다.
-//   null(무응답) → none
-//   'draft' → draft(사람이 아직 상신 안 함)
-//   'pending'·command_id=null → submitted(상신됨, 승인 대기)
-//   'pending'·command_id!=null → approved(승인됨, 발송 대기 — 워커가 아직 안 집음)
-//   'sent' → published(외부 채널에 실제로 올라감, external_reply_url 있으면 링크)
+// story #3517 조각②-b(BE #3876, 유나 §22-13/§22-14, PO 確定 2026-09-06) — reply
+// summary(BE 실도메인 status 'draft'|'pending'|'sent'|'failed' — 'approved'는
+// 없다 + command_id)를 화면 6종 CommentReplyStatus로 파생. §22-② "신호 없으면
+// 자리 자체를 안 그린다" 원칙의 다음 단계 — 이제 신호가 있으니(reply 필드)
+// 지어내지 않고 정직하게 그 값에서만 파생한다. 판정 순서(유나 §22-14 명시):
 //   'failed' → failed
-export function deriveCommentReplyStatus(
+//   'sent' → published(외부 채널에 실제로 올라감, external_reply_url 있으면
+//            발행됨 얼굴에서만 링크)
+//   'pending'·command_id!=null → awaiting_send(승인 뒤 발송 대기 — 워커가
+//            아직 안 집음, "승인됨"이라는 관측 가능한 상태는 없다)
+//   'pending'·command_id=null → submitted(상신됨, 승인 대기)
+//   'draft' → draft(사람이 아직 상신 안 함)
+//   null/undefined(무응답) → 'none'
+//   그 외 모르는 status 문자열 → null(칩 자체를 안 그린다 — 지어내지 않는다,
+//            BE가 미래에 새 상태를 추가해도 FE가 잘못된 라벨을 우기지 않는다)
+export function replyStatusFrom(
   reply: { status: string; command_id: string | null } | null | undefined,
-): CommentReplyStatus {
+): CommentReplyStatus | null {
   // `== null`(느슨한 비교, undefined도 함께 잡는다) — 구버전 응답 픽스처·아직 이
   // 필드를 안 주는 소비처가 `reply` 키 자체를 생략하면 undefined로 온다. TS 타입은
   // null만 허용하지만 런타임은 그 계약을 강제 못 한다 — 방어적으로 둘 다 "무응답".
   if (reply == null) return 'none';
   switch (reply.status) {
-    case 'draft': return 'draft';
-    case 'pending': return reply.command_id !== null ? 'approved' : 'submitted';
-    case 'sent': return 'published';
     case 'failed': return 'failed';
-    default: return 'none';
+    case 'sent': return 'published';
+    case 'pending': return reply.command_id !== null ? 'awaiting_send' : 'submitted';
+    case 'draft': return 'draft';
+    default: return null;
   }
 }
 
@@ -108,7 +116,7 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
     externalCreatedAt: c.external_created_at,
     capturedAt: c.captured_at,
     deletedAt: c.deleted_at,
-    replyStatus: deriveCommentReplyStatus(c.reply),
+    replyStatus: replyStatusFrom(c.reply),
     replyExternalUrl: c.reply?.external_reply_url ?? null,
   }));
   // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
@@ -127,7 +135,7 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
 // 착지. 댓글 목록 GET(조각①)이 그때는 reply 존재 여부를 전혀 안 실어보내(그라운딩
 // 확認) 지어내지 않고 안 그렸으나, #3876이 배치 조인 1회로 댓글마다 reply 요약
 // {id, status, external_reply_url, command_id}을 실어보내면서 신호가 생겼다 —
-// deriveCommentReplyStatus가 그 신호에서만 파생한다(§17 규율 그대로: 신호 없으면
+// replyStatusFrom이 그 신호에서만 파생한다(§17 규율 그대로: 신호 없으면
 // 여전히 'none', 지어내지 않는다).
 export interface CommentsSectionProps {
   face: CommentsFace;
@@ -222,10 +230,13 @@ function CommentsList({
               forceCollapsed={isDeleted}
               deletedSummaryLabel={t('commentsDeletedBodyLabel')}
             />
-            {/* story #3517 조각②-b(BE #3876, PO 確定 2026-09-06) — 답변 상태 칩.
-                comment.deletedAt(대상 댓글 삭제 여부)와는 다른 축이라 isDeleted와
-                무관하게 항상 그린다(답변 자체의 생애주기는 대상 댓글 삭제로 안
-                사라진다 — 이미 발행된 답변은 대상이 지워져도 발행된 채로 남는다). */}
+            {/* story #3517 조각②-b(BE #3876, 유나 §22-14④, PO 確定 2026-09-06) —
+                답변 상태 칩. comment.deletedAt(대상 댓글 삭제 여부)와는 다른
+                축이라 isDeleted와 무관하게 항상 그린다(답변 자체의 생애주기는
+                대상 댓글 삭제로 안 사라진다 — 이미 발행된 답변은 대상이 지워져도
+                발행된 채로 남는다). replyStatus===null(모르는 status)이면 칩
+                자리 자체를 안 그린다 — 지어내지 않는다. */}
+            {comment.replyStatus !== null ? (
             <div className="flex items-center gap-2" data-testid="comments-item-reply-status">
               <CommentReplyStatusChip status={comment.replyStatus} />
               {comment.replyStatus === 'published' && comment.replyExternalUrl ? (
@@ -240,6 +251,7 @@ function CommentsList({
                 </a>
               ) : null}
             </div>
+            ) : null}
             {/* story #3517(BE #3867 조각②, PO 確定 2026-09-05) — §22-9: 지워진
                 댓글엔 행 액션이 아예 안 그려진다(비활성이 아니라 부재). */}
             {!isDeleted ? (
@@ -307,7 +319,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
         <p className="text-sm text-muted-foreground" data-testid="comments-face-empty">
           {t('commentsFaceEmpty')}
         </p>
-        <CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={face.nextAllowedAt} displayTimezone={displayTimezone} />
+        <CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={face.nextAllowedAt} />
         {/* story #3517(유나 Design 재리뷰, 2026-09-05) — active_count===0이어도
             지워진 행(deleted_count>0)은 §22-9 "원래 자리 그대로" 그린다 — "댓글
             없음" 문구가 지워진 행의 존재 자체를 지우면 안 된다. */}
@@ -321,7 +333,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
   return (
     <div className="space-y-2 border-t border-border pt-3" data-testid="comments-section">
       <SectionHeader t={t} activeCount={face.activeCount} deletedCount={face.deletedCount} capturedAtDisplay={capturedAtDisplay} />
-      <CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={face.nextAllowedAt} displayTimezone={displayTimezone} />
+      <CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={face.nextAllowedAt} />
       <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} />
     </div>
   );

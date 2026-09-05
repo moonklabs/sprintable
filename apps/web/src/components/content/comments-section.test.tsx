@@ -242,6 +242,16 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     expect(link?.textContent).toBe('채널에서 보기');
   });
 
+  // story #3517 조각②-b(유나 §22-14④, PO 確定 2026-09-06) — replyStatus===null
+  // (모르는 status)이면 칩 자리 자체를 안 그린다(지어내지 않는다).
+  it('replyStatus=null(모르는 status)이면 답변 상태 칩 자리 자체가 안 뜬다', async () => {
+    const face = loadedFace([baseComment({ replyStatus: null })]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} />)); });
+    expect(container.querySelector('[data-testid="comments-item-reply-status"]')).toBeNull();
+    expect(container.querySelector('[data-comment-reply-status-chip]')).toBeNull();
+  });
+
   it('replyStatus="submitted"(발행 전)는 replyExternalUrl이 없어야 하고 링크도 안 뜬다', async () => {
     const face = loadedFace([baseComment({ replyStatus: 'submitted' })]);
     const { container, root } = mount();
@@ -321,8 +331,8 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
 
   // 회귀가드 — reply 키 자체가 응답에서 생략되면(undefined, 구버전 픽스처·아직 이
   // 필드를 안 주는 소비처) 런타임에서 TS 타입("reply: {...} | null")을 강제 못 해
-  // undefined가 그대로 온다. deriveCommentReplyStatus가 `=== null`만 검사하던
-  // 버전은 이 자리에서 TypeError로 죽었다(page.test.tsx 6곳 실사고, 2026-09-06).
+  // undefined가 그대로 온다. replyStatusFrom이 `=== null`만 검사하던 버전은 이
+  // 자리에서 TypeError로 죽었다(page.test.tsx 6곳 실사고, 2026-09-06).
   it('reply 키 자체가 생략되면(undefined) 죽지 않고 replyStatus="none"', () => {
     const raw = rawResponse({
       active_count: 1,
@@ -333,15 +343,17 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
     expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyStatus).toBe('none');
   });
 
-  // story #3517 조각②-b(BE #3876, PO 確定 2026-09-06) — reply summary 진리표.
-  // 무응답/초안/상신(승인 대기)/발송 대기(승인 뒤 워커 대기)/발행/실패 6종 전부.
+  // story #3517 조각②-b(BE #3876, 유나 §22-13/§22-14, PO 確定 2026-09-06) — reply
+  // summary 진리표. 무응답/초안/상신(승인 대기)/발송 대기(승인 뒤 워커 대기)/
+  // 발행/실패 6종 전부 + 모르는 status는 칩 자체를 안 그린다(null).
   it.each([
     [null, 'none'],
     [{ id: 'r1', status: 'draft', external_reply_url: null, command_id: null }, 'draft'],
     [{ id: 'r1', status: 'pending', external_reply_url: null, command_id: null }, 'submitted'],
-    [{ id: 'r1', status: 'pending', external_reply_url: null, command_id: 'cmd-1' }, 'approved'],
+    [{ id: 'r1', status: 'pending', external_reply_url: null, command_id: 'cmd-1' }, 'awaiting_send'],
     [{ id: 'r1', status: 'sent', external_reply_url: 'https://example.com/p/1', command_id: 'cmd-1' }, 'published'],
     [{ id: 'r1', status: 'failed', external_reply_url: null, command_id: 'cmd-1' }, 'failed'],
+    [{ id: 'r1', status: 'some_future_status', external_reply_url: null, command_id: null }, null],
   ] as const)('reply=%o → replyStatus=%s', (reply, expected) => {
     const face = deriveCommentsFace(rawResponse({ active_count: 1, comments: [rawComment({ reply })] }));
     expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyStatus).toBe(expected);

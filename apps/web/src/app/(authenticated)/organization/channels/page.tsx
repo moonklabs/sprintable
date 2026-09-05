@@ -328,8 +328,11 @@ function ChannelSection({
           {credential_kind === 'none' && !isOwnerOrAdmin ? (
             <p className="text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>
           ) : null}
+          {/* story #3521계 유나 #3877 관찰(PO 確定 2026-09-06) — 이 자리는 권한
+              사유(§5-2, 위 두 블록처럼 muted)가 아니라 "액션 실패 결과" 슬롯이다
+              — 하우스 관례(40:1대비 destructive) 그대로. */}
           {credential_kind === 'none' && sandboxError ? (
-            <p className="text-xs text-muted-foreground" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
+            <p className="text-xs text-destructive" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
           ) : null}
         </div>
       </SectionCardBody>
