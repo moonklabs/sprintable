@@ -34,6 +34,7 @@ from app.services.site_posts import (
     create_site_post_draft_version,
     get_campaign,
     get_site_post_draft,
+    get_site_post_external_publication_state,
     get_site_post_publication_info,
     is_agent_caller,
     list_site_post_draft_versions,
@@ -514,6 +515,58 @@ async def submit_site_post_draft_endpoint(
     )
 
 
+class ChannelPublicationView(BaseModel):
+    """story #3476 — `channel_publications` 최신 1행을 그대로 실은 것(서버 값 그대로,
+    FE 조립 X). `unpublished_at`은 전용 컬럼이 없다 — status가 "unpublished"일 때만
+    updated_at을 그 의미로 재사용한다(신규 마이그 없이, 이 스토리 스코프가 "읽기
+    표면"뿐이라 스키마 확장은 별도 판단 대상)."""
+    status: str
+    external_id: str | None = None
+    permalink: str | None = None
+    published_at: str | None = None
+    unpublished_at: str | None = None
+    last_error: str | None = None
+
+
+class PublicationCommandView(BaseModel):
+    """story #3476 보정①(페드루, 미르코 FE 그라운딩 2026-09-05) — 필드명은 새로
+    안 짓는다. FE의 기존 순수 판정 함수 `components/content/failure-action.ts::
+    deriveFailureAction`이 channel_post 상세에서 이미 먹는 그 shape 그대로 —
+    site_post에도 같은 이름으로 붙여야 `FailureActionBadge`를 재사용할 수 있다."""
+    id: uuid.UUID
+    command_status: str
+    attempt_count: int
+    failure_kind: str | None = None
+    next_retry_at: str | None = None
+    dead_letter_at: str | None = None
+    command_reason_code: str | None = None
+    last_error: str | None = None
+
+
+def _channel_publication_view(pub) -> ChannelPublicationView | None:
+    if pub is None:
+        return None
+    return ChannelPublicationView(
+        status=pub.status, external_id=pub.external_id, permalink=pub.permalink,
+        published_at=pub.published_at.isoformat() if pub.published_at else None,
+        unpublished_at=pub.updated_at.isoformat() if pub.status == "unpublished" else None,
+        last_error=pub.last_error,
+    )
+
+
+def _publication_command_view(cmd) -> PublicationCommandView | None:
+    if cmd is None:
+        return None
+    return PublicationCommandView(
+        id=cmd.id, command_status=cmd.status, attempt_count=cmd.attempt_count,
+        failure_kind=cmd.failure_kind,
+        next_retry_at=cmd.next_attempt_at.isoformat() if cmd.next_attempt_at else None,
+        dead_letter_at=cmd.dead_letter_at.isoformat() if cmd.dead_letter_at else None,
+        command_reason_code=cmd.reason_code,
+        last_error=cmd.last_error,
+    )
+
+
 class PublishSitePostFromDraftResponse(BaseModel):
     # story e4fc29fa(조각③c) — 외부 목적지(connection_id != None)는 이 요청 시점엔 아직
     # 결과가 없다(url/published_at은 워커가 나중에 채우는 channel_publications 몫이지
@@ -525,6 +578,10 @@ class PublishSitePostFromDraftResponse(BaseModel):
     version_id: uuid.UUID
     command_id: uuid.UUID | None = None
     status: str | None = None  # "pending" — 외부 목적지 경로에서만 채워진다.
+    # story #3476 — 외부 목적지 분기에서만 채워진다(hosted_site는 이 요청으로 이미
+    # 동기 완결이라 "지금 어디까지 왔나" 자체가 무의미 — None 유지, 회귀 0).
+    channel_publication: ChannelPublicationView | None = None
+    command: PublicationCommandView | None = None
 
 
 @router.post(
@@ -583,8 +640,13 @@ async def publish_site_post_from_draft_endpoint(
         command = await request_site_post_external_publish(
             db, org_id=org_id, draft_id=draft_id, requested_by_member_id=resolved.id,
         )
+        _destination, publication, _cmd_latest = await get_site_post_external_publication_state(
+            db, org_id=org_id, draft_id=draft_id,
+        )
         return PublishSitePostFromDraftResponse(
             version_id=command.approved_version, command_id=command.id, status=command.status,
+            channel_publication=_channel_publication_view(publication),
+            command=_publication_command_view(command),
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -609,6 +671,11 @@ class SitePostPublicationResponse(BaseModel):
     url: str | None
     published_by_member_id: uuid.UUID | None
     published_body_sha256: str | None
+    # story #3476 — destination은 hosted_site/wordpress/webhook 3종(기본값 hosted_site
+    # 유지 — 기존 필드 넷은 hosted_site에서 이미 그대로 채워지던 값, 회귀 0).
+    destination: str = "hosted_site"
+    channel_publication: ChannelPublicationView | None = None
+    command: PublicationCommandView | None = None
 
 
 @router.get(
@@ -633,6 +700,9 @@ async def get_site_post_publication_endpoint(
 
     try:
         info = await get_site_post_publication_info(db, org_id=org_id, draft_id=draft_id)
+        destination, publication, command = await get_site_post_external_publication_state(
+            db, org_id=org_id, draft_id=draft_id,
+        )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -640,6 +710,9 @@ async def get_site_post_publication_endpoint(
         published_at=info.published_at.isoformat() if info.published_at else None,
         url=info.url, published_by_member_id=info.published_by_member_id,
         published_body_sha256=info.published_body_sha256,
+        destination=destination,
+        channel_publication=_channel_publication_view(publication),
+        command=_publication_command_view(command),
     )
 
 
@@ -651,6 +724,9 @@ class UnpublishSitePostResponse(BaseModel):
     unpublished_at: str | None = None
     command_id: uuid.UUID | None = None
     status: str | None = None
+    # story #3476 — publish 응답과 동형(외부 목적지 분기에서만 채워진다).
+    channel_publication: ChannelPublicationView | None = None
+    command: PublicationCommandView | None = None
 
 
 @router.post(
@@ -691,7 +767,14 @@ async def unpublish_site_post_endpoint(
         command = await request_site_post_external_unpublish(
             db, org_id=org_id, draft_id=draft_id, requested_by_member_id=resolved.id,
         )
-        return UnpublishSitePostResponse(command_id=command.id, status=command.status)
+        _destination, publication, _cmd_latest = await get_site_post_external_publication_state(
+            db, org_id=org_id, draft_id=draft_id,
+        )
+        return UnpublishSitePostResponse(
+            command_id=command.id, status=command.status,
+            channel_publication=_channel_publication_view(publication),
+            command=_publication_command_view(command),
+        )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SitePostNotPublishedError as exc:

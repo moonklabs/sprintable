@@ -1118,6 +1118,45 @@ class RetryPublicationCommandResponse(BaseModel):
     status: str
 
 
+async def _retry_publication_command(
+    db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, auth: AuthContext,
+) -> RetryPublicationCommandResponse:
+    """story #3414 AC5·#3476(페드루 보정②, 미르코 FE 그라운딩 2026-09-05) — 휴먼
+    전용, `dead_letter`/`blocked` 상태인 command만 `pending`으로 되돌린다(그 외는
+    404로 존재 비노출). `retry_dead_letter_command` 자체가 `content_kind`를 안
+    본다(org_id+command_id로만 조회) — channel_post·site_post 양쪽 어느 경로에서
+    호출돼도 그대로 맞는다, 이 함수 자체엔 분기 코드가 없다(불필요)."""
+    await _require_human(db, auth, org_id)
+
+    from app.services.publication_command import retry_dead_letter_command
+
+    command = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id)
+    if command is None:
+        raise HTTPException(status_code=404, detail="command를 찾을 수 없거나 재시도 대상이 아닙니다")
+    await db.commit()
+    return RetryPublicationCommandResponse(id=command.id, status=command.status)
+
+
+@router.post(
+    "/{org_id}/publication-commands/{command_id}/retry",
+    response_model=RetryPublicationCommandResponse,
+)
+async def retry_publication_command_shared_endpoint(
+    org_id: uuid.UUID,
+    command_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> RetryPublicationCommandResponse:
+    """story #3476(페드루 보정②) — content_kind 무관 공용 경로. 기존
+    `/channel-posts/publication-commands/{id}/retry`는 경로 자체에 channel-posts가
+    박혀 있어 site_post 화면이 재사용할 수 없었다(미르코 FE 그라운딩). FE의
+    새 호출은 전부 이 경로로 옮긴다 — 구 경로는 하위호환으로 이 함수에 위임만."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    return await _retry_publication_command(db, org_id=org_id, command_id=command_id, auth=auth)
+
+
 @router.post(
     "/{org_id}/channel-posts/publication-commands/{command_id}/retry",
     response_model=RetryPublicationCommandResponse,
@@ -1136,18 +1175,13 @@ async def retry_publication_command_endpoint(
     (카디르 QA와 동형 관례, 상태를 굳이 구별해 알려주지 않는다).
     `next_attempt_at`을 null로 되돌려야 다음 cron tick이 이 행을 실제로 다시 집는다
     (status만 바뀌고 next_attempt_at이 미래에 멈춰 있으면 WHERE절에서 계속 빠지는
-    결함 — 카디르 QA⑤ 지적 그대로 반영)."""
+    결함 — 카디르 QA⑤ 지적 그대로 반영).
+
+    story #3476 — 공용 엔드포인트(`retry_publication_command_shared_endpoint`)로
+    위임만(동작 무변, 구 경로 호환 유지 — FE 마이그레이션 전까지 죽이지 않는다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    await _require_human(db, auth, org_id)
-
-    from app.services.publication_command import retry_dead_letter_command
-
-    command = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id)
-    if command is None:
-        raise HTTPException(status_code=404, detail="command를 찾을 수 없거나 재시도 대상이 아닙니다")
-    await db.commit()
-    return RetryPublicationCommandResponse(id=command.id, status=command.status)
+    return await _retry_publication_command(db, org_id=org_id, command_id=command_id, auth=auth)
 
 
 class CancelScheduledCommandResponse(BaseModel):

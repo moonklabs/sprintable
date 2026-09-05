@@ -1264,6 +1264,60 @@ async def get_site_post_publication_info(
     )
 
 
+async def get_site_post_external_publication_state(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+) -> "tuple[str, ChannelPublication | None, PublicationCommand | None]":
+    """story #3476(Phase1·BE·결함, 런북 A-7 FAIL 2026-09-05) — 외부 목적지(WordPress·
+    webhook)로 발행된 draft의 상태를 읽는 유일한 자리. `publish_site_post_external_
+    command`(워커)는 `channel_publications`에 결과를 잘 쓰지만(성공 분기 확認됨),
+    그걸 읽는 API가 하나도 없었다 — 런북 실측: 워커 로그엔 200이 찍히는데 제품 어디서도
+    permalink·external_id·상태를 확認할 수 없었다.
+
+    `destination`: draft.connection_id가 None이면 "hosted_site", 아니면 그 connection의
+    `channel` 값("wordpress"/"webhook") — connection 행이 지워졌으면(FK 없음, 그라운딩
+    §9) "unknown"(지어내지 않는다).
+
+    `channel_publication`/`command` 둘 다 이 draft 자신의 `site_post_versions`로 좁혀
+    조회한다(`version_id.in_(own_version_ids)`/`approved_version.in_(own_version_ids)`)
+    — request_site_post_external_unpublish가 이미 쓰는 그 축 그대로(cross-draft 유출
+    방지, PR#3797 블로커와 동형 사고를 읽기 경로에서 재발시키지 않는다). 최신 1건(없으면
+    둘 다 None — 아직 한 번도 시도 안 됐다는 뜻, 지어내지 않는다)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.models.publication_command import PublicationCommand
+    from app.models.site_post_version import SitePostVersion
+
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+    if draft.connection_id is None:
+        return "hosted_site", None, None
+
+    connection = await db.get(ChannelConnection, draft.connection_id)
+    destination = connection.channel if connection is not None else "unknown"
+
+    own_version_ids = select(SitePostVersion.id).where(SitePostVersion.draft_id == draft_id)
+    publication = (await db.execute(
+        select(ChannelPublication)
+        .where(ChannelPublication.org_id == org_id, ChannelPublication.version_id.in_(own_version_ids))
+        .order_by(ChannelPublication.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    command = (await db.execute(
+        select(PublicationCommand)
+        .where(
+            PublicationCommand.org_id == org_id,
+            PublicationCommand.content_kind == "site_post",
+            PublicationCommand.approved_version.in_(own_version_ids),
+        )
+        .order_by(PublicationCommand.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    return destination, publication, command
+
+
 # ─── story #3381(Phase0 후속·결함) — 발행 취소(비공개) ─────────────────────────────
 
 async def unpublish_site_post(

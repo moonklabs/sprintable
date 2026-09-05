@@ -315,6 +315,7 @@ async def test_publication_info_all_null_when_never_published_not_404():
         assert r_info.status_code == 200, r_info.text
         assert r_info.json() == {
             "published_at": None, "url": None, "published_by_member_id": None, "published_body_sha256": None,
+            "destination": "hosted_site", "channel_publication": None, "command": None,
         }
     finally:
         app.dependency_overrides.clear()
@@ -387,6 +388,7 @@ async def test_publication_info_all_null_after_unpublish():
         assert r_info.status_code == 200, r_info.text
         assert r_info.json() == {
             "published_at": None, "url": None, "published_by_member_id": None, "published_body_sha256": None,
+            "destination": "hosted_site", "channel_publication": None, "command": None,
         }
     finally:
         app.dependency_overrides.clear()
