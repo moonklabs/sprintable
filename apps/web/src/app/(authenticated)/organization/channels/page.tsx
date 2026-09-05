@@ -55,7 +55,13 @@ interface MeasurementConnectionItem {
 // 밖) — 여기는 「받아서 심는다」까지만.
 function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typeof useTranslations> }) {
   const [copied, setCopied] = useState(false);
-  const snippet = `fetch('${typeof window !== 'undefined' ? window.location.origin : ''}/api/v2/public/pageview', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    public_key: '${publicKey}',\n    path: location.pathname,\n    referrer: document.referrer || null,\n  }),\n});`;
+  // 페드루 PO REQUIRED①(2026-09-06, #3896 리뷰) — window.location.origin은 이
+  // 대시보드(FE) 호스트다. 고객이 그대로 복사하면 없는 경로로 beacon을 쏜다 —
+  // 정본은 sprintable-landing의 view-beacon.tsx가 실제로 쓰는 BE 베이스
+  // (NEXT_PUBLIC_FASTAPI_URL, fastapi-proxy.ts:16과 같은 값)다. UTM 4키·
+  // keepalive:true도 그 실물과 동형(페이지 언로드 중에도 요청이 끊기지 않게).
+  const backendBase = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? '';
+  const snippet = `fetch('${backendBase}/api/v2/public/pageview', {\n  method: 'POST',\n  keepalive: true,\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    public_key: '${publicKey}',\n    path: location.pathname,\n    referrer: document.referrer || null,\n    utm_source: new URLSearchParams(location.search).get('utm_source'),\n    utm_medium: new URLSearchParams(location.search).get('utm_medium'),\n    utm_campaign: new URLSearchParams(location.search).get('utm_campaign'),\n    utm_content: new URLSearchParams(location.search).get('utm_content'),\n  }),\n});`;
 
   const handleCopy = async () => {
     try {
@@ -140,6 +146,9 @@ function MeasurementConnectionsSection({
                 ? t('measurementBeaconNoDataYet')
                 : t('measurementBeaconHasData', {
                     time: beacon.last_seen_at ? formatRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
+                    // 페드루 PO REQUIRED③(2026-09-06, #3896 리뷰) — count_7d(0 포함,
+                    // null≠0 원칙 — has_data 상태면 항상 실수라 BE가 이미 보장).
+                    count: beacon.count_7d ?? 0,
                   })}
           </p>
           {!beaconPanel ? (

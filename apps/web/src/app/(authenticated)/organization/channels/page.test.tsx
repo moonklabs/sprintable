@@ -741,6 +741,10 @@ describe('OrganizationChannelsPage — 성과 수집(story #3540)', () => {
   });
 
   it('⭐「시작하기」 클릭 → 키 인라인 패널(값+복사+스니펫) → 같은 마운트에서 상태가 no_data_yet으로 갱신된다(재로드 없이)', async () => {
+    // 페드루 PO REQUIRED①(2026-09-06, #3896 리뷰) — 스니펫 베이스는 BE 주소
+    // (NEXT_PUBLIC_FASTAPI_URL)여야 한다. FE 호스트(window.location.origin,
+    // jsdom 기본 http://localhost:3000)가 섞이면 안 된다.
+    vi.stubEnv('NEXT_PUBLIC_FASTAPI_URL', 'https://api.sprintable.example');
     let measurementCallCount = 0;
     stubFetch({
       measurementConnections: [
@@ -772,14 +776,21 @@ describe('OrganizationChannelsPage — 성과 수집(story #3540)', () => {
     await flush();
 
     expect(container.querySelector('[data-testid="measurement-beacon-key-value"]')?.textContent).toBe('pk_live_abcdef123456');
-    expect(container.querySelector('[data-testid="measurement-beacon-snippet"]')?.textContent).toContain('pk_live_abcdef123456');
-    expect(container.querySelector('[data-testid="measurement-beacon-snippet"]')?.textContent).toContain('/api/v2/public/pageview');
+    const snippetText = container.querySelector('[data-testid="measurement-beacon-snippet"]')?.textContent ?? '';
+    expect(snippetText).toContain('pk_live_abcdef123456');
+    expect(snippetText).toContain('/api/v2/public/pageview');
+    // 페드루 PO REQUIRED①(2026-09-06, #3896 리뷰) — BE 베이스가 실려야 하고,
+    // FE 호스트가 섞이면 안 된다(되돌리면 window.location.origin이 다시 붙어 RED).
+    expect(snippetText).toContain('https://api.sprintable.example/api/v2/public/pageview');
+    expect(snippetText).not.toContain(window.location.origin);
+    expect(snippetText).toContain('utm_source');
+    expect(snippetText).toContain('keepalive');
     // 재로드 없이 같은 마운트에서 상태 문구가 갱신됐다.
     expect(container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent)
       .toBe(koMessages.channelConnect.measurementBeaconNoDataYet);
   });
 
-  it('beacon=has_data — 마지막 기록 상대시각이 보인다', async () => {
+  it('beacon=has_data — 마지막 기록 상대시각·최근 7일 건수가 보인다', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
     stubFetch({
@@ -788,7 +799,23 @@ describe('OrganizationChannelsPage — 성과 수집(story #3540)', () => {
       ],
     });
     await mount('owner');
-    expect(container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent).toContain('전');
+    const text = container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent ?? '';
+    expect(text).toContain('전');
+    // 페드루 PO REQUIRED③(2026-09-06, #3896 리뷰) — count_7d가 문구에 실린다.
+    expect(text).toContain('12');
+  });
+
+  it('beacon=has_data·count_7d=0 — 「0건」으로 뜬다(null이 아니다, null≠0 원칙)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
+    stubFetch({
+      measurementConnections: [
+        { key: 'beacon', status: 'has_data', last_seen_at: '2026-08-31T11:00:00Z', count_7d: 0, settings_path: null },
+      ],
+    });
+    await mount('owner');
+    const text = container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent ?? '';
+    expect(text).toContain('0');
   });
 
   it('utm=auto — 자동 부착 문구·콘텐츠 규칙 링크', async () => {

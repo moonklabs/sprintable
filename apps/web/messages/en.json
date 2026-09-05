@@ -2168,7 +2168,7 @@
     "measurementBeaconLabel": "Blog pageviews",
     "measurementBeaconNotStarted": "Not started yet",
     "measurementBeaconNoDataYet": "No hits recorded yet.",
-    "measurementBeaconHasData": "Last recorded {time}",
+    "measurementBeaconHasData": "Last recorded {time} · {count} in the last 7 days",
     "measurementBeaconStartAction": "Get started",
     "measurementBeaconViewKeyAction": "View key",
     "measurementBeaconKeyFailed": "Couldn't load the key. Please try again.",
@@ -2177,9 +2177,9 @@
     "measurementBeaconKeyCopied": "Copied",
     "measurementBeaconSnippetLabel": "Install snippet",
     "measurementUtmLabel": "UTM rules",
-    "measurementUtmAuto": "Attached automatically.",
-    "measurementUtmManual": "Only the manual rule is on.",
-    "measurementUtmOff": "Rules are off.",
+    "measurementUtmAuto": "Attached using your organization's values (including utm_content).",
+    "measurementUtmManual": "Attached using channel defaults. The link UTM check is on.",
+    "measurementUtmOff": "Attached using channel defaults.",
     "measurementUtmSettingsLink": "Change in content rules"
   },
   "content": {
