@@ -199,6 +199,55 @@ async def _attach_artifact_denorm(
     return out
 
 
+_GENERATION_COST_KIND = "generation_cost"
+
+
+async def _validate_and_normalize_evidence_payload(
+    session: AsyncSession, *, org_id: uuid.UUID, payload: dict | None, caller_type: str,
+) -> dict | None:
+    """story #3498(페드루 PO REQUIRED, PR#3847 리뷰) — client-writable payload를 연
+    대가로 두 가지를 서버가 강제한다.
+
+    ① `recorded_by`는 클라이언트 값을 항상 버리고 서버가 채운다(caller_type 그대로
+    — "platform" 표식은 이 경로로 절대 못 나온다, insight_snapshots.py 내부 서비스
+    호출만이 그 표식을 쓸 수 있다). evidence.py의 어떤 payload든 이 축은 위조 불가.
+
+    ② `kind="generation_cost"`(생성 비용 자기 보고, 3498 §2 spent 합산의 유일한
+    입력)면 `cost_minor`는 int·0 이상이어야 한다(음수 cost로 잔량을 부풀려 한도를
+    뚫는 걸 여기서 원천 차단 — generation_budget.py의 합산 스킵은 두 번째 겹).
+    `currency`는 조직에 generation_budget 정책이 설정돼 있으면 그 통화와 정확히
+    일치해야 한다(정책 자체가 없으면 비교 대상이 없어 통과 — «규칙 없음»과 같은
+    원칙). 위반은 422 EVIDENCE_PAYLOAD_INVALID."""
+    if payload is None:
+        return None
+    payload = dict(payload)
+    payload["recorded_by"] = caller_type
+
+    if payload.get("kind") == _GENERATION_COST_KIND:
+        cost_minor = payload.get("cost_minor")
+        if not isinstance(cost_minor, int) or isinstance(cost_minor, bool) or cost_minor < 0:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": "generation_cost evidence의 cost_minor는 0 이상의 정수여야 합니다.",
+                },
+            )
+        from app.services.content_rules import get_org_content_rules
+
+        rule_row = await get_org_content_rules(session, org_id=org_id)
+        policy_currency = ((rule_row.rules or {}).get("generation_budget") or {}).get("currency") if rule_row else None
+        if policy_currency is not None and payload.get("currency") != policy_currency:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": f"currency는 조직 정책 통화({policy_currency})와 일치해야 합니다.",
+                },
+            )
+    return payload
+
+
 @router.post("", response_model=EvidenceResponse, status_code=201)
 async def create_evidence(
     body: EvidenceCreateRequest,
@@ -223,6 +272,10 @@ async def create_evidence(
             session, body.artifact_id, org_id, project_id
         )
 
+    payload = await _validate_and_normalize_evidence_payload(
+        session, org_id=org_id, payload=body.payload, caller_type=caller.type,
+    )
+
     evidence = Evidence(
         id=uuid.uuid4(),
         org_id=org_id,
@@ -233,7 +286,7 @@ async def create_evidence(
         ref=body.ref,
         source=body.source,
         note=body.note,
-        payload=body.payload,
+        payload=payload,
         created_by=caller.id,
     )
     session.add(evidence)

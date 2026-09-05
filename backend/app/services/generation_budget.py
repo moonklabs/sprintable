@@ -78,9 +78,16 @@ async def compute_generation_budget_status(
     spent_minor = 0
     for payload in rows:
         try:
-            spent_minor += int((payload or {}).get("cost_minor") or 0)
+            cost = int((payload or {}).get("cost_minor") or 0)
         except (TypeError, ValueError):
             continue  # 기형 payload(비-숫자 cost_minor) — 지출로 안 잡는다(관대한 reader).
+        # 페드루 PO REQUIRED(2026-09-05, PR#3847 리뷰①) — 두 겹 방어의 두 번째 겹.
+        # 쓰기 시점(evidence.py::create_evidence)이 이미 음수를 422로 막지만, 이
+        # 합산 자체도 음수를 무시한다 — 어느 한쪽이 우회돼도(예: 과거 데이터·내부
+        # 서비스 직접 insert) 음수 cost로 잔량을 부풀려 한도를 뚫을 수 없다.
+        if cost < 0:
+            continue
+        spent_minor += cost
 
     return {
         "limit_minor": limit_minor, "currency": currency, "period": period,

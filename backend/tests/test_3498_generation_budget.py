@@ -120,6 +120,44 @@ async def _create_channel_post_draft_submit(
     return draft_id, r_submit
 
 
+async def _grant_project_access(session, *, project_id, member_id):
+    """evidence.py::_assert_work_item_access가 최종적으로 부르는 has_project_access의
+    agent 분기(project_auth.py::_project_access_predicate)는 team_member_branch가
+    TeamMember.type=="human" 전용이라 에이전트를 안 본다 — 에이전트는 이 명시 grant
+    (ProjectAccess.member_id, permission="granted")로만 통과한다(test_e_verify_v0_
+    s1_evidence_realdb.py의 확립된 시딩과 동형)."""
+    from app.models.project_access import ProjectAccess
+    import uuid as _uuid
+
+    grant = ProjectAccess(
+        id=_uuid.uuid4(), project_id=project_id, member_id=member_id, permission="granted", role="member",
+    )
+    session.add(grant)
+    await session.commit()
+
+
+async def _seed_evidence_agent(session, org_id, project_id, *, name="Evidence Agent"):
+    """evidence.py 경로 전용 — create_evidence()가 resolve_member()(레거시 경로,
+    member_ssot_resolver_shadow 기본 False)와 has_project_access를 **둘 다** 부른다.
+    실측(2026-09-05) — 실 alembic-migrated DB(realdb류 테스트)에서는 `team_members`가
+    `members`(+project_access) 위의 VIEW라 Member 하나만 심어도 양쪽에서 다 보이지만,
+    이 파일은 destructive_schema(`Base.metadata.create_all`)라 `team_members`가 그
+    VIEW 대신 독립된 빈 테이블로 만들어진다 — Member만 심으면 resolve_member의
+    TeamMember 조회가 0행(`Team member not found`, 400). 그래서 여기선 **같은 id로
+    Member+TeamMember 둘 다** 명시적으로 심는다(같은 신원의 두 그림자, 이 create_all
+    한정 우회 — 실 DB에서는 자동으로 성립하는 것을 여기서만 손으로 맞춘다)."""
+    from app.models.member import Member
+    from app.models.team import TeamMember
+    import uuid as _uuid
+
+    member_id = _uuid.uuid4()
+    session.add(Member(id=member_id, org_id=org_id, type="agent", name=name, is_active=True))
+    session.add(TeamMember(id=member_id, org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True))
+    await session.commit()
+    await _grant_project_access(session, project_id=project_id, member_id=member_id)
+    return member_id
+
+
 async def _approve_gate_directly(session, gate_id):
     from app.models.gate import Gate
     from sqlalchemy import select
@@ -571,6 +609,235 @@ async def test_get_generation_budget_endpoint_all_null_when_rule_absent():
             "limit_minor": None, "currency": None, "period": None,
             "period_start": None, "period_end": None, "spent_minor": None, "remaining_minor": None,
         }
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── 조각⑤(페드루 PO REQUIRED, PR#3847 리뷰) — payload 검증·recorded_by 강제 ───────
+
+
+@pytest.mark.anyio
+async def test_create_evidence_generation_cost_negative_cost_minor_rejected_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            agent_id = await _seed_evidence_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post("/api/v2/evidence", json={
+                "work_item_id": str(story_id), "work_item_type": "story",
+                "type": "metric", "ref": "self-report",
+                "payload": {"kind": "generation_cost", "cost_minor": -1, "currency": "KRW"},
+            })
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "EVIDENCE_PAYLOAD_INVALID"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_evidence_generation_cost_non_int_cost_minor_rejected_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            agent_id = await _seed_evidence_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post("/api/v2/evidence", json={
+                "work_item_id": str(story_id), "work_item_type": "story",
+                "type": "metric", "ref": "self-report",
+                "payload": {"kind": "generation_cost", "cost_minor": "500", "currency": "KRW"},
+            })
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "EVIDENCE_PAYLOAD_INVALID"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_evidence_generation_cost_currency_mismatch_rejected_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            agent_id = await _seed_evidence_agent(s, org_id, project_id)
+            await _put_generation_budget(s, org_id=org_id, limit_minor=100000, currency="KRW")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post("/api/v2/evidence", json={
+                "work_item_id": str(story_id), "work_item_type": "story",
+                "type": "metric", "ref": "self-report",
+                "payload": {"kind": "generation_cost", "cost_minor": 500, "currency": "USD"},
+            })
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "EVIDENCE_PAYLOAD_INVALID"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_evidence_generation_cost_currency_check_skipped_when_no_policy():
+    """정책 자체가 없으면(«규칙 없음») 비교 대상이 없어 통과 — currency 값이 뭐든
+    거부 안 함(존재하지 않는 정책과 비교할 수 없다는 원칙, generation_budget.py의
+    «규칙 없음=None» 신호와 동형)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            agent_id = await _seed_evidence_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post("/api/v2/evidence", json={
+                "work_item_id": str(story_id), "work_item_type": "story",
+                "type": "metric", "ref": "self-report",
+                "payload": {"kind": "generation_cost", "cost_minor": 500, "currency": "USD"},
+            })
+        assert r.status_code == 201, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_evidence_client_recorded_by_ignored_server_overwrites_with_caller_type():
+    """페드루 PO REQUIRED② — 클라이언트가 payload.recorded_by="platform"을 실어도
+    서버가 caller_type(여기선 "agent")으로 덮어쓴다. "platform" 표식 위조 불가."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            agent_id = await _seed_evidence_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post("/api/v2/evidence", json={
+                "work_item_id": str(story_id), "work_item_type": "story",
+                "type": "metric", "ref": "self-report",
+                "payload": {"kind": "generation_cost", "cost_minor": 500, "currency": "KRW", "recorded_by": "platform"},
+            })
+        assert r.status_code == 201, r.text
+        assert r.json()["payload"]["recorded_by"] == "agent", "클라이언트 recorded_by 위조가 안 막혔다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_evidence_non_generation_cost_payload_still_gets_recorded_by_overwritten():
+    """recorded_by 강제는 generation_cost에 국한되지 않는다 — payload가 있는 모든
+    evidence에 적용(위조 차단 축은 kind 무관)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            agent_id = await _seed_evidence_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post("/api/v2/evidence", json={
+                "work_item_id": str(story_id), "work_item_type": "story",
+                "type": "metric", "ref": "self-report",
+                "payload": {"note": "무관한 payload", "recorded_by": "platform"},
+            })
+        assert r.status_code == 201, r.text
+        assert r.json()["payload"]["recorded_by"] == "agent"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── GenerationBudgetRule PUT 3종 검증 ───────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_put_generation_budget_negative_limit_minor_rejected_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"generation_budget": {"limit_minor": -1}}},
+            )
+        assert r.status_code == 422, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_put_generation_budget_unsupported_currency_rejected_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"generation_budget": {"limit_minor": 1000, "currency": "JPY"}}},
+            )
+        assert r.status_code == 422, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_put_generation_budget_unsupported_period_rejected_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"generation_budget": {"limit_minor": 1000, "period": "week"}}},
+            )
+        assert r.status_code == 422, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

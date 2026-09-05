@@ -12,7 +12,7 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -53,7 +53,10 @@ class GenerationBudgetRule(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    limit_minor: int
+    # 페드루 PO REQUIRED(2026-09-05, PR#3847 리뷰③) — limit_minor 음수는 "정지"보다
+    # 더 이상한 상태(잔량이 시작부터 음수)라 애초에 저장을 막는다. currency/period는
+    # Literal이 이미 422를 강제(3종 검증 테스트로 확認).
+    limit_minor: int = Field(ge=0)
     currency: Literal["KRW", "USD"] = "KRW"
     period: Literal["month"] = "month"
 
