@@ -24,7 +24,11 @@ describe('/api/organizations/[id]/publications/[publicationId]/comments/refresh 
     await expect(resp.json()).resolves.toEqual({ data: result, error: null, meta: null });
   });
 
-  it('POST — 429 COMMENT_REFRESH_RATE_LIMITED — Retry-After 헤더가 그대로 보존된다', async () => {
+  // story #3517(PO 지적, 2026-09-05) — 이 테스트는 proxyToFastapiWithParams 자체를
+  // mock하므로 "route가 그 반환값을 그대로 넘긴다"만 잰다 — 실제 fastapi-proxy.ts의
+  // Retry-After 허용목록 통과 여부는 fastapi-proxy.test.ts(실 fetch stub)가 잰다.
+  // 이름이 "보존된다"라고 약속한 걸 이 테스트 혼자로는 못 지켜 이름을 정정한다.
+  it('POST — 429 COMMENT_REFRESH_RATE_LIMITED — route는 proxyToFastapiWithParams 반환 헤더를 그대로 넘긴다(허용목록 통과 자체는 fastapi-proxy.test.ts에서)', async () => {
     proxyToFastapiWithParams.mockResolvedValue(
       fastapiResponse({ detail: { code: 'COMMENT_REFRESH_RATE_LIMITED', message: '잠시 후 다시 시도해 주세요' } }, 429, { 'Retry-After': '60' }),
     );
