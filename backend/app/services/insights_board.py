@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.pagination import decode_cursor, decode_metric_cursor, encode_cursor, encode_metric_cursor
 from app.models.channel_publication import ChannelPublication
+from app.models.channel_post_version import ChannelPostVersion
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
@@ -75,6 +76,9 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime):
         SitePost.published_at.label("published_at"),
         _blog_external_url_expr(settings.public_site_base_url).label("external_url"),
         cast(literal(None), PG_UUID(as_uuid=True)).label("connection_id"),
+        # story #3516 조각② — site_post는 댓글 개념 자체가 없어(그라운딩, 민 레군·
+        # 유나양 확認) 항상 null(별건으로 미룸, 이 스토리 스코프 밖).
+        cast(literal(None), PG_UUID(as_uuid=True)).label("channel_post_draft_id"),
     ).where(
         SitePost.org_id == org_id, SitePost.unpublished_at.is_(None), SitePost.published_at >= since,
     )
@@ -91,10 +95,16 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime):
             ChannelPublication.published_at.label("published_at"),
             ChannelPublication.permalink.label("external_url"),
             ChannelPublication.connection_id.label("connection_id"),
+            # story #3516 조각② — 유나양·민 레군 그라운딩으로 channel_publication
+            # 행만 좁힌 필드(신규 컬럼 0·마이그 0, version_id→channel_post_versions.
+            # draft_id 조인 1회). 보드 「댓글 {n}」 링크가 이 값으로 변형 상세
+            # (/content/channel-posts/{draft_id})로 간다.
+            ChannelPostVersion.draft_id.label("channel_post_draft_id"),
         )
         .select_from(ChannelPublication)
         .join(Gate, Gate.id == ChannelPublication.gate_id)
         .join(Story, Story.id == Gate.work_item_id)
+        .outerjoin(ChannelPostVersion, ChannelPostVersion.id == ChannelPublication.version_id)
         .where(
             ChannelPublication.org_id == org_id, ChannelPublication.status == "published",
             ChannelPublication.published_at.is_not(None), ChannelPublication.published_at >= since,
@@ -223,10 +233,20 @@ async def list_insights_board(
     # story #3516 — comments_count 배치(N+1 회피, 위 스냅샷 배치와 동형). site_post
     # 행(kind="site_post")은 애초에 이 스토리 범위 밖(hosted_site 댓글 개념 자체가
     # 없다)이라 null 그대로 — channel_publication 행만 배치 대상.
-    from app.services.channel_post_comments import count_comments_by_publication_ids
+    from app.services.channel_post_comments import (
+        count_comments_by_publication_ids, get_last_collected_at_by_publication_ids,
+    )
 
     channel_pub_ids = [r.publication_id for r in page if r.kind == "channel_publication"]
     comments_count_by_pub = await count_comments_by_publication_ids(db, publication_ids=channel_pub_ids)
+    # story #3516 조각②(페드루 PO REQUIRED, 유나양·민 레군 그라운딩) — comments_count
+    # =0 하나가 "미수집"·"수집됐는데 0건"·"채널 미제공"을 다 가려 화면이 네 갈래를
+    # 못 그린다. 이 두 필드가 그 신호를 판별한다(comments_count의 정의는 그대로 —
+    # 이 필드들이 그 0의 뜻을 가른다).
+    comments_last_collected_at_by_pub = await get_last_collected_at_by_publication_ids(
+        db, publication_ids=channel_pub_ids,
+    )
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
 
     rows_out = []
     for r in page:
@@ -242,6 +262,8 @@ async def list_insights_board(
                 d1 = snap
             elif offset == 7:
                 d7 = snap
+        is_channel_pub = r.kind == "channel_publication"
+        adapter = CHANNEL_ADAPTERS.get(r.channel) if is_channel_pub else None
         rows_out.append({
             "publication_id": r.publication_id, "kind": r.kind, "channel": r.channel,
             "work_item_id": r.work_item_id, "title": r.title, "published_at": r.published_at,
@@ -251,7 +273,15 @@ async def list_insights_board(
             # 지금 안 지워진 댓글 수". 보드는 개요라 «미수집»과 «수집됐는데 0건»을
             # 안 가른다(둘 다 0) — 그 구분은 댓글 목록 API(list_comments_for_publication
             # 의 last_collected_at)의 몫으로 남긴다(정밀도가 필요한 자리는 거기).
-            "comments_count": comments_count_by_pub.get(r.publication_id, 0) if r.kind == "channel_publication" else None,
+            "comments_count": comments_count_by_pub.get(r.publication_id, 0) if is_channel_pub else None,
+            # story #3516 조각② — 「댓글 {n}」 링크 목적지(변형 상세). site_post는
+            # 별건(민 레군·유나양 그라운딩)이라 항상 null.
+            "channel_post_draft_id": r.channel_post_draft_id if is_channel_pub else None,
+            # 0의 뜻을 가르는 신호 둘 — comments_count(위)와 정의 재사용, 새 판정 0.
+            "comments_last_collected_at": (
+                comments_last_collected_at_by_pub.get(r.publication_id) if is_channel_pub else None
+            ),
+            "comments_supported": bool(adapter is not None and adapter.supports_fetch_replies) if is_channel_pub else False,
         })
 
     next_cursor = None

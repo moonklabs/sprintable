@@ -916,6 +916,44 @@ async def _maybe_create_scheduled_publication_command(
     if gate.gate_type != "external_publish":
         return
 
+    # story #3516 조각②(페드루 PO 確定 2026-09-05) — 댓글 답변 게이트(scope_key=
+    # "comment:{comment_id}", neutral_facts.kind="comment_reply")는 위 blog/channel_
+    # post 분기(scheduled_at·site_post draft_id 축)와 무관한 별도 축이라 맨 앞에서
+    # 갈라 처리하고 return한다(아래 기존 두 분기는 안 건드림 — 셋 다 서로 배타적).
+    if (gate.neutral_facts or {}).get("kind") == "comment_reply":
+        if resolver_id is None:
+            logger.warning(
+                "gate %s(comment_reply) approved but resolver_id missing — publication_command not created",
+                gate.id,
+            )
+            return
+        raw_reply_id = (gate.neutral_facts or {}).get("reply_id")
+        raw_connection_id = (gate.neutral_facts or {}).get("connection_id")
+        if raw_reply_id is None or raw_connection_id is None:
+            logger.warning(
+                "gate %s(comment_reply) approved but neutral_facts incomplete — publication_command not created",
+                gate.id,
+            )
+            return
+        try:
+            reply_id = uuid.UUID(raw_reply_id)
+            connection_id = uuid.UUID(raw_connection_id)
+        except (ValueError, TypeError, AttributeError):
+            logger.warning(
+                "gate %s(comment_reply) approved but neutral_facts unparsable — publication_command not created",
+                gate.id,
+            )
+            return
+
+        from app.services.publication_command import create_or_get_publication_command
+
+        await create_or_get_publication_command(
+            session, org_id=gate.org_id, gate_id=gate.id, destination=connection_id,
+            approved_version=reply_id, requested_by_member_id=resolver_id,
+            scheduled_at=None, operation="reply", content_kind="comment_reply",
+        )
+        return
+
     def _mark_unresolved() -> None:
         logger.warning(
             "gate %s approved but draft resolution failed — publication_command not created", gate.id,

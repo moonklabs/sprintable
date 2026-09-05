@@ -443,3 +443,24 @@ async def count_comments_by_publication_ids(
         .group_by(ChannelPostComment.publication_id)
     )).all()
     return {pid: count for pid, count in rows}
+
+
+async def get_last_collected_at_by_publication_ids(
+    db: AsyncSession, *, publication_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, datetime]:
+    """페드루 PO REQUIRED(2026-09-05, 유나양·민 레군 그라운딩) — 3502 성과 보드의
+    `comments_last_collected_at` 배치 조회. `list_comments_for_publication`의
+    `last_captured_at`과 정확히 같은 정의(CommentCollectionSchedule.status="captured"
+    MAX(captured_at))를 재사용한다(두 번째 구현 0). publication_id 없으면 dict에서
+    빠짐(호출부가 `.get(pid)` → None="미수집")."""
+    if not publication_ids:
+        return {}
+    rows = (await db.execute(
+        select(CommentCollectionSchedule.publication_id, func.max(CommentCollectionSchedule.captured_at))
+        .where(
+            CommentCollectionSchedule.publication_id.in_(publication_ids),
+            CommentCollectionSchedule.status == "captured",
+        )
+        .group_by(CommentCollectionSchedule.publication_id)
+    )).all()
+    return {pid: captured_at for pid, captured_at in rows}

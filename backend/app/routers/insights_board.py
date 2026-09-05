@@ -62,6 +62,11 @@ class InsightsBoardRow(BaseModel):
     # story #3516 — null="site_post(댓글 개념 없음)"·정수="channel_publication의 지금
     # 댓글 수"(미수집·0건 둘 다 0 — 정밀 구분은 댓글 목록 API 몫).
     comments_count: int | None = None
+    # story #3516 조각②(페드루 PO REQUIRED, 유나양·민 레군 그라운딩) — comments_count
+    # =0의 뜻을 가르는 신호 셋. site_post 행은 셋 다 null/false.
+    channel_post_draft_id: uuid.UUID | None = None
+    comments_last_collected_at: datetime | None = None
+    comments_supported: bool = False
 
 
 class InsightsBoardResponse(BaseModel):
