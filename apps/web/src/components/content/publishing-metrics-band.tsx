@@ -51,8 +51,11 @@ function formatOnTimeRate(rate: number | null, t: Translator): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+// PO 보정(2026-09-05, PR#3833 리뷰) — 「—」만 서면 이유 없이 "고장인가"로 읽힌다
+// (§18-2). recovery null의 뜻은 정시율과 다르다 — "이 기간에 실패가 없어 복구할
+// 것 자체가 없었다"이므로 별도 문구를 쓴다(정시율의 "발행이 없다"와 혼동 금지).
 function formatRecoveryMinutes(seconds: number | null, t: Translator): string {
-  if (seconds === null) return t('publishingMetricsUnmeasuredDash');
+  if (seconds === null) return `${t('publishingMetricsUnmeasuredDash')} (${t('publishingMetricsRecoveryNoFailures')})`;
   return t('publishingMetricsMinutesUnit', { minutes: Math.round(seconds / 60) });
 }
 

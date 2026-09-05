@@ -2328,6 +2328,7 @@
     "publishingMetricsOnTimeRateLabel": "정시 발행률",
     "publishingMetricsUnmeasuredDash": "—",
     "publishingMetricsUnmeasuredReason": "이 기간에 발행이 없습니다",
+    "publishingMetricsRecoveryNoFailures": "이 기간에 실패가 없습니다",
     "publishingMetricsRecoveryLabel": "복구",
     "publishingMetricsMinutesUnit": "{minutes}분",
     "publishingMetricsAccidentZero": "중복·승인 없는 호출 0",

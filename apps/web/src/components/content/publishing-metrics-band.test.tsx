@@ -102,13 +102,14 @@ describe('PublishingMetricsBand(story #3484, §18)', () => {
     expect(el?.textContent).toContain(koMessages.content.publishingMetricsUnmeasuredReason);
   });
 
-  it('recovery_seconds가 null이면 「—」(미측정 사유 없이, 값 자체가 없다는 뜻)', async () => {
+  it('⭐PO 보정(2026-09-05, PR#3833 리뷰) — recovery_seconds가 null이면 「—」만이 아니라 «이유»도 함께 선다(§18-2, 「고장인가」로 안 읽히게)', async () => {
     stubFetch({ '7d': { ...FULL_METRICS, recovery_seconds_p50: null, recovery_seconds_p95: null } });
     await act(async () => { root.render(wrap(<PublishingMetricsBand orgId="org-1" />)); });
     await flush();
     const el = container.querySelector('[data-testid="publishing-metrics-recovery"]');
     expect(el?.textContent).toContain('—');
     expect(el?.textContent).not.toContain('분');
+    expect(el?.textContent).toContain(koMessages.content.publishingMetricsRecoveryNoFailures);
   });
 
   it('⭐조회 실패 — 「지표를 불러오지 못했습니다」(값 렌더 없음)', async () => {

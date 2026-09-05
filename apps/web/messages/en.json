@@ -2328,6 +2328,7 @@
     "publishingMetricsOnTimeRateLabel": "On-time rate",
     "publishingMetricsUnmeasuredDash": "—",
     "publishingMetricsUnmeasuredReason": "No publishes in this window",
+    "publishingMetricsRecoveryNoFailures": "No failures in this window",
     "publishingMetricsRecoveryLabel": "Recovery",
     "publishingMetricsMinutesUnit": "{minutes}m",
     "publishingMetricsAccidentZero": "Duplicates & unapproved calls 0",
