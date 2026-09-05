@@ -36,6 +36,23 @@ _LANG_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
 _APPROVED_STATUSES = ("approved", "auto_passed")
 
 
+def _lint_site_post_fields(
+    rules: dict | None, *, title: str, summary: str, body_md: str,
+) -> list[dict]:
+    """story #3482 — `lint_content` 자체는 무변(순수 함수, 결합 텍스트 한 덩이라는
+    전제가 없다). 이 함수가 title·summary·body_md를 **각각** 별도로 lint해 위반의
+    `field`를 호출부가 진짜 필드명으로 덮어쓴다 — #3471의 `f"{title}\\n{summary}\\n
+    {body_md}"` 결합 방식은 위반 field가 항상 "text"로 와 site_post 화면(text 필드
+    자체가 없다)이 「어느 필드 아래」를 못 정했다(미르코 3472 2부 범위 밖 처리).
+    link_url은 site_post에 구조적으로 없다(UTM 축은 세 호출 다 no-op) — channel_post
+    경로(link_url 있음)는 이 함수를 안 쓴다(무변)."""
+    violations: list[dict] = []
+    for field_name, text in (("title", title), ("summary", summary), ("body_md", body_md)):
+        for v in lint_content(rules, text=text, link_url=None):
+            violations.append({**v, "field": field_name})
+    return violations
+
+
 class InvalidSitePostInputError(ValueError):
     """slug/lang이 서버 형식 규칙을 어김(422)."""
 
@@ -399,14 +416,17 @@ async def create_site_post_draft_version(
     #     길 자체를 차단한다).
     await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version, draft=draft)
 
-    # story #3471(페드루 PO 確定 2026-09-05) — channel_posts.py::create_channel_post_
-    # draft_version과 동형(비차단, draft에 스냅샷 저장). site_post는 link_url 필드가
-    # 없어 UTM 필수 검사는 구조적으로 no-op(lint_content가 link_url=None이면 그 축을
-    # 건너뛴다) — banned_terms만 title+summary+body_md 결합 텍스트에 적용한다(제목에
-    # 금칙어가 있어도 잡아야 한다, body_md만 보면 놓친다).
+    # story #3471(페드루 PO 確定 2026-09-05)·#3482(필드별, 2026-09-05 후속) —
+    # channel_posts.py::create_channel_post_draft_version과 동형(비차단, draft에
+    # 스냅샷 저장). site_post는 link_url 필드가 없어 UTM 필수 검사는 구조적으로
+    # no-op(lint_content가 link_url=None이면 그 축을 건너뛴다) — banned_terms를
+    # title·summary·body_md 각각에 적용한다(#3471의 결합 텍스트 한 덩이는 위반
+    # field가 항상 "text"로 와 site_post 화면이 «어느 필드 아래»를 못 정했다 —
+    # 미르코 3472 2부 범위 밖 처리, #3482 그라운딩).
     rule_row = await get_org_content_rules(db, org_id=org_id)
-    combined_text = f"{title}\n{summary}\n{body_md}"
-    violations = lint_content(rule_row.rules if rule_row else None, text=combined_text, link_url=None)
+    violations = _lint_site_post_fields(
+        rule_row.rules if rule_row else None, title=title, summary=summary, body_md=body_md,
+    )
     draft.lint_result = {"rules_version": rule_row.version if rule_row else 0, "violations": violations}
 
     await db.commit()
@@ -617,11 +637,13 @@ async def submit_site_post_draft(
         raise SitePostVersionNotFoundError(version_id)
     origin_author_member_id = versions[0].author_member_id
 
-    # story #3471(페드루 PO 確定 2026-09-05) — channel_posts.py::submit_channel_post_
-    # draft와 동형(제목·요약·본문 결합 재검사, link_url 없어 UTM 축은 no-op).
+    # story #3471(페드루 PO 確定 2026-09-05)·#3482(필드별) — channel_posts.py::
+    # submit_channel_post_draft와 동형 재검사(link_url 없어 UTM 축은 no-op), 필드별로
+    # 갈라 상신 422 body의 violations[].field도 title/summary/body_md 중 하나로 온다.
     rule_row = await get_org_content_rules(db, org_id=org_id)
-    submit_combined_text = f"{target.title}\n{target.summary}\n{target.body_md}"
-    submit_violations = lint_content(rule_row.rules if rule_row else None, text=submit_combined_text, link_url=None)
+    submit_violations = _lint_site_post_fields(
+        rule_row.rules if rule_row else None, title=target.title, summary=target.summary, body_md=target.body_md,
+    )
     if submit_violations:
         raise ContentRuleViolationError(
             rules_version=rule_row.version if rule_row else 0, violations=submit_violations,

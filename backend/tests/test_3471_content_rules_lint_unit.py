@@ -98,3 +98,47 @@ def test_lint_multiple_violations_all_reported():
     violations = lint_content(rules, text="대출 안내", link_url="https://example.com/no-utm")
     codes = {v["code"] for v in violations}
     assert codes == {"banned_term", "utm_missing"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 단위 테스트 — _lint_site_post_fields() 순수 함수(DB 불요, story #3482)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def test_site_post_field_lint_banned_term_only_in_title_reports_title_field():
+    from app.services.site_posts import _lint_site_post_fields
+
+    violations = _lint_site_post_fields(
+        {"banned_terms": ["대출"]}, title="대출 광고 제목", summary="요약", body_md="본문",
+    )
+    assert [v["field"] for v in violations] == ["title"]
+
+
+def test_site_post_field_lint_banned_term_only_in_body_md_reports_body_md_field():
+    from app.services.site_posts import _lint_site_post_fields
+
+    violations = _lint_site_post_fields(
+        {"banned_terms": ["대출"]}, title="제목", summary="요약", body_md="대출 안내 본문",
+    )
+    assert [v["field"] for v in violations] == ["body_md"]
+
+
+def test_site_post_field_lint_same_term_in_two_fields_reports_two_violations_not_merged():
+    """story #3482 5줄 確定④ — 합치지 않는다(필드마다 위반 1건씩, 총 2건)."""
+    from app.services.site_posts import _lint_site_post_fields
+
+    violations = _lint_site_post_fields(
+        {"banned_terms": ["대출"]}, title="대출 제목", summary="요약", body_md="대출 본문",
+    )
+    assert len(violations) == 2
+    assert {v["field"] for v in violations} == {"title", "body_md"}
+
+
+def test_site_post_field_lint_require_utm_is_structural_noop_all_fields():
+    """site_post에 link_url 필드 자체가 없다 — 세 호출 다 link_url=None 고정."""
+    from app.services.site_posts import _lint_site_post_fields
+
+    violations = _lint_site_post_fields(
+        {"require_utm": True}, title="제목", summary="요약", body_md="본문",
+    )
+    assert violations == []
