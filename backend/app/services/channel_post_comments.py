@@ -346,6 +346,84 @@ async def _schedule_next_continuous_poll_if_active(
     await db.execute(stmt)
 
 
+# story #3528 라이브 결함(2026-09-06, 카디르 QA 22:15Z·PO 코드 실측 確定) — 한 틱에
+# 심을 수 있는 자가회수 씨앗 상한(스캔 자체는 무제한 — 14일 활성 창+댓글 지원 채널
+# 필터로 이미 좁혀지고, 삽입만 비용이 커 이걸로 막는다. BATCH_SIZE와 동형 사상).
+_SELF_RECOVERY_SWEEP_SEED_LIMIT = 50
+
+
+async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession, *, now: datetime) -> int:
+    """story #3528 라이브 FAIL(2026-09-06, 카디르 QA·PO 코드 실측 確定) — 「상태
+    자가회수 부재」 클래스. `_schedule_next_continuous_poll_if_active`는 due 행이
+    captured/failed로 끝난 뒤(아래 루프 안)에만 불린다 — 배포 前에 이미 due 3창
+    (+1h/+1d/+7d)을 전부 소진해 pending/in_progress 행이 0으로 남아 있던 publication
+    은 씨앗(트리거할 행) 자체가 없어 재생성 체인이 영영 시작되지 않는다(같은 이유로
+    체인이 한 번 끊기면 — 크래시로 in_progress 잔류 등 — 그 publication은 영구
+    탈락하나, 그 회수는 별건 후보로 관찰만 하고 여기선 다루지 않는다 — 「행 0」만).
+
+    매 틱마다 활성(`_is_publication_active`)·댓글 지원 채널(`supports_fetch_replies`)
+    ·org 상한 안(`_within_org_continuous_poll_cap`)이면서 pending/in_progress 행이
+    0인 publication에 due_at=now 씨앗 행을 심는다(UNIQUE 멱등 — 동시 틱 경합 방어,
+    한 틱 삽입 상한 `_SELF_RECOVERY_SWEEP_SEED_LIMIT`건 — 남는 orphan은 다음 틱이
+    이어서 잡는다, 이미 씨앗 심긴 건 pending 행이 생겨 다음 스캔에서 자동 제외)."""
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    comment_capable_channels = [
+        channel for channel, adapter in CHANNEL_ADAPTERS.items() if adapter.supports_fetch_replies
+    ]
+    if not comment_capable_channels:
+        return 0
+
+    candidates = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.channel.in_(comment_capable_channels),
+            ChannelPublication.published_at.is_not(None),
+            ChannelPublication.published_at >= now - _ACTIVE_PUBLISHED_WITHIN,
+        ).order_by(ChannelPublication.published_at.desc())
+    )).scalars().all()
+
+    seeded = 0
+    for pub in candidates:
+        if seeded >= _SELF_RECOVERY_SWEEP_SEED_LIMIT:
+            break
+        has_open_row = (await db.execute(
+            select(func.count()).select_from(CommentCollectionSchedule).where(
+                CommentCollectionSchedule.publication_id == pub.id,
+                CommentCollectionSchedule.status.in_(("pending", "in_progress")),
+            )
+        )).scalar_one()
+        if has_open_row > 0:
+            continue
+        # 페드루 PO 실측 원인(2026-09-06) 재발 방지 자체 방어 — 방금 이 틱에서
+        # 정상적으로 처리·재생성된 publication(예: _schedule_next_continuous_poll_
+        # if_active가 정상 호출됨)을 스윕이 "orphan"으로 오판해 중복 씨앗을 심지
+        # 않도록, 가장 최근 행의 due_at이 _CONTINUOUS_POLL_INTERVAL 이내면(=정상
+        # 재생성 주기가 아직 안 지났다·방금 활동이 있었다) 건너뛴다. 실제 배포 前
+        # 소진 orphan은 마지막 활동이 최소 그만큼(보통 훨씬 더) 오래돼 이 방어를
+        # 그대로 통과한다.
+        last_activity_at = (await db.execute(
+            select(func.max(CommentCollectionSchedule.due_at)).where(
+                CommentCollectionSchedule.publication_id == pub.id,
+            )
+        )).scalar_one_or_none()
+        if last_activity_at is not None and now - last_activity_at < _CONTINUOUS_POLL_INTERVAL:
+            continue
+        if not await _is_publication_active(db, publication_id=pub.id, now=now):
+            continue
+        if not await _within_org_continuous_poll_cap(db, org_id=pub.org_id, publication_id=pub.id, now=now):
+            continue
+        stmt = pg_insert(CommentCollectionSchedule).values(
+            id=uuid.uuid4(), org_id=pub.org_id, publication_id=pub.id, channel=pub.channel,
+            external_id=pub.external_id, due_at=now, status="pending",
+        ).on_conflict_do_nothing(constraint="uq_comment_collection_schedule_publication_due_at")
+        await db.execute(stmt)
+        seeded += 1
+    if seeded:
+        await db.commit()
+    return seeded
+
+
 async def process_due_comment_collections(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """`insight_snapshots.py::process_due_insight_snapshots`와 동형 SKIP LOCKED 2단계
     커밋(클레임 commit → 개별 처리 commit/rollback 격리)."""
@@ -453,6 +531,12 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
             )
             await db.commit()
             counts["failed"] += 1
+
+    # story #3528 라이브 FAIL(2026-09-06) — 이번 틱이 방금 claim한 rows(위에서 이미
+    # 스냅샷됨)와는 별개로, 이번 틱 끝에 자가회수 씨앗을 심는다. due_at=now로 심어도
+    # 이번 틱의 claim은 이미 지나갔으므로 다음 틱이 그 씨앗을 집는다(관찰 가능한
+    # 2단계: 이번 틱=씨앗 생성, 다음 틱=수집·재생성 이어짐).
+    counts["self_recovery_seeded"] = await _sweep_orphaned_active_publications_for_self_recovery(db, now=now)
 
     return counts
 
