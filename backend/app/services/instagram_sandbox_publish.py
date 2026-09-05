@@ -83,3 +83,33 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
         "INSTAGRAM_DELETE_MEDIA_NOT_IMPLEMENTED",
         "Instagram 미디어 삭제 API는 아직 확認되지 않아 구현하지 않았습니다", status_code=501,
     )
+
+
+# ─── story #3320 조각③ — 댓글 수집+답변(sandbox_publish.py와 동형 계약) ────────
+
+
+def _deterministic_comment(*, media_id: str, index: int) -> dict:
+    seed = int(uuid.uuid5(uuid.NAMESPACE_URL, f"{media_id}:{index}").hex[:8], 16)
+    return {
+        "id": f"sandbox-ig-comment-{media_id}-{index}",
+        "text": f"샌드박스 IG 댓글 {index}(seed={seed % 1000})",
+        "username": f"sandbox_ig_user_{index}",
+        "timestamp": "2026-09-05T00:00:00+00:00",
+    }
+
+
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+    """sandbox_publish.py::fetch_replies와 동형 — media_id 하나엔 항상 같은 2건
+    (순서 고정), complete=True 고정(페이지네이션 개념 없음). AC8류
+    comment-2-deleted 시각 시뮬레이션은 이 조각(③) 스코프 밖(원 스토리 §3516
+    AC8이 이미 threads/기존 sandbox에서 검증한 마커라 여기서 중복 재발명 안 함)."""
+    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
+
+
+async def reply(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, reply_to_id: str, text: str,
+) -> tuple[str, str | None]:
+    """instagram_publish.py::reply와 동형 계약 — 댓글 답변엔 permalink 개념이
+    없어 두 번째 반환값은 항상 None(실 클라이언트와 동일하게, sandbox가 실제보다
+    관대한 값을 지어내지 않는다)."""
+    return f"sandbox-ig-reply-{uuid.uuid4().hex}", None

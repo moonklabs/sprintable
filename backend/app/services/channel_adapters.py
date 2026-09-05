@@ -174,10 +174,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         max_text_length=2200,  # 캡션 상한(스토리 본문 규격 표 IG 행, 그라운딩 실확認).
         utm_source="instagram",
         utm_medium="social",
-        # story #3320 조각① — supports_fetch_replies/reply·insight_metrics는 조각③
-        # 에서 켠다(페드루 PO 明示 — 댓글·인사이트 fetch dispatch가 아직 없어서 지금
-        # 켜면 capability 선언과 실제 구현이 어긋난다). supports_unpublish도 미선언
-        # (instagram_publish.py::delete_media 참고 — 삭제 API 자체가 미확認).
+        # story #3320 조각③ — supports_fetch_replies/reply를 켠다(페드루 PO 明示,
+        # `instagram_publish.py::fetch_replies`/`reply`+`channel_post_comments.py`
+        # dispatch가 이제 있다). supports_unpublish는 여전히 미선언(instagram_
+        # publish.py::delete_media 참고 — 삭제 API 자체가 미확認, 조각①과 무변경).
         # 규격(JPEG·4:5~1.91:1·8MB·피드 이미지 1장) — 스토리 본문 규격 표 IG 행
         # 그대로(그라운딩 실확認 대상), 캐러셀/릴스는 조각① 스코프 밖. ⚠️width_min/
         # width_max는 그라운딩이 명시 확認하지 않아 Threads 값(320~1440)을 잠정
@@ -191,6 +191,14 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_width_max=1440,
         image_color_space="sRGB",
         image_max_count=1,
+        supports_fetch_replies=True,
+        supports_reply=True,
+        reply_required_scope="instagram_business_manage_comments",
+        # story #3320 조각③ — 페드루 PO 決定⑤=(b): likes+comments+saved(+shares)를
+        # engagements로 합산(insight_snapshots.py::_fetch_instagram 참고). impressions/
+        # reach는 §2(d) 7키 이름 그대로 개별 유지. clicks/spend/conversions는 IG
+        # 유기 미디어 API가 안 줌(Threads와 동일 사유).
+        insight_metrics=("impressions", "reach", "engagements"),
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
@@ -313,13 +321,18 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
     CHANNEL_ADAPTERS["instagram_sandbox"] = ChannelAdapterConfig(
         authorize_url="",
         token_url="",
-        scope="sandbox_publish,sandbox_delete",
+        scope="sandbox_publish,sandbox_delete,sandbox_manage_replies",
         refresh_mode="manual",
         credential_kind="none",
         display_name="Instagram Sandbox",
         max_text_length=2200,  # instagram과 동형(캡션 상한).
         utm_source="instagram_sandbox",
         utm_medium="test",
+        # story #3320 조각③ — "sandbox"(위)와 동형으로 켠다(instagram_sandbox_publish.py
+        # ::fetch_replies/reply가 이제 있다).
+        supports_fetch_replies=True,
+        supports_reply=True,
+        reply_required_scope="sandbox_manage_replies",
         image_formats=("image/jpeg",),
         image_max_bytes=8 * 1024 * 1024,
         image_aspect_max=1.91,
@@ -328,6 +341,7 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         image_width_max=1440,
         image_color_space="sRGB",
         image_max_count=1,
+        insight_metrics=("impressions", "reach", "engagements"),
     )
 
 
