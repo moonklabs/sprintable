@@ -74,7 +74,11 @@
     "now": "지금",
     "approvals": "결재",
     "chat": "채팅",
-    "more": "전체"
+    "more": "전체",
+    "approvalsPendingSr": "대기 {count}건",
+    "approvalsPendingSrCapped": "대기 9건 이상",
+    "chatUnreadSr": "읽지 않음 {count}건",
+    "chatUnreadSrCapped": "읽지 않음 99건 이상"
   },
   "nav": {
     "dashboard": "대시보드",
@@ -2844,6 +2848,7 @@
     "emptySystem": "시스템 알림이 없습니다",
     "daysAgo": "일 전",
     "bellAriaLabelCount": "알림 {count}개",
+    "bellAriaLabelCountCapped": "알림 99개 이상",
     "syncDegradedBanner": "일부 지난 알림은 표시되지 않았습니다 — 아래 목록에서 확인할 수 있습니다"
   },
   "invite": {

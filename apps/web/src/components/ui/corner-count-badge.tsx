@@ -31,6 +31,15 @@ import { cn } from '@/lib/utils';
  *   primary     — info와 동일 토큰(라이트 fg oklch(.985 0 0) 동일·다크 fg 색상각만 262
  *                 vs 250, 값은 사실상 동일) — 별도 재계산 불요
  * (셋 다 AA 4.5 통과 — story c2bb0acd가 destructive를, §3-3 신설이 info/primary를 이미 확保)
+ *
+ * ⚠️접근성 이름 계약(story #3518, 유나 #3861 Design 관찰) — 이 배지는 `aria-hidden`
+ * 이다(스크린리더가 이 <span>을 직접 못 읽는다). 그 수(`value`)를 보조기술에 전하는
+ * 책임은 호출부에 있다 — 가장 가까운 접근성 이름(보통 이 배지를 담은 버튼/링크의
+ * `aria-label`)에 그 수를 넣어야 한다. notification-bell·team-presence-toggle은
+ * 이미 그렇게 한다(`bellAriaLabelCount`·`fabLabelWorking`) — 새 소비처를 추가할
+ * 때 이 자리를 빠뜨리면 그 수는 스크린리더 사용자에게 조용히 사라진다(mobile-
+ * tab-bar가 이 스토리 前까지 그랬다 — content-bff류가 아니라 이 계약 자체가
+ * 문서화 안 돼 있던 것이 원인).
  */
 const cornerCountBadgeVariants = cva(
   'flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums leading-none',

@@ -565,7 +565,15 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={unreadCount > 0 ? t('bellAriaLabelCount', { count: badgeLabel }) : t('panelTitle')}
+        // story #3518(유나 사전 스티어 G, 2026-09-05) — 이름엔 원수(unreadCount)를
+        // 쓴다. 배지 표시(badgeLabel)는 '99+' 문자열이라 그대로 넣으면 "알림 99+개"
+        // 처럼 문법이 어긋난다 — 100 이상은 전용 문장(bellAriaLabelCountCapped)으로
+        // "그 이상"이라는 사실을 말로 낸다(표시 '99+'와 같은 뜻, 다른 표현).
+        aria-label={
+          unreadCount > 0
+            ? (unreadCount > 99 ? t('bellAriaLabelCountCapped') : t('bellAriaLabelCount', { count: unreadCount }))
+            : t('panelTitle')
+        }
         aria-expanded={open}
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >

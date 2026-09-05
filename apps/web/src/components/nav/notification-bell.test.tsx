@@ -7,6 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -17,9 +18,10 @@ import type { EventNotification } from './notification-bell';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function withIntl(node: React.ReactNode) {
+function withIntl(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
+  const messages = locale === 'ko' ? koMessages : enMessages;
   return (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+    <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -457,6 +459,64 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     expect(badge?.className).toContain('text-[10px]');
     expect(badge?.className).not.toContain('text-[9px]');
     expect(badge?.className).not.toContain('font-mono');
+  });
+
+  // story #3518(유나 사전 스티어 G, 2026-09-05) — 벨 버튼은 아이콘 전용(보이는 텍스트
+  // 라벨이 없다)이라 aria-label로 접근성 이름 전체를 주는 것 자체는 WCAG 2.5.3 문제가
+  // 아니다(mobile-tab-bar와 다른 축 — 그쪽은 보이는 라벨이 있어서 sr-only로 «더하는»
+  // 접근이 필요했다). 여기 결함은 그 값이 badgeLabel('99+' 문자열)이라 100 이상에서
+  // "알림 99+개"처럼 문법이 깨졌던 것 — 원수(unreadCount)+전용 캡 문장으로 고친다.
+  it('⭐unreadCount=3 — aria-label "알림 3개"(원수 그대로, count=1 갈래 포함해 3으로 확인)', async () => {
+    stubUnreadCount(3);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('알림 3개');
+  });
+
+  it('⭐unreadCount=1 — aria-label "알림 1개"(count=1 갈래)', async () => {
+    stubUnreadCount(1);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('알림 1개');
+  });
+
+  it('⭐unreadCount=100(시각 표시 99+) — aria-label "알림 99개 이상"(badgeLabel 문자열이 안 새어든다)', async () => {
+    stubUnreadCount(100);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('알림 99개 이상');
+    expect(button?.getAttribute('aria-label')).not.toContain('99+');
+    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '99+');
+    expect(badge).toBeDefined(); // 시각 배지는 그대로 '99+'.
+  });
+
+  // story #3518(유나 사전 스티어 H) — en bellAriaLabelCount는 ICU plural(one/other)
+  // 이라 count=1 갈래가 실제로 갈린다.
+  it('⭐[en] unreadCount=1 — ICU plural one 갈래("1 notification", 단수)', async () => {
+    stubUnreadCount(1);
+    await act(async () => { root.render(withIntl(<NotificationBell />, 'en')); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('1 notification');
+  });
+
+  it('⭐[en] unreadCount=3 — ICU plural other 갈래("3 notifications", 복수)', async () => {
+    stubUnreadCount(3);
+    await act(async () => { root.render(withIntl(<NotificationBell />, 'en')); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('3 notifications');
+  });
+
+  it('⭐[en] unreadCount=100(시각 99+) — "99+ notifications"(고정 문구, badgeLabel 문자열 안 새어듦)', async () => {
+    stubUnreadCount(100);
+    await act(async () => { root.render(withIntl(<NotificationBell />, 'en')); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('99+ notifications');
   });
 
   it('⭐색 계산 양성대조 — globals.css 실값으로 라이트·다크 둘 다 대비비 ≥4.5(WCAG AA)', async () => {
