@@ -238,11 +238,29 @@ class ChannelPostDraftListItem(BaseModel):
     # 뒤집는다). true=둘 다 non-null이고 서로 다름(원문이 파생 이후 개정됨) · false=둘 다
     # non-null이고 같음 · None=하나라도 null("모른다" — 레거시 파생분).
     source_changed: bool | None = None
-    # story #3497 조각4(페드루 PO 決定 — 미르코 #3499 그라운딩 갭) — 3497 조회 API
-    # (`/publications/{publication_id}/insights`)의 path 파라미터와 같은 값(latest_pub.id,
-    # "최신 버전"의 publication 행 — publication_status·error_code와 같은 축). 아직 발행
-    # 시도 자체가 없으면 null.
-    publication_id: uuid.UUID | None = None
+    # story #3497 조각4(페드루 PO 決定 — 미르코 #3499 그라운딩 갭)·**story #3525 재정의
+    # (2026-09-06, 페드루 PO 確定, 유나 §22-12)** — 3497 조회 API(`/publications/
+    # {publication_id}/insights`)·3516 댓글 API(`/publications/{publication_id}/
+    # comments`)의 path 파라미터와 같은 값. **«마지막 발행»(published_pub.id) 기준 —
+    # 버전 무관**: `published_at`/`permalink`/`external_id`와 정확히 같은 publication
+    # 행(같은 status='published' 최신 1건)에서 온다. 발행 済 draft에 새 버전이 생겨
+    # 그 버전이 아직 재승인 대기(gate pending)여도 이 필드는 null이 되지 않는다(밖에
+    # 나가 있는 게시물은 새 버전과 무관하게 살아 있다 — 그 실물의 댓글·인사이트가
+    # 상세에서 사라지던 결함의 처방). "지금 버전 자체의 발행 시도 상태"는
+    # `publication_status`/`error_code`(아래, 여전히 latest_pub 축)가 별도로 담당 —
+    # 이 필드와 헷갈리지 말 것. 한 번도 발행된 적 없으면 null.
+    publication_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "«마지막 발행» publication의 id(버전 무관) — published_at/permalink/"
+            "external_id와 같은 publication 행에서 온다. 발행 済 게시물에 새 버전이 "
+            "생겨 재승인 대기(gate pending) 中이어도 null이 되지 않는다: 밖에 나가 "
+            "있는 게시물은 새 버전과 무관하게 살아 있다(story #3525). 댓글·인사이트 "
+            "조회 API(/publications/{publication_id}/comments·insights)의 path "
+            "파라미터가 이 값이다. \"지금 버전 자체\"의 발행 시도 상태는 "
+            "publication_status/error_code가 별도로 담당(다른 축)."
+        ),
+    )
     # story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — 단건 조회(lint-on-read)
     # 전용. 목록 응답에선 항상 None(행마다 lint하면 비용 N배, PO 明示 "단건만"). None=
     # "이 응답에선 안 쟀다"·[]="쟀는데 위반 0"(null≠0 원칙 그대로, site_posts.py::
@@ -600,6 +618,10 @@ def _to_draft_list_item(
     if draft.source_site_post_version_id is not None and source_current_site_post_version_id is not None:
         source_changed = draft.source_site_post_version_id != source_current_site_post_version_id
     command_status = latest_command.status if latest_command else None
+    # story #3525 — publication_status/error_code는 의도적으로 latest_pub(현재
+    # 최신 버전의 발행 시도) 축 그대로 둔다 — "지금 버전이 발행 中/실패인지"는
+    # published_pub(마지막으로 실제 나간 것)과는 다른 질문이라 건드리면 컨테이너
+    # 생성 진행 배지(processing_kind, 바로 아래)가 깨진다.
     publication_status = latest_pub.status if latest_pub else None
     # story 620beefc(AC5·§17-15, 페드루 PO 決定) — 판정식은 이 자리 한 곳에서만.
     processing_kind = (
@@ -643,7 +665,10 @@ def _to_draft_list_item(
         image_final_bytes=latest_image.final_bytes if latest_image else None,
         image_was_converted=latest_image.was_converted if latest_image else None,
         processing_kind=processing_kind,
-        publication_id=latest_pub.id if latest_pub else None,
+        # story #3525(재정의) — published_pub 사용(latest_pub 아님). published_at/
+        # permalink/external_id와 정확히 같은 객체라 이 셋과 publication_id가
+        # 절대 어긋날 수 없다(§22-12 계약이 구조적으로 성립).
+        publication_id=published_pub.id if published_pub else None,
         source_content_item_id=draft.source_content_item_id,
         source_title=source_title,
         source_site_post_version_id=draft.source_site_post_version_id,
