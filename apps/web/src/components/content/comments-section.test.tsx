@@ -137,6 +137,17 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
     expect(container.querySelector('[data-testid="comments-item-deleted-note"]')?.textContent).toBe('원본이 지워졌습니다.');
   });
 
+  // story #3517(PO 지정 순서, 2026-09-05) — §22-9 문장 순서: 사유가 위, 본문이 아래.
+  it('사유("원본이 지워졌습니다")가 본문(comment-body-text)보다 DOM에서 먼저 온다', async () => {
+    const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
+    const item = container.querySelector('[data-testid="comments-item"]')!;
+    const note = item.querySelector('[data-testid="comments-item-deleted-note"]')!;
+    const body = item.querySelector('[data-testid="comment-body-text"]')!;
+    expect(note.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('deletedAt이 null이면 지워짐 안내가 안 뜬다(회귀 0)', async () => {
     const face = loadedFace([baseComment({ deletedAt: null })]);
     const { container, root } = mount();

@@ -65,20 +65,20 @@ describe('CommentBodyText', () => {
     it('짧은 본문이어도 <summary>엔 라벨만, 본문 문자열이 한 글자도 없다', async () => {
       const { container, root } = mount();
       await act(async () => {
-        root.render(<CommentBodyText text="짧은 글" moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 보기" />);
+        root.render(<CommentBodyText text="짧은 글" moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 펼치기" />);
       });
       const details = container.querySelector('details') as HTMLDetailsElement;
       expect(details).not.toBeNull();
       expect(details.open).toBe(false);
       const summary = details.querySelector('summary');
-      expect(summary?.textContent).toBe('본문 보기');
+      expect(summary?.textContent).toBe('본문 펼치기');
       expect(summary?.textContent).not.toContain('짧은 글');
     });
 
     it('짧은 본문이어도 펼치면(<p>) 전문이 그대로 있다(text는 보존돼 온다)', async () => {
       const { container, root } = mount();
       await act(async () => {
-        root.render(<CommentBodyText text="짧은 글" moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 보기" />);
+        root.render(<CommentBodyText text="짧은 글" moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 펼치기" />);
       });
       const p = container.querySelector('details p');
       expect(p?.textContent).toBe('짧은 글');
@@ -88,10 +88,10 @@ describe('CommentBodyText', () => {
       const long = 'x'.repeat(250);
       const { container, root } = mount();
       await act(async () => {
-        root.render(<CommentBodyText text={long} moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 보기" />);
+        root.render(<CommentBodyText text={long} moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 펼치기" />);
       });
       const summary = container.querySelector('details summary');
-      expect(summary?.textContent).toBe('본문 보기');
+      expect(summary?.textContent).toBe('본문 펼치기');
       expect(summary?.textContent).not.toContain('x');
     });
   });

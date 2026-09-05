@@ -165,19 +165,21 @@ function CommentsList({
                 </span>
               )}
             </div>
-            {/* story #3517(§22-9) — 지워진 댓글: 본문은 길이 무관 기본 접힘(forceCollapsed)
-                + "원본이 지워졌습니다" 한 줄. text는 BE가 보존해서 준다(숨기지 않는다). */}
+            {/* story #3517(§22-9, PO 지정 순서 2026-09-05) — 사유("원본이
+                지워졌습니다")가 위, 본문("본문 펼치기")이 아래 — §22-9 문장
+                순서. 본문은 길이 무관 기본 접힘(forceCollapsed), text는 BE가
+                보존해서 준다(숨기지 않는다). */}
+            {isDeleted ? (
+              <p className="text-xs text-muted-foreground" data-testid="comments-item-deleted-note">
+                {t('commentsDeletedNote')}
+              </p>
+            ) : null}
             <CommentBodyText
               text={comment.bodyText}
               moreLabel={t('commentsMoreLabel')}
               forceCollapsed={isDeleted}
               deletedSummaryLabel={t('commentsDeletedBodyLabel')}
             />
-            {isDeleted ? (
-              <p className="text-xs text-muted-foreground" data-testid="comments-item-deleted-note">
-                {t('commentsDeletedNote')}
-              </p>
-            ) : null}
             {/* story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로
                 전환·답변)·답변 상태 칩은 이 슬라이스에서 렌더하지 않는다. 조각②
                 (답변/작업전환 엔드포인트) 미착지 상태로 눌러도 아무 일도 안 나는
