@@ -343,6 +343,11 @@
       "source": "story-3516-comment-reply-piece2(PR 개설 前 선제 등재 — 로컬 raw pytest 69.52s(15건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 420s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
+      "file": "tests/test_3528_comment_continuous_polling.py",
+      "sec": 45.0,
+      "source": "story-3528-comment-continuous-polling(PR 개설 前 선제 등재 — 로컬 raw pytest 6.16s(12건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_3516_comment_reply_piece2b.py",
       "sec": 240.0,
       "source": "story-3516-comment-reply-piece2b(PR 개설 前 선제 등재 — 로컬 raw pytest 39.98s(10건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 240s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
