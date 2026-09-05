@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,17 @@ from app.models.base import Base, TimestampMixin
 
 class PlatformSetting(Base, TimestampMixin):
     __tablename__ = "platform_settings"
+    __table_args__ = (
+        # story #3522(BE·위생, 2026-09-06) — 마이그(0270·0282·0329) raw SQL 미러
+        # (마이그=정본·모델=미러, publication_command.py 0340 관례와 동일 사상).
+        CheckConstraint("dunning_grace_days > 0", name="ck_platform_settings_dunning_grace_days_positive"),
+        CheckConstraint(
+            "vat_rate_bp >= 0 AND vat_rate_bp <= 10000", name="ck_platform_settings_vat_rate_bp_range",
+        ),
+        CheckConstraint(
+            "on_time_tolerance_seconds >= 0", name="ck_platform_settings_on_time_tolerance_seconds_nonneg",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")

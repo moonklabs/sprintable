@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, Text
+from sqlalchemy import BigInteger, CheckConstraint, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +15,24 @@ from app.models.base import OrgScopedMixin, TimestampMixin
 
 class BillingOrder(Base, TimestampMixin, OrgScopedMixin):
     __tablename__ = "billing_orders"
+    __table_args__ = (
+        # story #3522(BE·위생, 2026-09-06) — 마이그(0267·0268) raw SQL 미러
+        # (마이그=정본·모델=미러, publication_command.py 0340 관례와 동일 사상).
+        CheckConstraint(
+            "refund_status IS NULL OR refund_status IN ('confirmed', 'failed')",
+            name="ck_billing_orders_refund_status",
+        ),
+        CheckConstraint("purpose IN ('charge', 'pack_purchase')", name="ck_billing_orders_purpose"),
+        # story #3522 — 같은 테이블(billing_orders)의 원래 생성 마이그(0231, status
+        # 값은 0232가 'downgraded' 추가 뒤 최종본)에 걸린 3개도 같은 사유로 미러
+        # (이 테이블을 __table_args__로 손대는 김에 같이 — 스코프는 이 5개 테이블
+        # 안으로 한정, 프로젝트 전역 스윕은 이 스토리 밖에 별도 기록).
+        CheckConstraint(
+            "status IN ('pending','confirmed','failed','downgraded')", name="billing_orders_status_check",
+        ),
+        CheckConstraint("currency IN ('usd','krw')", name="billing_orders_currency_check"),
+        CheckConstraint("amount_minor > 0", name="billing_orders_amount_positive_check"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # org_id: OrgScopedMixin(index만 — 한 org가 여러 주문을 가지므로 unique 아님, org_billing_keys와 다름).

@@ -7,7 +7,7 @@ done의 검사지가 아니라 에이전트가 자기 완결을 표현하는 서
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,21 @@ _CLIENT_CREATABLE_TYPES = EVIDENCE_TYPES - {"gate_approval"}
 
 class Evidence(Base):
     __tablename__ = "evidence"
+    __table_args__ = (
+        # story #3522(BE·위생, 2026-09-06) — 마이그(0169)가 raw SQL로만 걸었던
+        # CHECK를 여기 미러(마이그=정본, 모델=미러 — publication_command.py의
+        # 0340 관례와 동일 사상). create_all() 기반 로컬 테스트가 이 제약 자체를
+        # 못 보던 «재료 불일치»(3516 승인 500의 뿌리 클래스)를 여기서도 닫는다.
+        # EVIDENCE_TYPES와 값 집합을 반드시 같이 유지할 것.
+        CheckConstraint(
+            "type IN ('url','file','pr','deploy','metric','report','gate_approval')",
+            name="ck_evidence_type",
+        ),
+        # story #3522 — 같은 마이그(0169)가 evidence에 건 두 번째 CHECK, 같은
+        # 사유로 미러(테이블이 이미 위 제약으로 __table_args__를 갖게 돼 이
+        # 하나를 빼먹기 딱 좋은 자리였다).
+        CheckConstraint("work_item_type IN ('story','task')", name="ck_evidence_work_item_type"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
