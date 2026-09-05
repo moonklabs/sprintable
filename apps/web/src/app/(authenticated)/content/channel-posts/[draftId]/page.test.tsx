@@ -3044,7 +3044,11 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
           },
         }],
       },
-      onCommentReplyGet: () => ({ status: 404, body: { detail: 'not found' } }),
+      // 카디르 QA(2026-09-06, PR#3902) — 미끼 data.text를 실은 404. 본문에
+      // data.text가 아예 없으면 res.ok 가드를 지워도(버그를 넣어도) 우연히
+      // 빈 칸이 나와 이 테스트가 그 가드를 실제로는 안 잰다 — 실패 응답에도
+      // 그럴싸한 값을 실어야 "res.ok를 본다"는 사실이 진짜로 pin된다.
+      onCommentReplyGet: () => ({ status: 404, body: { data: { text: '지어낸 답변' }, detail: 'not found' } }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
