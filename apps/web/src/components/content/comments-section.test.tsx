@@ -43,6 +43,14 @@ function loadedFace(comments: CommentItem[], overrides: Partial<Extract<Comments
   };
 }
 
+function emptyFace(comments: CommentItem[], overrides: Partial<Extract<CommentsFace, { kind: 'empty' }>> = {}): CommentsFace {
+  return {
+    kind: 'empty', capturedAt: '2026-09-05T10:00:00Z',
+    comments, activeCount: comments.filter((c) => !c.deletedAt).length, deletedCount: comments.filter((c) => c.deletedAt).length,
+    ...overrides,
+  };
+}
+
 describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('uncollected(null) — "아직 수집 전"만 뜨고 목록·수집시각은 안 뜬다', async () => {
     const face: CommentsFace = { kind: 'uncollected' };
@@ -61,7 +69,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   });
 
   it('empty([]) — "댓글이 없습니다"+수집시각+제목에 0건(uncollected/error와 다른 문구·표시)', async () => {
-    const face: CommentsFace = { kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 0 };
+    const face: CommentsFace = { kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0 };
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
@@ -136,13 +144,37 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
     expect(container.querySelector('[data-testid="comments-item-deleted-note"]')).toBeNull();
   });
 
-  it('지워진 댓글의 본문은 길이 무관 기본 접힘이다(forceCollapsed)', async () => {
+  // story #3517(유나 Design 재리뷰, 2026-09-05 실측) — active_count===0(empty 얼굴)
+  // 이어도 지워진 행은 사라지면 안 된다("댓글 없음" 문구가 §22-9 "원래 자리 그대로"를
+  // 지우는 결함이 있었다). PO 지정 표본: active 0·deleted 2.
+  it('empty 얼굴(active 0)이어도 지워진 행 2개가 그대로 그려진다(§22-9 "댓글 없음"이 지워진 행을 지우지 않는다)', async () => {
+    const face = emptyFace([
+      baseComment({ id: 'c1', deletedAt: '2026-09-05T11:00:00Z' }),
+      baseComment({ id: 'c2', deletedAt: '2026-09-05T11:05:00Z' }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
+    expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
+    expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(2);
+    expect(container.querySelectorAll('[data-testid="comments-item-deleted-note"]').length).toBe(2);
+  });
+
+  // story #3517(유나 Design 재리뷰, 2026-09-05 실측) — <summary>는 <details> 닫힘
+  // 상태에서도 항상 보인다. 길이 기반 preview를 그대로 쓰면(200자 이하) preview===
+  // 전문이라 "접혀도" 본문이 그대로 다 보이는 결함이 있었다 — textContent 단언은
+  // <p>(펼쳤을 때 자리)까지 포함해 이 결함을 못 잡는다. 닫힌 상태에서 실제로 보이는
+  // <summary> 자신의 텍스트만 따로 단언한다(기전이 아니라 표시).
+  it('지워진 댓글은 짧아도 <summary>에 본문 문자열이 한 글자도 없다(닫힌 채 다 보이는 결함 회귀가드)', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z', bodyText: '짧은 글' })]);
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     const body = container.querySelector('[data-testid="comment-body-text"]');
-    expect(body?.tagName).toBe('DETAILS'); // 짧아도 <details>(접힘) — 삭제 안 됐으면 <p>였을 길이.
-    expect(body?.textContent).toContain('짧은 글'); // text는 보존돼 온다 — 숨기지 않는다.
+    expect(body?.tagName).toBe('DETAILS');
+    const summary = body?.querySelector('summary');
+    expect(summary?.textContent).not.toContain('짧은 글');
+    // 펼치면(<p>) 여전히 전문이 있다 — text는 보존돼 온다, 숨기는 게 아니다.
+    const expandedBody = body?.querySelector('p');
+    expect(expandedBody?.textContent).toContain('짧은 글');
   });
 
   it('지워진 댓글엔 행 액션(작업으로 전환·답변)이 아예 안 그려진다(비활성이 아니라 부재)', async () => {
@@ -198,7 +230,7 @@ describe('deriveCommentsFace(story #3517, BE #3865 조각① 응답 매핑)', ()
 
   it('active_count=0·deleted_count=0 → empty', () => {
     const face = deriveCommentsFace(rawResponse({}));
-    expect(face).toEqual({ kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 0 });
+    expect(face).toEqual({ kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0 });
   });
 
   it('active_count>0 → loaded, 필드명이 camelCase로 정확히 옮겨진다', () => {
@@ -232,12 +264,18 @@ describe('deriveCommentsFace(story #3517, BE #3865 조각① 응답 매핑)', ()
   // active_count 하나만 본다. deleted_count>0(전부 지워짐)이어도 active_count=0이면
   // "댓글 없음" 얼굴이다 — deletedCount는 그 empty 얼굴 자체가 들고 있어(SectionHeader
   // 의 "지워진 댓글 {n}건" 안내) 지워진 사실 자체가 사라지진 않는다.
-  it('active_count=0인데 deleted_count>0이면(전부 지워짐)도 empty(deletedCount는 empty 얼굴에 실린다)', () => {
+  it('active_count=0인데 deleted_count>0이면(전부 지워짐)도 empty이되, 지워진 행은 comments에 그대로 실린다(§22-9 "원래 자리")', () => {
     const face = deriveCommentsFace(rawResponse({
       active_count: 0, deleted_count: 1,
       comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: null, text: 'x', external_created_at: null, captured_at: 't', deleted_at: '2026-09-05T11:00:00Z' }],
     }));
-    expect(face).toEqual({ kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 1 });
+    expect(face).toEqual({
+      kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 1,
+      comments: [{
+        id: 'c1', authorDisplayName: null, bodyText: 'x',
+        externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z', replyStatus: 'none',
+      }],
+    });
   });
 
   it('replyStatusFor를 주면 그 함수의 판정을 그대로 쓴다', () => {

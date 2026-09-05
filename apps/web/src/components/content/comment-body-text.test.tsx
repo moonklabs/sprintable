@@ -57,4 +57,42 @@ describe('CommentBodyText', () => {
     expect(container.querySelector('details')).toBeNull();
     expect(container.querySelector('[data-testid="comment-body-text"]')?.tagName).toBe('P');
   });
+
+  // story #3517(유나 Design 재리뷰, 2026-09-05) — forceCollapsed는 길이 무관 접힘인데,
+  // <summary>는 <details> 닫힘 상태에서도 항상 보인다. 길이 기반 preview를 그대로
+  // 쓰면(200자 이하 → preview===전문) "접혀도" 본문이 그대로 다 보이는 결함이 있었다.
+  describe('forceCollapsed(§22-9 지워진 댓글)', () => {
+    it('짧은 본문이어도 <summary>엔 라벨만, 본문 문자열이 한 글자도 없다', async () => {
+      const { container, root } = mount();
+      await act(async () => {
+        root.render(<CommentBodyText text="짧은 글" moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 보기" />);
+      });
+      const details = container.querySelector('details') as HTMLDetailsElement;
+      expect(details).not.toBeNull();
+      expect(details.open).toBe(false);
+      const summary = details.querySelector('summary');
+      expect(summary?.textContent).toBe('본문 보기');
+      expect(summary?.textContent).not.toContain('짧은 글');
+    });
+
+    it('짧은 본문이어도 펼치면(<p>) 전문이 그대로 있다(text는 보존돼 온다)', async () => {
+      const { container, root } = mount();
+      await act(async () => {
+        root.render(<CommentBodyText text="짧은 글" moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 보기" />);
+      });
+      const p = container.querySelector('details p');
+      expect(p?.textContent).toBe('짧은 글');
+    });
+
+    it('긴 본문이어도(200자 초과) 마찬가지로 summary엔 라벨만 — 길이 기반 preview로 새지 않는다', async () => {
+      const long = 'x'.repeat(250);
+      const { container, root } = mount();
+      await act(async () => {
+        root.render(<CommentBodyText text={long} moreLabel="더보기" forceCollapsed deletedSummaryLabel="본문 보기" />);
+      });
+      const summary = container.querySelector('details summary');
+      expect(summary?.textContent).toBe('본문 보기');
+      expect(summary?.textContent).not.toContain('x');
+    });
+  });
 });

@@ -34,10 +34,14 @@ export interface CommentItem {
 // story #3517(BE #3865 REQUIRED 2, 유나 §22-9, PO 確定) — activeCount/deletedCount는
 // 서버 전체 수(페이지 안 목록 길이가 아니다) — 헤더 「댓글 {activeCount}」·지워진 댓글
 // 안내는 이 값으로 만든다(comments.length로 세면 offset/limit에 따라 틀린다).
+// story #3517(유나 Design 재리뷰, 2026-09-05) — empty(active_count===0)도 comments를
+// 싣는다. 지워진 행은 §22-9 "원래 자리 그대로"가 activeCount 판정과 무관하게 지켜져야
+// 한다 — active 0·deleted N이면 empty 얼굴 "댓글이 없습니다" 문구 아래에 그 N개 지워진
+// 행이 그대로(접힘) 그려진다(행이 사라지면 §22-9 위반).
 export type CommentsFace =
   | { kind: 'uncollected' }
   | { kind: 'error' }
-  | { kind: 'empty'; capturedAt: string; activeCount: number; deletedCount: number }
+  | { kind: 'empty'; capturedAt: string; comments: CommentItem[]; activeCount: number; deletedCount: number }
   | { kind: 'loaded'; capturedAt: string; comments: CommentItem[]; activeCount: number; deletedCount: number };
 
 /** BE #3865 조각① 원 응답 shape(snake_case) — GET .../publications/{id}/comments. */
@@ -82,7 +86,7 @@ export function deriveCommentsFace(
   // "댓글 없음"이다(그 지워진 행 자체는 empty 얼굴에도 §22-9 안내로 여전히 보인다,
   // 아래 empty 분기 참고).
   if (activeCount === 0) {
-    return { kind: 'empty', capturedAt: data.last_collected_at, activeCount, deletedCount };
+    return { kind: 'empty', capturedAt: data.last_collected_at, comments, activeCount, deletedCount };
   }
   return { kind: 'loaded', capturedAt: data.last_collected_at, comments, activeCount, deletedCount };
 }
@@ -124,6 +128,69 @@ function SectionHeader({
   );
 }
 
+// story #3517(유나 Design 재리뷰, 2026-09-05) — empty/loaded 둘 다 같은 목록 렌더를
+// 쓴다(§22-9 지워진 행 규칙이 두 얼굴에서 갈리면 안 되므로 한 곳으로 통일).
+function CommentsList({
+  comments, displayTimezone, t,
+}: {
+  comments: CommentItem[];
+  displayTimezone: string;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <ul className="space-y-3">
+      {comments.map((comment) => {
+        const isDeleted = comment.deletedAt !== null;
+        return (
+          <li key={comment.id} className="space-y-1.5 rounded-md border border-border p-3" data-testid="comments-item">
+            <div className="flex items-center justify-between gap-2">
+              {/* story #3517(유나 §22-10②, PO 確定 2026-09-05) — 작성자 없으면
+                  공유 「모름」(originAuthorUnknown)이 아니라 이 화면 전용 문구
+                  ("작성자 정보 없음", 흐린 한 줄) — §22-③ "채널이 준 만큼"이
+                  구체적으로 뭘 못 받았는지 말한다. */}
+              <span className="text-xs font-medium text-muted-foreground" data-testid="comments-item-author">
+                {comment.authorDisplayName ?? t('commentsAuthorUnknown')}
+              </span>
+              {/* story #3517(유나 §22-10②) — external_created_at(작성 시각) 우선,
+                  없으면 capturedAt(수집 시각)으로 폴백하되 라벨을 반드시 바꾼다
+                  ("작성"이라 적으면 거짓말 — captured_at은 우리가 그 댓글을 발견한
+                  시각일 뿐 채널에 올라온 시각이 아니다). */}
+              {comment.externalCreatedAt ? (
+                <span className="text-xs text-muted-foreground" data-testid="comments-item-authored-at">
+                  {formatScheduledAt(comment.externalCreatedAt, displayTimezone).display}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground" data-testid="comments-item-captured-at">
+                  {t('commentsItemCapturedAtLabel', { time: formatScheduledAt(comment.capturedAt, displayTimezone).display })}
+                </span>
+              )}
+            </div>
+            {/* story #3517(§22-9) — 지워진 댓글: 본문은 길이 무관 기본 접힘(forceCollapsed)
+                + "원본이 지워졌습니다" 한 줄. text는 BE가 보존해서 준다(숨기지 않는다). */}
+            <CommentBodyText
+              text={comment.bodyText}
+              moreLabel={t('commentsMoreLabel')}
+              forceCollapsed={isDeleted}
+              deletedSummaryLabel={t('commentsDeletedBodyLabel')}
+            />
+            {isDeleted ? (
+              <p className="text-xs text-muted-foreground" data-testid="comments-item-deleted-note">
+                {t('commentsDeletedNote')}
+              </p>
+            ) : null}
+            {/* story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로
+                전환·답변)·답변 상태 칩은 이 슬라이스에서 렌더하지 않는다. 조각②
+                (답변/작업전환 엔드포인트) 미착지 상태로 눌러도 아무 일도 안 나는
+                컨트롤을 그리지 않는다("아직 없는 기능은 안 그린다"). 컴포넌트
+                (CommentConvertToTaskDialog)·상태 칩(CommentReplyStatusChip)·테스트는
+                남아 있다 — 조각② PR에서 이 자리에 다시 배선한다. */}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function CommentsSection({ face, displayTimezone, onRefresh }: CommentsSectionProps) {
   const t = useTranslations('content');
 
@@ -161,6 +228,10 @@ export function CommentsSection({ face, displayTimezone, onRefresh }: CommentsSe
           {t('commentsFaceEmpty')}
         </p>
         <CommentsRefreshButton onRefresh={onRefresh} />
+        {/* story #3517(유나 Design 재리뷰, 2026-09-05) — active_count===0이어도
+            지워진 행(deleted_count>0)은 §22-9 "원래 자리 그대로" 그린다 — "댓글
+            없음" 문구가 지워진 행의 존재 자체를 지우면 안 된다. */}
+        {face.comments.length > 0 ? <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} /> : null}
       </div>
     );
   }
@@ -169,52 +240,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh }: CommentsSe
     <div className="space-y-2 border-t border-border pt-3" data-testid="comments-section">
       <SectionHeader t={t} activeCount={face.activeCount} deletedCount={face.deletedCount} capturedAtDisplay={capturedAtDisplay} />
       <CommentsRefreshButton onRefresh={onRefresh} />
-      <ul className="space-y-3">
-        {face.comments.map((comment) => {
-          const isDeleted = comment.deletedAt !== null;
-          return (
-            <li key={comment.id} className="space-y-1.5 rounded-md border border-border p-3" data-testid="comments-item">
-              <div className="flex items-center justify-between gap-2">
-                {/* story #3517(유나 §22-10②, PO 確定 2026-09-05) — 작성자 없으면
-                    공유 「모름」(originAuthorUnknown)이 아니라 이 화면 전용 문구
-                    ("작성자 정보 없음", 흐린 한 줄) — §22-③ "채널이 준 만큼"이
-                    구체적으로 뭘 못 받았는지 말한다. */}
-                <span className="text-xs font-medium text-muted-foreground" data-testid="comments-item-author">
-                  {comment.authorDisplayName ?? t('commentsAuthorUnknown')}
-                </span>
-                {/* story #3517(유나 §22-10②) — external_created_at(작성 시각) 우선,
-                    없으면 capturedAt(수집 시각)으로 폴백하되 라벨을 반드시 바꾼다
-                    ("작성"이라 적으면 거짓말 — captured_at은 우리가 그 댓글을 발견한
-                    시각일 뿐 채널에 올라온 시각이 아니다). */}
-                {comment.externalCreatedAt ? (
-                  <span className="text-xs text-muted-foreground" data-testid="comments-item-authored-at">
-                    {formatScheduledAt(comment.externalCreatedAt, displayTimezone).display}
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground" data-testid="comments-item-captured-at">
-                    {t('commentsItemCapturedAtLabel', { time: formatScheduledAt(comment.capturedAt, displayTimezone).display })}
-                  </span>
-                )}
-              </div>
-              {/* story #3517(§22-9) — 지워진 댓글: 본문은 길이 무관 기본 접힘(forceCollapsed)
-                  + "원본이 지워졌습니다" 한 줄. text는 BE가 보존해서 준다(숨기지 않는다). */}
-              <CommentBodyText text={comment.bodyText} moreLabel={t('commentsMoreLabel')} forceCollapsed={isDeleted} />
-              {isDeleted ? (
-                <p className="text-xs text-muted-foreground" data-testid="comments-item-deleted-note">
-                  {t('commentsDeletedNote')}
-                </p>
-              ) : null}
-              {/* story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로
-                  전환·답변)·답변 상태 칩은 이 슬라이스에서 렌더하지 않는다. 조각②
-                  (답변/작업전환 엔드포인트) 미착지 상태로 눌러도 아무 일도 안 나는
-                  컨트롤을 그리지 않는다("아직 없는 기능은 안 그린다" — §5-2 "되돌아올
-                  수 없는 상태는 안 그림"과 같은 결). 컴포넌트(CommentConvertToTaskDialog)·
-                  상태 칩(CommentReplyStatusChip)·테스트는 남아 있다 — 조각② PR에서
-                  이 자리에 다시 배선한다. */}
-            </li>
-          );
-        })}
-      </ul>
+      <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} />
     </div>
   );
 }

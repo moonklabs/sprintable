@@ -2195,6 +2195,7 @@
     "commentsSectionTitleWithCount": "Comments {count}",
     "commentsDeletedCountLabel": "{count} deleted comments",
     "commentsDeletedNote": "The original was deleted.",
+    "commentsDeletedBodyLabel": "View body",
     "commentsRefreshCta": "Refresh",
     "commentsRefreshSubmitting": "Refreshing...",
     "commentsRefreshErrorGeneric": "Couldn't refresh comments.",

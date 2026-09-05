@@ -2195,6 +2195,7 @@
     "commentsSectionTitleWithCount": "댓글 {count}",
     "commentsDeletedCountLabel": "지워진 댓글 {count}건",
     "commentsDeletedNote": "원본이 지워졌습니다.",
+    "commentsDeletedBodyLabel": "본문 보기",
     "commentsRefreshCta": "다시 수집",
     "commentsRefreshSubmitting": "수집 중...",
     "commentsRefreshErrorGeneric": "다시 수집하지 못했습니다.",

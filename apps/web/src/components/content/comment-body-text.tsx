@@ -14,18 +14,34 @@ export interface CommentBodyTextProps {
    * 가능(text는 BE가 보존해서 준다, 숨기는 게 아니라 «남의 지워진 글»이라 기본을
    * 낮추는 것뿐). */
   forceCollapsed?: boolean;
+  /** forceCollapsed=true일 때만 쓰는 summary 라벨. 유나 Design 재리뷰(2026-09-05) —
+   * <summary>는 <details> 닫힘 상태에서도 항상 보이므로, 길이 기반 미리보기(preview)를
+   * 그대로 쓰면 200자 이하 지워진 글은 "접혀도" 본문이 전문 그대로 보였다(닫힌 채
+   * 다 보이는 결함 — 실측). 지워진 글은 이 라벨만 쓰고 본문은 «한 글자도» summary에
+   * 안 넣는다 — 펼쳐야만 보인다. */
+  deletedSummaryLabel?: string;
 }
 
-export function CommentBodyText({ text, moreLabel, forceCollapsed }: CommentBodyTextProps) {
+export function CommentBodyText({ text, moreLabel, forceCollapsed, deletedSummaryLabel }: CommentBodyTextProps) {
   if (!forceCollapsed && text.length <= COLLAPSE_THRESHOLD) {
     return <p className="whitespace-pre-wrap text-sm text-foreground" data-testid="comment-body-text">{text}</p>;
   }
-  const preview = text.length > COLLAPSE_THRESHOLD ? text.slice(0, COLLAPSE_THRESHOLD).trimEnd() : text;
+  if (forceCollapsed) {
+    return (
+      <details className="text-sm text-foreground" data-testid="comment-body-text">
+        <summary className="cursor-pointer">
+          <span className="text-muted-foreground underline">{deletedSummaryLabel}</span>
+        </summary>
+        <p className="mt-1 whitespace-pre-wrap">{text}</p>
+      </details>
+    );
+  }
+  const preview = text.slice(0, COLLAPSE_THRESHOLD).trimEnd();
   return (
     <details className="text-sm text-foreground" data-testid="comment-body-text">
       <summary className="cursor-pointer whitespace-pre-wrap">
         {preview}
-        {text.length > COLLAPSE_THRESHOLD ? '… ' : ' '}
+        {'… '}
         <span className="text-muted-foreground underline">{moreLabel}</span>
       </summary>
       <p className="mt-1 whitespace-pre-wrap">{text}</p>
