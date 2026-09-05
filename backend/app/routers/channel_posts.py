@@ -235,6 +235,11 @@ class ChannelPostDraftListItem(BaseModel):
     # 뒤집는다). true=둘 다 non-null이고 서로 다름(원문이 파생 이후 개정됨) · false=둘 다
     # non-null이고 같음 · None=하나라도 null("모른다" — 레거시 파생분).
     source_changed: bool | None = None
+    # story #3497 조각4(페드루 PO 決定 — 미르코 #3499 그라운딩 갭) — 3497 조회 API
+    # (`/publications/{publication_id}/insights`)의 path 파라미터와 같은 값(latest_pub.id,
+    # "최신 버전"의 publication 행 — publication_status·error_code와 같은 축). 아직 발행
+    # 시도 자체가 없으면 null.
+    publication_id: uuid.UUID | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -617,6 +622,7 @@ def _to_draft_list_item(
         image_final_bytes=latest_image.final_bytes if latest_image else None,
         image_was_converted=latest_image.was_converted if latest_image else None,
         processing_kind=processing_kind,
+        publication_id=latest_pub.id if latest_pub else None,
         source_content_item_id=draft.source_content_item_id,
         source_title=source_title,
         source_site_post_version_id=draft.source_site_post_version_id,

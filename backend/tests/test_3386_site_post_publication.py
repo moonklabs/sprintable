@@ -335,7 +335,11 @@ async def test_publication_info_exposes_latest_captured_insight_for_hosted_site(
         async with _client_for(app) as client:
             r_info = await client.get(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publication")
         assert r_info.status_code == 200, r_info.text
-        latest = r_info.json()["latest_insight"]
+        body = r_info.json()
+        assert body["publication_id"] == str(post_id), (
+            "story #3497 조각4 — SitePostPublicationResponse.publication_id는 SitePost.id"
+        )
+        latest = body["latest_insight"]
         assert latest is not None, "캡처된 스냅샷이 있는데 latest_insight가 None(publication_id 축 어긋남)"
         assert latest["status"] == "captured"
         assert latest["channel"] == "hosted_site"
@@ -344,6 +348,29 @@ async def test_publication_info_exposes_latest_captured_insight_for_hosted_site(
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publication_info_channel_publication_view_exposes_publication_id():
+    """story #3497 조각4 — 외부 목적지(wordpress/webhook)는 `channel_publication.
+    publication_id`가 ChannelPublication.id(3497 조회 API 축과 동일). 전체 external
+    publish HTTP 왕복 대신 `_channel_publication_view()` 직렬화 지점 자체를 직접 검증
+    (같은 파일의 다른 필드들과 동일 관례 — 이 함수가 유일한 직렬화 지점, story #3476
+    docstring 참고)."""
+    from app.models.channel_publication import ChannelPublication
+    from app.routers.site_posts import _channel_publication_view
+
+    pub = ChannelPublication(
+        id=uuid.uuid4(), org_id=uuid.uuid4(), gate_id=uuid.uuid4(), version_id=uuid.uuid4(),
+        connection_id=uuid.uuid4(), channel="wordpress", status="published",
+        external_id="post-1", permalink="https://example.com/post-1",
+        published_at=datetime.now(timezone.utc),
+    )
+    view = _channel_publication_view(pub)
+    assert view is not None
+    assert view.publication_id == pub.id
+
+    assert _channel_publication_view(None) is None, "null 케이스 — pub 자체가 없으면 view도 None(publication_id 참조 불가 상황 없음)"
 
 
 @pytest.mark.anyio
@@ -413,7 +440,8 @@ async def test_publication_info_all_null_when_never_published_not_404():
         assert r_info.status_code == 200, r_info.text
         assert r_info.json() == {
             "published_at": None, "url": None, "published_by_member_id": None, "published_body_sha256": None,
-            "destination": "hosted_site", "channel_publication": None, "command": None, "latest_insight": None,
+            "destination": "hosted_site", "channel_publication": None, "command": None,
+            "publication_id": None, "latest_insight": None,
         }
     finally:
         app.dependency_overrides.clear()
@@ -486,7 +514,8 @@ async def test_publication_info_all_null_after_unpublish():
         assert r_info.status_code == 200, r_info.text
         assert r_info.json() == {
             "published_at": None, "url": None, "published_by_member_id": None, "published_body_sha256": None,
-            "destination": "hosted_site", "channel_publication": None, "command": None, "latest_insight": None,
+            "destination": "hosted_site", "channel_publication": None, "command": None,
+            "publication_id": None, "latest_insight": None,
         }
     finally:
         app.dependency_overrides.clear()
