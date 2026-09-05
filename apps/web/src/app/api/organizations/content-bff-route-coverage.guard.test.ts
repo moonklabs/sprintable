@@ -20,6 +20,14 @@ import { describe, expect, it } from 'vitest';
 const CONTENT_DIRS = [
   join(__dirname, '../../../app/(authenticated)/content'),
   join(__dirname, '../../../components/content'),
+  // story #3503(성과 보드 화면, PO 브리프 명시) — 이 화면은 content 밖(organization/
+  // insights-board)에 살지만 같은 클래스(`/api/organizations/...` fetchWithAuth 호출)를
+  // 부른다. 이 배열에 안 넣으면 이 스토리가 새로 만든 BFF 호출부(GET insights-board·
+  // POST publications/{id}/follow-ups)가 이 가드의 스캔 대상에서 그냥 빠진다(가드가
+  // 조용히 통과하지만 실은 아무것도 검사 안 한 것 — 이 파일 상단 스캔 대상 0건 방지
+  // 테스트가 있는 이유와 같은 함정).
+  join(__dirname, '../../../app/(authenticated)/organization/insights-board'),
+  join(__dirname, '../../../components/insights-board'),
 ];
 const API_ROOT = join(__dirname, '../../../app/api');
 

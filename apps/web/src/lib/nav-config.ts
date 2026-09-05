@@ -17,6 +17,7 @@ import {
   Settings,
   Share2,
   Shield,
+  TrendingUp,
   Users,
   Users2,
   Workflow,
@@ -167,6 +168,10 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 채널 우선순위·브랜드 킷) 화면. 읽기 전용 화면이라 owner 아닌 사람에게도 보인다
       // (편집 컨트롤만 owner 전용 — 화면 자체의 자리는 전 역할 공통).
       { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules' },
+      // story #3503(성과 보드 화면) — 발행된 글의 D+1/D+7 성과 표. org-channels·
+      // org-content-rules와 같은 이유로 kind:'static'·top-level 경로(org 스코프,
+      // project 무관 — publication은 프로젝트가 아니라 조직 소유 자산이다).
+      { id: 'org-insights-board', labelKey: 'orgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board' },
     ],
   },
   {
