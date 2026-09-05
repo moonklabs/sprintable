@@ -864,8 +864,8 @@ export default function ChannelPostEditPage() {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as
-          { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string } } | null;
-        const { permalink, external_id, published_at, scheduled, scheduled_at } = json?.data ?? {};
+          { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string; publication_id?: string | null } } | null;
+        const { permalink, external_id, published_at, scheduled, scheduled_at, publication_id } = json?.data ?? {};
         // story #3414(PR#3769, 아직 리뷰중 — 계약은 그 PR 스키마 기준) — scheduled=true면
         // 이 요청은 command만 만들고 실제 발행은 워커가 나중에 한다. permalink/
         // published_at 셋 다 null인 게 정상이라, 그 null을 "발행됨"으로 그리면 안 된다
@@ -875,7 +875,10 @@ export default function ChannelPostEditPage() {
           setPublishResult({ type: 'scheduled', scheduledAt: scheduled_at });
         } else if (permalink && published_at) {
           setPublishResult({ type: 'success' });
-          setDraft((prev) => prev && { ...prev, permalink, external_id, published_at, publication_status: 'published' });
+          // story #3525(PO 確定 ③) — publication_id도 permalink 등과 같은 병합 대상
+          // (BE #3525가 publish 응답에 이 필드를 추가) — 재로드 없이도 발행됨 카드가
+          // draft.publication_id 조건 하나로 즉시 열린다.
+          setDraft((prev) => prev && { ...prev, permalink, external_id, published_at, publication_status: 'published', publication_id: publication_id ?? prev.publication_id });
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }
@@ -1298,55 +1301,71 @@ export default function ChannelPostEditPage() {
         ) : null}
       </div>
 
-      {/* story #3402 PR2(T7/T9) — publication_status는 다섯 상태 밖의 신호라
-          deriveChannelPostView가 별도 필드로 얹어 준다(WIP1과 동일 함수, 재사용). T7 —
-          발행됨이면 재진입해도 permalink·published_at·external_id가 그대로 보인다(doc
-          §4-2 "게시 ID로 동일성을 눈에 보이게"). T9 — 부분 성공(container_created)이면
-          "이어서 발행"이 기본 행동임을 미리 안다(발행 버튼 자체의 배선은 이 조각 스코프
-          밖 — 다음 조각). PR1 rebase 반영(2026-09-04) — 위 승인 카드가 이미 계산해 둔
-          `view`를 그대로 재사용한다(같은 함수를 두 번 부르지 않는다 — rebase 전엔 이
-          블록이 자체 IIFE로 따로 계산했으나, PR1의 hasGateContract 가드가 상위로
-          올라오며 중복이 됐다). */}
-      {(() => {
-        if (view.status === 'published' && draft.permalink) {
-          return (
-            <div className="space-y-2 rounded-md border border-border p-4 text-sm" data-testid="channel-post-published-info">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
-                <a href={draft.permalink} target="_blank" rel="noreferrer" className="underline">{draft.permalink}</a>
-              </div>
-              {draft.published_at ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>
-                  <span>{formatScheduledAt(draft.published_at, displayTimezone).display}</span>
-                </div>
-              ) : null}
-              {draft.external_id ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground" data-testid="channel-post-external-id-label">{t('channelPostsExternalIdLabel')}</span>
-                  <span data-testid="channel-post-external-id">{draft.external_id}</span>
-                </div>
-              ) : null}
-              {/* story #3499(Phase2·FE) — publication_id 있을 때만(BE #3844 조각4 의존). */}
-              {draft.publication_id ? (
-                <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
-              ) : null}
-              {/* story #3517(Phase2·FE, 그라운딩 ① 자리 그대로 — InsightSnapshotBlock 곁,
-                  같은 draft.publication_id 조건) — 댓글 섹션. 조각①-FE 범위(PO 確定
-                  2026-09-05): 세 얼굴·수집 시각·목록·지워진 댓글(§22-9)만 — 행 액션
-                  (작업으로 전환·답변)은 조각②(답변/작업전환 엔드포인트) PR에서. */}
-              {draft.publication_id ? (
-                <CommentsSection
-                  face={commentsFace}
-                  displayTimezone={displayTimezone}
-                  onRefresh={handleCommentsRefresh}
-                  onConvertToTask={setConvertToTaskComment}
-                  onReply={setReplyComment}
-                />
-              ) : null}
+      {/* story #3525(PO 確定 2026-09-06 재대조, 유나 §22-12 「댓글은 «마지막 발행»에
+          붙는다」) — 이 블록은 원래 view.status==='published' 분기 안에 있었다. #3879가
+          draft.publication_id를 «현재 버전의 승인 상태»가 아니라 «마지막 발행
+          publication»(버전 무관)으로 재정의했는데도, 이 블록이 여전히 view.status로
+          한 번 더 게이팅되고 있어(view.status는 «현재 버전»의 파생값 — 새 버전이
+          reapproval_required=true면 'published'가 아니다) 밖에 살아 있는 게시물의
+          댓글·인사이트·permalink가 상세에서 사라지는 사고가 재발했다(유나 18회차
+          실측, draft 2220797b). 렌더 조건을 draft.publication_id 하나로 좁힌다 —
+          #3525 BE(publish 응답에 publication_id 추가)로 동기 발행 즉시반영도 이
+          조건 하나로 선다. 「재승인 필요」는 기존 상태 칩(:1193 부근, view.status
+          기반, contentStatusReapprovalNeeded)이 이미 독립적으로 그린다 — 칩 문구
+          변경 0, 이 블록엔 그 사실을 다시 말하지 않고 아래 안내 한 줄만 얹는다. */}
+      {draft.publication_id ? (
+        <div className="space-y-2 rounded-md border border-border p-4 text-sm" data-testid="channel-post-published-info">
+          {/* story #3525(PO 確定 재대조) — reapproval_required=true(위 칩이 「재승인
+              필요」인 바로 그 경우)일 때만, 아래 정보가 "지금 편집 중인 버전"이
+              아니라 "마지막으로 나간 버전"의 것임을 블록 머리에 한 번 말한다(인사이트·
+              댓글 각각엔 안 넣는다 — 노이즈). 발행됨 상태(재승인 불요)엔 같은 버전
+              이야기라 이 줄 자체가 안 뜬다. */}
+          {draft.reapproval_required === true ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-post-published-info-last-published-notice">
+              {t('channelPostsPublishedInfoLastPublishedNotice')}
+            </p>
+          ) : null}
+          {draft.permalink ? (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
+              <a href={draft.permalink} target="_blank" rel="noreferrer" className="underline">{draft.permalink}</a>
             </div>
-          );
-        }
+          ) : null}
+          {draft.published_at ? (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>
+              <span>{formatScheduledAt(draft.published_at, displayTimezone).display}</span>
+            </div>
+          ) : null}
+          {draft.external_id ? (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground" data-testid="channel-post-external-id-label">{t('channelPostsExternalIdLabel')}</span>
+              <span data-testid="channel-post-external-id">{draft.external_id}</span>
+            </div>
+          ) : null}
+          {/* story #3499(Phase2·FE) — publication_id 있을 때만(BE #3844 조각4 의존). */}
+          <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
+          {/* story #3517(Phase2·FE, 그라운딩 ① 자리 그대로 — InsightSnapshotBlock 곁,
+              같은 draft.publication_id 조건) — 댓글 섹션. 조각①-FE 범위(PO 確定
+              2026-09-05): 세 얼굴·수집 시각·목록·지워진 댓글(§22-9)만 — 행 액션
+              (작업으로 전환·답변)은 조각②(답변/작업전환 엔드포인트) PR에서. */}
+          <CommentsSection
+            face={commentsFace}
+            displayTimezone={displayTimezone}
+            onRefresh={handleCommentsRefresh}
+            onConvertToTask={setConvertToTaskComment}
+            onReply={setReplyComment}
+          />
+        </div>
+      ) : null}
+
+      {/* story #3402 PR2(T7/T9) — publication_status는 다섯 상태 밖의 신호라
+          deriveChannelPostView가 별도 필드로 얹어 준다(WIP1과 동일 함수, 재사용). T9 —
+          부분 성공(container_created)이면 "이어서 발행"이 기본 행동임을 미리 안다
+          (발행 버튼 자체의 배선은 이 조각 스코프 밖 — 다음 조각). PR1 rebase
+          반영(2026-09-04) — 위 승인 카드가 이미 계산해 둔 `view`를 그대로 재사용한다
+          (같은 함수를 두 번 부르지 않는다). */}
+      {(() => {
         if (view.unpublished) {
           // story #3426(doc §17-10②) — 회수돼도 승인(gate) 자체는 안 풀린다 — 칩은
           // 「승인됨」 그대로이고 이 오버레이가 "회수됨"을 얹는다(partialSuccess/

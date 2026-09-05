@@ -951,6 +951,13 @@ class PublishChannelPostResponse(BaseModel):
     # 지정했다는 뜻과는 다른 축 — 이건 "지금 요청했는데 서버가 자동으로 이어서
     # 처리 중"). true면 permalink/external_id/published_at은 전부 null(아직 없다).
     processing: bool = False
+    # story #3525(PO 確定 2026-09-06) — permalink/external_id/published_at과 같은
+    # 시점에 생기는 값(publish_channel_post_draft가 반환하는 ChannelPublication.id
+    # 그대로). FE handlePublish의 로컬 병합이 이 필드도 draft에 얹어야 §22-12(발행됨
+    # 카드가 draft.publication_id 하나로 즉시 열림)가 재로드 없이 성립한다.
+    # processing=True(컨테이너 비동기 대기)면 아직 최종 published 행이 없어 그 세
+    # 필드처럼 null 그대로.
+    publication_id: uuid.UUID | None = None
 
 
 @router.post(
@@ -1238,7 +1245,7 @@ async def publish_channel_post_draft_endpoint(
     return PublishChannelPostResponse(
         permalink=row.permalink, external_id=row.external_id,
         published_at=row.published_at.isoformat(), version_id=row.version_id,
-        scheduled=False, command_id=command.id,
+        scheduled=False, command_id=command.id, publication_id=row.id,
     )
 
 

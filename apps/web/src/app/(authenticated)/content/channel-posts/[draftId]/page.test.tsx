@@ -301,7 +301,7 @@ function stubFetch(opts: {
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/publish` && init?.method === 'POST') {
         const result = opts.onPublish?.() ?? {
-          status: 200, body: { permalink: 'https://threads.net/@x/1', external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1' },
+          status: 200, body: { permalink: 'https://threads.net/@x/1', external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1', publication_id: 'pub-1' },
         };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
@@ -694,7 +694,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       draftDetail: {
         gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
         publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
-        published_at: '2026-09-04T00:00:00Z',
+        published_at: '2026-09-04T00:00:00Z', publication_id: 'pub-1',
       },
     });
     await act(async () => {
@@ -1370,6 +1370,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       draftDetail: {
         gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
         publication_status: 'published', permalink: 'https://old-permalink', published_at: '2026-09-01T00:00:00Z', external_id: 'old-id',
+        publication_id: 'pub-old',
       },
       onPublish: () => ({
         status: 200,
@@ -2498,7 +2499,12 @@ describe('ChannelPostEditPage — 콘텐츠 규칙 위반 표시(story #3472 2�
 });
 
 describe('ChannelPostEditPage — 성과 인사이트 블록(story #3499, BE #3844 조각4 의존)', () => {
-  it('publication_id 없음(BE 미착지 응답) — published 상태여도 인사이트 블록을 안 그린다', async () => {
+  // story #3525(PO 確定 2026-09-06 재대조) — publication_id는 이제 permalink 등과
+  // 구조적으로 같은 객체(published_pub)에서 나와 함께 없거나 함께 있어야 한다
+  // (#3879). 이 시나리오(permalink 있음+publication_id 없음)는 그 계약이 성립하기
+  // 전(BE #3844 조각4 미착지) 상정이었으나, 지금은 publication_id 자체가 발행됨
+  // 카드 전체의 유일한 렌더 조건이라 — 블록 통째로 미렌더가 맞는 동작이다.
+  it('⭐#3525 — publication_id 없으면 발행됨 카드(댓글·인사이트·permalink) 전체가 안 뜬다', async () => {
     stubFetch({
       draftDetail: {
         gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
@@ -2509,7 +2515,7 @@ describe('ChannelPostEditPage — 성과 인사이트 블록(story #3499, BE #38
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
 
-    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     expect(container.querySelector('[data-testid="content-insight-info"]')).toBeNull();
   });
 
@@ -2536,6 +2542,55 @@ describe('ChannelPostEditPage — 성과 인사이트 블록(story #3499, BE #38
     const values = Array.from(insight!.querySelectorAll('[data-testid="insight-metric-value"]')).map((el) => el.textContent);
     expect(values).toContain('200');
     expect(values).toContain('0');
+  });
+});
+
+// story #3525(PO 確定 재대조 2026-09-06, 유나 §22-12) — 발행됨 카드가 view.status가
+// 아니라 draft.publication_id 하나로 서는지, 그리고 reapproval_required일 때만
+// "마지막 발행 버전" 안내 한 줄이 뜨는지.
+describe('ChannelPostEditPage — 발행됨 카드 렌더 조건(story #3525)', () => {
+  const V2_PENDING_BUT_PUBLISHED = {
+    gate_status: 'pending', reapproval_required: true, sealed_content_sha256: 'h1', body_sha256: 'h2',
+    publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+    published_at: '2026-09-04T00:00:00Z', publication_id: 'cp-1',
+  } as const;
+
+  it('⭐reapproval_required=true+publication_id 있음 — view.status가 published가 아니어도 카드가 뜨고 "마지막 발행 버전" 안내가 함께 보인다', async () => {
+    stubFetch({ draftDetail: V2_PENDING_BUT_PUBLISHED });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-published-info-last-published-notice"]')).not.toBeNull();
+  });
+
+  it('⭐발행됨(재승인 불요)+publication_id 있음 — 카드는 뜨지만 "마지막 발행 버전" 안내는 없다(같은 버전이라 노이즈)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', reapproval_required: false, sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+        published_at: '2026-09-04T00:00:00Z', publication_id: 'cp-1',
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-published-info-last-published-notice"]')).toBeNull();
+  });
+
+  it('⭐publication_id 없음 — reapproval_required와 무관하게 카드 자체가 안 뜬다(회귀)', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'pending', reapproval_required: true, sealed_content_sha256: 'h1', body_sha256: 'h2',
+        publication_status: null, permalink: null, external_id: null, published_at: null, publication_id: null,
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
   });
 });
 
