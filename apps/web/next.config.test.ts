@@ -15,6 +15,14 @@ function extractDirective(name: string): string {
   return match[1]!;
 }
 
+// story #3532 — CSP 소스 리스트는 공백으로 구분된 토큰이다. "https:"가 값 안에
+// 있는지를 부분문자열(.toContain)로만 재면 "https://storage.googleapis.com"처럼
+// 이미 "https:"로 시작하는 exact-origin 값도 통과해 버려, 스킴 전체 허용으로의
+// 되돌림(narrow allowlist 회귀)을 못 잡는다 — 토큰 단위로 정확히 비교한다.
+function hasHttpsSchemeToken(directiveValue: string): boolean {
+  return directiveValue.split(/\s+/).includes('https:');
+}
+
 describe('CSP media-src (story #2083 regression guard)', () => {
   it('allows storage.googleapis.com so chat video attachments can load', () => {
     expect(extractDirective('media-src')).toContain('https://storage.googleapis.com');
@@ -25,8 +33,31 @@ describe('CSP media-src (story #2083 regression guard)', () => {
   });
 
   it('img-src and media-src agree on the GCS origin (same signed-URL exposure surface, story #2050)', () => {
-    expect(extractDirective('img-src')).toContain('https://storage.googleapis.com');
+    // story #3532(PO 재대조 2026-09-06) — img-src가 https: 스킴 전체 허용으로
+    // 넓어지며(고객 브랜드 로고는 임의 사이트 URL이라 exact-origin allowlist로
+    // 못 맞힌다) storage.googleapis.com은 그 상위집합으로 이미 포함된다 —
+    // hasHttpsSchemeToken으로 "부분문자열이 아니라 독립 토큰"인지 확認한다
+    // (narrow allowlist "https://storage.googleapis.com ..."도 부분문자열로는
+    // "https:"를 포함해 그 검사 방식으로는 되돌려도 안 걸리는 함정 — 실측).
+    expect(hasHttpsSchemeToken(extractDirective('img-src'))).toBe(true);
     expect(extractDirective('media-src')).toContain('https://storage.googleapis.com');
+  });
+});
+
+// story #3532(PO REQUIRED — 페드루 발견·유나 검토, 2026-09-06) — 브랜드 킷 로고는 고객이 «자기
+// 사이트»에 올린 임의 URL이다(우리 인프라가 아니다) — GCS/아바타류 exact-origin
+// allowlist로는 애초에 못 맞힌다. img-src가 https: 전체를 안 열면 CSP가 멀쩡한
+// URL을 조용히 막고, <img onError>가 그걸 "죽은 링크"로 오판해 화면이 거짓말을
+// 한다(#3889 코멘트 실측: next.config.ts:33 당시 GCS·googleusercontent·github
+// avatars뿐이었다).
+describe('CSP img-src — 임의 https 이미지 허용(story #3532 회귀가드)', () => {
+  it('https: 스킴 전체를 독립 토큰으로 허용한다(고객 브랜드 로고 등 임의 호스트 — narrow allowlist로 되돌리면 RED)', () => {
+    expect(hasHttpsSchemeToken(extractDirective('img-src'))).toBe(true);
+  });
+
+  it('data:·blob:도 그대로 허용한다(회귀 0 — 기존 인라인/객체 URL 이미지)', () => {
+    expect(extractDirective('img-src')).toContain('data:');
+    expect(extractDirective('img-src')).toContain('blob:');
   });
 });
 

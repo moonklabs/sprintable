@@ -113,14 +113,59 @@ interface VersionConflictState {
   freshServerVersion: number;
 }
 
+// story #3532(PO 確定③ 재대조 2026-09-06) — 값이 CSS 색으로 안 읽히면 스와치
+// 없이 문자열 그대로(형식 검증은 범위 밖·강제 변환·오류 표시 0, 그냥 스와치를
+// 안 그린다). DOM에 실제로 대입해 브라우저 자체의 판정을 그대로 쓴다(직접
+// 정규식을 짜서 CSS 색 문법을 재구현하지 않는다 — named color("rebeccapurple")·
+// hsl()·rgb() 등 전부를 브라우저가 이미 안다).
+function isValidCssColor(value: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const probe = document.createElement('div');
+  probe.style.color = '';
+  probe.style.color = value;
+  return probe.style.color !== '';
+}
+
+// story #3532(유나 §23, PO 確定 2026-09-06) — 색 칩에 실제 색 스와치를 보인다(색
+// 코드를 적어 두기만 해서는 맞는 색인지 아무도 확인 못 한다 — 로고 미리보기와 같은
+// 취지). banned_terms·taxonomy·channel_priority는 그대로(색 스와치가 뜻이 없는
+// 자리라 variant='default'가 기본).
+function TagChip({ item, variant, onRemove }: { item: string; variant: 'default' | 'color'; onRemove?: () => void }) {
+  const showSwatch = variant === 'color' && isValidCssColor(item);
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-foreground">
+      {showSwatch ? (
+        <span
+          className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
+          style={{ backgroundColor: item }}
+          aria-hidden="true"
+          data-testid="content-rules-brand-color-swatch"
+        />
+      ) : null}
+      {item}
+      {onRemove ? (
+        <button type="button" onClick={onRemove} aria-label={`Remove ${item}`} className="text-muted-foreground hover:text-foreground">
+          ×
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
 function TagListEditor({
-  items, onChange, readOnly, placeholder, testIdPrefix,
+  items, onChange, readOnly, placeholder, testIdPrefix, variant = 'default', emptyText = '—',
 }: {
   items: string[];
   onChange: (next: string[]) => void;
   readOnly: boolean;
   placeholder: string;
   testIdPrefix: string;
+  // story #3532 — 색 스와치 렌더 축(기본은 지금처럼 텍스트뿐).
+  variant?: 'default' | 'color';
+  // story #3532(PO 確定⑤) — 「—」는 이 제품에서 «모른다·못 잰다»는 뜻으로 이미 쓰는
+  // 글자라, 브랜드 킷처럼 "아직 정하지 않았다"는 다른 사실엔 다른 문구가 맞다.
+  // 기본값은 기존 호출부(banned_terms 등) 회귀 0을 위해 '—' 그대로 유지.
+  emptyText?: string;
 }) {
   const [draft, setDraft] = useState('');
 
@@ -133,14 +178,10 @@ function TagListEditor({
 
   if (readOnly) {
     return items.length === 0 ? (
-      <p className="text-xs text-muted-foreground" data-testid={`${testIdPrefix}-empty`}>—</p>
+      <p className="text-xs text-muted-foreground" data-testid={`${testIdPrefix}-empty`}>{emptyText}</p>
     ) : (
       <div className="flex flex-wrap gap-1.5" data-testid={`${testIdPrefix}-readonly`}>
-        {items.map((item) => (
-          <span key={item} className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs text-foreground">
-            {item}
-          </span>
-        ))}
+        {items.map((item) => <TagChip key={item} item={item} variant={variant} />)}
       </div>
     );
   }
@@ -149,17 +190,7 @@ function TagListEditor({
     <div className="space-y-1.5" data-testid={`${testIdPrefix}-editor`}>
       <div className="flex flex-wrap gap-1.5">
         {items.map((item) => (
-          <span key={item} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-foreground">
-            {item}
-            <button
-              type="button"
-              onClick={() => onChange(items.filter((x) => x !== item))}
-              aria-label={`Remove ${item}`}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              ×
-            </button>
-          </span>
+          <TagChip key={item} item={item} variant={variant} onRemove={() => onChange(items.filter((x) => x !== item))} />
         ))}
       </div>
       <input
@@ -172,6 +203,28 @@ function TagListEditor({
         data-testid={`${testIdPrefix}-input`}
       />
     </div>
+  );
+}
+
+// story #3532(PO 確定②, 유나 §23) — 로고 URL 미리보기 1장. url이 없으면 자리
+// 자체를 안 그린다("안 정함" 문구는 위 readonly 텍스트가 이미 말한다 — 여기서
+// 한 번 더 말하지 않는다). key={url}로 새 URL마다 컴포넌트를 새로 마운트해
+// 에러 상태를 자동으로 초기화한다(이전 URL의 실패가 새 URL에 들러붙지 않는다).
+function BrandLogoPreview({ url, t }: { url?: string; t: ReturnType<typeof useTranslations> }) {
+  const [failed, setFailed] = useState(false);
+  if (!url) return null;
+  if (failed) {
+    return <p className="text-xs text-muted-foreground" data-testid="content-rules-brand-logo-preview-failed">{t('brandKitLogoLoadFailed')}</p>;
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- story #3532: 임의 외부 URL(고객이 붙여넣은 값, next/image 최적화 대상 밖).
+    <img
+      src={url}
+      alt={t('brandKitLogoPreviewAlt')}
+      className="h-12 w-12 rounded border border-border object-contain"
+      data-testid="content-rules-brand-logo-preview"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -473,6 +526,16 @@ export default function ContentRulesPage() {
                 {fieldErrors.require_utm ? <p className="text-xs text-destructive">{fieldErrors.require_utm}</p> : null}
               </div>
 
+              {/* story #3532(유나 §23, PO 確定 2026-09-06) — 아래 네 필드(tone·taxonomy·
+                  channel_priority·brand_kit)는 기계 검사 소비처가 0이다(banned_terms·
+                  require_utm 둘만 실제로 검사된다) — 그런데 같은 입력칸 모양으로 나란히
+                  서 있어 "적어 두면 강제된다"로 읽힌다. 묶음 위에 한 번만(항목마다
+                  반복 X) 약속의 크기를 줄이는 문장 — 명령형("지키세요") 금지, 이 문구가
+                  거짓이 되는 날(실제 lint 축이 생기는 날)이 삭제 조건. */}
+              <p className="text-xs text-muted-foreground" data-testid="content-rules-advisory-notice">
+                {t('contentRulesAdvisoryNotice')}
+              </p>
+
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-tone">{t('toneLabel')}</label>
                 {canEditRules ? (
@@ -534,8 +597,15 @@ export default function ContentRulesPage() {
                     className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                   />
                 ) : (
-                  <p className="text-sm text-foreground" data-testid="content-rules-brand-logo-readonly">{rules.brand_kit.logo_url || '—'}</p>
+                  <p className="text-sm text-foreground" data-testid="content-rules-brand-logo-readonly">
+                    {rules.brand_kit.logo_url || t('contentRulesNotSetLabel')}
+                  </p>
                 )}
+                {/* story #3532(PO 確定②) — URL만 적어 두면 오타·죽은 링크가 그대로 "정본"
+                    행세를 한다(아무도 못 본다) — 편집·읽기 두 모드 다 실물 1장을
+                    보여준다. 로드 실패는 <img onError>로 잡아 "불러오지 못했습니다"로
+                    바꾼다(깨진 이미지 아이콘을 그대로 두지 않는다). */}
+                <BrandLogoPreview key={rules.brand_kit.logo_url ?? ''} url={rules.brand_kit.logo_url} t={t} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">{t('brandKitColorsLabel')}</label>
@@ -545,16 +615,22 @@ export default function ContentRulesPage() {
                   readOnly={!canEditRules}
                   placeholder={t('brandKitColorsPlaceholder')}
                   testIdPrefix="content-rules-brand-colors"
+                  variant="color"
+                  emptyText={t('contentRulesNotSetLabel')}
                 />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">{t('brandKitFontsLabel')}</label>
+                {/* story #3532(PO 確定③, 유나 §23) — 폰트는 이름 그대로만 보인다. 웹폰트
+                    로딩(구글 폰트 등) 시도 금지 — 고객 브랜드 폰트지 이 화면의 폰트가
+                    아니다(로딩 시도 자체가 없다 — style/link 삽입 코드 0). */}
                 <TagListEditor
                   items={rules.brand_kit.fonts ?? []}
                   onChange={(next) => setRules((r) => ({ ...r, brand_kit: { ...r.brand_kit, fonts: next } }))}
                   readOnly={!canEditRules}
                   placeholder={t('brandKitFontsPlaceholder')}
                   testIdPrefix="content-rules-brand-fonts"
+                  emptyText={t('contentRulesNotSetLabel')}
                 />
                 {fieldErrors.brand_kit ? <p className="text-xs text-destructive">{fieldErrors.brand_kit}</p> : null}
               </div>

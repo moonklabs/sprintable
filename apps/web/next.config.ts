@@ -29,8 +29,13 @@ const _CSP = [
   // 실행하지 않아 이 클래스를 못 잡는다).
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.tosspayments.com",
   "style-src 'self' 'unsafe-inline'",
-  // GCS 파일, Google/GitHub 아바타 이미지
-  "img-src 'self' data: blob: https://storage.googleapis.com https://*.googleusercontent.com https://avatars.githubusercontent.com",
+  // GCS 파일, Google/GitHub 아바타 이미지 + story #3532(PO 재대조 2026-09-06) —
+  // 브랜드 킷 로고는 고객이 «자기 사이트»에 올린 임의 URL이다(우리 인프라가 아니다)
+  // — exact-origin allowlist로는 애초에 못 맞힌다(GCS/아바타류 known-service와
+  // 다른 클래스). https: 전체 허용 없이는 CSP가 멀쩡한 URL을 조용히 막고, onError가
+  // 그걸 "죽은 링크"로 오판해 화면이 거짓말을 한다(#3532 PO REQUIRED — 페드루
+  // 발견·유나 검토).
+  "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   // API 호출 (self = Next.js rewrites 경유, googleapis = Cloud KMS/AI, tosspayments = 결제
   // 위젯 SDK 자체 통신 — story #2510). Support Gateway origin은 위 상수 참고 — 브라우저가
