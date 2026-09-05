@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -341,6 +343,8 @@ export function DescriptionViewer({
 
 export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const t = useTranslations('board');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/more');
@@ -2195,7 +2199,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                             <span>{memberMap[comment.created_by]?.name ?? '—'}</span>
                             <span>·</span>
-                            <span>{new Date(comment.created_at).toLocaleString()}</span>
+                            <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
                         </li>
                       ))}
@@ -2229,7 +2233,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                             <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                               <span>{actorName}</span>
                               <span>·</span>
-                              <span>{new Date(activity.created_at).toLocaleString()}</span>
+                              <span>{formatRelativeTime(activity.created_at, locale, displayTimezone)}</span>
                               {isLong ? (
                                 <Button
                                   type="button"

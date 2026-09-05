@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
@@ -58,15 +60,10 @@ interface OutsideProjectConversation {
   participants?: Participant[];
 }
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffDays = Math.floor(diffMs / 86_400_000);
-  if (diffDays === 0) return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-  if (diffDays === 1) return '어제';
-  if (diffDays < 7) return `${diffDays}일 전`;
-  return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+// story #3493 — 손으로 짠 상대시각(하드코딩 'ko-KR', locale 무시)이 3436 묶음 8
+// 정본(formatRelativeTime)과 별개로 존재하던 자리. 대화 최근시각은 "기록"이라 정본에 위임.
+function formatTime(iso: string, locale: string, displayTimezone: string): string {
+  return formatRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatParticipantNames(
@@ -107,6 +104,8 @@ function ConversationRow({
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0
@@ -210,7 +209,7 @@ function ConversationRow({
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
           <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
-          <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time)}</span>
+          <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
         </div>
         {participantLayer}
         <div className="flex items-center justify-between gap-1">

@@ -7,6 +7,8 @@ import { Activity, ChevronRight } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface ActivityLogItem {
   id: string;
@@ -59,23 +61,23 @@ function formatAction(action: string, entityType: string | null, entityTitle: st
   }
 }
 
+// story #3493 — 손으로 짠 상대시각(하드코딩 영문 "s/m/h ago", locale 무시 버그
+// 있었음)이 3436 묶음 8 정본(formatRelativeTime)과 별개로 존재하던 자리. 정본에
+// 위임하되, 이 컴포넌트의 실제 값(1분 주기 재계산)은 그대로 유지 — formatRelativeTime
+// 은 순수 함수라 "몇 분 전"이 시간이 지나며 자동으로 갱신되려면 호출부가 스스로
+// 다시 불러야 한다(정본이 새로 제공하는 기능이 아니다, 새 포맷 함수 신설 금지 원칙과
+// 무관 — 재호출 주기는 이 컴포넌트의 몫).
 function RelativeTime({ iso, locale }: { iso: string; locale: string }) {
-  const [label, setLabel] = useState('');
+  const displayTimezone = resolveDisplayTimezone().tz;
+  const [label, setLabel] = useState(() => formatRelativeTime(iso, locale, displayTimezone));
   useEffect(() => {
     function compute() {
-      const diffMs = Date.now() - new Date(iso).getTime();
-      const diffSec = Math.floor(diffMs / 1000);
-      if (diffSec < 60) { setLabel(`${diffSec}s ago`); return; }
-      const diffMin = Math.floor(diffSec / 60);
-      if (diffMin < 60) { setLabel(`${diffMin}m ago`); return; }
-      const diffHr = Math.floor(diffMin / 60);
-      if (diffHr < 24) { setLabel(`${diffHr}h ago`); return; }
-      setLabel(new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric' }));
+      setLabel(formatRelativeTime(iso, locale, displayTimezone));
     }
     compute();
     const id = setInterval(compute, 60_000);
     return () => clearInterval(id);
-  }, [iso, locale]);
+  }, [iso, locale, displayTimezone]);
   return <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>;
 }
 

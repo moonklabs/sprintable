@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations, useLocale } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -108,11 +109,12 @@ function priorityLabelKey(p: EpicPriority): 'priorityCritical' | 'priorityHigh' 
   return 'priorityLow';
 }
 
-// story #2084 근본: 'ko-KR' 하드코딩이었다 — locale=en에서도 날짜가 한국어 형식으로
-// 렌더되던 원인 중 하나(dashboard-activity-timeline.tsx와 동일하게 useLocale() 값을 받는다).
-function formatDate(d: string | null | undefined, locale: string) {
+// story #3493 — target_date/measure_after는 "약속"(목표 완료일·측정 예정일, 아직
+// 안 온 미래 시점) — §11-2 정본(formatScheduledAt)으로 통일. 고정 포맷이라 en/ko
+// locale 분기(구 #2084 근본원인)가 원천적으로 사라진다.
+function formatDate(d: string | null | undefined, displayTimezone: string) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return formatScheduledAt(d, displayTimezone).display;
 }
 
 // ─── UI components ────────────────────────────────────────────────────────────
@@ -227,7 +229,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 
 export default function EpicDetailPage() {
   const t = useTranslations('goals');
-  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { wsSlug, projSlug, projectId } = useGoalsRoute();
@@ -410,7 +412,7 @@ export default function EpicDetailPage() {
             />
             <Badge variant={priorityBadgeVariant(epic.priority)}>{t(priorityLabelKey(epic.priority))}</Badge>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
-            {epic.target_date && <span className="text-xs text-muted-foreground">{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>}
+            {epic.target_date && <span className="text-xs text-muted-foreground">{t('targetDate')}: {formatDate(epic.target_date, displayTimezone)}</span>}
             {epic.target_sp != null && <span className="text-xs text-muted-foreground">{t('targetSp')}: {epic.target_sp}</span>}
           </div>
         </div>
@@ -448,7 +450,7 @@ export default function EpicDetailPage() {
             </div>
             <div className="mt-2 text-[13px] leading-snug text-foreground/80">
               {epic.success_criteria?.trim() ? epic.success_criteria.split('\n')[0] : t('outcomeCapsuleNoCriteria')}
-              {epic.measure_after ? ` · ${t('targetDate')} ${formatDate(epic.measure_after, locale)}` : ''}
+              {epic.measure_after ? ` · ${t('targetDate')} ${formatDate(epic.measure_after, displayTimezone)}` : ''}
             </div>
           </div>
         </div>

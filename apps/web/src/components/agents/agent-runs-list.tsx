@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Activity, ChevronDown, Clock3, Cpu, Hash, RotateCw, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,8 @@ import {
 import { AgentRunDetail } from './agent-run-detail';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface AgentRun {
   id: string;
@@ -87,13 +89,9 @@ function formatCost(usd: number | null): string {
   return `$${usd.toFixed(4)}`;
 }
 
-function toLocaleDateStr(iso: string, locale: string): string {
-  return new Date(iso).toLocaleDateString(locale, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+// story #3493 — run.created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)으로.
+function toLocaleDateStr(iso: string, locale: string, displayTimezone: string): string {
+  return formatRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatBillingMode(t: ReturnType<typeof useTranslations>, billingMode: AgentRun['llm_provider']): string {
@@ -116,9 +114,8 @@ export function AgentRunsList() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [locale] = useState(() =>
-    typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en',
-  );
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const fetchRuns = useCallback(async (cursor?: string) => {
     const params = new URLSearchParams();
@@ -301,7 +298,7 @@ export function AgentRunsList() {
                     <div className="flex flex-col items-start gap-3 lg:items-end">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Activity className="size-3.5" />
-                        <span>{toLocaleDateStr(run.created_at, locale)}</span>
+                        <span>{toLocaleDateStr(run.created_at, locale, displayTimezone)}</span>
                       </div>
                       <Button variant="glass" size="sm" onClick={() => setSelectedRunId(run.id)}>
                         {t('openDetail')}

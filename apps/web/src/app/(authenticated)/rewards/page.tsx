@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,8 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { OperatorInput } from '@/components/ui/operator-control';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface LedgerEntry { id: string; member_id: string; amount: number; reason: string; created_at: string }
 interface LeaderboardEntry { member_id: string; balance: number }
@@ -20,6 +22,8 @@ type Period = 'all' | 'daily' | 'weekly' | 'monthly';
 export default function RewardsPage() {
   const t = useTranslations('rewards');
   const shellT = useTranslations('shell');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { projectId } = useDashboardContext();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
@@ -219,7 +223,7 @@ export default function RewardsPage() {
                         <p className={`text-sm font-bold ${e.amount >= 0 ? 'text-success' : 'text-destructive'}`}>
                           {e.amount >= 0 ? '+' : ''}{e.amount.toLocaleString()} TJSB
                         </p>
-                        <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-muted-foreground">{formatRelativeTime(e.created_at, locale, displayTimezone)}</p>
                       </div>
                     </div>
                   ))}

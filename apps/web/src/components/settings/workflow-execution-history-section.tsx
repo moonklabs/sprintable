@@ -1,12 +1,14 @@
 'use client';
 
 import { Fragment, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface ExecutionLogItem {
   id: string;
@@ -39,6 +41,8 @@ function statusVariant(status: string): 'secondary' | 'destructive' | 'outline' 
 
 export function WorkflowExecutionHistorySection({ projectId }: { projectId: string }) {
   const t = useTranslations('settings');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const [logs, setLogs] = useState<ExecutionLogItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -106,7 +110,7 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
                         onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
                       >
                         <td className="py-2 pr-4 text-muted-foreground whitespace-nowrap">
-                          {new Date(log.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {formatRelativeTime(log.created_at, locale, displayTimezone)}
                         </td>
                         <td className="py-2 pr-4">
                           <code className="rounded bg-muted px-1 py-0.5">{log.event_type}</code>

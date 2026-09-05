@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,8 @@ import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { canEditOrgMemberRole } from '@/lib/org-member-role';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface OrgMember {
   id: string;
@@ -45,6 +47,8 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [loading, setLoading] = useState(true);
 
   const t = useTranslations('settings');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
@@ -367,7 +371,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 name={member.name}
                 email={member.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={member.joined_at ? `${new Date(member.joined_at).toLocaleDateString('ko-KR')} 가입` : undefined}
+                meta={member.joined_at ? `${formatRelativeTime(member.joined_at, locale, displayTimezone)} 가입` : undefined}
                 actions={
                   <>
                     {canEdit ? (
@@ -429,7 +433,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 key={invite.id}
                 name={invite.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={`${invite.role} · 만료: ${new Date(invite.expires_at).toLocaleDateString('ko-KR')}`}
+                meta={`${invite.role} · 만료: ${formatScheduledAt(invite.expires_at, displayTimezone).display}`}
                 emphasis="subtle"
                 actions={
                   canManage ? (

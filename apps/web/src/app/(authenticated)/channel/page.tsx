@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Paperclip, Send, X } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface ChannelMsg {
   id: string;
@@ -26,9 +28,10 @@ function fastapiWsBase(): string {
     .replace(/^http:\/\//, 'ws://');
 }
 
-function fmtTime(ts: string): string {
+// story #3493 — 메시지 시각(msg.ts)은 "기록"(3436 묶음 8 정본 formatRelativeTime).
+function fmtTime(ts: string, locale: string, displayTimezone: string): string {
   try {
-    return new Date(ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    return formatRelativeTime(ts, locale, displayTimezone);
   } catch {
     return '';
   }
@@ -36,6 +39,8 @@ function fmtTime(ts: string): string {
 
 export default function ChannelPage() {
   const t = useTranslations('channel');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const searchParams = useSearchParams();
   const agentId = searchParams.get('agent_id');
   const { currentTeamMemberId } = useDashboardContext();
@@ -223,7 +228,7 @@ export default function ChannelPage() {
                   <p
                     className={`mt-0.5 text-xs text-muted-foreground ${isOwn ? 'text-right' : 'text-left'}`}
                   >
-                    {fmtTime(msg.ts)}
+                    {fmtTime(msg.ts, locale, displayTimezone)}
                   </p>
                 </div>
               </div>

@@ -11,6 +11,8 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition, getToolAuditOutcome } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface ToolCallEntry {
   type?: string;
@@ -132,16 +134,10 @@ function formatDuration(ms: number | null): string {
   return `${m}m ${rem}s`;
 }
 
-function toLocaleStr(iso: string | null, locale: string): string {
+// story #3493 — started_at/finished_at/entry.created_at은 "기록"(정본 formatRelativeTime).
+function toLocaleStr(iso: string | null, locale: string, displayTimezone: string): string {
   if (!iso) return '-';
-  return new Date(iso).toLocaleString(locale, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  return formatRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatBillingModeLabel(t: ReturnType<typeof useTranslations>, billingMode: RunDetail['llm_provider']): string {
@@ -188,6 +184,7 @@ export function AgentRunDetail({
 }) {
   const t = useTranslations('agentRuns');
   const tc = useTranslations('common');
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { toasts, addToast, dismissToast } = useToast();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -315,7 +312,7 @@ export function AgentRunDetail({
                 {t(`status_${run.status}`)}
               </Badge>
               <span className="text-xs text-muted-foreground">
-                {t('startedAt')}: {toLocaleStr(run.started_at, locale)}
+                {t('startedAt')}: {toLocaleStr(run.started_at, locale, displayTimezone)}
               </span>
               {run.status === 'failed' && failureDisposition && (
                 <Badge variant={failureDisposition === 'retry_scheduled' ? 'info' : 'outline'}>
@@ -324,7 +321,7 @@ export function AgentRunDetail({
               )}
               {run.finished_at && (
                 <span className="text-xs text-muted-foreground">
-                  {t('finishedAt')}: {toLocaleStr(run.finished_at, locale)}
+                  {t('finishedAt')}: {toLocaleStr(run.finished_at, locale, displayTimezone)}
                 </span>
               )}
               {run.model && (
@@ -368,8 +365,11 @@ export function AgentRunDetail({
                   {errorDisplay.code && (
                     <p className="mt-1 text-xs opacity-75">{t('errorCodeLabel')}: {errorDisplay.code}</p>
                   )}
+                  {/* story #3493 — next_retry_at은 미래 "약속"(재시도 예정 시각). record용
+                      formatRelativeTime을 쓰면 diffMs가 음수라 0으로 clamp돼 "지금"으로
+                      오표시되므로 §11-2 정본(formatScheduledAt)으로 절대 표기. */}
                   {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
-                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {toLocaleStr(run.next_retry_at, locale)}</p>
+                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {formatScheduledAt(run.next_retry_at, displayTimezone).display}</p>
                   )}
                 </AlertDescription>
               </Alert>
@@ -543,7 +543,7 @@ export function AgentRunDetail({
                           </Badge>
                           <span className="text-sm font-medium text-foreground">{toolName}</span>
                           {toolSource ? <Badge variant="chip">{t(`toolAuditSource_${toolSource}`)}</Badge> : null}
-                          <span className="text-xs text-muted-foreground">{toLocaleStr(entry.created_at, locale)}</span>
+                          <span className="text-xs text-muted-foreground">{toLocaleStr(entry.created_at, locale, displayTimezone)}</span>
                         </div>
                         <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
                           <div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { EntityChip } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * story c7abdf42 — #3337(서버 반복 스케줄러·tick)이 놓은 코어를 사람이 보고/재개하고/즉시
@@ -51,8 +53,15 @@ function LastStoryValue({ token, t }: { token: string | null; t: T }) {
   return <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={parsed.label} href={parsed.href} />;
 }
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString();
+// story #3493 — next_run_at은 "약속"(다음 실행 예정, 아직 안 온 미래)이라
+// §11-2 정본(formatScheduledAt)으로, last_run_at은 "기록"(이미 실행됐다)이라
+// 3436 묶음 8 정본(formatRelativeTime)으로 — 같은 함수로 뭉뚱그리지 않는다.
+function formatNextRunAt(iso: string, displayTimezone: string): string {
+  return formatScheduledAt(iso, displayTimezone).display;
+}
+
+function formatLastRunAt(iso: string, locale: string, displayTimezone: string): string {
+  return formatRelativeTime(iso, locale, displayTimezone);
 }
 
 function ScheduleRow({
@@ -65,6 +74,8 @@ function ScheduleRow({
 }) {
   const [busy, setBusy] = useState<Action | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const successKeyFor: Record<Action, string> = {
     'run-now': 'repeatSchedulesRunNowSuccess',
@@ -135,8 +146,8 @@ function ScheduleRow({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>{t('repeatSchedulesNextRunLabel')}: {formatDateTime(row.next_run_at)}</span>
-        <span>{t('repeatSchedulesLastRunLabel')}: {row.last_run_at ? formatDateTime(row.last_run_at) : t('repeatSchedulesNone')}</span>
+        <span>{t('repeatSchedulesNextRunLabel')}: {formatNextRunAt(row.next_run_at, displayTimezone)}</span>
+        <span>{t('repeatSchedulesLastRunLabel')}: {row.last_run_at ? formatLastRunAt(row.last_run_at, locale, displayTimezone) : t('repeatSchedulesNone')}</span>
         <span className="inline-flex items-center gap-1">
           {t('repeatSchedulesLastStoryLabel')}: <LastStoryValue token={row.last_story_reference_token} t={t} />
         </span>

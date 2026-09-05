@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
 import { DocToc } from '@/components/docs/doc-toc';
 import { DocMiniToc } from '@/components/docs/doc-mini-toc';
@@ -16,6 +16,8 @@ import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface DocDetail {
   id: string;
@@ -48,6 +50,8 @@ export default function DocViewPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const t = useTranslations('docs');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { wsSlug, projSlug, projectId, tree } = useDocsLayout();
 
   const [doc, setDoc] = useState<DocState>(null);
@@ -146,7 +150,7 @@ export default function DocViewPage() {
             <h1 className="mt-2 font-display font-editorial-heading text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
               {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
-              <span>{doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}</span>
+              <span>{doc.updated_at ? formatRelativeTime(doc.updated_at, locale, displayTimezone) : ''}</span>
               <span className="text-border">|</span>
               <span>{t('readMinutes', { minutes: readMinutes })}</span>
               {doc.revisions?.count ? (<><span className="text-border">|</span><span>v{doc.revisions.count}</span></>) : null}

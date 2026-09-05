@@ -2,13 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { BookOpen, LayoutGrid, List as ListIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDocsLayout, type Doc } from './docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
 import { DOC_STATUS_TONE, toDocStatusFilter, docStatusLabelKey, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * story #2955 §2/§6(doc docs-index-reader-redesign-handoff) — 셸 A "지식 인덱스". 미선택
@@ -53,6 +55,8 @@ function StatusChip({ status }: { status: string | undefined }) {
 
 export function DocsIndex() {
   const t = useTranslations('docs');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   const { tree, handleNewDoc, wsSlug, projSlug } = useDocsLayout();
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null); // null = 전체
@@ -120,7 +124,9 @@ export function DocsIndex() {
     );
   }
 
-  const formatDate = (s: string | undefined) => (s ? new Date(s).toLocaleDateString() : '—');
+  // story #3493 — doc.updated_at은 "기록"(마지막으로 편집된 시점) — 3436 묶음 8
+  // 정본(formatRelativeTime)으로 통일.
+  const formatDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '—');
   const [lead, ...rest] = filtered;
 
   return (
