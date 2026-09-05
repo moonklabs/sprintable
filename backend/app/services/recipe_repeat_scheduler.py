@@ -160,8 +160,15 @@ async def _build_next_collect_payload(schedule: RecipeRepeatSchedule, *, new_wor
 
 async def _create_next_story(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, schedule: RecipeRepeatSchedule, definition_name: str) -> uuid.UUID:
     """story #3337 AC — 매 회차 새 Story 자동 생성(기본, 정의별 override는 후속). assignee는
-    직전 회차 story에서 승계(story #3340 도달 원칙과 정합 — 새 Story도 미배정으로 안 태어남)."""
+    직전 회차 story에서 승계(story #3340 도달 원칙과 정합 — 새 Story도 미배정으로 안 태어남).
+
+    story #3505(위생·BE, 디디 3502 그라운딩 부수 발견) — `StoryRepository.create()`를
+    거치지 않는 직접 ORM 구성 경로라 `allocate_story_number()`를 여기서 명시 호출해야
+    story_number NOT NULL을 채운다(app/routers/oss.py의 데모 시드 경로와 동형 처방 —
+    Story()를 직접 만드는 곳마다 각자 호출, 새 코드 발명 0). 같은 트랜잭션(같은 db,
+    중간 commit 없음)에서 호출해야 안전(advisory lock이 caller 커밋까지 유효)."""
     from app.models.pm import Story
+    from app.repositories.story import allocate_story_number
 
     assignee_id = None
     if schedule.last_story_id is not None:
@@ -170,10 +177,12 @@ async def _create_next_story(db: AsyncSession, *, org_id: uuid.UUID, project_id:
         )).scalar_one_or_none()
         assignee_id = prev
 
+    story_number = await allocate_story_number(db, project_id)
     now = datetime.now(timezone.utc)
     title = f"{definition_name} — {now.strftime('%Y-%m-%d')}"
     story = Story(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title, assignee_id=assignee_id,
+        story_number=story_number,
     )
     db.add(story)
     await db.flush()
