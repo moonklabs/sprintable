@@ -296,6 +296,28 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
     expect(titleInput.value).toBe(`[${koMessages.insightsBoard.followUpKindEdit}] ${ROW_A.title}`);
   });
 
+  it('PO REQUEST(2026-09-05, PR#3853 재리뷰) — 사람이 직접 고친 제목은 유형을 바꿔도 소리 없이 안 지워진다', async () => {
+    stubFetch({});
+    await mount();
+    const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+
+    const titleInput = document.getElementById('follow-up-title') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(titleInput, '내가 직접 쓴 제목');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(titleInput.value).toBe('내가 직접 쓴 제목');
+
+    const editBtn = document.querySelector('[data-testid="follow-up-kind-edit"]') as HTMLButtonElement;
+    await act(async () => { editBtn.click(); });
+    // 유형은 바뀌었지만(버튼 aria-pressed로 확認) 손으로 쓴 제목은 그대로다.
+    expect(editBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(titleInput.value).toBe('내가 직접 쓴 제목');
+  });
+
   it('⭐성공 경로 — 만들면 story_id로 /board?story= 링크가 뜬다(getEntityHref 재사용)', async () => {
     stubFetch({ followUp: () => ({ status: 201, body: { story_id: 'story-99' } }) });
     await mount();

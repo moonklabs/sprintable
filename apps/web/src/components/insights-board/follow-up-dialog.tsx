@@ -128,7 +128,15 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
                   <button
                     key={option}
                     type="button"
-                    onClick={() => { setKind(option); setTitle(prefillTitle(option)); }}
+                    onClick={() => {
+                      // PO REQUEST(2026-09-05, PR#3853 재리뷰) — 사람이 직접 고친 제목을
+                      // 유형 전환 한 번에 소리 없이 지우지 않는다(§21-5·§19-8·§20-3과 같은
+                      // 규율: "손 댄 값은 화면이 조용히 덮어쓰지 않는다"). 지금 값이 «직전
+                      // 유형의 프리필 그대로»일 때만(=손 안 댄 기본값) 새 유형의 프리필로
+                      // 갈아끼운다 — 이미 고쳤으면 그대로 둔다.
+                      setTitle((current) => (current === prefillTitle(kind) ? prefillTitle(option) : current));
+                      setKind(option);
+                    }}
                     aria-pressed={kind === option}
                     className={`rounded-md border px-3 py-1.5 text-sm ${
                       kind === option
