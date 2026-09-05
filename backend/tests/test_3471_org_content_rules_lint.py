@@ -200,6 +200,150 @@ async def test_owner_put_content_rules_reflected_in_get_and_version_plus_one():
         await engine.dispose()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# story #3501(doc a0da40c9 §20, 페드루 PO REQUIRED — PR#3856 리뷰) — 낙관적 잠금 CAS
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.anyio
+async def test_put_missing_expected_version_returns_422():
+    """AC1 — expected_version 누락은 pydantic이 자동 422(별도 처리 없이 그 자체가 답)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": ["x"]}},
+            )
+        assert r.status_code == 422, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_put_version_mismatch_returns_409_with_current_version_and_updated_by():
+    """AC1 — expected_version 불일치 409, current_version·updated_by(이름 해소) 동봉."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r_put1 = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": ["첫저장"]}, "expected_version": 0},
+            )
+            assert r_put1.status_code == 200, r_put1.text
+            assert r_put1.json()["version"] == 1
+
+            # 이미 version=1인데 expected_version=0(구식)으로 다시 저장 시도 — 409.
+            r_put2 = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": ["충돌시도"]}, "expected_version": 0},
+            )
+        assert r_put2.status_code == 409, r_put2.text
+        error = r_put2.json()["error"]
+        assert error["code"] == "CONTENT_RULES_VERSION_CONFLICT"
+        assert error["current_version"] == 1
+        # updated_by_member_id 컬럼이 이미 있어(첫 PUT이 owner로 채웠다) 이름을 해소해
+        # 싣는다 — §20-2 "서버가 «누가»를 주면 그때 이름을 쓴다".
+        assert error["updated_by"] is not None
+        assert error["updated_by"]["name"] is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_put_matching_version_via_cas_update_path_succeeds():
+    """CAS UPDATE 경로(row가 이미 있음, expected_version>0) 자체를 직접 때린다 —
+    INSERT 경로(expected_version=0)와 별개 분기라 따로 확認할 값어치가 있다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r_put1 = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": ["v1"]}, "expected_version": 0},
+            )
+            assert r_put1.json()["version"] == 1
+
+            r_put2 = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"banned_terms": ["v2"]}, "expected_version": 1},
+            )
+        assert r_put2.status_code == 200, r_put2.text
+        assert r_put2.json()["version"] == 2
+        assert r_put2.json()["rules"]["banned_terms"] == ["v2"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_put_service_layer_cas_two_calls_same_expected_version_only_one_succeeds():
+    """페드루 PO REQUIRED(2026-09-05, PR#3856 리뷰) 핵심 — "읽기→비교→쓰기" 3단계가
+    원자가 아니면 같은 version을 든 두 호출이 «둘 다» 비교를 통과해 last-write-wins가
+    동시 경로에 남는다. 서비스 함수를 같은 expected_version으로 두 번 연달아 불러
+    (순서만 정해지면 참이 되는 성질 — 진짜 스레드 동시성이 없어도 CAS의 정확성은
+    "이미 버전이 옮겨간 뒤의 두 번째 쓰기가 막히는가"로 검증된다) 하나만 성공하고
+    나머지는 ContentRulesVersionConflictError를 받는지 직접 확認한다.
+
+    ⚠️뮤테이션 확認 완료(2026-09-05, 로컬 homebrew postgresql@16 — docker 데몬은 여전히
+    못 띄웠으나 이 realdb 스위트 자체는 실제로 돌렸다) — `put_org_content_rules`의 CAS
+    UPDATE에서 `OrgContentRule.version == expected_version` 절을 지우면(org_id만 남기면)
+    이 테스트가 `DID NOT RAISE`로 RED로 뒤집히는 것을 직접 확認하고 원복했다."""
+    from app.services.content_rules import ContentRulesVersionConflictError, put_org_content_rules
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+
+        async with Session() as s1, Session() as s2:
+            row1 = await put_org_content_rules(
+                s1, org_id=org_id, rules={"banned_terms": ["첫탭"]}, updated_by_member_id=owner_id, expected_version=0,
+            )
+            assert row1.version == 1
+
+            # 두 세션 모두 "지금 서버는 version=1"이라고 믿는 상태(같은 expected_version)
+            # 에서 각자 저장을 시도한다 — 세션1이 먼저 커밋해 실제로 version=2가 된다.
+            row2 = await put_org_content_rules(
+                s1, org_id=org_id, rules={"banned_terms": ["세션1_승리"]}, updated_by_member_id=owner_id, expected_version=1,
+            )
+            assert row2.version == 2
+
+            # 세션2는 아직 자신이 "version=1"이라고 믿은 채(구식) 같은 expected_version=1로
+            # 시도 — CAS WHERE가 실제 저장된 version=2와 안 맞아 rowcount=0 → 409 동형 예외.
+            with pytest.raises(ContentRulesVersionConflictError) as exc_info:
+                await put_org_content_rules(
+                    s2, org_id=org_id, rules={"banned_terms": ["세션2_패배"]}, updated_by_member_id=owner_id, expected_version=1,
+                )
+            assert exc_info.value.current_version == 2
+    finally:
+        # 서비스 함수를 직접 부르는 테스트라 FastAPI app 자체가 없다(app.dependency_overrides
+        # 정리는 HTTP 왕복 테스트 전용 — 이 테스트엔 해당 없음).
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_put_string_banned_terms_returns_422_not_char_by_char():
     """페드루 PO 리뷰 보정(2026-09-05, PR#3825) — banned_terms에 문자열을 그대로

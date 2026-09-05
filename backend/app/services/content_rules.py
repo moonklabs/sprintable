@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.org_content_rule import OrgContentRule
@@ -60,29 +61,49 @@ async def put_org_content_rules(
     이 값+`updated_by_member_id`로 충분 — story #3397 "파생 가능한 값은 별도 저장 안
     한다" 원칙과 동형).
 
-    story #3501 — `expected_version`이 현재 값과 다르면 저장 0(last-write-wins 차단).
-    row가 아직 없는 조직은 GET이 합성으로 돌려주는 `version=0`이 기준이라
-    `expected_version`도 0이어야 한다(그 자체가 "첫 저장" 신호)."""
-    existing = await get_org_content_rules(db, org_id=org_id)
-    if existing is None:
-        if expected_version != 0:
-            raise ContentRulesVersionConflictError(current_version=0, updated_by_member_id=None)
+    story #3501(페드루 PO REQUIRED, PR#3856 리뷰) — 첫 처방은 「읽기→비교→쓰기」 3단계가
+    원자가 아니었다: 두 탭이 같은 version으로 «동시에» 저장하면 둘 다 비교를 통과해
+    last-write-wins가 동시 경로에 그대로 남는다. CAS(compare-and-swap)로 교체한다 —
+    `expected_version`이 있는 조직은 `UPDATE ... WHERE org_id=:org AND version=:expected`
+    한 문장으로 비교+갱신을 한 SQL 왕복에 묶는다(`rowcount==0`이면 그 사이 다른 요청이
+    이미 갱신했다는 뜻 — au_metering.py::record_usage와 동형 rowcount 관례). row가 아직
+    없는 조직(expected_version=0)은 INSERT 자체가 CAS다 — 동시에 두 요청이 처음 만들면
+    `org_id` UNIQUE 제약이 하나만 통과시킨다(assets.py::create_folder의
+    IntegrityError catch와 동형 TOCTOU 방어)."""
+    if expected_version == 0:
         row = OrgContentRule(
             id=uuid.uuid4(), org_id=org_id, rules=rules, version=1,
             updated_by_member_id=updated_by_member_id,
         )
         db.add(row)
-    else:
-        if existing.version != expected_version:
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            existing = await get_org_content_rules(db, org_id=org_id)
             raise ContentRulesVersionConflictError(
-                current_version=existing.version, updated_by_member_id=existing.updated_by_member_id,
-            )
-        existing.rules = rules
-        existing.version += 1
-        existing.updated_by_member_id = updated_by_member_id
-        row = existing
+                current_version=existing.version if existing else 0,
+                updated_by_member_id=existing.updated_by_member_id if existing else None,
+            ) from None
+        await db.commit()
+        await db.refresh(row)
+        return row
+
+    result = await db.execute(
+        update(OrgContentRule)
+        .where(OrgContentRule.org_id == org_id, OrgContentRule.version == expected_version)
+        .values(rules=rules, version=OrgContentRule.version + 1, updated_by_member_id=updated_by_member_id)
+    )
+    if result.rowcount == 0:
+        await db.rollback()
+        existing = await get_org_content_rules(db, org_id=org_id)
+        raise ContentRulesVersionConflictError(
+            current_version=existing.version if existing else 0,
+            updated_by_member_id=existing.updated_by_member_id if existing else None,
+        )
     await db.commit()
-    await db.refresh(row)
+    row = await get_org_content_rules(db, org_id=org_id)
+    assert row is not None, "CAS UPDATE가 방금 1행을 갱신했는데 재조회에서 사라질 수 없다"
     return row
 
 

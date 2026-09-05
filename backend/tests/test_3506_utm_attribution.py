@@ -64,7 +64,7 @@ async def _put_utm_rules(session, *, org_id, **fields):
     from app.services.content_rules import put_org_content_rules
 
     return await put_org_content_rules(
-        session, org_id=org_id, rules={"utm_rules": fields}, updated_by_member_id=uuid.uuid4(),
+        session, org_id=org_id, rules={"utm_rules": fields}, updated_by_member_id=uuid.uuid4(), expected_version=0,
     )
 
 

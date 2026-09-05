@@ -66,7 +66,7 @@ async def _put_generation_budget(session, *, org_id, limit_minor, currency="KRW"
     return await put_org_content_rules(
         session, org_id=org_id,
         rules={"generation_budget": {"limit_minor": limit_minor, "currency": currency, "period": period}},
-        updated_by_member_id=uuid.uuid4(),
+        updated_by_member_id=uuid.uuid4(), expected_version=0,
     )
 
 
