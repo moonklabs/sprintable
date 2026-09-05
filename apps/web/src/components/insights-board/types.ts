@@ -39,11 +39,14 @@ export interface InsightsBoardRow {
   d7: InsightSnapshotBucketView | null;
   // story #3517(BE #3865 REQUIRED 2, 유나 §22-11 재정정, PO 確定 2026-09-05) —
   // null=site_post(댓글 축 자체가 없다) · 정수=channel_publication의 active 댓글
-  // 수. ⚠️조각①은 이 필드를 화면에 안 그린다(보드 행엔 아직 "미수집/0건/n건"을
-  // 가를 신호(last_collected_at 등)가 없어, InsightsBoardMetricCell처럼 네 갈래를
-  // 하나도 안 숨기는 관례를 못 지킨다 — 0의 뜻이 안 갈린다). 그 신호+draft_id는
-  // BE/FE 조각②에서 함께 실린다. 지금은 BFF 응답 허용목록에만 남긴다(타입만 유지).
+  // 수(0 포함 — comments_last_collected_at이 값 있으면 "수집됐는데 0건"이 확定,
+  // §22-7 "0이면 0으로 적는다" 원칙이 이제 선다).
   comments_count: number | null;
+  // story #3517(BE #3867 조각② REQUIRED, PO 確定 2026-09-05) — §22-11이 막았던
+  // "0의 뜻이 안 갈린다" 문제를 푸는 신호 둘. site_post는 항상 null/false.
+  channel_post_draft_id: string | null;
+  comments_last_collected_at: string | null;
+  comments_supported: boolean;
 }
 
 export interface InsightsBoardResponse {

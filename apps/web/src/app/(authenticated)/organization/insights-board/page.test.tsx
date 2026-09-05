@@ -370,3 +370,48 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
     expect(document.querySelector('[data-testid="follow-up-error"]')?.textContent).toBe(koMessages.insightsBoard.errorFollowUpInvalidKind);
   });
 });
+
+// story #3517(BE #3867 조각② REQUIRED, 유나 §13·§22-11 최종, PO 確定 2026-09-05) —
+// 댓글 칸 네 갈래. comments_supported·comments_last_collected_at 신호로 "미수집"·
+// "수집됐는데 0건"·"채널 미제공"·"해당 없음"이 갈린다(InsightsBoardMetricCell과
+// 같은 "네 갈래를 하나도 안 숨긴다" 관례).
+describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
+  it('① site_post 행 — "해당 없음"(댓글 축 자체가 없다)', async () => {
+    stubFetch({ page1: [{ ...ROW_B, comments_supported: false, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')?.textContent).toBe('해당 없음');
+  });
+
+  it('② channel_publication인데 채널이 댓글 수집 미지원 — "채널 미제공"(①과 다른 문구)', async () => {
+    stubFetch({ page1: [{ ...ROW_A, comments_supported: false, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')?.textContent).toBe('채널 미제공');
+  });
+
+  it('③ comments_supported=true인데 last_collected_at=null — "아직 수집 전"(0건과 다른 문구)', async () => {
+    stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-comments-uncollected"]')?.textContent).toBe('아직 수집 전');
+  });
+
+  it('④-a 수집됨·0건 — 이제 "댓글 0"으로 적는다(미수집과 신호로 갈렸으므로 §22-7 원칙이 선다)', async () => {
+    stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 0, channel_post_draft_id: null }] });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-comments-text"]')?.textContent).toBe('댓글 0');
+  });
+
+  it('④-b 수집됨·n건·draft_id 있음 — /content/channel-posts/{draft_id} 링크', async () => {
+    stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 5, channel_post_draft_id: 'draft-42' }] });
+    await mount();
+    const link = container.querySelector('[data-testid="insights-board-comments-link"]') as HTMLAnchorElement;
+    expect(link?.textContent).toBe('댓글 5');
+    expect(link?.getAttribute('href')).toBe('/content/channel-posts/draft-42');
+  });
+
+  it('④-c 수집됨·n건·draft_id 없음(BE 예외 케이스) — 링크 없이 수만', async () => {
+    stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 5, channel_post_draft_id: null }] });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-comments-link"]')).toBeNull();
+    expect(container.querySelector('[data-testid="insights-board-comments-text"]')?.textContent).toBe('댓글 5');
+  });
+});
