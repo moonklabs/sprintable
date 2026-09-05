@@ -464,22 +464,27 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setActionError(null);
 
     try {
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — 셋 다 부수(res.ok?채움:그대로 두는
+      // degrade, loadError 없음)인데 catch가 어디에도 없었다 — 셋 중 하나가 네트워크단
+      // reject(HTTP status가 아니라 fetch 자체 실패)면 Promise.all 전체가 던져 나머지도
+      // 조용히 못 채워졌다(setLoading은 finally라 꺼지긴 하나, 원인 표시가 0). leg별로
+      // 격리해 하나가 죽어도 나머지 둘은 그대로 채워진다(doc-status-rail.tsx 정본 패턴).
       const [burndownRes, storiesRes, backlogRes] = await Promise.all([
-        fetchWithAuth(`/api/sprints/${sprint.id}/burndown`),
-        fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`),
-        fetchWithAuth(`/api/stories/backlog?project_id=${projectId}&limit=20`),
+        fetchWithAuth(`/api/sprints/${sprint.id}/burndown`).catch(() => null),
+        fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`).catch(() => null),
+        fetchWithAuth(`/api/stories/backlog?project_id=${projectId}&limit=20`).catch(() => null),
       ]);
-      if (burndownRes.ok) {
+      if (burndownRes?.ok) {
         const json = await burndownRes.json();
         setBurndown(json.data);
       }
-      if (storiesRes.ok) {
+      if (storiesRes?.ok) {
         const json = await storiesRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setSprintStories(excludeHidden(json.data ?? []));
         setSprintStoriesHasMore(json.meta?.hasMore ?? false);
         setSprintStoriesNextCursor(json.meta?.nextCursor ?? null);
       }
-      if (backlogRes.ok) {
+      if (backlogRes?.ok) {
         const json = await backlogRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setBacklogStories(excludeHidden(json.data ?? []));
         setBacklogHasMore(json.meta?.hasMore ?? false);

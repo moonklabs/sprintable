@@ -757,15 +757,21 @@ export default function ChannelPostEditPage() {
       // gate_status/reapproval_required가 낡아 화면은 "승인됨·발행 가능"으로 남는데
       // 서버는 재승인을 요구한다(눌러야 서버가 거부) — 단건 GET(PR#3788)으로 서버 값을
       // 통째로 교체한다. text/linkUrl은 별도 state라 입력 중이던 내용은 안 건드린다.
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — 이 재조회 둘은 이미지 업로드 자체가
+      // 끝난 뒤의 부수 새로고침이다(§17 "화면이 판정 X"). 격리가 없어 재조회 쪽이
+      // 네트워크단 reject하면 바깥 catch가 "이미지 업로드 실패"로 오문구를 냈다 — 이미지는
+      // 이미 confirm까지 성공했는데(image 변수가 이미 참조 가능한 시점) 사용자는 업로드
+      // 자체가 실패한 걸로 오인한다. leg별로 격리해 재조회 실패가 업로드 성공 신호를
+      // 삼키지 않게 한다.
       const [draftRes, versionsRes] = await Promise.all([
-        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`),
-        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`),
+        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`).catch(() => null),
+        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`).catch(() => null),
       ]);
-      if (draftRes.ok) {
+      if (draftRes?.ok) {
         const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
         if (draftJson?.data) setDraft(draftJson.data);
       }
-      if (versionsRes.ok) {
+      if (versionsRes?.ok) {
         const versionsJson = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
         if (versionsJson?.data) setVersions(versionsJson.data);
       }

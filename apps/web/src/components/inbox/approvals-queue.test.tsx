@@ -153,6 +153,25 @@ describe('ApprovalsQueue', () => {
     expect(urls).toContain('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true');
   });
 
+  // story #3519(§16-7 2부, PO 確定 2026-09-05) — fetchGates 내부에 catch가 어디에도
+  // 없어(then뿐), 하나(held)가 네트워크단 reject하면 fetchGates() 자체가 throw했고
+  // 호출부(useEffect)도 안 잡아 setLoading(false)가 영영 안 불려 무한 스켈레톤(에러
+  // 표시조차 0)이 됐다 — 최악 사례. 이제 leg별 격리+finally 이중 방어로 pending(성공)은
+  // 그대로 뜨고 loading도 반드시 풀린다.
+  it('held가 네트워크 reject해도 pending(성공한 leg)은 뜨고 무한 스켈레톤에 안 걸린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
+      if (url.includes('status=pending')) {
+        return { ok: true, json: async () => [gate({ id: 'g1', gate_type: 'merge_gate', work_item_summary: { title: '살아남은 항목', slug: null } })] };
+      }
+      if (url.includes('status=held')) throw new Error('network down');
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    expect(container.textContent).not.toContain('게이트 조회 중...');
+    expect(container.textContent).toContain('살아남은 항목');
+  });
+
   it('4유형(게이트·문서결재·머지게이트·보류) 모두 렌더하고 gate_type 배지를 표시한다', async () => {
     mockFetches(
       [

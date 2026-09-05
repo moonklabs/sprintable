@@ -44,9 +44,14 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 이 큐 안에서 바로 승인/반려하는 인라인 액션으로 둔다 — Gate 항목은 기존대로 클릭 시
 // `/gates/{id}` 상세로 이동.
 async function fetchGates(): Promise<GateInboxItem[]> {
+  // story #3519(§16-7 2부, PO 確定 2026-09-05) — 두 leg 다 catch가 어디에도 없어(then뿐),
+  // 하나가 네트워크단 reject하면 이 함수 자체가 던졌다. 호출부(useEffect)가 그 reject를
+  // 안 잡아 setLoading(false)가 영영 안 불려 무한 스켈레톤(에러 표시조차 0)이 됐다 — 최악
+  // 사례. leg별로 격리해 하나가 죽어도 나머지는 그대로 보인다(catch(() => [])로 degrade,
+  // 기존 !res.ok 분기와 같은 취급).
   const [pending, held] = await Promise.all([
-    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
-    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
+    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])).catch(() => []),
   ]);
   return [...(pending as GateInboxItem[]), ...(held as GateInboxItem[])];
 }
@@ -199,12 +204,13 @@ export function ApprovalsQueue() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchGates().then((rows) => {
-      if (!cancelled) {
-        setItems(rows);
-        setLoading(false);
-      }
-    });
+    // story #3519(§16-7 2부, PO 確定 2026-09-05) — "loading은 finally에서 해소"
+    // 하우스룰(feedback-loading-finally). fetchGates 내부를 격리해도 그 함수가
+    // 원리적으로 던질 수 있는 이상 이 호출부도 방어선을 하나 더 둔다 — setLoading(false)
+    // 를 finally로 옮겨 무한 스켈레톤 재발을 원천 차단.
+    void fetchGates()
+      .then((rows) => { if (!cancelled) setItems(rows); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
