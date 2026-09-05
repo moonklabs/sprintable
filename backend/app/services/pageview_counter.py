@@ -66,7 +66,9 @@ async def get_beacon_status(db: AsyncSession, *, org_id: uuid.UUID, now: datetim
     key_issued=False면 last_seen_at/count_7d는 항상 None(집계 자체가 무의미 —
     지어내지 않는다). last_seen_at은 org_pageview_daily의 가장 최근 updated_at
     (그 (org,path,day) 행이 마지막으로 갱신된 시각, 신규 컬럼 0 — onupdate=now()가
-    이미 매 hit마다 갱신한다). count_7d는 최근 7일(day>=오늘-7) SUM(count)."""
+    이미 매 hit마다 갱신한다). count_7d는 「최근 7일」=오늘을 포함한 7일(오늘·
+    어제·…·6일 전) SUM(count) — 페드루 PO REQUIRED(2026-09-06, #3895 리뷰) —
+    `timedelta(days=7)`이면 오늘을 포함해 8일 창이 되는 off-by-one이었다."""
     existing = (await db.execute(
         select(OrgMeteringKey).where(
             OrgMeteringKey.org_id == org_id, OrgMeteringKey.revoked_at.is_(None),
@@ -80,7 +82,7 @@ async def get_beacon_status(db: AsyncSession, *, org_id: uuid.UUID, now: datetim
     )).scalar_one_or_none()
     count_7d = (await db.execute(
         select(func.coalesce(func.sum(OrgPageviewDaily.count), 0)).where(
-            OrgPageviewDaily.org_id == org_id, OrgPageviewDaily.day >= now.date() - timedelta(days=7),
+            OrgPageviewDaily.org_id == org_id, OrgPageviewDaily.day >= now.date() - timedelta(days=6),
         )
     )).scalar_one()
     return {"key_issued": True, "last_seen_at": last_seen_at, "count_7d": int(count_7d)}

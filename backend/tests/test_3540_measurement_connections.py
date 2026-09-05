@@ -239,6 +239,42 @@ async def test_beacon_count_7d_excludes_hits_older_than_7_days():
 
 
 @pytest.mark.anyio
+async def test_beacon_count_7d_boundary_is_today_inclusive_6_days_back():
+    """페드루 PO REQUIRED(2026-09-06, #3895 리뷰) — 「최근 7일」=오늘 포함 7일(오늘·
+    어제·…·6일 전). 정확히 6일 전 히트는 포함되고 7일 전 히트는 빠진다(되돌리면
+    timedelta(days=7)이 돼 8일 창이 되는 off-by-one, 7일 전 카운트가 섞여 RED)."""
+    from app.main import app
+    from app.models.org_pageview_daily import OrgPageviewDaily
+    from app.services.pageview_counter import get_or_create_active_key
+
+    engine, Session = await _session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            await get_or_create_active_key(s, org_id=org_id)
+            s.add(OrgPageviewDaily(
+                id=uuid.uuid4(), org_id=org_id, path="/exactly-6-days-ago",
+                day=(now - timedelta(days=6)).date(), count=3,
+            ))
+            s.add(OrgPageviewDaily(
+                id=uuid.uuid4(), org_id=org_id, path="/exactly-7-days-ago",
+                day=(now - timedelta(days=7)).date(), count=100,
+            ))
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/measurement-connections")
+        body = r.json()
+        beacon = next(item for item in body if item["key"] == "beacon")
+        assert beacon["count_7d"] == 3, "6일 전 히트가 빠졌거나 7일 전 히트가 섞였다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_utm_status_off_when_no_content_rules_row():
     from app.main import app
 
