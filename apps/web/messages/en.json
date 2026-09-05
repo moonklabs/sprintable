@@ -2105,6 +2105,8 @@
     "channelConnectFacebookNoPages": "No pages available to connect — this account manages no Facebook Page, or page list permission wasn't granted.",
     "channelConnectFacebookSelectGone": "This selection request can no longer be used — please connect again.",
     "channelConnectFacebookSelectRetryCta": "Retry",
+    "channelConnectFacebookSelectProviderUnavailable": "We couldn't connect right now — please try again in a moment.",
+    "channelConnectFacebookSelectInvalidPage": "That page can't be connected right now — choose a different page.",
     "channelConnectOwnerOnlyReason": "Only an owner can connect a {channel} account.",
     "channelThreads": "Threads",
     "channelLabelHostedSite": "Sprintable blog",

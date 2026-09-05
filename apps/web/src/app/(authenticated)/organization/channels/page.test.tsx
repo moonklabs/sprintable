@@ -1031,17 +1031,20 @@ describe('OrganizationChannelsPage — Facebook Page 연결(story #3549)', () =>
     expect(reauthLink?.getAttribute('href')).toBe('/api/oauth-channel/authorize?org=org-1&channel=facebook');
   });
 
-  it.each([
-    ['CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE', '선택한 페이지를 연결할 수 없습니다(서버 메시지 예시)'],
-    ['CHANNEL_OAUTH_PROVIDER_UNAVAILABLE', 'Meta 쪽 응답이 지연되고 있습니다(서버 메시지 예시)'],
-  ] as const)('⭐§13-8④ — select 실패 %s는 서버 문장 그대로+「다시 시도」(같은 선택을 다시 보낸다)', async (code, message) => {
+  // 페드루 PO REQUIRED 2(#3905 리뷰, 유나 §13-8④-b 채택, 2026-09-06) — 503과
+  // INVALID_PAGE는 원인이 다르니 서버 message를 더는 그대로 보여주지 않고 고정
+  // 두 문장으로 가른다. 503은 같은 페이지 재시도가 뜻이 있어 「다시 시도」 유지 —
+  // 이 화면엔 자동 재시도가 없어 §22-15의 "다시 시도" 금지 사유가 안 걸린다.
+  it('⭐§13-8④-b — select 실패 PROVIDER_UNAVAILABLE(503)은 고정 문장+「다시 시도」로 같은 페이지를 재전송한다', async () => {
     useSearchParamsMock.mockReturnValue(selectPendingQuery([{ page_id: 'p1', name: 'X' }]));
     let attempts = 0;
+    let lastBody: unknown = null;
     stubFetch({
       connections: [], availableChannels: FACEBOOK_AVAILABLE,
-      onFacebookSelect: () => {
+      onFacebookSelect: (body) => {
         attempts += 1;
-        return { status: code === 'CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE' ? 400 : 503, body: { error: { code, message } } };
+        lastBody = body;
+        return { status: 503, body: { error: { code: 'CHANNEL_OAUTH_PROVIDER_UNAVAILABLE', message: '서버 메시지(이제 안 씀)' } } };
       },
     });
     await mount('owner');
@@ -1050,13 +1053,44 @@ describe('OrganizationChannelsPage — Facebook Page 연결(story #3549)', () =>
     await act(async () => { (container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement).click(); });
     await flush();
     const errorBlock = container.querySelector('[data-testid="channel-connect-facebook-select-error"]')!;
-    expect(errorBlock.textContent).toContain(message);
+    expect(errorBlock.textContent).toContain(koMessages.channelConnect.channelConnectFacebookSelectProviderUnavailable);
     expect(errorBlock.querySelector('a')).toBeNull();
     const retryBtn = errorBlock.querySelector('button') as HTMLButtonElement;
     expect(retryBtn.textContent).toBe(koMessages.channelConnect.channelConnectFacebookSelectRetryCta);
     await act(async () => { retryBtn.click(); });
     await flush();
     expect(attempts).toBe(2);
+    expect(lastBody).toEqual({ pending_id: 'pending-1', page_id: 'p1' });
+  });
+
+  it('⭐§13-8④-b — select 실패 INVALID_PAGE는 고정 문장을 보이며 라디오 목록으로 돌아가고 선택이 해제된다(같은 실패로 가는 버튼 금지, 재시도 CTA 없음)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([
+      { page_id: 'p1', name: 'X' }, { page_id: 'p2', name: 'Y' },
+    ]));
+    stubFetch({
+      connections: [], availableChannels: FACEBOOK_AVAILABLE,
+      onFacebookSelect: () => ({ status: 400, body: { error: { code: 'CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE' } } }),
+    });
+    await mount('owner');
+    const radioP1 = container.querySelector('input[type="radio"][value="p1"]') as HTMLInputElement;
+    await act(async () => { radioP1.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    // 별도 에러 화면이 아니라 라디오 목록 그대로 — 재시도 버튼도 없다.
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select-invalid-page"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectFacebookSelectInvalidPage);
+    const radios = container.querySelectorAll('input[type="radio"]') as NodeListOf<HTMLInputElement>;
+    expect([...radios].every((r) => !r.checked)).toBe(true);
+    const submitBtn = container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    // 다른 페이지를 고르면 문구가 사라지고 다시 제출할 수 있다.
+    const radioP2 = container.querySelector('input[type="radio"][value="p2"]') as HTMLInputElement;
+    await act(async () => { radioP2.click(); });
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select-invalid-page"]')).toBeNull();
+    expect(submitBtn.disabled).toBe(false);
   });
 
   // 페드루 PO REQUIRED 1(#3905 리뷰, 2026-09-06) — 실 Meta App Review 前엔
