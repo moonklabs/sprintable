@@ -76,6 +76,37 @@ describe('CommentsRefreshButton', () => {
     expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('사람만 다시 수집할 수 있습니다');
   });
 
+  // story #3517 조각②-b(BE #3876, 유나 16회차, PO 確定 2026-09-06) — 로드 시점에
+  // 이미 nextAllowedAt이 미래면 사람이 한 번도 안 눌렀어도 비활성+사유("{시각}까지")
+  // — 429 응답을 받고서야 아는 게 아니라 로드 시점에 미리 안다.
+  it('nextAllowedAt이 미래면(다른 세션이 누른 창) 클릭 없이도 비활성+"{시각}까지" 문구가 뜬다', async () => {
+    const future = new Date(Date.now() + 5 * 60_000).toISOString();
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>();
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={future} displayTimezone="Asia/Seoul" />);
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(onRefresh).not.toHaveBeenCalled();
+    const blocked = container.querySelector('[data-testid="comments-refresh-load-time-blocked"]');
+    expect(blocked?.textContent).toContain('까지 재수집할 수 없습니다.');
+  });
+
+  it('nextAllowedAt이 과거(이미 지난 창)면 버튼이 정상 활성', async () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: true });
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={past} displayTimezone="Asia/Seoul" />);
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).toBeNull();
+  });
+
+  it('nextAllowedAt=null(지금 바로 가능)이면 로드 시점 차단 문구 자체가 없다', async () => {
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: true });
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={null} displayTimezone="Asia/Seoul" />);
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')).toBeNull();
+  });
+
   it('제출 중엔 버튼이 비활성+"수집 중..." 라벨', async () => {
     let resolvePromise: (v: CommentsRefreshOutcome) => void = () => {};
     const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockReturnValue(new Promise((resolve) => { resolvePromise = resolve; }));

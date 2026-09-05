@@ -31,6 +31,7 @@ function baseComment(overrides: Partial<CommentItem>): CommentItem {
     capturedAt: '2026-09-05T10:30:00Z',
     deletedAt: null,
     replyStatus: 'none',
+    replyExternalUrl: null,
     ...overrides,
   };
 }
@@ -39,6 +40,7 @@ function loadedFace(comments: CommentItem[], overrides: Partial<Extract<Comments
   return {
     kind: 'loaded', capturedAt: '2026-09-05T10:00:00Z',
     comments, activeCount: comments.filter((c) => !c.deletedAt).length, deletedCount: comments.filter((c) => c.deletedAt).length,
+    nextAllowedAt: null,
     ...overrides,
   };
 }
@@ -47,6 +49,7 @@ function emptyFace(comments: CommentItem[], overrides: Partial<Extract<CommentsF
   return {
     kind: 'empty', capturedAt: '2026-09-05T10:00:00Z',
     comments, activeCount: comments.filter((c) => !c.deletedAt).length, deletedCount: comments.filter((c) => c.deletedAt).length,
+    nextAllowedAt: null,
     ...overrides,
   };
 }
@@ -69,7 +72,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   });
 
   it('empty([]) — "댓글이 없습니다"+수집시각+제목에 0건(uncollected/error와 다른 문구·표시)', async () => {
-    const face: CommentsFace = { kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0 };
+    const face: CommentsFace = { kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0, nextAllowedAt: null };
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
@@ -188,13 +191,16 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
     expect(expandedBody?.textContent).toContain('짧은 글');
   });
 
-  it('지워진 댓글엔 행 액션(작업으로 전환·답변)이 아예 안 그려진다(비활성이 아니라 부재)', async () => {
+  // story #3517 조각②-b(PO 確定 2026-09-06) — 작업전환·답변 "액션"은 여전히 부재지만
+  // 답변 상태 "칩"은 다른 축(이미 존재하는 답변의 생애주기)이라 지워진 댓글에도 그대로
+  // 뜬다(위 CommentsList 주석 — 발행된 답변은 대상이 지워져도 발행된 채로 남는다).
+  it('지워진 댓글엔 작업전환·답변 액션은 안 그려지지만(비활성이 아니라 부재) 답변 상태 칩은 그대로 뜬다', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })]);
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).toBeNull();
     expect(container.querySelector('[data-testid="comments-item-reply"]')).toBeNull();
-    expect(container.querySelector('[data-comment-reply-status-chip]')).toBeNull(); // 답변 상태 칩도(액션 축 전체가 무의미).
+    expect(container.querySelector('[data-comment-reply-status-chip]')).not.toBeNull();
   });
 
   it('deletedCount>0이면 헤더에 "지워진 댓글 {n}건" 안내가 뜬다(서버 전체 수)', async () => {
@@ -212,17 +218,35 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   });
 });
 
-// story #3517(BE #3867 조각②, PO 確定 2026-09-05) — 행 액션 재도입. 답변 상태 칩은
-// 여전히 렌더 안 함(그라운딩 확認 — 댓글 목록 GET에 reply 존재 여부가 없어 BE 벌크
-// 조회 별건 대기 중, 신호 없는 자리를 지어내지 않는다).
+// story #3517(BE #3867 조각②, PO 確定 2026-09-05) — 행 액션 재도입.
+// story #3517 조각②-b(BE #3876, PO 確定 2026-09-06) — 답변 상태 칩 착지.
 describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
-  it('지워지지 않은 댓글엔 작업전환·답변 버튼이 뜬다(답변 상태 칩은 아직 안 뜬다)', async () => {
+  it('지워지지 않은 댓글엔 작업전환·답변 버튼과 답변 상태 칩이 함께 뜬다', async () => {
     const face = loadedFace([baseComment({})]);
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} />)); });
     expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="comments-item-reply"]')).not.toBeNull();
-    expect(container.querySelector('[data-comment-reply-status-chip]')).toBeNull();
+    expect(container.querySelector('[data-comment-reply-status-chip]')?.getAttribute('data-comment-reply-status-chip')).toBe('none');
+  });
+
+  // story #3517 조각②-b — replyStatus='published'·replyExternalUrl 있으면 링크가
+  // 뜬다. 다른 상태(예: submitted)는 링크 자체가 없어야 한다(§17 "신호 없으면 안
+  // 그린다" — sent 전엔 external_reply_url 자체가 항상 null).
+  it('replyStatus="published"·replyExternalUrl 있으면 「채널에서 보기」 링크가 뜬다', async () => {
+    const face = loadedFace([baseComment({ replyStatus: 'published', replyExternalUrl: 'https://example.com/p/1' })]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} />)); });
+    const link = container.querySelector('[data-testid="comments-item-reply-external-link"]') as HTMLAnchorElement;
+    expect(link?.getAttribute('href')).toBe('https://example.com/p/1');
+    expect(link?.textContent).toBe('채널에서 보기');
+  });
+
+  it('replyStatus="submitted"(발행 전)는 replyExternalUrl이 없어야 하고 링크도 안 뜬다', async () => {
+    const face = loadedFace([baseComment({ replyStatus: 'submitted' })]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} />)); });
+    expect(container.querySelector('[data-testid="comments-item-reply-external-link"]')).toBeNull();
   });
 
   it('「작업으로 전환」 클릭 — 그 댓글 객체 그대로 콜백에 전달된다', async () => {
@@ -251,9 +275,16 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
 // story #3517(BE #3865 조각①, PO 確定 2026-09-05) — 원 응답(snake_case)→CommentsFace
 // 매핑. 세 얼굴 판정이 이 함수 하나로만 결정되게(페이지가 직접 if/else로 판정하지
 // 않는다) 단위테스트로 고정.
-describe('deriveCommentsFace(story #3517, BE #3865 조각① 응답 매핑)', () => {
+describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => {
   function rawResponse(overrides: Partial<RawCommentsResponse>): RawCommentsResponse {
     return { last_collected_at: '2026-09-05T10:00:00Z', comments: [], active_count: 0, deleted_count: 0, ...overrides };
+  }
+  function rawComment(overrides: Partial<RawCommentsResponse['comments'][number]>): RawCommentsResponse['comments'][number] {
+    return {
+      id: 'c1', external_comment_id: 'ext-1', author_display_name: null, text: 'x',
+      external_created_at: null, captured_at: 't', deleted_at: null, reply: null,
+      ...overrides,
+    };
   }
 
   it('last_collected_at=null → uncollected', () => {
@@ -262,34 +293,71 @@ describe('deriveCommentsFace(story #3517, BE #3865 조각① 응답 매핑)', ()
 
   it('active_count=0·deleted_count=0 → empty', () => {
     const face = deriveCommentsFace(rawResponse({}));
-    expect(face).toEqual({ kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0 });
+    expect(face).toEqual({ kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0, nextAllowedAt: null });
   });
 
   it('active_count>0 → loaded, 필드명이 camelCase로 정확히 옮겨진다', () => {
     const face = deriveCommentsFace(rawResponse({
       active_count: 1,
-      comments: [{
-        id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '본문',
-        external_created_at: '2026-09-05T09:00:00Z', captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
-      }],
+      comments: [rawComment({
+        author_display_name: '홍길동', text: '본문', external_created_at: '2026-09-05T09:00:00Z', captured_at: '2026-09-05T10:00:00Z',
+      })],
     }));
     expect(face).toEqual({
-      kind: 'loaded', capturedAt: '2026-09-05T10:00:00Z', activeCount: 1, deletedCount: 0,
+      kind: 'loaded', capturedAt: '2026-09-05T10:00:00Z', activeCount: 1, deletedCount: 0, nextAllowedAt: null,
       comments: [{
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
-        externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null, replyStatus: 'none',
+        externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
+        replyStatus: 'none', replyExternalUrl: null,
       }],
     });
   });
 
-  // 조각②(답변/작업전환) 미착지 — replyStatusFor를 안 주면 지어내지 않고 전부 'none'.
-  it('replyStatusFor 없으면 전부 replyStatus="none"(조각② 대기, 지어내지 않는다)', () => {
-    const face = deriveCommentsFace(rawResponse({
-      active_count: 1,
-      comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: null, text: 'x', external_created_at: null, captured_at: 't', deleted_at: null }],
-    }));
+  it('reply=null이면 replyStatus="none"(무응답, 지어내지 않는다)', () => {
+    const face = deriveCommentsFace(rawResponse({ active_count: 1, comments: [rawComment({})] }));
     expect(face.kind).toBe('loaded');
     expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyStatus).toBe('none');
+  });
+
+  // 회귀가드 — reply 키 자체가 응답에서 생략되면(undefined, 구버전 픽스처·아직 이
+  // 필드를 안 주는 소비처) 런타임에서 TS 타입("reply: {...} | null")을 강제 못 해
+  // undefined가 그대로 온다. deriveCommentReplyStatus가 `=== null`만 검사하던
+  // 버전은 이 자리에서 TypeError로 죽었다(page.test.tsx 6곳 실사고, 2026-09-06).
+  it('reply 키 자체가 생략되면(undefined) 죽지 않고 replyStatus="none"', () => {
+    const raw = rawResponse({
+      active_count: 1,
+      comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: null, text: 'x', external_created_at: null, captured_at: 't', deleted_at: null } as RawCommentsResponse['comments'][number]],
+    });
+    expect(() => deriveCommentsFace(raw)).not.toThrow();
+    const face = deriveCommentsFace(raw);
+    expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyStatus).toBe('none');
+  });
+
+  // story #3517 조각②-b(BE #3876, PO 確定 2026-09-06) — reply summary 진리표.
+  // 무응답/초안/상신(승인 대기)/발송 대기(승인 뒤 워커 대기)/발행/실패 6종 전부.
+  it.each([
+    [null, 'none'],
+    [{ id: 'r1', status: 'draft', external_reply_url: null, command_id: null }, 'draft'],
+    [{ id: 'r1', status: 'pending', external_reply_url: null, command_id: null }, 'submitted'],
+    [{ id: 'r1', status: 'pending', external_reply_url: null, command_id: 'cmd-1' }, 'approved'],
+    [{ id: 'r1', status: 'sent', external_reply_url: 'https://example.com/p/1', command_id: 'cmd-1' }, 'published'],
+    [{ id: 'r1', status: 'failed', external_reply_url: null, command_id: 'cmd-1' }, 'failed'],
+  ] as const)('reply=%o → replyStatus=%s', (reply, expected) => {
+    const face = deriveCommentsFace(rawResponse({ active_count: 1, comments: [rawComment({ reply })] }));
+    expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyStatus).toBe(expected);
+  });
+
+  it('reply.status="sent"·external_reply_url 있으면 replyExternalUrl로 옮겨진다(발행 상태에서만 뜻이 있다)', () => {
+    const face = deriveCommentsFace(rawResponse({
+      active_count: 1,
+      comments: [rawComment({ reply: { id: 'r1', status: 'sent', external_reply_url: 'https://example.com/p/1', command_id: 'cmd-1' } })],
+    }));
+    expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyExternalUrl).toBe('https://example.com/p/1');
+  });
+
+  it('comments_next_allowed_at이 있으면 nextAllowedAt으로 옮겨진다', () => {
+    const face = deriveCommentsFace(rawResponse({ comments_next_allowed_at: '2026-09-05T10:05:00Z' }));
+    expect((face as Extract<CommentsFace, { kind: 'empty' }>).nextAllowedAt).toBe('2026-09-05T10:05:00Z');
   });
 
   // story #3517(유나 §22-10①·⑨, PO 確定 2026-09-05 정정) — "댓글 없음" 판정은
@@ -299,25 +367,15 @@ describe('deriveCommentsFace(story #3517, BE #3865 조각① 응답 매핑)', ()
   it('active_count=0인데 deleted_count>0이면(전부 지워짐)도 empty이되, 지워진 행은 comments에 그대로 실린다(§22-9 "원래 자리")', () => {
     const face = deriveCommentsFace(rawResponse({
       active_count: 0, deleted_count: 1,
-      comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: null, text: 'x', external_created_at: null, captured_at: 't', deleted_at: '2026-09-05T11:00:00Z' }],
+      comments: [rawComment({ deleted_at: '2026-09-05T11:00:00Z' })],
     }));
     expect(face).toEqual({
-      kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 1,
+      kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 1, nextAllowedAt: null,
       comments: [{
         id: 'c1', authorDisplayName: null, bodyText: 'x',
-        externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z', replyStatus: 'none',
+        externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
+        replyStatus: 'none', replyExternalUrl: null,
       }],
     });
-  });
-
-  it('replyStatusFor를 주면 그 함수의 판정을 그대로 쓴다', () => {
-    const face = deriveCommentsFace(
-      rawResponse({
-        active_count: 1,
-        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: null, text: 'x', external_created_at: null, captured_at: 't', deleted_at: null }],
-      }),
-      () => 'approved',
-    );
-    expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyStatus).toBe('approved');
   });
 });

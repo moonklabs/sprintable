@@ -25,7 +25,9 @@ const STATUSES: { status: CommentReplyStatus; label: string; tint: boolean }[] =
   { status: 'none', label: '무응답', tint: false },
   { status: 'draft', label: '초안', tint: false },
   { status: 'submitted', label: '상신됨', tint: true },
-  { status: 'approved', label: '승인됨', tint: true },
+  // story #3517 조각②-b(BE #3876, PO 確定 2026-09-06) — command_id 신호로 pending
+  // 안이 갈리면서 "승인됨"보다 정확한 "발송 대기"(승인은 됐으나 워커가 아직 안 집음)로 정정.
+  { status: 'approved', label: '발송 대기', tint: true },
   { status: 'published', label: '발행됨', tint: true },
   { status: 'failed', label: '실패', tint: true },
 ];

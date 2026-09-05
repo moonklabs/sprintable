@@ -41,6 +41,7 @@ const COMMENT: CommentItem = {
   capturedAt: '2026-09-05T10:00:00Z',
   deletedAt: null,
   replyStatus: 'none',
+  replyExternalUrl: null,
 };
 
 describe('CommentConvertToTaskDialog', () => {
