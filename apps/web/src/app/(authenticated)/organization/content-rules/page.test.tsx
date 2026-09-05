@@ -133,10 +133,11 @@ describe('ContentRulesPage — 조회·표시(story #3472)', () => {
     expect(container.querySelector('[data-testid="content-rules-brand-logo-readonly"]')?.textContent).toBe('—');
   });
 
-  it('⭐admin도 편집 컨트롤이 없다(owner-or-admin 상수 재사용 금지 — 정확히 owner만)', async () => {
+  it('⭐admin도 편집 컨트롤을 본다(story #3490 — owner만이던 자격을 owner·admin으로)', async () => {
     stubFetch({});
     await mount('admin');
-    expect(container.querySelector('[data-testid="content-rules-save-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-save-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-banned-terms-editor"]')).not.toBeNull();
   });
 });
 
@@ -163,8 +164,8 @@ describe('ContentRulesPage — 저장(story #3472 AC1)', () => {
     expect(container.textContent).toContain(koMessages.contentRules.saveSuccess.replace('{version}', '4'));
   });
 
-  it('403 CONTENT_RULES_OWNER_ONLY — 인라인 문구', async () => {
-    stubFetch({ onPut: () => ({ status: 403, body: { code: 'CONTENT_RULES_OWNER_ONLY' } }) });
+  it('403 CONTENT_RULES_ADMIN_ONLY — 인라인 문구', async () => {
+    stubFetch({ onPut: () => ({ status: 403, body: { code: 'CONTENT_RULES_ADMIN_ONLY' } }) });
     await mount('owner');
     const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
     await act(async () => { saveBtn.click(); });

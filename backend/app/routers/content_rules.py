@@ -1,7 +1,10 @@
-"""story #3471(Phase1·마케팅운영, 페드루 PO 確定 2026-09-05) — 조직 콘텐츠 규칙 API.
-GET은 org 멤버(휴먼·에이전트 모두) — 에이전트가 톤·택소노미·채널 우선순위·브랜드 킷
-선언 슬롯을 읽어야 하는 축(PO 確定 "에이전트: 위반 경고·개선 제안"). PUT은 owner만
-(휴먼이 정책 작성·버전 관리·활성화, 블루프린트 §2(f) 明示)."""
+"""story #3471(Phase1·마케팅운영, 페드루 PO 確定 2026-09-05)·#3490(2026-09-05 정정) —
+조직 콘텐츠 규칙 API. GET은 org 멤버(휴먼·에이전트 모두) — 에이전트가 톤·택소노미·
+채널 우선순위·브랜드 킷 선언 슬롯을 읽어야 하는 축(PO 確定 "에이전트: 위반 경고·개선
+제안"). PUT은 휴먼 owner **또는 admin**(story #3490 — 원래 "owner만"이 채널 연결
+생성(CHANNEL_CONNECTION_HUMAN_ONLY, owner/admin)과 비대칭이었다: dev org 유일
+owner가 대표뿐이라 admin 운영자가 규칙을 못 넣어 운영 요청이 owner에게 쌓이는
+구조였다)."""
 from __future__ import annotations
 
 import uuid
@@ -19,14 +22,16 @@ from app.services.project_auth import assert_target_in_caller_org
 router = APIRouter(prefix="/api/v2/organizations", tags=["content-rules"])
 
 
-async def _require_owner(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story #3490 — channel_connections.py::_require_owner와 동형 권한 폭(owner|admin).
+    member·에이전트는 여전히 403(회귀 0)."""
     resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human" or resolved.role != "owner":
+    if resolved.type != "human" or resolved.role not in ("owner", "admin"):
         raise HTTPException(
             status_code=403,
             detail={
-                "code": "CONTENT_RULES_OWNER_ONLY",
-                "message": "콘텐츠 규칙 편집은 조직 owner만 가능합니다.",
+                "code": "CONTENT_RULES_ADMIN_ONLY",
+                "message": "콘텐츠 규칙 편집은 조직 owner·admin만 가능합니다.",
             },
         )
     return resolved
@@ -85,7 +90,7 @@ async def put_content_rules_endpoint(
 ) -> ContentRulesResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_owner(db, auth, org_id)
+    resolved = await _require_owner_or_admin(db, auth, org_id)
 
     # story #3471(페드루 PO 確定) — 이 리소스는 org_id 자신이 식별자라 target org가
     # 항상 caller org와 같다(구조적으로 spoof 불가) — meetings.py::cancel_meeting과

@@ -15,10 +15,12 @@ import { fetchWithAuth } from '@/lib/db/client';
  * `violations[].settings_path`가 정확히 이 문자열로 온다(다른 경로면 초안 화면의
  * 링크가 깨진다).
  *
- * PUT은 휴먼 owner만(BE `_require_owner` 엄격 — admin·에이전트 불가). 연결 화면의
- * owner-or-admin 상수(`isOwner = role==='admin'||'owner'`)와 다르다 — 재사용
- * 금지(PO 明示). 그 외 역할은 값을 보되 편집 컨트롤이 없다(secret 아니라 읽기는
- * 전원 허용).
+ * story #3490(PO 決定 2026-09-05, 3471 계약 정정) — PUT은 휴먼 owner **또는 admin**
+ * (BE `_require_owner_or_admin`). 원래 "owner만"이 채널 연결 생성(owner-or-admin)과
+ * 비대칭이었다 — dev org 유일 owner가 대표뿐이라 admin 운영자가 규칙을 못 넣던 갭.
+ * 연결 화면의 `canEditRules = role==='admin'||'owner'` 상수를 이제 그대로 재사용한다(옛
+ * "재사용 금지" 明示는 이 스토리로 정정됨). member·에이전트는 여전히 읽기만(secret
+ * 아니라 값은 전원 허용, 편집 컨트롤만 없음).
  */
 interface BrandKit {
   logo_url?: string;
@@ -152,8 +154,9 @@ function OrderedListEditor({
 export default function ContentRulesPage() {
   const { orgId, orgMemberships } = useDashboardContext();
   const currentRole = orgMemberships.find((o) => o.orgId === orgId)?.role ?? 'member';
-  // PO 明示(2026-09-05) — 연결 화면의 owner-or-admin 상수 재사용 금지, 정확히 owner만.
-  const isOwner = currentRole === 'owner';
+  // story #3490(PO 決定 2026-09-05) — owner만이던 자격을 owner·admin으로(3471 계약
+  // 정정, 채널 연결 화면과 동형 권한 폭).
+  const canEditRules = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('contentRules');
 
   const [rules, setRules] = useState<ContentRules>(EMPTY_RULES);
@@ -210,7 +213,7 @@ export default function ContentRulesPage() {
         const field = body?.error?.field;
         if (code === 'CONTENT_RULES_INVALID' && field) {
           setFieldErrors({ [field]: t('errorInvalidField') });
-        } else if (code === 'CONTENT_RULES_OWNER_ONLY') {
+        } else if (code === 'CONTENT_RULES_ADMIN_ONLY') {
           setSaveError(t('errorOwnerOnly'));
         } else if (code === 'CONTENT_RULES_INVALID') {
           setSaveError(t('errorInvalid'));
@@ -247,7 +250,7 @@ export default function ContentRulesPage() {
           <AlertDescription>{t('saveSuccess', { version })}</AlertDescription>
         </Alert>
       ) : null}
-      {!isOwner ? (
+      {!canEditRules ? (
         <p className="text-xs text-muted-foreground" data-testid="content-rules-readonly-reason">{t('readOnlyReason')}</p>
       ) : null}
 
@@ -270,7 +273,7 @@ export default function ContentRulesPage() {
                 <TagListEditor
                   items={rules.banned_terms}
                   onChange={(next) => setRules((r) => ({ ...r, banned_terms: next }))}
-                  readOnly={!isOwner}
+                  readOnly={!canEditRules}
                   placeholder={t('bannedTermsPlaceholder')}
                   testIdPrefix="content-rules-banned-terms"
                 />
@@ -278,11 +281,11 @@ export default function ContentRulesPage() {
               </div>
 
               <div className="space-y-1.5">
-                {/* 카디르군 REQUEST_CHANGES(2026-09-05, PR#3827) — disabled={!isOwner}는
+                {/* 카디르군 REQUEST_CHANGES(2026-09-05, PR#3827) — disabled={!canEditRules}는
                     "살아 있는" 컨트롤(탭 순서·스크린리더가 여전히 체크박스로 읽는다)이라
                     AC "편집 컨트롤이 없다"를 안 지킨다. 나머지 4필드(TagListEditor)와
                     같은 원칙으로 읽기 전용 텍스트로 바꾼다. */}
-                {isOwner ? (
+                {canEditRules ? (
                   <label className="flex items-center gap-2 text-sm text-foreground">
                     <input
                       type="checkbox"
@@ -306,7 +309,7 @@ export default function ContentRulesPage() {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-tone">{t('toneLabel')}</label>
-                {isOwner ? (
+                {canEditRules ? (
                   <input
                     id="content-rules-tone"
                     type="text"
@@ -326,7 +329,7 @@ export default function ContentRulesPage() {
                 <TagListEditor
                   items={rules.taxonomy}
                   onChange={(next) => setRules((r) => ({ ...r, taxonomy: next }))}
-                  readOnly={!isOwner}
+                  readOnly={!canEditRules}
                   placeholder={t('taxonomyPlaceholder')}
                   testIdPrefix="content-rules-taxonomy"
                 />
@@ -335,7 +338,7 @@ export default function ContentRulesPage() {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">{t('channelPriorityLabel')}</label>
-                {isOwner ? (
+                {canEditRules ? (
                   <TagListEditor
                     items={rules.channel_priority}
                     onChange={(next) => setRules((r) => ({ ...r, channel_priority: next }))}
@@ -347,7 +350,7 @@ export default function ContentRulesPage() {
                 <OrderedListEditor
                   items={rules.channel_priority}
                   onChange={(next) => setRules((r) => ({ ...r, channel_priority: next }))}
-                  readOnly={!isOwner}
+                  readOnly={!canEditRules}
                   testIdPrefix="content-rules-channel-priority"
                 />
                 {fieldErrors.channel_priority ? <p className="text-xs text-destructive">{fieldErrors.channel_priority}</p> : null}
@@ -355,7 +358,7 @@ export default function ContentRulesPage() {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-brand-logo">{t('brandKitLogoLabel')}</label>
-                {isOwner ? (
+                {canEditRules ? (
                   <input
                     id="content-rules-brand-logo"
                     type="text"
@@ -373,7 +376,7 @@ export default function ContentRulesPage() {
                 <TagListEditor
                   items={rules.brand_kit.colors ?? []}
                   onChange={(next) => setRules((r) => ({ ...r, brand_kit: { ...r.brand_kit, colors: next } }))}
-                  readOnly={!isOwner}
+                  readOnly={!canEditRules}
                   placeholder={t('brandKitColorsPlaceholder')}
                   testIdPrefix="content-rules-brand-colors"
                 />
@@ -383,14 +386,14 @@ export default function ContentRulesPage() {
                 <TagListEditor
                   items={rules.brand_kit.fonts ?? []}
                   onChange={(next) => setRules((r) => ({ ...r, brand_kit: { ...r.brand_kit, fonts: next } }))}
-                  readOnly={!isOwner}
+                  readOnly={!canEditRules}
                   placeholder={t('brandKitFontsPlaceholder')}
                   testIdPrefix="content-rules-brand-fonts"
                 />
                 {fieldErrors.brand_kit ? <p className="text-xs text-destructive">{fieldErrors.brand_kit}</p> : null}
               </div>
 
-              {isOwner ? (
+              {canEditRules ? (
                 <Button size="sm" onClick={() => void handleSave()} disabled={saving} data-testid="content-rules-save-button">
                   {saving ? t('savingCta') : t('saveAction')}
                 </Button>
