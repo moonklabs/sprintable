@@ -73,6 +73,33 @@ def decode_cursor(token: str) -> tuple[datetime, uuid.UUID]:
         raise HTTPException(status_code=400, detail="Invalid cursor format") from exc
 
 
+def encode_metric_cursor(metric_value: int | None, published_at: datetime, id_: uuid.UUID) -> str:
+    """story #3502(페드루 PO 決定 2026-09-05) — insights-board의 metric 정렬(예: 7일
+    views) 전용 3키 컴포지트 — `(metric NULLS LAST, published_at DESC, id)`. 같은
+    canonical 모듈에 태운다(`encode_cursor`의 2키 변형 — assets.py의 별도 제네릭
+    커서·구식 ISO 커서를 새로 안 늘린다, 4번째 발명 금지). `metric_value=None`은
+    "이 지표가 미제공/미측정"(3497의 null≠0 규율) — JSON에 문자열 "null" 마커로
+    실어 정수 0과 반드시 구분한다(0은 진짜 실측값)."""
+    payload = {
+        "metric": metric_value if metric_value is not None else "null",
+        "published_at": published_at.isoformat(), "id": str(id_),
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def decode_metric_cursor(token: str) -> tuple[int | None, datetime, uuid.UUID]:
+    """`encode_metric_cursor`의 역함수. `decode_cursor`와 동형 오류 처리(손상 토큰=400)."""
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii"))
+        payload = json.loads(raw)
+        metric = payload["metric"]
+        metric_value = None if metric == "null" else int(metric)
+        return metric_value, datetime.fromisoformat(payload["published_at"]), uuid.UUID(str(payload["id"]))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid cursor format") from exc
+
+
 def assemble_page(
     rows: Sequence[T], limit: int, cursor_key: Callable[[T], tuple[datetime, uuid.UUID]]
 ) -> tuple[list[T], bool, str | None]:
