@@ -1163,6 +1163,11 @@
       "source": "story-620beefc-threads-image(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 28.2s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
+      "file": "tests/test_3536_channel_image_required.py",
+      "sec": 30.0,
+      "source": "story-3536-channel-image-required(PR 개설 前 선제 등재 — 로컬 raw pytest 4.38s(5건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 30s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_5b27b32f_sandbox_channel.py",
       "sec": 115.0,
       "source": "story-5b27b32f-sandbox-channel-adapter(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 19.03s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 115s 잠정값, 실 CI 샤드 로그로 재확認 필요)"

@@ -17,6 +17,7 @@ from app.services.content_rules import get_org_content_rules, lint_content
 from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
     ChannelImageContainerFailedError,
+    ChannelImageRequiredError,
     ChannelPostApproverRoleMissingError,
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
@@ -926,6 +927,13 @@ async def submit_channel_post_draft_endpoint(
                 "code": "CONTENT_RULE_VIOLATION", "rules_version": exc.rules_version,
                 "violations": exc.violations,
             },
+        ) from exc
+    except ChannelImageRequiredError as exc:
+        # story #3536(PO 確定 2026-09-06) — 필드 완결성 422(CHANNEL_TEXT_TOO_LONG류와
+        # 동형). 승인 게이트 낭비를 상신 단계에서 미리 막는다.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_IMAGE_REQUIRED", "message": str(exc)},
         ) from exc
 
     return SubmitChannelPostDraftResponse(

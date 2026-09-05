@@ -94,6 +94,16 @@ class ChannelTextTooLongError(ValueError):
         super().__init__(f"본문이 한도를 넘었습니다(한도 {max_length}자, 현재 {current_length}자)")
 
 
+class ChannelImageRequiredError(ValueError):
+    """story #3536(PO 確定 2026-09-06) — 어댑터가 image_required=True(예: Instagram)인데
+    상신하려는 버전에 이미지가 없음. 상신(submit) 시점에 막아 승인 게이트를 낭비하지
+    않는다(발행 시점에야 provider에서 422/실패로 아는 것을 사전 차단, ChannelTextTooLong
+    Error와 동형 관례 — 입력 형태 오류는 422)."""
+
+    def __init__(self) -> None:
+        super().__init__("이 채널은 이미지 1장이 필요합니다.")
+
+
 class ChannelTokenExpiredError(Exception):
     """story #f8f7cb0f — provider가 401/403(인증 실패)로 응답 — 토큰이 만료/철회됐다는
     뜻. `apply_refresh_failure`와 동형으로 connection.status를 expired로 내려 재인증을
@@ -911,6 +921,14 @@ async def submit_channel_post_draft(
     if target is None:
         raise ChannelPostVersionNotFoundError(version_id)
     origin_author_member_id = versions[0].author_member_id
+
+    # story #3536(PO 確定 2026-09-06) — 이미지 필수 채널(image_required=True)인데
+    # 이 버전에 이미지가 없으면 게이트 생성 前 즉시 422(§ChannelImageRequiredError
+    # docstring). ChannelTextTooLongError와 나란한 필드 완결성 검사 — content_rules
+    # lint보다 먼저 두는 이유는 같다(반쪽 봉인 없이 사전 거부).
+    adapter = get_channel_adapter(draft.channel)
+    if adapter is not None and adapter.image_required and not target.image_sha256:
+        raise ChannelImageRequiredError()
 
     # story #3471(페드루 PO 確定 2026-09-05) — submit(상신) 시점에 재검사·위반 1건
     # 이상이면 422(금지 AC=서버 거부). create/update의 lint_result 스냅샷을 다시

@@ -101,6 +101,12 @@ class ChannelAdapterConfig:
     # 明示 — 읽기는 기존 연결 스코프로 충분하다는 전제, 조각①은 sandbox까지가 라이브
     # 범위라 실제 부족 여부는 Threads 실계정 왕복 시점에 재확認).
     reply_required_scope: str | None = None
+    # story #3536(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06) — image_max_count>0
+    # (이미지를 지원함)과는 다른 축: "지원"이 아니라 "필수"(이미지 0장이면 발행 자체가
+    # provider에서 거부됨, 예: Instagram 피드 게시물). 기본 False=기존 채널(Threads
+    # 등, TEXT-only 허용) 회귀 0. True면 submit(상신) 단계에서 이미지 0장을 즉시 422로
+    # 막는다 — 승인 게이트를 낭비하고 발행 시점에야 죽는 것을 방지.
+    image_required: bool = False
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -201,6 +207,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 리뷰) — impressions는 2024-07-02 이후 미디어에 폐기돼 선언 안 함(항상
         # None), 대신 views를 threads와 같은 이름으로 선언.
         insight_metrics=("views", "reach", "engagements"),
+        # story #3536(PO 確定 2026-09-06) — IG 피드 발행은 이미지 1장이 구조적으로
+        # 필수(캡션만으론 컨테이너 생성 자체가 provider에서 거부됨, instagram_
+        # publish.py::create_media_container의 image_url=None 즉시 거부와 동형 사실).
+        image_required=True,
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
@@ -346,6 +356,8 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         # 페드루 PO REQUIRED(2026-09-06, #3874 리뷰) — 위 instagram과 동형 정정
         # (impressions 폐기, views로 대체).
         insight_metrics=("views", "reach", "engagements"),
+        # story #3536(PO 確定 2026-09-06) — 위 "instagram"과 동형(이미지 필수).
+        image_required=True,
     )
 
 
