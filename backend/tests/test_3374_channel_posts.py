@@ -443,6 +443,110 @@ async def test_approve_after_edit_is_blocked_until_resubmit_seals_new_version():
 
 
 @pytest.mark.anyio
+async def test_double_edit_without_resubmit_between_still_requires_and_allows_resubmit():
+    """story #3496(site_posts.py::test_double_edit_without_resubmit_between_...와
+    동형, 페드루 실측 2026-09-05) — 승인 뒤 편집(v2)까지는 위 테스트와 같지만,
+    **submit() 없이 또 편집(v3)**하면 재봉인 훅이 sealed_*를 v3로 동기화하면서도
+    reapproval_required는 True로 남긴다. submit()의 조기 return 조건이
+    reapproval_required를 안 보면, sealed sha·schedule·media가 이미 v3와 일치해
+    "이미 봉인돼 있다"로 조용히 넘어가 승인이 영구히 409 SITE_POST_RESUBMIT_REQUIRED
+    로 막힌다."""
+    from app.main import app
+    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.services.member_resolver import ResolvedMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+
+        # v2 — 승인 뒤 편집.
+        async with _client_for(app) as client:
+            r_edit_v2 = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_id, text="채널 포스트 v2."),
+            )
+        assert r_edit_v2.status_code == 201, r_edit_v2.text
+
+        # v3 — submit() 없이 또 편집.
+        async with _client_for(app) as client:
+            r_edit_v3 = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_id, text="채널 포스트 v3(submit 안 거침)."),
+            )
+        assert r_edit_v3.status_code == 201, r_edit_v3.text
+        v3_sha256 = r_edit_v3.json()["body_sha256"]
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.status == "pending"
+        assert gate.sealed_content_sha256 == v3_sha256, "pending 재봉인 훅이 v3로 동기화되지 않았다(그라운딩 전제 확인)"
+        assert gate.reapproval_required is True, "reapproval_required가 편집 훅에서 조용히 풀렸다(그라운딩 전제 확인)"
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_resubmit = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r_resubmit.status_code == 200, r_resubmit.text
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.reapproval_required is False, (
+            "submit() 재호출이 이미-봉인 조기 return을 타 reapproval_required가 안 풀렸다"
+            " — 승인이 영구히 409로 막히는 사고"
+        )
+
+        approver = ResolvedMember(
+            id=uuid.uuid4(), user_id=uuid.uuid4(), name="approver", type="human", role="owner", org_id=org_id,
+        )
+
+        class _FakeAuth:
+            user_id = str(approver.user_id)
+            claims: dict = {"app_metadata": {"org_id": str(org_id)}}
+
+        from fastapi import BackgroundTasks
+        from unittest.mock import AsyncMock, patch
+        import app.routers.gates as gates_mod
+
+        async with Session() as s:
+            with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
+                 patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
+                approved = await transition_gate_endpoint(
+                    id=gate_id, body=GateTransitionRequest(status="approved", note="재검토 완료", evidence_viewed=True),
+                    background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
+                )
+        assert approved.status == "approved", "재봉인이 정상 처리됐는데도 승인이 막혔다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_resubmit_after_approved_edit_reseals_to_new_version():
     """AC5 QA 뮤테이션 대상 — gate_seal.compute_seal_hash가 payload 내용과 무관한 상수를
     내면(공용 헬퍼가 깨진 것과 동형), 편집 전/후 버전이 "같은 해시"로 보여 이 재상신이

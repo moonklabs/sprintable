@@ -471,6 +471,127 @@ async def test_approve_after_edit_is_blocked_until_resubmit_seals_new_version():
 
 
 @pytest.mark.anyio
+async def test_double_edit_without_resubmit_between_still_requires_and_allows_resubmit():
+    """story #3496(페드루 실측 2026-09-05, #3835 3ee55a847 코드 읽기 중 발견) — 승인 뒤
+    편집(v2, reapproval_required=True)까지는 위 테스트와 같지만, **submit() 없이 또
+    편집(v3)**하면 `_reseal_gate_on_new_version`의 pending 분기가 sealed_content_*·
+    sealed_destination을 v3로 동기화하면서도 reapproval_required는 그대로 True로
+    남긴다(그 필드는 그 훅의 관할이 아니다). 그 상태에서 submit()을 호출하면 sealed
+    sha·destination이 이미 target(v3)과 일치해 "이미 이 정확한 상태로 봉인돼 있다"는
+    조기 return 조건에 걸린다 — reapproval_required를 안 보던 옛 조건이면 게이트가
+    조용히 무변한 채 반환되고, 이어지는 승인 시도가 여전히(그리고 영원히) 409
+    SITE_POST_RESUBMIT_REQUIRED로 막힌다(재상신해도 다시 이 자리로 돌아오는 막다른
+    길 — 사람이 본문을 한 글자라도 또 바꿔야만 빠져나간다, 안내 없는 사고).
+
+    수정 後 기대값 — submit()이 조기 return을 안 타고 reapproval_required=False까지
+    재봉인해, 그 뒤 승인이 200으로 통과한다."""
+    from app.main import app
+    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.services.member_resolver import ResolvedMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+
+        # v2 — 승인 뒤 편집. pending+reapproval_required=True로 재오픈(위 테스트와 동일).
+        async with _client_for(app) as client:
+            r_edit_v2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="2호 글(수정 v2)"),
+            )
+        assert r_edit_v2.status_code == 201, r_edit_v2.text
+
+        # v3 — submit() 재호출 없이 또 편집. pending 분기가 sealed를 v3로 동기화하되
+        # reapproval_required는 손 안 댄다(True 그대로) — 이게 이 스토리의 재현 핵심.
+        async with _client_for(app) as client:
+            r_edit_v3 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="2호 글(수정 v3, submit 안 거침)"),
+            )
+        assert r_edit_v3.status_code == 201, r_edit_v3.text
+        v3_sha256 = r_edit_v3.json()["body_sha256"]
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.status == "pending"
+        assert gate.sealed_content_sha256 == v3_sha256, "pending 재봉인 훅이 v3로 동기화되지 않았다(그라운딩 전제 확인)"
+        assert gate.reapproval_required is True, "reapproval_required가 편집 훅에서 조용히 풀렸다(그라운딩 전제 확인)"
+
+        # submit() 재호출 — v3는 이미 봉인돼 있다(sha·destination 둘 다 동일) → 옛 조건이면
+        # 조기 return으로 reapproval_required=True가 그대로 남는다.
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_resubmit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r_resubmit.status_code == 200, r_resubmit.text
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.reapproval_required is False, (
+            "submit() 재호출이 이미-봉인 조기 return을 타 reapproval_required가 안 풀렸다"
+            " — 승인이 영구히 409로 막히는 사고"
+        )
+
+        # 이제 승인이 통과해야 한다(막다른 길이 아니어야).
+        approver = ResolvedMember(
+            id=uuid.uuid4(), user_id=uuid.uuid4(), name="approver", type="human",
+            role="owner", org_id=org_id,
+        )
+
+        class _FakeAuth:
+            user_id = str(approver.user_id)
+            claims: dict = {"app_metadata": {"org_id": str(org_id)}}
+
+        from fastapi import BackgroundTasks
+        from unittest.mock import AsyncMock, patch
+        import app.routers.gates as gates_mod
+
+        async with Session() as s:
+            with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
+                 patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
+                # story #2027 고위험 게이트 사유 강제(신규 org=기본 posture=high risk_grade
+                # 추정) — 이 테스트의 관심사(SITE_POST_RESUBMIT_REQUIRED 해소)와 무관한
+                # 별도 가드라 note를 채워 지나간다(위 test_approve_after_edit_...는 그
+                # 가드 前에 409로 끝나 이 자리에 안 닿았을 뿐, 신규 요구사항이 아니다).
+                approved = await transition_gate_endpoint(
+                    id=gate_id, body=GateTransitionRequest(status="approved", note="재검토 완료", evidence_viewed=True),
+                    background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
+                )
+        assert approved.status == "approved", "재봉인이 정상 처리됐는데도 승인이 막혔다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_publish_with_content_diverged_from_sealed_hash_returns_409_and_keeps_old_public_body():
     """AC6의 실제 갭 — 기존 POST /site-posts는 임의 body(title/slug/body_md 등)를 그대로
     받는다(초안/버전 시스템과 무관하게 호출 가능, S1 이전부터 있던 계약). 게이트가 approved인
