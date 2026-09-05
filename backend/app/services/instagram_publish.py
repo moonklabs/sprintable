@@ -44,6 +44,8 @@ _MEDIA_CONTAINER_URL_TMPL = _GRAPH_BASE + "/{ig_user_id}/media"
 _MEDIA_PUBLISH_URL_TMPL = _GRAPH_BASE + "/{ig_user_id}/media_publish"
 _PUBLISHING_LIMIT_URL_TMPL = _GRAPH_BASE + "/{ig_user_id}/content_publishing_limit"
 _MEDIA_URL_TMPL = _GRAPH_BASE + "/{media_id}"
+_COMMENTS_URL_TMPL = _GRAPH_BASE + "/{media_id}/comments"
+_COMMENT_REPLIES_URL_TMPL = _GRAPH_BASE + "/{comment_id}/replies"
 
 
 async def create_container(
@@ -187,3 +189,79 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
     body = resp.json()
     permalink = body.get("permalink")
     return str(permalink) if permalink else None
+
+
+# ─── story #3320 조각③ — 댓글 수집+답변 ───────────────────────────────────────
+# 페드루 PO가 2026-09-06 Meta 공식 문서로 재확認한 엔드포인트(instagram_oauth.py
+# 헤더와 동일 신뢰도 — 이 파일 상단 발행 엔드포인트류의 "⚠️미확認"과 다름):
+# `GET /{ig-media-id}/comments`·`GET|POST /{ig-comment-id}/replies`, 필드
+# `id,text,timestamp,from{id,username}`, 스코프 instagram_business_basic+
+# instagram_business_manage_comments.
+
+_COMMENTS_FIELDS = "id,text,timestamp,from{id,username}"
+_REPLIES_MAX_PAGES = 10  # threads_publish.py::fetch_replies와 동일 상한·동일 사유
+
+
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+    """이 media의 댓글 목록 + 완전 수집 여부(threads_publish.py::fetch_replies와
+    동형 커서 상한 방어 — PR#3865 리뷰에서 나온 "첫 페이지만 보고 리컨실하면
+    뒷페이지가 오삭제되는" 결함 클래스를 여기서도 똑같이 막는다).
+
+    `channel_post_comments.py::collect_comments_for_publication`은 각 항목의
+    `raw.get("username")`을 top-level에서 읽는다(sandbox/threads raw 모양과
+    동일 계약) — IG는 실제로 `from.username`에 있어(threads의 top-level
+    `username`과 다른 응답 모양) 여기서 `username`/`from_id`를 top-level로
+    끌어올려 얹는다(원본 `from` 필드도 raw에 그대로 보존, 유실 없음)."""
+    items: list[dict] = []
+    after_cursor: str | None = None
+    for _ in range(_REPLIES_MAX_PAGES):
+        params = {"fields": _COMMENTS_FIELDS, "access_token": access_token}
+        if after_cursor:
+            params["after"] = after_cursor
+        resp = await client.get(_COMMENTS_URL_TMPL.format(media_id=media_id), params=params)
+        if resp.status_code != 200:
+            raise ThreadsPublishError(
+                "INSTAGRAM_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
+            )
+        body = resp.json()
+        for raw in body.get("data") or []:
+            frm = raw.get("from") or {}
+            item = dict(raw)
+            item["username"] = frm.get("username")
+            item["from_id"] = frm.get("id")
+            items.append(item)
+        after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
+        if not after_cursor:
+            return items, True
+    return items, False
+
+
+async def reply(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, reply_to_id: str, text: str,
+) -> tuple[str, str | None]:
+    """댓글에 답변 — `POST /{ig-comment-id}/replies`(전용 엔드포인트, Threads의
+    "미확認 2-step 추정"과 달리 Meta 문서로 확認됨). `reply_to_id`=대상 댓글의
+    external_comment_id. `threads_user_id`는 이 호출엔 안 쓴다(대상이 댓글
+    id라 유저/미디어 id가 URL에 안 들어감) — 시그니처는 dispatch 통일을 위해
+    그대로 유지(sandbox_publish.py·threads_publish.py와 동일 관례).
+
+    페드루 PO가 2026-09-06 Meta comment-moderation 문서로 POST 파라미터명
+    (`message`)·응답 필드(`{id}`)·요구 스코프(`instagram_business_manage_
+    comments`)까지 재확認했다 — 이 함수는 이제 미확認 딱지 0(OAuth·GET 댓글
+    엔드포인트와 같은 신뢰도). 응답엔 permalink 개념이 없어(댓글은 media가
+    아님) 두 번째 반환값은 항상 None."""
+    resp = await client.post(
+        _COMMENT_REPLIES_URL_TMPL.format(comment_id=reply_to_id),
+        params={"message": text, "access_token": access_token},
+    )
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "INSTAGRAM_REPLY_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    external_reply_id = body.get("id")
+    if not external_reply_id:
+        raise ThreadsPublishError(
+            "INSTAGRAM_REPLY_MISSING_ID", "id missing in response", status_code=resp.status_code,
+        )
+    return str(external_reply_id), None

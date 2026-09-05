@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.insight_snapshot import InsightSnapshot
+from app.services.instagram_publish import _GRAPH_BASE as _INSTAGRAM_GRAPH_BASE
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +248,85 @@ async def _fetch_threads(client: "httpx.AsyncClient", *, access_token: str, medi
     return {"raw": body, "values": values}
 
 
+# story #3320 — 페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회, #3874 리뷰
+# "자체 상수 X, _GRAPH_BASE 참조") — 새 호스트 상수를 여기 또 만들지 않고
+# instagram_publish.py의 것을 그대로 import해 쓴다(호스트를 되돌리는 실수가
+# 한 곳만 고치면 되게 — instagram_publish.py::_GRAPH_BASE docstring 참고).
+_INSTAGRAM_INSIGHTS_URL_TMPL = _INSTAGRAM_GRAPH_BASE + "/{media_id}/insights"
+# story #3320 조각③ — 페드루 PO 決定⑤=(b): likes+comments+saved(+shares, 있으면)를
+# threads_publish.py의 engagements 합산과 같은 모양으로 뭉친다(같은 낱말=같은
+# 정의). reach는 §2(d) 7키에 그대로 이름이 있어 개별 유지.
+#
+# 페드루 PO REQUIRED(2026-09-06, #3874 리뷰, Meta 문서 재확認) — **impressions는
+# 2024-07-02 이후 생성된 미디어에 폐기**됐다(우리 발행물 전부 이 이후) — 요청
+# metric에 넣으면 실계정 첫 호출이 400(#3872의 graph.facebook.com 호스트 오류와
+# 같은 클래스: sandbox는 이 파라미터를 실제로 안 쳐서 통과하고 실계정에서만
+# 드러남). impressions는 이제 요청도 안 하고 항상 None(선언 안 함, insight_
+# snapshots.py의 null≠0 원칙 그대로 — "쟀는데 0"이 아니라 "이 채널이 이 지표를
+# 안 준다"). 대신 `views`를 요청해 §2(d) 7키의 `views`에 그대로 싣는다(threads의
+# views와 같은 이름, 별도 합산 없음).
+_INSTAGRAM_INSIGHTS_METRICS = "views,reach,likes,comments,saved,shares"
+_INSTAGRAM_ENGAGEMENT_METRICS = ("likes", "comments", "saved", "shares")
+
+
+async def _fetch_instagram(client: "httpx.AsyncClient", *, access_token: str, media_id: str) -> dict[str, Any]:  # noqa: F821
+    """_fetch_threads와 동형 에러분류(같은 error_code 문자열 재사용, 새 매핑표 0)."""
+    import httpx
+
+    resp = await client.get(
+        _INSTAGRAM_INSIGHTS_URL_TMPL.format(media_id=media_id),
+        params={"metric": _INSTAGRAM_INSIGHTS_METRICS, "access_token": access_token},
+    )
+    if resp.status_code == 401:
+        raise InsightFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message="Instagram 액세스 토큰이 만료되었습니다")
+    if resp.status_code == 429:
+        raise InsightFetchError(error_code="CHANNEL_RATE_LIMITED", message="Instagram 인사이트 API 한도 초과")
+    if resp.status_code >= 500:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=f"Instagram 서버 오류: {resp.status_code}")
+    if resp.status_code >= 400:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_AUTH_REJECTED", message=f"Instagram 인사이트 요청 거부: {resp.status_code}")
+
+    body = resp.json()
+    values: dict[str, int] = {}
+    for item in body.get("data", []):
+        name = item.get("name")
+        total = 0
+        for v in item.get("values", []) or []:
+            total += int(v.get("value", 0) or 0)
+        if name in ("views", "reach"):
+            values[name] = values.get(name, 0) + total
+        elif name in _INSTAGRAM_ENGAGEMENT_METRICS:
+            values["engagements"] = values.get("engagements", 0) + total
+    return {"raw": body, "values": values}
+
+
+async def _fetch_instagram_via_connection(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_connection import decrypt_for_use
+
+    pub = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == snapshot.publication_id)
+    )).scalar_one_or_none()
+    if pub is None or pub.external_id is None:
+        raise InsightFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+        )
+    connection = await db.get(ChannelConnection, pub.connection_id)
+    if connection is None or connection.status != "active":
+        raise InsightFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
+        )
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise InsightFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
+
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        return await _fetch_instagram(client, access_token=access_token, media_id=pub.external_id)
+
+
 async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
     """channel별 dispatch. 호출 前 `insight_metrics`가 빈 튜플이 아님을 이미 확인했다는
     전제(호출자 `process_due_insight_snapshots`가 그 판정을 한다 — 여기선 순수 dispatch
@@ -257,6 +337,8 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> di
         return await _fetch_hosted_site(db, org_id=snapshot.org_id, publication_id=snapshot.publication_id)
     if snapshot.channel == "threads":
         return await _fetch_threads_via_connection(db, snapshot)
+    if snapshot.channel == "instagram":
+        return await _fetch_instagram_via_connection(db, snapshot)
     raise InsightFetchError(
         error_code="INSIGHT_CHANNEL_NOT_IMPLEMENTED",
         message=f"insight_metrics는 선언됐지만 fetch dispatch가 없습니다: {snapshot.channel}",
