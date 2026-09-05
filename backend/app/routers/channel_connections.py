@@ -481,28 +481,36 @@ async def channel_connection_callback(
     return _to_response(row)
 
 
-@router.post("/{org_id}/channel-connections/sandbox", response_model=ChannelConnectionResponse, status_code=201)
-async def create_sandbox_channel_connection(
+async def _create_channel_sandbox_connection(
+    channel: str,
     org_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
-    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession,
+    verified_org_id: uuid.UUID,
+    auth: AuthContext,
 ) -> ChannelConnectionResponse:
-    """story 5b27b32f(AC2) — OAuth 없는 샌드박스 연결 생성. dev org에 실 Meta 자격이
-    없어(채널 연결 0건) 발행 명령·cron tick·cancel·unpublish·429·컨테이너 폴링 경로를
-    dev에서 라이브로 못 밟던 병목을 푼다. `upsert_channel_connection`(story #3373 AC8
-    기존 함수, 신규 로직 0)을 그대로 재사용 — 같은 (org, "sandbox", account_id) 재호출은
-    새 행이 아니라 기존 행 갱신(멱등, 실 OAuth 콜백과 동일 계약).
+    """story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — story 5b27b32f
+    (`/sandbox`)와 #3320 조각①(`/instagram-sandbox`)이 사실상 동일 로직을 채널마다
+    새 라우트+하드코딩 문자열로 복제하던 것을 여기로 수렴한다. 채널이 늘 때마다
+    라우트를 새로 여는 대신 어댑터 레지스트리 하나가 fail-closed 판정의 SSOT다:
 
-    이 채널 자체가 `SANDBOX_CHANNEL_ENABLED=true`일 때만 CHANNEL_ADAPTERS에 등재되므로
-    (channel_adapters.py) prod에선 이 엔드포인트를 호출해도 404(어댑터 없음)로 막힌다 —
-    라우트 자체를 조건부로 등록하지 않는 이유는 fail-closed 축을 어댑터 레지스트리 하나로
-    모으기 위함(AC5의 기동 시점 가드와 같은 SSOT)."""
+    - adapter가 없으면(미등록/`SANDBOX_CHANNEL_ENABLED=false`로 아예 빠진 경우) 404.
+    - adapter는 있지만 credential_kind != "none"이거나 requires_connection=False면
+      422 — 이 엔드포인트가 뜻하는 "OAuth 없는 무자격 연결"이 그 채널엔 안 맞는
+      요청이다(예: channel="threads"로 부르면 실 OAuth 자격이 필요한 채널에 가짜
+      access_token을 심을 뻔한 조용한 오분기 — 이게 실제로 있었던 결함 클래스).
+      hosted_site도 credential_kind="none"이지만 requires_connection=False라 이
+      가드로 같이 막힌다(연결 자체가 불요한 채널에 가짜 연결을 만들면 안 된다).
+
+    account_id는 채널 문자열의 `_`를 `-`로 바꾼 것 — 기존 두 라우트가 각각
+    "sandbox"(무변환)·"instagram-sandbox"(하드코딩, channel 값 "instagram_sandbox"의
+    `_`→`-` 치환과 우연히 일치)였으므로 이 규칙이 기존 행과 계속 같은 (org, channel,
+    account_id) 키로 upsert된다(멱등 유지 — 이 리팩터로 기존 연결이 새 행으로 안
+    갈라진다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await _require_owner_or_admin(db, auth, org_id)
 
-    adapter = get_channel_adapter("sandbox")
+    adapter = get_channel_adapter(channel)
     if adapter is None:
         raise HTTPException(
             status_code=404,
@@ -511,15 +519,49 @@ async def create_sandbox_channel_connection(
                 "message": "이 환경에서 샌드박스 채널이 비활성화돼 있습니다(SANDBOX_CHANNEL_ENABLED).",
             },
         )
+    if adapter.credential_kind != "none" or not adapter.requires_connection:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_SANDBOX_UNSUPPORTED",
+                "message": f"'{channel}' 채널은 샌드박스 연결을 지원하지 않습니다.",
+            },
+        )
 
     row = await upsert_channel_connection(
-        db, org_id=org_id, channel="sandbox", account_id=f"sandbox-{org_id}",
-        account_label="Sandbox", credential_kind=adapter.credential_kind,
+        db, org_id=org_id, channel=channel, account_id=f"{channel.replace('_', '-')}-{org_id}",
+        account_label=adapter.display_name, credential_kind=adapter.credential_kind,
         access_token="sandbox-dummy-access-token", refresh_token=None,
         token_expires_at=None, refresh_mode=adapter.refresh_mode,
         scopes=adapter.scope.split(","), connected_by=resolved.id,
     )
     return _to_response(row)
+
+
+@router.post("/{org_id}/channel-connections/{channel}/sandbox", response_model=ChannelConnectionResponse, status_code=201)
+async def create_generic_channel_sandbox_connection(
+    org_id: uuid.UUID,
+    channel: str,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story #3523 — 범용 샌드박스 연결 엔드포인트(FE가 `available-channels`가 내려준
+    어떤 channel 값이든 그대로 이 URL에 넣는다, 신규 채널 추가 시 BE 라우트 추가 불요).
+    판정 로직은 `_create_channel_sandbox_connection` 참조."""
+    return await _create_channel_sandbox_connection(channel, org_id, db, verified_org_id, auth)
+
+
+@router.post("/{org_id}/channel-connections/sandbox", response_model=ChannelConnectionResponse, status_code=201)
+async def create_sandbox_channel_connection(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story 5b27b32f(AC2) — 하위호환 라우트(구 FE 캐시·북마크 대비). story #3523부터
+    신규 로직은 위 범용 라우트에 있고, 여긴 channel="sandbox" 고정 위임뿐이다."""
+    return await _create_channel_sandbox_connection("sandbox", org_id, db, verified_org_id, auth)
 
 
 @router.post(
@@ -531,33 +573,9 @@ async def create_instagram_sandbox_channel_connection(
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> ChannelConnectionResponse:
-    """story #3320 조각① — 위 `create_sandbox_channel_connection`(5b27b32f)과 동형
-    (신규 판정 로직 0) — 다만 채널이 "sandbox"가 아니라 "instagram_sandbox"다. 별도
-    라우트인 이유는 URL 자체가 채널을 특정해야(경로에 `{channel}` 변수를 안 쓰는 게
-    기존 관례 — authorize/callback과 달리 이 엔드포인트들은 OAuth가 없어 애초에
-    `{channel}` 파라미터화가 안 돼 있었다) 이 채널 전용 라우트가 자연스럽다."""
-    if org_id != verified_org_id:
-        raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_owner_or_admin(db, auth, org_id)
-
-    adapter = get_channel_adapter("instagram_sandbox")
-    if adapter is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "CHANNEL_SANDBOX_DISABLED",
-                "message": "이 환경에서 샌드박스 채널이 비활성화돼 있습니다(SANDBOX_CHANNEL_ENABLED).",
-            },
-        )
-
-    row = await upsert_channel_connection(
-        db, org_id=org_id, channel="instagram_sandbox", account_id=f"instagram-sandbox-{org_id}",
-        account_label="Instagram Sandbox", credential_kind=adapter.credential_kind,
-        access_token="sandbox-dummy-access-token", refresh_token=None,
-        token_expires_at=None, refresh_mode=adapter.refresh_mode,
-        scopes=adapter.scope.split(","), connected_by=resolved.id,
-    )
-    return _to_response(row)
+    """story #3320 조각①(하위호환) — story #3523부터 신규 로직은 위 범용 라우트에
+    있고, 여긴 channel="instagram_sandbox" 고정 위임뿐이다."""
+    return await _create_channel_sandbox_connection("instagram_sandbox", org_id, db, verified_org_id, auth)
 
 
 class CreatePastedSecretConnectionRequest(BaseModel):

@@ -116,8 +116,13 @@ function ConnectionRow({
           <p className="flex flex-wrap items-center gap-1.5 truncate text-sm font-medium text-foreground">
             {conn.account_label ?? conn.account_id}
             {/* story f30da19a AC4③(유나 확定) — 연결 카드는 「테스트용 연결」(글 목록/
-                캘린더의 「테스트」와 다른 정본 — 여기는 "이 연결 자체가 테스트"라는 뜻). */}
-            {conn.channel === 'sandbox' ? (
+                캘린더의 「테스트」와 다른 정본 — 여기는 "이 연결 자체가 테스트"라는 뜻).
+                story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — channel===
+                'sandbox' 하드코딩은 instagram_sandbox 등 다른 샌드박스 채널의 배지를
+                놓친다. credential_kind==='none'이 "이 연결은 OAuth 없는 테스트용"이라는
+                뜻 그 자체(BE ChannelAdapterConfig.credential_kind 정의와 동형 축) —
+                채널 문자열을 나열하지 않아도 신규 샌드박스 채널이 늘 때 자동으로 맞다. */}
+            {conn.credential_kind === 'none' ? (
               <span
                 className="inline-flex items-center rounded-full border border-border px-1.5 py-0.5 text-xs font-normal text-muted-foreground"
                 data-testid="channel-connect-sandbox-connection-badge"
@@ -230,13 +235,19 @@ function ChannelSection({
   // story f30da19a(AC2) — sandbox(credential_kind='none')는 OAuth authorize 리다이렉트가
   // 아니라 BFF POST 한 번으로 연결이 즉시 생긴다(멱등, BE 5b27b32f). 성공하면 페이지
   // 리로드 없이 onRefresh()로 새 행을 반영한다.
+  //
+  // story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — 이 경로가 channel
+  // 문자열과 무관하게 항상 리터럴 `sandbox`로 고정돼 있어, credential_kind==='none'인
+  // 카드 전부(instagram_sandbox 포함)가 눌러도 실은 Threads류 sandbox 연결을
+  // 만드는 조용한 오분기였다. `${item.channel}/sandbox`(BE #3523 범용 라우트)로
+  // 교체 — 이 카드가 어떤 채널인지는 item.channel이 항상 정확히 안다.
   const [creatingSandbox, setCreatingSandbox] = useState(false);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const handleCreateSandbox = useCallback(async () => {
     setCreatingSandbox(true);
     setSandboxError(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/sandbox`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${channel}/sandbox`, { method: 'POST' });
       if (res.ok) {
         onRefresh();
         return;
@@ -258,7 +269,7 @@ function ChannelSection({
     } finally {
       setCreatingSandbox(false);
     }
-  }, [orgId, onRefresh, t]);
+  }, [orgId, channel, onRefresh, t]);
 
   return (
     <SectionCard>

@@ -429,6 +429,54 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     expect(container.textContent).toContain('WordPress');
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).toBeNull();
   });
+
+  // story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — handleCreateSandbox가
+  // 채널 문자열과 무관하게 항상 리터럴 `.../channel-connections/sandbox`로 고정돼 있어,
+  // instagram_sandbox 카드의 「연결 만들기」를 눌러도 실은 Threads류 sandbox 연결을
+  // 만드는 조용한 오분기였다. 이 테스트는 그 오분기 자체를 재현·고정한다 — 되돌리면
+  // (item.channel 대신 다시 리터럴 'sandbox'로) RED.
+  it('⭐instagram_sandbox 카드의 「연결 만들기」는 .../instagram_sandbox/sandbox로 가지 .../sandbox(리터럴)로 새지 않는다', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') calledUrls.push(url);
+      if (url.includes('/channel-connections/available-channels')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            data: [
+              { channel: 'sandbox', display_name: 'Sandbox', credential_kind: 'none', kind: 'social' },
+              { channel: 'instagram_sandbox', display_name: 'Instagram Sandbox', credential_kind: 'none', kind: 'social' },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes('/instagram_sandbox/sandbox') && init?.method === 'POST') {
+        return { ok: true, status: 201, json: async () => ({ data: { id: 'ig-sb-1', channel: 'instagram_sandbox', account_id: 'instagram-sandbox-org-1', status: 'active' } }) } as Response;
+      }
+      if (url.includes('/app-credentials')) {
+        return { ok: true, status: 200, json: async () => ({ data: { configured: false, app_id_suffix: null, effective_source: 'platform' } }) } as Response;
+      }
+      if (url.includes('/channel-connections')) {
+        return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({ data: null, error: { code: 'NOT_FOUND' } }) } as Response;
+    }));
+    await mount('owner');
+
+    const btns = [...container.querySelectorAll('[data-testid="channel-connect-sandbox-button"]')];
+    expect(btns.length).toBe(2);
+    // 두 번째 섹션(instagram_sandbox)의 버튼 — channelLabel로 문구가 갈린다(§13-6 어휘).
+    const instagramSandboxBtn = btns.find((b) => b.textContent?.includes('Instagram 테스트용')) as HTMLButtonElement;
+    expect(instagramSandboxBtn).not.toBeUndefined();
+
+    await act(async () => { instagramSandboxBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    const sandboxPostCalls = calledUrls.filter((u) => u.includes('/channel-connections/') && (u.endsWith('/sandbox') || u.includes('/sandbox/')));
+    expect(sandboxPostCalls).toEqual([expect.stringContaining('/instagram_sandbox/sandbox')]);
+    expect(sandboxPostCalls.some((u) => u.endsWith('/channel-connections/sandbox'))).toBe(false);
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-error"]')).toBeNull();
+  });
 });
 
 // story #3450 FE 후속(3653a18c §2, 페드루 PO 確定 2026-09-04 23:13Z·23:20Z) —
