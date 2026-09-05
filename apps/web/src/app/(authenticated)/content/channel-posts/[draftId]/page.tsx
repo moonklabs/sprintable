@@ -20,8 +20,8 @@ import { parseScheduledAtServerError } from '@/components/content/validate-sched
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
-import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
-import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
+import { CommentsSection, deriveCommentsFace, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
+import type { CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
@@ -244,6 +244,41 @@ export default function ChannelPostEditPage() {
     return () => { cancelled = true; };
   }, [orgId, draft?.publication_id]);
   useEffect(() => loadComments(), [loadComments]);
+  // story #3517(BE #3865 조각①, 유나 §22-10③) — 수동 재수집. 세 갈래로 가른다(전부
+  // 뭉뚱그리면 429/422가 같은 취급을 받는다 — CommentsRefreshButton 주석 참고):
+  // 429는 Retry-After 헤더를 그대로 읽어 초를 준다(지어내지 않는다, 없으면 null).
+  // 422 COMMENT_COLLECTION_UNSUPPORTED는 전용 kind — 버튼이 스스로 접는다. 403
+  // COMMENT_REFRESH_HUMAN_ONLY·502 등은 generic(서버 message 그대로).
+  //
+  // ⚠️구현 규율(유나 §22-10③, 403) — 이 함수는 반드시 사람이 버튼을 눌렀을 때만
+  // 호출된다. 주기 폴링·마운트 시 자동 재수집을 절대 추가하지 않는다(에이전트
+  // 경로로 계속 403이 누적되는 것을 막는다 — 이 규율은 CommentsRefreshButton의
+  // onClick 배선 하나로 이미 지켜지고 있다, 여기 딴 곳에서 이 함수를 부르지 말 것).
+  const handleCommentsRefresh = useCallback(async (): Promise<CommentsRefreshOutcome> => {
+    if (!orgId || !draft?.publication_id) return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/comments/refresh`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        loadComments();
+        return { ok: true };
+      }
+      if (res.status === 429) {
+        const retryAfterHeader = res.headers.get('Retry-After');
+        const retryAfterSeconds = retryAfterHeader !== null ? Number.parseInt(retryAfterHeader, 10) : null;
+        return { ok: false, kind: 'rate_limited', retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null };
+      }
+      const body = await res.json().catch(() => null) as { detail?: { code?: string; message?: string }; code?: string; message?: string } | null;
+      if (body?.detail?.code === 'COMMENT_COLLECTION_UNSUPPORTED') {
+        return { ok: false, kind: 'unsupported' };
+      }
+      const message = body?.detail?.message ?? body?.message ?? t('commentsRefreshErrorGeneric');
+      return { ok: false, kind: 'generic', message };
+    } catch {
+      return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
+    }
+  }, [orgId, draft?.publication_id, loadComments, t]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -314,11 +349,6 @@ export default function ChannelPostEditPage() {
   // — 다이얼로그가 안 닫혀 재선택 가능하게 유지한다.
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleServerError, setScheduleServerError] = useState<'past_or_invalid' | null>(null);
-
-  // story #3517(Phase2·FE) — 「작업으로 전환」 다이얼로그. comment 자체가 open/close를
-  // 겸한다(null=닫힘, 그 댓글=열림) — dialog와 별도 boolean state를 안 둔다(kanban의
-  // story-detail-panel.tsx류 편집 다이얼로그와 동형 관례).
-  const [convertToTaskComment, setConvertToTaskComment] = useState<CommentItem | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
@@ -1229,17 +1259,11 @@ export default function ChannelPostEditPage() {
                 <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
               ) : null}
               {/* story #3517(Phase2·FE, 그라운딩 ① 자리 그대로 — InsightSnapshotBlock 곁,
-                  같은 draft.publication_id 조건) — 댓글 섹션. */}
+                  같은 draft.publication_id 조건) — 댓글 섹션. 조각①-FE 범위(PO 確定
+                  2026-09-05): 세 얼굴·수집 시각·목록·지워진 댓글(§22-9)만 — 행 액션
+                  (작업으로 전환·답변)은 조각②(답변/작업전환 엔드포인트) PR에서. */}
               {draft.publication_id ? (
-                <CommentsSection
-                  face={commentsFace}
-                  displayTimezone={displayTimezone}
-                  onConvertToTask={setConvertToTaskComment}
-                  onReply={() => {
-                    // story #3517 — 답변 초안→상신→승인 카드 흐름은 조각②(답변/작업전환
-                    // 엔드포인트) 대기 중(그라운딩 보고 済). 배선 자체는 다음 조각.
-                  }}
-                />
+                <CommentsSection face={commentsFace} displayTimezone={displayTimezone} onRefresh={handleCommentsRefresh} />
               ) : null}
             </div>
           );
@@ -1693,19 +1717,6 @@ export default function ChannelPostEditPage() {
         submitting={submitting}
         serverError={scheduleServerError}
       />
-      {/* story #3517(Phase2·FE) — 조각②(작업전환 엔드포인트)가 아직 없어 실제 POST는
-          미배선(§22-④ prefill·다이얼로그 자체는 조각①만으로 완결). 게시물 제목은
-          이 화면엔 별도 title 필드가 없다(text 자체가 본문) — 원문(source_title)이
-          있으면 그걸, 없으면(단독 채널 초안) 본문 앞부분으로 대체(지어내지 않되
-          다이얼로그 제목 칸을 비워 두지 않는다, §21-5 관례). */}
-      {convertToTaskComment ? (
-        <CommentConvertToTaskDialog
-          postTitle={draft.source_title ?? (versions[versions.length - 1]?.text.slice(0, 40) ?? '')}
-          comment={convertToTaskComment}
-          onClose={() => setConvertToTaskComment(null)}
-          onSubmit={() => Promise.resolve({ ok: false, errorMessage: t('commentsConvertPendingBackend') })}
-        />
-      ) : null}
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
           워시된다, Phase 0 실측). */}
       {isOverLimit ? (

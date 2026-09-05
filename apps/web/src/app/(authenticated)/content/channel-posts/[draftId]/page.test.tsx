@@ -162,6 +162,7 @@ function stubFetch(opts: {
     deleted_count: number;
   };
   commentsStatus?: number;
+  onCommentsRefresh?: () => { status: number; body: unknown; headers?: Record<string, string> };
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -314,6 +315,16 @@ function stubFetch(opts: {
       }
       // story #3517(Phase2·FE, BE #3865 조각①) — 댓글 목록. 기본값(옵션 생략)은
       // last_collected_at=null(uncollected) — 대부분 테스트가 이 스토리와 무관.
+      if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/comments/refresh') && init?.method === 'POST') {
+        const result = opts.onCommentsRefresh?.() ?? { status: 200, body: { fetched: 0, deleted: 0, captured_at: '2026-09-05T12:00:00Z' } };
+        const ok = result.status < 400;
+        const headers = new Map(Object.entries(result.headers ?? {}));
+        return {
+          ok, status: result.status,
+          headers: { get: (name: string) => headers.get(name) ?? null },
+          json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body),
+        };
+      }
       if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/comments')) {
         if (opts.commentsStatus && opts.commentsStatus >= 400) {
           return { ok: false, status: opts.commentsStatus, json: async () => ({ detail: 'boom' }) };
@@ -2514,7 +2525,10 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(published.querySelector('[data-testid="comment-body-text"]')?.textContent).toContain('좋은 글이네요');
   });
 
-  it('「작업으로 전환」 클릭 — 다이얼로그가 열리고 제목이 prefill된다(댓글 본문은 제목에 없다)', async () => {
+  // story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로 전환·답변)은
+  // 조각②(답변/작업전환 엔드포인트) PR에서 배선한다 — 지금은 렌더 자체가 없다("아직
+  // 없는 기능은 안 그린다").
+  it('댓글이 있어도 「작업으로 전환」·「답변」 버튼이 안 그려진다(조각②에서 배선)', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: {
@@ -2527,11 +2541,104 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
-    const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
+    expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).toBeNull();
+    expect(container.querySelector('[data-testid="comments-item-reply"]')).toBeNull();
+  });
+
+  // story #3517(BE #3865 조각①) — 수동 재수집. 429/422/403 문장을 서버 응답 그대로
+  // 보인다(재해석·재작성 0).
+  it('재수집 성공 — 목록을 다시 불러온다(POST 뒤 GET 재조회)', async () => {
+    let getCallCount = 0;
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => { getCallCount += 1; return { status: 200, body: { fetched: 1, deleted: 0, captured_at: '2026-09-05T12:00:00Z' } }; },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
-    const titleInput = document.querySelector('#comments-convert-title') as HTMLInputElement;
-    expect(titleInput).not.toBeNull();
-    expect(titleInput.value).not.toContain('이 부분 설명이 부족해요');
+    await flush();
+    expect(getCallCount).toBe(1);
+    expect(container.querySelector('[data-testid="comments-refresh-error"]')).toBeNull();
+  });
+
+  // story #3517(유나 §22-10③) — 429는 버튼 비활성+버튼 밖 「{N}초 뒤에…」(Retry-After
+  // 헤더를 그대로 읽는다, 지어내지 않는다).
+  it('재수집 429 COMMENT_REFRESH_RATE_LIMITED — 버튼 비활성+Retry-After 초 문구', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => ({
+        status: 429, headers: { 'Retry-After': '60' },
+        body: { detail: { code: 'COMMENT_REFRESH_RATE_LIMITED', message: '잠시 후 다시 시도해 주세요' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('60초 뒤에 다시 시도할 수 있습니다.');
+  });
+
+  it('재수집 429, Retry-After 헤더 없음 — 초를 지어내지 않고 "잠시 뒤"', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => ({ status: 429, body: { detail: { code: 'COMMENT_REFRESH_RATE_LIMITED', message: 'x' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('잠시 뒤에 다시 시도할 수 있습니다.');
+  });
+
+  // story #3517(유나 §22-10③) — 422 unsupported는 버튼 자체가 사라진다(네 번째 얼굴).
+  it('재수집 422 COMMENT_COLLECTION_UNSUPPORTED — 버튼이 사라지고 지원 안 함 문구만', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => ({ status: 422, body: { detail: { code: 'COMMENT_COLLECTION_UNSUPPORTED', message: '이 채널은 댓글 수집을 지원하지 않습니다' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-refresh-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않습니다.');
+  });
+
+  it('재수집 403 COMMENT_REFRESH_HUMAN_ONLY — 서버 문구를 그대로 보인다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => ({ status: 403, body: { detail: { code: 'COMMENT_REFRESH_HUMAN_ONLY', message: '사람만 다시 수집할 수 있습니다' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('사람만 다시 수집할 수 있습니다');
+  });
+
+  it('재수집 502(채널 fetch 실패) — flat {code,message} shape도 그대로 보인다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => ({ status: 502, body: { code: 'CHANNEL_FETCH_FAILED', message: '채널에서 응답을 받지 못했습니다' } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('채널에서 응답을 받지 못했습니다');
   });
 });
 

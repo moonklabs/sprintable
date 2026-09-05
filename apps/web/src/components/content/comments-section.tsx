@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { formatScheduledAt } from '@/components/content/schedule-format';
 import { CommentBodyText } from '@/components/content/comment-body-text';
-import { CommentReplyStatusChip } from '@/components/content/comment-reply-status-chip';
+import { CommentsRefreshButton, type CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import type { CommentReplyStatus } from '@/components/content/comment-reply-status';
 
 // story #3517(BE #3865 조각①, PO 確定 2026-09-05) — 필드명은 BE 응답
@@ -17,6 +17,9 @@ export interface CommentItem {
   bodyText: string;
   /** BE 계약상 null 가능(채널이 시각을 안 줄 수 있다) — 지어내지 않는다. */
   externalCreatedAt: string | null;
+  /** 이 댓글을 수집한 시각(항상 있다) — §22-10: externalCreatedAt이 없을 때만
+   * 폴백으로 쓰되, 반드시 "수집" 라벨로 보인다("작성"으로 적으면 거짓말이다). */
+  capturedAt: string;
   /** null이 아니면 지워진 댓글(§22-9) — 삭제됐어도 목록엔 원래 시간순 자리 그대로
    * 실린다(BE가 지우지 않고 실어 준다, text도 보존돼 온다 — "존재했던 사실"은 남긴다). */
   deletedAt: string | null;
@@ -69,20 +72,31 @@ export function deriveCommentsFace(
     authorDisplayName: c.author_display_name,
     bodyText: c.text,
     externalCreatedAt: c.external_created_at,
+    capturedAt: c.captured_at,
     deletedAt: c.deleted_at,
     replyStatus: replyStatusFor ? replyStatusFor(c.id) : 'none',
   }));
-  if (activeCount === 0 && deletedCount === 0) {
+  // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
+  // 하나만 본다(comments.length 아님 — 페이지 잘림·지워진 행이 섞이면 틀린다).
+  // deleted_count는 이 판정에 안 들어간다 — 활성 댓글이 0이면 지워진 행이 몇 개든
+  // "댓글 없음"이다(그 지워진 행 자체는 empty 얼굴에도 §22-9 안내로 여전히 보인다,
+  // 아래 empty 분기 참고).
+  if (activeCount === 0) {
     return { kind: 'empty', capturedAt: data.last_collected_at, activeCount, deletedCount };
   }
   return { kind: 'loaded', capturedAt: data.last_collected_at, comments, activeCount, deletedCount };
 }
 
+// story #3517(PO 確定 2026-09-05) — onConvertToTask/onReply는 조각②(답변/작업전환
+// 엔드포인트) PR에서 다시 추가한다 — 조각①은 행 액션 자체를 안 그린다.
 export interface CommentsSectionProps {
   face: CommentsFace;
   displayTimezone: string;
-  onConvertToTask: (comment: CommentItem) => void;
-  onReply: (comment: CommentItem) => void;
+  /** 수동 재수집(BE #3865 조각①). uncollected 포함 모든 얼굴에서 뜬다 — "아직
+   * 수집 전"이어도 사람이 지금 바로 트리거할 수 있어야 한다(자동 수집을 기다리지
+   * 않는다). onRefresh는 POST만 하고, 성공 뒤 목록을 다시 부르는 건 호출부(페이지)
+   * 몫이다(이 컴포넌트는 재조회 트리거만 위임받는다). */
+  onRefresh: () => Promise<CommentsRefreshOutcome>;
 }
 
 function SectionHeader({
@@ -110,7 +124,7 @@ function SectionHeader({
   );
 }
 
-export function CommentsSection({ face, displayTimezone, onConvertToTask, onReply }: CommentsSectionProps) {
+export function CommentsSection({ face, displayTimezone, onRefresh }: CommentsSectionProps) {
   const t = useTranslations('content');
 
   if (face.kind === 'uncollected') {
@@ -120,6 +134,7 @@ export function CommentsSection({ face, displayTimezone, onConvertToTask, onRepl
         <p className="text-sm text-muted-foreground" data-testid="comments-face-uncollected">
           {t('commentsFaceUncollected')}
         </p>
+        <CommentsRefreshButton onRefresh={onRefresh} />
       </div>
     );
   }
@@ -131,6 +146,7 @@ export function CommentsSection({ face, displayTimezone, onConvertToTask, onRepl
         <p className="text-sm text-muted-foreground" data-testid="comments-face-error">
           {t('commentsFaceError')}
         </p>
+        <CommentsRefreshButton onRefresh={onRefresh} />
       </div>
     );
   }
@@ -144,6 +160,7 @@ export function CommentsSection({ face, displayTimezone, onConvertToTask, onRepl
         <p className="text-sm text-muted-foreground" data-testid="comments-face-empty">
           {t('commentsFaceEmpty')}
         </p>
+        <CommentsRefreshButton onRefresh={onRefresh} />
       </div>
     );
   }
@@ -151,22 +168,33 @@ export function CommentsSection({ face, displayTimezone, onConvertToTask, onRepl
   return (
     <div className="space-y-2 border-t border-border pt-3" data-testid="comments-section">
       <SectionHeader t={t} activeCount={face.activeCount} deletedCount={face.deletedCount} capturedAtDisplay={capturedAtDisplay} />
+      <CommentsRefreshButton onRefresh={onRefresh} />
       <ul className="space-y-3">
         {face.comments.map((comment) => {
           const isDeleted = comment.deletedAt !== null;
           return (
             <li key={comment.id} className="space-y-1.5 rounded-md border border-border p-3" data-testid="comments-item">
               <div className="flex items-center justify-between gap-2">
+                {/* story #3517(유나 §22-10②, PO 確定 2026-09-05) — 작성자 없으면
+                    공유 「모름」(originAuthorUnknown)이 아니라 이 화면 전용 문구
+                    ("작성자 정보 없음", 흐린 한 줄) — §22-③ "채널이 준 만큼"이
+                    구체적으로 뭘 못 받았는지 말한다. */}
                 <span className="text-xs font-medium text-muted-foreground" data-testid="comments-item-author">
-                  {comment.authorDisplayName ?? t('originAuthorUnknown')}
+                  {comment.authorDisplayName ?? t('commentsAuthorUnknown')}
                 </span>
-                {/* BE 계약상 external_created_at은 null 가능(채널이 시각을 안 줄 수 있다) —
-                    없으면 이 자리 자체를 안 그린다(지어내지 않는다, §17 규율). */}
+                {/* story #3517(유나 §22-10②) — external_created_at(작성 시각) 우선,
+                    없으면 capturedAt(수집 시각)으로 폴백하되 라벨을 반드시 바꾼다
+                    ("작성"이라 적으면 거짓말 — captured_at은 우리가 그 댓글을 발견한
+                    시각일 뿐 채널에 올라온 시각이 아니다). */}
                 {comment.externalCreatedAt ? (
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground" data-testid="comments-item-authored-at">
                     {formatScheduledAt(comment.externalCreatedAt, displayTimezone).display}
                   </span>
-                ) : null}
+                ) : (
+                  <span className="text-xs text-muted-foreground" data-testid="comments-item-captured-at">
+                    {t('commentsItemCapturedAtLabel', { time: formatScheduledAt(comment.capturedAt, displayTimezone).display })}
+                  </span>
+                )}
               </div>
               {/* story #3517(§22-9) — 지워진 댓글: 본문은 길이 무관 기본 접힘(forceCollapsed)
                   + "원본이 지워졌습니다" 한 줄. text는 BE가 보존해서 준다(숨기지 않는다). */}
@@ -176,31 +204,13 @@ export function CommentsSection({ face, displayTimezone, onConvertToTask, onRepl
                   {t('commentsDeletedNote')}
                 </p>
               ) : null}
-              {/* §22-9 — 지워진 댓글엔 행 액션 자체를 안 그린다(비활성이 아니라 부재 —
-                  사유는 위 안내 줄이 이미 진다, 버튼 밖 사유 문구를 또 안 만든다). */}
-              {!isDeleted ? (
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <CommentReplyStatusChip status={comment.replyStatus} />
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onConvertToTask(comment)}
-                      className="text-xs text-muted-foreground underline hover:text-foreground"
-                      data-testid="comments-item-convert-to-task"
-                    >
-                      {t('commentsConvertToTaskCta')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onReply(comment)}
-                      className="text-xs text-muted-foreground underline hover:text-foreground"
-                      data-testid="comments-item-reply"
-                    >
-                      {t('commentsReplyCta')}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+              {/* story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로
+                  전환·답변)·답변 상태 칩은 이 슬라이스에서 렌더하지 않는다. 조각②
+                  (답변/작업전환 엔드포인트) 미착지 상태로 눌러도 아무 일도 안 나는
+                  컨트롤을 그리지 않는다("아직 없는 기능은 안 그린다" — §5-2 "되돌아올
+                  수 없는 상태는 안 그림"과 같은 결). 컴포넌트(CommentConvertToTaskDialog)·
+                  상태 칩(CommentReplyStatusChip)·테스트는 남아 있다 — 조각② PR에서
+                  이 자리에 다시 배선한다. */}
             </li>
           );
         })}

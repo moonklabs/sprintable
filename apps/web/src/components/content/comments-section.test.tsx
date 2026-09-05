@@ -2,13 +2,12 @@
 //
 // story #3517(유나 §22-②·④·⑨) — 세 얼굴(미수집/댓글없음/불러오지못함/목록) + 댓글
 // 행마다 답변 상태 6종 진리표 + 지워진 댓글(§22-9) 처리.
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFace, type RawCommentsResponse } from './comments-section';
-import type { CommentReplyStatus } from './comment-reply-status';
 
 function mount() {
   const container = document.createElement('div');
@@ -29,6 +28,7 @@ function baseComment(overrides: Partial<CommentItem>): CommentItem {
     authorDisplayName: '홍길동',
     bodyText: '좋은 글이네요',
     externalCreatedAt: '2026-09-05T10:00:00Z',
+    capturedAt: '2026-09-05T10:30:00Z',
     deletedAt: null,
     replyStatus: 'none',
     ...overrides,
@@ -47,7 +47,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('uncollected(null) — "아직 수집 전"만 뜨고 목록·수집시각은 안 뜬다', async () => {
     const face: CommentsFace = { kind: 'uncollected' };
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-face-uncollected"]')?.textContent).toBe('아직 수집 전입니다.');
     expect(container.querySelector('[data-testid="comments-captured-at"]')).toBeNull();
     expect(container.querySelector('[data-testid="comments-item"]')).toBeNull();
@@ -56,14 +56,14 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('error(fetch 실패) — "불러오지 못했습니다"만 뜬다(0건과 다른 문구)', async () => {
     const face: CommentsFace = { kind: 'error' };
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-face-error"]')?.textContent).toBe('댓글을 불러오지 못했습니다.');
   });
 
   it('empty([]) — "댓글이 없습니다"+수집시각+제목에 0건(uncollected/error와 다른 문구·표시)', async () => {
     const face: CommentsFace = { kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 0 };
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
     expect(container.querySelector('[data-testid="comments-captured-at"]')?.textContent).toContain('09-05');
     expect(container.querySelector('h3')?.textContent).toBe('댓글 0');
@@ -72,7 +72,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('loaded(n건) — 목록·수집시각·제목의 카운트 모두 뜬다', async () => {
     const face = loadedFace([baseComment({})]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(1);
     expect(container.querySelector('[data-testid="comments-item-author"]')?.textContent).toBe('홍길동');
     expect(container.querySelector('h3')?.textContent).toBe('댓글 1');
@@ -84,25 +84,38 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
   it('activeCount는 서버 전체 수를 쓴다(이 페이지의 comments.length가 아니다)', async () => {
     const face = loadedFace([baseComment({})], { activeCount: 42 });
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('h3')?.textContent).toBe('댓글 42');
   });
 
-  it('작성자 표시명이 없으면(null) 지어내지 않고 "모름" 폴백', async () => {
+  // story #3517(유나 §22-10②, PO 確定 2026-09-05) — 작성자 없으면 이 화면 전용
+  // 문구("작성자 정보 없음")를 쓴다(공유 「모름」이 아니다 — 구체적으로 뭘 못
+  // 받았는지 말한다).
+  it('작성자 표시명이 없으면(null) "작성자 정보 없음"(공유 「모름」이 아니다)', async () => {
     const face = loadedFace([baseComment({ authorDisplayName: null })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
-    expect(container.querySelector('[data-testid="comments-item-author"]')?.textContent).toBe(koMessages.content.originAuthorUnknown);
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
+    expect(container.querySelector('[data-testid="comments-item-author"]')?.textContent).toBe('작성자 정보 없음');
   });
 
-  // BE 계약상 external_created_at은 null 가능(채널이 시각을 안 줄 수 있다).
-  it('externalCreatedAt이 null이면 그 자리 자체를 안 그린다(지어내지 않는다)', async () => {
-    const face = loadedFace([baseComment({ externalCreatedAt: null })]);
+  it('externalCreatedAt이 있으면 그 값을 그대로 보인다(작성 시각)', async () => {
+    const face = loadedFace([baseComment({ externalCreatedAt: '2026-09-05T09:00:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
-    const item = container.querySelector('[data-testid="comments-item"]')!;
-    const timeSpans = item.querySelectorAll(':scope > div:first-child > span');
-    expect(timeSpans.length).toBe(1); // author span만 남는다(시각 span 미생성).
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
+    expect(container.querySelector('[data-testid="comments-item-authored-at"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="comments-item-captured-at"]')).toBeNull();
+  });
+
+  // story #3517(유나 §22-10②) — external_created_at이 없으면 capturedAt으로
+  // 폴백하되 라벨을 "작성"이 아니라 "수집"으로 바꾼다(captured_at을 작성 시각으로
+  // 적으면 거짓말 — 우리가 발견한 시각일 뿐이다).
+  it('externalCreatedAt이 null이면 capturedAt+"수집" 라벨로 폴백한다(지어내지 않되 자리를 비우지 않는다)', async () => {
+    const face = loadedFace([baseComment({ externalCreatedAt: null, capturedAt: '2026-09-05T10:30:00Z' })]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
+    expect(container.querySelector('[data-testid="comments-item-authored-at"]')).toBeNull();
+    const capturedSpan = container.querySelector('[data-testid="comments-item-captured-at"]');
+    expect(capturedSpan?.textContent).toContain('수집');
   });
 });
 
@@ -111,7 +124,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('deletedAt이 있으면 목록에서 안 빠지고 "원본이 지워졌습니다" 안내가 뜬다', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(1);
     expect(container.querySelector('[data-testid="comments-item-deleted-note"]')?.textContent).toBe('원본이 지워졌습니다.');
   });
@@ -119,14 +132,14 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('deletedAt이 null이면 지워짐 안내가 안 뜬다(회귀 0)', async () => {
     const face = loadedFace([baseComment({ deletedAt: null })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-item-deleted-note"]')).toBeNull();
   });
 
   it('지워진 댓글의 본문은 길이 무관 기본 접힘이다(forceCollapsed)', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z', bodyText: '짧은 글' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     const body = container.querySelector('[data-testid="comment-body-text"]');
     expect(body?.tagName).toBe('DETAILS'); // 짧아도 <details>(접힘) — 삭제 안 됐으면 <p>였을 길이.
     expect(body?.textContent).toContain('짧은 글'); // text는 보존돼 온다 — 숨기지 않는다.
@@ -135,7 +148,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('지워진 댓글엔 행 액션(작업으로 전환·답변)이 아예 안 그려진다(비활성이 아니라 부재)', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).toBeNull();
     expect(container.querySelector('[data-testid="comments-item-reply"]')).toBeNull();
     expect(container.querySelector('[data-comment-reply-status-chip]')).toBeNull(); // 답변 상태 칩도(액션 축 전체가 무의미).
@@ -144,50 +157,30 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
   it('deletedCount>0이면 헤더에 "지워진 댓글 {n}건" 안내가 뜬다(서버 전체 수)', async () => {
     const face = loadedFace([baseComment({ deletedAt: '2026-09-05T11:00:00Z' })], { deletedCount: 3 });
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-deleted-count"]')?.textContent).toBe('지워진 댓글 3건');
   });
 
   it('deletedCount=0이면 그 안내 줄 자체가 안 뜬다', async () => {
     const face = loadedFace([baseComment({})], { deletedCount: 0 });
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
     expect(container.querySelector('[data-testid="comments-deleted-count"]')).toBeNull();
   });
 });
 
-describe('CommentsSection — 답변 상태 6종 × 행 액션(story #3517 §22-④, 지워지지 않은 댓글만)', () => {
-  const STATUSES: CommentReplyStatus[] = ['none', 'draft', 'submitted', 'approved', 'published', 'failed'];
-
-  for (const status of STATUSES) {
-    it(`replyStatus=${status} — 그 댓글 행에 해당 칩이 선다`, async () => {
-      const face = loadedFace([baseComment({ replyStatus: status })]);
-      const { container, root } = mount();
-      await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={vi.fn()} />)); });
-      expect(container.querySelector(`[data-comment-reply-status-chip="${status}"]`)).not.toBeNull();
-    });
-  }
-
-  it('「작업으로 전환」 클릭 — 그 댓글 객체 그대로 콜백에 전달', async () => {
-    const comment = baseComment({});
-    const onConvertToTask = vi.fn();
-    const face = loadedFace([comment]);
+// story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로 전환·답변)·
+// 답변 상태 칩은 이 슬라이스에서 렌더 자체를 안 한다("아직 없는 기능은 안 그린다").
+// 조각②(답변/작업전환 엔드포인트) PR에서 이 자리에 다시 배선하며 이 describe가
+// 되살아난다 — CommentReplyStatus 진리표 6종 테스트도 그때 복원.
+describe('CommentsSection — 행 액션 부재(story #3517 조각①, 조각②에서 배선)', () => {
+  it('댓글이 있어도 작업전환·답변 버튼·답변상태 칩이 전혀 안 그려진다', async () => {
+    const face = loadedFace([baseComment({ replyStatus: 'approved' })]);
     const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={onConvertToTask} onReply={vi.fn()} />)); });
-    const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
-    await act(async () => { btn.click(); });
-    expect(onConvertToTask).toHaveBeenCalledWith(comment);
-  });
-
-  it('「답변」 클릭 — 그 댓글 객체 그대로 콜백에 전달', async () => {
-    const comment = baseComment({});
-    const onReply = vi.fn();
-    const face = loadedFace([comment]);
-    const { container, root } = mount();
-    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onConvertToTask={vi.fn()} onReply={onReply} />)); });
-    const btn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
-    await act(async () => { btn.click(); });
-    expect(onReply).toHaveBeenCalledWith(comment);
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} />)); });
+    expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).toBeNull();
+    expect(container.querySelector('[data-testid="comments-item-reply"]')).toBeNull();
+    expect(container.querySelector('[data-comment-reply-status-chip]')).toBeNull();
   });
 });
 
@@ -220,7 +213,7 @@ describe('deriveCommentsFace(story #3517, BE #3865 조각① 응답 매핑)', ()
       kind: 'loaded', capturedAt: '2026-09-05T10:00:00Z', activeCount: 1, deletedCount: 0,
       comments: [{
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
-        externalCreatedAt: '2026-09-05T09:00:00Z', deletedAt: null, replyStatus: 'none',
+        externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null, replyStatus: 'none',
       }],
     });
   });
@@ -235,12 +228,16 @@ describe('deriveCommentsFace(story #3517, BE #3865 조각① 응답 매핑)', ()
     expect((face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!.replyStatus).toBe('none');
   });
 
-  it('active_count=0인데 deleted_count>0이면(전부 지워짐) empty가 아니라 loaded(지워진 행만 있다)', () => {
+  // story #3517(유나 §22-10①·⑨, PO 確定 2026-09-05 정정) — "댓글 없음" 판정은
+  // active_count 하나만 본다. deleted_count>0(전부 지워짐)이어도 active_count=0이면
+  // "댓글 없음" 얼굴이다 — deletedCount는 그 empty 얼굴 자체가 들고 있어(SectionHeader
+  // 의 "지워진 댓글 {n}건" 안내) 지워진 사실 자체가 사라지진 않는다.
+  it('active_count=0인데 deleted_count>0이면(전부 지워짐)도 empty(deletedCount는 empty 얼굴에 실린다)', () => {
     const face = deriveCommentsFace(rawResponse({
       active_count: 0, deleted_count: 1,
       comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: null, text: 'x', external_created_at: null, captured_at: 't', deleted_at: '2026-09-05T11:00:00Z' }],
     }));
-    expect(face.kind).toBe('loaded');
+    expect(face).toEqual({ kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', activeCount: 0, deletedCount: 1 });
   });
 
   it('replyStatusFor를 주면 그 함수의 판정을 그대로 쓴다', () => {
