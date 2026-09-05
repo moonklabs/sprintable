@@ -102,6 +102,18 @@ interface ChannelPostDraftDetail {
   source_changed?: boolean | null;
 }
 
+// story #3472 2부(BE 3471/#3825 계약, 유나 §16-7 정본 2026-09-05) — 초안 create/
+// update 응답과 상신 422 CONTENT_RULE_VIOLATION이 공유하는 shape. field는 이 화면의
+// 두 입력(text/link_url)과 정확히 일치한다. severity가 계약에 없는 것은 "알고 줄인
+// 것"(첫 슬라이스=기계 검사 둘 다 차단) — 그래서 문구 키를 …BlockedHint 꼴로 짓는다.
+interface ContentRuleViolation {
+  code: string;
+  field: 'text' | 'link_url';
+  value: string;
+  hint_key: string;
+  settings_path: string;
+}
+
 interface ChannelPostVersion {
   version_id: string;
   version: number;
@@ -187,6 +199,19 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
   }
 }
 
+// story #3472 2부(§16-7) — code로 사람 문구를 고른다(hint_key는 BE 계약에 있으나
+// 값 자체가 아직 정해지지 않아 code를 1차 판정축으로 쓴다 — code는 그라운딩된 두
+// 값(banned_term·utm_missing)이 확실하다). 미지 code는 지어내지 않고 제네릭으로.
+function contentRuleViolationHint(code: string, value: string, t: (key: string, values?: Record<string, string | number>) => string): string {
+  if (code === 'banned_term') return t('contentRuleBannedTermBlockedHint', { value });
+  if (code === 'utm_missing') return t('contentRuleUtmMissingBlockedHint');
+  return t('contentRuleGenericBlockedHint');
+}
+
+// ⛔§16-7 "settings_path를 그대로 href로 쓰지 않는다" — FE가 아는 값만 라우트로
+// 매핑하고, 모르는 값이면 링크를 그리지 않는다(경로 결정권을 BE로 넘기지 않는다).
+const KNOWN_CONTENT_RULES_SETTINGS_PATH = '/organization/content-rules';
+
 export default function ChannelPostEditPage() {
   const { orgId, role } = useDashboardContext();
   const params = useParams();
@@ -235,6 +260,11 @@ export default function ChannelPostEditPage() {
   const [linkUrl, setLinkUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string; raw?: string } | null>(null);
+  // story #3472 2부(BE 3471/#3825, 유나 §16-7 정본 2026-09-05) — 초안 create/update
+  // 응답과 상신 422 CONTENT_RULE_VIOLATION이 함께 채우는 하나의 목록. "필드 옆" 렌더
+  // 단위가 이것 하나다 — 상신 422는 새 배너를 만들지 않고 이 state를 서버 응답으로
+  // 갱신한다(§16-7 "상신 422는 새 배너를 만들지 않는다").
+  const [violations, setViolations] = useState<ContentRuleViolation[]>([]);
 
   // story #3422 ②-d — 예약 상신 다이얼로그. serverError는 클라 검증 통과 뒤에도 상신
   // 사이 시각이 흘러 서버가 422로 거부하는 경로(parseScheduledAtServerError)만 담는다
@@ -378,6 +408,10 @@ export default function ChannelPostEditPage() {
   const textLength = channelTextLength(text);
   // AC6 — 한도 미선언(null)이면 초과 판정 자체를 안 한다(지어내지 않는다, 상신은 막지 않음).
   const isOverLimit = typeof maxTextLength === 'number' && textLength > maxTextLength;
+  // story #3472 2부(§16-7) — "강도는 하나다 — 편집 중에도 「이대로는 상신할 수
+  // 없습니다」를 말한다"·"severity가 없는 것은 알고 줄인 것"(첫 슬라이스=기계 검사
+  // 둘 다 차단). 지금 계약엔 warn이 없어 위반이 있으면 전부 차단.
+  const hasBlockingViolations = violations.length > 0;
 
   const handleSave = async () => {
     if (!orgId || !draft || imageUploadInProgress) return;
@@ -396,10 +430,15 @@ export default function ChannelPostEditPage() {
       });
       if (res.ok) {
         setSaveMessage({ type: 'success', text: t('editSaved') });
+        // story #3472 2부 — create 응답의 violations[]로 필드 옆 목록을 갱신한다(§16-7
+        // "기본 처리는 필드 옆 목록을 서버 응답으로 갱신"). 계약에 없으면(BE 미착지) 빈
+        // 배열 — 화면은 아무것도 지어내지 않는다.
+        const json = (await res.json().catch(() => null)) as { data?: { violations?: ContentRuleViolation[] } } | null;
+        setViolations(json?.data?.violations ?? []);
         const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`);
         if (versionsRes.ok) {
-          const json = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
-          if (json?.data) setVersions(json.data);
+          const versionsJson = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
+          if (versionsJson?.data) setVersions(versionsJson.data);
         }
       } else {
         const body = await res.json().catch(() => null);
@@ -420,7 +459,7 @@ export default function ChannelPostEditPage() {
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
   const handleSubmitForApproval = async (scheduledAt?: string) => {
-    if (!orgId || !draft || isOverLimit || imageUploadInProgress) return;
+    if (!orgId || !draft || isOverLimit || hasBlockingViolations || imageUploadInProgress) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
     if (scheduledAt) setScheduleServerError(null);
@@ -443,6 +482,15 @@ export default function ChannelPostEditPage() {
         }
       } else {
         const body = await res.json().catch(() => null);
+        // story #3472 2부(유나 §16-7) — "상신 422는 새 배너를 만들지 않는다". 위반은
+        // 이미 필드 옆에 서 있던 것이라 여기서는 그 목록을 서버 응답으로 갱신만 하고
+        // 끝낸다(submitResult 일반 오류 배너로 안 떨어뜨린다). "화면 밖 필드"·"화면에
+        // 없던 새 위반" 두 예외 배너는 이번 슬라이스 범위 밖(후속).
+        const ruleViolationBody = body as { error?: { code?: string; violations?: ContentRuleViolation[] } } | null;
+        if (ruleViolationBody?.error?.code === 'CONTENT_RULE_VIOLATION') {
+          setViolations(ruleViolationBody.error.violations ?? []);
+          return;
+        }
         // story #3422 ②-d(페드루 PO 지적 2026-09-04 10:49Z) — scheduled_at을 실은
         // 요청만 이 폴백을 본다(예약 아닌 상신에서 이 shape가 뜰 리 없다 — 그래도
         // 방어적으로 scheduledAt 유무로 먼저 좁힌다). 감지되면 다이얼로그를 안 닫고
@@ -1336,6 +1384,18 @@ export default function ChannelPostEditPage() {
                 : `${textLength}`}
           </span>
         </div>
+        {/* story #3472 2부(유나 §16-7) — "그 필드 아래" 그 필드 것만 목록. 경고색
+            없음(아직 아무것도 실패하지 않았다·사람이 고치는 중). FailureActionBadge
+            동형 아님(하우스 폼 검증 관례=필드 아래 한 줄, channel-post-text-field-
+            empty-reason과 같은 톤). */}
+        {violations.filter((v) => v.field === 'text').map((v, i) => (
+          <p key={`${v.code}-${i}`} className="text-xs text-muted-foreground" data-testid="channel-post-rule-violation-text">
+            {contentRuleViolationHint(v.code, v.value, t)}{' '}
+            {v.settings_path === KNOWN_CONTENT_RULES_SETTINGS_PATH ? (
+              <Link href={v.settings_path} className="underline">{t('contentRuleLinkLabel')}</Link>
+            ) : null}
+          </p>
+        ))}
         <input
           value={linkUrl}
           onChange={(e) => setLinkUrl(e.target.value)}
@@ -1343,6 +1403,14 @@ export default function ChannelPostEditPage() {
           className="w-full rounded-md border border-border p-2 text-sm"
           data-testid="channel-post-link-field"
         />
+        {violations.filter((v) => v.field === 'link_url').map((v, i) => (
+          <p key={`${v.code}-${i}`} className="text-xs text-muted-foreground" data-testid="channel-post-rule-violation-link">
+            {contentRuleViolationHint(v.code, v.value, t)}{' '}
+            {v.settings_path === KNOWN_CONTENT_RULES_SETTINGS_PATH ? (
+              <Link href={v.settings_path} className="underline">{t('contentRuleLinkLabel')}</Link>
+            ) : null}
+          </p>
+        ))}
       </div>
 
       {/* story #3428(T3-M·§17-16) — image_max_count<=0(미지원 채널, 또는 아직 모른다)
@@ -1450,7 +1518,7 @@ export default function ChannelPostEditPage() {
         </Button>
         <Button
           onClick={() => void handleSubmitForApproval()}
-          disabled={submitting || isOverLimit || imageUploadInProgress}
+          disabled={submitting || isOverLimit || hasBlockingViolations || imageUploadInProgress}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
@@ -1462,7 +1530,7 @@ export default function ChannelPostEditPage() {
         <Button
           variant="outline"
           onClick={() => setScheduleDialogOpen(true)}
-          disabled={submitting || isOverLimit || blockedByCommandInFlight || imageUploadInProgress}
+          disabled={submitting || isOverLimit || hasBlockingViolations || blockedByCommandInFlight || imageUploadInProgress}
           data-testid="channel-post-schedule-submit-button"
         >
           {t('channelPostsScheduleSubmitCta')}
@@ -1482,14 +1550,21 @@ export default function ChannelPostEditPage() {
           {t('channelPostsOverLimitReason')}
         </p>
       ) : null}
+      {/* story #3472 2부(§16-7) — "그래서 못 한다"는 버튼 밖·비활성(§17-13과 같은 규율).
+          "필드 아래"(무엇이 걸렸나)와 자리가 다르다 — 여기는 개수만 세고 가리킨다. */}
+      {!isOverLimit && hasBlockingViolations ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-rule-violation-blocked-reason">
+          {t('contentRuleSubmitBlockedHint', { count: violations.length })}
+        </p>
+      ) : null}
       {/* B2(페드루 PO, 2026-09-04 13:27Z) — 이미지 업로드 진행 중엔 저장/상신이 왜
           막혔는지 버튼 밖에 밝힌다(isOverLimit과 동시에 뜰 수 있어 둘 다 없을 때만). */}
-      {!isOverLimit && imageUploadInProgress ? (
+      {!isOverLimit && !hasBlockingViolations && imageUploadInProgress ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-in-progress-reason">
           {t('channelPostsImageUploadInProgressReason')}
         </p>
       ) : null}
-      {!isOverLimit && blockedByCommandInFlight ? (
+      {!isOverLimit && !hasBlockingViolations && blockedByCommandInFlight ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
           {t.rich(commandInFlightReasonKey, {
             link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
