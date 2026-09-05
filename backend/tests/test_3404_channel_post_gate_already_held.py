@@ -179,11 +179,13 @@ def _draft_body(*, work_item_id, connection_id, text="채널 포스트 본문입
 
 
 @pytest.mark.anyio
-async def test_second_draft_submit_blocked_while_first_holds_approved_gate():
-    """⭐핵심 pin — draft A(연결 1) 상신·승인 뒤, 같은 work_item의 draft B(연결 2)를
-    상신하면 409 CHANNEL_POST_GATE_ALREADY_HELD로 거부되고, A의 gate.status는 approved
-    그대로 남는다(가드 없으면: B의 상신이 같은 게이트를 B의 내용으로 재봉인+pending으로
-    되돌려 이 assert가 실패한다 — 그게 이 pin의 존재 이유)."""
+async def test_second_draft_submit_different_connection_both_succeed():
+    """story #3478(0328, 2026-09-05 후속) — 이 pin은 원래 "다른 connection의 draft도
+    막힌다"(work_item 단위 게이트)를 증명했다. #3478이 게이트 슬롯을 (work_item,
+    scope_key=connection_id) 단위로 바꿔 이 정확히 그 시나리오(같은 work_item·다른
+    목적지)를 **허용**하는 게 스토리 AC 자체가 됐다 — 옛 기대값(409)은 지금은 버그
+    재도입 여부를 재는 회귀 pin(둘 다 200이어야 정상, 하나라도 409면 scope_key 축이
+    깨진 것)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -222,16 +224,13 @@ async def test_second_draft_submit_blocked_while_first_holds_approved_gate():
             r_submit_b = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_b_id}/submit", json={},
             )
-            assert r_submit_b.status_code == 409, r_submit_b.text
-            body = r_submit_b.json()["error"]
-            assert body["code"] == "CHANNEL_POST_GATE_ALREADY_HELD"
-            assert body["holding_draft_id"] == draft_a_id
-            assert body["holding_channel"] == "threads"
-            assert body["holding_connection_id"] == str(connection_a)
+            assert r_submit_b.status_code == 200, r_submit_b.text
+            gate_b_id = uuid.UUID(r_submit_b.json()["gate_id"])
+            assert gate_b_id != gate_a_id, "다른 목적지인데 같은 게이트를 공유했다 — scope_key 축이 안 먹은 것"
 
         async with Session() as s:
             assert await _get_gate_status(s, gate_a_id) == "approved", (
-                "draft B의 상신 시도가 draft A의 승인을 pending으로 되돌렸다 — 가드가 안 걸린 것"
+                "draft B의 상신이 draft A(다른 목적지)의 승인을 건드렸다 — 격리가 깨진 것"
             )
     finally:
         app.dependency_overrides.clear()

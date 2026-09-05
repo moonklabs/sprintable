@@ -438,10 +438,15 @@ async def _reseal_gate_on_new_version(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, version: SitePostVersion,
     draft: SitePostDraft,
 ) -> None:
+    # story #3478(0328) — scope_key도 필터에 넣는다. 안 넣으면 같은 work_item에 목적지가
+    # 다른 게이트가 둘(예: WordPress+webhook) 있을 때 .scalar_one_or_none()이
+    # MultipleResultsFound(500)로 죽는다(dual-destination을 가능케 한 이 스토리 자체가
+    # 이 자리에서 새 500을 만들 뻔한 지점 — grep 전수 대조로 찾음).
     gate = (await db.execute(
         select(Gate)
         .where(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
+            Gate.scope_key == str(draft.connection_id or ""),
             Gate.status.in_(("pending", "approved")),
         )
         .with_for_update()
@@ -449,15 +454,16 @@ async def _reseal_gate_on_new_version(
     if gate is None:
         return
     # story f6d14476(발견 즉시 수정, AC1과 동일한 corruption class) — 이 훅은
-    # work_item_id만으로 게이트를 찾는다(draft 무관). 승인 대상이 아닌 다른 초안을
-    # 편집(새 버전 생성)했을 뿐인데 여기서 그 게이트를 되돌리거나(approved→pending)
-    # 조용히 재봉인하면(pending 유지) submit()을 거치지 않고도 동일한 파괴가 일어난다.
-    # 판정은 submit()과 같은 함수로 한다(story #3404에서 gate_service.py::
-    # resolve_gate_holder_draft_id로 추출 — channel_posts.py가 이 함수의 동형 훅에서도
-    # 같은 결함 클래스를 갖고 있어 공유하게 됐다).
+    # (work_item_id, scope_key)만으로 게이트를 찾는다(draft 무관, story #3478부터
+    # scope_key도 축에 편입). 승인 대상이 아닌 다른 초안을 편집(새 버전 생성)했을
+    # 뿐인데 여기서 그 게이트를 되돌리거나(approved→pending) 조용히 재봉인하면
+    # (pending 유지) submit()을 거치지 않고도 동일한 파괴가 일어난다. 판정은 submit()과
+    # 같은 함수로 한다(story #3404에서 gate_service.py::resolve_gate_holder_draft_id로
+    # 추출 — channel_posts.py가 이 함수의 동형 훅에서도 같은 결함 클래스를 갖고 있어
+    # 공유하게 됐다).
     from app.services.gate_service import resolve_gate_holder_draft_id
 
-    if resolve_gate_holder_draft_id(gate, this_draft_id=version.draft_id) is not None:
+    if await resolve_gate_holder_draft_id(db, gate, this_draft_id=version.draft_id) is not None:
         return
     if gate.status == "approved":
         # 승인된 뒤 편집 — pending으로 되돌리기만 한다. sealed_content_*는 절대 안 건드린다
@@ -652,17 +658,24 @@ async def submit_site_post_draft(
     from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id
 
+    # story #3478(0328) — scope_key=목적지(connection_id). 같은 work_item이 WordPress·
+    # webhook 등 여러 목적지로 각각 독립 게이트를 갖는다(work_item당 1건이던 제약의
+    # 근본수정 — 그라운딩 대조 결과, 이 슬롯은 channel_post와 공유하는 설계라 두
+    # 도메인 다 같은 규칙을 쓴다).
+    scope_key = str(draft.connection_id or "")
     existing = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
-        gate_type="external_publish", pr_number=None, repo_full_name=None,
+        gate_type="external_publish", pr_number=None, repo_full_name=None, scope_key=scope_key,
     )
 
-    # story f6d14476(PO 결정②, AC1) — 게이트 슬롯은 work_item 단위라, 이미 다른 초안이 그
-    # 게이트를 쥐고(pending/approved) 있으면 이 초안의 상신을 막는다. 판정 로직 자체는
-    # story #3404에서 gate_service.py::resolve_gate_holder_draft_id로 뽑아 channel_
-    # posts.py와 공유한다("모른다≠다르다"·자기 자신 재상신 허용 규칙 포함, 그 함수
-    # docstring 참고) — 여기선 그 판정 결과로 이 도메인 전용 에러(lang/slug)만 짓는다.
-    holding_draft_id = resolve_gate_holder_draft_id(existing, this_draft_id=draft.id)
+    # story f6d14476(PO 결정②, AC1) — 게이트 슬롯은 (work_item, scope_key) 단위(story
+    # #3478부터)라, 같은 목적지를 이미 다른 초안이 그 게이트를 쥐고(pending/approved
+    # 이면서 그 발행이 지금 실려 있음, story #3478 決定③) 있으면 이 초안의 상신을
+    # 막는다. 판정 로직 자체는 story #3404에서 gate_service.py::resolve_gate_holder_
+    # draft_id로 뽑아 channel_posts.py와 공유한다("모른다≠다르다"·자기 자신 재상신
+    # 허용 규칙 포함, 그 함수 docstring 참고) — 여기선 그 판정 결과로 이 도메인 전용
+    # 에러(lang/slug)만 짓는다.
+    holding_draft_id = await resolve_gate_holder_draft_id(db, existing, this_draft_id=draft.id)
     if holding_draft_id is not None:
         holder = await get_site_post_draft(db, org_id=org_id, draft_id=holding_draft_id)
         if holder is not None:
@@ -710,7 +723,7 @@ async def submit_site_post_draft(
         raise SitePostApproverRoleMissingError(org_id=org_id)
     gate = await create_gate(
         db, org_id, draft.work_item_id, "story", "external_publish",
-        requester_member_id, role_id, neutral_facts=neutral_facts,
+        requester_member_id, role_id, neutral_facts=neutral_facts, scope_key=scope_key,
     )
     # create_gate()의 기존-pending/approved 멱등 반환 분기는 neutral_facts 인자를 무시한다
     # (신규 생성·rejected 재오픈 경로에서만 반영) — 위 sha 동일성 조기 return을 안 탔다는 건
@@ -799,9 +812,11 @@ async def publish_site_post_from_draft(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
+    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
+        scope_key=str(draft.connection_id or ""),
     )
     if gate is None or gate.status != "approved":
         raise ExternalPublishGateNotApprovedError(
@@ -977,9 +992,11 @@ async def request_site_post_external_publish(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
+    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
+        scope_key=str(draft.connection_id or ""),
     )
     if gate is None or gate.status != "approved":
         raise ExternalPublishGateNotApprovedError(
