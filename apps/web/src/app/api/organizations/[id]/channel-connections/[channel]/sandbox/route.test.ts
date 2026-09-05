@@ -35,7 +35,7 @@ describe('/api/organizations/[id]/channel-connections/[channel]/sandbox (story #
     expect(resp.status).toBe(404);
   });
 
-  // story #3523 — 이 신규 라우트가 있는 이유 그 자체(카디르 QA #3873 발견 결함 클래스)의
+  // story #3523 — 이 신규 라우트가 있는 이유 그 자체(PO 실측 결함 클래스)의
   // 회귀가드: credential_kind가 'none'이 아닌 채널(예: threads)을 이 경로로 부르면
   // BE가 422 CHANNEL_SANDBOX_UNSUPPORTED로 거부한다 — 이 BFF는 그것도 그대로 통과시켜야
   // 한다(여기서 재해석·삼킴 0).

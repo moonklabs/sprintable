@@ -430,7 +430,7 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).toBeNull();
   });
 
-  // story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — handleCreateSandbox가
+  // story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — handleCreateSandbox가
   // 채널 문자열과 무관하게 항상 리터럴 `.../channel-connections/sandbox`로 고정돼 있어,
   // instagram_sandbox 카드의 「연결 만들기」를 눌러도 실은 Threads류 sandbox 연결을
   // 만드는 조용한 오분기였다. 이 테스트는 그 오분기 자체를 재현·고정한다 — 되돌리면

@@ -3,7 +3,7 @@ import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string; channel: string }> };
 
-// story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — 범용 샌드박스 연결
+// story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — 범용 샌드박스 연결
 // BFF. story 5b27b32f 당시 `.../channel-connections/sandbox`(채널 고정 literal)
 // BFF만 있었고, #3320 조각①이 BE에 `/instagram-sandbox`를 추가했을 때 이 FE에
 // 대응 BFF를 안 만들어(channels/page.tsx가 여전히 옛 sandbox literal 경로를

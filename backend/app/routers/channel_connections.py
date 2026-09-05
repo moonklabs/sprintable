@@ -488,7 +488,7 @@ async def _create_channel_sandbox_connection(
     verified_org_id: uuid.UUID,
     auth: AuthContext,
 ) -> ChannelConnectionResponse:
-    """story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — story 5b27b32f
+    """story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — story 5b27b32f
     (`/sandbox`)와 #3320 조각①(`/instagram-sandbox`)이 사실상 동일 로직을 채널마다
     새 라우트+하드코딩 문자열로 복제하던 것을 여기로 수렴한다. 채널이 늘 때마다
     라우트를 새로 여는 대신 어댑터 레지스트리 하나가 fail-closed 판정의 SSOT다:

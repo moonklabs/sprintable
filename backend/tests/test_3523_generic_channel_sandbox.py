@@ -1,4 +1,4 @@
-"""story #3523(카디르 QA #3873 실측 발견, PO 確定 2026-09-06) — 범용 채널 샌드박스
+"""story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — 범용 채널 샌드박스
 연결 엔드포인트(`POST /{org}/channel-connections/{channel}/sandbox`). story 5b27b32f
 (`/sandbox`)와 #3320 조각①(`/instagram-sandbox`)이 채널마다 라우트+하드코딩 문자열을
 복제하던 것을 수렴한다 — 판정 로직은 channel_connections.py::
@@ -182,27 +182,48 @@ async def test_generic_route_hosted_site_returns_422():
 
 
 @pytest.mark.anyio
-async def test_legacy_then_generic_route_upsert_same_row_not_duplicate():
-    """구 /instagram-sandbox로 먼저 연결을 만들고 신규 범용 라우트를 같은 채널로
-    다시 부르면, 새 행이 아니라 같은 (org, channel, account_id) 행이 upsert된다
-    (account_id의 `_`→`-` 치환 규칙이 기존 하드코딩 문자열과 정확히 일치해야
-    성립 — 이 규칙이 틀리면 여기서 새 UUID가 나와 실패한다)."""
+@pytest.mark.parametrize(
+    "channel,legacy_account_id",
+    [("sandbox", "sandbox-{org_id}"), ("instagram_sandbox", "instagram-sandbox-{org_id}")],
+)
+async def test_generic_route_upserts_preexisting_legacy_row_not_duplicate(channel, legacy_account_id):
+    """카디르 QA(뮤테이션) 지적 — 이전 버전은 구 라우트·신규 라우트 둘 다 같은
+    헬퍼(_create_channel_sandbox_connection)를 태워 account_id 치환(`_`→`-`)을
+    빼도 초록이 나오는 동어반복이었다(둘 다 같은 코드로 계산하니 항상 일치).
+
+    진짜 위험은 "배포 前 코드가 이미 만들어 둔 기존 행"(리터럴 `sandbox-{org}`·
+    `instagram-sandbox-{org}`)과 새 규칙이 안 맞아 dev에서 행이 갈라지는 것이다
+    — 그래서 이 테스트는 헬퍼를 거치지 않고 `upsert_channel_connection`을 직접
+    불러 그 리터럴 account_id로 기존 행을 먼저 심은 뒤, 범용 라우트를 호출해
+    같은 id가 돌아오는지 확인한다(치환 규칙을 빼면 여기서 새 UUID가 나와야
+    RED)."""
     from app.main import app
+    from app.services.channel_adapters import get_channel_adapter
+    from app.services.channel_connection import upsert_channel_connection
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, _ = await _seed_org(s)
-        async with await _owner_client(app, Session, org_id) as client:
-            r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/instagram-sandbox")
-            assert r1.status_code == 201, r1.text
-            id1 = r1.json()["id"]
+            owner_id = await _seed_human(s, org_id, role="owner")
+            adapter = get_channel_adapter(channel)
+            legacy_row = await upsert_channel_connection(
+                s, org_id=org_id, channel=channel, account_id=legacy_account_id.format(org_id=org_id),
+                account_label=adapter.display_name, credential_kind=adapter.credential_kind,
+                access_token="sandbox-dummy-access-token", refresh_token=None,
+                token_expires_at=None, refresh_mode=adapter.refresh_mode,
+                scopes=adapter.scope.split(","), connected_by=owner_id,
+            )
+            legacy_id = str(legacy_row.id)
 
-            r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/instagram_sandbox/sandbox")
-            assert r2.status_code == 201, r2.text
-            id2 = r2.json()["id"]
-
-        assert id1 == id2, "구 라우트와 신규 범용 라우트가 서로 다른 행을 만들면 안 된다(멱등 upsert 위반)"
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            resp = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/{channel}/sandbox")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["id"] == legacy_id, (
+            "범용 라우트의 account_id 치환 규칙이 배포 前 리터럴 문자열과 안 맞으면 "
+            "새 행이 생겨 여기서 실패한다(dev 기존 연결이 갈라지는 실사고 재현)"
+        )
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
