@@ -174,6 +174,12 @@ export default function ContentRulesPage() {
   // 정정, 채널 연결 화면과 동형 권한 폭).
   const canEditRules = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('contentRules');
+  // PO REQUIRED②(2026-09-05, PR#3848 Design 재검) — 금액 형식 키(generationBudgetAmountKrw/
+  // Usd)를 content·contentRules 두 네임스페이스에 중복 정의하면 한쪽만 고쳐지는 조용한
+  // 갈림이 난다. 공용 네임스페이스(content, generation-budget-indicator.tsx·
+  // generation-budget-exceeded-banner.tsx와 동일) 하나만 두고 이 화면은 그 네임스페이스로
+  // 별도 t를 받아 formatMinorCurrency에만 쓴다.
+  const tContent = useTranslations('content');
   const locale = useLocale();
 
   const [rules, setRules] = useState<ContentRules>(EMPTY_RULES);
@@ -535,7 +541,7 @@ export default function ContentRulesPage() {
                   <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-readonly">{t('generationBudgetSuspendedReadonly')}</p>
                 ) : (
                   <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-readonly">
-                    {formatMinorCurrency(rules.generation_budget.limit_minor, rules.generation_budget.currency, locale, t)}
+                    {formatMinorCurrency(rules.generation_budget.limit_minor, rules.generation_budget.currency, locale, tContent)}
                   </p>
                 )}
                 {fieldErrors.generation_budget ? <p className="text-xs text-destructive">{fieldErrors.generation_budget}</p> : null}
@@ -548,14 +554,7 @@ export default function ContentRulesPage() {
                 <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-period">{t('generationBudgetPeriodMonth')}</p>
               </div>
 
-              {!canEditRules ? <p className="text-xs text-muted-foreground">{t('readOnlyReason')}</p> : null}
               <p className="text-xs text-muted-foreground">{t('generationBudgetHint')}</p>
-
-              {canEditRules ? (
-                <Button size="sm" onClick={() => void handleSave()} disabled={saving} data-testid="content-rules-generation-budget-save-button">
-                  {saving ? t('savingCta') : t('saveAction')}
-                </Button>
-              ) : null}
             </SectionCardBody>
           </SectionCard>
         </>

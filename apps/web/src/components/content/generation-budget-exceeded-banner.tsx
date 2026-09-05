@@ -31,7 +31,9 @@ export function GenerationBudgetExceededBanner({
     <Alert variant="destructive" role="alert" data-testid="generation-budget-exceeded-banner">
       <AlertDescription>
         <span className="block">{t('generationBudgetExceededFact')}</span>
-        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs" role="list">
+        {/* PO 관찰ⓐ(2026-09-05, PR#3848 Design 재검) — 자식이 <span>뿐이라 listitem이
+            0개인데 role="list"만 있었다 — 틀린 role은 없는 것보다 나쁘다, 제거. */}
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
           <span className="text-muted-foreground">{t('generationBudgetLimitLabel')}</span>
           <span data-testid="generation-budget-exceeded-limit">{formatMinorCurrency(limitMinor, currency, locale, t)}</span>
           <span className="text-muted-foreground">{t('generationBudgetSpentLabel')}</span>

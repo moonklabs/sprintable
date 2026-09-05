@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 import {
   GenerationBudgetIndicator, formatMinorCurrency, majorToMinor, minorToMajor,
   type GenerationBudgetState,
@@ -31,6 +32,16 @@ async function renderIndicator(state: GenerationBudgetState, variant: 'full' | '
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+        <GenerationBudgetIndicator state={state} variant={variant} />
+      </NextIntlClientProvider>,
+    );
+  });
+}
+
+async function renderIndicatorEn(state: GenerationBudgetState, variant: 'full' | 'compact' = 'full') {
+  await act(async () => {
+    root.render(
+      <NextIntlClientProvider locale="en" messages={enMessages} timeZone="UTC">
         <GenerationBudgetIndicator state={state} variant={variant} />
       </NextIntlClientProvider>,
     );
@@ -172,5 +183,28 @@ describe('GenerationBudgetIndicator (story #3500, doc a0da40c9 §19 — BE #3498
     );
     expect(byTestId('generation-budget-remaining-compact')?.textContent).toBe('남음 0원');
     expect(byTestId('generation-budget-suspended')).toBeNull();
+  });
+});
+
+describe('⭐PO Design 재검①(2026-09-05, PR#3848) — en 로케일 KRW 표기는 실 en.json 값으로', () => {
+  // 유나 정본: 자국(ko) 통화는 관용 표기("원"), 외국(en에서 본 KRW)은 국제 기호("₩").
+  // 이 테스트가 실제 en.json 콘텐츠로 렌더한다 — stubT 단위 테스트로는 이 회귀를 못
+  // 잡는다(그 stub이 정답을 그대로 베낀 것이라 실 메시지 파일 오타를 놓친다).
+  it('KRW 카드 헤더가 en에서 "원"이 아니라 "₩"로 뜬다', async () => {
+    await renderIndicatorEn(
+      { status: 'ok', limitMinor: 100000, spentMinor: 0, remainingMinor: 100000, currency: 'KRW', period: 'month' },
+      'full',
+    );
+    const text = byTestId('generation-budget-remaining-full')?.textContent ?? '';
+    expect(text).toContain('₩100,000');
+    expect(text).not.toContain('원');
+  });
+
+  it('USD는 en에서도 ko와 동형으로 "$"', async () => {
+    await renderIndicatorEn(
+      { status: 'ok', limitMinor: 50000, spentMinor: 0, remainingMinor: 50000, currency: 'USD', period: 'month' },
+      'compact',
+    );
+    expect(byTestId('generation-budget-remaining-compact')?.textContent).toBe('$500.00 left');
   });
 });

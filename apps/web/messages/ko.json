@@ -4986,8 +4986,6 @@
     "generationBudgetPeriodMonth": "월",
     "generationBudgetNotSet": "정책 없음",
     "generationBudgetSuspendedReadonly": "정지",
-    "generationBudgetHint": "한도를 0으로 두면 생성이 전부 정지됩니다. 비우면 한도 자체가 없습니다(무제한과는 다릅니다 — 정책이 아예 없다는 뜻입니다).",
-    "generationBudgetAmountKrw": "{amount}원",
-    "generationBudgetAmountUsd": "${amount}"
+    "generationBudgetHint": "한도를 0으로 두면 생성이 전부 정지됩니다. 비우면 한도 자체가 없습니다(무제한과는 다릅니다 — 정책이 아예 없다는 뜻입니다)."
   }
 }

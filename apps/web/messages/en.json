@@ -2434,7 +2434,7 @@
     "generationBudgetEstimatedCostLabel": "Estimated generation cost (optional)",
     "generationBudgetExceededFact": "This exceeds the generation cost budget.",
     "generationBudgetExceededAction": "An owner or admin can change the limit on the content rules screen.",
-    "generationBudgetAmountKrw": "{amount}원",
+    "generationBudgetAmountKrw": "₩{amount}",
     "generationBudgetAmountUsd": "${amount}",
     "channelPostsApprovalLinkPreviewLabel": "Link that will be attached",
     "channelPostsExternalIdLabel": "Post ID",
@@ -4986,8 +4986,6 @@
     "generationBudgetPeriodMonth": "month",
     "generationBudgetNotSet": "No policy set",
     "generationBudgetSuspendedReadonly": "Suspended",
-    "generationBudgetHint": "Setting the limit to 0 suspends all generation. Leaving it blank means no policy at all (different from unlimited).",
-    "generationBudgetAmountKrw": "{amount}원",
-    "generationBudgetAmountUsd": "${amount}"
+    "generationBudgetHint": "Setting the limit to 0 suspends all generation. Leaving it blank means no policy at all (different from unlimited)."
   }
 }
