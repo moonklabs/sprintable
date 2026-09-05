@@ -1291,6 +1291,11 @@
       "file": "tests/test_3523_generic_channel_sandbox.py",
       "sec": 137.0,
       "source": "story-3523-generic-channel-sandbox-route(카디르 QA #3877 CI 가드 지적 — PR 파일 목록에 미등재였음. 로컬 raw pytest 8건 실측치(22.76s)를 CI 배율(~6x, story #3383) 보수적으로 반영한 137s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3522_check_constraint_mirror_guard.py",
+      "sec": 280.0,
+      "source": "story-3522-check-constraint-mirror-guard(PR 개설 前 선제 등재 — 이 파일은 테스트마다 실 alembic upgrade head를 전용 임시 DB에 두 번(마이그·create_all) 돌려 무겁다. 로컬 raw pytest 3건 46.49s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 280s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

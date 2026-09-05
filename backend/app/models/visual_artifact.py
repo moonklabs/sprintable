@@ -17,6 +17,11 @@ class VisualArtifact(Base):
     안 붙는 독립 artifact도 허용, blueprint §2가 story 종속을 강제하지 않음).
     """
     __tablename__ = "visual_artifacts"
+    __table_args__ = (
+        # story #3522(BE·위생, 2026-09-06) — 마이그(0171) raw SQL 미러. ARTIFACT_
+        # SOURCES와 값 집합 동기.
+        CheckConstraint("source IN ('created','imported')", name="ck_visual_artifacts_source"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
@@ -194,6 +199,11 @@ class ArtifactExport(Base):
     BE가 nodes 트리를 직렬화해 즉시 생성(렌더 불요·client-trust 이슈 없음).
     """
     __tablename__ = "artifact_exports"
+    __table_args__ = (
+        # story #3522(BE·위생, 2026-09-06) — 마이그(0173) raw SQL 미러. ARTIFACT_
+        # EXPORT_FORMATS와 값 집합 동기.
+        CheckConstraint("format IN ('png','html')", name="ck_artifact_exports_format"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     artifact_id: Mapped[uuid.UUID] = mapped_column(
