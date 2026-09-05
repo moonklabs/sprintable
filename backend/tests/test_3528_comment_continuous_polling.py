@@ -386,6 +386,53 @@ async def test_backoff_mutation_check_removing_next_attempt_at_lets_immediate_re
 
 
 @pytest.mark.anyio
+async def test_org_cap_rank_ignores_publications_on_comment_incapable_channels(monkeypatch):
+    """페드루 PO 비차단①(2026-09-06, #3882 리뷰) — 상한 순위 카운트는 댓글 수집을
+    지원하는 채널(supports_fetch_replies=True)만 센다. hosted_site(미지원)로 더
+    최근에 발행된 게 상한 수만큼 있어도, 그건 이 폴링 자원을 안 쓰니 대상
+    publication(sandbox)의 순위를 안 밀어야 한다(상한을 1로 낮춰도 통과)."""
+    import app.services.channel_post_comments as comments_module
+    from sqlalchemy import select
+    from app.models.channel_post_comment import CommentCollectionSchedule
+    from app.models.channel_publication import ChannelPublication
+
+    monkeypatch.setattr(comments_module, "_ACTIVE_PUBLICATIONS_ORG_CAP", 1)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            now = datetime.now(timezone.utc)
+
+            for i in range(3):
+                newer_hosted_site_pub = await _seed_channel_publication(
+                    s, org_id=org_id, connection_id=conn.id, channel="hosted_site", external_id=f"newer-hs-{i}",
+                )
+                row = await s.get(ChannelPublication, newer_hosted_site_pub.id)
+                row.published_at = now - timedelta(hours=1)
+                await s.commit()
+
+            target_pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="target",
+            )
+            target_row = await s.get(ChannelPublication, target_pub.id)
+            target_row.published_at = now - timedelta(hours=2)
+            await s.commit()
+
+            await _seed_due_schedule_row(s, org_id=org_id, publication_id=target_pub.id, external_id="target")
+            counts = await comments_module.process_due_comment_collections(s, now=now)
+            assert counts["captured"] == 1, counts
+
+            rows = (await s.execute(
+                select(CommentCollectionSchedule).where(CommentCollectionSchedule.publication_id == target_pub.id)
+            )).scalars().all()
+            assert len(rows) == 2, "hosted_site(댓글 미지원) 발행물은 순위에 안 세야 재생성이 통과함"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_org_cap_200_blocks_regeneration_for_older_publications(monkeypatch):
     """AC3 — org당 상한 200. 이 publication보다 최근에 발행된(14일 활성 창 안)
     publication이 200개 이상이면 재생성 0. 상한을 낮춰(2) 테스트 비용을 줄인다."""

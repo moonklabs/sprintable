@@ -299,15 +299,26 @@ async def _within_org_continuous_poll_cap(
     개수를 세어 200개 미만이면(=이 publication의 순위가 200 이내) 통과. 정확한
     "활성"(마지막 댓글 7일 축까지) 순위가 아니라 published_at만으로 근사 — PO 문구
     "최신 발행 순"과 일치하고, 매 재생성마다 org 전체의 댓글 최신성까지 다시 계산하는
-    비용을 피한다."""
+    비용을 피한다.
+
+    페드루 PO 비차단①(2026-09-06, #3882 리뷰) — 순위 카운트를 댓글 수집 자체를
+    지원하는 채널(어댑터 `supports_fetch_replies=True`)로 제한한다. 원래 구현은
+    org의 모든 channel_publications(예: hosted_site처럼 댓글 수집이 아예 없는
+    채널)까지 셌는데, 그런 발행물은 이 폴링 자원을 절대 안 쓰니 순위를 부풀려
+    실제로 폴링 대상인 publication이 상한 밖으로 밀리는 왜곡이 있었다."""
     from app.models.channel_publication import ChannelPublication
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
 
     pub = await db.get(ChannelPublication, publication_id)
     if pub is None or pub.published_at is None:
         return False
+    comment_capable_channels = [
+        channel for channel, adapter in CHANNEL_ADAPTERS.items() if adapter.supports_fetch_replies
+    ]
     more_recent_count = (await db.execute(
         select(func.count()).select_from(ChannelPublication).where(
             ChannelPublication.org_id == org_id,
+            ChannelPublication.channel.in_(comment_capable_channels),
             ChannelPublication.published_at.is_not(None),
             ChannelPublication.published_at > pub.published_at,
             ChannelPublication.published_at >= now - _ACTIVE_PUBLISHED_WITHIN,
