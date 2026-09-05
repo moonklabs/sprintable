@@ -172,7 +172,7 @@ async def test_shadow_anchor_promotion_gate_passes_after_patch(monkeypatch):
         async with _client_for(app) as client:
             r_gate = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"banned_terms": []}},
+                json={"rules": {"banned_terms": []}, "expected_version": 0},
             )
         assert r_gate.status_code == 200, (
             f"shadow anchor 리졸버가 여전히 옛 role(member)로 판정하면 403: {r_gate.text}"
@@ -206,7 +206,7 @@ async def test_shadow_anchor_demotion_gate_403_after_patch_no_privilege_lingers(
         async with _client_for(app) as client:
             r_gate = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"banned_terms": []}},
+                json={"rules": {"banned_terms": []}, "expected_version": 0},
             )
         assert r_gate.status_code == 403, (
             f"강등됐는데 옛 anchor role(admin)이 남아 게이트를 통과하면 권한 잔존: {r_gate.text}"

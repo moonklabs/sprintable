@@ -318,6 +318,13 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 개념을 정렬 드롭다운과 표 헤더 두 표면에서 일관되게 쓰는 것 자체가 의도다.
   'insightsBoard.columnD1 <-> insightsBoard.sortD1',
   'insightsBoard.columnD7 <-> insightsBoard.sortD7',
+  // story #3501(doc a0da40c9 §20, 2026-09-05) — contentRules.versionConflictPriorChanged
+  // ("먼저 저장된 변경: {list}", 충돌 배너 한 줄) <-> contentRules.saveAction("저장",
+  // 버튼 라벨). 겹치는 건 "저장"이라는 낱말뿐 — 하나는 "저장하다"는 동사 버튼이고
+  // 하나는 "(남이) 저장한" 과거 수동형 서술이라 화면에서 실제로 헷갈릴 자리가 아니다
+  // (#2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다 — {list}는
+  // 필드 이름 목록이지 숫자가 아니다).
+  'contentRules.saveAction <-> contentRules.versionConflictPriorChanged',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

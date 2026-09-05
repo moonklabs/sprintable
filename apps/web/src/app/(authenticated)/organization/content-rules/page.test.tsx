@@ -60,22 +60,29 @@ function stubFetch(opts: {
   version?: number;
   onPut?: (body: unknown) => { status: number; body?: unknown };
   budget?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' };
+  // story #3501(doc a0da40c9 §20-4) — 409 재검증 경로가 실제로 별도 GET을 쳐 "새
+  // 서버값"을 얻는지 확認하려면, 그 GET이 «다른» 값을 돌려줘야 한다. 첫 PUT이
+  // 409를 낸 뒤부터 GET이 이 값을 돌려준다(그 전엔 rules/version 그대로).
+  getAfterConflict?: { rules: typeof RULES_V1; version: number };
 }) {
   const rules = opts.rules ?? RULES_V1;
   const version = opts.version ?? 3;
   const budget = opts.budget ?? { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' as const };
+  let conflictTriggered = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/generation-budget')) {
       return new Response(JSON.stringify({ data: budget }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.includes('/content-rules') && (!init || init.method === undefined || init.method === 'GET')) {
-      return new Response(JSON.stringify({ data: { org_id: ORG_ID, rules, version } }), {
+      const current = conflictTriggered && opts.getAfterConflict ? opts.getAfterConflict : { rules, version };
+      return new Response(JSON.stringify({ data: { org_id: ORG_ID, rules: current.rules, version: current.version } }), {
         status: 200, headers: { 'Content-Type': 'application/json' },
       });
     }
     if (url.includes('/content-rules') && init?.method === 'PUT') {
       const body = init.body ? JSON.parse(init.body as string) : null;
       const result = opts.onPut?.(body) ?? { status: 200, body: { org_id: ORG_ID, rules: body?.rules ?? rules, version: version + 1 } };
+      if (result.status === 409) conflictTriggered = true;
       const ok = result.status < 400;
       return new Response(JSON.stringify(ok ? { data: result.body } : { data: null, error: result.body }), {
         status: result.status, headers: { 'Content-Type': 'application/json' },
@@ -199,6 +206,152 @@ describe('ContentRulesPage — 저장(story #3472 AC1)', () => {
     await act(async () => { saveBtn.click(); });
     await flush();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(koMessages.contentRules.errorInvalid);
+  });
+
+  it('⭐저장 요청 body에 expected_version이 로드된 버전 그대로 실린다', async () => {
+    let sentBody: unknown = null;
+    stubFetch({
+      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
+    });
+    await mount('owner');
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+    expect((sentBody as { expected_version?: number } | null)?.expected_version).toBe(3);
+  });
+});
+
+describe('ContentRulesPage — 낙관적 잠금 충돌(story #3501, doc a0da40c9 §20)', () => {
+  const SERVER_CHANGED = {
+    ...RULES_V1, banned_terms: ['서버측_새금칙'], // "먼저 저장된 변경" = banned_terms
+  };
+
+  it('⭐409(이름 있음) — "{이름}이 먼저 저장했습니다"+두 목록+저장 비활성+사유', async () => {
+    stubFetch({
+      onPut: () => ({
+        status: 409,
+        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: { member_id: 'm-1', name: '유나' } },
+      }),
+      getAfterConflict: { rules: SERVER_CHANGED, version: 4 },
+    });
+    await mount('owner');
+
+    // 내 로컬 편집 — tone을 바꾼다("되돌아갈 내 편집" = tone).
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '내가 고친 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
+    expect(banner?.textContent).toContain(koMessages.contentRules.versionConflictFactWithName.replace('{name}', '유나'));
+    expect(banner?.textContent).not.toContain(koMessages.contentRules.versionConflictFact);
+    expect(banner?.textContent).toContain(
+      koMessages.contentRules.versionConflictPriorChanged.replace('{list}', koMessages.contentRules.bannedTermsLabel),
+    );
+    expect(banner?.textContent).toContain(
+      koMessages.contentRules.versionConflictMyChanges.replace('{list}', koMessages.contentRules.toneLabel),
+    );
+
+    expect(saveBtn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="content-rules-save-disabled-reason"]')?.textContent)
+      .toBe(koMessages.contentRules.versionConflictSaveDisabledReason);
+  });
+
+  it('409(이름 없음) — 화면이 모르는 것은 지어내지 않고 일반 사실 문구만', async () => {
+    stubFetch({
+      onPut: () => ({
+        status: 409,
+        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null },
+      }),
+      getAfterConflict: { rules: SERVER_CHANGED, version: 4 },
+    });
+    await mount('owner');
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
+    expect(banner?.textContent).toContain(koMessages.contentRules.versionConflictFact);
+  });
+
+  it('⭐"다시 불러오기" — 자동 병합도 조용한 폐기도 아니다: 서버값으로 갈아끼우고 되돌린 필드 이름을 한 줄 남긴다', async () => {
+    stubFetch({
+      onPut: () => ({
+        status: 409,
+        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null },
+      }),
+      getAfterConflict: { rules: SERVER_CHANGED, version: 4 },
+    });
+    await mount('owner');
+
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '내가 고친 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const reloadBtn = container.querySelector('[data-testid="content-rules-reload-button"]') as HTMLButtonElement;
+    await act(async () => { reloadBtn.click(); });
+    await flush();
+
+    // 서버값(SERVER_CHANGED)으로 실제로 갈아끼워졌다 — 내가 고친 톤이 아니라 원래 톤.
+    expect((container.querySelector('#content-rules-tone') as HTMLInputElement).value).toBe(RULES_V1.tone);
+    expect(container.textContent).toContain('서버측_새금칙');
+    expect(container.querySelector('[data-testid="content-rules-version"]')?.textContent)
+      .toBe(koMessages.contentRules.versionLabel.replace('{version}', '4'));
+
+    // 되돌린 필드 이름 한 줄이 남는다 — 값이 아니라 이름만.
+    expect(container.querySelector('[data-testid="content-rules-rolled-back-note"]')?.textContent).toBe(
+      koMessages.contentRules.versionConflictRolledBack.replace('{list}', koMessages.contentRules.toneLabel),
+    );
+
+    // 충돌이 풀려 저장 버튼이 다시 활성화된다.
+    expect((container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="content-rules-version-conflict"]')).toBeNull();
+  });
+
+  it('겹치는 필드(진짜 충돌)가 각 목록의 맨 앞에 온다', async () => {
+    // 서버가 tone을 바꿨고(먼저 저장된 변경), 나도 tone을 바꿨다(되돌아갈 내 편집) — 겹침.
+    stubFetch({
+      onPut: () => ({
+        status: 409,
+        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null },
+      }),
+      getAfterConflict: { rules: { ...RULES_V1, tone: '서버가 바꾼 톤', banned_terms: ['서버측_새금칙'] }, version: 4 },
+    });
+    await mount('owner');
+
+    // 내 로컬 편집 — tone(겹침)과 require_utm(안 겹침) 둘 다 바꾼다.
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '내가 고친 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const utmCheckbox = container.querySelector('[data-testid="content-rules-require-utm"]') as HTMLInputElement;
+    await act(async () => { utmCheckbox.click(); });
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
+    // §20-4 "겹치는 이름은 앞에 둔다" — tone(겹침)이 require_utm(안 겹침)보다 리스트
+    // 앞에 와야 정확한 문구가 된다(순서가 틀리면 이 exact-match가 깨진다).
+    const expectedMyChanges = [koMessages.contentRules.toneLabel, koMessages.contentRules.requireUtmLabel].join(', ');
+    expect(banner?.textContent).toContain(
+      koMessages.contentRules.versionConflictMyChanges.replace('{list}', expectedMyChanges),
+    );
   });
 });
 

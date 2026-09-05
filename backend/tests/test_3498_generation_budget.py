@@ -66,7 +66,7 @@ async def _put_generation_budget(session, *, org_id, limit_minor, currency="KRW"
     return await put_org_content_rules(
         session, org_id=org_id,
         rules={"generation_budget": {"limit_minor": limit_minor, "currency": currency, "period": period}},
-        updated_by_member_id=uuid.uuid4(),
+        updated_by_member_id=uuid.uuid4(), expected_version=0,
     )
 
 
@@ -186,7 +186,10 @@ async def test_put_generation_budget_reflected_in_get():
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"generation_budget": {"limit_minor": 100000, "currency": "KRW", "period": "month"}}},
+                json={
+                    "rules": {"generation_budget": {"limit_minor": 100000, "currency": "KRW", "period": "month"}},
+                    "expected_version": 0,
+                },
             )
             assert r_put.status_code == 200, r_put.text
             assert r_put.json()["rules"]["generation_budget"] == {
@@ -214,7 +217,7 @@ async def test_generation_budget_unknown_field_returns_422():
         async with _client_for(app) as client:
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"generation_budget": {"limit_minor": 1000, "unknown_field": "x"}}},
+                json={"rules": {"generation_budget": {"limit_minor": 1000, "unknown_field": "x"}}, "expected_version": 0},
             )
         assert r_put.status_code == 422, r_put.text
     finally:
@@ -791,7 +794,7 @@ async def test_put_generation_budget_negative_limit_minor_rejected_422():
         async with _client_for(app) as client:
             r = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"generation_budget": {"limit_minor": -1}}},
+                json={"rules": {"generation_budget": {"limit_minor": -1}}, "expected_version": 0},
             )
         assert r.status_code == 422, r.text
     finally:
@@ -813,7 +816,7 @@ async def test_put_generation_budget_unsupported_currency_rejected_422():
         async with _client_for(app) as client:
             r = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"generation_budget": {"limit_minor": 1000, "currency": "JPY"}}},
+                json={"rules": {"generation_budget": {"limit_minor": 1000, "currency": "JPY"}}, "expected_version": 0},
             )
         assert r.status_code == 422, r.text
     finally:
@@ -835,7 +838,7 @@ async def test_put_generation_budget_unsupported_period_rejected_422():
         async with _client_for(app) as client:
             r = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
-                json={"rules": {"generation_budget": {"limit_minor": 1000, "period": "week"}}},
+                json={"rules": {"generation_budget": {"limit_minor": 1000, "period": "week"}}, "expected_version": 0},
             )
         assert r.status_code == 422, r.text
     finally:

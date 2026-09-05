@@ -4988,7 +4988,15 @@
     "generationBudgetPeriodLabel": "기간",
     "generationBudgetNotSet": "정책 없음",
     "generationBudgetSuspendedReadonly": "정지",
-    "generationBudgetHint": "한도를 0으로 두면 생성이 전부 정지됩니다. 비우면 한도 자체가 없습니다(무제한과는 다릅니다 — 정책이 아예 없다는 뜻입니다)."
+    "generationBudgetHint": "한도를 0으로 두면 생성이 전부 정지됩니다. 비우면 한도 자체가 없습니다(무제한과는 다릅니다 — 정책이 아예 없다는 뜻입니다).",
+    "brandKitLabel": "브랜드 킷",
+    "versionConflictFact": "이 화면을 연 뒤에 규칙이 바뀌었습니다.",
+    "versionConflictFactWithName": "{name}님이 먼저 저장했습니다.",
+    "versionConflictPriorChanged": "먼저 저장된 변경: {list}",
+    "versionConflictMyChanges": "되돌아갈 내 편집: {list}",
+    "versionConflictRolledBack": "방금 되돌린 편집: {list} — 필요하면 다시 넣어 주세요.",
+    "versionConflictReloadAction": "다시 불러오기",
+    "versionConflictSaveDisabledReason": "다시 불러온 뒤에 저장할 수 있습니다."
   },
   "insightsBoard": {
     "pageTitle": "성과 보드",
