@@ -1002,8 +1002,10 @@ async def publish_channel_post_draft_endpoint(
     except ChannelTextTooLongError as exc:
         # 페드루 PO 확定(2026-09-03) — 발행 시점 재검사(UTM 태그된 링크가 붙은 실제 전송
         # 문자열 기준). draft 생성 시점의 매핑(422·max_length·current_length)과 동형 —
-        # 코드 하나가 두 HTTP status를 갖지 않게 유지.
-        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_TEXT_TOO_LONG")
+        # 코드 하나가 두 HTTP status를 갖지 않게 유지. story #3474(페드루 리뷰 보정①,
+        # 2026-09-05) — `_validate_text_length`는 channel_posts.py:1158, httpx 클라이언트
+        # 블록(1160) *앞* — Threads에 아무 HTTP도 안 나간 시점(adapter_called=False).
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_TEXT_TOO_LONG")
         await apply_command_failure(
             db, command, error_code="CHANNEL_TEXT_TOO_LONG", last_error=str(exc), now=now,
         )
@@ -1016,7 +1018,9 @@ async def publish_channel_post_draft_endpoint(
             }),
         ) from exc
     except ChannelPostSealMissingError as exc:
-        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="SITE_POST_SEAL_MISSING")
+        # story #3474(페드루 리뷰 보정①) — channel_posts.py:1095, httpx 클라이언트 블록
+        # 앞(같은 이유로 adapter_called=False).
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="SITE_POST_SEAL_MISSING")
         await apply_command_failure(
             db, command, error_code="SITE_POST_SEAL_MISSING", last_error=str(exc), now=now,
         )
@@ -1039,7 +1043,9 @@ async def publish_channel_post_draft_endpoint(
             detail=_with_command_state({"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)}),
         ) from exc
     except ChannelConnectionNotActiveError as exc:
-        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_CONNECTION_NOT_ACTIVE")
+        # story #3474(페드루 리뷰 보정①) — channel_posts.py:1129, `create_container`
+        # 호출(1255) 전이라 adapter_called=False.
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_CONNECTION_NOT_ACTIVE")
         await apply_command_failure(
             db, command, error_code="CHANNEL_CONNECTION_NOT_ACTIVE", last_error=str(exc), now=now,
         )

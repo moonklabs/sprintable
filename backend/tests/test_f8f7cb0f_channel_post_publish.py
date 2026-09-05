@@ -926,6 +926,23 @@ async def test_publish_time_length_recheck_with_utm_link_returns_422_zero_provid
                 ChannelPublication.gate_id == gate_id,
             ))).scalars().all()
         assert rows == [], "provider 호출 전 거부됐으므로 ChannelPublication 행이 생기면 안 된다"
+
+        # story #3474(페드루 리뷰 보정①, 2026-09-05) — publication_attempts 원장의
+        # adapter_called는 「실제로 어댑터를 불렀나」의 사실이어야 한다. 이 테스트가
+        # 이미 call_count==0으로 증명한 그 사실을 원장 자신도 그대로 반영하는지 고정
+        # (raise 지점이 httpx 클라이언트 블록보다 앞이라 False가 맞다).
+        async with Session() as s:
+            from app.models.publication_attempt import PublicationAttempt
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+
+            cmd_id = (await s.execute(
+                select(PublicationCommand.id).where(PublicationCommand.gate_id == gate_id)
+            )).scalar_one()
+            attempt = (await s.execute(
+                select(PublicationAttempt).where(PublicationAttempt.command_id == cmd_id)
+            )).scalar_one()
+        assert attempt.adapter_called is False
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
