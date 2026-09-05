@@ -215,11 +215,26 @@ async def test_outbox_dispatcher_publishes_pending_rows_and_marks_published(monk
             s.add(EventOutbox(org_id=org_id, target="org", target_id=org_id, event_type="x", payload={}))
             await s.commit()
 
+        # story #3488(플레이키 근본원인, 2026-09-05 실측) — dispatcher 루프는
+        # `_publish_outbox_batch`(Redis publish, 이 fake가 `published`에 append하는
+        # 그 지점)와 `_finalize_outbox_published`(published_at UPDATE+commit, 별도
+        # 세션)이 서로 다른 await 구간이다(event_broker.py:646-647). `published`가
+        # 비었다가 채워진 순간 바로 task.cancel()하면, publish는 끝났지만 finalize의
+        # DB 커밋은 아직 시작도 안 했을 수 있는 창이 생긴다 — CI에서 간헐적으로
+        # `published_at is None`으로 관측된 원인이 정확히 이것이었다(CancelledError가
+        # finalize의 `await session.commit()` 진입 前에 그 태스크를 끊음). "발행됨"과
+        # "커밋됨"을 같은 순간으로 착각한 시간 기반 대기가 문제라 — 대기 조건을
+        # 상태(DB에 published_at이 실제로 찍혔는지)로 바꾼다(sleep 늘리기 아님).
         task = asyncio.create_task(eb.outbox_dispatcher_loop())
-        for _ in range(50):  # 최대 ~0.5s 대기 — dispatcher가 첫 배치를 처리할 때까지
+        finalized = False
+        for _ in range(200):  # 최대 ~2s 대기 — publish+finalize(별도 커밋)까지.
             await asyncio.sleep(0.01)
             if published:
-                break
+                async with Session() as s:
+                    row = (await s.execute(select(EventOutbox))).scalars().first()
+                if row is not None and row.published_at is not None:
+                    finalized = True
+                    break
         task.cancel()
         try:
             await task
@@ -227,6 +242,7 @@ async def test_outbox_dispatcher_publishes_pending_rows_and_marks_published(monk
             pass
 
         assert len(published) == 1
+        assert finalized, "publish는 됐는데 finalize(published_at 커밋)가 취소 前에 안 끝났다"
 
         async with Session() as s:
             rows = (await s.execute(select(EventOutbox))).scalars().all()
