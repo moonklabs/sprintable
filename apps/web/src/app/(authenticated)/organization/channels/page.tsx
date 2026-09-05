@@ -219,11 +219,14 @@ function ChannelSection({
   return (
     <SectionCard>
       <SectionCardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2" data-testid="channel-section-header">
           <h2 className="text-sm font-semibold text-foreground">{channelLabel(channel, t)}</h2>
-          {/* story dd29e6dd(유나 5회차 관찰) — rollup 칩은 여러 연결의 «최악»을 요약하는
-              것이 존재 이유라, 연결이 1개면 요약할 것이 없어 행 칩과 같은 문장을 두 번
-              보여줬다(0개일 때는 애초에 행 칩 자체가 없어 중복이 안 남). 연결 ≥2일 때만. */}
+          {/* story dd29e6dd(유나 5회차 관찰, 카디르군 REQUEST_CHANGES 2026-09-05 — 개수만
+              재는 pin은 "헤더 자리에 뜨고 행이 없는" 회귀를 못 잡는다는 지적, 자백·수용) —
+              rollup 칩은 여러 연결의 «최악»을 요약하는 것이 존재 이유라, 연결이 1개면
+              요약할 것이 없어 행 칩과 같은 문장을 두 번 보여줬다(0개일 때는 애초에 행 칩
+              자체가 없어 중복이 안 남). 연결 ≥2일 때만 — data-testid로 자리(헤더 vs 행)를
+              구조적으로 구분해 테스트가 값이 아니라 위치를 잰다. */}
           {connections.length >= 2 ? <ChannelStatusChip status={channelStatus} /> : null}
         </div>
       </SectionCardHeader>
@@ -231,7 +234,7 @@ function ChannelSection({
         {connections.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('channelNoConnections')}</p>
         ) : (
-          <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+          <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
             {connections.map((c) => (
               <ConnectionRow key={c.id} conn={c} isOwner={isOwner} orgId={orgId} onDisconnected={onRefresh} t={t} />
             ))}

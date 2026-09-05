@@ -200,22 +200,33 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
 
 // story dd29e6dd(유나 5회차 관찰) — 헤더 rollup 칩이 연결 1개일 때 행 칩과 같은
 // 문장을 두 번 보여주던 것. 처방=헤더 칩은 연결 ≥2일 때만. 3표본(0/1/2개) 그대로 pin.
+//
+// ⚠️카디르군 REQUEST_CHANGES(2026-09-05, PR#3826) — 최초 버전은 「칩 총 개수 + 값」만
+// 재서, "헤더 자리에 뜨고 행 자리엔 없는"(자리가 뒤바뀐) 회귀를 주입해도 그대로
+// PASS했다(개수 1은 그대로 1이니까). data-testid로 헤더 컨테이너·행 컨테이너를
+// 구조적으로 갈라 "그 자리 안에 몇 개가 있나"를 직접 잰다 — 값이 아니라 위치가 검증
+// 대상이다.
 describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6dd)', () => {
-  it('⭐연결 0개 — 헤더 칩 부재(회귀 pin, 행도 없음)', async () => {
+  it('⭐연결 0개 — 헤더 자리 칩 0·행 컨테이너 자체가 없음(회귀 pin)', async () => {
     stubFetch({ connections: [] });
     await mount('owner');
-    expect(container.querySelectorAll('[data-status-chip]')).toHaveLength(0);
+    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    expect(header.querySelectorAll('[data-status-chip]')).toHaveLength(0);
+    expect(container.querySelector('[data-testid="channel-section-rows"]')).toBeNull();
   });
 
-  it('⭐연결 1개 — 헤더 칩 없이 행 칩 1개만(같은 문장 두 번 안 남)', async () => {
+  it('⭐연결 1개 — 헤더 자리 칩 0·행 컨테이너 안에 정확히 1개(같은 문장 두 번 안 남, 자리 뒤바뀜도 잡힘)', async () => {
     stubFetch({ connections: [CONNECTION_ACTIVE] });
     await mount('owner');
-    const chips = container.querySelectorAll('[data-status-chip]');
-    expect(chips).toHaveLength(1);
-    expect(chips[0]?.getAttribute('data-status-chip')).toBe('connected');
+    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
+    expect(header.querySelectorAll('[data-status-chip]')).toHaveLength(0);
+    const rowChips = rows.querySelectorAll('[data-status-chip]');
+    expect(rowChips).toHaveLength(1);
+    expect(rowChips[0]?.getAttribute('data-status-chip')).toBe('connected');
   });
 
-  it('⭐연결 2개(active+expired) — 헤더에 최악(expired) 요약 + 행 칩 2개(현행 유지)', async () => {
+  it('⭐연결 2개(active+expired) — 헤더 자리에 정확히 1개(최악=expired)·행 컨테이너 안에 정확히 2개(현행 유지)', async () => {
     stubFetch({
       connections: [
         CONNECTION_ACTIVE,
@@ -223,13 +234,12 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
       ],
     });
     await mount('owner');
-    const chips = [...container.querySelectorAll('[data-status-chip]')];
-    expect(chips).toHaveLength(3);
-    // 헤더 칩은 채널명 <h2>의 형제(SectionCardHeader의 flex 컨테이너 안) — 행 칩(둘 다
-    // 'reauth_required'/'connected'일 수 있는 값 자체로는 헤더/행을 못 가른다, DOM
-    // 구조로 가른다.
-    const headerChip = container.querySelector('h2 ~ [data-status-chip]');
-    expect(headerChip?.getAttribute('data-status-chip')).toBe('reauth_required');
+    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
+    const headerChips = header.querySelectorAll('[data-status-chip]');
+    expect(headerChips).toHaveLength(1);
+    expect(headerChips[0]?.getAttribute('data-status-chip')).toBe('reauth_required');
+    expect(rows.querySelectorAll('[data-status-chip]')).toHaveLength(2);
   });
 });
 
