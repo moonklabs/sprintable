@@ -2047,6 +2047,37 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(errorText).toContain('28.6 MB');
     expect(errorText).toContain('25.0 MB');
   });
+
+  // story #3530 REQUIRED 1(PO 재대조 2026-09-06) — 422 문구가 규격 태그와 같은 형
+  // (formatAspectBound)으로 두 값을 적어야 한다 — 태그가 「1:1.25」라는데 문장이
+  // 「0.8」이면 같은 수를 다른 형으로 두 번 지어내는 사고.
+  it('⭐#3530 — CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW(422) — 태그와 같은 형(「1:1.25」)으로 문구가 조립된다', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageConfirm: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW', message: '…', width_height_ratio: 0.5625, min_width_height_ratio: 0.8 } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('1:1.25');
+    expect(errorText).toContain('1:1.78');
+    expect(errorText).not.toContain('0.8');
+    expect(errorText).not.toContain('0.56');
+  });
 });
 
 // story #3428(T5-M·§17-14) — 승인 카드 썸네일 + 자동 변환 배지.

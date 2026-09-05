@@ -211,12 +211,14 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
         aspectRatio: info.imageAspectRatio?.toFixed(2) ?? '',
       });
     case 'image_aspect_ratio_too_narrow':
-      // story #3530 — 하한 미달(세로가 너무 긴 이미지). BE 필드명은
-      // width_height_ratio/min_width_height_ratio(exceeded의 정규화 aspect_ratio와
-      // 다른 값 — 섞지 않는다).
+      // story #3530 REQUIRED 1(PO 재대조 2026-09-06) — 하한 미달(세로가 너무 긴
+      // 이미지). BE 필드명은 width_height_ratio/min_width_height_ratio(exceeded의
+      // 정규화 aspect_ratio와 다른 값 — 섞지 않는다). 두 값 다 규격 태그와 같은
+      // formatAspectBound로 — 태그가 「1:1.25」라고 말하는데 이 문장이 「0.8」이라고
+      // 말하면 같은 수를 다른 형으로 두 번 지어내는 사고.
       return t('channelPostsImageAspectRatioTooNarrow', {
-        minAspectRatio: info.imageMinWidthHeightRatio?.toFixed(1) ?? '',
-        aspectRatio: info.imageWidthHeightRatio?.toFixed(2) ?? '',
+        minAspectRatio: typeof info.imageMinWidthHeightRatio === 'number' ? formatAspectBound(info.imageMinWidthHeightRatio) : '',
+        aspectRatio: typeof info.imageWidthHeightRatio === 'number' ? formatAspectBound(info.imageWidthHeightRatio) : '',
       });
     case 'image_conversion_failed':
       return t('channelPostsImageConversionFailed', {
