@@ -1307,6 +1307,18 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("insight-snapshots tick error: %s", exc)
             counts["insight_snapshots"] = {"error": "unhandled"}
+        # story #3527(BE 결함, 2026-09-06) — 3516 배선 누락 처방: process_due_comment_
+        # collections가 만들어진 뒤 어디서도 호출되지 않아 due 3창(+1h·+1d·+7d) 자동
+        # 수집이 dev/라이브에서 한 번도 실행된 적이 없었다(수동 refresh만 실제 동작).
+        # insight_snapshots와 같은 자리·같은 피기백 사상(새 Cloud Scheduler 잡 0) —
+        # 독립 try로 이 축의 미분류 버그가 이미 커밋된 다른 두 축 결과를 500으로
+        # 덮지 않게 한다.
+        try:
+            from app.services.channel_post_comments import process_due_comment_collections
+            counts["comment_collections"] = await process_due_comment_collections(session)
+        except Exception as exc:
+            logger.exception("comment-collections tick error: %s", exc)
+            counts["comment_collections"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)
