@@ -139,13 +139,90 @@ describe('ContentRulesPage — 조회·표시(story #3472)', () => {
       .toBe('https://x.example/logo.png');
   });
 
-  it('member — tone·로고가 비어 있으면 「—」로 보인다(값 없음 표시)', async () => {
+  it('member — tone이 비어 있으면 「—」로 보인다(값 없음 표시, brand_kit 밖 필드는 회귀 0)', async () => {
     stubFetch({ rules: { ...RULES_V1, tone: null, brand_kit: { ...RULES_V1.brand_kit, logo_url: undefined } } });
     await mount('member');
     expect(container.querySelector('[data-testid="content-rules-tone-readonly"]')?.textContent).toBe('—');
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-readonly"]')?.textContent).toBe('—');
+    // story #3532(PO 確定⑤) — 「—」는 이 제품에서 «모른다·못 잰다»는 뜻으로 이미 쓰는
+    // 글자라, 브랜드 킷처럼 "아직 정하지 않았다"는 다른 사실엔 「안 정함」이 맞다.
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-readonly"]')?.textContent).toBe('안 정함');
   });
 
+});
+
+// story #3532(유나 §23, PO 確定 2026-09-06) — 검사 안 되는 넷(tone·taxonomy·
+// channel_priority·brand_kit)이 검사되는 둘(banned_terms·require_utm)과 같은
+// 모양으로 서 있어 "강제된다"로 읽힌다 — 안내 한 줄·로고 미리보기·색 스와치·
+// 빈 값 「안 정함」으로 뜻을 준다.
+describe('ContentRulesPage — 브랜드 킷에 뜻을 준다(story #3532)', () => {
+  it('⭐안내 문구가 한 번만 보인다(항목마다 반복 X)', async () => {
+    stubFetch({});
+    await mount('owner');
+    const notices = container.querySelectorAll('[data-testid="content-rules-advisory-notice"]');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.textContent).toBe(koMessages.contentRules.contentRulesAdvisoryNotice);
+  });
+
+  it('⭐브랜드 킷 색·폰트가 비어 있으면 「안 정함」으로 보인다(「—」 아님)', async () => {
+    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, colors: [], fonts: [] } } });
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-brand-colors-empty"]')?.textContent).toBe('안 정함');
+    expect(container.querySelector('[data-testid="content-rules-brand-fonts-empty"]')?.textContent).toBe('안 정함');
+    // 브랜드 킷 밖(taxonomy)은 회귀 0 — 지금처럼 「—」 그대로.
+    expect(container.querySelector('[data-testid="content-rules-taxonomy-empty"]')).toBeNull();
+  });
+
+  it('⭐로고 URL이 있으면 미리보기 이미지가 뜬다(편집·읽기 모드 둘 다)', async () => {
+    stubFetch({});
+    await mount('owner');
+    const img = container.querySelector('[data-testid="content-rules-brand-logo-preview"]') as HTMLImageElement;
+    expect(img).not.toBeNull();
+    expect(img.src).toBe('https://x.example/logo.png');
+
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview"]')).not.toBeNull();
+  });
+
+  it('⭐로고 URL이 없으면 미리보기 자리 자체가 안 뜬다(「안 정함」은 텍스트 쪽이 이미 말한다)', async () => {
+    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, logo_url: undefined } } });
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview-failed"]')).toBeNull();
+  });
+
+  it('⭐로고 이미지 로드 실패(onError) — 「불러오지 못했습니다」로 바뀐다(깨진 이미지 아이콘 대신)', async () => {
+    stubFetch({});
+    await mount('owner');
+    const img = container.querySelector('[data-testid="content-rules-brand-logo-preview"]') as HTMLImageElement;
+    await act(async () => { img.dispatchEvent(new Event('error')); });
+    await flush();
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview-failed"]')?.textContent)
+      .toBe(koMessages.contentRules.brandKitLogoLoadFailed);
+  });
+
+  it('⭐유효한 CSS 색이면 칩에 스와치가 붙는다', async () => {
+    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, colors: ['#3366ff'] } } });
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-brand-color-swatch"]')).not.toBeNull();
+  });
+
+  it('⭐CSS 색으로 안 읽히는 값이면 스와치 없이 문자열 그대로(형식 검증·오류 표시 0)', async () => {
+    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, colors: ['메인색'] } } });
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-brand-color-swatch"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-brand-colors-readonly"]')?.textContent).toBe('메인색');
+  });
+
+  it('⭐화면 어휘에 「테마」·「토큰」이 없다(이건 우리 제품의 디자인 토큰이 아니다)', async () => {
+    stubFetch({});
+    await mount('owner');
+    expect(container.textContent).not.toContain('테마');
+    expect(container.textContent).not.toContain('토큰');
+  });
+});
+
+describe('ContentRulesPage — 편집·저장(story #3472 계속)', () => {
   it('⭐admin도 편집 컨트롤을 본다(story #3490 — owner만이던 자격을 owner·admin으로)', async () => {
     stubFetch({});
     await mount('admin');
