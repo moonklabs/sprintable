@@ -416,3 +416,37 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
     expect(container.textContent).not.toMatch(/•{2,}|\*{2,}/);
   });
 });
+
+// story #3486(3436 묶음 8 잔여, 유나 10회차 관찰 2026-09-05) — 「연결 시각」이
+// new Date(...).toLocaleString()(브라우저 로케일 의존)이던 것을 묶음 8 정본
+// (formatRelativeTime)으로 정정. "지금"을 고정해(vi.setSystemTime) 결정적으로 잰다.
+describe('OrganizationChannelsPage — 연결 시각 상대시각 정본(story #3486)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('⭐연결 3일 전 — 상대시각(브라우저 로케일 절대 포맷 아님)으로 보인다', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-04T00:00:00Z'));
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, created_at: '2026-09-01T00:00:00Z' }] });
+    await mount('owner');
+
+    // 브라우저 로케일 절대 포맷(toLocaleString 특유의 "2026. 9. 1." 류 마침표 구분·
+    // 오전/오후)이 하나도 안 남는다 — 이게 바로 이 스토리가 잡는 회귀 모양이다.
+    expect(container.textContent).not.toMatch(/\d{4}\. \d{1,2}\. \d{1,2}\./);
+    expect(container.textContent).not.toContain('오전');
+    expect(container.textContent).not.toContain('오후');
+    // 7일 이내라 formatRelativeTime의 상대 분기("전")로 떨어진다.
+    expect(container.textContent).toContain('전');
+  });
+
+  it('연결 10일 전(7일 폴백 경계 밖) — formatRelativeTime의 절대 포맷(§11-2)으로 정상 폴백한다', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-11T00:00:00Z'));
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, created_at: '2026-09-01T00:00:00Z' }] });
+    await mount('owner');
+
+    // 폴백도 formatScheduledAt(§11-2 정본)이지 브라우저 toLocaleString이 아니다 —
+    // "MM-DD HH:mm TZ" 꼴(마침표 구분자 없음).
+    expect(container.textContent).toMatch(/09-01 \d{2}:\d{2}/);
+    expect(container.textContent).not.toMatch(/\d{4}\. \d{1,2}\. \d{1,2}\./);
+  });
+});

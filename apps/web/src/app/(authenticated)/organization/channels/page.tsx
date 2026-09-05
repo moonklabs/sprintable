@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel } from '@/lib/channel-label';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChannelStatusChip } from '@/components/channel-connect/channel-status-chip';
 import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/components/channel-connect/connection-status';
 import { AppCredentialsCard } from '@/components/channel-connect/app-credentials-card';
@@ -60,6 +62,10 @@ function ConnectionRow({
     serverStatus: conn.status, tokenExpiresAt: conn.token_expires_at,
     canAutoRefresh: conn.can_auto_refresh, lastError: conn.last_error,
   });
+  // story #3486(유나 10회차, 3436 묶음 8 정본 재사용) — 「연결 시각」은 약속이 아니라
+  // 기록이라 상대시각이 맞다(묶음 8 판정 그대로). 새 포맷 함수를 신설하지 않는다.
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [testing, setTesting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -106,7 +112,7 @@ function ConnectionRow({
             ) : null}
           </p>
           <p className="text-xs text-muted-foreground">
-            {t('channelConnectedBy', { time: new Date(conn.created_at).toLocaleString() })}
+            {t('channelConnectedBy', { time: formatRelativeTime(conn.created_at, locale, displayTimezone) })}
           </p>
         </div>
         <ChannelStatusChip status={derived.status} />
