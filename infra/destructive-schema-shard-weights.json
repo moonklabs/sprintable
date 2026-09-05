@@ -1133,6 +1133,11 @@
       "source": "story-3529-comment-reply-command-status(PR 개설 前 선제 등재 — 로컬 raw pytest 5.18s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 35s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
+      "file": "tests/test_3531_comment_reply_404.py",
+      "sec": 20.0,
+      "source": "story-3531-comment-not-found-404(PR 개설 前 선제 등재 — 로컬 raw pytest 2.50s(1건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_3415_channel_post_command_exposure.py",
       "sec": 19.0,
       "source": "story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)"

@@ -233,6 +233,7 @@ async def submit_comment_reply_endpoint(
 
     try:
         reply = await submit_comment_reply(db, org_id=org_id, reply_id=reply_id, requester_member_id=resolved.id)
+        view = await get_comment_reply_view(db, org_id=org_id, reply_id=reply.id)
     except CommentReplyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"답변을 찾을 수 없습니다: {reply_id}") from exc
     except CommentReplyWrongStatusError as exc:
@@ -249,8 +250,12 @@ async def submit_comment_reply_endpoint(
             status_code=422,
             detail={"code": "COMMENT_REPLY_CHANNEL_UNSUPPORTED", "message": "이 채널은 답변 발송을 지원하지 않습니다."},
         ) from exc
+    except CommentNotFoundError as exc:
+        # story #3531(2026-09-06) — create 엔드포인트는 이미 이 예외를 404로 잡는데
+        # (자리마다 다름 클래스) 여기(submit_comment_reply 내부 재조회·get_comment_
+        # reply_view 둘 다)는 안 잡아 500이 새던 갭. create와 같은 문장.
+        raise HTTPException(status_code=404, detail=f"댓글을 찾을 수 없습니다: {comment_id}") from exc
 
-    view = await get_comment_reply_view(db, org_id=org_id, reply_id=reply.id)
     return await _reply_view(db, view["reply"], view["target_comment_state"], view["target_text"])
 
 
@@ -270,7 +275,8 @@ async def get_comment_reply_endpoint(
     카드 화면은 이 응답의 `target_comment_state`(ReplyView 필드 설명 참고)를 그대로
     보여주면 된다(화면이 판정 X, 서버가 이미 계산해 실어 준다).
 
-    에러: `404`(reply_id 없음/다른 org 소속)."""
+    에러: `404`(reply_id 없음/다른 org 소속) · `404`(대상 댓글 행이 하드 삭제됨,
+    story #3531 — create 엔드포인트와 같은 문장으로 맞춘다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
@@ -278,4 +284,9 @@ async def get_comment_reply_endpoint(
         view = await get_comment_reply_view(db, org_id=org_id, reply_id=reply_id)
     except CommentReplyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"답변을 찾을 수 없습니다: {reply_id}") from exc
+    except CommentNotFoundError as exc:
+        # story #3531(2026-09-06, #3883 리뷰 中 발견) — get_comment_reply_view 안
+        # _get_owned_comment가 던지는데(대상 댓글 행 하드 삭제) 이 라우터가 이 예외를
+        # 못 잡아 500이 새던 갭. create 엔드포인트와 같은 문장으로 맞춘다.
+        raise HTTPException(status_code=404, detail=f"댓글을 찾을 수 없습니다: {comment_id}") from exc
     return await _reply_view(db, view["reply"], view["target_comment_state"], view["target_text"])
