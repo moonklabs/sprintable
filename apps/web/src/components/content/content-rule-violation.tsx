@@ -16,6 +16,9 @@ export interface ContentRuleViolation {
   value: string;
   hint_key: string;
   settings_path: string;
+  // story #3546 — utm_missing에만 실림(API를 직접 두드리는 소비자용, FE는 이
+  // 필드를 안 쓰고 code로 자체 i18n 문구를 고른다 — contentRuleViolationHint).
+  message?: string;
 }
 
 // ⛔§16-7 "settings_path를 그대로 href로 쓰지 않는다" — FE가 아는 값만 라우트로
@@ -31,7 +34,10 @@ export function contentRuleViolationHint(
   t: (key: string, values?: Record<string, string | number>) => string,
 ): string {
   if (code === 'banned_term') return t('contentRuleBannedTermBlockedHint', { value });
-  if (code === 'utm_missing') return t('contentRuleUtmMissingBlockedHint');
+  // story #3546(페드루 PO 確定 2026-09-06) — BE value는 콤마 조인
+  // ("utm_source,utm_medium") 계약 그대로 두고, 사람이 읽는 자리에서만 "·"로
+  // 다시 이어 보여준다(BE 계약 변경 0).
+  if (code === 'utm_missing') return t('contentRuleUtmMissingBlockedHint', { value: value.split(',').join('·') });
   return t('contentRuleGenericBlockedHint');
 }
 
