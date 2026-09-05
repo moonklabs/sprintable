@@ -920,9 +920,11 @@ describe('OrganizationChannelsPage — Facebook Page 연결(story #3549)', () =>
     { channel: 'facebook', display_name: 'Facebook', credential_kind: 'oauth', kind: 'social' },
   ];
 
-  function selectPendingQuery(candidates: { page_id: string; name: string }[], extra: Record<string, string> = {}) {
+  function selectPendingQuery(
+    candidates: { page_id: string; name: string }[], extra: Record<string, string> = {}, channel = 'facebook',
+  ) {
     return new URLSearchParams({
-      select_pending: 'facebook', pending_id: 'pending-1',
+      select_pending: channel, pending_id: 'pending-1',
       candidates: JSON.stringify(candidates), ...extra,
     });
   }
@@ -1055,5 +1057,61 @@ describe('OrganizationChannelsPage — Facebook Page 연결(story #3549)', () =>
     await act(async () => { retryBtn.click(); });
     await flush();
     expect(attempts).toBe(2);
+  });
+
+  // 페드루 PO REQUIRED 1(#3905 리뷰, 2026-09-06) — 실 Meta App Review 前엔
+  // facebook_sandbox가 §13-8 라이브 검증(AC5)의 유일한 길이다. 카드·앱 안내·
+  // select BFF 전부 channel 문자열이 아니라 kind 판별자만 보게 채널 무관이어야
+  // 한다(디디 PR#3904 실측: select는 pending.channel로 어댑터를 뽑지 URL로 안
+  // 가른다 — channel_connections.py:661/663/687, facebook_sandbox pending도
+  // 같은 리터럴 /facebook/select로 통과).
+  const FACEBOOK_SANDBOX_AVAILABLE = [
+    { channel: 'facebook_sandbox', display_name: 'Facebook Page Sandbox', credential_kind: 'oauth', kind: 'social' },
+  ];
+
+  it('facebook_sandbox — 앱 안내·선택 대기 얼굴이 facebook과 동형으로 뜬다(채널 문자열이 아니라 kind만 본다)', async () => {
+    stubFetch({ connections: [], availableChannels: FACEBOOK_SANDBOX_AVAILABLE });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-facebook-app-guidance"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectFacebookAppGuidance);
+  });
+
+  it('facebook_sandbox — select_pending=facebook_sandbox면 그 채널 카드에서만 라디오 목록이 뜬다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ page_id: 'sandbox-page-1', name: 'Sandbox Page 1' }], {}, 'facebook_sandbox',
+    ));
+    stubFetch({ connections: [], availableChannels: FACEBOOK_SANDBOX_AVAILABLE });
+    await mount('owner');
+    const select = container.querySelector('[data-testid="channel-connect-facebook-select"]')!;
+    expect(select.textContent).toContain('Sandbox Page 1');
+  });
+
+  it('facebook_sandbox — 선택 성공 시 select 호출이 (stubFetch의 literal /facebook/select 라우팅에) 맞아 카드가 연결 행으로 바뀐다(디디 PR#3904 실측 — pending.channel로 어댑터를 뽑지 URL 세그먼트로 안 가른다)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ page_id: 'sandbox-page-1', name: 'Sandbox Page 1' }], {}, 'facebook_sandbox',
+    ));
+    let selectCalled = false;
+    stubFetch({
+      connections: [], availableChannels: FACEBOOK_SANDBOX_AVAILABLE,
+      onFacebookSelect: (body) => {
+        selectCalled = true;
+        return {
+          status: 201,
+          body: { id: 'conn-fbs-1', channel: 'facebook_sandbox', account_id: (body as { page_id: string }).page_id, account_label: 'Sandbox Page 1', status: 'active', credential_kind: 'oauth' },
+          nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-fbs-1', channel: 'facebook_sandbox', account_id: 'sandbox-page-1', account_label: 'Sandbox Page 1' }],
+        };
+      },
+    });
+    await mount('owner');
+    const radio = container.querySelector('input[type="radio"][value="sandbox-page-1"]') as HTMLInputElement;
+    await act(async () => { radio.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+    // stubFetch는 url.includes('/channel-connections/facebook/select')일 때만
+    // onFacebookSelect를 태운다 — 이게 true라는 사실 자체가 카드의 실제 호출이
+    // 리터럴 facebook 세그먼트를 쓴다는 증거다(channel prop='facebook_sandbox'인데도).
+    expect(selectCalled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select"]')).toBeNull();
+    expect(container.textContent).toContain('Sandbox Page 1');
   });
 });

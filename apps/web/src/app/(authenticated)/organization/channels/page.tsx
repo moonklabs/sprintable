@@ -380,6 +380,13 @@ function ChannelSection({
   // story f30da19a(AC2) — 앱 자격 미완 게이팅은 credential_kind='oauth'에만 뜻이 있다
   // (sandbox·future pasted_secret 채널은 애초에 app-credentials 개념이 없다).
   const canStartConnect = credential_kind !== 'oauth' || effectiveSource !== 'none';
+  // story #3549 REQUIRED 1(페드루 PO 지적, 2026-09-06) — 실 Meta App Review 前엔
+  // facebook_sandbox가 §13-8 라이브 검증(AC5)의 유일한 길이다. 선택 대기 얼굴·앱
+  // 안내는 채널 문자열이 아니라 «Facebook Page류 oauth인가»로 걸어야 한다 —
+  // facebook_sandbox도 같은 OAuth+선택 대기 흐름을 탄다(디디 PR#3904:
+  // `_FACEBOOK_OAUTH_MODULE_PATHS`에 둘 다 등록, select는 어느 쪽이든 리터럴
+  // `/facebook/select` 하나로 통한다 — pending.channel로 식별, URL로 안 가른다).
+  const isFacebookOauthChannel = channel === 'facebook' || channel === 'facebook_sandbox';
   const channelStatus = connections.length === 0
     ? deriveChannelConnectionStatus({ effectiveSource: credential_kind === 'oauth' ? effectiveSource : 'org' }).status
     : worstChannelConnectionStatus(rowStatuses);
@@ -455,7 +462,7 @@ function ChannelSection({
               = _require_owner). 권한을 먼저 판정해 안 그린다(옛 `<Button disabled>`는
               §5-2가 금지한 "권한인데 비활성"이었다 — L275 문제였던 자리) — 그 다음에야
               (owner인 경우에만) 자격 미설정이라는 **상태** 축을 disabled로 표현한다. */}
-          {credential_kind === 'oauth' && channel === 'facebook' && isOwnerStrict && !pendingSelection ? (
+          {credential_kind === 'oauth' && isFacebookOauthChannel && isOwnerStrict && !pendingSelection ? (
             // story #3549(유나 §13-8①) — 「우리가 검사할 수 없는 조건」을 연결
             // 시작 버튼 위에 미리 말한다. 비활성 사유가 아니다(canStartConnect는
             // 별개 축) — 앱 자격 미등록 문구와 한 문장으로 합치지 않는다.
@@ -463,7 +470,7 @@ function ChannelSection({
               {t('channelConnectFacebookAppGuidance')}
             </p>
           ) : null}
-          {credential_kind === 'oauth' && channel === 'facebook' && pendingSelection && connections.length === 0 ? (
+          {credential_kind === 'oauth' && isFacebookOauthChannel && pendingSelection && connections.length === 0 ? (
             <FacebookPageSelectCard
               channel={channel} orgId={orgId} pendingId={pendingSelection.pendingId}
               candidates={pendingSelection.candidates} isOwner={isOwnerStrict} onConnected={onRefresh} t={t}
