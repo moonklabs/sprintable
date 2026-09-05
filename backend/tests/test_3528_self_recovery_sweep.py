@@ -139,7 +139,12 @@ async def test_orphaned_active_publication_gets_seeded_on_first_tick_and_process
 
 @pytest.mark.anyio
 async def test_publication_with_open_row_is_not_reseeded():
-    """이미 pending/in_progress 행이 있으면(정상 체인) 스윕이 손대지 않는다(중복 씨앗 방지)."""
+    """이미 pending/in_progress 행이 있으면(정상 체인) 스윕이 손대지 않는다(중복 씨앗
+    방지). status=in_progress·due_at=과거로 심어 두 축을 동시에 단독 격리한다 —
+    status='pending'+과거 due_at을 쓰면 메인 due-claim 루프 자체가 그 행을 정상
+    처리·재생성해 버려(스윕과 무관한 정상 경로) has_open_row 축을 못 잡고, 반대로
+    due_at을 미래로 두면 freshness가 어차피 걸러내 has_open_row 필터를 지워도
+    이 테스트가 안 깨지는 맹점이 생긴다(둘 다 뮤테이션으로 실측 확인됨)."""
     from app.services.channel_post_comments import process_due_comment_collections
 
     engine, Session = await _session_factory()
@@ -151,7 +156,7 @@ async def test_publication_with_open_row_is_not_reseeded():
             from app.models.channel_post_comment import CommentCollectionSchedule
             s.add(CommentCollectionSchedule(
                 id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, channel="sandbox",
-                external_id="media-open", due_at=datetime.now(timezone.utc) + timedelta(hours=1), status="pending",
+                external_id="media-open", due_at=datetime.now(timezone.utc) - timedelta(days=1), status="in_progress",
             ))
             await s.commit()
 
@@ -163,6 +168,50 @@ async def test_publication_with_open_row_is_not_reseeded():
         async with Session() as s:
             rows = await _count_schedule_rows(s, publication_id=pub.id)
             assert len(rows) == 1, "열려 있는 행이 있는데 씨앗이 추가로 심겼다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_normal_state_sweep_costs_exactly_one_query_and_seeds_zero():
+    """페드루 PO REQUIRED(2026-09-06, PR#3900 리뷰) — orphan이 0인 정상 상태(다른
+    publication들이 전부 열린 행을 가진 상태)에서 스윕 자체의 비용이 SQL 쿼리
+    정확히 1건(0행 반환)이어야 한다. 파이썬 루프에서 publication마다 count·max를
+    따로 던지던 이전 구현이면 이 assert가 깨진다(발행물 수만큼 쿼리)."""
+    from app.services.channel_post_comments import _sweep_orphaned_active_publications_for_self_recovery
+    from app.models.channel_post_comment import CommentCollectionSchedule
+    from sqlalchemy import event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            # 3건 모두 "정상"(열린 pending 행 있음) — 실제 운영에서 매 틱 대다수가 이 상태.
+            for i in range(3):
+                pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id=f"media-normal-{i}")
+                s.add(CommentCollectionSchedule(
+                    id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, channel="sandbox",
+                    external_id=f"media-normal-{i}", due_at=datetime.now(timezone.utc) + timedelta(minutes=10), status="pending",
+                ))
+            await s.commit()
+
+        now = datetime.now(timezone.utc)
+        query_count = 0
+
+        def _count_queries(*args, **kwargs):
+            nonlocal query_count
+            query_count += 1
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _count_queries)
+        try:
+            async with Session() as s:
+                seeded = await _sweep_orphaned_active_publications_for_self_recovery(s, now=now)
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _count_queries)
+
+        assert seeded == 0
+        assert query_count == 1, f"정상 상태 스윕 비용은 쿼리 1건이어야 하는데 {query_count}건 실행됨"
     finally:
         await engine.dispose()
 

@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -346,9 +346,9 @@ async def _schedule_next_continuous_poll_if_active(
     await db.execute(stmt)
 
 
-# story #3528 라이브 결함(2026-09-06, 카디르 QA 22:15Z·PO 코드 실측 確定) — 한 틱에
-# 심을 수 있는 자가회수 씨앗 상한(스캔 자체는 무제한 — 14일 활성 창+댓글 지원 채널
-# 필터로 이미 좁혀지고, 삽입만 비용이 커 이걸로 막는다. BATCH_SIZE와 동형 사상).
+# story #3528 라이브 결함(2026-09-06, 카디르 QA 22:15Z·PO 코드 실측 確定) — 자가회수
+# 스윕 한 틱의 SQL LIMIT(=삽입 상한과 동일, BATCH_SIZE와 동형 사상). orphan 후보
+# SQL이 이미 NOT EXISTS+freshness로 걸러내므로 정상 상태에선 이 LIMIT에 안 걸린다.
 _SELF_RECOVERY_SWEEP_SEED_LIMIT = 50
 
 
@@ -365,7 +365,14 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
     ·org 상한 안(`_within_org_continuous_poll_cap`)이면서 pending/in_progress 행이
     0인 publication에 due_at=now 씨앗 행을 심는다(UNIQUE 멱등 — 동시 틱 경합 방어,
     한 틱 삽입 상한 `_SELF_RECOVERY_SWEEP_SEED_LIMIT`건 — 남는 orphan은 다음 틱이
-    이어서 잡는다, 이미 씨앗 심긴 건 pending 행이 생겨 다음 스캔에서 자동 제외)."""
+    이어서 잡는다, 이미 씨앗 심긴 건 pending 행이 생겨 다음 스캔에서 자동 제외).
+
+    페드루 PO REQUIRED(2026-09-06, PR#3900 리뷰) — orphan 후보 판정을 SQL 한
+    쿼리로 민다(NOT EXISTS + 상관 서브쿼리 MAX 집계 + LIMIT). orphan이 0인 정상
+    상태(대부분의 틱)에서 이 함수의 비용이 「쿼리 1·0행」이 되게 하는 게 목적 —
+    이전 구현은 활성 창(14일) 안 publication을 전부 파이썬으로 받아 행마다 count+
+    max 쿼리를 따로 던져, orphan이 하나도 없어도 org×상한 200 규모면 틱마다
+    수천 쿼리가 영원히 돌았다."""
     from app.models.channel_publication import ChannelPublication
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
@@ -375,40 +382,32 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
     if not comment_capable_channels:
         return 0
 
+    freshness_cutoff = now - _CONTINUOUS_POLL_INTERVAL
+    has_open_row = (
+        select(func.count()).select_from(CommentCollectionSchedule).where(
+            CommentCollectionSchedule.publication_id == ChannelPublication.id,
+            CommentCollectionSchedule.status.in_(("pending", "in_progress")),
+        ).correlate(ChannelPublication).scalar_subquery()
+    )
+    last_activity_at = (
+        select(func.max(CommentCollectionSchedule.due_at)).where(
+            CommentCollectionSchedule.publication_id == ChannelPublication.id,
+        ).correlate(ChannelPublication).scalar_subquery()
+    )
+
     candidates = (await db.execute(
         select(ChannelPublication).where(
             ChannelPublication.channel.in_(comment_capable_channels),
             ChannelPublication.published_at.is_not(None),
             ChannelPublication.published_at >= now - _ACTIVE_PUBLISHED_WITHIN,
+            has_open_row == 0,
+            or_(last_activity_at.is_(None), last_activity_at < freshness_cutoff),
         ).order_by(ChannelPublication.published_at.desc())
+        .limit(_SELF_RECOVERY_SWEEP_SEED_LIMIT)
     )).scalars().all()
 
     seeded = 0
     for pub in candidates:
-        if seeded >= _SELF_RECOVERY_SWEEP_SEED_LIMIT:
-            break
-        has_open_row = (await db.execute(
-            select(func.count()).select_from(CommentCollectionSchedule).where(
-                CommentCollectionSchedule.publication_id == pub.id,
-                CommentCollectionSchedule.status.in_(("pending", "in_progress")),
-            )
-        )).scalar_one()
-        if has_open_row > 0:
-            continue
-        # 페드루 PO 실측 원인(2026-09-06) 재발 방지 자체 방어 — 방금 이 틱에서
-        # 정상적으로 처리·재생성된 publication(예: _schedule_next_continuous_poll_
-        # if_active가 정상 호출됨)을 스윕이 "orphan"으로 오판해 중복 씨앗을 심지
-        # 않도록, 가장 최근 행의 due_at이 _CONTINUOUS_POLL_INTERVAL 이내면(=정상
-        # 재생성 주기가 아직 안 지났다·방금 활동이 있었다) 건너뛴다. 실제 배포 前
-        # 소진 orphan은 마지막 활동이 최소 그만큼(보통 훨씬 더) 오래돼 이 방어를
-        # 그대로 통과한다.
-        last_activity_at = (await db.execute(
-            select(func.max(CommentCollectionSchedule.due_at)).where(
-                CommentCollectionSchedule.publication_id == pub.id,
-            )
-        )).scalar_one_or_none()
-        if last_activity_at is not None and now - last_activity_at < _CONTINUOUS_POLL_INTERVAL:
-            continue
         if not await _is_publication_active(db, publication_id=pub.id, now=now):
             continue
         if not await _within_org_continuous_poll_cap(db, org_id=pub.org_id, publication_id=pub.id, now=now):
@@ -428,8 +427,6 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
     """`insight_snapshots.py::process_due_insight_snapshots`와 동형 SKIP LOCKED 2단계
     커밋(클레임 commit → 개별 처리 commit/rollback 격리)."""
     from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION, FAILURE_KIND_TRANSIENT
-
-    from sqlalchemy import or_
 
     now = now or datetime.now(timezone.utc)
     rows = (await db.execute(
