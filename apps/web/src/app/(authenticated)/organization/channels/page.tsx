@@ -37,6 +37,154 @@ interface AvailableChannelItem {
   kind: string;
 }
 
+// story #3540(Phase1·마케팅운영, 페드루 PO 確定 2026-09-06) — 「성과 수집」 섹션. 발행
+// 채널 연결과 별개 축(beacon·UTM 둘 다 ChannelConnection 행이 아니다) — GA4는 Phase 2
+// 선행이라 이 화면에도 그 줄을 아예 안 그린다(유나 §13-7 「없는 자리를 그리지
+// 않는다」). BE는 이미 measurement-connections이 넷 다 판정해 준다 — 화면은 안 짓는다.
+interface MeasurementConnectionItem {
+  key: 'beacon' | 'utm';
+  status: string;
+  last_seen_at: string | null;
+  count_7d: number | null;
+  settings_path: string | null;
+}
+
+// story #3540 PO 確定4 — 「시작하기」/「키 보기」는 같은 액션(GET metering-key, 키
+// 없으면 최초 발급·있으면 반환만 — 발급 부작용 0은 BE가 이미 pin)이고 같은 자리에
+// 인라인 패널을 연다. 재발급(rotate)·설치 검증 UI는 4180f67f 잔여(이 스토리 스코프
+// 밖) — 여기는 「받아서 심는다」까지만.
+function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typeof useTranslations> }) {
+  const [copied, setCopied] = useState(false);
+  // 페드루 PO REQUIRED①(2026-09-06, #3896 리뷰) — window.location.origin은 이
+  // 대시보드(FE) 호스트다. 고객이 그대로 복사하면 없는 경로로 beacon을 쏜다 —
+  // 정본은 sprintable-landing의 view-beacon.tsx가 실제로 쓰는 BE 베이스
+  // (NEXT_PUBLIC_FASTAPI_URL, fastapi-proxy.ts:16과 같은 값)다. UTM 4키·
+  // keepalive:true도 그 실물과 동형(페이지 언로드 중에도 요청이 끊기지 않게).
+  const backendBase = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? '';
+  const snippet = `fetch('${backendBase}/api/v2/public/pageview', {\n  method: 'POST',\n  keepalive: true,\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    public_key: '${publicKey}',\n    path: location.pathname,\n    referrer: document.referrer || null,\n    utm_source: new URLSearchParams(location.search).get('utm_source'),\n    utm_medium: new URLSearchParams(location.search).get('utm_medium'),\n    utm_campaign: new URLSearchParams(location.search).get('utm_campaign'),\n    utm_content: new URLSearchParams(location.search).get('utm_content'),\n  }),\n});`;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(publicKey);
+    } catch {
+      // clipboard 실패는 조용히 무시(복사 버튼 재클릭으로 재시도 가능).
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3" data-testid="measurement-beacon-key-panel">
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-muted-foreground">{t('measurementBeaconKeyLabel')}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="rounded bg-muted px-2 py-1 text-xs" data-testid="measurement-beacon-key-value">{publicKey}</code>
+          <Button size="sm" variant="outline" onClick={() => void handleCopy()}>
+            {copied ? t('measurementBeaconKeyCopied') : t('measurementBeaconKeyCopyAction')}
+          </Button>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-muted-foreground">{t('measurementBeaconSnippetLabel')}</p>
+        <pre className="overflow-x-auto rounded bg-muted p-2 text-xs" data-testid="measurement-beacon-snippet">{snippet}</pre>
+      </div>
+    </div>
+  );
+}
+
+function MeasurementConnectionsSection({
+  items, orgId, onRefresh, t,
+}: {
+  items: MeasurementConnectionItem[];
+  orgId: string;
+  onRefresh: () => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
+  const [beaconPanel, setBeaconPanel] = useState<{ publicKey: string } | null>(null);
+  const [beaconPanelLoading, setBeaconPanelLoading] = useState(false);
+  const [beaconPanelError, setBeaconPanelError] = useState(false);
+
+  const beacon = items.find((it) => it.key === 'beacon');
+  const utm = items.find((it) => it.key === 'utm');
+
+  const handleShowBeaconKey = useCallback(async () => {
+    setBeaconPanelLoading(true);
+    setBeaconPanelError(false);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/metering-key`);
+      if (!res.ok) { setBeaconPanelError(true); return; }
+      const json = (await res.json().catch(() => null)) as { data?: { public_key: string } } | null;
+      if (!json?.data) { setBeaconPanelError(true); return; }
+      setBeaconPanel({ publicKey: json.data.public_key });
+      // PO 確定4 — 「같은 마운트에서 no_data_yet으로 갱신(재로드 요구 X)」. 최초
+      // 발급 뒤엔 status가 not_started→no_data_yet으로 바뀌어야 정확하다(beacon이
+      // 아직 안 찍혔어도 키는 이제 있다).
+      onRefresh();
+    } catch {
+      setBeaconPanelError(true);
+    } finally {
+      setBeaconPanelLoading(false);
+    }
+  }, [orgId, onRefresh]);
+
+  return (
+    <div className="space-y-4 border-t border-border pt-6" data-testid="measurement-connections-section">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold text-foreground">{t('measurementSectionTitle')}</h2>
+        <p className="text-xs text-muted-foreground">{t('measurementSectionSubtitle')}</p>
+      </div>
+
+      {beacon ? (
+        <div className="space-y-2" data-testid="measurement-beacon-row">
+          <p className="text-sm font-medium text-foreground">{t('measurementBeaconLabel')}</p>
+          <p className="text-sm text-foreground" data-testid="measurement-beacon-status">
+            {beacon.status === 'not_started'
+              ? t('measurementBeaconNotStarted')
+              : beacon.status === 'no_data_yet'
+                ? t('measurementBeaconNoDataYet')
+                : t('measurementBeaconHasData', {
+                    time: beacon.last_seen_at ? formatRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
+                    // 페드루 PO REQUIRED③(2026-09-06, #3896 리뷰) — count_7d(0 포함,
+                    // null≠0 원칙 — has_data 상태면 항상 실수라 BE가 이미 보장).
+                    count: beacon.count_7d ?? 0,
+                  })}
+          </p>
+          {!beaconPanel ? (
+            <Button size="sm" variant="outline" onClick={() => void handleShowBeaconKey()} disabled={beaconPanelLoading}>
+              {beacon.status === 'not_started' ? t('measurementBeaconStartAction') : t('measurementBeaconViewKeyAction')}
+            </Button>
+          ) : (
+            <BeaconKeyPanel publicKey={beaconPanel.publicKey} t={t} />
+          )}
+          {beaconPanelError ? (
+            <p className="text-xs text-destructive" data-testid="measurement-beacon-key-error">{t('measurementBeaconKeyFailed')}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {utm ? (
+        <div className="space-y-2" data-testid="measurement-utm-row">
+          <p className="text-sm font-medium text-foreground">{t('measurementUtmLabel')}</p>
+          <p className="text-sm text-foreground" data-testid="measurement-utm-status">
+            {utm.status === 'auto'
+              ? t('measurementUtmAuto')
+              : utm.status === 'manual'
+                ? t('measurementUtmManual')
+                : t('measurementUtmOff')}
+          </p>
+          {utm.settings_path ? (
+            <a href={utm.settings_path} className="text-xs underline text-foreground" data-testid="measurement-utm-settings-link">
+              {t('measurementUtmSettingsLink')}
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ExpiringSoonNote({ isAutoRefreshInfo, t }: { isAutoRefreshInfo?: boolean; t: ReturnType<typeof useTranslations> }) {
   return (
     <p className="text-xs text-muted-foreground">
@@ -433,6 +581,24 @@ export default function OrganizationChannelsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // story #3540 — 「성과 수집」 섹션은 발행 채널 목록·연결 왕복과 별개 축(실패해도
+  // 서로를 막지 않는다 — generation_budget/content-rules.py::page.tsx와 동형 관례).
+  const [measurementItems, setMeasurementItems] = useState<MeasurementConnectionItem[]>([]);
+  const [measurementLoadError, setMeasurementLoadError] = useState(false);
+  const loadMeasurement = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/measurement-connections`);
+      if (!res.ok) { setMeasurementLoadError(true); return; }
+      const json = (await res.json().catch(() => null)) as { data?: MeasurementConnectionItem[] } | null;
+      setMeasurementItems(json?.data ?? []);
+      setMeasurementLoadError(false);
+    } catch {
+      setMeasurementLoadError(true);
+    }
+  }, [orgId]);
+  useEffect(() => { void loadMeasurement(); }, [loadMeasurement]);
+
   const connected = searchParams.get('connected');
   const connectError = searchParams.get('connect_error');
 
@@ -492,6 +658,13 @@ export default function OrganizationChannelsPage() {
               t={t}
             />
           ))}
+          {measurementLoadError ? (
+            <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+              <AlertDescription>{t('measurementLoadFailed')}</AlertDescription>
+            </Alert>
+          ) : measurementItems.length > 0 ? (
+            <MeasurementConnectionsSection items={measurementItems} orgId={orgId ?? ''} onRefresh={() => void loadMeasurement()} t={t} />
+          ) : null}
         </>
       )}
     </div>
