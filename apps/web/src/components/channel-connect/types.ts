@@ -16,6 +16,9 @@ export interface ChannelConnectionResponse {
   connected_by: string | null;
   created_at: string;
   updated_at: string;
+  // story #3492 — 붙여넣기(pasted_secret) 자격 재방문 표시(끝 4자리). oauth 채널은
+  // null(§2 규격 3, app_id_suffix와 동형).
+  secret_hint: string | null;
 }
 
 export interface AuthorizeResponse {

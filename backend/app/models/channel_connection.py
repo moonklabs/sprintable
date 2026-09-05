@@ -50,3 +50,7 @@ class ChannelConnection(Base, TimestampMixin, OrgScopedMixin):
     # 유나 화면설계 §8②(PO 채택) — 갱신 실패 사유를 화면이 보여줄 수 있게(토큰 자체는 절대 아님).
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     connected_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #3492(0331) — 붙여넣기(pasted_secret) 자격 「제자리 교체」의 재방문 표시용
+    # (§2 규격 3, app_id_suffix와 동형 — 원문은 절대 저장/반환하지 않는다, 끝 4자리뿐).
+    # oauth 채널은 이 값을 안 씀(NULL 그대로).
+    secret_hint: Mapped[str | None] = mapped_column(Text, nullable=True)

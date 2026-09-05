@@ -70,6 +70,9 @@ async def upsert_channel_connection(
 
     encrypted_access_token = encrypt_channel_credential(access_token) if access_token else None
     encrypted_refresh_token = encrypt_channel_credential(refresh_token) if refresh_token else None
+    # story #3492 — pasted_secret 채널만 재방문 표시용 힌트를 남긴다(oauth는 이 개념이
+    # 없다, §2 규격 3).
+    secret_hint = _secret_hint(access_token) if access_token and credential_kind == "pasted_secret" else None
 
     if existing is None:
         row = ChannelConnection(
@@ -77,7 +80,7 @@ async def upsert_channel_connection(
             account_label=account_label, credential_kind=credential_kind,
             encrypted_access_token=encrypted_access_token, encrypted_refresh_token=encrypted_refresh_token,
             token_expires_at=token_expires_at, refresh_mode=refresh_mode, scopes=scopes,
-            status="active", connected_by=connected_by,
+            status="active", connected_by=connected_by, secret_hint=secret_hint,
         )
         db.add(row)
     else:
@@ -91,7 +94,57 @@ async def upsert_channel_connection(
         existing.status = "active"
         existing.last_error = None
         existing.connected_by = connected_by
+        existing.secret_hint = secret_hint
         row = existing
+
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+def _secret_hint(secret: str) -> str | None:
+    """channel_connections.py::_app_id_suffix와 동형(끝 4자리) — story #3492.
+
+    페드루 PO 차단(2026-09-05, PR#3841 리뷰·유나 Design FAIL) — 이전엔 3자 이하
+    secret이면 원문 통째를 그대로 돌려줬다(`len(secret) >= 4`가 아니면 else 분기가
+    `secret` 자체). 그 값이 DB `secret_hint` 컬럼(평문)·목록 응답(member까지)·화면
+    「****ab」로 그대로 샌다 — 짧은 secret일수록 오히려 더 많이 새는 역설. 8자
+    미만이면 힌트 자체를 안 만든다(None, 화면은 `secretHint ? … : null`이라 이미
+    null-safe — 무변경)."""
+    return secret[-4:] if len(secret) >= 8 else None
+
+
+async def replace_channel_connection_credential(
+    db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID,
+    new_secret: str, updated_by: uuid.UUID, account_label: str | None = None,
+) -> ChannelConnection:
+    """story #3492(PO 決定 2026-09-05) — 붙여넣기(pasted_secret) 자격 「제자리 교체」.
+    `upsert_channel_connection`과 의도적으로 다른 함수다 — 그쪽은 (org, channel,
+    account_id) 키로 새 행을 만들거나 찾아 갱신하지만(account_id가 바뀌면 새 행),
+    이 함수는 `connection_id` 하나로 정확히 그 행만 찾아 자격만 바꾼다(id·account_id·
+    channel 전부 불변 — draft·발행 이력·external_publish 게이트 scope_key(story
+    #3478, connection_id 단위)가 안 끊긴다는 것이 이 스토리의 존재 이유).
+
+    `account_label`은 WordPress만 갱신 대상(username이 바뀔 수 있다 — webhook은
+    label 개념이 없어 호출부가 안 넘긴다). `status`는 시험 성공 前에도 그대로
+    active로 남는다(PO 明示 — pending_verify 같은 신규 상태를 만들지 않는다,
+    「연결 시험」이 검증 축). 기존 last_error는 지운다(새 자격이 이전 실패를
+    고쳤을 수 있다 — 사람이 다시 시험 눌러 실제로 확인)."""
+    row = (await db.execute(
+        select(ChannelConnection).where(
+            ChannelConnection.id == connection_id, ChannelConnection.org_id == org_id,
+        ).with_for_update()
+    )).scalar_one_or_none()
+    if row is None:
+        raise ChannelConnectionNotFoundError(connection_id)
+
+    row.encrypted_access_token = encrypt_channel_credential(new_secret)
+    row.secret_hint = _secret_hint(new_secret)
+    if account_label is not None:
+        row.account_label = account_label
+    row.status = "active"
+    row.last_error = None
+    row.connected_by = updated_by
 
     await db.commit()
     await db.refresh(row)

@@ -138,7 +138,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await mount('member');
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
     expect(disconnectBtn).toBeUndefined();
-    expect(container.textContent).toContain('owner만 할 수 있는 작업입니다');
+    expect(container.textContent).toContain('이 작업은 owner·admin만 할 수 있습니다');
   });
 
   it('member도 연결 시험은 할 수 있다', async () => {
@@ -280,7 +280,7 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
     await mount('member');
     const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
     expect(registerBtn).toBeUndefined();
-    expect(container.textContent).toContain('owner만 할 수 있는 작업입니다');
+    expect(container.textContent).toContain('이 작업은 owner·admin만 할 수 있습니다');
   });
 });
 
@@ -312,7 +312,7 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
-    expect(container.textContent).toContain('owner만 할 수 있는 작업입니다');
+    expect(container.textContent).toContain('이 작업은 owner·admin만 할 수 있습니다');
   });
 
   it('⭐sandbox 「연결 만들기」를 누르면 BFF POST 성공 뒤 리로드 없이 새 연결 행이 추가된다', async () => {
@@ -397,7 +397,7 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
     expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOnlyReason);
   });
 
-  it('⭐(AC5) 이미 연결된 WordPress 행에 secret 값·끝 4자리 어느 것도 안 그려진다 — BFF 응답(ChannelConnectionResponse)에 그 필드가 없다', async () => {
+  it('⭐(AC5, story #3492로 secret_hint 부재 시로 범위 재확定) 응답에 secret_hint가 없으면 마스킹 흔적도 없다', async () => {
     stubFetch({
       connections: [{
         id: 'conn-wp-1', channel: 'wordpress', account_id: 'https://blog.example.com', account_label: 'admin',
@@ -410,10 +410,95 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
     await mount('owner');
     // 계정 라벨(username)만 보이고(ConnectionRow는 account_label이 있으면 account_id
     // 대신 그것만 그린다, 정상 기존 동작) — app_password류 흔적(마스킹 문자열 포함)이
-    // 어디에도 없다. 스키마 자체가 그 필드를 안 주므로(types.ts) 이 화면이 지어낼 값
-    // 자체가 없다.
+    // 어디에도 없다. secret_hint 필드 자체가 응답에 없으면(구버전 BFF·null) 이 화면이
+    // 지어낼 값이 없다(story #3492 이전 AC5 원문 그대로, "필드 자체가 없던" 시절 대신
+    // 지금은 "필드가 null·부재인" 케이스로 범위가 좁아졌을 뿐 — 있으면 다음 테스트처럼
+    // 끝 4자리를 보여주는 게 정상 동작으로 바뀌었다).
     expect(container.textContent).toContain('admin');
     expect(container.textContent).not.toMatch(/•{2,}|\*{2,}/);
+  });
+
+  it('⭐story #3492 — secret_hint가 있으면 owner는 끝 4자리 힌트와 「자격 바꾸기」 버튼을 본다(원문은 절대 안 보인다)', async () => {
+    stubFetch({
+      connections: [{
+        id: 'conn-wp-1', channel: 'wordpress', account_id: 'https://blog.example.com', account_label: 'admin',
+        credential_kind: 'pasted_secret', status: 'active', token_expires_at: null, last_refreshed_at: null,
+        last_error: null, can_auto_refresh: false, connected_by: 'member-1',
+        created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', secret_hint: '1234',
+      }],
+      availableChannels: WORDPRESS_AVAILABLE,
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-secret-hint-conn-wp-1"]')?.textContent).toBe('현재 자격 끝 4자리 1234');
+    expect(container.querySelector('[data-testid="channel-connect-replace-credential-button-conn-wp-1"]')).not.toBeNull();
+  });
+
+  it('story #3492 — member는 힌트도 「자격 바꾸기」 버튼도 안 보이고 owner 전용 사유만 본다', async () => {
+    stubFetch({
+      connections: [{
+        id: 'conn-wp-1', channel: 'wordpress', account_id: 'https://blog.example.com', account_label: 'admin',
+        credential_kind: 'pasted_secret', status: 'active', token_expires_at: null, last_refreshed_at: null,
+        last_error: null, can_auto_refresh: false, connected_by: 'member-1',
+        created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', secret_hint: '1234',
+      }],
+      availableChannels: WORDPRESS_AVAILABLE,
+    });
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-secret-hint-conn-wp-1"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-connect-replace-credential-button-conn-wp-1"]')).toBeNull();
+  });
+
+  it('story #3492 — owner가 「자격 바꾸기」 폼을 열고 제출하면 목록이 재조회되고 폼이 닫힌다', async () => {
+    let patchCalled = false;
+    let patchBody: unknown = null;
+    const connectionWithHint = {
+      id: 'conn-wp-1', channel: 'wordpress', account_id: 'https://blog.example.com', account_label: 'admin',
+      credential_kind: 'pasted_secret', status: 'active', token_expires_at: null, last_refreshed_at: null,
+      last_error: null, can_auto_refresh: false, connected_by: 'member-1',
+      created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', secret_hint: '1234',
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/channel-connections/available-channels')) {
+        return { ok: true, status: 200, json: async () => ({ data: WORDPRESS_AVAILABLE }) } as Response;
+      }
+      if (url.includes('/credentials') && init?.method === 'PATCH') {
+        patchCalled = true;
+        patchBody = init.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, status: 200, json: async () => ({ data: { ...connectionWithHint, secret_hint: '9999' } }) } as Response;
+      }
+      if (url.includes('/channel-connections')) {
+        return { ok: true, status: 200, json: async () => ({ data: [connectionWithHint] }) } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({ data: null, error: { code: 'NOT_FOUND' } }) } as Response;
+    }));
+    await mount('owner');
+
+    const openBtn = container.querySelector('[data-testid="channel-connect-replace-credential-button-conn-wp-1"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    // 유나 정본 §2④(페드루 PO 차단, PR#3841 리뷰) — 「이 자격이 어디서 오나」 필드-위
+    // 도움말이 폼을 열면 보여야 한다(생성 폼과 같은 다섯 규격).
+    expect(
+      container.querySelector('[data-testid="channel-connect-replace-credential-hint-conn-wp-1"]')?.textContent,
+    ).toContain('애플리케이션 비밀번호');
+
+    const pwInput = container.querySelector('#conn-wp-1-app_password') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(pwInput, 'new-app-password-9999');
+      pwInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-connect-replace-credential-submit-conn-wp-1"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(patchCalled).toBe(true);
+    expect((patchBody as { app_password?: string })?.app_password).toBe('new-app-password-9999');
+    // 폼이 닫히고(재입력 필드가 사라지고) 목록 재조회로 새 힌트가 반영된다.
+    expect(container.querySelector('[data-testid="channel-connect-replace-credential-form-conn-wp-1"]')).toBeNull();
   });
 });
 
