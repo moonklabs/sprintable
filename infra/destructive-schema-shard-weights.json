@@ -1118,6 +1118,11 @@
       "source": "story-3414-publication-command(로컬 raw pytest 실측, 템플릿 DB 스크립트 아님 — 페드루 리뷰 nit N)"
     },
     {
+      "file": "tests/test_3527_comment_collection_cron_wiring.py",
+      "sec": 45.0,
+      "source": "story-3527-comment-collection-cron-wiring(PR 개설 前 선제 등재 — 로컬 raw pytest 7.14s(2건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_3415_channel_post_command_exposure.py",
       "sec": 19.0,
       "source": "story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)"
