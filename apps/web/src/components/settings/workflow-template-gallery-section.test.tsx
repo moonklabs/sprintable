@@ -235,3 +235,84 @@ describe('WorkflowTemplateGallerySection — apply warnings[] 렌더(story #3316
     expect(container.textContent).not.toContain('주의');
   });
 });
+
+// story #3521(유나 §22-2, PO 確定 2026-09-05) — defRes(주)는 #3519 당시에도 catch가
+// 없었다(§16-7 주 계약대로 "던져도 된다"였지만, 받을 에러 상태 자체가 없어 finally만
+// 있는 이 컴포넌트에선 그 throw가 조용히 unhandled rejection으로 새고 화면은 초기값
+// (빈 배열)인 "항목 없음"과 똑같이 보였다). 이제 「불러오지 못했습니다」 얼굴로 갈린다.
+describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼굴(story #3521)', () => {
+  it('defRes가 네트워크 reject하면(응답 없음) "못 불러옴" 얼굴+다시 시도가 뜨고 정의는 안 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) throw new Error('network down');
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('테스트 레시피');
+    expect(container.querySelector('[data-testid="workflow-gallery-empty"]')).toBeNull();
+  });
+
+  it('defRes가 500이면(응답은 왔지만 실패) 위와 동형으로 "못 불러옴" 얼굴이 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: false, status: 500, json: async () => ({}) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).not.toBeNull();
+  });
+
+  it('defRes가 200+빈 배열이면(진짜 0건) "적용 가능한 워크플로우 템플릿이 없습니다"만 뜨고 실패 얼굴은 안 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [] };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="workflow-gallery-empty"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).toBeNull();
+  });
+
+  it('「다시 시도」 클릭 — 재조회 성공 시 정상 목록으로 복구된다', async () => {
+    let shouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) {
+        if (shouldFail) throw new Error('network down');
+        return { ok: true, json: async () => [DEFINITION] };
+      }
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).not.toBeNull();
+
+    shouldFail = false;
+    const retryBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).toBeNull();
+    expect(container.textContent).toContain('테스트 레시피');
+  });
+
+  // memberRes(부수)는 #3519 그대로 격리 유지 — 3521이 defRes(주) 취급을 바꿔도 이 회귀는
+  // 깨지면 안 된다(위 첫 describe 블록과 같은 계약, 다른 앵글로 재확인).
+  it('memberRes가 실패해도(부수) defRes(주)가 성공이면 loadError는 안 뜨고 정의가 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+      if (url.includes('/api/team-members')) throw new Error('network down');
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).toBeNull();
+    expect(container.textContent).toContain('테스트 레시피');
+  });
+});
