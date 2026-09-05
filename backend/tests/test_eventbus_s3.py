@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -208,12 +210,20 @@ async def test_batch_size_constant():
 
 
 def test_stream_batch_delivers_over_100_events(mock_session, org_id):
-    """110건 pending 이벤트를 배치(10건 청크)로 전달 + commit 횟수 확인."""
+    """110건 pending 이벤트를 배치(10건 청크)로 전달 + commit 횟수 확인.
+
+    story #3494(근본원인, 2026-09-05 PO 確定) — test_eventbus_s2.py::
+    test_agent_stream_registers_connection의 docstring 참조. 동기 TestClient는
+    앱 콜러블이 완전히 끝날 때까지 응답을 안 돌려준다 — injector가 앱 생존 중에
+    상태 기반으로 등록 관찰→sentinel 주입→소비확認한 뒤 shutdown_event로 정상
+    종료시킨다(하드코딩 sleep(0.3) 제거 — 110건 백필이 끝나기 전에 주입해도
+    무해하다, 큐에 그냥 쌓여 있다가 메인 루프가 백필을 마친 뒤 소비한다)."""
     from starlette.testclient import TestClient
     import threading
-    from contextlib import asynccontextmanager
+    from app.core import shutdown as shutdown_module
 
     member_id = uuid.uuid4()
+    member_id_str = str(member_id)
     events = [
         _make_event(
             recipient_id=member_id,
@@ -261,30 +271,50 @@ def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     async def _session_factory():
         yield mock_session
 
+    registered_observed = threading.Event()
+    consumed_observed = threading.Event()
+
+    def _inject():
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            if member_id_str in _agent_connections:
+                registered_observed.set()
+                break
+            time.sleep(0.005)
+        if not registered_observed.is_set():
+            return
+        queues = list(_agent_connections.get(member_id_str, set()))
+        for q in queues:
+            q.put_nowait({"event_type": "__test_sentinel__"})
+        # 110건 백필(11배치 commit)이 끝나야 메인 루프가 이 큐를 소비한다 — 상한을 넉넉히.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if all(q.empty() for q in queues):
+                consumed_observed.set()
+                break
+            time.sleep(0.005)
+        shutdown_module.shutdown_event.set()
+
+    t = threading.Thread(target=_inject)
+    t.start()
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
                 with TestClient(app, raise_server_exceptions=False) as c:
                     with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
                         assert resp.status_code == 200
-                        assert str(member_id) in _agent_connections
-
-                        # sentinel inject하여 스트림 종료
-                        def _inject():
-                            import time; time.sleep(0.3)
-                            for q in list(_agent_connections.get(str(member_id), set())):
-                                try: q.put_nowait({"event_type": "__test_sentinel__"})
-                                except: pass
-
-                        t = threading.Thread(target=_inject)
-                        t.start()
-                        for line in resp.iter_lines():
-                            if "__test_sentinel__" in line:
-                                resp.close(); break
-                        t.join(timeout=1.0)
     finally:
+        t.join(timeout=6.0)
         app.dependency_overrides.clear()
-        _agent_connections.pop(str(member_id), None)
+        _agent_connections.pop(member_id_str, None)
+        # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역, 이
+        # 테스트가 set()한 채로 남으면 다음 테스트의 SSE 스트림까지 즉시 shutdown_
+        # reconnect로 오판시킨다 — lifespan startup의 재생성에 암묵적으로 기대지 않고
+        # 명시로 되돌린다.
+        shutdown_module.reset_shutdown_event()
+
+    assert registered_observed.is_set(), "injector never observed the connection in _agent_connections"
+    assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"
 
     # 110건 = 11배치 → commit 11번 (backfill 배치 처리 확인)
     assert mock_session.commit.call_count >= 11
