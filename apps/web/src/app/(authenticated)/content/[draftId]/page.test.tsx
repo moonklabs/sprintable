@@ -1328,3 +1328,79 @@ describe('ContentPostEditPage — 캠페인 변경/해제(story 1db41045 B2)', (
     expect(container.querySelector('[data-testid="content-campaign-current"]')).toBeNull();
   });
 });
+
+// story #3483(BE 3482 계약, 유나 §16-7 정본) — 원문(site_post) 초안 화면 규칙 위반.
+// BE 3482가 아직 병합 前이라 stub fetch로 계약(violations[].field ∈ {title,summary,
+// body_md}, 나머지 shape은 3472 2부와 동일)만 먼저 검증한다. 라이브는 3482 착지 뒤.
+describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §16-7)', () => {
+  it('⭐저장 응답의 violations[] — title/summary/body_md 세 갈래로 각각 그 필드 아래에만', async () => {
+    stubFetchWithVersions([VERSION_1], () => ({
+      status: 201,
+      body: {
+        draft_id: DRAFT_ID, version_id: 'v2', version: 2,
+        violations: [
+          { code: 'banned_term', field: 'title', value: '무료체험', hint_key: 'x', settings_path: '/organization/content-rules' },
+          { code: 'banned_term', field: 'summary', value: '광고', hint_key: 'x', settings_path: '/organization/content-rules' },
+          { code: 'banned_term', field: 'body_md', value: '즉시할인', hint_key: 'x', settings_path: '/organization/content-rules' },
+        ],
+      },
+    }));
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.editSaveCta) as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const titleViolation = container.querySelector('[data-testid="content-rule-violation-title"]');
+    const summaryViolation = container.querySelector('[data-testid="content-rule-violation-summary"]');
+    const bodyViolation = container.querySelector('[data-testid="content-rule-violation-body-md"]');
+    expect(titleViolation?.textContent).toContain('무료체험');
+    expect(summaryViolation?.textContent).toContain('광고');
+    expect(bodyViolation?.textContent).toContain('즉시할인');
+    // 서로 새지 않는다(제목 위반이 요약 자리에 안 뜸 등).
+    expect(titleViolation?.textContent).not.toContain('광고');
+  });
+
+  it('⭐위반이 있으면 상신 버튼이 비활성이고, 버튼 밖에 개수가 뜬다', async () => {
+    stubFetchWithVersions([VERSION_1], () => ({
+      status: 201,
+      body: { violations: [{ code: 'banned_term', field: 'title', value: 'x', hint_key: 'x', settings_path: '/organization/content-rules' }] },
+    }));
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.editSaveCta) as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="content-rule-violation-blocked-reason"]')?.textContent)
+      .toBe(koMessages.content.contentRuleSubmitBlockedHint.replace('{count}', '1'));
+  });
+
+  it('⭐상신 422 CONTENT_RULE_VIOLATION — 새 배너를 안 만들고 필드 옆 목록만 갱신한다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, () => ({
+      status: 422,
+      body: { error: { code: 'CONTENT_RULE_VIOLATION', rules_version: 3, violations: [{ code: 'banned_term', field: 'body_md', value: 'y', hint_key: 'x', settings_path: '/organization/content-rules' }] } },
+    }));
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-rule-violation-body-md"]')?.textContent).toContain('y');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('위반이 없으면 저장·상신이 평소대로(회귀 0)', async () => {
+    stubFetchWithVersions([VERSION_1]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="content-rule-violation-title"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rule-violation-blocked-reason"]')).toBeNull();
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
+  });
+});

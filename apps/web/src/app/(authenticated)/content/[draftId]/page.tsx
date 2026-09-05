@@ -21,6 +21,12 @@ import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+// story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙
+// 위반. field는 title|summary|body_md(channel_post의 text|link_url과 다른 축이라
+// 컴포넌트는 field를 모른다 — 호출부가 이미 걸러 넘긴다).
+import {
+  ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
+} from '@/components/content/content-rule-violation';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -154,6 +160,12 @@ export default function ContentPostEditPage() {
   const [saveMessage, setSaveMessage] = useState<
     { type: 'success'; text: string } | { type: 'error'; text: string; raw?: string } | null
   >(null);
+  // story #3483(BE 3482, §16-7) — 저장/상신 응답이 채우는 하나의 목록. 상신 422는
+  // 새 배너를 안 만들고 이 state를 서버 응답으로 갱신한다(channel-posts 상세와 동형).
+  const [violations, setViolations] = useState<ContentRuleViolation[]>([]);
+  // "편집 중에도 같은 강도" — severity가 없어 위반이 있으면 전부 차단(channel-posts
+  // 상세와 동형).
+  const hasBlockingViolations = violations.length > 0;
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
@@ -570,6 +582,11 @@ export default function ContentPostEditPage() {
       });
       if (res.ok) {
         setSaveMessage({ type: 'success', text: t('editSaved') });
+        // story #3483 — create 응답의 violations[]로 필드 옆 목록을 갱신(§16-7 "기본
+        // 처리는 필드 옆 목록을 서버 응답으로 갱신"). 계약에 없으면(BE 미착지) 빈
+        // 배열 — 화면은 아무것도 지어내지 않는다.
+        const saveJson = (await res.json().catch(() => null)) as { data?: { violations?: ContentRuleViolation[] } } | null;
+        setViolations(saveJson?.data?.violations ?? []);
         // 새 버전이 생겼다 — 이력을 다시 읽어 새 버전 번호·"미상신" 상태를 반영한다(AC2).
         const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
         if (versionsRes.ok) {
@@ -601,7 +618,7 @@ export default function ContentPostEditPage() {
   // 404가 정상 응답이다 — 그 경우도 다른 에러와 동일하게 "사람 말+원문 보존"으로 렌더한다
   // (지어낸 성공 메시지로 덮지 않는다, AC7).
   const handleSubmitForApproval = async () => {
-    if (!orgId || !latest) return;
+    if (!orgId || !latest || hasBlockingViolations) return;
     setSubmitting(true);
     setSubmitResult(null);
     try {
@@ -625,6 +642,14 @@ export default function ContentPostEditPage() {
         }
       } else {
         const body = await res.json().catch(() => null);
+        // story #3483(§16-7) — "상신 422는 새 배너를 만들지 않는다". 위반은 이미
+        // 필드 옆에 서 있던 것이라 여기서는 그 목록을 서버 응답으로 갱신만 하고
+        // 끝낸다(submitResult 일반 오류 배너로 안 떨어뜨린다).
+        const ruleViolationBody = body as { error?: { code?: string; violations?: ContentRuleViolation[] } } | null;
+        if (ruleViolationBody?.error?.code === 'CONTENT_RULE_VIOLATION') {
+          setViolations(ruleViolationBody.error.violations ?? []);
+          return;
+        }
         const info = parseSitePostApiError(body);
         // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD 전용 분기. 서버는 상대 초안의
         // draft_id·lang·slug만 준다(title 없음) — 여기서 그 초안의 최신 버전을 별도
@@ -1111,6 +1136,8 @@ export default function ContentPostEditPage() {
             disabled={saving}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
           />
+          {/* story #3483(§16-7) — "그 필드 아래" 그 필드 것만 목록. */}
+          <ContentRuleViolationList violations={violations.filter((v) => v.field === 'title')} testId="content-rule-violation-title" t={t} />
         </div>
 
         <div className="space-y-1">
@@ -1123,6 +1150,7 @@ export default function ContentPostEditPage() {
             disabled={saving}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
           />
+          <ContentRuleViolationList violations={violations.filter((v) => v.field === 'summary')} testId="content-rule-violation-summary" t={t} />
         </div>
 
         <div className="space-y-1">
@@ -1148,6 +1176,7 @@ export default function ContentPostEditPage() {
             rows={16}
             className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground"
           />
+          <ContentRuleViolationList violations={violations.filter((v) => v.field === 'body_md')} testId="content-rule-violation-body-md" t={t} />
         </div>
 
         <div className="space-y-1">
@@ -1174,7 +1203,7 @@ export default function ContentPostEditPage() {
             <Button type="button" onClick={() => void handleSave()} disabled={saving}>
               {saving ? t('editSavingCta') : t('editSaveCta')}
             </Button>
-            <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting}>
+            <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting || hasBlockingViolations}>
               {submitting ? t('submitPendingCta') : t('submitCta')}
             </Button>
             {/* story #3386 AC2 — 발행된 글은 기본 잠금(canPublish=false), 재승인된 새
@@ -1185,6 +1214,11 @@ export default function ContentPostEditPage() {
                 : (isRepublish ? t('publishRepublishCta') : t('publishCta'))}
             </Button>
           </div>
+          {/* story #3483(§16-7) — "그래서 못 한다"는 버튼 밖·비활성. "필드 아래"(무엇이
+              걸렸나)와 자리가 다르다 — 여기는 개수만 세고 가리킨다. */}
+          {hasBlockingViolations ? (
+            <ContentRuleSubmitBlockedReason count={violations.length} testId="content-rule-violation-blocked-reason" t={t} />
+          ) : null}
           {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
               이유"를 옆에 두는 이 문구는 실제 정보라 4.5:1 판정 대상이다(text-muted-
               foreground on card 실측 5.92 — 통과, doc §6-2-1 그대로). */}
