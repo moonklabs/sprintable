@@ -96,7 +96,8 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
   // story #3472(페드루 PO 확定 2026-09-05) — '콘텐츠 규칙'(/organization/content-rules) 추가돼 6→7항목.
-  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터', '채널', '콘텐츠 규칙'] },
+  // story #3503 — '성과 보드'(/organization/insights-board) 추가돼 7→8항목.
+  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터', '채널', '콘텐츠 규칙', '성과 보드'] },
   { labelKey: null, labels: ['설정'] },
 ];
 
@@ -114,7 +115,8 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // (/organization/channels) 추가돼 챗 제외 20→21항목. story #3402 — 워크 그룹에 '채널
 // 포스트'(/content/channel-posts) 추가돼 챗 제외 21→22항목. story #3472(페드루 PO
 // 확定 2026-09-05) — 조직 그룹에 '콘텐츠 규칙'(/organization/content-rules) 추가돼
-// 챗 제외 22→23항목.
+// 챗 제외 22→23항목. story #3503 — 조직 그룹에 '성과 보드'(/organization/insights-board)
+// 추가돼 챗 제외 23→24항목.
 //
 // ⚠️'채널 포스트'는 텍스트가 '채널'로 시작한다 — 아래 매칭 로직의 startsWith 폴백이
 // '채널'을 찾을 때 '채널 포스트' 링크를 먼저 집을 위험이 있었다(페드루 PO 실측,
@@ -132,6 +134,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '커넥터': '/organization/connectors',
   '채널': '/organization/channels',
   '콘텐츠 규칙': '/organization/content-rules',
+  '성과 보드': '/organization/insights-board',
   '조직 브리핑': '/org-briefing',
   '알림': '/inbox',
   '보드': '/flow',

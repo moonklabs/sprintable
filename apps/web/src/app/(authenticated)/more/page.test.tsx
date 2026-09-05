@@ -92,6 +92,12 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(goalsLink?.getAttribute('href')).toBe('/goals');
   });
 
+  it('doc a0da40c9 §21-1(2026-09-05) — 조직 그룹에 새로 추가된 「성과 보드」가 이 모바일 허브에도 뜬다(하나만 서면 모바일 진입점이 아예 없다는 규율의 회귀가드)', async () => {
+    await mount();
+    const insightsBoardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('성과 보드'));
+    expect(insightsBoardLink?.getAttribute('href')).toBe('/organization/insights-board');
+  });
+
   it('설정 섹션이 그룹 라벨로 뜬다(desktop 무라벨 footer와 달리 허브에선 명시 섹션)', async () => {
     await mount();
     const settingsSection = [...container.querySelectorAll('h2')].find((h) => h.textContent === '설정');
