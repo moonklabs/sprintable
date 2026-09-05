@@ -137,6 +137,8 @@ function stubFetch(opts: {
   // 기본값 10 유지, IG 실값(1.91) 테스트만 덮어씀).
   imageAspectMin?: number;
   imageAspectMax?: number;
+  // story #3538(BE #3886) — 기본 false(기존 테스트 전부 회귀 0).
+  imageRequired?: boolean;
   onImageUploadUrl?: (body: unknown) => { status: number; body: unknown };
   onImagePut?: () => { status: number };
   onImageConfirm?: (body: unknown) => { status: number; body: unknown };
@@ -224,6 +226,8 @@ function stubFetch(opts: {
               image_aspect_max: opts.imageAspectMax ?? 10, image_aspect_min: opts.imageAspectMin ?? 0,
               image_width_min: 320, image_width_max: 1440,
               image_color_space: 'sRGB', image_max_count: opts.imageMaxCount ?? 0,
+              // story #3538(BE #3886) — 기본 false(기존 테스트 전부 회귀 0).
+              image_required: opts.imageRequired ?? false,
             }],
             error: null, meta: null,
           }),
@@ -2110,6 +2114,103 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(errorText).not.toContain('1.9인데');
     expect(errorText).not.toContain('가로');
     expect(errorText).not.toContain('세로');
+  });
+});
+
+// story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널 상신 전 선알림 + 422 문구.
+describe('ChannelPostEditPage — 이미지 필수 채널 선알림(story #3538)', () => {
+  const REASON_TESTID = 'channel-post-image-required-reason';
+
+  it('image_required=true·이미지 0장이면 사유가 뜨고 상신·예약 상신·저장 버튼 상태가 각각 옳다(저장만 활성)', async () => {
+    stubFetch({ imageMaxCount: 1, imageRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector(`[data-testid="${REASON_TESTID}"]`)).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    // 페드루 PO 明示(2026-09-06) — 저장은 이미지 필수 축과 무관(본문만 먼저 쓰고
+    // 이미지는 나중에 붙이는 길을 막지 않는다).
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('image_required=true여도 이미지가 있으면(같은 마운트에서 첨부 직후) 사유가 즉시 사라지고 상신이 풀린다', async () => {
+    stubFetch({ imageMaxCount: 1, imageRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector(`[data-testid="${REASON_TESTID}"]`)).not.toBeNull();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector(`[data-testid="${REASON_TESTID}"]`)).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('image_required=false(Threads 등)이면 이미지 0장이어도 사유가 렌더되지 않는다', async () => {
+    stubFetch({ imageMaxCount: 1, imageRequired: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector(`[data-testid="${REASON_TESTID}"]`)).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('업로드 진행 중엔 「업로드 중」 사유만 뜨고 「이미지 필요」 사유와 동시에 뜨지 않는다', async () => {
+    let releaseUpload: (() => void) | undefined;
+    const imagePutGate = new Promise<void>((resolve) => { releaseUpload = resolve; });
+    stubFetch({ imageMaxCount: 1, imageRequired: true, imagePutGate });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector(`[data-testid="${REASON_TESTID}"]`)).not.toBeNull();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // 업로드 中(0장 그대로) — 두 조건이 동시에 참일 수 있는 시점이지만 사유는 하나만.
+    expect(container.querySelector('[data-testid="channel-post-image-upload-in-progress-reason"]')).not.toBeNull();
+    expect(container.querySelector(`[data-testid="${REASON_TESTID}"]`)).toBeNull();
+
+    await act(async () => {
+      releaseUpload?.();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // 업로드 완료(이미지 생김) — 둘 다 사라진다.
+    expect(container.querySelector('[data-testid="channel-post-image-upload-in-progress-reason"]')).toBeNull();
+    expect(container.querySelector(`[data-testid="${REASON_TESTID}"]`)).toBeNull();
+  });
+
+  it('422 CHANNEL_IMAGE_REQUIRED — 선알림과 같은 문구가 뜬다(서버 message 그대로 아님)', async () => {
+    stubFetch({
+      onSubmit: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_IMAGE_REQUIRED', message: '이 채널은 이미지 1장이 필요합니다.' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    const alertText = container.querySelector('[role="alert"]')?.textContent ?? '';
+    expect(alertText).toContain('이미지 없이 상신할 수 없습니다 — 이 채널은 이미지가 필요합니다.');
   });
 });
 

@@ -163,6 +163,10 @@ interface ChannelConnectionInfo {
   image_width_max: number;
   image_color_space: string;
   image_max_count: number;
+  // story #3538(BE #3886, PO 確定 2026-09-06) — image_max_count>0("지원")과 다른
+  // 축: "필수"(이미지 0장이면 상신 자체가 422로 막힘, 예: Instagram). §17-16⑤
+  // 사유 사슬 렌더 조건 재료.
+  image_required: boolean;
 }
 
 // story #3402 ④(AC7) — 한도 잔량은 조회값이고 조회 실패도 상태다. success=false는
@@ -415,6 +419,8 @@ export default function ChannelPostEditPage() {
         // 태그가 이 값을 아예 안 그린다).
         aspectMin: number;
         widthMin: number; widthMax: number; colorSpace: string;
+        // story #3538 — image_required(additive, imageSpec 계열 나머지와 동형 관례).
+        imageRequired: boolean;
       }
     | undefined
   >(undefined);
@@ -549,6 +555,8 @@ export default function ChannelPostEditPage() {
                 // N(페드루 PO, 2026-09-04 13:27Z) — connection 응답에서 이미 읽던 필드가
                 // imageSpec에 안 실려 규격 태그에 한 번도 안 나온 갭.
                 colorSpace: conn.image_color_space,
+                // story #3538 — image_required 그대로(하드코딩 X·채널명 분기 X).
+                imageRequired: conn.image_required,
               });
             }
           }
@@ -670,7 +678,7 @@ export default function ChannelPostEditPage() {
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
   const handleSubmitForApproval = async (scheduledAt?: string) => {
-    if (!orgId || !draft || isOverLimit || hasBlockingViolations || imageUploadInProgress) return;
+    if (!orgId || !draft || isOverLimit || hasBlockingViolations || imageUploadInProgress || imageRequiredAndMissing) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
     if (scheduledAt) setScheduleServerError(null);
@@ -1172,6 +1180,15 @@ export default function ChannelPostEditPage() {
   // 것처럼 보인다). 업로드가 진행 중인 동안은 저장/즉시 상신/예약 상신을 막는다.
   const imageUploadInProgress = imageUploadStatus.phase === 'requesting_url'
     || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming';
+
+  // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널(image_required)인데
+  // 이미지가 없으면(draft.thumbnail_url 없음) 상신·예약 상신이 서버에서 422로 막힌다
+  // (§7 「필수값 빈칸 선알림」). 업로드 진행 中엔 이 사유를 안 보인다(업로드 중엔 실제로
+  // 0장이라 두 조건이 동시에 참일 수 있는데, 그땐 「업로드가 끝나면 된다」가 맞는
+  // 말 — 페드루 PO 明示, 사유 사슬은 한 줄만 뜬다). 저장 버튼은 이 조건과 무관(본문만
+  // 먼저 쓰고 이미지는 나중에 붙이는 길을 막지 않는다 — 상신·발행의 조건이지 저장의
+  // 조건이 아니다).
+  const imageRequiredAndMissing = Boolean(imageSpec?.imageRequired) && !draft?.thumbnail_url && !imageUploadInProgress;
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
@@ -1838,7 +1855,7 @@ export default function ChannelPostEditPage() {
         </Button>
         <Button
           onClick={() => void handleSubmitForApproval()}
-          disabled={submitting || isOverLimit || hasBlockingViolations || imageUploadInProgress}
+          disabled={submitting || isOverLimit || hasBlockingViolations || imageUploadInProgress || imageRequiredAndMissing}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
@@ -1850,7 +1867,7 @@ export default function ChannelPostEditPage() {
         <Button
           variant="outline"
           onClick={() => setScheduleDialogOpen(true)}
-          disabled={submitting || isOverLimit || hasBlockingViolations || blockedByCommandInFlight || imageUploadInProgress}
+          disabled={submitting || isOverLimit || hasBlockingViolations || blockedByCommandInFlight || imageUploadInProgress || imageRequiredAndMissing}
           data-testid="channel-post-schedule-submit-button"
         >
           {t('channelPostsScheduleSubmitCta')}
@@ -1898,6 +1915,15 @@ export default function ChannelPostEditPage() {
       {!isOverLimit && !hasBlockingViolations && imageUploadInProgress ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-in-progress-reason">
           {t('channelPostsImageUploadInProgressReason')}
+        </p>
+      ) : null}
+      {/* story #3538(유나 §17-16⑤ PO 確定 2026-09-06) — 「업로드 중」 바로 뒤(이미
+          업로드 中일 때 두 조건이 동시에 참일 수 있는데, imageRequiredAndMissing 자체가
+          !imageUploadInProgress를 이미 조건에 넣어 두 줄 동시 노출을 막는다). 개수는
+          말하지 않는다(계약은 image_required: boolean뿐). */}
+      {!isOverLimit && !hasBlockingViolations && imageRequiredAndMissing ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-image-required-reason">
+          {t('channelPostsImageRequiredReason')}
         </p>
       ) : null}
       {!isOverLimit && !hasBlockingViolations && blockedByCommandInFlight ? (
