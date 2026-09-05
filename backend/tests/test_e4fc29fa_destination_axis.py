@@ -494,12 +494,10 @@ async def test_destination_change_voided_gate_cannot_be_approved_into_wrong_publ
     (ValueError, 게이트 라우터에선 409 gate_already_resolved에 대응)으로 막힌다 — W용
     승인으로 H에 발행되는 경로 자체가 구조적으로 안 열린다.
 
-    뮤테이션 자가검증: `_reseal_gate_on_new_version`의 void 분기를 임시로 비활성화하면
-    G_W가 pending인 채 남아 approve가 200으로 성공하고, 곧이어
-    `_maybe_create_scheduled_publication_command`가 destination=H로 명령을 만든다
-    (BLOCKER 1이 없으면 벌어지는 정확히 그 사고) — 이 시나리오는 별도로 아래에서
-    직접 재현해 RED를 확인한다(코드를 되돌리지 않고, 같은 로직을 인라인으로 그대로
-    복제해 대조)."""
+    뮤테이션 자가검증(실제 방법 — PR 본문과 동일하게 정정) — `_reseal_gate_on_new_
+    version`의 void 분기(`if old_scope_key is not None and ...:`)를 `if False and ...`
+    로 임시 비활성화하고 이 파일 전체를 재실행 : 이 테스트를 포함해 3건이 RED로
+    재현됨을 직접 확인한 뒤 원본으로 복원했다(별도의 인라인 복제 로직은 쓰지 않았다)."""
     from app.services.gate_service import transition_gate
     from app.main import app
 
@@ -712,6 +710,101 @@ async def test_destination_change_only_touches_gate_held_by_this_draft():
             gate_a_after = (await s.execute(select(Gate).where(Gate.id == gate_a_id))).scalar_one()
             assert gate_a_after.status == "approved", "B의 destination 변경이 A가 쥔 게이트를 건드렸다"
     finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_destination_round_trip_revives_voided_gate_row():
+    """story #3478 후속(페드루 REQUIRED, 2026-09-05) — 「돌아오는 길」 계약. W→H로
+    바꾸면(위 테스트들) 옛 W 게이트가 voided된다 — 그 뒤 다시 H→W로 바꿔 재상신하면
+    **같은 게이트 행(id 불변)이 되살아나야** 한다(새 행을 새로 만들지 않는다).
+
+    이 계약은 다른 모듈의 암묵 전제 위에 서 있다 — `find_gate_slot_with_pr_fallback`
+    가 status 필터 없이 조회하고, `create_gate()`가 rejected가 아니면 그 행을 그대로
+    반환하며, `submit_site_post_draft()`의 "status != pending"이면 되돌리는 분기가
+    pending 복귀+재봉인+`reapproval_required=False`까지 처리한다는 전제. 이 셋 중
+    하나라도 나중에 "voided도 걸러내자"며 status 필터를 넣으면 이 되살아나는 경로가
+    조용히 깨진다 — 이 테스트가 그 자리를 지키는 가드."""
+    from app.services.gate_service import transition_gate
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_w = await _seed_connection(s, org_id, account_id="roundtrip-w")
+            connection_h = await _seed_connection(s, org_id, account_id="roundtrip-h")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, body_md="본문 v1", connection_id=connection_w),
+            )
+            draft_id = r1.json()["draft_id"]
+            r_submit_w1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+            assert r_submit_w1.status_code == 200, r_submit_w1.text
+            gate_w_id = uuid.UUID(r_submit_w1.json()["gate_id"])
+
+            # W → H (옛 W 게이트가 voided된다 — 위 테스트들과 동일 경로).
+            r2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, body_md="본문 v2", connection_id=connection_h),
+            )
+            assert r2.status_code == 201, r2.text
+            r_submit_h = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+            assert r_submit_h.status_code == 200, r_submit_h.text
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate_w_voided = (await s.execute(select(Gate).where(Gate.id == gate_w_id))).scalar_one()
+            assert gate_w_voided.status == "voided", "그라운딩 전제(W→H가 W를 voided)가 깨졌다"
+
+        # H → W (돌아오는 길) — 본문도 바꿔서 재봉인이 최신 버전을 실제로 반영하는지까지 잰다.
+        async with _client_for(app) as client:
+            r3 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, body_md="본문 v3(돌아온 뒤)", connection_id=connection_w),
+            )
+            assert r3.status_code == 201, r3.text
+            r_submit_w2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+            assert r_submit_w2.status_code == 200, r_submit_w2.text
+            revived_gate_id = uuid.UUID(r_submit_w2.json()["gate_id"])
+
+        assert revived_gate_id == gate_w_id, "돌아오는 길이 새 게이트 행을 만들었다 — 같은 행 재사용 계약이 깨진 것"
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from app.models.site_post_version import SitePostVersion
+            from sqlalchemy import select
+
+            revived = (await s.execute(select(Gate).where(Gate.id == revived_gate_id))).scalar_one()
+            assert revived.status == "pending"
+            assert revived.sealed_destination_connection_id == connection_w
+            assert revived.reapproval_required is False
+            latest_version = (await s.execute(
+                select(SitePostVersion)
+                .where(SitePostVersion.draft_id == draft_id)
+                .order_by(SitePostVersion.version.desc())
+                .limit(1)
+            )).scalar_one()
+            assert revived.sealed_content_sha256 == latest_version.body_sha256, "재봉인이 최신 버전을 안 반영했다"
+
+            approved = await transition_gate(s, org_id, revived_gate_id, "approved", resolver_id=uuid.uuid4())
+            await s.commit()
+            assert approved.status == "approved", "되살아난 게이트가 정상 승인 전이를 못 탔다"
+    finally:
+        app.dependency_overrides.clear()
         await engine.dispose()
 
 
