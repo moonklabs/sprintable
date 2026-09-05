@@ -22,7 +22,16 @@ create_all()`로 세운 DB(모델이 아는 전부)의 CHECK 제약 집합을 �
 `PARITY_TEST_DATABASE_URL`/`ALEMBIC_DATABASE_URL` 미설정 시 skip. 이 파일은
 자체 전용 임시 DB를 만들어 `alembic upgrade head`를 돌리고 끝나면 지운다(공용
 `_REAL_DB_URL` DB는 다른 테스트들이 create_all()로 이미 쓰고 있어 여기서 직접
-마이그를 걸면 충돌한다)."""
+마이그를 걸면 충돌한다).
+
+**이 가드가 못 잡는 것(페드루 PO REQUIRED, 2026-09-06 — 가드는 스스로 뭘
+놓치는지 선언해야 신뢰 가능하다)**: 대조는 **이름만**(`pg_constraint.conname`)
+본다 — 마이그와 모델 양쪽에 같은 이름의 CHECK가 있기만 하면 통과하고, 그
+안의 **조건식 자체가 서로 다르게 드리프트**해도(예: 마이그는 `IN ('a','b')`
+인데 모델은 `IN ('a','b','c')`로 값 집합만 슬쩍 달라짐) 이 가드는 못 잡는다
+— 이름 존재/부재 클래스(이 스토리의 실제 사고)만 겨눈 것이지 "제약 내용이
+서로 정확히 같은 규칙을 표현하는가"까지 검증하는 게 아니다. 조건식 드리프트는
+범위 밖(후속 스토리 대상)."""
 from __future__ import annotations
 
 import os

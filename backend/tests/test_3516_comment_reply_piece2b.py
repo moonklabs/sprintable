@@ -239,7 +239,16 @@ async def test_comment_list_reply_summary_null_for_unreplied_and_populated_for_r
 @pytest.mark.anyio
 async def test_comment_list_reply_summary_picks_latest_of_multiple_drafts():
     """댓글 1건에 초안 답변을 2개 만들면(재상신 API가 없어 "새 초안" 관례,
-    스토리 본문 명시) 배치 조인이 가장 최근 것 1건만 내야 한다."""
+    스토리 본문 명시) 배치 조인이 **created_at 최신** 1건만 내야 한다.
+
+    카디르 뮤테이션 발견(2026-09-06, 페드루 판단) — 원래 이 테스트는 두 초안을
+    삽입 순서 그대로(먼저 만든 게 물리적으로도 먼저) 만들어, `_latest_reply_
+    by_comment_ids`의 `rn==1` 필터(ORDER BY created_at DESC)를 완전히 빼도
+    "마지막 삽입 행이 우연히 마지막에 옴"이라는 Postgres 물리 순서 우연으로
+    초록이 나왔다 — ORDER BY 자체를 검증한 게 아니었다. 여기서는 **물리
+    삽입 순서와 created_at 순서를 일부러 어긋나게** 만든다(나중에 삽입한
+    행에 더 이른 created_at을 명시로 대입) — `rn==1` 필터를 빼면 이제
+    확실히 RED, 있으면 초록이어야 진짜 검증."""
     from app.services.channel_post_comment_replies import create_comment_reply_draft
     from app.services.channel_post_comments import list_comments_for_publication
 
@@ -252,19 +261,26 @@ async def test_comment_list_reply_summary_picks_latest_of_multiple_drafts():
             _, _, _, pub = await _seed_full_publication_chain(s, org_id=org_id, project_id=project_id)
             comment = await _seed_comment(s, org_id=org_id, publication_id=pub.id)
 
-            first_draft = await create_comment_reply_draft(
-                s, org_id=org_id, comment_id=comment.id, text="첫 초안", created_by_member_id=human_id,
-                created_by_kind="human",
+            # 물리 삽입 순서: newer_by_time(진짜 최신) 먼저 → older_by_time(진짜
+            # 과거) 나중 — 물리 순서 기준 "마지막 삽입 행"은 older_by_time이라,
+            # rn==1 필터 없이 dict comprehension(마지막 행 승리)만 쓰면 이제
+            # older_by_time이 잘못 선택돼야 정상(=RED 재현).
+            newer_by_time = await create_comment_reply_draft(
+                s, org_id=org_id, comment_id=comment.id, text="진짜 최신(먼저 삽입)",
+                created_by_member_id=human_id, created_by_kind="human",
             )
-            second_draft = await create_comment_reply_draft(
-                s, org_id=org_id, comment_id=comment.id, text="두 번째 초안", created_by_member_id=human_id,
-                created_by_kind="human",
+            older_by_time = await create_comment_reply_draft(
+                s, org_id=org_id, comment_id=comment.id, text="진짜 과거(나중 삽입)",
+                created_by_member_id=human_id, created_by_kind="human",
             )
+            newer_by_time.created_at = datetime.now(timezone.utc)
+            older_by_time.created_at = datetime.now(timezone.utc) - timedelta(days=1)
+            await s.commit()
 
             result = await list_comments_for_publication(s, org_id=org_id, publication_id=pub.id)
             summary = result["reply_by_comment_id"][comment.id]
-            assert summary.id == second_draft.id, "created_at 최신 답변이 나와야 함"
-            assert summary.id != first_draft.id
+            assert summary.id == newer_by_time.id, "created_at 최신 답변이 나와야 함(물리 삽입 순서와 무관)"
+            assert summary.id != older_by_time.id
     finally:
         await engine.dispose()
 
