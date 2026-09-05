@@ -14,6 +14,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.gcs_cors_ssot_helpers import assert_cors_file_allows_required_write_headers
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CORS_FILE = _REPO_ROOT / "infra" / "gcs-attachments-cors.json"
 _CLOUDBUILD = _REPO_ROOT / "cloudbuild.yaml"
@@ -81,11 +83,15 @@ def test_cors_file_allows_required_put_headers():
     로 서명해 모든 업로드 PUT에 Content-Type과 x-goog-if-generation-match를 항상 바인딩한다
     (안 보내면 403 SignatureDoesNotMatch). GCS responseHeader는 preflight의
     Access-Control-Allow-Headers에 대응(Expose-Headers 아님) — 여기 없으면 프리플라이트 자체가
-    막힌다. Content-Type은 #2806부터 이미 있었으나 x-goog-if-generation-match는 없었다."""
+    막힌다. Content-Type은 #2806부터 이미 있었으나 x-goog-if-generation-match는 없었다.
+
+    story #3545 — x-goog-if-generation-match 쪽은 이제 하드코딩이 아니라
+    GcsStorageProvider.required_write_headers(create_only=True)(정본)를 직접 읽는
+    공용 헬퍼로 검증한다 — 채널 미디어 버킷 json이 이 헬퍼를 같이 쓴다(#3545)."""
     rules = _load_cors_rules()
     all_headers = {h for rule in rules for h in rule.get("responseHeader", [])}
     assert "Content-Type" in all_headers
-    assert "x-goog-if-generation-match" in all_headers
+    assert_cors_file_allows_required_write_headers(_CORS_FILE)
 
 
 def test_cloudbuild_apply_step_references_the_cors_file_exactly():

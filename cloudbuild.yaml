@@ -397,7 +397,15 @@ steps:
           *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
           *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
         esac
-        echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
+        # story #3545(2026-09-06) — origin만 보던 검증이 헤더 누락(x-goog-if-generation-
+        # match, 서명 create-only PUT 필수)은 초록으로 지나쳤다(#3242의 채널 미디어
+        # 버킷 재발이 이 사각에서 나왔다). origin과 헤더 둘 다 봐야 실제 프리플라이트
+        # 통과를 보증한다.
+        case "$${applied}" in
+          *x-goog-if-generation-match*) ;;
+          *) echo "FAIL: x-goog-if-generation-match header missing from applied CORS — 서명 PUT preflight가 여전히 막힌다" >&2; exit 1 ;;
+        esac
+        echo "OK: dev Cloud Run regional origin + x-goog-if-generation-match header confirmed in applied CORS"
     waitFor: ['-']
 
   # story #2887 — avatar 전용 버킷 CORS. CORS json(infra/gcs-avatars-cors.json)
@@ -465,7 +473,15 @@ steps:
           *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
           *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
         esac
-        echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
+        # story #3545(2026-09-06, 유나 라이브 실측) — 이 버킷의 responseHeader가
+        # x-goog-if-generation-match 없이 배포돼(attachments의 #3242 교훈이 신규
+        # 버킷 json에 안 옮겨짐) 에디터 브라우저 이미지 첨부 preflight가 막혔다.
+        # origin만 보던 검증으론 이 회귀가 초록으로 지나갔다 — 헤더도 같이 본다.
+        case "$${applied}" in
+          *x-goog-if-generation-match*) ;;
+          *) echo "FAIL: x-goog-if-generation-match header missing from applied CORS — 서명 PUT preflight가 여전히 막힌다" >&2; exit 1 ;;
+        esac
+        echo "OK: dev Cloud Run regional origin + x-goog-if-generation-match header confirmed in applied CORS"
     waitFor: ['-']
 
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
