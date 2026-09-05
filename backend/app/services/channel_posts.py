@@ -1574,13 +1574,23 @@ async def unpublish_channel_post(
     # story 5b27b32f — publish 경로와 동일 디스패치(pub.channel 기준).
     delete_media = get_publish_client_module(pub.channel).delete_media
 
+    already_absent = False
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             try:
                 await delete_media(client, access_token=access_token, media_id=pub.external_id)
             except ThreadsPublishError as exc:
-                _, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
-                raise mapped_exc from exc
+                # story #3513(site_posts.py::unpublish_site_post_external_command와
+                # 동형 처리, PO 실측 2026-09-05) — 원격에 이미 없는 미디어(404/410,
+                # 예: 사람이 Threads 앱에서 먼저 지움)를 "일시적 provider 오류"로
+                # 취급하지 않는다 — 회수는 이미 목적을 이뤘다(멱등). `_classify_
+                # threads_error`(publish도 쓰는 공유 함수)는 안 건드린다 — publish
+                # 시점 404는 다른 의미(그런 media_id가 없다=실패)라 회수만의 축이다.
+                if exc.status_code in (404, 410):
+                    already_absent = True
+                else:
+                    _, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                    raise mapped_exc from exc
     finally:
         del access_token  # ⛔즉시 소비 후 폐기 — 기존 관례와 동일.
 
@@ -1596,6 +1606,7 @@ async def unpublish_channel_post(
         context={
             "gate_id": str(gate.id), "external_id": pub.external_id,
             "unpublished_by_member_id": str(unpublished_by_member_id),
+            **({"note": "already_absent"} if already_absent else {}),
         },
     )
     await db.commit()
