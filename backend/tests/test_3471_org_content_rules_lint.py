@@ -252,6 +252,8 @@ async def test_put_unknown_key_returns_422():
 
 @pytest.mark.anyio
 async def test_member_put_returns_403_owner_field_untouched():
+    """story #3490 — 옛 코드 CONTENT_RULES_OWNER_ONLY는 이제 없다(부재 검산).
+    member는 여전히 403(회귀 0), 새 코드는 CONTENT_RULES_ADMIN_ONLY."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -266,7 +268,33 @@ async def test_member_put_returns_403_owner_field_untouched():
                 f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": ["x"]}},
             )
         assert r.status_code == 403, r.text
-        assert r.json()["error"]["code"] == "CONTENT_RULES_OWNER_ONLY"
+        assert r.json()["error"]["code"] == "CONTENT_RULES_ADMIN_ONLY"
+        assert "CONTENT_RULES_OWNER_ONLY" not in r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_admin_put_content_rules_succeeds():
+    """story #3490(PO 決定 2026-09-05) — owner만이던 편집 자격을 owner·admin으로
+    넓힌다(채널 연결 생성과 동형 권한 폭). dev org의 유일 owner가 대표뿐이라 admin
+    운영자가 규칙을 못 넣던 비대칭을 해소."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            admin_id = await _seed_human(s, org_id, role="admin")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=admin_id)
+        async with _client_for(app) as client:
+            r = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules", json={"rules": {"banned_terms": ["금칙어"]}},
+            )
+        assert r.status_code == 200, r.text
+        assert r.json()["rules"]["banned_terms"] == ["금칙어"]
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
