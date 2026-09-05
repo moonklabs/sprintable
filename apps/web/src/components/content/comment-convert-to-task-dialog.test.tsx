@@ -42,6 +42,8 @@ const COMMENT: CommentItem = {
   deletedAt: null,
   replyStatus: 'none',
   replyExternalUrl: null,
+  replyFailureAction: undefined,
+  replyCommandId: null,
 };
 
 describe('CommentConvertToTaskDialog', () => {
