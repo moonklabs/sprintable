@@ -452,12 +452,6 @@ export default function ContentRulesPage() {
                 />
                 {fieldErrors.brand_kit ? <p className="text-xs text-destructive">{fieldErrors.brand_kit}</p> : null}
               </div>
-
-              {canEditRules ? (
-                <Button size="sm" onClick={() => void handleSave()} disabled={saving} data-testid="content-rules-save-button">
-                  {saving ? t('savingCta') : t('saveAction')}
-                </Button>
-              ) : null}
             </SectionCardBody>
           </SectionCard>
 
@@ -479,7 +473,7 @@ export default function ContentRulesPage() {
             <SectionCardBody className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-generation-budget-limit">
-                  {t('generationBudgetLimitLabel')}
+                  {tContent('generationBudgetLimitLabel')}
                 </label>
                 {canEditRules ? (
                   <div className="flex flex-wrap items-center gap-2">
@@ -551,12 +545,23 @@ export default function ContentRulesPage() {
                   관례 — 선택지 하나짜리 select를 안 쓴다). */}
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">{t('generationBudgetPeriodLabel')}</label>
-                <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-period">{t('generationBudgetPeriodMonth')}</p>
+                <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-period">{tContent('generationBudgetPeriodMonth')}</p>
               </div>
 
               <p className="text-xs text-muted-foreground">{t('generationBudgetHint')}</p>
             </SectionCardBody>
           </SectionCard>
+
+          {/* PO 재정정(2026-09-05, PR#3848 유나 재검) — 저장 버튼은 «카드 밖»이어야
+              한다(어느 SectionCard에도 속하지 않는 페이지 수준). 첫 재배치가 규칙
+              카드 안(L456-460 옛 자리)에 남아 있던 게 틀렸다 — 부분 PATCH가 없어
+              이 한 버튼이 두 카드(규칙+생성비용한도) 전체를 함께 저장한다는 사실을
+              자리 자체가 말해야 한다. */}
+          {canEditRules ? (
+            <Button size="sm" onClick={() => void handleSave()} disabled={saving} data-testid="content-rules-save-button">
+              {saving ? t('savingCta') : t('saveAction')}
+            </Button>
+          ) : null}
         </>
       )}
     </div>

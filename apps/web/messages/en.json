@@ -4980,10 +4980,8 @@
     "brandKitFontsLabel": "Brand kit · Fonts",
     "brandKitFontsPlaceholder": "Type a font name and press Enter",
     "generationBudgetSectionTitle": "Generation cost budget",
-    "generationBudgetLimitLabel": "Limit",
     "generationBudgetLimitPlaceholder": "Limit (leave blank for no policy)",
     "generationBudgetPeriodLabel": "Period",
-    "generationBudgetPeriodMonth": "month",
     "generationBudgetNotSet": "No policy set",
     "generationBudgetSuspendedReadonly": "Suspended",
     "generationBudgetHint": "Setting the limit to 0 suspends all generation. Leaving it blank means no policy at all (different from unlimited)."

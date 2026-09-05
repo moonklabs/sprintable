@@ -4980,10 +4980,8 @@
     "brandKitFontsLabel": "브랜드 킷 · 폰트",
     "brandKitFontsPlaceholder": "폰트 이름 입력 후 Enter",
     "generationBudgetSectionTitle": "생성 비용 한도",
-    "generationBudgetLimitLabel": "한도",
     "generationBudgetLimitPlaceholder": "한도(비우면 정책 없음)",
     "generationBudgetPeriodLabel": "기간",
-    "generationBudgetPeriodMonth": "월",
     "generationBudgetNotSet": "정책 없음",
     "generationBudgetSuspendedReadonly": "정지",
     "generationBudgetHint": "한도를 0으로 두면 생성이 전부 정지됩니다. 비우면 한도 자체가 없습니다(무제한과는 다릅니다 — 정책이 아예 없다는 뜻입니다)."
