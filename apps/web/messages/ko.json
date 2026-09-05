@@ -2215,6 +2215,7 @@
     "reapprovalSealedHash": "승인된 해시",
     "reapprovalCurrentHash": "현재 해시",
     "publishedInfoUrlLabel": "공개 URL",
+    "externalPublicationDestinationLabel": "발행 대상",
     "publishedInfoAtLabel": "발행 시각",
     "publishedInfoByLabel": "발행자",
     "unpublishCta": "발행 취소",

@@ -2215,6 +2215,7 @@
     "reapprovalSealedHash": "Approved hash",
     "reapprovalCurrentHash": "Current hash",
     "publishedInfoUrlLabel": "Public URL",
+    "externalPublicationDestinationLabel": "Destination",
     "publishedInfoAtLabel": "Published at",
     "publishedInfoByLabel": "Published by",
     "unpublishCta": "Unpublish",

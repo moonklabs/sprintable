@@ -27,6 +27,8 @@ import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import {
   ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
 } from '@/components/content/content-rule-violation';
+import { deriveFailureAction, type CommandStatus, type FailureKind } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -98,11 +100,40 @@ interface GateInfo {
 // story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — GET .../drafts/{draftId}/publication.
 // 발행된 적 없으면(또는 unpublish됐으면) 서버가 전부 null을 준다(200 — 404는 draft 자체가
 // 없을 때만, "모른다"와 "발행 안 됐다"를 구별하는 서버측 신호).
+//
+// story #3479(BE #3476/#3828 실물 계약, 페드루 PO 確定 2026-09-05) — destination이
+// "hosted_site"가 아니면(wordpress·webhook·unknown) channel_publication/command가
+// 실린다. command 필드명은 미르코 FE 그라운딩대로 deriveFailureAction 입력과 정확히
+// 같다(command_status/failure_kind/next_retry_at/command_reason_code) — 새 어댑터
+// 없이 그대로 재사용.
+interface ChannelPublicationView {
+  status: string;
+  external_id: string | null;
+  permalink: string | null;
+  published_at: string | null;
+  unpublished_at: string | null;
+  last_error: string | null;
+}
+
+interface PublicationCommandView {
+  id: string;
+  command_status: CommandStatus;
+  attempt_count: number;
+  failure_kind: FailureKind | null;
+  next_retry_at: string | null;
+  dead_letter_at: string | null;
+  command_reason_code: string | null;
+  last_error: string | null;
+}
+
 interface SitePostPublicationInfo {
   published_at: string | null;
   url: string | null;
   published_by_member_id: string | null;
   published_body_sha256: string | null;
+  destination: string;
+  channel_publication: ChannelPublicationView | null;
+  command: PublicationCommandView | null;
 }
 
 function realStr(v: unknown): string | undefined {
@@ -204,6 +235,9 @@ export default function ContentPostEditPage() {
   const [unpublishResult, setUnpublishResult] = useState<
     { type: 'success' } | { type: 'error'; text: string; raw?: string } | null
   >(null);
+  // story #3479(BE #3476) — 외부 목적지 발행 재시도. 공용 BFF(publication-commands/
+  // {id}/retry) — content_kind 무관, command_id 하나로 서버가 대상을 안다.
+  const [retryingCommand, setRetryingCommand] = useState(false);
 
   // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결 목록·이미 만든 변형
   // 목록은 서로 다른 조회(연결=channel-connections, 변형=variants) — 같이 로드한다.
@@ -776,6 +810,20 @@ export default function ContentPostEditPage() {
     }
   };
 
+  // story #3479(BE #3476) — 외부 목적지 발행 실패 재시도. 성공하면 publication을
+  // 다시 읽어(loadPublication, handleUnpublish와 동형) command_status가 즉시
+  // 반영되게 한다.
+  const handleRetryPublicationCommand = async (commandId: string) => {
+    if (!orgId || retryingCommand) return;
+    setRetryingCommand(true);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`, { method: 'POST' });
+      if (res.ok) void loadPublication();
+    } finally {
+      setRetryingCommand(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-4 p-6">
@@ -806,6 +854,16 @@ export default function ContentPostEditPage() {
   const publisherName = publication?.published_by_member_id
     ? memberNames[publication.published_by_member_id] ?? publication.published_by_member_id.slice(0, 8)
     : '—';
+  // story #3479 — undefined면 "보일 실패가 없다"는 뜻(예: command_status='completed').
+  // FailureActionBadge 자체를 안 그린다(가짜 상태를 지어내지 않는다).
+  const externalFailureAction = publication?.command
+    ? deriveFailureAction({
+        commandStatus: publication.command.command_status,
+        failureKind: publication.command.failure_kind,
+        nextRetryAt: publication.command.next_retry_at,
+        reasonCode: publication.command.command_reason_code,
+      })
+    : undefined;
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
@@ -969,6 +1027,48 @@ export default function ContentPostEditPage() {
           </Button>
           {!canUnpublish ? (
             <p className="text-xs text-muted-foreground">{t('unpublishDisabledReason')}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* story #3479(BE #3476, 런북 A-7) — 외부 목적지(WordPress·webhook) 발행 결과.
+          hosted_site와 병렬 분기(위 블록과 동시에 안 뜬다 — destination이 서버가 낸
+          축, FE가 재조립하지 않는다). permalink 값 없으면 그 자리 안 그린다. */}
+      {publication?.destination && publication.destination !== 'hosted_site' && (publication.channel_publication || publication.command) ? (
+        <div
+          data-testid="content-external-publication-info"
+          className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm"
+        >
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationDestinationLabel')}</span>{' '}
+            {channelLabel(publication.destination, t)}
+          </div>
+          {publication.channel_publication ? (
+            <>
+              <div>
+                <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
+                {publication.channel_publication.permalink ? (
+                  <a href={publication.channel_publication.permalink} target="_blank" rel="noopener noreferrer" className="underline">
+                    {publication.channel_publication.permalink}
+                  </a>
+                ) : (
+                  '—'
+                )}
+              </div>
+              {publication.channel_publication.published_at ? (
+                <div>
+                  <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
+                  {formatScheduledAt(publication.channel_publication.published_at, displayTimezone).display}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+          {publication.command && externalFailureAction ? (
+            <FailureActionBadge
+              action={externalFailureAction}
+              onRetryClick={() => void handleRetryPublicationCommand(publication.command!.id)}
+              displayTimezone={displayTimezone}
+            />
           ) : null}
         </div>
       ) : null}

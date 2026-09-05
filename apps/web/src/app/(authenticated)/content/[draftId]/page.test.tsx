@@ -83,8 +83,21 @@ function stubFetchWithVersions(
     onPublish?: () => { status: number; body: unknown };
     // story #3386 — 기본값은 "발행 안 됨"(전부 null). 개별 테스트가 발행됨 상태를
     // 재현하려면 이 필드를 넘긴다.
-    publication?: { published_at: string | null; url: string | null; published_by_member_id: string | null; published_body_sha256: string | null };
+    // story #3479(BE #3476/#3828) — destination·channel_publication·command 추가.
+    publication?: {
+      published_at: string | null; url: string | null; published_by_member_id: string | null; published_body_sha256: string | null;
+      destination?: string;
+      channel_publication?: {
+        status: string; external_id: string | null; permalink: string | null;
+        published_at: string | null; unpublished_at: string | null; last_error: string | null;
+      } | null;
+      command?: {
+        id: string; command_status: string; attempt_count: number; failure_kind: string | null;
+        next_retry_at: string | null; dead_letter_at: string | null; command_reason_code: string | null; last_error: string | null;
+      } | null;
+    };
     onUnpublish?: () => { status: number; body: unknown };
+    onRetryPublicationCommand?: (commandId: string) => { status: number; body: unknown };
     // 페드루 PO 리뷰(2026-09-03) — 발행자 UUID→이름 해소(gates/[id]/page.tsx의
     // memberNames 관례 재사용). 기본값 빈 배열 — 개별 테스트가 필요할 때만 넘긴다(넘기지
     // 않으면 published_by_member_id가 그대로 앞 8자 폴백으로 렌더된다, 그 자체도 유효한
@@ -165,11 +178,21 @@ function stubFetchWithVersions(
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
         // story #3386 — 기본은 "발행 안 됨"(전부 null), 개별 테스트가 opts.publication으로
-        // 덮는다.
+        // 덮는다. story #3479 — destination 기본 hosted_site·channel_publication/command
+        // 기본 null(회귀 0 — 옛 4필드만 넘기는 기존 테스트 전부가 이 기본값을 그대로 탄다).
         const body = opts?.publication ?? {
           published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
         };
-        return { ok: true, status: 200, json: async () => ({ data: body, error: null, meta: null }) };
+        const withExternal = {
+          destination: 'hosted_site', channel_publication: null, command: null,
+          ...body,
+        };
+        return { ok: true, status: 200, json: async () => ({ data: withExternal, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/publication-commands/cmd-1/retry` && init?.method === 'POST') {
+        const result = opts?.onRetryPublicationCommand?.('cmd-1') ?? { status: 200, body: { id: 'cmd-1', status: 'pending' } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/unpublish` && init?.method === 'POST') {
         const result = opts?.onUnpublish?.() ?? { status: 200, body: { id: 'p1', slug: '2ho-blog', unpublished_at: '2026-09-05T01:00:00Z' } };
@@ -1402,5 +1425,91 @@ describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §
     expect(container.querySelector('[data-testid="content-rule-violation-blocked-reason"]')).toBeNull();
     const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(false);
+  });
+});
+
+// story #3479(BE #3476/#3828 실물 계약, 페드루 PO 確定 2026-09-05) — 원문 상세
+// «발행 결과» 줄, 외부 목적지(WordPress·webhook). 4표본 그대로 pin.
+describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, 런북 A-7)', () => {
+  it('⭐destination=wordpress + channel_publication published + permalink — 링크 href=permalink', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'wordpress',
+        channel_publication: {
+          status: 'published', external_id: 'post-123', permalink: 'https://blog.example.com/hello',
+          published_at: '2026-09-05T00:00:00Z', unpublished_at: null, last_error: null,
+        },
+        command: { id: 'cmd-1', command_status: 'completed', attempt_count: 1, failure_kind: null, next_retry_at: null, dead_letter_at: null, command_reason_code: null, last_error: null },
+      },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    const info = container.querySelector('[data-testid="content-external-publication-info"]');
+    expect(info).not.toBeNull();
+    expect(info?.textContent).toContain(koMessages.content.channelLabelWordpress);
+    const link = info?.querySelector<HTMLAnchorElement>('a[href="https://blog.example.com/hello"]');
+    expect(link).not.toBeNull();
+    // completed엔 보일 실패가 없다 — FailureActionBadge 자체가 안 뜬다(가짜 상태 금지).
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+  });
+
+  it('hosted_site(현행) — 외부 목적지 블록이 안 뜬다(회귀 0)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: '2026-09-03T18:44:00Z', url: 'https://sprintable.ai/ko/blog/2ho-blog',
+        published_by_member_id: null, published_body_sha256: null,
+        destination: 'hosted_site',
+      },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-publication-info"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-external-publication-info"]')).toBeNull();
+  });
+
+  it('⭐command dead_letter — FailureActionBadge 재시도 버튼 클릭 → 공용 BFF(publication-commands/{id}/retry) 호출', async () => {
+    let retried: string | null = null;
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook',
+        channel_publication: null,
+        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: 'needs_check', next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+      },
+      onRetryPublicationCommand: (commandId) => { retried = commandId; return { status: 200, body: { id: commandId, status: 'pending' } }; },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    expect(retryBtn).not.toBeNull();
+    expect(retryBtn.disabled).toBe(false);
+    await act(async () => { retryBtn.click(); });
+    await flush();
+
+    expect(retried).toBe('cmd-1');
+  });
+
+  it('permalink이 null이면(아직 미발행) 링크 자리 자체를 안 그린다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'wordpress',
+        channel_publication: { status: 'container_created', external_id: null, permalink: null, published_at: null, unpublished_at: null, last_error: null },
+        command: { id: 'cmd-1', command_status: 'pending', attempt_count: 0, failure_kind: null, next_retry_at: null, dead_letter_at: null, command_reason_code: null, last_error: null },
+      },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+
+    const info = container.querySelector('[data-testid="content-external-publication-info"]')!;
+    expect(info.querySelector('a')).toBeNull();
   });
 });
