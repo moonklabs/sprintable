@@ -44,6 +44,7 @@ const COMMENT: CommentItem = {
   replyExternalUrl: null,
   replyFailureAction: undefined,
   replyCommandId: null,
+  replyId: null,
 };
 
 describe('CommentConvertToTaskDialog', () => {

@@ -38,6 +38,12 @@ export interface CommentReplyDialogProps {
   onClose: () => void;
   onCreateDraft: (text: string) => Promise<CommentReplyOutcome>;
   onSubmit: (replyId: string) => Promise<CommentReplyOutcome>;
+  /** story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
+   * 「다시 상신」이 여는 자리에서 «지금 답변» 원문을 미리 채운다(호출부가 단건 GET
+   * .../replies/{replyId}로 가져와 넘긴다). 일반 「답변」(새로 시작)은 undefined —
+   * 빈 칸 그대로. 「승인한 답변」과의 diff는 만들지 않는다(BE additive 前 — 못
+   * 하는 것으로 명기, §22-15 ⑧). */
+  initialText?: string;
 }
 
 /**
@@ -47,9 +53,9 @@ export interface CommentReplyDialogProps {
  * 여기서 보여주고, 승인 자체는 이 화면 책임이 아니다(§22-⑤ "승인 카드"는 게이트
  * 인박스의 몫).
  */
-export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit }: CommentReplyDialogProps) {
+export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit, initialText }: CommentReplyDialogProps) {
   const t = useTranslations('content');
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText ?? '');
   const [draft, setDraft] = useState<ReplyView | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
