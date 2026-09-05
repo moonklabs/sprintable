@@ -9,9 +9,9 @@ from __future__ import annotations
 import secrets
 import uuid
 from datetime import date as date_type
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,6 +57,33 @@ async def rotate_key(db: AsyncSession, *, org_id: uuid.UUID) -> str:
     db.add(key)
     await db.commit()
     return key.public_key
+
+
+async def get_beacon_status(db: AsyncSession, *, org_id: uuid.UUID, now: datetime) -> dict:
+    """story #3540(PO 確定 2026-09-06) — 「성과 수집」 화면 전용 읽기 전용 상태 조회.
+    `get_or_create_active_key`와 달리 키가 없어도 **발급하지 않는다**(관측이 상태를
+    바꾸는 함정 방지 — 이 함수를 몇 번을 불러도 `org_metering_keys` 행 수는 그대로).
+    key_issued=False면 last_seen_at/count_7d는 항상 None(집계 자체가 무의미 —
+    지어내지 않는다). last_seen_at은 org_pageview_daily의 가장 최근 updated_at
+    (그 (org,path,day) 행이 마지막으로 갱신된 시각, 신규 컬럼 0 — onupdate=now()가
+    이미 매 hit마다 갱신한다). count_7d는 최근 7일(day>=오늘-7) SUM(count)."""
+    existing = (await db.execute(
+        select(OrgMeteringKey).where(
+            OrgMeteringKey.org_id == org_id, OrgMeteringKey.revoked_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if existing is None:
+        return {"key_issued": False, "last_seen_at": None, "count_7d": None}
+
+    last_seen_at = (await db.execute(
+        select(func.max(OrgPageviewDaily.updated_at)).where(OrgPageviewDaily.org_id == org_id)
+    )).scalar_one_or_none()
+    count_7d = (await db.execute(
+        select(func.coalesce(func.sum(OrgPageviewDaily.count), 0)).where(
+            OrgPageviewDaily.org_id == org_id, OrgPageviewDaily.day >= now.date() - timedelta(days=7),
+        )
+    )).scalar_one()
+    return {"key_issued": True, "last_seen_at": last_seen_at, "count_7d": int(count_7d)}
 
 
 async def resolve_org_by_public_key(db: AsyncSession, public_key: str) -> uuid.UUID | None:
