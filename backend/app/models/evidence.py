@@ -31,7 +31,12 @@ class Evidence(Base):
     ref: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # story #3497(migration 0332, 페드루 決定 2026-09-05) — nullable로 완화. NULL=
+    # 특정 행위자 없는 순수 시스템 기록(activity_log의 actor_type=platform·actor_id=
+    # None과 동류, 예: 인사이트 스냅샷 evidence) — NIL UUID 같은 센티널로 "없는
+    # 행위자를 지어내지" 않는다. routers/evidence.py의 소유 검사는 None이면 "내
+    # 것 아님"으로 읽는다(플랫폼 기록은 멤버가 수정 못 함 — 의도).
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

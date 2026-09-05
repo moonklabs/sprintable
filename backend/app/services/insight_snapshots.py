@@ -310,21 +310,17 @@ async def _promote_connection_status_for_snapshot(db: AsyncSession, snapshot: In
         connection.status = "expired"
 
 
-# story #3497 — Evidence.created_by는 NOT NULL이지만 이 evidence는 activity_log의
-# "site_post_published"류(actor_type="platform", actor_id=None)와 같은 부류의
-# 순수 시스템 기록이다 — 특정 사람/에이전트가 "만든" 게 아니다. 이 코드베이스에
-# gate_approval(resolver_id, 실 행위자)류 밖의 "행위자 없는 evidence" 선례가 아직
-# 없어(그라운딩 확인) NIL UUID를 시스템 센티널로 쓴다. **페드루 확인 필요** — created_
-# by에 실 조직 멤버를 요구하는 화면/쿼리가 있다면 이 값 대신 "system-publisher" 류
-# 전용 멤버 행을 만드는 방향으로 바꿔야 한다(recipe_repeat_scheduler.py 선례 재사용).
-_SYSTEM_ACTOR_ID = uuid.UUID(int=0)
-
-
 async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) -> None:
     """story #3497 그라운딩①(페드루 決定 반영) — evidence.payload(JSONB)에 구조화
     데이터를, note에는 사람용 한 줄만. Evidence(...) 직접 construct(evidence_service.py
     ::create_gate_approval_evidence_if_applicable 선례와 동형 — 서비스 함수를 안 거치는
-    시스템 생성 관례, 그 함수는 라우터 전용 세션 커밋 포함이라 내부 호출용이 아니다)."""
+    시스템 생성 관례, 그 함수는 라우터 전용 세션 커밋 포함이라 내부 호출용이 아니다).
+
+    created_by=None(페드루 決定, 2026-09-05 열린 질문 판정) — activity_log의
+    actor_type=platform·actor_id=None과 동류인 순수 시스템 기록이라 실 행위자가
+    없다. NIL UUID 같은 센티널로 "없는 행위자를 지어내지" 않는다(evidence.created_
+    by가 이 스토리에서 nullable로 바뀐 이유, migration 0332). payload.recorded_by
+    가 그 표식(apps/web이 non-null 가정으로 렌더하면 이 값으로 "플랫폼" 라벨을 건다)."""
     from app.models.evidence import Evidence
 
     n = snapshot.normalized or {}
@@ -334,9 +330,9 @@ async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) 
     db.add(Evidence(
         id=uuid.uuid4(), org_id=snapshot.org_id, work_item_id=snapshot.work_item_id,
         work_item_type="story", type="metric", ref=str(snapshot.id), source=snapshot.channel,
-        note=note, created_by=_SYSTEM_ACTOR_ID,
+        note=note, created_by=None,
         payload={
             **n, "captured_at": snapshot.captured_at.isoformat() if snapshot.captured_at else None,
-            "source": snapshot.channel, "snapshot_id": str(snapshot.id),
+            "source": snapshot.channel, "snapshot_id": str(snapshot.id), "recorded_by": "platform",
         },
     ))

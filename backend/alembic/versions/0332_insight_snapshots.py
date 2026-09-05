@@ -17,6 +17,12 @@ channel_publications.id를 가리킬 뿐 이 테이블 자체는 그 구분을 �
 원본 지표와 evidence 대조"(§7)가 text 파싱에 얹히는 두 번째 지름길이 된다는 페드루
 판단 — additive라 기존 evidence 행(payload=NULL)은 회귀 0.
 
+`evidence.created_by` NOT NULL 해제(페드루 決定, 2026-09-05 열린 질문 판정) — 인사이트
+스냅샷 evidence는 activity_log의 "site_post_published"류(actor_type=platform·
+actor_id=None)와 같은 부류의 순수 시스템 기록이라 애초에 "누가 만들었나"가 없다.
+NIL UUID 같은 센티널로 "없는 행위자를 지어내는" 대신 null 자체를 허용한다(정공법).
+기존 행(전부 실 멤버 id)은 무회귀 — nullable 완화는 additive.
+
 down_revision=0331은 story #3492(#3841, channel_connections.secret_hint) — 이 스토리
 착수 시점에 develop 미착지였다(gh pr list로 실물 확인, 열린 PR 스택(#3835→#3836→
 #3837→#3841)의 alembic/versions까지가 SSOT, 0327 이후 이 세션 전체가 써 온 관례)."""
@@ -58,8 +64,10 @@ def upgrade() -> None:
         "uq_insight_snapshots_publication_due_at", "insight_snapshots", ["publication_id", "due_at"],
     )
     op.add_column("evidence", sa.Column("payload", postgresql.JSONB(), nullable=True))
+    op.alter_column("evidence", "created_by", nullable=True)
 
 
 def downgrade() -> None:
+    op.alter_column("evidence", "created_by", nullable=False)
     op.drop_column("evidence", "payload")
     op.drop_table("insight_snapshots")

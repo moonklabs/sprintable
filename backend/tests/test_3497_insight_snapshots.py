@@ -192,9 +192,11 @@ async def test_sandbox_end_to_end_captures_all_seven_keys_and_records_evidence()
             )).scalar_one()
             assert evidence.type == "metric"
             assert evidence.work_item_id == work_item_id
+            assert evidence.created_by is None, "행위자 없는 시스템 기록인데 created_by가 채워졌다(NIL 센티널류 지어냄)"
             assert evidence.payload is not None
             assert evidence.payload["snapshot_id"] == str(snapshot.id)
             assert evidence.payload["source"] == "sandbox"
+            assert evidence.payload["recorded_by"] == "platform"
     finally:
         await engine.dispose()
 
