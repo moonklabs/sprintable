@@ -396,13 +396,12 @@ export default function ChannelPostEditPage() {
   const imageFileInputRef = useRef<HTMLInputElement>(null);
 
   const [text, setText] = useState('');
-  // story #3517(BE #3867 조각②) — 댓글 「작업으로 전환」 다이얼로그의 「게시물 제목」
-  // prefill 대용. ⚠️그라운딩 — insights_board.py의 「게시물 제목」은 원문 Story.title
-  // 이지만(BE는 title을 서버가 안 짓는다, 호출부 필수 — comment_replies.py 주석 明示)
-  // 이 페이지엔 그 Story 조회가 없다(새 fetch를 늘리지 않는다). 채널 포스트 자체가
-  // 정식 제목이 없는 짧은 글 형식이라, 그 게시물을 식별하는 실질 대용으로 현재
-  // 편집 중(=발행된 그대로일 때가 보통) 본문의 앞부분을 쓴다.
-  const commentsPostTitle = text.length > 60 ? `${text.slice(0, 60).trimEnd()}…` : text;
+  // story #3517(BE #3867 조각②, PO 정정 2026-09-05) — 댓글 「작업으로 전환」
+  // 다이얼로그의 「게시물 제목」 prefill. 채널 포스트엔 정식 제목이 없다 — 1순위는
+  // draft.source_title(원문에서 파생된 글이면 이미 실려 있다, #3817), 없으면(순수
+  // 신규 작성 등) 본문 앞부분을 잘라 대용으로 쓴다.
+  const commentsPostTitle = draft?.source_title
+    ?? (text.length > 60 ? `${text.slice(0, 60).trimEnd()}…` : text);
   const [linkUrl, setLinkUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string; raw?: string } | null>(null);

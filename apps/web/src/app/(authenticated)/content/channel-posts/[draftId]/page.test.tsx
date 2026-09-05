@@ -2616,6 +2616,24 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(document.querySelector('[data-testid="comments-convert-success-link"]')?.getAttribute('href')).toBe('/board?story=story-42');
   });
 
+  // story #3517(PO 정정 2026-09-05) — postTitle 1순위는 draft.source_title(원문에서
+  // 파생된 글이면 이미 실려 있다) — 본문 앞부분 대용보다 우선한다.
+  it('「작업으로 전환」 제목 prefill — source_title이 있으면 그걸 쓴다(본문 대용보다 우선)', async () => {
+    stubFetch({
+      draftDetail: { ...PUBLISHED_DRAFT, source_title: '9월 실험 회고' },
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: 'x', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const titleInput = document.querySelector('#comments-convert-title') as HTMLInputElement;
+    expect(titleInput.value).toBe('[댓글] 9월 실험 회고');
+  });
+
   it('「작업으로 전환」 403(에이전트 차단) — 서버 문구가 그대로 뜬다', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
