@@ -455,6 +455,81 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
   });
 });
 
+// story #3517(유나 §22-⑤, BE #3867 조각②, PO 確定 2026-09-05) — 댓글 답변 게이트
+// (neutral_facts.kind='comment_reply') 승인 카드 봉인 축. 이 gate_type은
+// _HIGH_RISK_GATE_TYPES(BE)라 항상 서명 플로우(GateSignatureApproval)를 타고, 그
+// 컴포넌트가 GateEvidence를 그대로 쓴다 — 그래서 여기서 검증한다(approvals-queue.tsx
+// 인라인 경로가 아니다).
+describe('GateEvidence — 댓글 답변 게이트 봉인 축(story #3517)', () => {
+  function commentReplyGate(neutralFacts: Record<string, unknown>, sealedContentBody?: string | null): GateItem {
+    return realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'pending',
+      github_check_run_id: null,
+      neutral_facts: { kind: 'comment_reply', ...neutralFacts },
+      sealed_content_body: sealedContentBody ?? '안녕하세요, 다음 주 월요일에 재입고됩니다.',
+    });
+  }
+
+  it('⭐답변 본문(sealed_content_body)이 접힘 없이 항상 전문으로 보인다', async () => {
+    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-1' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.evidenceNonePrompt);
+    expect(container.textContent).toContain('안녕하세요, 다음 주 월요일에 재입고됩니다.');
+  });
+
+  it('대상 댓글 식별(target_external_comment_id)이 라벨과 함께 보인다', async () => {
+    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-42' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.commentReplyTargetLabel);
+    expect(container.textContent).toContain('ext-comment-42');
+  });
+
+  it('그라운딩 확認 갭 — target_text가 아직 없으면(BE 후속 착지 전) "봉인 시점 본문은 제공되지 않음"으로 정직하게 비운다(지어내지 않음)', async () => {
+    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-1' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.commentReplyTargetTextLabel);
+    expect(container.textContent).toContain(koMessages.cage.commentReplyTargetTextNotProvided);
+  });
+
+  it('BE 후속 착지 뒤(neutral_facts.target_text 도착) — 자리가 자연히 원문으로 채워진다(호출부 변경 0)', async () => {
+    const gate = commentReplyGate({
+      target_external_comment_id: 'ext-comment-1', target_text: '이 부분 설명이 부족해요',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('이 부분 설명이 부족해요');
+    expect(container.textContent).not.toContain(koMessages.cage.commentReplyTargetTextNotProvided);
+  });
+
+  it('AC4 회귀 0 — comment_reply가 아닌 external_publish(레시피 approve)는 대상 댓글 블록이 안 뜬다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'pending', github_check_run_id: null,
+      neutral_facts: { channel: 'threads', stage: 'approve' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.commentReplyTargetLabel);
+  });
+});
+
 // story #2975 AC4(PO 확定 2026-08-24) — 결재 이력(GET /gates/{id}/activity) 실 응답 shape
 // 마운트. gates.py GateActivityItem과 정합(id/action/actor_id/actor_name/context/created_at).
 describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story #2975 AC4)', () => {

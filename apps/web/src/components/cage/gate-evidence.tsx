@@ -163,6 +163,14 @@ interface RecipeApprovalFacts {
   // §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 승인 뒤 편집으로 pending 재오픈된 게이트인지.
   // true면 이 카드는 "승인 가능한 카드"가 아니라 "재상신 대기" 카드로 그린다(§3-1-2-1).
   reapprovalRequired: boolean;
+  // story #3517(유나 §22-⑤, BE #3867 조각②, PO 確定 2026-09-05) — 댓글 답변 게이트
+  // (neutral_facts.kind='comment_reply') 전용 봉인 축 둘. contentBody(위)가 이미
+  // "답변 본문"(reply.text, Gate.sealed_content_body) 몫을 채운다 — 이 둘은 "대상
+  // 댓글" 몫만 추가한다. targetText는 그라운딩 확認 갭이라 BE 후속(neutral_facts.
+  // target_text additive) 착지 전까진 항상 null(지어내지 않는다 — RecipeApprovalFactsBlock
+  // 이 null이면 "제공되지 않음"으로 정직하게 비운다).
+  targetExternalCommentId: string | null;
+  targetText: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -170,6 +178,7 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
   const contentBody = realString(gate.sealed_content_body);
   const contentVersion = typeof gate.sealed_content_version === 'number' ? gate.sealed_content_version : null;
   const contentSha256 = realString(gate.sealed_content_sha256);
+  const isCommentReply = f?.['kind'] === 'comment_reply';
   const facts: RecipeApprovalFacts = {
     workItemRef: parseReferenceToken(f?.['work_item_reference_token']),
     draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token']),
@@ -180,8 +189,10 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     contentVersion,
     contentSha256,
     reapprovalRequired: gate.reapproval_required === true,
+    targetExternalCommentId: isCommentReply ? realString(f?.['target_external_comment_id']) : null,
+    targetText: isCommentReply ? realString(f?.['target_text']) : null,
   };
-  const hasAny =
+  const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
     facts.contentBody || facts.contentVersion !== null || facts.contentSha256;
   return hasAny ? facts : null;
@@ -575,7 +586,28 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.contentBody ? (
         // §6-3 "요약 → 전문" — draftDocSummary와 달리 접힘 없이 항상 전문을 보인다(승인자가
         // 무엇을 승인하는지 클릭 한 번 없이 바로 보여야 한다는 processing #3328 원칙의 연장).
+        // story #3517(§22-⑤) — comment_reply 게이트에선 contentBody가 "답변 본문"이다
+        // (Gate.sealed_content_body=reply.text, submit이 그대로 봉인).
         <p className="mt-1 whitespace-pre-wrap text-foreground">{facts.contentBody}</p>
+      ) : null}
+      {/* story #3517(유나 §22-⑤, BE #3867 조각②, PO 確定 2026-09-05) — 봉인 축 나머지
+          둘: 대상 댓글 식별(target_external_comment_id, comment_reply 게이트에만
+          존재)·「대상 댓글 본문」은 그라운딩 확認 갭이라 BE 후속(neutral_facts.
+          target_text additive) 착지 전까지 "제공되지 않음"으로 정직하게 비운다(지어
+          내지 않는다 — §22-2 결. 착지 뒤 이 자리가 자연히 채워진다, 호출부 변경 0). */}
+      {facts.targetExternalCommentId ? (
+        <div className="mt-1.5 space-y-1 border-t border-border pt-1.5">
+          <p>
+            <span className="text-muted-foreground">{t('commentReplyTargetLabel')} · </span>
+            <span className="font-mono text-foreground">{facts.targetExternalCommentId}</span>
+          </p>
+          <div>
+            <p className="text-[10px] font-medium text-muted-foreground">{t('commentReplyTargetTextLabel')}</p>
+            <p className="whitespace-pre-wrap text-foreground">
+              {facts.targetText ?? <span className="italic text-muted-foreground">{t('commentReplyTargetTextNotProvided')}</span>}
+            </p>
+          </div>
+        </div>
       ) : null}
     </div>
   );
