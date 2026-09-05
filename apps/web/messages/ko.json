@@ -5018,7 +5018,7 @@
     "followUpAction": "후속 조치",
     "loadMore": "더 보기",
     "loadingMore": "불러오는 중...",
-    "insightsBoardBucketUnscheduled": "집계 예정 없음",
+    "insightsBoardBucketUnscheduled": "아직 집계 예정 없음",
     "insightsBoardMetricUnavailable": "지표 미제공",
     "errorInvalidWindow": "지원하지 않는 기간입니다.",
     "errorInvalidSort": "지원하지 않는 정렬 기준입니다.",

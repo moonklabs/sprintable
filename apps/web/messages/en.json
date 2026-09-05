@@ -5019,7 +5019,7 @@
     "loadMore": "Load more",
     "loadingMore": "Loading...",
     "insightsBoardBucketUnscheduled": "Not scheduled yet",
-    "insightsBoardMetricUnavailable": "Not provided by metric",
+    "insightsBoardMetricUnavailable": "Metric not provided",
     "errorInvalidWindow": "Unsupported window.",
     "errorInvalidSort": "Unsupported sort.",
     "errorFollowUpHumanOnly": "Only humans can create follow-ups.",
