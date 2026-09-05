@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.publication_attempt import PublicationAttempt
 from app.models.publication_command import PublicationCommand
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,32 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
 _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
 _TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED"})
+
+
+# story #3474(페드루 PO 確定 2026-09-05) — 게이트가 approved가 아니거나(missing)
+# 봉인 sha256이 지금 버전과 다르면(version_mismatch) adapter를 아예 안 부르고
+# command를 즉시 닫는다(백오프 재시도 대상 아님 — "재시도해도 안 되는" 종류가
+# 아니라 "재시도라는 개념 자체가 안 맞는" 종류: 사람이 다시 승인해야 새 커맨드가
+# 생긴다). 기존 'voided'(재승인으로 무효화)와 같은 결의 신규 terminal 상태.
+STATUS_BLOCKED_UNAPPROVED = "blocked_unapproved"
+_GATE_REVERIFY_ERROR_CODES = frozenset({"EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "SITE_POST_REAPPROVAL_REQUIRED"})
+
+
+async def record_publication_attempt(
+    db: AsyncSession, *, command: PublicationCommand, approval_check: str, adapter_called: bool,
+    started_at: datetime, finished_at: datetime | None, result_code: str | None,
+) -> PublicationAttempt:
+    """story #3474 — 워커의 매 시도마다 1행. `SELECT count(*) FROM publication_attempts
+    WHERE adapter_called AND approval_check <> 'ok'`가 정상 경로에서 항상 0이 되는 게
+    이 원장의 존재 이유(블루프린트 §1 차단 4를 쿼리로 셀 수 있게)."""
+    row = PublicationAttempt(
+        id=uuid.uuid4(), command_id=command.id, gate_id=command.gate_id,
+        approval_check=approval_check, adapter_called=adapter_called,
+        started_at=started_at, finished_at=finished_at, result_code=result_code,
+    )
+    db.add(row)
+    await db.flush()
+    return row
 
 
 def classify_failure_kind(error_code: str | None) -> str:
@@ -233,6 +260,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     error_code: str | None = None
     last_error: str | None = None
     retry_after_seconds: int | None = None
+    attempt_started_at = now
     try:
         version_row = (await db.execute(
             select(ChannelPostVersion).where(ChannelPostVersion.id == command.approved_version)
@@ -247,16 +275,27 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             db, org_id=command.org_id, draft_id=draft.id,
             published_by_member_id=command.requested_by_member_id,
         )
+        # story #3474 — 여기 도달했다는 것 자체가 publish_channel_post_draft() 내부
+        # 게이트 재검증(status==approved·sealed sha 일치)을 통과했다는 뜻이다(코드
+        # 무변, 기존 예외 둘을 이 지점 도달 여부로 판별). adapter는 실제로 호출됐다.
         if publication.status != "published":
             # story 620beefc(AC5) — IMAGE 컨테이너가 아직 처리 中(container_created,
             # 예외 없이 정상 반환됐다는 것 자체가 "아직 안 끝났다"는 신호). 실패가
             # 아니므로 attempt_count/backoff는 안 건드리고 30초 뒤 다시 이 command를
             # 집도록 pending에 남긴다(Meta 권장 폴링 간격, threads_publish.py 참고).
+            await record_publication_attempt(
+                db, command=command, approval_check="ok", adapter_called=True,
+                started_at=attempt_started_at, finished_at=now, result_code=publication.status,
+            )
             command.status = "pending"
             command.next_attempt_at = now + timedelta(seconds=30)
             command.last_error = None
             command.failure_kind = None
             return
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=True,
+            started_at=attempt_started_at, finished_at=now, result_code="published",
+        )
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
@@ -266,6 +305,12 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     except ChannelPostReapprovalRequiredError as exc:
         # story #3414 추가② 이중 방어 — void_pending_commands_for_gate가 보통 이 상황을
         # 이미 선제 처리하지만(제출 시점 즉시), 놓친 경우를 워커가 마지막으로 잡는다.
+        # story #3474 — 이 경로는 adapter를 안 부른다(publish_channel_post_draft가
+        # sealed sha 불일치를 발견한 시점에 이미 예외를 던졌다).
+        await record_publication_attempt(
+            db, command=command, approval_check="version_mismatch", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code=None,
+        )
         command.status = "voided"
         command.reason_code = "CONTENT_CHANGED"
         command.last_error = str(exc)[:2000]
@@ -273,7 +318,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     except ChannelPostDraftNotFoundError as exc:
         error_code, last_error = "CHANNEL_POST_DRAFT_NOT_FOUND", str(exc)
     except ExternalPublishGateNotApprovedError as exc:
-        error_code, last_error = "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", str(exc)
+        # story #3474 — 새 terminal 상태(blocked_unapproved). apply_command_failure로
+        # 안 보낸다 — "재시도해도 안 되는" 종류가 아니라 "재시도라는 개념 자체가 안
+        # 맞는" 종류(사람이 다시 승인해야 새 커맨드가 생긴다).
+        await record_publication_attempt(
+            db, command=command, approval_check="missing", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code=None,
+        )
+        command.status = STATUS_BLOCKED_UNAPPROVED
+        command.last_error = str(exc)[:2000]
+        return
     except ChannelPostSealMissingError as exc:
         error_code, last_error = "SITE_POST_SEAL_MISSING", str(exc)
     except ChannelTextTooLongError as exc:
@@ -293,6 +347,15 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         last_error = str(exc)
         logger.exception("publication_command 처리 중 미분류 예외 command_id=%s", command.id)
 
+    # story #3474 — 여기 도달한 실패는 전부 게이트 재검증(missing/version_mismatch)을
+    # 이미 통과한 뒤(publish_channel_post_draft 내부)의 실패다(그 둘은 위에서 별도
+    # return으로 먼저 빠졌다). DRAFT_NOT_FOUND만 예외 — 그건 gate 조회 자체보다도
+    # 먼저(버전/초안 조회 단계) 나므로 adapter가 안 불렸다.
+    await record_publication_attempt(
+        db, command=command, approval_check="ok",
+        adapter_called=error_code not in (None, "CHANNEL_POST_DRAFT_NOT_FOUND"),
+        started_at=attempt_started_at, finished_at=now, result_code=error_code,
+    )
     await apply_command_failure(
         db, command, error_code=error_code, last_error=last_error, now=now,
         retry_after_seconds=retry_after_seconds,
@@ -313,21 +376,52 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
 
     error_code: str | None = None
     last_error: str | None = None
+    attempt_started_at = now
     try:
         if command.operation == "unpublish":
             await unpublish_site_post_external_command(db, command)
         else:
             await publish_site_post_external_command(db, command)
+        # story #3474 — 여기 도달했다는 것 자체가 site_posts.py의 신규 게이트
+        # 재검증(status==approved·sealed sha 일치)을 통과했다는 뜻이다.
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=True,
+            started_at=attempt_started_at, finished_at=now, result_code="completed",
+        )
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
         return
     except SitePostExternalPublishError as exc:
         error_code, last_error = exc.error_code, str(exc)
+        if error_code in _GATE_REVERIFY_ERROR_CODES:
+            # story #3474 — adapter는 안 불렸다(게이트 재검증에서 막혔다). 재시도
+            # 백오프(apply_command_failure) 대상이 아니라 즉시 종결 — 사람이 다시
+            # 승인해야 새 커맨드가 생긴다(channel_post 쪽과 동형 처리).
+            approval_check = "missing" if error_code == "EXTERNAL_PUBLISH_APPROVAL_REQUIRED" else "version_mismatch"
+            await record_publication_attempt(
+                db, command=command, approval_check=approval_check, adapter_called=False,
+                started_at=attempt_started_at, finished_at=now, result_code=None,
+            )
+            if approval_check == "missing":
+                command.status = STATUS_BLOCKED_UNAPPROVED
+            else:
+                command.status = "voided"
+                command.reason_code = "CONTENT_CHANGED"
+            command.last_error = last_error[:2000]
+            return
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("site_post publication_command 처리 중 미분류 예외 command_id=%s", command.id)
 
+    # story #3474 — SITE_POST_DRAFT_NOT_FOUND/SITE_POST_NOT_PUBLISHED는 게이트 조회
+    # 자체보다 먼저(버전/발행기록 조회 단계) 나므로 adapter가 안 불렸다. 그 외(연결
+    # 비활성·자격거절 등)는 게이트 재검증을 통과한 뒤의 실패라 adapter가 불렸다.
+    await record_publication_attempt(
+        db, command=command, approval_check="ok",
+        adapter_called=error_code not in (None, "SITE_POST_DRAFT_NOT_FOUND", "SITE_POST_NOT_PUBLISHED"),
+        started_at=attempt_started_at, finished_at=now, result_code=error_code,
+    )
     await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)
 
 
@@ -428,13 +522,20 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
     await db.commit()
 
     counts = {
-        "completed": 0, "pending_retry": 0, "dead_letter": 0, "blocked": 0, "voided": 0, "error": 0,
+        "completed": 0, "pending_retry": 0, "dead_letter": 0, "blocked": 0, "voided": 0,
+        # story #3474 — 게이트 재검증 실패 전용 종결 상태. "pending_retry" 버킷에
+        # 안 섞는다(재시도 대상이 아니므로 그 이름이 거짓말이 된다).
+        "blocked_unapproved": 0, "error": 0,
     }
     for command in rows:
         try:
             await _process_one_command(db, command, now=now)
             await db.commit()
-            key = command.status if command.status in ("completed", "dead_letter", "blocked", "voided") else "pending_retry"
+            key = (
+                command.status
+                if command.status in ("completed", "dead_letter", "blocked", "voided", "blocked_unapproved")
+                else "pending_retry"
+            )
             counts[key] += 1
         except Exception:  # noqa: BLE001 — 2중 방어(AC4): 진짜 미분류 예외도 이 건만 격리.
             await db.rollback()

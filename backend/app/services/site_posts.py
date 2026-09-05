@@ -1074,6 +1074,24 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
             error_code="SITE_POST_DRAFT_NOT_FOUND", message=f"draft를 찾을 수 없습니다: {version.draft_id}",
         )
 
+    # 디디 그라운딩(2026-09-05, 페드루 실물 대조) — 이 함수는 여기까지 gate를 한 번도
+    # 안 봤다(channel_posts.py::publish_channel_post_draft와 달리 재검증 0). 블루프린트
+    # §1 차단 4 "승인 없는 adapter 호출 거부"를 코드 구조로 만든다 — module.publish()
+    # 호출(아래) 직전에 gate를 다시 읽어 approved인지, 봉인 sha256이 지금 버전과
+    # 같은지 확인한다. 불일치면 adapter를 아예 안 부른다(재시도 대상 아님 — 사람이
+    # 다시 승인하면 새 커맨드).
+    gate = await db.get(Gate, command.gate_id)
+    if gate is None or gate.status != "approved":
+        raise SitePostExternalPublishError(
+            error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED",
+            message=f"게이트가 승인 상태가 아닙니다(gate_id={command.gate_id}, status={gate.status if gate else None})",
+        )
+    if gate.sealed_content_sha256 != version.body_sha256:
+        raise SitePostExternalPublishError(
+            error_code="SITE_POST_REAPPROVAL_REQUIRED",
+            message=f"봉인된 본문과 현재 버전이 다릅니다(gate_id={gate.id})",
+        )
+
     try:
         connection = await _get_active_blog_connection(db, org_id=command.org_id, connection_id=draft.connection_id)
     except ChannelConnectionNotActiveError as exc:
@@ -1162,6 +1180,7 @@ async def unpublish_site_post_external_command(db: AsyncSession, command: "Publi
     publications 기존 3값 container_created|published|failed에 이 조각이 4번째 값을
     보탠다 — CHECK 제약 없는 Text 컬럼이라 마이그 불요)."""
     from app.models.channel_publication import ChannelPublication
+    from app.models.site_post_version import SitePostVersion
     from app.services.blog_destinations import get_blog_destination_module
     from app.services.channel_connection import decrypt_for_use
     from app.services.channel_posts import ChannelConnectionNotActiveError
@@ -1173,6 +1192,24 @@ async def unpublish_site_post_external_command(db: AsyncSession, command: "Publi
     )).scalar_one_or_none()
     if row is None or row.external_id is None:
         raise SitePostExternalPublishError(error_code="SITE_POST_NOT_PUBLISHED", message="회수할 발행 기록이 없습니다")
+
+    # story #3474(페드루 PO 確定 2026-09-05) — publish 경로와 동형 재검증. 회수도
+    # "승인 없는 adapter 호출"의 대상이다(블루프린트 §1 차단 4가 publish/unpublish를
+    # 안 가른다).
+    gate = await db.get(Gate, command.gate_id)
+    if gate is None or gate.status != "approved":
+        raise SitePostExternalPublishError(
+            error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED",
+            message=f"게이트가 승인 상태가 아닙니다(gate_id={command.gate_id}, status={gate.status if gate else None})",
+        )
+    version = (await db.execute(
+        select(SitePostVersion).where(SitePostVersion.id == command.approved_version)
+    )).scalar_one_or_none()
+    if version is not None and gate.sealed_content_sha256 != version.body_sha256:
+        raise SitePostExternalPublishError(
+            error_code="SITE_POST_REAPPROVAL_REQUIRED",
+            message=f"봉인된 본문과 현재 버전이 다릅니다(gate_id={gate.id})",
+        )
 
     try:
         connection = await _get_active_blog_connection(db, org_id=command.org_id, connection_id=row.connection_id)

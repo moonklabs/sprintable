@@ -913,7 +913,7 @@ async def publish_channel_post_draft_endpoint(
     resolved = await _require_human(db, auth, org_id)
 
     from app.services.channel_posts import resolve_command_target
-    from app.services.publication_command import apply_command_failure, create_or_get_publication_command
+    from app.services.publication_command import record_publication_attempt, apply_command_failure, create_or_get_publication_command
 
     try:
         draft, latest, gate = await resolve_command_target(db, org_id=org_id, draft_id=draft_id)
@@ -945,6 +945,18 @@ async def publish_channel_post_draft_endpoint(
     )
     await db.commit()
     now = datetime.now(timezone.utc)
+    attempt_started_at = now
+
+    async def _record_this_attempt(*, approval_check: str, adapter_called: bool, result_code: str | None) -> None:
+        # story #3474(페드루 보정, 2026-09-05) — 즉시 발행은 `_process_one_command`
+        # (cron 워커)를 안 거치는 별도 동기 경로라, 그쪽에 심은 원장 기록이 이 경로엔
+        # 하나도 안 닿는다. 실제 채널 발행 트래픽 대부분이 이 경로(즉시)를 타므로
+        # 여기서 빠지면 원장이 소수(예약분)만 세는 반쪽 계측이 된다 — 워커와 같은
+        # 지점(publish_channel_post_draft 호출 전후)에 동일하게 심는다.
+        await record_publication_attempt(
+            db, command=command, approval_check=approval_check, adapter_called=adapter_called,
+            started_at=attempt_started_at, finished_at=datetime.now(timezone.utc), result_code=result_code,
+        )
 
     def _with_command_state(detail: dict) -> dict:
         # 페드루 리뷰 F(제품 의미 확定) — 즉시 발행 실패로 command가 pending(자동
@@ -962,6 +974,7 @@ async def publish_channel_post_draft_endpoint(
             db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
         )
     except ChannelPostDraftNotFoundError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_POST_DRAFT_NOT_FOUND")
         await apply_command_failure(
             db, command, error_code="CHANNEL_POST_DRAFT_NOT_FOUND", last_error=str(exc), now=now,
         )
@@ -971,6 +984,13 @@ async def publish_channel_post_draft_endpoint(
             detail=_with_command_state({"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}),
         ) from exc
     except ExternalPublishGateNotApprovedError as exc:
+        # story #3474 — publish_channel_post_draft 내부 게이트 재검증이 여기서 막았다
+        # (adapter 미호출). 워커의 blocked_unapproved와 같은 결이지만, 이 즉시-발행
+        # 경로는 사람이 그 자리에서 받는 HTTP 실패라 command 종결 정책은 기존
+        # apply_command_failure(needs_check→dead_letter) 그대로 둔다(페드루 확定 —
+        # 이 코드 경로 자체의 재시도/종결 정책 변경은 이 스토리 스코프 밖, 원장
+        # 기록만 추가).
+        await _record_this_attempt(approval_check="missing", adapter_called=False, result_code=None)
         await apply_command_failure(
             db, command, error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc), now=now,
         )
@@ -982,7 +1002,10 @@ async def publish_channel_post_draft_endpoint(
     except ChannelTextTooLongError as exc:
         # 페드루 PO 확定(2026-09-03) — 발행 시점 재검사(UTM 태그된 링크가 붙은 실제 전송
         # 문자열 기준). draft 생성 시점의 매핑(422·max_length·current_length)과 동형 —
-        # 코드 하나가 두 HTTP status를 갖지 않게 유지.
+        # 코드 하나가 두 HTTP status를 갖지 않게 유지. story #3474(페드루 리뷰 보정①,
+        # 2026-09-05) — `_validate_text_length`는 channel_posts.py:1158, httpx 클라이언트
+        # 블록(1160) *앞* — Threads에 아무 HTTP도 안 나간 시점(adapter_called=False).
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_TEXT_TOO_LONG")
         await apply_command_failure(
             db, command, error_code="CHANNEL_TEXT_TOO_LONG", last_error=str(exc), now=now,
         )
@@ -995,6 +1018,9 @@ async def publish_channel_post_draft_endpoint(
             }),
         ) from exc
     except ChannelPostSealMissingError as exc:
+        # story #3474(페드루 리뷰 보정①) — channel_posts.py:1095, httpx 클라이언트 블록
+        # 앞(같은 이유로 adapter_called=False).
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="SITE_POST_SEAL_MISSING")
         await apply_command_failure(
             db, command, error_code="SITE_POST_SEAL_MISSING", last_error=str(exc), now=now,
         )
@@ -1005,7 +1031,9 @@ async def publish_channel_post_draft_endpoint(
         ) from exc
     except ChannelPostReapprovalRequiredError as exc:
         # story #3414 — 추가② 훅이 대개 이 상황 전에 command를 이미 voided로 무효화해
-        # 두지만, 놓친 경합 창은 여기서도 잡는다(이중 방어).
+        # 두지만, 놓친 경합 창은 여기서도 잡는다(이중 방어). story #3474 — 봉인 sha256
+        # 불일치라 adapter 미호출(워커의 version_mismatch와 동형).
+        await _record_this_attempt(approval_check="version_mismatch", adapter_called=False, result_code=None)
         command.status = "voided"
         command.reason_code = "CONTENT_CHANGED"
         command.last_error = str(exc)[:2000]
@@ -1015,6 +1043,9 @@ async def publish_channel_post_draft_endpoint(
             detail=_with_command_state({"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)}),
         ) from exc
     except ChannelConnectionNotActiveError as exc:
+        # story #3474(페드루 리뷰 보정①) — channel_posts.py:1129, `create_container`
+        # 호출(1255) 전이라 adapter_called=False.
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_CONNECTION_NOT_ACTIVE")
         await apply_command_failure(
             db, command, error_code="CHANNEL_CONNECTION_NOT_ACTIVE", last_error=str(exc), now=now,
         )
@@ -1024,6 +1055,7 @@ async def publish_channel_post_draft_endpoint(
             detail=_with_command_state({"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)}),
         ) from exc
     except ChannelTokenExpiredError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_TOKEN_EXPIRED")
         await apply_command_failure(
             db, command, error_code="CHANNEL_TOKEN_EXPIRED", last_error=str(exc), now=now,
         )
@@ -1034,6 +1066,7 @@ async def publish_channel_post_draft_endpoint(
         ) from exc
     except ChannelRateLimitedError as exc:
         retry_after_seconds = max(0, int((exc.reset_at - now).total_seconds()))
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_RATE_LIMITED")
         await apply_command_failure(
             db, command, error_code="CHANNEL_RATE_LIMITED", last_error=str(exc), now=now,
             retry_after_seconds=retry_after_seconds,
@@ -1050,6 +1083,7 @@ async def publish_channel_post_draft_endpoint(
             headers={"Retry-After": str(retry_after_seconds)},
         ) from exc
     except ChannelPublishProviderError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_PUBLISH_PROVIDER_ERROR")
         await apply_command_failure(
             db, command, error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", last_error=str(exc), now=now,
         )
@@ -1075,6 +1109,7 @@ async def publish_channel_post_draft_endpoint(
         # story 620beefc(AC5) — Threads가 IMAGE 컨테이너를 ERROR/EXPIRED로 끝냈다(결정적,
         # 재시도해도 안 바뀐다). needs_check 분류라 자동 재시도 없이 사람 재시도(retry
         # 엔드포인트, AC5)만 남긴다.
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_IMAGE_CONTAINER_FAILED")
         await apply_command_failure(
             db, command, error_code="CHANNEL_IMAGE_CONTAINER_FAILED", last_error=str(exc), now=now,
         )
@@ -1091,6 +1126,7 @@ async def publish_channel_post_draft_endpoint(
         # story 620beefc(AC5) — IMAGE 컨테이너가 아직 처리 中. 예외가 안 났다는 것
         # 자체가 "지금까지는 정상, 아직 안 끝났다"는 뜻 — command는 pending에
         # 남기고(다음 cron tick이 이어 폴링) 사람에게는 "처리 中"임을 그대로 알린다.
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code=row.status)
         command.status = "pending"
         command.next_attempt_at = now + timedelta(seconds=30)
         command.last_error = None
@@ -1101,6 +1137,7 @@ async def publish_channel_post_draft_endpoint(
             command_id=command.id, scheduled_at=None,
         )
 
+    await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="published")
     command.status = "completed"
     command.last_error = None
     command.failure_kind = None
