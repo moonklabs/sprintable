@@ -228,6 +228,11 @@ export default function ContentPostEditPage() {
   // story #3483(BE 3482, §16-7) — 저장/상신 응답이 채우는 하나의 목록. 상신 422는
   // 새 배너를 안 만들고 이 state를 서버 응답으로 갱신한다(channel-posts 상세와 동형).
   const [violations, setViolations] = useState<ContentRuleViolation[]>([]);
+  // story #3514(유나 Design 변경요청 1, 2026-09-05) — 단건 GET(violations 부수 호출)
+  // 실패가 초안 열기 자체를 막으면 안 된다(주 데이터는 여전히 /versions). 실패해도
+  // violations=[]로 진행하고 이 한 줄로만 "모른다"를 알린다(§16-7 "읽기 자리를 주
+  // 데이터와 같은 급으로 묶지 않는다").
+  const [violationsLoadFailed, setViolationsLoadFailed] = useState(false);
   // "편집 중에도 같은 강도" — severity가 없어 위반이 있으면 전부 차단(channel-posts
   // 상세와 동형).
   const hasBlockingViolations = violations.length > 0;
@@ -362,17 +367,29 @@ export default function ContentPostEditPage() {
         // 패턴 — site_post는 이 스토리 前까지 단건 GET 자체가 없어 /versions 하나만
         // 불렀다). 단건 GET의 violations[]로 "저장 없이" 위반 목록·상신 비활성이
         // 선다(§16-7을 읽기까지 넓힘).
+        //
+        // ⚠️유나 Design 변경요청 1(2026-09-05) — 단건 GET은 이 화면에선 부수 데이터다
+        // (주 데이터는 여전히 /versions). 단건 GET만 실패해도 화면 전체를 막지 않는다
+        // (§16-7 "읽기 자리를 주 데이터와 같은 급으로 묶지 않는다") — violations=[]로
+        // 진행하고 violationsLoadFailed 한 줄만 띄운다. 변형(channel_post) 화면은 단건
+        // GET이 주 데이터라 그대로 loadError 대상.
         const [draftRes, versionsRes] = await Promise.all([
           fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}`),
           fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`),
         ]);
         if (cancelled) return;
-        if (!draftRes.ok || !versionsRes.ok) {
+        if (!versionsRes.ok) {
           setLoadError(true);
           return;
         }
-        const draftJson = (await draftRes.json().catch(() => null)) as { data?: SitePostDraftDetail } | null;
-        setViolations(draftJson?.data?.violations ?? []);
+        if (draftRes.ok) {
+          const draftJson = (await draftRes.json().catch(() => null)) as { data?: SitePostDraftDetail } | null;
+          setViolations(draftJson?.data?.violations ?? []);
+          setViolationsLoadFailed(false);
+        } else {
+          setViolations([]);
+          setViolationsLoadFailed(true);
+        }
 
         const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
         const list = json?.data ?? [];
@@ -1512,6 +1529,15 @@ export default function ContentPostEditPage() {
               걸렸나)와 자리가 다르다 — 여기는 개수만 세고 가리킨다. */}
           {hasBlockingViolations ? (
             <ContentRuleSubmitBlockedReason count={violations.length} testId="content-rule-violation-blocked-reason" t={t} />
+          ) : null}
+          {/* story #3514(유나 Design 변경요청 1, 2026-09-05) — 단건 GET(violations 부수
+              데이터) 실패는 화면을 안 막되, "모른다"는 사실은 숨기지 않는다(지어내지
+              않는다 — 위반 0으로 조용히 넘어가면 실제로 위반이 있는데 못 본 것과
+              구별이 안 된다). */}
+          {violationsLoadFailed ? (
+            <p className="text-xs text-muted-foreground" data-testid="content-rule-violation-load-failed">
+              {t('contentRuleViolationsLoadFailed')}
+            </p>
           ) : null}
           {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
               이유"를 옆에 두는 이 문구는 실제 정보라 4.5:1 판정 대상이다(text-muted-

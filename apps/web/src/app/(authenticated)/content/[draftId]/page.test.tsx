@@ -124,6 +124,9 @@ function stubFetchWithVersions(
     // story #3514(lint-on-read, BE 신설) — 단건 GET의 violations[]. 기본값 빈 배열
     // (대부분 테스트가 이 스토리와 무관 — "위반 없음"이 기본).
     draftViolations?: unknown[];
+    // 유나 Design 변경요청 1(2026-09-05) — 단건 GET 자체가 실패하는 케이스 재현(기본
+    // 200). 부수 데이터라 화면은 그대로 서고 violations=[]+안내 한 줄만 뜬다.
+    draftStatus?: number;
   },
 ) {
   vi.stubGlobal(
@@ -134,6 +137,9 @@ function stubFetchWithVersions(
       // URL을 접두사로 포함한다(정확 일치 비교라 순서 자체는 무해하지만, 나란히
       // 둬 두 계약이 별개 왕복임을 코드로도 보이게 한다).
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}`) {
+        if (opts?.draftStatus && opts.draftStatus >= 400) {
+          return { ok: false, status: opts.draftStatus, json: async () => ({ detail: 'boom' }) };
+        }
         return { ok: true, status: 200, json: async () => ({ data: { draft_id: DRAFT_ID, violations: opts?.draftViolations ?? [] }, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
@@ -1492,6 +1498,23 @@ describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §
     expect(container.querySelector('[data-testid="content-rule-violation-title"]')).toBeNull();
     const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(false);
+  });
+
+  // story #3514(유나 Design 변경요청 1, 2026-09-05) — 단건 GET은 이 화면에서 부수
+  // 데이터(주 데이터는 /versions)라 그 실패가 초안 열기 자체를 막으면 안 된다.
+  it('⭐단건 GET 500 — 본문(제목·요약 등)은 그대로 뜨고 violations=0+안내 한 줄만 뜬다(loadError 아님)', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { draftStatus: 500 });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    // 화면이 안 막혔다 — /versions의 제목이 정상적으로 폼에 실렸다.
+    const titleInput = container.querySelector('#post-title') as HTMLInputElement | null;
+    expect(titleInput?.value).toBe(VERSION_1.title);
+    expect(container.querySelector('[data-testid="content-rule-violation-title"]')).toBeNull();
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false); // violations=[]라 상신 자체는 안 막힌다.
+    expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')?.textContent)
+      .toBe(koMessages.content.contentRuleViolationsLoadFailed);
   });
 });
 

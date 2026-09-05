@@ -2376,6 +2376,7 @@
     "contentRuleGenericBlockedHint": "이 값은 콘텐츠 규칙에 맞지 않습니다.",
     "contentRuleSubmitBlockedHint": "규칙 위반 {count}건을 고쳐야 상신할 수 있습니다.",
     "contentRuleLinkLabel": "콘텐츠 규칙",
+    "contentRuleViolationsLoadFailed": "위반 정보를 불러오지 못했습니다.",
     "channelPostsTextTooLong": "{max}자 한도인데 {current}자입니다 — 줄여서 재상신해 주세요.",
     "channelPostsRateLimitedUntil": "오늘 한도를 다 썼습니다 — {time} 이후 가능합니다.",
     "channelPostsPublishScheduled": "{time}에 지금 내용 그대로 나갑니다.",
