@@ -2469,7 +2469,7 @@
     "channelPostsCharLimitUnknown": "한도 미확인",
     "channelPostsOverLimitReason": "한도를 넘어 상신할 수 없습니다 — 본문을 줄여 주세요.",
     "contentRuleBannedTermBlockedHint": "「{value}」은 쓸 수 없습니다.",
-    "contentRuleUtmMissingBlockedHint": "{value}를 링크에 직접 적어야 합니다.",
+    "contentRuleUtmMissingBlockedHint": "{value} 값을 링크에 직접 적어야 합니다.",
     "contentRuleGenericBlockedHint": "이 값은 콘텐츠 규칙에 맞지 않습니다.",
     "contentRuleSubmitBlockedHint": "규칙 위반 {count}건을 고쳐야 상신할 수 있습니다.",
     "contentRuleLinkLabel": "콘텐츠 규칙",

@@ -14,7 +14,7 @@ import {
 
 const MESSAGES: Record<string, string> = {
   contentRuleBannedTermBlockedHint: '「{value}」은 쓸 수 없습니다.',
-  contentRuleUtmMissingBlockedHint: '{value}를 링크에 직접 적어야 합니다.',
+  contentRuleUtmMissingBlockedHint: '{value} 값을 링크에 직접 적어야 합니다.',
   contentRuleGenericBlockedHint: '이 값은 콘텐츠 규칙에 맞지 않습니다.',
   contentRuleSubmitBlockedHint: '규칙 위반 {count}건을 고쳐야 상신할 수 있습니다.',
   contentRuleLinkLabel: '콘텐츠 규칙',
@@ -42,11 +42,11 @@ describe('contentRuleViolationHint', () => {
   });
   it('utm_missing — BE 콤마조인 값을 「·」로 재조인해 보간한다(story #3546)', () => {
     expect(contentRuleViolationHint('utm_missing', 'utm_source,utm_medium', t))
-      .toBe('utm_source·utm_medium를 링크에 직접 적어야 합니다.');
+      .toBe('utm_source·utm_medium 값을 링크에 직접 적어야 합니다.');
   });
   it('utm_missing — 값이 하나뿐이면 구분자 없이 그대로', () => {
     expect(contentRuleViolationHint('utm_missing', 'utm_campaign', t))
-      .toBe('utm_campaign를 링크에 직접 적어야 합니다.');
+      .toBe('utm_campaign 값을 링크에 직접 적어야 합니다.');
   });
   it('⭐미지 code — 지어내지 않고 제네릭 폴백', () => {
     expect(contentRuleViolationHint('unknown_future_code', 'x', t)).toBe('이 값은 콘텐츠 규칙에 맞지 않습니다.');

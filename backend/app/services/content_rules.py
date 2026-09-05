@@ -149,7 +149,7 @@ def lint_content(rules: dict | None, *, text: str, link_url: str | None) -> list
             violations.append({
                 "code": "utm_missing", "field": "link_url", "value": ",".join(missing),
                 "hint_key": "content_rules.utm_missing", "settings_path": _SETTINGS_PATH,
-                "message": f"{'·'.join(missing)}를 링크에 직접 적어야 합니다.",
+                "message": f"{'·'.join(missing)} 값을 링크에 직접 적어야 합니다.",
             })
 
     return violations
