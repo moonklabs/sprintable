@@ -246,7 +246,8 @@ export default function ContentPostEditPage() {
   // 이 경우 입력·배너 전부 숨기고 상태 표시(GenerationBudgetIndicator)만 failed와
   // 동형으로 보인다(그 컴포넌트 내부가 이미 그렇게 처리한다).
   const generationBudgetUsable =
-    genBudget.status === 'ok' && genBudget.limitMinor !== null && genBudget.currency !== null && genBudget.remainingMinor !== null;
+    genBudget.status === 'ok' && genBudget.limitMinor !== null && genBudget.currency !== null
+    && genBudget.remainingMinor !== null && genBudget.spentMinor !== null;
   const generationBudgetCurrency: GenerationBudgetCurrency | null =
     genBudget.status === 'ok' ? genBudget.currency : null;
 
@@ -648,7 +649,7 @@ export default function ContentPostEditPage() {
         if (cancelled) return;
         if (!r.ok) { setGenBudget({ status: 'failed' }); return; }
         const json = (await r.json().catch(() => null)) as
-          | { data?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
+          | { data?: { limit_minor: number | null; spent_minor: number | null; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
           | null;
         if (!json?.data) { setGenBudget({ status: 'failed' }); return; }
         setGenBudget({

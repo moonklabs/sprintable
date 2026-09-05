@@ -57,7 +57,12 @@ export type GenerationBudgetState =
   | {
       status: 'ok';
       limitMinor: number | null;
-      spentMinor: number;
+      // BE #3498/PR#3847(실계약 확認, 2026-09-05 develop 착지) —
+      // GenerationBudgetStatusResponse는 정책이 없으면(limit_minor=null) spent_minor도
+      // null이다(둘이 같은 조건에서 함께 null). limitMinor가 null이 아닌데
+      // spentMinor가 null인 경우는 서버 응답이 불완전한 것 — §19-1 "추정해서
+      // 채우지 않는다" 규율을 여기도 적용한다(아래 렌더 로직에서 failed로 접는다).
+      spentMinor: number | null;
       remainingMinor: number | null;
       currency: GenerationBudgetCurrency | null;
       period: 'month';
@@ -117,7 +122,7 @@ export function GenerationBudgetIndicator({
   // remainingMinor가 비어 있으면 그건 서버 응답이 불완전한 것이지 FE가 추정해 채울
   // 값이 아니다 — 특히 currency를 'KRW'로 잘못 추정하면 실은 USD 조직인 경우 §19-1이
   // 막으려던 바로 그 100배 오차가 조용히 난다. 이 경우 failed와 동형으로 취급한다.
-  if (state.currency === null || state.remainingMinor === null) {
+  if (state.currency === null || state.remainingMinor === null || state.spentMinor === null) {
     return (
       <span className="text-xs text-muted-foreground" data-testid="generation-budget-failed">
         {variant === 'full' ? t('generationBudgetCardCheckFailed') : t('generationBudgetSubmitCheckFailed')}

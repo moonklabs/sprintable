@@ -176,6 +176,18 @@ describe('GenerationBudgetIndicator (story #3500, doc a0da40c9 §19 — BE #3498
     expect(byTestId('generation-budget-failed')?.textContent).toBe('잔량을 확인하지 못했습니다');
   });
 
+  it('⭐BE #3498/PR#3847 실계약 확認(2026-09-05) — spentMinor가 null이면(limitMinor는 있음) failed와 동형으로 접는다', async () => {
+    // GenerationBudgetStatusResponse 실물: limit_minor=null일 때만 spent_minor도
+    // null(같은 조건에서 함께). limitMinor가 있는데 spentMinor만 null인 건 응답
+    // 불완전 신호 — currency null과 같은 취급(추정해서 채우지 않는다).
+    await renderIndicator(
+      { status: 'ok', limitMinor: 100000, spentMinor: null, remainingMinor: 70000, currency: 'KRW', period: 'month' },
+      'full',
+    );
+    expect(byTestId('generation-budget-remaining-full')).toBeNull();
+    expect(byTestId('generation-budget-failed')?.textContent).toBe('잔량을 확인하지 못했습니다');
+  });
+
   it('0원 잔량(양수 한도 전부 소진)은 "정지"와 다르게, "남음 0원"으로 그대로 그린다(§19-3)', async () => {
     await renderIndicator(
       { status: 'ok', limitMinor: 100000, spentMinor: 100000, remainingMinor: 0, currency: 'KRW', period: 'month' },

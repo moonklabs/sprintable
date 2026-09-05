@@ -245,7 +245,8 @@ export default function ChannelPostEditPage() {
   // PO REQUIRED②(2026-09-05, PR#3848 리뷰) — `currency ?? 'KRW'` 조립 제거(site_post
   // 상세와 동형 처방, generation-budget-indicator.tsx 참조).
   const generationBudgetUsable =
-    genBudget.status === 'ok' && genBudget.limitMinor !== null && genBudget.currency !== null && genBudget.remainingMinor !== null;
+    genBudget.status === 'ok' && genBudget.limitMinor !== null && genBudget.currency !== null
+    && genBudget.remainingMinor !== null && genBudget.spentMinor !== null;
   const generationBudgetCurrency: GenerationBudgetCurrency | null =
     genBudget.status === 'ok' ? genBudget.currency : null;
   const [loading, setLoading] = useState(true);
@@ -431,7 +432,7 @@ export default function ChannelPostEditPage() {
         if (cancelled) return;
         if (!r.ok) { setGenBudget({ status: 'failed' }); return; }
         const json = (await r.json().catch(() => null)) as
-          | { data?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
+          | { data?: { limit_minor: number | null; spent_minor: number | null; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
           | null;
         if (!json?.data) { setGenBudget({ status: 'failed' }); return; }
         setGenBudget({
