@@ -28,9 +28,14 @@ export function InsightsBoardCommentsCell({
   row: InsightsBoardRow;
   t: ReturnType<typeof useTranslations>;
 }) {
+  // story #3517 조각②-b(페드루 PO 지적, 유나 프로브 오계수 2026-09-06) — 두 갈래가
+  // 같은 data-testid를 써 유나의 실픽셀 프로브가 "해당 없음"과 "채널 미제공"을 한
+  // 갈래로 세었다. 갈래별로 나눈다(문구는 이미 §21-2대로 달랐다 — testid만 못 갈렸다).
+  if (row.kind === 'site_post') {
+    return <span className="text-muted-foreground" data-testid="insights-board-comments-not-applicable">{t('insightsBoardCommentsNotApplicable')}</span>;
+  }
   if (!row.comments_supported) {
-    const label = row.kind === 'site_post' ? t('insightsBoardCommentsNotApplicable') : t('insightsBoardCommentsChannelUnsupported');
-    return <span className="text-muted-foreground" data-testid="insights-board-comments-not-applicable">{label}</span>;
+    return <span className="text-muted-foreground" data-testid="insights-board-comments-channel-unsupported">{t('insightsBoardCommentsChannelUnsupported')}</span>;
   }
 
   if (row.comments_last_collected_at === null) {
@@ -39,9 +44,10 @@ export function InsightsBoardCommentsCell({
 
   const label = t('commentsCountLink', { count: row.comments_count ?? 0 });
   if (row.channel_post_draft_id) {
-    const href = row.kind === 'site_post' ? `/content/${row.channel_post_draft_id}` : `/content/channel-posts/${row.channel_post_draft_id}`;
+    // row.kind==='site_post'는 위에서 이미 갈라졌다(댓글 축 자체가 없어 이 지점에
+    // 도달하지 않는다) — 여기 남는 row는 항상 channel_publication.
     return (
-      <Link href={href} className="hover:underline" data-testid="insights-board-comments-link">
+      <Link href={`/content/channel-posts/${row.channel_post_draft_id}`} className="hover:underline" data-testid="insights-board-comments-link">
         {label}
       </Link>
     );

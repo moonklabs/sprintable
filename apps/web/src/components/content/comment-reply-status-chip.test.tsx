@@ -25,7 +25,10 @@ const STATUSES: { status: CommentReplyStatus; label: string; tint: boolean }[] =
   { status: 'none', label: '무응답', tint: false },
   { status: 'draft', label: '초안', tint: false },
   { status: 'submitted', label: '상신됨', tint: true },
-  { status: 'approved', label: '승인됨', tint: true },
+  // story #3517 조각②-b(BE #3876, 유나 §22-13, PO 確定 2026-09-06) — command_id
+  // 신호로 pending 안이 갈리면서 값 이름을 'approved'→'awaiting_send'로 개명
+  // (BE는 "승인"을 실제로 대입하지 않는다). 라벨도 "발송 대기".
+  { status: 'awaiting_send', label: '발송 대기', tint: true },
   { status: 'published', label: '발행됨', tint: true },
   { status: 'failed', label: '실패', tint: true },
 ];

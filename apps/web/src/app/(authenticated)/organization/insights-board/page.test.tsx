@@ -382,10 +382,13 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
     expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')?.textContent).toBe('해당 없음');
   });
 
-  it('② channel_publication인데 채널이 댓글 수집 미지원 — "채널 미제공"(①과 다른 문구)', async () => {
+  // story #3517 조각②-b(페드루 PO 지적, 유나 프로브 오계수 2026-09-06) — ①②가 같은
+  // testid를 써 실픽셀 프로브가 한 갈래로 세었다. testid도 갈래별로 갈린다.
+  it('② channel_publication인데 채널이 댓글 수집 미지원 — "채널 미제공"(①과 다른 문구·다른 testid)', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: false, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
     await mount();
-    expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')?.textContent).toBe('채널 미제공');
+    expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')).toBeNull();
+    expect(container.querySelector('[data-testid="insights-board-comments-channel-unsupported"]')?.textContent).toBe('채널 미제공');
   });
 
   it('③ comments_supported=true인데 last_collected_at=null — "아직 수집 전"(0건과 다른 문구)', async () => {
