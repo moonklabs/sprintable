@@ -561,7 +561,9 @@ describe('ContentRulesPage — UTM 자동 부착(story #3540)', () => {
 
     expect(toggle.checked).toBe(true);
     expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('');
-    expect((container.querySelector('[data-testid="content-rules-utm-campaign-from"]') as HTMLSelectElement).value).toBe('campaign_slug');
+    // 페드루 PO REQUIRED②(2026-09-06, #3892 리뷰) — campaign_from은 서술용 고정
+    // 안내 한 줄뿐(select 제거, BE docstring "값이 뭐든 동작 무변경").
+    expect(container.querySelector('[data-testid="content-rules-utm-campaign-from-fixed-note"]')).not.toBeNull();
     expect((container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement).value).toBe('draft_id');
   });
 
@@ -649,8 +651,31 @@ describe('ContentRulesPage — UTM 자동 부착(story #3540)', () => {
     expect((container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement).checked).toBe(true);
     expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('ig-bio');
     expect((container.querySelector('[data-testid="content-rules-utm-default-medium"]') as HTMLInputElement).value).toBe('');
-    expect((container.querySelector('[data-testid="content-rules-utm-campaign-from"]') as HTMLSelectElement).value).toBe('draft_id');
     expect((container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement).value).toBe('none');
+  });
+
+  it('⭐campaign_from은 편집 UI 없이 로드값이 저장 시 그대로 보존된다(서술용 고정)', async () => {
+    let sentBody: unknown = null;
+    stubFetch({
+      rules: {
+        ...RULES_V1,
+        utm_rules: {
+          enabled: true, default_source: 'ig-bio', default_medium: null,
+          campaign_from: 'draft_id', content_from: 'none',
+        },
+      } as never,
+      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
+    });
+    await mount('owner');
+    // campaign_from을 바꿀 UI 자체가 없다(select 제거).
+    expect(container.querySelector('[data-testid="content-rules-utm-campaign-from"]')).toBeNull();
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const utmRules = (sentBody as { rules?: { utm_rules?: { campaign_from?: unknown } } } | null)?.rules?.utm_rules;
+    expect(utmRules?.campaign_from).toBe('draft_id');
   });
 
   it('member는 편집 컨트롤 없이 값만 읽는다(안 정함 표시 포함)', async () => {

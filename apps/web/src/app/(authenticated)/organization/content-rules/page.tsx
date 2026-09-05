@@ -542,7 +542,6 @@ export default function ContentRulesPage() {
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">{t('requireUtmHint')}</p>
-                <p className="text-xs text-muted-foreground">{t('requireUtmAutoAttachHint')}</p>
                 {fieldErrors.require_utm ? <p className="text-xs text-destructive">{fieldErrors.require_utm}</p> : null}
               </div>
 
@@ -584,6 +583,7 @@ export default function ContentRulesPage() {
                     </span>
                   </p>
                 )}
+                <p className="text-xs text-muted-foreground">{t('utmRulesEnabledHint')}</p>
                 {rules.utm_rules?.enabled ? (
                   <div className="space-y-3 rounded-md border border-border p-3">
                     <div className="space-y-1.5">
@@ -631,30 +631,17 @@ export default function ContentRulesPage() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-utm-campaign-from">
-                        {t('utmRulesCampaignFromLabel')}
-                      </label>
-                      {canEditRules ? (
-                        <select
-                          id="content-rules-utm-campaign-from"
-                          value={rules.utm_rules.campaign_from}
-                          onChange={(e) => setRules((r) => (r.utm_rules ? {
-                            ...r,
-                            utm_rules: { ...r.utm_rules, campaign_from: e.target.value as UtmRules['campaign_from'] },
-                          } : r))}
-                          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                          data-testid="content-rules-utm-campaign-from"
-                        >
-                          <option value="campaign_slug">{t('utmRulesCampaignFromCampaignSlug')}</option>
-                          <option value="draft_id">{t('utmRulesCampaignFromDraftId')}</option>
-                        </select>
-                      ) : (
-                        <p className="text-sm text-foreground" data-testid="content-rules-utm-campaign-from-readonly">
-                          {rules.utm_rules.campaign_from === 'campaign_slug'
-                            ? t('utmRulesCampaignFromCampaignSlug')
-                            : t('utmRulesCampaignFromDraftId')}
-                        </p>
-                      )}
+                      {/* 페드루 PO REQUIRED②(2026-09-06, #3892 리뷰) — campaign_from은
+                          content_rules.py::UtmRules docstring(:71-74) 그대로 "순수
+                          서술용"(실 campaign 해소는 여전히 resolve_utm_campaign()의
+                          기존 규칙, 이 필드가 뭐든 동작 무변경) — select를 두면 눌러도
+                          아무것도 안 바뀌는 죽은 컨트롤이 된다. 편집 제거·고정 안내
+                          한 줄만(값은 로드값 그대로 보존해 저장 — 지어내지 않는다).
+                          content_from은 실제로 동작하므로(build_tagged_link) 그대로
+                          select 유지. */}
+                      <p className="text-xs text-muted-foreground" data-testid="content-rules-utm-campaign-from-fixed-note">
+                        {t('utmRulesCampaignFromFixedNote')}
+                      </p>
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-utm-content-from">
