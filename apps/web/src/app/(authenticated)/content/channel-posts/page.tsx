@@ -15,6 +15,7 @@ import { type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
+import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
 
 /**
  * story #3402(Phase1·마케팅운영, AC1/AC2/AC3, doc phase1-threads-post-manager-screen-design
@@ -120,6 +121,10 @@ export default function ChannelPostListPage() {
           {t('channelPostsCalendarLinkCta')}
         </Link>
       </div>
+
+      {/* story #3484(블루프린트 §7 Phase 1 실측 열) — 발행 계측 띠. 캘린더·연결
+          화면엔 안 얹는다(첫 슬라이스, PO 確定). */}
+      {orgId ? <PublishingMetricsBand orgId={orgId} /> : null}
 
       {loadError ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
