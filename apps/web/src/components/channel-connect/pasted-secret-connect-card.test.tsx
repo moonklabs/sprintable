@@ -50,9 +50,9 @@ function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function TestHarness({ channel, isOwner, onConnected }: { channel: string; isOwner: boolean; onConnected: () => void }) {
+function TestHarness({ channel, isOwner, connectionCount = 0, onConnected }: { channel: string; isOwner: boolean; connectionCount?: number; onConnected: () => void }) {
   const t = useTranslations('channelConnect');
-  return <PastedSecretConnectCard channel={channel} orgId="org-1" isOwner={isOwner} onConnected={onConnected} t={t} />;
+  return <PastedSecretConnectCard channel={channel} orgId="org-1" isOwner={isOwner} connectionCount={connectionCount} onConnected={onConnected} t={t} />;
 }
 
 describe('PastedSecretConnectCard(story #3450 FE 후속)', () => {
@@ -61,8 +61,11 @@ describe('PastedSecretConnectCard(story #3450 FE 후속)', () => {
     await flush();
     expect(container.querySelector('button')).toBeNull();
     expect(container.querySelector('[data-testid^="channel-connect-pasted-secret-form-"]')).toBeNull();
-    // story #3504 — 붙여넣기 연결 생성은 owner|admin 폭이라 owner·admin 문구가 맞다.
-    expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOrAdminOnlyReason);
+    // story #3436 묶음10(유나 §17-21⑨) — 이 버튼 자리 전용 키로 분리(공용
+    // channelOwnerOrAdminOnlyReason은 다른 자리 그대로).
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOrAdminOnlyReason.replace('{channel}', 'WordPress'),
+    );
   });
 
   it('필드를 다 채우기 전에는 제출 버튼이 비활성', async () => {
@@ -223,6 +226,38 @@ describe('PastedSecretConnectCard(story #3450 FE 후속)', () => {
     expect(fetchWithAuthMock).toHaveBeenCalledWith(
       '/api/organizations/org-1/channel-connections/webhook',
       expect.objectContaining({ method: 'POST' }),
+    );
+  });
+});
+
+// story #3436 묶음10(유나 §17-21⑧⑨, PO 確定 2026-09-06) — 0개면 「연결」(그대로)·
+// 1개 이상이면 「연결 추가」로 낱말이 갈린다(sandbox #3537과 달리 둘째 연결이
+// 유의미해 버튼은 유지). 0개일 때 "추가"가 붙으면 거짓이므로 조건이 핵심 —
+// 0/1/2 × owner/member 매트릭스로 pin한다.
+describe('PastedSecretConnectCard — 연결 수별 버튼 낱말 매트릭스(story #3436 묶음10)', () => {
+  it.each([
+    { count: 0, expectedKey: 'channelConnectPastedSecretAction' as const },
+    { count: 1, expectedKey: 'channelConnectPastedSecretAnotherAction' as const },
+    { count: 2, expectedKey: 'channelConnectPastedSecretAnotherAction' as const },
+  ])('owner·연결 $count개 — 버튼 낱말이 $expectedKey', async ({ count, expectedKey }) => {
+    await act(async () => {
+      root.render(wrap(<TestHarness channel="wordpress" isOwner connectionCount={count} onConnected={vi.fn()} />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]') as HTMLButtonElement;
+    expect(btn.textContent).toBe(koMessages.channelConnect[expectedKey].replace('{channel}', 'WordPress'));
+    // 0개일 때 "추가"가 절대 안 붙는다(거짓 방지) — 문자열 자체를 대조.
+    if (count === 0) expect(btn.textContent).not.toContain('추가');
+  });
+
+  it.each([0, 1, 2])('member·연결 %i개 — 버튼 없이 사유만(연결 수 무관, owner|admin 폭)', async (count) => {
+    await act(async () => {
+      root.render(wrap(<TestHarness channel="wordpress" isOwner={false} connectionCount={count} onConnected={vi.fn()} />));
+    });
+    await flush();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOrAdminOnlyReason.replace('{channel}', 'WordPress'),
     );
   });
 });
