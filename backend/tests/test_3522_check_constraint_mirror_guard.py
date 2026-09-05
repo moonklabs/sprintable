@@ -44,7 +44,17 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not _REAL_DB_URL, reason="PARITY_TEST_DATABASE_URL/ALEMBIC_DATABASE_URL 미설정")
+# story #3522(페드루 PO 실측 2026-09-06) — test_2643_no_raw_ddl_in_tests_guard.py::
+# test_ac2_no_unmarked_raw_ddl_violations_across_test_suite는 모듈 `pytestmark`
+# (리스트/단일 값)만 읽는다 — 함수 데코레이터(156/168/184행 @pytest.mark.
+# destructive_schema)는 그 가드 눈에 안 보여, 이 파일의 헬퍼(118/127/138/152행
+# CREATE/DROP DATABASE 리터럴)가 "raw DDL, destructive_schema 마커 없음"으로
+# 오탐됐다. 모듈 pytestmark에 destructive_schema를 합류시킨다(함수 데코레이터
+# 3개는 이제 중복이라 아래에서 뗀다).
+pytestmark = [
+    pytest.mark.destructive_schema,
+    pytest.mark.skipif(not _REAL_DB_URL, reason="PARITY_TEST_DATABASE_URL/ALEMBIC_DATABASE_URL 미설정"),
+]
 
 _BACKEND_DIR = Path(__file__).parent.parent
 
@@ -153,7 +163,6 @@ def create_all_db_check_constraints():
         admin.dispose()
 
 
-@pytest.mark.destructive_schema
 def test_migrated_db_actually_lacks_the_confirmed_ghost_constraint(migrated_db_check_constraints):
     """양성대조(반대 방향) — `ck_judgments_target_required_for_meta_kinds`가
     진짜 유령인지(0218이 정말 안 되살렸는지) 이 테스트 자체가 실측으로 확인한다.
@@ -165,7 +174,6 @@ def test_migrated_db_actually_lacks_the_confirmed_ghost_constraint(migrated_db_c
     )
 
 
-@pytest.mark.destructive_schema
 def test_all_expected_check_constraints_mirrored_in_model(
     migrated_db_check_constraints, create_all_db_check_constraints,
 ):
@@ -181,7 +189,6 @@ def test_all_expected_check_constraints_mirrored_in_model(
         assert name in create_all_all, f"{name}이 모델 __table_args__에 미러돼 있지 않다"
 
 
-@pytest.mark.destructive_schema
 def test_check_constraint_diff_for_touched_tables_only(
     migrated_db_check_constraints, create_all_db_check_constraints,
 ):
