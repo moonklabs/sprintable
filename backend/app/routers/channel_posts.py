@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.channel_post_version import ChannelPostVersion
-from app.services.content_rules import get_org_content_rules
+from app.services.content_rules import get_org_content_rules, lint_content
 from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
     ChannelImageContainerFailedError,
@@ -242,6 +242,11 @@ class ChannelPostDraftListItem(BaseModel):
     # "최신 버전"의 publication 행 — publication_status·error_code와 같은 축). 아직 발행
     # 시도 자체가 없으면 null.
     publication_id: uuid.UUID | None = None
+    # story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — 단건 조회(lint-on-read)
+    # 전용. 목록 응답에선 항상 None(행마다 lint하면 비용 N배, PO 明示 "단건만"). None=
+    # "이 응답에선 안 쟀다"·[]="쟀는데 위반 0"(null≠0 원칙 그대로, site_posts.py::
+    # SitePostDraftListItem.violations와 동형).
+    violations: list[dict] | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -724,7 +729,11 @@ async def get_channel_post_draft_detail_endpoint(
     shape·같은 직렬화 경로(`_to_draft_list_item`) — `list_channel_post_drafts()`를
     draft_id 필터로 그대로 재사용해 조인 축 드리프트가 구조적으로 없다. 권한도 목록과
     동일(휴먼·에이전트 둘 다, `_require_human()` 안 부름). org 스코프 밖이거나 존재하지
-    않으면 404("존재 비노출" 관례, site_posts detail과 동형)."""
+    않으면 404("존재 비노출" 관례, site_posts detail과 동형).
+
+    story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — lint-on-read(유나 13회차
+    ③ 관찰). 저장 시점 스냅샷(`draft.lint_result`)이 아니라 **지금** org 규칙으로 최신
+    버전을 다시 lint한다 — 목록 응답엔 안 실음(단건만, 비용 N배 방지)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
@@ -735,7 +744,14 @@ async def get_channel_post_draft_detail_endpoint(
         db, org_id=org_id,
         content_item_ids={rows[0][0].source_content_item_id} if rows[0][0].source_content_item_id else set(),
     )
-    return _to_draft_list_item(rows[0], source_titles)
+    item = _to_draft_list_item(rows[0], source_titles)
+
+    latest_version = rows[0][1]
+    rule_row = await get_org_content_rules(db, org_id=org_id)
+    item.violations = lint_content(
+        rule_row.rules if rule_row else None, text=latest_version.text, link_url=latest_version.link_url,
+    )
+    return item
 
 
 @router.get(

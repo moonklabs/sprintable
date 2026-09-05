@@ -19,6 +19,7 @@ from app.services.member_resolver import resolve_member
 from app.routers.insight_snapshots import InsightSnapshotView
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.insight_snapshots import get_latest_insight_snapshot
+from app.services.content_rules import get_org_content_rules
 from app.services.site_posts import (
     CampaignNotFoundError,
     ContentRuleViolationError,
@@ -34,6 +35,7 @@ from app.services.site_posts import (
     SitePostReapprovalRequiredError,
     SitePostSealMissingError,
     SitePostVersionNotFoundError,
+    _lint_site_post_fields,
     create_site_post_draft_version,
     get_campaign,
     get_site_post_draft,
@@ -139,6 +141,28 @@ class SitePostDraftListItem(BaseModel):
     sealed_content_sha256: str | None = None
     body_sha256: str
     published_at: str | None = None
+    # story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — 단건 조회(lint-on-read)
+    # 전용. channel_posts.py::ChannelPostDraftListItem.violations와 동형 — 목록 응답에선
+    # 항상 None(행마다 lint하면 비용 N배, PO 明示 "단건만"). None="이 응답에선 안 쟀다"·
+    # []="쟀는데 위반 0"(null≠0 원칙 그대로).
+    violations: list[dict] | None = None
+
+
+def _to_site_post_draft_list_item(
+    draft, latest, origin, gate, post, *, violations: list[dict] | None = None,
+) -> SitePostDraftListItem:
+    return SitePostDraftListItem(
+        draft_id=draft.id, work_item_id=draft.work_item_id, slug=draft.slug,
+        lang=latest.lang, title=latest.title, current_version=latest.version,
+        latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
+        updated_at=latest.created_at.isoformat(),
+        body_sha256=latest.body_sha256,
+        gate_status=gate.status if gate else None,
+        reapproval_required=gate.reapproval_required if gate else None,
+        sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
+        published_at=post.published_at.isoformat() if post else None,
+        violations=violations,
+    )
 
 
 class SubmitSitePostDraftRequest(BaseModel):
@@ -407,20 +431,41 @@ async def list_site_post_drafts_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     rows = await list_site_post_drafts(db, org_id=org_id, limit=limit, offset=offset)
-    return [
-        SitePostDraftListItem(
-            draft_id=draft.id, work_item_id=draft.work_item_id, slug=draft.slug,
-            lang=latest.lang, title=latest.title, current_version=latest.version,
-            latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
-            updated_at=latest.created_at.isoformat(),
-            body_sha256=latest.body_sha256,
-            gate_status=gate.status if gate else None,
-            reapproval_required=gate.reapproval_required if gate else None,
-            sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
-            published_at=post.published_at.isoformat() if post else None,
-        )
-        for draft, latest, origin, gate, post in rows
-    ]
+    return [_to_site_post_draft_list_item(draft, latest, origin, gate, post) for draft, latest, origin, gate, post in rows]
+
+
+@router.get("/{org_id}/site-posts/drafts/{draft_id}", response_model=SitePostDraftListItem)
+async def get_site_post_draft_detail_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> SitePostDraftListItem:
+    """story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — 단건 조회 신설(site_post은
+    이제까지 목록·`/versions`·`/publication`뿐, 이 자리가 비어 있었다). 목록 항목과 완전히
+    같은 shape·같은 직렬화 경로(`list_site_post_drafts`를 draft_id 필터로 재사용) —
+    channel_posts.py::get_channel_post_draft_detail_endpoint(story #3403)와 동형. 권한도
+    목록과 동일(휴먼·에이전트 둘 다). org 스코프 밖이거나 존재하지 않으면 404("존재
+    비노출" 관례).
+
+    lint-on-read(이 스토리 본 목적, 유나 13회차 ③ 관찰) — 저장 시점 스냅샷(`draft.
+    lint_result`)이 아니라 **지금** org 규칙으로 최신 버전을 다시 lint한다(규칙이 바뀐
+    뒤 옛 초안을 열어도 위반이 즉시 보이게). `_lint_site_post_fields`(story #3482, 필드별
+    lint) 재사용 — save/submit과 같은 함수, 새 판정 로직 0."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    rows = await list_site_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    draft, latest, origin, gate, post = rows[0]
+
+    rule_row = await get_org_content_rules(db, org_id=org_id)
+    violations = _lint_site_post_fields(
+        rule_row.rules if rule_row else None, title=latest.title, summary=latest.summary, body_md=latest.body_md,
+    )
+    return _to_site_post_draft_list_item(draft, latest, origin, gate, post, violations=violations)
 
 
 @router.get(

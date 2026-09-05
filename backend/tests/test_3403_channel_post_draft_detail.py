@@ -229,7 +229,14 @@ async def test_detail_draft_only_matches_list_item_exactly():
         assert r_detail.status_code == 200, r_detail.text
         list_row = [it for it in r_list.json() if it["draft_id"] == draft_id]
         assert len(list_row) == 1
-        assert r_detail.json() == list_row[0]
+        # story #3514(PO 確定 2026-09-05) — violations는 유일하게 의도적으로 갈리는
+        # 필드다(단건=lint-on-read로 방금 계산·목록=항상 None, 비용 N배 방지). "완전히
+        # 같은 shape"라는 이 파일의 핵심 주장은 그 필드 하나를 빼고 여전히 성립한다.
+        detail_body = {k: v for k, v in r_detail.json().items() if k != "violations"}
+        list_body = {k: v for k, v in list_row[0].items() if k != "violations"}
+        assert detail_body == list_body
+        assert list_row[0]["violations"] is None
+        assert r_detail.json()["violations"] == []
         assert r_detail.json()["gate_status"] is None
         assert r_detail.json()["publication_status"] is None
     finally:
@@ -280,7 +287,14 @@ async def test_detail_published_matches_list_item_exactly():
         assert r_detail.status_code == 200, r_detail.text
         list_row = [it for it in r_list.json() if it["draft_id"] == draft_id]
         assert len(list_row) == 1
-        assert r_detail.json() == list_row[0]
+        # story #3514(PO 確定 2026-09-05) — violations는 유일하게 의도적으로 갈리는
+        # 필드다(단건=lint-on-read로 방금 계산·목록=항상 None, 비용 N배 방지). "완전히
+        # 같은 shape"라는 이 파일의 핵심 주장은 그 필드 하나를 빼고 여전히 성립한다.
+        detail_body = {k: v for k, v in r_detail.json().items() if k != "violations"}
+        list_body = {k: v for k, v in list_row[0].items() if k != "violations"}
+        assert detail_body == list_body
+        assert list_row[0]["violations"] is None
+        assert r_detail.json()["violations"] == []
         body = r_detail.json()
         assert body["publication_status"] == "published"
         assert body["permalink"] == "https://www.threads.net/@demo/post/media-1"
@@ -335,7 +349,14 @@ async def test_detail_partial_success_matches_list_item_exactly():
         assert r_detail.status_code == 200, r_detail.text
         list_row = [it for it in r_list.json() if it["draft_id"] == draft_id]
         assert len(list_row) == 1
-        assert r_detail.json() == list_row[0]
+        # story #3514(PO 確定 2026-09-05) — violations는 유일하게 의도적으로 갈리는
+        # 필드다(단건=lint-on-read로 방금 계산·목록=항상 None, 비용 N배 방지). "완전히
+        # 같은 shape"라는 이 파일의 핵심 주장은 그 필드 하나를 빼고 여전히 성립한다.
+        detail_body = {k: v for k, v in r_detail.json().items() if k != "violations"}
+        list_body = {k: v for k, v in list_row[0].items() if k != "violations"}
+        assert detail_body == list_body
+        assert list_row[0]["violations"] is None
+        assert r_detail.json()["violations"] == []
         assert r_detail.json()["publication_status"] == "container_created"
     finally:
         app.dependency_overrides.clear()

@@ -589,6 +589,7 @@ async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID
 
 async def list_site_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
+    draft_id: uuid.UUID | None = None,
 ) -> list[tuple[SitePostDraft, SitePostVersion, SitePostVersion, Gate | None, SitePost | None]]:
     """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — 조직 스코프 초안 목록. S4
     화면이 열릴 때 draft_id를 미리 알 방법이 없어 만든 자리 — 항목마다 최신 버전(title·lang·
@@ -604,7 +605,12 @@ async def list_site_post_drafts(
     (work_item_id→gate, (org_id,lang,slug)→site_posts)을 페이지 단위로 배치한 것뿐이다.
 
     반환: (draft, latest_version, origin_version, gate, site_post) 튜플 리스트 — gate·
-    site_post는 없으면 None(그 draft가 아직 상신/발행 전이라는 뜻, 지어내지 않는다)."""
+    site_post는 없으면 None(그 draft가 아직 상신/발행 전이라는 뜻, 지어내지 않는다).
+
+    story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — `draft_id`를 주면 페이지
+    쿼리에 단건 필터가 추가될 뿐(channel_posts.py::list_channel_post_drafts와 동형) —
+    새 단건 조회 경로(`GET .../site-posts/drafts/{draft_id}`)가 이 함수를 그대로
+    재사용해 목록과 단건이 다른 값을 낼 드리프트 표면을 안 만든다."""
     latest_version_ids = (
         select(
             SitePostVersion.draft_id,
@@ -642,6 +648,8 @@ async def list_site_post_drafts(
         .limit(limit)
         .offset(offset)
     )
+    if draft_id is not None:
+        stmt = stmt.where(SitePostDraft.id == draft_id)
     page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
     if not page_rows:
         return []
