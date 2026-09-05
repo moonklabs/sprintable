@@ -162,10 +162,16 @@ _PRESET_GATE_VERDICT_SCHEMA = {
     "properties": {
         "work_item_type": {"type": "string"},
         "work_item_id": {"type": "string", "format": "uuid"},
+        "work_item_title": {"type": ["string", "null"]},
         "gate_type": {"type": "string"},
         "verdict": {"type": "string", "enum": ["approved", "rejected"]},
         "resolver_member_id": {"type": "string", "format": "uuid"},
         "resolution_note": {"type": ["string", "null"]},
+        "gate_requester_member_id": {"type": "string", "format": "uuid"},
+        "gate_draft_author_member_id": {"type": "string", "format": "uuid"},
+        # story #3487(0330) — 판정된 그 게이트 행 식별(dual-destination 이후 재조회
+        # 대신 이 값으로 exact fetch).
+        "gate_id": {"type": "string", "format": "uuid"},
     },
 }
 _PRESET_GATE_VERDICT_ROUTING = {
