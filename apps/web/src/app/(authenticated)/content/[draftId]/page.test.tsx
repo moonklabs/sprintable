@@ -1496,7 +1496,7 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     expect(retried).toBe('cmd-1');
   });
 
-  it('permalink이 null이면(아직 미발행) 링크 자리 자체를 안 그린다', async () => {
+  it('⭐카디르군 REQUEST_CHANGES(2026-09-05) — permalink이 null이면(아직 미발행) 「공개 URL」 라벨을 포함해 그 행 전체가 안 보인다(<a> 부재만으론 안 잡히던 회귀)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       publication: {
         published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
@@ -1511,6 +1511,8 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
 
     const info = container.querySelector('[data-testid="content-external-publication-info"]')!;
     expect(info.querySelector('a')).toBeNull();
+    // <a> 부재만 재면 라벨+「—」 잔존을 못 잡는다 — 라벨 텍스트 자체가 없어야 한다.
+    expect(info.textContent).not.toContain(koMessages.content.publishedInfoUrlLabel);
   });
 
   it('⭐PO 보정(2026-09-05, PR#3830) — 회수된 글(status=unpublished)은 회수됨 문구+회수 시각을 보이고, permalink는 사실이니 그대로 링크로 남는다', async () => {

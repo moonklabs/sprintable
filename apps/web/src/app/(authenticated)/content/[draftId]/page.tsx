@@ -1066,16 +1066,17 @@ export default function ContentPostEditPage() {
                 <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationStatusLabel')}</span>{' '}
                 {t(externalPublicationStatusLabelKey(publication.channel_publication.status))}
               </div>
-              <div>
-                <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
-                {publication.channel_publication.permalink ? (
+              {/* 카디르군 REQUEST_CHANGES(2026-09-05, PR#3830) — permalink null일 때
+                  <a>만 빼고 라벨+「—」 행이 남아 명세("값 없으면 그 자리 안 그린다")를
+                  어겼다. 행 전체를 조건에 넣는다(라벨도 함께 없앤다). */}
+              {publication.channel_publication.permalink ? (
+                <div>
+                  <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
                   <a href={publication.channel_publication.permalink} target="_blank" rel="noopener noreferrer" className="underline">
                     {publication.channel_publication.permalink}
                   </a>
-                ) : (
-                  '—'
-                )}
-              </div>
+                </div>
+              ) : null}
               {publication.channel_publication.published_at ? (
                 <div>
                   <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
