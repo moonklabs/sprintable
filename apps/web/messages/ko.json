@@ -2270,7 +2270,6 @@
     "insightCapturedAtLabel": "수집",
     "insightStatusPending": "대기 중",
     "insightStatusCaptured": "수집됨",
-    "insightStatusUnsupported": "채널 미제공",
     "insightStatusFailed": "실패",
     "insightStatusDeadLetter": "자동 재시도 멈춤",
     "insightSnapshotPendingWithDue": "스냅샷 예정 · {due}",

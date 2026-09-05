@@ -2270,7 +2270,6 @@
     "insightCapturedAtLabel": "Captured",
     "insightStatusPending": "Pending",
     "insightStatusCaptured": "Captured",
-    "insightStatusUnsupported": "Not provided by channel",
     "insightStatusFailed": "Failed",
     "insightStatusDeadLetter": "Auto-retry stopped",
     "insightSnapshotPendingWithDue": "Snapshot due · {due}",

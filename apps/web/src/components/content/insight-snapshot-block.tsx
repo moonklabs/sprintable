@@ -46,15 +46,17 @@ const METRIC_LABEL_KEYS: Record<(typeof METRIC_KEYS)[number], string> = {
   conversions: 'insightMetricConversions',
 };
 
-// doc a0da40c9 §17-19(유나 2026-09-05, 이 스토리를 위한 확장) — captured/unsupported
-// 값+라벨 신규, pending/failed/dead_letter는 §17-10 기존 두 enum 라벨 재사용(같은
-// 사실을 두 벌로 안 쓴다). captured는 «비배지 원칙»(유나 지적) — 값이 있으면 값만
-// 보이고 라벨은 안 그린다, 이 맵은 pending/unsupported/failed/dead_letter 자리에만
-// 실제로 쓰인다(captured는 아래 렌더 로직에서 애초에 이 맵을 안 거친다).
-const STATUS_LABEL_KEYS: Record<InsightSnapshotStatus, string> = {
+// doc a0da40c9 §17-19(유나 2026-09-05, 이 스토리를 위한 확장 + PR#3846 실측 보강) —
+// captured/unsupported 값+라벨 신규, pending/failed/dead_letter는 §17-10 기존 두
+// enum 라벨 재사용(같은 사실을 두 벌로 안 쓴다). captured는 «비배지 원칙»(유나
+// 지적) — 값이 있으면 값만 보이고 라벨은 안 그린다, 이 맵은 pending/failed/
+// dead_letter 자리에만 실제로 쓰인다(captured는 아래 렌더 로직에서 애초에 이
+// 맵을 안 거친다). unsupported는 이 맵에 없다 — §17-19 보강절이 "배지 라벨을
+// 쓰는 자리가 없으면 그 키는 죽은 키다"로 직접 지적한 자리(문장 분기가 먼저
+// 잡아 폴백까지 안 내려간다, 아래 `insightSnapshotUnsupported` 참조) — 지웠다.
+const STATUS_LABEL_KEYS: Partial<Record<InsightSnapshotStatus, string>> = {
   pending: 'insightStatusPending',
   captured: 'insightStatusCaptured',
-  unsupported: 'insightStatusUnsupported',
   failed: 'insightStatusFailed',
   dead_letter: 'insightStatusDeadLetter',
 };
@@ -136,7 +138,7 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale }: Insight
             <li key={`${snap.source}-${snap.due_at ?? idx}`} className="text-xs" data-testid="insight-snapshot-row">
               {snap.status === 'pending' && !snap.captured_at ? (
                 <span className={toneClass} data-testid="insight-snapshot-pending">
-                  {dueDisplay ? t('insightSnapshotPendingWithDue', { due: dueDisplay }) : t(STATUS_LABEL_KEYS.pending)}
+                  {dueDisplay ? t('insightSnapshotPendingWithDue', { due: dueDisplay }) : t(STATUS_LABEL_KEYS.pending!)}
                 </span>
               ) : snap.status === 'unsupported' ? (
                 <span className={toneClass} data-testid="insight-snapshot-unsupported">
@@ -144,7 +146,8 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale }: Insight
                 </span>
               ) : snap.status === 'failed' || snap.status === 'dead_letter' ? (
                 <span className={toneClass} data-testid="insight-snapshot-failure">
-                  {t(STATUS_LABEL_KEYS[snap.status])}
+                  {/* failed/dead_letter는 STATUS_LABEL_KEYS에 항상 존재 — unsupported만 없음(위에서 처리 済) */}
+                  {t(STATUS_LABEL_KEYS[snap.status]!)}
                 </span>
               ) : snap.status === 'captured' && snap.captured_at ? (
                 <span data-testid="insight-snapshot-captured">
@@ -152,7 +155,10 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale }: Insight
                   {dueDisplay ? ` · ${dueDisplay}` : ''}
                 </span>
               ) : (
-                <span className={toneClass}>{t(STATUS_LABEL_KEYS[snap.status])}</span>
+                // 여기 도달하는 유일한 경우는 status==='captured'인데 captured_at이 null인
+                // 방어적 엣지케이스(계약상 있어선 안 되지만 렌더가 죽지 않게) — unsupported는
+                // 위 분기가 이미 잡아 여기 안 옴.
+                <span className={toneClass}>{t(STATUS_LABEL_KEYS[snap.status]!)}</span>
               )}
             </li>
           );
