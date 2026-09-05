@@ -67,6 +67,15 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
 _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
 _TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED"})
+# story #3536(PO 確定 2026-09-06) — ChannelPublishProviderError.provider_code가 이
+# 집합에 있으면(어댑터가 구조적으로 실어 준 코드, 문자열 매칭 아님 — instagram_
+# publish.py::create_media_container가 ThreadsPublishError("INSTAGRAM_IMAGE_
+# REQUIRED", ...)로 던진 값이 _classify_threads_error→ChannelPublishProviderError.
+# provider_code에 그대로 실린다) 「영구 조건」이라 재시도해도 다시 같은 결과 —
+# 일반 provider 오류(_TRANSIENT_CODES)와 달리 classify_failure_kind가 needs_check로
+# 보내도록 이 코드 자체를 error_code로 승격한다(아래 except 분기). 매핑표에 없는
+# 코드는 이미 needs_check가 기본값이라 이 집합에 새 이름을 추가하는 것만으로 충분.
+_PERMANENT_PROVIDER_CONDITION_CODES = frozenset({"INSTAGRAM_IMAGE_REQUIRED"})
 
 
 # story #3474(페드루 PO 確定 2026-09-05) — 게이트가 approved가 아니거나(missing)
@@ -365,7 +374,14 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         error_code, last_error = "CHANNEL_RATE_LIMITED", str(exc)
         retry_after_seconds = max(0, int((exc.reset_at - now).total_seconds()))
     except ChannelPublishProviderError as exc:
-        error_code, last_error = "CHANNEL_PUBLISH_PROVIDER_ERROR", str(exc)
+        # story #3536 — 어댑터가 넘긴 provider_code가 「영구 조건」이면(예: 이미지
+        # 필수 채널에 이미지 없이 도달) 그 코드 자체를 error_code로 써서 classify_
+        # failure_kind가 needs_check(재시도 0·dead_letter)로 보내게 한다. 그 외
+        # 일반 provider 오류는 기존처럼 CHANNEL_PUBLISH_PROVIDER_ERROR(transient).
+        if exc.provider_code in _PERMANENT_PROVIDER_CONDITION_CODES:
+            error_code, last_error = exc.provider_code, str(exc)
+        else:
+            error_code, last_error = "CHANNEL_PUBLISH_PROVIDER_ERROR", str(exc)
     except ChannelPublishInProgressError as exc:
         error_code, last_error = "CHANNEL_PUBLISH_IN_PROGRESS", str(exc)
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.

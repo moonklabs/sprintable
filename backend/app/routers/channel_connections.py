@@ -138,6 +138,11 @@ class ChannelConnectionResponse(BaseModel):
     image_width_max: int = 0
     image_color_space: str = ""
     image_max_count: int = 0
+    # story #3536(AC1, PO 確定 2026-09-06) — image_max_count>0("지원")과는 다른 축:
+    # "필수"(이미지 0장이면 발행 자체가 provider에서 거부됨, 예: Instagram). FE가
+    # 「올리기 전에」 안내를 만들 수 있게 노출(max_text_length·image_max_count와 동형
+    # 관례 — 상수 하드코딩 X).
+    image_required: bool = False
     # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
     # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
     secret_hint: str | None = None
@@ -173,6 +178,7 @@ def _to_response(row) -> ChannelConnectionResponse:
         image_width_max=adapter.image_width_max if adapter is not None else 0,
         image_color_space=adapter.image_color_space if adapter is not None else "",
         image_max_count=adapter.image_max_count if adapter is not None else 0,
+        image_required=adapter.image_required if adapter is not None else False,
         secret_hint=row.secret_hint,
     )
 
