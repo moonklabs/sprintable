@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Check, Circle } from 'lucide-react';
 import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from './derive-flow-map';
 import {
@@ -374,6 +376,8 @@ export function FlowMapCanvas({
   onOffscreenCountChange, focusGoalId = null, stallThresholdHours,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story #2224 후속(수→형, §A1) — 렌더 시각 하나를 고정해 같은 렌더 패스 안 모든 카드가
   // 같은 기준으로 판정되게 한다(Date.now()를 카드마다 따로 부르면 렌더 중 시각이 미세하게
   // 갈릴 수 있다 — 여기서만 부르고 순수함수(isNodeStalled)에 값으로 흘려보낸다).
@@ -1214,7 +1218,8 @@ export function FlowMapCanvas({
                   : t(titleResolution.key)}
               </DialogTitle>
               <DialogDescription>
-                {undoTarget.declaredAt ? t('portUndoSignature', { at: new Date(undoTarget.declaredAt).toLocaleString() }) : t('portUndoSignatureUnknown')}
+                {/* story #3493 — 서명 선언 시각은 "기록"(정본 formatRelativeTime). */}
+                {undoTarget.declaredAt ? t('portUndoSignature', { at: formatRelativeTime(undoTarget.declaredAt, locale, displayTimezone) }) : t('portUndoSignatureUnknown')}
               </DialogDescription>
             </DialogHeader>
             {undoDeleteError ? <p role="alert" className="text-[11px] text-destructive">{undoDeleteError}</p> : null}

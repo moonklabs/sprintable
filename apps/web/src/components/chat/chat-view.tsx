@@ -4,7 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { ChevronLeft, RefreshCw, WifiOff, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
@@ -71,12 +72,20 @@ interface MessageGroup {
 // 50/page × 10 = ~500개. 그 안에 없으면 no-op(graceful).
 const MAX_SCROLL_LOAD_ATTEMPTS = 10;
 
-function groupByDate(messages: ChatMessage[]): MessageGroup[] {
+// story #3493 — 날짜 구분선(day divider)은 "기록"도 "약속"도 아니다(개별 시각이 decay하는
+// 값이 아니라, 그 날 하루 전체를 대표하는 고정 달력 라벨 — formatRelativeTime을 쓰면 그룹
+// 헤더가 시간이 지나며 "3일 전"으로 계속 바뀌어 구분선 목적과 어긋나고, formatScheduledAt은
+// 시각·TZ 접미사가 붙어 날짜 전용 헤더에 맞지 않는다). schedule-format.ts의 toDateKey와
+// 같은 방식(Intl.DateTimeFormat 직접 호출 — 새 포맷 함수 신설 아님, 기존 정본과 동형 패턴)
+// 으로 하드코딩 'ko-KR'만 실제 locale로 교정한다. PR 분류표에 "기록/약속 밖(날짜 구분선)"으로
+// 별도 표기.
+function groupByDate(messages: ChatMessage[], locale: string, displayTimezone: string): MessageGroup[] {
   const groups: Record<string, ChatMessage[]> = {};
+  const dateFmt = new Intl.DateTimeFormat(locale, {
+    year: 'numeric', month: 'long', day: 'numeric', timeZone: displayTimezone,
+  });
   for (const msg of messages) {
-    const date = new Date(msg.created_at).toLocaleDateString('ko-KR', {
-      year: 'numeric', month: 'long', day: 'numeric',
-    });
+    const date = dateFmt.format(new Date(msg.created_at));
     (groups[date] ??= []).push(msg);
   }
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
@@ -119,6 +128,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story #3194 — 'agents' 네임스페이스의 viewConnectionSettings 키를 그대로 재사용(발명 0,
   // agent-management-tab.tsx의 동일 CTA와 문구 일치).
   const ta = useTranslations('agents');
@@ -819,7 +830,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return map;
   }, [messages]);
 
-  const groups = groupByDate(messages);
+  const groups = groupByDate(messages, locale, displayTimezone);
 
   // story #1977: "여기부터 안읽음" 마커 위치 — markerBoundary(동결된 진입 시점 last_read_at)
   // 이후·타인 발신(§4-1 BE unread 정의 sender IS DISTINCT FROM 나와 동형) 첫 메시지 앞.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Eye, Pencil, History, GitCompare, Plus, FileCheck2, Send, Save } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { WorkflowPolicySimulatorSection } from './workflow-policy-simulator-sect
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * E-DG S34 — workflow line admin editor(workflow-policies 탭 4모드 확장). org admin이 라인 config를
@@ -74,6 +76,8 @@ const DIFF_META: Record<string, { variant: 'success' | 'destructive' | 'warning'
 
 export function WorkflowLineEditorSection({ projectId }: { projectId?: string | null }) {
   const t = useTranslations('settings');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [mode, setMode] = useState<Mode>('view');
   const [entityType, setEntityType] = useState<string>('story');
   const [versions, setVersions] = useState<VersionItem[]>([]);
@@ -267,7 +271,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
                 <span className="font-mono text-xs text-foreground">v{v.version}</span>
                 <Badge variant={STATUS_VARIANT[v.status] ?? 'chip'}>{v.status}</Badge>
                 <span className="text-[10px] text-muted-foreground">{t('lineEditorLintLabel')}: {v.lint_status}</span>
-                {v.updated_at ? <span className="text-[10px] text-muted-foreground">{new Date(v.updated_at).toLocaleString()}</span> : null}
+                {v.updated_at ? <span className="text-[10px] text-muted-foreground">{formatRelativeTime(v.updated_at, locale, displayTimezone)}</span> : null}
                 {v.status === 'draft' ? (
                   <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1" onClick={() => void openVersion(v.id)}>
                     <Pencil className="size-3.5" />{t('lineEditorEditAction')}

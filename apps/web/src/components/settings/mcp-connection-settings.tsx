@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-contro
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface McpConnectionSummary {
   serverKey: string;
@@ -36,6 +38,8 @@ const STATUS_VARIANTS: Record<McpConnectionSummary['status'], 'success' | 'destr
 export function McpConnectionSettings({ projectId }: { projectId: string }) {
   const t = useTranslations('settings.mcpConnections');
   const tc = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const searchParams = useSearchParams();
 
   const [connections, setConnections] = useState<McpConnectionSummary[]>([]);
@@ -223,7 +227,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
                         {connection.label ? <div>{t('labelValue', { label: connection.label })}</div> : null}
                         {connection.maskedSecret ? <div>{t('maskedSecretValue', { secret: connection.maskedSecret })}</div> : null}
                         <div>{t('toolCountValue', { count: connection.toolNames.length })}</div>
-                        {connection.validatedAt ? <div>{t('validatedAtValue', { date: new Date(connection.validatedAt).toLocaleString() })}</div> : null}
+                        {connection.validatedAt ? <div>{t('validatedAtValue', { date: formatRelativeTime(connection.validatedAt, locale, displayTimezone) })}</div> : null}
                         {connection.lastError ? <div className="text-destructive">{connection.lastError}</div> : null}
                       </div>
                     </div>

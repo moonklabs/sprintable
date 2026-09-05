@@ -473,7 +473,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                     <span
                       title={[
                         lastExecution.rule_name ?? '워크플로우 실행됨',
-                        lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
+                        lastExecution.completed_at ? formatRelativeTime(lastExecution.completed_at, locale, displayTimezone) : '',
                         lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
                       ].filter(Boolean).join(' · ')}
                       className="flex h-5 w-5 items-center justify-center"

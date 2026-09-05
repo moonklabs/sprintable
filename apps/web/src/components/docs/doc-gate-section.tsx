@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User, ChevronDown,
   CheckCircle, XCircle,
@@ -77,6 +79,8 @@ export function DocGateSection({
   onTransitioned: () => void;
 }) {
   const t = useTranslations('docs');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { currentTeamMemberId } = useDashboardContext();
   const [gate, setGate] = useState<GateItem | null>(null);
   const [revisions, setRevisions] = useState<DocRevision[]>([]);
@@ -134,7 +138,8 @@ export function DocGateSection({
   // 자격 = gate.can_approve(BE per-caller·rule A: human+has_project_access+not-author). FE=가시성·실 authz=BE 403.
   const isApprover = status === 'pending' && gate?.can_approve === true;
   const resolveName = (id: string | null | undefined) => (id ? (memberNames[id] ?? id.slice(0, 6)) : '—');
-  const fmtDate = (s: string | undefined) => (s ? new Date(s).toLocaleString() : '');
+  // story #3493 — gate.resolved_at·ev.at은 "기록"(정본 formatRelativeTime).
+  const fmtDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
 
   // doc.status transition(draft↔pending↔denied). gate-row transition과 별개.
   // story #3004 — draft→pending(상신)은 approverMemberId가 이제 서버 필수(그 외 전이엔 무관·안 실음).

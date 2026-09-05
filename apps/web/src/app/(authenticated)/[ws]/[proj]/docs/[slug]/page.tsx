@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
@@ -29,6 +29,8 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface DocDetail {
   id: string;
@@ -126,6 +128,8 @@ export default function DocSlugPage() {
   const router = useRouter();
   const t = useTranslations('docs');
   const tc = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const ts = useTranslations('share');
   // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
@@ -450,7 +454,7 @@ export default function DocSlugPage() {
                 </>
               ) : null}
               {selectedDoc.updated_at ? (
-                <span className="tabular-nums">{new Date(selectedDoc.updated_at).toLocaleString()}</span>
+                <span className="tabular-nums">{formatRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</span>
               ) : null}
             </>
           }

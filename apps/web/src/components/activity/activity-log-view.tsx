@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -10,6 +10,8 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -353,10 +355,12 @@ export function auditActorProps(item: ActivityLogItem): {
 }
 
 function ActivityRow({ item }: { item: ActivityLogItem }) {
-  const locale = typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
-  const time = new Date(item.created_at).toLocaleString(locale, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  // story #3493 — 감사로그 created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)
+  // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
+  // 정본 훅 사용).
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
+  const time = formatRelativeTime(item.created_at, locale, displayTimezone);
   const { human, agent } = auditActorProps(item);
   return (
     <div title={auditContextTooltip(item)}>

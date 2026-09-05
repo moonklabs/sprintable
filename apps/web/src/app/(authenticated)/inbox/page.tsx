@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff, Bot, Bell, Info, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -13,6 +13,8 @@ import { AttentionQueueView } from '@/components/attention-queue/attention-queue
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   getInboxNotificationLabel,
   getNotificationReasonKey,
@@ -79,6 +81,8 @@ function AgentJoinedDetailPanel({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [revoking, setRevoking] = useState(false);
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   async function handleRevoke() {
     if (!notification.reference_id) return;
@@ -113,7 +117,7 @@ function AgentJoinedDetailPanel({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{t('filter_agent_joined')}</Badge>
             <span className="text-xs text-muted-foreground">
-              {t('receivedAt')} · {new Date(notification.created_at).toLocaleString()}
+              {t('receivedAt')} · {formatRelativeTime(notification.created_at, locale, displayTimezone)}
             </span>
           </div>
           <h2 className="text-lg font-semibold text-foreground">{notification.title}</h2>
@@ -191,6 +195,12 @@ export default function InboxPage() {
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
   const tCage = useTranslations('cage');
+  const locale = useLocale();
+  // story #3493 — resolveDisplayTimezone() 호출을 useMemo로 감싸 값 안정성을 React
+  // Compiler가 증명할 수 있게 한다(아래 inboxSections useMemo의 dep으로 쓰일 때
+  // "may be mutated later"로 메모이제이션 보존을 포기하던 것의 근본 수정 — 이 값
+  // 자체의 실제 산출 로직은 그대로, 안정화만 추가).
+  const displayTimezone = useMemo(() => resolveDisplayTimezone().tz, []);
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const activeTab = searchParams.get('tab') ?? 'notifications';
   // story #2164(2026-07-25, 까심): 예전엔 이 세 탭 중 notifications 탭 라벨과 페이지 헤더가
@@ -331,17 +341,10 @@ export default function InboxPage() {
     setUnreadCount(0);
   };
 
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return t('justNow');
-    if (diffMin < 60) return `${diffMin}${t('minutesAgo')}`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}${t('hoursAgo')}`;
-    return d.toLocaleDateString();
-  };
+  // story #3493 — 손으로 짠 상대시각(justNow/minutesAgo/hoursAgo)이 3436 묶음 8
+  // 정본(formatRelativeTime)과 별개로 존재해 "한 제품에 시각 표기 두 벌"이던
+  // 자리. 손대신 정본에 위임 — 폴백도 §11-2(toLocaleDateString 아님)로 통일된다.
+  const formatTime = (iso: string) => formatRelativeTime(iso, locale, displayTimezone);
 
   const selectedNotification = useMemo(
     () => notifications.find((n) => n.id === selectedId) ?? null,
@@ -402,10 +405,15 @@ export default function InboxPage() {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfYesterday = startOfToday - 86400000;
+    // story #3493 — 오늘/어제보다 오래된 날짜 버킷 라벨은 "기록"도 "약속"도 아닌
+    // 셋째 자리(날짜만 묶는 section 헤더, 시각 불요) — §11-2 정본(formatScheduledAt)
+    // 을 그대로 재사용해 시간대까지 통일하되, 이 자리의 실제 필요는 날짜뿐이라
+    // display 문자열에서 "MM-DD"만 취한다(새 포맷 함수 신설 없이 기존 정본의
+    // 부분 재사용).
     const labelFor = (time: number) => {
       if (time >= startOfToday) return t('dateToday');
       if (time >= startOfYesterday) return t('dateYesterday');
-      return new Date(time).toLocaleDateString();
+      return formatScheduledAt(new Date(time).toISOString(), displayTimezone).display.split(' ')[0];
     };
     const sections: { label: string; items: InboxItem[] }[] = [];
     for (const item of inboxItems) {
@@ -415,7 +423,7 @@ export default function InboxPage() {
       else sections.push({ label, items: [item] });
     }
     return sections;
-  }, [inboxItems, t]);
+  }, [inboxItems, t, displayTimezone]);
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setExpandedGroups((prev) => {
@@ -510,7 +518,7 @@ export default function InboxPage() {
                     {exec.rule_name ?? exec.event_type}
                   </span>
                   <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {exec.completed_at ? new Date(exec.completed_at).toLocaleString() : new Date(exec.created_at).toLocaleString()}
+                    {formatRelativeTime(exec.completed_at ?? exec.created_at, locale, displayTimezone)}
                   </span>
                 </div>
               ))}
@@ -743,7 +751,7 @@ export default function InboxPage() {
                       <Badge variant="info">{t(getNotificationReasonKey(selectedNotification.type) as string)}</Badge>
                     ) : null}
                     <span className="text-xs text-muted-foreground">
-                      {t('receivedAt')} · {new Date(selectedNotification.created_at).toLocaleString()}
+                      {t('receivedAt')} · {formatRelativeTime(selectedNotification.created_at, locale, displayTimezone)}
                     </span>
                   </div>
                   <h2 className="text-lg font-semibold text-foreground">{selectedNotification.title}</h2>

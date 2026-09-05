@@ -2,9 +2,11 @@
 
 import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type LucideIcon } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
@@ -399,6 +401,8 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
  */
 export function GateActivityHistory({ gateId }: { gateId: string }) {
   const t = useTranslations('cage');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
 
   useEffect(() => {
@@ -434,7 +438,8 @@ export function GateActivityHistory({ gateId }: { gateId: string }) {
                 {' · '}
                 {labelKey ? t(labelKey) : item.action}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
-                <span className="ml-1">· {new Date(item.created_at).toLocaleString()}</span>
+                {/* story #3493 — 게이트 활동 로그 항목은 "기록"(정본 formatRelativeTime). */}
+                <span className="ml-1">· {formatRelativeTime(item.created_at, locale, displayTimezone)}</span>
               </li>
             );
           })}

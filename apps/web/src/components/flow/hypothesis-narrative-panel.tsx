@@ -13,6 +13,8 @@ import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status
 import type { HypothesisStatus } from '@sprintable/core-storage';
 import { cn } from '@/lib/utils';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
@@ -134,7 +136,11 @@ export function HypothesisNarrativePanel({
     return () => { cancelled = true; };
   }, [hypothesisId, orgSyncVersion]);
 
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale);
+  const displayTimezone = resolveDisplayTimezone().tz;
+  // story #3493 — created_at/updated_at은 "기록"(정본 formatRelativeTime). measure_after는
+  // 미래 계획 시각("약속")이라 relative decay가 아니라 §11-2 정본(formatScheduledAt).
+  const fmtDate = (iso: string) => formatRelativeTime(iso, locale, displayTimezone);
+  const fmtScheduled = (iso: string) => formatScheduledAt(iso, displayTimezone).display;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -275,7 +281,7 @@ export function HypothesisNarrativePanel({
               <p className="mb-1.5 italic">{t('narrativeTimelineCaption')}</p>
               <ul className="space-y-0.5">
                 <li>{t('narrativeCreatedAt', { date: fmtDate(state.data.timeline.created_at) })}</li>
-                <li>{t('narrativeMeasureAfter', { date: fmtDate(state.data.timeline.measure_after) })}</li>
+                <li>{t('narrativeMeasureAfter', { date: fmtScheduled(state.data.timeline.measure_after) })}</li>
                 <li>{t('narrativeUpdatedAt', { date: fmtDate(state.data.timeline.updated_at) })}</li>
               </ul>
             </NarrativeStep>

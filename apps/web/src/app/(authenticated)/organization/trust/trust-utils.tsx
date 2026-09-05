@@ -1,8 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { useLocale } from 'next-intl';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 export interface OrgSummaryRow {
   member_id: string;
@@ -33,10 +36,6 @@ export interface RosterMember {
 }
 
 export type Translator = (key: string, values?: Record<string, string | number>) => string;
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString();
-}
 
 // story 7e21a8b5(C2a-FE): 콜드스타트(표본 없음) 판정 — hit_rate=0(나쁜 성과)과 표본 자체가
 // 없는 상태를 반드시 구분한다(E-VERIFY: 0%처럼 안 보이게).
@@ -138,6 +137,8 @@ export function Sparkline({ values }: { values: number[] }) {
 export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; roleKey: string; t: Translator }) {
   const [open, setOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshot[] | null>(null);
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const toggle = async () => {
     if (!open && snapshots === null) {
@@ -173,7 +174,7 @@ export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; r
               <Sparkline values={extractSparklineValues(snapshots)} />
               {snapshots.map((s) => (
                 <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{formatDate(s.computed_at)}</span>
+                  <span>{formatRelativeTime(s.computed_at, locale, displayTimezone)}</span>
                   <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
                 </div>
               ))}

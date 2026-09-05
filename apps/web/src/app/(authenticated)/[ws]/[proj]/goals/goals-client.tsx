@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations, useLocale } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -10,6 +10,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -180,11 +181,13 @@ function calcSpProgress(stories: Story[]): { done: number; total: number } {
   return { done, total };
 }
 
-// story #2084 근본: 'ko-KR' 하드코딩이었다 — locale=en에서도 날짜가 한국어 형식으로
-// 렌더되던 원인 중 하나(dashboard-activity-timeline.tsx와 동일하게 useLocale() 값을 받는다).
-function formatDate(dateStr: string | undefined, locale: string): string {
+// story #3493 — measure_after/target_date는 둘 다 "약속"(측정 예정일·목표 완료일,
+// 아직 안 온 미래 시점) — §11-2 정본(formatScheduledAt)으로 통일한다. locale
+// 하드코딩(구 #2084 근본원인) 자체가 사라진다 — 이 정본은 tz만 받고 로케일 무관
+// 고정 포맷이라 en/ko 분기가 원천적으로 없다.
+function formatDate(dateStr: string | undefined, displayTimezone: string): string {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return formatScheduledAt(dateStr, displayTimezone).display;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -536,21 +539,21 @@ function outcomeLineText(
   tOutcome: ReturnType<typeof useTranslations<'outcomeLoop'>>,
   status: Goal['outcome_status'],
   measureAfter: string | null | undefined,
-  locale: string,
+  displayTimezone: string,
 ): { text: string; tone: 'green' | 'blue' | 'neutral' } {
   if (status === 'hit') return { text: tOutcome('statusHit'), tone: 'green' };
   if (status === 'miss') return { text: tOutcome('statusMiss'), tone: 'neutral' };
   if (status === 'unmeasured') return { text: tOutcome('statusUnmeasured'), tone: 'neutral' };
   if (status === 'unmeasurable') return { text: tOutcome('statusUnmeasurable'), tone: 'neutral' };
   // pending/n_a/null — 아직 결과 없음. measure_after가 있으면 "측정 예정 · 날짜"까지만(추측 금지).
-  if (measureAfter) return { text: `${t('outcomeAwaitingMeasure')} · ${formatDate(measureAfter, locale)}`, tone: 'blue' };
+  if (measureAfter) return { text: `${t('outcomeAwaitingMeasure')} · ${formatDate(measureAfter, displayTimezone)}`, tone: 'blue' };
   return { text: tOutcome('statusPending'), tone: 'neutral' };
 }
 
 function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalRowProps) {
   const t = useTranslations('goals');
   const tOutcome = useTranslations('outcomeLoop');
-  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: epic.id,
     disabled: !sortable,
@@ -570,7 +573,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const spProgress = calcSpProgress(stories);
   const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
-  const outcomeLine = outcomeLineText(t, tOutcome, epic.outcome_status, epic.measure_after, locale);
+  const outcomeLine = outcomeLineText(t, tOutcome, epic.outcome_status, epic.measure_after, displayTimezone);
 
   const statusLabel: Record<GoalStatus, string> = {
     draft: t('statusDraft'),
@@ -713,7 +716,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {epic.target_date ? (
-            <span>{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>
+            <span>{t('targetDate')}: {formatDate(epic.target_date, displayTimezone)}</span>
           ) : null}
           <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
@@ -737,7 +740,7 @@ interface GoalDetailPanelProps {
 
 function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
   const t = useTranslations('goals');
-  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
   const [isEditing, setIsEditing] = useState(false);
@@ -819,7 +822,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-xs font-medium text-muted-foreground">{t('targetDate')}</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date, locale)}</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date, displayTimezone)}</p>
               </div>
               <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-xs font-medium text-muted-foreground">{t('targetSp')}</p>

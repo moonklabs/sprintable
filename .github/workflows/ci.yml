@@ -1277,15 +1277,17 @@ jobs:
       - name: "Verify no hanja in i18n message values (story #3432 regression guard)"
         run: pnpm --filter web verify:no-hanja-in-i18n
 
-      # story #3486 회귀가드: 마케팅 콘텐츠·채널 연결 표면(content/**·organization/
-      # channels/**·components/content/**·components/channel-connect/**)에 브라우저
-      # 로케일 의존 날짜 toLocaleString/toLocaleDateString/toLocaleTimeString이 새로
-      # 생기면 실패한다 — 3436 묶음 8 정본(formatRelativeTime/formatScheduledAt)이
-      # 있는데 세 번째로 새던 자리(유나 10회차 관찰) 재발 방지. 스코프는 이 네
-      # 디렉터리뿐(하우스 전체 20+곳은 각자 다른 기능 영역이라 범위 밖 — PR #3834
-      # 본문 참조).
-      - name: "Verify no date toLocaleString on marketing/channel surfaces (story #3486 regression guard)"
-        run: pnpm --filter web verify:no-date-tolocalestring-marketing-surface
+      # story #3486→#3493 회귀가드: 브라우저 로케일 의존 날짜 toLocaleString/
+      # toLocaleDateString/toLocaleTimeString이 새로 생기면 실패한다 — 3436 묶음 8
+      # 정본(formatRelativeTime/formatScheduledAt)이 있는데도 계속 새던 자리(유나
+      # 10회차 관찰) 재발 방지. 3486은 마케팅 콘텐츠·채널 연결 4 디렉터리만 걸었으나,
+      # #3493에서 그때 범위 밖이던 20+곳을 전환하며 스코프를 apps/web/src 전체로
+      # 넓히고 스크립트명도 마케팅 표면 한정 옛 이름(PR #3834)에서 지금 이름으로
+      # 개명했다(옛 이름 문자열 자체는 scripts/verify-no-date-tolocalestring.ts
+      # 상단 docstring 참조 — 이 파일엔 재도입 검산 대상이라 일부러 안 옮겨 적는다).
+      # 숫자 포맷(krw/포인트 잔액 등)은 스크립트 내 ALLOWLIST(file+line+reason+addedBy)로 예외.
+      - name: "Verify no date toLocaleString across apps/web/src (story #3493 regression guard)"
+        run: pnpm --filter web verify:no-date-tolocalestring
 
       # story #2420 AC3 회귀가드: globals.css의 `--<family>-tint` 배경 위에서 --foreground가
       # AA(4.5)를 넘는지 «정의 시점»에 계산한다(oklch→sRGB 변환은 Yuna의 실 Chromium canvas
