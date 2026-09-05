@@ -204,6 +204,11 @@ async def submit_comment_reply(
         "kind": "comment_reply", "reply_id": str(reply.id), "connection_id": str(pub.connection_id),
         "comment_id": str(comment.id), "target_external_comment_id": comment.external_comment_id,
         "target_text_sha256": comment.text_sha256, "requested_by_member_id": str(requester_member_id),
+        # story #3516 조각②-b(additive, 미르코 3517② 그라운딩 2026-09-06) — §22-⑤
+        # 「봉인 축 셋」의 세 번째(대상 댓글 본문)를 화면이 지금은 sha만 받아 못
+        # 그린다. sha는 계속 정본 판정에 쓰고(target_text_sha256, 그대로 유지),
+        # 이건 순수 표시용 additive 사본 — 대조·판정 로직은 절대 이 필드를 안 본다.
+        "target_text": comment.text,
     }
 
     # find_gate_slot_with_pr_fallback는 (work_item_id, gate_type, scope_key) 슬롯을
@@ -261,6 +266,7 @@ async def get_comment_reply_view(
     comment = await _get_owned_comment(db, org_id=org_id, comment_id=reply.comment_id)
 
     target_comment_state: TargetCommentState | None = None
+    target_text: str | None = None
     if reply.gate_id is not None:
         from app.models.gate import Gate
 
@@ -270,4 +276,8 @@ async def get_comment_reply_view(
             target_comment_state = compute_target_comment_state(
                 comment=comment, sealed_target_text_sha256=sealed_target_sha,
             )
-    return {"reply": reply, "target_comment_state": target_comment_state}
+            # story #3516 조각②-b — 봉인 시점 대상 댓글 본문(표시 전용, target_
+            # comment_state 판정엔 안 씀). 구버전 게이트(이 필드 추가 前 submit된
+            # 게이트)엔 없을 수 있어 None으로 자연히 떨어짐(지어내지 않는다).
+            target_text = (gate.neutral_facts or {}).get("target_text")
+    return {"reply": reply, "target_comment_state": target_comment_state, "target_text": target_text}
