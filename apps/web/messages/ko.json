@@ -2104,7 +2104,7 @@
     "channelTestOk": "정상 · {account}",
     "channelTestFailed": "실패 · {error}",
     "channelLastErrorToggle": "서버 응답 보기",
-    "channelOwnerOnlyReason": "owner만 할 수 있는 작업입니다.",
+    "channelOwnerOnlyReason": "이 작업은 owner·admin만 할 수 있습니다.",
     "channelConfigIncompleteReason": "먼저 앱 자격을 설정해야 연결을 시작할 수 있습니다.",
     "channelExpiringInfoNote": "자동 갱신됩니다.",
     "channelExpiringActionNote": "자동으로 갱신되지 않습니다 — 직접 다시 연결해야 합니다.",
@@ -2146,7 +2146,7 @@
     "channelConnectPastedSecretHintWordpress": "WordPress 관리자 → 사용자 → 애플리케이션 비밀번호에서 만들어 붙여넣습니다.",
     "channelConnectPastedSecretHintWebhook": "받는 서버가 검증에 쓸 비밀값을 그쪽 설정에서 만들어 붙여넣습니다.",
     "channelConnectPastedSecretRewriteNote": "저장한 뒤에는 다시 볼 수 없습니다 — 바꾸려면 새로 붙여넣습니다.",
-    "channelConnectSecretHintLabel": "현재 자격: ****{hint}",
+    "channelConnectSecretHintLabel": "현재 자격 끝 4자리 {hint}",
     "channelConnectReplaceCredentialAction": "자격 바꾸기",
     "channelConnectReplaceCredentialSubmitAction": "바꾸기",
     "channelConnectReplaceCredentialPendingCta": "바꾸는 중…"

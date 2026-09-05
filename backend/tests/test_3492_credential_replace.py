@@ -318,3 +318,35 @@ async def test_other_org_connection_returns_404(dns_stub):
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_short_secret_produces_no_hint_not_the_full_secret(dns_stub):
+    """페드루 PO 차단(2026-09-05, PR#3841 리뷰①·유나 Design FAIL) — 8자 미만 secret은
+    끝 4자리를 만들 수 없다(원문과 같아지거나 원문 자체가 나간다). 옛 코드는
+    `len(secret) >= 4`가 아니면 원문 통째를 그대로 돌려줬다 — DB 컬럼(평문)·목록
+    응답(member까지)·화면에 새는 경로였다. 지금은 None(화면은 null-safe라 무변경)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            created = await _create_wordpress_connection(client, org_id)
+            connection_id = created["id"]
+
+            r = await client.patch(
+                f"/api/v2/organizations/{org_id}/channel-connections/{connection_id}/credentials",
+                json={"app_password": "short12"},  # 7자 — 8자 미만.
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["secret_hint"] is None, "7자 secret인데 원문(또는 그 일부)이 secret_hint로 샜다"
+        assert "short12" not in str(body), "원문 secret이 응답 어디에도 없어야 한다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

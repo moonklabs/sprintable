@@ -102,9 +102,16 @@ async def upsert_channel_connection(
     return row
 
 
-def _secret_hint(secret: str) -> str:
-    """channel_connections.py::_app_id_suffix와 동형(끝 4자리) — story #3492."""
-    return secret[-4:] if len(secret) >= 4 else secret
+def _secret_hint(secret: str) -> str | None:
+    """channel_connections.py::_app_id_suffix와 동형(끝 4자리) — story #3492.
+
+    페드루 PO 차단(2026-09-05, PR#3841 리뷰·유나 Design FAIL) — 이전엔 3자 이하
+    secret이면 원문 통째를 그대로 돌려줬다(`len(secret) >= 4`가 아니면 else 분기가
+    `secret` 자체). 그 값이 DB `secret_hint` 컬럼(평문)·목록 응답(member까지)·화면
+    「****ab」로 그대로 샌다 — 짧은 secret일수록 오히려 더 많이 새는 역설. 8자
+    미만이면 힌트 자체를 안 만든다(None, 화면은 `secretHint ? … : null`이라 이미
+    null-safe — 무변경)."""
+    return secret[-4:] if len(secret) >= 8 else None
 
 
 async def replace_channel_connection_credential(

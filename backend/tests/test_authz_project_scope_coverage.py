@@ -349,6 +349,13 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "(→_require_human)가 org 멤버십+role(owner)을 검증한다 — project 스코프 검증이 "
         "애초에 무의미(labels/organizations/org_members류와 동일 ORG_ONLY 결)."
     ),
+    "app.routers.channel_connections:replace_channel_connection_credentials": (
+        "story #3492 — 바로 위 set_channel_app_credentials와 자구 동형. path의 "
+        "{connection_id}는 channel_connections 행(org_id+channel+account_id UNIQUE·"
+        "project_id 컬럼 자체가 없음, org-level 리소스). _require_owner_or_admin이 org "
+        "멤버십+role(owner|admin)을 검증하고 get_channel_connection(org_id, connection_id) "
+        "선조회로 org 스코프를 이미 강제한다 — project 스코프 검증이 애초에 무의미."
+    ),
     # 실 가드가 있으나 v1 정적스캔이 인라인/1-hop 헬퍼를 미인식(guarded 확認)
     "app.routers.open_api_keys:revoke_project_api_key": "resolves ProjectApiKey→key.project_id!=path project_id 인라인 체크(v1 스캔 miss)",
     "app.routers.project_access:delete_project_access": "_require_owner_or_admin→has_project_role(admin) on path project_id(1-hop miss)",

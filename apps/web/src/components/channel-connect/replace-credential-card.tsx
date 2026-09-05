@@ -33,6 +33,16 @@ const REPLACE_FIELDS: Record<string, ReplaceField[]> = {
   ],
 };
 
+// 유나 정본(3653a18c §2 "이 다섯은 pasted_secret 연결 폼에도 그대로 걸린다" ④ —
+// "이 자격이 어디서 오나" 필드-위 한 줄) — pasted-secret-connect-card.tsx의
+// PASTED_SECRET_HINT_KEY와 동형(같은 채널·같은 문구, 재입력 폼이라고 다른 말을
+// 쓸 이유가 없다). 페드루 PO 차단(2026-09-05, PR#3841 리뷰④) — 이 카드에 그동안
+// 이 줄 자체가 없었다.
+const REPLACE_SECRET_HINT_KEY: Record<string, string> = {
+  wordpress: 'channelConnectPastedSecretHintWordpress',
+  webhook: 'channelConnectPastedSecretHintWebhook',
+};
+
 export function ReplaceCredentialCard({
   channel, connectionId, secretHint, isOwner, orgId, onReplaced, t,
 }: {
@@ -111,6 +121,10 @@ export function ReplaceCredentialCard({
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : null}
+          {/* 유나 정본 §2④ — 도움말 두 줄 중 필드-위(어디서 오나, 넣기 전에 읽는다). */}
+          <p className="text-xs text-muted-foreground" data-testid={`channel-connect-replace-credential-hint-${connectionId}`}>
+            {t(REPLACE_SECRET_HINT_KEY[channel])}
+          </p>
           {fields.map((f) => (
             <div key={f.name} className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground" htmlFor={`${connectionId}-${f.name}`}>
