@@ -50,6 +50,10 @@ export type SitePostApiErrorKind =
   | 'image_undecodable'
   | 'image_animated_unsupported'
   | 'image_aspect_ratio_exceeded'
+  // story #3530(BE #3872, PO 確定 2026-09-06) — 하한 미달(세로가 너무 긴 이미지) 전용
+  // 갈래. exceeded(상한 초과)와 다른 문장이 필요하다 — 같은 kind로 묶으면 "초과했다"
+  // 문구가 "미달했다" 케이스에 거짓으로 붙는다.
+  | 'image_aspect_ratio_too_narrow'
   | 'image_conversion_failed'
   | 'image_upload_failed'
   // story #3500(BE #3498, 아직 미착지 — PO 確定 계약) — 생성 비용 한도(크레딧 게이트)
@@ -96,6 +100,11 @@ export interface SitePostApiErrorInfo {
   imageFrameCount?: number;
   imageAspectRatio?: number;
   imageMaxAspectRatio?: number;
+  // story #3530 — CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW 전용(BE width_height_ratio/
+  // min_width_height_ratio 그대로, exceeded의 정규화(≥1) aspect_ratio와 다른 값이라
+  // 별도 필드 — 섞으면 0.56을 1.78로 잘못 보이는 사고가 난다).
+  imageWidthHeightRatio?: number;
+  imageMinWidthHeightRatio?: number;
   imageFinalBytes?: number;
   // story #3500(BE #3498, 미착지) — GENERATION_BUDGET_EXCEEDED 전용 4값(무엇이·얼마까지·
   // 지금 얼마 3요소 + 예상치, §13 관례와 동형). 다른 코드엔 이 키들이 없어 undefined.
@@ -184,6 +193,9 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   CHANNEL_IMAGE_UNDECODABLE: { labelKey: 'errorChannelImageUndecodable', kind: 'image_undecodable' },
   CHANNEL_IMAGE_ANIMATED_UNSUPPORTED: { labelKey: '', kind: 'image_animated_unsupported' },
   CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED: { labelKey: '', kind: 'image_aspect_ratio_exceeded' },
+  // story #3530(BE #3872) — 하한 미달. width_height_ratio/min_width_height_ratio로
+  // 문구 조립(labelKey는 page.tsx가 보간).
+  CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW: { labelKey: '', kind: 'image_aspect_ratio_too_narrow' },
   CHANNEL_IMAGE_CONVERSION_FAILED: { labelKey: '', kind: 'image_conversion_failed' },
   CHANNEL_IMAGE_UPLOAD_FAILED: { labelKey: 'errorChannelImageUploadFailed', kind: 'image_upload_failed' },
 
@@ -202,6 +214,7 @@ function extractCodeAndMessage(detail: unknown): {
   imageChannel?: string; imageContentType?: string; imageAllowedFormats?: string[];
   imageSizeBytes?: number; imageMaxBytes?: number; imageFrameCount?: number;
   imageAspectRatio?: number; imageMaxAspectRatio?: number; imageFinalBytes?: number;
+  imageWidthHeightRatio?: number; imageMinWidthHeightRatio?: number;
   limitMinor?: number; spentMinor?: number; estimatedCostMinor?: number; remainingMinor?: number;
 } {
   if (typeof detail === 'string') return { message: detail };
@@ -235,6 +248,9 @@ function extractCodeAndMessage(detail: unknown): {
       imageFrameCount: typeof d.frame_count === 'number' ? d.frame_count : undefined,
       imageAspectRatio: typeof d.aspect_ratio === 'number' ? d.aspect_ratio : undefined,
       imageMaxAspectRatio: typeof d.max_aspect_ratio === 'number' ? d.max_aspect_ratio : undefined,
+      // story #3530 — CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW 전용(channel_posts.py:547 그대로).
+      imageWidthHeightRatio: typeof d.width_height_ratio === 'number' ? d.width_height_ratio : undefined,
+      imageMinWidthHeightRatio: typeof d.min_width_height_ratio === 'number' ? d.min_width_height_ratio : undefined,
       imageFinalBytes: typeof d.final_bytes === 'number' ? d.final_bytes : undefined,
       // story #3500 — GENERATION_BUDGET_EXCEEDED 전용(BE #3498 계약, 미착지).
       limitMinor: typeof d.limit_minor === 'number' ? d.limit_minor : undefined,
@@ -277,6 +293,8 @@ export function parseSitePostApiError(
   const imageFrameCount = fromDetail.imageFrameCount ?? fromError.imageFrameCount;
   const imageAspectRatio = fromDetail.imageAspectRatio ?? fromError.imageAspectRatio;
   const imageMaxAspectRatio = fromDetail.imageMaxAspectRatio ?? fromError.imageMaxAspectRatio;
+  const imageWidthHeightRatio = fromDetail.imageWidthHeightRatio ?? fromError.imageWidthHeightRatio;
+  const imageMinWidthHeightRatio = fromDetail.imageMinWidthHeightRatio ?? fromError.imageMinWidthHeightRatio;
   const imageFinalBytes = fromDetail.imageFinalBytes ?? fromError.imageFinalBytes;
   const limitMinor = fromDetail.limitMinor ?? fromError.limitMinor;
   const spentMinor = fromDetail.spentMinor ?? fromError.spentMinor;
@@ -307,6 +325,8 @@ export function parseSitePostApiError(
     imageFrameCount,
     imageAspectRatio,
     imageMaxAspectRatio,
+    imageWidthHeightRatio,
+    imageMinWidthHeightRatio,
     imageFinalBytes,
     limitMinor,
     spentMinor,

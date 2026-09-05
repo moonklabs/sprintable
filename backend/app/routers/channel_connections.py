@@ -134,6 +134,10 @@ class ChannelConnectionResponse(BaseModel):
     image_formats: list[str] = []
     image_max_bytes: int = 0
     image_aspect_max: float = 0.0
+    # story #3530(BE #3872 조각①이 어댑터·검증엔 이미 선언했으나 이 응답엔 안 실었던
+    # 갭 — image_aspect_max와 동형 관례) — 0.0=하한 미선언(§17-16 "0이면 0으로 적는다"의
+    # 반대 방향: FE는 이 값이 0이면 하한 축 자체를 안 그린다, 1:∞로 뒤집지 않는다).
+    image_aspect_min: float = 0.0
     image_width_min: int = 0
     image_width_max: int = 0
     image_color_space: str = ""
@@ -169,6 +173,7 @@ def _to_response(row) -> ChannelConnectionResponse:
         image_formats=list(adapter.image_formats) if adapter is not None else [],
         image_max_bytes=adapter.image_max_bytes if adapter is not None else 0,
         image_aspect_max=adapter.image_aspect_max if adapter is not None else 0.0,
+        image_aspect_min=adapter.image_aspect_min if adapter is not None else 0.0,
         image_width_min=adapter.image_width_min if adapter is not None else 0,
         image_width_max=adapter.image_width_max if adapter is not None else 0,
         image_color_space=adapter.image_color_space if adapter is not None else "",

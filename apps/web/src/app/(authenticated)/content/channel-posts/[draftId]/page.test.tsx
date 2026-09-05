@@ -133,6 +133,10 @@ function stubFetch(opts: {
   // story #3428 — 이미지 규격(어댑터 성질). 기본값 0 = 이미지 미지원(기존 74건 전부가
   // 이 값을 몰라도 되므로 명시 안 하면 첨부 칸 자체가 안 뜨는 쪽이 자연스러운 기본).
   imageMaxCount?: number;
+  // story #3530 — 하한 선언(0=미선언, 기존 74건 기본값 그대로 회귀 0)·상한(기존 74건
+  // 기본값 10 유지, IG 실값(1.91) 테스트만 덮어씀).
+  imageAspectMin?: number;
+  imageAspectMax?: number;
   onImageUploadUrl?: (body: unknown) => { status: number; body: unknown };
   onImagePut?: () => { status: number };
   onImageConfirm?: (body: unknown) => { status: number; body: unknown };
@@ -217,7 +221,8 @@ function stubFetch(opts: {
               id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
               can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason, status: connectionStatus,
               image_formats: ['image/jpeg', 'image/png'], image_max_bytes: 8 * 1024 * 1024,
-              image_aspect_max: 10, image_width_min: 320, image_width_max: 1440,
+              image_aspect_max: opts.imageAspectMax ?? 10, image_aspect_min: opts.imageAspectMin ?? 0,
+              image_width_min: 320, image_width_max: 1440,
               image_color_space: 'sRGB', image_max_count: opts.imageMaxCount ?? 0,
             }],
             error: null, meta: null,
@@ -1751,6 +1756,39 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(specTag).toContain('1440');
     // N — image_color_space가 imageSpec까지만 오고 화면엔 한 번도 안 실렸던 갭.
     expect(specTag).toContain('sRGB');
+  });
+
+  // story #3530(유나 §17-16④, PO 確定 2026-09-06) — 하한 선언(image_aspect_min>0)이면
+  // 「비율 최대 X:1」이 아니라 두 경계를 보인다. IG 실값(0.8~1.91) 기준.
+  it('⭐#3530 — image_aspect_min>0이면 규격 태그가 두 경계(「1:1.25 ~ 1.91:1」)를 보인다', async () => {
+    stubFetch({ imageMaxCount: 1, imageAspectMin: 0.8, imageAspectMax: 1.91 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const specTag = container.querySelector('[data-testid="channel-post-image-spec-tag"]')?.textContent ?? '';
+    expect(specTag).toContain('1:1.25 ~ 1.91:1');
+    expect(specTag).not.toContain('비율 최대');
+  });
+
+  // story #3530 — 1/0.1은 JS에서 부동소수 오차로 9.999999999999998이 나온다(고전
+  // 함정) — toFixed(2)로 반올림해 "10"(끝 0 제거)으로 정확히 떨어져야 한다.
+  it('⭐#3530 — Threads류 하한 0.1(1/0.1 부동소수 오차)도 「1:10」으로 정확히 뜬다', async () => {
+    stubFetch({ imageMaxCount: 1, imageAspectMin: 0.1, imageAspectMax: 10 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const specTag = container.querySelector('[data-testid="channel-post-image-spec-tag"]')?.textContent ?? '';
+    expect(specTag).toContain('1:10 ~ 10:1');
+  });
+
+  it('⭐#3530 — image_aspect_min=0(미선언)이면 지금처럼 「비율 최대 {n}:1」만 보인다(회귀)', async () => {
+    stubFetch({ imageMaxCount: 1, imageAspectMin: 0 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const specTag = container.querySelector('[data-testid="channel-post-image-spec-tag"]')?.textContent ?? '';
+    expect(specTag).toContain('10:1');
+    expect(specTag).not.toContain('~');
   });
 
   it('⭐업로드 성공 — 발급→PUT→confirm 3단계를 순서대로 거쳐 썸네일이 뜬다', async () => {
