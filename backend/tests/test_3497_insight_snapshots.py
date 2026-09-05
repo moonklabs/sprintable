@@ -268,6 +268,91 @@ async def test_hosted_site_views_reflects_real_pageview_count():
         await engine.dispose()
 
 
+# ─── hosted_site: clicks(story #3506·PO 決定 (e), views와 동형 path 축) ────────
+
+
+@pytest.mark.anyio
+async def test_hosted_site_clicks_null_when_no_metering_key_provisioned():
+    """views와 동형 — beacon 자체가 없으면 clicks도 미제공(null), 0으로 지어내지 않는다.
+    어댑터 실 선언(views, clicks) 그대로 _normalize에 넣는다(story #3506이 insight_
+    metrics를 확장한 실물을 직접 검증)."""
+    from app.services.insight_snapshots import _fetch_hosted_site, _normalize
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            post = await _seed_site_post(s, org_id=org_id, work_item_id=uuid.uuid4())
+
+            result = await _fetch_hosted_site(s, org_id=org_id, publication_id=post.id)
+            normalized = _normalize(declared_metrics=("views", "clicks"), values=result["values"])
+            assert normalized["clicks"] is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_hosted_site_clicks_zero_when_metering_key_exists_but_no_utm_pageviews():
+    from app.models.org_metering_key import OrgMeteringKey
+    from app.services.insight_snapshots import _fetch_hosted_site, _normalize
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            post = await _seed_site_post(s, org_id=org_id, work_item_id=uuid.uuid4())
+            s.add(OrgMeteringKey(id=uuid.uuid4(), org_id=org_id, public_key="pub-key-clicks-0"))
+            await s.commit()
+
+            result = await _fetch_hosted_site(s, org_id=org_id, publication_id=post.id)
+            normalized = _normalize(declared_metrics=("views", "clicks"), values=result["values"])
+            assert normalized["clicks"] == 0, "beacon은 있고 UTM 집계 0인데 null로 나왔다(0≠미제공 축 붕괴)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_hosted_site_clicks_sums_utm_daily_by_path_ignoring_dimension_values():
+    """PO 決定(A) — utm_content 특정값 매칭이 아니라 path 축으로 utm 4필드 중 하나라도
+    있던 방문 전부를 합산한다(서로 다른 campaign 2행도 같이 더해진다)."""
+    from app.models.org_metering_key import OrgMeteringKey
+    from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
+    from app.services.insight_snapshots import _fetch_hosted_site
+    from app.services.site_posts import _blog_post_path
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            post = await _seed_site_post(s, org_id=org_id, work_item_id=uuid.uuid4(), lang="ko", slug="utm-clicks")
+            path = _blog_post_path(lang="ko", slug="utm-clicks")
+            s.add(OrgMeteringKey(id=uuid.uuid4(), org_id=org_id, public_key="pub-key-clicks-sum"))
+            s.add(OrgPageviewUtmDaily(
+                id=uuid.uuid4(), org_id=org_id, path=path, day=datetime.now(timezone.utc).date(),
+                utm_source="twitter", utm_medium="social", utm_campaign="spring", utm_content="draft-1",
+                count=5,
+            ))
+            s.add(OrgPageviewUtmDaily(
+                id=uuid.uuid4(), org_id=org_id, path=path, day=datetime.now(timezone.utc).date(),
+                utm_source="newsletter", utm_medium="email", utm_campaign="summer", utm_content="draft-2",
+                count=3,
+            ))
+            # 다른 path의 utm 집계는 이 글의 clicks에 안 섞인다.
+            s.add(OrgPageviewUtmDaily(
+                id=uuid.uuid4(), org_id=org_id, path="/ko/blog/other-post", day=datetime.now(timezone.utc).date(),
+                utm_source="twitter", utm_medium="social", utm_campaign="spring", utm_content="draft-3",
+                count=100,
+            ))
+            await s.commit()
+
+            result = await _fetch_hosted_site(s, org_id=org_id, publication_id=post.id)
+            assert result["values"]["clicks"] == 8, "path 밖 행이 섞였거나 자기 path 행 일부를 놓쳤다"
+            assert len(result["raw"]["utm_breakdown"]) == 2
+            assert {b["utm_campaign"] for b in result["raw"]["utm_breakdown"]} == {"spring", "summer"}
+    finally:
+        await engine.dispose()
+
+
 # ─── wordpress/webhook: unsupported 즉시(어댑터 미선언) ───────────────────────
 
 

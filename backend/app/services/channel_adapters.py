@@ -148,10 +148,12 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 사실을 정확히 반영할 뿐(신규 동작 아님). 외부 스코프 개념이 없어(credential
         # 자체가 없다) unpublish_required_scope는 비운다.
         supports_unpublish=True,
-        # story #3497 — beacon 집계(org_pageview_daily) 기반 views만. 나머지 6키는
-        # 항상 null(hosted_site는 impressions/reach/engagements/clicks/spend/
-        # conversions 개념 자체가 없다 — 자체 방문자 카운터일 뿐 광고·소셜 API가 아님).
-        insight_metrics=("views",),
+        # story #3497 — beacon 집계(org_pageview_daily) 기반 views. story #3506(e) —
+        # clicks 추가(beacon UTM 집계 org_pageview_utm_daily 기반, "이 글로 온 UTM
+        # 유입 전체"). 나머지 5키는 항상 null(hosted_site는 impressions/reach/
+        # engagements/spend/conversions 개념 자체가 없다 — 자체 방문자 카운터일 뿐
+        # 광고·소셜 API가 아님).
+        insight_metrics=("views", "clicks"),
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각③b) — WordPress
     # self-hosted(Application Password) blog kind 어댑터 2호. WordPress.com OAuth2는

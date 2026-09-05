@@ -149,9 +149,19 @@ async def _fetch_hosted_site(db: AsyncSession, *, org_id: uuid.UUID, publication
     스토리가 세 번째 자리가 될 뻔한 리터럴을 뽑아 재사용)로 구성 — 고객 사이트가
     이 라우트를 실제로 구현했다는 전제 위에 서 있다(강제 보장 없음, 어댑터 선언
     주석·AC에 명시). "미제공"=`org_metering_keys`에 살아있는(revoked_at NULL) 키가
-    아예 없음(beacon 자체를 도입 안 함) · "0"=키는 있고 집계 행이 0 또는 부재."""
+    아예 없음(beacon 자체를 도입 안 함) · "0"=키는 있고 집계 행이 0 또는 부재.
+
+    story #3506(Phase2·마케팅운영, 페드루 PO 確定 (e), 그라운딩 왕복 2026-09-05 —
+    (A) path 축 확定) — clicks도 같은 path 축으로 `org_pageview_utm_daily`를 합산한다
+    ("이 글로 온 UTM 유입 전체", utm_content 특정값 매칭 아님 — 조각①이 UTM을 «이리로
+    향하는 channel_post 링크»에만 붙이므로 utm_content의 값 공간이 channel_post
+    draft이지 이 hosted_site 글 자신의 식별자가 아니다, (B)안 기각 사유 그대로).
+    views와 동일하게 beacon 미배선이면 null 유지(values에서 뺌) — 배선돼 있으면
+    집계 0건도 정확히 "0". utm_* 분해값은 raw에 그대로 실어(세부 breakdown은 후속
+    스토리 몫, 지금은 손실 없이 보존만)."""
     from app.models.org_metering_key import OrgMeteringKey
     from app.models.org_pageview_daily import OrgPageviewDaily
+    from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
     from app.models.site_post import SitePost
     from app.services.site_posts import _blog_post_path
 
@@ -172,7 +182,25 @@ async def _fetch_hosted_site(db: AsyncSession, *, org_id: uuid.UUID, publication
         select(OrgPageviewDaily.count).where(OrgPageviewDaily.org_id == org_id, OrgPageviewDaily.path == path)
     )).scalars().all()
     views = sum(total)  # beacon은 있는데 이 path에 아직 집계가 없으면 sum([])==0(정확히 "0").
-    return {"raw": {"path": path, "beacon_provisioned": True, "daily_rows": len(total)}, "values": {"views": views}}
+
+    utm_rows = (await db.execute(
+        select(
+            OrgPageviewUtmDaily.count, OrgPageviewUtmDaily.utm_source, OrgPageviewUtmDaily.utm_medium,
+            OrgPageviewUtmDaily.utm_campaign, OrgPageviewUtmDaily.utm_content,
+        ).where(OrgPageviewUtmDaily.org_id == org_id, OrgPageviewUtmDaily.path == path)
+    )).all()
+    clicks = sum(r.count for r in utm_rows)
+    utm_breakdown = [
+        {
+            "count": r.count, "utm_source": r.utm_source, "utm_medium": r.utm_medium,
+            "utm_campaign": r.utm_campaign, "utm_content": r.utm_content,
+        }
+        for r in utm_rows
+    ]
+    return {
+        "raw": {"path": path, "beacon_provisioned": True, "daily_rows": len(total), "utm_breakdown": utm_breakdown},
+        "values": {"views": views, "clicks": clicks},
+    }
 
 
 _THREADS_INSIGHTS_URL_TMPL = "https://graph.threads.net/v1.0/{media_id}/insights"

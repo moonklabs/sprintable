@@ -173,6 +173,11 @@
       "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
+      "file": "tests/test_3506_utm_beacon_aggregate.py",
+      "sec": 70.0,
+      "source": "story-3506-utm-beacon-aggregate(조각2, PR 개설 前 선제 등재 — 로컬 raw pytest 10.96s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 70s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_2038_hypothesis_outcome_result_enforce.py",
       "sec": 8.05,
       "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
@@ -1144,8 +1149,8 @@
     },
     {
       "file": "tests/test_3497_insight_snapshots.py",
-      "sec": 85.0,
-      "source": "story-3497-insight-snapshots(조각1~3, PR#3844 — 등재 누락분 소급 등록. 로컬 raw pytest 13.82s(12건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 85s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 130.0,
+      "source": "story-3497-insight-snapshots(조각1~3+3506 clicks 3건 추가, PR#3844 — 등재 누락분 소급 등록. 로컬 raw pytest 21.77s(15건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 130s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_e4fc29fa_hosted_site_publish_adapter.py",

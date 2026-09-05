@@ -134,6 +134,7 @@ from app.models.recipe_role_binding import RecipeRoleBinding
 from app.models.recipe_repeat_schedule import RecipeRepeatSchedule
 from app.models.org_metering_key import OrgMeteringKey
 from app.models.org_pageview_daily import OrgPageviewDaily
+from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
 from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
