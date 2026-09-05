@@ -61,7 +61,8 @@ describe('PastedSecretConnectCard(story #3450 FE 후속)', () => {
     await flush();
     expect(container.querySelector('button')).toBeNull();
     expect(container.querySelector('[data-testid^="channel-connect-pasted-secret-form-"]')).toBeNull();
-    expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOnlyReason);
+    // story #3504 — 붙여넣기 연결 생성은 owner|admin 폭이라 owner·admin 문구가 맞다.
+    expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOrAdminOnlyReason);
   });
 
   it('필드를 다 채우기 전에는 제출 버튼이 비활성', async () => {

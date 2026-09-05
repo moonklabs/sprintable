@@ -79,6 +79,9 @@ function stubFetch(opts: {
   // story f30da19a — 성공하면 nextConnections로 이후의 목록 재조회(onRefresh→load)가
   // 새 행을 반영하는지까지 pin할 수 있게 한다.
   onCreateSandbox?: (init?: RequestInit) => { status: number; body?: unknown; nextConnections?: unknown[] };
+  // story #3504 — 해제 실패 표면화 검증용.
+  disconnectStatus?: number;
+  disconnectErrorCode?: string;
 }) {
   let connections = opts.connections ?? [];
   const credentials = opts.credentials ?? { configured: false, app_id_suffix: null, effective_source: 'platform' };
@@ -87,6 +90,14 @@ function stubFetch(opts: {
     // available-channels가 '/channel-connections'의 부분문자열이라 그 체크보다 먼저 봐야 한다.
     if (url.includes('/channel-connections/available-channels')) {
       return { ok: true, status: 200, json: async () => ({ data: availableChannels }) } as Response;
+    }
+    if (url.includes('/disconnect') && init?.method === 'POST') {
+      const status = opts.disconnectStatus ?? 200;
+      const ok = status < 400;
+      return {
+        ok, status,
+        json: async () => (ok ? { data: { ok: true } } : { data: null, error: { code: opts.disconnectErrorCode ?? 'CHANNEL_DISCONNECT_FAILED' } }),
+      } as Response;
     }
     if (url.includes('/channel-connections/sandbox') && init?.method === 'POST') {
       const result = opts.onCreateSandbox?.(init) ?? {
@@ -134,11 +145,41 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   });
 
   it('member는 해제·다시 연결 버튼 대신 owner 안내 문구를 본다', async () => {
+    // story #3504 — 해제·재인증은 owner 전용(_require_owner)이라 owner만 문구가 맞다
+    // (옛 owner·admin 문구는 이 두 자리에선 거짓이었다).
     stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'expired' }] });
     await mount('member');
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
     expect(disconnectBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 owner·admin만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+  });
+
+  it('story #3504 — admin도 해제·재인증 버튼이 안 보이고(owner 전용) owner만 문구를 본다', async () => {
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'expired' }] });
+    await mount('admin');
+    const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
+    expect(disconnectBtn).toBeUndefined();
+    const reauthBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 연결');
+    expect(reauthBtn).toBeUndefined();
+    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+  });
+
+  it('story #3504 — 해제 실패(403 CHANNEL_CONNECTION_OWNER_ONLY)는 카드 안 문구로 표면화된다', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE], disconnectStatus: 403, disconnectErrorCode: 'CHANNEL_CONNECTION_OWNER_ONLY' });
+    await mount('owner');
+    const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제') as HTMLButtonElement;
+    await act(async () => { disconnectBtn.click(); });
+    await flush();
+    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+  });
+
+  it('story #3504 — 해제 실패(그 외 오류)는 일반 실패 문구로 표면화된다', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE], disconnectStatus: 500 });
+    await mount('owner');
+    const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제') as HTMLButtonElement;
+    await act(async () => { disconnectBtn.click(); });
+    await flush();
+    expect(container.textContent).toContain('연결 해제에 실패했습니다');
   });
 
   it('member도 연결 시험은 할 수 있다', async () => {
@@ -276,11 +317,21 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
   });
 
   it('member는 앱 자격 등록 버튼 자체가 없다', async () => {
+    // story #3504 — 앱 자격 저장은 owner 전용(set_channel_app_credentials =
+    // _require_owner)이라 owner만 문구가 맞다.
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('member');
     const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
     expect(registerBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 owner·admin만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+  });
+
+  it('story #3504 — admin도 앱 자격 등록 버튼이 없다(owner 전용, admin은 owner|admin이 아니다)', async () => {
+    stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
+    await mount('admin');
+    const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
+    expect(registerBtn).toBeUndefined();
+    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
   });
 });
 
@@ -308,11 +359,17 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     expect(btn?.textContent).toContain('테스트용');
   });
 
-  it('member는 sandbox 버튼 대신 owner 안내 문구를 본다', async () => {
+  it('member는 sandbox 버튼 대신 owner·admin 안내 문구를 본다', async () => {
     stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
     expect(container.textContent).toContain('이 작업은 owner·admin만 할 수 있습니다');
+  });
+
+  it('story #3504 — admin에게도 sandbox 「연결 만들기」 버튼이 보인다(owner|admin 폭)', async () => {
+    stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
+    await mount('admin');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).not.toBeNull();
   });
 
   it('⭐sandbox 「연결 만들기」를 누르면 BFF POST 성공 뒤 리로드 없이 새 연결 행이 추가된다', async () => {
@@ -390,11 +447,20 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).not.toBeNull();
   });
 
-  it('member는 버튼 대신 owner 전용 사유만 본다(§5·AC4)', async () => {
+  it('member는 버튼 대신 owner·admin 전용 사유만 본다(§5·AC4)', async () => {
+    // story #3504 — 붙여넣기 연결 생성은 owner|admin 폭
+    // (create_pasted_secret_channel_connection = _require_owner_or_admin)이라
+    // owner·admin 문구가 맞다(owner 전용 문구는 이 자리에선 거짓이다).
     stubFetch({ connections: [], availableChannels: WORDPRESS_AVAILABLE });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).toBeNull();
-    expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOnlyReason);
+    expect(container.textContent).toContain(koMessages.channelConnect.channelOwnerOrAdminOnlyReason);
+  });
+
+  it('story #3504 — admin은 붙여넣기 연결 카드를 실제로 본다(owner|admin 폭)', async () => {
+    stubFetch({ connections: [], availableChannels: WORDPRESS_AVAILABLE });
+    await mount('admin');
+    expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).not.toBeNull();
   });
 
   it('⭐(AC5, story #3492로 secret_hint 부재 시로 범위 재확定) 응답에 secret_hint가 없으면 마스킹 흔적도 없다', async () => {

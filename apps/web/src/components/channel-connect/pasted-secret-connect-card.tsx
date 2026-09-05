@@ -69,9 +69,11 @@ export function PastedSecretConnectCard({
   if (!fields) return null;
 
   // §5 정본(2026-09-04) — 비소유자는 버튼 자체를 안 그리고 사유 한 줄만(disabled
-  // 버튼은 탭 순서 밖이라 스크린리더가 사유에 못 닿는다).
+  // 버튼은 탭 순서 밖이라 스크린리더가 사유에 못 닿는다). story #3504 — 이 폼은
+  // owner|admin 폭(create_pasted_secret_channel_connection = _require_owner_or_admin)
+  // 이라 owner 전용 문구(channelOwnerOnlyReason)는 거짓이다 — 두 폭 전용 키로.
   if (!isOwner) {
-    return <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p>;
+    return <p className="text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>;
   }
 
   const allFilled = fields.every((f) => (values[f.name] ?? '').trim().length > 0);
