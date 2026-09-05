@@ -10,11 +10,14 @@ ORG_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
 CALLER_ID = uuid.uuid4()
 MEMBER_ID = uuid.uuid4()
+# story #3491 — caller의 org_member 행 id는 target(MEMBER_ID)과 별개다(둘 다
+# MEMBER_ID로 겹치면 자기 자신 판정이 모든 표본에서 거짓양성으로 항상 참이 된다).
+CALLER_MEMBER_ROW_ID = uuid.uuid4()
 
 
-def _mock_member(role: str = "member", user_id: uuid.UUID | None = None) -> MagicMock:
+def _mock_member(role: str = "member", user_id: uuid.UUID | None = None, id: uuid.UUID | None = None) -> MagicMock:
     m = MagicMock()
-    m.id = MEMBER_ID
+    m.id = id or MEMBER_ID
     m.org_id = ORG_ID
     m.user_id = user_id or USER_ID
     m.role = role
@@ -239,7 +242,7 @@ async def test_get_org_member_404():
 async def test_update_role_200():
     client, session, app, _ = await _client()
     try:
-        caller_admin = _mock_member("admin", user_id=CALLER_ID)
+        caller_admin = _mock_member("admin", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
         updated = _mock_member("admin")
 
         with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
@@ -289,6 +292,175 @@ async def test_update_invalid_role_400():
                 resp = await c.patch(f"/api/v2/org-members/{MEMBER_ID}", json={"role": "superuser"})
 
         assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+# story #3491(페드루 PO 確定 2026-09-05) — owner 보호 가드. _require_admin이
+# "owner 또는 admin"만 통과시키지만 그 폭 안에서 admin이 owner 경계를 넘나들 수
+# 있던 것을 서버가 명시로 거부한다.
+
+
+@pytest.mark.anyio
+async def test_update_role_403_admin_grants_owner():
+    """admin caller — 아무에게나 owner를 부여할 수 없다."""
+    client, session, app, _ = await _client()
+    try:
+        caller_admin = _mock_member("admin", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+        target_member = _mock_member("member")
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_admin
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = target_member
+            session.execute = AsyncMock(return_value=mock_result)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/org-members/{MEMBER_ID}", json={"role": "owner"})
+
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "ORG_MEMBER_OWNER_ONLY_ACTION"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_role_403_admin_touches_owner_row():
+    """admin caller — 대상이 이미 owner면(강등 시도든 뭐든) 거부한다."""
+    client, session, app, _ = await _client()
+    try:
+        caller_admin = _mock_member("admin", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+        target_owner = _mock_member("owner")
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_admin
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = target_owner
+            session.execute = AsyncMock(return_value=mock_result)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/org-members/{MEMBER_ID}", json={"role": "admin"})
+
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "ORG_MEMBER_OWNER_ONLY_ACTION"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_role_403_admin_touches_self():
+    """admin caller — 자기 자신의 role은 못 바꾼다(대상 행 id == caller 행 id)."""
+    client, session, app, _ = await _client()
+    try:
+        caller_admin = _mock_member("admin", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+        # 자기 자신 — 대상 행이 caller의 org_member 행 그 자체.
+        self_row = _mock_member("admin", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_admin
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = self_row
+            session.execute = AsyncMock(return_value=mock_result)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/org-members/{CALLER_MEMBER_ROW_ID}", json={"role": "member"})
+
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "ORG_MEMBER_OWNER_ONLY_ACTION"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_role_200_admin_changes_other_member():
+    """admin caller — owner도 자기 자신도 아닌 대상의 member↔admin은 정상 허용(회귀 0)."""
+    client, session, app, _ = await _client()
+    try:
+        caller_admin = _mock_member("admin", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+        target_member = _mock_member("member")
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_admin
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = target_member
+            session.execute = AsyncMock(return_value=mock_result)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/org-members/{MEMBER_ID}", json={"role": "admin"})
+
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_role_409_owner_demotes_last_owner():
+    """owner caller — 마지막 owner를 강등하면 조직이 owner 0이 된다, 거부한다."""
+    client, session, app, _ = await _client()
+    try:
+        caller_owner = _mock_member("owner", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+        target_owner = _mock_member("owner")
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user, \
+             patch("app.repositories.org_member.OrgMemberRepository.list", new_callable=AsyncMock) as mock_list:
+            mock_get_by_user.return_value = caller_owner
+            mock_list.return_value = [target_owner]  # owner가 이 하나뿐.
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = target_owner
+            session.execute = AsyncMock(return_value=mock_result)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/org-members/{MEMBER_ID}", json={"role": "admin"})
+
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "ORG_LAST_OWNER"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_role_200_owner_demotes_non_last_owner():
+    """owner caller — owner가 둘 이상이면 그중 하나를 강등해도 통과한다."""
+    client, session, app, _ = await _client()
+    try:
+        caller_owner = _mock_member("owner", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+        target_owner = _mock_member("owner")
+        other_owner = _mock_member("owner", id=uuid.uuid4())
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user, \
+             patch("app.repositories.org_member.OrgMemberRepository.list", new_callable=AsyncMock) as mock_list:
+            mock_get_by_user.return_value = caller_owner
+            mock_list.return_value = [target_owner, other_owner]
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = target_owner
+            session.execute = AsyncMock(return_value=mock_result)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/org-members/{MEMBER_ID}", json={"role": "admin"})
+
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_role_200_owner_promotes_to_owner():
+    """owner caller — 다른 멤버를 owner로 승격은 허용(owner만 할 수 있는 일)."""
+    client, session, app, _ = await _client()
+    try:
+        caller_owner = _mock_member("owner", user_id=CALLER_ID, id=CALLER_MEMBER_ROW_ID)
+        target_member = _mock_member("member")
+
+        with patch("app.repositories.org_member.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_get_by_user:
+            mock_get_by_user.return_value = caller_owner
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = target_member
+            session.execute = AsyncMock(return_value=mock_result)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/org-members/{MEMBER_ID}", json={"role": "owner"})
+
+        assert resp.status_code == 200
     finally:
         app.dependency_overrides.clear()
 

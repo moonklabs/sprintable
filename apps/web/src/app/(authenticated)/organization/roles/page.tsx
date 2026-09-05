@@ -3,14 +3,17 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { canEditOrgMemberRole } from '@/lib/org-member-role';
 
 interface OrgMember {
   id: string;
+  user_id: string | null;
   name: string;
   email?: string;
   role: 'owner' | 'admin' | 'member';
@@ -26,7 +29,10 @@ const ROLE_LABEL_KEY: Record<(typeof ROLE_ORDER)[number], string> = {
 export default function OrganizationRolesPage() {
   const { orgId, orgMemberships } = useDashboardContext();
   const currentRole = orgMemberships.find((o) => o.orgId === orgId)?.role ?? 'member';
-  const isOwner = currentRole === 'owner';
+  // story #3491(페드루 PO 確定) — canEditOrgMemberRole의 자기 자신 판정에 필요
+  // (org-members-section.tsx와 동형).
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   // story #3231(카디르 버그사냥) — 이 페이지가 email 포함 전체 로스터를 role 무관하게
   // 항상 렌더해, Member 신분도 조직 전원의 실명+이메일을 볼 수 있었다. BE(GET
   // /api/v2/org-members)를 admin/owner 전용 403으로 잠근 것이 실 정본이고, 이건 그
@@ -41,11 +47,19 @@ export default function OrganizationRolesPage() {
   const [changingId, setChangingId] = useState<string | null>(null);
 
   const refresh = async () => {
-    const res = await fetchWithAuth('/api/org-members').catch(() => null);
+    const [res, meRes] = await Promise.all([
+      fetchWithAuth('/api/org-members').catch(() => null),
+      fetchWithAuth('/api/me').catch(() => null),
+    ]);
+    if (meRes?.ok) {
+      const json = await meRes.json() as { data?: { user_id?: string | null } };
+      setCurrentUserId(json.data?.user_id ?? null);
+    }
     if (res?.ok) {
-      const json = await res.json() as { data?: Array<{ id: string; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member'; user_id?: string }> };
+      const json = await res.json() as { data?: Array<{ id: string; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member'; user_id?: string | null }> };
       setMembers((json.data ?? []).map((m) => ({
         id: m.id,
+        user_id: m.user_id ?? null,
         name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? '?',
         email: m.email ?? undefined,
         role: m.role,
@@ -65,11 +79,25 @@ export default function OrganizationRolesPage() {
 
   const handleChangeRole = async (memberId: string, newRole: 'admin' | 'member') => {
     setChangingId(memberId);
-    await fetch(`/api/org-members/${memberId}`, {
+    setActionError(null);
+    const res = await fetch(`/api/org-members/${memberId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: newRole }),
     }).catch(() => null);
+    if (res && !res.ok) {
+      // story #3491 — FE 게이트(canEditOrgMemberRole)가 대부분 막지만, 다른 창에서
+      // 동시에 상태가 바뀌는 race는 남아 있어 서버 거부(owner 보호 가드)를 그대로
+      // 안내한다(org-members-section.tsx와 동형).
+      const json = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+      if (json?.error?.code === 'ORG_MEMBER_OWNER_ONLY_ACTION') {
+        setActionError(t('memberRoleChangeOwnerOnlyError'));
+      } else if (json?.error?.code === 'ORG_LAST_OWNER') {
+        setActionError(t('memberRoleChangeLastOwnerError'));
+      } else {
+        setActionError(t('memberRoleChangeFailed'));
+      }
+    }
     await refresh();
     setChangingId(null);
   };
@@ -102,6 +130,12 @@ export default function OrganizationRolesPage() {
         <p className="text-sm text-muted-foreground">{t('rolesDescription')}</p>
       </div>
 
+      {actionError ? (
+        <Alert variant="destructive" role="alert" aria-live="assertive">
+          <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
+      ) : null}
+
       {ROLE_ORDER.map((role) => {
         const group = members.filter((m) => m.role === role);
         return (
@@ -116,7 +150,7 @@ export default function OrganizationRolesPage() {
                 <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
                   {group.map((member) => {
                     const isThisOwner = member.role === 'owner';
-                    const canEdit = isOwner && !isThisOwner;
+                    const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
                     return (
                       <MemberRow
                         key={member.id}
