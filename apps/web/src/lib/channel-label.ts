@@ -7,6 +7,11 @@ const CHANNEL_LABEL_KEYS: Record<string, string> = {
   hosted_site: 'channelLabelHostedSite',
   wordpress: 'channelLabelWordpress',
   sandbox: 'channelLabelSandbox',
+  // story #3523(BE #3872 착지, PO 確定 2026-09-06) — 등록 안 해도 크래시는 안 남(원문
+  // "instagram"/"instagram_sandbox" 그대로 폴백, 위 주석의 "모르는 값은 지어내지 않고
+  // 원문 그대로 폴백" 그 자체) — 다만 그 폴백이 화면에 실제로 뜨는 걸 막기 위해 등록.
+  instagram: 'channelLabelInstagram',
+  instagram_sandbox: 'channelLabelInstagramSandbox',
   // 디디 ④/⑤(#3800/#3802) 착지 뒤에야 실제로 들어오는 값 — 지금 develop엔 미등록이라
   // 당장은 아무 것도 이 키로 안 오지만, 죽은 키 스윕에서 지우지 말 것(의도된 선등록).
   webhook: 'channelLabelWebhook',

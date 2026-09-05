@@ -1281,6 +1281,11 @@
       "file": "tests/test_3475_publishing_metrics.py",
       "sec": 121.0,
       "source": "story-3475-publishing-metrics-api(PR 개설 前 선제 등재 — 로컬 raw pytest 11건 실측치(20.17s)를 CI 배율(~6x, story #3383) 보수적으로 반영한 121s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3523_generic_channel_sandbox.py",
+      "sec": 137.0,
+      "source": "story-3523-generic-channel-sandbox-route(카디르 QA #3877 CI 가드 지적 — PR 파일 목록에 미등재였음. 로컬 raw pytest 8건 실측치(22.76s)를 CI 배율(~6x, story #3383) 보수적으로 반영한 137s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
