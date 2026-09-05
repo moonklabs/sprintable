@@ -47,10 +47,14 @@ export interface InsightsBoardResponse {
 
 export type InsightsBoardWindow = '7d' | '30d' | '90d';
 
-// PO 판단 필요(미르코 판단, 스토리 본문에 이 지표를 못 찾아 impressions로 정함) — 표에서
-// d1/d7 열이 보여줄 «단일 대표 지표». BE 계약은 7개 지표를 다 준다(normalized dict) —
-// 표 셀 하나엔 그중 하나만 보인다.
-export const REPRESENTATIVE_METRIC = 'impressions' as const;
+// PO REQUEST(2026-09-05, PR#3853 리뷰) — 대표 지표를 impressions로 고정했더니
+// hosted_site(블로그 beacon)는 views만 채우고 impressions는 늘 null이라 고객
+// 1호(블로그+Threads)의 블로그 행이 전부 대시로 섰다. 지표를 «선택기»로 바꾼다 —
+// 기본값 views, URL 파라미터 `metric`(기본값이면 생략). 7키 순서는 insight-
+// snapshot-block.tsx(story #3499) METRIC_KEYS와 동일(그 파일의 i18n 라벨 재사용).
+export const METRIC_KEYS = ['views', 'impressions', 'reach', 'engagements', 'clicks', 'spend', 'conversions'] as const;
+export type BoardMetric = (typeof METRIC_KEYS)[number];
+export const DEFAULT_METRIC: BoardMetric = 'views';
 
 export type FollowUpKind = 'republish' | 'edit' | 'stop';
 

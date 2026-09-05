@@ -21,7 +21,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
-import { REPRESENTATIVE_METRIC, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
+import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 
 /**
  * story #3503 — 성과 보드 화면. BE #3502 의존(PR 브리프 헤더 참고, 이 파일 작성 시점
@@ -32,12 +32,29 @@ import { REPRESENTATIVE_METRIC, type InsightsBoardResponse, type InsightsBoardRo
  * FE 기본값(7d)과 BE 기본값(30d)이 다르므로, 화면이 «항상» window을 명시해서 BE에
  * 보낸다(URL 표시는 기본값일 때 생략해도 되지만, 실제 fetch 쿼리엔 항상 싣는다).
  */
-type BoardSort = 'published_at' | `${typeof REPRESENTATIVE_METRIC}_d1` | `${typeof REPRESENTATIVE_METRIC}_d7`;
+// PO REQUEST(2026-09-05, PR#3853 리뷰) — 정렬은 지표 선택에 «따라간다». 드롭다운
+// 자체는 역할(발행시각/D+1/D+7) 3개만 갖고, 실제 BE `sort` 파라미터는 그 역할과
+// 현재 선택 지표를 합성한다(예: metric=views·역할=d1 → `sort=views_d1`) — 지표를
+// 바꿔도 "D+1로 본다"는 의도 자체는 유지된다(URL엔 역할만 저장, 지표는 별도
+// `metric` 파라미터).
+type SortRole = 'published_at' | 'd1' | 'd7';
 type SortDir = 'asc' | 'desc';
 
 const WINDOW_OPTIONS: InsightsBoardWindow[] = ['7d', '30d', '90d'];
-const SORT_OPTIONS: BoardSort[] = ['published_at', 'impressions_d1', 'impressions_d7'];
+const SORT_ROLE_OPTIONS: SortRole[] = ['published_at', 'd1', 'd7'];
 const STATUS_FILTER_OPTIONS = ['pending', 'captured', 'unsupported', 'failed', 'dead_letter'] as const;
+
+// insight-snapshot-block.tsx(story #3499) METRIC_LABEL_KEYS와 동일 매핑 —
+// content 네임스페이스 기존 지표 라벨 재사용(새 키를 만들지 않는다).
+const METRIC_LABEL_KEYS: Record<BoardMetric, string> = {
+  views: 'insightMetricViews',
+  impressions: 'insightMetricImpressions',
+  reach: 'insightMetricReach',
+  engagements: 'insightMetricEngagements',
+  clicks: 'insightMetricClicks',
+  spend: 'insightMetricSpend',
+  conversions: 'insightMetricConversions',
+};
 
 // insight-snapshot-block.tsx(story #3499)의 STATUS_LABEL_KEYS와 동일 관례 — content
 // 네임스페이스 기존 키를 그대로 재사용한다(unsupported는 그 파일과 동일하게 전용 문장
@@ -50,7 +67,7 @@ const STATUS_FILTER_LABEL_KEYS: Partial<Record<(typeof STATUS_FILTER_OPTIONS)[nu
 };
 
 const DEFAULT_WINDOW: InsightsBoardWindow = '7d';
-const DEFAULT_SORT: BoardSort = 'published_at';
+const DEFAULT_SORT_ROLE: SortRole = 'published_at';
 const DEFAULT_SORT_DIR: SortDir = 'desc';
 
 export default function InsightsBoardPage() {
@@ -65,8 +82,12 @@ export default function InsightsBoardPage() {
   const windowParam = (searchParams.get('window') as InsightsBoardWindow | null) ?? DEFAULT_WINDOW;
   const channelParam = searchParams.get('channel') ?? '';
   const statusParam = searchParams.get('status') ?? '';
-  const sortParam = (searchParams.get('sort') as BoardSort | null) ?? DEFAULT_SORT;
+  const sortRoleParam = (searchParams.get('sort') as SortRole | null) ?? DEFAULT_SORT_ROLE;
   const sortDirParam = (searchParams.get('sort_dir') as SortDir | null) ?? DEFAULT_SORT_DIR;
+  const rawMetricParam = searchParams.get('metric') as BoardMetric | null;
+  const metricParam: BoardMetric = rawMetricParam && METRIC_KEYS.includes(rawMetricParam) ? rawMetricParam : DEFAULT_METRIC;
+  // 실제 BE sort 값 — 역할(published_at 고정, d1/d7은 현재 지표와 합성).
+  const resolvedSort = sortRoleParam === 'published_at' ? 'published_at' : `${metricParam}_${sortRoleParam}`;
 
   const [rows, setRows] = useState<InsightsBoardRow[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -74,7 +95,10 @@ export default function InsightsBoardPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
-  const [followUpPublicationId, setFollowUpPublicationId] = useState<string | null>(null);
+  // doc a0da40c9 §21-5(유나 2026-09-05) — 제목 기본값(「[재발행] {원문 제목}」 등)을
+  // 채워 보이려면 이 행의 원문 title이 필요하다 — publication_id만으론 부족해
+  // row 전체를 들고 있는다.
+  const [followUpRow, setFollowUpRow] = useState<InsightsBoardRow | null>(null);
 
   const buildQuery = useCallback((cursor?: string) => {
     const qs = new URLSearchParams();
@@ -83,11 +107,11 @@ export default function InsightsBoardPage() {
     qs.set('window', windowParam);
     if (channelParam) qs.set('channel', channelParam);
     if (statusParam) qs.set('status', statusParam);
-    if (sortParam !== DEFAULT_SORT) qs.set('sort', sortParam);
+    if (resolvedSort !== 'published_at') qs.set('sort', resolvedSort);
     if (sortDirParam !== DEFAULT_SORT_DIR) qs.set('sort_dir', sortDirParam);
     if (cursor) qs.set('cursor', cursor);
     return qs.toString();
-  }, [windowParam, channelParam, statusParam, sortParam, sortDirParam]);
+  }, [windowParam, channelParam, statusParam, resolvedSort, sortDirParam]);
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -140,10 +164,14 @@ export default function InsightsBoardPage() {
     router.replace(`/organization/insights-board${query ? `?${query}` : ''}`, { scroll: false });
   }
 
-  const sortLabel: Record<BoardSort, string> = {
+  // PO REQUEST — 라벨은 지표 이름을 포함한다("D+1 조회" 등, 지표를 바꾸면 라벨도
+  // 같이 바뀐다). insightsBoardSortD1/D7은 이 보드 전용 신규 템플릿 키(content
+  // 네임스페이스엔 "D+1"이라는 개념 자체가 없어 재사용할 기존 키가 없다).
+  const metricLabel = tContent(METRIC_LABEL_KEYS[metricParam]);
+  const sortRoleLabel: Record<SortRole, string> = {
     published_at: t('sortPublishedAt'),
-    impressions_d1: t('sortImpressionsD1'),
-    impressions_d7: t('sortImpressionsD7'),
+    d1: t('sortD1', { metric: metricLabel }),
+    d7: t('sortD7', { metric: metricLabel }),
   };
 
   const statusFilterLabel = (status: (typeof STATUS_FILTER_OPTIONS)[number]): string => (
@@ -214,18 +242,39 @@ export default function InsightsBoardPage() {
         <DropdownMenu>
           <DropdownMenuTrigger
             className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-            data-testid="insights-board-sort-trigger"
+            data-testid="insights-board-metric-trigger"
           >
-            {t('sortLabel')} {sortLabel[sortParam]}
+            {t('metricLabel')} {metricLabel}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuGroup>
-              {SORT_OPTIONS.map((option) => (
+              {METRIC_KEYS.map((option) => (
                 <DropdownMenuItem
                   key={option}
-                  onClick={() => updateQuery({ sort: option === DEFAULT_SORT ? null : option })}
+                  onClick={() => updateQuery({ metric: option === DEFAULT_METRIC ? null : option })}
                 >
-                  {sortLabel[option]}
+                  {tContent(METRIC_LABEL_KEYS[option])}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
+            data-testid="insights-board-sort-trigger"
+          >
+            {t('sortLabel')} {sortRoleLabel[sortRoleParam]}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuGroup>
+              {SORT_ROLE_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option}
+                  onClick={() => updateQuery({ sort: option === DEFAULT_SORT_ROLE ? null : option })}
+                >
+                  {sortRoleLabel[option]}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuGroup>
@@ -262,9 +311,28 @@ export default function InsightsBoardPage() {
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">{t('columnTitle')}</th>
                   <th className="px-3 py-2 text-left font-medium">{t('columnChannel')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnPublishedAt')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnD1')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnD7')}</th>
+                  {/* doc a0da40c9 §21-4(유나 권장, 값싼 것) — 정렬 드롭다운 라벨이 이미
+                      글자로 「지금 무엇으로」를 말하므로 필수는 아니지만, 정렬 중인
+                      열의 <th>에 aria-sort를 붙이면 보조기술이 표 안에서도 그 사실을
+                      안다. 헤더 클릭 정렬은 도입하지 않는다(§21-4 명시 금지). */}
+                  <th
+                    className="px-3 py-2 text-left font-medium"
+                    aria-sort={sortRoleParam === 'published_at' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  >
+                    {t('columnPublishedAt')}
+                  </th>
+                  <th
+                    className="px-3 py-2 text-left font-medium"
+                    aria-sort={sortRoleParam === 'd1' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  >
+                    {t('columnD1')} {metricLabel}
+                  </th>
+                  <th
+                    className="px-3 py-2 text-left font-medium"
+                    aria-sort={sortRoleParam === 'd7' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  >
+                    {t('columnD7')} {metricLabel}
+                  </th>
                   <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
                 </tr>
               </thead>
@@ -285,17 +353,17 @@ export default function InsightsBoardPage() {
                       {formatRelativeTime(row.published_at, locale, displayTimezone)}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
-                      <InsightsBoardMetricCell bucket={row.d1} metric={REPRESENTATIVE_METRIC} tContent={tContent} tBoard={t} />
+                      <InsightsBoardMetricCell bucket={row.d1} metric={metricParam} tContent={tContent} tBoard={t} />
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
-                      <InsightsBoardMetricCell bucket={row.d7} metric={REPRESENTATIVE_METRIC} tContent={tContent} tBoard={t} />
+                      <InsightsBoardMetricCell bucket={row.d7} metric={metricParam} tContent={tContent} tBoard={t} />
                     </td>
                     <td className="px-3 py-2.5">
                       {canCreateFollowUp ? (
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => setFollowUpPublicationId(row.publication_id)}
+                          onClick={() => setFollowUpRow(row)}
                           data-testid="insights-board-follow-up-button"
                         >
                           {t('followUpAction')}
@@ -318,11 +386,12 @@ export default function InsightsBoardPage() {
         </>
       )}
 
-      {followUpPublicationId && orgId ? (
+      {followUpRow && orgId ? (
         <FollowUpDialog
           orgId={orgId}
-          publicationId={followUpPublicationId}
-          onClose={() => setFollowUpPublicationId(null)}
+          publicationId={followUpRow.publication_id}
+          originalTitle={followUpRow.title}
+          onClose={() => setFollowUpRow(null)}
         />
       ) : null}
     </div>

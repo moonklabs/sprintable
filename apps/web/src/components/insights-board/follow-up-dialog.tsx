@@ -28,25 +28,29 @@ import type { FollowUpCreateResponse, FollowUpKind } from './types';
 export interface FollowUpDialogProps {
   orgId: string;
   publicationId: string;
+  /** doc a0da40c9 §21-5 — 「[재발행] {원문 제목}」 등 기본값을 채워 보이는 원본 자료. */
+  originalTitle: string;
   onClose: () => void;
 }
 
 const KIND_OPTIONS: FollowUpKind[] = ['republish', 'edit', 'stop'];
 
-export function FollowUpDialog({ orgId, publicationId, onClose }: FollowUpDialogProps) {
+export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }: FollowUpDialogProps) {
   const t = useTranslations('insightsBoard');
   const [kind, setKind] = useState<FollowUpKind>('republish');
-  const [title, setTitle] = useState('');
-  const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successStoryId, setSuccessStoryId] = useState<string | null>(null);
-
   const kindLabel: Record<FollowUpKind, string> = {
     republish: t('followUpKindRepublish'),
     edit: t('followUpKindEdit'),
     stop: t('followUpKindStop'),
   };
+  // §21-5 — 「제목 칸을 비워 두지 않는다·기본값을 채워 보인다」. 처음엔 기본 유형
+  // (republish)의 프리필로 시작한다.
+  const prefillTitle = (k: FollowUpKind) => `[${kindLabel[k]}] ${originalTitle}`;
+  const [title, setTitle] = useState(() => prefillTitle('republish'));
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successStoryId, setSuccessStoryId] = useState<string | null>(null);
 
   async function handleSubmit() {
     setSubmitting(true);
@@ -124,7 +128,7 @@ export function FollowUpDialog({ orgId, publicationId, onClose }: FollowUpDialog
                   <button
                     key={option}
                     type="button"
-                    onClick={() => setKind(option)}
+                    onClick={() => { setKind(option); setTitle(prefillTitle(option)); }}
                     aria-pressed={kind === option}
                     className={`rounded-md border px-3 py-1.5 text-sm ${
                       kind === option

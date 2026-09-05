@@ -311,6 +311,13 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 정상 패턴(docs.title<->docs.indexDocCount류) — 같은 개념("남음")을 두 표면에서
   // 일관되게 쓰라는 게 디자인 지시 그 자체다.
   'content.generationBudgetRemainingCompact <-> content.generationBudgetRemainingLabel',
+  // story #3503(PO REQUEST 2026-09-05, 지표 선택기) — insightsBoard.sortD1
+  // ("{metric}(D+1)", 정렬 드롭다운 라벨) <-> insightsBoard.columnD1("D+1", 표
+  // 컬럼 헤더). 짧은 라벨("D+1")이 그 라벨을 포함하는 긴 문구("{metric}(D+1)")에
+  // 들어간 정상 패턴(docs.title<->docs.indexDocCount류) — 같은 "D+1"이라는
+  // 개념을 정렬 드롭다운과 표 헤더 두 표면에서 일관되게 쓰는 것 자체가 의도다.
+  'insightsBoard.columnD1 <-> insightsBoard.sortD1',
+  'insightsBoard.columnD7 <-> insightsBoard.sortD7',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

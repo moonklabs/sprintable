@@ -154,10 +154,10 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
     expect(rows).toHaveLength(3);
 
-    // Row A: d1=null(미스케줄) · d7=captured 120.
+    // Row A: d1=null(미스케줄) · d7=captured, 기본 지표(views)=0(정상 캡처값 — null 아님).
     expect(rows[0]?.querySelector('[data-testid="insights-board-cell-unscheduled"]')).not.toBeNull();
     const rowACells = rows[0]!.querySelectorAll('[data-testid="insights-board-cell-value"]');
-    expect(rowACells[0]?.textContent).toBe('120');
+    expect(rowACells[0]?.textContent).toBe('0');
 
     // Row B: d1=pending(상태만) · d7=failed(destructive 톤).
     const rowBStatusCells = rows[1]!.querySelectorAll('[data-testid="insights-board-cell-status"]');
@@ -218,23 +218,39 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(lastUrl).toContain('status=failed');
   });
 
-  it('정렬 드롭다운에서 항목을 고르면 router.replace 쿼리에 sort가 실린다', async () => {
+  it('정렬 드롭다운에서 항목을 고르면 router.replace 쿼리에 sort 역할(role)이 실린다 — 지표는 URL엔 별도, 실제 fetch에서 합성된다', async () => {
     stubFetch({});
     await mount();
-    await openMenuAndClick('insights-board-sort-trigger', koMessages.insightsBoard.sortImpressionsD1);
+    await openMenuAndClick('insights-board-sort-trigger', koMessages.insightsBoard.sortD1.replace('{metric}', koMessages.content.insightMetricViews));
     const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
-    expect(lastUrl).toContain('sort=impressions_d1');
+    expect(lastUrl).toContain('sort=d1');
+    expect(lastUrl).not.toContain('sort=views_d1');
+  });
+
+  it('PO REQUEST(2026-09-05) — 지표 선택기에서 항목을 고르면 metric 쿼리가 갈아끼워지고, sort=d1 역할과 합성돼 fetch에 실린다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('sort=d1'));
+    const calls = stubFetch({});
+    await mount();
+    await openMenuAndClick('insights-board-metric-trigger', koMessages.content.insightMetricSpend);
+    const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
+    expect(lastUrl).toContain('metric=spend');
+    // URL이 바뀌면 useSearchParams도 갱신됐다고 가정하고 재장착해 fetch까지 확認.
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('sort=d1&metric=spend'));
+    await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
+    await flush();
+    const laterCall = calls.find((c) => c.includes('sort=spend_d1'));
+    expect(laterCall).not.toBeUndefined();
   });
 
   it('필터/정렬/방향이 이미 걸린 URL로 진입하면 그 값 그대로(+window 항상 포함) fetch 쿼리에 실린다', async () => {
-    useSearchParamsMock.mockReturnValue(new URLSearchParams('channel=threads&status=failed&sort=impressions_d7&sort_dir=asc&window=30d'));
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('channel=threads&status=failed&sort=d7&metric=clicks&sort_dir=asc&window=30d'));
     const calls = stubFetch({});
     await mount();
     const firstCall = calls.find((c) => c.includes('/insights-board'));
     expect(firstCall).toContain('window=30d');
     expect(firstCall).toContain('channel=threads');
     expect(firstCall).toContain('status=failed');
-    expect(firstCall).toContain('sort=impressions_d7');
+    expect(firstCall).toContain('sort=clicks_d7');
     expect(firstCall).toContain('sort_dir=asc');
   });
 });
@@ -263,6 +279,21 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
     stubFetch({});
     await mount();
     expect(container.querySelector('[data-testid="insights-board-follow-up-button"]')).toBeNull();
+  });
+
+  it('doc a0da40c9 §21-5(유나 2026-09-05) — 제목 입력이 「[유형] {원문 제목}」으로 미리 채워지고, 유형을 바꾸면 갈아끼워진다', async () => {
+    stubFetch({});
+    await mount();
+    const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+
+    const titleInput = document.getElementById('follow-up-title') as HTMLInputElement;
+    expect(titleInput.value).toBe(`[${koMessages.insightsBoard.followUpKindRepublish}] ${ROW_A.title}`);
+
+    const editBtn = document.querySelector('[data-testid="follow-up-kind-edit"]') as HTMLButtonElement;
+    await act(async () => { editBtn.click(); });
+    expect(titleInput.value).toBe(`[${koMessages.insightsBoard.followUpKindEdit}] ${ROW_A.title}`);
   });
 
   it('⭐성공 경로 — 만들면 story_id로 /board?story= 링크가 뜬다(getEntityHref 재사용)', async () => {
