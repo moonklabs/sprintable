@@ -1164,8 +1164,8 @@
     },
     {
       "file": "tests/test_3474_publication_attempts.py",
-      "sec": 45.0,
-      "source": "story-3474-worker-approval-reverify-attempts(PR 개설 前 선제 등재 — 로컬 raw pytest 7.21s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 55.0,
+      "source": "story-3474-worker-approval-reverify-attempts(PR 개설 前 선제 등재 — 페드루 리뷰 보정①(unpublish 부정대조 추가) 반영 후 로컬 raw pytest 4건 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 55s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

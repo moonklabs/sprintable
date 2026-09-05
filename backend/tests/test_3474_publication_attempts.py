@@ -233,3 +233,76 @@ async def test_approved_but_sealed_hash_mismatch_rejected_before_adapter_call(li
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_unpublish_gate_no_longer_approved_rejected_before_module_unpublish_call(live_wordpress_stub):
+    """(d) 페드루 리뷰 보정①(2026-09-05) — publish 경로의 부정대조(b)만으론 부족하다,
+    unpublish도 「동형으로 확인 필요」라 명시했던 자리. 발행 완료 뒤 게이트가 무효화된
+    상태에서 회수 요청 커맨드가 워커에 걸리면, `unpublish_site_post_external_command`
+    자신의 신규 재검증이 adapter(module.unpublish) 호출 자체를 막아야 한다 — 스텁
+    원장(_POSTS)의 status가 "draft"로 안 바뀌는 것이 유일한 신뢰 가능한 증거(command
+    상태만 보면 조작 성공 여부를 못 가른다)."""
+    from app.models.gate import Gate
+    from app.services.publication_command import process_due_publication_commands
+    from app.services.site_posts import request_site_post_external_unpublish
+    from app.routers.dev_wordpress_stub import _POSTS
+    from sqlalchemy import select
+
+    engine, Session, app, org_id, draft_id, gate_id, human_id = await _seed_and_approve(
+        live_wordpress_stub_url=live_wordpress_stub,
+    )
+    try:
+        # 1) 정상 발행 완료(양성대조 (a)와 동일 절차) — external_id가 실제로 생긴다.
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+        assert len(_POSTS) == 1
+        published_stub_status = next(iter(_POSTS.values()))["status"]
+
+        # 2) 회수 요청 커맨드를 만든 뒤(서비스 직접 호출 — 라우터의 owner/admin 가드는
+        # 이 테스트 관심사가 아니다) 게이트를 무효화한다(void_pending_commands_for_gate
+        # 훅이 보통 이 경합을 선점하지만, 놓친 경우를 워커가 마지막으로 잡는 시나리오를
+        # 직접 DB 조작으로 재현 — (b)와 동형 기법).
+        async with Session() as s:
+            await request_site_post_external_unpublish(
+                s, org_id=org_id, draft_id=draft_id, requested_by_member_id=human_id,
+            )
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.status = "pending"
+            await s.commit()
+
+        from app.models.publication_command import PublicationCommand
+        async with Session() as s:
+            unpub_cmd_id = (await s.execute(
+                select(PublicationCommand.id).where(
+                    PublicationCommand.gate_id == gate_id, PublicationCommand.operation == "unpublish",
+                )
+            )).scalar_one()
+
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["blocked_unapproved"] == 1, counts
+
+        # 스텁 원장 — 회수가 실제로 adapter를 안 건드렸다는 유일한 신뢰 가능한 증거.
+        assert next(iter(_POSTS.values()))["status"] == published_stub_status, (
+            "게이트 재검증에서 막혔는데 module.unpublish가 실제로 호출됐다"
+        )
+
+        from app.models.publication_attempt import PublicationAttempt
+        async with Session() as s:
+            cmd_row = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.id == unpub_cmd_id)
+            )).scalar_one()
+            assert cmd_row.status == "blocked_unapproved"
+
+            attempts = (await s.execute(
+                select(PublicationAttempt).where(PublicationAttempt.command_id == unpub_cmd_id)
+            )).scalars().all()
+        assert len(attempts) == 1
+        assert attempts[0].approval_check == "missing"
+        assert attempts[0].adapter_called is False
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

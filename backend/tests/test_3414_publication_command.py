@@ -316,6 +316,17 @@ async def test_publish_immediate_no_scheduled_at_completes_synchronously_and_mar
             )).scalar_one()
             assert cmd.status == "completed"
             assert cmd.scheduled_at is None
+
+            # story #3474(페드루 리뷰 확認②, 2026-09-05) — 이 즉시-발행 경로는
+            # `_process_one_command`(cron 워커)를 안 거치는 별도 동기 경로다. 원장이
+            # 이 경로에서도 실제로 쓰이는지(워커 전용 반쪽 계측이 아닌지)를 이 기존
+            # ok-경로 테스트에 한 줄로 고정한다.
+            from app.models.publication_attempt import PublicationAttempt
+            attempt = (await s.execute(
+                select(PublicationAttempt).where(PublicationAttempt.command_id == cmd.id)
+            )).scalar_one()
+            assert attempt.approval_check == "ok"
+            assert attempt.adapter_called is True
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
