@@ -1392,20 +1392,26 @@ class SitePostPublicationInfo:
     (발행됨·URL·행위자) 계약. 필드명은 목록 계약(story 0b72a300)과 한 벌: `published_at`
     하나로 발행 여부가 서고 별도 boolean은 두지 않는다."""
 
-    __slots__ = ("published_at", "url", "published_by_member_id", "published_body_sha256")
+    __slots__ = ("published_at", "url", "published_by_member_id", "published_body_sha256", "id")
 
     def __init__(
         self, *, published_at: datetime | None, url: str | None,
         published_by_member_id: uuid.UUID | None, published_body_sha256: str | None,
+        id: uuid.UUID | None = None,
     ):
         self.published_at = published_at
         self.url = url
         self.published_by_member_id = published_by_member_id
         self.published_body_sha256 = published_body_sha256
+        # story #3497 조각3 — hosted_site 발행의 `insight_snapshots.publication_id`
+        # 축(SitePost.id 자신). 외부 목적지(wordpress/webhook)는 이 필드를 안 쓴다
+        # (그쪽은 ChannelPublication.id를 별도로 들고 있다 — get_site_post_publication_
+        # endpoint에서 destination으로 갈라 쓴다).
+        self.id = id
 
 
 _EMPTY_PUBLICATION_INFO = SitePostPublicationInfo(
-    published_at=None, url=None, published_by_member_id=None, published_body_sha256=None,
+    published_at=None, url=None, published_by_member_id=None, published_body_sha256=None, id=None,
 )
 
 
@@ -1466,6 +1472,7 @@ async def get_site_post_publication_info(
     return SitePostPublicationInfo(
         published_at=post.published_at, url=url,
         published_by_member_id=post.created_by_member_id, published_body_sha256=published_body_sha256,
+        id=post.id,
     )
 
 

@@ -69,6 +69,53 @@ async def schedule_insight_snapshots(
         await db.execute(stmt)
 
 
+async def list_insight_snapshots_for_publication(
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID,
+) -> list[InsightSnapshot]:
+    """story #3497 조각3(조회 API) — 스냅샷 목록(due_at 오름차순, +1d 먼저). org
+    격리는 호출자(라우터)가 이미 검증한 뒤 이 함수를 부른다는 전제(다른 서비스
+    함수들과 동형 — org_id는 여기서도 WHERE에 걸어 이중 방어)."""
+    rows = (await db.execute(
+        select(InsightSnapshot)
+        .where(InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id == publication_id)
+        .order_by(InsightSnapshot.due_at.asc())
+    )).scalars().all()
+    return list(rows)
+
+
+async def get_latest_insight_snapshot(db: AsyncSession, *, publication_id: uuid.UUID) -> InsightSnapshot | None:
+    """story #3497 조각3 — get_*_publication 응답에 얹는 `latest_insight` 1건(그라운딩
+    確定④). "최신"은 captured_at 내림차순 — 아직 아무것도 안 잡힌 발행은 None(지어
+    내지 않는다, "0건" 그 자체가 정직한 값)."""
+    return (await db.execute(
+        select(InsightSnapshot)
+        .where(InsightSnapshot.publication_id == publication_id, InsightSnapshot.captured_at.isnot(None))
+        .order_by(InsightSnapshot.captured_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
+async def compute_insight_snapshot_counts(
+    db: AsyncSession, *, org_id: uuid.UUID, window_days: int = 7, now: datetime | None = None,
+) -> dict[str, int]:
+    """story #3497 確定⑤ — 3475 publishing-metrics 접합용 카운트 함수(이 PR에선
+    호출부를 안 연다 — 3475가 아직 develop 미착지라 그 스택 착지 뒤 후속 커밋으로
+    미룬다, 페드루 決定). 창(window)은 `created_at`(스냅샷이 예약된 시각) 기준 —
+    `captured_at`은 status='captured'에만 있어 failed/unsupported를 못 센다."""
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=window_days)
+    rows = (await db.execute(
+        select(InsightSnapshot.status).where(
+            InsightSnapshot.org_id == org_id, InsightSnapshot.created_at >= since,
+            InsightSnapshot.status.in_(("captured", "failed", "unsupported")),
+        )
+    )).scalars().all()
+    counts = {"captured": 0, "failed": 0, "unsupported": 0}
+    for status in rows:
+        counts[status] += 1
+    return counts
+
+
 def _normalize(*, declared_metrics: tuple[str, ...], values: dict[str, int]) -> dict[str, int | None]:
     """0과 미제공을 가르는 유일한 자리(페드루 決定, 이 스토리의 척추) — null은 두
     경우 모두: ①채널이 이 지표를 아예 선언 안 함(`declared_metrics`에 없음, 예:

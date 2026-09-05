@@ -249,6 +249,104 @@ async def test_publication_info_all_fields_present_when_published():
 
 
 @pytest.mark.anyio
+async def test_publication_info_latest_insight_null_before_any_snapshot_captured():
+    """story #3497 조각3 — hosted_site 발행 직후엔 아직 워커 tick이 안 돌았으니
+    `latest_insight`는 None이어야 한다(지어내지 않는다 — 빈 값 자체가 정직한 사실)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts", json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            await _submit_and_approve(client, s, org_id=org_id, draft_id=draft_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_pub = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publish")
+        assert r_pub.status_code == 200, r_pub.text
+
+        async with _client_for(app) as client:
+            r_info = await client.get(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publication")
+        assert r_info.status_code == 200, r_info.text
+        assert r_info.json()["latest_insight"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publication_info_exposes_latest_captured_insight_for_hosted_site():
+    """story #3497 조각3 — 워커 tick이 캡처한 스냅샷이 `latest_insight`로 노출된다
+    (publication_id 축 = SitePost.id 자신, schedule_insight_snapshots가 hosted_site
+    발행 콜백에서 그 값으로 스케줄한다는 사실과 대칭)."""
+    from app.main import app
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.models.site_post import SitePost
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts", json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            await _submit_and_approve(client, s, org_id=org_id, draft_id=draft_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_pub = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publish")
+        assert r_pub.status_code == 200, r_pub.text
+
+        async with Session() as s:
+            post_id = (await s.execute(
+                select(SitePost.id).where(SitePost.org_id == org_id, SitePost.slug == "2ho-blog", SitePost.lang == "ko")
+            )).scalar_one()
+            snapshot = InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, publication_id=post_id,
+                publication_kind="site_post", channel="hosted_site", due_at=datetime.now(timezone.utc),
+                captured_at=datetime.now(timezone.utc), status="captured",
+                normalized={"views": 12, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": None, "conversions": None},
+                source="hosted_site",
+            )
+            s.add(snapshot)
+            await s.commit()
+
+        async with _client_for(app) as client:
+            r_info = await client.get(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publication")
+        assert r_info.status_code == 200, r_info.text
+        latest = r_info.json()["latest_insight"]
+        assert latest is not None, "캡처된 스냅샷이 있는데 latest_insight가 None(publication_id 축 어긋남)"
+        assert latest["status"] == "captured"
+        assert latest["channel"] == "hosted_site"
+        assert latest["normalized"]["views"] == 12
+        assert latest["normalized"]["impressions"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_publication_url_null_when_public_site_base_url_unset():
     """AC1 — 랜딩 베이스(settings.public_site_base_url)가 미설정이면(오늘 dev의 실제
     기본값, deploy SSOT로 아직 안 채워졌던 상태와 동형) url은 지어내지 않고 null이다 —
@@ -315,7 +413,7 @@ async def test_publication_info_all_null_when_never_published_not_404():
         assert r_info.status_code == 200, r_info.text
         assert r_info.json() == {
             "published_at": None, "url": None, "published_by_member_id": None, "published_body_sha256": None,
-            "destination": "hosted_site", "channel_publication": None, "command": None,
+            "destination": "hosted_site", "channel_publication": None, "command": None, "latest_insight": None,
         }
     finally:
         app.dependency_overrides.clear()
@@ -388,7 +486,7 @@ async def test_publication_info_all_null_after_unpublish():
         assert r_info.status_code == 200, r_info.text
         assert r_info.json() == {
             "published_at": None, "url": None, "published_by_member_id": None, "published_body_sha256": None,
-            "destination": "hosted_site", "channel_publication": None, "command": None,
+            "destination": "hosted_site", "channel_publication": None, "command": None, "latest_insight": None,
         }
     finally:
         app.dependency_overrides.clear()

@@ -279,3 +279,49 @@ async def test_delete_by_creator_succeeds_by_other_forbidden():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_platform_authored_evidence_created_by_none_undeletable_by_any_member():
+    """story #3497 조각3(카디르 QA②) — evidence.created_by=None(플랫폼 자동 기록, 예:
+    인사이트 스냅샷)은 어떤 멤버도 "내 것"으로 삭제 못 한다(evidence.py::delete_evidence
+    L323 부근 `evidence.created_by != caller.id` — None은 caller.id와 절대 같을 수 없어
+    자연히 403). GET 응답도 `created_by: null`로 그대로 직렬화되어야 한다(생략·에러 아님)."""
+    from app.main import app
+    from app.models.evidence import Evidence
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id, other_agent_id, story_id, _task_id = await _seed(s)
+            platform_evidence = Evidence(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                type="metric", ref="platform-metric-1", source="sandbox", created_by=None,
+                payload={"recorded_by": "platform"},
+            )
+            s.add(platform_evidence)
+            await s.commit()
+            evidence_id = platform_evidence.id
+
+        await _setup_app(app, Session, agent_id, org_id)
+        client = _client_for(app)
+        try:
+            get_resp = await client.get(f"/api/v2/evidence/{evidence_id}")
+            assert get_resp.status_code == 200, get_resp.text
+            assert "created_by" in get_resp.json()
+            assert get_resp.json()["created_by"] is None, "플랫폼 기록의 created_by가 null로 직렬화되지 않았다"
+
+            delete_resp = await client.delete(f"/api/v2/evidence/{evidence_id}")
+            assert delete_resp.status_code == 403, delete_resp.text
+
+            async with Session() as s:
+                still_there = (await s.execute(
+                    select(Evidence).where(Evidence.id == evidence_id)
+                )).scalar_one_or_none()
+            assert still_there is not None, "403인데 실제로 삭제됐다(가드가 결과에 반영 안 됨)"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

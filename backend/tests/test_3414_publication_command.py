@@ -1527,3 +1527,48 @@ async def test_cron_endpoint_requires_cron_secret(monkeypatch):
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_insight_snapshot_exception_does_not_corrupt_publication_command_counts(monkeypatch):
+    """story #3497 조각3(카디르 QA①) — cron.py::publication_commands_tick의 독립 try
+    (`process_due_insight_snapshots` 예외를 `counts["insight_snapshots"]={"error":
+    "unhandled"}`로 흡수, 이미 처리된 publication_commands 결과까지 500으로 덮지 않는다)
+    가 실제로 격리되는지 확認. 큐가 비어 있어도(=publication_commands 쪽 counts가
+    전부 0) 증명 대상은 동일하다 — 이 테스트가 재는 것은 "명령 처리 로직 자체의
+    정확성"(그건 이 파일의 다른 테스트들이 이미 잰다)이 아니라 "인사이트 축 예외가
+    응답 딕셔너리·상태코드를 오염시키는가"이므로."""
+    import app.routers.cron as cron_module
+    import app.services.insight_snapshots as insight_module
+    from app.dependencies.database import get_worker_db
+    from app.main import app
+    from httpx import AsyncClient, ASGITransport
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("insight snapshot boom(테스트 주입)")
+
+    monkeypatch.setattr(insight_module, "process_due_insight_snapshots", _boom)
+
+    engine, Session = await _session_factory()
+    try:
+        async def _worker_db():
+            async with Session() as s:
+                yield s
+
+        app.dependency_overrides[get_worker_db] = _worker_db
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.post(
+                "/api/v2/internal/cron/publication-commands",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()["data"]
+        assert body["insight_snapshots"] == {"error": "unhandled"}
+        assert body["completed"] == 0 and body["error"] == 0, (
+            "insight_snapshots 축 예외가 publication_commands 카운트 필드까지 오염시켰다"
+        )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

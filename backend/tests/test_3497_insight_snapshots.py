@@ -16,6 +16,7 @@ from tests.test_e4fc29fa_site_post_orchestration import (
     _seed_org,
     _session_factory,
 )
+from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app, _seed_human
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -271,31 +272,56 @@ async def test_hosted_site_views_reflects_real_pageview_count():
 
 
 @pytest.mark.anyio
-async def test_unsupported_channel_marks_immediately_with_zero_adapter_calls():
+async def test_unsupported_channel_marks_immediately_with_zero_adapter_calls(monkeypatch):
+    """카디르 QA③ — `raw_payload is None`만으로는 "안 불렀다"를 증명 못 한다(정규화
+    실패로 raw만 남고 normalized가 비었을 경우도 같은 모양이 된다). `_fetch_for_snapshot`
+    자체를 spy로 감싸 실제 호출 횟수를 잰다 — 양성대조(sandbox=1회 호출)를 같은
+    tick 안에 같이 둬서 "이 spy가 원래 호출을 관측할 수는 있다"는 것도 함께 증명한다."""
     from app.models.insight_snapshot import InsightSnapshot
     from app.services.insight_snapshots import process_due_insight_snapshots, schedule_insight_snapshots
+    import app.services.insight_snapshots as insight_module
     from sqlalchemy import select
+
+    call_log: list[str] = []
+    _original_fetch = insight_module._fetch_for_snapshot
+
+    async def _spy_fetch(db, snapshot):
+        call_log.append(snapshot.channel)
+        return await _original_fetch(db, snapshot)
+
+    monkeypatch.setattr(insight_module, "_fetch_for_snapshot", _spy_fetch)
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             work_item_id = uuid.uuid4()
-            publication_id = uuid.uuid4()
+            unsupported_publication_id = uuid.uuid4()
+            supported_publication_id = uuid.uuid4()
+            anchor = datetime.now(timezone.utc) - timedelta(days=8)
 
             await schedule_insight_snapshots(
-                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=unsupported_publication_id,
                 publication_kind="channel_publication", channel="wordpress", external_id="post-9",
-                anchor_at=datetime.now(timezone.utc) - timedelta(days=8),
+                anchor_at=anchor,
+            )
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=supported_publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=anchor,
             )
             await s.commit()
 
             counts = await process_due_insight_snapshots(s)
             assert counts["unsupported"] == 2, counts  # +1d·+7d 둘 다 이미 도래.
-            assert counts["captured"] == 0
+            assert counts["captured"] == 2
+
+            assert call_log.count("wordpress") == 0, (
+                f"미지원 채널인데 adapter fetch가 {call_log.count('wordpress')}회 호출됐다(spy 실측)"
+            )
+            assert call_log.count("sandbox") == 2, "양성대조(sandbox)가 spy에 안 잡혔다 — spy 배선 자체가 무효"
 
             rows = (await s.execute(
-                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == unsupported_publication_id)
             )).scalars().all()
             assert all(r.status == "unsupported" for r in rows)
             assert all(r.raw_payload is None for r in rows), "미지원인데 adapter가 호출된 흔적(raw_payload)이 남았다"
@@ -403,5 +429,120 @@ async def test_threads_200_captures_views_and_engagements(monkeypatch):
             assert snap.normalized["views"] == 120
             assert snap.normalized["engagements"] == 13
             assert snap.normalized["impressions"] is None  # threads가 선언 안 한 축.
+    finally:
+        await engine.dispose()
+
+
+# ─── 조각3: 조회 API + 카운트 함수 ────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_insights_list_endpoint_returns_captured_snapshot():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+
+            from app.services.insight_snapshots import process_due_insight_snapshots, schedule_insight_snapshots
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None,
+                anchor_at=datetime.now(timezone.utc) - timedelta(days=8),
+            )
+            await s.commit()
+            await process_due_insight_snapshots(s)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publications/{publication_id}/insights")
+        assert r.status_code == 200, r.text
+        rows = r.json()
+        assert len(rows) == 2, "+1d·+7d 두 행이 스케줄됐어야 한다"
+        assert {row["status"] for row in rows} == {"captured"}
+        assert all(row["normalized"] is not None for row in rows)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_insights_list_endpoint_empty_list_for_unknown_publication():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publications/{uuid.uuid4()}/insights")
+        assert r.status_code == 200, r.text
+        assert r.json() == [], "존재하지 않는 publication_id는 404가 아니라 빈 목록(지어내지 않는다)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_insights_list_endpoint_org_mismatch_403():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            other_org_id = uuid.uuid4()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{other_org_id}/publications/{uuid.uuid4()}/insights")
+        assert r.status_code == 403, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_compute_insight_snapshot_counts_tallies_by_status_within_window():
+    """확定⑤ — 3475 접합용 카운트 함수(이 PR에선 호출부 미배선, 함수만). created_at
+    기준 window 밖 행은 안 세고, pending 행도 안 센다(3종만)."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import compute_insight_snapshot_counts
+
+    engine, Session = await _session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+
+            def _row(status, created_at, publication_id=None):
+                return InsightSnapshot(
+                    id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id,
+                    publication_id=publication_id or uuid.uuid4(), publication_kind="site_post",
+                    channel="sandbox", due_at=now, status=status, created_at=created_at,
+                )
+
+            s.add_all([
+                _row("captured", now - timedelta(days=1)),
+                _row("captured", now - timedelta(days=2)),
+                _row("failed", now - timedelta(days=3)),
+                _row("unsupported", now - timedelta(days=4)),
+                _row("pending", now - timedelta(days=1)),  # 3종 밖 — 안 세야 한다.
+                _row("captured", now - timedelta(days=9)),  # window(7d) 밖 — 안 세야 한다.
+            ])
+            await s.commit()
+
+            counts = await compute_insight_snapshot_counts(s, org_id=org_id, window_days=7, now=now)
+            assert counts == {"captured": 2, "failed": 1, "unsupported": 1}
     finally:
         await engine.dispose()
