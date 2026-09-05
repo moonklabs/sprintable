@@ -68,6 +68,7 @@ from app.services.channel_post_images import (
     get_channel_post_image_for_version,
     public_url_for_object_path,
 )
+from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-posts"])
@@ -297,6 +298,9 @@ class SubmitChannelPostDraftRequest(BaseModel):
     # v3 §3). 생략/null=즉시. 승인 뒤 이 값만 바꿔도(본문은 그대로) 재승인이 필요하다 —
     # submit_channel_post_draft가 그 판정을 한다(신규 엔드포인트 없음).
     scheduled_at: datetime | None = None
+    # story #3498(페드루 PO 決定 2026-09-05) — site_posts.py와 동형(submit 전용, draft
+    # 컬럼 아님). 생략/null=검사 없음(AC2).
+    estimated_cost_minor: int | None = None
 
     @field_validator("scheduled_at")
     @classmethod
@@ -817,7 +821,18 @@ async def submit_channel_post_draft_endpoint(
         gate, version_id = await submit_channel_post_draft(
             db, org_id=org_id, draft_id=draft_id, version_id=body.version_id,
             requester_member_id=uuid.UUID(auth.user_id), scheduled_at=body.scheduled_at,
+            estimated_cost_minor=body.estimated_cost_minor,
         )
+    except GenerationBudgetExceededError as exc:
+        # story #3498(AC2) — site_posts.py와 동형 4값 detail.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GENERATION_BUDGET_EXCEEDED",
+                "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
+                "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
+            },
+        ) from exc
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChannelPostVersionNotFoundError as exc:
@@ -1004,6 +1019,22 @@ async def publish_channel_post_draft_endpoint(
         raise HTTPException(
             status_code=403,
             detail=_with_command_state({"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)}),
+        ) from exc
+    except GenerationBudgetExceededError as exc:
+        # story #3498(AC4) — 위 EXTERNAL_PUBLISH_APPROVAL_REQUIRED와 동형 처리(adapter
+        # 미호출, 원장 기록만 추가·재시도/종결 정책 변경 없음).
+        await _record_this_attempt(approval_check="budget_exceeded", adapter_called=False, result_code=None)
+        await apply_command_failure(
+            db, command, error_code="GENERATION_BUDGET_EXCEEDED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state({
+                "code": "GENERATION_BUDGET_EXCEEDED",
+                "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
+                "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
+            }),
         ) from exc
     except ChannelTextTooLongError as exc:
         # 페드루 PO 확定(2026-09-03) — 발행 시점 재검사(UTM 태그된 링크가 붙은 실제 전송

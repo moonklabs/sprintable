@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import uuid
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.content_rules import get_org_content_rules, put_org_content_rules
+from app.services.generation_budget import compute_generation_budget_status
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import assert_target_in_caller_org
 
@@ -43,6 +46,21 @@ class ContentRulesResponse(BaseModel):
     version: int
 
 
+class GenerationBudgetRule(BaseModel):
+    """story #3498(페드루 PO 決定 2026-09-05) — 생성 비용 한도 정책값(Sprintable
+    결제 원장과 무접촉, 3471 슬롯 확장). limit_minor=0은 "정지"(모든 추정치가 즉시
+    거부) — 필드 자체가 없음(«규칙 없음»)과는 다른 신호(generation_budget.py 참고)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # 페드루 PO REQUIRED(2026-09-05, PR#3847 리뷰③) — limit_minor 음수는 "정지"보다
+    # 더 이상한 상태(잔량이 시작부터 음수)라 애초에 저장을 막는다. currency/period는
+    # Literal이 이미 422를 강제(3종 검증 테스트로 확認).
+    limit_minor: int = Field(ge=0)
+    currency: Literal["KRW", "USD"] = "KRW"
+    period: Literal["month"] = "month"
+
+
 class ContentRulesFields(BaseModel):
     """페드루 PO 리뷰 보정(2026-09-05, PR#3825) — `rules: dict`가 무형식이라
     `banned_terms`에 문자열 "spam"을 그대로 넣으면 `lint_content()`의
@@ -58,6 +76,7 @@ class ContentRulesFields(BaseModel):
     taxonomy: list[str] = []
     channel_priority: list[str] = []
     brand_kit: dict | None = None
+    generation_budget: GenerationBudgetRule | None = None
 
 
 class PutContentRulesRequest(BaseModel):
@@ -109,3 +128,44 @@ async def put_content_rules_endpoint(
         db, org_id=org_id, rules=validated.model_dump(), updated_by_member_id=resolved.id,
     )
     return ContentRulesResponse(org_id=row.org_id, rules=row.rules, version=row.version)
+
+
+class GenerationBudgetStatusResponse(BaseModel):
+    """story #3498 조각①(미르코 FE 3500 그라운딩, 페드루 PO 決定 2026-09-05) — 잔량
+    조회. limit_minor가 null이면(«규칙 없음») 전부 null — 지어내지 않는다(compute_
+    generation_budget_status()가 None을 돌려주는 그 신호를 그대로 반영)."""
+
+    limit_minor: int | None
+    currency: str | None
+    period: str | None
+    period_start: str | None
+    period_end: str | None
+    spent_minor: int | None
+    remaining_minor: int | None
+
+
+@router.get("/{org_id}/generation-budget", response_model=GenerationBudgetStatusResponse)
+async def get_generation_budget_endpoint(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> GenerationBudgetStatusResponse:
+    """content-rules GET과 동일 권한 축(org 멤버 누구나 — 휴먼·에이전트 모두, write
+    없음). compute_generation_budget_status() 그대로 재사용(submit/발행 체크포인트와
+    같은 계산 함수 — 화면이 보는 값과 서버가 실제로 거부 판정에 쓰는 값이 항상
+    같다는 보장)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    status = await compute_generation_budget_status(db, org_id=org_id)
+    if status is None:
+        return GenerationBudgetStatusResponse(
+            limit_minor=None, currency=None, period=None, period_start=None, period_end=None,
+            spent_minor=None, remaining_minor=None,
+        )
+    return GenerationBudgetStatusResponse(
+        limit_minor=status["limit_minor"], currency=status["currency"], period=status["period"],
+        period_start=status["period_start"].isoformat(), period_end=status["period_end"].isoformat(),
+        spent_minor=status["spent_minor"], remaining_minor=status["remaining_minor"],
+    )

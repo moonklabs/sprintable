@@ -74,7 +74,12 @@ _TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LI
 # 아니라 "재시도라는 개념 자체가 안 맞는" 종류: 사람이 다시 승인해야 새 커맨드가
 # 생긴다). 기존 'voided'(재승인으로 무효화)와 같은 결의 신규 terminal 상태.
 STATUS_BLOCKED_UNAPPROVED = "blocked_unapproved"
-_GATE_REVERIFY_ERROR_CODES = frozenset({"EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "SITE_POST_REAPPROVAL_REQUIRED"})
+_GATE_REVERIFY_ERROR_CODES = frozenset({
+    "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "SITE_POST_REAPPROVAL_REQUIRED",
+    # story #3498(AC4) — 예산 재검사도 이 워커 재검증 묶음에 낀다(adapter 호출 0
+    # 방어선이 이 자리 하나라, 새 방어선을 안 늘리고 기존 방어선을 확장한다).
+    "GENERATION_BUDGET_EXCEEDED",
+})
 
 
 async def record_publication_attempt(
@@ -256,6 +261,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         get_channel_post_draft,
         publish_channel_post_draft,
     )
+    from app.services.generation_budget import GenerationBudgetExceededError
 
     error_code: str | None = None
     last_error: str | None = None
@@ -328,6 +334,17 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.status = STATUS_BLOCKED_UNAPPROVED
         command.last_error = str(exc)[:2000]
         return
+    except GenerationBudgetExceededError as exc:
+        # story #3498(AC4) — site_post 쪽의 GENERATION_BUDGET_EXCEEDED 처리와 동형
+        # (adapter 호출 0, 재시도 대상 아님).
+        await record_publication_attempt(
+            db, command=command, approval_check="budget_exceeded", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code=None,
+        )
+        command.status = STATUS_BLOCKED_UNAPPROVED
+        command.reason_code = "GENERATION_BUDGET_EXCEEDED"
+        command.last_error = str(exc)[:2000]
+        return
     except ChannelPostSealMissingError as exc:
         error_code, last_error = "SITE_POST_SEAL_MISSING", str(exc)
     except ChannelTextTooLongError as exc:
@@ -398,16 +415,26 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
             # story #3474 — adapter는 안 불렸다(게이트 재검증에서 막혔다). 재시도
             # 백오프(apply_command_failure) 대상이 아니라 즉시 종결 — 사람이 다시
             # 승인해야 새 커맨드가 생긴다(channel_post 쪽과 동형 처리).
-            approval_check = "missing" if error_code == "EXTERNAL_PUBLISH_APPROVAL_REQUIRED" else "version_mismatch"
+            # story #3498(AC4, 페드루 PO 決定) — 예산 초과도 같은 결(재시도 개념
+            # 자체가 안 맞는다, 지출이 안 줄면 재시도해도 똑같다)이지만 사유가
+            # 다르다(승인 자체는 유효·잔량만 부족) — 별도 approval_check 값으로
+            # 구분한다.
+            approval_check = (
+                "missing" if error_code == "EXTERNAL_PUBLISH_APPROVAL_REQUIRED"
+                else "budget_exceeded" if error_code == "GENERATION_BUDGET_EXCEEDED"
+                else "version_mismatch"
+            )
             await record_publication_attempt(
                 db, command=command, approval_check=approval_check, adapter_called=False,
                 started_at=attempt_started_at, finished_at=now, result_code=None,
             )
-            if approval_check == "missing":
-                command.status = STATUS_BLOCKED_UNAPPROVED
-            else:
+            if approval_check == "version_mismatch":
                 command.status = "voided"
                 command.reason_code = "CONTENT_CHANGED"
+            else:
+                command.status = STATUS_BLOCKED_UNAPPROVED
+                if approval_check == "budget_exceeded":
+                    command.reason_code = "GENERATION_BUDGET_EXCEEDED"
             command.last_error = last_error[:2000]
             return
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
