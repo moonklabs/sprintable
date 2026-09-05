@@ -82,11 +82,26 @@ function stubFetch(opts: {
   // story #3504 — 해제 실패 표면화 검증용.
   disconnectStatus?: number;
   disconnectErrorCode?: string;
+  // story #3540 — 「성과 수집」 섹션. 기본값은 빈 배열(섹션 자체가 안 뜬다, 기존
+  // 테스트 전부 회귀 0). measurementLoadFails=true면 GET 자체가 실패.
+  measurementConnections?: { key: 'beacon' | 'utm'; status: string; last_seen_at: string | null; count_7d: number | null; settings_path: string | null }[];
+  measurementLoadFails?: boolean;
+  onMeteringKey?: () => { status: number; body?: unknown };
 }) {
   let connections = opts.connections ?? [];
   const credentials = opts.credentials ?? { configured: false, app_id_suffix: null, effective_source: 'platform' };
   const availableChannels = opts.availableChannels ?? AVAILABLE_CHANNELS_DEFAULT;
+  const measurementConnections = opts.measurementConnections ?? [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/measurement-connections')) {
+      if (opts.measurementLoadFails) return { ok: false, status: 500, json: async () => ({ data: null, error: { code: 'INTERNAL' } }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: measurementConnections }) } as Response;
+    }
+    if (url.includes('/metering-key')) {
+      const result = opts.onMeteringKey?.() ?? { status: 200, body: { public_key: 'pk_test_1234567890' } };
+      const ok = result.status < 400;
+      return { ok, status: result.status, json: async () => (ok ? { data: result.body } : { data: null, error: { code: 'INTERNAL' } }) } as Response;
+    }
     // available-channels가 '/channel-connections'의 부분문자열이라 그 체크보다 먼저 봐야 한다.
     if (url.includes('/channel-connections/available-channels')) {
       return { ok: true, status: 200, json: async () => ({ data: availableChannels }) } as Response;
@@ -690,5 +705,124 @@ describe('OrganizationChannelsPage — 연결 시각 상대시각 정본(story #
     // "MM-DD HH:mm TZ" 꼴(마침표 구분자 없음).
     expect(container.textContent).toMatch(/09-01 \d{2}:\d{2}/);
     expect(container.textContent).not.toMatch(/\d{4}\. \d{1,2}\. \d{1,2}\./);
+  });
+});
+
+// story #3540(Phase1·마케팅운영, 페드루 PO 確定 2026-09-06) — 「성과 수집」 섹션.
+// 발행 채널 카드와 별개 축(beacon·UTM). GA4 줄은 그리지 않는다(유나 §13-7 明示).
+describe('OrganizationChannelsPage — 성과 수집(story #3540)', () => {
+  it('BE 응답이 빈 배열이면 섹션 자체가 안 뜬다(기존 화면 회귀 0)', async () => {
+    stubFetch({});
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-connections-section"]')).toBeNull();
+  });
+
+  it('조회 실패면 일반 오류 배너만 뜬다(섹션은 안 그림)', async () => {
+    stubFetch({ measurementLoadFails: true });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-connections-section"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.channelConnect.measurementLoadFailed);
+  });
+
+  it('beacon=not_started — 「아직 쓰지 않음」+「시작하기」, GA4 줄은 없다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'beacon', status: 'not_started', last_seen_at: null, count_7d: null, settings_path: null },
+        { key: 'utm', status: 'off', last_seen_at: null, count_7d: null, settings_path: '/organization/content-rules' },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementBeaconNotStarted);
+    expect(container.textContent).toContain(koMessages.channelConnect.measurementBeaconStartAction);
+    // 「연결됨」 낱말 금지(유나 §13-7 明示) · GA4 줄 자체가 없다(Phase 2 선행).
+    expect(container.textContent).not.toContain('연결됨');
+    expect(container.textContent).not.toContain('GA4');
+  });
+
+  it('⭐「시작하기」 클릭 → 키 인라인 패널(값+복사+스니펫) → 같은 마운트에서 상태가 no_data_yet으로 갱신된다(재로드 없이)', async () => {
+    let measurementCallCount = 0;
+    stubFetch({
+      measurementConnections: [
+        { key: 'beacon', status: 'not_started', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+      onMeteringKey: () => ({ status: 200, body: { public_key: 'pk_live_abcdef123456' } }),
+    });
+    // stubFetch가 매 GET마다 같은 값을 주므로, 두 번째 measurement-connections 조회
+    // 시점부터 no_data_yet을 돌려주도록 별도 스텁으로 다시 감싼다.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/measurement-connections')) {
+        measurementCallCount += 1;
+        const status = measurementCallCount === 1 ? 'not_started' : 'no_data_yet';
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: [{ key: 'beacon', status, last_seen_at: null, count_7d: status === 'no_data_yet' ? 0 : null, settings_path: null }] }),
+        } as Response;
+      }
+      return (originalFetch as unknown as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+    }) as typeof fetch;
+
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementBeaconNotStarted);
+
+    const startBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.channelConnect.measurementBeaconStartAction) as HTMLButtonElement;
+    await act(async () => { startBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="measurement-beacon-key-value"]')?.textContent).toBe('pk_live_abcdef123456');
+    expect(container.querySelector('[data-testid="measurement-beacon-snippet"]')?.textContent).toContain('pk_live_abcdef123456');
+    expect(container.querySelector('[data-testid="measurement-beacon-snippet"]')?.textContent).toContain('/api/v2/public/pageview');
+    // 재로드 없이 같은 마운트에서 상태 문구가 갱신됐다.
+    expect(container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementBeaconNoDataYet);
+  });
+
+  it('beacon=has_data — 마지막 기록 상대시각이 보인다', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
+    stubFetch({
+      measurementConnections: [
+        { key: 'beacon', status: 'has_data', last_seen_at: '2026-09-06T11:00:00Z', count_7d: 12, settings_path: null },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-beacon-status"]')?.textContent).toContain('전');
+  });
+
+  it('utm=auto — 자동 부착 문구·콘텐츠 규칙 링크', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'utm', status: 'auto', last_seen_at: null, count_7d: null, settings_path: '/organization/content-rules' },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-utm-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementUtmAuto);
+    const link = container.querySelector('[data-testid="measurement-utm-settings-link"]') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/organization/content-rules');
+  });
+
+  it('utm=manual — 수동 규칙 문구', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'utm', status: 'manual', last_seen_at: null, count_7d: null, settings_path: '/organization/content-rules' },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-utm-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementUtmManual);
+  });
+
+  it('utm=off — 꺼짐 문구', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'utm', status: 'off', last_seen_at: null, count_7d: null, settings_path: '/organization/content-rules' },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-utm-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementUtmOff);
   });
 });
