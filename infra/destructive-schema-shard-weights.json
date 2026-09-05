@@ -1058,6 +1058,11 @@
       "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
     },
     {
+      "file": "tests/test_3511_gate_holder_liveness_pending.py",
+      "sec": 40.0,
+      "source": "story-3511-gate-holder-liveness-pending(PR 개설 前 선제 등재 — 로컬 raw pytest 14.92s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_3411_channel_post_text_preview.py",
       "sec": 6.0,
       "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
