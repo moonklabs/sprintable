@@ -151,6 +151,17 @@ function stubFetch(opts: {
   // story #3499 — /publications/{id}/insights 응답. 넘기지 않으면(대부분 테스트가
   // publication_id 자체가 null이라 이 fetch를 아예 안 탄다) 빈 배열.
   insightSnapshots?: unknown[];
+  // story #3517(Phase2·FE, BE #3865 조각①) — 댓글 목록 응답(옵션 생략=uncollected).
+  commentsResponse?: {
+    last_collected_at: string | null;
+    comments: {
+      id: string; external_comment_id: string; author_display_name: string | null; text: string;
+      external_created_at: string | null; captured_at: string; deleted_at: string | null;
+    }[];
+    active_count: number;
+    deleted_count: number;
+  };
+  commentsStatus?: number;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -300,6 +311,15 @@ function stubFetch(opts: {
       }
       if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/insights')) {
         return { ok: true, status: 200, json: async () => ({ data: opts.insightSnapshots ?? [], error: null, meta: null }) };
+      }
+      // story #3517(Phase2·FE, BE #3865 조각①) — 댓글 목록. 기본값(옵션 생략)은
+      // last_collected_at=null(uncollected) — 대부분 테스트가 이 스토리와 무관.
+      if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/comments')) {
+        if (opts.commentsStatus && opts.commentsStatus >= 400) {
+          return { ok: false, status: opts.commentsStatus, json: async () => ({ detail: 'boom' }) };
+        }
+        const data = opts.commentsResponse ?? { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 };
+        return { ok: true, status: 200, json: async () => ({ data, error: null, meta: null }) };
       }
       throw new Error('unexpected fetch: ' + url + ' ' + (init?.method ?? 'GET'));
     }),
@@ -2439,6 +2459,79 @@ describe('ChannelPostEditPage — 성과 인사이트 블록(story #3499, BE #38
     const values = Array.from(insight!.querySelectorAll('[data-testid="insight-metric-value"]')).map((el) => el.textContent);
     expect(values).toContain('200');
     expect(values).toContain('0');
+  });
+});
+
+// story #3517(Phase2·FE, BE #3865 조각①, 그라운딩 ① 삽입 지점) — 발행됨 오버레이 안,
+// InsightSnapshotBlock과 같은 조건(publication_id 있을 때만).
+describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
+  const PUBLISHED_DRAFT = {
+    gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+    publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+    published_at: '2026-09-04T00:00:00Z', publication_id: 'cp-1',
+  } as const;
+
+  it('publication_id 없으면 댓글 섹션 자체를 안 그린다', async () => {
+    stubFetch({ draftDetail: { ...PUBLISHED_DRAFT, publication_id: null } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-section"]')).toBeNull();
+  });
+
+  it('last_collected_at=null — uncollected 얼굴("아직 수집 전")', async () => {
+    stubFetch({ draftDetail: PUBLISHED_DRAFT, commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const published = container.querySelector('[data-testid="channel-post-published-info"]')!;
+    expect(published.querySelector('[data-testid="comments-face-uncollected"]')).not.toBeNull();
+  });
+
+  it('댓글 GET 500 — error 얼굴("불러오지 못했습니다"), 화면 전체는 안 막힌다', async () => {
+    stubFetch({ draftDetail: PUBLISHED_DRAFT, commentsStatus: 500 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const published = container.querySelector('[data-testid="channel-post-published-info"]')!;
+    expect(published.querySelector('[data-testid="comments-face-error"]')).not.toBeNull();
+    // 화면 전체는 안 막혔다 — permalink 등 주 데이터가 그대로 보인다.
+    expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
+  });
+
+  it('댓글 n건 — 목록·작성자·본문이 서버 응답 그대로 뜬다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '좋은 글이네요',
+          external_created_at: '2026-09-05T09:00:00Z', captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+        }],
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const published = container.querySelector('[data-testid="channel-post-published-info"]')!;
+    expect(published.querySelector('[data-testid="comments-item-author"]')?.textContent).toBe('홍길동');
+    expect(published.querySelector('[data-testid="comment-body-text"]')?.textContent).toContain('좋은 글이네요');
+  });
+
+  it('「작업으로 전환」 클릭 — 다이얼로그가 열리고 제목이 prefill된다(댓글 본문은 제목에 없다)', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '이 부분 설명이 부족해요',
+          external_created_at: '2026-09-05T09:00:00Z', captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+        }],
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const titleInput = document.querySelector('#comments-convert-title') as HTMLInputElement;
+    expect(titleInput).not.toBeNull();
+    expect(titleInput.value).not.toContain('이 부분 설명이 부족해요');
   });
 });
 

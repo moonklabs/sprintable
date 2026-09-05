@@ -6,16 +6,26 @@
 // 둘 다 클릭 한 번으로 공짜)를 재사용한다.
 const COLLAPSE_THRESHOLD = 200;
 
-export function CommentBodyText({ text, moreLabel }: { text: string; moreLabel: string }) {
-  if (text.length <= COLLAPSE_THRESHOLD) {
+export interface CommentBodyTextProps {
+  text: string;
+  moreLabel: string;
+  /** story #3517(§22-9, PO 確定) — 지워진 댓글은 길이 무관 기본 접힘(짧아도 접는다).
+   * uncontrolled <details defaultOpen={false}>로 항상 접힌 채 시작 — 펼치기는 여전히
+   * 가능(text는 BE가 보존해서 준다, 숨기는 게 아니라 «남의 지워진 글»이라 기본을
+   * 낮추는 것뿐). */
+  forceCollapsed?: boolean;
+}
+
+export function CommentBodyText({ text, moreLabel, forceCollapsed }: CommentBodyTextProps) {
+  if (!forceCollapsed && text.length <= COLLAPSE_THRESHOLD) {
     return <p className="whitespace-pre-wrap text-sm text-foreground" data-testid="comment-body-text">{text}</p>;
   }
-  const preview = text.slice(0, COLLAPSE_THRESHOLD).trimEnd();
+  const preview = text.length > COLLAPSE_THRESHOLD ? text.slice(0, COLLAPSE_THRESHOLD).trimEnd() : text;
   return (
     <details className="text-sm text-foreground" data-testid="comment-body-text">
       <summary className="cursor-pointer whitespace-pre-wrap">
         {preview}
-        {'… '}
+        {text.length > COLLAPSE_THRESHOLD ? '… ' : ' '}
         <span className="text-muted-foreground underline">{moreLabel}</span>
       </summary>
       <p className="mt-1 whitespace-pre-wrap">{text}</p>

@@ -38,6 +38,7 @@ const COMMENT: CommentItem = {
   authorDisplayName: '홍길동',
   bodyText: '이 부분 설명이 부족해요',
   externalCreatedAt: '2026-09-05T10:00:00Z',
+  deletedAt: null,
   replyStatus: 'none',
 };
 

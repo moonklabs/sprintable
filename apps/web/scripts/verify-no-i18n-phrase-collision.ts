@@ -325,6 +325,15 @@ export const EXEMPT_PAIRS = new Set<string>([
   // (#2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다 — {list}는
   // 필드 이름 목록이지 숫자가 아니다).
   'contentRules.saveAction <-> contentRules.versionConflictPriorChanged',
+  // story #3517(§22-②·⑨, 2026-09-05) — content.commentsSectionTitleWithCount
+  // ("댓글 {count}", 목록 얼굴 제목)·content.commentsDeletedCountLabel("지워진 댓글
+  // {count}건", 헤더 부속 줄)·content.commentsSectionTitle("댓글", 미수집/오류 얼굴
+  // 제목) 셋이 전부 "댓글"을 공유한다 — #2352/#2365가 잡으려는 "같은 화면의 두 «수»가
+  // 헷갈리는" 병이 아니라, 세 얼굴에서 같은 개념("댓글")을 일관되게 쓰는 것 자체가
+  // §22-②의 의도다(세 얼굴 문구를 서로 다른 낱말로 갈랐으면 그게 오히려 결함).
+  'content.commentsDeletedCountLabel <-> content.commentsSectionTitleWithCount',
+  'content.commentsSectionTitle <-> content.commentsSectionTitleWithCount',
+  'content.commentsDeletedCountLabel <-> content.commentsSectionTitle',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

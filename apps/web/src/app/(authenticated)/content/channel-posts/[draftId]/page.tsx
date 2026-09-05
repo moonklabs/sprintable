@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -20,6 +20,8 @@ import { parseScheduledAtServerError } from '@/components/content/validate-sched
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
+import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
+import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
@@ -222,6 +224,26 @@ export default function ChannelPostEditPage() {
       .catch(() => { if (!cancelled) setInsightSnapshots([]); });
     return () => { cancelled = true; };
   }, [orgId, draft?.publication_id]);
+  // story #3517(Phase2·FE, BE #3865 조각①, §22-2 삽입 지점 그라운딩) — 발행됨 오버레이
+  // 안, InsightSnapshotBlock과 같은 조건(draft.publication_id 있을 때만)·같은 왕복
+  // 패턴(insights 미러). 부수 데이터(§16-7 2부 원칙 그대로 — 3514/#3864 선례) — reject
+  // 시에도 'error' 얼굴로 안전 착지, 화면 전체를 막지 않는다.
+  const [commentsFace, setCommentsFace] = useState<CommentsFace>({ kind: 'uncollected' });
+  const loadComments = useCallback(() => {
+    if (!orgId || !draft?.publication_id) { setCommentsFace({ kind: 'uncollected' }); return; }
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/comments`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelled) return;
+        const data = (body?.data ?? null) as RawCommentsResponse | null;
+        if (!data) { setCommentsFace({ kind: 'error' }); return; }
+        setCommentsFace(deriveCommentsFace(data));
+      })
+      .catch(() => { if (!cancelled) setCommentsFace({ kind: 'error' }); });
+    return () => { cancelled = true; };
+  }, [orgId, draft?.publication_id]);
+  useEffect(() => loadComments(), [loadComments]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -292,6 +314,11 @@ export default function ChannelPostEditPage() {
   // — 다이얼로그가 안 닫혀 재선택 가능하게 유지한다.
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleServerError, setScheduleServerError] = useState<'past_or_invalid' | null>(null);
+
+  // story #3517(Phase2·FE) — 「작업으로 전환」 다이얼로그. comment 자체가 open/close를
+  // 겸한다(null=닫힘, 그 댓글=열림) — dialog와 별도 boolean state를 안 둔다(kanban의
+  // story-detail-panel.tsx류 편집 다이얼로그와 동형 관례).
+  const [convertToTaskComment, setConvertToTaskComment] = useState<CommentItem | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<
@@ -1201,6 +1228,19 @@ export default function ChannelPostEditPage() {
               {draft.publication_id ? (
                 <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
               ) : null}
+              {/* story #3517(Phase2·FE, 그라운딩 ① 자리 그대로 — InsightSnapshotBlock 곁,
+                  같은 draft.publication_id 조건) — 댓글 섹션. */}
+              {draft.publication_id ? (
+                <CommentsSection
+                  face={commentsFace}
+                  displayTimezone={displayTimezone}
+                  onConvertToTask={setConvertToTaskComment}
+                  onReply={() => {
+                    // story #3517 — 답변 초안→상신→승인 카드 흐름은 조각②(답변/작업전환
+                    // 엔드포인트) 대기 중(그라운딩 보고 済). 배선 자체는 다음 조각.
+                  }}
+                />
+              ) : null}
             </div>
           );
         }
@@ -1653,6 +1693,19 @@ export default function ChannelPostEditPage() {
         submitting={submitting}
         serverError={scheduleServerError}
       />
+      {/* story #3517(Phase2·FE) — 조각②(작업전환 엔드포인트)가 아직 없어 실제 POST는
+          미배선(§22-④ prefill·다이얼로그 자체는 조각①만으로 완결). 게시물 제목은
+          이 화면엔 별도 title 필드가 없다(text 자체가 본문) — 원문(source_title)이
+          있으면 그걸, 없으면(단독 채널 초안) 본문 앞부분으로 대체(지어내지 않되
+          다이얼로그 제목 칸을 비워 두지 않는다, §21-5 관례). */}
+      {convertToTaskComment ? (
+        <CommentConvertToTaskDialog
+          postTitle={draft.source_title ?? (versions[versions.length - 1]?.text.slice(0, 40) ?? '')}
+          comment={convertToTaskComment}
+          onClose={() => setConvertToTaskComment(null)}
+          onSubmit={() => Promise.resolve({ ok: false, errorMessage: t('commentsConvertPendingBackend') })}
+        />
+      ) : null}
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
           워시된다, Phase 0 실측). */}
       {isOverLimit ? (
