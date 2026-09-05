@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -156,13 +157,14 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
             <span className="relative">
               <Icon className="size-[22px]" strokeWidth={1.8} />
               {badge !== null ? (
-                <span
-                  aria-hidden
-                  className="absolute -top-1 left-full ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
-                >
-                  {/* story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지 */}
-                  {key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
-                </span>
+                // story #3431 — 공용 CornerCountBadge로 통합(bell·presence와 동일 정의,
+                // 색/크기 무변경). 위치만 이 소비처 고유(아이콘 오른쪽 옆, 코너 아님).
+                <CornerCountBadge
+                  variant="primary"
+                  className="absolute -top-1 left-full ml-0.5"
+                  // story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지
+                  value={key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
+                />
               ) : null}
             </span>
             {t(labelKey)}
