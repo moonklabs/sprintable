@@ -144,6 +144,20 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
           : key === 'chat' && chatUnreadTotal > 0
             ? chatUnreadTotal
             : null;
+        // story #3518(유나 사전 스티어, 2026-09-05) — CornerCountBadge는 aria-hidden이라
+        // 그 수를 보조기술에 전하는 책임은 이 링크에 있다(계약은 corner-count-badge.tsx
+        // 주석 참고). ⚠️여기 aria-label을 쓰지 않는다 — 이 탭은 벨/프레즌스와 달리
+        // 보이는 텍스트 라벨("채팅"·"결재")이 이미 있어서, aria-label로 접근성 이름을
+        // 통째로 갈아치우면 그 보이는 라벨이 이름에서 사라진다(WCAG 2.5.3 Label in
+        // Name 위반 — 음성 입력 사용자가 화면에 보이는 말("채팅")로 이 링크를 못
+        // 부른다). 대신 시각 라벨 뒤에 sr-only 텍스트를 덧붙인다 — 보이는 라벨은
+        // 그대로 두고 수만 "더한다". 상한(9+/99+)도 이름에 반영한다(캡 값이 아니라
+        // "그 이상"이라는 사실을 문장으로 — 시각 배지의 캡과 같은 뜻).
+        const srCountText = badge === null
+          ? null
+          : key === 'chat'
+            ? (badge > 99 ? t('chatUnreadSrCapped') : t('chatUnreadSr', { count: badge }))
+            : (badge > 9 ? t('approvalsPendingSrCapped') : t('approvalsPendingSr', { count: badge }));
         return (
           <Link
             key={key}
@@ -168,6 +182,10 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
               ) : null}
             </span>
             {t(labelKey)}
+            {/* story #3518 — 보이는 라벨 뒤에 이어 붙인다(라벨을 갈아치우지 않는다,
+                WCAG 2.5.3). aria-live는 안 붙인다(탭 전환 때마다 안내를 반복하지
+                않는다 — 이 링크에 포커스/진입할 때만 한 번 읽힌다). */}
+            {srCountText ? <span className="sr-only"> {srCountText}</span> : null}
           </Link>
         );
       })}

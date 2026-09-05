@@ -74,7 +74,11 @@
     "now": "Now",
     "approvals": "Approvals",
     "chat": "Chat",
-    "more": "More"
+    "more": "More",
+    "approvalsPendingSr": "{count, plural, one {# pending approval} other {# pending approvals}}",
+    "approvalsPendingSrCapped": "9 or more pending approvals",
+    "chatUnreadSr": "{count} unread",
+    "chatUnreadSrCapped": "99 or more unread"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -2843,7 +2847,8 @@
     "emptyStory": "No story notifications",
     "emptySystem": "No system notifications",
     "daysAgo": "d ago",
-    "bellAriaLabelCount": "{count} notifications",
+    "bellAriaLabelCount": "{count, plural, one {# notification} other {# notifications}}",
+    "bellAriaLabelCountCapped": "99 or more notifications",
     "syncDegradedBanner": "Some older notifications may be missing — check the list below"
   },
   "invite": {
