@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.channel_post_version import ChannelPostVersion
+from app.services.content_rules import get_org_content_rules
 from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
     ChannelImageContainerFailedError,
@@ -377,8 +378,10 @@ async def post_channel_post_draft_version(
             },
         ) from exc
 
+    utm_rule_row = await get_org_content_rules(db, org_id=org_id)
+    utm_rules = (utm_rule_row.rules or {}).get("utm_rules") if utm_rule_row else None
     tagged_link_preview = (
-        build_tagged_link(channel=channel, link_url=body.link_url, draft_id=version.draft_id)
+        build_tagged_link(channel=channel, link_url=body.link_url, draft_id=version.draft_id, utm_rules=utm_rules)
         if body.link_url else None
     )
     return ChannelPostDraftVersionResponse(
@@ -786,13 +789,15 @@ async def list_channel_post_draft_version_history(
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
 
     versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
+    utm_rule_row = await get_org_content_rules(db, org_id=org_id)
+    utm_rules = (utm_rule_row.rules or {}).get("utm_rules") if utm_rule_row else None
     return [
         ChannelPostVersionHistoryItem(
             version_id=v.id, version=v.version, draft_id=draft.id, text=v.text, link_url=v.link_url,
             body_sha256=v.body_sha256, author_member_id=v.author_member_id, author_kind=v.author_kind,
             created_at=v.created_at.isoformat(),
             tagged_link_preview=(
-                build_tagged_link(channel=draft.channel, link_url=v.link_url, draft_id=draft.id)
+                build_tagged_link(channel=draft.channel, link_url=v.link_url, draft_id=draft.id, utm_rules=utm_rules)
                 if v.link_url else None
             ),
         )

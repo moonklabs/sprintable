@@ -276,17 +276,32 @@ def compute_channel_post_hash(*, text: str, link_url: str | None) -> str:
     return compute_seal_hash({"text": text, "link_url": link_url})
 
 
-def build_tagged_link(*, channel: str, link_url: str, draft_id: uuid.UUID) -> str | None:
+def build_tagged_link(
+    *, channel: str, link_url: str, draft_id: uuid.UUID, utm_rules: dict | None = None,
+) -> str | None:
     """story #3394(S2c BE 선행) AC5·`publish_channel_post_draft` 공용 — UTM 태그된 최종
     링크 조립. **미리보기(편집·버전이력 응답)와 실제 발행이 반드시 같은 값을 내야 한다** —
     로직을 두 곳에 따로 두면 "미리보기가 거짓말"하는 자리가 생긴다(그래서 publish_channel_
     post_draft도 이 함수로 옮겼다, 신규 로직 아님). 어댑터가 없는 채널이면 None(지어내지
-    않는다 — 발행 자체도 이 경우 별도 가드로 막힌다)."""
+    않는다 — 발행 자체도 이 경우 별도 가드로 막힌다).
+
+    story #3506(페드루 PO 確定 2026-09-05) — `utm_rules`는 org_content_rules.rules.
+    utm_rules 딕셔너리 그대로(호출부가 미리 조회해 넘긴다 — 이 함수 자체는 DB를 안
+    본다, 기존 순수 함수 계약 유지). `enabled`가 아니거나 자체가 없으면(=«규칙
+    없음») source/medium은 어댑터 하드코딩 그대로·utm_content는 안 붙는다(회귀 0,
+    #f8f7cb0f 시절 동작과 완전히 동일). `enabled=true`면 default_source/medium이
+    있는 것만 override하고(둘 다 선택), content_from="draft_id"(기본값)면
+    utm_content=draft_id."""
     adapter = get_channel_adapter(channel)
     if adapter is None:
         return None
     campaign = resolve_utm_campaign(link_url, fallback_draft_id=draft_id)
-    return attach_utm(link_url, source=adapter.utm_source, medium=adapter.utm_medium, campaign=campaign)
+    rules = utm_rules or {}
+    enabled = rules.get("enabled", False)
+    source = (rules.get("default_source") if enabled else None) or adapter.utm_source
+    medium = (rules.get("default_medium") if enabled else None) or adapter.utm_medium
+    content = str(draft_id) if enabled and rules.get("content_from", "draft_id") == "draft_id" else None
+    return attach_utm(link_url, source=source, medium=medium, campaign=campaign, content=content)
 
 
 async def _get_active_connection(
@@ -1186,8 +1201,12 @@ async def publish_channel_post_draft(
     get_publishing_limit = _publish_client.get_publishing_limit
     publish_container = _publish_client.publish_container
 
+    # story #3506 — org의 utm_rules(있으면)를 미리보기(아래 두 라우터 call site)와
+    # 같은 값으로 넘긴다(build_tagged_link 자체는 DB를 안 보는 순수 함수 계약 유지).
+    utm_rule_row = await get_org_content_rules(db, org_id=org_id)
+    utm_rules = (utm_rule_row.rules or {}).get("utm_rules") if utm_rule_row else None
     tagged_link = (
-        build_tagged_link(channel=draft.channel, link_url=latest.link_url, draft_id=draft.id)
+        build_tagged_link(channel=draft.channel, link_url=latest.link_url, draft_id=draft.id, utm_rules=utm_rules)
         if latest.link_url else None
     )
     text_to_post = f"{latest.text}\n\n{tagged_link}" if tagged_link else latest.text
