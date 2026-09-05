@@ -5054,7 +5054,7 @@
     "brandKitColorsPlaceholder": "Type a color code and press Enter",
     "brandKitFontsLabel": "Brand kit · Fonts",
     "brandKitFontsPlaceholder": "Type a font name and press Enter",
-    "contentRulesAdvisoryNotice": "Agents use this as a reference when drafting. It doesn't block publishing.",
+    "contentRulesAdvisoryNotice": "The items below are used by agents as a reference when drafting. They don't block publishing.",
     "contentRulesNotSetLabel": "Not set",
     "brandKitLogoPreviewAlt": "Brand kit logo preview",
     "brandKitLogoLoadFailed": "Couldn't load this image.",
