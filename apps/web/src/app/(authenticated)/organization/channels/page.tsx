@@ -51,10 +51,11 @@ function ReauthNote({ reason, t }: { reason?: 'expired' | 'revoked' | 'error'; t
 }
 
 function ConnectionRow({
-  conn, isOwner, orgId, onDisconnected, t,
+  conn, isOwnerStrict, isOwnerOrAdmin, orgId, onDisconnected, t,
 }: {
   conn: ChannelConnectionResponse;
-  isOwner: boolean;
+  isOwnerStrict: boolean;
+  isOwnerOrAdmin: boolean;
   orgId: string;
   onDisconnected: () => void;
   t: ReturnType<typeof useTranslations>;
@@ -70,6 +71,7 @@ function ConnectionRow({
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [testing, setTesting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
 
   const handleTest = useCallback(async () => {
     setTesting(true);
@@ -85,15 +87,27 @@ function ConnectionRow({
     }
   }, [orgId, conn.id]);
 
+  // story #3504(PO 정본③) — 옛 `if (res.ok) onDisconnected()`뿐이라 실패하면
+  // 스피너만 멎고 화면이 그대로였다. replace-credential-card.tsx의 error+Alert
+  // 패턴을 그대로 이식 — 403(CHANNEL_CONNECTION_OWNER_ONLY)은 「이 작업은
+  // owner만 할 수 있습니다」(§5 정본 문구 재사용, connectErrorLabelKey의 다른
+  // 자리용 문구와 안 섞는다), 그 외는 일반 실패.
   const handleDisconnect = useCallback(async () => {
     setDisconnecting(true);
+    setDisconnectError(null);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${conn.id}/disconnect`, { method: 'POST' });
-      if (res.ok) onDisconnected();
+      if (res.ok) {
+        onDisconnected();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+      const code = body?.error?.code;
+      setDisconnectError(code === 'CHANNEL_CONNECTION_OWNER_ONLY' ? t('channelOwnerOnlyReason') : t('channelDisconnectFailed'));
     } finally {
       setDisconnecting(false);
     }
-  }, [orgId, conn.id, onDisconnected]);
+  }, [orgId, conn.id, onDisconnected, t]);
 
   return (
     <div className="space-y-2 border-b border-border px-3 py-3 last:border-b-0">
@@ -144,8 +158,11 @@ function ConnectionRow({
         <Button size="sm" variant="outline" onClick={() => void handleTest()} disabled={testing}>
           {t('channelTestAction')}
         </Button>
+        {/* story #3504 — 재인증·해제는 owner 전용(_require_owner). §5-2 "그려진
+            컨트롤은 「할 수 있다」는 단정" — admin에게 넓게 그리고 403으로 막지
+            않는다: 안 그리고 사유 한 줄만. */}
         {derived.status === 'reauth_required' ? (
-          isOwner ? (
+          isOwnerStrict ? (
             <a href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}`}>
               <Button size="sm" variant="outline">{t('channelReauthAction')}</Button>
             </a>
@@ -153,7 +170,7 @@ function ConnectionRow({
             <span className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</span>
           )
         ) : null}
-        {isOwner ? (
+        {isOwnerStrict ? (
           <Button size="sm" variant="destructive" onClick={() => void handleDisconnect()} disabled={disconnecting}>
             {t('channelDisconnectAction')}
           </Button>
@@ -161,14 +178,20 @@ function ConnectionRow({
           <span className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</span>
         )}
       </div>
+      {disconnectError ? (
+        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true" data-testid="channel-disconnect-error">
+          <AlertDescription>{disconnectError}</AlertDescription>
+        </Alert>
+      ) : null}
       {/* story #3492 — 붙여넣기(pasted_secret) 연결만 「자격 바꾸기」를 갖는다(해제→
-          재연결 대신 id 불변 제자리 교체). oauth 연결은 위 재인증 버튼이 그 역할). */}
+          재연결 대신 id 불변 제자리 교체). oauth 연결은 위 재인증 버튼이 그 역할).
+          자격 교체는 owner|admin(_require_owner_or_admin) — isOwnerOrAdmin. */}
       {conn.credential_kind === 'pasted_secret' ? (
         <ReplaceCredentialCard
           channel={conn.channel}
           connectionId={conn.id}
           secretHint={conn.secret_hint}
-          isOwner={isOwner}
+          isOwner={isOwnerOrAdmin}
           orgId={orgId}
           onReplaced={onDisconnected}
           t={t}
@@ -179,12 +202,13 @@ function ConnectionRow({
 }
 
 function ChannelSection({
-  item, connections, credentials, isOwner, orgId, onRefresh, t,
+  item, connections, credentials, isOwnerStrict, isOwnerOrAdmin, orgId, onRefresh, t,
 }: {
   item: AvailableChannelItem;
   connections: ChannelConnectionResponse[];
   credentials: AppCredentialsStatusResponse | undefined;
-  isOwner: boolean;
+  isOwnerStrict: boolean;
+  isOwnerOrAdmin: boolean;
   orgId: string;
   onRefresh: () => void;
   t: ReturnType<typeof useTranslations>;
@@ -221,7 +245,7 @@ function ChannelSection({
       const code = body?.error?.code;
       setSandboxError(
         code === 'CHANNEL_CONNECTION_OWNER_OR_ADMIN_ONLY'
-          ? t('channelOwnerOnlyReason')
+          ? t('channelOwnerOrAdminOnlyReason')
           // AC2 — 404 CHANNEL_SANDBOX_DISABLED는 이 버튼이 애초에 안 그려져야 정상이다
           // (available-channels 목록에 sandbox가 없으면 이 컴포넌트 자체가 안 만들어짐).
           // 그래도 두 요청 사이에 서버 설정이 바뀌는 경합을 대비한 방어적 문구만.
@@ -259,23 +283,26 @@ function ChannelSection({
         ) : (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
             {connections.map((c) => (
-              <ConnectionRow key={c.id} conn={c} isOwner={isOwner} orgId={orgId} onDisconnected={onRefresh} t={t} />
+              <ConnectionRow key={c.id} conn={c} isOwnerStrict={isOwnerStrict} isOwnerOrAdmin={isOwnerOrAdmin} orgId={orgId} onDisconnected={onRefresh} t={t} />
             ))}
           </div>
         )}
         <div className="flex flex-col items-start gap-1">
+          {/* story #3504(PO 정본§5) — OAuth 연결은 owner 전용(authorize_channel_connection
+              = _require_owner). 권한을 먼저 판정해 안 그린다(옛 `<Button disabled>`는
+              §5-2가 금지한 "권한인데 비활성"이었다 — L275 문제였던 자리) — 그 다음에야
+              (owner인 경우에만) 자격 미설정이라는 **상태** 축을 disabled로 표현한다. */}
           {credential_kind === 'oauth' ? (
-            isOwner ? (
+            isOwnerStrict ? (
               <a href={canStartConnect ? `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}` : undefined}>
                 <Button size="sm" disabled={!canStartConnect}>
                   {t('channelConnectAction', { channel: channelLabel(channel, t) })}
                 </Button>
               </a>
-            ) : (
-              <Button size="sm" disabled>{t('channelConnectAction', { channel: channelLabel(channel, t) })}</Button>
-            )
+            ) : null
           ) : credential_kind === 'none' ? (
-            isOwner ? (
+            // sandbox 생성은 owner|admin(create_sandbox_channel_connection = _require_owner_or_admin).
+            isOwnerOrAdmin ? (
               <Button
                 size="sm" onClick={() => void handleCreateSandbox()} disabled={creatingSandbox}
                 data-testid="channel-connect-sandbox-button"
@@ -285,16 +312,21 @@ function ChannelSection({
             ) : null
           ) : credential_kind === 'pasted_secret' ? (
             // story #3450 FE 후속(3653a18c §2 "②발급해서 붙여넣기", PO 確定
-            // 2026-09-04 23:13Z) — 자리 채움. isOwner는 이 파일의 owner-or-admin
-            // 상수(oauth/sandbox와 동일 게이팅, §5 "연결·해제는 owner" 취지에 admin
-            // 까지 넓힌 기존 결정 그대로 재사용).
-            <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwner} onConnected={onRefresh} t={t} />
+            // 2026-09-04 23:13Z) — 자리 채움. 붙여넣기 연결은 owner|admin
+            // (create_pasted_secret_channel_connection = _require_owner_or_admin).
+            <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwnerOrAdmin} onConnected={onRefresh} t={t} />
           ) : null}
-          {credential_kind === 'oauth' && !canStartConnect ? (
+          {credential_kind === 'oauth' && isOwnerStrict && !canStartConnect ? (
             <p className="text-xs text-muted-foreground">{t('channelConfigIncompleteReason')}</p>
           ) : null}
-          {(credential_kind === 'oauth' || credential_kind === 'none') && !isOwner ? (
+          {/* story #3504 — L297은 «한 자리가 두 폭»이었다(유나 지적). oauth는 owner
+              전용 문구, none(sandbox)은 owner|admin 문구 — credential_kind로 갈라야
+              한쪽에서 거짓이 안 남는다. */}
+          {credential_kind === 'oauth' && !isOwnerStrict ? (
             <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p>
+          ) : null}
+          {credential_kind === 'none' && !isOwnerOrAdmin ? (
+            <p className="text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>
           ) : null}
           {credential_kind === 'none' && sandboxError ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
@@ -308,7 +340,12 @@ function ChannelSection({
 export default function OrganizationChannelsPage() {
   const { orgId, orgMemberships } = useDashboardContext();
   const currentRole = orgMemberships.find((o) => o.orgId === orgId)?.role ?? 'member';
-  const isOwner = currentRole === 'admin' || currentRole === 'owner';
+  // story #3504(PO 確定 2026-09-05, 유나 doc 3653a18c §5-1/§5-2) — 옛 `isOwner`는
+  // 이름과 달리 owner|admin이었다. 서버 폭이 둘(owner 전용 vs owner|admin)이라
+  // 화면도 두 불리언을 따로 가진다 — content-rules/page.tsx의 `canEditRules`와
+  // 같은 소스(orgMemberships)에서 파생.
+  const isOwnerStrict = currentRole === 'owner';
+  const isOwnerOrAdmin = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('channelConnect');
   const searchParams = useSearchParams();
 
@@ -381,7 +418,10 @@ export default function OrganizationChannelsPage() {
       ) : null}
       {connectError ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription>{t(connectErrorLabelKey(connectError, isOwner))}</AlertDescription>
+          {/* story #3504 — CHANNEL_APP_CREDENTIALS_MISSING의 "누구에게 요청하나" 분기는
+              app-credentials 등록 자격(owner 전용, 앱 자격 저장과 같은 폭)을 묻는다 —
+              owner|admin 폭인 isOwnerOrAdmin이 아니라 isOwnerStrict가 맞다. */}
+          <AlertDescription>{t(connectErrorLabelKey(connectError, isOwnerStrict))}</AlertDescription>
         </Alert>
       ) : null}
       {loadError ? (
@@ -396,12 +436,13 @@ export default function OrganizationChannelsPage() {
         </div>
       ) : (
         <>
+          {/* 앱 자격 저장은 owner 전용(set_channel_app_credentials = _require_owner). */}
           {availableChannels.filter((it) => it.credential_kind === 'oauth').map((it) => (
             <AppCredentialsCard
               key={it.channel}
               channel={it.channel}
               orgId={orgId ?? ''}
-              isOwner={isOwner}
+              isOwner={isOwnerStrict}
               credentials={credentialsByChannel[it.channel]}
               onSaved={() => void load()}
             />
@@ -412,7 +453,8 @@ export default function OrganizationChannelsPage() {
               item={it}
               connections={connections.filter((c) => c.channel === it.channel)}
               credentials={credentialsByChannel[it.channel]}
-              isOwner={isOwner}
+              isOwnerStrict={isOwnerStrict}
+              isOwnerOrAdmin={isOwnerOrAdmin}
               orgId={orgId ?? ''}
               onRefresh={() => void load()}
               t={t}

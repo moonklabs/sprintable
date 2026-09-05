@@ -62,9 +62,11 @@ export function ReplaceCredentialCard({
 
   if (!fields) return null;
 
-  // §5 정본과 동형 — 비owner/admin은 버튼 자체를 안 그리고 사유 한 줄만.
+  // §5 정본과 동형 — 비owner/admin은 버튼 자체를 안 그리고 사유 한 줄만. story
+  // #3504 — 자격 교체는 owner|admin 폭(replace_channel_connection_credentials =
+  // _require_owner_or_admin)이라 owner 전용 문구는 거짓이다 — 두 폭 전용 키로.
   if (!isOwner) {
-    return <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p>;
+    return <p className="text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>;
   }
 
   const allFilled = fields.every((f) => !f.required || (values[f.name] ?? '').trim().length > 0);
