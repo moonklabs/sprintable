@@ -60,17 +60,20 @@ export function ApplyRecipeDialog({
     setWarnings([]);
     void (async () => {
       try {
+        // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(ok?채움:빈값)인데 격리
+        // 없이 같은 Promise.all 안에 있어, 하나가 네트워크단 reject하면 나머지도 조용히
+        // 빈 값이 됐다 — "에이전트 없음"처럼 보이지만 실은 네트워크 실패인 자리.
         const [memberRes, bindingsRes] = await Promise.all([
-          fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`),
-          fetchWithAuth(`/api/events/definitions/${target.id}/bindings?project_id=${projectId}`),
+          fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`).catch(() => null),
+          fetchWithAuth(`/api/events/definitions/${target.id}/bindings?project_id=${projectId}`).catch(() => null),
         ]);
-        if (memberRes.ok) {
+        if (memberRes?.ok) {
           const json = await memberRes.json() as { data?: AgentOption[] } | AgentOption[];
           setAgents(Array.isArray(json) ? json : (json.data ?? []));
         } else {
           setAgents([]);
         }
-        if (bindingsRes.ok) {
+        if (bindingsRes?.ok) {
           const j = await bindingsRes.json() as { bindings?: Record<string, string> };
           setRoleMapping(j.bindings ?? {});
         } else {

@@ -392,12 +392,17 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const memberParams = projectId ? `?project_id=${projectId}` : '';
 
       // CB-S4: status별 5회 독립 호출
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드의 실제 몸통, 주)와
+      // sprintsRes/epicsRes/membersRes(부수, ok?채움:방치)가 같은 Promise.all에 미격리로
+      // 묶여 있어, 부수 셋 중 하나가 네트워크단 reject하면 보드 주 데이터까지 조용히 텅
+      // 비었다(finally가 setLoading(false)는 걸어 무한 스켈레톤은 아니지만, 데이터 손실은
+      // 그대로). 부수 셋만 leg별로 격리한다.
       const statuses = COLUMNS.map((c) => c.id);
       const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
-        fetchWithAuth(`/api/sprints${sprintParams}`),
-        fetchWithAuth(`/api/goals?${epicParams.toString()}`),
-        fetchWithAuth(`/api/members${memberParams}`),
+        fetchWithAuth(`/api/sprints${sprintParams}`).catch(() => null),
+        fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
+        fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
       ]);
 
       const allStories: KanbanStory[] = [];
@@ -413,9 +418,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setColumnCursors(newCursors);
 
       const storyIds = allStories.map((s) => s.id);
-      if (sprintsRes.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
-      if (epicsRes.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
-      if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data); }
+      if (sprintsRes?.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
+      if (epicsRes?.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
+      if (membersRes?.ok) { const json = await membersRes.json(); setMembers(json.data); }
 
       if (projectId && storyIds.length > 0) {
         try {

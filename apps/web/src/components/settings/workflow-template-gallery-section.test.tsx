@@ -69,6 +69,23 @@ function stubFetch(overrides: Record<string, unknown> = {}) {
   }));
 }
 
+// story #3519(§16-7 2부, PO 確定 2026-09-05) — defRes(주, 갤러리 몸통)와 memberRes
+// (부수)가 미격리 Promise.all에 있어, memberRes가 네트워크단 reject하면 defRes도
+// 조용히 못 채워져 갤러리가 거짓 "항목 없음"으로 보이던 결함의 회귀가드.
+describe('WorkflowTemplateGallerySection — Promise.all 부수 격리(story #3519)', () => {
+  it('/api/team-members가 네트워크 reject해도 정의 목록(주 데이터)은 그대로 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+      if (url.includes('/api/team-members')) throw new Error('network down');
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    expect(container.textContent).toContain('테스트 레시피');
+  });
+});
+
 describe('WorkflowTemplateGallerySection — error.message 분기 (story #2501 계승)', () => {
   it('적용 실패 사유가 raw "적용 실패" 폴백 대신 실 서버 메시지로 뜬다(핵심 회귀가드)', async () => {
     stubFetch({
