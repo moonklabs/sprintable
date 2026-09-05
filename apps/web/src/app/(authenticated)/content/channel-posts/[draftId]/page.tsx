@@ -407,22 +407,32 @@ export default function ChannelPostEditPage() {
   // 만들지 않는다 — 원문 그 자체를 BE가 아직 안 실어서(additive 前) 지어낼 수
   // 없다(못 하는 것으로 명기).
   const [replyPrefillText, setReplyPrefillText] = useState<string | undefined>(undefined);
+  // story #3544 후속⑨(유나 관찰, PO 確定 2026-09-06) — replyPrefillText가
+  // undefined인 이유가 「일반 답변(새로 시작)이라 원래 빈 칸」인지 「다시 상신인데
+  // 단건 GET이 실패했다」인지를 이 플래그로 가른다(둘 다 undefined라 그 필드
+  // 하나로는 못 가른다).
+  const [replyPrefillFetchFailed, setReplyPrefillFetchFailed] = useState(false);
   const handleOpenReply = useCallback((comment: CommentItem) => {
     setReplyPrefillText(undefined);
+    setReplyPrefillFetchFailed(false);
     setReplyComment(comment);
   }, []);
   const handleResubmitReply = useCallback(async (comment: CommentItem) => {
     let prefill: string | undefined;
+    let fetchFailed = true;
     if (orgId && comment.replyId) {
       try {
         const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${comment.id}/replies/${comment.replyId}`);
         const body = await res.json().catch(() => null) as { data?: ReplyView } | null;
         prefill = res.ok ? (body?.data?.text ?? undefined) : undefined;
+        fetchFailed = !res.ok;
       } catch {
         prefill = undefined;
+        fetchFailed = true;
       }
     }
     setReplyPrefillText(prefill);
+    setReplyPrefillFetchFailed(fetchFailed);
     setReplyComment(comment);
   }, [orgId]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
@@ -1961,10 +1971,11 @@ export default function ChannelPostEditPage() {
       {replyComment ? (
         <CommentReplyDialog
           comment={replyComment}
-          onClose={() => { setReplyComment(null); setReplyPrefillText(undefined); }}
+          onClose={() => { setReplyComment(null); setReplyPrefillText(undefined); setReplyPrefillFetchFailed(false); }}
           onCreateDraft={handleCreateReplyDraft}
           onSubmit={handleSubmitReply}
           initialText={replyPrefillText}
+          prefillFetchFailed={replyPrefillFetchFailed}
         />
       ) : null}
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에

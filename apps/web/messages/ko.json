@@ -2257,6 +2257,7 @@
     "commentsConvertClose": "닫기",
     "commentsReplyDialogTitle": "답변",
     "commentsReplyTextLabel": "답변 내용",
+    "commentsReplyPrefillFetchFailed": "이전 답변을 불러오지 못했습니다 — 직접 적어 주세요.",
     "commentsReplyTextPlaceholder": "댓글에 보낼 답변을 입력하세요",
     "commentsReplySaveDraftCta": "초안 저장",
     "commentsReplySavingDraft": "저장하는 중...",
