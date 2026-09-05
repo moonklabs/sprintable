@@ -23,6 +23,7 @@
     "verify:migrated-resources-sync": "tsx scripts/verify-migrated-resources-sync.ts",
     "verify:no-new-raw-fetch-api": "tsx scripts/verify-no-new-raw-fetch-api.ts",
     "verify:no-direct-backend-v2-call": "tsx scripts/verify-no-direct-backend-v2-call.ts",
+    "verify:no-date-tolocalestring-marketing-surface": "tsx scripts/verify-no-date-tolocalestring-marketing-surface.ts",
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
