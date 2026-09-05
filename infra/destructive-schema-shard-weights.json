@@ -1129,8 +1129,8 @@
     },
     {
       "file": "tests/test_3502_insights_board.py",
-      "sec": 130.0,
-      "source": "story-3502-insights-board(조각1+2, PR 개설 前 선제 등재 — 로컬 raw pytest 19.90s(17건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 130s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 280.0,
+      "source": "story-3502-insights-board(조각1+2+sort_dir 결함수정, PR#3849 리뷰 대응 — 로컬 raw pytest 46.12s(20건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 280s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3497_insight_snapshots.py",

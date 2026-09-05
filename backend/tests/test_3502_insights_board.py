@@ -417,6 +417,150 @@ async def test_sort_by_metric_puts_null_last():
 
 
 @pytest.mark.anyio
+async def test_sort_by_metric_asc_orders_low_to_high():
+    """페드루 PO 실측(2026-09-05, fd57310d4 리뷰) — metric 정렬 분기가 sort_dir를
+    완전히 무시하고 desc로 하드코딩돼 있었다(ORDER BY·커서 비교 세 자리 전부).
+    양성대조: 이 테스트는 그 fix 이전 코드에서 RED여야 한다(고정값 10<500이 desc로만
+    나오면 [high, low] 순서가 나와 이 assert가 깨진다)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+
+            sp_high = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-high-asc", title="High",
+                published_at=now - timedelta(days=10),
+            )
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp_high.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=sp_high.published_at + timedelta(days=7), status="captured",
+                normalized={"views": 500, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": None, "conversions": None},
+            )
+            sp_low = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-low-asc", title="Low",
+                published_at=now - timedelta(days=8),
+            )
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp_low.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=sp_low.published_at + timedelta(days=7), status="captured",
+                normalized={"views": 10, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": None, "conversions": None},
+            )
+
+            result = await list_insights_board(
+                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc",
+            )
+        ids = [r["publication_id"] for r in result["rows"]]
+        assert ids == [sp_low.id, sp_high.id], "asc면 낮은 값(10)이 먼저, 높은 값(500)이 뒤여야 한다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sort_by_metric_asc_cursor_pagination_no_duplicates_no_gaps():
+    """metric asc 2페이지째가 (desc 하드코딩 커서 비교 탓에) 뒤로 점프하지 않는지 —
+    서로 다른 값 4개를 오름차순으로 페이지네이션."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            ids = []
+            for i, views in enumerate([40, 10, 30, 20]):
+                sp = await _seed_site_post(
+                    s, org_id=org_id, work_item_id=story_id, slug=f"post-asc-page-{i}", title=f"P{i}",
+                    published_at=now - timedelta(days=i),
+                )
+                await _seed_snapshot(
+                    s, org_id=org_id, work_item_id=story_id, publication_id=sp.id,
+                    publication_kind="site_post", channel="hosted_site",
+                    due_at=sp.published_at + timedelta(days=7), status="captured",
+                    normalized={"views": views, "impressions": None, "reach": None, "engagements": None,
+                                "clicks": None, "spend": None, "conversions": None},
+                )
+                ids.append((views, sp.id))
+            expected_order = [pid for _v, pid in sorted(ids, key=lambda t: t[0])]
+
+            page1 = await list_insights_board(
+                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
+            )
+            assert len(page1["rows"]) == 2 and page1["has_more"] is True
+            page2 = await list_insights_board(
+                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
+                cursor=page1["next_cursor"],
+            )
+            assert len(page2["rows"]) == 2 and page2["has_more"] is False
+
+            seen = [r["publication_id"] for p in (page1, page2) for r in p["rows"]]
+        assert seen == expected_order, "asc 커서 페이지네이션이 오름차순으로 중복/누락 없이 이어져야 한다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sort_by_metric_asc_null_group_still_last_with_cursor_continuity():
+    """PO 決定 (c) — nulls_last()는 방향 무관 상수. asc에서도 null 그룹은 맨 뒤이고,
+    그 null 그룹 «안에서»의 커서 연속(published_at/id tie-break)도 asc 방향으로
+    맞아야 한다."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+
+            sp_value = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-asc-value", title="Value",
+                published_at=now - timedelta(days=20),
+            )
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp_value.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=sp_value.published_at + timedelta(days=7), status="captured",
+                normalized={"views": 5, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": None, "conversions": None},
+            )
+            # null 그룹 — published_at 서로 다른 2행(둘 다 스냅샷 없음=metric null).
+            sp_null_older = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-asc-null-older", title="NullOlder",
+                published_at=now - timedelta(days=9),
+            )
+            sp_null_newer = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-asc-null-newer", title="NullNewer",
+                published_at=now - timedelta(days=8),
+            )
+
+            page1 = await list_insights_board(
+                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=1,
+            )
+            assert [r["publication_id"] for r in page1["rows"]] == [sp_value.id], (
+                "값 있는 행이 null 그룹보다 먼저(asc에서도 null은 맨 뒤)"
+            )
+            page2 = await list_insights_board(
+                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
+                cursor=page1["next_cursor"],
+            )
+        ids2 = [r["publication_id"] for r in page2["rows"]]
+        assert ids2 == [sp_null_older.id, sp_null_newer.id], (
+            "null 그룹 안에서도 커서가 published_at asc 순서로 이어져야 한다"
+        )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_cursor_pagination_published_at_no_duplicates_no_gaps():
     from app.services.insights_board import list_insights_board
 

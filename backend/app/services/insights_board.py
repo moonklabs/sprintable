@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from operator import gt as _gt
+from operator import lt as _lt
 from typing import Any
 
 from sqlalchemy import Integer, Text, cast, exists, literal, select, union_all
@@ -162,32 +164,45 @@ async def list_insights_board(
             .scalar_subquery()
         ).label("metric_value")
         query = query.add_columns(metric_col)
+        # 페드루 PO 실측(2026-09-05, fd57310d4 리뷰) — 이 분기가 sort_dir를 완전히
+        # 무시하고 desc로 하드코딩돼 있었다(published_at 분기는 위에서 정확히 갈랐는데
+        # 이 분기만 놓침). NULLS LAST는 방향 무관 상수로 유지(PO 決定 (c))하되, 그
+        # 안에서의 순서(비교 연산자·ORDER BY 세 키)는 전부 sort_dir로 갈라야 한다 —
+        # ORDER BY만 고치고 커서 비교를 desc로 두면 asc 2페이지째가 뒤로 점프한다
+        # (세 자리가 한 묶음).
         if cursor is not None:
             cursor_metric, cursor_published_at, cursor_id = decode_metric_cursor(cursor)
+            cmp = _lt if sort_dir != "asc" else _gt
             if cursor_metric is None:
-                # NULLS LAST 커서 위치 — metric이 NULL인 그룹 안에서만 이어간다.
+                # NULLS LAST 커서 위치 — metric이 NULL인 그룹 안에서만 이어간다(방향
+                # 무관 — null 그룹은 asc/desc 어느 쪽이든 항상 맨 뒤).
                 query = query.where(
                     metric_col.is_(None)
                     & (
-                        (rows_cte.c.published_at < cursor_published_at)
-                        | ((rows_cte.c.published_at == cursor_published_at) & (rows_cte.c.publication_id < cursor_id))
+                        cmp(rows_cte.c.published_at, cursor_published_at)
+                        | ((rows_cte.c.published_at == cursor_published_at) & cmp(rows_cte.c.publication_id, cursor_id))
                     )
                 )
             else:
                 query = query.where(
                     metric_col.is_(None)
-                    | (metric_col < cursor_metric)
+                    | cmp(metric_col, cursor_metric)
                     | (
                         (metric_col == cursor_metric)
                         & (
-                            (rows_cte.c.published_at < cursor_published_at)
-                            | ((rows_cte.c.published_at == cursor_published_at) & (rows_cte.c.publication_id < cursor_id))
+                            cmp(rows_cte.c.published_at, cursor_published_at)
+                            | ((rows_cte.c.published_at == cursor_published_at) & cmp(rows_cte.c.publication_id, cursor_id))
                         )
                     )
                 )
-        query = query.order_by(
-            metric_col.desc().nulls_last(), rows_cte.c.published_at.desc(), rows_cte.c.publication_id.desc(),
-        )
+        if sort_dir == "asc":
+            query = query.order_by(
+                metric_col.asc().nulls_last(), rows_cte.c.published_at.asc(), rows_cte.c.publication_id.asc(),
+            )
+        else:
+            query = query.order_by(
+                metric_col.desc().nulls_last(), rows_cte.c.published_at.desc(), rows_cte.c.publication_id.desc(),
+            )
 
     query = query.limit(limit + 1)
     result = (await db.execute(query)).all()
