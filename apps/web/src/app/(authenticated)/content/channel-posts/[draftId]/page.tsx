@@ -22,6 +22,11 @@ import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+// story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
+// (site-posts 상세와 재사용, 동작 무변).
+import {
+  ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
+} from '@/components/content/content-rule-violation';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 
 /**
@@ -100,18 +105,6 @@ interface ChannelPostDraftDetail {
   // 한 곳에서 낸다(FE가 직접 비교하지 않는다 — id 비교식은 서버 전용, 이 필드만 본다).
   // true=원문이 파생 이후 개정됨 · false=안 바뀜 · null=모른다(레거시 파생분).
   source_changed?: boolean | null;
-}
-
-// story #3472 2부(BE 3471/#3825 계약, 유나 §16-7 정본 2026-09-05) — 초안 create/
-// update 응답과 상신 422 CONTENT_RULE_VIOLATION이 공유하는 shape. field는 이 화면의
-// 두 입력(text/link_url)과 정확히 일치한다. severity가 계약에 없는 것은 "알고 줄인
-// 것"(첫 슬라이스=기계 검사 둘 다 차단) — 그래서 문구 키를 …BlockedHint 꼴로 짓는다.
-interface ContentRuleViolation {
-  code: string;
-  field: 'text' | 'link_url';
-  value: string;
-  hint_key: string;
-  settings_path: string;
 }
 
 interface ChannelPostVersion {
@@ -198,19 +191,6 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
       return info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('errorChannelImageUploadFailed'));
   }
 }
-
-// story #3472 2부(§16-7) — code로 사람 문구를 고른다(hint_key는 BE 계약에 있으나
-// 값 자체가 아직 정해지지 않아 code를 1차 판정축으로 쓴다 — code는 그라운딩된 두
-// 값(banned_term·utm_missing)이 확실하다). 미지 code는 지어내지 않고 제네릭으로.
-function contentRuleViolationHint(code: string, value: string, t: (key: string, values?: Record<string, string | number>) => string): string {
-  if (code === 'banned_term') return t('contentRuleBannedTermBlockedHint', { value });
-  if (code === 'utm_missing') return t('contentRuleUtmMissingBlockedHint');
-  return t('contentRuleGenericBlockedHint');
-}
-
-// ⛔§16-7 "settings_path를 그대로 href로 쓰지 않는다" — FE가 아는 값만 라우트로
-// 매핑하고, 모르는 값이면 링크를 그리지 않는다(경로 결정권을 BE로 넘기지 않는다).
-const KNOWN_CONTENT_RULES_SETTINGS_PATH = '/organization/content-rules';
 
 export default function ChannelPostEditPage() {
   const { orgId, role } = useDashboardContext();
@@ -1387,15 +1367,12 @@ export default function ChannelPostEditPage() {
         {/* story #3472 2부(유나 §16-7) — "그 필드 아래" 그 필드 것만 목록. 경고색
             없음(아직 아무것도 실패하지 않았다·사람이 고치는 중). FailureActionBadge
             동형 아님(하우스 폼 검증 관례=필드 아래 한 줄, channel-post-text-field-
-            empty-reason과 같은 톤). */}
-        {violations.filter((v) => v.field === 'text').map((v, i) => (
-          <p key={`${v.code}-${i}`} className="text-xs text-muted-foreground" data-testid="channel-post-rule-violation-text">
-            {contentRuleViolationHint(v.code, v.value, t)}{' '}
-            {v.settings_path === KNOWN_CONTENT_RULES_SETTINGS_PATH ? (
-              <Link href={v.settings_path} className="underline">{t('contentRuleLinkLabel')}</Link>
-            ) : null}
-          </p>
-        ))}
+            empty-reason과 같은 톤). story #3483 — 공용 컴포넌트로(site-posts 재사용). */}
+        <ContentRuleViolationList
+          violations={violations.filter((v) => v.field === 'text')}
+          testId="channel-post-rule-violation-text"
+          t={t}
+        />
         <input
           value={linkUrl}
           onChange={(e) => setLinkUrl(e.target.value)}
@@ -1403,14 +1380,11 @@ export default function ChannelPostEditPage() {
           className="w-full rounded-md border border-border p-2 text-sm"
           data-testid="channel-post-link-field"
         />
-        {violations.filter((v) => v.field === 'link_url').map((v, i) => (
-          <p key={`${v.code}-${i}`} className="text-xs text-muted-foreground" data-testid="channel-post-rule-violation-link">
-            {contentRuleViolationHint(v.code, v.value, t)}{' '}
-            {v.settings_path === KNOWN_CONTENT_RULES_SETTINGS_PATH ? (
-              <Link href={v.settings_path} className="underline">{t('contentRuleLinkLabel')}</Link>
-            ) : null}
-          </p>
-        ))}
+        <ContentRuleViolationList
+          violations={violations.filter((v) => v.field === 'link_url')}
+          testId="channel-post-rule-violation-link"
+          t={t}
+        />
       </div>
 
       {/* story #3428(T3-M·§17-16) — image_max_count<=0(미지원 채널, 또는 아직 모른다)
@@ -1551,11 +1525,10 @@ export default function ChannelPostEditPage() {
         </p>
       ) : null}
       {/* story #3472 2부(§16-7) — "그래서 못 한다"는 버튼 밖·비활성(§17-13과 같은 규율).
-          "필드 아래"(무엇이 걸렸나)와 자리가 다르다 — 여기는 개수만 세고 가리킨다. */}
+          "필드 아래"(무엇이 걸렸나)와 자리가 다르다 — 여기는 개수만 세고 가리킨다.
+          story #3483 — 공용 컴포넌트로. */}
       {!isOverLimit && hasBlockingViolations ? (
-        <p className="text-xs text-muted-foreground" data-testid="channel-post-rule-violation-blocked-reason">
-          {t('contentRuleSubmitBlockedHint', { count: violations.length })}
-        </p>
+        <ContentRuleSubmitBlockedReason count={violations.length} testId="channel-post-rule-violation-blocked-reason" t={t} />
       ) : null}
       {/* B2(페드루 PO, 2026-09-04 13:27Z) — 이미지 업로드 진행 중엔 저장/상신이 왜
           막혔는지 버튼 밖에 밝힌다(isOverLimit과 동시에 뜰 수 있어 둘 다 없을 때만). */}
