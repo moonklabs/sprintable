@@ -255,11 +255,17 @@ async def _fetch_threads(client: "httpx.AsyncClient", *, access_token: str, medi
 _INSTAGRAM_INSIGHTS_URL_TMPL = _INSTAGRAM_GRAPH_BASE + "/{media_id}/insights"
 # story #3320 조각③ — 페드루 PO 決定⑤=(b): likes+comments+saved(+shares, 있으면)를
 # threads_publish.py의 engagements 합산과 같은 모양으로 뭉친다(같은 낱말=같은
-# 정의). impressions/reach는 §2(d) 7키에 그대로 이름이 있어 개별 유지. IG 이미지
-# 미디어 insights의 정확한 지표 이름 집합은 ⚠️미확認(그라운딩⑤ 원문 그대로 —
-# Threads insights처럼 페드루가 developers.facebook.com으로 재확認한 축이 아니다,
-# 라이브 왕복 전 재검증 필요) — 최선 추정으로 이 5개를 요청한다.
-_INSTAGRAM_INSIGHTS_METRICS = "impressions,reach,likes,comments,saved,shares"
+# 정의). reach는 §2(d) 7키에 그대로 이름이 있어 개별 유지.
+#
+# 페드루 PO REQUIRED(2026-09-06, #3874 리뷰, Meta 문서 재확認) — **impressions는
+# 2024-07-02 이후 생성된 미디어에 폐기**됐다(우리 발행물 전부 이 이후) — 요청
+# metric에 넣으면 실계정 첫 호출이 400(#3872의 graph.facebook.com 호스트 오류와
+# 같은 클래스: sandbox는 이 파라미터를 실제로 안 쳐서 통과하고 실계정에서만
+# 드러남). impressions는 이제 요청도 안 하고 항상 None(선언 안 함, insight_
+# snapshots.py의 null≠0 원칙 그대로 — "쟀는데 0"이 아니라 "이 채널이 이 지표를
+# 안 준다"). 대신 `views`를 요청해 §2(d) 7키의 `views`에 그대로 싣는다(threads의
+# views와 같은 이름, 별도 합산 없음).
+_INSTAGRAM_INSIGHTS_METRICS = "views,reach,likes,comments,saved,shares"
 _INSTAGRAM_ENGAGEMENT_METRICS = ("likes", "comments", "saved", "shares")
 
 
@@ -287,7 +293,7 @@ async def _fetch_instagram(client: "httpx.AsyncClient", *, access_token: str, me
         total = 0
         for v in item.get("values", []) or []:
             total += int(v.get("value", 0) or 0)
-        if name in ("impressions", "reach"):
+        if name in ("views", "reach"):
             values[name] = values.get(name, 0) + total
         elif name in _INSTAGRAM_ENGAGEMENT_METRICS:
             values["engagements"] = values.get("engagements", 0) + total

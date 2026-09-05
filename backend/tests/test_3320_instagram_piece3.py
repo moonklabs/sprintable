@@ -68,7 +68,7 @@ def _enable_instagram_sandbox_adapter(monkeypatch):
         image_aspect_max=1.91, image_aspect_min=0.8,
         image_width_min=320, image_width_max=1440, image_color_space="sRGB", image_max_count=1,
         supports_fetch_replies=True, supports_reply=True, reply_required_scope="sandbox_manage_replies",
-        insight_metrics=("impressions", "reach", "engagements"),
+        insight_metrics=("views", "reach", "engagements"),
     )
     monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "instagram_sandbox", ig_sandbox_cfg)
     yield
@@ -99,7 +99,7 @@ def test_instagram_adapter_declares_fetch_replies_reply_and_insight_metrics():
     assert ig.supports_fetch_replies is True
     assert ig.supports_reply is True
     assert ig.reply_required_scope == "instagram_business_manage_comments"
-    assert ig.insight_metrics == ("impressions", "reach", "engagements")
+    assert ig.insight_metrics == ("views", "reach", "engagements")
 
 
 # ─── instagram_publish.py::fetch_replies ─────────────────────────────────────
@@ -417,7 +417,7 @@ async def test_instagram_insights_200_maps_likes_comments_saved_shares_to_engage
             await s.commit()
 
             _patch_transport(monkeypatch, lambda request: httpx.Response(200, json={"data": [
-                {"name": "impressions", "values": [{"value": 500}]},
+                {"name": "views", "values": [{"value": 500}]},
                 {"name": "reach", "values": [{"value": 300}]},
                 {"name": "likes", "values": [{"value": 10}]},
                 {"name": "comments", "values": [{"value": 2}]},
@@ -430,12 +430,29 @@ async def test_instagram_insights_200_maps_likes_comments_saved_shares_to_engage
             snap = (await s.execute(
                 select(InsightSnapshot).where(InsightSnapshot.publication_id == pub.id)
             )).scalars().first()
-            assert snap.normalized["impressions"] == 500
+            assert snap.normalized["views"] == 500
             assert snap.normalized["reach"] == 300
             assert snap.normalized["engagements"] == 17  # 10+2+1+4
-            assert snap.normalized["views"] is None  # instagram이 선언 안 한 축.
+            # 페드루 PO REQUIRED(2026-09-06, #3874 리뷰) — impressions는 2024-07-02
+            # 이후 미디어에 폐기돼 선언 자체를 안 한다(insight_metrics에 없음) —
+            # "쟀는데 0"이 아니라 "이 채널이 이 지표를 안 준다"(null≠0 원칙).
+            assert snap.normalized["impressions"] is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_instagram_insights_metric_param_excludes_impressions_includes_views():
+    """페드루 PO REQUIRED(2026-09-06, #3874 리뷰) — impressions가 2024-07-02
+    이후 미디어에 폐기돼 요청 파라미터에 들어가면 실계정 첫 호출이 400난다
+    (#3872의 graph.facebook.com 호스트 오류와 같은 클래스: sandbox는 이
+    파라미터를 실제로 안 쳐서 통과하고 실계정에서만 드러남). 되돌리면(mutation)
+    이 테스트가 RED."""
+    from app.services.insight_snapshots import _INSTAGRAM_INSIGHTS_METRICS
+
+    requested = _INSTAGRAM_INSIGHTS_METRICS.split(",")
+    assert "impressions" not in requested
+    assert "views" in requested
 
 
 @pytest.mark.anyio

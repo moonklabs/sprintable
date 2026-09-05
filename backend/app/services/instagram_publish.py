@@ -245,11 +245,11 @@ async def reply(
     id라 유저/미디어 id가 URL에 안 들어감) — 시그니처는 dispatch 통일을 위해
     그대로 유지(sandbox_publish.py·threads_publish.py와 동일 관례).
 
-    ⚠️미확認 1건: POST 파라미터명이 `message`라는 것은 Meta의 Comment→Replies
-    edge 표준 관례를 따른 최선 추정 — 페드루가 재확認한 건 엔드포인트 URL/메서드·
-    GET 응답 필드까지고 이 POST 파라미터명 자체는 아니다(라이브 왕복 전 재확認
-    필요). 응답엔 permalink 개념이 없어(댓글은 media가 아님) 두 번째 반환값은
-    항상 None."""
+    페드루 PO가 2026-09-06 Meta comment-moderation 문서로 POST 파라미터명
+    (`message`)·응답 필드(`{id}`)·요구 스코프(`instagram_business_manage_
+    comments`)까지 재확認했다 — 이 함수는 이제 미확認 딱지 0(OAuth·GET 댓글
+    엔드포인트와 같은 신뢰도). 응답엔 permalink 개념이 없어(댓글은 media가
+    아님) 두 번째 반환값은 항상 None."""
     resp = await client.post(
         _COMMENT_REPLIES_URL_TMPL.format(comment_id=reply_to_id),
         params={"message": text, "access_token": access_token},

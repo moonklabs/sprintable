@@ -195,10 +195,12 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         supports_reply=True,
         reply_required_scope="instagram_business_manage_comments",
         # story #3320 조각③ — 페드루 PO 決定⑤=(b): likes+comments+saved(+shares)를
-        # engagements로 합산(insight_snapshots.py::_fetch_instagram 참고). impressions/
-        # reach는 §2(d) 7키 이름 그대로 개별 유지. clicks/spend/conversions는 IG
-        # 유기 미디어 API가 안 줌(Threads와 동일 사유).
-        insight_metrics=("impressions", "reach", "engagements"),
+        # engagements로 합산(insight_snapshots.py::_fetch_instagram 참고). reach는
+        # §2(d) 7키 이름 그대로 개별 유지. clicks/spend/conversions는 IG 유기 미디어
+        # API가 안 줌(Threads와 동일 사유). 페드루 PO REQUIRED(2026-09-06, #3874
+        # 리뷰) — impressions는 2024-07-02 이후 미디어에 폐기돼 선언 안 함(항상
+        # None), 대신 views를 threads와 같은 이름으로 선언.
+        insight_metrics=("views", "reach", "engagements"),
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
@@ -341,7 +343,9 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         image_width_max=1440,
         image_color_space="sRGB",
         image_max_count=1,
-        insight_metrics=("impressions", "reach", "engagements"),
+        # 페드루 PO REQUIRED(2026-09-06, #3874 리뷰) — 위 instagram과 동형 정정
+        # (impressions 폐기, views로 대체).
+        insight_metrics=("views", "reach", "engagements"),
     )
 
 
