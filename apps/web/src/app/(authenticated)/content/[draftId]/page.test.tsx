@@ -127,6 +127,10 @@ function stubFetchWithVersions(
     // 유나 Design 변경요청 1(2026-09-05) — 단건 GET 자체가 실패하는 케이스 재현(기본
     // 200). 부수 데이터라 화면은 그대로 서고 violations=[]+안내 한 줄만 뜬다.
     draftStatus?: number;
+    // 유나 실측 후속(§16-7 2부, 2026-09-05) — "응답은 왔는데 실패"(draftStatus)와
+    // "응답이 안 옴"(연결 끊김·abort, fetchWithAuth 자체가 던짐)은 다른 갈래다. 이
+    // 옵션은 후자 — fetch 자체가 reject한다(HTTP 응답 객체 자체가 없다).
+    draftReject?: boolean;
   },
 ) {
   vi.stubGlobal(
@@ -137,6 +141,9 @@ function stubFetchWithVersions(
       // URL을 접두사로 포함한다(정확 일치 비교라 순서 자체는 무해하지만, 나란히
       // 둬 두 계약이 별개 왕복임을 코드로도 보이게 한다).
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}`) {
+        if (opts?.draftReject) {
+          throw new Error('network error');
+        }
         if (opts?.draftStatus && opts.draftStatus >= 400) {
           return { ok: false, status: opts.draftStatus, json: async () => ({ detail: 'boom' }) };
         }
@@ -1530,6 +1537,25 @@ describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §
     await flush();
 
     expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')).toBeNull();
+  });
+
+  // story #3514(유나 실측 후속, §16-7 2부, 2026-09-05) — 단건 GET이 "응답은 왔는데
+  // 실패"(4xx/5xx)가 아니라 "응답이 안 옴"(연결 끊김·abort, fetch 자체가 reject)이면
+  // Promise.all에 그대로 섞여 있을 때 전체가 거절돼 loadError로 화면 전체가 막혔었다
+  // (§16-7이 "나란히 부르되 같은 급으로 묶지 않는다"고 정한 것의 위반). 단건 GET만
+  // .catch(() => null)로 격리해 이 갈래도 draftStatus와 동일하게 취급되는지 고정.
+  it('⭐단건 GET reject(네트워크 오류) — 본문은 그대로 뜨고 violations=0+안내 한 줄, loadError 아님', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { draftReject: true });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('#post-title') as HTMLInputElement | null;
+    expect(titleInput?.value).toBe(VERSION_1.title);
+    expect(container.querySelector('[data-testid="content-rule-violation-title"]')).toBeNull();
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')?.textContent)
+      .toBe(koMessages.content.contentRuleViolationsLoadFailed);
   });
 });
 

@@ -373,8 +373,16 @@ export default function ContentPostEditPage() {
         // (§16-7 "읽기 자리를 주 데이터와 같은 급으로 묶지 않는다") — violations=[]로
         // 진행하고 violationsLoadFailed 한 줄만 띄운다. 변형(channel_post) 화면은 단건
         // GET이 주 데이터라 그대로 loadError 대상.
+        //
+        // ⚠️유나 실측 후속(2026-09-05, §16-7 2부 정정) — "응답은 왔는데 실패"(4xx/5xx,
+        // res.ok===false)와 "응답이 안 옴"(연결 끊김·abort, fetchWithAuth 자체가 던짐)은
+        // 다른 갈래다. 단건 GET을 Promise.all에 그대로 섞으면 후자에서 Promise.all
+        // 전체가 거절돼(§16-7이 지키려던) 부수 데이터 하나가 «나란히 부르되 같은 급으로
+        // 묶지 않는다»는 원칙을 어기고 화면 전체를 막는다 — 단건 GET만 따로
+        // .catch(() => null)로 받아 실패를 이 fetch 자리에 가둔다(/versions는 그대로
+        // Promise.all 안에 남아 실패 시 loadError).
         const [draftRes, versionsRes] = await Promise.all([
-          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}`),
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}`).catch(() => null),
           fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`),
         ]);
         if (cancelled) return;
@@ -382,7 +390,7 @@ export default function ContentPostEditPage() {
           setLoadError(true);
           return;
         }
-        if (draftRes.ok) {
+        if (draftRes?.ok) {
           const draftJson = (await draftRes.json().catch(() => null)) as { data?: SitePostDraftDetail } | null;
           setViolations(draftJson?.data?.violations ?? []);
           setViolationsLoadFailed(false);
