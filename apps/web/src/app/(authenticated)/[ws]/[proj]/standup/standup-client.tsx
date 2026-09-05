@@ -246,10 +246,15 @@ export default function StandupPage({ projectId }: StandupClientProps) {
         let nextStoriesCursor: string | null = null;
 
         if (projectId) {
+          // story #3519(§16-7 2부, PO 確定 2026-09-05) — missingRes는 주석("실패해도 본
+          // 화면은 막지 않음")상 부수인데, sprintsRes/feedbackRes(주)와 같은 미격리
+          // Promise.all 안에 있었다. missingRes의 fetch 자체가 네트워크단 reject(HTTP
+          // status가 아니라)하면 이 Promise.all 전체가 던져 주 데이터 둘도 같이 못
+          // 얻었다 — 주석과 코드가 어긋난 결함. missingRes만 leg 자체를 격리한다.
           const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
             fetchWithAuth(`/api/sprints?project_id=${projectId}&status=active`),
             fetchWithAuth(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
-            fetchWithAuth(`/api/standup/missing?project_id=${projectId}&date=${date}`),
+            fetchWithAuth(`/api/standup/missing?project_id=${projectId}&date=${date}`).catch(() => null),
           ]);
 
           const [sprintsData, fbData] = await Promise.all([
@@ -259,8 +264,8 @@ export default function StandupPage({ projectId }: StandupClientProps) {
           feedbackData = fbData;
 
           // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
-          const missingJson = await missingRes.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
-          missingList = missingRes.ok ? (missingJson?.data?.missing ?? []) : [];
+          const missingJson = await missingRes?.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
+          missingList = missingRes?.ok ? (missingJson?.data?.missing ?? []) : [];
 
           sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
 

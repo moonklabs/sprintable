@@ -112,17 +112,21 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
       setLoading(true);
       setLoadError(false);
       try {
+        // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(ok?채움:방치, 예를 들어
+        // meRes는 isAdmin 판정만 바꾼다)인데 격리가 없어, meRes가 네트워크단 reject하면
+        // 이 try/catch 바깥 catch가 setLoadError(true)로 «승격»시켜 에이전트 목록(이
+        // 탭의 실제 주 콘텐츠, refreshAgents가 따로 그린다)까지 통째로 못 뜨게 했다.
         const [meRes, projectsRes] = await Promise.all([
-          fetchWithAuth('/api/me'),
-          fetchWithAuth('/api/projects'),
+          fetchWithAuth('/api/me').catch(() => null),
+          fetchWithAuth('/api/projects').catch(() => null),
         ]);
-        if (meRes.ok) {
+        if (meRes?.ok) {
           const meJson = await meRes.json() as { data?: { role?: string } };
           const role = meJson.data?.role ?? 'member';
           setIsAdmin(role === 'admin' || role === 'owner');
         }
         let projectList: ProjectOption[] = [];
-        if (projectsRes.ok) {
+        if (projectsRes?.ok) {
           const json = await projectsRes.json() as { data?: ProjectOption[] };
           projectList = (json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
         }

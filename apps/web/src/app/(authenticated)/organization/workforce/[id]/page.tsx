@@ -136,15 +136,18 @@ export default function AgentDetailPage() {
   }, [id, router]);
 
   const fetchOrgContext = useCallback(async () => {
+    // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(ok?채움:방치, 그 외 화면을
+    // 안 막는다)인데 catch가 어디에도 없었다 — 하나가 네트워크단 reject하면 나머지도
+    // 조용히 못 채워졌다. leg별로 격리한다.
     const [projectRes, meRes] = await Promise.all([
-      fetchWithAuth('/api/projects'),
-      fetchWithAuth('/api/me'),
+      fetchWithAuth('/api/projects').catch(() => null),
+      fetchWithAuth('/api/me').catch(() => null),
     ]);
-    if (projectRes.ok) {
+    if (projectRes?.ok) {
       const json = await projectRes.json() as { data: ProjectOption[] };
       setProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
     }
-    if (meRes.ok) {
+    if (meRes?.ok) {
       const json = await meRes.json() as { data?: { user_id?: string | null; role?: string } };
       setCurrentUserId(json.data?.user_id ?? null);
       setOrgRole(json.data?.role ?? 'member');

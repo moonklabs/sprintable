@@ -280,6 +280,25 @@ async function waitForFreshAlert(excludeNode: Element): Promise<Element | null> 
   return null;
 }
 
+// story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드 몸통, 주)와
+// sprintsRes/epicsRes/membersRes(부수)가 미격리 Promise.all에 있어, 부수 하나가
+// 네트워크단 reject하면 보드 주 데이터까지 조용히 텅 비던 결함의 회귀가드.
+describe('KanbanBoard — Promise.all 부수 격리(story #3519)', () => {
+  it('/api/members가 네트워크 reject해도 스토리(주 데이터)는 그대로 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = status === 'backlog' ? [{ id: 's1', title: '살아남은 스토리', status: 'backlog', priority: 'medium', trust_stage: 'queued' }] : [];
+        return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/members')) throw new Error('network down');
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    expect(container.textContent).toContain('살아남은 스토리');
+  });
+});
+
 describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', () => {
   it('생성 실패 시 role="alert" aria-live="assertive"로 배너가 렌더된다', async () => {
     stubFetch([]);

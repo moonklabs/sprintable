@@ -61,9 +61,13 @@ export function WorkflowTemplateGallerySection({
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — memberRes(부수, ok?채움:방치)가
+      // defRes(주, 갤러리 몸통)와 미격리로 같은 Promise.all에 있어, memberRes가
+      // 네트워크단 reject하면 defRes도 조용히 못 채워져 갤러리가 거짓 "항목 없음"으로
+      // 보였다. memberRes만 격리한다.
       const [defRes, memberRes] = await Promise.all([
         fetchWithAuth('/api/events/definitions'),
-        fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`),
+        fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`).catch(() => null),
       ]);
       if (defRes.ok) {
         const data: unknown = await defRes.json();
@@ -81,7 +85,7 @@ export function WorkflowTemplateGallerySection({
         }));
         setAppliedKeys(applied);
       }
-      if (memberRes.ok) {
+      if (memberRes?.ok) {
         const json = await memberRes.json() as { data?: TeamMember[] } | TeamMember[];
         const members = Array.isArray(json) ? json : ((json as { data?: TeamMember[] }).data ?? []);
         setAgents(members);

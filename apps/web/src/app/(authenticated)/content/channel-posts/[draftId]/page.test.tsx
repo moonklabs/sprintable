@@ -163,16 +163,25 @@ function stubFetch(opts: {
   };
   commentsStatus?: number;
   onCommentsRefresh?: () => { status: number; body: unknown; headers?: Record<string, string> };
+  // story #3519(§16-7 2부) — 이미지 confirm 성공 「직후」의 단건 GET 재조회(부수)만
+  // 네트워크단 reject시킨다(격리 회귀가드).
+  rejectDraftRefetchAfterImageConfirm?: boolean;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
   if (opts.omitGateStatusKey) delete draftDetail.gate_status;
   let currentDraftDetail = draftDetail;
+  let rejectNextDraftRefetch = false;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`) {
+        // story #3519(§16-7 2부) — 이미지 업로드 confirm 성공 뒤 재조회(부수) 격리
+        // 회귀가드용. rejectDraftRefetchAfterImageConfirm이 켜지면 confirm이 성공한
+        // 「다음」 이 URL 호출(=재조회)만 네트워크단 reject한다(최초 페이지 로드
+        // 호출은 그대로 성공).
+        if (rejectNextDraftRefetch) { rejectNextDraftRefetch = false; throw new Error('network down'); }
         return { ok: true, status: 200, json: async () => ({ data: currentDraftDetail, error: null, meta: null }) };
       }
       // story #3402·PR#3767 — GATE_ALREADY_HELD best-effort 상대 초안 단건 조회. 테스트의
@@ -251,6 +260,7 @@ function stubFetch(opts: {
         };
         const ok = result.status < 400;
         if (ok) {
+          if (opts.rejectDraftRefetchAfterImageConfirm) rejectNextDraftRefetch = true;
           // B1 — 실제 백엔드라면 confirm이 반영한 이미지 필드가 그다음 단건 GET에도
           // 그대로 실린다(같은 draft 행). 목(mock)도 그 사실을 반영해야 재조회 검증이
           // 뜻이 있다 — 그 위에 draftAfterImageConfirm(게이트 재오픈 등 이 조각이 별도로
@@ -1725,6 +1735,28 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-image-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-upload-error"]')).toBeNull();
+  });
+
+  // story #3519(§16-7 2부, PO 確定 2026-09-05) — confirm 성공 뒤 재조회(draft/versions
+  // 단건 GET, 부수)가 격리 없이 Promise.all에 있어, 재조회 쪽이 네트워크단 reject하면
+  // 바깥 catch가 "이미지 업로드 실패"로 오문구를 냈다 — 업로드 자체(confirm까지)는 이미
+  // 성공했는데 사용자는 업로드가 실패한 걸로 오인한다.
+  it('⭐#3519 — confirm 성공 뒤 재조회가 네트워크 reject해도 "업로드 실패" 오문구가 안 뜬다', async () => {
+    stubFetch({ imageMaxCount: 1, rejectDraftRefetchAfterImageConfirm: true });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
     expect(container.querySelector('[data-testid="channel-post-image-upload-error"]')).toBeNull();
   });
 

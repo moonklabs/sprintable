@@ -129,6 +129,49 @@ describe('ApplyRecipeDialog', () => {
     expect(capture.body).toEqual({ project_id: 'proj-1', role_mapping: { step_1: 'agent-1' } });
   });
 
+  // story #3519(§16-7 2부, PO 確定 2026-09-05) — memberRes/bindingsRes 둘 다 부수인데
+  // 격리 없이 같은 Promise.all에 있어, 하나가 네트워크단 reject하면 나머지도 조용히
+  // 빈 값이 됐다("에이전트 없음"처럼 보이지만 실은 네트워크 실패).
+  it('/api/team-members가 네트워크 reject해도 bindings(다른 leg)는 그대로 반영된다', async () => {
+    const capture = { body: null as unknown };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) throw new Error('network down');
+      if (url.includes('/api/events/definitions/def-1/bindings')) {
+        return { ok: true, json: async () => ({ bindings: { step_1: 'agent-prebound' } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET}
+          open
+          onOpenChange={() => {}}
+          t={((k: string) => k) as never}
+          tc={((k: string) => k) as never}
+          addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    // bindings leg가 살아서 role_mapping을 미리 채운다(step_1='agent-prebound') — 그
+    // 결과 제출 버튼이 "역할 미지정" 사유로 막히지 않는다. memberRes가 reject해도
+    // agents=[]로 조용히 degrade할 뿐, bindings 값 자체(별개 leg)는 사라지면 안 된다.
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
+    void capture;
+  });
+
   it('apply 응답에 warnings가 있으면 그려진다', async () => {
     const capture = { body: null as unknown };
     stubFetch({ ok: true, bindings_upserted: 1, warnings: ['capability.connector_key 미해소 — org에 매칭되는 커넥터 여러 개'] }, capture);

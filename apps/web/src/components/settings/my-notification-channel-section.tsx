@@ -90,8 +90,12 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
   useEffect(() => {
     async function load() {
       try {
+        // story #3519(§16-7 2부, PO 確定 2026-09-05) — projRes만 격리돼 있었다(meRes는
+        // 안 됨) — meRes가 네트워크단 reject하면 이 Promise.all 전체가 던져 이미 정상
+        // 응답한 projRes의 결과(nameMap)까지 조용히 못 씌워졌다. meRes도 격리한다(한쪽만
+        // 격리하면 나머지 격리가 무의미해진다).
         const [meRes, projRes] = await Promise.all([
-          fetchWithAuth('/api/me'),
+          fetchWithAuth('/api/me').catch(() => null),
           fetchWithAuth('/api/projects').catch(() => null),
         ]);
         if (projRes?.ok) {
@@ -100,7 +104,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
           (pj.data ?? []).forEach((p) => { map[p.id] = p.name; });
           setNameMap(map);
         }
-        if (!meRes.ok) return;
+        if (!meRes?.ok) return;
         const json = await meRes.json() as { data?: { id?: string } };
         const mid = json.data?.id ?? null;
         if (!mid) return;
