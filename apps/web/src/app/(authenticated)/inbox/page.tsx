@@ -14,7 +14,7 @@ import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   getInboxNotificationLabel,
   getNotificationReasonKey,
@@ -405,15 +405,20 @@ export default function InboxPage() {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfYesterday = startOfToday - 86400000;
-    // story #3493 — 오늘/어제보다 오래된 날짜 버킷 라벨은 "기록"도 "약속"도 아닌
-    // 셋째 자리(날짜만 묶는 section 헤더, 시각 불요) — §11-2 정본(formatScheduledAt)
-    // 을 그대로 재사용해 시간대까지 통일하되, 이 자리의 실제 필요는 날짜뿐이라
-    // display 문자열에서 "MM-DD"만 취한다(새 포맷 함수 신설 없이 기존 정본의
-    // 부분 재사용).
+    // story #3493(페드루 PO 보정) — 오늘/어제보다 오래된 날짜 버킷 라벨은
+    // "기록"도 "약속"도 아닌 셋째 자리(날짜만 묶는 section 헤더, 시각 불요).
+    // formatScheduledAt(...).display에서 "MM-DD"를 문자열로 발췌하던 첫 처방은
+    // §11-2 포맷 문자열의 정확한 모양(공백 구분 순서)에 조용히 묶여, 그 포맷이
+    // 바뀌면 이 구분선이 소리 없이 깨진다 — chat-view.tsx::groupByDate와 같은
+    // 형(Intl.DateTimeFormat 직접 호출, schedule-format.ts::toDateKey와 동형
+    // 패턴 — 새 포맷 함수 신설 아님)으로 맞춘다.
+    const dateBucketFmt = new Intl.DateTimeFormat(locale, {
+      month: '2-digit', day: '2-digit', timeZone: displayTimezone,
+    });
     const labelFor = (time: number) => {
       if (time >= startOfToday) return t('dateToday');
       if (time >= startOfYesterday) return t('dateYesterday');
-      return formatScheduledAt(new Date(time).toISOString(), displayTimezone).display.split(' ')[0];
+      return dateBucketFmt.format(new Date(time));
     };
     const sections: { label: string; items: InboxItem[] }[] = [];
     for (const item of inboxItems) {
@@ -423,7 +428,7 @@ export default function InboxPage() {
       else sections.push({ label, items: [item] });
     }
     return sections;
-  }, [inboxItems, t, displayTimezone]);
+  }, [inboxItems, t, displayTimezone, locale]);
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setExpandedGroups((prev) => {
