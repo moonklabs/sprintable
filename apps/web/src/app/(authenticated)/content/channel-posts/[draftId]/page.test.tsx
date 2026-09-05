@@ -2246,3 +2246,115 @@ describe('ChannelPostEditPage — 서버 원문 접기(RawDetailsToggle, story #
     expect(findRawToggle(container)).toBeUndefined();
   });
 });
+
+// story #3472 2부(BE 3471/#3825 계약, 유나 §16-7 정본 2026-09-05) — 조직 콘텐츠
+// 규칙 위반이 이 초안 화면에 어떻게 서는지. BE가 아직 병합 전이라 stub fetch로
+// 계약(violations[{code,field,value,hint_key,settings_path}])만 먼저 검증한다.
+describe('ChannelPostEditPage — 콘텐츠 규칙 위반 표시(story #3472 2부, §16-7)', () => {
+  it('⭐저장 응답의 violations[] — 그 필드(text) 아래에만 표시되고 링크는 콘텐츠 규칙으로 간다', async () => {
+    stubFetch({
+      onSave: () => ({
+        status: 201,
+        body: {
+          draft_id: DRAFT_ID, version_id: 'v2', version: 2,
+          violations: [{ code: 'banned_term', field: 'text', value: '무료 보장', hint_key: 'x', settings_path: '/organization/content-rules' }],
+        },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const saveBtn = container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const textViolation = container.querySelector('[data-testid="channel-post-rule-violation-text"]');
+    expect(textViolation?.textContent).toContain('무료 보장');
+    expect(textViolation?.textContent).toBe(koMessages.content.contentRuleBannedTermBlockedHint.replace('{value}', '무료 보장') + ' ' + koMessages.content.contentRuleLinkLabel);
+    expect(textViolation?.querySelector('a')?.getAttribute('href')).toBe('/organization/content-rules');
+    // link_url 자리엔 안 새는지(필드별 분리).
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-link"]')).toBeNull();
+  });
+
+  it('⭐settings_path가 FE가 모르는 값이면 링크를 안 그린다(경로 결정권을 BE로 넘기지 않는다)', async () => {
+    stubFetch({
+      onSave: () => ({
+        status: 201,
+        body: { violations: [{ code: 'banned_term', field: 'text', value: 'x', hint_key: 'x', settings_path: '/some/other/path' }] },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const saveBtn = container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+    const textViolation = container.querySelector('[data-testid="channel-post-rule-violation-text"]');
+    expect(textViolation?.querySelector('a')).toBeNull();
+  });
+
+  it('utm_missing — link_url 필드 아래에 UTM 3종 문구가 뜬다', async () => {
+    stubFetch({
+      onSave: () => ({
+        status: 201,
+        body: { violations: [{ code: 'utm_missing', field: 'link_url', value: 'https://x.example', hint_key: 'x', settings_path: '/organization/content-rules' }] },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const saveBtn = container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-link"]')?.textContent)
+      .toContain(koMessages.content.contentRuleUtmMissingBlockedHint);
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-text"]')).toBeNull();
+  });
+
+  it('⭐위반이 있으면 상신·예약상신 버튼이 비활성이고, 버튼 밖에 개수가 뜬다("이대로는 상신할 수 없습니다")', async () => {
+    stubFetch({
+      onSave: () => ({ status: 201, body: { violations: [{ code: 'banned_term', field: 'text', value: 'x', hint_key: 'x', settings_path: '/organization/content-rules' }] } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const saveBtn = container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-blocked-reason"]')?.textContent)
+      .toBe(koMessages.content.contentRuleSubmitBlockedHint.replace('{count}', '1'));
+  });
+
+  it('⭐상신 422 CONTENT_RULE_VIOLATION — 새 배너를 안 만들고 필드 옆 목록만 서버 응답으로 갱신한다', async () => {
+    stubFetch({
+      onSubmit: () => ({
+        status: 422,
+        body: {
+          error: {
+            code: 'CONTENT_RULE_VIOLATION', rules_version: 3,
+            violations: [{ code: 'utm_missing', field: 'link_url', value: '', hint_key: 'x', settings_path: '/organization/content-rules' }],
+          },
+        },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-link"]')?.textContent)
+      .toContain(koMessages.content.contentRuleUtmMissingBlockedHint);
+    // 일반 오류 배너(submitResult)로는 안 뜬다 — 같은 말을 두 번 안 한다.
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('위반이 없으면 저장·상신이 평소대로(회귀 0)', async () => {
+    stubFetch({});
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-text"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-blocked-reason"]')).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
