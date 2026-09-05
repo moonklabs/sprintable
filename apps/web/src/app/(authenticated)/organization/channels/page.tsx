@@ -219,16 +219,25 @@ function ChannelSection({
   return (
     <SectionCard>
       <SectionCardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2" data-testid="channel-section-header">
           <h2 className="text-sm font-semibold text-foreground">{channelLabel(channel, t)}</h2>
-          <ChannelStatusChip status={channelStatus} />
+          {/* story dd29e6dd(유나 5회차 관찰·정본 3653a18c §3-3) — 「메아리」(헤더 rollup이
+              행 칩과 같은 문장을 두 번 보여주는 것)는 **연결이 정확히 1개일 때만** 성립한다
+              (두 칩이 실제로 있어야 메아리가 생긴다). 연결 0개일 때 헤더 칩은 rollup이
+              아니라 **자격 상태**(deriveChannelConnectionStatus({effectiveSource}) →
+              「설정 미완」·「미연결」)를 지는 **유일한 칩**이라 지우면 신호 자체가 사라진다
+              (카디르군 REQUEST_CHANGES 2026-09-05 뒤, 최초 처방 `>= 2`가 이 자리에서
+              회귀를 냈다 — PO 보정, 유나 지적). 그래서 조건은 `connections.length !== 1`
+              (0=자격 칩 그대로·1=메아리라 숨김·≥2=rollup+행 각각). data-testid로 자리
+              (헤더 vs 행)를 구조적으로 구분해 테스트가 값이 아니라 위치를 잰다. */}
+          {connections.length !== 1 ? <ChannelStatusChip status={channelStatus} /> : null}
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {connections.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('channelNoConnections')}</p>
         ) : (
-          <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+          <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
             {connections.map((c) => (
               <ConnectionRow key={c.id} conn={c} isOwner={isOwner} orgId={orgId} onDisconnected={onRefresh} t={t} />
             ))}

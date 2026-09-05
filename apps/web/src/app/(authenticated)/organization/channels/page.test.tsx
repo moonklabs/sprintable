@@ -198,6 +198,59 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   });
 });
 
+// story dd29e6dd(유나 5회차 관찰) — 헤더 rollup 칩이 연결 1개일 때 행 칩과 같은
+// 문장을 두 번 보여주던 것. 처방=연결 0이면 자격 상태, 그 외(1/≥2)에만 중복 판단
+// (연결 !== 1). 3표본(0/1/2개) 그대로 pin.
+//
+// ⚠️카디르군 REQUEST_CHANGES(2026-09-05, PR#3826) — 최초 버전은 「칩 총 개수 + 값」만
+// 재서, "헤더 자리에 뜨고 행 자리엔 없는"(자리가 뒤바뀐) 회귀를 주입해도 그대로
+// PASS했다(개수 1은 그대로 1이니까). data-testid로 헤더 컨테이너·행 컨테이너를
+// 구조적으로 갈라 "그 자리 안에 몇 개가 있나"를 직접 잰다 — 값이 아니라 위치가 검증
+// 대상이다.
+//
+// ⚠️PO 보정(2026-09-05, 유나 지적) — 최초 처방(`>= 2`)은 연결 0개일 때 헤더가 지는
+// «자격 상태»(설정 미완·미연결)까지 지워 회귀를 냈다. 아래 "0개" 표본은 그래서
+// 헤더 칩이 **없다**가 아니라 **자격 칩이 있다**를 pin한다(뒤집힌 것이 아니라 원래
+// 잘못 pin됐던 것을 바로잡는 것).
+describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6dd)', () => {
+  it('⭐연결 0개 — 헤더 자리에 자격 상태 칩(설정 미완)이 그대로 남는다(rollup과는 다른 신호, 지우면 회귀)', async () => {
+    stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'none' } });
+    await mount('owner');
+    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const headerChips = header.querySelectorAll('[data-status-chip]');
+    expect(headerChips).toHaveLength(1);
+    expect(headerChips[0]?.getAttribute('data-status-chip')).toBe('config_incomplete');
+    expect(container.querySelector('[data-testid="channel-section-rows"]')).toBeNull();
+  });
+
+  it('⭐연결 1개 — 헤더 자리 칩 0·행 컨테이너 안에 정확히 1개(같은 문장 두 번 안 남, 자리 뒤바뀜도 잡힘)', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE] });
+    await mount('owner');
+    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
+    expect(header.querySelectorAll('[data-status-chip]')).toHaveLength(0);
+    const rowChips = rows.querySelectorAll('[data-status-chip]');
+    expect(rowChips).toHaveLength(1);
+    expect(rowChips[0]?.getAttribute('data-status-chip')).toBe('connected');
+  });
+
+  it('⭐연결 2개(active+expired) — 헤더 자리에 정확히 1개(최악=expired)·행 컨테이너 안에 정확히 2개(현행 유지)', async () => {
+    stubFetch({
+      connections: [
+        CONNECTION_ACTIVE,
+        { ...CONNECTION_ACTIVE, id: 'conn-2', account_id: 'acc-2', account_label: '@second', status: 'expired', token_expires_at: '2020-01-01T00:00:00Z' },
+      ],
+    });
+    await mount('owner');
+    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
+    const headerChips = header.querySelectorAll('[data-status-chip]');
+    expect(headerChips).toHaveLength(1);
+    expect(headerChips[0]?.getAttribute('data-status-chip')).toBe('reauth_required');
+    expect(rows.querySelectorAll('[data-status-chip]')).toHaveLength(2);
+  });
+});
+
 describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
   it('org 자격이면 끝 4자리를, platform이면 공용 앱 문구를 보여준다(섞지 않는다)', async () => {
     stubFetch({ connections: [], credentials: { configured: true, app_id_suffix: 'ab12', effective_source: 'org' } });
