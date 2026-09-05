@@ -10,9 +10,9 @@ type RouteParams = { params: Promise<{ id: string }> };
  * gate-config/route.ts와 동형(단일 JSON 설정, version 반환).
  *
  * story #3490(PO 決定 2026-09-05) — PUT은 휴먼 owner **또는 admin**(BE
- * `_require_owner_or_admin`, 403 `CONTENT_RULES_ADMIN_ONLY` — 옛 코드
- * `CONTENT_RULES_OWNER_ONLY`는 이제 없다, backend/tests/test_3471_org_content_
- * rules_lint.py::test_member_put_returns_403_owner_field_untouched 부재 검산).
+ * `_require_owner_or_admin`, 403 `CONTENT_RULES_ADMIN_ONLY` — 옛 owner 전용
+ * 코드명은 이제 없다, backend/tests/test_3471_org_content_rules_lint.py::
+ * test_member_put_returns_403_owner_field_untouched 부재 검산).
  * 검증 로직 0, !ok(403·422 `CONTENT_RULES_INVALID`) 전부 그대로 pass-through.
  */
 export async function GET(request: Request, { params }: RouteParams) {

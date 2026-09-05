@@ -43,10 +43,10 @@ describe('/api/organizations/[id]/content-rules (story #3472)', () => {
 
   // story #3436 묶음11(페드루 PO 지적, 2026-09-06) — story #3490이 PUT 권한을
   // owner 단독에서 owner-or-admin으로 넓히며 코드도 CONTENT_RULES_ADMIN_ONLY로
-  // 바뀌었다(backend/tests/test_3471_org_content_rules_lint.py가 옛 코드
-  // CONTENT_RULES_OWNER_ONLY 부재를 직접 검산). 이 테스트만 옛 코드명 그대로
-  // 남아 있었다 — 라우트는 pass-through(검증 로직 0)라 실동작 회귀는 아니지만
-  // 다음 사람이 이 테스트 이름으로 실 계약값을 오인한다.
+  // 바뀌었다(backend/tests/test_3471_org_content_rules_lint.py가 옛 owner
+  // 전용 코드명 부재를 직접 검산). 이 테스트만 옛 코드명 그대로 남아 있었다 —
+  // 라우트는 pass-through(검증 로직 0)라 실동작 회귀는 아니지만 다음 사람이
+  // 이 테스트 이름으로 실 계약값을 오인한다.
   it('PUT — BE의 CHANNEL_CONNECTION류와 동형인 403 CONTENT_RULES_ADMIN_ONLY도 그대로 통과시킨다', async () => {
     proxyToFastapiWithParams.mockResolvedValue(
       new Response(JSON.stringify({ error: { code: 'CONTENT_RULES_ADMIN_ONLY' } }), {
