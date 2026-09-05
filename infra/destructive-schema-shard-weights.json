@@ -1133,6 +1133,11 @@
       "source": "story-5b27b32f-sandbox-channel-adapter(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 19.03s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 115s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
+      "file": "tests/test_3320_instagram_connector.py",
+      "sec": 190.0,
+      "source": "story-3320-instagram-connector-piece1(PR 개설 前 선제 등재 — 로컬 raw pytest 31.46s(28건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 190s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_8b7e52d6_claim_story_signal.py",
       "sec": 92.0,
       "source": "story-8b7e52d6-claim-story-signal(PR 개설 前 선제 등재, story 23bf1913 조기가드 학습 반영 — 로컬 raw pytest 15.30s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 92s 잠정값, 실 CI 샤드 로그로 재확認 필요)"

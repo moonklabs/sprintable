@@ -1238,22 +1238,35 @@ async def refresh_channel_tokens(
         from app.services.channel_connection import (
             apply_refresh_failure, apply_refresh_result, decrypt_for_use, list_connections_due_for_refresh,
         )
-        from app.services.threads_oauth import ThreadsOAuthError, refresh_long_lived_token
+        from app.services.threads_oauth import ThreadsOAuthError, refresh_long_lived_token as refresh_threads_token
+        from app.services.instagram_oauth import (
+            InstagramOAuthError, refresh_long_lived_token as refresh_instagram_token,
+        )
+
+        # story #3320 — Phase1은 threads만 구현했던 skip-guard(`continue`)를 채널→
+        # 갱신함수 명시 dict로 확장(get_publish_client_module의 dispatch dict 근본
+        # 처방과 같은 사상 — "모르는 채널은 조용히 스킵"까지는 fail-closed로서
+        # 안전하지만, instagram은 이제 "아는 채널"이니 여기도 등록해야 실제로
+        # 갱신된다. 등록 안 된 채널은 여전히 스킵되고 다음 refresh tick도 못
+        # 건드리므로 만료 방치 위험 — 새 채널 추가 시 이 dict도 같이 늘릴 것).
+        _REFRESH_FN_BY_CHANNEL = {"threads": refresh_threads_token, "instagram": refresh_instagram_token}
+        _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError)
 
         rows = await list_connections_due_for_refresh(session, now=datetime.now(timezone.utc))
         refreshed, failed = 0, 0
         async with _httpx.AsyncClient(timeout=15) as client:
             for row in rows:
-                if row.channel != "threads":
-                    continue  # Phase1 범위: threads만 구현(다른 채널은 후속 스토리)
+                refresh_fn = _REFRESH_FN_BY_CHANNEL.get(row.channel)
+                if refresh_fn is None:
+                    continue  # 미등록 채널(sandbox류 등)은 갱신 대상 아님(토큰 자체가 더미이거나 없음)
                 current_token = decrypt_for_use(row)
                 if current_token is None:
                     await apply_refresh_failure(session, connection=row, error_message="no stored access token")
                     failed += 1
                     continue
                 try:
-                    new_token, expires_in = await refresh_long_lived_token(client, current_token=current_token)
-                except ThreadsOAuthError as exc:
+                    new_token, expires_in = await refresh_fn(client, current_token=current_token)
+                except _OAUTH_ERROR_TYPES as exc:
                     await apply_refresh_failure(session, connection=row, error_message=exc.message)
                     failed += 1
                     continue

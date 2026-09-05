@@ -371,6 +371,11 @@ async def authorize_channel_connection(
         url = build_authorize_url(
             redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
         )
+    elif channel == "instagram":
+        # story #3320 — Instagram Login은 PKCE 미지원(그라운딩+PO 재확認, instagram_
+        # oauth.py 상단 딱지 참고) — code_challenge를 아예 안 넘긴다.
+        from app.services.instagram_oauth import build_authorize_url as build_instagram_authorize_url
+        url = build_instagram_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
     else:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
     return AuthorizeResponse(url=url, state=state)
@@ -406,7 +411,7 @@ async def channel_connection_callback(
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
-    if channel != "threads":
+    if channel not in ("threads", "instagram"):
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
     # authorize 단계와 별도로 다시 조회 — 콜백은 브라우저 왕복(수초~수분) 뒤라 그 사이 owner가
@@ -423,19 +428,45 @@ async def channel_connection_callback(
         )
     app_id, app_secret = app_credentials
 
-    from app.services.threads_oauth import exchange_code_for_short_lived_token, exchange_for_long_lived_token, test_connection
+    # story #3320 — instagram_oauth.InstagramOAuthError는 ThreadsOAuthError와 같은
+    # .code/.message 속성을 갖는 별도 클래스다(진짜 다른 provider — OAuth 예외는
+    # channel_posts.py의 ThreadsPublishError 재사용 판단과 달리 애초에 provider별
+    # 클래스가 따로 있었다, threads_oauth.py 참고). 두 분기가 3콜 순서(단기교환→
+    # 장기교환→시험)는 같지만 함수·예외 타입이 달라 그대로 나열한다(codebase 기존
+    # 관례 — 채널별 명시 분기, 억지 공통 추상화 X).
+    from app.services.instagram_oauth import InstagramOAuthError
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            short_lived_token, external_account_id = await exchange_code_for_short_lived_token(
-                client, code=body.code, redirect_uri=_redirect_uri(org_id, channel),
-                code_verifier=oauth_state.code_verifier, app_id=app_id, app_secret=app_secret,
-            )
-            long_lived_token, expires_in = await exchange_for_long_lived_token(
-                client, short_lived_token=short_lived_token, app_secret=app_secret,
-            )
-            account = await test_connection(client, access_token=long_lived_token)
-        except ThreadsOAuthError as exc:
+            if channel == "threads":
+                from app.services.threads_oauth import (
+                    exchange_code_for_short_lived_token, exchange_for_long_lived_token, test_connection,
+                )
+
+                short_lived_token, external_account_id = await exchange_code_for_short_lived_token(
+                    client, code=body.code, redirect_uri=_redirect_uri(org_id, channel),
+                    code_verifier=oauth_state.code_verifier, app_id=app_id, app_secret=app_secret,
+                )
+                long_lived_token, expires_in = await exchange_for_long_lived_token(
+                    client, short_lived_token=short_lived_token, app_secret=app_secret,
+                )
+                account = await test_connection(client, access_token=long_lived_token)
+            else:
+                from app.services.instagram_oauth import (
+                    exchange_code_for_short_lived_token as ig_exchange_short_lived,
+                    exchange_for_long_lived_token as ig_exchange_long_lived,
+                    test_connection as ig_test_connection,
+                )
+
+                short_lived_token, external_account_id = await ig_exchange_short_lived(
+                    client, code=body.code, redirect_uri=_redirect_uri(org_id, channel),
+                    app_id=app_id, app_secret=app_secret,
+                )
+                long_lived_token, expires_in = await ig_exchange_long_lived(
+                    client, short_lived_token=short_lived_token, app_secret=app_secret,
+                )
+                account = await ig_test_connection(client, access_token=long_lived_token)
+        except (ThreadsOAuthError, InstagramOAuthError) as exc:
             raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
         finally:
             del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다.
@@ -484,6 +515,44 @@ async def create_sandbox_channel_connection(
     row = await upsert_channel_connection(
         db, org_id=org_id, channel="sandbox", account_id=f"sandbox-{org_id}",
         account_label="Sandbox", credential_kind=adapter.credential_kind,
+        access_token="sandbox-dummy-access-token", refresh_token=None,
+        token_expires_at=None, refresh_mode=adapter.refresh_mode,
+        scopes=adapter.scope.split(","), connected_by=resolved.id,
+    )
+    return _to_response(row)
+
+
+@router.post(
+    "/{org_id}/channel-connections/instagram-sandbox", response_model=ChannelConnectionResponse, status_code=201,
+)
+async def create_instagram_sandbox_channel_connection(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story #3320 조각① — 위 `create_sandbox_channel_connection`(5b27b32f)과 동형
+    (신규 판정 로직 0) — 다만 채널이 "sandbox"가 아니라 "instagram_sandbox"다. 별도
+    라우트인 이유는 URL 자체가 채널을 특정해야(경로에 `{channel}` 변수를 안 쓰는 게
+    기존 관례 — authorize/callback과 달리 이 엔드포인트들은 OAuth가 없어 애초에
+    `{channel}` 파라미터화가 안 돼 있었다) 이 채널 전용 라우트가 자연스럽다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    adapter = get_channel_adapter("instagram_sandbox")
+    if adapter is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_SANDBOX_DISABLED",
+                "message": "이 환경에서 샌드박스 채널이 비활성화돼 있습니다(SANDBOX_CHANNEL_ENABLED).",
+            },
+        )
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel="instagram_sandbox", account_id=f"instagram-sandbox-{org_id}",
+        account_label="Instagram Sandbox", credential_kind=adapter.credential_kind,
         access_token="sandbox-dummy-access-token", refresh_token=None,
         token_expires_at=None, refresh_mode=adapter.refresh_mode,
         scopes=adapter.scope.split(","), connected_by=resolved.id,
@@ -717,15 +786,21 @@ async def test_channel_connection(
     if access_token is None:
         return TestConnectionResponse(ok=False, error="연결에 저장된 토큰이 없습니다.")
 
-    if row.channel != "threads":
+    if row.channel not in ("threads", "instagram"):
         return TestConnectionResponse(ok=False, error=f"unsupported channel: {row.channel}")
 
+    # story #3320 — instagram_oauth.InstagramOAuthError는 threads_oauth.ThreadsOAuthError
+    # 와 별도 클래스(진짜 다른 provider)라 둘 다 잡는다.
+    from app.services.instagram_oauth import InstagramOAuthError
+    from app.services.instagram_oauth import test_connection as instagram_test_connection
     from app.services.threads_oauth import test_connection as threads_test_connection
+
+    test_connection_fn = threads_test_connection if row.channel == "threads" else instagram_test_connection
 
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            account = await threads_test_connection(client, access_token=access_token)
-        except ThreadsOAuthError as exc:
+            account = await test_connection_fn(client, access_token=access_token)
+        except (ThreadsOAuthError, InstagramOAuthError) as exc:
             await apply_refresh_failure(db, connection=row, error_message=exc.message)
             return TestConnectionResponse(ok=False, error=exc.message)
     del access_token  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다.

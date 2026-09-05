@@ -133,6 +133,20 @@ class ChannelImageAspectRatioExceededError(Exception):
         )
 
 
+class ChannelImageAspectRatioTooNarrowError(Exception):
+    """story #3320(Phase2·마케팅운영) — Instagram 4:5(0.8)~1.91:1처럼 «세로가 너무
+    길어도» 거부하는 하한이 있는 채널용(Threads류 상한-only 채널은 image_aspect_min=
+    0.0 기본값이라 이 경로 자체를 안 탄다, 아래 검증 함수 참고 — 회귀 0)."""
+
+    def __init__(self, *, width_height_ratio: float, min_width_height_ratio: float):
+        self.width_height_ratio = width_height_ratio
+        self.min_width_height_ratio = min_width_height_ratio
+        super().__init__(
+            f"세로가 너무 길어(width/height {width_height_ratio:.2f}) 한도 "
+            f"{min_width_height_ratio:.2f}에 못 미칩니다(변환으로 고칠 수 없음)"
+        )
+
+
 class ChannelImageConversionFailedError(Exception):
     """재인코딩해도 어댑터 한도(image_max_bytes) 밑으로 못 낮춘 극히 드문 경우."""
 
@@ -319,11 +333,30 @@ async def confirm_channel_post_image_upload(
 
     probe = ImageOps.exif_transpose(probe)
     width, height = probe.size
-    aspect_ratio = (max(width, height) / min(width, height)) if min(width, height) > 0 else 0.0
-    if aspect_ratio > adapter.image_aspect_max:
-        raise ChannelImageAspectRatioExceededError(
-            aspect_ratio=aspect_ratio, max_aspect_ratio=adapter.image_aspect_max,
-        )
+    if adapter.image_aspect_min > 0 and height > 0:
+        # story #3320 — Instagram류(orientation-aware, 방향별 한도가 다름: 가로
+        # 최대 1.91:1·세로 최대 4:5=0.8). 아래(Threads 등) 정규화(long/short, 항상
+        # ≥1) 검사를 그대로 쓰면 image_aspect_max(1.91)가 방향 구분 없이 양쪽에
+        # 다 적용돼 세로쪽 실제 한도(0.8)보다 훨씬 느슨해진다(정규화 1.91 ==
+        # width/height 1/1.91=0.52까지 통과) — 원시 width/height 비율 하나로
+        # 위(가로 초과)·아래(세로 초과) 두 한도를 각각 직접 비교해야 정확하다.
+        # Threads 등 image_aspect_min=0.0(기본값)인 채널은 이 분기 자체를 안 타
+        # 아래의 기존 정규화 검사 그대로(회귀 0).
+        width_height_ratio = width / height
+        if width_height_ratio > adapter.image_aspect_max:
+            raise ChannelImageAspectRatioExceededError(
+                aspect_ratio=width_height_ratio, max_aspect_ratio=adapter.image_aspect_max,
+            )
+        if width_height_ratio < adapter.image_aspect_min:
+            raise ChannelImageAspectRatioTooNarrowError(
+                width_height_ratio=width_height_ratio, min_width_height_ratio=adapter.image_aspect_min,
+            )
+    else:
+        aspect_ratio = (max(width, height) / min(width, height)) if min(width, height) > 0 else 0.0
+        if aspect_ratio > adapter.image_aspect_max:
+            raise ChannelImageAspectRatioExceededError(
+                aspect_ratio=aspect_ratio, max_aspect_ratio=adapter.image_aspect_max,
+            )
 
     derived_bytes, derived_content_type, derived_width, derived_height, _out_format = _derive_image(
         raw, adapter=adapter,

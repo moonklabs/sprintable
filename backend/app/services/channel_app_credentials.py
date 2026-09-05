@@ -20,6 +20,13 @@ from app.services.channel_credential_crypto import decrypt_channel_credential, e
 # 때 여기 한 줄만 추가, platform_setting.py에도 그 채널의 컬럼 쌍을 먼저 추가).
 _PLATFORM_SETTINGS_COLUMNS = {
     "threads": ("threads_platform_app_id", "threads_platform_encrypted_app_secret"),
+    # story #3320(Phase2·마케팅운영, 페드루 PO 決定 2026-09-02) — "Threads 온보딩에서
+    # 만드는 Meta 개발자 앱에 Instagram Graph API use case만 추가"가 그라운딩 근거①
+    # 그 자체다: Instagram은 별도 앱이 아니라 **같은** Meta 개발자 앱(app_id/secret
+    # 재사용) — 새 platform_settings 컬럼을 안 만들고 threads 컬럼을 그대로 가리킨다
+    # (신규 컬럼 0·조직 상수 0, 스토리 본문 「결제 게이트 0」과 같은 취지의 「앱 등록
+    # 게이트 0」).
+    "instagram": ("threads_platform_app_id", "threads_platform_encrypted_app_secret"),
 }
 
 
