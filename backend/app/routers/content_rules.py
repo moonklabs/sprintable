@@ -61,6 +61,25 @@ class GenerationBudgetRule(BaseModel):
     period: Literal["month"] = "month"
 
 
+class UtmRules(BaseModel):
+    """story #3506(페드루 PO 確定 2026-09-05) — UTM 자동 부착 정책값. source/medium은
+    «어댑터 하드코딩 위에 조직 override»(미설정이면 channel_adapters.py의 어댑터별
+    상수 그대로, app/services/utm.py::attach_utm 호출부가 그 우선순위로 넘긴다).
+
+    `campaign_from`은 지금은 순수 서술용이다 — 실 campaign 해소는 여전히
+    `resolve_utm_campaign()`의 기존 규칙(블로그 경로면 slug·아니면 draft_id) 그대로다
+    (PO 確定 "기존 resolve 규칙 유지" — 이 필드가 그 규칙을 바꾸지 않는다, 값이
+    뭐든 동작 무변경). `content_from="none"`이면 utm_content 자체를 안 붙인다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    default_source: str | None = None
+    default_medium: str | None = None
+    campaign_from: Literal["campaign_slug", "draft_id"] = "campaign_slug"
+    content_from: Literal["draft_id", "none"] = "draft_id"
+
+
 class ContentRulesFields(BaseModel):
     """페드루 PO 리뷰 보정(2026-09-05, PR#3825) — `rules: dict`가 무형식이라
     `banned_terms`에 문자열 "spam"을 그대로 넣으면 `lint_content()`의
@@ -77,6 +96,7 @@ class ContentRulesFields(BaseModel):
     channel_priority: list[str] = []
     brand_kit: dict | None = None
     generation_budget: GenerationBudgetRule | None = None
+    utm_rules: UtmRules | None = None
 
 
 class PutContentRulesRequest(BaseModel):

@@ -18,15 +18,21 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 _BLOG_PATH_RE = re.compile(r"^/([a-z]{2}(?:-[A-Z]{2})?)/blog/([a-z0-9]+(?:-[a-z0-9]+)*)/?$")
 
 
-def attach_utm(url: str, *, source: str, medium: str, campaign: str) -> str:
+def attach_utm(url: str, *, source: str, medium: str, campaign: str, content: str | None = None) -> str:
     """기존 쿼리 파라미터를 보존하고, `utm_`로 시작하는 키가 이미 하나라도 있으면
     아무것도 건드리지 않고 원본을 그대로 돌려준다(PO 확定 — "자동 부착"은 없을 때만
-    채운다. 사용자가 이미 넣어 둔 UTM을 서버가 덮어쓰지 않는다)."""
+    채운다. 사용자가 이미 넣어 둔 UTM을 서버가 덮어쓰지 않는다).
+
+    story #3506(페드루 PO 確定 2026-09-05) — 네 번째 키 `utm_content` 추가(선택,
+    `content is None`이면 안 붙인다 — `content_from="none"` 정책값이 이 경로로
+    옮겨온다). source/medium/campaign 세 키의 기존 계약(스킵-if-present)은 무변경."""
     parsed = urlsplit(url)
     query = parse_qsl(parsed.query, keep_blank_values=True)
     if any(k.startswith("utm_") for k, _ in query):
         return url
     query += [("utm_source", source), ("utm_medium", medium), ("utm_campaign", campaign)]
+    if content is not None:
+        query.append(("utm_content", content))
     return urlunsplit(parsed._replace(query=urlencode(query)))
 
 

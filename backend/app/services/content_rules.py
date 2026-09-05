@@ -85,7 +85,12 @@ def lint_content(rules: dict | None, *, text: str, link_url: str | None) -> list
                 "hint_key": "content_rules.banned_term", "settings_path": _SETTINGS_PATH,
             })
 
-    if rules.get("require_utm") and link_url:
+    # story #3506(페드루 PO 確定 2026-09-05 ⓕ) — utm_rules.enabled=true면 발행 시점에
+    # 서버가 자동 부착을 보장하므로(build_tagged_link), submit 시점에 사람이 손으로
+    # 넣었는지 검사하는 이 축은 «자동 충족»으로 통과시킨다(require_utm 자체는 폐기
+    # 안 함 — 수동 규칙으로 계속 쓸 수 있게 남긴다, PO 明示).
+    utm_rules = rules.get("utm_rules") or {}
+    if rules.get("require_utm") and link_url and not utm_rules.get("enabled"):
         missing = [p for p in _REQUIRED_UTM_PARAMS if f"{p}=" not in link_url]
         if missing:
             violations.append({

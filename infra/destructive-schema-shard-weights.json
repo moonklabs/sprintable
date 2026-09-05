@@ -1123,6 +1123,11 @@
       "source": "story-3498-generation-budget(PR 개설 前 선제 등재 — 로컬 raw pytest 33.06s(14건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 200s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
+      "file": "tests/test_3506_utm_attribution.py",
+      "sec": 50.0,
+      "source": "story-3506-utm-attribution(조각1, PR 개설 前 선제 등재 — 로컬 raw pytest 7.95s(15건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 50s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_3497_insight_snapshots.py",
       "sec": 85.0,
       "source": "story-3497-insight-snapshots(조각1~3, PR#3844 — 등재 누락분 소급 등록. 로컬 raw pytest 13.82s(12건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 85s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
