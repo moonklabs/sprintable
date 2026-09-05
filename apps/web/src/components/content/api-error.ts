@@ -56,6 +56,10 @@ export type SitePostApiErrorKind =
   | 'image_aspect_ratio_too_narrow'
   | 'image_conversion_failed'
   | 'image_upload_failed'
+  // story #3538(BE #3886, 유나 §17-16⑤) — 이미지 필수 채널(Instagram)에 이미지 없이
+  // 상신 시도. 특별 분기 불요(labelKey만으로 t()가 문장을 조립 — text_too_long류와
+  // 달리 보간값이 없다) — kind는 다른 image_* 항목과 이름 관례만 맞춘다.
+  | 'image_required'
   // story #3500(BE #3498, 아직 미착지 — PO 確定 계약) — 생성 비용 한도(크레딧 게이트)
   // 초과. site_post·channel_post 상신 둘 다 같은 코드·같은 4값 shape를 공유(광고
   // budget_gate와 같은 계약, 블루프린트 §2). labelKey는 비워 두고(text_too_long과
@@ -158,6 +162,9 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // "상태를 다시 확認"이 맞는 다음 행동이다(두 번째 요청이 새 게시를 만들지 않는다).
   CHANNEL_PUBLISH_IN_PROGRESS: { labelKey: 'errorChannelPublishInProgress', kind: 'publish_in_progress' },
   CHANNEL_TEXT_TOO_LONG: { labelKey: '', kind: 'text_too_long' }, // maxLength·currentLength로 문구 조립(labelKey는 page.tsx가 보간)
+  // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 선알림(사유 사슬)과 같은 i18n 키.
+  // 서버 message를 그대로 뿌리지 않는다(코드→화면 문구 선택, §22-15 규율).
+  CHANNEL_IMAGE_REQUIRED: { labelKey: 'channelPostsImageRequiredReason', kind: 'image_required' },
   // EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED
   // 는 위 site 항목을 그대로 재사용한다(같은 external_publish 게이트 개념 공유, doc §9-4).
   // story #3402·PR#3764 — 채널 포스트 전용 GATE_ALREADY_HELD. site와 kind는 같지만
