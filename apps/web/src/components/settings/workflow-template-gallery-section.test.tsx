@@ -315,4 +315,28 @@ describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼�
     expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).toBeNull();
     expect(container.textContent).toContain('테스트 레시피');
   });
+
+  // story #3521 REQUIRED 1(유나 Design 변경요청·PO 確定 2026-09-06, 카디르 QA #3873
+  // 관찰 계기) — cyclic.map(...)이 만드는 N개짜리 "적용됨" 배지 조회는 부수(항목 하나
+  // 없어도 목록 자체는 온전)인데, 격리 없이 바깥 try/catch에만 기대면 항목 하나의
+  // 실패가 이미 성공한 definitions 전체를 "못 불러옴"으로 뒤덮인다(부수가 주를
+  // 삼키는 3519 클래스가 새 그릇으로 돌아온 자리).
+  it('cyclic 배지 조회 하나가 network reject해도 목록은 그대로 뜨고 loadError는 안 뜬다(항목별 격리)', async () => {
+    const DEF_2 = { ...DEFINITION, id: 'def-2', key: 'preset.test.recipe2', name: '두 번째 레시피' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION, DEF_2] };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) throw new Error('network down');
+      if (url.includes('/api/events/definitions/def-2/bindings')) return { ok: true, json: async () => ({ bindings: { step_1: 'agent-1' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="workflow-gallery-load-error"]')).toBeNull();
+    expect(container.textContent).toContain('테스트 레시피');
+    expect(container.textContent).toContain('두 번째 레시피');
+    // def-2(성공한 leg)는 배지가 붙고, def-1(실패한 leg)은 배지 없이(정직한 폴백) 목록엔 여전히 뜬다.
+    expect(container.textContent).toContain('적용됨');
+  });
 });

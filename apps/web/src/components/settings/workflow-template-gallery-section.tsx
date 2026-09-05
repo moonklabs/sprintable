@@ -88,11 +88,20 @@ export function WorkflowTemplateGallerySection({
       const defs = Array.isArray(data) ? (data as EventDefinitionResponse[]) : [];
       setDefinitions(defs);
       // "적용됨" 배지 — cyclic 정의마다 이 project에 바인딩이 하나라도 있는지 조회.
+      //
+      // story #3521 REQUIRED 1(유나 Design 변경요청, PO 確定 2026-09-06) — 이 leg는
+      // 부수(배지 하나 없어도 목록 자체는 온전)인데, cyclic.map(...)이 N개짜리
+      // Promise.all을 만든다. 이 map 결과 배열의 항목 하나라도 reject하면 그 reject가
+      // 이 함수를 감싸는 바깥 catch까지 전파해 loadError를 켜 — 이미 성공적으로 받은
+      // definitions 전체가 "못 불러옴"으로 뒤덮인다(부수가 주를 삼키는 3519 클래스가
+      // 새 그릇으로 돌아온 자리, 카디르 QA #3873 관찰 계기). 항목별로 격리해 실패한
+      // 항목만 배지가 안 붙고(그 정의는 "미적용"으로 보임 — §22-2 원칙상 배지 없음도
+      // 정직한 폴백, 지어낸 값이 아니다) 나머지 목록·배지는 그대로 선다.
       const cyclic = defs.filter(isCyclicDefinition);
       const applied = new Set<string>();
       await Promise.all(cyclic.map(async d => {
-        const r = await fetchWithAuth(`/api/events/definitions/${d.id}/bindings?project_id=${projectId}`);
-        if (r.ok) {
+        const r = await fetchWithAuth(`/api/events/definitions/${d.id}/bindings?project_id=${projectId}`).catch(() => null);
+        if (r?.ok) {
           const j = await r.json() as { bindings?: Record<string, string> };
           if (Object.keys(j.bindings ?? {}).length > 0) applied.add(d.key);
         }
