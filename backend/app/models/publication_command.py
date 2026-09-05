@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,16 @@ class PublicationCommand(Base):
         UniqueConstraint(
             "org_id", "destination", "approved_version", "operation",
             name="uq_publication_commands_idempotency",
+        ),
+        # story #3516 조각② 라이브 핫픽스(마이그 0340, 2026-09-05) — 0323이 이 CHECK를
+        # raw SQL로만 걸고 여기 모델에 미러를 안 남겨(뿌리 원인) 로컬 create_all() 기반
+        # 테스트가 이 제약 자체를 못 보고 죄다 그린으로 통과했다(실 마이그된 dev DB에서만
+        # content_kind="comment_reply" INSERT가 IntegrityError→500). 마이그(0323→0340)가
+        # 정본, 이건 그 정본의 미러 — 이름을 반드시 같게 유지할 것(`ck_publication_
+        # commands_content_kind`), 새 값을 추가할 땐 이 두 곳을 항상 같이 고칠 것.
+        CheckConstraint(
+            "content_kind IN ('channel_post', 'site_post', 'comment_reply')",
+            name="ck_publication_commands_content_kind",
         ),
     )
 
