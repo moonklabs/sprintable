@@ -1318,14 +1318,27 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
 
     draft_doc_ref: str | None = None
     draft_id: str | None = None
+    # story #3487(0329) — payload에 gate_id가 있으면(이 함수의 유일한 발행부는 항상
+    # 채운다) 그 행만 정확히 읽는다. story #3478(gate.scope_key) 이후 같은 work_item에
+    # 목적지가 다른 external_publish 게이트가 둘 이상일 수 있어, 아래 (work_item_id,
+    # gate_type, status) 재조회+`order_by(resolved_at desc).limit(1)`는 "가장 최근
+    # resolved"인 게이트를 고르는 것이지 "지금 이 이벤트가 말하는" 그 게이트가 아니다
+    # — 옛 payload(gate_id 없음, 레거시 큐 재생 등)에 대한 하위호환 폴백으로만 유지.
+    gate_id_raw = payload.get("gate_id")
     if work_item_type and work_item_id is not None and gate_type:
-        gate_row = (await db.execute(
-            select(Gate).where(
-                Gate.org_id == org_id, Gate.work_item_id == work_item_id,
-                Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
-                Gate.status == verdict,
-            ).order_by(Gate.resolved_at.desc()).limit(1)
-        )).scalar_one_or_none()
+        if gate_id_raw:
+            try:
+                gate_row = await db.get(Gate, uuid.UUID(str(gate_id_raw)))
+            except (ValueError, TypeError, AttributeError):
+                gate_row = None
+        else:
+            gate_row = (await db.execute(
+                select(Gate).where(
+                    Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                    Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                    Gate.status == verdict,
+                ).order_by(Gate.resolved_at.desc()).limit(1)
+            )).scalar_one_or_none()
         if gate_row is not None:
             facts = gate_row.neutral_facts or {}
             token = facts.get("draft_doc_reference_token")
@@ -1355,7 +1368,34 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
     # 없앤다).
     if gate_type == "external_publish":
         if verdict == "approved":
-            lines.append("- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.")
+            # story #3487(PO 실측 2026-09-05) — 옛 문구("발행은 휴먼이 화면에서 합니다")는
+            # site_post(외부 목적지·hosted_site 공통)의 실동작과 어긋난다: 승인 훅이
+            # publication_command를 즉시 만들고 **다음 워커 tick(최대 1분)이 어댑터를
+            # 호출**한다 — 휴먼 화면의 발행 버튼은 이미 completed된 command를 멱등
+            # 반환할 뿐(회수만 화면 액션이 실제로 필요). channel_post(예약 상신)는
+            # scheduled_at 시각에 발행되는 게 이미 맞는 문구라 무변(회귀 pin, AC2).
+            # draft_id가 site_post_drafts에 있는지로 도메인을 가른다 — destination
+            # 문자열(hosted_site/wordpress/webhook vs threads)에 기대는 것보다
+            # 채널 목록이 늘어나도 안 깨지는 축이다.
+            is_site_post = False
+            if draft_id:
+                try:
+                    draft_uuid = uuid.UUID(draft_id)
+                except (ValueError, TypeError, AttributeError):
+                    draft_uuid = None
+                if draft_uuid is not None:
+                    from app.models.site_post_draft import SitePostDraft
+                    is_site_post = (await db.execute(
+                        select(SitePostDraft.id).where(SitePostDraft.id == draft_uuid)
+                    )).scalar_one_or_none() is not None
+            if is_site_post:
+                lines.append(
+                    "- 다음 행동: 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 "
+                    "tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 "
+                    "확認합니다."
+                )
+            else:
+                lines.append("- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.")
         elif verdict == "rejected":
             # AC3 — 사유에 «폐기/중단» 신호가 있으면 다음 행동 자체를 비운다(침묵도
             # 문구다). 재상신을 권하면 카드가 사람의 결정과 정면으로 반대되는 행동을

@@ -167,6 +167,9 @@ _PRESET_GATE_VERDICT_SCHEMA = {
         "gate_requester_member_id": {"type": "string", "format": "uuid"},
         # story #3370 — 이 스토리가 여는 신규 선택 필드(migration 0308).
         "gate_draft_author_member_id": {"type": "string", "format": "uuid"},
+        # story #3487(0330) — 판정된 그 게이트 행 식별(dual-destination 이후 재조회
+        # 대신 이 값으로 exact fetch).
+        "gate_id": {"type": "string", "format": "uuid"},
     },
 }
 _WORK_ITEM_STAKEHOLDERS_ROUTING = {

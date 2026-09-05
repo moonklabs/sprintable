@@ -2057,6 +2057,10 @@ async def _publish_gate_verdict_notification(
             "gate_type": gate.gate_type,
             "verdict": new_status,
             "resolver_member_id": str(resolver_id),
+            # story #3487(0329) — 지금 판정된 그 게이트 행 자체(story #3478 dual-
+            # destination 이후 (work_item, gate_type)만으로는 유일하지 않다). 렌더
+            # (_render_gate_verdict_message)가 이 값이 있으면 재조회 없이 이 행만 읽는다.
+            "gate_id": str(gate.id),
             # story #3330 AC2 — 반려 사유 문구. 필드 자체는 #2791 스키마에 이미 있었으나
             # (payload_schema.resolution_note) 값이 한 번도 채워진 적이 없었다.
             "resolution_note": gate.resolution_note,

@@ -24,8 +24,9 @@ def anyio_backend():
 
 
 class _FakeGateRow:
-    def __init__(self, neutral_facts: dict | None):
+    def __init__(self, neutral_facts: dict | None, *, id_=None):
         self.neutral_facts = neutral_facts
+        self.id = id_ or uuid.uuid4()
 
 
 class _FakeResult:
@@ -36,20 +37,38 @@ class _FakeResult:
         return self._row
 
 
-def _fake_db(gate_row=None):
+def _fake_db(gate_row=None, *, site_post_draft_exists: bool = False):
+    """story #3487 — 두 번째 db.execute 호출(SitePostDraft 존재 확인, verdict==
+    approved·draft_id 있을 때만 일어난다)을 첫 번째(Gate 조회)와 다르게 응답해야
+    한다 — 호출 순서로 가른다(이 함수의 유일한 소비자가 순서를 그렇게 고정한다).
+    `db.get(Gate, ...)`(gate_id 있는 신규 경로)도 같은 gate_row를 돌려준다."""
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=_FakeResult(gate_row))
+    call_count = {"n": 0}
+
+    async def _execute(*_args, **_kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeResult(gate_row)
+        return _FakeResult(uuid.uuid4() if site_post_draft_exists else None)
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.get = AsyncMock(return_value=gate_row)
     return db
 
 
-def _payload(*, gate_type: str, verdict: str, resolution_note: str | None = None) -> dict:
-    return {
+def _payload(
+    *, gate_type: str, verdict: str, resolution_note: str | None = None, gate_id: str | None = None,
+) -> dict:
+    payload = {
         "work_item_type": "story",
         "work_item_id": str(uuid.uuid4()),
         "gate_type": gate_type,
         "verdict": verdict,
         "resolution_note": resolution_note,
     }
+    if gate_id:
+        payload["gate_id"] = gate_id
+    return payload
 
 
 @pytest.fixture(autouse=True)
@@ -62,10 +81,12 @@ def _stub_work_item_ref(monkeypatch):
     monkeypatch.setattr(events_module, "_render_event_notification_work_item_ref", _fake_ref)
 
 
-async def _render(payload: dict, gate_row=None) -> str:
+async def _render(payload: dict, gate_row=None, *, site_post_draft_exists: bool = False) -> str:
     from app.routers.events import _render_gate_verdict_message
 
-    return await _render_gate_verdict_message(_fake_db(gate_row), org_id=uuid.uuid4(), payload=payload)
+    return await _render_gate_verdict_message(
+        _fake_db(gate_row, site_post_draft_exists=site_post_draft_exists), org_id=uuid.uuid4(), payload=payload,
+    )
 
 
 class TestExternalPublishAgentNextAction:
@@ -90,6 +111,49 @@ class TestExternalPublishAgentNextAction:
             gate_type="external_publish", verdict="rejected", resolution_note="제목 오타 수정 필요",
         ))
         assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다." in text
+
+    async def test_site_post_approved_says_worker_tick_not_human_screen(self):
+        """story #3487 — site_post(외부 목적지·hosted_site 공통)는 승인 즉시 워커가
+        다음 tick에 발행한다(실동작). draft_id가 site_post_drafts에 있으면 새 문구."""
+        draft_id = str(uuid.uuid4())
+        gate_row = _FakeGateRow({"draft_id": draft_id})
+        text = await _render(
+            _payload(gate_type="external_publish", verdict="approved"),
+            gate_row=gate_row, site_post_draft_exists=True,
+        )
+        assert "발행은 휴먼이 화면에서 합니다" not in text
+        assert "다음 워커 tick" in text
+        assert "발행 결과" in text
+
+    async def test_channel_post_approved_keeps_old_text_regression(self):
+        """AC2 회귀 0 — channel_post(예약 상신)는 draft_id가 있어도(channel_posts.py도
+        neutral_facts.draft_id를 stamp한다) site_post_drafts엔 없으므로 옛 문구 그대로."""
+        draft_id = str(uuid.uuid4())
+        gate_row = _FakeGateRow({"draft_id": draft_id})
+        text = await _render(
+            _payload(gate_type="external_publish", verdict="approved"),
+            gate_row=gate_row, site_post_draft_exists=False,
+        )
+        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in text
+        assert "다음 워커 tick" not in text
+
+    async def test_gate_id_in_payload_fetches_exact_row_not_reconstructed(self):
+        """story #3487 AC3(페드루 決定, story #3478 dual-destination 대비) — payload에
+        gate_id가 있으면 db.get으로 그 행만 읽는다(재조회 쿼리를 아예 안 탄다). 뮤테이션
+        대상: db.get 호출을 지우면 이 테스트가 db.execute만 호출되는 옛 경로로 빠져
+        site_post_draft_exists=True를 반영 못 하고 RED가 된다."""
+        draft_id = str(uuid.uuid4())
+        gate_row = _FakeGateRow({"draft_id": draft_id}, id_=uuid.uuid4())
+        db = _fake_db(gate_row, site_post_draft_exists=True)
+        from app.routers.events import _render_gate_verdict_message
+
+        text = await _render_gate_verdict_message(
+            db, org_id=uuid.uuid4(),
+            payload=_payload(gate_type="external_publish", verdict="approved", gate_id=str(gate_row.id)),
+        )
+        db.get.assert_awaited_once()
+        assert "다음 워커 tick" in text
+        assert f"- draft_id: {draft_id}" in text
 
     async def test_rejected_signal_is_keyword_based_not_a_blanket_reason_suppression(self):
         # "제목 오타 수정 필요"는 신호가 없어 문구가 뜬다(위 테스트) — "중단"이 들어간
