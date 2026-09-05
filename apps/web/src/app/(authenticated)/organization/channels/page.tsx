@@ -15,6 +15,7 @@ import { ChannelStatusChip } from '@/components/channel-connect/channel-status-c
 import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/components/channel-connect/connection-status';
 import { AppCredentialsCard } from '@/components/channel-connect/app-credentials-card';
 import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-secret-connect-card';
+import { ReplaceCredentialCard } from '@/components/channel-connect/replace-credential-card';
 import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 
@@ -160,6 +161,19 @@ function ConnectionRow({
           <span className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</span>
         )}
       </div>
+      {/* story #3492 — 붙여넣기(pasted_secret) 연결만 「자격 바꾸기」를 갖는다(해제→
+          재연결 대신 id 불변 제자리 교체). oauth 연결은 위 재인증 버튼이 그 역할). */}
+      {conn.credential_kind === 'pasted_secret' ? (
+        <ReplaceCredentialCard
+          channel={conn.channel}
+          connectionId={conn.id}
+          secretHint={conn.secret_hint}
+          isOwner={isOwner}
+          orgId={orgId}
+          onReplaced={onDisconnected}
+          t={t}
+        />
+      ) : null}
     </div>
   );
 }

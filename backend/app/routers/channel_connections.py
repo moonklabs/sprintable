@@ -30,6 +30,7 @@ from app.services.channel_connection import (
     decrypt_for_use,
     get_channel_connection,
     list_channel_connections,
+    replace_channel_connection_credential,
     revoke_channel_connection,
     upsert_channel_connection,
 )
@@ -137,6 +138,9 @@ class ChannelConnectionResponse(BaseModel):
     image_width_max: int = 0
     image_color_space: str = ""
     image_max_count: int = 0
+    # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
+    # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
+    secret_hint: str | None = None
 
 
 def _to_response(row) -> ChannelConnectionResponse:
@@ -169,6 +173,7 @@ def _to_response(row) -> ChannelConnectionResponse:
         image_width_max=adapter.image_width_max if adapter is not None else 0,
         image_color_space=adapter.image_color_space if adapter is not None else "",
         image_max_count=adapter.image_max_count if adapter is not None else 0,
+        secret_hint=row.secret_hint,
     )
 
 
@@ -596,6 +601,80 @@ async def create_pasted_secret_channel_connection(
         status_code=404,
         detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={channel!r}는 아직 지원하지 않습니다."},
     )
+
+
+class ReplaceCredentialsRequest(BaseModel):
+    """story #3492 — WordPress는 `username?`(생략 시 무변)+`app_password`, webhook은
+    `secret`. create 쪽(CreatePastedSecretConnectionRequest)과 동형으로 한 모델에
+    Optional로 얹고 라우터가 channel별 필수 필드를 검사한다."""
+    username: str | None = None
+    app_password: str | None = None
+    secret: str | None = None
+
+
+@router.patch(
+    "/{org_id}/channel-connections/{connection_id}/credentials", response_model=ChannelConnectionResponse,
+)
+async def replace_channel_connection_credentials(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    body: ReplaceCredentialsRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story #3492(PO 決定 2026-09-05) — 붙여넣기 자격 「제자리 교체」(id 불변). 지금까지는
+    해제→새로 연결뿐이라 자격을 바꿀 때마다(예: WordPress 앱 비밀번호 정기 회전) 새
+    connection_id가 생겨 draft·발행 이력·external_publish 게이트 scope_key(story
+    #3478, connection_id 단위)가 끊겼다.
+
+    owner/admin(create_pasted_secret_channel_connection과 동형 폭). oauth 채널
+    (credential_kind != "pasted_secret")은 애초에 이 경로 대상이 아니다(404) —
+    OAuth 자격은 authorize/callback이 갱신하는 축이지 붙여넣기가 아니다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    row = await get_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"channel connection을 찾을 수 없습니다: {connection_id}")
+    if row.credential_kind != "pasted_secret":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_NOT_PASTED_SECRET",
+                "message": "붙여넣기형 연결만 자격을 바꿀 수 있습니다.",
+            },
+        )
+
+    if row.channel == "wordpress":
+        if not body.app_password:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "WORDPRESS_FIELDS_REQUIRED", "message": "app_password가 필요합니다."},
+            )
+        new_secret, account_label = body.app_password, body.username
+    elif row.channel == "webhook":
+        if not body.secret:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "WEBHOOK_FIELDS_REQUIRED", "message": "secret이 필요합니다."},
+            )
+        new_secret, account_label = body.secret, None
+    else:
+        # story e4fc29fa(조각⑤)의 fail-closed 관례 그대로 — 현재 pasted_secret 채널은
+        # wordpress/webhook 둘뿐. 새 pasted_secret 채널이 추가되고 이 분기가 안 늘면
+        # 조용히 새지 않고 여기로 떨어진다.
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={row.channel!r}는 아직 지원하지 않습니다."},
+        )
+
+    updated = await replace_channel_connection_credential(
+        db, org_id=org_id, connection_id=connection_id, new_secret=new_secret,
+        updated_by=resolved.id, account_label=account_label,
+    )
+    return _to_response(updated)
 
 
 @router.post("/{org_id}/channel-connections/{connection_id}/disconnect", response_model=ChannelConnectionResponse)

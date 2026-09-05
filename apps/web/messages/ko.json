@@ -2145,7 +2145,11 @@
     "channelConnectPastedSecretPendingCta": "연결하는 중…",
     "channelConnectPastedSecretHintWordpress": "WordPress 관리자 → 사용자 → 애플리케이션 비밀번호에서 만들어 붙여넣습니다.",
     "channelConnectPastedSecretHintWebhook": "받는 서버가 검증에 쓸 비밀값을 그쪽 설정에서 만들어 붙여넣습니다.",
-    "channelConnectPastedSecretRewriteNote": "저장한 뒤에는 다시 볼 수 없습니다 — 바꾸려면 새로 붙여넣습니다."
+    "channelConnectPastedSecretRewriteNote": "저장한 뒤에는 다시 볼 수 없습니다 — 바꾸려면 새로 붙여넣습니다.",
+    "channelConnectSecretHintLabel": "현재 자격: ****{hint}",
+    "channelConnectReplaceCredentialAction": "자격 바꾸기",
+    "channelConnectReplaceCredentialSubmitAction": "바꾸기",
+    "channelConnectReplaceCredentialPendingCta": "바꾸는 중…"
   },
   "content": {
     "title": "글 관리",

@@ -2145,7 +2145,11 @@
     "channelConnectPastedSecretPendingCta": "Connecting…",
     "channelConnectPastedSecretHintWordpress": "Create this in WordPress under Users → Application Passwords, then paste it here.",
     "channelConnectPastedSecretHintWebhook": "Create this on the receiving server's side (the value it will use to verify requests), then paste it here.",
-    "channelConnectPastedSecretRewriteNote": "You won't be able to see this again after saving — paste a new value to change it."
+    "channelConnectPastedSecretRewriteNote": "You won't be able to see this again after saving — paste a new value to change it.",
+    "channelConnectSecretHintLabel": "Current credential: ****{hint}",
+    "channelConnectReplaceCredentialAction": "Replace credential",
+    "channelConnectReplaceCredentialSubmitAction": "Replace",
+    "channelConnectReplaceCredentialPendingCta": "Replacing…"
   },
   "content": {
     "title": "Content",
