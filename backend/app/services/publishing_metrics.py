@@ -4,7 +4,7 @@ Phase 1 「실측」 5지표를 제품이 센다(지금까지 런북 회차마�
 5줄 確定 그대로:
 1. 정시 = `published_at - scheduled_at <= platform_settings.on_time_tolerance_seconds`
    (기본 120s — cron 1분 tick + 워커 여유, 어드민 관리값, `on_time_tolerance_seconds`
-   마이그 0328). 정시율 = 정시 발행 수 / 예약 발행(scheduled_at 있는 성공) 수.
+   마이그 0329). 정시율 = 정시 발행 수 / 예약 발행(scheduled_at 있는 성공) 수.
    재료: `publication_commands.scheduled_at` × `channel_publications.published_at`
    (gate_id·approved_version=version_id 조인 — channel_post/site_post-external 공용
    테이블, #3479/#3830 그라운딩). hosted_site 발행(연결 없음)은 channel_publications

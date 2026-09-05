@@ -463,6 +463,40 @@ async def test_computed_at_present_and_window_echoed():
         await engine.dispose()
 
 
+_FE_PUBLISHING_METRICS_KEYS = frozenset({
+    # PR#3833(components/content/publishing-metrics-band.tsx::PublishingMetrics)의
+    # 11개 키와 «정확히» 같아야 한다 — 키 하나만 어긋나도 FE가 그 필드를 조용히
+    # undefined→null로 그린다(pydantic response_model이 조용히 다른 값을 내보내도
+    # 이 pin이 즉시 잡는다). 페드루 PO 요청(2026-09-05, PR#3836 리뷰).
+    "window", "on_time_rate", "on_time_numer", "on_time_denom",
+    "duplicate_publications", "unapproved_adapter_calls",
+    "recovery_seconds_p50", "recovery_seconds_p95",
+    "connections_expired", "connections_expiring_7d", "computed_at",
+})
+
+
+@pytest.mark.anyio
+async def test_response_key_set_matches_fe_publishing_metrics_interface_exactly():
+    """⭐PO 요청(PR#3836 리뷰) — 응답 키 집합이 FE PublishingMetrics(#3833)와
+    정확히 같다(집합 비교 — 키 하나 어긋나면 FE가 조용히 null을 그린다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publishing-metrics?window=7d")
+        assert r.status_code == 200, r.text
+        assert set(r.json().keys()) == _FE_PUBLISHING_METRICS_KEYS
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_invalid_window_returns_422():
     from app.main import app

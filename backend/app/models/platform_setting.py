@@ -59,6 +59,6 @@ class PlatformSetting(Base, TimestampMixin):
     threads_platform_encrypted_app_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #3475(Phase1·마케팅운영, 페드루 PO 確定 2026-09-05) — 발행 계측 API
     # 「정시」 정의(published_at - scheduled_at <= tolerance)의 허용오차(초). cron
-    # 1분 tick + 워커 처리 여유 감안 기본 120초(마이그 0328 시드) — 하드코딩 금지
+    # 1분 tick + 워커 처리 여유 감안 기본 120초(마이그 0329 시드) — 하드코딩 금지
     # 원칙(dunning_grace_days/vat_rate_bp와 동일 선례).
     on_time_tolerance_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("120"))
