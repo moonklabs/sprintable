@@ -180,6 +180,7 @@ async def update_org_member(
     id: uuid.UUID,
     body: OrgMemberUpdate,
     repo: OrgMemberRepository = Depends(_require_admin),
+    auth: AuthContext = Depends(get_current_user),
 ) -> OrgMemberResponse:
     if body.role and body.role not in ORG_ROLES:
         raise HTTPException(status_code=400, detail=f"role must be one of: {', '.join(ORG_ROLES)}")
@@ -188,6 +189,40 @@ async def update_org_member(
         existing = await repo.get(id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Org member not found")
+
+        # story #3491(페드루 PO 確定 2026-09-05, 미르코 그라운딩) — _require_admin은
+        # "owner 또는 admin"만 통과시키지만 그 안에서 admin이 owner 자리를 만들거나
+        # 건드릴 수 있는 폭까지는 안 잰다. 여기서 owner 보호를 건다(정공법 — 서버가
+        # 거부, FE 숨김에만 기대지 않는다).
+        caller = await repo.get_by_user(uuid.UUID(auth.user_id))
+        if caller is None:
+            raise HTTPException(status_code=403, detail="org admin 또는 owner 권한 필요")
+
+        if caller.role != "owner":
+            # admin caller — owner를 부여할 수 없고, owner 행을 건드릴 수 없고, 자기
+            # 자신의 role도 못 바꾼다(세 축 다 같은 이유: admin이 스스로 owner 경계를
+            # 넘나들 여지를 원천 차단).
+            if data["role"] == "owner" or existing.role == "owner" or existing.id == caller.id:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "ORG_MEMBER_OWNER_ONLY_ACTION",
+                        "message": "owner 권한이 필요한 작업입니다.",
+                    },
+                )
+        elif existing.role == "owner" and data["role"] != "owner":
+            # owner caller가 owner를 강등하려는 경우 — 마지막 owner면 조직이 owner
+            # 0인 상태로 떨어진다(복구 불가에 가까운 상태, 구조적으로 막는다).
+            remaining_owners = await repo.list(role="owner")
+            if len(remaining_owners) <= 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "ORG_LAST_OWNER",
+                        "message": "마지막 owner는 강등할 수 없습니다.",
+                    },
+                )
+
         if existing.role != data["role"]:
             await _revoke_user_refresh_tokens(repo.session, existing.user_id)
     member = await repo.update(id, **data)

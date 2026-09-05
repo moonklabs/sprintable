@@ -14,6 +14,7 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { canEditOrgMemberRole } from '@/lib/org-member-role';
 
 interface OrgMember {
   id: string;
@@ -71,14 +72,22 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
 
   const canManage = currentRole === 'owner' || currentRole === 'admin';
-  const isOwner = currentRole === 'owner';
+  // story #3491(페드루 PO 確定) — canEditOrgMemberRole의 자기 자신 판정에 필요.
+  // BE MeResponse.user_id(=members.user_id 축, project-scoped team member id인
+  // currentTeamMemberId와는 다른 값)와 org-members 응답의 user_id를 대조한다.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const refreshData = async () => {
-    const [membersRes, invitesRes, projectsRes] = await Promise.all([
+    const [membersRes, invitesRes, projectsRes, meRes] = await Promise.all([
       fetchWithAuth('/api/org-members').catch(() => null),
       fetchWithAuth(`/api/organizations/${orgId}/invites`).catch(() => null),
       fetchWithAuth('/api/projects').catch(() => null),
+      fetchWithAuth('/api/me').catch(() => null),
     ]);
+    if (meRes?.ok) {
+      const json = await meRes.json() as { data?: { user_id?: string | null } };
+      setCurrentUserId(json.data?.user_id ?? null);
+    }
     if (projectsRes?.ok) {
       const json = await projectsRes.json() as { data?: Array<{ id: string; name: string }> };
       setOrgProjects((json.data ?? []).map((p) => ({ id: p.id, name: p.name })));
@@ -161,9 +170,19 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setActionMessage({ type: 'success', text: '역할이 변경됐습니다.' });
       await refreshData();
     } else {
-      // story #2485 — backend update_org_member()는 generic HTTP상태 코드만 낸다
-      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-      setActionMessage({ type: 'error', text: t('memberRoleChangeFailed') });
+      // story #3491 — update_org_member()가 이제 owner 보호 가드의 구조화 code를
+      // 낸다(ORG_MEMBER_OWNER_ONLY_ACTION·ORG_LAST_OWNER, story #2485 코멘트가 말한
+      // "진짜 비즈니스 code 없음" 시절은 지났다). FE 게이트가 canEditOrgMemberRole로
+      // 대부분 막지만, 다른 창에서 동시에 상태가 바뀌는 race는 남아 있어 서버 거부를
+      // 그대로 안내해야 한다(raw 서버 message 노출은 여전히 안 함, 고정 문구로).
+      const json = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+      if (json?.error?.code === 'ORG_MEMBER_OWNER_ONLY_ACTION') {
+        setActionMessage({ type: 'error', text: t('memberRoleChangeOwnerOnlyError') });
+      } else if (json?.error?.code === 'ORG_LAST_OWNER') {
+        setActionMessage({ type: 'error', text: t('memberRoleChangeLastOwnerError') });
+      } else {
+        setActionMessage({ type: 'error', text: t('memberRoleChangeFailed') });
+      }
     }
     setChangingRoleId(null);
   };
@@ -341,7 +360,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
           {members.map((member) => {
             const isThisOwner = member.role === 'owner';
-            const canEdit = isOwner && !isThisOwner;
+            const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
             return (
               <MemberRow
                 key={member.id}

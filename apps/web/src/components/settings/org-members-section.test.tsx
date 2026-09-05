@@ -122,3 +122,60 @@ describe('OrgMembersSection — error.code 분기 (story #2485)', () => {
     expect(container.textContent).toContain(koMessages.settings.memberInviteFailed);
   });
 });
+
+// story #3491(페드루 PO 確定) — FE 게이트가 BE 인가(owner·admin)와 정확히 같은 폭인지.
+// admin caller가 member는 편집하되 owner 행·자기 자신 행은 못 건드리는 것을 실 렌더로 잰다.
+async function mountAsAdmin(members: Array<{ id: string; user_id: string; role: 'owner' | 'admin' | 'member'; name?: string }>, currentUserId: string) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === '/api/org-members') {
+      return {
+        ok: true,
+        json: async () => ({
+          data: members.map((m) => ({ id: m.id, user_id: m.user_id, name: m.name ?? 'M', role: m.role, created_at: '2026-09-01T00:00:00Z' })),
+        }),
+      };
+    }
+    if (url === '/api/organizations/org-1/invites') return { ok: true, json: async () => ({ data: [] }) };
+    if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+    if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: currentUserId } }) };
+    throw new Error('unexpected fetch: ' + url);
+  }));
+  await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="admin" />)); });
+  await flush();
+}
+
+describe('OrgMembersSection — 역할 변경 게이트가 BE 인가 폭과 같다(story #3491)', () => {
+  it('⭐admin caller — owner도 자기 자신도 아닌 member 행엔 <select>가 뜬다(FE=BE 폭 정정의 핵심)', async () => {
+    await mountAsAdmin(
+      [
+        { id: 'row-owner', user_id: 'u-owner', role: 'owner' },
+        { id: 'row-self', user_id: 'u-admin-self', role: 'admin' },
+        { id: 'row-other', user_id: 'u-member', role: 'member' },
+      ],
+      'u-admin-self',
+    );
+
+    const selects = container.querySelectorAll('select');
+    expect(selects.length).toBe(1); // owner 행·자기 자신 행은 select가 없다.
+  });
+
+  it('⭐<select>엔 owner 옵션이 없다(BE가 admin의 owner 부여를 거부하니 UI도 안 보인다)', async () => {
+    await mountAsAdmin(
+      [{ id: 'row-other', user_id: 'u-member', role: 'member' }],
+      'u-admin-self',
+    );
+
+    const select = container.querySelector('select')!;
+    const optionValues = Array.from(select.querySelectorAll('option')).map((o) => o.getAttribute('value'));
+    expect(optionValues).toEqual(['admin', 'member']);
+    expect(optionValues).not.toContain('owner');
+  });
+
+  it('member fixture는 관리자 전용 안내로 막혀 select 자체가 없다(회귀 0, story #3231과 조합)', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="member" />)); });
+    await flush();
+    expect(container.querySelectorAll('select').length).toBe(0);
+  });
+});
