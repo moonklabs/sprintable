@@ -10,6 +10,7 @@ import {
   HardDrive,
   Inbox,
   Layers,
+  ListChecks,
   MessageSquare,
   Newspaper,
   Plug,
@@ -162,6 +163,10 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // org-connectors(위, «에이전트가 쓰는 도구 계약»)와 주체·수명이 달라 별도 라우트로
       // 분리한다 — 한 페이지 탭으로 섞으면 "연결"이라는 같은 말을 두 뜻으로 읽는다(PO 판단).
       { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels' },
+      // story #3472(페드루 PO 確定 2026-09-05) — 콘텐츠 규칙(금칙어·UTM 필수·톤·택소노미·
+      // 채널 우선순위·브랜드 킷) 화면. 읽기 전용 화면이라 owner 아닌 사람에게도 보인다
+      // (편집 컨트롤만 owner 전용 — 화면 자체의 자리는 전 역할 공통).
+      { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules' },
     ],
   },
   {

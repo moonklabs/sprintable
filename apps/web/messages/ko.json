@@ -120,6 +120,7 @@
     "orgEvents": "이벤트",
     "orgConnectors": "커넥터",
     "orgChannels": "채널",
+    "orgContentRules": "콘텐츠 규칙",
     "switcherOrgSettingsAria": "Organization 설정",
     "switcherMobileTriggerAria": "조직·프로젝트 전환",
     "switcherMobileSheetTitle": "전환",
