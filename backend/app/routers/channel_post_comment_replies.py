@@ -134,10 +134,15 @@ class ReplyView(BaseModel):
     reason_code: str | None = Field(
         default=None,
         description=(
-            "voided 사유(실재 값 그대로, 새 이름 짓지 않음) — "
-            "\"GATE_NOT_APPROVED_OR_RESEALED\"(게이트 재검증 실패) 또는 "
-            "\"TARGET_COMMENT_DELETED\"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스). "
-            "voided 아니면 null."
+            "voided 사유(PublicationCommand.reason_code 그대로, 새 이름 짓지 않음 — "
+            "이 컬럼은 channel_post 발행류(publication_command.py)와 공유라 열거를 "
+            "닫지 않는다). 페드루 PO 대조(2026-09-06) — **현재 관측 값**: "
+            "\"GATE_NOT_APPROVED_OR_RESEALED\"(게이트 재검증 실패) · "
+            "\"TARGET_COMMENT_DELETED\"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스) · "
+            "\"CONTENT_CHANGED\"(channel_posts.py 재승인 필요 전이 축, 댓글 답변 "
+            "경로가 아니어도 같은 컬럼에 실린다). 이 외에도 미래 값이 더 생길 수 "
+            "있다 — 화면은 아는 값만 문구로 대응하고 모르는 값은 원문 그대로/일반 "
+            "문구로 안전히 처리해야 한다. voided 아니면 null."
         ),
     )
 
