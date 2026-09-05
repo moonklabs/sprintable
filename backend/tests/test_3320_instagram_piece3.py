@@ -164,6 +164,53 @@ async def test_instagram_fetch_replies_follows_cursor_until_exhausted():
 
 
 @pytest.mark.anyio
+async def test_instagram_fetch_replies_uses_graph_instagram_com_host():
+    """페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회) — comments 엔드포인트도
+    graph.instagram.com이어야 한다(instagram_publish.py::_GRAPH_BASE와 동일
+    호스트로 통일). 호스트를 facebook.com으로 되돌리면 RED."""
+    from app.services.instagram_publish import fetch_replies
+
+    captured = {}
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"data": [], "paging": {}}
+
+    class _FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            return _FakeResponse()
+
+    await fetch_replies(_FakeClient(), access_token="tok", media_id="media-1")
+    assert captured["url"].startswith("https://graph.instagram.com/")
+    assert "facebook.com" not in captured["url"]
+
+
+@pytest.mark.anyio
+async def test_instagram_reply_uses_graph_instagram_com_host():
+    """페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회) — comment replies
+    엔드포인트도 graph.instagram.com이어야 한다."""
+    from app.services.instagram_publish import reply
+
+    captured = {}
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"id": "reply-1"}
+
+    class _FakeClient:
+        async def post(self, url, *, params):
+            captured["url"] = url
+            return _FakeResponse()
+
+    await reply(_FakeClient(), access_token="tok", threads_user_id="ig-1", reply_to_id="c1", text="x")
+    assert captured["url"].startswith("https://graph.instagram.com/")
+    assert "facebook.com" not in captured["url"]
+
+
+@pytest.mark.anyio
 async def test_instagram_fetch_replies_failure_raises_threads_publish_error():
     from app.services.instagram_publish import fetch_replies
     from app.services.threads_publish import ThreadsPublishError
@@ -387,6 +434,45 @@ async def test_instagram_insights_200_maps_likes_comments_saved_shares_to_engage
             assert snap.normalized["reach"] == 300
             assert snap.normalized["engagements"] == 17  # 10+2+1+4
             assert snap.normalized["views"] is None  # instagram이 선언 안 한 축.
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_instagram_insights_uses_graph_instagram_com_host(monkeypatch):
+    """페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회) — insights 엔드포인트도
+    graph.instagram.com이어야 한다. 호스트를 facebook.com으로 되돌리면 RED
+    (real HTTP 왕복 없이 MockTransport의 request.url로 실제 나간 호스트를 본다)."""
+    import httpx
+
+    from app.services.insight_snapshots import process_due_insight_snapshots, schedule_insight_snapshots
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            connection = await _seed_channel_connection(s, org_id, channel="instagram")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=connection.id, channel="instagram")
+            work_item_id = uuid.uuid4()
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=pub.id,
+                publication_kind="channel_publication", channel="instagram", external_id=pub.external_id,
+                anchor_at=datetime.now(timezone.utc) - timedelta(days=8),
+            )
+            await s.commit()
+
+            captured = {}
+
+            def _handler(request):
+                captured["url"] = str(request.url)
+                return httpx.Response(200, json={"data": []})
+
+            _patch_transport(monkeypatch, _handler)
+            await process_due_insight_snapshots(s)
+
+            assert captured["url"].startswith("https://graph.instagram.com/"), captured["url"]
+            assert "facebook.com" not in captured["url"]
     finally:
         await engine.dispose()
 

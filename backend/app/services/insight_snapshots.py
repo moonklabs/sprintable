@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.insight_snapshot import InsightSnapshot
+from app.services.instagram_publish import _GRAPH_BASE as _INSTAGRAM_GRAPH_BASE
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +248,11 @@ async def _fetch_threads(client: "httpx.AsyncClient", *, access_token: str, medi
     return {"raw": body, "values": values}
 
 
-_INSTAGRAM_INSIGHTS_URL_TMPL = "https://graph.facebook.com/v21.0/{media_id}/insights"
+# story #3320 — 페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회, #3874 리뷰
+# "자체 상수 X, _GRAPH_BASE 참조") — 새 호스트 상수를 여기 또 만들지 않고
+# instagram_publish.py의 것을 그대로 import해 쓴다(호스트를 되돌리는 실수가
+# 한 곳만 고치면 되게 — instagram_publish.py::_GRAPH_BASE docstring 참고).
+_INSTAGRAM_INSIGHTS_URL_TMPL = _INSTAGRAM_GRAPH_BASE + "/{media_id}/insights"
 # story #3320 조각③ — 페드루 PO 決定⑤=(b): likes+comments+saved(+shares, 있으면)를
 # threads_publish.py의 engagements 합산과 같은 모양으로 뭉친다(같은 낱말=같은
 # 정의). impressions/reach는 §2(d) 7키에 그대로 이름이 있어 개별 유지. IG 이미지
