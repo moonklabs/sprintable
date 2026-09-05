@@ -51,6 +51,16 @@ import { GenerationBudgetExceededBanner } from '@/components/content/generation-
  * `/gates/{id}` 딥링크(§6-1 재사용 목록, 게이트 상세)한다.
  */
 
+// story #3514(BE 신설, PO 確定 2026-09-05) — 단건 GET(site_post는 이 스토리 前엔 이
+// 엔드포인트 자체가 없었다, channel-posts/drafts/[draftId] #3445와 같은 갭). 목록
+// 항목(SitePostDraftListItem) shape에 lint-on-read `violations[]`를 얹은 응답 —
+// 이 화면이 지금 당장 쓰는 건 violations뿐이라(제목·본문 등은 여전히 /versions의
+// 최신 항목에서 온다) 그 필드만 타입에 싣는다(ChannelPostDraftDetail처럼 optional).
+interface SitePostDraftDetail {
+  draft_id: string;
+  violations?: ContentRuleViolation[];
+}
+
 interface SitePostVersion {
   version_id: string;
   version: number;
@@ -218,6 +228,11 @@ export default function ContentPostEditPage() {
   // story #3483(BE 3482, §16-7) — 저장/상신 응답이 채우는 하나의 목록. 상신 422는
   // 새 배너를 안 만들고 이 state를 서버 응답으로 갱신한다(channel-posts 상세와 동형).
   const [violations, setViolations] = useState<ContentRuleViolation[]>([]);
+  // story #3514(유나 Design 변경요청 1, 2026-09-05) — 단건 GET(violations 부수 호출)
+  // 실패가 초안 열기 자체를 막으면 안 된다(주 데이터는 여전히 /versions). 실패해도
+  // violations=[]로 진행하고 이 한 줄로만 "모른다"를 알린다(§16-7 "읽기 자리를 주
+  // 데이터와 같은 급으로 묶지 않는다").
+  const [violationsLoadFailed, setViolationsLoadFailed] = useState(false);
   // "편집 중에도 같은 강도" — severity가 없어 위반이 있으면 전부 차단(channel-posts
   // 상세와 동형).
   const hasBlockingViolations = violations.length > 0;
@@ -347,21 +362,44 @@ export default function ContentPostEditPage() {
       setLoading(true);
       setLoadError(false);
       try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
+        // story #3514(doc a0da40c9, PO 確定 2026-09-05) — lint-on-read: 단건 GET을
+        // /versions와 병렬로 부른다(channel-posts/[draftId]/page.tsx :340-341과 동형
+        // 패턴 — site_post는 이 스토리 前까지 단건 GET 자체가 없어 /versions 하나만
+        // 불렀다). 단건 GET의 violations[]로 "저장 없이" 위반 목록·상신 비활성이
+        // 선다(§16-7을 읽기까지 넓힘).
+        //
+        // ⚠️유나 Design 변경요청 1(2026-09-05) — 단건 GET은 이 화면에선 부수 데이터다
+        // (주 데이터는 여전히 /versions). 단건 GET만 실패해도 화면 전체를 막지 않는다
+        // (§16-7 "읽기 자리를 주 데이터와 같은 급으로 묶지 않는다") — violations=[]로
+        // 진행하고 violationsLoadFailed 한 줄만 띄운다. 변형(channel_post) 화면은 단건
+        // GET이 주 데이터라 그대로 loadError 대상.
+        const [draftRes, versionsRes] = await Promise.all([
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}`),
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`),
+        ]);
         if (cancelled) return;
-        if (res.ok) {
-          const json = (await res.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
-          const list = json?.data ?? [];
-          setVersions(list);
-          const latest = list[list.length - 1];
-          if (latest) {
-            setTitle(latest.title);
-            setSummary(latest.summary);
-            setTagsText(latest.tags.join(', '));
-            setBodyMd(latest.body_md);
-          }
-        } else {
+        if (!versionsRes.ok) {
           setLoadError(true);
+          return;
+        }
+        if (draftRes.ok) {
+          const draftJson = (await draftRes.json().catch(() => null)) as { data?: SitePostDraftDetail } | null;
+          setViolations(draftJson?.data?.violations ?? []);
+          setViolationsLoadFailed(false);
+        } else {
+          setViolations([]);
+          setViolationsLoadFailed(true);
+        }
+
+        const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+        const list = json?.data ?? [];
+        setVersions(list);
+        const latest = list[list.length - 1];
+        if (latest) {
+          setTitle(latest.title);
+          setSummary(latest.summary);
+          setTagsText(latest.tags.join(', '));
+          setBodyMd(latest.body_md);
         }
       } catch {
         if (!cancelled) setLoadError(true);
@@ -707,6 +745,9 @@ export default function ContentPostEditPage() {
         // 배열 — 화면은 아무것도 지어내지 않는다.
         const saveJson = (await res.json().catch(() => null)) as { data?: { violations?: ContentRuleViolation[] } } | null;
         setViolations(saveJson?.data?.violations ?? []);
+        // story #3514(PO REQUIRED, 2026-09-05) — 저장 응답이 권위 값을 방금 채웠으니
+        // 로드-실패 안내 줄이 그 옆에 남아 모순되면 안 된다.
+        setViolationsLoadFailed(false);
         // 새 버전이 생겼다 — 이력을 다시 읽어 새 버전 번호·"미상신" 상태를 반영한다(AC2).
         const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
         if (versionsRes.ok) {
@@ -778,6 +819,9 @@ export default function ContentPostEditPage() {
         const ruleViolationBody = body as { error?: { code?: string; violations?: ContentRuleViolation[] } } | null;
         if (ruleViolationBody?.error?.code === 'CONTENT_RULE_VIOLATION') {
           setViolations(ruleViolationBody.error.violations ?? []);
+          // story #3514(PO REQUIRED, 2026-09-05) — 상신 422도 권위 값이다(위 저장
+          // 응답과 동형 이유).
+          setViolationsLoadFailed(false);
           return;
         }
         const info = parseSitePostApiError(body);
@@ -1491,6 +1535,15 @@ export default function ContentPostEditPage() {
               걸렸나)와 자리가 다르다 — 여기는 개수만 세고 가리킨다. */}
           {hasBlockingViolations ? (
             <ContentRuleSubmitBlockedReason count={violations.length} testId="content-rule-violation-blocked-reason" t={t} />
+          ) : null}
+          {/* story #3514(유나 Design 변경요청 1, 2026-09-05) — 단건 GET(violations 부수
+              데이터) 실패는 화면을 안 막되, "모른다"는 사실은 숨기지 않는다(지어내지
+              않는다 — 위반 0으로 조용히 넘어가면 실제로 위반이 있는데 못 본 것과
+              구별이 안 된다). */}
+          {violationsLoadFailed ? (
+            <p className="text-xs text-muted-foreground" data-testid="content-rule-violation-load-failed">
+              {t('contentRuleViolationsLoadFailed')}
+            </p>
           ) : null}
           {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
               이유"를 옆에 두는 이 문구는 실제 정보라 4.5:1 판정 대상이다(text-muted-

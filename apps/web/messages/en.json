@@ -2376,6 +2376,7 @@
     "contentRuleGenericBlockedHint": "This value doesn't meet the content rules.",
     "contentRuleSubmitBlockedHint": "Fix {count} rule violation(s) before you can submit.",
     "contentRuleLinkLabel": "Content rules",
+    "contentRuleViolationsLoadFailed": "Couldn't load rule violation info.",
     "channelPostsTextTooLong": "The limit is {max} characters, but this is {current} — shorten it and resubmit.",
     "channelPostsRateLimitedUntil": "You've used today's posting limit — you can post again after {time}.",
     "channelPostsPublishScheduled": "This goes out exactly as it is now, at {time}.",

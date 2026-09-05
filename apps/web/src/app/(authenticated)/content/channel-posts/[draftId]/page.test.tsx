@@ -93,6 +93,9 @@ const DRAFT_DETAIL = {
   source_current_site_post_version_id: null as string | null,
   // story #3453 AC3 후속(BE 판정 이관) — null=모른다(기본값).
   source_changed: null as boolean | null,
+  // story #3514(lint-on-read, PO 確定 2026-09-05) — 단건 GET의 규칙 위반 목록.
+  // 기본값 빈 배열(대부분 테스트가 이 스토리와 무관 — "위반 없음"이 기본).
+  violations: [] as { code: string; field: string; value: string; hint_key: string; settings_path: string }[],
 };
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
@@ -2375,6 +2378,25 @@ describe('ChannelPostEditPage — 콘텐츠 규칙 위반 표시(story #3472 2�
     expect(container.querySelector('[data-testid="channel-post-rule-violation-text"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-rule-violation-blocked-reason"]')).toBeNull();
     expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // story #3514(lint-on-read, doc a0da40c9, PO 確定 2026-09-05) — 유나 13회차 ③ 관찰:
+  // 규칙이 바뀐 뒤 기존 초안을 «열기만» 하면(저장·상신 없이) 위반 목록·상신 비활성이
+  // 이미 서야 한다. 이 화면은 로드 시 이미 단건 GET을 부르므로(#3402) 그 응답의
+  // violations를 그대로 초기값으로 쓰면 되는 자리 — save/submit 흐름과 별개로 검증.
+  it('⭐로드만으로(저장·상신 없이) 단건 GET의 violations가 필드 옆 목록·상신 비활성으로 선다', async () => {
+    stubFetch({
+      draftDetail: {
+        violations: [{ code: 'banned_term', field: 'text', value: '무료 보장', hint_key: 'x', settings_path: '/organization/content-rules' }],
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-text"]')?.textContent).toContain('무료 보장');
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-rule-violation-blocked-reason"]')).not.toBeNull();
   });
 });
 
