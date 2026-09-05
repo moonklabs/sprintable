@@ -52,16 +52,22 @@ const RULES_V1 = {
   banned_terms: ['무료체험'], require_utm: true, tone: '친근하게' as string | null, taxonomy: ['공지'],
   channel_priority: ['threads', 'wordpress'],
   brand_kit: { logo_url: 'https://x.example/logo.png' as string | undefined, colors: ['#111'], fonts: ['Pretendard'] },
+  generation_budget: null as { limit_minor: number; currency: 'KRW' | 'USD'; period: 'month' } | null,
 };
 
 function stubFetch(opts: {
   rules?: typeof RULES_V1;
   version?: number;
   onPut?: (body: unknown) => { status: number; body?: unknown };
+  budget?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' };
 }) {
   const rules = opts.rules ?? RULES_V1;
   const version = opts.version ?? 3;
+  const budget = opts.budget ?? { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' as const };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/generation-budget')) {
+      return new Response(JSON.stringify({ data: budget }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (url.includes('/content-rules') && (!init || init.method === undefined || init.method === 'GET')) {
       return new Response(JSON.stringify({ data: { org_id: ORG_ID, rules, version } }), {
         status: 200, headers: { 'Content-Type': 'application/json' },
@@ -193,6 +199,95 @@ describe('ContentRulesPage — 저장(story #3472 AC1)', () => {
     await act(async () => { saveBtn.click(); });
     await flush();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(koMessages.contentRules.errorInvalid);
+  });
+});
+
+describe('ContentRulesPage — 생성 비용 한도(story #3500, BE #3498 미착지 — fixture)', () => {
+  it('owner — 정책 미설정(null)이면 "정책 없음" 입력이 비어 있고 select도 없다', async () => {
+    stubFetch({});
+    await mount('owner');
+    const limitInput = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
+    expect(limitInput.value).toBe('');
+    expect(container.querySelector('[data-testid="content-rules-generation-budget-currency"]')).toBeNull();
+  });
+
+  it('member — 정책 미설정(null)이면 읽기 전용으로 "정책 없음"을 본다', async () => {
+    stubFetch({});
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent)
+      .toBe(koMessages.contentRules.generationBudgetNotSet);
+    expect(container.querySelector('[data-testid="content-rules-generation-budget-limit"]')).toBeNull();
+  });
+
+  it('member — limit_minor=0이면 읽기 전용으로 "정지"를 본다(정책 미설정과 다른 값)', async () => {
+    stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 0, currency: 'KRW', period: 'month' } } });
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent)
+      .toBe(koMessages.contentRules.generationBudgetSuspendedReadonly);
+  });
+
+  it('member — 양수 한도면 값+통화를 읽기 전용으로 본다(§19-1 콤마 포맷)', async () => {
+    stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 100000, currency: 'KRW', period: 'month' } } });
+    await mount('member');
+    const text = container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent ?? '';
+    expect(text).toBe('100,000원');
+  });
+
+  it('member — USD 한도는 exponent 2로 변환돼 "$"+소수 2자리로 보인다(§19-1 회귀 방지 — KRW와 다른 자릿수)', async () => {
+    // limit_minor=30000(분단위, 센트) → USD exponent=2 → $300.00. 만약 exponent 변환을
+    // 빼먹고 KRW처럼 그대로 찍으면 "30,000$"류로 잘못 보여 이 단언이 깨진다.
+    stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 30000, currency: 'USD', period: 'month' } } });
+    await mount('member');
+    const text = container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent ?? '';
+    expect(text).toBe('$300.00');
+  });
+
+  it('⭐owner가 한도를 입력하고 저장하면 새 버전에 그대로 반영된다(round-trip)', async () => {
+    stubFetch({});
+    await mount('owner');
+
+    const limitInput = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(limitInput, '50000');
+      limitInput.dispatchEvent(new Event('input', { bubbles: true }));
+      limitInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    // currency select가 이제 나타난다(정책이 생겼으므로).
+    expect(container.querySelector('[data-testid="content-rules-generation-budget-currency"]')).not.toBeNull();
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-rules-version"]')?.textContent).toBe(koMessages.contentRules.versionLabel.replace('{version}', '4'));
+    const limitInputAfter = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
+    expect(limitInputAfter.value).toBe('50000');
+  });
+
+  it('owner — 한도 입력을 비우면 정책 전체가 null로 되돌아간다(0=정지와 다름)', async () => {
+    stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 30000, currency: 'USD', period: 'month' } } });
+    await mount('owner');
+    const limitInput = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
+    // §19-1 — 입력은 큰단위(major)다. 30000분단위(센트)/exponent 2 = $300(큰단위).
+    expect(limitInput.value).toBe('300');
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(limitInput, '');
+      limitInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-rules-generation-budget-currency"]')).toBeNull();
+  });
+
+  it('잔량 3상태(GenerationBudgetIndicator)가 규칙 섹션 옆에도 뜬다', async () => {
+    stubFetch({ budget: { limit_minor: 100000, spent_minor: 20000, remaining_minor: 80000, currency: 'KRW', period: 'month' } });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="generation-budget-remaining-full"]')).not.toBeNull();
   });
 });
 

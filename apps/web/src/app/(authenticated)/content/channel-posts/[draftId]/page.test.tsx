@@ -104,6 +104,8 @@ function stubFetch(opts: {
   maxTextLength?: number | null;
   accountLabel?: string | null;
   limitOk?: { quota_usage: number; quota_total: number } | false;
+  // story #3500(BE #3498, 미착지) — 잔량 조회 응답(기본=정책 미설정)·false=502.
+  genBudgetOk?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } | false;
   draftDetail?: Partial<typeof DRAFT_DETAIL>;
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
@@ -198,6 +200,14 @@ function stubFetch(opts: {
         if (opts.limitOk === false) return { ok: false, status: 502, json: async () => ({}) };
         const limit = opts.limitOk ?? { quota_usage: 3, quota_total: 250 };
         return { ok: true, status: 200, json: async () => ({ data: limit, error: null, meta: null }) };
+      }
+      // story #3500(BE #3498, 미착지) — 잔량 조회. 기본값은 정책 미설정(null)이라
+      // 대부분의 기존 테스트는 GenerationBudgetIndicator가 아무것도 안 그린다.
+      if (url === `/api/organizations/${ORG_ID}/generation-budget`) {
+        if (opts.genBudgetOk === false) return { ok: false, status: 502, json: async () => ({}) };
+        const budget = opts.genBudgetOk
+          ?? { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' };
+        return { ok: true, status: 200, json: async () => ({ data: budget, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/upload-url` && init?.method === 'POST') {
         const body = JSON.parse(String(init.body ?? '{}'));
@@ -2407,5 +2417,111 @@ describe('ChannelPostEditPage — 성과 인사이트 블록(story #3499, BE #38
     const values = Array.from(insight!.querySelectorAll('[data-testid="insight-metric-value"]')).map((el) => el.textContent);
     expect(values).toContain('200');
     expect(values).toContain('0');
+  });
+});
+
+describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9 §19 — BE #3498 미착지, 계약 fixture)', () => {
+  function setInputValue(input: HTMLInputElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('예상 비용을 입력하지 않으면 submit body에 estimated_cost_minor가 없다', async () => {
+    let submittedBody: unknown = null;
+    stubFetch({ onSubmit: (body) => { submittedBody = body; return { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } }; } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect((submittedBody as { estimated_cost_minor?: number } | null)?.estimated_cost_minor).toBeUndefined();
+  });
+
+  it('예상 비용을 입력하면 submit body에 정수로 실린다', async () => {
+    let submittedBody: unknown = null;
+    stubFetch({ onSubmit: (body) => { submittedBody = body; return { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } }; } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const costInput = container.querySelector('[data-testid="channel-post-estimated-cost-input"]') as HTMLInputElement;
+    await act(async () => { setInputValue(costInput, '5000'); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect((submittedBody as { estimated_cost_minor?: number } | null)?.estimated_cost_minor).toBe(5000);
+  });
+
+  it('⭐예상 비용(USD, exponent 2) — 큰단위×100이 분단위로 실린다(§19-1 회귀 방지)', async () => {
+    let submittedBody: unknown = null;
+    stubFetch({
+      onSubmit: (body) => { submittedBody = body; return { status: 200, body: { gate_id: 'g1', version_id: 'v1', content_sha256: 'h1', status: 'pending' } }; },
+      genBudgetOk: { limit_minor: 100000, spent_minor: 0, remaining_minor: 100000, currency: 'USD', period: 'month' },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const costInput = container.querySelector('[data-testid="channel-post-estimated-cost-input"]') as HTMLInputElement;
+    // 큰단위로 "5"(=$5) 입력 — exponent 변환을 빼먹으면 500이 아닌 5가 그대로 실린다.
+    await act(async () => { setInputValue(costInput, '5'); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect((submittedBody as { estimated_cost_minor?: number } | null)?.estimated_cost_minor).toBe(500);
+  });
+
+  it('⭐422 GENERATION_BUDGET_EXCEEDED — 전역 배너에 4값이 보간되고 입력값은 지워지지 않는다', async () => {
+    stubFetch({
+      onSubmit: () => ({
+        status: 422,
+        body: { error: { code: 'GENERATION_BUDGET_EXCEEDED', limit_minor: 100000, spent_minor: 90000, estimated_cost_minor: 20000, remaining_minor: 10000 } },
+      }),
+      genBudgetOk: { limit_minor: 100000, spent_minor: 90000, remaining_minor: 10000, currency: 'KRW', period: 'month' },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const costInput = container.querySelector('[data-testid="channel-post-estimated-cost-input"]') as HTMLInputElement;
+    await act(async () => { setInputValue(costInput, '20000'); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    // doc a0da40c9 §19-8 — 구조화 배너(사실 문장→4값 두 칸 목록→행동 문장), §19-1
+    // 콤마 포맷.
+    const banner = container.querySelector('[data-testid="generation-budget-exceeded-banner"]');
+    expect(banner?.textContent).toContain(koMessages.content.generationBudgetExceededFact);
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-limit"]')?.textContent).toBe('100,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-spent"]')?.textContent).toBe('90,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-estimated"]')?.textContent).toBe('20,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-remaining"]')?.textContent).toBe('10,000원');
+    expect(banner?.textContent).toContain(koMessages.content.generationBudgetExceededAction);
+    // 입력값이 안 지워진다(서버 오류 시 재입력 안 해도 되게, ScheduleAtDialog 관례와 동형).
+    expect(costInput.value).toBe('20000');
+  });
+
+  it('정책 미설정(limit_minor=null)이면 잔량 표시가 아무것도 안 그린다', async () => {
+    stubFetch({ genBudgetOk: { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="generation-budget-remaining-compact"]')).toBeNull();
+  });
+
+  it('잔량 조회 실패해도 저장·상신 버튼은 막히지 않는다(§3-2 "모른다≠0")', async () => {
+    stubFetch({ genBudgetOk: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="generation-budget-failed"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
   });
 });

@@ -304,6 +304,13 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 겹치는 게 당연하다(docs.title<->docs.indexDocCount류, "짧은 라벨이 그 라벨을
   // 포함하는 긴 문구의 폴백/변형"인 정상 패턴).
   'content.channelPostsFailureVoided <-> content.channelPostsFailureVoidedWithReason',
+  // story #3500(doc a0da40c9 §19-5, 디자인 유나 確定 2026-09-05) —
+  // generationBudgetRemainingLabel("남음", 카드 헤더 3값 중 하나의 라벨) <->
+  // generationBudgetRemainingCompact("남음 {remaining}", 상신 표면 전용 한 줄 — §19-5
+  // "submit surface는 남음만"). 짧은 라벨이 그 라벨을 포함하는 긴 문구에 들어간
+  // 정상 패턴(docs.title<->docs.indexDocCount류) — 같은 개념("남음")을 두 표면에서
+  // 일관되게 쓰라는 게 디자인 지시 그 자체다.
+  'content.generationBudgetRemainingCompact <-> content.generationBudgetRemainingLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

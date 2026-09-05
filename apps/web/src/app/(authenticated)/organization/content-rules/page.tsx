@@ -6,6 +6,10 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import {
+  GenerationBudgetIndicator, formatMinorCurrency, majorToMinor, minorToMajor,
+  type GenerationBudgetState, type GenerationBudgetCurrency,
+} from '@/components/content/generation-budget-indicator';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
@@ -28,6 +32,16 @@ interface BrandKit {
   fonts?: string[];
 }
 
+// story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 생성 비용
+// 한도(크레딧 게이트). limit_minor=0은 "정지", null은 "정책 미설정"(둘은 다른
+// 값 — GenerationBudgetIndicator가 그 구분을 렌더한다). currency/period는
+// 정책이 있을 때만 의미가 있다(둘 다 limit_minor가 null이면 화면에서 안 씀).
+interface GenerationBudget {
+  limit_minor: number;
+  currency: 'KRW' | 'USD';
+  period: 'month';
+}
+
 interface ContentRules {
   banned_terms: string[];
   require_utm: boolean;
@@ -35,6 +49,7 @@ interface ContentRules {
   taxonomy: string[];
   channel_priority: string[];
   brand_kit: BrandKit;
+  generation_budget: GenerationBudget | null;
 }
 
 interface ContentRulesResponse {
@@ -45,6 +60,7 @@ interface ContentRulesResponse {
 
 const EMPTY_RULES: ContentRules = {
   banned_terms: [], require_utm: false, tone: null, taxonomy: [], channel_priority: [], brand_kit: {},
+  generation_budget: null,
 };
 
 // story #3472(BE #3825 "보정 중") — 422 CONTENT_RULES_INVALID의 필드별 shape는 아직
@@ -167,6 +183,9 @@ export default function ContentRulesPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveSuccess, setSaveSuccess] = useState(false);
+  // story #3500 — 잔량은 규칙 저장과 별개 왕복(계산값, `rules.generation_budget`은
+  // 정책 설정값). 실패해도 규칙 화면 자체를 막지 않는다(§3-2 "모른다≠0").
+  const [budget, setBudget] = useState<GenerationBudgetState>({ status: 'loading' });
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -177,7 +196,12 @@ export default function ContentRulesPage() {
       if (!res.ok) { setLoadError(true); return; }
       const json = (await res.json().catch(() => null)) as { data?: ContentRulesResponse } | null;
       if (json?.data) {
-        setRules({ ...EMPTY_RULES, ...json.data.rules, brand_kit: json.data.rules.brand_kit ?? {} });
+        setRules({
+          ...EMPTY_RULES,
+          ...json.data.rules,
+          brand_kit: json.data.rules.brand_kit ?? {},
+          generation_budget: json.data.rules.generation_budget ?? null,
+        });
         setVersion(json.data.version);
       }
     } catch {
@@ -188,6 +212,30 @@ export default function ContentRulesPage() {
   }, [orgId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/generation-budget`)
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) { setBudget({ status: 'failed' }); return; }
+        const json = (await r.json().catch(() => null)) as
+          | { data?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
+          | null;
+        if (!json?.data) { setBudget({ status: 'failed' }); return; }
+        setBudget({
+          status: 'ok',
+          limitMinor: json.data.limit_minor,
+          spentMinor: json.data.spent_minor,
+          remainingMinor: json.data.remaining_minor,
+          currency: json.data.currency,
+          period: json.data.period,
+        });
+      })
+      .catch(() => { if (!cancelled) setBudget({ status: 'failed' }); });
+    return () => { cancelled = true; };
+  }, [orgId]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -203,7 +251,12 @@ export default function ContentRulesPage() {
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as { data?: ContentRulesResponse } | null;
         if (json?.data) {
-          setRules({ ...EMPTY_RULES, ...json.data.rules, brand_kit: json.data.rules.brand_kit ?? {} });
+          setRules({
+            ...EMPTY_RULES,
+            ...json.data.rules,
+            brand_kit: json.data.rules.brand_kit ?? {},
+            generation_budget: json.data.rules.generation_budget ?? null,
+          });
           setVersion(json.data.version);
           setSaveSuccess(true);
         }
@@ -395,6 +448,110 @@ export default function ContentRulesPage() {
 
               {canEditRules ? (
                 <Button size="sm" onClick={() => void handleSave()} disabled={saving} data-testid="content-rules-save-button">
+                  {saving ? t('savingCta') : t('saveAction')}
+                </Button>
+              ) : null}
+            </SectionCardBody>
+          </SectionCard>
+
+          {/* story #3500(BE #3498, PO 確定·doc a0da40c9 §19 디자인 유나 確定 2026-09-05
+              — BE 미착지, 계약만 고정) — 생성 비용 한도는 별도 카드(§19-2: 저장되는
+              정책값과 관찰되는 계산값 — 잔량 — 은 카드 몸통을 안 섞는다). 헤더 좌측=
+              제목, 우측=잔량 3값(GenerationBudgetIndicator full). limit_minor 입력을
+              비우면 generation_budget 전체가 null(정책 미설정)로 저장된다 — 0을
+              넣으면 "정지"(다른 값, §19-3). 입력/표시는 전부 큰단위(major)이고
+              분단위(minor) 변환은 generation-budget-indicator.tsx 한 곳에서만 한다
+              (§19-1 — KRW·USD 소수 자릿수가 달라 하드코딩 /100은 조용한 결함이 된다). */}
+          <SectionCard>
+            <SectionCardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-foreground">{t('generationBudgetSectionTitle')}</h2>
+                <GenerationBudgetIndicator state={budget} variant="full" />
+              </div>
+            </SectionCardHeader>
+            <SectionCardBody className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-generation-budget-limit">
+                  {t('generationBudgetLimitLabel')}
+                </label>
+                {canEditRules ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      id="content-rules-generation-budget-limit"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={
+                        rules.generation_budget
+                          ? minorToMajor(rules.generation_budget.limit_minor, rules.generation_budget.currency)
+                          : ''
+                      }
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === '') {
+                          setRules((r) => ({ ...r, generation_budget: null }));
+                          return;
+                        }
+                        const majorValue = Number(raw);
+                        if (!Number.isFinite(majorValue) || majorValue < 0) return;
+                        setRules((r) => {
+                          const currency = r.generation_budget?.currency ?? 'KRW';
+                          return {
+                            ...r,
+                            generation_budget: { limit_minor: majorToMinor(majorValue, currency), currency, period: 'month' },
+                          };
+                        });
+                      }}
+                      placeholder={t('generationBudgetLimitPlaceholder')}
+                      className="w-32 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                      data-testid="content-rules-generation-budget-limit"
+                    />
+                    {rules.generation_budget ? (
+                      <select
+                        value={rules.generation_budget.currency}
+                        onChange={(e) => setRules((r) => {
+                          if (!r.generation_budget) return r;
+                          const nextCurrency = e.target.value as GenerationBudgetCurrency;
+                          // 통화를 바꾸면 큰단위 값은 유지하고(사람이 입력한 숫자 자체는
+                          // 안 바뀐다) 분단위만 새 exponent로 재계산한다.
+                          const majorValue = minorToMajor(r.generation_budget.limit_minor, r.generation_budget.currency);
+                          return {
+                            ...r,
+                            generation_budget: { limit_minor: majorToMinor(majorValue, nextCurrency), currency: nextCurrency, period: 'month' },
+                          };
+                        })}
+                        className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                        data-testid="content-rules-generation-budget-currency"
+                      >
+                        <option value="KRW">KRW</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    ) : null}
+                  </div>
+                ) : rules.generation_budget === null ? (
+                  <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-readonly">{t('generationBudgetNotSet')}</p>
+                ) : rules.generation_budget.limit_minor === 0 ? (
+                  <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-readonly">{t('generationBudgetSuspendedReadonly')}</p>
+                ) : (
+                  <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-readonly">
+                    {formatMinorCurrency(rules.generation_budget.limit_minor, rules.generation_budget.currency)}
+                  </p>
+                )}
+                {fieldErrors.generation_budget ? <p className="text-xs text-destructive">{fieldErrors.generation_budget}</p> : null}
+              </div>
+
+              {/* §19-6 정정 — 기간은 "월" 하나뿐이라 select 아닌 고정 텍스트(이 코드베이스
+                  관례 — 선택지 하나짜리 select를 안 쓴다). */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">{t('generationBudgetPeriodLabel')}</label>
+                <p className="text-sm text-foreground" data-testid="content-rules-generation-budget-period">{t('generationBudgetPeriodMonth')}</p>
+              </div>
+
+              {!canEditRules ? <p className="text-xs text-muted-foreground">{t('readOnlyReason')}</p> : null}
+              <p className="text-xs text-muted-foreground">{t('generationBudgetHint')}</p>
+
+              {canEditRules ? (
+                <Button size="sm" onClick={() => void handleSave()} disabled={saving} data-testid="content-rules-generation-budget-save-button">
                   {saving ? t('savingCta') : t('saveAction')}
                 </Button>
               ) : null}
