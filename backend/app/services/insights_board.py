@@ -12,7 +12,15 @@ v3 §2 「대시보드·보고서」 MVP "채널·게시물 표". hosted_site(Si
 publication_id를 모아 `WHERE publication_id IN (...)` 배치 조회 1회 → Python에서
 due_at 버킷별로 두 열(`d1`·`d7`)로 피벗한다(PO 決定 — assets.py의 N+1 회피 관례와
 동형, 행당 최대 2건이라 배치도 작다). 단 **status 필터**(스냅샷 상태로 행을 거르는
-것)만은 이 파이프라인 밖에서 안 되므로 EXISTS 서브쿼리로 SQL 안에 남는다."""
+것)만은 이 파이프라인 밖에서 안 되므로 EXISTS 서브쿼리로 SQL 안에 남는다 — 페드루
+PO 기록②(PR#3849 리뷰) **의미는 "이 publication의 스냅샷 중 «어느 하나라도» 그
+상태와 일치하면 포함"**이다(d1·d7 둘 다 일치해야 하는 게 아니다 — 예: status=
+"captured"는 d1만 captured고 d7이 아직 pending이어도 이 행을 낸다).
+
+**title 축(페드루 PO 기록③, FE 정본용)**: site_post 행의 title은 그 게시물 자신의
+제목(SitePost.title)이고, channel_publication 행의 title은 컬럼이 없어 Gate→Story
+조인으로 얻은 **원 스토리의 제목**이다 — 같은 필드명이지만 두 팔에서 가리키는
+대상이 다르다(하나는 "이 글의 제목", 하나는 "이 글이 파생된 작업 항목의 제목")."""
 from __future__ import annotations
 
 import uuid
@@ -201,9 +209,12 @@ async def list_insights_board(
     for r in page:
         # due_at은 anchor_at(=published_at) + offset로 스케줄됐다(schedule_insight_
         # snapshots) — published_at과의 일수 차이로 +1일/+7일 버킷을 되짚는다.
+        # 페드루 PO 기록③(PR#3849 리뷰) — `.days`는 0을 향해 버림(예: 6.999일→6)이라
+        # 초 단위 미세 오차(타임존 변환 왕복 등)에서 경계값이 밀릴 수 있다 —
+        # round()로 완충(整수 offset만 유효하므로 반올림이 잘림보다 항상 안전).
         d1 = d7 = None
         for snap in snapshots_by_pub.get(r.publication_id, []):
-            offset = (snap.due_at - r.published_at).days
+            offset = round((snap.due_at - r.published_at).total_seconds() / 86400)
             if offset == 1:
                 d1 = snap
             elif offset == 7:
@@ -231,3 +242,102 @@ def _snapshot_view(snap: InsightSnapshot | None) -> dict[str, Any] | None:
     if snap is None:
         return None
     return {"status": snap.status, "normalized": snap.normalized, "captured_at": snap.captured_at}
+
+
+_FOLLOW_UP_KINDS = frozenset({"republish", "edit", "stop"})
+_FOLLOW_UP_TITLE_PREFIX = {"republish": "재발행", "edit": "수정", "stop": "중단"}
+
+
+class FollowUpPublicationNotFoundError(Exception):
+    pass
+
+
+class FollowUpInvalidKindError(Exception):
+    def __init__(self, kind: str):
+        self.kind = kind
+        super().__init__(f"unsupported follow-up kind: {kind}")
+
+
+async def _resolve_publication_work_item(
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID,
+) -> tuple[uuid.UUID, str] | None:
+    """publication_id 하나로 site_post·channel_publication 어느 쪽인지 모르는 채
+    들어온다(3497 조회 API와 동일 전제) — 순서대로 둘 다 본다. 반환은
+    (work_item_id, kind) 또는 None(양쪽 다 없음=타 org/미존재)."""
+    site_post = (await db.execute(
+        select(SitePost.source_story_id).where(SitePost.id == publication_id, SitePost.org_id == org_id)
+    )).scalar_one_or_none()
+    if site_post is not None:
+        return site_post, "site_post"
+
+    row = (await db.execute(
+        select(Gate.work_item_id)
+        .select_from(ChannelPublication)
+        .join(Gate, Gate.id == ChannelPublication.gate_id)
+        .where(ChannelPublication.id == publication_id, ChannelPublication.org_id == org_id)
+    )).scalar_one_or_none()
+    if row is not None:
+        return row, "channel_publication"
+    return None
+
+
+async def create_publication_follow_up(
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, kind: str,
+    title: str | None, note: str | None, requested_by_member_id: uuid.UUID,
+) -> dict[str, Any]:
+    """AC2 — 표의 행에서 "재발행/수정/중단" 후속 작업을 만든다. PO 確定 — 그 작업은
+    기존 원장의 Story(신규 마케팅 전용 객체 발명 0)다. "중단(stop)"은 예약을
+    취소하지 않는다 — 취소 자체는 3467 cancel-scheduled 경로 몫, 여기는 오직
+    "중단해야 한다"는 작업 항목만 만든다(발행 상태 무변경)."""
+    if kind not in _FOLLOW_UP_KINDS:
+        raise FollowUpInvalidKindError(kind)
+
+    resolved = await _resolve_publication_work_item(db, org_id=org_id, publication_id=publication_id)
+    if resolved is None:
+        raise FollowUpPublicationNotFoundError(publication_id)
+    work_item_id, publication_kind = resolved
+
+    story = (await db.execute(
+        select(Story).where(Story.id == work_item_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story is None:
+        raise FollowUpPublicationNotFoundError(publication_id)
+
+    from app.services.insight_snapshots import get_latest_insight_snapshot
+
+    latest = await get_latest_insight_snapshot(db, publication_id=publication_id)
+    snapshot_line = (
+        f"최근 스냅샷({latest.captured_at.isoformat()}): {latest.normalized}"
+        if latest is not None else "최근 스냅샷: 없음"
+    )
+    body = (
+        f"[{_FOLLOW_UP_TITLE_PREFIX[kind]} 후속 작업 — 원문: {story.title}]\n"
+        f"publication_id: {publication_id} (kind={publication_kind})\n"
+        f"{snapshot_line}"
+        + (f"\n\n{note}" if note else "")
+    )
+    story_title = title or f"[{_FOLLOW_UP_TITLE_PREFIX[kind]}] {story.title}"
+
+    from app.repositories.story import StoryRepository
+
+    new_story = await StoryRepository(db, org_id).create(
+        project_id=story.project_id, title=story_title, description=body,
+        assignee_id=requested_by_member_id,
+    )
+
+    from app.models.evidence import Evidence
+
+    db.add(Evidence(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=new_story.id, work_item_type="story",
+        type="report", ref=str(new_story.id), source="insights_board",
+        note=f"{_FOLLOW_UP_TITLE_PREFIX[kind]} 후속 작업 생성(publication {publication_id})",
+        created_by=None,
+        payload={
+            "kind": "follow_up_created", "follow_up_kind": kind,
+            "publication_id": str(publication_id), "story_id": str(new_story.id),
+            "recorded_by": "platform",
+        },
+    ))
+    await db.commit()
+    await db.refresh(new_story)
+    return {"story_id": new_story.id}

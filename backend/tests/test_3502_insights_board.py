@@ -13,7 +13,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tests.test_3471_org_content_rules_lint import _seed_org, _seed_story, _session_factory
+from tests.test_3471_org_content_rules_lint import (
+    _client_for,
+    _seed_agent,
+    _seed_human,
+    _seed_org,
+    _seed_story,
+    _session_factory,
+    _setup_org_scoped_app,
+)
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -93,6 +101,42 @@ async def _seed_snapshot(
     session.add(snap)
     await session.commit()
     return snap
+
+
+@pytest.mark.anyio
+async def test_pivot_matches_real_scheduler_offsets_not_a_hand_rolled_assumption():
+    """페드루 PO 기록①(PR#3849 리뷰) — insights_board.py의 피벗(`.days`/round 판정)이
+    insight_snapshots.py::schedule_insight_snapshots()의 실제 `_SNAPSHOT_OFFSETS`
+    (+1일·+7일)와 짝으로 맞는지 «직접» 잠근다. 이 파일의 다른 테스트는 전부 스냅샷을
+    수작업(_seed_snapshot)으로 심는데, 그 수작업이 스케줄러의 실제 due_at 계산과
+    조용히 갈리면(예: 스케줄러가 오프셋을 바꿔도 이 테스트들은 여전히 통과) 드리프트를
+    못 잡는다 — 이 테스트만 진짜 스케줄러 함수를 부른다."""
+    from app.services.insight_snapshots import schedule_insight_snapshots
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-real-sched", title="Real",
+                published_at=datetime.now(timezone.utc) - timedelta(days=10),
+            )
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp.id,
+                publication_kind="site_post", channel="hosted_site", external_id=None,
+                anchor_at=sp.published_at,
+            )
+            await s.commit()
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
+        assert row["d1"] is not None, "스케줄러가 심은 +1일 행을 피벗이 못 찾았다(오프셋 드리프트)"
+        assert row["d7"] is not None, "스케줄러가 심은 +7일 행을 피벗이 못 찾았다(오프셋 드리프트)"
+        assert row["d1"]["status"] == "pending" and row["d7"]["status"] == "pending"
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.anyio
@@ -455,4 +499,184 @@ async def test_invalid_window_raises():
             with pytest.raises(InsightsBoardInvalidWindowError):
                 await list_insights_board(s, org_id=org_id, window="14d")
     finally:
+        await engine.dispose()
+
+
+# ─── 조각②: HTTP 라우터(GET insights-board · POST follow-ups) ─────────────────
+
+
+@pytest.mark.anyio
+async def test_get_insights_board_endpoint_agent_200_with_rows():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-http", title="HTTP",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/insights-board")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert len(body["rows"]) == 1
+        assert body["rows"][0]["title"] == "HTTP"
+        assert body["has_more"] is False
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_insights_board_endpoint_invalid_window_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/insights-board?window=14d")
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "INSIGHTS_BOARD_INVALID_WINDOW"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_follow_up_creates_story_with_number_and_evidence():
+    from app.main import app
+    from app.models.evidence import Evidence
+    from app.models.pm import Story
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")
+            story_id = await _seed_story(s, org_id, project_id, title="원문")
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-fu", title="FU",
+                published_at=datetime.now(timezone.utc) - timedelta(days=2),
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{sp.id}/follow-ups",
+                json={"kind": "republish", "note": "다시 내보내자"},
+            )
+        assert r.status_code == 201, r.text
+        new_story_id = uuid.UUID(r.json()["story_id"])
+
+        async with Session() as s:
+            new_story = (await s.execute(select(Story).where(Story.id == new_story_id))).scalar_one()
+            assert new_story.project_id == project_id
+            assert new_story.story_number is not None, "allocate_story_number()가 채번해야 한다"
+            assert "원문" in new_story.title
+
+            evidence = (await s.execute(
+                select(Evidence).where(Evidence.work_item_id == new_story_id)
+            )).scalar_one()
+            assert evidence.payload["kind"] == "follow_up_created"
+            assert evidence.payload["follow_up_kind"] == "republish"
+            assert evidence.payload["publication_id"] == str(sp.id)
+            assert evidence.payload["recorded_by"] == "platform"
+            assert evidence.created_by is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_follow_up_agent_forbidden():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-fu-agent", title="FUA",
+                published_at=datetime.now(timezone.utc) - timedelta(days=2),
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{sp.id}/follow-ups",
+                json={"kind": "edit"},
+            )
+        assert r.status_code == 403, r.text
+        assert r.json()["error"]["code"] == "FOLLOW_UP_CREATE_HUMAN_ONLY"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_follow_up_other_org_publication_404():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_a, project_a = await _seed_org(s)
+            story_a = await _seed_story(s, org_a, project_a)
+            sp_a = await _seed_site_post(
+                s, org_id=org_a, work_item_id=story_a, slug="post-org-a", title="A",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+            org_b, project_b = await _seed_org(s)
+            human_b = await _seed_human(s, org_b, role="member")
+
+        _setup_org_scoped_app(app, Session, org_b, user_id=human_b)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_b}/publications/{sp_a.id}/follow-ups",
+                json={"kind": "stop"},
+            )
+        assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_follow_up_invalid_kind_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")
+            story_id = await _seed_story(s, org_id, project_id)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-fu-badkind", title="Bad",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{sp.id}/follow-ups",
+                json={"kind": "delete_everything"},
+            )
+        assert r.status_code == 422, r.text
+    finally:
+        app.dependency_overrides.clear()
         await engine.dispose()
