@@ -446,6 +446,19 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     expect(badge?.className).not.toContain('text-destructive-foreground');
   });
 
+  // story #3431 AC4 — 9px는 본문 최소보다 작았다. CornerCountBadge(공용) 도입으로 10px에
+  // 고정됐는지, team-presence-toggle.tsx와 같은 정의를 쓰는지(font-mono 폐기) 고정한다.
+  it('⭐크기 9px→10px(AC4) — 공용 CornerCountBadge를 쓰고 옛 font-mono가 안 남았다', async () => {
+    stubUnreadCount(5);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '5');
+    expect(badge?.className).toContain('text-[10px]');
+    expect(badge?.className).not.toContain('text-[9px]');
+    expect(badge?.className).not.toContain('font-mono');
+  });
+
   it('⭐색 계산 양성대조 — globals.css 실값으로 라이트·다크 둘 다 대비비 ≥4.5(WCAG AA)', async () => {
     const { readFileSync } = await import('node:fs');
     const path = await import('node:path');
