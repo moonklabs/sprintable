@@ -212,6 +212,63 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # publish.py::create_media_container의 image_url=None 즉시 거부와 동형 사실).
         image_required=True,
     ),
+    # story #3547(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06) — Facebook Page 피드
+    # 발행. 연결은 「Facebook Login」(그라운딩 확認 — Instagram Login과 별개 제품)
+    # 이라 authorize/callback이 threads·instagram과 다른 흐름(장기 유저 토큰 →
+    # /me/accounts로 페이지 선택, channel_connections.py 참고). ⚠️미확認 딱지
+    # (facebook_oauth.py·facebook_publish.py 상단 참고) — scope/max_text_length/
+    # 이미지 규격은 Meta 공식 문서 지식, 재확認 전 라이브 왕복 금지.
+    "facebook": ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        # pages_show_list=/me/accounts 목록 조회 · pages_manage_posts=피드 발행/삭제
+        # · pages_read_engagement=페이지 permalink류 읽기(⚠️미확認, 그라운딩 대상).
+        scope="pages_show_list,pages_manage_posts,pages_read_engagement",
+        refresh_mode="reissue_from_access_token",
+        credential_kind="oauth",
+        display_name="Facebook Page",
+        max_text_length=63206,  # ⚠️미확認 — Meta 문서 지식(Facebook 피드 게시물 상한).
+        utm_source="facebook",
+        utm_medium="social",
+        supports_unpublish=True,
+        unpublish_required_scope="pages_manage_posts",
+        # Threads류(캐러셀 범위 밖, story 본문 명시)와 동형 — 피드 이미지 1장.
+        image_formats=("image/jpeg", "image/png"),
+        image_max_bytes=10 * 1024 * 1024,
+        image_width_min=320,
+        image_width_max=1440,
+        image_color_space="sRGB",
+        image_max_count=1,
+        # comments/insights는 declare-only 미지원(페드루 PO 明示 2026-09-06) — 빈
+        # insight_metrics·supports_fetch_replies 기본값(False) 그대로.
+        image_required=False,  # Instagram과 달리 텍스트만으로도 피드 발행 가능.
+    ),
+    "facebook_sandbox": ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        scope="pages_show_list,pages_manage_posts,pages_read_engagement",
+        refresh_mode="reissue_from_access_token",
+        # 페드루 PO 確定(2026-09-06) — instagram_sandbox와 달리 credential_kind=
+        # "oauth"(=none이 아님). 페이지 수 마커(:pages-0/:pages-1)를 sandbox 앱
+        # 자격의 app_id 접미로 나르므로, org가 실제로 channel_app_credentials PUT을
+        # 거쳐 그 마커를 등록해야 한다 — 그래서 이 채널은 범용 「/sandbox」 엔드포인트
+        # (credential_kind=="none"만 받음)가 아니라 진짜 authorize→callback 라우터를
+        # 탄다(facebook_sandbox_oauth.py가 Meta 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="Facebook Page Sandbox",
+        max_text_length=63206,
+        utm_source="facebook_sandbox",
+        utm_medium="test",
+        supports_unpublish=True,
+        unpublish_required_scope="pages_manage_posts",
+        image_formats=("image/jpeg", "image/png"),
+        image_max_bytes=10 * 1024 * 1024,
+        image_width_min=320,
+        image_width_max=1440,
+        image_color_space="sRGB",
+        image_max_count=1,
+        image_required=False,
+    ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
     # 발행 흐름(`publish_site_post_from_draft` 등)은 지금처럼 내부 `site_posts` 테이블에
@@ -407,6 +464,8 @@ _PUBLISH_CLIENT_MODULE_PATHS: dict[str, str] = {
     "instagram_sandbox": "app.services.instagram_sandbox_publish",
     "threads": "app.services.threads_publish",
     "instagram": "app.services.instagram_publish",
+    "facebook": "app.services.facebook_publish",
+    "facebook_sandbox": "app.services.facebook_sandbox_publish",
 }
 
 

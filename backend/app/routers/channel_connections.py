@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -150,6 +151,10 @@ class ChannelConnectionResponse(BaseModel):
     # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
     # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
     secret_hint: str | None = None
+    # story #3547(페드루 PO 確定 2026-09-06) — 콜백 응답이 "연결 생성"과 "페이지 선택
+    # 대기"(PendingSelectionResponse) 둘 중 하나일 수 있어(Facebook Page만 해당) FE가
+    # 판별자로 가른다. additive 기본값이라 기존 threads/instagram 응답·소비자는 무변.
+    kind: Literal["connected"] = "connected"
 
 
 def _to_response(row) -> ChannelConnectionResponse:
@@ -198,6 +203,26 @@ class CallbackRequest(BaseModel):
     state: str
 
 
+class PendingSelectionCandidate(BaseModel):
+    page_id: str
+    name: str
+
+
+class PendingSelectionResponse(BaseModel):
+    """story #3547(BE 계약, 페드루 PO 確定 2026-09-06) — Facebook Page 콜백이 페이지
+    2개 이상을 봤을 때만 나온다(0개=실패·1개=즉시 ChannelConnectionResponse).
+    `kind` 판별자로 FE가 모양 추측 없이 분기한다."""
+    kind: Literal["pending_selection"] = "pending_selection"
+    pending_id: uuid.UUID
+    candidates: list[PendingSelectionCandidate]
+    expires_at: str
+
+
+class FacebookSelectRequest(BaseModel):
+    pending_id: uuid.UUID
+    page_id: str
+
+
 class TestConnectionResponse(BaseModel):
     ok: bool
     account: dict | None = None
@@ -233,6 +258,19 @@ class AppCredentialsStatusResponse(BaseModel):
 
 def _app_id_suffix(app_id: str) -> str:
     return app_id[-4:] if len(app_id) >= 4 else app_id
+
+
+_FACEBOOK_OAUTH_MODULE_PATHS = {
+    "facebook": "app.services.facebook_oauth",
+    "facebook_sandbox": "app.services.facebook_sandbox_oauth",
+}
+
+
+def _facebook_oauth_module(channel: str):
+    """story #3547 — `channel_adapters.py::get_publish_client_module`과 동형 dispatch
+    사상(real/sandbox가 정확히 같은 함수 시그니처를 구현, 새 분기 로직 0)."""
+    import importlib
+    return importlib.import_module(_FACEBOOK_OAUTH_MODULE_PATHS[channel])
 
 
 @router.get("/{org_id}/channel-connections", response_model=list[ChannelConnectionResponse])
@@ -387,12 +425,19 @@ async def authorize_channel_connection(
         # oauth.py 상단 딱지 참고) — code_challenge를 아예 안 넘긴다.
         from app.services.instagram_oauth import build_authorize_url as build_instagram_authorize_url
         url = build_instagram_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
+    elif channel in ("facebook", "facebook_sandbox"):
+        # story #3547 — Facebook Login도 PKCE 미지원(facebook_oauth.py 상단 딱지).
+        build_facebook_authorize_url = _facebook_oauth_module(channel).build_authorize_url
+        url = build_facebook_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
     else:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
     return AuthorizeResponse(url=url, state=state)
 
 
-@router.post("/{org_id}/channel-connections/{channel}/callback", response_model=ChannelConnectionResponse)
+@router.post(
+    "/{org_id}/channel-connections/{channel}/callback",
+    response_model=ChannelConnectionResponse | PendingSelectionResponse,
+)
 async def channel_connection_callback(
     org_id: uuid.UUID,
     channel: str,
@@ -400,7 +445,7 @@ async def channel_connection_callback(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> ChannelConnectionResponse:
+) -> ChannelConnectionResponse | PendingSelectionResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await _require_owner(db, auth, org_id)
@@ -422,7 +467,7 @@ async def channel_connection_callback(
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
-    if channel not in ("threads", "instagram"):
+    if channel not in ("threads", "instagram", "facebook", "facebook_sandbox"):
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
     # authorize 단계와 별도로 다시 조회 — 콜백은 브라우저 왕복(수초~수분) 뒤라 그 사이 owner가
@@ -438,6 +483,12 @@ async def channel_connection_callback(
             },
         )
     app_id, app_secret = app_credentials
+
+    if channel in ("facebook", "facebook_sandbox"):
+        return await _facebook_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, app_id=app_id, app_secret=app_secret,
+            requester_member_id=resolved.id,
+        )
 
     # story #3320 — instagram_oauth.InstagramOAuthError는 ThreadsOAuthError와 같은
     # .code/.message 속성을 갖는 별도 클래스다(진짜 다른 provider — OAuth 예외는
@@ -489,6 +540,158 @@ async def channel_connection_callback(
         token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
         refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=resolved.id,
     )
+    return _to_response(row)
+
+
+async def _facebook_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, app_id: str, app_secret: str,
+    requester_member_id: uuid.UUID,
+) -> ChannelConnectionResponse | PendingSelectionResponse:
+    """story #3547(페드루 PO 確定 2026-09-06) — Facebook Page는 페이지 개수에 따라
+    갈래가 셋(0/1/2+)이다. `_redirect_uri`는 threads/instagram과 같은 채널별 콜백
+    URL 관례(PKCE 없음이라 code_verifier 불요)."""
+    from app.services.facebook_oauth import FacebookOAuthError
+    from app.services.channel_oauth_pending_selection import create_pending_selection
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _facebook_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            short_lived_token, _ = await oauth_module.exchange_code_for_short_lived_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), app_id=app_id, app_secret=app_secret,
+            )
+            long_lived_token, _expires_in = await oauth_module.exchange_for_long_lived_token(
+                client, short_lived_token=short_lived_token, app_id=app_id, app_secret=app_secret,
+            )
+            pages = await oauth_module.list_pages(client, user_access_token=long_lived_token)
+        except FacebookOAuthError as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    if not pages:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_FACEBOOK_NO_PAGES_AVAILABLE",
+                "message": "연결할 수 있는 페이지가 없습니다 — 이 계정이 관리하는 Facebook 페이지가 없거나, "
+                           "페이지 목록 권한을 허용하지 않았습니다.",
+            },
+        )
+
+    if len(pages) == 1:
+        page = pages[0]
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel=channel, account_id=page["page_id"], account_label=page["name"],
+            credential_kind=adapter.credential_kind, access_token=page["access_token"], refresh_token=None,
+            token_expires_at=None,  # 페이지 토큰은 장기 유저 토큰에서 파생 — 별도 만료 불명(⚠️미확認).
+            refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=requester_member_id,
+        )
+        return _to_response(row)
+
+    now = datetime.now(timezone.utc)
+    candidates = [{"page_id": p["page_id"], "name": p["name"]} for p in pages]
+    pending = await create_pending_selection(
+        db, org_id=org_id, requester_member_id=requester_member_id, channel=channel,
+        user_token=long_lived_token, candidates=candidates, now=now,
+    )
+    return PendingSelectionResponse(
+        pending_id=pending.id,
+        candidates=[PendingSelectionCandidate(**c) for c in candidates],
+        expires_at=pending.expires_at.isoformat(),
+    )
+
+
+@router.post("/{org_id}/channel-connections/facebook/select", response_model=ChannelConnectionResponse)
+async def facebook_select_page_endpoint(
+    org_id: uuid.UUID,
+    body: FacebookSelectRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story #3547(BE 계약 確定, 페드루 PO 2026-09-06) — 페이지 2개 이상 콜백 뒤 사람이
+    하나를 고르면 이 엔드포인트가 연결 행을 만든다. `/me/accounts`를 여기서 재호출
+    (캐시된 candidates의 페이지 토큰은 안 믿는다 — 콜백 시점엔 후보 id/name만 저장,
+    토큰은 저장 안 함, pending_selection 모듈 docstring)."""
+    from app.services.channel_credential_crypto import decrypt_channel_credential
+    from app.services.channel_oauth_pending_selection import delete_pending_selection, get_pending_selection
+    from app.services.facebook_oauth import FacebookOAuthError
+
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+
+    pending = await get_pending_selection(db, pending_id=body.pending_id, org_id=org_id)
+    if pending is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_NOT_FOUND",
+                "message": "선택 대기 상태를 찾을 수 없습니다(이미 사용됐거나 존재하지 않습니다).",
+            },
+        )
+    if pending.requester_member_id != resolved.id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_FORBIDDEN",
+                "message": "이 선택 대기 상태를 시작한 사람만 페이지를 고를 수 있습니다.",
+            },
+        )
+    if pending.expires_at <= datetime.now(timezone.utc):
+        # 삭제는 스윕 몫(삭제 책임 단일화, 페드루 PO 確定) — 여기서 안 지운다.
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_EXPIRED",
+                "message": "15분이 지나 선택 대기 상태가 만료됐습니다. 다시 연결해주세요.",
+            },
+        )
+    if not any(c.get("page_id") == body.page_id for c in pending.candidates):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE",
+                "message": "선택한 페이지가 이 선택 대기 상태의 후보 목록에 없습니다.",
+            },
+        )
+
+    adapter = get_channel_adapter(pending.channel)
+    user_token = decrypt_channel_credential(pending.encrypted_user_token)
+    oauth_module = _facebook_oauth_module(pending.channel)
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            pages = await oauth_module.list_pages(client, user_access_token=user_token)
+        except FacebookOAuthError as exc:
+            # Meta 호출 실패 — 행 유지(페드루 PO 確定, TTL이 상한). 검증 실패와 구분되는
+            # 유일한 축(행이 살아 있어 재시도 가능 vs 검증 실패는 애초에 재시도해도 안 됨).
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "CHANNEL_OAUTH_PROVIDER_UNAVAILABLE", "message": exc.message},
+            ) from exc
+
+    matched = next((p for p in pages if p["page_id"] == body.page_id), None)
+    if matched is None:
+        # 재호출 사이 그 페이지 권한이 회수된 경우 — 검증 실패와 동형으로 취급.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE",
+                "message": "선택한 페이지를 더는 이 계정에서 관리할 수 없습니다.",
+            },
+        )
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=pending.channel, account_id=matched["page_id"], account_label=matched["name"],
+        credential_kind=adapter.credential_kind, access_token=matched["access_token"], refresh_token=None,
+        token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","),
+        connected_by=resolved.id,
+    )
+    # 성공에만 삭제(페드루 PO REQUIRED) — 같은 pending으로 두 번째 성공은 이 삭제가
+    # 먼저 지운 행을 get_pending_selection이 다음 호출에서 못 찾아 자연히 막힌다.
+    await delete_pending_selection(db, pending_id=pending.id)
     return _to_response(row)
 
 
