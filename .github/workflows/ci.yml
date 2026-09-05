@@ -843,11 +843,17 @@ jobs:
     # *절대* 배율 문제엔 안 듣는다. 샤드 수 확대(설정값 변경만, 로직 무변화)가 유일하게
     # 싸고 근본적인 처방.
     #
-    # timeout-minutes는 8샤드 첫 실측(정상 표본) 뒤 그 값의 2배 이내로 재조정한다(AC4
-    # 계승 — 헐거운 천장 금지, #3383와 동일 원칙). 지금은 4샤드 때 값(20)을 그대로 이어
-    # 두되, 8-way 분할이면 각 샤드 파일수/가중치총합이 거의 절반이라 정상 표본에서는
-    # 4샤드의 절반(~5분대)에 가까울 것으로 예상 — 실측 뒤 이 주석과 함께 갱신한다.
-    timeout-minutes: 20
+    # story #3541(2026-09-06, 페드루 PO 確定) — 8샤드 첫 실측 갱신. 단독 CI run(부하
+    # 없음) 11건·88 샤드 인스턴스: p50 7.7분·p90 9.3분·p95 11.0분·max 15.1분 — "실측
+    # 2배 이내" 규율(AC4 계승, #3383와 동일 원칙)을 이번엔 max 기준으로 적용해 30분.
+    # 같은 날 동시 PR CI run 4~5개(+develop push run) 부하 사고 2건(#3884 shard 5·7·
+    # #3886 shard 2 — 전부 20:16 정각에 kill, 로그는 파일마다 정상 통과 중이었고 형제
+    # 샤드는 7~10분 완주, attempt 2는 코드 무변경으로 통과)의 실측 배율(≥1.6x)까지
+    # 30분(정상 p95의 2.7배)이 덮는다. 큐잉이 아니라 실행 자체가 고르게 느려진 것으로
+    # 확認됐다(모든 샤드 startedAt 동일·특정 파일 병목 0) — 러너/Postgres IO 동시성
+    # 부하 문제라 weights.json 재실측(파일 간 *상대* 비중이라 안 듣는다)이나 샤드 수
+    # 확대(8→12, 각 샤드 p95≈7분 예상)는 이번엔 보류하고 재발 시 착수한다(선택 남김).
+    timeout-minutes: 30
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
       matrix:
@@ -1074,6 +1080,14 @@ jobs:
         if: needs.backend-test-destructive.result != 'success'
         run: |
           echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
+          # story #3541(페드루 PO 確定) — GitHub Actions는 timeout-minutes로 죽인 잡과
+          # 사람이 수동 취소한 잡을 conclusion에서 안 가른다(둘 다 "cancelled"). result가
+          # cancelled면 코드 결함이 아니라 시간 초과였을 가능성이 있다는 걸 여기서
+          # 말해 둔다(#3884 shard 5·7·#3886 shard 2 실사고 — attempt 2는 코드 무변경으로
+          # 통과했었다) — 사람이 곧장 코드를 의심하고 파는 시간을 줄인다.
+          if [ "${{ needs.backend-test-destructive.result }}" = "cancelled" ]; then
+            echo "cancelled=시간 초과 또는 수동 취소 — 잡 소요가 timeout-minutes에 닿았는지 확認(각 샤드 job의 소요 시간을 먼저 볼 것)"
+          fi
           exit 1
 
       - name: Checkout
