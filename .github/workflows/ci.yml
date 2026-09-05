@@ -1093,6 +1093,14 @@ jobs:
 
       - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
         working-directory: backend
+        # story #3494(2026-09-05, PO 確定) — asyncio debug 모드를 상시 켜 둔다(디버그
+        # 모드의 기본 slow-callback 임계값 0.1s로 스택과 함께 로그 — `loop.
+        # slow_callback_duration`은 코드로만 바꿀 수 있어 env 하나로 조절 불가, 기본값
+        # 그대로 사용). 이건 처방이 아니라 진단 도구다 — 다음에 이런 류의 이벤트루프
+        # 스케줄링 정체가 CI에서만 재현되면, 어떤 콜백/코루틴이 막았는지가 로그에
+        # 스스로 이름을 대게 하려는 것(코드 변경 0, env만).
+        env:
+          PYTHONASYNCIODEBUG: "1"
         run: |
           set -o pipefail
           uv run pytest -q -m "not destructive_schema" --durations=20 2>&1 | tee /tmp/pytest_output.log

@@ -181,16 +181,23 @@ async def test_sse_connection_limit_returns_503():
 # ─── AC2b: 연결 수 카운터 정상 증감 ──────────────────────────────────────────
 
 def test_connection_count_increments_and_decrements():
-    """SSE 연결 시 _sse_connection_count 증가, 종료 시 감소."""
+    """SSE 연결 시 _sse_connection_count 증가, 종료 시 감소.
+
+    story #3494(근본원인, 2026-09-05 PO 確定) — test_eventbus_s2.py::
+    test_agent_stream_registers_connection의 docstring 참조. "연결 중 카운터
+    증가"를 `with c.stream()` 반환 직후(=앱이 이미 완주한 뒤) 확認하던 것도 같은
+    클래스 — injector가 앱 생존 중에 상태 기반으로 관찰한다."""
     from starlette.testclient import TestClient
     import threading
     import time
+    from app.core import shutdown as shutdown_module
     from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
     import app.routers.events as ev_module
 
     member_id = uuid.uuid4()
+    member_id_str = str(member_id)
     org = uuid.uuid4()
 
     mock_sess = _make_mock_session()
@@ -219,34 +226,46 @@ def test_connection_count_increments_and_decrements():
     app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     count_before = ev_module._sse_connection_count
+    incremented_observed = threading.Event()
+    consumed_observed = threading.Event()
+
+    def _inject():
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            if ev_module._sse_connection_count == count_before + 1:
+                incremented_observed.set()
+                break
+            time.sleep(0.005)
+        if not incremented_observed.is_set():
+            return
+        queues = list(_agent_connections.get(member_id_str, set()))
+        for q in queues:
+            q.put_nowait({"event_type": "__test_sentinel__"})
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            if all(q.empty() for q in queues):
+                consumed_observed.set()
+                break
+            time.sleep(0.005)
+        shutdown_module.shutdown_event.set()
+
+    t = threading.Thread(target=_inject)
+    t.start()
     try:
         with patch("app.core.database.async_session_factory", _factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
                 with TestClient(app, raise_server_exceptions=False) as c:
                     with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
                         assert resp.status_code == 200
-                        # 연결 중 카운터 증가 확인
-                        assert ev_module._sse_connection_count == count_before + 1
-
-                        def _inject():
-                            time.sleep(0.05)
-                            for q in list(_agent_connections.get(str(member_id), set())):
-                                try: q.put_nowait({"event_type": "__test_sentinel__"})
-                                except: pass
-
-                        t = threading.Thread(target=_inject)
-                        t.start()
-                        for line in resp.iter_lines():
-                            if "__test_sentinel__" in line:
-                                resp.close(); break
-                        t.join(timeout=1.0)
-        # 연결 종료 후 카운터 복원 대기
-        time.sleep(0.1)
         assert ev_module._sse_connection_count == count_before
     finally:
+        t.join(timeout=2.0)
         app.dependency_overrides.clear()
-        _agent_connections.pop(str(member_id), None)
+        _agent_connections.pop(member_id_str, None)
         ev_module._sse_connection_count = count_before
+
+    assert incremented_observed.is_set(), "injector never observed _sse_connection_count incremented while connected"
+    assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"
 
 
 # ─── AC3: 동시 SSE 10개 + 쓰기 병행 ────────────────────────────────────────
