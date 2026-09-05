@@ -1156,6 +1156,11 @@
       "file": "tests/test_3471_org_content_rules_lint.py",
       "sec": 40.0,
       "source": "story-3471-org-content-rules-lint(PR 개설 前 선제 등재 — 로컬 raw pytest 7.34s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3476_publish_read_surface.py",
+      "sec": 55.0,
+      "source": "story-3476-external-publish-read-surface(PR 개설 前 선제 등재 — 로컬 raw pytest 9.14s 실측치(6 tests, 페드루 보정①·② 반영 후)를 CI 배율(~6x, story #3383) 보수적으로 반영한 55s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
