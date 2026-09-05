@@ -599,6 +599,13 @@ async def list_comments_for_publication(
         db, comment_ids=[c.id for c in rows],
     )
 
+    # story #3529(additive, 유나 §22-15 채택) — 댓글 목록 reply{} 요약에 발송 명령
+    # 상태 4필드(command_status·failure_kind·next_attempt_at·reason_code)를 얹기
+    # 위한 배치 조회(N+1 X) — PublicationCommand 그대로, 새 컬럼/새 이름 0.
+    command_by_id = await _commands_by_ids(
+        db, command_ids=[r.command_id for r in latest_reply_by_comment_id.values() if r.command_id is not None],
+    )
+
     # 조각②-b 추가(유나 16회차) — comments_last_collected_at과 같은 계산 자리
     # (바로 위 `last_captured_at`, refresh_comments_now의 rate-limit 판정과는
     # 별개 축 — "지금 화면에 보여줄 마지막 수집 시각"을 그대로 재사용). null=지금
@@ -614,7 +621,21 @@ async def list_comments_for_publication(
         "active_count": active_count, "deleted_count": deleted_count,
         "reply_by_comment_id": latest_reply_by_comment_id,
         "comments_next_allowed_at": comments_next_allowed_at,
+        "command_by_id": command_by_id,
     }
+
+
+async def _commands_by_ids(db: AsyncSession, *, command_ids: list[uuid.UUID]) -> dict[uuid.UUID, "PublicationCommand"]:  # noqa: F821
+    """story #3529 — publication_command_id 배치 조회(N+1 X). command_ids 없으면
+    빈 dict(호출부가 `.get(command_id)` → None="이 답변엔 명령이 없다")."""
+    if not command_ids:
+        return {}
+    from app.models.publication_command import PublicationCommand
+
+    rows = (await db.execute(
+        select(PublicationCommand).where(PublicationCommand.id.in_(command_ids))
+    )).scalars().all()
+    return {row.id: row for row in rows}
 
 
 async def _latest_reply_by_comment_ids(
