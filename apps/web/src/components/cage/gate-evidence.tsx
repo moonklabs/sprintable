@@ -604,7 +604,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           <div>
             <p className="text-[10px] font-medium text-muted-foreground">{t('commentReplyTargetTextLabel')}</p>
             <p className="whitespace-pre-wrap text-foreground">
-              {facts.targetText ?? <span className="italic text-muted-foreground">{t('commentReplyTargetTextNotProvided')}</span>}
+              {facts.targetText ?? <span className="italic text-muted-foreground">{t('commentReplyTargetTextNotSealed')}</span>}
             </p>
           </div>
         </div>

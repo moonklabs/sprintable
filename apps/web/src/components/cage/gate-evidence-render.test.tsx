@@ -500,7 +500,7 @@ describe('GateEvidence — 댓글 답변 게이트 봉인 축(story #3517)', () 
     await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
     expect(container.textContent).toContain(koMessages.cage.commentReplyTargetTextLabel);
-    expect(container.textContent).toContain(koMessages.cage.commentReplyTargetTextNotProvided);
+    expect(container.textContent).toContain(koMessages.cage.commentReplyTargetTextNotSealed);
   });
 
   it('BE 후속 착지 뒤(neutral_facts.target_text 도착) — 자리가 자연히 원문으로 채워진다(호출부 변경 0)', async () => {
@@ -513,7 +513,7 @@ describe('GateEvidence — 댓글 답변 게이트 봉인 축(story #3517)', () 
     await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
     expect(container.textContent).toContain('이 부분 설명이 부족해요');
-    expect(container.textContent).not.toContain(koMessages.cage.commentReplyTargetTextNotProvided);
+    expect(container.textContent).not.toContain(koMessages.cage.commentReplyTargetTextNotSealed);
   });
 
   it('AC4 회귀 0 — comment_reply가 아닌 external_publish(레시피 approve)는 대상 댓글 블록이 안 뜬다', async () => {

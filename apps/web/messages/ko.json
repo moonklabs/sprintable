@@ -4613,7 +4613,7 @@
     "recipeApprovalSealedHashLabel": "봉인 해시",
     "commentReplyTargetLabel": "대상 댓글",
     "commentReplyTargetTextLabel": "대상 댓글 본문",
-    "commentReplyTargetTextNotProvided": "봉인 시점 본문은 제공되지 않음",
+    "commentReplyTargetTextNotSealed": "대상 댓글 본문은 아직 카드에 실리지 않습니다 — 원문에서 확인하고 승인해 주세요",
     "gateDetailBackToInbox": "결재함",
     "gateDetailNotFound": "게이트를 찾을 수 없습니다.",
     "gateDetailResolvedStatus": "이미 처리됨 — 상태: {status}",
