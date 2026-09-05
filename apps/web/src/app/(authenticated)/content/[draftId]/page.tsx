@@ -745,6 +745,9 @@ export default function ContentPostEditPage() {
         // 배열 — 화면은 아무것도 지어내지 않는다.
         const saveJson = (await res.json().catch(() => null)) as { data?: { violations?: ContentRuleViolation[] } } | null;
         setViolations(saveJson?.data?.violations ?? []);
+        // story #3514(PO REQUIRED, 2026-09-05) — 저장 응답이 권위 값을 방금 채웠으니
+        // 로드-실패 안내 줄이 그 옆에 남아 모순되면 안 된다.
+        setViolationsLoadFailed(false);
         // 새 버전이 생겼다 — 이력을 다시 읽어 새 버전 번호·"미상신" 상태를 반영한다(AC2).
         const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
         if (versionsRes.ok) {
@@ -816,6 +819,9 @@ export default function ContentPostEditPage() {
         const ruleViolationBody = body as { error?: { code?: string; violations?: ContentRuleViolation[] } } | null;
         if (ruleViolationBody?.error?.code === 'CONTENT_RULE_VIOLATION') {
           setViolations(ruleViolationBody.error.violations ?? []);
+          // story #3514(PO REQUIRED, 2026-09-05) — 상신 422도 권위 값이다(위 저장
+          // 응답과 동형 이유).
+          setViolationsLoadFailed(false);
           return;
         }
         const info = parseSitePostApiError(body);

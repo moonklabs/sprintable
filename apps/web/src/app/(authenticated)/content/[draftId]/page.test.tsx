@@ -1516,6 +1516,21 @@ describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §
     expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')?.textContent)
       .toBe(koMessages.content.contentRuleViolationsLoadFailed);
   });
+
+  // story #3514(PO REQUIRED, 2026-09-05) — 저장 응답이 violations를 권위 값으로
+  // 채운 뒤에는 "불러오지 못했습니다" 줄이 그 곁에 남아 모순되면 안 된다.
+  it('⭐단건 GET 500 뒤에도 저장에 성공하면 안내 줄이 사라진다(권위 값이 덮어씀)', async () => {
+    stubFetchWithVersions([VERSION_1], () => ({ status: 201, body: { violations: [] } }), undefined, { draftStatus: 500 });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')).not.toBeNull();
+
+    const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.editSaveCta) as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')).toBeNull();
+  });
 });
 
 // story #3479(BE #3476/#3828 실물 계약, 페드루 PO 確定 2026-09-05) — 원문 상세
