@@ -933,6 +933,13 @@ async def submit_channel_post_draft(
         and not schedule_changed
         and not media_changed
         and existing.status in ("pending", "approved")
+        # story #3496(site_posts.py와 동형 결함, 페드루 실측 2026-09-05) — reapproval_
+        # required도 판정 축이다. 승인 뒤 편집(approved→pending+reapproval_required=
+        # True)한 뒤 submit 없이 또 편집하면 재봉인 훅이 sealed_*를 최신으로 동기화
+        # 하면서도 reapproval_required는 그대로 True로 남긴다 — 그 상태에서 이 조기
+        # return이 content/schedule/media만 보고 "이미 봉인돼 있다"로 넘기면 게이트
+        # 재승인 가드가 절대 안 풀리는 영구 막다른 길이 된다.
+        and not existing.reapproval_required
     ):
         return existing, target.id
 

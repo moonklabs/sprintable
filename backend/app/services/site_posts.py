@@ -680,6 +680,16 @@ async def submit_site_post_draft(
         # "이미 이 정확한 상태로 봉인돼 있다"가 아니다 — 재봉인(아래)을 타야 한다.
         and existing.sealed_destination_connection_id == draft.connection_id
         and existing.status in ("pending", "approved")
+        # story #3496(페드루 실측 2026-09-05) — reapproval_required도 판정 축이다. 승인
+        # 뒤 편집(approved→pending+reapproval_required=True, sealed는 옛 버전 보존)한
+        # 뒤 **submit 없이** 또 편집하면 `_reseal_gate_on_new_version`의 pending 분기가
+        # sealed_content_*·sealed_destination을 최신으로 동기화하면서도 reapproval_
+        # required는 그대로 True로 둔다(그 필드는 이 훅의 관할이 아니다) — 그 상태에서
+        # submit()이 sha·destination만 보고 "이미 봉인돼 있다"로 조기 return하면 gates.py
+        # 의 재승인 가드(SITE_POST_RESUBMIT_REQUIRED)가 절대 안 풀리는 영구 막다른 길이
+        # 된다(사람이 본문을 한 글자라도 바꿔야만 풀림 — 안내 없는 사고). "이미 이 정확한
+        # 상태로 봉인돼 있다"는 재승인 요구가 없을 때만 참이다.
+        and not existing.reapproval_required
     ):
         return existing, target.id  # 이미 이 정확한 내용+목적지로 봉인돼 있다 — 재봉인하지 않는다(불변).
 
