@@ -374,6 +374,31 @@ export default function ChannelPostEditPage() {
       return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
     }
   }, [orgId, replyComment, t]);
+
+  // story #3544(3517 조각③, 유나 §22-15) — dead_letter 답변을 다시 큐에 올린다.
+  // content_kind 무관 공용 엔드포인트(story #3476)라 이 화면이 새 BE를 요구하지
+  // 않는다(comment_reply도 org_id+command_id로만 조회하는 retry_dead_letter_
+  // command의 그 command 중 하나일 뿐). 성공하면 loadComments()로 재조회 —
+  // command.status가 즉시 'pending'으로 바뀌어도 reply.status는 다음 워커 tick이
+  // 성공/재실패로 끝내야 'failed'에서 벗어난다(비동기 지연은 정상, 지어내지 않는다).
+  const handleRetryReply = useCallback(async (
+    comment: CommentItem,
+  ): Promise<{ ok: true } | { ok: false; errorMessage: string }> => {
+    if (!orgId || !comment.replyCommandId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${comment.replyCommandId}/retry`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { detail?: { message?: string }; message?: string } | null;
+        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+      }
+      loadComments();
+      return { ok: true };
+    } catch {
+      return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    }
+  }, [orgId, loadComments, t]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -1423,6 +1448,7 @@ export default function ChannelPostEditPage() {
             onRefresh={handleCommentsRefresh}
             onConvertToTask={setConvertToTaskComment}
             onReply={setReplyComment}
+            onRetryReply={handleRetryReply}
           />
         </div>
       ) : null}

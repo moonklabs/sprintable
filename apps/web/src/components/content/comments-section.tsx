@@ -7,6 +7,8 @@ import { CommentsRefreshButton, type CommentsRefreshOutcome } from '@/components
 import { Button } from '@/components/ui/button';
 import type { CommentReplyStatus } from '@/components/content/comment-reply-status';
 import { CommentReplyStatusChip } from '@/components/content/comment-reply-status-chip';
+import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
+import { CommentReplyFailureNote } from '@/components/content/comment-reply-failure-note';
 
 // story #3517(BE #3865 조각①, PO 確定 2026-09-05) — 필드명은 BE 응답
 // (`{id, external_comment_id, author_display_name, text, external_created_at,
@@ -32,6 +34,14 @@ export interface CommentItem {
   /** replyStatus==='published'일 때만 뜻이 있다(외부 채널에 실제로 올라간 답변
    * 링크) — 그 외 상태는 항상 null(지어내지 않는다). */
   replyExternalUrl: string | null;
+  /** story #3544(3517 조각③, 유나 §22-15) — replyStatus==='failed'일 때만 뜻이
+   * 있다. failure-action.ts::deriveFailureAction 재사용(channel_post와 같은
+   * command_status 우선순위 축, 신규 분류 로직 0) — undefined=보일 갈래가 없다
+   * (예: command 자체가 없다). */
+  replyFailureAction: FailureAction | undefined;
+  /** dead_letter 재시도 호출에 필요 — command_id가 없으면(레이스) 재시도 버튼을
+   * 활성화하지 않는다. */
+  replyCommandId: string | null;
 }
 
 // story #3517(유나 §22-②) — 세 얼굴. "미수집"(null)·"댓글 없음"([])·"불러오지 못함"(fetch
@@ -63,8 +73,14 @@ export interface RawCommentsResponse {
     external_created_at: string | null;
     captured_at: string;
     deleted_at: string | null;
-    /** 조각②-b(BE #3876 additive) — 댓글당 최신 답변 1건 요약(배치 조인). null=무응답. */
-    reply?: { id: string; status: string; external_reply_url: string | null; command_id: string | null } | null;
+    /** 조각②-b(BE #3876 additive) — 댓글당 최신 답변 1건 요약(배치 조인). null=무응답.
+     * story #3544(BE #3883 additive, 유나 §22-15 채택) — command_status·failure_kind·
+     * next_attempt_at·reason_code 4필드 추가. command_id가 null이면 넷 다 null. */
+    reply?: {
+      id: string; status: string; external_reply_url: string | null; command_id: string | null;
+      command_status: string | null; failure_kind: string | null;
+      next_attempt_at: string | null; reason_code: string | null;
+    } | null;
   }[];
   active_count: number;
   deleted_count: number;
@@ -118,6 +134,13 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
     deletedAt: c.deleted_at,
     replyStatus: replyStatusFrom(c.reply),
     replyExternalUrl: c.reply?.external_reply_url ?? null,
+    replyFailureAction: deriveFailureAction({
+      commandStatus: (c.reply?.command_status as CommandStatus | null) ?? null,
+      failureKind: c.reply?.failure_kind ?? null,
+      nextRetryAt: c.reply?.next_attempt_at ?? null,
+      reasonCode: c.reply?.reason_code ?? null,
+    }),
+    replyCommandId: c.reply?.command_id ?? null,
   }));
   // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
   // 하나만 본다(comments.length 아님 — 페이지 잘림·지워진 행이 섞이면 틀린다).
@@ -149,6 +172,9 @@ export interface CommentsSectionProps {
    * CommentsList가 isDeleted로 이미 걸러 그 댓글에 대해선 이 콜백을 부르지 않는다). */
   onConvertToTask: (comment: CommentItem) => void;
   onReply: (comment: CommentItem) => void;
+  /** story #3544(§22-15) — dead_letter 답변을 공용 publication-commands/{id}/retry로
+   * 다시 큐에 올린다(content_kind 무관 기존 엔드포인트, BE 신설 0). */
+  onRetryReply: (comment: CommentItem) => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
 }
 
 function SectionHeader({
@@ -179,13 +205,14 @@ function SectionHeader({
 // story #3517(유나 Design 재리뷰, 2026-09-05) — empty/loaded 둘 다 같은 목록 렌더를
 // 쓴다(§22-9 지워진 행 규칙이 두 얼굴에서 갈리면 안 되므로 한 곳으로 통일).
 function CommentsList({
-  comments, displayTimezone, t, onConvertToTask, onReply,
+  comments, displayTimezone, t, onConvertToTask, onReply, onRetryReply,
 }: {
   comments: CommentItem[];
   displayTimezone: string;
   t: ReturnType<typeof useTranslations>;
   onConvertToTask: (comment: CommentItem) => void;
   onReply: (comment: CommentItem) => void;
+  onRetryReply: (comment: CommentItem) => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
 }) {
   return (
     <ul className="space-y-3">
@@ -252,6 +279,19 @@ function CommentsList({
               ) : null}
             </div>
             ) : null}
+            {/* story #3544(3517 조각③, 유나 §22-15③, PO 確定 2026-09-06) — 「왜
+                멈췄고 다음에 뭘 하나」는 칩과 다른 축이라 칩 옆이 아니라 그 아래
+                별도 줄로 붙는다(칩을 늘리지 않는다). replyFailureAction이
+                undefined면(command 자체가 없다·완결·정보 없음) 아무것도 안
+                그린다 — 지어내지 않는다. */}
+            {comment.replyStatus === 'failed' && comment.replyFailureAction ? (
+              <CommentReplyFailureNote
+                action={comment.replyFailureAction}
+                displayTimezone={displayTimezone}
+                onRetry={comment.replyCommandId ? () => onRetryReply(comment) : undefined}
+                onResubmit={() => onReply(comment)}
+              />
+            ) : null}
             {/* story #3517(BE #3867 조각②, PO 確定 2026-09-05) — §22-9: 지워진
                 댓글엔 행 액션이 아예 안 그려진다(비활성이 아니라 부재). */}
             {!isDeleted ? (
@@ -283,7 +323,7 @@ function CommentsList({
   );
 }
 
-export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToTask, onReply }: CommentsSectionProps) {
+export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToTask, onReply, onRetryReply }: CommentsSectionProps) {
   const t = useTranslations('content');
 
   if (face.kind === 'uncollected') {
@@ -324,7 +364,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
             지워진 행(deleted_count>0)은 §22-9 "원래 자리 그대로" 그린다 — "댓글
             없음" 문구가 지워진 행의 존재 자체를 지우면 안 된다. */}
         {face.comments.length > 0 ? (
-          <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} />
+          <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} onRetryReply={onRetryReply} />
         ) : null}
       </div>
     );
@@ -334,7 +374,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
     <div className="space-y-2 border-t border-border pt-3" data-testid="comments-section">
       <SectionHeader t={t} activeCount={face.activeCount} deletedCount={face.deletedCount} capturedAtDisplay={capturedAtDisplay} />
       <CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={face.nextAllowedAt} />
-      <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} />
+      <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} onRetryReply={onRetryReply} />
     </div>
   );
 }
