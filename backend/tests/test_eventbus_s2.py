@@ -196,6 +196,12 @@ def test_agent_stream_registers_connection(mock_session, org_id):
         t.join(timeout=2.0)
         app.dependency_overrides.clear()
         _agent_connections.pop(member_id_str, None)
+        # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역이라
+        # 이 테스트가 set()한 채로 남으면 다음 lifespan startup 前까지(또는 lifespan을
+        # 안 타는 테스트라면 영영) 다른 테스트의 SSE 스트림까지 즉시 shutdown_reconnect로
+        # 오판시킨다 — TestClient(app)의 startup이 reset_shutdown_event()를 불러줄
+        # 것이라는 암묵적 기대에 기대지 않고 여기서 명시로 되돌린다.
+        shutdown_module.reset_shutdown_event()
 
     assert registered_observed.is_set(), "injector never observed the connection in _agent_connections"
     assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"
@@ -428,6 +434,12 @@ def test_stream_delivers_pending_on_connect(mock_session, org_id):
         t.join(timeout=2.0)
         app.dependency_overrides.clear()
         _agent_connections.pop(member_id_str, None)
+        # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역이라
+        # 이 테스트가 set()한 채로 남으면 다음 lifespan startup 前까지(또는 lifespan을
+        # 안 타는 테스트라면 영영) 다른 테스트의 SSE 스트림까지 즉시 shutdown_reconnect로
+        # 오판시킨다 — TestClient(app)의 startup이 reset_shutdown_event()를 불러줄
+        # 것이라는 암묵적 기대에 기대지 않고 여기서 명시로 되돌린다.
+        shutdown_module.reset_shutdown_event()
 
     assert registered_observed.is_set(), "injector never observed the connection in _agent_connections"
     assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"

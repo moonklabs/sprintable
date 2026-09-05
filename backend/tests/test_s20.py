@@ -263,6 +263,11 @@ def test_connection_count_increments_and_decrements():
         app.dependency_overrides.clear()
         _agent_connections.pop(member_id_str, None)
         ev_module._sse_connection_count = count_before
+        # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역, 이
+        # 테스트가 set()한 채로 남으면 다음 테스트의 SSE 스트림까지 즉시 shutdown_
+        # reconnect로 오판시킨다 — lifespan startup의 재생성에 암묵적으로 기대지 않고
+        # 명시로 되돌린다.
+        shutdown_module.reset_shutdown_event()
 
     assert incremented_observed.is_set(), "injector never observed _sse_connection_count incremented while connected"
     assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"
