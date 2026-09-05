@@ -166,6 +166,10 @@ function stubFetch(opts: {
   // story #3519(§16-7 2부) — 이미지 confirm 성공 「직후」의 단건 GET 재조회(부수)만
   // 네트워크단 reject시킨다(격리 회귀가드).
   rejectDraftRefetchAfterImageConfirm?: boolean;
+  // story #3517(BE #3867 조각②) — 댓글 「작업으로 전환」·「답변」 BFF 응답.
+  onCommentFollowUp?: (body: unknown) => { status: number; body: unknown };
+  onCommentReplyDraft?: (body: unknown) => { status: number; body: unknown };
+  onCommentReplySubmit?: () => { status: number; body: unknown };
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -341,6 +345,36 @@ function stubFetch(opts: {
         }
         const data = opts.commentsResponse ?? { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 };
         return { ok: true, status: 200, json: async () => ({ data, error: null, meta: null }) };
+      }
+      // story #3517(BE #3867 조각②) — 댓글 「작업으로 전환」·「답변」.
+      if (url.startsWith(`/api/organizations/${ORG_ID}/comments/`) && url.endsWith('/follow-ups') && init?.method === 'POST') {
+        const parsedBody = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onCommentFollowUp?.(parsedBody) ?? { status: 201, body: { story_id: 'story-1' } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/comments/`) && url.endsWith('/replies') && init?.method === 'POST') {
+        const parsedBody = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onCommentReplyDraft?.(parsedBody) ?? {
+          status: 201,
+          body: {
+            id: 'reply-1', comment_id: 'c1', text: parsedBody.text, status: 'draft', gate_id: null,
+            external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: null,
+          },
+        };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url.includes('/replies/') && url.endsWith('/submit') && init?.method === 'POST') {
+        const result = opts.onCommentReplySubmit?.() ?? {
+          status: 200,
+          body: {
+            id: 'reply-1', comment_id: 'c1', text: 'x', status: 'pending', gate_id: 'gate-1',
+            external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: 'current',
+          },
+        };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       throw new Error('unexpected fetch: ' + url + ' ' + (init?.method ?? 'GET'));
     }),
@@ -2557,10 +2591,9 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(published.querySelector('[data-testid="comment-body-text"]')?.textContent).toContain('좋은 글이네요');
   });
 
-  // story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로 전환·답변)은
-  // 조각②(답변/작업전환 엔드포인트) PR에서 배선한다 — 지금은 렌더 자체가 없다("아직
-  // 없는 기능은 안 그린다").
-  it('댓글이 있어도 「작업으로 전환」·「답변」 버튼이 안 그려진다(조각②에서 배선)', async () => {
+  // story #3517(BE #3867 조각②, PO 確定 2026-09-05) — 행 액션 재도입.
+  it('「작업으로 전환」 클릭 — 다이얼로그가 열리고 실 BFF로 전환된다(성공 시 story 링크)', async () => {
+    let captured: unknown = null;
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: {
@@ -2570,11 +2603,90 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
           external_created_at: '2026-09-05T09:00:00Z', captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
         }],
       },
+      onCommentFollowUp: (body) => { captured = body; return { status: 201, body: { story_id: 'story-42' } }; },
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
-    expect(container.querySelector('[data-testid="comments-item-convert-to-task"]')).toBeNull();
-    expect(container.querySelector('[data-testid="comments-item-reply"]')).toBeNull();
+    const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const submitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.commentsConvertSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+    expect(captured).toMatchObject({ title: expect.stringContaining('[댓글]') });
+    expect(document.querySelector('[data-testid="comments-convert-success-link"]')?.getAttribute('href')).toBe('/board?story=story-42');
+  });
+
+  it('「작업으로 전환」 403(에이전트 차단) — 서버 문구가 그대로 뜬다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: 'x', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+      onCommentFollowUp: () => ({ status: 403, body: { detail: { code: 'COMMENT_REPLY_HUMAN_ONLY', message: '이 액션은 휴먼 멤버만 가능합니다.' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const submitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.commentsConvertSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+    expect(document.querySelector('[data-testid="comments-convert-error"]')?.textContent).toBe('이 액션은 휴먼 멤버만 가능합니다.');
+  });
+
+  it('「답변」 클릭 — 초안 저장→상신까지 실 BFF로 진행되고 성공 문구가 뜬다', async () => {
+    let draftedText = '';
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 재입고되나요?', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+      onCommentReplyDraft: (body) => {
+        draftedText = (body as { text: string }).text;
+        return { status: 201, body: { id: 'reply-1', comment_id: 'c1', text: draftedText, status: 'draft', gate_id: null, external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: null } };
+      },
+      onCommentReplySubmit: () => ({
+        status: 200,
+        body: { id: 'reply-1', comment_id: 'c1', text: draftedText, status: 'pending', gate_id: 'gate-1', external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: 'current' },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(textarea, '다음 주 월요일에 재입고됩니다'); textarea.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-submit-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    expect(document.querySelector('[data-testid="comments-reply-sealed-text"]')?.textContent).toBe('다음 주 월요일에 재입고됩니다');
+  });
+
+  it('「답변」 상신 409(대상 삭제) — 서버 문구가 그대로 뜬다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: 'x', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+      onCommentReplySubmit: () => ({ status: 409, body: { detail: { code: 'COMMENT_REPLY_TARGET_DELETED', message: '답변 대상 댓글이 삭제되어 상신할 수 없습니다.' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(textarea, 'x'); textarea.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-submit-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    expect(document.querySelector('[data-testid="comments-reply-error"]')?.textContent).toBe('답변 대상 댓글이 삭제되어 상신할 수 없습니다.');
   });
 
   // story #3517(BE #3865 조각①) — 수동 재수집. 429/422/403 문장을 서버 응답 그대로

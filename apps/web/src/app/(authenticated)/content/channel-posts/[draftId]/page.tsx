@@ -20,8 +20,10 @@ import { parseScheduledAtServerError } from '@/components/content/validate-sched
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
-import { CommentsSection, deriveCommentsFace, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
+import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
 import type { CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
+import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
+import { CommentReplyDialog, type CommentReplyOutcome, type ReplyView } from '@/components/content/comment-reply-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
@@ -279,6 +281,65 @@ export default function ChannelPostEditPage() {
       return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
     }
   }, [orgId, draft?.publication_id, loadComments, t]);
+  // story #3517(BE #3867 조각②, PO 確定 2026-09-05) — 댓글 「작업으로 전환」·「답변」.
+  const [convertToTaskComment, setConvertToTaskComment] = useState<CommentItem | null>(null);
+  const [replyComment, setReplyComment] = useState<CommentItem | null>(null);
+
+  const handleConvertToTaskSubmit = useCallback(async (
+    input: { title: string; note: string },
+  ): Promise<{ ok: true; storyId: string } | { ok: false; errorMessage: string }> => {
+    if (!orgId || !convertToTaskComment) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${convertToTaskComment.id}/follow-ups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: input.title, note: input.note || null }),
+      });
+      const body = await res.json().catch(() => null) as { data?: { story_id?: string }; detail?: { message?: string }; message?: string } | null;
+      if (!res.ok) {
+        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+      }
+      const storyId = body?.data?.story_id;
+      if (!storyId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+      return { ok: true, storyId };
+    } catch {
+      return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    }
+  }, [orgId, convertToTaskComment, t]);
+
+  const handleCreateReplyDraft = useCallback(async (replyText: string): Promise<CommentReplyOutcome> => {
+    if (!orgId || !replyComment) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${replyComment.id}/replies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: replyText }),
+      });
+      const body = await res.json().catch(() => null) as { data?: ReplyView; detail?: { message?: string }; message?: string } | null;
+      if (!res.ok || !body?.data) {
+        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+      }
+      return { ok: true, reply: body.data };
+    } catch {
+      return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    }
+  }, [orgId, replyComment, t]);
+
+  const handleSubmitReply = useCallback(async (replyId: string): Promise<CommentReplyOutcome> => {
+    if (!orgId || !replyComment) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${replyComment.id}/replies/${replyId}/submit`, {
+        method: 'POST',
+      });
+      const body = await res.json().catch(() => null) as { data?: ReplyView; detail?: { message?: string }; message?: string } | null;
+      if (!res.ok || !body?.data) {
+        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+      }
+      return { ok: true, reply: body.data };
+    } catch {
+      return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    }
+  }, [orgId, replyComment, t]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -335,6 +396,13 @@ export default function ChannelPostEditPage() {
   const imageFileInputRef = useRef<HTMLInputElement>(null);
 
   const [text, setText] = useState('');
+  // story #3517(BE #3867 조각②) — 댓글 「작업으로 전환」 다이얼로그의 「게시물 제목」
+  // prefill 대용. ⚠️그라운딩 — insights_board.py의 「게시물 제목」은 원문 Story.title
+  // 이지만(BE는 title을 서버가 안 짓는다, 호출부 필수 — comment_replies.py 주석 明示)
+  // 이 페이지엔 그 Story 조회가 없다(새 fetch를 늘리지 않는다). 채널 포스트 자체가
+  // 정식 제목이 없는 짧은 글 형식이라, 그 게시물을 식별하는 실질 대용으로 현재
+  // 편집 중(=발행된 그대로일 때가 보통) 본문의 앞부분을 쓴다.
+  const commentsPostTitle = text.length > 60 ? `${text.slice(0, 60).trimEnd()}…` : text;
   const [linkUrl, setLinkUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string; raw?: string } | null>(null);
@@ -1269,7 +1337,13 @@ export default function ChannelPostEditPage() {
                   2026-09-05): 세 얼굴·수집 시각·목록·지워진 댓글(§22-9)만 — 행 액션
                   (작업으로 전환·답변)은 조각②(답변/작업전환 엔드포인트) PR에서. */}
               {draft.publication_id ? (
-                <CommentsSection face={commentsFace} displayTimezone={displayTimezone} onRefresh={handleCommentsRefresh} />
+                <CommentsSection
+                  face={commentsFace}
+                  displayTimezone={displayTimezone}
+                  onRefresh={handleCommentsRefresh}
+                  onConvertToTask={setConvertToTaskComment}
+                  onReply={setReplyComment}
+                />
               ) : null}
             </div>
           );
@@ -1723,6 +1797,23 @@ export default function ChannelPostEditPage() {
         submitting={submitting}
         serverError={scheduleServerError}
       />
+      {/* story #3517(BE #3867 조각②, PO 確定 2026-09-05) — 댓글 「작업으로 전환」·「답변」. */}
+      {convertToTaskComment ? (
+        <CommentConvertToTaskDialog
+          postTitle={commentsPostTitle}
+          comment={convertToTaskComment}
+          onClose={() => setConvertToTaskComment(null)}
+          onSubmit={handleConvertToTaskSubmit}
+        />
+      ) : null}
+      {replyComment ? (
+        <CommentReplyDialog
+          comment={replyComment}
+          onClose={() => setReplyComment(null)}
+          onCreateDraft={handleCreateReplyDraft}
+          onSubmit={handleSubmitReply}
+        />
+      ) : null}
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에
           워시된다, Phase 0 실측). */}
       {isOverLimit ? (

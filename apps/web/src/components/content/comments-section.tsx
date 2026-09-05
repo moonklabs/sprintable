@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { formatScheduledAt } from '@/components/content/schedule-format';
 import { CommentBodyText } from '@/components/content/comment-body-text';
 import { CommentsRefreshButton, type CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
+import { Button } from '@/components/ui/button';
 import type { CommentReplyStatus } from '@/components/content/comment-reply-status';
 
 // story #3517(BE #3865 조각①, PO 確定 2026-09-05) — 필드명은 BE 응답
@@ -91,8 +92,12 @@ export function deriveCommentsFace(
   return { kind: 'loaded', capturedAt: data.last_collected_at, comments, activeCount, deletedCount };
 }
 
-// story #3517(PO 確定 2026-09-05) — onConvertToTask/onReply는 조각②(답변/작업전환
-// 엔드포인트) PR에서 다시 추가한다 — 조각①은 행 액션 자체를 안 그린다.
+// story #3517(BE #3867 조각②, PO 確定 2026-09-05) — onConvertToTask/onReply 재도입.
+// ⚠️답변 상태 칩(CommentReplyStatusChip)은 여전히 안 그린다 — 댓글 목록 GET(조각①)이
+// reply 존재 여부를 전혀 안 실어보내(그라운딩 확認, BE 벌크 조회 additive 별건 대기
+// 중) 페이지 로드 시점의 진짜 상태를 모른다. 로컬로 "이 세션에서 만든 draft"만
+// 기억해 칩을 지어내면 새로고침 후 이미 답변이 있던 댓글도 "무응답"으로 거짓 표시된다
+// — 신호가 없으면 그 자리 자체를 안 그린다(§17 규율).
 export interface CommentsSectionProps {
   face: CommentsFace;
   displayTimezone: string;
@@ -101,6 +106,10 @@ export interface CommentsSectionProps {
    * 않는다). onRefresh는 POST만 하고, 성공 뒤 목록을 다시 부르는 건 호출부(페이지)
    * 몫이다(이 컴포넌트는 재조회 트리거만 위임받는다). */
   onRefresh: () => Promise<CommentsRefreshOutcome>;
+  /** §22-9 — 지워진 댓글엔 이 액션 자체가 안 그려진다(호출부는 신경 안 써도 됨,
+   * CommentsList가 isDeleted로 이미 걸러 그 댓글에 대해선 이 콜백을 부르지 않는다). */
+  onConvertToTask: (comment: CommentItem) => void;
+  onReply: (comment: CommentItem) => void;
 }
 
 function SectionHeader({
@@ -131,11 +140,13 @@ function SectionHeader({
 // story #3517(유나 Design 재리뷰, 2026-09-05) — empty/loaded 둘 다 같은 목록 렌더를
 // 쓴다(§22-9 지워진 행 규칙이 두 얼굴에서 갈리면 안 되므로 한 곳으로 통일).
 function CommentsList({
-  comments, displayTimezone, t,
+  comments, displayTimezone, t, onConvertToTask, onReply,
 }: {
   comments: CommentItem[];
   displayTimezone: string;
   t: ReturnType<typeof useTranslations>;
+  onConvertToTask: (comment: CommentItem) => void;
+  onReply: (comment: CommentItem) => void;
 }) {
   return (
     <ul className="space-y-3">
@@ -180,12 +191,32 @@ function CommentsList({
               forceCollapsed={isDeleted}
               deletedSummaryLabel={t('commentsDeletedBodyLabel')}
             />
-            {/* story #3517(PO 確定 2026-09-05, 조각①-FE 범위) — 행 액션(작업으로
-                전환·답변)·답변 상태 칩은 이 슬라이스에서 렌더하지 않는다. 조각②
-                (답변/작업전환 엔드포인트) 미착지 상태로 눌러도 아무 일도 안 나는
-                컨트롤을 그리지 않는다("아직 없는 기능은 안 그린다"). 컴포넌트
-                (CommentConvertToTaskDialog)·상태 칩(CommentReplyStatusChip)·테스트는
-                남아 있다 — 조각② PR에서 이 자리에 다시 배선한다. */}
+            {/* story #3517(BE #3867 조각②, PO 確定 2026-09-05) — §22-9: 지워진
+                댓글엔 행 액션이 아예 안 그려진다(비활성이 아니라 부재). 답변 상태
+                칩(CommentReplyStatusChip)은 여전히 안 그린다(위 CommentsSectionProps
+                주석 — BE 벌크 조회 별건 대기). */}
+            {!isDeleted ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onConvertToTask(comment)}
+                  data-testid="comments-item-convert-to-task"
+                >
+                  {t('commentsConvertToTaskCta')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onReply(comment)}
+                  data-testid="comments-item-reply"
+                >
+                  {t('commentsReplyCta')}
+                </Button>
+              </div>
+            ) : null}
           </li>
         );
       })}
@@ -193,7 +224,7 @@ function CommentsList({
   );
 }
 
-export function CommentsSection({ face, displayTimezone, onRefresh }: CommentsSectionProps) {
+export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToTask, onReply }: CommentsSectionProps) {
   const t = useTranslations('content');
 
   if (face.kind === 'uncollected') {
@@ -233,7 +264,9 @@ export function CommentsSection({ face, displayTimezone, onRefresh }: CommentsSe
         {/* story #3517(유나 Design 재리뷰, 2026-09-05) — active_count===0이어도
             지워진 행(deleted_count>0)은 §22-9 "원래 자리 그대로" 그린다 — "댓글
             없음" 문구가 지워진 행의 존재 자체를 지우면 안 된다. */}
-        {face.comments.length > 0 ? <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} /> : null}
+        {face.comments.length > 0 ? (
+          <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} />
+        ) : null}
       </div>
     );
   }
@@ -242,7 +275,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh }: CommentsSe
     <div className="space-y-2 border-t border-border pt-3" data-testid="comments-section">
       <SectionHeader t={t} activeCount={face.activeCount} deletedCount={face.deletedCount} capturedAtDisplay={capturedAtDisplay} />
       <CommentsRefreshButton onRefresh={onRefresh} />
-      <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} />
+      <CommentsList comments={face.comments} displayTimezone={displayTimezone} t={t} onConvertToTask={onConvertToTask} onReply={onReply} />
     </div>
   );
 }
