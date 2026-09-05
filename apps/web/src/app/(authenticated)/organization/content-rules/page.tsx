@@ -146,7 +146,11 @@ function isValidCssColor(value: string): boolean {
 // 코드를 적어 두기만 해서는 맞는 색인지 아무도 확인 못 한다 — 로고 미리보기와 같은
 // 취지). banned_terms·taxonomy·channel_priority는 그대로(색 스와치가 뜻이 없는
 // 자리라 variant='default'가 기본).
-function TagChip({ item, variant, onRemove }: { item: string; variant: 'default' | 'color'; onRemove?: () => void }) {
+// story #3436 묶음11(유나 §17-20류 낱말, 페드루 PO 確定 2026-09-06) — 이 제거
+// 버튼의 접근성 이름이 하드코딩 영문(`Remove ${item}`)이라 한국어 화면에서도
+// 스크린리더가 영어로 읽었다(§17-20 낱말 축과 같은 클래스 — dep.remove
+// 「의존 관계 제거」 선례와 동형 형태 「{item} 제거」/`Remove {item}`).
+function TagChip({ item, variant, onRemove, t }: { item: string; variant: 'default' | 'color'; onRemove?: () => void; t: ReturnType<typeof useTranslations> }) {
   const showSwatch = variant === 'color' && isValidCssColor(item);
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-foreground">
@@ -160,7 +164,7 @@ function TagChip({ item, variant, onRemove }: { item: string; variant: 'default'
       ) : null}
       {item}
       {onRemove ? (
-        <button type="button" onClick={onRemove} aria-label={`Remove ${item}`} className="text-muted-foreground hover:text-foreground">
+        <button type="button" onClick={onRemove} aria-label={t('removeItemAction', { item })} className="text-muted-foreground hover:text-foreground">
           ×
         </button>
       ) : null}
@@ -169,7 +173,7 @@ function TagChip({ item, variant, onRemove }: { item: string; variant: 'default'
 }
 
 function TagListEditor({
-  items, onChange, readOnly, placeholder, testIdPrefix, variant = 'default', emptyText = '—',
+  items, onChange, readOnly, placeholder, testIdPrefix, variant = 'default', emptyText = '—', t,
 }: {
   items: string[];
   onChange: (next: string[]) => void;
@@ -182,6 +186,7 @@ function TagListEditor({
   // 글자라, 브랜드 킷처럼 "아직 정하지 않았다"는 다른 사실엔 다른 문구가 맞다.
   // 기본값은 기존 호출부(banned_terms 등) 회귀 0을 위해 '—' 그대로 유지.
   emptyText?: string;
+  t: ReturnType<typeof useTranslations>;
 }) {
   const [draft, setDraft] = useState('');
 
@@ -197,7 +202,7 @@ function TagListEditor({
       <p className="text-xs text-muted-foreground" data-testid={`${testIdPrefix}-empty`}>{emptyText}</p>
     ) : (
       <div className="flex flex-wrap gap-1.5" data-testid={`${testIdPrefix}-readonly`}>
-        {items.map((item) => <TagChip key={item} item={item} variant={variant} />)}
+        {items.map((item) => <TagChip key={item} item={item} variant={variant} t={t} />)}
       </div>
     );
   }
@@ -206,7 +211,7 @@ function TagListEditor({
     <div className="space-y-1.5" data-testid={`${testIdPrefix}-editor`}>
       <div className="flex flex-wrap gap-1.5">
         {items.map((item) => (
-          <TagChip key={item} item={item} variant={variant} onRemove={() => onChange(items.filter((x) => x !== item))} />
+          <TagChip key={item} item={item} variant={variant} onRemove={() => onChange(items.filter((x) => x !== item))} t={t} />
         ))}
       </div>
       <input
@@ -513,7 +518,7 @@ export default function ContentRulesPage() {
                   onChange={(next) => setRules((r) => ({ ...r, banned_terms: next }))}
                   readOnly={!canEditRules}
                   placeholder={t('bannedTermsPlaceholder')}
-                  testIdPrefix="content-rules-banned-terms"
+                  testIdPrefix="content-rules-banned-terms" t={t}
                 />
                 {fieldErrors.banned_terms ? <p className="text-xs text-destructive">{fieldErrors.banned_terms}</p> : null}
               </div>
@@ -710,7 +715,7 @@ export default function ContentRulesPage() {
                   onChange={(next) => setRules((r) => ({ ...r, taxonomy: next }))}
                   readOnly={!canEditRules}
                   placeholder={t('taxonomyPlaceholder')}
-                  testIdPrefix="content-rules-taxonomy"
+                  testIdPrefix="content-rules-taxonomy" t={t}
                 />
                 {fieldErrors.taxonomy ? <p className="text-xs text-destructive">{fieldErrors.taxonomy}</p> : null}
               </div>
@@ -723,7 +728,7 @@ export default function ContentRulesPage() {
                     onChange={(next) => setRules((r) => ({ ...r, channel_priority: next }))}
                     readOnly={false}
                     placeholder={t('channelPriorityPlaceholder')}
-                    testIdPrefix="content-rules-channel-priority-add"
+                    testIdPrefix="content-rules-channel-priority-add" t={t}
                   />
                 ) : null}
                 <OrderedListEditor
@@ -766,7 +771,7 @@ export default function ContentRulesPage() {
                   placeholder={t('brandKitColorsPlaceholder')}
                   testIdPrefix="content-rules-brand-colors"
                   variant="color"
-                  emptyText={t('contentRulesNotSetLabel')}
+                  emptyText={t('contentRulesNotSetLabel')} t={t}
                 />
               </div>
               <div className="space-y-1.5">
@@ -780,7 +785,7 @@ export default function ContentRulesPage() {
                   readOnly={!canEditRules}
                   placeholder={t('brandKitFontsPlaceholder')}
                   testIdPrefix="content-rules-brand-fonts"
-                  emptyText={t('contentRulesNotSetLabel')}
+                  emptyText={t('contentRulesNotSetLabel')} t={t}
                 />
                 {fieldErrors.brand_kit ? <p className="text-xs text-destructive">{fieldErrors.brand_kit}</p> : null}
               </div>
