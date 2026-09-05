@@ -74,6 +74,12 @@ class ChannelAdapterConfig:
     image_formats: tuple[str, ...] = ()
     image_max_bytes: int = 0
     image_aspect_max: float = 0.0
+    # story #3320(Phase2·마케팅운영) — Threads류(상한만, 0.0 기본값=하한 없음)와 달리
+    # Instagram은 세로 방향에도 하한이 있다(4:5=0.8~1.91:1, 정규화(long/short)로는
+    # 한쪽만 못 잡는다 — width/height 원시 비율로 별도 판정, channel_post_images.py
+    # 검증 함수 참고). 0.0이면 이 하한 검사 자체를 건너뛴다(기존 Threads/hosted_site
+    # 회귀 0 — 새 필드가 없던 것처럼 그대로 동작).
+    image_aspect_min: float = 0.0
     image_width_min: int = 0
     image_width_max: int = 0
     image_color_space: str = ""
@@ -149,6 +155,42 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 뭉친다). impressions/reach/clicks/spend/conversions는 Threads가 선언 안 함
         # (광고 계정 지표라 유기 게시물 API엔 없음).
         insight_metrics=("views", "engagements"),
+    ),
+    # story #3320(Phase2·마케팅운영, 페드루 PO 確定 2026-09-05) — M4 두 번째 A(API 자동
+    # 발행) 채널. OAuth 엔드포인트·스코프는 페드루 PO가 2026-09-06 Meta 공식 문서로
+    # 직접 재확認한 값(threads_oauth.py 최초 작성 시의 지식-컷오프 추정과 다름 —
+    # instagram_oauth.py 참고). Facebook Page 연결은 Instagram Login 방식 자체가
+    # 불요(그라운딩+PO 재확認 일치).
+    "instagram": ChannelAdapterConfig(
+        authorize_url="https://www.instagram.com/oauth/authorize",
+        token_url="https://api.instagram.com/oauth/access_token",
+        # manage_comments는 조각③(댓글) 대상이라 지금은 미사용이어도 스코프는 미리
+        # 선언한다(threads_delete·threads_manage_replies 선례와 동형 — 새 연결부터
+        # 적용, 기존 연결은 재인증 전까지 그 능력이 막힌다, 의도).
+        scope="instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments",
+        refresh_mode="reissue_from_access_token",
+        credential_kind="oauth",
+        display_name="Instagram",
+        max_text_length=2200,  # 캡션 상한(스토리 본문 규격 표 IG 행, 그라운딩 실확認).
+        utm_source="instagram",
+        utm_medium="social",
+        # story #3320 조각① — supports_fetch_replies/reply·insight_metrics는 조각③
+        # 에서 켠다(페드루 PO 明示 — 댓글·인사이트 fetch dispatch가 아직 없어서 지금
+        # 켜면 capability 선언과 실제 구현이 어긋난다). supports_unpublish도 미선언
+        # (instagram_publish.py::delete_media 참고 — 삭제 API 자체가 미확認).
+        # 규격(JPEG·4:5~1.91:1·8MB·피드 이미지 1장) — 스토리 본문 규격 표 IG 행
+        # 그대로(그라운딩 실확認 대상), 캐러셀/릴스는 조각① 스코프 밖. ⚠️width_min/
+        # width_max는 그라운딩이 명시 확認하지 않아 Threads 값(320~1440)을 잠정
+        # 재사용 — IG 최소 권장폭(320px)만 문서상 확실하고 상한은 미확認, 조각②
+        # (실발행 경로) 착수 전 재확認 필요.
+        image_formats=("image/jpeg",),
+        image_max_bytes=8 * 1024 * 1024,
+        image_aspect_max=1.91,
+        image_aspect_min=0.8,
+        image_width_min=320,
+        image_width_max=1440,
+        image_color_space="sRGB",
+        image_max_count=1,
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
@@ -264,6 +306,29 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
             "impressions", "reach", "views", "engagements", "clicks", "spend", "conversions",
         ),
     )
+    # story #3320 조각① — Instagram 전용 sandbox. 기존 "sandbox"(Threads류 TEXT-
+    # optional)와 같은 값을 재사용하지 않는 이유는 위 instagram_sandbox_publish.py
+    # docstring 참고(이미지 필수라는 성질 차이) — `get_publish_client_module`의
+    # 채널→모듈 dict가 이 구분을 그대로 반영한다.
+    CHANNEL_ADAPTERS["instagram_sandbox"] = ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="sandbox_publish,sandbox_delete",
+        refresh_mode="manual",
+        credential_kind="none",
+        display_name="Instagram Sandbox",
+        max_text_length=2200,  # instagram과 동형(캡션 상한).
+        utm_source="instagram_sandbox",
+        utm_medium="test",
+        image_formats=("image/jpeg",),
+        image_max_bytes=8 * 1024 * 1024,
+        image_aspect_max=1.91,
+        image_aspect_min=0.8,
+        image_width_min=320,
+        image_width_max=1440,
+        image_color_space="sRGB",
+        image_max_count=1,
+    )
 
 
 def get_channel_adapter(channel: str) -> ChannelAdapterConfig | None:
@@ -289,25 +354,53 @@ class BlogChannelDispatchNotImplementedError(NotImplementedError):
         )
 
 
+class ChannelPublishDispatchNotImplementedError(Exception):
+    """story #3320(Phase2·마케팅운영, 페드루 PO 確定 2026-09-05) — dispatch fall-
+    through 근본 처방. `get_publish_client_module`이 이전엔 미등록 채널을 조용히
+    `threads_publish`로 떨어뜨렸다(e4fc29fa의 blog 오분기와 같은 사고 클래스 —
+    "모르는 채널=기본값"이 실제로는 "모르는 채널이 Threads API를 잘못 탄다"는 뜻
+    이었다, 이미 한 번 겪음). 이제 아래 dict에 없는 채널은 즉시 이 예외로 fail-
+    closed(뮤테이션 대상 — dict에서 항목을 빼면 그 채널이 곧바로 이 예외를 내야
+    한다)."""
+
+    def __init__(self, *, channel: str):
+        self.channel = channel
+        super().__init__(f"발행 클라이언트 디스패치가 없는 채널입니다: {channel}")
+
+
+# story #3320 — 채널→발행 클라이언트 모듈의 명시 등록표(모듈 경로 문자열, importlib로
+# 지연 import — 순환 import 회피는 기존 로컬 import 관례와 동형). 새 채널을 추가할
+# 때마다 이 한 줄만 늘리면 되고, 안 늘리면 `get_publish_client_module`이 즉시 예외를
+# 낸다(위 사고 클래스의 근본 처방 — "그 외 전부 threads로" 폴백 자체를 없앤다).
+_PUBLISH_CLIENT_MODULE_PATHS: dict[str, str] = {
+    "sandbox": "app.services.sandbox_publish",
+    "instagram_sandbox": "app.services.instagram_sandbox_publish",
+    "threads": "app.services.threads_publish",
+    "instagram": "app.services.instagram_publish",
+}
+
+
 def get_publish_client_module(channel: str):
-    """story 5b27b32f — 발행 클라이언트 모듈 디스패치. `sandbox`만 `threads_publish`
-    대신 `sandbox_publish`로 우회한다(같은 함수 시그니처·같은 `ThreadsPublishError`
-    클래스를 그대로 재사용 — sandbox_publish.py가 신규 예외 타입을 만들지 않으므로
-    channel_posts.py의 기존 except절이 그대로 먹힌다, 신규 판정 로직 0). 실 배포 채널
-    (threads 등)은 전부 threads_publish 그대로 — 이 함수가 sandbox 개입의 유일한
-    지점이다(Threads 어댑터 코드 자체는 무변경).
+    """story 5b27b32f — 발행 클라이언트 모듈 디스패치. `sandbox`/`instagram_sandbox`
+    는 각각 `sandbox_publish`/`instagram_sandbox_publish`로 우회한다(같은 함수
+    시그니처·같은 `ThreadsPublishError` 클래스를 그대로 재사용 — 신규 판정 로직 0).
+    실 배포 채널(threads·instagram)은 각자의 실 클라이언트 모듈.
 
     story e4fc29fa(페드루 PO 리뷰 B2) — kind="blog" 채널(hosted_site 등)은 여기서
-    명시적으로 거부한다. 이 가드가 없으면 마지막 else가 threads_publish로 조용히
-    떨어져(수정 前 결함) 블로그 발행이 Threads API 코드를 잘못 탄다."""
+    명시적으로 거부한다(이 함수 자체가 site_posts.py 도메인과 무관 — blog는 그쪽의
+    자체 어댑터 dispatch를 쓴다).
+
+    story #3320(페드루 PO 確定) — 그 외(위 dict에 없는 채널)는 `ChannelPublishDispatch
+    NotImplementedError`로 fail-closed(위 클래스 docstring 참고 — 예전엔 조용히
+    threads_publish로 떨어지던 자리)."""
     adapter = get_channel_adapter(channel)
     if adapter is not None and adapter.kind == "blog":
         raise BlogChannelDispatchNotImplementedError(channel=channel)
-    if channel == "sandbox":
-        from app.services import sandbox_publish
-        return sandbox_publish
-    from app.services import threads_publish
-    return threads_publish
+    module_path = _PUBLISH_CLIENT_MODULE_PATHS.get(channel)
+    if module_path is None:
+        raise ChannelPublishDispatchNotImplementedError(channel=channel)
+    import importlib
+    return importlib.import_module(module_path)
 
 
 def assert_sandbox_channel_not_registered_in_prod() -> None:

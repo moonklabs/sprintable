@@ -241,11 +241,15 @@ def test_sandbox_env_flag_gates_registration_via_subprocess():
 
 def test_get_publish_client_module_dispatches_by_channel():
     from app.services import sandbox_publish, threads_publish
-    from app.services.channel_adapters import get_publish_client_module
+    from app.services.channel_adapters import ChannelPublishDispatchNotImplementedError, get_publish_client_module
 
     assert get_publish_client_module("sandbox") is sandbox_publish
     assert get_publish_client_module("threads") is threads_publish
-    assert get_publish_client_module("unknown-channel") is threads_publish  # 기본값(회귀 축)
+    # story #3320(페드루 PO 確定) — 미등록 채널이 threads_publish로 조용히 떨어지던
+    # 옛 기본값(회귀 축)은 근본처방으로 제거됨. 지금은 fail-closed 예외가 정본
+    # (test_3320_instagram_connector.py에 뮤테이션 자가검증 포함 더 자세히 있음).
+    with pytest.raises(ChannelPublishDispatchNotImplementedError):
+        get_publish_client_module("unknown-channel")
 
 
 # ─── AC5 — prod fail-closed ───────────────────────────────────────────────

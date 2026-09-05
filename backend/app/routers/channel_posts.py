@@ -55,6 +55,7 @@ from app.services.channel_posts import (
 from app.services.channel_post_images import (
     ChannelImageAnimatedUnsupportedError,
     ChannelImageAspectRatioExceededError,
+    ChannelImageAspectRatioTooNarrowError,
     ChannelImageConversionFailedError,
     ChannelImageObjectNotFoundError,
     ChannelImagePathNotScopedError,
@@ -518,6 +519,14 @@ async def post_channel_post_image_confirm(
             detail={
                 "code": "CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED", "message": str(exc),
                 "aspect_ratio": exc.aspect_ratio, "max_aspect_ratio": exc.max_aspect_ratio,
+            },
+        ) from exc
+    except ChannelImageAspectRatioTooNarrowError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW", "message": str(exc),
+                "width_height_ratio": exc.width_height_ratio, "min_width_height_ratio": exc.min_width_height_ratio,
             },
         ) from exc
     except ChannelImageConversionFailedError as exc:
