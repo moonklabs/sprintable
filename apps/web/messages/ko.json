@@ -77,8 +77,8 @@
     "more": "전체",
     "approvalsPendingSr": "대기 {count}건",
     "approvalsPendingSrCapped": "대기 9건 이상",
-    "chatUnreadSr": "읽지 않음 {count}건",
-    "chatUnreadSrCapped": "읽지 않음 99건 이상"
+    "chatUnreadSr": "안읽음 {count}건",
+    "chatUnreadSrCapped": "안읽음 99건 이상"
   },
   "nav": {
     "dashboard": "대시보드",

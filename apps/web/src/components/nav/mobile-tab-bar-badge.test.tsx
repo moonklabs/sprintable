@@ -130,7 +130,7 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('채팅 unread 3건 — 접근성 이름이 «보이는 라벨+수»', async () => {
     await mount(0, 3);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('채팅 읽지 않음 3건');
+    expect(approxAccessibleName(chatLink)).toBe('채팅 안읽음 3건');
   });
 
   it('결재 대기 12건(시각 9+ 표기) — 접근성 이름엔 "9건 이상"(캡을 말로 반영, 시각 캡과 같은 뜻)', async () => {
@@ -144,7 +144,7 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('채팅 unread 150건(시각 99+ 표기) — 접근성 이름엔 "99건 이상"', async () => {
     await mount(0, 150);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('채팅 읽지 않음 99건 이상');
+    expect(approxAccessibleName(chatLink)).toBe('채팅 안읽음 99건 이상');
     const badge = container.querySelector('span[aria-hidden]');
     expect(badge?.textContent).toBe('99+');
   });

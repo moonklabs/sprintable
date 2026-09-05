@@ -511,12 +511,12 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     expect(button?.getAttribute('aria-label')).toBe('3 notifications');
   });
 
-  it('⭐[en] unreadCount=100(시각 99+) — "99+ notifications"(고정 문구, badgeLabel 문자열 안 새어듦)', async () => {
+  it('⭐[en] unreadCount=100(시각 99+) — "99 or more notifications"(고정 문구, badgeLabel 문자열 안 새어듦)', async () => {
     stubUnreadCount(100);
     await act(async () => { root.render(withIntl(<NotificationBell />, 'en')); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const button = container.querySelector('button[aria-label]');
-    expect(button?.getAttribute('aria-label')).toBe('99+ notifications');
+    expect(button?.getAttribute('aria-label')).toBe('99 or more notifications');
   });
 
   it('⭐색 계산 양성대조 — globals.css 실값으로 라이트·다크 둘 다 대비비 ≥4.5(WCAG AA)', async () => {

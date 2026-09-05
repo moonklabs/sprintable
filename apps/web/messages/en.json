@@ -76,7 +76,7 @@
     "chat": "Chat",
     "more": "More",
     "approvalsPendingSr": "{count, plural, one {# pending approval} other {# pending approvals}}",
-    "approvalsPendingSrCapped": "9+ pending approvals",
+    "approvalsPendingSrCapped": "9 or more pending approvals",
     "chatUnreadSr": "{count} unread",
     "chatUnreadSrCapped": "99 or more unread"
   },
@@ -2848,7 +2848,7 @@
     "emptySystem": "No system notifications",
     "daysAgo": "d ago",
     "bellAriaLabelCount": "{count, plural, one {# notification} other {# notifications}}",
-    "bellAriaLabelCountCapped": "99+ notifications",
+    "bellAriaLabelCountCapped": "99 or more notifications",
     "syncDegradedBanner": "Some older notifications may be missing — check the list below"
   },
   "invite": {
