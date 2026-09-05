@@ -1171,6 +1171,11 @@
       "file": "tests/test_3478_gate_scope_key.py",
       "sec": 40.0,
       "source": "story-3478-gate-scope-key(PR 개설 前 선제 등재 — 로컬 raw pytest 6.51s 실측치(4 tests)를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3475_publishing_metrics.py",
+      "sec": 121.0,
+      "source": "story-3475-publishing-metrics-api(PR 개설 前 선제 등재 — 로컬 raw pytest 11건 실측치(20.17s)를 CI 배율(~6x, story #3383) 보수적으로 반영한 121s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
