@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.channel_post_comment import ChannelPostComment, CommentCollectionSchedule
+from app.models.channel_post_comment import ChannelPostComment, ChannelPostCommentReply, CommentCollectionSchedule
 
 BATCH_SIZE = 50
 _COLLECTION_OFFSETS = (timedelta(hours=1), timedelta(days=1), timedelta(days=7))
@@ -419,10 +419,52 @@ async def list_comments_for_publication(
         )
     )).scalar_one()
 
+    # story #3516 조각②-b(additive, 미르코 3517② 그라운딩 갭 2026-09-06) —
+    # 댓글당 최신 답변 1건, 배치 조인 1회(N+1 X). ROW_NUMBER 윈도우로 comment_id별
+    # created_at 내림차순 1위만 남긴다(같은 댓글에 재상신 이력이 있어도 최신만).
+    latest_reply_by_comment_id = await _latest_reply_by_comment_ids(
+        db, comment_ids=[c.id for c in rows],
+    )
+
+    # 조각②-b 추가(유나 16회차) — comments_last_collected_at과 같은 계산 자리
+    # (바로 위 `last_captured_at`, refresh_comments_now의 rate-limit 판정과는
+    # 별개 축 — "지금 화면에 보여줄 마지막 수집 시각"을 그대로 재사용). null=지금
+    # 바로 재수집 가능, 값=그 시각까지 429.
+    comments_next_allowed_at: datetime | None = None
+    if last_captured_at is not None:
+        elapsed = datetime.now(timezone.utc) - last_captured_at
+        if elapsed < _REFRESH_MIN_INTERVAL:
+            comments_next_allowed_at = last_captured_at + _REFRESH_MIN_INTERVAL
+
     return {
         "last_collected_at": last_captured_at, "comments": rows,
         "active_count": active_count, "deleted_count": deleted_count,
+        "reply_by_comment_id": latest_reply_by_comment_id,
+        "comments_next_allowed_at": comments_next_allowed_at,
     }
+
+
+async def _latest_reply_by_comment_ids(
+    db: AsyncSession, *, comment_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, ChannelPostCommentReply]:
+    """댓글당 최신 답변 1건 배치 조회 — ROW_NUMBER 윈도우(파티션=comment_id, 정렬=
+    created_at 내림차순)로 1위만 남긴다. comment_ids 없으면 빈 dict(호출부가
+    `.get(comment_id)` → None="무응답")."""
+    if not comment_ids:
+        return {}
+    from sqlalchemy.orm import aliased
+
+    rn = func.row_number().over(
+        partition_by=ChannelPostCommentReply.comment_id, order_by=ChannelPostCommentReply.created_at.desc(),
+    ).label("rn")
+    subq = (
+        select(ChannelPostCommentReply, rn)
+        .where(ChannelPostCommentReply.comment_id.in_(comment_ids))
+        .subquery()
+    )
+    reply_alias = aliased(ChannelPostCommentReply, subq)
+    rows = (await db.execute(select(reply_alias).where(subq.c.rn == 1))).scalars().all()
+    return {reply.comment_id: reply for reply in rows}
 
 
 async def count_comments_by_publication_ids(

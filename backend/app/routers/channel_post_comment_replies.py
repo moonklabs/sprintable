@@ -84,9 +84,13 @@ class ReplyView(BaseModel):
     id: uuid.UUID
     comment_id: uuid.UUID
     text: str
-    # 'draft'|'pending'|'approved'|'sent'|'failed'(channel_post_comment.py 모델 docstring 그대로).
+    # 'draft'|'pending'|'sent'|'failed'(channel_post_comment.py 모델 docstring 그대로
+    # — 'approved'는 실전이 대입 0곳이라 문서에서 뺌, 조각②-b 후속 정정).
     status: str
     gate_id: uuid.UUID | None
+    # story #3516 조각②-b(additive, 후속 기록 갭 메움) — pending+command_id≠null=
+    # 「승인됨(발송 대기, 워커가 아직 안 집음)」, FE 칩은 이 필드 하나에서 파생.
+    command_id: uuid.UUID | None = None
     external_reply_id: str | None
     external_reply_url: str | None
     last_error: str | None
@@ -100,13 +104,22 @@ class ReplyView(BaseModel):
             "(deleted가 changed보다 우선)."
         ),
     )
+    target_text: str | None = Field(
+        default=None,
+        description=(
+            "조각②-b(additive) — 봉인 시점(submit) 대상 댓글 원문. null=아직 게이트가 "
+            "없다(draft)이거나 이 필드 추가 前에 submit된 구버전 게이트. 표시 전용 — "
+            "target_comment_state 판정은 여전히 target_text_sha256(비노출)만 쓴다."
+        ),
+    )
 
 
-def _reply_view(reply, target_comment_state: str | None) -> ReplyView:
+def _reply_view(reply, target_comment_state: str | None, target_text: str | None = None) -> ReplyView:
     return ReplyView(
         id=reply.id, comment_id=reply.comment_id, text=reply.text, status=reply.status, gate_id=reply.gate_id,
+        command_id=reply.command_id,
         external_reply_id=reply.external_reply_id, external_reply_url=reply.external_reply_url,
-        last_error=reply.last_error, target_comment_state=target_comment_state,
+        last_error=reply.last_error, target_comment_state=target_comment_state, target_text=target_text,
     )
 
 
@@ -194,7 +207,7 @@ async def submit_comment_reply_endpoint(
         ) from exc
 
     view = await get_comment_reply_view(db, org_id=org_id, reply_id=reply.id)
-    return _reply_view(view["reply"], view["target_comment_state"])
+    return _reply_view(view["reply"], view["target_comment_state"], view["target_text"])
 
 
 @router.get(
@@ -221,4 +234,4 @@ async def get_comment_reply_endpoint(
         view = await get_comment_reply_view(db, org_id=org_id, reply_id=reply_id)
     except CommentReplyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"답변을 찾을 수 없습니다: {reply_id}") from exc
-    return _reply_view(view["reply"], view["target_comment_state"])
+    return _reply_view(view["reply"], view["target_comment_state"], view["target_text"])

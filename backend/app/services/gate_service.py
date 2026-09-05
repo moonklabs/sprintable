@@ -947,11 +947,26 @@ async def _maybe_create_scheduled_publication_command(
 
         from app.services.publication_command import create_or_get_publication_command
 
-        await create_or_get_publication_command(
+        command, _created = await create_or_get_publication_command(
             session, org_id=gate.org_id, gate_id=gate.id, destination=connection_id,
             approved_version=reply_id, requested_by_member_id=resolver_id,
             scheduled_at=None, operation="reply", content_kind="comment_reply",
         )
+        # story #3516 조각②-b(additive, 미르코 3517② 그라운딩 갭 2026-09-06) —
+        # 이 컬럼은 조각②부터 모델에 있었지만 여기서 채운 적이 없어(FE가 "승인됨
+        # (발송 대기)"를 못 가르던 근본 원인) command 생성 직후 채운다. 멱등
+        # 재호출(이미 명령이 있어 `_created=False`)이어도 같은 값을 다시 대입할
+        # 뿐이라 무해 — reply 조회 실패는 승인 자체를 막지 않는다(warning만).
+        from app.models.channel_post_comment import ChannelPostCommentReply
+
+        reply = await session.get(ChannelPostCommentReply, reply_id)
+        if reply is not None:
+            reply.command_id = command.id
+        else:
+            logger.warning(
+                "gate %s(comment_reply) approved but reply %s not found — command_id not backfilled",
+                gate.id, reply_id,
+            )
         return
 
     def _mark_unresolved() -> None:

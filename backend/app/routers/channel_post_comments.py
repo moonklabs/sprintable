@@ -38,6 +38,15 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     return resolved
 
 
+class CommentReplySummary(BaseModel):
+    """조각②-b(additive) — 댓글당 최신 답변 1건 요약(배치 조인, N+1 X). FE 칩
+    (무응답/초안/상신/발송 대기/발행/실패)은 이 필드 하나에서 파생 — null=무응답."""
+    id: uuid.UUID
+    status: str
+    external_reply_url: str | None
+    command_id: uuid.UUID | None
+
+
 class CommentItem(BaseModel):
     id: uuid.UUID
     external_comment_id: str
@@ -46,6 +55,7 @@ class CommentItem(BaseModel):
     external_created_at: str | None
     captured_at: str
     deleted_at: str | None
+    reply: CommentReplySummary | None = None
 
 
 class CommentListResponse(BaseModel):
@@ -58,6 +68,10 @@ class CommentListResponse(BaseModel):
     # 완전히 같다(deleted_at IS NULL, count_comments_by_publication_ids 재사용).
     active_count: int
     deleted_count: int
+    # 조각②-b 추가(유나 16회차, additive) — publication당 refresh 5분 창의 다음
+    # 허용 시각. null=지금 바로 재수집 가능. last_collected_at과 같은 계산 자리
+    # (다른 세션이 누른 429 창을 로드 시점에 화면이 미리 알게 — 버튼 비활성+사유).
+    comments_next_allowed_at: str | None = None
 
 
 class CommentRefreshResponse(BaseModel):
@@ -90,6 +104,7 @@ async def list_publication_comments_endpoint(
     except CommentPublicationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"발행 기록을 찾을 수 없습니다: {publication_id}") from exc
 
+    reply_by_comment_id = result["reply_by_comment_id"]
     return CommentListResponse(
         last_collected_at=result["last_collected_at"].isoformat() if result["last_collected_at"] else None,
         comments=[
@@ -97,10 +112,21 @@ async def list_publication_comments_endpoint(
                 id=c.id, external_comment_id=c.external_comment_id, author_display_name=c.author_display_name,
                 text=c.text, external_created_at=c.external_created_at.isoformat() if c.external_created_at else None,
                 captured_at=c.captured_at.isoformat(), deleted_at=c.deleted_at.isoformat() if c.deleted_at else None,
+                reply=(
+                    CommentReplySummary(
+                        id=reply_by_comment_id[c.id].id, status=reply_by_comment_id[c.id].status,
+                        external_reply_url=reply_by_comment_id[c.id].external_reply_url,
+                        command_id=reply_by_comment_id[c.id].command_id,
+                    )
+                    if c.id in reply_by_comment_id else None
+                ),
             )
             for c in result["comments"]
         ],
         active_count=result["active_count"], deleted_count=result["deleted_count"],
+        comments_next_allowed_at=(
+            result["comments_next_allowed_at"].isoformat() if result["comments_next_allowed_at"] else None
+        ),
     )
 
 
