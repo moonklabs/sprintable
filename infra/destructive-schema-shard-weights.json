@@ -1083,6 +1083,11 @@
       "source": "story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)"
     },
     {
+      "file": "tests/test_3513_unpublish_absent_idempotent.py",
+      "sec": 90.0,
+      "source": "story-3513-unpublish-absent-idempotent(PR 개설 前 선제 등재 — 로컬 raw pytest 13.86s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_3419_cancel_unpublish.py",
       "sec": 31.0,
       "source": "story-3419-cancel-unpublish(CI shard(6) unweighted-guard 실측 31s, run 33847827818/job 100943850339, 2026-09-04 — PR#3774)"

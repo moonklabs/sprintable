@@ -1352,12 +1352,23 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     return row
 
 
-async def unpublish_site_post_external_command(db: AsyncSession, command: "PublicationCommand"):
+async def unpublish_site_post_external_command(
+    db: AsyncSession, command: "PublicationCommand",
+) -> tuple["ChannelPublication", str | None]:
     """워커의 site_post unpublish 분기 — `command.gate_id`+`approved_version`으로 원
     `channel_publications` 행(external_id 보유)을 되짚어 `wordpress_publish.unpublish()`
     를 친다(status=draft 전환, 비파괴). 성공 시 그 행 status="unpublished"(channel_
     publications 기존 3값 container_created|published|failed에 이 조각이 4번째 값을
-    보탠다 — CHECK 제약 없는 Text 컬럼이라 마이그 불요)."""
+    보탠다 — CHECK 제약 없는 Text 컬럼이라 마이그 불요).
+
+    story #3513(PO 실측 2026-09-05, A 회수 명령 5d4d1e2d) — 원격에 이미 없는 글(404/410)을
+    "일시적 provider 오류"(`_blog_publish_error_code`의 기본 분기)로 잘못 분류하면
+    영원히 재시도만 반복하다 dead_letter로 끝난다. 원격에서 사람이 먼저 지운 글도
+    회수는 "완료"여야 한다(멱등) — 여기서만 특별 취급하고 공유 함수(`_blog_publish_
+    error_code`, publish()도 쓴다)는 안 건드린다(publish 시점 404는 전혀 다른 의미
+    — "그런 사이트가 없다"는 실패다, 회수만의 축).
+    반환값 둘째 원소는 이 시도가 "이미 없었음"으로 끝났는지(호출부가 publication_
+    attempts.result_code에 기록·"completed"와 구분)."""
     from app.models.channel_publication import ChannelPublication
     from app.models.site_post_version import SitePostVersion
     from app.services.blog_destinations import get_blog_destination_module
@@ -1414,10 +1425,13 @@ async def unpublish_site_post_external_command(db: AsyncSession, command: "Publi
     except _BLOG_DESTINATION_INSECURE_ERRORS as exc:
         raise SitePostExternalPublishError(error_code="SITE_POST_DESTINATION_INSECURE", message=str(exc)) from exc
     except _BLOG_DESTINATION_PUBLISH_ERRORS as exc:
+        if getattr(exc, "status_code", None) in (404, 410):
+            row.status = "unpublished"
+            return row, "already_absent"
         raise SitePostExternalPublishError(error_code=_blog_publish_error_code(exc), message=str(exc)) from exc
 
     row.status = "unpublished"
-    return row
+    return row, None
 
 
 class SitePostPublicationInfo:

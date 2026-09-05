@@ -394,16 +394,22 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
     error_code: str | None = None
     last_error: str | None = None
     attempt_started_at = now
+    result_code = "completed"
     try:
         if command.operation == "unpublish":
-            await unpublish_site_post_external_command(db, command)
+            # story #3513 — 원격에 이미 없던(404/410) 회수는 "completed"와 구분되는
+            # result_code로 남긴다(already_absent). 게이트/커맨드 상태 전이는 동일
+            # (성공 경로 그대로) — 사람이 볼 원장에만 사유를 남긴다.
+            _row, note = await unpublish_site_post_external_command(db, command)
+            if note is not None:
+                result_code = note
         else:
             await publish_site_post_external_command(db, command)
         # story #3474 — 여기 도달했다는 것 자체가 site_posts.py의 신규 게이트
         # 재검증(status==approved·sealed sha 일치)을 통과했다는 뜻이다.
         await record_publication_attempt(
             db, command=command, approval_check="ok", adapter_called=True,
-            started_at=attempt_started_at, finished_at=now, result_code="completed",
+            started_at=attempt_started_at, finished_at=now, result_code=result_code,
         )
         command.status = "completed"
         command.last_error = None
