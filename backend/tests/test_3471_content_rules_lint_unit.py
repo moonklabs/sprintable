@@ -65,6 +65,10 @@ def test_lint_require_utm_missing_one_of_three_params():
     assert violations[0]["field"] == "link_url"
     assert "utm_campaign" in violations[0]["value"]
     assert "utm_source" not in violations[0]["value"]
+    # story #3546(PO 確定 2026-09-06) — message는 "직접 적어야" 프레이밍이어야
+    # 하고 "UTM이 없습니다"류 문구(자동 부착이 항상 되므로 사실과 다름)는 금지.
+    assert violations[0]["message"] == "utm_campaign를 링크에 직접 적어야 합니다."
+    assert "없습니다" not in violations[0]["message"]
 
 
 def test_lint_require_utm_all_three_present_passes():

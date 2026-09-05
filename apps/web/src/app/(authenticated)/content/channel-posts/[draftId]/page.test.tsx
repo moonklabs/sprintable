@@ -2650,11 +2650,11 @@ describe('ChannelPostEditPage — 콘텐츠 규칙 위반 표시(story #3472 2�
     expect(textViolation?.querySelector('a')).toBeNull();
   });
 
-  it('utm_missing — link_url 필드 아래에 UTM 3종 문구가 뜬다', async () => {
+  it('utm_missing — link_url 필드 아래에 「직접 적어야」 문구가 값(콤마→「·」재조인) 보간돼 뜬다(story #3546)', async () => {
     stubFetch({
       onSave: () => ({
         status: 201,
-        body: { violations: [{ code: 'utm_missing', field: 'link_url', value: 'https://x.example', hint_key: 'x', settings_path: '/organization/content-rules' }] },
+        body: { violations: [{ code: 'utm_missing', field: 'link_url', value: 'utm_source,utm_campaign', hint_key: 'x', settings_path: '/organization/content-rules' }] },
       }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2662,8 +2662,10 @@ describe('ChannelPostEditPage — 콘텐츠 규칙 위반 표시(story #3472 2�
     const saveBtn = container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement;
     await act(async () => { saveBtn.click(); });
     await flush();
+    const expectedHint = koMessages.content.contentRuleUtmMissingBlockedHint.replace('{value}', 'utm_source·utm_campaign');
     expect(container.querySelector('[data-testid="channel-post-rule-violation-link"]')?.textContent)
-      .toContain(koMessages.content.contentRuleUtmMissingBlockedHint);
+      .toContain(expectedHint);
+    expect(expectedHint).not.toContain('없습니다');
     expect(container.querySelector('[data-testid="channel-post-rule-violation-text"]')).toBeNull();
   });
 
@@ -2702,7 +2704,7 @@ describe('ChannelPostEditPage — 콘텐츠 규칙 위반 표시(story #3472 2�
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-rule-violation-link"]')?.textContent)
-      .toContain(koMessages.content.contentRuleUtmMissingBlockedHint);
+      .toContain(koMessages.content.contentRuleUtmMissingBlockedHint.replace('{value}', ''));
     // 일반 오류 배너(submitResult)로는 안 뜬다 — 같은 말을 두 번 안 한다.
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });

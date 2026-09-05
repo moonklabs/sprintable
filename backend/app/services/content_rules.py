@@ -140,9 +140,16 @@ def lint_content(rules: dict | None, *, text: str, link_url: str | None) -> list
     if rules.get("require_utm") and link_url and not utm_rules.get("enabled"):
         missing = [p for p in _REQUIRED_UTM_PARAMS if f"{p}=" not in link_url]
         if missing:
+            # 페드루 PO 確定(2026-09-06, story #3546) — 이 검사는 "링크에 UTM 3종을
+            # 사람이 손으로 적었는지"만 본다(발행 시점 자동 부착과 별개, UTM은
+            # 항상 붙는다 — "UTM이 없습니다"류 문구 금지). message는 그 사실을
+            # 그대로 서술("직접 적어야" 프레이밍) — FE contentRuleUtmMissingBlockedHint
+            # 와 같은 문장이나 이쪽은 API를 직접 두드리는 소비자(에이전트 키 등)를
+            # 위해 서버가 낸다.
             violations.append({
                 "code": "utm_missing", "field": "link_url", "value": ",".join(missing),
                 "hint_key": "content_rules.utm_missing", "settings_path": _SETTINGS_PATH,
+                "message": f"{'·'.join(missing)}를 링크에 직접 적어야 합니다.",
             })
 
     return violations
