@@ -899,8 +899,8 @@ export default function ChannelPostEditPage() {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as
-          { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string; publication_id?: string | null } } | null;
-        const { permalink, external_id, published_at, scheduled, scheduled_at, publication_id } = json?.data ?? {};
+          { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string; publication_id?: string | null; processing?: boolean } } | null;
+        const { permalink, external_id, published_at, scheduled, scheduled_at, publication_id, processing } = json?.data ?? {};
         // story #3414(PR#3769, 아직 리뷰중 — 계약은 그 PR 스키마 기준) — scheduled=true면
         // 이 요청은 command만 만들고 실제 발행은 워커가 나중에 한다. permalink/
         // published_at 셋 다 null인 게 정상이라, 그 null을 "발행됨"으로 그리면 안 된다
@@ -908,6 +908,22 @@ export default function ChannelPostEditPage() {
         // 축). scheduled 분기를 permalink 존재 분기보다 먼저 검사한다.
         if (scheduled) {
           setPublishResult({ type: 'scheduled', scheduledAt: scheduled_at });
+        } else if (processing) {
+          // story #3539(PO 確定 2026-09-06, §17-15와 같은 자리) — IMAGE 컨테이너가
+          // 비동기라 즉시 요청도 이 응답 시점엔 아직 안 끝났을 수 있다(620beefc AC5).
+          // permalink/published_at/publication_id 전부 null인 게 «정상»이지 실패가
+          // 아니다 — 실패 문구 0, draft.processing_kind='awaiting_container'만
+          // 병합해 기존 §17-15 오버레이(:1371 부근, GET 재조회로 서버가 이미 그릴
+          // 줄 아는 바로 그 얼굴)가 재로드 없이 같은 마운트에서 즉시 선다(3525와
+          // 같은 "즉시 반영" 클래스 — 새 문구 0). command_status도 'pending'으로
+          // 같이 병합한다 — BE가 이 응답을 내는 그 분기에서 command.status를 항상
+          // "pending"으로 세팅한다(channel_posts.py 실측, 구조적으로 보장) — 안
+          // 하면 blockedByCommandInFlight가 옛 값을 그대로 들고 있어 오버레이는
+          // "처리 中"이라면서 발행 버튼은 눌리는 이 스토리의 원 사고(사람이 다시
+          // 눌러 CHANNEL_PUBLISH_IN_PROGRESS로 꼬이는 것)가 그대로 재현된다(AC1
+          // "발행 버튼은 오버레이 규칙대로").
+          setPublishResult(null);
+          setDraft((prev) => prev && { ...prev, processing_kind: 'awaiting_container', command_status: 'pending' });
         } else if (permalink && published_at) {
           setPublishResult({ type: 'success' });
           // story #3525(PO 確定 ③) — publication_id도 permalink 등과 같은 병합 대상

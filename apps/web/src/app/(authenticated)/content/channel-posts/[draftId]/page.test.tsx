@@ -1257,6 +1257,42 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
   });
 
+  // story #3539(PO 確定 2026-09-06) — IG처럼 IMAGE 컨테이너가 비동기인 채널은 즉시
+  // 발행 요청도 응답 시점엔 안 끝나 있을 수 있다(processing:true, permalink 등
+  // 전부 null — 이게 «정상»이다·실패가 아니다). 예전엔 이 응답이 permalink&&
+  // published_at도 scheduled도 아니라서 그냥 else(실패)로 떨어졌다.
+  it('⭐#3539 — publish 응답 processing:true — 「발행 실패」 문구 0·§17-15 awaiting_container 오버레이가 재로드 없이 즉시 선다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 200, body: { version_id: 'v1', scheduled: false, processing: true } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-publish-result"]')).toBeNull();
+    expect(container.textContent).not.toContain(koMessages.content.publishFailed);
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).not.toBeNull();
+  });
+
+  it('⭐#3539 — processing:true 뒤 발행 버튼이 비활성으로 바뀐다(오버레이 규칙대로·다시 눌러 CHANNEL_PUBLISH_IN_PROGRESS로 꼬이는 것 방지)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 200, body: { version_id: 'v1', scheduled: false, processing: true } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+
+    expect(btn.disabled).toBe(true);
+  });
+
   // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG은 api-error.ts가 humanMessageKey를
   // 일부러 비워 두고 max_length/current_length만 실어 오는 코드다 — page.tsx가 doc §5
   // 표 그대로("500자 한도인데 517자입니다") 값을 실제로 보간해 조립하는지 pin한다.
