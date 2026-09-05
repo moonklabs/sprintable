@@ -10,6 +10,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { isCommentReplyGate } from '@/components/cage/gate-risk';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -178,7 +179,9 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
   const contentBody = realString(gate.sealed_content_body);
   const contentVersion = typeof gate.sealed_content_version === 'number' ? gate.sealed_content_version : null;
   const contentSha256 = realString(gate.sealed_content_sha256);
-  const isCommentReply = f?.['kind'] === 'comment_reply';
+  // story #3521(카디르 QA #3873 발견) — isCommentReplyGate(gate-risk.ts)와 판정을
+  // 한 벌로 통일(전엔 여기 인라인 kind==='comment_reply'가 별도 사본이었다).
+  const isCommentReply = isCommentReplyGate(gate);
   const facts: RecipeApprovalFacts = {
     workItemRef: parseReferenceToken(f?.['work_item_reference_token']),
     draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token']),
