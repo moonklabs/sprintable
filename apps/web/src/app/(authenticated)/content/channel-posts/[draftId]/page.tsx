@@ -156,6 +156,9 @@ interface ChannelConnectionInfo {
   image_formats: string[];
   image_max_bytes: number;
   image_aspect_max: number;
+  // story #3530(BE #3872이 어댑터·검증엔 이미 선언했으나 연결 응답엔 없던 갭) —
+  // 0=하한 미선언(§17-16 반대 방향, 1:∞로 뒤집지 않는다).
+  image_aspect_min: number;
   image_width_min: number;
   image_width_max: number;
   image_color_space: string;
@@ -175,6 +178,18 @@ type PublishingLimitState =
 // 금지 규율(lib/storage/format.ts 헤더 주석 "파일 크기 포맷은 재구현 금지 → formatFileSize
 // (file-node.tsx) 재사용")까지 어기고 있었다. 그 헬퍼로 교체 — B/KB/MB 자동 스케일.
 
+// story #3530(유나 §17-16④, PO 確定 2026-09-06) — 규격 태그의 비율 경계 표기.
+// 지금 태그 형(「비율 최대 {n}:1」)을 그대로 늘린다: ≥1이면 "{n}:1", <1이면
+// "1:{1/값}"(소수 둘째 자리, 끝 0 제거 — 4:5 같은 홍보 표기를 흉내 X). toFixed(2)로
+// 부동소수 오차(1/0.1===9.999999999999998 등)를 흡수한 뒤 자른다.
+function formatAspectBound(value: number): string {
+  if (value >= 1) return `${trimTrailingZero(value)}:1`;
+  return `1:${trimTrailingZero(1 / value)}`;
+}
+function trimTrailingZero(n: number): string {
+  return n.toFixed(2).replace(/\.?0+$/, '');
+}
+
 // story #3428(T3-M·§13 3요소: 무엇이·얼마까지·지금 얼마) — CHANNEL_IMAGE_* 422/413의
 // 부가 필드를 사람 말로 조립한다. api-error.ts는 labelKey를 일부러 비워 뒀다(kind별로
 // 실리는 필드 집합이 달라 화면이 조립해야 한다 — CHANNEL_TEXT_TOO_LONG과 동형 관례).
@@ -191,9 +206,24 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
         sizeBytes: typeof info.imageSizeBytes === 'number' ? formatFileSize(info.imageSizeBytes) : '',
       });
     case 'image_aspect_ratio_exceeded':
+      // story #3530 REQUIRED 2(유나 Design 변경요청 3건, PO 채택 2026-09-06) —
+      // ① 이 갈래도 formatAspectBound로(전엔 toFixed(1)라 IG 1.91이 「1.9」로 태그
+      // 「1.91:1」과 다른 수였다). ③ Threads류(min=0, 정규화 비율이라 방향을 모른다)는
+      // 방향 있는 문구("가로가 너무 깁니다" 류) 금지 — 값을 아는 하한 갈래만 방향을
+      // 말한다(too_narrow의 "세로가 너무 깁니다.").
       return t('channelPostsImageAspectRatioExceeded', {
-        maxAspectRatio: info.imageMaxAspectRatio?.toFixed(1) ?? '',
-        aspectRatio: info.imageAspectRatio?.toFixed(2) ?? '',
+        maxAspectRatio: typeof info.imageMaxAspectRatio === 'number' ? formatAspectBound(info.imageMaxAspectRatio) : '',
+        aspectRatio: typeof info.imageAspectRatio === 'number' ? formatAspectBound(info.imageAspectRatio) : '',
+      });
+    case 'image_aspect_ratio_too_narrow':
+      // story #3530 REQUIRED 1(PO 재대조 2026-09-06) — 하한 미달(세로가 너무 긴
+      // 이미지). BE 필드명은 width_height_ratio/min_width_height_ratio(exceeded의
+      // 정규화 aspect_ratio와 다른 값 — 섞지 않는다). 두 값 다 규격 태그와 같은
+      // formatAspectBound로 — 태그가 「1:1.25」라고 말하는데 이 문장이 「0.8」이라고
+      // 말하면 같은 수를 다른 형으로 두 번 지어내는 사고.
+      return t('channelPostsImageAspectRatioTooNarrow', {
+        minAspectRatio: typeof info.imageMinWidthHeightRatio === 'number' ? formatAspectBound(info.imageMinWidthHeightRatio) : '',
+        aspectRatio: typeof info.imageWidthHeightRatio === 'number' ? formatAspectBound(info.imageWidthHeightRatio) : '',
       });
     case 'image_conversion_failed':
       return t('channelPostsImageConversionFailed', {
@@ -380,6 +410,10 @@ export default function ChannelPostEditPage() {
   const [imageSpec, setImageSpec] = useState<
     | {
         maxCount: number; formats: string[]; maxBytes: number; aspectMax: number;
+        // story #3530(BE #3872이 어댑터·검증엔 이미 선언했으나 연결 응답엔 없던
+        // 갭) — 0=하한 미선언(§17-16 규율의 반대 방향: 0을 1:∞로 뒤집지 않는다,
+        // 태그가 이 값을 아예 안 그린다).
+        aspectMin: number;
         widthMin: number; widthMax: number; colorSpace: string;
       }
     | undefined
@@ -510,7 +544,8 @@ export default function ChannelPostEditPage() {
             if (conn) {
               setImageSpec({
                 maxCount: conn.image_max_count, formats: conn.image_formats, maxBytes: conn.image_max_bytes,
-                aspectMax: conn.image_aspect_max, widthMin: conn.image_width_min, widthMax: conn.image_width_max,
+                aspectMax: conn.image_aspect_max, aspectMin: conn.image_aspect_min,
+                widthMin: conn.image_width_min, widthMax: conn.image_width_max,
                 // N(페드루 PO, 2026-09-04 13:27Z) — connection 응답에서 이미 읽던 필드가
                 // imageSpec에 안 실려 규격 태그에 한 번도 안 나온 갭.
                 colorSpace: conn.image_color_space,
@@ -1670,16 +1705,29 @@ export default function ChannelPostEditPage() {
             <span className="text-muted-foreground">{t('channelPostsImageAttachLabel')}</span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-image-spec-tag">
-            {t('channelPostsImageSpecTag', {
-              formats: imageSpec.formats.map((f) => f.replace('image/', '').toUpperCase()).join(', '),
-              maxBytes: formatFileSize(imageSpec.maxBytes),
-              aspectMax: imageSpec.aspectMax,
-              widthMin: imageSpec.widthMin,
-              widthMax: imageSpec.widthMax,
-              // N(페드루 PO, 2026-09-04 13:27Z) — 연결 응답에서 이미 읽던 image_color_space가
-              // imageSpec까지만 오고 화면엔 한 번도 안 실렸던 갭.
-              colorSpace: imageSpec.colorSpace,
-            })}
+            {/* story #3530(유나 §17-16④, PO 確定 2026-09-06) — aspectMin>0(선언
+                있음)일 때만 두 경계를 보인다. 0(미선언)이면 지금처럼 최대만 —
+                0을 1:∞로 뒤집지 않는다. */}
+            {imageSpec.aspectMin > 0
+              ? t('channelPostsImageSpecTagWithMin', {
+                  formats: imageSpec.formats.map((f) => f.replace('image/', '').toUpperCase()).join(', '),
+                  maxBytes: formatFileSize(imageSpec.maxBytes),
+                  aspectMinDisplay: formatAspectBound(imageSpec.aspectMin),
+                  aspectMaxDisplay: formatAspectBound(imageSpec.aspectMax),
+                  widthMin: imageSpec.widthMin,
+                  widthMax: imageSpec.widthMax,
+                  colorSpace: imageSpec.colorSpace,
+                })
+              : t('channelPostsImageSpecTag', {
+                  formats: imageSpec.formats.map((f) => f.replace('image/', '').toUpperCase()).join(', '),
+                  maxBytes: formatFileSize(imageSpec.maxBytes),
+                  aspectMax: imageSpec.aspectMax,
+                  widthMin: imageSpec.widthMin,
+                  widthMax: imageSpec.widthMax,
+                  // N(페드루 PO, 2026-09-04 13:27Z) — 연결 응답에서 이미 읽던 image_color_space가
+                  // imageSpec까지만 오고 화면엔 한 번도 안 실렸던 갭.
+                  colorSpace: imageSpec.colorSpace,
+                })}
           </p>
           {draft.thumbnail_url ? (
             <div className="space-y-1">

@@ -320,6 +320,17 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
         expect(result.imageMaxAspectRatio).toBe(10.0);
       });
 
+      test('CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW(422) — width_height_ratio/min_width_height_ratio 보존(exceeded의 정규화 aspect_ratio와 별개 필드)', () => {
+        const result = parseSitePostApiError({
+          error: { code: 'CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW', message: '…', width_height_ratio: 0.4, min_width_height_ratio: 0.8 },
+        });
+        expect(result.kind).toBe('image_aspect_ratio_too_narrow');
+        expect(result.imageWidthHeightRatio).toBe(0.4);
+        expect(result.imageMinWidthHeightRatio).toBe(0.8);
+        expect(result.imageAspectRatio).toBeUndefined();
+        expect(result.imageMaxAspectRatio).toBeUndefined();
+      });
+
       test('CHANNEL_IMAGE_CONVERSION_FAILED(422) — final_bytes/max_bytes 보존', () => {
         const result = parseSitePostApiError({ error: { code: 'CHANNEL_IMAGE_CONVERSION_FAILED', message: '…', final_bytes: 9000000, max_bytes: 8388608 } });
         expect(result.kind).toBe('image_conversion_failed');
@@ -333,14 +344,15 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
         expect(result.humanMessageKey).toBe('errorChannelImageUploadFailed');
       });
 
-      test('9종 전부 서로 다른 kind — unknown으로 조용히 안 떨어진다', () => {
+      test('10종 전부 서로 다른 kind — unknown으로 조용히 안 떨어진다(story #3530이 too_narrow 추가)', () => {
         const codes = [
           'CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED', 'CHANNEL_IMAGE_UNSUPPORTED', 'CHANNEL_IMAGE_UNSUPPORTED_FORMAT',
           'CHANNEL_IMAGE_TOO_LARGE', 'CHANNEL_IMAGE_UNDECODABLE', 'CHANNEL_IMAGE_ANIMATED_UNSUPPORTED',
-          'CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED', 'CHANNEL_IMAGE_CONVERSION_FAILED', 'CHANNEL_IMAGE_UPLOAD_FAILED',
+          'CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED', 'CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW',
+          'CHANNEL_IMAGE_CONVERSION_FAILED', 'CHANNEL_IMAGE_UPLOAD_FAILED',
         ];
         const kinds = codes.map((code) => parseSitePostApiError({ error: { code, message: '…' } }).kind);
-        expect(new Set(kinds).size).toBe(9);
+        expect(new Set(kinds).size).toBe(10);
         expect(kinds).not.toContain('unknown');
       });
     });

@@ -209,6 +209,17 @@ def _png_bytes(width: int, height: int, *, mode: str = "RGB", color=(200, 50, 80
     return buf.getvalue()
 
 
+# story #3530 — instagram 어댑터는 image_formats=("image/jpeg",)뿐(PNG 미지원) —
+# instagram 하한(image_aspect_min) 검증 테스트는 이 헬퍼로 실 JPEG를 만들어야 한다.
+def _jpeg_bytes(width: int, height: int, *, color=(200, 50, 80)) -> bytes:
+    from PIL import Image
+
+    img = Image.new("RGB", (width, height), color=color)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
 def _animated_gif_bytes() -> bytes:
     from PIL import Image
 
@@ -381,6 +392,87 @@ async def test_upload_aspect_ratio_exceeded_returns_422():
         error = r.json().get("error") or r.json()
         assert error["code"] == "CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED"
         assert error["max_aspect_ratio"] == 10.0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# story #3530(BE #3872이 어댑터·검증엔 이미 심어 둔 하한(image_aspect_min)의 경계
+# 테스트 3개 — instagram(4:5=0.8~1.91:1) 전용, PO 確定 "포함/배제 일치: 상한
+# ratio > max(1.91 통과)와 짝으로 하한 ratio < min(0.8 통과)").
+@pytest.mark.anyio
+async def test_upload_aspect_ratio_too_narrow_returns_422():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            raw = _jpeg_bytes(400, 1000)  # width/height 0.4 < 하한 0.8
+            r = await _upload_and_confirm(client, org_id, draft_id, raw, content_type="image/jpeg")
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW"
+        assert error["min_width_height_ratio"] == 0.8
+        assert error["width_height_ratio"] == pytest.approx(0.4)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_upload_aspect_ratio_min_boundary_passes():
+    """경계값(width/height == image_aspect_min 정확히)은 거부되지 않는다 — 검증이
+    `<`(strict)이지 `<=`가 아니어야 한다(PO 「0.8 통과」 확定)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            raw = _jpeg_bytes(400, 500)  # width/height 정확히 0.8
+            r = await _upload_and_confirm(client, org_id, draft_id, raw, content_type="image/jpeg")
+        assert r.status_code == 201, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_upload_aspect_ratio_max_boundary_passes_for_orientation_aware_channel():
+    """instagram(orientation-aware 분기, width/height 원시 비율)도 상한 경계값
+    (== image_aspect_max 정확히)은 거부되지 않는다 — 정규화 분기(else 절)만 검증
+    하던 회귀를 orientation-aware 분기까지 확장."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            raw = _jpeg_bytes(955, 500)  # width/height 정확히 1.91
+            r = await _upload_and_confirm(client, org_id, draft_id, raw, content_type="image/jpeg")
+        assert r.status_code == 201, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -1111,10 +1203,38 @@ async def test_connection_response_exposes_threads_image_spec():
         assert row["image_formats"] == ["image/jpeg", "image/png"]
         assert row["image_max_bytes"] == 8 * 1024 * 1024
         assert row["image_aspect_max"] == 10.0
+        # story #3530 — Threads는 하한 미선언(회귀 0, 0.0=«선언 안 함»).
+        assert row["image_aspect_min"] == 0.0
         assert row["image_width_min"] == 320
         assert row["image_width_max"] == 1440
         assert row["image_color_space"] == "sRGB"
         assert row["image_max_count"] == 1
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# story #3530(BE #3872이 어댑터엔 이미 선언했으나 연결 응답엔 안 실었던 갭) —
+# instagram은 하한(0.8)이 실제로 응답에 실려야 에디터가 「비율 1:1.25 ~ 1.91:1」
+# 태그를 그릴 수 있다.
+@pytest.mark.anyio
+async def test_connection_response_exposes_instagram_aspect_min():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            await _seed_connection(s, org_id, channel="instagram")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+        assert r.status_code == 200, r.text
+        row = r.json()[0]
+        assert row["image_aspect_min"] == 0.8
+        assert row["image_aspect_max"] == 1.91
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
