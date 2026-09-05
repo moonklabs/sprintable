@@ -11,6 +11,10 @@ ORG_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
 CALLER_ID = uuid.uuid4()
 MEMBER_ID = uuid.uuid4()
+# story #3491(페드루 PO 확認, PR#3840 CI 회귀) — caller의 org_member 행 id는
+# target(MEMBER_ID)과 별개다(test_org_members.py::_mock_member와 동일 처방 —
+# 둘 다 MEMBER_ID로 겹치면 owner 보호 가드의 자기 자신 판정이 거짓양성으로 뜬다).
+CALLER_MEMBER_ROW_ID = uuid.uuid4()
 
 
 @pytest.fixture
@@ -82,9 +86,9 @@ def _make_user(login_fail_count: int = 0, login_locked_until=None) -> MagicMock:
     return u
 
 
-def _make_member(role: str = "member") -> MagicMock:
+def _make_member(role: str = "member", id: uuid.UUID | None = None) -> MagicMock:
     m = MagicMock()
-    m.id = MEMBER_ID
+    m.id = id or MEMBER_ID
     m.org_id = ORG_ID
     m.user_id = USER_ID
     m.role = role
@@ -211,40 +215,29 @@ async def test_2fa_enable_writes_audit_log():
 @pytest.mark.anyio
 async def test_role_change_revokes_refresh_tokens():
     """role 변경 시 해당 user의 refresh token이 revoke됨 (session.execute UPDATE)."""
-    from app.models.user import RefreshToken
     client, session, app = await _org_client()
     try:
-        caller = _make_member(role="admin")
+        # story #3491(페드루 PO 확認, PR#3840 CI 회귀) — 이 테스트는 원래 raw
+        # session.execute 호출 "순서"를 세어 get_by_user/get/update 응답을 갈아
+        # 끼웠다. update_org_member가 owner 보호 가드를 위해 get_by_user를 한 번
+        # 더 부르면서(caller 재조회) 그 순서 번호가 밀려, 두 번째 get_by_user
+        # 호출이 "revoke UPDATE" 자리의 응답(사실상 member 자신)을 caller로
+        # 잘못 받아 «자기 행» 오판(403)으로 떨어졌다 — 실제로는 caller/target이
+        # 다른 사람인데 카운터 밀림이 같은 사람으로 보이게 만든 것.
+        # 처방 — get_by_user/get/update를 각각 명시로 patch(메서드 단위, 호출
+        # 순서에 의존하지 않는다). session.execute는 이제 revoke UPDATE 이 한
+        # 자리에만 남는다.
+        caller = _make_member(role="admin", id=CALLER_MEMBER_ROW_ID)
         caller.user_id = CALLER_ID
         member = _make_member(role="member")
         updated = _make_member(role="admin")
 
-        def execute_side_effect(stmt):
-            r = MagicMock()
-            r.scalar_one_or_none.return_value = None
-            return r
+        session.execute = AsyncMock(return_value=MagicMock(rowcount=1))
 
-        # get_by_user(CALLER_ID) → caller, get(MEMBER_ID) → member, update(MEMBER_ID) → updated
-        call_count = 0
-
-        async def async_execute(stmt):
-            nonlocal call_count
-            call_count += 1
-            r = MagicMock()
-            if call_count == 1:  # get_by_user for caller auth
-                r.scalar_one_or_none.return_value = caller
-            elif call_count == 2:  # get existing member
-                r.scalar_one_or_none.return_value = member
-            elif call_count == 3:  # revoke refresh tokens
-                r.rowcount = 1
-            else:  # update
-                r.scalar_one_or_none.return_value = updated
-            return r
-
-        session.execute = async_execute
-
-        with patch("app.routers.org_members.OrgMemberRepository.get") as mock_get, \
+        with patch("app.routers.org_members.OrgMemberRepository.get_by_user", new_callable=AsyncMock) as mock_gbu, \
+             patch("app.routers.org_members.OrgMemberRepository.get") as mock_get, \
              patch("app.routers.org_members.OrgMemberRepository.update", new_callable=AsyncMock) as mock_update:
+            mock_gbu.return_value = caller
             mock_get.return_value = member
             mock_update.return_value = updated
 
@@ -256,9 +249,8 @@ async def test_role_change_revokes_refresh_tokens():
                 )
 
         assert resp.status_code == 200
-
-        # session.execute가 RefreshToken UPDATE를 포함해 호출됐는지 확인
-        # (mock_update patch 때문에 session.execute 직접 호출이 안 됨 → execute_calls 통해 확인)
+        # session.execute가 RefreshToken UPDATE(revoke)를 위해 호출됨.
+        session.execute.assert_called()
         # 핵심 검증: mock_get은 role change 감지를 위해 호출됨
         mock_get.assert_called_once_with(MEMBER_ID)
     finally:
