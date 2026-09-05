@@ -5078,6 +5078,7 @@
     "brandKitFontsPlaceholder": "폰트 이름 입력 후 Enter",
     "contentRulesAdvisoryNotice": "아래 항목은 에이전트가 초안을 쓸 때 참고합니다. 발행을 막지는 않습니다.",
     "contentRulesNotSetLabel": "안 정함",
+    "removeItemAction": "{item} 제거",
     "brandKitLogoPreviewAlt": "브랜드 킷 로고 미리보기",
     "brandKitLogoLoadFailed": "불러오지 못했습니다.",
     "generationBudgetSectionTitle": "생성 비용 한도",

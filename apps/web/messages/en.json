@@ -5078,6 +5078,7 @@
     "brandKitFontsPlaceholder": "Type a font name and press Enter",
     "contentRulesAdvisoryNotice": "The items below are used by agents as a reference when drafting. They don't block publishing.",
     "contentRulesNotSetLabel": "Not set",
+    "removeItemAction": "Remove {item}",
     "brandKitLogoPreviewAlt": "Brand kit logo preview",
     "brandKitLogoLoadFailed": "Couldn't load this image.",
     "generationBudgetSectionTitle": "Generation cost budget",

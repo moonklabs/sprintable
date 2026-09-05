@@ -231,6 +231,20 @@ describe('ContentRulesPage — 편집·저장(story #3472 계속)', () => {
   });
 });
 
+// story #3436 묶음11(페드루 PO 지적, 2026-09-06) — TagChip 제거 버튼의 접근성
+// 이름이 하드코딩 영문(`Remove ${item}`)이라 한국어 화면에서도 스크린리더가
+// 영어로 읽었다. §17-20 낱말 축과 같은 클래스(dep.remove 선례와 동형 형태).
+describe('ContentRulesPage — 태그 제거 버튼 접근성 이름(story #3436 묶음11)', () => {
+  it('제거 버튼 aria-label이 한국어 「{item} 제거」다(하드코딩 영문 회귀 방지)', async () => {
+    stubFetch({});
+    await mount('owner');
+    const editor = container.querySelector('[data-testid="content-rules-banned-terms-editor"]')!;
+    const removeBtn = editor.querySelector('button[aria-label]') as HTMLButtonElement;
+    expect(removeBtn.getAttribute('aria-label')).toBe('무료체험 제거');
+    expect(removeBtn.getAttribute('aria-label')).not.toContain('Remove');
+  });
+});
+
 describe('ContentRulesPage — 저장(story #3472 AC1)', () => {
   it('⭐owner가 금칙어를 추가하고 저장하면 새 버전이 반영된다', async () => {
     stubFetch({});
