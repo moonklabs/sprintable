@@ -49,6 +49,17 @@ class OrgMemberRepository:
             .where(OrgMember.org_id == self.org_id, OrgMember.id == id)
             .values(**data)
         )
+        if "role" in data:
+            # story #3510 — 0075 ID 보존 불변식(members.id == org_member.id, 휴먼)으로
+            # 앵커(members.org_role)를 같은 트랜잭션에 동기화한다. members 행이 아직 없는
+            # grant-only 휴먼(members-sync 갭)이면 0행 UPDATE로 조용히 no-op(anchor 리졸버가
+            # org_members 폴백으로 흡수, member_resolver.py 참고) — 별도 존재 확인 불필요.
+            from app.models.member import Member
+            await self.session.execute(
+                update(Member)
+                .where(Member.id == id, Member.type == "human")
+                .values(org_role=data["role"])
+            )
         return await self.get(id)
 
     async def soft_delete(self, id: uuid.UUID) -> bool:
