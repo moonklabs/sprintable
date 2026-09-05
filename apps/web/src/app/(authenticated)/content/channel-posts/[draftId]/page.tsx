@@ -21,6 +21,8 @@ import { deriveFailureAction, type CommandStatus } from '@/components/content/fa
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
+import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 // story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
@@ -229,6 +231,24 @@ export default function ChannelPostEditPage() {
     { canUnpublish: boolean; blockedReason: 'unsupported' | 'scope_insufficient' | null; connectionStatus: ChannelConnectionInfo['status'] } | undefined
   >(undefined);
   const [limit, setLimit] = useState<PublishingLimitState>({ status: 'loading' });
+  // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 생성 비용
+  // 한도 잔량(별도 non-blocking 왕복, limit과 동형 원칙)·상신 시 실을 예상 비용
+  // 입력(선택, 문자열 상태 — 빈 문자열=body에 안 실음).
+  const [genBudget, setGenBudget] = useState<GenerationBudgetState>({ status: 'loading' });
+  const [estimatedCostInput, setEstimatedCostInput] = useState('');
+  // doc a0da40c9 §19-8 — 422 배너는 별도 state(구조화된 4값+통화)로 렌더한다. submitResult
+  // (일반 오류 배너)와 다른 자리 — 이 배너는 label+value 두 칸 목록이라 문자열 하나로
+  // 뭉치면 §19-8이 요구하는 구조를 못 그린다.
+  const [genBudgetExceeded, setGenBudgetExceeded] = useState<
+    { limitMinor: number; spentMinor: number; estimatedCostMinor: number; remainingMinor: number; currency: GenerationBudgetCurrency } | null
+  >(null);
+  // PO REQUIRED②(2026-09-05, PR#3848 리뷰) — `currency ?? 'KRW'` 조립 제거(site_post
+  // 상세와 동형 처방, generation-budget-indicator.tsx 참조).
+  const generationBudgetUsable =
+    genBudget.status === 'ok' && genBudget.limitMinor !== null && genBudget.currency !== null
+    && genBudget.remainingMinor !== null && genBudget.spentMinor !== null;
+  const generationBudgetCurrency: GenerationBudgetCurrency | null =
+    genBudget.status === 'ok' ? genBudget.currency : null;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -402,6 +422,32 @@ export default function ChannelPostEditPage() {
     };
   }, [orgId, draftId]);
 
+  // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 잔량은
+  // 규칙과 별개 왕복(draft/versions 로드를 막지 않는다, `limit`과 동형 원칙).
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/generation-budget`)
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) { setGenBudget({ status: 'failed' }); return; }
+        const json = (await r.json().catch(() => null)) as
+          | { data?: { limit_minor: number | null; spent_minor: number | null; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
+          | null;
+        if (!json?.data) { setGenBudget({ status: 'failed' }); return; }
+        setGenBudget({
+          status: 'ok',
+          limitMinor: json.data.limit_minor,
+          spentMinor: json.data.spent_minor,
+          remainingMinor: json.data.remaining_minor,
+          currency: json.data.currency,
+          period: json.data.period,
+        });
+      })
+      .catch(() => { if (!cancelled) setGenBudget({ status: 'failed' }); });
+    return () => { cancelled = true; };
+  }, [orgId]);
+
   const textLength = channelTextLength(text);
   // AC6 — 한도 미선언(null)이면 초과 판정 자체를 안 한다(지어내지 않는다, 상신은 막지 않음).
   const isOverLimit = typeof maxTextLength === 'number' && textLength > maxTextLength;
@@ -462,11 +508,24 @@ export default function ChannelPostEditPage() {
     if (scheduledAt) setScheduleServerError(null);
     setSubmitting(true);
     setSubmitResult(null);
+    setGenBudgetExceeded(null);
     try {
+      // story #3500 — estimated_cost_minor는 값을 입력했을 때만 body에 실린다(빈
+      // 문자열=선택 안 함, scheduled_at과 동형 조건부 포함 관례).
+      const submitBody: { version_id: string; scheduled_at?: string; estimated_cost_minor?: number } = {
+        version_id: latest.version_id,
+      };
+      if (scheduledAt) submitBody.scheduled_at = scheduledAt;
+      // §19-1 — 입력은 큰단위(major), 서버로는 분단위(minor)만 보낸다. 변환은
+      // generation-budget-indicator.tsx::majorToMinor 한 곳에서만. currency가
+      // null이면 입력 자체가 안 그려져 이 값이 채워질 수 없다 — 방어적 재확認.
+      if (estimatedCostInput !== '' && generationBudgetCurrency !== null) {
+        submitBody.estimated_cost_minor = majorToMinor(Number(estimatedCostInput), generationBudgetCurrency);
+      }
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(scheduledAt ? { version_id: latest.version_id, scheduled_at: scheduledAt } : { version_id: latest.version_id }),
+        body: JSON.stringify(submitBody),
       });
       if (res.ok) {
         if (scheduledAt) setScheduleDialogOpen(false);
@@ -530,6 +589,24 @@ export default function ChannelPostEditPage() {
             text: holdingLabel,
             raw: info.raw,
             heldByDraftId: holdingDraftId,
+          });
+        } else if (
+          info.kind === 'generation_budget_exceeded'
+          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+          // PO REQUIRED②(2026-09-05) — 422 detail엔 currency가 없다(4값뿐). genBudget
+          // GET이 실패/불완전(null)이면 통화를 모른 채 그릴 수 없어 구조화 배너를
+          // 접고 일반 에러 문구로 폴백한다('KRW' 추정 안 함).
+          && generationBudgetCurrency !== null
+        ) {
+          // doc a0da40c9 §19-8(디자인 유나 確定) — 전용 구조화 배너(사실 문장→4값
+          // 두 칸 목록→행동 문장, generic submitResult 텍스트 배너와 다른 자리).
+          // 입력값은 지우지 않는다(ScheduleAtDialog의 "서버 오류 시 입력 유지" 관례와
+          // 동형 — 사람이 다시 타이핑하지 않아도 되게).
+          setGenBudgetExceeded({
+            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+            currency: generationBudgetCurrency,
           });
         } else {
           setSubmitResult({
@@ -1507,6 +1584,35 @@ export default function ChannelPostEditPage() {
         </Alert>
       ) : null}
 
+      {/* doc a0da40c9 §19-7(디자인 유나 確定 2026-09-05) — 상신 버튼 «위» 자체 줄(옆
+          아님 — 선택 입력을 버튼 옆에 두면 필수처럼 보이고, 버튼 라벨이 좁은 화면에서
+          깨진다). 별도 다이얼로그가 아닌 plain input(그라운딩 확認 — 이 코드베이스에
+          MoneyInput류 0건, ScheduleAtDialog는 datetime 전용). 통화는 조직 정책값을
+          라벨로만 보이고 피커는 없다(§19-7). 입력/변환은 큰단위(major) — §19-1. */}
+      {/* PO REQUIRED②(2026-09-05) — 입력은 generationBudgetUsable일 때만(통화를 모르는
+          채 숫자를 입력받지 않는다). GenerationBudgetIndicator는 항상 그린다 — 그
+          컴포넌트가 loading/failed/정책없음/정상을 이미 스스로 갈라 보여준다. */}
+      <div className="flex items-center gap-2">
+        {generationBudgetUsable ? (
+          <>
+            <label htmlFor="channel-post-estimated-cost" className="text-xs text-muted-foreground">
+              {t('generationBudgetEstimatedCostLabel')}
+            </label>
+            <input
+              id="channel-post-estimated-cost"
+              type="number"
+              min={0}
+              step={1}
+              value={estimatedCostInput}
+              onChange={(e) => setEstimatedCostInput(e.target.value)}
+              className="w-28 rounded-md border border-border bg-background px-2 py-1 text-sm"
+              data-testid="channel-post-estimated-cost-input"
+            />
+            <span className="text-xs text-muted-foreground">{generationBudgetCurrency}</span>
+          </>
+        ) : null}
+        <GenerationBudgetIndicator state={genBudget} variant="compact" />
+      </div>
       <div className="flex gap-2">
         <Button onClick={handleSave} disabled={saving || imageUploadInProgress} data-testid="channel-post-save-button">
           {saving ? t('editSavingCta') : t('editSaveCta')}
@@ -1564,6 +1670,16 @@ export default function ChannelPostEditPage() {
             link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
           })}
         </p>
+      ) : null}
+
+      {genBudgetExceeded ? (
+        <GenerationBudgetExceededBanner
+          limitMinor={genBudgetExceeded.limitMinor}
+          spentMinor={genBudgetExceeded.spentMinor}
+          estimatedCostMinor={genBudgetExceeded.estimatedCostMinor}
+          remainingMinor={genBudgetExceeded.remainingMinor}
+          currency={genBudgetExceeded.currency}
+        />
       ) : null}
 
       {submitResult ? (

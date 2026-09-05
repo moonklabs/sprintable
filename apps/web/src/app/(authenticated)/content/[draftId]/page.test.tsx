@@ -119,6 +119,8 @@ function stubFetchWithVersions(
     onCreateCampaign?: (body: unknown) => { status: number; body: unknown };
     // PATCH .../campaign(버전 0·게이트 무접촉 — 유나 정적 판정 뒤 저장 POST에서 전환).
     onPatchCampaign?: (body: unknown) => { status: number; body: unknown };
+    // story #3500(BE #3498, 미착지) — 잔량 조회(기본=정책 미설정).
+    genBudget?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' };
   },
 ) {
   vi.stubGlobal(
@@ -127,6 +129,10 @@ function stubFetchWithVersions(
       const url = String(input);
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/generation-budget`) {
+        const budget = opts?.genBudget ?? { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' as const };
+        return { ok: true, status: 200, json: async () => ({ data: budget, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/variants`) {
         return { ok: true, status: 200, json: async () => ({ data: opts?.variants ?? [], error: null, meta: null }) };
@@ -1614,5 +1620,110 @@ describe('ContentPostEditPage — 성과 인사이트 블록(story #3499, BE #38
     await flush();
 
     expect(container.querySelector('[data-testid="content-insight-info"]')).not.toBeNull();
+  });
+});
+
+describe('ContentPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9 §19 — BE #3498 미착지, 계약 fixture)', () => {
+  it('예상 비용을 입력하지 않으면 submit body에 estimated_cost_minor가 없다', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, (body) => {
+      capturedBody = body as Record<string, unknown>;
+      return { status: 200, body: { gate_id: 'gate-1' } };
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capturedBody?.estimated_cost_minor).toBeUndefined();
+  });
+
+  it('⭐예상 비용을 입력하면(KRW, exponent 0) 큰단위 그대로 분단위로 실린다', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, (body) => {
+      capturedBody = body as Record<string, unknown>;
+      return { status: 200, body: { gate_id: 'gate-1' } };
+    }, { genBudget: { limit_minor: 100000, spent_minor: 0, remaining_minor: 100000, currency: 'KRW', period: 'month' } });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const costInput = container.querySelector('[data-testid="content-estimated-cost-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(costInput, '5000');
+      costInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capturedBody?.estimated_cost_minor).toBe(5000);
+  });
+
+  it('⭐예상 비용을 입력하면(USD, exponent 2) 큰단위×100이 분단위로 실린다(§19-1 회귀 방지)', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    stubFetchWithVersions([VERSION_1], undefined, (body) => {
+      capturedBody = body as Record<string, unknown>;
+      return { status: 200, body: { gate_id: 'gate-1' } };
+    }, { genBudget: { limit_minor: 100000, spent_minor: 0, remaining_minor: 100000, currency: 'USD', period: 'month' } });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const costInput = container.querySelector('[data-testid="content-estimated-cost-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      // 큰단위로 "5"(=$5)를 입력 — exponent 변환을 빼먹으면 500이 아닌 5가 그대로
+      // 실려 이 단언이 깨진다.
+      setter?.call(costInput, '5');
+      costInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capturedBody?.estimated_cost_minor).toBe(500);
+  });
+
+  it('⭐422 GENERATION_BUDGET_EXCEEDED — 구조화 배너(사실→4값→행동)가 뜨고 입력값은 지워지지 않는다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, () => ({
+      status: 422,
+      body: { detail: { code: 'GENERATION_BUDGET_EXCEEDED', limit_minor: 100000, spent_minor: 90000, estimated_cost_minor: 20000, remaining_minor: 10000 } },
+    }), { genBudget: { limit_minor: 100000, spent_minor: 90000, remaining_minor: 10000, currency: 'KRW', period: 'month' } });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const costInput = container.querySelector('[data-testid="content-estimated-cost-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(costInput, '20000');
+      costInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta);
+    await act(async () => { submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    const banner = container.querySelector('[data-testid="generation-budget-exceeded-banner"]');
+    expect(banner?.textContent).toContain(koMessages.content.generationBudgetExceededFact);
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-limit"]')?.textContent).toBe('100,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-spent"]')?.textContent).toBe('90,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-estimated"]')?.textContent).toBe('20,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-remaining"]')?.textContent).toBe('10,000원');
+    expect(banner?.textContent).toContain(koMessages.content.generationBudgetExceededAction);
+    expect(costInput.value).toBe('20000');
+  });
+
+  it('정책 미설정(limit_minor=null)이면 상신 표면에 잔량 표시가 아무것도 안 뜬다', async () => {
+    stubFetchWithVersions([VERSION_1]);
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="generation-budget-remaining-compact"]')).toBeNull();
   });
 });

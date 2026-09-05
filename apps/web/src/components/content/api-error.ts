@@ -52,6 +52,11 @@ export type SitePostApiErrorKind =
   | 'image_aspect_ratio_exceeded'
   | 'image_conversion_failed'
   | 'image_upload_failed'
+  // story #3500(BE #3498, 아직 미착지 — PO 確定 계약) — 생성 비용 한도(크레딧 게이트)
+  // 초과. site_post·channel_post 상신 둘 다 같은 코드·같은 4값 shape를 공유(광고
+  // budget_gate와 같은 계약, 블루프린트 §2). labelKey는 비워 두고(text_too_long과
+  // 동형 관례) page.tsx가 limit/spent/estimated/remaining 4값을 보간해 문장을 짓는다.
+  | 'generation_budget_exceeded'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -92,6 +97,12 @@ export interface SitePostApiErrorInfo {
   imageAspectRatio?: number;
   imageMaxAspectRatio?: number;
   imageFinalBytes?: number;
+  // story #3500(BE #3498, 미착지) — GENERATION_BUDGET_EXCEEDED 전용 4값(무엇이·얼마까지·
+  // 지금 얼마 3요소 + 예상치, §13 관례와 동형). 다른 코드엔 이 키들이 없어 undefined.
+  limitMinor?: number;
+  spentMinor?: number;
+  estimatedCostMinor?: number;
+  remainingMinor?: number;
 }
 
 interface KnownError {
@@ -175,6 +186,12 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED: { labelKey: '', kind: 'image_aspect_ratio_exceeded' },
   CHANNEL_IMAGE_CONVERSION_FAILED: { labelKey: '', kind: 'image_conversion_failed' },
   CHANNEL_IMAGE_UPLOAD_FAILED: { labelKey: 'errorChannelImageUploadFailed', kind: 'image_upload_failed' },
+
+  // story #3500(BE #3498, PO 確定 2026-09-05 — 미착지, 계약만 고정) — site_post·
+  // channel_post 상신 둘 다 같은 코드를 낸다(같은 external_publish 게이트 개념 공유,
+  // EXTERNAL_PUBLISH_APPROVAL_REQUIRED류와 동형). labelKey는 비워 page.tsx가
+  // limitMinor/spentMinor/estimatedCostMinor/remainingMinor 4값을 보간한다.
+  GENERATION_BUDGET_EXCEEDED: { labelKey: '', kind: 'generation_budget_exceeded' },
 };
 
 function extractCodeAndMessage(detail: unknown): {
@@ -185,6 +202,7 @@ function extractCodeAndMessage(detail: unknown): {
   imageChannel?: string; imageContentType?: string; imageAllowedFormats?: string[];
   imageSizeBytes?: number; imageMaxBytes?: number; imageFrameCount?: number;
   imageAspectRatio?: number; imageMaxAspectRatio?: number; imageFinalBytes?: number;
+  limitMinor?: number; spentMinor?: number; estimatedCostMinor?: number; remainingMinor?: number;
 } {
   if (typeof detail === 'string') return { message: detail };
   if (detail && typeof detail === 'object') {
@@ -218,6 +236,11 @@ function extractCodeAndMessage(detail: unknown): {
       imageAspectRatio: typeof d.aspect_ratio === 'number' ? d.aspect_ratio : undefined,
       imageMaxAspectRatio: typeof d.max_aspect_ratio === 'number' ? d.max_aspect_ratio : undefined,
       imageFinalBytes: typeof d.final_bytes === 'number' ? d.final_bytes : undefined,
+      // story #3500 — GENERATION_BUDGET_EXCEEDED 전용(BE #3498 계약, 미착지).
+      limitMinor: typeof d.limit_minor === 'number' ? d.limit_minor : undefined,
+      spentMinor: typeof d.spent_minor === 'number' ? d.spent_minor : undefined,
+      estimatedCostMinor: typeof d.estimated_cost_minor === 'number' ? d.estimated_cost_minor : undefined,
+      remainingMinor: typeof d.remaining_minor === 'number' ? d.remaining_minor : undefined,
     };
   }
   return {};
@@ -255,6 +278,10 @@ export function parseSitePostApiError(
   const imageAspectRatio = fromDetail.imageAspectRatio ?? fromError.imageAspectRatio;
   const imageMaxAspectRatio = fromDetail.imageMaxAspectRatio ?? fromError.imageMaxAspectRatio;
   const imageFinalBytes = fromDetail.imageFinalBytes ?? fromError.imageFinalBytes;
+  const limitMinor = fromDetail.limitMinor ?? fromError.limitMinor;
+  const spentMinor = fromDetail.spentMinor ?? fromError.spentMinor;
+  const estimatedCostMinor = fromDetail.estimatedCostMinor ?? fromError.estimatedCostMinor;
+  const remainingMinor = fromDetail.remainingMinor ?? fromError.remainingMinor;
   const raw = JSON.stringify({ code: code ?? null, message: message ?? null });
 
   const known = code ? KNOWN_ERRORS[code] : undefined;
@@ -281,5 +308,9 @@ export function parseSitePostApiError(
     imageAspectRatio,
     imageMaxAspectRatio,
     imageFinalBytes,
+    limitMinor,
+    spentMinor,
+    estimatedCostMinor,
+    remainingMinor,
   };
 }
