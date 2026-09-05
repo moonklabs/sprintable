@@ -312,8 +312,15 @@ function ChannelSection({
               </a>
             ) : null
           ) : credential_kind === 'none' ? (
+            // story #3537(유나 18회차 발견, PO 確定 2026-09-06) — 배지는 연결 「행」의
+            // credential_kind(상태)로 그리는데, 이 버튼은 채널 「항목」의 credential_kind
+            // (성질)로만 그려 연결이 이미 있어도 「…연결 만들기」가 활성으로 남았다 —
+            // 이름이 "만들기"인데 새로 생기는 게 없으면 라벨이 거짓말이 된다(§17-21).
+            // connections는 이미 이 channel로 필터된 배열(부모 컴포넌트, 위 connections.
+            // length===0/!==1 판정과 같은 변수) — 활성/만료 등 상태 무관하게 행이 하나라도
+            // 있으면 버튼 자체를 안 그린다("다시 만들기" 경로는 의도적으로 두지 않는다).
             // sandbox 생성은 owner|admin(create_sandbox_channel_connection = _require_owner_or_admin).
-            isOwnerOrAdmin ? (
+            isOwnerOrAdmin && connections.length === 0 ? (
               <Button
                 size="sm" onClick={() => void handleCreateSandbox()} disabled={creatingSandbox}
                 data-testid="channel-connect-sandbox-button"
@@ -336,7 +343,10 @@ function ChannelSection({
           {credential_kind === 'oauth' && !isOwnerStrict ? (
             <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p>
           ) : null}
-          {credential_kind === 'none' && !isOwnerOrAdmin ? (
+          {/* story #3537 — 액션 자체가 없는 자리(연결 이미 있음)에 권한 사유 문구를
+              남기면 "안 보이는 버튼을 왜 못 누르나"는 존재하지 않는 질문에 답하는
+              꼴이라 노이즈다 — 버튼과 조건을 맞춘다. */}
+          {credential_kind === 'none' && !isOwnerOrAdmin && connections.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>
           ) : null}
           {/* story #3521계 유나 #3877 관찰(PO 確定 2026-09-06) — 이 자리는 권한

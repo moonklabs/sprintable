@@ -372,6 +372,49 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).not.toBeNull();
   });
 
+  // story #3537(유나 18회차 발견, PO 確定 2026-09-06) — 배지는 연결 「행」의
+  // credential_kind(상태)로, 버튼은 채널 「항목」의 credential_kind(성질)로만 그려
+  // 연결이 이미 있어도 「…연결 만들기」가 활성으로 남았다. 채널에 연결이 하나라도
+  // 있으면(상태 무관) 버튼 자체가 안 뜬다 — "다시 만들기" 경로는 의도적으로 없다.
+  it('⭐#3537 — 이 채널에 연결이 이미 있으면(channel 일치) 「연결 만들기」 버튼이 안 뜬다', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-sandbox-1', channel: 'sandbox', credential_kind: 'none' }],
+      availableChannels: AVAILABLE_WITH_SANDBOX,
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
+    // 배지는 여전히 뜬다(연결 자체가 사라진 게 아니다 — 버튼만 안 뜨는 것).
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-connection-badge"]')).not.toBeNull();
+  });
+
+  it('⭐#3537 — 연결 상태(만료 등)와 무관하게 그 채널에 행이 하나라도 있으면 버튼이 안 뜬다("다시 만들기" 경로 없음)', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-sandbox-1', channel: 'sandbox', credential_kind: 'none', status: 'expired' }],
+      availableChannels: AVAILABLE_WITH_SANDBOX,
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
+  });
+
+  it('⭐#3537 — 연결이 이미 있으면 member에게도 owner·admin 안내 문구가 안 뜬다(버튼과 조건 일치, 존재하지 않는 액션의 사유는 노이즈)', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-sandbox-1', channel: 'sandbox', credential_kind: 'none' }],
+      availableChannels: AVAILABLE_WITH_SANDBOX,
+    });
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
+    expect(container.textContent).not.toContain('이 작업은 owner·admin만 할 수 있습니다');
+  });
+
+  it('⭐#3537 — 다른 채널(threads)에만 연결이 있으면 sandbox 「연결 만들기」 버튼은 그대로 뜬다(channel 하드코딩 0, 일치로만 판정)', async () => {
+    stubFetch({
+      connections: [CONNECTION_ACTIVE], // channel: 'threads'
+      availableChannels: AVAILABLE_WITH_SANDBOX,
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).not.toBeNull();
+  });
+
   it('⭐sandbox 「연결 만들기」를 누르면 BFF POST 성공 뒤 리로드 없이 새 연결 행이 추가된다', async () => {
     stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
     await mount('owner');
