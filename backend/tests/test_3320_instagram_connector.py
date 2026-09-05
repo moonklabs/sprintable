@@ -243,6 +243,31 @@ async def test_instagram_test_connection_returns_id_and_username():
     assert account == {"id": "17841400000000", "username": "sprintable_demo"}
 
 
+@pytest.mark.anyio
+async def test_instagram_test_connection_uses_graph_instagram_com_host():
+    """페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회) — Instagram Login 토큰은
+    graph.instagram.com 전용, graph.facebook.com이 아니다(Meta 문서 재확認).
+    호스트를 facebook.com으로 되돌리면 이 테스트가 RED — sandbox만으론 이
+    회귀를 못 잡는다(실제로 URL을 안 침)."""
+    from app.services.instagram_oauth import test_connection
+
+    captured = {}
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"id": "1", "username": "u"}
+
+    class _FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            return _FakeResponse()
+
+    await test_connection(_FakeClient(), access_token="tok")
+    assert captured["url"].startswith("https://graph.instagram.com/")
+    assert "facebook.com" not in captured["url"]
+
+
 # ─── instagram_publish.py ─────────────────────────────────────────────────────
 
 
@@ -332,6 +357,43 @@ async def test_get_publishing_limit_parses_quota_shape():
 
     usage, total, duration = await get_publishing_limit(_FakeClient(), access_token="tok", threads_user_id="ig-1")
     assert (usage, total, duration) == (5, 25, 86400)
+
+
+@pytest.mark.anyio
+async def test_instagram_publish_client_uses_graph_instagram_com_host_for_all_endpoints():
+    """페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회) — instagram_publish.py의
+    4개 URL 템플릿(container 생성·publish·publishing-limit·permalink) 전부
+    graph.instagram.com이어야 한다(Instagram Login 토큰은 graph.facebook.com을
+    거부). sandbox는 이 URL을 실제로 안 쳐서 이 회귀를 못 잡는 클래스 — 실계정
+    첫 호출에서만 드러난다. 이 테스트가 그 격차를 메운다(호스트를 facebook.com
+    으로 되돌리면 RED)."""
+    from app.services.instagram_publish import create_container, get_permalink, get_publishing_limit, publish_container
+
+    captured_urls: list[str] = []
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"id": "x", "data": [{"quota_usage": 0, "config": {"quota_total": 1, "quota_duration": 1}}], "permalink": None}
+
+    class _FakeClient:
+        async def post(self, url, *, params):
+            captured_urls.append(url)
+            return _FakeResponse()
+        async def get(self, url, *, params):
+            captured_urls.append(url)
+            return _FakeResponse()
+
+    client = _FakeClient()
+    await create_container(client, access_token="tok", threads_user_id="ig-1", text="c", image_url="https://x/i.jpg")
+    await publish_container(client, access_token="tok", threads_user_id="ig-1", creation_id="c1")
+    await get_publishing_limit(client, access_token="tok", threads_user_id="ig-1")
+    await get_permalink(client, access_token="tok", media_id="media-1")
+
+    assert len(captured_urls) == 4
+    for url in captured_urls:
+        assert url.startswith("https://graph.instagram.com/"), url
+        assert "facebook.com" not in url, url
 
 
 @pytest.mark.anyio

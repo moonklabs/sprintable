@@ -24,9 +24,15 @@ import httpx
 
 _AUTHORIZE_BASE = "https://www.instagram.com/oauth/authorize"
 _TOKEN_URL = "https://api.instagram.com/oauth/access_token"
+# 장기토큰 교환/갱신은 페드루 PO가 2026-09-06 재확認한 그대로 버전 세그먼트가
+# 없는 전용 엔드포인트(일반 Graph API 호출과 다름) — 바꾸지 않는다.
 _EXCHANGE_URL = "https://graph.instagram.com/access_token"
 _REFRESH_URL = "https://graph.instagram.com/refresh_access_token"
-_ME_URL = "https://graph.instagram.com/me"
+# story #3320 — 페드루 PO REQUIRED(2026-09-06, #3872 PASS 철회) — /me는 일반
+# Graph API 호출이라 instagram_publish.py::_GRAPH_BASE와 같은 버전 호스트로
+# 통일(위 두 전용 엔드포인트와는 다른 축).
+_GRAPH_BASE = "https://graph.instagram.com/v25.0"
+_ME_URL = _GRAPH_BASE + "/me"
 
 
 class InstagramOAuthError(Exception):

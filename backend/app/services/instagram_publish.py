@@ -17,21 +17,33 @@
 이 모듈도 순수 API 클라이언트로만 남는다 — 게이트 재검증·멱등·UTM·HTTP status 판단은
 호출부(`channel_posts.py`) 몫(threads_publish.py와 동일 분리).
 
-⚠️미확認 — 컨테이너 생성/상태 폴링/publish/한도조회/permalink 엔드포인트는 IG Graph
-API 지식 컷오프 기준 최선 추정이다(threads_publish.py 최초 작성 시와 동일 상태).
-OAuth·comments 엔드포인트만 페드루 PO가 2026-09-06 Meta 공식 문서로 재확認했다
-(`instagram_oauth.py` 참고) — 이 파일은 아직 그 재확認을 못 받았다. sandbox까지가
-이 조각 라이브 범위(App Review 뒤 실계정 왕복 시점에 재확認 필요)."""
+⚠️미확認 — 컨테이너 생성/상태 폴링/publish/한도조회/permalink의 파라미터·필드명은
+IG Graph API 지식 컷오프 기준 최선 추정이다(threads_publish.py 최초 작성 시와
+동일 상태). OAuth·comments 엔드포인트만 페드루 PO가 2026-09-06 Meta 공식 문서로
+재확認했다(`instagram_oauth.py` 참고) — 파라미터/필드명은 아직 그 재확認을 못
+받았다. sandbox까지가 이 조각 라이브 범위(App Review 뒤 실계정 왕복 시점에
+재확認 필요).
+
+**호스트 정정(페드루 PO REQUIRED, 2026-09-06, #3872 PASS 철회 뒤 재확認)**: Meta
+공식 문서(developers.facebook.com/docs/instagram-platform/instagram-graph-api/
+get-started · content-publishing, 조회일 2026-09-06, 예시 URL 전부
+`https://graph.instagram.com/v25.0/<IG_ID>/...`) — Instagram Login(Business
+Login for Instagram) 발급 토큰은 **`graph.instagram.com`** 전용이지 Facebook
+Login 경유의 `graph.facebook.com`이 아니다. 최초 작성 시 threads_publish.py의
+`graph.facebook.com` 호스트를 그대로 베꼈던 게 오류(sandbox는 이 URL을 실제로
+안 쳐서 통과했고 실계정 첫 호출에서만 드러나는 클래스) — `instagram_oauth.py`
+의 토큰 교환 엔드포인트들과 같은 호스트로 통일한다."""
 from __future__ import annotations
 
 import httpx
 
 from app.services.threads_publish import ThreadsPublishError
 
-_MEDIA_CONTAINER_URL_TMPL = "https://graph.facebook.com/v21.0/{ig_user_id}/media"
-_MEDIA_PUBLISH_URL_TMPL = "https://graph.facebook.com/v21.0/{ig_user_id}/media_publish"
-_PUBLISHING_LIMIT_URL_TMPL = "https://graph.facebook.com/v21.0/{ig_user_id}/content_publishing_limit"
-_MEDIA_URL_TMPL = "https://graph.facebook.com/v21.0/{media_id}"
+_GRAPH_BASE = "https://graph.instagram.com/v25.0"
+_MEDIA_CONTAINER_URL_TMPL = _GRAPH_BASE + "/{ig_user_id}/media"
+_MEDIA_PUBLISH_URL_TMPL = _GRAPH_BASE + "/{ig_user_id}/media_publish"
+_PUBLISHING_LIMIT_URL_TMPL = _GRAPH_BASE + "/{ig_user_id}/content_publishing_limit"
+_MEDIA_URL_TMPL = _GRAPH_BASE + "/{media_id}"
 
 
 async def create_container(
