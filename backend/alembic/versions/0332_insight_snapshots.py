@@ -6,6 +6,12 @@
 그라운딩 §9) — `publication_id`가 hosted_site면 site_posts.id, 외부 목적지면
 channel_publications.id를 가리킬 뿐 이 테이블 자체는 그 구분을 모른다.
 
+`publication_kind`(TEXT NOT NULL, 페드루 REQUEST_CHANGES①)가 그 구분을 명시한다
+('site_post'|'channel_publication') — "channel=hosted_site면 site_post"라는 암묵
+규칙에 기대지 않는다. `work_item_id`(UUID NOT NULL, REQUEST_CHANGES②)는 비정규화 —
+조각 2 tick이 evidence를 쓸 때 3단 조인 없이 바로 쓰고, 조회 API의 work item 축에도
+쓴다(등록 시점엔 이미 안다).
+
 `evidence.payload`(JSONB NULL) — type="metric" evidence가 note(사람용 한 줄)와 별개로
 정규화된 7키+captured_at+source+snapshot_id를 구조화해서 싣는다. note만으로는 "채널
 원본 지표와 evidence 대조"(§7)가 text 파싱에 얹히는 두 번째 지름길이 된다는 페드루
@@ -32,6 +38,8 @@ def upgrade() -> None:
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("org_id", postgresql.UUID(as_uuid=True), nullable=False, index=True),
         sa.Column("publication_id", postgresql.UUID(as_uuid=True), nullable=False, index=True),
+        sa.Column("publication_kind", sa.Text(), nullable=False),
+        sa.Column("work_item_id", postgresql.UUID(as_uuid=True), nullable=False, index=True),
         sa.Column("channel", sa.Text(), nullable=False),
         sa.Column("external_id", sa.Text(), nullable=True),
         sa.Column("due_at", sa.DateTime(timezone=True), nullable=False, index=True),

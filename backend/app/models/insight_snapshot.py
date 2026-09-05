@@ -32,6 +32,16 @@ class InsightSnapshot(Base):
     # hosted_site=site_posts.id · 외부 목적지(wordpress/webhook/threads 등)=
     # channel_publications.id.
     publication_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    # story #3497 REQUIRED(페드루 REQUEST_CHANGES, 2026-09-05) — publication_id는
+    # 다형(polymorphic) id라 "channel=hosted_site면 site_post"라는 암묵 규칙에
+    # 기대면 안 된다 — 어느 테이블을 봐야 하는지 이 컬럼이 명시한다.
+    # 'site_post'|'channel_publication'.
+    publication_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3497 REQUIRED — 비정규화(조각 2 tick이 evidence를 쓸 때 3단 조인 없이
+    # 바로 쓰게, 조회 API의 work item 축에도). 등록 시점(발행 성공 직후)엔 이미
+    # 안다 — FK 없음(그라운딩 §9 관례 그대로, Story/Task 양쪽 커버하는 evidence.
+    # work_item_id와 동형).
+    work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     # "hosted_site"|"sandbox"|"wordpress"|"webhook"|"threads"|... — CHANNEL_ADAPTERS
     # 키와 동일 문자열(어댑터 선택 축).
     channel: Mapped[str] = mapped_column(Text, nullable=False)
