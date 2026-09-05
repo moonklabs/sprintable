@@ -824,6 +824,20 @@ async def submit_site_post_draft(
 
 # ─── story #3369(Phase0 S3) — 승인본만 서버가 공개, URL, platform 감사 ─────────────
 
+def _blog_post_path(*, lang: str, slug: str) -> str:
+    """story #3497(페드루 決定, 2026-09-05) — 공개 글 URL의 path 부분(`/{lang}/blog/
+    {slug}`) 단일 조립점. `_resolve_public_url`·`_resolve_public_site_display_url`이
+    각자 이 리터럴을 따로 적고 있었다(드리프트 표면) — 이 스토리가 hosted_site
+    insights 어댑터에서 이 값을 «pageview beacon이 실은 path와 같은 것」으로 가정해
+    `org_pageview_daily`를 조회해야 해 세 번째 자리가 될 뻔했다. 한 곳으로 뽑는다.
+
+    ⚠️이 값이 실제 pageview beacon의 `path`와 일치하는지는 고객 사이트가 이 라우트
+    규칙을 실제로 구현했다는 전제 위에 서 있다(강제 보장 없음) — hosted_site insights
+    어댑터의 "views" 지표는 이 전제가 깨지면 조용히 0으로 보인다(집계 자체가 없어서가
+    아니라 path가 안 맞아서). AC·어댑터 선언 주석에 이 전제를 명시한다."""
+    return f"/{lang}/blog/{slug}"
+
+
 async def _resolve_public_url(
     db: AsyncSession, *, org_id: uuid.UUID, lang: str, slug: str, backend_base_url: str,
 ) -> str:
@@ -842,7 +856,7 @@ async def _resolve_public_url(
             site_base_url = raw.rstrip("/")
 
     if site_base_url is not None:
-        return f"{site_base_url}/{lang}/blog/{slug}"
+        return f"{site_base_url}{_blog_post_path(lang=lang, slug=slug)}"
 
     from app.services.pageview_counter import get_or_create_active_key
 
@@ -1376,7 +1390,7 @@ def _resolve_public_site_display_url(*, lang: str, slug: str) -> str | None:
     하나만 본다 — 미설정이면 None(화면은 「—」, 지어내지 않는다)."""
     if not settings.public_site_base_url:
         return None
-    return f"{settings.public_site_base_url.rstrip('/')}/{lang}/blog/{slug}"
+    return f"{settings.public_site_base_url.rstrip('/')}{_blog_post_path(lang=lang, slug=slug)}"
 
 
 async def get_site_post_publication_info(

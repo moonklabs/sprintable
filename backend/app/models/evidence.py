@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -42,3 +42,11 @@ class Evidence(Base):
     artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("artifact_versions.id", ondelete="SET NULL"), nullable=True
     )
+    # story #3497(migration 0332) — type="metric"(채널 인사이트) 전용 구조화 칸. note는
+    # "한 겹 얕은 원본"이라 대시보드·「채널 원본 지표와 evidence 대조」가 text 파싱에
+    # 얹히면 두 번째 지름길이 된다(페드루 決定, 2026-09-05) — 정규화된 7키(impressions·
+    # reach·views·engagements·clicks·spend·conversions, 각 int|null)·captured_at·
+    # source·snapshot_id를 여기 그대로 싣는다. captured_at 전용 컬럼은 신설 안 함
+    # (insight_snapshots 행이 정본, payload는 그 스냅샷의 사본). NULL=이 evidence가
+    # metric이 아니거나(다른 type) 구 데이터.
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

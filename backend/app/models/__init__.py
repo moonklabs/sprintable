@@ -145,6 +145,7 @@ from app.models.channel_post_image import ChannelPostImage
 from app.models.campaign import Campaign
 from app.models.org_content_rule import OrgContentRule
 from app.models.publication_attempt import PublicationAttempt
+from app.models.insight_snapshot import InsightSnapshot
 
 __all__ = [
     "RoleTemplate",
