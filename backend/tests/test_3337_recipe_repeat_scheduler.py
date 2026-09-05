@@ -232,6 +232,11 @@ async def test_ac1_two_rounds_fire_with_zero_human_hands_and_tick_is_idempotent(
                 select(Story).where(Story.id == schedule.last_story_id)
             )).scalar_one()
             assert round2_story.assignee_id == executor_id
+            # story #3505(위생, 디디 3502 그라운딩 부수 발견) — 회귀 pin. 스케줄러가 만든
+            # Story는 story_number를 채번받아야 한다(원래 결함=NULL로 남음).
+            assert round2_story.story_number is not None, (
+                "회차 2 Story가 allocate_story_number를 안 거쳤다(story #3505 원 증상)"
+            )
 
             # 멱등 — next_run_at이 미래로 전진했으므로, 같은 tick을 즉시 재호출해도 회차가
             # 추가로 안 나간다("같은 tick 2회 실행돼도 회차 1개", 페드루 확定 AC4).
