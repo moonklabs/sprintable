@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.database import get_db
-from app.services.pageview_counter import record_pageview, resolve_org_by_public_key
+from app.services.pageview_counter import record_pageview, record_pageview_utm, resolve_org_by_public_key
 from app.services.rate_limiter import get_rate_limiter
 
 router = APIRouter(prefix="/api/v2/public", tags=["public-pageview"])
@@ -29,11 +29,33 @@ _BOT_UA_RE = re.compile(r"bot|spider|crawl|slurp|headless", re.IGNORECASE)
 
 _DEDUP_WINDOW_LIMIT = 1  # 레이트리밋 윈도우(rate_limiter.WINDOW_SECS=60s)당 같은 (org,path,ua) 1회만 — AC "1분 내 재요청 억제"
 
+_UTM_MAX_LEN = 256  # UTM 파라미터 값 — referrer(1024)보다 훨씬 짧은 슬러그성 값이라 별도 상한.
+
+
+def _normalize_utm(value: str | None) -> str | None:
+    """story #3506(Phase2·마케팅운영) — utm_* 4필드는 referrer와 달리 «영속»된다(PO
+    決定 (d)) — 소문자+trim 정규화(대소문자만 다른 같은 캠페인이 다른 그룹으로
+    쪼개지지 않게) 후 빈 문자열이면 "차원 없음"(None)으로 접는다. 길이 상한 초과는
+    거부가 아니라 잘라 저장(PO 明示 — beacon 페이지가 못 믿을 querystring을 그대로
+    보낼 수 있어도 요청 자체를 실패시키지 않는다)."""
+    if value is None:
+        return None
+    normalized = value.strip().lower()[:_UTM_MAX_LEN]
+    return normalized or None
+
 
 class PageviewBeaconRequest(BaseModel):
     public_key: str = Field(..., min_length=1, max_length=128)
     path: str = Field(..., min_length=1, max_length=512)
     referrer: str | None = Field(default=None, max_length=1024)
+    # story #3506(Phase2·마케팅운영, 페드루 PO 決定 (d)) — referrer(버림)와 달리 이
+    # 4필드는 실제 저장 대상이다(org_pageview_utm_daily). Field 자체엔 상한을 안
+    # 두고(트렁케이션 vs 422 거부를 한 곳(_normalize_utm)에서만 결정 — Field
+    # max_length는 초과 시 422라 "잘라 저장" 계약과 어긋난다) 정규화 함수가 자른다.
+    utm_source: str | None = Field(default=None)
+    utm_medium: str | None = Field(default=None)
+    utm_campaign: str | None = Field(default=None)
+    utm_content: str | None = Field(default=None)
 
 
 @router.post("/pageview", status_code=204)
@@ -66,4 +88,18 @@ async def post_pageview(
 
     today = datetime.now(timezone.utc).date()
     await record_pageview(db, org_id=org_id, path=body.path, day=today)
+
+    utm_source = _normalize_utm(body.utm_source)
+    utm_medium = _normalize_utm(body.utm_medium)
+    utm_campaign = _normalize_utm(body.utm_campaign)
+    utm_content = _normalize_utm(body.utm_content)
+    if any((utm_source, utm_medium, utm_campaign, utm_content)):
+        # story #3506(Phase2·마케팅운영) — 적어도 하나라도 있을 때만 별도 집계(순수
+        # pageview와 분리, org_pageview_daily 위 write와 별도 트랜잭션 — 이 write가
+        # 실패해도 이미 커밋된 조회수 집계는 보존된다).
+        await record_pageview_utm(
+            db, org_id=org_id, path=body.path, day=today,
+            utm_source=utm_source, utm_medium=utm_medium,
+            utm_campaign=utm_campaign, utm_content=utm_content,
+        )
     return Response(status_code=204)

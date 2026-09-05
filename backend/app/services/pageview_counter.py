@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.org_metering_key import OrgMeteringKey
 from app.models.org_pageview_daily import OrgPageviewDaily
+from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
 
 _KEY_BYTES = 32  # doc_share.py의 secrets.token_urlsafe(32)와 동일 관례
 
@@ -74,6 +75,28 @@ async def record_pageview(db: AsyncSession, *, org_id: uuid.UUID, path: str, day
     stmt = stmt.on_conflict_do_update(
         constraint="uq_org_pageview_daily_org_path_day",
         set_={"count": OrgPageviewDaily.count + 1, "updated_at": datetime.now(timezone.utc)},
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def record_pageview_utm(
+    db: AsyncSession, *, org_id: uuid.UUID, path: str, day: date_type,
+    utm_source: str | None, utm_medium: str | None, utm_campaign: str | None, utm_content: str | None,
+) -> None:
+    """story #3506(Phase2·마케팅운영, 페드루 PO 決定 (d)) — beacon이 utm_* 중 적어도
+    하나라도 실었을 때만 호출된다(호출부 책임 — 순수 pageview와 분리, 이 함수 자체는
+    무조건 upsert). 4컬럼은 NOT NULL이라 None은 빈 문자열로 치환(모델 docstring
+    참고 — 그룹핑 키, null≠0 정규화 규약 적용 대상 아님)."""
+    stmt = pg_insert(OrgPageviewUtmDaily).values(
+        id=uuid.uuid4(), org_id=org_id, path=path, day=day,
+        utm_source=utm_source or "", utm_medium=utm_medium or "",
+        utm_campaign=utm_campaign or "", utm_content=utm_content or "",
+        count=1,
+    )
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_org_pageview_utm_daily_grouping",
+        set_={"count": OrgPageviewUtmDaily.count + 1, "updated_at": datetime.now(timezone.utc)},
     )
     await db.execute(stmt)
     await db.commit()
