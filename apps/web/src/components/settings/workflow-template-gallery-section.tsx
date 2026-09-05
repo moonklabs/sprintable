@@ -44,6 +44,11 @@ export function WorkflowTemplateGallerySection({
   const [definitions, setDefinitions] = useState<EventDefinitionResponse[]>([]);
   const [agents, setAgents] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — defRes(주)는 3519 당시에도 catch가
+  // 없었다(memberRes만 격리). §16-7 주 계약("주는 던져도 된다")은 지켜졌지만 그 throw를
+  // 받을 바깥 에러 상태 자체가 없어(finally뿐) 실패가 조용히 "항목 없음"과 똑같은 빈
+  // 그리드로 새고 있었다 — 이 플래그가 그 자리를 채운다.
+  const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<EventDefinitionResponse | null>(null);
   const [loadingBindings, setLoadingBindings] = useState(false);
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set());
@@ -60,36 +65,55 @@ export function WorkflowTemplateGallerySection({
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       // story #3519(§16-7 2부, PO 確定 2026-09-05) — memberRes(부수, ok?채움:방치)가
       // defRes(주, 갤러리 몸통)와 미격리로 같은 Promise.all에 있어, memberRes가
       // 네트워크단 reject하면 defRes도 조용히 못 채워져 갤러리가 거짓 "항목 없음"으로
       // 보였다. memberRes만 격리한다.
+      //
+      // story #3521(유나 §22-2, PO 確定 2026-09-05) — defRes는 여전히 격리하지 않는다
+      // (§16-7 주 계약 — 주는 던져도 된다). 대신 이제 이 함수를 감싸는 catch가 있어
+      // defRes의 reject·!ok 둘 다 loadError로 정직하게 착지한다(예전엔 던져도 받을
+      // 그릇이 없어 unhandled rejection으로 샜다).
       const [defRes, memberRes] = await Promise.all([
         fetchWithAuth('/api/events/definitions'),
         fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`).catch(() => null),
       ]);
-      if (defRes.ok) {
-        const data: unknown = await defRes.json();
-        const defs = Array.isArray(data) ? (data as EventDefinitionResponse[]) : [];
-        setDefinitions(defs);
-        // "적용됨" 배지 — cyclic 정의마다 이 project에 바인딩이 하나라도 있는지 조회.
-        const cyclic = defs.filter(isCyclicDefinition);
-        const applied = new Set<string>();
-        await Promise.all(cyclic.map(async d => {
-          const r = await fetchWithAuth(`/api/events/definitions/${d.id}/bindings?project_id=${projectId}`);
-          if (r.ok) {
-            const j = await r.json() as { bindings?: Record<string, string> };
-            if (Object.keys(j.bindings ?? {}).length > 0) applied.add(d.key);
-          }
-        }));
-        setAppliedKeys(applied);
+      if (!defRes.ok) {
+        setLoadError(true);
+        return;
       }
+      const data: unknown = await defRes.json();
+      const defs = Array.isArray(data) ? (data as EventDefinitionResponse[]) : [];
+      setDefinitions(defs);
+      // "적용됨" 배지 — cyclic 정의마다 이 project에 바인딩이 하나라도 있는지 조회.
+      //
+      // story #3521 REQUIRED 1(유나 Design 변경요청, PO 確定 2026-09-06) — 이 leg는
+      // 부수(배지 하나 없어도 목록 자체는 온전)인데, cyclic.map(...)이 N개짜리
+      // Promise.all을 만든다. 이 map 결과 배열의 항목 하나라도 reject하면 그 reject가
+      // 이 함수를 감싸는 바깥 catch까지 전파해 loadError를 켜 — 이미 성공적으로 받은
+      // definitions 전체가 "못 불러옴"으로 뒤덮인다(부수가 주를 삼키는 3519 클래스가
+      // 새 그릇으로 돌아온 자리, 카디르 QA #3873 관찰 계기). 항목별로 격리해 실패한
+      // 항목만 배지가 안 붙고(그 정의는 "미적용"으로 보임 — §22-2 원칙상 배지 없음도
+      // 정직한 폴백, 지어낸 값이 아니다) 나머지 목록·배지는 그대로 선다.
+      const cyclic = defs.filter(isCyclicDefinition);
+      const applied = new Set<string>();
+      await Promise.all(cyclic.map(async d => {
+        const r = await fetchWithAuth(`/api/events/definitions/${d.id}/bindings?project_id=${projectId}`).catch(() => null);
+        if (r?.ok) {
+          const j = await r.json() as { bindings?: Record<string, string> };
+          if (Object.keys(j.bindings ?? {}).length > 0) applied.add(d.key);
+        }
+      }));
+      setAppliedKeys(applied);
       if (memberRes?.ok) {
         const json = await memberRes.json() as { data?: TeamMember[] } | TeamMember[];
         const members = Array.isArray(json) ? json : ((json as { data?: TeamMember[] }).data ?? []);
         setAgents(members);
       }
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -166,6 +190,28 @@ export function WorkflowTemplateGallerySection({
     );
   }
 
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — "없음"보다 먼저 검사한다. defRes(주)가
+  // 실패했으면 definitions가 비어 있어도(초기값 그대로) 그건 진짜 0건이 아니라 못 불러온
+  // 것이다.
+  if (loadError) {
+    return (
+      <SectionCard>
+        <SectionCardHeader>
+          <h2 className="text-base font-semibold text-foreground">워크플로우 템플릿 갤러리</h2>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <div
+            className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-sm text-foreground"
+            data-testid="workflow-gallery-load-error"
+          >
+            <span>템플릿 목록을 불러오지 못했습니다.</span>
+            <Button variant="outline" size="sm" onClick={() => void loadData()}>다시 시도</Button>
+          </div>
+        </SectionCardBody>
+      </SectionCard>
+    );
+  }
+
   return (
     <SectionCard>
       <SectionCardHeader>
@@ -175,6 +221,13 @@ export function WorkflowTemplateGallerySection({
         </div>
       </SectionCardHeader>
       <SectionCardBody>
+        {/* story #3521(유나 §22-2) — 성공+0건("항목 없음")도 지금까지 텍스트 자체가 없어
+            빈 그리드로만 보였다(loadError와 구분 불가). */}
+        {cyclicDefinitions.length === 0 ? (
+          <p className="text-sm text-muted-foreground" data-testid="workflow-gallery-empty">
+            적용 가능한 워크플로우 템플릿이 없습니다.
+          </p>
+        ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {cyclicDefinitions.map(def => (
             <button
@@ -201,6 +254,7 @@ export function WorkflowTemplateGallerySection({
             </button>
           ))}
         </div>
+        )}
 
         {loadingBindings && (
           <p className="mt-4 text-xs text-muted-foreground">배정 정보 로딩 중...</p>

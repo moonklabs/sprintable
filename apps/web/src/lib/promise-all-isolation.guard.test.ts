@@ -16,6 +16,17 @@
 // 가드가 아니라 개별 리뷰(§16-7 2부 판정선: !res.ok→setLoadError/return=주,
 // res.ok?채움:degrade=부수)의 몫이다.
 //
+// ⚠️추가(story #3521 REQUIRED 1, PO 確定 2026-09-06) — `Promise.all(arr.map(...))`
+// 처럼 leg가 `.map()`으로 N개 생기는 형은 AST상 호출식이 1개뿐이라 이 가드가 정상
+// 통과시킨다(격리 유무 판정 자체는 맞다 — `.catch`가 map 콜백 안에 있든 밖에 있든
+// "이 Promise.all에 격리가 있다/없다" 이진 판정엔 지장 없다). 하지만 그 1개가 실은
+// N개의 부수 leg를 묶은 것이고, map 콜백 밖의 바깥 try/catch로 "전체 격리"를 대신하면
+// 항목 하나의 실패가 나머지 N-1개+이미 성공한 별개 데이터까지 통째로 삼킨다
+// (workflow-template-gallery-section.tsx:93, 카디르 QA #3873 관찰 계기 — cyclic
+// definitions "적용됨" 배지 조회 하나가 던지면 이미 받은 정의 목록 전체가 loadError로
+// 뒤덮였다). map 형은 항목별 `.catch()`가 정답이지 바깥 try/catch로는 부족하다 — 이
+// 가드는 "map 콜백 내부에 격리가 있는지"까지는 안 본다(범위 밖 선언).
+//
 // 양성대조(가드가 실제로 «실패할 수 있다»는 증거) — 이 스토리에서 고친 approvals-
 // queue.tsx:47(수정 前 스냅샷: 두 leg 다 `.then(...)`뿐, catch가 파일 어디에도
 // 없어 이 가드가 실제로 RED였다)를 아래 테스트로 재현해 고정한다. 3514 이전
