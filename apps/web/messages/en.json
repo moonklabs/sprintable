@@ -4899,6 +4899,8 @@
     "bannedTermsLabel": "Banned terms",
     "bannedTermsPlaceholder": "Type a term and press Enter",
     "requireUtmLabel": "Require UTM on links",
+    "requireUtmOnLabel": "On",
+    "requireUtmOffLabel": "Off",
     "requireUtmHint": "When a link is present, it must include all 3 UTM parameters (utm_source, utm_medium, utm_campaign). Drafts without a link are not checked.",
     "toneLabel": "Tone",
     "tonePlaceholder": "e.g. Friendly and concise",

@@ -4899,6 +4899,8 @@
     "bannedTermsLabel": "금칙어",
     "bannedTermsPlaceholder": "단어 입력 후 Enter",
     "requireUtmLabel": "링크에 UTM 필수",
+    "requireUtmOnLabel": "켜짐",
+    "requireUtmOffLabel": "꺼짐",
     "requireUtmHint": "링크가 있으면 UTM 3종(utm_source·utm_medium·utm_campaign)이 있어야 합니다. 링크 없는 초안은 검사하지 않습니다.",
     "toneLabel": "톤",
     "tonePlaceholder": "예: 친근하고 간결하게",

@@ -278,31 +278,46 @@ export default function ContentRulesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-sm text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={rules.require_utm}
-                    disabled={!isOwner}
-                    onChange={(e) => setRules((r) => ({ ...r, require_utm: e.target.checked }))}
-                    data-testid="content-rules-require-utm"
-                  />
-                  {t('requireUtmLabel')}
-                </label>
+                {/* 카디르군 REQUEST_CHANGES(2026-09-05, PR#3827) — disabled={!isOwner}는
+                    "살아 있는" 컨트롤(탭 순서·스크린리더가 여전히 체크박스로 읽는다)이라
+                    AC "편집 컨트롤이 없다"를 안 지킨다. 나머지 4필드(TagListEditor)와
+                    같은 원칙으로 읽기 전용 텍스트로 바꾼다. */}
+                {isOwner ? (
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={rules.require_utm}
+                      onChange={(e) => setRules((r) => ({ ...r, require_utm: e.target.checked }))}
+                      data-testid="content-rules-require-utm"
+                    />
+                    {t('requireUtmLabel')}
+                  </label>
+                ) : (
+                  <p className="text-sm text-foreground">
+                    <span className="text-xs font-medium text-muted-foreground">{t('requireUtmLabel')}</span>{' '}
+                    <span data-testid="content-rules-require-utm-readonly">
+                      {rules.require_utm ? t('requireUtmOnLabel') : t('requireUtmOffLabel')}
+                    </span>
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground">{t('requireUtmHint')}</p>
                 {fieldErrors.require_utm ? <p className="text-xs text-destructive">{fieldErrors.require_utm}</p> : null}
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-tone">{t('toneLabel')}</label>
-                <input
-                  id="content-rules-tone"
-                  type="text"
-                  value={rules.tone ?? ''}
-                  disabled={!isOwner}
-                  onChange={(e) => setRules((r) => ({ ...r, tone: e.target.value || null }))}
-                  placeholder={t('tonePlaceholder')}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm disabled:opacity-70"
-                />
+                {isOwner ? (
+                  <input
+                    id="content-rules-tone"
+                    type="text"
+                    value={rules.tone ?? ''}
+                    onChange={(e) => setRules((r) => ({ ...r, tone: e.target.value || null }))}
+                    placeholder={t('tonePlaceholder')}
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                  />
+                ) : (
+                  <p className="text-sm text-foreground" data-testid="content-rules-tone-readonly">{rules.tone || '—'}</p>
+                )}
                 {fieldErrors.tone ? <p className="text-xs text-destructive">{fieldErrors.tone}</p> : null}
               </div>
 
@@ -340,15 +355,18 @@ export default function ContentRulesPage() {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-brand-logo">{t('brandKitLogoLabel')}</label>
-                <input
-                  id="content-rules-brand-logo"
-                  type="text"
-                  value={rules.brand_kit.logo_url ?? ''}
-                  disabled={!isOwner}
-                  onChange={(e) => setRules((r) => ({ ...r, brand_kit: { ...r.brand_kit, logo_url: e.target.value || undefined } }))}
-                  placeholder={t('brandKitLogoPlaceholder')}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm disabled:opacity-70"
-                />
+                {isOwner ? (
+                  <input
+                    id="content-rules-brand-logo"
+                    type="text"
+                    value={rules.brand_kit.logo_url ?? ''}
+                    onChange={(e) => setRules((r) => ({ ...r, brand_kit: { ...r.brand_kit, logo_url: e.target.value || undefined } }))}
+                    placeholder={t('brandKitLogoPlaceholder')}
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                  />
+                ) : (
+                  <p className="text-sm text-foreground" data-testid="content-rules-brand-logo-readonly">{rules.brand_kit.logo_url || '—'}</p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">{t('brandKitColorsLabel')}</label>

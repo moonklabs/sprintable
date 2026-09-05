@@ -49,8 +49,9 @@ async function flush() {
 }
 
 const RULES_V1 = {
-  banned_terms: ['무료체험'], require_utm: true, tone: '친근하게', taxonomy: ['공지'],
-  channel_priority: ['threads', 'wordpress'], brand_kit: { logo_url: 'https://x.example/logo.png', colors: ['#111'], fonts: ['Pretendard'] },
+  banned_terms: ['무료체험'], require_utm: true, tone: '친근하게' as string | null, taxonomy: ['공지'],
+  channel_priority: ['threads', 'wordpress'],
+  brand_kit: { logo_url: 'https://x.example/logo.png' as string | undefined, colors: ['#111'], fonts: ['Pretendard'] },
 };
 
 function stubFetch(opts: {
@@ -104,6 +105,32 @@ describe('ContentRulesPage — 조회·표시(story #3472)', () => {
     expect(container.querySelector('[data-testid="content-rules-banned-terms-editor"]')).toBeNull();
     expect(container.querySelector('[data-testid="content-rules-banned-terms-readonly"]')).not.toBeNull();
     expect(container.textContent).toContain(koMessages.contentRules.readOnlyReason);
+  });
+
+  // 카디르군 REQUEST_CHANGES(2026-09-05, PR#3827) — require_utm 토글·tone·brand_kit
+  // logo_url 세 필드가 disabled={!isOwner}만 붙은 "살아 있는" input/checkbox였다
+  // (나머지 4필드=TagListEditor는 진작 읽기 전용 텍스트로 바뀌어 있었다 — 여섯 필드
+  // 전수 대신 readOnly 분기 하나만 보고 넘어간 최초 대조 갭). 여섯 필드 전수로 pin.
+  it('⭐member — 여섯 필드 전수: 살아있는 input/checkbox 0개, 값은 텍스트로 전부 보인다', async () => {
+    stubFetch({});
+    await mount('member');
+    // 편집 가능한 폼 컨트롤이 화면 전체에 하나도 없다(살아있는 컨트롤=탭 순서에
+    // 남아 스크린리더가 여전히 편집 가능한 것으로 읽는다).
+    expect(container.querySelectorAll('input, textarea')).toHaveLength(0);
+
+    expect(container.querySelector('[data-testid="content-rules-require-utm"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-require-utm-readonly"]')?.textContent)
+      .toBe(koMessages.contentRules.requireUtmOnLabel);
+    expect(container.querySelector('[data-testid="content-rules-tone-readonly"]')?.textContent).toBe('친근하게');
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-readonly"]')?.textContent)
+      .toBe('https://x.example/logo.png');
+  });
+
+  it('member — tone·로고가 비어 있으면 「—」로 보인다(값 없음 표시)', async () => {
+    stubFetch({ rules: { ...RULES_V1, tone: null, brand_kit: { ...RULES_V1.brand_kit, logo_url: undefined } } });
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-tone-readonly"]')?.textContent).toBe('—');
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-readonly"]')?.textContent).toBe('—');
   });
 
   it('⭐admin도 편집 컨트롤이 없다(owner-or-admin 상수 재사용 금지 — 정확히 owner만)', async () => {
