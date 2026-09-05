@@ -289,3 +289,109 @@ async def test_channel_post_two_connections_same_work_item_both_succeed():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_hosted_site_publish_rejected_when_only_webhook_gate_approved():
+    """(5) 양성대조·핵심(카디르 REQUEST_CHANGES 2026-09-05) — `_resolve_approved_gate`
+    (hosted_site 전용 chokepoint)에 scope_key="" 필터가 없으면, 같은 work_item의
+    webhook 게이트(scope_key=connection_id)가 approved라는 사실만으로 hosted_site
+    발행(POST /site-posts)이 대신 통과해 버린다 — dual-destination을 가능케 한 이
+    스토리 자신의 목적(목적지별 독립 승인)을 스스로 뚫는 결함이었다. 뮤테이션 대상:
+    `_resolve_approved_gate`의 `Gate.scope_key == ""` 필터(쿼리·post-fetch 검증 둘
+    다)를 지우면 아래 403이 201로 바뀌어야 한다."""
+    from app.services.gate_service import transition_gate
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_wh = await _seed_webhook_connection(
+                s, org_id, target_url_builder=lambda cid: f"https://reject.example.com/deliver/{cid}",
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_wh, gate_wh = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_wh, slug="reject-webhook",
+            )
+        async with Session() as s:
+            gate_row = await transition_gate(s, org_id, gate_wh, "approved", resolver_id=human_id)
+            await s.commit()
+            assert gate_row.status == "approved"
+
+        # hosted_site 발행(gate_id 생략 → fallback 조회 경로, scope_key="" 전용)을 같은
+        # work_item으로 시도 — webhook 게이트의 승인을 대신 통과시키면 안 된다. title·
+        # summary·tags·body_md를 webhook draft(_create_and_submit_site_post_draft
+        # 기본값: 제목/요약/본문, tags=[])와 **일부러 똑같이** 맞춘다 — scope_key 필터가
+        # 빠지면 그 게이트의 sealed_content_sha256과 해시가 일치해 봉인 재검증까지 통과,
+        # 즉 진짜로 201이 나야 이 뮤테이션이 무엇을 놓치는지가 명확해진다(해시가 달라
+        # 409로 떨어지면 "봉인 불일치"와 "목적지 오매칭"이 뒤섞여 이 pin이 흐려진다).
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_user_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json={
+                    "work_item_id": str(story_id), "title": "제목", "slug": "hosted-reject",
+                    "lang": "ko", "summary": "요약", "tags": [], "body_md": "본문",
+                },
+            )
+        assert r.status_code == 403, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_draft_list_shows_each_drafts_own_gate_not_the_others():
+    """(6) 양성대조 — 카디르 REQUEST_CHANGES(2026-09-05) — `list_site_post_drafts`의
+    게이트 배치 조회가 work_item_id만으로 키를 잡으면 같은 work_item의 draft A
+    (wordpress, approved)·B(webhook, pending)가 서로의 게이트 상태를 나눠 본다.
+    뮤테이션 대상: `gates_by_scope`를 다시 work_item_id만으로 keying하면 아래 두
+    assert 중 하나가 뒤바뀐 상태로 통과해 RED가 안 된다."""
+    from app.services.gate_service import transition_gate
+    from app.services.site_posts import list_site_post_drafts
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_user_id, human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_wp = await _seed_wordpress_connection(s, org_id, site_url="https://list-a.example.com")
+            connection_wh = await _seed_webhook_connection(
+                s, org_id, target_url_builder=lambda cid: f"https://list-b.example.com/deliver/{cid}",
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_a, gate_a = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_wp, slug="list-a",
+            )
+            draft_b, gate_b = await _create_and_submit_site_post_draft(
+                client, org_id=org_id, story_id=story_id, connection_id=connection_wh, slug="list-b",
+            )
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_a, "approved", resolver_id=human_id)
+            await s.commit()
+        # B는 의도적으로 pending 그대로 둔다.
+
+        async with Session() as s:
+            rows = await list_site_post_drafts(s, org_id=org_id)
+        rows_by_draft = {draft.id: (gate, ) for draft, _latest, _origin, gate, _post in rows}
+        gate_a_seen = rows_by_draft[draft_a][0]
+        gate_b_seen = rows_by_draft[draft_b][0]
+        assert gate_a_seen is not None and gate_a_seen.id == gate_a and gate_a_seen.status == "approved"
+        assert gate_b_seen is not None and gate_b_seen.id == gate_b and gate_b_seen.status == "pending"
+        assert gate_a_seen.id != gate_b_seen.id, "두 draft가 같은 게이트를 나눠 봤다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

@@ -170,7 +170,13 @@ async def _resolve_approved_gate(
 ) -> Gate:
     """gate_id가 주어지면 그 게이트 자체를 검증(work_item/타입 일치 + 승인 상태). 없으면 이
     work item의 external_publish 게이트를 찾아 검증(가장 최근 것 — story #2150 재제출 리셋
-    관례상 같은 (work_item, gate_type)엔 사실상 행 1개만 산다)."""
+    관례상 같은 (work_item, gate_type, scope_key)엔 사실상 행 1개만 산다).
+
+    story #3478 카디르 REQUEST_CHANGES(2026-09-05) — 이 함수는 hosted_site(자사 사이트)
+    발행 전용 chokepoint라 scope_key는 항상 ""(외부 목적지 축과 별개)여야 한다. 필터가
+    없으면 같은 work_item에 WordPress·webhook용으로 approved된 게이트(scope_key=
+    connection_id)를 이 hosted_site 발행이 대신 통과시켜 버린다 — dual-destination을
+    가능케 한 이 스토리 자체가 자신의 목적(목적지별 독립 승인)을 스스로 뚫을 뻔한 지점."""
     if gate_id is not None:
         gate = (await db.execute(
             select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
@@ -179,6 +185,7 @@ async def _resolve_approved_gate(
             gate is None
             or gate.work_item_id != work_item_id
             or gate.gate_type != "external_publish"
+            or gate.scope_key != ""
             or gate.status not in _APPROVED_STATUSES
         ):
             raise ExternalPublishGateNotApprovedError(
@@ -190,6 +197,7 @@ async def _resolve_approved_gate(
         select(Gate)
         .where(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
+            Gate.scope_key == "",
         )
         .order_by(Gate.created_at.desc())
         .limit(1)
@@ -584,16 +592,20 @@ async def list_site_post_drafts(
     work_item_ids = [draft.work_item_id for draft, _, _ in page_rows]
     slugs = [draft.slug for draft, _, _ in page_rows]
 
-    # 배치 ②: work_item당 external_publish 게이트 — story #3360 §2 관례상 사실상 1개뿐이지만
-    # 재제출 리셋 등으로 여럿이면 최신(created_at desc)이 이긴다(dict 조립 순서로 구현).
-    gates_by_work_item: dict[uuid.UUID, Gate] = {}
+    # 배치 ②: (work_item, scope_key)당 external_publish 게이트 — story #3360 §2 관례상
+    # 사실상 1개뿐이지만 재제출 리셋 등으로 여럿이면 최신(created_at desc)이 이긴다(dict
+    # 조립 순서로 구현). story #3478 카디르 REQUEST_CHANGES(2026-09-05) — 예전엔 키가
+    # work_item_id만이라 같은 work_item에 목적지가 다른 draft 둘(WordPress+webhook)이
+    # 있으면 그중 하나의 게이트를 서로 나눠 봤다(scope_key 도입으로 다중 목적지가 실제로
+    # 가능해진 이 스토리 자체가 이 배치 조회에서 새 혼선을 만들 뻔한 지점).
+    gates_by_scope: dict[tuple[uuid.UUID, str], Gate] = {}
     gate_rows = (await db.execute(
         select(Gate)
         .where(Gate.org_id == org_id, Gate.work_item_id.in_(work_item_ids), Gate.gate_type == "external_publish")
         .order_by(Gate.created_at.desc())
     )).scalars().all()
     for g in gate_rows:
-        gates_by_work_item.setdefault(g.work_item_id, g)
+        gates_by_scope.setdefault((g.work_item_id, g.scope_key), g)
 
     # 배치 ③: 공개 site_posts — 유일키 (org_id, lang, slug)라 draft.slug + latest.lang으로
     # 되찾는다(story #3381/#3386과 동일 조회 축).
@@ -607,7 +619,11 @@ async def list_site_post_drafts(
         posts_by_key[(p.lang, p.slug)] = p
 
     return [
-        (draft, latest_v, origin_v, gates_by_work_item.get(draft.work_item_id), posts_by_key.get((latest_v.lang, draft.slug)))
+        (
+            draft, latest_v, origin_v,
+            gates_by_scope.get((draft.work_item_id, str(draft.connection_id or ""))),
+            posts_by_key.get((latest_v.lang, draft.slug)),
+        )
         for draft, latest_v, origin_v in page_rows
     ]
 

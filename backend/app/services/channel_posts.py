@@ -764,22 +764,24 @@ async def list_channel_post_drafts(
 
     work_item_ids = [draft.work_item_id for draft, _, _ in page_rows]
 
-    # 배치 ②: work_item당 external_publish 게이트(site_posts.list_site_post_drafts와 동형 —
-    # 사실상 1개뿐이지만 여럿이면 최신 created_at이 이긴다).
-    gates_by_work_item: dict[uuid.UUID, Gate] = {}
+    # 배치 ②: (work_item, scope_key)당 external_publish 게이트(site_posts.list_site_post_
+    # drafts와 동형 — 사실상 1개뿐이지만 여럿이면 최신 created_at이 이긴다). story #3478
+    # 카디르 REQUEST_CHANGES(2026-09-05) — 예전엔 키가 work_item_id만이라 같은 work_item에
+    # 목적지가 다른 draft 둘(예: 커넥션 A·B)이 있으면 그중 하나의 게이트를 서로 나눠 봤다.
+    gates_by_scope: dict[tuple[uuid.UUID, str], Gate] = {}
     gate_rows = (await db.execute(
         select(Gate)
         .where(Gate.org_id == org_id, Gate.work_item_id.in_(work_item_ids), Gate.gate_type == "external_publish")
         .order_by(Gate.created_at.desc())
     )).scalars().all()
     for g in gate_rows:
-        gates_by_work_item.setdefault(g.work_item_id, g)
+        gates_by_scope.setdefault((g.work_item_id, g.scope_key), g)
 
-    gate_ids = [g.id for g in gates_by_work_item.values()]
+    gate_ids = [g.id for g in gates_by_scope.values()]
     latest_version_id_by_gate = {
-        gates_by_work_item[draft.work_item_id].id: latest_v.id
+        gates_by_scope[(draft.work_item_id, str(draft.connection_id))].id: latest_v.id
         for draft, latest_v, _ in page_rows
-        if draft.work_item_id in gates_by_work_item
+        if (draft.work_item_id, str(draft.connection_id)) in gates_by_scope
     }
 
     latest_version_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
@@ -842,7 +844,7 @@ async def list_channel_post_drafts(
 
     result = []
     for draft, latest_v, origin_v in page_rows:
-        gate = gates_by_work_item.get(draft.work_item_id)
+        gate = gates_by_scope.get((draft.work_item_id, str(draft.connection_id)))
         published_pub = published_pub_by_gate.get(gate.id) if gate else None
         latest_pub = latest_version_pub_by_gate.get(gate.id) if gate else None
         published_body_sha256 = (

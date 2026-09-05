@@ -238,6 +238,64 @@ async def test_second_draft_submit_different_connection_both_succeed():
 
 
 @pytest.mark.anyio
+async def test_draft_list_shows_each_drafts_own_gate_not_the_others():
+    """story #3478 카디르 REQUEST_CHANGES(2026-09-05) — `list_channel_post_drafts`의
+    게이트 배치 조회(`gates_by_scope`)가 work_item_id만으로 키를 잡으면 같은 work_item의
+    draft A(approved)·B(pending)가 서로의 게이트 상태를 나눠 본다(단건 조회
+    `GET .../drafts/{draft_id}`도 이 함수를 그대로 재사용하므로 동일 결함). 뮤테이션
+    대상: `gates_by_scope`를 다시 work_item_id만으로 keying하면 아래 assert 중 하나가
+    뒤바뀐 상태로 통과해 RED가 안 된다."""
+    from app.services.channel_posts import list_channel_post_drafts
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_a = await _seed_connection(s, org_id, account_id="list-acct-a")
+            connection_b = await _seed_connection(s, org_id, account_id="list-acct-b")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            r_draft_a = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_a, text="A안"),
+            )
+            draft_a_id = uuid.UUID(r_draft_a.json()["draft_id"])
+            r_submit_a = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_a_id}/submit", json={},
+            )
+            gate_a_id = uuid.UUID(r_submit_a.json()["gate_id"])
+            await _approve_gate_directly(s, gate_a_id)
+
+            r_draft_b = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_b, text="B안"),
+            )
+            draft_b_id = uuid.UUID(r_draft_b.json()["draft_id"])
+            r_submit_b = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_b_id}/submit", json={},
+            )
+            gate_b_id = uuid.UUID(r_submit_b.json()["gate_id"])
+        # B는 의도적으로 pending 그대로 둔다.
+
+        async with Session() as s:
+            rows = await list_channel_post_drafts(s, org_id=org_id)
+        gate_by_draft = {row[0].id: row[3] for row in rows}
+        gate_a_seen = gate_by_draft[draft_a_id]
+        gate_b_seen = gate_by_draft[draft_b_id]
+        assert gate_a_seen is not None and gate_a_seen.id == gate_a_id and gate_a_seen.status == "approved"
+        assert gate_b_seen is not None and gate_b_seen.id == gate_b_id and gate_b_seen.status == "pending"
+        assert gate_a_seen.id != gate_b_seen.id, "두 draft가 같은 게이트를 나눠 봤다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_same_draft_resubmit_still_allowed_no_regression():
     """AC3(회귀 없음) — 같은 draft를 다시 상신(예: 재승인 요청)하는 것은 그대로 허용된다
     (자기 자신은 "다른 초안"이 아니다)."""
