@@ -1316,6 +1316,11 @@
       "file": "tests/test_3522_check_constraint_mirror_guard.py",
       "sec": 280.0,
       "source": "story-3522-check-constraint-mirror-guard(PR 개설 前 선제 등재 — 이 파일은 테스트마다 실 alembic upgrade head를 전용 임시 DB에 두 번(마이그·create_all) 돌려 무겁다. 로컬 raw pytest 3건 46.49s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 280s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3528_self_recovery_sweep.py",
+      "sec": 20.0,
+      "source": "story-3528-self-recovery-sweep(라이브 FAIL 핫픽스, PR#3900 REQUIRED 1 반영 — 로컬 raw pytest 6건 3.6s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -346,12 +346,87 @@ async def _schedule_next_continuous_poll_if_active(
     await db.execute(stmt)
 
 
+# story #3528 라이브 결함(2026-09-06, 카디르 QA 22:15Z·PO 코드 실측 確定) — 자가회수
+# 스윕 한 틱의 SQL LIMIT(=삽입 상한과 동일, BATCH_SIZE와 동형 사상). orphan 후보
+# SQL이 이미 NOT EXISTS+freshness로 걸러내므로 정상 상태에선 이 LIMIT에 안 걸린다.
+_SELF_RECOVERY_SWEEP_SEED_LIMIT = 50
+
+
+async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession, *, now: datetime) -> int:
+    """story #3528 라이브 FAIL(2026-09-06, 카디르 QA·PO 코드 실측 確定) — 「상태
+    자가회수 부재」 클래스. `_schedule_next_continuous_poll_if_active`는 due 행이
+    captured/failed로 끝난 뒤(아래 루프 안)에만 불린다 — 배포 前에 이미 due 3창
+    (+1h/+1d/+7d)을 전부 소진해 pending/in_progress 행이 0으로 남아 있던 publication
+    은 씨앗(트리거할 행) 자체가 없어 재생성 체인이 영영 시작되지 않는다(같은 이유로
+    체인이 한 번 끊기면 — 크래시로 in_progress 잔류 등 — 그 publication은 영구
+    탈락하나, 그 회수는 별건 후보로 관찰만 하고 여기선 다루지 않는다 — 「행 0」만).
+
+    매 틱마다 활성(`_is_publication_active`)·댓글 지원 채널(`supports_fetch_replies`)
+    ·org 상한 안(`_within_org_continuous_poll_cap`)이면서 pending/in_progress 행이
+    0인 publication에 due_at=now 씨앗 행을 심는다(UNIQUE 멱등 — 동시 틱 경합 방어,
+    한 틱 삽입 상한 `_SELF_RECOVERY_SWEEP_SEED_LIMIT`건 — 남는 orphan은 다음 틱이
+    이어서 잡는다, 이미 씨앗 심긴 건 pending 행이 생겨 다음 스캔에서 자동 제외).
+
+    페드루 PO REQUIRED(2026-09-06, PR#3900 리뷰) — orphan 후보 판정을 SQL 한
+    쿼리로 민다(NOT EXISTS + 상관 서브쿼리 MAX 집계 + LIMIT). orphan이 0인 정상
+    상태(대부분의 틱)에서 이 함수의 비용이 「쿼리 1·0행」이 되게 하는 게 목적 —
+    이전 구현은 활성 창(14일) 안 publication을 전부 파이썬으로 받아 행마다 count+
+    max 쿼리를 따로 던져, orphan이 하나도 없어도 org×상한 200 규모면 틱마다
+    수천 쿼리가 영원히 돌았다."""
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    comment_capable_channels = [
+        channel for channel, adapter in CHANNEL_ADAPTERS.items() if adapter.supports_fetch_replies
+    ]
+    if not comment_capable_channels:
+        return 0
+
+    freshness_cutoff = now - _CONTINUOUS_POLL_INTERVAL
+    has_open_row = (
+        select(func.count()).select_from(CommentCollectionSchedule).where(
+            CommentCollectionSchedule.publication_id == ChannelPublication.id,
+            CommentCollectionSchedule.status.in_(("pending", "in_progress")),
+        ).correlate(ChannelPublication).scalar_subquery()
+    )
+    last_activity_at = (
+        select(func.max(CommentCollectionSchedule.due_at)).where(
+            CommentCollectionSchedule.publication_id == ChannelPublication.id,
+        ).correlate(ChannelPublication).scalar_subquery()
+    )
+
+    candidates = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.channel.in_(comment_capable_channels),
+            ChannelPublication.published_at.is_not(None),
+            ChannelPublication.published_at >= now - _ACTIVE_PUBLISHED_WITHIN,
+            has_open_row == 0,
+            or_(last_activity_at.is_(None), last_activity_at < freshness_cutoff),
+        ).order_by(ChannelPublication.published_at.desc())
+        .limit(_SELF_RECOVERY_SWEEP_SEED_LIMIT)
+    )).scalars().all()
+
+    seeded = 0
+    for pub in candidates:
+        if not await _is_publication_active(db, publication_id=pub.id, now=now):
+            continue
+        if not await _within_org_continuous_poll_cap(db, org_id=pub.org_id, publication_id=pub.id, now=now):
+            continue
+        stmt = pg_insert(CommentCollectionSchedule).values(
+            id=uuid.uuid4(), org_id=pub.org_id, publication_id=pub.id, channel=pub.channel,
+            external_id=pub.external_id, due_at=now, status="pending",
+        ).on_conflict_do_nothing(constraint="uq_comment_collection_schedule_publication_due_at")
+        await db.execute(stmt)
+        seeded += 1
+    if seeded:
+        await db.commit()
+    return seeded
+
+
 async def process_due_comment_collections(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """`insight_snapshots.py::process_due_insight_snapshots`와 동형 SKIP LOCKED 2단계
     커밋(클레임 commit → 개별 처리 commit/rollback 격리)."""
     from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION, FAILURE_KIND_TRANSIENT
-
-    from sqlalchemy import or_
 
     now = now or datetime.now(timezone.utc)
     rows = (await db.execute(
@@ -453,6 +528,12 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
             )
             await db.commit()
             counts["failed"] += 1
+
+    # story #3528 라이브 FAIL(2026-09-06) — 이번 틱이 방금 claim한 rows(위에서 이미
+    # 스냅샷됨)와는 별개로, 이번 틱 끝에 자가회수 씨앗을 심는다. due_at=now로 심어도
+    # 이번 틱의 claim은 이미 지나갔으므로 다음 틱이 그 씨앗을 집는다(관찰 가능한
+    # 2단계: 이번 틱=씨앗 생성, 다음 틱=수집·재생성 이어짐).
+    counts["self_recovery_seeded"] = await _sweep_orphaned_active_publications_for_self_recovery(db, now=now)
 
     return counts
 
