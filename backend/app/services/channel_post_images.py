@@ -349,7 +349,7 @@ async def confirm_channel_post_image_upload(
     if latest is None:
         raise ChannelPostDraftNotFoundError(draft_id)
 
-    new_version, _channel = await create_channel_post_draft_version(
+    new_version, _channel, _violations = await create_channel_post_draft_version(
         db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
         text=latest.text, link_url=latest.link_url,
         author_member_id=member_id, author_kind=member_kind, image_sha256=final_sha256,

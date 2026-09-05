@@ -39,6 +39,7 @@ from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
 from app.services.channel_adapters import get_channel_adapter
 from app.services.channel_connection import decrypt_for_use
+from app.services.content_rules import ContentRuleViolationError, get_org_content_rules, lint_content
 from app.services.gate_seal import (
     GateReapprovalRequiredError as ChannelPostReapprovalRequiredError,  # noqa: F401 (재-export, 라우터가 import)
     GateSealMissingError as ChannelPostSealMissingError,  # noqa: F401 (재-export, 라우터가 import)
@@ -375,7 +376,7 @@ async def create_channel_post_draft_version(
     author_kind: str,
     image_sha256: str | None = _IMAGE_SHA256_CARRY_FORWARD,  # type: ignore[assignment]
     source_content_item_id: uuid.UUID | None = None,
-) -> tuple[ChannelPostVersion, str]:
+) -> tuple[ChannelPostVersion, str, list[dict]]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
     site_posts.create_site_post_draft_version과 1:1 대응(AC1).
 
@@ -383,6 +384,10 @@ async def create_channel_post_draft_version(
     라우터가 곧바로 unpack하도록 같이 바꾼다) — 라우터가 `tagged_link_preview`(AC5)를
     조립하려면 이 draft의 channel을 알아야 하는데, 여기서 이미 조회한 `connection.channel`을
     그대로 돌려주는 편이 라우터가 별도 쿼리로 다시 찾는 것보다 싸다.
+
+    story #3471(페드루 PO 確定 2026-09-05) — 3-튜플로 다시 넓혔다(`violations` 추가).
+    라우터가 응답 body에 그대로 실어 create/update 시점에 위반을 보여준다(비차단 —
+    거부는 submit()에서만).
 
     story 620beefc — `image_sha256` 생략(기본값) 시 draft의 직전 최신 버전 값을 그대로
     캐리포워드한다(§17-14 배지가 「이미지가 텍스트 편집만으로 조용히 사라졌다」를 만들지
@@ -493,9 +498,16 @@ async def create_channel_post_draft_version(
 
     await _reseal_gate_on_new_version(db, org_id=org_id, work_item_id=work_item_id, version=version)
 
+    # story #3471(페드루 PO 確定 2026-09-05) — 초안 create/update는 lint를 비차단으로
+    # 실행·draft에 스냅샷 저장만 한다(거부는 submit()만, 아래 함수 참고). rules가 org에
+    # 한 번도 PUT 안 됐으면(None) violations=0건.
+    rule_row = await get_org_content_rules(db, org_id=org_id)
+    violations = lint_content(rule_row.rules if rule_row else None, text=text, link_url=link_url)
+    draft.lint_result = {"rules_version": rule_row.version if rule_row else 0, "violations": violations}
+
     await db.commit()
     await db.refresh(version)
-    return version, connection.channel
+    return version, connection.channel, violations
 
 
 async def _reseal_gate_on_new_version(
@@ -875,6 +887,17 @@ async def submit_channel_post_draft(
     if target is None:
         raise ChannelPostVersionNotFoundError(version_id)
     origin_author_member_id = versions[0].author_member_id
+
+    # story #3471(페드루 PO 確定 2026-09-05) — submit(상신) 시점에 재검사·위반 1건
+    # 이상이면 422(금지 AC=서버 거부). create/update의 lint_result 스냅샷을 다시
+    # 신뢰하지 않고 이 시점 규칙으로 직접 재검사한다(create 이후 규칙이 PUT됐을 수
+    # 있다 — 오래된 스냅샷을 믿으면 그 사이 새로 생긴 위반을 놓친다).
+    rule_row = await get_org_content_rules(db, org_id=org_id)
+    submit_violations = lint_content(rule_row.rules if rule_row else None, text=target.text, link_url=target.link_url)
+    if submit_violations:
+        raise ContentRuleViolationError(
+            rules_version=rule_row.version if rule_row else 0, violations=submit_violations,
+        )
 
     from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
     from app.services.workflow_line_config import _default_role_id
