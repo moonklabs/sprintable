@@ -42,6 +42,20 @@ interface GenerationBudget {
   period: 'month';
 }
 
+// story #3540(BE #3506, PO 確定 2026-09-06 — 「성과 수집」 UTM 구멍 처방) — UTM
+// 자동 부착 정책값. 지금까지 이 화면 어디에도 편집 자리가 없어(build_tagged_link이
+// 실제로 쓰는 값인데도) 「어디서 바꾸나」가 거짓이던 갭 — content_rules.py::UtmRules
+// 모델 그대로(신규 필드 0). default_source/default_medium 빈 문자열=「안 정함」
+// (어댑터 하드코딩 그대로 쓰겠다는 뜻, null로 저장 — generation_budget 빈 입력=null
+// 관례와 동형).
+interface UtmRules {
+  enabled: boolean;
+  default_source: string | null;
+  default_medium: string | null;
+  campaign_from: 'campaign_slug' | 'draft_id';
+  content_from: 'draft_id' | 'none';
+}
+
 interface ContentRules {
   banned_terms: string[];
   require_utm: boolean;
@@ -50,6 +64,7 @@ interface ContentRules {
   channel_priority: string[];
   brand_kit: BrandKit;
   generation_budget: GenerationBudget | null;
+  utm_rules: UtmRules | null;
 }
 
 interface ContentRulesResponse {
@@ -60,7 +75,7 @@ interface ContentRulesResponse {
 
 const EMPTY_RULES: ContentRules = {
   banned_terms: [], require_utm: false, tone: null, taxonomy: [], channel_priority: [], brand_kit: {},
-  generation_budget: null,
+  generation_budget: null, utm_rules: null,
 };
 
 // story #3472(BE #3825 "보정 중") — 422 CONTENT_RULES_INVALID의 필드별 shape는 아직
@@ -85,6 +100,7 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
   channel_priority: 'channelPriorityLabel',
   brand_kit: 'brandKitLabel',
   generation_budget: 'generationBudgetSectionTitle',
+  utm_rules: 'utmRulesSectionTitle',
 };
 
 // story #3501(doc a0da40c9 §20-4) — "화면이 이미 가진 것으로 계산한다": 로드값·
@@ -314,6 +330,7 @@ export default function ContentRulesPage() {
           ...json.data.rules,
           brand_kit: json.data.rules.brand_kit ?? {},
           generation_budget: json.data.rules.generation_budget ?? null,
+          utm_rules: json.data.rules.utm_rules ?? null,
         };
         setRules(merged);
         setLoadedRules(merged);
@@ -373,6 +390,7 @@ export default function ContentRulesPage() {
             ...json.data.rules,
             brand_kit: json.data.rules.brand_kit ?? {},
             generation_budget: json.data.rules.generation_budget ?? null,
+            utm_rules: json.data.rules.utm_rules ?? null,
           };
           setRules(merged);
           setLoadedRules(merged);
@@ -396,6 +414,7 @@ export default function ContentRulesPage() {
             ...freshJson.data.rules,
             brand_kit: freshJson.data.rules.brand_kit ?? {},
             generation_budget: freshJson.data.rules.generation_budget ?? null,
+            utm_rules: freshJson.data.rules.utm_rules ?? null,
           };
           const priorChangedFields = diffFieldNames(loadedRules, freshServerRules);
           const myChangedFields = diffFieldNames(loadedRules, rules);
@@ -526,12 +545,143 @@ export default function ContentRulesPage() {
                 {fieldErrors.require_utm ? <p className="text-xs text-destructive">{fieldErrors.require_utm}</p> : null}
               </div>
 
+              {/* story #3540(BE #3506, PO 確定 2026-09-06) — utm_rules 편집 자리. 지금까지
+                  이 화면 어디에도 없어(build_tagged_link이 실제로 쓰는 값인데도) 「어디서
+                  바꾸나」가 거짓이던 갭. require_utm 곁에(같은 카드, 별도 SectionCard
+                  아님). enabled=false(또는 utm_rules 자체가 null)면 나머지 4필드는 안
+                  그린다(꺼져 있으면 값이 무의미 — generation_budget의 "정책 없으면 통화
+                  select 숨김"과 동형 관례). default_source/default_medium 빈 입력=null
+                  ("안 정함", 어댑터 하드코딩 그대로 — build_tagged_link 계약 그대로). */}
+              <div className="space-y-1.5">
+                <h3 className="text-xs font-medium text-muted-foreground">{t('utmRulesSectionTitle')}</h3>
+                {canEditRules ? (
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={rules.utm_rules?.enabled ?? false}
+                      onChange={(e) => setRules((r) => ({
+                        ...r,
+                        utm_rules: e.target.checked
+                          ? {
+                              enabled: true,
+                              default_source: r.utm_rules?.default_source ?? null,
+                              default_medium: r.utm_rules?.default_medium ?? null,
+                              campaign_from: r.utm_rules?.campaign_from ?? 'campaign_slug',
+                              content_from: r.utm_rules?.content_from ?? 'draft_id',
+                            }
+                          : (r.utm_rules ? { ...r.utm_rules, enabled: false } : null),
+                      }))}
+                      data-testid="content-rules-utm-rules-enabled"
+                    />
+                    {t('utmRulesEnabledLabel')}
+                  </label>
+                ) : (
+                  <p className="text-sm text-foreground">
+                    <span className="text-xs font-medium text-muted-foreground">{t('utmRulesEnabledLabel')}</span>{' '}
+                    <span data-testid="content-rules-utm-rules-enabled-readonly">
+                      {rules.utm_rules?.enabled ? t('utmRulesEnabledOnLabel') : t('utmRulesEnabledOffLabel')}
+                    </span>
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">{t('utmRulesEnabledHint')}</p>
+                {rules.utm_rules?.enabled ? (
+                  <div className="space-y-3 rounded-md border border-border p-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-utm-default-source">
+                        {t('utmRulesDefaultSourceLabel')}
+                      </label>
+                      {canEditRules ? (
+                        <input
+                          id="content-rules-utm-default-source"
+                          type="text"
+                          value={rules.utm_rules.default_source ?? ''}
+                          onChange={(e) => setRules((r) => (r.utm_rules ? {
+                            ...r, utm_rules: { ...r.utm_rules, default_source: e.target.value || null },
+                          } : r))}
+                          placeholder={t('utmRulesDefaultSourcePlaceholder')}
+                          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                          data-testid="content-rules-utm-default-source"
+                        />
+                      ) : (
+                        <p className="text-sm text-foreground" data-testid="content-rules-utm-default-source-readonly">
+                          {rules.utm_rules.default_source ?? t('utmRulesNotSetValue')}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-utm-default-medium">
+                        {t('utmRulesDefaultMediumLabel')}
+                      </label>
+                      {canEditRules ? (
+                        <input
+                          id="content-rules-utm-default-medium"
+                          type="text"
+                          value={rules.utm_rules.default_medium ?? ''}
+                          onChange={(e) => setRules((r) => (r.utm_rules ? {
+                            ...r, utm_rules: { ...r.utm_rules, default_medium: e.target.value || null },
+                          } : r))}
+                          placeholder={t('utmRulesDefaultMediumPlaceholder')}
+                          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                          data-testid="content-rules-utm-default-medium"
+                        />
+                      ) : (
+                        <p className="text-sm text-foreground" data-testid="content-rules-utm-default-medium-readonly">
+                          {rules.utm_rules.default_medium ?? t('utmRulesNotSetValue')}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      {/* 페드루 PO REQUIRED②(2026-09-06, #3892 리뷰) — campaign_from은
+                          content_rules.py::UtmRules docstring(:71-74) 그대로 "순수
+                          서술용"(실 campaign 해소는 여전히 resolve_utm_campaign()의
+                          기존 규칙, 이 필드가 뭐든 동작 무변경) — select를 두면 눌러도
+                          아무것도 안 바뀌는 죽은 컨트롤이 된다. 편집 제거·고정 안내
+                          한 줄만(값은 로드값 그대로 보존해 저장 — 지어내지 않는다).
+                          content_from은 실제로 동작하므로(build_tagged_link) 그대로
+                          select 유지. */}
+                      <p className="text-xs text-muted-foreground" data-testid="content-rules-utm-campaign-from-fixed-note">
+                        {t('utmRulesCampaignFromFixedNote')}
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground" htmlFor="content-rules-utm-content-from">
+                        {t('utmRulesContentFromLabel')}
+                      </label>
+                      {canEditRules ? (
+                        <select
+                          id="content-rules-utm-content-from"
+                          value={rules.utm_rules.content_from}
+                          onChange={(e) => setRules((r) => (r.utm_rules ? {
+                            ...r,
+                            utm_rules: { ...r.utm_rules, content_from: e.target.value as UtmRules['content_from'] },
+                          } : r))}
+                          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                          data-testid="content-rules-utm-content-from"
+                        >
+                          <option value="draft_id">{t('utmRulesContentFromDraftId')}</option>
+                          <option value="none">{t('utmRulesContentFromNone')}</option>
+                        </select>
+                      ) : (
+                        <p className="text-sm text-foreground" data-testid="content-rules-utm-content-from-readonly">
+                          {rules.utm_rules.content_from === 'draft_id'
+                            ? t('utmRulesContentFromDraftId')
+                            : t('utmRulesContentFromNone')}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+                {fieldErrors.utm_rules ? <p className="text-xs text-destructive">{fieldErrors.utm_rules}</p> : null}
+              </div>
+
               {/* story #3532(유나 §23, PO 確定 2026-09-06) — 아래 네 필드(tone·taxonomy·
                   channel_priority·brand_kit)는 기계 검사 소비처가 0이다(banned_terms·
                   require_utm 둘만 실제로 검사된다) — 그런데 같은 입력칸 모양으로 나란히
                   서 있어 "적어 두면 강제된다"로 읽힌다. 묶음 위에 한 번만(항목마다
                   반복 X) 약속의 크기를 줄이는 문장 — 명령형("지키세요") 금지, 이 문구가
-                  거짓이 되는 날(실제 lint 축이 생기는 날)이 삭제 조건. */}
+                  거짓이 되는 날(실제 lint 축이 생기는 날)이 삭제 조건. 페드루 PO
+                  明示(2026-09-06, #3892 리뷰) — utm_rules 섹션이 이 문장 위(#3540
+                  편집 폼은 그 자체가 검사 대상이 아니라 이 광고문 묶음과 무관). */}
               <p className="text-xs text-muted-foreground" data-testid="content-rules-advisory-notice">
                 {t('contentRulesAdvisoryNotice')}
               </p>

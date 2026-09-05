@@ -541,3 +541,179 @@ describe('ContentRulesPage — 채널 우선순위 정렬(story #3472)', () => {
     expect(list.querySelectorAll('button')).toHaveLength(0);
   });
 });
+
+// story #3540(BE #3506, PO 確定 2026-09-06) — UTM 자동 부착 정책(utm_rules) 편집.
+// build_tagged_link이 실제로 쓰는 값인데 이 화면에 편집 자리가 없던 갭을 메운다.
+describe('ContentRulesPage — UTM 자동 부착(story #3540)', () => {
+  it('utm_rules가 null(기본)이면 꺼짐 상태로 뜨고 하위 필드는 안 그려진다', async () => {
+    stubFetch({});
+    await mount('owner');
+    expect((container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement)?.checked).toBe(false);
+    expect(container.querySelector('[data-testid="content-rules-utm-default-source"]')).toBeNull();
+  });
+
+  it('⭐owner가 켜면 하위 4필드가 기본값으로 나타난다(campaign_slug·draft_id)', async () => {
+    stubFetch({});
+    await mount('owner');
+    const toggle = container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement;
+    await act(async () => { toggle.click(); });
+    await flush();
+
+    expect(toggle.checked).toBe(true);
+    expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('');
+    // 페드루 PO REQUIRED②(2026-09-06, #3892 리뷰) — campaign_from은 서술용 고정
+    // 안내 한 줄뿐(select 제거, BE docstring "값이 뭐든 동작 무변경").
+    expect(container.querySelector('[data-testid="content-rules-utm-campaign-from-fixed-note"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement).value).toBe('draft_id');
+  });
+
+  it('⭐owner가 값을 채우고 저장하면 PUT body의 utm_rules에 정확히 실린다(빈 문자열=null)', async () => {
+    let sentBody: unknown = null;
+    stubFetch({
+      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
+    });
+    await mount('owner');
+
+    const toggle = container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement;
+    await act(async () => { toggle.click(); });
+    await flush();
+
+    const sourceInput = container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(sourceInput, 'newsletter');
+      sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    const contentFromSelect = container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement;
+    await act(async () => {
+      contentFromSelect.value = 'none';
+      contentFromSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const utmRules = (sentBody as { rules?: { utm_rules?: unknown } } | null)?.rules?.utm_rules as
+      | { enabled: boolean; default_source: string | null; default_medium: string | null; campaign_from: string; content_from: string }
+      | undefined;
+    expect(utmRules).toEqual({
+      enabled: true, default_source: 'newsletter', default_medium: null,
+      campaign_from: 'campaign_slug', content_from: 'none',
+    });
+  });
+
+  it('⭐값이 있던 필드를 지우면(빈 문자열) 저장 시 null로 보내진다(안 정함)', async () => {
+    let sentBody: unknown = null;
+    stubFetch({
+      rules: {
+        ...RULES_V1,
+        utm_rules: {
+          enabled: true, default_source: 'old-value', default_medium: null,
+          campaign_from: 'campaign_slug', content_from: 'draft_id',
+        },
+      } as never,
+      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
+    });
+    await mount('owner');
+
+    const sourceInput = container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement;
+    expect(sourceInput.value).toBe('old-value');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(sourceInput, '');
+      sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const utmRules = (sentBody as { rules?: { utm_rules?: { default_source?: unknown } } } | null)?.rules?.utm_rules;
+    expect(utmRules?.default_source).toBeNull();
+  });
+
+  it('로드된 utm_rules 값이 있으면 그대로 반영된다(owner)', async () => {
+    stubFetch({
+      rules: {
+        ...RULES_V1,
+        utm_rules: {
+          enabled: true, default_source: 'ig-bio', default_medium: null,
+          campaign_from: 'draft_id', content_from: 'none',
+        },
+      } as never,
+    });
+    await mount('owner');
+    expect((container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement).checked).toBe(true);
+    expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('ig-bio');
+    expect((container.querySelector('[data-testid="content-rules-utm-default-medium"]') as HTMLInputElement).value).toBe('');
+    expect((container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement).value).toBe('none');
+  });
+
+  it('⭐campaign_from은 편집 UI 없이 로드값이 저장 시 그대로 보존된다(서술용 고정)', async () => {
+    let sentBody: unknown = null;
+    stubFetch({
+      rules: {
+        ...RULES_V1,
+        utm_rules: {
+          enabled: true, default_source: 'ig-bio', default_medium: null,
+          campaign_from: 'draft_id', content_from: 'none',
+        },
+      } as never,
+      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
+    });
+    await mount('owner');
+    // campaign_from을 바꿀 UI 자체가 없다(select 제거).
+    expect(container.querySelector('[data-testid="content-rules-utm-campaign-from"]')).toBeNull();
+
+    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
+    await act(async () => { saveBtn.click(); });
+    await flush();
+
+    const utmRules = (sentBody as { rules?: { utm_rules?: { campaign_from?: unknown } } } | null)?.rules?.utm_rules;
+    expect(utmRules?.campaign_from).toBe('draft_id');
+  });
+
+  it('member는 편집 컨트롤 없이 값만 읽는다(안 정함 표시 포함)', async () => {
+    stubFetch({
+      rules: {
+        ...RULES_V1,
+        utm_rules: {
+          enabled: true, default_source: null, default_medium: 'social',
+          campaign_from: 'campaign_slug', content_from: 'draft_id',
+        },
+      } as never,
+    });
+    await mount('member');
+    expect(container.querySelector('[data-testid="content-rules-utm-rules-enabled"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-utm-rules-enabled-readonly"]')?.textContent).toBe('켜짐');
+    expect(container.querySelector('[data-testid="content-rules-utm-default-source-readonly"]')?.textContent).toBe('안 정함');
+    expect(container.querySelector('[data-testid="content-rules-utm-default-medium-readonly"]')?.textContent).toBe('social');
+  });
+
+  it('켰다가 다시 끄면 하위 필드는 사라지지만 값은 보존된다(다시 켜면 그대로)', async () => {
+    stubFetch({
+      rules: {
+        ...RULES_V1,
+        utm_rules: {
+          enabled: true, default_source: 'kept-value', default_medium: null,
+          campaign_from: 'campaign_slug', content_from: 'draft_id',
+        },
+      } as never,
+    });
+    await mount('owner');
+    const toggle = container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement;
+
+    await act(async () => { toggle.click(); }); // off
+    await flush();
+    expect(container.querySelector('[data-testid="content-rules-utm-default-source"]')).toBeNull();
+
+    await act(async () => { toggle.click(); }); // on again
+    await flush();
+    expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('kept-value');
+  });
+});
