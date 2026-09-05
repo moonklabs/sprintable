@@ -38,12 +38,20 @@
   뒤에야 FINISHED로 전환된다(AC3 "container IN_PROGRESS→FINISHED 2 tick" — 발행 오케스트
   레이션의 최초 30초 대기+이후 폴링 주기를 감안해 첫 poll엔 아직 IN_PROGRESS, 두 번째
   poll에서 FINISHED가 나오게 지연을 잡았다). ⚠️위와 동일하게 **이미지 첨부 초안 전용**.
+- `[sandbox:comment-2-deleted]`(story #3516 AC8, 라이브 런북용) — 발행 뒤 `fetch_replies`
+  가 처음엔(발행 직후 ~`_COMMENT2_DELETE_AFTER_SECONDS`초까지) 댓글 2건을 그대로 주다가,
+  그 시각이 지나면 댓글 2가 사라진 것처럼 1건만 준다(comment_post_comments.py 조각①의
+  소프트 삭제 리컨실을 라이브에서 재현하는 유일한 트리거). 시각은 `create_container`가
+  `publish_container`를 거쳐 media_id 문자열 자체에 싣는다(서버 메모리 0, 위 stateless
+  계약 그대로) — 지연은 댓글 재수집 5분 rate-limit보다 짧게 잡혀 있어(60초) 처음 refresh
+  뒤 rate-limit이 풀리는 시점(5분 뒤)엔 이미 댓글이 사라져 있다.
 
 마커는 서로 배타적으로 다루지 않는다(먼저 매치되는 것을 그대로 적용) — 실패 마커 3종은
 텍스트 안 어디에든, 컨테이너 마커 2종과 자유롭게 조합 가능(단, 컨테이너 마커 2종은
 이미지 첨부 초안에서만 의미 있음, 위 참고)."""
 from __future__ import annotations
 
+import re
 import time
 import uuid
 
@@ -56,6 +64,16 @@ _MARKER_PROVIDER_ERROR = "[sandbox:provider-error]"
 _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
 _MARKER_CONTAINER_ERROR = "[sandbox:container-error]"
 _MARKER_CONTAINER_SLOW = "[sandbox:container-slow]"
+# story #3516 AC8(페드루 PO 確定 2026-09-05) — 라이브 런북 재료. 댓글 수집 리컨실
+# (조각①)을 사람이 dev에서 눈으로 재현하려면 "처음엔 2건, 잠시 뒤엔 1건"이 필요한데
+# sandbox_publish.fetch_replies는 media_id만 받아 完全 무상태로 결정적이라(story
+# 5b27b32f 계약) media_id 자체가 그 타이밍을 실어야 한다 — 위 마커들과 동형으로
+# `create_container`가 받는 text에서만 읽고, 그 뒤로는 media_id 문자열에 인코딩된
+# "몇 시 이후엔 댓글 2가 없다"는 타임스탬프로 표현한다(서버 메모리 0).
+_MARKER_COMMENT2_DELETED = "[sandbox:comment-2-deleted]"
+# 5분 재수집 rate-limit(channel_post_comments.py) 안에서 "처음 refresh=2건·재수집
+# 허용되는 5분 뒤=1건"이 항상 성립하도록 5분보다 넉넉히 짧게 잡는다.
+_COMMENT2_DELETE_AFTER_SECONDS = 60
 
 # story 5b27b32f — cron 워커의 발행 오케스트레이션(channel_posts.py)은 컨테이너 생성 직후
 # 곧바로 폴링하지 않고(Meta 권장 30초 대기, story 620beefc B3) 그 다음 tick부터 폴링한다.
@@ -64,20 +82,35 @@ _MARKER_CONTAINER_SLOW = "[sandbox:container-slow]"
 _CONTAINER_SLOW_DELAY_SECONDS = 40
 
 
-def _encode_creation_id(*, mode: str, ready_at_epoch: int) -> str:
-    return f"sandbox:{mode}:{ready_at_epoch}:{uuid.uuid4().hex}"
+def _encode_creation_id(*, mode: str, ready_at_epoch: int, comment2_delete_after_epoch: int | None = None) -> str:
+    base = f"sandbox:{mode}:{ready_at_epoch}:{uuid.uuid4().hex}"
+    if comment2_delete_after_epoch is None:
+        return base
+    return f"{base}:c2del:{comment2_delete_after_epoch}"
 
 
 def _decode_creation_id(creation_id: str) -> tuple[str, int]:
     """(mode, ready_at_epoch). 형식이 어긋나면(외부에서 만든 값 등) 방어적으로 즉시
-    FINISHED 취급 — 샌드박스가 알 수 없는 입력에 영원히 멈춰 있는 것보다 낫다."""
+    FINISHED 취급 — 샌드박스가 알 수 없는 입력에 영원히 멈춰 있는 것보다 낫다. 4단
+    기본 형식 뒤에 `:c2del:{epoch}`가 더 붙어도(아래 _decode_comment2_delete_after_
+    epoch 전용) 앞 4단 판정은 그대로 유효하다(len(parts) < 4만 거부, 초과는 허용)."""
     parts = creation_id.split(":")
-    if len(parts) != 4 or parts[0] != "sandbox" or parts[1] not in ("ok", "error"):
+    if len(parts) < 4 or parts[0] != "sandbox" or parts[1] not in ("ok", "error"):
         return "ok", 0
     try:
         return parts[1], int(parts[2])
     except ValueError:
         return "ok", 0
+
+
+def _decode_comment2_delete_after_epoch(creation_id: str) -> int | None:
+    parts = creation_id.split(":")
+    if len(parts) == 6 and parts[4] == "c2del":
+        try:
+            return int(parts[5])
+        except ValueError:
+            return None
+    return None
 
 
 async def create_container(
@@ -97,7 +130,13 @@ async def create_container(
 
     mode = "error" if _MARKER_CONTAINER_ERROR in text else "ok"
     delay = _CONTAINER_SLOW_DELAY_SECONDS if _MARKER_CONTAINER_SLOW in text else 0
-    return _encode_creation_id(mode=mode, ready_at_epoch=int(time.time()) + delay)
+    comment2_delete_after_epoch = (
+        int(time.time()) + _COMMENT2_DELETE_AFTER_SECONDS if _MARKER_COMMENT2_DELETED in text else None
+    )
+    return _encode_creation_id(
+        mode=mode, ready_at_epoch=int(time.time()) + delay,
+        comment2_delete_after_epoch=comment2_delete_after_epoch,
+    )
 
 
 async def get_container_status(
@@ -116,7 +155,14 @@ async def publish_container(
 ) -> str:
     # 여기 도달했다는 것 자체가 오케스트레이션이 이미 FINISHED를 확인했다는 뜻(AC3
     # "기본 성공") — media_id는 새 uuid4(진짜 미디어처럼 creation_id와 다른 값).
-    return f"sandbox-media-{uuid.uuid4().hex}"
+    media_id = f"sandbox-media-{uuid.uuid4().hex}"
+    # story #3516 AC8 — create_container가 [sandbox:comment-2-deleted] 마커를 봤으면
+    # creation_id에 실어 둔 타임스탬프를 media_id로 그대로 옮긴다(fetch_replies는
+    # media_id만 받으므로 여기서 넘겨줘야 한다 — 상태는 여전히 서버 메모리 0).
+    comment2_delete_after_epoch = _decode_comment2_delete_after_epoch(creation_id)
+    if comment2_delete_after_epoch is not None:
+        media_id = f"{media_id}-c2del{comment2_delete_after_epoch}"
+    return media_id
 
 
 async def get_publishing_limit(
@@ -154,12 +200,23 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
     }
 
 
+_COMMENT2_DELETE_MARKER_RE = re.compile(r"-c2del(\d+)$")
+
+
 async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
     """AC(조각①) "기본 2건" — media_id 하나엔 항상 같은 2건(순서도 고정, 테스트가
     인덱스로 단언 가능). 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — threads가
     커서 상한에 걸리면 `complete=False`를 낼 수 있어 `(items, complete)` 튜플
     계약으로 통일했다. sandbox는 언제나 2건 전체를 한 번에 주니 `complete=True`
-    고정(페이지네이션 개념 자체가 없다)."""
+    고정(페이지네이션 개념 자체가 없다).
+
+    story #3516 AC8 — media_id가 `-c2del{epoch}` 접미사를 달고 있고(퍼블리시 시점에
+    [sandbox:comment-2-deleted] 마커를 봤을 때만) 지금이 그 epoch를 지났으면 댓글
+    2는 이제 없다(1건만 반환) — «처음 refresh=2건, 5분 rate-limit 뒤 재수집=1건»을
+    라이브에서 재현하는 유일한 신호(서버 메모리 0, media_id 문자열 자체가 시계)."""
+    match = _COMMENT2_DELETE_MARKER_RE.search(media_id)
+    if match is not None and time.time() >= int(match.group(1)):
+        return [_deterministic_comment(media_id=media_id, index=1)], True
     return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
 
 
