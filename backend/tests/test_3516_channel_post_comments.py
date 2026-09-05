@@ -137,7 +137,7 @@ async def test_collect_upserts_two_comments_then_reconciles_one_as_deleted(monke
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
             async def _first_fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1", "안녕"), _fake_comment("c2", "반가워요")]
+                return [_fake_comment("c1", "안녕"), _fake_comment("c2", "반가워요")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _first_fetch)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
@@ -152,7 +152,7 @@ async def test_collect_upserts_two_comments_then_reconciles_one_as_deleted(monke
 
             # 두 번째 수집 — c2가 사라짐(외부에서 삭제됨을 시뮬레이션).
             async def _second_fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1", "안녕")]
+                return [_fake_comment("c1", "안녕")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _second_fetch)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
@@ -189,10 +189,10 @@ async def test_collect_reappearing_comment_undeletes():
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
             async def _only_c1(client, *, access_token, media_id):
-                return [_fake_comment("c1")]
+                return [_fake_comment("c1")], True
 
             async def _both(client, *, access_token, media_id):
-                return [_fake_comment("c1"), _fake_comment("c2")]
+                return [_fake_comment("c1"), _fake_comment("c2")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _both)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
@@ -233,6 +233,138 @@ async def test_collect_unsupported_channel_raises():
         await engine.dispose()
 
 
+# ─── complete=False(페드루 PO REQUIRED 2026-09-05, PR#3865 리뷰): 커서 상한에 걸려
+# 이번 수집이 전체를 못 봤으면 삭제 리컨실을 건너뛴다 ─────────────────────────
+
+
+@pytest.mark.anyio
+async def test_collect_incomplete_page_skips_deletion_reconciliation(monkeypatch):
+    """threads가 첫 페이지만 보고(sandbox는 항상 2건 고정이라 이 시나리오를 못 낸다
+    — monkeypatch로 직접 재현) c1만 준 채 complete=False를 내면, c2는 «이번엔 안
+    보였을 뿐»이라 소프트 삭제되면 안 된다(그 전 결함: 뒷페이지 댓글이 매 수집마다
+    오삭제됨)."""
+    from app.models.channel_post_comment import ChannelPostComment
+    from app.services.channel_post_comments import collect_comments_for_publication
+    import app.services.sandbox_publish as sandbox_publish
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+
+            async def _both_complete(client, *, access_token, media_id):
+                return [_fake_comment("c1"), _fake_comment("c2")], True
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _both_complete)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+            async def _only_c1_incomplete(client, *, access_token, media_id):
+                return [_fake_comment("c1")], False
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _only_c1_incomplete)
+            result = await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+            assert result["complete"] is False
+            assert result["deleted"] == 0, "complete=False면 리컨실 자체를 건너뛰어야 한다"
+            c2 = (await s.execute(
+                select(ChannelPostComment).where(
+                    ChannelPostComment.publication_id == pub.id, ChannelPostComment.external_comment_id == "c2",
+                )
+            )).scalar_one()
+            assert c2.deleted_at is None, "이번 fetch가 전체를 못 봤을 뿐인데 삭제로 오판하면 안 된다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_collect_complete_page_still_reconciles_deletion(monkeypatch):
+    """complete=True면 기존과 동일하게 리컨실이 동작해야 한다(위 테스트의 대조군)."""
+    from app.models.channel_post_comment import ChannelPostComment
+    from app.services.channel_post_comments import collect_comments_for_publication
+    import app.services.sandbox_publish as sandbox_publish
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+
+            async def _both_complete(client, *, access_token, media_id):
+                return [_fake_comment("c1"), _fake_comment("c2")], True
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _both_complete)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+            async def _only_c1_complete(client, *, access_token, media_id):
+                return [_fake_comment("c1")], True
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _only_c1_complete)
+            result = await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+            assert result["complete"] is True
+            assert result["deleted"] == 1
+            c2 = (await s.execute(
+                select(ChannelPostComment).where(
+                    ChannelPostComment.publication_id == pub.id, ChannelPostComment.external_comment_id == "c2",
+                )
+            )).scalar_one()
+            assert c2.deleted_at is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_process_due_marks_incomplete_page_error_code_without_failing():
+    """워커가 complete=False를 받으면 status는 여전히 "captured"(성공)이되 error_code
+    로만 "다 못 봤다"를 남긴다(실패로 재시도 대상이 아님)."""
+    from app.models.channel_post_comment import CommentCollectionSchedule
+    from app.services.channel_post_comments import process_due_comment_collections, schedule_comment_collection
+    import app.services.sandbox_publish as sandbox_publish
+    from sqlalchemy import select
+    import pytest as _pytest
+
+    engine, Session = await _session_factory()
+    monkeypatch = _pytest.MonkeyPatch()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+
+            anchor = datetime.now(timezone.utc) - timedelta(hours=2)
+            await schedule_comment_collection(
+                s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1", anchor_at=anchor,
+            )
+            await s.commit()
+
+            async def _incomplete(client, *, access_token, media_id):
+                return [_fake_comment("c1")], False
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _incomplete)
+            counts = await process_due_comment_collections(s)
+            assert counts["captured"] == 1
+            assert counts["failed"] == 0
+
+            row = (await s.execute(
+                select(CommentCollectionSchedule).where(
+                    CommentCollectionSchedule.publication_id == pub.id, CommentCollectionSchedule.status == "captured",
+                )
+            )).scalar_one()
+            assert row.error_code == "COMMENT_COLLECTION_INCOMPLETE_PAGE"
+    finally:
+        monkeypatch.undo()
+        await engine.dispose()
+
+
 # ─── process_due_comment_collections: 워커 SKIP LOCKED ───────────────────────
 
 
@@ -256,7 +388,7 @@ async def test_process_due_marks_captured_and_ignores_not_yet_due(monkeypatch):
             await s.commit()
 
             async def _fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1")]
+                return [_fake_comment("c1")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
             counts = await process_due_comment_collections(s)
@@ -288,7 +420,7 @@ async def test_refresh_now_rate_limited_within_five_minutes(monkeypatch):
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
             async def _fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1")]
+                return [_fake_comment("c1")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
             first = await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
@@ -314,7 +446,7 @@ async def test_refresh_now_allowed_again_after_five_minutes(monkeypatch):
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
             async def _fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1")]
+                return [_fake_comment("c1")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
             await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
@@ -356,7 +488,7 @@ async def test_list_comments_null_before_collection_then_zero_after_empty_collec
             assert before["comments"] == []
 
             async def _empty_fetch(client, *, access_token, media_id):
-                return []
+                return [], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _empty_fetch)
             await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
@@ -364,6 +496,56 @@ async def test_list_comments_null_before_collection_then_zero_after_empty_collec
             after = await list_comments_for_publication(s, org_id=org_id, publication_id=pub.id)
             assert after["last_collected_at"] is not None, "수집은 됐으니 0건이어도 시각이 찍혀야 한다(null≠0)"
             assert after["comments"] == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_list_comments_active_and_deleted_count_match_board_definition(monkeypatch):
+    """페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰, 유나 §22-9) — 리컨실 뒤
+    active_count/deleted_count가 count_comments_by_publication_ids(보드 comments_count
+    의 원천)와 정확히 같은 값이어야 한다. 소프트 삭제 행의 text도 그대로 남아 있어야
+    한다(하드 삭제·마스킹 금지)."""
+    from app.services.channel_post_comments import (
+        collect_comments_for_publication, count_comments_by_publication_ids, list_comments_for_publication,
+    )
+    import app.services.sandbox_publish as sandbox_publish
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+
+            # 비대칭 수(active 2·deleted 1) — active_count↔deleted_count 정의가
+            # 뒤바뀌어도(뮤테이션) 우연히 같은 값이 나와 안 잡히는 일이 없게 한다.
+            async def _three(client, *, access_token, media_id):
+                return [
+                    _fake_comment("c1", "살아있음1"), _fake_comment("c2", "살아있음2"), _fake_comment("c3", "곧 지워짐"),
+                ], True
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _three)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+            async def _two(client, *, access_token, media_id):
+                return [_fake_comment("c1", "살아있음1"), _fake_comment("c2", "살아있음2")], True
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _two)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+            result = await list_comments_for_publication(s, org_id=org_id, publication_id=pub.id)
+            assert result["active_count"] == 2
+            assert result["deleted_count"] == 1
+
+            board_counts = await count_comments_by_publication_ids(s, publication_ids=[pub.id])
+            assert board_counts[pub.id] == result["active_count"], "보드 comments_count와 목록 active_count는 같은 정의여야 한다"
+
+            deleted_comment = next(c for c in result["comments"] if c.external_comment_id == "c3")
+            assert deleted_comment.deleted_at is not None
+            assert deleted_comment.text == "곧 지워짐", "소프트 삭제 행도 text는 보존돼야 한다(마스킹·하드삭제 금지)"
     finally:
         await engine.dispose()
 
@@ -402,14 +584,14 @@ async def test_count_comments_by_publication_ids_excludes_deleted(monkeypatch):
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
             async def _two(client, *, access_token, media_id):
-                return [_fake_comment("c1"), _fake_comment("c2")]
+                return [_fake_comment("c1"), _fake_comment("c2")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _two)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
             await s.commit()
 
             async def _one(client, *, access_token, media_id):
-                return [_fake_comment("c1")]
+                return [_fake_comment("c1")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _one)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
@@ -452,7 +634,7 @@ async def test_api_list_comments_allows_agent_caller(monkeypatch):
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
             async def _fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1")]
+                return [_fake_comment("c1")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
             # story #3516 — 실제 배선처럼 refresh_comments_now를 거쳐야 스케줄 행이
@@ -470,6 +652,8 @@ async def test_api_list_comments_allows_agent_caller(monkeypatch):
                 body = resp.json()
                 assert len(body["comments"]) == 1
                 assert body["last_collected_at"] is not None
+                assert body["active_count"] == 1
+                assert body["deleted_count"] == 0
         finally:
             app.dependency_overrides.clear()
     finally:
@@ -514,7 +698,7 @@ async def test_api_refresh_allows_human_and_returns_counts(monkeypatch):
             human_id = await _seed_human(s, org_id)
 
         async def _fetch(client, *, access_token, media_id):
-            return [_fake_comment("c1"), _fake_comment("c2")]
+            return [_fake_comment("c1"), _fake_comment("c2")], True
 
         monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
 
@@ -563,7 +747,7 @@ async def test_insights_board_row_carries_comments_count_for_channel_publication
             )
 
             async def _fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1")]
+                return [_fake_comment("c1")], True
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")

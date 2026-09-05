@@ -4,9 +4,11 @@
 ③, 댓글 수집은 정규화값을 안 담고 시도 성공/실패만 남긴다).
 
 지속 폴링/커서는 이 조각 스코프 밖(PO 決定) — 매 수집 시도는 provider의 "현재 댓글
-전체"(첫 페이지)를 받아 upsert하고, 이전엔 있었는데 이번엔 없는 댓글을 소프트 삭제로
-리컨실한다(diff 방식 — provider가 실제로 지원하는지와 무관하게 항상 성립하는 일반
-로직, sandbox·threads 둘 다 같은 코드를 탄다)."""
+전체"(커서 상한 10페이지까지, 그 안에서 다 봤으면 complete=True)를 받아 upsert하고,
+complete=True일 때만 이전엔 있었는데 이번엔 없는 댓글을 소프트 삭제로 리컨실한다
+(diff 방식 — provider가 실제로 지원하는지와 무관하게 항상 성립하는 일반 로직,
+sandbox·threads 둘 다 같은 코드를 탄다. 페드루 PO REQUIRED 2026-09-05 PR#3865
+리뷰 — 첫 페이지만 보고 리컨실하면 뒷페이지 댓글이 매 수집마다 오삭제되던 결함)."""
 from __future__ import annotations
 
 import hashlib
@@ -14,7 +16,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,10 +72,14 @@ def _text_sha256(text: str) -> str:
 
 async def _fetch_replies_raw(
     db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, channel: str, external_id: str | None,
-) -> list[dict]:
+) -> tuple[list[dict], bool]:
     """channel별 dispatch(insight_snapshots.py::_fetch_for_snapshot과 동형) — 어댑터가
     supports_fetch_replies를 선언 안 했으면 여기 도달 前에 호출자가 이미 unsupported로
-    끝낸다(중복 판정 안 둠)."""
+    끝낸다(중복 판정 안 둠). 반환의 두 번째 값(complete)은 페드루 PO REQUIRED
+    (2026-09-05, PR#3865 리뷰) — 이번 fetch가 그 publication의 댓글 전체를 봤는지.
+    False면 collect_comments_for_publication이 삭제 리컨실을 건너뛴다(첫 페이지만
+    보고 "없다=삭제됐다"로 오판하면 다음 페이지 댓글이 매 수집마다 소프트 삭제되는
+    결함이 있었다 — sandbox=항상 2건 고정이라 테스트가 못 잡던 자리)."""
     if channel == "sandbox":
         from app.services import sandbox_publish
 
@@ -136,7 +142,7 @@ async def collect_comments_for_publication(
     if adapter is None or not adapter.supports_fetch_replies:
         raise CommentCollectionUnsupportedError()
 
-    raw_comments = await _fetch_replies_raw(
+    raw_comments, complete = await _fetch_replies_raw(
         db, org_id=org_id, publication_id=publication_id, channel=channel, external_id=external_id,
     )
 
@@ -180,18 +186,25 @@ async def collect_comments_for_publication(
         await db.execute(stmt)
 
     # 리컨실 — 이전엔 살아있다고 기록됐는데 이번 fetch엔 없는 댓글은 소프트 삭제.
-    existing_rows = (await db.execute(
-        select(ChannelPostComment).where(
-            ChannelPostComment.publication_id == publication_id, ChannelPostComment.deleted_at.is_(None),
-        )
-    )).scalars().all()
+    # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — complete=False(커서 상한에
+    # 걸려 이번 수집이 전체를 못 봄)면 리컨실 자체를 건너뛴다. "이번엔 안 보였다"가
+    # "삭제됐다"를 증명하지 못하는 경우(뒷페이지 미도달)까지 삭제로 단정하면 안
+    # 된다 — upsert(이번에 본 것 갱신)만 하고, 다음 due 창이 마저 본다.
     deleted_count = 0
-    for row in existing_rows:
-        if row.external_comment_id not in fetched_external_ids:
-            row.deleted_at = now
-            deleted_count += 1
+    if complete:
+        existing_rows = (await db.execute(
+            select(ChannelPostComment).where(
+                ChannelPostComment.publication_id == publication_id, ChannelPostComment.deleted_at.is_(None),
+            )
+        )).scalars().all()
+        for row in existing_rows:
+            if row.external_comment_id not in fetched_external_ids:
+                row.deleted_at = now
+                deleted_count += 1
 
-    return {"fetched": len(fetched_external_ids), "deleted": deleted_count, "captured_at": now}
+    return {
+        "fetched": len(fetched_external_ids), "deleted": deleted_count, "captured_at": now, "complete": complete,
+    }
 
 
 async def process_due_comment_collections(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
@@ -254,6 +267,11 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
 
             row.status = "captured"
             row.captured_at = result["captured_at"]
+            # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — 커서 상한에 걸려 이번
+            # 수집이 전체를 못 봤으면(complete=False) 삭제 리컨실은 건너뛰었지만
+            # upsert 자체는 성공했다 — status는 "captured" 그대로 두고 error_code로만
+            # "다 못 봤다"를 남긴다(다음 due 창이 이어서 본다, 실패로 재시도 대상 X).
+            row.error_code = None if result["complete"] else "COMMENT_COLLECTION_INCOMPLETE_PAGE"
             await db.commit()
             counts["captured"] += 1
         except Exception:  # noqa: BLE001 — 이 행 하나만 막는다(전체 배치 안 죽음).
@@ -338,6 +356,9 @@ async def refresh_comments_now(
 
     schedule_row.status = "captured"
     schedule_row.captured_at = result["captured_at"]
+    # process_due_comment_collections와 동형 — 다 못 봤으면(complete=False) error_code에
+    # 만 남긴다(captured 자체는 성공이었다).
+    schedule_row.error_code = None if result["complete"] else "COMMENT_COLLECTION_INCOMPLETE_PAGE"
     await db.commit()
     return result
 
@@ -384,7 +405,24 @@ async def list_comments_for_publication(
         .limit(limit).offset(offset)
     )).scalars().all()
 
-    return {"last_collected_at": last_captured_at, "comments": rows}
+    # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰, 유나 §22-9 「지워진 댓글은 숨기지
+    # 않고 대응 대상에서 뺀다」) — 페이지 무관 서버 전체 수. active_count는
+    # count_comments_by_publication_ids와 정확히 같은 정의(deleted_at IS NULL)를
+    # 재사용해 보드 comments_count와 항상 같은 값이 나오게 한다(두 번째 구현 0).
+    # 소프트 삭제 행의 text는 그대로 보존(하드 삭제·마스킹 안 함, 현 구현 그대로).
+    active_counts = await count_comments_by_publication_ids(db, publication_ids=[publication_id])
+    active_count = active_counts.get(publication_id, 0)
+    deleted_count = (await db.execute(
+        select(func.count()).select_from(ChannelPostComment).where(
+            ChannelPostComment.org_id == org_id, ChannelPostComment.publication_id == publication_id,
+            ChannelPostComment.deleted_at.is_not(None),
+        )
+    )).scalar_one()
+
+    return {
+        "last_collected_at": last_captured_at, "comments": rows,
+        "active_count": active_count, "deleted_count": deleted_count,
+    }
 
 
 async def count_comments_by_publication_ids(

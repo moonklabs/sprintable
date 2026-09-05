@@ -201,22 +201,38 @@ _REPLIES_URL_TMPL = "https://graph.threads.net/v1.0/{media_id}/pending_replies"
 # 모든 댓글"과 정확히 같은 것인지는 라이브 왕복 전엔 확실하지 않다. sandbox까지가 이
 # 스토리 라이브 범위(PO 明示) — Threads 실계정 시점에 재확認 필요.
 _REPLIES_FIELDS = "id,text,username,timestamp,has_replies,is_reply,hide_status,reply_approval_status"
+# 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — 이 media의 댓글이 한 페이지를
+# 넘으면 첫 페이지만 보고 "응답에 없다=삭제됐다"로 리컨실하는 순간 2페이지 이후
+# 댓글이 매 수집마다 조용히 소프트 삭제되는 결함이 있었다(sandbox=항상 2건 고정
+# 이라 테스트가 못 잡던 자리). 이 상한(10페이지)까지 커서를 따라가고, 그 안에서
+# 끝(after 커서 소진)에 닿으면 complete=True, 상한에 걸리면 False — "지속
+# 폴링/커서는 후속"이라는 PO 決定은 유지하되(한도 밖은 다음 due 창이 또 시도),
+# "이번 한 번의 수집이 완전한가"만 이 반환값으로 호출부(리컨실 여부 판단)에 알린다.
+_REPLIES_MAX_PAGES = 10
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> list[dict]:
-    """이 media의 댓글 목록. 페이지네이션(`paging.cursors.after`)은 이 조각에선 첫
-    페이지만 본다(PO 決定 — "지속 폴링/커서는 후속", 커서 값 자체는 응답에 있으면
-    호출부가 저장만 해 둔다)."""
-    resp = await client.get(
-        _REPLIES_URL_TMPL.format(media_id=media_id),
-        params={"fields": _REPLIES_FIELDS, "access_token": access_token},
-    )
-    if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
-    body = resp.json()
-    return list(body.get("data") or [])
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+    """이 media의 댓글 목록 + 완전 수집 여부. `paging.cursors.after`로 최대
+    `_REPLIES_MAX_PAGES`페이지까지 따라간다 — 더 볼 커서가 없으면 (items, True),
+    상한에 걸려 아직 더 남았으면 (items, False)(그 페이지들은 유실이 아니라 다음
+    due 창에 다시 시도)."""
+    items: list[dict] = []
+    after_cursor: str | None = None
+    for _ in range(_REPLIES_MAX_PAGES):
+        params = {"fields": _REPLIES_FIELDS, "access_token": access_token}
+        if after_cursor:
+            params["after"] = after_cursor
+        resp = await client.get(_REPLIES_URL_TMPL.format(media_id=media_id), params=params)
+        if resp.status_code != 200:
+            raise ThreadsPublishError(
+                "THREADS_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
+            )
+        body = resp.json()
+        items.extend(body.get("data") or [])
+        after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
+        if not after_cursor:
+            return items, True
+    return items, False
 
 
 async def reply(

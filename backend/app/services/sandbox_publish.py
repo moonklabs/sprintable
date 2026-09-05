@@ -154,10 +154,13 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
     }
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> list[dict]:
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
     """AC(조각①) "기본 2건" — media_id 하나엔 항상 같은 2건(순서도 고정, 테스트가
-    인덱스로 단언 가능)."""
-    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)]
+    인덱스로 단언 가능). 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — threads가
+    커서 상한에 걸리면 `complete=False`를 낼 수 있어 `(items, complete)` 튜플
+    계약으로 통일했다. sandbox는 언제나 2건 전체를 한 번에 주니 `complete=True`
+    고정(페이지네이션 개념 자체가 없다)."""
+    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
 
 
 async def reply(

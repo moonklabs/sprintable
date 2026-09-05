@@ -53,6 +53,11 @@ class CommentListResponse(BaseModel):
     # (그 시각의 댓글 수가 0이어도 이 필드는 채워진다 — null≠0 원칙 그대로).
     last_collected_at: str | None
     comments: list[CommentItem]
+    # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰, 유나 §22-9) — 페이지(limit/offset)
+    # 무관 서버 전체 수. active_count는 insights_board.py comments_count와 정의가
+    # 완전히 같다(deleted_at IS NULL, count_comments_by_publication_ids 재사용).
+    active_count: int
+    deleted_count: int
 
 
 class CommentRefreshResponse(BaseModel):
@@ -95,6 +100,7 @@ async def list_publication_comments_endpoint(
             )
             for c in result["comments"]
         ],
+        active_count=result["active_count"], deleted_count=result["deleted_count"],
     )
 
 
