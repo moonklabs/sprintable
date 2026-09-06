@@ -87,6 +87,7 @@ from app.services.channel_post_videos import (
     ChannelVideoDurationTooShortError,
     ChannelVideoObjectNotFoundError,
     ChannelVideoPathNotScopedError,
+    ChannelVideoRequiresSingleCoverError,
     ChannelVideoTooLargeError,
     ChannelVideoUnparsableError,
     ChannelVideoUnsupportedError,
@@ -687,6 +688,10 @@ async def post_channel_post_video_confirm(
         ) from exc
     except ChannelVideoUploadFailedError as exc:
         raise HTTPException(status_code=502, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
+    except ChannelVideoRequiresSingleCoverError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_REQUIRES_SINGLE_COVER", "message": str(exc)},
+        ) from exc
     return _video_response(version, video_row)
 
 
