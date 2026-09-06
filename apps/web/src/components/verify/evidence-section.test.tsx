@@ -367,6 +367,21 @@ describe('EvidenceSection — 검증 시트(story #3560, payload.kind=verificati
     expect(text).not.toContain('모두 통과');
   });
 
+  // story #3581(유나 #3927 비차단 발견, 페드루 PO 確定 2026-09-06) — fail>0·na>0 동시
+  // 참이면 예전엔 fail 갈래(「실패 N · 전체 M」)로 떨어져 na가 조용히 사라졌다. 새
+  // 갈래(verificationSheetSummaryWithFailAndNa)로 분리됐는지만 검증한다 — 낱말은
+  // 유나 §17-24 확定 대기라 지금 키 값은 빈 문자열(임의 문장 커밋 금지, 페드루 지시).
+  it('실패 있음 + 해당없음 있음 — 새 갈래로 분리된다(예전 fail-only 문구로 떨어지지 않는다)', async () => {
+    await renderWithSheet([
+      { name: 'A', verdict: 'fail' },
+      { name: 'B', verdict: 'n_a' },
+      { name: 'C', verdict: 'pass' },
+    ]);
+    const text = findRowSummary().textContent ?? '';
+    // 낱말 확定 전 placeholder(빈 문자열)라 지금은 이 값 — 유나 §17-24 도착 뒤 실 문구로 교체.
+    expect(text).toBe('검증 시트');
+  });
+
   it('펼침 표 — 비고가 하나도 없으면 비고 열 자체가 없다', async () => {
     await renderWithSheet([{ name: '자막 표시', verdict: 'pass' }, { name: '길이 15초 이내', verdict: 'fail' }]);
     await act(async () => { findRowSummary().click(); });

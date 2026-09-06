@@ -4882,6 +4882,7 @@
     "verificationSheetSummaryWithFail": "Failed {fail} · Total {total}",
     "verificationSheetSummaryAllPass": "All {total} passed",
     "verificationSheetSummaryWithNa": "Passed {pass} · {naLabel} {na}",
+    "verificationSheetSummaryWithFailAndNa": "",
     "verificationSheetColumnName": "Item",
     "verificationSheetColumnVerdict": "Verdict",
     "verificationSheetColumnNote": "Note",
