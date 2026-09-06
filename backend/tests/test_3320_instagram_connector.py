@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.test_3373_channel_connections import (
+from tests.test_3373_channel_connections_auth import (
     _seed_agent, _seed_human, _seed_org, _session_factory, _client_for, _setup_org_scoped_app,
 )
 
@@ -601,15 +601,15 @@ async def test_api_create_instagram_sandbox_connection():
 
 @pytest.fixture(autouse=True)
 def _local_channel_media_storage_for_image_upload(monkeypatch, tmp_path):
-    """test_620beefc_channel_post_image.py의 동형 픽스처(중복 재발명 금지) — 이
+    """test_620beefc_channel_post_image_upload.py의 동형 픽스처(중복 재발명 금지) — 이
     파일의 다른 테스트엔 영향 없다(channel_post_images.py를 안 건드리는 테스트는
     이 monkeypatch를 그냥 무시). 버킷 이름은 반드시 `_upload_and_confirm`이 쓰는
-    `test_620beefc_channel_post_image.py`의 `_CHANNEL_MEDIA_BUCKET`과 같아야 한다
+    `test_620beefc_channel_post_image_upload.py`의 `_CHANNEL_MEDIA_BUCKET`과 같아야 한다
     — 다르면 PUT(_put_raw_object가 그 상수로 씀)과 confirm(cpi_module.
     CHANNEL_MEDIA_BUCKET을 읽음)이 서로 다른 버킷을 봐서 404 CHANNEL_IMAGE_
     OBJECT_NOT_FOUND가 난다(실제로 한 번 겪은 자리)."""
     import app.services.channel_post_images as cpi_module
-    from tests.test_620beefc_channel_post_image import _CHANNEL_MEDIA_BUCKET
+    from tests.test_620beefc_channel_post_image_upload import _CHANNEL_MEDIA_BUCKET
 
     monkeypatch.setenv("STORAGE_PROVIDER", "local")
     monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path / ".storage-3320"))
@@ -634,7 +634,7 @@ async def test_upload_instagram_image_too_narrow_returns_422_but_threads_unaffec
     Instagram(0.8 하한)에서는 거부되고, Threads(0.0=하한 없음)에서는 기존 그대로
     통과해야 한다(회귀 0의 실제 증거, 흉내가 아니라 같은 이미지로 대조)."""
     from app.main import app
-    from tests.test_620beefc_channel_post_image import (
+    from tests.test_620beefc_channel_post_image_upload import (
         _create_draft, _seed_connection, _seed_human, _seed_org, _seed_story,
         _session_factory, _client_for, _setup_org_scoped_app, _upload_and_confirm,
     )

@@ -5,7 +5,7 @@
    URL을 additive로 싣는다 — violations와 동형(단건 전용, N+1 방지로 목록엔 항상
    None).
 
-세팅 헬퍼는 test_620beefc_channel_post_image.py 재사용, MP4 픽스처 조립은
+세팅 헬퍼는 test_620beefc_channel_post_image_upload.py 재사용, MP4 픽스처 조립은
 test_3554_instagram_reels.py의 순수 파이썬 박스 빌더 재사용(중복 재발명 금지).
 instagram_sandbox가 아니라 **instagram**(실 어댑터, 조건부 등재 불요)을 쓴다 —
 video_* 검증엔 sandbox 마커·조건부 config 주입이 불필요."""
@@ -17,7 +17,7 @@ import uuid
 
 import pytest
 
-from tests.test_620beefc_channel_post_image import (
+from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _create_draft,
     _jpeg_bytes,
@@ -82,7 +82,7 @@ def _local_channel_media_storage(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _local_channel_media_storage_object_path_fix(monkeypatch):
-    import tests.test_620beefc_channel_post_image as base_test_module
+    import tests.test_620beefc_channel_post_image_upload as base_test_module
 
     monkeypatch.setattr(base_test_module, "_CHANNEL_MEDIA_BUCKET", _CHANNEL_MEDIA_BUCKET)
     yield

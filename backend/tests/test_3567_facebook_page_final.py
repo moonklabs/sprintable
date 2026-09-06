@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tests.test_620beefc_channel_post_image import (
+from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _create_draft,
     _jpeg_bytes,
@@ -95,7 +95,7 @@ def _local_channel_media_storage(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _local_channel_media_storage_object_path_fix(monkeypatch):
-    import tests.test_620beefc_channel_post_image as base_test_module
+    import tests.test_620beefc_channel_post_image_upload as base_test_module
 
     monkeypatch.setattr(base_test_module, "_CHANNEL_MEDIA_BUCKET", _CHANNEL_MEDIA_BUCKET)
     yield

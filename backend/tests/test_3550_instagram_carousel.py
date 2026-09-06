@@ -7,7 +7,7 @@
 ④ Instagram 캐러셀 컨테이너(부모+children) — sandbox 어댑터 동형 선언·자식 실패=
    원자성(부모 0건).
 
-세팅 헬퍼는 test_620beefc_channel_post_image.py 재사용(중복 재발명 금지)."""
+세팅 헬퍼는 test_620beefc_channel_post_image_upload.py 재사용(중복 재발명 금지)."""
 from __future__ import annotations
 
 import os
@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.test_620beefc_channel_post_image import (
+from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _create_draft,
     _jpeg_bytes,
@@ -69,7 +69,7 @@ _CHANNEL_MEDIA_BUCKET = "test-channel-media-3550"
 
 @pytest.fixture(autouse=True)
 def _local_channel_media_storage(monkeypatch, tmp_path):
-    """test_620beefc_channel_post_image.py의 동형 픽스처(중복 재발명 대신 이 파일도
+    """test_620beefc_channel_post_image_upload.py의 동형 픽스처(중복 재발명 대신 이 파일도
     같은 기법 — 다른 버킷명으로 격리)."""
     import app.services.channel_post_images as cpi_module
 
@@ -87,7 +87,7 @@ def _local_channel_media_storage_object_path_fix(monkeypatch):
     이름의 버킷이어야 앞뒤가 맞는다 — 두 파일이 같은 상수명을 각자 갖되 여기서는
     import한 헬퍼가 그 파일의 전역을 참조하므로, monkeypatch로 그 값을 이 파일의
     버킷명과 맞춘다."""
-    import tests.test_620beefc_channel_post_image as base_test_module
+    import tests.test_620beefc_channel_post_image_upload as base_test_module
 
     monkeypatch.setattr(base_test_module, "_CHANNEL_MEDIA_BUCKET", _CHANNEL_MEDIA_BUCKET)
     yield
@@ -494,7 +494,7 @@ async def test_publish_endpoint_dispatches_to_carousel_for_two_plus_images_insta
             # 즉시 반환)·2틱=publish_container까지(instagram_sandbox_publish.py::
             # get_container_status가 이미 결정적으로 FINISHED라 별도 mock 불요, 그래도
             # channel_posts.py 오케스트레이션이 "이미지 있으면 1틱은 무조건 반환"이라
-            # 실제로 2번 불러야 한다 — test_620beefc_channel_post_image.py::
+            # 실제로 2번 불러야 한다 — test_620beefc_channel_post_image_upload.py::
             # test_image_publish_finished_tick_completes와 동형 계약).
             r_publish_1 = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",

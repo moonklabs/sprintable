@@ -13,7 +13,7 @@ MP4 픽스처는 실 ffmpeg 없이 순수 파이썬으로 최소 유효 ISOBMFF 
 직접 조립한다(파서가 실제로 요구하는 필드만 — moov/mvhd·trak/mdia/hdlr·
 trak/tkhd·trak/mdia/minf/stbl/stsd, mdat은 더미).
 
-세팅 헬퍼는 test_620beefc_channel_post_image.py 재사용(중복 재발명 금지)."""
+세팅 헬퍼는 test_620beefc_channel_post_image_upload.py 재사용(중복 재발명 금지)."""
 from __future__ import annotations
 
 import os
@@ -22,7 +22,7 @@ import uuid
 
 import pytest
 
-from tests.test_620beefc_channel_post_image import (
+from tests.test_620beefc_channel_post_image_upload import (
     _approve_gate_directly,
     _client_for,
     _create_draft,
@@ -88,7 +88,7 @@ def _local_channel_media_storage(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _local_channel_media_storage_object_path_fix(monkeypatch):
-    import tests.test_620beefc_channel_post_image as base_test_module
+    import tests.test_620beefc_channel_post_image_upload as base_test_module
 
     monkeypatch.setattr(base_test_module, "_CHANNEL_MEDIA_BUCKET", _CHANNEL_MEDIA_BUCKET)
     yield

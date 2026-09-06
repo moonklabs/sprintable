@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.test_3373_channel_connections import (
+from tests.test_3373_channel_connections_auth import (
     _seed_org, _seed_human, _session_factory, _client_for, _setup_org_scoped_app,
 )
 
