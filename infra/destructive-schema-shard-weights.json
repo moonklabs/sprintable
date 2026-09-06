@@ -1341,6 +1341,11 @@
       "file": "tests/test_3559_video_fields_additive.py",
       "sec": 40.0,
       "source": "story-3559-video-fields-additive(PR 개설 前 선제 등재 — 로컬 raw pytest 6건 6.53s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3561_concept_approval_gate.py",
+      "sec": 65.0,
+      "source": "story-3561-concept-approval-gate(PR 개설 前 선제 등재 — 로컬 raw pytest 17건 10.81s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 65s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
