@@ -158,6 +158,14 @@ class Settings(BaseSettings):
     apple_private_key: str = ""  # SIWA Key .p8 파일 내용 그대로(PEM, ES256 개인키).
     # Next.js 프론트엔드 URL (OAuth redirect_uri 조합용)
     app_url: str = "http://localhost:3000"
+    # story #3583-BE(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06) — GA4 측정 연결
+    # OAuth. 이 백엔드 자신의 URL(Cloud Run 서비스 URL 등) — Google이 이 값+
+    # "/api/v2/measurement-connections/ga4/callback"으로 직접 리다이렉트한다
+    # (github_integration.py::install_callback과 동형 — FE BFF 콜백 라우트 0,
+    # `app_url`은 프론트 도메인이라 이 자리에 못 쓴다). Google Cloud Console에
+    # 이 정확한 콜백 URL을 리다이렉트 URI로 등록하는 것은 이 스토리 밖(analytics.
+    # readonly 스코프 동의화면 검수와 같은 PO/사람 항목).
+    backend_url: str = ""
 
     # EE / SaaS gating
     license_consent: str = ""
