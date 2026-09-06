@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -41,6 +42,8 @@ from app.services.channel_posts import (
     get_channel_post_draft,
 )
 from app.services.storage import get_storage_provider
+
+logger = logging.getLogger(__name__)
 
 CHANNEL_MEDIA_BUCKET = os.environ.get("GCS_CHANNEL_MEDIA_BUCKET") or None
 _PUBLIC_BASE = f"https://storage.googleapis.com/{CHANNEL_MEDIA_BUCKET}/" if CHANNEL_MEDIA_BUCKET else None
@@ -383,100 +386,115 @@ async def confirm_channel_post_image_upload(
     size = await provider.head_object(bucket, object_path)
     if size is None:
         raise ChannelImageObjectNotFoundError(object_path=object_path)
-    if size > _MAX_ORIGINAL_UPLOAD_BYTES:
-        await provider.delete_object(bucket, object_path)
-        raise ChannelImageTooLargeError(size_bytes=size, max_bytes=_MAX_ORIGINAL_UPLOAD_BYTES)
 
-    raw = await provider.download_object(bucket, object_path)
-    original_sha256 = hashlib.sha256(raw).hexdigest()
-
-    try:
-        probe = Image.open(io.BytesIO(raw))
-        probe.load()
-    except (UnidentifiedImageError, OSError) as exc:
-        raise ChannelImageUndecodableError() from exc
-
-    frame_count = getattr(probe, "n_frames", 1)
-    if frame_count > 1:
-        raise ChannelImageAnimatedUnsupportedError(frame_count=frame_count)
-
-    # story 620beefc(페드루 리뷰 — EXIF 방향) — .format을 transpose 前에 챙긴다(회전이
-    # 실제로 필요하면 exif_transpose가 .format 없는 새 객체를 반환한다, _derive_image와
-    # 동일 함정). 종횡비·저장 메타(original_width/height)는 픽셀 그리드가 아니라 사람이
-    # 보는 방향 기준이어야 정확하다 — 회전된 원본을 안 굽고 재면 종횡비 오판정 가능.
-    original_mime = _PIL_FORMAT_TO_MIME.get((probe.format or "").upper()) or "application/octet-stream"
-    from PIL import ImageOps
-
-    probe = ImageOps.exif_transpose(probe)
-    width, height = probe.size
-
-    # story #3578(Phase2·BE·급·결함, 페드루 PO 確定 2026-09-06) — 분기(영상 유무)를
-    # 비율 검증보다 먼저 결정한다. 지연 import는 channel_post_videos.py가 이
-    # 모듈을 모듈 레벨에서 import하는 순환을 피하기 위함(story #3554 기존 관례,
-    # 아래 캐리 로직이 쓰던 것을 여기로 당김 — 신규 순환 0). 이전엔 이 검증이
-    # "이게 캐러셀 이미지인지 커버인지" 조차 모른 채 image_aspect_min(0.80)
-    # 하나로 먼저 돌아, 릴스 커버(9:16=0.5625)가 그 하한을 구조적으로 못 넘어
-    # 어떤 실제 커버도 통과 못 하던 결함(유나 §17-23 ④ 실측)의 근본원인이었다.
-    from app.services.channel_post_videos import _copy_video_row, get_channel_post_video_for_version
-
-    latest_for_cover_check = latest_for_count
-    if latest_for_cover_check is None:
-        raise ChannelPostDraftNotFoundError(draft_id)
-    existing_video = await get_channel_post_video_for_version(db, version_id=latest_for_cover_check.id)
-
-    if existing_video is not None:
-        # story #3578 — 커버 규격(video_aspect_target±video_aspect_tolerance,
-        # 어댑터 선언 — 하드코딩 0). 캐러셀 image_aspect_min/max와 완전히 다른
-        # 축(캐러셀=정지 이미지 앨범 규격·커버=그 영상과 같은 비율이어야 하는
-        # 제약)이라 아래 캐러셀 분기와 절대 안 섞는다.
-        if width > 0 and height > 0 and adapter.video_aspect_target > 0:
-            cover_ratio = width / height
-            if abs(cover_ratio - adapter.video_aspect_target) > adapter.video_aspect_tolerance:
-                raise ChannelCoverAspectRatioRejectedError(
-                    aspect_ratio=cover_ratio, target=adapter.video_aspect_target,
-                    tolerance=adapter.video_aspect_tolerance,
-                )
-    elif adapter.image_aspect_min > 0 and height > 0:
-        # story #3320 — Instagram류(orientation-aware, 방향별 한도가 다름: 가로
-        # 최대 1.91:1·세로 최대 4:5=0.8). 아래(Threads 등) 정규화(long/short, 항상
-        # ≥1) 검사를 그대로 쓰면 image_aspect_max(1.91)가 방향 구분 없이 양쪽에
-        # 다 적용돼 세로쪽 실제 한도(0.8)보다 훨씬 느슨해진다(정규화 1.91 ==
-        # width/height 1/1.91=0.52까지 통과) — 원시 width/height 비율 하나로
-        # 위(가로 초과)·아래(세로 초과) 두 한도를 각각 직접 비교해야 정확하다.
-        # Threads 등 image_aspect_min=0.0(기본값)인 채널은 이 분기 자체를 안 타
-        # 아래의 기존 정규화 검사 그대로(회귀 0).
-        width_height_ratio = width / height
-        if width_height_ratio > adapter.image_aspect_max:
-            raise ChannelImageAspectRatioExceededError(
-                aspect_ratio=width_height_ratio, max_aspect_ratio=adapter.image_aspect_max,
-            )
-        if width_height_ratio < adapter.image_aspect_min:
-            raise ChannelImageAspectRatioTooNarrowError(
-                width_height_ratio=width_height_ratio, min_width_height_ratio=adapter.image_aspect_min,
-            )
-    else:
-        aspect_ratio = (max(width, height) / min(width, height)) if min(width, height) > 0 else 0.0
-        if aspect_ratio > adapter.image_aspect_max:
-            raise ChannelImageAspectRatioExceededError(
-                aspect_ratio=aspect_ratio, max_aspect_ratio=adapter.image_aspect_max,
-            )
-
-    derived_bytes, derived_content_type, derived_width, derived_height, _out_format = _derive_image(
-        raw, adapter=adapter,
-    )
+    # story #3589(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-06) — head_object가
+    # 객체 존재를 확認한 뒤부터는, 아래 어떤 검증이든 거부(422)로 끝나면 원본(과
+    # 이미 업로드됐을 수 있는 파생본)이 고아로 남는다 — "용량 초과" 갈래 하나에만
+    # delete_object가 있어 나머지(디코드 실패·애니메이션·종횡비·파생 업로드 실패)가
+    # 전부 샜다(channel_post_videos.py와 동일 클래스, 같은 처방 — 구간 전체를 한
+    # 자리에서 감싼다). 삭제 자체가 실패해도 원래 거부 사유를 가리지 않는다.
     derived_object_path: str | None = None
-    derived_sha256: str | None = None
-    if derived_bytes is not None:
-        ext = "png" if derived_content_type == "image/png" else "jpg"
-        derived_object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
-        ok = await provider.put_object(bucket, derived_object_path, derived_bytes, content_type=derived_content_type)
-        if not ok:
-            raise ChannelImageUploadFailedError(object_path=derived_object_path)
-        derived_sha256 = hashlib.sha256(derived_bytes).hexdigest()
+    try:
+        if size > _MAX_ORIGINAL_UPLOAD_BYTES:
+            raise ChannelImageTooLargeError(size_bytes=size, max_bytes=_MAX_ORIGINAL_UPLOAD_BYTES)
 
-    final_sha256 = derived_sha256 or original_sha256
+        raw = await provider.download_object(bucket, object_path)
+        original_sha256 = hashlib.sha256(raw).hexdigest()
 
-    latest = latest_for_cover_check
+        try:
+            probe = Image.open(io.BytesIO(raw))
+            probe.load()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise ChannelImageUndecodableError() from exc
+
+        frame_count = getattr(probe, "n_frames", 1)
+        if frame_count > 1:
+            raise ChannelImageAnimatedUnsupportedError(frame_count=frame_count)
+
+        # story 620beefc(페드루 리뷰 — EXIF 방향) — .format을 transpose 前에 챙긴다(회전이
+        # 실제로 필요하면 exif_transpose가 .format 없는 새 객체를 반환한다, _derive_image와
+        # 동일 함정). 종횡비·저장 메타(original_width/height)는 픽셀 그리드가 아니라 사람이
+        # 보는 방향 기준이어야 정확하다 — 회전된 원본을 안 굽고 재면 종횡비 오판정 가능.
+        original_mime = _PIL_FORMAT_TO_MIME.get((probe.format or "").upper()) or "application/octet-stream"
+        from PIL import ImageOps
+
+        probe = ImageOps.exif_transpose(probe)
+        width, height = probe.size
+
+        # story #3578(Phase2·BE·급·결함, 페드루 PO 確定 2026-09-06) — 분기(영상 유무)를
+        # 비율 검증보다 먼저 결정한다. 지연 import는 channel_post_videos.py가 이
+        # 모듈을 모듈 레벨에서 import하는 순환을 피하기 위함(story #3554 기존 관례,
+        # 아래 캐리 로직이 쓰던 것을 여기로 당김 — 신규 순환 0). 이전엔 이 검증이
+        # "이게 캐러셀 이미지인지 커버인지" 조차 모른 채 image_aspect_min(0.80)
+        # 하나로 먼저 돌아, 릴스 커버(9:16=0.5625)가 그 하한을 구조적으로 못 넘어
+        # 어떤 실제 커버도 통과 못 하던 결함(유나 §17-23 ④ 실측)의 근본원인이었다.
+        from app.services.channel_post_videos import _copy_video_row, get_channel_post_video_for_version
+
+        latest_for_cover_check = latest_for_count
+        if latest_for_cover_check is None:
+            raise ChannelPostDraftNotFoundError(draft_id)
+        existing_video = await get_channel_post_video_for_version(db, version_id=latest_for_cover_check.id)
+
+        if existing_video is not None:
+            # story #3578 — 커버 규격(video_aspect_target±video_aspect_tolerance,
+            # 어댑터 선언 — 하드코딩 0). 캐러셀 image_aspect_min/max와 완전히 다른
+            # 축(캐러셀=정지 이미지 앨범 규격·커버=그 영상과 같은 비율이어야 하는
+            # 제약)이라 아래 캐러셀 분기와 절대 안 섞는다.
+            if width > 0 and height > 0 and adapter.video_aspect_target > 0:
+                cover_ratio = width / height
+                if abs(cover_ratio - adapter.video_aspect_target) > adapter.video_aspect_tolerance:
+                    raise ChannelCoverAspectRatioRejectedError(
+                        aspect_ratio=cover_ratio, target=adapter.video_aspect_target,
+                        tolerance=adapter.video_aspect_tolerance,
+                    )
+        elif adapter.image_aspect_min > 0 and height > 0:
+            # story #3320 — Instagram류(orientation-aware, 방향별 한도가 다름: 가로
+            # 최대 1.91:1·세로 최대 4:5=0.8). 아래(Threads 등) 정규화(long/short, 항상
+            # ≥1) 검사를 그대로 쓰면 image_aspect_max(1.91)가 방향 구분 없이 양쪽에
+            # 다 적용돼 세로쪽 실제 한도(0.8)보다 훨씬 느슨해진다(정규화 1.91 ==
+            # width/height 1/1.91=0.52까지 통과) — 원시 width/height 비율 하나로
+            # 위(가로 초과)·아래(세로 초과) 두 한도를 각각 직접 비교해야 정확하다.
+            # Threads 등 image_aspect_min=0.0(기본값)인 채널은 이 분기 자체를 안 타
+            # 아래의 기존 정규화 검사 그대로(회귀 0).
+            width_height_ratio = width / height
+            if width_height_ratio > adapter.image_aspect_max:
+                raise ChannelImageAspectRatioExceededError(
+                    aspect_ratio=width_height_ratio, max_aspect_ratio=adapter.image_aspect_max,
+                )
+            if width_height_ratio < adapter.image_aspect_min:
+                raise ChannelImageAspectRatioTooNarrowError(
+                    width_height_ratio=width_height_ratio, min_width_height_ratio=adapter.image_aspect_min,
+                )
+        else:
+            aspect_ratio = (max(width, height) / min(width, height)) if min(width, height) > 0 else 0.0
+            if aspect_ratio > adapter.image_aspect_max:
+                raise ChannelImageAspectRatioExceededError(
+                    aspect_ratio=aspect_ratio, max_aspect_ratio=adapter.image_aspect_max,
+                )
+
+        derived_bytes, derived_content_type, derived_width, derived_height, _out_format = _derive_image(
+            raw, adapter=adapter,
+        )
+        derived_sha256: str | None = None
+        if derived_bytes is not None:
+            ext = "png" if derived_content_type == "image/png" else "jpg"
+            derived_object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
+            ok = await provider.put_object(bucket, derived_object_path, derived_bytes, content_type=derived_content_type)
+            if not ok:
+                raise ChannelImageUploadFailedError(object_path=derived_object_path)
+            derived_sha256 = hashlib.sha256(derived_bytes).hexdigest()
+
+        final_sha256 = derived_sha256 or original_sha256
+
+        latest = latest_for_cover_check
+    except Exception:
+        try:
+            await provider.delete_object(bucket, object_path)
+            if derived_object_path is not None:
+                await provider.delete_object(bucket, derived_object_path)
+        except Exception:
+            logger.exception("이미지 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
+        raise
 
     # story #3554(Phase2, 페드루 PO 確定 2026-09-06③) — 이 draft에 영상이 이미
     # 붙어 있으면 이 호출은 캐러셀 첨부가 아니라 "커버 교체"다(PO 明示 "커버=별개

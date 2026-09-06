@@ -1411,6 +1411,11 @@
       "file": "tests/test_3583_ga4_insight_enrichment.py",
       "sec": 16.0,
       "source": "story-3583-ga4-measurement-connection(3-way 분할 — inflow 부착 로직 4건 로컬 2.60s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 16s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3589_upload_cleanup_on_reject.py",
+      "sec": 42.0,
+      "source": "story-3589-upload-cleanup-on-reject(PR 개설 前 선제 등재 — 로컬 raw pytest 11건 6.95s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 42s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
