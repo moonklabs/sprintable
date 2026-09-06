@@ -35,7 +35,11 @@ def _agent(mid: uuid.UUID) -> ResolvedMember:
 
 
 def _gate(requester_id, *, work_item_id=None, status="pending", gate_id=None):
-    return SimpleNamespace(
+    # story #3569(페드루 PO 리뷰) — SimpleNamespace 대신 gate_mock_factory.make_gate()
+    # (story #2837 "건드릴 때 이관" 관례 — 실 Gate ORM 인스턴스라 sealed_doc_id 등 새 컬럼이
+    # 늘어도 AttributeError로 재발하지 않는다, mock을 실물 스키마에 맞춰 올리는 쪽).
+    from tests.gate_mock_factory import make_gate
+    return make_gate(
         id=gate_id or uuid.uuid4(),
         gate_type="doc_approval",
         neutral_facts={"requested_by_member_id": str(requester_id)} if requester_id else {},
@@ -200,8 +204,10 @@ async def test_list_gates_can_approve_false_for_agent():
 
 
 async def _run_non_doc_can_approve(project_role):
+    from tests.gate_mock_factory import make_gate
+
     org = uuid.uuid4()
-    merge = SimpleNamespace(
+    merge = make_gate(
         id=uuid.uuid4(), gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
         neutral_facts={}, status="pending", designated_approver_id=None,
     )

@@ -763,12 +763,7 @@ async def list_gates(
     # 대상이 아니다, 본문 sha만 봉인). work_item_summary/doc_proj(위 doc_approval용
     # 배치)와는 키 축이 다르다(work_item_id가 아니라 sealed_doc_id) — 별도의 독립
     # 1회 배치(N+1 0). 삭제된 doc·sealed_doc_id 자체가 없으면 None(지어내지 않는다).
-    # ⚠️getattr(..., None) — 이 파일의 여러 test_1970/1972류 테스트가 gate를 SimpleNamespace
-    # 로 목(mock)해 새 Gate ORM 컬럼을 안 갖고 있다(sealed_content_* 등 다른 필드는 GateResponse.
-    # model_validate()의 from_attributes 관용(속성 없으면 pydantic 기본값)으로만 접근돼 이 함정을
-    # 안 밟았는데, 이 블록은 g.sealed_doc_id를 Python 코드에서 직접 읽어 AttributeError로 터졌다
-    # — 실측 확認(7건 회귀).
-    sealed_doc_ids = {sid for g in gates if (sid := getattr(g, "sealed_doc_id", None)) is not None}
+    sealed_doc_ids = {g.sealed_doc_id for g in gates if g.sealed_doc_id is not None}
     if sealed_doc_ids:
         from app.models.doc import Doc as _SealedDoc
         title_rows = (await session.execute(
@@ -778,9 +773,8 @@ async def list_gates(
         )).all()
         sealed_doc_title_by_id = {did: title for did, title in title_rows}
         for resp, g in zip(responses, gates):
-            sid = getattr(g, "sealed_doc_id", None)
-            if sid is not None:
-                resp.sealed_doc_title = sealed_doc_title_by_id.get(sid)
+            if g.sealed_doc_id is not None:
+                resp.sealed_doc_title = sealed_doc_title_by_id.get(g.sealed_doc_id)
 
     # doc-side enrich 2종 Doc 조회를 **한 배치**로(org-scope·soft-delete 가드·N+1 0):
     #  ⓐ work_item_summary(24f5ae18): work_item_type=='doc' gate → title/slug.
@@ -1283,14 +1277,12 @@ async def get_gate_endpoint(
     _posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
     # story #3569 — list_gates와 동일 축(sealed_doc_id, work_item_id 아님)·동일 규칙
-    # (지금 제목·삭제/미존재 doc은 None). getattr(...) 방어 — list_gates 쪽 주석 참고
-    # (SimpleNamespace mock gate 회귀와 동일 원인).
-    _sealed_doc_id = getattr(gate, "sealed_doc_id", None)
-    if _sealed_doc_id is not None:
+    # (지금 제목·삭제/미존재 doc은 None).
+    if gate.sealed_doc_id is not None:
         from app.models.doc import Doc as _SealedDoc
         resp.sealed_doc_title = (await session.execute(
             select(_SealedDoc.title).where(
-                _SealedDoc.id == _sealed_doc_id, _SealedDoc.org_id == org_id, _SealedDoc.deleted_at.is_(None),
+                _SealedDoc.id == gate.sealed_doc_id, _SealedDoc.org_id == org_id, _SealedDoc.deleted_at.is_(None),
             )
         )).scalar_one_or_none()
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
