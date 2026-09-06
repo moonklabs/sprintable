@@ -131,6 +131,40 @@ async def _wait_until(predicate, *, timeout: float = 5.0, interval: float = 0.00
     return predicate()
 
 
+def _asgi_transport_observing(app, needle: bytes) -> tuple[ASGITransport, asyncio.Event]:
+    """페드루 PO 現場 재현(카디르 로그 실측, 2026-09-06) — CI에서 「큐 비움
+    (consumed)」과 「제너레이터가 그 항목을 실제로 스트림에 write함」 사이에 진짜
+    레이스가 있었다: `queue.get()`이 반환된 시점(`_wait_until(q.empty 확認)`이
+    보는 시점)과, `asyncio.wait({get_task, shutdown_wait_task}, ...)`가 그 완료를
+    거둬 `generate()`의 태스크가 실제로 재개돼 `yield`까지 도달하는 시점 사이에는
+    스케줄링 홉이 최소 1~2번 더 있다 — 그 창에서 `shutdown_event.set()`이 로컬
+    저부하에선 항상 늦게 관측되지만(그래서 로컬 재현 0), CI 부하에선 그 홉이 먼저
+    끝나 `asyncio.wait`의 `done`에 `shutdown_wait_task`까지 같이 들어차 버리면
+    `if shutdown_wait_task in done:`(get_task보다 먼저 검사)가 이겨 sentinel을
+    한 번도 못 내보내고 shutdown_reconnect로 바로 끝난다(CI 원본 로그의 body가
+    정확히 이 모양이었다).
+
+    처방 — 큐 상태라는 간접 신호 대신 **ASGI 자신의 `send()` 콜러블을 감싸** 그
+    바이트열이 실제로 응답 바디에 실리는 순간을 직접 관찰한다(`c.stream()`으로
+    바꿔도 소용없다 — httpx.ASGITransport.handle_async_request 소스 확認: 앱
+    콜러블 `self.app(...)`이 완전히 끝나야 Response 자체가 생성되므로, `c.stream()`
+    도 `c.get()`과 똑같이 완주 後에야 바디를 준다, #3494/#3580 확립 사실 재확認).
+    이 훅은 스트리밍 여부와 무관하게 서버측 `send()` 호출 자체를 가로채므로 그
+    제약과 상관없이 정확한 시점을 잡는다 — 폴링·타임아웃 예산 자체가 필요 없어진다
+    (이벤트가 set될 때까지 `await event.wait()`로 순수 이벤트 기반 대기)."""
+    written = asyncio.Event()
+
+    async def _wrapped_app(scope, receive, send):
+        async def _send(message):
+            if message.get("type") == "http.response.body" and needle in message.get("body", b""):
+                written.set()
+            await send(message)
+
+        await app(scope, receive, _send)
+
+    return ASGITransport(app=_wrapped_app), written
+
+
 @pytest.mark.anyio
 async def test_agent_stream_registers_connection(mock_session, org_id):
     """GET /api/v2/events/stream 연결 시 _agent_connections에 등록됨.
@@ -188,12 +222,13 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
     app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     registered_observed = False
-    consumed_observed = False
+    written_observed = False
     body = ""
+    transport, sentinel_written = _asgi_transport_observing(app, b"__test_sentinel__")
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
-                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                async with AsyncClient(transport=transport, base_url="http://test") as c:
                     stream_task = asyncio.create_task(
                         c.get(f"/api/v2/events/stream?member_id={member_id}")
                     )
@@ -202,7 +237,11 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
                     for q in queues:
                         q.put_nowait({"event_type": "__test_sentinel__"})
                     if queues:
-                        consumed_observed = await _wait_until(lambda: all(q.empty() for q in queues))
+                        try:
+                            await asyncio.wait_for(sentinel_written.wait(), timeout=5.0)
+                            written_observed = True
+                        except asyncio.TimeoutError:
+                            pass
                     shutdown_module.shutdown_event.set()
                     resp = await asyncio.wait_for(stream_task, timeout=5.0)
                     assert resp.status_code == 200
@@ -217,7 +256,7 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
         shutdown_module.reset_shutdown_event()
 
     assert registered_observed, "injector never observed the connection in _agent_connections"
-    assert consumed_observed, "generator never consumed the injected sentinel from its queue"
+    assert written_observed, "generator never actually wrote the sentinel line to the ASGI send() callable"
     assert "__test_sentinel__" in body
     assert member_id_str not in _agent_connections  # cleanup 계약 — 완주 뒤엔 반드시 비어야 함
 
@@ -411,12 +450,13 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
         yield mock_session
 
     registered_observed = False
-    consumed_observed = False
+    written_observed = False
     body = ""
+    transport, sentinel_written = _asgi_transport_observing(app, b"__test_sentinel__")
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
-                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                async with AsyncClient(transport=transport, base_url="http://test") as c:
                     stream_task = asyncio.create_task(
                         c.get(f"/api/v2/events/stream?member_id={member_id}")
                     )
@@ -425,7 +465,11 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
                     for q in queues:
                         q.put_nowait({"event_type": "__test_sentinel__"})
                     if queues:
-                        consumed_observed = await _wait_until(lambda: all(q.empty() for q in queues))
+                        try:
+                            await asyncio.wait_for(sentinel_written.wait(), timeout=5.0)
+                            written_observed = True
+                        except asyncio.TimeoutError:
+                            pass
                     shutdown_module.shutdown_event.set()
                     resp = await asyncio.wait_for(stream_task, timeout=5.0)
                     assert resp.status_code == 200
@@ -440,7 +484,7 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
         shutdown_module.reset_shutdown_event()
 
     assert registered_observed, "injector never observed the connection in _agent_connections"
-    assert consumed_observed, "generator never consumed the injected sentinel from its queue"
+    assert written_observed, "generator never actually wrote the sentinel line to the ASGI send() callable"
     assert "__test_sentinel__" in body
     assert member_id_str not in _agent_connections  # cleanup 계약
 
