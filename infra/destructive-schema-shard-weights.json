@@ -1396,6 +1396,11 @@
       "file": "tests/test_3578_cover_aspect_validation_order.py",
       "sec": 30.0,
       "source": "story-3578-cover-aspect-validation-order(PR 개설 前 선제 등재 — 로컬 raw pytest 5건 실측 CPU 4.3s(동시 부하로 벽시계는 변동 큼) 기준 CI 배율(~6x, story #3383) 보수적으로 반영한 30s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3571_facebook_comments_insights.py",
+      "sec": 20.0,
+      "source": "story-3571-facebook-comments-insights(PR 개설 前 선제 등재 — 로컬 raw pytest 17건 3.26s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

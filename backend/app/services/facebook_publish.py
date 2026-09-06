@@ -280,3 +280,81 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
     if resp.status_code != 200:
         return None
     return resp.json().get("permalink_url")
+
+
+# ─── story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06) — 댓글 조회+답변 ───────
+# ⚠️미확認(그라운딩①, 모듈 상단 딱지와 동형): `GET /{post-id}/comments`(fields·
+# paging.cursors)·답변 `POST /{comment-id}/comments {message}` — Instagram의
+# 전용 `/{ig-comment-id}/replies` 엔드포인트와 달리, Facebook은 같은 `/comments`
+# 엔드포인트가 대상이 post든 기존 댓글이든 그 밑에 새 댓글/답글을 단다(PO
+# 確定, Meta 문서 지식). threads_publish.py::fetch_replies와 동형 커서 상한
+# 방어(PR#3865 리뷰의 "첫 페이지만 보고 리컨실하면 뒷페이지가 오삭제되는"
+# 결함 클래스를 여기서도 막는다).
+_COMMENTS_URL_TMPL = _GRAPH_BASE + "/{post_id}/comments"
+_COMMENT_REPLY_URL_TMPL = _GRAPH_BASE + "/{comment_id}/comments"
+_COMMENTS_FIELDS = "id,message,from,created_time"
+_REPLIES_MAX_PAGES = 10
+
+
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+    """이 post의 댓글 목록 + 완전 수집 여부. `channel_post_comments.py::
+    collect_comments_for_publication`은 각 항목의 top-level `raw.get("text")`/
+    `raw.get("username")`/`raw.get("timestamp")`를 읽는 계약(sandbox/threads raw
+    모양과 동일) — Facebook Page 댓글 원시 응답은 `message`/`from.name`/
+    `created_time`이라(instagram_publish.py::fetch_replies의 `from.username`
+    끌어올림과 동형 사상) 여기서 text/username/timestamp로 끌어올려 얹는다(원본
+    필드도 raw에 그대로 보존, 유실 없음)."""
+    from app.services.threads_publish import ThreadsPublishError
+
+    items: list[dict] = []
+    after_cursor: str | None = None
+    for _ in range(_REPLIES_MAX_PAGES):
+        params = {"fields": _COMMENTS_FIELDS, "access_token": access_token}
+        if after_cursor:
+            params["after"] = after_cursor
+        resp = await client.get(_COMMENTS_URL_TMPL.format(post_id=media_id), params=params)
+        if resp.status_code != 200:
+            raise ThreadsPublishError(
+                "FACEBOOK_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
+            )
+        body = resp.json()
+        for raw in body.get("data") or []:
+            frm = raw.get("from") or {}
+            item = dict(raw)
+            item["text"] = raw.get("message")
+            item["username"] = frm.get("name")
+            item["from_id"] = frm.get("id")
+            item["timestamp"] = raw.get("created_time")
+            items.append(item)
+        after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
+        if not after_cursor:
+            return items, True
+    return items, False
+
+
+async def reply(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, reply_to_id: str, text: str,
+) -> tuple[str, str | None]:
+    """댓글에 답변 — `POST /{comment-id}/comments {message}`(모듈 상단 딱지 참고 —
+    Instagram의 전용 `/replies`와 다른 형). `reply_to_id`=대상 댓글의 external_
+    comment_id. `threads_user_id`는 이 호출엔 안 쓴다(대상이 댓글 id라 페이지/
+    유저 id가 URL에 안 들어감) — 시그니처는 dispatch 통일을 위해 그대로 유지
+    (sandbox_publish.py·threads_publish.py·instagram_publish.py와 동일 관례).
+    응답엔 permalink 개념이 없어(댓글은 post가 아님) 두 번째 반환값은 항상 None."""
+    from app.services.threads_publish import ThreadsPublishError
+
+    resp = await client.post(
+        _COMMENT_REPLY_URL_TMPL.format(comment_id=reply_to_id),
+        params={"message": text, "access_token": access_token},
+    )
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "FACEBOOK_REPLY_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    external_reply_id = body.get("id")
+    if not external_reply_id:
+        raise ThreadsPublishError(
+            "FACEBOOK_REPLY_MISSING_ID", "id missing in response", status_code=resp.status_code,
+        )
+    return str(external_reply_id), None

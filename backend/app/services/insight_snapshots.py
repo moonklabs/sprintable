@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.insight_snapshot import InsightSnapshot
+from app.services.facebook_publish import _GRAPH_BASE as _FACEBOOK_GRAPH_BASE
 from app.services.instagram_publish import _GRAPH_BASE as _INSTAGRAM_GRAPH_BASE
 
 logger = logging.getLogger(__name__)
@@ -327,6 +328,89 @@ async def _fetch_instagram_via_connection(db: AsyncSession, snapshot: InsightSna
         return await _fetch_instagram(client, access_token=access_token, media_id=pub.external_id)
 
 
+# story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06②) — Meta 문서 지식(⚠️미확認,
+# threads/instagram 상단 딱지와 동형). Page 게시물 insights → §2(d) 7키 매핑:
+# post_impressions→impressions·post_impressions_unique→reach(Page 게시물의 «도달»
+# 표준 메트릭·⚠️미확認)·post_engaged_users→engagements·post_clicks→clicks·
+# post_video_views→views(영상 게시물만 — 텍스트/이미지 게시물은 이 메트릭이
+# 응답에 아예 안 실려, `values`에서 빠져 _normalize가 자동으로 null="미제공"
+# 처리한다. threads/instagram의 "선언 안 함=null"과 다른 축 — 이건 "선언은
+# 했지만 이번 fetch가 값을 못 줌"쪽, _normalize 독스트링의 두 번째 경우 그대로
+# 재사용, 새 메커니즘 0). spend/conversions은 아예 요청하지 않는다(광고 축·
+# Phase 3, 대응 후보 자체가 없음 — threads/instagram과 동일 사유).
+_FACEBOOK_INSIGHTS_URL_TMPL = _FACEBOOK_GRAPH_BASE + "/{post_id}/insights"
+_FACEBOOK_INSIGHTS_METRICS = "post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_video_views"
+_FACEBOOK_METRIC_TO_KEY = {
+    "post_impressions": "impressions",
+    "post_impressions_unique": "reach",
+    "post_engaged_users": "engagements",
+    "post_clicks": "clicks",
+    "post_video_views": "views",
+}
+
+
+async def _fetch_facebook(client: "httpx.AsyncClient", *, access_token: str, media_id: str) -> dict[str, Any]:  # noqa: F821
+    """_fetch_threads/_fetch_instagram과 동형 에러분류(같은 error_code 문자열
+    재사용, 새 매핑표 0)."""
+    import httpx
+
+    resp = await client.get(
+        _FACEBOOK_INSIGHTS_URL_TMPL.format(post_id=media_id),
+        params={"metric": _FACEBOOK_INSIGHTS_METRICS, "access_token": access_token},
+    )
+    if resp.status_code == 401:
+        raise InsightFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message="Facebook 액세스 토큰이 만료되었습니다")
+    if resp.status_code == 429:
+        raise InsightFetchError(error_code="CHANNEL_RATE_LIMITED", message="Facebook 인사이트 API 한도 초과")
+    if resp.status_code >= 500:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=f"Facebook 서버 오류: {resp.status_code}")
+    if resp.status_code >= 400:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_AUTH_REJECTED", message=f"Facebook 인사이트 요청 거부: {resp.status_code}")
+
+    body = resp.json()
+    values: dict[str, int] = {}
+    for item in body.get("data", []):
+        key = _FACEBOOK_METRIC_TO_KEY.get(item.get("name"))
+        if key is None:
+            continue
+        item_values = item.get("values") or []
+        # 페드루 PO 리뷰(2026-09-06) — 「값이 실제로 있을 때만 싣는다」 원칙: name은
+        # 왔지만 values가 빈 목록이면(예: 이 지표가 이번 응답에서 실제로 안 잡힘)
+        # total=0으로 지어내 싣지 않는다 — 항목이 1개 이상일 때만 합산해 싣는다.
+        if not item_values:
+            continue
+        total = sum(int(v.get("value", 0) or 0) for v in item_values)
+        values[key] = values.get(key, 0) + total
+    return {"raw": body, "values": values}
+
+
+async def _fetch_facebook_via_connection(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_connection import decrypt_for_use
+
+    pub = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == snapshot.publication_id)
+    )).scalar_one_or_none()
+    if pub is None or pub.external_id is None:
+        raise InsightFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+        )
+    connection = await db.get(ChannelConnection, pub.connection_id)
+    if connection is None or connection.status != "active":
+        raise InsightFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
+        )
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise InsightFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
+
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        return await _fetch_facebook(client, access_token=access_token, media_id=pub.external_id)
+
+
 async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
     """channel별 dispatch. 호출 前 `insight_metrics`가 빈 튜플이 아님을 이미 확인했다는
     전제(호출자 `process_due_insight_snapshots`가 그 판정을 한다 — 여기선 순수 dispatch
@@ -339,6 +423,14 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> di
         return await _fetch_threads_via_connection(db, snapshot)
     if snapshot.channel == "instagram":
         return await _fetch_instagram_via_connection(db, snapshot)
+    if snapshot.channel == "facebook":
+        return await _fetch_facebook_via_connection(db, snapshot)
+    # story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06③) — sandbox 결정값 재사용
+    # (instagram_sandbox와 달리 facebook_sandbox는 dispatch가 없으면 이 채널의
+    # insight_metrics 선언 자체가 무의미해진다 — 어댑터 선언과 dispatch를 짝으로
+    # 유지한다).
+    if snapshot.channel == "facebook_sandbox":
+        return _fetch_sandbox(publication_id=snapshot.publication_id)
     raise InsightFetchError(
         error_code="INSIGHT_CHANNEL_NOT_IMPLEMENTED",
         message=f"insight_metrics는 선언됐지만 fetch dispatch가 없습니다: {snapshot.channel}",

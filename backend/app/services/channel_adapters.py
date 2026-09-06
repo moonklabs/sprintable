@@ -250,8 +250,11 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
         token_url="https://graph.facebook.com/v21.0/oauth/access_token",
         # pages_show_list=/me/accounts 목록 조회 · pages_manage_posts=피드 발행/삭제
-        # · pages_read_engagement=페이지 permalink류 읽기(⚠️미확認, 그라운딩 대상).
-        scope="pages_show_list,pages_manage_posts,pages_read_engagement",
+        # · pages_read_engagement=페이지 permalink류·인사이트 읽기(⚠️미확認, 그라운딩
+        # 대상) · pages_manage_engagement=댓글 답변(story #3571, 페드루 PO 確定
+        # 2026-09-06 — threads_manage_replies 선례와 동형: 기존 연결은 재인증 전까지
+        # 답변이 막힌다, 의도).
+        scope="pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_engagement",
         refresh_mode="reissue_from_access_token",
         credential_kind="oauth",
         display_name="Facebook Page",
@@ -260,6 +263,13 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         utm_medium="social",
         supports_unpublish=True,
         unpublish_required_scope="pages_manage_posts",
+        # story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06) — 댓글 조회/답변(Threads/
+        # Instagram 동형 축, facebook_publish.py::fetch_replies/reply). ⚠️미확認
+        # (그라운딩① — GET /{post-id}/comments·POST /{comment-id}/comments {message},
+        # Instagram의 전용 /replies 엔드포인트와 다른 형).
+        supports_fetch_replies=True,
+        supports_reply=True,
+        reply_required_scope="pages_manage_engagement",
         image_formats=("image/jpeg", "image/png"),
         image_max_bytes=10 * 1024 * 1024,
         image_width_min=320,
@@ -282,8 +292,6 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 이미지가 아니라 자체 정책값이라는 점이 image_formats/max_bytes 등 다른
         # ⚠️미확認 필드들과 다르다).
         image_max_count=10,
-        # comments/insights는 declare-only 미지원(페드루 PO 明示 2026-09-06) — 빈
-        # insight_metrics·supports_fetch_replies 기본값(False) 그대로.
         image_required=False,  # Instagram과 달리 텍스트만으로도 피드 발행 가능.
         # story #3567(④) — Page 릴스. Meta 공식 규격을 그라운딩에서 확認 못 해
         # Instagram 값 그대로 동형 사용(⚠️미확認 — App Review로 실 Page 권한을
@@ -294,11 +302,21 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         video_aspect_target=9 / 16,
         video_aspect_tolerance=0.05,
         video_codecs=("avc1", "hvc1", "hev1"),
+        # story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06②) — Page 게시물 insights
+        # → 정규화 7키 매핑(그라운딩②). impressions←post_impressions·reach←post_
+        # impressions_unique(Page 게시물의 «도달» 표준 메트릭·⚠️미확認)·engagements←
+        # post_engaged_users·clicks←post_clicks·views←post_video_views(영상
+        # 게시물만 — insight_snapshots.py::_fetch_facebook이 응답에 그 메트릭이
+        # 실제로 왔을 때만 채운다, 텍스트/이미지 게시물은 요청 metric 목록에 있어도
+        # 응답에 없어 자동으로 null="미제공"이 된다, _normalize의 «선언은 했지만
+        # 이번 fetch가 값을 못 줌» 경로 그대로 재사용 — 새 메커니즘 0). spend·
+        # conversions=광고 축(Phase 3) — 대응 후보 자체가 없어 아예 미선언.
+        insight_metrics=("impressions", "reach", "engagements", "clicks", "views"),
     ),
     "facebook_sandbox": ChannelAdapterConfig(
         authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
         token_url="https://graph.facebook.com/v21.0/oauth/access_token",
-        scope="pages_show_list,pages_manage_posts,pages_read_engagement",
+        scope="pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_engagement",
         refresh_mode="reissue_from_access_token",
         # 페드루 PO 確定(2026-09-06) — instagram_sandbox와 달리 credential_kind=
         # "oauth"(=none이 아님). 페이지 수 마커(:pages-0/:pages-1)를 sandbox 앱
@@ -313,6 +331,11 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         utm_medium="test",
         supports_unpublish=True,
         unpublish_required_scope="pages_manage_posts",
+        # story #3571 — 실 facebook과 동형(댓글/답변, facebook_sandbox_publish.py::
+        # fetch_replies/reply).
+        supports_fetch_replies=True,
+        supports_reply=True,
+        reply_required_scope="pages_manage_engagement",
         image_formats=("image/jpeg", "image/png"),
         image_max_bytes=10 * 1024 * 1024,
         image_width_min=320,
@@ -333,6 +356,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         video_aspect_target=9 / 16,
         video_aspect_tolerance=0.05,
         video_codecs=("avc1", "hvc1", "hev1"),
+        # story #3571 — 실 facebook과 동일 5키 선언(sandbox가 실계정보다 관대하면
+        # 안 된다는 기존 관례 그대로, instagram_sandbox가 instagram과 동형 선언하는
+        # 것과 같은 원칙 — 일반 "sandbox"의 7키 전부와는 다르다).
+        insight_metrics=("impressions", "reach", "engagements", "clicks", "views"),
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의

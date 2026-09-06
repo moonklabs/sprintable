@@ -1,8 +1,11 @@
 """story #3547(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06) — dev 전용 Facebook Page
 샌드박스 발행 클라이언트. `facebook_publish.py`와 정확히 같은 함수 시그니처(신규
 판정 로직 0) — 결정적·상태 없음(sandbox_publish.py·instagram_sandbox_publish.py와
-동형 설계 계약). comments/insights 함수는 아예 안 둔다(declare-only, supports_
-fetch_replies/insight_metrics를 어댑터에서 선언 안 함 — 페드루 PO 明示 2026-09-06)."""
+동형 설계 계약).
+
+story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06) — 댓글 조회/답변 추가(fetch_replies/
+reply, instagram_sandbox_publish.py와 동형 결정적 표본 — 실 provider 없이 정규화
+파이프라인 전체를 라이브로 실측)."""
 from __future__ import annotations
 
 import uuid
@@ -128,3 +131,32 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
     # "삭제됨"을 시뮬레이션한다(sandbox_publish.py의 threads 계열과 동형 — 실
     # provider가 지원 확認된 능력은 sandbox도 성공으로 흉내낸다).
     return None
+
+
+# ─── story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06) — 댓글 수집+답변
+# (instagram_sandbox_publish.py와 동형 계약) ──────────────────────────────────
+
+
+def _deterministic_comment(*, media_id: str, index: int) -> dict:
+    seed = int(uuid.uuid5(uuid.NAMESPACE_URL, f"{media_id}:{index}").hex[:8], 16)
+    return {
+        "id": f"sandbox-fb-comment-{media_id}-{index}",
+        "text": f"샌드박스 FB 댓글 {index}(seed={seed % 1000})",
+        "username": f"sandbox_fb_user_{index}",
+        "timestamp": "2026-09-06T00:00:00+00:00",
+    }
+
+
+async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+    """instagram_sandbox_publish.py::fetch_replies와 동형 — media_id 하나엔 항상
+    같은 2건(순서 고정), complete=True 고정(페이지네이션 개념 없음)."""
+    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
+
+
+async def reply(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, reply_to_id: str, text: str,
+) -> tuple[str, str | None]:
+    """facebook_publish.py::reply와 동형 계약 — 댓글 답변엔 permalink 개념이
+    없어 두 번째 반환값은 항상 None(실 클라이언트와 동일하게, sandbox가 실제보다
+    관대한 값을 지어내지 않는다)."""
+    return f"sandbox-fb-reply-{uuid.uuid4().hex}", None
