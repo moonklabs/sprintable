@@ -1397,6 +1397,15 @@ jobs:
       - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
         run: pnpm --filter web verify:no-new-raw-fetch-api
 
+      # story #3557 회귀가드: aria-label={`Xyz...`}(영문 대문자로 시작하는 템플릿
+      # 리터럴)이 새로 들어오면 실패한다 — #3899가 TagChip 하나를 i18n 키로 옮겼는데 같은
+      # 부류(content-rules 이동 버튼 2·story-detail-panel 라벨 제거 1)가 유나 §17 #3912
+      # 리뷰 中 전수에서 뒤늦게 드러났다. ⛔평문 `aria-label="…"`(따옴표, 템플릿 리터럴
+      # 아님) 형은 이 판별식 밖 — 고유명사류 오탐(예: 브랜드명) 회피를 위해 의도적으로
+      # 좁혔다(스크립트 헤더 주석·story #3557 본문 "못 잡는 것" 참조).
+      - name: "Verify no hardcoded aria-label (story #3557 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-aria-label
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
