@@ -24,6 +24,7 @@ confirm_channel_post_image_upload`가 "이 draft에 영상이 이미 있으면 �
 from __future__ import annotations
 
 import hashlib
+import logging
 import struct
 import uuid
 from dataclasses import dataclass
@@ -49,6 +50,8 @@ from app.services.channel_posts import (
     get_channel_post_draft,
 )
 from app.services.storage import get_storage_provider
+
+logger = logging.getLogger(__name__)
 
 _MIME_TO_EXT: dict[str, str] = {"video/mp4": "mp4", "video/quicktime": "mov"}
 
@@ -354,46 +357,60 @@ async def confirm_channel_post_video_upload(
     size = await provider.head_object(bucket, object_path)
     if size is None:
         raise ChannelVideoObjectNotFoundError(object_path=object_path)
-    if size > adapter.video_max_bytes:
-        await provider.delete_object(bucket, object_path)
-        raise ChannelVideoTooLargeError(size_bytes=size, max_bytes=adapter.video_max_bytes)
 
-    raw = await provider.download_object(bucket, object_path)
-    original_sha256 = hashlib.sha256(raw).hexdigest()
+    # story #3589(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-06) — head_object가
+    # 객체 존재를 확認한 뒤부터는, 아래 어떤 검증이든 거부(422)로 끝나면 그 객체가
+    # 고아로 남는다(사람이 없앨 길 0). "용량 초과" 갈래(원래 위치) 하나에만 delete_
+    # object가 있어 나머지(길이·비율·코덱·파싱 실패·이미지≥2)가 전부 샜다 — 갈래마다
+    # 손으로 delete_object를 넣는 대신 이 구간 전체를 한 자리에서 감싸 갈래별 누락을
+    # 구조적으로 없앤다. 삭제 자체가 실패해도 원래 거부 사유를 가리지 않는다(로그만
+    # 남기고 원본 예외 그대로 재던짐).
+    try:
+        if size > adapter.video_max_bytes:
+            raise ChannelVideoTooLargeError(size_bytes=size, max_bytes=adapter.video_max_bytes)
 
-    metadata = parse_mp4_metadata(raw)
+        raw = await provider.download_object(bucket, object_path)
+        original_sha256 = hashlib.sha256(raw).hexdigest()
 
-    if metadata.duration_seconds > adapter.video_max_seconds:
-        raise ChannelVideoDurationExceededError(
-            duration_seconds=metadata.duration_seconds, max_seconds=adapter.video_max_seconds,
-        )
-    if metadata.duration_seconds < adapter.video_min_seconds:
-        raise ChannelVideoDurationTooShortError(
-            duration_seconds=metadata.duration_seconds, min_seconds=adapter.video_min_seconds,
-        )
-    aspect_ratio = metadata.width / metadata.height
-    if adapter.video_aspect_target > 0 and abs(aspect_ratio - adapter.video_aspect_target) > adapter.video_aspect_tolerance:
-        raise ChannelVideoAspectRatioError(
-            aspect_ratio=aspect_ratio, target=adapter.video_aspect_target, tolerance=adapter.video_aspect_tolerance,
-        )
-    if adapter.video_codecs and metadata.codec not in adapter.video_codecs:
-        raise ChannelVideoCodecUnsupportedError(codec=metadata.codec, allowed=adapter.video_codecs)
+        metadata = parse_mp4_metadata(raw)
 
-    latest = (await db.execute(
-        select(ChannelPostVersion)
-        .where(ChannelPostVersion.draft_id == draft_id)
-        .order_by(ChannelPostVersion.version.desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    if latest is None:
-        raise ChannelPostDraftNotFoundError(draft_id)
+        if metadata.duration_seconds > adapter.video_max_seconds:
+            raise ChannelVideoDurationExceededError(
+                duration_seconds=metadata.duration_seconds, max_seconds=adapter.video_max_seconds,
+            )
+        if metadata.duration_seconds < adapter.video_min_seconds:
+            raise ChannelVideoDurationTooShortError(
+                duration_seconds=metadata.duration_seconds, min_seconds=adapter.video_min_seconds,
+            )
+        aspect_ratio = metadata.width / metadata.height
+        if adapter.video_aspect_target > 0 and abs(aspect_ratio - adapter.video_aspect_target) > adapter.video_aspect_tolerance:
+            raise ChannelVideoAspectRatioError(
+                aspect_ratio=aspect_ratio, target=adapter.video_aspect_target, tolerance=adapter.video_aspect_tolerance,
+            )
+        if adapter.video_codecs and metadata.codec not in adapter.video_codecs:
+            raise ChannelVideoCodecUnsupportedError(codec=metadata.codec, allowed=adapter.video_codecs)
 
-    # story #3574(Phase2·BE·결함, 페드루 PO 確定 2026-09-06) — 트랜잭션(새 버전 생성)
-    # 시작 前 명시 거부. 이미지 0·1장일 때만 아래 단수 캐리 로직에 도달한다(그 경우
-    # 의미가 정확히 일치 — position=0 대표 1장=전체 1장).
-    existing_images = await list_channel_post_images_for_version(db, version_id=latest.id)
-    if len(existing_images) >= 2:
-        raise ChannelVideoRequiresSingleCoverError()
+        latest = (await db.execute(
+            select(ChannelPostVersion)
+            .where(ChannelPostVersion.draft_id == draft_id)
+            .order_by(ChannelPostVersion.version.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if latest is None:
+            raise ChannelPostDraftNotFoundError(draft_id)
+
+        # story #3574(Phase2·BE·결함, 페드루 PO 確定 2026-09-06) — 트랜잭션(새 버전 생성)
+        # 시작 前 명시 거부. 이미지 0·1장일 때만 아래 단수 캐리 로직에 도달한다(그 경우
+        # 의미가 정확히 일치 — position=0 대표 1장=전체 1장).
+        existing_images = await list_channel_post_images_for_version(db, version_id=latest.id)
+        if len(existing_images) >= 2:
+            raise ChannelVideoRequiresSingleCoverError()
+    except Exception:
+        try:
+            await provider.delete_object(bucket, object_path)
+        except Exception:
+            logger.exception("영상 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
+        raise
 
     existing_cover = await get_channel_post_image_for_version(db, version_id=latest.id)
     cover_sha256 = existing_cover.final_sha256 if existing_cover is not None else ""
