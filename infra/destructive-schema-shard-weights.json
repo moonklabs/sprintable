@@ -1319,8 +1319,8 @@
     },
     {
       "file": "tests/test_3528_self_recovery_sweep.py",
-      "sec": 20.0,
-      "source": "story-3528-self-recovery-sweep(라이브 FAIL 핫픽스, PR#3900 REQUIRED 1 반영 — 로컬 raw pytest 6건 3.6s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 25.0,
+      "source": "story-3528-orphan-window-widen([SID:3528] 별 PR, dev DB oneoff 실측 7291bad8 REQUIRED 반영 — 로컬 raw pytest 8건 4.09s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 25s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3547_facebook_page_connection.py",

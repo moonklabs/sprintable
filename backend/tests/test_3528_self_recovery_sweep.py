@@ -173,6 +173,86 @@ async def test_publication_with_open_row_is_not_reseeded():
 
 
 @pytest.mark.anyio
+async def test_orphan_with_only_far_future_pending_window_still_gets_seeded():
+    """페드루 PO REQUIRED(2026-09-06, dev DB oneoff 실측 publication 7291bad8) —
+    「열린 행 0」 판정의 실측 갭 재현. #3882 배포 前 마지막 due 3창(+1h) 캡처가 끝난
+    publication은 +1d/+7d 창이 아직 pending으로 남아 "열린 행 0"을 절대 만족 못
+    하는데, 그 pending 행은 며칠 뒤에나 도래해 그 사이 지속폴링(30분 주기)이 영영
+    시작 안 된다. orphan 판정이 「30분 안에 도래하는 열린 행 0」으로 넓혀졌으면
+    이 표본도 씨앗을 받아야 한다."""
+    from app.services.channel_post_comments import process_due_comment_collections
+    from app.models.channel_post_comment import CommentCollectionSchedule
+
+    engine, Session = await _session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-7291bad8")
+            # +1h창 캡처(수 시간 전, #3882 배포 前 상황 재현) — freshness 가드가
+            # "이미 도래한" 행만 보게 하는 축을 이 행으로 검증(먼 미래 pending의
+            # due_at에 가려지면 안 된다).
+            await _seed_terminal_schedule_row(
+                s, org_id=org_id, publication_id=pub.id, external_id="media-7291bad8",
+                due_at=now - timedelta(hours=5),
+            )
+            # +1d창 — 아직 pending, 며칠 뒤에나 도래(열린 행은 있지만 30분 안이
+            # 아니다).
+            s.add(CommentCollectionSchedule(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, channel="sandbox",
+                external_id="media-7291bad8", due_at=now + timedelta(days=1), status="pending",
+            ))
+            await s.commit()
+
+        async with Session() as s:
+            counts = await process_due_comment_collections(s, now=now)
+        assert counts["self_recovery_seeded"] == 1, counts
+
+        async with Session() as s:
+            rows = await _count_schedule_rows(s, publication_id=pub.id)
+            new_pending = [r for r in rows if r.status == "pending" and r.due_at <= now + timedelta(minutes=1)]
+            assert len(new_pending) == 1, "30분 안 도래 씨앗 행이 안 생겼다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publication_with_open_row_due_within_30min_is_not_reseeded():
+    """열린 행이 있어도 30분 밖(먼 미래)이면 씨앗을 받아야 하지만(위 테스트),
+    반대로 30분 **안**에 도래하는 열린 행이 있으면 정상 체인이 곧 스스로 처리할
+    것이므로 씨앗을 심으면 안 된다."""
+    from app.services.channel_post_comments import process_due_comment_collections
+    from app.models.channel_post_comment import CommentCollectionSchedule
+
+    engine, Session = await _session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-due-soon")
+            await _seed_terminal_schedule_row(
+                s, org_id=org_id, publication_id=pub.id, external_id="media-due-soon", due_at=now - timedelta(hours=5),
+            )
+            s.add(CommentCollectionSchedule(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, channel="sandbox",
+                external_id="media-due-soon", due_at=now + timedelta(minutes=10), status="pending",
+            ))
+            await s.commit()
+
+        async with Session() as s:
+            counts = await process_due_comment_collections(s, now=now)
+        assert counts["self_recovery_seeded"] == 0, counts
+
+        async with Session() as s:
+            rows = await _count_schedule_rows(s, publication_id=pub.id)
+            assert len(rows) == 2, "30분 안에 도래하는 열린 행이 있는데 씨앗이 추가됐다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_normal_state_sweep_costs_exactly_one_query_and_seeds_zero():
     """페드루 PO REQUIRED(2026-09-06, PR#3900 리뷰) — orphan이 0인 정상 상태(다른
     publication들이 전부 열린 행을 가진 상태)에서 스윕 자체의 비용이 SQL 쿼리

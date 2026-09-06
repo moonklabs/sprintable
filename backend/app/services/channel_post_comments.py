@@ -362,10 +362,19 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
     탈락하나, 그 회수는 별건 후보로 관찰만 하고 여기선 다루지 않는다 — 「행 0」만).
 
     매 틱마다 활성(`_is_publication_active`)·댓글 지원 채널(`supports_fetch_replies`)
-    ·org 상한 안(`_within_org_continuous_poll_cap`)이면서 pending/in_progress 행이
-    0인 publication에 due_at=now 씨앗 행을 심는다(UNIQUE 멱등 — 동시 틱 경합 방어,
-    한 틱 삽입 상한 `_SELF_RECOVERY_SWEEP_SEED_LIMIT`건 — 남는 orphan은 다음 틱이
-    이어서 잡는다, 이미 씨앗 심긴 건 pending 행이 생겨 다음 스캔에서 자동 제외).
+    ·org 상한 안(`_within_org_continuous_poll_cap`)이면서 **30분 안에 도래하는 열린
+    (pending/in_progress) 행이 0인** publication에 due_at=now 씨앗 행을 심는다
+    (UNIQUE 멱등 — 동시 틱 경합 방어, 한 틱 삽입 상한 `_SELF_RECOVERY_SWEEP_SEED_LIMIT`
+    건 — 남는 orphan은 다음 틱이 이어서 잡는다, 이미 씨앗 심긴 건 pending 행이 생겨
+    다음 스캔에서 자동 제외).
+
+    페드루 PO REQUIRED(2026-09-06, dev DB oneoff 실측·publication 7291bad8) —
+    orphan 판정을 "열린 행이 0"에서 "**30분 안에 도래하는** 열린 행이 0"으로 넓힌다.
+    좁은 판정은 실측 갭을 놓쳤다 — #3882 배포 前 마지막 due 3창(+1h) 캡처가 끝난
+    publication은 +1d/+7d 창이 아직 pending으로 남아 있어 "열린 행 0"을 절대
+    만족 못 하는데, 그 pending 행들은 며칠 뒤에나 도래해 그 사이 30분 지속폴링
+    체인은 영영 시작 안 된다(마지막 캡처가 #3882 前이라 재생성 콜 자체가 없었던
+    탓). "30분 안에 도래" 기준이면 이런 publication도 정확히 걸린다.
 
     페드루 PO REQUIRED(2026-09-06, PR#3900 리뷰) — orphan 후보 판정을 SQL 한
     쿼리로 민다(NOT EXISTS + 상관 서브쿼리 MAX 집계 + LIMIT). orphan이 0인 정상
@@ -383,15 +392,23 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
         return 0
 
     freshness_cutoff = now - _CONTINUOUS_POLL_INTERVAL
-    has_open_row = (
+    due_soon_cutoff = now + _CONTINUOUS_POLL_INTERVAL
+    has_open_row_due_soon = (
         select(func.count()).select_from(CommentCollectionSchedule).where(
             CommentCollectionSchedule.publication_id == ChannelPublication.id,
             CommentCollectionSchedule.status.in_(("pending", "in_progress")),
+            CommentCollectionSchedule.due_at <= due_soon_cutoff,
         ).correlate(ChannelPublication).scalar_subquery()
     )
-    last_activity_at = (
+    # 신선도 가드(회귀 방지, 변경 없음) — "방금 이 틱에서 정상 처리된" publication을
+    # orphan으로 오판해 중복 씨앗을 심지 않게 한다. MAX(due_at)를 전체 행이 아니라
+    # "이미 도래한"(due_at<=now) 행으로만 좁힌다 — 아니면 +1d/+7d처럼 먼 미래
+    # pending 행의 due_at이 MAX를 차지해 "최근 활동 없음"을 절대 못 보게 된다(위
+    # 7291bad8 갭과 같은 함정 — 이 필터가 그걸 피한다).
+    last_actionable_activity_at = (
         select(func.max(CommentCollectionSchedule.due_at)).where(
             CommentCollectionSchedule.publication_id == ChannelPublication.id,
+            CommentCollectionSchedule.due_at <= now,
         ).correlate(ChannelPublication).scalar_subquery()
     )
 
@@ -400,8 +417,8 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
             ChannelPublication.channel.in_(comment_capable_channels),
             ChannelPublication.published_at.is_not(None),
             ChannelPublication.published_at >= now - _ACTIVE_PUBLISHED_WITHIN,
-            has_open_row == 0,
-            or_(last_activity_at.is_(None), last_activity_at < freshness_cutoff),
+            has_open_row_due_soon == 0,
+            or_(last_actionable_activity_at.is_(None), last_actionable_activity_at < freshness_cutoff),
         ).order_by(ChannelPublication.published_at.desc())
         .limit(_SELF_RECOVERY_SWEEP_SEED_LIMIT)
     )).scalars().all()
