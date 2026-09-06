@@ -4,8 +4,8 @@ process_due_comment_collections`가 만들어진 뒤 어디서도 호출되지 �
 한 번도 실행된 적이 없었다(수동 refresh만 실제 동작). insight_snapshots와 같은
 자리(`/publication-commands` tick)에 피기백해 처방 — 신규 엔드포인트 0.
 
-세팅 헬퍼는 test_3414_publication_command.py(cron tick 테스트 선례)와 동형
-(중복 재발명 금지)."""
+세팅 헬퍼는 test_3414_publication_command_cron_retry.py(cron tick 테스트 선례,
+story #3562로 분할 前엔 test_3414_publication_command.py)와 동형(중복 재발명 금지)."""
 from __future__ import annotations
 
 import os

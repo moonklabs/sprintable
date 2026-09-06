@@ -1123,9 +1123,19 @@
       "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
-      "file": "tests/test_3414_publication_command.py",
-      "sec": 40.0,
-      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
+      "file": "tests/test_3414_publication_command_core.py",
+      "sec": 21.0,
+      "source": "story-3562-split-3414-publication-command(2026-09-06, 원본 test_3414_publication_command.py 22건·실측 40.0s(run 34011626732)를 3-way 분할 후 로컬 raw pytest 비중(core 8건 12.93s/총 24.81s ≈ 52%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3414_publication_command_cron_retry.py",
+      "sec": 13.0,
+      "source": "story-3562-split-3414-publication-command(2026-09-06, 원본 22건·실측 40.0s(run 34011626732)를 3-way 분할 후 로컬 raw pytest 비중(cron_retry 10건 7.57s/총 24.81s ≈ 31%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3414_publication_command_edges.py",
+      "sec": 7.0,
+      "source": "story-3562-split-3414-publication-command(2026-09-06, 원본 22건·실측 40.0s(run 34011626732)를 3-way 분할 후 로컬 raw pytest 비중(edges 4건 4.31s/총 24.81s ≈ 17%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3527_comment_collection_cron_wiring.py",

@@ -5,8 +5,8 @@
 2026-09-04 12:46Z 샌드박스 라이브 실측).
 
 이 파일의 테스트는 **`gate_service.py::transition_gate()`를 직접 호출**한다 —
-test_3414_publication_command.py의 `_approve_gate_directly`(gate.status를 직접
-대입)와 달리, 이 스토리의 훅이 `transition_gate()` 안에 살아 그 우회로는 훅을
+test_3414_publication_command_core.py(story #3562로 분할 前엔 test_3414_
+publication_command.py)의 `_approve_gate_directly`(gate.status를 직접 대입)와 달리, 이 스토리의 훅이 `transition_gate()` 안에 살아 그 우회로는 훅을
 전혀 안 태운다(사고 자체가 실 승인 엔드포인트에서만 나고 기존 단위테스트가 전부
 그 경로를 bypass해 놓쳤던 사실의 재발 방지 — story 본문 발견 섹션 그대로)."""
 from __future__ import annotations
