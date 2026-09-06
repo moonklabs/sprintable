@@ -26,6 +26,10 @@ import type { BacklinkItem } from '@/components/shared/entity-backlinks-section'
 // gates는 story-detail-panel.tsx가 이미 fetch해 둔 chipGates를 그대로 prop으로
 // 받는다(PO 確定 — "새 fetch 0이 이상", 게이트 목록은 상세 패널이 P0-04 in-flight
 // 칩용으로 이미 물어보는 데이터라 이 블록이 또 부르면 같은 것을 두 번 묻는 셈).
+// gatesLoaded는 그 fetch가 끝났는지(성공이든 실패든)를 나타낸다 — chipGates의 초기값이
+// `[]`라 값만으로는 "로딩 중"과 "게이트 0건"을 못 가른다(유나 그라운딩, PR#3938 비차단,
+// 2026-09-06) — 게이트 쪽에만 doc이 있는 스토리(3573류)에서 이 구분이 없으면 backlinks가
+// 늦게 와도 초기 렌더에서 "게이트엔 없다"로 잘못 접힐 수 있다.
 interface ConceptCardDoc {
   id: string;
   title: string;
@@ -38,7 +42,13 @@ interface GateSealedDocItem {
   sealed_doc_title?: string | null;
 }
 
-export function ConceptCardSection({ workItemId, gates }: { workItemId: string; gates: GateSealedDocItem[] }) {
+export function ConceptCardSection({
+  workItemId, gates, gatesLoaded,
+}: {
+  workItemId: string;
+  gates: GateSealedDocItem[];
+  gatesLoaded: boolean;
+}) {
   const t = useTranslations('board');
   const [backlinkItems, setBacklinkItems] = useState<BacklinkItem[] | null>(null);
 
@@ -51,10 +61,11 @@ export function ConceptCardSection({ workItemId, gates }: { workItemId: string; 
     return () => { cancelled = true; };
   }, [workItemId]);
 
-  // backlinks가 도착하기 전엔 판정하지 않는다(늦게 오는 doc이 있어도 블록이 먼저
-  // 접혀 안 뜨는 것을 막는다 — §5-2 "모른다≠없다"와 같은 결). gates는 부모가 이미
-  // 로드를 끝낸 값을 그대로 받으므로 여기선 null 게이팅이 필요 없다.
-  if (backlinkItems === null) return null;
+  // backlinks·gates 둘 다 도착하기 전엔 판정하지 않는다(늦게 오는 doc이 있어도
+  // 블록이 먼저 접혀 안 뜨는 것을 막는다 — §5-2 "모른다≠없다"와 같은 결). gates
+  // 자체는 부모가 로드하지만 그 fetch가 끝났는지는 gatesLoaded로 따로 받는다
+  // (chipGates 초기값 []가 "로딩 중"과 "0건"을 못 갈라서다, PR#3938 비차단).
+  if (backlinkItems === null || !gatesLoaded) return null;
 
   const backlinkDocs: ConceptCardDoc[] = backlinkItems
     .filter((item) => item.source_type === 'doc' && item.doc)

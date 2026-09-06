@@ -47,9 +47,9 @@ describe('ConceptCardSection — story #3560 ①-c · #3584 데이터 소스 확
 
   type StubGate = { gate_type: string; sealed_doc_id?: string | null; sealed_doc_title?: string | null };
 
-  async function mount(gates: StubGate[] = []) {
+  async function mount(gates: StubGate[] = [], gatesLoaded = true) {
     await act(async () => {
-      root.render(wrap(<ConceptCardSection workItemId="s1" gates={gates} />));
+      root.render(wrap(<ConceptCardSection workItemId="s1" gates={gates} gatesLoaded={gatesLoaded} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
   }
@@ -105,5 +105,22 @@ describe('ConceptCardSection — story #3560 ①-c · #3584 데이터 소스 확
     stubBacklinksFetch([]);
     await mount([{ gate_type: 'concept_approval', sealed_doc_id: 'doc-g1', sealed_doc_title: null }]);
     expect(container.querySelector('[data-testid="concept-card-section"]')).toBeNull();
+  });
+
+  // PR#3938 비차단(유나 그라운딩·PO 確定 2026-09-06) — chipGates 초기값이 []라
+  // gatesLoaded 없이는 "로딩 중"과 "게이트 0건"을 못 가른다. 게이트에만 doc이 있는
+  // 스토리(3573류)에서 gatesLoaded=false면 아직 판정을 보류해야 한다.
+  it('⭐gatesLoaded가 false면(게이트 아직 로딩 중) 게이트 doc이 있어도 판정을 보류한다', async () => {
+    stubBacklinksFetch([]);
+    await mount([{ gate_type: 'concept_approval', sealed_doc_id: 'doc-g1', sealed_doc_title: '컨셉 v3' }], false);
+    expect(container.querySelector('[data-testid="concept-card-section"]')).toBeNull();
+  });
+
+  it('gatesLoaded가 true가 되면 그제서야 게이트 doc이 뜬다', async () => {
+    stubBacklinksFetch([]);
+    await mount([{ gate_type: 'concept_approval', sealed_doc_id: 'doc-g1', sealed_doc_title: '컨셉 v3' }], true);
+    const section = container.querySelector('[data-testid="concept-card-section"]');
+    expect(section).not.toBeNull();
+    expect(section?.textContent).toContain('컨셉 v3');
   });
 });
