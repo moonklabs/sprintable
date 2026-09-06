@@ -27,6 +27,12 @@ _PLATFORM_SETTINGS_COLUMNS = {
     # (신규 컬럼 0·조직 상수 0, 스토리 본문 「결제 게이트 0」과 같은 취지의 「앱 등록
     # 게이트 0」).
     "instagram": ("threads_platform_app_id", "threads_platform_encrypted_app_secret"),
+    # story #3547(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06) — Facebook Login도
+    # 같은 Meta 개발자 앱에 제품만 추가하면 되는 축(instagram과 동일 근거·같은
+    # platform_settings 컬럼 재사용, 새 컬럼 0). 이 공용 앱 경로를 쓰려면 그 앱에
+    # Facebook Login 제품이 켜져 있어야 한다 — 조직이 자기 앱을 등록(①단계 우선)
+    # 하면 이 축과 무관.
+    "facebook": ("threads_platform_app_id", "threads_platform_encrypted_app_secret"),
 }
 
 

@@ -1319,6 +1319,14 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("comment-collections tick error: %s", exc)
             counts["comment_collections"] = {"error": "unhandled"}
+        # story #3547(2026-09-06) — Facebook Page 페이지 선택 중간 상태(TTL 15분) 만료분
+        # 스윕. 위 두 축과 같은 피기백 사상(새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.channel_oauth_pending_selection import sweep_expired_pending_selections
+            counts["oauth_pending_selections_swept"] = await sweep_expired_pending_selections(session)
+        except Exception as exc:
+            logger.exception("oauth-pending-selections sweep tick error: %s", exc)
+            counts["oauth_pending_selections_swept"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)
