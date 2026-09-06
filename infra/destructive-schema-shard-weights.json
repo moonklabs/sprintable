@@ -1391,6 +1391,11 @@
       "file": "tests/test_3569_gate_sealed_doc_fields.py",
       "sec": 27.0,
       "source": "story-3569-gate-sealed-doc-fields(PR 개설 前 선제 등재 — 로컬 raw pytest 4건 4.43s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 27s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3578_cover_aspect_validation_order.py",
+      "sec": 30.0,
+      "source": "story-3578-cover-aspect-validation-order(PR 개설 前 선제 등재 — 로컬 raw pytest 5건 실측 CPU 4.3s(동시 부하로 벽시계는 변동 큼) 기준 CI 배율(~6x, story #3383) 보수적으로 반영한 30s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

@@ -451,7 +451,7 @@ async def test_cover_attach_after_video_computes_composite_and_replaces_not_appe
             assert r_video.status_code == 201, r_video.text
             video_sha256 = __import__("hashlib").sha256(video_raw).hexdigest()
 
-            cover1_raw = _jpeg_bytes(800, 1000, color=(10, 20, 30))
+            cover1_raw = _jpeg_bytes(720, 1280, color=(10, 20, 30))
             r_cover1 = await _upload_and_confirm(client, org_id, draft_id, cover1_raw, content_type="image/jpeg")
             assert r_cover1.status_code == 201, r_cover1.text
             version1_id = r_cover1.json()["version_id"]
@@ -468,7 +468,7 @@ async def test_cover_attach_after_video_computes_composite_and_replaces_not_appe
         assert version1.image_sha256 == compute_image_seal_hash([video_sha256, images_v1[0].final_sha256])
 
         async with _client_for(app) as client:
-            cover2_raw = _jpeg_bytes(800, 1000, color=(200, 210, 220))
+            cover2_raw = _jpeg_bytes(720, 1280, color=(200, 210, 220))
             r_cover2 = await _upload_and_confirm(client, org_id, draft_id, cover2_raw, content_type="image/jpeg")
             assert r_cover2.status_code == 201, r_cover2.text
             version2_id = r_cover2.json()["version_id"]
@@ -510,7 +510,7 @@ async def test_text_only_edit_after_video_and_cover_carries_forward_both():
             draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
             video_raw = _build_mp4(duration_seconds=6.0, **_VALID_9_16)
             await _upload_and_confirm_video(client, org_id, draft_id, video_raw)
-            cover_raw = _jpeg_bytes(800, 1000)
+            cover_raw = _jpeg_bytes(720, 1280)
             r_cover = await _upload_and_confirm(client, org_id, draft_id, cover_raw, content_type="image/jpeg")
             assert r_cover.status_code == 201, r_cover.text
             version_before_id = r_cover.json()["version_id"]
