@@ -1356,6 +1356,11 @@
       "file": "tests/test_3561_concept_approval_gate.py",
       "sec": 69.0,
       "source": "story-3561-concept-approval-gate(PR 개설 前 선제 등재 — PO 리뷰 조건 반영 후 로컬 raw pytest 18건 11.46s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 69s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3567_facebook_page_final.py",
+      "sec": 40.0,
+      "source": "story-3567-facebook-page-final(PO 리뷰 조건 반영 후 로컬 raw pytest 19건 6.73s 재실측 — 조건 반영 커밋이 테스트 3건 추가했는데 등재 갱신을 누락했던 것을 story #3574 작업 중 발견·즉시 수정. CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

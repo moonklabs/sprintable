@@ -14,6 +14,11 @@ from app.services.threads_publish import ThreadsPublishError
 _MARKER_429 = "[sandbox:429]"
 _MARKER_PROVIDER_ERROR = "[sandbox:provider-error]"
 _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
+# story #3567(Phase2·BE, 페드루 PO 確定 2026-09-06④) — instagram_sandbox_publish.py
+# 와 **같은 마커 문자열**(PO 明示 — 새 마커 어휘 0, 에러코드 접두만 이 파일의 기존
+# SANDBOX_FACEBOOK_* 관례를 따른다).
+_MARKER_REELS_PROCESSING_FAILED = "[sandbox:reels-processing-failed]"
+_MARKER_REELS_CODEC_REJECTED = "[sandbox:reels-codec-rejected]"
 
 
 async def create_container(
@@ -33,9 +38,70 @@ async def create_container(
     return f"sandbox-fb-post-{uuid.uuid4().hex}"
 
 
+async def create_carousel_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str, image_urls: list[str],
+) -> str:
+    """facebook_publish.py::create_carousel_container·instagram_sandbox_publish.py::
+    create_carousel_container와 동형 계약(결정적·상태 없음). 자식 N번째 실패
+    마커(1-indexed) `[sandbox:carousel-child-{n}-failed]`로 그 번째에서 예외 —
+    부모(`/feed`) 호출 자체가 안 만들어진다(원자성 재현)."""
+    if _MARKER_429 in text:
+        raise ThreadsPublishError("SANDBOX_FACEBOOK_RATE_LIMITED", "sandbox: [sandbox:429] 마커 시뮬레이션", status_code=429)
+    if _MARKER_PROVIDER_ERROR in text:
+        raise ThreadsPublishError(
+            "SANDBOX_FACEBOOK_PROVIDER_ERROR", "sandbox: [sandbox:provider-error] 마커 시뮬레이션", status_code=502,
+        )
+    if _MARKER_EXPIRED_TOKEN in text:
+        raise ThreadsPublishError(
+            "SANDBOX_FACEBOOK_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
+        )
+    for index, _image_url in enumerate(image_urls, start=1):
+        marker = f"[sandbox:carousel-child-{index}-failed]"
+        if marker in text:
+            raise ThreadsPublishError(
+                "SANDBOX_FACEBOOK_CAROUSEL_CHILD_FAILED", f"sandbox: {marker} 마커 시뮬레이션", status_code=502,
+            )
+    return f"sandbox-fb-carousel-{uuid.uuid4().hex}"
+
+
+async def create_reels_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
+    video_url: str | None, cover_url: str | None = None,
+) -> str:
+    """facebook_publish.py::create_reels_container·instagram_sandbox_publish.py::
+    create_reels_container와 동형 계약."""
+    if _MARKER_429 in text:
+        raise ThreadsPublishError("SANDBOX_FACEBOOK_RATE_LIMITED", "sandbox: [sandbox:429] 마커 시뮬레이션", status_code=429)
+    if _MARKER_PROVIDER_ERROR in text:
+        raise ThreadsPublishError(
+            "SANDBOX_FACEBOOK_PROVIDER_ERROR", "sandbox: [sandbox:provider-error] 마커 시뮬레이션", status_code=502,
+        )
+    if _MARKER_EXPIRED_TOKEN in text:
+        raise ThreadsPublishError(
+            "SANDBOX_FACEBOOK_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
+        )
+    if _MARKER_REELS_PROCESSING_FAILED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_FACEBOOK_REELS_PROCESSING_FAILED",
+            "sandbox: [sandbox:reels-processing-failed] 마커 시뮬레이션", status_code=502,
+        )
+    if _MARKER_REELS_CODEC_REJECTED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_FACEBOOK_REELS_CODEC_REJECTED",
+            "sandbox: [sandbox:reels-codec-rejected] 마커 시뮬레이션", status_code=422,
+        )
+    if video_url is None:
+        raise ThreadsPublishError(
+            "FACEBOOK_REELS_VIDEO_REQUIRED", "릴스 발행은 영상이 필수입니다", status_code=422,
+        )
+    return f"sandbox-fb-reels-{uuid.uuid4().hex}"
+
+
 async def get_container_status(
     client: httpx.AsyncClient, *, access_token: str, creation_id: str,
 ) -> tuple[str, str | None]:
+    # instagram_sandbox_publish.py와 동형 — 사진/피드·릴스 전부 즉시 FINISHED로
+    # 단순화(처리 실패 시뮬레이션은 create_reels_container 마커에서 이미 던진다).
     return "FINISHED", None
 
 
