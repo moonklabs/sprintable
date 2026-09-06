@@ -113,7 +113,13 @@ async def test_comment_with_two_replies_exposes_count_and_latest_text():
                 s, org_id=org_id, project_id=project_id,
             )
             comment = await _seed_comment(s, org_id=org_id, publication_id=pub.id)
-            await _submit_and_approve_reply_with_text(s, org_id=org_id, human_id=human_id, comment=comment, text="첫 답변")
+            # story #3596(PO 確定 2026-09-06) — 안 보낸 초안이 있는 댓글엔 새 초안
+            # 생성이 409로 막힌다(2차 초안 방지). 이 테스트가 원래 검증하려는 것은
+            # "2건째 답변"이지, "첫 답변이 안 보낸 채 방치"가 아니므로 첫 답변을
+            # sent로 마감한 뒤 두 번째를 만든다(원 의도 불변, 새 가드와 정합).
+            first_reply = await _submit_and_approve_reply_with_text(s, org_id=org_id, human_id=human_id, comment=comment, text="첫 답변")
+            first_reply.status = "sent"
+            await s.commit()
             second_reply = await _submit_and_approve_reply_with_text(
                 s, org_id=org_id, human_id=human_id, comment=comment, text="두 번째 답변",
             )

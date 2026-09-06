@@ -13,6 +13,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.services.channel_post_comment_replies import (
     CommentNotFoundError,
+    CommentReplyDraftAlreadyOpenError,
     CommentReplyChannelUnsupportedError,
     CommentReplyNotFoundError,
     CommentReplyTargetDeletedError,
@@ -203,6 +204,15 @@ async def create_comment_reply_draft_endpoint(
         )
     except CommentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"댓글을 찾을 수 없습니다: {comment_id}") from exc
+    except CommentReplyDraftAlreadyOpenError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "COMMENT_REPLY_DRAFT_ALREADY_OPEN",
+                "message": "안 보낸 초안이 이미 있습니다.",
+                "existing_reply_id": str(exc.existing_reply_id),
+            },
+        ) from exc
     return await _reply_view(db, reply, None)
 
 

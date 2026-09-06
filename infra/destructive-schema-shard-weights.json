@@ -1431,6 +1431,11 @@
       "file": "tests/test_3593_comment_reply_additive.py",
       "sec": 20.0,
       "source": "story-3593-comment-reply-additive(PR 개설 前 선제 등재 — 로컬 raw pytest 3건 3.31s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3596_open_reply_draft_additive.py",
+      "sec": 18.0,
+      "source": "story-3596-open-reply-draft-additive(PR 개설 前 선제 등재 — 로컬 raw pytest 4건 3.88s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 18s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

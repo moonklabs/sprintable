@@ -103,6 +103,15 @@ def _comment_reply_summary(reply, command_by_id: dict) -> CommentReplySummary:
     )
 
 
+class CommentOpenReplyDraft(BaseModel):
+    """story #3596(Phase2·BE, 페드루 PO 確定 2026-09-06) — 안 보낸(status draft/
+    pending) 최신 답변 1건. FE는 이 존재만으로 버튼을 「이어서 답변」으로 갈라
+    (답변 더하기 대신) 이 text로 다이얼로그를 채운다."""
+    id: uuid.UUID
+    status: str
+    text: str
+
+
 class CommentItem(BaseModel):
     id: uuid.UUID
     external_comment_id: str
@@ -119,6 +128,12 @@ class CommentItem(BaseModel):
     # {상태}" 형을 조립할 수 있게 한다. 답변 0건이면 0(reply가 null인 것과
     # 논리적으로 항상 같이 간다 — 0이면 reply도 반드시 null, 그 역도 성립).
     replies_count: int = 0
+    # story #3596(Phase2·BE, 페드루 PO 確定 2026-09-06) — 3593의 「답변 없음/이미
+    # 있음」 2갈래가 «보낸 답변»과 «안 보낸 초안»을 안 갈라 빈 다이얼로그로 2차
+    # 초안이 생기던 결함(#3947 카디르 비차단①)의 additive 처방. open_reply_draft
+    # null이면 안 보낸 초안 0건(replies_count>=sent_replies_count 항상 성립).
+    open_reply_draft: CommentOpenReplyDraft | None = None
+    sent_replies_count: int = 0
 
 
 class CommentListResponse(BaseModel):
@@ -170,6 +185,8 @@ async def list_publication_comments_endpoint(
     reply_by_comment_id = result["reply_by_comment_id"]
     command_by_id = result["command_by_id"]
     reply_counts_by_comment_id = result["reply_counts_by_comment_id"]
+    open_reply_draft_by_comment_id = result["open_reply_draft_by_comment_id"]
+    sent_reply_counts_by_comment_id = result["sent_reply_counts_by_comment_id"]
     return CommentListResponse(
         last_collected_at=result["last_collected_at"].isoformat() if result["last_collected_at"] else None,
         comments=[
@@ -182,6 +199,15 @@ async def list_publication_comments_endpoint(
                     if c.id in reply_by_comment_id else None
                 ),
                 replies_count=reply_counts_by_comment_id.get(c.id, 0),
+                open_reply_draft=(
+                    CommentOpenReplyDraft(
+                        id=open_reply_draft_by_comment_id[c.id].id,
+                        status=open_reply_draft_by_comment_id[c.id].status,
+                        text=open_reply_draft_by_comment_id[c.id].text,
+                    )
+                    if c.id in open_reply_draft_by_comment_id else None
+                ),
+                sent_replies_count=sent_reply_counts_by_comment_id.get(c.id, 0),
             )
             for c in result["comments"]
         ],
