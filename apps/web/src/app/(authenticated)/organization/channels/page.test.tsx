@@ -96,7 +96,7 @@ function stubFetch(opts: {
   // onRefresh()가 다시 부르는 GET이 새 상태를 보게 하려면 nextMeasurementConnections로
   // 교체한다(onFacebookSelect의 nextConnections와 같은 관례).
   onGa4Authorize?: () => { status: number; body?: unknown };
-  ga4Properties?: { id: string; display_name: string }[];
+  ga4Properties?: { property_id: string; display_name: string }[];
   ga4PropertiesFails?: boolean;
   onGa4Select?: (body: unknown) => { status: number; body?: unknown; nextMeasurementConnections?: unknown[] };
   onGa4Disconnect?: () => { status: number; nextMeasurementConnections?: unknown[] };
@@ -1001,7 +1001,7 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
       measurementConnections: [
         { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
       ],
-      ga4Properties: [{ id: 'p1', display_name: '뭉클랩 GA4' }, { id: 'p2', display_name: '테스트 속성' }],
+      ga4Properties: [{ property_id: 'p1', display_name: '뭉클랩 GA4' }, { property_id: 'p2', display_name: '테스트 속성' }],
     });
     await mount('owner');
     expect(container.querySelector('[data-testid="measurement-ga4-authorize-button"]')).toBeNull();
@@ -1031,7 +1031,7 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
       measurementConnections: [
         { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
       ],
-      ga4Properties: [{ id: 'p1', display_name: '뭉클랩 GA4' }],
+      ga4Properties: [{ property_id: 'p1', display_name: '뭉클랩 GA4' }],
       onGa4Select: (body) => {
         selectedBody = body;
         return {

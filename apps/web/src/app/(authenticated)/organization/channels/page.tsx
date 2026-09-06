@@ -56,10 +56,10 @@ interface MeasurementConnectionItem {
   property_name?: string | null;
 }
 
-// story #3583 — GA4 속성 선택(property_pending 전용). BE 계약: GET .../ga4/properties
-// → {id, display_name} 목록.
+// story #3583(BE 계약, PO 確定 2026-09-06 스토리 본문) — GA4 속성 선택(property_pending
+// 전용). GET .../ga4/properties → [{property_id, display_name}] 목록(Admin API 그대로).
 interface Ga4Property {
-  id: string;
+  property_id: string;
   display_name: string;
 }
 
@@ -321,7 +321,7 @@ function MeasurementConnectionsSection({
                   >
                     <option value="">{t('measurementGa4PropertySelectPlaceholder')}</option>
                     {ga4Properties.map((p) => (
-                      <option key={p.id} value={p.id}>{p.display_name}</option>
+                      <option key={p.property_id} value={p.property_id}>{p.display_name}</option>
                     ))}
                   </select>
                   <Button
