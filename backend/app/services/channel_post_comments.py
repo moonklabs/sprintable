@@ -96,102 +96,72 @@ async def _fetch_replies_raw(
     (2026-09-05, PR#3865 리뷰) — 이번 fetch가 그 publication의 댓글 전체를 봤는지.
     False면 collect_comments_for_publication이 삭제 리컨실을 건너뛴다(첫 페이지만
     보고 "없다=삭제됐다"로 오판하면 다음 페이지 댓글이 매 수집마다 소프트 삭제되는
-    결함이 있었다 — sandbox=항상 2건 고정이라 테스트가 못 잡던 자리)."""
-    if channel == "sandbox":
-        from app.services import sandbox_publish
+    결함이 있었다 — sandbox=항상 2건 고정이라 테스트가 못 잡던 자리).
 
+    story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06④) — 채널별 if/elif(threads/
+    instagram이 연결 조회·토큰 복호화·에러 매핑을 그대로 중복 구현하던 것)를
+    해체하고, `publication_command.py:577`의 답변 발송 duck-typing과 같은 형으로
+    통일한다: `get_publish_client_module(channel)`이 돌려주는 모듈의 `fetch_replies`
+    를 그대로 호출 — 새 채널(facebook)은 그 모듈에 `fetch_replies`만 추가하면
+    되고, 이 함수 자체는 더는 안 늘어난다(Threads/Instagram 동작 불변, 회귀 0
+    은 테스트로 고정). sandbox/instagram_sandbox는 여전히 별도 분기 — 실 연결이
+    없는(access_token="sandbox" 고정) 별개 계약이라 아래 공용 블록(ChannelPublication/
+    ChannelConnection 조회)과 억지로 합치지 않는다(그 자체가 새 결합, PO 원칙 위반)."""
+    from app.services.channel_adapters import get_publish_client_module
+
+    if channel in ("sandbox", "instagram_sandbox"):
         if external_id is None:
             raise CommentFetchError(error_code="COMMENT_EXTERNAL_ID_MISSING", message="external_id가 없습니다")
+        _publish_client = get_publish_client_module(channel)
         import httpx
         async with httpx.AsyncClient() as client:
-            return await sandbox_publish.fetch_replies(client, access_token="sandbox", media_id=external_id)
+            return await _publish_client.fetch_replies(client, access_token="sandbox", media_id=external_id)
 
-    if channel == "threads":
-        from app.models.channel_connection import ChannelConnection
-        from app.models.channel_publication import ChannelPublication
-        from app.services.channel_connection import decrypt_for_use
-        from app.services.threads_publish import fetch_replies as threads_fetch_replies
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_adapters import ChannelPublishDispatchNotImplementedError
+    from app.services.channel_connection import decrypt_for_use
+    from app.services.threads_publish import ThreadsPublishError
 
-        pub = (await db.execute(
-            select(ChannelPublication).where(ChannelPublication.id == publication_id)
-        )).scalar_one_or_none()
-        if pub is None or pub.external_id is None:
-            raise CommentFetchError(
-                error_code="CHANNEL_CONNECTION_NOT_ACTIVE",
-                message=f"channel_publication을 찾을 수 없습니다: {publication_id}",
-            )
-        connection = await db.get(ChannelConnection, pub.connection_id)
-        if connection is None or connection.status != "active":
-            raise CommentFetchError(
-                error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
-            )
-        access_token = decrypt_for_use(connection)
-        if access_token is None:
-            raise CommentFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
+    pub = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == publication_id)
+    )).scalar_one_or_none()
+    if pub is None or pub.external_id is None:
+        raise CommentFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE",
+            message=f"channel_publication을 찾을 수 없습니다: {publication_id}",
+        )
+    connection = await db.get(ChannelConnection, pub.connection_id)
+    if connection is None or connection.status != "active":
+        raise CommentFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
+        )
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise CommentFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
 
-        import httpx
-        try:
-            async with httpx.AsyncClient() as client:
-                return await threads_fetch_replies(client, access_token=access_token, media_id=pub.external_id)
-        except Exception as exc:  # noqa: BLE001 — ThreadsPublishError는 상태코드로 분류
-            from app.services.threads_publish import ThreadsPublishError
-            if isinstance(exc, ThreadsPublishError):
-                if exc.status_code in (401, 403):
-                    raise CommentFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message=str(exc)) from exc
-                if exc.status_code == 429:
-                    raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message=str(exc)) from exc
-                raise CommentFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
-            raise
+    try:
+        _publish_client = get_publish_client_module(channel)
+    except ChannelPublishDispatchNotImplementedError as exc:
+        # supports_fetch_replies=True인데 발행 클라이언트 모듈이 등록 안 된 설정
+        # 오류 방어(정상 경로면 collect_comments_for_publication의 어댑터 게이트가
+        # 이미 걸렀을 조합) — 옛 폴백 에러코드 그대로 유지(회귀 0).
+        raise CommentFetchError(
+            error_code="COMMENT_CHANNEL_NOT_IMPLEMENTED", message=f"fetch_replies dispatch가 없습니다: {channel}",
+        ) from exc
 
-    if channel == "instagram":
-        from app.models.channel_connection import ChannelConnection
-        from app.models.channel_publication import ChannelPublication
-        from app.services.channel_connection import decrypt_for_use
-        from app.services.instagram_publish import fetch_replies as instagram_fetch_replies
-
-        pub = (await db.execute(
-            select(ChannelPublication).where(ChannelPublication.id == publication_id)
-        )).scalar_one_or_none()
-        if pub is None or pub.external_id is None:
-            raise CommentFetchError(
-                error_code="CHANNEL_CONNECTION_NOT_ACTIVE",
-                message=f"channel_publication을 찾을 수 없습니다: {publication_id}",
-            )
-        connection = await db.get(ChannelConnection, pub.connection_id)
-        if connection is None or connection.status != "active":
-            raise CommentFetchError(
-                error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
-            )
-        access_token = decrypt_for_use(connection)
-        if access_token is None:
-            raise CommentFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
-
-        import httpx
-        try:
-            async with httpx.AsyncClient() as client:
-                return await instagram_fetch_replies(client, access_token=access_token, media_id=pub.external_id)
-        except Exception as exc:  # noqa: BLE001 — ThreadsPublishError는 상태코드로 분류(instagram도 재사용)
-            from app.services.threads_publish import ThreadsPublishError
-            if isinstance(exc, ThreadsPublishError):
-                if exc.status_code in (401, 403):
-                    raise CommentFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message=str(exc)) from exc
-                if exc.status_code == 429:
-                    raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message=str(exc)) from exc
-                raise CommentFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
-            raise
-
-    if channel == "instagram_sandbox":
-        from app.services import instagram_sandbox_publish
-
-        if external_id is None:
-            raise CommentFetchError(error_code="COMMENT_EXTERNAL_ID_MISSING", message="external_id가 없습니다")
-        import httpx
+    import httpx
+    try:
         async with httpx.AsyncClient() as client:
-            return await instagram_sandbox_publish.fetch_replies(client, access_token="sandbox", media_id=external_id)
-
-    raise CommentFetchError(
-        error_code="COMMENT_CHANNEL_NOT_IMPLEMENTED", message=f"fetch_replies dispatch가 없습니다: {channel}",
-    )
+            return await _publish_client.fetch_replies(client, access_token=access_token, media_id=pub.external_id)
+    except Exception as exc:  # noqa: BLE001 — ThreadsPublishError는 상태코드로 분류(threads/instagram/facebook 공용)
+        if isinstance(exc, ThreadsPublishError):
+            if exc.status_code in (401, 403):
+                raise CommentFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message=str(exc)) from exc
+            if exc.status_code == 429:
+                raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message=str(exc)) from exc
+            raise CommentFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
+        raise
 
 
 async def collect_comments_for_publication(
