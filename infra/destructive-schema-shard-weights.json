@@ -1413,9 +1413,14 @@
       "source": "story-3583-ga4-measurement-connection(3-way 분할 — inflow 부착 로직 4건 로컬 2.60s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 16s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
-      "file": "tests/test_3589_upload_cleanup_on_reject.py",
-      "sec": 42.0,
-      "source": "story-3589-upload-cleanup-on-reject(PR 개설 前 선제 등재 — 로컬 raw pytest 11건 6.95s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 42s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "file": "tests/test_3589_video_upload_cleanup_on_reject.py",
+      "sec": 29.0,
+      "source": "story-3589-upload-cleanup-on-reject(페드루 PO 리뷰 2026-09-06 14:00Z — 원래 영상+이미지 11건 단일 파일 42s가 story #3579 60초 가드 경계대역이라 2-way 분할. 영상 6건 로컬 4.73s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 29s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3589_image_upload_cleanup_on_reject.py",
+      "sec": 26.0,
+      "source": "story-3589-upload-cleanup-on-reject(2-way 분할 — 이미지 5건 로컬 4.26s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 26s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
