@@ -94,28 +94,57 @@ async def client(mock_session, auth_ctx, org_id):
 
 # ─── AC1 + AC5: SSE 스트림 수립 + 해제 감지 ─────────────────────────────────
 
-def test_agent_stream_registers_connection(mock_session, org_id):
+
+async def _wait_until(predicate, *, timeout: float = 5.0, interval: float = 0.005) -> bool:
+    """story #3580(근본원인, 페드루 PO 確定 2026-09-06) — 이 파일의 threading.Thread
+    injector 재작성이 쓰는 유일한 폴링 축. #3494에서 threading.Thread + time.sleep로
+    구현했던 게 진짜 플레이키 근원이었다 — `asyncio.Queue.put_nowait`/`asyncio.Event.
+    set()`은 이벤트 루프를 도는 **바로 그 스레드**에서 불려야 대기자(waiter)에게
+    안전하게 통지된다는 게 asyncio의 계약인데, 별도 OS 스레드(injector)가 그 두
+    프리미티브를 직접 건드리고 있었다 — 대개는 우연히 동작하지만 CI 러너가 붐빌 때
+    (오늘 FE-only PR 2건과 동시 실행 등, GIL/스레드 스케줄링 타이밍이 달라지는 조건)
+    통지가 늦게 도착하거나 씹혀 폴링이 데드라인을 넘겨 조용히 flaky해진다 — 실 결함이
+    스레드 재작성 자체가 아니라 "asyncio 프리미티브를 그 이벤트 루프의 스레드 밖에서
+    건드린 것"이었다는 뜻(그 자리에 `loop.call_soon_threadsafe`를 끼워도 고칠 수
+    있었겠지만, 이 테스트엔 실 스레드가 아예 필요 없다 — SSE 제너레이터가 시작한 스트림
+    응답 자체를 `asyncio.create_task()`로 감싸면, injector 로직도 같은 이벤트 루프
+    위의 평범한 코루틴이 되어 매 `await` 지점마다 협조적으로 스케줄링된다 — 스레드도
+    락도 `call_soon_threadsafe`도 필요 없어진다, ASGITransport가 앱 콜러블 전체가
+    끝나야 응답을 돌려준다는 #3494의 제약은 그대로지만 이제 그게 문제가 안 된다:
+    `client.get(...)`을 태스크로 띄워두고 메인 코루틴이 `_agent_connections`/큐 상태를
+    `await asyncio.sleep(interval)`로 협조적으로 재확인하다가, 관찰되면 그제서야
+    `shutdown_event.set()`으로 제너레이터를 정상 종료시켜 그 태스크가 완주하게 한다.
+
+    타임아웃 5.0s(원래 1.0s)로 실측 상향 — 이 재작성판 자체도 로컬에서 다른 pytest
+    프로세스와 동시 실행되는 조건(이 파일 자체를 3-way 동시 20회씩 돌린 재현 실험)
+    아래서 20회 중 5회 연속 실패가 실제로 재현됐다(재현 로그: 격리 실행 20/20·30/30
+    green, 겹쳐 돈 구간에서만 실패 — 스레드 안전성 결함이 아니라 순수 스케줄링
+    지연이 1.0s 예산을 넘긴 것, 재현 후 이 코루틴 자신의 이벤트 루프가 잠깐 CPU를
+    못 받아도 흡수할 여유를 5배로 늘렸다). 프로세스 스케줄링 지연을 흡수하는 자리라
+    "왜 5.0s인지"는 코드가 아니라 이 재현 실험이 근거다 — CI 잡 전체 타임아웃(분 단위)
+    에 비하면 무시할 수 있는 상한."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(interval)
+    return predicate()
+
+
+@pytest.mark.anyio
+async def test_agent_stream_registers_connection(mock_session, org_id):
     """GET /api/v2/events/stream 연결 시 _agent_connections에 등록됨.
 
-    story #3494(근본원인, 2026-09-05 PO 確定) — starlette.testclient.TestClient(동기)
-    **뿐 아니라 httpx.ASGITransport도**(둘 다 실측·소스 확認) 앱 콜러블이 완전히
-    끝날 때까지(`more_body=False`) 응답을 안 돌려준다 — 진짜 스트리밍이 아니다. 즉
-    `with c.stream() as resp:`가 반환된 시점엔 SSE 제너레이터가 이미 끝난 뒤(finally가
-    돈 뒤)라 "응답을 받은 뒤 등록을 확認"하는 구조 자체가 성립 불가능하다(#3839·#3840
-    CI 실측 — 빈 defaultdict, CancelledError로 조기종료 확認).
+    story #3494(1차 근본원인) — ASGITransport/TestClient 둘 다 앱 콜러블이 완전히
+    끝날 때까지 응답을 안 돌려준다(httpx._transports.asgi.ASGITransport.
+    handle_async_request 소스 확認 — `await self.app(...)`가 끝나야 Response가
+    생성된다). "응답을 받은 뒤 등록을 확認"하는 구조 자체가 성립 불가능해 "등록 관찰"과
+    "종료 후 결과 확認"을 분리해야 한다는 처방은 그대로 옳았다.
 
-    처방 — "등록 관찰"과 "종료 후 결과 확認"을 분리한다:
-    - injector(별도 스레드)가 **앱이 살아 있는 동안**(handle_request가 아직 안 돌아온
-      사이) `_agent_connections`를 상태 기반으로 폴링(하드코딩 sleep 없음, 상한 1초)해
-      실제 등록 시각을 기록 → 그 뒤 sentinel 이벤트 주입 → 큐가 비는 것(=제너레이터가
-      실제로 소비함, 이것도 상태 기반)을 확認 → 그제서야 `shutdown_event.set()`으로
-      제너레이터를 **정상 `return`**시킨다(CancelledError가 아니라 제품에 이미 있는
-      graceful shutdown 경로 — `events.py`의 `shutdown_wait_task` 분기, "event:
-      shutdown_reconnect"). CancelledError로 안 끝나면 pytest-timeout이 끼어들 일도
-      없다.
-    - 메인 스레드는 `with c.stream()`이 반환된(=완주된) 뒤, injector가 기록해 둔
-      "등록 관찰됨" 플래그·완주된 body의 sentinel 프레임·cleanup 계약(레지스트리가
-      다시 비었음) 셋을 단언한다."""
+    story #3580(2차 근본원인, 페드루 PO 確定 2026-09-06) — 그 분리를 별도 OS
+    threading.Thread injector로 구현한 게 재발의 진짜 원인이었다(`_wait_until`
+    docstring 참조). 처방: 스트림 요청을 `asyncio.create_task()`로 같은 이벤트
+    루프 위에 띄우고, injector도 평범한 async 코루틴으로 만든다 — 스레드 0개."""
     member_id = uuid.uuid4()
     member_id_str = str(member_id)
 
@@ -131,8 +160,6 @@ def test_agent_stream_registers_connection(mock_session, org_id):
 
     mock_session.execute.side_effect = [membership_result, pending_result]
 
-    from starlette.testclient import TestClient
-    import threading
     from app.core import shutdown as shutdown_module
     from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
@@ -160,51 +187,37 @@ def test_agent_stream_registers_connection(mock_session, org_id):
     app.dependency_overrides[get_current_user_streaming] = _auth
     app.dependency_overrides[get_verified_org_id_streaming] = _org
 
-    registered_observed = threading.Event()
-    consumed_observed = threading.Event()
-
-    def _inject():
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            if member_id_str in _agent_connections:
-                registered_observed.set()
-                break
-            time.sleep(0.005)
-        if not registered_observed.is_set():
-            return
-        queues = list(_agent_connections.get(member_id_str, set()))
-        for q in queues:
-            q.put_nowait({"event_type": "__test_sentinel__"})
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            if all(q.empty() for q in queues):
-                consumed_observed.set()
-                break
-            time.sleep(0.005)
-        shutdown_module.shutdown_event.set()
-
-    t = threading.Thread(target=_inject)
-    t.start()
+    registered_observed = False
+    consumed_observed = False
+    body = ""
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
-                with TestClient(app, raise_server_exceptions=False) as c:
-                    with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                        assert resp.status_code == 200
-                        body = resp.read().decode()
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                    stream_task = asyncio.create_task(
+                        c.get(f"/api/v2/events/stream?member_id={member_id}")
+                    )
+                    registered_observed = await _wait_until(lambda: member_id_str in _agent_connections)
+                    queues = list(_agent_connections.get(member_id_str, set())) if registered_observed else []
+                    for q in queues:
+                        q.put_nowait({"event_type": "__test_sentinel__"})
+                    if queues:
+                        consumed_observed = await _wait_until(lambda: all(q.empty() for q in queues))
+                    shutdown_module.shutdown_event.set()
+                    resp = await asyncio.wait_for(stream_task, timeout=5.0)
+                    assert resp.status_code == 200
+                    body = resp.text
     finally:
-        t.join(timeout=2.0)
         app.dependency_overrides.clear()
         _agent_connections.pop(member_id_str, None)
         # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역이라
         # 이 테스트가 set()한 채로 남으면 다음 lifespan startup 前까지(또는 lifespan을
         # 안 타는 테스트라면 영영) 다른 테스트의 SSE 스트림까지 즉시 shutdown_reconnect로
-        # 오판시킨다 — TestClient(app)의 startup이 reset_shutdown_event()를 불러줄
-        # 것이라는 암묵적 기대에 기대지 않고 여기서 명시로 되돌린다.
+        # 오판시킨다 — 명시로 되돌린다.
         shutdown_module.reset_shutdown_event()
 
-    assert registered_observed.is_set(), "injector never observed the connection in _agent_connections"
-    assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"
+    assert registered_observed, "injector never observed the connection in _agent_connections"
+    assert consumed_observed, "generator never consumed the injected sentinel from its queue"
     assert "__test_sentinel__" in body
     assert member_id_str not in _agent_connections  # cleanup 계약 — 완주 뒤엔 반드시 비어야 함
 
@@ -341,12 +354,13 @@ async def test_create_event_delivered_when_agent_connected(client, mock_session)
 
 # ─── AC4: 재연결 시 pending 이벤트 즉시 전달 ────────────────────────────────
 
-def test_stream_delivers_pending_on_connect(mock_session, org_id):
+@pytest.mark.anyio
+async def test_stream_delivers_pending_on_connect(mock_session, org_id):
     """SSE 연결 시 pending 이벤트 즉시 백필 전달됨.
 
-    story #3494 — test_agent_stream_registers_connection과 같은 근본원인·같은 처방
-    (그 테스트의 docstring 참조 — injector가 앱 생존 중에 상태 기반으로 관찰·주입·
-    소비확認한 뒤 shutdown_event로 정상 종료시킨다)."""
+    story #3580 — test_agent_stream_registers_connection과 같은 근본원인·같은 처방
+    (`_wait_until` docstring 참조 — injector를 threading.Thread가 아니라 같은
+    이벤트 루프 위 코루틴으로 만들어 asyncio 프리미티브 cross-thread 위반을 없앤다)."""
     member_id = uuid.uuid4()
     member_id_str = str(member_id)
     pending_event = _make_event(
@@ -369,8 +383,6 @@ def test_stream_delivers_pending_on_connect(mock_session, org_id):
 
     mock_session.execute.side_effect = [membership_result, pending_result]
 
-    from starlette.testclient import TestClient
-    import threading
     from app.core import shutdown as shutdown_module
     from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
@@ -398,51 +410,37 @@ def test_stream_delivers_pending_on_connect(mock_session, org_id):
     async def _session_factory():
         yield mock_session
 
-    registered_observed = threading.Event()
-    consumed_observed = threading.Event()
-
-    def _inject():
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            if member_id_str in _agent_connections:
-                registered_observed.set()
-                break
-            time.sleep(0.005)
-        if not registered_observed.is_set():
-            return
-        queues = list(_agent_connections.get(member_id_str, set()))
-        for q in queues:
-            q.put_nowait({"event_type": "__test_sentinel__"})
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            if all(q.empty() for q in queues):
-                consumed_observed.set()
-                break
-            time.sleep(0.005)
-        shutdown_module.shutdown_event.set()
-
-    t = threading.Thread(target=_inject)
-    t.start()
+    registered_observed = False
+    consumed_observed = False
+    body = ""
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
-                with TestClient(app, raise_server_exceptions=False) as c:
-                    with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                        assert resp.status_code == 200
-                        body = resp.read().decode()
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                    stream_task = asyncio.create_task(
+                        c.get(f"/api/v2/events/stream?member_id={member_id}")
+                    )
+                    registered_observed = await _wait_until(lambda: member_id_str in _agent_connections)
+                    queues = list(_agent_connections.get(member_id_str, set())) if registered_observed else []
+                    for q in queues:
+                        q.put_nowait({"event_type": "__test_sentinel__"})
+                    if queues:
+                        consumed_observed = await _wait_until(lambda: all(q.empty() for q in queues))
+                    shutdown_module.shutdown_event.set()
+                    resp = await asyncio.wait_for(stream_task, timeout=5.0)
+                    assert resp.status_code == 200
+                    body = resp.text
     finally:
-        t.join(timeout=2.0)
         app.dependency_overrides.clear()
         _agent_connections.pop(member_id_str, None)
         # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역이라
         # 이 테스트가 set()한 채로 남으면 다음 lifespan startup 前까지(또는 lifespan을
         # 안 타는 테스트라면 영영) 다른 테스트의 SSE 스트림까지 즉시 shutdown_reconnect로
-        # 오판시킨다 — TestClient(app)의 startup이 reset_shutdown_event()를 불러줄
-        # 것이라는 암묵적 기대에 기대지 않고 여기서 명시로 되돌린다.
+        # 오판시킨다 — 명시로 되돌린다.
         shutdown_module.reset_shutdown_event()
 
-    assert registered_observed.is_set(), "injector never observed the connection in _agent_connections"
-    assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"
+    assert registered_observed, "injector never observed the connection in _agent_connections"
+    assert consumed_observed, "generator never consumed the injected sentinel from its queue"
     assert "__test_sentinel__" in body
     assert member_id_str not in _agent_connections  # cleanup 계약
 
