@@ -94,6 +94,7 @@ from app.services.channel_post_videos import (
     ChannelVideoUploadFailedError,
     confirm_channel_post_video_upload,
     create_channel_post_video_upload_url,
+    get_channel_post_video_for_version,
 )
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.member_resolver import resolve_member
@@ -291,6 +292,12 @@ class ChannelPostDraftListItem(BaseModel):
     # "이 응답에선 안 쟀다"·[]="쟀는데 위반 0"(null≠0 원칙 그대로, site_posts.py::
     # SitePostDraftListItem.violations와 동형).
     violations: list[dict] | None = None
+    # story #3559(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — violations와 동형 관례
+    # (단건 조회 전용, `_to_draft_list_item()`은 항상 None을 남기고 단건 엔드포인트가
+    # 이 필드를 나중에 채운다 — N+1 방지, 목록에서 매 행마다 영상 조회를 안 돈다).
+    # 최신 버전에 영상(릴스) 행이 있으면 그 원본 공개 URL(asset 단건 응답과 같은 값),
+    # 없으면(이미지만 있거나 아무것도 없는 draft) null. 커버는 기존 thumbnail_url 그대로.
+    video_url: str | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -1134,6 +1141,12 @@ async def get_channel_post_draft_detail_endpoint(
     item.violations = lint_content(
         rule_row.rules if rule_row else None, text=latest_version.text, link_url=latest_version.link_url,
     )
+
+    # story #3559 — video_url도 violations와 동형(단건 전용, N+1 방지로 목록 쿼리에는
+    # 안 실림). asset 단건 응답(get_channel_post_video_for_version_endpoint)과 정확히
+    # 같은 값(같은 서비스 함수+같은 public_url_for_object_path 호출).
+    video_row = await get_channel_post_video_for_version(db, version_id=latest_version.id)
+    item.video_url = public_url_for_object_path(video_row.original_object_path) if video_row else None
     return item
 
 

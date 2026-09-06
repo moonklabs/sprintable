@@ -64,10 +64,65 @@ describe('ImageAttachmentList(story #3550)', () => {
     const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
     expect(items[0]!.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')).toBeNull();
     expect(items[1]!.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent)
-      .toBe(koMessages.content.channelPostsImageConvertedBadge
-        .replace('{originalWidth}', '4000').replace('{finalWidth}', '1440')
-        .replace('{originalBytes}', formatFileSize(5_000_000)).replace('{finalBytes}', formatFileSize(900_000)));
+      .toBe(`이 채널 규격에 맞춰 자동 변환됐습니다: 너비 4000px → 1440px · 용량 ${formatFileSize(5_000_000)} → ${formatFileSize(900_000)}`);
     expect(items[2]!.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')).toBeNull();
+  });
+
+  // story #3563(유나 24회차 결함·§13-3-1 정본, 페드루 PO 確定 2026-09-06) — 「A → B」는
+  // 두 값이 다르다는 약속(§13-3-1) — 안 바뀐 축은 그 형으로 적지 않는다.
+  it('⭐너비만 바뀌면 용량 조각 없이 너비 조각만', async () => {
+    const img: ImageAttachmentItem = {
+      url: 'https://storage.googleapis.com/x/w.jpg', wasConverted: true,
+      originalWidth: 1440, finalWidth: 1080, originalBytes: 300_000, finalBytes: 300_000,
+    };
+    await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
+    const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다: 너비 1440px → 1080px');
+  });
+
+  it('⭐용량만 바뀌면 너비 조각 없이 용량 조각만(⛔「1080px → 1080px」 안 나온다·음성 대조)', async () => {
+    const img: ImageAttachmentItem = {
+      url: 'https://storage.googleapis.com/x/b.jpg', wasConverted: true,
+      originalWidth: 1080, finalWidth: 1080, originalBytes: 30_000, finalBytes: 29_500,
+    };
+    await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
+    const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
+    expect(badge).toBe(`이 채널 규격에 맞춰 자동 변환됐습니다: 용량 ${formatFileSize(30_000)} → ${formatFileSize(29_500)}`);
+    expect(badge).not.toContain('1080px → 1080px');
+  });
+
+  it('둘 다 바뀌면 두 조각 다 · 로 잇는다', async () => {
+    const img: ImageAttachmentItem = {
+      url: 'https://storage.googleapis.com/x/wb.jpg', wasConverted: true,
+      originalWidth: 4000, finalWidth: 1440, originalBytes: 5_000_000, finalBytes: 900_000,
+    };
+    await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
+    const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
+    expect(badge).toBe(`이 채널 규격에 맞춰 자동 변환됐습니다: 너비 4000px → 1440px · 용량 ${formatFileSize(5_000_000)} → ${formatFileSize(900_000)}`);
+  });
+
+  it('⭐둘 다 그대로면 축 조각 없이 기본 문장만(마침표로 끝)', async () => {
+    const img: ImageAttachmentItem = {
+      url: 'https://storage.googleapis.com/x/same.jpg', wasConverted: true,
+      originalWidth: 1080, finalWidth: 1080, originalBytes: 30_000, finalBytes: 30_000,
+    };
+    await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
+    const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다.');
+  });
+
+  // 유나 Design 조건 1(2026-09-06, #3919 리뷰) — 판정을 원시 바이트로 하면
+  // 10,300B/10,340B처럼 다른 값이 formatFileSize 뒤 같은 문자열("10.1 KB")로
+  // 반올림돼 「용량 10.1 KB → 10.1 KB」가 그대로 뜬다(너비와 같은 병).
+  it('⭐용량이 바뀌어도 표시 문자열이 같으면(10300B→10340B, 둘 다 "10.1 KB") 용량 조각 없음', async () => {
+    const img: ImageAttachmentItem = {
+      url: 'https://storage.googleapis.com/x/round.jpg', wasConverted: true,
+      originalWidth: 1080, finalWidth: 1080, originalBytes: 10_300, finalBytes: 10_340,
+    };
+    await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
+    const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다.');
+    expect(badge).not.toContain('10.1 KB → 10.1 KB');
   });
 
   it('첫 장은 위로 이동 비활성, 마지막 장은 아래로 이동 비활성', async () => {

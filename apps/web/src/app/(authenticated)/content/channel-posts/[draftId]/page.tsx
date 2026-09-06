@@ -30,6 +30,7 @@ import { GenerationBudgetExceededBanner } from '@/components/content/generation-
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import { ImageAttachmentList } from '@/components/content/image-attachment-list';
+import { formatImageConvertedBadge } from '@/components/content/image-converted-badge';
 // story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
 // (site-posts 상세와 재사용, 동작 무변).
 import {
@@ -1542,12 +1543,10 @@ export default function ChannelPostEditPage() {
             />
             {draft.image_was_converted ? (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-image-converted-badge">
-                {t('channelPostsImageConvertedBadge', {
-                  originalWidth: draft.image_original_width ?? 0,
-                  finalWidth: draft.image_final_width ?? 0,
-                  originalBytes: typeof draft.image_original_bytes === 'number' ? formatFileSize(draft.image_original_bytes) : '',
-                  finalBytes: typeof draft.image_final_bytes === 'number' ? formatFileSize(draft.image_final_bytes) : '',
-                })}
+                {formatImageConvertedBadge({
+                  originalWidth: draft.image_original_width ?? null, finalWidth: draft.image_final_width ?? null,
+                  originalBytes: draft.image_original_bytes ?? null, finalBytes: draft.image_final_bytes ?? null,
+                }, t)}
               </p>
             ) : null}
           </div>
@@ -1991,7 +1990,7 @@ export default function ChannelPostEditPage() {
           />
           <Button
             type="button" variant="outline" size="sm"
-            disabled={imageUploadInProgress}
+            disabled={imageUploadInProgress || images.length >= imageSpec.maxCount}
             onClick={() => imageFileInputRef.current?.click()}
             data-testid="channel-post-image-attach-trigger"
           >
@@ -2004,6 +2003,15 @@ export default function ChannelPostEditPage() {
                 : imageUploadStatus.phase === 'uploading'
                   ? t('channelPostsImageUploading')
                   : t('channelPostsImageConfirming')}
+            </p>
+          ) : null}
+          {/* story #3564(유나 24회차 결함②·§5-2, 페드루 PO 確定 2026-09-06) — 캐러셀이
+              가득 차도(images.length>=maxCount) 트리거가 활성 상태였다(§5-2 "그려진
+              컨트롤은 할 수 있다는 단정" 위반 — 눌러도 서버 422로만 막힘). 업로드
+              진행 中엔 이 사유를 안 보인다(위 진행 문구가 이미 이유를 말한다). */}
+          {!imageUploadInProgress && images.length >= imageSpec.maxCount ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-post-image-max-count-reached-reason">
+              {t('channelPostsImageMaxCountReachedReason', { max: imageSpec.maxCount })}
             </p>
           ) : null}
           {imageUploadStatus.phase === 'error' ? (

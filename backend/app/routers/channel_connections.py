@@ -148,6 +148,16 @@ class ChannelConnectionResponse(BaseModel):
     # 「올리기 전에」 안내를 만들 수 있게 노출(max_text_length·image_max_count와 동형
     # 관례 — 상수 하드코딩 X).
     image_required: bool = False
+    # story #3559(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — 어댑터가 이미 선언한
+    # 영상(릴스) 규격(story #3554)을 image_* 6종과 동형 관례로 노출(additive). 미지원
+    # 채널(어댑터 None 또는 video_max_bytes=0)은 0/0.0/[](§17-16 "0이면 0으로 적는다"
+    # 그대로 — image_*와 다른 새 관례를 만들지 않는다).
+    video_max_bytes: int = 0
+    video_max_seconds: float = 0.0
+    video_min_seconds: float = 0.0
+    video_aspect_target: float = 0.0
+    video_aspect_tolerance: float = 0.0
+    video_codecs: list[str] = []
     # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
     # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
     secret_hint: str | None = None
@@ -189,6 +199,12 @@ def _to_response(row) -> ChannelConnectionResponse:
         image_color_space=adapter.image_color_space if adapter is not None else "",
         image_max_count=adapter.image_max_count if adapter is not None else 0,
         image_required=adapter.image_required if adapter is not None else False,
+        video_max_bytes=adapter.video_max_bytes if adapter is not None else 0,
+        video_max_seconds=adapter.video_max_seconds if adapter is not None else 0.0,
+        video_min_seconds=adapter.video_min_seconds if adapter is not None else 0.0,
+        video_aspect_target=adapter.video_aspect_target if adapter is not None else 0.0,
+        video_aspect_tolerance=adapter.video_aspect_tolerance if adapter is not None else 0.0,
+        video_codecs=list(adapter.video_codecs) if adapter is not None else [],
         secret_hint=row.secret_hint,
     )
 

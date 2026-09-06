@@ -2407,6 +2407,58 @@ describe('ChannelPostEditPage — 캐러셀 N장 목록·삭제·재정렬(story
   });
 });
 
+// story #3564(유나 24회차 결함②·§5-2, 페드루 PO 確定 2026-09-06) — 캐러셀이 가득
+// 차도(images.length>=maxCount) 「이미지 선택」 트리거가 활성 상태였다(§5-2 "그려진
+// 컨트롤은 할 수 있다는 단정" 위반). maxCount=10 채널에서 검증한다.
+describe('ChannelPostEditPage — 캐러셀 가득 참 트리거 비활성(story #3564)', () => {
+  function makeImages(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      image_id: `img${i + 1}`, draft_id: DRAFT_ID, version_id: 'v1', version: 1, position: i,
+      original_width: 1000, original_height: 1000, original_bytes: 100_000,
+      final_width: 1000, final_height: 1000, final_bytes: 100_000,
+      was_converted: false, image_url: `https://storage.googleapis.com/x/${i + 1}.jpg`,
+    }));
+  }
+
+  it('⭐9/10장 — 트리거 활성·사유 문구 없음', async () => {
+    stubFetch({ imageMaxCount: 10, initialImages: makeImages(9) });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')).toBeNull();
+  });
+
+  it('⭐10/10장 — 트리거 비활성 + 「최대 10장까지 첨부할 수 있습니다.」', async () => {
+    stubFetch({ imageMaxCount: 10, initialImages: makeImages(10) });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')?.textContent)
+      .toBe('최대 10장까지 첨부할 수 있습니다.');
+  });
+
+  it('⭐10장에서 한 장 삭제 — 같은 마운트에서 트리거가 재활성된다', async () => {
+    stubFetch({
+      imageMaxCount: 10, initialImages: makeImages(10),
+      onImageDelete: () => ({ status: 200, body: makeImages(9) }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[0]!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')).toBeNull();
+  });
+});
+
 // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널 상신 전 선알림 + 422 문구.
 describe('ChannelPostEditPage — 이미지 필수 채널 선알림(story #3538)', () => {
   const REASON_TESTID = 'channel-post-image-required-reason';
@@ -2553,6 +2605,25 @@ describe('ChannelPostEditPage — 승인 카드 썸네일·배지(T5-M, story #3
 
     expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="channel-post-image-converted-badge"]')).toBeNull();
+  });
+
+  // story #3563(유나 24회차 결함 실측 — PO Test Org 초안 8544d936, 페드루 PO 確定
+  // 2026-09-06) — 너비는 그대로(1080→1080)인데 용량만 줄어든 실사고 재현. 「A → B」는
+  // 두 값이 다르다는 약속(§13-3-1)이라 안 바뀐 너비는 그 형으로 적지 않는다.
+  it('⭐너비는 그대로·용량만 바뀜 — 「1080px → 1080px」가 안 뜨고 용량 조각만 뜬다(유나 24회차 재현)', async () => {
+    stubFetch({
+      draftDetail: {
+        thumbnail_url: 'https://storage.googleapis.com/bucket/x.jpg',
+        image_original_width: 1080, image_original_bytes: 30000,
+        image_final_width: 1080, image_final_bytes: 29500, image_was_converted: true,
+      } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const badge = container.querySelector('[data-testid="channel-post-image-converted-badge"]')?.textContent ?? '';
+    expect(badge).not.toContain('1080px → 1080px');
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다: 용량 29.3 KB → 28.8 KB');
   });
 });
 
