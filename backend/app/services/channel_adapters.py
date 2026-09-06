@@ -260,16 +260,36 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         utm_medium="social",
         supports_unpublish=True,
         unpublish_required_scope="pages_manage_posts",
-        # Threads류(캐러셀 범위 밖, story 본문 명시)와 동형 — 피드 이미지 1장.
         image_formats=("image/jpeg", "image/png"),
         image_max_bytes=10 * 1024 * 1024,
         image_width_min=320,
         image_width_max=1440,
         image_color_space="sRGB",
-        image_max_count=1,
+        # story #3567 발견 즉시 수정 — 3547이 이 필드를 아예 선언 안 해 기본값 0.0으로
+        # 남아 있었다(channel_post_images.py의 Threads류 정규화 검사가 0.0을 "무제한"
+        # 이 아니라 "0:1 초과 즉시 거부"로 해석 — 정사각형 아닌 이미지는 이미 3547
+        # 단일-이미지 경로에서도 전부 422였을 잠복 결함, 이 스토리의 다중 사진
+        # 테스트가 처음 노출). Threads(image_aspect_max=10.0)와 동형으로 관대하게
+        # 선언 — ⚠️미확認(Meta 문서 지식, 다른 image_* 필드들과 동일 라벨).
+        image_aspect_max=10.0,
+        # story #3567(Phase2·BE, 페드루 PO 確定 2026-09-06③) — 다중 사진(캐러셀 동형)
+        # 지원. 10은 Meta 문서상 실측 상한이 아니라 **제품 상한**(Instagram 캐러셀
+        # image_max_count=10과 UX 일관성을 맞추기 위한 이 제품의 선택 — «미확認»
+        # 이미지가 아니라 자체 정책값이라는 점이 image_formats/max_bytes 등 다른
+        # ⚠️미확認 필드들과 다르다).
+        image_max_count=10,
         # comments/insights는 declare-only 미지원(페드루 PO 明示 2026-09-06) — 빈
         # insight_metrics·supports_fetch_replies 기본값(False) 그대로.
         image_required=False,  # Instagram과 달리 텍스트만으로도 피드 발행 가능.
+        # story #3567(④) — Page 릴스. Meta 공식 규격을 그라운딩에서 확認 못 해
+        # Instagram 값 그대로 동형 사용(⚠️미확認 — App Review로 실 Page 권한을
+        # 받은 뒤 Meta 문서/실측으로 교체 필요, facebook.py 상단 딱지와 동일 원칙).
+        video_max_bytes=100 * 1024 * 1024,
+        video_max_seconds=90.0,
+        video_min_seconds=3.0,
+        video_aspect_target=9 / 16,
+        video_aspect_tolerance=0.05,
+        video_codecs=("avc1", "hvc1", "hev1"),
     ),
     "facebook_sandbox": ChannelAdapterConfig(
         authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
@@ -294,8 +314,20 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_width_min=320,
         image_width_max=1440,
         image_color_space="sRGB",
-        image_max_count=1,
+        # story #3567 발견 즉시 수정 — 실 facebook과 동일 이유(위 주석 참고, 미선언
+        # 시 기본값 0.0이 "정사각형만 통과"로 잠복 결함).
+        image_aspect_max=10.0,
+        # story #3567 — 실 facebook과 동일 제품 상한(10). sandbox가 실계정보다
+        # 관대하면 「sandbox는 됐는데 실계정은 막힘」류 격차가 생긴다(instagram_
+        # sandbox_publish.py 상단 원칙과 동형).
+        image_max_count=10,
         image_required=False,
+        video_max_bytes=100 * 1024 * 1024,
+        video_max_seconds=90.0,
+        video_min_seconds=3.0,
+        video_aspect_target=9 / 16,
+        video_aspect_tolerance=0.05,
+        video_codecs=("avc1", "hvc1", "hev1"),
     ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의

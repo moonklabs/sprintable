@@ -62,11 +62,163 @@ async def create_container(
     return str(post_id)
 
 
+async def create_carousel_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str, image_urls: list[str],
+) -> str:
+    """story #3567(Phase2·BE, 페드루 PO 確定 2026-09-06①) — Page 다중 사진(2장 이상).
+    `create_container`의 "단일 콜=이미 발행까지 끝남" 계약(모듈 docstring) 안에서
+    구현한다: N회 `/{page-id}/photos?published=false`(각각 미발행 photo id 반환)
+    → 1회 `/{page-id}/feed?attached_media=[{media_fbid:id},...]`(**이 호출이 실제
+    발행** — instagram_publish.py::create_carousel_container의 "부모 컨테이너"와
+    달리, 여기선 부모=진짜 최종 게시물이라 반환값도 곧 최종 post id다). 자식 하나
+    라도 실패하면 그 자리에서 즉시 예외(부모/`/feed` 호출 자체를 안 만든다 —
+    instagram_publish.py와 동일 원자성 원칙, 「부분 발행 0」).
+
+    ⚠️미확認(facebook_publish.py 상단 딱지와 동형 — `attached_media` 파라미터
+    shape·`published=false`가 실제로 동작하는지는 Meta 문서 지식, 재확認 전
+    라이브 왕복 금지)."""
+    from app.services.threads_publish import ThreadsPublishError
+
+    photo_ids: list[str] = []
+    for image_url in image_urls:
+        resp = await client.post(
+            f"{_GRAPH_BASE}/{threads_user_id}/photos",
+            params={"access_token": access_token, "url": image_url, "published": "false"},
+        )
+        if resp.status_code != 200:
+            raise ThreadsPublishError(
+                "FACEBOOK_CREATE_CAROUSEL_CHILD_FAILED", resp.text[:500], status_code=resp.status_code,
+            )
+        photo_id = resp.json().get("id")
+        if not photo_id:
+            raise ThreadsPublishError(
+                "FACEBOOK_CREATE_CAROUSEL_CHILD_MISSING_ID", "id missing in response", status_code=resp.status_code,
+            )
+        photo_ids.append(str(photo_id))
+
+    import json as _json
+    params = {
+        "access_token": access_token,
+        "attached_media": _json.dumps([{"media_fbid": pid} for pid in photo_ids]),
+    }
+    if text:
+        params["message"] = text
+    resp = await client.post(f"{_GRAPH_BASE}/{threads_user_id}/feed", params=params)
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "FACEBOOK_CREATE_CAROUSEL_PARENT_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    post_id = body.get("post_id") or body.get("id")
+    if not post_id:
+        raise ThreadsPublishError(
+            "FACEBOOK_CREATE_CAROUSEL_PARENT_MISSING_ID", "id/post_id missing in response", status_code=resp.status_code,
+        )
+    return str(post_id)
+
+
+# story #3567(Phase2·BE, 페드루 PO 確定 2026-09-06②) — Page 릴스는 이 파일에서
+# 유일하게 **진짜 비동기**인 경로(사진/피드는 전부 "단일 콜=이미 끝남"). `/video_
+# reels`는 start(업로드 세션 발급)→upload(바이너리 or 호스팅 URL)→finish(발행
+# 등록) 3단 + 진짜 status 폴링이 필요(⚠️미확認, Meta 문서 지식). `create_reels_
+# container`가 반환하는 creation_id=Meta의 video_id — `get_container_status`가
+# 이 id로만 진짜 폴링하고, 사진/피드 post id는(그 자리에서 이미 발행 완료라) 계속
+# 즉시 FINISHED로 남는다(media_type을 별도 파라미터로 안 받고, 실 API 응답에
+# `status` 필드가 있는지로 구분 — channel_posts.py는 무변경, 이 파일 안에서만
+# 분간).
+_REELS_UPLOAD_PHASE_START = "start"
+_REELS_UPLOAD_PHASE_FINISH = "finish"
+
+
+async def create_reels_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
+    video_url: str | None, cover_url: str | None = None,
+) -> str:
+    """instagram_publish.py::create_reels_container와 동형 시그니처. start가
+    `video_id`+`upload_url`을 발급하면, 이 함수가 그 `upload_url`에 실 업로드를
+    요청한다(⚠️미확認 — 바이트를 직접 재전송하는지, `file_url` 헤더로 Meta가
+    `video_url`을 직접 fetch하게 위임할 수 있는지 재확認 필요·여기선 후자로 구현
+    — 이 코드베이스의 다른 모든 업로드가 "URL을 주면 Meta/provider가 직접 가져간다"
+    관례를 따르므로, 우리가 바이트를 다시 내려받아 재전송하는 방식보다 이 관례가
+    더 낫다는 판단). finish가 `video_state=PUBLISHED`로 발행을 등록한다 — 이후
+    `get_container_status`의 실 폴링이 처리 완료를 확認한다. 커버(`cover_url`)는
+    finish 파라미터로 실어 보낸다(⚠️미확認 — 파라미터명 `thumb`/`cover_url` 어느
+    쪽인지 재확認 필요)."""
+    from app.services.threads_publish import ThreadsPublishError
+
+    if video_url is None:
+        raise ThreadsPublishError(
+            "FACEBOOK_REELS_VIDEO_REQUIRED", "릴스 발행은 영상이 필수입니다", status_code=422,
+        )
+    resp_start = await client.post(
+        f"{_GRAPH_BASE}/{threads_user_id}/video_reels",
+        params={"access_token": access_token, "upload_phase": _REELS_UPLOAD_PHASE_START},
+    )
+    if resp_start.status_code != 200:
+        raise ThreadsPublishError(
+            "FACEBOOK_REELS_START_FAILED", resp_start.text[:500], status_code=resp_start.status_code,
+        )
+    start_body = resp_start.json()
+    video_id = start_body.get("video_id")
+    upload_url = start_body.get("upload_url")
+    if not video_id or not upload_url:
+        raise ThreadsPublishError(
+            "FACEBOOK_REELS_START_MISSING_FIELDS", "video_id/upload_url missing in response",
+            status_code=resp_start.status_code,
+        )
+
+    resp_upload = await client.post(
+        upload_url,
+        headers={"Authorization": f"OAuth {access_token}", "file_url": video_url},
+    )
+    if resp_upload.status_code != 200:
+        raise ThreadsPublishError(
+            "FACEBOOK_REELS_UPLOAD_FAILED", resp_upload.text[:500], status_code=resp_upload.status_code,
+        )
+
+    finish_params = {
+        "access_token": access_token, "upload_phase": _REELS_UPLOAD_PHASE_FINISH,
+        "video_id": video_id, "video_state": "PUBLISHED",
+    }
+    if cover_url:
+        finish_params["thumb"] = cover_url
+    if text:
+        finish_params["description"] = text
+    resp_finish = await client.post(f"{_GRAPH_BASE}/{threads_user_id}/video_reels", params=finish_params)
+    if resp_finish.status_code != 200:
+        raise ThreadsPublishError(
+            "FACEBOOK_REELS_FINISH_FAILED", resp_finish.text[:500], status_code=resp_finish.status_code,
+        )
+    return str(video_id)
+
+
 async def get_container_status(
     client: httpx.AsyncClient, *, access_token: str, creation_id: str,
 ) -> tuple[str, str | None]:
-    """`create_container`가 이미 실제로 발행까지 끝냈으므로(모듈 docstring) 여기는
-    항상 FINISHED — 진짜 폴링(HTTP 호출) 0건."""
+    """사진/피드는 `create_container`가 이미 발행까지 끝냈으므로(모듈 docstring)
+    항상 FINISHED. 릴스(video_id)만 진짜 비동기라 실 폴링이 필요한데, 이 함수는
+    media_type을 인자로 안 받는다(channel_posts.py 오케스트레이션 계약 무변경,
+    story #3567 確定②) — `GET /{creation_id}?fields=status`를 항상 시도해 응답에
+    `status`가 있으면(릴스 처리 상태) 그 값을 실제로 매핑하고, 없으면(사진/피드
+    post는 이 필드 자체가 없다) 기존처럼 FINISHED로 간주한다. ⚠️미확認 — `status`
+    필드 shape·값 어휘(processing/ready/error 등)는 Meta 문서 지식, 재확認 전
+    라이브 왕복 금지."""
+    resp = await client.get(
+        f"{_GRAPH_BASE}/{creation_id}", params={"fields": "status", "access_token": access_token},
+    )
+    if resp.status_code != 200:
+        return _CONTAINER_STATUS_FINISHED, None
+    body = resp.json()
+    status = body.get("status")
+    if not status:
+        return _CONTAINER_STATUS_FINISHED, None
+    video_status = status.get("video_status") if isinstance(status, dict) else status
+    if video_status in ("ready", "published"):
+        return _CONTAINER_STATUS_FINISHED, None
+    if video_status == "processing":
+        return "IN_PROGRESS", None
+    if video_status == "error":
+        return "ERROR", (status.get("uploading_phase") or {}).get("errors") if isinstance(status, dict) else None
     return _CONTAINER_STATUS_FINISHED, None
 
 
