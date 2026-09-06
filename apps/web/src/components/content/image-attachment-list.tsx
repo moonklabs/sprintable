@@ -1,6 +1,6 @@
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { formatFileSize } from '@/components/docs/extensions/file-node';
+import { formatImageConvertedBadge } from '@/components/content/image-converted-badge';
 
 // story #3550(Phase2·풀스택, PO 決定 2026-09-06) — Instagram 캐러셀 N장 첨부.
 // 업로드 자체(파일 선택·서명 URL·PUT·confirm)는 부모(channel-posts/[draftId]/
@@ -58,12 +58,7 @@ export function ImageAttachmentList({ images, maxCount, disabled, onReorder, onD
               </p>
               {img.wasConverted ? (
                 <p className="text-xs text-muted-foreground" data-testid="channel-post-image-attachment-converted-badge">
-                  {t('channelPostsImageConvertedBadge', {
-                    originalWidth: img.originalWidth ?? 0,
-                    finalWidth: img.finalWidth ?? 0,
-                    originalBytes: typeof img.originalBytes === 'number' ? formatFileSize(img.originalBytes) : '',
-                    finalBytes: typeof img.finalBytes === 'number' ? formatFileSize(img.finalBytes) : '',
-                  })}
+                  {formatImageConvertedBadge(img, t)}
                 </p>
               ) : null}
             </div>

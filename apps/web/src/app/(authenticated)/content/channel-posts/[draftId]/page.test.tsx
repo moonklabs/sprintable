@@ -2606,6 +2606,25 @@ describe('ChannelPostEditPage — 승인 카드 썸네일·배지(T5-M, story #3
     expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="channel-post-image-converted-badge"]')).toBeNull();
   });
+
+  // story #3563(유나 24회차 결함 실측 — PO Test Org 초안 8544d936, 페드루 PO 確定
+  // 2026-09-06) — 너비는 그대로(1080→1080)인데 용량만 줄어든 실사고 재현. 「A → B」는
+  // 두 값이 다르다는 약속(§13-3-1)이라 안 바뀐 너비는 그 형으로 적지 않는다.
+  it('⭐너비는 그대로·용량만 바뀜 — 「1080px → 1080px」가 안 뜨고 용량 조각만 뜬다(유나 24회차 재현)', async () => {
+    stubFetch({
+      draftDetail: {
+        thumbnail_url: 'https://storage.googleapis.com/bucket/x.jpg',
+        image_original_width: 1080, image_original_bytes: 30000,
+        image_final_width: 1080, image_final_bytes: 29500, image_was_converted: true,
+      } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const badge = container.querySelector('[data-testid="channel-post-image-converted-badge"]')?.textContent ?? '';
+    expect(badge).not.toContain('1080px → 1080px');
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다: 용량 29.3 KB → 28.8 KB');
+  });
 });
 
 // story #3428(§17-15, PO 확定 2026-09-04 12:19Z) — processing_kind 오버레이 우선순위
