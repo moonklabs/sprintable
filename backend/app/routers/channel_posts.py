@@ -67,10 +67,15 @@ from app.services.channel_post_images import (
     ChannelImageUndecodableError,
     ChannelImageUploadFailedError,
     ChannelPostImageCountExceededError,
+    ChannelPostImageNotFoundError,
+    ChannelPostImageReorderInvalidSetError,
     confirm_channel_post_image_upload,
     create_channel_post_image_upload_url,
+    delete_channel_post_image,
     get_channel_post_image_for_version,
+    list_channel_post_images_for_version,
     public_url_for_object_path,
+    reorder_channel_post_images,
 )
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.member_resolver import resolve_member
@@ -300,6 +305,12 @@ class ChannelPostImageUploadUrlResponse(BaseModel):
 
 class ConfirmChannelPostImageUploadRequest(BaseModel):
     object_path: str
+
+
+class ReorderChannelPostImagesRequest(BaseModel):
+    # story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 부분 재정렬 불허·항상
+    # 전체 집합(현재 버전 이미지 id 전부, 새 순서 그대로)을 명시로 받는다.
+    image_ids: list[uuid.UUID]
 
 
 class ChannelPostImageResponse(BaseModel):
@@ -604,6 +615,103 @@ async def get_channel_post_image_for_version_endpoint(
     if image_row is None:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_IMAGE_NOT_FOUND", "message": str(version_id)})
     return _image_response(version, image_row)
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}/versions/{version_id}/assets",
+    response_model=list[ChannelPostImageResponse],
+)
+async def list_channel_post_images_for_version_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostImageResponse]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 캐러셀 N장 전체를
+    position 순으로. 위 `.../asset`(단수, 대표 1장만 — 기존 FE 계약 무변경)과 별도
+    엔드포인트로 신설(FE N장 슬롯 UI가 이 목록으로 썸네일을 그리고 삭제·재정렬 대상
+    image_id를 얻는다, `list_channel_post_images_for_version` 서비스 함수 그대로 노출)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    version = (await db.execute(
+        select(ChannelPostVersion).where(
+            ChannelPostVersion.id == version_id, ChannelPostVersion.draft_id == draft_id,
+        )
+    )).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_VERSION_NOT_FOUND", "message": str(version_id)})
+
+    image_rows = await list_channel_post_images_for_version(db, version_id=version_id)
+    return [_image_response(version, row) for row in image_rows]
+
+
+@router.delete(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/{image_id}",
+    response_model=list[ChannelPostImageResponse],
+)
+async def delete_channel_post_image_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, image_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostImageResponse]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 1장 삭제.
+    attach(confirm)와 대칭축: 새 불변 버전을 만들어 반영한다(원본 행 삭제 X) —
+    #3291 승인 불변화 규율대로 이미지 집합 변화 자체가 재승인 트리거. 응답은
+    새 버전에 남은 이미지 전체(0장이면 빈 배열)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    member_id = uuid.UUID(auth.user_id)
+    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    try:
+        new_version, remaining = await delete_channel_post_image(
+            db, org_id=org_id, draft_id=draft_id, image_id=image_id,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelPostImageNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail={"code": "CHANNEL_POST_IMAGE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    return [_image_response(new_version, row) for row in remaining]
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/reorder",
+    response_model=list[ChannelPostImageResponse],
+)
+async def reorder_channel_post_images_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ReorderChannelPostImagesRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostImageResponse]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 순서 재배열.
+    `image_ids`는 새 순서 그대로 **전체 집합**(부분 재정렬 불허). delete와 동형으로
+    새 불변 버전을 만들어 반영 — 순서 자체가 합성 해시 입력이라 재정렬도 재승인
+    트리거(#3291 규율)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    member_id = uuid.UUID(auth.user_id)
+    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    try:
+        new_version, ordered = await reorder_channel_post_images(
+            db, org_id=org_id, draft_id=draft_id, image_ids=body.image_ids,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelPostImageReorderInvalidSetError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_POST_IMAGE_REORDER_INVALID_SET", "message": str(exc)},
+        ) from exc
+    return [_image_response(new_version, row) for row in ordered]
 
 
 def _to_draft_list_item(

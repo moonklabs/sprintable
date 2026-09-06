@@ -512,3 +512,257 @@ async def test_publish_endpoint_dispatches_to_carousel_for_two_plus_images_insta
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── BE 2/2(디디·페드루 PO 確定 2026-09-06) — 삭제·재정렬 ─────────────────────────
+
+
+@pytest.mark.anyio
+async def test_delete_middle_image_renumbers_remaining_and_recomputes_seal():
+    """3장 중 가운데(position 1) 삭제 → 남은 2장이 새 버전에서 [0,1]로 재부여되고
+    합성 해시가 남은 순서(원래 상대 순서 유지)로 재계산돼야 한다. 옛 버전 행은
+    그대로 남아 있어야 한다(삭제=새 버전, 원본 불변 원칙)."""
+    from app.main import app
+    from app.models.channel_post_image import ChannelPostImage
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.services.channel_post_images import compute_image_seal_hash
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r1, r2, r3 = await _upload_n_images(client, org_id, draft_id, 3)
+            old_version_id = r3.json()["version_id"]
+
+            async with Session() as s:
+                old_images = list((await s.execute(
+                    select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(old_version_id))
+                    .order_by(ChannelPostImage.position)
+                )).scalars().all())
+            middle_image_id = str(old_images[1].id)
+            kept_hashes = [old_images[0].final_sha256, old_images[2].final_sha256]
+
+            r_delete = await client.request(
+                "DELETE", f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/{middle_image_id}",
+            )
+        assert r_delete.status_code == 200, r_delete.text
+        remaining = r_delete.json()
+        assert [row["position"] for row in remaining] == [0, 1]
+
+        async with Session() as s:
+            old_images_after = list((await s.execute(
+                select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(old_version_id))
+            )).scalars().all())
+            assert len(old_images_after) == 3, "옛 버전 행이 삭제 처리로 건드려지면 안 된다(불변)"
+
+            new_version_id = remaining[0]["version_id"]
+            new_version = (await s.execute(
+                select(ChannelPostVersion).where(ChannelPostVersion.id == uuid.UUID(new_version_id))
+            )).scalar_one()
+            new_images = list((await s.execute(
+                select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(new_version_id))
+                .order_by(ChannelPostImage.position)
+            )).scalars().all())
+        assert [img.final_sha256 for img in new_images] == kept_hashes
+        assert new_version.image_sha256 == compute_image_seal_hash(kept_hashes)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_delete_only_remaining_image_sets_seal_to_none_and_empty_list():
+    """1장뿐인 draft에서 그 1장을 삭제 → 새 버전은 이미지 0장·image_sha256=None(첫
+    draft의 "이미지 없음" 상태와 동일 — sha256("")이 아니다)."""
+    from app.main import app
+    from app.models.channel_post_version import ChannelPostVersion
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            (r1,) = await _upload_n_images(client, org_id, draft_id, 1)
+            image_id = r1.json()
+
+            async with Session() as s:
+                from app.models.channel_post_image import ChannelPostImage
+                row = (await s.execute(
+                    select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(image_id["version_id"]))
+                )).scalar_one()
+            r_delete = await client.request(
+                "DELETE", f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/{row.id}",
+            )
+        assert r_delete.status_code == 200, r_delete.text
+        assert r_delete.json() == []
+
+        async with Session() as s:
+            new_version = (await s.execute(
+                select(ChannelPostVersion).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+                .order_by(ChannelPostVersion.version.desc()).limit(1)
+            )).scalar_one()
+        assert new_version.image_sha256 is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_delete_unknown_image_id_returns_404():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            await _upload_n_images(client, org_id, draft_id, 1)
+
+            r_delete = await client.request(
+                "DELETE",
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/{uuid.uuid4()}",
+            )
+        assert r_delete.status_code == 404, r_delete.text
+        assert r_delete.json()["error"]["code"] == "CHANNEL_POST_IMAGE_NOT_FOUND"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reorder_two_images_swaps_positions_and_recomputes_seal():
+    from app.main import app
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.services.channel_post_images import compute_image_seal_hash
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r1, r2 = await _upload_n_images(client, org_id, draft_id, 2)
+
+            async with Session() as s:
+                from app.models.channel_post_image import ChannelPostImage
+                images = list((await s.execute(
+                    select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(r2.json()["version_id"]))
+                    .order_by(ChannelPostImage.position)
+                )).scalars().all())
+            first_id, second_id = str(images[0].id), str(images[1].id)
+            reversed_hashes = [images[1].final_sha256, images[0].final_sha256]
+
+            r_reorder = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/reorder",
+                json={"image_ids": [second_id, first_id]},
+            )
+        assert r_reorder.status_code == 200, r_reorder.text
+        reordered = r_reorder.json()
+        assert [row["position"] for row in reordered] == [0, 1]
+
+        async with Session() as s:
+            new_version = (await s.execute(
+                select(ChannelPostVersion).where(ChannelPostVersion.id == uuid.UUID(reordered[0]["version_id"]))
+            )).scalar_one()
+        assert new_version.image_sha256 == compute_image_seal_hash(reversed_hashes)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reorder_with_missing_or_duplicate_id_rejected_422():
+    from app.main import app
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r1, r2 = await _upload_n_images(client, org_id, draft_id, 2)
+
+            async with Session() as s:
+                from app.models.channel_post_image import ChannelPostImage
+                images = list((await s.execute(
+                    select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(r2.json()["version_id"]))
+                    .order_by(ChannelPostImage.position)
+                )).scalars().all())
+            first_id, second_id = str(images[0].id), str(images[1].id)
+
+            r_missing = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/reorder",
+                json={"image_ids": [first_id]},
+            )
+            r_duplicate = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/reorder",
+                json={"image_ids": [first_id, first_id]},
+            )
+        for r in (r_missing, r_duplicate):
+            assert r.status_code == 422, r.text
+            assert r.json()["error"]["code"] == "CHANNEL_POST_IMAGE_REORDER_INVALID_SET"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_list_images_for_version_endpoint_returns_ordered_positions():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r1, r2, r3 = await _upload_n_images(client, org_id, draft_id, 3)
+            version_id = r3.json()["version_id"]
+
+            r_list = await client.get(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/versions/{version_id}/assets",
+            )
+        assert r_list.status_code == 200, r_list.text
+        rows = r_list.json()
+        assert [row["position"] for row in rows] == [0, 1, 2]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
