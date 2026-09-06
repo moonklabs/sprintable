@@ -304,14 +304,19 @@ def test_stream_batch_delivers_over_100_events(mock_session, org_id):
                     with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
                         assert resp.status_code == 200
     finally:
-        t.join(timeout=6.0)
-        app.dependency_overrides.clear()
-        _agent_connections.pop(member_id_str, None)
-        # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역, 이
-        # 테스트가 set()한 채로 남으면 다음 테스트의 SSE 스트림까지 즉시 shutdown_
-        # reconnect로 오판시킨다 — lifespan startup의 재생성에 암묵적으로 기대지 않고
-        # 명시로 되돌린다.
-        shutdown_module.reset_shutdown_event()
+        # story #3580(페드루 PO 確定 2026-09-06, #3942 CI 실사고) — 이 reset을 이
+        # finally 블록 맨 앞·독립 try로 둔다. 예전엔 t.join()/dependency_overrides.
+        # clear()/_agent_connections.pop() 뒤(마지막)에 있었는데, 그 중 하나라도
+        # 예외를 던지면(예: t.join 타임아웃) 뒤에 있던 이 reset이 아예 안 돈다 —
+        # 이 테스트가 다음 SSE 스트림 테스트를 오염시키는 잠복 경로였다(전역
+        # conftest.py::_guard_global_shutdown_event_leak이 이제 이런 누락을 그
+        # 자리에서 FAIL로 잡아낸다).
+        try:
+            shutdown_module.reset_shutdown_event()
+        finally:
+            t.join(timeout=6.0)
+            app.dependency_overrides.clear()
+            _agent_connections.pop(member_id_str, None)
 
     assert registered_observed.is_set(), "injector never observed the connection in _agent_connections"
     assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"

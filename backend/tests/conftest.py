@@ -481,6 +481,51 @@ def pytest_runtest_makereport(item, call):
         report.sections.append(("story #2662: missing model import 진단", diagnosis))
 
 
+@pytest.fixture(autouse=True)
+def _guard_global_shutdown_event_leak(request):
+    """story #3580(페드루 PO 確定 2026-09-06, #3942 CI 실사고 근본원인) —
+    `app.core.shutdown.shutdown_event`는 프로세스 전역 asyncio.Event다. SSE 스트림
+    테스트가 이걸 set()해 즉시-종료를 실측한 뒤 자기 정리(reset_shutdown_event())를
+    모든 경로(예외·타임아웃 포함)에서 못 돌리고 끝나면, 같은 pytest 프로세스에서
+    이어 도는 «무관한» 다음 SSE 스트림 테스트가 시작하자마자 shutdown_reconnect로
+    오판된다 — 실제 CI 원본 실측(run 34037169656): 피해자 테스트의 타임라인이
+    `heartbeat@+0.006s, sync_status@+0.006s, shutdown_reconnect@+0.006s`(시작하자마자
+    셧다운) — 원인은 그 앞에 돈 테스트가 남긴 오염이지 피해자 자신의 결함이 아니었다.
+
+    처방 — 설정(이 테스트 시작 前) 한 시점만 지킨다: 이미 set돼 있으면(이전 테스트의
+    오염 상속) 조용히 reset해 이 테스트를 깨끗한 상태에서 시작시킨다(피해자를 만들지
+    않는다). 상속받은 오염이었다는 사실은 경고 로그로만 남긴다.
+
+    ⛔종료 시점(teardown) 검사 — "테스트가 끝났는데 여전히 set이면 그 테스트가
+    범인" — 은 **처음엔 넣었다가 실측으로 되돌렸다**: `app/main.py:61,163`(lifespan
+    startup=reset·shutdown=set) 그대로, `with TestClient(app) as c:` 블록을 정상
+    종료하는 **모든** 테스트가 그 자체로 실 lifespan shutdown을 타 이 이벤트를
+    "정상적으로" set한 채 끝난다(다음 lifespan startup의 reset을 기다리는 게 설계
+    그대로 — 실 프로덕션 그래스풀 셧다운과 동일 신호). 이건 버그가 전혀 아닌데,
+    teardown 검사를 넣었더니 그런 완전히 무고한 테스트(`test_heartbeat_disconnect_
+    check_clears_connection` 등)가 새로 FAIL/ERROR 나는 걸 로컬에서 직접 재현했다
+    (이 fixture를 no-op으로 바꾸면 사라짐 — 원인 이 fixture로 특정 확認). "여전히
+    set"이라는 신호 하나로는 «이 테스트가 수동 set()을 잊고 안 지웠다»와 «이 테스트의
+    TestClient(app) lifespan이 정상적으로 셧다운을 신호했다»를 구조적으로 구분할
+    수 없다 — 그래서 teardown-시점 자동 「범인 지목」은 안전하게 구현이 안 된다고
+    판단, 설정-시점 방어(피해자 보호)만 남긴다. 수동 set() 4자리(test_c4c72eb1_sse_
+    shutdown_aware.py·test_eventbus_s2.py·test_eventbus_s3.py·test_s20.py)는 각
+    파일에서 개별로 finally 순서를 하드닝했다(그 reset이 다른 cleanup 코드보다
+    먼저/독립적으로 돌게)."""
+    import logging
+
+    from app.core import shutdown as shutdown_module
+
+    if shutdown_module.shutdown_event.is_set():
+        logging.getLogger(__name__).warning(
+            "%s 시작 前 app.core.shutdown.shutdown_event가 이미 set — 이전 테스트가 "
+            "남긴 오염으로 판단해 reset 후 진행(이 테스트는 피해자로 취급, 실패 처리 안 함)",
+            request.node.nodeid,
+        )
+        shutdown_module.reset_shutdown_event()
+    yield
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
