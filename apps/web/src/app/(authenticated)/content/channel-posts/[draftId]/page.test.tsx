@@ -505,22 +505,31 @@ function stubFetch(opts: {
 // 이벤트 확보). jsdom의 실 XMLHttpRequest는 실 네트워크가 없어 그대로 못 쓴다 —
 // send() 호출 즉시 progress 이벤트 1~2개를 합성해 쏘고 onload로 마무리하는 최소
 // 가짜 클래스로 교체한다(fetch stubGlobal과 동형 관례).
-function stubXhrForVideoUpload(opts: { status?: number; progressTicks?: number[] } = {}) {
+function stubXhrForVideoUpload(opts: {
+  status?: number; progressTicks?: number[]; networkError?: boolean; responseText?: string;
+} = {}) {
   const progressTicks = opts.progressTicks ?? [50, 100];
   const status = opts.status ?? 200;
   // story #3577 — setRequestHeader 호출을 기록해 「Content-Type 정확히 1회·정확한
   // 값」을 pin할 수 있게(호출부/함수 둘 다 세팅하면 중복 호출로 드러난다).
   const setHeaderCalls: [string, string][] = [];
+  const networkError = opts.networkError ?? false;
+  const responseText = opts.responseText ?? '';
   class FakeXHR {
     upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = { onprogress: null };
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
     status = 0;
+    responseText = '';
     open(_method: string, _url: string) {}
     setRequestHeader(k: string, v: string) { setHeaderCalls.push([k, v]); }
     send(_body: unknown) {
       for (const pct of progressTicks) this.upload.onprogress?.({ lengthComputable: true, loaded: pct, total: 100 });
+      // story #3575(⑤) — networkError는 상태코드 자체가 안 잡히는 경로(DNS/CORS/
+      // 연결 단절)를 흉내낸다 — onload가 아니라 onerror만 불린다.
+      if (networkError) { this.onerror?.(); return; }
       this.status = status;
+      this.responseText = responseText;
       this.onload?.();
     }
   }
@@ -2591,6 +2600,94 @@ describe('ChannelPostEditPage — 캐러셀 가득 참 트리거 비활성(story
   });
 });
 
+// story #3575(유나 §17-23④/⑤ 확定 2026-09-06, 페드루 PO 確定) — 영상↔이미지 상호배타
+// + 영상 있을 때 커버 상한 1(단, 「가득 참 비활성」은 금지 — 트리거는 안 닫고 낱말만
+// 「커버 선택」→「커버 바꾸기」). 낱말은 유나 확定값 그대로 pin.
+describe('ChannelPostEditPage — 영상↔이미지 상호배타 + 커버 상한 1(story #3575)', () => {
+  function makeTestImages(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      image_id: `simg${i + 1}`, draft_id: DRAFT_ID, version_id: 'v1', version: 1, position: i,
+      original_width: 1000, original_height: 1000, original_bytes: 100_000,
+      final_width: 1000, final_height: 1000, final_bytes: 100_000,
+      was_converted: false, image_url: `https://storage.googleapis.com/x/s${i + 1}.jpg`,
+    }));
+  }
+
+  it('⭐영상 없음·이미지 1장 — 영상 트리거 활성', async () => {
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 10, initialImages: makeTestImages(1) });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-video-attach-trigger"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-video-blocked-by-images-reason"]')).toBeNull();
+  });
+
+  it('⭐영상 없음·이미지 2장 — 영상 트리거 비활성(상호배타)+사유(유나 §17-23④ 확定 낱말)', async () => {
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 10, initialImages: makeTestImages(2) });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-video-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-video-blocked-by-images-reason"]')?.textContent)
+      .toBe('이미지가 2장 이상이면 영상을 붙일 수 없습니다. 이미지를 한 장만 남기면 그 한 장이 커버가 됩니다.');
+  });
+
+  it('⭐이미지 2장에서 1장 삭제 — 같은 마운트에서 영상 트리거 재활성(3564 해제 경로 동형)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 10, initialImages: makeTestImages(2),
+      onImageDelete: () => ({ status: 200, body: makeTestImages(1) }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect((container.querySelector('[data-testid="channel-post-video-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
+
+    const item = container.querySelector('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (item!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-video-attach-trigger"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('⭐영상 있음 — 커버 상한이 1이라 개수 태그가 「1 / 1장」', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 10, initialImages: makeTestImages(1),
+      draftDetail: { video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4' } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-image-attach"]')?.textContent).toContain('1 / 1장');
+  });
+
+  it('⭐영상 있음·커버 1장(상한 도달) — 「가득 참 비활성」 금지: 트리거는 여전히 활성이고 라벨이 「커버 바꾸기」, 가득 참 사유는 안 뜬다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 10, initialImages: makeTestImages(1),
+      draftDetail: { video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4' } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement;
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.textContent).toBe('커버 바꾸기');
+    expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')).toBeNull();
+  });
+
+  it('영상 있음·커버 0장 — 라벨은 「커버 선택」(교체할 대상이 없다)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 10, initialImages: [],
+      draftDetail: { video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4' } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).textContent)
+      .toBe('커버 선택');
+  });
+});
+
 // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널 상신 전 선알림 + 422 문구.
 describe('ChannelPostEditPage — 이미지 필수 채널 선알림(story #3538)', () => {
   const REASON_TESTID = 'channel-post-image-required-reason';
@@ -3999,6 +4096,123 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
     expect(errorText).toBe('비율이 9:16을 벗어납니다(서버 메시지 예시)');
+  });
+
+  // story #3575(⑤, 유나 §17-23③/⑤ 확定 2026-09-06) — PUT 실패를 응답 있음/없음
+  // 둘로 가른다. 응답 있음(상태코드 앎)은 "다시 시도" 없이 상태코드+서버 응답
+  // 보기만(재시도해도 같은 실패일 수 있다 — 규격/서명 문제).
+  it('⭐PUT 실패(응답 있음, 403) — 상태코드 문구+「서버 응답 보기」(재시도 문장 없음)', async () => {
+    stubXhrForVideoUpload({ status: 403, responseText: '<Error>SignatureDoesNotMatch</Error>' });
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버가 403로 응답했습니다.');
+    expect(errorText).not.toContain('다시 시도');
+    expect(
+      [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
+    ).not.toBeUndefined();
+  });
+
+  // 응답 없음(네트워크 미도달)만 "연결을 확인한 뒤 다시 시도"가 맞는 말 — 서버
+  // 응답이 아예 없으니 raw로 보여줄 것도 없다(toggle 미표시).
+  it('⭐PUT 실패(응답 없음, 네트워크) — 재시도 문장이 있고 「서버 응답 보기」는 없다', async () => {
+    stubXhrForVideoUpload({ networkError: true });
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.');
+    expect(
+      [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
+    ).toBeUndefined();
+  });
+
+  // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 화면 상한 1이 정상 경로를
+  // 이미 막지만, 레이스 등으로 서버까지 도달 시 방어선 회귀 0(서버 message 그대로).
+  it('⭐422 CHANNEL_VIDEO_REQUIRES_SINGLE_COVER(confirm) — 서버 message 그대로 렌더된다', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      onVideoConfirm: () => ({
+        status: 422, body: { detail: { code: 'CHANNEL_VIDEO_REQUIRES_SINGLE_COVER', message: '영상에는 커버 1장만 첨부할 수 있습니다(서버 메시지 예시)' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('영상에는 커버 1장만 첨부할 수 있습니다(서버 메시지 예시)');
+  });
+
+  // story #3575(⑤ 조건 1, 페드루 PO 지적 2026-09-06) — urlRes.ok=true(2xx)인데 본문에
+  // .data가 없는 잔존 분기. 응답은 왔으니 "응답 있음" 갈래(상태코드+raw), 「다시 시도」
+  // 문장은 없다.
+  it('⭐upload-url 응답 200인데 본문에 .data가 없음 — 상태코드 문구+raw(응답 있음 갈래)', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      onVideoUploadUrl: () => ({ status: 200, body: null }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버가 200로 응답했습니다.');
+    expect(
+      [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
+    ).not.toBeUndefined();
+  });
+
+  // confirm 쪽도 동형(응답 있음 갈래) — 그리고 이 함수 전체를 감싸는 catch는 이제
+  // "응답 자체가 없다"(fetch가 던지는 예외 — 네트워크 단절류) 갈래만 남는다는 것을
+  // 같이 pin(HTTP 오류는 throw 없이 res.ok=false로 오므로 이 catch는 진짜 미도달만 잡는다).
+  it('⭐confirm이 던지는 예외(네트워크 단절) — 재시도 문장(응답 없음 갈래), raw 없음', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      onVideoConfirm: () => { throw new Error('network down'); },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.');
+    expect(
+      [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
+    ).toBeUndefined();
   });
 
   it('⭐승인 카드 — draft.video_url이 있으면 <video>를, 없으면 썸네일만 그린다', async () => {

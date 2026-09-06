@@ -65,9 +65,12 @@ export type SitePostApiErrorKind =
   // budget_gate와 같은 계약, 블루프린트 §2). labelKey는 비워 두고(text_too_long과
   // 동형 관례) page.tsx가 limit/spent/estimated/remaining 4값을 보간해 문장을 짓는다.
   | 'generation_budget_exceeded'
-  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — 미승인 컨셉 게이트로
-  // submit 자체가 막힘. labelKey 없음(서버 message 그대로).
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06 · 유나 리뷰 정정
+  // PR#3927 CHANGES) — 미승인 컨셉 게이트로 submit 자체가 막힘. 서버가 이 코드에
+  // message를 안 보내 화면이 직접 문장을 짓는다(labelKey 등재).
   | 'concept_not_approved'
+  // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 영상 초안 커버 2장째 서버 거부.
+  | 'video_requires_single_cover'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -175,6 +178,10 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 선알림(사유 사슬)과 같은 i18n 키.
   // 서버 message를 그대로 뿌리지 않는다(코드→화면 문구 선택, §22-15 규율).
   CHANNEL_IMAGE_REQUIRED: { labelKey: 'channelPostsImageRequiredReason', kind: 'image_required' },
+  // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 영상이 있는 초안에 커버를
+  // 2장째 올리려 할 때의 서버 방어선(화면 상한 1이 정상 경로를 이미 막지만, 레이스
+  // 등으로 도달 시 회귀 0). labelKey 빈칸 — 서버 message 그대로(3471 동형).
+  CHANNEL_VIDEO_REQUIRES_SINGLE_COVER: { labelKey: '', kind: 'video_requires_single_cover' },
   // EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED
   // 는 위 site 항목을 그대로 재사용한다(같은 external_publish 게이트 개념 공유, doc §9-4).
   // story #3402·PR#3764 — 채널 포스트 전용 GATE_ALREADY_HELD. site와 kind는 같지만

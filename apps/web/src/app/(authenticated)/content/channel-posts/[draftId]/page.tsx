@@ -1129,9 +1129,20 @@ export default function ChannelPostEditPage() {
   // 100MB(이미지 8MB 대비)라 무프로그레스 텍스트만으로는 체감이 나쁘다는 그라운딩
   // 지적을 XHR upload.onprogress로 처방 — signed URL PUT 이 단계만 XHR, 나머지
   // (upload-url 발급·confirm)는 기존 fetchWithAuth 그대로.
+  // story #3575(⑤, 유나 §17-23③/⑤ 확定 2026-09-06) — 실패를 "응답 있음(상태코드
+  // 앎)"과 "응답 없음(네트워크 미도달)" 둘로 가른다. 전자는 "다시 시도"가 틀린
+  // 안내일 수 있다(규격/서명 문제면 같은 파일로 재시도해도 또 실패) — 후자만
+  // "연결을 확인한 뒤 다시 시도"가 맞는 말. status===null이 "응답 자체가 없었다"
+  // 신호(xhr.onerror — DNS/CORS/네트워크 단절 등, 서버가 아예 안 보였다).
+  interface PutVideoResult {
+    ok: boolean;
+    status: number | null;
+    responseText: string;
+  }
+
   function putVideoWithProgress(
     uploadUrl: string, file: File, headers: Record<string, string>, onProgress: (pct: number) => void,
-  ): Promise<boolean> {
+  ): Promise<PutVideoResult> {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', uploadUrl);
@@ -1145,8 +1156,10 @@ export default function ChannelPostEditPage() {
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
       };
-      xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
-      xhr.onerror = () => resolve(false);
+      xhr.onload = () => resolve({
+        ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, responseText: xhr.responseText ?? '',
+      });
+      xhr.onerror = () => resolve({ ok: false, status: null, responseText: '' });
       xhr.send(file);
     });
   }
@@ -1174,17 +1187,34 @@ export default function ChannelPostEditPage() {
         { data?: { upload_url: string; object_path: string; required_put_headers: Record<string, string> } } | null;
       const uploadInfo = urlJson?.data;
       if (!uploadInfo) {
-        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+        // story #3575(⑤ 조건 1, 페드루 PO 지적 2026-09-06) — urlRes.ok=true(2xx)인데
+        // 본문에 .data가 없다 — 응답 자체는 왔으니 "응답 있음" 갈래(상태코드+raw).
+        setVideoUploadStatus({
+          phase: 'error',
+          text: t('errorChannelVideoUploadFailedWithStatus', { status: urlRes.status }),
+          raw: JSON.stringify(urlJson),
+        });
         return;
       }
 
       setVideoUploadStatus({ phase: 'uploading', progress: 0 });
-      const putOk = await putVideoWithProgress(
+      const putResult = await putVideoWithProgress(
         uploadInfo.upload_url, file, { 'Content-Type': file.type, ...uploadInfo.required_put_headers },
         (pct) => setVideoUploadStatus({ phase: 'uploading', progress: pct }),
       );
-      if (!putOk) {
-        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+      if (!putResult.ok) {
+        // story #3575(⑤, 유나 §17-23③/⑤ 확定) — 응답 있음(상태코드 앎)과 응답
+        // 없음(네트워크 미도달) 갈래. "다시 시도" 문장은 후자에만(전자는 재시도해도
+        // 같은 실패일 수 있다 — 규격/서명 문제는 시간이 해결 못 한다).
+        if (putResult.status !== null) {
+          setVideoUploadStatus({
+            phase: 'error',
+            text: t('errorChannelVideoUploadFailedWithStatus', { status: putResult.status }),
+            raw: JSON.stringify({ status: putResult.status, response: putResult.responseText }),
+          });
+        } else {
+          setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailedNoResponse') });
+        }
         return;
       }
 
@@ -1202,7 +1232,13 @@ export default function ChannelPostEditPage() {
       const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: ChannelPostVideoResponse } | null;
       const uploaded = confirmJson?.data;
       if (!uploaded) {
-        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+        // story #3575(⑤ 조건 1) — confirmRes.ok=true인데 본문에 .data가 없다 —
+        // 마찬가지로 "응답 있음" 갈래.
+        setVideoUploadStatus({
+          phase: 'error',
+          text: t('errorChannelVideoUploadFailedWithStatus', { status: confirmRes.status }),
+          raw: JSON.stringify(confirmJson),
+        });
         return;
       }
       setVideo({
@@ -1225,7 +1261,11 @@ export default function ChannelPostEditPage() {
       }
       setVideoUploadStatus({ phase: 'idle' });
     } catch {
-      setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+      // story #3575(⑤ 조건 1) — 예외가 여기까지 올라왔다는 것 자체가 "응답이
+      // 없다"(fetch가 던지는 건 네트워크 단절류뿐 — HTTP 오류 상태는 throw하지
+      // 않고 res.ok=false로 옴, JSON 파싱 실패는 이미 각 .catch(() => null)로
+      // 흡수돼 있다) — 응답 없음 갈래.
+      setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailedNoResponse') });
     }
   };
 
@@ -1621,6 +1661,21 @@ export default function ChannelPostEditPage() {
   // story #3556(B2와 동형 이유, §17-23③) — 영상 업로드 中엔 저장/상신을 막는다.
   const videoUploadInProgress = videoUploadStatus.phase === 'requesting_url'
     || videoUploadStatus.phase === 'uploading' || videoUploadStatus.phase === 'confirming';
+
+  // story #3575(유나 §17-23④ 정정 2026-09-06, PO 確定) — 영상이 있으면 이 구역은
+  // 「이미지 N장」이 아니라 그 영상의 «커버 1장»이다. BE도 커버=1장·교체
+  // (images.py 커버 confirm 경로)라 어긋난 쪽은 화면이었다 — imageSpec.maxCount를
+  // 그대로 쓰지 않고 영상 유무로 가른 상한을 쓴다(3564의 "가득 참" 문장·개수
+  // 태그 기계가 이 값 하나만 바꾸면 「1 / 1장」·1장 사유로 자동으로 맞아떨어진다,
+  // 새 문장 0).
+  const effectiveImageMaxCount = video ? 1 : (imageSpec?.maxCount ?? 0);
+
+  // story #3575(PO 確定 ① · 유나 §17-23④ 정정 도착 뒤 낱말 확定 — 지금은 구조만) —
+  // 영상 없는 상태에서 이미지가 이미 2장 이상이면 영상 첨부가 그 이미지들을
+  // 조용히 버리는 행동이 된다(BE는 첫 장만 커버로 carry — 3574). 화면이 먼저
+  // 막는다: 이미지를 1장 이하로 줄이면 같은 마운트에서 재활성(3564 해제 경로
+  // 규율과 동형 — 별도 상태 없이 매 렌더 images.length로 판정).
+  const videoTriggerBlockedByImages = !video && images.length >= 2;
 
   // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널(image_required)인데
   // 이미지가 없으면 상신·예약 상신이 서버에서 422로 막힌다(§7 「필수값 빈칸
@@ -2215,12 +2270,20 @@ export default function ChannelPostEditPage() {
           />
           <Button
             type="button" variant="outline" size="sm"
-            disabled={videoUploadInProgress}
+            disabled={videoUploadInProgress || videoTriggerBlockedByImages}
             onClick={() => videoFileInputRef.current?.click()}
             data-testid="channel-post-video-attach-trigger"
           >
             {video ? t('channelPostsVideoReplaceTriggerCta') : t('channelPostsVideoAttachTriggerCta')}
           </Button>
+          {/* story #3575(PO 確定 ①, 유나 §17-23④ 낱말 확定 2026-09-06) — 비활성 버튼
+              «밖»의 사유 한 줄(툴팁 아님). 업로드 진행 中엔 아래 진행 문구가 이미
+              이유를 말하므로 이 사유는 안 겹쳐 뜬다(videoUploadInProgress와 배타). */}
+          {!videoUploadInProgress && videoTriggerBlockedByImages ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-post-video-blocked-by-images-reason">
+              {t('channelPostsVideoBlockedByImagesReason')}
+            </p>
+          ) : null}
           {videoUploadInProgress ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
               {videoUploadStatus.phase === 'requesting_url'
@@ -2295,7 +2358,7 @@ export default function ChannelPostEditPage() {
               originalWidth: img.original_width, finalWidth: img.final_width,
               originalBytes: img.original_bytes, finalBytes: img.final_bytes,
             }))}
-            maxCount={imageSpec.maxCount}
+            maxCount={effectiveImageMaxCount}
             disabled={imageUploadInProgress || imagesActionInProgress}
             onReorder={(from, to) => void handleReorderImage(from, to)}
             onDelete={(index) => void handleDeleteImage(index)}
@@ -2324,11 +2387,18 @@ export default function ChannelPostEditPage() {
           />
           <Button
             type="button" variant="outline" size="sm"
-            disabled={imageUploadInProgress || images.length >= imageSpec.maxCount}
+            // story #3575(유나 §17-23④ 정정 2026-09-06, 페드루 PO 전언) — 「가득 참
+            // 비활성」 금지: 영상이 있을 때 커버 구역은 상한 1이어도 트리거를 닫지
+            // 않는다(BE가 새 업로드를 «교체»로 처리하니 닫으면 "할 수 없다"는 거짓
+            // 신호 — §5-2 위반). 가득 참 비활성은 영상 없는 순수 이미지 캐러셀
+            // (3564)에서만 유효.
+            disabled={imageUploadInProgress || (!video && images.length >= effectiveImageMaxCount)}
             onClick={() => imageFileInputRef.current?.click()}
             data-testid="channel-post-image-attach-trigger"
           >
-            {video ? t('channelPostsCoverAttachTriggerCta') : t('channelPostsImageAttachTriggerCta')}
+            {video
+              ? (images.length > 0 ? t('channelPostsCoverReplaceTriggerCta') : t('channelPostsCoverAttachTriggerCta'))
+              : t('channelPostsImageAttachTriggerCta')}
           </Button>
           {imageUploadInProgress ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-progress">
@@ -2343,9 +2413,13 @@ export default function ChannelPostEditPage() {
               가득 차도(images.length>=maxCount) 트리거가 활성 상태였다(§5-2 "그려진
               컨트롤은 할 수 있다는 단정" 위반 — 눌러도 서버 422로만 막힘). 업로드
               진행 中엔 이 사유를 안 보인다(위 진행 문구가 이미 이유를 말한다). */}
-          {!imageUploadInProgress && images.length >= imageSpec.maxCount ? (
+          {/* story #3575(유나 §17-23④ 정정 — 「가득 참 비활성」 금지) — 영상이 있으면
+              가득 참 사유 자체를 안 그린다(트리거가 안 닫혀 있으니 "가득 찼다"는
+              말도 거짓 — 실제로는 다음 선택이 교체로 된다). 영상 없는 순수 이미지
+              캐러셀(3564)에서만 이 사유가 유효. */}
+          {!video && !imageUploadInProgress && images.length >= effectiveImageMaxCount ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-post-image-max-count-reached-reason">
-              {t('channelPostsImageMaxCountReachedReason', { max: imageSpec.maxCount })}
+              {t('channelPostsImageMaxCountReachedReason', { max: effectiveImageMaxCount })}
             </p>
           ) : null}
           {imageUploadStatus.phase === 'error' ? (
