@@ -667,6 +667,15 @@ async def list_comments_for_publication(
         db, comment_ids=[c.id for c in rows],
     )
 
+    # story #3593(Phase2·BE, 페드루 PO 確定 2026-09-06) — 유나 실측: 답변이 2건
+    # 이상이면(재상신 이력) 화면의 배지 하나(=최신 답변 status)가 「이 발행됨이
+    # 어느 답변의 상태인가」를 말 못 한다. 최신 답변 요약(위)과 별개로 댓글당
+    # 전체 답변 개수를 배치 조회(N+1 X) — FE가 "답변 N · 최신 {상태}" 형을
+    # 조립할 수 있게. count_comments_by_publication_ids와 동형 GROUP BY 패턴.
+    reply_counts_by_comment_id = await _reply_counts_by_comment_ids(
+        db, comment_ids=[c.id for c in rows],
+    )
+
     # story #3529(additive, 유나 §22-15 채택) — 댓글 목록 reply{} 요약에 발송 명령
     # 상태 4필드(command_status·failure_kind·next_attempt_at·reason_code)를 얹기
     # 위한 배치 조회(N+1 X) — PublicationCommand 그대로, 새 컬럼/새 이름 0.
@@ -690,6 +699,7 @@ async def list_comments_for_publication(
         "reply_by_comment_id": latest_reply_by_comment_id,
         "comments_next_allowed_at": comments_next_allowed_at,
         "command_by_id": command_by_id,
+        "reply_counts_by_comment_id": reply_counts_by_comment_id,
     }
 
 
@@ -727,6 +737,22 @@ async def _latest_reply_by_comment_ids(
     reply_alias = aliased(ChannelPostCommentReply, subq)
     rows = (await db.execute(select(reply_alias).where(subq.c.rn == 1))).scalars().all()
     return {reply.comment_id: reply for reply in rows}
+
+
+async def _reply_counts_by_comment_ids(
+    db: AsyncSession, *, comment_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """story #3593 — 댓글당 전체 답변 개수(초안 포함 모든 status) 배치 조회
+    (N+1 X). count_comments_by_publication_ids와 동형 GROUP BY 패턴.
+    comment_ids 없으면 빈 dict(호출부가 `.get(comment_id, 0)`)."""
+    if not comment_ids:
+        return {}
+    rows = (await db.execute(
+        select(ChannelPostCommentReply.comment_id, func.count())
+        .where(ChannelPostCommentReply.comment_id.in_(comment_ids))
+        .group_by(ChannelPostCommentReply.comment_id)
+    )).all()
+    return {comment_id: count for comment_id, count in rows}
 
 
 async def count_comments_by_publication_ids(
