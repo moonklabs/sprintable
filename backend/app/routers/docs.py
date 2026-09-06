@@ -639,6 +639,16 @@ async def update_doc(
             session, org_id=repo.org_id, doc_id=doc.id, html_content=doc.content, created_by=actor_id,
         )
 
+        # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — 이 doc을 근거자료로 삼은
+        # concept_approval 게이트가 있으면 재봉인/재승인 판정(channel_posts.py의 content
+        # 변경 감지 훅과 동형). 같은 트랜잭션(실패 시 doc 수정 전체 롤백 — mentions
+        # reconcile과 동일 원자성 원칙).
+        from app.services.doc import compute_doc_body_sha256, _reseal_concept_approval_gate_on_doc_update
+        await _reseal_concept_approval_gate_on_doc_update(
+            session, org_id=repo.org_id, doc_id=doc.id,
+            new_body_sha256=compute_doc_body_sha256(doc.content),
+        )
+
         # story #2346 AC3 — content 길이가 실제로 바뀌면 doc_updated activity에 「이전 길이→이후
         # 길이」를 얹는다(신규 장치 0, 전문 스냅샷 아님). 안 바뀌면 안 남긴다(양성 대조 — stories.py와
         # 동형, 매번 남으면 잡음). old_content_length는 위에서 setattr 前에 이미 스칼라로 떠 뒀다.
@@ -974,6 +984,66 @@ async def transition_doc_endpoint(
         raise HTTPException(
             status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
         )
+
+
+class DocConceptApprovalSubmitRequest(BaseModel):
+    work_item_id: uuid.UUID
+    work_item_type: str
+    # story #3561 확定① — 이 필드는 doc_approval(#3004)의 approver_member_id와 달리 필수가
+    # 아니다: concept_approval의 승인 자격은 rule B(work_item의 project owner/admin, gates.py
+    # ::_non_doc_can_approve)가 기본으로 커버한다 — 미지정(None)이면 그 전원이 액션 대상.
+    approver_member_id: uuid.UUID | None = None
+
+
+class DocConceptApprovalSubmitResponse(BaseModel):
+    gate_id: uuid.UUID
+    status: str
+    work_item_id: uuid.UUID
+    work_item_type: str
+    doc_id: uuid.UUID
+    sealed_doc_body_sha256: str
+
+
+@router.post("/{id}/concept-approval", response_model=DocConceptApprovalSubmitResponse, status_code=201)
+async def submit_concept_approval_endpoint(
+    id: uuid.UUID,
+    body: DocConceptApprovalSubmitRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> DocConceptApprovalSubmitResponse:
+    """story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — doc을 근거자료로 다른
+    work_item(Story/Task)에 `concept_approval` 게이트를 상신. `/transition`(doc_approval,
+    doc 자신의 lifecycle)과 무관한 별개 경로 — 이 엔드포인트는 doc.status를 전혀 안 바꾼다."""
+    from app.services.doc import ConceptApprovalError, submit_concept_approval
+    from app.services.member_resolver import resolve_member
+
+    caller = await resolve_member(auth, org_id, session)
+    # f69fcd91과 동일 gate — cross-project IDOR 차단. submit_concept_approval() 안의
+    # project-scope 일치 검사(doc.project_id == work_item project_id)와 합쳐지면 caller가
+    # work_item의 project 접근권도 사실상 이미 검증된 것과 같다(둘이 다른 project면 422로
+    # 별도 거부되므로 — 그 경우까지 이 가드가 커버할 필요는 없다, 정직한 최소 검증).
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), org_id)
+    try:
+        gate = await submit_concept_approval(
+            session, org_id, caller, doc_id=id, work_item_id=body.work_item_id,
+            work_item_type=body.work_item_type, designated_approver_id=body.approver_member_id,
+        )
+        await session.commit()
+        await session.refresh(gate)
+    except ConceptApprovalError as e:
+        _codes = {
+            "DOC_NOT_FOUND": 404, "INVALID_WORK_ITEM_TYPE": 422,
+            "CONCEPT_APPROVAL_DOC_SCOPE_MISMATCH": 422,
+        }
+        raise HTTPException(
+            status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
+        )
+    return DocConceptApprovalSubmitResponse(
+        gate_id=gate.id, status=gate.status, work_item_id=gate.work_item_id,
+        work_item_type=gate.work_item_type, doc_id=id,
+        sealed_doc_body_sha256=gate.sealed_doc_body_sha256,
+    )
 
 
 class DocAssetRegisterRequest(BaseModel):

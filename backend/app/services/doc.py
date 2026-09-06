@@ -7,14 +7,17 @@ doc 의 native status(0128·doc-specific 값)를 hypothesis 와 동형 패턴으
 from __future__ import annotations
 
 import difflib
+import hashlib
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.doc import Doc, DOC_STATUSES, DocRevision, is_valid_doc_transition
+from app.models.gate import Gate, set_gate_status
 from app.services.member_resolver import ResolvedMember
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,12 @@ logger = logging.getLogger(__name__)
 # E-DG doc-gate(48f064e5): doc 결재 인앱 게이트. work_item_type='doc'·gate_type='doc_approval'.
 DOC_GATE_WORK_ITEM_TYPE = "doc"
 DOC_GATE_TYPE = "doc_approval"
+
+# story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — doc_approval(doc 자신의 lifecycle
+# 전이)과 별개 축: doc을 근거자료로 삼아 **다른** work_item(Story/Task)을 승인하는 게이트.
+# 이 gate_type은 doc.status를 절대 안 건드린다 — 승인 대상은 work_item이지 doc이 아니다.
+CONCEPT_APPROVAL_GATE_TYPE = "concept_approval"
+_CONCEPT_APPROVAL_WORK_ITEM_TYPES = frozenset({"story", "task"})
 
 _DOC_SUMMARY_LIMIT = 220
 # story #3258(customer-zero 2차) — 결재 카드가 채팅 밖으로 안 나가고 결정 가능하려면 본문
@@ -318,3 +327,117 @@ async def transition_doc(
     doc.status = to_status
     await session.flush()
     return doc
+
+
+# ─── story #3561: concept_approval(doc 근거 work_item 승인, doc_approval과 별개 축) ───
+
+
+def compute_doc_body_sha256(content: str) -> str:
+    """external_publish의 `ChannelPostVersion.body_sha256`과 동형 관례 — doc 본문 변경
+    감지의 비교 기준값. 단순 sha256(다중 필드 합성 아님, doc.content 하나뿐)."""
+    return hashlib.sha256((content or "").encode()).hexdigest()
+
+
+class ConceptApprovalError(Exception):
+    """도메인 오류 — 라우터가 code/message를 HTTPException으로 매핑(DocTransitionError와
+    동형 관례)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+async def submit_concept_approval(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    caller: ResolvedMember,
+    *,
+    doc_id: uuid.UUID,
+    work_item_id: uuid.UUID,
+    work_item_type: str,
+    designated_approver_id: uuid.UUID | None = None,
+) -> Gate:
+    """doc을 근거자료로 다른 work_item(Story/Task)에 `concept_approval` 게이트를 상신한다.
+
+    doc_approval(위 `transition_doc`)과 무관한 별개 경로 — 이 함수는 doc.status를 전혀
+    안 바꾼다. "doc이 그 org·work item 참조 아니면 422"(story 確定①)의 구체적 판정:
+    doc과 work_item이 **같은 project**(project_id 일치) 소속이어야 한다 — evidence.py::
+    _assert_work_item_access의 project-scope 강제와 동일 근거(cross-project 근거 자료
+    금지, [[feedback_mutation_target_resource_project_scope]] 동형)."""
+    if work_item_type not in _CONCEPT_APPROVAL_WORK_ITEM_TYPES:
+        raise ConceptApprovalError(
+            "INVALID_WORK_ITEM_TYPE",
+            f"work_item_type must be one of {sorted(_CONCEPT_APPROVAL_WORK_ITEM_TYPES)}",
+        )
+
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == doc_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc is None:
+        raise ConceptApprovalError("DOC_NOT_FOUND", "문서를 찾을 수 없습니다.")
+
+    from app.services.gate_service import resolve_work_item_project_id
+    work_item_project_id = await resolve_work_item_project_id(session, org_id, work_item_type, work_item_id)
+    if work_item_project_id is None or work_item_project_id != doc.project_id:
+        raise ConceptApprovalError(
+            "CONCEPT_APPROVAL_DOC_SCOPE_MISMATCH",
+            "이 문서는 지정한 work item과 같은 프로젝트에 속하지 않습니다.",
+        )
+
+    from app.services.gate_service import create_gate
+    from app.services.workflow_line_config import _default_role_id
+    role_id = await _default_role_id(session, org_id) or doc.id
+    gate = await create_gate(
+        session, org_id, work_item_id, work_item_type, CONCEPT_APPROVAL_GATE_TYPE,
+        caller.id, role_id,
+        neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
+        project_id=work_item_project_id,
+        designated_approver_id=designated_approver_id,
+    )
+    # story #2668/doc.py transition_doc과 동형 server-stamp — forged neutral_facts 불신,
+    # 재상신(재오픈된 rejected 슬롯 포함)마다 caller.id로 항상 덮어쓴다.
+    _facts = dict(gate.neutral_facts or {})
+    _facts["requested_by_member_id"] = str(caller.id)
+    _facts.setdefault("doc_title", doc.title)
+    gate.neutral_facts = _facts
+    gate.sealed_doc_id = doc.id
+    gate.sealed_doc_body_sha256 = compute_doc_body_sha256(doc.content)
+    await session.flush()
+    return gate
+
+
+async def _reseal_concept_approval_gate_on_doc_update(
+    session: AsyncSession, *, org_id: uuid.UUID, doc_id: uuid.UUID, new_body_sha256: str,
+) -> None:
+    """channel_posts.py::_reseal_gate_on_new_version과 동형 규칙 — doc 본문이 실제로
+    바뀌었을 때만(호출부가 `if "content" in data:`에서만 부른다) 그 doc을 근거로 삼은
+    concept_approval 게이트를 찾아: pending 中 편집이면 즉시 재봉인, approved 뒤
+    편집이면 pending 재오픈+reapproval_required=True(옛 봉인은 resolution 필드까지
+    그대로 보존 — set_gate_status만 상태를 바꾼다).
+
+    (sealed_doc_id, gate_type=concept_approval)로 찾는다 — work_item_id가 아니라 doc_id
+    축이다: 이 훅은 "이 doc을 누가 근거로 삼았나"에서 출발하지 "이 work_item에 뭐가
+    걸렸나"에서 출발하지 않는다(doc 하나가 어느 work_item에 걸렸는지는 gate 쪽에서만
+    알 수 있다 — doc 자신은 모른다)."""
+    gate = (await session.execute(
+        select(Gate)
+        .where(
+            Gate.org_id == org_id, Gate.sealed_doc_id == doc_id,
+            Gate.gate_type == CONCEPT_APPROVAL_GATE_TYPE, Gate.status.in_(("pending", "approved")),
+        )
+        .with_for_update()
+    )).scalar_one_or_none()
+    if gate is None:
+        return
+    if gate.sealed_doc_body_sha256 == new_body_sha256:
+        return
+    if gate.status == "approved":
+        set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
+        gate.requires_human = True
+        gate.resolver_id = None
+        gate.resolution_note = None
+        gate.resolved_at = None
+        gate.reapproval_required = True
+        return
+    gate.sealed_doc_body_sha256 = new_body_sha256

@@ -28,6 +28,11 @@ GATE_TYPES = frozenset({
     # _ALWAYS_MANUAL_GATE_TYPES에도 등재해 org posture 무관 항상 pending 강제(순수히
     # 여기 등재만으론 disposition 자동판정에 영향 없음 — 위 agent_decision_request 주석 참고).
     "external_publish",
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — doc(개념/컨셉 자료)을 근거로
+    # 다른 work_item(Story/Task)을 휴먼이 승인하는 게이트. external_publish와 동일 근거로
+    # _ALWAYS_MANUAL_GATE_TYPES에도 등재(항상 pending — deliberate approval, disposition
+    # auto-pass 대상 아님).
+    "concept_approval",
 })
 
 _POSTURE_DEFAULT: dict[str, str] = {

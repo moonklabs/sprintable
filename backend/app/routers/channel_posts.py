@@ -24,6 +24,7 @@ from app.services.channel_posts import (
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
     ChannelPostGateNotFoundError,
+    ConceptApprovalNotApprovedError,
     ChannelPostNotPublishedError,
     ChannelPostReapprovalRequiredError,
     ChannelPostSealMissingError,
@@ -1281,6 +1282,12 @@ async def submit_channel_post_draft_endpoint(
         raise HTTPException(
             status_code=422,
             detail={"code": "CHANNEL_IMAGE_REQUIRED", "message": str(exc)},
+        ) from exc
+    except ConceptApprovalNotApprovedError as exc:
+        # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — opt-in 서버 거부.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CONCEPT_NOT_APPROVED", "gate_id": str(exc.gate_id), "status": exc.status},
         ) from exc
 
     return SubmitChannelPostDraftResponse(

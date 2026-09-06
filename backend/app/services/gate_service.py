@@ -339,6 +339,10 @@ _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
         # 자동 승인되면 만든 이유가 없어진다). ⚠️이 스토리는 게이트 타입 자체가 항상-수동임을
         # 강제할 뿐 — 실제 발행 직전 gate.status 확인(chokepoint)은 발행 커넥터 스토리 몫.
         "external_publish",
+        # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — doc(개념/컨셉 자료) 근거
+        # work_item 승인. external_publish와 동일 근거(판단이 존재 이유) — org posture
+        # 무관 항상 pending.
+        "concept_approval",
     }
 )
 # ⚠️story #2709 — agent_decision_request가 항상 manual(=posture 무관 항상 pending)인 이유:
@@ -585,6 +589,36 @@ async def find_gate_slot_with_pr_fallback(
             )
         )
     ).scalar_one_or_none()
+
+
+class ConceptApprovalNotApprovedError(Exception):
+    """story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — opt-in 서버 거부: work_item에
+    `concept_approval` 게이트가 1건 이상 존재하고 최신 것이 approved가 아니면 external_
+    publish 상신 자체를 막는다. `ExternalPublishGateNotApprovedError`(site_posts.py, 채널
+    라우터가 재-export해 재사용하는 것)와 동일 공유 관례 — gate_service.py가 원 소유,
+    channel_posts.py·site_posts.py가 재-export해 재사용(로직·예외 클래스 모두 단일 정의)."""
+
+    def __init__(self, *, gate_id: uuid.UUID, status: str):
+        self.gate_id = gate_id
+        self.status = status
+        super().__init__(f"컨셉 승인이 완료되지 않았습니다(gate_id={gate_id}, status={status})")
+
+
+async def find_unapproved_gate_of_type(
+    session: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str, gate_type: str,
+) -> Gate | None:
+    """story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — "이 work_item에 특정 gate_type
+    게이트가 존재하고 최신 것이 approved가 아닌지"의 공용 opt-in 서버 거부 체크포인트
+    헬퍼(channel_posts.py::submit_channel_post_draft·site_posts.py::submit_site_post_draft
+    가 concept_approval 미승인 시 제출을 막는 데 공유 — 로직 중복 0). 게이트 자체가
+    없으면 None(그 work_item은 이 축 검사 대상이 아니다 — opt-in, 현행 그대로)."""
+    gate = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+        gate_type=gate_type, pr_number=None, repo_full_name=None,
+    )
+    if gate is None or gate.status == "approved":
+        return None
+    return gate
 
 
 async def _gate_publication_is_live(session: AsyncSession, *, gate_id: uuid.UUID) -> bool:
