@@ -293,6 +293,10 @@ export const EXEMPT_PAIRS = new Set<string>([
   'settings.memberLimitExceededError <-> settings.roleMember',
   'content.channelPostsTextTooLong <-> content.originAuthorUnknown',
   'content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown',
+  // 3575 ⑤ 추가(페드루 PO 승인 2026-09-06) — errorChannelVideoUploadFailedWithStatus
+  // ("…서버가 {status}로 응답했습니다.")도 위와 같은 클래스: 문장 속 "—" 구두점 하나가
+  // originAuthorUnknown 단독 자리표시와 겹칠 뿐, 수({status})는 한쪽에만 있다.
+  'content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown',
   // story #3422(2026-09-04, ②-c FailureActionBadge) — channelPostsFailureAutoRetryAt
   // ({time} 보간 있음) <-> channelPostsFailureRetryCta("다시 시도", 보간 없음). 겹치는
   // 건 "다시 시도"라는 흔한 동사구 하나뿐 — auto_retry(자동, 버튼 없음)와 dead_letter
