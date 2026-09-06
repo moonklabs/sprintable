@@ -259,8 +259,13 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     """② DRY: doc_approval 인데 work_item_type≠doc 인 이상 게이트도 project_id 를 doc_approval predicate
     (work_item_id→Doc·transition 과 동일)로 조회 → can_approve 가 transition 강제와 정합. work_item_type 으로
     키잉하면 project_id=None→can_approve False 로 갈림(이 테스트가 그 회귀를 잠금)."""
+    # story #3569(페드루 PO 리뷰) — SimpleNamespace 대신 gate_mock_factory.make_gate()
+    # (story #2837 "건드릴 때 이관" 관례 — 실 Gate ORM 인스턴스라 sealed_doc_id 등 새 컬럼이
+    # 늘어도 AttributeError로 재발하지 않는다).
+    from tests.gate_mock_factory import make_gate
+
     org, doc_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    g = SimpleNamespace(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
+    g = make_gate(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
         id=uuid.uuid4(), gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
         neutral_facts={"requested_by_member_id": str(uuid.uuid4())}, status="pending",
     )
