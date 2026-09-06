@@ -1554,8 +1554,6 @@ export default function ChannelPostEditPage() {
   // 만 site와 동일하게 role===owner|admin으로 좁힌다(발행 취소는 더 무거운 되돌릴 수
   // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
   // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
-  // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
-  // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
   // "휴먼 게이팅"의 실체는 이 owner/admin 세분화다.
   const canPublish = view.publishable;
   const canUnpublish = role === 'owner' || role === 'admin';
