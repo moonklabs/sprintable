@@ -2596,6 +2596,7 @@
     "channelPostsImageAspectRatioTooNarrow": "세로가 너무 깁니다. 비율 하한은 {minAspectRatio}인데 {aspectRatio}입니다",
     "channelPostsImageConversionFailed": "자동 변환 후에도 한도 {maxBytes}를 넘습니다({finalBytes})",
     "channelPostsImageAnimatedUnsupported": "애니메이션 이미지는 지원하지 않습니다({frameCount}프레임)",
+    "channelPostsVideoCoverAspectRatioRejected": "커버 비율이 {actual}입니다. 릴스 커버는 {target} 비율이어야 합니다.",
     "channelPostsImageConvertedBadgeBase": "이 채널 규격에 맞춰 자동 변환됐습니다",
     "channelPostsImageConvertedBadgeWidthFragment": "너비 {from}px → {to}px",
     "channelPostsImageConvertedBadgeBytesFragment": "용량 {from} → {to}",

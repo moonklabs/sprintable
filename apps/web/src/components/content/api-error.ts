@@ -71,6 +71,9 @@ export type SitePostApiErrorKind =
   | 'concept_not_approved'
   // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 영상 초안 커버 2장째 서버 거부.
   | 'video_requires_single_cover'
+  // story #3586(BE #3933, 페드루 PO 確定 2026-09-06) — 릴스 커버 비율이 어댑터 선언
+  // target±tolerance를 벗어남(캐러셀 image_aspect_min/max와 다른 축 — 커버 전용).
+  | 'cover_aspect_ratio_rejected'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -122,6 +125,10 @@ export interface SitePostApiErrorInfo {
   spentMinor?: number;
   estimatedCostMinor?: number;
   remainingMinor?: number;
+  // story #3586 — CHANNEL_COVER_ASPECT_RATIO_REJECTED 전용(BE aspect_ratio는 기존
+  // imageAspectRatio 필드를 그대로 재사용 — 같은 JSON 키, kind로만 뜻이 갈린다).
+  coverAspectTarget?: number;
+  coverAspectTolerance?: number;
 }
 
 interface KnownError {
@@ -182,6 +189,10 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 2장째 올리려 할 때의 서버 방어선(화면 상한 1이 정상 경로를 이미 막지만, 레이스
   // 등으로 도달 시 회귀 0). labelKey 빈칸 — 서버 message 그대로(3471 동형).
   CHANNEL_VIDEO_REQUIRES_SINGLE_COVER: { labelKey: '', kind: 'video_requires_single_cover' },
+  // story #3586(BE #3933 21ac3dc3a, 유나 §17-23 확定 2026-09-06) — 릴스 커버 비율이
+  // 어댑터 target±tolerance를 벗어남. labelKey 비움 — page.tsx가 actual/target을
+  // formatVideoAspectRatio로 조립한다(image_aspect_ratio_* 동형 관례).
+  CHANNEL_COVER_ASPECT_RATIO_REJECTED: { labelKey: '', kind: 'cover_aspect_ratio_rejected' },
   // EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED
   // 는 위 site 항목을 그대로 재사용한다(같은 external_publish 게이트 개념 공유, doc §9-4).
   // story #3402·PR#3764 — 채널 포스트 전용 GATE_ALREADY_HELD. site와 kind는 같지만
@@ -240,6 +251,7 @@ function extractCodeAndMessage(detail: unknown): {
   imageAspectRatio?: number; imageMaxAspectRatio?: number; imageFinalBytes?: number;
   imageWidthHeightRatio?: number; imageMinWidthHeightRatio?: number;
   limitMinor?: number; spentMinor?: number; estimatedCostMinor?: number; remainingMinor?: number;
+  coverAspectTarget?: number; coverAspectTolerance?: number;
 } {
   if (typeof detail === 'string') return { message: detail };
   if (detail && typeof detail === 'object') {
@@ -281,6 +293,11 @@ function extractCodeAndMessage(detail: unknown): {
       spentMinor: typeof d.spent_minor === 'number' ? d.spent_minor : undefined,
       estimatedCostMinor: typeof d.estimated_cost_minor === 'number' ? d.estimated_cost_minor : undefined,
       remainingMinor: typeof d.remaining_minor === 'number' ? d.remaining_minor : undefined,
+      // story #3586 — CHANNEL_COVER_ASPECT_RATIO_REJECTED 전용(channel_posts.py
+      // 21ac3dc3a 그대로: aspect_ratio·target·tolerance). aspect_ratio는 위
+      // imageAspectRatio가 이미 같은 JSON 키를 읽는다(재사용, 새 필드 0).
+      coverAspectTarget: typeof d.target === 'number' ? d.target : undefined,
+      coverAspectTolerance: typeof d.tolerance === 'number' ? d.tolerance : undefined,
     };
   }
   return {};
@@ -324,6 +341,8 @@ export function parseSitePostApiError(
   const spentMinor = fromDetail.spentMinor ?? fromError.spentMinor;
   const estimatedCostMinor = fromDetail.estimatedCostMinor ?? fromError.estimatedCostMinor;
   const remainingMinor = fromDetail.remainingMinor ?? fromError.remainingMinor;
+  const coverAspectTarget = fromDetail.coverAspectTarget ?? fromError.coverAspectTarget;
+  const coverAspectTolerance = fromDetail.coverAspectTolerance ?? fromError.coverAspectTolerance;
   const raw = JSON.stringify({ code: code ?? null, message: message ?? null });
 
   const known = code ? KNOWN_ERRORS[code] : undefined;
@@ -356,5 +375,7 @@ export function parseSitePostApiError(
     spentMinor,
     estimatedCostMinor,
     remainingMinor,
+    coverAspectTarget,
+    coverAspectTolerance,
   };
 }
