@@ -2575,9 +2575,10 @@
     "channelPostsImageConvertedBadge": "Automatically converted to fit this channel's specs: width {originalWidth}px → {finalWidth}px · size {originalBytes} → {finalBytes}",
     "channelPostsImageCountTag": "{count} / {max} images",
     "channelPostsImageAttachmentPosition": "Position {position}",
-    "channelPostsImageMoveUpAction": "Move up",
-    "channelPostsImageMoveDownAction": "Move down",
+    "channelPostsImageMoveUpAction": "Move image {position} up",
+    "channelPostsImageMoveDownAction": "Move image {position} down",
     "channelPostsImageRemoveAction": "Remove",
+    "channelPostsImageRemoveActionLabel": "Remove image {position}",
     "channelPostsAwaitingContainerNotice": "This is being automatically continued. Please check back shortly.",
     "channelPostsPublicationFailedNotice": "Publishing failed — republishing this draft will continue that attempt."
   },

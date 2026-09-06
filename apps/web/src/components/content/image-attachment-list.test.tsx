@@ -111,6 +111,24 @@ describe('ImageAttachmentList(story #3550)', () => {
     expect(onDelete).toHaveBeenCalledWith(2);
   });
 
+  // 유나 §17 PASS 권고② 정정(2026-09-06) — N개 버튼이 "몇 번째 이미지"인지 지어야
+  // 스크린리더가 「삭제」「삭제」만 반복해 듣지 않는다. 삭제 aria-label은 보이는
+  // 글자("삭제")를 덧붙여 포함하는 별도 키(channelPostsImageRemoveActionLabel).
+  it('⭐이동·삭제 버튼 aria-label이 "몇 번째 이미지"인지 각각 다르게 진다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ImageAttachmentList images={[IMG_1, IMG_2, IMG_3]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />,
+      ));
+    });
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    expect((items[0]!.querySelector('[data-testid="channel-post-image-attachment-move-up"]') as HTMLButtonElement).getAttribute('aria-label'))
+      .toBe('1번째 이미지 위로 이동');
+    expect((items[1]!.querySelector('[data-testid="channel-post-image-attachment-move-down"]') as HTMLButtonElement).getAttribute('aria-label'))
+      .toBe('2번째 이미지 아래로 이동');
+    expect((items[2]!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).getAttribute('aria-label'))
+      .toBe('3번째 이미지 삭제');
+  });
+
   it('disabled=true — 이동·삭제 버튼 전부 비활성(업로드 진행 중 등)', async () => {
     await act(async () => {
       root.render(wrap(

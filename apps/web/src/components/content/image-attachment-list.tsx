@@ -2,11 +2,10 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 
-// story #3550(Phase2·풀스택, PO 決定 2026-09-06) — Instagram 캐러셀 N장 첨부 골격.
-// BE 계약(이미지 목록/순서 API·업로드 다중화·422 코드명·합성 봉인 해시)이 아직 안 뜬
-// 자리라(디디 설계 선행 §① 안 A 채택·②③ 신설 예정) 이 컴포넌트는 **순수 표시+로컬
-// 재배열/삭제**만 진다 — 업로드·저장 왕복은 부모가 계약 확定 뒤 onReorder/onDelete/
-// onAddClick을 실 API에 배선한다(지금은 그 콜백을 로컬 배열 조작으로만 채워도 된다).
+// story #3550(Phase2·풀스택, PO 決定 2026-09-06) — Instagram 캐러셀 N장 첨부.
+// 업로드 자체(파일 선택·서명 URL·PUT·confirm)는 부모(channel-posts/[draftId]/
+// page.tsx)가 진다 — 이 컴포넌트는 이미 첨부된 N장의 표시·재배열·삭제만 맡는다
+// (onReorder/onDelete를 부모가 실 API에 배선, BE 2/2 #3910 계약).
 //
 // §13-3(디디 재확인, 2026-09-06 — 단일 슬롯 옛 §13-8 인용은 #3549 오귀속 정정) "있는
 // 그대로 그린다" — 변환 배지(image_was_converted)는 승인 카드와 같은 문구를 공유한다는
@@ -68,28 +67,37 @@ export function ImageAttachmentList({ images, maxCount, disabled, onReorder, onD
                 </p>
               ) : null}
             </div>
-            <div className="flex shrink-0 gap-1">
-              <Button
-                type="button" variant="outline" size="sm" disabled={disabled || index === 0}
-                onClick={() => onReorder(index, index - 1)}
-                data-testid="channel-post-image-attachment-move-up"
-                aria-label={t('channelPostsImageMoveUpAction')}
-              >
-                ↑
-              </Button>
-              <Button
-                type="button" variant="outline" size="sm" disabled={disabled || index === images.length - 1}
-                onClick={() => onReorder(index, index + 1)}
-                data-testid="channel-post-image-attachment-move-down"
-                aria-label={t('channelPostsImageMoveDownAction')}
-              >
-                ↓
-              </Button>
+            <div className="flex shrink-0 items-center gap-3">
+              {/* 유나 §17 PASS 권고①(2026-09-06) — 반복 조작(위/아래 이동)과
+                  되돌리기 비싼 조작(삭제)을 같은 gap-1 묶음에 안 둔다. 두 그룹
+                  사이 gap-3로 시각 분리. */}
+              <div className="flex gap-1">
+                <Button
+                  type="button" variant="outline" size="sm" disabled={disabled || index === 0}
+                  onClick={() => onReorder(index, index - 1)}
+                  data-testid="channel-post-image-attachment-move-up"
+                  aria-label={t('channelPostsImageMoveUpAction', { position: index + 1 })}
+                >
+                  ↑
+                </Button>
+                <Button
+                  type="button" variant="outline" size="sm" disabled={disabled || index === images.length - 1}
+                  onClick={() => onReorder(index, index + 1)}
+                  data-testid="channel-post-image-attachment-move-down"
+                  aria-label={t('channelPostsImageMoveDownAction', { position: index + 1 })}
+                >
+                  ↓
+                </Button>
+              </div>
+              {/* 유나 §17 PASS 권고② 정정(2026-09-06) — aria-label을 지우지 않고
+                  N개 버튼이 "몇 번째 이미지"인지 지도록 위치를 붙인다(스크린리더가
+                  「삭제」「삭제」만 반복해 듣는 문제 — §17-20① "지우지 마라"는 접근성
+                  이름에 보이는 글자를 빼라는 뜻이지 덧붙이지 말라는 뜻이 아니다). */}
               <Button
                 type="button" variant="outline" size="sm" disabled={disabled}
                 onClick={() => onDelete(index)}
                 data-testid="channel-post-image-attachment-delete"
-                aria-label={t('channelPostsImageRemoveAction')}
+                aria-label={t('channelPostsImageRemoveActionLabel', { position: index + 1 })}
               >
                 {t('channelPostsImageRemoveAction')}
               </Button>

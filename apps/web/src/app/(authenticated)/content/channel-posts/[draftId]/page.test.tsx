@@ -2275,6 +2275,42 @@ describe('ChannelPostEditPage — 캐러셀 N장 목록·삭제·재정렬(story
     expect(container.querySelector('[data-testid="channel-post-image-count-tag"]')?.textContent).toBe('2 / 10장');
   });
 
+  // 카디르 QA(2026-09-06) — 삭제·재정렬은 새 버전=재승인 트리거(#3291)라
+  // draft/versions 단건 GET도 다시 불러야 하는데(refreshDraftAndVersionsAfterImagesMutation),
+  // 그 호출을 지워도 위 테스트는 목록 교체만 보느라 RED 0이었다 — fetch 호출
+  // 횟수로 명시 pin.
+  it('⭐삭제 성공 뒤 draft·versions 단건 GET을 다시 부른다(재승인 트리거 반영)', async () => {
+    stubFetch({
+      imageMaxCount: 10, initialImages: [IMG_1, IMG_2],
+      onImageDelete: () => ({ status: 200, body: [{ ...IMG_1, position: 0 }] }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const fetchMock = globalThis.fetch as unknown as { mock: { calls: [RequestInfo | URL, RequestInit?][] } };
+    const draftGetCallsBefore = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`,
+    ).length;
+    const versionsGetCallsBefore = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`,
+    ).length;
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[0]!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    const draftGetCallsAfter = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`,
+    ).length;
+    const versionsGetCallsAfter = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`,
+    ).length;
+    expect(draftGetCallsAfter).toBeGreaterThan(draftGetCallsBefore);
+    expect(versionsGetCallsAfter).toBeGreaterThan(versionsGetCallsBefore);
+  });
+
   it('⭐재정렬 — 위로 이동 클릭이 전체 집합(image_ids)을 새 순서로 한 번에 보낸다', async () => {
     let reorderedIds: string[] | null = null;
     stubFetch({
@@ -2318,8 +2354,12 @@ describe('ChannelPostEditPage — 캐러셀 N장 목록·삭제·재정렬(story
     });
     await flush();
 
-    const errorText = container.querySelector('[data-testid="channel-post-images-action-error"]')?.textContent ?? '';
-    expect(errorText).toContain('이미지 집합이 일치하지 않습니다(서버 메시지 예시)');
+    // 카디르 QA(2026-09-06) — RawDetailsToggle의 접힌 <pre>raw JSON에도 서버
+    // message가 그대로 들어 있어, 바깥 Alert 전체 textContent로 재면 표시 로직이
+    // 고장 나도(describeChannelImageError 분기 제거) raw만으로 우연히 통과한다 —
+    // 실제 표시 요소(AlertDescription, <p>)만 좁혀 잰다.
+    const errorText = container.querySelector('[data-testid="channel-post-images-action-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('이미지 집합이 일치하지 않습니다(서버 메시지 예시)');
     // 실패해도 목록 자체는 그대로(낙관적으로 먼저 바꾸지 않는다).
     expect(container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]').length).toBe(2);
   });
@@ -2340,8 +2380,8 @@ describe('ChannelPostEditPage — 캐러셀 N장 목록·삭제·재정렬(story
     });
     await flush();
 
-    const errorText = container.querySelector('[data-testid="channel-post-images-action-error"]')?.textContent ?? '';
-    expect(errorText).toContain('이미 삭제된 이미지입니다(서버 메시지 예시)');
+    const errorText = container.querySelector('[data-testid="channel-post-images-action-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('이미 삭제된 이미지입니다(서버 메시지 예시)');
   });
 
   it('⭐422 CHANNEL_POST_IMAGE_COUNT_EXCEEDED(업로드) — 서버 message 그대로 업로드 에러 자리에 렌더된다', async () => {
@@ -2360,8 +2400,8 @@ describe('ChannelPostEditPage — 캐러셀 N장 목록·삭제·재정렬(story
     await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
 
-    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
-    expect(errorText).toContain('최대 1장까지만 첨부할 수 있습니다(서버 메시지 예시)');
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('최대 1장까지만 첨부할 수 있습니다(서버 메시지 예시)');
     // 실패했으니 목록은 그대로 1장.
     expect(container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]').length).toBe(1);
   });
