@@ -135,38 +135,84 @@ async def _wait_until(predicate, *, timeout: float = 15.0, interval: float = 0.0
     return predicate()
 
 
-def _asgi_transport_observing(app, needle: bytes) -> tuple[ASGITransport, asyncio.Event]:
-    """페드루 PO 現場 재현(카디르 로그 실측, 2026-09-06) — CI에서 「큐 비움
-    (consumed)」과 「제너레이터가 그 항목을 실제로 스트림에 write함」 사이에 진짜
-    레이스가 있었다: `queue.get()`이 반환된 시점(`_wait_until(q.empty 확認)`이
-    보는 시점)과, `asyncio.wait({get_task, shutdown_wait_task}, ...)`가 그 완료를
-    거둬 `generate()`의 태스크가 실제로 재개돼 `yield`까지 도달하는 시점 사이에는
-    스케줄링 홉이 최소 1~2번 더 있다 — 그 창에서 `shutdown_event.set()`이 로컬
-    저부하에선 항상 늦게 관측되지만(그래서 로컬 재현 0), CI 부하에선 그 홉이 먼저
-    끝나 `asyncio.wait`의 `done`에 `shutdown_wait_task`까지 같이 들어차 버리면
-    `if shutdown_wait_task in done:`(get_task보다 먼저 검사)가 이겨 sentinel을
-    한 번도 못 내보내고 shutdown_reconnect로 바로 끝난다(CI 원본 로그의 body가
-    정확히 이 모양이었다).
+class _SSEObserver:
+    """페드루 PO 現場 재현(카디르 로그 실측, 2026-09-06)+2차 리뷰(2026-09-06 13:38Z)
+    — CI에서 「큐 비움(consumed)」과 「제너레이터가 그 항목을 실제로 스트림에
+    write함」 사이에 진짜 레이스가 있었다: `queue.get()`이 반환된 시점과, `asyncio.
+    wait({get_task, shutdown_wait_task}, ...)`가 그 완료를 거둬 `generate()`의
+    태스크가 실제로 재개돼 `yield`까지 도달하는 시점 사이에는 스케줄링 홉이 최소
+    1~2번 더 있다 — 그 창에서 `shutdown_event.set()`이 로컬 저부하에선 항상 늦게
+    관측되지만(그래서 로컬 재현 0), CI 부하에선 그 홉이 먼저 끝나 `asyncio.wait`의
+    `done`에 `shutdown_wait_task`까지 같이 들어차 버리면 `if shutdown_wait_task
+    in done:`(get_task보다 먼저 검사)가 이겨 sentinel을 한 번도 못 내보내고
+    shutdown_reconnect로 바로 끝난다(CI 원본 로그의 body가 정확히 이 모양이었다).
 
     처방 — 큐 상태라는 간접 신호 대신 **ASGI 자신의 `send()` 콜러블을 감싸** 그
     바이트열이 실제로 응답 바디에 실리는 순간을 직접 관찰한다(`c.stream()`으로
     바꿔도 소용없다 — httpx.ASGITransport.handle_async_request 소스 확認: 앱
     콜러블 `self.app(...)`이 완전히 끝나야 Response 자체가 생성되므로, `c.stream()`
     도 `c.get()`과 똑같이 완주 後에야 바디를 준다, #3494/#3580 확립 사실 재확認).
-    이 훅은 스트리밍 여부와 무관하게 서버측 `send()` 호출 자체를 가로채므로 그
-    제약과 상관없이 정확한 시점을 잡는다 — 폴링·타임아웃 예산 자체가 필요 없어진다
-    (이벤트가 set될 때까지 `await event.wait()`로 순수 이벤트 기반 대기)."""
-    written = asyncio.Event()
+
+    2차 리뷰(페드루 PO, 2026-09-06 13:38Z) — sentinel을 큐에 넣는 시점을
+    「등록 관찰 직후」가 아니라 **「`event: sync_status`(백필 완료·라이브 루프
+    진입) 관찰 直後」**로 미룬다. 등록(`_agent_connections`에 큐 추가)은 라우터
+    핸들러 동기 구간에서 일어나 제너레이터 시작보다 먼저지만, 그 뒤 heartbeat→
+    백필 조회 구간이 CI에서 얼마나 걸릴지는 이 send-hook 관찰로만 알 수 있다 —
+    sync_status를 보기 前에 넣으면 제너레이터가 아직 라이브 루프(`asyncio.wait`)
+    에 들어가지도 않은 채로 큐에 쌓여 있을 수 있어, "5초 write 예산"이 실제로는
+    "백필+5초"를 재는 셈이 된다. sync_status 관찰 後로 미루면 그 예산은 순수하게
+    "라이브 루프 진입 뒤 write"만 잰다 — CI가 정말 느려서 예산을 늘려야 하는지,
+    아니면 그냥 잘못된 시점에 재고 있었는지를 이제 구분할 수 있다.
+
+    모든 관찰(`event: X` 라인)을 (monotonic 시각, 이름) 목록으로 남겨 — RED가
+    나면 그 목록 자체가 "어느 단계에서 몇 초"인지 말한다(폴링·추측 없이)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[float, str]] = []
+        self._waiters: dict[str, asyncio.Event] = {}
+
+    def _mark(self, event_type: str) -> None:
+        # ⚠️ 자가 회귀(2026-09-06, 로컬 재현 직후 실측) — 처음엔 `self._waiters.get(...)`
+        # 로 "이미 등록된 waiter가 있으면만" set()했다. sync_status는 heartbeat 바로
+        # 뒤(로컬 실측 +0.004s)에 이미 와 있는데, 이 테스트 코루틴이 `waiter_for("sync_
+        # status")`를 부르는 시점(`_wait_until`로 등록을 먼저 기다린 뒤)엔 이미 지나간
+        # 뒤라 waiter가 그때 처음 만들어져 영영 안 켜졌다 — "이미 일어난 일을 나중에
+        # 기다리면 놓친다"는, 이 파일이 #3494/#3580에서 몇 번이고 고친 바로 그 급의
+        # 레이스가 내 관찰 하네스 자신에게도 있었다(15s 통째로 태워 발견). setdefault로
+        # 항상 만들어 즉시 set() — "이미 일어난 이벤트"와 "지금부터 기다리는 이벤트"를
+        # 구조적으로 구분 안 한다(둘 다 안전).
+        self.events.append((time.monotonic(), event_type))
+        self._waiters.setdefault(event_type, asyncio.Event()).set()
+
+    def waiter_for(self, event_type: str) -> asyncio.Event:
+        return self._waiters.setdefault(event_type, asyncio.Event())
+
+    def timeline(self, t0: float) -> str:
+        return ", ".join(f"{name}@+{ts - t0:.3f}s" for ts, name in self.events) or "(no events observed)"
+
+
+def _asgi_transport_with_observer(app) -> tuple[ASGITransport, _SSEObserver]:
+    observer = _SSEObserver()
 
     async def _wrapped_app(scope, receive, send):
         async def _send(message):
-            if message.get("type") == "http.response.body" and needle in message.get("body", b""):
-                written.set()
+            if message.get("type") == "http.response.body":
+                for line in message.get("body", b"").split(b"\n"):
+                    if line.startswith(b"event: "):
+                        observer._mark(line[len(b"event: "):].decode())
             await send(message)
 
         await app(scope, receive, _send)
 
-    return ASGITransport(app=_wrapped_app), written
+    return ASGITransport(app=_wrapped_app), observer
+
+
+async def _wait_for_event(observer: _SSEObserver, event_type: str, *, timeout: float) -> bool:
+    try:
+        await asyncio.wait_for(observer.waiter_for(event_type).wait(), timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        return False
 
 
 @pytest.mark.anyio
@@ -225,10 +271,12 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
     app.dependency_overrides[get_current_user_streaming] = _auth
     app.dependency_overrides[get_verified_org_id_streaming] = _org
 
+    t0 = time.monotonic()
     registered_observed = False
+    sync_status_observed = False
     written_observed = False
     body = ""
-    transport, sentinel_written = _asgi_transport_observing(app, b"__test_sentinel__")
+    transport, observer = _asgi_transport_with_observer(app)
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
@@ -238,14 +286,15 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
                     )
                     registered_observed = await _wait_until(lambda: member_id_str in _agent_connections)
                     queues = list(_agent_connections.get(member_id_str, set())) if registered_observed else []
+                    # 페드루 PO 2차 리뷰(2026-09-06 13:38Z) — sentinel을 큐에 넣기 前에
+                    # 백필이 끝나 라이브 루프에 실제로 들어갔는지(`event: sync_status`)부터
+                    # 확認한다 — 안 그러면 "5초 write 예산"이 실은 "백필+5초"를 재는 것.
+                    if queues:
+                        sync_status_observed = await _wait_for_event(observer, "sync_status", timeout=15.0)
                     for q in queues:
                         q.put_nowait({"event_type": "__test_sentinel__"})
-                    if queues:
-                        try:
-                            await asyncio.wait_for(sentinel_written.wait(), timeout=15.0)
-                            written_observed = True
-                        except asyncio.TimeoutError:
-                            pass
+                    if queues and sync_status_observed:
+                        written_observed = await _wait_for_event(observer, "__test_sentinel__", timeout=5.0)
                     shutdown_module.shutdown_event.set()
                     resp = await asyncio.wait_for(stream_task, timeout=15.0)
                     assert resp.status_code == 200
@@ -259,9 +308,11 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
         # 오판시킨다 — 명시로 되돌린다.
         shutdown_module.reset_shutdown_event()
 
-    assert registered_observed, "injector never observed the connection in _agent_connections"
-    assert written_observed, "generator never actually wrote the sentinel line to the ASGI send() callable"
-    assert "__test_sentinel__" in body
+    _timeline = observer.timeline(t0)
+    assert registered_observed, f"injector never observed the connection in _agent_connections — timeline: {_timeline}"
+    assert sync_status_observed, f"generator never reached the live loop (no sync_status observed) — timeline: {_timeline}"
+    assert written_observed, f"generator never actually wrote the sentinel line to the ASGI send() callable — timeline: {_timeline}"
+    assert "__test_sentinel__" in body, f"timeline: {_timeline}"
     assert member_id_str not in _agent_connections  # cleanup 계약 — 완주 뒤엔 반드시 비어야 함
 
 
@@ -453,10 +504,12 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
     async def _session_factory():
         yield mock_session
 
+    t0 = time.monotonic()
     registered_observed = False
+    sync_status_observed = False
     written_observed = False
     body = ""
-    transport, sentinel_written = _asgi_transport_observing(app, b"__test_sentinel__")
+    transport, observer = _asgi_transport_with_observer(app)
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
@@ -466,14 +519,16 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
                     )
                     registered_observed = await _wait_until(lambda: member_id_str in _agent_connections)
                     queues = list(_agent_connections.get(member_id_str, set())) if registered_observed else []
+                    # 페드루 PO 2차 리뷰(2026-09-06 13:38Z) — sentinel을 큐에 넣기 前에
+                    # 백필이 끝나 라이브 루프에 실제로 들어갔는지(`event: sync_status`)부터
+                    # 확認한다(이 테스트는 pending 백필 1건도 있어 그 배출까지 끝난 뒤라는
+                    # 뜻 — `_wait_for_event`의 docstring 참조).
+                    if queues:
+                        sync_status_observed = await _wait_for_event(observer, "sync_status", timeout=15.0)
                     for q in queues:
                         q.put_nowait({"event_type": "__test_sentinel__"})
-                    if queues:
-                        try:
-                            await asyncio.wait_for(sentinel_written.wait(), timeout=15.0)
-                            written_observed = True
-                        except asyncio.TimeoutError:
-                            pass
+                    if queues and sync_status_observed:
+                        written_observed = await _wait_for_event(observer, "__test_sentinel__", timeout=5.0)
                     shutdown_module.shutdown_event.set()
                     resp = await asyncio.wait_for(stream_task, timeout=15.0)
                     assert resp.status_code == 200
@@ -487,9 +542,11 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
         # 오판시킨다 — 명시로 되돌린다.
         shutdown_module.reset_shutdown_event()
 
-    assert registered_observed, "injector never observed the connection in _agent_connections"
-    assert written_observed, "generator never actually wrote the sentinel line to the ASGI send() callable"
-    assert "__test_sentinel__" in body
+    _timeline = observer.timeline(t0)
+    assert registered_observed, f"injector never observed the connection in _agent_connections — timeline: {_timeline}"
+    assert sync_status_observed, f"generator never reached the live loop (no sync_status observed) — timeline: {_timeline}"
+    assert written_observed, f"generator never actually wrote the sentinel line to the ASGI send() callable — timeline: {_timeline}"
+    assert "__test_sentinel__" in body, f"timeline: {_timeline}"
     assert member_id_str not in _agent_connections  # cleanup 계약
 
     # pending 이벤트가 delivered로 마킹됐는지 (backfill 처리 확인)
