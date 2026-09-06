@@ -498,13 +498,16 @@ async def create_channel_post_draft_version(
     # 새 version_id로 복제한다 — 파일 재업로드·재변환 없음(object_path·sha256 그대로,
     # 계보만 이어붙임).
     if image_sha256 is _IMAGE_SHA256_CARRY_FORWARD and prior_latest is not None:
-        prior_image = (await db.execute(
-            select(ChannelPostImage).where(ChannelPostImage.version_id == prior_latest.id)
-        )).scalar_one_or_none()
-        if prior_image is not None:
+        # story #3550(Phase2, PO 確定 ②) — 캐러셀(N장)로 확장: 직전 버전에 이미지가
+        # 여러 장이면(position 0..N-1) 전부 복제한다. Phase1(N=1)엔 이 루프가 정확히
+        # 1회 도는 것과 동형(회귀 0).
+        from app.services.channel_post_images import list_channel_post_images_for_version
+
+        prior_images = await list_channel_post_images_for_version(db, version_id=prior_latest.id)
+        for prior_image in prior_images:
             db.add(ChannelPostImage(
                 id=uuid.uuid4(), org_id=prior_image.org_id, draft_id=prior_image.draft_id,
-                version_id=version.id,
+                version_id=version.id, position=prior_image.position,
                 original_object_path=prior_image.original_object_path,
                 original_sha256=prior_image.original_sha256,
                 original_content_type=prior_image.original_content_type,
@@ -519,6 +522,7 @@ async def create_channel_post_draft_version(
                 derived_height=prior_image.derived_height,
                 created_by=prior_image.created_by,
             ))
+        if prior_images:
             await db.flush()
 
     await _reseal_gate_on_new_version(
@@ -1182,21 +1186,24 @@ async def publish_channel_post_draft(
     if existing is not None and existing.status == "published":
         return existing
 
-    # story 620beefc(AC5) — 이 버전에 이미지가 붙어 있으면 IMAGE 컨테이너 경로(비동기),
-    # 아니면 기존 TEXT 경로(동기, 완전 무변경). 이미지 유무는 channel_post_images 행
-    # (버전당 1건, Phase1)의 존재로 판단 — latest.image_sha256만으로는 「나가는 파생본」
-    # 경로를 못 구하므로 행 자체를 조회한다.
-    image_public_url: str | None = None
+    # story 620beefc(AC5)·#3550(캐러셀 확장) — 이 버전에 이미지가 붙어 있으면 IMAGE
+    # (또는 CAROUSEL) 컨테이너 경로(비동기), 아니면 기존 TEXT 경로(동기, 완전 무변경).
+    # 이미지 유무·장수는 channel_post_images 행(position 순, N=1이면 Phase1과 동형)의
+    # 존재로 판단 — latest.image_sha256만으로는 「나가는 파생본」 경로를 못 구하므로
+    # 행 자체를 조회한다.
+    image_public_urls: list[str] = []
     if latest.image_sha256 is not None:
-        from app.models.channel_post_image import ChannelPostImage
-        from app.services.channel_post_images import public_url_for_object_path
+        from app.services.channel_post_images import list_channel_post_images_for_version, public_url_for_object_path
 
-        image_row = (await db.execute(
-            select(ChannelPostImage).where(ChannelPostImage.version_id == latest.id)
-        )).scalar_one_or_none()
-        if image_row is not None:
-            image_public_url = public_url_for_object_path(image_row.final_object_path)
-    has_image = image_public_url is not None
+        image_rows = await list_channel_post_images_for_version(db, version_id=latest.id)
+        image_public_urls = [
+            url for row in image_rows if (url := public_url_for_object_path(row.final_object_path)) is not None
+        ]
+    has_image = len(image_public_urls) > 0
+    # 기존 단일-이미지 호출부(threads/facebook/sandbox 등 — 전부 image_max_count<=1이라
+    # 여기까지 2장 이상으로 도달할 수 없다, confirm_channel_post_image_upload의 업로드
+    # 시점 거부가 이미 막는다)와의 하위호환 — image_url은 항상 "첫 장"(N=0이면 None).
+    image_public_url: str | None = image_public_urls[0] if image_public_urls else None
 
     # 발행 직전 재검증③(연결 활성) — 초안 생성/상신과 같은 헬퍼.
     connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
@@ -1332,10 +1339,30 @@ async def publish_channel_post_draft(
             just_created_container = row.external_container_id is None
             if just_created_container:
                 try:
-                    container_id = await create_container(
-                        client, access_token=access_token, threads_user_id=connection.account_id,
-                        text=text_to_post, image_url=image_public_url,
-                    )
+                    if len(image_public_urls) > 1:
+                        # story #3550(Phase2, PO 確定 ④) — 캐러셀(2장 이상)은 별도
+                        # 함수(instagram_publish.py::create_carousel_container류) —
+                        # image_max_count<=1인 채널(threads/facebook/sandbox 등)은
+                        # confirm_channel_post_image_upload가 업로드 시점에 이미
+                        # 2번째 이미지를 거부해 여기 이 분기에 절대 안 온다. 그래도
+                        # 그 어댑터가 create_carousel_container를 안 구현했으면
+                        # (미확認 방어) 조용히 image_url=1장짜리로 새는 대신 명시 실패.
+                        create_carousel_container = getattr(_publish_client, "create_carousel_container", None)
+                        if create_carousel_container is None:
+                            raise ThreadsPublishError(
+                                "CHANNEL_CAROUSEL_UNSUPPORTED",
+                                f"{draft.channel} 채널은 이미지 2장 이상(캐러셀)을 지원하지 않습니다",
+                                status_code=422,
+                            )
+                        container_id = await create_carousel_container(
+                            client, access_token=access_token, threads_user_id=connection.account_id,
+                            text=text_to_post, image_urls=image_public_urls,
+                        )
+                    else:
+                        container_id = await create_container(
+                            client, access_token=access_token, threads_user_id=connection.account_id,
+                            text=text_to_post, image_url=image_public_url,
+                        )
                 except ThreadsPublishError as exc:
                     error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
                     row.status = "failed"

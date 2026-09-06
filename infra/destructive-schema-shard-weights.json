@@ -1326,6 +1326,11 @@
       "file": "tests/test_3547_facebook_page_connection.py",
       "sec": 45.0,
       "source": "story-3547-facebook-page-adapter-be(PR 개설 前 선제 등재 — 로컬 raw pytest 16건 7.51s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3550_instagram_carousel.py",
+      "sec": 35.0,
+      "source": "story-3550-instagram-carousel-be(PR 개설 前 선제 등재 — 로컬 raw pytest 12건 5.48s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 35s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

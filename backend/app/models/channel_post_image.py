@@ -1,6 +1,13 @@
 """story 620beefc(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — 채널 포스트 이미지
-원본+파생본 원장. `ChannelPostVersion`과 1:1(version_id UNIQUE, Phase1
-`image_max_count=1`) — 한 버전이 봉인하는 이미지는 최대 하나.
+원본+파생본 원장. Phase1은 `ChannelPostVersion`과 1:1(version_id UNIQUE,
+`image_max_count=1`)이었다 — 한 버전이 봉인하는 이미지는 최대 하나.
+
+story #3550(Phase2, 페드루 PO 確定 2026-09-06, 마이그 0343) — Instagram 캐러셀
+(2~10장) 지원으로 1:1 제약을 1:N(`UniqueConstraint(version_id, position)`)으로
+완화. `position`(0-indexed)이 순서를 명시 — 봉인 해시(`ChannelPostVersion.
+image_sha256`)는 이 순서대로 이어붙인 합성값(N=1은 항등, `channel_post_images.py
+::compute_image_seal_hash`)이라 순서 재배열도 이미지 바꿔치기와 동형으로 봉인을
+깬다(디디 설계 메모·PO 確定 안 A).
 
 원본은 항상 보존한다(계보, PO 決定 ③ "원본 보존 + 파생본 별도 행"). 파생본이 필요
 없었으면(원본이 이미 어댑터 규격 안) `derived_*`는 전부 None — "나가는(발행에 실제로
@@ -21,13 +28,16 @@ from app.core.database import Base
 class ChannelPostImage(Base):
     __tablename__ = "channel_post_images"
     __table_args__ = (
-        UniqueConstraint("version_id", name="uq_channel_post_images_version"),
+        UniqueConstraint("version_id", "position", name="uq_channel_post_images_version_position"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     draft_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # story #3550(마이그 0343) — 0-indexed. 봉인 해시가 이 순서를 그대로 잠근다(§ 모듈
+    # docstring) — 재배열=바꿔치기와 동형으로 판정돼야 하므로 이 값을 신뢰의 SSOT로 쓴다.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     original_object_path: Mapped[str] = mapped_column(Text, nullable=False)
     original_sha256: Mapped[str] = mapped_column(Text, nullable=False)

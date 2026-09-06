@@ -196,7 +196,11 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_width_min=320,
         image_width_max=1440,
         image_color_space="sRGB",
-        image_max_count=1,
+        # story #3550(Phase2, 페드루 PO 確定 2026-09-06) — 캐러셀 2~10장(Meta 문서
+        # 지식·⚠️미확認, 재확認 전 라이브 금지). 1→10 상향이 유일한 변경 — 규격(비율·
+        # 용량·해상도)은 장별로 그대로 각각 적용된다(channel_post_images.py의 검증이
+        # 이미지 1건 처리라 여러 번 호출되는 구조, 새 루프 불요).
+        image_max_count=10,
         supports_fetch_replies=True,
         supports_reply=True,
         reply_required_scope="instagram_business_manage_comments",
@@ -409,7 +413,9 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         image_width_min=320,
         image_width_max=1440,
         image_color_space="sRGB",
-        image_max_count=1,
+        # story #3550 — 위 instagram과 동형 정정(1→10, sandbox가 실 provider보다
+        # 관대하면 안 된다는 기존 관례 그대로 같은 값 유지).
+        image_max_count=10,
         # 페드루 PO REQUIRED(2026-09-06, #3874 리뷰) — 위 instagram과 동형 정정
         # (impressions 폐기, views로 대체).
         insight_metrics=("views", "reach", "engagements"),

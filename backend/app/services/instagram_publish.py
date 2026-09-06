@@ -52,11 +52,12 @@ async def create_container(
     client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
     image_url: str | None = None,
 ) -> str:
-    """미디어 컨테이너 생성 → creation_id. IG는 이미지 필수(피드 이미지 1장, 캐러셀/
-    릴스는 조각① 스코프 밖 — 그라운딩 확認) — `image_url`이 None이면(Threads의
-    TEXT-only 경로와 달리) 호출부가 이미지 없는 초안을 여기까지 보내면 안 된다는
-    뜻이라 즉시 거부한다(사일런트 미디어 없는 컨테이너를 만들지 않는다). `text`는
-    캡션(`caption` 파라미터명 — Threads의 `text`와 다름, IG 실 파라미터명)."""
+    """미디어 컨테이너 생성 → creation_id(이미지 1장 전용, 단일-이미지 피드). 캐러셀
+    (2장 이상)은 `create_carousel_container`(아래, story #3550) — 릴스는 여전히
+    스코프 밖. `image_url`이 None이면(Threads의 TEXT-only 경로와 달리) 호출부가
+    이미지 없는 초안을 여기까지 보내면 안 된다는 뜻이라 즉시 거부한다(사일런트
+    미디어 없는 컨테이너를 만들지 않는다). `text`는 캡션(`caption` 파라미터명 —
+    Threads의 `text`와 다름, IG 실 파라미터명)."""
     if image_url is None:
         raise ThreadsPublishError(
             "INSTAGRAM_IMAGE_REQUIRED", "Instagram 발행은 이미지가 필수입니다(피드 이미지 1장)", status_code=422,
@@ -74,6 +75,59 @@ async def create_container(
     if not creation_id:
         raise ThreadsPublishError(
             "INSTAGRAM_CREATE_CONTAINER_MISSING_ID", "id missing in response", status_code=resp.status_code,
+        )
+    return str(creation_id)
+
+
+async def create_carousel_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str, image_urls: list[str],
+) -> str:
+    """story #3550(Phase2, 페드루 PO 確定 2026-09-06 ④) — 캐러셀(2장 이상) 발행.
+    자식 컨테이너 N개(각 `is_carousel_item=true`)를 순서대로 먼저 만들고, 부모
+    컨테이너 1개(`media_type=CAROUSEL`, `children=`자식id 콤마join)를 만들어 그
+    creation_id를 반환한다 — 오케스트레이션(channel_posts.py)은 이 반환값을 기존
+    단일-이미지 creation_id와 완전히 동일하게 취급한다(get_container_status·
+    publish_container 무변경, 부모 id 하나만 알면 되는 계약이라).
+
+    **원자성**(그라운딩 §·PO 明示) — 자식 하나라도 실패하면 그 자리에서 즉시 예외를
+    던진다(부모 컨테이너를 아예 안 만든다). 호출부의 기존 실패 처리(row.status=
+    "failed", 재시도 큐)가 그대로 "부분 발행 0"을 보장한다 — 이 함수 안에 별도
+    롤백 로직 불요(부모가 없으면 그 자식들은 Meta 쪽에도 고아 컨테이너로만 남고
+    피드에 절대 안 뜬다, 발행이 아니라 준비 단계라 사용자에게 보이는 결과 없음).
+
+    ⚠️미확認(instagram_publish.py 상단 딱지와 동형 — 컨테이너 파라미터명은 Meta
+    문서 지식, 재확認 전 라이브 왕복 금지)."""
+    child_ids: list[str] = []
+    for image_url in image_urls:
+        resp = await client.post(
+            _MEDIA_CONTAINER_URL_TMPL.format(ig_user_id=threads_user_id),
+            params={"access_token": access_token, "image_url": image_url, "is_carousel_item": "true"},
+        )
+        if resp.status_code != 200:
+            raise ThreadsPublishError(
+                "INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED", resp.text[:500], status_code=resp.status_code,
+            )
+        child_body = resp.json()
+        child_id = child_body.get("id")
+        if not child_id:
+            raise ThreadsPublishError(
+                "INSTAGRAM_CREATE_CAROUSEL_CHILD_MISSING_ID", "id missing in response", status_code=resp.status_code,
+            )
+        child_ids.append(str(child_id))
+
+    params = {"access_token": access_token, "media_type": "CAROUSEL", "children": ",".join(child_ids)}
+    if text:
+        params["caption"] = text
+    resp = await client.post(_MEDIA_CONTAINER_URL_TMPL.format(ig_user_id=threads_user_id), params=params)
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "INSTAGRAM_CREATE_CAROUSEL_PARENT_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    creation_id = body.get("id")
+    if not creation_id:
+        raise ThreadsPublishError(
+            "INSTAGRAM_CREATE_CAROUSEL_PARENT_MISSING_ID", "id missing in response", status_code=resp.status_code,
         )
     return str(creation_id)
 

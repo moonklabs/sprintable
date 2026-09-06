@@ -66,6 +66,7 @@ from app.services.channel_post_images import (
     ChannelImageUnsupportedFormatError,
     ChannelImageUndecodableError,
     ChannelImageUploadFailedError,
+    ChannelPostImageCountExceededError,
     confirm_channel_post_image_upload,
     create_channel_post_image_upload_url,
     get_channel_post_image_for_version,
@@ -316,6 +317,9 @@ class ChannelPostImageResponse(BaseModel):
     final_bytes: int
     was_converted: bool
     image_url: str | None = None
+    # story #3550(Phase2, 페드루 PO 確定 2026-09-06) — 캐러셀 순서(0-indexed). FE
+    # 다중 슬롯 UI(별도 스토리)가 이 값으로 정렬·삭제 대상을 가른다.
+    position: int = 0
 
 
 class SubmitChannelPostDraftRequest(BaseModel):
@@ -424,6 +428,7 @@ def _image_response(version, image_row) -> ChannelPostImageResponse:
         final_width=image_row.final_width, final_height=image_row.final_height,
         final_bytes=image_row.final_bytes, was_converted=image_row.was_converted,
         image_url=public_url_for_object_path(image_row.final_object_path),
+        position=image_row.position,
     )
 
 
@@ -512,6 +517,17 @@ async def post_channel_post_image_confirm(
     except ChannelImageUnsupportedError as exc:
         raise HTTPException(
             status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelPostImageCountExceededError as exc:
+        # story #3550(PO 確定 ③) — 어댑터 image_max_count 초과(예: Threads/Facebook
+        # 2번째 이미지, Instagram 11번째 이미지). 변환으로 못 고치는 축(ASPECT_RATIO_
+        # EXCEEDED·UNDECODABLE과 동형 판단) — 서버 거부.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_POST_IMAGE_COUNT_EXCEEDED", "message": str(exc),
+                "image_max_count": exc.image_max_count,
+            },
         ) from exc
     except ChannelImagePathNotScopedError as exc:
         raise HTTPException(status_code=403, detail={"code": "CHANNEL_IMAGE_PATH_NOT_SCOPED", "message": str(exc)}) from exc

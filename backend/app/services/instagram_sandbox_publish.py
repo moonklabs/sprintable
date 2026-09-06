@@ -51,6 +51,33 @@ async def create_container(
     return f"sandbox-ig-creation-{uuid.uuid4().hex}"
 
 
+async def create_carousel_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str, image_urls: list[str],
+) -> str:
+    """story #3550(Phase2, 페드루 PO 確定 2026-09-06) — instagram_publish.py::
+    create_carousel_container와 동형 계약(결정적·상태 없음). 자식 N번째 실패
+    마커(1-indexed) — `[sandbox:carousel-child-{n}-failed]`를 text에 심으면 그
+    번째 자식에서 예외를 던져 부모 컨테이너가 아예 안 만들어진다(원자성 재현,
+    「자식 하나 실패=부모도 실패」는 실측 아님·Meta 문서 지식 가정)."""
+    if _MARKER_429 in text:
+        raise ThreadsPublishError("SANDBOX_INSTAGRAM_RATE_LIMITED", "sandbox: [sandbox:429] 마커 시뮬레이션", status_code=429)
+    if _MARKER_PROVIDER_ERROR in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_PROVIDER_ERROR", "sandbox: [sandbox:provider-error] 마커 시뮬레이션", status_code=502,
+        )
+    if _MARKER_EXPIRED_TOKEN in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
+        )
+    for index, _image_url in enumerate(image_urls, start=1):
+        marker = f"[sandbox:carousel-child-{index}-failed]"
+        if marker in text:
+            raise ThreadsPublishError(
+                "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED", f"sandbox: {marker} 마커 시뮬레이션", status_code=502,
+            )
+    return f"sandbox-ig-carousel-{uuid.uuid4().hex}"
+
+
 async def get_container_status(
     client: httpx.AsyncClient, *, access_token: str, creation_id: str,
 ) -> tuple[str, str | None]:
