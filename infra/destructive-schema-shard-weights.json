@@ -1331,6 +1331,11 @@
       "file": "tests/test_3550_instagram_carousel.py",
       "sec": 31.0,
       "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
+    },
+    {
+      "file": "tests/test_3554_instagram_reels.py",
+      "sec": 45.0,
+      "source": "story-3554-instagram-reels-be(PR 개설 前 선제 등재 — 로컬 raw pytest 14건 7.40s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요 — #3558 전수 재측정(run 34011626732) 당시 이 PR 미머지라 그 산출물엔 없음)"
     }
   ]
 }

@@ -79,6 +79,21 @@ from app.services.channel_post_images import (
     public_url_for_object_path,
     reorder_channel_post_images,
 )
+from app.services.channel_post_videos import (
+    ChannelVideoAspectRatioError,
+    ChannelVideoCodecUnsupportedError,
+    ChannelVideoDurationExceededError,
+    ChannelVideoDurationTooShortError,
+    ChannelVideoObjectNotFoundError,
+    ChannelVideoPathNotScopedError,
+    ChannelVideoTooLargeError,
+    ChannelVideoUnparsableError,
+    ChannelVideoUnsupportedError,
+    ChannelVideoUnsupportedFormatError,
+    ChannelVideoUploadFailedError,
+    confirm_channel_post_video_upload,
+    create_channel_post_video_upload_url,
+)
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.member_resolver import resolve_member
 
@@ -309,6 +324,39 @@ class ConfirmChannelPostImageUploadRequest(BaseModel):
     object_path: str
 
 
+class CreateChannelPostVideoUploadUrlRequest(BaseModel):
+    content_type: str
+
+
+class ChannelPostVideoUploadUrlResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    expires_at: str
+    max_bytes: int
+    required_put_headers: dict[str, str] = {}
+
+
+class ConfirmChannelPostVideoUploadRequest(BaseModel):
+    object_path: str
+
+
+class ChannelPostVideoResponse(BaseModel):
+    # story #3554(Phase2, 페드루 PO 確定 2026-09-06) — 릴스 영상 마스터. 규격
+    # 검증에 실제로 쓰인 값(duration_seconds·width/height·codec)을 그대로 실어
+    # FE가 "무엇이·얼마까지·지금 얼마"(§13 규격 문구 3요소) 배지를 조립할 수 있게
+    # 한다(image_row와 동형 원칙 — 서버가 문구를 짓지 않고 값만 낸다).
+    video_id: uuid.UUID
+    draft_id: uuid.UUID
+    version_id: uuid.UUID
+    version: int
+    duration_seconds: float
+    width: int
+    height: int
+    codec: str
+    original_bytes: int
+    video_url: str | None = None
+
+
 class ReorderChannelPostImagesRequest(BaseModel):
     # story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 부분 재정렬 불허·항상
     # 전체 집합(현재 버전 이미지 id 전부, 새 순서 그대로)을 명시로 받는다.
@@ -497,6 +545,141 @@ async def post_channel_post_image_upload_url(
     except ChannelImageUploadFailedError as exc:
         raise HTTPException(status_code=502, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
     return ChannelPostImageUploadUrlResponse(**result)
+
+
+def _video_response(version, video_row) -> ChannelPostVideoResponse:
+    return ChannelPostVideoResponse(
+        video_id=video_row.id,
+        draft_id=version.draft_id, version_id=version.id, version=version.version,
+        duration_seconds=video_row.duration_seconds, width=video_row.width, height=video_row.height,
+        codec=video_row.codec, original_bytes=video_row.original_bytes,
+        video_url=public_url_for_object_path(video_row.original_object_path),
+    )
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/video/upload-url",
+    response_model=ChannelPostVideoUploadUrlResponse,
+)
+async def post_channel_post_video_upload_url(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: CreateChannelPostVideoUploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostVideoUploadUrlResponse:
+    """story #3554(Phase2, 페드루 PO 確定 2026-09-06) — 이미지 업로드-url 엔드포인트와
+    동형 2단계(signed URL 발급→FE 직접 PUT→confirm)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+
+    try:
+        result = await create_channel_post_video_upload_url(
+            org_id=org_id, draft_id=draft_id, channel=draft.channel, content_type=body.content_type,
+        )
+    except ChannelImageStorageNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except ChannelVideoUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelVideoUnsupportedFormatError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_UNSUPPORTED_FORMAT", "message": str(exc),
+                "content_type": exc.content_type, "allowed_formats": list(exc.allowed),
+            },
+        ) from exc
+    except ChannelVideoUploadFailedError as exc:
+        raise HTTPException(status_code=502, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return ChannelPostVideoUploadUrlResponse(**result)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
+    response_model=ChannelPostVideoResponse, status_code=201,
+)
+async def post_channel_post_video_confirm(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostVideoUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostVideoResponse:
+    """story #3554(Phase2, 페드루 PO 確定 2026-09-06①~④) — 업로드 확인+MP4 규격
+    검증(순수 파이썬 박스 파서, ffmpeg 없음)+계보. 이 호출도 새 버전을 만든다
+    (이미지 confirm과 동형 — 텍스트 편집과 같은 불변 버전 축)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    member_id = uuid.UUID(auth.user_id)
+    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    try:
+        version, video_row = await confirm_channel_post_video_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelVideoUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelVideoPathNotScopedError as exc:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_VIDEO_PATH_NOT_SCOPED", "message": str(exc)}) from exc
+    except ChannelVideoObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_VIDEO_OBJECT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelVideoTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "CHANNEL_VIDEO_TOO_LARGE", "message": str(exc),
+                "size_bytes": exc.size_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelVideoUnparsableError as exc:
+        raise HTTPException(status_code=422, detail={"code": "CHANNEL_VIDEO_UNPARSABLE", "message": str(exc)}) from exc
+    except ChannelVideoDurationExceededError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_DURATION_EXCEEDED", "message": str(exc),
+                "duration_seconds": exc.duration_seconds, "max_seconds": exc.max_seconds,
+            },
+        ) from exc
+    except ChannelVideoDurationTooShortError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_DURATION_TOO_SHORT", "message": str(exc),
+                "duration_seconds": exc.duration_seconds, "min_seconds": exc.min_seconds,
+            },
+        ) from exc
+    except ChannelVideoAspectRatioError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_ASPECT_RATIO_REJECTED", "message": str(exc),
+                "aspect_ratio": exc.aspect_ratio, "target": exc.target, "tolerance": exc.tolerance,
+            },
+        ) from exc
+    except ChannelVideoCodecUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_CODEC_UNSUPPORTED", "message": str(exc),
+                "codec": exc.codec, "allowed_codecs": list(exc.allowed),
+            },
+        ) from exc
+    except ChannelVideoUploadFailedError as exc:
+        raise HTTPException(status_code=502, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return _video_response(version, video_row)
 
 
 @router.post(
