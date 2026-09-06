@@ -87,6 +87,8 @@ function stubFetch(opts: {
   measurementConnections?: { key: 'beacon' | 'utm'; status: string; last_seen_at: string | null; count_7d: number | null; settings_path: string | null }[];
   measurementLoadFails?: boolean;
   onMeteringKey?: () => { status: number; body?: unknown };
+  // story #3549 — Facebook Page 「선택 대기」 select 호출.
+  onFacebookSelect?: (body: unknown) => { status: number; body: unknown; nextConnections?: unknown[] };
 }) {
   let connections = opts.connections ?? [];
   const credentials = opts.credentials ?? { configured: false, app_id_suffix: null, effective_source: 'platform' };
@@ -126,6 +128,17 @@ function stubFetch(opts: {
     }
     if (url.includes('/app-credentials')) {
       return { ok: true, status: 200, json: async () => ({ data: credentials }) } as Response;
+    }
+    if (url.includes('/channel-connections/facebook/select') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}'));
+      const result = opts.onFacebookSelect?.(body) ?? {
+        status: 201,
+        body: { id: 'conn-fb-1', channel: 'facebook', account_id: body.page_id, account_label: '선택된 페이지', status: 'active', credential_kind: 'oauth' },
+        nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-fb-1', channel: 'facebook', account_id: body.page_id, account_label: '선택된 페이지' }],
+      };
+      const ok = result.status < 400;
+      if (ok && result.nextConnections) connections = result.nextConnections;
+      return { ok, status: result.status, json: async () => (ok ? { data: result.body } : { data: null, error: (result.body as { error?: unknown })?.error ?? result.body }) } as Response;
     }
     if (url.includes('/channel-connections')) {
       return { ok: true, status: 200, json: async () => ({ data: connections }) } as Response;
@@ -896,5 +909,243 @@ describe('OrganizationChannelsPage — 성과 수집(story #3540)', () => {
     await mount('owner');
     expect(container.querySelector('[data-testid="measurement-utm-status"]')?.textContent)
       .toBe(koMessages.channelConnect.measurementUtmOff);
+  });
+});
+
+// story #3549(3547 BE·디디 계약, 유나 §13-8, PO 確定 2026-09-06) — Facebook Page
+// 연결 화면. 새로 짓는 것은 「선택 대기」 얼굴 하나뿐(§13-8 그라운딩) — 연결
+// 시작 카드·연결 카드·실패 문구 배선은 기존 것을 그대로 쓴다.
+describe('OrganizationChannelsPage — Facebook Page 연결(story #3549)', () => {
+  const FACEBOOK_AVAILABLE = [
+    { channel: 'facebook', display_name: 'Facebook', credential_kind: 'oauth', kind: 'social' },
+  ];
+
+  function selectPendingQuery(
+    candidates: { page_id: string; name: string }[], extra: Record<string, string> = {}, channel = 'facebook',
+  ) {
+    return new URLSearchParams({
+      select_pending: channel, pending_id: 'pending-1',
+      candidates: JSON.stringify(candidates), ...extra,
+    });
+  }
+
+  it('⭐§13-8① — owner에게 앱 안내 한 줄이 연결 버튼 위에 뜬다(연결 0개, 선택 대기 아님)', async () => {
+    stubFetch({ connections: [], availableChannels: FACEBOOK_AVAILABLE });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-facebook-app-guidance"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectFacebookAppGuidance);
+  });
+
+  it('member는 앱 안내를 안 본다(연결 버튼 자체가 없는 사람에게 준비물을 알려도 할 일이 없다)', async () => {
+    stubFetch({ connections: [], availableChannels: FACEBOOK_AVAILABLE });
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-facebook-app-guidance"]')).toBeNull();
+  });
+
+  it('⭐§13-8② — 후보 2개면 라디오 목록(이름+ID)이 뜨고 기본 선택이 없다, 앱 안내는 이제 안 뜬다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([
+      { page_id: 'p1', name: '우리 회사 페이지' }, { page_id: 'p2', name: '2호점' },
+    ]));
+    stubFetch({ connections: [], availableChannels: FACEBOOK_AVAILABLE });
+    await mount('owner');
+    const select = container.querySelector('[data-testid="channel-connect-facebook-select"]')!;
+    expect(select.textContent).toContain('우리 회사 페이지');
+    expect(select.textContent).toContain('p1');
+    expect(select.textContent).toContain('2호점');
+    const radios = select.querySelectorAll('input[type="radio"]') as NodeListOf<HTMLInputElement>;
+    expect(radios.length).toBe(2);
+    expect([...radios].every((r) => !r.checked)).toBe(true);
+    const submitBtn = container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-connect-facebook-app-guidance"]')).toBeNull();
+  });
+
+  it('⭐§13-8② — 페이지를 고르면 버튼이 활성화되고, 「연결」을 누르면 select 호출 뒤 같은 자리가 연결 카드로 바뀐다(재로드 없이)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([{ page_id: 'p1', name: '우리 회사 페이지' }]));
+    let selectedBody: unknown = null;
+    stubFetch({
+      connections: [], availableChannels: FACEBOOK_AVAILABLE,
+      onFacebookSelect: (body) => {
+        selectedBody = body;
+        return {
+          status: 201,
+          body: { id: 'conn-fb-1', channel: 'facebook', account_id: 'p1', account_label: '우리 회사 페이지', status: 'active', credential_kind: 'oauth' },
+          nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-fb-1', channel: 'facebook', account_id: 'p1', account_label: '우리 회사 페이지' }],
+        };
+      },
+    });
+    await mount('owner');
+    const radio = container.querySelector('input[type="radio"][value="p1"]') as HTMLInputElement;
+    await act(async () => { radio.click(); });
+    const submitBtn = container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
+    await act(async () => { submitBtn.click(); });
+    await flush();
+    expect(selectedBody).toEqual({ pending_id: 'pending-1', page_id: 'p1' });
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select"]')).toBeNull();
+    expect(container.textContent).toContain('우리 회사 페이지');
+  });
+
+  // 페드루 QA(2026-09-06) — FacebookPageSelectCard 자체의 owner 게이트가 호출부의
+  // isOwnerStrict 조건과 중복이면 뮤테이션으로 안 걸리는 죽은 코드다(PastedSecretConnectCard
+  // 선례 그대로 — owner 판정은 카드 안에서 진다, 호출부가 한 번 더 안 거른다). member도
+  // 이 카드까지는 도달하되 카드 안에서 사유만 본다.
+  it('member는 선택 대기 상태에서도 라디오 목록이 아니라 owner 전용 사유만 본다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([{ page_id: 'p1', name: '우리 회사 페이지' }]));
+    stubFetch({ connections: [], availableChannels: FACEBOOK_AVAILABLE });
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select"]')).toBeNull();
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOnlyReason.replace('{channel}', 'Facebook'),
+    );
+  });
+
+  it('⭐§13-8③ — 후보 0개는 두 원인을 하나로 뭉치지 않은 문구를 보인다(선택 UI 없음)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([]));
+    stubFetch({ connections: [], availableChannels: FACEBOOK_AVAILABLE });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-facebook-no-pages"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectFacebookNoPages);
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select"]')).toBeNull();
+  });
+
+  it.each([
+    ['CHANNEL_OAUTH_PENDING_SELECTION_NOT_FOUND'],
+    ['CHANNEL_OAUTH_PENDING_SELECTION_EXPIRED'],
+    ['CHANNEL_OAUTH_PENDING_SELECTION_FORBIDDEN'],
+  ] as const)('⭐§13-8④ — select 실패 %s는 「다시 연결」(기존 재인증 낱말 재사용)로 안내한다', async (code) => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([{ page_id: 'p1', name: 'X' }]));
+    stubFetch({
+      connections: [], availableChannels: FACEBOOK_AVAILABLE,
+      onFacebookSelect: () => ({ status: 404, body: { error: { code } } }),
+    });
+    await mount('owner');
+    const radio = container.querySelector('input[type="radio"][value="p1"]') as HTMLInputElement;
+    await act(async () => { radio.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+    const errorBlock = container.querySelector('[data-testid="channel-connect-facebook-select-error"]')!;
+    expect(errorBlock.textContent).toContain(koMessages.channelConnect.channelConnectFacebookSelectGone);
+    const reauthLink = errorBlock.querySelector('a');
+    expect(reauthLink?.textContent).toBe(koMessages.channelConnect.channelReauthAction);
+    expect(reauthLink?.getAttribute('href')).toBe('/api/oauth-channel/authorize?org=org-1&channel=facebook');
+  });
+
+  // 페드루 PO REQUIRED 2(#3905 리뷰, 유나 §13-8④-b 채택, 2026-09-06) — 503과
+  // INVALID_PAGE는 원인이 다르니 서버 message를 더는 그대로 보여주지 않고 고정
+  // 두 문장으로 가른다. 503은 같은 페이지 재시도가 뜻이 있어 「다시 시도」 유지 —
+  // 이 화면엔 자동 재시도가 없어 §22-15의 "다시 시도" 금지 사유가 안 걸린다.
+  it('⭐§13-8④-b — select 실패 PROVIDER_UNAVAILABLE(503)은 고정 문장+「다시 시도」로 같은 페이지를 재전송한다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([{ page_id: 'p1', name: 'X' }]));
+    let attempts = 0;
+    let lastBody: unknown = null;
+    stubFetch({
+      connections: [], availableChannels: FACEBOOK_AVAILABLE,
+      onFacebookSelect: (body) => {
+        attempts += 1;
+        lastBody = body;
+        return { status: 503, body: { error: { code: 'CHANNEL_OAUTH_PROVIDER_UNAVAILABLE', message: '서버 메시지(이제 안 씀)' } } };
+      },
+    });
+    await mount('owner');
+    const radio = container.querySelector('input[type="radio"][value="p1"]') as HTMLInputElement;
+    await act(async () => { radio.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+    const errorBlock = container.querySelector('[data-testid="channel-connect-facebook-select-error"]')!;
+    expect(errorBlock.textContent).toContain(koMessages.channelConnect.channelConnectFacebookSelectProviderUnavailable);
+    expect(errorBlock.querySelector('a')).toBeNull();
+    const retryBtn = errorBlock.querySelector('button') as HTMLButtonElement;
+    expect(retryBtn.textContent).toBe(koMessages.channelConnect.channelConnectFacebookSelectRetryCta);
+    await act(async () => { retryBtn.click(); });
+    await flush();
+    expect(attempts).toBe(2);
+    expect(lastBody).toEqual({ pending_id: 'pending-1', page_id: 'p1' });
+  });
+
+  it('⭐§13-8④-b — select 실패 INVALID_PAGE는 고정 문장을 보이며 라디오 목록으로 돌아가고 선택이 해제된다(같은 실패로 가는 버튼 금지, 재시도 CTA 없음)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([
+      { page_id: 'p1', name: 'X' }, { page_id: 'p2', name: 'Y' },
+    ]));
+    stubFetch({
+      connections: [], availableChannels: FACEBOOK_AVAILABLE,
+      onFacebookSelect: () => ({ status: 400, body: { error: { code: 'CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE' } } }),
+    });
+    await mount('owner');
+    const radioP1 = container.querySelector('input[type="radio"][value="p1"]') as HTMLInputElement;
+    await act(async () => { radioP1.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    // 별도 에러 화면이 아니라 라디오 목록 그대로 — 재시도 버튼도 없다.
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select-invalid-page"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectFacebookSelectInvalidPage);
+    const radios = container.querySelectorAll('input[type="radio"]') as NodeListOf<HTMLInputElement>;
+    expect([...radios].every((r) => !r.checked)).toBe(true);
+    const submitBtn = container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    // 다른 페이지를 고르면 문구가 사라지고 다시 제출할 수 있다.
+    const radioP2 = container.querySelector('input[type="radio"][value="p2"]') as HTMLInputElement;
+    await act(async () => { radioP2.click(); });
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select-invalid-page"]')).toBeNull();
+    expect(submitBtn.disabled).toBe(false);
+  });
+
+  // 페드루 PO REQUIRED 1(#3905 리뷰, 2026-09-06) — 실 Meta App Review 前엔
+  // facebook_sandbox가 §13-8 라이브 검증(AC5)의 유일한 길이다. 카드·앱 안내·
+  // select BFF 전부 channel 문자열이 아니라 kind 판별자만 보게 채널 무관이어야
+  // 한다(디디 PR#3904 실측: select는 pending.channel로 어댑터를 뽑지 URL로 안
+  // 가른다 — channel_connections.py:661/663/687, facebook_sandbox pending도
+  // 같은 리터럴 /facebook/select로 통과).
+  const FACEBOOK_SANDBOX_AVAILABLE = [
+    { channel: 'facebook_sandbox', display_name: 'Facebook Page Sandbox', credential_kind: 'oauth', kind: 'social' },
+  ];
+
+  it('facebook_sandbox — 앱 안내·선택 대기 얼굴이 facebook과 동형으로 뜬다(채널 문자열이 아니라 kind만 본다)', async () => {
+    stubFetch({ connections: [], availableChannels: FACEBOOK_SANDBOX_AVAILABLE });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-facebook-app-guidance"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectFacebookAppGuidance);
+  });
+
+  it('facebook_sandbox — select_pending=facebook_sandbox면 그 채널 카드에서만 라디오 목록이 뜬다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ page_id: 'sandbox-page-1', name: 'Sandbox Page 1' }], {}, 'facebook_sandbox',
+    ));
+    stubFetch({ connections: [], availableChannels: FACEBOOK_SANDBOX_AVAILABLE });
+    await mount('owner');
+    const select = container.querySelector('[data-testid="channel-connect-facebook-select"]')!;
+    expect(select.textContent).toContain('Sandbox Page 1');
+  });
+
+  it('facebook_sandbox — 선택 성공 시 select 호출이 (stubFetch의 literal /facebook/select 라우팅에) 맞아 카드가 연결 행으로 바뀐다(디디 PR#3904 실측 — pending.channel로 어댑터를 뽑지 URL 세그먼트로 안 가른다)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ page_id: 'sandbox-page-1', name: 'Sandbox Page 1' }], {}, 'facebook_sandbox',
+    ));
+    let selectCalled = false;
+    stubFetch({
+      connections: [], availableChannels: FACEBOOK_SANDBOX_AVAILABLE,
+      onFacebookSelect: (body) => {
+        selectCalled = true;
+        return {
+          status: 201,
+          body: { id: 'conn-fbs-1', channel: 'facebook_sandbox', account_id: (body as { page_id: string }).page_id, account_label: 'Sandbox Page 1', status: 'active', credential_kind: 'oauth' },
+          nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-fbs-1', channel: 'facebook_sandbox', account_id: 'sandbox-page-1', account_label: 'Sandbox Page 1' }],
+        };
+      },
+    });
+    await mount('owner');
+    const radio = container.querySelector('input[type="radio"][value="sandbox-page-1"]') as HTMLInputElement;
+    await act(async () => { radio.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-facebook-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+    // stubFetch는 url.includes('/channel-connections/facebook/select')일 때만
+    // onFacebookSelect를 태운다 — 이게 true라는 사실 자체가 카드의 실제 호출이
+    // 리터럴 facebook 세그먼트를 쓴다는 증거다(channel prop='facebook_sandbox'인데도).
+    expect(selectCalled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-connect-facebook-select"]')).toBeNull();
+    expect(container.textContent).toContain('Sandbox Page 1');
   });
 });

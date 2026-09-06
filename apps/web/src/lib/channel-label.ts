@@ -15,6 +15,12 @@ const CHANNEL_LABEL_KEYS: Record<string, string> = {
   // 디디 ④/⑤(#3800/#3802) 착지 뒤에야 실제로 들어오는 값 — 지금 develop엔 미등록이라
   // 당장은 아무 것도 이 키로 안 오지만, 죽은 키 스윕에서 지우지 말 것(의도된 선등록).
   webhook: 'channelLabelWebhook',
+  // story #3549(3547 BE·디디 PR#3904 실측, 위 webhook과 동형 관례) — Facebook
+  // Page 연결. 라벨 자체는 순수 FE 문구라 BE 계약과 무관하게 지금 등록해도 안전하다.
+  facebook: 'channelLabelFacebook',
+  // story #3549 REQUIRED 1(페드루 PO, 2026-09-06) — 실 Meta App Review 前엔 이
+  // sandbox가 §13-8 라이브 검증의 유일한 길이라 facebook과 같이 선등록한다.
+  facebook_sandbox: 'channelLabelFacebookSandbox',
 };
 
 export function channelLabel(channel: string, t: (key: string) => string): string {

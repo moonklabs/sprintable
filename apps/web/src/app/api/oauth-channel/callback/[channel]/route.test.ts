@@ -102,3 +102,70 @@ describe('GET /api/oauth-channel/callback/[channel] (story #3376)', () => {
     expect(res.headers.get('location')).toContain('connect_error=CHANNEL_OAUTH_STATE_INVALID');
   });
 });
+
+// story #3549(3547 BE·디디 계약, 유나 §13-8②, PO 確定 2026-09-06) — Facebook Page가
+// 2개 이상이면 BE가 연결을 만들지 않고 `{kind:"pending_selection", ...}`을 돌려준다.
+// 브라우저 리다이렉트는 POST 바디를 못 옮기므로 다음 요청이 스스로 다시 그릴 수
+// 있게 쿼리에 후보·만료 시각을 싣는다.
+describe('GET /api/oauth-channel/callback/[channel] — Facebook 「선택 대기」(story #3549)', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    h.cookiesGetMock.mockReset();
+    h.cookiesDeleteMock.mockReset();
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  function stubFacebookCookies() {
+    const defaults: Record<string, string> = { oauth_channel_org_facebook: 'org-1', sp_at: 'sp-at-token' };
+    h.cookiesGetMock.mockImplementation((name: string) => (name in defaults ? { value: defaults[name] } : undefined));
+  }
+  function facebookRequest(query: Record<string, string>): Request {
+    const url = new URL('http://localhost/api/oauth-channel/callback/facebook');
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+    return new Request(url.toString());
+  }
+  function facebookRouteParams() {
+    return { params: Promise.resolve({ channel: 'facebook' }) };
+  }
+
+  it('kind=pending_selection — candidates·pending_id·expires_at을 쿼리에 실어 select_pending으로 리다이렉트한다(연결은 안 만들어짐)', async () => {
+    stubFacebookCookies();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        kind: 'pending_selection', pending_id: 'pending-1',
+        candidates: [{ page_id: 'p1', name: '우리 회사 페이지' }, { page_id: 'p2', name: '2호점' }],
+        expires_at: '2026-09-06T00:00:00Z',
+      }),
+    });
+    const res = await GET(facebookRequest({ code: 'c', state: 's' }), facebookRouteParams());
+    const location = res.headers.get('location')!;
+    expect(location).toContain('/organization/channels?');
+    expect(location).toContain('select_pending=facebook');
+    expect(location).toContain('pending_id=pending-1');
+    expect(location).toContain('expires_at=2026-09-06T00%3A00%3A00Z');
+    expect(decodeURIComponent(new URL(location).searchParams.get('candidates')!)).toBe(
+      JSON.stringify([{ page_id: 'p1', name: '우리 회사 페이지' }, { page_id: 'p2', name: '2호점' }]),
+    );
+    expect(location).not.toContain('connected=facebook');
+  });
+
+  it('kind=pending_selection·candidates=[] — 0개도(§13-8③) 같은 select_pending 경로로 넘긴다(화면이 0개 문구를 고른다)', async () => {
+    stubFacebookCookies();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ kind: 'pending_selection', pending_id: 'pending-2', candidates: [], expires_at: '2026-09-06T00:00:00Z' }),
+    });
+    const res = await GET(facebookRequest({ code: 'c', state: 's' }), facebookRouteParams());
+    const location = res.headers.get('location')!;
+    expect(location).toContain('select_pending=facebook');
+    expect(decodeURIComponent(new URL(location).searchParams.get('candidates')!)).toBe('[]');
+  });
+
+  it('kind 없음(threads·instagram류, 기존 계약 그대로) — 여전히 ?connected=로', async () => {
+    stubFacebookCookies();
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'c1', channel: 'facebook' }) });
+    const res = await GET(facebookRequest({ code: 'c', state: 's' }), facebookRouteParams());
+    expect(res.headers.get('location')).toBe('http://localhost:3108/organization/channels?connected=facebook');
+  });
+});
