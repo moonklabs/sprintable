@@ -696,7 +696,11 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익). 아티팩트를 근거로 삼을 땐 artifact_id를 같이 주면"
      " 그 시각의 버전이 자동 고정된다(그 뒤 아티팩트가 새 버전으로 바뀌어도 이 evidence의"
-     " 근거는 안 흔들림).",
+     " 근거는 안 흔들림). 구조화 페이로드가 필요한 경우(예: 검증 시트) type=\"report\"와"
+     " payload를 같이 준다 — payload 예시: {\"kind\": \"verification_sheet\", \"items\":"
+     " [{\"name\": \"로그인 흐름\", \"verdict\": \"pass\"}, {\"name\": \"결제 흐름\","
+     " \"verdict\": \"fail\", \"note\": \"타임아웃\"}]} (verdict는 pass/fail/n_a 중 하나,"
+     " verified_by/verified_at은 서버가 호출자 정보로 자동 채운다).",
      AddEvidenceInput, add_evidence),
     # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
     ("sprintable_add_judgment",
