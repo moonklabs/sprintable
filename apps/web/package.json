@@ -35,6 +35,7 @@
     "verify:no-hanja-in-i18n": "tsx scripts/verify-no-hanja-in-i18n.ts",
     "verify:no-new-raw-button": "tsx scripts/verify-no-new-raw-button.ts",
     "verify:no-handrolled-card": "tsx scripts/verify-no-handrolled-card.ts",
+    "verify:no-hardcoded-aria-label": "tsx scripts/verify-no-hardcoded-aria-label.ts",
     "e2e": "playwright test",
     "e2e:contrast": "playwright test contrast-guard.spec.ts",
     "e2e:ui": "playwright test --ui",
