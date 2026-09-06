@@ -98,6 +98,12 @@ interface ChannelPostDraftDetail {
   image_final_width?: number | null;
   image_final_bytes?: number | null;
   image_was_converted?: boolean | null;
+  // story #3556(Phase2·FE, BE #3554 후속·페드루 PO 確定 2026-09-06) — 이 draft에
+  // 첨부된 릴스 영상의 재생 가능한 공개 URL(additive). thumbnail_url(#3554 설계상
+  // 커버 프레임 그 자체)과 별개 — 승인 카드가 이 값이 있으면 <video controls
+  // poster={thumbnail_url}>, 없으면 기존처럼 썸네일만 그린다. 없으면 null(영상
+  // 미첨부 또는 BE 미착지 — 둘 다 화면 동작 동일, fail-closed).
+  video_url?: string | null;
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지(FailureActionBadge)가 이
   // 화면에 mount 안 된 채로 남아 있던 갭. 단건 GET(ChannelPostDraftListItem과 동형
   // shape, backend/app/routers/channel_posts.py)이 이미 내는 필드.
@@ -188,6 +194,33 @@ interface ChannelConnectionInfo {
   // 축: "필수"(이미지 0장이면 상신 자체가 422로 막힘, 예: Instagram). §17-16⑤
   // 사유 사슬 렌더 조건 재료.
   image_required: boolean;
+  // story #3556(Phase2·FE, BE #3554/#3911 어댑터 선언 → 연결 응답 additive, 페드루
+  // PO 確定 2026-09-06) — 릴스 영상 규격(image_*와 동형 관례, 하드코딩 금지 축).
+  // video_max_bytes<=0이면 이 채널은 영상 미지원(§17-16과 동형 — 첨부 칸 자체를
+  // 안 그린다).
+  video_max_bytes: number;
+  video_max_seconds: number;
+  video_min_seconds: number;
+  video_aspect_target: number;
+  video_aspect_tolerance: number;
+  video_codecs: string[];
+}
+
+// story #3556(Phase2·FE, BE #3554/#3911 계약, 페드루 PO 確定 2026-09-06) — 영상
+// confirm 응답(channel_posts.py::ChannelPostVideoResponse). 규격 검증에 실제로 쓰인
+// 값(duration_seconds·width/height·codec)을 그대로 실어 FE가 배지를 조립한다
+// (image_row와 동형 원칙 — 서버가 문구를 짓지 않고 값만 낸다).
+interface ChannelPostVideoResponse {
+  video_id: string;
+  draft_id: string;
+  version_id: string;
+  version: number;
+  duration_seconds: number;
+  width: number;
+  height: number;
+  codec: string;
+  original_bytes: number;
+  video_url: string | null;
 }
 
 // story #3402 ④(AC7) — 한도 잔량은 조회값이고 조회 실패도 상태다. success=false는
@@ -213,6 +246,53 @@ function formatAspectBound(value: number): string {
 }
 function trimTrailingZero(n: number): string {
   return n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+// story #3556(§17-23②, 유나 確定 2026-09-06) — 릴스 코덱 규격 태그. 기계 이름을
+// 사람 낱말로(모르는 값은 표에 없으면 원문 대문자화만 — 이름을 지어내지 않는다).
+// 어댑터가 같은 코덱의 두 표기(avc1·h264)를 선언할 수 있어 변환 뒤 중복 제거하되
+// 선언 순서는 유지한다.
+const VIDEO_CODEC_LABELS: Record<string, string> = {
+  avc1: 'H.264', avc3: 'H.264', h264: 'H.264', H264: 'H.264',
+  hvc1: 'HEVC', hev1: 'HEVC', hevc: 'HEVC', h265: 'HEVC',
+};
+function formatVideoCodecs(codecs: string[]): string {
+  const labels = codecs.map((c) => VIDEO_CODEC_LABELS[c] ?? c.toUpperCase());
+  return [...new Set(labels)].join('/');
+}
+
+// story #3556(§17-23②, 유나 確定 2026-09-06) — 릴스 비율 규격 태그. 이름 있는
+// 비율(9:16 등)은 이름으로, 없으면 §17-16④ 일반 표기(formatAspectBound)로 폴백.
+// 부동소수 오차를 두고 비교한다(===0.5625가 아니라 근사).
+const VIDEO_ASPECT_NAMES: [number, string][] = [
+  [0.5625, '9:16'], [0.8, '4:5'], [1.0, '1:1'], [1.7778, '16:9'],
+];
+function formatVideoAspectRatio(target: number): string {
+  const named = VIDEO_ASPECT_NAMES.find(([v]) => Math.abs(v - target) < 0.001);
+  return named ? named[1] : formatAspectBound(target);
+}
+
+// story #3556(§17-23⑤-1, 유나 確定 2026-09-06 06:03Z) — 업로드 직후 메타 한 줄
+// (라벨 없음, 값이 자기 정체를 짐). 순서=길이·해상도·코덱·용량("무엇이 붙었나"
+// 순서 — 규격 태그와 다르다). 각 조각은 없으면(=0/빈값) 빼고 `·`로 잇는다·넷 다
+// 없으면 줄 자체를 안 그린다(호출부가 null 판정).
+function trimTrailingZeroOneDecimal(n: number): string {
+  return n.toFixed(1).replace(/\.0$/, '');
+}
+function formatVideoMetaLine(
+  v: { durationSeconds?: number; width?: number; height?: number; codec?: string; originalBytes?: number },
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string | null {
+  const parts: string[] = [];
+  if (typeof v.durationSeconds === 'number' && v.durationSeconds !== 0) {
+    parts.push(t('channelPostsVideoMetaDuration', { n: trimTrailingZeroOneDecimal(v.durationSeconds) }));
+  }
+  if (typeof v.width === 'number' && typeof v.height === 'number' && v.width !== 0 && v.height !== 0) {
+    parts.push(`${v.width}×${v.height}`);
+  }
+  if (v.codec) parts.push(formatVideoCodecs([v.codec]));
+  if (typeof v.originalBytes === 'number' && v.originalBytes !== 0) parts.push(formatFileSize(v.originalBytes));
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 // story #3428(T3-M·§13 3요소: 무엇이·얼마까지·지금 얼마) — CHANNEL_IMAGE_* 422/413의
@@ -525,6 +605,34 @@ export default function ChannelPostEditPage() {
   const [imagesActionInProgress, setImagesActionInProgress] = useState(false);
   const [imagesActionError, setImagesActionError] = useState<{ text: string; raw?: string } | null>(null);
 
+  // story #3556(Phase2·FE, BE #3554/#3911 후속 계약, 페드루 PO 確定 2026-09-06) — 릴스
+  // 영상 규격(image_*와 동형 관례). maxBytes<=0="아직 모른다/미지원"(fail-closed,
+  // imageSpec과 동형 — 첨부 칸 자체를 안 그린다).
+  const [videoSpec, setVideoSpec] = useState<
+    | { maxBytes: number; maxSeconds: number; minSeconds: number; aspectTarget: number; aspectTolerance: number; codecs: string[] }
+    | undefined
+  >(undefined);
+  // ①(PO 確定 그라운딩 2026-09-06) — 영상 전용 삭제 API 없음. FE는 «교체» 한 동작만
+  // (재업로드=새 버전으로 새 영상, 기존 확인 다이얼로그 불요 — 이미지 캐러셀과 달리
+  // 목록이 아니라 슬롯 1개). 초기값은 draft.video_url(있으면 재생 URL만, 메타는
+  // 모른다 — 별도 GET이 없다, 확定 갭②)로 seed하고, 이 세션에서 새로 업로드하면
+  // confirm 응답의 풍부한 메타(길이·해상도·코덱)로 교체된다.
+  const [video, setVideo] = useState<
+    | { videoUrl: string; durationSeconds?: number; width?: number; height?: number; codec?: string; originalBytes?: number }
+    | null
+  >(null);
+  // ③(PO 確定 2026-09-06) — uploading 단계는 XHR upload.onprogress로 % 표시(서명
+  // PUT은 XHR로 보낸다, fetch는 업로드 진행률 이벤트가 없다). 나머지 단계는 이미지와
+  // 동형 텍스트 라벨.
+  const [videoUploadStatus, setVideoUploadStatus] = useState<
+    | { phase: 'idle' }
+    | { phase: 'requesting_url' }
+    | { phase: 'uploading'; progress: number }
+    | { phase: 'confirming' }
+    | { phase: 'error'; text: string; raw?: string }
+  >({ phase: 'idle' });
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
+
   const [text, setText] = useState('');
   // story #3517(BE #3867 조각②, PO 정정 2026-09-05) — 댓글 「작업으로 전환」
   // 다이얼로그의 「게시물 제목」 prefill. 채널 포스트엔 정식 제목이 없다 — 1순위는
@@ -608,6 +716,11 @@ export default function ChannelPostEditPage() {
         const d = draftJson?.data;
         const list = versionsJson?.data ?? [];
         setDraft(d ?? null);
+        // story #3556(확定 갭②, 페드루 PO 2026-09-06) — 별도 영상 GET이 없어 초기
+        // 로드는 draft.video_url(재생 URL만)로만 seed한다 — 길이·해상도·코덱은
+        // "모른다"(undefined)로 남긴다(지어내지 않는다). 이 세션에서 새로 업로드하면
+        // handleVideoFileSelected가 confirm 응답의 풍부한 메타로 통째로 교체한다.
+        setVideo(d?.video_url ? { videoUrl: d.video_url } : null);
         // story #3514(doc a0da40c9, PO 確定 2026-09-05) — lint-on-read. 저장/상신
         // 응답에서만 갱신되던 위반 목록을 로드 시점에도 채운다 — "저장 없이" 위반
         // 목록·상신 비활성이 선다(§16-7을 읽기까지 넓힘). 계약 없으면(BE 미착지)
@@ -657,6 +770,15 @@ export default function ChannelPostEditPage() {
                 colorSpace: conn.image_color_space,
                 // story #3538 — image_required 그대로(하드코딩 X·채널명 분기 X).
                 imageRequired: conn.image_required,
+              });
+            }
+            // story #3556(BE #3554/#3911 어댑터 선언, 페드루 PO 確定 2026-09-06) —
+            // 영상 규격(image_*와 동형 관례, 하드코딩 금지 축 그대로).
+            if (conn) {
+              setVideoSpec({
+                maxBytes: conn.video_max_bytes, maxSeconds: conn.video_max_seconds,
+                minSeconds: conn.video_min_seconds, aspectTarget: conn.video_aspect_target,
+                aspectTolerance: conn.video_aspect_tolerance, codecs: conn.video_codecs,
               });
             }
           }
@@ -733,7 +855,7 @@ export default function ChannelPostEditPage() {
   const hasBlockingViolations = violations.length > 0;
 
   const handleSave = async () => {
-    if (!orgId || !draft || imageUploadInProgress) return;
+    if (!orgId || !draft || imageUploadInProgress || videoUploadInProgress) return;
     setSaving(true);
     setSaveMessage(null);
     try {
@@ -778,7 +900,7 @@ export default function ChannelPostEditPage() {
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
   const handleSubmitForApproval = async (scheduledAt?: string) => {
-    if (!orgId || !draft || isOverLimit || hasBlockingViolations || imageUploadInProgress || imageRequiredAndMissing) return;
+    if (!orgId || !draft || isOverLimit || hasBlockingViolations || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
     if (scheduledAt) setScheduleServerError(null);
@@ -992,6 +1114,106 @@ export default function ChannelPostEditPage() {
       setImageUploadStatus({ phase: 'idle' });
     } catch {
       setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
+    }
+  };
+
+  // story #3556(Phase2·FE, PO 確定③ 2026-09-06) — fetch()는 업로드 진행률 이벤트가
+  // 없다(response body 스트림만 관측 가능, request body 진행은 XHR 전용 API).
+  // 100MB(이미지 8MB 대비)라 무프로그레스 텍스트만으로는 체감이 나쁘다는 그라운딩
+  // 지적을 XHR upload.onprogress로 처방 — signed URL PUT 이 단계만 XHR, 나머지
+  // (upload-url 발급·confirm)는 기존 fetchWithAuth 그대로.
+  function putVideoWithProgress(
+    uploadUrl: string, file: File, headers: Record<string, string>, onProgress: (pct: number) => void,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl);
+      xhr.setRequestHeader('Content-Type', file.type);
+      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
+      xhr.onerror = () => resolve(false);
+      xhr.send(file);
+    });
+  }
+
+  // story #3556(Phase2·FE, BE #3554/#3911 계약, 페드루 PO 確定 2026-09-06) — 릴스
+  // 영상 첨부. handleImageFileSelected와 동형 2단계(발급→PUT→confirm)이나 PUT만
+  // XHR(진행률)·삭제 API가 없어(確定①) 이 함수 자체가 "첨부"이자 "교체"다(재호출
+  // 시마다 새 버전+새 영상 행, BE가 알아서 이전 영상을 carry-forward 안 한다 —
+  // confirm_channel_post_video_upload docstring).
+  const handleVideoFileSelected = async (file: File) => {
+    if (!orgId || !draft) return;
+    setVideoUploadStatus({ phase: 'requesting_url' });
+    try {
+      const urlRes = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/video/upload-url`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content_type: file.type }) },
+      );
+      if (!urlRes.ok) {
+        const body = await urlRes.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setVideoUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const urlJson = (await urlRes.json().catch(() => null)) as
+        { data?: { upload_url: string; object_path: string; required_put_headers: Record<string, string> } } | null;
+      const uploadInfo = urlJson?.data;
+      if (!uploadInfo) {
+        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+        return;
+      }
+
+      setVideoUploadStatus({ phase: 'uploading', progress: 0 });
+      const putOk = await putVideoWithProgress(
+        uploadInfo.upload_url, file, { 'Content-Type': file.type, ...uploadInfo.required_put_headers },
+        (pct) => setVideoUploadStatus({ phase: 'uploading', progress: pct }),
+      );
+      if (!putOk) {
+        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+        return;
+      }
+
+      setVideoUploadStatus({ phase: 'confirming' });
+      const confirmRes = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/video/confirm`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
+      );
+      if (!confirmRes.ok) {
+        const body = await confirmRes.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setVideoUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: ChannelPostVideoResponse } | null;
+      const uploaded = confirmJson?.data;
+      if (!uploaded) {
+        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+        return;
+      }
+      setVideo({
+        videoUrl: uploaded.video_url ?? '', durationSeconds: uploaded.duration_seconds,
+        width: uploaded.width, height: uploaded.height, codec: uploaded.codec, originalBytes: uploaded.original_bytes,
+      });
+      // confirm이 새 버전을 만들며 재승인 게이트를 재오픈한다(handleImageFileSelected의
+      // B1과 동형 이유) — draft/versions를 서버 값으로 통째로 교체한다.
+      const [draftRes, versionsRes] = await Promise.all([
+        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`).catch(() => null),
+        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`).catch(() => null),
+      ]);
+      if (draftRes?.ok) {
+        const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
+        if (draftJson?.data) setDraft(draftJson.data);
+      }
+      if (versionsRes?.ok) {
+        const versionsJson = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
+        if (versionsJson?.data) setVersions(versionsJson.data);
+      }
+      setVideoUploadStatus({ phase: 'idle' });
+    } catch {
+      setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
     }
   };
 
@@ -1381,6 +1603,10 @@ export default function ChannelPostEditPage() {
   const imageUploadInProgress = imageUploadStatus.phase === 'requesting_url'
     || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming';
 
+  // story #3556(B2와 동형 이유, §17-23③) — 영상 업로드 中엔 저장/상신을 막는다.
+  const videoUploadInProgress = videoUploadStatus.phase === 'requesting_url'
+    || videoUploadStatus.phase === 'uploading' || videoUploadStatus.phase === 'confirming';
+
   // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널(image_required)인데
   // 이미지가 없으면 상신·예약 상신이 서버에서 422로 막힌다(§7 「필수값 빈칸
   // 선알림」). 업로드 진행 中엔 이 사유를 안 보인다(업로드 중엔 실제로 0장이라 두
@@ -1534,7 +1760,16 @@ export default function ChannelPostEditPage() {
             원본=최종이라 배지 자체를 안 그린다(값은 서버가 낸 것만, 문구 조립만 화면
             몫 — 판정은 안 함). 이미지 없는 초안(thumbnail_url=null)은 이 블록 전체를
             건너뛴다. */}
-        {draft.thumbnail_url ? (
+        {/* story #3556(§17-23⑥, 페드루 PO 確定②·유나 §17-23) — video_url이 실린
+            뒤에만 재생 가능한 <video>를 그린다(BE additive 선행, 없으면 undefined —
+            지어내지 않는다). 없으면 기존처럼 썸네일만(「재생할 수 없습니다」류를
+            지어내지 않는다). */}
+        {draft.video_url ? (
+          <video
+            controls preload="metadata" src={draft.video_url} poster={draft.thumbnail_url ?? undefined}
+            className="h-32 w-32 rounded object-cover" data-testid="channel-post-approval-video"
+          />
+        ) : draft.thumbnail_url ? (
           <div className="space-y-1">
             {/* eslint-disable-next-line @next/next/no-img-element -- story #3428: public-read GCS 오브젝트 URL(외부 도메인, next/image 대상 밖 — avatar_upload.py 소비부와 동형 관례). */}
             <img
@@ -1910,6 +2145,79 @@ export default function ChannelPostEditPage() {
         />
       </div>
 
+      {/* story #3556(§17-23①, 유나 確定 2026-09-06) — video_max_bytes>0일 때만
+          슬롯을 그린다(어댑터가 영상을 선언하지 않으면 슬롯 자체가 없다). 자리는
+          이미지(커버) 구역 «위»(커버는 영상에 딸린 것이므로 영상이 먼저 온다).
+          동작은 하나뿐 — 영상 없으면 「영상 선택」, 있으면 「영상 교체」(삭제 버튼
+          없음 — BE에 DELETE가 없다, 確定①). */}
+      {videoSpec && videoSpec.maxBytes > 0 ? (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="channel-post-video-attach">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('channelPostsVideoAttachLabel')}</span>
+          </div>
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-video-spec-tag">
+            {t('channelPostsVideoSpecTag', {
+              maxBytes: formatFileSize(videoSpec.maxBytes),
+              minSeconds: videoSpec.minSeconds,
+              maxSeconds: videoSpec.maxSeconds,
+              aspect: formatVideoAspectRatio(videoSpec.aspectTarget),
+              codecs: formatVideoCodecs(videoSpec.codecs),
+            })}
+          </p>
+          {video ? (
+            <div className="space-y-1">
+              <video
+                controls preload="metadata" src={video.videoUrl} poster={draft?.thumbnail_url ?? undefined}
+                className="h-32 w-32 rounded object-cover" data-testid="channel-post-video-preview"
+              />
+              {/* story #3556(§17-23⑤-1, 유나 確定 2026-09-06 06:03Z) — 업로드 직후
+                  메타 한 줄(라벨 없음). 확定 뒤에만 뜬다(업로드 中엔 아래 단계 문구가
+                  이 자리를 진다) — 네 조각 다 없으면(§17-23④) 줄 자체를 안 그린다. */}
+              {formatVideoMetaLine(video, t) ? (
+                <p className="text-xs text-muted-foreground" data-testid="channel-post-video-meta">
+                  {formatVideoMetaLine(video, t)}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <input
+            ref={videoFileInputRef}
+            type="file"
+            accept="video/*"
+            hidden
+            data-testid="channel-post-video-file-input"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void handleVideoFileSelected(file);
+            }}
+          />
+          <Button
+            type="button" variant="outline" size="sm"
+            disabled={videoUploadInProgress}
+            onClick={() => videoFileInputRef.current?.click()}
+            data-testid="channel-post-video-attach-trigger"
+          >
+            {video ? t('channelPostsVideoReplaceTriggerCta') : t('channelPostsVideoAttachTriggerCta')}
+          </Button>
+          {videoUploadInProgress ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
+              {videoUploadStatus.phase === 'requesting_url'
+                ? t('channelPostsImageUploadRequestingUrl')
+                : videoUploadStatus.phase === 'uploading'
+                  ? t('channelPostsVideoUploading', { pct: videoUploadStatus.progress })
+                  : t('channelPostsImageConfirming')}
+            </p>
+          ) : null}
+          {videoUploadStatus.phase === 'error' ? (
+            <Alert variant="destructive" role="alert" data-testid="channel-post-video-upload-error">
+              <AlertDescription>{videoUploadStatus.text}</AlertDescription>
+              <RawDetailsToggle raw={videoUploadStatus.raw} label={t('errorRawDetailsToggle')} />
+            </Alert>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* story #3428(T3-M·§17-16) — image_max_count<=0(미지원 채널, 또는 아직 모른다)
           이면 첨부 칸 자체를 그리지 않는다. 규격 태그는 어댑터 선언값 그대로(하드코딩
           금지 축) — 값을 지어내지 않는다. */}
@@ -1919,8 +2227,13 @@ export default function ChannelPostEditPage() {
             {/* story #3550(BE 2/2 #3910 계약 확定, 2026-09-06) — B3(2026-09-04)가
                 "다중첨부 아니다"라 개수를 안 적던 것과 반대로, 이제 파일 선택마다
                 실제로 이미지가 하나씩 늘어난다(캐러셀). 개수는 ImageAttachmentList의
-                count 태그가 맡는다(여기서 다시 안 적어 겹치는 문장 0). */}
-            <span className="text-muted-foreground">{t('channelPostsImageAttachLabel')}</span>
+                count 태그가 맡는다(여기서 다시 안 적어 겹치는 문장 0).
+                story #3556(§17-23④, 유나 確定) — 영상이 있으면 이 구역은 「이미지」가
+                아니라 그 영상의 «커버»다(하는 일이 달라졌으므로 이름이 달라야 한다) —
+                라벨·트리거 낱말만 바뀌고 컴포넌트·업로드 경로·검증은 그대로. */}
+            <span className="text-muted-foreground">
+              {video ? t('channelPostsCoverAttachLabel') : t('channelPostsImageAttachLabel')}
+            </span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-image-spec-tag">
             {/* story #3530(유나 §17-16④, PO 確定 2026-09-06) — aspectMin>0(선언
@@ -1994,7 +2307,7 @@ export default function ChannelPostEditPage() {
             onClick={() => imageFileInputRef.current?.click()}
             data-testid="channel-post-image-attach-trigger"
           >
-            {t('channelPostsImageAttachTriggerCta')}
+            {video ? t('channelPostsCoverAttachTriggerCta') : t('channelPostsImageAttachTriggerCta')}
           </Button>
           {imageUploadInProgress ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-progress">
@@ -2060,12 +2373,12 @@ export default function ChannelPostEditPage() {
         <GenerationBudgetIndicator state={genBudget} variant="compact" />
       </div>
       <div className="flex gap-2">
-        <Button onClick={handleSave} disabled={saving || imageUploadInProgress} data-testid="channel-post-save-button">
+        <Button onClick={handleSave} disabled={saving || imageUploadInProgress || videoUploadInProgress} data-testid="channel-post-save-button">
           {saving ? t('editSavingCta') : t('editSaveCta')}
         </Button>
         <Button
           onClick={() => void handleSubmitForApproval()}
-          disabled={submitting || isOverLimit || hasBlockingViolations || imageUploadInProgress || imageRequiredAndMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
@@ -2077,7 +2390,7 @@ export default function ChannelPostEditPage() {
         <Button
           variant="outline"
           onClick={() => setScheduleDialogOpen(true)}
-          disabled={submitting || isOverLimit || hasBlockingViolations || blockedByCommandInFlight || imageUploadInProgress || imageRequiredAndMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || blockedByCommandInFlight || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
           data-testid="channel-post-schedule-submit-button"
         >
           {t('channelPostsScheduleSubmitCta')}
@@ -2127,6 +2440,13 @@ export default function ChannelPostEditPage() {
       {!isOverLimit && !hasBlockingViolations && imageUploadInProgress ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-image-upload-in-progress-reason">
           {t('channelPostsImageUploadInProgressReason')}
+        </p>
+      ) : null}
+      {/* story #3556(§17-23③, 유나 確定) — 영상 업로드 中엔 저장/상신이 왜 막혔는지
+          버튼 밖에 밝힌다(B2와 동형 이유·자리). */}
+      {!isOverLimit && !hasBlockingViolations && videoUploadInProgress ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-video-upload-in-progress-reason">
+          {t('channelPostsVideoUploadInProgressReason')}
         </p>
       ) : null}
       {/* story #3538(유나 §17-16⑤ PO 確定 2026-09-06) — 「업로드 중」 바로 뒤(이미

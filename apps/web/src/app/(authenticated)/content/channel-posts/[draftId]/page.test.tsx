@@ -195,6 +195,16 @@ function stubFetch(opts: {
   }[];
   onImageDelete?: (imageId: string) => { status: number; body: unknown };
   onImageReorder?: (imageIds: string[]) => { status: number; body: unknown };
+  // story #3556(§17-23, PO 確定 2026-09-06) — 릴스 영상 규격(image_*와 동형 관례).
+  // 기본값 0/[] = 영상 미지원(기존 시나리오 전부 회귀 0 — 슬롯 자체가 안 뜬다).
+  videoMaxBytes?: number;
+  videoMaxSeconds?: number;
+  videoMinSeconds?: number;
+  videoAspectTarget?: number;
+  videoAspectTolerance?: number;
+  videoCodecs?: string[];
+  onVideoUploadUrl?: (body: unknown) => { status: number; body: unknown };
+  onVideoConfirm?: (body: unknown) => { status: number; body: unknown };
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -248,6 +258,13 @@ function stubFetch(opts: {
               image_color_space: 'sRGB', image_max_count: opts.imageMaxCount ?? 0,
               // story #3538(BE #3886) — 기본 false(기존 테스트 전부 회귀 0).
               image_required: opts.imageRequired ?? false,
+              // story #3556 — 영상 규격(기본 0/[]=미지원, 기존 시나리오 전부 회귀 0).
+              video_max_bytes: opts.videoMaxBytes ?? 0,
+              video_max_seconds: opts.videoMaxSeconds ?? 0,
+              video_min_seconds: opts.videoMinSeconds ?? 0,
+              video_aspect_target: opts.videoAspectTarget ?? 0,
+              video_aspect_tolerance: opts.videoAspectTolerance ?? 0,
+              video_codecs: opts.videoCodecs ?? [],
             }],
             error: null, meta: null,
           }),
@@ -320,6 +337,35 @@ function stubFetch(opts: {
           // 페이지가 confirm 뒤 이 목록 엔드포인트를 다시 불러 반영하는지가
           // 검증 대상이지, 이 mock의 버전 정합 자체는 아니다).
           currentImages = [...currentImages, result.body as typeof currentImages[number]];
+        }
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      // story #3556(§17-23) — 영상 업로드-url(BFF 형제, PR#3916 완전 동형). PUT
+      // 자체는 XHR로 나가(진행률 이벤트) fetch 목을 안 거친다 — stubXhrForVideoUpload
+      // 별도 헬퍼가 담당.
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/video/upload-url` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onVideoUploadUrl?.(body) ?? {
+          status: 200,
+          body: { upload_url: 'https://storage.example/video-put', object_path: 'channel-media/o/d1/x.mp4', expires_at: '2026-09-06T12:10:00Z', max_bytes: 104857600, required_put_headers: {} },
+        };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/video/confirm` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const result = opts.onVideoConfirm?.(body) ?? {
+          status: 201,
+          body: {
+            video_id: 'vid1', draft_id: DRAFT_ID, version_id: 'v2', version: 2,
+            duration_seconds: 12.5, width: 1080, height: 1920, codec: 'avc1',
+            original_bytes: 20000000, video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4',
+          },
+        };
+        const ok = result.status < 400;
+        if (ok) {
+          const confirmed = result.body as { version?: number; video_url?: string | null };
+          currentDraftDetail = { ...currentDraftDetail, current_version: confirmed.version, video_url: confirmed.video_url };
         }
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -453,6 +499,29 @@ function stubFetch(opts: {
       throw new Error('unexpected fetch: ' + url + ' ' + (init?.method ?? 'GET'));
     }),
   );
+}
+
+// story #3556(§17-23③, PO 確定) — 영상 PUT은 fetch가 아니라 XHR로 나간다(진행률
+// 이벤트 확보). jsdom의 실 XMLHttpRequest는 실 네트워크가 없어 그대로 못 쓴다 —
+// send() 호출 즉시 progress 이벤트 1~2개를 합성해 쏘고 onload로 마무리하는 최소
+// 가짜 클래스로 교체한다(fetch stubGlobal과 동형 관례).
+function stubXhrForVideoUpload(opts: { status?: number; progressTicks?: number[] } = {}) {
+  const progressTicks = opts.progressTicks ?? [50, 100];
+  const status = opts.status ?? 200;
+  class FakeXHR {
+    upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = { onprogress: null };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    status = 0;
+    open(_method: string, _url: string) {}
+    setRequestHeader(_k: string, _v: string) {}
+    send(_body: unknown) {
+      for (const pct of progressTicks) this.upload.onprogress?.({ lengthComputable: true, loaded: pct, total: 100 });
+      this.status = status;
+      this.onload?.();
+    }
+  }
+  vi.stubGlobal('XMLHttpRequest', FakeXHR);
 }
 
 describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
@@ -3628,5 +3697,178 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
     await flush();
     expect(container.querySelector('[data-testid="generation-budget-failed"]')).not.toBeNull();
     expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+// story #3556(§17-23, 페드루 PO 確定 2026-09-06) — 릴스 영상 슬롯. BE additive
+// (video_* 6종·video_url)이 develop에 아직 없어(#3559 착지 뒤 rebase 예정) 이
+// 스위트는 계약값으로만 검증한다.
+describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
+  it('⭐videoMaxBytes<=0(기본값·미지원)이면 영상 슬롯 자체를 안 그린다(회귀 0)', async () => {
+    stubFetch({});
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-video-attach"]')).toBeNull();
+  });
+
+  it('⭐규격 태그 — 코덱 표(중복 제거·선언 순서 유지)·이름 있는 비율(9:16)로 조립한다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0.5625, videoCodecs: ['avc1', 'h264', 'hvc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 3~90초 · 9:16 · H.264/HEVC');
+  });
+
+  it('규격 태그 — 표에 없는 비율은 §17-16④ 일반 표기(formatAspectBound)로 폴백한다(1.5 → 1.5:1)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 1.5, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toContain('1.5:1');
+  });
+
+  it('⭐첨부 전 트리거 라벨은 「영상 선택」, 이미지 구역 라벨은 「이미지 첨부」(영상 없음)', async () => {
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-video-attach-trigger"]')?.textContent).toBe('영상 선택');
+    expect(container.querySelector('[data-testid="channel-post-image-attach"] span')?.textContent).toBe('이미지 첨부');
+  });
+
+  it('⭐업로드 왕복 — requesting_url→uploading(%)→confirming→성공, video 상태 반영+커버 라벨 전환', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-preview"]')?.getAttribute('src'))
+      .toBe('https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4');
+    // §17-23⑤-1(유나 確定 06:03Z) — 라벨 없음·순서=길이·해상도·코덱·용량.
+    expect(container.querySelector('[data-testid="channel-post-video-meta"]')?.textContent)
+      .toBe('12.5초 · 1080×1920 · H.264 · 19.1 MB');
+    // §17-23④ — 영상이 있으면 이미지 구역은 「커버」가 된다(컴포넌트·경로는 그대로).
+    expect(container.querySelector('[data-testid="channel-post-image-attach"] span')?.textContent).toBe('커버');
+    expect(container.querySelector('[data-testid="channel-post-image-attach-trigger"]')?.textContent).toBe('커버 선택');
+    expect(container.querySelector('[data-testid="channel-post-video-attach-trigger"]')?.textContent).toBe('영상 교체');
+  });
+
+  it('메타 한 줄 — 소수 첫째 자리·0이면 생략(trimTrailingZero 형, 13.0초 → "13초")', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      onVideoConfirm: () => ({
+        status: 201,
+        body: {
+          video_id: 'vid1', draft_id: DRAFT_ID, version_id: 'v2', version: 2,
+          duration_seconds: 13.0, width: 1080, height: 1920, codec: 'hvc1',
+          original_bytes: 1024 * 1024, video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4',
+        },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-meta"]')?.textContent)
+      .toBe('13초 · 1080×1920 · HEVC · 1.0 MB');
+  });
+
+  it('업로드 진행 中엔 저장·상신·예약이 막히고 사유 문구가 뜬다(B2와 동형)', async () => {
+    let releaseUpload: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { releaseUpload = resolve; });
+    class GatedXHR {
+      upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = { onprogress: null };
+      onload: (() => void) | null = null;
+      status = 0;
+      open() {}
+      setRequestHeader() {}
+      async send() {
+        await gate;
+        this.status = 200;
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', GatedXHR);
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-video-upload-in-progress-reason"]')).not.toBeNull();
+
+    releaseUpload!();
+    await flush();
+  });
+
+  it('⭐422 CHANNEL_VIDEO_ASPECT_RATIO_REJECTED — 서버 message 그대로 렌더된다', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      onVideoConfirm: () => ({
+        status: 422, body: { detail: { code: 'CHANNEL_VIDEO_ASPECT_RATIO_REJECTED', message: '비율이 9:16을 벗어납니다(서버 메시지 예시)' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('비율이 9:16을 벗어납니다(서버 메시지 예시)');
+  });
+
+  it('⭐승인 카드 — draft.video_url이 있으면 <video>를, 없으면 썸네일만 그린다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      draftDetail: {
+        video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/existing.mp4',
+        thumbnail_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/cover.jpg',
+        publication_id: null,
+      } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const video = container.querySelector('[data-testid="channel-post-approval-video"]') as HTMLVideoElement;
+    expect(video?.getAttribute('src')).toBe('https://storage.googleapis.com/bucket/channel-media/o/d1/existing.mp4');
+    expect(video?.getAttribute('poster')).toBe('https://storage.googleapis.com/bucket/channel-media/o/d1/cover.jpg');
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).toBeNull();
+  });
+
+  it('video_url 없으면(BE 미착지·영상 미첨부) 승인 카드는 기존처럼 썸네일만', async () => {
+    stubFetch({
+      draftDetail: { thumbnail_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/cover.jpg' } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-approval-video"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
   });
 });
