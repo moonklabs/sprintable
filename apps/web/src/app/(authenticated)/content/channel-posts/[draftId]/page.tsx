@@ -1547,8 +1547,13 @@ export default function ChannelPostEditPage() {
   // story #3402 PR2 ②-a(doc §5·AC5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b).
   // canPublish는 site-posts(content/[draftId]/page.tsx::canPublish)와 동형으로 role
   // 제약이 아니라 view.publishable(업무 상태) 그대로다 — "승인된 최신 버전에서만
-  // 발행할 수 있다"는 판단은 게이트/봉인 일치 여부이지 누구인지가 아니다. canUnpublish
+  // 발행할 수 있다"는 판단은 게이트/봉인 일치 여부이지 누구인지가 아니다. 사유 렌더도
+  // site-posts와 동형(story #3568 정정 — 이전엔 canPublish만 동형이고 사유 렌더가
+  // SEAL_MISSING→기본 두 갈래뿐이라 안 따라갔다: 발행 성공 뒤 "승인된 최신 버전에서만…"
+  // 오문구가 뜨는 결함이었다). canUnpublish
   // 만 site와 동일하게 role===owner|admin으로 좁힌다(발행 취소는 더 무거운 되돌릴 수
+  // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
+  // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
   // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
   // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
   // "휴먼 게이팅"의 실체는 이 owner/admin 세분화다.
@@ -1943,7 +1948,11 @@ export default function ChannelPostEditPage() {
         </div>
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
-            {view.blockedReason === 'SEAL_MISSING' ? t('publishDisabledReasonSealMissing') : t('publishDisabledReason')}
+            {view.blockedReason === 'SEAL_MISSING'
+              ? t('publishDisabledReasonSealMissing')
+              : view.status === 'published'
+                ? t('publishDisabledReasonAlreadyPublished')
+                : t('publishDisabledReason')}
           </p>
         ) : null}
         {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌
