@@ -380,3 +380,94 @@ def test_main_meta_out_empty_list_when_shard_fully_weighted(tmp_path, monkeypatc
     mod.main()
     meta = json.loads(meta_path.read_text())
     assert meta["unweighted_files"] == []
+
+
+# ─── story #3558 — 등재값 대 실측 절대 배율 경고 축(실패 X) ────────────────────
+
+
+def test_ratio_outliers_flags_at_exact_high_boundary():
+    """ratio==2.0(경계 자체)는 «>=»라 flag돼야 한다(정확히 2배 과소 등재도 놓치면 안 됨)."""
+    mod = _load()
+    outliers = mod.ratio_outliers({"tests/a.py": 20.0}, {"tests/a.py": 10.0})
+    assert len(outliers) == 1
+    assert outliers[0]["file"] == "tests/a.py"
+    assert outliers[0]["ratio"] == pytest.approx(2.0)
+
+
+def test_ratio_outliers_flags_at_exact_low_boundary():
+    """ratio==0.5(경계 자체)도 «<=」라 flag(과대 등재 — 이 파일 탓에 다른 파일이 손해)."""
+    mod = _load()
+    outliers = mod.ratio_outliers({"tests/a.py": 5.0}, {"tests/a.py": 10.0})
+    assert len(outliers) == 1
+    assert outliers[0]["ratio"] == pytest.approx(0.5)
+
+
+def test_ratio_outliers_just_inside_bounds_not_flagged():
+    """2.0/0.5 경계 바로 안쪽(1.99배·0.51배)은 정상 편차로 보고 flag 안 한다."""
+    mod = _load()
+    outliers = mod.ratio_outliers(
+        {"tests/a.py": 19.9, "tests/b.py": 5.1}, {"tests/a.py": 10.0, "tests/b.py": 10.0},
+    )
+    assert outliers == []
+
+
+def test_ratio_outliers_skips_file_missing_from_weights():
+    """measured에는 있는데 weights.json엔 없는(unweighted, #3392 축이 별도 담당) 파일은
+    조용히 건너뛴다 — 이 축이 unweighted 가드와 중복 경고를 내면 혼란만 커진다."""
+    mod = _load()
+    outliers = mod.ratio_outliers({"tests/new_unweighted.py": 999.0}, {})
+    assert outliers == []
+
+
+def test_ratio_outliers_sorted_worst_first():
+    mod = _load()
+    outliers = mod.ratio_outliers(
+        {"tests/mild.py": 21.0, "tests/severe.py": 100.0},
+        {"tests/mild.py": 10.0, "tests/severe.py": 10.0},
+    )
+    assert [o["file"] for o in outliers] == ["tests/severe.py", "tests/mild.py"]
+
+
+def test_load_duration_artifacts_merges_multiple_shard_files(tmp_path):
+    mod = _load()
+    (tmp_path / "shard-durations-0.json").write_text(
+        json.dumps({"shard": 0, "durations": {"tests/a.py": 5.0, "tests/b.py": 6.0}})
+    )
+    (tmp_path / "shard-durations-1.json").write_text(
+        json.dumps({"shard": 1, "durations": {"tests/c.py": 7.0}})
+    )
+    merged = mod.load_duration_artifacts(tmp_path)
+    assert merged == {"tests/a.py": 5.0, "tests/b.py": 6.0, "tests/c.py": 7.0}
+
+
+def test_write_and_reload_durations_json_roundtrip(tmp_path):
+    mod = _load()
+    out = tmp_path / "shard-durations-3.json"
+    mod.write_durations_json({"tests/x.py": 12.5}, out, shard=3)
+    data = json.loads(out.read_text())
+    assert data == {"shard": 3, "durations": {"tests/x.py": 12.5}}
+
+
+def test_audit_durations_mode_never_fails_even_with_outliers(tmp_path, capsys, monkeypatch):
+    """story #3558 AC2 — 명백한 이탈이 있어도 exit code는 항상 0이어야 한다(경고 전용,
+    이 잡이 CI를 절대 못 죽인다)."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    (artifact_dir / "shard-durations-0.json").write_text(
+        json.dumps({"shard": 0, "durations": {"tests/way_off.py": 500.0}})
+    )
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/way_off.py": 10.0})
+    exit_code = mod._audit_durations_mode(artifact_dir)
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "::warning::" in captured.out
+    assert "tests/way_off.py" in captured.out
+
+
+def test_audit_durations_mode_missing_dir_returns_0_no_crash(tmp_path):
+    """backend-irrelevant PR이면 destructive 샤드 자체가 스킵돼 산출물이 아예 없을 수
+    있다 — 디렉터리 부재를 에러가 아니라 "대조 0건"으로 조용히 처리해야 한다."""
+    mod = _load()
+    exit_code = mod._audit_durations_mode(tmp_path / "does-not-exist")
+    assert exit_code == 0
