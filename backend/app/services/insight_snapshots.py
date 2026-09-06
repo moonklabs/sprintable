@@ -25,8 +25,14 @@ logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
 _SNAPSHOT_OFFSETS = (timedelta(days=1), timedelta(days=7))
-# 블루프린트 v3 §2(d) 7키 — 이 순서·이 이름 그대로가 정규화 계약의 SSOT.
-NORMALIZED_KEYS = ("impressions", "reach", "views", "engagements", "clicks", "spend", "conversions")
+# 블루프린트 v3 §2(d) 7키 + story #3583-BE(GA4 유입 3키, 그라운딩③ PO 確定) — 이
+# 순서·이 이름 그대로가 정규화 계약의 SSOT. inflow_* 3키는 채널 어댑터의
+# insight_metrics 선언 축과 별개다(org GA4 연결 여부로 판정 — `_maybe_enrich_
+# with_ga4_inflow` 참고, declared_metrics 게이트를 안 탄다).
+NORMALIZED_KEYS = (
+    "impressions", "reach", "views", "engagements", "clicks", "spend", "conversions",
+    "inflow_sessions", "inflow_users", "inflow_conversions",
+)
 
 # story #3414 classify_failure_kind()와 같은 error_code 문자열을 재사용한다(새 상태값
 # 0, 페드루 決定⑤) — CHANNEL_TOKEN_EXPIRED/CHANNEL_PUBLISH_AUTH_REJECTED=connection
@@ -529,6 +535,7 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
             snapshot.status = "captured"
             snapshot.captured_at = now
             snapshot.source = snapshot.channel
+            await _maybe_enrich_with_ga4_inflow(db, snapshot)
             await _record_insight_evidence(db, snapshot)
             await db.commit()
             counts["captured"] += 1
@@ -557,6 +564,145 @@ async def _promote_connection_status_for_snapshot(db: AsyncSession, snapshot: In
     connection = await db.get(ChannelConnection, pub.connection_id)
     if connection is not None and connection.status not in ("revoked", "error"):
         connection.status = "expired"
+
+
+_GA4_RUN_REPORT_URL_TMPL = "https://analyticsdata.googleapis.com/v1beta/properties/{property_id}:runReport"
+
+
+async def _fetch_ga4_inflow(
+    client: "httpx.AsyncClient", *, access_token: str, property_id: str,  # noqa: F821
+    source: str, medium: str, campaign: str, start_date: str, end_date: str,
+) -> dict[str, int]:
+    """story #3583-BE(그라운딩③ PO 確定) — GA4 Data API `runReport`. 이 발행물의
+    UTM(source/medium/campaign) **정확 일치** 세션만 필터링해 sessions·totalUsers·
+    keyEvents를 합산한다. `rows`가 아예 없으면(그 필터로 온 세션이 0건이거나
+    GA4 데이터 처리 지연으로 이 기간을 아직 안 채웠을 수 있음) 빈 dict를 돌려준다
+    — 0을 지어내지 않고 호출부가 그대로 「미제공」 처리하게 한다(보수적 판단,
+    threads/instagram/facebook의 "값이 있을 때만 싣는다" 원칙과 동형).
+
+    페드루 PO 리뷰(2026-09-06) — GA4 `conversions` 메트릭은 2024-05-06 changelog
+    로 deprecated, 대체는 `keyEvents`(같은 개념·새 이름). `conversions`를 그대로
+    요청하면 400이 나고 이 함수의 `resp.status_code != 200` 분기가 예외를 던져
+    호출부(`_maybe_enrich_with_ga4_inflow`)가 조용히 전부 미제공으로 삼켜버리는
+    자리라 — 지금 고치지 않으면 라이브에서 inflow_conversions가 영원히 null이
+    되는 잠복 결함이었다."""
+    from app.services.ga4_oauth import GA4OAuthError
+
+    body = {
+        "dateRanges": [{"startDate": start_date, "endDate": end_date}],
+        "dimensions": [
+            {"name": "sessionSource"}, {"name": "sessionMedium"}, {"name": "sessionCampaignName"},
+        ],
+        "metrics": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
+        "dimensionFilter": {
+            "andGroup": {"expressions": [
+                {"filter": {"fieldName": "sessionSource", "stringFilter": {"value": source}}},
+                {"filter": {"fieldName": "sessionMedium", "stringFilter": {"value": medium}}},
+                {"filter": {"fieldName": "sessionCampaignName", "stringFilter": {"value": campaign}}},
+            ]}
+        },
+    }
+    resp = await client.post(
+        _GA4_RUN_REPORT_URL_TMPL.format(property_id=property_id),
+        json=body, headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if resp.status_code != 200:
+        raise GA4OAuthError("GA4_RUN_REPORT_FAILED", resp.text[:500], status_code=resp.status_code)
+
+    result = resp.json()
+    rows = result.get("rows") or []
+    if not rows:
+        return {}
+    metric_names = [h["name"] for h in result.get("metricHeaders", [])]
+    totals = {name: 0 for name in metric_names}
+    for row in rows:
+        for i, mv in enumerate(row.get("metricValues", [])):
+            if i < len(metric_names):
+                totals[metric_names[i]] += int(float(mv.get("value", 0) or 0))
+    return {
+        "inflow_sessions": totals.get("sessions", 0),
+        "inflow_users": totals.get("totalUsers", 0),
+        "inflow_conversions": totals.get("keyEvents", 0),
+    }
+
+
+async def _maybe_enrich_with_ga4_inflow(db: AsyncSession, snapshot: InsightSnapshot) -> None:
+    """story #3583-BE(그라운딩③ PO 確定) — inflow_* 3키는 채널 어댑터의 declared_
+    metrics 축과 별개(org GA4 연결 여부로만 판정) — `_normalize`가 이미 이 3키를
+    null로 채워 둔 뒤(어느 채널 어댑터도 이 키들을 선언 안 하므로), 이 함수는
+    조건이 맞을 때만 그 값을 **덮어쓴다**. 외부 channel_post 발행물에만 적용
+    (hosted_site는 그 글이 UTM 링크의 목적지지 발신지가 아니므로 스코프 밖).
+
+    best-effort — 이 함수의 어떤 실패도 스냅샷 전체를 실패시키지 않는다(채널
+    자신의 성과 캡처는 이미 끝난 뒤 호출된다, inflow는 부가 정보). 지속 인증
+    실패만 GA4Connection을 needs_reauth로 승격(덧붙임 c) — 그 외(429/5xx/
+    네트워크/UTM 불일치로 rows 0건)는 조용히 미제공으로 남긴다."""
+    if snapshot.publication_kind != "channel_publication":
+        return
+
+    import httpx
+
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.channel_publication import ChannelPublication
+    from app.models.ga4_connection import GA4Connection
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+    from app.services.channel_credential_crypto import decrypt_channel_credential, encrypt_channel_credential
+    from app.services.ga4_oauth import (
+        GA4OAuthError,
+        classify_ga4_reauth_reason,
+        is_persistent_ga4_auth_failure,
+        refresh_access_token,
+    )
+    from app.services.utm import resolve_utm_campaign
+
+    ga4_connection = (await db.execute(
+        select(GA4Connection).where(GA4Connection.org_id == snapshot.org_id)
+    )).scalar_one_or_none()
+    if ga4_connection is None or ga4_connection.status != "connected" or not ga4_connection.property_id:
+        return
+
+    adapter = CHANNEL_ADAPTERS.get(snapshot.channel)
+    if adapter is None or not adapter.utm_source:
+        return  # 이 채널은 UTM 부착 자체를 선언 안 함.
+
+    pub = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == snapshot.publication_id)
+    )).scalar_one_or_none()
+    if pub is None or pub.published_at is None:
+        return
+    version = await db.get(ChannelPostVersion, pub.version_id)
+    if version is None:
+        return
+    campaign = resolve_utm_campaign(version.link_url, fallback_draft_id=version.draft_id)
+
+    from app.core.config import settings
+
+    start_date = pub.published_at.date().isoformat()
+    end_date = (snapshot.due_at or datetime.now(timezone.utc)).date().isoformat()
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            access_token, _expires_in = await refresh_access_token(
+                client, refresh_token=decrypt_channel_credential(ga4_connection.encrypted_refresh_token),
+                client_id=settings.google_client_id, client_secret=settings.google_client_secret,
+            )
+        except GA4OAuthError as exc:
+            if is_persistent_ga4_auth_failure(exc):
+                ga4_connection.status = "needs_reauth"
+                ga4_connection.reason = classify_ga4_reauth_reason(exc)
+            return
+        try:
+            inflow = await _fetch_ga4_inflow(
+                client, access_token=access_token, property_id=ga4_connection.property_id,
+                source=adapter.utm_source, medium=adapter.utm_medium, campaign=campaign,
+                start_date=start_date, end_date=end_date,
+            )
+        except GA4OAuthError:
+            return
+
+    ga4_connection.encrypted_access_token = encrypt_channel_credential(access_token)
+    if inflow and snapshot.normalized is not None:
+        snapshot.normalized.update(inflow)
 
 
 async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) -> None:

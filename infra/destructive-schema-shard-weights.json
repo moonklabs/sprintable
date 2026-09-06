@@ -1401,6 +1401,16 @@
       "file": "tests/test_3571_facebook_comments_insights.py",
       "sec": 20.0,
       "source": "story-3571-facebook-comments-insights(PR 개설 前 선제 등재 — 로컬 raw pytest 17건 3.26s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3583_ga4_measurement_connection_router.py",
+      "sec": 55.0,
+      "source": "story-3583-ga4-measurement-connection(PR 개설 前 선제 등재 — 애초 28건 단일 파일이 로컬 11.5s로 story #3579 60초 가드 경계대역 추정이라 처음부터 3-way 분할(oauth_unit=non-destructive·router·insight_enrichment). 이 파일은 라우터 15건 로컬 8.91s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 55s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3583_ga4_insight_enrichment.py",
+      "sec": 16.0,
+      "source": "story-3583-ga4-measurement-connection(3-way 분할 — inflow 부착 로직 4건 로컬 2.60s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 16s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

@@ -248,4 +248,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 배선. 시크릿 아님, cloudbuild.yaml _PUBLIC_SITE_BASE_URL substitution으로 직접
     # 배선·manual-env-allowlist.yml 미등재)로 119→120. 가드가 신규 필드를 설계대로 잡은 것.
     assert "PUBLIC_SITE_BASE_URL" in keys
-    assert len(keys) == 120
+    # story #3583-BE(GA4 «고객 소유» 연결, 페드루 PO 確定 2026-09-06) — backend_url 1필드
+    # 신설(GA4 OAuth 콜백 redirect_uri 구성용, 백엔드 자기 자신 URL)로 120→121.
+    # cloudbuild.yaml `_BACKEND_URL` substitution으로 직접 배선·manual-env-allowlist.yml
+    # 미등재(PUBLIC_SITE_BASE_URL과 동형).
+    assert "BACKEND_URL" in keys
+    assert len(keys) == 121

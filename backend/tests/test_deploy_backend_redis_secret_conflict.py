@@ -276,7 +276,12 @@ _CLOUDBUILD_YAML = _REPO_ROOT / "cloudbuild.yaml"
 # cloudbuild.yaml 최상위 substitutions: 블록에 선언된 키 + GCP 내장 substitution.
 # story #2421 핫픽스 테스트가 이 목록 밖의 `${...}` 참조를 전부 "이스케이프 안 된 셸 변수"로 간주한다.
 _DECLARED_SUBSTITUTIONS = {
-    "_AR_REGION", "_AR_REPO", "_DEPLOY_ENV", "_FASTAPI_URL", "_BACKEND_MIN_INSTANCES",
+    "_AR_REGION", "_AR_REPO", "_DEPLOY_ENV", "_FASTAPI_URL",
+    # story #3583-BE(GA4 «고객 소유» 연결) — GA4 OAuth 콜백 redirect_uri 구성용.
+    # deploy-backend ENV_VARS가 이제 이 값을 직접 참조(_FASTAPI_URL과 값은 같지만 prod에서
+    # GHA가 빈 값으로 override해야 해 별도 substitution으로 둔다).
+    "_BACKEND_URL",
+    "_BACKEND_MIN_INSTANCES",
     "_BACKEND_MAX_INSTANCES", "_DB_POOL_SIZE", "_DB_MAX_OVERFLOW", "_BACKEND_DB_PGBOUNCER", "_BACKEND_TIMEOUT", "_REALTIME_MIN_INSTANCES",
     "_REALTIME_MAX_INSTANCES", "_REALTIME_TIMEOUT", "_REALTIME_URL", "_FRONTEND_TIMEOUT",
     "_BACKEND_PG_LISTEN_ENABLED", "_BACKEND_REDIS_CONSUME_ENABLED",
@@ -379,6 +384,8 @@ def _run_env_vars_assembly(
         **os.environ,
         "_DEPLOY_ENV": deploy_env,
         "_FASTAPI_URL": "https://example.run.app",
+        # story #3583-BE — set -u라 미설정이면 스크립트가 죽는다(_FASTAPI_URL과 동일 이유).
+        "_BACKEND_URL": "https://example.run.app",
         "_DB_POOL_SIZE": "3",
         "_DB_MAX_OVERFLOW": "1",
         "_BACKEND_DB_PGBOUNCER": "false",
@@ -758,7 +765,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
     """dev 경로 무회귀 — prod 분기 추가가 dev의 다른 필드에 영향을 주지 않는다."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert result == (
-        "FASTAPI_URL=https://example.run.app,DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,"
+        "FASTAPI_URL=https://example.run.app,BACKEND_URL=https://example.run.app,"
+        "DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,"
         "DB_PGBOUNCER=false,"
         "PG_LISTEN_ENABLED=true,EVENT_BROKER_REDIS_CONSUME_ENABLED=false,"
         "EVENT_BROKER_REDIS_DISPATCH_ENABLED=false,EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=false,"

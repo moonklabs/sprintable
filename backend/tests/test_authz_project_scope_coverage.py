@@ -368,6 +368,16 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     # 스캔이 이 커스텀 헬퍼명을 인식 못함). POST 발급/confirm 두 곳도 같은 헬퍼를 쓰지만
     # 이 스캐너는 DELETE/PATCH/PUT만 대상이라 여기 한 건만 잡힌다.
     "app.routers.team_members:delete_avatar_endpoint": "_assert_can_edit_avatar(에이전트 owner/admin·휴먼 self/admin — avatar_url PATCH와 동일 게이트 재사용, v1 스캔 미인식 커스텀 헬퍼)",
+    # story #3583-BE — GA4 «고객 소유» 측정 연결. path의 {org_id}는 ga4_connections
+    # 행(org_id UNIQUE·project_id 컬럼 자체가 없음, channel_connections/channel_app_
+    # credentials와 동형 ORG_ONLY 리소스 — 그라운딩 §9). _require_owner(channel_
+    # connections.py에서 그대로 재사용, 새 헬퍼 0)가 org 멤버십+role(owner)을 검증한다
+    # — project 스코프 검증이 애초에 무의미. authorize/select는 POST라 이 스캐너(DELETE/
+    # PATCH/PUT만 대상)의 후보 자체가 아니다 — DELETE인 disconnect만 여기 등재.
+    "app.routers.measurement_connections:ga4_disconnect_endpoint": (
+        "_require_owner(→org owner) — ga4_connections는 project 축이 없는 org-level "
+        "리소스(channel_connections:set_channel_app_credentials와 동형 ORG_ONLY 결)."
+    ),
 }
 
 # ── known-debt: 실 project-scoped IDOR — 후속 라운드 상환(6후보·story 5285888c 감사). ──

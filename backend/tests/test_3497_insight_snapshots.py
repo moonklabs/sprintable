@@ -186,7 +186,12 @@ async def test_sandbox_end_to_end_captures_all_seven_keys_and_records_evidence()
             assert snapshot.status == "captured"
             assert snapshot.captured_at is not None
             assert set(snapshot.normalized.keys()) == set(NORMALIZED_KEYS)
-            assert all(v is not None for v in snapshot.normalized.values()), "sandbox는 7키 전부 값이 있어야 한다"
+            original_seven = ("impressions", "reach", "views", "engagements", "clicks", "spend", "conversions")
+            assert all(snapshot.normalized[k] is not None for k in original_seven), "sandbox는 7키 전부 값이 있어야 한다"
+            # story #3583-BE — inflow_* 3키는 GA4 연결 축(org 미연결)이라 null이 맞다
+            # (이 스냅샷은 publication_kind="site_post"라 애초에 그 축 대상도 아님).
+            for key in ("inflow_sessions", "inflow_users", "inflow_conversions"):
+                assert snapshot.normalized[key] is None
 
             evidence = (await s.execute(
                 select(Evidence).where(Evidence.ref == str(snapshot.id))
