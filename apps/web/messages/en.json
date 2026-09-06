@@ -2596,6 +2596,7 @@
     "channelPostsImageAspectRatioTooNarrow": "This image is too tall. The minimum aspect ratio is {minAspectRatio}, but this is {aspectRatio}",
     "channelPostsImageConversionFailed": "Even after automatic conversion, this still exceeds the {maxBytes} limit ({finalBytes})",
     "channelPostsImageAnimatedUnsupported": "Animated images aren't supported ({frameCount} frames)",
+    "channelPostsVideoCoverAspectRatioRejected": "The cover ratio is {actual}. A Reels cover must be {target}.",
     "channelPostsImageConvertedBadgeBase": "Automatically converted to fit this channel's specs",
     "channelPostsImageConvertedBadgeWidthFragment": "width {from}px → {to}px",
     "channelPostsImageConvertedBadgeBytesFragment": "size {from} → {to}",

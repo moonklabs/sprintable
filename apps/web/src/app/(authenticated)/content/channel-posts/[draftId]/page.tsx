@@ -344,6 +344,15 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
       });
     case 'image_animated_unsupported':
       return t('channelPostsImageAnimatedUnsupported', { frameCount: info.imageFrameCount ?? '' });
+    // story #3586(BE #3933, 유나 §17-23 확定 2026-09-06 · PO 정정 — tolerance는
+    // 절대오차지 퍼센트가 아니라 문장에 안 싣는다) — 방향(세로/가로) 문장 없음
+    // (BE가 abs 한 갈래라 어느 쪽으로 벗어났는지 모른다). actual·target 둘 다
+    // formatVideoAspectRatio(규격 태그 헬퍼, §17-23②)로 — 날 소수 금지.
+    case 'cover_aspect_ratio_rejected':
+      return t('channelPostsVideoCoverAspectRatioRejected', {
+        actual: typeof info.imageAspectRatio === 'number' ? formatVideoAspectRatio(info.imageAspectRatio) : '',
+        target: typeof info.coverAspectTarget === 'number' ? formatVideoAspectRatio(info.coverAspectTarget) : '',
+      });
     default:
       return info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('errorChannelImageUploadFailed'));
   }

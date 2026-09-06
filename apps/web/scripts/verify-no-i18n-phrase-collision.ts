@@ -371,6 +371,14 @@ export const EXEMPT_PAIRS = new Set<string>([
   // docs.indexDocCount류)이지 #2352/#2365가 잡으려는 "다른 두 셈이 헷갈리는" 병이
   // 아니다. 유나 §17-24 원문 확定값 — 재작명 대상 아님.
   'verify.verificationSheetColumnName <-> verify.verificationSheetSummaryAllPass',
+  // story #3586(BE #3933, 유나 §17-23 확定 2026-09-06 · PO 승인 2026-09-06) —
+  // content.channelPostsVideoCoverAspectRatioRejected(완결 오류 문장, actual/target
+  // 값 보간) <-> content.channelPostsCoverAttachLabel("커버", 첨부 버튼 라벨). 완결
+  // 오류 문장 vs 첨부 버튼 라벨 — 같은 대상("커버")을 다른 레지스터로 부르는 것이지
+  // #2352/#2365가 잡으려는 "다른 것을 세는 두 수가 헷갈리는" 병이 아니다(가드 표적
+  // 클래스 밖). actual/target을 NON_NUMBER_PLACEHOLDER_NAMES에 넣지 않는다(PO 지적
+  // — 그 이름들은 다른 자리에서 진짜 수를 실을 수 있어 자를 무디게 만든다).
+  'content.channelPostsCoverAttachLabel <-> content.channelPostsVideoCoverAspectRatioRejected',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

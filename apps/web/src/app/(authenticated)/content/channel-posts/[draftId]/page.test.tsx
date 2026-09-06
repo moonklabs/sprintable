@@ -2328,6 +2328,66 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(errorText).not.toContain('0.56');
   });
 
+  // story #3586(BE #3933, 유나 §17-23 확定 2026-09-06) — 릴스 커버 비율 거부.
+  // actual·target 둘 다 formatVideoAspectRatio(규격 태그 헬퍼)로 조립 — 날 소수
+  // 금지, tolerance는 절대오차라 문장에 안 싣는다(PO 정정).
+  it('⭐#3586 — CHANNEL_COVER_ASPECT_RATIO_REJECTED(422) — actual·target이 규격 태그 형(「9:16」)으로 조립된다', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageConfirm: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_COVER_ASPECT_RATIO_REJECTED', message: '…', aspect_ratio: 1.0, target: 0.5625, tolerance: 0.05 } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('1:1');
+    expect(errorText).toContain('9:16');
+    expect(errorText).not.toContain('0.5625');
+    expect(errorText).not.toContain('0.05');
+    expect(errorText).not.toContain('%');
+  });
+
+  // ⭐뮤테이션 방향 — detail target이 바뀌면 문구의 {target}도 바뀐다(하드코딩
+  // "9:16" 문자열이 아니라 실제로 detail 값을 읽는다는 증거).
+  it('⭐#3586 — detail target이 다른 값(4:5)이면 문구도 그 값으로 바뀐다', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageConfirm: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_COVER_ASPECT_RATIO_REJECTED', message: '…', aspect_ratio: 1.0, target: 0.8, tolerance: 0.05 } },
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('4:5');
+    expect(errorText).not.toContain('9:16');
+  });
+
   // story #3530 REQUIRED 2(유나 Design 변경요청, PO 채택 2026-09-06) — exceeded
   // 갈래도 formatAspectBound로(전엔 toFixed(1)라 IG 1.91이 「1.9」로 태그와 다른
   // 수였다) + 방향 없는 문구("이미지가 너무 길쭉합니다" — "가로가 너무 깁니다"류
