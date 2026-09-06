@@ -70,8 +70,14 @@ RiskGrade = Literal["low", "high"]
 # 등재하지 않는다(신중 결재 취지 훼손, PO 명시 판단) — high로 명시.
 # story #3291(M1·마케팅자동화, 2026-09-01) — external_publish(불가역 외부 발신) 명시 high
 # 등재. doc_approval 미등재 실사고(위 코멘트) 선례를 그대로 따라 폴백 의존 대신 명시.
+# story #3561(Phase2·BE, 페드루 PO 리뷰 조건③, PR#3922 2026-09-06) — concept_approval도
+# 명시 high 등재. GATE_TYPES(hitl_config.py)·_ALWAYS_MANUAL_GATE_TYPES(이 파일 위)엔
+# 넣었으나 이 매트릭스에 행을 안 넣은 게 CI shard(3) test_1972_gate_risk_grade.py의
+# "GATE_TYPES <= covered" 완결성 assert를 실패시켰다(폴백에 기대지 않는다는 이 섹션
+# 자체의 원칙을 그대로 따름 — external_publish와 동일 근거: 판단이 존재 이유인
+# 게이트는 신중 결재 UX가 맞다).
 _HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset(
-    {"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE, "external_publish"}
+    {"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE, "external_publish", "concept_approval"}
 )
 #
 # story #2709(2026-08-17, PO 판정) — agent_decision_request를 명시 low 등재. 미등재=폴백(§2.3

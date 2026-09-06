@@ -71,6 +71,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("conservative", "doc_approval", "high"),
     ("conservative", "agent_decision_request", "high"),  # story #2709
     ("conservative", "external_publish", "high"),  # story #3291
+    ("conservative", "concept_approval", "high"),  # story #3561
     ("conservative", _UNCLASSIFIED_GATE_TYPE, "high"),
     # posture=permissive → 항상 low(gate_type 무관, §2.1)
     ("permissive", "pr_review", "low"),
@@ -81,6 +82,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("permissive", "doc_approval", "low"),
     ("permissive", "agent_decision_request", "low"),  # story #2709
     ("permissive", "external_publish", "low"),  # story #3291 — §2.1 1차 축은 gate_type 무관
+    ("permissive", "concept_approval", "low"),  # story #3561 — §2.1 1차 축은 gate_type 무관
     ("permissive", _UNCLASSIFIED_GATE_TYPE, "low"),
     # posture=balanced → 2차 축(gate_type, §2.2) + 폴백(§2.3)
     ("balanced", "pr_review", "low"),
@@ -90,6 +92,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("balanced", "workflow_config_publish", "high"),
     ("balanced", "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
     ("balanced", "external_publish", "high"),  # story #3291 — _HIGH_RISK_GATE_TYPES 명시 등재
+    ("balanced", "concept_approval", "high"),  # story #3561 — _HIGH_RISK_GATE_TYPES 명시 등재
     # story #2709 — agent_decision_request는 _LOW_RISK_GATE_TYPES에 명시 등재(gate_service.py) —
     # doc_approval과 반대로 low(2차 축에서 직접, 폴백 아님). 근거: 이 gate는 되돌릴 수 없는
     # 액션을 그 자신이 트리거하지 않는다(에이전트가 이미 자기 가정대로 진행 중인 결정의
@@ -104,6 +107,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     (None, "workflow_config_publish", "high"),
     (None, "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
     (None, "external_publish", "high"),  # story #3291 — balanced와 동일(§2.2 2차 축)
+    (None, "concept_approval", "high"),  # story #3561 — balanced와 동일(§2.2 2차 축)
     (None, "agent_decision_request", "low"),  # story #2709 — balanced와 동일(§2.2 2차 축)
     (None, _UNCLASSIFIED_GATE_TYPE, "high"),  # 폴백: 진짜 미분류 gate_type → 보수적 고위험
 ]
