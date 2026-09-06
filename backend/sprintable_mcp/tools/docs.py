@@ -293,6 +293,14 @@ class SubmitForApprovalInput(SprintableInput):
     def _validate_concept_approval_fields(self) -> "SubmitForApprovalInput":
         if self.gate_type == "concept_approval" and (self.work_item_id is None or self.work_item_type is None):
             raise ValueError("gate_type=concept_approval이면 work_item_id·work_item_type이 모두 필요합니다.")
+        # 페드루 PO 리뷰(PR#3922, 2026-09-06) — approver_member_id를 Optional로 완화하며
+        # story 129d4f84([결재 정책 ④] 미지정 상신 서버 거부, doc_approval+agent_decision_
+        # request 한정)의 **doc_approval 왕복-前 빠른-실패** 계약을 깨뜨렸다(서버가 결국
+        # 400으로 거부하긴 하지만, 그 전에 이 MCP 도구가 먼저 걸러 왕복 자체를 없애는 게
+        # 그 스토리의 취지). concept_approval은 그 스토리 대상이 아니라(rule B가 기본
+        # 자격을 이미 커버) 여전히 Optional.
+        if self.gate_type == "doc_approval" and self.approver_member_id is None:
+            raise ValueError("gate_type=doc_approval이면 approver_member_id가 필요합니다(받는 사람이 없는 결재는 존재할 수 없습니다).")
         return self
 
 

@@ -1344,8 +1344,8 @@
     },
     {
       "file": "tests/test_3561_concept_approval_gate.py",
-      "sec": 65.0,
-      "source": "story-3561-concept-approval-gate(PR 개설 前 선제 등재 — 로컬 raw pytest 17건 10.81s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 65s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 69.0,
+      "source": "story-3561-concept-approval-gate(PR 개설 前 선제 등재 — PO 리뷰 조건 반영 후 로컬 raw pytest 18건 11.46s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 69s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

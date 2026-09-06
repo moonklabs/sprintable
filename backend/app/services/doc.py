@@ -419,25 +419,31 @@ async def _reseal_concept_approval_gate_on_doc_update(
     (sealed_doc_id, gate_type=concept_approval)로 찾는다 — work_item_id가 아니라 doc_id
     축이다: 이 훅은 "이 doc을 누가 근거로 삼았나"에서 출발하지 "이 work_item에 뭐가
     걸렸나"에서 출발하지 않는다(doc 하나가 어느 work_item에 걸렸는지는 gate 쪽에서만
-    알 수 있다 — doc 자신은 모른다)."""
-    gate = (await session.execute(
+    알 수 있다 — doc 자신은 모른다).
+
+    페드루 PO 리뷰(PR#3922, 2026-09-06) — 컨셉 doc 1건이 여러 work_item(Story N)에
+    근거자료로 걸리는 것은 정상 경로다(같은 컨셉 문서로 여러 스토리를 동시에 상신할
+    수 있다 — submit_concept_approval에 "doc당 1건" 제약이 없다). `scalar_one_or_none()`
+    은 그 정상 상태에서 MultipleResultsFound(500, doc 편집 자체가 죽는다)로 죽었다 —
+    걸린 게이트 **전부**를 순회해 각자 독립적으로 재봉인/재승인 판정한다(한 게이트의
+    판정이 다른 게이트에 영향 없음 — 서로 다른 work_item의 승인 사이클이다)."""
+    gates = (await session.execute(
         select(Gate)
         .where(
             Gate.org_id == org_id, Gate.sealed_doc_id == doc_id,
             Gate.gate_type == CONCEPT_APPROVAL_GATE_TYPE, Gate.status.in_(("pending", "approved")),
         )
         .with_for_update()
-    )).scalar_one_or_none()
-    if gate is None:
-        return
-    if gate.sealed_doc_body_sha256 == new_body_sha256:
-        return
-    if gate.status == "approved":
-        set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
-        gate.requires_human = True
-        gate.resolver_id = None
-        gate.resolution_note = None
-        gate.resolved_at = None
-        gate.reapproval_required = True
-        return
-    gate.sealed_doc_body_sha256 = new_body_sha256
+    )).scalars().all()
+    for gate in gates:
+        if gate.sealed_doc_body_sha256 == new_body_sha256:
+            continue
+        if gate.status == "approved":
+            set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
+            gate.requires_human = True
+            gate.resolver_id = None
+            gate.resolution_note = None
+            gate.resolved_at = None
+            gate.reapproval_required = True
+            continue
+        gate.sealed_doc_body_sha256 = new_body_sha256

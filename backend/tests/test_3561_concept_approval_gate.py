@@ -415,6 +415,56 @@ async def test_doc_edit_unrelated_doc_does_not_touch_other_gate():
         await engine.dispose()
 
 
+@pytest.mark.anyio
+async def test_doc_edit_reseals_all_gates_when_doc_backs_multiple_work_items():
+    """페드루 PO 리뷰(PR#3922, 2026-09-06) — 컨셉 doc 1건이 여러 work_item(Story N)에
+    근거자료로 걸리는 것은 정상 경로(같은 컨셉 문서로 여러 스토리를 동시에 상신 가능).
+    _reseal_concept_approval_gate_on_doc_update가 scalar_one_or_none()이면 이 상태에서
+    doc 편집이 MultipleResultsFound로 500이 나야 이 테스트가 잡는다 — 전부 순회해
+    각자 독립 판정해야 한다(하나는 pending 재봉인, 다른 하나는 approved→pending
+    재승인, 동시에)."""
+    from app.main import app
+    from app.services.doc import compute_doc_body_sha256
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id)
+            story_pending = await _seed_story(s, org_id, project_id, title="스토리 A(pending 유지)")
+            story_approved = await _seed_story(s, org_id, project_id, title="스토리 B(approved→pending)")
+            doc_id = await _seed_doc(s, org_id, project_id, content="본문 v1")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r1 = await _submit_concept_approval(client, org_id, doc_id, work_item_id=story_pending)
+            assert r1.status_code == 201, r1.text
+            gate_pending_id = uuid.UUID(r1.json()["gate_id"])
+
+            r2 = await _submit_concept_approval(client, org_id, doc_id, work_item_id=story_approved)
+            assert r2.status_code == 201, r2.text
+            gate_approved_id = uuid.UUID(r2.json()["gate_id"])
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_approved_id)
+
+        async with _client_for(app) as client:
+            r_patch = await client.patch(f"/api/v2/docs/{doc_id}", json={"content": "본문 v2(동시 편집)"})
+        assert r_patch.status_code == 200, r_patch.text
+
+        async with Session() as s:
+            gate_pending = await _get_gate(s, gate_pending_id)
+            gate_approved = await _get_gate(s, gate_approved_id)
+        assert gate_pending.status == "pending"
+        assert gate_pending.sealed_doc_body_sha256 == compute_doc_body_sha256("본문 v2(동시 편집)")
+        assert gate_approved.status == "pending"
+        assert gate_approved.reapproval_required is True
+        assert gate_approved.sealed_doc_body_sha256 == compute_doc_body_sha256("본문 v1")
+    finally:
+        await engine.dispose()
+
+
 # ─── ③ 제출 시점 opt-in 서버 거부 — channel_posts/site_posts ─────────────────
 
 
