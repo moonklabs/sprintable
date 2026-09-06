@@ -189,6 +189,18 @@ export function isNumberAdjacent(value: string): boolean {
   return false;
 }
 
+// story #3582(유나 관측 · #3929 Design review 2026-09-06 09:39Z 비차단 · PO 確定) —
+// 카탈로그에 글자·숫자가 하나도 없는 값(「—」·「...」·「↳」·「≥」·「≤」류)이 9건 있다. 이
+// 가드가 잡으려는 병은 "«같은 뜻을 다르게»가 아니라 «다른 두 셈이 같은 말로 헷갈린다»"
+// 인데, 값이 순수 구두점/기호면 «구»(phrase)를 담지 않으니 애초에 이 축의 대상이 아니다
+// (3402·3575가 정확히 이 모양으로 3번 EXEMPT를 늘렸다 — 매 사유 문장마다 "—" 하나가
+// originAuthorUnknown과 겹쳐 걸렸다). 비교 쌍을 만들기 «전»에 제외한다 — 인스턴스별
+// EXEMPT 승인 대신 규칙이 이 축 자체를 안다.
+const LETTER_OR_NUMBER_RE = /\p{L}|\p{N}/u;
+export function hasLetterOrNumber(value: string): boolean {
+  return LETTER_OR_NUMBER_RE.test(value);
+}
+
 // ── 충돌 판정 ────────────────────────────────────────────────────────────
 
 /** 서로 다른 키의 값이 부분문자열 관계(포함하거나 포함되는)면서 «최소 한쪽이 수와 함께
@@ -274,15 +286,15 @@ export function findSubstringCollisions(
 // 부분문자열은 겹치지만 하나는 애초에 안 보이는 값이라 혼동 여지가 실질 0.
 // story #3402(2026-09-04, 유나 design review·페드루 PO 판정) — content.channelPostsTextTooLong/
 // channelPostsRateLimitedUntil(둘 다 {max}/{current}/{time} 보간이 있어 numberAdjacent=true)
-// <-> content.originAuthorUnknown("—" 한 글자, 보간 없음). 겹치는 건 오직 문장 중간의 「—」
-// 구두점 하나뿐이다 — originAuthorUnknown이 "—"를 값으로 쓰는 건 «값을 모른다»는 자리표시
-// 기호(이 화면 전역에서 「키 부재→—」 관례)이지 이 두 문장이 말하는 "한도"·"reset 시각"과
-// 같은 개념을 가리키는 게 전혀 아니다. #2352/#2365가 잡으려는 "같은 화면의 두 «수»가
-// 헷갈리는" 병이 아니다 — 애초에 originAuthorUnknown 쪽엔 수 자체가 없다(단독 자리표시
-// 기호일 뿐). 유나 design review가 이 두 문구의 "—" 구두점 자체를 정본으로 지정했다(쉼표로
-// 바꾸면 en 쪽이 comma splice가 되는 문법 문제까지 겹쳐 구두점을 굽히지 않는 쪽으로 판정,
-// 페드루 PO 확定 2026-09-04 06:13Z). 다시 볼 때 — 이 가드가 "구두점 자체"를 문제 삼는
-// 방식으로 정교해지면(값 안의 특정 기호 하나만 따로 취급) 재검토.
+// <-> content.originAuthorUnknown("—" 한 글자, 보간 없음)가 겪던 오탐. 겹치는 건 오직 문장
+// 중간의 「—」 구두점 하나뿐 — originAuthorUnknown이 "—"를 값으로 쓰는 건 «값을 모른다»는
+// 자리표시 기호(이 화면 전역에서 「키 부재→—」 관례)이지 이 두 문장이 말하는 "한도"·"reset
+// 시각"과 같은 개념을 가리키는 게 전혀 아니다. ⚠️story #3582(PO 確定 2026-09-06) — 이런
+// "값에 글자·숫자가 0개"인 오탐이 매 사유 문장마다 EXEMPT를 한 줄씩 늘리는 패턴이라(3575가
+// errorChannelVideoUploadFailedWithStatus 짝으로 세 번째를 늘렸다), 인스턴스별 승인 대신
+// hasLetterOrNumber() 사전 제외로 규칙 자체에 이 축을 흡수했다 — originAuthorUnknown이
+// 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
+// 한다).
 export const EXEMPT_PAIRS = new Set<string>([
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
@@ -291,12 +303,6 @@ export const EXEMPT_PAIRS = new Set<string>([
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',
   'settings.memberLimitExceededError <-> settings.roleMember',
-  'content.channelPostsTextTooLong <-> content.originAuthorUnknown',
-  'content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown',
-  // 3575 ⑤ 추가(페드루 PO 승인 2026-09-06) — errorChannelVideoUploadFailedWithStatus
-  // ("…서버가 {status}로 응답했습니다.")도 위와 같은 클래스: 문장 속 "—" 구두점 하나가
-  // originAuthorUnknown 단독 자리표시와 겹칠 뿐, 수({status})는 한쪽에만 있다.
-  'content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown',
   // story #3422(2026-09-04, ②-c FailureActionBadge) — channelPostsFailureAutoRetryAt
   // ({time} 보간 있음) <-> channelPostsFailureRetryCta("다시 시도", 보간 없음). 겹치는
   // 건 "다시 시도"라는 흔한 동사구 하나뿐 — auto_retry(자동, 버튼 없음)와 dead_letter
@@ -459,6 +465,8 @@ export interface RepositoryScanResult {
   grandfathered: Map<string, CollisionPair>;
   exemptHit: Set<string>;
   grandfatherHit: Set<string>;
+  // story #3582 — 글자·숫자 0개라 비교 쌍 자체를 안 만든 (namespace.key) 집합.
+  symbolOnlyExcluded: Set<string>;
 }
 
 /** main()에서 뽑아낸 전 저장소 스캔 — story #2410, GRANDFATHER_LIVE_COUNT_TEST가 이걸 불러
@@ -474,6 +482,7 @@ export function scanRepository(): RepositoryScanResult {
   const grandfathered = new Map<string, CollisionPair>();
   const exemptHit = new Set<string>();
   const grandfatherHit = new Set<string>();
+  const symbolOnlyExcluded = new Set<string>();
 
   for (const abs of files) {
     const content = readFileSync(abs, 'utf8');
@@ -486,6 +495,8 @@ export function scanRepository(): RepositoryScanResult {
     for (const qualifiedKey of usages) {
       const value = messages.get(qualifiedKey);
       if (value === undefined) continue;
+      // story #3582 — 비교 쌍을 만들기 전에 제외(글자·숫자 0개 값).
+      if (!hasLetterOrNumber(value)) { symbolOnlyExcluded.add(qualifiedKey); continue; }
       phrases.set(qualifiedKey, { value, numberAdjacent: isNumberAdjacent(value) });
     }
 
@@ -504,11 +515,11 @@ export function scanRepository(): RepositoryScanResult {
     }
   }
 
-  return { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit };
+  return { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit, symbolOnlyExcluded };
 }
 
 function main(): void {
-  const { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit } = scanRepository();
+  const { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit, symbolOnlyExcluded } = scanRepository();
 
   const staleExempt = [...EXEMPT_PAIRS].filter((pk) => !exemptHit.has(pk));
   const staleGrandfather = [...GRANDFATHER_BASELINE].filter((pk) => !grandfatherHit.has(pk));
@@ -517,6 +528,11 @@ function main(): void {
     `[AC7] i18n 문구 충돌 스캔(같은 파일·수와 함께 서는 쌍만) — 파일 ${files.length}개 · ` +
       `동적 키 호출(정적 미포착) ${totalDynamicCalls}건(AC4㉡) · grandfather(미triage 채무, 안 막음) ${grandfatherHit.size}건 · ` +
       `exempt ${EXEMPT_PAIRS.size}건 · en.json 미검사(AC4㉢)`,
+  );
+  // story #3582 — 이 가드가 «못 잡는 것»(AC4 관례와 같은 결) 선언: 글자·숫자 0개 값은
+  // «구»를 담지 않으므로 비교 쌍 자체를 안 만든다.
+  console.log(
+    `  ℹ️ 글자·숫자 없는 값이라 비교 제외(이 가드가 못 잡는 축) ${symbolOnlyExcluded.size}건: ${[...symbolOnlyExcluded].sort().join(', ')}`,
   );
   if (staleExempt.length > 0) {
     console.log(`  ⚠️ exempt로 등재됐으나 이번 스캔에서 안 걸린(죽은 문서 후보): ${staleExempt.join(', ')}`);

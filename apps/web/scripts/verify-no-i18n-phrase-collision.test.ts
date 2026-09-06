@@ -7,6 +7,7 @@ import {
   findSubstringCollisions,
   flattenMessages,
   GRANDFATHER_BASELINE,
+  hasLetterOrNumber,
   isNumberAdjacent,
   pairKey,
   parseKeyUsages,
@@ -325,5 +326,41 @@ describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실�
     expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
     const { exemptHit } = scanRepository();
     expect(exemptHit.size).toBe(EXEMPT_PAIRS.size);
+  });
+});
+
+// story #3582(유나 관측 · PO 確定 2026-09-06) — 값에 유니코드 글자(L)·숫자(N)가 0개면
+// «구»(phrase)를 담지 않으므로 이 가드가 잡으려는 병(두 셈이 헷갈림)의 대상이 아니다.
+describe('hasLetterOrNumber — story #3582', () => {
+  it('제외 — 순수 구두점/기호 값(글자·숫자 0개)', () => {
+    expect(hasLetterOrNumber('—')).toBe(false);
+    expect(hasLetterOrNumber('...')).toBe(false);
+    expect(hasLetterOrNumber('↳')).toBe(false);
+    expect(hasLetterOrNumber('≥')).toBe(false);
+    expect(hasLetterOrNumber('≤')).toBe(false);
+  });
+
+  it('비제외 — 글자나 숫자가 하나라도 있으면 그대로 비교 대상(짧은 값도)', () => {
+    expect(hasLetterOrNumber('막힘')).toBe(true);
+    expect(hasLetterOrNumber('나')).toBe(true);
+    expect(hasLetterOrNumber('{n}')).toBe(true); // 보간 자리 자체가 글자를 포함
+    expect(hasLetterOrNumber('1')).toBe(true);
+  });
+});
+
+// story #3582 — 비교 쌍을 만들기 «전»에 제외되므로, 글자·숫자 0개 값과 다른 값의 짝은
+// exempt/grandfather/new 어디로도 안 잡히고(=이미 빠진 것) symbolOnlyExcluded에만 잡힌다.
+describe('scanRepository — 글자·숫자 0개 값 사전 제외(story #3582)', () => {
+  it('content.originAuthorUnknown("—")이 symbolOnlyExcluded에 잡힌다(인스턴스별 EXEMPT 없이도 비교 자체를 안 한다)', () => {
+    const { symbolOnlyExcluded } = scanRepository();
+    expect(symbolOnlyExcluded.has('content.originAuthorUnknown')).toBe(true);
+  });
+
+  it('원래 EXEMPT였던 두 쌍은 이제 EXEMPT_PAIRS 등재 없이도 새 충돌로 안 걸린다(규칙이 대신 안다)', () => {
+    expect(EXEMPT_PAIRS.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
+    expect(EXEMPT_PAIRS.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
+    const { newFindings } = scanRepository();
+    expect(newFindings.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
+    expect(newFindings.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
   });
 });
