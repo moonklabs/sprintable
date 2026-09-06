@@ -10,7 +10,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.routers.auth import _OAUTH_CONFIGS
 from app.models.member import Member
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
 from app.models.team import TeamMember
 from app.models.user import User
 from app.repositories.human_api_key import HumanApiKeyRepository
@@ -190,10 +190,22 @@ async def get_me(
                     proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
                 except (ValueError, AttributeError):
                     proj_id = org_member.org_id
+                # story #3553(페드루 PO 라이브 재현, PO Test Org db474a4e·772609ea, 2026-09-06) —
+                # 이 폴백(team_member 행 0인 owner/admin — org 소유만으로 접근)은 project_id는
+                # 채우면서 project_name을 통째로 빼먹어 항상 null로 나갔다(일반 경로 211행의
+                # `member.project.name`은 이 분기를 안 타 무사했다). project_id_str이 실제
+                # project를 가리킬 때만 조회한다(0-project org 폴백=org_member.org_id는 project가
+                # 아니라 조회할 이유가 없다 — project_name=None 그대로가 맞다).
+                project_name: str | None = None
+                if project_id_str:
+                    project_name = (await session.execute(
+                        select(Project.name).where(Project.id == proj_id, Project.deleted_at.is_(None))
+                    )).scalar_one_or_none()
                 return MeResponse(
                     id=org_member.id,
                     org_id=org_member.org_id,
                     project_id=proj_id,
+                    project_name=project_name,
                     user_id=uid,
                     name=name,
                     email=user.email if user else None,

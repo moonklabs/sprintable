@@ -436,12 +436,17 @@ async def _build_app_metadata(
             return await _resolve_explicit_app_metadata(user, session, explicit_pid, org_id)
 
     # 1. last_project_id 우선 → 해당 project의 active team_member (org_id 지정 시 그 org일 때만)
+    # story #3553(페드루 PO 確定, 2026-09-06) — 아래 두 조회 다 `projects` JOIN·deleted_at
+    # 필터가 없어 삭제된 project를 가리키는 옛 team_member 행이 «접근 가능」으로 잡혔다
+    # (first_accessible_project_id branch1·has_project_access는 이미 Project.deleted_at IS NULL을
+    # 본다 — 이 두 곳만 비대칭이었다). 삭제 프로젝트로 착지시키지 않는다.
     member = None
     if getattr(user, "last_project_id", None):
-        q = select(TeamMember).where(
+        q = select(TeamMember).join(Project, TeamMember.project_id == Project.id).where(
             TeamMember.project_id == user.last_project_id,
             or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
             TeamMember.is_active.is_(True),
+            Project.deleted_at.is_(None),
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
@@ -452,9 +457,10 @@ async def _build_app_metadata(
         # ⚠️0746: org_id 지정 시 그 org로 스코프(미지정이면 org 무관 → cross-org 옛 프로젝트 누수).
         # 908075db 단계2(flag-on): 이 **추측** 제거 — flag on이면 member None 유지 → 아래 deterministic
         # 경로(first_accessible/invite/Path4)로 해소. flag off면 기존 추측 그대로(거동 무변경).
-        q = select(TeamMember).where(
+        q = select(TeamMember).join(Project, TeamMember.project_id == Project.id).where(
             or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
             TeamMember.is_active.is_(True),
+            Project.deleted_at.is_(None),
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
