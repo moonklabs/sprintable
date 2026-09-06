@@ -227,3 +227,64 @@ def test_stories_only_scope_key_is_blocked_from_submit_for_approval():
     from app.services.mcp_toolset import is_tool_allowed
 
     assert is_tool_allowed("sprintable_submit_for_approval", ["stories"]) is False
+
+
+# ─── story #3561 — SubmitForApprovalInput 확장(gate_type 분기) 회귀 ───────────
+# 페드루 PO 리뷰(PR#3922, 2026-09-06) — concept_approval 신설을 위해 approver_
+# member_id를 Optional로 완화하면서 story 129d4f84([결재 정책 ④] 미지정 상신 서버
+# 거부, doc_approval+agent_decision_request 한정)의 doc_approval 왕복-前 빠른-실패
+# 계약을 깨뜨렸었다 — validator로 복원.
+
+
+def test_submit_for_approval_input_doc_approval_requires_approver_member_id():
+    from pydantic import ValidationError
+
+    from sprintable_mcp.tools.docs import SubmitForApprovalInput
+
+    with pytest.raises(ValidationError):
+        SubmitForApprovalInput(doc_id="doc-1")  # gate_type 기본값=doc_approval, approver 없음.
+
+
+def test_submit_for_approval_input_doc_approval_explicit_still_requires_approver_member_id():
+    from pydantic import ValidationError
+
+    from sprintable_mcp.tools.docs import SubmitForApprovalInput
+
+    with pytest.raises(ValidationError):
+        SubmitForApprovalInput(doc_id="doc-1", gate_type="doc_approval")
+
+
+def test_submit_for_approval_input_concept_approval_does_not_require_approver_member_id():
+    from sprintable_mcp.tools.docs import SubmitForApprovalInput
+
+    # 예외 없이 생성돼야 한다(rule B가 기본 승인 자격을 커버 — doc_approval과 다른 축).
+    args = SubmitForApprovalInput(
+        doc_id="doc-1", gate_type="concept_approval", work_item_id="story-1", work_item_type="story",
+    )
+    assert args.approver_member_id is None
+
+
+def test_submit_for_approval_input_concept_approval_requires_work_item_fields():
+    from pydantic import ValidationError
+
+    from sprintable_mcp.tools.docs import SubmitForApprovalInput
+
+    with pytest.raises(ValidationError):
+        SubmitForApprovalInput(doc_id="doc-1", gate_type="concept_approval")
+
+
+@pytest.mark.anyio
+async def test_submit_for_approval_concept_approval_routes_to_concept_approval_endpoint():
+    from sprintable_mcp.tools.docs import SubmitForApprovalInput, submit_for_approval
+
+    with patch("sprintable_mcp.tools.docs.client") as mock_client:
+        mock_client.post = AsyncMock(return_value={"gate_id": "g-1", "status": "pending"})
+        out = await submit_for_approval(SubmitForApprovalInput(
+            doc_id="doc-1", gate_type="concept_approval", work_item_id="story-1", work_item_type="story",
+        ))
+
+    mock_client.post.assert_awaited_once_with(
+        "/api/v2/docs/doc-1/concept-approval",
+        json={"work_item_id": "story-1", "work_item_type": "story"},
+    )
+    assert json.loads(out[0].text)["gate_id"] == "g-1"

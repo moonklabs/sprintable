@@ -29,6 +29,7 @@ from app.services.gate_seal import (
     GateSealMissingError as SitePostSealMissingError,
     compute_seal_hash,
 )
+from app.services.gate_service import ConceptApprovalNotApprovedError  # noqa: F401 (재-export, 라우터가 import — story #3561)
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _LANG_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
@@ -772,6 +773,16 @@ async def submit_site_post_draft(
             raise SitePostGateAlreadyHeldError(
                 holding_draft_id=holder.id, holding_lang=holder_lang, holding_slug=holder.slug,
             )
+
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — channel_posts.py::
+    # submit_channel_post_draft와 동형(gate_service.py 공용 헬퍼 재사용, 로직 중복 0).
+    from app.services.gate_service import find_unapproved_gate_of_type
+    concept_gate = await find_unapproved_gate_of_type(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type="concept_approval",
+    )
+    if concept_gate is not None:
+        raise ConceptApprovalNotApprovedError(gate_id=concept_gate.id, status=concept_gate.status)
 
     if (
         existing is not None

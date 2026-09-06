@@ -22,6 +22,7 @@ from app.services.insight_snapshots import get_latest_insight_snapshot
 from app.services.content_rules import get_org_content_rules
 from app.services.site_posts import (
     CampaignNotFoundError,
+    ConceptApprovalNotApprovedError,
     ContentRuleViolationError,
     ExternalPublishGateNotApprovedError,
     InvalidSitePostInputError,
@@ -570,6 +571,13 @@ async def submit_site_post_draft_endpoint(
                 "code": "CONTENT_RULE_VIOLATION", "rules_version": exc.rules_version,
                 "violations": exc.violations,
             },
+        ) from exc
+    except ConceptApprovalNotApprovedError as exc:
+        # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — opt-in 서버 거부(channel_posts.py와
+        # 동형 422 body).
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CONCEPT_NOT_APPROVED", "gate_id": str(exc.gate_id), "status": exc.status},
         ) from exc
 
     return SubmitSitePostDraftResponse(

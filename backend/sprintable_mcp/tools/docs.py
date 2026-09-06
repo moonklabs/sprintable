@@ -274,22 +274,57 @@ async def update_doc(args: UpdateDocInput) -> list[TextContent]:
 class SubmitForApprovalInput(SprintableInput):
     doc_id: str
     # story #2985(PO 설계 확定 2026-08-24)에서 신설(선택), story #3004(선생님 정책 확定
-    # 2026-08-24)부터 **필수**(org member_id) — "받는 사람이 없는 결재는 존재할 수 없다".
-    # 서버(transition_doc)가 최종 자격 검증(owner/admin·not-self)을 하지만, 이 필드를 Pydantic
-    # required로 걸어 두면 호출 즉시(왕복 前) 명확한 에러를 받는다.
-    approver_member_id: str
+    # 2026-08-24)부터 doc_approval(기본 경로)엔 **필수**(org member_id) — "받는 사람이 없는
+    # 결재는 존재할 수 없다". 서버(transition_doc)가 최종 자격 검증(owner/admin·not-self)을
+    # 하지만, concept_approval 경로(story #3561)는 이 필드가 필요 없어(rule B가 기본 자격을
+    # 이미 커버) Optional로 완화 — doc_approval 경로의 필수성은 서버가 여전히 강제한다(위 서버
+    # 검증 문장 그대로, 이 완화는 클라이언트단 빠른-실패 힌트만 늦출 뿐 서버 계약은 무변경).
+    approver_member_id: str | None = None
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — 이 doc을 근거자료로 **다른**
+    # work_item(Story/Task)을 승인하는 새 경로. 지정하면 doc_approval(기본, doc 자신의
+    # lifecycle 전이) 대신 `POST /{doc_id}/concept-approval`로 라우팅한다 — 서로 다른
+    # REST 엔드포인트(무관한 개념을 한 엔드포인트에 억지로 합치지 않는다, doc.py 그라운딩
+    # 근거 그대로).
+    gate_type: Literal["doc_approval", "concept_approval"] = "doc_approval"
+    work_item_id: str | None = None
+    work_item_type: Literal["story", "task"] | None = None
+
+    @model_validator(mode="after")
+    def _validate_concept_approval_fields(self) -> "SubmitForApprovalInput":
+        if self.gate_type == "concept_approval" and (self.work_item_id is None or self.work_item_type is None):
+            raise ValueError("gate_type=concept_approval이면 work_item_id·work_item_type이 모두 필요합니다.")
+        # 페드루 PO 리뷰(PR#3922, 2026-09-06) — approver_member_id를 Optional로 완화하며
+        # story 129d4f84([결재 정책 ④] 미지정 상신 서버 거부, doc_approval+agent_decision_
+        # request 한정)의 **doc_approval 왕복-前 빠른-실패** 계약을 깨뜨렸다(서버가 결국
+        # 400으로 거부하긴 하지만, 그 전에 이 MCP 도구가 먼저 걸러 왕복 자체를 없애는 게
+        # 그 스토리의 취지). concept_approval은 그 스토리 대상이 아니라(rule B가 기본
+        # 자격을 이미 커버) 여전히 Optional.
+        if self.gate_type == "doc_approval" and self.approver_member_id is None:
+            raise ValueError("gate_type=doc_approval이면 approver_member_id가 필요합니다(받는 사람이 없는 결재는 존재할 수 없습니다).")
+        return self
 
 
 async def submit_for_approval(args: SubmitForApprovalInput) -> list[TextContent]:
-    """문서를 결재 상신(draft→pending) — `POST /{id}/transition`의 MCP 래퍼.
+    """문서를 결재 상신 — 기본(`gate_type=doc_approval`)은 문서 자신의 lifecycle 전이
+    (draft→pending, `POST /{id}/transition`의 MCP 래퍼). `gate_type=concept_approval`
+    (story #3561)은 이 문서를 근거자료로 **다른** work_item(Story/Task)에 게이트를
+    상신한다(`POST /{id}/concept-approval`) — 이 경로는 doc.status를 안 바꾼다.
 
     story #2668(B3): 응답에 doc(status=pending)뿐 아니라 그 상신이 실제로 만든 pending 게이트
     (실물)를 동봉한다 — "호출은 200인데 게이트가 진짜 생겼는지"를 에이전트가 별도 조회 없이
     이 한 번의 호출로 확認할 수 있게(AC1: MCP만으로 create_doc→submit_for_approval→pending
-    게이트 실물까지 왕복).
+    게이트 실물까지 왕복). concept_approval 경로는 doc 자신이 아니라 지정한 work_item이
+    게이트의 work_item이라 그 축으로 조회한다.
     """
     try:
-        body: dict[str, object] = {"status": "pending", "approver_member_id": args.approver_member_id}
+        if args.gate_type == "concept_approval":
+            body: dict[str, object] = {"work_item_id": args.work_item_id, "work_item_type": args.work_item_type}
+            if args.approver_member_id is not None:
+                body["approver_member_id"] = args.approver_member_id
+            result = await client.post(f"/api/v2/docs/{args.doc_id}/concept-approval", json=body)
+            return ok(result)
+
+        body = {"status": "pending", "approver_member_id": args.approver_member_id}
         doc = await client.post(f"/api/v2/docs/{args.doc_id}/transition", json=body)
         gates = await client.get(
             "/api/v2/gates", params={"work_item_id": args.doc_id, "work_item_type": "doc", "status": "pending"},
