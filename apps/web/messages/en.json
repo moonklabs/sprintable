@@ -2205,7 +2205,13 @@
     "measurementUtmAuto": "Attached using your organization's values (including utm_content).",
     "measurementUtmManual": "Attached using channel defaults. The link UTM check is on.",
     "measurementUtmOff": "Attached using channel defaults.",
-    "measurementUtmSettingsLink": "Change in content rules"
+    "measurementUtmSettingsLink": "Change in content rules",
+    "measurementGa4Label": "GA4 connection",
+    "measurementGa4PropertySelectPlaceholder": "Select property",
+    "measurementGa4PropertiesLoading": "Loading…",
+    "measurementGa4PropertiesLoadFailed": "Couldn't load the property list.",
+    "measurementGa4ActionFailed": "The request failed. Please try again shortly.",
+    "measurementGa4DisconnectEffect": "Disconnecting stops future traffic collection. Values collected so far are kept."
   },
   "content": {
     "title": "Content",
@@ -2390,6 +2396,8 @@
     "insightMetricClicks": "Clicks",
     "insightMetricSpend": "Spend",
     "insightMetricConversions": "Conversions",
+    "insightMetricInflowSessions": "Inflow sessions",
+    "insightMetricInflowUsers": "Inflow users",
     "insightMetricUnavailableDash": "—",
     "insightMetricUnavailableReason": "This channel doesn't provide this metric",
     "insightCapturedAtLabel": "Captured",
@@ -5218,6 +5226,7 @@
     "loadingMore": "Loading...",
     "insightsBoardBucketUnscheduled": "Not scheduled yet",
     "insightsBoardMetricUnavailable": "Metric not provided",
+    "insightsBoardGa4NotConnected": "GA4 not connected",
     "errorInvalidWindow": "Unsupported window.",
     "errorInvalidSort": "Unsupported sort.",
     "errorFollowUpHumanOnly": "Only humans can create follow-ups.",

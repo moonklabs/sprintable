@@ -242,6 +242,16 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(laterCall).not.toBeUndefined();
   });
 
+  // story #3583(페드루 PO 確定 2026-09-06) — GA4 유입 지표 2개가 선택기에 더해졌다
+  // (열 추가가 아니라 이 선택기의 지표 축 확장 — DEFAULT_METRIC은 그대로 views).
+  it('⭐지표 선택기에 유입 세션·유입 사용자가 있고, 고르면 metric 쿼리가 갈아끼워진다', async () => {
+    stubFetch({});
+    await mount();
+    await openMenuAndClick('insights-board-metric-trigger', koMessages.content.insightMetricInflowSessions);
+    const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
+    expect(lastUrl).toContain('metric=inflow_sessions');
+  });
+
   it('필터/정렬/방향이 이미 걸린 URL로 진입하면 그 값 그대로(+window 항상 포함) fetch 쿼리에 실린다', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('channel=threads&status=failed&sort=d7&metric=clicks&sort_dir=asc&window=30d'));
     const calls = stubFetch({});

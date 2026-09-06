@@ -219,6 +219,22 @@ describe('story #2410 — isNumberAdjacent: 이름 보간은 numberAdjacent가 �
     expect(isNumberAdjacent('{count}개 문서 일치')).toBe(true);
   });
 
+  // story #3583(2026-09-06) — {channel}=채널 표시 이름(Threads/GA4 등, ko.json 9곳
+  // 실측 전부 확認) — role·project·slug·tier와 같은 축. channelConnectAction<->
+  // channelConnectOwnerOnlyReason이 channels/page.tsx에서 처음 같은 파일에 동시
+  // 노출돼 걸렸던 신규 충돌을 이 축 등재로 닫는다(개별 EXEMPT_PAIRS 등재 대신).
+  it('{channel}(채널 표시 이름)은 false — channelConnectAction<->OwnerOnlyReason이 새 충돌로 안 걸린다', () => {
+    expect(isNumberAdjacent('{channel} 계정 연결')).toBe(false);
+    expect(isNumberAdjacent('{channel} 계정 연결은 owner만 할 수 있습니다.')).toBe(false);
+    const messagesPath = path.resolve(__dirname, '../messages/ko.json');
+    const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
+    const phrases = new Map([
+      ['channelConnect.channelConnectAction', { value: messages.get('channelConnect.channelConnectAction')!, numberAdjacent: isNumberAdjacent(messages.get('channelConnect.channelConnectAction')!) }],
+      ['channelConnect.channelConnectOwnerOnlyReason', { value: messages.get('channelConnect.channelConnectOwnerOnlyReason')!, numberAdjacent: isNumberAdjacent(messages.get('channelConnect.channelConnectOwnerOnlyReason')!) }],
+    ] as const);
+    expect(findSubstringCollisions(phrases)).toHaveLength(0);
+  });
+
   it('알 수 없는 보간 이름은 «안전한 쪽»(true)으로 남는다 — 모르면 놓치지 않는다', () => {
     expect(isNumberAdjacent('{somethingBrandNew} 상태')).toBe(true);
   });

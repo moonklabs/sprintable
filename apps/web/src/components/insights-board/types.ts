@@ -16,6 +16,11 @@ export interface InsightNormalizedMetrics {
   clicks: number | null;
   spend: number | null;
   conversions: number | null;
+  // story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06 · 유나 §13-9/§21-6-1) —
+  // GA4 「고객 소유」 연결의 유입 지표. 열 추가가 아니라 이 그리드(지표×D1/D7)의
+  // 지표 축에 2개를 더한 것 — DEFAULT_METRIC(views)은 그대로.
+  inflow_sessions: number | null;
+  inflow_users: number | null;
 }
 
 // NULL(이 값 전체) — 이 버킷 자체가 아직 스케줄되지 않았음/존재하지 않음. bucket.normalized가
@@ -62,7 +67,12 @@ export type InsightsBoardWindow = '7d' | '30d' | '90d';
 // 1호(블로그+Threads)의 블로그 행이 전부 대시로 섰다. 지표를 «선택기»로 바꾼다 —
 // 기본값 views, URL 파라미터 `metric`(기본값이면 생략). 7키 순서는 insight-
 // snapshot-block.tsx(story #3499) METRIC_KEYS와 동일(그 파일의 i18n 라벨 재사용).
-export const METRIC_KEYS = ['views', 'impressions', 'reach', 'engagements', 'clicks', 'spend', 'conversions'] as const;
+// story #3583 — inflow_sessions/inflow_users 2개 추가(유나 §13-9 確定 — 열 추가가
+// 아니라 이 선택기의 지표 축 확장). DEFAULT_METRIC은 그대로 views.
+export const METRIC_KEYS = [
+  'views', 'impressions', 'reach', 'engagements', 'clicks', 'spend', 'conversions',
+  'inflow_sessions', 'inflow_users',
+] as const;
 export type BoardMetric = (typeof METRIC_KEYS)[number];
 export const DEFAULT_METRIC: BoardMetric = 'views';
 

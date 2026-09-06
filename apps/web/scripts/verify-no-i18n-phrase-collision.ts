@@ -169,6 +169,12 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 //                쌍 예외)가 아니라 여기(이름 자체가 비수치임을 선언)가 맞는 자리다 — 이
 //                이름을 쓰는 다음 키가 생겨도 자동으로 같은 판정을 받는다(EXEMPT_PAIRS는
 //                그 다음 키를 또 개별 등재해야 한다).
+//   channel    — 채널 표시 이름(story #3583, 2026-09-06 — channelConnectAction<->
+//                channelConnectOwnerOnlyReason이 channels/page.tsx에서 처음 같은 파일에
+//                동시 노출돼 걸렸다). ko.json 전체 {channel} 보간 9곳을 직접 읽어 확認 —
+//                전부 "Threads"·"GA4" 류 채널 표시 이름이지 수가 아니다. role·project·
+//                slug·tier와 같은 축(카테고리/식별자 라벨). EXEMPT_PAIRS 개별 등재 대신
+//                여기 등재 — 앞으로 {channel} 보간 키가 늘어도 자동으로 같은 판정을 받는다.
 // ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
 // 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
 // EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
@@ -178,7 +184,7 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 // 재는지 모르게 되는 것)이 재발한다.
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
-  'sources', 'excludes', 'slug', 'tier', 'date', 'provider',
+  'sources', 'excludes', 'slug', 'tier', 'date', 'provider', 'channel',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 

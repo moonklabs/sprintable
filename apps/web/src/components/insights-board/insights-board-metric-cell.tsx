@@ -32,6 +32,12 @@ const STATUS_LABEL_KEYS: Partial<Record<InsightSnapshotBucketView['status'], str
 
 const DESTRUCTIVE_STATUSES: ReadonlySet<InsightSnapshotBucketView['status']> = new Set(['failed', 'dead_letter']);
 
+// story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06 · 유나 §21-6-1) — captured인데
+// 값이 null인 사유 3갈래 중 이 하나만 새 낱말(「GA4 미연결」) — 나머지 5지표는 기존
+// insightsBoardMetricUnavailable 그대로. inflow_* 지표가 null인 것은 이 채널·행 자체가
+// GA4를 아직 안 붙였다는 뜻(BE 계약 — 붙었는데 값만 없는 경우는 여기 안 온다).
+const GA4_INFLOW_METRICS = new Set(['inflow_sessions', 'inflow_users']);
+
 export interface InsightsBoardMetricCellProps {
   bucket: InsightSnapshotBucketView | null;
   metric: keyof NonNullable<InsightSnapshotBucketView['normalized']>;
@@ -63,10 +69,11 @@ export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard }: In
   // (§21-2 — 사유는 명사구 insightsBoardMetricUnavailable, 문장 아님).
   const value = bucket.normalized?.[metric] ?? null;
   if (value === null) {
+    const reasonKey = GA4_INFLOW_METRICS.has(metric) ? 'insightsBoardGa4NotConnected' : 'insightsBoardMetricUnavailable';
     return (
       <span data-testid="insights-board-cell-value-dash">
         <span>{tContent('insightMetricUnavailableDash')}</span>
-        <span className="ml-1 text-xs text-muted-foreground">{tBoard('insightsBoardMetricUnavailable')}</span>
+        <span className="ml-1 text-xs text-muted-foreground">{tBoard(reasonKey)}</span>
       </span>
     );
   }

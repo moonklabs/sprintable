@@ -2205,7 +2205,13 @@
     "measurementUtmAuto": "조직 규칙 값으로 붙습니다(utm_content 포함).",
     "measurementUtmManual": "채널 기본값으로 붙습니다. 링크의 UTM 검사가 켜져 있습니다.",
     "measurementUtmOff": "채널 기본값으로 붙습니다.",
-    "measurementUtmSettingsLink": "콘텐츠 규칙에서 바꾸기"
+    "measurementUtmSettingsLink": "콘텐츠 규칙에서 바꾸기",
+    "measurementGa4Label": "GA4 연결",
+    "measurementGa4PropertySelectPlaceholder": "속성 선택",
+    "measurementGa4PropertiesLoading": "불러오는 중…",
+    "measurementGa4PropertiesLoadFailed": "속성 목록을 불러오지 못했습니다.",
+    "measurementGa4ActionFailed": "요청에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+    "measurementGa4DisconnectEffect": "연결을 해제하면 앞으로의 유입 수집이 멈춥니다. 지금까지 모인 값은 남습니다."
   },
   "content": {
     "title": "글 관리",
@@ -2390,6 +2396,8 @@
     "insightMetricClicks": "클릭",
     "insightMetricSpend": "비용",
     "insightMetricConversions": "전환",
+    "insightMetricInflowSessions": "유입 세션",
+    "insightMetricInflowUsers": "유입 사용자",
     "insightMetricUnavailableDash": "—",
     "insightMetricUnavailableReason": "이 채널은 이 지표를 제공하지 않습니다",
     "insightCapturedAtLabel": "수집",
@@ -5218,6 +5226,7 @@
     "loadingMore": "불러오는 중...",
     "insightsBoardBucketUnscheduled": "아직 집계 예정 없음",
     "insightsBoardMetricUnavailable": "지표 미제공",
+    "insightsBoardGa4NotConnected": "GA4 미연결",
     "errorInvalidWindow": "지원하지 않는 기간입니다.",
     "errorInvalidSort": "지원하지 않는 정렬 기준입니다.",
     "errorFollowUpHumanOnly": "후속 조치 생성은 사람만 할 수 있습니다.",

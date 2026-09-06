@@ -84,17 +84,52 @@ function stubFetch(opts: {
   disconnectErrorCode?: string;
   // story #3540 — 「성과 수집」 섹션. 기본값은 빈 배열(섹션 자체가 안 뜬다, 기존
   // 테스트 전부 회귀 0). measurementLoadFails=true면 GET 자체가 실패.
-  measurementConnections?: { key: 'beacon' | 'utm'; status: string; last_seen_at: string | null; count_7d: number | null; settings_path: string | null }[];
+  measurementConnections?: {
+    key: 'beacon' | 'utm' | 'ga4'; status: string; last_seen_at: string | null; count_7d: number | null;
+    settings_path: string | null; property_id?: string | null; property_name?: string | null;
+  }[];
   measurementLoadFails?: boolean;
   onMeteringKey?: () => { status: number; body?: unknown };
   // story #3549 — Facebook Page 「선택 대기」 select 호출.
   onFacebookSelect?: (body: unknown) => { status: number; body: unknown; nextConnections?: unknown[] };
+  // story #3583 — GA4 인증/속성 목록/속성 선택/해제. select·disconnect 성공 뒤
+  // onRefresh()가 다시 부르는 GET이 새 상태를 보게 하려면 nextMeasurementConnections로
+  // 교체한다(onFacebookSelect의 nextConnections와 같은 관례).
+  onGa4Authorize?: () => { status: number; body?: unknown };
+  ga4Properties?: { id: string; display_name: string }[];
+  ga4PropertiesFails?: boolean;
+  onGa4Select?: (body: unknown) => { status: number; body?: unknown; nextMeasurementConnections?: unknown[] };
+  onGa4Disconnect?: () => { status: number; nextMeasurementConnections?: unknown[] };
 }) {
   let connections = opts.connections ?? [];
   const credentials = opts.credentials ?? { configured: false, app_id_suffix: null, effective_source: 'platform' };
   const availableChannels = opts.availableChannels ?? AVAILABLE_CHANNELS_DEFAULT;
-  const measurementConnections = opts.measurementConnections ?? [];
+  let measurementConnections = opts.measurementConnections ?? [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    // story #3583 — GA4 하위 경로가 '/measurement-connections'의 부분문자열이라
+    // 그 체크보다 먼저 봐야 한다(available-channels/channel-connections와 같은 순서 규율).
+    if (url.includes('/measurement-connections/ga4/authorize') && init?.method === 'POST') {
+      const result = opts.onGa4Authorize?.() ?? { status: 200, body: { authorize_url: 'https://accounts.google.com/o/oauth2/mock' } };
+      const ok = result.status < 400;
+      return { ok, status: result.status, json: async () => (ok ? { data: result.body } : { data: null, error: { code: 'INTERNAL' } }) } as Response;
+    }
+    if (url.includes('/measurement-connections/ga4/properties')) {
+      if (opts.ga4PropertiesFails) return { ok: false, status: 500, json: async () => ({ data: null, error: { code: 'INTERNAL' } }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: opts.ga4Properties ?? [] }) } as Response;
+    }
+    if (url.includes('/measurement-connections/ga4/select') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}'));
+      const result = opts.onGa4Select?.(body) ?? { status: 200, body: { ok: true } };
+      const ok = result.status < 400;
+      if (ok && result.nextMeasurementConnections) measurementConnections = result.nextMeasurementConnections as typeof measurementConnections;
+      return { ok, status: result.status, json: async () => (ok ? { data: result.body } : { data: null, error: { code: 'INTERNAL' } }) } as Response;
+    }
+    if (url.includes('/measurement-connections/ga4') && init?.method === 'DELETE') {
+      const result = opts.onGa4Disconnect?.() ?? { status: 200 };
+      const ok = result.status < 400;
+      if (ok && result.nextMeasurementConnections) measurementConnections = result.nextMeasurementConnections as typeof measurementConnections;
+      return { ok, status: result.status, json: async () => (ok ? { data: { ok: true } } : { data: null, error: { code: 'INTERNAL' } }) } as Response;
+    }
     if (url.includes('/measurement-connections')) {
       if (opts.measurementLoadFails) return { ok: false, status: 500, json: async () => ({ data: null, error: { code: 'INTERNAL' } }) } as Response;
       return { ok: true, status: 200, json: async () => ({ data: measurementConnections }) } as Response;
@@ -909,6 +944,148 @@ describe('OrganizationChannelsPage — 성과 수집(story #3540)', () => {
     await mount('owner');
     expect(container.querySelector('[data-testid="measurement-utm-status"]')?.textContent)
       .toBe(koMessages.channelConnect.measurementUtmOff);
+  });
+});
+
+// story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06 · 유나 §13-9) — GA4 「고객
+// 소유」 연결. status 4종: disconnected·property_pending·connected·needs_reauth.
+// 낱말 자리 일부(행 라벨·속성 placeholder류)는 유나 §절 확定 前 자리표시자.
+describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
+  it('disconnected — 「미연결」+연결 버튼(GA4 계정 연결), 속성 선택 UI는 없다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'disconnected', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelStatusNotConnected);
+    const btn = container.querySelector('[data-testid="measurement-ga4-authorize-button"]') as HTMLButtonElement;
+    expect(btn.textContent).toBe(koMessages.channelConnect.channelConnectAction.replace('{channel}', 'GA4'));
+    expect(container.querySelector('[data-testid="measurement-ga4-property-select"]')).toBeNull();
+  });
+
+  it('⭐disconnected — 연결 버튼 클릭 시 POST authorize 뒤 authorize_url로 전체 페이지 리다이렉트한다', async () => {
+    const originalLocation = window.location;
+    // jsdom의 location은 직접 대입이 안 막혀 있지 않으므로 href만 감시하는 대체 객체로 교체.
+    Object.defineProperty(window, 'location', { value: { ...originalLocation, href: '' }, writable: true });
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'disconnected', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+      onGa4Authorize: () => ({ status: 200, body: { authorize_url: 'https://accounts.google.com/o/oauth2/mock-ga4' } }),
+    });
+    await mount('owner');
+    const btn = container.querySelector('[data-testid="measurement-ga4-authorize-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(window.location.href).toBe('https://accounts.google.com/o/oauth2/mock-ga4');
+    Object.defineProperty(window, 'location', { value: originalLocation, writable: true });
+  });
+
+  it('needs_reauth — 「재인증 필요」+「다시 연결」 버튼(disconnected와 같은 authorize 경로)', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'needs_reauth', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelStatusReauthRequired);
+    expect((container.querySelector('[data-testid="measurement-ga4-authorize-button"]') as HTMLButtonElement).textContent)
+      .toBe(koMessages.channelConnect.channelReauthAction);
+  });
+
+  it('⭐property_pending — 속성 목록을 자동으로 불러오고, 드롭다운+확인 버튼이 뜬다(연결 버튼은 없다)', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+      ga4Properties: [{ id: 'p1', display_name: '뭉클랩 GA4' }, { id: 'p2', display_name: '테스트 속성' }],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-authorize-button"]')).toBeNull();
+    const dropdown = container.querySelector('[data-testid="measurement-ga4-property-dropdown"]') as HTMLSelectElement;
+    expect(dropdown).not.toBeNull();
+    const optionLabels = Array.from(dropdown.options).map((o) => o.textContent);
+    expect(optionLabels).toContain('뭉클랩 GA4');
+    expect(optionLabels).toContain('테스트 속성');
+    expect((container.querySelector('[data-testid="measurement-ga4-property-confirm"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('property_pending — 속성 목록 로드 실패면 실패 문구만(드롭다운 없음)', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+      ga4PropertiesFails: true,
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-properties-error"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="measurement-ga4-property-dropdown"]')).toBeNull();
+  });
+
+  it('⭐property_pending — 속성 선택 후 확인 클릭 → select 호출 → 같은 마운트에서 connected로 갱신된다', async () => {
+    let selectedBody: unknown = null;
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+      ga4Properties: [{ id: 'p1', display_name: '뭉클랩 GA4' }],
+      onGa4Select: (body) => {
+        selectedBody = body;
+        return {
+          status: 200, body: { ok: true },
+          nextMeasurementConnections: [
+            { key: 'ga4', status: 'connected', last_seen_at: null, count_7d: null, settings_path: null, property_id: 'p1', property_name: '뭉클랩 GA4' },
+          ],
+        };
+      },
+    });
+    await mount('owner');
+    const dropdown = container.querySelector('[data-testid="measurement-ga4-property-dropdown"]') as HTMLSelectElement;
+    await act(async () => { dropdown.value = 'p1'; dropdown.dispatchEvent(new Event('change', { bubbles: true })); });
+    const confirmBtn = container.querySelector('[data-testid="measurement-ga4-property-confirm"]') as HTMLButtonElement;
+    expect(confirmBtn.disabled).toBe(false);
+    await act(async () => { confirmBtn.click(); });
+    await flush();
+
+    expect(selectedBody).toEqual({ property_id: 'p1' });
+    expect(container.querySelector('[data-testid="measurement-ga4-status"]')?.textContent)
+      .toBe(`${koMessages.channelConnect.channelStatusConnected} · 뭉클랩 GA4`);
+  });
+
+  it('⭐connected — 속성명이 상태 줄에 보이고, 「해제」 버튼 아래 상시 사유 문장이 있다(확인 대화상자 없음)', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'connected', last_seen_at: null, count_7d: null, settings_path: null, property_id: 'p1', property_name: '뭉클랩 GA4' },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-status"]')?.textContent)
+      .toBe(`${koMessages.channelConnect.channelStatusConnected} · 뭉클랩 GA4`);
+    expect((container.querySelector('[data-testid="measurement-ga4-disconnect-button"]') as HTMLButtonElement).textContent)
+      .toBe(koMessages.channelConnect.channelDisconnectAction);
+    expect(container.querySelector('[data-testid="measurement-ga4-disconnect-effect"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementGa4DisconnectEffect);
+  });
+
+  it('⭐connected — 해제 클릭 → DELETE 호출(확인 대화상자 없이 즉시) → 같은 마운트에서 disconnected로 갱신된다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'connected', last_seen_at: null, count_7d: null, settings_path: null, property_id: 'p1', property_name: '뭉클랩 GA4' },
+      ],
+      onGa4Disconnect: () => ({
+        status: 200,
+        nextMeasurementConnections: [{ key: 'ga4', status: 'disconnected', last_seen_at: null, count_7d: null, settings_path: null }],
+      }),
+    });
+    await mount('owner');
+    const disconnectBtn = container.querySelector('[data-testid="measurement-ga4-disconnect-button"]') as HTMLButtonElement;
+    await act(async () => { disconnectBtn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="measurement-ga4-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelStatusNotConnected);
   });
 });
 
