@@ -95,7 +95,7 @@ async def client(mock_session, auth_ctx, org_id):
 # ─── AC1 + AC5: SSE 스트림 수립 + 해제 감지 ─────────────────────────────────
 
 
-async def _wait_until(predicate, *, timeout: float = 5.0, interval: float = 0.005) -> bool:
+async def _wait_until(predicate, *, timeout: float = 15.0, interval: float = 0.005) -> bool:
     """story #3580(근본원인, 페드루 PO 確定 2026-09-06) — 이 파일의 threading.Thread
     injector 재작성이 쓰는 유일한 폴링 축. #3494에서 threading.Thread + time.sleep로
     구현했던 게 진짜 플레이키 근원이었다 — `asyncio.Queue.put_nowait`/`asyncio.Event.
@@ -115,14 +115,18 @@ async def _wait_until(predicate, *, timeout: float = 5.0, interval: float = 0.00
     `await asyncio.sleep(interval)`로 협조적으로 재확인하다가, 관찰되면 그제서야
     `shutdown_event.set()`으로 제너레이터를 정상 종료시켜 그 태스크가 완주하게 한다.
 
-    타임아웃 5.0s(원래 1.0s)로 실측 상향 — 이 재작성판 자체도 로컬에서 다른 pytest
-    프로세스와 동시 실행되는 조건(이 파일 자체를 3-way 동시 20회씩 돌린 재현 실험)
-    아래서 20회 중 5회 연속 실패가 실제로 재현됐다(재현 로그: 격리 실행 20/20·30/30
-    green, 겹쳐 돈 구간에서만 실패 — 스레드 안전성 결함이 아니라 순수 스케줄링
-    지연이 1.0s 예산을 넘긴 것, 재현 후 이 코루틴 자신의 이벤트 루프가 잠깐 CPU를
-    못 받아도 흡수할 여유를 5배로 늘렸다). 프로세스 스케줄링 지연을 흡수하는 자리라
-    "왜 5.0s인지"는 코드가 아니라 이 재현 실험이 근거다 — CI 잡 전체 타임아웃(분 단위)
-    에 비하면 무시할 수 있는 상한."""
+    타임아웃 15.0s(1.0s→5.0s→15.0s) — 실 CI 로그 대조로 확定. #3942 head 81ce6b03c
+    CI RED(run 34034971767) `gh run view --log` 원문 실측: pytest `--durations=20`
+    표에 `test_agent_stream_registers_connection`이 **정확히 5.02s**로 찍혀 있다
+    (내부 예산 5.0s와 정합 — "어딘가 멈춰 30초 pytest-timeout까지 갔다"는 최초 읽기는
+    오독이었다. 같은 표의 `test_s20.py::test_heartbeat_disconnect_check_clears_
+    connection`이 두 실패 run 모두에서 독립적으로 30.16s/30.17s — 이건 그 테스트
+    자신의 별개 30초 로직이지 이 파일의 문제가 옮아붙은 게 아니다. 즉 pytest-timeout
+    배너는 그 테스트 것이었고 이 테스트는 정상적으로 자기 예산 안에서 깔끔하게 실패
+    했을 뿐). 결론 — 이 로직 자체엔 새 레이스가 없다(재작성 자체가 문제였다면 로컬
+    110/110에서도 드러났어야 한다) — GitHub Actions 러너가 그냥 이 Mac보다 느려서
+    5.0s가 종종 부족한 것. 3배(15.0s)로 다시 상향 — 이번엔 "재현 실험"이 아니라
+    "CI 자신의 durations 표"가 근거."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
@@ -238,12 +242,12 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
                         q.put_nowait({"event_type": "__test_sentinel__"})
                     if queues:
                         try:
-                            await asyncio.wait_for(sentinel_written.wait(), timeout=5.0)
+                            await asyncio.wait_for(sentinel_written.wait(), timeout=15.0)
                             written_observed = True
                         except asyncio.TimeoutError:
                             pass
                     shutdown_module.shutdown_event.set()
-                    resp = await asyncio.wait_for(stream_task, timeout=5.0)
+                    resp = await asyncio.wait_for(stream_task, timeout=15.0)
                     assert resp.status_code == 200
                     body = resp.text
     finally:
@@ -466,12 +470,12 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
                         q.put_nowait({"event_type": "__test_sentinel__"})
                     if queues:
                         try:
-                            await asyncio.wait_for(sentinel_written.wait(), timeout=5.0)
+                            await asyncio.wait_for(sentinel_written.wait(), timeout=15.0)
                             written_observed = True
                         except asyncio.TimeoutError:
                             pass
                     shutdown_module.shutdown_event.set()
-                    resp = await asyncio.wait_for(stream_task, timeout=5.0)
+                    resp = await asyncio.wait_for(stream_task, timeout=15.0)
                     assert resp.status_code == 200
                     body = resp.text
     finally:
