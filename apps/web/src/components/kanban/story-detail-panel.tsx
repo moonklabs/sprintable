@@ -814,12 +814,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   }, [story.id, orgSyncVersion]);
 
   // P0-04 in-flight 신뢰 칩 — StoryMergeGate와 동형 데이터소스(work_item_id 필터, BE 추가 0).
+  // story #3584 CHANGES(유나 그라운딩·PO 確定 2026-09-06, PR#3938 비차단) — chipGates
+  // 초기값이 `[]`라 "로딩 중"과 "게이트 0건"을 값만으로 구분 못 한다. 게이트에만 doc이
+  // 있는 스토리(3573류)에서 ConceptCardSection이 이 로딩 중 `[]`를 "게이트 쪽엔 없다"로
+  // 오판하면 backlinks가 늦게 와도 이미 블록을 접어 버릴 수 있어 gatesLoaded로 분리한다.
+  const [gatesLoaded, setGatesLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetchWithAuth(`/api/gates?work_item_id=${story.id}&work_item_type=story`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : []))
       .then((gates) => { if (!cancelled) setChipGates(Array.isArray(gates) ? gates : []); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setGatesLoaded(true); });
     return () => { cancelled = true; };
   }, [story.id, orgSyncVersion]);
 
@@ -1583,8 +1589,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
             {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
                 가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
-                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다. */}
-            <ConceptCardSection workItemId={story.id} />
+                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다.
+                story #3584 — gates는 새로 안 부르고 위(P0-04 in-flight 칩)가 이미
+                fetch한 chipGates를 그대로 넘긴다("새 fetch 0", PO 確定).
+                gatesLoaded도 같이 내려 backlinks·gates 둘 다 도착 前엔 판정을
+                보류한다(§3584 CHANGES — chipGates 초기값 []가 "로딩 중"과 "0건"을
+                못 가른다). */}
+            <ConceptCardSection workItemId={story.id} gates={chipGates} gatesLoaded={gatesLoaded} />
 
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}
