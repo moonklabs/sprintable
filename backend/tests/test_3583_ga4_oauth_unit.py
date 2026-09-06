@@ -162,18 +162,25 @@ async def test_revoke_token_failure_raises():
 
 @pytest.mark.anyio
 async def test_fetch_ga4_inflow_sums_metric_values():
+    """페드루 PO 리뷰(2026-09-06) 픽스 — GA4 `conversions` 메트릭은 2024-05-06
+    changelog로 deprecated, 대체는 `keyEvents`. 요청 자체가 `keyEvents`를
+    보내는지까지 잡아야 이 뮤테이션(`conversions`로 되돌림)이 진짜 RED가 된다
+    — 응답 mock의 헤더 이름만 바꿔선 요청 바디 회귀를 못 잡는다."""
     from app.services.insight_snapshots import _fetch_ga4_inflow
+
+    captured = {}
 
     class _FakeResponse:
         status_code = 200
         def json(self):
             return {
-                "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "conversions"}],
+                "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
                 "rows": [{"metricValues": [{"value": "10"}, {"value": "8"}, {"value": "2"}]}],
             }
 
     class _FakeClient:
         async def post(self, url, *, json, headers):
+            captured["json"] = json
             return _FakeResponse()
 
     result = await _fetch_ga4_inflow(
@@ -181,6 +188,8 @@ async def test_fetch_ga4_inflow_sums_metric_values():
         campaign="draft-1", start_date="2026-09-01", end_date="2026-09-01",
     )
     assert result == {"inflow_sessions": 10, "inflow_users": 8, "inflow_conversions": 2}
+    assert {"name": "keyEvents"} in captured["json"]["metrics"]
+    assert {"name": "conversions"} not in captured["json"]["metrics"]
 
 
 @pytest.mark.anyio

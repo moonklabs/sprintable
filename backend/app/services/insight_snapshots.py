@@ -575,10 +575,17 @@ async def _fetch_ga4_inflow(
 ) -> dict[str, int]:
     """story #3583-BE(그라운딩③ PO 確定) — GA4 Data API `runReport`. 이 발행물의
     UTM(source/medium/campaign) **정확 일치** 세션만 필터링해 sessions·totalUsers·
-    conversions를 합산한다. `rows`가 아예 없으면(그 필터로 온 세션이 0건이거나
+    keyEvents를 합산한다. `rows`가 아예 없으면(그 필터로 온 세션이 0건이거나
     GA4 데이터 처리 지연으로 이 기간을 아직 안 채웠을 수 있음) 빈 dict를 돌려준다
     — 0을 지어내지 않고 호출부가 그대로 「미제공」 처리하게 한다(보수적 판단,
-    threads/instagram/facebook의 "값이 있을 때만 싣는다" 원칙과 동형)."""
+    threads/instagram/facebook의 "값이 있을 때만 싣는다" 원칙과 동형).
+
+    페드루 PO 리뷰(2026-09-06) — GA4 `conversions` 메트릭은 2024-05-06 changelog
+    로 deprecated, 대체는 `keyEvents`(같은 개념·새 이름). `conversions`를 그대로
+    요청하면 400이 나고 이 함수의 `resp.status_code != 200` 분기가 예외를 던져
+    호출부(`_maybe_enrich_with_ga4_inflow`)가 조용히 전부 미제공으로 삼켜버리는
+    자리라 — 지금 고치지 않으면 라이브에서 inflow_conversions가 영원히 null이
+    되는 잠복 결함이었다."""
     from app.services.ga4_oauth import GA4OAuthError
 
     body = {
@@ -586,7 +593,7 @@ async def _fetch_ga4_inflow(
         "dimensions": [
             {"name": "sessionSource"}, {"name": "sessionMedium"}, {"name": "sessionCampaignName"},
         ],
-        "metrics": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "conversions"}],
+        "metrics": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
         "dimensionFilter": {
             "andGroup": {"expressions": [
                 {"filter": {"fieldName": "sessionSource", "stringFilter": {"value": source}}},
@@ -615,7 +622,7 @@ async def _fetch_ga4_inflow(
     return {
         "inflow_sessions": totals.get("sessions", 0),
         "inflow_users": totals.get("totalUsers", 0),
-        "inflow_conversions": totals.get("conversions", 0),
+        "inflow_conversions": totals.get("keyEvents", 0),
     }
 
 

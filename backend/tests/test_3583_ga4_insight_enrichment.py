@@ -149,7 +149,7 @@ async def test_enrich_merges_inflow_keys_when_ga4_connected_and_utm_matches(monk
                 if request.url.path.endswith("/token"):
                     return httpx.Response(200, json={"access_token": "fresh-at", "expires_in": 3600})
                 return httpx.Response(200, json={
-                    "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "conversions"}],
+                    "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
                     "rows": [{"metricValues": [{"value": "7"}, {"value": "5"}, {"value": "1"}]}],
                 })
 
