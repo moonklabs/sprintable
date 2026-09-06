@@ -2407,6 +2407,58 @@ describe('ChannelPostEditPage — 캐러셀 N장 목록·삭제·재정렬(story
   });
 });
 
+// story #3564(유나 24회차 결함②·§5-2, 페드루 PO 確定 2026-09-06) — 캐러셀이 가득
+// 차도(images.length>=maxCount) 「이미지 선택」 트리거가 활성 상태였다(§5-2 "그려진
+// 컨트롤은 할 수 있다는 단정" 위반). maxCount=10 채널에서 검증한다.
+describe('ChannelPostEditPage — 캐러셀 가득 참 트리거 비활성(story #3564)', () => {
+  function makeImages(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      image_id: `img${i + 1}`, draft_id: DRAFT_ID, version_id: 'v1', version: 1, position: i,
+      original_width: 1000, original_height: 1000, original_bytes: 100_000,
+      final_width: 1000, final_height: 1000, final_bytes: 100_000,
+      was_converted: false, image_url: `https://storage.googleapis.com/x/${i + 1}.jpg`,
+    }));
+  }
+
+  it('⭐9/10장 — 트리거 활성·사유 문구 없음', async () => {
+    stubFetch({ imageMaxCount: 10, initialImages: makeImages(9) });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')).toBeNull();
+  });
+
+  it('⭐10/10장 — 트리거 비활성 + 「최대 10장까지 첨부할 수 있습니다.」', async () => {
+    stubFetch({ imageMaxCount: 10, initialImages: makeImages(10) });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')?.textContent)
+      .toBe('최대 10장까지 첨부할 수 있습니다.');
+  });
+
+  it('⭐10장에서 한 장 삭제 — 같은 마운트에서 트리거가 재활성된다', async () => {
+    stubFetch({
+      imageMaxCount: 10, initialImages: makeImages(10),
+      onImageDelete: () => ({ status: 200, body: makeImages(9) }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[0]!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')).toBeNull();
+  });
+});
+
 // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널 상신 전 선알림 + 422 문구.
 describe('ChannelPostEditPage — 이미지 필수 채널 선알림(story #3538)', () => {
   const REASON_TESTID = 'channel-post-image-required-reason';
