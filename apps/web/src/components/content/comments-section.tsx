@@ -46,6 +46,16 @@ export interface CommentItem {
    * 「다시 상신」이 여는 다이얼로그에 «지금 답변»을 prefill하는 데 쓴다(단건 GET
    * .../replies/{replyId}로 원문을 가져온다). null=이 댓글에 답변 자체가 없다. */
   replyId: string | null;
+  /** story #3593(Phase2·FE, 페드루 PO 確定 2026-09-06, BE #3945 additive) — 최신
+   * 답변의 실제 본문. null=이 댓글에 답변 자체가 없다(replyId===null과 항상 같이
+   * 간다). 발송 前(submitted·awaiting_send)에도 "내가 무엇을 답했는지"를 화면이
+   * 말해야 한다는 유나 실측 처방 — 행에 한 줄(truncate)로 보인다. */
+  latestReplyText: string | null;
+  /** story #3593 — 이 댓글의 전체 답변 개수(초안 포함, BE replies_count 그대로).
+   * 0이면 latestReplyText도 반드시 null(그 역도 성립). 2건 이상이면 배지가
+   * "답변 N · 최신 {상태}"로 바뀐다(1건이면 기존 배지 그대로 — 상태 낱말 자체는
+   * 불변). */
+  repliesCount: number;
 }
 
 // story #3517(유나 §22-②) — 세 얼굴. "미수집"(null)·"댓글 없음"([])·"불러오지 못함"(fetch
@@ -84,7 +94,15 @@ export interface RawCommentsResponse {
       id: string; status: string; external_reply_url: string | null; command_id: string | null;
       command_status: string | null; failure_kind: string | null;
       next_attempt_at: string | null; reason_code: string | null;
+      /** story #3593(BE #3945 additive) — 옵셔널로 둔다(기존 픽스처·구버전 소비처가
+       * 이 키 없이 reply 객체를 만들어도 안 죽는다, §17 "신호 없으면 지어내지
+       * 않는다" — 아래 deriveCommentsFace에서 `?? null`로만 안전 폴백). */
+      text?: string;
     } | null;
+    /** story #3593(BE #3945 additive, 유나 §22-16) — 이 댓글 전체 답변 개수. 옵셔널
+     * (기존 픽스처 무변경, 없으면 0으로 안전 폴백 — comments_next_allowed_at과
+     * 같은 관례). */
+    replies_count?: number;
   }[];
   active_count: number;
   deleted_count: number;
@@ -146,6 +164,8 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
     }),
     replyCommandId: c.reply?.command_id ?? null,
     replyId: c.reply?.id ?? null,
+    latestReplyText: c.reply?.text ?? null,
+    repliesCount: c.replies_count ?? 0,
   }));
   // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
   // 하나만 본다(comments.length 아님 — 페이지 잘림·지워진 행이 섞이면 틀린다).
@@ -275,7 +295,7 @@ function CommentsList({
                 자리 자체를 안 그린다 — 지어내지 않는다. */}
             {comment.replyStatus !== null ? (
             <div className="flex items-center gap-2" data-testid="comments-item-reply-status">
-              <CommentReplyStatusChip status={comment.replyStatus} />
+              <CommentReplyStatusChip status={comment.replyStatus} repliesCount={comment.repliesCount} />
               {comment.replyStatus === 'published' && comment.replyExternalUrl ? (
                 <a
                   href={comment.replyExternalUrl}
@@ -288,6 +308,15 @@ function CommentsList({
                 </a>
               ) : null}
             </div>
+            ) : null}
+            {/* story #3593(Phase2·FE, 페드루 PO 確定 2026-09-06) — 최신 답변 본문
+                한 줄(truncate). 발송 前(submitted·awaiting_send)에도 보인다 —
+                CommentBodyText의 길이 기반 접기/펼치기와 다른 축(여기는 목록
+                리듬 안의 짧은 미리보기일 뿐, 전문은 답변 다이얼로그에서 본다). */}
+            {comment.latestReplyText ? (
+              <p className="truncate text-xs text-muted-foreground" data-testid="comments-item-reply-text">
+                {comment.latestReplyText}
+              </p>
             ) : null}
             {/* story #3544(3517 조각③, 유나 §22-15③, PO 確定 2026-09-06) — 「왜
                 멈췄고 다음에 뭘 하나」는 칩과 다른 축이라 칩 옆이 아니라 그 아래
@@ -322,7 +351,11 @@ function CommentsList({
                   onClick={() => onReply(comment)}
                   data-testid="comments-item-reply"
                 >
-                  {t('commentsReplyCta')}
+                  {/* story #3593(Phase2·FE, 페드루 PO 確定 2026-09-06) — 이미 답변이
+                      있으면(재상신 이력) 버튼 이름이 "답변 더하기"로 갈린다(3592
+                      처방과 합쳐 접근 이름도 같은 낱말 — 이 버튼은 visible text가
+                      곧 accessible name이라 별도 aria-label 불필요). */}
+                  {comment.repliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta')}
                 </Button>
               </div>
             ) : null}

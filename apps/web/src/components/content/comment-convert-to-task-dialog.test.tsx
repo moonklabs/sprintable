@@ -45,6 +45,8 @@ const COMMENT: CommentItem = {
   replyFailureAction: undefined,
   replyCommandId: null,
   replyId: null,
+  latestReplyText: null,
+  repliesCount: 0,
 };
 
 describe('CommentConvertToTaskDialog', () => {

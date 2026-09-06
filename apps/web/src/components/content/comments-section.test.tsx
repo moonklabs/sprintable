@@ -35,6 +35,8 @@ function baseComment(overrides: Partial<CommentItem>): CommentItem {
     replyFailureAction: undefined,
     replyCommandId: null,
     replyId: null,
+    latestReplyText: null,
+    repliesCount: 0,
     ...overrides,
   };
 }
@@ -283,6 +285,54 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     await act(async () => { btn.click(); });
     expect(onReply).toHaveBeenCalledWith(comment);
   });
+
+  // story #3593(Phase2·FE, 페드루 PO 確定 2026-09-06) — AC2: 답변이 있으면 행에
+  // 최신 답변 텍스트 한 줄이 보인다. submitted·awaiting_send(발송 前)에도 보인다
+  // (유나 실측 — "내가 무엇을 답했는지"를 발송 전에 확認할 수 있어야 한다).
+  it.each(['submitted', 'awaiting_send', 'published'] as const)(
+    '답변 상태=%s여도 latestReplyText가 있으면 행에 한 줄로 보인다',
+    async (replyStatus) => {
+      const face = loadedFace([baseComment({ replyStatus, latestReplyText: '최신 답변 본문', repliesCount: 1 })]);
+      const { container, root } = mount();
+      await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+      expect(container.querySelector('[data-testid="comments-item-reply-text"]')?.textContent).toBe('최신 답변 본문');
+    },
+  );
+
+  it('답변 자체가 없으면(latestReplyText=null) 답변 텍스트 줄 자체가 안 뜬다', async () => {
+    const face = loadedFace([baseComment({ replyStatus: 'none', latestReplyText: null, repliesCount: 0 })]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    expect(container.querySelector('[data-testid="comments-item-reply-text"]')).toBeNull();
+  });
+
+  // story #3593 AC3 — 버튼 이름이 상태로 갈린다.
+  it('repliesCount=0이면 버튼 「답변」, repliesCount>0이면 「답변 더하기」', async () => {
+    const face = loadedFace([
+      baseComment({ id: 'c1', repliesCount: 0 }),
+      baseComment({ id: 'c2', repliesCount: 1, replyStatus: 'published' }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const buttons = container.querySelectorAll('[data-testid="comments-item-reply"]');
+    expect(buttons[0]?.textContent).toBe('답변');
+    expect(buttons[1]?.textContent).toBe('답변 더하기');
+  });
+
+  // story #3593 AC4·AC5 — 답변 2건 이상이면 배지가 「답변 N · 최신 {상태}」로
+  // 바뀌고, 1건이면 기존 배지("발행됨" 낱말 그대로) 그대로다.
+  it('repliesCount>=2면 배지가 「답변 N · 최신 {상태}」, 1건이면 기존 배지 그대로', async () => {
+    const face = loadedFace([
+      baseComment({ id: 'c1', replyStatus: 'published', repliesCount: 1 }),
+      baseComment({ id: 'c2', replyStatus: 'published', repliesCount: 2 }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const chips = container.querySelectorAll('[data-comment-reply-status-chip]');
+    expect(chips[0]?.textContent).toContain('발행됨');
+    expect(chips[0]?.textContent).not.toContain('·');
+    expect(chips[1]?.textContent).toBe('답변 2 · 최신 발행됨');
+  });
 });
 
 // story #3517(BE #3865 조각①, PO 確定 2026-09-05) — 원 응답(snake_case)→CommentsFace
@@ -321,7 +371,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
         externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
       }],
     });
   });
@@ -375,6 +425,42 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
     expect((face as Extract<CommentsFace, { kind: 'empty' }>).nextAllowedAt).toBe('2026-09-05T10:05:00Z');
   });
 
+  // story #3593(Phase2·FE, 페드루 PO 確定 2026-09-06, BE #3945 additive) —
+  // reply.text·replies_count가 각각 latestReplyText·repliesCount로 옮겨진다.
+  it('reply.text·replies_count가 latestReplyText·repliesCount로 옮겨진다', () => {
+    const face = deriveCommentsFace(rawResponse({
+      active_count: 1,
+      comments: [rawComment({
+        replies_count: 2,
+        reply: {
+          id: 'r1', status: 'sent', external_reply_url: null, command_id: null,
+          command_status: null, failure_kind: null, next_attempt_at: null, reason_code: null,
+          text: '두 번째 답변',
+        },
+      })],
+    }));
+    const comment = (face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!;
+    expect(comment.latestReplyText).toBe('두 번째 답변');
+    expect(comment.repliesCount).toBe(2);
+  });
+
+  // 회귀가드 — reply.text·replies_count 둘 다 응답에서 생략되면(구버전 픽스처)
+  // 죽지 않고 안전 기본값(null·0)으로 폴백한다(§17 "신호 없으면 지어내지 않는다").
+  it('reply.text·replies_count가 생략되면 latestReplyText=null·repliesCount=0으로 안전 폴백', () => {
+    const face = deriveCommentsFace(rawResponse({
+      active_count: 1,
+      comments: [rawComment({
+        reply: {
+          id: 'r1', status: 'sent', external_reply_url: null, command_id: null,
+          command_status: null, failure_kind: null, next_attempt_at: null, reason_code: null,
+        },
+      })],
+    }));
+    const comment = (face as Extract<CommentsFace, { kind: 'loaded' }>).comments[0]!;
+    expect(comment.latestReplyText).toBeNull();
+    expect(comment.repliesCount).toBe(0);
+  });
+
   // story #3517(유나 §22-10①·⑨, PO 確定 2026-09-05 정정) — "댓글 없음" 판정은
   // active_count 하나만 본다. deleted_count>0(전부 지워짐)이어도 active_count=0이면
   // "댓글 없음" 얼굴이다 — deletedCount는 그 empty 얼굴 자체가 들고 있어(SectionHeader
@@ -389,7 +475,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: null, bodyText: 'x',
         externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
       }],
     });
   });

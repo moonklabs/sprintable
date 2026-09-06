@@ -35,6 +35,7 @@ const COMMENT: CommentItem = {
   id: 'c1', authorDisplayName: '홍길동', bodyText: '언제 재입고되나요?',
   externalCreatedAt: '2026-09-05T10:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null, replyStatus: 'none',
   replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null,
+  latestReplyText: null, repliesCount: 0,
 };
 
 const DRAFT_REPLY: ReplyView = {
