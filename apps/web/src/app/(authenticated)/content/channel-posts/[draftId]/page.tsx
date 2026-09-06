@@ -1187,7 +1187,13 @@ export default function ChannelPostEditPage() {
         { data?: { upload_url: string; object_path: string; required_put_headers: Record<string, string> } } | null;
       const uploadInfo = urlJson?.data;
       if (!uploadInfo) {
-        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+        // story #3575(⑤ 조건 1, 페드루 PO 지적 2026-09-06) — urlRes.ok=true(2xx)인데
+        // 본문에 .data가 없다 — 응답 자체는 왔으니 "응답 있음" 갈래(상태코드+raw).
+        setVideoUploadStatus({
+          phase: 'error',
+          text: t('errorChannelVideoUploadFailedWithStatus', { status: urlRes.status }),
+          raw: JSON.stringify(urlJson),
+        });
         return;
       }
 
@@ -1226,7 +1232,13 @@ export default function ChannelPostEditPage() {
       const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: ChannelPostVideoResponse } | null;
       const uploaded = confirmJson?.data;
       if (!uploaded) {
-        setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+        // story #3575(⑤ 조건 1) — confirmRes.ok=true인데 본문에 .data가 없다 —
+        // 마찬가지로 "응답 있음" 갈래.
+        setVideoUploadStatus({
+          phase: 'error',
+          text: t('errorChannelVideoUploadFailedWithStatus', { status: confirmRes.status }),
+          raw: JSON.stringify(confirmJson),
+        });
         return;
       }
       setVideo({
@@ -1249,7 +1261,11 @@ export default function ChannelPostEditPage() {
       }
       setVideoUploadStatus({ phase: 'idle' });
     } catch {
-      setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailed') });
+      // story #3575(⑤ 조건 1) — 예외가 여기까지 올라왔다는 것 자체가 "응답이
+      // 없다"(fetch가 던지는 건 네트워크 단절류뿐 — HTTP 오류 상태는 throw하지
+      // 않고 res.ok=false로 옴, JSON 파싱 실패는 이미 각 .catch(() => null)로
+      // 흡수돼 있다) — 응답 없음 갈래.
+      setVideoUploadStatus({ phase: 'error', text: t('errorChannelVideoUploadFailedNoResponse') });
     }
   };
 

@@ -2586,7 +2586,6 @@
     "channelPostsVideoBlockedByImagesReason": "이미지가 2장 이상이면 영상을 붙일 수 없습니다. 이미지를 한 장만 남기면 그 한 장이 커버가 됩니다.",
     "channelPostsVideoSpecTag": "최대 {maxBytes} · {minSeconds}~{maxSeconds}초 · {aspect} · {codecs}",
     "channelPostsVideoMetaDuration": "{n}초",
-    "errorChannelVideoUploadFailed": "영상 업로드에 실패했습니다 — 다시 시도해 주세요.",
     "errorChannelVideoUploadFailedWithStatus": "영상을 올리지 못했습니다 — 서버가 {status}로 응답했습니다.",
     "errorChannelVideoUploadFailedNoResponse": "영상을 올리지 못했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.",
     "channelPostsImageRequiredReason": "이미지 없이 상신할 수 없습니다 — 이 채널은 이미지가 필요합니다.",

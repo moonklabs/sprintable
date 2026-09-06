@@ -2600,9 +2600,9 @@ describe('ChannelPostEditPage — 캐러셀 가득 참 트리거 비활성(story
   });
 });
 
-// story #3575(유나 §17-23④ 정정 2026-09-06, 페드루 PO 確定) — 영상↔이미지 상호배타 +
-// 영상 있을 때 커버 상한 1(단, 「가득 참 비활성」은 금지 — 트리거는 안 닫고 낱말만
-// 「커버 선택」→「커버 바꾸기」). 낱말(사유 문장)은 유나 표 도착 前이라 구조만 pin.
+// story #3575(유나 §17-23④/⑤ 확定 2026-09-06, 페드루 PO 確定) — 영상↔이미지 상호배타
+// + 영상 있을 때 커버 상한 1(단, 「가득 참 비활성」은 금지 — 트리거는 안 닫고 낱말만
+// 「커버 선택」→「커버 바꾸기」). 낱말은 유나 확定값 그대로 pin.
 describe('ChannelPostEditPage — 영상↔이미지 상호배타 + 커버 상한 1(story #3575)', () => {
   function makeTestImages(count: number) {
     return Array.from({ length: count }, (_, i) => ({
@@ -4163,6 +4163,56 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
     expect(errorText).toBe('영상에는 커버 1장만 첨부할 수 있습니다(서버 메시지 예시)');
+  });
+
+  // story #3575(⑤ 조건 1, 페드루 PO 지적 2026-09-06) — urlRes.ok=true(2xx)인데 본문에
+  // .data가 없는 잔존 분기. 응답은 왔으니 "응답 있음" 갈래(상태코드+raw), 「다시 시도」
+  // 문장은 없다.
+  it('⭐upload-url 응답 200인데 본문에 .data가 없음 — 상태코드 문구+raw(응답 있음 갈래)', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      onVideoUploadUrl: () => ({ status: 200, body: null }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버가 200로 응답했습니다.');
+    expect(
+      [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
+    ).not.toBeUndefined();
+  });
+
+  // confirm 쪽도 동형(응답 있음 갈래) — 그리고 이 함수 전체를 감싸는 catch는 이제
+  // "응답 자체가 없다"(fetch가 던지는 예외 — 네트워크 단절류) 갈래만 남는다는 것을
+  // 같이 pin(HTTP 오류는 throw 없이 res.ok=false로 오므로 이 catch는 진짜 미도달만 잡는다).
+  it('⭐confirm이 던지는 예외(네트워크 단절) — 재시도 문장(응답 없음 갈래), raw 없음', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      onVideoConfirm: () => { throw new Error('network down'); },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.');
+    expect(
+      [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
+    ).toBeUndefined();
   });
 
   it('⭐승인 카드 — draft.video_url이 있으면 <video>를, 없으면 썸네일만 그린다', async () => {

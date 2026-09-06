@@ -2586,7 +2586,6 @@
     "channelPostsVideoBlockedByImagesReason": "A video can't be added while more than one image is attached. Leave a single image and it becomes the cover.",
     "channelPostsVideoSpecTag": "Up to {maxBytes} · {minSeconds}–{maxSeconds}s · {aspect} · {codecs}",
     "channelPostsVideoMetaDuration": "{n}s",
-    "errorChannelVideoUploadFailed": "Video upload failed — please try again.",
     "errorChannelVideoUploadFailedWithStatus": "Couldn't upload the video — the server responded with {status}.",
     "errorChannelVideoUploadFailedNoResponse": "Couldn't upload the video — couldn't reach the server. Check your connection and try again.",
     "channelPostsImageRequiredReason": "You can't submit without an image — this channel requires an image.",
