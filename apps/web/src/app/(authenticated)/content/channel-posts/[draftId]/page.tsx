@@ -349,10 +349,16 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
     // (BE가 abs 한 갈래라 어느 쪽으로 벗어났는지 모른다). actual·target 둘 다
     // formatVideoAspectRatio(규격 태그 헬퍼, §17-23②)로 — 날 소수 금지.
     case 'cover_aspect_ratio_rejected':
-      return t('channelPostsVideoCoverAspectRatioRejected', {
-        actual: typeof info.imageAspectRatio === 'number' ? formatVideoAspectRatio(info.imageAspectRatio) : '',
-        target: typeof info.coverAspectTarget === 'number' ? formatVideoAspectRatio(info.coverAspectTarget) : '',
-      });
+      // 유나 CHANGES(PR#3940, §17-23 ⑤-1) — actual/target 둘 다 있을 때만 이
+      // 문장. 하나라도 없으면 구멍 난 문장(「…입니다. …이어야 합니다.」) 대신
+      // 아래 default(서버 message 일반 경로)로 떨어진다.
+      if (typeof info.imageAspectRatio === 'number' && typeof info.coverAspectTarget === 'number') {
+        return t('channelPostsVideoCoverAspectRatioRejected', {
+          actual: formatVideoAspectRatio(info.imageAspectRatio),
+          target: formatVideoAspectRatio(info.coverAspectTarget),
+        });
+      }
+      return info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('errorChannelImageUploadFailed'));
     default:
       return info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('errorChannelImageUploadFailed'));
   }

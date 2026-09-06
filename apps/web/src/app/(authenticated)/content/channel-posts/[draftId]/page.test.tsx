@@ -2360,6 +2360,26 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(errorText).not.toContain('%');
   });
 
+  it('⭐#3586 CHANGES — target/actual 중 하나라도 없으면 구멍 문장 대신 일반 경로(서버 message)', async () => {
+    stubFetch({
+      imageMaxCount: 1,
+      onImageConfirm: () => ({
+        status: 422,
+        body: { detail: { code: 'CHANNEL_COVER_ASPECT_RATIO_REJECTED', message: '서버 메시지 그대로' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(errorText).toContain('서버 메시지 그대로');
+    expect(errorText).not.toContain('비율이');
+  });
+
   // ⭐뮤테이션 방향 — detail target이 바뀌면 문구의 {target}도 바뀐다(하드코딩
   // "9:16" 문자열이 아니라 실제로 detail 값을 읽는다는 증거).
   it('⭐#3586 — detail target이 다른 값(4:5)이면 문구도 그 값으로 바뀐다', async () => {
