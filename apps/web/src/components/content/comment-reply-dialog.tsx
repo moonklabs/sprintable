@@ -44,6 +44,11 @@ export interface CommentReplyDialogProps {
    * 빈 칸 그대로. 「승인한 답변」과의 diff는 만들지 않는다(BE additive 前 — 못
    * 하는 것으로 명기, §22-15 ⑧). */
   initialText?: string;
+  /** story #3544 후속⑨(유나 관찰, PO 確定 2026-09-06) — 조각⑧의 단건 GET이 실패하면
+   * initialText는 undefined로 남아 일반 「답변」(새로 시작)의 빈 칸과 글자가 같아진다
+   * — 「불러오다 실패했다」와 「원래 빈 칸이다」를 사람이 못 가른다. 이 플래그가 true면
+   * textarea 위에 한 줄을 보여준다(실패해도 손으로 쓸 수는 있어 액션 0). */
+  prefillFetchFailed?: boolean;
 }
 
 /**
@@ -53,7 +58,7 @@ export interface CommentReplyDialogProps {
  * 여기서 보여주고, 승인 자체는 이 화면 책임이 아니다(§22-⑤ "승인 카드"는 게이트
  * 인박스의 몫).
  */
-export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit, initialText }: CommentReplyDialogProps) {
+export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit, initialText, prefillFetchFailed }: CommentReplyDialogProps) {
   const t = useTranslations('content');
   const [text, setText] = useState(initialText ?? '');
   const [draft, setDraft] = useState<ReplyView | null>(null);
@@ -157,6 +162,11 @@ export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit, 
               <label className="text-xs font-medium text-muted-foreground" htmlFor="comments-reply-text">
                 {t('commentsReplyTextLabel')}
               </label>
+              {prefillFetchFailed ? (
+                <p className="text-xs text-muted-foreground" data-testid="comments-reply-prefill-fetch-failed">
+                  {t('commentsReplyPrefillFetchFailed')}
+                </p>
+              ) : null}
               <textarea
                 id="comments-reply-text"
                 value={text}

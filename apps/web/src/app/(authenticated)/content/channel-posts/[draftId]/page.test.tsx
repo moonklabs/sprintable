@@ -3030,9 +3030,11 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
 
     const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
     expect(textarea.value).toBe('승인 뒤 바뀐 지금 답변');
+    // story #3544 후속⑨ — 성공했으면 「불러오지 못했습니다」 줄은 안 뜬다.
+    expect(document.querySelector('[data-testid="comments-reply-prefill-fetch-failed"]')).toBeNull();
   });
 
-  it('⭐「다시 상신」인데 단건 GET이 실패하면(레이스) 빈 칸으로 열린다(지어내지 않는다)', async () => {
+  it('⭐「다시 상신」인데 단건 GET이 실패하면(레이스) 빈 칸으로 열리고, 후속⑨(유나 관찰) — 「불러오지 못했습니다」 한 줄이 textarea 위에 뜬다(일반 답변의 원래 빈 칸과 구분)', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: {
@@ -3061,6 +3063,32 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
 
     const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
     expect(textarea.value).toBe('');
+    expect(document.querySelector('[data-testid="comments-reply-prefill-fetch-failed"]')?.textContent)
+      .toBe(koMessages.content.commentsReplyPrefillFetchFailed);
+  });
+
+  it('일반 「답변」(새로 시작) — 빈 칸이지만 후속⑨ 줄은 안 뜬다(원래 빈 칸이지 불러오다 실패한 게 아니다)', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: null,
+        }],
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const replyBtn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    await act(async () => { replyBtn.click(); });
+    await flush();
+
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
+    expect(document.querySelector('[data-testid="comments-reply-prefill-fetch-failed"]')).toBeNull();
   });
 
   it('「답변」 상신 409(대상 삭제) — 서버 문구가 그대로 뜬다', async () => {

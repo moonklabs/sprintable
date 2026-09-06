@@ -2269,6 +2269,7 @@
     "commentsConvertClose": "Close",
     "commentsReplyDialogTitle": "Reply",
     "commentsReplyTextLabel": "Reply text",
+    "commentsReplyPrefillFetchFailed": "We couldn't load the previous reply — please write it yourself.",
     "commentsReplyTextPlaceholder": "Write the reply to send to this comment",
     "commentsReplySaveDraftCta": "Save draft",
     "commentsReplySavingDraft": "Saving...",
