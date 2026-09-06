@@ -56,6 +56,10 @@ export interface CommentItem {
    * "답변 N · 최신 {상태}"로 바뀐다(1건이면 기존 배지 그대로 — 상태 낱말 자체는
    * 불변). */
   repliesCount: number;
+  /** story #3596 — 안 보낸(draft/pending) 최신 답변. null=없음. */
+  openReplyDraft: { id: string; status: string; text: string } | null;
+  /** story #3596 — status=sent만 카운트(배지 N의 새 주어). */
+  sentRepliesCount: number;
 }
 
 // story #3517(유나 §22-②) — 세 얼굴. "미수집"(null)·"댓글 없음"([])·"불러오지 못함"(fetch
@@ -103,6 +107,8 @@ export interface RawCommentsResponse {
      * (기존 픽스처 무변경, 없으면 0으로 안전 폴백 — comments_next_allowed_at과
      * 같은 관례). */
     replies_count?: number;
+    open_reply_draft?: { id: string; status: string; text: string } | null;
+    sent_replies_count?: number;
   }[];
   active_count: number;
   deleted_count: number;
@@ -166,6 +172,8 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
     replyId: c.reply?.id ?? null,
     latestReplyText: c.reply?.text ?? null,
     repliesCount: c.replies_count ?? 0,
+    openReplyDraft: c.open_reply_draft ?? null,
+    sentRepliesCount: c.sent_replies_count ?? 0,
   }));
   // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
   // 하나만 본다(comments.length 아님 — 페이지 잘림·지워진 행이 섞이면 틀린다).
@@ -355,13 +363,10 @@ function CommentsList({
                       있으면(재상신 이력) 버튼 이름이 "답변 더하기"로 갈린다(3592
                       처방과 합쳐 접근 이름도 같은 낱말 — 이 버튼은 visible text가
                       곧 accessible name이라 별도 aria-label 불필요). */}
-                  {/* WIP story #3596 AC7 — openReplyDraft가 이기고, 그다음
-                      sentRepliesCount, 둘 다 없으면 기본. openReplyDraft/
-                      sentRepliesCount 필드는 다음 WIP 커밋에서 CommentItem·
-                      deriveCommentsFace에 배선(지금은 any 캐스트로 컴파일만
-                      통과 — 다음 커밋에서 제거). */}
-                  {(comment as any).openReplyDraft ? t('commentsReplyContinueCta')
-                    : comment.repliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta')}
+                  {/* story #3596 AC7 — openReplyDraft가 이기고(sentRepliesCount
+                      무관), 그다음 sentRepliesCount, 둘 다 없으면 기본. */}
+                  {comment.openReplyDraft ? t('commentsReplyContinueCta')
+                    : comment.sentRepliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta')}
                 </Button>
               </div>
             ) : null}
