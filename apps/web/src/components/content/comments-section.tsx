@@ -355,7 +355,13 @@ function CommentsList({
                       있으면(재상신 이력) 버튼 이름이 "답변 더하기"로 갈린다(3592
                       처방과 합쳐 접근 이름도 같은 낱말 — 이 버튼은 visible text가
                       곧 accessible name이라 별도 aria-label 불필요). */}
-                  {comment.repliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta')}
+                  {/* WIP story #3596 AC7 — openReplyDraft가 이기고, 그다음
+                      sentRepliesCount, 둘 다 없으면 기본. openReplyDraft/
+                      sentRepliesCount 필드는 다음 WIP 커밋에서 CommentItem·
+                      deriveCommentsFace에 배선(지금은 any 캐스트로 컴파일만
+                      통과 — 다음 커밋에서 제거). */}
+                  {(comment as any).openReplyDraft ? t('commentsReplyContinueCta')
+                    : comment.repliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta')}
                 </Button>
               </div>
             ) : null}
