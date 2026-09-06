@@ -200,10 +200,17 @@ async def _attach_artifact_denorm(
 
 
 _GENERATION_COST_KIND = "generation_cost"
+# story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — concept_approval 게이트 승인 근거로
+# 첨부하는 검증표. type="report"와 짝을 이루는 관례(generation_cost의 type="metric" 관례와
+# 동형 — 이 관례는 여기서 강제 안 함, 소비자 쪽이 kind로만 읽는다. 3498 kind=generation_cost
+# 분기와 동일 원칙).
+_VERIFICATION_SHEET_KIND = "verification_sheet"
+_VERIFICATION_SHEET_VERDICTS = frozenset({"pass", "fail", "n_a"})
 
 
 async def _validate_and_normalize_evidence_payload(
     session: AsyncSession, *, org_id: uuid.UUID, payload: dict | None, caller_type: str,
+    caller_id: uuid.UUID | None = None,
 ) -> dict | None:
     """story #3498(페드루 PO REQUIRED, PR#3847 리뷰) — client-writable payload를 연
     대가로 두 가지를 서버가 강제한다.
@@ -217,7 +224,15 @@ async def _validate_and_normalize_evidence_payload(
     뚫는 걸 여기서 원천 차단 — generation_budget.py의 합산 스킵은 두 번째 겹).
     `currency`는 조직에 generation_budget 정책이 설정돼 있으면 그 통화와 정확히
     일치해야 한다(정책 자체가 없으면 비교 대상이 없어 통과 — «규칙 없음»과 같은
-    원칙). 위반은 422 EVIDENCE_PAYLOAD_INVALID."""
+    원칙). 위반은 422 EVIDENCE_PAYLOAD_INVALID.
+
+    ③ `kind="verification_sheet"`(story #3561, concept_approval 게이트 승인 근거) —
+    `items`는 `{name:str, verdict:"pass"|"fail"|"n_a", note?:str}` 1건 이상의 배열이어야
+    한다(위반 422 EVIDENCE_PAYLOAD_INVALID). `verified_by`는 ①의 `recorded_by`와 동일
+    원칙으로 클라이언트 값을 무시하고 서버가 caller_type+caller_id로 덮어쓴다(caller_id는
+    ①과 달리 이 kind 전용으로 추가 전달받는다 — 「누가 검증표를 작성했나」는 caller_type
+    하나로는 부족, 실 멤버까지 특정해야 한다). `verified_at`은 서버 시각(클라이언트가
+    못 주는 값, 지어내지 않는다)."""
     if payload is None:
         return None
     payload = dict(payload)
@@ -245,6 +260,37 @@ async def _validate_and_normalize_evidence_payload(
                     "message": f"currency는 조직 정책 통화({policy_currency})와 일치해야 합니다.",
                 },
             )
+    elif payload.get("kind") == _VERIFICATION_SHEET_KIND:
+        items = payload.get("items")
+        if not isinstance(items, list) or not items:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": "verification_sheet evidence의 items는 1건 이상의 배열이어야 합니다.",
+                },
+            )
+        for item in items:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("name"), str) or not item.get("name")
+                or item.get("verdict") not in _VERIFICATION_SHEET_VERDICTS
+                or (item.get("note") is not None and not isinstance(item.get("note"), str))
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "EVIDENCE_PAYLOAD_INVALID",
+                        "message": (
+                            "verification_sheet evidence의 각 item은 name(비어있지 않은 문자열)·"
+                            f"verdict({sorted(_VERIFICATION_SHEET_VERDICTS)} 중 하나)가 필요하고, "
+                            "note는 있으면 문자열이어야 합니다."
+                        ),
+                    },
+                )
+        from datetime import datetime, timezone
+        payload["verified_by"] = {"type": caller_type, "id": str(caller_id) if caller_id is not None else None}
+        payload["verified_at"] = datetime.now(timezone.utc).isoformat()
     return payload
 
 
@@ -273,7 +319,7 @@ async def create_evidence(
         )
 
     payload = await _validate_and_normalize_evidence_payload(
-        session, org_id=org_id, payload=body.payload, caller_type=caller.type,
+        session, org_id=org_id, payload=body.payload, caller_type=caller.type, caller_id=caller.id,
     )
 
     evidence = Evidence(

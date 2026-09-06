@@ -45,6 +45,7 @@ from app.services.gate_seal import (
     GateSealMissingError as ChannelPostSealMissingError,  # noqa: F401 (재-export, 라우터가 import)
     compute_seal_hash,
 )
+from app.services.gate_service import ConceptApprovalNotApprovedError  # noqa: F401 (재-export, 라우터가 import — story #3561)
 from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채널 라우터도 재사용)
     ExternalPublishGateNotApprovedError,
     get_site_post_draft,
@@ -984,6 +985,18 @@ async def submit_channel_post_draft(
                 holding_draft_id=holder.id, holding_channel=holder.channel,
                 holding_connection_id=holder.connection_id,
             )
+
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — opt-in 서버 거부: 이 work_item에
+    # concept_approval 게이트가 있고 미승인이면 상신 자체를 막는다(반쪽 봉인 없이, 위 두 422/409
+    # 검사와 동일하게 게이트 mutation 前). 게이트가 없으면 find_unapproved_gate_of_type이 None을
+    # 반환 — 그 work_item은 이 축 검사 대상이 아니다(현행 그대로).
+    from app.services.gate_service import find_unapproved_gate_of_type
+    concept_gate = await find_unapproved_gate_of_type(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type="concept_approval",
+    )
+    if concept_gate is not None:
+        raise ConceptApprovalNotApprovedError(gate_id=concept_gate.id, status=concept_gate.status)
 
     # story #3414 — 무엇이 바뀌었는지(본문 또는 scheduled_at)를 재봉인 前에 먼저
     # 판정한다. 셋 다 안 바뀌었으면 기존처럼 완전 no-op(short-circuit).

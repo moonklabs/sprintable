@@ -295,6 +295,21 @@ async def maybe_create_stage_gate(
         designated_approver_id=approver_id,
     )
 
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — gate_type=concept_approval
+    # 선언은 `payload.doc_ref`(문자열 uuid, previous_output_doc_id와 동형 출처 관례)로
+    # "무엇을 승인하는지"를 명시한다. create_gate()는 gate_type/work_item_type을 안 가려
+    # sealed_doc_* 축을 모른다(공용 chokepoint 성격 유지) — 이 훅(호출부)에서만 채운다.
+    # 못 찾으면(doc_ref 없음·해소 실패) 조용히 스킵(지어내지 않는다 — sealed_doc_id는
+    # null로 남고, doc.py::_reseal_concept_approval_gate_on_doc_update가 애초에 그
+    # 게이트를 못 찾아 재승인 훅이 무동작이 될 뿐, 게이트 생성 자체는 막지 않는다).
+    if gate_type == "concept_approval":
+        doc_ref = await _resolve_doc_by_id(db, org_id=org_id, doc_id_raw=payload.get("doc_ref"))
+        if doc_ref is not None:
+            doc_id, _doc_title, doc_content, _created_by = doc_ref
+            from app.services.doc import compute_doc_body_sha256
+            gate.sealed_doc_id = doc_id
+            gate.sealed_doc_body_sha256 = compute_doc_body_sha256(doc_content)
+
     if gate.status == "voided":
         logger.info(
             "recipe stage gate stays voided — admin 판단 필요(자동 재오픈 대상 아님) "

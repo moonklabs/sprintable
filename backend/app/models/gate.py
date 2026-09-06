@@ -160,6 +160,14 @@ class Gate(Base):
     # on_new_version`(편집 훅)은 이 필드를 절대 안 건드린다 — submit() 재호출만이
     # 재봉인 권한을 갖는다(sealed_content_*와 동일 "무엇이 승인됐었나 보존" 원칙).
     sealed_estimated_cost_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — `concept_approval` 전용 봉인 축
+    # (위 sealed_* 축들과 같은 공유-nullable 관례 — 그 gate_type이 아니면 항상 null). 승인
+    # 대상 doc의 정체(sealed_doc_id)와 그 시점 본문 해시(sealed_doc_body_sha256) — doc 본문이
+    # 바뀌면(app/services/doc.py::_reseal_concept_approval_gate_on_doc_update) approved→
+    # pending+reapproval_required(external_publish의 content sha 대조와 동형 판정, work_item
+    # 자체는 doc이 아니라 그 doc이 근거로 삼는 Story/Task라는 점만 다르다).
+    sealed_doc_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    sealed_doc_body_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
