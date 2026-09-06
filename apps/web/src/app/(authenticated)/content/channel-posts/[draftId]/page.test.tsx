@@ -3722,6 +3722,31 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     expect(tag).toBe('최대 100.0 MB · 3~90초 · 9:16 · H.264/HEVC');
   });
 
+  // PR#3917 조건 1(유나 §17-23② 정정, 페드루 PO 確定 2026-09-06) — 조회를
+  // toLowerCase()로(대문자 이중 키 불요) + 모르는 값은 원문 그대로(대문자화
+  // 안 함, "vp09"가 "VP09"로 둔갑하지 않게).
+  it('⭐코덱 표 — 대문자 입력도 조회되고(AVC1→H.264), 모르는 값은 원문 그대로(대문자화 안 함)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0.5625, videoCodecs: ['AVC1', 'hvc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent)
+      .toBe('최대 100.0 MB · 3~90초 · 9:16 · H.264/HEVC');
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0.5625, videoCodecs: ['vp09'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent)
+      .toBe('최대 100.0 MB · 3~90초 · 9:16 · vp09');
+  });
+
   it('규격 태그 — 표에 없는 비율은 §17-16④ 일반 표기(formatAspectBound)로 폴백한다(1.5 → 1.5:1)', async () => {
     stubFetch({
       videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,

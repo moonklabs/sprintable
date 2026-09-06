@@ -248,16 +248,18 @@ function trimTrailingZero(n: number): string {
   return n.toFixed(2).replace(/\.?0+$/, '');
 }
 
-// story #3556(§17-23②, 유나 確定 2026-09-06) — 릴스 코덱 규격 태그. 기계 이름을
-// 사람 낱말로(모르는 값은 표에 없으면 원문 대문자화만 — 이름을 지어내지 않는다).
-// 어댑터가 같은 코덱의 두 표기(avc1·h264)를 선언할 수 있어 변환 뒤 중복 제거하되
-// 선언 순서는 유지한다.
+// story #3556(§17-23②, 유나 確定 2026-09-06·PR#3917 조건 1 정정) — 릴스 코덱
+// 규격 태그. fourcc 관례는 소문자라 조회 키도 소문자만 둔다(대문자 이중 키
+// 불요 — `c.toLowerCase()`로 조회). 모르는 값은 원문 그대로(대문자화하지
+// 않는다 — 이름을 지어내지 않는다, vp09 같은 값이 VP09로 둔갑하지 않게).
+// 어댑터가 같은 코덱의 두 표기(avc1·h264)를 선언할 수 있어 변환 뒤 중복
+// 제거하되 선언 순서는 유지한다.
 const VIDEO_CODEC_LABELS: Record<string, string> = {
-  avc1: 'H.264', avc3: 'H.264', h264: 'H.264', H264: 'H.264',
+  avc1: 'H.264', avc3: 'H.264', h264: 'H.264',
   hvc1: 'HEVC', hev1: 'HEVC', hevc: 'HEVC', h265: 'HEVC',
 };
 function formatVideoCodecs(codecs: string[]): string {
-  const labels = codecs.map((c) => VIDEO_CODEC_LABELS[c] ?? c.toUpperCase());
+  const labels = codecs.map((c) => VIDEO_CODEC_LABELS[c.toLowerCase()] ?? c);
   return [...new Set(labels)].join('/');
 }
 
