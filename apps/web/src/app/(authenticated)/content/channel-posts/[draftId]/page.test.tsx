@@ -2938,15 +2938,14 @@ describe('ChannelPostEditPage — 서버 원문 접기(RawDetailsToggle, story #
     expect(findRawToggle(container)).not.toBeUndefined();
   });
 
-  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — 미승인 컨셉 게이트로
-  // submit 자체가 막힌다. api-error.ts KNOWN_ERRORS 등재는 labelKey를 일부러 비워
-  // (서버 message 그대로) — 화면이 새 문장을 짓지 않고 서버 문장을 사유줄에 그대로 낸다.
-  it('⭐CONCEPT_NOT_APPROVED — 서버 message를 그대로 사유줄에 낸다(화면이 문장을 새로 짓지 않는다)', async () => {
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06 · 유나 리뷰 정정
+  // PR#3927 CHANGES) — 미승인 컨셉 게이트로 submit 자체가 막힌다. 서버는 이
+  // 코드에 message를 안 보내므로(형제 코드들과 달리) 화면이 문장을 직접 짓는다
+  // (유나 §17-24 확定 낱말) — labelKey 등재 없이 t('submitFailed') 일반문구로
+  // 떨어지면 이 테스트가 RED.
+  it('⭐CONCEPT_NOT_APPROVED — 화면이 직접 지은 문장을 사유줄에 낸다(서버가 message를 안 보낸다)', async () => {
     stubFetch({
-      onSubmit: () => ({
-        status: 422,
-        body: { detail: { code: 'CONCEPT_NOT_APPROVED', message: '컨셉 문서 "9월 릴스 컨셉안"이 아직 결재되지 않았습니다.' } },
-      }),
+      onSubmit: () => ({ status: 422, body: { detail: { code: 'CONCEPT_NOT_APPROVED' } } }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
@@ -2956,7 +2955,7 @@ describe('ChannelPostEditPage — 서버 원문 접기(RawDetailsToggle, story #
     await flush();
 
     const alert = container.querySelector('[role="alert"]');
-    expect(alert?.textContent).toContain('컨셉 문서 "9월 릴스 컨셉안"이 아직 결재되지 않았습니다.');
+    expect(alert?.textContent).toContain('컨셉 결재를 아직 받지 못해 상신할 수 없습니다. 결재가 끝난 뒤 다시 상신해 주세요.');
   });
 
   it('이미지 업로드 실패 — raw 토글이 뜬다', async () => {

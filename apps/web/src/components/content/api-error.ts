@@ -142,10 +142,11 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   SITE_POST_RESUBMIT_REQUIRED: { labelKey: 'errorResubmitRequired', kind: 'resubmit_required' },
   // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — work item에 미승인
   // concept_approval 게이트가 있으면 submit 자체가 막힌다(관문은 서버 — 클라 선판정
-  // fetch를 만들지 않는다, 3471 동형). labelKey를 일부러 비운다 — 서버 message가
-  // 이미 "무엇을 승인 못 받았는지"(어느 doc)를 사람 말로 실어 보낸다, 화면이 그
-  // 문장을 다시 짓지 않는다(3471 §3-1 "서버 message 그대로" 관례).
-  CONCEPT_NOT_APPROVED: { labelKey: '', kind: 'concept_not_approved' },
+  // fetch를 만들지 않는다, 3471 동형). ⚠️유나 리뷰 정정(2026-09-06, PR#3927 CHANGES) —
+  // 서버(channel_posts.py/site_posts.py 이 코드 분기)는 message를 안 보낸다(형제
+  // 코드들과 달리) — labelKey를 비우면 t('submitFailed')라는 무의미한 일반 문구로
+  // 떨어진다. 화면이 직접 문장을 짓는다(유나 §17-24 확定 낱말).
+  CONCEPT_NOT_APPROVED: { labelKey: 'errorConceptNotApproved', kind: 'concept_not_approved' },
   // story #3386 — 「발행 취소」 버튼이 부르는 story #3381(PR#3739, 이 브랜치 착수 시점
   // 미병합) 엔드포인트의 에러 코드. 병합 전엔 그 라우트 자체가 없어 404(pass-through
   // raw fallback으로 뜬다 — 다른 계약 stub 자리와 동형 관례, S2 착지 전 submit()과 동일).
