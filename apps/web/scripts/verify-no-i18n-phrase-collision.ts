@@ -347,6 +347,12 @@ export const EXEMPT_PAIRS = new Set<string>([
   // ("{position}번째 이미지 삭제", aria-label) — §17-20⑧ "접근성 이름은 보이는 글자를
   // 포함해야 한다"는 규율 그 자체가 이 부분문자열 포함을 요구한다(제거 대상 아님).
   'content.channelPostsImageRemoveAction <-> content.channelPostsImageRemoveActionLabel',
+  // story #3556(§17-23③·페드루 PO 승인 2026-09-06) — content.channelPostsImageUploading
+  // ("업로드 중…") <-> content.channelPostsVideoUploading("업로드 중… {pct}%") — 영상만
+  // {pct}. §17-23③ "퍼센트를 단계 문구 안에·이미지 쪽 문구 형을 그대로 따른다"는
+  // 지시 자체가 이 부분문자열 포함을 요구한다(docs.title<->docs.indexDocCount류
+  // 정상 패턴).
+  'content.channelPostsImageUploading <-> content.channelPostsVideoUploading',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
