@@ -45,6 +45,12 @@ class CommentReplySummary(BaseModel):
     status: str
     external_reply_url: str | None
     command_id: uuid.UUID | None
+    # story #3593(Phase2·BE, 페드루 PO 確定 2026-09-06) — 유나 실측: 답변 sent
+    # 뒤에도 행에 답변 텍스트가 어디에도 없어(comments-section.tsx grep 0건)
+    # 「내가 무엇을 답했는지」가 화면에서 안 보였다. DB엔 이미 저장돼 있던
+    # 값(ChannelPostCommentReply.text)의 투영만 빠진 자리 — 이 요약이 이미
+    # 「최신 답변」이므로 그 답변의 실제 본문을 그대로 싣는다.
+    text: str
     # story #3529(additive, 유나 §22-15 채택) — PublicationCommand 4필드 그대로
     # (새 이름/새 값 0). command_id가 null이면 넷 다 null.
     command_status: str | None = Field(
@@ -87,7 +93,7 @@ def _comment_reply_summary(reply, command_by_id: dict) -> CommentReplySummary:
     command = command_by_id.get(reply.command_id) if reply.command_id is not None else None
     return CommentReplySummary(
         id=reply.id, status=reply.status, external_reply_url=reply.external_reply_url,
-        command_id=reply.command_id,
+        command_id=reply.command_id, text=reply.text,
         command_status=command.status if command is not None else None,
         failure_kind=command.failure_kind if command is not None else None,
         next_attempt_at=(
@@ -106,6 +112,13 @@ class CommentItem(BaseModel):
     captured_at: str
     deleted_at: str | None
     reply: CommentReplySummary | None = None
+    # story #3593(Phase2·BE, 페드루 PO 確定 2026-09-06) — `reply`는 이미 「최신
+    # 답변」이지만(_latest_reply_by_comment_ids), 답변이 2건 이상(재상신 이력)
+    # 이면 배지 하나(=이 최신 status)만으로는 "이 발행됨이 어느 답변의 상태인가"
+    # 가 안 선다(유나 실측). 전체 개수를 additive로 얹어 FE가 "답변 N · 최신
+    # {상태}" 형을 조립할 수 있게 한다. 답변 0건이면 0(reply가 null인 것과
+    # 논리적으로 항상 같이 간다 — 0이면 reply도 반드시 null, 그 역도 성립).
+    replies_count: int = 0
 
 
 class CommentListResponse(BaseModel):
@@ -156,6 +169,7 @@ async def list_publication_comments_endpoint(
 
     reply_by_comment_id = result["reply_by_comment_id"]
     command_by_id = result["command_by_id"]
+    reply_counts_by_comment_id = result["reply_counts_by_comment_id"]
     return CommentListResponse(
         last_collected_at=result["last_collected_at"].isoformat() if result["last_collected_at"] else None,
         comments=[
@@ -167,6 +181,7 @@ async def list_publication_comments_endpoint(
                     _comment_reply_summary(reply_by_comment_id[c.id], command_by_id)
                     if c.id in reply_by_comment_id else None
                 ),
+                replies_count=reply_counts_by_comment_id.get(c.id, 0),
             )
             for c in result["comments"]
         ],
