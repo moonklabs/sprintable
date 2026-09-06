@@ -132,6 +132,41 @@ async def create_carousel_container(
     return str(creation_id)
 
 
+async def create_reels_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
+    video_url: str | None, cover_url: str | None = None,
+) -> str:
+    """story #3554(Phase2, 페드루 PO 確定 2026-09-06④) — 릴스(영상) 발행.
+    `create_carousel_container`와 동형(부모 컨테이너 1개만 만들고 그 creation_id를
+    반환 — 오케스트레이션은 get_container_status·publish_container를 무변경 재사용).
+    `media_type=REELS`·`video_url`·`cover_url`(선택, 없으면 Meta가 자동 프레임을
+    고른다). caption 파라미터명은 이미지/캐러셀과 동일.
+
+    ⚠️미확認(instagram_publish.py 상단 딱지와 동형 — 컨테이너 파라미터명은 Meta
+    문서 지식, 재확認 전 라이브 왕복 금지)."""
+    if video_url is None:
+        raise ThreadsPublishError(
+            "INSTAGRAM_REELS_VIDEO_REQUIRED", "릴스 발행은 영상이 필수입니다", status_code=422,
+        )
+    params = {"access_token": access_token, "media_type": "REELS", "video_url": video_url}
+    if cover_url:
+        params["cover_url"] = cover_url
+    if text:
+        params["caption"] = text
+    resp = await client.post(_MEDIA_CONTAINER_URL_TMPL.format(ig_user_id=threads_user_id), params=params)
+    if resp.status_code != 200:
+        raise ThreadsPublishError(
+            "INSTAGRAM_CREATE_REELS_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
+        )
+    body = resp.json()
+    creation_id = body.get("id")
+    if not creation_id:
+        raise ThreadsPublishError(
+            "INSTAGRAM_CREATE_REELS_CONTAINER_MISSING_ID", "id missing in response", status_code=resp.status_code,
+        )
+    return str(creation_id)
+
+
 _CONTAINER_STATUS_FINISHED = "FINISHED"
 _CONTAINER_STATUS_IN_PROGRESS = "IN_PROGRESS"
 _CONTAINER_STATUS_ERROR = "ERROR"

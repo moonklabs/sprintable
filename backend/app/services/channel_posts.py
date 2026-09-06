@@ -525,6 +525,17 @@ async def create_channel_post_draft_version(
         if prior_images:
             await db.flush()
 
+        # story #3554(Phase2, 페드루 PO 確定 2026-09-06) — 영상(릴스) draft도 텍스트만
+        # 편집하면 이 sentinel 경로를 탄다(image_sha256 인자 생략) — 위 이미지 캐리
+        # 포워드와 동형으로 영상 행도 새 version_id로 복제해야 발행 시점에 「빈손」이
+        # 안 된다(위 B1 교훈과 동일 재발 방지).
+        from app.services.channel_post_videos import _copy_video_row, get_channel_post_video_for_version
+
+        prior_video = await get_channel_post_video_for_version(db, version_id=prior_latest.id)
+        if prior_video is not None:
+            db.add(_copy_video_row(prior_video, new_version_id=version.id))
+            await db.flush()
+
     await _reseal_gate_on_new_version(
         db, org_id=org_id, work_item_id=work_item_id, version=version, connection_id=draft.connection_id,
     )
@@ -1192,18 +1203,34 @@ async def publish_channel_post_draft(
     # 존재로 판단 — latest.image_sha256만으로는 「나가는 파생본」 경로를 못 구하므로
     # 행 자체를 조회한다.
     image_public_urls: list[str] = []
+    video_row = None
+    video_public_url: str | None = None
     if latest.image_sha256 is not None:
         from app.services.channel_post_images import list_channel_post_images_for_version, public_url_for_object_path
+        from app.services.channel_post_videos import get_channel_post_video_for_version
 
         image_rows = await list_channel_post_images_for_version(db, version_id=latest.id)
         image_public_urls = [
             url for row in image_rows if (url := public_url_for_object_path(row.final_object_path)) is not None
         ]
+        # story #3554(Phase2, 페드루 PO 確定 2026-09-06④) — 릴스(영상). 영상 마스터
+        # 존재 여부로 REELS 경로를 가른다 — 커버는 `channel_post_images` position=0
+        # 재사용이라 위 `image_public_urls`에 커버 1장이 섞여 들어올 수 있지만, 그
+        # 경우도 "영상 있음"이 우선이라 REELS로만 나간다(아래 dispatch 참고).
+        video_row = await get_channel_post_video_for_version(db, version_id=latest.id)
+        if video_row is not None:
+            video_public_url = public_url_for_object_path(video_row.original_object_path)
     has_image = len(image_public_urls) > 0
+    has_video = video_row is not None
     # 기존 단일-이미지 호출부(threads/facebook/sandbox 등 — 전부 image_max_count<=1이라
     # 여기까지 2장 이상으로 도달할 수 없다, confirm_channel_post_image_upload의 업로드
-    # 시점 거부가 이미 막는다)와의 하위호환 — image_url은 항상 "첫 장"(N=0이면 None).
+    # 시점 거부가 이미 막는다)와의 하위호환 — image_url은 항상 "첫 장"(N=0이면 None,
+    # 영상 모드면 이 값은 "커버" — REELS dispatch는 이 변수가 아니라 video_public_url을 쓴다).
     image_public_url: str | None = image_public_urls[0] if image_public_urls else None
+    # story 620beefc(AC5)의 기존 "이미지 있으면 비동기" 게이트를 릴스까지 넓힌 축
+    # 이름 — REELS 컨테이너도 IMAGE/CAROUSEL과 동형으로 항상 비동기(Meta "처리 대기"
+    # 폴링 필요, 3539 processing 축 그대로 재사용).
+    has_async_media = has_image or has_video
 
     # 발행 직전 재검증③(연결 활성) — 초안 생성/상신과 같은 헬퍼.
     connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
@@ -1339,7 +1366,22 @@ async def publish_channel_post_draft(
             just_created_container = row.external_container_id is None
             if just_created_container:
                 try:
-                    if len(image_public_urls) > 1:
+                    if has_video:
+                        # story #3554(Phase2, PO 確定 ④) — 릴스는 이미지/캐러셀과
+                        # 완전히 별도 컨테이너 함수(create_reels_container류) — 어댑터가
+                        # 안 구현했으면(미확認 방어) 명시 실패.
+                        create_reels_container = getattr(_publish_client, "create_reels_container", None)
+                        if create_reels_container is None:
+                            raise ThreadsPublishError(
+                                "CHANNEL_REELS_UNSUPPORTED",
+                                f"{draft.channel} 채널은 릴스(영상) 발행을 지원하지 않습니다",
+                                status_code=422,
+                            )
+                        container_id = await create_reels_container(
+                            client, access_token=access_token, threads_user_id=connection.account_id,
+                            text=text_to_post, video_url=video_public_url, cover_url=image_public_url,
+                        )
+                    elif len(image_public_urls) > 1:
                         # story #3550(Phase2, PO 確定 ④) — 캐러셀(2장 이상)은 별도
                         # 함수(instagram_publish.py::create_carousel_container류) —
                         # image_max_count<=1인 채널(threads/facebook/sandbox 등)은
@@ -1377,8 +1419,8 @@ async def publish_channel_post_draft(
                 row.error_code = None
                 row.last_error = None
                 await db.commit()
-                if has_image:
-                    # story 620beefc(AC5, PO 決定) — IMAGE 컨테이너는 비동기(그라운딩
+                if has_async_media:
+                    # story 620beefc(AC5, PO 決定)·#3554(릴스로 확장) — IMAGE/REELS 컨테이너는 비동기(그라운딩
                     # §② Meta 권장 "평균 30초 대기"). 막 만든 컨테이너를 이 자리에서
                     # 곧바로 poll하지 않는다 — container_created 그대로 반환, 호출부
                     # (cron 워커·즉시발행 라우터 둘 다)가 command를 pending(next_
@@ -1386,8 +1428,8 @@ async def publish_channel_post_draft(
                     # 기존 워커 재사용).
                     return row
 
-            if has_image:
-                # story 620beefc(AC5) — 재진입(다음 tick)마다 컨테이너 상태를 먼저
+            if has_async_media:
+                # story 620beefc(AC5)·#3554(릴스로 확장) — 재진입(다음 tick)마다 컨테이너 상태를 먼저
                 # 확인한다. FINISHED여야만 publish 호출로 진행 — Meta 문서: 완료 前
                 # publish는 실패한다.
                 try:

@@ -436,13 +436,28 @@ async def confirm_channel_post_image_upload(
     if latest is None:
         raise ChannelPostDraftNotFoundError(draft_id)
 
-    # story #3550(PO 確定 ①) — 기존(=carry-forward 대상) 이미지들의 sha256 + 이번에
-    # 새로 붙는 이미지의 sha256을 position 순으로 이어 합성 봉인 해시를 만든다. N=1
-    # (existing_images가 0장이던 첫 첨부)이면 compute_image_seal_hash가 항등을 돌려줘
-    # Phase1 단일-이미지 봉인 의미와 완전히 같다(회귀 0).
-    new_position = len(existing_images)
-    ordered_hashes = [img.final_sha256 for img in existing_images] + [final_sha256]
-    composite_sha256 = compute_image_seal_hash(ordered_hashes)
+    # story #3554(Phase2, 페드루 PO 確定 2026-09-06③) — 이 draft에 영상이 이미
+    # 붙어 있으면 이 호출은 캐러셀 첨부가 아니라 "커버 교체"다(PO 明示 "커버=별개
+    # 이미지 에셋·기존 이미지 파이프" — 새 업로드 경로를 안 만드는 대신, 여기서
+    # 영상 유무로 두 모드를 가른다). 커버는 항상 position=0 슬롯 하나뿐 — 옛
+    # 커버를 캐리포워드하지 않고 이번 것으로 완전히 대체한다(캐러셀의 "추가"와
+    # 다른 의미 축). 봉인은 `[video_sha256, cover_sha256]`(순서 고정) — 지연
+    # import는 channel_post_videos.py가 이 모듈을 모듈 레벨에서 import하는
+    # 순환을 피하기 위함(channel_posts.py의 기존 관례와 동형).
+    from app.services.channel_post_videos import _copy_video_row, get_channel_post_video_for_version
+
+    existing_video = await get_channel_post_video_for_version(db, version_id=latest.id)
+    if existing_video is not None:
+        new_position = 0
+        composite_sha256 = compute_image_seal_hash([existing_video.original_sha256, final_sha256])
+    else:
+        # story #3550(PO 確定 ①) — 기존(=carry-forward 대상) 이미지들의 sha256 + 이번에
+        # 새로 붙는 이미지의 sha256을 position 순으로 이어 합성 봉인 해시를 만든다. N=1
+        # (existing_images가 0장이던 첫 첨부)이면 compute_image_seal_hash가 항등을 돌려줘
+        # Phase1 단일-이미지 봉인 의미와 완전히 같다(회귀 0).
+        new_position = len(existing_images)
+        ordered_hashes = [img.final_sha256 for img in existing_images] + [final_sha256]
+        composite_sha256 = compute_image_seal_hash(ordered_hashes)
 
     new_version, _channel, _violations = await create_channel_post_draft_version(
         db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
@@ -450,13 +465,16 @@ async def confirm_channel_post_image_upload(
         author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
     )
 
-    # story #3550(PO 確定 ②) — create_channel_post_draft_version()의 자체 carry-forward
-    # 훅(image_sha256이 sentinel일 때만 발동)은 여기서 안 탄다(위에서 합성값을 명시로
-    # 넘겼으므로) — 기존 이미지 행들을 새 version_id로 직접 복제한다(파일 재업로드·
-    # 재변환 없음, object_path·sha256·position 그대로 — 단일 이미지 carry-forward
-    # 패턴(channel_posts.py::create_channel_post_draft_version)을 N장으로 그대로 확장).
-    for existing in existing_images:
-        db.add(_copy_image_row(existing, new_version_id=new_version.id, new_position=existing.position))
+    if existing_video is not None:
+        db.add(_copy_video_row(existing_video, new_version_id=new_version.id))
+    else:
+        # story #3550(PO 確定 ②) — create_channel_post_draft_version()의 자체 carry-forward
+        # 훅(image_sha256이 sentinel일 때만 발동)은 여기서 안 탄다(위에서 합성값을 명시로
+        # 넘겼으므로) — 기존 이미지 행들을 새 version_id로 직접 복제한다(파일 재업로드·
+        # 재변환 없음, object_path·sha256·position 그대로 — 단일 이미지 carry-forward
+        # 패턴(channel_posts.py::create_channel_post_draft_version)을 N장으로 그대로 확장).
+        for existing in existing_images:
+            db.add(_copy_image_row(existing, new_version_id=new_version.id, new_position=existing.position))
 
     image_row = ChannelPostImage(
         id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=new_version.id, position=new_position,
