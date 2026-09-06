@@ -7,13 +7,14 @@
 //
 // ⛔이 집합은 BE 「한 곳」에 안 산다(페드루 PO 재실측 2026-09-06 — #3565 리뷰 前
 // 주석의 "두 곳"도 이미 부정확했다): GATE_TYPES(backend/app/models/hitl_config.py)·
-// doc_approval(backend/app/services/doc.py의 DOC_GATE_TYPE)·loop_decision·
-// artifact_canonicalize(backend/app/services/gate_service.py:317
-// _ALWAYS_MANUAL_GATE_TYPES)·hypothesis_outcome_confirm(backend/app/services/
-// hypothesis_outcome_confirm.py:26)·artifact_canonicalize가 또(backend/app/
-// routers/gates.py:535)에도 나온다 — 넷 이상의 파일에 흩어져 있고, 앞으로도
-// 늘어날 수 있다. 새 gate_type을 여기 추가할 땐 특정 파일 목록을 믿지 말고
-// backend 전체에서 `gate_type=` 리터럴을 grep해 실제로 쓰이는 값을 확認한다.
+// doc_approval(backend/app/services/doc.py)·loop_decision·artifact_canonicalize·
+// hypothesis_outcome_confirm(backend/app/services/gate_service.py·
+// backend/app/services/hypothesis_outcome_confirm.py)·artifact_canonicalize가
+// 또(backend/app/routers/gates.py)에도 나온다 — 넷 이상의 파일에 흩어져 있고,
+// 앞으로도 늘어날 수 있다. 줄번호는 리팩터 한 번에 죽는 정보라 파일 경로만
+// 남긴다(story #3560, 페드루 PO 지적 2026-09-06). 새 gate_type을 여기 추가할
+// 땐 특정 파일 목록을 믿지 말고 backend 전체에서 `gate_type=` 리터럴을 grep해
+// 실제로 쓰이는 값을 확認한다.
 //
 export const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
   qa: 'ccGateTypeQa',
@@ -28,11 +29,15 @@ export const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
   hypothesis_outcome_confirm: 'ccGateTypeHypothesisOutcomeConfirm',
   artifact_canonicalize: 'ccGateTypeArtifactCanonicalize',
   agent_decision_request: 'ccGateTypeAgentDecisionRequest',
-  // support_escalation_review — backend/app/routers/support_gateway_token.py:199가
-  // 생성, backend/app/services/gate_service.py의 _ALWAYS_MANUAL_GATE_TYPES(:334)에
+  // support_escalation_review — backend/app/routers/support_gateway_token.py가
+  // 생성, backend/app/services/gate_service.py의 _ALWAYS_MANUAL_GATE_TYPES에
   // 있어 항상 수동(story #3263). 페드루 PO 재확認(2026-09-06 — 최초 grep 0건은
   // 로컬 클론이 옛 브랜치에 멈춰 있던 PO 쪽 오류, origin/develop 실물엔 있음).
   support_escalation_review: 'ccGateTypeSupportEscalationReview',
+  // story #3560(페드루 PO 確定 2026-09-06) — 제작 작업대 컨셉·구조 승인. 생성=
+  // backend/app/routers/docs.py::POST /docs/{id}/concept-approval. `qa`로
+  // 흉내내지 않는다(다른 메커니즘=다른 낱말) — doc_approval(시스템전용)과도 별개.
+  concept_approval: 'ccGateTypeConceptApproval',
 };
 
 /**

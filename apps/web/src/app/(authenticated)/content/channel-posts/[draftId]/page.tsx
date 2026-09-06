@@ -285,15 +285,20 @@ function formatVideoMetaLine(
   v: { durationSeconds?: number; width?: number; height?: number; codec?: string; originalBytes?: number },
   t: (key: string, values?: Record<string, string | number>) => string,
 ): string | null {
+  // story #3560(후속 정리, 페드루 PO 確定 2026-09-06 — 3556 본문 예고) — `!== 0` 판정은
+  // 죽은 조건이었다(channel_post_videos.py 실측: confirm 성공한 영상은 width/height가
+  // 0 이하면 즉시 파싱 실패 422·duration도 video_min_seconds 미만이면 422라 0이 될
+  // 경로 자체가 없다 — original_bytes도 실 업로드 파일이라 0 불가). typeof 검사만으로
+  // 충분해 남겨 두면 §3-2 "모른다≠0" 규율을 다음 사람이 오독할 소지만 있었다(동작 무변).
   const parts: string[] = [];
-  if (typeof v.durationSeconds === 'number' && v.durationSeconds !== 0) {
+  if (typeof v.durationSeconds === 'number') {
     parts.push(t('channelPostsVideoMetaDuration', { n: trimTrailingZeroOneDecimal(v.durationSeconds) }));
   }
-  if (typeof v.width === 'number' && typeof v.height === 'number' && v.width !== 0 && v.height !== 0) {
+  if (typeof v.width === 'number' && typeof v.height === 'number') {
     parts.push(`${v.width}×${v.height}`);
   }
   if (v.codec) parts.push(formatVideoCodecs([v.codec]));
-  if (typeof v.originalBytes === 'number' && v.originalBytes !== 0) parts.push(formatFileSize(v.originalBytes));
+  if (typeof v.originalBytes === 'number') parts.push(formatFileSize(v.originalBytes));
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
@@ -1922,7 +1927,9 @@ export default function ChannelPostEditPage() {
                 site-posts의 isRepublish(재승인 뒤 재발행) 분기보다 먼저다 — 둘 다 참일
                 일은 없지만(부분성공은 채널 고유 신호, isRepublish는 사이트 공유 파생)
                 우선순위를 명시해 둔다. */}
-            {publishing ? t('publishPendingCta') : view.partialSuccess ? t('channelPostsPublishContinueCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
+            {publishing
+              ? (view.isRepublish ? t('publishRepublishingCta') : t('publishPendingCta'))
+              : view.partialSuccess ? t('channelPostsPublishContinueCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
           </Button>
           {/* story #3426 ①-b/①-c — 예약 취소·회수 버튼. PR2에서 렌더 보류했던 「발행
               취소」 버튼을 BE #3419 착지로 복원한다. 둘 다 되돌리기 번거로운/불가능한

@@ -172,6 +172,13 @@ interface RecipeApprovalFacts {
   // 이 null이면 "제공되지 않음"으로 정직하게 비운다).
   targetExternalCommentId: string | null;
   targetText: string | null;
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — sealed_content_*와
+  // 동형이나 대상이 doc(external_publish=본문 텍스트 봉인·concept_approval=doc
+  // 봉인). BE additive(story #3569) — 그 전까진 항상 null. 「펼침」이 없다(본문
+  // 전문을 안 보인다 — 링크로 doc을 직접 열어 보는 쪽이 doc 자체의 편집 이력·
+  // 서식을 있는 그대로 보여준다, contentBody의 "요약→전문" 확장과 다른 결).
+  sealedDocRef: ParsedReferenceToken | null;
+  sealedDocBodySha256: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -182,6 +189,14 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
   // story #3521(카디르 QA #3873 발견) — isCommentReplyGate(gate-risk.ts)와 판정을
   // 한 벌로 통일(전엔 여기 인라인 kind==='comment_reply'가 별도 사본이었다).
   const isCommentReply = isCommentReplyGate(gate);
+  const sealedDocId = realString(gate.sealed_doc_id);
+  const sealedDocRef: ParsedReferenceToken | null = sealedDocId
+    ? {
+        entityType: 'doc', entityId: sealedDocId,
+        label: realString(gate.sealed_doc_title) ?? sealedDocId.slice(0, 8),
+        href: getEntityHref('doc', sealedDocId),
+      }
+    : null;
   const facts: RecipeApprovalFacts = {
     workItemRef: parseReferenceToken(f?.['work_item_reference_token']),
     draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token']),
@@ -194,10 +209,13 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     reapprovalRequired: gate.reapproval_required === true,
     targetExternalCommentId: isCommentReply ? realString(f?.['target_external_comment_id']) : null,
     targetText: isCommentReply ? realString(f?.['target_text']) : null,
+    sealedDocRef,
+    sealedDocBodySha256: realString(gate.sealed_doc_body_sha256),
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
-    facts.contentBody || facts.contentVersion !== null || facts.contentSha256;
+    facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
+    facts.sealedDocRef || facts.sealedDocBodySha256;
   return hasAny ? facts : null;
 }
 
@@ -585,6 +603,23 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.contentVersion !== null && facts.contentSha256 ? ' · ' : null}
           {facts.contentSha256 ? `${t('recipeApprovalSealedHashLabel')} ${facts.contentSha256.slice(0, 12)}…` : null}
         </p>
+      ) : null}
+      {/* story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — 봉인 doc은
+          contentBody(전문 펼침)와 달리 링크로만(doc 자체를 열어 편집 이력·서식을
+          있는 그대로 본다) — 글자=doc 제목, 위 mono 배지와 같은 관례로 해시를 잇는다. */}
+      {facts.sealedDocRef || facts.sealedDocBodySha256 ? (
+        <div className="flex flex-wrap items-center gap-1 font-mono text-muted-foreground">
+          {facts.sealedDocRef ? (
+            <EntityChip
+              entityType={facts.sealedDocRef.entityType}
+              entityId={facts.sealedDocRef.entityId}
+              label={facts.sealedDocRef.label}
+              href={facts.sealedDocRef.href}
+            />
+          ) : null}
+          {facts.sealedDocRef && facts.sealedDocBodySha256 ? <span>· </span> : null}
+          {facts.sealedDocBodySha256 ? <span>{t('recipeApprovalSealedHashLabel')} {facts.sealedDocBodySha256.slice(0, 12)}…</span> : null}
+        </div>
       ) : null}
       {facts.contentBody ? (
         // §6-3 "요약 → 전문" — draftDocSummary와 달리 접힘 없이 항상 전문을 보인다(승인자가

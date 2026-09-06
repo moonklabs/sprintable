@@ -29,6 +29,17 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
     expect(result.kind).toBe('permission');
   });
 
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — KNOWN_ERRORS 등재로
+  // 유나 리뷰 정정(PR#3927 CHANGES, 2026-09-06) — 서버(channel_posts.py/site_posts.py
+  // 이 분기)는 message를 안 보낸다(형제 코드들과 달리) — labelKey를 비우면
+  // t('submitFailed')라는 무의미한 일반 문구로 떨어진다. 화면이 직접 문장을 짓는다.
+  // 등재 자체를 지우면 kind가 'unknown'으로 떨어져 이 테스트가 RED.
+  test('⭐알려진 코드(CONCEPT_NOT_APPROVED) — kind가 정확히 분류되고 labelKey가 채워진다(서버가 message를 안 보내므로)', () => {
+    const result = parseSitePostApiError({ detail: { code: 'CONCEPT_NOT_APPROVED' } });
+    expect(result.kind).toBe('concept_not_approved');
+    expect(result.humanMessageKey).toBe('errorConceptNotApproved');
+  });
+
   test('⭐모르는 코드 — 지어낸 문구로 덮지 않고 서버 원문 메시지를 그대로 fallback에 담는다', () => {
     const result = parseSitePostApiError({ detail: { code: 'SOME_FUTURE_S2_CODE', message: '아직 모르는 에러' } });
     expect(result.humanMessageKey).toBeUndefined();

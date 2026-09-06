@@ -14,6 +14,7 @@ describe('gateTypeLabel/gateTypeLabelKey — story #3565', () => {
       ccGateTypeLoopDecision: '루프 결정', ccGateTypeHypothesisOutcomeConfirm: '가설 판정',
       ccGateTypeArtifactCanonicalize: '정본화', ccGateTypeAgentDecisionRequest: '판단 요청',
       ccGateTypeSupportEscalationReview: '고객지원 검토',
+      ccGateTypeConceptApproval: '컨셉 결재',
     };
     return map[key] ?? key;
   };
@@ -25,6 +26,11 @@ describe('gateTypeLabel/gateTypeLabelKey — story #3565', () => {
     expect(gateTypeLabel(t, 'artifact_canonicalize')).toBe('정본화');
     expect(gateTypeLabel(t, 'agent_decision_request')).toBe('판단 요청');
     expect(gateTypeLabel(t, 'support_escalation_review')).toBe('고객지원 검토');
+  });
+
+  // story #3560(제작 작업대, 페드루 PO 確定 2026-09-06) — concept_approval 등재.
+  it('⭐concept_approval이 사람 낱말 「컨셉 결재」로 뜬다(라벨 제거 시 일반 「게이트」로 떨어지면 RED — 뮤테이션)', () => {
+    expect(gateTypeLabel(t, 'concept_approval')).toBe('컨셉 결재');
   });
 
   it('⭐미등재 값·null·undefined는 원시값이 아니라 일반 「게이트」로 떨어진다', () => {
