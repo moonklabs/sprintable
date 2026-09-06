@@ -147,6 +147,23 @@ class ChannelImageAspectRatioTooNarrowError(Exception):
         )
 
 
+class ChannelCoverAspectRatioRejectedError(Exception):
+    """story #3578(Phase2·BE·급·결함, 페드루 PO 確定 2026-09-06) — 캐러셀 이미지
+    규격(`image_aspect_min`/`image_aspect_max`)과 완전히 다른 축: 영상이 이미
+    붙어 있는 버전에 이미지 confirm이 오면 그건 캐러셀 첨부가 아니라 "커버
+    교체"라, 커버는 그 영상과 같은 비율(`video_aspect_target±video_aspect_
+    tolerance`, 어댑터 선언)이어야 한다는 완전히 다른 제약을 받는다. 유나
+    §17-16 ⑥과 짝 문구 형(현재값 노출)."""
+
+    def __init__(self, *, aspect_ratio: float, target: float, tolerance: float):
+        self.aspect_ratio = aspect_ratio
+        self.target = target
+        self.tolerance = tolerance
+        super().__init__(
+            f"커버는 영상과 같은 비율({target:.4f}±{tolerance:.2f})이어야 합니다 — 현재 {aspect_ratio:.4f}"
+        )
+
+
 class ChannelImageConversionFailedError(Exception):
     """재인코딩해도 어댑터 한도(image_max_bytes) 밑으로 못 낮춘 극히 드문 경우."""
 
@@ -392,7 +409,34 @@ async def confirm_channel_post_image_upload(
 
     probe = ImageOps.exif_transpose(probe)
     width, height = probe.size
-    if adapter.image_aspect_min > 0 and height > 0:
+
+    # story #3578(Phase2·BE·급·결함, 페드루 PO 確定 2026-09-06) — 분기(영상 유무)를
+    # 비율 검증보다 먼저 결정한다. 지연 import는 channel_post_videos.py가 이
+    # 모듈을 모듈 레벨에서 import하는 순환을 피하기 위함(story #3554 기존 관례,
+    # 아래 캐리 로직이 쓰던 것을 여기로 당김 — 신규 순환 0). 이전엔 이 검증이
+    # "이게 캐러셀 이미지인지 커버인지" 조차 모른 채 image_aspect_min(0.80)
+    # 하나로 먼저 돌아, 릴스 커버(9:16=0.5625)가 그 하한을 구조적으로 못 넘어
+    # 어떤 실제 커버도 통과 못 하던 결함(유나 §17-23 ④ 실측)의 근본원인이었다.
+    from app.services.channel_post_videos import _copy_video_row, get_channel_post_video_for_version
+
+    latest_for_cover_check = latest_for_count
+    if latest_for_cover_check is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    existing_video = await get_channel_post_video_for_version(db, version_id=latest_for_cover_check.id)
+
+    if existing_video is not None:
+        # story #3578 — 커버 규격(video_aspect_target±video_aspect_tolerance,
+        # 어댑터 선언 — 하드코딩 0). 캐러셀 image_aspect_min/max와 완전히 다른
+        # 축(캐러셀=정지 이미지 앨범 규격·커버=그 영상과 같은 비율이어야 하는
+        # 제약)이라 아래 캐러셀 분기와 절대 안 섞는다.
+        if width > 0 and height > 0 and adapter.video_aspect_target > 0:
+            cover_ratio = width / height
+            if abs(cover_ratio - adapter.video_aspect_target) > adapter.video_aspect_tolerance:
+                raise ChannelCoverAspectRatioRejectedError(
+                    aspect_ratio=cover_ratio, target=adapter.video_aspect_target,
+                    tolerance=adapter.video_aspect_tolerance,
+                )
+    elif adapter.image_aspect_min > 0 and height > 0:
         # story #3320 — Instagram류(orientation-aware, 방향별 한도가 다름: 가로
         # 최대 1.91:1·세로 최대 4:5=0.8). 아래(Threads 등) 정규화(long/short, 항상
         # ≥1) 검사를 그대로 쓰면 image_aspect_max(1.91)가 방향 구분 없이 양쪽에
@@ -432,21 +476,16 @@ async def confirm_channel_post_image_upload(
 
     final_sha256 = derived_sha256 or original_sha256
 
-    latest = latest_for_count
-    if latest is None:
-        raise ChannelPostDraftNotFoundError(draft_id)
+    latest = latest_for_cover_check
 
     # story #3554(Phase2, 페드루 PO 確定 2026-09-06③) — 이 draft에 영상이 이미
     # 붙어 있으면 이 호출은 캐러셀 첨부가 아니라 "커버 교체"다(PO 明示 "커버=별개
     # 이미지 에셋·기존 이미지 파이프" — 새 업로드 경로를 안 만드는 대신, 여기서
     # 영상 유무로 두 모드를 가른다). 커버는 항상 position=0 슬롯 하나뿐 — 옛
     # 커버를 캐리포워드하지 않고 이번 것으로 완전히 대체한다(캐러셀의 "추가"와
-    # 다른 의미 축). 봉인은 `[video_sha256, cover_sha256]`(순서 고정) — 지연
-    # import는 channel_post_videos.py가 이 모듈을 모듈 레벨에서 import하는
-    # 순환을 피하기 위함(channel_posts.py의 기존 관례와 동형).
-    from app.services.channel_post_videos import _copy_video_row, get_channel_post_video_for_version
-
-    existing_video = await get_channel_post_video_for_version(db, version_id=latest.id)
+    # 다른 의미 축). 봉인은 `[video_sha256, cover_sha256]`(순서 고정). `existing_
+    # video`는 story #3578에서 비율 검증 분기 결정을 위해 위로 옮긴 조회를 그대로
+    # 재사용(중복 쿼리 0).
     if existing_video is not None:
         new_position = 0
         composite_sha256 = compute_image_seal_hash([existing_video.original_sha256, final_sha256])

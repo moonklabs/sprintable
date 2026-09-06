@@ -656,7 +656,7 @@ async def test_facebook_reels_composite_seal_includes_cover_hash():
     from sqlalchemy import select
     from app.models.channel_post_version import ChannelPostVersion
 
-    same_cover = _jpeg_bytes(800, 1000, color=(77, 77, 77))
+    same_cover = _jpeg_bytes(720, 1280, color=(77, 77, 77))
 
     engine, Session = await _session_factory()
     try:
