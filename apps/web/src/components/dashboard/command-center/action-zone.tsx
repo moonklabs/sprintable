@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History, Clock } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
-import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, gateTypeLabelKey, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+import { gateTypeLabel } from '@/lib/gate-type-label';
 import { cn } from '@/lib/utils';
 import { cardVariants } from '@/components/ui/card';
 
@@ -22,13 +23,6 @@ const PRIORITY_BORDER: Record<Priority, string> = {
   warn: 'border-l-warning',
   info: 'border-l-border',
 };
-
-// PO 지적(2026-07-29): gate_type 원시값을 화면에 그대로 내보내지 않는다 — 아는 값은
-// 번역, 모르는 값은 null과 같은 일반 라벨로(derive-action-zone.gateTypeLabelKey 참조).
-function gateLabel(t: ReturnType<typeof useTranslations>, gateType: string | null | undefined): string {
-  const key = gateTypeLabelKey(gateType);
-  return key ? t(key) : t('ccGateGeneric');
-}
 
 // story #3150 — AttentionItem 7종(types.ts 참조) 공통 식별명 추출. agent_stuck만 id 재해소가
 // 필요(entity_id가 멤버/에픽 id)하고, 나머지 6종은 BE(#2538 계약)가 title/statement/
@@ -75,7 +69,7 @@ export function attentionDayCount(item: AttentionItem): number | null {
 // story #3177(S3a) — 「지금」 스트립도 같은 부제 텍스트를 쓴다(attentionEntityLabel/
 // attentionDayCount와 같은 재사용 결 — no-fiction 문구 생성 로직을 두 벌 두지 않는다).
 export function attentionDetailText(t: ReturnType<typeof useTranslations>, item: AttentionItem): string {
-  if (item.type === 'agent_stuck') return t('ccAgentStuck', { gate: gateLabel(t, item.gate_type) });
+  if (item.type === 'agent_stuck') return t('ccAgentStuck', { gate: gateTypeLabel(t, item.gate_type) });
   if (item.type === 'agent_auth_failure') return t('ccAttentionAuthFailure', { count: item.failure_count });
   const days = attentionDayCount(item);
   return days != null ? t('ccAttentionDays', { days }) : t('ccAttentionGeneric');
@@ -111,7 +105,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
       >
         <ShieldCheck className="size-3.5 shrink-0 text-warning-strong" />
         <span className="min-w-0 flex-1 truncate text-foreground">
-          {t('ccQueueGateApproval')}{ctx.gate_type ? <span className="text-muted-foreground"> · {gateLabel(t, ctx.gate_type)}</span> : null}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
+          {t('ccQueueGateApproval')}{ctx.gate_type ? <span className="text-muted-foreground"> · {gateTypeLabel(t, ctx.gate_type)}</span> : null}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
         </span>
         <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueApprove')}<ChevronRight className="size-3" /></span>
       </Link>
@@ -180,7 +174,7 @@ function WaitingRow({ item }: { item: QueueItem }) {
       className={cn(cardVariants({ radius: 'card' }), 'flex items-center gap-2 p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30')}
     >
       <Clock className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate: gateLabel(t, ctx.gate_type) })}</span>
+      <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate: gateTypeLabel(t, ctx.gate_type) })}</span>
     </Link>
   );
 }

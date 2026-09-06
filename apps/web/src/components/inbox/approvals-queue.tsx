@@ -13,6 +13,7 @@ import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+import { gateTypeLabel } from '@/lib/gate-type-label';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
@@ -133,6 +134,10 @@ function formatUndoRemaining(resolvedAtMs: number, t: ReturnType<typeof useTrans
 
 export function ApprovalsQueue() {
   const t = useTranslations('cage');
+  // story #3565 — ccGateType*/ccGateGeneric 키는 Command Center가 처음 세운
+  // 'dashboard' 네임스페이스에 산다(공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는
+  // 그대로) — 이 화면 자체 t는 'cage'라 별도로 받는다.
+  const tDashboard = useTranslations('dashboard');
   const router = useRouter();
   // story #2103 — BE `PATCH /api/v1/hitl-requests/{id}`가 human-only 불변식이다(gates.py
   // transition_gate_endpoint와 동형, resolved.type != "human" → 403). #2091(게이트 상세)과
@@ -466,7 +471,10 @@ export function ApprovalsQueue() {
         const gateBody = (
           <>
             <div className="flex w-full flex-wrap items-center gap-1.5">
-              <Badge variant="chip">{gate.gate_type}</Badge>
+              {/* story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — gate_type
+                  원시값(예: "external_publish")을 그대로 찍던 것을 사람 낱말로.
+                  미등재 값은 일반 「게이트」로(원시 snake_case 노출 경로 0). */}
+              <Badge variant="chip">{gateTypeLabel(tDashboard, gate.gate_type)}</Badge>
               {held ? (
                 <Badge variant="secondary">{t('heldBadge')}</Badge>
               ) : null}
