@@ -1014,12 +1014,31 @@ jobs:
           fi
           uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file"
           slow_exit=$?
+          # story #3558(CI·소형) AC1 — 삭제(rm -f) 前에 등재값 대조용 산출물로 변환해
+          # 둔다(DB 준비를 제외한 순수 pytest wall time, `_t0`가 dropdb/createdb 뒤에서
+          # 시작하므로 이미 그 값 — 새 타이머 불요, 기존 elapsed_file을 그대로 재사용).
+          # 이 변환은 위 60초 가드 판정과 무관하게 항상 시도한다(느린 러너여도 산출물은
+          # 남겨야 다음 잡의 대조가 그 run을 볼 수 있다).
+          uv run python scripts/shard_destructive_tests.py --elapsed-to-json "$elapsed_file" /tmp/shard-durations-${{ matrix.shard }}.json --shard ${{ matrix.shard }}
           rm -f "$elapsed_file"
           if [ "$slow_exit" -ne 0 ]; then
             echo "러너 정규화 60초 가드 초과(story #3396, 위 ::error:: 참고)"
             exit 1
           fi
           echo "OK: all ${#files[@]} isolated destructive-schema files passed (shard ${{ matrix.shard }})"
+
+      # story #3558(CI·소형) AC1 — 다음 잡("Require all destructive-schema shards")이
+      # 8개 샤드의 산출물을 모아 weights.json과 절대 배율(2배/0.5배) 경고 대조를 한다.
+      # `if: always()`(위 pytest 스텝이 실패해도 산출물은 남긴다 — 실패 원인 진단에도
+      # "이 run에서 각 파일이 실제로 얼마나 걸렸는지"가 유용하다).
+      - name: Upload shard durations (story #3558)
+        if: always() && needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-durations-${{ matrix.shard }}
+          path: /tmp/shard-durations-${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Skip reason (backend-irrelevant PR)
         if: needs.detect-changed-scope.outputs.backend_relevant == 'false'
@@ -1097,6 +1116,24 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           version: 'latest'
+
+      # story #3558(CI·소형) AC2 — 8개 샤드가 낸 shard-durations-{n} 산출물을 모아
+      # weights.json과 절대 배율(2배/0.5배) 대조 «경고만»(실패 0 — continue-on-error도
+      # 필요 없다, _audit_durations_mode 자체가 항상 exit 0). backend-irrelevant PR이라
+      # 샤드가 스킵됐으면 산출물 자체가 없을 수 있어 download 단계를 continue-on-error로
+      # 감싼다(찾는 패턴이 0건이면 actions/download-artifact가 에러를 낸다 — 그게 이
+      # 필수 체크 잡을 죽이면 안 된다, story #2555의 backend-irrelevant 우회 규율과 동형).
+      - name: Download shard durations (story #3558)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: shard-durations-*
+          path: /tmp/shard-durations
+          merge-multiple: true
+
+      - name: Audit shard durations vs weights.json (story #3558, warn-only)
+        working-directory: backend
+        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations
 
       # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
       # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다
