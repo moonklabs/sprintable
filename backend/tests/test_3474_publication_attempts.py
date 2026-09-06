@@ -6,8 +6,9 @@ adapter 호출 0건」을 표본 3종(양성·부정·부정)으로 고정한다
 디디 그라운딩(2026-09-05, 페드루 실물 대조로 확認) — 재검증 신규 코드는 site_post
 외부 발행·발행 취소 둘뿐(publish_site_post_external_command·unpublish_site_post_
 external_command). channel_post(publish_channel_post_draft)는 이미 재검증이 있어
-무변 — 그 경로의 기존 테스트(test_3414_publication_command.py) 쪽에 원장 assert
-한 줄만 추가했다(이 파일이 아님).
+무변 — 그 경로의 기존 테스트(test_3414_publication_command_core.py, story #3562로
+분할 前엔 test_3414_publication_command.py) 쪽에 원장 assert 한 줄만 추가했다(이
+파일이 아님).
 
 세팅 헬퍼는 test_e4fc29fa_site_post_orchestration.py와 동형(중복 재발명 금지)."""
 from __future__ import annotations

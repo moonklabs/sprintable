@@ -207,8 +207,8 @@ async def _seed_scheduled_instagram_command(session, client, *, org_id, connecti
     """이미지 있는 IG 초안으로 상신(#3536 사전체크 통과)+승인 뒤, 발행 시점 provider가
     그래도(레이스·서버·클라이언트 판정 불일치 등 방어선 시나리오) INSTAGRAM_IMAGE_
     REQUIRED로 거부하는 상황을 워커까지 직접 재현하기 위해 scheduled command를
-    수동으로 심는다(test_3414_publication_command.py::test_cron_deterministic_
-    failure...와 동형 기법)."""
+    수동으로 심는다(test_3414_publication_command_cron_retry.py::test_cron_
+    deterministic_failure...와 동형 기법 — story #3562로 분할)."""
     from app.models.publication_command import PublicationCommand
 
     raw = _png_bytes(800, 800)
