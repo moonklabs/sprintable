@@ -22,23 +22,25 @@ import type { BacklinkItem } from '@/components/shared/entity-backlinks-section'
 // backlinks doc ∪ 이 work item의 concept_approval 게이트가 물고 있는 sealed_doc_id/
 // sealed_doc_title(story #3569 additive)로 넓힌다 — 같은 doc이 두 경로 다로 잡히면
 // id로 중복 제거. 표시 조건은 그대로(합집합이 0건이면 블록 자체를 안 그린다).
+//
+// gates는 story-detail-panel.tsx가 이미 fetch해 둔 chipGates를 그대로 prop으로
+// 받는다(PO 確定 — "새 fetch 0이 이상", 게이트 목록은 상세 패널이 P0-04 in-flight
+// 칩용으로 이미 물어보는 데이터라 이 블록이 또 부르면 같은 것을 두 번 묻는 셈).
 interface ConceptCardDoc {
   id: string;
   title: string;
 }
 
-// #3560 GateItem(kanban/types.ts) 전체를 안 끌어오고 이 블록이 실제로 쓰는 필드만—
-// gates 응답이 raw 배열(래핑 없음, story-detail-panel.tsx::chipGates와 동형 관례).
+// #3560 GateItem(kanban/types.ts) 전체를 안 끌어오고 이 블록이 실제로 쓰는 필드만.
 interface GateSealedDocItem {
   gate_type: string;
   sealed_doc_id?: string | null;
   sealed_doc_title?: string | null;
 }
 
-export function ConceptCardSection({ workItemId }: { workItemId: string }) {
+export function ConceptCardSection({ workItemId, gates }: { workItemId: string; gates: GateSealedDocItem[] }) {
   const t = useTranslations('board');
   const [backlinkItems, setBacklinkItems] = useState<BacklinkItem[] | null>(null);
-  const [gates, setGates] = useState<GateSealedDocItem[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,25 +51,20 @@ export function ConceptCardSection({ workItemId }: { workItemId: string }) {
     return () => { cancelled = true; };
   }, [workItemId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchWithAuth(`/api/gates?work_item_id=${workItemId}&work_item_type=story`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((json) => { if (!cancelled) setGates(Array.isArray(json) ? json : []); })
-      .catch(() => { if (!cancelled) setGates([]); });
-    return () => { cancelled = true; };
-  }, [workItemId]);
-
-  // 둘 다 도착하기 전엔 판정하지 않는다(한쪽만 보고 "없다"로 단정하면 늦게 오는
-  // 쪽의 doc이 있어도 블록이 먼저 접혀 안 뜬다 — §5-2 "모른다≠없다"와 같은 결).
-  if (backlinkItems === null || gates === null) return null;
+  // backlinks가 도착하기 전엔 판정하지 않는다(늦게 오는 doc이 있어도 블록이 먼저
+  // 접혀 안 뜨는 것을 막는다 — §5-2 "모른다≠없다"와 같은 결). gates는 부모가 이미
+  // 로드를 끝낸 값을 그대로 받으므로 여기선 null 게이팅이 필요 없다.
+  if (backlinkItems === null) return null;
 
   const backlinkDocs: ConceptCardDoc[] = backlinkItems
     .filter((item) => item.source_type === 'doc' && item.doc)
     .map((item) => ({ id: item.doc!.id, title: item.doc!.title }));
+  // PO 지적(§17-21 ①, 2026-09-06 PR#3938 CONDITIONAL) — sealed_doc_title이 없다고
+  // sealed_doc_id 앞 8자(hex)를 링크 글자로 대신 그리지 않는다(사람이 읽을 낱말이
+  // 아니다). title이 없으면 그 항목 자체를 뺀다.
   const gateDocs: ConceptCardDoc[] = gates
-    .filter((g) => g.gate_type === 'concept_approval' && g.sealed_doc_id)
-    .map((g) => ({ id: g.sealed_doc_id!, title: g.sealed_doc_title ?? g.sealed_doc_id!.slice(0, 8) }));
+    .filter((g) => g.gate_type === 'concept_approval' && g.sealed_doc_id && g.sealed_doc_title)
+    .map((g) => ({ id: g.sealed_doc_id!, title: g.sealed_doc_title! }));
 
   const seen = new Set<string>();
   const docs: ConceptCardDoc[] = [...backlinkDocs, ...gateDocs].filter((d) => {

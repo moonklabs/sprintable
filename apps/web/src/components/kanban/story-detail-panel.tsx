@@ -1583,8 +1583,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
             {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
                 가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
-                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다. */}
-            <ConceptCardSection workItemId={story.id} />
+                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다.
+                story #3584 — gates는 새로 안 부르고 위(P0-04 in-flight 칩)가 이미
+                fetch한 chipGates를 그대로 넘긴다("새 fetch 0", PO 確定). */}
+            <ConceptCardSection workItemId={story.id} gates={chipGates} />
 
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}
