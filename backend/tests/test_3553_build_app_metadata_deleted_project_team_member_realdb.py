@@ -97,3 +97,37 @@ async def test_deleted_project_team_member_does_not_block_live_project_resolutio
         assert md["role"] == "owner"
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_last_project_id_pointing_at_deleted_project_does_not_block_live_project_resolution():
+    """카디르 QA(2026-09-06) — 위 테스트는 `user.last_project_id`가 비어(None) search-1
+    ("last_project_id 우선", :440~448)을 안 태우고 search-2("가장 오래된 team_member",
+    :455~461)만 태워, search-1의 JOIN을 지워도 RED 0이었다(양성대조가 그 분기를 실제로
+    안 잰 것). `users.last_project_id`가 **삭제된 project를 직접 가리키는** 표본으로
+    search-1을 명시적으로 태운다 — fix 前엔 search-1이 그 team_member 행을 그대로
+    찾아 죽은 project_id로 착지했다."""
+    from app.routers.auth import _build_app_metadata
+    from app.models.user import User as UserModel
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            await s.execute(text(f"UPDATE users SET last_project_id='{PROJ_DELETED}' WHERE id='{USER}'"))
+            await s.commit()
+
+        async with Session() as s:
+            user = await s.get(UserModel, USER)
+            assert user is not None and user.last_project_id == PROJ_DELETED, "seed 확인 — last_project_id가 의도대로 안 실렸다"
+            with patch("app.routers.auth._user_projects_claim", new=AsyncMock(return_value=[])):
+                md = await _build_app_metadata(user, s, org_id=ORG)
+
+        assert md["project_id"] == str(PROJ_LIVE), (
+            f"user.last_project_id가 삭제된 project({PROJ_DELETED})를 직접 가리키는데 search-1"
+            f"(:440~448)이 그 team_member 행을 여전히 «접근 가능»으로 잡아 project_id="
+            f"{md['project_id']}로 나갔으면 #3553 그대로 재발 — search-1 JOIN·deleted_at 필터 결함."
+        )
+        assert md["role"] == "owner"
+    finally:
+        await eng.dispose()
