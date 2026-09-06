@@ -7,6 +7,7 @@ import {
   findSubstringCollisions,
   flattenMessages,
   GRANDFATHER_BASELINE,
+  hasLetterOrNumber,
   isNumberAdjacent,
   pairKey,
   parseKeyUsages,
@@ -325,5 +326,60 @@ describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실�
     expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
     const { exemptHit } = scanRepository();
     expect(exemptHit.size).toBe(EXEMPT_PAIRS.size);
+  });
+});
+
+// story #3582(유나 관측 · PO 確定 2026-09-06) — 값에 유니코드 글자(L)·숫자(N)가 0개면
+// «구»(phrase)를 담지 않으므로 이 가드가 잡으려는 병(두 셈이 헷갈림)의 대상이 아니다.
+describe('hasLetterOrNumber — story #3582', () => {
+  it('제외 — 순수 구두점/기호 값(글자·숫자 0개)', () => {
+    expect(hasLetterOrNumber('—')).toBe(false);
+    expect(hasLetterOrNumber('...')).toBe(false);
+    expect(hasLetterOrNumber('↳')).toBe(false);
+    expect(hasLetterOrNumber('≥')).toBe(false);
+    expect(hasLetterOrNumber('≤')).toBe(false);
+  });
+
+  it('비제외 — 글자나 숫자가 하나라도 있으면 그대로 비교 대상(짧은 값도)', () => {
+    expect(hasLetterOrNumber('막힘')).toBe(true);
+    expect(hasLetterOrNumber('나')).toBe(true);
+    expect(hasLetterOrNumber('{n}')).toBe(true); // 보간 자리 자체가 글자를 포함
+    expect(hasLetterOrNumber('1')).toBe(true);
+  });
+});
+
+// story #3582 — 비교 쌍을 만들기 «전»에 제외되므로, 글자·숫자 0개 값과 다른 값의 짝은
+// exempt/grandfather/new 어디로도 안 잡히고(=이미 빠진 것) symbolOnlyExcluded에만 잡힌다.
+describe('scanRepository — 글자·숫자 0개 값 사전 제외(story #3582)', () => {
+  it('content.originAuthorUnknown("—")이 symbolOnlyExcluded에 잡힌다(인스턴스별 EXEMPT 없이도 비교 자체를 안 한다)', () => {
+    const { symbolOnlyExcluded } = scanRepository();
+    expect(symbolOnlyExcluded.has('content.originAuthorUnknown')).toBe(true);
+  });
+
+  it('원래 EXEMPT였던 세 쌍(3402 2·3575 1)은 이제 EXEMPT_PAIRS 등재 없이도 새 충돌로 안 걸린다(규칙이 대신 안다)', () => {
+    expect(EXEMPT_PAIRS.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
+    expect(EXEMPT_PAIRS.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
+    expect(EXEMPT_PAIRS.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
+    const { newFindings } = scanRepository();
+    expect(newFindings.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
+    expect(newFindings.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
+    expect(newFindings.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
+  });
+
+  // 유나 비차단(2026-09-06, #3931 Design review) — 위 두 테스트는 "제외가 일했다"와
+  // "애초에 그 쌍이 안 겹쳤다"를 못 가른다. 주석의 약속("제외 로직을 끄면 다시 RED")을
+  // 코드로 직접 증명한다 — scanRepository의 사전 제외를 «건너뛰고» findSubstringCollisions에
+  // 실 값 그대로(originAuthorUnknown="—" · channelPostsTextTooLong="{max}자 한도인데
+  // {current}자입니다 — 줄여서 재상신해 주세요.") 넘기면 여전히 겹친다(순수 판정 로직
+  // 자체는 살아있다는 양성대조).
+  it('제외 없이 findSubstringCollisions에 직접 넘기면 여전히 겹친다(제외가 "일한다"는 증명, 애초에 안 겹친 게 아니다)', () => {
+    const phrases = new Map([
+      ['content.originAuthorUnknown', { value: '—', numberAdjacent: false }],
+      [
+        'content.channelPostsTextTooLong',
+        { value: '{max}자 한도인데 {current}자입니다 — 줄여서 재상신해 주세요.', numberAdjacent: true },
+      ],
+    ]);
+    expect(findSubstringCollisions(phrases)).toHaveLength(1);
   });
 });
