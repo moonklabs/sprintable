@@ -10,6 +10,7 @@
 AC2(양성대조) — 오탈자 뮤테이션 주입 시 ①이 실제로 red가 되는지가 이 스위트의 핵심 표본."""
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -293,8 +294,9 @@ def test_load_manifest_union_adds_develop_only_names():
     안 잡힌다(story #3272 실사고: SUPPORT_GATEWAY_*_dev 3종, run 33458117504)."""
     with patch.object(sync_gate, "load_manifest", return_value={"A"}), \
          patch.object(sync_gate, "fetch_develop_manifest_text", return_value="A\nSUPPORT_GATEWAY_TOKEN_SECRET_dev\n"):
-        union = sync_gate.load_manifest_union()
+        union, fell_back = sync_gate.load_manifest_union()
     assert union == {"A", "SUPPORT_GATEWAY_TOKEN_SECRET_dev"}
+    assert fell_back is False
 
     ok, lines = sync_gate.check(manifest=union, live={"A", "SUPPORT_GATEWAY_TOKEN_SECRET_dev"})
     assert ok is True  # union 적용 전이었다면 main={"A"} 단독 대조로 이 케이스가 FAIL이었다.
@@ -302,11 +304,13 @@ def test_load_manifest_union_adds_develop_only_names():
 
 def test_load_manifest_union_falls_back_to_main_only_when_develop_fetch_fails():
     """develop을 못 읽으면(네트워크 실패 등) 조용히 main 단독으로 폴백 — 완화가 안 걸릴
-    뿐, 이 스크립트 자체가 죽거나 예외를 삼켜 원인불명 성공을 내지는 않는다."""
+    뿐, 이 스크립트 자체가 죽거나 예외를 삼켜 원인불명 성공을 내지는 않는다. story #3552
+    — 폴백 여부(두 번째 반환값)를 호출부가 알 수 있어야 한다."""
     with patch.object(sync_gate, "load_manifest", return_value={"A"}), \
          patch.object(sync_gate, "fetch_develop_manifest_text", return_value=None):
-        union = sync_gate.load_manifest_union()
+        union, fell_back = sync_gate.load_manifest_union()
     assert union == {"A"}
+    assert fell_back is True
 
 
 def test_load_manifest_union_still_catches_true_orphan_secret():
@@ -315,7 +319,7 @@ def test_load_manifest_union_still_catches_true_orphan_secret():
     범위는 develop이 아는 이름으로 한정된다는 모듈 docstring의 선언 그대로)."""
     with patch.object(sync_gate, "load_manifest", return_value={"A"}), \
          patch.object(sync_gate, "fetch_develop_manifest_text", return_value="A\n"):
-        union = sync_gate.load_manifest_union()
+        union, _fell_back = sync_gate.load_manifest_union()
     ok, lines = sync_gate.check(manifest=union, live={"A", "TRULY_ORPHANED_SECRET"})
     assert ok is False
     assert any("TRULY_ORPHANED_SECRET" in line for line in lines)
@@ -326,7 +330,81 @@ def test_load_manifest_union_still_catches_dangerous_axis_deleted_from_gcp():
     처방이 손대는 건 저위험 축(GCP엔 있는데 manifest에 없음)뿐이다."""
     with patch.object(sync_gate, "load_manifest", return_value={"A", "GHOST"}), \
          patch.object(sync_gate, "fetch_develop_manifest_text", return_value="A\n"):
-        union = sync_gate.load_manifest_union()
+        union, _fell_back = sync_gate.load_manifest_union()
     ok, lines = sync_gate.check(manifest=union, live={"A"})
     assert ok is False
     assert any("GHOST" in line for line in lines)
+
+
+# ── story #3552 — narrow(단일 브랜치 shallow) checkout에서 develop fetch가 실제로 되는지 ──
+
+
+def _git(*args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def _init_local_remote_with_main_and_develop(tmp_path: Path) -> Path:
+    """로컬 bare repo(파일시스템 경로 — GitHub 네트워크 0)에 main·develop 두 브랜치를
+    만들고 서로 다른 manifest 내용을 심는다. `actions/checkout@v4`의 narrow fetch
+    refspec 문제는 원격 프로토콜과 무관한 순수 git ref 메커니즘 문제라 로컬 경로로도
+    똑같이 재현된다."""
+    bare = tmp_path / "origin.git"
+    _git("init", "--bare", str(bare), cwd=tmp_path)
+
+    seed = tmp_path / "seed"
+    _git("clone", str(bare), str(seed), cwd=tmp_path)
+    _git("config", "user.email", "t@t.dev", cwd=seed)
+    _git("config", "user.name", "t", cwd=seed)
+
+    manifest_dir = seed / "infra"
+    manifest_dir.mkdir()
+    (manifest_dir / "cloudbuild-secret-manifest.txt").write_text("A\n")
+    _git("add", ".", cwd=seed)
+    _git("commit", "-m", "main", cwd=seed)
+    _git("branch", "-M", "main", cwd=seed)
+    _git("push", "origin", "main", cwd=seed)
+
+    _git("checkout", "-b", "develop", cwd=seed)
+    (manifest_dir / "cloudbuild-secret-manifest.txt").write_text("A\nDEVELOP_ONLY_SECRET\n")
+    _git("commit", "-am", "develop", cwd=seed)
+    _git("push", "origin", "develop", cwd=seed)
+
+    return bare
+
+
+def _narrow_clone_like_actions_checkout(bare_repo: Path, dest: Path) -> None:
+    """`actions/checkout@v4` 기본 동작 재현 — 단일 브랜치 shallow(narrow fetch refspec,
+    `remote.origin.fetch`가 checkout한 브랜치 하나로 좁혀짐)."""
+    subprocess.run(
+        ["git", "clone", "--depth=1", "--single-branch", "--branch", "main", str(bare_repo), str(dest)],
+        check=True, capture_output=True, text=True,
+    )
+
+
+def test_fetch_develop_manifest_text_works_against_narrow_checkout_clone(tmp_path, monkeypatch):
+    """페드루 PO 판별축①(2026-09-06) 실물 재현 — `actions/checkout@v4` 기본(단일 브랜치
+    shallow)과 정확히 같은 조건에서도 `fetch_develop_manifest_text()`가 develop 텍스트를
+    정상 읽어야 한다. destination refspec(`origin develop:refs/remotes/origin/develop`)
+    없이는(뮤테이션 자가검증 대상) `origin/develop` ref가 안 만들어져 None(폴백)만 나온다
+    — 실 스케줄 run이 2026-09-03부터 매일 이 상태였다."""
+    bare = _init_local_remote_with_main_and_develop(tmp_path)
+    narrow = tmp_path / "narrow"
+    _narrow_clone_like_actions_checkout(bare, narrow)
+
+    monkeypatch.setattr(sync_gate, "_REPO_ROOT", narrow)
+    text = sync_gate.fetch_develop_manifest_text()
+    assert text is not None, "narrow checkout 환경에서 develop manifest를 못 읽었다(원래 결함 재현)"
+    assert "DEVELOP_ONLY_SECRET" in sync_gate.parse_manifest_text(text)
+
+
+def test_fetch_develop_manifest_text_prints_failure_reason_on_fallback(tmp_path, monkeypatch, capsys):
+    """페드루 PO 판별축②(2026-09-06) — 폴백 시 조용히 삼키지 않고 stderr에 실패 사유를
+    찍는다(원래 있던 침묵 폴백이 재발을 아무도 못 보게 했다)."""
+    not_a_repo = tmp_path / "not-a-repo"
+    not_a_repo.mkdir()
+    monkeypatch.setattr(sync_gate, "_REPO_ROOT", not_a_repo)
+
+    text = sync_gate.fetch_develop_manifest_text()
+    assert text is None
+    captured = capsys.readouterr()
+    assert "develop manifest fetch 실패" in captured.err
