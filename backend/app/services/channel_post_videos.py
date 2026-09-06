@@ -41,6 +41,7 @@ from app.services.channel_post_images import (
     _require_bucket,
     compute_image_seal_hash,
     get_channel_post_image_for_version,
+    list_channel_post_images_for_version,
 )
 from app.services.channel_posts import (
     ChannelPostDraftNotFoundError,
@@ -130,6 +131,19 @@ class ChannelVideoUploadFailedError(Exception):
     def __init__(self, *, object_path: str):
         self.object_path = object_path
         super().__init__(f"영상 업로드 실패: {object_path}")
+
+
+class ChannelVideoRequiresSingleCoverError(Exception):
+    """story #3574(Phase2·BE·결함, 페드루 PO 確定 2026-09-06) — 이 함수 아래의
+    「단수 getter로 커버 1장만 캐리」가 이미지 N장(N≥2, 캐러셀) 버전에 그대로
+    도달하면 나머지 N-1장이 사용자 행동 하나(영상 첨부)로 조용히 사라진다
+    (유나 §17-23 ④ 규격 구멍 실측 — `get_channel_post_image_for_version`이
+    position=0만 대표로 돌려주는 기존 계약 자체는 옳다, 문제는 그 계약을
+    캐러셀 버전에도 무비판 적용한 이 호출부였다). 금지 AC — 트랜잭션(새 버전
+    생성) 시작 前에 명시 거부."""
+
+    def __init__(self):
+        super().__init__("영상은 커버 이미지 1장과만 함께 갈 수 있습니다 — 이미지를 1장으로 줄인 뒤 첨부하세요.")
 
 
 @dataclass(frozen=True)
@@ -373,6 +387,13 @@ async def confirm_channel_post_video_upload(
     )).scalar_one_or_none()
     if latest is None:
         raise ChannelPostDraftNotFoundError(draft_id)
+
+    # story #3574(Phase2·BE·결함, 페드루 PO 確定 2026-09-06) — 트랜잭션(새 버전 생성)
+    # 시작 前 명시 거부. 이미지 0·1장일 때만 아래 단수 캐리 로직에 도달한다(그 경우
+    # 의미가 정확히 일치 — position=0 대표 1장=전체 1장).
+    existing_images = await list_channel_post_images_for_version(db, version_id=latest.id)
+    if len(existing_images) >= 2:
+        raise ChannelVideoRequiresSingleCoverError()
 
     existing_cover = await get_channel_post_image_for_version(db, version_id=latest.id)
     cover_sha256 = existing_cover.final_sha256 if existing_cover is not None else ""
