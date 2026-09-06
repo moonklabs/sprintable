@@ -1991,7 +1991,7 @@ export default function ChannelPostEditPage() {
           />
           <Button
             type="button" variant="outline" size="sm"
-            disabled={imageUploadInProgress}
+            disabled={imageUploadInProgress || images.length >= imageSpec.maxCount}
             onClick={() => imageFileInputRef.current?.click()}
             data-testid="channel-post-image-attach-trigger"
           >
@@ -2004,6 +2004,15 @@ export default function ChannelPostEditPage() {
                 : imageUploadStatus.phase === 'uploading'
                   ? t('channelPostsImageUploading')
                   : t('channelPostsImageConfirming')}
+            </p>
+          ) : null}
+          {/* story #3564(유나 24회차 결함②·§5-2, 페드루 PO 確定 2026-09-06) — 캐러셀이
+              가득 차도(images.length>=maxCount) 트리거가 활성 상태였다(§5-2 "그려진
+              컨트롤은 할 수 있다는 단정" 위반 — 눌러도 서버 422로만 막힘). 업로드
+              진행 中엔 이 사유를 안 보인다(위 진행 문구가 이미 이유를 말한다). */}
+          {!imageUploadInProgress && images.length >= imageSpec.maxCount ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-post-image-max-count-reached-reason">
+              {t('channelPostsImageMaxCountReachedReason', { max: imageSpec.maxCount })}
             </p>
           ) : null}
           {imageUploadStatus.phase === 'error' ? (

@@ -2567,6 +2567,7 @@
     "channelPostsImageConfirming": "Confirming…",
     "channelPostsImageUploadInProgressReason": "You can't save or submit until the image upload finishes.",
     "channelPostsImageRequiredReason": "You can't submit without an image — this channel requires an image.",
+    "channelPostsImageMaxCountReachedReason": "You can attach up to {max} images.",
     "channelPostsImageUnsupportedFormat": "Unsupported format — {contentType} (allowed: {allowed})",
     "channelPostsImageTooLarge": "Only {maxBytes} or less can be attached, but this is {sizeBytes}",
     "channelPostsImageAspectRatioExceeded": "This image is too elongated. The maximum aspect ratio is {maxAspectRatio}, but this is {aspectRatio}",
