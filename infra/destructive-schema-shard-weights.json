@@ -1373,6 +1373,11 @@
       "source": "story-3559-video-fields-additive(PR 개설 前 선제 등재 — 로컬 raw pytest 6건 6.53s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
+      "file": "tests/test_3590_video_meta_additive.py",
+      "sec": 17.0,
+      "source": "story-3590-video-meta-additive(페드루 PO 리뷰 2026-09-06 14:37Z — test_3559_video_fields_additive.py가 이미 40.0s(story #3579 60초 가드 경계대역 시작점)라 신규 2건을 그 파일에 얹지 않고 이 파일로 분리. 로컬 raw pytest 2건 2.78s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 17s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
       "file": "tests/test_3561_concept_approval_gate.py",
       "sec": 69.0,
       "source": "story-3561-concept-approval-gate(PR 개설 前 선제 등재 — PO 리뷰 조건 반영 후 로컬 raw pytest 18건 11.46s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 69s 잠정값, 실 CI 샤드 로그로 재확認 필요)"

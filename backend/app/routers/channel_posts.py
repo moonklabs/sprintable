@@ -180,6 +180,19 @@ class ChannelPostDraftVersionResponse(BaseModel):
     violations: list[dict] = []
 
 
+class ChannelPostVideoMeta(BaseModel):
+    """story #3590(Phase2·BE→FE·소형, 페드루 PO 確定 2026-09-06) — 유나 §17-23 ⑤-1
+    정정: 업로드 직후에만 서던 메타 줄(길이·해상도·코덱·용량)이 재진입(draft 상세
+    재조회)에서 사라지던 결함의 BE 몫. `ChannelPostVideoResponse`(confirm 응답)와
+    정확히 같은 필드명·타입(FE `formatVideoMetaLine`이 두 응답을 같은 코드로
+    처리할 수 있게 — 새 문구 조립 규칙 0)."""
+    duration_seconds: float
+    width: int
+    height: int
+    codec: str
+    original_bytes: int
+
+
 class ChannelPostDraftListItem(BaseModel):
     draft_id: uuid.UUID
     work_item_id: uuid.UUID
@@ -300,6 +313,10 @@ class ChannelPostDraftListItem(BaseModel):
     # 최신 버전에 영상(릴스) 행이 있으면 그 원본 공개 URL(asset 단건 응답과 같은 값),
     # 없으면(이미지만 있거나 아무것도 없는 draft) null. 커버는 기존 thumbnail_url 그대로.
     video_url: str | None = None
+    # story #3590(Phase2·BE→FE·소형, 페드루 PO 確定 2026-09-06) — video_url과 동형
+    # 관례(단건 전용·N+1 방지, 같은 video_row 재사용·추가 쿼리 0). 재진입 시 메타
+    # 줄(길이·해상도·코덱·용량)이 사라지던 결함의 BE 몫 — video_row 없으면 null.
+    video_meta: ChannelPostVideoMeta | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -1161,6 +1178,11 @@ async def get_channel_post_draft_detail_endpoint(
     # 같은 값(같은 서비스 함수+같은 public_url_for_object_path 호출).
     video_row = await get_channel_post_video_for_version(db, version_id=latest_version.id)
     item.video_url = public_url_for_object_path(video_row.original_object_path) if video_row else None
+    # story #3590 — video_url과 같은 video_row 재사용(추가 쿼리 0).
+    item.video_meta = ChannelPostVideoMeta(
+        duration_seconds=video_row.duration_seconds, width=video_row.width,
+        height=video_row.height, codec=video_row.codec, original_bytes=video_row.original_bytes,
+    ) if video_row else None
     return item
 
 
