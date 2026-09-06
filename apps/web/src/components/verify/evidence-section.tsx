@@ -61,6 +61,11 @@ function verificationSheetSummary(
   const fail = items.filter((i) => i.verdict === 'fail').length;
   const na = items.filter((i) => i.verdict === 'n_a').length;
   const pass = items.filter((i) => i.verdict === 'pass').length;
+  // story #3581(유나 #3927 비차단 발견 → §17-24 낱말 확定 2026-09-06) — fail>0·na>0가
+  // 동시에 참이면 예전엔 fail 갈래로 떨어져 na가 조용히 사라졌다(§3-2 "모른다≠0"과
+  // 같은 결 — 해당 없음 항목이 있었다는 사실이 통째로 안 보였다). 4갈래로: 이 조합만
+  // 새 갈래(「실패 N · 해당 없음 M · 전체 K」).
+  if (fail > 0 && na > 0) return t('verificationSheetSummaryWithFailAndNa', { fail, na, total, naLabel });
   if (fail > 0) return t('verificationSheetSummaryWithFail', { fail, total });
   if (na > 0) return t('verificationSheetSummaryWithNa', { pass, na, naLabel });
   return t('verificationSheetSummaryAllPass', { total });

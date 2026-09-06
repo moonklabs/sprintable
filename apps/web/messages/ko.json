@@ -4885,6 +4885,7 @@
     "verificationSheetSummaryWithFail": "실패 {fail} · 전체 {total}",
     "verificationSheetSummaryAllPass": "{total}항목 모두 통과",
     "verificationSheetSummaryWithNa": "통과 {pass} · {naLabel} {na}",
+    "verificationSheetSummaryWithFailAndNa": "실패 {fail} · {naLabel} {na} · 전체 {total}",
     "verificationSheetColumnName": "항목",
     "verificationSheetColumnVerdict": "판정",
     "verificationSheetColumnNote": "비고",

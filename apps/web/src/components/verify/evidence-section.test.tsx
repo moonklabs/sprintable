@@ -367,6 +367,19 @@ describe('EvidenceSection — 검증 시트(story #3560, payload.kind=verificati
     expect(text).not.toContain('모두 통과');
   });
 
+  // story #3581(유나 #3927 비차단 발견 → §17-24 낱말 확定 2026-09-06) — fail>0·na>0
+  // 동시 참이면 예전엔 fail 갈래(「실패 N · 전체 M」)로 떨어져 na가 조용히 사라졌다.
+  // 새 갈래로 분리 — 「실패 · 해당 없음 · 전체」 셋 다 한 줄에.
+  it('실패 있음 + 해당없음 있음 — 「실패 N · 해당 없음 M · 전체 K」(예전 fail-only 문구로 안 떨어진다)', async () => {
+    await renderWithSheet([
+      { name: 'A', verdict: 'fail' },
+      { name: 'B', verdict: 'n_a' },
+      { name: 'C', verdict: 'pass' },
+    ]);
+    const text = findRowSummary().textContent ?? '';
+    expect(text).toContain('실패 1 · 해당 없음 1 · 전체 3');
+  });
+
   it('펼침 표 — 비고가 하나도 없으면 비고 열 자체가 없다', async () => {
     await renderWithSheet([{ name: '자막 표시', verdict: 'pass' }, { name: '길이 15초 이내', verdict: 'fail' }]);
     await act(async () => { findRowSummary().click(); });
