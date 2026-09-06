@@ -314,6 +314,11 @@ class ReorderChannelPostImagesRequest(BaseModel):
 
 
 class ChannelPostImageResponse(BaseModel):
+    # story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — additive. 목록 응답이
+    # 이 id를 안 실으면 FE가 삭제(`DELETE .../assets/{image_id}`)·재정렬(`POST
+    # .../assets/reorder`의 image_ids)을 부를 대상을 아예 못 얻는다(대표 1장 단건
+    # 조회 계약은 무변경 — 이 필드가 추가돼도 그 엔드포인트 응답 모양은 그대로).
+    image_id: uuid.UUID
     draft_id: uuid.UUID
     version_id: uuid.UUID
     version: int
@@ -433,6 +438,7 @@ async def post_channel_post_draft_version(
 
 def _image_response(version, image_row) -> ChannelPostImageResponse:
     return ChannelPostImageResponse(
+        image_id=image_row.id,
         draft_id=version.draft_id, version_id=version.id, version=version.version,
         original_width=image_row.original_width, original_height=image_row.original_height,
         original_bytes=image_row.original_bytes,

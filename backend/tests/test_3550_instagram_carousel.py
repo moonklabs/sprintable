@@ -766,3 +766,50 @@ async def test_list_images_for_version_endpoint_returns_ordered_positions():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_list_response_carries_image_id_usable_for_delete_and_reorder():
+    """페드루 PO 확定(2026-09-06, BE 2/2 대조 후속) — ChannelPostImageResponse에
+    image_id가 없으면 FE가 삭제·재정렬 호출 대상을 목록 응답만으로 못 얻는다.
+    목록 각 항목의 image_id가 실제로 DB 행의 id와 일치하고, 그 값을 그대로
+    DELETE에 넘겨 성공하는 것까지 왕복 확인(응답 모양뿐 아니라 실제 소비까지)."""
+    from app.main import app
+    from app.models.channel_post_image import ChannelPostImage
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r1, r2 = await _upload_n_images(client, org_id, draft_id, 2)
+            version_id = r2.json()["version_id"]
+
+            async with Session() as s:
+                db_images = list((await s.execute(
+                    select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(version_id))
+                    .order_by(ChannelPostImage.position)
+                )).scalars().all())
+
+            r_list = await client.get(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/versions/{version_id}/assets",
+            )
+            rows = r_list.json()
+            assert [row["image_id"] for row in rows] == [str(img.id) for img in db_images]
+
+            r_delete = await client.request(
+                "DELETE",
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/{rows[0]['image_id']}",
+            )
+        assert r_delete.status_code == 200, r_delete.text
+        assert len(r_delete.json()) == 1, "목록 응답의 image_id가 실제 삭제 대상으로 통해야 한다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
