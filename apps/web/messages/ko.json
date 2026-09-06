@@ -2250,6 +2250,8 @@
     "commentsConvertToTaskCta": "작업으로 전환",
     "commentsReplyCta": "답변",
     "commentsReplyAgainCta": "답변 더하기",
+    "commentsReplyContinueCta": "이어서 답변",
+    "commentsReplyDraftPrefillFetchFailed": "작성한 답변을 불러오지 못했습니다 — 직접 적어 주세요.",
     "commentsReplyCountStatusLabel": "답변 {count} · 최신 {status}",
     "commentsSectionTitleWithCount": "댓글 {count}",
     "commentsDeletedCountLabel": "지워진 댓글 {count}건",

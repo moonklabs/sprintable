@@ -2250,6 +2250,8 @@
     "commentsConvertToTaskCta": "Convert to task",
     "commentsReplyCta": "Reply",
     "commentsReplyAgainCta": "Add another reply",
+    "commentsReplyContinueCta": "Continue replying",
+    "commentsReplyDraftPrefillFetchFailed": "We couldn't load your drafted reply — please write it yourself.",
     "commentsReplyCountStatusLabel": "{count} replies · latest {status}",
     "commentsSectionTitleWithCount": "Comments {count}",
     "commentsDeletedCountLabel": "{count} deleted comments",
