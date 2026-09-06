@@ -28,6 +28,10 @@ export const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
   hypothesis_outcome_confirm: 'ccGateTypeHypothesisOutcomeConfirm',
   artifact_canonicalize: 'ccGateTypeArtifactCanonicalize',
   agent_decision_request: 'ccGateTypeAgentDecisionRequest',
+  // support_escalation_review — backend/app/routers/support_gateway_token.py:199가
+  // 생성, backend/app/services/gate_service.py의 _ALWAYS_MANUAL_GATE_TYPES(:334)에
+  // 있어 항상 수동(story #3263). 페드루 PO 재확認(2026-09-06 — 최초 grep 0건은
+  // 로컬 클론이 옛 브랜치에 멈춰 있던 PO 쪽 오류, origin/develop 실물엔 있음).
   support_escalation_review: 'ccGateTypeSupportEscalationReview',
 };
 
