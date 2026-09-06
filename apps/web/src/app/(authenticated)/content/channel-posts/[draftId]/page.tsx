@@ -29,6 +29,7 @@ import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency,
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+import { ImageAttachmentList } from '@/components/content/image-attachment-list';
 // story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
 // (site-posts 상세와 재사용, 동작 무변).
 import {
@@ -132,6 +133,25 @@ interface ChannelPostVersion {
   author_kind: 'agent' | 'human';
   created_at: string;
   tagged_link_preview: string | null;
+}
+
+// story #3550(Phase2·풀스택, BE 2/2 #3910 계약, 페드루 PO 確定 2026-09-06) — 캐러셀
+// N장 목록 응답(position 순). image_id가 삭제(`DELETE .../assets/{image_id}`)·재정렬
+// (`POST .../assets/reorder`의 image_ids)의 대상 키다.
+interface ChannelPostImageResponse {
+  image_id: string;
+  draft_id: string;
+  version_id: string;
+  version: number;
+  original_width: number;
+  original_height: number;
+  original_bytes: number;
+  final_width: number;
+  final_height: number;
+  final_bytes: number;
+  was_converted: boolean;
+  image_url: string | null;
+  position: number;
 }
 
 interface ChannelConnectionInfo {
@@ -496,6 +516,14 @@ export default function ChannelPostEditPage() {
   // Button만 보인다(브라우저 기본 컨트롤 로케일 불일치 회피).
   const imageFileInputRef = useRef<HTMLInputElement>(null);
 
+  // story #3550(Phase2·풀스택, BE 2/2 #3910 계약 확定 2026-09-06) — 캐러셀 N장.
+  // position 순 전체 목록(단수 대표 1장 계약·draft.thumbnail_url은 무변경 — 별개
+  // 엔드포인트). imagesActionError는 삭제·재정렬 실패 전용(업로드 실패는
+  // imageUploadStatus가 이미 진다 — 자리를 안 섞는다).
+  const [images, setImages] = useState<ChannelPostImageResponse[]>([]);
+  const [imagesActionInProgress, setImagesActionInProgress] = useState(false);
+  const [imagesActionError, setImagesActionError] = useState<{ text: string; raw?: string } | null>(null);
+
   const [text, setText] = useState('');
   // story #3517(BE #3867 조각②, PO 정정 2026-09-05) — 댓글 「작업으로 전환」
   // 다이얼로그의 「게시물 제목」 prefill. 채널 포스트엔 정식 제목이 없다 — 1순위는
@@ -589,6 +617,16 @@ export default function ChannelPostEditPage() {
         if (latest) {
           setText(latest.text);
           setLinkUrl(latest.link_url ?? '');
+          // story #3550 — N장 목록(현재 버전 기준)도 초기 로드 때 같이 가져온다.
+          // 실패해도 페이지 전체를 막지 않는다(첨부 0장으로 보이는 것과 "조회
+          // 실패"를 이 자리에서 구별해 봐야 아직 아무 UI도 없다 — 빈 배열 유지).
+          const imagesRes = await fetchWithAuth(
+            `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions/${latest.version_id}/assets`,
+          ).catch(() => null);
+          if (!cancelled && imagesRes?.ok) {
+            const imagesJson = (await imagesRes.json().catch(() => null)) as { data?: ChannelPostImageResponse[] } | null;
+            if (imagesJson?.data) setImages(imagesJson.data);
+          }
         }
         if (d) {
           const connRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
@@ -910,13 +948,7 @@ export default function ChannelPostEditPage() {
         setImageUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
         return;
       }
-      const confirmJson = (await confirmRes.json().catch(() => null)) as
-        {
-          data?: {
-            version: number; original_width: number; original_bytes: number;
-            final_width: number; final_bytes: number; was_converted: boolean; image_url: string | null;
-          };
-        } | null;
+      const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: ChannelPostImageResponse } | null;
       const image = confirmJson?.data;
       if (!image) {
         setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
@@ -934,9 +966,15 @@ export default function ChannelPostEditPage() {
       // 이미 confirm까지 성공했는데(image 변수가 이미 참조 가능한 시점) 사용자는 업로드
       // 자체가 실패한 걸로 오인한다. leg별로 격리해 재조회 실패가 업로드 성공 신호를
       // 삼키지 않게 한다.
-      const [draftRes, versionsRes] = await Promise.all([
+      // story #3550 — confirm 응답은 새로 붙은 이미지 1장뿐이라(캐러셀 목록 전체가
+      // 아니다), 새 버전(image.version_id — carry-forward로 기존 이미지도 이 버전에
+      // 옮겨 붙는다, delete/reorder와 동형 버전 승계) 기준으로 목록을 다시 받는다.
+      // 로컬로 배열에 추가만 하면 carry-forward 규칙을 이 화면이 지어내는 셈이라
+      // 안 한다.
+      const [draftRes, versionsRes, imagesRes] = await Promise.all([
         fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`).catch(() => null),
         fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`).catch(() => null),
+        fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions/${image.version_id}/assets`).catch(() => null),
       ]);
       if (draftRes?.ok) {
         const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
@@ -946,9 +984,93 @@ export default function ChannelPostEditPage() {
         const versionsJson = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
         if (versionsJson?.data) setVersions(versionsJson.data);
       }
+      if (imagesRes?.ok) {
+        const imagesJson = (await imagesRes.json().catch(() => null)) as { data?: ChannelPostImageResponse[] } | null;
+        if (imagesJson?.data) setImages(imagesJson.data);
+      }
       setImageUploadStatus({ phase: 'idle' });
     } catch {
       setImageUploadStatus({ phase: 'error', text: t('errorChannelImageUploadFailed') });
+    }
+  };
+
+  // story #3550(Phase2·풀스택, BE 2/2 #3910 계약 확定) — 삭제·재정렬 공용 후처리.
+  // 둘 다 새 불변 버전을 만들어(#3291 규율) 그 버전에 남은/재배열된 이미지 전체를
+  // 응답으로 돌려준다(delete/reorder 엔드포인트 자체가 list[ChannelPostImageResponse])
+  // — confirm과 달리 추가 GET 없이 이 응답 하나로 images를 통째로 교체한다. 새 버전이
+  // 곧 재승인 트리거(B1과 동형 이유)라 draft/versions도 같이 재조회한다.
+  async function refreshDraftAndVersionsAfterImagesMutation() {
+    const [draftRes, versionsRes] = await Promise.all([
+      fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`).catch(() => null),
+      fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/versions`).catch(() => null),
+    ]);
+    if (draftRes?.ok) {
+      const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
+      if (draftJson?.data) setDraft(draftJson.data);
+    }
+    if (versionsRes?.ok) {
+      const versionsJson = (await versionsRes.json().catch(() => null)) as { data?: ChannelPostVersion[] } | null;
+      if (versionsJson?.data) setVersions(versionsJson.data);
+    }
+  }
+
+  // 페드루 PO 確定(2026-09-06) — 위/아래 이동도 매번 「새 순서 그대로 전체 집합」을
+  // 한 번에 보낸다(부분 재정렬 불허, BE가 422 CHANNEL_POST_IMAGE_REORDER_INVALID_SET
+  // 로 거부). ImageAttachmentList는 인접 스왑 UI라 fromIndex/toIndex를 여기서 배열
+  // 재배치로 풀어 image_id 전체 목록을 만든다.
+  const handleReorderImage = async (fromIndex: number, toIndex: number) => {
+    if (!orgId || toIndex < 0 || toIndex >= images.length) return;
+    const reordered = [...images];
+    const [moved] = reordered.splice(fromIndex, 1);
+    if (!moved) return;
+    reordered.splice(toIndex, 0, moved);
+    setImagesActionInProgress(true);
+    setImagesActionError(null);
+    try {
+      const res = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/reorder`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: reordered.map((img) => img.image_id) }) },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setImagesActionError({ text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: ChannelPostImageResponse[] } | null;
+      if (json?.data) setImages(json.data);
+      await refreshDraftAndVersionsAfterImagesMutation();
+    } catch {
+      setImagesActionError({ text: t('errorChannelImageUploadFailed') });
+    } finally {
+      setImagesActionInProgress(false);
+    }
+  };
+
+  const handleDeleteImage = async (index: number) => {
+    if (!orgId) return;
+    const target = images[index];
+    if (!target) return;
+    setImagesActionInProgress(true);
+    setImagesActionError(null);
+    try {
+      const res = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/${target.image_id}`,
+        { method: 'DELETE' },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setImagesActionError({ text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: ChannelPostImageResponse[] } | null;
+      if (json?.data) setImages(json.data);
+      await refreshDraftAndVersionsAfterImagesMutation();
+    } catch {
+      setImagesActionError({ text: t('errorChannelImageUploadFailed') });
+    } finally {
+      setImagesActionInProgress(false);
     }
   };
 
@@ -1259,13 +1381,15 @@ export default function ChannelPostEditPage() {
     || imageUploadStatus.phase === 'uploading' || imageUploadStatus.phase === 'confirming';
 
   // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 이미지 필수 채널(image_required)인데
-  // 이미지가 없으면(draft.thumbnail_url 없음) 상신·예약 상신이 서버에서 422로 막힌다
-  // (§7 「필수값 빈칸 선알림」). 업로드 진행 中엔 이 사유를 안 보인다(업로드 중엔 실제로
-  // 0장이라 두 조건이 동시에 참일 수 있는데, 그땐 「업로드가 끝나면 된다」가 맞는
-  // 말 — 페드루 PO 明示, 사유 사슬은 한 줄만 뜬다). 저장 버튼은 이 조건과 무관(본문만
-  // 먼저 쓰고 이미지는 나중에 붙이는 길을 막지 않는다 — 상신·발행의 조건이지 저장의
-  // 조건이 아니다).
-  const imageRequiredAndMissing = Boolean(imageSpec?.imageRequired) && !draft?.thumbnail_url && !imageUploadInProgress;
+  // 이미지가 없으면 상신·예약 상신이 서버에서 422로 막힌다(§7 「필수값 빈칸
+  // 선알림」). 업로드 진행 中엔 이 사유를 안 보인다(업로드 중엔 실제로 0장이라 두
+  // 조건이 동시에 참일 수 있는데, 그땐 「업로드가 끝나면 된다」가 맞는 말 — 페드루
+  // PO 明示, 사유 사슬은 한 줄만 뜬다). 저장 버튼은 이 조건과 무관(본문만 먼저 쓰고
+  // 이미지는 나중에 붙이는 길을 막지 않는다 — 상신·발행의 조건이지 저장의 조건이
+  // 아니다). story #3550 — 판정 소스를 draft.thumbnail_url(단수 대표 1장)에서
+  // images.length(캐러셀 N장 목록, 이 화면의 실제 첨부 수)로 옮긴다 — 0장인지가
+  // 이제 이 배열의 길이로 정확히 난다.
+  const imageRequiredAndMissing = Boolean(imageSpec?.imageRequired) && images.length === 0 && !imageUploadInProgress;
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
@@ -1793,11 +1917,10 @@ export default function ChannelPostEditPage() {
       {imageSpec && imageSpec.maxCount > 0 ? (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="channel-post-image-attach">
           <div className="flex items-center justify-between">
-            {/* B3(페드루 PO·유나 지적, 2026-09-04) — 어댑터가 image_max_count>1을 선언해도
-                이 첨부 칸은 파일 하나만 받는다(input에 multiple 없음·onChange가 files[0]만
-                읽음·confirm이 draft 이미지 필드를 한 장으로 덮어씀 — 진짜 다중첨부가
-                아니다). "{count}장까지"라고 적으면 화면이 실제로 안 하는 일을 약속하는
-                거짓말이 된다 — 개수를 아예 안 적는다. */}
+            {/* story #3550(BE 2/2 #3910 계약 확定, 2026-09-06) — B3(2026-09-04)가
+                "다중첨부 아니다"라 개수를 안 적던 것과 반대로, 이제 파일 선택마다
+                실제로 이미지가 하나씩 늘어난다(캐러셀). 개수는 ImageAttachmentList의
+                count 태그가 맡는다(여기서 다시 안 적어 겹치는 문장 0). */}
             <span className="text-muted-foreground">{t('channelPostsImageAttachLabel')}</span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-image-spec-tag">
@@ -1825,30 +1948,30 @@ export default function ChannelPostEditPage() {
                   colorSpace: imageSpec.colorSpace,
                 })}
           </p>
-          {draft.thumbnail_url ? (
-            <div className="space-y-1">
-              {/* eslint-disable-next-line @next/next/no-img-element -- story #3428: public-read GCS 오브젝트 URL(외부 도메인, next/image 대상 밖 — avatar_upload.py 소비부와 동형 관례). */}
-              <img
-                src={draft.thumbnail_url} alt={t('channelPostsImageAttachAlt')}
-                className="h-24 w-24 rounded object-cover" data-testid="channel-post-image-preview"
-              />
-              {/* 배지 첨부 칸(페드루 PO, 2026-09-04 13:41Z) — 이 미리보기도 파생본(변환
-                  결과)을 그리므로 image_was_converted일 때 승인 카드(§13-3)와 같은
-                  배지·같은 문구를 함께 보인다(새 문구 없음·false면 안 그림). 승인 카드
-                  =확定 결과 보여주는 자리, 여기=작성자가 지금 첨부가 어떻게 변환됐는지
-                  확인하는 자리 — 둘 다 image_final_object_path 기준이라 같은 값이다.
-                  <img> 2벌은 의도적으로 유지(§13-3 그대로). */}
-              {draft.image_was_converted ? (
-                <p className="text-xs text-muted-foreground" data-testid="channel-post-image-attach-converted-badge">
-                  {t('channelPostsImageConvertedBadge', {
-                    originalWidth: draft.image_original_width ?? 0,
-                    finalWidth: draft.image_final_width ?? 0,
-                    originalBytes: typeof draft.image_original_bytes === 'number' ? formatFileSize(draft.image_original_bytes) : '',
-                    finalBytes: typeof draft.image_final_bytes === 'number' ? formatFileSize(draft.image_final_bytes) : '',
-                  })}
-                </p>
-              ) : null}
-            </div>
+          {/* story #3550(BE 2/2 #3910 계약 확定) — 단일 <img> 슬롯을 N장 목록으로
+              교체(디디 설계 메모 §13-3 재확인 — 단일 슬롯 옛 §13-8 인용은 #3549
+              오귀속 정정, "있는 그대로 그린다"는 장별 변환 배지로 이 컴포넌트
+              안에서 적용). 유나 §17 회차(장별 배지·위/아래 이동 낱말)는 이 PR
+              프리뷰가 아니라 dev 배포 뒤 실픽셀로 연다 — 여기 낱말은 골격 그대로.
+              디디 재확認: draft.thumbnail_url·image_was_converted 등 단수 필드는
+              무변경(별개 대표 1장 계약, 승인 카드가 그대로 쓴다) — 이 화면만
+              images(N장 목록)로 옮긴다. */}
+          <ImageAttachmentList
+            images={images.map((img) => ({
+              url: img.image_url ?? '', wasConverted: img.was_converted,
+              originalWidth: img.original_width, finalWidth: img.final_width,
+              originalBytes: img.original_bytes, finalBytes: img.final_bytes,
+            }))}
+            maxCount={imageSpec.maxCount}
+            disabled={imageUploadInProgress || imagesActionInProgress}
+            onReorder={(from, to) => void handleReorderImage(from, to)}
+            onDelete={(index) => void handleDeleteImage(index)}
+          />
+          {imagesActionError ? (
+            <Alert variant="destructive" role="alert" data-testid="channel-post-images-action-error">
+              <AlertDescription>{imagesActionError.text}</AlertDescription>
+              <RawDetailsToggle raw={imagesActionError.raw} label={t('errorRawDetailsToggle')} />
+            </Alert>
           ) : null}
           {/* ②(유나 지적, 2026-09-04) — <input type=file>는 접근 가능한 이름이 0이고
               그리는 브라우저 기본 컨트롤 라벨("파일 선택" 등)이 브라우저 로케일을 따라

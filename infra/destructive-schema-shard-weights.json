@@ -1,1341 +1,1341 @@
 {
-  "_snapshot_policy": "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 ~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐.",
-  "measured_at": "2026-09-03",
+  "_snapshot_policy": "story #3558(2026-09-06) — CI 실측 전수 재측정(run 34011626732, 8개 shard-durations 산출물 병합, DB 준비 제외 순수 pytest wall time). 이전 스냅샷(story #3383, 로컬×6 추정)을 대체 — 로컬 추정이 아니라 실 CI 값이라 재측정 기준(a)(b)(c)는 그대로 두되 근거가 더 강해졌다: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐. story #3558의 shard-durations 산출물+경고 대조가 이 스냅샷의 노후화를 지속 감시한다.",
+  "measured_at": "2026-09-06",
   "files": [
     {
       "file": "tests/test_3373_channel_connections.py",
-      "sec": 20.1,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 39.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3317_org_connector_registry.py",
-      "sec": 19.63,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 23.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2813_gate_github_check_realdb.py",
-      "sec": 17.72,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 45.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3360_site_posts.py",
-      "sec": 15.7,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 22.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3332_block_template_payload_ref_contract.py",
-      "sec": 15.33,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2161_agent_run_reaper.py",
-      "sec": 14.19,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 25.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2932_gate_slot_hardening_realdb.py",
-      "sec": 13.17,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 30.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s8_watchdog.py",
-      "sec": 12.83,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s26_sprint_overlay.py",
-      "sec": 12.32,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2631_gate_undo_discuss.py",
-      "sec": 11.72,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 22.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3143_chat_server_command_catalog.py",
-      "sec": 11.48,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 28.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3374_channel_posts.py",
-      "sec": 11.42,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 24.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2636_custom_event_registration.py",
-      "sec": 11.39,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 17.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2826_gate_pr_lifecycle_creation_realdb.py",
-      "sec": 11.31,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 19.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3381_site_post_unpublish.py",
-      "sec": 10.7,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 25.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s32_reassign.py",
-      "sec": 10.42,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2893_pr4_late_participation_gate_creation_realdb.py",
-      "sec": 9.83,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3329_embedded_entity_ref_tokenization.py",
-      "sec": 9.75,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 19.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2172_assignee_position_events.py",
-      "sec": 9.53,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3369_publish_site_post_from_draft.py",
-      "sec": 9.38,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 24.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1940_human_api_keys.py",
-      "sec": 9.28,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3323_prev_output_doc_chain.py",
-      "sec": 9.28,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3367_site_post_submit_gate_seal.py",
-      "sec": 8.82,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 24.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2944_api_key_issuance_replace_semantics_realdb.py",
-      "sec": 8.81,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 19.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2250_stalled_signal_realdb.py",
-      "sec": 8.8,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 26.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2043_ac3_hitl_reason_enforce.py",
-      "sec": 8.72,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 17.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2027_gate_approval_reason_enforce.py",
-      "sec": 8.58,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1972_gate_risk_grade.py",
-      "sec": 8.52,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s9_parallel_quorum.py",
-      "sec": 8.35,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2604_approval_request_cards.py",
-      "sec": 8.24,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2843_goal_outcome_verdict_realdb.py",
-      "sec": 8.24,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2815_gate_github_check_events_endpoint_realdb.py",
-      "sec": 8.21,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 19.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2630_circuit_breaker.py",
-      "sec": 8.2,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3540_measurement_connections.py",
-      "sec": 40.0,
-      "source": "story-3540-measurement-connections(PR 개설 前 선제 등재 — 로컬 raw pytest 5.31s(8건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 21.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3354_pageview_counter.py",
-      "sec": 8.18,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 21.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3506_utm_beacon_aggregate.py",
-      "sec": 70.0,
-      "source": "story-3506-utm-beacon-aggregate(조각2, PR 개설 前 선제 등재 — 로컬 raw pytest 10.96s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 70s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2038_hypothesis_outcome_result_enforce.py",
-      "sec": 8.05,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2633_event_publish.py",
-      "sec": 7.93,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 21.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1973_gate_urgency_sort.py",
-      "sec": 7.84,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s14_role_resolver.py",
-      "sec": 7.83,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2131_bulk_status_changed_sse_realdb.py",
-      "sec": 7.77,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_recruit_s5_connection_artifact_realdb.py",
-      "sec": 7.77,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2893_gate_null_slot_promotion_realdb.py",
-      "sec": 7.64,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3084_gate_toss_realdb.py",
-      "sec": 7.57,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 20.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2893_pr4_label_alignment_gate_creation_realdb.py",
-      "sec": 7.55,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2836_agent_auth_failure_realdb.py",
-      "sec": 7.51,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s12_context_pack_items_realdb.py",
-      "sec": 7.46,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2853_gate_check_revocation_realdb.py",
-      "sec": 7.4,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s18_runtime_mode.py",
-      "sec": 7.36,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_c7abdf42_repeat_schedule_endpoints.py",
-      "sec": 7.18,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2078_event_outbox_realdb.py",
-      "sec": 7.02,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2087_agent_api_key_usage_audit_trail_realdb.py",
-      "sec": 7.02,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_merge_verdict_gate.py",
-      "sec": 6.93,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1974_gate_assigned_to_me.py",
-      "sec": 6.89,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3313_recipe_notification_render.py",
-      "sec": 6.89,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2054_gate_inbox.py",
-      "sec": 6.88,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3386_site_post_publication.py",
-      "sec": 6.88,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 24.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2893_pr3_gate_reevaluate_realdb.py",
-      "sec": 6.83,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 19.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2953_agent_inactive_project_access_realdb.py",
-      "sec": 6.79,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2747_draft_doc_chat_nudge_realdb.py",
-      "sec": 6.68,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2893_pr2_sha_repending_label_unlabel_realdb.py",
-      "sec": 6.67,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_a2a_sa3_link_gate_to_task_realdb.py",
-      "sec": 6.63,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1970_gate_single_get.py",
-      "sec": 6.59,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3365_site_post_drafts.py",
-      "sec": 6.51,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_f6d1bbaa_stamp_integrity_guard.py",
-      "sec": 6.45,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2156_merge_gate_evidence_realdb.py",
-      "sec": 6.39,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3505_story_number_gap.py",
-      "sec": 20.0,
-      "source": "story-3505-story-number-gap(PR 개설 前 선제 등재 — 로컬 raw pytest 3.3s(3건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3516_channel_post_comments.py",
-      "sec": 576.0,
-      "source": "story-3516-comment-collection-piece1(PR 개설 前 선제 등재 — 로컬 raw pytest 95.85s(15건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 576s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 33.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3516_comment_reply.py",
-      "sec": 420.0,
-      "source": "story-3516-comment-reply-piece2(PR 개설 前 선제 등재 — 로컬 raw pytest 69.52s(15건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 420s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 28.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3528_comment_continuous_polling.py",
-      "sec": 45.0,
-      "source": "story-3528-comment-continuous-polling(PR 개설 前 선제 등재 — 로컬 raw pytest 6.16s(12건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 21.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3516_comment_reply_piece2b.py",
-      "sec": 240.0,
-      "source": "story-3516-comment-reply-piece2b(PR 개설 前 선제 등재 — 로컬 raw pytest 39.98s(10건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 240s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 24.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3516_comment_scope_and_runbook.py",
-      "sec": 40.0,
-      "source": "story-3516-comment-scope-piece3(PR 개설 前 선제 등재 — 로컬 raw pytest 6.47s(5건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3516_publication_command_content_kind_check.py",
-      "sec": 90.0,
-      "source": "story-3516-content-kind-check-hotfix(PR 개설 前 선제 등재 — 로컬 raw pytest 14.66s(4건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3337_recipe_repeat_scheduler.py",
-      "sec": 6.39,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2004_a2a_sendmessage_idempotency_realdb.py",
-      "sec": 6.28,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3334_gate_reject_reason_enforce.py",
-      "sec": 6.27,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_project_relay_owner.py",
-      "sec": 6.25,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3153_glance_org_stalled_realdb.py",
-      "sec": 6.12,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_a2a_sa5_auth_required_realdb.py",
-      "sec": 6.12,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 17.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2893_gate_pr_scoped_isolation_realdb.py",
-      "sec": 5.99,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3001_gate_delegate_realdb.py",
-      "sec": 5.94,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_a2a_sa4_streaming_realdb.py",
-      "sec": 5.91,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2201_sse_backfill_degraded_signal_realdb.py",
-      "sec": 5.84,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_recruit_s3_recruit_service_realdb.py",
-      "sec": 5.8,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2637_action_auth_enforcement.py",
-      "sec": 5.67,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2935_steer_conversation_override.py",
-      "sec": 5.66,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2039_project_slug_ascii.py",
-      "sec": 5.62,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3039_merge_gate_ci_reeval_webhook_realdb.py",
-      "sec": 5.56,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3288_recipe_role_bindings.py",
-      "sec": 5.55,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2082_artifact_canonicalize_gate_inbox.py",
-      "sec": 5.54,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2832_gate_reapproval_anchor_realdb.py",
-      "sec": 5.48,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2626_chain_escalation_episode.py",
-      "sec": 5.38,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2118_merge_gate_approval_cards_realdb.py",
-      "sec": 5.37,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3340_gate_verdict_notify_reach.py",
-      "sec": 5.36,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_s26_context_pack_synthesis.py",
-      "sec": 5.36,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2249_gate_entered_at_realdb.py",
-      "sec": 5.34,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3330_gate_verdict_notification.py",
-      "sec": 5.26,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3035_late_participation_pr_result_explicit_realdb.py",
-      "sec": 5.25,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3370_gate_notify_recipients.py",
-      "sec": 5.24,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2628_approval_dm_participant_set_lookup.py",
-      "sec": 5.23,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2975_gate_activity_audit_trail_realdb.py",
-      "sec": 5.22,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s11_dispatch_context_pack_realdb.py",
-      "sec": 5.2,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2838_api_key_expiry_no_silent_default_realdb.py",
-      "sec": 5.15,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2975_gate_approval_sha_race_realdb.py",
-      "sec": 5.15,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2985_gate_designated_approver_line.py",
-      "sec": 5.14,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2982_gate_already_resolved_realdb.py",
-      "sec": 5.13,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3325_recipe_gate_card_reopen.py",
-      "sec": 5.13,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s3_engine.py",
-      "sec": 5.11,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2693_publish_event_unknown_member_400.py",
-      "sec": 5.09,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1983_doc_gate_assigned_to_me_who_state.py",
-      "sec": 5.06,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s7_handoff_relay.py",
-      "sec": 5.03,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s13_sla_processor.py",
-      "sec": 5.01,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2606_legal_document_current.py",
-      "sec": 4.95,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_f84227b5_agent_org_header_membership.py",
-      "sec": 4.91,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s10_status_api.py",
-      "sec": 4.88,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2665_event_publish_history.py",
-      "sec": 4.84,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3312_approve_stage_gate_auto_creation.py",
-      "sec": 4.83,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1715_merge_gate_requester_notify_realdb.py",
-      "sec": 4.78,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 6.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2078_publish_atomic.py",
-      "sec": 4.78,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_d1f4afcb_draft_nudge_gate_and_event_suppress.py",
-      "sec": 4.75,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s19_grandfather.py",
-      "sec": 4.75,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_a2a_sa1_deadline_sweeper_realdb.py",
-      "sec": 4.69,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2835_gate_approval_publish_self_sufficient_realdb.py",
-      "sec": 4.55,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2086_assignee_changed_sse.py",
-      "sec": 4.53,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3033_merge_gate_sha_fallback_realdb.py",
-      "sec": 4.53,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_batch_line_status.py",
-      "sec": 4.5,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2624_approval_result_reply.py",
-      "sec": 4.49,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3317b_recipe_capability_apply_check.py",
-      "sec": 4.48,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3025_gate_self_reclamation_realdb.py",
-      "sec": 4.34,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_m2_recipe_role_binding_routing_realdb.py",
-      "sec": 4.33,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2637_block_template_registration.py",
-      "sec": 4.32,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_agent_access_matrix_realdb.py",
-      "sec": 4.26,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3115_late_link_gate_creation_realdb.py",
-      "sec": 4.25,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_s27_context_pack_recommendation.py",
-      "sec": 4.25,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2128_sse_lifespan_cap.py",
-      "sec": 4.22,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3293_recipe_role_bindings_read.py",
-      "sec": 4.22,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s5_merge_gate.py",
-      "sec": 4.21,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s4_resolver.py",
-      "sec": 4.17,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s16_seed.py",
-      "sec": 4.14,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2634_event_definitions_list.py",
-      "sec": 4.02,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2058_hitl_human_only.py",
-      "sec": 4.01,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2381_wake_after_commit_race_realdb.py",
-      "sec": 4.0,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2637_notification_preference_router_event_key.py",
-      "sec": 3.97,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s23_hypothesis_overlay.py",
-      "sec": 3.89,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s6_gate_hook.py",
-      "sec": 3.76,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s17_recall.py",
-      "sec": 3.69,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s33_override.py",
-      "sec": 3.68,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2087_api_key_logs_endpoint_realdb.py",
-      "sec": 3.67,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2637_notification_preference_event_key.py",
-      "sec": 3.58,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 6.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2381_ac4_live_wake_delivery_realdb.py",
-      "sec": 3.56,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2834_link_evidence_merge_semantics_realdb.py",
-      "sec": 3.56,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s25_epic_overlay.py",
-      "sec": 3.55,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 6.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3275_presence_profile_selfheal_realdb.py",
-      "sec": 3.53,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2941_apikey_scope_resync_realdb.py",
-      "sec": 3.52,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s2_config_governance.py",
-      "sec": 3.52,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_ccbcd9da_gate_wake_wiring_realdb.py",
-      "sec": 3.47,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2632_event_definitions.py",
-      "sec": 3.46,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3349_repeat_schedule_cycle_guard.py",
-      "sec": 3.46,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 6.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s28_doc_resubmit.py",
-      "sec": 3.44,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 6.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s34_line_versions.py",
-      "sec": 3.44,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s12be_recipient_fallback.py",
-      "sec": 3.43,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2608_chain_depth.py",
-      "sec": 3.42,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_ho_s9_e2e_closed_loop.py",
-      "sec": 3.38,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2047_explicit_ask_gate.py",
-      "sec": 3.34,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_h1_s9_merge_gate_metrics.py",
-      "sec": 3.32,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s22_doc_overlay.py",
-      "sec": 3.27,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_org_create_seeds_default_participation_role.py",
-      "sec": 3.26,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s15_metrics.py",
-      "sec": 3.19,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s31_hold.py",
-      "sec": 3.18,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_h1_fix2_approve_advances_done.py",
-      "sec": 3.01,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s3_embed_backlog_realdb.py",
-      "sec": 3.0,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2049_default_participation_roles.py",
-      "sec": 2.97,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 8.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2675_publish_event_malformed_uuid_400.py",
-      "sec": 2.97,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_1968_gate_project_id_threading.py",
-      "sec": 2.93,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2636_publish_zero_reach_warning.py",
-      "sec": 2.93,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2524_gate_reopen_requires_human.py",
-      "sec": 2.78,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s30_void_recovery.py",
-      "sec": 2.66,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_h1_s10_e2e.py",
-      "sec": 2.65,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2101_sse_recent_delivered_backfill_realdb.py",
-      "sec": 2.63,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_edg_s29_dryrun_preview.py",
-      "sec": 2.6,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2667_recruit_defer_key_issuance_realdb.py",
-      "sec": 2.54,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2602_sse_lease_lifespan_reclaim.py",
-      "sec": 2.48,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_claim_participation.py",
-      "sec": 2.37,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2620_a2a_webhook_fallback_regression.py",
-      "sec": 2.34,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2617_chain_escalation.py",
-      "sec": 2.33,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2637_event_msg_metadata_tagging.py",
-      "sec": 2.3,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3258_doc_gate_card_content_realdb.py",
-      "sec": 2.3,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_ho_s4_scorer_verdict_wiring.py",
-      "sec": 2.28,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_doc_gate_cascade_scope_realdb.py",
-      "sec": 2.25,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_ho_s7_cold_start_seed.py",
-      "sec": 2.25,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 3.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_merge_gate_reject_resubmit_reopen.py",
-      "sec": 2.05,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 6.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s5_embedding_backfill_realdb.py",
-      "sec": 2.02,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_s29_active_line_get.py",
-      "sec": 1.91,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2428_list_backlog_total_count_realdb.py",
-      "sec": 1.9,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2216_workflow_fallback_notify_owner_floor_realdb.py",
-      "sec": 1.88,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 3.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_h1_s7_gate_verdict.py",
-      "sec": 1.84,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 5.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s6_context_pack_search_realdb.py",
-      "sec": 1.8,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_a2a_p1_s1_recruit_card_contract_realdb.py",
-      "sec": 1.74,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s3f_poison_pill_terminal.py",
-      "sec": 1.73,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 3.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_recruit_s16_rotate_idor_realdb.py",
-      "sec": 1.68,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e_loop_ledger_p1_s3g_score_hypotheses_savepoint_realdb.py",
-      "sec": 1.65,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 3.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_ho_s1_score_hypotheses_smoke.py",
-      "sec": 1.57,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_cron_retry_dry_run.py",
-      "sec": 1.53,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 3.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2520_line_merge_gate_reconcile.py",
-      "sec": 1.47,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_ho_s2_outcome_verdict.py",
-      "sec": 1.36,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 4.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3287_domain_label_realdb.py",
-      "sec": 1.16,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 3.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2635_agent_api_keys_events_backfill.py",
-      "sec": 0.91,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 1.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2635_role_templates_events_scope.py",
-      "sec": 0.84,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 2.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2648_fix_legacy_scope_events_overreach.py",
-      "sec": 0.81,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 1.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2637_preset_block_template_seed.py",
-      "sec": 0.62,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 1.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_2637_gate_verdict_title_fix.py",
-      "sec": 0.53,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 1.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_ho_s3_hypothesis_owner_seed.py",
-      "sec": 0.53,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 2.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_member_ssot_parity_realdb.py",
-      "sec": 0.31,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 1.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3384_site_post_list_status.py",
-      "sec": 4.25,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_f8f7cb0f_channel_post_publish.py",
-      "sec": 11.97,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 32.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3394_channel_post_list_be_fields.py",
-      "sec": 13.33,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 22.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3399_agent_visible_channel_connections.py",
-      "sec": 5.64,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_f6d14476_gate_already_held.py",
-      "sec": 23.0,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3514_lint_on_read.py",
-      "sec": 40.0,
-      "source": "story-3514-lint-on-read(PR 개설 前 선제 등재 — 로컬 raw pytest 6.69s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 19.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3403_channel_post_draft_detail.py",
-      "sec": 8.0,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3525_publication_id_last_published.py",
-      "sec": 45.0,
-      "source": "story-3525-publication-id-last-published(PR 개설 前 선제 등재 — 로컬 raw pytest 6.26s(1건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3404_channel_post_gate_already_held.py",
-      "sec": 6.0,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3511_gate_holder_liveness_pending.py",
-      "sec": 40.0,
-      "source": "story-3511-gate-holder-liveness-pending(PR 개설 前 선제 등재 — 로컬 raw pytest 14.92s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 10.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3411_channel_post_text_preview.py",
-      "sec": 6.0,
-      "source": "local-post-template-optimization+story-3392-unweighted-additions+story-3384-merge+story-3375-merge+story-3394-merge+story-3399-agent-visible-connections+fix-f6d14476-unweighted-guard+story-3403-channel-post-draft-detail+story-3404-channel-post-gate-already-held"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3414_publication_command.py",
-      "sec": 25.9,
-      "source": "story-3414-publication-command(로컬 raw pytest 실측, 템플릿 DB 스크립트 아님 — 페드루 리뷰 nit N)"
+      "sec": 40.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3527_comment_collection_cron_wiring.py",
-      "sec": 45.0,
-      "source": "story-3527-comment-collection-cron-wiring(PR 개설 前 선제 등재 — 로컬 raw pytest 7.14s(2건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3529_comment_reply_command_status.py",
-      "sec": 35.0,
-      "source": "story-3529-comment-reply-command-status(PR 개설 前 선제 등재 — 로컬 raw pytest 5.18s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 35s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 19.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3531_comment_reply_404.py",
-      "sec": 20.0,
-      "source": "story-3531-comment-not-found-404(PR 개설 前 선제 등재 — 로컬 raw pytest 2.50s(1건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 9.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3415_channel_post_command_exposure.py",
-      "sec": 19.0,
-      "source": "story-3415-command-exposure(CI shard(6) unweighted-guard 실측 19s, run 33845555857/job 100939581435, 2026-09-04 — PR#3773 리뷰)"
+      "sec": 20.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3513_unpublish_absent_idempotent.py",
-      "sec": 90.0,
-      "source": "story-3513-unpublish-absent-idempotent(PR 개설 前 선제 등재 — 로컬 raw pytest 13.86s(6건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 17.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3419_cancel_unpublish.py",
-      "sec": 31.0,
-      "source": "story-3419-cancel-unpublish(CI shard(6) unweighted-guard 실측 31s, run 33847827818/job 100943850339, 2026-09-04 — PR#3774)"
+      "sec": 29.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3423_channel_post_scheduled_filter.py",
-      "sec": 23.0,
-      "source": "story-3423-scheduled-filter(CI shard(2) unweighted-guard 실측 23s, run 33849386492/job 100950217041, 2026-09-04 — PR#3775)"
+      "sec": 21.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_620beefc_channel_post_image.py",
-      "sec": 60.0,
-      "source": "story-620beefc-threads-image(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 28.2s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 48.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3536_channel_image_required.py",
-      "sec": 30.0,
-      "source": "story-3536-channel-image-required(PR 개설 前 선제 등재 — 로컬 raw pytest 4.38s(5건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 30s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_5b27b32f_sandbox_channel.py",
-      "sec": 115.0,
-      "source": "story-5b27b32f-sandbox-channel-adapter(PR 개설 前 선제 등재, 페드루 체크리스트 — 로컬 raw pytest 19.03s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 115s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 29.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3320_instagram_connector.py",
-      "sec": 190.0,
-      "source": "story-3320-instagram-connector-piece1(PR 개설 前 선제 등재 — 로컬 raw pytest 31.46s(28건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 190s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3320_instagram_piece3.py",
-      "sec": 90.0,
-      "source": "story-3320-instagram-connector-piece3(PR 개설 前 선제 등재 — 로컬 raw pytest 14.96s(13건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_8b7e52d6_claim_story_signal.py",
-      "sec": 92.0,
-      "source": "story-8b7e52d6-claim-story-signal(PR 개설 前 선제 등재, story 23bf1913 조기가드 학습 반영 — 로컬 raw pytest 15.30s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 92s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_46da6450_org_timezone.py",
-      "sec": 95.0,
-      "source": "story-46da6450-org-timezone(PR 개설 前 선제 등재, 페드루 리뷰 B1 — 로컬 raw pytest 15.86s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 95s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 26.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_f30da19a_available_channels.py",
-      "sec": 110.0,
-      "source": "story-f30da19a-available-channels(페드루 리뷰 B1 후속, PR#3784 — 로컬 raw pytest 17.74s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 110s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 14.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_0e960006_command_id_exposure.py",
-      "sec": 40.0,
-      "source": "story-0e960006-command-id-exposure(PR 개설 前 선제 등재 — 로컬 raw pytest 6.62s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3497_channel_post_publication_id_exposure.py",
-      "sec": 40.0,
-      "source": "story-3497-publication-id-exposure(조각4, PR#3844 — 로컬 raw pytest 6.19s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3498_generation_budget.py",
-      "sec": 200.0,
-      "source": "story-3498-generation-budget(PR 개설 前 선제 등재 — 로컬 raw pytest 33.06s(14건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 200s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 42.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3506_utm_attribution.py",
-      "sec": 50.0,
-      "source": "story-3506-utm-attribution(조각1, PR 개설 前 선제 등재 — 로컬 raw pytest 7.95s(15건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 50s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 13.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3502_insights_board.py",
-      "sec": 280.0,
-      "source": "story-3502-insights-board(조각1+2+sort_dir 결함수정, PR#3849 리뷰 대응 — 로컬 raw pytest 46.12s(20건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 280s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 39.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3510_member_role_sync.py",
-      "sec": 40.0,
-      "source": "story-3510-member-role-sync(PR 개설 前 선제 등재 — 로컬 raw pytest 6.09s(5건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3497_insight_snapshots.py",
-      "sec": 130.0,
-      "source": "story-3497-insight-snapshots(조각1~3+3506 clicks 3건 추가, PR#3844 — 등재 누락분 소급 등록. 로컬 raw pytest 21.77s(15건) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 130s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 34.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e4fc29fa_hosted_site_publish_adapter.py",
-      "sec": 20.0,
-      "source": "story-e4fc29fa-hosted-site-publish-adapter(PR 개설 前 선제 등재 — 로컬 raw pytest 3.34s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 7.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3437_content_ledger_projection.py",
-      "sec": 90.0,
-      "source": "story-3437-content-ledger-projection(PR 개설 前 선제 등재 — 로컬 raw pytest 15.26s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 30.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_cfc1a55a_scheduled_command_on_approval.py",
-      "sec": 60.0,
-      "source": "story-cfc1a55a-scheduled-command-on-approval(PR 개설 前 선제 등재 — 로컬 raw pytest 9.76s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e4fc29fa_destination_axis.py",
-      "sec": 40.0,
-      "source": "story-e4fc29fa-destination-axis(PR 개설 前 선제 등재 — 로컬 raw pytest 6.60s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 23.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3457_campaigns_list_and_version_campaign_fields.py",
-      "sec": 90.0,
-      "source": "story-3457-campaigns-list-and-version-campaign-fields(PR 개설 前 선제 등재 — 로컬 raw pytest 14.66s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 16.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3437_campaign_patch_no_version_no_gate_touch.py",
-      "sec": 40.0,
-      "source": "story-3437-campaign-patch-no-version-no-gate-touch(PR 개설 前 선제 등재 — 로컬 raw pytest 6.14s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 11.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e4fc29fa_site_post_orchestration.py",
-      "sec": 120.0,
-      "source": "story-e4fc29fa-site-post-orchestration(조각③c, PR 개설 前 선제 등재 — 실 uvicorn 라이브 서버 기동 포함 로컬 raw pytest 19.58s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 120s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 29.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_e4fc29fa_channel_connection_creation.py",
-      "sec": 90.0,
-      "source": "story-e4fc29fa-channel-connection-creation(조각⑤, PR 개설 前 선제 등재 — 로컬 raw pytest 15.01s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 90s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 21.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3492_credential_replace.py",
-      "sec": 85.0,
-      "source": "story-3492-channel-connection-credential-replace(PR 개설 前 선제 등재 — 로컬 raw pytest 13.93s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 85s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 22.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3471_org_content_rules_lint.py",
-      "sec": 40.0,
-      "source": "story-3471-org-content-rules-lint(PR 개설 前 선제 등재 — 로컬 raw pytest 7.34s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 29.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3476_publish_read_surface.py",
-      "sec": 55.0,
-      "source": "story-3476-external-publish-read-surface(PR 개설 前 선제 등재 — 로컬 raw pytest 9.14s 실측치(6 tests, 페드루 보정①·② 반영 후)를 CI 배율(~6x, story #3383) 보수적으로 반영한 55s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 17.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3474_publication_attempts.py",
-      "sec": 55.0,
-      "source": "story-3474-worker-approval-reverify-attempts(PR 개설 前 선제 등재 — 페드루 리뷰 보정①(unpublish 부정대조 추가) 반영 후 로컬 raw pytest 4건 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 55s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 17.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3478_gate_scope_key.py",
-      "sec": 40.0,
-      "source": "story-3478-gate-scope-key(PR 개설 前 선제 등재 — 로컬 raw pytest 6.51s 실측치(4 tests)를 CI 배율(~6x, story #3383) 보수적으로 반영한 40s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 18.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3475_publishing_metrics.py",
-      "sec": 121.0,
-      "source": "story-3475-publishing-metrics-api(PR 개설 前 선제 등재 — 로컬 raw pytest 11건 실측치(20.17s)를 CI 배율(~6x, story #3383) 보수적으로 반영한 121s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 26.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3523_generic_channel_sandbox.py",
-      "sec": 137.0,
-      "source": "story-3523-generic-channel-sandbox-route(카디르 QA #3877 CI 가드 지적 — PR 파일 목록에 미등재였음. 로컬 raw pytest 8건 실측치(22.76s)를 CI 배율(~6x, story #3383) 보수적으로 반영한 137s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 27.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3522_check_constraint_mirror_guard.py",
-      "sec": 280.0,
-      "source": "story-3522-check-constraint-mirror-guard(PR 개설 前 선제 등재 — 이 파일은 테스트마다 실 alembic upgrade head를 전용 임시 DB에 두 번(마이그·create_all) 돌려 무겁다. 로컬 raw pytest 3건 46.49s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 280s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 15.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3528_self_recovery_sweep.py",
-      "sec": 25.0,
-      "source": "story-3528-orphan-window-widen([SID:3528] 별 PR, dev DB oneoff 실측 7291bad8 REQUIRED 반영 — 로컬 raw pytest 8건 4.09s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 25s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 12.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3547_facebook_page_connection.py",
-      "sec": 45.0,
-      "source": "story-3547-facebook-page-adapter-be(PR 개설 前 선제 등재 — 로컬 raw pytest 16건 7.51s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 26.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3550_instagram_carousel.py",
-      "sec": 60.0,
-      "source": "story-3550-instagram-carousel-be(#3910 CI authz 가드 fix — cross-project 404 테스트 2건 추가 뒤 재측정 — 로컬 raw pytest 21건 9.30s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값. 실 CI 샤드 7 로그 실측: 19건 25.13s — 여유 충분 확인됨, story #3550 그라운딩 코멘트 참고)"
+      "sec": 31.0,
+      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
       "file": "tests/test_3554_instagram_reels.py",
       "sec": 45.0,
-      "source": "story-3554-instagram-reels-be(PR 개설 前 선제 등재 — 로컬 raw pytest 14건 7.40s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "source": "story-3554-instagram-reels-be(PR 개설 前 선제 등재 — 로컬 raw pytest 14건 7.40s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 45s 잠정값, 실 CI 샤드 로그로 재확認 필요 — #3558 전수 재측정(run 34011626732) 당시 이 PR 미머지라 그 산출물엔 없음)"
     }
   ]
 }

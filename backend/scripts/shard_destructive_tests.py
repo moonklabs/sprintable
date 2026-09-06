@@ -234,6 +234,85 @@ def _parse_elapsed_file(path: Path) -> dict[str, float]:
     return result
 
 
+# story #3558(CI·소형) — shard(5) 22분29초 사례(2026-09-06, #3910 CI): 원인이 신규
+# 파일이 아니라 옛 파일 클러스터의 등재값 과소(4~10배)였다. `_check_elapsed_mode`(위,
+# #3396)는 "이 run 자신의 중앙값 배율로 60초를 스케일"하는 *러너 정규화* 가드라
+# 클러스터 전체가 같이 느려진 경우 정규화가 따라가 버려 개별 파일의 등재값 자체가
+# 낡았다는 신호를 못 낸다 — 이 축은 그와 별개로 "등재값 대 실측"의 **절대 배율**을
+# 그대로 보는 경고 전용 축(실패 0, story #3396의 실패 가드와 안 겹친다).
+RATIO_WARN_HIGH_MULTIPLIER = 2.0
+RATIO_WARN_LOW_MULTIPLIER = 0.5
+
+
+def ratio_outliers(
+    measured: dict[str, float], weights: dict[str, float], *,
+    high_multiplier: float = RATIO_WARN_HIGH_MULTIPLIER, low_multiplier: float = RATIO_WARN_LOW_MULTIPLIER,
+) -> list[dict]:
+    """story #3558 — `measured`(산출물에서 병합된 실측 pytest 소요)와 `weights`(등재값)
+    둘 다에 있는 파일만 대상으로 ratio=measured/weight를 낸다. ratio>=high_multiplier
+    (과소 등재, 이 파일이 이 등재값 탓에 샤드를 무겁게 만들 수 있다) 또는 ratio<=
+    low_multiplier(과대 등재, 반대로 다른 파일이 손해를 볼 수 있다)만 반환(정렬은
+    ratio 내림차순 — 가장 심한 것부터). weights에 없는 파일(#3392의 unweighted 축이
+    이미 담당)·measured에 없는 파일(그 샤드에 안 걸렸거나 산출물 누락)은 조용히
+    건너뛴다 — 이 축은 "이미 등재된 값이 실측과 얼마나 벌어졌는가"만 본다."""
+    outliers = []
+    for file, elapsed in measured.items():
+        weight = weights.get(file)
+        if weight is None or weight <= 0:
+            continue
+        ratio = elapsed / weight
+        if ratio >= high_multiplier or ratio <= low_multiplier:
+            outliers.append({"file": file, "measured_sec": elapsed, "weight_sec": weight, "ratio": ratio})
+    outliers.sort(key=lambda o: o["ratio"], reverse=True)
+    return outliers
+
+
+def write_durations_json(elapsed_by_file: dict[str, float], out_path: Path, *, shard: int) -> None:
+    """story #3558 AC1 — 샤드별 순수 pytest 소요(DB 준비 제외, `_parse_elapsed_file`과
+    같은 값)를 JSON 산출물로 낸다. ci.yml이 이 파일을 `actions/upload-artifact`로
+    올린다(shard-durations-{shard})."""
+    out_path.write_text(json.dumps({"shard": shard, "durations": elapsed_by_file}, indent=2, sort_keys=True))
+
+
+def load_duration_artifacts(artifact_dir: Path) -> dict[str, float]:
+    """story #3558 AC2 — `artifact_dir` 아래 `*.json`(각 shard-durations-{n}.json,
+    `{"shard": n, "durations": {file: sec}}` 모양) 전부를 하나의 {file: sec}로 병합한다.
+    partition()이 무손실·배타적 분배를 보장하므로(test_partition_is_lossless_for_any_
+    input) 파일이 두 샤드에 동시에 나타나는 정상 경로는 없다 — 방어적으로 나타나도
+    마지막 값으로 덮어쓴다(에러로 죽이지 않는다, 이 축 자체가 경고 전용이라 원칙과 동형)."""
+    merged: dict[str, float] = {}
+    for p in sorted(artifact_dir.glob("*.json")):
+        try:
+            data = json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        merged.update(data.get("durations", {}))
+    return merged
+
+
+def _audit_durations_mode(artifact_dir: Path) -> int:
+    """story #3558 AC2 — 항상 0을 반환한다(경고 전용, CI를 절대 안 죽인다). 산출물
+    디렉터리가 없거나 비어 있어도(backend-irrelevant PR이라 샤드 자체가 스킵된 경우)
+    조용히 "대조 대상 0건"으로 끝낸다."""
+    if not artifact_dir.exists():
+        print(f"산출물 디렉터리 없음({artifact_dir}) — backend-irrelevant PR로 샤드가 스킵됐을 수 있음, 대조 0건", file=sys.stderr)
+        return 0
+    measured = load_duration_artifacts(artifact_dir)
+    weights = load_weights()
+    outliers = ratio_outliers(measured, weights)
+    if not outliers:
+        print(f"OK: 등재값 대조 — 산출물 {len(measured)}건 중 2배/0.5배 이탈 0건(story #3558)", file=sys.stderr)
+        return 0
+    for o in outliers:
+        direction = "과소 등재" if o["ratio"] >= RATIO_WARN_HIGH_MULTIPLIER else "과대 등재"
+        print(
+            f"::warning::등재값 {direction}(story #3558): {o['file']} — 실측 {o['measured_sec']:.1f}s vs "
+            f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights.json 재측정 검토."
+        )
+    print(f"경고 {len(outliers)}건(산출물 {len(measured)}건 중) — 실패 아님, story #3558 AC2", file=sys.stderr)
+    return 0
+
+
 def _check_elapsed_mode(elapsed_path: Path) -> int:
     """story #3396 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
     호출한다(중앙값은 그 run 전체 표본이 있어야 나온다 — 파일 단위 즉시 판정이 애초에
@@ -282,10 +361,33 @@ def main() -> int:
              "가드를 판정하고 끝낸다(discover/partition 없음 — ci.yml의 pytest 루프가 이 "
              "샤드의 모든 파일을 다 돈 뒤 한 번 호출한다, 중앙값은 그 run 전체를 봐야 나온다).",
     )
+    ap.add_argument(
+        "--elapsed-to-json", nargs=2, type=Path, default=None, metavar=("ELAPSED_IN", "JSON_OUT"),
+        help="story #3558 AC1 — --check-elapsed와 같은 <file>\\t<elapsed_sec> 파일을 읽어 "
+             "{shard, durations} JSON으로 변환한다(actions/upload-artifact 산출물용). "
+             "--shard와 함께 쓴다.",
+    )
+    ap.add_argument("--shard", type=int, default=None, help="--elapsed-to-json의 shard 번호")
+    ap.add_argument(
+        "--audit-durations", type=Path, default=None, metavar="ARTIFACT_DIR",
+        help="story #3558 AC2 — ARTIFACT_DIR 아래 shard-durations-*.json 전부를 병합해 "
+             "weights.json과 2배/0.5배 대조 경고를 낸다(항상 exit 0, 실패 없음).",
+    )
     args = ap.parse_args()
 
     if args.check_elapsed is not None:
         return _check_elapsed_mode(args.check_elapsed)
+
+    if args.elapsed_to_json is not None:
+        elapsed_in, json_out = args.elapsed_to_json
+        if args.shard is None:
+            print("--elapsed-to-json은 --shard가 필수", file=sys.stderr)
+            return 2
+        write_durations_json(_parse_elapsed_file(elapsed_in), json_out, shard=args.shard)
+        return 0
+
+    if args.audit_durations is not None:
+        return _audit_durations_mode(args.audit_durations)
 
     if args.shard_index is None or args.shard_count is None:
         print("--shard-index/--shard-count는 --check-elapsed 없이는 필수", file=sys.stderr)

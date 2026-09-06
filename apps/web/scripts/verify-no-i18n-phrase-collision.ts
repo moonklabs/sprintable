@@ -334,6 +334,19 @@ export const EXEMPT_PAIRS = new Set<string>([
   'content.commentsDeletedCountLabel <-> content.commentsSectionTitleWithCount',
   'content.commentsSectionTitle <-> content.commentsSectionTitleWithCount',
   'content.commentsDeletedCountLabel <-> content.commentsSectionTitle',
+  // story #3550(PR#3912, 페드루 PO 승인 2026-09-06) — content.channelPostsImageAttachmentPosition
+  // ("{position}번째", 장 위치 라벨) <-> channelPostsImageMoveUpAction/MoveDownAction/
+  // RemoveActionLabel(전부 "{position}번째 ..." 접근성 이름). 같은 이미지 슬롯의 같은
+  // position 값을 위치 라벨과 접근성 이름 두 표면에 일관되게 쓰는 의도된 반복 —
+  // #2352/#2365가 잡으려는 "다른 두 셈이 헷갈리는" 병이 아니다(insightsBoard.columnD1
+  // <-> sortD1류, 짧은 라벨이 그 라벨을 포함하는 긴 문구에 들어간 정상 패턴).
+  'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageMoveDownAction',
+  'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageMoveUpAction',
+  'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageRemoveActionLabel',
+  // channelPostsImageRemoveAction("삭제", 보이는 글자) <-> channelPostsImageRemoveActionLabel
+  // ("{position}번째 이미지 삭제", aria-label) — §17-20⑧ "접근성 이름은 보이는 글자를
+  // 포함해야 한다"는 규율 그 자체가 이 부분문자열 포함을 요구한다(제거 대상 아님).
+  'content.channelPostsImageRemoveAction <-> content.channelPostsImageRemoveActionLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
