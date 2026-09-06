@@ -911,6 +911,45 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       .toBe(koMessages.content.channelPostsPublishContinueCta);
   });
 
+  // story #3560(3560 FE PR 동승, 페드루 PO 지적 2026-09-06) — site-posts:1538과 동형
+  // (자매 화면 전수의 유일한 잔여). 발행 중 라벨이 isRepublish를 안 봐 재발행 진행
+  // 중에도 항상 "발행 중…"으로 떴다.
+  it('⭐재발행 진행 중 — 버튼 라벨이 "발행 중…"이 아니라 "재발행 중…"이다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'new', body_sha256: 'new',
+        published_body_sha256: 'old', published_at: '2026-09-01T00:00:00Z',
+        publication_status: 'published', permalink: 'https://x',
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const publishBtn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publishBtn.textContent).toBe(koMessages.content.publishRepublishCta);
+
+    // publish fetch를 진짜로 붙들어 둔다(mid-flight 상태를 실측 — stubFetch onPublish는
+    // 동기 반환이라 그냥 클릭만으론 act()가 완주까지 다 흘려보내 버린다).
+    let resolvePublish!: (v: { ok: boolean; status: number; json: () => Promise<unknown> }) => void;
+    const pending = new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((resolve) => {
+      resolvePublish = resolve;
+    });
+    vi.mocked(global.fetch).mockImplementationOnce(() => pending as unknown as Promise<Response>);
+
+    await act(async () => { publishBtn.click(); });
+    expect(publishBtn.textContent).toBe(koMessages.content.publishRepublishingCta);
+    expect(publishBtn.textContent).not.toBe(koMessages.content.publishPendingCta);
+
+    await act(async () => {
+      resolvePublish({
+        ok: true, status: 200,
+        json: async () => ({ data: { permalink: 'https://x', external_id: 'media-1', published_at: '2026-09-06T00:00:00Z', version_id: 'v2' }, error: null, meta: null }),
+      });
+    });
+  });
+
   it('⭐publication_status=failed — 실패 안내가 보인다', async () => {
     stubFetch({
       draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'failed', error_code: 'CHANNEL_PUBLISH_PROVIDER_ERROR' },
@@ -2897,6 +2936,27 @@ describe('ChannelPostEditPage — 서버 원문 접기(RawDetailsToggle, story #
     await flush();
 
     expect(findRawToggle(container)).not.toBeUndefined();
+  });
+
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — 미승인 컨셉 게이트로
+  // submit 자체가 막힌다. api-error.ts KNOWN_ERRORS 등재는 labelKey를 일부러 비워
+  // (서버 message 그대로) — 화면이 새 문장을 짓지 않고 서버 문장을 사유줄에 그대로 낸다.
+  it('⭐CONCEPT_NOT_APPROVED — 서버 message를 그대로 사유줄에 낸다(화면이 문장을 새로 짓지 않는다)', async () => {
+    stubFetch({
+      onSubmit: () => ({
+        status: 422,
+        body: { detail: { code: 'CONCEPT_NOT_APPROVED', message: '컨셉 문서 "9월 릴스 컨셉안"이 아직 결재되지 않았습니다.' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('컨셉 문서 "9월 릴스 컨셉안"이 아직 결재되지 않았습니다.');
   });
 
   it('이미지 업로드 실패 — raw 토글이 뜬다', async () => {

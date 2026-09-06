@@ -291,3 +291,122 @@ describe('EvidenceSection — 아티팩트 버전 pin(story #2722 AC2)', () => {
     expect(versionDetailCalls.some((u) => u.includes('/art-1/versions/1'))).toBe(true);
   });
 });
+
+// story #3560(제작 작업대 검증 시트, 유나 §17-24 확定 2026-09-06) — 접힘 요약 3갈래(실패/
+// 모두통과/통과+해당없음) · 펼침 표(비고 열 조건) · 판정 낱말(fail만 destructive).
+describe('EvidenceSection — 검증 시트(story #3560, payload.kind=verification_sheet)', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  async function renderWithSheet(items: { name: string; verdict: 'pass' | 'fail' | 'n_a'; note?: string | null }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/evidence?')) {
+        return new Response(JSON.stringify({
+          data: [{
+            id: 'ev-sheet-1', org_id: 'org-1', work_item_id: 's1', work_item_type: 'story',
+            type: 'report', ref: 'verification-sheet', source: null, note: null,
+            created_by: 'member-1', created_at: '2026-09-06T00:00:00Z',
+            artifact_version_id: null, artifact_id: null, artifact_version_number: null,
+            payload: { kind: 'verification_sheet', items },
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <EvidenceSection workItemId="s1" workItemType="story" selfReported={true} humanVerified={null} humanVerifiedBy={null} humanVerifiedAt={null} />,
+      ));
+    });
+    const toggleBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('근거 보기'));
+    await act(async () => { toggleBtn!.click(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  function findRowSummary() {
+    return container.querySelector('[data-testid="evidence-verification-sheet-summary"]') as HTMLButtonElement;
+  }
+
+  it('실패 있음 — 「실패 N · 전체 M」 (실패가 있으면 실패 수부터)', async () => {
+    await renderWithSheet([
+      { name: '자막 표시', verdict: 'pass' },
+      { name: '워터마크 위치', verdict: 'fail' },
+      { name: '길이 15초 이내', verdict: 'pass' },
+    ]);
+    expect(findRowSummary().textContent).toContain('실패 1 · 전체 3');
+  });
+
+  it('실패 0·해당없음 0 — 「N항목 모두 통과」', async () => {
+    await renderWithSheet([
+      { name: '자막 표시', verdict: 'pass' },
+      { name: '길이 15초 이내', verdict: 'pass' },
+    ]);
+    expect(findRowSummary().textContent).toContain('2항목 모두 통과');
+  });
+
+  it('실패 0·해당없음 있음 — 「통과 N · 해당 없음 M」(「모두 통과」 금지 — 일부는 안 쟀다)', async () => {
+    await renderWithSheet([
+      { name: '자막 표시', verdict: 'pass' },
+      { name: '워터마크 위치', verdict: 'n_a' },
+    ]);
+    const text = findRowSummary().textContent ?? '';
+    expect(text).toContain('통과 1');
+    expect(text).toContain('해당 없음 1');
+    expect(text).not.toContain('모두 통과');
+  });
+
+  it('펼침 표 — 비고가 하나도 없으면 비고 열 자체가 없다', async () => {
+    await renderWithSheet([{ name: '자막 표시', verdict: 'pass' }, { name: '길이 15초 이내', verdict: 'fail' }]);
+    await act(async () => { findRowSummary().click(); });
+    const table = container.querySelector('[data-testid="evidence-verification-sheet-table"]') as HTMLTableElement;
+    expect(table).not.toBeNull();
+    expect(table.querySelectorAll('thead th').length).toBe(2);
+    expect(table.textContent).not.toContain('비고');
+  });
+
+  it('펼침 표 — 하나라도 비고가 있으면 비고 열이 생기고, 없는 행은 빈 칸(지어내지 않는다)', async () => {
+    await renderWithSheet([
+      { name: '자막 표시', verdict: 'pass', note: '2회 재검' },
+      { name: '길이 15초 이내', verdict: 'fail' },
+    ]);
+    await act(async () => { findRowSummary().click(); });
+    const table = container.querySelector('[data-testid="evidence-verification-sheet-table"]') as HTMLTableElement;
+    expect(table.querySelectorAll('thead th').length).toBe(3);
+    expect(table.textContent).toContain('2회 재검');
+  });
+
+  it('판정 낱말 — fail만 destructive, pass/n_a는 muted가 아니라 foreground', async () => {
+    await renderWithSheet([
+      { name: 'A', verdict: 'pass' },
+      { name: 'B', verdict: 'fail' },
+      { name: 'C', verdict: 'n_a' },
+    ]);
+    await act(async () => { findRowSummary().click(); });
+    const table = container.querySelector('[data-testid="evidence-verification-sheet-table"]') as HTMLTableElement;
+    const verdictCells = Array.from(table.querySelectorAll('tbody tr')).map((tr) => tr.children[1]);
+    expect(verdictCells[0]?.querySelector('span')?.className).toBe('text-foreground');
+    expect(verdictCells[1]?.querySelector('span')?.className).toBe('text-destructive');
+    expect(verdictCells[2]?.querySelector('span')?.className).toBe('text-foreground');
+    // muted 금지(유나 §17-24 대비 규율) — 어느 판정 칸에도 muted 클래스가 없다.
+    expect(table.innerHTML).not.toContain('text-muted-foreground"><span');
+    expect(verdictCells[2]?.textContent).toBe('해당 없음'); // 새 낱말 0 — 재사용 확認
+  });
+
+  it('타입 배지가 일반 「리포트」가 아니라 「검증 시트」다', async () => {
+    await renderWithSheet([{ name: 'A', verdict: 'pass' }]);
+    expect(findRowSummary().parentElement?.textContent).toContain('검증 시트');
+    expect(findRowSummary().parentElement?.textContent).not.toContain('리포트');
+  });
+});

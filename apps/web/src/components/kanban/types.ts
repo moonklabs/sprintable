@@ -126,6 +126,14 @@ export interface GateItem {
   // 승인 뒤 편집으로 pending 재오픈된 게이트인지(사람이 처음 상신한 pending과 구분) — S4가
   // "재승인 필요" 배지·재상신 대기 카드를 그릴 신호. 다른 gate_type은 항상 false.
   reapproval_required?: boolean;
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — sealed_content_*와
+  // 동형이나 대상이 doc이다(external_publish=본문 텍스트 봉인·concept_approval=doc
+  // 봉인). BE additive(story #3569, GateResponse list/detail 공용) — 그 전까진
+  // 항상 undefined. sealed_doc_title은 "봉인 당시" 제목이 아니라 "지금" 제목(본문
+  // sha만 봉인, 제목은 표시용) — 다른 gate_type은 전부 undefined/null.
+  sealed_doc_id?: string | null;
+  sealed_doc_body_sha256?: string | null;
+  sealed_doc_title?: string | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE

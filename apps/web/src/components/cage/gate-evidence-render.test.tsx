@@ -441,6 +441,41 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedHashLabel);
   });
 
+  // story #3560(concept_approval 봉인 doc, 페드루 PO 確定 2026-09-06) — sealed_content_*와
+  // 동형이나 대상이 doc. contentBody(전문 펼침)와 달리 doc 링크만(제목=글자·해시 앞 12자).
+  it('⭐concept_approval 봉인 doc — 제목이 클릭 가능한 링크로, 해시 앞 12자가 나란히 뜬다(전체 해시는 아님)', async () => {
+    const gate = recipeApprovalGate(
+      {},
+      {
+        gate_type: 'concept_approval',
+        sealed_doc_id: '44444444-4444-4444-4444-444444444444',
+        sealed_doc_title: '9월 릴스 컨셉안',
+        sealed_doc_body_sha256: 'abcdef0123456789fedcba9876543210',
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('9월 릴스 컨셉안');
+    expect(container.textContent).toContain('abcdef012345');
+    expect(container.textContent).not.toContain('abcdef0123456789fedcba9876543210');
+    // EntityChip(draftDocRef와 같은 관례) — 클릭 가능한 요소로 그려졌는지(raw href는
+    // 아니다, chat/embed-card.tsx::EntityChip이 모달/패널을 여는 인터랙션 칩이다).
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBeGreaterThan(0);
+  });
+
+  it('concept_approval 봉인 doc — sealed_doc_id가 없으면(BE additive 착지 前) 해시 배지 자체가 안 뜬다(지어내지 않음)', async () => {
+    const gate = recipeApprovalGate({ channel: 'hosted_site' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedHashLabel);
+  });
+
   it('AC4 회귀 0 재확認 — content_version=0(falsy이지만 유효한 버전 번호)도 정확히 렌더된다', async () => {
     const gate = recipeApprovalGate(
       { channel: 'hosted_site' },

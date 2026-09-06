@@ -35,6 +35,7 @@ import { initials, formatDate } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { ConceptCardSection } from '@/components/kanban/concept-card-section';
 import { RejectedRelationsSection } from '@/components/shared/rejected-relations-section';
 import { StoryOriginSection } from '@/components/shared/story-origin-section';
 import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
@@ -1579,6 +1580,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
                 — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
             <StoryOriginSection storyId={story.id} />
+
+            {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
+                가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
+                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다. */}
+            <ConceptCardSection workItemId={story.id} />
 
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}

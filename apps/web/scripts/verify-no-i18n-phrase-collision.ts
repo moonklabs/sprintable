@@ -353,6 +353,14 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 지시 자체가 이 부분문자열 포함을 요구한다(docs.title<->docs.indexDocCount류
   // 정상 패턴).
   'content.channelPostsImageUploading <-> content.channelPostsVideoUploading',
+  // story #3560(제작 작업대 검증 시트, 페드루 PO 승인 2026-09-06) —
+  // verify.verificationSheetSummaryAllPass("{total}항목 모두 통과", 접힘 요약) <->
+  // verify.verificationSheetColumnName("항목", 펼침 표 컬럼 헤더) — 같은 검증 시트
+  // 행 안에서 동시에 뜬다. 같은 낱말=같은 뜻(검증 «항목») — 요약 문장이 열 제목
+  // 낱말을 그대로 품는 것은 두 문장이 한 세계를 말하는 정상 패턴(docs.title<->
+  // docs.indexDocCount류)이지 #2352/#2365가 잡으려는 "다른 두 셈이 헷갈리는" 병이
+  // 아니다. 유나 §17-24 원문 확定값 — 재작명 대상 아님.
+  'verify.verificationSheetColumnName <-> verify.verificationSheetSummaryAllPass',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

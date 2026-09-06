@@ -29,6 +29,18 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
     expect(result.kind).toBe('permission');
   });
 
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — KNOWN_ERRORS 등재로
+  // kind가 'concept_not_approved'로 정확히 분류되는지(labelKey는 일부러 비움 — 서버
+  // message 그대로. 등재 자체를 지우면 kind가 'unknown'으로 떨어져 이 테스트가 RED).
+  test('⭐알려진 코드(CONCEPT_NOT_APPROVED) — kind가 정확히 분류되고 labelKey는 비어(서버 message 그대로)', () => {
+    const result = parseSitePostApiError({
+      detail: { code: 'CONCEPT_NOT_APPROVED', message: '컨셉 문서가 아직 결재되지 않았습니다.' },
+    });
+    expect(result.kind).toBe('concept_not_approved');
+    expect(result.humanMessageKey).toBeUndefined();
+    expect(result.humanMessageFallback).toBe('컨셉 문서가 아직 결재되지 않았습니다.');
+  });
+
   test('⭐모르는 코드 — 지어낸 문구로 덮지 않고 서버 원문 메시지를 그대로 fallback에 담는다', () => {
     const result = parseSitePostApiError({ detail: { code: 'SOME_FUTURE_S2_CODE', message: '아직 모르는 에러' } });
     expect(result.humanMessageKey).toBeUndefined();

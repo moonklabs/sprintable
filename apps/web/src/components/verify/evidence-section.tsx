@@ -9,7 +9,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
-import { deriveTrustStage, type EvidenceItem, type EvidenceType } from '@/services/verify';
+import { deriveTrustStage, asVerificationSheet, type EvidenceItem, type EvidenceType, type VerificationSheetItem } from '@/services/verify';
 import {
   adaptArtifactDetail, getArtifactVersionDetail,
   type ArtifactFormat, type BeArtifactVersionSummary,
@@ -48,6 +48,95 @@ export function isLinkableRef(ref: string): boolean {
   return /^https?:\/\//i.test(ref);
 }
 
+// story #3560(제작 작업대 검증 시트, 유나 §17-24 확定 2026-09-06) — 「A → B」류
+// 화살표가 아니라 접힘+요약 한 줄부터. 실패 있으면 실패 수를 앞세우고(무엇이
+// 급한지 먼저), 실패 0이면 「해당 없음」 섞임 여부로 「모두 통과」를 말할 수
+// 있는지를 가른다(섞이면 "모두 통과"라고 말할 자격이 없다 — 일부는 안 쟀다).
+function verificationSheetSummary(
+  items: VerificationSheetItem[],
+  t: (key: string, values?: Record<string, string | number>) => string,
+  naLabel: string,
+): string {
+  const total = items.length;
+  const fail = items.filter((i) => i.verdict === 'fail').length;
+  const na = items.filter((i) => i.verdict === 'n_a').length;
+  const pass = items.filter((i) => i.verdict === 'pass').length;
+  if (fail > 0) return t('verificationSheetSummaryWithFail', { fail, total });
+  if (na > 0) return t('verificationSheetSummaryWithNa', { pass, na, naLabel });
+  return t('verificationSheetSummaryAllPass', { total });
+}
+
+// story #3560 — 「해당 없음」은 새 낱말을 짓지 않고 insightsBoardCommentsNotApplicable을
+// 그대로 재사용한다(PO 確定 2026-09-06) — 요약 줄과 표의 n_a 판정 낱말 둘 다.
+const VERDICT_LABEL_KEY: Partial<Record<VerificationSheetItem['verdict'], string>> = {
+  pass: 'verificationSheetVerdictPass',
+  fail: 'verificationSheetVerdictFail',
+};
+
+// 유나 §17-24 대비 규율(2026-09-06) — 판정 낱말은 muted 금지(작은 글자×muted×
+// bg-muted 조합 실측 최저 4.77 — 이 표는 muted 배경 위가 아니지만 규율은 표
+// 전체에 건다), fail만 destructive(색은 낱말 뒤에 덧붙는 것 — 낱말이 먼저).
+function VerificationSheetVerdict({
+  verdict, t, naLabel,
+}: { verdict: VerificationSheetItem['verdict']; t: (key: string) => string; naLabel: string }) {
+  return (
+    <span className={verdict === 'fail' ? 'text-destructive' : 'text-foreground'}>
+      {verdict === 'n_a' ? naLabel : t(VERDICT_LABEL_KEY[verdict]!)}
+    </span>
+  );
+}
+
+function VerificationSheetRow({
+  item, t, naLabel,
+}: {
+  item: EvidenceItem; t: (key: string, values?: Record<string, string | number>) => string; naLabel: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const items = asVerificationSheet(item.payload) ?? [];
+  const hasNoteColumn = items.some((i) => i.note);
+  return (
+    <li className="rounded-md px-1.5 py-1 hover:bg-muted/40">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 text-left"
+        data-testid="evidence-verification-sheet-summary"
+      >
+        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+          {verificationSheetSummary(items, t, naLabel)}
+        </span>
+        <span className="shrink-0 text-[10px] font-semibold text-muted-foreground">
+          {t('verificationSheetTypeLabel')}
+        </span>
+        {expanded ? <ChevronUp className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
+      </button>
+      {expanded ? (
+        // 대비: 표 글자는 text-xs 아래로 내려가지 않는다(§17-24) — 이 파일 다른
+        // evidence 행이 쓰는 text-[10px]/text-[11px]류를 여기선 안 쓴다.
+        <table className="mt-1.5 w-full text-xs" data-testid="evidence-verification-sheet-table">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="pb-1 pr-2 font-medium">{t('verificationSheetColumnName')}</th>
+              <th className="pb-1 pr-2 font-medium">{t('verificationSheetColumnVerdict')}</th>
+              {hasNoteColumn ? <th className="pb-1 font-medium">{t('verificationSheetColumnNote')}</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((row, i) => (
+              <tr key={`${row.name}-${i}`} className="align-top">
+                <td className="py-0.5 pr-2 text-foreground">{row.name}</td>
+                <td className="py-0.5 pr-2"><VerificationSheetVerdict verdict={row.verdict} t={t} naLabel={naLabel} /></td>
+                {hasNoteColumn ? <td className="py-0.5 text-foreground">{row.note ?? ''}</td> : null}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </li>
+  );
+}
+
 interface EvidenceSectionProps {
   workItemId: string;
   workItemType: 'story' | 'task';
@@ -76,6 +165,10 @@ export function EvidenceSection({
 }: EvidenceSectionProps) {
   const t = useTranslations('verify');
   const tCommon = useTranslations('common');
+  // story #3560(PO 確定 2026-09-06) — 「해당 없음」 재사용(insightsBoard 네임스페이스,
+  // 새 낱말 0).
+  const tInsights = useTranslations('insightsBoard');
+  const naLabel = tInsights('insightsBoardCommentsNotApplicable');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [expanded, setExpanded] = useState(false);
@@ -231,6 +324,12 @@ export function EvidenceSection({
                 ) : null}
                 <ul className="space-y-1">
                   {(visibleItems ?? []).map((item) => {
+                    // story #3560(제작 작업대 검증 시트, PO 確定 2026-09-06) — 다른
+                    // kind는 기존 그대로(§17-24 "이 kind만" 원칙), verification_sheet
+                    // 만 접힘 요약+펼침 표 전용 행으로 갈린다.
+                    if (item.type === 'report' && asVerificationSheet(item.payload)) {
+                      return <VerificationSheetRow key={item.id} item={item} t={t} naLabel={naLabel} />;
+                    }
                     const Icon = TYPE_ICON[item.type] ?? Link2;
                     const linkable = isLinkableRef(item.ref);
                     const primaryText = item.note || item.ref;
