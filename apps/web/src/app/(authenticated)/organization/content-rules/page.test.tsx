@@ -542,7 +542,10 @@ describe('ContentRulesPage — 채널 우선순위 정렬(story #3472)', () => {
     const list = container.querySelector('[data-testid="content-rules-channel-priority-list"]')!;
     expect(list.textContent).toMatch(/1\. threads[\s\S]*2\. wordpress/);
 
-    const downBtn = Array.from(list.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === 'Move threads down') as HTMLButtonElement;
+    // story #3557(유나 確定) — 하드코딩 영문(`Move ${item} down`)이 한국어 화면에서도
+    // 영어로 읽히던 것을 i18n 키(moveItemDownAction)로 고쳤다 — 이 화면 기본 로케일(ko)
+    // 기준 실제 값으로 pin.
+    const downBtn = Array.from(list.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === 'threads 아래로 이동') as HTMLButtonElement;
     await act(async () => { downBtn.click(); });
     await flush();
     expect(list.textContent).toMatch(/1\. wordpress[\s\S]*2\. threads/);
