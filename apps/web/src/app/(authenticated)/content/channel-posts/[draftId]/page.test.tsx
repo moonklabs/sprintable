@@ -508,13 +508,16 @@ function stubFetch(opts: {
 function stubXhrForVideoUpload(opts: { status?: number; progressTicks?: number[] } = {}) {
   const progressTicks = opts.progressTicks ?? [50, 100];
   const status = opts.status ?? 200;
+  // story #3577 — setRequestHeader 호출을 기록해 「Content-Type 정확히 1회·정확한
+  // 값」을 pin할 수 있게(호출부/함수 둘 다 세팅하면 중복 호출로 드러난다).
+  const setHeaderCalls: [string, string][] = [];
   class FakeXHR {
     upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = { onprogress: null };
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
     status = 0;
     open(_method: string, _url: string) {}
-    setRequestHeader(_k: string, _v: string) {}
+    setRequestHeader(k: string, v: string) { setHeaderCalls.push([k, v]); }
     send(_body: unknown) {
       for (const pct of progressTicks) this.upload.onprogress?.({ lengthComputable: true, loaded: pct, total: 100 });
       this.status = status;
@@ -522,6 +525,7 @@ function stubXhrForVideoUpload(opts: { status?: number; progressTicks?: number[]
     }
   }
   vi.stubGlobal('XMLHttpRequest', FakeXHR);
+  return { setHeaderCalls };
 }
 
 describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
@@ -3807,6 +3811,54 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     expect(container.querySelector('[data-testid="channel-post-image-attach"] span')?.textContent).toBe('커버');
     expect(container.querySelector('[data-testid="channel-post-image-attach-trigger"]')?.textContent).toBe('커버 선택');
     expect(container.querySelector('[data-testid="channel-post-video-attach-trigger"]')?.textContent).toBe('영상 교체');
+  });
+
+  // story #3577(유나 헤더 실측·페드루 PO 지적 2026-09-06) — putVideoWithProgress
+  // 내부(구 :1133)와 호출부(:1173)가 둘 다 Content-Type을 세팅해 XHR이
+  // setRequestHeader를 같은 헤더 이름으로 두 번 불러 "video/mp4, video/mp4"로
+  // 이어붙는 결함(GCS V4 서명 불일치 → PUT 403, dev 영상 첨부 100% 실패).
+  it('⭐PUT 요청 — Content-Type이 정확히 1회, required_put_headers 없으면 file.type으로 세팅된다', async () => {
+    const { setHeaderCalls } = stubXhrForVideoUpload();
+    stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const contentTypeCalls = setHeaderCalls.filter(([k]) => k.toLowerCase() === 'content-type');
+    expect(contentTypeCalls.length).toBe(1);
+    expect(contentTypeCalls[0][1]).toBe('video/mp4');
+  });
+
+  it('⭐PUT 요청 — required_put_headers가 Content-Type을 정하면(BE 정본) 그 값이 이기고 여전히 1회뿐이다', async () => {
+    const { setHeaderCalls } = stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1,
+      onVideoUploadUrl: () => ({
+        status: 200,
+        body: {
+          upload_url: 'https://storage.example/video-put', object_path: 'channel-media/o/d1/x.mp4',
+          expires_at: '2026-09-06T12:10:00Z', max_bytes: 104857600,
+          required_put_headers: { 'Content-Type': 'video/mp4; codecs=avc1' },
+        },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const contentTypeCalls = setHeaderCalls.filter(([k]) => k.toLowerCase() === 'content-type');
+    expect(contentTypeCalls.length).toBe(1);
+    expect(contentTypeCalls[0][1]).toBe('video/mp4; codecs=avc1');
   });
 
   it('메타 한 줄 — 소수 첫째 자리·0이면 생략(trimTrailingZero 형, 13.0초 → "13초")', async () => {
