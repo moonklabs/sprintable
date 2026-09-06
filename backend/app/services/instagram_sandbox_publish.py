@@ -25,6 +25,12 @@ from app.services.threads_publish import ThreadsPublishError
 _MARKER_429 = "[sandbox:429]"
 _MARKER_PROVIDER_ERROR = "[sandbox:provider-error]"
 _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
+# story #3554(Phase2, 페드루 PO 確定 2026-09-06⑤) — 릴스 전용 마커 2종. "processing-
+# failed"는 Meta 쪽 비동기 영상 처리 실패(코덱은 통과했지만 인코딩 파이프라인
+# 자체가 거부하는 케이스, 예: 손상된 프레임)를 흉내낸다 — 서버 업로드 시점 파서
+# 검증(codec-rejected와 다른 축)과 구분해 둔다.
+_MARKER_REELS_PROCESSING_FAILED = "[sandbox:reels-processing-failed]"
+_MARKER_REELS_CODEC_REJECTED = "[sandbox:reels-codec-rejected]"
 
 
 async def create_container(
@@ -76,6 +82,42 @@ async def create_carousel_container(
                 "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED", f"sandbox: {marker} 마커 시뮬레이션", status_code=502,
             )
     return f"sandbox-ig-carousel-{uuid.uuid4().hex}"
+
+
+async def create_reels_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
+    video_url: str | None, cover_url: str | None = None,
+) -> str:
+    """story #3554(Phase2, 페드루 PO 確定 2026-09-06④⑤) — instagram_publish.py::
+    create_reels_container와 동형 계약. `[sandbox:reels-processing-failed]`·
+    `[sandbox:reels-codec-rejected]` 마커로 Meta 쪽 비동기 처리 실패를 흉내낸다
+    (업로드 시점 파서 검증과 별개 축 — 여긴 "파서는 통과했지만 provider가 나중에
+    거부"하는 케이스)."""
+    if _MARKER_429 in text:
+        raise ThreadsPublishError("SANDBOX_INSTAGRAM_RATE_LIMITED", "sandbox: [sandbox:429] 마커 시뮬레이션", status_code=429)
+    if _MARKER_PROVIDER_ERROR in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_PROVIDER_ERROR", "sandbox: [sandbox:provider-error] 마커 시뮬레이션", status_code=502,
+        )
+    if _MARKER_EXPIRED_TOKEN in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
+        )
+    if _MARKER_REELS_PROCESSING_FAILED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_REELS_PROCESSING_FAILED",
+            "sandbox: [sandbox:reels-processing-failed] 마커 시뮬레이션", status_code=502,
+        )
+    if _MARKER_REELS_CODEC_REJECTED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_REELS_CODEC_REJECTED",
+            "sandbox: [sandbox:reels-codec-rejected] 마커 시뮬레이션", status_code=422,
+        )
+    if video_url is None:
+        raise ThreadsPublishError(
+            "INSTAGRAM_REELS_VIDEO_REQUIRED", "릴스 발행은 영상이 필수입니다", status_code=422,
+        )
+    return f"sandbox-ig-reels-{uuid.uuid4().hex}"
 
 
 async def get_container_status(

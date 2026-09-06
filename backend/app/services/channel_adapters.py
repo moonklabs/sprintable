@@ -107,6 +107,20 @@ class ChannelAdapterConfig:
     # 등, TEXT-only 허용) 회귀 0. True면 submit(상신) 단계에서 이미지 0장을 즉시 422로
     # 막는다 — 승인 게이트를 낭비하고 발행 시점에야 죽는 것을 방지.
     image_required: bool = False
+    # story #3554(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06) — 릴스(영상) 규격
+    # 선언(image_*와 동형 관례: 0/빈값=이 채널은 영상 미지원). video_max_bytes<=0이면
+    # 영상 업로드 자체가 422 CHANNEL_VIDEO_UNSUPPORTED(image_max_count<=0과 동형
+    # 판단). video_codecs는 MP4 `stsd` 박스 fourcc(avc1=H.264·hvc1/hev1=HEVC) —
+    # 오디오 코덱은 순수 파이썬 파서로 미검증(PO 明示, 문구에 그대로 노출).
+    video_max_bytes: int = 0
+    video_max_seconds: float = 0.0
+    video_min_seconds: float = 0.0
+    # 9:16(세로) 목표비에서 허용 오차(±) — width/height 원시 비율로 판정(image_aspect_
+    # min/max와 다른 표현 형태인 이유: 릴스는 목표비 1개+오차뿐이라 상하한 2값보다
+    # "목표±오차"가 그라운딩·Meta 문서 그대로를 코드에 옮기기 쉬움).
+    video_aspect_target: float = 0.0
+    video_aspect_tolerance: float = 0.0
+    video_codecs: tuple[str, ...] = ()
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -201,6 +215,16 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 용량·해상도)은 장별로 그대로 각각 적용된다(channel_post_images.py의 검증이
         # 이미지 1건 처리라 여러 번 호출되는 구조, 새 루프 불요).
         image_max_count=10,
+        # story #3554(Phase2, 페드루 PO 確定 2026-09-06①) — Meta 문서 지식(⚠️미확認,
+        # 재확認 전 라이브 금지) — 릴스 3~90초·9:16(±5% 허용 오차)·MP4/MOV 컨테이너
+        # (H.264/HEVC만 파서로 검증, 오디오 코덱은 미검증 선언). 100MB는 Graph API
+        # 업로드 한도 문서값 그대로.
+        video_max_bytes=100 * 1024 * 1024,
+        video_max_seconds=90.0,
+        video_min_seconds=3.0,
+        video_aspect_target=9 / 16,
+        video_aspect_tolerance=0.05,
+        video_codecs=("avc1", "hvc1", "hev1"),
         supports_fetch_replies=True,
         supports_reply=True,
         reply_required_scope="instagram_business_manage_comments",
@@ -416,6 +440,14 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         # story #3550 — 위 instagram과 동형 정정(1→10, sandbox가 실 provider보다
         # 관대하면 안 된다는 기존 관례 그대로 같은 값 유지).
         image_max_count=10,
+        # story #3554 — 위 instagram과 동형(sandbox가 실 provider보다 관대하면 안
+        # 된다는 기존 관례 그대로 같은 값).
+        video_max_bytes=100 * 1024 * 1024,
+        video_max_seconds=90.0,
+        video_min_seconds=3.0,
+        video_aspect_target=9 / 16,
+        video_aspect_tolerance=0.05,
+        video_codecs=("avc1", "hvc1", "hev1"),
         # 페드루 PO REQUIRED(2026-09-06, #3874 리뷰) — 위 instagram과 동형 정정
         # (impressions 폐기, views로 대체).
         insight_metrics=("views", "reach", "engagements"),
