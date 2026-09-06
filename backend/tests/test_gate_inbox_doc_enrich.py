@@ -19,12 +19,15 @@ def anyio_backend():
 
 
 def _gate(org, work_item_id, wtype):
-    return SimpleNamespace(
+    # story #3569(페드루 PO 리뷰) — SimpleNamespace 대신 gate_mock_factory.make_gate()
+    # (story #2837 "건드릴 때 이관" 관례 — 실 Gate ORM 인스턴스라 sealed_doc_id 등 새 컬럼이
+    # 늘어도 AttributeError로 재발하지 않는다). work_item_summary는 Gate 모델 컬럼이 아니라
+    # GateResponse 쪽 enrich 산출물이라 여기서 세팅하지 않는다(make_gate 기본값과 무관).
+    from tests.gate_mock_factory import make_gate
+
+    return make_gate(
         id=uuid.uuid4(), org_id=org, work_item_id=work_item_id, work_item_type=wtype,
-        gate_type="doc_approval" if wtype == "doc" else "merge", status="pending",
-        resolver_id=None, resolved_at=None, resolution_note=None, held_until=None,
-        neutral_facts=None, requires_human=False, evidence_status=None,
-        decision_basis=None, auto_decision_reason=None, work_item_summary=None,
+        gate_type="doc_approval" if wtype == "doc" else "merge",
         created_at=datetime(2026, 6, 26, tzinfo=timezone.utc),
         updated_at=datetime(2026, 6, 26, tzinfo=timezone.utc),
     )

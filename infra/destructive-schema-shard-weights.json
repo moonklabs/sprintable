@@ -1386,6 +1386,11 @@
       "file": "tests/test_3574_video_requires_single_cover.py",
       "sec": 36.0,
       "source": "story-3574-video-requires-single-cover(PR 개설 前 선제 등재 — 로컬 raw pytest 6건 5.98s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 36s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3569_gate_sealed_doc_fields.py",
+      "sec": 27.0,
+      "source": "story-3569-gate-sealed-doc-fields(PR 개설 前 선제 등재 — 로컬 raw pytest 4건 4.43s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 27s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
