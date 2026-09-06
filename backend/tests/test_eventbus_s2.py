@@ -300,13 +300,18 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
                     assert resp.status_code == 200
                     body = resp.text
     finally:
-        app.dependency_overrides.clear()
-        _agent_connections.pop(member_id_str, None)
-        # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역이라
-        # 이 테스트가 set()한 채로 남으면 다음 lifespan startup 前까지(또는 lifespan을
-        # 안 타는 테스트라면 영영) 다른 테스트의 SSE 스트림까지 즉시 shutdown_reconnect로
-        # 오판시킨다 — 명시로 되돌린다.
-        shutdown_module.reset_shutdown_event()
+        # story #3580(페드루 PO 確定 2026-09-06, #3942 CI 실사고 근본원인) — 이
+        # reset을 finally 블록 맨 앞·독립 try로 둔다. 예전엔 dependency_overrides.
+        # clear()/_agent_connections.pop() 뒤(마지막)에 있었는데, 둘 중 하나라도
+        # 예외를 던지면 뒤에 있던 이 reset이 아예 안 돌아 다음 SSE 스트림 테스트를
+        # 오염시켰다(#3942 CI 원본 실측 — 피해자 테스트의 타임라인이 시작하자마자
+        # shutdown_reconnect, conftest.py::_guard_global_shutdown_event_leak이
+        # 이제 이런 누락을 그 자리에서 FAIL로 잡아낸다).
+        try:
+            shutdown_module.reset_shutdown_event()
+        finally:
+            app.dependency_overrides.clear()
+            _agent_connections.pop(member_id_str, None)
 
     _timeline = observer.timeline(t0)
     assert registered_observed, f"injector never observed the connection in _agent_connections — timeline: {_timeline}"
@@ -534,13 +539,18 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
                     assert resp.status_code == 200
                     body = resp.text
     finally:
-        app.dependency_overrides.clear()
-        _agent_connections.pop(member_id_str, None)
-        # story #3494(PO REQUIRED, 2026-09-05) — shutdown_event는 프로세스 전역이라
-        # 이 테스트가 set()한 채로 남으면 다음 lifespan startup 前까지(또는 lifespan을
-        # 안 타는 테스트라면 영영) 다른 테스트의 SSE 스트림까지 즉시 shutdown_reconnect로
-        # 오판시킨다 — 명시로 되돌린다.
-        shutdown_module.reset_shutdown_event()
+        # story #3580(페드루 PO 確定 2026-09-06, #3942 CI 실사고 근본원인) — 이
+        # reset을 finally 블록 맨 앞·독립 try로 둔다. 예전엔 dependency_overrides.
+        # clear()/_agent_connections.pop() 뒤(마지막)에 있었는데, 둘 중 하나라도
+        # 예외를 던지면 뒤에 있던 이 reset이 아예 안 돌아 다음 SSE 스트림 테스트를
+        # 오염시켰다(#3942 CI 원본 실측 — 피해자 테스트의 타임라인이 시작하자마자
+        # shutdown_reconnect, conftest.py::_guard_global_shutdown_event_leak이
+        # 이제 이런 누락을 그 자리에서 FAIL로 잡아낸다).
+        try:
+            shutdown_module.reset_shutdown_event()
+        finally:
+            app.dependency_overrides.clear()
+            _agent_connections.pop(member_id_str, None)
 
     _timeline = observer.timeline(t0)
     assert registered_observed, f"injector never observed the connection in _agent_connections — timeline: {_timeline}"
