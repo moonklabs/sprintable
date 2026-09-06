@@ -121,7 +121,7 @@ async def _seed_human(session, org_id, project_id, *, role="owner"):
 
 
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
-    """페드루 리뷰 B1 — test_3373_channel_connections.py::_seed_agent와 동형."""
+    """페드루 리뷰 B1 — test_3373_channel_connections_auth.py::_seed_agent와 동형."""
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
@@ -350,7 +350,7 @@ async def test_create_sandbox_connection_as_agent_returns_403():
     """페드루 리뷰 B1 — 샌드박스 연결은 "OAuth 없이 agent-callable"이 아니다. 실제로는
     `_require_owner_or_admin`이 `_require_human`을 거치므로(channel_connections.py:76,51)
     에이전트 키는 사람과 똑같이 403(CHANNEL_CONNECTION_HUMAN_ONLY) — 실 OAuth 연결
-    (test_3373_channel_connections.py::test_agent_gets_403_on_every_endpoint)과 동일
+    (test_3373_channel_connections_auth.py::test_agent_gets_403_on_every_endpoint)과 동일
     가드가 이 신규 endpoint에도 그대로 적용됨을 고정."""
     from app.main import app
 

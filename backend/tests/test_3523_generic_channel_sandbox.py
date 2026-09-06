@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from tests.test_3373_channel_connections import (
+from tests.test_3373_channel_connections_auth import (
     _seed_agent, _seed_human, _seed_org, _session_factory, _client_for, _setup_org_scoped_app,
 )
 

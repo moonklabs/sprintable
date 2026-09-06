@@ -3,9 +3,19 @@
   "measured_at": "2026-09-06",
   "files": [
     {
-      "file": "tests/test_3373_channel_connections.py",
-      "sec": 39.0,
-      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
+      "file": "tests/test_3373_channel_connections_auth.py",
+      "sec": 16.0,
+      "source": "story-3579-split-3373-channel-connections(2026-09-06, 원본 test_3373_channel_connections.py 31건·등재 39.0s를 3-way 분할 후 테스트 개수 비중(auth 13/31 ≈ 42%)으로 배분한 잠정값 — 원본이 러너 정규화 60초 가드 경계대역(36~77s 관측)이었던 것을 각 파일 ≤25s 목표로 분리, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3373_channel_connections_app_credentials.py",
+      "sec": 18.0,
+      "source": "story-3579-split-3373-channel-connections(2026-09-06, 원본 31건·등재 39.0s를 3-way 분할 후 테스트 개수 비중(app_credentials 14/31 ≈ 45%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3373_channel_connections_pkce.py",
+      "sec": 5.0,
+      "source": "story-3579-split-3373-channel-connections(2026-09-06, 원본 31건·등재 39.0s를 3-way 분할 후 테스트 개수 비중(pkce 4/31 ≈ 13%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3317_org_connector_registry.py",
@@ -1173,9 +1183,19 @@
       "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
     },
     {
-      "file": "tests/test_620beefc_channel_post_image.py",
-      "sec": 48.0,
-      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
+      "file": "tests/test_620beefc_channel_post_image_upload.py",
+      "sec": 21.0,
+      "source": "story-3579-split-620beefc-channel-post-image(2026-09-06, 원본 test_620beefc_channel_post_image.py 25건·등재 48.0s를 3-way 분할 후 로컬 raw pytest 비중(upload 11건 8.09s/총 19.86s ≈ 44%)으로 배분한 잠정값 — 원본이 러너 정규화 60초 가드 경계대역(48~57s, PR #3925/#3926에서 174s/141s까지 관측)이었던 것을 각 파일 ≤30s 목표로 분리, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_620beefc_channel_post_image_lifecycle.py",
+      "sec": 19.0,
+      "source": "story-3579-split-620beefc-channel-post-image(2026-09-06, 원본 25건·등재 48.0s를 3-way 분할 후 로컬 raw pytest 비중(lifecycle 10건 7.79s/총 19.86s ≈ 39%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_620beefc_channel_post_image_regression.py",
+      "sec": 8.0,
+      "source": "story-3579-split-620beefc-channel-post-image(2026-09-06, 원본 25건·등재 48.0s를 3-way 분할 후 로컬 raw pytest 비중(regression 4건 3.98s/총 19.86s ≈ 20%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3536_channel_image_required.py",

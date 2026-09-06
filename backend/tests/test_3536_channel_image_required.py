@@ -4,7 +4,7 @@
 `classify_failure_kind`가 needs_check(재시도 0·dead_letter)로 보내게 한다(기존
 transient «기다리면 됨» 오분류 정정).
 
-세팅 헬퍼는 test_620beefc_channel_post_image.py와 동형(중복 재발명 금지)."""
+세팅 헬퍼는 test_620beefc_channel_post_image_upload.py와 동형(중복 재발명 금지)."""
 from __future__ import annotations
 
 import os
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tests.test_620beefc_channel_post_image import (
+from tests.test_620beefc_channel_post_image_upload import (
     _approve_gate_directly, _client_for, _create_draft, _png_bytes, _seed_connection,
     _seed_default_role, _seed_human, _seed_org, _seed_story, _session_factory,
     _setup_org_scoped_app, _upload_and_confirm,
@@ -55,11 +55,11 @@ def _configure_secrets(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _local_channel_media_storage_for_image_upload(monkeypatch, tmp_path):
-    """test_620beefc_channel_post_image.py와 동형(중복 재발명 금지) — 버킷 이름은
+    """test_620beefc_channel_post_image_upload.py와 동형(중복 재발명 금지) — 버킷 이름은
     반드시 그 파일의 `_CHANNEL_MEDIA_BUCKET`과 같아야 한다(다르면 PUT과 confirm이
     서로 다른 버킷을 봐서 404가 난다, test_3320_instagram_connector.py와 동일 관례)."""
     import app.services.channel_post_images as cpi_module
-    from tests.test_620beefc_channel_post_image import _CHANNEL_MEDIA_BUCKET
+    from tests.test_620beefc_channel_post_image_upload import _CHANNEL_MEDIA_BUCKET
 
     monkeypatch.setenv("STORAGE_PROVIDER", "local")
     monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path / ".storage-3536"))

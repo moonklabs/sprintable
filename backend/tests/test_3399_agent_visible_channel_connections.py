@@ -6,7 +6,7 @@
 status)만, 토큰·token_expires_at·last_error·connected_by는 절대 안 싣는다.
 
 기존 human-only 엔드포인트(`GET .../channel-connections`)는 그대로 유지한다 — 이
-파일은 그 회귀를 재검증하지 않는다(test_3373_channel_connections.py::
+파일은 그 회귀를 재검증하지 않는다(test_3373_channel_connections_auth.py::
 test_agent_gets_403_on_every_endpoint가 이미 pin)."""
 from __future__ import annotations
 

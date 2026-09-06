@@ -48,7 +48,7 @@ async def _dispose_global_engine_after_test():
 
 @pytest.fixture(autouse=True)
 def _configure_secrets(monkeypatch):
-    """test_3373_channel_connections.py와 동형 패턴 — crypto 시크릿을 매 테스트 새로."""
+    """test_3373_channel_connections_auth.py와 동형 패턴 — crypto 시크릿을 매 테스트 새로."""
     import importlib
     from cryptography.fernet import Fernet
 
