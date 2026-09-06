@@ -15,7 +15,9 @@ name = "sprintable"
 # 영구 고정이라 이 캡을 벗는 유일한 길. private 내부 결합 3곳(fn_metadata.arg_model 조작·
 # _tool_manager 재조회·list_tools 구성시점 바인딩) 전부 2.0.0 실 소스 대조로 등가 확認(스파이크,
 # 순수 rename+import경로 포팅 — 재설계 아님).
-version = "0.2.0"
+# 0.2.1 (2026-09-06, story #3585): sprintable_add_evidence에 payload additive — REST가 이미
+# 받는 구조화 페이로드(예: 검증 시트)가 MCP엔 없어 고객 에이전트가 못 만들던 갭 처방.
+version = "0.2.1"
 description = "Sprintable MCP server — BYO agent toolset over the Sprintable API (stdio). No repo clone required."
 readme = "README.md"
 requires-python = ">=3.11"
