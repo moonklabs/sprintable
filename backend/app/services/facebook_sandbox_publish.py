@@ -22,6 +22,12 @@ _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
 # SANDBOX_FACEBOOK_* 관례를 따른다).
 _MARKER_REELS_PROCESSING_FAILED = "[sandbox:reels-processing-failed]"
 _MARKER_REELS_CODEC_REJECTED = "[sandbox:reels-codec-rejected]"
+# story #3597(Phase2·BE, 페드루 PO 確定 2026-09-06) — instagram_sandbox_publish.py
+# 와 같은 마커 문자열(새 마커 어휘 0) — 「발행 뒤 만료」. create_container가 이미
+# 최종 media_id를 낸다는 이 파일의 계약(publish_container가 그대로 되돌림)이라
+# 접미사를 여기서 바로 붙인다(별도 전달 단계 불필요, instagram과 유일한 차이).
+_MARKER_EXPIRE_AFTER_PUBLISH = "[sandbox:expire-after-publish]"
+_EXPIRE_AFTER_PUBLISH_SUFFIX = "-expireafterpublish"
 
 
 async def create_container(
@@ -38,6 +44,8 @@ async def create_container(
         raise ThreadsPublishError(
             "SANDBOX_FACEBOOK_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
         )
+    if _MARKER_EXPIRE_AFTER_PUBLISH in text:
+        return f"sandbox-fb-post-{uuid.uuid4().hex}{_EXPIRE_AFTER_PUBLISH_SUFFIX}"
     return f"sandbox-fb-post-{uuid.uuid4().hex}"
 
 
@@ -149,7 +157,15 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
 
 async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
     """instagram_sandbox_publish.py::fetch_replies와 동형 — media_id 하나엔 항상
-    같은 2건(순서 고정), complete=True 고정(페이지네이션 개념 없음)."""
+    같은 2건(순서 고정), complete=True 고정(페이지네이션 개념 없음).
+
+    story #3597 — media_id가 `_EXPIRE_AFTER_PUBLISH_SUFFIX`를 달고 있으면 401을
+    던진다(instagram_sandbox_publish.py::fetch_replies와 동형)."""
+    if media_id.endswith(_EXPIRE_AFTER_PUBLISH_SUFFIX):
+        raise ThreadsPublishError(
+            "SANDBOX_FACEBOOK_TOKEN_EXPIRED",
+            "sandbox: [sandbox:expire-after-publish] 마커 시뮬레이션(발행 후 토큰 만료)", status_code=401,
+        )
     return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
 
 
