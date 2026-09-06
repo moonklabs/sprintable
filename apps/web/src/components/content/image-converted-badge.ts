@@ -21,13 +21,17 @@ export function formatImageConvertedBadge(
       from: values.originalWidth, to: values.finalWidth,
     }));
   }
-  if (
-    values.originalBytes !== null && values.finalBytes !== null
-    && values.originalBytes !== values.finalBytes
-  ) {
-    fragments.push(t('channelPostsImageConvertedBadgeBytesFragment', {
-      from: formatFileSize(values.originalBytes), to: formatFileSize(values.finalBytes),
-    }));
+  if (values.originalBytes !== null && values.finalBytes !== null) {
+    // 유나 Design 조건 1(2026-09-06) — 판정을 원시 바이트로 하면 10,300B와
+    // 10,340B처럼 다른 값이 `formatFileSize` 뒤 같은 문자열("10.1 KB")로
+    // 반올림돼 "용량 10.1 KB → 10.1 KB"가 그대로 뜬다(너비와 같은 병 — §13-3-1
+    // "A → B는 두 값이 다르다는 약속"). 화면에 실제로 «보이는 문자열» 기준으로
+    // 판정한다(너비는 정수 그대로라 이 문제가 없다 — 현행 유지).
+    const from = formatFileSize(values.originalBytes);
+    const to = formatFileSize(values.finalBytes);
+    if (from !== to) {
+      fragments.push(t('channelPostsImageConvertedBadgeBytesFragment', { from, to }));
+    }
   }
   return fragments.length > 0 ? `${base}: ${fragments.join(' · ')}` : `${base}.`;
 }

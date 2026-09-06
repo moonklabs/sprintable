@@ -111,6 +111,20 @@ describe('ImageAttachmentList(story #3550)', () => {
     expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다.');
   });
 
+  // 유나 Design 조건 1(2026-09-06, #3919 리뷰) — 판정을 원시 바이트로 하면
+  // 10,300B/10,340B처럼 다른 값이 formatFileSize 뒤 같은 문자열("10.1 KB")로
+  // 반올림돼 「용량 10.1 KB → 10.1 KB」가 그대로 뜬다(너비와 같은 병).
+  it('⭐용량이 바뀌어도 표시 문자열이 같으면(10300B→10340B, 둘 다 "10.1 KB") 용량 조각 없음', async () => {
+    const img: ImageAttachmentItem = {
+      url: 'https://storage.googleapis.com/x/round.jpg', wasConverted: true,
+      originalWidth: 1080, finalWidth: 1080, originalBytes: 10_300, finalBytes: 10_340,
+    };
+    await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
+    const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다.');
+    expect(badge).not.toContain('10.1 KB → 10.1 KB');
+  });
+
   it('첫 장은 위로 이동 비활성, 마지막 장은 아래로 이동 비활성', async () => {
     await act(async () => {
       root.render(wrap(
