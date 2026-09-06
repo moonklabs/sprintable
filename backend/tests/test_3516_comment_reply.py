@@ -578,7 +578,15 @@ async def test_api_create_draft_allows_agent_but_submit_rejects_agent():
 
 
 @pytest.mark.anyio
-async def test_insights_board_carries_three_comment_signal_fields():
+async def test_insights_board_carries_three_comment_signal_fields(monkeypatch):
+    """story #3594(테스트 위생, 페드루 PO 確定 2026-09-06) — 이 자리가 원래
+    `sandbox_publish.fetch_replies`를 pytest `monkeypatch` 없이 모듈 속성에
+    직접 대입했다(변수명만 `monkeypatch_target`, 실제 monkeypatch 기능은 0) —
+    이 프로세스에서 도는 «다음» 어떤 테스트든 실 sandbox_publish.fetch_replies
+    대신 이 고정 응답(댓글 1건 "c1")을 영구히 받게 됐다(자동 원복 0). #3945
+    회귀 실행 中 test_3516_comment_scope_and_runbook.py 3건이 이 잔존 때문에
+    엉뚱하게 실패하는 것을 실측(디디, 2026-09-06 14:57Z) — `monkeypatch.
+    setattr`로 바꾸면 pytest가 이 테스트 종료 즉시 원본으로 자동 복원한다."""
     from app.services.insights_board import list_insights_board
     from app.services.channel_post_comments import refresh_comments_now
     import app.services.sandbox_publish as sandbox_publish
@@ -606,8 +614,7 @@ async def test_insights_board_carries_three_comment_signal_fields():
             async def _fetch(client, *, access_token, media_id):
                 return [_fake_comment("c1")], True
 
-            monkeypatch_target = sandbox_publish
-            monkeypatch_target.fetch_replies = _fetch
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
             await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
 
             result = await list_insights_board(
