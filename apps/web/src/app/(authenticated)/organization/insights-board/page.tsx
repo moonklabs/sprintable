@@ -55,6 +55,10 @@ const METRIC_LABEL_KEYS: Record<BoardMetric, string> = {
   clicks: 'insightMetricClicks',
   spend: 'insightMetricSpend',
   conversions: 'insightMetricConversions',
+  // story #3583(페드루 PO 確定 2026-09-06) — GA4 유입 지표 2개(새 낱말 필요 — 5지표엔
+  // 없던 개념이라 재사용원이 없다).
+  inflow_sessions: 'insightMetricInflowSessions',
+  inflow_users: 'insightMetricInflowUsers',
 };
 
 // insight-snapshot-block.tsx(story #3499)의 STATUS_LABEL_KEYS와 동일 관례 — content

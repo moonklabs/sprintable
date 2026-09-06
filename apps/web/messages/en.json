@@ -2205,7 +2205,15 @@
     "measurementUtmAuto": "Attached using your organization's values (including utm_content).",
     "measurementUtmManual": "Attached using channel defaults. The link UTM check is on.",
     "measurementUtmOff": "Attached using channel defaults.",
-    "measurementUtmSettingsLink": "Change in content rules"
+    "measurementUtmSettingsLink": "Change in content rules",
+    "measurementGa4Label": "GA4 traffic",
+    "measurementGa4PropertySelectPlaceholder": "Select a property",
+    "measurementGa4PropertiesLoading": "Loading the property list…",
+    "measurementGa4PropertiesLoadFailed": "Couldn't load the property list.",
+    "measurementGa4NoProperties": "This account has no GA4 properties. Create one in Google Analytics, then reconnect.",
+    "measurementGa4ActionFailedWithStatus": "The request failed — the server responded with {status}.",
+    "measurementGa4ActionFailedNoResponse": "The request failed — couldn't reach the server. Check your connection and try again.",
+    "measurementGa4DisconnectEffect": "Disconnecting stops future traffic collection. Values collected so far are kept."
   },
   "content": {
     "title": "Content",
@@ -2390,6 +2398,8 @@
     "insightMetricClicks": "Clicks",
     "insightMetricSpend": "Spend",
     "insightMetricConversions": "Conversions",
+    "insightMetricInflowSessions": "Traffic sessions",
+    "insightMetricInflowUsers": "Traffic users",
     "insightMetricUnavailableDash": "—",
     "insightMetricUnavailableReason": "This channel doesn't provide this metric",
     "insightCapturedAtLabel": "Captured",
@@ -5219,6 +5229,7 @@
     "loadingMore": "Loading...",
     "insightsBoardBucketUnscheduled": "Not scheduled yet",
     "insightsBoardMetricUnavailable": "Metric not provided",
+    "insightsBoardGa4NotConnected": "GA4 not connected",
     "errorInvalidWindow": "Unsupported window.",
     "errorInvalidSort": "Unsupported sort.",
     "errorFollowUpHumanOnly": "Only humans can create follow-ups.",
