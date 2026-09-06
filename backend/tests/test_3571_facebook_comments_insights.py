@@ -428,6 +428,30 @@ async def test_facebook_insights_non_video_post_views_stays_none_not_zero():
 
 
 @pytest.mark.anyio
+async def test_facebook_insights_metric_name_present_but_values_empty_list_stays_absent_not_zero():
+    """페드루 PO 리뷰(2026-09-06) — name은 응답에 왔지만 그 values가 빈 목록인
+    경우(예: 그 회차에 실제로 안 잡힘)도 0으로 지어내면 안 된다 — "값이 실제로
+    있을 때만 싣는다" 원칙은 name 유무가 아니라 values 유무로 판정한다."""
+    from app.services.insight_snapshots import _fetch_facebook
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"data": [
+                {"name": "post_impressions", "values": [{"value": 100}]},
+                {"name": "post_clicks", "values": []},  # name은 있지만 값이 빈 목록.
+            ]}
+
+    class _FakeClient:
+        async def get(self, url, *, params):
+            return _FakeResponse()
+
+    result = await _fetch_facebook(_FakeClient(), access_token="tok", media_id="post-1")
+    assert "clicks" not in result["values"], "values가 빈 목록이면 0을 지어내지 않고 키 자체가 없어야 한다"
+    assert result["values"]["impressions"] == 100
+
+
+@pytest.mark.anyio
 async def test_facebook_insights_metric_param_excludes_spend_and_conversions():
     from app.services.insight_snapshots import _FACEBOOK_INSIGHTS_METRICS
 

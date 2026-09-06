@@ -373,9 +373,13 @@ async def _fetch_facebook(client: "httpx.AsyncClient", *, access_token: str, med
         key = _FACEBOOK_METRIC_TO_KEY.get(item.get("name"))
         if key is None:
             continue
-        total = 0
-        for v in item.get("values", []) or []:
-            total += int(v.get("value", 0) or 0)
+        item_values = item.get("values") or []
+        # 페드루 PO 리뷰(2026-09-06) — 「값이 실제로 있을 때만 싣는다」 원칙: name은
+        # 왔지만 values가 빈 목록이면(예: 이 지표가 이번 응답에서 실제로 안 잡힘)
+        # total=0으로 지어내 싣지 않는다 — 항목이 1개 이상일 때만 합산해 싣는다.
+        if not item_values:
+            continue
+        total = sum(int(v.get("value", 0) or 0) for v in item_values)
         values[key] = values.get(key, 0) + total
     return {"raw": body, "values": values}
 
