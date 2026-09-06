@@ -445,11 +445,24 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
 // 준다), 이 가드는 그대로 유지(회귀 시 잡아냄).
 describe('GateDetailPage — gate_type 배지 대비(P0-02, chip variant 기본으로 승계·#2937)', () => {
   it('gate_type 배지가 text-foreground를 쓴다(chip variant 기본값 — #2937 이후 지점 오버라이드 불요)', async () => {
+    // story #3565(2026-09-06) — gate_type이 사람 낱말로 바뀌면서, 미등재 값
+    // 'merge_gate'(실존 타입 아닌 픽스처값)는 이제 원문이 아니라 일반 「게이트」
+    // (ccGateGeneric)로 뜬다 — 이 테스트는 배지 CSS만 보므로 그 낱말로 찾는다.
     await mount(gate({ gate_type: 'merge_gate' }));
-    const chipEl = [...container.querySelectorAll('span')].find((el) => el.textContent === 'merge_gate');
+    const chipEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '게이트');
     expect(chipEl, 'gate_type 배지를 못 찾음').toBeDefined();
     expect(chipEl!.className).toContain('text-foreground');
     expect(chipEl!.className).not.toContain('text-muted-foreground');
+  });
+});
+
+// story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — 게이트 상세도 결재함
+// 카드와 같은 표를 탄다. 음성 대조.
+describe('GateDetailPage — gate_type 사람 낱말(story #3565)', () => {
+  it('⭐external_publish가 원시값이 아니라 「외부 발행」으로 뜬다(음성 대조)', async () => {
+    await mount(gate({ gate_type: 'external_publish' }));
+    expect(container.textContent).toContain('외부 발행');
+    expect(container.textContent).not.toContain('external_publish');
   });
 });
 

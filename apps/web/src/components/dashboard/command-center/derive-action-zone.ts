@@ -46,31 +46,11 @@ export interface RenderableQueueResult {
   unrenderableCount: number;
 }
 
-// PO 지적(2026-07-29): gate_type 원시값(BE enum 문자열)이 한국어 화면에 날것으로 나오던
-// 결함 — 닫힌 집합이라 번역 맵을 둔다. i18n 키만 반환 — 실제 문구는 action-zone.tsx가
-// next-intl로 그린다.
-// ⛔이 집합은 BE에 «한 곳»이 아니라 «두 곳»에 산다(PO 지적 — 값진 함정, 다음 사람도 놓치기
-// 쉽다): GATE_TYPES(backend/app/models/hitl_config.py: pr_review·qa·merge·deploy·
-// workflow_config_publish) + doc_approval(backend/app/services/doc.py의 DOC_GATE_TYPE,
-// hitl_config.py의 GATE_TYPES frozenset에는 없음). 새 gate_type을 여기 추가할 땐 두 파일
-// 다 확認한다.
-const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
-  qa: 'ccGateTypeQa',
-  pr_review: 'ccGateTypePrReview',
-  merge: 'ccGateTypeMerge',
-  deploy: 'ccGateTypeDeploy',
-  workflow_config_publish: 'ccGateTypeWorkflowConfigPublish',
-  doc_approval: 'ccGateTypeDocApproval',
-};
-
-/**
- * gate_type → i18n 키. 맵에 없는 값(미래 확장·오타 등)은 null — 호출부가 null일 때와
- * «같은 자리»(일반 라벨)로 떨어뜨린다. 원시값을 폴백으로 내보내지 않는다(PO 지적).
- */
-export function gateTypeLabelKey(gateType: string | null | undefined): string | null {
-  if (!gateType) return null;
-  return GATE_TYPE_LABEL_KEYS[gateType] ?? null;
-}
+// story #3565(페드루 PO 確定 2026-09-06) — gate_type→사람 낱말 매핑을
+// @/lib/gate-type-label.ts로 옮겼다(결재함 카드·게이트 상세도 같은 표를
+// 타야 해서 Command Center 전용 파일에 가둬 둘 이유가 없어졌다). 이 자리는
+// 하위 호환 재수출만 — 새 코드는 @/lib/gate-type-label을 직접 import한다.
+export { gateTypeLabelKey } from '@/lib/gate-type-label';
 
 /**
  * story #2288, PO 지시(2026-07-29) — #2265 ChatProofSection의 skippedCount와 같은 관례:

@@ -153,6 +153,15 @@ describe('ApprovalsQueue', () => {
     expect(urls).toContain('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true');
   });
 
+  // story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — gate_type 원시값
+  // (예: "external_publish")을 배지에 그대로 찍던 것을 사람 낱말로. 음성 대조.
+  it('⭐게이트 배지 — external_publish가 원시값이 아니라 「외부 발행」으로 뜬다(음성 대조)', async () => {
+    mockFetches([gate({ id: 'g1', gate_type: 'external_publish', work_item_summary: { title: '외부 발행 대상', slug: null } })], []);
+    await mount();
+    expect(container.textContent).toContain('외부 발행');
+    expect(container.textContent).not.toContain('external_publish');
+  });
+
   // story #3519(§16-7 2부, PO 確定 2026-09-05) — fetchGates 내부에 catch가 어디에도
   // 없어(then뿐), 하나(held)가 네트워크단 reject하면 fetchGates() 자체가 throw했고
   // 호출부(useEffect)도 안 잡아 setLoading(false)가 영영 안 불려 무한 스켈레톤(에러
