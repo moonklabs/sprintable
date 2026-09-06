@@ -851,6 +851,26 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-external-id"]')?.textContent).toBe('media-1');
   });
 
+  // story #3568(유나 24회차 실측·§17-15, 페드루 PO 確定 2026-09-06) — 발행 성공 뒤
+  // 비활성 발행 버튼 사유가 "승인된 최신 버전에서만…"(publishDisabledReason)으로
+  // 떨어지던 결함. site-posts(content/[draftId]/page.test.tsx:773)와 동형 pin —
+  // published면 publishDisabledReasonAlreadyPublished, 옛 문장은 음성 대조.
+  it('⭐발행됨(published) — 비활성 사유가 「이미 발행됐습니다」이지 「승인된 최신 버전」이 아니다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://threads.net/@x/1', external_id: 'media-1',
+        published_at: '2026-09-04T00:00:00Z', publication_id: 'pub-1',
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const reason = container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')?.textContent;
+    expect(reason).toBe('이미 발행됐습니다 — 다시 발행할 새 내용이 없습니다.');
+    expect(reason).not.toContain('승인된 최신 버전');
+  });
+
   it('⭐T9 — publication_status=container_created(부분 성공) — "이어서 발행" 안내가 보인다(발행됨 카드는 안 보임)', async () => {
     stubFetch({
       draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'container_created' },
