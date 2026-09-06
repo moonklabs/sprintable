@@ -7,7 +7,7 @@ image_for_version`, position=0만 대표)가 그대로 커버 캐리에 쓰여 N
 (새 버전 생성) 시작 前 422 `CHANNEL_VIDEO_REQUIRES_SINGLE_COVER`. 0·1장은 현행
 그대로(단수 getter 의미가 정확히 일치하는 구간이라 무변경).
 
-세팅 헬퍼는 test_620beefc_channel_post_image.py(base)·test_3567_facebook_page_
+세팅 헬퍼는 test_620beefc_channel_post_image_upload.py(base)·test_3567_facebook_page_
 final.py(facebook_sandbox 영상 픽스처) 재사용(중복 재발명 금지)."""
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import uuid
 
 import pytest
 
-from tests.test_620beefc_channel_post_image import (
+from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _create_draft,
     _jpeg_bytes,
@@ -85,7 +85,7 @@ def _local_channel_media_storage(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _local_channel_media_storage_object_path_fix(monkeypatch):
-    import tests.test_620beefc_channel_post_image as base_test_module
+    import tests.test_620beefc_channel_post_image_upload as base_test_module
 
     monkeypatch.setattr(base_test_module, "_CHANNEL_MEDIA_BUCKET", _CHANNEL_MEDIA_BUCKET)
     yield
