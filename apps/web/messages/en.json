@@ -2249,6 +2249,8 @@
     "commentsCapturedAtLabel": "As of {time}",
     "commentsConvertToTaskCta": "Convert to task",
     "commentsReplyCta": "Reply",
+    "commentsReplyAgainCta": "Add another reply",
+    "commentsReplyCountStatusLabel": "{count} replies · latest {status}",
     "commentsSectionTitleWithCount": "Comments {count}",
     "commentsDeletedCountLabel": "{count} deleted comments",
     "commentsDeletedNote": "The original was deleted.",

@@ -2249,6 +2249,8 @@
     "commentsCapturedAtLabel": "{time} 기준",
     "commentsConvertToTaskCta": "작업으로 전환",
     "commentsReplyCta": "답변",
+    "commentsReplyAgainCta": "답변 더하기",
+    "commentsReplyCountStatusLabel": "답변 {count} · 최신 {status}",
     "commentsSectionTitleWithCount": "댓글 {count}",
     "commentsDeletedCountLabel": "지워진 댓글 {count}건",
     "commentsDeletedNote": "원본이 지워졌습니다.",
