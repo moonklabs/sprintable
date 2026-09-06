@@ -334,10 +334,16 @@ def test_genuinely_heavy_file_still_caught_when_runner_is_normal():
     assert threshold == 60.0  # 정상 러너(배율 1.0) — 사실상 절대 60초와 같은 값, 100s는 그 위
 
 
-def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys):
+def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monkeypatch):
     """_check_elapsed_mode()를 통째로 돌려 오늘 실사고 표본이 exit 0(정상 판정)이
-    되는지 e2e로 확인한다(파일 파싱·가중치 로딩·판정 전체 경로)."""
+    되는지 e2e로 확인한다(파일 파싱·가중치 로딩·판정 전체 경로). 이 픽스처는 PR
+    #3753(2026-09-03) 실사고 당시의 weight 스냅샷(_RUN_33773872963_SHARD0_WEIGHTS)을
+    재현하는 것이 목적이라 **그 시점 값을 고정**해야 한다 — 실 weights.json을 그대로
+    읽으면(story #3558, 2026-09-06 전수 재측정으로 값이 갱신된 뒤) 이 역사적 시나리오
+    재현이 매번 지금 시점의 등재값에 따라 값이 달라져 깨진다(실측 fix 자체가 이
+    회귀를 노출시킴 — load_weights를 monkeypatch해 고정)."""
     mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: _RUN_33773872963_SHARD0_WEIGHTS)
     elapsed_path = tmp_path / "elapsed.tsv"
     elapsed_path.write_text(
         "\n".join(f"{f}\t{s}" for f, s in _RUN_33773872963_SHARD0_ELAPSED.items())
