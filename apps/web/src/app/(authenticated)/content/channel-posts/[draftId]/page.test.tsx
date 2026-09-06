@@ -184,12 +184,24 @@ function stubFetch(opts: {
   onCommentReplySubmit?: () => { status: number; body: unknown };
   // story #3544 조각⑧ — voided(봉인 불일치) 「다시 상신」의 prefill용 단건 GET.
   onCommentReplyGet?: () => { status: number; body: unknown };
+  // story #3550(Phase2·풀스택, BE 2/2 #3910 계약) — 캐러셀 N장 목록. 기본값 빈
+  // 배열(첨부 0장, 기존 시나리오 전부 회귀 0). image_id/position이 삭제·재정렬
+  // 대상 키다.
+  initialImages?: {
+    image_id: string; draft_id: string; version_id: string; version: number;
+    original_width: number; original_height: number; original_bytes: number;
+    final_width: number; final_height: number; final_bytes: number;
+    was_converted: boolean; image_url: string | null; position: number;
+  }[];
+  onImageDelete?: (imageId: string) => { status: number; body: unknown };
+  onImageReorder?: (imageIds: string[]) => { status: number; body: unknown };
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
   if (opts.omitGateStatusKey) delete draftDetail.gate_status;
   let currentDraftDetail = draftDetail;
   let rejectNextDraftRefetch = false;
+  let currentImages = opts.initialImages ?? [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -273,10 +285,11 @@ function stubFetch(opts: {
         const result = opts.onImageConfirm?.(body) ?? {
           status: 201,
           body: {
-            draft_id: DRAFT_ID, version_id: 'v2', version: 2,
+            image_id: `img${currentImages.length + 1}`, draft_id: DRAFT_ID, version_id: 'v2', version: 2,
             original_width: 4000, original_height: 3000, original_bytes: 12000000,
             final_width: 1440, final_height: 1080, final_bytes: 3100000,
             was_converted: true, image_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.jpg',
+            position: currentImages.length,
           },
         };
         const ok = result.status < 400;
@@ -301,7 +314,40 @@ function stubFetch(opts: {
             image_was_converted: confirmed.was_converted,
             ...opts.draftAfterImageConfirm,
           };
+          // story #3550 — confirm 성공은 캐러셀 목록에도 새 이미지 1장을 더한다
+          // (BE의 carry-forward: 기존 이미지도 이 새 버전으로 옮겨 붙지만, 이
+          // 목(mock)엔 버전 축 자체가 없어 「현재 목록 + 새 이미지」로 근사한다 —
+          // 페이지가 confirm 뒤 이 목록 엔드포인트를 다시 불러 반영하는지가
+          // 검증 대상이지, 이 mock의 버전 정합 자체는 아니다).
+          currentImages = [...currentImages, result.body as typeof currentImages[number]];
         }
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      const assetsListMatch = url.match(/\/versions\/([^/]+)\/assets$/);
+      if (assetsListMatch && (!init || init.method === undefined || init.method === 'GET')) {
+        return { ok: true, status: 200, json: async () => ({ data: currentImages, error: null, meta: null }) };
+      }
+      const assetDeleteMatch = url.match(/\/channel-posts\/drafts\/[^/]+\/assets\/([^/]+)$/);
+      if (assetDeleteMatch && init?.method === 'DELETE') {
+        const imageId = assetDeleteMatch[1] as string;
+        const result = opts.onImageDelete?.(imageId) ?? {
+          status: 200, body: currentImages.filter((img) => img.image_id !== imageId).map((img, i) => ({ ...img, position: i })),
+        };
+        const ok = result.status < 400;
+        if (ok) currentImages = result.body as typeof currentImages;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/assets/reorder` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}')) as { image_ids: string[] };
+        const result = opts.onImageReorder?.(body.image_ids) ?? {
+          status: 200,
+          body: body.image_ids
+            .map((id) => currentImages.find((img) => img.image_id === id))
+            .filter((img): img is typeof currentImages[number] => img !== undefined)
+            .map((img, i) => ({ ...img, position: i })),
+        };
+        const ok = result.status < 400;
+        if (ok) currentImages = result.body as typeof currentImages;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts` && init?.method === 'POST') {
@@ -1866,7 +1912,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     });
     await flush();
 
-    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-attachment-preview"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="channel-post-image-upload-error"]')).toBeNull();
   });
 
@@ -1921,7 +1967,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
 
     // 이미지 필드(썸네일)도 여전히 반영되고, 게이트가 재오픈됐다는 서버 진실까지
     // 같이 들어와 발행 버튼이 다시 막힌다(이미지 필드만 로컬 병합했다면 여전히 활성).
-    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-attachment-preview"]')).not.toBeNull();
     expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -1966,8 +2012,10 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  // B3(페드루 PO·유나 지적, 2026-09-04) — 첨부 칸은 실제로 파일 1개만 받는데
-  // "{count}장까지"라고 적으면 화면이 안 하는 일을 약속하는 거짓 라벨이 된다.
+  // B3(페드루 PO·유나 지적, 2026-09-04 — story #3550 BE 2/2 계약 확定 뒤에도 문구
+  // 자체는 무변경) — 개수는 ImageAttachmentList의 count 태그("{count}/{max}장")
+  // 몫이라 이 라벨엔 여전히 "{count}장까지"류를 안 적는다(같은 정보를 두 자리에서
+  // 다른 형으로 반복하지 않는다).
   it('⭐B3 — 첨부 칸 라벨이 개수를 약속하지 않는다("장까지" 문구 없음)', async () => {
     stubFetch({ imageMaxCount: 4 });
     await act(async () => {
@@ -2029,7 +2077,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     });
     await flush();
 
-    const img = container.querySelector('[data-testid="channel-post-image-preview"]') as HTMLImageElement;
+    const img = container.querySelector('[data-testid="channel-post-image-attachment-preview"]') as HTMLImageElement;
     expect(img.alt).toBe(koMessages.content.channelPostsImageAttachAlt);
   });
 
@@ -2050,7 +2098,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     });
     await flush();
 
-    const badge = container.querySelector('[data-testid="channel-post-image-attach-converted-badge"]')?.textContent ?? '';
+    const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent ?? '';
     expect(badge).toContain('4000');
     expect(badge).toContain('1440');
   });
@@ -2079,7 +2127,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
     expect(errorText).toContain('image/gif');
     expect(errorText).toContain('image/jpeg');
-    expect(container.querySelector('[data-testid="channel-post-image-preview"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-image-attachment-preview"]')).toBeNull();
   });
 
   it('⭐AC4 — CHANNEL_IMAGE_TOO_LARGE(413) — MB 단위로 3요소 문구가 조립된다(confirm 단계에서 실패)', async () => {
@@ -2169,6 +2217,193 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     expect(errorText).not.toContain('1.9인데');
     expect(errorText).not.toContain('가로');
     expect(errorText).not.toContain('세로');
+  });
+});
+
+// story #3550(Phase2·풀스택, BE 2/2 #3910 계약 확定 2026-09-06) — 캐러셀 N장:
+// 목록 로드→삭제(image_id)→재정렬(전체 집합)→422 두 문장.
+describe('ChannelPostEditPage — 캐러셀 N장 목록·삭제·재정렬(story #3550)', () => {
+  const IMG_1 = {
+    image_id: 'img1', draft_id: DRAFT_ID, version_id: 'v1', version: 1, position: 0,
+    original_width: 1000, original_height: 1000, original_bytes: 100_000,
+    final_width: 1000, final_height: 1000, final_bytes: 100_000,
+    was_converted: false, image_url: 'https://storage.googleapis.com/x/1.jpg',
+  };
+  const IMG_2 = {
+    image_id: 'img2', draft_id: DRAFT_ID, version_id: 'v1', version: 1, position: 1,
+    original_width: 4000, original_height: 3000, original_bytes: 5_000_000,
+    final_width: 1440, final_height: 1080, final_bytes: 900_000,
+    was_converted: true, image_url: 'https://storage.googleapis.com/x/2.jpg',
+  };
+  const IMG_3 = {
+    image_id: 'img3', draft_id: DRAFT_ID, version_id: 'v1', version: 1, position: 2,
+    original_width: 1000, original_height: 1000, original_bytes: 100_000,
+    final_width: 1000, final_height: 1000, final_bytes: 100_000,
+    was_converted: false, image_url: 'https://storage.googleapis.com/x/3.jpg',
+  };
+
+  it('⭐목록 — 초기 로드가 버전의 이미지 N장을 position 순으로 그린다', async () => {
+    stubFetch({ imageMaxCount: 10, initialImages: [IMG_1, IMG_2, IMG_3] });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    expect(items.length).toBe(3);
+    expect(container.querySelector('[data-testid="channel-post-image-count-tag"]')?.textContent).toBe('3 / 10장');
+  });
+
+  it('⭐삭제 — image_id로 DELETE를 호출하고 응답의 남은 목록으로 교체된다', async () => {
+    let deletedId: string | null = null;
+    stubFetch({
+      imageMaxCount: 10, initialImages: [IMG_1, IMG_2, IMG_3],
+      onImageDelete: (imageId) => {
+        deletedId = imageId;
+        return { status: 200, body: [{ ...IMG_1, position: 0 }, { ...IMG_3, position: 1 }] };
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[1]!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    expect(deletedId).toBe('img2');
+    expect(container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]').length).toBe(2);
+    expect(container.querySelector('[data-testid="channel-post-image-count-tag"]')?.textContent).toBe('2 / 10장');
+  });
+
+  // 카디르 QA(2026-09-06) — 삭제·재정렬은 새 버전=재승인 트리거(#3291)라
+  // draft/versions 단건 GET도 다시 불러야 하는데(refreshDraftAndVersionsAfterImagesMutation),
+  // 그 호출을 지워도 위 테스트는 목록 교체만 보느라 RED 0이었다 — fetch 호출
+  // 횟수로 명시 pin.
+  it('⭐삭제 성공 뒤 draft·versions 단건 GET을 다시 부른다(재승인 트리거 반영)', async () => {
+    stubFetch({
+      imageMaxCount: 10, initialImages: [IMG_1, IMG_2],
+      onImageDelete: () => ({ status: 200, body: [{ ...IMG_1, position: 0 }] }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const fetchMock = globalThis.fetch as unknown as { mock: { calls: [RequestInfo | URL, RequestInit?][] } };
+    const draftGetCallsBefore = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`,
+    ).length;
+    const versionsGetCallsBefore = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`,
+    ).length;
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[0]!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    const draftGetCallsAfter = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`,
+    ).length;
+    const versionsGetCallsAfter = fetchMock.mock.calls.filter(
+      ([u]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`,
+    ).length;
+    expect(draftGetCallsAfter).toBeGreaterThan(draftGetCallsBefore);
+    expect(versionsGetCallsAfter).toBeGreaterThan(versionsGetCallsBefore);
+  });
+
+  it('⭐재정렬 — 위로 이동 클릭이 전체 집합(image_ids)을 새 순서로 한 번에 보낸다', async () => {
+    let reorderedIds: string[] | null = null;
+    stubFetch({
+      imageMaxCount: 10, initialImages: [IMG_1, IMG_2, IMG_3],
+      onImageReorder: (imageIds) => {
+        reorderedIds = imageIds;
+        return {
+          status: 200,
+          body: imageIds.map((id, i) => ({ ...[IMG_1, IMG_2, IMG_3].find((img) => img.image_id === id), position: i })),
+        };
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[2]!.querySelector('[data-testid="channel-post-image-attachment-move-up"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    expect(reorderedIds).toEqual(['img1', 'img3', 'img2']);
+    const reorderedItems = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    expect(reorderedItems[1]!.querySelector('[data-testid="channel-post-image-attachment-preview"]')?.getAttribute('src'))
+      .toBe(IMG_3.image_url);
+  });
+
+  it('⭐422 CHANNEL_POST_IMAGE_REORDER_INVALID_SET — 서버 message 그대로 렌더된다', async () => {
+    stubFetch({
+      imageMaxCount: 10, initialImages: [IMG_1, IMG_2],
+      onImageReorder: () => ({
+        status: 422, body: { detail: { code: 'CHANNEL_POST_IMAGE_REORDER_INVALID_SET', message: '이미지 집합이 일치하지 않습니다(서버 메시지 예시)' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[1]!.querySelector('[data-testid="channel-post-image-attachment-move-up"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    // 카디르 QA(2026-09-06) — RawDetailsToggle의 접힌 <pre>raw JSON에도 서버
+    // message가 그대로 들어 있어, 바깥 Alert 전체 textContent로 재면 표시 로직이
+    // 고장 나도(describeChannelImageError 분기 제거) raw만으로 우연히 통과한다 —
+    // 실제 표시 요소(AlertDescription, <p>)만 좁혀 잰다.
+    const errorText = container.querySelector('[data-testid="channel-post-images-action-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('이미지 집합이 일치하지 않습니다(서버 메시지 예시)');
+    // 실패해도 목록 자체는 그대로(낙관적으로 먼저 바꾸지 않는다).
+    expect(container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]').length).toBe(2);
+  });
+
+  it('⭐404 CHANNEL_POST_IMAGE_NOT_FOUND(삭제) — 서버 message 그대로 렌더된다', async () => {
+    stubFetch({
+      imageMaxCount: 10, initialImages: [IMG_1],
+      onImageDelete: () => ({
+        status: 404, body: { detail: { code: 'CHANNEL_POST_IMAGE_NOT_FOUND', message: '이미 삭제된 이미지입니다(서버 메시지 예시)' } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
+    await act(async () => {
+      (items[0]!.querySelector('[data-testid="channel-post-image-attachment-delete"]') as HTMLButtonElement).click();
+    });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-images-action-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('이미 삭제된 이미지입니다(서버 메시지 예시)');
+  });
+
+  it('⭐422 CHANNEL_POST_IMAGE_COUNT_EXCEEDED(업로드) — 서버 message 그대로 업로드 에러 자리에 렌더된다', async () => {
+    stubFetch({
+      imageMaxCount: 1, initialImages: [IMG_1],
+      onImageConfirm: () => ({
+        status: 422, body: { detail: { code: 'CHANNEL_POST_IMAGE_COUNT_EXCEEDED', message: '최대 1장까지만 첨부할 수 있습니다(서버 메시지 예시)', image_max_count: 1 } },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-image-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"] p')?.textContent ?? '';
+    expect(errorText).toBe('최대 1장까지만 첨부할 수 있습니다(서버 메시지 예시)');
+    // 실패했으니 목록은 그대로 1장.
+    expect(container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]').length).toBe(1);
   });
 });
 
