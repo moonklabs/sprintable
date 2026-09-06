@@ -365,4 +365,21 @@ describe('scanRepository — 글자·숫자 0개 값 사전 제외(story #3582)'
     expect(newFindings.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
     expect(newFindings.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
   });
+
+  // 유나 비차단(2026-09-06, #3931 Design review) — 위 두 테스트는 "제외가 일했다"와
+  // "애초에 그 쌍이 안 겹쳤다"를 못 가른다. 주석의 약속("제외 로직을 끄면 다시 RED")을
+  // 코드로 직접 증명한다 — scanRepository의 사전 제외를 «건너뛰고» findSubstringCollisions에
+  // 실 값 그대로(originAuthorUnknown="—" · channelPostsTextTooLong="{max}자 한도인데
+  // {current}자입니다 — 줄여서 재상신해 주세요.") 넘기면 여전히 겹친다(순수 판정 로직
+  // 자체는 살아있다는 양성대조).
+  it('제외 없이 findSubstringCollisions에 직접 넘기면 여전히 겹친다(제외가 "일한다"는 증명, 애초에 안 겹친 게 아니다)', () => {
+    const phrases = new Map([
+      ['content.originAuthorUnknown', { value: '—', numberAdjacent: false }],
+      [
+        'content.channelPostsTextTooLong',
+        { value: '{max}자 한도인데 {current}자입니다 — 줄여서 재상신해 주세요.', numberAdjacent: true },
+      ],
+    ]);
+    expect(findSubstringCollisions(phrases)).toHaveLength(1);
+  });
 });
