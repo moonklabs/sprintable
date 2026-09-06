@@ -319,3 +319,68 @@ async def test_list_endpoint_never_leaks_video_url_even_with_video_confirmed():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── story #3590: draft 상세 video_meta additive(재진입에서도 남는다) ───────────
+
+
+@pytest.mark.anyio
+async def test_draft_detail_video_meta_present_when_video_confirmed():
+    """유나 §17-23 ⑤-1 정정 — 업로드 직후뿐 아니라 재진입(단건 재조회)에서도
+    메타 줄(길이·해상도·코덱·용량)이 같은 값으로 서야 한다. video_url과 같은
+    video_row 재사용(추가 쿼리 0) — confirm 응답과 정확히 같은 값이어야 FE
+    formatVideoMetaLine이 두 응답을 같은 코드로 처리할 수 있다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            raw = _build_mp4(duration_seconds=6.0, **_VALID_9_16)
+            r_video = await _upload_and_confirm_video(client, org_id, draft_id, raw)
+            assert r_video.status_code == 201, r_video.text
+            confirm_body = r_video.json()
+
+            # 재진입 — 새 GET 왕복(업로드 직후 응답이 아니라 별개 단건 재조회).
+            r_detail = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+        assert r_detail.status_code == 200, r_detail.text
+        video_meta = r_detail.json()["video_meta"]
+        assert video_meta is not None
+        assert video_meta["duration_seconds"] == confirm_body["duration_seconds"]
+        assert video_meta["width"] == confirm_body["width"]
+        assert video_meta["height"] == confirm_body["height"]
+        assert video_meta["codec"] == confirm_body["codec"]
+        assert video_meta["original_bytes"] == confirm_body["original_bytes"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_draft_detail_video_meta_null_when_no_media():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r_detail = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+        assert r_detail.status_code == 200, r_detail.text
+        assert r_detail.json()["video_meta"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
