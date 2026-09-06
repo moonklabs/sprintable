@@ -75,6 +75,26 @@ def _enable_sandbox_adapter(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _enable_instagram_sandbox_adapter(monkeypatch):
+    """instagram_sandbox는 sandbox와 동형 사정 — CHANNEL_ADAPTERS 본 registry에
+    없다(_PUBLISH_CLIENT_MODULE_PATHS 전용). facebook_sandbox는 이미 본 registry에
+    있어(channel_adapters.py:316) 이 fixture가 불필요."""
+    import app.services.channel_adapters as adapters_mod
+
+    ig_sandbox_config = adapters_mod.ChannelAdapterConfig(
+        authorize_url="", token_url="", scope="instagram_sandbox_publish", refresh_mode="manual",
+        display_name="Instagram Sandbox", credential_kind="none", max_text_length=2200,
+        utm_source="instagram_sandbox", utm_medium="test",
+        image_formats=("image/jpeg", "image/png"), image_max_bytes=8 * 1024 * 1024,
+        image_aspect_max=1.91, image_width_min=320, image_width_max=1440,
+        image_color_space="sRGB", image_max_count=10,
+        supports_fetch_replies=True,
+    )
+    monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "instagram_sandbox", ig_sandbox_config)
+    yield
+
+
 @pytest.mark.anyio
 async def test_instagram_connection_failure_promotes_status_expired(monkeypatch):
     """AC1·AC2 — instagram CONNECTION 실패가 이제 connection.status를 expired로
@@ -191,5 +211,84 @@ async def test_sandbox_connection_untouched_by_promote(monkeypatch):
 
             await s.refresh(conn)
             assert conn.status == "active"
+    finally:
+        await engine.dispose()
+
+
+# ─── story #3597(페드루 PO 追加 2026-09-06) — 「발행 뒤 만료」 라이브 마커 ────────
+# [sandbox:expire-after-publish]: create_container/publish_container를 실제로
+# 거쳐(발행은 성공) media_id에 표식을 남기고, fetch_replies가 그 media_id를 보면
+# 401을 던진다 — AC3 라이브 검증(PO Test Org)이 실제로 재현하는 정확한 경로를
+# 여기서 코드로도 고정한다(create_container→publish_container→fetch_replies
+# 전부 실동작, monkeypatch 0).
+
+
+@pytest.mark.anyio
+async def test_instagram_sandbox_expire_after_publish_marker_promotes_status_expired():
+    from app.services.channel_post_comments import process_due_comment_collections, schedule_comment_collection
+    import app.services.instagram_sandbox_publish as ig_sandbox
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="instagram_sandbox")
+
+            creation_id = await ig_sandbox.create_container(
+                None, access_token="x", threads_user_id="u", text="[sandbox:expire-after-publish]",
+                image_url="https://example.com/i.jpg",
+            )
+            media_id = await ig_sandbox.publish_container(None, access_token="x", threads_user_id="u", creation_id=creation_id)
+            assert media_id.endswith("-expireafterpublish")
+
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="instagram_sandbox", external_id=media_id,
+            )
+            anchor = datetime.now(timezone.utc) - timedelta(hours=2)
+            await schedule_comment_collection(
+                s, org_id=org_id, publication_id=pub.id, channel="instagram_sandbox", external_id=media_id, anchor_at=anchor,
+            )
+            await s.commit()
+
+            counts = await process_due_comment_collections(s)
+            assert counts["failed"] == 1
+
+            await s.refresh(conn)
+            assert conn.status == "expired"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_facebook_sandbox_expire_after_publish_marker_promotes_status_expired():
+    from app.services.channel_post_comments import process_due_comment_collections, schedule_comment_collection
+    import app.services.facebook_sandbox_publish as fb_sandbox
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="facebook_sandbox")
+
+            creation_id = await fb_sandbox.create_container(
+                None, access_token="x", threads_user_id="u", text="[sandbox:expire-after-publish]",
+            )
+            media_id = await fb_sandbox.publish_container(None, access_token="x", threads_user_id="u", creation_id=creation_id)
+            assert media_id.endswith("-expireafterpublish")
+
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="facebook_sandbox", external_id=media_id,
+            )
+            anchor = datetime.now(timezone.utc) - timedelta(hours=2)
+            await schedule_comment_collection(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox", external_id=media_id, anchor_at=anchor,
+            )
+            await s.commit()
+
+            counts = await process_due_comment_collections(s)
+            assert counts["failed"] == 1
+
+            await s.refresh(conn)
+            assert conn.status == "expired"
     finally:
         await engine.dispose()

@@ -113,9 +113,22 @@ async def _fetch_replies_raw(
         if external_id is None:
             raise CommentFetchError(error_code="COMMENT_EXTERNAL_ID_MISSING", message="external_id가 없습니다")
         _publish_client = get_publish_client_module(channel)
+        from app.services.threads_publish import ThreadsPublishError
         import httpx
-        async with httpx.AsyncClient() as client:
-            return await _publish_client.fetch_replies(client, access_token="sandbox", media_id=external_id)
+        try:
+            async with httpx.AsyncClient() as client:
+                return await _publish_client.fetch_replies(client, access_token="sandbox", media_id=external_id)
+        except ThreadsPublishError as exc:
+            # story #3597 — instagram_sandbox_publish.py::fetch_replies가 새
+            # [sandbox:expire-after-publish] 마커로 401을 던지기 전까지는 이 분기가
+            # 예외를 낼 일이 없어(sandbox_publish.py는 fetch_replies에서 절대
+            # raise 안 함) 이 try/except 자체가 없었다 — 아래 공용 블록(157행대)의
+            # 매핑을 그대로 재사용(새 판정 로직 0).
+            if exc.status_code in (401, 403):
+                raise CommentFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message=str(exc)) from exc
+            if exc.status_code == 429:
+                raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message=str(exc)) from exc
+            raise CommentFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
 
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
