@@ -162,6 +162,51 @@ class ChannelImageUploadFailedError(Exception):
         super().__init__(f"파생본 업로드 실패: {object_path}")
 
 
+class ChannelPostImageCountExceededError(Exception):
+    """story #3550(Phase2, 페드루 PO 確定 2026-09-06 ③) — 어댑터 `image_max_count`
+    초과 첨부 시도(예: Threads/Facebook은 여전히 1장, Instagram은 10장). 변환으로
+    못 고치는 축(ASPECT/UNDECODABLE과 동형 판단) — 서버가 명시 거부한다. 이 검사가
+    처음 생기기 前엔 `UniqueConstraint(version_id)`가 스키마 레벨에서 2번째 이미지
+    자체를 IntegrityError로 막아 이런 명시 코드가 필요 없었다(마이그 0343으로 그
+    제약이 (version_id, position)으로 완화되며 이 축이 새로 필요해졌다)."""
+
+    def __init__(self, *, image_max_count: int):
+        self.image_max_count = image_max_count
+        super().__init__(f"이미지는 최대 {image_max_count}장까지 첨부할 수 있습니다")
+
+
+class ChannelPostImageNotFoundError(Exception):
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 삭제 대상 image_id가
+    이 draft 최신 버전의 이미지 집합에 없음(이미 삭제됐거나 다른 draft 소속 등)."""
+
+    def __init__(self, *, image_id: uuid.UUID):
+        self.image_id = image_id
+        super().__init__(f"이미지를 찾을 수 없습니다: {image_id}")
+
+
+class ChannelPostImageReorderInvalidSetError(Exception):
+    """전달된 image_ids 집합이 최신 버전의 실제 이미지 집합과 정확히 일치하지 않음
+    (누락·중복·다른 버전/미존재 id 포함 등) — 부분 재정렬은 허용하지 않는다("나머지는
+    그대로"라는 암묵 규칙을 두지 않기 위해 항상 전체 집합을 명시로 받는다)."""
+
+    def __init__(self):
+        super().__init__("image_ids가 현재 이미지 집합과 정확히 일치해야 합니다(누락·중복·불일치 없이)")
+
+
+def compute_image_seal_hash(ordered_final_sha256s: list[str]) -> str:
+    """story #3550(Phase2, 페드루 PO 確定 2026-09-06 ①) — `ChannelPostVersion.
+    image_sha256`(→`Gate.sealed_media_sha256`)에 담을 값. **N=1은 항등**(그 이미지의
+    sha256 그대로) — 이미 승인된 단일-이미지 게이트·버전이 이 스토리 배포 순간
+    "변조"로 뒤집히면 안 된다(기존 봉인 의미 무변경, PO 明示 못박음). N≥2부터
+    position 순으로 이어붙인 각 sha256 문자열을 그대로 합쳐 재해시 — 어느 한 장이
+    바뀌거나 두 장의 순서가 바뀌면 합성 입력 문자열 자체가 달라져 합성값도 달라진다
+    (「이미지 1장 바꿔치기」·「순서 재배열」 둘 다 승인 불변화 #3291 규율의 양성대조
+    통과 — 디디 설계 메모에서 실측 확認)."""
+    if len(ordered_final_sha256s) == 1:
+        return ordered_final_sha256s[0]
+    return hashlib.sha256("".join(ordered_final_sha256s).encode("utf-8")).hexdigest()
+
+
 def _require_bucket() -> str:
     if not CHANNEL_MEDIA_BUCKET:
         raise ChannelImageStorageNotConfiguredError()
@@ -298,6 +343,20 @@ async def confirm_channel_post_image_upload(
     if adapter is None or adapter.image_max_count <= 0:
         raise ChannelImageUnsupportedError(channel=draft.channel)
 
+    # story #3550(PO 確定 ③) — 개수 상한은 다운로드·디코드·변환(비용 큰 작업) 前에
+    # 즉시 거부한다(어차피 실패할 요청에 GCS 다운로드+PIL 변환을 낭비 안 함).
+    latest_for_count = (await db.execute(
+        select(ChannelPostVersion)
+        .where(ChannelPostVersion.draft_id == draft_id)
+        .order_by(ChannelPostVersion.version.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    existing_images: list[ChannelPostImage] = []
+    if latest_for_count is not None:
+        existing_images = await list_channel_post_images_for_version(db, version_id=latest_for_count.id)
+    if len(existing_images) >= adapter.image_max_count:
+        raise ChannelPostImageCountExceededError(image_max_count=adapter.image_max_count)
+
     bucket = _require_bucket()
     expected_prefix = f"channel-media/{org_id}/{draft_id}/"
     if not object_path.startswith(expected_prefix) or "/" in object_path[len(expected_prefix):]:
@@ -373,23 +432,34 @@ async def confirm_channel_post_image_upload(
 
     final_sha256 = derived_sha256 or original_sha256
 
-    latest = (await db.execute(
-        select(ChannelPostVersion)
-        .where(ChannelPostVersion.draft_id == draft_id)
-        .order_by(ChannelPostVersion.version.desc())
-        .limit(1)
-    )).scalar_one_or_none()
+    latest = latest_for_count
     if latest is None:
         raise ChannelPostDraftNotFoundError(draft_id)
+
+    # story #3550(PO 確定 ①) — 기존(=carry-forward 대상) 이미지들의 sha256 + 이번에
+    # 새로 붙는 이미지의 sha256을 position 순으로 이어 합성 봉인 해시를 만든다. N=1
+    # (existing_images가 0장이던 첫 첨부)이면 compute_image_seal_hash가 항등을 돌려줘
+    # Phase1 단일-이미지 봉인 의미와 완전히 같다(회귀 0).
+    new_position = len(existing_images)
+    ordered_hashes = [img.final_sha256 for img in existing_images] + [final_sha256]
+    composite_sha256 = compute_image_seal_hash(ordered_hashes)
 
     new_version, _channel, _violations = await create_channel_post_draft_version(
         db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
         text=latest.text, link_url=latest.link_url,
-        author_member_id=member_id, author_kind=member_kind, image_sha256=final_sha256,
+        author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
     )
 
+    # story #3550(PO 確定 ②) — create_channel_post_draft_version()의 자체 carry-forward
+    # 훅(image_sha256이 sentinel일 때만 발동)은 여기서 안 탄다(위에서 합성값을 명시로
+    # 넘겼으므로) — 기존 이미지 행들을 새 version_id로 직접 복제한다(파일 재업로드·
+    # 재변환 없음, object_path·sha256·position 그대로 — 단일 이미지 carry-forward
+    # 패턴(channel_posts.py::create_channel_post_draft_version)을 N장으로 그대로 확장).
+    for existing in existing_images:
+        db.add(_copy_image_row(existing, new_version_id=new_version.id, new_position=existing.position))
+
     image_row = ChannelPostImage(
-        id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=new_version.id,
+        id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=new_version.id, position=new_position,
         original_object_path=object_path, original_sha256=original_sha256,
         original_content_type=original_mime, original_bytes=size,
         original_width=width, original_height=height,
@@ -413,6 +483,137 @@ def public_url_for_object_path(object_path: str) -> str | None:
 async def get_channel_post_image_for_version(
     db: AsyncSession, *, version_id: uuid.UUID,
 ) -> ChannelPostImage | None:
+    """story #3550 — N장(캐러셀) 버전에서도 안 죽게 position=0(첫 장)만 대표로
+    돌려준다. 이 함수·`GET .../asset` 엔드포인트의 단일-이미지 계약은 무변경(FE
+    다중 슬롯 UI는 별도 스토리, PO 明示 — 마이그 0343 前엔 `.scalar_one_or_none()`
+    이었으나 그 제약(UNIQUE(version_id))이 완화된 지금 N>1에 그대로 두면
+    MultipleResultsFound로 죽는다)."""
     return (await db.execute(
         select(ChannelPostImage).where(ChannelPostImage.version_id == version_id)
+        .order_by(ChannelPostImage.position).limit(1)
+    )).scalars().first()
+
+
+async def list_channel_post_images_for_version(
+    db: AsyncSession, *, version_id: uuid.UUID,
+) -> list[ChannelPostImage]:
+    """story #3550 — 캐러셀 소비부(발행 오케스트레이션·carry-forward·봉인 재계산)용
+    position 순 전체 목록. `get_channel_post_image_for_version`(단일, FE 기존 계약)
+    과 별도 함수로 분리 — 호출부가 "대표 1장"과 "전체 N장"을 헷갈리지 않게."""
+    return list((await db.execute(
+        select(ChannelPostImage).where(ChannelPostImage.version_id == version_id)
+        .order_by(ChannelPostImage.position)
+    )).scalars().all())
+
+
+def _copy_image_row(existing: ChannelPostImage, *, new_version_id: uuid.UUID, new_position: int) -> ChannelPostImage:
+    """attach(confirm_channel_post_image_upload)·delete·reorder 셋이 공유하는 유일한
+    행 복제 지점(계보 필드 나열이 세 곳에서 각자 드리프트하지 않게 — 파일 재업로드·
+    재변환 없음, object_path·sha256는 그대로 복제)."""
+    return ChannelPostImage(
+        id=uuid.uuid4(), org_id=existing.org_id, draft_id=existing.draft_id,
+        version_id=new_version_id, position=new_position,
+        original_object_path=existing.original_object_path, original_sha256=existing.original_sha256,
+        original_content_type=existing.original_content_type, original_bytes=existing.original_bytes,
+        original_width=existing.original_width, original_height=existing.original_height,
+        derived_object_path=existing.derived_object_path, derived_sha256=existing.derived_sha256,
+        derived_content_type=existing.derived_content_type, derived_bytes=existing.derived_bytes,
+        derived_width=existing.derived_width, derived_height=existing.derived_height,
+        created_by=existing.created_by,
+    )
+
+
+async def delete_channel_post_image(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, image_id: uuid.UUID,
+    member_id: uuid.UUID, member_kind: str,
+) -> tuple[ChannelPostVersion, list[ChannelPostImage]]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 1장 삭제.
+    attach와 대칭축: 원본 행을 지우지 않고 **새 불변 버전**을 만들어 나머지 이미지를
+    position 0..N-2로 재부여+복제하고 합성 해시를 재계산한다(#3291 승인 불변화
+    규율 — 이미지 집합이 바뀌면 그 자체가 재승인 트리거, delete도 attach와 동형).
+    남는 이미지가 0장이면 image_sha256=None(첫 draft의 "이미지 없음" 상태와 동일 —
+    compute_image_seal_hash에 빈 리스트를 주지 않는다, sha256("")은 그 의미가 아니다)."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+
+    latest = (await db.execute(
+        select(ChannelPostVersion)
+        .where(ChannelPostVersion.draft_id == draft_id)
+        .order_by(ChannelPostVersion.version.desc())
+        .limit(1)
     )).scalar_one_or_none()
+    existing_images = await list_channel_post_images_for_version(db, version_id=latest.id) if latest else []
+    remaining = [img for img in existing_images if img.id != image_id]
+    if len(remaining) == len(existing_images):
+        raise ChannelPostImageNotFoundError(image_id=image_id)
+
+    composite_sha256 = (
+        compute_image_seal_hash([img.final_sha256 for img in remaining]) if remaining else None
+    )
+
+    new_version, _channel, _violations = await create_channel_post_draft_version(
+        db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
+        text=latest.text, link_url=latest.link_url,
+        author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
+    )
+
+    new_rows = [
+        _copy_image_row(existing, new_version_id=new_version.id, new_position=position)
+        for position, existing in enumerate(remaining)
+    ]
+    for row in new_rows:
+        db.add(row)
+    await db.commit()
+    for row in new_rows:
+        await db.refresh(row)
+    return new_version, new_rows
+
+
+async def reorder_channel_post_images(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, image_ids: list[uuid.UUID],
+    member_id: uuid.UUID, member_kind: str,
+) -> tuple[ChannelPostVersion, list[ChannelPostImage]]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 순서 재배열.
+    `image_ids`는 새 순서 그대로 **전체 집합**(현재 버전의 이미지 id 전부, 누락·중복
+    ·불일치 없이)을 받는다(부분 재정렬 불허). delete와 동형으로 새 버전을 만들어
+    반영 — 순서 자체가 합성 해시 입력이라 재정렬도 재승인 트리거(#3291 규율,
+    compute_image_seal_hash 모듈 docstring의 "순서 재배열도 바꿔치기와 동형" 그대로)."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+
+    latest = (await db.execute(
+        select(ChannelPostVersion)
+        .where(ChannelPostVersion.draft_id == draft_id)
+        .order_by(ChannelPostVersion.version.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    existing_images = await list_channel_post_images_for_version(db, version_id=latest.id) if latest else []
+    existing_by_id = {img.id: img for img in existing_images}
+    if (
+        len(image_ids) != len(existing_images)
+        or len(set(image_ids)) != len(image_ids)
+        or set(image_ids) != set(existing_by_id.keys())
+    ):
+        raise ChannelPostImageReorderInvalidSetError()
+
+    ordered = [existing_by_id[image_id] for image_id in image_ids]
+    composite_sha256 = compute_image_seal_hash([img.final_sha256 for img in ordered])
+
+    new_version, _channel, _violations = await create_channel_post_draft_version(
+        db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
+        text=latest.text, link_url=latest.link_url,
+        author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
+    )
+
+    new_rows = [
+        _copy_image_row(existing, new_version_id=new_version.id, new_position=position)
+        for position, existing in enumerate(ordered)
+    ]
+    for row in new_rows:
+        db.add(row)
+    await db.commit()
+    for row in new_rows:
+        await db.refresh(row)
+    return new_version, new_rows

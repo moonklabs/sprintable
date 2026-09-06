@@ -110,6 +110,12 @@ ID_MUTATION_PROJECT_GUARDS: frozenset[str] = frozenset(PROJECT_GUARD_FUNCTIONS -
     # project 접근권을 검증하던 동일 IDOR 경계를 delete_asset(신규 DELETE)이 재사용한다 — 이름이
     # assets.py 에만 있음을 확인 후 편입(grep 0건, 타 모듈 동명 함수와 충돌 리스크 없음).
     "_scope_filter",
+    # story #3550 BE 2/2(2026-09-06, #3910 CI 후속) — channel_posts.py 모듈-로컬 헬퍼
+    # (assets.py::_scope_filter와 동형 편입 사유). draft(work_item_id→Story.project_id)
+    # 선조회 뒤 `require_project_access`를 실제로 호출한다(delete_channel_post_image_
+    # endpoint·reorder_channel_post_images_endpoint 둘 다 공유) — 이름이 channel_posts.py
+    # 에만 있음을 확인 후 편입(grep 0건, 타 모듈 동명 함수와 충돌 리스크 없음).
+    "_require_channel_post_draft_project_access",
 }
 
 # Depends(...) 콜러블 — 결과 id가 caller auth에서 서버-파생돼 클라이언트가 스푸핑할 여지가
