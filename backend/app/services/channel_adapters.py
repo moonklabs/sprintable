@@ -265,12 +265,16 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_width_min=320,
         image_width_max=1440,
         image_color_space="sRGB",
-        # story #3567 발견 즉시 수정 — 3547이 이 필드를 아예 선언 안 해 기본값 0.0으로
-        # 남아 있었다(channel_post_images.py의 Threads류 정규화 검사가 0.0을 "무제한"
-        # 이 아니라 "0:1 초과 즉시 거부"로 해석 — 정사각형 아닌 이미지는 이미 3547
-        # 단일-이미지 경로에서도 전부 422였을 잠복 결함, 이 스토리의 다중 사진
-        # 테스트가 처음 노출). Threads(image_aspect_max=10.0)와 동형으로 관대하게
-        # 선언 — ⚠️미확認(Meta 문서 지식, 다른 image_* 필드들과 동일 라벨).
+        # story #3567 발견 즉시 수정(페드루 PO 리뷰 정정 2026-09-06) — 3547이 이 필드를
+        # 아예 선언 안 해 기본값 0.0으로 남아 있었다. channel_post_images.py의 Threads류
+        # 정규화 검사는 `aspect_ratio = max(w,h)/min(w,h)`(항상 ≥1.0)를 `> image_aspect_
+        # max`와 비교한다 — 0.0이면 이 비교가 **정사각형(1.0:1)을 포함해 모든 이미지**에서
+        # 참이 된다(정사각형만 예외로 통과한다는 것은 부정확한 서술이었다 — 실측으로
+        # 정정: `python3`로 800×800/1000×1000 케이스까지 직접 대입해 확認, 둘 다 거부).
+        # 즉 3547의 단일-이미지 경로는 애초에 **어떤 이미지도** 못 올렸을 잠복 결함(이
+        # 스토리의 다중 사진 테스트가 처음 실제로 노출·재현). Threads(image_aspect_
+        # max=10.0)와 동형으로 관대하게 선언 — ⚠️미확認(Meta 문서 지식, 다른 image_*
+        # 필드들과 동일 라벨).
         image_aspect_max=10.0,
         # story #3567(Phase2·BE, 페드루 PO 確定 2026-09-06③) — 다중 사진(캐러셀 동형)
         # 지원. 10은 Meta 문서상 실측 상한이 아니라 **제품 상한**(Instagram 캐러셀
@@ -314,8 +318,9 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         image_width_min=320,
         image_width_max=1440,
         image_color_space="sRGB",
-        # story #3567 발견 즉시 수정 — 실 facebook과 동일 이유(위 주석 참고, 미선언
-        # 시 기본값 0.0이 "정사각형만 통과"로 잠복 결함).
+        # story #3567 발견 즉시 수정(페드루 PO 리뷰 정정 2026-09-06) — 실 facebook과
+        # 동일 이유(위 주석 참고 — 미선언 시 기본값 0.0은 정사각형 포함 모든 이미지를
+        # 거부, "정사각형만 통과"는 부정확한 서술이었다).
         image_aspect_max=10.0,
         # story #3567 — 실 facebook과 동일 제품 상한(10). sandbox가 실계정보다
         # 관대하면 「sandbox는 됐는데 실계정은 막힘」류 격차가 생긴다(instagram_

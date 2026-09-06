@@ -202,12 +202,27 @@ async def get_container_status(
     `status`가 있으면(릴스 처리 상태) 그 값을 실제로 매핑하고, 없으면(사진/피드
     post는 이 필드 자체가 없다) 기존처럼 FINISHED로 간주한다. ⚠️미확認 — `status`
     필드 shape·값 어휘(processing/ready/error 등)는 Meta 문서 지식, 재확認 전
-    라이브 왕복 금지."""
+    라이브 왕복 금지.
+
+    페드루 PO 리뷰(PR#3925, 2026-09-06) — 비-200을 전부 FINISHED로 넘기면
+    fail-open이다(릴스가 아직 처리 中인데 429/5xx를 "끝났다"로 오판해 publish_
+    container를 강행하는 사고). Graph API 표준 에러 shape({"error":{"code":...}})
+    에서 **400+code==100**("이 필드/객체 조합 자체가 없음" — 사진/피드 post에
+    `status` 필드를 물었을 때의 정상 반응, ⚠️미확認)만 "그러면 사진/피드다"와
+    동형으로 FINISHED. 그 밖의 비-200(429 rate limit·5xx 등, 진짜 원인 불명)은
+    IN_PROGRESS로 넘겨 channel_posts.py의 기존 재시도·5분 상한 축이 다음 tick에
+    다시 묻게 한다(모른다≠끝났다)."""
     resp = await client.get(
         f"{_GRAPH_BASE}/{creation_id}", params={"fields": "status", "access_token": access_token},
     )
     if resp.status_code != 200:
-        return _CONTAINER_STATUS_FINISHED, None
+        try:
+            error_code = resp.json().get("error", {}).get("code")
+        except Exception:  # noqa: BLE001 — 파싱 불가 응답도 "모른다"로 취급.
+            error_code = None
+        if resp.status_code == 400 and error_code == 100:
+            return _CONTAINER_STATUS_FINISHED, None
+        return "IN_PROGRESS", None
     body = resp.json()
     status = body.get("status")
     if not status:

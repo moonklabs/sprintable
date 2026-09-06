@@ -189,6 +189,33 @@ _VALID_9_16 = {"width": 720, "height": 1280}
 # ─── ③ 어댑터 선언 — 순수 유닛 ─────────────────────────────────────────────────
 
 
+@pytest.mark.anyio
+async def test_facebook_single_image_non_square_passes_aspect_normalization():
+    """페드루 PO 리뷰(PR#3925) — image_aspect_max 수정의 양성 대조. 3547 단일-이미지
+    경로(캐러셀 아님, 이미지 1장)로 비정사각(1080×1350) 이미지를 올려 200이 나는지
+    직접 확認 — 수정 前엔(image_aspect_max=0.0) 이 값도 422였다(뮤테이션에서 재확認)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="facebook")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r = await _upload_and_confirm(
+                client, org_id, draft_id, _jpeg_bytes(1080, 1350), content_type="image/jpeg",
+            )
+        assert r.status_code == 201, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 def test_facebook_adapter_declares_carousel_and_video_spec():
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
@@ -397,6 +424,42 @@ async def test_get_container_status_branches_by_response_status_field():
         _FakeClient({"status": {"video_status": "error"}}), access_token="tok", creation_id="video-42",
     )
     assert status == "ERROR"
+
+
+@pytest.mark.anyio
+async def test_get_container_status_400_code_100_treated_as_finished():
+    """400+error.code==100 = "이 필드/객체 조합 자체가 없음"(사진/피드 post에 status를
+    물었을 때의 정상 반응, ⚠️미확認) — 그 경우만 FINISHED."""
+    from app.services.facebook_publish import get_container_status
+
+    class _FakeErrorClient:
+        async def get(self, url, *, params):
+            return _FakeResponse({"error": {"code": 100, "message": "Unsupported get request"}}, status_code=400)
+
+    status, _ = await get_container_status(_FakeErrorClient(), access_token="tok", creation_id="page_post-1")
+    assert status == "FINISHED"
+
+
+@pytest.mark.anyio
+async def test_get_container_status_other_non_200_is_in_progress_not_fail_open():
+    """뮤테이션 대상 — 비-200을 전부 FINISHED로 되돌리면(fail-open) 이 테스트가
+    RED여야 한다. 429(rate limit)·5xx(진짜 원인 불명)는 "모른다"를 "끝났다"로
+    넘기면 안 된다 — IN_PROGRESS로 다음 tick 재폴링."""
+    from app.services.facebook_publish import get_container_status
+
+    class _FakeRateLimitClient:
+        async def get(self, url, *, params):
+            return _FakeResponse({"error": {"code": 4, "message": "rate limited"}}, status_code=429)
+
+    class _FakeServerErrorClient:
+        async def get(self, url, *, params):
+            return _FakeResponse({}, status_code=500)
+
+    status, _ = await get_container_status(_FakeRateLimitClient(), access_token="tok", creation_id="video-42")
+    assert status == "IN_PROGRESS"
+
+    status, _ = await get_container_status(_FakeServerErrorClient(), access_token="tok", creation_id="video-42")
+    assert status == "IN_PROGRESS"
 
 
 # ─── 종단 — facebook_sandbox 초안 발행 ────────────────────────────────────────
