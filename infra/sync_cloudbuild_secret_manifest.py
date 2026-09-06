@@ -20,6 +20,20 @@ story #3140 후속 추가분)은 develop 매니페스트가 정본이고 main엔
 2방향 판정(위험 축/저위험 축)은 그대로 유지하면서, "아직 승격 전"이라는 정상 상태를 더 이상
 드리프트로 오판하지 않는다.
 
+story #3552(2026-09-06, 페드루 PO 확定·디디 로컬 재현) — 위 처방이 실 스케줄 run에서
+**무력했다**(2026-09-03~09-06 매일 실패, develop엔 이미 등재된 5개를 여전히 "manifest에
+없음"으로 잡음). 근본 원인은 `actions/checkout@v4` 기본(단일 브랜치 shallow)이
+`remote.origin.fetch`를 `+refs/heads/main:refs/remotes/origin/main` 하나로 좁혀두는
+것 — 그 뒤 `git fetch --depth=1 origin develop`(목적지 refspec 없음)은 **성공은 하지만**
+(exit 0, FETCH_HEAD만 갱신) `refs/remotes/origin/develop` 자체를 안 만든다(narrow
+refspec이라 자동 매핑도 없음). 다음 줄 `git show origin/develop:...`이 "invalid object
+name" exit 128로 죽고, 그게 `CalledProcessError`로 조용히 삼켜져 매번 폴백만 탔다(로컬
+git clone --depth=1 --single-branch --branch main 재현으로 100% 재확認, GCP 인증 불요).
+처방: fetch에 목적지 refspec을 명시(`origin develop:refs/remotes/origin/develop`)해
+narrow refspec과 무관하게 그 ref를 강제로 만든다 + 폴백 시 실패 사유를 stderr에 찍고
+최종 출력에도 "main 단독(develop 미반영)"임을 명시(침묵 폴백 재발 방지, 페드루 PO
+판별축②).
+
 **이 처방이 새로 못 잡게 되는 것**(선언): main엔 아예 없고 develop 매니페스트에만 적힌
 이름이 GCP에도 존재하면(예: 실험 브랜치가 등록했지만 결국 main에 승격 안 시킨 시크릿), 이
 가드는 이제 그걸 "정상"(승격 대기 중)으로 봐준다 — 실제로는 그냥 만들어두고 잊은 고아
@@ -61,11 +75,18 @@ def parse_manifest_text(text: str) -> set[str]:
 def fetch_develop_manifest_text() -> str | None:
     """origin/develop의 manifest 파일 내용을 로컬 clone 안에서 직접 읽는다(git show — 추가
     GCP 권한 불요, 이미 checkout된 로컬 저장소만 씀). 실패(fetch 안 됨·develop에 파일이
-    없음 등)하면 조용히 None — 그 경우 main 단독으로 대조(구 동작으로 안전측 폴백, 회귀는
-    아니고 "완화가 적용 안 됨"일 뿐)."""
+    없음 등)하면 None — 그 경우 main 단독으로 대조(구 동작으로 안전측 폴백)하되, 실패
+    사유는 stderr에 찍는다(story #3552 — 조용히 삼키면 재발을 아무도 못 본다).
+
+    story #3552 — fetch 목적지에 `:refs/remotes/origin/develop`를 명시한다. 이게 없으면
+    `actions/checkout@v4` 기본(단일 브랜치 shallow, `remote.origin.fetch`가 checkout한
+    브랜치 하나로 좁혀짐)인 환경에서 이 fetch 자체는 성공해도(exit 0, FETCH_HEAD만 갱신)
+    `origin/develop` ref가 실제로 안 만들어져 다음 줄 `git show origin/develop:...`이
+    매번 "invalid object name"으로 죽는다 — 실 스케줄 run이 2026-09-03부터 이 상태였다
+    (로컬 narrow-clone 재현으로 확認, GCP 인증 불요)."""
     try:
         subprocess.run(
-            ["git", "fetch", "--depth=1", "origin", "develop"],
+            ["git", "fetch", "--depth=1", "origin", "develop:refs/remotes/origin/develop"],
             cwd=_REPO_ROOT, capture_output=True, text=True, check=True, timeout=30,
         )
         proc = subprocess.run(
@@ -73,19 +94,23 @@ def fetch_develop_manifest_text() -> str | None:
             cwd=_REPO_ROOT, capture_output=True, text=True, check=True, timeout=30,
         )
         return proc.stdout
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        reason = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        print(f"⚠️ develop manifest fetch 실패(main 단독 폴백) — {reason}", file=sys.stderr)
         return None
 
 
-def load_manifest_union() -> set[str]:
+def load_manifest_union() -> tuple[set[str], bool]:
     """story #3272 — 현재 checkout(스케줄 워크플로우=main)의 manifest + develop 브랜치의
     manifest 합집합. develop 텍스트를 못 읽으면(위 fetch_develop_manifest_text 참고)
-    main 단독으로 폴백한다."""
+    main 단독으로 폴백한다. 반환의 두 번째 값(story #3552)=폴백이 실제로 일어났는지 —
+    호출부가 결과 범위(main+develop vs main 단독)를 요약에 반영할 수 있게."""
     manifest = load_manifest()
     develop_text = fetch_develop_manifest_text()
+    fell_back = develop_text is None
     if develop_text is not None:
         manifest |= parse_manifest_text(develop_text)
-    return manifest
+    return manifest, fell_back
 
 
 def _live_gcp_secret_names() -> set[str]:
@@ -122,13 +147,18 @@ def check(manifest: set[str], live: set[str]) -> tuple[bool, list[str]]:
 
 
 def main() -> int:
-    manifest = load_manifest_union()
+    manifest, fell_back = load_manifest_union()
     live = _live_gcp_secret_names()
     ok, lines = check(manifest, live)
     for line in lines:
         print(line)
+    scope = "main 단독(develop 미반영)" if fell_back else "main+develop 합집합"
+    if fell_back:
+        # story #3552 — 폴백이 조용히 결과 범위를 좁혔다는 사실을 요약에도 남긴다(위
+        # fetch_develop_manifest_text가 이미 stderr에 실패 사유를 찍었다).
+        print(f"⚠️ {scope}으로만 대조했습니다 — 위 develop fetch 실패 사유를 확인하세요.")
     if ok:
-        print(f"OK — manifest(main+develop 합집합 {len(manifest)}건)가 GCP 실물과 정확히 일치.")
+        print(f"OK — manifest({scope} {len(manifest)}건)가 GCP 실물과 정확히 일치.")
     return 0 if ok else 1
 
 
