@@ -250,12 +250,13 @@ function BrandLogoPreview({ url, t }: { url?: string; t: ReturnType<typeof useTr
 }
 
 function OrderedListEditor({
-  items, onChange, readOnly, testIdPrefix,
+  items, onChange, readOnly, testIdPrefix, t,
 }: {
   items: string[];
   onChange: (next: string[]) => void;
   readOnly: boolean;
   testIdPrefix: string;
+  t: ReturnType<typeof useTranslations>;
 }) {
   const move = (index: number, delta: number) => {
     const target = index + delta;
@@ -276,8 +277,8 @@ function OrderedListEditor({
           <span>{i + 1}. {item}</span>
           {readOnly ? null : (
             <span className="flex gap-1">
-              <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${item} up`}>↑</Button>
-              <Button size="sm" variant="ghost" disabled={i === items.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${item} down`}>↓</Button>
+              <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t('moveItemUpAction', { item })}>↑</Button>
+              <Button size="sm" variant="ghost" disabled={i === items.length - 1} onClick={() => move(i, 1)} aria-label={t('moveItemDownAction', { item })}>↓</Button>
             </span>
           )}
         </li>
@@ -736,6 +737,7 @@ export default function ContentRulesPage() {
                   onChange={(next) => setRules((r) => ({ ...r, channel_priority: next }))}
                   readOnly={!canEditRules}
                   testIdPrefix="content-rules-channel-priority"
+                  t={t}
                 />
                 {fieldErrors.channel_priority ? <p className="text-xs text-destructive">{fieldErrors.channel_priority}</p> : null}
               </div>

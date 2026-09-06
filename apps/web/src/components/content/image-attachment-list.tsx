@@ -92,7 +92,7 @@ export function ImageAttachmentList({ images, maxCount, disabled, onReorder, onD
               {/* 유나 §17 PASS 권고② 정정(2026-09-06) — aria-label을 지우지 않고
                   N개 버튼이 "몇 번째 이미지"인지 지도록 위치를 붙인다(스크린리더가
                   「삭제」「삭제」만 반복해 듣는 문제 — §17-20① "지우지 마라"는 접근성
-                  이름에 보이는 글자를 빼라는 뜻이지 덧붙이지 말라는 뜻이 아니다). */}
+                  이름에서 보이는 글자를 빼지 말라는 뜻이지 덧붙이지 말라는 뜻이 아니다). */}
               <Button
                 type="button" variant="outline" size="sm" disabled={disabled}
                 onClick={() => onDelete(index)}

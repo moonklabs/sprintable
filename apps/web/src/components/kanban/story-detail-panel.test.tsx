@@ -865,3 +865,28 @@ describe('StoryDetailPanel — 삭제 404/이중발사 처방(story #3169)', () 
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   });
 });
+
+// story #3557(유나 §17-20류 낱말, 페드루 PO 確定 2026-09-06) — 라벨 제거 버튼 접근성
+// 이름이 하드코딩 영문(`Remove ${label.name}`)이라 한국어 화면에서도 스크린리더가
+// 영어로 읽었다 — board.removeItemAction(contentRules.removeItemAction과 같은 문구,
+// 네임스페이스가 안 닿아 형제 키)으로 교체.
+describe('StoryDetailPanel — 라벨 제거 버튼 접근성 이름 i18n(story #3557)', () => {
+  it('라벨 제거 버튼 aria-label이 한국어 화면에서 한국어로 뜬다("{item} 제거")', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/item-labels')) {
+        return { ok: true, json: async () => [{ id: 'il1', label_id: 'l1' }] };
+      }
+      if (url === '/api/labels') {
+        return { ok: true, json: async () => [{ id: 'l1', name: 'bug', color: null }] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const removeBtn = container.querySelector('button[aria-label="bug 제거"]');
+    expect(removeBtn).toBeTruthy();
+  });
+});
