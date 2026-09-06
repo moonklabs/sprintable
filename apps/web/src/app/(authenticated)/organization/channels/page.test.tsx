@@ -87,6 +87,7 @@ function stubFetch(opts: {
   measurementConnections?: {
     key: 'beacon' | 'utm' | 'ga4'; status: string; last_seen_at: string | null; count_7d: number | null;
     settings_path: string | null; property_id?: string | null; property_name?: string | null;
+    reason?: 'expired' | 'revoked' | 'error' | null;
   }[];
   measurementLoadFails?: boolean;
   onMeteringKey?: () => { status: number; body?: unknown };
@@ -996,6 +997,30 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
       .toBe(koMessages.channelConnect.channelReauthAction);
   });
 
+  // story #3583 CHANGES(PO, PR#3935, 2026-09-06) — 계약 보강: needs_reauth에 reason이
+  // 실리면 ConnectionRow와 같은 ReauthNote 낱말을 재사용한다. reason 없으면 note 0.
+  it('⭐needs_reauth — reason이 있으면 ReauthNote 낱말이 그대로 뜬다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'needs_reauth', last_seen_at: null, count_7d: null, settings_path: null, reason: 'revoked' },
+      ],
+    });
+    await mount('owner');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelReauthRevoked);
+  });
+
+  it('needs_reauth — reason이 없으면 note 자체를 안 그린다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'needs_reauth', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+    });
+    await mount('owner');
+    expect(container.textContent).not.toContain(koMessages.channelConnect.channelReauthExpired);
+    expect(container.textContent).not.toContain(koMessages.channelConnect.channelReauthRevoked);
+    expect(container.textContent).not.toContain(koMessages.channelConnect.channelReauthError);
+  });
+
   it('⭐property_pending — 속성 목록을 자동으로 불러오고, 드롭다운+확인 버튼이 뜬다(연결 버튼은 없다)', async () => {
     stubFetch({
       measurementConnections: [
@@ -1013,7 +1038,7 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
     expect((container.querySelector('[data-testid="measurement-ga4-property-confirm"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('property_pending — 속성 목록 로드 실패면 실패 문구만(드롭다운 없음)', async () => {
+  it('property_pending — 속성 목록 로드 실패면 실패 문구+「다시 시도」 버튼(드롭다운 없음)', async () => {
     stubFetch({
       measurementConnections: [
         { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
@@ -1023,6 +1048,49 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
     await mount('owner');
     expect(container.querySelector('[data-testid="measurement-ga4-properties-error"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="measurement-ga4-property-dropdown"]')).toBeNull();
+    expect(container.querySelector('[data-testid="measurement-ga4-properties-retry-button"]')?.textContent)
+      .toBe(koMessages.common.retry);
+  });
+
+  // 유나 CHANGES ④(PR#3935) — 자동 로딩이라 실패 시 「다시 시도」 버튼 없인 재시도할
+  // 방법이 없다. 클릭하면 다시 부르고, 이번엔 성공하면 드롭다운이 뜬다.
+  it('⭐property_pending — 「다시 시도」 클릭 시 목록을 다시 부른다(실패→성공)', async () => {
+    let callCount = 0;
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/measurement-connections/ga4/properties')) {
+        callCount += 1;
+        if (callCount === 1) return { ok: false, status: 500, json: async () => ({ data: null, error: { code: 'INTERNAL' } }) } as Response;
+        return { ok: true, status: 200, json: async () => ({ data: [{ property_id: 'p1', display_name: '뭉클랩 GA4' }] }) } as Response;
+      }
+      return (originalFetch as unknown as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+    }) as typeof fetch;
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-properties-error"]')).not.toBeNull();
+    const retryBtn = container.querySelector('[data-testid="measurement-ga4-properties-retry-button"]') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="measurement-ga4-properties-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="measurement-ga4-property-dropdown"]')).not.toBeNull();
+  });
+
+  // 유나 CHANGES 필수①(PR#3935) — 속성 0개는 드롭다운(빈 목록) 대신 사유 문장.
+  it('⭐property_pending — 속성이 0개면 드롭다운 대신 안내 문장(빈 드롭다운 금지)', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'property_pending', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+      ga4Properties: [],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-property-dropdown"]')).toBeNull();
+    expect(container.querySelector('[data-testid="measurement-ga4-no-properties"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementGa4NoProperties);
   });
 
   it('⭐property_pending — 속성 선택 후 확인 클릭 → select 호출 → 같은 마운트에서 connected로 갱신된다', async () => {
@@ -1086,6 +1154,56 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
     await flush();
     expect(container.querySelector('[data-testid="measurement-ga4-status"]')?.textContent)
       .toBe(koMessages.channelConnect.channelStatusNotConnected);
+  });
+
+  // 유나 CHANGES 필수②(PR#3935, §17-23 ⑤-1) — property_name이 없으면(구버전 응답 등)
+  // 「연결됨 · 」 구분자까지 함께 뺀다.
+  it('⭐connected — property_name이 없으면 구분자(·) 없이 「연결됨」만 뜬다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'connected', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="measurement-ga4-status"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelStatusConnected);
+  });
+
+  // 유나 CHANGES ⑤(PR#3935, 3575 ⑤ 동형) — 응답 있음/응답 없음 두 문장.
+  it('⭐해제 실패(응답 있음, 500) — 상태코드 문장이 뜬다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'connected', last_seen_at: null, count_7d: null, settings_path: null, property_id: 'p1', property_name: '뭉클랩 GA4' },
+      ],
+      onGa4Disconnect: () => ({ status: 500 }),
+    });
+    await mount('owner');
+    const disconnectBtn = container.querySelector('[data-testid="measurement-ga4-disconnect-button"]') as HTMLButtonElement;
+    await act(async () => { disconnectBtn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="measurement-ga4-action-error"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementGa4ActionFailedWithStatus.replace('{status}', '500'));
+  });
+
+  it('⭐해제 실패(응답 없음, 네트워크) — 연결 문장이 뜬다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'connected', last_seen_at: null, count_7d: null, settings_path: null, property_id: 'p1', property_name: '뭉클랩 GA4' },
+      ],
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/measurement-connections/ga4') && init?.method === 'DELETE') {
+        throw new TypeError('network error');
+      }
+      return (originalFetch as unknown as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+    }) as typeof fetch;
+    await mount('owner');
+    const disconnectBtn = container.querySelector('[data-testid="measurement-ga4-disconnect-button"]') as HTMLButtonElement;
+    await act(async () => { disconnectBtn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="measurement-ga4-action-error"]')?.textContent)
+      .toBe(koMessages.channelConnect.measurementGa4ActionFailedNoResponse);
   });
 });
 

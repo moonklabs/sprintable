@@ -2206,11 +2206,13 @@
     "measurementUtmManual": "채널 기본값으로 붙습니다. 링크의 UTM 검사가 켜져 있습니다.",
     "measurementUtmOff": "채널 기본값으로 붙습니다.",
     "measurementUtmSettingsLink": "콘텐츠 규칙에서 바꾸기",
-    "measurementGa4Label": "GA4 연결",
+    "measurementGa4Label": "GA4 유입",
     "measurementGa4PropertySelectPlaceholder": "속성 선택",
-    "measurementGa4PropertiesLoading": "불러오는 중…",
+    "measurementGa4PropertiesLoading": "속성 목록을 불러오는 중…",
     "measurementGa4PropertiesLoadFailed": "속성 목록을 불러오지 못했습니다.",
-    "measurementGa4ActionFailed": "요청에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+    "measurementGa4NoProperties": "이 계정에 GA4 속성이 없습니다. Google Analytics에서 속성을 만든 뒤 다시 연결해 주세요.",
+    "measurementGa4ActionFailedWithStatus": "요청에 실패했습니다 — 서버가 {status}로 응답했습니다.",
+    "measurementGa4ActionFailedNoResponse": "요청에 실패했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.",
     "measurementGa4DisconnectEffect": "연결을 해제하면 앞으로의 유입 수집이 멈춥니다. 지금까지 모인 값은 남습니다."
   },
   "content": {

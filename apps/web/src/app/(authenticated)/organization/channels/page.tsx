@@ -54,6 +54,10 @@ interface MeasurementConnectionItem {
   settings_path: string | null;
   property_id?: string | null;
   property_name?: string | null;
+  // story #3583(PO CONDITIONAL, PR#3935, 2026-09-06) — needs_reauth 계약 보강. 행은
+  // ConnectionRow가 이미 쓰는 ReauthNote 낱말 그대로 재사용(새 문구 0) — reason이
+  // 없으면(구버전 BE 응답 등) note 자체를 안 그린다(모른다≠알려진 사유 하나).
+  reason?: 'expired' | 'revoked' | 'error' | null;
 }
 
 // story #3583(BE 계약, PO 確定 2026-09-06 스토리 본문) — GA4 속성 선택(property_pending
@@ -128,7 +132,9 @@ function MeasurementConnectionsSection({
   // story #3583 — 인증(authorize)·속성 선택(select)·해제(disconnect) 셋 다 이 컴포넌트가
   // 직접 부른다(beacon의 handleShowBeaconKey와 같은 자리 — 상위로 안 올린다).
   const [ga4AuthorizeLoading, setGa4AuthorizeLoading] = useState(false);
-  const [ga4ActionError, setGa4ActionError] = useState(false);
+  // 유나 CHANGES ⑤(PR#3935, 2026-09-06, 3575 ⑤ 동형) — 응답 있음(status)과 응답
+  // 없음(null, 네트워크 자체가 안 닿음)을 갈라 서로 다른 문장을 쓴다. undefined=오류 없음.
+  const [ga4ActionError, setGa4ActionError] = useState<{ status: number | null } | undefined>(undefined);
   const [ga4Properties, setGa4Properties] = useState<Ga4Property[] | null>(null);
   const [ga4PropertiesError, setGa4PropertiesError] = useState(false);
   const [ga4SelectedPropertyId, setGa4SelectedPropertyId] = useState('');
@@ -137,24 +143,27 @@ function MeasurementConnectionsSection({
 
   const handleGa4Authorize = useCallback(async () => {
     setGa4AuthorizeLoading(true);
-    setGa4ActionError(false);
+    setGa4ActionError(undefined);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/measurement-connections/ga4/authorize`, { method: 'POST' });
-      if (!res.ok) { setGa4ActionError(true); return; }
+      if (!res.ok) { setGa4ActionError({ status: res.status }); return; }
       const json = (await res.json().catch(() => null)) as { data?: { authorize_url: string } } | null;
-      if (!json?.data?.authorize_url) { setGa4ActionError(true); return; }
+      if (!json?.data?.authorize_url) { setGa4ActionError({ status: res.status }); return; }
       // story #3583(그라운딩) — 소셜 채널의 GET 기반 BFF 리다이렉트(<a href>)와 달리
       // 이 계약은 POST라 앵커로 못 연다 — fetch 뒤 전체 페이지 리다이렉트.
       window.location.href = json.data.authorize_url;
     } catch {
-      setGa4ActionError(true);
+      setGa4ActionError({ status: null });
       setGa4AuthorizeLoading(false);
     }
   }, [orgId]);
 
   // story #3583(PO 確定 2026-09-06) — property_pending에 들어서면 목록을 자동으로
   // 부른다(별도 「불러오기」 버튼 없음 — beacon의 "시작하기=키 보기"처럼 이 화면
-  // 진입 자체가 요청이다).
+  // 진입 자체가 요청이다). 유나 CHANGES ④(PR#3935) — 자동 로딩이라 실패 시 사람이
+  // 직접 다시 시킬 방법이 없었다 — retryToken을 증가시켜 재요청을 트리거하는
+  // 「다시 시도」 버튼을 둔다.
+  const [ga4PropertiesRetryToken, setGa4PropertiesRetryToken] = useState(0);
   useEffect(() => {
     if (ga4?.status !== 'property_pending') { setGa4Properties(null); return; }
     let cancelled = false;
@@ -168,21 +177,21 @@ function MeasurementConnectionsSection({
       })
       .catch(() => { if (!cancelled) setGa4PropertiesError(true); });
     return () => { cancelled = true; };
-  }, [ga4?.status, orgId]);
+  }, [ga4?.status, orgId, ga4PropertiesRetryToken]);
 
   const handleGa4Select = useCallback(async () => {
     if (!ga4SelectedPropertyId) return;
     setGa4SelectLoading(true);
-    setGa4ActionError(false);
+    setGa4ActionError(undefined);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/measurement-connections/ga4/select`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ property_id: ga4SelectedPropertyId }),
       });
-      if (!res.ok) { setGa4ActionError(true); return; }
+      if (!res.ok) { setGa4ActionError({ status: res.status }); return; }
       onRefresh();
     } catch {
-      setGa4ActionError(true);
+      setGa4ActionError({ status: null });
     } finally {
       setGa4SelectLoading(false);
     }
@@ -192,13 +201,13 @@ function MeasurementConnectionsSection({
   // 상시 문장(measurementGa4DisconnectEffect)이 누르기 前에 이미 서 있다.
   const handleGa4Disconnect = useCallback(async () => {
     setGa4DisconnectLoading(true);
-    setGa4ActionError(false);
+    setGa4ActionError(undefined);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/measurement-connections/ga4`, { method: 'DELETE' });
-      if (!res.ok) { setGa4ActionError(true); return; }
+      if (!res.ok) { setGa4ActionError({ status: res.status }); return; }
       onRefresh();
     } catch {
-      setGa4ActionError(true);
+      setGa4ActionError({ status: null });
     } finally {
       setGa4DisconnectLoading(false);
     }
@@ -277,22 +286,27 @@ function MeasurementConnectionsSection({
         </div>
       ) : null}
 
-      {/* story #3583(페드루 PO 確定 2026-09-06, 유나 §13-9) — 문장 리듬(칩 X), beacon·
-          utm과 같은 자리 규율. 상태 낱말은 3종만 재사용(channelStatus{Connected,
-          NotConnected,ReauthRequired}) — property_pending은 새 낱말을 짓지 않고
-          NotConnected로 접는다(그 대신 이 줄 아래 속성 선택 UI 자체가 "다음 걸음"을
-          보인다). ⚠️낱말 일부(행 라벨·속성 placeholder·로딩/실패 문구)는 유나 §절
-          확定 전 자리표시자 — PR 본문에 명시, 확定 도착 뒤 별도 커밋으로 교체. */}
+      {/* story #3583(페드루 PO 確定 2026-09-06, 유나 §13-9·CHANGES PR#3935) — 문장
+          리듬(칩 X), beacon·utm과 같은 자리 규율. 상태 낱말은 3종만 재사용
+          (channelStatus{Connected,NotConnected,ReauthRequired}) — property_pending은
+          새 낱말을 짓지 않고 NotConnected로 접는다(그 대신 이 줄 아래 속성 선택 UI
+          자체가 "다음 걸음"을 보인다). */}
       {ga4 ? (
         <div className="space-y-2" data-testid="measurement-ga4-row">
           <p className="text-sm font-medium text-foreground">{t('measurementGa4Label')}</p>
           <p className="text-sm text-foreground" data-testid="measurement-ga4-status">
+            {/* 유나 CHANGES 필수②(PR#3935) — property_name이 없으면 「연결됨 · 」
+                구분자까지 함께 뺀다(§17-23 ⑤-1, 낱말만 빼면 구분자가 헛돈다). */}
             {ga4.status === 'connected'
-              ? `${t('channelStatusConnected')} · ${ga4.property_name ?? ''}`
+              ? (ga4.property_name ? `${t('channelStatusConnected')} · ${ga4.property_name}` : t('channelStatusConnected'))
               : ga4.status === 'needs_reauth'
                 ? t('channelStatusReauthRequired')
                 : t('channelStatusNotConnected')}
           </p>
+          {/* 계약 보강(PO, PR#3935) — needs_reauth에 reason이 실리면 ConnectionRow와
+              같은 ReauthNote 낱말을 그대로 재사용한다. reason이 없으면(구버전 응답 등)
+              note 자체를 안 그린다. */}
+          {ga4.status === 'needs_reauth' && ga4.reason ? <ReauthNote reason={ga4.reason} t={t} /> : null}
 
           {ga4.status === 'disconnected' || ga4.status === 'needs_reauth' ? (
             <Button
@@ -306,11 +320,27 @@ function MeasurementConnectionsSection({
           {ga4.status === 'property_pending' ? (
             <div className="space-y-2" data-testid="measurement-ga4-property-select">
               {ga4PropertiesError ? (
-                <p className="text-xs text-destructive" data-testid="measurement-ga4-properties-error">
-                  {t('measurementGa4PropertiesLoadFailed')}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs text-destructive" data-testid="measurement-ga4-properties-error">
+                    {t('measurementGa4PropertiesLoadFailed')}
+                  </p>
+                  {/* 유나 CHANGES ④(PR#3935) — 자동 로딩이라 사람이 직접 다시 시킬
+                      방법이 버튼 없인 없다. */}
+                  <Button
+                    size="sm" variant="outline" onClick={() => setGa4PropertiesRetryToken((n) => n + 1)}
+                    data-testid="measurement-ga4-properties-retry-button"
+                  >
+                    {tCommon('retry')}
+                  </Button>
+                </div>
               ) : !ga4Properties ? (
                 <p className="text-xs text-muted-foreground">{t('measurementGa4PropertiesLoading')}</p>
+              ) : ga4Properties.length === 0 ? (
+                // 유나 CHANGES 필수①(PR#3935) — 속성 0개는 드롭다운(빈 목록)이 아니라
+                // "어디 가서 무엇을 하면 되는지"를 말하는 문장.
+                <p className="text-xs text-muted-foreground" data-testid="measurement-ga4-no-properties">
+                  {t('measurementGa4NoProperties')}
+                </p>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   <select
@@ -351,8 +381,14 @@ function MeasurementConnectionsSection({
             </div>
           ) : null}
 
+          {/* 유나 CHANGES ⑤(PR#3935, 3575 ⑤ 동형) — 응답 있음(status 코드)/응답
+              없음(네트워크 자체가 안 닿음) 두 문장으로 가른다. */}
           {ga4ActionError ? (
-            <p className="text-xs text-destructive" data-testid="measurement-ga4-action-error">{t('measurementGa4ActionFailed')}</p>
+            <p className="text-xs text-destructive" data-testid="measurement-ga4-action-error">
+              {ga4ActionError.status !== null
+                ? t('measurementGa4ActionFailedWithStatus', { status: ga4ActionError.status })
+                : t('measurementGa4ActionFailedNoResponse')}
+            </p>
           ) : null}
         </div>
       ) : null}
