@@ -1329,8 +1329,8 @@
     },
     {
       "file": "tests/test_3550_instagram_carousel.py",
-      "sec": 55.0,
-      "source": "story-3550-instagram-carousel-be(BE 2/2 삭제·재정렬 6건 추가 뒤 재측정 — 로컬 raw pytest 18건 8.62s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 55s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+      "sec": 60.0,
+      "source": "story-3550-instagram-carousel-be(#3910 CI authz 가드 fix — cross-project 404 테스트 2건 추가 뒤 재측정 — 로컬 raw pytest 21건 9.30s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 60s 잠정값. 실 CI 샤드 7 로그 실측: 19건 25.13s — 여유 충분 확인됨, story #3550 그라운딩 코멘트 참고)"
     }
   ]
 }

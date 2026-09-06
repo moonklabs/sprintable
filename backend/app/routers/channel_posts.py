@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.channel_post_version import ChannelPostVersion
+from app.models.pm import Story
 from app.services.content_rules import get_org_content_rules, lint_content
+from app.services.project_auth import require_project_access
 from app.services.channel_posts import (
     ChannelConnectionNotActiveError,
     ChannelImageContainerFailedError,
@@ -652,6 +654,34 @@ async def list_channel_post_images_for_version_endpoint(
     return [_image_response(version, row) for row in image_rows]
 
 
+async def _require_channel_post_draft_project_access(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, member_id: uuid.UUID,
+):
+    """story #3550 BE 2/2 authz 가드 후속(#3910 CI, test_authz_project_scope_coverage.py
+    ::test_no_new_unguarded_id_mutation_routes) — draft는 project-소속 리소스
+    (work_item_id→Story.project_id)라 org_id 일치만으로는 same-org cross-project
+    IDOR가 남는다(리소스 fetch가 project를 안 좁힘). 삭제·재정렬 둘 다 이 헬퍼로
+    통일(같은 리소스 축, 페드루 PO 明示) — `require_project_access`(project_auth.py
+    SSOT)가 실패 시 404(존재-비노출 관례). 반환값은 이후 서비스 호출이 재조회
+    없이 쓸 수 있게 draft 자체."""
+    not_found = HTTPException(
+        status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)},
+    )
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise not_found
+    story = (await db.execute(
+        select(Story).where(Story.id == draft.work_item_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story is None:
+        raise not_found
+    await require_project_access(
+        db, user_id=member_id, project_id=story.project_id, org_id=org_id,
+        not_found_detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)},
+    )
+    return draft
+
+
 @router.delete(
     "/{org_id}/channel-posts/drafts/{draft_id}/assets/{image_id}",
     response_model=list[ChannelPostImageResponse],
@@ -671,6 +701,8 @@ async def delete_channel_post_image_endpoint(
 
     member_id = uuid.UUID(auth.user_id)
     actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    await _require_channel_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, member_id=member_id)
 
     try:
         new_version, remaining = await delete_channel_post_image(
@@ -705,6 +737,8 @@ async def reorder_channel_post_images_endpoint(
 
     member_id = uuid.UUID(auth.user_id)
     actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    await _require_channel_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, member_id=member_id)
 
     try:
         new_version, ordered = await reorder_channel_post_images(

@@ -813,3 +813,105 @@ async def test_list_response_carries_image_id_usable_for_delete_and_reorder():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── authz(#3910 CI 후속, 페드루 PO 明示 2026-09-06) — project-scope 가드 ───────────
+
+
+@pytest.mark.anyio
+async def test_delete_image_cross_project_member_gets_404_not_authorized():
+    """test_authz_project_scope_coverage.py::test_no_new_unguarded_id_mutation_routes
+    후속 — draft가 project-소속 리소스(work_item_id→Story.project_id)임을 실제
+    런타임으로도 검증한다. project A에만 TeamMember로 소속된(org role="member",
+    owner/admin 아님) human이 project B 소속 story의 draft 이미지를 지우려 하면
+    same-org라도 404여야 한다(존재-비노출 관례, cross-project IDOR 막힘 실증)."""
+    from app.main import app
+    from app.models.project import Project
+    from app.models.team import TeamMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_a_id = await _seed_org(s)
+            project_b = Project(id=uuid.uuid4(), org_id=org_id, name="Project B")
+            s.add(project_b)
+            await s.commit()
+            project_b_id = project_b.id
+
+            human_id = await _seed_human(s, org_id, project_a_id, role="member")
+            s.add(TeamMember(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_a_id,
+                user_id=human_id, type="human", name="Project A member",
+            ))
+            await s.commit()
+
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_b_id)  # project B 소속 story
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            [r1] = await _upload_n_images(client, org_id, draft_id, 1)
+            image_id = r1.json()["image_id"]
+
+            r_delete = await client.request(
+                "DELETE", f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/{image_id}",
+            )
+        assert r_delete.status_code == 404, r_delete.text
+        assert r_delete.json()["error"]["code"] == "CHANNEL_POST_DRAFT_NOT_FOUND"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reorder_cross_project_member_gets_404_not_authorized():
+    """delete와 같은 헬퍼(_require_channel_post_draft_project_access) 공유 확인 —
+    reorder도 동일 IDOR 경계에서 막혀야 한다(POST라 authz 스캐너 대상은 아니지만
+    페드루 PO 明示 "같은 세계")."""
+    from app.main import app
+    from app.models.channel_post_image import ChannelPostImage
+    from app.models.project import Project
+    from app.models.team import TeamMember
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_a_id = await _seed_org(s)
+            project_b = Project(id=uuid.uuid4(), org_id=org_id, name="Project B")
+            s.add(project_b)
+            await s.commit()
+            project_b_id = project_b.id
+
+            human_id = await _seed_human(s, org_id, project_a_id, role="member")
+            s.add(TeamMember(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_a_id,
+                user_id=human_id, type="human", name="Project A member",
+            ))
+            await s.commit()
+
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_b_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r1, r2 = await _upload_n_images(client, org_id, draft_id, 2)
+
+            async with Session() as s:
+                images = list((await s.execute(
+                    select(ChannelPostImage).where(ChannelPostImage.version_id == uuid.UUID(r2.json()["version_id"]))
+                    .order_by(ChannelPostImage.position)
+                )).scalars().all())
+            first_id, second_id = str(images[0].id), str(images[1].id)
+
+            r_reorder = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/reorder",
+                json={"image_ids": [second_id, first_id]},
+            )
+        assert r_reorder.status_code == 404, r_reorder.text
+        assert r_reorder.json()["error"]["code"] == "CHANNEL_POST_DRAFT_NOT_FOUND"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
