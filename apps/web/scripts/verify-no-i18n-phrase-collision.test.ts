@@ -356,11 +356,13 @@ describe('scanRepository — 글자·숫자 0개 값 사전 제외(story #3582)'
     expect(symbolOnlyExcluded.has('content.originAuthorUnknown')).toBe(true);
   });
 
-  it('원래 EXEMPT였던 두 쌍은 이제 EXEMPT_PAIRS 등재 없이도 새 충돌로 안 걸린다(규칙이 대신 안다)', () => {
+  it('원래 EXEMPT였던 세 쌍(3402 2·3575 1)은 이제 EXEMPT_PAIRS 등재 없이도 새 충돌로 안 걸린다(규칙이 대신 안다)', () => {
     expect(EXEMPT_PAIRS.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
     expect(EXEMPT_PAIRS.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
+    expect(EXEMPT_PAIRS.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
     const { newFindings } = scanRepository();
     expect(newFindings.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
     expect(newFindings.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
+    expect(newFindings.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
   });
 });
