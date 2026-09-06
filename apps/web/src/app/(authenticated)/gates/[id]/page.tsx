@@ -13,6 +13,7 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
+import { gateTypeLabel } from '@/lib/gate-type-label';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
@@ -40,6 +41,9 @@ export default function GateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('cage');
+  // story #3565 — ccGateType*/ccGateGeneric 키는 'dashboard' 네임스페이스에 산다
+  // (공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는 그대로) — 이 화면 자체 t는 'cage'.
+  const tDashboard = useTranslations('dashboard');
   // 조직/프로젝트 식별(AC) — 현재 탭이 이미 로드해둔 멤버십 목록에서 이름 조회(신규 fetch 0).
   // 크로스 프로젝트 게이트(현재 탭 프로젝트가 아닌 경우)는 매칭 실패 → ID 스니펫 폴백(정직한 값).
   const { orgMemberships, projectMemberships, currentTeamMemberId } = useDashboardContext();
@@ -304,7 +308,9 @@ export default function GateDetailPage() {
                   {/* story #2937(PR#3372, 2026-08-22)로 chip variant 기본 자체가
                       text-foreground로 이행 — PR#3367의 이 지점 className 오버라이드는
                       이제 중복. 클래스가 닫혔으니 지점 처방을 걷는다(PO 지시). */}
-                  <Badge variant="chip">{gate.gate_type}</Badge>
+                  {/* story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — 원시값
+                      대신 사람 낱말(미등재는 일반 「게이트」). */}
+                  <Badge variant="chip">{gateTypeLabel(tDashboard, gate.gate_type)}</Badge>
                 </div>
                 {decisionFacts ? (
                   <p className="text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
