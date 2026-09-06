@@ -1135,7 +1135,12 @@ export default function ChannelPostEditPage() {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', uploadUrl);
-      xhr.setRequestHeader('Content-Type', file.type);
+      // story #3577(유나 헤더 실측·페드루 PO 지적 2026-09-06) — Content-Type을 여기서
+      // 또 세팅하면 호출부가 이미 headers에 실어 보낸 값과 겹쳐 setRequestHeader가
+      // 같은 헤더 이름을 이어붙인다("video/mp4, video/mp4") → GCS V4 서명 불일치로
+      // PUT 403(dev 영상 첨부 100% 실패, 3556 관문). 헤더 출처는 호출부(headers 인자)
+      // 하나뿐 — required_put_headers가 정본, file.type은 그게 없을 때만의 폴백이며
+      // 그 병합은 호출부가 이미 한다({'Content-Type': file.type, ...required_put_headers}).
       for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
