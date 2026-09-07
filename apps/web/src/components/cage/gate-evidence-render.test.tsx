@@ -563,6 +563,116 @@ describe('GateEvidence — 댓글 답변 게이트 봉인 축(story #3517)', () 
 
     expect(container.textContent).not.toContain(koMessages.cage.commentReplyTargetLabel);
   });
+
+  // story #3599(유나 §22-17 ⑥-4, PO 決 2026-09-07) — sealed_content_version이
+  // null인데 봉인 본문은 있는 행(옛 comment_reply 게이트, scope_key가 reply
+  // 단위로 쪼개지기 전)은 「쌍」이 안 서 대조 불가하다. 「덮였습니다」로 단정
+  // 하지 않고 「확인할 수 없습니다」만 말한다 — 자리는 버전·해시 줄이 서던
+  // 그 자리(줄을 새로 만들지 않는다). 뮤테이션(이 분기 제거 → "v" 텍스트가
+  // 다시 보여 RED).
+  it('⑥-4 결정 난(rejected) 행에서 sealed_content_version이 null이면 「확인할 수 없습니다」만 서고 v숫자는 안 뜬다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'rejected', github_check_run_id: null,
+      neutral_facts: { kind: 'comment_reply', target_external_comment_id: 'ext-comment-1' },
+      sealed_content_body: '안녕하세요, 다음 주 월요일에 재입고됩니다.',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
+    expect(container.textContent).not.toMatch(/\bv\d/);
+  });
+
+  // story #3599(유나 §22-17 ⑥-4 조건 갱신, 페드루 PO 정정 2026-09-07) — pending
+  // 옛 게이트(아직 아무도 승인/반려한 적 없음)는 "무엇을 승인했나" 물음 자체가
+  // 안 서므로 캡션이 뜨면 안 된다(지어내지 않는다). 뮤테이션(isResolved 조건
+  // 제거 → 이 pending 표본에도 캡션이 떠 RED).
+  it('⑥-4 pending인데 sealed_content_version이 null이면 캡션이 안 뜬다(결정 前)', async () => {
+    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-1' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
+  });
+
+  // story #3599(페드루 PO 정정 2026-09-07, 그라운딩) — held(일시정지·가역)는
+  // gate.status!=='pending'이지만 판단이 난 게 아니다. void_gate가 resolved_at
+  // 도 채우는 것과 달리(그라운딩 확認, gate_service.py:1592) held는 resolver_id
+  // 만 채우고 판단 자체는 없다 — 어느 조건으로 재도 캡션이 뜨면 안 된다.
+  it('⑥-4 held(일시정지)인데 sealed_content_version이 null이면 캡션이 안 뜬다(판단 아님)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'held', github_check_run_id: null,
+      neutral_facts: { kind: 'comment_reply', target_external_comment_id: 'ext-comment-1' },
+      sealed_content_body: '안녕하세요, 다음 주 월요일에 재입고됩니다.',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
+  });
+
+  // voided는 gate.resolved_at을 채우지만(그라운딩 확認) 승인 판단이 아니라
+  // 행정 무효화다 — resolved_at 기준으로 재면 이 표본이 잘못 캡션을 띄운다
+  // (뮤테이션: isResolved를 `resolved_at !== null`로 바꾸면 이 assert가 RED).
+  it('⑥-4 voided(행정 무효화)인데 sealed_content_version이 null이면 캡션이 안 뜬다(승인 판단 아님)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'voided', github_check_run_id: null,
+      resolved_at: '2026-09-07T01:00:00Z',
+      neutral_facts: { kind: 'comment_reply', target_external_comment_id: 'ext-comment-1' },
+      sealed_content_body: '안녕하세요, 다음 주 월요일에 재입고됩니다.',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
+  });
+
+  it('⑥-4 sealed_content_version이 있으면(신규 3599 게이트) 기존 버전·해시 줄이 그대로 뜨고 확인불가 문구는 없다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'pending', github_check_run_id: null,
+      neutral_facts: { kind: 'comment_reply', target_external_comment_id: 'ext-comment-1' },
+      sealed_content_body: '답변 본문', sealed_content_version: 1, sealed_content_sha256: 'abcdef123456',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('v1');
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
+  });
+
+  // story #3599(유나 §22-17 ⑥-1, 페드루 PO 追加 2026-09-07) — 답변 다이얼로그
+  // (content.commentsReplyAlreadySentCount)와 짝인 승인자 쪽 줄. 게이트 생성
+  // 시점 neutral_facts.sent_replies_count 스냅샷 — 0/없음이면 줄 자체가 없다.
+  // 뮤테이션(alreadySentCount 배선 제거 → 항상 null 취급돼 RED).
+  it('⑥-1 neutral_facts.sent_replies_count>0이면 「이미 보낸 답변 N건」 줄이 대상 댓글 블록에 선다', async () => {
+    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-1', sent_replies_count: 2 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('이 댓글에 이미 보낸 답변 2건');
+  });
+
+  it('⑥-1 sent_replies_count가 0이거나 없으면 그 줄이 없다', async () => {
+    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-1', sent_replies_count: 0 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain('이미 보낸 답변');
+  });
 });
 
 // story #2975 AC4(PO 확定 2026-08-24) — 결재 이력(GET /gates/{id}/activity) 실 응답 shape

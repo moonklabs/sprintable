@@ -1212,6 +1212,15 @@ async def transition_gate(
             # 그 시점의 역사가 사라지므로, append-only인 이 context가 유일한 영속 기록이 된다.
             # merge 게이트가 아니면 애초에 None(무관 필드 — 조용히 무해).
             "head_sha": gate.github_check_run_sha,
+            # story #3599(BE·결함, 페드루 PO 決 2026-09-07) — 게이트 행 자체(sealed_
+            # content_sha256/body)는 이후 같은 슬롯이 재-open되면 새 내용으로 덮인다
+            # (comment_reply는 #3599로 슬롯을 reply 단위로 쪼갰지만, site_post·
+            # channel_post 등 다른 gate_type은 여전히 (work_item, scope_key) 슬롯
+            # 재사용이 정상 동작이다 — 편집→재승인마다 옛 sha가 사라진다). context는
+            # append-only라 "그 결정 시점에 무엇이 봉인돼 있었나"를 여기 스냅샷해야만
+            # 나중에 복원 가능(additive, 기존 키 불변).
+            "sealed_content_sha256": gate.sealed_content_sha256,
+            "sealed_content_version": gate.sealed_content_version,
         },
     )
 

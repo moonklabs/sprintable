@@ -1438,6 +1438,11 @@
       "source": "story-3596-open-reply-draft-additive(PR 개설 前 선제 등재 — 로컬 raw pytest 4건 3.88s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 18s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
+      "file": "tests/test_3599_comment_reply_gate_per_reply.py",
+      "sec": 13.9,
+      "source": "story-3599-comment-reply-gate-per-reply(PR#3955 CI 실측, run 34073227196 — destructive-schema shard 실 wall time)"
+    },
+    {
       "file": "tests/test_3597_ig_fb_connection_status_promote.py",
       "sec": 22.0,
       "source": "story-3597-ig-fb-connection-status-promote(페드루 PO 追加 2026-09-06 — [sandbox:expire-after-publish] 마커 라이브검증 테스트 2건 추가 뒤 재측정. 로컬 raw pytest 6건 3.15s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 22s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
