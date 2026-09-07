@@ -242,14 +242,16 @@ async def test_sandbox_fetch_replies_shows_two_before_epoch_and_one_after(monkey
     )
     assert media_id.endswith(f"-c2del{1000 + sandbox_publish._COMMENT2_DELETE_AFTER_SECONDS}")
 
-    before_items, before_complete = await sandbox_publish.fetch_replies(_FakeClient(), access_token="x", media_id=media_id)
+    before_items, before_complete, before_reported = await sandbox_publish.fetch_replies(_FakeClient(), access_token="x", media_id=media_id)
     assert len(before_items) == 2
     assert before_complete is True
+    assert before_reported == 2, "샌드박스는 페이지네이션이 없어 돌려준 개수가 곧 채널이 말하는 전체 개수"
 
     fake_now[0] = 1000.0 + sandbox_publish._COMMENT2_DELETE_AFTER_SECONDS + 1
-    after_items, after_complete = await sandbox_publish.fetch_replies(_FakeClient(), access_token="x", media_id=media_id)
+    after_items, after_complete, after_reported = await sandbox_publish.fetch_replies(_FakeClient(), access_token="x", media_id=media_id)
     assert len(after_items) == 1
     assert after_complete is True
+    assert after_reported == 1
 
 
 @pytest.mark.anyio
@@ -261,9 +263,9 @@ async def test_sandbox_fetch_replies_without_marker_unaffected_by_time(monkeypat
     fake_now = [1000.0]
     monkeypatch.setattr(sandbox_publish.time, "time", lambda: fake_now[0])
 
-    items_now, _ = await sandbox_publish.fetch_replies(None, access_token="x", media_id="sandbox-media-plain")
+    items_now, _, _reported2 = await sandbox_publish.fetch_replies(None, access_token="x", media_id="sandbox-media-plain")
     fake_now[0] = 999999999.0
-    items_later, _ = await sandbox_publish.fetch_replies(None, access_token="x", media_id="sandbox-media-plain")
+    items_later, _, _reported2 = await sandbox_publish.fetch_replies(None, access_token="x", media_id="sandbox-media-plain")
     assert len(items_now) == 2
     assert len(items_later) == 2
 

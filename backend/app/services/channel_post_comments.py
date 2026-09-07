@@ -119,14 +119,18 @@ def _text_sha256(text: str) -> str:
 
 async def _fetch_replies_raw(
     db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, channel: str, external_id: str | None,
-) -> tuple[list[dict], bool]:
+) -> tuple[list[dict], bool, int | None]:
     """channel별 dispatch(insight_snapshots.py::_fetch_for_snapshot과 동형) — 어댑터가
     supports_fetch_replies를 선언 안 했으면 여기 도달 前에 호출자가 이미 unsupported로
     끝낸다(중복 판정 안 둠). 반환의 두 번째 값(complete)은 페드루 PO REQUIRED
     (2026-09-05, PR#3865 리뷰) — 이번 fetch가 그 publication의 댓글 전체를 봤는지.
     False면 collect_comments_for_publication이 삭제 리컨실을 건너뛴다(첫 페이지만
     보고 "없다=삭제됐다"로 오판하면 다음 페이지 댓글이 매 수집마다 소프트 삭제되는
-    결함이 있었다 — sandbox=항상 2건 고정이라 테스트가 못 잡던 자리).
+    결함이 있었다 — sandbox=항상 2건 고정이라 테스트가 못 잡던 자리). 세 번째 값
+    (story #3618)은 채널이 말하는 전체 댓글 개수(§7 Phase2 「댓글 누락률」 정의의
+    분모) — 각 어댑터 `fetch_replies`가 그대로 3-tuple로 반환해 이 함수는 그대로
+    통과시킨다(새 판정 로직 0, 여기서 조립하지 않음 — 어댑터가 아는 것을 여기서
+    다시 추론하지 않는다).
 
     story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06④) — 채널별 if/elif(threads/
     instagram이 연결 조회·토큰 복호화·에러 매핑을 그대로 중복 구현하던 것)를
@@ -232,7 +236,7 @@ async def collect_comments_for_publication(
     if adapter is None or not adapter.supports_fetch_replies:
         raise CommentCollectionUnsupportedError()
 
-    raw_comments, complete = await _fetch_replies_raw(
+    raw_comments, complete, channel_reported_comment_count = await _fetch_replies_raw(
         db, org_id=org_id, publication_id=publication_id, channel=channel, external_id=external_id,
     )
 
@@ -294,6 +298,7 @@ async def collect_comments_for_publication(
 
     return {
         "fetched": len(fetched_external_ids), "deleted": deleted_count, "captured_at": now, "complete": complete,
+        "channel_reported_comment_count": channel_reported_comment_count,
     }
 
 
@@ -574,6 +579,8 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
 
             row.status = "captured"
             row.captured_at = result["captured_at"]
+            # story #3618 — §7 Phase2 「댓글 누락률」 분모(채널이 말하는 전체 개수).
+            row.channel_reported_comment_count = result["channel_reported_comment_count"]
             # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — 커서 상한에 걸려 이번
             # 수집이 전체를 못 봤으면(complete=False) 삭제 리컨실은 건너뛰었지만
             # upsert 자체는 성공했다 — status는 "captured" 그대로 두고 error_code로만
@@ -729,6 +736,8 @@ async def refresh_comments_now(
 
     schedule_row.status = "captured"
     schedule_row.captured_at = result["captured_at"]
+    # story #3618 — §7 Phase2 「댓글 누락률」 분모(채널이 말하는 전체 개수).
+    schedule_row.channel_reported_comment_count = result["channel_reported_comment_count"]
     # process_due_comment_collections와 동형 — 다 못 봤으면(complete=False) error_code에
     # 만 남긴다(captured 자체는 성공이었다).
     schedule_row.error_code = None if result["complete"] else "COMMENT_COLLECTION_INCOMPLETE_PAGE"

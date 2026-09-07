@@ -127,7 +127,7 @@ async def test_instagram_fetch_replies_normalizes_from_username_to_top_level():
         async def get(self, url, *, params):
             return _FakeResponse()
 
-    items, complete = await fetch_replies(_FakeClient(), access_token="tok", media_id="media-1")
+    items, complete, _reported = await fetch_replies(_FakeClient(), access_token="tok", media_id="media-1")
     assert complete is True
     assert items[0]["username"] == "sprintable_demo"
     assert items[0]["from_id"] == "u1"
@@ -157,7 +157,7 @@ async def test_instagram_fetch_replies_follows_cursor_until_exhausted():
             call_count["n"] += 1
             return resp
 
-    items, complete = await fetch_replies(_FakeClient(), access_token="tok", media_id="media-1")
+    items, complete, _reported = await fetch_replies(_FakeClient(), access_token="tok", media_id="media-1")
     assert [i["id"] for i in items] == ["c1", "c2"]
     assert complete is True
     assert call_count["n"] == 2
@@ -281,13 +281,13 @@ async def test_instagram_reply_failure_raises():
 async def test_instagram_sandbox_fetch_replies_deterministic_two_comments():
     from app.services.instagram_sandbox_publish import fetch_replies
 
-    items, complete = await fetch_replies(None, access_token="x", media_id="media-1")
+    items, complete, _reported = await fetch_replies(None, access_token="x", media_id="media-1")
     assert complete is True
     assert [i["id"] for i in items] == [
         "sandbox-ig-comment-media-1-1", "sandbox-ig-comment-media-1-2",
     ]
 
-    items2, _ = await fetch_replies(None, access_token="x", media_id="media-1")
+    items2, _, _reported2 = await fetch_replies(None, access_token="x", media_id="media-1")
     assert items == items2, "결정적이어야 함(같은 media_id는 매번 같은 값)"
 
 
@@ -322,7 +322,7 @@ async def test_collect_comments_for_publication_dispatches_instagram(monkeypatch
             )
 
             async def _fake_fetch(client, *, access_token, media_id):
-                return [{"id": "c1", "text": "댓글", "username": "u1", "timestamp": datetime.now(timezone.utc).isoformat()}], True
+                return [{"id": "c1", "text": "댓글", "username": "u1", "timestamp": datetime.now(timezone.utc).isoformat()}], True, None
 
             monkeypatch.setattr(instagram_publish, "fetch_replies", _fake_fetch)
             await collect_comments_for_publication(

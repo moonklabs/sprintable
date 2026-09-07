@@ -5299,6 +5299,15 @@
     "followUpClose": "닫기",
     "followUpSuccessMessage": "후속 조치 스토리를 만들었습니다.",
     "followUpSuccessLink": "스토리 보기",
-    "followUpErrorGeneric": "후속 조치를 만들지 못했습니다."
+    "followUpErrorGeneric": "후속 조치를 만들지 못했습니다.",
+    "measuredMetricsTitle": "실측 지표",
+    "measuredAttributionRate": "귀속률",
+    "measuredCommentMissRate": "누락률",
+    "measuredFollowUpRate": "생성률",
+    "measuredReasonNoPageviews": "집계할 페이지뷰가 없습니다",
+    "measuredReasonNoCommentData": "채널이 원본 댓글 수를 아직 안 줬습니다",
+    "measuredReasonNoSnapshots": "집계할 발행 스냅샷이 없습니다",
+    "measuredReasonWindowUnsupported": "90일 기간은 이 실측을 지원하지 않습니다(7·30일만)",
+    "measuredMetricsErrorGeneric": "실측값을 불러오지 못했습니다."
   }
 }

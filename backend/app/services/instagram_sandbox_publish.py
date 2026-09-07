@@ -183,9 +183,12 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
     }
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+async def fetch_replies(
+    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+) -> tuple[list[dict], bool, int | None]:
     """sandbox_publish.py::fetch_replies와 동형 — media_id 하나엔 항상 같은 2건
-    (순서 고정), complete=True 고정(페이지네이션 개념 없음). AC8류
+    (순서 고정), complete=True 고정(페이지네이션 개념 없음). 세 번째 값(채널이
+    말하는 전체 개수, story #3618)도 동형 — 항상 `len(items)`. AC8류
     comment-2-deleted 시각 시뮬레이션은 이 조각(③) 스코프 밖(원 스토리 §3516
     AC8이 이미 threads/기존 sandbox에서 검증한 마커라 여기서 중복 재발명 안 함).
 
@@ -198,7 +201,8 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             "SANDBOX_INSTAGRAM_TOKEN_EXPIRED",
             "sandbox: [sandbox:expire-after-publish] 마커 시뮬레이션(발행 후 토큰 만료)", status_code=401,
         )
-    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
+    items = [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)]
+    return items, True, len(items)
 
 
 async def reply(

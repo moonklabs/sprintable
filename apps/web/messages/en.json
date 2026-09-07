@@ -5299,6 +5299,15 @@
     "followUpClose": "Close",
     "followUpSuccessMessage": "Follow-up story created.",
     "followUpSuccessLink": "View story",
-    "followUpErrorGeneric": "Couldn't create the follow-up."
+    "followUpErrorGeneric": "Couldn't create the follow-up.",
+    "measuredMetricsTitle": "Measured metrics",
+    "measuredAttributionRate": "Attribution rate",
+    "measuredCommentMissRate": "Comment miss rate",
+    "measuredFollowUpRate": "Follow-up creation rate",
+    "measuredReasonNoPageviews": "No pageviews to measure",
+    "measuredReasonNoCommentData": "Channel hasn't reported original comment counts yet",
+    "measuredReasonNoSnapshots": "No publication snapshots to measure",
+    "measuredReasonWindowUnsupported": "The 90-day window isn't supported for this measurement (7 or 30 days only)",
+    "measuredMetricsErrorGeneric": "Couldn't load the measurements."
   }
 }

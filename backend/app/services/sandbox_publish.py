@@ -248,12 +248,19 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
 _COMMENT2_DELETE_MARKER_RE = re.compile(r"-c2del(\d+)$")
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+async def fetch_replies(
+    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+) -> tuple[list[dict], bool, int | None]:
     """AC(조각①) "기본 2건" — media_id 하나엔 항상 같은 2건(순서도 고정, 테스트가
     인덱스로 단언 가능). 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — threads가
     커서 상한에 걸리면 `complete=False`를 낼 수 있어 `(items, complete)` 튜플
     계약으로 통일했다. sandbox는 언제나 2건 전체를 한 번에 주니 `complete=True`
     고정(페이지네이션 개념 자체가 없다).
+
+    story #3618 — 세 번째 값(채널이 말하는 전체 개수)은 항상 `len(items)`다.
+    sandbox엔 summary API가 없지만, 페이지네이션 자체가 없어 "이번에 돌려준 것"이
+    이미 "전체"와 같다(§7 Phase2 「댓글 누락률」 정의 — 샌드박스는 seed 수를 원본
+    수로 문서 명시).
 
     story #3516 AC8 — media_id가 `-c2del{epoch}` 접미사를 달고 있고(퍼블리시 시점에
     [sandbox:comment-2-deleted] 마커를 봤을 때만) 지금이 그 epoch를 지났으면 댓글
@@ -261,8 +268,10 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
     라이브에서 재현하는 유일한 신호(서버 메모리 0, media_id 문자열 자체가 시계)."""
     match = _COMMENT2_DELETE_MARKER_RE.search(media_id)
     if match is not None and time.time() >= int(match.group(1)):
-        return [_deterministic_comment(media_id=media_id, index=1)], True
-    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
+        items = [_deterministic_comment(media_id=media_id, index=1)]
+        return items, True, len(items)
+    items = [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)]
+    return items, True, len(items)
 
 
 async def reply(

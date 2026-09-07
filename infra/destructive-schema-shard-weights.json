@@ -1476,6 +1476,16 @@
       "file": "tests/test_3605_worker_exception_ordering.py",
       "sec": 15.0,
       "source": "story-3605-oauth-connection-kind-generalize(PR 개설 前 선제 등재 — 로컬 raw pytest 2건 2.81s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 15s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3618_phase2_metrics.py",
+      "sec": 25.0,
+      "source": "story-3618-phase2-metrics(PR 개설 前 선제 등재 — 로컬 raw pytest 9건 4.14s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 25s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3618_phase2_metrics_endpoint.py",
+      "sec": 20.0,
+      "source": "story-3618-phase2-metrics-endpoint(PR 개설 前 선제 등재 — test_3502_insights_board_endpoints.py와 동형 app.main 1회 import 비용 포함. 로컬 raw pytest 3건 3.29s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

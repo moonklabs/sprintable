@@ -288,20 +288,24 @@ _COMMENTS_FIELDS = "id,message,from,created_time"
 _REPLIES_MAX_PAGES = 10
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
-    """이 post의 댓글 목록 + 완전 수집 여부. `channel_post_comments.py::
-    collect_comments_for_publication`은 각 항목의 top-level `raw.get("text")`/
-    `raw.get("username")`/`raw.get("timestamp")`를 읽는 계약(sandbox/threads raw
-    모양과 동일) — Facebook Page 댓글 원시 응답은 `message`/`from.name`/
-    `created_time`이라(instagram_publish.py::fetch_replies의 `from.username`
-    끌어올림과 동형 사상) 여기서 text/username/timestamp로 끌어올려 얹는다(원본
-    필드도 raw에 그대로 보존, 유실 없음)."""
+async def fetch_replies(
+    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+) -> tuple[list[dict], bool, int | None]:
+    """이 post의 댓글 목록 + 완전 수집 여부 + 채널이 말하는 전체 개수(story #3618,
+    threads_publish.py::fetch_replies와 동형 — summary=true opt-in 요청, 없으면
+    None="미제공"). `channel_post_comments.py::collect_comments_for_publication`은
+    각 항목의 top-level `raw.get("text")`/`raw.get("username")`/`raw.get("timestamp")`
+    를 읽는 계약(sandbox/threads raw 모양과 동일) — Facebook Page 댓글 원시 응답은
+    `message`/`from.name`/`created_time`이라(instagram_publish.py::fetch_replies의
+    `from.username` 끌어올림과 동형 사상) 여기서 text/username/timestamp로 끌어올려
+    얹는다(원본 필드도 raw에 그대로 보존, 유실 없음)."""
     from app.services.threads_publish import ThreadsPublishError, error_from_response
 
     items: list[dict] = []
+    reported_total: int | None = None
     after_cursor: str | None = None
     for _ in range(_REPLIES_MAX_PAGES):
-        params = {"fields": _COMMENTS_FIELDS, "access_token": access_token}
+        params = {"fields": _COMMENTS_FIELDS, "access_token": access_token, "summary": "true"}
         if after_cursor:
             params["after"] = after_cursor
         resp = await client.get(_COMMENTS_URL_TMPL.format(post_id=media_id), params=params)
@@ -316,10 +320,13 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             item["from_id"] = frm.get("id")
             item["timestamp"] = raw.get("created_time")
             items.append(item)
+        summary_total = (body.get("summary") or {}).get("total_count")
+        if isinstance(summary_total, int):
+            reported_total = summary_total
         after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
         if not after_cursor:
-            return items, True
-    return items, False
+            return items, True, reported_total
+    return items, False, reported_total
 
 
 async def reply(
