@@ -186,7 +186,7 @@ describe('MeasuredMetricsCards — 반응형 그리드(story #3620 CHANGES)', ()
 
     const grid = container.querySelector('[data-testid="measured-metric-card"]')?.parentElement;
     expect(grid?.className).toContain('grid-cols-2');
-    expect(grid?.className).toContain('md:grid-cols-4');
+    expect(grid?.className).toContain('lg:grid-cols-4');
   });
 });
 

@@ -208,7 +208,7 @@ export function MeasuredMetricsCards({ orgId, windowDays }: { orgId: string; win
     <div className="space-y-2" data-testid="measured-metrics-section">
       <p className="text-xs font-medium text-muted-foreground">{t('measuredMetricsTitle')}</p>
       {loading && !data && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="measured-metrics-loading">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2" data-testid="measured-metrics-loading">
           {[1, 2, 3, 4].map((i) => <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />)}
         </div>
       )}
@@ -216,7 +216,7 @@ export function MeasuredMetricsCards({ orgId, windowDays }: { orgId: string; win
         <p className="text-xs text-destructive" data-testid="measured-metrics-error">{t('measuredMetricsErrorGeneric')}</p>
       )}
       {data && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <MetricCard label={t('measuredAttributionRate')} metric={data.utm_attribution_rate} t={t} tContent={tContent} />
           <MetricCard label={t('measuredCommentMissRate')} metric={data.comment_miss_rate} t={t} tContent={tContent} />
           <MetricCard label={t('measuredFollowUpRate')} metric={data.follow_up_creation_rate} t={t} tContent={tContent} />
