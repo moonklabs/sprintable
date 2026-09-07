@@ -59,5 +59,57 @@ def main() -> int:
     return 0
 
 
+# story #3647 AC2 — selftest 3(있음→통과·없음→실패·형식 틀림→실패) + PO 지시 v7 표본.
+# 이 repo-root 스크립트는 backend/ 패키지 밖이라 pytest 수집 경로에 안 잡힌다(conftest
+# 없음) — `ci.yml`의 기존 관례(`verify-no-new-repeated-row-action-names -- --selftest`)
+# 를 그대로 따라 스크립트 자신에 --selftest 플래그로 픽스처를 심는다(새 테스트 러너
+# 배선 0).
+_SELFTEST_CASES: list[tuple[str, str, bool]] = [
+    (
+        "session+model 둘 다 있음(v4) → 통과",
+        "## QA verdict: approved (qa:pass)\n**Head:** `abc1234`\ncodex session: 5b6f1a2c-9d3e-4f10-8a7b-1c2d3e4f5a6b\nmodel: gpt-6-astra\n",
+        True,
+    ),
+    (
+        "session+model 둘 다 있음(v7, 페드루 PO 지시 예시) → 통과",
+        "## QA verdict: approved (qa:pass)\n**Head:** `abc1234`\ncodex session: 01a07be9-cad1-7b10-aaa1-91a7d0c1efe6\nmodel: gpt-6-astra\n",
+        True,
+    ),
+    (
+        "둘 다 없음(구형 verdict) → 실패",
+        "## QA verdict: approved (qa:pass)\n**Head:** `abc1234`\nAPPROVE — 로그인 흐름 확認.\n",
+        False,
+    ),
+    (
+        "session 줄이 있지만 UUID 형식이 틀림(짧은 hex) → 실패",
+        "## QA verdict: approved (qa:pass)\ncodex session: abc123\nmodel: gpt-6-astra\n",
+        False,
+    ),
+    (
+        "model 줄만 없음(session은 정상) → 실패",
+        "## QA verdict: approved (qa:pass)\ncodex session: 5b6f1a2c-9d3e-4f10-8a7b-1c2d3e4f5a6b\n",
+        False,
+    ),
+]
+
+
+def _run_selftest() -> int:
+    failures = 0
+    for label, body, expect_ok in _SELFTEST_CASES:
+        missing = missing_codex_session_lines(body)
+        actual_ok = not missing
+        status = "OK" if actual_ok == expect_ok else "FAIL"
+        if status == "FAIL":
+            failures += 1
+        print(f"[{status}] {label} — missing={missing!r}")
+    if failures:
+        print(f"selftest: {failures}/{len(_SELFTEST_CASES)} 실패")
+        return 1
+    print(f"selftest: {len(_SELFTEST_CASES)}/{len(_SELFTEST_CASES)} 통과")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        raise SystemExit(_run_selftest())
     raise SystemExit(main())
