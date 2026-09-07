@@ -60,6 +60,17 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # "update_event_definition")가 먼저 있어 이 항목까지 안 내려온다(admin이 이 events보다
     # 리스트 앞쪽 — tool_group()은 첫 매치를 반환).
     ("events", ("event",)),
+    # story #3614 CHANGES(2026-09-07, 페드루 PO 判定) — sprintable_withdraw_channel_post_draft
+    # 가 키워드 미매칭으로 core에 떨어졌는데, build_toolset_catalog()의 "core" 그룹은 오직
+    # _ALWAYS_ALLOWED만 나열해(tool_group()의 fallback "core"와는 별개 축) 카탈로그 커버리지
+    # 검증(test_toolset_catalog.py::test_every_tool_covered_exactly_once)에서 누락으로
+    # 잡혔다. 최초 처방(_ALWAYS_ALLOWED 임시 등재)은 페드루 PO가 CHANGES로 반려 — 그 목록은
+    # "scope 막론 항상 허용"(is_tool_allowed 무조건 True) 의미라, 초안을 폐기하는 변이 도구를
+    # 두면 role scope 없는 키도 호출 가능해지는 권한 확대였다(커버리지 공백을 권한으로 메운
+    # 지름길). 정공법 — 콘텐츠 전용 그룹을 여기서 신설(이 스토리 범위는 이 한 도구만 —
+    # site_post/channel_connection/comment/insight 등 다른 콘텐츠 도구 키워드 확장은 story
+    # #3631(진행 중)이 이어받는다).
+    ("content", ("channel_post",)),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -135,14 +146,6 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 스코프 키가 이 도구를 403으로 못 본다. vendored 사본과 동기화 필수
     # (sprintable_mcp/toolset.py).
     "sprintable_list_agent_cards",
-    # story #3614 CHANGES(2026-09-07, 페드루 PO 判定) — sprintable_withdraw_channel_post_draft
-    # 등록 직후 build_toolset_catalog() 커버리지 검증(test_toolset_catalog.py::test_every_
-    # tool_covered_exactly_once)에서 발견: tool_group()이 매칭 키워드 없음→"core"를 반환해도
-    # 그 자체로는 카탈로그에 안 나타난다(카탈로그의 "core" 그룹은 오직 _ALWAYS_ALLOWED만
-    # 나열 — tool_group()의 fallback "core"와 이 목록은 별개 축). 콘텐츠 전용 toolset 그룹은
-    # story #3631(진행 중)이 신설한다 — 그 그룹이 서면 이 항목은 거기로 옮기고 여기서 뺀다
-    # (임시 조치, always-allow 의미 확대가 목적이 아니라 커버리지 공백 임시 해소).
-    "sprintable_withdraw_channel_post_draft",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -448,6 +451,10 @@ _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     # default_tool_groups에 아직 이 토큰을 가진 role이 없다(선생님 승인 게이트 — 데이터
     # 마이그 없이 여기 등록만으로는 아무 role도 자동으로 이 도구를 못 쓴다, fail-closed).
     "events",
+    # story #3614 CHANGES — 콘텐츠 그룹, events와 동일 이유로 fail-closed(등록만으로는
+    # 아무 role도 자동으로 이 도구를 못 쓴다, default_tool_groups에 "content" 토큰을 가진
+    # role이 아직 없다). 다른 콘텐츠 도구 편입은 story #3631.
+    "content",
 )
 
 

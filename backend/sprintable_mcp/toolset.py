@@ -52,6 +52,9 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # list_event_definitions. admin 뒤에 두는 이유는 순서 의존(emit_event가 substring "event"를
     # 포함 — admin보다 앞에 두면 기존 sprintable_emit_event 분류가 깨진다).
     ("events", ("event",)),
+    # story #3614 CHANGES(2026-09-07) — 백엔드 SSOT와 동기화. 콘텐츠 그룹(이 스토리는
+    # channel_post 키워드만 — 다른 콘텐츠 도구 키워드 확장은 story #3631).
+    ("content", ("channel_post",)),
 ]
 
 _CORE = "core"
@@ -108,9 +111,6 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 안 두면 스코프 키(대부분의 role_template)에서 403으로 안 보인다. 백엔드 SSOT와 동기화
     # (app/services/mcp_toolset.py).
     "sprintable_list_agent_cards",
-    # story #3614 CHANGES(2026-09-07) — 백엔드 SSOT와 동기화. 카탈로그 커버리지 임시 해소
-    # (story #3631이 콘텐츠 전용 그룹을 신설하면 그쪽으로 옮기고 여기서 뺀다).
-    "sprintable_withdraw_channel_post_draft",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

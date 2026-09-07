@@ -63,6 +63,11 @@ _RESTRICTIVE_VOCAB = (
     "rewards", "analytics", "agent_runs", "audit", "webhooks", "notifications",
     "meetings", "retro", "standup", "docs", "chat", "sprints", "hypotheses",
     "epics", "tasks", "stories", "canvas", "core", "admin",
+    # story #3614 CHANGES(2026-09-07) — test_migration_group_vocab_matches_live_all_groups가
+    # 이 리터럴을 살아있는 ALL_GROUPS와 계속 대조한다(신규 그룹 신설 시 갱신 신호). "content"
+    # 그룹 신설로 추가(이벤트류처럼 이 마이그 자체와 의미 충돌하는 토큰이 아니라 그냥 신규
+    # 그룹이라 여기 포함이 맞다 — "events" 제외 사유는 이 그룹에 해당 안 됨).
+    "content",
 )
 
 
