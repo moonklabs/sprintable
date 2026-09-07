@@ -3887,6 +3887,37 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
   });
 
+  // story #3615 CHANGES(유나 재판정 2026-09-07) — handleCreateReplyDraft의 errorMessage가
+  // extractBackendErrorMessage(user_message 계약)를 거치지 않고 error.message를 직접
+  // 읽던 것을 고쳤다. user_message가 message와 다르면 user_message가 떠야 이 fix가
+  // 실제로 작동한다는 것을 증명한다(existing_reply_id 없는 일반 실패 — 레이스 복구
+  // 분기와 다른 코드 경로).
+  it('일반 「답변」 임시저장 실패(existing_reply_id 없음)에서 user_message가 원문 message보다 우선한다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+      onCommentReplyDraft: () => ({
+        status: 422,
+        body: { data: null, error: { code: 'SOME_OTHER_CODE', message: '원문(진단용): field=x', user_message: '지금은 답변을 만들 수 없습니다.' }, meta: null },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const replyBtn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    await act(async () => { replyBtn.click(); });
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(textarea, '내가 막 쓰던 것'); textarea.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+
+    expect(document.querySelector('[data-testid="comments-reply-error"]')?.textContent).toBe('지금은 답변을 만들 수 없습니다.');
+  });
+
   it('「답변」 상신 409(대상 삭제) — 서버 문구가 그대로 뜬다', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,

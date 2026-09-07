@@ -508,7 +508,13 @@ export default function ChannelPostEditPage() {
         // 이어가게 한다.
         return {
           ok: false,
-          errorMessage: body?.error?.message ?? body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric'),
+          // story #3615 CHANGES(유나 재판정) — 이 자리만 extractBackendErrorMessage를
+          // 안 거치고 error.message를 직접 읽었다(같은 파일 다른 8곳은 헬퍼 경유) —
+          // 지금은 두 문자열이 같아 차이가 없어도 계약의 구멍이다(BE가 나중에 이
+          // 코드에 user_message를 다르게 채우면 이 자리만 조용히 원문을 계속 보인다).
+          // 헬퍼를 먼저 보고, existingReplyId는 헬퍼가 안 다루는 3596 전용 필드라
+          // 기존처럼 별도로 뽑는다.
+          errorMessage: extractBackendErrorMessage(body, t) ?? body?.error?.message ?? body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric'),
           existingReplyId: body?.error?.existing_reply_id,
         };
       }
