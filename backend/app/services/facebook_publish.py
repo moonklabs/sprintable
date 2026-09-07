@@ -38,7 +38,7 @@ async def create_container(
     (message=text) 단일 콜로 **이미 발행까지 끝낸다** — 반환값은 Meta가 준 실제
     post id(모듈 docstring 참고 — publish_container는 이 값을 그대로 되돌려줄 뿐
     추가 호출을 안 한다)."""
-    from app.services.threads_publish import ThreadsPublishError
+    from app.services.threads_publish import ThreadsPublishError, error_from_response
 
     if image_url:
         url = f"{_GRAPH_BASE}/{threads_user_id}/photos"
@@ -48,9 +48,7 @@ async def create_container(
         params = {"access_token": access_token, "message": text}
     resp = await client.post(url, params=params)
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "FACEBOOK_CREATE_POST_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("FACEBOOK_CREATE_POST_FAILED", resp)
     body = resp.json()
     # /photos 응답은 {"id": <photo_id>, "post_id": <page_post_id>} — 페이지 피드에
     # 실제로 뜨는 건 post_id 쪽(⚠️미확認, Meta 문서 지식). /feed 응답은 {"id": <post_id>}뿐.
@@ -77,7 +75,7 @@ async def create_carousel_container(
     ⚠️미확認(facebook_publish.py 상단 딱지와 동형 — `attached_media` 파라미터
     shape·`published=false`가 실제로 동작하는지는 Meta 문서 지식, 재확認 전
     라이브 왕복 금지)."""
-    from app.services.threads_publish import ThreadsPublishError
+    from app.services.threads_publish import ThreadsPublishError, error_from_response
 
     photo_ids: list[str] = []
     for image_url in image_urls:
@@ -86,9 +84,7 @@ async def create_carousel_container(
             params={"access_token": access_token, "url": image_url, "published": "false"},
         )
         if resp.status_code != 200:
-            raise ThreadsPublishError(
-                "FACEBOOK_CREATE_CAROUSEL_CHILD_FAILED", resp.text[:500], status_code=resp.status_code,
-            )
+            raise error_from_response("FACEBOOK_CREATE_CAROUSEL_CHILD_FAILED", resp)
         photo_id = resp.json().get("id")
         if not photo_id:
             raise ThreadsPublishError(
@@ -105,9 +101,7 @@ async def create_carousel_container(
         params["message"] = text
     resp = await client.post(f"{_GRAPH_BASE}/{threads_user_id}/feed", params=params)
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "FACEBOOK_CREATE_CAROUSEL_PARENT_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("FACEBOOK_CREATE_CAROUSEL_PARENT_FAILED", resp)
     body = resp.json()
     post_id = body.get("post_id") or body.get("id")
     if not post_id:
@@ -144,7 +138,7 @@ async def create_reels_container(
     `get_container_status`의 실 폴링이 처리 완료를 확認한다. 커버(`cover_url`)는
     finish 파라미터로 실어 보낸다(⚠️미확認 — 파라미터명 `thumb`/`cover_url` 어느
     쪽인지 재확認 필요)."""
-    from app.services.threads_publish import ThreadsPublishError
+    from app.services.threads_publish import ThreadsPublishError, error_from_response
 
     if video_url is None:
         raise ThreadsPublishError(
@@ -262,13 +256,11 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
     재확認 필요하나 Instagram과 달리 이 엔드포인트 자체의 존재는 Meta 문서에서
     통상적으로 다뤄지는 축이라 instagram_publish.py::delete_media의 미구현 판단과는
     다르게 구현한다 — supports_unpublish=True 선언과 짝)."""
-    from app.services.threads_publish import ThreadsPublishError
+    from app.services.threads_publish import ThreadsPublishError, error_from_response
 
     resp = await client.delete(f"{_GRAPH_BASE}/{media_id}", params={"access_token": access_token})
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "FACEBOOK_DELETE_POST_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("FACEBOOK_DELETE_POST_FAILED", resp)
 
 
 async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> str | None:
@@ -304,7 +296,7 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
     `created_time`이라(instagram_publish.py::fetch_replies의 `from.username`
     끌어올림과 동형 사상) 여기서 text/username/timestamp로 끌어올려 얹는다(원본
     필드도 raw에 그대로 보존, 유실 없음)."""
-    from app.services.threads_publish import ThreadsPublishError
+    from app.services.threads_publish import ThreadsPublishError, error_from_response
 
     items: list[dict] = []
     after_cursor: str | None = None
@@ -314,9 +306,7 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             params["after"] = after_cursor
         resp = await client.get(_COMMENTS_URL_TMPL.format(post_id=media_id), params=params)
         if resp.status_code != 200:
-            raise ThreadsPublishError(
-                "FACEBOOK_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
-            )
+            raise error_from_response("FACEBOOK_FETCH_REPLIES_FAILED", resp)
         body = resp.json()
         for raw in body.get("data") or []:
             frm = raw.get("from") or {}
@@ -341,16 +331,14 @@ async def reply(
     유저 id가 URL에 안 들어감) — 시그니처는 dispatch 통일을 위해 그대로 유지
     (sandbox_publish.py·threads_publish.py·instagram_publish.py와 동일 관례).
     응답엔 permalink 개념이 없어(댓글은 post가 아님) 두 번째 반환값은 항상 None."""
-    from app.services.threads_publish import ThreadsPublishError
+    from app.services.threads_publish import ThreadsPublishError, error_from_response
 
     resp = await client.post(
         _COMMENT_REPLY_URL_TMPL.format(comment_id=reply_to_id),
         params={"message": text, "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "FACEBOOK_REPLY_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("FACEBOOK_REPLY_FAILED", resp)
     body = resp.json()
     external_reply_id = body.get("id")
     if not external_reply_id:

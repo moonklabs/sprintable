@@ -193,13 +193,25 @@ async def apply_refresh_result(
     await db.commit()
 
 
+async def apply_connection_failure(
+    db: AsyncSession, *, connection: ChannelConnection, status: str, error_message: str,
+) -> None:
+    """story #3598 — `apply_refresh_failure`(status="expired" 고정)의 status 일반화판.
+    `_classify_threads_error`가 code==190/OAuthException을 expired|revoked로 세분화한
+    뒤 이 함수로 정확한 status를 남긴다(모델 컬럼 주석 그대로 active|expired|revoked|
+    error 중 하나). last_error는 provider 원문 그대로(가공은 화면 몫, apply_refresh_
+    failure와 동일 규율)."""
+    connection.status = status
+    connection.last_error = error_message[:2000]
+    await db.commit()
+
+
 async def apply_refresh_failure(db: AsyncSession, *, connection: ChannelConnection, error_message: str) -> None:
     """AC4 — 갱신 실패 시 status=expired(자동 재시도 스톰 방지, owner가 재인증해야 벗어남).
     last_error는 provider 원문 그대로 저장(페드루 PO 확定 2026-09-03 07:09Z) — 사람이 읽을
-    말로 가공하는 건 화면(FE) 몫."""
-    connection.status = "expired"
-    connection.last_error = error_message[:2000]
-    await db.commit()
+    말로 가공하는 건 화면(FE) 몫. story #3598 — apply_connection_failure(status="expired")
+    의 특수판으로 위임(기존 cron 갱신-실패 호출부 시그니처 무변경, 회귀 0)."""
+    await apply_connection_failure(db, connection=connection, status="expired", error_message=error_message)
 
 
 def decrypt_for_use(connection: ChannelConnection) -> str | None:

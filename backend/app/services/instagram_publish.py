@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import httpx
 
-from app.services.threads_publish import ThreadsPublishError
+from app.services.threads_publish import ThreadsPublishError, error_from_response
 
 _GRAPH_BASE = "https://graph.instagram.com/v25.0"
 _MEDIA_CONTAINER_URL_TMPL = _GRAPH_BASE + "/{ig_user_id}/media"
@@ -67,9 +67,7 @@ async def create_container(
         params["caption"] = text
     resp = await client.post(_MEDIA_CONTAINER_URL_TMPL.format(ig_user_id=threads_user_id), params=params)
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_CREATE_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_CREATE_CONTAINER_FAILED", resp)
     body = resp.json()
     creation_id = body.get("id")
     if not creation_id:
@@ -104,9 +102,7 @@ async def create_carousel_container(
             params={"access_token": access_token, "image_url": image_url, "is_carousel_item": "true"},
         )
         if resp.status_code != 200:
-            raise ThreadsPublishError(
-                "INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED", resp.text[:500], status_code=resp.status_code,
-            )
+            raise error_from_response("INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED", resp)
         child_body = resp.json()
         child_id = child_body.get("id")
         if not child_id:
@@ -120,9 +116,7 @@ async def create_carousel_container(
         params["caption"] = text
     resp = await client.post(_MEDIA_CONTAINER_URL_TMPL.format(ig_user_id=threads_user_id), params=params)
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_CREATE_CAROUSEL_PARENT_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_CREATE_CAROUSEL_PARENT_FAILED", resp)
     body = resp.json()
     creation_id = body.get("id")
     if not creation_id:
@@ -155,9 +149,7 @@ async def create_reels_container(
         params["caption"] = text
     resp = await client.post(_MEDIA_CONTAINER_URL_TMPL.format(ig_user_id=threads_user_id), params=params)
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_CREATE_REELS_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_CREATE_REELS_CONTAINER_FAILED", resp)
     body = resp.json()
     creation_id = body.get("id")
     if not creation_id:
@@ -186,9 +178,7 @@ async def get_container_status(
         params={"fields": "status_code", "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_CONTAINER_STATUS_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_CONTAINER_STATUS_FAILED", resp)
     body = resp.json()
     status = body.get("status_code")
     if not status:
@@ -208,9 +198,7 @@ async def publish_container(
         params={"creation_id": creation_id, "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_PUBLISH_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_PUBLISH_CONTAINER_FAILED", resp)
     body = resp.json()
     media_id = body.get("id")
     if not media_id:
@@ -232,9 +220,7 @@ async def get_publishing_limit(
         params={"fields": "quota_usage,config", "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_PUBLISHING_LIMIT_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_PUBLISHING_LIMIT_FAILED", resp)
     body = resp.json()
     data = body.get("data") or [{}]
     row = data[0] if data else {}
@@ -272,9 +258,7 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
         params={"fields": "permalink", "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_GET_PERMALINK_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_GET_PERMALINK_FAILED", resp)
     body = resp.json()
     permalink = body.get("permalink")
     return str(permalink) if permalink else None
@@ -309,9 +293,7 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             params["after"] = after_cursor
         resp = await client.get(_COMMENTS_URL_TMPL.format(media_id=media_id), params=params)
         if resp.status_code != 200:
-            raise ThreadsPublishError(
-                "INSTAGRAM_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
-            )
+            raise error_from_response("INSTAGRAM_FETCH_REPLIES_FAILED", resp)
         body = resp.json()
         for raw in body.get("data") or []:
             frm = raw.get("from") or {}
@@ -344,9 +326,7 @@ async def reply(
         params={"message": text, "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "INSTAGRAM_REPLY_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("INSTAGRAM_REPLY_FAILED", resp)
     body = resp.json()
     external_reply_id = body.get("id")
     if not external_reply_id:
