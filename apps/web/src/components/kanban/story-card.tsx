@@ -177,6 +177,26 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const menuRef = useRef<HTMLDivElement>(null);
   const statusMenuRef = useRef<HTMLDivElement>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  // Esc/항목선택으로 메뉴를 닫을 때만 포커스를 카드로 되돌린다(클릭-밖/스크롤/리사이즈로
+  // 닫힐 때는 사용자가 이미 다른 곳에 의도를 두고 있어 포커스를 뺏지 않는다).
+  const returnFocusOnCloseRef = useRef(false);
+  const closeContextMenu = useCallback((returnFocus: boolean) => {
+    setContextMenuOpen(false);
+    setStatusMenuOpen(false);
+    if (returnFocus) {
+      returnFocusOnCloseRef.current = true;
+    }
+  }, []);
+  // story #3664 CHANGES(유나 QA, 2026-09-07) — 서브메뉴(상태 변경)에서 Esc는 전체 메뉴를
+  // 닫는 게 아니라 "상위로 복귀"(서브메뉴만 닫고 트리거 버튼에 포커스)여야 한다. 상위
+  // closeContextMenu(카드로 포커스 복귀)와 별도 경로 — statusMenuOpen 열려 있을 때만 쓴다.
+  const returnFocusToStatusTriggerRef = useRef(false);
+  const closeStatusSubmenu = useCallback((returnFocus: boolean) => {
+    setStatusMenuOpen(false);
+    if (returnFocus) {
+      returnFocusToStatusTriggerRef.current = true;
+    }
+  }, []);
   // #1942: 두 메뉴 다 position:fixed + 뷰포트 좌표 clamp(clampToViewport)로 연다 — 트리거(카드/
   // 버튼)의 화면 위치와 무관하게 항상 뷰포트 안에 들어온다(카드-상대 anchor는 카드 자체가 뷰포트
   // 밖일 때 답이 없다는 게 까심 QA 적출).
@@ -213,6 +233,20 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     data: { story },
     disabled: locked,
   });
+  // story #3664 — dnd-kit의 listeners.onKeyDown(키보드 드래그 픽업/이동)을 그대로 두되,
+  // Shift+F10/ContextMenu 키만 가로채 메뉴를 연다(handleCardKeyDown). 나머지 키는 그대로
+  // dnd-kit에 위임 — 드래그 키보드 조작 회귀 0.
+  const { onKeyDown: dndOnKeyDown, ...dndListenersWithoutKeyDown } = listeners ?? {};
+  // story #3664(유나 발견 — role=menu/menuitem 없는 맨 div) — 카드 자체가 메뉴 트리거다
+  // (우클릭 대상). cardRef는 dnd-kit의 setNodeRef와 별개 로컬 ref(합성 콜백으로 합친다) —
+  // 키보드로 메뉴를 열 때(Shift+F10) 좌표 기준이 필요하고, Esc로 닫을 때 포커스를 돌려줄
+  // 대상이 필요하다(둘 다 setNodeRef만으로는 못 읽는다 — dnd-kit 내부가 그 DOM 노드를
+  // 다른 용도로 관리하지 이 컴포넌트에 되돌려주지 않는다).
+  const cardRef = useRef<HTMLDivElement>(null);
+  const setCardRefs = useCallback((node: HTMLDivElement | null) => {
+    setNodeRef(node);
+    cardRef.current = node;
+  }, [setNodeRef]);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -239,14 +273,13 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       const insideMenu = menuRef.current?.contains(target);
       const insideStatusMenu = statusMenuRef.current?.contains(target);
       if (!insideMenu && !insideStatusMenu) {
-        setContextMenuOpen(false);
-        setStatusMenuOpen(false);
+        closeContextMenu(false);
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [contextMenuOpen]);
+  }, [contextMenuOpen, closeContextMenu]);
 
   // Close menu on Escape
   useEffect(() => {
@@ -254,14 +287,54 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setContextMenuOpen(false);
-        setStatusMenuOpen(false);
+        // story #3664 CHANGES — 서브메뉴가 열려 있으면 Esc는 서브메뉴만 닫고 상위(트리거
+        // 버튼)로 복귀한다. 상위 메뉴 자체는 그대로 열어 둔다(전체 종료가 아님).
+        if (statusMenuOpen) {
+          closeStatusSubmenu(true);
+        } else {
+          closeContextMenu(true);
+        }
       }
     };
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
+  }, [contextMenuOpen, statusMenuOpen, closeContextMenu, closeStatusSubmenu]);
+
+  // story #3664 AC2 — 메뉴가 열리면 첫 항목으로 포커스를 옮긴다(ARIA menu 관례: 열림=포커스
+  // 진입). 포털이 이 effect보다 먼저 커밋되므로 querySelector 시점엔 이미 DOM에 있다.
+  useEffect(() => {
+    if (!contextMenuOpen) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    first?.focus();
   }, [contextMenuOpen]);
+
+  // story #3664 AC2 — Esc/항목선택으로 닫힐 때만(closeContextMenu(true)) 포커스를 카드로
+  // 되돌린다. contextMenuOpen이 false로 커밋된 *다음* effect 타이밍에 실행돼야 포털이 이미
+  // 사라진 뒤라 focus() 대상(카드)이 안전하다.
+  useEffect(() => {
+    if (contextMenuOpen) return;
+    if (!returnFocusOnCloseRef.current) return;
+    returnFocusOnCloseRef.current = false;
+    cardRef.current?.focus();
+  }, [contextMenuOpen]);
+
+  // story #3664 CHANGES(유나 QA) — 서브메뉴가 열리면 첫 항목으로 포커스(상위 메뉴 열림과
+  // 동형 관례).
+  useEffect(() => {
+    if (!statusMenuOpen) return;
+    const first = statusMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    first?.focus();
+  }, [statusMenuOpen]);
+
+  // story #3664 CHANGES — 서브메뉴가 Esc로 닫히면(closeStatusSubmenu(true)) 트리거 버튼으로
+  // 포커스를 되돌린다(상위 메뉴 복귀).
+  useEffect(() => {
+    if (statusMenuOpen) return;
+    if (!returnFocusToStatusTriggerRef.current) return;
+    returnFocusToStatusTriggerRef.current = false;
+    statusTriggerRef.current?.focus();
+  }, [statusMenuOpen]);
 
   // 열려있는 동안 스크롤/리사이즈되면 닫는다(까심 QA 지적 ②) — 보드 컬럼의 overflow-x-auto
   // 가로스크롤은 캡처 리스너로만 잡힌다(스크롤 이벤트는 버블링하지 않음). 재측정 대신 close가
@@ -270,8 +343,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   useEffect(() => {
     if (!contextMenuOpen) return;
     const closeOnScrollOrResize = () => {
-      setContextMenuOpen(false);
-      setStatusMenuOpen(false);
+      closeContextMenu(false);
     };
     window.addEventListener('scroll', closeOnScrollOrResize, true);
     window.addEventListener('resize', closeOnScrollOrResize);
@@ -279,7 +351,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       window.removeEventListener('scroll', closeOnScrollOrResize, true);
       window.removeEventListener('resize', closeOnScrollOrResize);
     };
-  }, [contextMenuOpen]);
+  }, [contextMenuOpen, closeContextMenu]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -290,32 +362,70 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     setContextMenuOpen(true);
   }, []);
 
+  // story #3664 AC2 — 키보드로 메뉴 열기(Shift+F10 또는 Menu/ContextMenu 키, OS 표준
+  // "컨텍스트 메뉴 열기" 제스처). 우클릭과 동형으로 카드의 바운딩 사각형을 앵커로 쓴다
+  // (마우스 좌표가 없으니 카드 자체의 화면 위치를 대신 쓴다 — statusTriggerRef가 서브메뉴를
+  // 여는 자리와 같은 패턴).
+  const handleCardKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      e.preventDefault();
+      const rect = cardRef.current?.getBoundingClientRect();
+      if (rect) {
+        setMenuPos({ top: rect.bottom, left: clampToViewport(rect.left) });
+      }
+      setContextMenuOpen(true);
+      return;
+    }
+    dndOnKeyDown?.(e);
+  }, [dndOnKeyDown]);
+
+  // story #3664 — 메뉴/서브메뉴 컨테이너 공용 키보드 순회(위/아래 화살표로 role="menuitem"
+  // 사이 이동, wrap). Enter/Space는 네이티브 <button> 활성화로 이미 동작해 별도 처리 0.
+  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    // story #3664 CHANGES(유나 QA) — 서브메뉴는 body portal이라 DOM 트리 상 상위 메뉴 밖에
+    // 있지만, React는 JSX(포털을 만든) 트리를 기준으로 synthetic event를 버블링한다 — 그대로
+    // 두면 서브메뉴 안의 방향키가 상위 메뉴의 이 같은 핸들러에도 도달해 e.currentTarget이
+    // 상위 메뉴 div로 바뀌어(현재 컨테이너 기준 querySelectorAll) 엉뚱한(상위) 항목 집합에서
+    // 포커스를 옮긴다. stopPropagation으로 "방향키는 서브메뉴 안에서만 순회"를 보장한다.
+    e.stopPropagation();
+    const container = e.currentTarget;
+    const items = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    const direction = e.key === 'ArrowDown' ? 1 : -1;
+    const nextIndex = currentIndex === -1
+      ? (direction === 1 ? 0 : items.length - 1)
+      : (currentIndex + direction + items.length) % items.length;
+    items[nextIndex]?.focus();
+  }, []);
+
   const handleEdit = useCallback(() => {
     if (onEdit) {
       onEdit(story.id);
     }
-    setContextMenuOpen(false);
-  }, [story.id, onEdit]);
+    closeContextMenu(true);
+  }, [story.id, onEdit, closeContextMenu]);
 
   const handleChangeStatusClick = useCallback((newStatus: string) => {
     if (onChangeStatus) {
       onChangeStatus(story.id, newStatus);
     }
-    setContextMenuOpen(false);
-    setStatusMenuOpen(false);
-  }, [story.id, onChangeStatus]);
+    closeContextMenu(true);
+  }, [story.id, onChangeStatus, closeContextMenu]);
 
   const handleAssign = useCallback(() => {
     if (onAssign) {
       onAssign(story.id);
     }
-    setContextMenuOpen(false);
-  }, [story.id, onAssign]);
+    closeContextMenu(true);
+  }, [story.id, onAssign, closeContextMenu]);
 
   const handleDelete = useCallback(() => {
     setDeleteConfirmOpen(true);
-    setContextMenuOpen(false);
-  }, []);
+    closeContextMenu(true);
+  }, [closeContextMenu]);
 
   const confirmDelete = useCallback(() => {
     setDeleteConfirmOpen(false);
@@ -335,12 +445,18 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
 
   return (
     <div
-      ref={setNodeRef}
+      ref={setCardRefs}
       style={style}
       {...(locked ? {} : attributes)}
-      {...(locked ? {} : listeners)}
+      {...(locked ? {} : dndListenersWithoutKeyDown)}
       onClick={onClick}
       onContextMenu={handleContextMenu}
+      onKeyDown={locked ? undefined : handleCardKeyDown}
+      // story #3664 AC1 — 카드=메뉴 트리거. aria-haspopup/expanded로 "이 카드가 여는 메뉴가
+      // 있다·지금 열려 있다"를 스크린리더에 알린다(role은 dnd-kit attributes가 이미
+      // "button"으로 준다 — 새로 안 얹는다).
+      aria-haspopup="menu"
+      aria-expanded={contextMenuOpen}
       title={story.story_number ? `#${story.story_number}` : story.title}
       className="group relative cursor-pointer transition"
     >
@@ -511,6 +627,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {contextMenuOpen && menuPos && createPortal(
         <div
           ref={menuRef}
+          role="menu"
+          tabIndex={-1}
+          onKeyDown={handleMenuKeyDown}
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
           // story #2998 로드맵 PR-A(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
           className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]"
@@ -518,6 +637,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         >
           {onEdit && (
             <button
+              role="menuitem"
               onClick={handleEdit}
               className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
             >
@@ -528,6 +648,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             <div className="relative">
               <button
                 ref={statusTriggerRef}
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={statusMenuOpen}
                 onClick={() => {
                   const rect = statusTriggerRef.current?.getBoundingClientRect();
                   if (rect) {
@@ -543,14 +666,18 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
               {statusMenuOpen && statusMenuPos && createPortal(
                 <div
                   ref={statusMenuRef}
+                  role="menu"
+                  tabIndex={-1}
+                  onKeyDown={handleMenuKeyDown}
                   style={{ position: 'fixed', top: statusMenuPos.top, left: statusMenuPos.left, width: MENU_WIDTH }}
                   // story #2998 로드맵 PR-A(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
-          className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]"
+                  className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {statuses.map((status) => (
                     <button
                       key={status.id}
+                      role="menuitem"
                       onClick={() => handleChangeStatusClick(status.id)}
                       className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
                     >
@@ -564,6 +691,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           )}
           {onAssign && (
             <button
+              role="menuitem"
               onClick={handleAssign}
               className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
             >
@@ -572,6 +700,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           )}
           {onDelete && (
             <button
+              role="menuitem"
               onClick={handleDelete}
               className="w-full rounded-sm px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint"
             >
