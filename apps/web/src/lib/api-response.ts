@@ -56,6 +56,33 @@ export function apiUpgradeRequired(message: string, meterType: string, status = 
   return apiError('UPGRADE_REQUIRED', message, status, { meterType });
 }
 
+// story #3644(3632 후속, AC8) — 직접 fetch(proxyToFastapi 미경유) 12 라우트가
+// `await fastapiRes.json()`을 !ok 검사 「위」에서 불러, 상류가 비-JSON(CF가
+// 502/504를 자기 HTML로 바꿔치는 자리)을 내면 여기서 던져 이미 적혀 있는 폴백
+// 봉투 줄에 영영 도달 못 하고 Next.js가 자기 500 HTML을 낸다(로그인·토큰
+// 갱신·조직 전환 경로 포함). text()로 읽어 안전하게 파싱 — 실패하면 빈 객체를
+// 반환해 호출부의 기존 `json.error ?? {...fallback}` 줄이 그대로 그 폴백을
+// 쓰게 한다(새 봉투 형 발명 0, 폴백은 각 라우트가 이미 갖고 있던 것).
+export async function safeJsonParse(res: Response): Promise<Record<string, unknown>> {
+  // 기존 라우트 테스트 다수가 fetch 응답을 `{status, json: async () => ...}` 형
+  // 플레인 객체로 mock한다(.text() 없음) — 실 Response에서는 .text()로 읽어
+  // JSON.parse가 실 파싱 실패를 잡아내지만, 그 mock 형에서는 .text가 함수가
+  // 아니므로 이미 파싱된 값을 내는 .json()으로 안전하게 폴백한다.
+  if (typeof res.text !== 'function') {
+    try {
+      return (await res.json()) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 /** 자주 쓰는 에러 숏컷 */
 export const ApiErrors = {
   unauthorized: () => apiError('UNAUTHORIZED', 'Unauthorized', 401),

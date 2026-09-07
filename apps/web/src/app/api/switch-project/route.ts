@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { SP_AT_COOKIE, SP_RT_COOKIE, getServerSession } from '@/lib/db/server';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { safeJsonParse } from '@/lib/api-response';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -25,7 +26,7 @@ export async function POST(request: Request): Promise<Response> {
     body: JSON.stringify({ project_id: body.project_id }),
   });
 
-  const json = await fastapiRes.json() as {
+  const json = await safeJsonParse(fastapiRes) as {
     data?: { access_token: string; refresh_token: string; token_type: string; expires_in?: number };
     error?: { code: string; message: string };
   };

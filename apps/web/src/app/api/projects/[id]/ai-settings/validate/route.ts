@@ -71,7 +71,8 @@ async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: 
     };
 
     const config = endpoints[provider];
-    if (!config) return 'invalid';
+    // PO 決(2026-09-07) — provider 설정 자체가 없는 건 "못 잼"이지 "무효"가 아니다.
+    if (!config) return 'unknown';
 
     if (provider === 'anthropic') {
       const res = await fetch(config.url, {
