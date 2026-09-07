@@ -1162,10 +1162,14 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                 sender_id=system_member.id,
                 # story #3379 AC — 단정형("상신하시겠습니까?") 대신 두 갈래 문구. "논의됐다"가
                 # 곧 "상신 의사"라고 단정하지 않는다(최저 지능 에이전트가 그대로 따라도 논의
-                # 중인 문서가 결재로 안 가도록).
+                # 중인 문서가 결재로 안 가도록). 유나 카피 판정(2026-09-07, PR #4011 게이트
+                # CHANGES 1) — "결재 상신"은 doc 도메인 카탈로그에 0건, draft 상태 문서에서
+                # 사용자가 실제로 보는 낱말은 doc-status-rail.tsx가 못 박은 「검토 요청」
+                # (docs.docGateRequestReview). "결재"는 결과/이력의 말(결재 이력)이라 작성자
+                # 행위 문구와 층이 다름 — 「검토 요청」으로 교체.
                 content=(
-                    f"'{doc_title}' 문서가 채팅에서 논의됐습니다 — 이 내용이 확정본이면 결재 "
-                    "상신을, 아직 고칠 게 있으면 편집을 진행해 주세요."
+                    f"'{doc_title}' 문서가 채팅에서 논의됐습니다 — 이 내용이 확정본이면 검토 "
+                    "요청을, 아직 고칠 게 있으면 편집을 진행해 주세요."
                 ),
                 mentioned_ids=[doc_author_id],
                 msg_metadata={
