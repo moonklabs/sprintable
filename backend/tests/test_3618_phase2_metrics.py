@@ -54,13 +54,13 @@ def _configure_secrets(monkeypatch):
 
 @pytest.mark.anyio
 async def test_utm_attribution_rate_denominator_zero_is_not_measured():
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, _ = await _seed_org(s)
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["utm_attribution_rate"]
             assert metric["value"] is None
             assert metric["reason_code"] == "NO_PAGEVIEWS"
@@ -73,7 +73,7 @@ async def test_utm_attribution_rate_denominator_zero_is_not_measured():
 async def test_utm_attribution_rate_normal_value():
     from app.models.org_pageview_daily import OrgPageviewDaily
     from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
@@ -92,7 +92,7 @@ async def test_utm_attribution_rate_normal_value():
             ))
             await s.commit()
 
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["utm_attribution_rate"]
             assert metric["reason_code"] is None
             assert metric["numerator"] == 30
@@ -107,13 +107,13 @@ async def test_utm_attribution_rate_normal_value():
 
 @pytest.mark.anyio
 async def test_comment_miss_rate_no_data_is_not_measured():
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, _ = await _seed_org(s)
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["comment_miss_rate"]
             assert metric["value"] is None
             assert metric["reason_code"] == "NO_COMMENT_DATA"
@@ -127,7 +127,7 @@ async def test_comment_miss_rate_channel_not_reporting_is_not_measured():
     (구 어댑터·미지원 채널) 저장된 댓글이 있어도 "미측정"이어야 한다 — None을 0으로
     오판하면 "누락 0%"라는 거짓 안심을 준다."""
     from app.models.channel_post_comment import CommentCollectionSchedule
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
@@ -142,7 +142,7 @@ async def test_comment_miss_rate_channel_not_reporting_is_not_measured():
             ))
             await s.commit()
 
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["comment_miss_rate"]
             assert metric["value"] is None
             assert metric["reason_code"] == "NO_COMMENT_DATA"
@@ -153,7 +153,7 @@ async def test_comment_miss_rate_channel_not_reporting_is_not_measured():
 @pytest.mark.anyio
 async def test_comment_miss_rate_normal_value():
     from app.models.channel_post_comment import ChannelPostComment, CommentCollectionSchedule
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
@@ -173,7 +173,7 @@ async def test_comment_miss_rate_normal_value():
                 ))
             await s.commit()
 
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["comment_miss_rate"]
             assert metric["reason_code"] is None
             assert metric["numerator"] == 3
@@ -188,13 +188,13 @@ async def test_comment_miss_rate_normal_value():
 
 @pytest.mark.anyio
 async def test_follow_up_creation_rate_no_snapshots_is_not_measured():
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, _ = await _seed_org(s)
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["follow_up_creation_rate"]
             assert metric["value"] is None
             assert metric["reason_code"] == "NO_SNAPSHOTS"
@@ -207,7 +207,7 @@ async def test_follow_up_creation_rate_zero_is_a_real_value_not_unmeasured():
     """AC 명시 — 스냅샷은 있는데(측정됐다) 참조 링크가 하나도 없으면 「—」가 아니라
     진짜 0(만든 적 없음이 사실)."""
     from app.models.insight_snapshot import InsightSnapshot
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
@@ -223,7 +223,7 @@ async def test_follow_up_creation_rate_zero_is_a_real_value_not_unmeasured():
             ))
             await s.commit()
 
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["follow_up_creation_rate"]
             assert metric["reason_code"] is None, "측정 자체는 됐다(스냅샷 존재) — None이면 안 됨"
             assert metric["value"] == 0.0
@@ -241,7 +241,7 @@ async def test_follow_up_creation_rate_direct_and_indirect_matches():
     from app.models.channel_post_comment import ChannelPostComment
     from app.models.evidence import Evidence
     from app.models.insight_snapshot import InsightSnapshot
-    from app.services.phase2_metrics import compute_phase2_metrics
+    from app.services.measured_metrics import compute_measured_metrics
 
     engine, Session = await _session_factory()
     try:
@@ -278,7 +278,7 @@ async def test_follow_up_creation_rate_direct_and_indirect_matches():
             ))
             await s.commit()
 
-            result = await compute_phase2_metrics(s, org_id=org_id, days=7)
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
             metric = result["follow_up_creation_rate"]
             assert metric["denominator"] == 3
             assert metric["numerator"] == 2

@@ -1,7 +1,13 @@
-"""story #3618(Phase2·BE+FE·실측, 페드루 PO 確定 2026-09-07) — 블루프린트 v3 §7
-Phase 2 「실측」 열 3종을 제품이 스스로 센다: UTM 귀속률·댓글 누락률·후속 작업
-생성률. 계측 없이는 완료 판정을 PO 손셈으로만 할 수 있었다(AARRR 렌즈 — 「미측정」이
-1급 답, 계측 장치가 없으면 그 장치가 스토리).
+"""story #3618(BE+FE·실측, 페드루 PO 確定 2026-09-07) — 블루프린트 v3 §7 Phase 2
+「실측」 열 3종을 제품이 스스로 센다: UTM 귀속률·댓글 누락률·후속 작업 생성률.
+계측 없이는 완료 판정을 PO 손셈으로만 할 수 있었다(AARRR 렌즈 — 「미측정」이 1급
+답, 계측 장치가 없으면 그 장치가 스토리).
+
+페드루 PO CHANGES(2026-09-07, 유나 낱말 판정) — 모듈명·엔드포인트를 `phase2_
+metrics`/`phase2-metrics`에서 `measured_metrics`/`measured-metrics`로 옮겼다
+(이름에 "Phase 2" 같은 블루프린트 내부 단계명을 넣지 않는다 — 단계가 끝나면
+이름이 거짓이 되는 클래스). 응답 필드(`utm_attribution_rate` 등)는 그대로
+(additive 계약 불변).
 
 세 정의(실물 대조 확定, PR 본문 첫 절과 동일):
 
@@ -183,7 +189,7 @@ async def _compute_follow_up_creation_rate(
     }
 
 
-async def compute_phase2_metrics(db: AsyncSession, *, org_id: uuid.UUID, days: int) -> dict[str, Any]:
+async def compute_measured_metrics(db: AsyncSession, *, org_id: uuid.UUID, days: int) -> dict[str, Any]:
     """AC1 — days는 7|30(호출부가 검증). 「기간」은 오늘을 포함한 N일(오늘·어제·
     …·N-1일 전) — `pageview_counter.py::get_beacon_status`의 count_7d와 동일
     off-by-one 규약(페드루 PO REQUIRED 2026-09-06, #3895 리뷰 그대로 재사용)."""

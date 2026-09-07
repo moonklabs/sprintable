@@ -22,7 +22,7 @@ from app.services.insights_board import (
     create_publication_follow_up,
     list_insights_board,
 )
-from app.services.phase2_metrics import compute_phase2_metrics
+from app.services.measured_metrics import compute_measured_metrics
 from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["insights-board"])
@@ -76,17 +76,17 @@ class InsightsBoardResponse(BaseModel):
     next_cursor: str | None
 
 
-class Phase2MetricValue(BaseModel):
+class MeasuredMetricValue(BaseModel):
     value: float | None
     numerator: int
     denominator: int
     reason_code: str | None
 
 
-class Phase2MetricsResponse(BaseModel):
-    utm_attribution_rate: Phase2MetricValue
-    comment_miss_rate: Phase2MetricValue
-    follow_up_creation_rate: Phase2MetricValue
+class MeasuredMetricsResponse(BaseModel):
+    utm_attribution_rate: MeasuredMetricValue
+    comment_miss_rate: MeasuredMetricValue
+    follow_up_creation_rate: MeasuredMetricValue
     computed_at: datetime
 
 
@@ -165,14 +165,14 @@ async def create_publication_follow_up_endpoint(
     return FollowUpCreateResponse(**result)
 
 
-@router.get("/{org_id}/insights/phase2-metrics", response_model=Phase2MetricsResponse)
-async def get_phase2_metrics_endpoint(
+@router.get("/{org_id}/insights/measured-metrics", response_model=MeasuredMetricsResponse)
+async def get_measured_metrics_endpoint(
     org_id: uuid.UUID,
     days: int = Query(default=7),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth: AuthContext = Depends(get_current_user),
-) -> Phase2MetricsResponse:
+) -> MeasuredMetricsResponse:
     """story #3618 — 블루프린트 §7 Phase 2 실측 열 3종. GET(read)이라 인증만(휴먼·
     에이전트 모두, get_insights_board_endpoint와 동형 권한 폭)."""
     if org_id != verified_org_id:
@@ -180,7 +180,7 @@ async def get_phase2_metrics_endpoint(
     if days not in (7, 30):
         raise HTTPException(
             status_code=422,
-            detail={"code": "PHASE2_METRICS_INVALID_DAYS", "message": "days는 7 또는 30만 허용합니다."},
+            detail={"code": "MEASURED_METRICS_INVALID_DAYS", "message": "days는 7 또는 30만 허용합니다."},
         )
-    result = await compute_phase2_metrics(db, org_id=org_id, days=days)
-    return Phase2MetricsResponse(**result)
+    result = await compute_measured_metrics(db, org_id=org_id, days=days)
+    return MeasuredMetricsResponse(**result)

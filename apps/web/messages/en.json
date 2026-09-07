@@ -5299,14 +5299,14 @@
     "followUpSuccessMessage": "Follow-up story created.",
     "followUpSuccessLink": "View story",
     "followUpErrorGeneric": "Couldn't create the follow-up.",
-    "phase2MetricsTitle": "Measured rates",
-    "phase2AttributionRate": "Attribution rate",
-    "phase2CommentMissRate": "Comment miss rate",
-    "phase2FollowUpRate": "Follow-up creation rate",
-    "phase2Unmeasured": "—",
-    "phase2ReasonNoPageviews": "No pageviews to measure",
-    "phase2ReasonNoCommentData": "Channel hasn't reported original comment counts yet",
-    "phase2ReasonNoSnapshots": "No publication snapshots to measure",
-    "phase2MetricsErrorGeneric": "Couldn't load the measurements."
+    "measuredMetricsTitle": "Measured metrics",
+    "measuredAttributionRate": "Attribution rate",
+    "measuredCommentMissRate": "Comment miss rate",
+    "measuredFollowUpRate": "Follow-up creation rate",
+    "measuredReasonNoPageviews": "No pageviews to measure",
+    "measuredReasonNoCommentData": "Channel hasn't reported original comment counts yet",
+    "measuredReasonNoSnapshots": "No publication snapshots to measure",
+    "measuredReasonWindowUnsupported": "The 90-day window isn't supported for this measurement (7 or 30 days only)",
+    "measuredMetricsErrorGeneric": "Couldn't load the measurements."
   }
 }

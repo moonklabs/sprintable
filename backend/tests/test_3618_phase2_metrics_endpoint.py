@@ -1,4 +1,4 @@
-"""story #3618(Phase2·BE+FE·실측) 조각② — GET .../insights/phase2-metrics HTTP
+"""story #3618(Phase2·BE+FE·실측) 조각② — GET .../insights/measured-metrics HTTP
 라우터. test_3502_insights_board_endpoints.py와 동형 관례(app.main 1회 import
 비용 분리, 세팅 헬퍼는 test_3471_org_content_rules_lint.py 재사용)."""
 from __future__ import annotations
@@ -49,7 +49,7 @@ async def test_get_phase2_metrics_endpoint_agent_200_all_unmeasured():
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
-            r = await client.get(f"/api/v2/organizations/{org_id}/insights/phase2-metrics", params={"days": 7})
+            r = await client.get(f"/api/v2/organizations/{org_id}/insights/measured-metrics", params={"days": 7})
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["utm_attribution_rate"]["value"] is None
@@ -74,9 +74,9 @@ async def test_get_phase2_metrics_endpoint_invalid_days_422():
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
-            r = await client.get(f"/api/v2/organizations/{org_id}/insights/phase2-metrics", params={"days": 14})
+            r = await client.get(f"/api/v2/organizations/{org_id}/insights/measured-metrics", params={"days": 14})
         assert r.status_code == 422, r.text
-        assert r.json()["error"]["code"] == "PHASE2_METRICS_INVALID_DAYS"
+        assert r.json()["error"]["code"] == "MEASURED_METRICS_INVALID_DAYS"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -95,7 +95,7 @@ async def test_get_phase2_metrics_endpoint_org_mismatch_403():
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
-            r = await client.get(f"/api/v2/organizations/{other_org_id}/insights/phase2-metrics", params={"days": 7})
+            r = await client.get(f"/api/v2/organizations/{other_org_id}/insights/measured-metrics", params={"days": 7})
         assert r.status_code == 403, r.text
     finally:
         app.dependency_overrides.clear()
