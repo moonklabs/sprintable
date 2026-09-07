@@ -5299,7 +5299,7 @@
     "followUpSuccessMessage": "Follow-up story created.",
     "followUpSuccessLink": "View story",
     "followUpErrorGeneric": "Couldn't create the follow-up.",
-    "phase2MetricsTitle": "Phase 2 measurement",
+    "phase2MetricsTitle": "Measured rates",
     "phase2AttributionRate": "Attribution rate",
     "phase2CommentMissRate": "Comment miss rate",
     "phase2FollowUpRate": "Follow-up creation rate",

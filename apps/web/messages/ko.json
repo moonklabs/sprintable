@@ -5299,7 +5299,7 @@
     "followUpSuccessMessage": "후속 조치 스토리를 만들었습니다.",
     "followUpSuccessLink": "스토리 보기",
     "followUpErrorGeneric": "후속 조치를 만들지 못했습니다.",
-    "phase2MetricsTitle": "Phase 2 실측",
+    "phase2MetricsTitle": "실측 지표",
     "phase2AttributionRate": "귀속률",
     "phase2CommentMissRate": "누락률",
     "phase2FollowUpRate": "생성률",
