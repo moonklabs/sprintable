@@ -1972,6 +1972,31 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
   });
 
+  // 페드루 PO 권고(#4022 리뷰, 2026-09-07) — 유나 #4016 적기만 ③(엇갈린 status
+  // 조합 미측). 주 데이터(draftRes)는 200인데 보조(versionsRes)만 404/403이면
+  // 「서버 불변식 위반에 가까워 그 외/loadError로 접는다」(코드 주석 그대로)가
+  // 실제로도 그렇게 동작함을 못 박는다 — draftRes.status만 본다는 의도의 고정.
+  it('엇갈린 status(주 데이터 200 + 보조 404) — notFound가 아니라 editLoadFailed로 접힌다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/channel-posts/drafts/${DRAFT_ID}/versions`)) {
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+      if (url.includes(`/channel-posts/drafts/${DRAFT_ID}`)) {
+        return { ok: true, status: 200, json: async () => ({ data: DRAFT_DETAIL }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
+  });
+
 
   // story f30da19a AC5 — T3(상세 머리).
   it('⭐AC5 — channel=sandbox면 상세 머리에 「테스트」 배지가 뜬다', async () => {

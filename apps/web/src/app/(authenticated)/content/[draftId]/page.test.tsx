@@ -1592,6 +1592,25 @@ describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §
       .toBe(koMessages.content.contentRuleViolationsLoadFailed);
   });
 
+  // 페드루 PO 권고(#4022 리뷰, 2026-09-07) — 유나 #4016 적기만 ③(엇갈린 status
+  // 조합 미측). 부수 데이터(단건 GET)가 404/403이어도 — 그 status가 마치 「이
+  // 초안 자체가 없다/권한 없다」로 보일 수 있는 값이어도 — 주 데이터(/versions)가
+  // 200이면 notFound/forbidden 어느 쪽도 아니다(오직 /versions만 본다는 의도의
+  // 고정, 위 500 표본과 같은 결 — 404/403이라는 "그럴듯한" 값으로도 안 새는지).
+  it('엇갈린 status(부수 단건 GET 404여도 주 데이터 /versions는 200) — notFound가 아니라 violations 안내 줄로 접힌다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { draftStatus: 404 });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('#post-title') as HTMLInputElement | null;
+    expect(titleInput?.value).toBe(VERSION_1.title);
+    expect(container.textContent).not.toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('a[href="/content"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')?.textContent)
+      .toBe(koMessages.content.contentRuleViolationsLoadFailed);
+  });
+
   // story #3514(PO REQUIRED, 2026-09-05) — 저장 응답이 violations를 권위 값으로
   // 채운 뒤에는 "불러오지 못했습니다" 줄이 그 곁에 남아 모순되면 안 된다.
   it('⭐단건 GET 500 뒤에도 저장에 성공하면 안내 줄이 사라진다(권위 값이 덮어씀)', async () => {
