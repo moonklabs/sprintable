@@ -345,12 +345,21 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         # 않는다). 문자열로 심겨 있어(AuthContext.org_id: str) UUID로 변환.
         _raw_org_id = getattr(request.state, "au_org_id", None)
         _raw_user_id = getattr(request.state, "au_user_id", None)
+        # 페드루 PO 권고①(#4025 리뷰, 2026-09-07) — dev-app은 CF 경유라 x-request-id가
+        # 지금은 거의 null. cf-ray(Cloudflare)·x-cloud-trace-context(GCP LB/Cloud Run)
+        # 순으로 폴백 — 셋 다 "이 한 요청의 트레이스 식별자"라는 같은 뜻, 상관용일 뿐
+        # 인가/검증에 안 쓰이니 값을 신뢰하지 않고 그대로 통과시켜도 안전하다.
+        _request_id = (
+            request.headers.get("x-request-id")
+            or request.headers.get("cf-ray")
+            or request.headers.get("x-cloud-trace-context")
+        )
         await record_unhandled_error_event(
             error_id=error_id, method=request.method, path=request.url.path,
             exception_class=type(exc).__name__, message=str(exc)[:2000] if str(exc) else None,
             org_id=uuid.UUID(_raw_org_id) if _raw_org_id else None,
             user_id=uuid.UUID(_raw_user_id) if _raw_user_id else None,
-            request_id=request.headers.get("x-request-id"),
+            request_id=_request_id,
         )
     except Exception:
         _logger.exception("record_unhandled_error_event itself raised for error_id=%s", error_id)

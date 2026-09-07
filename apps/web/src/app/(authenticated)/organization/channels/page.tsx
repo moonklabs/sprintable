@@ -873,7 +873,12 @@ export default function OrganizationChannelsPage() {
   // story #3672(2026-09-07, 3663 실사고) — BE unhandled_exception_handler가 실어 준
   // error_id를 BFF(authorize/callback route.ts)가 그대로 릴레이한다(AC4). 있을 때만
   // 표시(AC5) — 없으면 지금 문구 그대로, 복사 가능한 일반 텍스트(select-text).
-  const connectErrorId = searchParams.get('error_id');
+  // 페드루 PO 권고②(#4025 리뷰) — 쿼리는 조작 가능한 입력이라, uuid 형식이 아니면
+  // (손상된 URL·수동 조작) «오류 번호» 자리에 임의 문자열을 그대로 띄우지 않는다.
+  const rawConnectErrorId = searchParams.get('error_id');
+  const connectErrorId = rawConnectErrorId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawConnectErrorId)
+    ? rawConnectErrorId
+    : null;
   // story #3650(PO Test Org 실측 2026-09-07) — 재연결 대상 행과 콜백이 실제로 갱신한
   // 행이 다를 때(다른 계정을 승인) BFF가 함께 싣는 두 id. 라벨은 이 화면이 이미
   // 불러온 connections에서 붙인다(콜백 라우트는 opaque 릴레이 그대로 유지).

@@ -10,6 +10,7 @@ main.py의 원래 500 응답은 그대로 나간다."""
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +22,27 @@ from app.models.unhandled_error_event import UnhandledErrorEvent
 logger = logging.getLogger(__name__)
 
 _RETENTION_DAYS = 30
+
+# 페드루 PO REQUIRED(#4025 리뷰, 2026-09-07) — `message=str(exc)[:2000]`는 debug 여부와
+# 무관하게 이 테이블에 30일 남는다. 이 문자열은 요청 URL/헤더/바디를 그대로 인용하는
+# 예외(예: httpx가 실패한 요청의 URL을 메시지에 그대로 넣는 경우)에서 access_token=…·
+# client_secret=…·Authorization: Bearer … 가 새어 들어올 수 있어, 여기서 한 겹 마스킹한다
+# — «비밀값 미저장»(AC2)이 path/헤더/바디를 안 담는 것만으로는 안 끝난다(예외 메시지라는
+# 별도 경로가 있다). key=value류(쿼리스트링·form 인코딩 공통 표기)와 Bearer 토큰 두
+# 형태만 잡는다(과설계 금지 — 이 표에 실제로 나타나는 값의 모양 두 가지).
+_SECRET_KV_RE = re.compile(
+    r"(?i)\b(access_token|refresh_token|client_secret|api_key|password|secret|token)"
+    r"([=:])\s*[^\s&\"'<>]+"
+)
+_BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9\-_.~+/]+=*")
+
+
+def _redact(message: str | None) -> str | None:
+    if not message:
+        return message
+    redacted = _BEARER_RE.sub("Bearer [REDACTED]", message)
+    redacted = _SECRET_KV_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", redacted)
+    return redacted
 
 
 async def record_unhandled_error_event(
@@ -36,14 +58,15 @@ async def record_unhandled_error_event(
 ) -> None:
     """AC2 — 비밀값(헤더·바디·쿼리스트링) 미저장, message는 호출부가 이미
     [:2000]으로 자른 값을 그대로 받는다(이 함수는 자르지 않는다 — 계약은
-    호출부 몫, 이중 절단 방지)."""
+    호출부 몫, 이중 절단 방지). 저장 直前 `_redact()`로 예외 문자열 안에 낀
+    토큰류를 한 번 더 가린다(경로/헤더 자체를 안 담는 것과는 별개 방어선)."""
     from app.core.database import async_session_factory
 
     try:
         async with async_session_factory() as s:
             s.add(UnhandledErrorEvent(
                 id=error_id, method=method, path=path, exception_class=exception_class,
-                message=message, org_id=org_id, user_id=user_id, request_id=request_id,
+                message=_redact(message), org_id=org_id, user_id=user_id, request_id=request_id,
             ))
             await s.commit()
     except Exception:

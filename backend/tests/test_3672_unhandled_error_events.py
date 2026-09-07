@@ -16,6 +16,8 @@ from unittest.mock import patch
 import pytest
 from fastapi import Depends, Request
 
+from tests.conftest import override_db_and_read
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -80,7 +82,6 @@ async def _seed_org_and_user(session):
 @pytest.mark.anyio
 async def test_unhandled_exception_returns_error_id_and_persists_row_with_auth_context():
     from app.main import app
-    from app.dependencies.database import get_db
     from app.dependencies.auth import AuthContext, get_current_user
     from app.models.unhandled_error_event import UnhandledErrorEvent
     from sqlalchemy import select
@@ -103,7 +104,7 @@ async def test_unhandled_exception_returns_error_id_and_persists_row_with_auth_c
             request.state.au_user_id = str(user_id)
             return AuthContext(user_id=str(user_id), email="caller@test", claims={}, org_id=str(org_id))
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = _auth_with_state
 
         # 테스트 전용 라우트 — 인증 dependency가 먼저 resolve된 뒤(request.state 채워짐)
@@ -147,12 +148,73 @@ async def test_unhandled_exception_returns_error_id_and_persists_row_with_auth_c
         await engine.dispose()
 
 
+# 페드루 PO 권고①(#4025 리뷰, 2026-09-07) — dev-app이 CF 경유라 x-request-id는 지금
+# 거의 null. cf-ray→x-cloud-trace-context 순 폴백이 실제로 도는지 고정.
+@pytest.mark.anyio
+async def test_request_id_falls_back_to_cf_ray_then_cloud_trace_context():
+    from app.main import app
+    from app.dependencies.auth import AuthContext, get_current_user
+    from app.models.unhandled_error_event import UnhandledErrorEvent
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async def _db():
+            async with Session() as s:
+                yield s
+
+        async def _auth():
+            return AuthContext(user_id=str(uuid.uuid4()), email="caller@test", claims={})
+
+        override_db_and_read(app, _db)
+        app.dependency_overrides[get_current_user] = _auth
+
+        async def _boom(auth: AuthContext = Depends(get_current_user)):
+            raise RuntimeError("s3672 forced unhandled failure")
+
+        app.add_api_route("/__test_3672_boom_reqid", _boom, methods=["GET"])
+        try:
+            with patch("app.core.database.async_session_factory", new=Session):
+                client = _client_for(app)
+                try:
+                    # x-request-id 없음 · cf-ray 있음 → cf-ray를 쓴다.
+                    resp = await client.get(
+                        "/__test_3672_boom_reqid",
+                        headers={"cf-ray": "cf-ray-value-1", "x-cloud-trace-context": "trace-value-1"},
+                    )
+                    error_id_1 = resp.json()["error"]["error_id"]
+                    # x-request-id·cf-ray 둘 다 없음 → x-cloud-trace-context를 쓴다.
+                    resp2 = await client.get(
+                        "/__test_3672_boom_reqid",
+                        headers={"x-cloud-trace-context": "trace-value-2"},
+                    )
+                    error_id_2 = resp2.json()["error"]["error_id"]
+                finally:
+                    await client.aclose()
+
+            async with Session() as s:
+                row1 = (await s.execute(
+                    select(UnhandledErrorEvent).where(UnhandledErrorEvent.id == uuid.UUID(error_id_1))
+                )).scalar_one_or_none()
+                row2 = (await s.execute(
+                    select(UnhandledErrorEvent).where(UnhandledErrorEvent.id == uuid.UUID(error_id_2))
+                )).scalar_one_or_none()
+            assert row1.request_id == "cf-ray-value-1"
+            assert row2.request_id == "trace-value-2"
+        finally:
+            app.router.routes[:] = [
+                r for r in app.router.routes if getattr(r, "path", None) != "/__test_3672_boom_reqid"
+            ]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_unhandled_exception_before_auth_persists_null_org_and_user():
     """인증 자체가 죽으면(request.state가 안 채워진 채) org_id/user_id는 null이
     정직한 값 — 지어내지 않는다(AC2 "알 때만")."""
     from app.main import app
-    from app.dependencies.database import get_db
     from app.dependencies.auth import get_current_user
     from app.models.unhandled_error_event import UnhandledErrorEvent
     from sqlalchemy import select
@@ -166,7 +228,7 @@ async def test_unhandled_exception_before_auth_persists_null_org_and_user():
         async def _boom_auth():
             raise RuntimeError("s3672 forced auth failure")
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = _boom_auth
 
         from app.dependencies.auth import AuthContext
@@ -206,7 +268,6 @@ async def test_persist_failure_does_not_block_the_500_response():
     (best-effort, fail-silent). 뮤테이션 대상 — main.py의 try/except를 없애면 이
     테스트가 500 대신 unhandled RuntimeError로 죽어 RED가 된다."""
     from app.main import app
-    from app.dependencies.database import get_db
     from app.dependencies.auth import AuthContext, get_current_user
     import app.services.unhandled_error_events as uee_mod
 
@@ -219,7 +280,7 @@ async def test_persist_failure_does_not_block_the_500_response():
         async def _auth():
             return AuthContext(user_id=str(uuid.uuid4()), email="caller@test", claims={})
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = _auth
 
 
@@ -256,7 +317,6 @@ async def test_persisted_path_excludes_query_string_even_if_request_had_one():
     보장되지만, oauth-channel authorize/callback 같은 자리는 쿼리에 code/state
     (사실상 비밀)를 싣는다 — 그 요청이 500나도 path 컬럼엔 안 새는지 직접 확認."""
     from app.main import app
-    from app.dependencies.database import get_db
     from app.dependencies.auth import AuthContext, get_current_user
     from app.models.unhandled_error_event import UnhandledErrorEvent
     from sqlalchemy import select
@@ -270,7 +330,7 @@ async def test_persisted_path_excludes_query_string_even_if_request_had_one():
         async def _auth():
             return AuthContext(user_id=str(uuid.uuid4()), email="caller@test", claims={})
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = _auth
 
 
@@ -303,13 +363,72 @@ async def test_persisted_path_excludes_query_string_even_if_request_had_one():
         await engine.dispose()
 
 
+# 페드루 PO REQUIRED(#4025 리뷰, 2026-09-07) — message=str(exc)[:2000]는 debug 무관하게
+# 30일 잔존한다. 예외 문자열 자체(요청 URL/헤더가 아니라)가 access_token=…·Bearer …를
+# 인용하는 경로(예: 실패한 하위요청의 URL을 그대로 붙이는 라이브러리 예외)가 있어
+# path/헤더/바디를 안 담는 것만으로는 안 끝난다 — 저장 直前 _redact()로 한 번 더 가린다.
+@pytest.mark.anyio
+async def test_persisted_message_redacts_access_token_and_bearer_even_when_exception_string_carries_it():
+    from app.main import app
+    from app.dependencies.auth import AuthContext, get_current_user
+    from app.models.unhandled_error_event import UnhandledErrorEvent
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async def _db():
+            async with Session() as s:
+                yield s
+
+        async def _auth():
+            return AuthContext(user_id=str(uuid.uuid4()), email="caller@test", claims={})
+
+        override_db_and_read(app, _db)
+        app.dependency_overrides[get_current_user] = _auth
+
+        async def _boom(auth: AuthContext = Depends(get_current_user)):
+            raise RuntimeError(
+                "upstream call failed: https://graph.facebook.com/oauth?access_token=abc123secret"
+                " Authorization: Bearer xyz789token client_secret=shh-dont-tell"
+            )
+
+        app.add_api_route("/__test_3672_boom_redact", _boom, methods=["GET"])
+        try:
+            with patch("app.core.database.async_session_factory", new=Session):
+                client = _client_for(app)
+                try:
+                    resp = await client.get("/__test_3672_boom_redact")
+                    error_id = resp.json()["error"]["error_id"]
+                finally:
+                    await client.aclose()
+
+            async with Session() as s:
+                row = (await s.execute(
+                    select(UnhandledErrorEvent).where(UnhandledErrorEvent.id == uuid.UUID(error_id))
+                )).scalar_one_or_none()
+            assert row.message is not None
+            assert "abc123secret" not in row.message
+            assert "xyz789token" not in row.message
+            assert "shh-dont-tell" not in row.message
+            # 값만 가리고 자리 자체(그 예외가 access_token 축과 관련됐다는 사실)는 남긴다 —
+            # 완전 삭제가 아니라 마스킹임을 확認(디버깅에 최소한의 단서는 남아야 값이 있다).
+            assert "access_token" in row.message
+            assert "[REDACTED]" in row.message
+        finally:
+            app.router.routes[:] = [
+                r for r in app.router.routes if getattr(r, "path", None) != "/__test_3672_boom_redact"
+            ]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ── AC3 — platform-admin GET 조회 ──────────────────────────────────────────
 
 
 @pytest.mark.anyio
 async def test_admin_get_unhandled_error_returns_stored_row():
     from app.main import app
-    from app.dependencies.database import get_db
     from app.dependencies.admin_auth import AdminOperator, require_admin_operator
     from app.models.unhandled_error_event import UnhandledErrorEvent
 
@@ -327,7 +446,7 @@ async def test_admin_get_unhandled_error_returns_stored_row():
             async with Session() as s:
                 yield s
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[require_admin_operator] = lambda: AdminOperator(email="op@moonklabs.com", subject="sub-1")
 
         client = _client_for(app)
@@ -348,7 +467,6 @@ async def test_admin_get_unhandled_error_returns_stored_row():
 @pytest.mark.anyio
 async def test_admin_get_unhandled_error_404_for_unknown_id():
     from app.main import app
-    from app.dependencies.database import get_db
     from app.dependencies.admin_auth import AdminOperator, require_admin_operator
 
     engine, Session = await _session_factory()
@@ -357,7 +475,7 @@ async def test_admin_get_unhandled_error_404_for_unknown_id():
             async with Session() as s:
                 yield s
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[require_admin_operator] = lambda: AdminOperator(email="op@moonklabs.com", subject="sub-1")
 
         client = _client_for(app)
@@ -409,5 +527,47 @@ async def test_sweep_deletes_only_rows_older_than_30_days():
             remaining_ids = set((await s.execute(select(UnhandledErrorEvent.id))).scalars().all())
         assert old_id not in remaining_ids
         assert recent_id in remaining_ids
+    finally:
+        await engine.dispose()
+
+
+# 페드루 PO 권고③(#4025 리뷰, 2026-09-07) — main.py와 같은 서비스를 realtime_main.py
+# (SSE 전용 별도 entrypoint, story #2089)에도 건다. 여기는 get_current_user 경로를
+# 안 태우는 라우터만 마운트하므로(모듈 docstring) org_id/user_id는 null이 정직한 값.
+@pytest.mark.anyio
+async def test_realtime_main_unhandled_exception_also_gets_error_id():
+    from app.realtime_main import app
+    from app.models.unhandled_error_event import UnhandledErrorEvent
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async def _boom():
+            raise RuntimeError("s3672 realtime forced unhandled failure")
+
+        app.add_api_route("/__test_3672_realtime_boom", _boom, methods=["GET"])
+        try:
+            with patch("app.core.database.async_session_factory", new=Session):
+                client = _client_for(app)
+                try:
+                    resp = await client.get("/__test_3672_realtime_boom")
+                    assert resp.status_code == 500, resp.text
+                    body = resp.json()
+                    error_id = body["error"]["error_id"]
+                    uuid.UUID(error_id)
+                finally:
+                    await client.aclose()
+
+            async with Session() as s:
+                row = (await s.execute(
+                    select(UnhandledErrorEvent).where(UnhandledErrorEvent.id == uuid.UUID(error_id))
+                )).scalar_one_or_none()
+            assert row is not None
+            assert row.path == "/__test_3672_realtime_boom"
+            assert row.exception_class == "RuntimeError"
+        finally:
+            app.router.routes[:] = [
+                r for r in app.router.routes if getattr(r, "path", None) != "/__test_3672_realtime_boom"
+            ]
     finally:
         await engine.dispose()
