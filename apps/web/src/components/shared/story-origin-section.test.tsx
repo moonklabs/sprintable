@@ -57,7 +57,7 @@ describe('StoryOriginSection', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }))));
     await render('s1');
     expect(container.textContent).toContain('출처 미수집');
-    expect(container.textContent).toContain('«없음»이 아니라 «모름»');
+    expect(container.textContent).toContain('«출처가 없다»가 아니라 «모른다»');
   });
 
   it('AC7 — relation="none"(그냥 멘션) 항목만 있어도 「출처 없음」이 아니라 같은 미수집 문구다(분기하지 않는다)', async () => {
