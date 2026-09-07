@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.channel_connection import ChannelConnection
 from app.services.channel_credential_crypto import decrypt_channel_credential, encrypt_channel_credential
+from app.services.graph_api_errors import mark_connection_recovered
 
 # 만료 임박 임계값(cron이 이보다 이내로 남은 active 연결을 갱신 대상으로 본다) — 설정값
 # (story AC 명시, 코드 상수로 시작 — 조직별로 달라질 필요가 생기면 그때 org 설정으로 승격).
@@ -91,8 +92,10 @@ async def upsert_channel_connection(
         existing.token_expires_at = token_expires_at
         existing.refresh_mode = refresh_mode
         existing.scopes = scopes
-        existing.status = "active"
-        existing.last_error = None
+        # story #3633 — status/last_error 3종(last_error_code·last_error_at 포함)
+        # 클리어를 mark_connection_recovered 하나로(graph_api_errors.py, 3605
+        # sticky_connection_status와 같은 모듈).
+        mark_connection_recovered(existing)
         existing.connected_by = connected_by
         existing.secret_hint = secret_hint
         row = existing
@@ -147,8 +150,8 @@ async def replace_channel_connection_credential(
     row.secret_hint = _secret_hint(new_secret)
     if account_label is not None:
         row.account_label = account_label
-    row.status = "active"
-    row.last_error = None
+    # story #3633 — mark_connection_recovered로 status/last_error 3종 통일.
+    mark_connection_recovered(row)
     row.connected_by = updated_by
     # story #3612 — 이 자격 교체도 non-active→active 복귀 경로다(wake_resting_
     # comment_schedules 참고, 단일 깨우는 손).
@@ -197,8 +200,8 @@ async def apply_refresh_result(
     connection.encrypted_access_token = encrypt_channel_credential(new_access_token)
     connection.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
     connection.last_refreshed_at = datetime.now(timezone.utc)
-    connection.last_error = None
-    connection.status = "active"
+    # story #3633 — mark_connection_recovered로 status/last_error 3종 통일.
+    mark_connection_recovered(connection)
     # story #3612 — 자동 토큰 갱신 성공도 non-active→active 복귀 경로다(wake_
     # resting_comment_schedules 참고, 단일 깨우는 손).
     from app.services.channel_post_comments import wake_resting_comment_schedules

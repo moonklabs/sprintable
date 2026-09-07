@@ -67,6 +67,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import httpx
 
+    from app.models.channel_connection import ChannelConnection
+
 _EXPIRED_SUBCODES = frozenset({463})
 _REVOKED_SUBCODES = frozenset({458, 460, 467, 490})
 
@@ -174,8 +176,9 @@ def sticky_connection_status(current: str, new: str) -> str:
     - current가 "expired" 또는 "revoked"(이미 확정된 구체적 사실)면 new가
       무엇이든 절대 안 바꾼다 — 이 둘은 서로도 안 덮는다. status="active"로
       되돌리는 대입(재연결 upsert·자격 교체·apply_refresh_result)이 전부
-      last_error=None까지 같이 지우므로, 이 얼음은 한 실패 국면 안에서만 서고
-      "지금도 실패하나"는 last_error{code,message,at}가 진다(#3960)."""
+      `mark_connection_recovered`(아래, story #3633) 하나로 last_error·
+      last_error_code·last_error_at 3종까지 같이 지우므로, 이 얼음은 한 실패
+      국면 안에서만 서고 "지금도 실패하나"는 그 3종이 진다(#3960)."""
     if current in ("revoked", "expired"):
         return current
     if current == "error" and new == "error":
@@ -194,6 +197,25 @@ def connection_status_for_error_code(error_code: str | None, *, current_status: 
     않기 규율 자체는 `sticky_connection_status`(공유 단일 지점, CHANGES-2)."""
     new_status = CONNECTION_ERROR_CODE_TO_STATUS.get(error_code, "expired")
     return sticky_connection_status(current_status, new_status)
+
+
+def mark_connection_recovered(connection: "ChannelConnection") -> None:
+    """story #3633(BE·소형·신뢰, 페드루 PO 確定 2026-09-07) — non-active→active 복귀
+    (재연결 upsert·자격 교체·자동 토큰 갱신 성공) 경로 3곳이 각자 `status="active"`·
+    `last_error=None`만 대입하고 3603이 더한 `last_error_code`·`last_error_at`은
+    안 지웠다(dev 실측: Sandbox Page 1 재연결 뒤에도 API가 옛 CHANNEL_CONNECTION_
+    NOT_ACTIVE 코드를 계속 돌려줌 — "활성인데 오류 코드가 붙은" 반쪽 상태, 3605
+    sticky·3612 선검사·FE 칩이 그 옛 코드를 "지금도 실패 中"으로 오독할 수 있다).
+
+    `sticky_connection_status`(위)와 짝 — 그쪽은 "실패로 갈 때 어떤 status를
+    고르나", 이건 "복귀할 때 실패 흔적 4종을 다 지운다"를 한 자리로 고정한다.
+    세 호출부(channel_connection.py::upsert_channel_connection의 재연결 분기·
+    replace_channel_connection_credential·apply_refresh_result)가 전부 이
+    함수 하나로 통일 — 새 판정자 발명 0, 그냥 "지우는 목록"이 넷으로 늘었을 뿐."""
+    connection.status = "active"
+    connection.last_error = None
+    connection.last_error_code = None
+    connection.last_error_at = None
 
 
 def parse_graph_error_envelope(resp: "httpx.Response") -> tuple[int | None, int | None, str | None]:
