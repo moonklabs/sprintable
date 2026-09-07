@@ -41,7 +41,11 @@ from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
 from app.models.site_post import SitePost
-from app.services.insight_snapshots import NORMALIZED_KEYS, _resolve_channel_publication_asset_evidence
+from app.services.insight_snapshots import (
+    NORMALIZED_KEYS,
+    assemble_channel_post_asset_evidence,
+    batch_fetch_channel_post_asset_evidence_sources,
+)
 
 _WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90}  # story 確定(e) — 3475(7d·30d)에 90d 신규 편입.
 _SNAPSHOT_OFFSET_DAYS = {"d1": 1, "d7": 7}
@@ -79,6 +83,9 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime):
         # story #3516 조각② — site_post는 댓글 개념 자체가 없어(그라운딩, 민 레군·
         # 유나양 확認) 항상 null(별건으로 미룸, 이 스토리 스코프 밖).
         cast(literal(None), PG_UUID(as_uuid=True)).label("channel_post_draft_id"),
+        # story #3656 — site_post는 소재/훅 개념 자체가 없어 항상 null(channel_post_
+        # draft_id와 동일 이유).
+        cast(literal(None), PG_UUID(as_uuid=True)).label("version_id"),
     ).where(
         SitePost.org_id == org_id, SitePost.unpublished_at.is_(None), SitePost.published_at >= since,
     )
@@ -100,6 +107,10 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime):
             # draft_id 조인 1회). 보드 「댓글 {n}」 링크가 이 값으로 변형 상세
             # (/content/channel-posts/{draft_id})로 간다.
             ChannelPostVersion.draft_id.label("channel_post_draft_id"),
+            # story #3656 — 소재/훅 배치 조회(_batch_resolve_channel_publication_
+            # asset_evidence)의 키. 이미 조인돼 있는 ChannelPublication에서 바로
+            # 뽑는다(추가 조인 0 — channel_post_draft_id와 같은 열에서 파생).
+            ChannelPublication.version_id.label("version_id"),
         )
         .select_from(ChannelPublication)
         .join(Gate, Gate.id == ChannelPublication.gate_id)
@@ -248,6 +259,17 @@ async def list_insights_board(
     )
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
+    # story #3656(페드루 PO CHANGES, 2026-09-07) — 소재/훅 배치 조회(N+1 회피, 위
+    # 스냅샷·댓글 배치와 동형). 이 UNION 쿼리가 이미 version_id를 실어 오므로
+    # (channel_pub_arm, ChannelPublication에서 직접) 추가 조인 0으로 페이지의
+    # channel_publication 행 전체 version_id를 모을 수 있다 — 쿼리 수가 페이지
+    # 행 수와 무관하게 상수(3)로 고정된다(단건 호출부 _resolve_channel_publication_
+    # asset_evidence와 달리 이쪽은 배치 조립 함수를 쓴다, 같은 규칙 재사용).
+    version_ids = [r.version_id for r in page if r.kind == "channel_publication" and r.version_id is not None]
+    hook_key_by_version, images_by_version, video_by_version = (
+        await batch_fetch_channel_post_asset_evidence_sources(db, version_ids=version_ids)
+    )
+
     rows_out = []
     for r in page:
         # due_at은 anchor_at(=published_at) + offset로 스케줄됐다(schedule_insight_
@@ -264,17 +286,11 @@ async def list_insights_board(
                 d7 = snap
         is_channel_pub = r.kind == "channel_publication"
         adapter = CHANNEL_ADAPTERS.get(r.channel) if is_channel_pub else None
-        # story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 3645(#4002)의
-        # _resolve_channel_publication_asset_evidence 재사용(새 판정 0). ⚠️잃는 것
-        # (선언) — 이 호출은 행마다(channel_publication뿐) ChannelPublication·
-        # ChannelPostVersion·ChannelPostVideo·ChannelPostImage 최대 4쿼리를 새로
-        # 낸다(N+1) — 위 스냅샷·댓글 배치 조회와 달리 이 스토리는 배치화하지 않았다
-        # (PO 지시가 "헬퍼 재사용"이었지 새 배치 쿼리 설계가 아니었음 — 페이지 상한
-        # 200행 기준 최악 800쿼리, 실측 체감 느려지면 후속 배치화 스토리 후보).
-        asset_sha256s, hook_key = (
-            await _resolve_channel_publication_asset_evidence(
-                db, publication_kind=r.kind, publication_id=r.publication_id,
-            ) if is_channel_pub else (None, None)
+        asset_sha256s, hook_key = assemble_channel_post_asset_evidence(
+            r.version_id if is_channel_pub else None,
+            hook_key_by_version=hook_key_by_version,
+            images_by_version=images_by_version,
+            video_by_version=video_by_version,
         )
         rows_out.append({
             "publication_id": r.publication_id, "kind": r.kind, "channel": r.channel,

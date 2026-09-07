@@ -757,3 +757,69 @@ async def test_site_post_row_asset_and_hook_always_null():
         assert row["hook_key"] is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_asset_hook_evidence_query_count_not_proportional_to_row_count():
+    """PO CHANGES(2026-09-07) — channel_publication 행마다 소재/훅을 조회하면
+    N+1(페이지 상한 200 기준 최악 800쿼리, "보드가 못 견딘다"). 1건일 때와 4건일
+    때 SELECT 문 수가 같아야 한다(test_3394_channel_post_list_be_fields.py의
+    before_cursor_execute 실측 관례 그대로 재사용 — 새 계측 패턴 발명 0)."""
+    from sqlalchemy import event
+    from app.services.insights_board import list_insights_board
+
+    def _capture(bucket: list[str]):
+        def _listener(conn, cursor, statement, parameters, context, executemany):
+            bucket.append(statement)
+        return _listener
+
+    async def _seed_one_row(session, *, org_id, story_id, slug_suffix):
+        gate = await _seed_gate(session, org_id=org_id, work_item_id=story_id)
+        draft = await _seed_channel_post_draft(session, org_id=org_id, work_item_id=story_id)
+        version_id = uuid.uuid4()
+        await _seed_channel_post_version(session, draft_id=draft.id, version_id=version_id, hook_key=f"hook-{slug_suffix}")
+        await _seed_channel_post_image(session, org_id=org_id, draft_id=draft.id, version_id=version_id, position=0)
+        await _seed_channel_publication(
+            session, org_id=org_id, gate_id=gate.id, channel="instagram",
+            published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
+        )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_one_row(s, org_id=org_id, story_id=story_id, slug_suffix="1")
+
+        statements_1: list[str] = []
+        listener_1 = _capture(statements_1)
+        event.listen(engine.sync_engine, "before_cursor_execute", listener_1)
+        try:
+            async with Session() as s:
+                result_1 = await list_insights_board(s, org_id=org_id, window="30d")
+                assert len(result_1["rows"]) == 1
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", listener_1)
+        select_count_1 = len([st for st in statements_1 if st.strip().upper().startswith("SELECT")])
+
+        async with Session() as s:
+            for n in range(2, 5):
+                await _seed_one_row(s, org_id=org_id, story_id=story_id, slug_suffix=str(n))
+
+        statements_4: list[str] = []
+        listener_4 = _capture(statements_4)
+        event.listen(engine.sync_engine, "before_cursor_execute", listener_4)
+        try:
+            async with Session() as s:
+                result_4 = await list_insights_board(s, org_id=org_id, window="30d")
+                assert len(result_4["rows"]) == 4
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", listener_4)
+        select_count_4 = len([st for st in statements_4 if st.strip().upper().startswith("SELECT")])
+
+        print(f"\n=== N+1 실측(insights-board 소재/훅): 1건 SELECT={select_count_1}, 4건 SELECT={select_count_4}")
+        assert select_count_4 == select_count_1, (
+            f"쿼리 수가 행 수에 비례한다(N+1) — 1건={select_count_1}, 4건={select_count_4}"
+        )
+    finally:
+        await engine.dispose()
