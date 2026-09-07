@@ -29,14 +29,19 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!parsed.success) return ApiErrors.badRequest(parsed.error.issues.map((i) => i.message).join(', '));
     const { provider, api_key, base_url } = parsed.data;
     const normalizedBaseUrl = base_url?.trim() ? validateCustomEndpoint(base_url, provider) : undefined;
-    const valid = await testProviderKey(provider, api_key, normalizedBaseUrl);
-    return apiSuccess({ valid, project_id: id });
+    const status = await testProviderKey(provider, api_key, normalizedBaseUrl);
+    return apiSuccess({ status, project_id: id });
   } catch (err: unknown) {
     return handleApiError(err);
   }
 }
 
-async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: string): Promise<boolean> {
+// story #3644(3632 후속, 유나 v3.1 목록 즉시 결함) — 정상 경로는 `res.status !== 401/403`
+// 인데, 아래 catch가 네트워크 실패·타임아웃(AbortSignal.timeout(10s))·DNS 오류까지 전부
+// false 하나로 수렴시켰다. false는 화면에서 "키가 유효하지 않다"로 읽히는데 실제로는
+// "검증하지 못했다"다 — 사용자가 멀쩡한 키를 버리고 새로 발급하러 가는 오독(doc §1
+// "모름을 아님으로"). valid/invalid/unknown 세 값으로 가른다.
+async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: string): Promise<'valid' | 'invalid' | 'unknown'> {
   try {
     const endpoints: Record<string, { url: string; headers: Record<string, string> }> = {
       openai: {
@@ -66,7 +71,7 @@ async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: 
     };
 
     const config = endpoints[provider];
-    if (!config) return false;
+    if (!config) return 'invalid';
 
     if (provider === 'anthropic') {
       const res = await fetch(config.url, {
@@ -75,7 +80,7 @@ async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: 
         body: JSON.stringify({ model: 'claude-sonnet-4', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
         signal: AbortSignal.timeout(10000),
       });
-      return res.status !== 401 && res.status !== 403;
+      return res.status === 401 || res.status === 403 ? 'invalid' : 'valid';
     }
 
     const res = await fetch(config.url, {
@@ -84,8 +89,10 @@ async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: 
       signal: AbortSignal.timeout(10000),
     });
 
-    return res.status !== 401 && res.status !== 403;
+    return res.status === 401 || res.status === 403 ? 'invalid' : 'valid';
   } catch {
-    return false;
+    // 네트워크 실패·타임아웃·DNS 오류 — 상류가 401/403을 정직하게 answer하지 못했다.
+    // "invalid"가 아니라 "unknown"이다.
+    return 'unknown';
   }
 }

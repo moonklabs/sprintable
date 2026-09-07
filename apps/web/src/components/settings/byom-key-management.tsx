@@ -45,7 +45,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
 
   // Action states
   const [validating, setValidating] = useState(false);
-  const [validationResult, setValidationResult] = useState<'success' | 'error' | null>(null);
+  const [validationResult, setValidationResult] = useState<'success' | 'error' | 'unknown' | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<'success' | 'error' | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -103,9 +103,14 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
         }),
       });
       const json = await res.json();
-      setValidationResult(json?.data?.valid ? 'success' : 'error');
+      // story #3644(3632 후속) — status는 valid/invalid/unknown 세 값. "검증하지 못했다"
+      // (unknown)를 "무효"(invalid)로 뭉개면 사용자가 멀쩡한 키를 버리고 새로 발급하러
+      // 간다(doc §1 모름을 아님으로 오독).
+      const status = json?.data?.status as 'valid' | 'invalid' | 'unknown' | undefined;
+      setValidationResult(status === 'valid' ? 'success' : status === 'unknown' ? 'unknown' : 'error');
     } catch {
-      setValidationResult('error');
+      // 클라이언트 쪽 fetch 자체가 던진 것도 "검증 못함"이지 "무효 확認"이 아니다.
+      setValidationResult('unknown');
     } finally {
       setValidating(false);
     }
@@ -309,6 +314,9 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
             ) : null}
             {validationResult === 'error' ? (
               <Alert variant="destructive"><AlertDescription>{t('validationError')}</AlertDescription></Alert>
+            ) : null}
+            {validationResult === 'unknown' ? (
+              <Alert variant="info"><AlertDescription>{t('validationUnknown')}</AlertDescription></Alert>
             ) : null}
 
             {/* Save result */}

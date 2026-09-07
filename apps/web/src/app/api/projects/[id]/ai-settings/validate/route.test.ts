@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('/api/projects/[id]/ai-settings/validate', () => {
-  it('POST — 키가 유효하면 provider 호출 후 { valid: true } 반환', async () => {
+  it('POST — 키가 유효하면 provider 호출 후 { status: "valid" } 반환', async () => {
     const fetchMock = vi.fn(async (..._args: unknown[]) => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -25,7 +25,7 @@ describe('/api/projects/[id]/ai-settings/validate', () => {
 
     expect(resp.status).toBe(200);
     await expect(resp.json()).resolves.toEqual({
-      data: { valid: true, project_id: 'proj-1' },
+      data: { status: 'valid', project_id: 'proj-1' },
       error: null,
       meta: null,
     });
@@ -33,22 +33,35 @@ describe('/api/projects/[id]/ai-settings/validate', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.openai.com/v1/models');
   });
 
-  it('POST — provider가 401/403이면 { valid: false }', async () => {
+  it('POST — provider가 401/403이면 { status: "invalid" }(진짜 무효)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('unauthorized', { status: 401 })));
 
     const resp = await POST(jsonRequest({ provider: 'anthropic', api_key: 'sk-bad' }), ctx());
 
     expect(resp.status).toBe(200);
-    await expect(resp.json()).resolves.toMatchObject({ data: { valid: false, project_id: 'proj-1' } });
+    await expect(resp.json()).resolves.toMatchObject({ data: { status: 'invalid', project_id: 'proj-1' } });
   });
 
-  it('POST — provider 호출이 throw하면 { valid: false }로 흡수', async () => {
+  // story #3644(3632 후속, 유나 v3.1 목록 즉시 결함) — 이 테스트는 원래 "throw하면
+  // valid: false"(=invalid로 수렴)을 고정하고 있었다. 그 자체가 결함이었다 — 네트워크
+  // 실패·타임아웃·DNS 오류는 "무효 확認"이 아니라 "검증하지 못함"이다(doc §1: 모름을
+  // 아님으로 오독하면 사용자가 멀쩡한 키를 버리고 새로 발급하러 간다). status="unknown"
+  // 으로 수정.
+  it('POST — provider 호출이 throw하면 { status: "unknown" } — invalid로 수렴 금지', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
 
     const resp = await POST(jsonRequest({ provider: 'groq', api_key: 'sk-x' }), ctx());
 
     expect(resp.status).toBe(200);
-    await expect(resp.json()).resolves.toMatchObject({ data: { valid: false } });
+    await expect(resp.json()).resolves.toMatchObject({ data: { status: 'unknown' } });
+  });
+
+  it('POST — AbortSignal 타임아웃(DOMException)도 { status: "unknown" }', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('The operation was aborted', 'AbortError'); }));
+
+    const resp = await POST(jsonRequest({ provider: 'anthropic', api_key: 'sk-ant-test' }), ctx());
+
+    await expect(resp.json()).resolves.toMatchObject({ data: { status: 'unknown' } });
   });
 
   it('POST — api_key 누락이면 400 BAD_REQUEST (provider 미호출)', async () => {
