@@ -3470,7 +3470,8 @@
         "admin": "위험 작업 (Admin)",
         "hypotheses": "가설",
         "canvas": "아티팩트",
-        "events": "이벤트"
+        "events": "이벤트",
+        "content": "콘텐츠"
       }
     },
     "statusEyebrow": "STATUS DASHBOARD",

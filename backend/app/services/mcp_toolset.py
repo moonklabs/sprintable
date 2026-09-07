@@ -60,17 +60,21 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # "update_event_definition")가 먼저 있어 이 항목까지 안 내려온다(admin이 이 events보다
     # 리스트 앞쪽 — tool_group()은 첫 매치를 반환).
     ("events", ("event",)),
-    # story #3614 CHANGES(2026-09-07, 페드루 PO 判定) — sprintable_withdraw_channel_post_draft
-    # 가 키워드 미매칭으로 core에 떨어졌는데, build_toolset_catalog()의 "core" 그룹은 오직
-    # _ALWAYS_ALLOWED만 나열해(tool_group()의 fallback "core"와는 별개 축) 카탈로그 커버리지
-    # 검증(test_toolset_catalog.py::test_every_tool_covered_exactly_once)에서 누락으로
-    # 잡혔다. 최초 처방(_ALWAYS_ALLOWED 임시 등재)은 페드루 PO가 CHANGES로 반려 — 그 목록은
-    # "scope 막론 항상 허용"(is_tool_allowed 무조건 True) 의미라, 초안을 폐기하는 변이 도구를
-    # 두면 role scope 없는 키도 호출 가능해지는 권한 확대였다(커버리지 공백을 권한으로 메운
-    # 지름길). 정공법 — 콘텐츠 전용 그룹을 여기서 신설(이 스토리 범위는 이 한 도구만 —
-    # site_post/channel_connection/comment/insight 등 다른 콘텐츠 도구 키워드 확장은 story
-    # #3631(진행 중)이 이어받는다).
-    ("content", ("channel_post",)),
+    # story #3614 CHANGES(2026-09-07, 페드루 PO 判定)가 "channel_post" 키워드 하나로 이
+    # 그룹을 최소 신설(sprintable_withdraw_channel_post_draft의 카탈로그 커버리지 공백
+    # 임시 해소, PR#3972) — story #3631이 그 위에 나머지 콘텐츠 도구 키워드를 마저 얹어
+    # 완성한다.
+    #
+    # "comment"는 바로 안 쓴다 — sprintable_add_artifact_comment/sprintable_
+    # list_artifact_comments(canvas 그룹, "artifact" 키워드)와 겹친다. 이 리스트 순서
+    # (canvas가 먼저)상 그 둘은 이미 canvas로 먼저 매치되므로 실질 충돌은 없지만,
+    # "post_comment"(channel_post_comment류 실제 이름 패턴과 일치)로 더 구체화해 순서
+    # 의존성 자체를 없앤다(방어적 이중 안전).
+    #
+    # "withdraw"는 의도적으로 뺐다 — 이 하나의 동사만으로 미래의 무관한 도구(예: 보상/지갑
+    # 인출류)까지 이 그룹으로 잘못 끌어올 위험이 "channel_post" 등 구체 키워드보다 크다.
+    # 지금 유일한 실 도구(withdraw_channel_post_draft)는 "channel_post" 키워드로 이미 잡힌다.
+    ("content", ("channel_post", "site_post", "channel_connection", "post_comment", "insight")),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -451,9 +455,10 @@ _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     # default_tool_groups에 아직 이 토큰을 가진 role이 없다(선생님 승인 게이트 — 데이터
     # 마이그 없이 여기 등록만으로는 아무 role도 자동으로 이 도구를 못 쓴다, fail-closed).
     "events",
-    # story #3614 CHANGES — 콘텐츠 그룹, events와 동일 이유로 fail-closed(등록만으로는
-    # 아무 role도 자동으로 이 도구를 못 쓴다, default_tool_groups에 "content" 토큰을 가진
-    # role이 아직 없다). 다른 콘텐츠 도구 편입은 story #3631.
+    # story #3614 CHANGES가 최소 신설(events와 동일 이유로 당시 fail-closed) — story #3631
+    # (alembic 0350)이 growth-hacker·performance-marketer 2 role_template.default_tool_groups
+    # 에 "content" 토큰을 배선해 실제로 도는 자리로 완성한다(dev 실측 — 뭉클랩 활성
+    # 에이전트 11 전수 훑어도 이 2 role 밖에서 recruit된 콘텐츠 전담 role 0건).
     "content",
 )
 

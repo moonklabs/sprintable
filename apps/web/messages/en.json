@@ -3470,7 +3470,8 @@
         "admin": "Danger zone (Admin)",
         "hypotheses": "Hypotheses",
         "canvas": "Artifacts",
-        "events": "Events"
+        "events": "Events",
+        "content": "Content"
       }
     },
     "statusEyebrow": "STATUS DASHBOARD",
