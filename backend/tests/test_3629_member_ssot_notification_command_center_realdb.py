@@ -25,6 +25,11 @@ from tests.test_2301_story_body_mentions_realdb import (
 from tests.test_2288_command_center_gate_type_waiting_realdb import _make_member, _setup_app_human
 
 pytestmark = [
+    # 페드루 PO CHANGES(2026-09-07, 3877/3878 전례) — command_center 테스트가 `app.main`의
+    # 전역 엔진·실 HTTP 클라이언트를 거치는 신규 real-DB 파일이라 destructive_schema 짝(모듈
+    # 마커+infra/destructive-schema-shard-weights.json 등재)이 요구된다 — 미등재면 샤드 가드가
+    # 빨개진다.
+    pytest.mark.destructive_schema,
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
     pytest.mark.anyio,
 ]
@@ -40,6 +45,20 @@ async def _dispose_global_engine_after_test():
     yield
     from app.core.database import engine as _global_engine
     await _global_engine.dispose()
+
+
+async def _migrated_session_factory():
+    """destructive_schema 마커의 autouse 리셋(conftest.py::_reset_schema_for_destructive_
+    tests)이 매 테스트 前 스키마를 통째로 지운다 — test_2301의 `_session_factory`는 이미
+    migrated 스키마가 있다는 전제(non-destructive 파일 전용)라 그대로 재사용하면 "relation
+    ... does not exist"로 죽는다. create_all로 재건(idempotent — 이미 있으면 no-op)."""
+    from app.core.database import Base
+    import app.models  # noqa: F401
+
+    engine, Session = await _session_factory()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    return engine, Session
 
 
 async def _make_agent_only(session, org_id, project_id):
@@ -79,7 +98,7 @@ async def test_filter_human_member_ids_includes_org_member_only_and_legacy_team_
     """org_member-only 휴먼·legacy team_member(human) 휴먼 둘 다 포함, agent는 제외."""
     from app.services.member_resolver import filter_human_member_ids
 
-    engine, Session = await _session_factory()
+    engine, Session = await _migrated_session_factory()
     try:
         async with Session() as s:
             org = await _make_org(s)
@@ -104,7 +123,7 @@ async def test_filter_human_member_ids_excludes_soft_deleted_org_member():
     from sqlalchemy import update
     from app.services.member_resolver import filter_human_member_ids
 
-    engine, Session = await _session_factory()
+    engine, Session = await _migrated_session_factory()
     try:
         async with Session() as s:
             org = await _make_org(s)
@@ -132,7 +151,7 @@ async def test_command_center_overview_counts_org_member_only_assignee_as_human(
     from sqlalchemy import update
     from app.main import app
 
-    engine, Session = await _session_factory()
+    engine, Session = await _migrated_session_factory()
     try:
         async with Session() as s:
             org = await _make_org(s)
