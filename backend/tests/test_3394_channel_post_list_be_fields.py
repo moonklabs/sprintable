@@ -408,7 +408,7 @@ async def test_list_states_partial_success_failed_status_with_container_preserve
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
                 r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-                assert r_publish.status_code == 502, r_publish.text
+                assert r_publish.status_code == 503, r_publish.text  # story #3632 — 진짜 상류 실패는 502 대신 503(CF 통과)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:

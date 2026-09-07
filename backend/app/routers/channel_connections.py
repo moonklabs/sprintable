@@ -1162,8 +1162,10 @@ async def get_channel_publishing_limit(
                         status_code=409,
                         detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": exc.message},
                     ) from exc
+                # story #3632 — 진짜 상류 실패는 CF가 HTML로 가로채는 502 대신 503으로
+                # (channel_posts.py/channel_post_comments.py의 동일 코드 처리와 동형).
                 raise HTTPException(
-                    status_code=502,
+                    status_code=503,
                     detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": exc.message},
                 ) from exc
     finally:

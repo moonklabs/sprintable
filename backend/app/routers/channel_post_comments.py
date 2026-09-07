@@ -252,9 +252,39 @@ async def refresh_publication_comments_endpoint(
             ),
         ) from exc
     except CommentFetchError as exc:
+        # story #3632(PO 실측, 2026-09-07) — Cloudflare 에지가 origin의 502/504만 자체
+        # HTML 에러 페이지로 대체한다(Enterprise 미만 플랜, Origin Error Page Pass-thru
+        # 없음) — 봉투(error.code·user_message)가 브라우저에 아예 도달하지 않아 화면이
+        # 침묵했다. 규칙: 「우리 상태」로 인한 거절(연결 비활성·발행 기록 없음·채널
+        # 미구현·필수 데이터 없음)은 CF가 그대로 통과시키는 4xx로, 「진짜 상류 실패」
+        # (채널 API가 실제로 오류/타임아웃 응답)만 503(재시도 의미 있음, CF 통과)으로 —
+        # 502는 이제 이 분기 어디에서도 내지 않는다.
         if exc.error_code == "COMMENT_PUBLICATION_NOT_FOUND":
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        raise HTTPException(status_code=502, detail={"code": exc.error_code, "message": str(exc)}) from exc
+        if exc.error_code == "CHANNEL_RATE_LIMITED":
+            # 우리 쪽 5분 쿨다운(CommentRefreshRateLimitedError, 위)과는 다른 축 —
+            # 채널(Graph API) 자체가 이 호출을 rate-limit한 경우. HTTP 의미상 429 그대로
+            # (channel_posts.py 발행 경로의 CHANNEL_RATE_LIMITED 처리와 동형).
+            raise HTTPException(
+                status_code=429, detail={"code": exc.error_code, "message": str(exc)},
+            ) from exc
+        from app.services.publication_command import classify_failure_kind, FAILURE_KIND_TRANSIENT
+
+        if classify_failure_kind(exc.error_code) == FAILURE_KIND_TRANSIENT:
+            # CHANNEL_PUBLISH_PROVIDER_ERROR류 — 채널 API가 실제로 실패 응답을 준 경우
+            # (SSOT 분류는 publication_command.py, channel_posts.py 발행 경로와 동일
+            # 어휘 재사용 — 새 판정 로직 0).
+            raise HTTPException(
+                status_code=503, detail={"code": exc.error_code, "message": str(exc)},
+            ) from exc
+        # 그 외(CHANNEL_CONNECTION_NOT_ACTIVE·CHANNEL_TOKEN_EXPIRED·CHANNEL_CONNECTION_
+        # REVOKED·CHANNEL_CONNECTION_AUTH_ERROR·COMMENT_CHANNEL_NOT_IMPLEMENTED·
+        # COMMENT_EXTERNAL_ID_MISSING) — 전부 "우리 상태"(연결·설정·데이터) 문제라 409.
+        # CHANNEL_TOKEN_EXPIRED/REVOKED/AUTH_ERROR는 channel_posts.py 발행 경로가 이미
+        # 409로 내는 것과 동형(다른 메커니즘은 다른 낱말이되 같은 축은 같은 코드).
+        raise HTTPException(
+            status_code=409, detail={"code": exc.error_code, "message": str(exc)},
+        ) from exc
 
     return CommentRefreshResponse(
         fetched=result["fetched"], deleted=result["deleted"], captured_at=result["captured_at"].isoformat(),
