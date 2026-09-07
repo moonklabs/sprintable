@@ -46,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.channel_post_comment import ChannelPostComment
 from app.models.channel_post_comment import CommentCollectionSchedule
+from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
 from app.models.evidence import Evidence
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.org_pageview_daily import OrgPageviewDaily
@@ -136,15 +137,25 @@ async def _compute_comment_miss_rate(
     }
 
 
-async def _compute_follow_up_creation_rate(
+async def _captured_snapshot_publication_ids(
     db: AsyncSession, *, org_id: uuid.UUID, period_start: datetime,
-) -> dict[str, Any]:
-    publication_ids = (await db.execute(
+) -> list[uuid.UUID]:
+    """기간 내 captured 스냅샷이 있는 발행 집합 — follow_up_creation_rate·
+    reconciliation_coverage_rate 두 지표가 같은 분모를 쓴다(둘 다 "이 기간에 실측
+    스냅샷이 잡힌 발행"을 모집단으로 삼는 정의, story #3620이 #3618의 분모를
+    재사용)."""
+    return (await db.execute(
         select(InsightSnapshot.publication_id).where(
             InsightSnapshot.org_id == org_id, InsightSnapshot.status == "captured",
             InsightSnapshot.captured_at.is_not(None), InsightSnapshot.captured_at >= period_start,
         ).distinct()
     )).scalars().all()
+
+
+async def _compute_follow_up_creation_rate(
+    db: AsyncSession, *, org_id: uuid.UUID, period_start: datetime,
+) -> dict[str, Any]:
+    publication_ids = await _captured_snapshot_publication_ids(db, org_id=org_id, period_start=period_start)
 
     denominator = len(publication_ids)
     if denominator == 0:
@@ -189,6 +200,64 @@ async def _compute_follow_up_creation_rate(
     }
 
 
+async def _compute_reconciliation_coverage_rate(
+    db: AsyncSession, *, org_id: uuid.UUID, period_start: datetime,
+) -> dict[str, Any]:
+    """정의 2(story #3620) — 분모는 follow_up_creation_rate와 동형(기간 내 captured
+    스냅샷이 있는 발행 집합). 분자는 그중 기간 내 대조 기록(reconciliation)이
+    1건이라도 있는 발행 수. 분모 0이면 「—」(NO_SNAPSHOTS, follow_up_creation_rate와
+    같은 사유 코드 재사용 — 같은 분모니 같은 미측정 이유)."""
+    publication_ids = await _captured_snapshot_publication_ids(db, org_id=org_id, period_start=period_start)
+    denominator = len(publication_ids)
+    if denominator == 0:
+        return _empty_metric("NO_SNAPSHOTS")
+
+    reconciled_publication_ids = set((await db.execute(
+        select(ChannelPublicationReconciliation.publication_id).where(
+            ChannelPublicationReconciliation.org_id == org_id,
+            ChannelPublicationReconciliation.created_at >= period_start,
+            ChannelPublicationReconciliation.publication_id.in_(publication_ids),
+        ).distinct()
+    )).scalars().all())
+
+    numerator = sum(1 for p in publication_ids if p in reconciled_publication_ids)
+    return {
+        "value": numerator / denominator, "numerator": numerator, "denominator": denominator,
+        "reason_code": None,
+    }
+
+
+async def _compute_reconciliation_mismatch_rate(
+    db: AsyncSession, *, org_id: uuid.UUID, period_start: datetime,
+) -> dict[str, Any]:
+    """정의 3(story #3620) — 「불일치 수」를 카드 형(퍼센트) 계약에 맞춰 비율로
+    낸다: 분모=기간 내 대조 기록이 1건이라도 있는 발행 수, 분자=그중 하나라도
+    mismatch였던 발행 수(has_mismatch 비정규화 컬럼 재사용 — verdicts JSONB
+    스캔 0). 분모 0(대조를 아무도 아직 안 눌렀음)이면 「—」(NO_RECONCILIATIONS)
+    — 분자 0(눌렀는데 전부 일치)은 「—」가 아니라 진짜 0."""
+    rows = (await db.execute(
+        select(ChannelPublicationReconciliation.publication_id, ChannelPublicationReconciliation.has_mismatch)
+        .where(
+            ChannelPublicationReconciliation.org_id == org_id,
+            ChannelPublicationReconciliation.created_at >= period_start,
+        )
+    )).all()
+
+    mismatch_by_publication: dict[uuid.UUID, bool] = {}
+    for publication_id, has_mismatch in rows:
+        mismatch_by_publication[publication_id] = mismatch_by_publication.get(publication_id, False) or has_mismatch
+
+    denominator = len(mismatch_by_publication)
+    if denominator == 0:
+        return _empty_metric("NO_RECONCILIATIONS")
+
+    numerator = sum(1 for v in mismatch_by_publication.values() if v)
+    return {
+        "value": numerator / denominator, "numerator": numerator, "denominator": denominator,
+        "reason_code": None,
+    }
+
+
 async def compute_measured_metrics(db: AsyncSession, *, org_id: uuid.UUID, days: int) -> dict[str, Any]:
     """AC1 — days는 7|30(호출부가 검증). 「기간」은 오늘을 포함한 N일(오늘·어제·
     …·N-1일 전) — `pageview_counter.py::get_beacon_status`의 count_7d와 동일
@@ -200,10 +269,15 @@ async def compute_measured_metrics(db: AsyncSession, *, org_id: uuid.UUID, days:
     utm = await _compute_utm_attribution_rate(db, org_id=org_id, start_date=start_date)
     comment_miss = await _compute_comment_miss_rate(db, org_id=org_id, period_start=period_start)
     follow_up = await _compute_follow_up_creation_rate(db, org_id=org_id, period_start=period_start)
+    reconciliation_coverage = await _compute_reconciliation_coverage_rate(db, org_id=org_id, period_start=period_start)
+    reconciliation_mismatch = await _compute_reconciliation_mismatch_rate(db, org_id=org_id, period_start=period_start)
 
     return {
         "utm_attribution_rate": utm,
         "comment_miss_rate": comment_miss,
         "follow_up_creation_rate": follow_up,
+        # story #3620(additive — 기존 3키·응답 형은 불변) — 4번째 실측 열.
+        "reconciliation_coverage_rate": reconciliation_coverage,
+        "reconciliation_mismatch_rate": reconciliation_mismatch,
         "computed_at": now,
     }

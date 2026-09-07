@@ -5314,7 +5314,19 @@
     "measuredReasonNoPageviews": "집계할 페이지뷰가 없습니다",
     "measuredReasonNoCommentData": "채널이 원본 댓글 수를 아직 안 줬습니다",
     "measuredReasonNoSnapshots": "집계할 발행 스냅샷이 없습니다",
-    "measuredReasonWindowUnsupported": "90일 기간은 이 실측을 지원하지 않습니다(7·30일만)",
-    "measuredMetricsErrorGeneric": "실측값을 불러오지 못했습니다."
+    "measuredReasonWindowUnsupported": "이 기간은 이 실측을 지원하지 않습니다(7·30일만)",
+    "measuredMetricsErrorGeneric": "실측값을 불러오지 못했습니다.",
+    "measuredReconciliationCoverageRate": "대조율",
+    "measuredReconciliationMismatchCount": "불일치",
+    "measuredReasonNoReconciliations": "아직 대조한 발행이 없습니다",
+    "reconcileAction": "원본과 대조",
+    "reconcileAriaLabel": "{n}번째 행 {label}",
+    "reconcileInProgress": "대조 중...",
+    "reconcileErrorGeneric": "대조하지 못했습니다.",
+    "reconcileErrorConnectionInactive": "연결이 활성 상태가 아니라 대조할 수 없습니다.",
+    "reconcileErrorChannelUnsupported": "이 채널은 실측 대조를 지원하지 않습니다.",
+    "reconcileVerdictMatch": "일치",
+    "reconcileVerdictMismatch": "불일치",
+    "reconcileVerdictUnmeasured": "미측정"
   }
 }

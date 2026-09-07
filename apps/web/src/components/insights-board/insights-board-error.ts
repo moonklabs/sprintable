@@ -7,6 +7,8 @@ export type InsightsBoardErrorKind =
   | 'invalid_sort'
   | 'follow_up_human_only'
   | 'follow_up_invalid_kind'
+  | 'reconcile_connection_inactive'
+  | 'reconcile_channel_unsupported'
   | 'unknown';
 
 export interface InsightsBoardErrorInfo {
@@ -33,6 +35,11 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 그대로 뜰 수 있어 문구도 준비해 둔다.
   FOLLOW_UP_CREATE_HUMAN_ONLY: { labelKey: 'errorFollowUpHumanOnly', kind: 'follow_up_human_only' },
   FOLLOW_UP_INVALID_KIND: { labelKey: 'errorFollowUpInvalidKind', kind: 'follow_up_invalid_kind' },
+  // story #3620 — publication_reconciliation.py의 선검사 3종 중 사람이 읽을 문구가
+  // 정해진 2종(정의 2). INSIGHT_PUBLICATION_NOT_FOUND는 드문 엣지(행이 가리키는
+  // publication_id가 이미 유효했던 상태에서 눌렀다는 전제)라 generic 폴백으로 둔다.
+  CHANNEL_CONNECTION_NOT_ACTIVE: { labelKey: 'reconcileErrorConnectionInactive', kind: 'reconcile_connection_inactive' },
+  INSIGHT_CHANNEL_NOT_IMPLEMENTED: { labelKey: 'reconcileErrorChannelUnsupported', kind: 'reconcile_channel_unsupported' },
 };
 
 function extractCodeAndMessage(detail: unknown): { code?: string; message?: string } {

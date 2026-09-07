@@ -183,6 +183,45 @@ async def test_comment_miss_rate_normal_value():
         await engine.dispose()
 
 
+@pytest.mark.anyio
+async def test_comment_miss_rate_over_storage_is_clamped_to_zero_not_negative():
+    """story #3620 — #3975 카디르 발견(비차단): 기존 3건 전부 reported>stored라
+    stored>reported(over-storage, 삭제 리컨실 등으로 저장 수가 채널 원본보다 많아진
+    경우)를 잡는 테스트가 없었다(max(0, ...) 클램프를 지워도 9/9 GREEN — 가드가
+    잡는다는 걸 스스로 증명 못 함). 이 테스트는 그 갭을 메운다: 뮤테이션(클램프
+    제거)에서 RED가 나야 정당하다."""
+    from app.models.channel_post_comment import ChannelPostComment, CommentCollectionSchedule
+    from app.services.measured_metrics import compute_measured_metrics
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="threads")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="threads", external_id="m1")
+            now = datetime.now(timezone.utc)
+            s.add(CommentCollectionSchedule(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, channel="threads", external_id="m1",
+                due_at=now, captured_at=now, status="captured", channel_reported_comment_count=5,
+            ))
+            for i in range(8):  # 채널은 5건이라는데 저장은 8건(over-storage) — 누락 0.
+                s.add(ChannelPostComment(
+                    id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, channel="threads",
+                    external_comment_id=f"c{i}", text=f"댓글{i}", text_sha256=f"sha{i}", captured_at=now,
+                ))
+            await s.commit()
+
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
+            metric = result["comment_miss_rate"]
+            assert metric["reason_code"] is None
+            assert metric["numerator"] == 0
+            assert metric["denominator"] == 5
+            assert metric["value"] == pytest.approx(0.0)
+            assert metric["value"] >= 0
+    finally:
+        await engine.dispose()
+
+
 # ─── 후속 작업 생성률 — 분모 0("—")·정상(직접+간접 매치)·분자 0(측정됐으나 0) ──
 
 

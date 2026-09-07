@@ -39,6 +39,8 @@ const MEASURED_AND_UNMEASURED = {
   utm_attribution_rate: { value: 0.3, numerator: 30, denominator: 100, reason_code: null },
   comment_miss_rate: { value: null, numerator: 0, denominator: 0, reason_code: 'NO_COMMENT_DATA' },
   follow_up_creation_rate: { value: 0, numerator: 0, denominator: 5, reason_code: null },
+  reconciliation_coverage_rate: { value: 0.5, numerator: 1, denominator: 2, reason_code: null },
+  reconciliation_mismatch_rate: { value: 1, numerator: 1, denominator: 1, reason_code: null },
   computed_at: '2026-09-07T00:00:00Z',
 };
 
@@ -79,6 +81,50 @@ describe('MeasuredMetricsCards — 값·미측정·0 구분(story #3618)', () =>
   });
 });
 
+// story #3620(additive) — 4번째 카드 「채널 원본 지표와 evidence 대조」(coverage 본체
+// +mismatch 보조 줄, 독립 사유 코드).
+describe('MeasuredMetricsCards — 4번째 카드(reconciliation, story #3620)', () => {
+  it('coverage 값이 있으면 퍼센트+분자/분모, mismatch 보조 줄도 함께 보여준다', async () => {
+    stubFetch(MEASURED_AND_UNMEASURED);
+    await act(async () => { root.render(wrap(<MeasuredMetricsCards orgId="org-1" windowDays={7} />)); });
+    await flush();
+
+    const values = container.querySelectorAll('[data-testid="measured-metric-value"]');
+    expect(values[3].textContent).toBe('50%');
+    expect(container.textContent).toContain('1 / 2');
+    const mismatchLine = container.querySelector('[data-testid="measured-metric-mismatch-line"]');
+    expect(mismatchLine?.textContent).toContain('1 / 1');
+  });
+
+  it('coverage·mismatch가 서로 다른 사유로 각자 「—」일 수 있다(coverage=NO_SNAPSHOTS·mismatch=NO_RECONCILIATIONS)', async () => {
+    stubFetch({
+      ...MEASURED_AND_UNMEASURED,
+      reconciliation_coverage_rate: { value: null, numerator: 0, denominator: 0, reason_code: 'NO_SNAPSHOTS' },
+      reconciliation_mismatch_rate: { value: null, numerator: 0, denominator: 0, reason_code: 'NO_RECONCILIATIONS' },
+    });
+    await act(async () => { root.render(wrap(<MeasuredMetricsCards orgId="org-1" windowDays={7} />)); });
+    await flush();
+
+    const values = container.querySelectorAll('[data-testid="measured-metric-value"]');
+    expect(values[3].textContent).toBe('—');
+    expect(container.textContent).toContain('집계할 발행 스냅샷이 없습니다');
+    const mismatchLine = container.querySelector('[data-testid="measured-metric-mismatch-line"]');
+    expect(mismatchLine?.textContent).toContain('—');
+  });
+
+  it('mismatch 분자가 0이면(전부 일치) 「—」가 아니라 「0 / N」을 그대로 보여준다', async () => {
+    stubFetch({
+      ...MEASURED_AND_UNMEASURED,
+      reconciliation_mismatch_rate: { value: 0, numerator: 0, denominator: 1, reason_code: null },
+    });
+    await act(async () => { root.render(wrap(<MeasuredMetricsCards orgId="org-1" windowDays={7} />)); });
+    await flush();
+
+    const mismatchLine = container.querySelector('[data-testid="measured-metric-mismatch-line"]');
+    expect(mismatchLine?.textContent).toContain('0 / 1');
+  });
+});
+
 // story #3618 CHANGES 2(페드루 PO 채택, 유나 자리축) — 기간 조작은 화면에 하나(카드
 // 자체 토글 삭제, 페이지 window prop을 따른다). 90일은 BE가 안 받는 값이라 조용히
 // 30일로 떨어뜨리지 않고 「—」+사유로만 보여준다.
@@ -97,7 +143,7 @@ describe('MeasuredMetricsCards — windowDays prop이 페이지 기간을 그대
     expect(calledUrls.some((u) => u.includes('days=30'))).toBe(true);
   });
 
-  it('windowDays=90이면 BE를 아예 안 부르고 3장 다 「—」+WINDOW_UNSUPPORTED 사유를 보여준다', async () => {
+  it('windowDays=90이면 BE를 아예 안 부르고 4장 다 「—」+WINDOW_UNSUPPORTED 사유를 보여준다', async () => {
     const fetchMock = vi.fn(async (..._args: unknown[]) => ({ ok: true, json: async () => ({ data: MEASURED_AND_UNMEASURED }) }));
     vi.stubGlobal('fetch', fetchMock);
     await act(async () => { root.render(wrap(<MeasuredMetricsCards orgId="org-1" windowDays={90} />)); });
@@ -105,11 +151,13 @@ describe('MeasuredMetricsCards — windowDays prop이 페이지 기간을 그대
 
     expect(fetchMock).not.toHaveBeenCalled();
     const values = container.querySelectorAll('[data-testid="measured-metric-value"]');
-    expect(values).toHaveLength(3);
+    expect(values).toHaveLength(4);
     for (const v of Array.from(values)) {
       expect(v.textContent).toBe('—');
     }
-    expect(container.textContent).toContain('90일 기간은 이 실측을 지원하지 않습니다');
+    expect(container.textContent).toContain('이 기간은 이 실측을 지원하지 않습니다');
+    const mismatchLine = container.querySelector('[data-testid="measured-metric-mismatch-line"]');
+    expect(mismatchLine?.textContent).toContain('—');
   });
 });
 

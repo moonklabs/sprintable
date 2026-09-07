@@ -5314,7 +5314,19 @@
     "measuredReasonNoPageviews": "No pageviews to measure",
     "measuredReasonNoCommentData": "Channel hasn't reported original comment counts yet",
     "measuredReasonNoSnapshots": "No publication snapshots to measure",
-    "measuredReasonWindowUnsupported": "The 90-day window isn't supported for this measurement (7 or 30 days only)",
-    "measuredMetricsErrorGeneric": "Couldn't load the measurements."
+    "measuredReasonWindowUnsupported": "This window isn't supported for this measurement (7 or 30 days only)",
+    "measuredMetricsErrorGeneric": "Couldn't load the measurements.",
+    "measuredReconciliationCoverageRate": "Reconciled",
+    "measuredReconciliationMismatchCount": "Mismatches",
+    "measuredReasonNoReconciliations": "No publications have been reconciled yet",
+    "reconcileAction": "Reconcile with source",
+    "reconcileAriaLabel": "{label} — row {n}",
+    "reconcileInProgress": "Reconciling...",
+    "reconcileErrorGeneric": "Couldn't reconcile.",
+    "reconcileErrorConnectionInactive": "The connection isn't active, so this can't be reconciled.",
+    "reconcileErrorChannelUnsupported": "This channel doesn't support reconciliation.",
+    "reconcileVerdictMatch": "Match",
+    "reconcileVerdictMismatch": "Mismatch",
+    "reconcileVerdictUnmeasured": "Unmeasured"
   }
 }

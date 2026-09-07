@@ -1491,6 +1491,11 @@
       "file": "tests/test_3614_channel_post_draft_withdraw.py",
       "sec": 15.0,
       "source": "story-3614-draft-withdraw(PR 개설 前 선제 등재 — 로컬 격리 uv run pytest 7건 7.16s 전체 왕복(마이그레이션 포함 프로세스 시간) 실측, 2배 안전마진 반영한 15s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3620_publication_reconciliation.py",
+      "sec": 30.0,
+      "source": "story-3620-publication-reconciliation(PR 개설 前 선제 등재 — 로컬 raw pytest 11건 4.69s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 30s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
