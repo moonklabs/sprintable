@@ -512,7 +512,9 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
     expect(resultLine!.textContent).toContain(koMessages.insightsBoard.reconcileVerdictUnmeasured);
   });
 
-  it('409 CHANNEL_CONNECTION_NOT_ACTIVE — 알려진 코드의 사람 말 문구가 행 아래에 뜬다', async () => {
+  it('409 CHANNEL_CONNECTION_NOT_ACTIVE — content 네임스페이스 기존 키(신규 키 0)의 문구가 행 아래에 뜬다', async () => {
+    // story #3620 CHANGES(카디르 발견) — 새 키를 만들지 않고 content.errorChannelConnectionNotActive
+    // (「연결 화면에서 확인」 안내까지 포함된 정본)를 재사용한다.
     stubFetch({
       reconcile: () => ({ status: 409, body: { detail: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: 'raw' } } }),
     });
@@ -523,7 +525,7 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
     await flush();
 
     expect(container.querySelector('[data-testid="insights-board-reconcile-error"]')?.textContent).toBe(
-      koMessages.insightsBoard.reconcileErrorConnectionInactive,
+      koMessages.content.errorChannelConnectionNotActive,
     );
   });
 });

@@ -53,4 +53,15 @@ describe('ReconcileResultLine(story #3620)', () => {
     const text = container.querySelector('[data-testid="reconcile-result-line"]')?.textContent;
     expect(text).toBe(`${koMessages.content.insightMetricSpend} ${koMessages.insightsBoard.reconcileVerdictMatch}`);
   });
+
+  // story #3620 CHANGES(카디르 발견, #3971 클래스) — 서버가 모르는 판정값을 원문 그대로
+  // 화면에 흘리면 안 된다. 알려진 3값 밖은 「미측정」으로 접는다.
+  it('알려지지 않은 판정값은 raw 그대로가 아니라 「미측정」으로 보인다(원문 유출 금지)', async () => {
+    await act(async () => {
+      root.render(wrap(<ReconcileResultLine verdicts={{ spend: 'some-future-verdict-value' }} />));
+    });
+    const text = container.querySelector('[data-testid="reconcile-result-line"]')?.textContent;
+    expect(text).toBe(`${koMessages.content.insightMetricSpend} ${koMessages.insightsBoard.reconcileVerdictUnmeasured}`);
+    expect(text).not.toContain('some-future-verdict-value');
+  });
 });

@@ -139,7 +139,10 @@ export default function InsightsBoardPage() {
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { detail?: unknown; error?: Record<string, unknown> } | null;
         const info = parseInsightsBoardApiError(body);
-        const message = info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('reconcileErrorGeneric'));
+        // story #3620 CHANGES(카디르 발견) — CHANNEL_CONNECTION_NOT_ACTIVE는 content
+        // 네임스페이스 기존 키를 재사용하므로 humanMessageNamespace로 어느 t를 쓸지 가른다.
+        const translate = info.humanMessageNamespace === 'content' ? tContent : t;
+        const message = info.humanMessageKey ? translate(info.humanMessageKey) : (info.humanMessageFallback || t('reconcileErrorGeneric'));
         setReconcileState((prev) => ({ ...prev, [row.publication_id]: { status: 'error', message } }));
         return;
       }
@@ -156,7 +159,7 @@ export default function InsightsBoardPage() {
         ...prev, [row.publication_id]: { status: 'error', message: t('reconcileErrorGeneric') },
       }));
     }
-  }, [orgId, t]);
+  }, [orgId, t, tContent]);
 
   const buildQuery = useCallback((cursor?: string) => {
     const qs = new URLSearchParams();

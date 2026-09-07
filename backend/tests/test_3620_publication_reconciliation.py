@@ -276,7 +276,7 @@ async def test_reconciliation_coverage_rate_no_snapshots_is_not_measured():
 
 
 @pytest.mark.anyio
-async def test_reconciliation_coverage_and_mismatch_rate_normal_values():
+async def test_reconciliation_coverage_rate_and_mismatch_count_normal_values():
     from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
     from app.services.measured_metrics import compute_measured_metrics
 
@@ -291,8 +291,9 @@ async def test_reconciliation_coverage_and_mismatch_rate_normal_values():
             await _seed_captured_snapshot(s, org_id=org_id, publication_id=pub1.id, channel="threads", normalized={})
             await _seed_captured_snapshot(s, org_id=org_id, publication_id=pub2.id, channel="threads", normalized={})
 
-            # pub1만 대조 기록 있음(불일치 1건) — coverage=1/2, mismatch=1/1(대조된
-            # 발행 중 불일치인 것의 비율 — pub2는 대조 자체가 없어 분모에 안 낀다).
+            # pub1만 대조 기록 있음(불일치 1건) — coverage=1/2, mismatch_count=1건
+            # (story #3620 CHANGES 2026-09-07 — 「불일치 수」는 정의 3 그대로 수,
+            # 비율로 안 지어낸다).
             s.add(ChannelPublicationReconciliation(
                 id=uuid.uuid4(), org_id=org_id, publication_id=pub1.id, snapshot_id=None,
                 live_raw={"impressions": 10}, verdicts={"impressions": "mismatch"}, has_mismatch=True,
@@ -302,20 +303,19 @@ async def test_reconciliation_coverage_and_mismatch_rate_normal_values():
 
             result = await compute_measured_metrics(s, org_id=org_id, days=7)
             coverage = result["reconciliation_coverage_rate"]
-            mismatch = result["reconciliation_mismatch_rate"]
+            mismatch = result["reconciliation_mismatch_count"]
             assert coverage["numerator"] == 1
             assert coverage["denominator"] == 2
             assert coverage["value"] == pytest.approx(0.5)
-            assert mismatch["numerator"] == 1
-            assert mismatch["denominator"] == 1
-            assert mismatch["value"] == pytest.approx(1.0)
+            assert mismatch["reason_code"] is None
+            assert mismatch["value"] == 1
     finally:
         await engine.dispose()
 
 
 @pytest.mark.anyio
-async def test_reconciliation_mismatch_rate_all_match_is_real_zero_not_dash():
-    """대조 기록은 있는데 전부 일치면 「—」가 아니라 진짜 0(측정은 됐다)."""
+async def test_reconciliation_mismatch_count_all_match_is_real_zero_not_dash():
+    """대조 기록은 있는데 전부 일치면 「—」가 아니라 진짜 0건(측정은 됐다)."""
     from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
     from app.services.measured_metrics import compute_measured_metrics
 
@@ -335,10 +335,9 @@ async def test_reconciliation_mismatch_rate_all_match_is_real_zero_not_dash():
             await s.commit()
 
             result = await compute_measured_metrics(s, org_id=org_id, days=7)
-            metric = result["reconciliation_mismatch_rate"]
+            metric = result["reconciliation_mismatch_count"]
             assert metric["reason_code"] is None
-            assert metric["numerator"] == 0
-            assert metric["denominator"] == 1
+            assert metric["value"] == 0
             assert metric["value"] is not None  # 「—」(None)와 0 혼동 방지 — 측정은 됐다.
             assert metric["value"] == pytest.approx(0.0)
     finally:

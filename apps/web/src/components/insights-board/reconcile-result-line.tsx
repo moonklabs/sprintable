@@ -28,10 +28,13 @@ export function ReconcileResultLine({ verdicts }: { verdicts: Record<string, str
   const t = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
 
+  // story #3620 CHANGES(카디르 발견, #3971 클래스) — 서버가 모르는 판정값을 원문 그대로
+  // 화면에 흘리지 않는다(원문 message 유출 금지 관례와 동형). 알려진 3값 밖은 전부
+  // 「미측정」으로 접는다 — raw는 화면에 안 남는다.
   const parts = METRIC_ORDER.filter((key) => key in verdicts).map((key) => {
     const verdict = verdicts[key];
-    const verdictLabelKey = verdict ? VERDICT_LABEL_KEYS[verdict] : undefined;
-    return `${tContent(METRIC_LABEL_KEYS[key])} ${verdictLabelKey ? t(verdictLabelKey) : verdict}`;
+    const verdictLabelKey = (verdict && VERDICT_LABEL_KEYS[verdict]) || 'reconcileVerdictUnmeasured';
+    return `${tContent(METRIC_LABEL_KEYS[key])} ${t(verdictLabelKey)}`;
   });
 
   return <span data-testid="reconcile-result-line">{parts.join(' · ')}</span>;

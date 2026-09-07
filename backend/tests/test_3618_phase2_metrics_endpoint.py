@@ -59,8 +59,8 @@ async def test_get_phase2_metrics_endpoint_agent_200_all_unmeasured():
         # story #3620(additive) — 4번째 실측 열 2키.
         assert body["reconciliation_coverage_rate"]["value"] is None
         assert body["reconciliation_coverage_rate"]["reason_code"] == "NO_SNAPSHOTS"
-        assert body["reconciliation_mismatch_rate"]["value"] is None
-        assert body["reconciliation_mismatch_rate"]["reason_code"] == "NO_RECONCILIATIONS"
+        assert body["reconciliation_mismatch_count"]["value"] is None
+        assert body["reconciliation_mismatch_count"]["reason_code"] == "NO_RECONCILIATIONS"
         assert body["computed_at"] is not None
     finally:
         app.dependency_overrides.clear()

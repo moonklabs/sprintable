@@ -85,13 +85,21 @@ class MeasuredMetricValue(BaseModel):
     reason_code: str | None
 
 
+class MismatchCountValue(BaseModel):
+    """story #3620 CHANGES(2026-09-07, 페드루 PO·유나 낱말 판정) — 「불일치 수」는
+    스토리 정의 3 그대로 수(count)다. MeasuredMetricValue의 분모/분자 형은 비율
+    지표 전용이라 여기엔 안 맞는다(억지로 끼워 맞추면 "3/12"류 분수로 잘못 읽힌다)."""
+    value: int | None
+    reason_code: str | None
+
+
 class MeasuredMetricsResponse(BaseModel):
     utm_attribution_rate: MeasuredMetricValue
     comment_miss_rate: MeasuredMetricValue
     follow_up_creation_rate: MeasuredMetricValue
     # story #3620(additive) — 「채널 원본 지표와 evidence 대조」 4열.
     reconciliation_coverage_rate: MeasuredMetricValue
-    reconciliation_mismatch_rate: MeasuredMetricValue
+    reconciliation_mismatch_count: MismatchCountValue
     computed_at: datetime
 
 

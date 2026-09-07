@@ -227,14 +227,16 @@ async def _compute_reconciliation_coverage_rate(
     }
 
 
-async def _compute_reconciliation_mismatch_rate(
+async def _compute_reconciliation_mismatch_count(
     db: AsyncSession, *, org_id: uuid.UUID, period_start: datetime,
 ) -> dict[str, Any]:
-    """정의 3(story #3620) — 「불일치 수」를 카드 형(퍼센트) 계약에 맞춰 비율로
-    낸다: 분모=기간 내 대조 기록이 1건이라도 있는 발행 수, 분자=그중 하나라도
-    mismatch였던 발행 수(has_mismatch 비정규화 컬럼 재사용 — verdicts JSONB
-    스캔 0). 분모 0(대조를 아무도 아직 안 눌렀음)이면 「—」(NO_RECONCILIATIONS)
-    — 분자 0(눌렀는데 전부 일치)은 「—」가 아니라 진짜 0."""
+    """정의 3(story #3620) — 페드루 PO CHANGES(2026-09-07, 유나 낱말·자리 판정) —
+    「불일치 수」는 스토리 정의 3 그대로 **수**다(비율로 지어내지 않는다 — 카드
+    퍼센트 계약에 맞추려고 분모/분자로 늘렸던 이전 형을 되돌린다, additive라
+    이름을 그대로 바꿔도 소비처는 이 PR뿐). 기간 내 대조 기록이 1건이라도 있는
+    발행 중 하나라도 mismatch였던 발행 수(has_mismatch 비정규화 컬럼 재사용 —
+    verdicts JSONB 스캔 0). 대조 기록이 하나도 없으면(아무도 아직 안 눌렀음)
+    「—」(NO_RECONCILIATIONS) — 있는데 전부 일치(0건)는 「—」가 아니라 진짜 0."""
     rows = (await db.execute(
         select(ChannelPublicationReconciliation.publication_id, ChannelPublicationReconciliation.has_mismatch)
         .where(
@@ -247,15 +249,11 @@ async def _compute_reconciliation_mismatch_rate(
     for publication_id, has_mismatch in rows:
         mismatch_by_publication[publication_id] = mismatch_by_publication.get(publication_id, False) or has_mismatch
 
-    denominator = len(mismatch_by_publication)
-    if denominator == 0:
-        return _empty_metric("NO_RECONCILIATIONS")
+    if not mismatch_by_publication:
+        return {"value": None, "reason_code": "NO_RECONCILIATIONS"}
 
-    numerator = sum(1 for v in mismatch_by_publication.values() if v)
-    return {
-        "value": numerator / denominator, "numerator": numerator, "denominator": denominator,
-        "reason_code": None,
-    }
+    count = sum(1 for v in mismatch_by_publication.values() if v)
+    return {"value": count, "reason_code": None}
 
 
 async def compute_measured_metrics(db: AsyncSession, *, org_id: uuid.UUID, days: int) -> dict[str, Any]:
@@ -270,7 +268,7 @@ async def compute_measured_metrics(db: AsyncSession, *, org_id: uuid.UUID, days:
     comment_miss = await _compute_comment_miss_rate(db, org_id=org_id, period_start=period_start)
     follow_up = await _compute_follow_up_creation_rate(db, org_id=org_id, period_start=period_start)
     reconciliation_coverage = await _compute_reconciliation_coverage_rate(db, org_id=org_id, period_start=period_start)
-    reconciliation_mismatch = await _compute_reconciliation_mismatch_rate(db, org_id=org_id, period_start=period_start)
+    reconciliation_mismatch = await _compute_reconciliation_mismatch_count(db, org_id=org_id, period_start=period_start)
 
     return {
         "utm_attribution_rate": utm,
@@ -278,6 +276,6 @@ async def compute_measured_metrics(db: AsyncSession, *, org_id: uuid.UUID, days:
         "follow_up_creation_rate": follow_up,
         # story #3620(additive — 기존 3키·응답 형은 불변) — 4번째 실측 열.
         "reconciliation_coverage_rate": reconciliation_coverage,
-        "reconciliation_mismatch_rate": reconciliation_mismatch,
+        "reconciliation_mismatch_count": reconciliation_mismatch,
         "computed_at": now,
     }

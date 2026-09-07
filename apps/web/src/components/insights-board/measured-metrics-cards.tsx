@@ -38,12 +38,20 @@ type MeasuredMetricValue = {
   reason_code: string | null;
 };
 
+// story #3620 CHANGES(2026-09-07, 페드루 PO·유나 낱말 판정) — 「불일치 수」는
+// 스토리 정의 3 그대로 수(count)다. MeasuredMetricValue(비율 전용, 분모/분자)
+// 형에 억지로 끼워 맞추면 화면이 "3 / 12" 분수로 잘못 읽힌다.
+type MismatchCountValue = {
+  value: number | null;
+  reason_code: string | null;
+};
+
 type MeasuredMetricsResponse = {
   utm_attribution_rate: MeasuredMetricValue;
   comment_miss_rate: MeasuredMetricValue;
   follow_up_creation_rate: MeasuredMetricValue;
   reconciliation_coverage_rate: MeasuredMetricValue;
-  reconciliation_mismatch_rate: MeasuredMetricValue;
+  reconciliation_mismatch_count: MismatchCountValue;
   computed_at: string;
 };
 
@@ -56,13 +64,14 @@ const REASON_LABEL_KEYS: Record<string, string> = {
 };
 
 const _UNMEASURED_METRIC: MeasuredMetricValue = { value: null, numerator: 0, denominator: 0, reason_code: 'WINDOW_UNSUPPORTED' };
+const _UNMEASURED_COUNT: MismatchCountValue = { value: null, reason_code: 'WINDOW_UNSUPPORTED' };
 // 90일(BE 미지원 기간) 전용 — 4장 다 같은 사유로 「—」. 네트워크 호출 자체를 안 한다.
 const WINDOW_UNSUPPORTED_RESPONSE: MeasuredMetricsResponse = {
   utm_attribution_rate: _UNMEASURED_METRIC,
   comment_miss_rate: _UNMEASURED_METRIC,
   follow_up_creation_rate: _UNMEASURED_METRIC,
   reconciliation_coverage_rate: _UNMEASURED_METRIC,
-  reconciliation_mismatch_rate: _UNMEASURED_METRIC,
+  reconciliation_mismatch_count: _UNMEASURED_COUNT,
   computed_at: '',
 };
 
@@ -105,11 +114,12 @@ function ReconciliationCard({
   coverage, mismatch, t, tContent,
 }: {
   coverage: MeasuredMetricValue;
-  mismatch: MeasuredMetricValue;
+  mismatch: MismatchCountValue;
   t: ReturnType<typeof useTranslations>;
   tContent: ReturnType<typeof useTranslations>;
 }) {
   const coverageReasonKey = coverage.reason_code ? REASON_LABEL_KEYS[coverage.reason_code] : undefined;
+  const mismatchReasonKey = mismatch.reason_code ? REASON_LABEL_KEYS[mismatch.reason_code] : undefined;
   return (
     <div className="rounded-lg border border-border bg-card p-3" data-testid="measured-metric-card">
       <p className="text-xs text-muted-foreground">{t('measuredReconciliationCoverageRate')}</p>
@@ -128,12 +138,23 @@ function ReconciliationCard({
           <p className="mt-0.5 text-[11px] text-muted-foreground">{coverage.numerator} / {coverage.denominator}</p>
         </>
       )}
-      <p className="mt-1 text-[11px] text-muted-foreground" data-testid="measured-metric-mismatch-line">
-        {t('measuredReconciliationMismatchCount')}:{' '}
-        {mismatch.value === null
-          ? tContent('insightMetricUnavailableDash')
-          : `${mismatch.numerator} / ${mismatch.denominator}`}
-      </p>
+      {/* story #3620 CHANGES — 「불일치」는 수(count)로, 「—」일 때도 coverage와 동형으로
+          사유 줄을 단다(3618 계약: 「—」는 항상 사유 한 줄과 짝, 자리마다 예외 0). */}
+      <div className="mt-1 border-t border-border pt-1">
+        <p className="text-[11px] text-muted-foreground">{t('measuredReconciliationMismatchCount')}</p>
+        {mismatch.value === null ? (
+          <>
+            <p className="text-xs font-medium text-muted-foreground" data-testid="measured-metric-mismatch-line">
+              {tContent('insightMetricUnavailableDash')}
+            </p>
+            {mismatchReasonKey && <p className="text-[11px] text-muted-foreground">{t(mismatchReasonKey)}</p>}
+          </>
+        ) : (
+          <p className="text-xs font-medium text-foreground" data-testid="measured-metric-mismatch-line">
+            {t('measuredReconciliationMismatchCountValue', { n: mismatch.value })}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -187,7 +208,7 @@ export function MeasuredMetricsCards({ orgId, windowDays }: { orgId: string; win
     <div className="space-y-2" data-testid="measured-metrics-section">
       <p className="text-xs font-medium text-muted-foreground">{t('measuredMetricsTitle')}</p>
       {loading && !data && (
-        <div className="grid grid-cols-4 gap-2" data-testid="measured-metrics-loading">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="measured-metrics-loading">
           {[1, 2, 3, 4].map((i) => <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />)}
         </div>
       )}
@@ -195,12 +216,12 @@ export function MeasuredMetricsCards({ orgId, windowDays }: { orgId: string; win
         <p className="text-xs text-destructive" data-testid="measured-metrics-error">{t('measuredMetricsErrorGeneric')}</p>
       )}
       {data && (
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <MetricCard label={t('measuredAttributionRate')} metric={data.utm_attribution_rate} t={t} tContent={tContent} />
           <MetricCard label={t('measuredCommentMissRate')} metric={data.comment_miss_rate} t={t} tContent={tContent} />
           <MetricCard label={t('measuredFollowUpRate')} metric={data.follow_up_creation_rate} t={t} tContent={tContent} />
           <ReconciliationCard
-            coverage={data.reconciliation_coverage_rate} mismatch={data.reconciliation_mismatch_rate} t={t} tContent={tContent}
+            coverage={data.reconciliation_coverage_rate} mismatch={data.reconciliation_mismatch_count} t={t} tContent={tContent}
           />
         </div>
       )}
