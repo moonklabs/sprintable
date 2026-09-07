@@ -40,6 +40,12 @@
   =467(앱이 꺼지면 그 앱으로 발급된 토큰이 "무효"가 된다는 해석). 셋 다 classify_graph_
   oauth_error 안에서는 동일하게 "revoked"로 수렴한다(현재 reason 어휘가 expired|
   revoked|error 3종뿐이라 그 이상 세분화할 자리가 없다 — 어휘가 늘면 재배정).
+- `[sandbox:permission-error]`(story #3605, 3598 AC6 일반화 시뮬레이션) — `create_
+  container`가 401로 실패하되 `provider_error_code=10`(type 없음 — code==10은
+  190과 달리 OAuthException 타입 표기 없이도 이 family에 걸린다, 그라운딩:
+  graph_api_errors.py 모듈 docstring)을 실어 `classify_graph_oauth_error`가
+  "error"(사유 불명, CHANNEL_CONNECTION_AUTH_ERROR)로 분류하게 한다 — 190 밖의
+  family가 실제로 fail-closed 승격되는지 확인하는 마커.
 - `[sandbox:container-error]` — 컨테이너 생성 자체는 성공하지만, 폴링(get_container_
   status)이 ERROR를 낸다(AC3 "컨테이너 ERROR"). ⚠️**이미지 첨부 초안 전용** — 오케스트
   레이션(channel_posts.py::publish_channel_post_draft)이 `has_image`일 때만 폴링을
@@ -79,6 +85,8 @@ _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
 _MARKER_REVOKED = "[sandbox:revoked]"
 _MARKER_PAGE_UNLINKED = "[sandbox:page-unlinked]"
 _MARKER_APP_INACTIVE = "[sandbox:app-inactive]"
+# story #3605 — 190 밖 family(code==10)의 fail-closed 승격 시뮬레이션.
+_MARKER_PERMISSION_ERROR = "[sandbox:permission-error]"
 _MARKER_CONTAINER_ERROR = "[sandbox:container-error]"
 _MARKER_CONTAINER_SLOW = "[sandbox:container-slow]"
 # story #3516 AC8(페드루 PO 確定 2026-09-05) — 라이브 런북 재료. 댓글 수집 리컨실
@@ -158,6 +166,11 @@ async def create_container(
         raise ThreadsPublishError(
             "SANDBOX_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
             provider_error_code=190, provider_error_subcode=467, provider_error_type="OAuthException",
+        )
+    if _MARKER_PERMISSION_ERROR in text:
+        raise ThreadsPublishError(
+            "SANDBOX_PERMISSION_ERROR", "sandbox: [sandbox:permission-error] 마커 시뮬레이션", status_code=401,
+            provider_error_code=10, provider_error_subcode=None, provider_error_type=None,
         )
 
     mode = "error" if _MARKER_CONTAINER_ERROR in text else "ok"

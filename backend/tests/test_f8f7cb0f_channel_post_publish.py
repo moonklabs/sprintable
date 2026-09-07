@@ -737,13 +737,15 @@ async def test_token_expired_returns_409_and_marks_connection_expired():
 # 지나 connection.status가 (expired가 아니라) "revoked"로 정확히 남는 것은 다른
 # 주장이다 — 위 test_token_expired_*와 완전히 동형으로 HTTP 왕복까지 실측한다.
 @pytest.mark.anyio
-async def test_revoked_returns_409_with_token_expired_code_but_marks_connection_revoked():
-    """AC4 「화면 문장은 기존 needs_reauth 낱말 재사용(새 낱말 0)」 — HTTP 응답
-    error.code는 그대로 CHANNEL_TOKEN_EXPIRED(상속 덕에 기존 except 절이 그대로
-    잡는다, 새 HTTP 코드 0)이지만, connection.status는 "expired"가 아니라 정확히
-    "revoked"로 남아야 한다(3595 표 행 ② 「권한 회수」가 "미감지"→"감지+표시"로
-    바뀌는 지점 — status가 여전히 expired로 뭉개지면 이 스토리는 아무것도 안 고친
-    것과 같다)."""
+async def test_revoked_returns_409_with_connection_revoked_code_and_marks_connection_revoked():
+    """story #3605 CHANGES-2(페드루 PO 판정 2026-09-07) — HTTP error.code 계약이
+    바뀌었다: 원래 이 테스트는 「상속 덕에 기존 except 절이 그대로 잡아 HTTP
+    응답 code가 CHANNEL_TOKEN_EXPIRED 그대로」를 AC4의 "새 낱말 0"으로 못박았으나,
+    #3964가 `_process_one_command`/라우터의 except 절 순서를 서브클래스 우선으로
+    정정하면서(⚠️story #3605 except-ordering 주석 참고) revoked는 이제 정확히
+    CHANNEL_CONNECTION_REVOKED로 낸다 — "다른 메커니즘은 다른 낱말이어야 한다,
+    옛 계약(전부 TOKEN_EXPIRED로 뭉뚱그림)은 거짓말"이 새 판정. connection.status
+    ="revoked"는 원래 의도 그대로(3595 표 행 ② 「권한 회수」 감지)."""
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
     from app.services.threads_publish import ThreadsPublishError
@@ -782,8 +784,9 @@ async def test_revoked_returns_409_with_token_expired_code_but_marks_connection_
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
         assert r_publish.status_code == 409, r_publish.text
-        # 상속 덕에 기존 except 절이 잡는다 — HTTP 응답 code는 새 낱말 0(AC4).
-        assert r_publish.json()["error"]["code"] == "CHANNEL_TOKEN_EXPIRED"
+        # story #3605 CHANGES-2 — 새 계약: revoked는 CHANNEL_CONNECTION_REVOKED로
+        # 명시(구 계약이었던 CHANNEL_TOKEN_EXPIRED 뭉뚱그림은 폐기).
+        assert r_publish.json()["error"]["code"] == "CHANNEL_CONNECTION_REVOKED"
 
         async with Session() as s:
             from app.models.channel_connection import ChannelConnection

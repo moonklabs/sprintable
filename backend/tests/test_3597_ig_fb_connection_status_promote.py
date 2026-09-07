@@ -165,8 +165,11 @@ async def test_facebook_connection_failure_promotes_status_expired(monkeypatch):
 @pytest.mark.anyio
 async def test_facebook_connection_failure_does_not_downgrade_revoked_or_error():
     """기존 규율 불변 — 이미 revoked·error인 연결은 expired로 덮어쓰지 않는다
-    (_promote_connection_status의 `not in ("revoked", "error")` 가드는 이 PR이
-    안 건드린다, 여기서 회귀 0을 고정)."""
+    (story #3605 — `_promote_connection_status`에 `error_code` 인자가 추가되며
+    이 가드가 graph_api_errors.connection_status_for_error_code로 옮겨갔다.
+    여기선 "다른 코드가 expired로 매핑돼도 이미 revoked면 안 바뀐다"는 sticky
+    규율이 여전히 지켜지는지 고정 — 이 스토리 리팩터 中 한 번 실제로 좁혀져서
+    회귀했던 자리, 이 테스트가 그 회귀를 실측으로 잡았다)."""
     from app.services.channel_post_comments import _promote_connection_status
 
     engine, Session = await _session_factory()
@@ -177,7 +180,7 @@ async def test_facebook_connection_failure_does_not_downgrade_revoked_or_error()
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="facebook", external_id="media-1")
             await s.commit()
 
-            await _promote_connection_status(s, publication_id=pub.id)
+            await _promote_connection_status(s, publication_id=pub.id, error_code="CHANNEL_TOKEN_EXPIRED")
             await s.commit()
             await s.refresh(conn)
             assert conn.status == "revoked"

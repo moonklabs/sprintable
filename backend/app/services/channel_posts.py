@@ -125,7 +125,27 @@ class ChannelConnectionRevokedError(ChannelTokenExpiredError):
     `except ChannelTokenExpiredError`(라우터·publication_command.py) 전부가 신규
     except 절 없이 그대로 이 예외도 잡는다. `connection.status`만 "expired" 대신
     "revoked"로 정확히 남기는 것이 이 클래스가 존재하는 유일한 이유(3595 표 행
-    ②「권한 회수」가 "미감지"에서 "감지+표시"로 바뀌는 지점)."""
+    ②「권한 회수」가 "미감지"에서 "감지+표시"로 바뀌는 지점).
+
+    ⚠️story #3605(실측 정정) — "그대로 잡는다"는 catch 자체는 맞지만, 잡는 쪽이
+    예외 인스턴스가 아니라 **error_code 문자열을 다시 하드코딩**하면(예:
+    `except ChannelTokenExpiredError as exc: error_code = "CHANNEL_TOKEN_EXPIRED"`)
+    이 서브클래스로 온 사실 자체가 그 자리에서 조용히 지워진다 — publication_
+    command.py::_process_one_command가 정확히 이 함정에 있었다(하위 클래스 except
+    절을 부모보다 먼저 두는 방식으로 정정, #3605). 이 클래스를 새로 잡는 자리를
+    추가할 때마다 "인스턴스 타입으로 갈라 문자열을 새로 짓는지"를 확認할 것."""
+
+
+class ChannelConnectionAuthError(ChannelTokenExpiredError):
+    """story #3605(3598 AC6 일반화, PO 確定) — Graph API 권한/인증 계열 오류인 건
+    확실하지만(code==190·10·200~299 범위·type=="OAuthException") 정확한 사유(만료
+    vs 회수)는 모를 때(`classify_graph_oauth_error`가 "error"를 반환하는 자리 —
+    190의 미지 subcode든, 10·200~299 family든 전부 이 버킷). `ChannelConnection.
+    status` enum의 네 번째 값 "error"(active|expired|revoked|error)가 정확히 이
+    자리를 위해 존재한다 — expired/revoked로 섣불리 단정하지 않고 fail-closed로
+    "재인증이 필요한 건 확실하다"만 말한다. `ChannelTokenExpiredError`를 상속해
+    기존 except 절이 계속 잡되(위 ⚠️와 같은 주의), connection.status만 "error"로
+    정확히 남긴다."""
 
 
 class ChannelRateLimitedError(Exception):
@@ -1126,40 +1146,34 @@ def _classify_threads_error(
     파서, IG·FB·threads 어댑터가 전부 `error_from_response()`로 채운 `.provider_
     error_*` 3필드를 읽는다)로 먼저 세분화한다: expired는 기존 CHANNEL_TOKEN_EXPIRED
     그대로(회귀 0), revoked는 신설 CHANNEL_CONNECTION_REVOKED(ChannelTokenExpiredError
-    상속이라 기존 except 절 무변경). error 버킷은 AC6(fail-closed 승격·재시도 상한,
-    다음 커밋)에서 다룬다 — 지금은 미분류 provider 오류와 동일하게 아래 401/403/429
-    휴리스틱으로 떨어진다(회귀 0). 파서가 관할 밖(None — code!=190 ∧ type!=
-    OAuthException, 또는 애초에 파싱 가능한 Graph 오류 envelope이 없던 경우)이면
-    기존 401/403 휴리스틱이 계속 유일한 판정 근거다(비-Meta 오류·malformed body 대비)."""
-    from app.services.graph_api_errors import classify_graph_oauth_error
+    상속이라 기존 except 절 무변경).
 
-    oauth_reason = classify_graph_oauth_error(
-        error_code=exc.provider_error_code, error_subcode=exc.provider_error_subcode,
-        error_type=exc.provider_error_type,
+    story #3605(3598 AC6 일반화) — error 버킷(190의 미지 subcode·10·200~299
+    family·fail-closed)은 신설 CHANNEL_CONNECTION_AUTH_ERROR로 승격한다(더 이상
+    아래 401/403 휴리스틱으로 안 떨어진다 — 그러면 CHANNEL_TOKEN_EXPIRED로
+    뭉개져 "만료"라고 거짓 확信하는 꼴이라 fail-closed 취지와 반대다). 실제 판정
+    (오류 코드 하나 고르는 부분)은 `graph_api_errors.classify_graph_error_code`
+    로 옮겼다 — 댓글 수집(channel_post_comments.py)도 같은 함수를 쓴다(3605에서
+    통합, 그 전엔 자기만의 401/403 휴리스틱을 따로 갖고 있어 발행 경로만 정밀
+    판정을 받는 드리프트였다). 이 함수는 이제 그 문자열에 맞는 예외 인스턴스만
+    조립한다(connection_id가 필요한 이 도메인 전용 사정)."""
+    from app.services.graph_api_errors import classify_graph_error_code
+
+    error_code = classify_graph_error_code(
+        status_code=exc.status_code, provider_error_code=exc.provider_error_code,
+        provider_error_subcode=exc.provider_error_subcode, provider_error_type=exc.provider_error_type,
     )
-    if oauth_reason is not None:
-        status, _reason = oauth_reason
-        if status == "expired":
-            return "CHANNEL_TOKEN_EXPIRED", ChannelTokenExpiredError(
-                connection_id=connection_id, provider_message=exc.message,
-            )
-        if status == "revoked":
-            return "CHANNEL_CONNECTION_REVOKED", ChannelConnectionRevokedError(
-                connection_id=connection_id, provider_message=exc.message,
-            )
-        # status == "error" — AC6(다음 커밋)에서 fail-closed 승격·재시도 상한과 함께
-        # 처리. 지금은 아래 401/403/429 휴리스틱으로 폴스루(회귀 0).
-    if exc.status_code in (401, 403):
-        return "CHANNEL_TOKEN_EXPIRED", ChannelTokenExpiredError(
-            connection_id=connection_id, provider_message=exc.message,
-        )
-    if exc.status_code == 429:
-        return "CHANNEL_RATE_LIMITED", ChannelRateLimitedError(
+    if error_code == "CHANNEL_TOKEN_EXPIRED":
+        return error_code, ChannelTokenExpiredError(connection_id=connection_id, provider_message=exc.message)
+    if error_code == "CHANNEL_CONNECTION_REVOKED":
+        return error_code, ChannelConnectionRevokedError(connection_id=connection_id, provider_message=exc.message)
+    if error_code == "CHANNEL_CONNECTION_AUTH_ERROR":
+        return error_code, ChannelConnectionAuthError(connection_id=connection_id, provider_message=exc.message)
+    if error_code == "CHANNEL_RATE_LIMITED":
+        return error_code, ChannelRateLimitedError(
             reset_at=datetime.now(timezone.utc) + timedelta(seconds=_RATE_LIMIT_DEFAULT_RESET_SECONDS),
         )
-    return "CHANNEL_PUBLISH_PROVIDER_ERROR", ChannelPublishProviderError(
-        provider_code=exc.code, provider_message=exc.message,
-    )
+    return error_code, ChannelPublishProviderError(provider_code=exc.code, provider_message=exc.message)
 
 
 async def resolve_command_target(
@@ -1474,6 +1488,15 @@ async def publish_channel_post_draft(
                         await apply_connection_failure(
                             db, connection=connection, status="revoked", error_message=exc.message,
                         )
+                    elif error_code == "CHANNEL_CONNECTION_AUTH_ERROR":
+                        # story #3605 — 사유(만료/회수) 불명이지만 인증 계열인 건
+                        # 확실 — 기존 두 상태를 덮지 않는다는 점은 apply_connection_
+                        # failure 호출부 규율과 같다(connection.status 컬럼 자체가
+                        # revoked/error를 서로 안 덮게 짜여 있음, publication_command.
+                        # py::apply_command_failure의 동형 가드 참고).
+                        await apply_connection_failure(
+                            db, connection=connection, status="error", error_message=exc.message,
+                        )
                     raise mapped_exc from exc
                 row.external_container_id = container_id
                 row.status = "container_created"
@@ -1508,6 +1531,15 @@ async def publish_channel_post_draft(
                     elif error_code == "CHANNEL_CONNECTION_REVOKED":
                         await apply_connection_failure(
                             db, connection=connection, status="revoked", error_message=exc.message,
+                        )
+                    elif error_code == "CHANNEL_CONNECTION_AUTH_ERROR":
+                        # story #3605 — 사유(만료/회수) 불명이지만 인증 계열인 건
+                        # 확실 — 기존 두 상태를 덮지 않는다는 점은 apply_connection_
+                        # failure 호출부 규율과 같다(connection.status 컬럼 자체가
+                        # revoked/error를 서로 안 덮게 짜여 있음, publication_command.
+                        # py::apply_command_failure의 동형 가드 참고).
+                        await apply_connection_failure(
+                            db, connection=connection, status="error", error_message=exc.message,
                         )
                     raise mapped_exc from exc
                 if container_status == "IN_PROGRESS":
@@ -1560,6 +1592,10 @@ async def publish_channel_post_draft(
                 elif error_code == "CHANNEL_CONNECTION_REVOKED":
                     await apply_connection_failure(
                         db, connection=connection, status="revoked", error_message=exc.message,
+                    )
+                elif error_code == "CHANNEL_CONNECTION_AUTH_ERROR":
+                    await apply_connection_failure(
+                        db, connection=connection, status="error", error_message=exc.message,
                     )
                 raise mapped_exc from exc
 

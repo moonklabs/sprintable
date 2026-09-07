@@ -213,9 +213,20 @@ async def apply_connection_failure(
     `_classify_threads_error`가 code==190/OAuthException을 expired|revoked로 세분화한
     뒤 이 함수로 정확한 status를 남긴다(모델 컬럼 주석 그대로 active|expired|revoked|
     error 중 하나). last_error는 provider 원문 그대로(가공은 화면 몫, apply_refresh_
-    failure와 동일 규율)."""
-    connection.status = status
+    failure와 동일 규율).
+
+    story #3605 CHANGES-2(유나 코드 리뷰 재확認, 페드루 PO 채택 2026-09-07) —
+    "되돌아가지 않기" 규율이 한때 이 함수 안에 따로 구현돼 있었다(status=="error"
+    일 때만 막고 expired↔revoked는 서로 덮게 둠) — `graph_api_errors.
+    connection_status_for_error_code`가 쓰던 규율(expired·revoked는 서로도 안
+    덮는 완전 sticky)과 «같은 사실»을 다르게 말하고 있어 하나는 거짓이었다.
+    이제 `graph_api_errors.sticky_connection_status`(공유 단일 지점) 하나로
+    통일한다. last_error는 그래도 최신 원문으로 갱신한다(status가 안 바뀌어도
+    "최근에도 계속 실패 中"이라는 사실 자체는 갱신할 가치가 있다)."""
+    from app.services.graph_api_errors import sticky_connection_status
+
     connection.last_error = error_message[:2000]
+    connection.status = sticky_connection_status(connection.status, status)
     await db.commit()
 
 

@@ -61,6 +61,11 @@ _CONNECTION_BLOCKED_CODES = frozenset({
     # 승격하고 무한 백오프 재시도 대신 사람의 재연결을 기다린다(site_posts.py::
     # publish_site_post_external_command가 상태코드 401/403일 때만 이 코드를 쓴다).
     "CHANNEL_PUBLISH_AUTH_REJECTED",
+    # story #3605(실측 정정) — #3598이 신설한 두 코드가 이 집합에 빠져 있었다(발행
+    # 워커 경로에서 이 error_code로는 classify_failure_kind가 needs_check로 떨어져,
+    # connection.status가 첫 실패에도 즉시 승격되지 않고 재시도 상한까지 기다리는
+    # 결함이었다 — CHANNEL_TOKEN_EXPIRED와 대칭이 안 맞았다).
+    "CHANNEL_CONNECTION_REVOKED", "CHANNEL_CONNECTION_AUTH_ERROR",
 })
 # story 620beefc(PO 決定, 2026-09-04) — IMAGE 컨테이너가 Threads 쪽에서 ERROR/EXPIRED로
 # 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라
@@ -264,7 +269,9 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
 
     from app.models.channel_post_version import ChannelPostVersion
     from app.services.channel_posts import (
+        ChannelConnectionAuthError,
         ChannelConnectionNotActiveError,
+        ChannelConnectionRevokedError,
         ChannelImageContainerFailedError,
         ChannelPostDraftNotFoundError,
         ChannelPostReapprovalRequiredError,
@@ -368,6 +375,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         error_code, last_error = "CHANNEL_TEXT_TOO_LONG", str(exc)
     except ChannelConnectionNotActiveError as exc:
         error_code, last_error = "CHANNEL_CONNECTION_NOT_ACTIVE", str(exc)
+    # story #3605(실측 정정) — ChannelConnectionRevokedError·ChannelConnectionAuthError
+    # 둘 다 ChannelTokenExpiredError의 서브클래스(신규 except 절 없이 기존 라우터가
+    # 계속 잡는다는 설계, #3598)라 Python except 순서상 **부모보다 먼저** 와야 한다
+    # — 순서가 바뀌면 부모 절이 먼저 잡아 아래 하드코딩된 "CHANNEL_TOKEN_EXPIRED"
+    # 문자열로 뭉개진다(이 워커 경로가 정확히 이 함정에 있었다 — revoked/error가
+    # 전부 "expired"로 오분류되던 실사고, 3605 그라운딩).
+    except ChannelConnectionRevokedError as exc:
+        error_code, last_error = "CHANNEL_CONNECTION_REVOKED", str(exc)
+    except ChannelConnectionAuthError as exc:
+        error_code, last_error = "CHANNEL_CONNECTION_AUTH_ERROR", str(exc)
     except ChannelTokenExpiredError as exc:
         error_code, last_error = "CHANNEL_TOKEN_EXPIRED", str(exc)
     except ChannelRateLimitedError as exc:
@@ -643,15 +660,24 @@ async def apply_command_failure(
         # "quota_exceeded" 상태값은 죽은 코드였다(CHANNEL_RATE_LIMITED는 _TRANSIENT_
         # CODES라 애초에 이 분기(connection)에 못 옴 — 아래처럼 백오프 재시도로 간다).
         # ChannelConnection.status enum(active|expired|revoked|error)에도 없는 값이라
-        # 제거. 이미 revoked/error로 더 구체적인 종결 상태면 그걸 expired로 덮어쓰지
-        # 않는다(더 약한 정보로 되돌리지 않기).
+        # 제거.
+        #
+        # story #3605(실측 정정) — error_code 무관하게 항상 "expired"로 굳혔던 것을
+        # 바로잡는다. CHANNEL_CONNECTION_REVOKED·CHANNEL_CONNECTION_AUTH_ERROR가
+        # 이 분기에 오도록(_CONNECTION_BLOCKED_CODES 등재) 이 스토리에서 처음
+        # 고쳤으므로, 여기서 status 자체도 그 error_code에 맞게 골라야 한다(안 그러면
+        # "revoked"가 이 경로를 타는 순간 다시 "expired"로 뭉개진다 — 등재만 하고
+        # 이 매핑을 안 고치면 반쪽 수리). graph_api_errors.connection_status_for_
+        # error_code가 이 판정을 3곳(여기·channel_post_comments.py::_promote_
+        # connection_status·insight_snapshots.py::_promote_connection_status_
+        # for_snapshot)과 공유하는 단일 지점이다.
         from app.models.channel_connection import ChannelConnection
+        from app.services.graph_api_errors import connection_status_for_error_code
 
         connection = await db.get(ChannelConnection, command.destination)
         if connection is not None:
             connection.last_error = (last_error or "")[:2000]
-            if connection.status not in ("revoked", "error"):
-                connection.status = "expired"
+            connection.status = connection_status_for_error_code(error_code, current_status=connection.status)
         command.status = "blocked"
         return
 

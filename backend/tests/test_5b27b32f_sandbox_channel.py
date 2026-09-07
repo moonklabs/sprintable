@@ -511,6 +511,23 @@ async def test_sandbox_publish_app_inactive_marker_classifies_as_connection_revo
 
 
 @pytest.mark.anyio
+async def test_sandbox_publish_permission_error_marker_classifies_as_connection_auth_error():
+    """story #3605 — code==10(190 밖 family) 시뮬레이션. 위 세 마커(revoked류)와
+    달리 CHANNEL_CONNECTION_AUTH_ERROR(사유 불명, fail-closed)로 분류돼야 한다."""
+    import uuid
+    from app.services import sandbox_publish as sp
+    from app.services.threads_publish import ThreadsPublishError
+    from app.services.channel_posts import _classify_threads_error
+
+    with pytest.raises(ThreadsPublishError) as exc_info:
+        await sp.create_container(None, access_token="x", threads_user_id="u", text="[sandbox:permission-error]")
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.provider_error_code == 10
+    error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
+    assert error_code == "CHANNEL_CONNECTION_AUTH_ERROR"
+
+
+@pytest.mark.anyio
 async def test_sandbox_publish_container_error_marker():
     from app.services import sandbox_publish as sp
 

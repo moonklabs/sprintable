@@ -17,7 +17,9 @@ from app.models.pm import Story
 from app.services.content_rules import get_org_content_rules, lint_content
 from app.services.project_auth import require_project_access
 from app.services.channel_posts import (
+    ChannelConnectionAuthError,
     ChannelConnectionNotActiveError,
+    ChannelConnectionRevokedError,
     ChannelImageContainerFailedError,
     ChannelImageRequiredError,
     ChannelPostApproverRoleMissingError,
@@ -1564,6 +1566,35 @@ async def publish_channel_post_draft_endpoint(
             status_code=409,
             detail=_with_command_state({"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)}),
         ) from exc
+    # story #3605(실측 정정) — ChannelConnectionRevokedError·ChannelConnectionAuthError
+    # 둘 다 ChannelTokenExpiredError의 서브클래스라 부모보다 먼저 잡아야 한다. 안 그러면
+    # channel_posts.py::publish_channel_post_draft가 이미 inline으로 정확히 승격해 둔
+    # connection.status(revoked/error)를, 이 핸들러가 apply_command_failure를
+    # error_code="CHANNEL_TOKEN_EXPIRED"로 다시 호출해 "expired"로 덮어써 버리는
+    # 실사고가 났다(_process_one_command 워커의 동형 함정과 같은 근본원인, 3605
+    # 그라운딩) — publish_channel_post_draft가 이미 apply_connection_failure로
+    # connection은 처리해 뒀으므로 여기선 command 상태·HTTP 응답 코드만 그 사유에
+    # 맞게 정확히 남긴다(connection.status 재승격 없음, 이중 기록 방지).
+    except ChannelConnectionRevokedError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_CONNECTION_REVOKED")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_CONNECTION_REVOKED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "CHANNEL_CONNECTION_REVOKED", "message": str(exc)}),
+        ) from exc
+    except ChannelConnectionAuthError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_CONNECTION_AUTH_ERROR")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_CONNECTION_AUTH_ERROR", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "CHANNEL_CONNECTION_AUTH_ERROR", "message": str(exc)}),
+        ) from exc
     except ChannelTokenExpiredError as exc:
         await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_TOKEN_EXPIRED")
         await apply_command_failure(
@@ -1839,6 +1870,17 @@ async def unpublish_channel_post_endpoint(
         raise HTTPException(
             status_code=409,
             detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
+        ) from exc
+    # story #3605 — 회수/사유불명 예외도 부모(ChannelTokenExpiredError)보다 먼저 잡아
+    # HTTP 응답 code가 정확한 사유를 말하게 한다(unpublish는 command가 없어 connection
+    # 승격 자체는 이미 publish 경로에서 끝났다는 전제 — 여긴 응답 코드만의 문제).
+    except ChannelConnectionRevokedError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_CONNECTION_REVOKED", "message": str(exc)},
+        ) from exc
+    except ChannelConnectionAuthError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_CONNECTION_AUTH_ERROR", "message": str(exc)},
         ) from exc
     except ChannelTokenExpiredError as exc:
         raise HTTPException(

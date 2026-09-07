@@ -52,10 +52,17 @@ def test_non_oauth_error_returns_none_so_caller_falls_through_to_other_classific
     assert classify_graph_oauth_error(error_code=100, error_subcode=None, error_type="GraphMethodException") is None
 
 
-def test_oauth_exception_type_without_code_190_still_matches_by_type_alone():
-    """일부 Graph 응답은 code가 다른 값(예: 200번대)이어도 type=="OAuthException"으로
-    권한 계열임을 알린다 — code만 보고 판단하면 이런 경우를 놓친다(3595 표의 「페이지
-    연결 해제」류가 이 경로로 잡힐 가능성)."""
+def test_type_alone_no_longer_opens_the_family_door_changes_1():
+    """story #3605 CHANGES-1(유나 코드 리뷰, 페드루 PO 채택 2026-09-07) — 이 테스트가
+    한때 검증하던 동작("code가 190이 아니어도 type=='OAuthException'이면 subcode로
+    세분화") 자체가 자해 잠금의 원인이었다: Graph는 한도 초과·파라미터 오류 등
+    이 family가 전혀 아닌 오류도 전부 type: "OAuthException"으로 싣는다 — type
+    단독 통과를 열어 두면 그런 무관한 오류까지 "error"(fail-closed)로 떨어져
+    CONNECTION kind로 승격되는 자해 잠금이 된다. family 판정은 이제 code
+    소속으로만(190/10/200..299) — code=200은 200~299 family에 걸려 "error"로
+    떨어지지만(아래), subcode(463=expired) 기반 세분화는 code==190 전용이라
+    code=200에는 적용되지 않는다(그 세분화 체계 자체가 190 전용이라는 게 이
+    family의 전제 그대로)."""
     assert classify_graph_oauth_error(error_code=200, error_subcode=463, error_type="OAuthException") == (
-        "expired", "expired",
+        "error", "error",
     )

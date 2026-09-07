@@ -54,18 +54,14 @@ def error_from_response(code: str, resp: httpx.Response) -> ThreadsPublishError:
     """story #3598 — `resp.text[:500]`/`resp.status_code`는 기존 그대로(회귀 0), Graph
     표준 오류 envelope이 파싱되면 `.provider_error_*` 3필드도 함께 채운다. envelope이
     없거나(malformed body·비-JSON 응답) `error` 키가 dict가 아니면 3필드 전부 None —
-    지어내지 않는다(기존 401/403 휴리스틱 폴백이 그 경우를 계속 담당)."""
-    provider_error_code: int | None = None
-    provider_error_subcode: int | None = None
-    provider_error_type: str | None = None
-    try:
-        err = resp.json().get("error")
-    except Exception:
-        err = None
-    if isinstance(err, dict):
-        provider_error_code = err.get("code")
-        provider_error_subcode = err.get("error_subcode")
-        provider_error_type = err.get("type")
+    지어내지 않는다(기존 401/403 휴리스틱 폴백이 그 경우를 계속 담당).
+
+    story #3605 — 실제 파싱은 `graph_api_errors.parse_graph_error_envelope`로
+    옮겼다(insight_snapshots.py의 3개 fetch 함수도 같은 파서를 쓴다, 새 판정
+    로직 0 — 한 곳에서만 envelope 모양을 안다)."""
+    from app.services.graph_api_errors import parse_graph_error_envelope
+
+    provider_error_code, provider_error_subcode, provider_error_type = parse_graph_error_envelope(resp)
     return ThreadsPublishError(
         code, resp.text[:500], status_code=resp.status_code,
         provider_error_code=provider_error_code, provider_error_subcode=provider_error_subcode,
