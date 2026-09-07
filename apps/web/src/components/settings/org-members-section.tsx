@@ -362,7 +362,13 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           {/* HARD 픽셀 딴판 fix: 박시 per-member 카드 → project-access와 동일 de-boxy divide-y(공유 MemberRow flat·양 surface 정합) */}
           {members.length > 0 ? (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-          {members.map((member) => {
+          {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「제거」 접근 이름이라
+              보조기술 버튼 목록에서 어느 멤버 행인지 못 가른다. ⚠️이 파일은 애초에
+              대부분의 보이는 글자가 t() 없이 하드코딩돼 있다(별도·더 큰 i18n 갭 —
+              이 스토리 범위 밖이라 조용히 빼지 않고 남김, 후속 확인 필요) — 새
+              aria-label 템플릿만 'settings' 네임스페이스에 추가하고 {label} 값은
+              기존 하드코딩 문자열을 그대로 넘긴다(새 낱말 0, 드리프트 0). */}
+          {members.map((member, index) => {
             const isThisOwner = member.role === 'owner';
             const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
             return (
@@ -388,7 +394,10 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                       <Badge variant={isThisOwner ? 'info' : 'secondary'} className="capitalize">{member.role}</Badge>
                     )}
                     {canEdit && (
-                      <Button size="sm" variant="glass" onClick={() => setRemoveDialogMemberId(member.id)}>
+                      <Button
+                        size="sm" variant="glass" onClick={() => setRemoveDialogMemberId(member.id)}
+                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: '제거' })}
+                      >
                         제거
                       </Button>
                     )}
@@ -428,7 +437,11 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           </SectionCardHeader>
           <SectionCardBody>
             <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-            {invites.map((invite) => (
+            {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「링크 복사」·「재발송」·
+                「취소」 접근 이름이라 보조기술 버튼 목록에서 어느 초대 행인지 못
+                가른다(위 멤버 목록과 같은 하드코딩 i18n 갭 참고 — {label}은 기존
+                문자열 그대로). */}
+            {invites.map((invite, index) => (
               <MemberRow
                 key={invite.id}
                 name={invite.email}
@@ -446,6 +459,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         onClick={() => void handleCopyInviteLink(invite.id, invite.invite_url)}
                         title={invite.invite_url ? '초대 링크 복사' : '링크 사용 불가'}
                         className={copiedInviteId === invite.id ? 'text-foreground bg-success/12 border-success/30' : ''}
+                        aria-label={t('orgInviteRowActionAriaLabel', {
+                          n: index + 1, label: copiedInviteId === invite.id ? '복사됨' : '링크 복사',
+                        })}
                       >
                         {copiedInviteId === invite.id ? (
                           <><Check className="h-3 w-3 mr-1" />복사됨</>
@@ -453,11 +469,16 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                           <><Copy className="h-3 w-3 mr-1" />링크 복사</>
                         )}
                       </Button>
-                      <Button size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}>
+                      <Button
+                        size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: resendingId === invite.id ? '...' : '재발송' })}
+                      >
                         {resendingId === invite.id ? '...' : '재발송'}
                       </Button>
                       <Button size="sm" variant="glass" disabled={revokingId === invite.id} onClick={() => void handleRevokeInvite(invite.id)}
-                        className="text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60">
+                        className="text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: revokingId === invite.id ? '...' : '취소' })}
+                      >
                         {revokingId === invite.id ? '...' : '취소'}
                       </Button>
                     </div>

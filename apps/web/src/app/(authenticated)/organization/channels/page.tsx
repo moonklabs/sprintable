@@ -410,9 +410,10 @@ function ReauthNote({ reason, t }: { reason?: 'expired' | 'revoked' | 'error'; t
 }
 
 function ConnectionRow({
-  conn, isOwnerStrict, isOwnerOrAdmin, orgId, onDisconnected, t,
+  conn, index, isOwnerStrict, isOwnerOrAdmin, orgId, onDisconnected, t,
 }: {
   conn: ChannelConnectionResponse;
+  index: number;
   isOwnerStrict: boolean;
   isOwnerOrAdmin: boolean;
   orgId: string;
@@ -518,8 +519,14 @@ function ConnectionRow({
             : t('channelTestFailed', { error: testResult.error ?? '' })}
         </p>
       ) : null}
+      {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 접근 이름(「연결 시험」·
+          「다시 연결」·「해제」)이라 보조기술 버튼 목록에서 어느 연결 행인지 못
+          가른다. */}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={() => void handleTest()} disabled={testing}>
+        <Button
+          size="sm" variant="outline" onClick={() => void handleTest()} disabled={testing}
+          aria-label={t('channelRowActionAriaLabel', { n: index + 1, label: t('channelTestAction') })}
+        >
           {t('channelTestAction')}
         </Button>
         {/* story #3504 — 재인증·해제는 owner 전용(_require_owner). §5-2 "그려진
@@ -528,14 +535,22 @@ function ConnectionRow({
         {derived.status === 'reauth_required' ? (
           isOwnerStrict ? (
             <a href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}`}>
-              <Button size="sm" variant="outline">{t('channelReauthAction')}</Button>
+              <Button
+                size="sm" variant="outline"
+                aria-label={t('channelRowActionAriaLabel', { n: index + 1, label: t('channelReauthAction') })}
+              >
+                {t('channelReauthAction')}
+              </Button>
             </a>
           ) : (
             <span className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</span>
           )
         ) : null}
         {isOwnerStrict ? (
-          <Button size="sm" variant="destructive" onClick={() => void handleDisconnect()} disabled={disconnecting}>
+          <Button
+            size="sm" variant="destructive" onClick={() => void handleDisconnect()} disabled={disconnecting}
+            aria-label={t('channelRowActionAriaLabel', { n: index + 1, label: t('channelDisconnectAction') })}
+          >
             {t('channelDisconnectAction')}
           </Button>
         ) : (
@@ -662,8 +677,8 @@ function ChannelSection({
           <p className="text-sm text-muted-foreground">{t('channelNoConnections')}</p>
         ) : (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
-            {connections.map((c) => (
-              <ConnectionRow key={c.id} conn={c} isOwnerStrict={isOwnerStrict} isOwnerOrAdmin={isOwnerOrAdmin} orgId={orgId} onDisconnected={onRefresh} t={t} />
+            {connections.map((c, index) => (
+              <ConnectionRow key={c.id} conn={c} index={index} isOwnerStrict={isOwnerStrict} isOwnerOrAdmin={isOwnerOrAdmin} orgId={orgId} onDisconnected={onRefresh} t={t} />
             ))}
           </div>
         )}

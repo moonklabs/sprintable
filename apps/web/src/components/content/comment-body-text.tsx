@@ -9,6 +9,14 @@ const COLLAPSE_THRESHOLD = 200;
 export interface CommentBodyTextProps {
   text: string;
   moreLabel: string;
+  /** story #3592(§22-18 정본) — 목록 안에서 댓글마다 <summary>(=포커스 대상,
+   * §22-18 컨트롤 ⑥ "더 보기")의 접근 이름이 「더보기」로 전부 같아 어느 댓글의
+   * 것인지 못 가른다. 호출부(comments-section.tsx)가 순번을 품긴 aria-label을
+   * 미리 조립해 넘긴다 — 이 컴포넌트 자신은 순번을 모른다(댓글 목록 밖의
+   * 다른 소비처도 있어 여기서 인덱스를 계산하지 않는다, 신규 판단 로직 0).
+   * 없으면(호출부가 안 넘기면) 기존처럼 aria-label 자체를 안 붙인다(visible
+   * text=accessible name, 단일 소비처류 회귀 0). */
+  moreAriaLabel?: string;
   /** story #3517(§22-9, PO 確定) — 지워진 댓글은 길이 무관 기본 접힘(짧아도 접는다).
    * uncontrolled <details defaultOpen={false}>로 항상 접힌 채 시작 — 펼치기는 여전히
    * 가능(text는 BE가 보존해서 준다, 숨기는 게 아니라 «남의 지워진 글»이라 기본을
@@ -22,7 +30,7 @@ export interface CommentBodyTextProps {
   deletedSummaryLabel?: string;
 }
 
-export function CommentBodyText({ text, moreLabel, forceCollapsed, deletedSummaryLabel }: CommentBodyTextProps) {
+export function CommentBodyText({ text, moreLabel, moreAriaLabel, forceCollapsed, deletedSummaryLabel }: CommentBodyTextProps) {
   if (!forceCollapsed && text.length <= COLLAPSE_THRESHOLD) {
     return <p className="whitespace-pre-wrap text-sm text-foreground" data-testid="comment-body-text">{text}</p>;
   }
@@ -39,7 +47,7 @@ export function CommentBodyText({ text, moreLabel, forceCollapsed, deletedSummar
   const preview = text.slice(0, COLLAPSE_THRESHOLD).trimEnd();
   return (
     <details className="text-sm text-foreground" data-testid="comment-body-text">
-      <summary className="cursor-pointer whitespace-pre-wrap">
+      <summary className="cursor-pointer whitespace-pre-wrap" aria-label={moreAriaLabel}>
         {preview}
         {'… '}
         <span className="text-muted-foreground underline">{moreLabel}</span>

@@ -49,7 +49,6 @@ const COMMENT: CommentItem = {
   repliesCount: 0,
   openReplyDraft: null,
   sentRepliesCount: 0,
-  latestSentReplyStatus: null,
 };
 
 describe('CommentConvertToTaskDialog', () => {

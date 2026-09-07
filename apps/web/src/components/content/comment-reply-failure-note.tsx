@@ -33,9 +33,17 @@ export interface CommentReplyFailureNoteProps {
   /** voided(봉인 불일치) 전용 — 기존 답변 다이얼로그를 새로 연다(재승인이 필요한
    * 전제 자체가 바뀌었으므로 "같은 명령 재시도"가 아니라 "새 답변으로 다시 시작"). */
   onResubmit?: () => void;
+  /** story #3592(§22-18 정본) — 목록 안 댓글마다 「다시 보내기」·「다시 상신」
+   * 접근 이름이 전부 같아 어느 댓글의 버튼인지 못 가른다(§17-20 ⑧과 같은 클래스).
+   * 호출부(comments-section.tsx)가 순번을 품긴 aria-label을 미리 조립해 넘긴다
+   * (이 컴포넌트는 순번을 모른다). 없으면 기존처럼 aria-label 자체를 안 붙인다. */
+  retryAriaLabel?: string;
+  resubmitAriaLabel?: string;
 }
 
-export function CommentReplyFailureNote({ action, displayTimezone, onRetry, onResubmit }: CommentReplyFailureNoteProps) {
+export function CommentReplyFailureNote({
+  action, displayTimezone, onRetry, onResubmit, retryAriaLabel, resubmitAriaLabel,
+}: CommentReplyFailureNoteProps) {
   const t = useTranslations('content');
   const [retrying, setRetrying] = useState(false);
   const [retryOutcome, setRetryOutcome] = useState<'ok' | string | null>(null);
@@ -86,6 +94,7 @@ export function CommentReplyFailureNote({ action, displayTimezone, onRetry, onRe
           <Button
             type="button" variant="outline" size="sm" onClick={() => void handleRetryClick()}
             disabled={!onRetry || retrying} data-testid="comments-item-reply-retry-button"
+            aria-label={retryAriaLabel}
           >
             {t('commentsReplyRetryCta')}
           </Button>
@@ -119,6 +128,7 @@ export function CommentReplyFailureNote({ action, displayTimezone, onRetry, onRe
         <Button
           type="button" variant="outline" size="sm" onClick={onResubmit} disabled={!onResubmit}
           data-testid="comments-item-reply-resubmit-button"
+          aria-label={resubmitAriaLabel}
         >
           {t('commentsReplyResubmitCta')}
         </Button>

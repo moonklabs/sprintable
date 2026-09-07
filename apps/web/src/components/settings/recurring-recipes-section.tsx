@@ -65,9 +65,10 @@ function formatLastRunAt(iso: string, locale: string, displayTimezone: string): 
 }
 
 function ScheduleRow({
-  row, projectId, onChanged, t,
+  row, index, projectId, onChanged, t,
 }: {
   row: RepeatScheduleRow;
+  index: number;
   projectId: string;
   onChanged: (row: RepeatScheduleRow) => void;
   t: T;
@@ -125,16 +126,33 @@ function ScheduleRow({
             {row.status === 'active' ? t('repeatSchedulesStatusActive') : t('repeatSchedulesStatusPaused')}
           </Badge>
         </div>
+        {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 접근 이름이라 보조기술
+            버튼 목록에서 어느 예약 행인지 못 가른다. */}
         <div className="flex gap-1">
-          <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => void act('run-now')}>
+          <Button
+            type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => void act('run-now')}
+            aria-label={t('repeatSchedulesRowActionAriaLabel', {
+              n: index + 1, label: busy === 'run-now' ? t(busyKeyFor['run-now']) : t(ctaKeyFor['run-now']),
+            })}
+          >
             {busy === 'run-now' ? t(busyKeyFor['run-now']) : t(ctaKeyFor['run-now'])}
           </Button>
           {row.status === 'paused' ? (
-            <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => void act('resume')}>
+            <Button
+              type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => void act('resume')}
+              aria-label={t('repeatSchedulesRowActionAriaLabel', {
+                n: index + 1, label: busy === 'resume' ? t(busyKeyFor.resume) : t(ctaKeyFor.resume),
+              })}
+            >
               {busy === 'resume' ? t(busyKeyFor.resume) : t(ctaKeyFor.resume)}
             </Button>
           ) : (
-            <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => void act('pause')}>
+            <Button
+              type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => void act('pause')}
+              aria-label={t('repeatSchedulesRowActionAriaLabel', {
+                n: index + 1, label: busy === 'pause' ? t(busyKeyFor.pause) : t(ctaKeyFor.pause),
+              })}
+            >
               {busy === 'pause' ? t(busyKeyFor.pause) : t(ctaKeyFor.pause)}
             </Button>
           )}
@@ -218,7 +236,7 @@ export function RecurringRecipesSection({ projectId }: { projectId: string }) {
           <p className="text-sm text-muted-foreground">{t('repeatSchedulesEmpty')}</p>
         ) : (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-            {rows.map((r) => <ScheduleRow key={r.id} row={r} projectId={projectId} onChanged={handleChanged} t={t} />)}
+            {rows.map((r, index) => <ScheduleRow key={r.id} row={r} index={index} projectId={projectId} onChanged={handleChanged} t={t} />)}
           </div>
         )}
       </SectionCardBody>

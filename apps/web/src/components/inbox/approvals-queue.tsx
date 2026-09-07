@@ -413,7 +413,7 @@ export function ApprovalsQueue() {
 
   return (
     <div className="space-y-2">
-      {items.map((item) => {
+      {items.map((item, index) => {
         if (isHitl(item)) {
           return (
             <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info/30 bg-info/5 px-4 py-3">
@@ -424,6 +424,9 @@ export function ApprovalsQueue() {
               <p className="text-sm text-foreground">{item.title}</p>
               <p className="line-clamp-2 text-[11px] text-muted-foreground">{item.prompt}</p>
               {canResolveHitl ? (
+                // story #3592(§17-20 ⑧·§22-18 동형) — gateReject만 이 PR에서 가른다
+                // (판정표 명시 대상). gateApprove도 행마다 반복되는 같은 결함이지만
+                // 이번 착수분 밖 — 조용히 빼지 않고 남김(후속 확인 필요).
                 <div className="mt-1 flex justify-end gap-1.5">
                   <Button
                     size="sm"
@@ -431,6 +434,7 @@ export function ApprovalsQueue() {
                     className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
                     disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'rejected')}
+                    aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateReject') })}
                   >
                     <XCircle className="size-3.5" />
                     {t('gateReject')}
@@ -707,6 +711,10 @@ export function ApprovalsQueue() {
                 order 유틸+wrapper의 sm:contents로 DOM은 한 세트만 유지한다(버튼 중복 렌더
                 금지 — 테스트·접근성 트리 둘 다 단일 소스여야 함). */}
             <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-end">
+              {/* story #3592(§17-20 ⑧·§22-18 동형) — sigRequestChanges·gateDiscussSubmit
+                  만 이 PR에서 가른다(판정표 명시 대상). primaryLabel(승인류) 버튼도
+                  행마다 반복되는 같은 결함이지만 라벨 자체가 게이트 타입별로 동적이라
+                  판정이 더 필요 — 이번 착수분 밖(조용히 빼지 않고 남김). */}
               <div className="order-2 flex gap-1.5 sm:contents">
                 <Button
                   size="sm"
@@ -714,6 +722,7 @@ export function ApprovalsQueue() {
                   className="order-1 h-8 flex-1 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 sm:order-1 sm:flex-none"
                   disabled={disabled}
                   onClick={rejectOnClick}
+                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigRequestChanges') })}
                 >
                   <Pencil className="size-3.5" />
                   {t('sigRequestChanges')}
@@ -725,6 +734,7 @@ export function ApprovalsQueue() {
                   className="order-2 h-8 flex-1 text-muted-foreground sm:order-2 sm:flex-none"
                   disabled={disabled}
                   onClick={() => setDiscussTargetId(gate.id)}
+                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateDiscussSubmit') })}
                 >
                   {t('gateDiscussSubmit')}
                 </Button>
