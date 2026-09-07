@@ -44,7 +44,7 @@ async def test_get_checklist_404_when_user_missing():
     db.get = AsyncMock(return_value=None)
     auth = type("A", (), {"user_id": str(uuid.uuid4())})()
     with pytest.raises(HTTPException) as ei:
-        await get_checklist(db=db, auth=auth)
+        await get_checklist(db=db, auth=auth, org_id=uuid.uuid4())
     assert ei.value.status_code == 404
 
 
@@ -58,13 +58,17 @@ async def test_get_checklist_returns_state():
     user = object()
     db.get = AsyncMock(return_value=user)
     auth = type("A", (), {"user_id": str(uuid.uuid4())})()
+    org_id = uuid.uuid4()
     state = {"steps": {"email_verified": True}, "completed": 3, "total": 5, "all_complete": False}
-    with patch("app.routers.activation.get_activation_state", AsyncMock(return_value=state)):
-        res = await get_checklist(db=db, auth=auth)
+    with patch("app.routers.activation.get_activation_state", AsyncMock(return_value=state)) as mocked:
+        res = await get_checklist(db=db, auth=auth, org_id=org_id)
     assert isinstance(res, dict)
     assert not hasattr(res, "status_code")  # JSONResponse류 자체래핑이면 이 속성이 있다 — 없어야 정공
     assert res["steps"]["email_verified"] is True
     assert "data" not in res  # {"data": {...}} 이중래핑 재발 방지
+    # story #3607(잔여, 페드루 PO 確定 2026-09-07) — 요청 org 컨텍스트가 서비스로 실제로
+    # 전달되는지(그냥 무시하고 옛 시그니처로 부르지 않는지) 호출 인자로 고정.
+    mocked.assert_awaited_once_with(db, user, requested_org_id=org_id)
 
 
 @pytest.mark.anyio
