@@ -3654,7 +3654,7 @@
     "status_running": "실행 중",
     "status_queued": "대기",
     "status_held": "보류",
-    "status_abandoned": "포기됨",
+    "status_abandoned": "미완",
     "fromDate": "시작일",
     "toDate": "종료일",
     "emptyTitle": "실행 기록이 없습니다.",
