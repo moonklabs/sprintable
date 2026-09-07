@@ -88,3 +88,39 @@ def test_org_date_sql_uses_given_timezone():
     from app.models.agent_run import AgentRun
     compiled = str(org_date_sql(AgentRun.started_at, "Asia/Seoul").compile(compile_kwargs={"literal_binds": True}))
     assert "'Asia/Seoul'" in compiled
+
+
+# story #3674 rebase CHANGES(페드루 PO, 2026-09-07) — #4026을 develop(#4020/3665 착지 뒤)
+# 위로 rebase하며 deployment_lifecycle._utc_midnight_today()·ga4_client의 process-local
+# datetime import를 org_time.py 헬퍼로 흡수했다(§3674 확定 그대로) — 그 결과
+# test_3665_utc_date_boundary_regression.py의 두 테스트가 삭제된 헬퍼/이름을 직접
+# monkeypatch하려다 AttributeError로 죽는다(CI 실물로만 드러남, 로컬은 그 파일을 안
+# 돌려 안 잡힘 — PO 재대조 발견). 그 파일이 지키던 불변식("UTC 기준 계산은 프로세스
+# 로컬 TZ가 이미 다음 날로 넘어가도 안 흔들린다")을 org_time.py 축으로 옮겨 고정한다
+# (아래 두 테스트) — superseded 파일은 이 커밋에서 삭제.
+
+@patch("app.services.org_time.datetime")
+def test_org_midnight_utc_null_timezone_uses_utc_boundary_not_process_local(mock_dt):
+    """구 test_utc_midnight_today_uses_utc_not_process_local_date와 동일 경계
+    (UTC 23:30 — 프로세스 로컬 TZ가 이미 "다음 날"로 갈렸다고 가정해도) —
+    org_midnight_utc(None)은 org.timezone 미설정이면 UTC 폴백이라 "그날(UTC 기준)"의
+    00:00:00+00:00을 내야 한다(다음 날 자정이 아니다)."""
+    mock_dt.now.side_effect = _frozen_now
+    mock_dt.side_effect = datetime
+    result = org_midnight_utc(None)
+    assert result == datetime(2026, 9, 7, 0, 0, 0, tzinfo=timezone.utc)
+
+
+@patch("app.services.org_time.datetime")
+def test_make_date_range_null_org_timezone_uses_utc_not_process_local(mock_dt):
+    """구 test_make_date_range_uses_utc_not_process_local_date와 동일 경계·동일
+    기대값 — `_make_date_range`가 이제 org_today()(org_time.py)에 위임하므로 그
+    모듈의 datetime을 고정한다(ga4_client 자신은 더 이상 datetime을 top-level
+    import하지 않는다 — monkeypatch 대상이 바뀐 것 자체가 «흡수됐다»는 증거)."""
+    from app.services.ga4_client import _make_date_range
+
+    mock_dt.now.side_effect = _frozen_now
+    mock_dt.side_effect = datetime
+    start, end = _make_date_range(1, None)
+    assert end == "2026-09-06"
+    assert start == "2026-09-06"
