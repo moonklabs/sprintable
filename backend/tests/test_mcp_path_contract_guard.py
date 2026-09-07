@@ -243,3 +243,70 @@ def test_repo_current_state_is_green():
     도는 그 실행과 동일하다(가짜 없음, ref 신선도만 이 테스트 환경에선 git 명령이 있어야 함)."""
     mod = _load()
     assert mod.main() == 0
+
+
+# story #3630(2026-09-07, #3972에서 발견) — load_route_table()의 데코레이터 정규식이 «여는
+# 괄호 직후 같은 줄 문자열»만 읽어 다중행 데코레이터(`@router.post(\n    "...", ...)`)를
+# 통째로 못 봤다(레포 실측 — 채널 포스트 20개 중 19개 등 전체 44개 라우트가 route_table에서
+# 조용히 빠져 있었다, MCP 도구가 그 경로를 안 부르는 동안은 드러나지 않던 잠복 사각지대).
+# 아래는 그 정규식 하나만 고립시켜 검증하는 self-contained positive control — main()류
+# 상위 함수를 안 거치고 load_route_table() 자체를 합성 라우터 파일로 직접 부른다.
+def _write_router(tmp_path: Path, filename: str, body: str) -> Path:
+    routers_dir = tmp_path / "routers"
+    routers_dir.mkdir(exist_ok=True)
+    (routers_dir / filename).write_text(
+        'from fastapi import APIRouter\n\nrouter = APIRouter(prefix="/api/v2/widgets")\n\n' + body
+    )
+    return routers_dir
+
+
+def _write_main(tmp_path: Path, module: str) -> Path:
+    main_py = tmp_path / "main.py"
+    main_py.write_text(f"from app.routers import {module}\n\napp.include_router({module}.router)\n")
+    return main_py
+
+
+def test_load_route_table_reads_multiline_decorator(tmp_path):
+    """⭐양성대조 핵심 — 경로 문자열이 다음 줄에 오는 형(이 스토리가 고치는 그 형 그대로).
+    수정 前(정규식에 `\\s*` 없음)엔 이 테스트가 RED였다(직접 확認, #3630 커밋 로그 참고)."""
+    mod = _load()
+    routers_dir = _write_router(tmp_path, "widgets.py", (
+        '@router.post(\n'
+        '    "/{org_id}/widgets/{widget_id}/archive", response_model=dict,\n'
+        ')\n'
+        "async def archive_widget(org_id, widget_id):\n"
+        "    ...\n"
+    ))
+    main_py = _write_main(tmp_path, "widgets")
+    routes = mod.load_route_table(routers_dir=routers_dir, main_py=main_py)
+    assert ("POST", mod.norm("/api/v2/widgets/{org_id}/widgets/{widget_id}/archive")) in routes
+
+
+def test_load_route_table_reads_single_line_decorator_regression(tmp_path):
+    """회귀가드 — 기존에 이미 작동하던 1줄 형이 계속 잡혀야 한다(다중행 지원 추가가 그
+    형을 깨면 안 된다)."""
+    mod = _load()
+    routers_dir = _write_router(tmp_path, "widgets.py", (
+        '@router.get("/{org_id}/widgets", response_model=list)\n'
+        "async def list_widgets(org_id):\n"
+        "    ...\n"
+    ))
+    main_py = _write_main(tmp_path, "widgets")
+    routes = mod.load_route_table(routers_dir=routers_dir, main_py=main_py)
+    assert ("GET", mod.norm("/api/v2/widgets/{org_id}/widgets")) in routes
+
+
+def test_load_route_table_still_cannot_read_variable_path(tmp_path):
+    """가드가 못 잡는 것 선언(모듈 docstring) — 경로가 리터럴이 아니라 변수/f-string이면
+    여전히 못 읽는다(조용히 빠지되 예외로 죽지는 않는다는 것만 고정 — variable-path
+    라우트 자체를 route_table에 실을 방법이 이 정규식엔 없다는 걸 문서와 일치시킨다)."""
+    mod = _load()
+    routers_dir = _write_router(tmp_path, "widgets.py", (
+        "_ARCHIVE_PATH = \"/{org_id}/widgets/{widget_id}/archive\"\n\n"
+        "@router.post(_ARCHIVE_PATH, response_model=dict)\n"
+        "async def archive_widget(org_id, widget_id):\n"
+        "    ...\n"
+    ))
+    main_py = _write_main(tmp_path, "widgets")
+    routes = mod.load_route_table(routers_dir=routers_dir, main_py=main_py)
+    assert ("POST", mod.norm("/api/v2/widgets/{org_id}/widgets/{widget_id}/archive")) not in routes

@@ -141,7 +141,26 @@ def check_ref_freshness(repo_root: Path = _REPO_ROOT) -> str | None:
 
 def load_route_table(routers_dir: Path = _ROUTERS_DIR, main_py: Path = _MAIN_PY) -> set[tuple[str, str]]:
     """FastAPI 실제 라우트. prefix가 있는/없는 라우터, include_router(prefix=...) 마운트 시점
-    prefix 세 가지 경우를 모두 읽는다."""
+    prefix 세 가지 경우를 모두 읽는다.
+
+    story #3630(2026-09-07, #3972에서 발견) — 데코레이터 정규식에 `\\s*`를 추가해 «여는
+    괄호와 경로 문자열 사이에 줄바꿈이 있는»(가장 흔한 형: `@router.post(\\n    "...",
+    response_model=...)`) 다중행 데코레이터도 읽는다. 고치기 전 레포 전체 실측(순수 정규식
+    직접 실행) — 전체 라우트 데코레이터 659개 중 이 형 때문에 44개(6곳 이상 파일에 분산,
+    channel_posts.py는 20개 중 19개·site_posts.py 10개 중 7개 등)가 route_table에서 조용히
+    빠져 있었다 — MCP 도구가 그 경로를 하나도 안 불렀던 동안은 드러나지 않던 잠복 사각지대
+    (#3614가 channel_posts.py를 부르는 첫 MCP 도구가 되며 처음 발현). 고친 뒤 재실측 —
+    659개 전부 매칭(누락 0).
+
+    ⛔이 정규식이 여전히 못 읽는 것(자인, 지금 레포에 실례 0건이나 앞으로 생기면 이 스캐너가
+    다시 "M 없이 조용히" 못 본다 — load_mcp_declared()의 unreadable 트래킹과 달리 route_table
+    쪽은 그런 이름-노출 채널이 없다는 게 이 가드 자체의 남은 한계):
+      1. 경로 문자열이 f-string이거나 변수 조립인 경우(`@router.get(f"/{x}")`·`@router.get(
+         PATH_CONST)`) — 리터럴 `"..."` 매칭이라 원천적으로 못 읽는다.
+      2. 경로 문자열 앞에 인라인 주석이 끼어 있는 경우(`@router.post(  # comment\\n    "...")`
+         ) — `\\s*`는 공백/줄바꿈만 건너뛰고 `#...`는 건너뛰지 못한다.
+      3. `@router.post` 대신 `router.add_api_route(...)` 같은 대안 등록 API — 이 정규식은
+         `@router.METHOD(` 데코레이터 형만 본다."""
     routes = set()
     mounted = set()
     mount_prefixes: dict[str, set] = {}
@@ -170,7 +189,7 @@ def load_route_table(routers_dir: Path = _ROUTERS_DIR, main_py: Path = _MAIN_PY)
         if module not in mount_prefixes and decorator_prefix is not None:
             candidate_prefixes.add(decorator_prefix)
 
-        for method, path in re.findall(r'@router\.(get|post|patch|put|delete)\("([^"]*)"', src):
+        for method, path in re.findall(r'@router\.(get|post|patch|put|delete)\(\s*"([^"]*)"', src):
             for prefix in candidate_prefixes:
                 full = (prefix.rstrip("/") + path) if prefix else path
                 routes.add((method.upper(), norm(full)))
