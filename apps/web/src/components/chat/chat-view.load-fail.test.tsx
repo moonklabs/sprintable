@@ -119,4 +119,36 @@ describe('ChatView — 초기 로드 실패 시 문장(story #3638)', () => {
     expect(container.textContent).toContain(koMessages.chats.messagesLoadFailed);
     expect(container.textContent).not.toContain('대화를 시작하세요');
   });
+
+  // PO 決(2026-09-07) — 성공 경로의 setMessagesLoadFailed(false) 리셋을 지키는 표본이
+  // 없어(리셋 제거해도 위 3건은 그대로 초록) 별도로 고정한다. 재시도 트리거는
+  // useChatSse의 onPoll(handlePoll, story #3621) — mock에 전달된 opts.onPoll을 직접
+  // 호출해 "폴 사이클이 fetchMessages를 다시 태운다"를 재현한다(실 타이머 불요).
+  //
+  // ⚠️ 재시도 응답에 메시지를 담으면 messages.length>0이 돼 렌더가 아예 다른 분기(메시지
+  // 목록)로 넘어가 messagesLoadFailed의 값 자체가 더는 안 읽힌다 — 리셋을 지워도 이
+  // 분기 전환만으로 테스트가 초록이 되는 거짓 통과가 난다(직접 확認: 리셋 삭제 뮤테이션
+  // 으로 먼저 재현). 그래서 재시도 응답도 "성공했지만 진짜 빈 대화"(data: [])로 둬 계속
+  // messages.length===0 분기 안에서 error↔empty state 전환만으로 리셋을 가른다.
+  it('실패로 마운트 → 폴(재시도) 성공(진짜 빈 대화)하면 문구가 사라지고 empty state가 뜬다', async () => {
+    let ok = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/messages?')) {
+        return ok
+          ? { ok: true, json: async () => ({ data: [], meta: { next_cursor: null, has_more: false } }) }
+          : { ok: false, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+    expect(container.textContent).toContain(koMessages.chats.messagesLoadFailed);
+    expect(container.textContent).not.toContain('대화를 시작하세요');
+
+    ok = true;
+    const opts = useChatSseMock.mock.calls[useChatSseMock.mock.calls.length - 1][0] as { onPoll: () => Promise<boolean> };
+    await act(async () => { await opts.onPoll(); });
+
+    expect(container.textContent).not.toContain(koMessages.chats.messagesLoadFailed);
+    expect(container.textContent).toContain('대화를 시작하세요');
+  });
 });
