@@ -122,8 +122,19 @@ async def test_org_member_repository_create_anchor_removed_is_orphan_regression(
 
 @pytest.mark.anyio
 async def test_backfill_query_fills_pre_existing_gap():
-    """0349 마이그의 INSERT SELECT를 그대로 재현 — 백필 前엔 갭 1, 백필 뒤엔 0."""
-    from sqlalchemy import text
+    """0352 마이그의 INSERT SELECT를 그대로 재현 — 백필 前엔 갭 1, 백필 뒤엔 0.
+
+    story #3987 CI 실사고(2026-09-07, run 34121108303) — 대상 지정
+    `ON CONFLICT (id) DO NOTHING`은 이 org_member의 (org_id, user_id)에 이미 id가
+    다른 active human member 행이 있으면(공유 비-destructive DB에서 다른 자리가
+    먼저 앵커를 만들어 둔 경우 등, uq_members_active_human 부분 유니크 인덱스)
+    PK 충돌이 아니라서 그대로 UniqueViolation으로 죽는다 — 백필의 목표(그
+    (org_id, user_id)에 앵커가 있다)는 이미 달성된 상태인데도 크래시하는 과잉이었다.
+    마이그를 대상 없는 bare `ON CONFLICT DO NOTHING`으로 고쳤다 — 이 테스트도 그에
+    맞춰 「id==om_id인 특정 행」이 아니라 「그 (org_id, user_id)에 active human
+    anchor가 존재한다」는 백필의 실제 목표 자체를 단언한다(어느 경로로 채워졌든
+    통과 — Pedro PO 방향)."""
+    from sqlalchemy import select, text
     from app.models.member import Member
 
     engine, Session = await _session_factory()
@@ -134,7 +145,7 @@ async def test_backfill_query_fills_pre_existing_gap():
 
             assert await _count_orphan_active_org_members(s, org.id) == 1
 
-            # alembic/versions/0349_member_anchor_backfill_root_fix.py와 동일 SQL.
+            # alembic/versions/0352_member_anchor_backfill_root_fix.py와 동일 SQL.
             await s.execute(text(
                 """
                 INSERT INTO members (id, org_id, type, user_id, owner_member_id, name, org_role, is_active, created_at, updated_at)
@@ -145,14 +156,18 @@ async def test_backfill_query_fills_pre_existing_gap():
                 JOIN organizations o ON o.id = om.org_id
                 LEFT JOIN users u ON u.id = om.user_id
                 WHERE om.deleted_at IS NULL
-                ON CONFLICT (id) DO NOTHING
+                ON CONFLICT DO NOTHING
                 """
             ))
             await s.commit()
 
             assert await _count_orphan_active_org_members(s, org.id) == 0
-            anchor = await s.get(Member, om_id)
-            assert anchor is not None
+            anchor = (await s.execute(
+                select(Member).where(
+                    Member.org_id == org.id, Member.user_id == user_id,
+                    Member.type == "human", Member.deleted_at.is_(None),
+                )
+            )).scalar_one()
             assert anchor.user_id == user_id
     finally:
         await engine.dispose()
