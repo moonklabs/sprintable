@@ -180,7 +180,11 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
       {/* 연결됨(canonical) — close-on-merge 대상 */}
       {canonical.length > 0 ? (
         <ul className="space-y-1.5">
-          {canonical.map((l) => (
+          {/* story #3592(§17-20 ⑧·§22-18 동형·AC11 함정 실사례) — 이 unlink 버튼은
+              aria-label이 이미 있었지만 정적 키라 목록 안 모든 행이 같은 접근 이름을
+              공유했다("aria-label 있는가"만 보면 놓치는 자리). 아이콘 전용이라 보이는
+              글자 라벨은 없으므로 순번만으로 가른다. */}
+          {canonical.map((l, index) => (
             <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-2 text-[11px]">
               <a
                 href={prUrl(l.repo_full_name, l.pr_number)}
@@ -205,7 +209,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                 type="button"
                 onClick={() => void unlink(l)}
                 disabled={busyId === l.id}
-                aria-label={t('unlinkAria')}
+                aria-label={t('unlinkAria', { n: index + 1 })}
                 className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 disabled:opacity-50"
               >
                 {busyId === l.id ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
@@ -220,7 +224,9 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
         <div className="space-y-1.5">
           <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('suggestionLabel')}</p>
           <ul className="space-y-1.5">
-            {suggestions.map((l) => (
+            {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「명시 연결」 접근 이름이라
+                보조기술 버튼 목록에서 어느 PR 링크 행인지 못 가른다. */}
+            {suggestions.map((l, index) => (
               <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-2 text-[11px]">
                 <a
                   href={prUrl(l.repo_full_name, l.pr_number)}
@@ -242,6 +248,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                   className="ml-auto h-6 shrink-0 gap-1 text-[11px]"
                   disabled={busyId === l.id}
                   onClick={() => void promote(l)}
+                  aria-label={t('promoteAriaLabel', { n: index + 1, label: t('promoteCta') })}
                 >
                   {busyId === l.id ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
                   {t('promoteCta')}
