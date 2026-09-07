@@ -21,11 +21,17 @@ from __future__ import annotations
 import re
 import sys
 
+# story #3647 CHANGES(카디르 codex 발견, 2026-09-07) — `\s`는 개행도 먹는다(re.DOTALL
+# 없이도 `\s` 클래스 자체가 `\n`을 포함). 그래서 "model:"이 그 줄에서 값 없이 끝나고
+# 다음 줄에 아무 낱말이나 있어도(완전히 무관한 문장의 일부라도) `\s*\S+`가 그 낱말을
+# "model:"의 값으로 잘못 집어 통과시켰다(python 재현 済 — 실사고는 아니고 카디르가
+# 검사 중 직접 발견). 줄바꿈은 절대 건너뛰면 안 되는 경계라 `[ \t]*`(스페이스·탭만)
+# 로 좁힌다 — 두 정규식 다 같은 결함이라 같이 고친다.
 _SESSION_RE = re.compile(
-    r"codex session:\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    r"codex session:[ \t]*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
     re.IGNORECASE,
 )
-_MODEL_RE = re.compile(r"model:\s*\S+", re.IGNORECASE)
+_MODEL_RE = re.compile(r"model:[ \t]*\S+", re.IGNORECASE)
 
 
 def missing_codex_session_lines(body: str) -> list[str]:
@@ -88,6 +94,11 @@ _SELFTEST_CASES: list[tuple[str, str, bool]] = [
     (
         "model 줄만 없음(session은 정상) → 실패",
         "## QA verdict: approved (qa:pass)\ncodex session: 5b6f1a2c-9d3e-4f10-8a7b-1c2d3e4f5a6b\n",
+        False,
+    ),
+    (
+        "카디르 발견(2026-09-07) — model: 값 없이 줄이 끝나고 다음 줄에 무관한 낱말이 와도 실패해야 한다(개행을 건너뛰면 안 됨)",
+        "## QA verdict: approved (qa:pass)\ncodex session: 5b6f1a2c-9d3e-4f10-8a7b-1c2d3e4f5a6b\nmodel:\n어떤 텍스트가 다음 줄에 있음\n",
         False,
     ),
 ]
