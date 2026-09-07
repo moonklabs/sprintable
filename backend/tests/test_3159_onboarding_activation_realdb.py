@@ -152,11 +152,12 @@ async def test_resolve_activation_org_id_prefers_requested_context_when_owner_th
 
 
 @pytest.mark.anyio
-async def test_get_activation_state_scope_org_id_reveals_mismatch_for_non_owner_context():
-    """story #3610(3607 잔여, 페드루 PO 確定 2026-09-07) — 요청 org의 owner가 아닌 사용자
-    (초대받은 admin/member)에게 `scope_org_id`가 요청 org와 다른 값을 실어야 FE가 "이
-    판정은 지금 보는 org 얘기가 아니다"를 알 수 있다. owner인 요청 컨텍스트에서는
-    scope_org_id가 요청 org와 정확히 같아야 한다(오탐 0)."""
+async def test_get_activation_state_scope_is_requested_org_reveals_mismatch_for_non_owner_context():
+    """story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — 최초판 scope_org_id
+    (판정에 쓰인 org 값 자체)를 폐기하고 `scope_is_requested_org` 불리언으로 대체했다.
+    요청 org의 owner가 아닌 사용자(초대받은 admin/member)는 폴백 org로 판정이 떨어져
+    요청 org와 달라지므로 False — FE가 "이 판정은 지금 보는 org 얘기가 아니다"를 안다.
+    owner인 요청 컨텍스트에서는 True(오탐 0)."""
     eng, Session = await _engine()
     async with Session() as s:
         await _wipe(s, ORG)
@@ -180,15 +181,14 @@ async def test_get_activation_state_scope_org_id_reveals_mismatch_for_non_owner_
             await s.commit()
             user = (await s.execute(select(User).where(User.id == uuid.UUID(user_id)))).scalar_one()
 
-            # 요청 컨텍스트=owner_org(그 org의 owner) — scope_org_id가 요청 org와 일치.
+            # 요청 컨텍스트=owner_org(그 org의 owner) — 요청 org==판정 org라 True.
             state_owner_ctx = await svc.get_activation_state(s, user, requested_org_id=uuid.UUID(owner_org))
-            assert state_owner_ctx["scope_org_id"] == owner_org
+            assert state_owner_ctx["scope_is_requested_org"] is True
 
-            # 요청 컨텍스트=invited_org(admin일 뿐 owner 아님) — scope_org_id가 폴백
-            # (owner_org)으로 떨어져 요청 org와 달라진다 — FE가 이 신호로 배너를 끈다.
+            # 요청 컨텍스트=invited_org(admin일 뿐 owner 아님) — 판정이 폴백(owner_org)
+            # 으로 떨어져 요청 org(invited_org)와 달라진다 — False, FE가 이 신호로 배너를 끈다.
             state_invited_ctx = await svc.get_activation_state(s, user, requested_org_id=uuid.UUID(invited_org))
-            assert state_invited_ctx["scope_org_id"] == owner_org
-            assert state_invited_ctx["scope_org_id"] != invited_org
+            assert state_invited_ctx["scope_is_requested_org"] is False
         finally:
             await _wipe(s, ORG)
             await s.execute(text(f"DELETE FROM organizations WHERE id='{invited_org}'"))

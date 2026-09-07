@@ -26,7 +26,7 @@ const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
   const router = useRouter();
-  const { projectId, orgId } = useDashboardContext();
+  const { projectId } = useDashboardContext();
   const { state, allComplete } = useActivationStatus();
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -39,11 +39,12 @@ export function ActivationChecklistBanner() {
   });
 
   if (allComplete || !state) return null;
-  // story #3610(3607 잔여, 페드루 PO 確定 2026-09-07) — scope_org_id(판정에 쓰인 org)가
-  // 지금 보는 org(orgId)와 다르면 이 판정은 이 화면 얘기가 아니다(초대받은 org에서 남의
-  // owner-org 진행률을 보이거나, 딥링크가 다른 org 대화로 새는 것을 막는다). 둘 다 확定된
-  // 값일 때만 가른다 — 아직 orgId를 모르는 초기 렌더는 기존 그대로(과다 은닉 방지).
-  if (orgId && state.scope_org_id && state.scope_org_id !== orgId) return null;
+  // story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — orgId(계정 기본
+  // org, me.org_id)와 비교하던 최초판을 폐기 — BE가 이미 "요청 org(X-Org-Id)==판정
+  // org"를 판정해 낸 불리언을 그대로 쓴다(다른 프레임 값 2개를 FE가 다시 맞대지
+  // 않는다). false일 때만 숨긴다 — undefined(구 응답 shape, 롤아웃 창)는 기존처럼
+  // 렌더 유지(과다 은닉 방지, 3610 최초판과 동일 원칙).
+  if (state.scope_is_requested_org === false) return null;
 
   const toggleCollapse = () => {
     const next = !collapsed;
