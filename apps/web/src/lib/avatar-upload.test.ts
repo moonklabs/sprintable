@@ -74,6 +74,24 @@ describe('uploadAvatar — story #2887 S2g', () => {
     expect(FakeXHR.instances).toHaveLength(0);
   });
 
+  // story #3601(디디 전수 표 2026-09-07) — 실 BE 봉투({data:null,error:{code,message},
+  // meta:null}, BE 전역 http_exception_handler 그대로)에서도 실 에러가 뜬다. 이전엔
+  // `json.data ?? json.detail ?? fallback`이 .error를 아예 안 봐 항상 "HTTP {status}"
+  // 제네릭으로만 떨어졌다(이 정규식 lint의 선언된 사각지대 — 변수 결합 없이 바로
+  // `?.` 체이닝을 안 쓰는 형이라 lint_fe_error_envelope_detail_mismatch.py는 못 잡고
+  // 이 테스트가 대신 고정한다).
+  it('upload-url 발급 실패(실 봉투 {error:{code,message}}) — 실 에러가 제네릭 대신 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 422,
+      json: async () => ({ data: null, error: { code: 'UNSUPPORTED_CONTENT_TYPE', message: '지원하지 않는 이미지 형식입니다' }, meta: null }),
+    } as Response)));
+
+    await expect(uploadAvatar('member-1', new Blob(['x']), 'image/png'))
+      .rejects.toMatchObject({ code: 'UNSUPPORTED_CONTENT_TYPE', message: '지원하지 않는 이미지 형식입니다' });
+    expect(FakeXHR.instances).toHaveLength(0);
+  });
+
   it('PUT 실패(XHR 비2xx) 시 confirm을 호출하지 않고 에러를 던진다', async () => {
     class FailingPutXHR extends FakeXHR {
       send() { this.status = 403; this.onload?.(); }

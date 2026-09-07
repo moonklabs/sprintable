@@ -21,8 +21,12 @@ export interface AvatarApiError {
 
 async function readError(res: Response): Promise<AvatarApiError> {
   try {
-    const json = await res.json() as { data?: AvatarApiError; detail?: AvatarApiError };
-    return json.data ?? json.detail ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` };
+    // story #3601(디디 전수 표 2026-09-07) — BE 전역 봉투는 {data,error,meta}뿐이라
+    // json.data는 에러 응답에서 항상 null·json.detail은 항상 undefined였다 — 실
+    // 에러(json.error, AvatarApiError와 같은 {code,message} 모양 그대로)를 한
+    // 번도 안 읽고 매번 "HTTP {status}" 제네릭으로 떨어졌다.
+    const json = await res.json() as { data?: AvatarApiError; error?: AvatarApiError; detail?: AvatarApiError };
+    return json.error ?? json.data ?? json.detail ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` };
   } catch {
     return { code: 'UNKNOWN', message: `HTTP ${res.status}` };
   }
