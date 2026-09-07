@@ -409,13 +409,19 @@ async def test_cron_rate_limited_max_retries_reaches_dead_letter_but_connection_
 
 
 @pytest.mark.anyio
-async def test_cron_max_retries_reaches_dead_letter_also_escalates_connection_to_error():
-    """story #3598(AC6, PO 確定 2026-09-06) — transient가 재시도 상한(MAX_RETRIES, 댓글
-    수집 attempt_count>=5와 동형 임계값)에 도달해도 connection.status가 그대로
-    "active"로 남아 「연결됨」 칩이 거짓으로 보이던 결함(3595 표 ③④류 "미표시"와 같은
-    클래스). dead_letter 승격과 같은 자리에서 connection.status="error"(reason=error)
-    로도 승격해야 한다. 위 test_cron_max_retries_reaches_dead_letter와 완전히 동형
-    세팅 — command 승격만 추가 검증."""
+async def test_cron_max_retries_provider_error_reaches_dead_letter_but_connection_unchanged():
+    """story #3598(AC6, PO 確定 2026-09-06)이 이 자리에 얹었던 connection.status="error"
+    승격을 story #3646(BE·결함·소형·3605 후속, 페드루 PO 確定 2026-09-07, dev 실측 — PO
+    Test Org IG sandbox `[sandbox:provider-error]` 502 발행 실패가 「재인증 필요」로
+    잘못 승격)이 되돌린다 — #3598 AC6 자신의 주석이 이미 "이 transient 분기엔 인증/권한
+    계열이 애초에 못 오고, 남는 error_code는 CHANNEL_PUBLISH_PROVIDER_ERROR뿐"이라고
+    못박아 놓고도 그 유일한 코드를 승격 대상에 남겨 뒀던 것 — 결과적으로 5xx/네트워크/
+    타임아웃이 재시도 5회를 채우면 예외 없이 전부 승격되던 결함이었다. 위
+    test_cron_rate_limited_max_retries_reaches_dead_letter_but_connection_stays_active와
+    같은 원칙(「연결 상태는 사람이 고쳐야 풀리는 것에만」)을 CHANNEL_PUBLISH_PROVIDER_
+    ERROR에도 그대로 적용 — command는 dead_letter로 소진되지만(재시도 정책 자체는
+    무변), connection은 status·last_error 4필드 다 그대로다. 세팅은 위
+    test_cron_max_retries_reaches_dead_letter와 완전히 동형."""
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
     from app.services.publication_command import MAX_RETRIES, process_due_publication_commands
@@ -453,6 +459,7 @@ async def test_cron_max_retries_reaches_dead_letter_also_escalates_connection_to
             )
             s.add(cmd)
             await s.commit()
+            cmd_id = cmd.id
 
         from app.services.threads_publish import ThreadsPublishError
         with (
@@ -466,13 +473,21 @@ async def test_cron_max_retries_reaches_dead_letter_also_escalates_connection_to
 
         async with Session() as s:
             from app.models.channel_connection import ChannelConnection
+            from app.models.publication_command import PublicationCommand
             from sqlalchemy import select
+            cmd = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
             conn = (await s.execute(
                 select(ChannelConnection).where(ChannelConnection.id == connection_id)
             )).scalar_one()
-        assert conn.status == "error", (
-            "transient 재시도 상한 도달 후에도 「연결됨」 칩이 거짓으로 남으면 안 된다"
+        assert cmd.status == "dead_letter", "재시도 상한 도달(=일시 오류 소진) 자체는 그대로여야 한다"
+        assert cmd.dead_letter_at is not None
+        assert conn.status == "active", (
+            "일시 provider 오류(5xx)가 재시도 상한에 닿아도 connection은 건드리면 안 된다 — "
+            "「다시 연결해 주세요」는 사람에게 틀린 처방이다(dev 실사고 #3646)"
         )
+        assert conn.last_error is None
+        assert conn.last_error_code is None
+        assert conn.last_error_at is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -545,6 +560,10 @@ async def test_cron_retryable_failure_below_cap_does_not_prematurely_escalate_co
 
 @pytest.mark.anyio
 async def test_cron_token_expired_blocks_command_and_escalates_connection_status():
+    """story #3646 CHANGES — 인증 계열(FAILURE_KIND_CONNECTION 분기)은 첫 실패에서
+    바로 승격되고(재시도 무관, 위 provider-error 테스트와 대조축), 이제 last_error_
+    code/last_error_at도 같이 채운다(공용 헬퍼 `mark_connection_failed`, 이전엔
+    이 분기만 status/last_error 2필드뿐이었다)."""
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
     from app.services.publication_command import process_due_publication_commands
@@ -602,6 +621,242 @@ async def test_cron_token_expired_blocks_command_and_escalates_connection_status
             assert cmd.failure_kind == "connection"
             conn = (await s.execute(select(ChannelConnection).where(ChannelConnection.id == connection_id))).scalar_one()
             assert conn.status == "expired"
+            assert conn.last_error_code == "CHANNEL_TOKEN_EXPIRED"
+            assert conn.last_error_at is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_connection_revoked_blocks_command_and_sets_status_revoked():
+    """story #3646 회귀 — 인증 계열 3종 중 REVOKED. `CONNECTION_ERROR_CODE_TO_STATUS`
+    매핑을 그대로 pin(회귀 0, 새 판정 0)."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.publication_command import process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+            )
+            s.add(cmd)
+            await s.commit()
+            cmd_id = cmd.id
+
+        from app.services.threads_publish import ThreadsPublishError
+        with (
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
+                status_code=401, code="OAUTH_REVOKED", provider_error_code=190, provider_error_subcode=460,
+                message="revoked",
+            ))),
+        ):
+            async with Session() as s:
+                await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_connection import ChannelConnection
+            from sqlalchemy import select
+            cmd = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd.status == "blocked"
+            conn = (await s.execute(select(ChannelConnection).where(ChannelConnection.id == connection_id))).scalar_one()
+            assert conn.status == "revoked"
+            assert conn.last_error_code == "CHANNEL_CONNECTION_REVOKED"
+            assert conn.last_error_at is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_permission_error_blocks_command_and_sets_status_error():
+    """story #3646 회귀 — 인증 계열 3종 중 AUTH_ERROR(permission family, code=10).
+    `CONNECTION_ERROR_CODE_TO_STATUS`가 이 코드를 지정 안 해 "expired"로 기본
+    폴백되는 다른 매핑 밖 코드들과 달리, `classify_graph_oauth_error`가 permission
+    family를 항상 "error"로 내는 것과 짝을 이룬다(회귀 0, 새 판정 0)."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.publication_command import process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+            )
+            s.add(cmd)
+            await s.commit()
+            cmd_id = cmd.id
+
+        from app.services.threads_publish import ThreadsPublishError
+        with (
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
+                status_code=403, code="OAUTH_PERMISSION", provider_error_code=10, message="permission",
+            ))),
+        ):
+            async with Session() as s:
+                await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_connection import ChannelConnection
+            from sqlalchemy import select
+            cmd = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd.status == "blocked"
+            conn = (await s.execute(select(ChannelConnection).where(ChannelConnection.id == connection_id))).scalar_one()
+            assert conn.status == "error"
+            assert conn.last_error_code == "CHANNEL_CONNECTION_AUTH_ERROR"
+            assert conn.last_error_at is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_mutation_reintroducing_transient_exhaustion_promotion_reopens_bug(monkeypatch):
+    """뮤테이션 — apply_command_failure의 소진 분기가 다시 error_code!=RATE_LIMITED로
+    connection을 승격하도록 되돌리면(#3598 AC6 옛 동작 재현), 위 provider-error
+    「불변」 테스트가 정확히 그 이유로 RED가 되는 것을 고정한다."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.publication_command as pc_module
+    import app.services.threads_publish as tp
+    from app.services.publication_command import MAX_RETRIES, process_due_publication_commands
+
+    original = pc_module.apply_command_failure
+
+    async def _reintroduce_old_promotion(db, command, *, error_code, last_error, now, retry_after_seconds=None):
+        from app.services.publication_command import (
+            FAILURE_KIND_CONNECTION, FAILURE_KIND_NEEDS_CHECK, MAX_RETRIES, classify_failure_kind,
+        )
+        command.last_error = last_error[:2000] if last_error else None
+        failure_kind = classify_failure_kind(error_code)
+        command.failure_kind = failure_kind
+        if failure_kind in (FAILURE_KIND_CONNECTION, FAILURE_KIND_NEEDS_CHECK):
+            return await original(
+                db, command, error_code=error_code, last_error=last_error, now=now,
+                retry_after_seconds=retry_after_seconds,
+            )
+        command.attempt_count += 1
+        if command.attempt_count >= MAX_RETRIES:
+            if error_code != "CHANNEL_RATE_LIMITED":
+                from app.models.channel_connection import ChannelConnection
+                connection = await db.get(ChannelConnection, command.destination)
+                if connection is not None:
+                    connection.last_error = (last_error or "")[:2000]
+                    if connection.status not in ("revoked", "error"):
+                        connection.status = "error"
+            command.status = "dead_letter"
+            command.dead_letter_at = now
+            command.next_attempt_at = None
+            return
+        command.status = "pending"
+
+    monkeypatch.setattr(pc_module, "apply_command_failure", _reintroduce_old_promotion)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+                attempt_count=MAX_RETRIES - 1,
+            )
+            s.add(cmd)
+            await s.commit()
+
+        from app.services.threads_publish import ThreadsPublishError
+        with (
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
+                status_code=500, code="SERVER_ERROR", message="boom",
+            ))),
+        ):
+            async with Session() as s:
+                await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.channel_connection import ChannelConnection
+            from sqlalchemy import select
+            conn = (await s.execute(
+                select(ChannelConnection).where(ChannelConnection.id == connection_id)
+            )).scalar_one()
+        assert conn.status == "error", "뮤테이션이 걸리지 않았다(옛 승격이 재현돼야 한다)"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
