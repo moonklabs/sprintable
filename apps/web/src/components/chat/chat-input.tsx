@@ -444,9 +444,15 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => null) as { detail?: { code?: string } } | null;
+        // story #3601(디디 전수 표 2026-09-07) — BE 전역 봉투는 {data,error,meta}뿐이라
+        // body?.detail?.code는 항상 undefined였다 — "참여자 아님" 친절 문구가 영구
+        // 사망하고 항상 일반 sendFailed로만 떨어졌다. .detail을 변수로 먼저 옮겨
+        // 읽는다(body 뒤에 곧장 물음표 두 번으로 detail.code를 잇는 형은 lint_fe_
+        // error_envelope_detail_mismatch.py가 잡는 그 모양이라 다시 걸린다).
+        const body = await res.json().catch(() => null) as { error?: { code?: string }; detail?: { code?: string } } | null;
+        const detail = body?.detail;
         setSteerError(
-          body?.detail?.code === 'conversation_target_mismatch'
+          (body?.error?.code ?? detail?.code) === 'conversation_target_mismatch'
             ? t('steerErrorNotParticipant')
             : extractBackendErrorMessage(body) ?? t('sendFailed'),
         );

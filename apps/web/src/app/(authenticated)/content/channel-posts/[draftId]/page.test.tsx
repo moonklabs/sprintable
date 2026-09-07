@@ -188,6 +188,9 @@ function stubFetch(opts: {
   onCommentReplySubmit?: () => { status: number; body: unknown };
   // story #3544 조각⑧ — voided(봉인 불일치) 「다시 상신」의 prefill용 단건 GET.
   onCommentReplyGet?: () => { status: number; body: unknown };
+  // story #3544(3517 조각③) — dead_letter 답변 「다시 보내기」(공용 publication-commands
+  // /{id}/retry, org 스코프 — channel-posts/publication-commands 쪽과 다른 URL).
+  onCommentReplyRetry?: () => { status: number; body: unknown };
   // story #3550(Phase2·풀스택, BE 2/2 #3910 계약) — 캐러셀 N장 목록. 기본값 빈
   // 배열(첨부 0장, 기존 시나리오 전부 회귀 0). image_id/position이 삭제·재정렬
   // 대상 키다.
@@ -486,6 +489,14 @@ function stubFetch(opts: {
           status: 200,
           body: { id: 'reply-1', comment_id: 'c1', text: '이전 답변 원문', status: 'failed', gate_id: 'gate-1', external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: null },
         };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      // story #3544(3517 조각③) — dead_letter 답변 「다시 보내기」(org 스코프
+      // publication-commands/{id}/retry, channel-posts/publication-commands 쪽과
+      // 다른 URL — handleRetryReply 전용 자리).
+      if (url.match(/\/organizations\/[^/]+\/publication-commands\/[^/]+\/retry$/) && init?.method === 'POST') {
+        const result = opts.onCommentReplyRetry?.() ?? { status: 200, body: { id: 'cmd-1', status: 'pending' } };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -3606,6 +3617,28 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(document.querySelector('[data-testid="comments-convert-error"]')?.textContent).toBe('이 액션은 휴먼 멤버만 가능합니다.');
   });
 
+  // story #3601(디디 전수 표 2026-09-07) — 실 BE 봉투({error:{message}})로도 서버
+  // 문구가 그대로 보인다(예전엔 body?.detail?.message만 읽어 이 자리에서 늘 폴백
+  // 「commentsActionErrorGeneric」으로만 떨어졌다).
+  it('「작업으로 전환」 403 — 실 봉투({error:{message}})로도 서버 문구가 그대로 뜬다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: 'x', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+      onCommentFollowUp: () => ({ status: 403, body: { data: null, error: { code: 'COMMENT_REPLY_HUMAN_ONLY', message: '이 액션은 휴먼 멤버만 가능합니다.' }, meta: null } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-convert-to-task"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const submitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.commentsConvertSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+    expect(document.querySelector('[data-testid="comments-convert-error"]')?.textContent).toBe('이 액션은 휴먼 멤버만 가능합니다.');
+  });
+
   it('「답변」 클릭 — 초안 저장→상신까지 실 BFF로 진행되고 성공 문구가 뜬다', async () => {
     let draftedText = '';
     stubFetch({
@@ -3856,6 +3889,66 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(document.querySelector('[data-testid="comments-reply-error"]')?.textContent).toBe('답변 대상 댓글이 삭제되어 상신할 수 없습니다.');
   });
 
+  // story #3601(디디 전수 표 2026-09-07) — 실 BE 봉투({error:{message}})로도 서버
+  // 문구가 그대로 보인다.
+  it('「답변」 상신 409 — 실 봉투({error:{message}})로도 서버 문구가 그대로 뜬다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: 'x', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+      onCommentReplySubmit: () => ({ status: 409, body: { data: null, error: { code: 'COMMENT_REPLY_TARGET_DELETED', message: '답변 대상 댓글이 삭제되어 상신할 수 없습니다.' }, meta: null } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(textarea, 'x'); textarea.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-submit-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    expect(document.querySelector('[data-testid="comments-reply-error"]')?.textContent).toBe('답변 대상 댓글이 삭제되어 상신할 수 없습니다.');
+  });
+
+  // story #3601(디디 전수 표 2026-09-07·페드루 PO 정정) — handleRetryReply
+  // (dead_letter 「다시 보내기」)의 실제 유일한 실패는 command_service.py::
+  // retry_dead_letter_command가 None을 반환하는 404뿐이다(command_id 불일치/이미
+  // 처리됨 둘 다 존재 비노출로 같은 404, PO 決 AC5) — 전역 핸들러가 그 plain-string
+  // detail을 `error:{code:"NOT_FOUND", message:"..."}`으로 감싼다. `NOT_FOUND`는
+  // 앱 전체 미지정 404가 공유하는 제네릭 라벨이라(다른 자리는 uuid를 담기도 함)
+  // HUMAN_SAFE_ERROR_MESSAGE_CODES에 못 올린다 — 이 code일 땐 항상 제네릭으로
+  // 떨어지는 게 맞다(이전 버전은 code 없이 message만 봐 이 실 BE 문장도 우연히
+  // 통과시켰다 — 안전 쪽으로 조인 결과지 회귀 아님).
+  it('「다시 보내기」(dead_letter) 실패 — 404(NOT_FOUND, allowlist 밖)는 제네릭 문구', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+          },
+        }],
+      },
+      onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' }, meta: null } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const retryBtn = container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement;
+    expect(retryBtn).not.toBeNull();
+    await act(async () => { retryBtn.click(); });
+    await flush();
+    expect(document.body.textContent).toContain('요청을 처리하지 못했습니다.');
+    expect(document.body.textContent).not.toContain('재시도 대상이 아닙니다');
+  });
+
   // story #3517(BE #3865 조각①) — 수동 재수집. 429/422/403 문장을 서버 응답 그대로
   // 보인다(재해석·재작성 0).
   it('재수집 성공 — 목록을 다시 불러온다(POST 뒤 GET 재조회)', async () => {
@@ -3939,18 +4032,67 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('사람만 다시 수집할 수 있습니다');
   });
 
-  it('재수집 502(채널 fetch 실패) — flat {code,message} shape도 그대로 보인다', async () => {
+  // story #3601(유나 Design CHANGES, 페드루 PO 정정 2026-09-07) — 이전 표본
+  // (`CHANNEL_FETCH_FAILED`)은 BE에 실재하지 않는 가상 code였고, 예전엔
+  // `?? body?.message`(우리 봉투에 없는 죽은 폴백)로 우연히 그 문구가 통과했다.
+  // 실제 502 원인(CHANNEL_PUBLISH_PROVIDER_ERROR 등)의 message는 provider raw
+  // exception repr이라 사람에게 그대로 보이면 안 된다 — allowlist에 없는 코드는
+  // 제네릭으로 떨어져야 한다(이 테스트가 그 방향을 고정).
+  it('재수집 502(CHANNEL_PUBLISH_PROVIDER_ERROR, allowlist 밖) — raw provider 메시지 대신 제네릭', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
-      onCommentsRefresh: () => ({ status: 502, body: { code: 'CHANNEL_FETCH_FAILED', message: '채널에서 응답을 받지 못했습니다' } }),
+      onCommentsRefresh: () => ({
+        status: 502,
+        body: { data: null, error: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: "ThreadsPublishError(status_code=502, body='<html>Bad Gateway</html>')" }, meta: null },
+      }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
-    expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('채널에서 응답을 받지 못했습니다');
+    expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe(koMessages.content.commentsRefreshErrorGeneric);
+    expect(document.body.textContent).not.toContain('ThreadsPublishError');
+  });
+
+  // story #3601(디디 전수 표 2026-09-07) — 실 BE 봉투({data:null,error:{...},meta:null},
+  // BE 전역 http_exception_handler 그대로)로 COMMENT_COLLECTION_UNSUPPORTED가 실제로
+  // 선다. 위 테스트(3913행)는 `.detail` 모양이라 늘 폴백을 통했었다 — 이 테스트가 실
+  // 봉투 회귀를 고정한다.
+  it('재수집 422 COMMENT_COLLECTION_UNSUPPORTED — 실 봉투({error:{code,message}})로도 그 얼굴이 선다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => ({
+        status: 422,
+        body: { data: null, error: { code: 'COMMENT_COLLECTION_UNSUPPORTED', message: '이 채널은 댓글 수집을 지원하지 않습니다' }, meta: null },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-refresh-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않습니다.');
+  });
+
+  it('재수집 403 — 실 봉투({error:{message}})로도 서버 문구가 그대로 보인다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
+      onCommentsRefresh: () => ({
+        status: 403,
+        body: { data: null, error: { code: 'COMMENT_REFRESH_HUMAN_ONLY', message: '사람만 다시 수집할 수 있습니다' }, meta: null },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('사람만 다시 수집할 수 있습니다');
   });
 });
 
