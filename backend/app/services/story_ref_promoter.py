@@ -39,7 +39,25 @@ _LATIN_RE = re.compile(r"[A-Za-z]")
 # [E-01-S-07…]"·45e9e868 "PR [E-02-S-02…]") 전부 「PR #N」(공백+해시) 형태였다 — dev
 # 라이브 실측(2026-08-14, 착수 시 재검증)으로 「PR N」(해시 없는 형태)의 실사례는
 # 확인되지 않았다: 그 형태는 애초에 `_BARE_STORY_REF_RE`가 `#`을 요구해 매치 자체가 없다.
-_PR_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9_])[Pp][Rr]\s*$")
+# story #3652(PO 確定 2026-09-07) — 「pull #N」도 「PR #N」과 같은 축(PR을 풀어 쓴 형).
+_PR_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9_])(?:[Pp][Rr]|[Pp]ull)\s*$")
+
+# story #3652(PO 確定 2026-09-07) — «owner/repo#N»(슬래시 있음)은 레포가 org 원장에
+# 있는지와 무관하게 항상 story 승격에서 제외한다(rule① "owner/repo#N → 치환 0"은
+# 조건부가 아니다 — 원장 유일 일치 여부는 «PR 링크로 대신 해석할지」만 가른다,
+# _find_explicit_repo_pr_candidates 참조). ⚠️잃는 것(선언) — "owner"/"repo" 자리가
+# 실제 GitHub 식별자인지 확인할 길이 없어(러너가 GitHub API를 안 부름) "a/b #24"류
+# 우연한 슬래시 텍스트도 같은 모양이면 제외된다 — dev 실측(#2660 GROUP BY)이 이런
+# 표현이 실사용에 없었음을 보였으나, 새로 생기면 이 클래스가 못 잡는다.
+_SLASH_QUALIFIED_REPO_RE = re.compile(r"(?<![\w/])[\w.-]+/[\w.-]+\s*$")
+
+# story #3652 — GitHub PR URL(owner/repo/pull/N). 이 형은 `#`이 없어 `_BARE_STORY_REF_RE`
+# 자체가 안 물지만(URL 안에 매치 대상 자체가 없음), 이 URL을 «명시 repo#N 후보»로도
+# 함께 뽑아 PR 링크 해석을 시도한다(_find_explicit_repo_pr_candidates 참조).
+_GITHUB_PR_URL_RE = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)\b")
+# owner/repo#N — 슬래시 필수(바로 위 _SLASH_QUALIFIED_REPO_RE와 같은 판별축, PR 링크
+# 해석 시도 대상만 별도로 뽑는다).
+_OWNER_REPO_HASH_RE = re.compile(r"(?<![\w/])([\w.-]+/[\w.-]+)#(\d+)\b")
 
 # story #2660(#2651 후속) — GitHub 크로스레포 관례 "repo-name#N"(예: agent-plugins#25·
 # gemini#3)이 실피해로 재발(실측: 실제 원문은 `agent-plugins#25`·`gemini#3` — 백틱 無,
@@ -55,9 +73,24 @@ _PR_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9_])[Pp][Rr]\s*$")
 # `INJECTABLE_EVENT_TYPES`(sprintable_sse.py)와 같은 성격의 닫힌 허용목록. 새 레포가
 # 생기면 이 목록에 추가할 것(자동 발견 불가 — 그 자체가 이 클래스의 한계, 가드가 못
 # 잡는 것으로 명시).
-_REPO_SHORTHAND_SUFFIX_RE = re.compile(
-    r"(?i:agent-plugins|gemini|admin|claude-plugin|mobile)$"
+#
+# story #3652(PO 確定 2026-09-07) — 이 정적 다섯 개는 «닫힌 허용목록»으로 계속 남는다
+# (예: "admin"은 pull_request_story_link에 없는 별개 제품일 수 있어 원장이 못 대신함).
+# 실피해(디디 conv 52fd99d0, 2026-09-07)는 **공백**이 낀 「sprintable-agent-plugins #46」
+# 형태였는데 이 정적 목록엔 원래 공백 허용(`\s*`)이 없었다(#2660 당시 실측이 전부
+# 공백-無 형태였기 때문 — 모듈 docstring "공백 없음" 문구가 그 경계를 그대로 선언한다).
+# 이번에 `\s*`를 더해 「이름 + 공백 + #N」도 같이 잡는다(_PR_PREFIX_RE가 이미 쓰던
+# 관례 그대로 확장 — 새 패턴 발명 0). `extra_repo_short_names`(org 원장 파생, 동적)가
+# 이 정적 다섯과 합쳐진다 — `extract_bare_story_ref_candidates` 참조.
+_STATIC_REPO_SHORTHANDS: frozenset[str] = frozenset(
+    {"agent-plugins", "gemini", "admin", "claude-plugin", "mobile"}
 )
+
+
+def _repo_shorthand_suffix_re(extra_repo_short_names: frozenset[str]) -> re.Pattern[str]:
+    names = _STATIC_REPO_SHORTHANDS | extra_repo_short_names
+    alternation = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    return re.compile(rf"(?i:{alternation})\s*$")
 
 # 보호 구간(스캔에서 제외) — fenced 코드블록·인라인 코드·이미 만들어진 entity 토큰.
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -78,21 +111,33 @@ _KOREAN_BRACKET_QUOTE_RE = re.compile(r"「[^」\n]*」|『[^』\n]*』|《[^》
 _BLOCKQUOTE_LINE_RE = re.compile(r"^>.*$", re.MULTILINE)
 
 
-def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]]:
+def extract_bare_story_ref_candidates(
+    content: str, *, extra_repo_short_names: frozenset[str] = frozenset(),
+) -> list[tuple[int, int, int]]:
     """본문에서 «#숫자» 후보 위치를 뽑는다(DB 조회 없는 순수 함수 — 모양만 본다, 존재 여부는
     별도 async 함수의 몫. 은퇴한 @handle 파서의 `extract_handle_tokens`와 같은 형태였다).
 
+    `extra_repo_short_names`(story #3652) — org의 `pull_request_story_link.repo_full_name`
+    (원장, 동적)에서 파생한 짧은이름 집합. 정적 다섯(`_STATIC_REPO_SHORTHANDS`)과 합쳐
+    레포명 배제 판별에 쓴다 — 호출부(`promote_bare_story_refs`)가 DB 조회 결과를 넘긴다
+    (이 함수 자신은 여전히 DB 왕복 0).
+
     반환: (start, end, story_number) 튜플 리스트. 매치 직후 문자가 라틴 알파벳이면
     헥스 컬러류(`#74747c`)로 보고 그 후보 자체를 버린다(dev 실측 근거 — 모듈 docstring
-    참조). 매치 직전 토큰이 「PR」/「pr」이면(story #2651) PR 번호로 보고 마찬가지로
-    버린다 — `_PR_PREFIX_RE` 참조. 매치 직전이 알려진 레포 짧은이름 접미사로 끝나면
-    (story #2660) GitHub「repo-name#N」류로 보고 버린다 — `_REPO_SHORTHAND_SUFFIX_RE`
-    참조(⛔허용목록 방식 — "라틴 단어문자 전부"가 아니다. story#N/BE#N류 정상 팀 표기는
-    이 목록에 없어 계속 승격된다, #2660 GROUP BY 실측). 코드블록/인라인코드/기존 entity
-    토큰 내부는 여기서 걸러지지 않는다 — 그건 `_protected_spans`가 별도로 처리(관심사
-    분리: 이 함수는 "무엇이 숫자 토큰처럼 생겼는가"만, 저건 "어디를 건드리면 안 되는가"만)."""
+    참조). 매치 직전 토큰이 「PR」/「pr」/「pull」이면(story #2651·#3652) PR 번호로 보고
+    마찬가지로 버린다 — `_PR_PREFIX_RE` 참조. 매치 직전이 「owner/repo」꼴(슬래시 있음)
+    이면(story #3652) 레포가 원장에 있는지와 무관하게 항상 버린다 — `_SLASH_QUALIFIED_
+    REPO_RE` 참조(PR 링크 해석 시도는 `_find_explicit_repo_pr_candidates`가 별도로
+    한다). 매치 직전이 알려진 레포 짧은이름(정적+동적, 공백 유무 무관)으로 끝나면
+    (story #2660·#3652) GitHub「repo-name#N」류로 보고 버린다 — `_repo_shorthand_
+    suffix_re` 참조(⛔허용목록 방식 — "라틴 단어문자 전부"가 아니다. story#N/BE#N류
+    정상 팀 표기는 이 목록에 없어 계속 승격된다, #2660 GROUP BY 실측). 코드블록/
+    인라인코드/기존 entity 토큰 내부는 여기서 걸러지지 않는다 — 그건 `_protected_spans`
+    가 별도로 처리(관심사 분리: 이 함수는 "무엇이 숫자 토큰처럼 생겼는가"만, 저건
+    "어디를 건드리면 안 되는가"만)."""
     if not content:
         return []
+    repo_shorthand_re = _repo_shorthand_suffix_re(extra_repo_short_names)
     candidates: list[tuple[int, int, int]] = []
     for m in _BARE_STORY_REF_RE.finditer(content):
         start = m.start()
@@ -101,10 +146,63 @@ def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]
             continue
         if _PR_PREFIX_RE.search(content, 0, start):
             continue
-        if _REPO_SHORTHAND_SUFFIX_RE.search(content, 0, start):
+        if _SLASH_QUALIFIED_REPO_RE.search(content, 0, start):
+            continue
+        if repo_shorthand_re.search(content, 0, start):
             continue
         candidates.append((start, end, int(m.group(1))))
     return candidates
+
+
+def _repo_short_name(full_name: str) -> str:
+    return full_name.rsplit("/", 1)[-1]
+
+
+def _find_explicit_repo_pr_candidates(
+    content: str, *, known_full_names: frozenset[str],
+) -> list[tuple[int, int, str, int]]:
+    """story #3652(PO 確定 2026-09-07) — GitHub PR URL·`owner/repo#N`·(원장 유일 일치 시)
+    맨 `repo#N`을 찾아 (start, end, repo_full_name, pr_number) 4-tuple로 돌려준다.
+    repo_full_name은 `normalize_repo()`로 정규화(lowercase) — `pull_request_story_link`
+    조회 키와 항상 같은 프레임(PO 재確定 — "다른 출처 둘을 비교하면 갈리는 창이 생긴다").
+
+    ⛔`repo#N`(슬래시 없는 맨 이름)은 `known_full_names`의 짧은이름이 **유일하게** 일치할
+    때만 후보가 된다 — 두 개 이상의 full_name이 같은 짧은이름을 공유하면(예: 서로 다른
+    owner의 동명 레포) 어느 쪽인지 원리적으로 모른다는 뜻이라 후보에서 뺀다(모호=조용히
+    스킵, `owner/repo#N`으로 명시하면 이 모호함 자체가 없다)."""
+    from app.services.pr_story_link import normalize_repo
+
+    found: list[tuple[int, int, str, int]] = []
+    consumed: list[tuple[int, int]] = []
+
+    for m in _GITHUB_PR_URL_RE.finditer(content):
+        found.append((m.start(), m.end(), normalize_repo(m.group(1)), int(m.group(2))))
+        consumed.append(m.span())
+
+    for m in _OWNER_REPO_HASH_RE.finditer(content):
+        if _in_protected_span(m.start(), consumed):
+            continue
+        found.append((m.start(), m.end(), normalize_repo(m.group(1)), int(m.group(2))))
+        consumed.append(m.span())
+
+    if known_full_names:
+        short_to_fulls: dict[str, set[str]] = {}
+        for full in known_full_names:
+            short_to_fulls.setdefault(_repo_short_name(normalize_repo(full)), set()).add(normalize_repo(full))
+        unique_shorts = {short: next(iter(fulls)) for short, fulls in short_to_fulls.items() if len(fulls) == 1}
+        if unique_shorts:
+            alternation = "|".join(re.escape(s) for s in sorted(unique_shorts, key=len, reverse=True))
+            bare_repo_hash_re = re.compile(rf"(?<![\w/])({alternation})\s*#(\d+)\b", re.IGNORECASE)
+            for m in bare_repo_hash_re.finditer(content):
+                if _in_protected_span(m.start(), consumed):
+                    continue
+                full = unique_shorts.get(m.group(1).lower())
+                if full is None:
+                    continue
+                found.append((m.start(), m.end(), full, int(m.group(2))))
+                consumed.append(m.span())
+
+    return found
 
 
 def _protected_spans(content: str) -> list[tuple[int, int]]:
@@ -127,13 +225,26 @@ def _in_protected_span(pos: int, spans: list[tuple[int, int]]) -> bool:
 async def promote_bare_story_refs(
     db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, content: str,
 ) -> tuple[str, set[uuid.UUID]]:
-    """본문의 «#N» 후보를 org+project 스코프 story_number로 resolve해 entity 참조 토큰
-    (`build_reference_token`, #2282 SSOT 그대로 재사용 — 새 escape 규칙 발명 안 함)으로
-    치환한다.
+    """본문의 «#N» 후보를 두 갈래로 나눠 처리한다(story #3652, PO 確定 2026-09-07 —
+    실사고: 「sprintable-agent-plugins #46」이 이 org의 story #46로 옷을 입었다. story
+    번호와 PR 번호가 같은 `#N` 표기 공간을 공유하는데, 치환기가 그 사실을 몰랐다).
 
-    resolve 실패(그 번호의 story가 없음·타 project 소속)면 **그 매치만** 원문 그대로
-    남긴다(전체 all-or-nothing 아님 — 은퇴한 @handle 파서의 "매치 0건=조회도 없이 조기
-    반환" 관대함과 동형 철학, 성실한 오독에서도 메시지 발신 자체는 막지 않는다).
+    ① 명시 repo#N(`owner/repo#N`·GitHub PR URL·원장 유일 일치 시 맨 `repo#N`) — 항상
+    story_number 승격 대상에서 빠진다. repo가 org의 `pull_request_story_link`
+    (repo_full_name, pr_number)와 일치하면 그 PR의 연결 스토리로(있으면), 없으면
+    본문 그대로(«아니면 침묵» — PO rule①, 새 참조 종류를 만들지 않는다: PR 자체를
+    가리키는 entity type이 없어 «연결된 스토리»로만 표현 가능하다).
+    ② 맨 `#N`(레포 표식 0) — 지금처럼 org+project 스코프 story_number로 resolve하되,
+    같은 N이 org 전체(레포 무관) `pull_request_story_link.pr_number`에도 있으면
+    모호(스토리 번호와 PR 번호가 우연히 겹침)로 보고 치환하지 않는다(PO rule② — 둘
+    다 이 플랫폼 원장이라 "같은 프레임"으로 판정, 다른 소스를 비교하지 않는다).
+
+    두 갈래 모두 resolve 실패(그 번호/PR의 대상이 없음·타 project 소속)면 **그 매치만**
+    원문 그대로 남긴다(전체 all-or-nothing 아님 — 은퇴한 @handle 파서의 "매치 0건=조회도
+    없이 조기 반환" 관대함과 동형 철학, 성실한 오독에서도 메시지 발신 자체는 막지 않는다).
+
+    치환된 링크 텍스트는 원문 `#N`을 제목 앞에 남긴다(PO rule③ — 사람이 오인을 바로
+    잡을 수 있게, 예: `#46 → [#46 S209: pm-api 정리…]`).
 
     story #2679(BE): 반환이 `str`에서 `(content, auto_story_ids)`로 바뀌었다 — 이번 호출에서
     **실제로 성공 치환한** story_id 집합을 같이 돌려준다(resolve 실패로 원문 그대로 남은
@@ -144,17 +255,87 @@ async def promote_bare_story_refs(
     넘긴다."""
     if not content:
         return content, set()
-    candidates = extract_bare_story_ref_candidates(content)
-    if not candidates:
+    # story #3652 CHANGES(자체 발견, 실사고 없이 회귀 테스트로 적발 — test_conversations.py
+    # ::test_send_message_201) — 아래 PullRequestStoryLink 조회를 무조건 앞세우면 「#」도
+    # 「/pull/」도 없는 평범한 메시지("안녕")마다 매 발신 시 DB 왕복 1회가 새로 붙는다(기존
+    # 계약: 후보 0건이면 DB 왕복 0회, extract_bare_story_ref_candidates의 早期 반환과
+    # 동형). 세 정규식 중 하나도 안 물면 이 함수가 만질 수 있는 게 원리적으로 없다(맨
+    # #N·owner/repo#N 전부 `#`을 요구, GitHub URL은 `/pull/`을 요구) — 이 셋 다 없으면
+    # DB 조회 자체를 건너뛴다.
+    if not (
+        _BARE_STORY_REF_RE.search(content)
+        or _OWNER_REPO_HASH_RE.search(content)
+        or _GITHUB_PR_URL_RE.search(content)
+    ):
         return content, set()
-    protected = _protected_spans(content)
+
+    from app.models.pm import Story
+    from app.models.pull_request_story_link import PullRequestStoryLink
+
+    # org 전체(모든 repo) PR 링크 원장 — story #3652의 SSOT(둘 다 이 원장을 쓴다: ①의
+    # repo_full_name 대조·②의 pr_number 모호 판정).
+    pr_link_rows = (await db.execute(
+        select(
+            PullRequestStoryLink.repo_full_name, PullRequestStoryLink.pr_number,
+            PullRequestStoryLink.story_id,
+        ).where(PullRequestStoryLink.org_id == org_id, PullRequestStoryLink.deleted_at.is_(None))
+    )).all()
+    known_full_names = frozenset(r.repo_full_name for r in pr_link_rows)
+    pr_story_by_key: dict[tuple[str, int], uuid.UUID] = {
+        (r.repo_full_name, r.pr_number): r.story_id for r in pr_link_rows
+    }
+    org_pr_numbers = frozenset(r.pr_number for r in pr_link_rows)
+
+    result = content
+    promoted_ids: set[uuid.UUID] = set()
+
+    # ── ① 명시 repo#N — story_number 승격보다 먼저(우선순위가 이긴다, PO rule①).
+    # 코드블록/인용부호/블록인용 안은 맨 #N과 같은 이유로 여기서도 보호(story #3162
+    # 원칙 — 예시로 재인용된 repo#N도 "새로 참조하려는 의도"가 아니다).
+    explicit_protected = _protected_spans(content)
+    explicit = [
+        c for c in _find_explicit_repo_pr_candidates(content, known_full_names=known_full_names)
+        if not _in_protected_span(c[0], explicit_protected)
+    ]
+    if explicit:
+        story_ids_needed = {
+            pr_story_by_key[(repo, n)]
+            for _, _, repo, n in explicit
+            if (repo, n) in pr_story_by_key
+        }
+        title_by_id: dict[uuid.UUID, str] = {}
+        if story_ids_needed:
+            rows = (await db.execute(
+                select(Story.id, Story.title).where(
+                    Story.id.in_(story_ids_needed), Story.deleted_at.is_(None),
+                )
+            )).all()
+            title_by_id = {sid: title for sid, title in rows}
+        for start, end, repo, pr_number in sorted(explicit, key=lambda c: c[0], reverse=True):
+            story_id = pr_story_by_key.get((repo, pr_number))
+            if story_id is None or story_id not in title_by_id:
+                continue  # 레포는 식별됐지만(원장 유일 일치) 그 PR에 스토리 링크가 없다 — 본문 그대로.
+            token = build_reference_token("story", story_id, f"#{pr_number} {title_by_id[story_id]}")
+            if token is None:
+                continue
+            result = result[:start] + token + result[end:]
+            promoted_ids.add(story_id)
+
+    # ── ② 맨 #N(스토리 번호) — ①이 이미 치환한 자리는 지금 entity 토큰이라
+    # `_protected_spans`의 `_ENTITY_TOKEN_RE`가 자연히 다시 보호한다(별도 좌표 보정 불요).
+    known_short_names = frozenset(_repo_short_name(f) for f in known_full_names)
+    candidates = extract_bare_story_ref_candidates(result, extra_repo_short_names=known_short_names)
+    if not candidates:
+        return result, promoted_ids
+    protected = _protected_spans(result)
     candidates = [c for c in candidates if not _in_protected_span(c[0], protected)]
+    # PO rule② — 같은 N이 org(레포 무관) pr_number에도 있으면 모호. story_number와
+    # pr_number가 같은 플랫폼 원장(다른 소스가 아니다)이라 이 대조가 "같은 프레임"이다.
+    candidates = [c for c in candidates if c[2] not in org_pr_numbers]
     if not candidates:
-        return content, set()
+        return result, promoted_ids
 
     numbers = {c[2] for c in candidates}
-    from app.models.pm import Story
-
     rows = (await db.execute(
         select(Story.story_number, Story.id, Story.title).where(
             Story.org_id == org_id,
@@ -165,17 +346,15 @@ async def promote_bare_story_refs(
     )).all()
     story_by_number = {number: (story_id, title) for number, story_id, title in rows}
     if not story_by_number:
-        return content, set()
+        return result, promoted_ids
 
     # 뒤에서부터 치환 — 앞쪽 매치의 인덱스가 뒤 치환으로 밀리지 않게.
-    result = content
-    promoted_ids: set[uuid.UUID] = set()
     for start, end, number in sorted(candidates, key=lambda c: c[0], reverse=True):
         found = story_by_number.get(number)
         if found is None:
             continue
         story_id, title = found
-        token = build_reference_token("story", story_id, title)
+        token = build_reference_token("story", story_id, f"#{number} {title}")
         if token is None:
             continue
         result = result[:start] + token + result[end:]
