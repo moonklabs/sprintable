@@ -45,11 +45,45 @@ class TestPermissionFamilyExtension:
 class TestRateLimitCodesNeverEnterThisFamily:
     """⛔story #3605 핵심 요구 — 「연결 상태 승격은 사람이 고칠 수 있는 원인에만」
     (한 방향 문). rate-limit 코드가 우연히라도 이 family에 안 걸리는지 직접 검증
-    (200~299 범위 밖이라는 사실을 구조적으로 고정, 문서 주장만 두지 않는다)."""
+    (200~299 범위 밖이라는 사실을 구조적으로 고정, 문서 주장만 두지 않는다).
+
+    story #3605 CHANGES-1(유나 코드 리뷰, 페드루 PO 채택 2026-09-07) — 원판 배제
+    테스트는 `error_type=None` 표본만 써서 "type 단독 통과" 버그가 있어도 절대
+    실패할 수 없었다(양성대조 실패 — `_EXPIRED_SUBCODES`류는 code==190에서 이미
+    자기 스스로 검증되는데, 이 축만 그 반례가 없었다). 이제 `error_type=
+    "OAuthException"`을 실은 표본으로 실제 위험 시나리오(Graph가 한도 초과·
+    파라미터 오류도 전부 이 type으로 싣는 것)를 재현한다."""
 
     @pytest.mark.parametrize("code", [4, 17, 32, 613])
     def test_known_rate_limit_codes_are_never_classified_as_oauth_family(self, code: int):
         assert classify_graph_oauth_error(error_code=code, error_subcode=None, error_type=None) is None
+
+    @pytest.mark.parametrize("code", [4, 17, 32, 613])
+    def test_rate_limit_codes_stay_excluded_even_with_oauthexception_type(self, code: int):
+        """⭐뮤테이션 표적 — family 문을 다시 `type == "OAuthException"` 단독으로
+        열면(CHANGES-1 이전 상태로 되돌리면) 이 assert가 None이 아닌 ("error",
+        "error")로 깨져야 한다. `_RATE_LIMIT_CODES`가 실제로 읽히는지도 이 테스트로
+        같이 고정(정의만 있고 참조 0이던 원판 결함, 페드루 PO 지적)."""
+        assert classify_graph_oauth_error(
+            error_code=code, error_subcode=None, error_type="OAuthException",
+        ) is None
+
+    def test_param_error_code_100_stays_excluded_even_with_oauthexception_type(self):
+        """code==100(잘못된 파라미터류, 페드루 PO 리뷰가 든 예시)도 type만으로
+        가족에 들어오면 안 된다."""
+        assert classify_graph_oauth_error(
+            error_code=100, error_subcode=None, error_type="OAuthException",
+        ) is None
+
+    def test_classify_graph_error_code_end_to_end_rate_limit_with_oauthexception_type(self):
+        """AC — `classify_graph_error_code(429, code=4, type="OAuthException")` →
+        CHANNEL_RATE_LIMITED(CONNECTION 계열이 아니라 TRANSIENT). 이 종단 케이스가
+        실제로 CI에서 관측된 위험(429 응답에 code=4·type=OAuthException을 함께
+        싣는 것)과 정확히 같은 모양이다."""
+        assert classify_graph_error_code(
+            status_code=429, provider_error_code=4, provider_error_subcode=None,
+            provider_error_type="OAuthException",
+        ) == "CHANNEL_RATE_LIMITED"
 
 
 class TestClassifyGraphErrorCode:

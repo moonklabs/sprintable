@@ -215,19 +215,18 @@ async def apply_connection_failure(
     error 중 하나). last_error는 provider 원문 그대로(가공은 화면 몫, apply_refresh_
     failure와 동일 규율).
 
-    story #3605(3598 AC6 일반화) — 신설 status="error"(사유 불명, code 10·200~299
-    family 등)는 이미 더 구체적인 종결 상태(expired·revoked)를 덮지 않는다 — "더
-    약한 정보로 되돌리지 않기"(publication_command.py::apply_command_failure의
-    동형 가드와 같은 원칙, 새 기전 발명 아님). last_error는 그래도 최신 원문으로
-    갱신한다(사유는 그대로여도 "최근에도 계속 실패 中"이라는 사실 자체는 갱신할
-    가치가 있다). expired↔revoked 상호 덮어쓰기 규율은 이 스토리 스코프 밖(기존
-    그대로 — 이 함수는 그 둘 사이는 그대로 덮어쓴다, 호출부가 이미 정확한 값만
-    넘긴다는 전제)."""
+    story #3605 CHANGES-2(유나 코드 리뷰 재확認, 페드루 PO 채택 2026-09-07) —
+    "되돌아가지 않기" 규율이 한때 이 함수 안에 따로 구현돼 있었다(status=="error"
+    일 때만 막고 expired↔revoked는 서로 덮게 둠) — `graph_api_errors.
+    connection_status_for_error_code`가 쓰던 규율(expired·revoked는 서로도 안
+    덮는 완전 sticky)과 «같은 사실»을 다르게 말하고 있어 하나는 거짓이었다.
+    이제 `graph_api_errors.sticky_connection_status`(공유 단일 지점) 하나로
+    통일한다. last_error는 그래도 최신 원문으로 갱신한다(status가 안 바뀌어도
+    "최근에도 계속 실패 中"이라는 사실 자체는 갱신할 가치가 있다)."""
+    from app.services.graph_api_errors import sticky_connection_status
+
     connection.last_error = error_message[:2000]
-    if status == "error" and connection.status in ("expired", "revoked"):
-        await db.commit()
-        return
-    connection.status = status
+    connection.status = sticky_connection_status(connection.status, status)
     await db.commit()
 
 

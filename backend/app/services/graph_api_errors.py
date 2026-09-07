@@ -21,8 +21,8 @@ subcode 그라운딩(PO 코드 확認 2026-09-06 15:36Z, 스토리 본문 確定
   실패인 건 확실하지만 정확한 사유는 모른다"로 fail-closed(만료·회수를 섣불리
   단정하지 않는다 — AC6 「알 수 없는 오류는 CONNECTION kind로 fail-closed, reason만
   모른다」와 같은 원칙).
-- code!=190 이고 type!="OAuthException"이면 이 함수의 관할이 아니다(None) — 호출부가
-  429/5xx 등 다른 분류로 넘어간다.
+- code!=190이면(아래 3605 정정 뒤로는 type과 무관하게) 이 함수의 관할이 아니다
+  (None) — 호출부가 429/5xx 등 다른 분류로 넘어간다.
 
 story #3605(3598 AC6 일반화, PO 確定 2026-09-07 · 유나 §22-16류 6-정정 「한 방향
 문」) — Graph API 권한/인증 계열 오류 family를 190/OAuthException 밖으로 넓힌다:
@@ -43,7 +43,23 @@ story #3605(3598 AC6 일반화, PO 確定 2026-09-07 · 유나 §22-16류 6-정�
   되돌아오는 길이 사람뿐이므로 사람이 못 고치는 원인을 넣으면 조직이 스스로
   잠긴다).
 - 알 수 없는(미지) code — 여전히 None(이 함수의 관할 밖). 새 code를 이 family에
-  넣는 것은 항상 PO 確定을 거친다(추측으로 넓히지 않는다)."""
+  넣는 것은 항상 PO 確定을 거친다(추측으로 넓히지 않는다).
+
+⛔story #3605 CHANGES-1(유나 코드 리뷰 재확認, 페드루 PO 채택 2026-09-07) —
+family 문을 `error_type == "OAuthException"` 단독으로도 열던 자리(원래 #3598
+코드 그대로 물려받은 것)가 심각한 자해 잠금이었다. Graph는 한도 초과(4·17·32·
+613)·잘못된 파라미터(100)·일시 장애(1·2) 등 **이 family가 전혀 아닌 오류도
+전부 `type: "OAuthException"`으로 싣는다**(Meta 오류 응답 형 — code만이 실제로
+그 오류의 «종류»를 가른다, type은 그 아래 인증 관련 하위체계 전체의 공통
+포장지에 가깝다). type 단독 통과를 열어 두면 한도 초과 한 번이 "error"로
+떨어져 CHANNEL_CONNECTION_AUTH_ERROR→CONNECTION kind→connection.status="error"
+→ 화면이 "다시 연결"을 요구하는 자해 잠금이 된다(정확히 이 스토리 §37~44가
+막으려던 그 시나리오를 이 스토리 자신이 다시 열어 놨던 것).
+
+처방 — family 판정은 **code 소속으로만**(190 / 10 / 200..299), type은 더 이상
+문을 여는 조건이 아니다(190 밖에서 type만 보고 통과시키는 경로 삭제). 한도
+초과 코드는 판정 맨 앞에서 명시적으로 걸러 그 사실 자체를 코드로 고정한다
+(`_RATE_LIMIT_CODES`를 정의만 하고 실제로 읽지 않던 것도 이 정정으로 해소)."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -54,44 +70,49 @@ if TYPE_CHECKING:
 _EXPIRED_SUBCODES = frozenset({463})
 _REVOKED_SUBCODES = frozenset({458, 460, 467, 490})
 
-_OAUTH_ERROR_TYPE = "OAuthException"
 _OAUTH_ERROR_CODE = 190
 
 # story #3605 — code==10(권한 없음)·200~299(permission error 대역)도 이 family에
-# 속한다(그라운딩: Meta 문서 인용은 이 모듈 docstring 참고). ⛔rate-limit 코드
-# (4·17·32·613)는 이 범위 밖이라는 사실 자체가 이 family를 좁게 유지하는 방어선 —
-# 새 코드를 이 상수들에 추가할 때마다 rate-limit 코드와 안 겹치는지 재확認할 것.
+# 속한다(그라운딩: Meta 문서 인용은 이 모듈 docstring 참고).
 _PERMISSION_ERROR_CODE = 10
 _PERMISSION_ERROR_RANGE = range(200, 300)
+# story #3605 CHANGES-1 — 이 family에서 명시적으로 배제하는 한도 초과 코드.
+# classify_graph_oauth_error 맨 앞에서 실제로 읽는다(#3605 원판은 이 상수를
+# 정의만 하고 어디서도 참조하지 않아 «검증된 배제»가 아니라 «문서 주장」에
+# 불과했다 — 유나 코드 리뷰가 이 갭을 실측으로 잡았다).
 _RATE_LIMIT_CODES = frozenset({4, 17, 32, 613})
 
 
 def classify_graph_oauth_error(
     *, error_code: int | None, error_subcode: int | None, error_type: str | None,
 ) -> tuple[str, str] | None:
-    """Graph API 오류 응답의 `error.code`·`error.error_subcode`·`error.type`을
-    연결 (status, reason) 튜플로 매핑한다 — 둘 다 "expired"|"revoked"|"error" 중
-    하나(GA4 커넥션의 status/reason 어휘, story #3583과 같은 축).
+    """Graph API 오류 응답의 `error.code`·`error.error_subcode`를 연결 (status,
+    reason) 튜플로 매핑한다 — 둘 다 "expired"|"revoked"|"error" 중 하나(GA4
+    커넥션의 status/reason 어휘, story #3583과 같은 축).
 
-    code==190·type=="OAuthException"·code==10·code in 200..299 중 어느 것도
-    아니면 이 함수의 관할이 아니라 None을 반환한다 — 이 오류가 아예 이 family가
-    아니라는 뜻이므로 호출부가 별도 분류(429 rate limit, 5xx provider 오류 등)로
-    넘어가야 한다."""
-    is_oauth_family = error_code == _OAUTH_ERROR_CODE or error_type == _OAUTH_ERROR_TYPE
-    is_permission_family = (
-        error_code == _PERMISSION_ERROR_CODE or error_code in _PERMISSION_ERROR_RANGE
-    )
-    if not is_oauth_family and not is_permission_family:
+    story #3605 CHANGES-1 — family 판정은 **code 소속으로만**(190 / 10 /
+    200..299) 이뤄진다. `error_type`은 더 이상 문을 여는 조건이 아니다(파라미터
+    자체는 그대로 받되 판정에 안 쓴다 — 호출부 시그니처 무변경, 회귀 0) — Graph가
+    한도 초과·파라미터 오류 등 이 family가 전혀 아닌 오류도 전부 `type:
+    "OAuthException"`으로 싣기 때문(모듈 docstring ⛔ 참고). 한도 초과 코드는
+    맨 앞에서 명시적으로 배제한다.
+
+    code==190·10·200..299 중 어느 것도 아니면(한도 초과 코드 포함) 이 함수의
+    관할이 아니라 None을 반환한다 — 호출부가 별도 분류(429 rate limit, 5xx
+    provider 오류 등)로 넘어가야 한다."""
+    if error_code in _RATE_LIMIT_CODES:
         return None
-    # story #3605 — permission family(10·200~299)는 subcode 체계가 190처럼
-    # 표준화돼 있지 않아 항상 error(사유 불명, fail-closed)로만 떨어진다 — expired/
-    # revoked 세분화는 190 전용(아래 subcode 매핑은 여기 안 닿는다).
-    if is_oauth_family:
+    if error_code == _OAUTH_ERROR_CODE:
         if error_subcode in _EXPIRED_SUBCODES:
             return "expired", "expired"
         if error_subcode in _REVOKED_SUBCODES:
             return "revoked", "revoked"
-    return "error", "error"
+        return "error", "error"
+    # story #3605 — permission family(10·200~299)는 subcode 체계가 190처럼
+    # 표준화돼 있지 않아 항상 error(사유 불명, fail-closed)로만 떨어진다.
+    if error_code == _PERMISSION_ERROR_CODE or error_code in _PERMISSION_ERROR_RANGE:
+        return "error", "error"
+    return None
 
 
 def classify_graph_error_code(
@@ -136,6 +157,32 @@ CONNECTION_ERROR_CODE_TO_STATUS: dict[str, str] = {
 }
 
 
+def sticky_connection_status(current: str, new: str) -> str:
+    """story #3605 CHANGES-2(유나 §13-9 ④-2, 페드루 PO 채택 2026-09-07) — connection.
+    status가 "되돌아가지 않는다"는 사실 하나를 이 함수 하나로 고정한다. 이 규율이
+    한때 두 곳에 따로 구현돼 있었다(`connection_status_for_error_code`는 expired·
+    revoked를 서로도 안 덮게 sticky했는데, `channel_connection.apply_connection_
+    failure`는 `status=="error"`일 때만 막고 expired↔revoked는 서로 덮게 뒀다 —
+    같은 사실을 두 규칙으로 말하면 하나는 거짓이다). 이제 두 소비처 다 이 함수만
+    쓴다.
+
+    규율(유나 표 그대로 — 「active 아니면 그대로」로 줄이면 error→expired 승급이
+    죽는다, 반드시 3구간):
+    - current가 "active"(첫 실패)면 new를 그대로 쓴다.
+    - current가 "error"(사유 불명)면, new가 "error"가 아닌 한(더 구체적인 정보)
+      그 값으로 올린다 — "error"→"error"는 그대로 무해.
+    - current가 "expired" 또는 "revoked"(이미 확정된 구체적 사실)면 new가
+      무엇이든 절대 안 바꾼다 — 이 둘은 서로도 안 덮는다. status="active"로
+      되돌리는 대입(재연결 upsert·자격 교체·apply_refresh_result)이 전부
+      last_error=None까지 같이 지우므로, 이 얼음은 한 실패 국면 안에서만 서고
+      "지금도 실패하나"는 last_error{code,message,at}가 진다(#3960)."""
+    if current in ("revoked", "expired"):
+        return current
+    if current == "error" and new == "error":
+        return current
+    return new
+
+
 def connection_status_for_error_code(error_code: str | None, *, current_status: str) -> str:
     """story #3605 — connection.status 승격 지점 4곳(publication_command.py::
     apply_command_failure·channel_post_comments.py::_promote_connection_status·
@@ -143,27 +190,10 @@ def connection_status_for_error_code(error_code: str | None, *, current_status: 
     자리)이 전부 이 함수 하나로 값을 고른다. 이전엔 4곳 전부 error_code를 무시하고
     항상 "expired"로 하드코딩돼 있어, CHANNEL_CONNECTION_REVOKED/CHANNEL_CONNECTION_
     AUTH_ERROR가 이 분기에 와도 "expired"로 뭉개지는 결함이 반복됐다(3605 실측
-    그라운딩 — 등재만 하고 이 매핑을 안 고치면 반쪽 수리라는 교훈).
-
-    ⚠️정밀도 규율(기존 4곳의 `not in ("revoked", "error")` 가드를 일반화한 것,
-    새 기전 발명 아님 — 목표 status가 여럿으로 늘어난 이 스토리에서 그 가드를
-    그대로 옮기다 처음엔 "error"만 보호하도록 좁게 썼다가, 기존 테스트(연결이
-    이미 revoked인데 다른 코드가 "expired"로 매핑되는 경우 그대로 revoked로
-    남아야 한다 — test_3597_ig_fb_connection_status_promote.py::test_facebook_
-    connection_failure_does_not_downgrade_revoked_or_error)가 그 좁힘이 회귀임을
-    실측으로 잡았다):
-    - current_status가 "revoked" 또는 "expired"(이미 확정된 구체적 사실)면 새
-      값이 무엇이든 절대 안 바꾼다 — 이 둘은 서로도 안 덮는다(기존 프로덕션 코드가
-      "expired" 하나만 목표값이던 시절부터 지켜 온 그대로의 sticky 규율).
-    - current_status가 "error"(사유 불명)면, 새 값이 "error"가 아닌 한(더 구체적인
-      정보) 그 값으로 올린다 — "error"→"error"는 그대로 무해.
-    - current_status가 "active"(첫 실패)면 새 값을 그대로 쓴다."""
+    그라운딩 — 등재만 하고 이 매핑을 안 고치면 반쪽 수리라는 교훈). 되돌아가지
+    않기 규율 자체는 `sticky_connection_status`(공유 단일 지점, CHANGES-2)."""
     new_status = CONNECTION_ERROR_CODE_TO_STATUS.get(error_code, "expired")
-    if current_status in ("revoked", "expired"):
-        return current_status
-    if current_status == "error" and new_status == "error":
-        return current_status
-    return new_status
+    return sticky_connection_status(current_status, new_status)
 
 
 def parse_graph_error_envelope(resp: "httpx.Response") -> tuple[int | None, int | None, str | None]:
