@@ -1436,6 +1436,11 @@
       "file": "tests/test_3597_ig_fb_connection_status_promote.py",
       "sec": 22.0,
       "source": "story-3597-ig-fb-connection-status-promote(페드루 PO 追加 2026-09-06 — [sandbox:expire-after-publish] 마커 라이브검증 테스트 2건 추가 뒤 재측정. 로컬 raw pytest 6건 3.15s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 22s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3598_facebook_refresh_judgment.py",
+      "sec": 13.9,
+      "source": "story-3598-graph-api-oauth-reason(PR#3954 CI 실측 — lint_destructive_schema_weights_registered.py 미등재 가드가 잡은 평균 가중치 13.9s를 그대로 등재, run https://github.com/moonklabs/sprintable/actions/runs/34074109882/job/101597402205 · 실측치로 재측정 필요 — scripts/measure_destructive_durations_local.py 참고)"
     }
   ]
 }
