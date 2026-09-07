@@ -691,6 +691,13 @@ async def list_comments_for_publication(
     reply_counts_by_comment_id = await _reply_counts_by_comment_ids(
         db, comment_ids=[c.id for c in rows],
     )
+    # story #3596 — 안 보낸 초안(있으면 «이어서 답변» 버튼)·보낸 답변 수(배지 N).
+    open_reply_draft_by_comment_id = await _open_reply_draft_by_comment_ids(
+        db, comment_ids=[c.id for c in rows],
+    )
+    sent_reply_counts_by_comment_id = await _sent_reply_counts_by_comment_ids(
+        db, comment_ids=[c.id for c in rows],
+    )
 
     # story #3529(additive, 유나 §22-15 채택) — 댓글 목록 reply{} 요약에 발송 명령
     # 상태 4필드(command_status·failure_kind·next_attempt_at·reason_code)를 얹기
@@ -716,6 +723,8 @@ async def list_comments_for_publication(
         "comments_next_allowed_at": comments_next_allowed_at,
         "command_by_id": command_by_id,
         "reply_counts_by_comment_id": reply_counts_by_comment_id,
+        "open_reply_draft_by_comment_id": open_reply_draft_by_comment_id,
+        "sent_reply_counts_by_comment_id": sent_reply_counts_by_comment_id,
     }
 
 
@@ -753,6 +762,51 @@ async def _latest_reply_by_comment_ids(
     reply_alias = aliased(ChannelPostCommentReply, subq)
     rows = (await db.execute(select(reply_alias).where(subq.c.rn == 1))).scalars().all()
     return {reply.comment_id: reply for reply in rows}
+
+
+async def _open_reply_draft_by_comment_ids(
+    db: AsyncSession, *, comment_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, ChannelPostCommentReply]:
+    """story #3596(Phase2·BE, 페드루 PO 確定 2026-09-06) — 댓글당 «안 보낸» 최신
+    답변(status draft/pending) 1건. `_latest_reply_by_comment_ids`와 동형 ROW_NUMBER
+    윈도우, WHERE절만 status 필터 추가(sent/failed는 여기 안 잡힌다 — 이미 나갔거나
+    이미 실패 흐름이 따로 있다)."""
+    if not comment_ids:
+        return {}
+    from sqlalchemy.orm import aliased
+
+    rn = func.row_number().over(
+        partition_by=ChannelPostCommentReply.comment_id, order_by=ChannelPostCommentReply.created_at.desc(),
+    ).label("rn")
+    subq = (
+        select(ChannelPostCommentReply, rn)
+        .where(
+            ChannelPostCommentReply.comment_id.in_(comment_ids),
+            ChannelPostCommentReply.status.in_(("draft", "pending")),
+        )
+        .subquery()
+    )
+    reply_alias = aliased(ChannelPostCommentReply, subq)
+    rows = (await db.execute(select(reply_alias).where(subq.c.rn == 1))).scalars().all()
+    return {reply.comment_id: reply for reply in rows}
+
+
+async def _sent_reply_counts_by_comment_ids(
+    db: AsyncSession, *, comment_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """story #3596 — 댓글당 «실제로 나간» 답변 개수(status=sent만). 배지 「답변 N」
+    의 N은 이제 이 값(초안은 배지가 아니라 버튼 낱말로만 드러난다, 유나 §확定8)."""
+    if not comment_ids:
+        return {}
+    rows = (await db.execute(
+        select(ChannelPostCommentReply.comment_id, func.count())
+        .where(
+            ChannelPostCommentReply.comment_id.in_(comment_ids),
+            ChannelPostCommentReply.status == "sent",
+        )
+        .group_by(ChannelPostCommentReply.comment_id)
+    )).all()
+    return {comment_id: count for comment_id, count in rows}
 
 
 async def _reply_counts_by_comment_ids(

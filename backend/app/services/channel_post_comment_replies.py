@@ -53,6 +53,17 @@ class CommentReplyApproverRoleMissingError(Exception):
         super().__init__(f"기본 승인 role이 없습니다: {org_id}")
 
 
+class CommentReplyDraftAlreadyOpenError(Exception):
+    """story #3596(Phase2·BE, 페드루 PO 確定 2026-09-06) — 안 보낸 초안(status
+    draft/pending)이 이미 있는 댓글에 새 초안 생성 요청(409). 「빈 다이얼로그로
+    2차 초안이 생기는」 결함(#3947 카디르 비차단①)의 서버 쪽 봉함 — FE는 이
+    existing_reply_id로 «이어서 답변» 다이얼로그를 채운다."""
+
+    def __init__(self, *, existing_reply_id: uuid.UUID):
+        self.existing_reply_id = existing_reply_id
+        super().__init__(f"안 보낸 초안이 이미 있습니다: {existing_reply_id}")
+
+
 def compute_target_comment_state(
     *, comment: ChannelPostComment, sealed_target_text_sha256: str | None,
 ) -> TargetCommentState:
@@ -147,8 +158,23 @@ async def create_comment_reply_draft(
     created_by_member_id: uuid.UUID, created_by_kind: str,
 ) -> ChannelPostCommentReply:
     """AC3 초안 — is_agent_caller 허용(승인·발행은 human-only, submit부터). gate_id는
-    아직 없다(0339가 nullable로 정정한 이유)."""
+    아직 없다(0339가 nullable로 정정한 이유).
+
+    story #3596 — 이 댓글에 안 보낸 초안(status draft/pending)이 이미 있으면 409
+    (fail-closed, 새 초안 0건). «빈 다이얼로그로 2차 초안» 결함의 서버 쪽 봉함."""
     await _get_owned_comment(db, org_id=org_id, comment_id=comment_id)
+
+    existing_open = (await db.execute(
+        select(ChannelPostCommentReply)
+        .where(
+            ChannelPostCommentReply.comment_id == comment_id,
+            ChannelPostCommentReply.status.in_(("draft", "pending")),
+        )
+        .order_by(ChannelPostCommentReply.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if existing_open is not None:
+        raise CommentReplyDraftAlreadyOpenError(existing_reply_id=existing_open.id)
 
     reply = ChannelPostCommentReply(
         id=uuid.uuid4(), org_id=org_id, comment_id=comment_id, gate_id=None, command_id=None,
