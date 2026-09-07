@@ -357,6 +357,7 @@ def load_duration_artifacts(artifact_dir: Path) -> dict[str, float]:
 def _audit_durations_mode(
     artifact_dir: Path, *, drift_state_path: Path | None = None, run_id: str | None = None,
     expected_shard_count: int | None = None, shard_result: str | None = None,
+    backend_relevant: str | None = None,
 ) -> int:
     """story #3558 AC2 — 원칙은 경고 전용(CI를 절대 안 죽인다). 산출물 디렉터리가
     없거나 비어 있어도(backend-irrelevant PR이라 샤드 자체가 스킵된 경우) 조용히
@@ -388,6 +389,20 @@ def _audit_durations_mode(
       실측 데이터가 원천적으로 없어(타임아웃이 파일 루프 중간을 끊으면 부분 기록도
       없다) "센다"가 물리적으로 불가능하다 — `::warning::`으로 "N개는 집계 밖"만
       선언(exit 0, 기존 경고-전용 원칙 그대로).
+
+    story #3678(CI·핫픽스, 페드루 PO 確定 2026-09-07) — 위 `shard_result == "success"`
+    분기가 놓친 세 번째 세계: FE-only PR은 `detect-changed-scope`가 backend_relevant=
+    false를 내고, 그러면 ci.yml의 「Upload shard durations」 스텝 자체가 스킵된다
+    (`if: ... && backend_relevant != 'false'`) — 8개 shard 잡은 각자 내부 스텝을 전부
+    건너뛰고도 잡 자체는 `if: always()`라 "success"로 끝난다(스킵을 미실행이 아니라
+    통과로 잡히게 하려는 의도된 설계, 위 주석 §3653 참고). 그 결과 "shard_result=
+    success인데 산출물 8개 다 없다"가 **정상 경로**로 발생하는데, 위 분기는 이걸
+    "업로드 파이프라인이 무산됐다"와 구분하지 못하고 그대로 ::error+exit 1을 낸다
+    (실물: PR #4021 run 34160408234 잡 101860994039 — FE-only인데 Backend pytest
+    전체가 이걸로 빨갛다). `backend_relevant`(ci.yml이 `needs.detect-changed-scope.
+    outputs.backend_relevant`를 그대로 넘긴다)가 `"false"`면 shard_result·missing과
+    무관하게 "스코프 밖·집계 대상 아님"만 선언하고 exit 0 — backend_relevant가
+    `"false"`가 아닌 한(진짜 관련 PR) 위 §3653 판정은 그대로다(회귀 0).
 
     카디르 qa:changes(PR #4005, 2026-09-07, codex 발견) — 예전엔 `artifact_dir.exists()`
     가 이 shard_result 분기보다 **먼저** 서서, 디렉터리 자체가 통째로 없으면(업로드가
@@ -434,7 +449,14 @@ def _audit_durations_mode(
     if expected_shard_count is not None:
         missing = missing_shards(load_present_shard_numbers(artifact_dir), expected_count=expected_shard_count)
         if missing:
-            if shard_result == "success":
+            if backend_relevant == "false":
+                print(
+                    f"OK: shard {len(missing)}개 산출물 없음(story #3678): {missing} — backend_relevant="
+                    "false(FE-only 등 백엔드-무관 PR)라 8개 shard 모두 내부 스텝을 스킵하고 업로드 자체를 "
+                    "안 했다(잡은 always()라 result=success로 끝나지만 그건 스킵의 「통과」일 뿐) — "
+                    "스코프 밖·집계 대상 아님, 실패 아님."
+                )
+            elif shard_result == "success":
                 print(
                     f"::error::shard 산출물 누락(story #3653): {missing} — backend-test-destructive.result="
                     "success인데 산출물이 없다(코드 결함 아님 — 업로드 파이프라인이 조용히 무산됐다는 뜻, "
@@ -594,6 +616,15 @@ def main() -> int:
              "짝을 이뤄 «성공인데 산출물이 빈 shard」(업로드 결함, ::error+exit 1)와 "
              "「실패/타임아웃이라 원천적으로 못 세는 shard」(::warning만)를 가른다.",
     )
+    ap.add_argument(
+        "--backend-relevant", type=str, default=None,
+        help="story #3678 — --audit-durations와 함께 쓴다(ci.yml이 "
+             "needs.detect-changed-scope.outputs.backend_relevant를 그대로 넘긴다). "
+             "'false'면 --shard-result와 무관하게 산출물 누락을 «스코프 밖»으로 선언하고 "
+             "exit 0 — FE-only PR은 8개 shard 모두 업로드 자체를 스킵하는데도 잡은 "
+             "always()라 result=success로 끝나, --shard-result만으로는(§3653) 이 케이스가 "
+             "업로드 결함과 구분이 안 됐다.",
+    )
     args = ap.parse_args()
 
     if args.check_elapsed is not None:
@@ -611,6 +642,7 @@ def main() -> int:
         return _audit_durations_mode(
             args.audit_durations, drift_state_path=args.drift_state, run_id=args.run_id,
             expected_shard_count=args.shard_count, shard_result=args.shard_result,
+            backend_relevant=args.backend_relevant,
         )
 
     if args.shard_index is None or args.shard_count is None:

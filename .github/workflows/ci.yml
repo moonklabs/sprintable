@@ -1179,9 +1179,9 @@ jobs:
       # 나머지 스텝을 건너뛴다) — result!=success(실패/타임아웃)면 그 샤드의 실측
       # 데이터가 원천적으로 없어 "센다"가 불가능하니 ::warning만(exit 0, 원칙 그대로
       # CI를 안 죽인다).
-      - name: Audit shard durations vs weights.json (story #3558+#3642+#3653)
+      - name: Audit shard durations vs weights.json (story #3558+#3642+#3653+#3678)
         working-directory: backend
-        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}" --shard-count 8 --shard-result "${{ needs.backend-test-destructive.result }}"
+        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}" --shard-count 8 --shard-result "${{ needs.backend-test-destructive.result }}" --backend-relevant "${{ needs.detect-changed-scope.outputs.backend_relevant }}"
 
       - name: Save weights-drift streak state (story #3642)
         if: always()
