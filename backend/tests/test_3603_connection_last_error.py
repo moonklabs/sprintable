@@ -215,3 +215,91 @@ async def test_promote_no_op_keeps_status_but_still_updates_last_error_trio():
             assert refreshed.last_error_at is not None
     finally:
         await engine.dispose()
+
+
+# ─── story #3633 — non-active→active 복귀 3경로가 last_error 3종을 전부 지운다 ───
+# dev 실측(2026-09-07 08:26Z): Sandbox Page 1 재연결 뒤 status=active인데
+# last_error_code=CHANNEL_CONNECTION_NOT_ACTIVE가 그대로 남아 있었다(재연결 경로가
+# last_error 문장만 비우고 code/at은 안 비움) — mark_connection_recovered(graph_
+# api_errors.py, 3605 sticky_connection_status와 같은 모듈)로 세 경로 통일.
+
+
+async def _seed_expired_connection_with_error_trio(session, org_id, *, channel="threads"):
+    conn = await _seed_channel_connection(session, org_id, channel=channel, status="expired")
+    conn.last_error = "old failure"
+    conn.last_error_code = "CHANNEL_CONNECTION_NOT_ACTIVE"
+    conn.last_error_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    await session.commit()
+    return conn
+
+
+@pytest.mark.anyio
+async def test_reconnect_upsert_clears_last_error_trio():
+    """재연결(upsert_channel_connection의 기존 행 upsert 분기)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_connection import upsert_channel_connection
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_expired_connection_with_error_trio(s, org_id, channel="threads")
+
+            row = await upsert_channel_connection(
+                s, org_id=org_id, channel="threads", account_id=conn.account_id, account_label=None,
+                credential_kind="oauth", access_token="new-token", refresh_token=None,
+                token_expires_at=None, refresh_mode="reissue_from_access_token", scopes=[],
+                connected_by=uuid.uuid4(),
+            )
+            assert row.id == conn.id
+            assert row.status == "active"
+            assert row.last_error is None
+            assert row.last_error_code is None
+            assert row.last_error_at is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_replace_credential_clears_last_error_trio():
+    """자격 교체(replace_channel_connection_credential)."""
+    from app.services.channel_connection import replace_channel_connection_credential
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_expired_connection_with_error_trio(s, org_id, channel="wordpress")
+
+            row = await replace_channel_connection_credential(
+                s, org_id=org_id, connection_id=conn.id, new_secret="new-secret-value", updated_by=uuid.uuid4(),
+            )
+            assert row.status == "active"
+            assert row.last_error is None
+            assert row.last_error_code is None
+            assert row.last_error_at is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_apply_refresh_result_clears_last_error_trio():
+    """자동 토큰 갱신 성공(apply_refresh_result)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_connection import apply_refresh_result
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_expired_connection_with_error_trio(s, org_id, channel="threads")
+
+            await apply_refresh_result(s, connection=conn, new_access_token="new-token", expires_in_seconds=3600)
+
+            refreshed = await s.get(ChannelConnection, conn.id)
+            assert refreshed.status == "active"
+            assert refreshed.last_error is None
+            assert refreshed.last_error_code is None
+            assert refreshed.last_error_at is None
+    finally:
+        await engine.dispose()
