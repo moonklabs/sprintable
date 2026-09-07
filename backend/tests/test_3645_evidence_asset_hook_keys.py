@@ -268,7 +268,11 @@ async def test_mutation_removing_asset_resolver_call_loses_asset_sha256s_key(mon
     asset_sha256s가 None으로 무너진다(이 정규화가 실제로 그 결함을 잡는다는 증거)."""
     import app.services.insight_snapshots as insight_snapshots_module
 
-    async def _never_resolves(db, snapshot):
+    # story #3656 CHANGES — _resolve_channel_publication_asset_evidence의 시그니처가
+    # snapshot 객체 하나에서 publication_kind/publication_id 키워드 인자 둘로 바뀌었다
+    # (list_insights_board도 같은 헬퍼를 재사용하려고 — 그쪽엔 InsightSnapshot 객체가
+    # 없어 kind/publication_id를 직접 들고 있을 뿐이라). 이 목(mock)도 같은 시그니처로.
+    async def _never_resolves(db, *, publication_kind, publication_id):
         return None, None
 
     monkeypatch.setattr(

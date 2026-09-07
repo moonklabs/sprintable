@@ -70,6 +70,13 @@ class InsightsBoardRow(BaseModel):
     channel_post_draft_id: uuid.UUID | None = None
     comments_last_collected_at: datetime | None = None
     comments_supported: bool = False
+    # story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 3645(#4002)의
+    # _resolve_channel_publication_asset_evidence를 list_insights_board가 재사용해
+    # 「지금」 값을 싣는다(evidence 조인 아님 — version 행 불변 전제로 보드의
+    # 「지금」과 evidence의 「스냅샷 시점」이 같다, BE PO 確定). site_post·소재
+    # 0건·hook_key 미기입은 각각 null.
+    asset_sha256s: list[str] | None = None
+    hook_key: str | None = None
 
 
 class InsightsBoardResponse(BaseModel):

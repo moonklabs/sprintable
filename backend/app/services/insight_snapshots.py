@@ -805,13 +805,21 @@ async def _maybe_enrich_with_ga4_inflow(db: AsyncSession, snapshot: InsightSnaps
 
 
 async def _resolve_channel_publication_asset_evidence(
-    db: AsyncSession, snapshot: InsightSnapshot,
+    db: AsyncSession, *, publication_kind: str, publication_id: uuid.UUID,
 ) -> tuple[list[str] | None, str | None]:
     """story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07 — 그라운딩 정정: asset_master
-    개념은 코드 0건, 블루프린트 «처분»을 «착지»로 읽은 PO 오독이었다) — 이 스냅샷이
-    가리키는 발행물이 실제로 내보낸 소재(이미지/영상)의 sha256을 position 순으로,
-    그리고 그 버전에 걸린 `hook_key`를 함께(`(asset_sha256s, hook_key)`) — 같은
-    `ChannelPublication`→`ChannelPostVersion` 조회를 한 번만 태운다.
+    개념은 코드 0건, 블루프린트 «처분»을 «착지»로 읽은 PO 오독이었다) — 이 발행물이
+    실제로 내보낸 소재(이미지/영상)의 sha256을 position 순으로, 그리고 그 버전에
+    걸린 `hook_key`를 함께(`(asset_sha256s, hook_key)`) — 같은 `ChannelPublication`→
+    `ChannelPostVersion` 조회를 한 번만 태운다.
+
+    story #3656(페드루 PO 確定 2026-09-07) — 원래 `InsightSnapshot` 객체 하나를
+    받았으나, `list_insights_board`(다른 호출부, 스냅샷이 아니라 UNION 행에서
+    kind/publication_id를 직접 갖고 있다 — 행마다 스냅샷이 있다는 보장도 없다,
+    아직 스냅샷 자체가 안 뜬 신규 발행물도 이 화면엔 뜬다)도 같은 로직이 필요해져
+    `snapshot.publication_kind`/`snapshot.publication_id` 두 속성만 쓰던 것을
+    평범한 인자 둘로 뺐다(동작 변경 0 — 기존 유일 호출부 `_record_insight_evidence`
+    도 이 두 값을 그대로 넘기도록 같이 고쳤다).
 
     `publication_kind == "site_post"`(hosted_site)는 이미지/영상·hook_key 개념
     자체가 없어 `(None, None)`(있는 걸 지어내지 않는다). `channel_publication`만
@@ -820,10 +828,10 @@ async def _resolve_channel_publication_asset_evidence(
     position 순으로(캐러셀 N장 또는 단일 1장). 이미지도 영상도 없으면(텍스트만)
     asset_sha256s는 None. hook_key는 이 시점의 `ChannelPostVersion.hook_key` 값을
     그대로 카피 — 발행 뒤 그 컬럼을 고쳐도 이미 기록된 이 evidence는 안 바뀐다."""
-    if snapshot.publication_kind != "channel_publication":
+    if publication_kind != "channel_publication":
         return None, None
 
-    publication = await db.get(ChannelPublication, snapshot.publication_id)
+    publication = await db.get(ChannelPublication, publication_id)
     if publication is None:
         return None, None
 
@@ -848,6 +856,72 @@ async def _resolve_channel_publication_asset_evidence(
     return sha256s or None, hook_key
 
 
+async def batch_fetch_channel_post_asset_evidence_sources(
+    db: AsyncSession, *, version_ids: list[uuid.UUID],
+) -> tuple[
+    dict[uuid.UUID, str | None], dict[uuid.UUID, list[ChannelPostImage]], dict[uuid.UUID, ChannelPostVideo],
+]:
+    """story #3656(페드루 PO CHANGES, 2026-09-07) — `list_insights_board`가 페이지
+    전체(최대 `limit`행)의 소재/훅을 «행마다» 조회하면(_resolve_channel_publication_
+    asset_evidence 재사용) channel_publication 행 하나당 최대 3쿼리가 붙어 N+1이
+    된다(PO 실측: 페이지 상한 200행 기준 최악 600쿼리, "보드가 못 견딘다"). 이
+    함수가 그 3쿼리(hook_key·video·image, 전부 version_id IN (...))를 페이지의
+    모든 version_id에 대해 **한 번씩만** 태우고 `_assemble_channel_post_asset_
+    evidence`(아래, 순수 조립)가 행마다 이 결과에서 조립한다 — 쿼리 수가 페이지
+    행 수와 무관하게 상수(3)로 고정된다.
+
+    단건 호출부(`_record_insight_evidence`, 워커 tick이 캡처된 스냅샷 하나씩
+    처리 — 애초에 N+1이 아니다)는 `_resolve_channel_publication_asset_evidence`
+    그대로 쓴다 — 이 배치 함수로 안 바꾼다(그 자리는 배치화할 "여러 행"이 없다)."""
+    if not version_ids:
+        return {}, {}, {}
+
+    versions = (await db.execute(
+        select(ChannelPostVersion).where(ChannelPostVersion.id.in_(version_ids))
+    )).scalars().all()
+    hook_key_by_version = {v.id: v.hook_key for v in versions}
+
+    videos = (await db.execute(
+        select(ChannelPostVideo).where(ChannelPostVideo.version_id.in_(version_ids))
+    )).scalars().all()
+    video_by_version = {v.version_id: v for v in videos}
+
+    images = (await db.execute(
+        select(ChannelPostImage)
+        .where(ChannelPostImage.version_id.in_(version_ids))
+        .order_by(ChannelPostImage.position.asc())
+    )).scalars().all()
+    images_by_version: dict[uuid.UUID, list[ChannelPostImage]] = {}
+    for image in images:
+        images_by_version.setdefault(image.version_id, []).append(image)
+
+    return hook_key_by_version, images_by_version, video_by_version
+
+
+def assemble_channel_post_asset_evidence(
+    version_id: uuid.UUID | None,
+    *,
+    hook_key_by_version: dict[uuid.UUID, str | None],
+    images_by_version: dict[uuid.UUID, list[ChannelPostImage]],
+    video_by_version: dict[uuid.UUID, ChannelPostVideo],
+) -> tuple[list[str] | None, str | None]:
+    """순수 함수(DB 왕복 0) — `batch_fetch_channel_post_asset_evidence_sources`가
+    낸 dict 셋에서 특정 `version_id` 하나의 (asset_sha256s, hook_key)를 조립한다.
+    `_resolve_channel_publication_asset_evidence`와 정확히 같은 규칙(영상+커버
+    우선, 없으면 이미지 position 순) — 같은 로직을 두 번 짓지 않고 dict 조회로만
+    바꿔치기했다. `version_id`가 None이면(site_post류, 애초에 소재 개념이 없는
+    행) 조회 없이 바로 `(None, None)`."""
+    if version_id is None:
+        return None, None
+    hook_key = hook_key_by_version.get(version_id)
+    sha256s: list[str] = []
+    video = video_by_version.get(version_id)
+    if video is not None:
+        sha256s.append(video.original_sha256)
+    sha256s.extend(image.original_sha256 for image in images_by_version.get(version_id, []))
+    return sha256s or None, hook_key
+
+
 async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) -> None:
     """story #3497 그라운딩①(페드루 決定 반영) — evidence.payload(JSONB)에 구조화
     데이터를, note에는 사람용 한 줄만. Evidence(...) 직접 construct(evidence_service.py
@@ -868,7 +942,9 @@ async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) 
     # story #3645 — 이 evidence 시점의 소재 계보·hook_key를 고정한다(publish 뒤 draft
     # 쪽 이미지나 hook_key가 바뀌어도 이미 기록된 이 evidence는 안 바뀐다 — 카피지
     # 참조가 아니다).
-    asset_sha256s, hook_key = await _resolve_channel_publication_asset_evidence(db, snapshot)
+    asset_sha256s, hook_key = await _resolve_channel_publication_asset_evidence(
+        db, publication_kind=snapshot.publication_kind, publication_id=snapshot.publication_id,
+    )
 
     db.add(Evidence(
         id=uuid.uuid4(), org_id=snapshot.org_id, work_item_id=snapshot.work_item_id,
