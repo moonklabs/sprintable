@@ -5,15 +5,22 @@
 걸 막는 가드. 정답은 항상 `app.services.org_time`의 헬퍼(org_today·to_org_date·
 org_midnight_utc·org_date_sql)를 org_id/org_timezone과 함께 쓰는 것.
 
-⛔이 lint가 잡는 패턴 3종(backend/app/ 전수, `.py` 파일):
+⛔이 lint가 잡는 패턴 4종(backend/app/ 전수, `.py` 파일):
   ① `date.today()`(datetime.date의 today — 프로세스 로컬 TZ, 3665 원 결함)
   ② `utcnow().date()`(datetime.utcnow() 자체가 이미 폐기 예정 API인데다 여전히
      "조직의 오늘"을 무시)
   ③ `now(timezone.utc).date()`(3665가 만든 UTC 고정 — org tz 인지 前 상태)
+  ④ `now.date()`(변수에 담긴 "지금 이 순간" 값의 .date() — CHANGES 페드루 PO
+     2026-09-07, pageview_counter.py 실물이 이 형이었다: 함수 파라미터로 받은
+     `now: datetime`을 그대로 `.date()`해 org tz를 건너뛰었다. ①~③은 "그 자리에서
+     즉시 계산"만 잡고 "먼저 변수에 담아 나중에 .date()"는 못 봤던 사각.
 
-⛔이 lint가 «못 잡는» 것: 동적으로 조립된 표현(변수 재할당 뒤 다단계 호출), 이 3개
-리터럴 텍스트 패턴이 한 줄 안에 정확히 이어지지 않는 형태. 오탐 방지 우선(다른
-lint_*.py와 동일 원칙).
+⛔이 lint가 «못 잡는» 것: 동적으로 조립된 표현(변수 재할당 뒤 다단계 호출), 이
+리터럴 텍스트 패턴이 한 줄 안에 정확히 이어지지 않는 형태, `now` 아닌 다른
+이름으로 담은 변수(④는 식별자 이름이 정확히 `now`일 때만 잡는다 — `order.created_
+at.date()`류(스토리에 저장된 과거 시각의 날짜 부분을 비교/키잉에 쓰는 것, "오늘"
+계산이 아님)까지 넓히면 오탐이 폭증한다, billing_scheduler.py의 `order.created_at.
+date()`·`period_end.date()` 등이 그 예). 오탐 방지 우선(다른 lint_*.py와 동일 원칙).
 
 허용 목록은 **파일 + 그 줄의 strip()된 내용 완전 일치**로 키를 잡는다(줄번호 X —
 story #3609/#3611의 처방과 동형: 무관한 줄이 위에 추가돼 줄번호만 밀려도 안 깨진다).
@@ -31,6 +38,7 @@ _PATTERNS = [
     re.compile(r"\bdate\.today\(\)"),
     re.compile(r"\butcnow\(\)\.date\(\)"),
     re.compile(r"\bnow\(timezone\.utc\)\.date\(\)"),
+    re.compile(r"\bnow\.date\(\)"),  # ④ — 변수 now(파라미터·지역변수)의 .date().
 ]
 
 
@@ -41,10 +49,31 @@ class AllowlistEntry(NamedTuple):
     added_by: str
 
 
-# story #3674 — 현재 등재분 0건(전수 grep 후 org_time.py 헬퍼로 전부 이전 完了).
-# 정말 필요한 새 예외가 생기면 여기에 file(backend/app/ 기준 상대경로)·line_content
-# (그 줄을 strip()한 정확한 원문)·reason·added_by를 채워 추가한다.
-ALLOWLIST: list[AllowlistEntry] = []
+# story #3674 CHANGES(페드루 PO, 2026-09-07) — billing_scheduler.py의 dunning
+# 재시도 케이던스는 결제 정책 문서(pricing-policy-proposal-v1 §12.1)가 정한 절대
+# 일수 앵커(D+1..D+grace_days)라 org의 "표시" 시간대와 무관하게 UTC로 결정적이어야
+# 한다(디디 분류: 「내부 잡」 — l2_trigger_worker.py의 dedup 버킷과 동형 원칙, 3674
+# 그라운딩 ①). 사용자가 화면에서 "보는" 날짜가 아니라 서버 상태기계 내부 계산.
+ALLOWLIST: list[AllowlistEntry] = [
+    AllowlistEntry(
+        file="app/services/billing_scheduler.py",
+        line_content="age_days = (now.date() - order.created_at.date()).days",
+        reason="dunning 재시도 케이던스(D+1..D+grace_days) — 결제 정책 절대 일수 앵커, 내부 잡·UTC 의도",
+        added_by="story #3674 CHANGES(페드루 PO)",
+    ),
+    AllowlistEntry(
+        file="app/services/billing_scheduler.py",
+        line_content="already_attempted_today = order.updated_at.date() >= now.date()",
+        reason="같은 날 중복 재시도 방지 — dunning 내부 잡·UTC 의도(위와 동일 함수)",
+        added_by="story #3674 CHANGES(페드루 PO)",
+    ),
+    AllowlistEntry(
+        file="app/services/billing_scheduler.py",
+        line_content="grace_anchor = order.created_at.date() if order is not None else now.date()",
+        reason="order 없는 극단 실패 폴백 앵커 — dunning 내부 잡·UTC 의도(order.created_at.date()와 같은 축)",
+        added_by="story #3674 CHANGES(페드루 PO)",
+    ),
+]
 
 
 def _is_allowed(rel_file: str, line_text: str) -> bool:
@@ -53,11 +82,21 @@ def _is_allowed(rel_file: str, line_text: str) -> bool:
 
 
 def find_violations(path: Path, label: str | None = None) -> list[str]:
-    """단일 파일 스캔 — 위반 라인을 `{label}:{lineno}: {line}` 형태로 반환(label 생략 시 path 그대로)."""
+    """단일 파일 스캔 — 위반 라인을 `{label}:{lineno}: {line}` 형태로 반환(label 생략 시 path 그대로).
+
+    story #3674 CHANGES(페드루 PO) — 줄 전체가 주석(strip() 결과가 `#`로 시작)이면
+    스킵한다: 이 lint가 잡는 패턴을 "설명하는" docstring/주석(이 스크립트 자신의
+    상단 docstring 포함, 실제로 billing_scheduler.py:630에서 재현됨 — 이 처방을 적은
+    주석 자체가 오탐이었다)까지 코드로 오인하면 매번 문장을 우회 표현으로 돌려
+    써야 하는 부담이 생긴다. 실제 호출 코드만 본다(다른 lint_*.py의 기존 한계
+    — 문자열 리터럴 안 언급은 여전히 못 잡음, 그건 애초에 실행되는 코드가 아니라
+    이 lint의 관심사 밖)."""
     text = path.read_text(encoding="utf-8")
     label = label or str(path)
     violations: list[str] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
+        if line.strip().startswith("#"):
+            continue
         if _is_allowed(label, line):
             continue
         for pattern in _PATTERNS:

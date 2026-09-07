@@ -42,6 +42,16 @@ def test_flags_now_timezone_utc_date(tmp_path):
     assert len(violations) == 1
 
 
+def test_flags_bare_now_variable_date(tmp_path):
+    """④ CHANGES(페드루 PO) — pageview_counter.py 실물이 이 형이었다: 파라미터로
+    받은 `now`를 그대로 .date()해 org tz를 건너뛴다. ①~③은 "그 자리에서 즉시
+    계산"만 잡고 "먼저 변수에 담아 나중에 .date()"는 못 봤던 사각을 메운다."""
+    p = _write(tmp_path, "site_d.py", "today = now.date()\n")
+    violations = find_violations(p, label="site_d.py")
+    assert len(violations) == 1
+    assert "now.date()" in violations[0]
+
+
 # ─── ⭐음성대조 — org_time.py 헬퍼로 고친 뒤엔 오탐 없음 ───────────────────
 
 def test_org_today_helper_call_not_flagged(tmp_path):
@@ -62,6 +72,21 @@ def test_astimezone_chain_not_flagged(tmp_path):
         "return datetime.now(timezone.utc).astimezone(org_tz(org_timezone)).date()\n",
     )
     assert find_violations(p, label="org_time_like.py") == []
+
+
+def test_created_at_dot_date_not_flagged_different_identifier(tmp_path):
+    """④는 식별자 이름이 정확히 `now`일 때만 잡는다 — billing_scheduler.py의
+    `order.created_at.date()`(저장된 과거 시각의 날짜 부분, "오늘" 계산이 아님)까지
+    넓히면 오탐이 폭증한다는 것을 음성대조로 고정."""
+    p = _write(tmp_path, "site_e.py", "age_days = (x - order.created_at.date()).days\n")
+    assert find_violations(p, label="site_e.py") == []
+
+
+def test_comment_only_line_not_flagged(tmp_path):
+    """CHANGES(페드루 PO) — 이 lint가 잡는 패턴을 "설명하는" 주석 자체가 오탐이었다
+    (billing_scheduler.py:630 실사고). 줄 전체가 주석이면 스킵한다."""
+    p = _write(tmp_path, "site_f.py", "# 폴백만 now.date()로 처리한다\nreal_code = 1\n")
+    assert find_violations(p, label="site_f.py") == []
 
 
 # ─── ⭐허용목록 — file+내용 완전 일치(줄번호 무관) ─────────────────────────

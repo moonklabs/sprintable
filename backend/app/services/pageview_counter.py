@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.org_metering_key import OrgMeteringKey
 from app.models.org_pageview_daily import OrgPageviewDaily
 from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
+from app.services.org_time import get_org_timezone, to_org_date
 
 _KEY_BYTES = 32  # doc_share.py의 secrets.token_urlsafe(32)와 동일 관례
 
@@ -80,9 +81,16 @@ async def get_beacon_status(db: AsyncSession, *, org_id: uuid.UUID, now: datetim
     last_seen_at = (await db.execute(
         select(func.max(OrgPageviewDaily.updated_at)).where(OrgPageviewDaily.org_id == org_id)
     )).scalar_one_or_none()
+    # story #3674 CHANGES(페드루 PO, 2026-09-07) — 쓰기 쪽(record_pageview 호출부,
+    # public_pageview.py)이 이미 org tz로 "오늘" 버킷을 잡는데, 이 읽기 쪽이 여전히
+    # UTC 기준으로 7일 창을 재면 org tz가 앞서 있는(KST 등) 조직은 방금 쓴 "오늘"
+    # 버킷을 7일 창 계산 기준점이 하루 어긋나 놓칠 수 있다 — 같은 헬퍼(org_time.py
+    # ::to_org_date)로 통일한다.
+    org_timezone = await get_org_timezone(db, org_id)
+    today = to_org_date(now, org_timezone)
     count_7d = (await db.execute(
         select(func.coalesce(func.sum(OrgPageviewDaily.count), 0)).where(
-            OrgPageviewDaily.org_id == org_id, OrgPageviewDaily.day >= now.date() - timedelta(days=6),
+            OrgPageviewDaily.org_id == org_id, OrgPageviewDaily.day >= today - timedelta(days=6),
         )
     )).scalar_one()
     return {"key_issued": True, "last_seen_at": last_seen_at, "count_7d": int(count_7d)}
