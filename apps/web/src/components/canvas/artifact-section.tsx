@@ -177,7 +177,10 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     if (!detail) {
       // 빈 catch 금지 계열 — 커밋 실패를 삼키지 않고 로깅, 편집 모드 유지(사용자 재시도 가능).
       console.error('[canvas-edit] artifact edit commit failed', item.artifact.id);
-      addToast({ title: t('specPinSaveFailedNote'), type: 'error' });
+      // story #3658 — specPinSaveFailedNote(스펙 핀 전용 이름)를 재사용해 키 이름이
+      // 쓰임을 속이던 것을 saveFailedNote(공용, 값 무변)로 rename — 스펙 핀 자리
+      // (pin-authoring-popover.tsx)도 같은 키로 갈아탔다.
+      addToast({ title: t('saveFailedNote'), type: 'error' });
       return;
     }
     const { artifact, versions } = adaptArtifactDetail(detail);

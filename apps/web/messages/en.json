@@ -5033,7 +5033,7 @@
     "specPinSaveAction": "Save",
     "specPinSavingAction": "Saving…",
     "specPinCancelAction": "Cancel",
-    "specPinSaveFailedNote": "The save didn't go through. Please try again in a moment.",
+    "saveFailedNote": "The save didn't go through. Please try again in a moment.",
     "artifactCreateFailed": "Couldn't create it. Please try again in a moment.",
     "changeCount": "{count} changes",
     "commitSummaryPlaceholder": "What changed…",
