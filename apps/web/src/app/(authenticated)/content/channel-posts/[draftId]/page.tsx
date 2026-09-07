@@ -472,9 +472,21 @@ export default function ChannelPostEditPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: replyText }),
       });
-      const body = await res.json().catch(() => null) as { data?: ReplyView; detail?: { message?: string }; message?: string } | null;
+      const body = await res.json().catch(() => null) as {
+        data?: ReplyView;
+        detail?: { message?: string; existing_reply_id?: string };
+        message?: string;
+      } | null;
       if (!res.ok || !body?.data) {
-        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+        // story #3596(페드루 PO 追加 2026-09-07) — 409(COMMENT_REPLY_DRAFT_ALREADY_OPEN)면
+        // BE가 existing_reply_id를 같이 준다(레이스: 이 다이얼로그를 열어 두고
+        // 있던 사이 다른 세션이 먼저 초안을 만든 경우). 재시도로 우회하지 않고
+        // 그 초안 id를 그대로 넘겨 다이얼로그가 이어가게 한다.
+        return {
+          ok: false,
+          errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric'),
+          existingReplyId: body?.detail?.existing_reply_id,
+        };
       }
       return { ok: true, reply: body.data };
     } catch {
@@ -535,29 +547,40 @@ export default function ChannelPostEditPage() {
   // 단건 GET이 실패했다」인지를 이 플래그로 가른다(둘 다 undefined라 그 필드
   // 하나로는 못 가른다).
   const [replyPrefillFetchFailed, setReplyPrefillFetchFailed] = useState(false);
+  // story #3596(Phase2·FE, 페드루 PO 確定 2026-09-06, AC2·AC7·AC11) — 「이어서
+  // 답변」이 여는 자리. comment.openReplyDraft{id,text}는 이미 목록 GET이 실어
+  // 준 값(추가 왕복 0) — 그 초안 id로 상신까지 곧장 간다(create를 다시 안 부른다,
+  // create_comment_reply_draft가 409로 막는 이유와 같은 축). 단건 GET(AC11이
+  // 허용한 재사용)은 create가 나중에 레이스로 409를 내는 자리에서만 쓴다
+  // (handleFetchReplyText·onFetchReplyText 참고).
+  const [continuingReplyDraft, setContinuingReplyDraft] = useState<{ id: string; text: string } | null>(null);
   const handleOpenReply = useCallback((comment: CommentItem) => {
     setReplyPrefillText(undefined);
     setReplyPrefillFetchFailed(false);
+    setContinuingReplyDraft(comment.openReplyDraft ? { id: comment.openReplyDraft.id, text: comment.openReplyDraft.text } : null);
     setReplyComment(comment);
   }, []);
-  const handleResubmitReply = useCallback(async (comment: CommentItem) => {
-    let prefill: string | undefined;
-    let fetchFailed = true;
-    if (orgId && comment.replyId) {
-      try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${comment.id}/replies/${comment.replyId}`);
-        const body = await res.json().catch(() => null) as { data?: ReplyView } | null;
-        prefill = res.ok ? (body?.data?.text ?? undefined) : undefined;
-        fetchFailed = !res.ok;
-      } catch {
-        prefill = undefined;
-        fetchFailed = true;
-      }
+  // story #3544 조각⑧ 원문·story #3596(AC11) 재사용 — 단건 GET .../replies/{replyId}
+  // 하나로 두 자리(voided 「다시 상신」·이 아래 409 레이스 복구)를 같이 쓴다.
+  const handleFetchReplyText = useCallback(async (commentId: string, replyId: string): Promise<string | undefined> => {
+    if (!orgId) return undefined;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${commentId}/replies/${replyId}`);
+      const body = await res.json().catch(() => null) as { data?: ReplyView } | null;
+      return res.ok ? (body?.data?.text ?? undefined) : undefined;
+    } catch {
+      return undefined;
     }
-    setReplyPrefillText(prefill);
-    setReplyPrefillFetchFailed(fetchFailed);
-    setReplyComment(comment);
   }, [orgId]);
+  const handleResubmitReply = useCallback(async (comment: CommentItem) => {
+    const prefill = comment.replyId ? await handleFetchReplyText(comment.id, comment.replyId) : undefined;
+    // comment.replyId===null이면(있을 수 없는 자리지만) 원래 로직대로 실패로 친다
+    // (「불러오다 실패」와 「원래 빈 칸」을 못 가르는 undefined 하나로 뭉치지 않는다).
+    setReplyPrefillText(prefill);
+    setReplyPrefillFetchFailed(prefill === undefined);
+    setContinuingReplyDraft(null);
+    setReplyComment(comment);
+  }, [handleFetchReplyText]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
   const [maxTextLength, setMaxTextLength] = useState<number | null | undefined>(undefined);
   // story #3402 ④(AC9) — account_label(없으면 account_id)로 나가는 계정을 승인 카드에
@@ -2525,11 +2548,16 @@ export default function ChannelPostEditPage() {
       {replyComment ? (
         <CommentReplyDialog
           comment={replyComment}
-          onClose={() => { setReplyComment(null); setReplyPrefillText(undefined); setReplyPrefillFetchFailed(false); }}
+          onClose={() => {
+            setReplyComment(null); setReplyPrefillText(undefined); setReplyPrefillFetchFailed(false);
+            setContinuingReplyDraft(null);
+          }}
           onCreateDraft={handleCreateReplyDraft}
           onSubmit={handleSubmitReply}
           initialText={replyPrefillText}
           prefillFetchFailed={replyPrefillFetchFailed}
+          initialDraft={continuingReplyDraft ?? undefined}
+          onFetchReplyText={(replyId) => handleFetchReplyText(replyComment.id, replyId)}
         />
       ) : null}
       {/* AC6 — 비활성 이유는 버튼 밖에 둔다(라벨 안에 넣으면 disabled:opacity-50에

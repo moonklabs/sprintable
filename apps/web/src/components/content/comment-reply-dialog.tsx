@@ -31,7 +31,17 @@ export interface ReplyView {
   target_comment_state: 'current' | 'changed' | 'deleted' | null;
 }
 
-export type CommentReplyOutcome = { ok: true; reply: ReplyView } | { ok: false; errorMessage: string };
+export type CommentReplyOutcome =
+  | { ok: true; reply: ReplyView }
+  | {
+      ok: false;
+      errorMessage: string;
+      /** story #3596(페드루 PO 追加 2026-09-07) — create가 409(COMMENT_REPLY_
+       * DRAFT_ALREADY_OPEN)로 막히면 BE가 기존 초안 id를 같이 돌려준다(레이스:
+       * 이 다이얼로그를 열어 두고 있던 사이 다른 세션이 먼저 초안을 만든 경우
+       * 등). 있으면 에러 배너 대신 그 초안으로 이어서(draft 뷰) 넘어간다. */
+      existingReplyId?: string;
+    };
 
 export interface CommentReplyDialogProps {
   comment: CommentItem;
@@ -49,6 +59,22 @@ export interface CommentReplyDialogProps {
    * — 「불러오다 실패했다」와 「원래 빈 칸이다」를 사람이 못 가른다. 이 플래그가 true면
    * textarea 위에 한 줄을 보여준다(실패해도 손으로 쓸 수는 있어 액션 0). */
   prefillFetchFailed?: boolean;
+  /** story #3596(Phase2·FE, 페드루 PO 確定 2026-09-06, AC2·AC7) — 「이어서 답변」
+   * (안 보낸 초안이 이미 있는 댓글)이 여는 자리. 이 값이 있으면 create 단계를
+   * 건너뛰고 곧장 draft 뷰(상신 버튼)를 그린다 — 같은 댓글에 새 초안을 또
+   * 만들면 서버가 409를 낸다(create_comment_reply_draft의 fail-closed 가드),
+   * 그래서 이 흐름은 기존 초안 id를 그대로 재사용해 상신까지만 간다. */
+  initialDraft?: { id: string; text: string };
+  /** story #3596(AC10) — initialDraft 단건 GET이 실패했을 때 뜻이 있다. 기존
+   * prefillFetchFailed(voided 「다시 상신」 전용, commentsReplyPrefillFetchFailed)와
+   * 다른 문구(commentsReplyDraftPrefillFetchFailed) — 「지어낸 것」과 「작성하던
+   * 것」은 다른 사고라 유나가 키를 갈랐다(재사용 0). */
+  draftPrefillFetchFailed?: boolean;
+  /** story #3596(페드루 PO 追加 2026-09-07) — create가 409+existingReplyId로
+   * 막힌 자리에서 그 초안 원문을 단건 GET으로 가져온다(AC11 재사용 — 호출부가
+   * 이미 handleContinueReply에 쓰는 그 왕복 그대로). 안 주면(또는 실패하면)
+   * 빈 칸 + commentsReplyDraftPrefillFetchFailed로 안전 폴백. */
+  onFetchReplyText?: (replyId: string) => Promise<string | undefined>;
 }
 
 /**
@@ -58,13 +84,21 @@ export interface CommentReplyDialogProps {
  * 여기서 보여주고, 승인 자체는 이 화면 책임이 아니다(§22-⑤ "승인 카드"는 게이트
  * 인박스의 몫).
  */
-export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit, initialText, prefillFetchFailed }: CommentReplyDialogProps) {
+export function CommentReplyDialog({
+  comment, onClose, onCreateDraft, onSubmit, initialText, prefillFetchFailed,
+  initialDraft, draftPrefillFetchFailed, onFetchReplyText,
+}: CommentReplyDialogProps) {
   const t = useTranslations('content');
   const [text, setText] = useState(initialText ?? '');
-  const [draft, setDraft] = useState<ReplyView | null>(null);
+  const [draft, setDraft] = useState<{ id: string; text: string } | null>(initialDraft ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<ReplyView | null>(null);
+  // story #3596(페드루 PO 追加 2026-09-07) — create가 409(existingReplyId)로 막혀
+  // 그 초안으로 이어간 경우의 자체 fetch 실패(부모가 여는 시점의 draftPrefillFetchFailed
+  // 와 별개 자리 — 열려 있는 이 다이얼로그 안에서 나중에 일어난다). 둘 다 같은 문구다.
+  const [draftPrefillFailedAfterConflict, setDraftPrefillFailedAfterConflict] = useState(false);
+  const showDraftPrefillFailed = (draftPrefillFetchFailed ?? false) || draftPrefillFailedAfterConflict;
 
   async function handleCreateDraft() {
     if (!text.trim()) return;
@@ -73,7 +107,15 @@ export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit, 
     try {
       const result = await onCreateDraft(text.trim());
       if (result.ok) {
-        setDraft(result.reply);
+        setDraft({ id: result.reply.id, text: result.reply.text });
+      } else if (result.existingReplyId) {
+        // story #3596 — 이 댓글에 안 보낸 초안이 이미 있다(레이스): 새로 만들지
+        // 않고 그 초안으로 이어간다(create_comment_reply_draft의 409 가드가
+        // 「안 다룬다」는 막아야 한다는 §3596 처방 그대로 — 재시도로 우회하지
+        // 않는다).
+        const fetchedText = onFetchReplyText ? await onFetchReplyText(result.existingReplyId) : undefined;
+        setDraft({ id: result.existingReplyId, text: fetchedText ?? '' });
+        setDraftPrefillFailedAfterConflict(fetchedText === undefined);
       } else {
         setErrorMessage(result.errorMessage);
       }
@@ -139,6 +181,11 @@ export function CommentReplyDialog({ comment, onClose, onCreateDraft, onSubmit, 
           <div className="flex min-h-0 flex-1 flex-col gap-3">
             <div className="shrink-0 space-y-1">
               <p className="text-xs font-medium text-muted-foreground">{t('commentsReplyDraftLabel')}</p>
+              {showDraftPrefillFailed ? (
+                <p className="text-xs text-muted-foreground" data-testid="comments-reply-draft-prefill-fetch-failed">
+                  {t('commentsReplyDraftPrefillFetchFailed')}
+                </p>
+              ) : null}
               <p className="whitespace-pre-wrap rounded-md border border-border p-2 text-sm text-foreground">{draft.text}</p>
             </div>
             {errorMessage ? (
