@@ -1009,6 +1009,22 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
     expect(container.textContent).toContain(koMessages.channelConnect.channelReauthRevoked);
   });
 
+  // story #3598(유나 §AC9 문구 確定 2026-09-06 15:44Z) — channelReauthError 교체 2 —
+  // 「갱신에 실패했습니다」(reason=error가 갱신 문제라고 잘못 단정하던 옛 문구)를
+  // 「이 연결로 지금 발행할 수 없습니다 — 다시 연결해 주세요.」로(재연결로 풀린다고
+  // 약속하지 않는다).
+  it('⭐#3598 — needs_reauth reason=error면 새 문구(발행 불가·재연결 유도)가 뜬다', async () => {
+    stubFetch({
+      measurementConnections: [
+        { key: 'ga4', status: 'needs_reauth', last_seen_at: null, count_7d: null, settings_path: null, reason: 'error' },
+      ],
+    });
+    await mount('owner');
+    expect(container.textContent).toContain('이 연결로 지금 발행할 수 없습니다 — 다시 연결해 주세요.');
+    expect(container.textContent).not.toContain('갱신에 실패했습니다');
+    expect(container.textContent).not.toContain('서버 응답');
+  });
+
   it('needs_reauth — reason이 없으면 note 자체를 안 그린다', async () => {
     stubFetch({
       measurementConnections: [

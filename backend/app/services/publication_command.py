@@ -672,6 +672,19 @@ async def apply_command_failure(
     # transient만 지수 백오프 재시도 큐로.
     command.attempt_count += 1
     if command.attempt_count >= MAX_RETRIES:
+        # story #3598(AC6, PO 確定 2026-09-06) — transient가 재시도 상한(댓글수집
+        # channel_post_comments.py의 attempt_count>=5와 동형 임계값=MAX_RETRIES)에
+        # 도달해도 여태 connection.status는 그대로 "active"로 남아 「연결됨」 칩이
+        # 계속 거짓으로 보였다(3595 표 행 ③④가 지적한 "미표시" 부류와 같은 결함 —
+        # 감지 못 하는 동안 화면이 「연결됨」이라 단정하지 않는다). 위 CONNECTION
+        # 분기와 동형으로 이미 revoked/error면 더 약한 정보로 덮어쓰지 않는다.
+        from app.models.channel_connection import ChannelConnection
+
+        connection = await db.get(ChannelConnection, command.destination)
+        if connection is not None:
+            connection.last_error = (last_error or "")[:2000]
+            if connection.status not in ("revoked", "error"):
+                connection.status = "error"
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
