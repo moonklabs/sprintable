@@ -599,6 +599,42 @@ describe('GateEvidence — 댓글 답변 게이트 봉인 축(story #3517)', () 
     expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
   });
 
+  // story #3599(페드루 PO 정정 2026-09-07, 그라운딩) — held(일시정지·가역)는
+  // gate.status!=='pending'이지만 판단이 난 게 아니다. void_gate가 resolved_at
+  // 도 채우는 것과 달리(그라운딩 확認, gate_service.py:1592) held는 resolver_id
+  // 만 채우고 판단 자체는 없다 — 어느 조건으로 재도 캡션이 뜨면 안 된다.
+  it('⑥-4 held(일시정지)인데 sealed_content_version이 null이면 캡션이 안 뜬다(판단 아님)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'held', github_check_run_id: null,
+      neutral_facts: { kind: 'comment_reply', target_external_comment_id: 'ext-comment-1' },
+      sealed_content_body: '안녕하세요, 다음 주 월요일에 재입고됩니다.',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
+  });
+
+  // voided는 gate.resolved_at을 채우지만(그라운딩 확認) 승인 판단이 아니라
+  // 행정 무효화다 — resolved_at 기준으로 재면 이 표본이 잘못 캡션을 띄운다
+  // (뮤테이션: isResolved를 `resolved_at !== null`로 바꾸면 이 assert가 RED).
+  it('⑥-4 voided(행정 무효화)인데 sealed_content_version이 null이면 캡션이 안 뜬다(승인 판단 아님)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'voided', github_check_run_id: null,
+      resolved_at: '2026-09-07T01:00:00Z',
+      neutral_facts: { kind: 'comment_reply', target_external_comment_id: 'ext-comment-1' },
+      sealed_content_body: '안녕하세요, 다음 주 월요일에 재입고됩니다.',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
+  });
+
   it('⑥-4 sealed_content_version이 있으면(신규 3599 게이트) 기존 버전·해시 줄이 그대로 뜨고 확인불가 문구는 없다', async () => {
     const gate = realApiShapedGate({
       gate_type: 'external_publish', work_item_type: 'story', status: 'pending', github_check_run_id: null,

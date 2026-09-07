@@ -178,8 +178,9 @@ interface RecipeApprovalFacts {
   // (§content.commentsReplyAlreadySentCount와 같은 규율: 수만·0이면 미표시).
   alreadySentCount: number | null;
   // story #3599(유나 §22-17 ⑥-4 조건 갱신, 페드루 PO 정정 2026-09-07) — 버전-미상
-  // 캡션은 «결정이 난» 행에서만(pending 옛 게이트는 아직 아무도 승인/반려한 적이
-  // 없어 "이 승인이 무엇을 봉인했는지" 물음 자체가 아직 안 선다 — 지어내지 않는다).
+  // 캡션은 «승인/반려 판단이 실제로 난» 행에서만. pending·held(일시정지)는
+  // 아직 판단 자체가 없고, voided는 판단이 아니라 행정 무효화라 지어낼 것도
+  // 없다 — approved/rejected/auto_passed만 이 조건을 만족한다.
   isResolved: boolean;
   // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — sealed_content_*와
   // 동형이나 대상이 doc(external_publish=본문 텍스트 봉인·concept_approval=doc
@@ -219,7 +220,13 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     targetExternalCommentId: isCommentReply ? realString(f?.['target_external_comment_id']) : null,
     targetText: isCommentReply ? realString(f?.['target_text']) : null,
     alreadySentCount: isCommentReply && typeof f?.['sent_replies_count'] === 'number' ? f['sent_replies_count'] : null,
-    isResolved: gate.status !== 'pending',
+    // story #3599(페드루 PO 정정 2026-09-07, 그라운딩 2026-09-07) — gate.status!==
+    // 'pending'은 held(일시정지·가역)·voided까지 "결정 남"으로 세어버린다. PO가
+    // 제시한 대안(resolved_at!==null)도 실측해 보니 안 맞는다 — void_gate(gate_
+    // service.py:1592)가 resolved_at을 채운다(voided도 포함돼 버림). "승인/반려
+    // 판단이 실제로 난" 상태만 명시 열거한다(GATE_STATUSES 중 이 셋만 본문에
+    // 대한 판단 — held는 판단 자체가 없고 voided는 판단이 아니라 행정 무효화).
+    isResolved: gate.status === 'approved' || gate.status === 'rejected' || gate.status === 'auto_passed',
     sealedDocRef,
     sealedDocBodySha256: realString(gate.sealed_doc_body_sha256),
   };
@@ -613,10 +620,11 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           comment_id 단위였던 옛 comment_reply 게이트 — 마이그레이션 0, 그대로
           둔다는 §5 판정)은 「쌍」이 안 서 대조 불가하다. 「덮였습니다」로 단정
           하지 않는다(못 대조하는 게이트 중엔 한 번 승인되고 끝난 정상 옛 행도
-          있다) — 아는 것만 말한다: 「확인할 수 없다」. isResolved(pending이
-          아님) 한정 — 아직 아무도 승인/반려한 적 없는 pending 옛 게이트는
-          "무엇을 승인했나" 물음 자체가 아직 안 선다(지어내지 않는다). 이
-          자리(버전·해시 줄)를 대신할 뿐 줄을 새로 만들지 않는다. */}
+          있다) — 아는 것만 말한다: 「확인할 수 없다」. isResolved(resolved_at
+          있음) 한정 — 아직 아무도 승인/반려한 적 없는 pending 옛 게이트는
+          "무엇을 승인했나" 물음 자체가 아직 안 선다(지어내지 않는다·held·
+          voided는 resolved_at이 없어 이 조건에서도 자동 제외). 이 자리
+          (버전·해시 줄)를 대신할 뿐 줄을 새로 만들지 않는다. */}
       {facts.contentVersion === null && facts.contentBody && facts.isResolved ? (
         <p className="text-muted-foreground">{t('recipeApprovalSealedVersionMissing')}</p>
       ) : facts.contentVersion !== null || facts.contentSha256 ? (
