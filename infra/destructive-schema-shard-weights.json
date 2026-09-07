@@ -1466,6 +1466,11 @@
       "file": "tests/test_3612_connection_notactive_precheck_norecord.py",
       "sec": 16.0,
       "source": "story-3612-connection-notactive-precheck-norecord(PR 개설 前 선제 등재 — 페드루 PO 追加 2026-09-07, PO 대조 CHANGES-1 반영. 로컬 raw pytest 6건 2.60s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 16s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3605_worker_exception_ordering.py",
+      "sec": 15.0,
+      "source": "story-3605-oauth-connection-kind-generalize(PR 개설 前 선제 등재 — 로컬 raw pytest 2건 2.81s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 15s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
