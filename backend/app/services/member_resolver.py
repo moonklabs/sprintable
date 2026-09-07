@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -47,6 +47,61 @@ class ResolvedMember:
     org_id: uuid.UUID
     project_id: uuid.UUID | None = field(default=None)
     avatar_url: str | None = field(default=None)
+
+
+def is_human_member_condition(member_id_col, *, user_id: uuid.UUID | None = None):
+    """story #3627/#3629(prod 결함 클래스, 페드루 PO 確定 2026-09-07) — 이 member_id가
+    「휴먼」인지 판정하는 유일한 자리(이 모듈 첫 줄의 규칙과 같은 자리 — 새 판정자
+    발명 0). SQL WHERE 절에 그대로 끼워 넣을 수 있는 boolean 조건을 돌려준다.
+
+    E-MEMBER-SSOT Phase 0부터 JWT 휴먼의 참여자/발신자 id는 `org_members.id`다
+    (org_members 테이블 자체가 휴먼 전용이라 추가 type 조건 불요) — 그런데 코드
+    곳곳(conversations.py 멘션/알림 대상 필터·channel_router.py 대화-내-휴먼
+    존재 판정 등)이 여전히 `team_members(type='human')`로만 이었다. team_members에
+    그 org의 휴먼 행이 하나도 없으면(SSOT 전환 이후 만들어진 org 다수) 그 자리들이
+    org_member-only 휴먼을 조용히 "휴먼 아님"으로 판정한다(3627 원 사고: 온보딩
+    왕복·딥링크. 3629: 멘션 알림·chain-expired 휴먼 존재 판정 등으로 같은 클래스가
+    번져 있음을 확認).
+
+    둘 다 인정(OR) — legacy team_member(type='human') 행이 남아있는 org도 회귀
+    없이 그대로 통과해야 한다. `user_id`를 주면 그 유저 소유 여부까지, 안 주면
+    "휴먼이기만 하면" 통과.
+
+    story #3629(카디르 발견, #3627 후속) — `OrgMember.deleted_at.is_(None)` 가드
+    없이는 soft-delete된 org_member도 여전히 휴먼으로 오판정된다(뮤테이션 확認,
+    회귀 테스트 참고)."""
+    org_member_conditions = [OrgMember.id == member_id_col, OrgMember.deleted_at.is_(None)]
+    team_member_conditions = [TeamMember.id == member_id_col, TeamMember.type == "human"]
+    if user_id is not None:
+        org_member_conditions.append(OrgMember.user_id == user_id)
+        team_member_conditions.append(TeamMember.user_id == user_id)
+    return or_(
+        select(OrgMember.id).where(*org_member_conditions).exists(),
+        select(TeamMember.id).where(*team_member_conditions).exists(),
+    )
+
+
+async def filter_human_member_ids(
+    candidate_ids: set[uuid.UUID],
+    session: AsyncSession,
+) -> set[uuid.UUID]:
+    """story #3629 — `candidate_ids` 중 휴먼인 것만 반환(org_members 또는 legacy
+    team_members(type='human') 둘 다 인정, `is_human_member_condition`과 같은 규칙).
+
+    conversations.py의 멘션/일반 메시지 notification 대상 필터 2곳이 각자 `TeamMember.
+    id.in_(candidates)` INCLUSION 쿼리만 써서 org_member-only 휴먼을 조용히 빼던 것을
+    한 자리로 통일(배치-멤버십 조회라 `filter_org_member_ids`와 같은 형 — 다만 그 함수는
+    "org 소속인가"(agent 포함)이고 이건 "휴먼인가"라 목적이 다르다, 새 판정자 발명은
+    아니다)."""
+    if not candidate_ids:
+        return set()
+    org_member_ids = set((await session.execute(
+        select(OrgMember.id).where(OrgMember.id.in_(candidate_ids), OrgMember.deleted_at.is_(None))
+    )).scalars().all())
+    team_member_ids = set((await session.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(candidate_ids), TeamMember.type == "human")
+    )).scalars().all())
+    return org_member_ids | team_member_ids
 
 
 async def resolve_member(
