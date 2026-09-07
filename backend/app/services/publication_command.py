@@ -680,9 +680,11 @@ async def apply_command_failure(
         # AC6 원칙 그대로 "연결 상태는 사람이 고쳐야 풀리는 것에만"(한도 초과는
         # 잔량·시각 축이지 connection 축이 아니다). 제외 없이 그대로 승격하면
         # 일시 한도 초과 5연속(부하가 몰리는 정상 상황)만으로 발행이 전면
-        # 차단되고 사람의 재연결 없인 못 풀리는 자해 잠금이 된다. 인증/권한
-        # 계열·미분류 provider 오류(CHANNEL_PUBLISH_PROVIDER_ERROR 등, "사람이
-        # 봐야 아는" 부류)만 상한 승격 대상.
+        # 차단되고 사람의 재연결 없인 못 풀리는 자해 잠금이 된다. 페드루 PO
+        # 정정(2026-09-07) — 이 transient 분기(위 CONNECTION·NEEDS_CHECK
+        # 분기는 이미 return돼 여기 안 옴)에 이 제외 뒤 남는 error_code는
+        # CHANNEL_PUBLISH_PROVIDER_ERROR뿐(_TRANSIENT_CODES 정의 그대로) —
+        # "인증/권한 계열"은 이 분기에 애초에 못 온다(과장 표현 정정).
         if error_code != "CHANNEL_RATE_LIMITED":
             from app.models.channel_connection import ChannelConnection
 
