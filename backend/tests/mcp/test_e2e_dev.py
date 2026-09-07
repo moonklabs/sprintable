@@ -55,19 +55,41 @@ READ_ONLY_TOOLS = [
 
 
 @pytest.mark.anyio
-async def test_tools_list_89_tools():
-    """tools/list 응답에서 89개 도구 전량 확인."""
+async def test_tools_list_matches_registered_tool_count():
+    """tools/list 응답이 등록된 도구 전량을 낸다.
+
+    story #3657(카디르 3648② 재QA 발견) — 이 자리가 원래 `== 89`로 하드코딩돼 있었다.
+    도구는 스토리마다 계속 늘어나는 값이라(2026-09-07 실측 시점 126개) 고정 상수는
+    등록될 때마다 다시 stale해지는 게 예정된 결함 클래스 — "몇 개인가"를 박아 두는
+    대신 "subprocess(STDIO transport)로 받은 목록이 in-process로 직접 부른
+    `mcp.list_tools()`와 정확히 같은 집합인가"를 잰다(등록 루프가 조용히 일부를
+    빠뜨리는 진짜 회귀는 여전히 잡되, 정상적인 도구 추가엔 무반응 — story #3631류
+    신규 그룹/도구 추가가 이 테스트를 매번 다시 고장내지 않는다)."""
+    from sprintable_mcp.server import mcp as _in_process_mcp
+
+    in_process_tools = await _in_process_mcp.list_tools()
+    in_process_names = {t.name for t in in_process_tools}
+    assert in_process_names, "in-process 등록 도구 0건 — _TOOL_DEFS 등록 루프 자체가 비어 있다"
+
     async with stdio_client(_SERVER_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.list_tools()
             tool_names = {t.name for t in result.tools}
-            assert len(tool_names) == 89, f"도구 수 불일치: {len(tool_names)}"
+            assert tool_names == in_process_names, (
+                f"subprocess(STDIO) tools/list이 in-process 등록 목록과 다르다 — "
+                f"subprocess에만 있음: {tool_names - in_process_names} · "
+                f"in-process에만 있음: {in_process_names - tool_names}"
+            )
 
 
 @pytest.mark.anyio
 async def test_read_only_tools_succeed():
-    """read-only 도구 21개 dev 백엔드 실호출 — 200 응답 확인."""
+    """read-only 도구(READ_ONLY_TOOLS, 위 정의) dev 백엔드 실호출 — 200 응답 확인.
+
+    story #3657 — 이 docstring이 "21개"라고 고정 적혀 있었는데 실제 리스트는 19개였다
+    (같은 stale-count 클래스, 어차피 개수 자체를 코드가 안 쓰므로 리스트 자체를 그대로
+    인용해 다시 안 어긋나게 한다)."""
     async with stdio_client(_SERVER_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

@@ -117,6 +117,14 @@ AGENT_MCP_PATHS = [
 ]
 
 
+@pytest.mark.skipif(
+    bool(os.environ.get("CI")),
+    reason="story #3657(카디르 3648② 재QA 발견) — 다른 에이전트(ortega/mirko/damrong)의 "
+    "홈 디렉터리 .mcp.json을 직접 읽는 이 머신 로컬 상태 검사. CI 러너엔 이 경로들이 "
+    "애초에 존재하지 않아(parametrize가 collection 시점에 빈 리스트로 접혀 자연히 "
+    "0건 수집) 원래도 CI에서 안 도는 테스트였다 — 이 skipif는 그 사실을 조용한 "
+    "0-수집이 아니라 명시 사유로 남긴다(AC 요구, «조용한 skip 금지»).",
+)
 @pytest.mark.parametrize("mcp_path", [p for p in AGENT_MCP_PATHS if p.exists()])
 def test_agent_mcp_json_uses_python(mcp_path: Path):
     """각 에이전트 .mcp.json의 sprintable 서버가 Python MCP를 사용함."""
