@@ -18,11 +18,17 @@ pytestmark = pytest.mark.anyio
 
 
 def _snapshot(
-    *, due_at: str, status: str = "captured", normalized: dict | None = None, channel: str = "facebook_sandbox",
+    *, due_at: str, offset_label: str | None, status: str = "captured", normalized: dict | None = None,
+    channel: str = "facebook_sandbox",
 ) -> dict:
+    """카디르 CHANGES(PR#4003) — offset_label은 이제 서버(insight_snapshots.py 라우터)
+    가 정본을 매겨 보낸다. 이 MCP 계층은 더 이상 인덱스로 라벨링하지 않으므로, 이
+    fixture가 서버 응답을 흉내 낼 때 명시적으로 값을 실어야 한다(암묵적 "첫째=1d"
+    가정 재도입 금지 — 그게 이 버그의 원인이었다)."""
     return {
         "id": f"snap-{due_at}", "channel": channel, "due_at": due_at, "captured_at": due_at,
         "status": status, "normalized": normalized, "source": "facebook_sandbox", "error_code": None,
+        "offset_label": offset_label,
     }
 
 
@@ -44,8 +50,8 @@ async def test_positive_delta_both_captured(monkeypatch):
     from sprintable_mcp.tools import channel_posts
 
     snapshots = [
-        _snapshot(due_at="2026-09-08T00:00:00Z", normalized={"impressions": 100, "clicks": 10, "spend": None}),
-        _snapshot(due_at="2026-09-14T00:00:00Z", normalized={"impressions": 250, "clicks": 40, "spend": None}),
+        _snapshot(due_at="2026-09-08T00:00:00Z", offset_label="1d", normalized={"impressions": 100, "clicks": 10, "spend": None}),
+        _snapshot(due_at="2026-09-14T00:00:00Z", offset_label="7d", normalized={"impressions": 250, "clicks": 40, "spend": None}),
     ]
     recorder = _RecordingGet([snapshots])
     monkeypatch.setattr(channel_posts.client, "get", recorder)
@@ -68,8 +74,8 @@ async def test_7d_pending_yields_null_delta_with_reason(monkeypatch):
     from sprintable_mcp.tools import channel_posts
 
     snapshots = [
-        _snapshot(due_at="2026-09-08T00:00:00Z", normalized={"impressions": 100}),
-        _snapshot(due_at="2026-09-14T00:00:00Z", status="pending", normalized=None),
+        _snapshot(due_at="2026-09-08T00:00:00Z", offset_label="1d", normalized={"impressions": 100}),
+        _snapshot(due_at="2026-09-14T00:00:00Z", offset_label="7d", status="pending", normalized=None),
     ]
     monkeypatch.setattr(channel_posts.client, "get", _RecordingGet([snapshots]))
     monkeypatch.setattr(type(channel_posts.client), "org_id", property(lambda self: "org-1"))
@@ -90,8 +96,8 @@ async def test_unprovided_metric_stays_null_not_zero(monkeypatch):
     from sprintable_mcp.tools import channel_posts
 
     snapshots = [
-        _snapshot(due_at="2026-09-08T00:00:00Z", normalized={"spend": None, "conversions": 5}),
-        _snapshot(due_at="2026-09-14T00:00:00Z", normalized={"spend": None, "conversions": 12}),
+        _snapshot(due_at="2026-09-08T00:00:00Z", offset_label="1d", normalized={"spend": None, "conversions": 5}),
+        _snapshot(due_at="2026-09-14T00:00:00Z", offset_label="7d", normalized={"spend": None, "conversions": 12}),
     ]
     monkeypatch.setattr(channel_posts.client, "get", _RecordingGet([snapshots]))
     monkeypatch.setattr(type(channel_posts.client), "org_id", property(lambda self: "org-1"))
@@ -113,8 +119,8 @@ async def test_float_metrics_get_real_delta_not_null(monkeypatch):
     from sprintable_mcp.tools import channel_posts
 
     snapshots = [
-        _snapshot(due_at="2026-09-08T00:00:00Z", normalized={"spend": 12.5, "ctr": None}),
-        _snapshot(due_at="2026-09-14T00:00:00Z", normalized={"spend": 30.25, "ctr": 0.042}),
+        _snapshot(due_at="2026-09-08T00:00:00Z", offset_label="1d", normalized={"spend": 12.5, "ctr": None}),
+        _snapshot(due_at="2026-09-14T00:00:00Z", offset_label="7d", normalized={"spend": 30.25, "ctr": 0.042}),
     ]
     monkeypatch.setattr(channel_posts.client, "get", _RecordingGet([snapshots]))
     monkeypatch.setattr(type(channel_posts.client), "org_id", property(lambda self: "org-1"))
@@ -155,7 +161,7 @@ async def test_draft_id_resolves_publication_id_then_fetches_insights(monkeypatc
     from sprintable_mcp.tools import channel_posts
 
     draft = {"id": "draft-1", "publication_id": "pub-9"}
-    snapshots = [_snapshot(due_at="2026-09-08T00:00:00Z", normalized={"impressions": 5})]
+    snapshots = [_snapshot(due_at="2026-09-08T00:00:00Z", offset_label="1d", normalized={"impressions": 5})]
     recorder = _RecordingGet([draft, snapshots])
     monkeypatch.setattr(channel_posts.client, "get", recorder)
     monkeypatch.setattr(type(channel_posts.client), "org_id", property(lambda self: "org-1"))
@@ -187,6 +193,38 @@ async def test_draft_never_published_reports_no_publication(monkeypatch):
     assert result[0].text.startswith("Error:")
     assert "발행된 적이 없습니다" in result[0].text
     assert len(recorder.calls) == 1  # insights 조회는 안 나감
+
+
+async def test_republish_superseded_snapshots_excluded_from_delta(monkeypatch):
+    """카디르 발견(PR#4003, 2026-09-07) — hosted_site 재발행은 같은 publication_id를
+    유지한 채 published_at을 갱신하고 새 due_at 2행을 더 연다(UNIQUE(publication_id,
+    due_at)는 «새» due_at을 안 막는다). 4건(최초 1d/7d + 재발행 1d/7d) 표본에서 옛
+    인덱스 라벨링("idx0=1d·나머지=7d")은 최초 사이클의 due_at 순번을 오라벨했다 —
+    이제 서버가 매긴 offset_label을 그대로 읽으므로, null 라벨(최초 사이클 잔존
+    2건)은 델타에서 빠지고 재발행 짝(1d/7d)만으로 델타가 나며 superseded_snapshots
+    =2로 알려야 한다."""
+    from sprintable_mcp.tools import channel_posts
+
+    snapshots = [
+        # 최초 발행 사이클 — 재발행으로 due_at이 더 이상 «지금» published_at의
+        # +1일/+7일 어느 쪽도 아니게 된 잔존 스냅샷(서버가 null로 라벨).
+        _snapshot(due_at="2026-09-01T00:00:00Z", offset_label=None, normalized={"impressions": 10}),
+        _snapshot(due_at="2026-09-07T00:00:00Z", offset_label=None, normalized={"impressions": 20}),
+        # 재발행 사이클 — 이 둘만 «지금» published_at 기준 유효한 1d/7d.
+        _snapshot(due_at="2026-09-08T00:00:00Z", offset_label="1d", normalized={"impressions": 100}),
+        _snapshot(due_at="2026-09-14T00:00:00Z", offset_label="7d", normalized={"impressions": 250}),
+    ]
+    monkeypatch.setattr(channel_posts.client, "get", _RecordingGet([snapshots]))
+    monkeypatch.setattr(type(channel_posts.client), "org_id", property(lambda self: "org-1"))
+
+    result = await channel_posts.get_publication_insights(
+        channel_posts.GetPublicationInsightsInput(publication_id="pub-1"),
+    )
+    body = jsonlib.loads(result[0].text)
+
+    assert body["delta_1d_to_7d"] == {"impressions": 150}  # 250-100(재발행 짝), 20-10(최초)이 아니다
+    assert body["delta_unavailable_reason"] is None
+    assert body["superseded_snapshots"] == 2
 
 
 async def test_neither_id_given_rejected_before_any_http_call(monkeypatch):

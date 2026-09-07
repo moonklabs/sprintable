@@ -60,32 +60,32 @@ def _is_numeric(v: object) -> bool:
 
 def _label_snapshots_and_compute_delta(
     snapshots: list[dict],
-) -> tuple[list[dict], dict[str, int | float | None] | None, str | None]:
-    """due_at 오름차순 정렬 뒤 offset_label(1d|7d)을 매기고, 둘 다 captured일 때만
-    키별 v7−v1 델타를 낸다. 페드루 決定(3321 원칙) — 0과 null(미제공)을 섞지 않는다:
-    두 값 중 하나라도 None이면 그 키의 델타는 None(0으로 대체하지 않는다). 값은
-    int뿐 아니라 float도 허용(spend·GA4 유입 파생값 등 실수로 올 수 있는 지표가
-    조용히 null 처리되면 «제공된 값»을 «미제공」으로 오판하는 것이라 — 페드루 CHANGES
-    2026-09-07, PR#4003).
+) -> tuple[dict[str, int | float | None] | None, str | None, int]:
+    """서버(insight_snapshots.py 라우터)가 이미 매긴 offset_label(1d|7d|null)을 그대로
+    읽는다 — 둘 다 captured일 때만 키별 v7−v1 델타를 낸다. 페드루 決定(3321 원칙) —
+    0과 null(미제공)을 섞지 않는다: 두 값 중 하나라도 None이면 그 키의 델타는 None
+    (0으로 대체하지 않는다). 값은 int뿐 아니라 float도 허용(spend·GA4 유입 파생값
+    등 실수로 올 수 있는 지표가 조용히 null 처리되면 «제공된 값»을 «미제공」으로
+    오판하는 것이라 — 페드루 CHANGES 2026-09-07, PR#4003).
 
-    ⚠️전제(관찰, 페드루 CHANGES 동시 지적) — 라벨은 idx 0=1d·나머지 전부=7d다. 원장
-    (`_SNAPSHOT_OFFSETS`, insight_snapshots.py)이 지금 오프셋 2개(1d·7d)만 등록해
-    한 publication_id·채널 조합엔 스냅샷이 정확히 2건뿐이라 안전하지만, 재시도 등으로
-    3건 이상이 생기면 셋째부터도 "7d"로 잘못 찍힌다 — 이 스토리 범위 밖(원장에
-    오프셋이 늘어나면 그때 이 함수도 같이 고칠 자리)."""
-    sorted_snapshots = sorted(snapshots, key=lambda s: s["due_at"])
-    labeled = [
-        {**snap, "offset_label": "1d" if idx == 0 else "7d"}
-        for idx, snap in enumerate(sorted_snapshots)
-    ]
-    snapshot_1d = next((s for s in labeled if s["offset_label"] == "1d"), None)
-    snapshot_7d = next((s for s in labeled if s["offset_label"] == "7d"), None)
+    카디르 발견(PR#4003, 2026-09-07) — 예전엔 이 함수가 직접 「idx0=1d·나머지=7d」로
+    라벨을 매겼는데, hosted_site 재발행이 같은 publication_id를 유지한 채 published_at
+    을 갱신하고 새 due_at 2행을 더 열어(UNIQUE는 «새» due_at을 안 막는다) 4건 이상이
+    흔했다 — 옛 사이클의 잔존 스냅샷이 "7d"로 오라벨돼 에러 없이 틀린 델타가 나갔다.
+    처방(근본) — 인덱스 라벨링을 버리고 서버가 「due_at−«지금» published_at」으로
+    낸 정본 라벨만 읽는다(insights_board.py와 같은 헬퍼 `label_snapshot_offset`).
+    null 라벨(옛 사이클 잔존)은 델타 계산에서 빼고 개수만 3번째 반환값(superseded_
+    snapshots)으로 알린다 — 지어내지 않고 사실 그대로("이 발행 뒤로 안 쓰는 스냅샷이
+    n건 더 있었다")."""
+    superseded = [s for s in snapshots if s.get("offset_label") is None]
+    snapshot_1d = next((s for s in snapshots if s.get("offset_label") == "1d"), None)
+    snapshot_7d = next((s for s in snapshots if s.get("offset_label") == "7d"), None)
     if snapshot_1d is None or snapshot_7d is None:
-        return labeled, None, "스냅샷이 2건 미만 — 1일·7일 두 스냅샷이 모두 등록돼야 델타를 계산합니다."
+        return None, "스냅샷이 2건 미만 — 1일·7일 두 스냅샷이 모두 등록돼야 델타를 계산합니다.", len(superseded)
     if snapshot_1d["status"] != "captured":
-        return labeled, None, f"1일 스냅샷 미도달(status={snapshot_1d['status']})"
+        return None, f"1일 스냅샷 미도달(status={snapshot_1d['status']})", len(superseded)
     if snapshot_7d["status"] != "captured":
-        return labeled, None, f"7일 스냅샷 미도달(status={snapshot_7d['status']})"
+        return None, f"7일 스냅샷 미도달(status={snapshot_7d['status']})", len(superseded)
 
     normalized_1d = snapshot_1d.get("normalized") or {}
     normalized_7d = snapshot_7d.get("normalized") or {}
@@ -93,7 +93,7 @@ def _label_snapshots_and_compute_delta(
     for key in sorted(set(normalized_1d) | set(normalized_7d)):
         v1, v7 = normalized_1d.get(key), normalized_7d.get(key)
         delta[key] = (v7 - v1) if _is_numeric(v1) and _is_numeric(v7) else None
-    return labeled, delta, None
+    return delta, None, len(superseded)
 
 
 async def get_publication_insights(args: GetPublicationInsightsInput) -> list[TextContent]:
@@ -106,7 +106,11 @@ async def get_publication_insights(args: GetPublicationInsightsInput) -> list[Te
     스냅샷 모두 status=captured일 때만 채워진다 — 7일이 아직 안 왔거나(pending) 수집이
     실패했으면(failed) null+delta_unavailable_reason으로 사유를 알린다. 각 키는 두
     스냅샷 모두 값이 있을 때만 계산되고, 한쪽이라도 미제공(null)이면 그 키도 null —
-    0(선언했고 실제로 0)과 null(그 채널이 그 지표를 아예 선언 안 함)을 섞지 않는다."""
+    0(선언했고 실제로 0)과 null(그 채널이 그 지표를 아예 선언 안 함)을 섞지 않는다.
+
+    각 스냅샷의 offset_label(1d|7d|null)은 서버가 매긴 정본 — null은 재발행 등으로
+    옛 발행 사이클에 속한 잔존 스냅샷(카디르 발견, PR#4003)이라 델타 계산에서 빠지고,
+    그 개수가 superseded_snapshots에 실린다(0이면 잔존 없음)."""
     try:
         publication_id = args.publication_id
         if not publication_id:
@@ -125,12 +129,13 @@ async def get_publication_insights(args: GetPublicationInsightsInput) -> list[Te
         snapshots = await client.get(
             f"/api/v2/organizations/{client.org_id}/publications/{publication_id}/insights",
         )
-        labeled, delta, reason = _label_snapshots_and_compute_delta(snapshots)
+        delta, reason, superseded_count = _label_snapshots_and_compute_delta(snapshots)
         return ok({
             "publication_id": publication_id,
-            "snapshots": labeled,
+            "snapshots": snapshots,
             "delta_1d_to_7d": delta,
             "delta_unavailable_reason": reason,
+            "superseded_snapshots": superseded_count,
         })
     except Exception as exc:
         return err(str(exc))

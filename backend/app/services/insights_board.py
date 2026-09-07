@@ -41,7 +41,7 @@ from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
 from app.models.site_post import SitePost
-from app.services.insight_snapshots import NORMALIZED_KEYS
+from app.services.insight_snapshots import NORMALIZED_KEYS, label_snapshot_offset
 
 _WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90}  # story 確定(e) — 3475(7d·30d)에 90d 신규 편입.
 _SNAPSHOT_OFFSET_DAYS = {"d1": 1, "d7": 7}
@@ -252,15 +252,15 @@ async def list_insights_board(
     for r in page:
         # due_at은 anchor_at(=published_at) + offset로 스케줄됐다(schedule_insight_
         # snapshots) — published_at과의 일수 차이로 +1일/+7일 버킷을 되짚는다.
-        # 페드루 PO 기록③(PR#3849 리뷰) — `.days`는 0을 향해 버림(예: 6.999일→6)이라
-        # 초 단위 미세 오차(타임존 변환 왕복 등)에서 경계값이 밀릴 수 있다 —
-        # round()로 완충(整수 offset만 유효하므로 반올림이 잘림보다 항상 안전).
+        # label_snapshot_offset(insight_snapshots.py) 공유 헬퍼로 뺐다(카디르 발견,
+        # PR#4003 — MCP 3651이 이 자리와 별개로 인덱스 기반 라벨링을 갖고 있어 재발행
+        # 스냅샷을 오라벨했다, 같은 규칙 한 자리).
         d1 = d7 = None
         for snap in snapshots_by_pub.get(r.publication_id, []):
-            offset = round((snap.due_at - r.published_at).total_seconds() / 86400)
-            if offset == 1:
+            label = label_snapshot_offset(due_at=snap.due_at, published_at=r.published_at)
+            if label == "1d":
                 d1 = snap
-            elif offset == 7:
+            elif label == "7d":
                 d7 = snap
         is_channel_pub = r.kind == "channel_publication"
         adapter = CHANNEL_ADAPTERS.get(r.channel) if is_channel_pub else None

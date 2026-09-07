@@ -95,6 +95,38 @@ async def list_insight_snapshots_for_publication(
     return list(rows)
 
 
+async def resolve_publication_published_at(
+    db: AsyncSession, *, publication_kind: str, publication_id: uuid.UUID,
+) -> datetime | None:
+    """publication_kind별 «지금」 published_at 해석 — insights_board.py의 rows_cte가
+    kind별로 이미 푸는 자리와 같은 소스(SitePost.published_at·ChannelPublication.
+    published_at). 존재하지 않는 publication_id는 None(지어내지 않는다)."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.site_post import SitePost
+
+    model = SitePost if publication_kind == "site_post" else ChannelPublication
+    return (await db.execute(
+        select(model.published_at).where(model.id == publication_id)
+    )).scalar_one_or_none()
+
+
+def label_snapshot_offset(*, due_at: datetime, published_at: datetime) -> str | None:
+    """due_at이 «지금» published_at 기준 +1일/+7일 버킷 중 어디인지 — insights_board.py
+    관찰 그대로(round()로 부동소수 잡음 완충, `.days`는 0을 향해 버려 경계값이 밀릴
+    수 있다). 매치 안 되면 None — 카디르 발견(PR#4003, 2026-09-07): hosted_site 재발행은
+    같은 publication_id를 유지한 채 published_at을 갱신하고, `schedule_insight_
+    snapshots`가 새 due_at 2행을 더 연다(UNIQUE(publication_id, due_at)는 «새» due_at을
+    안 막는다) — 원래 있던 인덱스 기반 라벨링("idx0=1d·나머지=7d")은 이 옛 발행 사이클의
+    잔존 스냅샷을 «7d»로 오라벨했다. None은 "옛 사이클 잔존"의 정직한 신호 — 호출자가
+    델타 계산에서 빼고 개수만 알린다(3651 MCP 도구의 superseded_snapshots)."""
+    offset = round((due_at - published_at).total_seconds() / 86400)
+    if offset == 1:
+        return "1d"
+    if offset == 7:
+        return "7d"
+    return None
+
+
 async def get_latest_insight_snapshot(db: AsyncSession, *, publication_id: uuid.UUID) -> InsightSnapshot | None:
     """story #3497 조각3 — get_*_publication 응답에 얹는 `latest_insight` 1건(그라운딩
     確定④). "최신"은 captured_at 내림차순 — 아직 아무것도 안 잡힌 발행은 None(지어
