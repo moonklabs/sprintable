@@ -2168,6 +2168,8 @@
     "channelSandboxConnectionBadge": "Test connection",
     "channelDisconnectAction": "Disconnect",
     "channelReauthAction": "Reconnect",
+    "channelReauthMismatchNote": "The {updated} connection was refreshed — you approved a different account, so {intended} is unchanged.",
+    "channelSandboxReauthUnavailableNote": "Test connections can't be reconnected — use \"Create {channel} connection\" to make a new one.",
     "channelTestAction": "Test connection",
     "channelRowActionAriaLabel": "{label} — connection {n}",
     "channelTestOk": "OK · {account}",

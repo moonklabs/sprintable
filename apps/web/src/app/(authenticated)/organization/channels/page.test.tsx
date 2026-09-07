@@ -328,6 +328,59 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     const headerChip = chips.find((c) => c.getAttribute('data-status-chip') !== 'connected');
     expect(headerChip?.getAttribute('data-status-chip')).toBe('reauth_required');
   });
+
+  // story #3650(PO Test Org 실측 2026-09-07) — 「다시 연결」이 어느 행을 재인증하려는
+  // 것인지 authorize 쿼리에 실려야 콜백이 대상을 안다.
+  it('재인증 필요 행의 「다시 연결」 링크에 connection_id가 그 행의 id로 실린다', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-needs-reauth', status: 'revoked' }],
+    });
+    await mount('owner');
+    const reauthLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '다시 연결') as HTMLAnchorElement;
+    expect(reauthLink).not.toBeUndefined();
+    const href = reauthLink.getAttribute('href')!;
+    expect(href).toContain('connection_id=conn-needs-reauth');
+    expect(href).toContain('channel=threads');
+  });
+
+  // story #3650 — credential_kind='none'(예: instagram_sandbox) 행은 OAuth authorize
+  // 자체가 그 채널을 지원 안 해 「다시 연결」이 구조적 막다른 길이다. 버튼 대신 문장.
+  it('테스트용 연결(credential_kind=none)이 재인증 필요면 「다시 연결」 버튼 대신 문장이 뜬다', async () => {
+    stubFetch({
+      availableChannels: [
+        { channel: 'instagram_sandbox', display_name: 'Instagram Sandbox', credential_kind: 'none', kind: 'social' },
+      ],
+      connections: [{
+        ...CONNECTION_ACTIVE, id: 'conn-ig-sandbox', channel: 'instagram_sandbox',
+        credential_kind: 'none', status: 'revoked',
+      }],
+    });
+    await mount('owner');
+    const reauthLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '다시 연결');
+    expect(reauthLink).toBeUndefined();
+    const note = container.querySelector('[data-testid="channel-sandbox-reauth-unavailable"]');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('테스트용 연결은 다시 연결할 수 없습니다');
+  });
+
+  // story #3650 — dev 실측 재현: 재연결 대상과 콜백이 실제로 갱신한 행이 다르면
+  // ?connected=&mismatch=&updated= 세 쿼리가 함께 온다. 화면이 두 id를 이미 불러온
+  // connections에서 라벨로 바꿔 한 문장으로 보인다(침묵 0).
+  it('?mismatch=&updated= 쿼리가 있으면 일반 성공 배너 대신 대상 불일치 문장이 뜬다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads&mismatch=conn-page2&updated=conn-page1'));
+    stubFetch({
+      connections: [
+        { ...CONNECTION_ACTIVE, id: 'conn-page1', account_label: 'Page 1', status: 'active' },
+        { ...CONNECTION_ACTIVE, id: 'conn-page2', account_label: 'Page 2', status: 'revoked' },
+      ],
+    });
+    await mount('owner');
+    const note = container.querySelector('[data-testid="channel-reauth-mismatch-note"]');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('Page 1');
+    expect(note?.textContent).toContain('Page 2');
+    expect(container.textContent).not.toContain(koMessages.channelConnect.channelConnectSuccess.replace('{channel}', 'Threads'));
+  });
 });
 
 // story #3436 묶음10(유나 §17-21⑧⑨, PO 確定 2026-09-06) — oauth 갈래 「{channel}

@@ -169,9 +169,14 @@ class ChannelConnectionResponse(BaseModel):
     # 대기"(PendingSelectionResponse) 둘 중 하나일 수 있어(Facebook Page만 해당) FE가
     # 판별자로 가른다. additive 기본값이라 기존 threads/instagram 응답·소비자는 무변.
     kind: Literal["connected"] = "connected"
+    # story #3650(PO Test Org 실측 2026-09-07) — additive. authorize state가 실은
+    # target_connection_id가 이 콜백이 실제로 갱신한 행(id)과 다르면 채워진다(다른
+    # 계정을 골랐다는 뜻 — 갱신 자체은 사실대로 진행, 화면이 어느 행이 실제로
+    # 갱신됐는지 침묵하지 않게 하는 신호일 뿐). 일치·state 없음(신규 연결)이면 null.
+    reconnect_mismatch_target_id: uuid.UUID | None = None
 
 
-def _to_response(row) -> ChannelConnectionResponse:
+def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) -> ChannelConnectionResponse:
     adapter = get_channel_adapter(row.channel)
     max_text_length = adapter.max_text_length if adapter is not None and adapter.max_text_length > 0 else None
     supports_unpublish = adapter is not None and adapter.supports_unpublish
@@ -213,7 +218,14 @@ def _to_response(row) -> ChannelConnectionResponse:
         video_aspect_tolerance=adapter.video_aspect_tolerance if adapter is not None else 0.0,
         video_codecs=list(adapter.video_codecs) if adapter is not None else [],
         secret_hint=row.secret_hint,
+        reconnect_mismatch_target_id=reconnect_mismatch_target_id,
     )
+
+
+class AuthorizeRequest(BaseModel):
+    # story #3650(PO Test Org 실측 2026-09-07) — 「다시 연결」 대상 행을 authorize
+    # 단계에서 state에 실어 콜백까지 왕복시킨다. 생략(신규 연결)이면 기존 동작 그대로.
+    target_connection_id: uuid.UUID | None = None
 
 
 class AuthorizeResponse(BaseModel):
@@ -404,6 +416,7 @@ async def list_available_channels_endpoint(
 async def authorize_channel_connection(
     org_id: uuid.UUID,
     channel: str,
+    body: AuthorizeRequest = AuthorizeRequest(),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -415,6 +428,16 @@ async def authorize_channel_connection(
     adapter = get_channel_adapter(channel)
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
+
+    # story #3650 — target_connection_id가 실려 오면 이 org·채널 소유가 맞는지 먼저
+    # 검증한다(IDOR 방지 — 콜백 mismatch 판정이 믿는 값이 여기서부터 정직해야 한다).
+    if body.target_connection_id is not None:
+        target_conn = await get_channel_connection(db, org_id=org_id, connection_id=body.target_connection_id)
+        if target_conn is None or target_conn.channel != channel:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "CHANNEL_CONNECTION_NOT_FOUND", "message": "재연결 대상 연결을 찾을 수 없습니다."},
+            )
 
     # 선생님 지적·페드루 PO 정정(2026-09-03 08:29Z) — 조직이 자기 채널 앱 자격을 등록 안
     # 했으면(플랫폼 기본값도 없으면) authorize 진입 자체를 여기서 막는다. Meta 호출 0건.
@@ -434,6 +457,7 @@ async def authorize_channel_connection(
     try:
         state = sign_channel_oauth_state(
             org_id=org_id, requester_member_id=resolved.id, channel=channel, code_verifier=code_verifier,
+            connection_id=body.target_connection_id,
         )
     except ChannelOAuthStateNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -510,7 +534,7 @@ async def channel_connection_callback(
     if channel in ("facebook", "facebook_sandbox"):
         return await _facebook_channel_connection_callback(
             db, org_id=org_id, channel=channel, code=body.code, app_id=app_id, app_secret=app_secret,
-            requester_member_id=resolved.id,
+            requester_member_id=resolved.id, target_connection_id=oauth_state.connection_id,
         )
 
     # story #3320 — instagram_oauth.InstagramOAuthError는 ThreadsOAuthError와 같은
@@ -563,12 +587,20 @@ async def channel_connection_callback(
         token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
         refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=resolved.id,
     )
-    return _to_response(row)
+    # story #3650 — 대상 행(재연결 의도)과 실제 갱신된 행이 다르면(provider가 다른
+    # 계정을 돌려줬다는 뜻 — 다른 계정으로 로그인/선택) 갱신은 그대로 진행하되
+    # 화면에 알릴 신호를 싣는다. 일치·state에 target 자체가 없으면(신규 연결) null.
+    mismatch_target_id = (
+        oauth_state.connection_id
+        if oauth_state.connection_id is not None and oauth_state.connection_id != row.id
+        else None
+    )
+    return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
 
 
 async def _facebook_channel_connection_callback(
     db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, app_id: str, app_secret: str,
-    requester_member_id: uuid.UUID,
+    requester_member_id: uuid.UUID, target_connection_id: uuid.UUID | None = None,
 ) -> ChannelConnectionResponse | PendingSelectionResponse:
     """story #3547(페드루 PO 確定 2026-09-06) — Facebook Page는 페이지 개수에 따라
     갈래가 셋(0/1/2+)이다. `_redirect_uri`는 threads/instagram과 같은 채널별 콜백
@@ -611,7 +643,14 @@ async def _facebook_channel_connection_callback(
             token_expires_at=None,  # 페이지 토큰은 장기 유저 토큰에서 파생 — 별도 만료 불명(⚠️미확認).
             refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=requester_member_id,
         )
-        return _to_response(row)
+        # story #3650(PO Test Org 실측 2026-09-07) — facebook_sandbox는 고정 계정 1개라
+        # 어느 행에서 「다시 연결」을 눌러도 이 단일-페이지 갈래가 항상 그 고정 계정으로
+        # upsert한다. target_connection_id(재연결 의도 행)와 실제 갱신된 행(row.id)이
+        # 다르면 갱신 자체는 사실대로 두되 화면에 신호를 싣는다.
+        mismatch_target_id = (
+            target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+        )
+        return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
 
     now = datetime.now(timezone.utc)
     candidates = [{"page_id": p["page_id"], "name": p["name"]} for p in pages]

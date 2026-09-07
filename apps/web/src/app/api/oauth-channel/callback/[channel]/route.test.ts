@@ -168,4 +168,30 @@ describe('GET /api/oauth-channel/callback/[channel] — Facebook 「선택 대�
     const res = await GET(facebookRequest({ code: 'c', state: 's' }), facebookRouteParams());
     expect(res.headers.get('location')).toBe('http://localhost:3108/organization/channels?connected=facebook');
   });
+
+  // story #3650(PO Test Org 실측 2026-09-07) — BE가 reconnect_mismatch_target_id를
+  // 실으면(재연결 대상≠실제 갱신 행) 이 라우트는 그대로 릴레이만 한다(opaque —
+  // 라벨 조립은 /organization/channels 몫).
+  it('BE가 reconnect_mismatch_target_id를 실으면 mismatch·updated 쿼리로 릴레이한다', async () => {
+    stubFacebookCookies();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'updated-row-id', channel: 'facebook', reconnect_mismatch_target_id: 'target-row-id' }),
+    });
+    const res = await GET(facebookRequest({ code: 'c', state: 's' }), facebookRouteParams());
+    const location = new URL(res.headers.get('location')!);
+    expect(location.searchParams.get('connected')).toBe('facebook');
+    expect(location.searchParams.get('mismatch')).toBe('target-row-id');
+    expect(location.searchParams.get('updated')).toBe('updated-row-id');
+  });
+
+  it('reconnect_mismatch_target_id가 null이면(정상 재인증) 기존 ?connected=로', async () => {
+    stubFacebookCookies();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'c1', channel: 'facebook', reconnect_mismatch_target_id: null }),
+    });
+    const res = await GET(facebookRequest({ code: 'c', state: 's' }), facebookRouteParams());
+    expect(res.headers.get('location')).toBe('http://localhost:3108/organization/channels?connected=facebook');
+  });
 });

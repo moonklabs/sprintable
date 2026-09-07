@@ -542,10 +542,19 @@ function ConnectionRow({
         </Button>
         {/* story #3504 — 재인증·해제는 owner 전용(_require_owner). §5-2 "그려진
             컨트롤은 「할 수 있다」는 단정" — admin에게 넓게 그리고 403으로 막지
-            않는다: 안 그리고 사유 한 줄만. */}
+            않는다: 안 그리고 사유 한 줄만.
+            story #3650(PO Test Org 실측 2026-09-07) — credential_kind==='none'
+            채널(예: instagram_sandbox)은 OAuth authorize 분기 자체가 이 채널을
+            지원 안 해(app 자격도 등록될 수 없음) 「다시 연결」이 구조적 막다른
+            길이다("테스트용 연결" 배지와 같은 판별축 — sandboxConnectionBadge
+            참고). 버튼 대신 문장, 처방은 「새로 만들기」. */}
         {derived.status === 'reauth_required' ? (
-          isOwnerStrict ? (
-            <a href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}`}>
+          conn.credential_kind === 'none' ? (
+            <p className="text-xs text-muted-foreground" data-testid="channel-sandbox-reauth-unavailable">
+              {t('channelSandboxReauthUnavailableNote', { channel: channelLabel(conn.channel, t) })}
+            </p>
+          ) : isOwnerStrict ? (
+            <a href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}&connection_id=${conn.id}`}>
               <Button
                 size="sm" variant="outline"
                 aria-label={t('channelRowActionAriaLabel', { n: index + 1, label: t('channelReauthAction') })}
@@ -861,6 +870,13 @@ export default function OrganizationChannelsPage() {
 
   const connected = searchParams.get('connected');
   const connectError = searchParams.get('connect_error');
+  // story #3650(PO Test Org 실측 2026-09-07) — 재연결 대상 행과 콜백이 실제로 갱신한
+  // 행이 다를 때(다른 계정을 승인) BFF가 함께 싣는 두 id. 라벨은 이 화면이 이미
+  // 불러온 connections에서 붙인다(콜백 라우트는 opaque 릴레이 그대로 유지).
+  const mismatchTargetId = searchParams.get('mismatch');
+  const mismatchUpdatedId = searchParams.get('updated');
+  const mismatchTargetConn = connections.find((c) => c.id === mismatchTargetId);
+  const mismatchUpdatedConn = connections.find((c) => c.id === mismatchUpdatedId);
 
   // story #3549(§13-8②, 3547 계약) — 콜백 BFF(api/oauth-channel/callback/[channel])가
   // 2개 이상 페이지를 찾으면 `?select_pending={channel}&pending_id=...&candidates=...`
@@ -887,7 +903,16 @@ export default function OrganizationChannelsPage() {
         <p className="text-sm text-muted-foreground">{t('pageDescription')}</p>
       </div>
 
-      {connected ? (
+      {connected && mismatchTargetId && mismatchUpdatedId ? (
+        <Alert variant="info" role="status" aria-live="polite" aria-atomic="true" data-testid="channel-reauth-mismatch-note">
+          <AlertDescription>
+            {t('channelReauthMismatchNote', {
+              updated: mismatchUpdatedConn?.account_label ?? mismatchUpdatedConn?.account_id ?? mismatchUpdatedId,
+              intended: mismatchTargetConn?.account_label ?? mismatchTargetConn?.account_id ?? mismatchTargetId,
+            })}
+          </AlertDescription>
+        </Alert>
+      ) : connected ? (
         <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
           <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected, t) })}</AlertDescription>
         </Alert>
