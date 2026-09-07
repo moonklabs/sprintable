@@ -153,6 +153,65 @@ async function mountAsAdmin(members: Array<{ id: string; user_id: string; role: 
   await flush();
 }
 
+// story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — 초대 대기 행의 재발송·취소
+// pending 中 "..."가 위 aria-label 안에도 그대로 들어갔다(발견 시점 실측, #3592가
+// 이 두 자리에 순번 aria-label을 이미 배선해 뒀지만 낱말화는 놓쳤다).
+describe('OrgMembersSection — 초대 pending 라벨 낱말화(story #3608)', () => {
+  async function mountWithPendingInvite() {
+    let resolveResend!: () => void;
+    let resolveRevoke!: () => void;
+    const resendPending = new Promise<void>((resolve) => { resolveResend = resolve; });
+    const revokePending = new Promise<void>((resolve) => { resolveRevoke = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/org-members') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/organizations/org-1/invites' && (!init || init.method === undefined)) {
+        return { ok: true, json: async () => ({ data: [{ id: 'inv-1', email: 'x@example.com', role: 'member', status: 'pending', expires_at: '2026-09-10T00:00:00Z' }] }) };
+      }
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/organizations/org-1/invites/inv-1/resend' && init?.method === 'POST') {
+        await resendPending;
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url === '/api/organizations/org-1/invites/inv-1' && init?.method === 'DELETE') {
+        await revokePending;
+        return { ok: true, json: async () => ({}) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="admin" />)); });
+    await flush();
+    return { resolveResend, resolveRevoke };
+  }
+
+  it('⭐#3608 — 재발송 pending 中 접근 이름·보이는 글자에 "..." 0, "재발송 중" 포함', async () => {
+    const { resolveResend } = await mountWithPendingInvite();
+    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '재발송');
+    expect(resendBtn).not.toBeUndefined();
+    await act(async () => { resendBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); });
+    expect(resendBtn!.textContent).not.toContain('...');
+    expect(resendBtn!.textContent).toContain('재발송 중');
+    const ariaLabel = resendBtn!.getAttribute('aria-label');
+    expect(ariaLabel).not.toContain('...');
+    expect(ariaLabel).toContain('재발송 중');
+    resolveResend();
+    await flush();
+  });
+
+  it('⭐#3608 — 취소 pending 中 접근 이름·보이는 글자에 "..." 0, "취소 중" 포함', async () => {
+    const { resolveRevoke } = await mountWithPendingInvite();
+    const cancelBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '취소');
+    expect(cancelBtn).not.toBeUndefined();
+    await act(async () => { cancelBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); });
+    expect(cancelBtn!.textContent).not.toContain('...');
+    expect(cancelBtn!.textContent).toContain('취소 중');
+    const ariaLabel = cancelBtn!.getAttribute('aria-label');
+    expect(ariaLabel).not.toContain('...');
+    expect(ariaLabel).toContain('취소 중');
+    resolveRevoke();
+    await flush();
+  });
+});
+
 describe('OrgMembersSection — 역할 변경 게이트가 BE 인가 폭과 같다(story #3491)', () => {
   it('⭐admin caller — owner도 자기 자신도 아닌 member 행엔 <select>가 뜬다(FE=BE 폭 정정의 핵심)', async () => {
     await mountAsAdmin(

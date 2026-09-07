@@ -474,15 +474,20 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                       </Button>
                       <Button
                         size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}
-                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: resendingId === invite.id ? '...' : t('resend') })}
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: resendingId === invite.id ? t('orgInviteResending') : t('resend') })}
                       >
-                        {resendingId === invite.id ? '...' : t('resend')}
+                        {/* story #3608(유나 §22-18 ④-2)+#3606(i18n화) 병합 — pending
+                            "..."는 아무 말도 안 한다(낱말 "재발송 중…"로), 기본 라벨은
+                            #3606이 새로 i18n화한 t('resend') 키를 쓴다. */}
+                        {resendingId === invite.id ? t('orgInviteResending') : t('resend')}
                       </Button>
                       <Button size="sm" variant="glass" disabled={revokingId === invite.id} onClick={() => void handleRevokeInvite(invite.id)}
                         className="text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: revokingId === invite.id ? '...' : tc('cancel') })}
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: revokingId === invite.id ? t('orgInviteCancelling') : tc('cancel') })}
                       >
-                        {revokingId === invite.id ? '...' : tc('cancel')}
+                        {/* story #3608+#3606 병합 — 낱말("취소 중…")+기본 라벨은
+                            #3606이 쓰는 공용 tc('cancel') 키. */}
+                        {revokingId === invite.id ? t('orgInviteCancelling') : tc('cancel')}
                       </Button>
                     </div>
                   ) : undefined
