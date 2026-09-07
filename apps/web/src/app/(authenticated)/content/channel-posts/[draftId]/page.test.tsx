@@ -4092,6 +4092,36 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     expect(specTag).not.toContain('9:16');
   });
 
+  // story #3590(유나 §17-23⑤-1 정정, 페드루 PO 確定 2026-09-06, BE #3944 additive) —
+  // 업로드 직후엔 메타 줄이 섰지만 재진입(단건 재조회)에서는 draft.video_url만
+  // 실어 사라졌다. draft.video_meta seed로 재로드에서도 confirm 응답과 같은
+  // 필드명·같은 문장이 서는지 고정(새 문구 조립 0).
+  it('⭐#3590 — 재로드에서도 draft.video_meta로 메타 줄이 confirm 응답과 같은 문장으로 선다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1,
+      draftDetail: {
+        video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4',
+        video_meta: { duration_seconds: 12.5, width: 1080, height: 1920, codec: 'avc1', original_bytes: 20000000 },
+      } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-meta"]')?.textContent)
+      .toBe('12.5초 · 1080×1920 · H.264 · 19.1 MB');
+  });
+
+  it('⭐#3590 — video_meta가 없으면(BE 미착지·video_row 없음) 재로드는 여전히 메타 줄을 안 그린다(회귀)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1,
+      draftDetail: { video_url: 'https://storage.googleapis.com/bucket/channel-media/o/d1/x.mp4' } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-meta"]')).toBeNull();
+  });
+
   // story #3577(유나 헤더 실측·페드루 PO 지적 2026-09-06) — putVideoWithProgress
   // 내부(구 :1133)와 호출부(:1173)가 둘 다 Content-Type을 세팅해 XHR이
   // setRequestHeader를 같은 헤더 이름으로 두 번 불러 "video/mp4, video/mp4"로
