@@ -934,7 +934,11 @@ export default function OrganizationChannelsPage() {
           <AlertDescription>
             {t(connectErrorLabelKey(connectError, isOwnerStrict))}
             {connectErrorId ? (
-              <span className="mt-1 block select-text text-xs text-muted-foreground">
+              // 유나 라이브 픽셀 실측(#4025 리뷰, 2026-09-07) — AlertDescription 자체가
+              // opacity-90이라 그 안에서 text-muted-foreground는 0.9와 합성돼 라이트
+              // 4.150(하한 4.5 미달)로 떨어진다. text-foreground(12.597/12.592)로 —
+              // opacity 층은 자식에 opacity-100을 줘도 상쇄 안 된다(부모 합성 자체).
+              <span className="mt-1 block select-text text-xs text-foreground">
                 {t('channelConnectErrorId', { errorId: connectErrorId })}
               </span>
             ) : null}
