@@ -20,9 +20,15 @@ realdb.py 재사용, team_members는 그쪽 관례대로 진짜 VIEW)로 간다.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
+
+# story #3379 — maybe_nudge_draft_doc_shared_in_chat이 이제 doc_updated_at을 보고 "최근
+# 편집" 억제를 건다. 이 파일의 테스트는 그 축을 다루지 않으니 억제선(30분) 밖의 값으로
+# 고정해 새 억제 조건에 안 걸리게 한다(그 조건 자체는 test_d1f4afcb류가 별도로 검증).
+_STALE_ENOUGH_UPDATED_AT = datetime.now(timezone.utc) - timedelta(hours=1)
 
 from tests.test_2301_story_body_mentions_realdb import _REAL_DB_URL, _make_org, _make_project, _session_factory
 from tests.test_2288_command_center_gate_type_waiting_realdb import _make_member
@@ -96,6 +102,8 @@ async def test_nudge_sender_is_system_publisher_not_human_trigger():
                 s, org_id=org.id, project_id=project.id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=trigger_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -139,6 +147,8 @@ async def test_nudge_sender_is_system_publisher_when_trigger_is_agent():
                 s, org_id=org.id, project_id=project.id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=trigger_agent_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -174,6 +184,8 @@ async def test_nudge_writes_platform_activity_log():
                 s, org_id=org.id, project_id=project.id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=trigger_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -230,6 +242,8 @@ async def test_mutation_reverting_sender_to_trigger_id_fails(monkeypatch):
                 s, org_id=org.id, project_id=project.id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=trigger_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 

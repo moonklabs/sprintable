@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
+
+# story #3379 — maybe_nudge_draft_doc_shared_in_chat이 이제 doc_updated_at을 보고 "최근
+# 편집" 억제를 건다. 이 파일의 테스트는 그 축을 다루지 않으니 억제선(30분) 밖의 값으로
+# 고정해 새 억제 조건에 안 걸리게 한다(그 조건 자체는 test_d1f4afcb류가 별도로 검증).
+_STALE_ENOUGH_UPDATED_AT = datetime.now(timezone.utc) - timedelta(hours=1)
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -180,6 +186,8 @@ async def test_draft_doc_mention_nudges_author_once_even_if_called_twice():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -196,6 +204,8 @@ async def test_draft_doc_mention_nudges_author_once_even_if_called_twice():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -226,6 +236,8 @@ async def test_two_different_senders_sequential_still_nudge_author_once():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_a,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -235,6 +247,8 @@ async def test_two_different_senders_sequential_still_nudge_author_once():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_b,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -268,6 +282,8 @@ async def test_concurrent_mentions_still_nudge_author_once():
                     s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                     doc_title="온보딩 리서치", doc_status="draft",
                     doc_author_id=author_id, sender_id=sender_id,
+                    doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                    trigger_message_content="이 문서 확인 부탁드립니다",
                 )
                 await s.commit()
 
@@ -297,6 +313,8 @@ async def test_non_draft_doc_mention_does_not_nudge():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="확定 문서", doc_status="confirmed",
                 doc_author_id=author_id, sender_id=sender_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -323,6 +341,8 @@ async def test_self_share_does_not_nudge():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="내 문서", doc_status="draft",
                 doc_author_id=author_id, sender_id=author_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -362,6 +382,8 @@ async def test_delivery_failure_rolls_back_reservation_and_retry_succeeds():
                     s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                     doc_title="온보딩 리서치", doc_status="draft",
                     doc_author_id=author_id, sender_id=sender_id,
+                    doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                    trigger_message_content="이 문서 확인 부탁드립니다",
                 )
                 await s.commit()
 
@@ -382,6 +404,8 @@ async def test_delivery_failure_rolls_back_reservation_and_retry_succeeds():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="온보딩 리서치", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -420,6 +444,8 @@ async def test_integrity_error_branch_discriminates_uq_dup_from_other_bidirectio
                     s, org_id=org_id, project_id=project_id, doc_id=dup_doc_id,
                     doc_title="온보딩 리서치", doc_status="draft",
                     doc_author_id=author_id, sender_id=sender_id,
+                    doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                    trigger_message_content="이 문서 확인 부탁드립니다",
                 )
                 await s.commit()
             async with Session() as s:
@@ -427,6 +453,8 @@ async def test_integrity_error_branch_discriminates_uq_dup_from_other_bidirectio
                     s, org_id=org_id, project_id=project_id, doc_id=dup_doc_id,
                     doc_title="온보딩 리서치", doc_status="draft",
                     doc_author_id=author_id, sender_id=sender_id,
+                    doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                    trigger_message_content="이 문서 확인 부탁드립니다",
                 )
                 await s.commit()
 
@@ -442,6 +470,8 @@ async def test_integrity_error_branch_discriminates_uq_dup_from_other_bidirectio
                     s, org_id=org_id, project_id=project_id, doc_id=ghost_doc_id,
                     doc_title="유령 문서", doc_status="draft",
                     doc_author_id=author_id, sender_id=sender_id,
+                    doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                    trigger_message_content="이 문서 확인 부탁드립니다",
                 )
                 await s.commit()
 

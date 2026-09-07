@@ -15,10 +15,17 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy import select
+
+# story #3379 — maybe_nudge_draft_doc_shared_in_chat이 이제 doc_updated_at을 보고 "최근
+# 편집" 억제를 건다. 이 파일의 기존 테스트(게이트·이벤트 억제)는 그 축을 다루지 않으니
+# 억제선(30분) 밖의 값으로 고정한다(신규 억제 3종 자체의 회귀는 이 스토리의 새 테스트
+# 파일에서 별도 검증).
+_STALE_ENOUGH_UPDATED_AT = datetime.now(timezone.utc) - timedelta(hours=1)
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -209,6 +216,8 @@ async def test_doc_with_open_external_publish_gate_does_not_nudge(gate_status):
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="3바퀴 draft", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -239,6 +248,8 @@ async def test_doc_with_approved_external_publish_gate_still_nudges():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="완료된 산출물", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -270,6 +281,8 @@ async def test_gate_for_different_doc_does_not_suppress_nudge():
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
                 doc_title="타깃 문서", doc_status="draft",
                 doc_author_id=author_id, sender_id=sender_id,
+                doc_updated_at=_STALE_ENOUGH_UPDATED_AT, doc_superseded_by=None,
+                trigger_message_content="이 문서 확인 부탁드립니다",
             )
             await s.commit()
 
@@ -336,6 +349,15 @@ async def test_organic_chat_message_mentioning_draft_doc_still_nudges():
             author_id = await _seed_human_member(s, org_id, project_id, name="Author")
             sender_id = await _seed_human_member(s, org_id, project_id, name="Sender")
             doc_id = await _seed_doc(s, org_id, project_id, author_id, title="논의된 문서")
+            # story #3379 ⑤ — 방금 seed한 doc은 updated_at이 "지금"이라 새 "최근 편집"
+            # 억제(30분)에 그대로 걸린다. 이 테스트의 취지(organic mention은 그 축과
+            # 무관하게 뜬다)를 지키려면 억제선 밖으로 backdate 필요.
+            from sqlalchemy import text as _sa_text
+            await s.execute(
+                _sa_text("UPDATE docs SET updated_at = now() - interval '1 hour' WHERE id = :id"),
+                {"id": str(doc_id)},
+            )
+            await s.commit()
 
             from app.routers.events import _get_or_create_event_conversation
 

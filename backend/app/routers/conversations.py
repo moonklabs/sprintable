@@ -2675,16 +2675,22 @@ async def send_message(
         try:
             from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
 
+            # story #3379 — 「기본 침묵」 판정(최근 편집·superseded)에 doc_updated_at·
+            # superseded_by가 필요해 SELECT에 같이 얹는다(추가 쿼리 0, 기존 1회 SELECT 그대로).
             _docs = (await db.execute(
-                select(Doc.id, Doc.title, Doc.status, Doc.created_by).where(
+                select(
+                    Doc.id, Doc.title, Doc.status, Doc.created_by, Doc.updated_at, Doc.superseded_by,
+                ).where(
                     Doc.id.in_(_mentioned_doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
                 )
             )).all()
-            for _doc_id, _doc_title, _doc_status, _doc_author_id in _docs:
+            for _doc_id, _doc_title, _doc_status, _doc_author_id, _doc_updated_at, _doc_superseded_by in _docs:
                 await maybe_nudge_draft_doc_shared_in_chat(
                     db, org_id=org_id, project_id=conv.project_id,
                     doc_id=_doc_id, doc_title=_doc_title, doc_status=_doc_status,
-                    doc_author_id=_doc_author_id, sender_id=sender.id,
+                    doc_author_id=_doc_author_id, doc_updated_at=_doc_updated_at,
+                    doc_superseded_by=_doc_superseded_by, sender_id=sender.id,
+                    trigger_message_content=msg.content,
                 )
         except Exception:  # noqa: BLE001 — 넛지 실패가 메시지 전송을 막지 않는다(best-effort).
             logger.warning("draft doc 넛지 배선 실패(비차단) message=%s", msg.id, exc_info=True)
