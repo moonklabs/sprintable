@@ -620,10 +620,11 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           comment_id 단위였던 옛 comment_reply 게이트 — 마이그레이션 0, 그대로
           둔다는 §5 판정)은 「쌍」이 안 서 대조 불가하다. 「덮였습니다」로 단정
           하지 않는다(못 대조하는 게이트 중엔 한 번 승인되고 끝난 정상 옛 행도
-          있다) — 아는 것만 말한다: 「확인할 수 없다」. isResolved(resolved_at
-          있음) 한정 — 아직 아무도 승인/반려한 적 없는 pending 옛 게이트는
-          "무엇을 승인했나" 물음 자체가 아직 안 선다(지어내지 않는다·held·
-          voided는 resolved_at이 없어 이 조건에서도 자동 제외). 이 자리
+          있다) — 아는 것만 말한다: 「확인할 수 없다」. isResolved = status가
+          approved|rejected|auto_passed 중 하나(명시 열거) 한정 — resolved_at은
+          판별 키가 아니다(void_gate도 resolved_at을 채운다, gate_service.py:1592
+          그라운딩 確認). held(판단 자체 없음)·voided(판단이 아니라 행정
+          무효화)는 이 열거에 없어 자동 제외. 이 자리
           (버전·해시 줄)를 대신할 뿐 줄을 새로 만들지 않는다. */}
       {facts.contentVersion === null && facts.contentBody && facts.isResolved ? (
         <p className="text-muted-foreground">{t('recipeApprovalSealedVersionMissing')}</p>
