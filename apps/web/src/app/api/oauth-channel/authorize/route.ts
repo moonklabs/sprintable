@@ -15,6 +15,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const orgId = searchParams.get('org');
   const channel = searchParams.get('channel');
+  // story #3650(PO Test Org 실측 2026-09-07) — 「다시 연결」 대상 행. 없으면(신규
+  // 연결) 기존 동작 그대로 — BE authorize가 body 없이도 받는다.
+  const connectionId = searchParams.get('connection_id');
   const origin = resolveAppUrl(null);
 
   if (!orgId || !channel) {
@@ -29,7 +32,11 @@ export async function GET(request: Request) {
 
   const res = await fetch(
     `${FASTAPI_BASE}/api/v2/organizations/${orgId}/channel-connections/${channel}/authorize`,
-    { method: 'POST', headers: { Authorization: `Bearer ${spAt}` } },
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${spAt}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_connection_id: connectionId ?? undefined }),
+    },
   ).catch(() => null);
 
   if (!res?.ok) {

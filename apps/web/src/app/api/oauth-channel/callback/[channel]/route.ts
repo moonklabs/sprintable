@@ -81,6 +81,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   // "미리보기 없음" 규율과 같은 이유로 원래도 가벼운 데이터).
   const successBody = await res.json().catch(() => null) as {
     kind?: string; pending_id?: string; candidates?: { page_id: string; name: string }[]; expires_at?: string;
+    id?: string; reconnect_mismatch_target_id?: string | null;
   } | null;
   if (successBody?.kind === 'pending_selection' && successBody.pending_id) {
     const params = new URLSearchParams({
@@ -89,6 +90,19 @@ export async function GET(request: Request, { params }: RouteParams) {
       candidates: JSON.stringify(successBody.candidates ?? []),
     });
     if (successBody.expires_at) params.set('expires_at', successBody.expires_at);
+    return NextResponse.redirect(`${origin}/organization/channels?${params.toString()}`);
+  }
+
+  // story #3650(PO Test Org 실측 2026-09-07) — 재연결 대상 행과 콜백이 실제로 갱신한
+  // 행이 다르면(다른 계정을 승인했다는 뜻) 갱신 사실은 그대로 두되 화면이 침묵하지
+  // 않게 두 id를 싣는다. `/organization/channels`가 이미 불러온 목록에서 라벨을
+  // 붙인다(여기서 미리 조립하지 않는다 — 이 라우트는 org_id 이후로는 opaque 릴레이).
+  if (successBody?.reconnect_mismatch_target_id && successBody.id) {
+    const params = new URLSearchParams({
+      connected: channel,
+      mismatch: successBody.reconnect_mismatch_target_id,
+      updated: successBody.id,
+    });
     return NextResponse.redirect(`${origin}/organization/channels?${params.toString()}`);
   }
 

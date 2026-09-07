@@ -534,3 +534,225 @@ async def test_owner_disconnect_revokes_and_wipes_tokens():
         await engine.dispose()
 
 
+# ─── story #3650 — 재연결 대상 행≠콜백 계정 mismatch 신호 ───────────────────
+
+@pytest.mark.anyio
+async def test_authorize_with_foreign_org_target_connection_id_rejected_404():
+    """IDOR 방지 — target_connection_id가 이 org 소유가 아니면 authorize 자체를 막는다
+    (콜백 mismatch 판정이 믿는 값이 여기서부터 정직해야 한다)."""
+    from app.main import app
+    from app.models.channel_connection import ChannelConnection
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_a_id, _ = await _seed_org(s, slug="org-a-3650")
+            org_b_id, _ = await _seed_org(s, slug="org-b-3650")
+            owner_a_id = await _seed_human(s, org_a_id, role="owner")
+            other_org_row = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_b_id, channel="threads", account_id="acc-b",
+                account_label="b", credential_kind="oauth", refresh_mode="reissue_from_access_token",
+                status="needs_reauth", connected_by=owner_a_id,
+            )
+            s.add(other_org_row)
+            await s.commit()
+            foreign_connection_id = other_org_row.id
+        _setup_org_scoped_app(app, Session, org_a_id, user_id=owner_a_id)
+
+        async with _client_for(app) as client:
+            r_auth = await client.post(
+                f"/api/v2/organizations/{org_a_id}/channel-connections/threads/authorize",
+                json={"target_connection_id": str(foreign_connection_id)},
+            )
+        assert r_auth.status_code == 404, r_auth.text
+        assert r_auth.json()["error"]["code"] == "CHANNEL_CONNECTION_NOT_FOUND"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reconnect_target_matches_callback_account_no_mismatch():
+    """재연결 대상 행과 콜백이 돌려준 계정이 같으면(정상 재인증) mismatch 신호가 없다."""
+    from app.main import app
+    from app.models.channel_connection import ChannelConnection
+    import app.services.threads_oauth as ccr
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+            row = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_id, channel="threads", account_id="ext-account-1",
+                account_label="page1", credential_kind="oauth", refresh_mode="reissue_from_access_token",
+                status="needs_reauth", connected_by=owner_id,
+            )
+            s.add(row)
+            await s.commit()
+            target_id = row.id
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        async with _client_for(app) as client:
+            r_auth = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/authorize",
+                json={"target_connection_id": str(target_id)},
+            )
+        assert r_auth.status_code == 200, r_auth.text
+        state = r_auth.json()["state"]
+
+        with patch.object(
+            ccr, "exchange_code_for_short_lived_token", AsyncMock(return_value=("sl", "ext-account-1")),
+        ), patch.object(
+            ccr, "exchange_for_long_lived_token", AsyncMock(return_value=("ll", 5184000)),
+        ), patch.object(
+            ccr, "test_connection", AsyncMock(return_value={"id": "ext-account-1", "username": "page1"}),
+        ):
+            async with _client_for(app) as client:
+                r_cb = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-connections/threads/callback",
+                    json={"code": "c", "state": state},
+                )
+        assert r_cb.status_code == 200, r_cb.text
+        payload = r_cb.json()
+        assert payload["id"] == str(target_id)
+        assert payload["reconnect_mismatch_target_id"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reconnect_target_differs_from_callback_account_mismatch_signaled():
+    """dev 실측 재현(threads 축) — Page 2 행에서 「다시 연결」을 눌렀는데 콜백이 다른
+    계정(Page 1에 해당하는 ext-account-1)을 돌려주면, 그 계정이 실제로 매핑되는 행이
+    갱신되고(사실 유지) 응답에 mismatch_target_id=Page 2 행 id가 실린다. 뮤테이션
+    대상 — mismatch 판정 줄을 지우면 이 단언이 RED."""
+    from app.main import app
+    from app.models.channel_connection import ChannelConnection
+    import app.services.threads_oauth as ccr
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+            page1_row = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_id, channel="threads", account_id="ext-account-1",
+                account_label="page1", credential_kind="oauth", refresh_mode="reissue_from_access_token",
+                status="active", connected_by=owner_id,
+            )
+            page2_row = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_id, channel="threads", account_id="ext-account-2",
+                account_label="page2", credential_kind="oauth", refresh_mode="reissue_from_access_token",
+                status="needs_reauth", connected_by=owner_id,
+            )
+            s.add_all([page1_row, page2_row])
+            await s.commit()
+            page1_id, page2_id = page1_row.id, page2_row.id
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        # Page 2 행에서 "다시 연결"을 누른다(target=page2) — 그런데 브라우저가 돌아온
+        # 계정은 ext-account-1(Page 1)이다(dev 실측: 사용자가 Meta 다이얼로그에서
+        # 다른 계정을 골랐거나, sandbox처럼 고정 계정인 경우).
+        async with _client_for(app) as client:
+            r_auth = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/threads/authorize",
+                json={"target_connection_id": str(page2_id)},
+            )
+        state = r_auth.json()["state"]
+
+        with patch.object(
+            ccr, "exchange_code_for_short_lived_token", AsyncMock(return_value=("sl", "ext-account-1")),
+        ), patch.object(
+            ccr, "exchange_for_long_lived_token", AsyncMock(return_value=("ll", 5184000)),
+        ), patch.object(
+            ccr, "test_connection", AsyncMock(return_value={"id": "ext-account-1", "username": "page1"}),
+        ):
+            async with _client_for(app) as client:
+                r_cb = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-connections/threads/callback",
+                    json={"code": "c", "state": state},
+                )
+        assert r_cb.status_code == 200, r_cb.text
+        payload = r_cb.json()
+        # 갱신 사실은 그대로 — ext-account-1에 매핑되는 page1_row가 갱신됐다(정직).
+        assert payload["id"] == str(page1_id)
+        assert payload["status"] == "active"
+        # 화면이 침묵하지 않게 하는 신호 — 의도한 대상(page2)을 알린다.
+        assert payload["reconnect_mismatch_target_id"] == str(page2_id)
+
+        async with Session() as s:
+            from sqlalchemy import select
+            fresh_page2 = (await s.execute(select(ChannelConnection).where(ChannelConnection.id == page2_id))).scalar_one()
+        assert fresh_page2.status == "needs_reauth", "의도한 행(page2)은 갱신되지 않고 그대로 남아야 한다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_facebook_sandbox_single_page_reconnect_mismatch_signaled():
+    """dev 실측 그대로(facebook_sandbox 축) — sandbox는 고정 계정 1개라 어느 행에서
+    「다시 연결」을 눌러도 그 고정 계정으로 upsert된다. Page 2 행 target으로 authorize
+    했는데 sandbox 모듈이 항상 Page 1 계정을 돌려주면 mismatch가 실린다."""
+    from app.main import app
+    from app.models.channel_connection import ChannelConnection
+    import app.services.facebook_sandbox_oauth as fbs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+            # facebook_sandbox는 platform_settings 공용 앱 fallback 컬럼이 없다
+            # (_PLATFORM_SETTINGS_COLUMNS 미등재) — org 자체 등록이 유일한 경로.
+            from app.services.channel_app_credentials import upsert_channel_app_credentials
+            await upsert_channel_app_credentials(
+                s, org_id=org_id, channel="facebook_sandbox", app_id="org-fb-app-id",
+                app_secret="org-fb-app-secret", updated_by=owner_id,
+            )
+            page1_row = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_id, channel="facebook_sandbox", account_id="fb-page-1",
+                account_label="Page 1", credential_kind="oauth", refresh_mode="reissue_from_access_token",
+                status="active", connected_by=owner_id,
+            )
+            page2_row = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_id, channel="facebook_sandbox", account_id="fb-page-2",
+                account_label="Page 2", credential_kind="oauth", refresh_mode="reissue_from_access_token",
+                status="needs_reauth", connected_by=owner_id,
+            )
+            s.add_all([page1_row, page2_row])
+            await s.commit()
+            page1_id, page2_id = page1_row.id, page2_row.id
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        async with _client_for(app) as client:
+            r_auth = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/facebook_sandbox/authorize",
+                json={"target_connection_id": str(page2_id)},
+            )
+        assert r_auth.status_code == 200, r_auth.text
+        state = r_auth.json()["state"]
+
+        with patch.object(
+            fbs, "exchange_code_for_short_lived_token", AsyncMock(return_value=("sl", None)),
+        ), patch.object(
+            fbs, "exchange_for_long_lived_token", AsyncMock(return_value=("ll", 5184000)),
+        ), patch.object(
+            fbs, "list_pages", AsyncMock(return_value=[{"page_id": "fb-page-1", "name": "Page 1", "access_token": "pt"}]),
+        ):
+            async with _client_for(app) as client:
+                r_cb = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-connections/facebook_sandbox/callback",
+                    json={"code": "c", "state": state},
+                )
+        assert r_cb.status_code == 200, r_cb.text
+        payload = r_cb.json()
+        assert payload["id"] == str(page1_id)
+        assert payload["reconnect_mismatch_target_id"] == str(page2_id)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+

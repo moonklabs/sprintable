@@ -2168,6 +2168,8 @@
     "channelSandboxConnectionBadge": "테스트용 연결",
     "channelDisconnectAction": "해제",
     "channelReauthAction": "다시 연결",
+    "channelReauthMismatchNote": "승인한 계정이 달라 {updated} 연결이 갱신됐습니다 — {intended} 연결은 그대로입니다.",
+    "channelSandboxReauthUnavailableNote": "테스트용 연결은 다시 연결할 수 없습니다 — 「{channel} 연결 만들기」로 새로 만들어 주세요.",
     "channelTestAction": "연결 시험",
     "channelRowActionAriaLabel": "{n}번째 연결 {label}",
     "channelTestOk": "정상 · {account}",

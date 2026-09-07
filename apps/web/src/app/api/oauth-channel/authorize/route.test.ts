@@ -58,10 +58,31 @@ describe('GET /api/oauth-channel/authorize (story #3376)', () => {
     const res = await GET(makeRequest({ org: 'org-1', channel: 'threads' }));
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/organizations/org-1/channel-connections/threads/authorize'),
-      expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer sp-at-token' } }),
+      expect.objectContaining({
+        method: 'POST',
+        headers: { Authorization: 'Bearer sp-at-token', 'Content-Type': 'application/json' },
+      }),
     );
     expect(h.cookiesSetMock).toHaveBeenCalledWith('oauth_channel_org_threads', 'org-1', expect.any(Object));
     expect(res.headers.get('location')).toBe('https://threads.net/oauth/authorize?x=1');
+  });
+
+  // story #3650(PO Test Org 실측 2026-09-07) — 「다시 연결」 대상 행. BE authorize가
+  // state에 실어 콜백까지 왕복시키는 값 — 이 라우트는 쿼리에서 받아 body로 릴레이만.
+  it('connection_id 쿼리가 있으면 BE 요청 body에 target_connection_id로 실려 간다', async () => {
+    h.cookiesGetMock.mockReturnValue({ value: 'sp-at-token' });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ url: 'https://threads.net/oauth/authorize?x=1', state: 's' }) });
+    await GET(makeRequest({ org: 'org-1', channel: 'threads', connection_id: 'conn-42' }));
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ target_connection_id: 'conn-42' });
+  });
+
+  it('connection_id 쿼리가 없으면(신규 연결) target_connection_id가 undefined로 실린다', async () => {
+    h.cookiesGetMock.mockReturnValue({ value: 'sp-at-token' });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ url: 'https://threads.net/oauth/authorize?x=1', state: 's' }) });
+    await GET(makeRequest({ org: 'org-1', channel: 'threads' }));
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({});
   });
 
   // story #3613 — instagram/facebook/facebook_sandbox도 같은 라우트를 공유한다(채널명만
