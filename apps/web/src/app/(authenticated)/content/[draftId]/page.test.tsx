@@ -131,6 +131,10 @@ function stubFetchWithVersions(
     // "응답이 안 옴"(연결 끊김·abort, fetchWithAuth 자체가 던짐)은 다른 갈래다. 이
     // 옵션은 후자 — fetch 자체가 reject한다(HTTP 응답 객체 자체가 없다).
     draftReject?: boolean;
+    // story #3662 — 주 데이터(/versions)의 실패를 재현(기본 200). draftStatus/draftReject
+    // (부수 데이터)와 대칭 옵션 — 이 파일의 loadError/notFound/forbidden 판정 대상.
+    versionsStatus?: number;
+    versionsReject?: boolean;
   },
 ) {
   vi.stubGlobal(
@@ -150,6 +154,12 @@ function stubFetchWithVersions(
         return { ok: true, status: 200, json: async () => ({ data: { draft_id: DRAFT_ID, violations: opts?.draftViolations ?? [] }, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/versions`) {
+        if (opts?.versionsReject) {
+          throw new Error('network error');
+        }
+        if (opts?.versionsStatus && opts.versionsStatus >= 400) {
+          return { ok: false, status: opts.versionsStatus, json: async () => ({ detail: 'boom' }) };
+        }
         return { ok: true, status: 200, json: async () => ({ data: versions, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/generation-budget`) {
@@ -736,6 +746,54 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
     expect(container.textContent).toContain(koMessages.content.contentStatusDraft);
     const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
     expect(publishButton?.hasAttribute('disabled')).toBe(true);
+  });
+});
+
+// story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — 주 데이터(/versions)
+// 실패를 404/403/그 외/네트워크 예외 4갈래로 문장을 가른다(추정 0, 서버 status 그대로).
+describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', () => {
+  it('로드 실패(500) — 기존 editLoadFailed를 보인다', async () => {
+    stubFetchWithVersions([], undefined, undefined, { versionsStatus: 500 });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+  });
+
+  it('로드 실패(404) — 「찾을 수 없습니다」를 보인다', async () => {
+    stubFetchWithVersions([], undefined, undefined, { versionsStatus: 404 });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+  });
+
+  it('로드 실패(403) — 「볼 권한이 없습니다」를 보인다', async () => {
+    stubFetchWithVersions([], undefined, undefined, { versionsStatus: 403 });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editForbidden);
+    expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+  });
+
+  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다', async () => {
+    stubFetchWithVersions([], undefined, undefined, { versionsReject: true });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editForbidden);
   });
 });
 

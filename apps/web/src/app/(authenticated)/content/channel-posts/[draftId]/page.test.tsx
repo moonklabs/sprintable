@@ -1916,7 +1916,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
   });
 
-  it('로드 실패 — 오류 알림을 보인다', async () => {
+  it('로드 실패(500) — 오류 알림을 보인다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
@@ -1925,6 +1925,43 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
   });
+
+  // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — 404/403/네트워크
+  // 예외까지 4표본으로 문장이 갈리는지 고정(500은 위 표본이 이미 editLoadFailed로 커버).
+  it('로드 실패(404) — 「찾을 수 없습니다」를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+  });
+
+  it('로드 실패(403) — 「볼 권한이 없습니다」를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) })));
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editForbidden);
+    expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+  });
+
+  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+  });
+
 
   // story f30da19a AC5 — T3(상세 머리).
   it('⭐AC5 — channel=sandbox면 상세 머리에 「테스트」 배지가 뜬다', async () => {
