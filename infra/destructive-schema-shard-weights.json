@@ -1507,6 +1507,11 @@
       "file": "tests/test_3629_member_ssot_notification_command_center_realdb.py",
       "sec": 20.0,
       "source": "story-3629-member-ssot-notification-command-center(PR 개설 前 선제 등재, 페드루 PO CHANGES — app.main 전역 엔진+실 HTTP 클라이언트 경유라 destructive_schema 짝 요구. 로컬 raw pytest 3건 3.02s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3645_evidence_asset_hook_keys.py",
+      "sec": 41.0,
+      "source": "story-3645-evidence-asset-hook-keys(PR #4002 CI 가드 발견 — 로컬 raw pytest 11건 6.81s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 41s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
