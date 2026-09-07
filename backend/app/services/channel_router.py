@@ -18,6 +18,7 @@ from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
 from app.models.user_block import UserBlock
 from app.services.chain_depth import compute_agent_chain_depth
+from app.services.member_resolver import is_human_member_condition
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +32,17 @@ async def _conversation_has_human(db: AsyncSession, conversation_id: uuid.UUID) 
     """story #2617: 대화 참가자 중 human이 1명이라도 있는가 — 실물 참가자 조회(캐시/파생
     금지, PO 지시 2026-08-13). chain-expired 게이트가 사람-부재 대화를 무기한 침묵시키는지
     판정하는 유일한 근거라 정확성이 중요하다 — recipient_type_map처럼 필터된 부분집합에서
-    유도하지 않고, 이 conversation_id의 ConversationParticipant 전체를 매번 새로 스캔한다."""
+    유도하지 않고, 이 conversation_id의 ConversationParticipant 전체를 매번 새로 스캔한다.
+
+    story #3629(3627 클래스, 페드루 PO 確定 2026-09-07) — TeamMember INNER JOIN 단독으론
+    org_member-only 휴먼(SSOT 전환 이후 org 다수)이 참가자여도 조용히 "사람 없음"으로
+    잘못 판정됐다 — chain-expired 게이트가 그 대화를 사람 부재로 오판해 무기한 침묵시킬
+    위험. is_human_member_condition(member_resolver.py, #3627과 같은 판정자)으로 통일."""
     row = (await db.execute(
         select(ConversationParticipant.member_id)
-        .join(TeamMember, TeamMember.id == ConversationParticipant.member_id)
         .where(
             ConversationParticipant.conversation_id == conversation_id,
-            TeamMember.type == "human",
+            is_human_member_condition(ConversationParticipant.member_id),
         )
         .limit(1)
     )).scalar_one_or_none()

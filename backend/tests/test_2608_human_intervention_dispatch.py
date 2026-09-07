@@ -25,6 +25,15 @@ def _result_all(rows: list):
     return r
 
 
+def _result_scalars(ids: list):
+    """story #3629 — human_targets 조회가 (member_id, type) 튜플 join 대신 이미 휴먼으로
+    필터된 member_id 스칼라 목록을 `.scalars().all()`로 받는 형으로 바뀌었다(is_human_
+    member_condition WHERE절이 SQL에서 이미 걸러낸다 — agent는 애초에 이 목록에 없다)."""
+    r = SimpleNamespace()
+    r.scalars = lambda: SimpleNamespace(all=lambda: list(ids))
+    return r
+
+
 def _msg(mentioned=None):
     return SimpleNamespace(
         id=uuid.uuid4(),
@@ -70,7 +79,7 @@ async def test_only_human_participants_receive_intervention_event():
     blocked = {uuid.uuid4()}  # 상대 agent(연쇄 게이트에 막힌 agent recipient)
 
     db = _DB([
-        _result_all([(human1, "human"), (human2, "human"), (agent_other, "agent")]),
+        _result_scalars([human1, human2]),  # agent_other는 SQL WHERE절이 이미 제외.
     ])
 
     import contextlib
@@ -99,9 +108,9 @@ async def test_no_human_participants_no_event_and_no_db_roundtrip():
     conversation = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
     msg = _msg()
     sender = _sender()
-    agent_only = uuid.uuid4()
+    agent_only = uuid.uuid4()  # SQL WHERE절이 애초에 걸러내 mock 목록에도 안 실린다.
 
-    db = _DB([_result_all([(agent_only, "agent")])])
+    db = _DB([_result_scalars([])])
 
     result = await conv._dispatch_human_intervention_event(
         db, conversation, msg, uuid.uuid4(), sender, {uuid.uuid4()}, chain_depth_cap=4,
