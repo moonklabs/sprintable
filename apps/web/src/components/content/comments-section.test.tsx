@@ -39,7 +39,6 @@ function baseComment(overrides: Partial<CommentItem>): CommentItem {
     repliesCount: 0,
     openReplyDraft: null,
     sentRepliesCount: 0,
-    latestSentReplyStatus: null,
     ...overrides,
   };
 }
@@ -341,25 +340,45 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     expect(buttons[2]?.textContent).toBe('이어서 답변');
   });
 
-  // story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 「답변 N ·
-  // 최신 {상태}」(N>=2)의 상태 주어가 최신(초안 포함)이 아니라 «보낸 답변»
-  // 것이어야 한다. 보낸 2+초안 1이면 replyStatus 자체는(최신이 초안이라)
-  // 'draft'일 수 있지만, latestSentReplyStatus가 'published'면 배지는 그
-  // 값을 말해야 한다("초안" 0). 뮤테이션 대상(latestSentStatus를 안 넘기면
-  // 배지가 "초안"으로 돌아가 RED).
-  it('sentRepliesCount>=2·latestSentReplyStatus 있으면 배지 상태 주어가 그 값(초안 아님)', async () => {
+  // story #3592(유나 §22-16 ② 「제3의 답」, 페드루 PO 決 채택 2026-09-07 01:24Z) —
+  // 「보낸 답변 {count} · 최신 {status}」의 status 주어는 count 임계와 무관하게
+  // «항상» comment.replyStatus(현재 최신 답변의 상태, 초안·실패 포함) 하나다.
+  // 한때(#3596 Design CHANGES①) 있던 "N>=2면 latestSentReplyStatus(보낸 답변만의
+  // 최신)로 갈아친다"는 그 뒤 決으로 폐기됐다 — 보낸 2건+최신이 안 보낸 초안이면
+  // 배지는 "최신 초안"을 그대로 말해야 한다(톤도 muted로, 보낸 것 중 최신인
+  // 'published' 따위로 덮지 않는다). 뮤테이션 대상(status 주어를 latestSent류로
+  // 되돌리면 이 assert가 깨져야 한다).
+  it('보낸 2+최신 초안 — 배지 「보낸 답변 2 · 최신 초안」·muted 톤·버튼 「이어서 답변」', async () => {
     const face = loadedFace([
       baseComment({
         id: 'c1', replyStatus: 'draft', sentRepliesCount: 2,
         openReplyDraft: { id: 'r-open', status: 'draft', text: '작성 중' },
-        latestSentReplyStatus: 'published',
       }),
     ]);
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     const chip = container.querySelector('[data-comment-reply-status-chip]');
-    expect(chip?.textContent).toBe('보낸 답변 2 · 최신 발행됨');
-    expect(chip?.textContent).not.toContain('초안');
+    expect(chip?.textContent).toBe('보낸 답변 2 · 최신 초안');
+    expect(chip?.className).toContain('bg-muted');
+    expect(chip?.className).not.toContain('bg-destructive-tint');
+    const replyBtn = container.querySelector('[data-testid="comments-item-reply"]');
+    expect(replyBtn?.textContent).toBe('이어서 답변');
+  });
+
+  it('보낸 2+최신 실패 — 배지 「보낸 답변 2 · 최신 실패」·빨강 톤·실패 줄 렌더', async () => {
+    const face = loadedFace([
+      baseComment({
+        id: 'c1', replyStatus: 'failed', sentRepliesCount: 2,
+        replyFailureAction: { kind: 'dead_letter' },
+        replyCommandId: 'cmd-1',
+      }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const chip = container.querySelector('[data-comment-reply-status-chip]');
+    expect(chip?.textContent).toBe('보낸 답변 2 · 최신 실패');
+    expect(chip?.className).toContain('bg-destructive-tint');
+    expect(container.querySelector('[data-testid="comments-item-reply-failure-note"]')).not.toBeNull();
   });
 
   // story #3593 AC4·AC5 — 답변 2건 이상이면 배지가 「답변 N · 최신 {상태}」로
@@ -417,7 +436,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
         externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
         replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
-        openReplyDraft: null, sentRepliesCount: 0, latestSentReplyStatus: null,
+        openReplyDraft: null, sentRepliesCount: 0,
       }],
     });
   });
@@ -522,7 +541,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
         id: 'c1', authorDisplayName: null, bodyText: 'x',
         externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
         replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
-        openReplyDraft: null, sentRepliesCount: 0, latestSentReplyStatus: null,
+        openReplyDraft: null, sentRepliesCount: 0,
       }],
     });
   });

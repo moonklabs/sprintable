@@ -14,21 +14,22 @@ import {
  * optional. 2건 이상(재상신 이력)이면 배지 낱말이 "답변 N · 최신 {status}"로
  * 바뀐다(1건이면 기존 그대로) — {status} 자리는 여전히 commentReplyStatusLabelKey
  * 그대로 넣어(유나 확定: 「발행됨」 등 상태 낱말 자체는 불변, 조합 문구만 새로).
- * story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — `latestSentStatus`
- * additive optional. repliesCount(=sentRepliesCount)>=2 조합 문구의 status
- * 자리는 이 값이 있으면 그것을(보낸 답변 중 최신), 없으면(사실상 안 쓰이는
- * 자리) 기존 `status`로 폴백한다 — 임계 아래(단일 낱말) 칩은 여전히 `status`
- * 그대로(이 값 미사용, PO 스코프 정정).
+ * story #3592(유나 §22-16 ② 「제3의 답」, 페드루 PO 決 채택 2026-09-07 01:24Z) —
+ * status 주어는 «항상» 이 컴포넌트의 `status` prop(=comment.replyStatus, 초안·
+ * 실패 포함 현재 최신) 하나다 — 톤(칩 색)·낱말·아래 실패 줄이 이 한 주어로
+ * 통일된다. 한때 있던 `latestSentStatus`(보낸 답변만의 최신 상태로 조합 문구의
+ * status만 따로 갈아치우던 additive prop, story #3596 Design CHANGES①)는 이
+ * 決으로 폐기됐다 — BE 필드(`latest_sent_reply_status`)는 남아 있어도 FE
+ * 소비는 여기서 완전히 걷는다.
  */
 export function CommentReplyStatusChip({
-  status, repliesCount, latestSentStatus,
-}: { status: CommentReplyStatus; repliesCount?: number; latestSentStatus?: CommentReplyStatus | null }) {
+  status, repliesCount,
+}: { status: CommentReplyStatus; repliesCount?: number }) {
   const t = useTranslations('content');
   const tone = COMMENT_REPLY_STATUS_TONE[status];
   const statusLabel = t(commentReplyStatusLabelKey(status));
-  const countStatusLabel = t(commentReplyStatusLabelKey(latestSentStatus ?? status));
   const label = repliesCount != null && repliesCount >= 2
-    ? t('commentsReplyCountStatusLabel', { count: repliesCount, status: countStatusLabel })
+    ? t('commentsReplyCountStatusLabel', { count: repliesCount, status: statusLabel })
     : statusLabel;
   return (
     <span
