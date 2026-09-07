@@ -39,6 +39,7 @@ function baseComment(overrides: Partial<CommentItem>): CommentItem {
     repliesCount: 0,
     openReplyDraft: null,
     sentRepliesCount: 0,
+    latestSentReplyStatus: null,
     ...overrides,
   };
 }
@@ -340,6 +341,27 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     expect(buttons[2]?.textContent).toBe('이어서 답변');
   });
 
+  // story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 「답변 N ·
+  // 최신 {상태}」(N>=2)의 상태 주어가 최신(초안 포함)이 아니라 «보낸 답변»
+  // 것이어야 한다. 보낸 2+초안 1이면 replyStatus 자체는(최신이 초안이라)
+  // 'draft'일 수 있지만, latestSentReplyStatus가 'published'면 배지는 그
+  // 값을 말해야 한다("초안" 0). 뮤테이션 대상(latestSentStatus를 안 넘기면
+  // 배지가 "초안"으로 돌아가 RED).
+  it('sentRepliesCount>=2·latestSentReplyStatus 있으면 배지 상태 주어가 그 값(초안 아님)', async () => {
+    const face = loadedFace([
+      baseComment({
+        id: 'c1', replyStatus: 'draft', sentRepliesCount: 2,
+        openReplyDraft: { id: 'r-open', status: 'draft', text: '작성 중' },
+        latestSentReplyStatus: 'published',
+      }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const chip = container.querySelector('[data-comment-reply-status-chip]');
+    expect(chip?.textContent).toBe('답변 2 · 최신 발행됨');
+    expect(chip?.textContent).not.toContain('초안');
+  });
+
   // story #3593 AC4·AC5 — 답변 2건 이상이면 배지가 「답변 N · 최신 {상태}」로
   // 바뀌고, 1건이면 기존 배지("발행됨" 낱말 그대로) 그대로다.
   // story #3596 AC8 — 배지 개수·임계(>=2)의 주어가 sentRepliesCount로 바뀐다
@@ -395,7 +417,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
         externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
         replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
-        openReplyDraft: null, sentRepliesCount: 0,
+        openReplyDraft: null, sentRepliesCount: 0, latestSentReplyStatus: null,
       }],
     });
   });
@@ -500,7 +522,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
         id: 'c1', authorDisplayName: null, bodyText: 'x',
         externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
         replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
-        openReplyDraft: null, sentRepliesCount: 0,
+        openReplyDraft: null, sentRepliesCount: 0, latestSentReplyStatus: null,
       }],
     });
   });

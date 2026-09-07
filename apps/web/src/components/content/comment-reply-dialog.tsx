@@ -151,6 +151,15 @@ export function CommentReplyDialog({
         <div className="shrink-0 space-y-1 rounded-md border border-border p-2">
           <p className="text-xs font-medium text-muted-foreground">{t('commentsConvertDialogSourceLabel')}</p>
           <CommentBodyText text={comment.bodyText} moreLabel={t('commentsMoreLabel')} />
+          {/* story #3596(유나 §22-16 ⑦, 페드루 PO 追加 2026-09-07, AC8 마지막
+              조각) — sentRepliesCount는 목록이 이미 실어 준 값(추가 왕복 0).
+              0이면 안 그린다(순번·본문 없이 수만 — 결재함 카드의 같은 줄은
+              #3599 ⑥-1, 이 둘은 짝으로 같이 고친다). */}
+          {comment.sentRepliesCount > 0 ? (
+            <p className="text-xs text-muted-foreground" data-testid="comments-reply-already-sent-count">
+              {t('commentsReplyAlreadySentCount', { count: comment.sentRepliesCount })}
+            </p>
+          ) : null}
         </div>
 
         {submitted ? (
@@ -182,11 +191,18 @@ export function CommentReplyDialog({
             <div className="shrink-0 space-y-1">
               <p className="text-xs font-medium text-muted-foreground">{t('commentsReplyDraftLabel')}</p>
               {showDraftPrefillFailed ? (
+                // story #3596(유나 Design CHANGES② 2026-09-07) — 이 화면은 읽기
+                // 전용이라 "직접 적어 주세요"를 할 자리가 없고, text=''인 빈
+                // 상자는 「모른다」가 아니라 「초안이 비었다」로 읽힌다(서버엔
+                // 본문이 있는데 화면이 틀리게 말하는 자리) — 문구만 서고 상자
+                // 자체를 안 그린다. 「상신」은 그대로 연다(서버가 이미 갖고
+                // 있는 초안을 상신할 뿐이라 로컬 표시 실패가 그 능력을 안 막는다).
                 <p className="text-xs text-muted-foreground" data-testid="comments-reply-draft-prefill-fetch-failed">
                   {t('commentsReplyDraftPrefillFetchFailed')}
                 </p>
-              ) : null}
-              <p className="whitespace-pre-wrap rounded-md border border-border p-2 text-sm text-foreground">{draft.text}</p>
+              ) : (
+                <p className="whitespace-pre-wrap rounded-md border border-border p-2 text-sm text-foreground" data-testid="comments-reply-draft-text-box">{draft.text}</p>
+              )}
             </div>
             {errorMessage ? (
               <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">

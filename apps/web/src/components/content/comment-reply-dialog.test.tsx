@@ -36,7 +36,7 @@ const COMMENT: CommentItem = {
   externalCreatedAt: '2026-09-05T10:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null, replyStatus: 'none',
   replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null,
   latestReplyText: null, repliesCount: 0,
-  openReplyDraft: null, sentRepliesCount: 0,
+  openReplyDraft: null, sentRepliesCount: 0, latestSentReplyStatus: null,
 };
 
 const DRAFT_REPLY: ReplyView = {
@@ -56,6 +56,23 @@ describe('CommentReplyDialog', () => {
       root.render(wrap(<CommentReplyDialog comment={COMMENT} onClose={vi.fn()} onCreateDraft={vi.fn()} onSubmit={vi.fn()} />));
     });
     expect(document.body.textContent).toContain('언제 재입고되나요?');
+  });
+
+  // story #3596(유나 §22-16 ⑦, 페드루 PO 追加 2026-09-07, AC8 마지막 조각) —
+  // 「대상 댓글」 블록에 이미 보낸 답변 수(sentRepliesCount, 목록이 이미 실어
+  // 준 값)를 한 줄로. 0이면 안 그린다. 뮤테이션 대상(이 줄 자체를 지우면 RED).
+  it('sentRepliesCount>0이면 「이미 보낸 답변 N건」 한 줄, 0이면 그 줄이 없다', async () => {
+    await act(async () => {
+      root.render(wrap(<CommentReplyDialog comment={{ ...COMMENT, sentRepliesCount: 1 }} onClose={vi.fn()} onCreateDraft={vi.fn()} onSubmit={vi.fn()} />));
+    });
+    expect(document.querySelector('[data-testid="comments-reply-already-sent-count"]')?.textContent).toBe('이 댓글에 이미 보낸 답변 1건');
+  });
+
+  it('sentRepliesCount===0이면 「이미 보낸 답변」 줄이 없다', async () => {
+    await act(async () => {
+      root.render(wrap(<CommentReplyDialog comment={COMMENT} onClose={vi.fn()} onCreateDraft={vi.fn()} onSubmit={vi.fn()} />));
+    });
+    expect(document.querySelector('[data-testid="comments-reply-already-sent-count"]')).toBeNull();
   });
 
   it('초안 저장 — onCreateDraft에 입력한 텍스트가 전달되고, 성공하면 초안 화면으로 전환된다', async () => {
@@ -211,7 +228,10 @@ describe('CommentReplyDialog', () => {
     });
     await act(async () => { setValue(document.querySelector('#comments-reply-text') as HTMLTextAreaElement, '내가 막 쓰던 것'); });
     await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
-    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')?.textContent).toBe('작성한 답변을 불러오지 못했습니다 — 직접 적어 주세요.');
+    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')?.textContent).toBe('작성한 답변을 불러오지 못했습니다 — 저장된 내용 그대로 상신됩니다.');
+    // story #3596(유나 Design CHANGES② 2026-09-07) — 읽기 전용 자리라 빈 상자를
+    // 그리면 「초안이 비었다」로 읽힌다 — 실패 시 상자 자체를 안 그린다.
+    expect(document.querySelector('[data-testid="comments-reply-draft-text-box"]')).toBeNull();
     expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
   });
 });

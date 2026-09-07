@@ -134,6 +134,13 @@ class CommentItem(BaseModel):
     # null이면 안 보낸 초안 0건(replies_count>=sent_replies_count 항상 성립).
     open_reply_draft: CommentOpenReplyDraft | None = None
     sent_replies_count: int = 0
+    # story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 배지
+    # 「답변 {count} · 최신 {status}」(count>=2)의 status 주어. `reply.status`
+    # (draft/pending 포함 최신)와 별도 축 — sent_replies_count>=1이어도 최신이
+    # 안 보낸 초안이면 `reply.status`는 "draft"라 배지가 거꾸로 말했다(수는
+    # 보낸 답변인데 상태는 초안). null=보낸 답변 0건(이 값은 그 경우 안 쓴다,
+    # count<2 칩은 여전히 reply.status).
+    latest_sent_reply_status: str | None = None
 
 
 class CommentListResponse(BaseModel):
@@ -187,6 +194,7 @@ async def list_publication_comments_endpoint(
     reply_counts_by_comment_id = result["reply_counts_by_comment_id"]
     open_reply_draft_by_comment_id = result["open_reply_draft_by_comment_id"]
     sent_reply_counts_by_comment_id = result["sent_reply_counts_by_comment_id"]
+    latest_sent_reply_status_by_comment_id = result["latest_sent_reply_status_by_comment_id"]
     return CommentListResponse(
         last_collected_at=result["last_collected_at"].isoformat() if result["last_collected_at"] else None,
         comments=[
@@ -208,6 +216,7 @@ async def list_publication_comments_endpoint(
                     if c.id in open_reply_draft_by_comment_id else None
                 ),
                 sent_replies_count=sent_reply_counts_by_comment_id.get(c.id, 0),
+                latest_sent_reply_status=latest_sent_reply_status_by_comment_id.get(c.id),
             )
             for c in result["comments"]
         ],

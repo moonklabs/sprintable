@@ -60,6 +60,12 @@ export interface CommentItem {
   openReplyDraft: { id: string; status: string; text: string } | null;
   /** story #3596 — status=sent만 카운트(배지 N의 새 주어). */
   sentRepliesCount: number;
+  /** story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 「답변 N ·
+   * 최신 {상태}」(N>=2)의 status 주어. replyStatus(draft/pending 포함 최신)와
+   * 별도 축 — 최신이 안 보낸 초안이어도 배지는 "보낸 답변"의 상태를 말해야
+   * 한다. null=보낸 답변 0건(그 경우 이 필드를 안 쓴다, N<2 칩은 여전히
+   * replyStatus). */
+  latestSentReplyStatus: CommentReplyStatus | null;
 }
 
 // story #3517(유나 §22-②) — 세 얼굴. "미수집"(null)·"댓글 없음"([])·"불러오지 못함"(fetch
@@ -109,6 +115,7 @@ export interface RawCommentsResponse {
     replies_count?: number;
     open_reply_draft?: { id: string; status: string; text: string } | null;
     sent_replies_count?: number;
+    latest_sent_reply_status?: string | null;
   }[];
   active_count: number;
   deleted_count: number;
@@ -174,6 +181,9 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
     repliesCount: c.replies_count ?? 0,
     openReplyDraft: c.open_reply_draft ?? null,
     sentRepliesCount: c.sent_replies_count ?? 0,
+    latestSentReplyStatus: c.latest_sent_reply_status != null
+      ? replyStatusFrom({ status: c.latest_sent_reply_status, command_id: null })
+      : null,
   }));
   // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
   // 하나만 본다(comments.length 아님 — 페이지 잘림·지워진 행이 섞이면 틀린다).
@@ -306,8 +316,17 @@ function CommentsList({
               {/* story #3596 AC8 — 배지 개수의 주어는 «보낸 답변»만(sentRepliesCount).
                   안 보낸 초안은 배지가 아니라 위 버튼 낱말(「이어서 답변」)로만
                   드러난다 — repliesCount(초안 포함 전체)를 쓰면 초안 하나뿐인
-                  댓글도 "답변 N"으로 잘못 셌다(§3596 출처 그 결함). */}
-              <CommentReplyStatusChip status={comment.replyStatus} repliesCount={comment.sentRepliesCount} />
+                  댓글도 "답변 N"으로 잘못 셌다(§3596 출처 그 결함).
+                  latestSentStatus(유나 Design CHANGES①, 페드루 PO 정정
+                  2026-09-07) — 「답변 N · 최신 {상태}」(N>=2)의 상태 주어도
+                  보낸 답변 것으로(최신이 안 보낸 초안이면 status 자체는
+                  여전히 draft 등일 수 있어 그 경우 배지가 초안을 말하던
+                  자리를 닫는다). N<2 칩은 그대로 status(=replyStatus). */}
+              <CommentReplyStatusChip
+                status={comment.replyStatus}
+                repliesCount={comment.sentRepliesCount}
+                latestSentStatus={comment.latestSentReplyStatus}
+              />
               {comment.replyStatus === 'published' && comment.replyExternalUrl ? (
                 <a
                   href={comment.replyExternalUrl}

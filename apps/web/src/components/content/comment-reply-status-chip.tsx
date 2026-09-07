@@ -14,15 +14,21 @@ import {
  * optional. 2건 이상(재상신 이력)이면 배지 낱말이 "답변 N · 최신 {status}"로
  * 바뀐다(1건이면 기존 그대로) — {status} 자리는 여전히 commentReplyStatusLabelKey
  * 그대로 넣어(유나 확定: 「발행됨」 등 상태 낱말 자체는 불변, 조합 문구만 새로).
+ * story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — `latestSentStatus`
+ * additive optional. repliesCount(=sentRepliesCount)>=2 조합 문구의 status
+ * 자리는 이 값이 있으면 그것을(보낸 답변 중 최신), 없으면(사실상 안 쓰이는
+ * 자리) 기존 `status`로 폴백한다 — 임계 아래(단일 낱말) 칩은 여전히 `status`
+ * 그대로(이 값 미사용, PO 스코프 정정).
  */
 export function CommentReplyStatusChip({
-  status, repliesCount,
-}: { status: CommentReplyStatus; repliesCount?: number }) {
+  status, repliesCount, latestSentStatus,
+}: { status: CommentReplyStatus; repliesCount?: number; latestSentStatus?: CommentReplyStatus | null }) {
   const t = useTranslations('content');
   const tone = COMMENT_REPLY_STATUS_TONE[status];
   const statusLabel = t(commentReplyStatusLabelKey(status));
+  const countStatusLabel = t(commentReplyStatusLabelKey(latestSentStatus ?? status));
   const label = repliesCount != null && repliesCount >= 2
-    ? t('commentsReplyCountStatusLabel', { count: repliesCount, status: statusLabel })
+    ? t('commentsReplyCountStatusLabel', { count: repliesCount, status: countStatusLabel })
     : statusLabel;
   return (
     <span

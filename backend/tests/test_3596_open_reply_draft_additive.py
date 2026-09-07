@@ -155,6 +155,35 @@ async def test_sent_reply_plus_new_draft_shows_both_derived_fields_consistently(
             assert item["replies_count"] == 2
             assert item["sent_replies_count"] == 1
             assert item["open_reply_draft"]["id"] == str(open_draft.id)
+            # story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 보낸
+            # 답변이 있으면(1건이라도) latest_sent_reply_status가 "sent"를 말해야
+            # 한다 — reply.status(최신·이 표본에선 안 보낸 초안이라 "draft")와
+            # 별도 축. 배지 조립(count>=2)이 이 값을 쓴다.
+            assert item["latest_sent_reply_status"] == "sent"
+            assert item["reply"]["status"] == "draft", "reply는 여전히 draft/pending 포함 최신(이 필드는 안 건드린다)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_latest_sent_reply_status_null_when_no_sent_reply_exists():
+    """뮤테이션 대상(latest_sent_reply_status_by_comment_id 배선 제거 → 이 assert가
+    RED — get(id)가 None으로 안전 폴백하는 것과 별개로, 「보낸 답변 있음」 표본
+    (위 테스트)이 null로 떨어지면 그쪽이 먼저 RED가 난다)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id, _ = await _seed_human(s, org_id, role="owner")
+            _, _, _, pub = await _seed_full_publication_chain(s, org_id=org_id, project_id=project_id)
+            comment = await _seed_comment(s, org_id=org_id, publication_id=pub.id)
+            await _create_reply(s, org_id=org_id, comment=comment, text="아직 안 보냄", human_id=human_id)
+
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+            async with _client_for(app) as client:
+                resp = await client.get(f"/api/v2/organizations/{org_id}/publications/{pub.id}/comments")
+            item = resp.json()["comments"][0]
+            assert item["latest_sent_reply_status"] is None
     finally:
         await engine.dispose()
 
