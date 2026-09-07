@@ -1254,8 +1254,8 @@
     },
     {
       "file": "tests/test_3502_insights_board.py",
-      "sec": 39.0,
-      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
+      "sec": 14.0,
+      "source": "story-3604-insights-board-durations(원인 실측: from app.main import app 1회 비용 ~3.4s(로컬 무경합)가 이 파일에 섞여 있어 등재 39s 대비 경합 시 80s까지 늘던 원인 — 조각②(HTTP 라우터 6개 테스트, app.main 소비)를 test_3502_insights_board_endpoints.py로 분리. 남은 14개는 list_insights_board를 서비스 함수로 직접 부르며 app.main 무관 — 격리 uv run pytest 프로세스(ci.yml per-file 루프와 동형) 2회 로컬 실측 6.65~6.68s, 2배 안전마진 반영한 14s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     },
     {
       "file": "tests/test_3510_member_role_sync.py",
@@ -1446,6 +1446,11 @@
       "file": "tests/test_3598_facebook_refresh_judgment.py",
       "sec": 13.9,
       "source": "story-3598-graph-api-oauth-reason(PR#3954 CI 실측 — lint_destructive_schema_weights_registered.py 미등재 가드가 잡은 평균 가중치 13.9s를 그대로 등재, run https://github.com/moonklabs/sprintable/actions/runs/34074109882/job/101597402205 · 실측치로 재측정 필요 — scripts/measure_destructive_durations_local.py 참고)"
+    },
+    {
+      "file": "tests/test_3502_insights_board_endpoints.py",
+      "sec": 10.0,
+      "source": "story-3604-insights-board-durations(신규 분리 파일 — story #3502 조각② HTTP 라우터 6개 테스트, from app.main import app 1회 비용 ~3.4s 포함. 격리 uv run pytest 프로세스 2회 로컬 실측 4.63~4.85s, 2배 안전마진 반영한 10s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
