@@ -219,7 +219,7 @@ async def test_organization_repository_create_owner_member_id_anchor_removed_is_
 
 @pytest.mark.anyio
 async def test_backfill_query_fills_pre_existing_gap():
-    """0352 마이그의 INSERT SELECT를 그대로 재현 — 백필 前엔 갭 1, 백필 뒤엔 0.
+    """0354 마이그의 INSERT SELECT를 그대로 재현 — 백필 前엔 갭 1, 백필 뒤엔 0.
 
     story #3987 CI 실사고(2026-09-07, run 34121108303) — 대상 지정
     `ON CONFLICT (id) DO NOTHING`은 이 org_member의 (org_id, user_id)에 이미 id가
@@ -242,7 +242,7 @@ async def test_backfill_query_fills_pre_existing_gap():
 
             assert await _count_orphan_active_org_members(s, org.id) == 1
 
-            # alembic/versions/0352_member_anchor_backfill_root_fix.py와 동일 SQL.
+            # alembic/versions/0354_member_anchor_backfill_root_fix.py와 동일 SQL.
             await s.execute(text(
                 """
                 INSERT INTO members (id, org_id, type, user_id, owner_member_id, name, org_role, is_active, created_at, updated_at)
