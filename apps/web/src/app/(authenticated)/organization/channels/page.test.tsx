@@ -381,6 +381,49 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(note?.textContent).toContain('Page 2');
     expect(container.textContent).not.toContain(koMessages.channelConnect.channelConnectSuccess.replace('{channel}', 'Threads'));
   });
+
+  // story #3661(3650 후속, 유나 판정 정정 2026-09-07) — 목록(connections)이 아직 안
+  // 불린 동안 mismatch 파라미터의 raw UUID가 그대로(aria-live=polite라 스크린리더가
+  // 읽는다) 서던 결함. /channel-connections가 아직 응답 안 한 시점(fetch pending)엔
+  // Alert 자체를 안 그린다 — flush()를 부르지 않고 초기 렌더 직후 상태를 본다.
+  it('연결 목록 fetch가 아직 안 끝났으면 mismatch Alert를 안 그린다(raw UUID 노출 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));  // 영원히 안 풀리는 pending
+    useSearchParamsMock.mockReturnValue(
+      new URLSearchParams('connected=threads&mismatch=382e18bd-target&updated=cdd3106d-updated'),
+    );
+    useDashboardContextMock.mockReturnValue({
+      orgId: ORG_ID, orgMemberships: [{ orgId: ORG_ID, orgName: 'Org', orgSlug: 'org', role: 'owner' }], projectMemberships: [],
+    });
+    await act(async () => { root.render(wrap(<OrganizationChannelsPage />)); });
+    const note = container.querySelector('[data-testid="channel-reauth-mismatch-note"]');
+    expect(note).toBeNull();
+    expect(container.textContent).not.toContain('382e18bd-target');
+    expect(container.textContent).not.toContain('cdd3106d-updated');
+  });
+
+  // story #3661 — account_label이 null인 연결(webhook류는 account_id가 139자 URL)로
+  // 폴백하면 문장을 URL이 관통했다. 폴백은 «채널명 + 연결 id 짧은 꼬리»로 정체만 남긴다
+  // (뮤테이션 대상: channelConnectionIdentityLabel의 폴백을 conn.account_id로
+  // 되돌리면 이 테스트가 RED — 실제로 되돌려 확認, 아래 결과 참고).
+  it('account_label이 없는 연결은 「채널명(…짧은 꼬리)」로 폴백하고 긴 URL을 노출하지 않는다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads&mismatch=conn-page2&updated=conn-page1'));
+    stubFetch({
+      connections: [
+        {
+          ...CONNECTION_ACTIVE, id: 'conn-page1', channel: 'webhook', account_label: null,
+          account_id: 'https://example.com/webhook/callback?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_extra_padding_to_reach_139_chars_xxxxxxxxxxxxxxxxxxxxxxxxx',
+          status: 'active',
+        },
+        { ...CONNECTION_ACTIVE, id: 'conn-page2', account_label: 'Page 2', status: 'revoked' },
+      ],
+    });
+    await mount('owner');
+    const note = container.querySelector('[data-testid="channel-reauth-mismatch-note"]');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).not.toContain('https://example.com');
+    expect(note?.textContent).not.toContain('conn-page1');
+    expect(note?.textContent).toContain('…');
+  });
 });
 
 // story #3436 묶음10(유나 §17-21⑧⑨, PO 確定 2026-09-06) — oauth 갈래 「{channel}
