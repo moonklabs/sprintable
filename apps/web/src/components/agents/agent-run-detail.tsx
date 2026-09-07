@@ -499,7 +499,13 @@ export function AgentRunDetail({
                             )}
                           </div>
                           {hasError && (
-                            <div className="mt-1 space-y-1 text-xs text-destructive/80">
+                            // story #3677(FE·대비·確定, 유나 표① 2026-09-07) — text-destructive/80
+                            // 이 이 카드 배경 위에서 두 테마 다 AA 미달(3.76/3.82)이었다. 알파
+                            // 제거 규칙: 시맨틱 색(destructive/muted/foreground 등) 알파 수정자는
+                            // /60 이상만·hover는 그 resting state보다 대비를 낮추지 않음·이중 알파
+                            // (반투명 배경 위에 알파 전경, 예 bg-white/3 위 text-*/N)는 픽셀 실측
+                            // 없이는 통과로 간주하지 않는다(유나 표 대조 필수).
+                            <div className="mt-1 space-y-1 text-xs text-destructive">
                               <p>{display.error}</p>
                               {display.userReason ? <p>{display.userReason}</p> : null}
                               {display.nextAction ? <p>{display.nextAction}</p> : null}
@@ -592,7 +598,10 @@ export function AgentRunDetail({
                           </div>
                         ) : null}
                         {error ? (
-                          <p className="mt-3 text-sm text-destructive/80">{error}</p>
+                          // story #3677(FE·대비·確定, 유나 표① 2026-09-07) — bg-white/3(이 카드
+                          // 자체가 이미 반투명) 위 text-destructive/80은 이중 알파라 AA 미달
+                          // (3.82) — 알파 제거(규칙 근거는 위 hasError 블록 주석 참고).
+                          <p className="mt-3 text-sm text-destructive">{error}</p>
                         ) : null}
                         {!operatorReason && !userReason && !nextAction && detailSummary ? (
                           <p className="mt-3 text-sm text-muted-foreground">{detailSummary}</p>
