@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import event as sa_event
 from sqlalchemy import func, select
@@ -1015,6 +1016,36 @@ async def _has_open_external_publish_gate_for_doc(
     return row is not None
 
 
+# story #3379(에이전트 온보딩·오도, 페드루 PO 確定 2026-09-07, 담롱·댄 실사고 2026-09-03) —
+# 「채팅에서 논의됐다」를 상신 의사로 읽으면 안 된다: 논의는 대개 고칠 게 있어서 하는
+# 것이라 채팅 등장은 오히려 상신의 반대 신호인 자리가 많다. 트리거 메시지 자신의
+# content만 본다(PO 確定② — 대화 이력 스캔 X, 최저 비용·결정적). 잃는 것: 이 메시지
+# "전"에 오간 논의 문맥(예: 앞선 메시지에서 "이거 이제 안 맞는 것 같아요" 하고 다음
+# 메시지에서 doc을 mention)은 못 본다 — 트리거 메시지 자체에 신호가 없으면 넛지가 여전히
+# 뜬다(범위 밖으로 명시 선언, PO 채택).
+# "고치"/"바꾸"만으로는 모음축약형 활용(고쳐·바꿔 — 치+어→쳐, 꾸+어→꿔)을 못 잡는다
+# (한국어 어간 substring 매치의 알려진 한계) — 축약형을 별도 항목으로 병기.
+_DOC_REVISION_SIGNAL_WORDS: tuple[str, ...] = (
+    "수정", "정정", "교체", "폐기", "고치", "고쳐", "바꾸", "바꿔", "업데이트", "갱신",
+)
+
+
+def _message_signals_doc_still_being_revised(content: str) -> bool:
+    """순수함수 — 트리거 메시지 content에 «이 문서는 아직 고치는 중」류 신호가 있는지만
+    본다(다른 입력 없음, DB 접근 없음). `_DOC_REVISION_SIGNAL_WORDS` 중 하나라도 부분
+    일치하면 True(억제 신호)."""
+    if not content:
+        return False
+    return any(word in content for word in _DOC_REVISION_SIGNAL_WORDS)
+
+
+# story #3379 AC(a) — "최근 N분 안에 편집됐으면" 억제. 이 문서 도메인에 기존 관례가
+# 없어(grep 0건) 30분으로 잠정 고정 — 댓글수집류 백오프 상한(60분)보다 짧게 잡은 이유는
+# "편집 세션이 아직 진행 중일 가능성이 높은 창"만 억제하려는 것(PO 조정 여지, 새 설정
+# 노출 없음 — 이 스토리 범위 밖).
+_DOC_RECENTLY_EDITED_WINDOW_MINUTES = 30
+
+
 async def maybe_nudge_draft_doc_shared_in_chat(
     db: AsyncSession,
     *,
@@ -1024,10 +1055,13 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     doc_title: str,
     doc_status: str,
     doc_author_id: uuid.UUID | None,
+    doc_updated_at: datetime,
+    doc_superseded_by: uuid.UUID | None,
     sender_id: uuid.UUID,
+    trigger_message_content: str,
 ) -> None:
     """story #2747(2026-08-25, PO 판정) — draft 상태 문서가 채팅에서 mention(=논의)되는
-    순간, 작성자에게 「결재 상신 여부」를 묻는 1회성 넛지. 제품이 그 갈림 자체를 안
+    순간, 작성자에게 「검토 요청 여부」를 묻는 1회성 넛지. 제품이 그 갈림 자체를 안
     묻던 갭(선생님 실증 2건, 2026-08-18)의 처방 — 후보 a(설계 스케치)의 「묻기」 절반만
     이번 사이클 스코프(FE 뱃지·N회 카운트 nudge·에이전트 리마인더 격상은 각각 별도 스토리,
     PO 확定 2026-08-25).
@@ -1053,11 +1087,27 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     **시스템/이벤트 발신**(`msg_metadata['event']` 보유)이면 애초에 호출부(conversations.py
     ::send_message)가 이 함수를 부르지 않는다(사람의 대화 맥락에서만 넛지가 뜬다는
     전제 — 호출부 주석 참조).
-    """
+
+    story #3379(에이전트 온보딩·오도, 페드루 PO 確定 2026-09-07, 담롱·댄 실사고
+    2026-09-03) — 「기본 침묵」: draft doc이 채팅에서 참조됐다는 사실만으로 상신을
+    권하지 않는다("draft 제외"가 아니라 "논의 성격을 읽을 수 없으면 권하지 않는다").
+    아래 셋 중 하나면 넛지를 안 낸다: ⑤doc이 최근 `_DOC_RECENTLY_EDITED_WINDOW_MINUTES`
+    분 안에 편집됨(doc_updated_at) ⑥트리거 메시지 자신에 수정/정정/교체/폐기 계열
+    신호(`_message_signals_doc_still_being_revised`, 대화 이력 스캔 X — PO 確定) ⑦doc이
+    이미 다른 doc에 superseded 표기(doc_superseded_by). ①의 (org, doc) 전역 1회
+    reservation은 **그대로 안 건드린다**(더 엄격한 쪽이 이긴다, PO 確定 — 스토리 AC(d)
+    "같은 대화·같은 doc 최대 1회"는 이 전역 축에 자동 포함되는 상위 제약이라 새 표·새
+    인덱스 0)."""
     if doc_status != "draft" or not doc_author_id or not project_id:
         return
     if doc_author_id == sender_id:
         return  # 본인이 스스로 공유한 것 — 자기-알림 스킵(기존 관례 동형).
+    if doc_superseded_by is not None:
+        return  # story #3379 ⑦ — 이미 다른 doc으로 대체됨.
+    if datetime.now(timezone.utc) - doc_updated_at < timedelta(minutes=_DOC_RECENTLY_EDITED_WINDOW_MINUTES):
+        return  # story #3379 ⑤ — 아직 편집 세션이 진행 中일 가능성이 높은 창.
+    if _message_signals_doc_still_being_revised(trigger_message_content):
+        return  # story #3379 ⑥ — 트리거 메시지 자신이 "아직 고치는 중" 신호를 낸다.
 
     if await _has_open_external_publish_gate_for_doc(db, org_id=org_id, doc_id=doc_id):
         return  # story d1f4afcb AC2 — 이 doc은 이미 external_publish 게이트가 발행/반려를
@@ -1110,7 +1160,17 @@ async def maybe_nudge_draft_doc_shared_in_chat(
             msg = ConversationMessage(
                 conversation_id=conv.id,
                 sender_id=system_member.id,
-                content=f"'{doc_title}' 문서가 채팅에서 논의됐는데 아직 draft — 결재 상신하시겠습니까?",
+                # story #3379 AC — 단정형("상신하시겠습니까?") 대신 두 갈래 문구. "논의됐다"가
+                # 곧 "상신 의사"라고 단정하지 않는다(최저 지능 에이전트가 그대로 따라도 논의
+                # 중인 문서가 결재로 안 가도록). 유나 카피 판정(2026-09-07, PR #4011 게이트
+                # CHANGES 1) — "결재 상신"은 doc 도메인 카탈로그에 0건, draft 상태 문서에서
+                # 사용자가 실제로 보는 낱말은 doc-status-rail.tsx가 못 박은 「검토 요청」
+                # (docs.docGateRequestReview). "결재"는 결과/이력의 말(결재 이력)이라 작성자
+                # 행위 문구와 층이 다름 — 「검토 요청」으로 교체.
+                content=(
+                    f"'{doc_title}' 문서가 채팅에서 논의됐습니다 — 이 내용이 확정본이면 검토 "
+                    "요청을, 아직 고칠 게 있으면 편집을 진행해 주세요."
+                ),
                 mentioned_ids=[doc_author_id],
                 msg_metadata={
                     "activation": {
@@ -1149,7 +1209,11 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                     db, org_id=org_id, event_type="doc_draft_discussed_in_chat",
                     target_member_ids=[doc_author_id],
                     title="draft 문서가 채팅에서 논의됐습니다",
-                    body=f"'{doc_title}' — 결재 상신 여부를 확인해 주세요.",
+                    # 유나 CHANGES 2(2026-09-07, PR #4011) — 같은 함수가 같은 doc_author에게
+                    # 채팅 DM(위 content, 「검토 요청」)과 알림(이 body) 둘 다 보내는데,
+                    # 알림만 「결재 상신」으로 남으면 한 사람이 두 낱말을 읽는 자리라 낱말을
+                    # 맞춘다.
+                    body=f"'{doc_title}' — 검토 요청 여부를 확인해 주세요.",
                     reference_type="doc", reference_id=doc_id,
                     source_project_id=project_id, via_outbox=True,
                 )
