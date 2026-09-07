@@ -24,6 +24,8 @@ from app.services.channel_posts import (
     ChannelImageContainerFailedError,
     ChannelImageRequiredError,
     ChannelPostApproverRoleMissingError,
+    ChannelPostDraftAlreadyPublishedError,
+    ChannelPostDraftForbiddenError,
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
     ChannelPostGateNotFoundError,
@@ -58,6 +60,7 @@ from app.services.channel_posts import (
     submit_channel_post_draft,
     text_char_count,
     unpublish_channel_post,
+    withdraw_channel_post_draft,
 )
 from app.services.channel_post_images import (
     ChannelCoverAspectRatioRejectedError,
@@ -203,6 +206,10 @@ class ChannelPostDraftListItem(BaseModel):
     work_item_id: uuid.UUID
     channel: str
     connection_id: uuid.UUID
+    # story #3614 — `ChannelPostDraft.status`(draft|withdrawn) 그대로 노출. FE가
+    # 「폐기」 버튼 표시 여부·「폐기됨」 배지 판정에 쓴다(단건 조회는 폐기돼도 항상
+    # 보이므로 이 필드로 화면이 그 상태를 반영해야 한다).
+    draft_status: str
     current_version: int
     latest_author_kind: str
     origin_author_kind: str
@@ -1023,7 +1030,7 @@ def _to_draft_list_item(
     )
     return ChannelPostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
-        connection_id=draft.connection_id, current_version=latest.version,
+        connection_id=draft.connection_id, draft_status=draft.status, current_version=latest.version,
         latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
         updated_at=latest.created_at.isoformat(),
         text_preview=build_text_preview(latest.text), text_length=text_char_count(latest.text),
@@ -1090,6 +1097,11 @@ async def list_channel_post_drafts_endpoint(
         "레인). scheduled_from/scheduled_to와 상호 배타. 게이트 자체가 없는(아직 상신 "
         "안 한) 순수 초안도 포함한다 — 둘 다 「날짜 미정」이라는 점에서 같은 부류다(유나 §11-1).",
     ),
+    include_withdrawn: bool = Query(
+        default=False,
+        description="story #3614(AC2) — true면 폐기된(status='withdrawn') 초안도 목록에 "
+        "포함한다(「폐기됨 보기」 필터). 기본은 제외 — 폐기는 결재함·목록 양쪽에서 사라진다.",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -1133,6 +1145,7 @@ async def list_channel_post_drafts_endpoint(
     rows = await list_channel_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset,
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
+        include_withdrawn=include_withdrawn,
     )
     source_titles = await get_source_titles_and_latest_versions(
         db, org_id=org_id,
@@ -1163,7 +1176,9 @@ async def get_channel_post_draft_detail_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    rows = await list_channel_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1)
+    # story #3614 — 단건 조회는 폐기 여부와 무관하게 항상 보인다(목록 기본 필터가
+    # 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
+    rows = await list_channel_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True)
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
     source_titles = await get_source_titles_and_latest_versions(
@@ -1348,6 +1363,53 @@ async def submit_channel_post_draft_endpoint(
         gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
         status=gate.status,
         scheduled_at=gate.sealed_scheduled_at.isoformat() if gate.sealed_scheduled_at else None,
+    )
+
+
+class WithdrawChannelPostDraftResponse(BaseModel):
+    status: str
+    gate_id: uuid.UUID | None = None
+    gate_status: str | None = None
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/withdraw", response_model=WithdrawChannelPostDraftResponse,
+)
+async def withdraw_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> WithdrawChannelPostDraftResponse:
+    """story #3614(AC1) — 작성자(에이전트 포함) 또는 org owner/admin이 초안을 닫는다.
+    「변경 요청 뒤 재상신」만 있던 갭(3602가 닫은 재작성 경로와 대칭인 «폐기» 축)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+
+    try:
+        draft, gate = await withdraw_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_POST_WITHDRAW_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    except ChannelPostDraftAlreadyPublishedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_POST_DRAFT_ALREADY_PUBLISHED", "message": str(exc)},
+        ) from exc
+
+    return WithdrawChannelPostDraftResponse(
+        status=draft.status, gate_id=gate.id if gate else None, gate_status=gate.status if gate else None,
     )
 
 

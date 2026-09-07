@@ -57,6 +57,8 @@ interface ChannelPostDraftDetail {
   work_item_id: string;
   channel: string;
   connection_id: string;
+  // story #3614(AC2) — draft|withdrawn. 「폐기」 버튼 표시 여부·폐기됨 배지 판정.
+  draft_status: string;
   current_version: number;
   // story #3402 ④ — 단건 GET(story #3403)이 목록 항목(ChannelPostDraftListItem, #3394)과
   // 같은 shape를 준다 — 승인 카드가 필요로 하는 게이트 신호도 이미 여기 실려 있다.
@@ -775,6 +777,12 @@ export default function ChannelPostEditPage() {
   // story #3454(retryResult와 같은 발견 — 티켓 범위 밖이지만 같은 파일·같은 버그 종류라
   // 함께 고친다, PO 보고에 별도 표기) — 이 state도 raw 자체가 없었다.
   const [unpublishResult, setUnpublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
+
+  // story #3614(Phase2·BE+FE, 페드루 PO 確定 2026-09-07) — 초안 폐기(withdraw).
+  // unpublish와 동형 3종 state(confirm/pending/result) — 새 패턴 발명 0.
+  const [withdrawConfirmOpen, setWithdrawConfirmOpen] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawResult, setWithdrawResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
 
   // story f061c1a3(#3422 AC3 잔여) — 실패 배지 「재시도」 클릭 배선. dead_letter·
   // needs_check 둘 다 같은 다이얼로그를 쓴다 — needs_check만 추가로 「확認했습니다」
@@ -1613,6 +1621,39 @@ export default function ChannelPostEditPage() {
     }
   };
 
+  // story #3614(AC1·AC3, 페드루 PO 確定 2026-09-07) — 「변경 요청 뒤 재상신」만 있던
+  // 작성자의 유일한 다음 행동에 「폐기」를 더한다. handleUnpublish와 동형 패턴(로컬
+  // 상태를 서버 응답 모양으로 직접 맞춘다 — 재조회 없이 즉시 반영, §3-2 원칙).
+  const handleWithdraw = async () => {
+    if (!orgId) return;
+    setWithdrawConfirmOpen(false);
+    setWithdrawing(true);
+    setWithdrawResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/withdraw`, { method: 'POST' });
+      if (res.ok) {
+        const body = (await res.json().catch(() => null)) as { data?: { status?: string; gate_status?: string | null } } | null;
+        setWithdrawResult({ type: 'success' });
+        setDraft((prev) => prev && {
+          ...prev, draft_status: body?.data?.status ?? 'withdrawn',
+          gate_status: body?.data?.gate_status ?? prev.gate_status,
+        });
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setWithdrawResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsWithdrawFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setWithdrawResult({ type: 'error', text: t('channelPostsWithdrawFailed') });
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
   // story f061c1a3(#3422 AC3 잔여) — dead_letter 수동 재시도·needs_check 2단계 확認 뒤
   // 재시도. 성공하면 로컬로 짐작해 만들지 않고 단건 GET을 다시 불러 서버가 낸
   // command_status(보통 pending)로 배지를 갱신한다(§3-2 "지어내지 않는다"와 같은 축 —
@@ -1720,6 +1761,11 @@ export default function ChannelPostEditPage() {
   // 3653a18c §3) + role 게이팅. unpublishGate===undefined(연결 조회 전/실패)면
   // "모른다"로 두고 버튼을 비활성화한다(§3-2와 같은 축 — 모르는 것을 근거로 허용하지
   // 않는다, fail-closed).
+  // story #3614(AC2) — 이미 폐기됐거나 발행된(=BE가 409를 낼) 초안엔 버튼 자체를
+  // 안 그린다. 실제 인가(작성자/admin)는 BE만 안다 — FE는 상태 축만 미리 거른다
+  // (버튼을 눌러도 되는지의 대부분은 이걸로 걸러지고, 나머지 권한 문제는 클릭
+  // 시 403으로 온다 — handleWithdraw의 에러 분기가 그 문구를 그린다).
+  const showWithdraw = draft.draft_status !== 'withdrawn' && !draft.published_at;
   const showUnpublish = draft.publication_status === 'published';
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true && unpublishGate?.connectionStatus === 'active';
 
@@ -2112,6 +2158,18 @@ export default function ChannelPostEditPage() {
               {t('channelPostsUnpublishCta')}
             </Button>
           ) : null}
+          {/* story #3614(AC1) — 「변경 요청 뒤 재상신」만 있던 작성자의 유일한 다음
+              행동에 「폐기」를 더한다. 실 인가(작성자/admin)는 BE만 판정 — 이 버튼은
+              상태 축(폐기 아님·미발행)만 미리 거른다. */}
+          {showWithdraw ? (
+            <Button
+              variant="outline" disabled={withdrawing}
+              onClick={() => setWithdrawConfirmOpen(true)} data-testid="channel-post-withdraw-button"
+            >
+              {/* story #3608(유나 §22-18 ④-2) 규격 — 진행 중 낱말화, "..." 금지. */}
+              {withdrawing ? t('channelPostsWithdrawing') : t('channelPostsWithdrawCta')}
+            </Button>
+          ) : null}
         </div>
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
@@ -2275,6 +2333,33 @@ export default function ChannelPostEditPage() {
               {unpublishResult.type === 'success' ? t('channelPostsUnpublishSuccess') : unpublishResult.text}
             </AlertDescription>
             {unpublishResult.type === 'error' ? <RawDetailsToggle raw={unpublishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+          </Alert>
+        ) : null}
+
+        <ConfirmDialog
+          open={withdrawConfirmOpen}
+          onOpenChange={setWithdrawConfirmOpen}
+          title={t('channelPostsWithdrawConfirmTitle')}
+          description={(
+            <>
+              <span className="block" data-testid="channel-post-withdraw-confirm-what">{t('channelPostsWithdrawConfirmWhat')}</span>
+              <span className="block" data-testid="channel-post-withdraw-confirm-reversible">{t('channelPostsWithdrawConfirmReversible')}</span>
+            </>
+          )}
+          cancelLabel={t('channelPostsWithdrawConfirmCancel')}
+          confirmLabel={t('channelPostsWithdrawConfirmAction')}
+          onConfirm={() => void handleWithdraw()}
+        />
+        {withdrawResult ? (
+          <Alert
+            variant={withdrawResult.type === 'error' ? 'destructive' : 'default'}
+            role={withdrawResult.type === 'error' ? 'alert' : 'status'}
+            data-testid="channel-post-withdraw-result"
+          >
+            <AlertDescription>
+              {withdrawResult.type === 'success' ? t('channelPostsWithdrawSuccess') : withdrawResult.text}
+            </AlertDescription>
+            {withdrawResult.type === 'error' ? <RawDetailsToggle raw={withdrawResult.raw} label={t('errorRawDetailsToggle')} /> : null}
           </Alert>
         ) : null}
       </div>
