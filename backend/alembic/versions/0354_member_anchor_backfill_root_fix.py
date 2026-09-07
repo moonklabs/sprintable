@@ -11,14 +11,19 @@ idempotent(대상 없는 ON CONFLICT DO NOTHING — PK·uq_members_active_human 
 막아도 조용히 스킵, story #3987 CI 실사고로 대상 지정에서 정정)라 재실행해도 안전,
 `OrgMemberRepository.create()`가
 이제 `ensure_human_member`를 호출해도(이 PR의 코드 변경) 이 백필과 중복 INSERT 시도가
-0건 사고 없이 겹친다."""
+0건 사고 없이 겹친다.
+
+prod 승격(promote/main-20260907-3629-3635, 결재 2f9e82fa) — down_revision을 develop의
+"0353"에서 main head "0295"로 재작성했다(develop 전용 마이그 0296~0353은 이 승격에
+안 실린다 — 스키마 따라잡기 0, revision id 자체는 develop과 대조용으로 "0354" 그대로
+유지). 0283/0289/0292 선례와 같은 방식."""
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "0354"
-down_revision = "0353"
+down_revision = "0295"
 branch_labels = None
 depends_on = None
 
