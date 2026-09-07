@@ -113,9 +113,22 @@ async def _fetch_replies_raw(
         if external_id is None:
             raise CommentFetchError(error_code="COMMENT_EXTERNAL_ID_MISSING", message="external_id가 없습니다")
         _publish_client = get_publish_client_module(channel)
+        from app.services.threads_publish import ThreadsPublishError
         import httpx
-        async with httpx.AsyncClient() as client:
-            return await _publish_client.fetch_replies(client, access_token="sandbox", media_id=external_id)
+        try:
+            async with httpx.AsyncClient() as client:
+                return await _publish_client.fetch_replies(client, access_token="sandbox", media_id=external_id)
+        except ThreadsPublishError as exc:
+            # story #3597 — instagram_sandbox_publish.py::fetch_replies가 새
+            # [sandbox:expire-after-publish] 마커로 401을 던지기 전까지는 이 분기가
+            # 예외를 낼 일이 없어(sandbox_publish.py는 fetch_replies에서 절대
+            # raise 안 함) 이 try/except 자체가 없었다 — 아래 공용 블록(157행대)의
+            # 매핑을 그대로 재사용(새 판정 로직 0).
+            if exc.status_code in (401, 403):
+                raise CommentFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message=str(exc)) from exc
+            if exc.status_code == 429:
+                raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message=str(exc)) from exc
+            raise CommentFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
 
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
@@ -451,7 +464,7 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
             except CommentFetchError as exc:
                 failure_kind = classify_failure_kind(exc.error_code)
                 if failure_kind == FAILURE_KIND_CONNECTION:
-                    await _promote_connection_status(db, publication_id=row.publication_id, channel=row.channel)
+                    await _promote_connection_status(db, publication_id=row.publication_id)
                     row.status = "failed"
                     row.error_code = exc.error_code
                     await _schedule_next_continuous_poll_if_active(
@@ -525,11 +538,14 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
     return counts
 
 
-async def _promote_connection_status(db: AsyncSession, *, publication_id: uuid.UUID, channel: str) -> None:
-    """insight_snapshots.py::_promote_connection_status_for_snapshot과 동형 — sandbox는
-    connection 자체가 없어 no-op."""
-    if channel != "threads":
-        return
+async def _promote_connection_status(db: AsyncSession, *, publication_id: uuid.UUID) -> None:
+    """insight_snapshots.py::_promote_connection_status_for_snapshot과 동형 — 가드는
+    channel 이름이 아니라 connection 유무(sandbox는 connection 자체가 없어 no-op).
+    story #3597(Phase2·BE, 페드루 PO 確定 2026-09-06, 3595 실측 근거) — 이전엔
+    `if channel != "threads": return`로 잘려 있어(#3517 원 구현이 threads만 구현하던
+    시절 그대로 방치) IG/FB 댓글 수집 CONNECTION 실패는 에러코드까지 정확히
+    분류되고도 /organization/channels 칩·재연결 버튼에 안 섰다 — insight_snapshots.py
+    쪽은 애초에 이 가드가 없었다(그쪽이 맞았다)."""
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
 

@@ -31,6 +31,15 @@ _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
 # 검증(codec-rejected와 다른 축)과 구분해 둔다.
 _MARKER_REELS_PROCESSING_FAILED = "[sandbox:reels-processing-failed]"
 _MARKER_REELS_CODEC_REJECTED = "[sandbox:reels-codec-rejected]"
+# story #3597(Phase2·BE, 페드루 PO 確定 2026-09-06) — 「발행 뒤 만료」 마커. 위
+# `_MARKER_EXPIRED_TOKEN`은 create_container 자체를 실패시켜(발행 前) 그 글이
+# 애초에 존재하지 못하므로 fetch_replies로 갈 표본이 안 생긴다 — #3595/#3597
+# 라이브 검증(연결 승격→칩→재연결)이 필요로 하는 건 "발행은 성공했는데 나중에
+# 토큰이 만료된" 표본. text 마커는 create_container에서만 읽고(publish_container·
+# fetch_replies는 원문을 다시 안 받음), creation_id→media_id에 접미사로 실어
+# 옮긴다(comment-2-deleted와 동형 사상 — 서버 메모리 0, id 문자열 자체가 표식).
+_MARKER_EXPIRE_AFTER_PUBLISH = "[sandbox:expire-after-publish]"
+_EXPIRE_AFTER_PUBLISH_SUFFIX = "-expireafterpublish"
 
 
 async def create_container(
@@ -54,6 +63,8 @@ async def create_container(
         raise ThreadsPublishError(
             "INSTAGRAM_IMAGE_REQUIRED", "Instagram 발행은 이미지가 필수입니다(피드 이미지 1장)", status_code=422,
         )
+    if _MARKER_EXPIRE_AFTER_PUBLISH in text:
+        return f"sandbox-ig-creation-{uuid.uuid4().hex}{_EXPIRE_AFTER_PUBLISH_SUFFIX}"
     return f"sandbox-ig-creation-{uuid.uuid4().hex}"
 
 
@@ -130,7 +141,12 @@ async def get_container_status(
 async def publish_container(
     client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, creation_id: str,
 ) -> str:
-    return f"sandbox-ig-media-{uuid.uuid4().hex}"
+    media_id = f"sandbox-ig-media-{uuid.uuid4().hex}"
+    # story #3597 — create_container가 [sandbox:expire-after-publish] 마커를 봤으면
+    # 표식을 media_id로 옮긴다(fetch_replies는 media_id만 받는다).
+    if creation_id.endswith(_EXPIRE_AFTER_PUBLISH_SUFFIX):
+        media_id = f"{media_id}{_EXPIRE_AFTER_PUBLISH_SUFFIX}"
+    return media_id
 
 
 async def get_publishing_limit(
@@ -171,7 +187,17 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
     """sandbox_publish.py::fetch_replies와 동형 — media_id 하나엔 항상 같은 2건
     (순서 고정), complete=True 고정(페이지네이션 개념 없음). AC8류
     comment-2-deleted 시각 시뮬레이션은 이 조각(③) 스코프 밖(원 스토리 §3516
-    AC8이 이미 threads/기존 sandbox에서 검증한 마커라 여기서 중복 재발명 안 함)."""
+    AC8이 이미 threads/기존 sandbox에서 검증한 마커라 여기서 중복 재발명 안 함).
+
+    story #3597 — media_id가 `_EXPIRE_AFTER_PUBLISH_SUFFIX`를 달고 있으면(발행
+    시점에 [sandbox:expire-after-publish] 마커를 봤을 때만) 401을 던진다 —
+    "발행은 성공했는데 나중에 토큰이 만료됐다"를 라이브에서 재현하는 유일한
+    신호(서버 메모리 0, media_id 문자열 자체가 표식)."""
+    if media_id.endswith(_EXPIRE_AFTER_PUBLISH_SUFFIX):
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_TOKEN_EXPIRED",
+            "sandbox: [sandbox:expire-after-publish] 마커 시뮬레이션(발행 후 토큰 만료)", status_code=401,
+        )
     return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
 
 
