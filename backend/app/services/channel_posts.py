@@ -1908,6 +1908,28 @@ async def withdraw_channel_post_draft(
         if published is not None:
             raise ChannelPostDraftAlreadyPublishedError(draft_id)
 
+        # story #3639(3614 후속, 페드루 PO 確定 2026-09-07) — dev 실측: 승인된 초안을
+        # 발행 시도했다가 503(provider-error)로 pending·next_retry_at이 잡힌 채 withdraw
+        # 하면(게이트는 이미 approved라 위 "gate.status == pending" 분기가 안 닿는다)
+        # command가 살아서 재시도를 계속했다. 마커 표본은 영원히 실패하지만 진짜 일시
+        # 실패(네트워크·rate limit)였다면 다음 재시도가 성공해 "작성자가 폐기한 초안이
+        # 외부에 발행"된다 — 3614의 "닫는다"가 command 층까지 안 닿는 반쪽이었다.
+        # cancel_scheduled_publication(story #3419 AC1)과 동일 조건/전이(새 상태기계
+        # 0) — pending·blocked·dead_letter만 취소, in_progress/completed/voided/이미
+        # cancelled는 손 안 댐(레이스로 그 사이 워커가 이미 집었다면 그대로 진행되게
+        # 둔다 — 이 스토리는 "죽은 채 재시도만 남은" 경로를 닫는 것이지 진행 중인 발행을
+        # 가로채는 게 아니다).
+        command = (await db.execute(
+            select(PublicationCommand)
+            .where(PublicationCommand.gate_id == gate.id)
+            .order_by(PublicationCommand.created_at.desc())
+            .limit(1)
+            .with_for_update()
+        )).scalar_one_or_none()
+        if command is not None and command.status in _CANCELLABLE_COMMAND_STATUSES:
+            command.status = "cancelled"
+            command.reason_code = "CANCELLED_BY_HUMAN"
+
         if gate.status == "pending":
             from app.services.gate_service import transition_gate
 
