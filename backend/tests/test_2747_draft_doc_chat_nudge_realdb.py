@@ -43,6 +43,7 @@ def _async_url() -> str:
 
 async def _session_factory():
     import app.models  # noqa: F401
+    from sqlalchemy import text as sa_text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.core.database import Base
@@ -51,6 +52,15 @@ async def _session_factory():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        # story #3380 — maybe_nudge_draft_doc_shared_in_chat이 이제 _get_or_create_
+        # system_publisher를 부른다. 그 ON CONFLICT가 겨누는 부분 유니크 인덱스(마이그
+        # 0258)는 raw op.execute라 ORM 모델 메타데이터에 없어 create_all이 못 만든다 —
+        # test_3475_publishing_metrics.py 등 기존 create_all 하네스의 동일 선례 그대로
+        # 직접 만든다(새 관례 발명 0).
+        await conn.execute(sa_text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_members_org_system_publisher "
+            "ON members (org_id) WHERE (runtime_type = 'system-publisher' AND type = 'agent')"
+        ))
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -103,7 +113,30 @@ async def _seed_org_project(session):
     project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
     session.add(project)
     await session.commit()
+    await _ensure_system_publisher_team_members_row(session, org.id, project.id)
     return org.id, project.id
+
+
+async def _ensure_system_publisher_team_members_row(session, org_id, project_id):
+    """story #3380 — maybe_nudge_draft_doc_shared_in_chat이 이제 sender/이벤트 sender로
+    _get_or_create_system_publisher(events.py)를 쓴다. 그 함수는 members+project_access
+    에만 쓰고 team_members 투영은 실 VIEW(0110)에 기댄다 — create_all 환경은 team_members
+    가 평범한 물리 테이블(위 관례 그대로, VIEW 아님, project_id NOT NULL)이라 투영이 안
+    되므로, 여기서 직접 같은 id로 TeamMember 행을 짝지어 심는다(conversation_messages.
+    sender_id FK가 요구). project_id는 _get_or_create_system_publisher 자신이 anchor로
+    쓰는 "org 내 가장 오래된 project"와 같은 값(이 헬퍼가 호출되는 시점엔 이 project가
+    유일하므로 항상 일치)."""
+    from app.models.team import TeamMember
+    from app.routers.events import _get_or_create_system_publisher
+
+    system_member = await _get_or_create_system_publisher(session, org_id)
+    await session.commit()
+    session.add(TeamMember(
+        id=system_member.id, org_id=org_id, project_id=project_id, user_id=None,
+        type="agent", name=system_member.name, role="member",
+    ))
+    await session.commit()
+    return system_member.id
 
 
 async def _seed_doc(session, org_id, project_id, author_id, *, status="draft", title="Doc"):
@@ -153,7 +186,10 @@ async def test_draft_doc_mention_nudges_author_once_even_if_called_twice():
         async with Session() as s:
             rows = await _count_nudge_messages(s, doc_id)
             assert len(rows) == 1
-            assert rows[0].sender_id == sender_id
+            # story #3380 — sender는 트리거한 사람(sender_id)이 아니라 시스템 발행자
+            # (_get_or_create_system_publisher)여야 한다(디테일은 test_3380*.py 참고).
+            assert rows[0].sender_id != sender_id
+            assert rows[0].msg_metadata["triggered_by_member_id"] == str(sender_id)
 
         async with Session() as s:
             await maybe_nudge_draft_doc_shared_in_chat(

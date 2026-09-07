@@ -50,6 +50,7 @@ def _async_url() -> str:
 
 async def _session_factory():
     import app.models  # noqa: F401
+    from sqlalchemy import text as sa_text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.core.database import Base
@@ -58,6 +59,15 @@ async def _session_factory():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        # story #3380 — maybe_nudge_draft_doc_shared_in_chat이 이제 _get_or_create_
+        # system_publisher를 부른다. 그 ON CONFLICT가 겨누는 부분 유니크 인덱스(마이그
+        # 0258)는 raw op.execute라 ORM 모델 메타데이터에 없어 create_all이 못 만든다 —
+        # test_3475_publishing_metrics.py 등 기존 create_all 하네스의 동일 선례 그대로
+        # 직접 만든다(새 관례 발명 0).
+        await conn.execute(sa_text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_members_org_system_publisher "
+            "ON members (org_id) WHERE (runtime_type = 'system-publisher' AND type = 'agent')"
+        ))
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -118,6 +128,8 @@ async def _seed_org_project(session, *, slug_prefix="d1f4afcb"):
     project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
     session.add(project)
     await session.commit()
+    from tests.test_2747_draft_doc_chat_nudge_realdb import _ensure_system_publisher_team_members_row
+    await _ensure_system_publisher_team_members_row(session, org.id, project.id)
     return org.id, project.id
 
 

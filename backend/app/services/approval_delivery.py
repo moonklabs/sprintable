@@ -1089,13 +1089,27 @@ async def maybe_nudge_draft_doc_shared_in_chat(
             ))
             await db.flush()  # UNIQUE(org_id, doc_id) 위반이면 여기서 IntegrityError.
 
+            # story #3380(BE·결함·감사 신뢰, 페드루 PO 確定 2026-09-07, 담롱 실사고) — 이
+            # 메시지는 시스템이 짓는 문장이지 sender_id가 실제로 쓴 게 아니다. DM 자체
+            # (어느 1:1 스레드에 나타나는가)는 여전히 requester=트리거한 사람 축을 그대로
+            # 쓴다(_get_or_create_approval_dm — 그 축은 "이 doc을 누가 mention했나"를 DM
+            # 상대로 삼는 기존 설계 그대로, 이 스토리 범위 밖) — 바뀌는 건 오직 "이 메시지의
+            # sender 명의"뿐: `_get_or_create_system_publisher`(events.py, story #2791 —
+            # 새 개념 발명 0, recipe_repeat_scheduler.py::_notify_owner_paused와 동형 재사용)
+            # 가 반환하는 org당 1개의 「시스템 발행」 anchor member로 sender_id를 고정한다.
+            # 트리거한 사람은 sender 명의를 안 빌리는 대신 msg_metadata.triggered_by_
+            # member_id로 감사 추적을 남긴다(누가 이 넛지를 유발했는지는 여전히 기록).
+            from app.routers.events import _get_or_create_system_publisher
+
+            system_member = await _get_or_create_system_publisher(db, org_id)
+
             conv = await _get_or_create_approval_dm(
                 db, org_id=org_id, project_id=project_id,
                 requester_id=sender_id, approver_id=doc_author_id,
             )
             msg = ConversationMessage(
                 conversation_id=conv.id,
-                sender_id=sender_id,
+                sender_id=system_member.id,
                 content=f"'{doc_title}' 문서가 채팅에서 논의됐는데 아직 draft — 결재 상신하시겠습니까?",
                 mentioned_ids=[doc_author_id],
                 msg_metadata={
@@ -1103,12 +1117,32 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                         "audience": [str(doc_author_id)], "kind": "request", "expects_response": False,
                     },
                     "nudge_target": {"doc_id": str(doc_id), "kind": "draft_doc_chat_share"},
+                    "triggered_by_member_id": str(sender_id),
                 },
             )
             db.add(msg)
             await db.flush()
+            # story #3380 — 채널 릴레이(_msg_payload)가 SSE/webhook payload의 "sender" 필드를
+            # msg.sender_id(DB)가 아니라 이 인자 자체에서 조립한다. 이전엔 여기 `author`(doc
+            # 작성자)가 실려 DB의 sender_id(트리거한 사람)와 릴레이 표시가 서로 다른 두
+            # 사람을 가리키는 이중 오귀속이었다(실사고: Sprintable 원본=댄·릴레이 표시=담롱,
+            # 둘 다 문장을 안 씀) — 같은 system_member를 넘겨 두 층이 항상 일치하게 한다.
             from app.routers.conversations import _dispatch_conversation_event
-            await _dispatch_conversation_event(db, conv, msg, org_id, author)
+            await _dispatch_conversation_event(db, conv, msg, org_id, system_member)
+
+            # story #3380 AC — 감사축(activity_logs)도 채팅 sender와 같은 판정을 든다.
+            # channel_posts.py::_publish_channel_post 등 기존 platform-action 관례
+            # (actor_type="platform"·actor_id=None) 그대로 재사용 — 새 actor 유형 발명 0.
+            from app.services.activity_log import ActivityLogService
+
+            await ActivityLogService(db).record(
+                org_id=org_id, action="doc_chat_nudge_sent", actor_type="platform", actor_id=None,
+                entity_type="doc", entity_id=doc_id,
+                context={
+                    "conversation_id": str(conv.id), "message_id": str(msg.id),
+                    "triggered_by_member_id": str(sender_id), "doc_author_id": str(doc_author_id),
+                },
+            )
             if author.type == "human":
                 from app.services.notification_dispatch import dispatch_notification
                 await dispatch_notification(
