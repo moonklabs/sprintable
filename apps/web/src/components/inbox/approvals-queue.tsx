@@ -745,7 +745,7 @@ export function ApprovalsQueue() {
                 className="order-1 h-9 w-full gap-1.5 sm:order-3 sm:h-8 sm:w-auto"
                 disabled={disabled || (requiresOptionChoice && !selectedOption)}
                 onClick={primaryOnClick}
-                aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: disabled && !isSigFlow ? '...' : primaryLabel })}
+                aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: disabled && !isSigFlow ? t('gateApproving') : primaryLabel })}
               >
                 <CheckCircle className="size-3.5" />
                 {/* story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — "..."는 보는
