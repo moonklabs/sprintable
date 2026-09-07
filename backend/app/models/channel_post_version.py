@@ -39,6 +39,13 @@ class ChannelPostVersion(Base):
     link_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     body_sha256: Mapped[str] = mapped_column(Text, nullable=False)
     image_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07) — 훅(캡션 도입부) A/B 태깅용
+    # 분석 라벨. **봉인 축에 안 넣는다**(위 image_sha256/body_sha256 분리 논리와 같은
+    # 이유로 더 강하게 — 이건 내용도 아니고 순수 분석 메타라 값이 바뀌어도 재승인 사유가
+    # 생길 이유가 아예 없다). 발행 시점에 evidence payload로 값을 복사해 두므로(§
+    # insight_snapshots.py::_record_insight_evidence), 발행 뒤 이 컬럼을 고쳐도 이미
+    # 기록된 evidence는 안 바뀐다(카피가 그 시점의 스냅샷이므로).
+    hook_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     author_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     author_kind: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
