@@ -22,12 +22,19 @@ _FUTURE_TOOL_NAMES_BY_KEYWORD = {
     "channel_post": "sprintable_create_channel_post_draft",
     "site_post": "sprintable_create_site_post_draft",
     "channel_connection": "sprintable_list_channel_connections",
-    "post_comment": "sprintable_list_channel_post_comments",
+    # 카디르 QA(2026-08-07·#3990 리뷰) — "sprintable_list_channel_post_comments"는
+    # "channel_post"도 이미 포함해(같은 그룹 튜플의 앞 키워드) "post_comment"를 빼도
+    # 이 표본은 여전히 매치되는 "틀릴 수 없는 표본"이었다. "channel_post"를 안 품는
+    # 이름으로 교체해 "post_comment" 키워드 하나만 단독으로 검증한다.
+    "post_comment": "sprintable_list_post_comments",
     "insight": "sprintable_get_insight_snapshot",
 }
 
 
 def test_each_declared_keyword_classifies_into_content():
+    """뮤테이션 확認(#3990 리뷰 후) — "post_comment" 키워드를 튜플에서 빼면 이 표본
+    (sprintable_list_post_comments)만 core로 되돌아가 RED가 되는 것을 로컬에서 확認 후
+    복구(다른 4키워드 표본은 영향 없음 — 이제 각 키워드가 독립적으로 단독 검증됨)."""
     from app.services.mcp_toolset import tool_group as backend_tool_group
     from sprintable_mcp.toolset import tool_group as vendored_tool_group
 
