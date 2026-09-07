@@ -250,13 +250,15 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   useEffect(() => {
     if (mentionQuery === null) { setMentionMembers([]); setMentionLoadFailed(false); return; }
     let cancelled = false;
-    // story #3687(3680 클래스) — project_id 없는 대화(org-level DM 등)는 project 스코프
-    // /api/members(project_id 필수, 없으면 422)가 원천적으로 못 닿는다. /api/team-members는
-    // project_id 생략 시 org 전체(휴먼+에이전트)로 이미 폴백하는 기존 엔드포인트라(S:166051f0)
-    // 여기서도 그대로 재사용 — project_id 있으면 기존과 동일하게 프로젝트 스코프 유지.
+    // story #3687(3680 클래스) — project_id 없는 대화(org-level DM 등)는 project_id를 안
+    // 보냈었다(BE 필수→422). /api/members는 canonical SSOT(grant 휴먼·owner/admin 누락
+    // 없음, /api/team-members와 다른 계약 — BFF route.ts 주석)라 project_id가 있는 대화는
+    // 계속 이 엔드포인트를 써야 한다(team-members로 바꾸면 grant 휴먼이 사라지는 회귀,
+    // PO CHANGES 지적). 대신 BE가 project_id 없으면 org 스코프(grant 판정 불요)로
+    // additive 분기했다 — FE는 project_id 있으면 그대로, 없으면 생략만 하면 된다.
     const params = new URLSearchParams({ is_active: 'true' });
     if (projectId) params.set('project_id', projectId);
-    fetchWithAuth(`/api/team-members?${params.toString()}`)
+    fetchWithAuth(`/api/members?${params.toString()}`)
       .then((r) => {
         if (!r.ok) throw new Error(`mention fetch ${r.status}`);
         return r.json();

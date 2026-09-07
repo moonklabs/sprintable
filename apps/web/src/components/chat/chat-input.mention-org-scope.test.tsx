@@ -2,9 +2,14 @@
 //
 // story #3687(3680 클래스) — @멘션 자동완성이 project_id 없는 대화(org-level DM 등)에서
 // /api/members(project_id 필수, Query(...))를 불러 매 요청 422 → r.ok 검사 없이 json()으로
-// 파싱 → data undefined → `?? []`로 조용히 0건. 처방: 기존 org-스코프 폴백을 이미 가진
-// /api/team-members(project_id 생략 시 org 전체, S:166051f0)로 갈아타고, 실패는 실패
-// 얼굴(mentionLoadFailed)로 드러낸다(실패≠0건).
+// 파싱 → data undefined → `?? []`로 조용히 0건.
+//
+// PO CHANGES(페드루, 2026-09-07) — 처음엔 /api/team-members(project_id 생략 시 org
+// 스코프 폴백, S:166051f0)로 갈아탔으나, 이건 회귀였다: /api/members는 canonical
+// SSOT(grant 휴먼·owner/admin 누락 없음)라 team-members(뷰 기반)로 바꾸면 project_id
+// 있는 대화에서도 grant 휴먼이 @멘션에서 사라진다(BFF route.ts 주석). 정정 — FE는
+// /api/members 그대로 두고, BE가 project_id 생략 시 org 스코프(grant 판정 불요) additive
+// 분기를 얻었다. 실패는 실패 얼굴(mentionLoadFailed)로 드러낸다(실패≠0건).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -74,9 +79,9 @@ async function typeAt() {
 }
 
 describe('ChatInput — @멘션 org-스코프 폴백(story #3687 AC①)', () => {
-  it('project_id 없는 대화에서도 team-members(org 스코프)로 멤버 ≥1건이 뜬다', async () => {
+  it('project_id 없는 대화에서도 members(org 스코프)로 멤버 ≥1건이 뜬다', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      expect(url).toContain('/api/team-members');
+      expect(url).toContain('/api/members');
       expect(url).not.toContain('project_id');
       return new Response(JSON.stringify({ data: [{ id: 'm1', name: 'Alice', role: 'member' }] }), { status: 200 });
     });
