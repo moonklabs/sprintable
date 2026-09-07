@@ -4299,6 +4299,7 @@
     "approvalRequestLabel": "Approval request",
     "approvalRequestNotFound": "The approval gate could not be found.",
     "approvalRequestLoadError": "Failed to load approval details.",
+    "messagesLoadFailed": "Couldn't load the conversation.",
     "approvalRequestResolvedStatus": "Resolved — status: {status}",
     "approvalRequestStatusApproved": "Approved",
     "approvalRequestStatusRejected": "Rejected",

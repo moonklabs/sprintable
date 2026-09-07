@@ -4299,6 +4299,7 @@
     "approvalRequestLabel": "결재 요청",
     "approvalRequestNotFound": "결재 게이트를 찾을 수 없습니다.",
     "approvalRequestLoadError": "결재 정보를 불러오지 못했습니다.",
+    "messagesLoadFailed": "대화를 불러오지 못했습니다.",
     "approvalRequestResolvedStatus": "처리됨 — 상태: {status}",
     "approvalRequestStatusApproved": "승인됨",
     "approvalRequestStatusRejected": "반려됨",
