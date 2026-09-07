@@ -248,3 +248,94 @@ describe('fastapi-proxy — dict-detail 409(error.code) passthrough(story #2975)
     expect(body.error.current_head_sha).toBe('sha-race-landed');
   });
 });
+
+// story #3644(3632 후속, 「봉투가 사라지는」 자리 전수·PO 決 2026-09-07) — grep 실측:
+// `if (!_r.ok) return _r` 형이 244개 라우트 파일에 290곳. 유나 v3.1 목록의 "BFF 10곳"은
+// 이 공유 프록시를 통해 훨씬 넓은 범위(244+)와 같은 병을 앓는 최소치였다 — 라우트마다
+// 고치는 대신 이 헬퍼 한 자리에서 막아 소비 라우트 전부가 물려받는다.
+describe('fastapi-proxy — 봉투가 사라지는 자리 전수 fix(story #3644)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
+  });
+
+  // 표본 1 — 502 HTML: CF가 origin 502/504를 자기 HTML 오류 페이지로 바꿔치는 자리
+  // (story #3632 그라운딩). 상류 status(502)는 보존하되, 파싱 안 되는 본문은 새
+  // 봉투(UPSTREAM_NON_JSON)로 감싼다 — 화면이 봉투 없이 raw HTML을 받는 사고를 막는다.
+  it('상류가 502+비-JSON(HTML) 본문을 내면 UPSTREAM_NON_JSON 봉투로 감싸고 상류 status(502)는 보존한다', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      '<html><head><title>502 Bad Gateway</title></head><body>cloudflare</body></html>',
+      { status: 502, headers: { 'content-type': 'text/html' } },
+    ));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { data: null; error: { code: string; message: string } };
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe('UPSTREAM_NON_JSON');
+    expect(body.error.message.length).toBeGreaterThan(0);
+  });
+
+  // story #3998 CHANGES(카디르 codex 발견, 2026-09-07) — 3516이 한 번 고쳤던
+  // Retry-After 소실이 UPSTREAM_NON_JSON 분기에서 재발했다(resHeaders는 계산되지만
+  // apiError() 호출에 안 실려 버려짐). CF 429 HTML 오류 페이지도 Retry-After를
+  // 실어 보낼 수 있다 — 그 값이 이 봉투에도 보존돼야 한다.
+  it('상류가 429+비-JSON(HTML) 본문+Retry-After를 내면 UPSTREAM_NON_JSON 봉투에도 Retry-After가 보존된다', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      '<html><body>rate limited</body></html>',
+      { status: 429, headers: { 'content-type': 'text/html', 'retry-after': '30' } },
+    ));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('30');
+    const body = (await res.json()) as { data: null; error: { code: string } };
+    expect(body.error.code).toBe('UPSTREAM_NON_JSON');
+  });
+
+  // 표본 2 — 503 JSON 봉투: BE 전역 핸들러가 이미 만든 정상 JSON 오류 봉투는 파싱이
+  // 성공하니 그대로 통과(옳음 5 BFF 라우트 무변경 — 이 헬퍼가 재해석하지 않는다).
+  it('상류가 503+정상 JSON 오류 봉투를 내면 그대로 통과한다(재해석 0)', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      JSON.stringify({ data: null, error: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: '일시적으로 발행할 수 없습니다.' }, meta: null }),
+      { status: 503, headers: { 'content-type': 'application/json' } },
+    ));
+    const request = new Request('http://localhost/api/organizations/org-1/channel-posts/drafts/d1/publish', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/channel-posts/drafts/d1/publish');
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('CHANNEL_PUBLISH_PROVIDER_ERROR');
+  });
+
+  // 표본 3 — fetch 자체가 던짐(DNS·connection refused·abort): 어느 라우트도 이 아래
+  // 코드를 못 받는다 — 헬퍼 안에서 즉시 막는다. status=503(502 아님, PO 決) — CF가
+  // origin 502/504 본문을 HTML로 바꿔치는 자리와 같은 "진짜 상류 실패" 분류.
+  it('fetch 자체가 던지면(네트워크 불능) UPSTREAM_UNREACHABLE 503을 반환한다', async () => {
+    global.fetch = vi.fn(async () => { throw new Error('fetch failed: ECONNREFUSED'); });
+    const request = new Request('http://localhost/api/me');
+
+    const res = await proxyToFastapi(request, '/api/v2/me');
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { data: null; error: { code: string } };
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe('UPSTREAM_UNREACHABLE');
+  });
+
+  it('proxyToFastapiWrapped도 UPSTREAM_NON_JSON 봉투를 그대로 통과시킨다(재파싱 0)', async () => {
+    global.fetch = vi.fn(async () => new Response('<html>gateway error</html>', { status: 502, headers: { 'content-type': 'text/html' } }));
+    const request = new Request('http://localhost/api/me');
+
+    const res = await proxyToFastapiWrapped(request, '/api/v2/me');
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('UPSTREAM_NON_JSON');
+  });
+});

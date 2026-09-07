@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
+import { safeJsonParse } from '@/lib/api-response';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     body: JSON.stringify({ email: body.email }),
   });
 
-  const json = await fastapiRes.json() as Record<string, unknown>;
+  const json = await safeJsonParse(fastapiRes);
   if (!fastapiRes.ok) {
     return NextResponse.json({ error: json['error'] ?? { code: 'FAILED', message: 'Request failed' } }, { status: fastapiRes.status });
   }

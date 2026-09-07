@@ -18,16 +18,29 @@ import { clearSuperseded, markSuperseded } from '@/lib/auth/switch-epoch';
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 const RT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
-/** RC3: 단건 RT revoke만(bulk는 "전체"에서만). best-effort. */
+/**
+ * RC3: 단건 RT revoke만(bulk는 "전체"에서만). best-effort — PO 정책 決(2026-09-07,
+ * story #3644): 로컬 사인아웃은 이 결과와 무관하게 항상 성공 처리한다(쿠키가 실제로
+ * 지워지므로 정직). 사용자 문장은 불필요하나 침묵은 금지 — 구조화 로그 한 줄.
+ *
+ * ⚠️보안 표면: 이 revoke가 실패하면 refresh token이 자연 만료 前까지 서버측에
+ * 유효한 채로 남는다. 이 로그는 그 잔존을 서버측에서 관측하기 위한 것 — user_id/
+ * token 원문·해시는 절대 싣지 않는다(사유·상태만).
+ */
 async function beRevoke(refreshToken: string): Promise<void> {
   try {
-    await fetch(`${FASTAPI_URL()}/api/v2/auth/logout`, {
+    const res = await fetch(`${FASTAPI_URL()}/api/v2/auth/logout`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
-  } catch {
-    /* best-effort */
+    if (!res.ok) {
+      console.warn('[signout-account] beRevoke non-ok — refresh token may remain valid until natural expiry', { status: res.status });
+    }
+  } catch (error) {
+    console.warn('[signout-account] beRevoke threw — refresh token may remain valid until natural expiry', {
+      reason: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

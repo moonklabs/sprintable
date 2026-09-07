@@ -4,7 +4,7 @@
  */
 
 import { getServerSession } from '@/lib/db/server';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 
 // story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
 // fastapiCall 사본을 따로 갖고 있어(#2488에서 같은 버그를 두 곳에 각각 고쳐야 했다),
@@ -73,11 +73,26 @@ export async function proxyToFastapi(
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   const body = hasBody ? await request.text() : undefined;
 
-  const res = await fetch(targetUrl, {
-    method: request.method,
-    headers,
-    body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(targetUrl, {
+      method: request.method,
+      headers,
+      body,
+    });
+  } catch {
+    // story #3644(3632 후속, «봉투가 사라지는» 자리 전수) — DNS 실패·connection refused·
+    // abort 등 fetch() 자체가 던지면 이 아래 코드가 전혀 안 돈다 — 어떤 라우트도 자기
+    // 몫의 오류 처리를 못 받는다. grep 실측: `if (!_r.ok) return _r` 형이 244개 라우트
+    // 파일에 290곳 — 스토리가 지목한 "BFF 10곳"은 이 공유 프록시를 통해 훨씬 넓은
+    // 범위와 같은 병을 앓고 있었다(최소치였다). 라우트마다 고치는 대신 이 프록시
+    // 자리 하나에서 막아 소비 라우트 전부(244+)가 물려받게 한다.
+    //
+    // status=503(502 아님) — PO 決(2026-09-07): CF가 origin 502/504를 자기 HTML로
+    // 바꿔치는 자리라(story #3632 그라운딩과 같은 결정) "우리 상태"의 502가 아니라
+    // "진짜 상류 실패"의 503 계열로 분류한다.
+    return apiError('UPSTREAM_UNREACHABLE', '서버에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+  }
 
   const resBody = await res.text();
   const resHeaders: Record<string, string> = { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' };
@@ -110,7 +125,32 @@ export async function proxyToFastapi(
   // 그대로 500으로 바꿔버리던 것 — 사용자는 "실패"로 보지만 실제로는 BE 쪽 작업이 이미 끝난
   // 상태(예: DELETE user-blocks — 차단 해제는 됐는데 화면엔 에러 토스트가 뜨는 사고).
   const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
-  return new Response(NULL_BODY_STATUSES.has(res.status) ? null : resBody, {
+  if (NULL_BODY_STATUSES.has(res.status)) {
+    return new Response(null, { status: res.status, headers: resHeaders });
+  }
+  // story #3644(3632 처방 재사용 — 새 상태기계 0) — CF가 502/504 등 상류 실패를 자기
+  // HTML 오류 페이지로 바꿔치면(story #3632 그라운딩) status는 보존되지만 본문은
+  // JSON이 아니게 된다. BE가 낸 진짜 JSON 오류 봉투(전역 핸들러가 이미 구성한 것)는
+  // 파싱이 성공하니 그대로 통과 — 상류 status를 이 프록시가 재해석하지 않는다(그건
+  // 각 BE 라우터의 classify_failure_kind 몫). 파싱이 안 되는 경우만 새 봉투로 감싼다.
+  if (!res.ok) {
+    try {
+      JSON.parse(resBody);
+    } catch {
+      // story #3998 CHANGES(카디르 codex 발견, 2026-09-07) — resHeaders(위에서 이미
+      // 계산됨)가 이 분기에서 apiError()에 안 실려 통째로 버려졌다 — 3516이 한 번
+      // 고쳤던 Retry-After 소실의 재발(CF 429 HTML 오류 페이지도 Retry-After를
+      // 실어 보낼 수 있다). resHeaders 전체가 아니라 retry-after만 골라 넘긴다 —
+      // resHeaders['Content-Type']은 상류의 원래 타입(HTML이면 text/html)이라 새로
+      // 감싸는 JSON 봉투와 안 맞는다(apiError가 스스로 application/json을 낸다).
+      const retryAfter = resHeaders['retry-after'];
+      return apiError(
+        'UPSTREAM_NON_JSON', '서버 응답을 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', res.status,
+        undefined, retryAfter ? { 'Retry-After': retryAfter } : undefined,
+      );
+    }
+  }
+  return new Response(resBody, {
     status: res.status,
     headers: resHeaders,
   });

@@ -93,6 +93,39 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
   });
 });
 
+// story #3644(3632 후속) — handleCreateCommit 실패가 console.error만 남기고 사용자에게는
+// 아무 신호가 없던 자리(onCommit={() => void handleCreateCommit(...)}가 반환값을 버려
+// 호출부 UI가 결과를 못 받는다 — createArtifact()가 POST 실패 시 null을 반환해도 편집기가
+// 그냥 열린 채로 남고 "왜"가 안 보였다).
+describe('ArtifactSection — 생성 커밋 실패 시 토스트(story #3644)', () => {
+  it('createArtifact()가 실패(POST !ok)하면 토스트로 알린다', async () => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/visual-artifacts' && init?.method === 'POST') {
+        return { ok: false, status: 500, json: async () => ({ error: { code: 'INTERNAL_ERROR' } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mount('ko');
+    const cta = [...container.querySelectorAll('button')].find((b) => b.textContent === '산출물 그리기')!;
+    await act(async () => { cta.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const paletteButton = container.querySelectorAll('button')[0] as HTMLButtonElement;
+    await act(async () => { paletteButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const commitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '버전으로 저장') as HTMLButtonElement;
+    expect(commitButton.disabled).toBe(false);
+    await act(async () => { commitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('만들지 못했습니다');
+    // 편집 모드는 유지된다(재시도 가능 — 원 규율 그대로).
+    expect(container.textContent).toContain('버전으로 저장');
+  });
+});
+
 describe('ArtifactSection — 새 좌표 코멘트 생성(story #2725, story-linked 표면)', () => {
   let rectSpy: ReturnType<typeof vi.spyOn>;
 
