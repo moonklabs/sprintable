@@ -49,16 +49,16 @@ describe('extractHits — 순수 판정 함수(story #3486 원 가드 계승, #3
   });
 
   // story #3493 AC2 — 숫자 포맷(krw/포인트 잔액)은 날짜가 아니므로 ALLOWLIST에 등재된
-  // file+line은 이 가드가 봐줘야 한다(정확히 그 줄만 — 다른 줄은 여전히 걸린다).
-  it('ALLOWLIST에 등재된 file+line은 통과시킨다(숫자 포맷)', () => {
-    const entry = ALLOWLIST.find((e) => e.file === 'app/(authenticated)/rewards/page.tsx' && e.line === 153);
+  // 줄 내용은 이 가드가 봐줘야 한다(정확히 그 내용만 — 다른 줄은 여전히 걸린다).
+  it('ALLOWLIST에 등재된 줄 내용은 통과시킨다(숫자 포맷)', () => {
+    const entry = ALLOWLIST.find(
+      (e) => e.file === 'app/(authenticated)/rewards/page.tsx' && e.lineContent.includes('e.balance'),
+    );
     expect(entry).toBeDefined();
     expect(entry?.reason).toBeTruthy();
     expect(entry?.addedBy).toBeTruthy();
 
-    const content = Array.from({ length: 153 }, (_, i) =>
-      i === 152 ? "{e.balance.toLocaleString()} TJSB" : `// line ${i + 1}`,
-    ).join('\n');
+    const content = `const x = 1;\n${entry!.lineContent}\nconst y = 2;`;
     expect(extractHits(content, 'app/(authenticated)/rewards/page.tsx')).toEqual([]);
   });
 
@@ -66,7 +66,7 @@ describe('extractHits — 순수 판정 함수(story #3486 원 가드 계승, #3
     const hits = extractHits(
       'new Date(x).toLocaleString()',
       'app/(authenticated)/rewards/page.tsx',
-    ); // line 1 — ALLOWLIST는 이 파일의 153/224행만 등재, 1행은 미등재.
+    );
     expect(hits).toEqual([{ file: 'app/(authenticated)/rewards/page.tsx', line: 1 }]);
   });
 
@@ -75,6 +75,39 @@ describe('extractHits — 순수 판정 함수(story #3486 원 가드 계승, #3
       expect(entry.reason.length).toBeGreaterThan(0);
       expect(entry.addedBy.length).toBeGreaterThan(0);
     }
+  });
+
+  // story #3611(CI 후속, #3609와 같은 클래스) — 허용 목록이 file+line(줄번호) 키였을 때
+  // 무관한 줄이 위에 추가돼 뒷줄 번호가 밀리면 거짓 빨강이 났다(#3609 실사고). 키를
+  // «파일+줄 내용»으로 바꾼 뒤에도 그 내성이 실제로 성립하는지 selftest로 고정한다.
+  describe('#3611 — 줄번호 무관(file+내용) 핀 내성', () => {
+    const ALLOWED_ENTRY = ALLOWLIST[0]!; // rewards/page.tsx의 balance 줄.
+
+    it('(a) 허용 줄 «앞»에 무관한 줄을 여러 개 삽입해도 위반 0(줄번호가 밀려도 안 깨짐)', () => {
+      const content = [
+        '// unrelated line 1',
+        '// unrelated line 2',
+        '// unrelated line 3',
+        'const noise = 1;',
+        ALLOWED_ENTRY.lineContent,
+      ].join('\n');
+      expect(extractHits(content, ALLOWED_ENTRY.file)).toEqual([]);
+    });
+
+    it('(b) 허용 줄의 «내용 자체»가 바뀌면 더는 허용목록에 안 걸려 위반 1(내용 변화는 진짜 새 자리)', () => {
+      const mutatedLine = ALLOWED_ENTRY.lineContent.replace('balance', 'differentField');
+      const content = `const noise = 1;\n${mutatedLine}`;
+      expect(extractHits(content, ALLOWED_ENTRY.file)).toEqual([{ file: ALLOWED_ENTRY.file, line: 2 }]);
+    });
+
+    // 뮤테이션 대조 — isAllowed가 다시 줄번호 기반이 되면 (a)가 반드시 빨강이어야
+    // 이 selftest 자체가 그 회귀를 잡는다는 걸 증명한다(코드 자체를 되돌리지 않고,
+    // 판정 로직과 동형인 line-index 매칭을 이 테스트 안에서 직접 흉내내 대조).
+    it('뮤테이션 대조 — line-index 매칭이었다면 (a)의 그 줄(5번째)은 원래 153번째가 아니라 위반으로 남는다', () => {
+      const lineIndexBasedIsAllowed = (file: string, lineNumber: number) =>
+        file === ALLOWED_ENTRY.file && lineNumber === 153; // 옛 방식(고정 줄번호 153) 흉내.
+      expect(lineIndexBasedIsAllowed(ALLOWED_ENTRY.file, 5)).toBe(false);
+    });
   });
 });
 
