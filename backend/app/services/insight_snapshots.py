@@ -317,7 +317,7 @@ async def _fetch_instagram_via_connection(db: AsyncSession, snapshot: InsightSna
     )).scalar_one_or_none()
     if pub is None or pub.external_id is None:
         raise InsightFetchError(
-            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+            error_code="INSIGHT_PUBLICATION_NOT_FOUND", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
         )
     connection = await db.get(ChannelConnection, pub.connection_id)
     if connection is None or connection.status != "active":
@@ -400,7 +400,7 @@ async def _fetch_facebook_via_connection(db: AsyncSession, snapshot: InsightSnap
     )).scalar_one_or_none()
     if pub is None or pub.external_id is None:
         raise InsightFetchError(
-            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+            error_code="INSIGHT_PUBLICATION_NOT_FOUND", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
         )
     connection = await db.get(ChannelConnection, pub.connection_id)
     if connection is None or connection.status != "active":
@@ -453,7 +453,7 @@ async def _fetch_threads_via_connection(db: AsyncSession, snapshot: InsightSnaps
     )).scalar_one_or_none()
     if pub is None or pub.external_id is None:
         raise InsightFetchError(
-            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+            error_code="INSIGHT_PUBLICATION_NOT_FOUND", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
         )
     connection = await db.get(ChannelConnection, pub.connection_id)
     if connection is None or connection.status != "active":

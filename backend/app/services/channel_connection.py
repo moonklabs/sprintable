@@ -96,6 +96,11 @@ async def upsert_channel_connection(
         existing.connected_by = connected_by
         existing.secret_hint = secret_hint
         row = existing
+        # story #3612 — 재연결(active 복귀)이 이 함수의 else 분기(기존 행 upsert)로만
+        # 일어난다(if existing is None 분기는 신규 연결이라 쉬는 스케줄이 있을 수
+        # 없음). wake_resting_comment_schedules 참고(단일 깨우는 손).
+        from app.services.channel_post_comments import wake_resting_comment_schedules
+        await wake_resting_comment_schedules(db, connection_id=existing.id)
 
     await db.commit()
     await db.refresh(row)
@@ -145,6 +150,10 @@ async def replace_channel_connection_credential(
     row.status = "active"
     row.last_error = None
     row.connected_by = updated_by
+    # story #3612 — 이 자격 교체도 non-active→active 복귀 경로다(wake_resting_
+    # comment_schedules 참고, 단일 깨우는 손).
+    from app.services.channel_post_comments import wake_resting_comment_schedules
+    await wake_resting_comment_schedules(db, connection_id=row.id)
 
     await db.commit()
     await db.refresh(row)
@@ -190,6 +199,10 @@ async def apply_refresh_result(
     connection.last_refreshed_at = datetime.now(timezone.utc)
     connection.last_error = None
     connection.status = "active"
+    # story #3612 — 자동 토큰 갱신 성공도 non-active→active 복귀 경로다(wake_
+    # resting_comment_schedules 참고, 단일 깨우는 손).
+    from app.services.channel_post_comments import wake_resting_comment_schedules
+    await wake_resting_comment_schedules(db, connection_id=connection.id)
     await db.commit()
 
 
