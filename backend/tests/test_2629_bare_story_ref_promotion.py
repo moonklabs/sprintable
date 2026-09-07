@@ -225,6 +225,59 @@ async def test_promote_skips_existing_entity_token():
         await engine.dispose()
 
 
+# 카디르 발견(PR#4007 QA, 2026-09-07) — `reference_token`은 대괄호로 시작하는 스토리
+# 제목을 `[\[BE·insights\] 제목…](entity:story:…)`처럼 escape해 싣는다(우리 스토리
+# 제목 대부분이 「[…]」로 시작 — story_number.py::reference_token). `_ENTITY_TOKEN_RE`의
+# 옛 `[^\]]*`는 그 escape된 `\]`에서 라벨 매치를 조기종료해(문자 클래스는 백슬래시를
+# 안 본다) 토큰 전체가 보호 구간 밖으로 샜다 — 양성대조(다음 두 테스트는 옛 정규식
+# 기준 실패였다).
+async def test_promote_protects_entity_token_with_escaped_bracket_in_label():
+    """라벨이 escape된 대괄호를 포함한 entity 토큰 전체가 한 span으로 보호돼야 한다 —
+    라벨 안의 bare 번호(#4003, "PR" 접두 없음이라 _PR_PREFIX_RE로는 안 걸리는 경우)까지
+    포함해서 통째 무변경."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=4003, title="별개 스토리")
+            content = (
+                r"[\[BE·insights\] 훅 #4003 착지](entity:story:"
+                "11111111-1111-1111-1111-111111111111) 참고"
+            )
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content, "escape된 대괄호 라벨이 토큰 매치를 조기종료시켜 재치환됨"
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_bare_number_inside_escaped_label_not_reresolved():
+    """라벨 안의 bare 「#4003」이 보호 구간 밖으로 새어나가 별도 후보로 재승격되면
+    토큰 안에 또 다른 entity 링크가 중첩된다 — 그 중첩이 없어야 한다."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=4003, title="별개 스토리")
+            content = (
+                r"[\[BE·insights\] 훅 #4003 착지](entity:story:"
+                "11111111-1111-1111-1111-111111111111) 참고"
+            )
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result.count("(entity:story:") == 1, "라벨 안 bare #4003이 재치환돼 중첩 토큰이 생김"
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
 # story #3162(채팅·치환 결함) — 인용부호/블록인용 안의 #N은 재인용이지 새 참조 의도가
 # 아니다(디캄포 오늘 밤 재발 실사고: 정정 메시지에서 오염된 원문을 그대로 다시 인용해
 # 재승격됨). 코드블록/인라인코드와 같은 "예시 영역" 원칙을 확장.
@@ -296,7 +349,11 @@ async def test_promote_bare_ref_outside_quotes_still_promotes_no_regression():
                 s, org_id=org.id, project_id=project.id, content=content,
             )
             assert promoted_ids == {story.id}
-            assert "#24" not in result
+            # story #3652 — 치환 텍스트가 이제 원문 #24를 링크 제목 앞에 남긴다(PO rule③)라
+            # "#24"라는 부분문자열 자체는 남지만, 그것이 «치환 안 된 맨 #24»가 아니라
+            # entity 토큰 «안에» 있다는 것으로 회귀 여부를 가른다.
+            assert "#24 보드 확인" not in result  # 맨 #24(미치환)는 없다
+            assert "[#24 보드 리팩터](entity:story:" in result  # entity 토큰 안에 있다
     finally:
         await engine.dispose()
 
@@ -314,7 +371,8 @@ async def test_promote_resolves_existing_story_to_entity_token():
             result, promoted_ids = await promote_bare_story_refs(
                 s, org_id=org.id, project_id=project.id, content="확인은 #24 참고",
             )
-            expected_token = build_reference_token("story", story.id, "보드 리팩터")
+            # story #3652(PO rule③) — 치환 텍스트가 원문 #24를 제목 앞에 남긴다.
+            expected_token = build_reference_token("story", story.id, "#24 보드 리팩터")
             assert result == f"확인은 {expected_token} 참고"
             # story #2679: 실제 치환된 story_id 집합도 반환 — caller가 origin='auto' 판정에 씀.
             assert promoted_ids == {story.id}
@@ -335,7 +393,9 @@ async def test_promote_unresolved_number_kept_verbatim():
             result, promoted_ids = await promote_bare_story_refs(
                 s, org_id=org.id, project_id=project.id, content="#24 그리고 #9999",
             )
-            expected_token = build_reference_token("story", story.id, "보드 리팩터")
+            # story #3652(PO rule③) — 치환된 #24는 원문을 제목 앞에 남기고, resolve
+            # 실패한 #9999는 손 안 댄 원문 그대로(all-or-nothing 아님, 기존 계약 그대로).
+            expected_token = build_reference_token("story", story.id, "#24 보드 리팩터")
             assert result == f"{expected_token} 그리고 #9999"
             # #9999는 resolve 실패라 promoted_ids엔 안 들어간다(원문 그대로 남은 것과 대칭).
             assert promoted_ids == {story.id}
@@ -481,7 +541,8 @@ async def test_send_message_promotes_bare_ref_for_agent_sender():
                 background_tasks=BackgroundTasks(),
                 db=s, auth=_agent_auth(agent_id, org.id), org_id=org.id,
             )
-            expected_token = build_reference_token("story", story.id, "보드 리팩터")
+            # story #3652(PO rule③) — 치환 텍스트가 원문 #24를 제목 앞에 남긴다.
+            expected_token = build_reference_token("story", story.id, "#24 보드 리팩터")
             assert result["data"]["content"] == f"확인은 {expected_token} 참고"
     finally:
         await engine.dispose()
@@ -508,7 +569,8 @@ async def test_send_message_promotes_bare_ref_for_human_sender():
                 background_tasks=BackgroundTasks(),
                 db=s, auth=_human_auth(user_id, org.id), org_id=org.id,
             )
-            expected_token = build_reference_token("story", story.id, "보드 리팩터")
+            # story #3652(PO rule③) — 치환 텍스트가 원문 #24를 제목 앞에 남긴다.
+            expected_token = build_reference_token("story", story.id, "#24 보드 리팩터")
             assert result["data"]["content"] == f"확인은 {expected_token} 참고"
     finally:
         await engine.dispose()
@@ -615,5 +677,175 @@ async def test_send_message_no_bare_ref_unaffected():
                 db=s, auth=_agent_auth(agent_id, org.id), org_id=org.id,
             )
             assert result["data"]["content"] == "그냥 평문 메시지"
+    finally:
+        await engine.dispose()
+
+
+# ── story #3652(PO 確定 2026-09-07) — 실사고: 「sprintable-agent-plugins #46」이
+# 이 org의 story #46(S209 표기)로 잘못 옷을 입었다. story 번호와 PR 번호가 같은
+# `#N` 표기 공간을 공유하는데 치환기가 그 사실을 몰랐다 — 두 규칙으로 처방한다:
+# ① 명시 repo#N(owner/repo·bare repo#N·URL) → story 승격 0(원장 유일 일치 시만 PR
+# 링크로 별도 해석) ② 맨 #N인데 같은 N이 org pr_number에도 있으면 모호(치환 0).
+async def _seed_pr_link(session, org_id, story_id, *, repo_full_name, pr_number):
+    from app.models.pull_request_story_link import PullRequestStoryLink
+
+    link = PullRequestStoryLink(
+        id=uuid.uuid4(), org_id=org_id, story_id=story_id,
+        repo_full_name=repo_full_name, pr_number=pr_number,
+        link_source="explicit", confidence="high",
+    )
+    session.add(link)
+    await session.commit()
+    return link
+
+
+async def test_promote_owner_repo_hash_prefixed_not_promoted_to_story():
+    """PO rule① — `owner/repo#N`은 그 repo가 org 원장에도, 정적/동적 짧은이름
+    허용목록에도 없어도(슬래시 자체가 판별축) 항상 story 승격에서 빠진다(원장
+    부재=본문 그대로, story_number로 대체 해석하지 않는다). repo 이름을 허용목록
+    밖의 임의 문자열("randomorg/randomrepo")로 골라 `_SLASH_QUALIFIED_REPO_RE`
+    자신의 효과만 단독으로 잰다(레포 짧은이름 허용목록 축과 뒤섞이지 않게)."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=46, title="아무 스토리")
+            content = "randomorg/randomrepo#46 확인 바라는"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content  # 원장에 이 repo#46 링크가 없으니 완전히 그대로
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_repo_hash_unique_ledger_match_resolves_to_linked_story():
+    """PO rule① — 맨 `repo#N`(슬래시 없음)이 org 원장의 짧은이름과 «유일하게» 일치하고
+    그 PR에 연결된 스토리가 있으면 그 스토리로 해석한다(story_number 축과 무관한
+    별도 해석 경로 — repo#N이 story #46이 아니라 sprintable-agent-plugins PR#46에
+    연결된 스토리로 옷을 입는다, 실사고의 «올바른» 결과)."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+    from app.services.reference_token import build_reference_token
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            wrong_story = await _seed_story(s, org.id, project.id, number=46, title="S209: pm-api 정리")
+            linked_story = await _seed_story(s, org.id, project.id, number=999, title="플러그인 정리 작업")
+            await _seed_pr_link(
+                s, org.id, linked_story.id,
+                repo_full_name="moonklabs/sprintable-agent-plugins", pr_number=46,
+            )
+            content = "sprintable-agent-plugins #46 확인 바라는"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            expected_token = build_reference_token("story", linked_story.id, "#46 플러그인 정리 작업")
+            assert result == f"{expected_token} 확인 바라는"
+            assert promoted_ids == {linked_story.id}
+            assert wrong_story.id not in promoted_ids  # 실사고의 오승격 대상은 안 걸림
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_bare_number_still_promotes_when_no_pr_collision():
+    """PO rule② 음성대조 — 같은 N이 org pr_number 어디에도 없으면(콜리전 0) 맨 #N은
+    지금까지처럼 story_number로 승격된다(무회귀)."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+    from app.services.reference_token import build_reference_token
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            story = await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content="확인은 #24 참고",
+            )
+            expected_token = build_reference_token("story", story.id, "#24 보드 리팩터")
+            assert result == f"확인은 {expected_token} 참고"
+            assert promoted_ids == {story.id}
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_bare_number_ambiguous_with_org_pr_number_not_promoted():
+    """PO rule② — 같은 N이 story_number에도, org(레포 무관) pr_number에도 있으면
+    모호 — 치환 0(실사고의 근본 원인: story #46와 PR #46이 같은 표기 공간을 공유).
+    이 org의 다른 repo(예: 「sprintable」 본체)에 PR#24가 있어도 같은 판정 —
+    레포 무관(«이 플랫폼 원장 전체»가 판정 대상)."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            story = await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
+            other_story = await _seed_story(s, org.id, project.id, number=25, title="다른 작업")
+            await _seed_pr_link(
+                s, org.id, other_story.id, repo_full_name="moonklabs/sprintable", pr_number=24,
+            )
+            content = "확인은 #24 참고"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content  # 모호 — 손 안 댐
+            assert promoted_ids == set()
+            assert story.id not in promoted_ids
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_github_pr_url_resolves_to_linked_story():
+    """PO rule① — GitHub PR URL은 owner/repo가 URL 자체에 명시돼 있어 원장 유일성
+    문제 없이 바로 (repo_full_name, pr_number)를 뽑아 대조한다."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+    from app.services.reference_token import build_reference_token
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            linked_story = await _seed_story(s, org.id, project.id, number=999, title="플러그인 정리 작업")
+            await _seed_pr_link(
+                s, org.id, linked_story.id,
+                repo_full_name="moonklabs/sprintable-agent-plugins", pr_number=46,
+            )
+            content = "실물은 https://github.com/moonklabs/sprintable-agent-plugins/pull/46 참고"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            expected_token = build_reference_token("story", linked_story.id, "#46 플러그인 정리 작업")
+            assert result == f"실물은 {expected_token} 참고"
+            assert promoted_ids == {linked_story.id}
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_quoted_repo_hash_not_resolved_example_reuse():
+    """story #3162 원칙 재확認 — 인용부호 안의 `owner/repo#N`도 「예시로 재인용」이지
+    새 참조 의도가 아니다. 원장에 실제 PR 링크가 있어도(정정 메시지가 오염된 원문을
+    그대로 다시 인용하는 실사고 재현) 인용부호 안이면 치환하지 않는다."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            linked_story = await _seed_story(s, org.id, project.id, number=999, title="플러그인 정리 작업")
+            await _seed_pr_link(
+                s, org.id, linked_story.id,
+                repo_full_name="moonklabs/sprintable-agent-plugins", pr_number=46,
+            )
+            content = '아까 "moonklabs/sprintable-agent-plugins#46 확인"이라고 적었던'
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content
+            assert promoted_ids == set()
     finally:
         await engine.dispose()
