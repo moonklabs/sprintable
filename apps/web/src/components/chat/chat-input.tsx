@@ -197,6 +197,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionLoadFailed, setMentionLoadFailed] = useState(false);
 
   // story #2264(C-6): 채팅 전용이던 entityQuery/entityResults/entityIndex + 검색 effect가
   // 참조 코어 hook으로 옮겨갔다 — 이 컴포넌트는 소비자일 뿐이다.
@@ -247,18 +248,33 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   }, [prefillCommand]);
 
   useEffect(() => {
-    if (mentionQuery === null) { setMentionMembers([]); return; }
+    if (mentionQuery === null) { setMentionMembers([]); setMentionLoadFailed(false); return; }
     let cancelled = false;
-    fetchWithAuth(`/api/members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)
-      .then((r) => r.json())
+    // story #3687(3680 클래스) — project_id 없는 대화(org-level DM 등)는 project 스코프
+    // /api/members(project_id 필수, 없으면 422)가 원천적으로 못 닿는다. /api/team-members는
+    // project_id 생략 시 org 전체(휴먼+에이전트)로 이미 폴백하는 기존 엔드포인트라(S:166051f0)
+    // 여기서도 그대로 재사용 — project_id 있으면 기존과 동일하게 프로젝트 스코프 유지.
+    const params = new URLSearchParams({ is_active: 'true' });
+    if (projectId) params.set('project_id', projectId);
+    fetchWithAuth(`/api/team-members?${params.toString()}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`mention fetch ${r.status}`);
+        return r.json();
+      })
       .then((json) => {
         if (cancelled) return;
         const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null }) => ({ id: m.id, name: m.name, role: m.role }));
         const q = mentionQuery.toLowerCase();
         setMentionMembers(q ? all.filter((m) => m.name.toLowerCase().includes(q)) : all);
         setMentionIndex(0);
+        setMentionLoadFailed(false);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        // 실패≠0건 — 조용히 빈 목록으로 삼키지 않고 드롭다운에 실패 상태를 드러낸다(AC②).
+        setMentionMembers([]);
+        setMentionLoadFailed(true);
+      });
     return () => { cancelled = true; };
   }, [mentionQuery, projectId]);
 
@@ -765,6 +781,13 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Mention dropdown 실패 상태 — story #3687: 조용한 0건과 구분되는 별도 얼굴. */}
+        {mentionQuery !== null && mentionLoadFailed && (
+          <div role="status" className="focus-inset absolute bottom-full left-8 z-50 mb-1 w-56 rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
+            {t('mentionLoadFailed')}
+          </div>
         )}
 
         {/* Mention dropdown */}

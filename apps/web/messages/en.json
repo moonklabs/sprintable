@@ -4443,6 +4443,7 @@
     "deliveryContractLevel_all": "All",
     "deliveryContractLevel_mentions": "Mentions only",
     "deliveryContractLevel_mute": "Off",
+    "mentionLoadFailed": "Couldn't load the member list.",
     "deliveryContractFreeResponseLabel": "Allow replies without a mention",
     "deliveryContractFreeResponseDesc": "When on, participants set to \"mentions only\" in this conversation also receive messages that don't mention them.",
     "deliveryContractReasonGapNote": "Why a message wasn't delivered (e.g. chain limit reached) isn't shown here yet.",
