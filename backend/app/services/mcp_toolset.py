@@ -439,6 +439,9 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     # 콘텐츠 전용 그룹이 아직 없다는 기존 갭(REST _PATH_GROUP_PREFIXES에도 channel-posts
     # 미등록, 동일 갭)의 연장선. 새 그룹 신설은 이 스토리 범위 밖 — 후속 스토리 후보로 남긴다.
     "sprintable_withdraw_channel_post_draft",
+    # 발행물 인사이트(story #3651) — 이름에 "insight"가 있어 _GROUP_KEYWORDS의 "content"
+    # 그룹(3631 신설)이 이미 커버한다(위 withdraw와 달리 새 갭이 아니다).
+    "sprintable_get_publication_insights",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
