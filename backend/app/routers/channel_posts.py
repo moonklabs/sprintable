@@ -1415,9 +1415,7 @@ class WithdrawChannelPostDraftResponse(BaseModel):
     gate_status: str | None = None
 
 
-@router.post(
-    "/{org_id}/channel-posts/drafts/{draft_id}/withdraw", response_model=WithdrawChannelPostDraftResponse,
-)
+@router.post("/{org_id}/channel-posts/drafts/{draft_id}/withdraw", response_model=WithdrawChannelPostDraftResponse)
 async def withdraw_channel_post_draft_endpoint(
     org_id: uuid.UUID,
     draft_id: uuid.UUID,

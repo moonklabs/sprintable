@@ -980,7 +980,7 @@ _TOOL_DEFS: list[tuple] = [
      UpdateEventDefinitionInput, update_event_definition),
     # 채널 글 초안 폐기 — story #3614(2026-09-07)
     ("sprintable_withdraw_channel_post_draft",
-     "[콘텐츠] 채널 글 초안을 폐기(withdraw)한다 — 작성자(에이전트 포함) 또는 org owner/"
+     "[일감] 채널 글 초안을 폐기(withdraw)한다 — 작성자(에이전트 포함) 또는 org owner/"
      "admin만. 변경 요청을 받아들일 수 없을 때 재상신 대신 스스로 닫는 길. 열린(pending) "
      "게이트는 사유 「작성자가 폐기」로 rejected 종결, 이미 발행된 초안은 409(발행 취소는 "
      "별도 unpublish 경로). 이미 폐기된 초안 재호출은 멱등.",

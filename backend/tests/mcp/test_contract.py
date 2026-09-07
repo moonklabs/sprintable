@@ -116,6 +116,9 @@ EXPECTED_TOOLS = {
     "sprintable_publish_event", "sprintable_list_event_definitions",
     # events registry 등록(2) — story #2636: org 커스텀 이벤트 정의 등록/수정(admin 그룹).
     "sprintable_register_event_definition", "sprintable_update_event_definition",
+    # channel post drafts (1) — story #3614: 이 도메인의 첫 MCP 도구(withdraw). org-scoped URL을
+    # client.org_id로 수동 구성하는 첫 사례(server.py 참고).
+    "sprintable_withdraw_channel_post_draft",
     # smoke
     "ping",
 }
@@ -142,7 +145,9 @@ def test_total_tool_count():
     # REST를 MCP로 노출 — 도구 목록에 없어 에이전트가 발견 못 하던 것) — 121→122.
     # story #2709: sprintable_request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 122→123.
     # story #3331: sprintable_list_conversations 1종 신설(내 참여 방 목록 — 알림 미도달 백스톱) — 124→125.
-    assert len(_TOOLS) == 125  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    # story #3614: sprintable_withdraw_channel_post_draft 1종 신설(채널 글 초안 폐기 — 이 도메인
+    # 첫 MCP 도구) — 125→126.
+    assert len(_TOOLS) == 126  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

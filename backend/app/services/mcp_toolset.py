@@ -419,6 +419,11 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_publish_event", "sprintable_list_event_definitions",
     # events registry 등록(story #2636) — POST/PATCH /api/v2/events/definitions(org 커스텀).
     "sprintable_register_event_definition", "sprintable_update_event_definition",
+    # channel post drafts (story #3614) — 이 도메인의 첫 MCP 도구. "channel_post"/"withdraw"
+    # 둘 다 _GROUP_KEYWORDS에 없어 tool_group()이 core로 분류한다(cross-cutting 취급) —
+    # 콘텐츠 전용 그룹이 아직 없다는 기존 갭(REST _PATH_GROUP_PREFIXES에도 channel-posts
+    # 미등록, 동일 갭)의 연장선. 새 그룹 신설은 이 스토리 범위 밖 — 후속 스토리 후보로 남긴다.
+    "sprintable_withdraw_channel_post_draft",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
