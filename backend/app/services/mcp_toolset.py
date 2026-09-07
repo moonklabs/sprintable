@@ -297,6 +297,72 @@ _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/api/v2/visual-artifacts", "canvas"),
 )
 
+# story #3654(BE·REST·소형, 페드루 PO 確定 2026-09-07) — org 스코프 콘텐츠 경로
+# (`/api/v2/organizations/{org_id}/<segment>...`). `_PATH_GROUP_PREFIXES`(위, 고정
+# prefix 매칭)는 이 형을 표현 못 한다 — org_id가 동적 값으로 리터럴 prefix 사이에 끼어
+# 있어 `path.startswith(prefix)`가 안 통한다(test_3614_content_toolset_group_changes.py
+# 의 옛 pin이 이 갭을 기록해 뒀었다). 정규식 신설 대신 org_id **뒤 첫 세그먼트**만 뽑아
+# (그라운딩③ 싼 쪽) 이 표와 대조한다 — org_id 값 자체는 안 본다(UUID든 아니든 위치만).
+#
+# 그라운딩② 전수 — 6개 라우터(channel_posts·channel_connections·site_posts·
+# channel_post_comments·insight_snapshots·publishing_metrics)뿐 아니라 같은 콘텐츠
+# 파이프라인의 나머지 org-scoped 라우터(channel_post_comment_replies·insights_board)
+# 까지 실제 세그먼트를 전수 스캔하면 9개다(스토리 초안이 5개로 적었던 것보다 많다 —
+# publication-commands(발행 재시도)·comments(댓글 답변 초안)·insights/insights-board
+# (콘텐츠 성과 조회)도 같은 콘텐츠 파이프라인 자원이라 포함했다, PO 재확認 요청 완료).
+_ORG_SCOPED_PATH_GROUP_SEGMENTS: tuple[tuple[str, str], ...] = (
+    ("channel-posts", "content"),
+    ("site-posts", "content"),
+    ("publication-commands", "content"),
+    ("channel-connections", "content"),
+    ("publications", "content"),
+    ("comments", "content"),
+    ("insights", "content"),
+    ("insights-board", "content"),
+    ("publishing-metrics", "content"),
+)
+
+# story #3654(정적 가드) — `test_3654_org_scoped_content_rest_group.py`의 가드 테스트가
+# `app/routers/` 전수를 스캔해, `/api/v2/organizations/{org_id}/<segment>...`(또는
+# `/{id}/<segment>`) 형 라우터의 모든 세그먼트가 위 표에 있거나 이 목록에 «이유»와 함께
+# 있어야만 통과시킨다 — 새 org-scoped 자원이 표·목록 어느 쪽에도 없이 추가되면 가드가
+# 스스로 RED(b4027b2e류 사각지대의 재발을 "조용한 통과"가 아니라 "빨간 실패"로 바꾼다).
+# 아래 사유는 전부 실측 확認(sprintable_mcp/ 전수 grep) — 이 세그먼트들과 매칭되는 MCP
+# 도구/키워드가 현재 0건이라, REST를 미매핑으로 두는 것이 MCP 쪽 취급(core, 이미 존재하는
+# 별도 갭)과 최소한 "새로 벌어지지는" 않는다는 뜻 — 이 갭 자체를 정당화하지 않는다(이
+# 스토리 범위 밖일 뿐, 후속 후보로 남긴다).
+_ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
+    "campaigns": "MCP 도구/키워드 0건(REST·MCP 양쪽 다 core 취급 — 이 스토리가 새로 벌리는 격차 아님)",
+    "connectors": "MCP 도구/키워드 0건(connectors.py, 위와 동형)",
+    "content-rules": "MCP 도구/키워드 0건(content_rules.py, 콘텐츠 거버넌스 설정 — 산출물 자체가 아님)",
+    "generation-budget": "MCP 도구/키워드 0건(content_rules.py, 생성 한도 조회 — 산출물 자체가 아님)",
+    "domain-labels": "MCP 도구/키워드 0건(domain_labels.py, 사이트 도메인 설정·admin류)",
+    "gate-config": "MCP 도구/키워드 0건(gate_config.py, 승인 게이트 거버넌스 설정·admin류)",
+    "measurement-connections": "MCP 도구/키워드 0건(measurement_connections.py, GA4 연결 설정)",
+    "invites": "MCP 도구/키워드 0건(org_invites.py, org 멤버 초대·admin류)",
+    "metering-key": "MCP 도구/키워드 0건(pageview_metering.py, hosted-site 계측 설정·admin류)",
+    "pageviews": "MCP 도구/키워드 0건(pageview_metering.py, hosted-site pageview 조회)",
+    "impact": "MCP 도구/키워드 0건(organizations.py, org 임팩트 조회·admin류)",
+    "resolve": "MCP 도구/키워드 0건(organizations.py, slug→org 해소·session 유틸류)",
+    "(empty/root)": "MCP 도구/키워드 0건(organizations.py, org 목록/생성 자체·admin류)",
+    "(root, org_id only)": "MCP 도구/키워드 0건(organizations.py, org 단건 조회/수정·admin류)",
+}
+
+
+def _org_scoped_content_group(path: str) -> str | None:
+    """story #3654 — `/api/v2/organizations/<org_id>/<segment>[...]`에서 `<segment>`만
+    뽑아 `_ORG_SCOPED_PATH_GROUP_SEGMENTS`와 대조한다. org_id 자체는 값 무관(위치만
+    본다) — 정규식 없이 split만으로 충분하다."""
+    parts = [p for p in path.split("/") if p]
+    # ["api", "v2", "organizations", "<org_id>", "<segment>", ...]
+    if len(parts) < 5 or parts[0] != "api" or parts[1] != "v2" or parts[2] != "organizations":
+        return None
+    segment = parts[4]
+    for seg, group in _ORG_SCOPED_PATH_GROUP_SEGMENTS:
+        if seg == segment:
+            return group
+    return None
+
 
 def path_to_tool_group(path: str) -> str | None:
     """요청 path → toolset group. always-allowed/미매핑(core 취급)이면 None(강제 면제)."""
@@ -306,6 +372,9 @@ def path_to_tool_group(path: str) -> str | None:
     for prefix, group in _PATH_GROUP_PREFIXES:
         if path == prefix or path.startswith(prefix + "/"):
             return group
+    org_scoped_group = _org_scoped_content_group(path)
+    if org_scoped_group is not None:
+        return org_scoped_group
     return None  # 미매핑 → core 취급(허용)
 
 

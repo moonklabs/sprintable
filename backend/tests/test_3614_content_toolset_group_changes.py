@@ -46,27 +46,20 @@ def test_content_group_registered_in_all_groups_and_catalog_order():
     assert "content" in _CATALOG_DISPLAY_ORDER
 
 
-def test_channel_posts_rest_path_is_currently_unmapped_and_permissive():
-    """PO 요청 — REST 경계(`_PATH_GROUP_PREFIXES`) 등재 시도 결과를 선언한다.
-
-    channel_posts.py 라우터는 `/api/v2/organizations`(공유 prefix) 아래 `/{org_id}/
-    channel-posts/...`형이라 — 이 리스트의 다른 모든 항목(`/api/v2/stories`처럼 독립
-    top-level 자원)과 달리 org_id가 리터럴 prefix 사이에 끼어 있어 `path.startswith(prefix)`
-    단순 매칭으로는 표현이 안 된다(신규 매칭 방식 없이는 `/api/v2/organizations` 전체를
-    "content"로 묶어 다른 모든 org-scoped 자원까지 잘못 끌어오게 된다). 그래서 이 스토리는
-    등재하지 않는다 — 결과: `channel-posts` REST 엔드포인트는 지금 `_PATH_GROUP_PREFIXES`
-    미등록 → `path_to_tool_group()`가 None → `path_allowed_for_scope()`가 **scope 막론
-    True**(story b4027b2e가 canvas 편입 前 visual-artifacts에서 겪은 것과 정확히 같은
-    permissive-unmapped 폴백, 까심 라이브 실증 선례). 이 gap은 MCP 도구 쪽 그룹 경계
-    (위 테스트들)와는 독립적 축이고, channel-posts 라우터가 애초에 이 REST 경계 자체를
-    강제하는 의존성(get_verified_org_id)을 쓰는지와도 별개 문제 — 이 PR 범위 밖, 별건으로
-    남긴다(story #3631 이후 후속 후보)."""
+def test_channel_posts_rest_path_now_gated_into_content_story_3654():
+    """story #3654가 이 pin을 뒤집는다 — 이 테스트 이름·docstring이 옛 갭을 기록해 뒀던
+    자리(REST `_PATH_GROUP_PREFIXES`는 고정 prefix라 org_id가 동적으로 끼는
+    `/{org_id}/channel-posts` 형을 못 표현했다)를 그 갭이 닫혔다는 증거로 대체한다.
+    `_org_scoped_content_group()`(정규식 없이 org_id 뒤 세그먼트만 split으로 뽑는 새 매칭
+    축, mcp_toolset.py)가 이제 이 경로를 "content"로 판정한다 — 상세 계약(9개 세그먼트
+    전수·미매핑 예외 목록)은 test_3654_org_scoped_content_rest_group.py 참고."""
     from app.services.mcp_toolset import path_allowed_for_scope, path_to_tool_group
 
     withdraw_path = "/api/v2/organizations/org-1/channel-posts/drafts/draft-1/withdraw"
-    assert path_to_tool_group(withdraw_path) is None
-    assert path_allowed_for_scope(withdraw_path, ["stories"]) is True  # 무관 scope도 통과(gap)
-    assert path_allowed_for_scope(withdraw_path, []) is True
+    assert path_to_tool_group(withdraw_path) == "content"
+    assert path_allowed_for_scope(withdraw_path, ["stories"]) is False  # 무관 scope는 이제 막힌다.
+    assert path_allowed_for_scope(withdraw_path, ["content"]) is True
+    assert path_allowed_for_scope(withdraw_path, []) is True  # 레거시 빈 scope=전체 허용, 무회귀.
 
 
 def test_build_toolset_catalog_covers_withdraw_tool_in_content_group():
