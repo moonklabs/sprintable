@@ -5033,7 +5033,7 @@
     "specPinSaveAction": "저장",
     "specPinSavingAction": "저장하는 중…",
     "specPinCancelAction": "취소",
-    "specPinSaveFailedNote": "저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "saveFailedNote": "저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
     "artifactCreateFailed": "만들지 못했습니다. 잠시 후 다시 시도해 주세요.",
     "changeCount": "변경 {count}건",
     "commitSummaryPlaceholder": "변경 이유…",
