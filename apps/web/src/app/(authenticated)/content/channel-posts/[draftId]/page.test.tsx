@@ -169,6 +169,10 @@ function stubFetch(opts: {
         command_status: string | null; failure_kind: string | null;
         next_attempt_at: string | null; reason_code: string | null;
       } | null;
+      // story #3596(BE additive) — 「이어서 답변」 3갈래 판정에 쓴다(옵션, 대부분
+      // 시나리오는 생략 — 없으면 open_reply_draft=null·sent_replies_count=0 폴백).
+      open_reply_draft?: { id: string; status: string; text: string } | null;
+      sent_replies_count?: number;
     }[];
     active_count: number;
     deleted_count: number;
@@ -3724,6 +3728,109 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
     expect(textarea.value).toBe('');
     expect(document.querySelector('[data-testid="comments-reply-prefill-fetch-failed"]')).toBeNull();
+  });
+
+  // story #3596(AC2·AC7·AC11, 유나 지적·PO 決 2026-09-07) — 「이어서 답변」 직행도
+  // 목록 GET 스냅샷(open_reply_draft.text)을 그대로 안 믿고 열 때 단건 GET
+  // 1회로 다시 확인한다(다른 탭/에이전트가 그 사이 고쳤을 수 있어 옛 텍스트로
+  // 상신하면 새 편집을 덮어쓴다 — 409 가드는 "둘 생김"만 막지 "덮어씀"은
+  // 못 막는다). 뮤테이션(직행 GET을 지우고 스냅샷을 바로 쓰면, 이 테스트가
+  // 스냅샷 '옛 답변'이 아니라 실측 '실제 최신 답변'을 기대해 RED가 나야 한다).
+  it('「이어서 답변」 클릭 — 목록 스냅샷이 아니라 단건 GET으로 다시 가져온 원문이 채워진다', async () => {
+    let draftCreateCalled = false;
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          open_reply_draft: { id: 'draft-1', status: 'draft', text: '목록이 실어 준 옛 스냅샷' },
+          sent_replies_count: 0,
+        }],
+      },
+      onCommentReplyDraft: () => { draftCreateCalled = true; return { status: 201, body: {} }; },
+      onCommentReplyGet: () => ({
+        status: 200,
+        body: { id: 'draft-1', comment_id: 'c1', text: '실제 최신 답변(단건 GET)', status: 'draft', gate_id: null, external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: null },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const continueBtn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    expect(continueBtn.textContent).toBe(koMessages.content.commentsReplyContinueCta);
+    await act(async () => { continueBtn.click(); });
+    await flush();
+
+    expect(draftCreateCalled).toBe(false);
+    expect(document.body.textContent).toContain('실제 최신 답변(단건 GET)');
+    expect(document.body.textContent).not.toContain('목록이 실어 준 옛 스냅샷');
+    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')).toBeNull();
+    expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
+  });
+
+  it('「이어서 답변」인데 단건 GET이 실패하면 commentsReplyDraftPrefillFetchFailed로 안전 폴백하되 상신 버튼은 그대로 있다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          open_reply_draft: { id: 'draft-1', status: 'draft', text: '목록이 실어 준 옛 스냅샷' },
+          sent_replies_count: 0,
+        }],
+      },
+      onCommentReplyGet: () => ({ status: 404, body: { data: null, error: { code: 'COMMENT_REPLY_NOT_FOUND', message: 'not found' }, meta: null } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const continueBtn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    await act(async () => { continueBtn.click(); });
+    await flush();
+
+    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')?.textContent)
+      .toBe(koMessages.content.commentsReplyDraftPrefillFetchFailed);
+    expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
+  });
+
+  // story #3596(페드루 PO 追加 2026-09-07) — 레이스: 목록은 초안이 없다고 봤지만
+  // (일반 「답변」로 빈 create 폼을 연 채) 다른 세션이 먼저 초안을 만들어 create가
+  // 409+existing_reply_id로 막힌다. 재시도로 우회하지 않고 그 초안 id로 단건
+  // GET(AC11 재사용)해 이어간다.
+  it('일반 「답변」 임시저장이 409+existing_reply_id로 막히면 그 초안 원문을 단건 GET으로 채워 이어간다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{ id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?', external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null }],
+      },
+      onCommentReplyDraft: () => ({
+        status: 409,
+        body: { data: null, error: { code: 'COMMENT_REPLY_DRAFT_ALREADY_OPEN', message: '안 보낸 초안이 이미 있습니다.', existing_reply_id: 'reply-race' }, meta: null },
+      }),
+      onCommentReplyGet: () => ({
+        status: 200,
+        body: { id: 'reply-race', comment_id: 'c1', text: '레이스로 먼저 생긴 초안', status: 'draft', gate_id: null, external_reply_id: null, external_reply_url: null, last_error: null, target_comment_state: null },
+      }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const replyBtn = container.querySelector('[data-testid="comments-item-reply"]') as HTMLButtonElement;
+    expect(replyBtn.textContent).toBe(koMessages.content.commentsReplyCta);
+    await act(async () => { replyBtn.click(); });
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(textarea, '내가 막 쓰던 것'); textarea.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    await flush();
+
+    expect(document.querySelector('[data-testid="comments-reply-error"]')).toBeNull();
+    expect(document.body.textContent).toContain('레이스로 먼저 생긴 초안');
+    expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
   });
 
   it('「답변」 상신 409(대상 삭제) — 서버 문구가 그대로 뜬다', async () => {

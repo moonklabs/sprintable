@@ -385,6 +385,13 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 클래스 밖). actual/target을 NON_NUMBER_PLACEHOLDER_NAMES에 넣지 않는다(PO 지적
   // — 그 이름들은 다른 자리에서 진짜 수를 실을 수 있어 자를 무디게 만든다).
   'content.channelPostsCoverAttachLabel <-> content.channelPostsVideoCoverAspectRatioRejected',
+  // story #3596(유나 §22-16 ⑦, 페드루 PO 追加 2026-09-07) — content.commentsReplyDialogTitle
+  // ("답변", 다이얼로그 제목) <-> content.commentsReplyAlreadySentCount("이 댓글에
+  // 이미 보낸 답변 {count}건", 대상 댓글 블록의 한 줄). 겹치는 건 "답변"이라는
+  // 이 화면 전역의 공통 명사 하나뿐 — 제목 라벨과 개수 안내 문장은 서로 다른
+  // 자리(다이얼로그 헤더 vs 본문 안내)에서 다른 걸 말한다. #2352/#2365가 잡으려는
+  // "같은 화면의 두 «수»가 헷갈리는" 병이 아니다(count는 이 안내 문장에만 있다).
+  'content.commentsReplyAlreadySentCount <-> content.commentsReplyDialogTitle',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

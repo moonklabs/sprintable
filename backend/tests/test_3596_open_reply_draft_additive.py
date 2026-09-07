@@ -155,6 +155,35 @@ async def test_sent_reply_plus_new_draft_shows_both_derived_fields_consistently(
             assert item["replies_count"] == 2
             assert item["sent_replies_count"] == 1
             assert item["open_reply_draft"]["id"] == str(open_draft.id)
+            # story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 보낸
+            # 답변이 있으면(1건이라도) latest_sent_reply_status가 "sent"를 말해야
+            # 한다 — reply.status(최신·이 표본에선 안 보낸 초안이라 "draft")와
+            # 별도 축. 배지 조립(count>=2)이 이 값을 쓴다.
+            assert item["latest_sent_reply_status"] == "sent"
+            assert item["reply"]["status"] == "draft", "reply는 여전히 draft/pending 포함 최신(이 필드는 안 건드린다)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_latest_sent_reply_status_null_when_no_sent_reply_exists():
+    """뮤테이션 대상(latest_sent_reply_status_by_comment_id 배선 제거 → 이 assert가
+    RED — get(id)가 None으로 안전 폴백하는 것과 별개로, 「보낸 답변 있음」 표본
+    (위 테스트)이 null로 떨어지면 그쪽이 먼저 RED가 난다)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id, _ = await _seed_human(s, org_id, role="owner")
+            _, _, _, pub = await _seed_full_publication_chain(s, org_id=org_id, project_id=project_id)
+            comment = await _seed_comment(s, org_id=org_id, publication_id=pub.id)
+            await _create_reply(s, org_id=org_id, comment=comment, text="아직 안 보냄", human_id=human_id)
+
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+            async with _client_for(app) as client:
+                resp = await client.get(f"/api/v2/organizations/{org_id}/publications/{pub.id}/comments")
+            item = resp.json()["comments"][0]
+            assert item["latest_sent_reply_status"] is None
     finally:
         await engine.dispose()
 
@@ -180,5 +209,48 @@ async def test_create_draft_rejects_second_draft_with_409_and_existing_id():
             assert resp.status_code == 409, resp.text
             body = resp.json()
             assert body["error"]["existing_reply_id"] == str(first_draft.id), body
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_pending_reply_status_still_exposes_open_reply_draft_and_blocks_new_draft():
+    """AC12(카디르 #3949 QA 갭, 2026-09-06 16:15Z) — 스위트에 reply.status="pending"을
+    실제로 만드는 케이스가 0건이라 open_reply_draft·sent_replies_count의 pending
+    필터가 RED 없이 지나갔다. draft→submit(실제 pending 전이)→목록 API에서
+    open_reply_draft.status=="pending"·sent_replies_count==0·새 초안 시도 409를
+    한 번에 고정한다(뮤테이션: _open_reply_draft_by_comment_ids의 status.in_(("draft",
+    "pending")) 필터에서 "pending"을 빼면 이 테스트가 open_reply_draft=None을
+    보게 돼 RED가 나야 한다)."""
+    from app.services.channel_post_comment_replies import submit_comment_reply
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id, _ = await _seed_human(s, org_id, role="owner")
+            _, _, _, pub = await _seed_full_publication_chain(s, org_id=org_id, project_id=project_id)
+            comment = await _seed_comment(s, org_id=org_id, publication_id=pub.id)
+
+            draft = await _create_reply(s, org_id=org_id, comment=comment, text="상신 대기 답변", human_id=human_id)
+            submitted = await submit_comment_reply(s, org_id=org_id, reply_id=draft.id, requester_member_id=human_id)
+            assert submitted.status == "pending", submitted.status
+
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+            async with _client_for(app) as client:
+                list_resp = await client.get(f"/api/v2/organizations/{org_id}/publications/{pub.id}/comments")
+                item = list_resp.json()["comments"][0]
+                assert item["open_reply_draft"] is not None, item
+                assert item["open_reply_draft"]["id"] == str(draft.id)
+                assert item["open_reply_draft"]["status"] == "pending"
+                assert item["sent_replies_count"] == 0
+
+                # 안 보낸 초안(status=pending)이 이미 있으니 새 초안 요청도 여전히 409.
+                create_resp = await client.post(
+                    f"/api/v2/organizations/{org_id}/comments/{comment.id}/replies", json={"text": "두 번째 시도"},
+                )
+                assert create_resp.status_code == 409, create_resp.text
+                assert create_resp.json()["error"]["existing_reply_id"] == str(draft.id)
     finally:
         await engine.dispose()
