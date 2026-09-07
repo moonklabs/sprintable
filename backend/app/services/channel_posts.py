@@ -454,6 +454,7 @@ async def create_channel_post_draft_version(
     author_kind: str,
     image_sha256: str | None = _IMAGE_SHA256_CARRY_FORWARD,  # type: ignore[assignment]
     source_content_item_id: uuid.UUID | None = None,
+    hook_key: str | None = None,
 ) -> tuple[ChannelPostVersion, str, list[dict]]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
     site_posts.create_site_post_draft_version과 1:1 대응(AC1).
@@ -474,7 +475,13 @@ async def create_channel_post_draft_version(
     story #3437(AC2, 페드루 PO 確定 2026-09-04) — `source_content_item_id`는 **초안
     생성 시에만** 반영한다(channel이 connection_id의 파생값으로 생성 시에만 고정되는
     것과 동형 축 — 편집마다 다시 보내는 text/link_url과는 다른 종류의 필드). org
-    불일치·존재하지 않는 원문은 `ChannelPostSourceContentItemNotFoundError`(422)."""
+    불일치·존재하지 않는 원문은 `ChannelPostSourceContentItemNotFoundError`(422).
+
+    story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07) — `hook_key`는 `link_url`과
+    동형(캐리포워드 없음, 매 호출이 현재 값을 명시) — image_sha256과 달리 「빈손
+    발행」류 결함 소지가 없는 순수 분석 라벨이라 캐리포워드 sentinel을 얹는 복잡도가
+    안 남는다. 형식 검사(≤64자·`[A-Za-z0-9_-]`)는 라우터 요청 모델(422)에서 이미
+    끝낸 값만 여기로 들어온다."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
 
@@ -535,7 +542,7 @@ async def create_channel_post_draft_version(
         id=uuid.uuid4(), draft_id=draft.id, version=next_version,
         text=text, link_url=link_url,
         body_sha256=compute_channel_post_hash(text=text, link_url=link_url),
-        image_sha256=resolved_image_sha256,
+        image_sha256=resolved_image_sha256, hook_key=hook_key,
         author_member_id=author_member_id, author_kind=author_kind,
     )
     db.add(version)

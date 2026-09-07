@@ -2,6 +2,7 @@
 API. `app/routers/site_posts.py`(story #3365) 형태를 그대로 미러 — 새 패턴 발명 0."""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -151,6 +152,10 @@ async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: u
     return resolved
 
 
+# story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07).
+_HOOK_KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+
+
 class CreateChannelPostDraftVersionRequest(BaseModel):
     work_item_id: uuid.UUID
     connection_id: uuid.UUID
@@ -172,6 +177,20 @@ class CreateChannelPostDraftVersionRequest(BaseModel):
     # 시에만 반영, 편집(기존 draft) 호출은 무시된다(서비스 계층 docstring 참고).
     source_content_item_id: uuid.UUID | None = None
 
+    # story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07) — 훅(캡션 도입부) A/B 태깅용
+    # 분석 라벨. link_url과 동형(캐리포워드 없음, 이 요청의 값이 현재 값). 생략/null=
+    # 라벨 없음.
+    hook_key: str | None = None
+
+    @field_validator("hook_key")
+    @classmethod
+    def _hook_key_format(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if len(v) > 64 or not _HOOK_KEY_PATTERN.fullmatch(v):
+            raise ValueError("hook_key는 64자 이하의 영문·숫자·-·_ 조합이어야 합니다")
+        return v
+
 
 class ChannelPostDraftVersionResponse(BaseModel):
     draft_id: uuid.UUID
@@ -186,6 +205,8 @@ class ChannelPostDraftVersionResponse(BaseModel):
     # 빈 배열=위반 없음(지어내지 않는다 — organization이 규칙을 아예 안 정했으면 항상
     # 빈 배열).
     violations: list[dict] = []
+    # story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07).
+    hook_key: str | None = None
 
 
 class ChannelPostVideoMeta(BaseModel):
@@ -494,7 +515,7 @@ async def post_channel_post_draft_version(
         version, channel, violations = await create_channel_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, connection_id=body.connection_id,
             text=body.text, link_url=body.link_url, author_member_id=member_id, author_kind=actor_type,
-            source_content_item_id=body.source_content_item_id,
+            source_content_item_id=body.source_content_item_id, hook_key=body.hook_key,
         )
     except ChannelPostSourceContentItemNotFoundError as exc:
         raise HTTPException(
@@ -528,6 +549,7 @@ async def post_channel_post_draft_version(
         draft_id=version.draft_id, version_id=version.id, version=version.version,
         author_kind=version.author_kind, body_sha256=version.body_sha256,
         tagged_link_preview=tagged_link_preview, violations=violations,
+        hook_key=version.hook_key,
     )
 
 

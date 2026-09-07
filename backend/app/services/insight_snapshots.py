@@ -17,6 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.channel_post_image import ChannelPostImage
+from app.models.channel_post_version import ChannelPostVersion
+from app.models.channel_post_video import ChannelPostVideo
+from app.models.channel_publication import ChannelPublication
 from app.models.insight_snapshot import InsightSnapshot
 from app.services.facebook_publish import _GRAPH_BASE as _FACEBOOK_GRAPH_BASE
 from app.services.instagram_publish import _GRAPH_BASE as _INSTAGRAM_GRAPH_BASE
@@ -769,6 +773,50 @@ async def _maybe_enrich_with_ga4_inflow(db: AsyncSession, snapshot: InsightSnaps
         snapshot.normalized.update(inflow)
 
 
+async def _resolve_channel_publication_asset_evidence(
+    db: AsyncSession, snapshot: InsightSnapshot,
+) -> tuple[list[str] | None, str | None]:
+    """story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07 — 그라운딩 정정: asset_master
+    개념은 코드 0건, 블루프린트 «처분»을 «착지»로 읽은 PO 오독이었다) — 이 스냅샷이
+    가리키는 발행물이 실제로 내보낸 소재(이미지/영상)의 sha256을 position 순으로,
+    그리고 그 버전에 걸린 `hook_key`를 함께(`(asset_sha256s, hook_key)`) — 같은
+    `ChannelPublication`→`ChannelPostVersion` 조회를 한 번만 태운다.
+
+    `publication_kind == "site_post"`(hosted_site)는 이미지/영상·hook_key 개념
+    자체가 없어 `(None, None)`(있는 걸 지어내지 않는다). `channel_publication`만
+    `ChannelPublication.version_id`를 거쳐 찾는다 — 릴스(`ChannelPostVideo`, story
+    #3554)면 영상+커버(position=0 이미지) 순으로 2건, 아니면 `ChannelPostImage`를
+    position 순으로(캐러셀 N장 또는 단일 1장). 이미지도 영상도 없으면(텍스트만)
+    asset_sha256s는 None. hook_key는 이 시점의 `ChannelPostVersion.hook_key` 값을
+    그대로 카피 — 발행 뒤 그 컬럼을 고쳐도 이미 기록된 이 evidence는 안 바뀐다."""
+    if snapshot.publication_kind != "channel_publication":
+        return None, None
+
+    publication = await db.get(ChannelPublication, snapshot.publication_id)
+    if publication is None:
+        return None, None
+
+    version = await db.get(ChannelPostVersion, publication.version_id)
+    hook_key = version.hook_key if version is not None else None
+
+    video = (await db.execute(
+        select(ChannelPostVideo).where(ChannelPostVideo.version_id == publication.version_id)
+    )).scalar_one_or_none()
+
+    images = (await db.execute(
+        select(ChannelPostImage)
+        .where(ChannelPostImage.version_id == publication.version_id)
+        .order_by(ChannelPostImage.position.asc())
+    )).scalars().all()
+
+    sha256s: list[str] = []
+    if video is not None:
+        sha256s.append(video.original_sha256)
+    sha256s.extend(image.original_sha256 for image in images)
+
+    return sha256s or None, hook_key
+
+
 async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) -> None:
     """story #3497 그라운딩①(페드루 決定 반영) — evidence.payload(JSONB)에 구조화
     데이터를, note에는 사람용 한 줄만. Evidence(...) 직접 construct(evidence_service.py
@@ -786,6 +834,11 @@ async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) 
     parts = [f"{k}={v}" for k, v in n.items() if v is not None]
     note = f"{', '.join(parts)} · captured {snapshot.captured_at.strftime('%m-%d %H:%MZ')}" if snapshot.captured_at else ", ".join(parts)
 
+    # story #3645 — 이 evidence 시점의 소재 계보·hook_key를 고정한다(publish 뒤 draft
+    # 쪽 이미지나 hook_key가 바뀌어도 이미 기록된 이 evidence는 안 바뀐다 — 카피지
+    # 참조가 아니다).
+    asset_sha256s, hook_key = await _resolve_channel_publication_asset_evidence(db, snapshot)
+
     db.add(Evidence(
         id=uuid.uuid4(), org_id=snapshot.org_id, work_item_id=snapshot.work_item_id,
         work_item_type="story", type="metric", ref=str(snapshot.id), source=snapshot.channel,
@@ -793,5 +846,6 @@ async def _record_insight_evidence(db: AsyncSession, snapshot: InsightSnapshot) 
         payload={
             **n, "captured_at": snapshot.captured_at.isoformat() if snapshot.captured_at else None,
             "source": snapshot.channel, "snapshot_id": str(snapshot.id), "recorded_by": "platform",
+            "asset_sha256s": asset_sha256s, "hook_key": hook_key,
         },
     ))
