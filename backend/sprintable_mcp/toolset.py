@@ -108,6 +108,9 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 안 두면 스코프 키(대부분의 role_template)에서 403으로 안 보인다. 백엔드 SSOT와 동기화
     # (app/services/mcp_toolset.py).
     "sprintable_list_agent_cards",
+    # story #3614 CHANGES(2026-09-07) — 백엔드 SSOT와 동기화. 카탈로그 커버리지 임시 해소
+    # (story #3631이 콘텐츠 전용 그룹을 신설하면 그쪽으로 옮기고 여기서 뺀다).
+    "sprintable_withdraw_channel_post_draft",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

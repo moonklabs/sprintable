@@ -135,6 +135,14 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 스코프 키가 이 도구를 403으로 못 본다. vendored 사본과 동기화 필수
     # (sprintable_mcp/toolset.py).
     "sprintable_list_agent_cards",
+    # story #3614 CHANGES(2026-09-07, 페드루 PO 判定) — sprintable_withdraw_channel_post_draft
+    # 등록 직후 build_toolset_catalog() 커버리지 검증(test_toolset_catalog.py::test_every_
+    # tool_covered_exactly_once)에서 발견: tool_group()이 매칭 키워드 없음→"core"를 반환해도
+    # 그 자체로는 카탈로그에 안 나타난다(카탈로그의 "core" 그룹은 오직 _ALWAYS_ALLOWED만
+    # 나열 — tool_group()의 fallback "core"와 이 목록은 별개 축). 콘텐츠 전용 toolset 그룹은
+    # story #3631(진행 중)이 신설한다 — 그 그룹이 서면 이 항목은 거기로 옮기고 여기서 뺀다
+    # (임시 조치, always-allow 의미 확대가 목적이 아니라 커버리지 공백 임시 해소).
+    "sprintable_withdraw_channel_post_draft",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
