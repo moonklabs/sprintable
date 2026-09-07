@@ -19,7 +19,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -29,6 +29,31 @@ from app.models.team import TeamMember
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+
+def _is_human_member(member_id_col, *, user_id: uuid.UUID | None = None):
+    """story #3627(prod 결함, 페드루 PO 確定 2026-09-07) — 이 member_id가 「휴먼」인지
+    판정하는 유일한 자리(member_resolver.py 첫 줄과 같은 규칙, 새 판정자 발명 0).
+
+    E-MEMBER-SSOT Phase 0부터 JWT 휴먼의 참여자/발신자 id는 `org_members.id`다
+    (org_members 테이블 자체가 휴먼 전용이라 추가 type 조건 불요) — 그런데
+    이 모듈의 왕복·딥링크 판정은 여전히 `team_members(type='human')`로만 이었다.
+    team_members에 그 org의 휴먼 행이 하나도 없으면(SSOT 전환 이후 만들어진
+    org 다수) `human_before`·`requester_is_participant`가 영원히 false로
+    떨어져 "대화 中인데도 미완료·딥링크 null"이 났다(dev PO Test Org 실측).
+
+    둘 다 인정(OR) — legacy team_member(type='human') 행이 남아있는 org도
+    회귀 없이 그대로 통과해야 한다(#3607 기존 테스트가 그 표본).
+    `user_id`를 주면 그 유저 소유 여부까지, 안 주면 "휴먼이기만 하면" 통과."""
+    org_member_conditions = [OrgMember.id == member_id_col, OrgMember.deleted_at.is_(None)]
+    team_member_conditions = [TeamMember.id == member_id_col, TeamMember.type == "human"]
+    if user_id is not None:
+        org_member_conditions.append(OrgMember.user_id == user_id)
+        team_member_conditions.append(TeamMember.user_id == user_id)
+    return or_(
+        select(OrgMember.id).where(*org_member_conditions).exists(),
+        select(TeamMember.id).where(*team_member_conditions).exists(),
+    )
 
 
 async def get_owner_org_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | None:
@@ -99,15 +124,13 @@ async def is_org_first_roundtrip_done(db: AsyncSession, org_id: uuid.UUID) -> bo
     """휴먼 발신 메시지 "이후"에 온 최초 agent 발신 메시지 존재(같은 conversation 안 순서조건).
     존재만 보면 #3157과 어긋난다(디디 지적) — 반드시 human_msg.created_at < agent_msg.created_at."""
     HumanMsg = aliased(ConversationMessage)
-    HumanSender = aliased(TeamMember)
     AgentSender = aliased(TeamMember)
 
     human_before = (
         select(HumanMsg.id)
-        .join(HumanSender, HumanSender.id == HumanMsg.sender_id)
         .where(
             HumanMsg.conversation_id == ConversationMessage.conversation_id,
-            HumanSender.type == "human",
+            _is_human_member(HumanMsg.sender_id),
             HumanMsg.created_at < ConversationMessage.created_at,
         )
         .exists()
@@ -147,28 +170,23 @@ async def get_first_instruction_conversation_id(
     거부와 동형 — 그 403 자체는 옳다, 애초에 링크가 거기로 가면 안 된다). `requester_user_id`
     의 human TeamMember가 참여자인 대화만 후보로 좁힌다."""
     HumanMsg = aliased(ConversationMessage)
-    HumanSender = aliased(TeamMember)
     AgentSender = aliased(TeamMember)
     RequesterParticipant = aliased(ConversationParticipant)
-    RequesterMember = aliased(TeamMember)
 
     requester_is_participant = (
         select(RequesterParticipant.id)
-        .join(RequesterMember, RequesterMember.id == RequesterParticipant.member_id)
         .where(
             RequesterParticipant.conversation_id == Conversation.id,
-            RequesterMember.user_id == requester_user_id,
-            RequesterMember.type == "human",
+            _is_human_member(RequesterParticipant.member_id, user_id=requester_user_id),
         )
         .exists()
     )
 
     human_before = (
         select(HumanMsg.id)
-        .join(HumanSender, HumanSender.id == HumanMsg.sender_id)
         .where(
             HumanMsg.conversation_id == ConversationMessage.conversation_id,
-            HumanSender.type == "human",
+            _is_human_member(HumanMsg.sender_id),
             HumanMsg.created_at < ConversationMessage.created_at,
         )
         .exists()

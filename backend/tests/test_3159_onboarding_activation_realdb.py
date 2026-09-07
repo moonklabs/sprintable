@@ -494,6 +494,128 @@ async def test_is_org_first_roundtrip_order_sensitive():
 
 
 @pytest.mark.anyio
+async def test_is_org_first_roundtrip_done_recognizes_org_member_only_human():
+    """story #3627(prod 결함, 페드루 PO 確定 2026-09-07) — E-MEMBER-SSOT Phase 0부터 JWT
+    휴먼의 sender_id는 `org_members.id`(별개 테이블 PK, `members`/`project_access`/
+    `team_members` 뷰와 겹치지 않는 id 공간)다. 이 휴먼이 `members` 행(따라서 team_members
+    뷰에 잡히는 legacy 행)이 하나도 없는 org(SSOT 전환 이후 만들어진 org 다수의 실제
+    모양, dev PO Test Org 실측과 동형)에서도 왕복 판정이 서야 한다 — org_members만
+    seed(members/project_access 0행)."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj = _uuid()
+            human_user = _uuid()
+            om_human = _uuid()
+            agent_member = _uuid()
+            app_id = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{human_user}','story3159-ssot@t.test','x','U',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            # 휴먼은 org_members 딱 1행뿐 — members/project_access(따라서 team_members
+            # 뷰)에 이 사람 행이 아예 없다(그라운딩 확인: conversation_participants.
+            # member_id·conversation_messages.sender_id엔 real FK가 없어 org_members.id를
+            # 그대로 써도 무결성 위반 0 — 실물 스키마 확認).
+            await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{om_human}','{ORG}','{human_user}','member')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES ('{agent_member}','{ORG}','agent','A')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
+            ))
+            await s.commit()
+
+            now = datetime.now(timezone.utc)
+            t0, t1 = now - timedelta(hours=1), now
+            conv = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type) VALUES ('{conv}','{ORG}','{proj}','group')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_messages (id,conversation_id,sender_id,content,created_at) VALUES "
+                f"('{_uuid()}','{conv}','{om_human}','hi(org_member만)','{t0.isoformat()}'),"
+                f"('{_uuid()}','{conv}','{agent_member}','hello','{t1.isoformat()}')"
+            ))
+            await s.commit()
+            assert (await svc.is_org_first_roundtrip_done(s, uuid.UUID(ORG))) is True
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text("DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
+    await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_first_instruction_conversation_id_org_member_only_human():
+    """story #3627 — 딥링크 축도 마찬가지: 요청 휴먼이 org_members에만 있어도(legacy
+    team_members 행 0) requester_is_participant가 그를 참여자로 인정해야 한다. 원본
+    실증(dev PO Test Org)은 정확히 이 모양이었다(human TeamMember 0행·API 참여자는
+    org_member ecc99eaf)."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj = _uuid()
+            human_user = _uuid()
+            om_human = _uuid()
+            agent_member = _uuid()
+            app_id = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{human_user}','story3159-ssot2@t.test','x','U',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{om_human}','{ORG}','{human_user}','member')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES ('{agent_member}','{ORG}','agent','A')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
+            ))
+            await s.commit()
+
+            # 대화 0건 — None(①).
+            assert (await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))) is None
+
+            dm = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type,created_at) VALUES "
+                f"('{dm}','{ORG}','{proj}','dm', now())"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{dm}','{om_human}'),('{_uuid()}','{dm}','{agent_member}')"
+            ))
+            await s.commit()
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))
+            assert str(result) == dm, "org_member만 있는 휴먼도 참여자로 인정돼 딥링크가 나와야 한다(②)"
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text("DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
+    await eng.dispose()
+
+
+@pytest.mark.anyio
 async def test_find_reminder_candidates_window_dedup_optout_complete():
     eng, Session = await _engine()
     async with Session() as s:
