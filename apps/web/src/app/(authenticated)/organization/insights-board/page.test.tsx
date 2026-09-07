@@ -113,6 +113,7 @@ function stubFetch(opts: {
   page1NextCursor?: string | null;
   page2?: unknown[];
   followUp?: (init?: RequestInit) => { status: number; body: unknown };
+  reconcile?: (init?: RequestInit) => { status: number; body: unknown };
 }) {
   const page1 = opts.page1 ?? [ROW_A, ROW_B, ROW_C];
   const page1HasMore = opts.page1HasMore ?? false;
@@ -128,6 +129,16 @@ function stubFetch(opts: {
       // FastAPI raw 에러 바디(`{detail: ...}`)를 그대로 pass-through한다(위 follow-ups/
       // route.ts 그대로) — 그래서 실패 케이스의 opts.followUp 반환 body는 이미 그 raw
       // 형상이어야 하고, 여기서 다시 감싸면 안 된다.
+      return {
+        ok, status: result.status,
+        json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body),
+      } as Response;
+    }
+    if (url.includes('/reconcile') && init?.method === 'POST') {
+      const result = opts.reconcile?.(init) ?? {
+        status: 201, body: { id: 'recon-1', publication_id: 'pub-a', snapshot_id: null, live_raw: {}, verdicts: { views: 'match' }, has_mismatch: false, created_at: '2026-09-07T00:00:00Z' },
+      };
+      const ok = result.status < 400;
       return {
         ok, status: result.status,
         json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body),
@@ -460,5 +471,61 @@ describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)'
     stubFetch({});
     await mount();
     expect(scrollIntoViewMock).not.toHaveBeenCalled();
+  });
+});
+
+// story #3620 AC3 — 행 액션 「원본과 대조」(발행 後 행에만·진행 中 비활성·결과는
+// 행 아래 한 줄).
+describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () => {
+  it('channel_publication 행(A·C)에만 버튼이 있고, site_post 행(B)엔 없다', async () => {
+    stubFetch({});
+    await mount();
+    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    expect(rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    expect(rows[1]!.querySelector('[data-testid="insights-board-reconcile-button"]')).toBeNull();
+    expect(rows[2]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+  });
+
+  it('누르면 진행 中 비활성 상태를 거쳐 결과가 행 아래 한 줄로 뜬다(지표별 일치/불일치/미측정)', async () => {
+    stubFetch({
+      reconcile: () => ({
+        status: 201,
+        body: {
+          id: 'recon-1', publication_id: 'pub-a', snapshot_id: 'snap-1', live_raw: {},
+          verdicts: { views: 'mismatch', engagements: 'match', impressions: 'unmeasured' },
+          has_mismatch: true, created_at: '2026-09-07T00:00:00Z',
+        },
+      }),
+    });
+    await mount();
+    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+
+    await act(async () => { btn.click(); });
+    await flush();
+
+    const resultLine = container.querySelector('[data-testid="reconcile-result-line"]');
+    expect(resultLine).not.toBeNull();
+    expect(resultLine!.textContent).toContain(koMessages.insightsBoard.reconcileVerdictMismatch);
+    expect(resultLine!.textContent).toContain(koMessages.insightsBoard.reconcileVerdictMatch);
+    expect(resultLine!.textContent).toContain(koMessages.insightsBoard.reconcileVerdictUnmeasured);
+  });
+
+  it('409 CHANNEL_CONNECTION_NOT_ACTIVE — content 네임스페이스 기존 키(신규 키 0)의 문구가 행 아래에 뜬다', async () => {
+    // story #3620 CHANGES(카디르 발견) — 새 키를 만들지 않고 content.errorChannelConnectionNotActive
+    // (「연결 화면에서 확인」 안내까지 포함된 정본)를 재사용한다.
+    stubFetch({
+      reconcile: () => ({ status: 409, body: { detail: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: 'raw' } } }),
+    });
+    await mount();
+    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="insights-board-reconcile-error"]')?.textContent).toBe(
+      koMessages.content.errorChannelConnectionNotActive,
+    );
   });
 });

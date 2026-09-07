@@ -22,8 +22,10 @@ from app.services.insights_board import (
     create_publication_follow_up,
     list_insights_board,
 )
+from app.services.insight_snapshots import InsightFetchError
 from app.services.measured_metrics import compute_measured_metrics
 from app.services.member_resolver import resolve_member
+from app.services.publication_reconciliation import reconcile_publication
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["insights-board"])
 
@@ -83,11 +85,32 @@ class MeasuredMetricValue(BaseModel):
     reason_code: str | None
 
 
+class MismatchCountValue(BaseModel):
+    """story #3620 CHANGES(2026-09-07, 페드루 PO·유나 낱말 판정) — 「불일치 수」는
+    스토리 정의 3 그대로 수(count)다. MeasuredMetricValue의 분모/분자 형은 비율
+    지표 전용이라 여기엔 안 맞는다(억지로 끼워 맞추면 "3/12"류 분수로 잘못 읽힌다)."""
+    value: int | None
+    reason_code: str | None
+
+
 class MeasuredMetricsResponse(BaseModel):
     utm_attribution_rate: MeasuredMetricValue
     comment_miss_rate: MeasuredMetricValue
     follow_up_creation_rate: MeasuredMetricValue
+    # story #3620(additive) — 「채널 원본 지표와 evidence 대조」 4열.
+    reconciliation_coverage_rate: MeasuredMetricValue
+    reconciliation_mismatch_count: MismatchCountValue
     computed_at: datetime
+
+
+class ReconciliationResponse(BaseModel):
+    id: uuid.UUID
+    publication_id: uuid.UUID
+    snapshot_id: uuid.UUID | None
+    live_raw: dict[str, Any]
+    verdicts: dict[str, str]
+    has_mismatch: bool
+    created_at: datetime
 
 
 @router.get("/{org_id}/insights-board", response_model=InsightsBoardResponse)
@@ -163,6 +186,38 @@ async def create_publication_follow_up_endpoint(
             detail={"code": "FOLLOW_UP_INVALID_KIND", "message": str(exc)},
         ) from exc
     return FollowUpCreateResponse(**result)
+
+
+@router.post(
+    "/{org_id}/publications/{publication_id}/reconcile", response_model=ReconciliationResponse, status_code=201,
+)
+async def reconcile_publication_endpoint(
+    org_id: uuid.UUID,
+    publication_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ReconciliationResponse:
+    """story #3620 AC4 — follow-ups와 달리 휴먼 전용 게이트 0(사람·에이전트 동형,
+    `_require_human` 안 탄다). 연결 비활성/채널 미지원(정의 2·로컬 선검사)은 409로
+    그대로 전파 — 승격도 reconciliation 행도 안 남긴다(#3612 원칙 재사용)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await resolve_member(auth, org_id, db)
+
+    try:
+        record = await reconcile_publication(
+            db, org_id=org_id, publication_id=publication_id, requested_by_member_id=resolved.id,
+        )
+    except InsightFetchError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": exc.error_code, "message": str(exc)},
+        ) from exc
+    return ReconciliationResponse(
+        id=record.id, publication_id=record.publication_id, snapshot_id=record.snapshot_id,
+        live_raw=record.live_raw, verdicts=record.verdicts, has_mismatch=record.has_mismatch,
+        created_at=record.created_at,
+    )
 
 
 @router.get("/{org_id}/insights/measured-metrics", response_model=MeasuredMetricsResponse)

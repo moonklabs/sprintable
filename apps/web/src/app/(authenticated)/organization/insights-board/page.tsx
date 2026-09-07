@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -22,6 +22,7 @@ import { InsightsBoardMetricCell } from '@/components/insights-board/insights-bo
 import { MeasuredMetricsCards } from '@/components/insights-board/measured-metrics-cards';
 import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-board-comments-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
+import { ReconcileResultLine } from '@/components/insights-board/reconcile-result-line';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
 import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 
@@ -83,6 +84,12 @@ function windowParamToDays(window: InsightsBoardWindow): 7 | 30 | 90 {
   return Number(window.replace('d', '')) as 7 | 30 | 90;
 }
 
+// story #3620 AC3 — 행 액션 「원본과 대조」의 진행 상태 3분기(진행 中·실패·완료).
+type ReconcileRowState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'done'; verdicts: Record<string, string> };
+
 export default function InsightsBoardPage() {
   const { orgId, currentMemberType } = useDashboardContext();
   const router = useRouter();
@@ -116,6 +123,43 @@ export default function InsightsBoardPage() {
   // 채워 보이려면 이 행의 원문 title이 필요하다 — publication_id만으론 부족해
   // row 전체를 들고 있는다.
   const [followUpRow, setFollowUpRow] = useState<InsightsBoardRow | null>(null);
+
+  // story #3620 AC3 — 행 액션 「원본과 대조」. publication_id로 키잉(같은 화면에
+  // 여러 행이 각자 진행 중일 수 있다 — follow-up 다이얼로그와 달리 대조는 모달이
+  // 아니라 인라인 결과라 여러 행이 동시에 진행 가능해야 한다).
+  const [reconcileState, setReconcileState] = useState<Record<string, ReconcileRowState>>({});
+
+  const handleReconcile = useCallback(async (row: InsightsBoardRow) => {
+    if (!orgId) return;
+    setReconcileState((prev) => ({ ...prev, [row.publication_id]: { status: 'loading' } }));
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publications/${row.publication_id}/reconcile`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { detail?: unknown; error?: Record<string, unknown> } | null;
+        const info = parseInsightsBoardApiError(body);
+        // story #3620 CHANGES(카디르 발견) — CHANNEL_CONNECTION_NOT_ACTIVE는 content
+        // 네임스페이스 기존 키를 재사용하므로 humanMessageNamespace로 어느 t를 쓸지 가른다.
+        const translate = info.humanMessageNamespace === 'content' ? tContent : t;
+        const message = info.humanMessageKey ? translate(info.humanMessageKey) : (info.humanMessageFallback || t('reconcileErrorGeneric'));
+        setReconcileState((prev) => ({ ...prev, [row.publication_id]: { status: 'error', message } }));
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: { verdicts: Record<string, string> } } | null;
+      if (!json?.data) {
+        setReconcileState((prev) => ({ ...prev, [row.publication_id]: { status: 'error', message: t('reconcileErrorGeneric') } }));
+        return;
+      }
+      setReconcileState((prev) => ({
+        ...prev, [row.publication_id]: { status: 'done', verdicts: json.data!.verdicts },
+      }));
+    } catch {
+      setReconcileState((prev) => ({
+        ...prev, [row.publication_id]: { status: 'error', message: t('reconcileErrorGeneric') },
+      }));
+    }
+  }, [orgId, t, tContent]);
 
   const buildQuery = useCallback((cursor?: string) => {
     const qs = new URLSearchParams();
@@ -374,9 +418,16 @@ export default function InsightsBoardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((row, index) => (
+                {rows.map((row, index) => {
+                  const reconcile = reconcileState[row.publication_id];
+                  // story #3620 AC3 — 「발행 後 행에만」. hosted_site(site_post)는
+                  // channel_publication이 없어 BE가 항상 INSIGHT_PUBLICATION_NOT_FOUND
+                  // 를 낸다 — 버튼 자체를 그 행엔 안 보여준다(follow-up 사람전용 게이트와
+                  // 동형: 실패로 알리는 대신 애초에 숨긴다).
+                  const canReconcile = row.kind === 'channel_publication';
+                  return (
+                    <Fragment key={row.publication_id}>
                   <tr
-                    key={row.publication_id}
                     ref={(el) => {
                       if (el) rowRefs.current.set(row.publication_id, el);
                       else rowRefs.current.delete(row.publication_id);
@@ -410,20 +461,50 @@ export default function InsightsBoardPage() {
                     <td className="px-3 py-2.5">
                       {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「후속 조치」
                           접근 이름이라 보조기술 버튼 목록에서 어느 행인지 못 가른다. */}
-                      {canCreateFollowUp ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setFollowUpRow(row)}
-                          data-testid="insights-board-follow-up-button"
-                          aria-label={t('followUpAriaLabel', { n: index + 1, label: t('followUpAction') })}
-                        >
-                          {t('followUpAction')}
-                        </Button>
-                      ) : null}
+                      <div className="flex flex-wrap gap-1.5">
+                        {canCreateFollowUp ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setFollowUpRow(row)}
+                            data-testid="insights-board-follow-up-button"
+                            aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('followUpAction') })}
+                          >
+                            {t('followUpAction')}
+                          </Button>
+                        ) : null}
+                        {/* story #3620 AC3 — 「원본과 대조」, 진행 中 비활성. */}
+                        {canReconcile ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleReconcile(row)}
+                            disabled={reconcile?.status === 'loading'}
+                            data-testid="insights-board-reconcile-button"
+                            aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('reconcileAction') })}
+                          >
+                            {reconcile?.status === 'loading' ? t('reconcileInProgress') : t('reconcileAction')}
+                          </Button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
-                ))}
+                  {reconcile && reconcile.status !== 'loading' ? (
+                    <tr data-testid="insights-board-reconcile-result-row">
+                      <td colSpan={7} className="px-3 py-1.5 text-xs">
+                        {reconcile.status === 'error' ? (
+                          <span className="text-destructive" data-testid="insights-board-reconcile-error">
+                            {reconcile.message}
+                          </span>
+                        ) : (
+                          <ReconcileResultLine verdicts={reconcile.verdicts} />
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

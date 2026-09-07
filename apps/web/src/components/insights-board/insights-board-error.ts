@@ -7,11 +7,18 @@ export type InsightsBoardErrorKind =
   | 'invalid_sort'
   | 'follow_up_human_only'
   | 'follow_up_invalid_kind'
+  | 'reconcile_connection_inactive'
+  | 'reconcile_channel_unsupported'
   | 'unknown';
 
 export interface InsightsBoardErrorInfo {
   /** 사람이 읽을 문장. 알려진 코드면 번역 키, 모르면(또는 code 자체가 없으면) 서버 원문. */
   humanMessageKey?: string;
+  /** story #3620 CHANGES(카디르 발견) — CHANNEL_CONNECTION_NOT_ACTIVE는 새 키를 안 만들고
+   * content 네임스페이스의 기존 errorChannelConnectionNotActive를 재사용한다(문구가 둘로
+   * 갈리는 것 방지) — humanMessageKey가 이 네임스페이스 소속임을 호출부에 알린다. 생략 시
+   * insightsBoard(기본, 기존 관례). */
+  humanMessageNamespace?: 'insightsBoard' | 'content';
   humanMessageFallback: string;
   /** 항상 채운다 — {code, message} JSON 문자열(디버깅 보존). */
   raw: string;
@@ -20,6 +27,7 @@ export interface InsightsBoardErrorInfo {
 
 interface KnownError {
   labelKey: string;
+  namespace?: 'insightsBoard' | 'content';
   kind: InsightsBoardErrorKind;
 }
 
@@ -33,6 +41,18 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 그대로 뜰 수 있어 문구도 준비해 둔다.
   FOLLOW_UP_CREATE_HUMAN_ONLY: { labelKey: 'errorFollowUpHumanOnly', kind: 'follow_up_human_only' },
   FOLLOW_UP_INVALID_KIND: { labelKey: 'errorFollowUpInvalidKind', kind: 'follow_up_invalid_kind' },
+  // story #3620 — publication_reconciliation.py의 선검사 3종 중 사람이 읽을 문구가
+  // 정해진 2종(정의 2). INSIGHT_PUBLICATION_NOT_FOUND는 드문 엣지(행이 가리키는
+  // publication_id가 이미 유효했던 상태에서 눌렀다는 전제)라 generic 폴백으로 둔다.
+  //
+  // CHANGES(카디르 발견, 2026-09-07) — 새 키(reconcileErrorConnectionInactive)를 만들었더니
+  // "연결이 활성 상태가 아니다"류 문장이 화면에 둘 존재하게 됐다. content 네임스페이스의
+  // 기존 errorChannelConnectionNotActive(「연결 화면에서 확인」 안내까지 포함된 정본)를
+  // 그대로 재사용 — 신규 키 삭제.
+  CHANNEL_CONNECTION_NOT_ACTIVE: {
+    labelKey: 'errorChannelConnectionNotActive', namespace: 'content', kind: 'reconcile_connection_inactive',
+  },
+  INSIGHT_CHANNEL_NOT_IMPLEMENTED: { labelKey: 'reconcileErrorChannelUnsupported', kind: 'reconcile_channel_unsupported' },
 };
 
 function extractCodeAndMessage(detail: unknown): { code?: string; message?: string } {
@@ -68,6 +88,7 @@ export function parseInsightsBoardApiError(
   const known = code ? KNOWN_ERRORS[code] : undefined;
   return {
     humanMessageKey: known?.labelKey || undefined,
+    humanMessageNamespace: known?.namespace,
     humanMessageFallback: message ?? '',
     raw,
     kind: known?.kind ?? 'unknown',

@@ -22,8 +22,13 @@ import { fetchWithAuth } from '@/lib/db/client';
  * 이 있어 기간 조작이 둘이었다. 처방(PO 채택): 카드 자체 토글을 없애고 `windowDays`
  * prop으로 페이지 window를 그대로 따른다 — 기간 조작은 화면에 하나. BE는 7/30만
  * 받는 계약(days 파라미터 자체를 안 바꿈) — 90일 선택 시 이 컴포넌트는 BE를 아예
- * 안 부르고(조용히 30일로 떨어뜨리지 않는다) 3장 다 「—」+`WINDOW_UNSUPPORTED` 사유로
+ * 안 부르고(조용히 30일로 떨어뜨리지 않는다) 4장 다 「—」+`WINDOW_UNSUPPORTED` 사유로
  * 렌더한다(기존 미측정 표시 관례 그대로 재사용, 새 UI 분기 0).
+ *
+ * story #3620(additive) — 4번째 카드 「채널 원본 지표와 evidence 대조」. BE 응답이
+ * coverage_rate·mismatch_rate 2키를 additive로 얹었지만 화면은 카드 1장(페드루 PO
+ * 「4번째 카드」 단수 표현 그대로) — coverage가 카드 본체(퍼센트+분모), mismatch는
+ * 그 카드의 보조 줄(둘이 각자 다른 사유로 「—」일 수 있어 독립 렌더).
  */
 
 type MeasuredMetricValue = {
@@ -33,10 +38,20 @@ type MeasuredMetricValue = {
   reason_code: string | null;
 };
 
+// story #3620 CHANGES(2026-09-07, 페드루 PO·유나 낱말 판정) — 「불일치 수」는
+// 스토리 정의 3 그대로 수(count)다. MeasuredMetricValue(비율 전용, 분모/분자)
+// 형에 억지로 끼워 맞추면 화면이 "3 / 12" 분수로 잘못 읽힌다.
+type MismatchCountValue = {
+  value: number | null;
+  reason_code: string | null;
+};
+
 type MeasuredMetricsResponse = {
   utm_attribution_rate: MeasuredMetricValue;
   comment_miss_rate: MeasuredMetricValue;
   follow_up_creation_rate: MeasuredMetricValue;
+  reconciliation_coverage_rate: MeasuredMetricValue;
+  reconciliation_mismatch_count: MismatchCountValue;
   computed_at: string;
 };
 
@@ -44,15 +59,19 @@ const REASON_LABEL_KEYS: Record<string, string> = {
   NO_PAGEVIEWS: 'measuredReasonNoPageviews',
   NO_COMMENT_DATA: 'measuredReasonNoCommentData',
   NO_SNAPSHOTS: 'measuredReasonNoSnapshots',
+  NO_RECONCILIATIONS: 'measuredReasonNoReconciliations',
   WINDOW_UNSUPPORTED: 'measuredReasonWindowUnsupported',
 };
 
 const _UNMEASURED_METRIC: MeasuredMetricValue = { value: null, numerator: 0, denominator: 0, reason_code: 'WINDOW_UNSUPPORTED' };
-// 90일(BE 미지원 기간) 전용 — 3장 다 같은 사유로 「—」. 네트워크 호출 자체를 안 한다.
+const _UNMEASURED_COUNT: MismatchCountValue = { value: null, reason_code: 'WINDOW_UNSUPPORTED' };
+// 90일(BE 미지원 기간) 전용 — 4장 다 같은 사유로 「—」. 네트워크 호출 자체를 안 한다.
 const WINDOW_UNSUPPORTED_RESPONSE: MeasuredMetricsResponse = {
   utm_attribution_rate: _UNMEASURED_METRIC,
   comment_miss_rate: _UNMEASURED_METRIC,
   follow_up_creation_rate: _UNMEASURED_METRIC,
+  reconciliation_coverage_rate: _UNMEASURED_METRIC,
+  reconciliation_mismatch_count: _UNMEASURED_COUNT,
   computed_at: '',
 };
 
@@ -87,6 +106,55 @@ function MetricCard({
         {formatPercent(metric.value)}
       </p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{metric.numerator} / {metric.denominator}</p>
+    </div>
+  );
+}
+
+function ReconciliationCard({
+  coverage, mismatch, t, tContent,
+}: {
+  coverage: MeasuredMetricValue;
+  mismatch: MismatchCountValue;
+  t: ReturnType<typeof useTranslations>;
+  tContent: ReturnType<typeof useTranslations>;
+}) {
+  const coverageReasonKey = coverage.reason_code ? REASON_LABEL_KEYS[coverage.reason_code] : undefined;
+  const mismatchReasonKey = mismatch.reason_code ? REASON_LABEL_KEYS[mismatch.reason_code] : undefined;
+  return (
+    <div className="rounded-lg border border-border bg-card p-3" data-testid="measured-metric-card">
+      <p className="text-xs text-muted-foreground">{t('measuredReconciliationCoverageRate')}</p>
+      {coverage.value === null ? (
+        <>
+          <p className="mt-1 text-xl font-semibold text-muted-foreground" data-testid="measured-metric-value">
+            {tContent('insightMetricUnavailableDash')}
+          </p>
+          {coverageReasonKey && <p className="mt-0.5 text-[11px] text-muted-foreground">{t(coverageReasonKey)}</p>}
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-xl font-semibold text-foreground" data-testid="measured-metric-value">
+            {formatPercent(coverage.value)}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{coverage.numerator} / {coverage.denominator}</p>
+        </>
+      )}
+      {/* story #3620 CHANGES — 「불일치」는 수(count)로, 「—」일 때도 coverage와 동형으로
+          사유 줄을 단다(3618 계약: 「—」는 항상 사유 한 줄과 짝, 자리마다 예외 0). */}
+      <div className="mt-1 border-t border-border pt-1">
+        <p className="text-[11px] text-muted-foreground">{t('measuredReconciliationMismatchCount')}</p>
+        {mismatch.value === null ? (
+          <>
+            <p className="text-xs font-medium text-muted-foreground" data-testid="measured-metric-mismatch-line">
+              {tContent('insightMetricUnavailableDash')}
+            </p>
+            {mismatchReasonKey && <p className="text-[11px] text-muted-foreground">{t(mismatchReasonKey)}</p>}
+          </>
+        ) : (
+          <p className="text-xs font-medium text-foreground" data-testid="measured-metric-mismatch-line">
+            {t('measuredReconciliationMismatchCountValue', { n: mismatch.value })}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -140,18 +208,21 @@ export function MeasuredMetricsCards({ orgId, windowDays }: { orgId: string; win
     <div className="space-y-2" data-testid="measured-metrics-section">
       <p className="text-xs font-medium text-muted-foreground">{t('measuredMetricsTitle')}</p>
       {loading && !data && (
-        <div className="grid grid-cols-3 gap-2" data-testid="measured-metrics-loading">
-          {[1, 2, 3].map((i) => <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />)}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2" data-testid="measured-metrics-loading">
+          {[1, 2, 3, 4].map((i) => <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />)}
         </div>
       )}
       {error && !loading && (
         <p className="text-xs text-destructive" data-testid="measured-metrics-error">{t('measuredMetricsErrorGeneric')}</p>
       )}
       {data && (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <MetricCard label={t('measuredAttributionRate')} metric={data.utm_attribution_rate} t={t} tContent={tContent} />
           <MetricCard label={t('measuredCommentMissRate')} metric={data.comment_miss_rate} t={t} tContent={tContent} />
           <MetricCard label={t('measuredFollowUpRate')} metric={data.follow_up_creation_rate} t={t} tContent={tContent} />
+          <ReconciliationCard
+            coverage={data.reconciliation_coverage_rate} mismatch={data.reconciliation_mismatch_count} t={t} tContent={tContent}
+          />
         </div>
       )}
     </div>

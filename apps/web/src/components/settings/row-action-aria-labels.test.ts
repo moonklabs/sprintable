@@ -41,7 +41,12 @@ const CASES: { namespace: string; key: string; ko: string[]; en: string[] }[] = 
   { namespace: 'settings', key: 'orgMemberRowActionAriaLabel', ko: ['제거'], en: ['Remove'] },
   { namespace: 'settings', key: 'orgInviteRowActionAriaLabel', ko: ['링크 복사', '재발송', '취소'], en: ['Copy link'] },
   { namespace: 'githubLinks', key: 'promoteAriaLabel', ko: ['명시 연결'], en: ['Link explicitly'] },
-  { namespace: 'insightsBoard', key: 'followUpAriaLabel', ko: ['후속 조치'], en: ['Follow-up'] },
+  // story #3620 CHANGES(페드루 PO 정정 — i18n 부분문자열 가드 신규 결함, 유나양 決) — 두
+  // 버튼(page.tsx:471·:484)이 followUpAriaLabel/reconcileAriaLabel 각자 키였는데 값이
+  // 완전히 같은 템플릿이라 가드가 걸렸다. 「가운데 낱말=그 행이 무엇인가」 관례를 새로
+  // 만들지 않고 키 자체를 하나(rowActionAriaLabel)로 합쳐 겹칠 쌍을 구조적으로 없앤다
+  // (접근 이름을 가르는 건 {label} 표본 자체).
+  { namespace: 'insightsBoard', key: 'rowActionAriaLabel', ko: ['후속 조치', '원본과 대조'], en: ['Follow-up', 'Reconcile with source'] },
   { namespace: 'agentRuns', key: 'openDetailAriaLabel', ko: ['상세 보기'], en: ['Open detail'] },
   // story #3606(잔여, 페드루 PO 確定 2026-09-07) — gateApprove(HITL 승인)·primaryLabel
   // (일반/서명 승인 둘 다)도 같은 map·같은 gateRowActionAriaLabel 재사용으로 마감.
