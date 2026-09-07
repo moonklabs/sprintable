@@ -311,6 +311,35 @@ async def _get_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | N
     return result.scalar_one_or_none()
 
 
+def _is_session_stale_after_password_change(user: User, session_started_at: object) -> bool:
+    """story #3649(BE·보안·prod, 페드루 PO 確定 2026-09-07) — totp/disable의 password
+    재검증 분기(PR#3634, 위 §3247 주석)가 이미 쓰던 "이 비밀번호가 이 세션이 시작된
+    뒤에 심어졌나" 비교식을 공용 함수로 뺐다(refresh·switch-account·switch-project·
+    switch-org 재발급 경로 4곳이 재사용 — 새 판정 로직 0). set-password confirm·
+    change-password·reset-password 셋 다 password_set_at을 갱신하므로(그라운딩②
+    확認 완료) 이 하나의 컬럼으로 세 경로 전부를 잡는다.
+
+    password_set_at IS NULL(migration 0295 이전부터 비밀번호를 가진 기존 유저)은
+    판정 대상 밖 — 과거 시점을 알 방법이 없어 백필은 거짓 신호(0290 locale과 동형
+    논지, 무제약=무회귀). session_started_at이 없거나 int가 아니면(레거시 토큰·
+    #3247 seam 이전 발급) totp/disable과 동일하게 fail-closed(세션 무효로 본다) —
+    "판별 불가"를 "안전하다"로 해석하지 않는다(보안 결함 규율)."""
+    if user.password_set_at is None:
+        return False
+    if not isinstance(session_started_at, int):
+        return True
+    return user.password_set_at.timestamp() > session_started_at
+
+
+def _explicit_revoke_values(now: datetime) -> dict:
+    """story #3649(BE·보안·prod 결함) — logout·set-password confirm·switch-project·
+    switch-org·org_members 관리자 강제폐기(5곳) 전부 이 딕셔너리를 그대로 `.values()`
+    에 넘긴다(단일 seam — 다섯 곳 흩어 두지 않는다). `expires_at`도 함께 내려 refresh()
+    의 §2449 유예창(`expires_at > now()` 조건)이 명시 폐기 RT를 구조적으로 걸러낸다
+    (원자 rotation UPDATE는 이 함수를 안 써 무접촉 — §2449 구제 그대로)."""
+    return {"revoked_at": now, "expires_at": now}
+
+
 _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
 
 
@@ -890,6 +919,20 @@ async def refresh_token(
         # seconds→chain_resolve_window_seconds) + 통과 시 오늘과 동일한 독립 fork(다른 row
         # 무접촉)」로 수렴했다 — replaced_by 는 «승자 경로에서만» 기록해 감사열(정상 회전 死
         # vs logout 같은 명시적 dead-end 구분)·향후 family-revoke 훅 기반으로만 쓴다.
+        # story #3649(BE·보안·prod 결함, 페드루 PO 確定 2026-09-07, 카디르 재현 확定) —
+        # 이 select는 애초에 "회전 경합으로 죽은 RT"(진짜 race straggler)만 구제할 셈
+        # 이었지만, logout·set-password confirm·switch-* «대량 무효화»(명시 폐기)로
+        # 죽은 RT도 이 창(기본 180s) 안이면 그냥 통과해 새 토큰을 fork했다(카디르 직접
+        # 재현: confirm 직후/60s/170s 옛 RT refresh 200). replaced_by는 이 구분에 못
+        # 쓴다 — 승자가 그 값을 새 row INSERT+commit «後» 별개 문장으로 채우는 타이밍
+        # 이라(위 §2449 주석), 진짜 동시 경합(asyncio.gather)에서 replaced_by IS NOT
+        # NULL 조건을 걸면 그 커밋 전에 도착한 패자의 select가 오탐 401난다(실측:
+        # test_concurrent_refresh_same_token_exactly_one_succeeds_realdb 회귀 — 새
+        # 컬럼/조건 시도 뒤 되돌림). 대신 명시 폐기 UPDATE(아래 §3649 표시 3곳)가
+        # `expires_at=now()`도 같이 내려 — 이 select가 이미 요구하는
+        # `expires_at > now()` 조건 하나로 명시 폐기 RT가 **구조적으로** 창 밖이 된다
+        # (원자 rotation UPDATE는 expires_at을 안 건드려 §2449 구제 그대로, 새
+        # 컬럼·타이밍 레이스 0 — 마이그 0, PO 확定 2026-09-07 12:40Z).
         resolve_cutoff = datetime.now(timezone.utc) - timedelta(
             seconds=settings.auth_refresh_chain_resolve_window_seconds
         )
@@ -937,6 +980,16 @@ async def refresh_token(
     # 뚫린다 — 카디르+codex 2라운드 QA 실증). 그 토큰에 그 값이 없으면(마이그 이전 구
     # 토큰) 새 토큰에도 없다 — totp/disable이 그걸 fail-closed(password 경로 불허)로 해석.
     _session_started_at = payload.get("session_started_at")
+    # story #3649(보안 결함, 카디르 재현 확定) — 비밀번호 변경/설정 확認 뒤에도 옛
+    # refresh token(만료까지 최장 REFRESH_TOKEN_EXPIRE_DAYS)이 이 경로로 계속 새
+    # 토큰을 낳아 옛 세션이 무기한 이어졌다. 재발급 «직전» 여기서 막는다 —
+    # _store_refresh_token 前이라 새 RT 자체가 안 생긴다(부분 커밋 없음).
+    if _is_session_stale_after_password_change(user, _session_started_at):
+        logger.warning(
+            "auth.refresh 실패 reason=session_invalidated_by_password_change key=%s user_id=%s",
+            correlation_key, user.id,
+        )
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
     tokens = create_tokens(
         str(user.id), email=user.email, app_metadata=_md, session_started_at=_session_started_at,
     )
@@ -1017,6 +1070,9 @@ async def switch_account(
     # story #3247 — refresh_token()과 동형(위 §3247 주석 참고) — 타겟 계정의 원 세션 시작
     # 시각을 그대로 이월.
     _session_started_at = payload.get("session_started_at")
+    # story #3649 — refresh_token()과 동형(위 §3649 주석 참고).
+    if _is_session_stale_after_password_change(user, _session_started_at):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
     tokens = create_tokens(
         str(user.id), email=user.email, app_metadata=_md, session_started_at=_session_started_at,
     )
@@ -1040,10 +1096,15 @@ async def logout(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     token_hash = hash_token(body.refresh_token)
+    # story #3649(보안 결함) — expires_at도 함께 내려 refresh()의 유예창 select
+    # (`expires_at > now()` 조건)가 구조적으로 이 RT를 재사용 대상에서 뺀다(§3649
+    # 주석, refresh_token() 참고) — 명시 logout은 회전 경합 straggler 구제 대상이
+    # 아니다.
+    _now = datetime.now(timezone.utc)
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.token_hash == token_hash, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(**_explicit_revoke_values(_now))
     )
     await session.commit()
     return _ok({"ok": True})
@@ -1154,15 +1215,10 @@ async def totp_disable(
             return _err("WRONG_PASSWORD", "Incorrect password", 403)
 
         # ② 그 비밀번호가 "이 세션이 시작된 시각보다 먼저" 존재했을 때만 유효한
-        # 재검증으로 인정. password_set_at이 session_started_at 이후면(=이 세션이
-        # 시작된 뒤 심어진 비밀번호 — refresh로 우회 불가, 세션 시작 자체는 재로그인
-        # 없이 안 바뀜) 우회체인이므로 거부. password_set_at IS NULL(migration 0295
-        # 이전부터 비밀번호를 가진 기존 유저)은 제약 대상 밖(0290 locale과 동형 논지
-        # — 과거 시점을 알 방법이 없어 백필은 거짓 신호, 무제약 유지=무회귀).
-        if user.password_set_at is not None:
-            session_started_at = auth.claims.get("session_started_at")
-            if not isinstance(session_started_at, int) or user.password_set_at.timestamp() > session_started_at:
-                return _err("PASSWORD_TOO_RECENT", "Password was set after this session started — please log in again", 403)
+        # 재검증으로 인정 — story #3649로 공용 함수(_is_session_stale_after_password_
+        # change, 위)로 뺐다(refresh/switch-* 재발급 경로 4곳과 같은 비교식 재사용).
+        if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+            return _err("PASSWORD_TOO_RECENT", "Password was set after this session started — please log in again", 403)
     else:
         return _err("REVERIFICATION_REQUIRED", "TOTP code or password required", 400)
 
@@ -1818,10 +1874,14 @@ async def confirm_set_password(
     )
     # story #ab2a503f — 탈취 refresh token으로 이후 /auth/refresh가 즉시 401(우회체인 봉합).
     # switch_project/switch_org(이 파일)와 동일 인라인 패턴 재사용.
+    # story #3649(보안 결함) — expires_at도 함께 내려 refresh()의 유예창(§3649 주석)이
+    # 이 RT를 재사용 대상에서 뺀다 — set-password confirm이 죽인 RT는 회전 경합
+    # straggler가 아니라 명시 폐기.
+    _now = datetime.now(timezone.utc)
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(**_explicit_revoke_values(_now))
     )
     await session.commit()
     return _ok({"message": "Password set successfully — please log in with your new password"})
@@ -1922,6 +1982,13 @@ async def switch_project(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
+    # story #3649(보안 결함, 카디르 재현 확定) — 옛 access token(비밀번호 변경/설정
+    # 뒤에도 만료까지 최대 60분 유효)으로 이 경로를 부르면 새 refresh token이
+    # 나와 옛 세션이 처음부터 다시 열렸다. mutation 前(어떤 행도 아직 안 건드림)에
+    # 막는다.
+    if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
+
     # E-SECURITY SEC-S8(story 83ea3d6a) K — org_id 미전달이면 has_project_access가 org 필터
     # 없이 판정해, J(cross-org project_access grant)로 생긴 행 하나만 있어도 target org의
     # 정식 access+refresh 토큰이 발급되는 증폭 경로였다(SEC-S5~S8 가드를 우회하는 크리덴셜
@@ -1938,11 +2005,14 @@ async def switch_project(
     target_project_id = body.project_id
     user.last_project_id = target_project_id
 
-    # 기존 refresh token 무효화
+    # 기존 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
+    # refresh()의 유예창(§3649 주석)이 이 RT들을 재사용 대상에서 뺀다(명시 폐기,
+    # 회전 경합 straggler 아님).
+    _now = datetime.now(timezone.utc)
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(**_explicit_revoke_values(_now))
     )
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
@@ -1988,6 +2058,10 @@ async def switch_organization(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
+    # story #3649 — switch_project()와 동형(위 §3649 주석 참고).
+    if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
+
     # org_members 소속 여부 확인
     membership = await session.execute(
         select(OrgMember)
@@ -2007,11 +2081,13 @@ async def switch_organization(
     # cross-org 옛 프로젝트 재주입 0 (last_project_id=None이어도 org는 유지).
     user.last_org_id = body.org_id
 
-    # 기존 refresh token 무효화
+    # 기존 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
+    # (§3649 주석 참고).
+    _now = datetime.now(timezone.utc)
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(**_explicit_revoke_values(_now))
     )
 
     # _build_app_metadata 호출 전에 target project_id 고정
