@@ -15,7 +15,7 @@
  * 없으므로 이 gate 밖 — 기존 동작 그대로 무조건 통과시킨다. 페드루 PO 정정(2026-09-07)
  * — 이 형이 "다른 라우트가 실제로 내는 합법적 shape"라는 건 부정확하다: 우리 BE 전역
  * 핸들러는 string detail로 raise된 HTTPException도 object(`error:{code,message}`)로
- * 감싼다(lint_fe_error_envelope_detail_mismatch.py 참고) — 우리 BE가 실제로 내는 string
+ * 감싼다(lint_fe_error_envelope_detail_mismatch.py — 3601로 은퇴 참고) — 우리 BE가 실제로 내는 string
  * detail은 없다(Pydantic 422조차 object가 아니라 `[{loc,msg,type}]` 배열이라 이 분기와
  * 무관). 이 분기는 순수하게 `DeliveryContractModal.test.tsx`(#2647)의 옛 픽스처 계약을
  * 깨지 않으려는 하위호환일 뿐 — 실 BE 오늘 산출물이 아니다.
@@ -38,8 +38,9 @@
  * **allowlist 조회 없이** 그걸 최우선으로 쓴다(`human_error()`로 채운 자리부터 점진
  * 전환, `app/core/error_envelope.py` 참고). 아래 allowlist는 아직 human_error()로
  * 전환 안 된 자리들의 안전망으로 당분간 남는다 — 전환이 끝나(등재 0건 수렴) 이 파일
- * 자체와 `lint_fe_error_envelope_detail_mismatch.py`를 은퇴시키는 게 이 스토리가 연
- * 길이다(이 PR에서 즉시 은퇴는 아님 — AC3, "수렴 가능함을 보인다"까지).
+ * 자체를 은퇴시키는 게 이 스토리가 연 길이다. `lint_fe_error_envelope_detail_mismatch.py`
+ * (별개 가드 — `.detail?.message` 원시 읽기 자체를 잡던 자리)는 story #3601로 이미
+ * 은퇴했다(2026-09-07, 그 가드가 잡던 패턴이 코드베이스 전체에서 0건으로 수렴).
  */
 export const HUMAN_SAFE_ERROR_MESSAGE_CODES = new Set<string>([
   // channel_post_comments.py::refresh_publication_comments_endpoint(raise 1곳)

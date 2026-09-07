@@ -437,9 +437,10 @@ export default function ChannelPostEditPage() {
       // story #3601(디디 전수 표 2026-09-07) — BE 전역 봉투는 {data,error,meta}뿐이라
       // .detail은 항상 undefined였다(COMMENT_COLLECTION_UNSUPPORTED 분기 영구 사망).
       // .error를 1순위로, .detail은 무해한 방어적 폴백으로만 남긴다(detail을 변수로
-      // 먼저 옮겨 읽는다 — body 뒤에 곧장 물음표 두 번으로 detail.code를 잇는 형은
-      // lint_fe_error_envelope_detail_mismatch.py가 잡는 그 모양 자체라 새 위반으로
-      // 다시 걸린다).
+      // 먼저 옮겨 읽는다 — body 뒤에 곧장 물음표 두 번으로 detail.code를 잇는 형이
+      // 재발 방지 가드가 잡던 그 모양이었다. 그 가드(lint_fe_error_envelope_detail_
+      // mismatch.py)는 story #3601로 은퇴했지만(2026-09-07, 잡던 패턴이 전체 0건으로
+      // 수렴) 이 파일이 이미 안전한 형태를 유지할 이유 자체는 그대로다).
       const body = await res.json().catch(() => null) as { error?: { code?: string; message?: string }; detail?: { code?: string; message?: string }; message?: string } | null;
       const detail = body?.detail;
       if ((body?.error?.code ?? detail?.code) === 'COMMENT_COLLECTION_UNSUPPORTED') {
