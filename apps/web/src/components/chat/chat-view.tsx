@@ -347,6 +347,14 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       setHasMore(meta?.has_more ?? false);
       setMessagesLoadFailed(false);
       return merged;
+    } catch {
+      // story #3638(유나 재판정 CHANGES 2026-09-07) — fetch 자체가 던지면(오프라인·
+      // DNS·res.json() 파싱 실패) !res.ok 분기를 안 거쳐 setMessagesLoadFailed가
+      // 안 서고 finally만 돌아 messages=[]·플래그=false로 「대화를 시작하세요」가
+      // 다시 섰다. 이 함수의 계약(undefined 반환=실패, handlePoll이 그대로 소비)을
+      // 지키며 던짐도 !res.ok와 동일하게 처리한다.
+      setMessagesLoadFailed(true);
+      return undefined;
     } finally {
       setLoading(false);
       setLoadingMore(false);
