@@ -2165,9 +2165,11 @@ export default function ChannelPostEditPage() {
               {t('channelPostsUnpublishCta')}
             </Button>
           ) : null}
-          {/* story #3614(AC1) — 「변경 요청 뒤 재상신」만 있던 작성자의 유일한 다음
-              행동에 「폐기」를 더한다. 실 인가(작성자/admin)는 BE만 판정 — 이 버튼은
-              상태 축(폐기 아님·미발행)만 미리 거른다. */}
+          {/* story #3614(AC1)+CHANGES(유나 재판정, 페드루 PO 채택) — 「변경 요청 뒤
+              재상신」만 있던 작성자의 유일한 다음 행동에 「폐기」를 더한다. BE
+              can_withdraw(원저자 또는 org owner/admin ∧ 미발행 ∧ 미폐기) 하나만
+              본다 — FE는 org_id/author 비교를 직접 하지 않는다(#3966 프레임
+              규칙). */}
           {showWithdraw ? (
             <Button
               variant="outline" disabled={withdrawing}
