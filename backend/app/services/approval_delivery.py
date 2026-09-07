@@ -1061,7 +1061,7 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     trigger_message_content: str,
 ) -> None:
     """story #2747(2026-08-25, PO 판정) — draft 상태 문서가 채팅에서 mention(=논의)되는
-    순간, 작성자에게 「결재 상신 여부」를 묻는 1회성 넛지. 제품이 그 갈림 자체를 안
+    순간, 작성자에게 「검토 요청 여부」를 묻는 1회성 넛지. 제품이 그 갈림 자체를 안
     묻던 갭(선생님 실증 2건, 2026-08-18)의 처방 — 후보 a(설계 스케치)의 「묻기」 절반만
     이번 사이클 스코프(FE 뱃지·N회 카운트 nudge·에이전트 리마인더 격상은 각각 별도 스토리,
     PO 확定 2026-08-25).
@@ -1209,7 +1209,11 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                     db, org_id=org_id, event_type="doc_draft_discussed_in_chat",
                     target_member_ids=[doc_author_id],
                     title="draft 문서가 채팅에서 논의됐습니다",
-                    body=f"'{doc_title}' — 결재 상신 여부를 확인해 주세요.",
+                    # 유나 CHANGES 2(2026-09-07, PR #4011) — 같은 함수가 같은 doc_author에게
+                    # 채팅 DM(위 content, 「검토 요청」)과 알림(이 body) 둘 다 보내는데,
+                    # 알림만 「결재 상신」으로 남으면 한 사람이 두 낱말을 읽는 자리라 낱말을
+                    # 맞춘다.
+                    body=f"'{doc_title}' — 검토 요청 여부를 확인해 주세요.",
                     reference_type="doc", reference_id=doc_id,
                     source_project_id=project_id, via_outbox=True,
                 )
