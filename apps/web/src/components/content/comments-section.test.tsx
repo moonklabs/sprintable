@@ -37,6 +37,8 @@ function baseComment(overrides: Partial<CommentItem>): CommentItem {
     replyId: null,
     latestReplyText: null,
     repliesCount: 0,
+    openReplyDraft: null,
+    sentRepliesCount: 0,
     ...overrides,
   };
 }
@@ -307,10 +309,11 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
   });
 
   // story #3593 AC3 — 버튼 이름이 상태로 갈린다.
-  it('repliesCount=0이면 버튼 「답변」, repliesCount>0이면 「답변 더하기」', async () => {
+  // story #3596 AC7 — 주어가 sentRepliesCount로 바뀐다(초안은 별도 「이어서 답변」 갈래).
+  it('sentRepliesCount=0이면 버튼 「답변」, sentRepliesCount>0이면 「답변 더하기」', async () => {
     const face = loadedFace([
-      baseComment({ id: 'c1', repliesCount: 0 }),
-      baseComment({ id: 'c2', repliesCount: 1, replyStatus: 'published' }),
+      baseComment({ id: 'c1', repliesCount: 0, sentRepliesCount: 0 }),
+      baseComment({ id: 'c2', repliesCount: 1, sentRepliesCount: 1, replyStatus: 'published' }),
     ]);
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
@@ -321,10 +324,12 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
 
   // story #3593 AC4·AC5 — 답변 2건 이상이면 배지가 「답변 N · 최신 {상태}」로
   // 바뀌고, 1건이면 기존 배지("발행됨" 낱말 그대로) 그대로다.
-  it('repliesCount>=2면 배지가 「답변 N · 최신 {상태}」, 1건이면 기존 배지 그대로', async () => {
+  // story #3596 AC8 — 배지 개수·임계(>=2)의 주어가 sentRepliesCount로 바뀐다
+  // (repliesCount는 초안 포함 전체라 초안 하나뿐인 댓글까지 잘못 세던 자리).
+  it('sentRepliesCount>=2면 배지가 「답변 N · 최신 {상태}」, 1건이면 기존 배지 그대로', async () => {
     const face = loadedFace([
-      baseComment({ id: 'c1', replyStatus: 'published', repliesCount: 1 }),
-      baseComment({ id: 'c2', replyStatus: 'published', repliesCount: 2 }),
+      baseComment({ id: 'c1', replyStatus: 'published', repliesCount: 1, sentRepliesCount: 1 }),
+      baseComment({ id: 'c2', replyStatus: 'published', repliesCount: 2, sentRepliesCount: 2 }),
     ]);
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
@@ -372,6 +377,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
         externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
         replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
+        openReplyDraft: null, sentRepliesCount: 0,
       }],
     });
   });
@@ -476,6 +482,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
         id: 'c1', authorDisplayName: null, bodyText: 'x',
         externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
         replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
+        openReplyDraft: null, sentRepliesCount: 0,
       }],
     });
   });

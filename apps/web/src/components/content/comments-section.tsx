@@ -303,7 +303,11 @@ function CommentsList({
                 자리 자체를 안 그린다 — 지어내지 않는다. */}
             {comment.replyStatus !== null ? (
             <div className="flex items-center gap-2" data-testid="comments-item-reply-status">
-              <CommentReplyStatusChip status={comment.replyStatus} repliesCount={comment.repliesCount} />
+              {/* story #3596 AC8 — 배지 개수의 주어는 «보낸 답변»만(sentRepliesCount).
+                  안 보낸 초안은 배지가 아니라 위 버튼 낱말(「이어서 답변」)로만
+                  드러난다 — repliesCount(초안 포함 전체)를 쓰면 초안 하나뿐인
+                  댓글도 "답변 N"으로 잘못 셌다(§3596 출처 그 결함). */}
+              <CommentReplyStatusChip status={comment.replyStatus} repliesCount={comment.sentRepliesCount} />
               {comment.replyStatus === 'published' && comment.replyExternalUrl ? (
                 <a
                   href={comment.replyExternalUrl}
