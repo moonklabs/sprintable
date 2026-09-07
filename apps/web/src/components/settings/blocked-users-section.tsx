@@ -82,7 +82,9 @@ export function BlockedUsersSection() {
           // story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「차단 해제」 접근 이름이라
           // 보조기술 버튼 목록에서 어느 사용자 행인지 못 가른다. 순번+현재 보이는 라벨을
           // 그대로 품는 aria-label로 가른다(새 낱말 0 — 보이는 글자는 불변).
-          const visibleLabel = busyId === row.blocked_member_id ? '...' : t('unblockUserAction');
+          // story #3608(유나 §22-18 ④-2) — "..."는 위 aria-label 안에도 그대로
+          // 들어가 "3번째 ..."이 됐다(발견 시점 실측). 낱말("해제 중…")로.
+          const visibleLabel = busyId === row.blocked_member_id ? t('unblockUserUnblocking') : t('unblockUserAction');
           return (
             <div key={row.blocked_member_id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
               <span className="flex items-center gap-2 text-sm text-foreground">

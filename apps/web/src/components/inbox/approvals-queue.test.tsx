@@ -664,6 +664,30 @@ describe('ApprovalsQueue', () => {
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
   });
 
+  // story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — 승인 요청이 아직 안 끝난 동안
+  // "..."가 보이는 글자에 그대로 떴다(#3592 실측 발견 — 이 primaryLabel 자리는 게이트
+  // 타입별로 동적이라 #3592 자체는 순번 aria-label을 안 배선했지만, "..." 낱말화 문제는
+  // 이 자리에도 그대로 있었다). 낱말("승인 중…")로 바뀌었는지 검증.
+  it('⭐#3608 — 승인 요청 pending 中 보이는 글자에 "..." 0, "승인 중" 포함', async () => {
+    let resolveResponse: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') {
+        return new Promise((resolve) => {
+          resolveResponse = () => resolve({ ok: true, json: async () => ({}) });
+        });
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approveButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(approveButton.textContent).not.toContain('...');
+    expect(approveButton.textContent).toContain(koMessages.cage.gateApproving);
+    await act(async () => { resolveResponse?.(); await Promise.resolve(); await Promise.resolve(); });
+  });
+
   // story #3334(선생님 실사용 4바퀴 T1' 적출, 처방 확定) — 저위험이라도 반려는 이제 사유
   // 필수(서버 gate_type 무관 422 강제). 예전엔 이 카드의 "변경 요청" 클릭이 사유 없이 즉시
   // POST했다(이 테스트가 그 낡은 계약을 pin하고 있었다) — 지금은 클릭 즉시 제출 대신 서명

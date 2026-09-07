@@ -748,7 +748,11 @@ export function ApprovalsQueue() {
                 aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: disabled && !isSigFlow ? '...' : primaryLabel })}
               >
                 <CheckCircle className="size-3.5" />
-                {disabled && !isSigFlow ? '...' : primaryLabel}
+                {/* story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — "..."는 보는
+                    사람에게도 아무 말을 안 한다("3번째 항목 ..."로 접근 이름이
+                    끝나던 원인). 낱말("승인 중…")로 바꾸면 접근 이름은 §22-18
+                    ④(보이는 라벨 통째)로 저절로 따라온다 — 새 aria 장치 0. */}
+                {disabled && !isSigFlow ? t('gateApproving') : primaryLabel}
               </Button>
             </div>
             {requiresOptionChoice && !selectedOption ? (

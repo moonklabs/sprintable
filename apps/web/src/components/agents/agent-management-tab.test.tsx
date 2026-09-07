@@ -83,3 +83,41 @@ describe('AgentManagementTab — 토글 버튼 접근 이름 전수(story #3592)
     expect(names[1]).toContain('비활성화');
   });
 });
+
+// story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — pending 中 "..."는 위 aria-label
+// 안에도 그대로 들어갔다(발견 시점 실측). 활성화는 확認 다이얼로그 없이 즉시 실행되므로
+// (requestToggle의 확認-우회 분기, story #2406 AC1) 그 경로로 pending 상태를 잡는다.
+describe('AgentManagementTab — pending 라벨 낱말화(story #3608)', () => {
+  it('⭐#3608 — 활성화 pending 中 접근 이름·보이는 글자에 "..." 0, "변경 중" 포함', async () => {
+    let resolvePatch!: () => void;
+    const patchPending = new Promise<void>((resolve) => { resolvePatch = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { role: 'admin' } }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url.startsWith('/api/team-members?')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', name: '에이전트 하나', role: 'member', is_active: false }] }) };
+      }
+      if (url === '/api/team-members/a1' && init?.method === 'PATCH') {
+        await patchPending;
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+
+    const toggleBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '활성화');
+    expect(toggleBtn).not.toBeUndefined();
+    await act(async () => {
+      toggleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(toggleBtn!.textContent).not.toContain('...');
+    expect(toggleBtn!.textContent).toContain('변경 중');
+    const ariaLabel = toggleBtn!.getAttribute('aria-label');
+    expect(ariaLabel).not.toContain('...');
+    expect(ariaLabel).toContain('변경 중');
+    resolvePatch();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  });
+});

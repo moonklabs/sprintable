@@ -246,7 +246,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       // story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「비활성화」/
                       // 「활성화」 접근 이름이라 보조기술 버튼 목록에서 어느 에이전트
                       // 행인지 못 가른다. 순번+현재 보이는 라벨을 그대로 품는다.
-                      const visibleLabel = togglingId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent');
+                      // story #3608(유나 §22-18 ④-2) — "..."는 아래 aria-label
+                      // 안에도 그대로 들어간다(발견 시점 실측). 낱말("변경 중…")로.
+                      const visibleLabel = togglingId === agent.id ? t('agentToggling') : agent.is_active ? t('deactivateAgent') : t('activateAgent');
                       return (
                         <Button
                           variant="glass"

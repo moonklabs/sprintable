@@ -126,6 +126,43 @@ describe('BlockedUsersSection', () => {
     expect(names[1]).toContain('차단 해제');
   });
 
+  // story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — pending 中 "..."는 접근
+  // 이름에도 그대로 들어가 "1번째 ..."가 됐다(#3592 발견분). 낱말("해제 중…")로
+  // 바뀌었는지 검증 — aria-label이 있는가가 아니라 그 안에 "..." 0·"해제 중" 포함.
+  it('⭐#3608 — 차단 해제 pending 中 접근 이름·보이는 글자에 "..." 0, "해제 중" 포함', async () => {
+    let resolveDelete!: () => void;
+    const deletePending = new Promise<void>((resolve) => { resolveDelete = resolve; });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/user-blocks') {
+        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }] }) };
+      }
+      if (url === '/api/team-members/member-9') {
+        return { ok: true, json: async () => ({ data: { name: '까심' } }) };
+      }
+      if (url === '/api/user-blocks/member-9' && init?.method === 'DELETE') {
+        await deletePending;
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const unblockBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '차단 해제');
+    await act(async () => {
+      unblockBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(unblockBtn!.textContent).not.toContain('...');
+    expect(unblockBtn!.textContent).toContain('해제 중');
+    const ariaLabel = unblockBtn!.getAttribute('aria-label');
+    expect(ariaLabel).not.toContain('...');
+    expect(ariaLabel).toContain('해제 중');
+    resolveDelete();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  });
+
   it('차단 해제 실패면 목록에 그대로 남고 에러 토스트가 뜬다', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/user-blocks') {

@@ -181,9 +181,11 @@ export function WorkflowTriggerTypesSection() {
                         size="sm"
                         onClick={() => void handleSaveEdit(tt.id)}
                         disabled={!editLabel.trim() || saving === tt.id}
-                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: saving === tt.id ? '...' : tc('save') })}
+                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: saving === tt.id ? t('workflowSaving') : tc('save') })}
                       >
-                        {saving === tt.id ? '...' : tc('save')}
+                        {/* story #3608(유나 §22-18 ④-2)+#3606(aria-label 배선) 병합 —
+                            "..."는 아무 말도 안 한다, 낱말("저장 중…")로. */}
+                        {saving === tt.id ? t('workflowSaving') : tc('save')}
                       </Button>
                       <Button
                         variant="glass"
@@ -222,10 +224,15 @@ export function WorkflowTriggerTypesSection() {
                         disabled={togglingId === tt.id}
                         aria-label={t('workflowToggleAriaLabel', {
                           n: index + 1,
-                          label: togglingId === tt.id ? '...' : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn'),
+                          label: togglingId === tt.id ? t('workflowToggling') : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn'),
                         })}
                       >
-                        {togglingId === tt.id ? '...' : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn')}
+                        {/* story #3608 — 이 버튼은 #3592가 aria-label까지 이미 배선한
+                            자리라 "..."가 그 aria-label 문자열 안에도 그대로 들어가
+                            "3번째 트리거 유형 ..."이 됐다(발견 시점 실측). 낱말
+                            ("변경 중…")로 바꿔 보이는 글자·aria-label 둘 다 한 번에
+                            고친다. */}
+                        {togglingId === tt.id ? t('workflowToggling') : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn')}
                       </Button>
                       {!tt.is_system ? (
                         <>
@@ -248,9 +255,11 @@ export function WorkflowTriggerTypesSection() {
                                 size="sm"
                                 onClick={() => void handleDelete(tt.id)}
                                 disabled={deletingId === tt.id}
-                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: deletingId === tt.id ? '...' : tc('confirm') })}
+                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: deletingId === tt.id ? t('workflowDeleting') : tc('confirm') })}
                               >
-                                {deletingId === tt.id ? '...' : tc('confirm')}
+                                {/* story #3608(+#3606 aria-label 배선 병합) — "..."는
+                                    아무 말도 안 한다, 낱말("삭제 중…")로. */}
+                                {deletingId === tt.id ? t('workflowDeleting') : tc('confirm')}
                               </Button>
                               <Button
                                 variant="glass"
