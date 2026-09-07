@@ -72,18 +72,63 @@ async def _seed_gate(session, *, org_id, work_item_id, status="approved"):
 
 async def _seed_channel_publication(
     session, *, org_id, gate_id, channel, published_at, permalink="https://example.com/post",
-    connection_id=None, status="published",
+    connection_id=None, status="published", version_id=None,
 ):
     from app.models.channel_publication import ChannelPublication
 
     pub = ChannelPublication(
-        id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, version_id=uuid.uuid4(),
+        # story #3656 — version_id 파라미터화(기본값은 기존 그대로 임의 uuid) — 소재/훅
+        # 시딩(ChannelPostVersion·ChannelPostImage)이 이 값을 정확히 가리켜야 한다.
+        id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, version_id=version_id or uuid.uuid4(),
         connection_id=connection_id or uuid.uuid4(), channel=channel, status=status,
         external_id=f"ext-{uuid.uuid4().hex[:8]}", permalink=permalink, published_at=published_at,
     )
     session.add(pub)
     await session.commit()
     return pub
+
+
+async def _seed_channel_post_draft(session, *, org_id, work_item_id, channel="instagram"):
+    """story #3656 — ChannelPostVersion.draft_id는 실 FK(channel_post_drafts.id)라
+    test_3645_evidence_asset_hook_keys.py의 「draft_id=uuid.uuid4() 그대로」 관례를
+    그대로 못 따른다(그쪽은 ChannelPostImage/Video만 쓰는데 그 둘은 FK 없음 관례 —
+    version만 FK가 있다, 실측으로 확認)."""
+    from app.models.channel_post_draft import ChannelPostDraft
+
+    draft = ChannelPostDraft(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, channel=channel,
+        connection_id=uuid.uuid4(),
+    )
+    session.add(draft)
+    await session.commit()
+    return draft
+
+
+async def _seed_channel_post_version(session, *, draft_id, version_id, hook_key=None):
+    from app.models.channel_post_version import ChannelPostVersion
+
+    version = ChannelPostVersion(
+        id=version_id, draft_id=draft_id, version=1, text="본문", body_sha256=uuid.uuid4().hex,
+        hook_key=hook_key, author_member_id=uuid.uuid4(), author_kind="human",
+    )
+    session.add(version)
+    await session.commit()
+    return version
+
+
+async def _seed_channel_post_image(session, *, org_id, draft_id, version_id, position, sha256=None):
+    from app.models.channel_post_image import ChannelPostImage
+
+    image = ChannelPostImage(
+        id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=version_id, position=position,
+        original_object_path=f"org/{org_id}/img-{uuid.uuid4().hex[:8]}.jpg",
+        original_sha256=sha256 or uuid.uuid4().hex,
+        original_content_type="image/jpeg", original_bytes=1234,
+        original_width=1080, original_height=1080, created_by=uuid.uuid4(),
+    )
+    session.add(image)
+    await session.commit()
+    return image
 
 
 async def _seed_snapshot(
@@ -650,3 +695,131 @@ async def test_invalid_window_raises():
 # 1회 비용(~3.4s, 로컬 무경합)이 이 파일에 섞여 있을 때 60초 러너 가드의 등재/경합
 # 배율을 왜곡했다(그 파일 머리 주석에 실측 상세). 이 파일에 남은 14개는 전부
 # list_insights_board를 서비스 함수로 직접 부르며 app.main을 안 건드린다.
+
+# ─── story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — asset_sha256s·hook_key
+# additive. 3645(#4002)의 _resolve_channel_publication_asset_evidence 재사용(새
+# 판정 0) — 여기 테스트는 "그 헬퍼가 list_insights_board 행에도 정확히 배선됐는가"
+# 만 잰다(헬퍼 자신의 로직 커버리지는 test_3645_evidence_asset_hook_keys.py가 이미
+# 갖고 있다, 이중 검증 안 함).
+@pytest.mark.anyio
+async def test_channel_publication_row_carries_asset_sha256s_and_hook_key():
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_id)
+            draft = await _seed_channel_post_draft(s, org_id=org_id, work_item_id=story_id)
+            draft_id = draft.id
+            version_id = uuid.uuid4()
+            await _seed_channel_post_version(s, draft_id=draft_id, version_id=version_id, hook_key="hook-A")
+            await _seed_channel_post_image(
+                s, org_id=org_id, draft_id=draft_id, version_id=version_id, position=0, sha256="sha-first",
+            )
+            await _seed_channel_post_image(
+                s, org_id=org_id, draft_id=draft_id, version_id=version_id, position=1, sha256="sha-second",
+            )
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=gate.id, channel="instagram",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
+        assert row["asset_sha256s"] == ["sha-first", "sha-second"]
+        assert row["hook_key"] == "hook-A"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_site_post_row_asset_and_hook_always_null():
+    """site_post(hosted_site)는 이미지/영상·hook_key 개념 자체가 없다 — 있는 걸
+    지어내지 않는다(_resolve_channel_publication_asset_evidence의 (None, None)
+    조기 반환과 동형 계약을 list_insights_board 행에서도 그대로 고정)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-no-asset", title="글",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
+        assert row["asset_sha256s"] is None
+        assert row["hook_key"] is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_asset_hook_evidence_query_count_not_proportional_to_row_count():
+    """PO CHANGES(2026-09-07) — channel_publication 행마다 소재/훅을 조회하면
+    N+1(페이지 상한 200 기준 최악 800쿼리, "보드가 못 견딘다"). 1건일 때와 4건일
+    때 SELECT 문 수가 같아야 한다(test_3394_channel_post_list_be_fields.py의
+    before_cursor_execute 실측 관례 그대로 재사용 — 새 계측 패턴 발명 0)."""
+    from sqlalchemy import event
+    from app.services.insights_board import list_insights_board
+
+    def _capture(bucket: list[str]):
+        def _listener(conn, cursor, statement, parameters, context, executemany):
+            bucket.append(statement)
+        return _listener
+
+    async def _seed_one_row(session, *, org_id, story_id, slug_suffix):
+        gate = await _seed_gate(session, org_id=org_id, work_item_id=story_id)
+        draft = await _seed_channel_post_draft(session, org_id=org_id, work_item_id=story_id)
+        version_id = uuid.uuid4()
+        await _seed_channel_post_version(session, draft_id=draft.id, version_id=version_id, hook_key=f"hook-{slug_suffix}")
+        await _seed_channel_post_image(session, org_id=org_id, draft_id=draft.id, version_id=version_id, position=0)
+        await _seed_channel_publication(
+            session, org_id=org_id, gate_id=gate.id, channel="instagram",
+            published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
+        )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_one_row(s, org_id=org_id, story_id=story_id, slug_suffix="1")
+
+        statements_1: list[str] = []
+        listener_1 = _capture(statements_1)
+        event.listen(engine.sync_engine, "before_cursor_execute", listener_1)
+        try:
+            async with Session() as s:
+                result_1 = await list_insights_board(s, org_id=org_id, window="30d")
+                assert len(result_1["rows"]) == 1
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", listener_1)
+        select_count_1 = len([st for st in statements_1 if st.strip().upper().startswith("SELECT")])
+
+        async with Session() as s:
+            for n in range(2, 5):
+                await _seed_one_row(s, org_id=org_id, story_id=story_id, slug_suffix=str(n))
+
+        statements_4: list[str] = []
+        listener_4 = _capture(statements_4)
+        event.listen(engine.sync_engine, "before_cursor_execute", listener_4)
+        try:
+            async with Session() as s:
+                result_4 = await list_insights_board(s, org_id=org_id, window="30d")
+                assert len(result_4["rows"]) == 4
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", listener_4)
+        select_count_4 = len([st for st in statements_4 if st.strip().upper().startswith("SELECT")])
+
+        print(f"\n=== N+1 실측(insights-board 소재/훅): 1건 SELECT={select_count_1}, 4건 SELECT={select_count_4}")
+        assert select_count_4 == select_count_1, (
+            f"쿼리 수가 행 수에 비례한다(N+1) — 1건={select_count_1}, 4건={select_count_4}"
+        )
+    finally:
+        await engine.dispose()

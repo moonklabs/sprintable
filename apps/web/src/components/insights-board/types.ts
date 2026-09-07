@@ -52,6 +52,14 @@ export interface InsightsBoardRow {
   channel_post_draft_id: string | null;
   comments_last_collected_at: string | null;
   comments_supported: boolean;
+  // story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 3645(#4002)의
+  // `_resolve_channel_publication_asset_evidence`를 list_insights_board가 재사용해
+  // 「지금」 값을 싣는다(evidence 조인이 아니다 — version 행 불변 전제로 보드의
+  // 「지금」과 evidence의 「스냅샷 시점」이 같다는 것이 BE 측 전제, BE PR에서 주석
+  // 확定). site_post(hosted_site)·이미지/영상 0건·hook_key 미태깅 발행물은 각각
+  // null — 소급 백필 없음(신규 발행부터만 채워진다).
+  asset_sha256s: string[] | null;
+  hook_key: string | null;
 }
 
 export interface InsightsBoardResponse {

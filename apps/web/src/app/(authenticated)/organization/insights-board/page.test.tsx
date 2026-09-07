@@ -529,3 +529,73 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
     );
   });
 });
+
+// story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 소재/훅 묶음 토글. BE(#3656
+// 절반)가 아직 안 착지해 asset_sha256s/hook_key가 실린 목 행으로 먼저 짓는다(PO
+// 지시 — FE 절반 지금, BE는 #4002 착지 뒤 같은 브랜치에).
+const GROUPABLE_ROW_IG = {
+  publication_id: 'pub-ig', kind: 'channel_publication', channel: 'instagram', work_item_id: 'wi-ig',
+  title: '캐러셀 IG', published_at: '2026-09-05T00:00:00Z', external_url: null, connection_id: 'conn-1',
+  d1: { status: 'captured', normalized: { impressions: 100, reach: null, views: null, engagements: null, clicks: null, spend: null, conversions: null, inflow_sessions: null, inflow_users: null }, captured_at: '2026-09-06T00:00:00Z' },
+  d7: null,
+  asset_sha256s: ['abcdefabcdef1111'], hook_key: 'hook-A',
+};
+const GROUPABLE_ROW_FB = {
+  publication_id: 'pub-fb', kind: 'channel_publication', channel: 'facebook', work_item_id: 'wi-fb',
+  title: '캐러셀 FB', published_at: '2026-09-04T00:00:00Z', external_url: null, connection_id: 'conn-2',
+  d1: { status: 'captured', normalized: { impressions: 150, reach: null, views: null, engagements: null, clicks: null, spend: null, conversions: null, inflow_sessions: null, inflow_users: null }, captured_at: '2026-09-05T00:00:00Z' },
+  d7: null,
+  asset_sha256s: ['abcdefabcdef1111'], hook_key: null,
+};
+const GROUPABLE_ROW_THREADS = {
+  publication_id: 'pub-th', kind: 'channel_publication', channel: 'threads', work_item_id: 'wi-th',
+  title: '단일 소재', published_at: '2026-09-03T00:00:00Z', external_url: null, connection_id: 'conn-3',
+  d1: null, d7: null,
+  asset_sha256s: ['zzzzzzzzzzzz9999'], hook_key: 'hook-A',
+};
+
+describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이터)', () => {
+  it('기본값(묶음=없음)은 무회귀 — 그룹 헤더 행이 안 뜨고 기존처럼 행마다 하나씩', async () => {
+    stubFetch({ page1: [GROUPABLE_ROW_IG, GROUPABLE_ROW_FB, GROUPABLE_ROW_THREADS] });
+    await mount();
+    expect(container.querySelectorAll('[data-testid="insights-board-group-header"]').length).toBe(0);
+    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+  });
+
+  it('묶음=소재 — 같은 asset_sha256s[0]을 공유하는 IG·FB가 한 그룹(대표=sha256 앞 8자)으로, 단일 소재(threads)는 별도 그룹으로 묶인다', async () => {
+    stubFetch({ page1: [GROUPABLE_ROW_IG, GROUPABLE_ROW_FB, GROUPABLE_ROW_THREADS] });
+    await mount();
+    await openMenuAndClick('insights-board-group-by-trigger', koMessages.insightsBoard.groupByCreative);
+    const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
+    expect(lastUrl).toContain('group_by=asset');
+
+    // 다른 URL-쿼리 필터(window/status/metric)와 같은 관례 — useSearchParams는
+    // 정적 목이라 router.replace가 실제 URL을 안 바꾼다, 재장착으로 갱신을 흉내낸다.
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('group_by=asset'));
+    await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
+    await flush();
+
+    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    expect(headers).toHaveLength(2);
+    expect(headers[0]!.querySelector('[data-testid="insights-board-group-label"]')?.textContent).toBe('abcdefab');
+    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+  });
+
+  it('묶음=훅 — hook_key가 null인 FB는 「미분류」(docs 재사용) 그룹으로, IG·threads는 hook-A 그룹으로 합쳐진다', async () => {
+    stubFetch({ page1: [GROUPABLE_ROW_IG, GROUPABLE_ROW_FB, GROUPABLE_ROW_THREADS] });
+    await mount();
+    await openMenuAndClick('insights-board-group-by-trigger', koMessages.insightsBoard.groupByHook);
+    const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
+    expect(lastUrl).toContain('group_by=hook');
+
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('group_by=hook'));
+    await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
+    await flush();
+
+    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    const labels = headers.map((h) => h.querySelector('[data-testid="insights-board-group-label"]')?.textContent);
+    expect(labels).toEqual(['hook-A', koMessages.docs.indexCategoryUncategorized]);
+    const hookAHeader = headers[0]!;
+    expect(hookAHeader.textContent).toContain(koMessages.insightsBoard.groupMemberCount.replace('{n}', '2'));
+  });
+});

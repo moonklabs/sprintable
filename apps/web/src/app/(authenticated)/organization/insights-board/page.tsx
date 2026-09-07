@@ -24,6 +24,7 @@ import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { ReconcileResultLine } from '@/components/insights-board/reconcile-result-line';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
+import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows, type InsightsBoardGroupBy } from '@/components/insights-board/group-rows';
 import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 
 /**
@@ -46,6 +47,11 @@ type SortDir = 'asc' | 'desc';
 const WINDOW_OPTIONS: InsightsBoardWindow[] = ['7d', '30d', '90d'];
 const SORT_ROLE_OPTIONS: SortRole[] = ['published_at', 'd1', 'd7'];
 const STATUS_FILTER_OPTIONS = ['pending', 'captured', 'unsupported', 'failed', 'dead_letter'] as const;
+// story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 소재/훅 묶음 토글. 다른
+// 필터와 달리 이 축은 서버가 모른다(client-side groupBy, group-rows.ts) — BE 쿼리
+// 파라미터로 안 보낸다(buildQuery 불변).
+const GROUP_BY_OPTIONS: InsightsBoardGroupBy[] = ['none', 'asset', 'hook'];
+const DEFAULT_GROUP_BY: InsightsBoardGroupBy = 'none';
 
 // insight-snapshot-block.tsx(story #3499) METRIC_LABEL_KEYS와 동일 매핑 —
 // content 네임스페이스 기존 지표 라벨 재사용(새 키를 만들지 않는다).
@@ -96,6 +102,9 @@ export default function InsightsBoardPage() {
   const searchParams = useSearchParams();
   const t = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
+  // story #3656 — 훅 미태깅 묶음 라벨은 새 낱말을 안 만들고 docs 네임스페이스 기존
+  // 키(indexCategoryUncategorized, 「미분류」)를 재사용한다(유나 確定).
+  const tDocs = useTranslations('docs');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
 
@@ -110,6 +119,11 @@ export default function InsightsBoardPage() {
   // publication_id를 실어 온다. 있는 강조/스크롤 메커니즘이 이 화면엔 없어서(그라운딩
   // 확認) 새로 짠다 — row가 이미 publication_id로 키가 나 있어(346행) 비용이 작다.
   const highlightParam = searchParams.get('highlight');
+  // story #3656 — 소재/훅 묶음 토글. 다른 필터와 같은 URL-쿼리 관례(getter는 여기,
+  // 세터는 updateQuery 재사용) — 서버 쿼리(buildQuery)엔 안 실린다(client-side뿐).
+  const rawGroupByParam = searchParams.get('group_by') as InsightsBoardGroupBy | null;
+  const groupByParam: InsightsBoardGroupBy = rawGroupByParam && GROUP_BY_OPTIONS.includes(rawGroupByParam)
+    ? rawGroupByParam : DEFAULT_GROUP_BY;
   // 실제 BE sort 값 — 역할(published_at 고정, d1/d7은 현재 지표와 합성).
   const resolvedSort = sortRoleParam === 'published_at' ? 'published_at' : `${metricParam}_${sortRoleParam}`;
 
@@ -213,7 +227,6 @@ export default function InsightsBoardPage() {
     setHighlightedRowId(highlightParam);
     const timer = setTimeout(() => setHighlightedRowId(null), 3000);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightParam, loading, rows]);
 
   const handleLoadMore = useCallback(async () => {
@@ -255,6 +268,20 @@ export default function InsightsBoardPage() {
   const statusFilterLabel = (status: (typeof STATUS_FILTER_OPTIONS)[number]): string => (
     status === 'unsupported' ? tContent('insightSnapshotUnsupported') : tContent(STATUS_FILTER_LABEL_KEYS[status]!)
   );
+
+  // story #3656(유나 낱말 確定 2026-09-07) — 묶음 축 토글 라벨.
+  const groupByLabel: Record<InsightsBoardGroupBy, string> = {
+    none: t('groupByNone'), asset: t('groupByCreative'), hook: t('groupByHook'),
+  };
+
+  // story #3656 — 묶음 헤더의 대표 라벨. 소재=sha256 앞 8자·미태깅=「소재 없음」(신규
+  // 키, 훅과 다른 말) · 훅=hook_key 그대로·미태깅=docs 네임스페이스 기존 「미분류」
+  // 재사용(유나 確定 — 두 축의 미태깅 낱말이 다르다, 하나로 안 합친다).
+  function groupRepresentativeLabel(mode: InsightsBoardGroupBy, rawKey: string | null): string | null {
+    if (mode === 'none') return null;
+    if (mode === 'asset') return rawKey ? rawKey.slice(0, ASSET_LABEL_PREFIX_LENGTH) : t('groupCreativeNone');
+    return rawKey ?? tDocs('indexCategoryUncategorized');
+  }
 
   // PO 브리프 — 이 기능 전체가 BE 기준 사람 전용(follow-up POST가 403 FOLLOW_UP_CREATE_
   // HUMAN_ONLY). 액터 종류를 미리 알 수 있으면(useDashboardContext().currentMemberType)
@@ -369,6 +396,28 @@ export default function InsightsBoardPage() {
         >
           {sortDirParam === 'desc' ? t('sortDirDesc') : t('sortDirAsc')}
         </button>
+
+        {/* story #3656 — 소재/훅 묶음 토글. 서버 쿼리에 안 실림(client-side groupBy). */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
+            data-testid="insights-board-group-by-trigger"
+          >
+            {t('groupByLabel')} {groupByLabel[groupByParam]}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuGroup>
+              {GROUP_BY_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option}
+                  onClick={() => updateQuery({ group_by: option === DEFAULT_GROUP_BY ? null : option })}
+                >
+                  {groupByLabel[option]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {loadErrorMessage ? (
@@ -418,7 +467,38 @@ export default function InsightsBoardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((row, index) => {
+                {groupInsightsBoardRows(rows, groupByParam).map((group) => (
+                <Fragment key={group.groupKey}>
+                {/* story #3656 — 묶음 헤더(groupByParam='none'이면 그룹마다 행 1개라
+                    안 그린다, 기존 무회귀). 대표 라벨+구성원 수·1d/7d 합계(전부
+                    captured일 때만, 아니면 대기 중 재사용 — aggregateGroupBucket). */}
+                {groupByParam !== 'none' ? (
+                  <tr className="bg-muted/30 text-xs" data-testid="insights-board-group-header">
+                    <td colSpan={3} className="px-3 py-2 font-medium text-foreground">
+                      <span data-testid="insights-board-group-label">
+                        {groupRepresentativeLabel(groupByParam, group.rawKey)}
+                      </span>
+                      <span className="ml-2 text-muted-foreground">
+                        {t('groupMemberCount', { n: group.rows.length })}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      <InsightsBoardMetricCell
+                        bucket={aggregateGroupBucket(group.rows, 'd1')} metric={metricParam}
+                        tContent={tContent} tBoard={t}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      <InsightsBoardMetricCell
+                        bucket={aggregateGroupBucket(group.rows, 'd7')} metric={metricParam}
+                        tContent={tContent} tBoard={t}
+                      />
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                ) : null}
+                {group.rows.map((row) => {
+                  const index = rows.findIndex((r) => r.publication_id === row.publication_id);
                   const reconcile = reconcileState[row.publication_id];
                   // story #3620 AC3 — 「발행 後 행에만」. hosted_site(site_post)는
                   // channel_publication이 없어 BE가 항상 INSIGHT_PUBLICATION_NOT_FOUND
@@ -505,6 +585,8 @@ export default function InsightsBoardPage() {
                     </Fragment>
                   );
                 })}
+                </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
