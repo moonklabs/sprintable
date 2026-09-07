@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError, type SitePostApiErrorInfo } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
@@ -175,6 +175,10 @@ interface ChannelPostImageResponse {
 
 interface ChannelConnectionInfo {
   id: string;
+  // story #3671(3661 클래스 잔여, 페드루 PO 確定 2026-09-07) — channelConnectionIdentityLabel
+  // (lib/channel-label.ts)이 폴백 문구를 짓는 데 필요(BE 응답엔 원래 있던 필드, 이 인터페이스가
+  // 안 읽고 있었을 뿐).
+  channel: string;
   max_text_length: number | null;
   // story #3402 ④(AC9) — 나가는 계정을 승인 카드에 적는다. 없으면 account_id로 폴백
   // (지어내지 않는다, doc §3-4).
@@ -890,8 +894,10 @@ export default function ChannelPostEditPage() {
             // AC6 — 계약 필드 자체가 없거나 연결을 못 찾으면 "모른다"(undefined)로 남긴다.
             // 값이 명시적으로 null이면 "선언 안 함"(한도 미확認)으로 구별한다.
             setMaxTextLength(conn ? conn.max_text_length : undefined);
-            // AC9 — account_label 없으면 account_id로 폴백(지어내지 않는다).
-            if (conn) setAccountLabel(conn.account_label ?? conn.account_id);
+            // AC9 — account_label 없으면 폴백(지어내지 않는다). story #3671(3661 후속) —
+            // account_id를 그대로 쓰면 webhook류가 139자 URL로 문장을 무너뜨린다
+            // (channel-label.ts::channelConnectionIdentityLabel, 3661과 동형 처방).
+            if (conn) setAccountLabel(channelConnectionIdentityLabel(conn, t));
             // story #3426 — can_unpublish/unpublish_blocked_reason은 draft가 아니라
             // 이 연결 응답에 실린다(그라운딩 확認) — 새 왕복을 만들지 않고 같은 응답에서 읽는다.
             if (conn) {

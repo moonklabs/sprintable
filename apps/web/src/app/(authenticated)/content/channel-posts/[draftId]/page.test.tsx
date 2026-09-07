@@ -138,6 +138,12 @@ function stubFetch(opts: {
   // story #3458 — 연결 «상태»(토큰 등). 기본 'active'.
   connectionStatus?: 'active' | 'expired' | 'revoked' | 'error';
   connectionsOk?: boolean;
+  // story #3671(유나 QA 2026-09-07) — 기본 'c1'은 2자라 channelConnectionIdentityLabel의
+  // 「…뒤 8자」 절단 자체가 재현이 안 된다(2자는 잘라도 그대로 2자) — 절단이 실제로
+  // 일어나는 걸 단언하려면 36자 uuid 표본이 필요한 테스트가 이 값을 덮어쓴다. draftDetail
+  // 의 connection_id도 같이 맞춰야 conn을 찾는다(호출부 책임 — 이 헬퍼가 자동 동기화하지
+  // 않음, DRAFT_DETAIL 기본 connection_id='c1'과 이 값이 다르면 draftDetail도 함께 override).
+  connectionId?: string;
   // story #3428 — 이미지 규격(어댑터 성질). 기본값 0 = 이미지 미지원(기존 74건 전부가
   // 이 값을 몰라도 되므로 명시 안 하면 첨부 칸 자체가 안 뜨는 쪽이 자연스러운 기본).
   imageMaxCount?: number;
@@ -265,7 +271,7 @@ function stubFetch(opts: {
           ok: true, status: 200,
           json: async () => ({
             data: [{
-              id: 'c1', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
+              id: opts.connectionId ?? 'c1', channel: 'threads', max_text_length: maxTextLength, account_label: accountLabel, account_id: 'acct-1',
               can_unpublish: canUnpublish, unpublish_blocked_reason: unpublishBlockedReason, status: connectionStatus,
               image_formats: ['image/jpeg', 'image/png'], image_max_bytes: 8 * 1024 * 1024,
               image_aspect_max: opts.imageAspectMax ?? 10, image_aspect_min: opts.imageAspectMin ?? 0,
@@ -786,14 +792,69 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-account-label"]')?.textContent).toBe('Marketing Bot');
   });
 
-  it('⭐AC9 — account_label이 null이면 account_id로 폴백한다(지어내지 않는다)', async () => {
-    stubFetch({ accountLabel: null });
+  // story #3671(3661 클래스 잔여, 페드루 PO 確定 2026-09-07) — account_id를 그대로
+  // 쓰면 webhook류가 139자 URL로 문장을 무너뜨린다(3661과 동형 결함) — 채널명+연결
+  // id 짧은 꼬리로 폴백한다(channelConnectionIdentityLabel, 새 낱말 0).
+  it('⭐AC9 — account_label이 null이면 「채널명(…연결id 짧은 꼬리)」로 폴백한다(raw account_id 노출 0, 실제 8자 절단 확認)', async () => {
+    // story #3671 CHANGES(유나 QA) — 기본 표본 'c1'(2자)은 「…뒤 8자」 절단이 안 재현된다
+    // (2자를 slice(-8)해도 그대로 2자) — 36자 uuid 표본으로 실제 절단을 단언.
+    const CONNECTION_UUID = 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f56789';
+    stubFetch({ accountLabel: null, connectionId: CONNECTION_UUID, draftDetail: { connection_id: CONNECTION_UUID } });
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
     });
     await flush();
 
-    expect(container.querySelector('[data-testid="channel-post-account-label"]')?.textContent).toBe('acct-1');
+    const label = container.querySelector('[data-testid="channel-post-account-label"]')?.textContent;
+    expect(label).toBe(`Threads(…${CONNECTION_UUID.slice(-8)})`);
+    expect(label).not.toContain('acct-1');
+    expect(label).not.toContain(CONNECTION_UUID);
+  });
+
+  // story #3671 — 3661 원 재현 조건(webhook의 account_id=139자 URL) 그대로. 뮤테이션
+  // 표적: setAccountLabel을 conn.account_label ?? conn.account_id로 되돌리면 이
+  // 테스트가 RED(전체 URL이 그대로 서게 됨).
+  it('⭐AC9 — webhook류(account_id가 URL)도 폴백이 짧은 꼬리만 보이고 URL 전체를 노출하지 않는다', async () => {
+    // stubFetch의 connections mock은 channel을 항상 'threads' 고정 실어 — webhook
+    // 케이스를 재현하려면 fetch mock을 여기서 직접 짠다(stubFetch 재사용 안 함).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}`) {
+          return { ok: true, status: 200, json: async () => ({ data: { ...DRAFT_DETAIL, channel: 'webhook' }, error: null, meta: null }) };
+        }
+        if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/versions`) {
+          return { ok: true, status: 200, json: async () => ({ data: [VERSION_1], error: null, meta: null }) };
+        }
+        if (url === `/api/organizations/${ORG_ID}/channel-connections`) {
+          return {
+            ok: true, status: 200,
+            json: async () => ({
+              data: [{
+                id: 'c1', channel: 'webhook', max_text_length: 500, account_label: null,
+                account_id: 'https://example.com/webhook/callback?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_extra_padding_to_reach_139_chars_xxxxxxxxxxxxxxxxxxxxxxxxx',
+                can_unpublish: true, unpublish_blocked_reason: null, status: 'active',
+                image_formats: [], image_max_bytes: 0, image_aspect_max: 10, image_aspect_min: 0,
+                image_width_min: 0, image_width_max: 0, image_color_space: 'sRGB', image_max_count: 0,
+                image_required: false, video_max_bytes: 0, video_max_seconds: 0, video_min_seconds: 0,
+                video_aspect_target: 0, video_aspect_tolerance: 0, video_codecs: [],
+              }],
+              error: null, meta: null,
+            }),
+          };
+        }
+        return { ok: true, status: 200, json: async () => ({ data: null, error: null, meta: null }) };
+      }),
+    );
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const label = container.querySelector('[data-testid="channel-post-account-label"]')?.textContent;
+    expect(label).not.toContain('https://example.com');
+    expect(label).toContain('…');
   });
 
   it('⭐AC7 — 한도 잔량 조회 성공 시 남은 게시 수를 보인다', async () => {

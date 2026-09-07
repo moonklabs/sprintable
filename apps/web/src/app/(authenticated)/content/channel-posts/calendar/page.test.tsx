@@ -105,6 +105,28 @@ describe('ChannelPostCalendarPage (story #3422 ③)', () => {
     expect(container.querySelectorAll('[data-testid="channel-post-calendar-card"]').length).toBe(1);
   });
 
+  // story #3671(3661 클래스 잔여, 페드루 PO 確定 2026-09-07) — account_label 없는
+  // 연결의 필터 칩 라벨이 account_id로 폴백했다(webhook류는 그 값이 139자 URL이라
+  // 칩 문구를 무너뜨린다, 3661과 동형 결함). 채널명+연결 id 짧은 꼬리로 폴백한다
+  // (channelConnectionIdentityLabel, 새 낱말 0). 뮤테이션 표적: label을
+  // c.account_label ?? c.account_id로 되돌리면 이 테스트가 RED(전체 URL 노출).
+  it('⭐account_label이 없는 연결은 필터 칩에 「채널명(…짧은 꼬리)」로 폴백하고 URL 전체를 노출하지 않는다', async () => {
+    stubFetch({
+      connections: [{
+        id: 'conn-webhook-1', channel: 'webhook', account_label: null,
+        account_id: 'https://example.com/webhook/callback?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_extra_padding_to_reach_139_chars_xxxxxxxxxxxxxxxxxxxxxxxxx',
+      }],
+      scheduled: [],
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostCalendarPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-calendar-grid"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('https://example.com');
+    expect(container.textContent).toContain('…');
+  });
+
   it('「날짜 미정」 항목은 레인에 뜨고 격자 셀에는 안 나온다', async () => {
     stubFetch({
       connections: [{ id: 'c1', account_label: 'Marketing Bot', account_id: 'acct-1' }],
