@@ -570,8 +570,12 @@ describe('GateEvidence — 댓글 답변 게이트 봉인 축(story #3517)', () 
   // 하지 않고 「확인할 수 없습니다」만 말한다 — 자리는 버전·해시 줄이 서던
   // 그 자리(줄을 새로 만들지 않는다). 뮤테이션(이 분기 제거 → "v" 텍스트가
   // 다시 보여 RED).
-  it('⑥-4 sealed_content_version이 null이면 「확인할 수 없습니다」만 서고 v숫자는 안 뜬다', async () => {
-    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-1' });
+  it('⑥-4 결정 난(rejected) 행에서 sealed_content_version이 null이면 「확인할 수 없습니다」만 서고 v숫자는 안 뜬다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'external_publish', work_item_type: 'story', status: 'rejected', github_check_run_id: null,
+      neutral_facts: { kind: 'comment_reply', target_external_comment_id: 'ext-comment-1' },
+      sealed_content_body: '안녕하세요, 다음 주 월요일에 재입고됩니다.',
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -579,6 +583,20 @@ describe('GateEvidence — 댓글 답변 게이트 봉인 축(story #3517)', () 
 
     expect(container.textContent).toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
     expect(container.textContent).not.toMatch(/\bv\d/);
+  });
+
+  // story #3599(유나 §22-17 ⑥-4 조건 갱신, 페드루 PO 정정 2026-09-07) — pending
+  // 옛 게이트(아직 아무도 승인/반려한 적 없음)는 "무엇을 승인했나" 물음 자체가
+  // 안 서므로 캡션이 뜨면 안 된다(지어내지 않는다). 뮤테이션(isResolved 조건
+  // 제거 → 이 pending 표본에도 캡션이 떠 RED).
+  it('⑥-4 pending인데 sealed_content_version이 null이면 캡션이 안 뜬다(결정 前)', async () => {
+    const gate = commentReplyGate({ target_external_comment_id: 'ext-comment-1' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedVersionMissing);
   });
 
   it('⑥-4 sealed_content_version이 있으면(신규 3599 게이트) 기존 버전·해시 줄이 그대로 뜨고 확인불가 문구는 없다', async () => {

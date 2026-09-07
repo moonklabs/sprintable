@@ -283,12 +283,14 @@ async def submit_comment_reply(
         gate.resolved_at = None
     gate.sealed_content_sha256 = text_sha256
     gate.sealed_content_body = reply.text
-    # story #3599(유나 지적 「쌍이 아예 안 선다」) — sha만 있고 version이 계속
-    # null이면 승인 카드가 "버전 ?"로 보인다(site_post/channel_post는 draft.
-    # version을 채운다). scope_key가 이제 reply_id 전용이라 이 게이트엔 항상
-    # 그 reply 하나만 산다 — "버전 1"은 항상 참(미래에 같은 reply_id 재편집·
-    # 재상신을 허용하게 되면 그때 증가시킬 자리, 지금은 상수).
-    gate.sealed_content_version = 1
+    # story #3599(유나 지적 「쌍이 아예 안 선다」, 페드루 PO 정정 2026-09-07) —
+    # sha만 있고 version이 계속 null이면 승인 카드가 "버전 ?"로 보인다
+    # (site_post/channel_post는 draft.version을 채운다). scope_key가 이제
+    # reply_id 전용이라 지금은 이 게이트엔 항상 그 reply 하나만 산다 — 이 줄은
+    # 항상 1을 만들지만, 증가 형으로 둔다(동작 변화 0·미래에 같은 reply_id를
+    # 재봉인하는 경로가 생겨도 "그때 증가시킬 자리"를 사람이 따로 기억할
+    # 필요가 없어진다).
+    gate.sealed_content_version = (gate.sealed_content_version or 0) + 1
 
     reply.gate_id = gate.id
     reply.status = "pending"
