@@ -76,19 +76,26 @@ describe('LoopsClient — 실험실 first-touch 정체성', () => {
     const html = container.innerHTML;
     // 오르테가군 리뷰(유나 조건부 GREEN) — headline/explainer/CTA 단위 용어를 "Loop"으로 통일
     // (surface명 "실험실"과 단위명 "Loop" 분리, "실험"↔"Loop" 혼용 제거).
-    expect(html).toContain('아직 시작한 Loop이 없어요');
-    expect(html).toContain('Loop은 가설에서 시작해 실행·검증·학습으로 이어지는 하나의 사이클이에요');
-    // 4노드(가설→실행→검증→학습)+↻다음 Loop 라벨이 아이콘과 함께 렌더.
+    // story #3643(2026-09-07, PO 決) — 그 "Loop" 단위명이 이번엔 「루프」로 통일됐다(로그인
+    // 부제 「열린 루프를 닫는 조직 OS」 등 한글이 이미 제품 어휘라는 판단).
+    expect(html).toContain('아직 시작한 루프가 없어요');
+    expect(html).toContain('루프는 가설에서 시작해 실행·검증·학습으로 이어지는 하나의 사이클이에요');
+    // 4노드(가설→실행→검증→학습)+↻다음 루프 라벨이 아이콘과 함께 렌더.
     expect(html).toContain('가설');
     expect(html).toContain('실행');
     expect(html).toContain('검증');
     expect(html).toContain('학습');
-    expect(html).toContain('다음 Loop');
+    expect(html).toContain('다음 루프');
     expect(container.querySelectorAll('svg').length).toBeGreaterThanOrEqual(5); // headline icon + 4노드 icon + next-loop icon
-    expect(html).toContain('첫 Loop 시작하기');
+    expect(html).toContain('첫 루프 시작하기');
     expect(html).toContain('가설 하나로 충분해요');
     expect(html).toContain('AI가 초안을 도와요');
-    expect(html).not.toContain('Loop이 없습니다'); // 구 카피 소거
+    // story #3643(2026-09-07, 유나 제안·PO 決) — 두 세대 낡은 부정 단언("Loop이 없습니다"
+    // 소거)은 그 정확한 문자열만 지켜 아무것도 안 지키는 상태였다. 「Loop」로 넓혀 이
+    // 화면 키 14개(이 컴포넌트가 t()로 부르는 loops.* 전체)에 영문 loop이 0임을 지킨다
+    // (entityTypeLoop을 쓰는 context-pack-panel.tsx는 이 파일이 import하지 않는다 — 유나
+    // 확認 済).
+    expect(html).not.toContain('Loop');
   });
 
   it('빈 상태 CTA 클릭 시 LoopCreateDialog가 open=true로 전환된다(동일 다이얼로그 재사용)', async () => {
@@ -97,7 +104,7 @@ describe('LoopsClient — 실험실 first-touch 정체성', () => {
     expect(loopCreateDialogOpenSpy).toHaveBeenCalledWith(false);
     loopCreateDialogOpenSpy.mockClear();
 
-    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 Loop 시작하기'));
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 루프 시작하기'));
     expect(ctaButton).not.toBeUndefined();
     await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
