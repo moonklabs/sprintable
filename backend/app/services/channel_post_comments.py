@@ -154,11 +154,17 @@ async def _fetch_replies_raw(
             # 예외를 낼 일이 없어(sandbox_publish.py는 fetch_replies에서 절대
             # raise 안 함) 이 try/except 자체가 없었다 — 아래 공용 블록(157행대)의
             # 매핑을 그대로 재사용(새 판정 로직 0).
-            if exc.status_code in (401, 403):
-                raise CommentFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message=str(exc)) from exc
-            if exc.status_code == 429:
-                raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message=str(exc)) from exc
-            raise CommentFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
+            # story #3605 — 401/403만 보던 휴리스틱을 classify_graph_error_code
+            # (graph_api_errors.py, channel_posts.py::_classify_threads_error와
+            # 같은 공용 함수)로 교체 — Graph subcode·10·200~299 family까지 정밀
+            # 판정(발행 경로와 드리프트 0).
+            from app.services.graph_api_errors import classify_graph_error_code
+
+            error_code = classify_graph_error_code(
+                status_code=exc.status_code, provider_error_code=exc.provider_error_code,
+                provider_error_subcode=exc.provider_error_subcode, provider_error_type=exc.provider_error_type,
+            )
+            raise CommentFetchError(error_code=error_code, message=str(exc)) from exc
 
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
@@ -203,11 +209,15 @@ async def _fetch_replies_raw(
             return await _publish_client.fetch_replies(client, access_token=access_token, media_id=pub.external_id)
     except Exception as exc:  # noqa: BLE001 — ThreadsPublishError는 상태코드로 분류(threads/instagram/facebook 공용)
         if isinstance(exc, ThreadsPublishError):
-            if exc.status_code in (401, 403):
-                raise CommentFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message=str(exc)) from exc
-            if exc.status_code == 429:
-                raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message=str(exc)) from exc
-            raise CommentFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=str(exc)) from exc
+            # story #3605 — 위 sandbox 분기와 동일하게 classify_graph_error_code로
+            # 교체(새 판정 로직 0, 공용 함수 재사용).
+            from app.services.graph_api_errors import classify_graph_error_code
+
+            error_code = classify_graph_error_code(
+                status_code=exc.status_code, provider_error_code=exc.provider_error_code,
+                provider_error_subcode=exc.provider_error_subcode, provider_error_type=exc.provider_error_type,
+            )
+            raise CommentFetchError(error_code=error_code, message=str(exc)) from exc
         raise
 
 
@@ -608,14 +618,22 @@ async def _promote_connection_status(
 
     story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07, 유나 3597 관찰) —
     `status`만 바꾸고 「왜」는 안 남겨 /organization/channels의 「서버 응답 보기」가
-    비거나 옛 오류를 보였다. 실제로 expired로 승격하는 이 분기에서만 `last_error`
-    3종(원문 그대로 · code · 시각)을 같이 채운다 — no-op(이미 revoked/error·sandbox
-    no-op) 분기는 전부 불변(호출자가 error_code/message를 안 줄 수도 있다, 예:
-    아래 `refresh_comments_now`가 아닌 다른 미래 호출자 대비 — 둘 다 optional)."""
+    비거나 옛 오류를 보였다. `last_error_code`·`last_error_at`은 status의 sticky
+    여부와 무관하게 항상 갱신한다("지금도 실패 中"이라는 사실 자체가 갱신할
+    가치가 있다, `channel_connection.apply_connection_failure`와 같은 규율).
+    `last_error`(원문)는 message가 주어질 때만 채운다(호출자가 안 줄 수도 있다 —
+    둘 다 optional).
+
+    story #3605(실측 정정) — error_code 무관하게 항상 "expired"로 굳혔던 것을
+    바로잡는다(publication_command.py::apply_command_failure와 같은 결함 클래스,
+    같은 스토리에서 같이 고침). `graph_api_errors.sticky_connection_status`(공유
+    단일 지점, CHANGES-2)가 정확한 status를 고른다 — #3603의 `not in ("revoked",
+    "error")` 가드를 이 함수가 대체한다(expired도 이제 동등하게 sticky)."""
     from datetime import datetime, timezone
 
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
+    from app.services.graph_api_errors import connection_status_for_error_code
 
     pub = (await db.execute(
         select(ChannelPublication).where(ChannelPublication.id == publication_id)
@@ -623,12 +641,13 @@ async def _promote_connection_status(
     if pub is None:
         return
     connection = await db.get(ChannelConnection, pub.connection_id)
-    if connection is not None and connection.status not in ("revoked", "error"):
-        connection.status = "expired"
-        if message is not None:
-            connection.last_error = message[:2000]
-        connection.last_error_code = error_code
-        connection.last_error_at = datetime.now(timezone.utc)
+    if connection is None:
+        return
+    connection.status = connection_status_for_error_code(error_code, current_status=connection.status)
+    if message is not None:
+        connection.last_error = message[:2000]
+    connection.last_error_code = error_code
+    connection.last_error_at = datetime.now(timezone.utc)
 
 
 async def refresh_comments_now(
@@ -688,6 +707,9 @@ async def refresh_comments_now(
         # 는 여기서 안 부른다 — 그건 «다음 자동 폴링 예약» 개념인데 이 경로는 사람이
         # 그 자리에서 손으로 누른 1회성 재수집이라 다음 폴링 스케줄과 무관하다(루프
         # 전용 개념을 수동 경로에 섞지 않는다).
+        # story #3605(rebase 반영) — `_promote_connection_status`에 `error_code`가
+        # 추가돼(어떤 status로 승격할지 error_code로 정확히 고르기 위해) 호출부도
+        # 그 값을 넘긴다.
         from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION
 
         # story #3612(라이브 결함, 배포 47) — CHANNEL_CONNECTION_NOT_ACTIVE는 선검사

@@ -232,6 +232,21 @@ async def _fetch_threads(client: "httpx.AsyncClient", *, access_token: str, medi
         _THREADS_INSIGHTS_URL_TMPL.format(media_id=media_id),
         params={"metric": _THREADS_INSIGHTS_METRICS, "access_token": access_token},
     )
+    if resp.status_code >= 400:
+        # story #3605 — 401/403 뭉뚱그림을 Graph envelope 파싱으로 먼저 세분화한다
+        # (code==190/OAuthException·10·200~299 family). 이 family 밖(None)이면
+        # 기존 status_code 휴리스틱(아래)이 그대로 유일한 판정 근거 — 403의
+        # CHANNEL_PUBLISH_AUTH_REJECTED류 기존 분류는 안 건드린다(회귀 0).
+        from app.services.graph_api_errors import classify_graph_oauth_error, parse_graph_error_envelope
+
+        _code, _subcode, _type = parse_graph_error_envelope(resp)
+        oauth_reason = classify_graph_oauth_error(error_code=_code, error_subcode=_subcode, error_type=_type)
+        if oauth_reason is not None:
+            _status, _ = oauth_reason
+            _error_code = {
+                "expired": "CHANNEL_TOKEN_EXPIRED", "revoked": "CHANNEL_CONNECTION_REVOKED",
+            }.get(_status, "CHANNEL_CONNECTION_AUTH_ERROR")
+            raise InsightFetchError(error_code=_error_code, message=f"Threads 인사이트 인증 오류: {resp.text[:500]}")
     if resp.status_code == 401:
         raise InsightFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message="Threads 액세스 토큰이 만료되었습니다")
     if resp.status_code == 429:
@@ -284,6 +299,19 @@ async def _fetch_instagram(client: "httpx.AsyncClient", *, access_token: str, me
         _INSTAGRAM_INSIGHTS_URL_TMPL.format(media_id=media_id),
         params={"metric": _INSTAGRAM_INSIGHTS_METRICS, "access_token": access_token},
     )
+    if resp.status_code >= 400:
+        # story #3605 — _fetch_threads와 동형(Graph envelope 파싱 우선, 밖이면
+        # 기존 status_code 휴리스틱 폴백, 회귀 0).
+        from app.services.graph_api_errors import classify_graph_oauth_error, parse_graph_error_envelope
+
+        _code, _subcode, _type = parse_graph_error_envelope(resp)
+        oauth_reason = classify_graph_oauth_error(error_code=_code, error_subcode=_subcode, error_type=_type)
+        if oauth_reason is not None:
+            _status, _ = oauth_reason
+            _error_code = {
+                "expired": "CHANNEL_TOKEN_EXPIRED", "revoked": "CHANNEL_CONNECTION_REVOKED",
+            }.get(_status, "CHANNEL_CONNECTION_AUTH_ERROR")
+            raise InsightFetchError(error_code=_error_code, message=f"Instagram 인사이트 인증 오류: {resp.text[:500]}")
     if resp.status_code == 401:
         raise InsightFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message="Instagram 액세스 토큰이 만료되었습니다")
     if resp.status_code == 429:
@@ -364,6 +392,19 @@ async def _fetch_facebook(client: "httpx.AsyncClient", *, access_token: str, med
         _FACEBOOK_INSIGHTS_URL_TMPL.format(post_id=media_id),
         params={"metric": _FACEBOOK_INSIGHTS_METRICS, "access_token": access_token},
     )
+    if resp.status_code >= 400:
+        # story #3605 — _fetch_threads와 동형(Graph envelope 파싱 우선, 밖이면
+        # 기존 status_code 휴리스틱 폴백, 회귀 0).
+        from app.services.graph_api_errors import classify_graph_oauth_error, parse_graph_error_envelope
+
+        _code, _subcode, _type = parse_graph_error_envelope(resp)
+        oauth_reason = classify_graph_oauth_error(error_code=_code, error_subcode=_subcode, error_type=_type)
+        if oauth_reason is not None:
+            _status, _ = oauth_reason
+            _error_code = {
+                "expired": "CHANNEL_TOKEN_EXPIRED", "revoked": "CHANNEL_CONNECTION_REVOKED",
+            }.get(_status, "CHANNEL_CONNECTION_AUTH_ERROR")
+            raise InsightFetchError(error_code=_error_code, message=f"Facebook 인사이트 인증 오류: {resp.text[:500]}")
     if resp.status_code == 401:
         raise InsightFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message="Facebook 액세스 토큰이 만료되었습니다")
     if resp.status_code == 429:
@@ -557,11 +598,20 @@ async def _promote_connection_status_for_snapshot(
     threads 경로뿐).
 
     story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07) — channel_post_
-    comments.py::_promote_connection_status와 동형 last_error 3종 additive."""
+    comments.py::_promote_connection_status와 동형 last_error 3종 additive
+    (status의 sticky 여부와 무관하게 last_error_code·last_error_at은 항상 갱신).
+
+    story #3605(실측 정정) — error_code 무관하게 항상 "expired"로 굳혔던 것을
+    바로잡는다(channel_post_comments.py::_promote_connection_status·publication_
+    command.py::apply_command_failure와 같은 결함 클래스, 같은 스토리에서 같이
+    고침). `graph_api_errors.sticky_connection_status`(공유 단일 지점, CHANGES-2)
+    가 정확한 status를 고른다 — #3603의 `not in ("revoked", "error")` 가드를 이
+    함수가 대체한다(expired도 이제 동등하게 sticky)."""
     from datetime import datetime, timezone
 
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
+    from app.services.graph_api_errors import connection_status_for_error_code
 
     if snapshot.publication_kind != "channel_publication":
         return
@@ -571,12 +621,13 @@ async def _promote_connection_status_for_snapshot(
     if pub is None:
         return
     connection = await db.get(ChannelConnection, pub.connection_id)
-    if connection is not None and connection.status not in ("revoked", "error"):
-        connection.status = "expired"
-        if message is not None:
-            connection.last_error = message[:2000]
-        connection.last_error_code = error_code
-        connection.last_error_at = datetime.now(timezone.utc)
+    if connection is None:
+        return
+    connection.status = connection_status_for_error_code(error_code, current_status=connection.status)
+    if message is not None:
+        connection.last_error = message[:2000]
+    connection.last_error_code = error_code
+    connection.last_error_at = datetime.now(timezone.utc)
 
 
 _GA4_RUN_REPORT_URL_TMPL = "https://analyticsdata.googleapis.com/v1beta/properties/{property_id}:runReport"

@@ -213,9 +213,21 @@ async def apply_connection_failure(
     `_classify_threads_error`가 code==190/OAuthException을 expired|revoked로 세분화한
     뒤 이 함수로 정확한 status를 남긴다(모델 컬럼 주석 그대로 active|expired|revoked|
     error 중 하나). last_error는 provider 원문 그대로(가공은 화면 몫, apply_refresh_
-    failure와 동일 규율)."""
-    connection.status = status
+    failure와 동일 규율).
+
+    story #3605(3598 AC6 일반화) — 신설 status="error"(사유 불명, code 10·200~299
+    family 등)는 이미 더 구체적인 종결 상태(expired·revoked)를 덮지 않는다 — "더
+    약한 정보로 되돌리지 않기"(publication_command.py::apply_command_failure의
+    동형 가드와 같은 원칙, 새 기전 발명 아님). last_error는 그래도 최신 원문으로
+    갱신한다(사유는 그대로여도 "최근에도 계속 실패 中"이라는 사실 자체는 갱신할
+    가치가 있다). expired↔revoked 상호 덮어쓰기 규율은 이 스토리 스코프 밖(기존
+    그대로 — 이 함수는 그 둘 사이는 그대로 덮어쓴다, 호출부가 이미 정확한 값만
+    넘긴다는 전제)."""
     connection.last_error = error_message[:2000]
+    if status == "error" and connection.status in ("expired", "revoked"):
+        await db.commit()
+        return
+    connection.status = status
     await db.commit()
 
 
