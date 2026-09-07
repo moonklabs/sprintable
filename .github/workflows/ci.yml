@@ -392,6 +392,23 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_model_registration_completeness.py
 
+  # story #3647(CI·QA 관문·소형·긴급, 페드루 PO 確定 2026-09-07) — qa-review-gate.yml의
+  # qa-verdict-codex-session-check 액션이 부르는 판정 로직(infra/qa_verdict_codex_
+  # session_check.py::missing_codex_session_lines)이 순수 함수라 pytest 없이도 자기
+  # 자신에 --selftest로 픽스처를 심었다(story #3592 verify-no-new-repeated-row-action-
+  # names의 --selftest 관례 그대로, 새 테스트 러너 배선 0). 이 job은 그 판정 로직
+  # 자체의 회귀를 매 PR에서 잡는다 — qa-review-gate.yml 자신은 이 로직을 "실제 qa:pass
+  # PR"에만 태우므로 회귀가 나도 그 순간까지 조용할 수 있다.
+  qa-verdict-codex-session-check-selftest:
+    name: QA verdict codex session check selftest (guard, story #3647)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run codex session/model line check selftest fixtures
+        run: python3 infra/qa_verdict_codex_session_check.py --selftest
+
   alembic-no-autocommit-block:
     name: Alembic migrations — no autocommit_block() (guard)
     runs-on: ubuntu-latest

@@ -207,6 +207,15 @@ jobs:
           head-extract-regex: '\*\*Head:\*\*[^0-9a-f]*[0-9a-f]{7,40}'
           gh-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # story #3647(2026-09-07, 선생님 12:17Z 지시) — «codex exec 위임 없이 낸 approved»
+      # 재발 방지. 위 head-check와 별도 액션(그 자체 ⛔주석 참고 — qa 전용 규율을
+      # design과 공유하는 액션에 억지로 얹지 않는다). 형식 검사만(잃는 것은 액션 자체
+      # docstring에 선언).
+      - name: Enforce qa:pass verdict comment has codex exec session line
+        uses: ./.github/actions/qa-verdict-codex-session-check
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+
       # story #2676 AC2 — PR#3088 실사고 ③: 최초 qa:pass 승인이 Backend pytest가 아직
       # in_progress이던 도중(job 95074664724, 21:49~21:59) 21:54에 나갔다 — 리뷰 코멘트가
       # "CI green"이라 썼지만 그 시점 실제로는 «아직 안 나온 결과»였다(까디르 자기 정정).
