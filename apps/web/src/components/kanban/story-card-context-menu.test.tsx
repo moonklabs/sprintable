@@ -163,6 +163,58 @@ describe('StoryCard 컨텍스트 메뉴 — story #3664 AC2(키보드)', () => {
   });
 });
 
+function getStatusTrigger(): HTMLButtonElement {
+  const trigger = document.body.querySelector('[role="menu"] [role="menuitem"][aria-haspopup="menu"]');
+  if (!trigger) throw new Error('상태 변경 트리거 not found');
+  return trigger as HTMLButtonElement;
+}
+
+function getSubmenu(): HTMLElement {
+  // 최상위 메뉴가 아닌 두 번째 [role="menu"](서브메뉴, 별도 portal) — 요소 자체를 특정하려면
+  // 상태 변경 항목(statuses.length===5, editStory/assignMember/deleteStory엔 없는 항목 수)로 식별.
+  const menus = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menu"]'));
+  const submenu = menus.find((m) => m.querySelectorAll('[role="menuitem"]').length === 5);
+  if (!submenu) throw new Error('서브메뉴 not found');
+  return submenu;
+}
+
+describe('StoryCard 컨텍스트 메뉴 — story #3664 CHANGES(유나 QA, 상태 변경 서브메뉴 키보드)', () => {
+  it('서브메뉴가 열리면 첫 항목(role=menuitem)으로 포커스, 방향키는 서브메뉴 안에서만 순회', () => {
+    renderCard();
+    openViaContextMenu();
+    const trigger = getStatusTrigger();
+    act(() => { trigger.click(); });
+
+    const submenu = getSubmenu();
+    const items = Array.from(submenu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    expect(document.activeElement).toBe(items[0]);
+
+    act(() => {
+      submenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    // 서브메뉴 안에서만 순회 — 상위 메뉴(editStory 등)로 포커스가 안 새 나간다.
+    expect(document.activeElement).toBe(items[1]);
+    expect(items).toContain(document.activeElement as HTMLElement);
+  });
+
+  it('서브메뉴에서 Esc는 서브메뉴만 닫고 트리거로 포커스를 되돌린다(상위 메뉴는 열려 있음)', () => {
+    renderCard();
+    openViaContextMenu();
+    const trigger = getStatusTrigger();
+    act(() => { trigger.click(); });
+    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(2);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+
+    // 서브메뉴만 사라지고 상위 메뉴(카드 트리거의 aria-haspopup 메뉴)는 그대로 열려 있다.
+    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(1);
+    expect(getCard().getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(getStatusTrigger());
+  });
+});
+
 describe('StoryCard 컨텍스트 메뉴 — story #3664 회귀(기존 우클릭·좌표·항목)', () => {
   it('우클릭 좌표가 메뉴 위치(top/left)로 그대로 쓰인다(기존 동작 무변)', () => {
     renderCard();

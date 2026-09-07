@@ -187,6 +187,16 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       returnFocusOnCloseRef.current = true;
     }
   }, []);
+  // story #3664 CHANGES(유나 QA, 2026-09-07) — 서브메뉴(상태 변경)에서 Esc는 전체 메뉴를
+  // 닫는 게 아니라 "상위로 복귀"(서브메뉴만 닫고 트리거 버튼에 포커스)여야 한다. 상위
+  // closeContextMenu(카드로 포커스 복귀)와 별도 경로 — statusMenuOpen 열려 있을 때만 쓴다.
+  const returnFocusToStatusTriggerRef = useRef(false);
+  const closeStatusSubmenu = useCallback((returnFocus: boolean) => {
+    setStatusMenuOpen(false);
+    if (returnFocus) {
+      returnFocusToStatusTriggerRef.current = true;
+    }
+  }, []);
   // #1942: 두 메뉴 다 position:fixed + 뷰포트 좌표 clamp(clampToViewport)로 연다 — 트리거(카드/
   // 버튼)의 화면 위치와 무관하게 항상 뷰포트 안에 들어온다(카드-상대 anchor는 카드 자체가 뷰포트
   // 밖일 때 답이 없다는 게 까심 QA 적출).
@@ -277,13 +287,19 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        closeContextMenu(true);
+        // story #3664 CHANGES — 서브메뉴가 열려 있으면 Esc는 서브메뉴만 닫고 상위(트리거
+        // 버튼)로 복귀한다. 상위 메뉴 자체는 그대로 열어 둔다(전체 종료가 아님).
+        if (statusMenuOpen) {
+          closeStatusSubmenu(true);
+        } else {
+          closeContextMenu(true);
+        }
       }
     };
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [contextMenuOpen, closeContextMenu]);
+  }, [contextMenuOpen, statusMenuOpen, closeContextMenu, closeStatusSubmenu]);
 
   // story #3664 AC2 — 메뉴가 열리면 첫 항목으로 포커스를 옮긴다(ARIA menu 관례: 열림=포커스
   // 진입). 포털이 이 effect보다 먼저 커밋되므로 querySelector 시점엔 이미 DOM에 있다.
@@ -302,6 +318,23 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     returnFocusOnCloseRef.current = false;
     cardRef.current?.focus();
   }, [contextMenuOpen]);
+
+  // story #3664 CHANGES(유나 QA) — 서브메뉴가 열리면 첫 항목으로 포커스(상위 메뉴 열림과
+  // 동형 관례).
+  useEffect(() => {
+    if (!statusMenuOpen) return;
+    const first = statusMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    first?.focus();
+  }, [statusMenuOpen]);
+
+  // story #3664 CHANGES — 서브메뉴가 Esc로 닫히면(closeStatusSubmenu(true)) 트리거 버튼으로
+  // 포커스를 되돌린다(상위 메뉴 복귀).
+  useEffect(() => {
+    if (statusMenuOpen) return;
+    if (!returnFocusToStatusTriggerRef.current) return;
+    returnFocusToStatusTriggerRef.current = false;
+    statusTriggerRef.current?.focus();
+  }, [statusMenuOpen]);
 
   // 열려있는 동안 스크롤/리사이즈되면 닫는다(까심 QA 지적 ②) — 보드 컬럼의 overflow-x-auto
   // 가로스크롤은 캡처 리스너로만 잡힌다(스크롤 이벤트는 버블링하지 않음). 재측정 대신 close가
@@ -351,6 +384,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
+    // story #3664 CHANGES(유나 QA) — 서브메뉴는 body portal이라 DOM 트리 상 상위 메뉴 밖에
+    // 있지만, React는 JSX(포털을 만든) 트리를 기준으로 synthetic event를 버블링한다 — 그대로
+    // 두면 서브메뉴 안의 방향키가 상위 메뉴의 이 같은 핸들러에도 도달해 e.currentTarget이
+    // 상위 메뉴 div로 바뀌어(현재 컨테이너 기준 querySelectorAll) 엉뚱한(상위) 항목 집합에서
+    // 포커스를 옮긴다. stopPropagation으로 "방향키는 서브메뉴 안에서만 순회"를 보장한다.
+    e.stopPropagation();
     const container = e.currentTarget;
     const items = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
     if (items.length === 0) return;
