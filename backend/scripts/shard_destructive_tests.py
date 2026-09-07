@@ -328,16 +328,32 @@ def load_duration_artifacts(artifact_dir: Path) -> dict[str, float]:
     return merged
 
 
-def _audit_durations_mode(artifact_dir: Path) -> int:
+def _audit_durations_mode(artifact_dir: Path, *, drift_state_path: Path | None = None) -> int:
     """story #3558 AC2 — 항상 0을 반환한다(경고 전용, CI를 절대 안 죽인다). 산출물
     디렉터리가 없거나 비어 있어도(backend-irrelevant PR이라 샤드 자체가 스킵된 경우)
-    조용히 "대조 대상 0건"으로 끝낸다."""
+    조용히 "대조 대상 0건"으로 끝낸다.
+
+    story #3642(AC3) — `drift_state_path`가 주어지면 «과소 등재(ratio≥2.0) 연속 스트릭»
+    을 같이 추적한다(ci.yml이 actions/cache로 run 사이에 이 파일을 넘긴다)."""
     if not artifact_dir.exists():
         print(f"산출물 디렉터리 없음({artifact_dir}) — backend-irrelevant PR로 샤드가 스킵됐을 수 있음, 대조 0건", file=sys.stderr)
         return 0
     measured = load_duration_artifacts(artifact_dir)
     weights = load_weights()
     outliers = ratio_outliers(measured, weights)
+
+    if drift_state_path is not None:
+        streaks = update_drift_streaks(_load_drift_state(drift_state_path), outliers)
+        for f in drift_warnings(streaks):
+            print(
+                f"::warning::weights drift(story #3642): {f} — 등재값이 {DRIFT_STREAK_THRESHOLD}"
+                f"run 연속 실측의 {RATIO_WARN_HIGH_MULTIPLIER:.0f}배 이상 벗어났다(러너가 느린 "
+                "하루가 아니라 등재값 자체가 낡았다는 신호) — infra/destructive-schema-shard-"
+                "weights.json 재측정 필요."
+            )
+            streaks[f] = 0  # story #3642 AC3 — 1회 경고 뒤 리셋(매 run 반복 스팸 방지).
+        _save_drift_state(drift_state_path, streaks)
+
     if not outliers:
         print(f"OK: 등재값 대조 — 산출물 {len(measured)}건 중 2배/0.5배 이탈 0건(story #3558)", file=sys.stderr)
         return 0
@@ -349,6 +365,46 @@ def _audit_durations_mode(artifact_dir: Path) -> int:
         )
     print(f"경고 {len(outliers)}건(산출물 {len(measured)}건 중) — 실패 아님, story #3558 AC2", file=sys.stderr)
     return 0
+
+
+# story #3642(CI·소형, 3636 후속, 페드루 PO 確定 2026-09-07) — 3396의 러너 정규화는
+# "이 run 자체가 느렸다"만 흡수한다. 등재값(weight)이 실측을 계속 밑도는 채로 여러
+# run 연속이면(러너 편차로는 설명 안 됨) 등재값 자체가 낡은 것 — 그 신호를 3558의
+# ratio_outliers(이미 ratio≥2.0을 "과소 등재"로 판정) 위에 «연속 카운트» 축 하나만
+# 얹는다(새 판정 로직 0, 기존 축 재사용). ci.yml이 actions/cache로 이 상태를 run
+# 사이에 넘긴다(단일 run 안에서는 이 축이 그냥 no-op).
+DRIFT_STREAK_THRESHOLD = 3
+
+
+def update_drift_streaks(streaks: dict[str, int], outliers: list[dict]) -> dict[str, int]:
+    """story #3642 — 이번 run에서 과소 등재(ratio≥RATIO_WARN_HIGH_MULTIPLIER)인 파일만
+    스트릭 +1. 나머지(이전엔 걸렸지만 이번엔 정상 — 러너 편차였다는 뜻)는 결과에서
+    빠진다(=0으로 리셋, 다음 로드 시 .get(file, 0)). 과대 등재(ratio≤0.5) 축은 drift
+    경고 대상이 아니다(반대 방향, #3558이 이미 별도 경고)."""
+    over_files = {o["file"] for o in outliers if o["ratio"] >= RATIO_WARN_HIGH_MULTIPLIER}
+    return {f: streaks.get(f, 0) + 1 for f in over_files}
+
+
+def drift_warnings(streaks: dict[str, int], *, threshold: int = DRIFT_STREAK_THRESHOLD) -> list[str]:
+    """threshold 이상 연속인 파일만(정렬 — 재현성)."""
+    return sorted(f for f, n in streaks.items() if n >= threshold)
+
+
+def _load_drift_state(path: Path) -> dict[str, int]:
+    """상태 파일이 없거나(첫 run·캐시 미스) 깨졌으면(방어적) 빈 스트릭으로 시작한다
+    — 이 축 자체가 경고 전용이라 최악의 경우 «드리프트 경고 1회 늦게 뜬다»뿐, CI를
+    죽이지 않는다."""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_drift_state(path: Path, streaks: dict[str, int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(streaks, indent=2, sort_keys=True))
 
 
 def _check_elapsed_mode(elapsed_path: Path) -> int:
@@ -420,6 +476,12 @@ def main() -> int:
         help="story #3558 AC2 — ARTIFACT_DIR 아래 shard-durations-*.json 전부를 병합해 "
              "weights.json과 2배/0.5배 대조 경고를 낸다(항상 exit 0, 실패 없음).",
     )
+    ap.add_argument(
+        "--drift-state", type=Path, default=None, metavar="STATE_JSON",
+        help="story #3642 AC3 — --audit-durations와 함께 쓴다. 과소 등재 연속 스트릭을 "
+             "이 JSON에 읽고 쓴다(ci.yml이 actions/cache로 run 사이에 넘긴다). 생략하면 "
+             "drift 축 자체가 no-op(3558 축은 그대로 동작).",
+    )
     args = ap.parse_args()
 
     if args.check_elapsed is not None:
@@ -434,7 +496,7 @@ def main() -> int:
         return 0
 
     if args.audit_durations is not None:
-        return _audit_durations_mode(args.audit_durations)
+        return _audit_durations_mode(args.audit_durations, drift_state_path=args.drift_state)
 
     if args.shard_index is None or args.shard_count is None:
         print("--shard-index/--shard-count는 --check-elapsed 없이는 필수", file=sys.stderr)

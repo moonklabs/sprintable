@@ -552,3 +552,125 @@ def test_audit_durations_mode_missing_dir_returns_0_no_crash(tmp_path):
     mod = _load()
     exit_code = mod._audit_durations_mode(tmp_path / "does-not-exist")
     assert exit_code == 0
+
+
+# ─── story #3642(CI·소형, 3396/3558 후속) — weights drift 연속 스트릭 축 ───────────
+
+
+def test_update_drift_streaks_increments_only_over_ratio_files():
+    mod = _load()
+    outliers = [
+        {"file": "tests/heavy.py", "ratio": 2.5, "measured_sec": 100.0, "weight_sec": 40.0},
+        {"file": "tests/light.py", "ratio": 0.4, "measured_sec": 4.0, "weight_sec": 10.0},  # 과대 등재(반대 방향)
+    ]
+    streaks = mod.update_drift_streaks({}, outliers)
+    assert streaks == {"tests/heavy.py": 1}
+
+
+def test_update_drift_streaks_resets_file_no_longer_over_ratio():
+    """이전엔 걸렸던 파일이 이번 run엔 정상이면(러너 편차였다는 뜻) 스트릭이
+    사라진다(=0으로 리셋) — 다음 로드 시 .get(file, 0)이 0을 준다."""
+    mod = _load()
+    prior = {"tests/heavy.py": 2, "tests/other.py": 5}
+    outliers = [{"file": "tests/other.py", "ratio": 2.1, "measured_sec": 1.0, "weight_sec": 1.0}]
+    streaks = mod.update_drift_streaks(prior, outliers)
+    assert streaks == {"tests/other.py": 6}
+    assert "tests/heavy.py" not in streaks  # 이번엔 안 걸렸다 — 리셋.
+
+
+def test_drift_warnings_only_at_or_above_threshold():
+    mod = _load()
+    streaks = {"a.py": 1, "b.py": 2, "c.py": 3, "d.py": 5}
+    assert mod.drift_warnings(streaks) == ["c.py", "d.py"]
+
+
+def test_drift_warnings_default_threshold_is_3():
+    """story #3642 AC3 — PO 確定 "3 run 연속"을 상수로 고정."""
+    mod = _load()
+    assert mod.DRIFT_STREAK_THRESHOLD == 3
+
+
+def test_audit_durations_mode_drift_state_fires_after_3_consecutive_runs_then_quiets(tmp_path, capsys, monkeypatch):
+    """AC3 selftest — 같은 파일이 3 run 연속 ratio≥2배면 3번째 run에서 ::warning::이
+    뜬다. 그 직후(4번째 run, 여전히 초과)는 스트릭이 1회 경고 뒤 리셋됐으므로 다시
+    3회를 채워야 한다(«매 run 반복 스팸 방지» — 4번째 run 단독으로는 안 뜬다)."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/stale.py": 10.0})
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    state_path = tmp_path / "drift-state.json"
+
+    def _run(elapsed: float):
+        (artifact_dir / "shard-durations-0.json").write_text(
+            json.dumps({"shard": 0, "durations": {"tests/stale.py": elapsed}})
+        )
+        return mod._audit_durations_mode(artifact_dir, drift_state_path=state_path)
+
+    for _ in range(2):  # run 1·2 — 아직 threshold 미달, warning 없음.
+        _run(25.0)  # ratio 2.5
+        assert "weights drift" not in capsys.readouterr().out
+
+    _run(25.0)  # run 3 — 스트릭 3 도달, 발화.
+    out3 = capsys.readouterr().out
+    assert "::warning::weights drift(story #3642): tests/stale.py" in out3
+
+    _run(25.0)  # run 4 — 직전에 리셋됐으니 단독으론 안 뜬다(스트릭 1).
+    out4 = capsys.readouterr().out
+    assert "weights drift" not in out4
+
+    streaks_after = json.loads(state_path.read_text())
+    assert streaks_after == {"tests/stale.py": 1}
+
+
+def test_audit_durations_mode_drift_state_normal_run_resets_streak(tmp_path, capsys, monkeypatch):
+    """뮤테이션 대조(AC3) — 2 run 연속 초과 뒤 3번째 run이 정상으로 돌아오면(러너
+    편차였다) drift 경고가 안 뜬다 — 스트릭이 리셋됐다는 증거."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/stale.py": 10.0})
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    state_path = tmp_path / "drift-state.json"
+
+    def _run(elapsed: float):
+        (artifact_dir / "shard-durations-0.json").write_text(
+            json.dumps({"shard": 0, "durations": {"tests/stale.py": elapsed}})
+        )
+        return mod._audit_durations_mode(artifact_dir, drift_state_path=state_path)
+
+    _run(25.0)
+    _run(25.0)
+    capsys.readouterr()
+    _run(5.0)  # 정상 복귀(ratio 0.5, low-outlier 방향이라 drift 축엔 아예 안 잡힘).
+    out3 = capsys.readouterr().out
+    assert "weights drift" not in out3
+
+    _run(25.0)  # 다시 초과 — 리셋된 뒤라 스트릭 1, 아직 미발화.
+    out4 = capsys.readouterr().out
+    assert "weights drift" not in out4
+
+
+# ─── story #3642 AC1 — 재실측 반영값(test_2813·test_3516·test_3414) + 샤드 균형 ──
+
+
+def test_remeasured_weights_reflect_story_3642_normalized_values():
+    """등재값이 story #3642 재실측(러너 정규화 median 배율로 나눈 평균값)을 그대로
+    담고 있는지 고정 — infra/destructive-schema-shard-weights.json이 실수로 옛
+    잠정값(45.0/33.0/13.0)으로 되돌아가면 이 테스트가 잡는다."""
+    mod = _load()
+    weights = mod.load_weights()
+    assert weights["tests/test_2813_gate_github_check_realdb.py"] == 79.0
+    assert weights["tests/test_3516_channel_post_comments.py"] == 55.0
+    assert weights["tests/test_3414_publication_command_cron_retry.py"] == 33.0
+
+
+def test_shard_balance_stays_even_after_remeasure():
+    """AC2 — 갱신 뒤에도 partition()의 weight-sum 균형이 샤드 4(또는 무거운 파일이
+    떨어지는 아무 샤드)를 편중시키지 않는다(그리디 LPT가 자동 재배치 — 샤드 «번호»가
+    아니라 «합»이 기준이라는 것이 이 균형의 근거). 편차 5% 이내로 못박는다."""
+    mod = _load()
+    weights = mod.load_weights()
+    files = mod.discover_files()
+    shards, totals = mod.partition(files, weights, 8)
+    avg = sum(totals) / len(totals)
+    for t in totals:
+        assert abs(t - avg) / avg < 0.05, f"샤드 편차 5% 초과: {totals}"
