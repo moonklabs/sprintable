@@ -76,8 +76,17 @@ def _label_snapshots_and_compute_delta(
     낸 정본 라벨만 읽는다(insights_board.py와 같은 헬퍼 `label_snapshot_offset`).
     null 라벨(옛 사이클 잔존)은 델타 계산에서 빼고 개수만 3번째 반환값(superseded_
     snapshots)으로 알린다 — 지어내지 않고 사실 그대로("이 발행 뒤로 안 쓰는 스냅샷이
-    n건 더 있었다")."""
-    superseded = [s for s in snapshots if s.get("offset_label") is None]
+    n건 더 있었다").
+
+    story #3660(2026-09-07) — 서버가 이제 옛 사이클의 pending/in_progress 행을
+    status="superseded"로 회수한다(insight_snapshots.py::schedule_insight_snapshots).
+    이 카운트는 그 값 ∪ offset_label이 null인 행(옛 사이클이지만 이미 captured/
+    failed/unsupported로 종결돼 status는 안 바뀐 행)의 합집합 — 한 스냅샷이 둘 다
+    해당해도 리스트 컴프리헨션이 한 번만 세므로 중복 0."""
+    superseded = [
+        s for s in snapshots
+        if s.get("status") == "superseded" or s.get("offset_label") is None
+    ]
     snapshot_1d = next((s for s in snapshots if s.get("offset_label") == "1d"), None)
     snapshot_7d = next((s for s in snapshots if s.get("offset_label") == "7d"), None)
     if snapshot_1d is None or snapshot_7d is None:

@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,15 +70,37 @@ async def schedule_insight_snapshots(
     넘긴다 — `datetime.now()`를 여기서 새로 재면, 같은 발행이 재처리(워커 재시도 등)
     될 때마다 due_at이 미세하게 달라져 UNIQUE(publication_id, due_at) 멱등이 무력화
     된다(페드루 決定①의 "같은 발행 재처리에도 2행 유지"가 실제로 성립하려면 이
-    앵커가 안정적이어야 한다)."""
-    for offset in _SNAPSHOT_OFFSETS:
+    앵커가 안정적이어야 한다).
+
+    story #3660(BE·insights·상태 자가회수, 페드루 PO 確定 2026-09-07, 카디르 발견
+    PR#4003) — 같은 publication_id를 유지한 채 anchor_at만 바뀌는 재발행(hosted_site
+    update·ChannelPublication 같은 (gate_id, version_id) 재처리 둘 다 해당, AC4)에서
+    옛 사이클의 pending/in_progress 행이 그대로 살아남아 수집기가 계속 due로 집었다.
+    새 2행을 연 뒤 같은 트랜잭션에서 이 publication의 **다른** due_at(=이번 anchor가
+    아닌 사이클)에 걸린 pending/in_progress 행을 superseded로 회수한다 — captured/
+    failed/unsupported는 이력이라 손대지 않는다(#3651 MCP superseded_snapshots가 그
+    구분을 이미 전제한다). 같은 anchor 재처리(due_at이 이번 anchor와 일치)는 이
+    UPDATE의 WHERE에 안 걸려 무변(2행 그대로 — 페드루 決定① 회귀 보존)."""
+    new_due_ats = [anchor_at + offset for offset in _SNAPSHOT_OFFSETS]
+    for due_at in new_due_ats:
         stmt = pg_insert(InsightSnapshot).values(
             id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id,
             publication_id=publication_id, publication_kind=publication_kind,
-            channel=channel, external_id=external_id, due_at=anchor_at + offset,
+            channel=channel, external_id=external_id, due_at=due_at,
             status="pending",
         ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at")
         await db.execute(stmt)
+
+    await db.execute(
+        update(InsightSnapshot)
+        .where(
+            InsightSnapshot.org_id == org_id,
+            InsightSnapshot.publication_id == publication_id,
+            InsightSnapshot.due_at.notin_(new_due_ats),
+            InsightSnapshot.status.in_(("pending", "in_progress")),
+        )
+        .values(status="superseded")
+    )
 
 
 async def list_insight_snapshots_for_publication(
