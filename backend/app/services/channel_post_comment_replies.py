@@ -190,9 +190,19 @@ async def submit_comment_reply(
     db: AsyncSession, *, org_id: uuid.UUID, reply_id: uuid.UUID, requester_member_id: uuid.UUID,
 ) -> ChannelPostCommentReply:
     """AC3 상신(human-only, 라우터 가드) — external_publish 게이트(scope_key=
-    "comment:{comment_id}")를 만들고 봉인한다. draft 상태에서만 1회(재상신·재편집은
-    이 조각 스코프 밖 — 실패/반려 뒤 새 초안을 다시 만드는 편이 이 MVP엔 더 단순).
-    대상 댓글이 이미 삭제됐으면 게이트조차 안 만들고 즉시 거부(AC4)."""
+    "comment:{comment_id}:{reply_id}")를 만들고 봉인한다. draft 상태에서만 1회
+    (재상신·재편집은 이 조각 스코프 밖 — 실패/반려 뒤 새 초안을 다시 만드는 편이
+    이 MVP엔 더 단순 — 같은 reply_id를 다시 여는 경로 자체가 없다, 위 status
+    가드가 그 증거). 대상 댓글이 이미 삭제됐으면 게이트조차 안 만들고 즉시
+    거부(AC4).
+
+    story #3599(BE·결함, 페드루 PO 決 2026-09-07) — scope_key가 이전엔
+    "comment:{comment_id}"뿐이라 같은 댓글의 2차 답변 상신이 1차 답변의 게이트
+    행을 재사용(create_gate 멱등 재-open)해 1차의 sealed_content_sha256/body/
+    neutral_facts/resolved_at을 2차 것으로 덮어썼다 — 「14:07Z에 무엇을
+    승인했나」가 그 자리에서 사라지는 결함. reply_id를 scope_key에 편입해
+    답변마다 게이트 1행이 되게 한다(같은 reply_id 재상신 경로가 없으니 이
+    바꾼 scope_key로도 재-open 경합이 없다 — 이력 테이블 신설 불요)."""
     reply = await _get_owned_reply(db, org_id=org_id, reply_id=reply_id)
     if reply.status != "draft":
         raise CommentReplyWrongStatusError(status=reply.status)
@@ -224,7 +234,7 @@ async def submit_comment_reply(
     from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback
     from app.services.workflow_line_config import _default_role_id
 
-    scope_key = f"comment:{comment.id}"
+    scope_key = f"comment:{comment.id}:{reply.id}"
     text_sha256 = hashlib.sha256(reply.text.encode("utf-8")).hexdigest()
     neutral_facts = {
         "kind": "comment_reply", "reply_id": str(reply.id), "connection_id": str(pub.connection_id),
@@ -258,6 +268,12 @@ async def submit_comment_reply(
         gate.resolved_at = None
     gate.sealed_content_sha256 = text_sha256
     gate.sealed_content_body = reply.text
+    # story #3599(유나 지적 「쌍이 아예 안 선다」) — sha만 있고 version이 계속
+    # null이면 승인 카드가 "버전 ?"로 보인다(site_post/channel_post는 draft.
+    # version을 채운다). scope_key가 이제 reply_id 전용이라 이 게이트엔 항상
+    # 그 reply 하나만 산다 — "버전 1"은 항상 참(미래에 같은 reply_id 재편집·
+    # 재상신을 허용하게 되면 그때 증가시킬 자리, 지금은 상수).
+    gate.sealed_content_version = 1
 
     reply.gate_id = gate.id
     reply.status = "pending"

@@ -221,7 +221,10 @@ async def test_submit_comment_reply_creates_sealed_gate():
             gate = (await s.execute(
                 Gate.__table__.select().where(Gate.id == reply.gate_id)
             )).mappings().one()
-            assert gate["scope_key"] == f"comment:{comment.id}"
+            # story #3599(BE·결함, 페드루 PO 決 2026-09-07) — scope_key가 댓글
+            # 단위에서 답변(reply) 단위로 바뀌었다(2차 답변이 1차 게이트를
+            # 재사용·덮어쓰던 결함 봉함, test_3599_comment_reply_gate_per_reply.py).
+            assert gate["scope_key"] == f"comment:{comment.id}:{reply.id}"
             assert gate["work_item_id"] == work_item_id
             assert gate["sealed_content_sha256"] == hashlib.sha256("답변 초안".encode("utf-8")).hexdigest()
             assert gate["sealed_content_body"] == "답변 초안"
