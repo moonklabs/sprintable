@@ -2636,6 +2636,7 @@
     "generationBudgetAmountKrw": "₩{amount}",
     "generationBudgetAmountUsd": "${amount}",
     "channelPostsApprovalLinkPreviewLabel": "Link that will be attached",
+    "channelPostsApprovalHookLabel": "Hook",
     "channelPostsExternalIdLabel": "Post ID",
     "channelPostsPartialSuccessNotice": "The container was created but not yet published — continue publishing it. Starting over could post the same content twice.",
     "channelPostsImageAttachLabel": "Attach image",

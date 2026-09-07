@@ -106,6 +106,7 @@ const DRAFT_DETAIL = {
 const VERSION_1 = {
   version_id: 'v1', version: 1, draft_id: DRAFT_ID, text: '초안 본문입니다', link_url: null,
   body_sha256: 'h1', author_kind: 'agent', created_at: '2026-09-03T03:50:00+00:00', tagged_link_preview: null,
+  hook_key: null as string | null,
 };
 
 function stubFetch(opts: {
@@ -870,6 +871,27 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
     expect(container.querySelector('[data-testid="channel-post-tagged-link-preview"]')).toBeNull();
+  });
+
+  // story #3679(3656 후속) — 훅 축은 tagged_link_preview와 달리 값이 없어도 줄 자체는
+  // 항상 그린다(insights-board group-rows와 같은 사실 표현, 뮤테이션 표적).
+  it('⭐3679 — hook_key가 있으면 그 값이 보인다', async () => {
+    stubFetch({ versions: [{ ...VERSION_1, hook_key: 'hook-A' }] });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-hook-key"]')?.textContent).toBe('hook-A');
+  });
+
+  it('⭐3679 — hook_key가 null이면 insights-board와 같은 미태깅 낱말(「미분류」)이 보인다', async () => {
+    stubFetch({ versions: [{ ...VERSION_1, hook_key: null }] });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-hook-key"]')?.textContent)
+      .toBe(koMessages.docs.indexCategoryUncategorized);
   });
 
   // story #3402 PR2(T7/T9) — 발행됨/부분성공/실패 표시(발행 버튼 배선은 다음 조각).
