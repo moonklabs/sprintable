@@ -23,11 +23,28 @@ _PAGES_1_SUFFIX = ":pages-1"
 _FAKE_TOKEN_PREFIX = "sandbox-fb-user-token"
 
 
+_SANDBOX_FAKE_CODE = "sandbox-oauth-code"
+
+
 def build_authorize_url(*, redirect_uri: str, state: str, app_id: str) -> str:
-    """sandbox는 실제로 이 URL을 브라우저가 방문하지 않는다(테스트/QA가 callback을
-    직접 호출) — 값 자체는 authorize 응답 계약(AuthorizeResponse.url)을 채우기
-    위한 자리표시자."""
-    return f"https://sandbox.local/facebook-oauth?state={state}"
+    """story #3613(페드루 PO 確定 2026-09-07) — 원판은 `https://sandbox.local/...`
+    (실존하지 않는 도메인)을 냈다 — 자체 docstring이 "브라우저가 실제로 이 URL을
+    방문하지 않는다(테스트/QA가 callback을 직접 호출)"고 적어 뒀지만, /organization/
+    channels의 「다시 연결」 버튼은 이 URL로 «브라우저를» 리다이렉트한다(§13-8 AC5의
+    유일한 라이브 검증 경로) — 즉 실제로는 브라우저가 방문«해야»했는데 방문할 수
+    없는 도메인이라 그 경로 자체가 결함이었다(결함 2, #3613이 같은 스토리에서 닫음).
+
+    처방 — `redirect_uri`(=`_redirect_uri(org_id, channel)`, 이 채널의 콜백 URL 그
+    자체)로 가짜 `code`와 real `state`를 실어 곧장 리다이렉트한다. 브라우저 관점에서
+    "authorize" 리다이렉트가 즉시 "callback" 리다이렉트가 되는 셈 — real Meta 없이도
+    같은 코드 경로(FE callback route → BE callback endpoint → connection 갱신)를
+    전부 그대로 탄다(sandbox_publish.py "같은 코드 경로·가짜 데이터" 철학과 동일).
+    `code` 값 자체는 `exchange_code_for_short_lived_token`이 검증 없이 무조건 고정
+    가짜 토큰을 내므로 아무 문자열이나 무방 — `state`만 실물이어야 한다(BE가
+    `CHANNEL_OAUTH_STATE_INVALID`로 검증)."""
+    from urllib.parse import urlencode
+
+    return f"{redirect_uri}?{urlencode({'code': _SANDBOX_FAKE_CODE, 'state': state})}"
 
 
 async def exchange_code_for_short_lived_token(
