@@ -104,6 +104,11 @@ interface ChannelPostDraftDetail {
   // poster={thumbnail_url}>, 없으면 기존처럼 썸네일만 그린다. 없으면 null(영상
   // 미첨부 또는 BE 미착지 — 둘 다 화면 동작 동일, fail-closed).
   video_url?: string | null;
+  // story #3590(Phase2·BE→FE·소형, 페드루 PO 確定 2026-09-06, BE #3944 additive) —
+  // video_url과 동형 관례(단건 전용). ChannelPostVideoResponse(confirm 응답)와
+  // 정확히 같은 필드명·타입 — formatVideoMetaLine이 재로드에서도 같은 문장을
+  // 낸다. video_row 없으면 null.
+  video_meta?: { duration_seconds: number; width: number; height: number; codec: string; original_bytes: number } | null;
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지(FailureActionBadge)가 이
   // 화면에 mount 안 된 채로 남아 있던 갭. 단건 GET(ChannelPostDraftListItem과 동형
   // shape, backend/app/routers/channel_posts.py)이 이미 내는 필드.
@@ -738,11 +743,25 @@ export default function ChannelPostEditPage() {
         const d = draftJson?.data;
         const list = versionsJson?.data ?? [];
         setDraft(d ?? null);
-        // story #3556(확定 갭②, 페드루 PO 2026-09-06) — 별도 영상 GET이 없어 초기
-        // 로드는 draft.video_url(재생 URL만)로만 seed한다 — 길이·해상도·코덱은
-        // "모른다"(undefined)로 남긴다(지어내지 않는다). 이 세션에서 새로 업로드하면
-        // handleVideoFileSelected가 confirm 응답의 풍부한 메타로 통째로 교체한다.
-        setVideo(d?.video_url ? { videoUrl: d.video_url } : null);
+        // story #3590(유나 §17-23⑤-1 정정, 페드루 PO 確定 2026-09-06) — BE #3944가
+        // video_meta(additive)를 실어 준 뒤로는 재로드에서도 confirm 응답과 같은
+        // 필드명으로 seed한다(formatVideoMetaLine이 같은 코드로 같은 문장을 낸다
+        // — 새 문구 조립 0). video_meta가 없으면(BE 미착지·video_row 없음) 종전대로
+        // videoUrl만 seed하고 메타는 "모른다"(undefined)로 남긴다.
+        setVideo(d?.video_url
+          ? {
+              videoUrl: d.video_url,
+              ...(d.video_meta
+                ? {
+                    durationSeconds: d.video_meta.duration_seconds,
+                    width: d.video_meta.width,
+                    height: d.video_meta.height,
+                    codec: d.video_meta.codec,
+                    originalBytes: d.video_meta.original_bytes,
+                  }
+                : {}),
+            }
+          : null);
         // story #3514(doc a0da40c9, PO 確定 2026-09-05) — lint-on-read. 저장/상신
         // 응답에서만 갱신되던 위반 목록을 로드 시점에도 채운다 — "저장 없이" 위반
         // 목록·상신 비활성이 선다(§16-7을 읽기까지 넓힘). 계약 없으면(BE 미착지)
