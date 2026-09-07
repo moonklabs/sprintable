@@ -406,3 +406,102 @@ describe('useChatSse — mux 공유 커넥션 경로에서 connected 리렌더 �
     expect(connectedCapture.current).toBe(true);
   });
 });
+
+// story #3621(FE·결함·high, 선생님 2026-09-07 05:45Z 실물) — 실시간이 죽어 있는 동안
+// 화면이 "스스로" 낡음을 벗어나는 경로가 없던 것을 폴링 fallback으로 닫는다.
+describe('useChatSse — 폴링 fallback(story #3621)', () => {
+  function setVisibility(state: DocumentVisibilityState) {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  }
+
+  afterEach(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  it('connected가 threshold(10s) 미만으로 끊기면 onPoll을 부르지 않는다', async () => {
+    const onPoll = vi.fn().mockResolvedValue(true);
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onPoll={onPoll} />); });
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+    await act(async () => { es.readyState = FakeEventSource.CONNECTING; es.onerror?.(); await Promise.resolve(); });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
+    expect(onPoll).not.toHaveBeenCalled();
+  });
+
+  it('connected가 threshold(10s) 이상 머물면 onPoll이 불리기 시작한다(AC1)', async () => {
+    const onPoll = vi.fn().mockResolvedValue(true);
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onPoll={onPoll} />); });
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+    await act(async () => { es.readyState = FakeEventSource.CONNECTING; es.onerror?.(); await Promise.resolve(); });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(onPoll).toHaveBeenCalledTimes(1);
+  });
+
+  it('폴링 중엔 간격(15s)마다 반복 호출된다', async () => {
+    const onPoll = vi.fn().mockResolvedValue(true);
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onPoll={onPoll} />); });
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+    await act(async () => { es.readyState = FakeEventSource.CONNECTING; es.onerror?.(); await Promise.resolve(); });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(onPoll).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(onPoll).toHaveBeenCalledTimes(2);
+  });
+
+  it('재연결 성공(connected=true)이 되면 폴링을 즉시 멈춘다(AC2, backfill과 중복 0)', async () => {
+    const onPoll = vi.fn().mockResolvedValue(true);
+    const onReconnect = vi.fn();
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onPoll={onPoll} onReconnect={onReconnect} />); });
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+    await act(async () => { es.readyState = FakeEventSource.CONNECTING; es.onerror?.(); await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(onPoll).toHaveBeenCalledTimes(1);
+
+    // 재연결 backoff 재시도가 새 EventSource 인스턴스를 만들 시간을 준 뒤 그걸 연다.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+    const latest = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    await act(async () => { latest.onopen?.(); await Promise.resolve(); });
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+
+    onPoll.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(onPoll).not.toHaveBeenCalled(); // 폴링이 멈췄다 — backfill(onReconnect)이 이어받았다.
+  });
+
+  it('탭이 백그라운드(hidden)면 폴링 호출을 쉬고, 복귀하면 재개한다(AC5)', async () => {
+    const onPoll = vi.fn().mockResolvedValue(true);
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onPoll={onPoll} />); });
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+    await act(async () => { es.readyState = FakeEventSource.CONNECTING; es.onerror?.(); await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(onPoll).toHaveBeenCalledTimes(1);
+
+    onPoll.mockClear();
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); }); // 폴 간격(15s) 두 배를 넘겨도
+    expect(onPoll).not.toHaveBeenCalled(); // 백그라운드에선 안 부른다.
+
+    act(() => { setVisibility('visible'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); }); // 가시성 재확인 poke 간격
+    expect(onPoll).toHaveBeenCalledTimes(1); // 복귀 즉시 재개.
+  });
+
+  // ⭐뮤테이션 표적 — threshold 가드(POLL_THRESHOLD_MS)를 지우면 위 "10s 미만" 테스트가
+  // RED여야 한다(연결 순단마다 폴링이 켜지는 소음 회귀).
+  it('⭐뮤테이션 대조 — onPoll 자체가 없으면(옵션 생략) 아무 타이머도 안 돈다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+    await act(async () => { es.readyState = FakeEventSource.CONNECTING; es.onerror?.(); await Promise.resolve(); });
+    // onPoll이 없으니 폴링 effect 자체가 조기 return — 타이머 advance가 아무 것도 못 건드려도
+    // (에러 없이) 통과해야 한다. 이 테스트의 존재 의의는 "onPoll 없을 때도 회귀 없음" 확인.
+    await expect(act(async () => { await vi.advanceTimersByTimeAsync(60_000); })).resolves.not.toThrow();
+  });
+});

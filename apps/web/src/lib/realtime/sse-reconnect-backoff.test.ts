@@ -5,8 +5,9 @@
 // ① 연결이 HEALTHY_CONNECTION_MS(10초) 이상 붙어 있다가 끊기면 실패 카운트를 즉시 잊는다
 //    (정상 60초 사이클에서 backoff가 절대 안 치솟는다).
 // ② 10초 미만에 끊기면(핸드셰이크 직후 등) 실패 카운트가 유지·증가한다(서버가 진짜
-//    죽었을 때만 벌어지는 시나리오 — 그 경우도 상한 20초로 재시도 폭풍을 막는다).
-// ③ 상한은 300초→20초로 낮아졌다.
+//    죽었을 때만 벌어지는 시나리오 — 그 경우도 상한 30초로 재시도 폭풍을 막는다).
+// ③ 상한은 300초→20초(2026-07-22)→30초(story #3621, 2026-09-07 — 폴링 fallback이
+//    갱신을 재연결과 무관하게 보장하므로 재연결 자체는 더 이상 급할 이유가 없다).
 // ④ PO 리뷰(2026-07-22, E-GCE-RT S6 실측 600연결/CPU 92~97% thundering herd 근거) — 각
 //    지연에 ±20% 지터를 곱해 동시 재시도(herd)를 시간축으로 흩뿌린다.
 
@@ -31,10 +32,10 @@ describe('createReconnectBackoffState — story #2095', () => {
     expect(backoff.onError()).toBe(RECONNECT_DELAYS_MS[0]);
   });
 
-  it('핸드셰이크가 반복 실패하면(open 없이 error만) 지연이 단계적으로 상승하고 상한(20s)에서 멈춘다', () => {
+  it('핸드셰이크가 반복 실패하면(open 없이 error만) 지연이 단계적으로 상승하고 상한(30s)에서 멈춘다', () => {
     const backoff = createReconnectBackoffState(NO_JITTER);
     const delays = [backoff.onError(), backoff.onError(), backoff.onError(), backoff.onError(), backoff.onError()];
-    expect(delays).toEqual([1_000, 3_000, 8_000, 20_000, 20_000]);
+    expect(delays).toEqual([1_000, 3_000, 8_000, 30_000, 30_000]);
   });
 
   it('연결이 10초 미만으로 붙어있다가 끊기면 — 진짜 불안정으로 보고 카운트가 계속 오른다', () => {
@@ -107,6 +108,6 @@ describe('createReconnectBackoffState — story #2095', () => {
     const backoff = createReconnectBackoffState(NO_JITTER);
     const delays = [backoff.onError(), backoff.onError(), backoff.onError(), backoff.onError()];
     // NO_JITTER(배수=1.0)이므로 정확값과 동일 — 지터 로직이 단계 자체를 깨지 않는 것 확인.
-    expect(delays).toEqual([1_000, 3_000, 8_000, 20_000]);
+    expect(delays).toEqual([1_000, 3_000, 8_000, 30_000]);
   });
 });

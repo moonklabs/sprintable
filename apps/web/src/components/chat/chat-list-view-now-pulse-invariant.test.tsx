@@ -19,7 +19,8 @@ const { useDashboardContextMock, fetchWithAuthMock } = vi.hoisted(() => ({
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
-vi.mock('@/hooks/use-chat-sse', () => ({ useChatSse: () => {} }));
+// story #3621 — connected/polling을 반환하는 실제 훅 shape과 맞춘다.
+vi.mock('@/hooks/use-chat-sse', () => ({ useChatSse: () => ({ connected: true, polling: false }) }));
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
 

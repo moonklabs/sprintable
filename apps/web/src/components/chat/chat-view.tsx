@@ -455,11 +455,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
   // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가
   // 그동안 아무도 안 읽고 있었다.
-  const { connected } = useChatSse({
+  // story #3621 AC1 — connected가 끊긴 채 threshold 이상 머물면 이 대화를 폴링으로
+  // 갱신한다. fetchMessages()가 undefined를 반환하면(!res.ok·throw) 실패로 간주해
+  // 폴 간격을 넓힌다(useChatSse 내부, sse-polling-fallback.ts).
+  const handlePoll = useCallback(async () => (await fetchMessages()) !== undefined, [fetchMessages]);
+
+  const { connected, polling } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onWorking: handleWorking,
     onReconnect: handleReconnect,
+    onPoll: handlePoll,
   });
   // 짧은 순단(정상 60초 재연결 사이클, sse-reconnect-backoff.ts 주석 참고)까지 매번 배너를
   // 띄우면 소음이라, 끊김이 일정 시간(2s) 이상 지속될 때만 보인다 — 자동 재연결(#2987 §1)이
@@ -892,7 +898,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           {showDisconnectedBanner && (
             <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
               <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="flex-1">{t('connectionLost')}</span>
+              {/* story #3621 AC3 — 폴링이 켜지면(threshold 이상 지속) "폴링으로 갱신 중"을
+                  덧붙인다 — 갱신이 사람 조작 없이도 서고 있다는 신호(기존 문구 재사용,
+                  새 어휘는 이 한 줄뿐). */}
+              <span className="flex-1">{polling ? t('connectionLostPolling') : t('connectionLost')}</span>
               <button
                 type="button"
                 onClick={() => void fetchMessages()}

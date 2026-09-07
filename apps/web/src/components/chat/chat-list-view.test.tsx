@@ -34,8 +34,10 @@ vi.mock('next/navigation', () => ({
 // (SSE 백오프/타이머 전체를 재현하지 않는다 — sse-multiplexer.test.tsx가 이미 그 축은
 // "실제 재연결 타이밍은 별도"로 선언하고 옵션 배선만 고정하는 동일 관례).
 const { useChatSseMock } = vi.hoisted(() => ({ useChatSseMock: vi.fn() }));
+// story #3621 — connected/polling을 반환하는 실제 훅 shape과 맞춘다(그전엔 이 컴포넌트가
+// 반환값을 안 읽어 undefined 반환도 무해했지만, 이제 destructure한다).
 vi.mock('@/hooks/use-chat-sse', () => ({
-  useChatSse: (opts: unknown) => { useChatSseMock(opts); },
+  useChatSse: (opts: unknown) => { useChatSseMock(opts); return { connected: true, polling: false }; },
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
