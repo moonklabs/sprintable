@@ -37,18 +37,40 @@ async def _resolve_current_human_member(
     레거시 경로에서 OrgMember.id를 반환해(shadow 플래그 꺼짐이 기본) member_ssot 캐노니컬
     ``members.id``와 항상 같은 값이라는 보장에 기대지 않는다 — 여기서 직접
     ``Member.user_id == auth.user_id``로 해소(agent API key 경로는 애초에 사용 불가:
-    is_api_key=True면 이 함수를 부르는 라우트 자체가 human_api_key_id 발급 대상이 아님)."""
+    is_api_key=True면 이 함수를 부르는 라우트 자체가 human_api_key_id 발급 대상이 아님).
+
+    story #3634(BE·결함, 페드루 PO 確定 2026-09-07) — member SSOT Phase 0 이후 만들어진
+    org의 휴먼은 org_members 행만 있고 members 앵커 행이 없을 수 있다(migration 0075의
+    ``members.id == org_members.id`` 백필 불변식은 그 마이그 시점 한정 — 이후 신규
+    org_member는 아무도 앵커를 안 만든다, #3627/#3629와 같은 SSOT dual-table 결함
+    클래스). `human_api_keys.member_id`는 `members.id` FK(CASCADE)라 org_members.id로
+    그냥 갈음할 수 없다(conversation_participants류와 달리 FK가 실물로 걸려 있음) —
+    앵커 자체를 멱등 생성해야 한다. `ensure_human_member`(agent_anchor_sync.py, AC3-2c
+    grant write-sync가 이미 쓰는 같은 함수 — 새 판정자 발명 0)로 org_member.id 축에서
+    앵커를 만들고 다시 조회한다."""
     org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
     if not org_id_str:
         raise HTTPException(status_code=400, detail="org_id not resolvable from auth context")
+    org_id = uuid.UUID(org_id_str)
+    user_id = uuid.UUID(auth.user_id)
     member = (await session.execute(
         select(Member).where(
-            Member.user_id == uuid.UUID(auth.user_id),
-            Member.org_id == uuid.UUID(org_id_str),
+            Member.user_id == user_id,
+            Member.org_id == org_id,
             Member.type == "human",
             Member.deleted_at.is_(None),
         )
     )).scalar_one_or_none()
+    if member is None:
+        from app.services.agent_anchor_sync import ensure_human_member
+
+        org_member = (await session.execute(
+            select(OrgMember).where(
+                OrgMember.user_id == user_id, OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if org_member is not None and await ensure_human_member(session, org_member.id):
+            member = await session.get(Member, org_member.id)
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
     return member
