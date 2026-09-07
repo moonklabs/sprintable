@@ -32,7 +32,16 @@ message/code에 접근하는 형 — 실전 버그의 정확한 모양). 매치�
 page.tsx:509 — 이 마지막 자리는 story #3596/#3953이 만든 `.error` 우선 폴백, #3601
 스코프 밖). 새 자리가 이 목록에 또 오르려면 반드시 같은 근거(.error 우선 확認)와
 사유를 남길 것 — 그냥 억제하려고 추가하면 이 가드의 존재 이유가 사라진다.
-"""
+
+story #3609(CI 후속, 실사고 2026-09-07) — 허용 목록이 원래 `path:lineno` 키였다.
+#3956(3592, events/page.tsx에 aria-label 39줄 추가)가 그 파일의 뒷줄 2개(원래
+546·755)를 571·780으로 밀자, 그 코드는 «한 글자도 안 바뀐 채» develop·열린 PR
+전부의 CI가 거짓 빨강이 됐다(줄 내용은 그대로인데 줄 번호만 밀렸다는 이유로) —
+model_registration류의 "pin은 조용히 늘어나면 안 된다"는 옳지만, 그 pin의 «키»
+자체가 줄번호이면 안 늘어도 무관한 변경 한 번에 깨진다. 키를 «파일 + 그 줄의
+strip()된 내용 전체 일치»로 바꾼다 — 줄번호가 몇 번이든, 그 파일에 그 정확한
+텍스트가 있으면 허용(같은 내용이 그 파일에 여러 줄 있어도 전부 허용 — 내용이
+같으면 안전성 판단도 같다, 줄마다 새로 등재할 이유가 없다)."""
 from __future__ import annotations
 
 import re
@@ -41,25 +50,26 @@ from pathlib import Path
 
 _PATTERN = re.compile(r"\.detail\?\.(message|code)\b")
 
-# PO 리뷰 관례(model_registration lint와 동형) — 줄 단위 dict, 값=사유. 새 항목은
-# 반드시 ".error를 이미 1순위로 읽는다"는 근거를 사유에 적을 것. 이 dict의 key
-# 집합은 tests/test_3601_error_envelope_detail_mismatch_lint.py::
+# story #3609 — 줄번호 대신 «파일 + strip한 줄 내용 전체 일치»로 키를 바꿨다(위
+# 모듈 docstring 그라운딩). 값=그 파일에서 허용되는 줄 내용의 목록(사유는 각
+# 항목 옆 주석). 이 dict의 key(파일) 집합·값(내용) 집합은
+# tests/test_3601_error_envelope_detail_mismatch_lint.py::
 # test_allowlist_is_pinned_to_known_safe_lines에 pin돼 있어 조용히 늘어날 수 없다.
-_ALLOWED_MATCHES: dict[str, str] = {
-    "src/app/(authenticated)/organization/events/page.tsx:116": (
-        "`body?.error?.message ?? body?.detail?.message ?? ...` — .error가 이미 1순위, "
-        ".detail은 무해한 죽은 폴백(story #3601 그라운딩)."
-    ),
-    "src/app/(authenticated)/organization/events/page.tsx:546": (
-        "위와 동형(resBody 변수명만 다름)."
-    ),
-    "src/app/(authenticated)/organization/events/page.tsx:755": (
-        "위와 동형."
-    ),
-    "src/app/(authenticated)/content/channel-posts/[draftId]/page.tsx:511": (
-        "story #3596/#3953이 만든 `.error?.message ?? .detail?.message ?? ...` — "
-        ".error 1순위 확認 완료, #3601 스코프 밖(그 스토리가 이미 닫은 자리)."
-    ),
+_ALLOWED_MATCHES: dict[str, list[str]] = {
+    "src/app/(authenticated)/organization/events/page.tsx": [
+        # `body?.error?.message ?? body?.detail?.message ?? ...` — .error가 이미
+        # 1순위, .detail은 무해한 죽은 폴백(story #3601 그라운딩). 이 정확한 문자열이
+        # 이 파일에 2줄 있다(원래 116·755, #3609 시점 116·780) — 내용이 같으므로
+        # 한 항목으로 둘 다 허용.
+        "throw new Error(body?.error?.message ?? body?.detail?.message ?? `HTTP ${res.status}`);",
+        # 위와 동형(resBody 변수명만 다름, 원래 546 · #3609 시점 571).
+        "throw new Error(resBody?.error?.message ?? resBody?.detail?.message ?? `HTTP ${res.status}`);",
+    ],
+    "src/app/(authenticated)/content/channel-posts/[draftId]/page.tsx": [
+        # story #3596/#3953이 만든 `.error?.message ?? .detail?.message ?? ...` —
+        # .error 1순위 확認 완료, #3601 스코프 밖(그 스토리가 이미 닫은 자리).
+        "errorMessage: body?.error?.message ?? body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric'),",
+    ],
 }
 
 SCAN_ROOT = "apps/web/src"
@@ -68,12 +78,18 @@ _EXCLUDE_SUFFIXES = (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
 
 def find_violations(path: Path, label: str | None = None) -> list[str]:
     """단일 파일 스캔 — 허용 목록에 없는 위반 라인을 `{label}:{lineno}: {line}` 형태로
-    반환. label 생략 시 path 그대로."""
+    반환. label 생략 시 path 그대로.
+
+    story #3609 — 매칭은 줄번호가 아니라 «label(파일) + strip한 줄 내용 전체 일치»
+    (`_ALLOWED_MATCHES.get(label, [])`에 그 줄의 strip 결과가 있는지)로 판정한다 —
+    같은 파일의 무관한 다른 줄이 밀려도(예: 위에 코드가 추가돼 뒤 줄번호가 전부
+    +N) 이 판정은 흔들리지 않는다."""
     text = path.read_text(encoding="utf-8")
     label = label or str(path)
+    allowed_for_file = _ALLOWED_MATCHES.get(label, [])
     violations: list[str] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        if _PATTERN.search(line) and f"{label}:{lineno}" not in _ALLOWED_MATCHES:
+        if _PATTERN.search(line) and line.strip() not in allowed_for_file:
             violations.append(f"{label}:{lineno}: {line.strip()}")
     return violations
 
@@ -103,7 +119,8 @@ def main() -> int:
         for v in violations:
             print(f"  {v}")
         return 1
-    print(f"OK: `.detail?.(message|code)` 신규 위반 0건 (허용 목록 {len(_ALLOWED_MATCHES)}건 유지)")
+    total_allowed = sum(len(v) for v in _ALLOWED_MATCHES.values())
+    print(f"OK: `.detail?.(message|code)` 신규 위반 0건 (허용 목록 {len(_ALLOWED_MATCHES)}개 파일·{total_allowed}줄 유지)")
     return 0
 
 
