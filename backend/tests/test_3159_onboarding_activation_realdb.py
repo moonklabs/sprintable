@@ -15,9 +15,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.models.user import User
 from app.services import onboarding_activation as svc
 
 _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DATABASE_URL") or ""
@@ -145,6 +146,52 @@ async def test_resolve_activation_org_id_prefers_requested_context_when_owner_th
             await _wipe(s, ORG)
             await s.execute(text(f"DELETE FROM organizations WHERE id='{later_org}'"))
             await s.execute(text(f"DELETE FROM organizations WHERE id='{unrelated_org}'"))
+            await s.execute(text(f"DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
+    await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_activation_state_scope_is_requested_org_reveals_mismatch_for_non_owner_context():
+    """story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — 최초판 scope_org_id
+    (판정에 쓰인 org 값 자체)를 폐기하고 `scope_is_requested_org` 불리언으로 대체했다.
+    요청 org의 owner가 아닌 사용자(초대받은 admin/member)는 폴백 org로 판정이 떨어져
+    요청 org와 달라지므로 False — FE가 "이 판정은 지금 보는 org 얘기가 아니다"를 안다.
+    owner인 요청 컨텍스트에서는 True(오탐 0)."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            owner_org, invited_org = ORG, _uuid()
+            user_id = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES "
+                f"('{owner_org}','O','story3159-o','free'),('{invited_org}','O2','story3159-o2','free')"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{user_id}','story3159-scope@t.test','x','U',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES "
+                f"('{_uuid()}','{owner_org}','{user_id}','owner'),"
+                f"('{_uuid()}','{invited_org}','{user_id}','admin')"
+            ))
+            await s.commit()
+            user = (await s.execute(select(User).where(User.id == uuid.UUID(user_id)))).scalar_one()
+
+            # 요청 컨텍스트=owner_org(그 org의 owner) — 요청 org==판정 org라 True.
+            state_owner_ctx = await svc.get_activation_state(s, user, requested_org_id=uuid.UUID(owner_org))
+            assert state_owner_ctx["scope_is_requested_org"] is True
+
+            # 요청 컨텍스트=invited_org(admin일 뿐 owner 아님) — 판정이 폴백(owner_org)
+            # 으로 떨어져 요청 org(invited_org)와 달라진다 — False, FE가 이 신호로 배너를 끈다.
+            state_invited_ctx = await svc.get_activation_state(s, user, requested_org_id=uuid.UUID(invited_org))
+            assert state_invited_ctx["scope_is_requested_org"] is False
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text(f"DELETE FROM organizations WHERE id='{invited_org}'"))
             await s.execute(text(f"DELETE FROM users WHERE email LIKE 'story3159-%'"))
             await s.commit()
     await eng.dispose()

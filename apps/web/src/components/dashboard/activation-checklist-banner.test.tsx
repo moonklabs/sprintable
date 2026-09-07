@@ -9,6 +9,10 @@ import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-stat
 
 // story #3201 — useDashboardContext(projectId)·useRouter 신규 의존성. storage-capacity-
 // banner.test.tsx와 동일 패턴(실 dashboard-shell.tsx 전체 모듈 그래프를 끌어들이지 않음).
+// story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — orgId 비교를 폐기하고
+// BE가 낸 scope_is_requested_org 불리언만 본다(dashboard-shell 의존 0으로 축소). 기존
+// 픽스처(PARTIAL·COMPLETE)는 이 필드를 안 실어(undefined) 새 가드(`=== false`만 숨김)가
+// 항상 통과해 회귀 0 — 신규 테스트만 명시로 채운다.
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectId: 'proj-1' }),
 }));
@@ -81,6 +85,7 @@ function stubChecklist(data: {
   total: number;
   all_complete: boolean;
   first_instruction_conversation_id?: string | null;
+  scope_is_requested_org?: boolean;
 }) {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data }) })));
 }
@@ -161,6 +166,29 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
     await act(async () => { chip.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
     expect(container.textContent).toContain('이메일 인증하기');
+  });
+});
+
+describe('ActivationChecklistBanner — scope_is_requested_org 불일치 시 미노출(story #3610, 3607 잔여·CHANGES-2)', () => {
+  it('scope_is_requested_org===true면 그대로 렌더된다(오탐 0)', async () => {
+    stubChecklist({ ...PARTIAL, scope_is_requested_org: true });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('scope_is_requested_org===false면 아무것도 렌더하지 않는다(요청 org와 판정 org가 갈리는 switch-org 전환 창 포함 — orgId 프레임 불일치 원인과 무관하게 BE 판단만 본다)', async () => {
+    stubChecklist({ ...PARTIAL, scope_is_requested_org: false });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toBe('');
+  });
+
+  it('scope_is_requested_org가 undefined(구 응답 shape)면 기존처럼 렌더 유지(과다 은닉 방지)', async () => {
+    stubChecklist({ ...PARTIAL });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
   });
 });
 

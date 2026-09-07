@@ -24,6 +24,12 @@ export interface ActivationState {
   all_complete: boolean;
   // story #3201 — 왕복 성사된 대화(또는 org 최초 agent DM) id, 없으면 null.
   first_instruction_conversation_id: string | null;
+  // story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — 최초판 scope_org_id
+  // (판정에 쓰인 org 값)를 폐기하고 불리언으로 대체했다. FE가 그 값을 orgId(실제로는
+  // me.org_id=계정 기본 org)와 비교했는데, X-Org-Id(탭 effective org)와 다른 프레임이라
+  // switch-org 전환 창에서 가드가 안 걸리는 구멍이 있었다 — BE가 "요청 org==판정 org"
+  // 비교를 직접 끝내 낸다. undefined(구 응답 shape, 롤아웃 창)면 기존처럼 렌더 유지.
+  scope_is_requested_org?: boolean;
 }
 
 function readLocalFlag(key: string): boolean {

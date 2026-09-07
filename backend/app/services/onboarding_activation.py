@@ -237,6 +237,20 @@ async def get_activation_state(
         "first_instruction_conversation_id": (
             str(first_instruction_conv_id) if first_instruction_conv_id else None
         ),
+        # story #3610(3607 잔여) 최초판은 scope_org_id(판정에 쓰인 org 값 자체)를
+        # 냈는데, 유나 CHANGES-2(2026-09-07, PR#3966 리뷰·PO 채택) — FE가 그 값을
+        # `orgId`(useDashboardContext, 실제로는 me.org_id=계정 기본 org, layout.tsx:140)
+        # 와 비교했다. 이 둘은 다른 프레임이다 — scope_org_id는 "요청 X-Org-Id(탭
+        # effective org)로 판정된 값"인데 orgId는 "계정 기본 org"라, 멀티-org 계정이
+        # URL로 다른 org에 들어와 DashboardShell 자동 switch-org가 끝나기 前 창
+        # (project-context-client.ts:40~52, me.org_id=A·X-Org-Id=B가 갈리는 그 자리)
+        # 에서 비-owner면 폴백 scope=A=orgId가 돼 가드가 안 걸린다(B 화면에 A 진행률이
+        # 새는, 이 스토리가 원래 닫으려던 바로 그 경우가 재발).
+        #
+        # BE는 "요청됐던 org"(requested_org_id)와 "판정에 실제로 쓰인 org"(org_id)
+        # 둘 다 안다 — 그 비교를 FE에 값 2개로 떠넘기지 않고 여기서 불리언 하나로
+        # 확定해 낸다. FE는 이제 orgId(다른 프레임)와 비교하지 않고 이 불리언만 본다.
+        "scope_is_requested_org": org_id is not None and org_id == requested_org_id,
     }
 
 
