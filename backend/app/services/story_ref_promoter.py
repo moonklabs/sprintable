@@ -95,7 +95,16 @@ def _repo_shorthand_suffix_re(extra_repo_short_names: frozenset[str]) -> re.Patt
 # 보호 구간(스캔에서 제외) — fenced 코드블록·인라인 코드·이미 만들어진 entity 토큰.
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-_ENTITY_TOKEN_RE = re.compile(r"\[[^\]]*\]\(entity:[a-z_]+:[^)]+\)")
+# 페드루 PO CHANGES(카디르 발견, 2026-09-07) — `[^\]]*`는 라벨 안의 escape된 `\]`도
+# 그 자리에서 매치를 끊는다(문자 클래스는 백슬래시 유무를 안 본다, `]` 자체를
+# 제외했을 뿐). `reference_token`이 대괄호로 시작하는 제목("[BE·insights] 제목…")을
+# `[\[BE·insights\] 제목…](entity:story:…)`처럼 escape해 실어 보내는데(우리 스토리
+# 제목 대부분이 이 모양) — 그 escape된 `\]`에서 라벨 매치가 조기종료되면 토큰의
+# 나머지 절반(예: 라벨 안의 「PR #4003」 같은 bare 번호)이 보호 구간 밖으로 새어나가
+# 2단계 재스캔에서 다시 치환되어 중첩·깨진 토큰이 된다. `(?:\\.|[^\]\\])*`로 —
+# escape 시퀀스(`\.`아무거나) 하나로 통째 소비하거나, 대괄호·백슬래시가 아닌 문자를
+# 소비 — 진짜 닫는 `]`에 도달할 때까지 안 끊긴다.
+_ENTITY_TOKEN_RE = re.compile(r"\[(?:\\.|[^\]\\])*\]\(entity:[a-z_]+:[^)]+\)")
 
 # story #3162(채팅·치환 결함 조사) — 인용부호/블록인용 안의 `#N`은 「예시로 재인용」이지
 # 「새로 참조하려는 의도」가 아니다(디캄포 오늘 밤 재발 실사고: 정정 메시지에서 오염된

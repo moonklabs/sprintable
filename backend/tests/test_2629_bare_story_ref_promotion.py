@@ -225,6 +225,59 @@ async def test_promote_skips_existing_entity_token():
         await engine.dispose()
 
 
+# 카디르 발견(PR#4007 QA, 2026-09-07) — `reference_token`은 대괄호로 시작하는 스토리
+# 제목을 `[\[BE·insights\] 제목…](entity:story:…)`처럼 escape해 싣는다(우리 스토리
+# 제목 대부분이 「[…]」로 시작 — story_number.py::reference_token). `_ENTITY_TOKEN_RE`의
+# 옛 `[^\]]*`는 그 escape된 `\]`에서 라벨 매치를 조기종료해(문자 클래스는 백슬래시를
+# 안 본다) 토큰 전체가 보호 구간 밖으로 샜다 — 양성대조(다음 두 테스트는 옛 정규식
+# 기준 실패였다).
+async def test_promote_protects_entity_token_with_escaped_bracket_in_label():
+    """라벨이 escape된 대괄호를 포함한 entity 토큰 전체가 한 span으로 보호돼야 한다 —
+    라벨 안의 bare 번호(#4003, "PR" 접두 없음이라 _PR_PREFIX_RE로는 안 걸리는 경우)까지
+    포함해서 통째 무변경."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=4003, title="별개 스토리")
+            content = (
+                r"[\[BE·insights\] 훅 #4003 착지](entity:story:"
+                "11111111-1111-1111-1111-111111111111) 참고"
+            )
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content, "escape된 대괄호 라벨이 토큰 매치를 조기종료시켜 재치환됨"
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_bare_number_inside_escaped_label_not_reresolved():
+    """라벨 안의 bare 「#4003」이 보호 구간 밖으로 새어나가 별도 후보로 재승격되면
+    토큰 안에 또 다른 entity 링크가 중첩된다 — 그 중첩이 없어야 한다."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            await _seed_story(s, org.id, project.id, number=4003, title="별개 스토리")
+            content = (
+                r"[\[BE·insights\] 훅 #4003 착지](entity:story:"
+                "11111111-1111-1111-1111-111111111111) 참고"
+            )
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result.count("(entity:story:") == 1, "라벨 안 bare #4003이 재치환돼 중첩 토큰이 생김"
+            assert promoted_ids == set()
+    finally:
+        await engine.dispose()
+
+
 # story #3162(채팅·치환 결함) — 인용부호/블록인용 안의 #N은 재인용이지 새 참조 의도가
 # 아니다(디캄포 오늘 밤 재발 실사고: 정정 메시지에서 오염된 원문을 그대로 다시 인용해
 # 재승격됨). 코드블록/인라인코드와 같은 "예시 영역" 원칙을 확장.
