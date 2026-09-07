@@ -253,6 +253,40 @@ async def test_withdraw_is_idempotent():
 
 
 @pytest.mark.anyio
+async def test_withdraw_already_withdrawn_by_non_author_non_admin_still_403():
+    """story #3614 CHANGES(카디르 QA 적발, 페드루 PO 채택 2026-09-07) — 인가가 멱등
+    조기반환보다 앞에 있어야 한다. 작성자가 먼저 폐기(200)한 뒤, 작성자도 admin도
+    아닌 다른 멤버가 같은 초안에 다시 호출하면 멱등 성공(200)이 아니라 403이어야
+    한다 — 순서가 뒤바뀌면(조회→멱등 반환→인가) 이미 withdrawn인 초안은 누가
+    호출해도 인가 체크에 닿기 전에 200이 새 나갔다.
+    ⭐뮤테이션 표적 — 인가 체크를 멱등 반환 «뒤»로 되돌리면 이 테스트가 RED여야
+    한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            author_agent_id = await _seed_agent(s, org_id, project_id, name="작성자")
+            other_agent_id = await _seed_agent(s, org_id, project_id, name="타인")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=author_agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/withdraw")
+            assert r1.status_code == 200, r1.text
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=other_agent_id, agent=True)
+        async with _client_for(app) as client:
+            r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/withdraw")
+        assert r2.status_code == 403, r2.text
+        assert r2.json()["error"]["code"] == "CHANNEL_POST_WITHDRAW_FORBIDDEN"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_can_withdraw_field_three_branches_via_detail_endpoint():
     """story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 can_unpublish와
     같은 정책: 서버가 (원저자 또는 org owner/admin) ∧ 미발행 ∧ 미폐기를 계산해

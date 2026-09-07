@@ -1866,8 +1866,11 @@ async def withdraw_channel_post_draft(
     함수의 관할은 "아직 아무도 결정 안 한 pending"뿐, void/hold는 admin 별도 축).
     게이트가 없으면(한 번도 상신 안 한 초안) 그냥 draft만 닫는다.
 
-    멱등 — 이미 withdrawn인 초안을 다시 호출하면 그대로 조용히 성공(재클릭 방어,
-    새 오류 코드 발명 0)."""
+    멱등 — 인가를 통과한 호출자가 이미 withdrawn인 초안을 다시 호출하면 그대로
+    조용히 성공(재클릭 방어, 새 오류 코드 발명 0). 인가는 멱등 반환보다 항상
+    먼저 — 작성자/admin이 아닌 호출자는 이미 폐기된 초안에도 403을 받는다
+    (CHANGES, 카디르 QA 적발 2026-09-07 — 순서가 뒤바뀌면 인가 우회로 200이
+    샜다)."""
     draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None:
         raise ChannelPostDraftNotFoundError(draft_id)
@@ -1880,15 +1883,21 @@ async def withdraw_channel_post_draft(
         scope_key=str(draft.connection_id),
     )
 
-    if draft.status == "withdrawn":
-        return draft, gate
-
+    # story #3614 CHANGES(카디르 QA 적발, 페드루 PO 채택 2026-09-07) — 인가는
+    # 멱등 조기반환보다 «앞»이어야 한다. 이 순서가 뒤바뀌면(조회→멱등 반환→인가)
+    # 작성자도 admin도 아닌 org 멤버가 이미 폐기된 초안에 호출해도 인가 체크에
+    # 닿기 전에 200을 받는다 — 문서화한 정책("작성자 또는 org owner/admin만")이
+    # 이미-폐기 경로에서 강제되지 않는 갭. 순서=조회→인가→멱등 반환→409 발행됨→
+    # 게이트 처리.
     versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
     if not versions:
         raise ChannelPostDraftNotFoundError(draft_id)
     origin_author_member_id = versions[0].author_member_id
     if not is_org_admin and str(origin_author_member_id) != str(requester_member_id):
         raise ChannelPostDraftForbiddenError(draft_id)
+
+    if draft.status == "withdrawn":
+        return draft, gate
 
     if gate is not None:
         published = (await db.execute(
