@@ -690,7 +690,7 @@ async def _promote_connection_status(
 
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
-    from app.services.graph_api_errors import connection_status_for_error_code
+    from app.services.graph_api_errors import mark_connection_failed
 
     pub = (await db.execute(
         select(ChannelPublication).where(ChannelPublication.id == publication_id)
@@ -700,11 +700,10 @@ async def _promote_connection_status(
     connection = await db.get(ChannelConnection, pub.connection_id)
     if connection is None:
         return
-    connection.status = connection_status_for_error_code(error_code, current_status=connection.status)
-    if message is not None:
-        connection.last_error = message[:2000]
-    connection.last_error_code = error_code
-    connection.last_error_at = datetime.now(timezone.utc)
+    # story #3646 — insight_snapshots.py::_promote_connection_status_for_snapshot·
+    # publication_command.py::apply_command_failure(CONNECTION 분기)와 이제 이
+    # 4줄을 한 헬퍼로 공유한다(중복 3벌 → 1).
+    mark_connection_failed(connection, error_code=error_code, message=message, now=datetime.now(timezone.utc))
 
 
 async def refresh_comments_now(

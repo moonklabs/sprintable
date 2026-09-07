@@ -65,6 +65,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import httpx
 
     from app.models.channel_connection import ChannelConnection
@@ -216,6 +218,36 @@ def mark_connection_recovered(connection: "ChannelConnection") -> None:
     connection.last_error = None
     connection.last_error_code = None
     connection.last_error_at = None
+
+
+def mark_connection_failed(
+    connection: "ChannelConnection", *, error_code: str | None, message: str | None, now: "datetime",
+) -> None:
+    """story #3646(BE·결함·소형·3605 후속, 페드루 PO 確定 2026-09-07) — `mark_connection_
+    recovered`(위)의 짝 — 그쪽은 "복귀할 때 실패 흔적 4종을 지운다", 이건 "실패로
+    갈 때 4종(status·last_error·last_error_code·last_error_at)을 같이 채운다"를 한
+    자리로 고정한다.
+
+    `_promote_connection_status`(channel_post_comments.py)·`_promote_connection_
+    status_for_snapshot`(insight_snapshots.py)이 각자 인라인으로 갖고 있던 정확히
+    같은 4줄을 이 함수로 뺐다(새 판정 로직 0, 중복 제거) — `publication_command.py::
+    apply_command_failure`의 CONNECTION 분기는 실측(3646 그라운딩) 그 3곳과 달리
+    `last_error_code`/`last_error_at` 2종을 안 채우고 있었다. 이 헬퍼로 그 갭을
+    닫는다(message만 서는 자리 0).
+
+    status는 `connection_status_for_error_code`(sticky 포함)로 고른다 — 호출자가
+    직접 `connection.status = ...`를 대입하지 않는다(그 자리마다 sticky 규율을
+    다시 안 짜도록).
+
+    카디르 qa:changes(PR #4004, 2026-09-07) — `message is not None`일 때만 last_error를
+    쓰면, message=None으로 호출됐을 때 그 연결의 옛 last_error가 그대로 남는다(「틀린
+    진단문구 표시」 회귀 — 지운 인라인 3곳은 전부 `(message or "")[:2000]`으로 항상
+    덮어쓰고 있었다). status/code/at은 이 자리에서 항상 최신으로 갱신되는데 last_error만
+    구식으로 남으면 셋이 서로 다른 실패를 가리키는 자리가 생긴다 — 무조건 덮어쓴다."""
+    connection.status = connection_status_for_error_code(error_code, current_status=connection.status)
+    connection.last_error = (message or "")[:2000]
+    connection.last_error_code = error_code
+    connection.last_error_at = now
 
 
 def parse_graph_error_envelope(resp: "httpx.Response") -> tuple[int | None, int | None, str | None]:

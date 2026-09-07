@@ -672,12 +672,15 @@ async def apply_command_failure(
         # connection_status·insight_snapshots.py::_promote_connection_status_
         # for_snapshot)과 공유하는 단일 지점이다.
         from app.models.channel_connection import ChannelConnection
-        from app.services.graph_api_errors import connection_status_for_error_code
+        from app.services.graph_api_errors import mark_connection_failed
 
         connection = await db.get(ChannelConnection, command.destination)
         if connection is not None:
-            connection.last_error = (last_error or "")[:2000]
-            connection.status = connection_status_for_error_code(error_code, current_status=connection.status)
+            # story #3646 그라운딩 — 이 자리만 last_error_code/last_error_at를 안
+            # 채우고 있었다(channel_post_comments.py::_promote_connection_status·
+            # insight_snapshots.py::_promote_connection_status_for_snapshot은 이미
+            # 4필드 다 채움). 공용 헬퍼로 갭을 닫는다(message만 서는 자리 0).
+            mark_connection_failed(connection, error_code=error_code, message=last_error, now=now)
         command.status = "blocked"
         return
 
@@ -699,26 +702,23 @@ async def apply_command_failure(
     command.attempt_count += 1
     if command.attempt_count >= MAX_RETRIES:
         # story #3598(AC6, PO 確定 2026-09-06 · 유나 Design CHANGES 1 정정
-        # 2026-09-07) — transient가 재시도 상한(댓글수집 attempt_count>=5와 동형
-        # 임계값=MAX_RETRIES)에 도달해도 connection.status가 "active"로 남아
-        # 「연결됨」 칩이 거짓으로 보이는 결함을 닫되, CHANNEL_RATE_LIMITED(시간이
-        # 지나면 스스로 풀리는 한도 초과)는 이 승격에서 제외한다 — 3595 본문·
-        # AC6 원칙 그대로 "연결 상태는 사람이 고쳐야 풀리는 것에만"(한도 초과는
-        # 잔량·시각 축이지 connection 축이 아니다). 제외 없이 그대로 승격하면
-        # 일시 한도 초과 5연속(부하가 몰리는 정상 상황)만으로 발행이 전면
-        # 차단되고 사람의 재연결 없인 못 풀리는 자해 잠금이 된다. 페드루 PO
-        # 정정(2026-09-07) — 이 transient 분기(위 CONNECTION·NEEDS_CHECK
-        # 분기는 이미 return돼 여기 안 옴)에 이 제외 뒤 남는 error_code는
-        # CHANNEL_PUBLISH_PROVIDER_ERROR뿐(_TRANSIENT_CODES 정의 그대로) —
-        # "인증/권한 계열"은 이 분기에 애초에 못 온다(과장 표현 정정).
-        if error_code != "CHANNEL_RATE_LIMITED":
-            from app.models.channel_connection import ChannelConnection
-
-            connection = await db.get(ChannelConnection, command.destination)
-            if connection is not None:
-                connection.last_error = (last_error or "")[:2000]
-                if connection.status not in ("revoked", "error"):
-                    connection.status = "error"
+        # 2026-09-07)이 재시도 상한 소진 시 connection.status="error" 승격을 이
+        # 자리에 얹었었다(CHANNEL_RATE_LIMITED만 제외). story #3646(BE·결함,
+        # 페드루 PO 確定 2026-09-07, dev 실측 — PO Test Org IG sandbox 502
+        # 발행 실패가 「재인증 필요」로 잘못 승격) — #3598 AC6 자신의 주석이 이미
+        # "이 transient 분기엔 인증/권한 계열이 애초에 못 오고, 남는 error_code는
+        # CHANNEL_PUBLISH_PROVIDER_ERROR뿐"이라고 못박아 놓고도 그 유일한 코드를
+        # 승격 대상에 남겨 뒀다 — 결과적으로 «5xx/네트워크/타임아웃(=이 TRANSIENT
+        # 분기 전체, _TRANSIENT_CODES 정의 그대로)이 재시도 5회를 채우면 예외 없이
+        # 전부 승격」이 됐다. 원칙(3605·3612) "연결 상태는 사람이 고쳐야 풀리는
+        # 것에만"은 CHANNEL_RATE_LIMITED뿐 아니라 CHANNEL_PUBLISH_PROVIDER_ERROR
+        # (일시 provider 오류 — 「다시 연결」해도 provider가 살아나는 것과 무관)
+        # 에도 똑같이 적용된다. 그래서 이 TRANSIENT 분기 전체에서 connection
+        # 승격을 없앤다 — command만 dead_letter로 보내고 재시도는 사람 몫(AC5),
+        # connection의 status·last_error 3종은 이 분기가 손대지 않는다(불변).
+        # 인증 계열 승격은 위 FAILURE_KIND_CONNECTION 분기(즉시, 재시도 무관)가
+        # 전담 — 그 분기와 이 분기는 _CONNECTION_BLOCKED_CODES/_TRANSIENT_CODES로
+        # 이미 배타적으로 갈린다(한 error_code가 둘 다 탈 수 없다).
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
