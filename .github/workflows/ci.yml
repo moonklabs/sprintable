@@ -8,15 +8,29 @@ on:
     # base 재타겟도 새 런을 튼다 — required 3잡(alembic-fresh-db·backend-test·ci)엔
     # changes.base skip-필터를 걸지 않는다(그 잡들의 기존 `if: always()`가 스킵-캐스케이드
     # 방지용이라, skip 조건을 더하면 그 방지를 무력화한다 — [[ci-stuck-c-d-remedy-design-20260822]]
-    # landmine 참고). title/body 편집에도 전체 재실행되지만 PR#3324의 concurrency그룹이
-    # 연속 편집 시 구run을 자동취소해 낭비를 완화한다.
+    # landmine 참고). title/body 편집에도 전체 재실행된다 — 이건 story #3636이 아래
+    # concurrency.group에서 별도 격리한다(낭비는 있지만 산 run을 더는 안 죽인다).
     types: [opened, synchronize, reopened, edited]
     branches: [main, develop]
   push:
     branches: [main, develop]
 
+# story #3636(CI·소형, 페드루 PO 確定 2026-09-07) — #3972 실사고: `edited`가 PR **본문/
+# 제목만** 편집해도 발화해(GitHub이 base 재타겟과 구분 안 함) 같은 head에 새 run이 하나
+# 더 생기고, 이 concurrency 그룹이 같아 cancel-in-progress가 **아직 돌고 있던 산 run의
+# 잡**을 즉시 죽였다(PO가 새 run을 pending 중복으로 오인해 취소 → 산 run 0 → 재가동
+# ≈15분 손실). job-level `if:`로는 이 취소 자체를 못 막는다(취소는 새 run이 이 그룹에
+# 큐잉되는 순간 발화 — job의 if 평가보다 먼저다). 그래서 group 자체를 조건부로: `edited`
+# 이벤트인데 `changes.base`가 없으면(=base 안 바뀐 본문/제목 편집) 그 run만 run_id로
+# 격리된 자기 그룹에 넣어 — 옛(진짜) run과 아예 안 겹쳐 취소가 안 걸린다. base가 실제로
+# 바뀐 재타겟(#2912/#3317 의도)·opened/synchronize/reopened·push는 전부 그대로 안정
+# 그룹을 공유해 기존 취소 동작을 그대로 유지한다.
+# ⚠️낭비 축(선언) — 본문/제목만 편집한 그 throwaway run은 격리된 자기 그룹에서 required
+# 3잡을 「전량」 돈다(job/step skip 없음 — story #2555/22436b87의 "skip=required 체크
+# 애매" landmine을 그대로 피한다). 즉 같은 head SHA를 두 번 완주하는 CI 낭비(연속 편집마다
+# 반복될 수 있다)는 그대로 남는다 — 정확성(산 run이 안 죽는다)과 맞바꾼 것.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) && format('-edited-only-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:

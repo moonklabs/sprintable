@@ -334,6 +334,81 @@ def test_genuinely_heavy_file_still_caught_when_runner_is_normal():
     assert threshold == 60.0  # 정상 러너(배율 1.0) — 사실상 절대 60초와 같은 값, 100s는 그 위
 
 
+# ── story #3636(CI 후속) — 무거운 파일의 flat 임계값 거짓 빨강(2026-09-07 실사고 2건) ──
+#
+# test_2813_gate_github_check_realdb.py(weight 45.0s — 25개 realdb 테스트, 매번 전체
+# schema create_all을 다시 태우는 무거운 파일)가 오늘 두 번: run 34099865987에서
+# 72s>66.0s, run 34103152060에서 131s>102.9s. 둘 다 그 파일과 무관한 PR이고 다음 run은
+# 초록이었다(3396의 정규화 자체는 맞게 동작 — "그 run이 전반적으로 느렸다"는 판정까지는
+# 맞았다. 문제는 threshold가 파일 자신의 weight와 무관한 flat 값이라 weight 45.0처럼
+# 60s 근방인 파일은 median_ratio가 1.0만 넘어도 밥먹듯 걸리는 구조였다는 것).
+_INCIDENT1_ELAPSED = {
+    "tests/normal_a.py": 11.0, "tests/normal_b.py": 11.0, "tests/normal_c.py": 11.0,
+    "tests/test_2813_gate_github_check_realdb.py": 72.0,
+}
+_INCIDENT1_WEIGHTS = {
+    "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
+    "tests/test_2813_gate_github_check_realdb.py": 45.0,
+}  # median_ratio = 1.1 → threshold = 66.0(실사고와 동일)
+
+_INCIDENT2_ELAPSED = {
+    "tests/normal_a.py": 17.15, "tests/normal_b.py": 17.15, "tests/normal_c.py": 17.15,
+    "tests/test_2813_gate_github_check_realdb.py": 131.0,
+}
+_INCIDENT2_WEIGHTS = {
+    "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
+    "tests/test_2813_gate_github_check_realdb.py": 45.0,
+}  # median_ratio = 1.715 → threshold ≈ 102.9(실사고와 동일)
+
+
+def test_incident1_2026_09_07_run_34099865987_no_longer_flags_test_2813():
+    """⭐story #3636 핵심(실사고 1) — weight×3.0 여유축 적용 후 test_2813(72s)이
+    더는 FAIL이 아니어야 한다(정규화 자체는 맞다 — threshold 66.0도 실사고와 일치)."""
+    mod = _load()
+    slow, threshold, sample_size = mod.slow_files_normalized(_INCIDENT1_ELAPSED, _INCIDENT1_WEIGHTS)
+    assert threshold == pytest.approx(66.0)
+    assert slow == [], f"weight×3.0 여유축이 있는데도 여전히 걸림: {slow}"
+
+
+def test_incident2_2026_09_07_run_34103152060_no_longer_flags_test_2813():
+    """⭐story #3636 핵심(실사고 2) — 131s>102.9s도 마찬가지로 더는 FAIL이 아니다."""
+    mod = _load()
+    slow, threshold, sample_size = mod.slow_files_normalized(_INCIDENT2_ELAPSED, _INCIDENT2_WEIGHTS)
+    assert threshold == pytest.approx(102.9, abs=0.1)
+    assert slow == [], f"weight×3.0 여유축이 있는데도 여전히 걸림: {slow}"
+
+
+def test_incident1_without_own_weight_cap_axis_would_still_fail_mutation():
+    """뮤테이션(AC4) — weight×3.0 여유축 없이(구 로직 그대로) 판정하면 실사고 1이
+    다시 FAIL로 재현돼야 한다. slow_files_normalized() 내부 두 번째 AND 조건을
+    걷어낸 구식 판정을 직접 재현(이 assert가 표현하는 조건으로 되돌아간다는 뜻)."""
+    mod = _load()
+    ratios = mod.weighted_ratios(_INCIDENT1_ELAPSED, _INCIDENT1_WEIGHTS)
+    threshold = mod.normalized_slow_threshold_sec(ratios)
+    old_slow = sorted(f for f, e in _INCIDENT1_ELAPSED.items() if f in _INCIDENT1_WEIGHTS and e > threshold)
+    assert old_slow == ["tests/test_2813_gate_github_check_realdb.py"]
+
+
+def test_warned_only_files_normalized_surfaces_the_spared_file():
+    """story #3636 — FAIL에서 빠졌다고 조용히 넘어가지 않는다. warned_only에 잡혀야
+    한다(가시성, story #3558 ratio_outliers와 동형)."""
+    mod = _load()
+    slow, threshold, _ = mod.slow_files_normalized(_INCIDENT1_ELAPSED, _INCIDENT1_WEIGHTS)
+    warned = mod.warned_only_files_normalized(_INCIDENT1_ELAPSED, _INCIDENT1_WEIGHTS, threshold, slow)
+    assert warned == ["tests/test_2813_gate_github_check_realdb.py"]
+
+
+def test_heavy_file_own_weight_cap_still_fails_past_3x_boundary():
+    """경계 — test_2813 weight 45.0이라도 자기 weight의 3배(135.0s)를 넘게 느려지면
+    (진짜 회귀) 여전히 FAIL이어야 한다 — 이 축이 «무거운 파일은 뭘 해도 안 걸린다»로
+    변질되면 안 된다(story #3636 AC2 선언과 짝)."""
+    mod = _load()
+    elapsed = dict(_INCIDENT1_ELAPSED)
+    elapsed["tests/test_2813_gate_github_check_realdb.py"] = 140.0  # > 45.0*3.0
+    slow, threshold, _ = mod.slow_files_normalized(elapsed, _INCIDENT1_WEIGHTS)
+    assert slow == ["tests/test_2813_gate_github_check_realdb.py"]
+
+
 def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monkeypatch):
     """_check_elapsed_mode()를 통째로 돌려 오늘 실사고 표본이 exit 0(정상 판정)이
     되는지 e2e로 확인한다(파일 파싱·가중치 로딩·판정 전체 경로). 이 픽스처는 PR
