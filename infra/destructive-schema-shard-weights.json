@@ -1456,6 +1456,11 @@
       "file": "tests/test_3502_insights_board_endpoints.py",
       "sec": 10.0,
       "source": "story-3604-insights-board-durations(신규 분리 파일 — story #3502 조각② HTTP 라우터 6개 테스트, from app.main import app 1회 비용 ~3.4s 포함. 격리 uv run pytest 프로세스 2회 로컬 실측 4.63~4.85s, 2배 안전마진 반영한 10s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3603_connection_last_error.py",
+      "sec": 14.0,
+      "source": "story-3603-connection-last-error(PR 개설 前 선제 등재 — 로컬 raw pytest 3건 2.20s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 14s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

@@ -48,7 +48,18 @@ class ChannelConnection(Base, TimestampMixin, OrgScopedMixin):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")  # active|expired|revoked|error
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 유나 화면설계 §8②(PO 채택) — 갱신 실패 사유를 화면이 보여줄 수 있게(토큰 자체는 절대 아님).
+    # channel_connection.py::apply_refresh_failure의 PO 확定(2026-09-03 07:09Z) 그대로
+    # provider/실패 원문을 가공 없이 담는다 — "사람이 읽을 말로 가공"은 화면(FE) 몫.
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07, 유나 3597 관찰) — additive.
+    # `_promote_connection_status`(댓글)·`_promote_connection_status_for_snapshot`(인사이트)가
+    # CONNECTION 실패로 expired 승격할 때 이 둘도 같이 채운다(no-op 분기=last_error 3종
+    # 전부 불변). last_error 자체는 위 원칙대로 원문 그대로 두고, «어느 code였는지»·
+    # «언제였는지»는 이 두 컬럼이 별도로 든다(last_error 문자열 안에 섞어 넣지 않음 —
+    # apply_refresh_failure가 이미 세운 "원문 그대로" 관례와 같은 컬럼을 다른 의미로
+    # 오염시키지 않는다).
+    last_error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     connected_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # story #3492(0331) — 붙여넣기(pasted_secret) 자격 「제자리 교체」의 재방문 표시용
     # (§2 규격 3, app_id_suffix와 동형 — 원문은 절대 저장/반환하지 않는다, 끝 4자리뿐).

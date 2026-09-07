@@ -507,7 +507,9 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
             except InsightFetchError as exc:
                 failure_kind = classify_failure_kind(exc.error_code)
                 if failure_kind == FAILURE_KIND_CONNECTION:
-                    await _promote_connection_status_for_snapshot(db, snapshot)
+                    await _promote_connection_status_for_snapshot(
+                        db, snapshot, error_code=exc.error_code, message=str(exc),
+                    )
                     snapshot.status = "failed"
                     snapshot.error_code = exc.error_code
                     await db.commit()
@@ -546,11 +548,18 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
     return counts
 
 
-async def _promote_connection_status_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> None:
+async def _promote_connection_status_for_snapshot(
+    db: AsyncSession, snapshot: InsightSnapshot, *, error_code: str | None = None, message: str | None = None,
+) -> None:
     """publication_command.py:454-461과 동형 inline 승격(그라운딩⑤, 새 상태값 0) —
     hosted_site/sandbox는 connection 자체가 없어 no-op(그 두 채널은 애초에
     FAILURE_KIND_CONNECTION을 못 낸다 — CHANNEL_TOKEN_EXPIRED류를 던지는 곳이
-    threads 경로뿐)."""
+    threads 경로뿐).
+
+    story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07) — channel_post_
+    comments.py::_promote_connection_status와 동형 last_error 3종 additive."""
+    from datetime import datetime, timezone
+
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
 
@@ -564,6 +573,10 @@ async def _promote_connection_status_for_snapshot(db: AsyncSession, snapshot: In
     connection = await db.get(ChannelConnection, pub.connection_id)
     if connection is not None and connection.status not in ("revoked", "error"):
         connection.status = "expired"
+        if message is not None:
+            connection.last_error = message[:2000]
+        connection.last_error_code = error_code
+        connection.last_error_at = datetime.now(timezone.utc)
 
 
 _GA4_RUN_REPORT_URL_TMPL = "https://analyticsdata.googleapis.com/v1beta/properties/{property_id}:runReport"

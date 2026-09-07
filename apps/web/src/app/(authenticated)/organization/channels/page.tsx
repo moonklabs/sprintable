@@ -502,6 +502,17 @@ function ConnectionRow({
       {conn.last_error ? (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer">{t('channelLastErrorToggle')}</summary>
+          {/* story #3603(페드루 PO 確定 2026-09-07, 유나 3597 관찰) — 새 UI 섹션 0,
+              같은 자리 안에 code·시각을 last_error 원문과 나란히(표면 변화 0). code·
+              시각이 아직 없는 옛 행(3603 이전 승격·토큰 갱신 실패 경로)은 원문 한
+              줄만 그대로 — 새 값을 지어내지 않는다. */}
+          {conn.last_error_code || conn.last_error_at ? (
+            <p className="mt-1 font-mono">
+              {[conn.last_error_code, conn.last_error_at ? formatRelativeTime(conn.last_error_at, locale, displayTimezone) : null]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          ) : null}
           <p className="mt-1 font-mono">{conn.last_error}</p>
         </details>
       ) : null}

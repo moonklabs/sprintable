@@ -464,7 +464,9 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
             except CommentFetchError as exc:
                 failure_kind = classify_failure_kind(exc.error_code)
                 if failure_kind == FAILURE_KIND_CONNECTION:
-                    await _promote_connection_status(db, publication_id=row.publication_id)
+                    await _promote_connection_status(
+                        db, publication_id=row.publication_id, error_code=exc.error_code, message=str(exc),
+                    )
                     row.status = "failed"
                     row.error_code = exc.error_code
                     await _schedule_next_continuous_poll_if_active(
@@ -538,14 +540,25 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
     return counts
 
 
-async def _promote_connection_status(db: AsyncSession, *, publication_id: uuid.UUID) -> None:
+async def _promote_connection_status(
+    db: AsyncSession, *, publication_id: uuid.UUID, error_code: str | None = None, message: str | None = None,
+) -> None:
     """insight_snapshots.py::_promote_connection_status_for_snapshot과 동형 — 가드는
     channel 이름이 아니라 connection 유무(sandbox는 connection 자체가 없어 no-op).
     story #3597(Phase2·BE, 페드루 PO 確定 2026-09-06, 3595 실측 근거) — 이전엔
     `if channel != "threads": return`로 잘려 있어(#3517 원 구현이 threads만 구현하던
     시절 그대로 방치) IG/FB 댓글 수집 CONNECTION 실패는 에러코드까지 정확히
     분류되고도 /organization/channels 칩·재연결 버튼에 안 섰다 — insight_snapshots.py
-    쪽은 애초에 이 가드가 없었다(그쪽이 맞았다)."""
+    쪽은 애초에 이 가드가 없었다(그쪽이 맞았다).
+
+    story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07, 유나 3597 관찰) —
+    `status`만 바꾸고 「왜」는 안 남겨 /organization/channels의 「서버 응답 보기」가
+    비거나 옛 오류를 보였다. 실제로 expired로 승격하는 이 분기에서만 `last_error`
+    3종(원문 그대로 · code · 시각)을 같이 채운다 — no-op(이미 revoked/error·sandbox
+    no-op) 분기는 전부 불변(호출자가 error_code/message를 안 줄 수도 있다, 예:
+    아래 `refresh_comments_now`가 아닌 다른 미래 호출자 대비 — 둘 다 optional)."""
+    from datetime import datetime, timezone
+
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
 
@@ -557,6 +570,10 @@ async def _promote_connection_status(db: AsyncSession, *, publication_id: uuid.U
     connection = await db.get(ChannelConnection, pub.connection_id)
     if connection is not None and connection.status not in ("revoked", "error"):
         connection.status = "expired"
+        if message is not None:
+            connection.last_error = message[:2000]
+        connection.last_error_code = error_code
+        connection.last_error_at = datetime.now(timezone.utc)
 
 
 async def refresh_comments_now(
@@ -619,7 +636,10 @@ async def refresh_comments_now(
         from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION
 
         if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION:
-            await _promote_connection_status(db, publication_id=publication_id)
+            # story #3603(잔여, 페드루 PO 追加 2026-09-07) — error_code/message를 안 실으면
+            # 이 수동 경로만 last_error 3종이 안 채워져(3597과 같은 클래스 재발) 「서버
+            # 응답 보기」가 여기서 시작된 만료엔 비거나 옛 오류를 보인다.
+            await _promote_connection_status(db, publication_id=publication_id, error_code=exc.error_code, message=str(exc))
         schedule_row.status = "failed"
         schedule_row.error_code = exc.error_code
         await db.commit()
