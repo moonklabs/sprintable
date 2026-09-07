@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tests.test_2301_story_body_mentions_realdb import _REAL_DB_URL, _make_org, _session_factory
+from tests.test_2301_story_body_mentions_realdb import _REAL_DB_URL, _make_org, _make_project, _session_factory
 from tests.test_2288_command_center_gate_type_waiting_realdb import _make_member
 
 pytestmark = [
@@ -113,6 +113,103 @@ async def test_org_member_repository_create_anchor_removed_is_orphan_regression(
             await repo.create(user_id=uuid.uuid4(), role="member")
 
             assert await _count_orphan_active_org_members(s, org.id) == 1
+    finally:
+        await engine.dispose()
+
+
+# ─── AC2b — OrganizationRepository.create(owner_member_id=...)도 앵커를 만든다
+# (4번째 생성 경로, PR#3987 qa:changes·카디르 재발견·페드루 코드 재확認 2026-09-07) ────
+
+
+async def _seed_project_scoped_human(session, org_id, project_id):
+    """team_members VIEW가 실제로 행을 내려면 project_access가 있어야 한다(0110 뷰 정의
+    — project_access와의 JOIN이 필수). 완전 앵커된 휴먼(기존 test_2288 패턴 그대로,
+    새 세팅 발명 0) — 이 스토리의 관심사는 「이 사람을 새 org의 owner로 지정했을 때 그
+    새 org_member」쪽이지, 이 소스 멤버 자체의 앵커 상태가 아니다."""
+    from app.models.user import User
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+    from app.models.member import Member
+
+    user = User(id=uuid.uuid4(), email=f"owner-{uuid.uuid4().hex[:8]}@t.test", hashed_password="x")
+    session.add(user)
+    await session.flush()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role="member")
+    session.add(om)
+    await session.flush()
+    m = Member(id=om.id, org_id=org_id, type="human", user_id=user.id, name="Owner")
+    session.add(m)
+    await session.flush()
+    session.add(ProjectAccess(project_id=project_id, org_member_id=om.id, member_id=m.id, role="member"))
+    await session.commit()
+    return m.id, user.id  # m.id == team_members.id(0110 뷰: SELECT m.id FROM members m ...)
+
+
+@pytest.mark.anyio
+async def test_organization_repository_create_with_owner_member_id_ensures_member_anchor():
+    """POST /organizations에 owner_member_id를 지정한 생성 경로 — repositories/
+    organization.py::create()의 owner_member_id 갈래(원자 INSERT ... FROM team_members)가
+    이제 새로 만든 org의 org_member에도 members 앵커를 보장한다. 이전엔 organizations.py
+    라우터의 owner_member_id=None 갈래만 ensure_human_member를 불렀다(4번째 생성 경로 갭)."""
+    from sqlalchemy import select
+    from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.repositories.organization import OrganizationRepository
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            source_org = await _make_org(s)
+            project = await _make_project(s, source_org.id)
+            owner_member_id, owner_user_id = await _seed_project_scoped_human(s, source_org.id, project.id)
+
+            repo = OrganizationRepository(s)
+            new_org = await repo.create(
+                name="New Org", slug=f"neworg-{uuid.uuid4().hex[:8]}", owner_member_id=owner_member_id,
+            )
+            await s.commit()
+
+            new_om = (await s.execute(
+                select(OrgMember).where(OrgMember.org_id == new_org.id, OrgMember.user_id == owner_user_id)
+            )).scalar_one()
+            anchor = await s.get(Member, new_om.id)
+            assert anchor is not None, "owner_member_id 갈래로 만든 새 org의 org_member에 members 앵커가 없다"
+            assert anchor.type == "human"
+            assert anchor.org_id == new_org.id
+
+            assert await _count_orphan_active_org_members(s, new_org.id) == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_organization_repository_create_owner_member_id_anchor_removed_is_orphan_regression(monkeypatch):
+    """뮤테이션 — 위 자리의 ensure_human_member 호출을 없애면(4번째 경로의 옛 결함
+    재현) 새 org에도 다시 orphan org_member가 생긴다."""
+    import app.repositories.organization as org_repo_module
+
+    async def _never_ensures(session, org_member_id):
+        return False
+
+    # org_repo_module.create()가 함수 안에서 `from app.services.agent_anchor_sync import
+    # ensure_human_member`를 그때그때 다시 부른다(지연 import, org_member.py 선례와 동형) —
+    # 원본 모듈의 속성을 갈아끼우면 그 다음 호출부터 이 대역이 잡힌다.
+    monkeypatch.setattr("app.services.agent_anchor_sync.ensure_human_member", _never_ensures)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            source_org = await _make_org(s)
+            project = await _make_project(s, source_org.id)
+            owner_member_id, owner_user_id = await _seed_project_scoped_human(s, source_org.id, project.id)
+
+            repo = org_repo_module.OrganizationRepository(s)
+            new_org = await repo.create(
+                name="New Org", slug=f"neworg-{uuid.uuid4().hex[:8]}", owner_member_id=owner_member_id,
+            )
+            await s.commit()
+
+            assert await _count_orphan_active_org_members(s, new_org.id) == 1, "뮤테이션이 걸리지 않았다"
     finally:
         await engine.dispose()
 
