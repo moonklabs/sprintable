@@ -1443,6 +1443,17 @@ jobs:
       - name: "Verify no hardcoded aria-label (story #3557 regression guard)"
         run: pnpm --filter web verify:no-hardcoded-aria-label
 
+      # story #3592(§22-18 정본) 회귀가드("유나의 자") — 목록 안 반복 행 액션 버튼이
+      # 순번 없이 같은 접근 이름을 공유하면(스크린리더가 항목을 못 가름) 새로 늘 때만
+      # FAIL(baseline-freeze — verify-no-new-raw-button.ts와 동형 관례, 기존 잔존은
+      # repeated-row-action-names-baseline.json에 얼림). ⛔aria-label이 «있지만 정적
+      # 값»인 경우(pr-link-section.tsx의 unlinkAria 실사례)는 이 스캔이 못 잡는다 —
+      # 스크립트 머리 주석 ㉠~㉥ 참고, 검산은 comments-action-aria-labels.test.ts류의
+      # 부분 문자열 테스트로 별도.
+      - name: "Verify no new repeated row-action static labels (story #3592 regression guard)"
+        run: |
+          pnpm --filter web verify:no-new-repeated-row-action-names -- --selftest
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op

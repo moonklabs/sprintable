@@ -358,7 +358,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     const chip = container.querySelector('[data-comment-reply-status-chip]');
-    expect(chip?.textContent).toBe('답변 2 · 최신 발행됨');
+    expect(chip?.textContent).toBe('보낸 답변 2 · 최신 발행됨');
     expect(chip?.textContent).not.toContain('초안');
   });
 
@@ -376,7 +376,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     const chips = container.querySelectorAll('[data-comment-reply-status-chip]');
     expect(chips[0]?.textContent).toContain('발행됨');
     expect(chips[0]?.textContent).not.toContain('·');
-    expect(chips[1]?.textContent).toBe('답변 2 · 최신 발행됨');
+    expect(chips[1]?.textContent).toBe('보낸 답변 2 · 최신 발행됨');
   });
 });
 
@@ -671,5 +671,102 @@ describe('CommentsSection — 답변 실패 얼굴(story #3544, 유나 §22-15)'
     const resubmitBtn = voidedContainer.querySelector('[data-testid="comments-item-reply-resubmit-button"]');
     expect(resubmitBtn?.textContent).toBe('다시 상신');
     expect(resubmitBtn?.textContent).not.toBe(retryBtn?.textContent);
+  });
+});
+
+// story #3592(유나 §22-18 정본) — comments-section.tsx AC1 실배선. 목록 안 댓글마다
+// 「답변」·「작업으로 전환」의 접근 이름이 같아 보조기술 버튼 목록에서 어느 댓글의
+// 버튼인지 못 가르던 결함(§17-20 ⑧과 같은 클래스). 검산은 AC11 그대로 «보이는
+// 라벨이 접근 이름의 부분 문자열인가» — 「aria-label이 있는가」로 세지 않는다.
+describe('CommentsSection — §22-18 행 액션 접근 이름(story #3592)', () => {
+  it('⭐AC1 — 댓글 2건의 「작업으로 전환」 버튼이 서로 다른 접근 이름을 갖는다(순번 포함)', async () => {
+    const face = loadedFace([
+      baseComment({ id: 'c1' }),
+      baseComment({ id: 'c2' }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const buttons = container.querySelectorAll('[data-testid="comments-item-convert-to-task"]');
+    const name1 = buttons[0]?.getAttribute('aria-label');
+    const name2 = buttons[1]?.getAttribute('aria-label');
+    expect(name1).not.toBe(name2);
+    expect(name1).toContain('작업으로 전환');
+    expect(name1).toContain('1');
+    expect(name2).toContain('작업으로 전환');
+    expect(name2).toContain('2');
+  });
+
+  it('⭐AC1·AC7 — 댓글 2건의 「답변」 버튼도 서로 다른 접근 이름을 갖고, 지금 보이는 라벨을 그대로 품는다', async () => {
+    const face = loadedFace([
+      baseComment({ id: 'c1', sentRepliesCount: 0 }),
+      baseComment({ id: 'c2', sentRepliesCount: 1, replyStatus: 'published' }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const buttons = container.querySelectorAll('[data-testid="comments-item-reply"]');
+    const name1 = buttons[0]?.getAttribute('aria-label');
+    const name2 = buttons[1]?.getAttribute('aria-label');
+    expect(name1).not.toBe(name2);
+    // 보이는 라벨(「답변」/「답변 더하기」)이 그대로 접근 이름의 부분 문자열이어야
+    // 한다 — 고정 낱말로 덮으면(예: 항상 "답변"만 품기면) c2의 실제 보이는 라벨
+    // "답변 더하기"와 어긋난다.
+    expect(name1).toContain(buttons[0]?.textContent ?? '');
+    expect(name2).toContain(buttons[1]?.textContent ?? '');
+    expect(name1).toContain('1');
+    expect(name2).toContain('2');
+  });
+
+  it('⭐AC7 — openReplyDraft로 「이어서 답변」이 보일 때도 그 낱말을 그대로 품는다(고정 낱말 금지)', async () => {
+    const face = loadedFace([
+      baseComment({ id: 'c1', sentRepliesCount: 1, replyStatus: 'published', openReplyDraft: { id: 'r-open', status: 'draft', text: '작성 중' } }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const button = container.querySelector('[data-testid="comments-item-reply"]');
+    expect(button?.textContent).toBe('이어서 답변');
+    expect(button?.getAttribute('aria-label')).toContain('이어서 답변');
+  });
+
+  it('⭐AC1 — 「채널에서 보기」 링크도 순번을 품긴 접근 이름을 갖는다', async () => {
+    const face = loadedFace([
+      baseComment({ id: 'c1', replyStatus: 'published', replyExternalUrl: 'https://example.com/1' }),
+      baseComment({ id: 'c2', replyStatus: 'published', replyExternalUrl: 'https://example.com/2' }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const links = container.querySelectorAll('[data-testid="comments-item-reply-external-link"]');
+    const name1 = links[0]?.getAttribute('aria-label');
+    const name2 = links[1]?.getAttribute('aria-label');
+    expect(name1).not.toBe(name2);
+    expect(name1).toContain('채널에서 보기');
+    expect(name2).toContain('채널에서 보기');
+  });
+
+  it('⭐AC1 — 「더 보기」(<details><summary>) 접근 이름이 댓글마다 순번으로 갈린다', async () => {
+    const longText = 'x'.repeat(250);
+    const face = loadedFace([
+      baseComment({ id: 'c1', bodyText: longText }),
+      baseComment({ id: 'c2', bodyText: longText }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const summaries = container.querySelectorAll('[data-testid="comment-body-text"] summary');
+    const name1 = summaries[0]?.getAttribute('aria-label');
+    const name2 = summaries[1]?.getAttribute('aria-label');
+    expect(name1).not.toBe(name2);
+    expect(name1).toContain('더보기');
+    expect(name2).toContain('더보기');
+  });
+
+  // 뮤테이션 대조 — index를 안 넘기면(고정 n=1 등) 위 「서로 다른 접근 이름」
+  // assert들이 반드시 실패해야 한다. 별도 뮤테이션 실행 없이, 그 자체가 이
+  // describe의 존재 이유임을 문서화(실제 뮤테이션 검증은 이 파일을 다루는
+  // 세션에서 comments-section.tsx의 `index + 1`을 상수로 바꿔 로컬 실행함).
+  it('회귀 가드 — 댓글 1건뿐이면(순번 비교 불가) 그래도 접근 이름 자체는 선다(0건 회귀 아님)', async () => {
+    const face = loadedFace([baseComment({ id: 'c1' })]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const button = container.querySelector('[data-testid="comments-item-convert-to-task"]');
+    expect(button?.getAttribute('aria-label')).toBeTruthy();
   });
 });

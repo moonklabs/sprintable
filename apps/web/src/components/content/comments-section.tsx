@@ -264,8 +264,18 @@ function CommentsList({
 }) {
   return (
     <ul className="space-y-3">
-      {comments.map((comment) => {
+      {comments.map((comment, index) => {
         const isDeleted = comment.deletedAt !== null;
+        // story #3592(§22-18 정본) — 항목 식별자는 «순번»(1-based, 작성자 형은
+        // 폐기 — 같은 사람이 여러 댓글을 달거나 작성자 정보가 없으면 못 가른다).
+        // replyLabel을 한 번만 계산해 버튼 children·aria-label 둘 다에 그대로
+        // 넣는다(같은 문구를 두 번 조립하지 않는다 — 조립 규칙 0, §22-18 ⛔
+        // "고정 낱말로 덮지 않는다"와 같은 사상: 실제 렌더되는 그 낱말을 그대로
+        // aria-label에 품긴다).
+        const ordinal = index + 1;
+        const replyLabel = comment.openReplyDraft
+          ? t('commentsReplyContinueCta')
+          : comment.sentRepliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta');
         return (
           <li key={comment.id} className="space-y-1.5 rounded-md border border-border p-3" data-testid="comments-item">
             <div className="flex items-center justify-between gap-2">
@@ -302,6 +312,7 @@ function CommentsList({
             <CommentBodyText
               text={comment.bodyText}
               moreLabel={t('commentsMoreLabel')}
+              moreAriaLabel={t('commentsMoreAriaLabel', { n: ordinal })}
               forceCollapsed={isDeleted}
               deletedSummaryLabel={t('commentsDeletedBodyLabel')}
             />
@@ -334,6 +345,7 @@ function CommentsList({
                   rel="noopener noreferrer"
                   className="text-xs text-primary hover:underline"
                   data-testid="comments-item-reply-external-link"
+                  aria-label={t('commentsViewOnChannelAriaLabel', { n: ordinal, label: t('commentsReplyExternalLinkCta') })}
                 >
                   {t('commentsReplyExternalLinkCta')}
                 </a>
@@ -360,6 +372,8 @@ function CommentsList({
                 displayTimezone={displayTimezone}
                 onRetry={comment.replyCommandId ? () => onRetryReply(comment) : undefined}
                 onResubmit={() => onResubmitReply(comment)}
+                retryAriaLabel={t('commentsRetryAriaLabel', { n: ordinal, label: t('commentsReplyRetryCta') })}
+                resubmitAriaLabel={t('commentsResubmitAriaLabel', { n: ordinal, label: t('commentsReplyResubmitCta') })}
               />
             ) : null}
             {/* story #3517(BE #3867 조각②, PO 確定 2026-09-05) — §22-9: 지워진
@@ -372,6 +386,7 @@ function CommentsList({
                   size="sm"
                   onClick={() => onConvertToTask(comment)}
                   data-testid="comments-item-convert-to-task"
+                  aria-label={t('commentsConvertToTaskAriaLabel', { n: ordinal, label: t('commentsConvertToTaskCta') })}
                 >
                   {t('commentsConvertToTaskCta')}
                 </Button>
@@ -381,15 +396,16 @@ function CommentsList({
                   size="sm"
                   onClick={() => onReply(comment)}
                   data-testid="comments-item-reply"
+                  // story #3592(§22-18 정본) — visible text만으로는(WCAG 2.5.3은
+                  // 닫아도) 목록 안에서 «어느 댓글»의 버튼인지 못 가른다(§17-20 ⑧과
+                  // 같은 클래스 — 댓글 2건이면 같은 라벨의 버튼이 스크린리더
+                  // 버튼목록에 둘 뜬다). replyLabel(위에서 한 번만 계산)을 aria-label
+                  // 에 «그대로 품겨»(고정 낱말로 덮지 않는다) 순번으로 가른다 —
+                  // 아래 §22-18 참조로 정정(이 주석이 예전엔 "visible text=accessible
+                  // name이라 불필요"라고 적어 §17-20 ⑧을 안 닫은 채로 접혀 있었다).
+                  aria-label={t('commentsReplyAriaLabel', { n: ordinal, label: replyLabel })}
                 >
-                  {/* story #3593(Phase2·FE, 페드루 PO 確定 2026-09-06) — 이미 답변이
-                      있으면(재상신 이력) 버튼 이름이 "답변 더하기"로 갈린다(3592
-                      처방과 합쳐 접근 이름도 같은 낱말 — 이 버튼은 visible text가
-                      곧 accessible name이라 별도 aria-label 불필요). */}
-                  {/* story #3596 AC7 — openReplyDraft가 이기고(sentRepliesCount
-                      무관), 그다음 sentRepliesCount, 둘 다 없으면 기본. */}
-                  {comment.openReplyDraft ? t('commentsReplyContinueCta')
-                    : comment.sentRepliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta')}
+                  {replyLabel}
                 </Button>
               </div>
             ) : null}

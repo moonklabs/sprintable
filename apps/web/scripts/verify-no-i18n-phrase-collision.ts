@@ -302,6 +302,42 @@ export function findSubstringCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #3592(§22-18 정본, 2026-09-07) — 행 액션 접근 이름 재발 가드가 새로 심은
+  // aria-label 템플릿 11쌍. 전부 이 가드가 잡으려는 "화면에 «보이는» 두 문구가
+  // 헷갈린다"(#2352·#2365) 모양이 아니다 — aria-label은 스크린리더 전용이라 애초에
+  // 「화면에서 겹쳐 보인다」가 구조적으로 성립하지 않는다(사람 눈에는 둘 중 하나만
+  // 항상 보인다: 시각적 라벨 아니면 보조기술 이름). 짧은 라벨이 그 라벨을 포함하는
+  // 긴 문구에 들어간 정상 패턴(docs.title<->docs.indexDocCount류)이거나, 같은
+  // 템플릿 «형태»를 여러 형제 컨트롤이 공유해 생기는 자기충돌(AC7 — 그 자리에 실제
+  // 보이는 라벨을 그대로 품기는 게 규칙이라 형태가 같아지는 게 오히려 의도).
+  'content.commentsConvertToTaskAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsMoreAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsReplyAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsRetryAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsResubmitAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsSectionTitle <-> content.commentsViewOnChannelAriaLabel',
+  // 위 6건 전부 — commentsSectionTitle="댓글"(제목, 보간 없음)이 모든 댓글별
+  // aria-label 템플릿("{n}번째 댓글...")의 부분 문자열이라 6개 전부와 겹친다.
+  // "댓글"은 눈에 보이는 섹션 제목이고 aria-label은 그 밑 목록 행의 보조기술
+  // 전용 이름이라 실제 화면에서 두 문구가 나란히 «겹쳐 읽힐» 자리가 없다.
+  'content.commentsMoreAriaLabel <-> content.commentsMoreLabel',
+  // commentsMoreLabel="더보기"(<summary> 안 눈에 보이는 낱말) <-> commentsMoreAriaLabel
+  // ("{n}번째 댓글 더보기") — AC11이 요구하는 그 자체(보이는 라벨을 aria-label이
+  // «품어야» 통과하는 부분 문자열 검산)라 겹치는 게 정상이자 필수.
+  'content.commentsConvertToTaskAriaLabel <-> content.commentsViewOnChannelAriaLabel',
+  // 두 템플릿 다 "{n}번째 댓글을 {label}"로 형태가 완전히 같다(§22-18 표가 두
+  // 컨트롤에 같은 어순을 지정) — {label} 자리에 실제로는 서로 다른 값("작업으로
+  // 전환"/"채널에서 보기")이 들어가 렌더 결과는 갈린다, 템플릿 문자열 자체의
+  // 우연한 형태 일치일 뿐.
+  'content.commentsResubmitAriaLabel <-> content.commentsRetryAriaLabel',
+  // 위와 같은 이유 — 둘 다 "{n}번째 댓글 {label}" 템플릿 공유(§22-18 표 그대로).
+  'settings.agentMember <-> settings.agentToggleAriaLabel',
+  // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
+  // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
+  // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
+  'organization.eventRowActionAriaLabel <-> organization.eventsTitle',
+  // eventsTitle="이벤트"(섹션 제목) <-> eventRowActionAriaLabel("{n}번째 이벤트
+  // 정의 {label}") — 위 commentsSectionTitle류와 동형(섹션 제목 vs 행 aria-label).
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
   'goals.outcomeLabel <-> goals.trustRailOutcomeJudged',
