@@ -72,18 +72,63 @@ async def _seed_gate(session, *, org_id, work_item_id, status="approved"):
 
 async def _seed_channel_publication(
     session, *, org_id, gate_id, channel, published_at, permalink="https://example.com/post",
-    connection_id=None, status="published",
+    connection_id=None, status="published", version_id=None,
 ):
     from app.models.channel_publication import ChannelPublication
 
     pub = ChannelPublication(
-        id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, version_id=uuid.uuid4(),
+        # story #3656 — version_id 파라미터화(기본값은 기존 그대로 임의 uuid) — 소재/훅
+        # 시딩(ChannelPostVersion·ChannelPostImage)이 이 값을 정확히 가리켜야 한다.
+        id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, version_id=version_id or uuid.uuid4(),
         connection_id=connection_id or uuid.uuid4(), channel=channel, status=status,
         external_id=f"ext-{uuid.uuid4().hex[:8]}", permalink=permalink, published_at=published_at,
     )
     session.add(pub)
     await session.commit()
     return pub
+
+
+async def _seed_channel_post_draft(session, *, org_id, work_item_id, channel="instagram"):
+    """story #3656 — ChannelPostVersion.draft_id는 실 FK(channel_post_drafts.id)라
+    test_3645_evidence_asset_hook_keys.py의 「draft_id=uuid.uuid4() 그대로」 관례를
+    그대로 못 따른다(그쪽은 ChannelPostImage/Video만 쓰는데 그 둘은 FK 없음 관례 —
+    version만 FK가 있다, 실측으로 확認)."""
+    from app.models.channel_post_draft import ChannelPostDraft
+
+    draft = ChannelPostDraft(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, channel=channel,
+        connection_id=uuid.uuid4(),
+    )
+    session.add(draft)
+    await session.commit()
+    return draft
+
+
+async def _seed_channel_post_version(session, *, draft_id, version_id, hook_key=None):
+    from app.models.channel_post_version import ChannelPostVersion
+
+    version = ChannelPostVersion(
+        id=version_id, draft_id=draft_id, version=1, text="본문", body_sha256=uuid.uuid4().hex,
+        hook_key=hook_key, author_member_id=uuid.uuid4(), author_kind="human",
+    )
+    session.add(version)
+    await session.commit()
+    return version
+
+
+async def _seed_channel_post_image(session, *, org_id, draft_id, version_id, position, sha256=None):
+    from app.models.channel_post_image import ChannelPostImage
+
+    image = ChannelPostImage(
+        id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=version_id, position=position,
+        original_object_path=f"org/{org_id}/img-{uuid.uuid4().hex[:8]}.jpg",
+        original_sha256=sha256 or uuid.uuid4().hex,
+        original_content_type="image/jpeg", original_bytes=1234,
+        original_width=1080, original_height=1080, created_by=uuid.uuid4(),
+    )
+    session.add(image)
+    await session.commit()
+    return image
 
 
 async def _seed_snapshot(
@@ -650,3 +695,65 @@ async def test_invalid_window_raises():
 # 1회 비용(~3.4s, 로컬 무경합)이 이 파일에 섞여 있을 때 60초 러너 가드의 등재/경합
 # 배율을 왜곡했다(그 파일 머리 주석에 실측 상세). 이 파일에 남은 14개는 전부
 # list_insights_board를 서비스 함수로 직접 부르며 app.main을 안 건드린다.
+
+# ─── story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — asset_sha256s·hook_key
+# additive. 3645(#4002)의 _resolve_channel_publication_asset_evidence 재사용(새
+# 판정 0) — 여기 테스트는 "그 헬퍼가 list_insights_board 행에도 정확히 배선됐는가"
+# 만 잰다(헬퍼 자신의 로직 커버리지는 test_3645_evidence_asset_hook_keys.py가 이미
+# 갖고 있다, 이중 검증 안 함).
+@pytest.mark.anyio
+async def test_channel_publication_row_carries_asset_sha256s_and_hook_key():
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_id)
+            draft = await _seed_channel_post_draft(s, org_id=org_id, work_item_id=story_id)
+            draft_id = draft.id
+            version_id = uuid.uuid4()
+            await _seed_channel_post_version(s, draft_id=draft_id, version_id=version_id, hook_key="hook-A")
+            await _seed_channel_post_image(
+                s, org_id=org_id, draft_id=draft_id, version_id=version_id, position=0, sha256="sha-first",
+            )
+            await _seed_channel_post_image(
+                s, org_id=org_id, draft_id=draft_id, version_id=version_id, position=1, sha256="sha-second",
+            )
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=gate.id, channel="instagram",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
+        assert row["asset_sha256s"] == ["sha-first", "sha-second"]
+        assert row["hook_key"] == "hook-A"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_site_post_row_asset_and_hook_always_null():
+    """site_post(hosted_site)는 이미지/영상·hook_key 개념 자체가 없다 — 있는 걸
+    지어내지 않는다(_resolve_channel_publication_asset_evidence의 (None, None)
+    조기 반환과 동형 계약을 list_insights_board 행에서도 그대로 고정)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-no-asset", title="글",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
+        assert row["asset_sha256s"] is None
+        assert row["hook_key"] is None
+    finally:
+        await engine.dispose()

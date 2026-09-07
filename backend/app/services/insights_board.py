@@ -41,7 +41,7 @@ from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
 from app.models.site_post import SitePost
-from app.services.insight_snapshots import NORMALIZED_KEYS
+from app.services.insight_snapshots import NORMALIZED_KEYS, _resolve_channel_publication_asset_evidence
 
 _WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90}  # story 確定(e) — 3475(7d·30d)에 90d 신규 편입.
 _SNAPSHOT_OFFSET_DAYS = {"d1": 1, "d7": 7}
@@ -264,6 +264,18 @@ async def list_insights_board(
                 d7 = snap
         is_channel_pub = r.kind == "channel_publication"
         adapter = CHANNEL_ADAPTERS.get(r.channel) if is_channel_pub else None
+        # story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 3645(#4002)의
+        # _resolve_channel_publication_asset_evidence 재사용(새 판정 0). ⚠️잃는 것
+        # (선언) — 이 호출은 행마다(channel_publication뿐) ChannelPublication·
+        # ChannelPostVersion·ChannelPostVideo·ChannelPostImage 최대 4쿼리를 새로
+        # 낸다(N+1) — 위 스냅샷·댓글 배치 조회와 달리 이 스토리는 배치화하지 않았다
+        # (PO 지시가 "헬퍼 재사용"이었지 새 배치 쿼리 설계가 아니었음 — 페이지 상한
+        # 200행 기준 최악 800쿼리, 실측 체감 느려지면 후속 배치화 스토리 후보).
+        asset_sha256s, hook_key = (
+            await _resolve_channel_publication_asset_evidence(
+                db, publication_kind=r.kind, publication_id=r.publication_id,
+            ) if is_channel_pub else (None, None)
+        )
         rows_out.append({
             "publication_id": r.publication_id, "kind": r.kind, "channel": r.channel,
             "work_item_id": r.work_item_id, "title": r.title, "published_at": r.published_at,
@@ -282,6 +294,10 @@ async def list_insights_board(
                 comments_last_collected_at_by_pub.get(r.publication_id) if is_channel_pub else None
             ),
             "comments_supported": bool(adapter is not None and adapter.supports_fetch_replies) if is_channel_pub else False,
+            # story #3656 — 소재/훅 묶음(FE group-rows.ts)의 원재료. site_post·소재
+            # 0건·hook_key 미기입은 각각 null(소급 백필 없음 — 신규 발행부터만).
+            "asset_sha256s": asset_sha256s,
+            "hook_key": hook_key,
         })
 
     next_cursor = None
