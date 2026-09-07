@@ -387,13 +387,18 @@ def _audit_durations_mode(
     - 그 외(실패·타임아웃·cancelled 등)는 그라운딩②의 결론 그대로 — 그 shard의
       실측 데이터가 원천적으로 없어(타임아웃이 파일 루프 중간을 끊으면 부분 기록도
       없다) "센다"가 물리적으로 불가능하다 — `::warning::`으로 "N개는 집계 밖"만
-      선언(exit 0, 기존 경고-전용 원칙 그대로)."""
-    if not artifact_dir.exists():
-        print(f"산출물 디렉터리 없음({artifact_dir}) — backend-irrelevant PR로 샤드가 스킵됐을 수 있음, 대조 0건", file=sys.stderr)
-        if drift_state_path is not None:
-            state = _load_drift_state(drift_state_path)
-            _save_drift_state(drift_state_path, run_id=run_id, streaks=state["streaks"])
-        return 0
+      선언(exit 0, 기존 경고-전용 원칙 그대로).
+
+    카디르 qa:changes(PR #4005, 2026-09-07, codex 발견) — 예전엔 `artifact_dir.exists()`
+    가 이 shard_result 분기보다 **먼저** 서서, 디렉터리 자체가 통째로 없으면(업로드가
+    전부 무산된 극단형) shard_result 무관하게 항상 조용히 0을 돌려줬다 — 부분 누락은
+    잡는데 전체 누락은 새는 비대칭. `artifact_dir.glob("*.json")`(load_duration_
+    artifacts·load_present_shard_numbers 둘 다)은 디렉터리가 없어도 빈 이터레이터를
+    돌려줄 뿐 예외를 안 던지므로(파이썬 pathlib 표준 동작), 이 조기 return을 그냥
+    없애면 아래 로직이 "산출물 0건"을 자연스럽게 흘려보내 밑의 `expected_shard_count`
+    분기(shard_result 기준 error/warning)에 그대로 합류한다 — 전체 누락도 부분 누락과
+    **같은 문구·같은 코드**를 탄다. drift 상태 write-through(story #3642 CHANGES①)도
+    이 함수 중간에 무조건 도는 블록이라(위치 무변경) 이 삭제로 안 깨진다."""
     measured = load_duration_artifacts(artifact_dir)
     weights = load_weights()
     outliers = ratio_outliers(measured, weights)

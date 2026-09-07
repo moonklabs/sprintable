@@ -799,6 +799,33 @@ def test_audit_durations_mode_7_of_8_success_errors_and_fails(capsys, tmp_path):
     assert "[7]" in captured.out
 
 
+def test_audit_durations_mode_dir_missing_entirely_success_errors_and_fails(capsys, tmp_path):
+    """카디르 qa:changes(PR #4005, 2026-09-07) — 산출물 디렉터리 자체가 통째로 없는
+    극단형(업로드가 전부 무산)도 shard_result="success"면 부분 누락(selftest 3)과
+    같은 문구·같은 코드로 실패해야 한다. 예전엔 이 케이스가 shard_result 분기보다
+    앞선 조기 return에 걸려 항상 조용히 0을 돌려줬다(비대칭)."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"  # 만들지 않음 — 디렉터리 자체가 없다.
+    exit_code = mod._audit_durations_mode(artifact_dir, expected_shard_count=8, shard_result="success")
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "::error::shard 산출물 누락" in captured.out
+    assert "[0, 1, 2, 3, 4, 5, 6, 7]" in captured.out
+
+
+def test_audit_durations_mode_dir_missing_entirely_non_success_warns_only(capsys, tmp_path):
+    """양성대조 — 디렉터리 통째 부재도 shard_result가 non-success면(진짜 스킵/타임아웃)
+    여전히 경고-only+exit 0(전체 누락이라고 무조건 실패시키면 안 된다 — 원래 관대한
+    분기는 그대로 살아 있어야 한다)."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    exit_code = mod._audit_durations_mode(artifact_dir, expected_shard_count=8, shard_result="cancelled")
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "::warning::shard 8개는 드리프트 집계 밖" in captured.out
+    assert "::error::" not in captured.out
+
+
 def test_mutation_removing_shard_presence_diff_silences_missing_shard_warning(tmp_path, capsys, monkeypatch):
     """뮤테이션 — missing_shards()가 항상 빈 리스트를 내도록 되돌리면(옛 사각지대
     재현), 7/8+non-success 케이스에서 경고가 사라지는 것을 고정한다(이 가드가 실제로
