@@ -726,3 +726,90 @@ def test_audit_durations_mode_same_run_retry_does_not_double_count(tmp_path, cap
         mod._audit_durations_mode(artifact_dir, drift_state_path=state_path, run_id="run-B")
         state3 = json.loads(state_path.read_text())
         assert state3 == {"run_id": "run-B", "streaks": {"tests/stale.py": 2}}
+
+
+# ─── story #3653(CI·가드, 페드루 PO 確定 2026-09-07) — 타임아웃으로 죽은 shard가
+# drift 집계 사각지대에 빠지던 것을 닫는다: shard 산출물 개수를 --shard-count와
+# 대조해, «성공인데 산출물 없음»(업로드 결함, ::error+exit 1)과 «실패/타임아웃이라
+# 원천적으로 못 세는 것»(::warning만, exit 0)을 가른다 ────────────────────────────
+
+
+def _write_shard_artifact(artifact_dir, shard: int, durations: dict | None = None) -> None:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / f"shard-durations-{shard}.json").write_text(
+        json.dumps({"shard": shard, "durations": durations or {}})
+    )
+
+
+def test_missing_shards_all_8_present_returns_empty():
+    mod = _load()
+    assert mod.missing_shards(set(range(8)), expected_count=8) == []
+
+
+def test_load_present_shard_numbers_reads_shard_field_from_each_artifact(tmp_path):
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    for n in (0, 2, 5):
+        _write_shard_artifact(artifact_dir, n)
+    assert mod.load_present_shard_numbers(artifact_dir) == {0, 2, 5}
+
+
+def test_audit_durations_mode_8_of_8_present_no_shard_warning(capsys, tmp_path):
+    """selftest 1 — 산출물이 기대한 만큼(8/8) 다 있으면 shard-누락 관련 경고/에러가
+    0건이어야 한다(양성대조: 아래 두 테스트가 실제로 다른 조건에서 다르게 뜬다는 것
+    자체가 이 테스트의 「무경고」가 우연이 아님을 증명한다)."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    for n in range(8):
+        _write_shard_artifact(artifact_dir, n)
+    exit_code = mod._audit_durations_mode(artifact_dir, expected_shard_count=8, shard_result="success")
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "::error::" not in captured.out
+    assert "::warning::shard" not in captured.out
+    assert "8/8" in captured.err
+
+
+def test_audit_durations_mode_7_of_8_non_success_warns_only(capsys, tmp_path):
+    """selftest 2 — 7/8만 있고 shard_result가 non-success(타임아웃/실패)면 경고 1건만
+    뜨고 exit 0(원천적으로 못 세는 데이터라 실패시키면 안 된다 — story #3653 그라운딩②)."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    for n in range(7):  # shard 7만 빠짐.
+        _write_shard_artifact(artifact_dir, n)
+    exit_code = mod._audit_durations_mode(artifact_dir, expected_shard_count=8, shard_result="cancelled")
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "::warning::shard 1개는 드리프트 집계 밖" in captured.out
+    assert "[7]" in captured.out
+    assert "::error::" not in captured.out
+
+
+def test_audit_durations_mode_7_of_8_success_errors_and_fails(capsys, tmp_path):
+    """selftest 3 — 7/8만 있는데 shard_result가 success면(업로드 파이프라인이 조용히
+    무산된 것) ::error + exit 1 — 가드 스스로 빨개져야 한다(story #3653 확定)."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    for n in range(7):  # shard 7만 빠짐.
+        _write_shard_artifact(artifact_dir, n)
+    exit_code = mod._audit_durations_mode(artifact_dir, expected_shard_count=8, shard_result="success")
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "::error::shard 산출물 누락" in captured.out
+    assert "[7]" in captured.out
+
+
+def test_mutation_removing_shard_presence_diff_silences_missing_shard_warning(tmp_path, capsys, monkeypatch):
+    """뮤테이션 — missing_shards()가 항상 빈 리스트를 내도록 되돌리면(옛 사각지대
+    재현), 7/8+non-success 케이스에서 경고가 사라지는 것을 고정한다(이 가드가 실제로
+    그 결함을 잡는다는 증거)."""
+    mod = _load()
+    monkeypatch.setattr(mod, "missing_shards", lambda present, *, expected_count: [])
+
+    artifact_dir = tmp_path / "artifacts"
+    for n in range(7):
+        _write_shard_artifact(artifact_dir, n)
+    exit_code = mod._audit_durations_mode(artifact_dir, expected_shard_count=8, shard_result="cancelled")
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "::warning::shard" not in captured.out, "뮤테이션이 걸리지 않았다(경고가 여전히 뜬다)"

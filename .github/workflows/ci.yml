@@ -1109,20 +1109,6 @@ jobs:
       SECRET_KEY: ci-test-secret-at-least-32-chars-long
 
     steps:
-      - name: Require all destructive-schema shards to have succeeded
-        if: needs.backend-test-destructive.result != 'success'
-        run: |
-          echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
-          # story #3541(페드루 PO 確定) — GitHub Actions는 timeout-minutes로 죽인 잡과
-          # 사람이 수동 취소한 잡을 conclusion에서 안 가른다(둘 다 "cancelled"). result가
-          # cancelled면 코드 결함이 아니라 시간 초과였을 가능성이 있다는 걸 여기서
-          # 말해 둔다(#3884 shard 5·7·#3886 shard 2 실사고 — attempt 2는 코드 무변경으로
-          # 통과했었다) — 사람이 곧장 코드를 의심하고 파는 시간을 줄인다.
-          if [ "${{ needs.backend-test-destructive.result }}" = "cancelled" ]; then
-            echo "cancelled=시간 초과 또는 수동 취소 — 잡 소요가 timeout-minutes에 닿았는지 확認(각 샤드 job의 소요 시간을 먼저 볼 것)"
-          fi
-          exit 1
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -1132,11 +1118,20 @@ jobs:
           version: 'latest'
 
       # story #3558(CI·소형) AC2 — 8개 샤드가 낸 shard-durations-{n} 산출물을 모아
-      # weights.json과 절대 배율(2배/0.5배) 대조 «경고만»(실패 0 — continue-on-error도
-      # 필요 없다, _audit_durations_mode 자체가 항상 exit 0). backend-irrelevant PR이라
-      # 샤드가 스킵됐으면 산출물 자체가 없을 수 있어 download 단계를 continue-on-error로
-      # 감싼다(찾는 패턴이 0건이면 actions/download-artifact가 에러를 낸다 — 그게 이
-      # 필수 체크 잡을 죽이면 안 된다, story #2555의 backend-irrelevant 우회 규율과 동형).
+      # weights.json과 절대 배율(2배/0.5배) 대조 «경고만»(원칙 — story #3653이 "성공인데
+      # 산출물 누락"이라는 새 결함 클래스에 한해 예외를 둔다, 아래 Audit 스텝 참고).
+      # backend-irrelevant PR이라 샤드가 스킵됐으면 산출물 자체가 없을 수 있어 download
+      # 단계를 continue-on-error로 감싼다(찾는 패턴이 0건이면 actions/download-artifact가
+      # 에러를 낸다 — 그게 이 필수 체크 잡을 죽이면 안 된다, story #2555의
+      # backend-irrelevant 우회 규율과 동형).
+      #
+      # story #3653(CI·가드, 페드루 PO 確定 2026-09-07) — 이 Download/Audit 2스텝을
+      # "Require all destructive-schema shards"(아래) **앞으로** 옮겼다. 그라운딩 —
+      # 옛 순서(Require 먼저, exit 1 무조건)에서는 샤드 하나라도 실패/타임아웃이면
+      # (needs.backend-test-destructive.result != success) Require가 먼저 죽어 이
+      # Audit이 통째로 스킵됐다 — 다른 7개 정상 샤드의 실측조차 집계되지 못했다(가장
+      # 드리프트가 클 타임아웃 상황에 가드가 침묵하는 사각지대). 이제 이 잡의 첫
+      # 스텝들이라 Require의 결과와 무관하게 항상 돈다.
       - name: Download shard durations (story #3558)
         uses: actions/download-artifact@v4
         continue-on-error: true
@@ -1160,9 +1155,16 @@ jobs:
           restore-keys: |
             weights-drift-streak-
 
-      - name: Audit shard durations vs weights.json (story #3558+#3642, warn-only)
+      # story #3653 — --shard-count(matrix.shard와 동형 8, 기존 인자 재사용)+
+      # --shard-result(needs.backend-test-destructive.result 그대로)로 산출물이 8개
+      # 미만일 때를 가른다: result=success인데 미만이면 업로드 파이프라인 자체가
+      # 조용히 무산된 것(::error+exit 1, 이 스텝 자체가 실패해 아래 Require를 포함한
+      # 나머지 스텝을 건너뛴다) — result!=success(실패/타임아웃)면 그 샤드의 실측
+      # 데이터가 원천적으로 없어 "센다"가 불가능하니 ::warning만(exit 0, 원칙 그대로
+      # CI를 안 죽인다).
+      - name: Audit shard durations vs weights.json (story #3558+#3642+#3653)
         working-directory: backend
-        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}"
+        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}" --shard-count 8 --shard-result "${{ needs.backend-test-destructive.result }}"
 
       - name: Save weights-drift streak state (story #3642)
         if: always()
@@ -1170,6 +1172,20 @@ jobs:
         with:
           path: /tmp/weights-drift-streak.json
           key: weights-drift-streak-${{ github.run_id }}
+
+      - name: Require all destructive-schema shards to have succeeded
+        if: needs.backend-test-destructive.result != 'success'
+        run: |
+          echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
+          # story #3541(페드루 PO 確定) — GitHub Actions는 timeout-minutes로 죽인 잡과
+          # 사람이 수동 취소한 잡을 conclusion에서 안 가른다(둘 다 "cancelled"). result가
+          # cancelled면 코드 결함이 아니라 시간 초과였을 가능성이 있다는 걸 여기서
+          # 말해 둔다(#3884 shard 5·7·#3886 shard 2 실사고 — attempt 2는 코드 무변경으로
+          # 통과했었다) — 사람이 곧장 코드를 의심하고 파는 시간을 줄인다.
+          if [ "${{ needs.backend-test-destructive.result }}" = "cancelled" ]; then
+            echo "cancelled=시간 초과 또는 수동 취소 — 잡 소요가 timeout-minutes에 닿았는지 확認(각 샤드 job의 소요 시간을 먼저 볼 것)"
+          fi
+          exit 1
 
       # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
       # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다

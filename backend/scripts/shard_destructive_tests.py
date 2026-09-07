@@ -312,6 +312,32 @@ def write_durations_json(elapsed_by_file: dict[str, float], out_path: Path, *, s
     out_path.write_text(json.dumps({"shard": shard, "durations": elapsed_by_file}, indent=2, sort_keys=True))
 
 
+def load_present_shard_numbers(artifact_dir: Path) -> set[int]:
+    """story #3653(CI·가드, 페드루 PO 確定 2026-09-07) — `artifact_dir` 아래
+    shard-durations-{n}.json이 실제로 있는 shard 번호만 모은다(`load_duration_
+    artifacts`와 같은 파일을 다시 읽되, 이번엔 병합된 durations가 아니라 "이 shard가
+    산출물을 남겼는가" 자체가 관심사). 그라운딩 확認 — 타임아웃으로 25분 천장에
+    죽은 shard는 `--elapsed-to-json`(파일 루프 완주 뒤에만 도는 마지막 스텝)까지
+    못 가 이 산출물 자체가 없다(부분 기록도 없다) — 이 함수가 그 부재를 shard
+    번호 단위로 드러낸다."""
+    present: set[int] = set()
+    for p in sorted(artifact_dir.glob("*.json")):
+        try:
+            data = json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        shard = data.get("shard")
+        if isinstance(shard, int):
+            present.add(shard)
+    return present
+
+
+def missing_shards(present: set[int], *, expected_count: int) -> list[int]:
+    """story #3653 — 0..expected_count-1(ci.yml matrix.shard와 동형 범위) 중
+    `present`에 없는 번호를 정렬해 반환(재현성)."""
+    return sorted(set(range(expected_count)) - present)
+
+
 def load_duration_artifacts(artifact_dir: Path) -> dict[str, float]:
     """story #3558 AC2 — `artifact_dir` 아래 `*.json`(각 shard-durations-{n}.json,
     `{"shard": n, "durations": {file: sec}}` 모양) 전부를 하나의 {file: sec}로 병합한다.
@@ -330,10 +356,11 @@ def load_duration_artifacts(artifact_dir: Path) -> dict[str, float]:
 
 def _audit_durations_mode(
     artifact_dir: Path, *, drift_state_path: Path | None = None, run_id: str | None = None,
+    expected_shard_count: int | None = None, shard_result: str | None = None,
 ) -> int:
-    """story #3558 AC2 — 항상 0을 반환한다(경고 전용, CI를 절대 안 죽인다). 산출물
-    디렉터리가 없거나 비어 있어도(backend-irrelevant PR이라 샤드 자체가 스킵된 경우)
-    조용히 "대조 대상 0건"으로 끝낸다.
+    """story #3558 AC2 — 원칙은 경고 전용(CI를 절대 안 죽인다). 산출물 디렉터리가
+    없거나 비어 있어도(backend-irrelevant PR이라 샤드 자체가 스킵된 경우) 조용히
+    "대조 대상 0건"으로 끝낸다.
 
     story #3642(AC3) — `drift_state_path`가 주어지면 «과소 등재(ratio≥2.0) 연속 스트릭»
     을 같이 추적한다(ci.yml이 actions/cache로 run 사이에 이 파일을 넘긴다).
@@ -345,7 +372,22 @@ def _audit_durations_mode(
 
     story #3642 CHANGES②(페드루 PO) — `run_id`가 주어지고 복원된 상태의 run_id와
     같으면(=같은 run의 재시도가 attempt 1이 이미 반영한 상태를 복원) 스트릭을 다시
-    증가시키지 않는다(이중 카운트 방지, 멱등)."""
+    증가시키지 않는다(이중 카운트 방지, 멱등).
+
+    story #3653(CI·가드, 페드루 PO 確定 2026-09-07) — 이 audit가 이제 ci.yml에서
+    "Require all destructive-schema shards" **앞으로** 옮겨져 항상 돈다(그라운딩①,
+    타임아웃/실패로 shard가 안 죽어도 이 audit는 실행돼야 다른 정상 shard의 실측이
+    계속 집계된다). 그 재배치가 낳는 새 질문 — "산출물이 8개 미만이면 왜인가"를
+    `expected_shard_count`/`shard_result`(ci.yml이 `needs.backend-test-destructive.
+    result`를 그대로 넘긴다)로 가른다:
+    - `shard_result == "success"`인데 산출물이 빠진 shard가 있으면 그건 코드 결함이
+      아니라 **업로드 파이프라인 자체가 조용히 무산된 것**(예: upload-artifact 설정
+      실수) — 침묵하면 안 되는 새로운 결함 클래스라 `::error`+**exit 1**(가드가
+      "재료를 못 찾았다"고 스스로 빨개진다).
+    - 그 외(실패·타임아웃·cancelled 등)는 그라운딩②의 결론 그대로 — 그 shard의
+      실측 데이터가 원천적으로 없어(타임아웃이 파일 루프 중간을 끊으면 부분 기록도
+      없다) "센다"가 물리적으로 불가능하다 — `::warning::`으로 "N개는 집계 밖"만
+      선언(exit 0, 기존 경고-전용 원칙 그대로)."""
     if not artifact_dir.exists():
         print(f"산출물 디렉터리 없음({artifact_dir}) — backend-irrelevant PR로 샤드가 스킵됐을 수 있음, 대조 0건", file=sys.stderr)
         if drift_state_path is not None:
@@ -355,6 +397,7 @@ def _audit_durations_mode(
     measured = load_duration_artifacts(artifact_dir)
     weights = load_weights()
     outliers = ratio_outliers(measured, weights)
+    exit_code = 0
 
     if drift_state_path is not None:
         state = _load_drift_state(drift_state_path)
@@ -374,15 +417,36 @@ def _audit_durations_mode(
 
     if not outliers:
         print(f"OK: 등재값 대조 — 산출물 {len(measured)}건 중 2배/0.5배 이탈 0건(story #3558)", file=sys.stderr)
-        return 0
-    for o in outliers:
-        direction = "과소 등재" if o["ratio"] >= RATIO_WARN_HIGH_MULTIPLIER else "과대 등재"
-        print(
-            f"::warning::등재값 {direction}(story #3558): {o['file']} — 실측 {o['measured_sec']:.1f}s vs "
-            f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights.json 재측정 검토."
-        )
-    print(f"경고 {len(outliers)}건(산출물 {len(measured)}건 중) — 실패 아님, story #3558 AC2", file=sys.stderr)
-    return 0
+    else:
+        for o in outliers:
+            direction = "과소 등재" if o["ratio"] >= RATIO_WARN_HIGH_MULTIPLIER else "과대 등재"
+            print(
+                f"::warning::등재값 {direction}(story #3558): {o['file']} — 실측 {o['measured_sec']:.1f}s vs "
+                f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights.json 재측정 검토."
+            )
+        print(f"경고 {len(outliers)}건(산출물 {len(measured)}건 중) — 실패 아님, story #3558 AC2", file=sys.stderr)
+
+    if expected_shard_count is not None:
+        missing = missing_shards(load_present_shard_numbers(artifact_dir), expected_count=expected_shard_count)
+        if missing:
+            if shard_result == "success":
+                print(
+                    f"::error::shard 산출물 누락(story #3653): {missing} — backend-test-destructive.result="
+                    "success인데 산출물이 없다(코드 결함 아님 — 업로드 파이프라인이 조용히 무산됐다는 뜻, "
+                    "actions/upload-artifact 설정을 확認하라)."
+                )
+                exit_code = 1
+            else:
+                print(
+                    f"::warning::shard {len(missing)}개는 드리프트 집계 밖(story #3653): {missing} — "
+                    f"backend-test-destructive.result={shard_result!r}(타임아웃/실패)라 이 shard들의 실측 "
+                    "데이터 자체가 없다(부분 기록도 없다) — 등재값 대조·drift 스트릭 어느 쪽도 이 shard를 "
+                    "«못 봤다»는 뜻이지 «정상»이라는 뜻이 아니다."
+                )
+        else:
+            print(f"OK: shard 산출물 {expected_shard_count}/{expected_shard_count} 전부 있음(story #3653)", file=sys.stderr)
+
+    return exit_code
 
 
 # story #3642(CI·소형, 3636 후속, 페드루 PO 確定 2026-09-07) — 3396의 러너 정규화는
@@ -477,7 +541,11 @@ def _check_elapsed_mode(elapsed_path: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard-index", type=int, default=None)
-    ap.add_argument("--shard-count", type=int, default=None)
+    ap.add_argument(
+        "--shard-count", type=int, default=None,
+        help="파티션 모드(--shard-index와 함께)의 샤드 수. story #3653 — --audit-durations "
+             "모드에서도 재사용한다(새 인자 발명 0) — 산출물이 이 수만큼 다 있는지 대조한다.",
+    )
     ap.add_argument("--print-summary", action="store_true", help="전체 샤드 분배를 stderr에 찍는다")
     ap.add_argument(
         "--meta-out", type=Path, default=None,
@@ -514,6 +582,13 @@ def main() -> int:
              "${{ github.run_id }}를 넘긴다). 복원된 상태의 run_id와 같으면(같은 run의 "
              "재시도) 스트릭을 다시 증가시키지 않는다 — 이중 카운트 방지.",
     )
+    ap.add_argument(
+        "--shard-result", type=str, default=None,
+        help="story #3653 — --audit-durations와 함께 쓴다(ci.yml이 "
+             "needs.backend-test-destructive.result를 그대로 넘긴다). --shard-count와 "
+             "짝을 이뤄 «성공인데 산출물이 빈 shard」(업로드 결함, ::error+exit 1)와 "
+             "「실패/타임아웃이라 원천적으로 못 세는 shard」(::warning만)를 가른다.",
+    )
     args = ap.parse_args()
 
     if args.check_elapsed is not None:
@@ -530,6 +605,7 @@ def main() -> int:
     if args.audit_durations is not None:
         return _audit_durations_mode(
             args.audit_durations, drift_state_path=args.drift_state, run_id=args.run_id,
+            expected_shard_count=args.shard_count, shard_result=args.shard_result,
         )
 
     if args.shard_index is None or args.shard_count is None:
