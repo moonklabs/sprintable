@@ -74,6 +74,10 @@ export type SitePostApiErrorKind =
   // story #3586(BE #3933, 페드루 PO 確定 2026-09-06) — 릴스 커버 비율이 어댑터 선언
   // target±tolerance를 벗어남(캐러셀 image_aspect_min/max와 다른 축 — 커버 전용).
   | 'cover_aspect_ratio_rejected'
+  // story #3614(BE, 페드루 PO 確定 2026-09-07) — 이미 발행된 초안은 폐기 대상이
+  // 아니다(발행 취소는 별도 unpublish 경로). 다른 kind와 안 섞는 이유는 already_
+  // published가 permission이 아니라 상태 충돌(409)이라 문구가 달라야 해서.
+  | 'draft_already_published'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -200,6 +204,9 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 어댑터 target±tolerance를 벗어남. labelKey 비움 — page.tsx가 actual/target을
   // formatVideoAspectRatio로 조립한다(image_aspect_ratio_* 동형 관례).
   CHANNEL_COVER_ASPECT_RATIO_REJECTED: { labelKey: '', kind: 'cover_aspect_ratio_rejected' },
+  // story #3614(BE, 페드루 PO 確定 2026-09-07) — 초안 폐기(withdraw) 전용 2코드.
+  CHANNEL_POST_WITHDRAW_FORBIDDEN: { labelKey: 'errorChannelWithdrawForbidden', kind: 'permission' },
+  CHANNEL_POST_DRAFT_ALREADY_PUBLISHED: { labelKey: 'errorChannelDraftAlreadyPublished', kind: 'draft_already_published' },
   // EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED
   // 는 위 site 항목을 그대로 재사용한다(같은 external_publish 게이트 개념 공유, doc §9-4).
   // story #3402·PR#3764 — 채널 포스트 전용 GATE_ALREADY_HELD. site와 kind는 같지만

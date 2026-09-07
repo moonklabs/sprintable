@@ -165,7 +165,7 @@ def _client_for(app):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-def _setup_org_scoped_app(app, Session, org_id, *, user_id):
+def _setup_org_scoped_app(app, Session, org_id, *, user_id, agent: bool = False):
     from app.dependencies.auth import AuthContext, get_current_user
 
     async def _db():
@@ -178,10 +178,14 @@ def _setup_org_scoped_app(app, Session, org_id, *, user_id):
                 raise
 
     async def _auth():
-        return AuthContext(
-            user_id=str(user_id), email="caller@test",
-            claims={"app_metadata": {"org_id": str(org_id)}},
-        )
+        # story #3614 CHANGES — 이 파일의 목록/단건 엔드포인트 호출부가 새로
+        # resolve_member(agent 판정=app_metadata.api_key_id)를 거치게 되면서,
+        # agent 판정 없이 human으로만 해소되던 이 헬퍼의 오랜 갭이 드러났다
+        # (test_3414_publication_command_core.py의 완전판과 동기화).
+        claims: dict = {"app_metadata": {"org_id": str(org_id)}}
+        if agent:
+            claims["app_metadata"]["api_key_id"] = "test-agent-key"
+        return AuthContext(user_id=str(user_id), email="caller@test", claims=claims)
 
     from tests.conftest import override_db_and_read
     override_db_and_read(app, _db)
@@ -211,7 +215,7 @@ async def test_agent_creates_draft_and_submits_end_to_end():
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
 
-        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r_draft = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts",

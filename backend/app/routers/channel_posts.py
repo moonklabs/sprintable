@@ -24,6 +24,8 @@ from app.services.channel_posts import (
     ChannelImageContainerFailedError,
     ChannelImageRequiredError,
     ChannelPostApproverRoleMissingError,
+    ChannelPostDraftAlreadyPublishedError,
+    ChannelPostDraftForbiddenError,
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
     ChannelPostGateNotFoundError,
@@ -58,6 +60,7 @@ from app.services.channel_posts import (
     submit_channel_post_draft,
     text_char_count,
     unpublish_channel_post,
+    withdraw_channel_post_draft,
 )
 from app.services.channel_post_images import (
     ChannelCoverAspectRatioRejectedError,
@@ -203,6 +206,16 @@ class ChannelPostDraftListItem(BaseModel):
     work_item_id: uuid.UUID
     channel: str
     connection_id: uuid.UUID
+    # story #3614 — `ChannelPostDraft.status`(draft|withdrawn) 그대로 노출. 「폐기됨」
+    # 배지 판정에 쓴다(단건 조회는 폐기돼도 항상 보이므로 이 필드로 화면이 그 상태를
+    # 반영해야 한다).
+    draft_status: str
+    # story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 필드
+    # `can_unpublish`(channel_connections.py)와 같은 정책: 서버가 (원저자 또는
+    # org owner/admin) ∧ 미발행 ∧ 미폐기를 전부 계산해 bool 하나로 낸다. FE는
+    # 이 값이 true일 때만 「폐기」 버튼을 그린다 — org_id/author 비교를 FE가 직접
+    # 하지 않는다(그리고 403을 내는 "그렸다가 막는" 이중 정책 금지, 이웃과 같은 규칙).
+    can_withdraw: bool = False
     current_version: int
     latest_author_kind: str
     origin_author_kind: str
@@ -984,6 +997,9 @@ async def reorder_channel_post_images_endpoint(
 def _to_draft_list_item(
     row: tuple,
     source_titles: dict[uuid.UUID, tuple[str, uuid.UUID]] | None = None,
+    *,
+    requester_member_id: uuid.UUID | None = None,
+    is_org_admin: bool = False,
 ) -> ChannelPostDraftListItem:
     """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
     번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를
@@ -992,7 +1008,16 @@ def _to_draft_list_item(
     story #3437(후속 묶음) — `source_titles`는 {content_item_id: (title, latest_
     version_id)} 배치조회 결과(호출부가 미리 구해 넘긴다 — 이 함수 자체는 쿼리를
     안 돈다, N+1 방지 원칙 유지). None/미스=소스 없거나 조회 결과에 없음(둘 다 null로
-    떨어진다 — "모른다≠다르다" 원칙과 달리 여긴 순수 배치 미스 표현)."""
+    떨어진다 — "모른다≠다르다" 원칙과 달리 여긴 순수 배치 미스 표현).
+
+    story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — `can_withdraw`는
+    이웃 `can_unpublish`(channel_connections.py)와 같은 정책: 권한 없으면 버튼
+    자체를 안 그린다(그렸다가 403을 내는 두 정책 공존 금지, 한 화면 한 규칙).
+    판정은 여기 한 곳에서만(FE가 origin author/role을 직접 비교하지 않는다 —
+    project_auth·can_unpublish류와 동일 "서버가 판단해 bool 하나로 낸다" 원칙).
+    `requester_member_id`/`is_org_admin` 생략(None/False 기본값)은 이 함수를
+    caller 컨텍스트 없이 쓰는 극소수 호출부 대비 — 그 경우 can_withdraw는 항상
+    False(안전 쪽으로 fail, "모른다=버튼 안 보임")."""
     (
         draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
         latest_command, latest_image,
@@ -1009,6 +1034,16 @@ def _to_draft_list_item(
     source_changed: bool | None = None
     if draft.source_site_post_version_id is not None and source_current_site_post_version_id is not None:
         source_changed = draft.source_site_post_version_id != source_current_site_post_version_id
+    # story #3614 CHANGES — can_unpublish와 동형 판정: 미폐기 ∧ 미발행(published_pub
+    # 없음, withdraw_channel_post_draft의 409 조건과 정확히 같은 축) ∧ (원저자 또는
+    # org owner/admin). requester_member_id가 None이면(caller 컨텍스트 없는 호출부)
+    # 안전 쪽으로 항상 False.
+    can_withdraw = (
+        draft.status != "withdrawn"
+        and published_pub is None
+        and requester_member_id is not None
+        and (is_org_admin or str(origin.author_member_id) == str(requester_member_id))
+    )
     command_status = latest_command.status if latest_command else None
     # story #3525 — publication_status/error_code는 의도적으로 latest_pub(현재
     # 최신 버전의 발행 시도) 축 그대로 둔다 — "지금 버전이 발행 中/실패인지"는
@@ -1023,7 +1058,7 @@ def _to_draft_list_item(
     )
     return ChannelPostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
-        connection_id=draft.connection_id, current_version=latest.version,
+        connection_id=draft.connection_id, draft_status=draft.status, can_withdraw=can_withdraw, current_version=latest.version,
         latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
         updated_at=latest.created_at.isoformat(),
         text_preview=build_text_preview(latest.text), text_length=text_char_count(latest.text),
@@ -1090,6 +1125,11 @@ async def list_channel_post_drafts_endpoint(
         "레인). scheduled_from/scheduled_to와 상호 배타. 게이트 자체가 없는(아직 상신 "
         "안 한) 순수 초안도 포함한다 — 둘 다 「날짜 미정」이라는 점에서 같은 부류다(유나 §11-1).",
     ),
+    include_withdrawn: bool = Query(
+        default=False,
+        description="story #3614(AC2) — true면 폐기된(status='withdrawn') 초안도 목록에 "
+        "포함한다(「폐기됨 보기」 필터). 기본은 제외 — 폐기는 결재함·목록 양쪽에서 사라진다.",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -1133,12 +1173,19 @@ async def list_channel_post_drafts_endpoint(
     rows = await list_channel_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset,
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
+        include_withdrawn=include_withdrawn,
     )
     source_titles = await get_source_titles_and_latest_versions(
         db, org_id=org_id,
         content_item_ids={row[0].source_content_item_id for row in rows if row[0].source_content_item_id},
     )
-    return [_to_draft_list_item(row, source_titles) for row in rows]
+    # story #3614 CHANGES — can_withdraw 계산에 필요(이웃 can_unpublish와 동형).
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    return [
+        _to_draft_list_item(row, source_titles, requester_member_id=resolved.id, is_org_admin=is_org_admin)
+        for row in rows
+    ]
 
 
 @router.get(
@@ -1163,14 +1210,19 @@ async def get_channel_post_draft_detail_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    rows = await list_channel_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1)
+    # story #3614 — 단건 조회는 폐기 여부와 무관하게 항상 보인다(목록 기본 필터가
+    # 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
+    rows = await list_channel_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True)
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
     source_titles = await get_source_titles_and_latest_versions(
         db, org_id=org_id,
         content_item_ids={rows[0][0].source_content_item_id} if rows[0][0].source_content_item_id else set(),
     )
-    item = _to_draft_list_item(rows[0], source_titles)
+    # story #3614 CHANGES — can_withdraw 계산에 필요(이웃 can_unpublish와 동형).
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    item = _to_draft_list_item(rows[0], source_titles, requester_member_id=resolved.id, is_org_admin=is_org_admin)
 
     latest_version = rows[0][1]
     rule_row = await get_org_content_rules(db, org_id=org_id)
@@ -1221,7 +1273,13 @@ async def list_content_item_variants_endpoint(
     source_titles = await get_source_titles_and_latest_versions(
         db, org_id=org_id, content_item_ids={content_item_id},
     )
-    return [_to_draft_list_item(row, source_titles) for row in rows]
+    # story #3614 CHANGES — can_withdraw 계산에 필요(이웃 can_unpublish와 동형).
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    return [
+        _to_draft_list_item(row, source_titles, requester_member_id=resolved.id, is_org_admin=is_org_admin)
+        for row in rows
+    ]
 
 
 @router.get(
@@ -1348,6 +1406,51 @@ async def submit_channel_post_draft_endpoint(
         gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
         status=gate.status,
         scheduled_at=gate.sealed_scheduled_at.isoformat() if gate.sealed_scheduled_at else None,
+    )
+
+
+class WithdrawChannelPostDraftResponse(BaseModel):
+    status: str
+    gate_id: uuid.UUID | None = None
+    gate_status: str | None = None
+
+
+@router.post("/{org_id}/channel-posts/drafts/{draft_id}/withdraw", response_model=WithdrawChannelPostDraftResponse)
+async def withdraw_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> WithdrawChannelPostDraftResponse:
+    """story #3614(AC1) — 작성자(에이전트 포함) 또는 org owner/admin이 초안을 닫는다.
+    「변경 요청 뒤 재상신」만 있던 갭(3602가 닫은 재작성 경로와 대칭인 «폐기» 축)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+
+    try:
+        draft, gate = await withdraw_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_POST_WITHDRAW_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    except ChannelPostDraftAlreadyPublishedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_POST_DRAFT_ALREADY_PUBLISHED", "message": str(exc)},
+        ) from exc
+
+    return WithdrawChannelPostDraftResponse(
+        status=draft.status, gate_id=gate.id if gate else None, gate_status=gate.status if gate else None,
     )
 
 

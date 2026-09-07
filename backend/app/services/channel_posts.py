@@ -313,6 +313,26 @@ class ChannelScopeInsufficientError(Exception):
         super().__init__(f"이 연결에 필요한 스코프가 없습니다: {required_scopes}")
 
 
+class ChannelPostDraftForbiddenError(Exception):
+    """story #3614 — 폐기는 이 초안의 origin author(versions[0].author_member_id,
+    에이전트 포함) 또는 org owner/admin만 가능하다. `_require_owner_or_admin`(발행
+    취소·회수 전용, human-only)과는 다른 인가 축 — 여기는 작성자 본인이 자기
+    초안을 닫는 것도 정당하므로 human 제한이 없다. 403."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"이 초안을 폐기할 권한이 없습니다: {draft_id}")
+
+
+class ChannelPostDraftAlreadyPublishedError(Exception):
+    """story #3614 AC1 — 이미 발행된 초안(연결된 게이트에 status='published' publication
+    존재)은 폐기 대상이 아니다(발행 취소는 별도 unpublish 경로) — 409."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"이미 발행된 초안은 폐기할 수 없습니다(발행 취소를 이용하세요): {draft_id}")
+
+
 def compute_channel_post_hash(*, text: str, link_url: str | None) -> str:
     """gate_seal.compute_seal_hash 위 얇은 payload 조립부(site_posts.compute_body_sha256과
     동형 역할) — channel은 draft 고정값(배달 경로)이라 해시에 안 섞는다(모델 docstring 참고)."""
@@ -704,6 +724,7 @@ async def list_channel_post_drafts(
     scheduled_to: datetime | None = None,
     unscheduled: bool = False,
     source_content_item_id: uuid.UUID | None = None,
+    include_withdrawn: bool = False,
 ) -> list[
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
@@ -751,6 +772,12 @@ async def list_channel_post_drafts(
     (없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처, latest_command와
     같은 "최신 버전/게이트 기준" 원칙.
 
+    story #3614(AC2) — `include_withdrawn=False`(기본)면 `status='withdrawn'`(폐기된)
+    초안을 결과에서 뺀다. **`draft_id` 단건 조회 호출자는 반드시 `include_withdrawn=
+    True`로 넘길 것** — 직접 URL로 들어온 특정 초안을 목록 필터 기본값 때문에 조용히
+    404 취급하면 안 된다(get_channel_post_draft_detail_endpoint 참고, 존재 자체는
+    org 스코프로만 판정).
+
     story #3423(캘린더 #3422 선행) — `scheduled_from`/`scheduled_to`/`unscheduled`.
     기준 컬럼은 **`gate.sealed_scheduled_at`**(승인된 예약 시각) — `publication_command.
     scheduled_at`이 아니다(그 값은 요청 시점 스냅샷, story #3414). "그 게이트"의 정의는
@@ -792,6 +819,8 @@ async def list_channel_post_drafts(
         )
         .where(ChannelPostDraft.org_id == org_id)
     )
+    if not include_withdrawn:
+        stmt = stmt.where(ChannelPostDraft.status != "withdrawn")
 
     schedule_filter_active = unscheduled or scheduled_from is not None or scheduled_to is not None
     if schedule_filter_active:
@@ -1813,3 +1842,80 @@ async def unpublish_channel_post(
     )
     await db.commit()
     return pub
+
+
+async def withdraw_channel_post_draft(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+    requester_member_id: uuid.UUID, is_org_admin: bool,
+) -> tuple[ChannelPostDraft, Gate | None]:
+    """story #3614(Phase2·BE, 페드루 PO 確定 2026-09-07) — 「변경 요청 뒤 재상신」만
+    있던 작성자의 유일한 다음 행동에 「폐기」를 더한다. 그라운딩(dev 실물,
+    2026-09-07 02:29Z): 재작성도 폐기도 없어 결재함에 `gate_status=rejected` 초안이
+    영구 잔존했다(3602는 재작성 경로를 「재료 0」으로 닫음 — 이 스토리가 폐기 축).
+
+    인가(`ChannelPostDraftForbiddenError`) — origin author(versions[0].
+    author_member_id, **에이전트도 포함**) 또는 org owner/admin. `_require_owner_or_
+    admin`(발행 취소·회수 전용, human-only)과는 다른 축이다 — "자기가 만든 걸 자기가
+    닫는" 행위는 에이전트에게도 정당하다(발행 자체가 human-only인 것과 별개 문제).
+
+    이미 발행된 초안(연결된 게이트에 status='published' publication 존재)은
+    `ChannelPostDraftAlreadyPublishedError`(409, 발행 취소는 unpublish 경로 몫).
+
+    게이트가 있고 아직 `pending`이면 `transition_gate`(SSOT, 새 상태기계 발명 0)로
+    `rejected`(사유="작성자가 폐기") 종결한다 — `held`류 다른 상태는 손 안 댐(이
+    함수의 관할은 "아직 아무도 결정 안 한 pending"뿐, void/hold는 admin 별도 축).
+    게이트가 없으면(한 번도 상신 안 한 초안) 그냥 draft만 닫는다.
+
+    멱등 — 인가를 통과한 호출자가 이미 withdrawn인 초안을 다시 호출하면 그대로
+    조용히 성공(재클릭 방어, 새 오류 코드 발명 0). 인가는 멱등 반환보다 항상
+    먼저 — 작성자/admin이 아닌 호출자는 이미 폐기된 초안에도 403을 받는다
+    (CHANGES, 카디르 QA 적발 2026-09-07 — 순서가 뒤바뀌면 인가 우회로 200이
+    샜다)."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    gate = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
+        scope_key=str(draft.connection_id),
+    )
+
+    # story #3614 CHANGES(카디르 QA 적발, 페드루 PO 채택 2026-09-07) — 인가는
+    # 멱등 조기반환보다 «앞»이어야 한다. 이 순서가 뒤바뀌면(조회→멱등 반환→인가)
+    # 작성자도 admin도 아닌 org 멤버가 이미 폐기된 초안에 호출해도 인가 체크에
+    # 닿기 전에 200을 받는다 — 문서화한 정책("작성자 또는 org owner/admin만")이
+    # 이미-폐기 경로에서 강제되지 않는 갭. 순서=조회→인가→멱등 반환→409 발행됨→
+    # 게이트 처리.
+    versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    origin_author_member_id = versions[0].author_member_id
+    if not is_org_admin and str(origin_author_member_id) != str(requester_member_id):
+        raise ChannelPostDraftForbiddenError(draft_id)
+
+    if draft.status == "withdrawn":
+        return draft, gate
+
+    if gate is not None:
+        published = (await db.execute(
+            select(ChannelPublication)
+            .where(ChannelPublication.gate_id == gate.id, ChannelPublication.status == "published")
+            .limit(1)
+        )).scalar_one_or_none()
+        if published is not None:
+            raise ChannelPostDraftAlreadyPublishedError(draft_id)
+
+        if gate.status == "pending":
+            from app.services.gate_service import transition_gate
+
+            gate = await transition_gate(
+                db, org_id, gate.id, "rejected", requester_member_id, "작성자가 폐기",
+            )
+
+    draft.status = "withdrawn"
+    await db.commit()
+    await db.refresh(draft)
+    return draft, gate

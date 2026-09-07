@@ -60,6 +60,17 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # "update_event_definition")가 먼저 있어 이 항목까지 안 내려온다(admin이 이 events보다
     # 리스트 앞쪽 — tool_group()은 첫 매치를 반환).
     ("events", ("event",)),
+    # story #3614 CHANGES(2026-09-07, 페드루 PO 判定) — sprintable_withdraw_channel_post_draft
+    # 가 키워드 미매칭으로 core에 떨어졌는데, build_toolset_catalog()의 "core" 그룹은 오직
+    # _ALWAYS_ALLOWED만 나열해(tool_group()의 fallback "core"와는 별개 축) 카탈로그 커버리지
+    # 검증(test_toolset_catalog.py::test_every_tool_covered_exactly_once)에서 누락으로
+    # 잡혔다. 최초 처방(_ALWAYS_ALLOWED 임시 등재)은 페드루 PO가 CHANGES로 반려 — 그 목록은
+    # "scope 막론 항상 허용"(is_tool_allowed 무조건 True) 의미라, 초안을 폐기하는 변이 도구를
+    # 두면 role scope 없는 키도 호출 가능해지는 권한 확대였다(커버리지 공백을 권한으로 메운
+    # 지름길). 정공법 — 콘텐츠 전용 그룹을 여기서 신설(이 스토리 범위는 이 한 도구만 —
+    # site_post/channel_connection/comment/insight 등 다른 콘텐츠 도구 키워드 확장은 story
+    # #3631(진행 중)이 이어받는다).
+    ("content", ("channel_post",)),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -419,6 +430,11 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_publish_event", "sprintable_list_event_definitions",
     # events registry 등록(story #2636) — POST/PATCH /api/v2/events/definitions(org 커스텀).
     "sprintable_register_event_definition", "sprintable_update_event_definition",
+    # channel post drafts (story #3614) — 이 도메인의 첫 MCP 도구. "channel_post"/"withdraw"
+    # 둘 다 _GROUP_KEYWORDS에 없어 tool_group()이 core로 분류한다(cross-cutting 취급) —
+    # 콘텐츠 전용 그룹이 아직 없다는 기존 갭(REST _PATH_GROUP_PREFIXES에도 channel-posts
+    # 미등록, 동일 갭)의 연장선. 새 그룹 신설은 이 스토리 범위 밖 — 후속 스토리 후보로 남긴다.
+    "sprintable_withdraw_channel_post_draft",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
@@ -435,6 +451,10 @@ _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     # default_tool_groups에 아직 이 토큰을 가진 role이 없다(선생님 승인 게이트 — 데이터
     # 마이그 없이 여기 등록만으로는 아무 role도 자동으로 이 도구를 못 쓴다, fail-closed).
     "events",
+    # story #3614 CHANGES — 콘텐츠 그룹, events와 동일 이유로 fail-closed(등록만으로는
+    # 아무 role도 자동으로 이 도구를 못 쓴다, default_tool_groups에 "content" 토큰을 가진
+    # role이 아직 없다). 다른 콘텐츠 도구 편입은 story #3631.
+    "content",
 )
 
 

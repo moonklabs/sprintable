@@ -52,6 +52,9 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # list_event_definitions. admin 뒤에 두는 이유는 순서 의존(emit_event가 substring "event"를
     # 포함 — admin보다 앞에 두면 기존 sprintable_emit_event 분류가 깨진다).
     ("events", ("event",)),
+    # story #3614 CHANGES(2026-09-07) — 백엔드 SSOT와 동기화. 콘텐츠 그룹(이 스토리는
+    # channel_post 키워드만 — 다른 콘텐츠 도구 키워드 확장은 story #3631).
+    ("content", ("channel_post",)),
 ]
 
 _CORE = "core"

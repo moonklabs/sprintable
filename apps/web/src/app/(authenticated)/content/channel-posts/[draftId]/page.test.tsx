@@ -67,7 +67,13 @@ async function flush() {
 }
 
 const DRAFT_DETAIL = {
-  draft_id: DRAFT_ID, work_item_id: 'w1', channel: 'threads', connection_id: 'c1', current_version: 1,
+  draft_id: DRAFT_ID, work_item_id: 'w1', channel: 'threads', connection_id: 'c1',
+  // story #3614(AC2) — draft|withdrawn. 기본값 'draft'(대부분 테스트가 이 스토리와 무관).
+  draft_status: 'draft' as string,
+  // story #3614 CHANGES(유나 재판정) — 서버 계산값. 기본 true(대부분 테스트가 폐기와
+  // 무관하므로 버튼이 항상 뜨는 쪽이 자연스러운 기본, can_unpublish 기본값 관례와 동형).
+  can_withdraw: true as boolean,
+  current_version: 1,
   gate_status: null as string | null, reapproval_required: null as boolean | null,
   sealed_content_sha256: null as string | null, body_sha256: 'h1',
   publication_status: null as 'container_created' | 'published' | 'failed' | null,
@@ -115,6 +121,8 @@ function stubFetch(opts: {
   onPublish?: () => { status: number; body: unknown };
   onCancelScheduled?: () => { status: number; body: unknown };
   onUnpublish?: () => { status: number; body: unknown };
+  // story #3614 — 폐기(withdraw) 응답 override. 기본=성공(draft.status=withdrawn).
+  onWithdraw?: () => { status: number; body: unknown };
   // story #3402·PR#3764/#3767(페드루 PO 정정 2026-09-04 02:00Z) — GATE_ALREADY_HELD의
   // best-effort 상대 초안 조회. undefined=엔드포인트 자체가 404(구 계약, #3767 착지 전
   // 상황 재현) · { text_preview: null }=필드는 있는데 값이 없음 · 값 있으면 그 미리보기.
@@ -429,6 +437,11 @@ function stubFetch(opts: {
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/unpublish` && init?.method === 'POST') {
         const result = opts.onUnpublish?.() ?? { status: 200, body: { publication_id: 'pub-1', status: 'unpublished', external_id: 'media-1', unpublished_at: '2026-09-04T00:00:00Z' } };
+        const ok = result.status < 400;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/withdraw` && init?.method === 'POST') {
+        const result = opts.onWithdraw?.() ?? { status: 200, body: { status: 'withdrawn', gate_id: null, gate_status: null } };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
@@ -1218,6 +1231,135 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // "요청" 갈래 — 페이지 코드가 role==='owner'만 owner문구, 그 외 전부 요청문구).
     expect(container.querySelector('[data-testid="channel-post-unpublish-disabled-reason"]')?.textContent)
       .toBe(koMessages.content.channelPostsUnpublishScopeInsufficientNonOwner);
+  });
+
+  // story #3614(Phase2·BE+FE, 페드루 PO 確定 2026-09-07) — 초안 폐기(withdraw).
+  // CHANGES(유나 재판정, 페드루 PO 채택) — 이웃 can_unpublish와 동형 정책: FE는
+  // BE가 계산한 can_withdraw 하나만 보고 버튼을 그린다(org_id/author 비교를
+  // FE가 직접 하지 않는다).
+  it('⭐폐기 버튼 — can_withdraw=true면 보인다', async () => {
+    stubFetch({ draftDetail: { can_withdraw: true } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).not.toBeNull();
+  });
+
+  it('⭐폐기 버튼 — can_withdraw=false면 버튼이 안 보인다(이미 withdrawn·발행됨·권한 없음 등 서버 판정 무엇이든)', async () => {
+    stubFetch({ draftDetail: { can_withdraw: false } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).toBeNull();
+  });
+
+  it('⭐폐기 버튼 — can_withdraw 필드 자체가 없으면(구버전 BE 응답 등) 안전 쪽으로 안 보인다', async () => {
+    // draftDetail override가 얕은 병합이라(DRAFT_DETAIL 기본값 can_withdraw=true가
+    // 살아남음) 명시적으로 undefined를 실어 필드 부재를 재현한다.
+    stubFetch({ draftDetail: { can_withdraw: undefined as unknown as boolean } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).toBeNull();
+  });
+
+  it('⭐폐기 — 확認 다이얼로그를 거쳐 성공하면 완료 배너가 뜨고 버튼이 사라진다', async () => {
+    let withdrawCalled = false;
+    stubFetch({
+      draftDetail: { draft_status: 'draft', published_at: null },
+      onWithdraw: () => { withdrawCalled = true; return { status: 200, body: { status: 'withdrawn', gate_id: null, gate_status: null } }; },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-withdraw-button"]') as HTMLButtonElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    const what = document.body.querySelector('[data-testid="channel-post-withdraw-confirm-what"]');
+    const reversible = document.body.querySelector('[data-testid="channel-post-withdraw-confirm-reversible"]');
+    expect(what?.textContent).toBe(koMessages.content.channelPostsWithdrawConfirmWhat);
+    expect(reversible?.textContent).toBe(koMessages.content.channelPostsWithdrawConfirmReversible);
+    expect(what).not.toBe(reversible);
+
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsWithdrawConfirmAction);
+    expect(confirmButton).not.toBeUndefined();
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(withdrawCalled).toBe(true);
+    expect(container.textContent).toContain(koMessages.content.channelPostsWithdrawSuccess);
+    expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).toBeNull();
+  });
+
+  // story #3608(유나 §22-18 ④-2) 규격 — pending 中 "..." 금지.
+  it('⭐폐기 pending 中 — 버튼 보이는 글자가 "..." 없이 "폐기 중…"으로 바뀐다', async () => {
+    let resolveWithdraw!: () => void;
+    const pending = new Promise<void>((resolve) => { resolveWithdraw = resolve; });
+    stubFetch({
+      draftDetail: { draft_status: 'draft', published_at: null },
+      onWithdraw: () => { void pending; return { status: 200, body: { status: 'withdrawn', gate_id: null, gate_status: null } }; },
+    });
+    // stubFetch의 onWithdraw는 동기 반환이라 pending 상태를 직접 잡을 수 없다 — fetch
+    // 자체를 감싸 이 한 호출만 지연시킨다(unpublish류 다른 테스트들과 달리 이 파일
+    // stubFetch가 지연 mock을 직접 지원하지 않아 여기서만 얇게 우회).
+    const globalFetch = globalThis.fetch;
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      if (url.endsWith('/withdraw') && (args[1] as RequestInit | undefined)?.method === 'POST') {
+        await pending;
+      }
+      return globalFetch(...args);
+    }) as typeof fetch;
+    try {
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const trigger = container.querySelector('[data-testid="channel-post-withdraw-button"]') as HTMLButtonElement;
+      await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsWithdrawConfirmAction);
+      await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      const pendingBtn = container.querySelector('[data-testid="channel-post-withdraw-button"]') as HTMLButtonElement;
+      expect(pendingBtn.textContent).not.toContain('...');
+      expect(pendingBtn.textContent).toBe(koMessages.content.channelPostsWithdrawing);
+      resolveWithdraw();
+      await flush();
+    } finally {
+      globalThis.fetch = globalFetch;
+    }
+  });
+
+  it('⭐폐기 실패(403 CHANNEL_POST_WITHDRAW_FORBIDDEN) — 권한 없음 문구가 보인다', async () => {
+    stubFetch({
+      draftDetail: { draft_status: 'draft', published_at: null },
+      onWithdraw: () => ({ status: 403, body: { detail: { code: 'CHANNEL_POST_WITHDRAW_FORBIDDEN', message: '권한 없음' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const trigger = container.querySelector('[data-testid="channel-post-withdraw-button"]') as HTMLButtonElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsWithdrawConfirmAction);
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(container.textContent).toContain(koMessages.content.errorChannelWithdrawForbidden);
+    // 버튼은 그대로 남아 있다(폐기가 실제로 안 됐으므로).
+    expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).not.toBeNull();
+  });
+
+  it('⭐폐기 실패(409 CHANNEL_POST_DRAFT_ALREADY_PUBLISHED) — 이미 발행됨 문구가 보인다', async () => {
+    stubFetch({
+      draftDetail: { draft_status: 'draft', published_at: null },
+      onWithdraw: () => ({ status: 409, body: { detail: { code: 'CHANNEL_POST_DRAFT_ALREADY_PUBLISHED', message: '이미 발행됨' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const trigger = container.querySelector('[data-testid="channel-post-withdraw-button"]') as HTMLButtonElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const confirmButton = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.content.channelPostsWithdrawConfirmAction);
+    await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(container.textContent).toContain(koMessages.content.errorChannelDraftAlreadyPublished);
   });
 
   // story #3426 — 예약 취소 버튼.

@@ -57,6 +57,12 @@ interface ChannelPostDraftDetail {
   work_item_id: string;
   channel: string;
   connection_id: string;
+  // story #3614(AC2) — draft|withdrawn. 「폐기됨」 배지 판정.
+  draft_status: string;
+  // story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 can_unpublish와
+  // 동형: 서버가 (원저자 또는 org owner/admin) ∧ 미발행 ∧ 미폐기를 전부 계산해 낸다.
+  // FE는 이 값만 보고 버튼을 그린다 — org_id/author 비교를 FE가 직접 하지 않는다.
+  can_withdraw?: boolean;
   current_version: number;
   // story #3402 ④ — 단건 GET(story #3403)이 목록 항목(ChannelPostDraftListItem, #3394)과
   // 같은 shape를 준다 — 승인 카드가 필요로 하는 게이트 신호도 이미 여기 실려 있다.
@@ -776,6 +782,12 @@ export default function ChannelPostEditPage() {
   // story #3454(retryResult와 같은 발견 — 티켓 범위 밖이지만 같은 파일·같은 버그 종류라
   // 함께 고친다, PO 보고에 별도 표기) — 이 state도 raw 자체가 없었다.
   const [unpublishResult, setUnpublishResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
+
+  // story #3614(Phase2·BE+FE, 페드루 PO 確定 2026-09-07) — 초안 폐기(withdraw).
+  // unpublish와 동형 3종 state(confirm/pending/result) — 새 패턴 발명 0.
+  const [withdrawConfirmOpen, setWithdrawConfirmOpen] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawResult, setWithdrawResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
 
   // story f061c1a3(#3422 AC3 잔여) — 실패 배지 「재시도」 클릭 배선. dead_letter·
   // needs_check 둘 다 같은 다이얼로그를 쓴다 — needs_check만 추가로 「확認했습니다」
@@ -1614,6 +1626,42 @@ export default function ChannelPostEditPage() {
     }
   };
 
+  // story #3614(AC1·AC3, 페드루 PO 確定 2026-09-07) — 「변경 요청 뒤 재상신」만 있던
+  // 작성자의 유일한 다음 행동에 「폐기」를 더한다. handleUnpublish와 동형 패턴(로컬
+  // 상태를 서버 응답 모양으로 직접 맞춘다 — 재조회 없이 즉시 반영, §3-2 원칙).
+  const handleWithdraw = async () => {
+    if (!orgId) return;
+    setWithdrawConfirmOpen(false);
+    setWithdrawing(true);
+    setWithdrawResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/withdraw`, { method: 'POST' });
+      if (res.ok) {
+        const body = (await res.json().catch(() => null)) as { data?: { status?: string; gate_status?: string | null } } | null;
+        setWithdrawResult({ type: 'success' });
+        setDraft((prev) => prev && {
+          ...prev, draft_status: body?.data?.status ?? 'withdrawn',
+          gate_status: body?.data?.gate_status ?? prev.gate_status,
+          // story #3614 CHANGES — can_withdraw도 서버 응답 모양으로 맞춘다(성공
+          // 직후 재조회 없이 버튼이 사라지려면 이 필드가 로컬에서도 꺼져야 한다).
+          can_withdraw: false,
+        });
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setWithdrawResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsWithdrawFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setWithdrawResult({ type: 'error', text: t('channelPostsWithdrawFailed') });
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
   // story f061c1a3(#3422 AC3 잔여) — dead_letter 수동 재시도·needs_check 2단계 확認 뒤
   // 재시도. 성공하면 로컬로 짐작해 만들지 않고 단건 GET을 다시 불러 서버가 낸
   // command_status(보통 pending)로 배지를 갱신한다(§3-2 "지어내지 않는다"와 같은 축 —
@@ -1721,6 +1769,11 @@ export default function ChannelPostEditPage() {
   // 3653a18c §3) + role 게이팅. unpublishGate===undefined(연결 조회 전/실패)면
   // "모른다"로 두고 버튼을 비활성화한다(§3-2와 같은 축 — 모르는 것을 근거로 허용하지
   // 않는다, fail-closed).
+  // story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 can_unpublish와
+  // 같은 정책: 권한 없으면 버튼 자체를 안 그린다(그렸다가 403을 내는 이중 정책 금지).
+  // 서버가 (원저자 또는 org owner/admin) ∧ 미발행 ∧ 미폐기를 전부 계산한
+  // can_withdraw 하나만 본다 — FE가 org_id/author를 직접 비교하지 않는다.
+  const showWithdraw = draft.can_withdraw === true;
   const showUnpublish = draft.publication_status === 'published';
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true && unpublishGate?.connectionStatus === 'active';
 
@@ -2113,6 +2166,20 @@ export default function ChannelPostEditPage() {
               {t('channelPostsUnpublishCta')}
             </Button>
           ) : null}
+          {/* story #3614(AC1)+CHANGES(유나 재판정, 페드루 PO 채택) — 「변경 요청 뒤
+              재상신」만 있던 작성자의 유일한 다음 행동에 「폐기」를 더한다. BE
+              can_withdraw(원저자 또는 org owner/admin ∧ 미발행 ∧ 미폐기) 하나만
+              본다 — FE는 org_id/author 비교를 직접 하지 않는다(#3966 프레임
+              규칙). */}
+          {showWithdraw ? (
+            <Button
+              variant="outline" disabled={withdrawing}
+              onClick={() => setWithdrawConfirmOpen(true)} data-testid="channel-post-withdraw-button"
+            >
+              {/* story #3608(유나 §22-18 ④-2) 규격 — 진행 중 낱말화, "..." 금지. */}
+              {withdrawing ? t('channelPostsWithdrawing') : t('channelPostsWithdrawCta')}
+            </Button>
+          ) : null}
         </div>
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
@@ -2276,6 +2343,33 @@ export default function ChannelPostEditPage() {
               {unpublishResult.type === 'success' ? t('channelPostsUnpublishSuccess') : unpublishResult.text}
             </AlertDescription>
             {unpublishResult.type === 'error' ? <RawDetailsToggle raw={unpublishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+          </Alert>
+        ) : null}
+
+        <ConfirmDialog
+          open={withdrawConfirmOpen}
+          onOpenChange={setWithdrawConfirmOpen}
+          title={t('channelPostsWithdrawConfirmTitle')}
+          description={(
+            <>
+              <span className="block" data-testid="channel-post-withdraw-confirm-what">{t('channelPostsWithdrawConfirmWhat')}</span>
+              <span className="block" data-testid="channel-post-withdraw-confirm-reversible">{t('channelPostsWithdrawConfirmReversible')}</span>
+            </>
+          )}
+          cancelLabel={t('channelPostsWithdrawConfirmCancel')}
+          confirmLabel={t('channelPostsWithdrawConfirmAction')}
+          onConfirm={() => void handleWithdraw()}
+        />
+        {withdrawResult ? (
+          <Alert
+            variant={withdrawResult.type === 'error' ? 'destructive' : 'default'}
+            role={withdrawResult.type === 'error' ? 'alert' : 'status'}
+            data-testid="channel-post-withdraw-result"
+          >
+            <AlertDescription>
+              {withdrawResult.type === 'success' ? t('channelPostsWithdrawSuccess') : withdrawResult.text}
+            </AlertDescription>
+            {withdrawResult.type === 'error' ? <RawDetailsToggle raw={withdrawResult.raw} label={t('errorRawDetailsToggle')} /> : null}
           </Alert>
         ) : null}
       </div>

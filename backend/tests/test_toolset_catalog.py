@@ -30,10 +30,11 @@ def test_catalog_structure_and_contract_fields():
     cat = build_toolset_catalog()
     assert set(cat.keys()) == {"groups"}
     groups = cat["groups"]
-    # core + 17 비파괴(story b4027b2e: canvas 그룹 추가·story 205e6831: standup이 core로 전량
+    # core + 18 비파괴(story b4027b2e: canvas 그룹 추가·story 205e6831: standup이 core로 전량
     # 흡수돼 카탈로그 그룹 목록에서 제거 — _GROUP_KEYWORDS/ALL_GROUPS엔 여전히 존재, 여긴 picker
-    # 표시 목록만·story #2634: events 그룹 추가) + admin = 19
-    assert len(groups) == 19
+    # 표시 목록만·story #2634: events 그룹 추가·story #3614 CHANGES: content 그룹 신설,
+    # 19→20) + admin = 20
+    assert len(groups) == 20
     for g in groups:
         assert set(g.keys()) == _CONTRACT_FIELDS, f"{g['key']} 필드 계약 불일치"
         assert isinstance(g["key"], str) and g["key"]
@@ -41,8 +42,8 @@ def test_catalog_structure_and_contract_fields():
         assert isinstance(g["is_core"], bool) and isinstance(g["is_destructive"], bool)
         assert isinstance(g["order"], int)
         assert g["tools"], f"{g['key']} 빈 그룹 — 모든 그룹은 멤버 보유"
-    # order = 배열 순서와 일치(0..18 단조)
-    assert [g["order"] for g in groups] == list(range(19))
+    # order = 배열 순서와 일치(0..19 단조)
+    assert [g["order"] for g in groups] == list(range(20))
 
 
 def test_core_first_admin_last_flags():
