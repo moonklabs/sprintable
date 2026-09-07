@@ -2,6 +2,8 @@
 API. `app/routers/site_posts.py`(story #3365) 형태를 그대로 미러 — 새 패턴 발명 0."""
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.channel_post_image import ChannelPostImage
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.pm import Story
 from app.services.content_rules import get_org_content_rules, lint_content
@@ -84,6 +87,7 @@ from app.services.channel_post_images import (
     create_channel_post_image_upload_url,
     delete_channel_post_image,
     get_channel_post_image_for_version,
+    import_channel_post_image,
     list_channel_post_images_for_version,
     public_url_for_object_path,
     reorder_channel_post_images,
@@ -388,6 +392,14 @@ class ChannelPostImageUploadUrlResponse(BaseModel):
 
 class ConfirmChannelPostImageUploadRequest(BaseModel):
     object_path: str
+
+
+class ImportChannelPostImageRequest(BaseModel):
+    """story #3666(Phase2·마케팅운영, 페드루 PO 確定 2026-09-07) — MCP/플러그인 에이전트
+    전용 원콜 입구. `visual_artifacts.py::ImportImageArtifactRequest`(story b6b9c52d)와
+    같은 모양(title 없음 — 채널 포스트 이미지엔 그 개념이 없다)."""
+    image_base64: str
+    content_type: str
 
 
 class CreateChannelPostVideoUploadUrlRequest(BaseModel):
@@ -753,31 +765,16 @@ async def post_channel_post_video_confirm(
     return _video_response(version, video_row)
 
 
-@router.post(
-    "/{org_id}/channel-posts/drafts/{draft_id}/assets/confirm",
-    response_model=ChannelPostImageResponse, status_code=201,
-)
-async def post_channel_post_image_confirm(
-    org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostImageUploadRequest,
-    db: AsyncSession = Depends(get_db),
-    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
-    auth: AuthContext = Depends(get_current_user),
-) -> ChannelPostImageResponse:
-    """AC1/AC3 — 업로드 확인+자동 변환(필요 시)+계보 기록. 이 호출 자체가 새
-    `ChannelPostVersion`을 만든다(text/link_url은 직전 버전에서 캐리포워드, image_sha256만
-    갱신) — 텍스트 편집과 동형 축(재승인 판정은 create_channel_post_draft_version의
-    기존 재봉인 훅이 그대로 처리, 신규 메커니즘 0)."""
-    if org_id != verified_org_id:
-        raise HTTPException(status_code=403, detail="org_id mismatch")
-
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
-
+async def _confirm_image_upload_or_raise(
+    coro,
+) -> tuple[ChannelPostVersion, ChannelPostImage]:
+    """story #3666 리팩터 — `post_channel_post_image_confirm`(기존 3단계 업로드-URL 플로우의
+    마지막 걸음)과 `post_channel_post_image_import`(#3666 신규, 에이전트 원콜 base64 입구)
+    둘 다 `confirm_channel_post_image_upload`가 던지는 같은 예외 집합을 같은 HTTP 코드/
+    바디로 매핑해야 한다 — 그 매핑을 한 곳에만 두고(들쭉날쭉 금지 원칙) 호출부는 아직
+    await 안 된 코루틴만 넘긴다."""
     try:
-        version, image_row = await confirm_channel_post_image_upload(
-            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
-            member_id=member_id, member_kind=actor_type,
-        )
+        return await coro
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
     except ChannelImageStorageNotConfiguredError as exc:
@@ -855,6 +852,78 @@ async def post_channel_post_image_confirm(
         ) from exc
     except ChannelImageUploadFailedError as exc:
         raise HTTPException(status_code=503, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/confirm",
+    response_model=ChannelPostImageResponse, status_code=201,
+)
+async def post_channel_post_image_confirm(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostImageUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """AC1/AC3 — 업로드 확인+자동 변환(필요 시)+계보 기록. 이 호출 자체가 새
+    `ChannelPostVersion`을 만든다(text/link_url은 직전 버전에서 캐리포워드, image_sha256만
+    갱신) — 텍스트 편집과 동형 축(재승인 판정은 create_channel_post_draft_version의
+    기존 재봉인 훅이 그대로 처리, 신규 메커니즘 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    member_id = uuid.UUID(auth.user_id)
+    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    version, image_row = await _confirm_image_upload_or_raise(
+        confirm_channel_post_image_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+            member_id=member_id, member_kind=actor_type,
+        )
+    )
+    return _image_response(version, image_row)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/import-image",
+    response_model=ChannelPostImageResponse, status_code=201,
+)
+async def post_channel_post_image_import(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ImportChannelPostImageRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """story #3666(Phase2·마케팅운영, 페드루 PO 確定 2026-09-07) — MCP/플러그인 에이전트
+    전용 원콜 입구. 미르코 배포 52 표본 준비 중 실측 갭: `create_channel_post_draft`가
+    image(산출물 첨부)를 안 받아, 기존 3단계(upload-url 발급→서명 PUT→confirm) 플로우를
+    Bash/HTTP 클라이언트가 없는 에이전트가 스스로 못 탔다. `visual_artifacts.py::
+    import_image_artifact`(story b6b9c52d)와 동일 정신(base64 원콜)이지만 다른 테이블
+    (VisualArtifact가 아니라 ChannelPostImage) — 새 연결 개념(두 시스템 사이 참조)을
+    만드는 대신 서버가 직접 GCS에 쓴 뒤 기존 confirm_channel_post_image_upload를 그대로
+    재사용한다(검증/변환/해시/봉인 로직 사본 0, `_confirm_image_upload_or_raise`로 에러
+    매핑도 confirm과 공유)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    if not body.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400, detail={"code": "VALIDATION_ERROR", "message": "content_type must be an image/* type"},
+        )
+    try:
+        image_bytes = base64.b64decode(body.image_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": "VALIDATION_ERROR", "message": "image_base64 is not valid base64"},
+        ) from exc
+
+    member_id = uuid.UUID(auth.user_id)
+    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+
+    version, image_row = await _confirm_image_upload_or_raise(
+        import_channel_post_image(
+            db, org_id=org_id, draft_id=draft_id, image_bytes=image_bytes, content_type=body.content_type,
+            member_id=member_id, member_kind=actor_type,
+        )
+    )
     return _image_response(version, image_row)
 
 

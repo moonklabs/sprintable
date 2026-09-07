@@ -274,6 +274,33 @@ async def create_channel_post_image_upload_url(
     }
 
 
+async def import_channel_post_image(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, image_bytes: bytes, content_type: str,
+    member_id: uuid.UUID, member_kind: str,
+) -> tuple[ChannelPostVersion, ChannelPostImage]:
+    """story #3666(Phase2·마케팅운영, 페드루 PO 確定 2026-09-07) — MCP/플러그인 에이전트
+    전용 원콜 입구(base64 디코드된 bytes in → confirm까지 한 호출). `visual_artifacts.py
+    ::import_image_artifact`와 동일 정신(Bash/HTTP 클라이언트가 없는 에이전트는 기존
+    3단계 upload-url 발급→서명 PUT→confirm 플로우를 스스로 못 탄다)이지만 다른 테이블
+    (VisualArtifact가 아니라 ChannelPostImage) — 두 시스템 사이에 새 연결 개념을 만드는
+    대신, 서버가 그냥 자기 손으로(신뢰된 서버측 자격증명, signed-URL 우회) `_object_path`
+    스코프에 바로 쓰고 confirm_channel_post_image_upload를 그대로 재사용한다(검증/변환/
+    해시/봉인 로직 사본 0 — content_type은 오브젝트 키 확장자에만 쓰이고, 실제 포맷/
+    규격 검증은 confirm 내부의 PIL 디코드가 그대로 한다, 이 함수는 새 검증을 안 얹는다)."""
+    bucket = _require_bucket()
+    ext = _MIME_TO_EXT.get(content_type, "bin")
+    object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
+    provider = get_storage_provider()
+    ok = await provider.put_object(bucket, object_path, image_bytes, content_type=content_type)
+    if not ok:
+        raise ChannelImageUploadFailedError(object_path=object_path)
+
+    return await confirm_channel_post_image_upload(
+        db, org_id=org_id, draft_id=draft_id, object_path=object_path,
+        member_id=member_id, member_kind=member_kind,
+    )
+
+
 def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int | None, int | None, str | None]:
     """규격 위반 원본을 자동 변환한다. 반환: (derived_bytes, derived_content_type,
     derived_width, derived_height, out_format) — 변환 불요면 전부 None.
