@@ -190,17 +190,55 @@ def normalized_slow_threshold_sec(ratios: list[float], *, base_seconds: float = 
     return statistics.median(ratios) * base_seconds
 
 
+# story #3636(CI·소형, 페드루 PO 確定 2026-09-07) — 위 threshold는 **run 전체에 대한
+# 하나의 flat 값**이라, 그 파일 자신의 등재 weight와 무관하게 모든 weighted 파일에
+# 똑같이 적용된다. test_2813_gate_github_check_realdb.py(weight 45.0s, 실제로는 25개
+# realdb 테스트가 매번 전체 스키마 create_all을 다시 태우는 무거운 파일)가 2026-09-07
+# 하루에 두 번 거짓 빨강(72s>66.0s·131s>102.9s)을 냈다 — 그 파일 자신의 elapsed/weight
+# 배율은 1.6·2.91로 평범한 편차인데, weight가 60s 근방/이상인 파일은 애초에 그
+# 배율만으로도 flat 임계값을 밥먹듯 넘는 구조다(weight 자체가 threshold의 분모에
+# 전혀 반영 안 됨). 이 축은 그 구조적 갭을 메운다: 파일 자신의 weight × 배수(3.0) 밑에
+# 있으면 flat 임계값을 넘었어도 FAIL이 아니라 WARN으로 낮춘다(무거운 파일에 «자기
+# 무게만큼의» 여유를 준다 — flat 임계값 자체를 못 믿는 게 아니라 무거운 파일에게만
+# 추가 여유축을 얹는 것, AC6이 거부한 "배율 자체의 상한"과는 다른 축).
+#
+# ⚠️ 이 가드가 이제 놓치는 것(선언, story #3636 AC2): 등재 weight W인 파일이 flat
+# 임계값은 넘되 W × 3.0 밑으로만 느려지면(예: test_2813 weight 45 → elapsed ≤135) FAIL이
+# 아니라 WARN이다 — «무거운 파일이 자기 weight의 3배 이내로 느려지는」 회귀는 이제
+# 잡지 못한다(WARN으로만 보임). weight가 가벼운 파일(예: 5.0)의 20배 회귀(test_
+# genuinely_heavy_file_still_caught_when_runner_is_normal, 100.0s)는 5.0×3.0=15.0을
+# 훨씬 넘어 여전히 FAIL — 이 축은 무거운 파일에만 좁게 적용된다.
+HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER = 3.0
+
+
 def slow_files_normalized(
     elapsed_by_file: dict[str, float], weights: dict[str, float], *, base_seconds: float = 60.0,
 ) -> tuple[list[str], float, int]:
     """story #3396 — weighted 파일만 대상으로 러너 정규화 60초 가드를 판정한다.
     반환: (초과한 파일 목록·정렬, 실제로 쓴 판정선(초), 배율 표본 크기). unweighted
     파일은 대상에서 아예 빠진다(#3392가 별도로 담당 — 두 가드가 같은 파일을 다른
-    기준으로 두 번 재는 혼선을 막는다)."""
+    기준으로 두 번 재는 혼선을 막는다).
+
+    story #3636 — FAIL 판정은 flat threshold 초과 **AND** 그 파일 자신의 weight ×
+    HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER도 초과할 때만(무거운 파일 전용 여유축,
+    위 상수 docstring 참고)."""
     ratios = weighted_ratios(elapsed_by_file, weights)
     threshold = normalized_slow_threshold_sec(ratios, base_seconds=base_seconds)
-    slow = [f for f, elapsed in elapsed_by_file.items() if f in weights and elapsed > threshold]
+    slow = [
+        f for f, elapsed in elapsed_by_file.items()
+        if f in weights and elapsed > threshold
+        and elapsed > weights[f] * HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER
+    ]
     return sorted(slow), threshold, len(ratios)
+
+
+def warned_only_files_normalized(
+    elapsed_by_file: dict[str, float], weights: dict[str, float], threshold: float, slow: list[str],
+) -> list[str]:
+    """story #3636 — flat threshold는 넘었지만 자기 weight×3.0 여유축에 막혀 FAIL에서
+    빠진 파일(가시성용 — 실패 0, story #3558의 ratio_outliers와 동형으로 경고만)."""
+    over_threshold = {f for f, elapsed in elapsed_by_file.items() if f in weights and elapsed > threshold}
+    return sorted(over_threshold - set(slow))
 
 
 def partition(files: list[str], weights: dict[str, float], shard_count: int) -> tuple[list[list[str]], list[float]]:
@@ -320,6 +358,15 @@ def _check_elapsed_mode(elapsed_path: Path) -> int:
     elapsed_by_file = _parse_elapsed_file(elapsed_path)
     weights = load_weights()
     slow, threshold, sample_size = slow_files_normalized(elapsed_by_file, weights)
+
+    # story #3636 — weight×3.0 여유축에 막혀 FAIL에서 빠진 파일도 조용히 넘기지 않고
+    # WARN으로 남긴다(가시성 — story #3558 ratio_outliers와 동형 관례).
+    for f in warned_only_files_normalized(elapsed_by_file, weights, threshold, slow):
+        print(
+            f"::warning::러너 정규화 가드 — {f} 임계값({threshold:.1f}s) 초과했지만 자기 weight"
+            f"({weights[f]:.1f}s)×{HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER:.1f} 이내라 WARN만(story #3636): "
+            f"{elapsed_by_file[f]:.0f}s"
+        )
 
     if sample_size < MIN_RATIO_SAMPLE:
         print(
