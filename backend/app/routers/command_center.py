@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import exists, func, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,7 @@ from app.models.agent_run import AgentRun
 from app.models.dependency import ItemDependency
 from app.models.hypothesis import Hypothesis
 from app.models.member import AgentProjectProfile, Member
+from app.models.project import OrgMember
 from app.models.pm import Goal, Story, StoryActivity, Task
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
 from app.services.agent_auth_failure import AUTH_FAILURE_THRESHOLD, AUTH_FAILURE_WINDOW_MINUTES
@@ -712,17 +713,33 @@ async def overview(
     ][:10]
 
     # CC-BE.2 기여(에이전트 vs 사람·aggregate only·개인 blame/랭킹 0): done 스토리 assignee type 집계.
+    #
+    # story #3629(3627 클래스, 페드루 PO 確定 2026-09-07) — members.id=org_members.id는
+    # migration 0075 백필 시점(당시 존재하던 org_member) 한정 불변식이다. SSOT 전환
+    # 이후 새로 생긴 org_member는 members 앵커 행이 안 만들어져(member_resolver.py의
+    # canonicalize_member_id가 쓰는 org_member.id 그대로가 canonical, members 행을
+    # 새로 안 만든다) Member.id==Story.assignee_id가 매치 안 되고 "unassigned"로
+    # 잘못 떨어졌다. OrgMember도 같이 LEFT JOIN해 매치되면 "human"으로 보강한다
+    # (org_members 테이블 자체가 휴먼 전용이라 추가 type 조건 불요 — is_human_member_
+    # condition과 같은 전제, 여기는 집계 CASE라 그 헬퍼를 그대로 못 쓰고 같은 규칙만
+    # 재현).
+    effective_type = case(
+        (Member.type.is_not(None), Member.type),
+        (OrgMember.id.is_not(None), "human"),
+        else_=None,
+    )
     contrib_rows = (
         await session.execute(
-            select(Member.type, func.count(Story.id))
+            select(effective_type, func.count(Story.id))
             .select_from(Story)
             # outer join + ON 에 org_id — 타 org member 매칭 차단(cross-org → unassigned 으로 떨어짐).
             .join(Member, (Member.id == Story.assignee_id) & (Member.org_id == org_id), isouter=True)
+            .join(OrgMember, (OrgMember.id == Story.assignee_id) & (OrgMember.org_id == org_id), isouter=True)
             .where(
                 Story.org_id == org_id, Story.status == "done",
                 Story.deleted_at.is_(None), Story.is_excluded.is_(False),
             )
-            .group_by(Member.type)
+            .group_by(effective_type)
         )
     ).all()
     contribution = {"agent": 0, "human": 0, "unassigned": 0}

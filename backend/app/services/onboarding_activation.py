@@ -19,7 +19,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -27,33 +27,12 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.user import User
+# story #3629 — org_member SSOT 인정 판정자가 conversations.py·channel_router.py 등
+# 여러 모듈에서 재사용돼 member_resolver.py(그 규칙의 원 자리)로 옮겼다(_is_human_member
+# 사설 사본 폐기, 새 판정자 발명 0 원칙을 이 모듈 간 이관에도 그대로 적용).
+from app.services.member_resolver import is_human_member_condition as _is_human_member
 
 logger = logging.getLogger(__name__)
-
-
-def _is_human_member(member_id_col, *, user_id: uuid.UUID | None = None):
-    """story #3627(prod 결함, 페드루 PO 確定 2026-09-07) — 이 member_id가 「휴먼」인지
-    판정하는 유일한 자리(member_resolver.py 첫 줄과 같은 규칙, 새 판정자 발명 0).
-
-    E-MEMBER-SSOT Phase 0부터 JWT 휴먼의 참여자/발신자 id는 `org_members.id`다
-    (org_members 테이블 자체가 휴먼 전용이라 추가 type 조건 불요) — 그런데
-    이 모듈의 왕복·딥링크 판정은 여전히 `team_members(type='human')`로만 이었다.
-    team_members에 그 org의 휴먼 행이 하나도 없으면(SSOT 전환 이후 만들어진
-    org 다수) `human_before`·`requester_is_participant`가 영원히 false로
-    떨어져 "대화 中인데도 미완료·딥링크 null"이 났다(dev PO Test Org 실측).
-
-    둘 다 인정(OR) — legacy team_member(type='human') 행이 남아있는 org도
-    회귀 없이 그대로 통과해야 한다(#3607 기존 테스트가 그 표본).
-    `user_id`를 주면 그 유저 소유 여부까지, 안 주면 "휴먼이기만 하면" 통과."""
-    org_member_conditions = [OrgMember.id == member_id_col, OrgMember.deleted_at.is_(None)]
-    team_member_conditions = [TeamMember.id == member_id_col, TeamMember.type == "human"]
-    if user_id is not None:
-        org_member_conditions.append(OrgMember.user_id == user_id)
-        team_member_conditions.append(TeamMember.user_id == user_id)
-    return or_(
-        select(OrgMember.id).where(*org_member_conditions).exists(),
-        select(TeamMember.id).where(*team_member_conditions).exists(),
-    )
 
 
 async def get_owner_org_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | None:

@@ -37,7 +37,9 @@ from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
     ResolvedMember,
+    filter_human_member_ids,
     filter_org_member_ids,
+    is_human_member_condition,
     lookup_members_by_ids,
     resolve_member,
     resolve_member_identity,
@@ -961,12 +963,16 @@ async def _dispatch_human_intervention_event(
     if not conversation.project_id:
         return []
 
-    participant_rows = (await db.execute(
-        select(ConversationParticipant.member_id, TeamMember.type)
-        .join(TeamMember, TeamMember.id == ConversationParticipant.member_id)
-        .where(ConversationParticipant.conversation_id == conversation.id)
-    )).all()
-    human_targets = {pid for pid, m_type in participant_rows if m_type == "human"}
+    # story #3629(3627 클래스, 페드루 PO 確定 2026-09-07) — team_members INNER JOIN
+    # 단독으론 org_member-only 휴먼(SSOT 전환 이후 org 다수)이 조용히 human_targets에서
+    # 빠졌다(chain-expired 개입 알림이 그 휴먼에게 영원히 안 감). is_human_member_condition
+    # (member_resolver.py, #3627과 같은 판정자)으로 통일.
+    human_targets = set((await db.execute(
+        select(ConversationParticipant.member_id).where(
+            ConversationParticipant.conversation_id == conversation.id,
+            is_human_member_condition(ConversationParticipant.member_id),
+        )
+    )).scalars().all())
     if not human_targets:
         return []
 
@@ -2916,12 +2922,12 @@ async def send_message(
                 # P0 message-loss savepoint 격리 — dispatch_notification 이 실제 write(outbox)를
                 # 하는 유력 용의자 지점(위 blocks와 동일 근거).
                 async with db.begin_nested():
-                    human_mention_rows = (await db.execute(
-                        select(TeamMember.id).where(
-                            TeamMember.id.in_(mention_targets), TeamMember.type == "human",
-                        )
-                    )).all()
-                    human_mention_targets = [r[0] for r in human_mention_rows]
+                    # story #3629(3627 클래스) — TeamMember.id.in_() 단독 INCLUSION 필터는
+                    # org_member-only 휴먼을 조용히 뺀다(_dispatch_mention_events의 "찾지
+                    # 못하면 human으로 간주" 기본값과 반대 — 여기는 못 찾으면 제외돼 알림
+                    # 자체가 안 감). filter_human_member_ids(member_resolver.py, org_members·
+                    # team_members(human) 둘 다 보는 배치 조회)로 통일.
+                    human_mention_targets = list(await filter_human_member_ids(mention_targets, db))
                     if human_mention_targets:
                         from app.services.notification_dispatch import dispatch_notification
                         await dispatch_notification(
@@ -2958,12 +2964,8 @@ async def send_message(
                 - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids - set(msg.mentioned_ids or [])
             )
             if candidate_targets:
-                human_message_rows = (await db.execute(
-                    select(TeamMember.id).where(
-                        TeamMember.id.in_(candidate_targets), TeamMember.type == "human",
-                    )
-                )).all()
-                message_targets = [r[0] for r in human_message_rows]
+                # story #3629(3627 클래스) — 위 mention 블록과 동형(filter_human_member_ids).
+                message_targets = list(await filter_human_member_ids(candidate_targets, db))
                 if message_targets:
                     from app.services.notification_dispatch import dispatch_notification
                     await dispatch_notification(
