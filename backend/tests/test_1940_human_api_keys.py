@@ -423,3 +423,85 @@ async def test_router_cannot_revoke_other_humans_key():
             assert ei.value.status_code == 404
     finally:
         await engine.dispose()
+
+
+# ─── story #3634 — org_member만 있고 members 앵커 없는 휴먼도 발급돼야 한다 ─────
+# member SSOT Phase 0 이후 새 org의 휴먼은 org_members 행만 있을 수 있다(dev PO
+# Test Org 실물 모양) — human_api_keys.member_id는 members.id FK(CASCADE)라 앵커가
+# 없으면 발급 자체가 불가능했다(404). ensure_human_member(agent_anchor_sync.py,
+# 이미 다른 SSOT 자리들이 쓰는 같은 함수)로 앵커를 멱등 생성하고 재조회한다.
+
+
+async def _seed_org_member_only_human(session, org_id, user_id, *, role="member"):
+    """team_members/members 앵커가 아예 없는 SSOT-only 휴먼 — org_members 딱 1행만."""
+    from app.models.project import OrgMember
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role)
+    session.add(om)
+    await session.commit()
+    return om.id
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_org_member_only_human_can_create_and_list_api_keys():
+    """org_member만 있는 휴먼도 발급 200 — 이전엔 members 앵커가 없어 404였다."""
+    from app.models.member import Member
+    from app.routers.me import create_my_api_key, list_my_api_keys
+    from app.schemas.human_api_key import CreateHumanApiKeyRequest
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_user(s, email="ssot-only-3634@example.com")
+            om_id = await _seed_org_member_only_human(s, org_id, user_id)
+            auth = _human_auth(user_id, org_id)
+
+            created = await create_my_api_key(
+                CreateHumanApiKeyRequest(name="my key", expires_at=None), session=s, auth=auth,
+            )
+            assert created.api_key.startswith("hu_live_")
+
+            # 0075 불변식(휴먼 members.id == org_members.id)대로 앵커가 멱등 생성됐어야.
+            anchor = await s.get(Member, om_id)
+            assert anchor is not None
+            assert anchor.type == "human"
+
+            listed = await list_my_api_keys(session=s, auth=auth)
+            assert len(listed) == 1
+            assert listed[0].id == created.id
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_org_member_only_human_without_ensure_human_member_still_404s(monkeypatch):
+    """뮤테이션 — ensure_human_member 호출을 지우면(옛 동작 재현) org_member-only
+    휴먼은 다시 404여야 한다(이 테스트가 실제로 그 경로를 검증한다는 증거)."""
+    import app.routers.me as me_module
+    from fastapi import HTTPException
+    from app.schemas.human_api_key import CreateHumanApiKeyRequest
+
+    async def _never_ensures(session, org_member_id):
+        return False
+
+    monkeypatch.setattr(
+        "app.services.agent_anchor_sync.ensure_human_member", _never_ensures,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_user(s, email="ssot-only-mut-3634@example.com")
+            await _seed_org_member_only_human(s, org_id, user_id)
+            auth = _human_auth(user_id, org_id)
+
+            with pytest.raises(HTTPException) as ei:
+                await me_module.create_my_api_key(
+                    CreateHumanApiKeyRequest(expires_at=None), session=s, auth=auth,
+                )
+            assert ei.value.status_code == 404
+    finally:
+        await engine.dispose()
