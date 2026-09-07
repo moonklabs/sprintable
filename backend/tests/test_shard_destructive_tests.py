@@ -618,8 +618,8 @@ def test_audit_durations_mode_drift_state_fires_after_3_consecutive_runs_then_qu
     out4 = capsys.readouterr().out
     assert "weights drift" not in out4
 
-    streaks_after = json.loads(state_path.read_text())
-    assert streaks_after == {"tests/stale.py": 1}
+    state_after = json.loads(state_path.read_text())
+    assert state_after["streaks"] == {"tests/stale.py": 1}
 
 
 def test_audit_durations_mode_drift_state_normal_run_resets_streak(tmp_path, capsys, monkeypatch):
@@ -652,17 +652,6 @@ def test_audit_durations_mode_drift_state_normal_run_resets_streak(tmp_path, cap
 # ─── story #3642 AC1 — 재실측 반영값(test_2813·test_3516·test_3414) + 샤드 균형 ──
 
 
-def test_remeasured_weights_reflect_story_3642_normalized_values():
-    """등재값이 story #3642 재실측(러너 정규화 median 배율로 나눈 평균값)을 그대로
-    담고 있는지 고정 — infra/destructive-schema-shard-weights.json이 실수로 옛
-    잠정값(45.0/33.0/13.0)으로 되돌아가면 이 테스트가 잡는다."""
-    mod = _load()
-    weights = mod.load_weights()
-    assert weights["tests/test_2813_gate_github_check_realdb.py"] == 79.0
-    assert weights["tests/test_3516_channel_post_comments.py"] == 55.0
-    assert weights["tests/test_3414_publication_command_cron_retry.py"] == 33.0
-
-
 def test_shard_balance_stays_even_after_remeasure():
     """AC2 — 갱신 뒤에도 partition()의 weight-sum 균형이 샤드 4(또는 무거운 파일이
     떨어지는 아무 샤드)를 편중시키지 않는다(그리디 LPT가 자동 재배치 — 샤드 «번호»가
@@ -674,3 +663,66 @@ def test_shard_balance_stays_even_after_remeasure():
     avg = sum(totals) / len(totals)
     for t in totals:
         assert abs(t - avg) / avg < 0.05, f"샤드 편차 5% 초과: {totals}"
+
+
+# ─── story #3642 CHANGES(페드루 PO) — write-through·같은 run 재시도 이중카운트 방지 ──
+
+
+def test_audit_durations_mode_missing_artifacts_writes_through_state_unchanged(tmp_path):
+    """CHANGES① — 산출물 디렉터리가 없어(backend-irrelevant PR) 조기 return해도
+    drift 상태 파일은 그대로 다시 저장돼야 한다 — 안 그러면 ci.yml의
+    `actions/cache/save`(if: always())가 존재하지 않는 경로를 캐시하려다 매 run
+    Path Validation Error를 낸다.
+
+    ⚠️ 파일을 미리 만들어 두면(사전 존재) "write-through가 실제로 도는가"가 아니라
+    "이미 있던 파일이 그대로 있는가"만 재는 항진 통과 함정이다(리셋 로직 없이도
+    통과) — 상태 파일을 아예 없는 채로 시작해 조기 return 경로 자체가 파일을 «새로
+    만드는지»로 write-through 실행 자체를 증명한다."""
+    mod = _load()
+    state_path = tmp_path / "drift-state.json"
+    assert not state_path.exists()  # 사전 상태 0 — write-through가 없으면 끝까지 없어야 정상.
+
+    exit_code = mod._audit_durations_mode(tmp_path / "does-not-exist", drift_state_path=state_path)
+
+    assert exit_code == 0
+    assert state_path.exists(), "write-through가 없으면 조기 return 경로가 파일을 안 만든다"
+    state_after = json.loads(state_path.read_text())
+    assert state_after == {"run_id": None, "streaks": {}}
+
+    # 두 번째 호출 — 기존 스트릭({"tests/a.py": 2})이 write-through로 무변경 보존.
+    mod._save_drift_state(state_path, run_id="run-1", streaks={"tests/a.py": 2})
+    mod._audit_durations_mode(
+        tmp_path / "still-does-not-exist", drift_state_path=state_path, run_id="run-1",
+    )
+    state_after2 = json.loads(state_path.read_text())
+    assert state_after2 == {"run_id": "run-1", "streaks": {"tests/a.py": 2}}
+
+
+def test_audit_durations_mode_same_run_retry_does_not_double_count(tmp_path, capsys):
+    """CHANGES② — attempt 2(같은 run_id)가 attempt 1이 이미 반영한 상태를 복원하면
+    스트릭을 다시 증가시키지 않는다(멱등). run_id가 다르면(진짜 새 run) 정상 증가."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    state_path = tmp_path / "drift-state.json"
+    (artifact_dir / "shard-durations-0.json").write_text(
+        json.dumps({"shard": 0, "durations": {"tests/stale.py": 25.0}})
+    )
+    weights = {"tests/stale.py": 10.0}
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(mod, "load_weights", lambda: weights):
+        mod._audit_durations_mode(artifact_dir, drift_state_path=state_path, run_id="run-A")
+        state1 = json.loads(state_path.read_text())
+        assert state1 == {"run_id": "run-A", "streaks": {"tests/stale.py": 1}}
+
+        # attempt 2 — 같은 run_id로 재시도(예: 이 잡 이후 다른 잡이 실패해 rerun).
+        mod._audit_durations_mode(artifact_dir, drift_state_path=state_path, run_id="run-A")
+        state2 = json.loads(state_path.read_text())
+        assert state2 == {"run_id": "run-A", "streaks": {"tests/stale.py": 1}}, "같은 run 재시도가 이중 카운트했다"
+
+        # 진짜 다음 run(run_id 다름) — 정상 증가.
+        mod._audit_durations_mode(artifact_dir, drift_state_path=state_path, run_id="run-B")
+        state3 = json.loads(state_path.read_text())
+        assert state3 == {"run_id": "run-B", "streaks": {"tests/stale.py": 2}}

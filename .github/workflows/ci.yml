@@ -1162,7 +1162,7 @@ jobs:
 
       - name: Audit shard durations vs weights.json (story #3558+#3642, warn-only)
         working-directory: backend
-        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json
+        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}"
 
       - name: Save weights-drift streak state (story #3642)
         if: always()

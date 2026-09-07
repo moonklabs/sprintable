@@ -328,31 +328,49 @@ def load_duration_artifacts(artifact_dir: Path) -> dict[str, float]:
     return merged
 
 
-def _audit_durations_mode(artifact_dir: Path, *, drift_state_path: Path | None = None) -> int:
+def _audit_durations_mode(
+    artifact_dir: Path, *, drift_state_path: Path | None = None, run_id: str | None = None,
+) -> int:
     """story #3558 AC2 — 항상 0을 반환한다(경고 전용, CI를 절대 안 죽인다). 산출물
     디렉터리가 없거나 비어 있어도(backend-irrelevant PR이라 샤드 자체가 스킵된 경우)
     조용히 "대조 대상 0건"으로 끝낸다.
 
     story #3642(AC3) — `drift_state_path`가 주어지면 «과소 등재(ratio≥2.0) 연속 스트릭»
-    을 같이 추적한다(ci.yml이 actions/cache로 run 사이에 이 파일을 넘긴다)."""
+    을 같이 추적한다(ci.yml이 actions/cache로 run 사이에 이 파일을 넘긴다).
+
+    story #3642 CHANGES①(페드루 PO) — 산출물 디렉터리가 없어 조기 return하는 경로도
+    drift 상태를 write-through(무변경 재저장)한다 — 안 그러면 ci.yml의 save 스텝
+    (`if: always()`)이 존재하지 않는 경로를 캐시하려다 매 run "Path Validation
+    Error"를 낸다(빨강이 배경음이 되는 자리, 이 스토리가 없애려는 바로 그 패턴).
+
+    story #3642 CHANGES②(페드루 PO) — `run_id`가 주어지고 복원된 상태의 run_id와
+    같으면(=같은 run의 재시도가 attempt 1이 이미 반영한 상태를 복원) 스트릭을 다시
+    증가시키지 않는다(이중 카운트 방지, 멱등)."""
     if not artifact_dir.exists():
         print(f"산출물 디렉터리 없음({artifact_dir}) — backend-irrelevant PR로 샤드가 스킵됐을 수 있음, 대조 0건", file=sys.stderr)
+        if drift_state_path is not None:
+            state = _load_drift_state(drift_state_path)
+            _save_drift_state(drift_state_path, run_id=run_id, streaks=state["streaks"])
         return 0
     measured = load_duration_artifacts(artifact_dir)
     weights = load_weights()
     outliers = ratio_outliers(measured, weights)
 
     if drift_state_path is not None:
-        streaks = update_drift_streaks(_load_drift_state(drift_state_path), outliers)
-        for f in drift_warnings(streaks):
-            print(
-                f"::warning::weights drift(story #3642): {f} — 등재값이 {DRIFT_STREAK_THRESHOLD}"
-                f"run 연속 실측의 {RATIO_WARN_HIGH_MULTIPLIER:.0f}배 이상 벗어났다(러너가 느린 "
-                "하루가 아니라 등재값 자체가 낡았다는 신호) — infra/destructive-schema-shard-"
-                "weights.json 재측정 필요."
-            )
-            streaks[f] = 0  # story #3642 AC3 — 1회 경고 뒤 리셋(매 run 반복 스팸 방지).
-        _save_drift_state(drift_state_path, streaks)
+        state = _load_drift_state(drift_state_path)
+        if run_id is not None and state["run_id"] == run_id:
+            streaks = state["streaks"]  # 같은 run 재시도 — 무변경 write-through.
+        else:
+            streaks = update_drift_streaks(state["streaks"], outliers)
+            for f in drift_warnings(streaks):
+                print(
+                    f"::warning::weights drift(story #3642): {f} — 등재값이 {DRIFT_STREAK_THRESHOLD}"
+                    f"run 연속 실측의 {RATIO_WARN_HIGH_MULTIPLIER:.0f}배 이상 벗어났다(러너가 느린 "
+                    "하루가 아니라 등재값 자체가 낡았다는 신호) — infra/destructive-schema-shard-"
+                    "weights.json 재측정 필요."
+                )
+                streaks[f] = 0  # story #3642 AC3 — 1회 경고 뒤 리셋(매 run 반복 스팸 방지).
+        _save_drift_state(drift_state_path, run_id=run_id, streaks=streaks)
 
     if not outliers:
         print(f"OK: 등재값 대조 — 산출물 {len(measured)}건 중 2배/0.5배 이탈 0건(story #3558)", file=sys.stderr)
@@ -390,21 +408,29 @@ def drift_warnings(streaks: dict[str, int], *, threshold: int = DRIFT_STREAK_THR
     return sorted(f for f, n in streaks.items() if n >= threshold)
 
 
-def _load_drift_state(path: Path) -> dict[str, int]:
-    """상태 파일이 없거나(첫 run·캐시 미스) 깨졌으면(방어적) 빈 스트릭으로 시작한다
-    — 이 축 자체가 경고 전용이라 최악의 경우 «드리프트 경고 1회 늦게 뜬다»뿐, CI를
-    죽이지 않는다."""
+def _load_drift_state(path: Path) -> dict:
+    """반환 {"run_id": str|None, "streaks": dict[str,int]}. 상태 파일이 없거나
+    (첫 run·캐시 미스) 깨졌으면(방어적) 빈 상태로 시작한다 — 이 축 자체가 경고
+    전용이라 최악의 경우 «드리프트 경고 1회 늦게 뜬다»뿐, CI를 죽이지 않는다.
+
+    story #3642 CHANGES② — run_id를 같이 저장/복원해 같은 run의 재시도(attempt
+    2+)가 attempt 1이 이미 반영한 스트릭을 또 증가시키는 이중 카운트를 막는다.
+    구버전(플랫 {file: count} 상태 파일)도 read하면 streaks로 그대로 승격
+    (run_id=None — 다음 저장부터 새 모양)."""
     if not path.exists():
-        return {}
+        return {"run_id": None, "streaks": {}}
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
-        return {}
+        return {"run_id": None, "streaks": {}}
+    if "streaks" not in data:
+        return {"run_id": None, "streaks": data}
+    return {"run_id": data.get("run_id"), "streaks": data.get("streaks", {})}
 
 
-def _save_drift_state(path: Path, streaks: dict[str, int]) -> None:
+def _save_drift_state(path: Path, *, run_id: str | None, streaks: dict[str, int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(streaks, indent=2, sort_keys=True))
+    path.write_text(json.dumps({"run_id": run_id, "streaks": streaks}, indent=2, sort_keys=True))
 
 
 def _check_elapsed_mode(elapsed_path: Path) -> int:
@@ -482,6 +508,12 @@ def main() -> int:
              "이 JSON에 읽고 쓴다(ci.yml이 actions/cache로 run 사이에 넘긴다). 생략하면 "
              "drift 축 자체가 no-op(3558 축은 그대로 동작).",
     )
+    ap.add_argument(
+        "--run-id", type=str, default=None,
+        help="story #3642 CHANGES② — --drift-state와 함께 쓴다(ci.yml이 "
+             "${{ github.run_id }}를 넘긴다). 복원된 상태의 run_id와 같으면(같은 run의 "
+             "재시도) 스트릭을 다시 증가시키지 않는다 — 이중 카운트 방지.",
+    )
     args = ap.parse_args()
 
     if args.check_elapsed is not None:
@@ -496,7 +528,9 @@ def main() -> int:
         return 0
 
     if args.audit_durations is not None:
-        return _audit_durations_mode(args.audit_durations, drift_state_path=args.drift_state)
+        return _audit_durations_mode(
+            args.audit_durations, drift_state_path=args.drift_state, run_id=args.run_id,
+        )
 
     if args.shard_index is None or args.shard_count is None:
         print("--shard-index/--shard-count는 --check-elapsed 없이는 필수", file=sys.stderr)
