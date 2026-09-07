@@ -119,6 +119,8 @@ EXPECTED_TOOLS = {
     # channel post drafts (1) — story #3614: 이 도메인의 첫 MCP 도구(withdraw). org-scoped URL을
     # client.org_id로 수동 구성하는 첫 사례(server.py 참고).
     "sprintable_withdraw_channel_post_draft",
+    # 발행물 인사이트 (1) — story #3651: 1일·7일 스냅샷 조회 + 델타. 이 도메인 둘째 도구.
+    "sprintable_get_publication_insights",
     # smoke
     "ping",
 }
@@ -146,8 +148,9 @@ def test_total_tool_count():
     # story #2709: sprintable_request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 122→123.
     # story #3331: sprintable_list_conversations 1종 신설(내 참여 방 목록 — 알림 미도달 백스톱) — 124→125.
     # story #3614: sprintable_withdraw_channel_post_draft 1종 신설(채널 글 초안 폐기 — 이 도메인
-    # 첫 MCP 도구) — 125→126.
-    assert len(_TOOLS) == 126  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    # 첫 MCP 도구) — 125→126. story #3651: sprintable_get_publication_insights 1종 신설(발행물
+    # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127.
+    assert len(_TOOLS) == 127  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():
