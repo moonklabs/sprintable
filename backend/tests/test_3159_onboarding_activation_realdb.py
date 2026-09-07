@@ -98,6 +98,59 @@ async def test_get_owner_org_id_only_owner_role():
 
 
 @pytest.mark.anyio
+async def test_resolve_activation_org_id_prefers_requested_context_when_owner_there():
+    """story #3607(prod 결함, 선생님 실측 2026-09-07) — owner org가 둘 이상인 유저가 화면에
+    떠 있는(요청 컨텍스트) org에서 owner이면, 「가장 이른 owner org」가 아니라 그 org로
+    판정한다. 컨텍스트가 없으면(cron 등) 기존 get_owner_org_id 그대로."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            earliest_org, later_org, unrelated_org = ORG, _uuid(), _uuid()
+            owner_user = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan,created_at) VALUES "
+                f"('{earliest_org}','O','story3159-o','free', now() - interval '2 days'),"
+                f"('{later_org}','O2','story3159-o2','free', now())"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{owner_user}','story3159-2owners@t.test','x','U',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role,created_at) VALUES "
+                f"('{_uuid()}','{earliest_org}','{owner_user}','owner', now() - interval '2 days'),"
+                f"('{_uuid()}','{later_org}','{owner_user}','owner', now())"
+            ))
+            await s.commit()
+
+            # 컨텍스트 없음(cron 등) — 기존 동작: 가장 이른 owner org.
+            no_context = await svc.resolve_activation_org_id(s, uuid.UUID(owner_user), None)
+            assert str(no_context) == earliest_org
+
+            # 요청 컨텍스트=later_org(화면이 지금 보는 org), 그 org의 owner — 그 org로 판정.
+            with_context = await svc.resolve_activation_org_id(s, uuid.UUID(owner_user), uuid.UUID(later_org))
+            assert str(with_context) == later_org
+
+            # 요청 컨텍스트가 이 유저가 owner가 아닌(또는 소속조차 아닌) org면 — 폴백.
+            unrelated_org = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{unrelated_org}','O3','story3159-o3','free')"
+            ))
+            await s.commit()
+            fallback = await svc.resolve_activation_org_id(s, uuid.UUID(owner_user), uuid.UUID(unrelated_org))
+            assert str(fallback) == earliest_org
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text(f"DELETE FROM organizations WHERE id='{later_org}'"))
+            await s.execute(text(f"DELETE FROM organizations WHERE id='{unrelated_org}'"))
+            await s.execute(text(f"DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
+    await eng.dispose()
+
+
+@pytest.mark.anyio
 async def test_is_org_agent_connected_requires_real_verify_not_just_member_record():
     """story #3193 근본수정 — 예전엔 agent 멤버 레코드 **존재**만으로 True였다("생성"을
     "연결"로 오판정: 연결 스텝을 건너뛰어도 레코드는 남아 체크리스트가 거짓 완료를 표시
@@ -211,16 +264,28 @@ async def test_get_first_instruction_conversation_id_priority_order():
         try:
             proj = _uuid()
             human_member, agent_member = _uuid(), _uuid()
+            human_user = _uuid()
             app_id = _uuid()
             await s.execute(text(
                 f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
             ))
             await s.execute(text(
-                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{human_user}','story3159-requester@t.test','x','U',true,false,0,false,0)"
             ))
             await s.execute(text(
-                f"INSERT INTO members (id,org_id,type,name) VALUES "
-                f"('{human_member}','{ORG}','human','H'),('{agent_member}','{ORG}','agent','A')"
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            # story #3607(잔여, 페드루 PO 確定 2026-09-07) — human_member에 user_id를 실어야
+            # team_members 뷰(migration 0088)의 user_id가 채워진다 — get_first_instruction_
+            # conversation_id의 새 requester_is_participant 필터가 이 값으로 매치한다.
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name,user_id) VALUES "
+                f"('{human_member}','{ORG}','human','H','{human_user}')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES ('{agent_member}','{ORG}','agent','A')"
             ))
             await s.execute(text(
                 f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
@@ -231,7 +296,7 @@ async def test_get_first_instruction_conversation_id_priority_order():
             await s.commit()
 
             # ① org에 대화 0건 — None.
-            assert (await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))) is None
+            assert (await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))) is None
 
             # ② DM 1개 생성(왕복 前) — 그 DM이 반환돼야.
             dm1 = _uuid()
@@ -244,7 +309,7 @@ async def test_get_first_instruction_conversation_id_priority_order():
                 f"('{_uuid()}','{dm1}','{human_member}'),('{_uuid()}','{dm1}','{agent_member}')"
             ))
             await s.commit()
-            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))
             assert str(result) == dm1
 
             # ②b DM을 하나 더(더 이른 created_at) 만들면 org 최초(가장 이른) 쪽이 반환돼야.
@@ -258,7 +323,7 @@ async def test_get_first_instruction_conversation_id_priority_order():
                 f"('{_uuid()}','{dm0}','{human_member}'),('{_uuid()}','{dm0}','{agent_member}')"
             ))
             await s.commit()
-            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))
             assert str(result) == dm0
 
             # ③ 왕복(휴먼→에이전트 응답) 성사된 대화가 생기면, DM들보다 우선해 그게 반환돼야.
@@ -268,16 +333,99 @@ async def test_get_first_instruction_conversation_id_priority_order():
             await s.execute(text(
                 f"INSERT INTO conversations (id,org_id,project_id,type) VALUES ('{roundtrip_conv}','{ORG}','{proj}','group')"
             ))
+            # story #3607(잔여) — conversation_participants는 dm뿐 아니라 group도 채워야
+            # 새 requester_is_participant 필터가 이 대화를 인정한다(conversations.py의
+            # (conversation_id, member_id) 매치 0행=비참여자 규칙은 dm/group 공통).
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{roundtrip_conv}','{human_member}'),('{_uuid()}','{roundtrip_conv}','{agent_member}')"
+            ))
             await s.execute(text(
                 f"INSERT INTO conversation_messages (id,conversation_id,sender_id,content,created_at) VALUES "
                 f"('{_uuid()}','{roundtrip_conv}','{human_member}','hi','{t0.isoformat()}'),"
                 f"('{_uuid()}','{roundtrip_conv}','{agent_member}','hello','{t1.isoformat()}')"
             ))
             await s.commit()
-            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG))
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))
             assert str(result) == roundtrip_conv
         finally:
             await _wipe(s, ORG)
+    await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_first_instruction_conversation_id_excludes_dm_requester_not_participant():
+    """story #3607(prod 결함, 선생님 실측 2026-09-07) — agent↔agent DM(요청 휴먼 비참여)은
+    ②에서 절대 고르지 않는다. 요청 휴먼(human_user)이 이 org의 다른 사람이라(participant
+    아님) DM이 있어도 None — 랜딩 뒤 403이 나는 자리로 딥링크가 안 간다."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj = _uuid()
+            requester_member, agent1, agent2 = _uuid(), _uuid(), _uuid()
+            requester_user, other_user = _uuid(), _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{requester_user}','story3159-req@t.test','x','U',true,false,0,false,0),"
+                f"('{other_user}','story3159-other@t.test','x','U2',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name,user_id) VALUES "
+                f"('{requester_member}','{ORG}','human','Requester','{requester_user}')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES "
+                f"('{agent1}','{ORG}','agent','A1'),('{agent2}','{ORG}','agent','A2')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES "
+                f"('{_uuid()}','{agent1}','{proj}'),('{_uuid()}','{agent2}','{proj}')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO project_access (id,project_id,member_id,role) VALUES ('{_uuid()}','{proj}','{requester_member}','member')"
+            ))
+            await s.commit()
+
+            # agent↔agent DM만 있고, 요청 휴먼이 참여하는 대화가 org 안에 하나도 없다.
+            agent_dm = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type,created_at) VALUES "
+                f"('{agent_dm}','{ORG}','{proj}','dm', now() - interval '1 hour')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{agent_dm}','{agent1}'),('{_uuid()}','{agent_dm}','{agent2}')"
+            ))
+            await s.commit()
+
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(requester_user))
+            assert result is None, "요청 휴먼이 비참여자인 agent↔agent DM을 골라선 안 된다"
+
+            # 요청 휴먼이 실제로 참여하는 DM이 하나 더 생기면 그건 정상적으로 반환돼야.
+            human_dm = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type,created_at) VALUES "
+                f"('{human_dm}','{ORG}','{proj}','dm', now())"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{human_dm}','{requester_member}'),('{_uuid()}','{human_dm}','{agent1}')"
+            ))
+            await s.commit()
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(requester_user))
+            assert str(result) == human_dm
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text(f"DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
     await eng.dispose()
 
 
@@ -342,6 +490,128 @@ async def test_is_org_first_roundtrip_order_sensitive():
             assert (await svc.is_org_first_roundtrip_done(s, uuid.UUID(ORG))) is True
         finally:
             await _wipe(s, ORG)
+    await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_is_org_first_roundtrip_done_recognizes_org_member_only_human():
+    """story #3627(prod 결함, 페드루 PO 確定 2026-09-07) — E-MEMBER-SSOT Phase 0부터 JWT
+    휴먼의 sender_id는 `org_members.id`(별개 테이블 PK, `members`/`project_access`/
+    `team_members` 뷰와 겹치지 않는 id 공간)다. 이 휴먼이 `members` 행(따라서 team_members
+    뷰에 잡히는 legacy 행)이 하나도 없는 org(SSOT 전환 이후 만들어진 org 다수의 실제
+    모양, dev PO Test Org 실측과 동형)에서도 왕복 판정이 서야 한다 — org_members만
+    seed(members/project_access 0행)."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj = _uuid()
+            human_user = _uuid()
+            om_human = _uuid()
+            agent_member = _uuid()
+            app_id = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{human_user}','story3159-ssot@t.test','x','U',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            # 휴먼은 org_members 딱 1행뿐 — members/project_access(따라서 team_members
+            # 뷰)에 이 사람 행이 아예 없다(그라운딩 확인: conversation_participants.
+            # member_id·conversation_messages.sender_id엔 real FK가 없어 org_members.id를
+            # 그대로 써도 무결성 위반 0 — 실물 스키마 확認).
+            await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{om_human}','{ORG}','{human_user}','member')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES ('{agent_member}','{ORG}','agent','A')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
+            ))
+            await s.commit()
+
+            now = datetime.now(timezone.utc)
+            t0, t1 = now - timedelta(hours=1), now
+            conv = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type) VALUES ('{conv}','{ORG}','{proj}','group')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_messages (id,conversation_id,sender_id,content,created_at) VALUES "
+                f"('{_uuid()}','{conv}','{om_human}','hi(org_member만)','{t0.isoformat()}'),"
+                f"('{_uuid()}','{conv}','{agent_member}','hello','{t1.isoformat()}')"
+            ))
+            await s.commit()
+            assert (await svc.is_org_first_roundtrip_done(s, uuid.UUID(ORG))) is True
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text("DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
+    await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_first_instruction_conversation_id_org_member_only_human():
+    """story #3627 — 딥링크 축도 마찬가지: 요청 휴먼이 org_members에만 있어도(legacy
+    team_members 행 0) requester_is_participant가 그를 참여자로 인정해야 한다. 원본
+    실증(dev PO Test Org)은 정확히 이 모양이었다(human TeamMember 0행·API 참여자는
+    org_member ecc99eaf)."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj = _uuid()
+            human_user = _uuid()
+            om_human = _uuid()
+            agent_member = _uuid()
+            app_id = _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{human_user}','story3159-ssot2@t.test','x','U',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{proj}','{ORG}','P','none')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{om_human}','{ORG}','{human_user}','member')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES ('{agent_member}','{ORG}','agent','A')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{app_id}','{agent_member}','{proj}')"
+            ))
+            await s.commit()
+
+            # 대화 0건 — None(①).
+            assert (await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))) is None
+
+            dm = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type,created_at) VALUES "
+                f"('{dm}','{ORG}','{proj}','dm', now())"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{dm}','{om_human}'),('{_uuid()}','{dm}','{agent_member}')"
+            ))
+            await s.commit()
+            result = await svc.get_first_instruction_conversation_id(s, uuid.UUID(ORG), uuid.UUID(human_user))
+            assert str(result) == dm, "org_member만 있는 휴먼도 참여자로 인정돼 딥링크가 나와야 한다(②)"
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text("DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
     await eng.dispose()
 
 

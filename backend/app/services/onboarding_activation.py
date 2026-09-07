@@ -19,7 +19,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -31,6 +31,31 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 
+def _is_human_member(member_id_col, *, user_id: uuid.UUID | None = None):
+    """story #3627(prod 결함, 페드루 PO 確定 2026-09-07) — 이 member_id가 「휴먼」인지
+    판정하는 유일한 자리(member_resolver.py 첫 줄과 같은 규칙, 새 판정자 발명 0).
+
+    E-MEMBER-SSOT Phase 0부터 JWT 휴먼의 참여자/발신자 id는 `org_members.id`다
+    (org_members 테이블 자체가 휴먼 전용이라 추가 type 조건 불요) — 그런데
+    이 모듈의 왕복·딥링크 판정은 여전히 `team_members(type='human')`로만 이었다.
+    team_members에 그 org의 휴먼 행이 하나도 없으면(SSOT 전환 이후 만들어진
+    org 다수) `human_before`·`requester_is_participant`가 영원히 false로
+    떨어져 "대화 中인데도 미완료·딥링크 null"이 났다(dev PO Test Org 실측).
+
+    둘 다 인정(OR) — legacy team_member(type='human') 행이 남아있는 org도
+    회귀 없이 그대로 통과해야 한다(#3607 기존 테스트가 그 표본).
+    `user_id`를 주면 그 유저 소유 여부까지, 안 주면 "휴먼이기만 하면" 통과."""
+    org_member_conditions = [OrgMember.id == member_id_col, OrgMember.deleted_at.is_(None)]
+    team_member_conditions = [TeamMember.id == member_id_col, TeamMember.type == "human"]
+    if user_id is not None:
+        org_member_conditions.append(OrgMember.user_id == user_id)
+        team_member_conditions.append(TeamMember.user_id == user_id)
+    return or_(
+        select(OrgMember.id).where(*org_member_conditions).exists(),
+        select(TeamMember.id).where(*team_member_conditions).exists(),
+    )
+
+
 async def get_owner_org_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | None:
     """가입 유저가 owner인 org(=본인이 만든 org) 최초 행. 초대 멤버는 None."""
     return (await db.execute(
@@ -39,6 +64,29 @@ async def get_owner_org_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | 
         .order_by(OrgMember.created_at.asc())
         .limit(1)
     )).scalar_one_or_none()
+
+
+async def resolve_activation_org_id(
+    db: AsyncSession, user_id: uuid.UUID, requested_org_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    """story #3607(prod 결함, 선생님 실측 2026-09-07, 페드루 PO 確定) — 체크리스트/딥링크
+    판정 스코프. `get_owner_org_id`(가장 이른 owner org)는 "현재 화면이 보고 있는 org"와
+    무관해, owner org가 둘 이상인 유저는 배너가 뜬 org와 다른 org 기준으로 판정됐다
+    (dev 실측: sellerking이 moonklabs 화면에서 PO Test Org 기준 판정을 받음).
+
+    `requested_org_id`가 있고 그 org에서 이 유저가 owner이면 그 org를 그대로 쓴다(요청
+    컨텍스트 우선). 없거나(호출자가 컨텍스트를 안 준 리마인드 스윕 cron) 그 org의 owner가
+    아니면(예: 초대받아 참여 중인 org 화면을 보는 중) 기존 `get_owner_org_id`로 폴백 —
+    두 벌 판정자 발명이 아니라 같은 함수의 선택적 우선순위."""
+    if requested_org_id is not None:
+        is_owner_here = (await db.execute(
+            select(OrgMember.org_id).where(
+                OrgMember.user_id == user_id, OrgMember.org_id == requested_org_id, OrgMember.role == "owner",
+            )
+        )).scalar_one_or_none()
+        if is_owner_here is not None:
+            return is_owner_here
+    return await get_owner_org_id(db, user_id)
 
 
 async def is_org_agent_connected(db: AsyncSession, org_id: uuid.UUID) -> bool:
@@ -76,15 +124,13 @@ async def is_org_first_roundtrip_done(db: AsyncSession, org_id: uuid.UUID) -> bo
     """휴먼 발신 메시지 "이후"에 온 최초 agent 발신 메시지 존재(같은 conversation 안 순서조건).
     존재만 보면 #3157과 어긋난다(디디 지적) — 반드시 human_msg.created_at < agent_msg.created_at."""
     HumanMsg = aliased(ConversationMessage)
-    HumanSender = aliased(TeamMember)
     AgentSender = aliased(TeamMember)
 
     human_before = (
         select(HumanMsg.id)
-        .join(HumanSender, HumanSender.id == HumanMsg.sender_id)
         .where(
             HumanMsg.conversation_id == ConversationMessage.conversation_id,
-            HumanSender.type == "human",
+            _is_human_member(HumanMsg.sender_id),
             HumanMsg.created_at < ConversationMessage.created_at,
         )
         .exists()
@@ -104,7 +150,9 @@ async def is_org_first_roundtrip_done(db: AsyncSession, org_id: uuid.UUID) -> bo
     return row is not None
 
 
-async def get_first_instruction_conversation_id(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
+async def get_first_instruction_conversation_id(
+    db: AsyncSession, org_id: uuid.UUID, requester_user_id: uuid.UUID,
+) -> uuid.UUID | None:
     """story #3201 — 체크리스트 "첫 지시 보내고 회신 받기" 클릭의 딥링크 타겟.
 
     DM 생성(`POST /api/conversations`)이 의도적으로 always-new라서(EF-S2/db75ecd0,
@@ -115,17 +163,30 @@ async def get_first_instruction_conversation_id(db: AsyncSession, org_id: uuid.U
       ②없으면 org 최초(created_at 가장 이른) agent 참여 DM.
       ③그것도 없으면 None — FE는 None이면 신규 DM 생성 CTA(story #3201 A안)를 그대로
         재사용한다(제3의 경로 발명 금지, PO 지시).
-    """
+
+    story #3607(prod 결함, 선생님 실측 2026-09-07) — ①②는 org 단위로만 골라 «요청 휴먼이
+    실제로 그 대화의 참여자인가»를 안 봤다. agent↔agent DM(요청 휴먼 비참여)도 ②에 걸려
+    골라지면 랜딩 뒤 발신이 403(conversations.py의 (conversation_id, member_id) 비참여자
+    거부와 동형 — 그 403 자체는 옳다, 애초에 링크가 거기로 가면 안 된다). `requester_user_id`
+    의 human TeamMember가 참여자인 대화만 후보로 좁힌다."""
     HumanMsg = aliased(ConversationMessage)
-    HumanSender = aliased(TeamMember)
     AgentSender = aliased(TeamMember)
+    RequesterParticipant = aliased(ConversationParticipant)
+
+    requester_is_participant = (
+        select(RequesterParticipant.id)
+        .where(
+            RequesterParticipant.conversation_id == Conversation.id,
+            _is_human_member(RequesterParticipant.member_id, user_id=requester_user_id),
+        )
+        .exists()
+    )
 
     human_before = (
         select(HumanMsg.id)
-        .join(HumanSender, HumanSender.id == HumanMsg.sender_id)
         .where(
             HumanMsg.conversation_id == ConversationMessage.conversation_id,
-            HumanSender.type == "human",
+            _is_human_member(HumanMsg.sender_id),
             HumanMsg.created_at < ConversationMessage.created_at,
         )
         .exists()
@@ -138,6 +199,7 @@ async def get_first_instruction_conversation_id(db: AsyncSession, org_id: uuid.U
             Conversation.org_id == org_id,
             AgentSender.type == "agent",
             human_before,
+            requester_is_participant,
         )
         .order_by(ConversationMessage.created_at.asc())
         .limit(1)
@@ -153,21 +215,29 @@ async def get_first_instruction_conversation_id(db: AsyncSession, org_id: uuid.U
             Conversation.org_id == org_id,
             Conversation.type == "dm",
             TeamMember.type == "agent",
+            requester_is_participant,
         )
         .order_by(Conversation.created_at.asc())
         .limit(1)
     )).scalar_one_or_none()
 
 
-async def get_activation_state(db: AsyncSession, user: User) -> dict:
-    """체크리스트/리마인드 공용 — 5단계 완료 여부 + 요약."""
-    org_id = await get_owner_org_id(db, user.id)
+async def get_activation_state(
+    db: AsyncSession, user: User, *, requested_org_id: uuid.UUID | None = None,
+) -> dict:
+    """체크리스트/리마인드 공용 — 5단계 완료 여부 + 요약.
+
+    story #3607(prod 결함, 페드루 PO 確定 2026-09-07) — `requested_org_id`는 HTTP 조회
+    (라우터가 요청의 X-Org-Id/JWT org_id를 검증해 넘긴다)에만 있고, 리마인드 스윕 cron
+    호출(`find_reminder_candidates`)은 안 준다 — 그쪽은 "대상 선별"이 목적이라 기존
+    `get_owner_org_id` 그대로(불변, resolve_activation_org_id의 폴백 분기와 동일값)."""
+    org_id = await resolve_activation_org_id(db, user.id, requested_org_id)
     agent_connected = await is_org_agent_connected(db, org_id) if org_id else False
     roundtrip_done = await is_org_first_roundtrip_done(db, org_id) if org_id else False
     # story #3201 — 체크리스트 "첫 지시…" 항목 클릭 딥링크. org_id 없으면(온보딩 미완주)
     # 애초에 org 스코프 쿼리 자체가 무의미 — None(FE 신규 DM CTA 폴백).
     first_instruction_conv_id = (
-        await get_first_instruction_conversation_id(db, org_id) if org_id else None
+        await get_first_instruction_conversation_id(db, org_id, user.id) if org_id else None
     )
     steps = {
         "signed_up": True,

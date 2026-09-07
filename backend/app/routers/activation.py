@@ -12,7 +12,7 @@ from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_email_unsubscribe_token
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.user import User
 from app.services.onboarding_activation import get_activation_state, unsubscribe_user
@@ -37,11 +37,17 @@ def _err(code: str, message: str, status: int) -> JSONResponse:
 async def get_checklist(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
+    """story #3607(prod 결함, 선생님 실측 2026-09-07) — `org_id`(요청의 X-Org-Id 헤더/JWT
+    org_id, membership 검증 완료)를 실어 판정 스코프를 "지금 보는 화면의 org"로 맞춘다.
+    이 유저가 그 org의 owner가 아니면 서비스 레이어가 기존 get_owner_org_id로 폴백
+    (resolve_activation_org_id 참고) — 요청 자체는 거부하지 않는다(project-gate 없는
+    org 멤버십만 필요, no_project_gate 변형을 쓰는 이유)."""
     user = await db.get(User, uuid.UUID(auth.user_id))
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    return await get_activation_state(db, user)
+    return await get_activation_state(db, user, requested_org_id=org_id)
 
 
 # unsubscribe는 이메일 링크 클릭이라 pre-auth(브라우저에 세션 없을 수 있음) — 토큰 자체가 인가.
