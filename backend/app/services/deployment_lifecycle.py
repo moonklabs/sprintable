@@ -28,6 +28,7 @@ from app.schemas.agent_deployment import (
     DeploymentMutationResponse,
     DeploymentPreflightResponse,
 )
+from app.services.org_time import get_org_timezone, org_midnight_utc
 
 ACTIVE_STATUSES = ("DEPLOYING", "ACTIVE", "SUSPENDED")
 TRANSITIONS: dict[str, list[str]] = {
@@ -45,18 +46,6 @@ class DeploymentLifecycleError(Exception):
         self.code = code
         self.status = status
         self.details = details or {}
-
-
-def _utc_midnight_today() -> datetime:
-    """UTC 자정(오늘 0시)을 프로세스 로컬 TZ 영향 없이 직접 구한다.
-
-    story #3665 CHANGES(페드루 PO, 2026-09-07) — 예전엔 `date.today()`(프로세스 로컬
-    타임존 기준)로 날짜를 얻은 뒤 `.replace(tzinfo=timezone.utc)`로 라벨만 UTC로 갈아
-    끼웠다(값 자체는 안 바뀜) — 배포 컨테이너 시스템 TZ가 UTC가 아니면 자정 경계에서
-    "오늘 0시"가 실제 UTC 자정과 최대 하루 어긋난다(#3665 원 결함, standups.py:308과
-    같은 클래스). `datetime.now(timezone.utc)`에서 시:분:초만 0으로 잘라 UTC 자정을
-    직접 구해 이 클래스의 결함을 원천 차단한다."""
-    return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 # ---------------------------------------------------------------------------
@@ -864,7 +853,11 @@ class DeploymentLifecycleService:
             )
             persona_name_by_id = {row.id: row.name for row in pr.all()}
 
-        today_start = _utc_midnight_today()
+        # story #3674(BE 確定 2026-09-07) — "오늘"은 조직 시간대 기준(org_time.py).
+        # org.timezone 미설정(null)이면 UTC로 폴백해 3665(#4020)의 환경-TZ 고정
+        # 동작을 그대로 보존한다(회귀 0).
+        org_timezone = await get_org_timezone(self.session, org_id)
+        today_start = org_midnight_utc(org_timezone)
 
         runs_today_r = await self.session.execute(
             select(AgentRun.deployment_id, AgentRun.input_tokens, AgentRun.output_tokens)

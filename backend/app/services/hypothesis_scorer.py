@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import Hypothesis, HypothesisStoryLink
 from app.models.pm import Story
+from app.services.org_time import get_org_timezone
 from app.services.outcome_scorer import score_epic_outcome, score_ga4_outcome
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,9 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
                     # (ga4_client.fetch_ga4_metric)이 이벤트루프를 막지 않도록 to_thread로
                     # 포장. md는 순수 dict라 SAVEPOINT/session과 무관하게 안전(session을
                     # 참조하지 않는 스레드 실행).
-                    scoring = await asyncio.to_thread(score_ga4_outcome, md)
+                    # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                    org_timezone = await get_org_timezone(session, hyp.org_id)
+                    scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
                 elif source == "internal_ops":
                     pct = await _linked_story_completion_pct(session, hyp.id)
                     result = score_epic_outcome(md, pct)

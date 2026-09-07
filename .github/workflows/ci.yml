@@ -375,6 +375,22 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_legacy_subscriptions_reuse.py
 
+  # story #3674(BE 確定, 페드루 PO 確定 2026-09-07) — "오늘"(캘린더 날짜) 계산의
+  # 프로세스-로컬/무조건-UTC 직접 호출(date.today()·utcnow().date()·now(timezone.utc)
+  # .date())을 막는다. 3665(#4020)가 UTC 고정으로 한 클래스(환경마다 다른 오늘)를
+  # 닫았지만, 그 UTC 고정 자체가 "조직의 오늘"(org.timezone)을 무시하는 다음 결함
+  # 클래스였다 — org_time.py 헬퍼(org_today 등)로만 계산하도록 강제한다.
+  org-today-direct-call-lint:
+    name: org today direct call lint (guard, story #3674)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/app for org-tz-unaware "today" calls
+        working-directory: backend
+        run: python3 scripts/lint_org_today_direct_call.py
+
   # story #2255(69d7380e, 2026-07-28~09-02) — app/models/*.py에 __tablename__ 보유 모델이
   # 새로 생겼는데 app/models/__init__.py에 import 안 되면 create_all()이 그 테이블을 조용히
   # 안 만든다(#2201이 처음 적발한 결함 클래스, 11개 중 10개가 이 스토리로 뒤늦게 등재됨 —

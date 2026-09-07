@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.database import get_db
+from app.services.org_time import get_org_timezone, org_today
 from app.services.pageview_counter import record_pageview, record_pageview_utm, resolve_org_by_public_key
 from app.services.rate_limiter import get_rate_limiter
 
@@ -86,7 +86,11 @@ async def post_pageview(
     if not allowed:
         return Response(status_code=204)  # 1분 내 같은 UA 재요청 — 중복으로 간주, 집계 안 늘림
 
-    today = datetime.now(timezone.utc).date()
+    # story #3674(BE 確定 2026-09-07) — "오늘"은 조직 시간대 기준(org_time.py). 그라운딩
+    # 원 4자리 이후 새로 발견한 5번째 자리(3665 이전부터 이미 명시 UTC였지만 org TZ는
+    # 여전히 반영 안 함 — 같은 결함 클래스).
+    org_timezone = await get_org_timezone(db, org_id)
+    today = org_today(org_timezone)
     await record_pageview(db, org_id=org_id, path=body.path, day=today)
 
     utm_source = _normalize_utm(body.utm_source)

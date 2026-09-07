@@ -507,6 +507,7 @@ async def score_ga4_outcomes(
     verify_cron(request)
 
     from app.models.pm import Goal, Sprint, Story
+    from app.services.org_time import get_org_timezone
     from app.services.outcome_scorer import score_epic_outcome, score_ga4_outcome
 
     now = datetime.now(timezone.utc)
@@ -527,7 +528,9 @@ async def score_ga4_outcomes(
             if not md or md.get("source") != "ga4":
                 continue
             try:
-                scoring = await asyncio.to_thread(score_ga4_outcome, md)
+                # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                org_timezone = await get_org_timezone(session, sprint.org_id)
+                scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
                 sprint.outcome_status = scoring["outcome_status"]
                 sprint.outcome_result = scoring["outcome_result"]
                 scored.append({"type": "sprint", "id": str(sprint.id), "outcome_status": scoring["outcome_status"]})
@@ -549,7 +552,9 @@ async def score_ga4_outcomes(
             if not md or md.get("source") != "ga4":
                 continue
             try:
-                scoring = await asyncio.to_thread(score_ga4_outcome, md)
+                # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                org_timezone = await get_org_timezone(session, story.org_id)
+                scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
                 story.outcome_status = scoring["outcome_status"]
                 story.outcome_result = scoring["outcome_result"]
                 scored.append({"type": "story", "id": str(story.id), "outcome_status": scoring["outcome_status"]})
@@ -578,7 +583,9 @@ async def score_ga4_outcomes(
             source = md.get("source")
             try:
                 if source == "ga4":
-                    scoring = await asyncio.to_thread(score_ga4_outcome, md)
+                    # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                    org_timezone = await get_org_timezone(session, epic.org_id)
+                    scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
                 elif source == "internal_ops":
                     # 하위 스토리 진행률 계산
                     story_rows = await session.execute(

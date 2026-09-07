@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import exists, select
@@ -10,6 +10,7 @@ from app.dependencies.database import get_db, get_read_db
 from app.models.pm import Sprint, Story
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
+from app.services.org_time import get_org_timezone, org_today
 from app.schemas.standup import (
     FeedbackCreate,
     FeedbackResponse,
@@ -305,16 +306,11 @@ async def list_standup_history(
     # 누락하면 파이썬 기본값인 Query(...) 센티넬 객체(정수 아님·truthy) 가 그대로 들어온다.
     # int가 아니면 필터 없음으로 취급(cursor의 isinstance(..., str) 가드와 동형).
     if isinstance(days, int):
-        # story #3665(BE·결함, 2026-09-07) — `date.today()`는 프로세스(OS) 로컬 타임존
-        # 기준이라, 배포 컨테이너의 시스템 TZ가 UTC가 아니면(또는 이 값을 읽는 시점이
-        # 로컬 자정 경계와 겹치면) 실행마다 "오늘"이 달라지는 비결정적 필터가 된다 —
-        # 실측(로컬 TZ=Asia/Seoul, UTC 17시대) 재현: days=1 필터가 UTC 기준으로 명시
-        # 심어진 "오늘" 항목을 놓쳤다(0건 vs 기대 1건), TZ=UTC로 바꾸면 즉시 통과.
-        # `datetime.now(timezone.utc).date()`로 명시 UTC 고정 — 환경(컨테이너 TZ)에
-        # 무관하게 항상 같은 값을 낸다(StandupEntry.date 자체는 client-supplied라 그
-        # 값의 타임존 관례는 이 수정의 범위 밖 — 여기서 고치는 것은 "오늘"의 계산 방식
-        # 만이다).
-        q = q.where(StandupEntry.date >= datetime.now(timezone.utc).date() - timedelta(days=days - 1))
+        # story #3674(BE 確定 2026-09-07) — "오늘"은 조직 시간대 기준(org_time.py).
+        # org.timezone 미설정(null)이면 UTC로 폴백해 3665(#4020)의 환경-TZ 고정
+        # 동작을 그대로 보존한다(회귀 0).
+        org_timezone = await get_org_timezone(repo.session, repo.org_id)
+        q = q.where(StandupEntry.date >= org_today(org_timezone) - timedelta(days=days - 1))
     # #2540 CI 교훈(오르테가군): "값이 있는지"만 보면 안 되고 "그 값이 문자열인지"까지 봐야
     # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
     # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
