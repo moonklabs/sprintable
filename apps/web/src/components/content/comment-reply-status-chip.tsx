@@ -19,8 +19,8 @@ import {
  * 실패 포함 현재 최신) 하나다 — 톤(칩 색)·낱말·아래 실패 줄이 이 한 주어로
  * 통일된다. 한때 있던 `latestSentStatus`(보낸 답변만의 최신 상태로 조합 문구의
  * status만 따로 갈아치우던 additive prop, story #3596 Design CHANGES①)는 이
- * 決으로 폐기됐다 — BE 필드(`latest_sent_reply_status`)는 남아 있어도 FE
- * 소비는 여기서 완전히 걷는다.
+ * 決으로 폐기됐다 — BE 필드(`latest_sent_reply_status`)도 같은 PR에서 은퇴
+ * (응답 스키마·라우터·서비스 함수까지 전부 걷음, 죽은 필드 없음).
  */
 export function CommentReplyStatusChip({
   status, repliesCount,
