@@ -1145,9 +1145,31 @@ jobs:
           path: /tmp/shard-durations
           merge-multiple: true
 
-      - name: Audit shard durations vs weights.json (story #3558, warn-only)
+      # story #3642(3396/3558 후속) — 「과소 등재(ratio≥2)가 3 run 연속」을 세려면 run
+      # 사이에 작은 상태(파일별 연속 카운트)가 살아남아야 한다 — actions/cache가 그
+      # 유일한 run-간 저장소다(job/run은 매번 새 환경). key를 run_id로 유니크하게 저장
+      # (매번 새로 커밋), restore-keys 접두만으로 "가장 최근 저장분"을 복원(정확히 같은
+      # key가 없으면 GH가 접두 매치 중 최신을 준다) — save 쪽은 항상 실행(if: always(),
+      # 이 잡이 실패해도 스트릭은 이어져야 다음 run이 이어 셀 수 있다).
+      - name: Restore weights-drift streak state (story #3642)
+        id: drift-cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/weights-drift-streak.json
+          key: weights-drift-streak-${{ github.run_id }}
+          restore-keys: |
+            weights-drift-streak-
+
+      - name: Audit shard durations vs weights.json (story #3558+#3642, warn-only)
         working-directory: backend
-        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations
+        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}"
+
+      - name: Save weights-drift streak state (story #3642)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/weights-drift-streak.json
+          key: weights-drift-streak-${{ github.run_id }}
 
       # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
       # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다
