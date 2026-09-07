@@ -217,7 +217,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             </div>
           ) : (
             <div className="space-y-2">
-              {agents.map((agent) => (
+              {agents.map((agent, index) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                   <Link href={`/organization/workforce/${agent.id}`} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -242,16 +242,23 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                         {ta('viewConnectionSettings')}
                       </Link>
                     ) : null}
-                    {isAdmin ? (
-                      <Button
-                        variant="glass"
-                        size="sm"
-                        onClick={() => requestToggle(agent)}
-                        disabled={togglingId === agent.id}
-                      >
-                        {togglingId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent')}
-                      </Button>
-                    ) : null}
+                    {isAdmin ? (() => {
+                      // story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「비활성화」/
+                      // 「활성화」 접근 이름이라 보조기술 버튼 목록에서 어느 에이전트
+                      // 행인지 못 가른다. 순번+현재 보이는 라벨을 그대로 품는다.
+                      const visibleLabel = togglingId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent');
+                      return (
+                        <Button
+                          variant="glass"
+                          size="sm"
+                          onClick={() => requestToggle(agent)}
+                          disabled={togglingId === agent.id}
+                          aria-label={t('agentToggleAriaLabel', { n: index + 1, label: visibleLabel })}
+                        >
+                          {visibleLabel}
+                        </Button>
+                      );
+                    })() : null}
                     <Link href={`/organization/workforce/${agent.id}`} className="text-muted-foreground hover:text-foreground">
                       <ChevronRight className="size-4" />
                     </Link>

@@ -36,7 +36,7 @@ const COMMENT: CommentItem = {
   externalCreatedAt: '2026-09-05T10:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null, replyStatus: 'none',
   replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null,
   latestReplyText: null, repliesCount: 0,
-  openReplyDraft: null, sentRepliesCount: 0, latestSentReplyStatus: null,
+  openReplyDraft: null, sentRepliesCount: 0,
 };
 
 const DRAFT_REPLY: ReplyView = {

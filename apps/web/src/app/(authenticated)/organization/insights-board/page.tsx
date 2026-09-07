@@ -343,7 +343,7 @@ export default function InsightsBoardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((row) => (
+                {rows.map((row, index) => (
                   <tr key={row.publication_id} data-testid="insights-board-row">
                     <td className="max-w-xs truncate px-3 py-2.5 font-medium text-foreground">
                       {row.external_url ? (
@@ -368,12 +368,15 @@ export default function InsightsBoardPage() {
                       <InsightsBoardCommentsCell row={row} t={t} />
                     </td>
                     <td className="px-3 py-2.5">
+                      {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「후속 조치」
+                          접근 이름이라 보조기술 버튼 목록에서 어느 행인지 못 가른다. */}
                       {canCreateFollowUp ? (
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => setFollowUpRow(row)}
                           data-testid="insights-board-follow-up-button"
+                          aria-label={t('followUpAriaLabel', { n: index + 1, label: t('followUpAction') })}
                         >
                           {t('followUpAction')}
                         </Button>

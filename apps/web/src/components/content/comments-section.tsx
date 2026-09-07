@@ -60,12 +60,6 @@ export interface CommentItem {
   openReplyDraft: { id: string; status: string; text: string } | null;
   /** story #3596 — status=sent만 카운트(배지 N의 새 주어). */
   sentRepliesCount: number;
-  /** story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 「답변 N ·
-   * 최신 {상태}」(N>=2)의 status 주어. replyStatus(draft/pending 포함 최신)와
-   * 별도 축 — 최신이 안 보낸 초안이어도 배지는 "보낸 답변"의 상태를 말해야
-   * 한다. null=보낸 답변 0건(그 경우 이 필드를 안 쓴다, N<2 칩은 여전히
-   * replyStatus). */
-  latestSentReplyStatus: CommentReplyStatus | null;
 }
 
 // story #3517(유나 §22-②) — 세 얼굴. "미수집"(null)·"댓글 없음"([])·"불러오지 못함"(fetch
@@ -115,7 +109,6 @@ export interface RawCommentsResponse {
     replies_count?: number;
     open_reply_draft?: { id: string; status: string; text: string } | null;
     sent_replies_count?: number;
-    latest_sent_reply_status?: string | null;
   }[];
   active_count: number;
   deleted_count: number;
@@ -181,9 +174,6 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
     repliesCount: c.replies_count ?? 0,
     openReplyDraft: c.open_reply_draft ?? null,
     sentRepliesCount: c.sent_replies_count ?? 0,
-    latestSentReplyStatus: c.latest_sent_reply_status != null
-      ? replyStatusFrom({ status: c.latest_sent_reply_status, command_id: null })
-      : null,
   }));
   // story #3517(유나 §22-10, PO 確定 2026-09-05) — "댓글 없음" 판정은 active_count
   // 하나만 본다(comments.length 아님 — 페이지 잘림·지워진 행이 섞이면 틀린다).
@@ -264,8 +254,18 @@ function CommentsList({
 }) {
   return (
     <ul className="space-y-3">
-      {comments.map((comment) => {
+      {comments.map((comment, index) => {
         const isDeleted = comment.deletedAt !== null;
+        // story #3592(§22-18 정본) — 항목 식별자는 «순번»(1-based, 작성자 형은
+        // 폐기 — 같은 사람이 여러 댓글을 달거나 작성자 정보가 없으면 못 가른다).
+        // replyLabel을 한 번만 계산해 버튼 children·aria-label 둘 다에 그대로
+        // 넣는다(같은 문구를 두 번 조립하지 않는다 — 조립 규칙 0, §22-18 ⛔
+        // "고정 낱말로 덮지 않는다"와 같은 사상: 실제 렌더되는 그 낱말을 그대로
+        // aria-label에 품긴다).
+        const ordinal = index + 1;
+        const replyLabel = comment.openReplyDraft
+          ? t('commentsReplyContinueCta')
+          : comment.sentRepliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta');
         return (
           <li key={comment.id} className="space-y-1.5 rounded-md border border-border p-3" data-testid="comments-item">
             <div className="flex items-center justify-between gap-2">
@@ -302,6 +302,7 @@ function CommentsList({
             <CommentBodyText
               text={comment.bodyText}
               moreLabel={t('commentsMoreLabel')}
+              moreAriaLabel={t('commentsMoreAriaLabel', { n: ordinal })}
               forceCollapsed={isDeleted}
               deletedSummaryLabel={t('commentsDeletedBodyLabel')}
             />
@@ -317,15 +318,15 @@ function CommentsList({
                   안 보낸 초안은 배지가 아니라 위 버튼 낱말(「이어서 답변」)로만
                   드러난다 — repliesCount(초안 포함 전체)를 쓰면 초안 하나뿐인
                   댓글도 "답변 N"으로 잘못 셌다(§3596 출처 그 결함).
-                  latestSentStatus(유나 Design CHANGES①, 페드루 PO 정정
-                  2026-09-07) — 「답변 N · 최신 {상태}」(N>=2)의 상태 주어도
-                  보낸 답변 것으로(최신이 안 보낸 초안이면 status 자체는
-                  여전히 draft 등일 수 있어 그 경우 배지가 초안을 말하던
-                  자리를 닫는다). N<2 칩은 그대로 status(=replyStatus). */}
+                  story #3592(유나 §22-16 ② 「제3의 답」, PO 決 2026-09-07
+                  01:24Z) — status 주어는 count(=sentRepliesCount) 임계와
+                  무관하게 «항상» replyStatus 하나(현재 최신 답변의 상태,
+                  초안·실패 포함) — 톤(칩 색)·낱말·아래 실패 줄이 이 한
+                  주어로 통일된다. 한때(#3596 Design CHANGES①) 있던 "N>=2면
+                  보낸 답변 것으로 갈아친다"는 그 뒤 決으로 폐기됐다. */}
               <CommentReplyStatusChip
                 status={comment.replyStatus}
                 repliesCount={comment.sentRepliesCount}
-                latestSentStatus={comment.latestSentReplyStatus}
               />
               {comment.replyStatus === 'published' && comment.replyExternalUrl ? (
                 <a
@@ -334,6 +335,7 @@ function CommentsList({
                   rel="noopener noreferrer"
                   className="text-xs text-primary hover:underline"
                   data-testid="comments-item-reply-external-link"
+                  aria-label={t('commentsViewOnChannelAriaLabel', { n: ordinal, label: t('commentsReplyExternalLinkCta') })}
                 >
                   {t('commentsReplyExternalLinkCta')}
                 </a>
@@ -360,6 +362,8 @@ function CommentsList({
                 displayTimezone={displayTimezone}
                 onRetry={comment.replyCommandId ? () => onRetryReply(comment) : undefined}
                 onResubmit={() => onResubmitReply(comment)}
+                retryAriaLabel={t('commentsRetryAriaLabel', { n: ordinal, label: t('commentsReplyRetryCta') })}
+                resubmitAriaLabel={t('commentsResubmitAriaLabel', { n: ordinal, label: t('commentsReplyResubmitCta') })}
               />
             ) : null}
             {/* story #3517(BE #3867 조각②, PO 確定 2026-09-05) — §22-9: 지워진
@@ -372,6 +376,7 @@ function CommentsList({
                   size="sm"
                   onClick={() => onConvertToTask(comment)}
                   data-testid="comments-item-convert-to-task"
+                  aria-label={t('commentsConvertToTaskAriaLabel', { n: ordinal, label: t('commentsConvertToTaskCta') })}
                 >
                   {t('commentsConvertToTaskCta')}
                 </Button>
@@ -381,15 +386,16 @@ function CommentsList({
                   size="sm"
                   onClick={() => onReply(comment)}
                   data-testid="comments-item-reply"
+                  // story #3592(§22-18 정본) — visible text만으로는(WCAG 2.5.3은
+                  // 닫아도) 목록 안에서 «어느 댓글»의 버튼인지 못 가른다(§17-20 ⑧과
+                  // 같은 클래스 — 댓글 2건이면 같은 라벨의 버튼이 스크린리더
+                  // 버튼목록에 둘 뜬다). replyLabel(위에서 한 번만 계산)을 aria-label
+                  // 에 «그대로 품겨»(고정 낱말로 덮지 않는다) 순번으로 가른다 —
+                  // 아래 §22-18 참조로 정정(이 주석이 예전엔 "visible text=accessible
+                  // name이라 불필요"라고 적어 §17-20 ⑧을 안 닫은 채로 접혀 있었다).
+                  aria-label={t('commentsReplyAriaLabel', { n: ordinal, label: replyLabel })}
                 >
-                  {/* story #3593(Phase2·FE, 페드루 PO 確定 2026-09-06) — 이미 답변이
-                      있으면(재상신 이력) 버튼 이름이 "답변 더하기"로 갈린다(3592
-                      처방과 합쳐 접근 이름도 같은 낱말 — 이 버튼은 visible text가
-                      곧 accessible name이라 별도 aria-label 불필요). */}
-                  {/* story #3596 AC7 — openReplyDraft가 이기고(sentRepliesCount
-                      무관), 그다음 sentRepliesCount, 둘 다 없으면 기본. */}
-                  {comment.openReplyDraft ? t('commentsReplyContinueCta')
-                    : comment.sentRepliesCount > 0 ? t('commentsReplyAgainCta') : t('commentsReplyCta')}
+                  {replyLabel}
                 </Button>
               </div>
             ) : null}

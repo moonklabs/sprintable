@@ -32,7 +32,8 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function stubFetch(opts: { meReject?: boolean } = {}) {
+function stubFetch(opts: { meReject?: boolean; agents?: { id: string; name: string; role: string; is_active: boolean }[] } = {}) {
+  const agents = opts.agents ?? [{ id: 'a1', name: '에이전트 하나', role: 'member', is_active: true }];
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => null };
     if (url === '/api/me') {
@@ -41,7 +42,7 @@ function stubFetch(opts: { meReject?: boolean } = {}) {
     }
     if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
     if (url.startsWith('/api/team-members?')) {
-      return { ok: true, json: async () => ({ data: [{ id: 'a1', name: '에이전트 하나', role: 'member', is_active: true }] }) };
+      return { ok: true, json: async () => ({ data: agents }) };
     }
     return { ok: false, json: async () => null };
   }));
@@ -57,5 +58,28 @@ describe('AgentManagementTab — meRes/projectsRes 격리(story #3519)', () => {
     stubFetch({ meReject: true });
     await mount();
     expect(container.textContent).toContain('에이전트 하나');
+  });
+});
+
+// story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「비활성화」 접근 이름이라 보조기술
+// 버튼 목록에서 어느 에이전트 행인지 못 가른다.
+describe('AgentManagementTab — 토글 버튼 접근 이름 전수(story #3592)', () => {
+  it('⭐#3592 — 2건이면 두 「비활성화」 버튼의 접근 이름이 서로 다르고 각자 순번을 품는다', async () => {
+    stubFetch({
+      agents: [
+        { id: 'a1', name: '에이전트 하나', role: 'member', is_active: true },
+        { id: 'a2', name: '에이전트 둘', role: 'member', is_active: true },
+      ],
+    });
+    await mount();
+
+    const buttons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === '비활성화');
+    expect(buttons).toHaveLength(2);
+    const names = buttons.map((b) => b.getAttribute('aria-label'));
+    expect(names[0]).not.toBe(names[1]);
+    expect(names[0]).toContain('1번째');
+    expect(names[0]).toContain('비활성화');
+    expect(names[1]).toContain('2번째');
+    expect(names[1]).toContain('비활성화');
   });
 });
