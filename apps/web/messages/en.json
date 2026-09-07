@@ -2371,6 +2371,8 @@
     "editSaved": "Saved. A new version was created.",
     "editSaveFailed": "Failed to save.",
     "editLoadFailed": "Failed to load the post.",
+    "editNotFound": "Couldn't find this post.",
+    "editForbidden": "You don't have permission to view this post.",
     "editSaveCta": "Save",
     "editSavingCta": "Saving…",
     "fieldTitle": "Title",

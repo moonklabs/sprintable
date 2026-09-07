@@ -673,6 +673,10 @@ export default function ChannelPostEditPage() {
     genBudget.status === 'ok' ? genBudget.currency : null;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — notFound/loadError
+  // 하나였던 것에 forbidden을 더해 서버 status를 그대로 세 갈래로 가른다(추정 0).
+  const [notFound, setNotFound] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
 
   // story #3428(T3-M·§17-16) — 어댑터가 선언한 이미지 규격(연결 응답에서 읽음).
   // undefined="아직 모른다"(연결 조회 전/실패) — maxCount<=0과 동형으로 첨부 칸을
@@ -811,6 +815,8 @@ export default function ChannelPostEditPage() {
     async function load() {
       setLoading(true);
       setLoadError(false);
+      setNotFound(false);
+      setForbidden(false);
       try {
         const [draftRes, versionsRes] = await Promise.all([
           fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`),
@@ -818,7 +824,17 @@ export default function ChannelPostEditPage() {
         ]);
         if (cancelled) return;
         if (!draftRes.ok || !versionsRes.ok) {
-          setLoadError(true);
+          // story #3662 — 주 데이터(draftRes)의 status로만 가른다(versionsRes는 같은
+          // draft를 다른 각도로 보는 것이라 draftRes가 404/403이면 versionsRes도 사실상
+          // 같은 사유일 것 — draftRes.ok인데 versionsRes만 404/403인 경우는 서버 불변식
+          // 위반에 가까워 그 외/loadError로 접는다, 지어내지 않는다).
+          if (draftRes.status === 404) {
+            setNotFound(true);
+          } else if (draftRes.status === 403) {
+            setForbidden(true);
+          } else {
+            setLoadError(true);
+          }
           return;
         }
         const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
@@ -1706,6 +1722,24 @@ export default function ChannelPostEditPage() {
 
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
+  }
+  if (notFound) {
+    return (
+      <div className="mx-auto w-full max-w-2xl p-6">
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>{t('editNotFound')}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+  if (forbidden) {
+    return (
+      <div className="mx-auto w-full max-w-2xl p-6">
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>{t('editForbidden')}</AlertDescription>
+        </Alert>
+      </div>
+    );
   }
   if (loadError || !draft) {
     return (

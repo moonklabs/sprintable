@@ -216,6 +216,11 @@ export default function ContentPostEditPage() {
   const [versions, setVersions] = useState<SitePostVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — notFound/loadError
+  // 하나였던 것에 forbidden을 더해 서버 status를 그대로 세 갈래로 가른다(추정 0). 주
+  // 데이터는 versionsRes(이 파일 자체 관례 — draftRes는 부수 데이터, 위 §16-7 주석 참고).
+  const [notFound, setNotFound] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
 
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
@@ -361,6 +366,8 @@ export default function ContentPostEditPage() {
     async function load() {
       setLoading(true);
       setLoadError(false);
+      setNotFound(false);
+      setForbidden(false);
       try {
         // story #3514(doc a0da40c9, PO 確定 2026-09-05) — lint-on-read: 단건 GET을
         // /versions와 병렬로 부른다(channel-posts/[draftId]/page.tsx :340-341과 동형
@@ -387,7 +394,13 @@ export default function ContentPostEditPage() {
         ]);
         if (cancelled) return;
         if (!versionsRes.ok) {
-          setLoadError(true);
+          if (versionsRes.status === 404) {
+            setNotFound(true);
+          } else if (versionsRes.status === 403) {
+            setForbidden(true);
+          } else {
+            setLoadError(true);
+          }
           return;
         }
         if (draftRes?.ok) {
@@ -999,6 +1012,24 @@ export default function ContentPostEditPage() {
     );
   }
 
+  if (notFound) {
+    return (
+      <div className="mx-auto w-full max-w-3xl p-6">
+        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+          <AlertDescription>{t('editNotFound')}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+  if (forbidden) {
+    return (
+      <div className="mx-auto w-full max-w-3xl p-6">
+        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+          <AlertDescription>{t('editForbidden')}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
   if (loadError || !latest) {
     return (
       <div className="mx-auto w-full max-w-3xl p-6">

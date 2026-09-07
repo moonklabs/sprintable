@@ -2371,6 +2371,8 @@
     "editSaved": "저장했습니다. 새 버전이 생성됐습니다.",
     "editSaveFailed": "저장하지 못했습니다.",
     "editLoadFailed": "글을 불러오지 못했습니다.",
+    "editNotFound": "이 글을 찾을 수 없습니다.",
+    "editForbidden": "이 글을 볼 권한이 없습니다.",
     "editSaveCta": "저장",
     "editSavingCta": "저장 중…",
     "fieldTitle": "제목",
