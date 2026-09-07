@@ -49,8 +49,11 @@ class InsightSnapshot(Base):
     external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # 'pending'|'captured'|'unsupported'|'failed'|'dead_letter' — publication_commands.status
-    # 관례와 동형(그라운딩 §9), 새 상태값 체계 발명 안 함.
+    # 'pending'|'in_progress'|'captured'|'unsupported'|'failed'|'superseded' — enum/CHECK
+    # 아님(Text, 마이그 0으로 새 값 추가 가능). 'superseded'는 story #3660(2026-09-07) —
+    # 같은 publication_id 재발행이 새 anchor_at으로 새 2행을 열면서, 옛 사이클의
+    # pending/in_progress 잔존 행을 회수하는 값(captured/failed/unsupported는 이력이라
+    # 이 전이 대상이 아니다 — insight_snapshots.py::schedule_insight_snapshots 참고).
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     # 어댑터 원본 응답 그대로(디버그·재정규화 근거) — 정규화 로직이 나중에 바뀌어도

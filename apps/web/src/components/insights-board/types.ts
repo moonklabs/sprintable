@@ -6,7 +6,17 @@
 // insight-snapshot-block.tsx(story #3499)의 InsightSnapshot과 형태가 비슷하지만 이 보드의
 // d1/d7 버킷은 그 스냅샷 히스토리 항목과 다른 모양이다(due_at·source 필드가 없다 — 이
 // 보드는 "지금 이 버킷이 어디 있나"만 보여주는 요약 뷰다, 히스토리 목록이 아니다).
-export type InsightSnapshotStatus = 'pending' | 'captured' | 'unsupported' | 'failed' | 'dead_letter';
+// story #3660(2026-09-07, 페드루 PO CHANGES) — 'in_progress'가 누락돼 있었고(BE가
+// due 도래분을 pending→in_progress로 전이해 실제로 쓰는 값), 재발행 자가회수가 옛
+// 사이클 pending/in_progress 행을 superseded로 회수하는 값을 새로 추가했다.
+export type InsightSnapshotStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'captured'
+  | 'unsupported'
+  | 'failed'
+  | 'superseded'
+  | 'dead_letter';
 
 export interface InsightNormalizedMetrics {
   impressions: number | null;

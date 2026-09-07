@@ -152,6 +152,296 @@ async def test_schedule_creates_two_rows_and_is_idempotent_on_same_anchor():
         await engine.dispose()
 
 
+# ─── story #3660 — 재발행 자가회수(옛 사이클 pending/in_progress → superseded) ──
+
+
+@pytest.mark.anyio
+async def test_republish_supersedes_old_pending_rows_collector_skips_them():
+    """AC1·AC2 — 최초 사이클 2행(pending) → 재발행 → 옛 2행 superseded·새 2행
+    pending. 수집기 1틱을 옛 due_at(이미 지남)로 돌려도 superseded는 안 집힌다
+    (status=="pending" 필터가 구조적으로 배제 — 뮤테이션은 아래 별도 테스트)."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import process_due_insight_snapshots, schedule_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            first_anchor = datetime.now(timezone.utc) - timedelta(days=20)
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=first_anchor,
+            )
+            await s.commit()
+
+            second_anchor = datetime.now(timezone.utc) - timedelta(days=5)
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=second_anchor,
+            )
+            await s.commit()
+
+            rows = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+                .order_by(InsightSnapshot.due_at.asc())
+            )).scalars().all()
+            assert len(rows) == 4
+            statuses = sorted(r.status for r in rows)
+            assert statuses == ["pending", "pending", "superseded", "superseded"], statuses
+
+        async with Session() as s:
+            # 옛 due_at(20일 전 기준 +1d/+7d)은 이미 지났다 — 수집기가 지금 돌아도
+            # superseded 2행은 안 집힌다(둘 다 지금 처리 대상인 새 pending 2행과 due_at이
+            # 겹치지 않아 이 tick에선 어차피 due 도래도 아니다, 별도로 재확認).
+            counts = await process_due_insight_snapshots(s, now=datetime.now(timezone.utc))
+            await s.commit()
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+            )).scalars().all()
+            superseded_rows = [r for r in rows if r.status == "superseded"]
+            assert len(superseded_rows) == 2, "superseded 행이 수집기에 건드려짐"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_republish_mutation_removing_status_pending_filter_lets_superseded_get_collected():
+    """뮤테이션 — 수집기 due 쿼리에서 status=="pending" 필터를 빼면(원래 방어가 없어지면)
+    superseded 행도 due 도래분으로 집혀 in_progress로 전이된다 — RED 재현."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from sqlalchemy import select, update
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            snap = InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=uuid.uuid4(),
+                publication_id=uuid.uuid4(), publication_kind="site_post", channel="sandbox",
+                due_at=datetime.now(timezone.utc) - timedelta(hours=1), status="superseded",
+            )
+            s.add(snap)
+            await s.commit()
+            snap_id = snap.id
+
+            # 원래 코드의 필터(status=="pending")를 뺀 "버그" 쿼리를 직접 재현 — RED.
+            buggy_due_rows = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.due_at <= datetime.now(timezone.utc))
+            )).scalars().all()
+            assert any(r.id == snap_id for r in buggy_due_rows), (
+                "뮤테이션이 무력화됨 — status 필터 없는 쿼리가 superseded를 안 집었다"
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_republish_same_anchor_retry_leaves_two_rows_no_supersede():
+    """PO 確定① 회귀 — 같은 anchor로 재처리(워커 재시도 등)는 due_at이 new_due_ats와
+    일치해 supersede WHERE에 안 걸린다. 2행 그대로(4행 아님)."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import schedule_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            anchor = datetime.now(timezone.utc)
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=anchor,
+            )
+            await s.commit()
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=anchor,
+            )
+            await s.commit()
+
+            rows = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+            )).scalars().all()
+            assert len(rows) == 2, "같은 anchor 재처리가 행을 늘리거나 superseded로 잘못 회수함"
+            assert all(r.status == "pending" for r in rows)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_republish_already_captured_old_cycle_row_stays_captured_not_superseded():
+    """AC1 — 옛 사이클 행이 이미 captured(재발행 前에 수집 완료)면 재발행이 그 행을
+    건드리지 않는다(pending/in_progress만 전이 대상 — 이력 불변)."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import schedule_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            first_anchor = datetime.now(timezone.utc) - timedelta(days=20)
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=first_anchor,
+            )
+            await s.commit()
+
+            captured_due_at = first_anchor + timedelta(days=1)
+            row = (await s.execute(
+                select(InsightSnapshot).where(
+                    InsightSnapshot.publication_id == publication_id, InsightSnapshot.due_at == captured_due_at,
+                )
+            )).scalar_one()
+            row.status = "captured"
+            row.captured_at = datetime.now(timezone.utc)
+            await s.commit()
+            captured_row_id = row.id
+
+            second_anchor = datetime.now(timezone.utc) - timedelta(days=5)
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=second_anchor,
+            )
+            await s.commit()
+
+            captured_row = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.id == captured_row_id)
+            )).scalar_one()
+            assert captured_row.status == "captured", "이미 captured된 이력이 재발행에 덮어써짐"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_finalize_write_race_in_progress_then_superseded_then_capture_attempt_keeps_superseded():
+    """페드루 PO CHANGES①(PR #4015, 2026-09-07) — 수집기가 행을 클레임(pending→
+    in_progress·commit)한 뒤, 그 사이 같은 publication의 재발행이 그 행을 superseded로
+    회수하면, 수집기가 나중에 그 행을 종결(예: captured)하려 해도 그 회수가 유지돼야
+    한다(status 되돌림 금지 — 역전 결함, 실측으로 발견·처방됨). `_finalize_snapshot_
+    write`를 직접 호출해 그 창을 재현한다."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import _finalize_snapshot_write, schedule_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            first_anchor = datetime.now(timezone.utc) - timedelta(days=20)
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=first_anchor,
+            )
+            await s.commit()
+
+            # 클레임(수집기의 1단계) — pending → in_progress, commit.
+            row = (await s.execute(
+                select(InsightSnapshot).where(
+                    InsightSnapshot.publication_id == publication_id,
+                    InsightSnapshot.due_at == first_anchor + timedelta(days=1),
+                )
+            )).scalar_one()
+            row.status = "in_progress"
+            await s.commit()
+            row_id = row.id
+
+            # 그 사이 재발행 — 이 행을 superseded로 회수(별도 커밋, 클레임과 종결
+            # 사이의 창을 그대로 재현).
+            second_anchor = datetime.now(timezone.utc) - timedelta(days=5)
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=second_anchor,
+            )
+            await s.commit()
+
+            confirm = (await s.execute(
+                select(InsightSnapshot.status).where(InsightSnapshot.id == row_id)
+            )).scalar_one()
+            assert confirm == "superseded", f"사전조건 실패 — 재발행이 회수를 안 함(status={confirm})"
+
+            # 수집기의 2단계(종결) — 이미 detach된 `row` 객체로 captured 시도.
+            wrote = await _finalize_snapshot_write(s, row, new_status="captured")
+            assert wrote is False, "가드가 뚫려 superseded 뒤에도 종결 쓰기가 성공함"
+
+        async with Session() as s:
+            final = (await s.execute(
+                select(InsightSnapshot.status).where(InsightSnapshot.id == row_id)
+            )).scalar_one()
+            assert final == "superseded", f"역전 결함 — captured 시도 뒤 status={final}(superseded 유지돼야)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_mutation_unconditional_finalize_write_reverts_superseded_status():
+    """뮤테이션 — `_finalize_snapshot_write`의 가드(WHERE status='in_progress')를
+    없애고 무조건 UPDATE하면(원래 결함 재현), superseded가 captured로 되돌아간다 —
+    RED."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import schedule_insight_snapshots
+    from sqlalchemy import select, update
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            first_anchor = datetime.now(timezone.utc) - timedelta(days=20)
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=first_anchor,
+            )
+            await s.commit()
+
+            row = (await s.execute(
+                select(InsightSnapshot).where(
+                    InsightSnapshot.publication_id == publication_id,
+                    InsightSnapshot.due_at == first_anchor + timedelta(days=1),
+                )
+            )).scalar_one()
+            row_id = row.id
+            row.status = "in_progress"
+            await s.commit()
+
+            second_anchor = datetime.now(timezone.utc) - timedelta(days=5)
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=second_anchor,
+            )
+            await s.commit()
+
+            # 원래 결함 재현 — 가드 없는 무조건 UPDATE.
+            await s.execute(
+                update(InsightSnapshot).where(InsightSnapshot.id == row_id).values(status="captured")
+            )
+            await s.commit()
+
+            reverted = (await s.execute(
+                select(InsightSnapshot.status).where(InsightSnapshot.id == row_id)
+            )).scalar_one()
+            assert reverted == "captured", "뮤테이션이 무력화됨 — 무조건 UPDATE가 실제로 되돌리지 않음"
+    finally:
+        await engine.dispose()
+
+
 # ─── sandbox 전 과정(멱등 등록 → tick → captured → evidence) ──────────────────
 
 
@@ -660,6 +950,13 @@ async def test_insights_list_endpoint_offset_label_nulls_out_superseded_snapshot
         for row in rows:
             by_label[row["offset_label"]] = by_label.get(row["offset_label"], 0) + 1
         assert by_label == {None: 2, "1d": 1, "7d": 1}, by_label
+
+        # story #3660 — 최초 사이클의 pending 2행이 재발행으로 superseded 회수됐다(옛
+        # pending 스냅샷이 살아서 수집되던 자가회수 부재의 근본 처방).
+        by_status: dict[str, int] = {}
+        for row in rows:
+            by_status[row["status"]] = by_status.get(row["status"], 0) + 1
+        assert by_status == {"superseded": 2, "pending": 2}, by_status
 
         # 카운트만으론 부족 — «어느 사이클»의 due_at이 1d/7d로 라벨됐는지 직접 확認한다
         # (뮤테이션 대상: rows[0].due_at 기준 역산 같은 우회는 이 표본에서 우연히 같은
