@@ -747,7 +747,14 @@ async def test_api_refresh_connection_not_active_returns_409_not_502():
         finally:
             app.dependency_overrides.clear()
         assert resp.status_code == 409, resp.text
-        assert resp.json()["error"]["code"] == "CHANNEL_CONNECTION_NOT_ACTIVE"
+        body = resp.json()
+        assert body["error"]["code"] == "CHANNEL_CONNECTION_NOT_ACTIVE"
+        # story #3615/AC4(2026-09-07 PO 정정) — CHANNEL_CONNECTION_NOT_ACTIVE는 raise
+        # 자리 다수가 uuid를 그대로 담아(api-error-message.ts allowlist 등재 금지 사유)
+        # FE가 원문 message를 못 보인다 — 이 엔드포인트는 human_error()로 안전한 손글
+        # 문장을 직접 채운다. uuid가 안 섞였는지 직접 확認(connection.id 문자열 부재).
+        assert body["error"]["user_message"] == "연결이 활성 상태가 아니라 댓글을 대조/수집할 수 없습니다 — 연결 화면에서 확인해 주세요."
+        assert str(conn.id) not in body["error"]["user_message"]
     finally:
         await engine.dispose()
 
@@ -781,7 +788,9 @@ async def test_api_refresh_provider_error_returns_503_not_502(monkeypatch):
         finally:
             app.dependency_overrides.clear()
         assert resp.status_code == 503, resp.text
-        assert resp.json()["error"]["code"] == "CHANNEL_PUBLISH_PROVIDER_ERROR"
+        body = resp.json()
+        assert body["error"]["code"] == "CHANNEL_PUBLISH_PROVIDER_ERROR"
+        assert body["error"]["user_message"] == "채널에서 일시적인 오류가 발생해 다시 수집하지 못했습니다 — 잠시 후 다시 시도해 주세요."
     finally:
         await engine.dispose()
 
