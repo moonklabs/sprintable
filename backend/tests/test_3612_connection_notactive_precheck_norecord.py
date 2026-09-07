@@ -248,3 +248,48 @@ async def test_ac4_insight_publication_not_found_uses_own_code():
             assert exc_info.value.error_code != "CHANNEL_CONNECTION_NOT_ACTIVE"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ac4b_comment_publication_not_found_uses_own_code_and_is_precheck():
+    """PO 대조 CHANGES-1(2026-09-07) — channel_post_comments.py에도 insight :320과
+    같은 패턴("channel_publication을 찾을 수 없습니다"가 CHANNEL_CONNECTION_NOT_ACTIVE
+    재사용)이 1곳 있었다. 자기 코드(COMMENT_PUBLICATION_NOT_FOUND)로 분리하되,
+    선검사 성격(승격/기록 대상 아님·스케줄은 쉼)은 그대로 유지되는지 함께 고정한다
+    (그냥 코드만 바꾸고 _COMMENT_PRECHECK_CODES 갱신을 빠뜨리면 이 자리만 다시
+    "failed"로 승격 대상이 되는 회귀가 조용히 생긴다)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_post_comment import CommentCollectionSchedule
+    from app.services.channel_post_comments import CommentFetchError, _fetch_replies_raw, refresh_comments_now
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="facebook", status="active")
+            missing_publication_id = uuid.uuid4()
+
+            with pytest.raises(CommentFetchError) as exc_info:
+                await _fetch_replies_raw(
+                    s, org_id=org_id, publication_id=missing_publication_id, channel="facebook", external_id="media-x",
+                )
+            assert exc_info.value.error_code == "COMMENT_PUBLICATION_NOT_FOUND"
+            assert exc_info.value.error_code != "CHANNEL_CONNECTION_NOT_ACTIVE"
+
+            # 선검사 성격 유지 확인 — 이 코드로도 refresh_comments_now가 승격/기록 없이
+            # 그대로 실패만 낸다(connection은 active 그대로, last_error 3필드 불변).
+            original_error_at = datetime.now(timezone.utc) - timedelta(hours=1)
+            conn.last_error = "이전 원인"
+            conn.last_error_code = "CHANNEL_TOKEN_EXPIRED"
+            conn.last_error_at = original_error_at
+            await s.commit()
+
+            with pytest.raises(CommentFetchError):
+                await refresh_comments_now(s, org_id=org_id, publication_id=missing_publication_id)
+
+            refreshed = await s.get(ChannelConnection, conn.id)
+            assert refreshed.last_error == "이전 원인"
+            assert refreshed.last_error_code == "CHANNEL_TOKEN_EXPIRED"
+            assert refreshed.last_error_at == original_error_at
+    finally:
+        await engine.dispose()

@@ -43,6 +43,12 @@ _ACTIVE_PUBLICATIONS_ORG_CAP = 200
 # transient(429/5xx) 백오프 — next_attempt_at = now + min(2^attempt_count분, 60분).
 _TRANSIENT_BACKOFF_CAP_MINUTES = 60
 
+# story #3612 — _fetch_replies_raw의 선검사 실패 코드 전부(연결 비활성/연결 없음
+# ·발행 기록 없음/자격 없음). 전부 "provider가 알려준 새 사실"이 아니라 우리 쪽
+# 사전 조회가 막은 것이라 승격(_promote_connection_status)·기록 대상이 아니고,
+# 스케줄 루프는 이 코드들을 만나면 그 행을 "connection_inactive"로 쉬운다(AC1·AC2).
+_COMMENT_PRECHECK_CODES = frozenset({"CHANNEL_CONNECTION_NOT_ACTIVE", "COMMENT_PUBLICATION_NOT_FOUND"})
+
 
 class CommentFetchError(Exception):
     """어댑터 fetch_replies 실패 통로. error_code는 `publication_command.py::
@@ -164,8 +170,12 @@ async def _fetch_replies_raw(
         select(ChannelPublication).where(ChannelPublication.id == publication_id)
     )).scalar_one_or_none()
     if pub is None or pub.external_id is None:
+        # story #3612(PO 대조 CHANGES-1, insight_snapshots.py::_fetch_*_via_connection과
+        # 같은 패턴) — "발행 기록 없음"은 연결 상태와 무관한 다른 사실인데 CHANNEL_
+        # CONNECTION_NOT_ACTIVE를 재사용하고 있었다. 자기 코드로 분리(_COMMENT_
+        # PRECHECK_CODES에도 등재 — 선검사 성격은 동일해 승격/기록 대상은 아니다).
         raise CommentFetchError(
-            error_code="CHANNEL_CONNECTION_NOT_ACTIVE",
+            error_code="COMMENT_PUBLICATION_NOT_FOUND",
             message=f"channel_publication을 찾을 수 없습니다: {publication_id}",
         )
     connection = await db.get(ChannelConnection, pub.connection_id)
@@ -495,7 +505,7 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
                 continue
             except CommentFetchError as exc:
                 failure_kind = classify_failure_kind(exc.error_code)
-                if exc.error_code == "CHANNEL_CONNECTION_NOT_ACTIVE":
+                if exc.error_code in _COMMENT_PRECHECK_CODES:
                     # story #3612(라이브 결함, 배포 47) — 이건 선검사(이미 비활성/연결
                     # 없음/무자격)가 막은 것이지 provider가 새로 알려준 사실이 아니다.
                     # 승격·last_error 기록 대상이 아니다(AC1 — 안 그러면 그 이전에
@@ -685,7 +695,7 @@ async def refresh_comments_now(
         # 아니다(AC3, 스케줄 루프 쪽 AC1과 동형). 사람에게는 그대로 409로 알린다
         # (schedule_row.status="failed"·raise는 불변) — «기록 안 함»과 «알림 안 함»은
         # 다르다, 이 버튼을 누른 그 사람에게는 지금 실패했다는 사실 자체가 유효한 응답.
-        if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION and exc.error_code != "CHANNEL_CONNECTION_NOT_ACTIVE":
+        if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION and exc.error_code not in _COMMENT_PRECHECK_CODES:
             # story #3603(잔여, 페드루 PO 追加 2026-09-07) — error_code/message를 안 실으면
             # 이 수동 경로만 last_error 3종이 안 채워져(3597과 같은 클래스 재발) 「서버
             # 응답 보기」가 여기서 시작된 만료엔 비거나 옛 오류를 보인다.
