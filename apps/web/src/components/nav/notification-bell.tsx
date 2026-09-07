@@ -22,6 +22,7 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -361,6 +362,7 @@ export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
   const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { toasts, addToast, dismissToast } = useToast();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
@@ -527,12 +529,14 @@ export function NotificationBell() {
     const res = await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' });
     // 서버 실패 시 롤백
     if (!res.ok) {
+      // story #3637(유나 silent-failure-sweep-3632) — 안읽음으로 조용히 되돌아가던 자리.
+      addToast({ title: t('markReadFailed'), type: 'error' });
       setNotifications((prev) =>
         prev ? prev.map((n) => (n.id === id ? { ...n, read_at: null } : n)) : prev,
       );
       setUnreadCount((c) => c + 1);
     }
-  }, []);
+  }, [addToast, t]);
 
   const handleMarkAllRead = useCallback(async () => {
     const readAt = new Date().toISOString();
@@ -543,9 +547,11 @@ export function NotificationBell() {
     const res = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' });
     // 서버 실패 시 unread count 재폴링으로 보정
     if (!res.ok) {
+      // story #3637(유나 silent-failure-sweep-3632) — 배지가 조용히 다시 차오르던 자리.
+      addToast({ title: t('markAllReadFailed'), type: 'error' });
       void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
     }
-  }, [projectId]);
+  }, [projectId, addToast, t]);
 
   const handleNavigate = useCallback(
     (notification: EventNotification) => {
@@ -625,6 +631,7 @@ export function NotificationBell() {
           />
         </div>
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

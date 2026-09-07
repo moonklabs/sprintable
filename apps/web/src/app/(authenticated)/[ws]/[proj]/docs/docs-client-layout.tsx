@@ -196,17 +196,21 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc)));
     try {
       const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort_order: newSortOrder }) });
-      if (!res.ok) await fetchTree();
-    } catch { await fetchTree(); }
-  }, [fetchTree]);
+      // story #3637(유나 silent-failure-sweep-3632) — 낙관 순서변경이 실패하면 fetchTree()로
+      // 조용히 원복되던 자리(형제 kanban-board.tsx:1074처럼 문장까지 낸다).
+      if (!res.ok) { addToast({ title: t('reorderFailed'), type: 'error' }); await fetchTree(); }
+    } catch { addToast({ title: t('reorderFailed'), type: 'error' }); await fetchTree(); }
+  }, [fetchTree, addToast, t]);
 
   const handleMove = useCallback(async (docId: string, newParent: string | null, newSortOrder: number) => {
     setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, parent_id: newParent, sort_order: newSortOrder } : doc)));
     try {
       const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: newParent, sort_order: newSortOrder }) });
-      if (!res.ok) await fetchTree();
-    } catch { await fetchTree(); }
-  }, [fetchTree]);
+      // story #3637 — 이동 실패도 동일(circular/permission/sort-mode 거부와 다른 축 — 이건
+      // 거부가 아니라 시도 자체가 서버에서 실패한 경우).
+      if (!res.ok) { addToast({ title: t('moveFailed'), type: 'error' }); await fetchTree(); }
+    } catch { addToast({ title: t('moveFailed'), type: 'error' }); await fetchTree(); }
+  }, [fetchTree, addToast, t]);
 
   const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
@@ -219,21 +223,24 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     try {
       const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newName }) });
       if (!res.ok) {
+        // story #3637 — 이름이 조용히 원래대로 되돌아가던 자리.
+        addToast({ title: t('renameFailed'), type: 'error' });
         await fetchTree();
       } else {
         const { data } = await res.json() as { data: { updated_at: string } };
         setPendingDocUpdate({ id: docId, title: newName, updated_at: data.updated_at });
       }
-    } catch { await fetchTree(); }
-  }, [fetchTree]);
+    } catch { addToast({ title: t('renameFailed'), type: 'error' }); await fetchTree(); }
+  }, [fetchTree, addToast, t]);
 
   const handleDeleteDoc = useCallback(async (docId: string) => {
     setTree((prev) => prev.filter((doc) => doc.id !== docId));
     try {
       const res = await fetch(`/api/docs/${docId}`, { method: 'DELETE' });
-      if (!res.ok) await fetchTree();
-    } catch { await fetchTree(); }
-  }, [fetchTree]);
+      // story #3637 — 삭제가 조용히 되살아나던 자리.
+      if (!res.ok) { addToast({ title: t('deleteFailed'), type: 'error' }); await fetchTree(); }
+    } catch { addToast({ title: t('deleteFailed'), type: 'error' }); await fetchTree(); }
+  }, [fetchTree, addToast, t]);
 
   const createDoc = useCallback(async (parentId: string | null = null) => {
     if (!projectId || isCreating) return;

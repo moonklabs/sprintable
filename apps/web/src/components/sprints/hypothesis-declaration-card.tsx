@@ -45,6 +45,10 @@ export function HypothesisDeclarationCard({
   const [drafting, setDrafting] = useState(false);
   const [precedents, setPrecedents] = useState<ContextPackSearchResult[] | null>(null);
   const [precedentsLoading, setPrecedentsLoading] = useState(false);
+  // story #3637(유나 silent-failure-sweep-3632) — 실패를 setPrecedents([])로 그리면
+  // "비슷한 가설 조회 중..." 로딩 문구가 조용히 사라져 "찾아봤는데 없다"로 읽힌다(모름을
+  // 없음으로 오독). precedents는 null(모름) 유지, 실패는 이 플래그로만.
+  const [precedentsFailed, setPrecedentsFailed] = useState(false);
 
   const metric = value.metricDefinition;
   const isGa4 = metric?.source === 'ga4';
@@ -94,15 +98,16 @@ export function HypothesisDeclarationCard({
   // 지금은 필드 부재/엔드포인트 404 모두 섹션 자체 생략으로 흡수(nullable graceful).
   async function fetchPrecedents() {
     const query = value.statement.trim();
-    if (!query || query.length < 4) { setPrecedents(null); return; }
+    if (!query || query.length < 4) { setPrecedents(null); setPrecedentsFailed(false); return; }
     setPrecedentsLoading(true);
+    setPrecedentsFailed(false);
     try {
       const res = await fetch(`/api/context-pack/search?project_id=${projectId}&query=${encodeURIComponent(query)}&limit=5`);
-      if (!res.ok) { setPrecedents([]); return; }
+      if (!res.ok) { setPrecedentsFailed(true); return; }
       const json = await res.json() as { data?: ContextPackSearchResult[] };
       setPrecedents((json.data ?? []).filter((r) => r.entity_type === 'hypothesis').slice(0, 2));
     } catch {
-      setPrecedents([]);
+      setPrecedentsFailed(true);
     } finally {
       setPrecedentsLoading(false);
     }
@@ -264,6 +269,8 @@ export function HypothesisDeclarationCard({
 
           {precedentsLoading ? (
             <p className="text-[10px] text-muted-foreground">{t('declareL1Loading')}</p>
+          ) : precedentsFailed ? (
+            <p className="text-[10px] text-muted-foreground">{t('declareL1LoadError')}</p>
           ) : precedents && precedents.length > 0 ? (
             <div className="space-y-1.5 rounded-lg border border-border bg-muted/20 p-2">
               <p className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
