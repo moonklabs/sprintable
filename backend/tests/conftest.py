@@ -84,8 +84,9 @@ _TEST_DB_SIGNAL_RE = re.compile(
 # 사람/에이전트 여럿이 같은 로컬 postgres 서버의 같은 DB명을 동시에 가리키는 일이 흔하다. CI에서는
 # 안전하다(job마다 완전히 새로운 격리 postgres 서비스 컨테이너를 매번 띄우고 그 안에서만
 # `sprintable_test`라는 이름을 쓰므로 "공유"가 구조적으로 불가능 — GitHub Actions가 항상
-# `CI=true`를 심어주는 것을 신호로 구분한다, 이 conftest 밖에서도 이미 쓰는 관례:
-# test_s6_4_dod.py·test_s7_2_epic_dod.py 참조). CI 밖에서 이 이름을 향한 파괴적 리셋은 —
+# `CI=true`를 심어주는 것을 신호로 구분한다, 이 conftest 밖에서도 이미 쓰는 관례(story
+# #3657로 은퇴한 test_s6_4_dod.py·test_s7_2_epic_dod.py가 원 선례였다 — `os.environ.get
+# ("CI")` 자체는 이 파일 아래에서 여전히 유효한 패턴). CI 밖에서 이 이름을 향한 파괴적 리셋은 —
 # 격리를 사람이 «기억」해야 하는 바로 그 자리라 opt-in을 강제한다.
 _SHARED_CONVENTION_DB_NAMES = frozenset({"sprintable_test"})
 
