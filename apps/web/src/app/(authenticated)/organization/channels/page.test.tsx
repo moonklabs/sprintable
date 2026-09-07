@@ -208,6 +208,33 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(container.textContent).toContain('먼저 앱 자격을 설정해야');
   });
 
+  // story #3603(페드루 PO 確定 2026-09-07, 유나 3597 관찰) — 연결 상태 승격이 이제
+  // last_error_code·last_error_at도 채운다. 「서버 응답 보기」 토글이 그 둘을
+  // 기존 last_error 원문과 같은 자리에 나란히 보이는지 고정한다(새 UI 섹션 0).
+  it('last_error_code·last_error_at이 있으면 「서버 응답 보기」 토글에 원문과 나란히 선다', async () => {
+    stubFetch({
+      connections: [{
+        ...CONNECTION_ACTIVE, status: 'expired', last_error: '토큰이 만료되었습니다(401)',
+        last_error_code: 'CHANNEL_TOKEN_EXPIRED', last_error_at: '2026-09-07T02:30:00Z',
+      }],
+    });
+    await mount('owner');
+    expect(container.textContent).toContain('토큰이 만료되었습니다(401)');
+    expect(container.textContent).toContain('CHANNEL_TOKEN_EXPIRED');
+  });
+
+  it('last_error_code·last_error_at이 없는 옛 행은 last_error 원문 한 줄만(새 값 지어내지 않음)', async () => {
+    stubFetch({
+      connections: [{
+        ...CONNECTION_ACTIVE, status: 'expired', last_error: '토큰이 만료되었습니다(401)',
+        last_error_code: null, last_error_at: null,
+      }],
+    });
+    await mount('owner');
+    expect(container.textContent).toContain('토큰이 만료되었습니다(401)');
+    expect(container.textContent).not.toContain('CHANNEL_TOKEN_EXPIRED');
+  });
+
   it('member는 해제·다시 연결 버튼 대신 owner 안내 문구를 본다', async () => {
     // story #3504 — 해제·재인증은 owner 전용(_require_owner)이라 owner만 문구가 맞다
     // (옛 owner·admin 문구는 이 두 자리에선 거짓이었다).

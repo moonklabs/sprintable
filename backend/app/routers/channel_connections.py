@@ -107,6 +107,10 @@ class ChannelConnectionResponse(BaseModel):
     token_expires_at: str | None
     last_refreshed_at: str | None
     last_error: str | None
+    # story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07) — additive, last_error와
+    # 짝(원문 message는 last_error에 그대로, 이 둘은 "어느 code·언제"만 별도로).
+    last_error_code: str | None = None
+    last_error_at: str | None = None
     can_auto_refresh: bool
     connected_by: uuid.UUID | None
     created_at: str
@@ -186,7 +190,10 @@ def _to_response(row) -> ChannelConnectionResponse:
         credential_kind=row.credential_kind, status=row.status,
         token_expires_at=row.token_expires_at.isoformat() if row.token_expires_at else None,
         last_refreshed_at=row.last_refreshed_at.isoformat() if row.last_refreshed_at else None,
-        last_error=row.last_error, can_auto_refresh=can_auto_refresh(row.refresh_mode),
+        last_error=row.last_error,
+        last_error_code=row.last_error_code,
+        last_error_at=row.last_error_at.isoformat() if row.last_error_at else None,
+        can_auto_refresh=can_auto_refresh(row.refresh_mode),
         connected_by=row.connected_by, created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
         unpublish_blocked_reason=unpublish_blocked_reason,
         max_text_length=max_text_length, can_unpublish=can_unpublish,

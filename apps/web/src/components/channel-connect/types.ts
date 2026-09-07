@@ -12,6 +12,11 @@ export interface ChannelConnectionResponse {
   token_expires_at: string | null;
   last_refreshed_at: string | null;
   last_error: string | null;
+  // story #3603(additive) — last_error와 짝. 원문 message는 last_error 그대로,
+  // 이 둘은 "어느 code·언제"만 별도로(연결 상태 승격이 채우는 자리, 채워지지
+  // 않은 옛 행/토큰-갱신 실패 경로는 여전히 null일 수 있다).
+  last_error_code: string | null;
+  last_error_at: string | null;
   can_auto_refresh: boolean;
   connected_by: string | null;
   created_at: string;
