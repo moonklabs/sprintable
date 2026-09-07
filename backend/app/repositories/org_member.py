@@ -41,6 +41,14 @@ class OrgMemberRepository:
         self.session.add(obj)
         await self.session.flush()
         await self.session.refresh(obj)
+        # story #3635(BE·결함 클래스 근본·prod, 페드루 PO 確定 2026-09-07) — org_member
+        # 생성 경로 전수 그라운딩에서 이 메서드(관리자 직접 추가 org_members.py:154의
+        # 유일한 호출부)만 members 앵커를 안 만들고 있었다(org_invite.py·organizations.py
+        # 등 나머지는 이미 ensure_human_member 호출). 단일 choke point인 이 메서드
+        # 안에서 채워 향후 새 호출부가 생겨도 자동으로 안전하다(호출부별로 흩어 두지
+        # 않는다 — 새 판정자 발명 0, agent_anchor_sync.py의 같은 함수 재사용).
+        from app.services.agent_anchor_sync import ensure_human_member
+        await ensure_human_member(self.session, obj.id)
         return obj
 
     async def update(self, id: uuid.UUID, **data: Any) -> OrgMember | None:
