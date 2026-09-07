@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -18,6 +19,14 @@ router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
 # story #2161: PATCH가 이 세 상태로 전이시키는데 클라가 finished_at을 안 보내면 서버가 채운다
 # (server-authority — MCP는 이미 finished_at을 보낼 수 있지만 항상 보낸다고 신뢰하지 않는다).
 _TERMINAL_STATUSES = {"completed", "failed", "abandoned"}
+
+# story #3680 — list_agent_runs `status=` 필터의 유효값 집합. DB CHECK 제약
+# (agent_runs_status_check, alembic/versions/0207_agent_runs_status_check_widen.py)이
+# 이미 정본으로 갖고 있는 7값 그대로(신규 정의 0) — Literal이라 FastAPI가 불명값을
+# 자동 422(코드 발명 없이, 이 스토리의 「불명값 422」 AC를 그대로 만족).
+_AGENT_RUN_STATUS_VALUES = Literal[
+    "queued", "held", "running", "hitl_pending", "completed", "failed", "abandoned",
+]
 
 # story #2346 AC3(범위: 기록만) — 「긴 텍스트 필드」 정의, stories.py/docs.py와 동형.
 _LENGTH_TRACKED_FIELDS = ("result_summary", "last_error_code")
@@ -39,6 +48,9 @@ async def list_agent_runs(
     project_id: uuid.UUID = Query(...),
     agent_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
+    status: _AGENT_RUN_STATUS_VALUES | None = Query(default=None),
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
@@ -56,7 +68,14 @@ async def list_agent_runs(
     story_id(story 7a7f6c36·Workcell 실 run 배선): 위 project 가드가 통과한 뒤, 이미
     project-bound된 run 집합을 story 단위로 좁히는 옵션 narrowing 필터. AND 축소라 결과를
     확장할 수 없고(A AND B ⊆ A) 신규 인가 축이 아니다 — 타 project story_id를 넣어도 그
-    project agent의 run은 이 집합 밖이라 0건."""
+    project agent의 run은 이 집합 밖이라 0건.
+
+    story #3680(BE·결함) — 그라운딩(2026-09-07): 이 엔드포인트가 지금껏 `status`/`from`/
+    `to`를 아예 안 받았다. FastAPI가 미선언 쿼리 파라미터를 조용히 버리므로(422도 아니고
+    무시) `?status=failed`가 200으로 completed 행을 그대로 돌려주는 "오타로 써도 통과하나"
+    클래스였다. `status`는 `agent_runs_status_check`(alembic 0207) DB CHECK가 이미 갖고
+    있는 7값 그대로 `Literal`로 못박아 — 유효값 밖은 FastAPI가 자동 422(신규 코드 0).
+    `from`/`to`는 ISO 8601(cursor와 동형 파싱·400)·`from>to`는 422(입력 자체가 모순)."""
     from app.services.project_auth import has_project_access
 
     proj_r = await session.execute(select(Project.id).where(Project.id == project_id, Project.org_id == org_id))
@@ -73,8 +92,23 @@ async def list_agent_runs(
             cursor_dt = datetime.fromisoformat(cursor)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid cursor (expected ISO 8601 datetime)")
+    from_dt: datetime | None = None
+    if from_:
+        try:
+            from_dt = datetime.fromisoformat(from_)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid from (expected ISO 8601 datetime)")
+    to_dt: datetime | None = None
+    if to:
+        try:
+            to_dt = datetime.fromisoformat(to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid to (expected ISO 8601 datetime)")
+    if from_dt is not None and to_dt is not None and from_dt > to_dt:
+        raise HTTPException(status_code=422, detail="from must not be after to")
     runs = await repo.list(
-        project_id=project_id, agent_id=agent_id, story_id=story_id, limit=limit, cursor=cursor_dt
+        project_id=project_id, agent_id=agent_id, story_id=story_id, status=status,
+        from_dt=from_dt, to_dt=to_dt, limit=limit, cursor=cursor_dt,
     )
     return [AgentRunResponse.model_validate(r) for r in runs]
 
