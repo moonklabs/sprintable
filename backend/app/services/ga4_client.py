@@ -7,15 +7,22 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 def _make_date_range(date_range_days: int) -> tuple[str, str]:
-    """date_range_days일 전 ~ 어제 (GA4 데이터 지연 고려)."""
-    end = date.today() - timedelta(days=1)
+    """date_range_days일 전 ~ 어제 (GA4 데이터 지연 고려).
+
+    story #3665 CHANGES(페드루 PO, 2026-09-07) — `date.today()`는 프로세스(OS) 로컬
+    타임존 기준이라 배포 컨테이너 시스템 TZ가 UTC가 아니면 "어제"가 실행 환경에 따라
+    비결정적이다(#3665 원 결함과 같은 클래스, standups.py:308 참고). "오늘"의 뜻이
+    org 로컬 일 경계(organizations.timezone)여야 하는지는 별도 제품 질문 — 그 헬퍼가
+    아직 없어(그라운딩 확認) 이번엔 UTC로 결정적으로만 만든다(org 로컬 일 경계 정합은
+    범위 밖, PO 확定)."""
+    end = datetime.now(timezone.utc).date() - timedelta(days=1)
     start = end - timedelta(days=date_range_days - 1)
     return start.isoformat(), end.isoformat()
 
