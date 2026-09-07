@@ -9,8 +9,11 @@ import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-stat
 
 // story #3201 — useDashboardContext(projectId)·useRouter 신규 의존성. storage-capacity-
 // banner.test.tsx와 동일 패턴(실 dashboard-shell.tsx 전체 모듈 그래프를 끌어들이지 않음).
+// story #3610(3607 잔여) — orgId='org-1' 고정. 기존 픽스처(PARTIAL·COMPLETE)는
+// scope_org_id를 안 실어(undefined) 새 가드(`orgId && state.scope_org_id && ...`)가
+// 항상 false로 빠져 회귀 0 — 신규 테스트만 scope_org_id를 명시로 채운다.
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ projectId: 'proj-1' }),
+  useDashboardContext: () => ({ projectId: 'proj-1', orgId: 'org-1' }),
 }));
 const routerPushMock = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -81,6 +84,7 @@ function stubChecklist(data: {
   total: number;
   all_complete: boolean;
   first_instruction_conversation_id?: string | null;
+  scope_org_id?: string | null;
 }) {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data }) })));
 }
@@ -161,6 +165,22 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
     await act(async () => { chip.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
     expect(container.textContent).toContain('이메일 인증하기');
+  });
+});
+
+describe('ActivationChecklistBanner — scope_org_id 불일치 시 미노출(story #3610, 3607 잔여)', () => {
+  it('scope_org_id가 현재 org(orgId)와 같으면 그대로 렌더된다(오탐 0)', async () => {
+    stubChecklist({ ...PARTIAL, scope_org_id: 'org-1' });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('scope_org_id가 현재 org(orgId)와 다르면 아무것도 렌더하지 않는다(초대받은 org에서 남의 owner-org 진행률을 안 보임)', async () => {
+    stubChecklist({ ...PARTIAL, scope_org_id: 'org-2' });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toBe('');
   });
 });
 

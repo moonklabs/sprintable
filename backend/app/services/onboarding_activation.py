@@ -237,6 +237,12 @@ async def get_activation_state(
         "first_instruction_conversation_id": (
             str(first_instruction_conv_id) if first_instruction_conv_id else None
         ),
+        # story #3610(3607 잔여, 페드루 PO 確定 2026-09-07) — 판정에 실제로 쓰인 org(
+        # resolve_activation_org_id의 반환값 그대로). 요청 org(현재 화면)의 owner가
+        # 아니면 이 값이 요청 org와 달라진다 — FE가 그 불일치로 "이 판정은 지금 보는
+        # org 얘기가 아니다"를 알고 배너를 안 그린다(딥링크가 다른 org 대화로 새는
+        # 자리 자체를 원천 차단, scope_org_id가 null이면 어느 org도 owner가 아님).
+        "scope_org_id": str(org_id) if org_id else None,
     }
 
 

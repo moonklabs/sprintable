@@ -24,6 +24,10 @@ export interface ActivationState {
   all_complete: boolean;
   // story #3201 — 왕복 성사된 대화(또는 org 최초 agent DM) id, 없으면 null.
   first_instruction_conversation_id: string | null;
+  // story #3610(3607 잔여, 페드루 PO 確定 2026-09-07) — 판정에 실제로 쓰인 org. 요청 org의
+  // owner가 아니면(초대 admin/member) 폴백 org로 떨어져 요청 org와 달라진다 — 이 불일치로
+  // "이 판정은 지금 보는 org 얘기가 아니다"를 안다(어느 org도 owner가 아니면 null).
+  scope_org_id: string | null;
 }
 
 function readLocalFlag(key: string): boolean {

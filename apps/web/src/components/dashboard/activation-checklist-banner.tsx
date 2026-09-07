@@ -26,7 +26,7 @@ const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
   const router = useRouter();
-  const { projectId } = useDashboardContext();
+  const { projectId, orgId } = useDashboardContext();
   const { state, allComplete } = useActivationStatus();
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -39,6 +39,11 @@ export function ActivationChecklistBanner() {
   });
 
   if (allComplete || !state) return null;
+  // story #3610(3607 잔여, 페드루 PO 確定 2026-09-07) — scope_org_id(판정에 쓰인 org)가
+  // 지금 보는 org(orgId)와 다르면 이 판정은 이 화면 얘기가 아니다(초대받은 org에서 남의
+  // owner-org 진행률을 보이거나, 딥링크가 다른 org 대화로 새는 것을 막는다). 둘 다 확定된
+  // 값일 때만 가른다 — 아직 orgId를 모르는 초기 렌더는 기존 그대로(과다 은닉 방지).
+  if (orgId && state.scope_org_id && state.scope_org_id !== orgId) return null;
 
   const toggleCollapse = () => {
     const next = !collapsed;
