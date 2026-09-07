@@ -63,7 +63,7 @@ def _client_for(app):
 
 
 async def _setup_db_override(app, Session):
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -74,7 +74,7 @@ async def _setup_db_override(app, Session):
                 await s.rollback()
                 raise
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
 
 
 def _override_auth(app, *, user_id, org_id, session_started_at):

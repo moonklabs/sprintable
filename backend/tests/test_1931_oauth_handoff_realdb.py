@@ -883,8 +883,8 @@ async def test_consume_mints_session_started_at_and_refresh_succeeds_for_passwor
                     await s.rollback()
                     raise
 
-        from app.dependencies.database import get_db
-        app.dependency_overrides[get_db] = _db
+        from tests.conftest import override_db_and_read
+        override_db_and_read(app, _db)
         from httpx import ASGITransport, AsyncClient
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
