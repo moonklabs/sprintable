@@ -468,7 +468,7 @@ export default function InsightsBoardPage() {
                             variant="outline"
                             onClick={() => setFollowUpRow(row)}
                             data-testid="insights-board-follow-up-button"
-                            aria-label={t('followUpAriaLabel', { n: index + 1, label: t('followUpAction') })}
+                            aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('followUpAction') })}
                           >
                             {t('followUpAction')}
                           </Button>
@@ -481,7 +481,7 @@ export default function InsightsBoardPage() {
                             onClick={() => void handleReconcile(row)}
                             disabled={reconcile?.status === 'loading'}
                             data-testid="insights-board-reconcile-button"
-                            aria-label={t('reconcileAriaLabel', { n: index + 1, label: t('reconcileAction') })}
+                            aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('reconcileAction') })}
                           >
                             {reconcile?.status === 'loading' ? t('reconcileInProgress') : t('reconcileAction')}
                           </Button>
