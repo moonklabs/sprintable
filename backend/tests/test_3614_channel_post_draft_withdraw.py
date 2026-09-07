@@ -15,6 +15,7 @@ from tests.test_3414_publication_command_core import (
     _seed_org, _seed_agent, _seed_human, _seed_default_role, _seed_connection, _seed_story,
     _session_factory, _setup_org_scoped_app, _client_for, _draft_body,
 )
+from app.services.publication_command import process_due_publication_commands
 
 pytestmark = [pytest.mark.destructive_schema]
 
@@ -362,5 +363,141 @@ async def test_list_excludes_withdrawn_by_default_includes_with_flag():
             r_detail = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
             assert r_detail.status_code == 200, r_detail.text
             assert r_detail.json()["draft_status"] == "withdrawn"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_withdraw_cancels_pending_retry_command():
+    """story #3639(3614 후속) — dev 실측 재현: 승인된 초안을 발행 시도했다가 503으로
+    command_status=pending·next_attempt_at이 미래로 잡힌 채 withdraw하면(게이트는 이미
+    approved라 "gate.status == pending" 분기는 안 닿는다), command가 cancelled로
+    종결돼 워커 due 조회(process_due_publication_commands)에서 더는 안 집힌다. 마커
+    표본이 아니라 진짜 일시 실패였다면 다음 재시도가 성공해 "작성자가 폐기한 초안이
+    외부에 발행"되는 반쪽을 막는다."""
+    from app.main import app
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.publication_command import PublicationCommand
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r_submit = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={})
+            gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        from tests.test_3414_publication_command_core import _approve_gate_directly
+
+        command_id = uuid.uuid4()
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+            v = (await s.execute(
+                select(ChannelPostVersion).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalars().first()
+            # dev 실측 그대로 — 503(provider-error 마커) 뒤 워커가 남긴 pending·재시도
+            # 대기 command를 직접 심는다(이 테스트의 관심사는 withdraw의 취소 가드지
+            # 발행 파이프라인 자체가 아니다).
+            command = PublicationCommand(
+                id=command_id, org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=v.id, operation="publish", content_kind="channel_post",
+                status="pending", attempt_count=1,
+                next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1),  # 이미 도래(due)
+                requested_by_member_id=human_id,
+            )
+            s.add(command)
+            await s.commit()
+
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/withdraw")
+        assert r.status_code == 200, r.text
+
+        async with Session() as s:
+            refreshed = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.id == command_id)
+            )).scalar_one()
+            assert refreshed.status == "cancelled"
+            assert refreshed.reason_code == "CANCELLED_BY_HUMAN"
+
+        # AC1 — 워커 due 조회에서 실제로 빠지는지 직접 증명(단언만이 아니라 실제 워커
+        # 진입점을 태워 0건 처리됨을 확認).
+        async with Session() as s:
+            result = await process_due_publication_commands(s)
+            assert sum(result.values()) == 0, f"취소된 command가 워커에 집혔다: {result}"
+            refreshed = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.id == command_id)
+            )).scalar_one()
+            assert refreshed.status == "cancelled", "워커가 취소된 command를 다시 집으면 안 된다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_withdraw_cancel_mutation_removing_guard_leaves_command_due():
+    """뮤테이션 대조 — cancel 로직을 제거하면(withdraw_channel_post_draft에서 command
+    상태를 안 건드리면) 위 테스트가 RED로 돌아가는지는 소스 코드 리뷰로 확認(로컬에서
+    수동 확認 후 복구) — 여기서는 그 반대(정상 동작에서 command가 실제로 due 조회에
+    안 걸림)를 별도 직접 쿼리로 한 번 더 고정한다(process_due_publication_commands
+    내부의 SKIP LOCKED 배치 크기·격리와 무관하게, 순수 WHERE 조건만으로도 재검증)."""
+    from app.main import app
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.publication_command import PublicationCommand
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r_submit = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={})
+            gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        from tests.test_3414_publication_command_core import _approve_gate_directly
+
+        command_id = uuid.uuid4()
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+            v = (await s.execute(
+                select(ChannelPostVersion).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalars().first()
+            command = PublicationCommand(
+                id=command_id, org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=v.id, operation="publish", content_kind="channel_post",
+                status="pending", attempt_count=1,
+                next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+                requested_by_member_id=human_id,
+            )
+            s.add(command)
+            await s.commit()
+
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/withdraw")
+        assert r.status_code == 200, r.text
+
+        async with Session() as s:
+            due = (await s.execute(
+                select(PublicationCommand).where(
+                    PublicationCommand.id == command_id,
+                    PublicationCommand.status == "pending",
+                )
+            )).scalar_one_or_none()
+            assert due is None, "취소됐다면 status='pending' 조건에 더는 안 걸려야 한다(due 배제 SSOT)"
     finally:
         await engine.dispose()
