@@ -390,9 +390,14 @@ async def test_hook_key_invalid_characters_rejected_422():
 
 @pytest.mark.anyio
 async def test_hook_key_edit_after_publish_does_not_change_recorded_evidence():
-    """발행 뒤 draft를 다시 편집(새 버전, hook_key 다른 값)해도 이미 기록된 evidence의
-    hook_key는 안 바뀐다 — evidence가 그 시점(publication.version_id 고정)의 버전을
-    카피했기 때문(참조 조회가 아니다)."""
+    """AC3 — evidence 고정의 근거는 「version 행 불변」 하나뿐(편집=새 version 행을
+    추가할 뿐, publication.version_id가 가리키는 옛 행을 제자리 갱신하지 않는다).
+    이 구조를 실제 시간 순서(발행 → 편집(새 version) → +1d 스냅샷 캡처) 그대로
+    밟아 증명한다 — 스냅샷 캡처가 편집보다 **나중에** 일어나도, resolver가
+    publication.version_id로 조회하는 건 여전히 발행 시점의 그 옛 행이라 옛 값을
+    낸다. 잃는 것(PR 본문에도 명시): 편집이 같은 version 행을 「제자리」로 고치는
+    경로가 생기는 순간 이 구조가 깨진다 — 지금 head엔 그런 `.hook_key =` 갱신이
+    0건이라 참."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -407,6 +412,9 @@ async def test_hook_key_edit_after_publish_does_not_change_recorded_evidence():
         _setup_org_scoped_app(app, Session, org_id, user_id=user_id)
         try:
             async with _client_for(app) as c:
+                # ① 발행 — v1(hook_key=hook-v1)을 만들고, 그 버전을 가리키는
+                # channel_publication을 심는다(실 발행 오케스트레이션은 다른 파일이
+                # 이미 잰다 — 이 테스트의 관심사는 「그 뒤」 축뿐).
                 r1 = await c.post(
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts",
                     json={
@@ -417,19 +425,14 @@ async def test_hook_key_edit_after_publish_does_not_change_recorded_evidence():
                 assert r1.status_code == 201, r1.text
                 published_version_id = uuid.UUID(r1.json()["version_id"])
 
-                # 발행(그 버전을 가리키는 channel_publication)은 이 시점의 버전을 고정.
                 async with Session() as s:
                     pub = await _seed_channel_publication(
                         s, org_id=org_id, connection_id=conn_id, channel="sandbox",
                         version_id=published_version_id,
                     )
-                    evidence = await _capture_and_get_evidence(
-                        s, org_id=org_id, work_item_id=story_id, publication_id=pub.id,
-                        publication_kind="channel_publication",
-                    )
-                    assert evidence.payload["hook_key"] == "hook-v1"
 
-                # 발행 뒤 편집(같은 draft, 새 버전) — hook_key를 다른 값으로.
+                # ② 발행 뒤 편집(같은 draft, 새 버전 v2) — hook_key를 다른 값으로.
+                # 이 시점엔 아직 스냅샷을 한 번도 캡처하지 않았다(+1d 스냅샷은 뒤에).
                 r2 = await c.post(
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts",
                     json={
@@ -440,14 +443,18 @@ async def test_hook_key_edit_after_publish_does_not_change_recorded_evidence():
                 assert r2.status_code == 201, r2.text
                 assert r2.json()["version_id"] != str(published_version_id)
 
-                # 이미 기록된 evidence는 v1 그대로.
+                # ③ +1d 스냅샷 캡처 — v2 편집 「뒤」에 일어난다. publication.version_id는
+                # 여전히 v1을 가리키므로(발행이 v2를 다시 가리키게 옮기는 경로가 없다),
+                # resolver가 읽는 ChannelPostVersion.hook_key도 v1의 값 그대로다.
                 async with Session() as s:
-                    from sqlalchemy import select
-                    from app.models.evidence import Evidence
-                    reloaded = (await s.execute(
-                        select(Evidence).where(Evidence.id == evidence.id)
-                    )).scalar_one()
-                    assert reloaded.payload["hook_key"] == "hook-v1", "발행 뒤 편집이 옛 evidence를 조용히 바꿨다"
+                    evidence = await _capture_and_get_evidence(
+                        s, org_id=org_id, work_item_id=story_id, publication_id=pub.id,
+                        publication_kind="channel_publication",
+                    )
+                    assert evidence.payload["hook_key"] == "hook-v1", (
+                        "편집(v2) 뒤에 캡처한 스냅샷인데도 발행 시점(v1) 값이 아니다 — "
+                        "publication.version_id가 편집으로 옮겨갔거나, v1 행이 제자리로 고쳐졌다는 뜻"
+                    )
         finally:
             app.dependency_overrides.clear()
     finally:
