@@ -672,19 +672,25 @@ async def apply_command_failure(
     # transient만 지수 백오프 재시도 큐로.
     command.attempt_count += 1
     if command.attempt_count >= MAX_RETRIES:
-        # story #3598(AC6, PO 確定 2026-09-06) — transient가 재시도 상한(댓글수집
-        # channel_post_comments.py의 attempt_count>=5와 동형 임계값=MAX_RETRIES)에
-        # 도달해도 여태 connection.status는 그대로 "active"로 남아 「연결됨」 칩이
-        # 계속 거짓으로 보였다(3595 표 행 ③④가 지적한 "미표시" 부류와 같은 결함 —
-        # 감지 못 하는 동안 화면이 「연결됨」이라 단정하지 않는다). 위 CONNECTION
-        # 분기와 동형으로 이미 revoked/error면 더 약한 정보로 덮어쓰지 않는다.
-        from app.models.channel_connection import ChannelConnection
+        # story #3598(AC6, PO 確定 2026-09-06 · 유나 Design CHANGES 1 정정
+        # 2026-09-07) — transient가 재시도 상한(댓글수집 attempt_count>=5와 동형
+        # 임계값=MAX_RETRIES)에 도달해도 connection.status가 "active"로 남아
+        # 「연결됨」 칩이 거짓으로 보이는 결함을 닫되, CHANNEL_RATE_LIMITED(시간이
+        # 지나면 스스로 풀리는 한도 초과)는 이 승격에서 제외한다 — 3595 본문·
+        # AC6 원칙 그대로 "연결 상태는 사람이 고쳐야 풀리는 것에만"(한도 초과는
+        # 잔량·시각 축이지 connection 축이 아니다). 제외 없이 그대로 승격하면
+        # 일시 한도 초과 5연속(부하가 몰리는 정상 상황)만으로 발행이 전면
+        # 차단되고 사람의 재연결 없인 못 풀리는 자해 잠금이 된다. 인증/권한
+        # 계열·미분류 provider 오류(CHANNEL_PUBLISH_PROVIDER_ERROR 등, "사람이
+        # 봐야 아는" 부류)만 상한 승격 대상.
+        if error_code != "CHANNEL_RATE_LIMITED":
+            from app.models.channel_connection import ChannelConnection
 
-        connection = await db.get(ChannelConnection, command.destination)
-        if connection is not None:
-            connection.last_error = (last_error or "")[:2000]
-            if connection.status not in ("revoked", "error"):
-                connection.status = "error"
+            connection = await db.get(ChannelConnection, command.destination)
+            if connection is not None:
+                connection.last_error = (last_error or "")[:2000]
+                if connection.status not in ("revoked", "error"):
+                    connection.status = "error"
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
