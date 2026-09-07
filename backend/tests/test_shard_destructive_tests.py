@@ -840,3 +840,58 @@ def test_mutation_removing_shard_presence_diff_silences_missing_shard_warning(tm
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "::warning::shard" not in captured.out, "뮤테이션이 걸리지 않았다(경고가 여전히 뜬다)"
+
+
+def test_audit_durations_mode_backend_irrelevant_success_missing_all_is_ok_not_error(capsys, tmp_path):
+    """selftest 4(story #3678) — 실물 재현(PR #4021 run 34160408234): FE-only PR이라
+    backend_relevant=false, 8개 shard가 전부 내부 스텝을 스킵해 업로드 자체가 없는데도
+    잡은 always()라 shard_result="success"로 끝난다. §3653만으로는 이걸 "업로드
+    파이프라인 무산"(selftest 3)과 구분 못 해 ::error+exit 1을 냈다 — backend_relevant
+    가 이 케이스를 갈라 exit 0."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"  # 만들지 않음 — 업로드 자체가 스킵됐다.
+    exit_code = mod._audit_durations_mode(
+        artifact_dir, expected_shard_count=8, shard_result="success", backend_relevant="false",
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "::error::" not in captured.out
+    assert "OK: shard 8개 산출물 없음(story #3678)" in captured.out
+    assert "[0, 1, 2, 3, 4, 5, 6, 7]" in captured.out
+
+
+def test_audit_durations_mode_backend_relevant_true_success_missing_still_errors(capsys, tmp_path):
+    """양성대조 — backend_relevant="true"(진짜 관련 PR)면 §3653 판정이 그대로다(selftest
+    3과 동일 시나리오, backend_relevant 인자만 추가). backend_relevant 도입이 §3653의
+    실제 결함 탐지력을 죽이지 않았음을 고정한다."""
+    mod = _load()
+    artifact_dir = tmp_path / "artifacts"
+    for n in range(7):  # shard 7만 빠짐 — 업로드 파이프라인이 조용히 무산된 형.
+        _write_shard_artifact(artifact_dir, n)
+    exit_code = mod._audit_durations_mode(
+        artifact_dir, expected_shard_count=8, shard_result="success", backend_relevant="true",
+    )
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "::error::shard 산출물 누락" in captured.out
+    assert "[7]" in captured.out
+
+
+def test_mutation_removing_backend_relevant_guard_reintroduces_false_positive(capsys, tmp_path, monkeypatch):
+    """뮤테이션 — backend_relevant 분기를 빼면(§3678 도입 前 코드 재현) FE-only PR의 정상
+    스킵이 다시 ::error+exit 1로 잘못 뜨는 것을 고정한다(이 가드가 실제로 그 결함을
+    막는다는 증거, story #3653의 뮤테이션 관례와 동형)."""
+    mod = _load()
+    original = mod._audit_durations_mode
+
+    def _without_backend_relevant_guard(artifact_dir, **kwargs):
+        kwargs.pop("backend_relevant", None)
+        return original(artifact_dir, **kwargs)
+
+    monkeypatch.setattr(mod, "_audit_durations_mode", _without_backend_relevant_guard)
+
+    artifact_dir = tmp_path / "artifacts"
+    exit_code = mod._audit_durations_mode(
+        artifact_dir, expected_shard_count=8, shard_result="success", backend_relevant="false",
+    )
+    assert exit_code == 1, "뮤테이션이 걸리지 않았다(backend_relevant 무시하고도 exit 0이 나왔다)"
