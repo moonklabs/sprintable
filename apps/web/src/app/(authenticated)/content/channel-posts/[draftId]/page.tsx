@@ -2000,7 +2000,10 @@ export default function ChannelPostEditPage() {
             </div>
           ) : null}
           {/* story #3499(Phase2·FE) — publication_id 있을 때만(BE #3844 조각4 의존). */}
-          <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
+          <InsightSnapshotBlock
+            snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale}
+            publicationId={draft.publication_id}
+          />
           {/* story #3517(Phase2·FE, 그라운딩 ① 자리 그대로 — InsightSnapshotBlock 곁,
               같은 draft.publication_id 조건) — 댓글 섹션. 조각①-FE 범위(PO 確定
               2026-09-05): 세 얼굴·수집 시각·목록·지워진 댓글(§22-9)만 — 행 액션

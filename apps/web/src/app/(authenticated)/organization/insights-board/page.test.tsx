@@ -428,3 +428,37 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
     expect(container.querySelector('[data-testid="insights-board-comments-text"]')?.textContent).toBe('댓글 5');
   });
 });
+
+// story #3617(유나 3600 AC2 기준선) — 채널 포스트 화면 「성과 보기」에서 ?highlight=
+// {publication_id}로 들어오면 해당 행을 강조·스크롤한다.
+describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)', () => {
+  it('?highlight=pub-b — 그 행에 scrollIntoView가 불리고 강조 클래스가 붙는다', async () => {
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('highlight=pub-b'));
+    stubFetch({});
+    await mount();
+
+    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const highlighted = [...rows].find((r) => r.getAttribute('data-highlighted') === 'true');
+    expect(highlighted).not.toBeUndefined();
+    expect(scrollIntoViewMock).toHaveBeenCalled();
+  });
+
+  it('?highlight 없음 — 아무 행도 강조되지 않는다(보드 최상단으로 끝나는 기본 경로)', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
+    stubFetch({});
+    await mount();
+    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    expect([...rows].some((r) => r.getAttribute('data-highlighted') === 'true')).toBe(false);
+  });
+
+  it('?highlight가 존재하지 않는 publication_id를 가리키면(레이스·오타) 조용히 무시한다', async () => {
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('highlight=pub-does-not-exist'));
+    stubFetch({});
+    await mount();
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+  });
+});

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt } from '@/components/content/schedule-format';
@@ -32,6 +33,11 @@ export interface InsightSnapshotBlockProps {
   snapshots: InsightSnapshot[];
   orgTimezone: string;
   locale: string;
+  // story #3617(유나 3600 AC2 기준선) — 성과 보드로 가는 유일한 화면 내 길. 발행
+  // 前(publication 없음)에는 undefined/null — 링크를 안 그린다(이 블록 자체도
+  // snapshots.length===0이면 이미 안 그려지지만, publicationId 부재를 별도로도
+  // 명시 방어한다 — "모른다≠다르다").
+  publicationId?: string | null;
 }
 
 const METRIC_KEYS = ['impressions', 'reach', 'views', 'engagements', 'clicks', 'spend', 'conversions'] as const;
@@ -91,8 +97,9 @@ function MetricValue({ value, dashLabel, reasonLabel }: { value: number | null; 
   return <span data-testid="insight-metric-value">{value}</span>;
 }
 
-export function InsightSnapshotBlock({ snapshots, orgTimezone, locale }: InsightSnapshotBlockProps) {
+export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicationId }: InsightSnapshotBlockProps) {
   const t = useTranslations('content');
+  const tNav = useTranslations('nav');
 
   if (snapshots.length === 0) return null;
 
@@ -103,7 +110,21 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale }: Insight
       data-testid="content-insight-info"
       className="space-y-3 rounded-md border border-border bg-muted/30 p-3 text-sm"
     >
-      <p className="text-xs font-medium text-muted-foreground">{t('insightSectionLabel')}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{t('insightSectionLabel')}</p>
+        {/* story #3617(유나 3600 AC2 기준선) — 마케팅 흐름(제작→승인→발행→댓글→성과)의
+            마지막 구역 건너뛰기를 화면의 길로 없앤다. 기존 낱말("성과 보드", nav
+            네임스페이스) 재사용 — 새 어휘 0. publicationId 없으면(발행 前) 안 그린다. */}
+        {publicationId ? (
+          <Link
+            href={`/organization/insights-board?highlight=${encodeURIComponent(publicationId)}`}
+            className="text-xs text-primary hover:underline"
+            data-testid="insight-view-in-board-link"
+          >
+            {t('insightViewInBoardCta', { board: tNav('orgInsightsBoard') })}
+          </Link>
+        ) : null}
+      </div>
 
       {latest ? (
         // 유나 지적(§17-19) — captured는 값이 있으면 값만 그린다, "수집됨" 배지를

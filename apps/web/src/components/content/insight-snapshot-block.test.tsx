@@ -28,9 +28,9 @@ function wrap(node: React.ReactNode) {
   return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">{node}</NextIntlClientProvider>;
 }
 
-async function render(snapshots: InsightSnapshot[]) {
+async function render(snapshots: InsightSnapshot[], publicationId?: string | null) {
   await act(async () => {
-    root.render(wrap(<InsightSnapshotBlock snapshots={snapshots} orgTimezone="UTC" locale="ko" />));
+    root.render(wrap(<InsightSnapshotBlock snapshots={snapshots} orgTimezone="UTC" locale="ko" publicationId={publicationId} />));
   });
 }
 
@@ -163,5 +163,28 @@ describe('InsightSnapshotBlock — story #3499(게시물 성과 표면 1차)', (
     await render([unsupported]);
     const el = container.querySelector('[data-testid="insight-snapshot-unsupported"]');
     expect(el?.className).not.toContain('text-destructive');
+  });
+});
+
+// story #3617(유나 3600 AC2 기준선) — 마케팅 흐름의 마지막 구역 건너뛰기를 화면의
+// 길로 없앤다. publicationId 유무로 링크 0/1을 가른다(발행 前에는 그릴 수 없다).
+describe('InsightSnapshotBlock — 「성과 보드」 링크(story #3617)', () => {
+  it('publicationId 없음(발행 前) — 링크가 안 보인다', async () => {
+    await render([capturedSnapshot()], null);
+    expect(container.querySelector('[data-testid="insight-view-in-board-link"]')).toBeNull();
+  });
+
+  it('publicationId 있음(발행 後) — 링크 1개, href에 publication id가 실린다', async () => {
+    await render([capturedSnapshot()], 'pub-123');
+    const links = container.querySelectorAll('[data-testid="insight-view-in-board-link"]');
+    expect(links).toHaveLength(1);
+    const href = links[0].getAttribute('href');
+    expect(href).toBe('/organization/insights-board?highlight=pub-123');
+  });
+
+  // ⭐뮤테이션 표적 — publicationId 가드를 지우면(항상 렌더) 위 "없음" 테스트가 RED여야 한다.
+  it('⭐뮤테이션 대조 — publicationId가 falsy 문자열이 아니라 실제 null/undefined일 때만 안 그린다', async () => {
+    await render([capturedSnapshot()], undefined);
+    expect(container.querySelector('[data-testid="insight-view-in-board-link"]')).toBeNull();
   });
 });

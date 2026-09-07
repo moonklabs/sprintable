@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -91,6 +91,10 @@ export default function InsightsBoardPage() {
   const sortDirParam = (searchParams.get('sort_dir') as SortDir | null) ?? DEFAULT_SORT_DIR;
   const rawMetricParam = searchParams.get('metric') as BoardMetric | null;
   const metricParam: BoardMetric = rawMetricParam && METRIC_KEYS.includes(rawMetricParam) ? rawMetricParam : DEFAULT_METRIC;
+  // story #3617(유나 3600 AC2 기준선) — 채널 포스트 화면 「성과 보기」 링크가 이 발행의
+  // publication_id를 실어 온다. 있는 강조/스크롤 메커니즘이 이 화면엔 없어서(그라운딩
+  // 확認) 새로 짠다 — row가 이미 publication_id로 키가 나 있어(346행) 비용이 작다.
+  const highlightParam = searchParams.get('highlight');
   // 실제 BE sort 값 — 역할(published_at 고정, d1/d7은 현재 지표와 합성).
   const resolvedSort = sortRoleParam === 'published_at' ? 'published_at' : `${metricParam}_${sortRoleParam}`;
 
@@ -142,6 +146,23 @@ export default function InsightsBoardPage() {
   }, [orgId, buildQuery, t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // story #3617 — 채널 포스트 화면 「성과 보기」에서 ?highlight={publication_id}로
+  // 들어오면 해당 행으로 스크롤+강조(짧게, 3초 뒤 해제). 행이 아직 안 실렸으면
+  // (loading 中·다음 페이지에 있음 등) 조용히 스킵 — 없으면 보드 최상단으로
+  // 끝내는 것이 AC의 명시 대체 경로다(새 로딩/재조회 로직 0).
+  const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null);
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  useEffect(() => {
+    if (!highlightParam || loading || rows.length === 0) return;
+    const el = rowRefs.current.get(highlightParam);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedRowId(highlightParam);
+    const timer = setTimeout(() => setHighlightedRowId(null), 3000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightParam, loading, rows]);
 
   const handleLoadMore = useCallback(async () => {
     if (!orgId || !nextCursor || loadingMore) return;
@@ -344,7 +365,16 @@ export default function InsightsBoardPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((row, index) => (
-                  <tr key={row.publication_id} data-testid="insights-board-row">
+                  <tr
+                    key={row.publication_id}
+                    ref={(el) => {
+                      if (el) rowRefs.current.set(row.publication_id, el);
+                      else rowRefs.current.delete(row.publication_id);
+                    }}
+                    data-testid="insights-board-row"
+                    data-highlighted={highlightedRowId === row.publication_id ? 'true' : undefined}
+                    className={highlightedRowId === row.publication_id ? 'bg-primary/10 motion-safe:transition-colors' : undefined}
+                  >
                     <td className="max-w-xs truncate px-3 py-2.5 font-medium text-foreground">
                       {row.external_url ? (
                         <a href={row.external_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
