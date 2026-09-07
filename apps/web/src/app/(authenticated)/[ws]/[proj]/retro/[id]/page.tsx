@@ -438,11 +438,15 @@ export default function RetroSessionPage() {
         body: JSON.stringify({}),
       });
       if (!res.ok) {
+        // story #3637(유나 silent-failure-sweep-3632) — 체크가 조용히 해제되던 자리.
+        // voteFailed 키는 이미 카탈로그에 있었으나 어디서도 안 쓰이고 있었다(새 키 0).
+        addToast({ title: t('voteFailed'), type: 'error' });
         setVotedItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
         return;
       }
       setItems((prev) => prev.map((item) => item.id === itemId ? { ...item, vote_count: item.vote_count + 1 } : item));
     } catch {
+      addToast({ title: t('voteFailed'), type: 'error' });
       setVotedItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
     }
   }

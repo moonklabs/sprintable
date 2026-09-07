@@ -88,6 +88,7 @@ export function LoopCreateDialog({
 }) {
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
+  const tf = useTranslations('flow');
 
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<Mode>('new');
@@ -97,6 +98,11 @@ export function LoopCreateDialog({
   const [tags, setTags] = useState('');
 
   const [hypotheses, setHypotheses] = useState<Hypothesis[] | null>(null);
+  // story #3637(유나 silent-failure-sweep-3632) — 조회 실패를 setHypotheses([])로
+  // 그리면 "연결 가능한 가설이 없습니다"가 실제로 뜬다(모름을 없음으로 오독시켜 판단을
+  // 바꾼다). recipesFailed와 동형(실패/빈 목록을 상태에서 가른다) — hypotheses는 null
+  // (모름) 유지, 실패는 이 플래그로만.
+  const [hypothesesFailed, setHypothesesFailed] = useState(false);
   const [hypothesisSearch, setHypothesisSearch] = useState('');
   const [linkedId, setLinkedId] = useState<string | null>(null);
 
@@ -123,6 +129,7 @@ export function LoopCreateDialog({
     setDrafted(false);
     setRecipeSlug('');
     setRecipesFailed(false);
+    setHypothesesFailed(false);
   }, []);
 
   const handleDraft = useCallback(async () => {
@@ -154,18 +161,18 @@ export function LoopCreateDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (mode !== 'link' || hypotheses !== null) return;
+    if (mode !== 'link' || hypotheses !== null || hypothesesFailed) return;
     void (async () => {
       try {
         const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}`);
-        if (!res.ok) { setHypotheses([]); return; }
+        if (!res.ok) { setHypothesesFailed(true); return; }
         const json = (await res.json()) as { data?: Hypothesis[] };
         setHypotheses((json.data ?? []).filter((h) => LINKABLE_STATUSES.has(h.status)));
       } catch {
-        setHypotheses([]);
+        setHypothesesFailed(true);
       }
     })();
-  }, [open, mode, hypotheses, projectId]);
+  }, [open, mode, hypotheses, hypothesesFailed, projectId]);
 
   // story #2792 — recipe 목록은 선택 기능이라 fetch 실패해도 select 옵션만 없어질 뿐
   // (null-safe, "직접 진행" 기본값으로 폼은 정상 동작). 실패는 recipesFailed로만 표시하고
@@ -482,7 +489,9 @@ export function LoopCreateDialog({
                   placeholder={t('createLoopLinkSearchPlaceholder')}
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 />
-                {hypotheses === null ? (
+                {hypothesesFailed ? (
+                  <p className="py-2 text-center text-xs text-muted-foreground">{tf('earthLoadError')}</p>
+                ) : hypotheses === null ? (
                   <p className="py-2 text-center text-xs text-muted-foreground">{t('loading')}</p>
                 ) : filteredHypotheses.length === 0 ? (
                   <p className="py-2 text-center text-xs text-muted-foreground">{t('createLoopLinkEmpty')}</p>

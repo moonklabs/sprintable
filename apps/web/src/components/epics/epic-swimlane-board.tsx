@@ -457,7 +457,15 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ epic_id: newEpicId }),
         });
-        if (!res.ok) { void fetchAll(); return; }
+        if (!res.ok) {
+          // story #3637(유나 silent-failure-sweep-3632) — 카드가 조용히 제자리로 돌아가던
+          // 자리(형제 kanban-board.tsx의 알리는 원칙을 여기서 완성 — 정확 지점은
+          // handleCreateStory/createStoryFailed, 드래그 핸들러 자체는 형제도 FORBIDDEN
+          // 외엔 조용했다는 점을 PR 본문에 정정 기록).
+          addToast({ type: 'error', title: t('storyMoveFailed') });
+          void fetchAll();
+          return;
+        }
         // QA changes 8R HIGH①(카디르+codex, 2026-08-22) — 형제(kanban-board.tsx
         // handleTrustDragEnd, story #2933 H4 qa:changes)와 동형: 응답에 실린 진짜
         // trust_stage를 병합한다(재파생 아님, BE 판정값 그대로 — PO 조건②).
@@ -471,7 +479,15 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
         });
-        if (!res.ok) { void fetchAll(); return; }
+        if (!res.ok) {
+          // story #3637(유나 silent-failure-sweep-3632) — 카드가 조용히 제자리로 돌아가던
+          // 자리(형제 kanban-board.tsx의 알리는 원칙을 여기서 완성 — 정확 지점은
+          // handleCreateStory/createStoryFailed, 드래그 핸들러 자체는 형제도 FORBIDDEN
+          // 외엔 조용했다는 점을 PR 본문에 정정 기록).
+          addToast({ type: 'error', title: t('storyMoveFailed') });
+          void fetchAll();
+          return;
+        }
         const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
         const okItem = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId) : null;
         // QA changes 10R HIGH②(카디르+codex, 2026-08-22) — bulk PATCH는 gate가 막은 항목도

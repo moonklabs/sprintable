@@ -667,14 +667,20 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: selected?.id ?? null }),
       });
-      if (!res.ok) { console.error('스토리 스프린트 배정 실패', res.status); return; }
+      if (!res.ok) {
+        // story #3637(유나 silent-failure-sweep-3632) — console만 찍고 화면은 아무 일도
+        // 없던 것처럼 보이던 자리. activateError/closeError와 동형 페이지 배너 재사용.
+        console.error('스토리 스프린트 배정 실패', res.status);
+        setActionError(t('assignError'));
+        return;
+      }
       if (selected) {
         setSprintStories((prev) => [...prev, { ...story, sprint_id: selected.id }]);
         setBacklogStories((prev) => prev.filter((s) => s.id !== story.id));
       }
     } catch (err) {
-      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
       console.error('스토리 스프린트 배정 실패', err);
+      setActionError(t('assignError'));
     }
   };
 
@@ -685,12 +691,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: null }),
       });
-      if (!res.ok) { console.error('스토리 스프린트 해제 실패', res.status); return; }
+      if (!res.ok) {
+        console.error('스토리 스프린트 해제 실패', res.status);
+        setActionError(t('unassignError'));
+        return;
+      }
       setSprintStories((prev) => prev.filter((s) => s.id !== story.id));
       setBacklogStories((prev) => [...prev, { ...story, sprint_id: null }]);
     } catch (err) {
-      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
       console.error('스토리 스프린트 해제 실패', err);
+      setActionError(t('unassignError'));
     }
   };
 

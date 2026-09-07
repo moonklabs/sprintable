@@ -657,6 +657,10 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     });
 
     expect(storiesGetCount).toBe(2); // 500 응답 後 fetchAll이 실제로 재발화(재조회로 정직 복구).
+    // story #3637(유나 silent-failure-sweep-3632) — 카드가 조용히 제자리로 돌아가던 자리,
+    // 이제 storyMoveFailed 토스트가 뜬다(새 규격 0, board 네임스페이스의 createStoryFailed
+    // 형과 동형).
+    expect(container.textContent).toContain('스토리 이동에 실패했습니다');
   });
 
   // 같은 클래스 — bulk(컬럼) PATCH 축도 동일 가드가 걸리는지 대칭 확認.
@@ -681,6 +685,8 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     });
 
     expect(storiesGetCount).toBe(2);
+    // story #3637 — 열 이동도 동일 처방.
+    expect(container.textContent).toContain('스토리 이동에 실패했습니다');
   });
 
   // TRUST_COLUMNS 고정 순서(queued=0,running=1,needs_input=2,claimed_done=3,verified=4,
