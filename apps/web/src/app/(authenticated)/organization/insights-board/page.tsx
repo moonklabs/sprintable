@@ -373,7 +373,7 @@ export default function InsightsBoardPage() {
                     }}
                     data-testid="insights-board-row"
                     data-highlighted={highlightedRowId === row.publication_id ? 'true' : undefined}
-                    className={highlightedRowId === row.publication_id ? 'bg-primary/10 transition-colors' : undefined}
+                    className={highlightedRowId === row.publication_id ? 'bg-primary/10 motion-safe:transition-colors' : undefined}
                   >
                     <td className="max-w-xs truncate px-3 py-2.5 font-medium text-foreground">
                       {row.external_url ? (
