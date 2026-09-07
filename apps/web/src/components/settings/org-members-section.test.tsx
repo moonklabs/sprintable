@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { OrgMembersSection } from './org-members-section';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,6 +20,14 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
+
+function wrapEn(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={enMessages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -177,5 +186,57 @@ describe('OrgMembersSection — 역할 변경 게이트가 BE 인가 폭과 같�
     await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="member" />)); });
     await flush();
     expect(container.querySelectorAll('select').length).toBe(0);
+  });
+});
+
+// story #3606(잔여, 페드루 PO 確定 2026-09-07) — 이 파일 전체가 t() 없는 하드코딩
+// 한글이라 en 로케일에서도 한국어가 그대로 노출됐다(초대 폼 제목·설명·성공/실패
+// 배너·멤버/초대 목록 헤딩·행 액션 버튼 등). 실 렌더(멤버 1행+대기 초대 1행 —
+// 두 SectionCard 다 그려야 전수를 잰다)로 en 로케일에서 한글이 0임을 고정한다.
+const HANGUL_RE = /[가-힣]/;
+
+async function mountEnWithData() {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === '/api/org-members') {
+      return {
+        ok: true,
+        json: async () => ({
+          data: [{ id: 'm1', user_id: 'u1', name: 'Alice', email: 'alice@example.com', role: 'member', created_at: '2026-09-01T00:00:00Z' }],
+        }),
+      };
+    }
+    if (url === '/api/organizations/org-1/invites') {
+      return {
+        ok: true,
+        json: async () => ({
+          data: [{ id: 'inv1', email: 'bob@example.com', role: 'member', status: 'pending', expires_at: '2026-09-14T00:00:00Z', invite_url: 'https://sprintable.example/i/abc' }],
+        }),
+      };
+    }
+    if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+    if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u-admin-self' } }) };
+    throw new Error('unexpected fetch: ' + url);
+  }));
+  await act(async () => { root.render(wrapEn(<OrgMembersSection orgId="org-1" currentRole="admin" />)); });
+  await flush();
+}
+
+describe('OrgMembersSection — en 로케일 한글 노출 0(story #3606, i18n 갭 마감)', () => {
+  it('멤버 1행+대기 초대 1행 실 렌더 — 화면 텍스트 전체에 한글이 하나도 없다', async () => {
+    await mountEnWithData();
+    expect(container.textContent).not.toMatch(HANGUL_RE);
+    // 실제로 영문 대체 텍스트가 서 있는지도 같이(빈 렌더링으로 "우연히 0건" 방지).
+    expect(container.textContent).toContain(enMessages.settings.orgMembersHeading);
+    expect(container.textContent).toContain(enMessages.settings.invite);
+    expect(container.textContent).toContain(enMessages.settings.removeFromProject);
+    expect(container.textContent).toContain(enMessages.share.copyLink);
+    expect(container.textContent).toContain(enMessages.settings.resend);
+    expect(container.textContent).toContain(enMessages.common.cancel);
+  });
+
+  // 뮤테이션 대조 — 이 검산이 실제로 한글 잔재를 잡는지 자가 증명(하드코딩 한글이
+  // 남아있는 걸 흉내 낸 조각을 검사기에 직접 먹여 RED가 남을 확인).
+  it('뮤테이션 대조 — 한글이 섞인 텍스트는 이 정규식이 반드시 잡는다', () => {
+    expect('Members (1) 가입').toMatch(HANGUL_RE);
   });
 });

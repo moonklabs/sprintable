@@ -47,6 +47,10 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [loading, setLoading] = useState(true);
 
   const t = useTranslations('settings');
+  // story #3606(잔여, 페드루 PO 確定 2026-09-07) — common.cancel·share.copyLink는
+  // 기존 키 재사용(새 낱말 0, §22-18 원칙과 동형).
+  const tc = useTranslations('common');
+  const tShare = useTranslations('share');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
 
@@ -153,7 +157,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         setInviteResult({ type: 'error', text: t('memberInviteFailed') });
       }
     } else {
-      setInviteResult({ type: 'success', text: `초대 발송 완료${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
+      setInviteResult({ type: 'success', text: `${t('orgMemberInviteSuccess')}${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
       setInviteEmail('');
       setInviteProjectIds([]);
       setShowProjectPicker(false);
@@ -171,7 +175,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       body: JSON.stringify({ role: newRole }),
     });
     if (res.ok) {
-      setActionMessage({ type: 'success', text: '역할이 변경됐습니다.' });
+      setActionMessage({ type: 'success', text: t('orgMemberRoleChangeSuccess') });
       await refreshData();
     } else {
       // story #3491 — update_org_member()가 이제 owner 보호 가드의 구조화 code를
@@ -195,7 +199,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     setActionMessage(null);
     const res = await fetch(`/api/org-members/${memberId}`, { method: 'DELETE' });
     if (res.ok) {
-      setActionMessage({ type: 'success', text: '멤버가 제거됐습니다.' });
+      setActionMessage({ type: 'success', text: t('orgMemberRemoveSuccess') });
       await refreshData();
     } else {
       // story #2485 — backend delete_org_member()는 generic HTTP상태 코드만 낸다
@@ -245,7 +249,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setTimeout(() => setCopiedInviteId(null), 1500);
     } catch {
       bumpActionMessageNonce();
-      setActionMessage({ type: 'error', text: '클립보드 복사에 실패했습니다.' });
+      setActionMessage({ type: 'error', text: t('orgMemberClipboardCopyFailed') });
     }
   };
 
@@ -256,9 +260,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-foreground">조직 전체 멤버</h2>
+              <h2 className="text-base font-semibold text-foreground">{t('orgMembersHeading')}</h2>
               <p className="text-sm text-muted-foreground">
-                여기서 새 멤버를 초대할 수 있습니다. 초대된 멤버는 조직에 합류한 후, 프로젝트별로 별도 추가됩니다.
+                {t('orgMembersInviteDescription')}
               </p>
             </div>
           </SectionCardHeader>
@@ -279,7 +283,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 ]}
               />
               <Button variant="hero" size="lg" onClick={() => void handleInvite()} disabled={!inviteEmail.trim() || inviting}>
-                {inviting ? '...' : '초대'}
+                {inviting ? '...' : t('invite')}
               </Button>
             </div>
 
@@ -356,18 +360,17 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       {/* 멤버 목록 */}
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">멤버 ({members.length})</h2>
+          <h2 className="text-base font-semibold text-foreground">{t('orgMembersListHeading', { count: members.length })}</h2>
         </SectionCardHeader>
         <SectionCardBody>
           {/* HARD 픽셀 딴판 fix: 박시 per-member 카드 → project-access와 동일 de-boxy divide-y(공유 MemberRow flat·양 surface 정합) */}
           {members.length > 0 ? (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
           {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「제거」 접근 이름이라
-              보조기술 버튼 목록에서 어느 멤버 행인지 못 가른다. ⚠️이 파일은 애초에
-              대부분의 보이는 글자가 t() 없이 하드코딩돼 있다(별도·더 큰 i18n 갭 —
-              이 스토리 범위 밖이라 조용히 빼지 않고 남김, 후속 확인 필요) — 새
-              aria-label 템플릿만 'settings' 네임스페이스에 추가하고 {label} 값은
-              기존 하드코딩 문자열을 그대로 넘긴다(새 낱말 0, 드리프트 0). */}
+              보조기술 버튼 목록에서 어느 멤버 행인지 못 가른다. story #3606(잔여,
+              페드루 PO 確定 2026-09-07)에서 이 파일 전체 하드코딩 한글을 마저
+              i18n 키화했다(기존 키 재사용 우선, 새 낱말은 「문자열→키」 표 PR
+              본문 참고). */}
           {members.map((member, index) => {
             const isThisOwner = member.role === 'owner';
             const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
@@ -377,7 +380,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 name={member.name}
                 email={member.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={member.joined_at ? `${formatRelativeTime(member.joined_at, locale, displayTimezone)} 가입` : undefined}
+                meta={member.joined_at ? t('orgMemberJoinedMeta', { time: formatRelativeTime(member.joined_at, locale, displayTimezone) }) : undefined}
                 actions={
                   <>
                     {canEdit ? (
@@ -396,9 +399,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                     {canEdit && (
                       <Button
                         size="sm" variant="glass" onClick={() => setRemoveDialogMemberId(member.id)}
-                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: '제거' })}
+                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: t('removeFromProject') })}
                       >
-                        제거
+                        {t('removeFromProject')}
                       </Button>
                     )}
                   </>
@@ -408,7 +411,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           })}
           </div>
           ) : (
-            <p className="text-sm text-muted-foreground">멤버가 없습니다.</p>
+            <p className="text-sm text-muted-foreground">{t('orgMembersEmpty')}</p>
           )}
         </SectionCardBody>
       </SectionCard>
@@ -433,20 +436,20 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       {invites.length > 0 && (
         <SectionCard>
           <SectionCardHeader>
-            <h2 className="text-base font-semibold text-foreground">초대 대기 ({invites.length})</h2>
+            <h2 className="text-base font-semibold text-foreground">{t('orgInvitesListHeading', { count: invites.length })}</h2>
           </SectionCardHeader>
           <SectionCardBody>
             <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-            {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「링크 복사」·「재발송」·
-                「취소」 접근 이름이라 보조기술 버튼 목록에서 어느 초대 행인지 못
-                가른다(위 멤버 목록과 같은 하드코딩 i18n 갭 참고 — {label}은 기존
-                문자열 그대로). */}
+            {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
+                2026-09-07) — 링크 복사·재발송·취소 aria-label은 기존
+                orgInviteRowActionAriaLabel 유지, 하드코딩 한글은 마저 키화(기존
+                키(share.copyLink·settings.resend·common.cancel) 재사용 우선). */}
             {invites.map((invite, index) => (
               <MemberRow
                 key={invite.id}
                 name={invite.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={`${invite.role} · 만료: ${formatScheduledAt(invite.expires_at, displayTimezone).display}`}
+                meta={t('orgInviteMeta', { role: invite.role, date: formatScheduledAt(invite.expires_at, displayTimezone).display })}
                 emphasis="subtle"
                 actions={
                   canManage ? (
@@ -457,29 +460,29 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         variant="glass"
                         disabled={!invite.invite_url}
                         onClick={() => void handleCopyInviteLink(invite.id, invite.invite_url)}
-                        title={invite.invite_url ? '초대 링크 복사' : '링크 사용 불가'}
+                        title={invite.invite_url ? t('orgInviteCopyLinkTitle') : t('orgInviteCopyLinkUnavailableTitle')}
                         className={copiedInviteId === invite.id ? 'text-foreground bg-success/12 border-success/30' : ''}
                         aria-label={t('orgInviteRowActionAriaLabel', {
-                          n: index + 1, label: copiedInviteId === invite.id ? '복사됨' : '링크 복사',
+                          n: index + 1, label: copiedInviteId === invite.id ? t('orgInviteCopiedLabel') : tShare('copyLink'),
                         })}
                       >
                         {copiedInviteId === invite.id ? (
-                          <><Check className="h-3 w-3 mr-1" />복사됨</>
+                          <><Check className="h-3 w-3 mr-1" />{t('orgInviteCopiedLabel')}</>
                         ) : (
-                          <><Copy className="h-3 w-3 mr-1" />링크 복사</>
+                          <><Copy className="h-3 w-3 mr-1" />{tShare('copyLink')}</>
                         )}
                       </Button>
                       <Button
                         size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}
-                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: resendingId === invite.id ? '...' : '재발송' })}
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: resendingId === invite.id ? '...' : t('resend') })}
                       >
-                        {resendingId === invite.id ? '...' : '재발송'}
+                        {resendingId === invite.id ? '...' : t('resend')}
                       </Button>
                       <Button size="sm" variant="glass" disabled={revokingId === invite.id} onClick={() => void handleRevokeInvite(invite.id)}
                         className="text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: revokingId === invite.id ? '...' : '취소' })}
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: revokingId === invite.id ? '...' : tc('cancel') })}
                       >
-                        {revokingId === invite.id ? '...' : '취소'}
+                        {revokingId === invite.id ? '...' : tc('cancel')}
                       </Button>
                     </div>
                   ) : undefined

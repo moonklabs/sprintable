@@ -428,6 +428,20 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 자리(다이얼로그 헤더 vs 본문 안내)에서 다른 걸 말한다. #2352/#2365가 잡으려는
   // "같은 화면의 두 «수»가 헷갈리는" 병이 아니다(count는 이 안내 문장에만 있다).
   'content.commentsReplyAlreadySentCount <-> content.commentsReplyDialogTitle',
+  // story #3606(잔여, 페드루 PO 정정 2026-09-07, 유나 판정) — org-members-section.tsx가
+  // 이 스토리에서 처음으로 settings.invite("초대", 버튼 라벨)를 이 파일 안에서 다른
+  // "초대"류 문구와 같이 렌더하게 됐다. ⚠️초안 사유("초대 카드·대기 목록이 같이 안
+  // 선다")는 거짓이었다 — 초대 폼 카드(버튼 자리)와 대기 목록 카드는 실제로 같은
+  // 화면의 형제 섹션이라 대기 초대가 1건이라도 있으면 같이 선다(유나 실측 정정).
+  // 근거는 둘째 문장뿐: orgInviteRowActionAriaLabel·orgInvitesListHeading은 항상
+  // «순번/개수와 함께»만 서는 aria-label·헤딩 문장인 반면 settings.invite는 그
+  // 자체로 완결된 짧은 버튼 라벨이다 — #2352/#2365가 잡으려는 병은 "같은 화면의
+  // 두 «수»가 헷갈리는" 것인데, invite 자체엔 수가 없어 그 축의 혼동이 성립하지
+  // 않는다(memberLimitExceededError도 동형 — 수({limit})는 있지만 문장 전체가
+  // 정책 한도 안내라 "초대" 단어 하나가 버튼과 헷갈릴 리스크가 아니다).
+  'settings.invite <-> settings.memberLimitExceededError',
+  'settings.invite <-> settings.orgInviteRowActionAriaLabel',
+  'settings.invite <-> settings.orgInvitesListHeading',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

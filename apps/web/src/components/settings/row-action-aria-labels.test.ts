@@ -33,14 +33,19 @@ const CASES: { namespace: string; key: string; ko: string[]; en: string[] }[] = 
   { namespace: 'settings', key: 'unblockUserAriaLabel', ko: ['차단 해제'], en: ['Unblock'] },
   { namespace: 'settings', key: 'agentToggleAriaLabel', ko: ['비활성화', '활성화'], en: ['Deactivate', 'Activate'] },
   { namespace: 'settings', key: 'lineEditorEditAriaLabel', ko: ['편집'], en: ['Edit'] },
-  { namespace: 'settings', key: 'workflowToggleAriaLabel', ko: ['비활성화', '활성화'], en: ['Disable', 'Enable'] },
+  // story #3606(잔여, 페드루 PO 確定 2026-09-07) — edit/delete/confirm/cancel/save
+  // (tc(...) 공용 common 키)도 같은 workflowToggleAriaLabel 템플릿을 재사용해
+  // 마감했다 — 표본에 그 5개 라벨 추가(새 템플릿·새 낱말 0).
+  { namespace: 'settings', key: 'workflowToggleAriaLabel', ko: ['비활성화', '활성화', '수정', '삭제', '확인', '취소', '저장'], en: ['Disable', 'Enable', 'Edit', 'Delete', 'Confirm', 'Cancel', 'Save'] },
   { namespace: 'settings', key: 'repeatSchedulesRowActionAriaLabel', ko: ['지금 한 회차', '재개', '일시정지'], en: ['Run now'] },
   { namespace: 'settings', key: 'orgMemberRowActionAriaLabel', ko: ['제거'], en: ['Remove'] },
   { namespace: 'settings', key: 'orgInviteRowActionAriaLabel', ko: ['링크 복사', '재발송', '취소'], en: ['Copy link'] },
   { namespace: 'githubLinks', key: 'promoteAriaLabel', ko: ['명시 연결'], en: ['Link explicitly'] },
   { namespace: 'insightsBoard', key: 'followUpAriaLabel', ko: ['후속 조치'], en: ['Follow-up'] },
   { namespace: 'agentRuns', key: 'openDetailAriaLabel', ko: ['상세 보기'], en: ['Open detail'] },
-  { namespace: 'cage', key: 'gateRowActionAriaLabel', ko: ['반려', '변경 요청', '보류(논의 필요)'], en: ['Reject'] },
+  // story #3606(잔여, 페드루 PO 確定 2026-09-07) — gateApprove(HITL 승인)·primaryLabel
+  // (일반/서명 승인 둘 다)도 같은 map·같은 gateRowActionAriaLabel 재사용으로 마감.
+  { namespace: 'cage', key: 'gateRowActionAriaLabel', ko: ['반려', '변경 요청', '보류(논의 필요)', '승인', '승인하고 서명'], en: ['Reject', 'Approve', 'Approve & sign'] },
   { namespace: 'channelConnect', key: 'channelRowActionAriaLabel', ko: ['연결 시험', '다시 연결', '해제'], en: ['Test connection'] },
   { namespace: 'organization', key: 'eventRowActionAriaLabel', ko: ['발행 테스트', '프로젝트에 적용', '수정', '비활성화'], en: ['Test publish'] },
 ];
