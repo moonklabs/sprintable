@@ -70,6 +70,9 @@ const DRAFT_DETAIL = {
   draft_id: DRAFT_ID, work_item_id: 'w1', channel: 'threads', connection_id: 'c1',
   // story #3614(AC2) — draft|withdrawn. 기본값 'draft'(대부분 테스트가 이 스토리와 무관).
   draft_status: 'draft' as string,
+  // story #3614 CHANGES(유나 재판정) — 서버 계산값. 기본 true(대부분 테스트가 폐기와
+  // 무관하므로 버튼이 항상 뜨는 쪽이 자연스러운 기본, can_unpublish 기본값 관례와 동형).
+  can_withdraw: true as boolean,
   current_version: 1,
   gate_status: null as string | null, reapproval_required: null as boolean | null,
   sealed_content_sha256: null as string | null, body_sha256: 'h1',
@@ -1231,27 +1234,27 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   });
 
   // story #3614(Phase2·BE+FE, 페드루 PO 確定 2026-09-07) — 초안 폐기(withdraw).
-  it('⭐폐기 버튼 — draft_status=draft·미발행이면 보인다', async () => {
-    stubFetch({ draftDetail: { draft_status: 'draft', published_at: null } });
+  // CHANGES(유나 재판정, 페드루 PO 채택) — 이웃 can_unpublish와 동형 정책: FE는
+  // BE가 계산한 can_withdraw 하나만 보고 버튼을 그린다(org_id/author 비교를
+  // FE가 직접 하지 않는다).
+  it('⭐폐기 버튼 — can_withdraw=true면 보인다', async () => {
+    stubFetch({ draftDetail: { can_withdraw: true } });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).not.toBeNull();
   });
 
-  it('⭐폐기 버튼 — 이미 withdrawn이면 버튼이 안 보인다', async () => {
-    stubFetch({ draftDetail: { draft_status: 'withdrawn', published_at: null } });
+  it('⭐폐기 버튼 — can_withdraw=false면 버튼이 안 보인다(이미 withdrawn·발행됨·권한 없음 등 서버 판정 무엇이든)', async () => {
+    stubFetch({ draftDetail: { can_withdraw: false } });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).toBeNull();
   });
 
-  it('⭐폐기 버튼 — 이미 발행됐으면(published_at 있음) 버튼이 안 보인다(발행 취소는 별도 경로)', async () => {
-    stubFetch({
-      draftDetail: {
-        draft_status: 'draft', gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
-        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
-      },
-    });
+  it('⭐폐기 버튼 — can_withdraw 필드 자체가 없으면(구버전 BE 응답 등) 안전 쪽으로 안 보인다', async () => {
+    // draftDetail override가 얕은 병합이라(DRAFT_DETAIL 기본값 can_withdraw=true가
+    // 살아남음) 명시적으로 undefined를 실어 필드 부재를 재현한다.
+    stubFetch({ draftDetail: { can_withdraw: undefined as unknown as boolean } });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).toBeNull();

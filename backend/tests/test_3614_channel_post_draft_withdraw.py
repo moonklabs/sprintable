@@ -253,6 +253,49 @@ async def test_withdraw_is_idempotent():
 
 
 @pytest.mark.anyio
+async def test_can_withdraw_field_three_branches_via_detail_endpoint():
+    """story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 can_unpublish와
+    같은 정책: 서버가 (원저자 또는 org owner/admin) ∧ 미발행 ∧ 미폐기를 계산해
+    can_withdraw 하나로 낸다. 3분기: ①원저자=true ②무관 멤버=false ③org admin
+    (작성자 아님)=true."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            author_agent_id = await _seed_agent(s, org_id, project_id, name="작성자")
+            other_agent_id = await _seed_agent(s, org_id, project_id, name="무관")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=author_agent_id, agent=True)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+
+        # ① 원저자 — can_withdraw=true
+        _setup_org_scoped_app(app, Session, org_id, user_id=author_agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+        assert r.json()["can_withdraw"] is True
+
+        # ② 무관 멤버(작성자도 admin도 아님) — can_withdraw=false
+        _setup_org_scoped_app(app, Session, org_id, user_id=other_agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+        assert r.json()["can_withdraw"] is False
+
+        # ③ org admin(작성자 아님) — can_withdraw=true
+        async with Session() as s:
+            admin_user_id = await _seed_human(s, org_id, role="admin")
+        _setup_org_scoped_app(app, Session, org_id, user_id=admin_user_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+        assert r.json()["can_withdraw"] is True
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_list_excludes_withdrawn_by_default_includes_with_flag():
     """AC2 — 목록 기본 응답에서 폐기된 초안은 빠지고, include_withdrawn=true면 보인다.
     단건 조회는 항상 보인다(목록 필터와 별개)."""

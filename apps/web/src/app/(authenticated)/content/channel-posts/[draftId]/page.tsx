@@ -57,8 +57,12 @@ interface ChannelPostDraftDetail {
   work_item_id: string;
   channel: string;
   connection_id: string;
-  // story #3614(AC2) — draft|withdrawn. 「폐기」 버튼 표시 여부·폐기됨 배지 판정.
+  // story #3614(AC2) — draft|withdrawn. 「폐기됨」 배지 판정.
   draft_status: string;
+  // story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 can_unpublish와
+  // 동형: 서버가 (원저자 또는 org owner/admin) ∧ 미발행 ∧ 미폐기를 전부 계산해 낸다.
+  // FE는 이 값만 보고 버튼을 그린다 — org_id/author 비교를 FE가 직접 하지 않는다.
+  can_withdraw?: boolean;
   current_version: number;
   // story #3402 ④ — 단건 GET(story #3403)이 목록 항목(ChannelPostDraftListItem, #3394)과
   // 같은 shape를 준다 — 승인 카드가 필요로 하는 게이트 신호도 이미 여기 실려 있다.
@@ -1637,6 +1641,9 @@ export default function ChannelPostEditPage() {
         setDraft((prev) => prev && {
           ...prev, draft_status: body?.data?.status ?? 'withdrawn',
           gate_status: body?.data?.gate_status ?? prev.gate_status,
+          // story #3614 CHANGES — can_withdraw도 서버 응답 모양으로 맞춘다(성공
+          // 직후 재조회 없이 버튼이 사라지려면 이 필드가 로컬에서도 꺼져야 한다).
+          can_withdraw: false,
         });
       } else {
         const body = await res.json().catch(() => null);
@@ -1761,11 +1768,11 @@ export default function ChannelPostEditPage() {
   // 3653a18c §3) + role 게이팅. unpublishGate===undefined(연결 조회 전/실패)면
   // "모른다"로 두고 버튼을 비활성화한다(§3-2와 같은 축 — 모르는 것을 근거로 허용하지
   // 않는다, fail-closed).
-  // story #3614(AC2) — 이미 폐기됐거나 발행된(=BE가 409를 낼) 초안엔 버튼 자체를
-  // 안 그린다. 실제 인가(작성자/admin)는 BE만 안다 — FE는 상태 축만 미리 거른다
-  // (버튼을 눌러도 되는지의 대부분은 이걸로 걸러지고, 나머지 권한 문제는 클릭
-  // 시 403으로 온다 — handleWithdraw의 에러 분기가 그 문구를 그린다).
-  const showWithdraw = draft.draft_status !== 'withdrawn' && !draft.published_at;
+  // story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 can_unpublish와
+  // 같은 정책: 권한 없으면 버튼 자체를 안 그린다(그렸다가 403을 내는 이중 정책 금지).
+  // 서버가 (원저자 또는 org owner/admin) ∧ 미발행 ∧ 미폐기를 전부 계산한
+  // can_withdraw 하나만 본다 — FE가 org_id/author를 직접 비교하지 않는다.
+  const showWithdraw = draft.can_withdraw === true;
   const showUnpublish = draft.publication_status === 'published';
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true && unpublishGate?.connectionStatus === 'active';
 
