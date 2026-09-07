@@ -318,7 +318,7 @@ async def test_mutation_removing_claim_hook_leaves_zero_runs(monkeypatch):
         await engine.dispose()
 
 
-def _install_check_violating_agent_run(monkeypatch, mod):
+def _install_check_violating_agent_run(monkeypatch):
     """CHANGES(페드루 PO, 2026-09-07) — PK 충돌은 SQLAlchemy identity map이 SQL을 내보내기
     前에 ORM 층에서 먼저 잡아버려(식별맵에 같은 키가 있으면) 실제로 Postgres에 SQL이
     한 번도 안 나가고, 그래서 asyncpg 트랜잭션도 안 깨지고 세션도 PendingRollback이 안
@@ -328,13 +328,18 @@ def _install_check_violating_agent_run(monkeypatch, mod):
     INSERT가 실제로 Postgres에 도달해 CHECK 위반(asyncpg IntegrityError)으로 터지고,
     그 순간 PG가 트랜잭션을 abort한다(SAVEPOINT 없으면 그 뒤 같은 세션의 어떤 SQL도
     실패)."""
-    from app.models.agent_run import AgentRun as RealAgentRun
+    from app.models.agent_run import AgentRun
 
-    def _factory(**kwargs):
+    # mod.AgentRun 자체(모듈-레벨 이름)를 바꾸면 dedupe SELECT의 `AgentRun.id`(클래스
+    # 속성 접근)도 같이 깨진다(함수엔 .id가 없다) — 생성자(__init__)만 패치해 SELECT는
+    # 그대로 두고 INSERT할 인스턴스만 status를 강제로 위반값으로 바꾼다.
+    original_init = AgentRun.__init__
+
+    def _init_with_bogus_status(self, **kwargs):
         kwargs["status"] = "bogus"  # agent_runs_status_check가 거부하는 값 — 실 CHECK 위반.
-        return RealAgentRun(**kwargs)
+        original_init(self, **kwargs)
 
-    monkeypatch.setattr(mod, "AgentRun", _factory)
+    monkeypatch.setattr(AgentRun, "__init__", _init_with_bogus_status)
 
 
 @pytest.mark.anyio
@@ -346,7 +351,7 @@ async def test_run_write_failure_does_not_poison_story_transition_commit(monkeyp
     약한 신호) 새 세션 SELECT로 story.status가 실제로 영속됐는지를 본다."""
     import app.services.agent_run_tracking as mod
 
-    _install_check_violating_agent_run(monkeypatch, mod)
+    _install_check_violating_agent_run(monkeypatch)
 
     from app.main import app
     from app.models.pm import Story
@@ -377,9 +382,97 @@ async def test_run_write_failure_does_not_poison_story_transition_commit(monkeyp
         app.dependency_overrides.clear()
         await engine.dispose()
 
-# 뮤테이션(begin_nested 제거) 테스트는 두 번 시도(PK 충돌·CHECK 위반) 다 이
-# SQLAlchemy/asyncpg 조합에서 SAVEPOINT 유무 차이를 못 드러냈다(둘 다 여전히
-# 200+영속) — 채널에 실측 그대로 보고, 신뢰성 없는 RED를 위한 RED 테스트는
-# 안 남긴다. SAVEPOINT 자체(코드)는 이 결함 클래스의 확립된 정공법이라 유지.
+
+@pytest.mark.anyio
+async def test_run_write_failure_does_not_lose_uncommitted_sibling_write(monkeypatch):
+    """페드루 PO 3차 지적(2026-09-07, 서비스 층 직접) — API 경로에선 차이가 안 드러난
+    이유는 «잃을 미커밋 형제 쓰기가 없어서»였다: SQLAlchemy 2.0은 flush 실패 시
+    세션을 poison(못 쓰게)시키는 게 아니라 루트 트랜잭션을 통째로 롤백하고 다음
+    사용에 새 트랜잭션을 autobegin한다 — 실제 증상은 «세션이 죽는다」가 아니라
+    «그 앞의 미커밋 쓰기가 조용히 사라진다」. 이 테스트는 서비스 함수를 API 없이
+    직접 호출해 그 증상을 정확히 겨냥한다: 같은 세션에서 ① 형제 쓰기(story.title,
+    flush 안 함=pending) → ② ensure_agent_run_started를 CHECK 위반으로 실패시킴
+    → ③ session.commit() → ④ 새 세션 SELECT로 ①이 살아남았는지."""
+    import app.services.agent_run_tracking as mod
+    from app.models.pm import Story
+
+    _install_check_violating_agent_run(monkeypatch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+
+        async with Session() as s:
+            story = (await s.execute(
+                select(Story).where(Story.id == seeded["story_id"])
+            )).scalar_one()
+            story.title = "형제쓰기-생존확인"  # flush 안 함 — 세션에 pending 상태로만 존재.
+
+            await mod.ensure_agent_run_started(
+                s, org_id=seeded["org_id"], project_id=seeded["project_id"],
+                agent_id=seeded["agent_id"], story_id=seeded["story_id"],
+            )
+            await s.commit()
+
+        async with Session() as s2:
+            story2 = (await s2.execute(
+                select(Story).where(Story.id == seeded["story_id"])
+            )).scalar_one()
+            assert story2.title == "형제쓰기-생존확인", (
+                "형제의 미커밋 쓰기가 사라졌다 — run 기록 실패가 세션을 poison시켰다"
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_mutation_removing_savepoint_loses_sibling_write(monkeypatch):
+    """뮤테이션 — begin_nested() 격리를 빼면(옛 결함 재현) 위 테스트와 똑같은 시나리오에서
+    형제의 미커밋 쓰기가 루트 트랜잭션 롤백에 휩쓸려 사라지는 것을 고정(위 테스트가
+    실제로 SAVEPOINT 격리를 지키고 있다는 증거)."""
+
+    class _AsyncNullContext:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False  # 예외를 그대로 전파(=SAVEPOINT 없음과 동형).
+
+    import app.services.agent_run_tracking as mod
+    from app.models.pm import Story
+
+    _install_check_violating_agent_run(monkeypatch)
+    monkeypatch.setattr(mod.AsyncSession, "begin_nested", lambda self: _AsyncNullContext())
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+
+        async with Session() as s:
+            story = (await s.execute(
+                select(Story).where(Story.id == seeded["story_id"])
+            )).scalar_one()
+            story.title = "형제쓰기-생존확인"
+
+            await mod.ensure_agent_run_started(
+                s, org_id=seeded["org_id"], project_id=seeded["project_id"],
+                agent_id=seeded["agent_id"], story_id=seeded["story_id"],
+            )
+            try:
+                await s.commit()
+            except Exception:  # noqa: BLE001 — SAVEPOINT 없으면 commit 자체가 터질 수도 있다.
+                await s.rollback()
+
+        async with Session() as s2:
+            story2 = (await s2.execute(
+                select(Story).where(Story.id == seeded["story_id"])
+            )).scalar_one()
+            assert story2.title != "형제쓰기-생존확인", (
+                "뮤테이션이 걸리지 않았다(SAVEPOINT 없이도 형제 쓰기가 살아남았다)"
+            )
+    finally:
+        await engine.dispose()
 
 

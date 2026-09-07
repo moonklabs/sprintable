@@ -65,11 +65,13 @@ async def ensure_agent_run_started(
             session.add(run)
             await session.flush()
     except Exception:  # noqa: BLE001 — best-effort(위 docstring).
-        # SAVEPOINT 롤백은 DB측 변경만 되돌린다 — 방금 session.add()한 pending 객체가
-        # 세션 identity map에 남아 있으면 바깥 호출부의 다음 flush/commit이 이 죽은
-        # 객체를 다시 밀어보려다 또 실패한다(같은 poison 클래스, 격리만 하고 안 지우면
-        # 재발). expunge로 완전히 떼어낸다.
-        if run is not None:
+        # begin_nested()의 SAVEPOINT 롤백은 그 SAVEPOINT 안에서 session.add()한 pending
+        # 객체를 SQLAlchemy가 이미 자동으로 세션에서 떼어낸다(실측 확認 — CHECK 위반
+        # 재현 중 session.expunge(run)이 "Instance is not present in this Session"으로
+        # 터졌다) — 그래서 `run in session`으로 아직 붙어 있는 경우만 방어적으로
+        # expunge한다(SAVEPOINT 실패 전, 예: 데드록/타임아웃처럼 flush 자체가 SAVEPOINT
+        # 밖에서 실패하는 다른 예외 경로를 위한 안전망).
+        if run is not None and run in session:
             session.expunge(run)
         logger.warning(
             "agent_run 자동 시작 실패(비차단) agent_id=%s story_id=%s", agent_id, story_id, exc_info=True,
