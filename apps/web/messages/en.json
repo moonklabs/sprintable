@@ -4385,6 +4385,7 @@
     "unknownMember": "Unknown member",
     "noMessages": "Send the first message",
     "connectionLost": "Connection lost",
+    "connectionLostPolling": "Connection lost · auto-refreshing",
     "refreshNow": "Refresh",
     "agentNotConnectedBanner": "{name} isn't connected yet — your message may not go through.",
     "agentNotConnectedBannerMulti": "{count} agents aren't connected yet — your messages may not go through.",

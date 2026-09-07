@@ -7,6 +7,7 @@ import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/r
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
 import { createVisibilityReconnectState } from '@/lib/realtime/sse-visibility-reconnect';
+import { createPollBackoffState, POLL_THRESHOLD_MS } from '@/lib/realtime/sse-polling-fallback';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -173,12 +174,19 @@ interface UseChatSseOptions {
   // story #1977: conversation.read — 다른 탭/기기에서 읽음 처리 시 이 탭의 unread 배지(리스트+GNB) 자가정정.
   onConversationRead?: (payload: SseConversationReadPayload) => void;
   onReconnect?: () => void;
+  /** story #3621 — `connected`가 threshold(기본 10s) 이상 false로 머물면 이 콜백을
+   *  폴링 간격(기본 15s → 연속 실패 시 최대 30s)으로 반복 호출한다. Promise<boolean>|
+   *  boolean 반환 — false/throw는 폴 실패로 간주해 다음 간격을 넓힌다(sse-polling-
+   *  fallback.ts). 탭이 백그라운드면 폴링을 쉬고(방전 방지·기존 visibility 재조회
+   *  규칙과 충돌 0), 재연결 성공(connected=true) 즉시 멈춘다 — 그 뒤는 기존
+   *  onReconnect(backfill)가 이어받는다(중복 fetch 0). */
+  onPoll?: () => Promise<boolean | undefined> | boolean | undefined;
 }
 
 // story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용, sse-multiplexer.ts와
 // 동일 모듈 재사용)로 뽑았다.
 
-export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect, onPoll }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,6 +200,7 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   const onWorkingRef = useRef(onWorking);
   const onConversationReadRef = useRef(onConversationRead);
   const onReconnectRef = useRef(onReconnect);
+  const onPollRef = useRef(onPoll);
   const memberIdRef = useRef(currentTeamMemberId);
   // story #2964(#2940과 동일 클래스, 폴백 경로 전용) — memberId가 진짜로 바뀐 재실행(마운트·
   // mux 단독 토글이 아니라)인지 판별용.
@@ -203,6 +212,7 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   useLayoutEffect(() => { onWorkingRef.current = onWorking; }, [onWorking]);
   useLayoutEffect(() => { onConversationReadRef.current = onConversationRead; }, [onConversationRead]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
+  useLayoutEffect(() => { onPollRef.current = onPoll; }, [onPoll]);
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   const handleConversationMessage = (raw: string) => {
@@ -382,5 +392,53 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   // story 6ddaa086 — 이전 주석은 "mux.connected가 이미 반응형"이라 적었으나 틀렸다: mux
   // 핸들 자체는 참조안정적이라(realtime-provider.tsx) getter 뒤 값이 바뀌어도 이 컴포넌트가
   // 리렌더되지 않았다. muxConnected(위, 전용 컨텍스트)만 실제로 반응형이다.
-  return { connected: mux ? muxConnected : connected };
+  const effectiveConnected = mux ? muxConnected : connected;
+
+  // story #3621 — connected가 threshold(기본 10s) 이상 false로 머물면 폴링 시작. mux
+  // 경로·독립 연결 경로 둘 다 effectiveConnected 하나로 판정(경로 무관 동일 동작).
+  // connected로 돌아오면(effect 재실행 → cleanup) 즉시 멈춘다 — onReconnect(backfill)가
+  // 이어받으므로 폴링·backfill이 겹쳐 돌지 않는다(AC2). `polling`은 호출부가 배너 문구를
+  // "끊김"에서 "폴링으로 갱신 중"으로 바꿔 다는 신호(AC3) — threshold 전엔 false.
+  const [polling, setPolling] = useState(false);
+  useEffect(() => {
+    // polling은 초기값이 이미 false이고, 폴링이 실제로 돌던 상태에서 벗어날 때는 아래
+    // cleanup이 false로 되돌린다 — 여기서 다시 동기 setState할 필요가 없다
+    // (react-hooks/set-state-in-effect, 카스케이드 렌더 방지).
+    if (!onPollRef.current || effectiveConnected) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const pollBackoff = createPollBackoffState();
+
+    const runPoll = () => {
+      if (cancelled) return;
+      setPolling(true);
+      // story #1978/#3081과 동일 축 — 탭이 백그라운드면 폴링을 쉰다(방전 방지). 짧은
+      // 간격(1s)으로 가시성 복귀를 감시해, 복귀 즉시 폴링을 재개한다.
+      const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if (isHidden) {
+        timer = setTimeout(runPoll, 1000);
+        return;
+      }
+      void Promise.resolve()
+        .then(() => onPollRef.current?.())
+        .catch(() => false)
+        .then((result) => {
+          if (cancelled) return;
+          pollBackoff.onPollResult(result !== false && result !== undefined);
+          timer = setTimeout(runPoll, pollBackoff.currentIntervalMs());
+        });
+    };
+
+    const thresholdTimer = setTimeout(runPoll, POLL_THRESHOLD_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(thresholdTimer);
+      if (timer) clearTimeout(timer);
+      setPolling(false);
+    };
+  }, [effectiveConnected]);
+
+  return { connected: effectiveConnected, polling };
 }

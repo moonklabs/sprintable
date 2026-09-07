@@ -1,12 +1,13 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, RefreshCw, WifiOff, UserX } from 'lucide-react';
+import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
+import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
@@ -455,11 +456,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
   // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가
   // 그동안 아무도 안 읽고 있었다.
-  const { connected } = useChatSse({
+  // story #3621 AC1 — connected가 끊긴 채 threshold 이상 머물면 이 대화를 폴링으로
+  // 갱신한다. fetchMessages()가 undefined를 반환하면(!res.ok·throw) 실패로 간주해
+  // 폴 간격을 넓힌다(useChatSse 내부, sse-polling-fallback.ts).
+  const handlePoll = useCallback(async () => (await fetchMessages()) !== undefined, [fetchMessages]);
+
+  const { connected, polling } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onWorking: handleWorking,
     onReconnect: handleReconnect,
+    onPoll: handlePoll,
   });
   // 짧은 순단(정상 60초 재연결 사이클, sse-reconnect-backoff.ts 주석 참고)까지 매번 배너를
   // 띄우면 소음이라, 끊김이 일정 시간(2s) 이상 지속될 때만 보인다 — 자동 재연결(#2987 §1)이
@@ -885,23 +892,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
         <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
-          {/* story #2987 AC2 후반 — 자동 재연결(§1)이 대부분 소리 없이 복구하지만, 실패하면
-              (예: 서버가 실제로 죽음) 주소창 없는 앱에선 새로고침 우회조차 없다 — 수동 갱신
-              affordance가 유일한 탈출구. 빨강(destructive) 아님 — "네가 실패했다"가 아니라
-              "연결이 끊긴 상태"(reference-drop-notice.tsx와 동일 warning-tint 관례). */}
+          {/* story #2987 AC2 후반+#3621(유나 CHANGES, 단일화) — ConnectionLostBanner
+              (connection-lost-banner.tsx) 참고. */}
           {showDisconnectedBanner && (
-            <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
-              <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="flex-1">{t('connectionLost')}</span>
-              <button
-                type="button"
-                onClick={() => void fetchMessages()}
-                className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
-              >
-                <RefreshCw className="h-3 w-3" />
-                {t('refreshNow')}
-              </button>
-            </div>
+            <ConnectionLostBanner polling={polling} onRefresh={() => void fetchMessages()} />
           )}
           {/* story #3194(PO 신규 회원 친절도 실측) — 미연결 에이전트에게 첫 메시지를 보내도
               화면 어디에도 신호가 없어 "제품이 죽었다"로 읽히던 결함. 판별자(verified===false)

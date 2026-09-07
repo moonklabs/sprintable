@@ -4385,6 +4385,7 @@
     "unknownMember": "알 수 없는 멤버",
     "noMessages": "첫 메시지를 보내보세요",
     "connectionLost": "연결이 끊겼어요",
+    "connectionLostPolling": "연결이 끊겼어요 · 자동 새로고침 중",
     "refreshNow": "새로고침",
     "agentNotConnectedBanner": "{name}이(가) 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.",
     "agentNotConnectedBannerMulti": "에이전트 {count}명이 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.",

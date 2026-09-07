@@ -9,6 +9,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
+import { ConnectionLostBanner } from './connection-lost-banner';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
@@ -331,18 +332,24 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
 
-  const fetchConversations = useCallback(async (nextOffset = 0, append = false) => {
+  // story #3621 — boolean 반환(성공/실패)을 추가했다. AC1 폴링 fallback이 이 값으로
+  // 폴 간격을 좁히거나(성공) 넓힌다(실패, sse-polling-fallback.ts). 기존 호출부(`void
+  // fetchConversations(...)`)는 반환값을 안 봐 회귀 0.
+  const fetchConversations = useCallback(async (nextOffset = 0, append = false): Promise<boolean> => {
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(현 화면 안 덮음)
+      if (projectId !== projectIdRef.current) return false; // 전환됨 — stale 응답 drop(현 화면 안 덮음)
       const items = json.data ?? [];
       setConversations((prev) => append ? [...prev, ...items] : items);
       setMyOffset(nextOffset + items.length);
       setMyTotal(json.total ?? 0);
+      return true;
+    } catch {
+      return false;
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -454,12 +461,30 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (agentLoadedRef.current) void fetchAllConversations(0, false);
   }, [fetchConversations, fetchAllConversations]);
 
-  useChatSse({
+  // story #3621 AC1 — connected가 끊긴 채 threshold 이상 머물면 목록을 폴링으로
+  // 갱신한다(handleReconnect와 같은 재조회 대상, coalesce 가드 공유). agent 탭도
+  // handleReconnect와 동형 lazy 가드.
+  const handlePoll = useCallback(async () => {
+    const ok = await fetchConversations(0, false);
+    if (agentLoadedRef.current) void fetchAllConversations(0, false);
+    return ok;
+  }, [fetchConversations, fetchAllConversations]);
+
+  const { connected, polling } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onConversationRead: handleConversationRead,
     onReconnect: handleReconnect,
+    onPoll: handlePoll,
   });
+  // story #3621 AC3 — chat-view.tsx의 끊김 배너와 같은 낱말·같은 2s 지연(그 파일 §2987
+  // 주석 참고). 목록 뷰엔 이 표시 자체가 없었다.
+  const [showDisconnectedBanner, setShowDisconnectedBanner] = useState(false);
+  useEffect(() => {
+    if (connected) { setShowDisconnectedBanner(false); return; }
+    const timer = setTimeout(() => setShowDisconnectedBanner(true), 2000);
+    return () => clearTimeout(timer);
+  }, [connected]);
 
   // story #1978(트랙C) — onReconnect(SSE 커넥션 자체의 재연결)와는 다른 축: 탭이 백그라운드에
   // 있는 동안엔 SSE가 안 끊겨도(브라우저가 살려둘 수 있음) 목록이 갱신 안 됐을 수 있다.
@@ -585,6 +610,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   return (
     <div className="flex h-full flex-col">
+      {/* story #3621 AC3(유나 CHANGES, 단일화) — ConnectionLostBanner(connection-
+          lost-banner.tsx) 참고. 배너(2s)·폴링 시작(10s) 사이 8초 구간에도 새로고침
+          버튼을 항상 같이 그린다(조치 수단 0인 구간 제거). */}
+      {showDisconnectedBanner && (
+        <ConnectionLostBanner polling={polling} onRefresh={handlePoll} />
+      )}
       {/* story #3177(S3a)+#3178(S3b) — chat 구심점 최상단 고정 「지금」 스트립+pulse 카드
           (대화 스크롤과 분리, 훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게
           항상 상단 고정. AC2 합산 불변식(#3178) — expandedSurface 하나로 둘 중 최대 1개만
