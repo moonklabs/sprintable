@@ -606,6 +606,20 @@ async def refresh_comments_now(
         await db.commit()
         raise
     except CommentFetchError as exc:
+        # story #3597(잔여, PO 라이브 회차 2026-09-07 02:27~02:33Z 실측·PO 確定) —
+        # 스케줄 루프(process_due_comment_collections)는 CONNECTION 실패 시
+        # `_promote_connection_status`를 부르는데 이 수동 경로는 그 호출이 아예
+        # 없었다(AC1 「수집이 connection 실패로 끝나면 칩이 선다」가 「다시 수집」
+        # 버튼에서 안 섬 — 라이브 실측: FB 샌드박스 502 CHANNEL_TOKEN_EXPIRED 뒤에도
+        # connection.status가 active 그대로). 루프와 같은 순서(승격 먼저, 그 다음
+        # schedule_row 상태 기록)로 맞춘다. `_schedule_next_continuous_poll_if_active`
+        # 는 여기서 안 부른다 — 그건 «다음 자동 폴링 예약» 개념인데 이 경로는 사람이
+        # 그 자리에서 손으로 누른 1회성 재수집이라 다음 폴링 스케줄과 무관하다(루프
+        # 전용 개념을 수동 경로에 섞지 않는다).
+        from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION
+
+        if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION:
+            await _promote_connection_status(db, publication_id=publication_id)
         schedule_row.status = "failed"
         schedule_row.error_code = exc.error_code
         await db.commit()

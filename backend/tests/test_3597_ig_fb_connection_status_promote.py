@@ -259,6 +259,72 @@ async def test_instagram_sandbox_expire_after_publish_marker_promotes_status_exp
         await engine.dispose()
 
 
+# ─── story #3597(잔여, PO 라이브 회차 2026-09-07 02:27~02:33Z 실측·PO 確定) ────────
+# 스케줄 루프(process_due_comment_collections)는 위 테스트들처럼 CONNECTION 실패
+# 시 승격을 부르는데, 휴먼 수동 「다시 수집」(refresh_comments_now)은 그 호출
+# 자체가 없었다 — 라이브 실측: FB 샌드박스 502 CHANNEL_TOKEN_EXPIRED 뒤에도
+# connection.status가 active 그대로(/organization/channels 칩 「연결됨」).
+
+
+@pytest.mark.anyio
+async def test_manual_refresh_connection_failure_promotes_status_expired(monkeypatch):
+    """AC1(수동 경로) — 「다시 수집」 버튼이 부르는 refresh_comments_now도 CONNECTION
+    실패면 connection.status를 expired로 승격해야 칩이 선다."""
+    from app.services.channel_post_comments import CommentFetchError, refresh_comments_now
+    from app.services.threads_publish import ThreadsPublishError
+    import app.services.instagram_publish as instagram_publish
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="instagram")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="instagram", external_id="media-1")
+            await s.commit()
+
+            async def _raise_expired(client, *, access_token, media_id):
+                raise ThreadsPublishError("TOKEN_EXPIRED", "sandbox: 401 시뮬레이션", status_code=401)
+
+            monkeypatch.setattr(instagram_publish, "fetch_replies", _raise_expired)
+            with pytest.raises(CommentFetchError):
+                await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
+
+            await s.refresh(conn)
+            assert conn.status == "expired"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_manual_refresh_transient_failure_does_not_touch_connection(monkeypatch):
+    """루프와 동형 불변 — TRANSIENT(CHANNEL_RATE_LIMITED)는 사람이 고칠 대상이
+    아니라 connection을 건드리지 않는다(재시도가 유효할 수 있는 실패류를
+    「재연결 필요」로 잘못 몰지 않는다)."""
+    from app.services.channel_post_comments import CommentFetchError, refresh_comments_now
+    from app.services.threads_publish import ThreadsPublishError
+    import app.services.instagram_publish as instagram_publish
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="instagram")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="instagram", external_id="media-1")
+            await s.commit()
+
+            async def _raise_rate_limited(client, *, access_token, media_id):
+                raise ThreadsPublishError("RATE_LIMITED", "sandbox: 429 시뮬레이션", status_code=429)
+
+            monkeypatch.setattr(instagram_publish, "fetch_replies", _raise_rate_limited)
+            with pytest.raises(CommentFetchError):
+                await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
+
+            await s.refresh(conn)
+            assert conn.status == "active"
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_facebook_sandbox_expire_after_publish_marker_promotes_status_expired():
     from app.services.channel_post_comments import process_due_comment_collections, schedule_comment_collection
