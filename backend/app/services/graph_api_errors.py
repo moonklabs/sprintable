@@ -237,10 +237,15 @@ def mark_connection_failed(
 
     status는 `connection_status_for_error_code`(sticky 포함)로 고른다 — 호출자가
     직접 `connection.status = ...`를 대입하지 않는다(그 자리마다 sticky 규율을
-    다시 안 짜도록)."""
+    다시 안 짜도록).
+
+    카디르 qa:changes(PR #4004, 2026-09-07) — `message is not None`일 때만 last_error를
+    쓰면, message=None으로 호출됐을 때 그 연결의 옛 last_error가 그대로 남는다(「틀린
+    진단문구 표시」 회귀 — 지운 인라인 3곳은 전부 `(message or "")[:2000]`으로 항상
+    덮어쓰고 있었다). status/code/at은 이 자리에서 항상 최신으로 갱신되는데 last_error만
+    구식으로 남으면 셋이 서로 다른 실패를 가리키는 자리가 생긴다 — 무조건 덮어쓴다."""
     connection.status = connection_status_for_error_code(error_code, current_status=connection.status)
-    if message is not None:
-        connection.last_error = message[:2000]
+    connection.last_error = (message or "")[:2000]
     connection.last_error_code = error_code
     connection.last_error_at = now
 
