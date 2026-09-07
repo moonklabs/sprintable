@@ -481,6 +481,17 @@ trap 'rm -f "${STARTUP_SCRIPT_FILE}"' EXIT
     echo '#   소켓 dir을 world-writable로 — 프록시(생성)·앱(소켓 접속) 양쪽 UID 무관하게 통과.'
     echo "chmod 777 ${_HOST_SOCKET_DIR}"
     echo 'docker rm -f cloud-sql-proxy 2>/dev/null || true'
+    # story #3616(라이브 결함, 2026-09-06~07 DB 비밀번호 로테이션 뒤 15시간 503) — 이
+    # startup-script는 `rolling-action restart`(재부팅)에서도 그대로 재실행된다(위 주석
+    # "재부팅마다 재실행" 그대로)는데, `/mnt/stateful_partition`은 stateful(디스크 보존)
+    # 이라 이전 부팅의 소켓 파일(`${SQL_INSTANCE_CONN}/.s.PGSQL.5432`)이 재부팅 뒤에도
+    # 그대로 남아 있었다 — 새 cloud-sql-proxy 컨테이너가 그 자리에 bind하려다
+    # "Unable to mount socket: listen unix ...: bind: address already in use"로 죽어
+    # 크래시루프(`replace`=디스크 자체를 새로 만들어 우연히 피해갔을 뿐, `restart`=고장
+    # 그대로 재현). 컨테이너를 지운 뒤(위 줄) 그 잔존 소켓 서브dir을 지워 매 부팅을
+    # 항상 「빈 소켓 dir에서 새로 붙는」 것과 동일하게 만든다 — restart와 replace가
+    # 이제 이 실패축에서 동등해진다(AC1).
+    echo "rm -rf \"${_HOST_SOCKET_DIR}/${SQL_INSTANCE_CONN}\""
     echo 'docker run -d --name cloud-sql-proxy --restart=always \'
     echo "  -v ${_HOST_SOCKET_DIR}:/cloudsql \\"
     echo "  gcr.io/cloud-sql-connectors/cloud-sql-proxy:2 \\"
@@ -622,6 +633,9 @@ if [ "${DRY_RUN}" = "1" ]; then
     # story #3071 — 같은 관례: 시크릿 배치 fetch 로직(embedded fetch-secrets.sh + 재조립
     # 루프)이 실제로 생성된 그대로를 노출한다(요약 변수가 아니라 산출물 자체).
     _GENERATED_FETCH_SECRETS_BLOCK_B64="$(sed -n '/^cat > \/tmp\/fetch-secrets\.sh/,/^# story #3071 fetch-secrets block end/p' "${STARTUP_SCRIPT_FILE}" | base64 | tr -d '\n')"
+    # story #3616 — cloud-sql-proxy 재기동 블록(잔존 소켓 정리 순서 검증용, 같은 관례:
+    # 요약이 아니라 산출물 자체를 노출).
+    _GENERATED_CLOUDSQL_PROXY_BLOCK_B64="$(sed -n '/^docker rm -f cloud-sql-proxy/,/^# 소켓 파일이 실제로 나타날 때까지/p' "${STARTUP_SCRIPT_FILE}" | base64 | tr -d '\n')"
     cat <<EOF
 ENV=${ENV}
 MIG_NAME=${MIG_NAME}
@@ -639,6 +653,7 @@ GENERATED_PLAIN_ENV_FILE_B64=${_GENERATED_PLAIN_ENV_FILE_B64}
 UVICORN_APP_MODULE=${UVICORN_APP_MODULE}
 GENERATED_UVICORN_CMD_LINE=${_GENERATED_UVICORN_CMD_LINE}
 GENERATED_FETCH_SECRETS_BLOCK_B64=${_GENERATED_FETCH_SECRETS_BLOCK_B64}
+GENERATED_CLOUDSQL_PROXY_BLOCK_B64=${_GENERATED_CLOUDSQL_PROXY_BLOCK_B64}
 EOF
     exit 0
 fi

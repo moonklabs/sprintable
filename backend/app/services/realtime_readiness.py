@@ -23,17 +23,31 @@ unhealthy):
    DB 불요라 무관). DB 연결 자체의 실패(예외)만 신호로 잡는다 — 틀린 키(정상 401)는
    readiness와 무관(같이 잡으면 「틀린 키 = 인프라 UNHEALTHY」라는 오판정이 된다).
 
-⚠️못 잡는 것(PO 명시, AC) — 이 신호는 **트래픽 의존**이다. 신규 SSE 연결 시도(agent API키
-경로)가 0인 구간엔 cloud-sql-proxy가 죽어도 ②가 안 나서 `/ready`가 마지막 캐시 상태(또는
-기동 후 첫 시도 前 fail-open 「not_yet_connected」)에 그대로 머문다 — 무트래픽 구간의
-감지 지연. 원 인시던트류(크래시루프)는 fleet 전체의 재연결 폭주가 신호를 계속 만들어
-실용상 잘 잡히지만, 이론상 무트래픽 구간은 이 처방의 사각지대다. 능동 프로브(예: 60s급
-백그라운드 1회 SELECT)는 이번 스코프 밖 — 실 신호(무트래픽 구간에서 놓친 사례)가 나오면
-후속 스토리로.
-"""
+⚠️못 잡는 것(PO 명시, AC, story #2295 원문) — 이 신호는 **트래픽 의존**이다. 신규 SSE
+연결 시도(agent API키 경로)가 0인 구간엔 cloud-sql-proxy가 죽어도 ②가 안 나서 `/ready`가
+마지막 캐시 상태(또는 기동 후 첫 시도 前 fail-open 「not_yet_connected」)에 그대로
+머문다 — 무트래픽 구간의 감지 지연. 원 인시던트류(크래시루프)는 fleet 전체의 재연결
+폭주가 신호를 계속 만들어 실용상 잘 잡히지만, 이론상 무트래픽 구간은 이 처방의
+사각지대다. 능동 프로브(예: 60s급 백그라운드 1회 SELECT)는 그때는 스코프 밖 — "실
+신호(무트래픽 구간에서 놓친 사례)가 나오면 후속 스토리로"라고 명시적으로 미뤄뒀다.
+
+story #3616(2026-09-07, 그 "실 신호") — DB 비밀번호 로테이션 뒤 dev의 backplane은
+redis(①은 아예 안 뜸)라 ②(트래픽 의존)만 유일한 신호원이었는데, 그 창에 SSE 신규
+연결 시도가 뜸해 `/ready`가 마지막 캐시된 "connected"에 15시간 넘게 눌러앉았다 —
+정확히 위 문단이 예견한 그 사각지대다. ③ `run_active_probe_loop()`를 더한다 —
+`ACTIVE_PROBE_INTERVAL_SECONDS`(60s)마다 백그라운드에서 **경량 `SELECT 1`을 딱 한
+커넥션으로** 실행해 같은 `mark_connected`/`mark_disconnected`에 먹인다. 이건 "매
+헬스체크마다 SELECT 1"이 아니다 — 헬스체크 빈도(GCLB 10s 간격 × VM 3대 = 초당
+0.3회)와 무관하게 인스턴스당 60초에 1커넥션·1쿼리로 상한이 고정된다(트래픽·헬스체크
+호출 횟수가 얼마든 이 비용은 안 늘어난다) — /health가 되돌아가려다 만 "체크 빈도에
+비례하는 DB 부하"를 재도입하지 않으면서, ②의 트래픽 의존성만 없앤다."""
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import UTC, datetime
+
+_logger = logging.getLogger(__name__)
 
 # AC4(카디르 제안, 근거): listen_loop()의 재연결 backoff는 1s→2s→4s→8s→16s→30s(cap)로
 # 자란다. 유예시간을 그 backoff 자체의 수렴값(30s)으로 맞추면 — 연결이 끊긴 순간부터
@@ -42,6 +56,13 @@ from datetime import UTC, datetime
 # 뜻이 된다. 임의 숫자가 아니라 기존 재시도 스케줄 자체를 유예 기준으로 재사용한 것 — 새
 # 임계값 체계를 따로 발명하지 않는다.
 UNHEALTHY_GRACE_SECONDS = 30.0
+
+# story #3616 — ③ 능동 프로브 주기. UNHEALTHY_GRACE_SECONDS(30s)보다 짧으면 무트래픽
+# 구간에서도 최소 1회는 그 유예 창 안에 들어와 flapping 오탐 없이 정상적으로 unhealthy
+# 로 전이한다(60s를 골랐다고 실제 감지가 60s+30s=최대 90s까지 걸릴 수 있다는 뜻 — 그래도
+# 기존 인시던트의 15시간에 비하면 실용적으로 충분하고, 이보다 짧게 잡을 근거[분당 비용
+# 상한]는 없다는 판단. 더 빠른 감지가 필요해지면 여기 숫자만 낮추면 된다).
+ACTIVE_PROBE_INTERVAL_SECONDS = 60.0
 
 _connected: bool = False
 _disconnected_since: datetime | None = None
@@ -94,3 +115,30 @@ def is_ready() -> tuple[bool, dict]:
         "disconnected_for_seconds": round(elapsed, 1),
         "last_error": _last_error,
     }
+
+
+async def run_active_probe_loop(interval_seconds: float = ACTIVE_PROBE_INTERVAL_SECONDS) -> None:
+    """story #3616 — ③ 능동 프로브. ①(backplane=pg 전용)·②(트래픽 의존) 둘 다 신호를
+    못 내는 조합(backplane=redis·무트래픽)에서 15시간 감지 지연을 낸 그 사각지대를
+    닫는다. `app.core.database.engine`으로 매 주기 딱 한 커넥션·`SELECT 1` 하나만 쓰고
+    바로 반환(연결 보유 0 — 커넥션 풀에 상주하지 않는다) — 실패해도 예외를 삼키고
+    `mark_disconnected()`만 호출한다(이 루프 자체가 죽으면 ③ 신호가 영구 소실되므로,
+    한 번의 DB 장애로 루프가 죽는 것이 최악의 결과 — 절대 raise하지 않는다).
+
+    realtime_main.py::realtime_lifespan이 backplane 선택과 무관하게(pg든 redis든) 항상
+    이 태스크를 띄운다 — ③은 ①의 대체가 아니라 추가 신호원(OR 집합에 합류)."""
+    from sqlalchemy import text
+
+    from app.core.database import engine
+
+    while True:
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            mark_connected()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — 위 docstring: 절대 루프를 죽이지 않는다.
+            mark_disconnected(f"active_probe: {type(exc).__name__}: {exc}")
+            _logger.warning("realtime_readiness 능동 프로브 실패(다음 주기에 재시도): %s", exc)
+        await asyncio.sleep(interval_seconds)

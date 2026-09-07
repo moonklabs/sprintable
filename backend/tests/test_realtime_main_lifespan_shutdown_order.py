@@ -98,10 +98,41 @@ async def test_all_three_background_tasks_are_referenced_and_awaited():
          patch("app.services.event_broker.redis_consume_loop", side_effect=_tracked_loop("redis_shadow")), \
          patch("app.core.config.settings.event_broker_outbox_enabled", True), \
          patch("app.services.event_broker.outbox_dispatcher_loop", side_effect=_tracked_loop("outbox")), \
+         patch("app.services.realtime_readiness.run_active_probe_loop", side_effect=_tracked_loop("readiness_probe")), \
          patch("app.core.database.engine", new=_FakeEngine()):
         async with rm.realtime_lifespan(rm.app):
             await asyncio.sleep(0)
 
-    assert cancelled == {"listen", "redis_shadow", "outbox"}, (
+    assert cancelled == {"listen", "redis_shadow", "outbox", "readiness_probe"}, (
         f"일부 백그라운드 루프가 취소되지 않음(GC 조기수거 위험) — cancelled={cancelled}"
     )
+
+
+async def test_readiness_probe_task_always_starts_regardless_of_backplane():
+    """story #3616 — readiness_probe_task는 backplane 선택(pg/redis)과 무관하게 항상
+    떠야 한다(①listen_task는 backplane=pg에서만 뜨는 것과 대조적으로, ③은 그 조합
+    무관 상시 신호원이어야 무트래픽·backplane=redis 사각지대를 닫는다는 게 이 스토리의
+    존재 이유). backplane=redis(dev/prod 실값)로 명시 재현."""
+    import app.realtime_main as rm
+
+    probe_started = asyncio.Event()
+
+    async def _fake_probe_loop():
+        probe_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise
+
+    async def _fake_redis_consume_loop():
+        await asyncio.Event().wait()
+
+    with patch("app.services.event_broker.resolve_backplane", return_value="redis"), \
+         patch("app.core.config.settings.event_broker_redis_dual_publish_enabled", True), \
+         patch("app.core.config.settings.event_broker_redis_consume_enabled", True), \
+         patch("app.services.event_broker.redis_consume_loop", side_effect=_fake_redis_consume_loop), \
+         patch("app.services.event_broker.check_outbox_dual_publish_config", return_value=None), \
+         patch("app.services.realtime_readiness.run_active_probe_loop", side_effect=_fake_probe_loop), \
+         patch("app.core.database.engine", new=_FakeEngine()):
+        async with rm.realtime_lifespan(rm.app):
+            await asyncio.wait_for(probe_started.wait(), timeout=1.0)

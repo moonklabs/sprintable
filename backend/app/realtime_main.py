@@ -61,6 +61,8 @@ async def realtime_lifespan(app: FastAPI):
     - outbox_dispatcher_loop — event_broker_outbox_enabled 조합에서 realtime도 관련될 수 있어
       우선 포함(측정 결과로 불필요하면 뺀다).
     - engine.dispose() — 좀비 커넥션 방지, 다른 서비스와 동형으로 필수.
+    - story #3616 — realtime_readiness.run_active_probe_loop(): backplane 무관 항상 기동,
+      /api/v2/ready가 트래픽 의존 신호만으로 무트래픽 구간을 놓치던 사각지대를 닫는다.
     """
     from app.core import shutdown as shutdown_module
     from app.core.database import engine
@@ -98,14 +100,21 @@ async def realtime_lifespan(app: FastAPI):
     if settings.event_broker_outbox_enabled:
         outbox_dispatcher_task = asyncio.create_task(outbox_dispatcher_loop())
 
+    # story #3616 — readiness ③(능동 프로브). backplane 선택(pg/redis)과 무관하게 항상
+    # 띄운다 — ①(listen_task)은 backplane=pg에서만 뜨고 ②(agent API키 인증)는 트래픽
+    # 의존이라, backplane=redis(현재 dev/prod 실값)·무트래픽 조합에서 15시간 감지
+    # 지연을 낸 그 사각지대를 이 태스크가 메운다(realtime_readiness.py 참고).
+    from app.services.realtime_readiness import run_active_probe_loop
+    readiness_probe_task = asyncio.create_task(run_active_probe_loop())
+
     try:
         yield
     finally:
         shutdown_module.shutdown_event.set()
-        for t in (listen_task, redis_shadow_task, outbox_dispatcher_task):
+        for t in (listen_task, redis_shadow_task, outbox_dispatcher_task, readiness_probe_task):
             if t is not None:
                 t.cancel()
-        for t in (listen_task, redis_shadow_task, outbox_dispatcher_task):
+        for t in (listen_task, redis_shadow_task, outbox_dispatcher_task, readiness_probe_task):
             if t is not None:
                 try:
                     await t
