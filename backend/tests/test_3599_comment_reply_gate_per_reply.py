@@ -131,6 +131,15 @@ async def test_second_reply_submit_gets_own_gate_row_first_seal_untouched():
             assert first_gate_after["neutral_facts"]["reply_id"] == str(first.id)
             assert first_gate_after["resolved_at"] == first_gate_snapshot["resolved_at"]
             assert first_gate_after["sealed_content_version"] == 1
+
+            # story #3599(유나 §22-17 ⑥-1) — 게이트 생성 시점 sent 카운트 스냅샷.
+            # 1차는 만들 당시 보낸 답변 0건, 2차는 1차가 이미 sent라 1건이어야
+            # 한다(뮤테이션 대상③ — sent_replies_count 배선 제거 → KeyError/None RED).
+            assert first_gate_snapshot["neutral_facts"]["sent_replies_count"] == 0
+            second_gate = (await s.execute(
+                Gate.__table__.select().where(Gate.id == second.gate_id)
+            )).mappings().one()
+            assert second_gate["neutral_facts"]["sent_replies_count"] == 1
     finally:
         await engine.dispose()
 

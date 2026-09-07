@@ -172,6 +172,11 @@ interface RecipeApprovalFacts {
   // 이 null이면 "제공되지 않음"으로 정직하게 비운다).
   targetExternalCommentId: string | null;
   targetText: string | null;
+  // story #3599(유나 §22-17 ⑥-1, 페드루 PO 追加 2026-09-07) — 게이트 생성 시점의
+  // sent 카운트 스냅샷(neutral_facts.sent_replies_count, additive). null=구버전
+  // 게이트(이 필드 자체가 없던 시절)·0=보낸 답변 없음 — 둘 다 줄을 안 그린다
+  // (§content.commentsReplyAlreadySentCount와 같은 규율: 수만·0이면 미표시).
+  alreadySentCount: number | null;
   // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — sealed_content_*와
   // 동형이나 대상이 doc(external_publish=본문 텍스트 봉인·concept_approval=doc
   // 봉인). BE additive(story #3569) — 그 전까진 항상 null. 「펼침」이 없다(본문
@@ -209,6 +214,7 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     reapprovalRequired: gate.reapproval_required === true,
     targetExternalCommentId: isCommentReply ? realString(f?.['target_external_comment_id']) : null,
     targetText: isCommentReply ? realString(f?.['target_text']) : null,
+    alreadySentCount: isCommentReply && typeof f?.['sent_replies_count'] === 'number' ? f['sent_replies_count'] : null,
     sealedDocRef,
     sealedDocBodySha256: realString(gate.sealed_doc_body_sha256),
   };
@@ -597,7 +603,15 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           ) : null}
         </div>
       ) : null}
-      {facts.contentVersion !== null || facts.contentSha256 ? (
+      {/* story #3599(유나 §22-17 ⑥-4, PO 決 2026-09-07) — sealed_content_version이
+          null인데 봉인 본문은 있는 행(scope_key가 comment_id 단위였던 옛 comment_
+          reply 게이트 — 마이그레이션 0, 그대로 둔다는 §5 판정)은 「쌍」이 안 서
+          대조 불가하다. 「덮였습니다」로 단정하지 않는다(못 대조하는 게이트 중엔
+          한 번 승인되고 끝난 정상 옛 행도 있다) — 아는 것만 말한다: 「확인할 수
+          없다」. 이 자리(버전·해시 줄)를 대신할 뿐 줄을 새로 만들지 않는다. */}
+      {facts.contentVersion === null && facts.contentBody ? (
+        <p className="text-muted-foreground">{t('recipeApprovalSealedVersionMissing')}</p>
+      ) : facts.contentVersion !== null || facts.contentSha256 ? (
         <p className="font-mono text-muted-foreground">
           {facts.contentVersion !== null ? `${t('recipeApprovalVersionLabel')} v${facts.contentVersion}` : null}
           {facts.contentVersion !== null && facts.contentSha256 ? ' · ' : null}
@@ -639,6 +653,13 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <span className="text-muted-foreground">{t('commentReplyTargetLabel')} · </span>
             <span className="font-mono text-foreground">{facts.targetExternalCommentId}</span>
           </p>
+          {/* story #3599(유나 §22-17 ⑥-1, 페드루 PO 追加 2026-09-07) — 답변 다이얼로그
+              (content.commentsReplyAlreadySentCount)와 같은 사실·같은 규율(수만·0이면
+              미표시)의 승인자 짝. 이 사실은 이 답변이 아니라 그 댓글에 대한 것이라
+              대상 댓글 블록 안에 선다(행이 아니라 이 카드가 지는 이유와 동형). */}
+          {facts.alreadySentCount != null && facts.alreadySentCount > 0 ? (
+            <p className="text-muted-foreground">{t('commentReplyAlreadySentCount', { count: facts.alreadySentCount })}</p>
+          ) : null}
           <div>
             <p className="text-[10px] font-medium text-muted-foreground">{t('commentReplyTargetTextLabel')}</p>
             <p className="whitespace-pre-wrap text-foreground">

@@ -236,6 +236,20 @@ async def submit_comment_reply(
 
     scope_key = f"comment:{comment.id}:{reply.id}"
     text_sha256 = hashlib.sha256(reply.text.encode("utf-8")).hexdigest()
+
+    # story #3599(유나 §22-17 ⑥-1, 페드루 PO 追加 2026-09-07) — 결재함 카드가
+    # 이 댓글에 이미 나간 답변 수를 추가 왕복 없이 말할 수 있게, 게이트 생성
+    # 시점의 sent 카운트를 neutral_facts에 스냅샷(0이면 FE가 그 줄을 안 그린다
+    # — comments-section.tsx의 sentRepliesCount>0 관례와 동형). 이 reply 자신은
+    # 아직 안 나갔으니(방금 submit) 카운트에 안 낀다 — "이미 보낸" 그대로.
+    from sqlalchemy import func as _func
+
+    sent_replies_count = (await db.execute(
+        select(_func.count()).select_from(ChannelPostCommentReply).where(
+            ChannelPostCommentReply.comment_id == comment.id, ChannelPostCommentReply.status == "sent",
+        )
+    )).scalar_one()
+
     neutral_facts = {
         "kind": "comment_reply", "reply_id": str(reply.id), "connection_id": str(pub.connection_id),
         "comment_id": str(comment.id), "target_external_comment_id": comment.external_comment_id,
@@ -245,6 +259,7 @@ async def submit_comment_reply(
         # 그린다. sha는 계속 정본 판정에 쓰고(target_text_sha256, 그대로 유지),
         # 이건 순수 표시용 additive 사본 — 대조·판정 로직은 절대 이 필드를 안 본다.
         "target_text": comment.text,
+        "sent_replies_count": sent_replies_count,
     }
 
     # find_gate_slot_with_pr_fallback는 (work_item_id, gate_type, scope_key) 슬롯을

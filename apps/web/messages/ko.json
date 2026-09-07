@@ -4719,6 +4719,8 @@
     "recipeApprovalSummaryCollapse": "산출물 요약 접기",
     "recipeApprovalVersionLabel": "버전",
     "recipeApprovalSealedHashLabel": "봉인 해시",
+    "recipeApprovalSealedVersionMissing": "이 승인이 어느 본문을 봉인했는지 확인할 수 없습니다 — 아래는 마지막으로 봉인된 본문입니다",
+    "commentReplyAlreadySentCount": "이 댓글에 이미 보낸 답변 {count}건",
     "commentReplyTargetLabel": "대상 댓글",
     "commentReplyTargetTextLabel": "대상 댓글 본문",
     "commentReplyTargetTextNotSealed": "대상 댓글 본문은 아직 카드에 실리지 않습니다 — 원문에서 확인하고 승인해 주세요",

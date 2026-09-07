@@ -4719,6 +4719,8 @@
     "recipeApprovalSummaryCollapse": "Hide draft summary",
     "recipeApprovalVersionLabel": "Version",
     "recipeApprovalSealedHashLabel": "Sealed hash",
+    "recipeApprovalSealedVersionMissing": "We can't confirm which body this approval sealed — below is the last sealed body",
+    "commentReplyAlreadySentCount": "{count} replies already sent to this comment",
     "commentReplyTargetLabel": "Target comment",
     "commentReplyTargetTextLabel": "Target comment body",
     "commentReplyTargetTextNotSealed": "The target comment body isn't in this card yet — check the original before approving",
