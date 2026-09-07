@@ -172,6 +172,18 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       expect(result.humanMessageKey).toBe('errorChannelTokenExpired');
     });
 
+    // story #3605 CHANGES-3(페드루 PO 確定 2026-09-07) — BE가 revoked·auth_error를
+    // CHANNEL_TOKEN_EXPIRED로 뭉뚱그리지 않고 각자의 code로 명시하게 됐다(계약 변경).
+    // 화면은 셋 다 같은 "다시 연결" 유도로 충분해 기존 키·kind를 그대로 재사용한다.
+    test.each(['CHANNEL_CONNECTION_REVOKED', 'CHANNEL_CONNECTION_AUTH_ERROR'])(
+      '%s — kind=token_expired(기존 키 재사용, 새 낱말 0)',
+      (code) => {
+        const result = parseSitePostApiError({ error: { code, message: '연결 실패' } });
+        expect(result.kind).toBe('token_expired');
+        expect(result.humanMessageKey).toBe('errorChannelTokenExpired');
+      },
+    );
+
     test('CHANNEL_CONNECTION_NOT_ACTIVE — kind=connection_not_active', () => {
       const result = parseSitePostApiError({ error: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: '연결 비활성' } });
       expect(result.kind).toBe('connection_not_active');

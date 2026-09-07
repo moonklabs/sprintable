@@ -173,6 +173,13 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // except 매핑, PR#3752 277debe92·#3757 eb55c4221·#3395·PR#3764 c6049add1 실측).
   CHANNEL_RATE_LIMITED: { labelKey: 'errorChannelRateLimited', kind: 'rate_limited' },
   CHANNEL_TOKEN_EXPIRED: { labelKey: 'errorChannelTokenExpired', kind: 'token_expired' },
+  // story #3605 CHANGES-3(페드루 PO 確定 2026-09-07) — BE가 이제 revoked(사용자/보안
+  // 행동으로 세션 무효화)·auth_error(권한 계열, 사유 불명)를 CHANNEL_TOKEN_EXPIRED로
+  // 뭉뚱그리지 않고 각자의 code로 명시한다(3605 계약 변경). 화면 문구·다음 행동은
+  // 셋 다 동일("연결이 끊겼습니다 — owner가 다시 연결해야 합니다", 재연결 하나로
+  // 전부 풀린다는 점에서 사용자 관점 구분 불필요) — 기존 키 그대로 재사용, 새 낱말 0.
+  CHANNEL_CONNECTION_REVOKED: { labelKey: 'errorChannelTokenExpired', kind: 'token_expired' },
+  CHANNEL_CONNECTION_AUTH_ERROR: { labelKey: 'errorChannelTokenExpired', kind: 'token_expired' },
   CHANNEL_CONNECTION_NOT_ACTIVE: { labelKey: 'errorChannelConnectionNotActive', kind: 'connection_not_active' },
   CHANNEL_POST_APPROVER_ROLE_MISSING: { labelKey: 'errorChannelApproverRoleMissing', kind: 'approver_role_missing' },
   // doc §5 v8 — 발행은 사람이 화면에서 한다. 에이전트에겐 이 화면 자체가 없어(AC14)
