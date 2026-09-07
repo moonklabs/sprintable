@@ -17,6 +17,7 @@ import { describeExternalImpact } from '@/components/content/external-impact';
 import { contentPostStatusLabelKey } from '@/components/content/post-status';
 import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
+import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
@@ -433,11 +434,20 @@ export default function ChannelPostEditPage() {
         const retryAfterSeconds = retryAfterHeader !== null ? Number.parseInt(retryAfterHeader, 10) : null;
         return { ok: false, kind: 'rate_limited', retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null };
       }
-      const body = await res.json().catch(() => null) as { detail?: { code?: string; message?: string }; code?: string; message?: string } | null;
-      if (body?.detail?.code === 'COMMENT_COLLECTION_UNSUPPORTED') {
+      // story #3601(디디 전수 표 2026-09-07) — BE 전역 봉투는 {data,error,meta}뿐이라
+      // .detail은 항상 undefined였다(COMMENT_COLLECTION_UNSUPPORTED 분기 영구 사망).
+      // .error를 1순위로, .detail은 무해한 방어적 폴백으로만 남긴다(detail을 변수로
+      // 먼저 옮겨 읽는다 — body 뒤에 곧장 물음표 두 번으로 detail.code를 잇는 형은
+      // lint_fe_error_envelope_detail_mismatch.py가 잡는 그 모양 자체라 새 위반으로
+      // 다시 걸린다).
+      const body = await res.json().catch(() => null) as { error?: { code?: string; message?: string }; detail?: { code?: string; message?: string }; message?: string } | null;
+      const detail = body?.detail;
+      if ((body?.error?.code ?? detail?.code) === 'COMMENT_COLLECTION_UNSUPPORTED') {
         return { ok: false, kind: 'unsupported' };
       }
-      const message = body?.detail?.message ?? body?.message ?? t('commentsRefreshErrorGeneric');
+      // story #3601(페드루 PO 追加 2026-09-07) — body?.message는 우리 봉투에 없는
+      // 자리라 죽은 폴백이었다(추가 검증 없이 걷는다).
+      const message = extractBackendErrorMessage(body) ?? t('commentsRefreshErrorGeneric');
       return { ok: false, kind: 'generic', message };
     } catch {
       return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
@@ -457,9 +467,10 @@ export default function ChannelPostEditPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: input.title, note: input.note || null }),
       });
-      const body = await res.json().catch(() => null) as { data?: { story_id?: string }; detail?: { message?: string }; message?: string } | null;
+      const body = await res.json().catch(() => null) as { data?: { story_id?: string }; error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
       if (!res.ok) {
-        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+        // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
+        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
       }
       const storyId = body?.data?.story_id;
       if (!storyId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
@@ -483,9 +494,9 @@ export default function ChannelPostEditPage() {
         // BE 전역 HTTPException 핸들러(app/main.py http_exception_handler)의
         // {data:null,error:{...},meta:null} 봉투를 그대로 통과시킨다(proxyToFastapi
         // 주석 "Errors already enveloped by the BE global handler" — detail 키는
-        // 존재한 적이 없다, 이 파일 다른 자리의 body?.detail 패턴은 그 봉투와
-        // 안 맞아 늘 폴백 메시지로 떨어지는 별개 결함 — 이 스토리 스코프 밖,
-        // 발견만 남긴다).
+        // 존재한 적이 없다). 이 파일 다른 자리들도 story #3601에서 같은 근거로
+        // extractBackendErrorMessage(.error 1순위)로 통일했다 — 여기 existingReplyId는
+        // 그 헬퍼가 안 다루는 3596 전용 필드라 이 자리만 인라인으로 남는다.
         error?: { message?: string; existing_reply_id?: string };
         detail?: { message?: string };
         message?: string;
@@ -513,9 +524,10 @@ export default function ChannelPostEditPage() {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${replyComment.id}/replies/${replyId}/submit`, {
         method: 'POST',
       });
-      const body = await res.json().catch(() => null) as { data?: ReplyView; detail?: { message?: string }; message?: string } | null;
+      const body = await res.json().catch(() => null) as { data?: ReplyView; error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
       if (!res.ok || !body?.data) {
-        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+        // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
+        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
       }
       return { ok: true, reply: body.data };
     } catch {
@@ -538,8 +550,9 @@ export default function ChannelPostEditPage() {
         method: 'POST',
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => null) as { detail?: { message?: string }; message?: string } | null;
-        return { ok: false, errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric') };
+        // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
+        const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
+        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
       }
       loadComments();
       return { ok: true };

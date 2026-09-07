@@ -698,6 +698,23 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_business_info_email_footer_drift.py
 
+  # story #3601(FE·결함 클래스, 디디 전수 표 2026-09-07) — BE 전역 오류 봉투는 항상
+  # {data,error,meta}뿐인데 apps/web 곳곳이 body?.detail?.message·body?.detail?.code를
+  # 1차 소스로 읽어(그 필드는 우리 봉투에 없어 항상 undefined) 실 메시지가 소실되거나
+  # 특정 code 분기가 영구 사망했다(실제 사고: story #3596 create 409 existing_reply_id).
+  # 재발 방지 — 새 `.detail?.(message|code)` 등장을 잡는다(허용 목록=이미 .error 우선인
+  # 무해한 자리·PG 불요 정적 스캔).
+  fe-error-envelope-detail-mismatch-lint:
+    name: FE error envelope .detail mismatch lint (guard, story #3601)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan apps/web/src for unguarded .detail?.(message|code) reads
+        working-directory: backend
+        run: python3 scripts/lint_fe_error_envelope_detail_mismatch.py
+
   # story #3219(카디르 3라운드, 2026-08-30) — 이 검증은 run-migrations.test.sh 시나리오
   # [9]로 먼저 만들어졌지만 그 .test.sh는 CI 어디에도 안 걸려 있어(convention 자체가
   # manual-only) 매 PR에 실제로 도는 자리가 없었다("만들어졌는데 도는 자리 없음" 결함).

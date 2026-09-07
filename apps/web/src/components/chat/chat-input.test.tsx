@@ -482,6 +482,43 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     expect(container.textContent).toContain('방향 전환 지시');
   });
 
+  // story #3601(디디 전수 표 2026-09-07) — 실 BE 봉투({data:null,error:{code,message},
+  // meta:null}, BE 전역 http_exception_handler 그대로)로도 같은 명시 카피가 선다.
+  // 위 테스트는 `{detail:{...}}` 모양이라 body?.detail?.code가 항상 undefined였던
+  // 예전 코드에서도(우연히) 통과했다 — 이 테스트가 실 봉투 회귀를 고정한다.
+  it('422 conversation_target_mismatch — 실 봉투({error:{code,message}})로도 명시 카피가 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 's1', title: '대상 스토리', status: 'in-progress' }] }));
+      }
+      if (url === '/api/events/publish' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ data: null, error: { code: 'conversation_target_mismatch', message: 'internal BE msg', errors: ['u1'] }, meta: null }), { status: 422 });
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput threadId="c1" onSend={vi.fn()} currentTeamMemberId="me" participants={PARTICIPANTS} projectId="p1" />,
+      ));
+    });
+    await act(async () => { toggleBtn()!.click(); });
+    await act(async () => { setValue(textarea(), '이제 A로 가자'); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => { setValue(select, 'u1'); });
+    const workItemInput = container.querySelectorAll('input[type="text"]')[0] as HTMLInputElement;
+    await act(async () => { setValue(workItemInput, '대상'); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
+    await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+
+    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    await act(async () => { sendBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('internal BE msg');
+    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없습니다');
+  });
+
   // story #3203(카디르 QA 블로킹·2026-08-29) — BE가 orphan participant.name을 이제 null로
   // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐). 대상 select가 `p.name ?? p.member_id`
   // 폴백을 쓰고 있어 36자 uuid 전체가 옵션 텍스트로 그대로 새는 회귀였다 — 이 PR의 BE 변경이

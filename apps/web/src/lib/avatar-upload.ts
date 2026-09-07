@@ -1,4 +1,5 @@
 import { fetchWithAuth } from '@/lib/db/client';
+import { HUMAN_SAFE_ERROR_MESSAGE_CODES } from '@/lib/api-error-message';
 
 /** story #2887(S2g) — BE avatar 3단 계약(team_members.py) 클라 소비. png/jpeg/webp만
  * 서버가 서명 발급 단계에서 검증하지만, 클라도 동일 화이트리스트로 조기 거절(UX — 업로드
@@ -21,8 +22,21 @@ export interface AvatarApiError {
 
 async function readError(res: Response): Promise<AvatarApiError> {
   try {
-    const json = await res.json() as { data?: AvatarApiError; detail?: AvatarApiError };
-    return json.data ?? json.detail ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` };
+    // story #3601(디디 전수 표 2026-09-07) — BE 전역 봉투는 {data,error,meta}뿐이라
+    // json.data는 에러 응답에서 항상 null·json.detail은 항상 undefined였다 — 실
+    // 에러(json.error)를 한 번도 안 읽고 매번 "HTTP {status}" 제네릭으로 떨어졌다.
+    // 페드루 PO 정정(2026-09-07, 유나 Design CHANGES) — AvatarUploadError의 실제
+    // message는 사람 문장이 아니다(예: UNSUPPORTED_CONTENT_TYPE이 원문 content_type
+    // 값+허용 목록 repr을 그대로 담는다, avatar_upload.py:72) — code는 살리고 message
+    // 만 공용 allowlist(HUMAN_SAFE_ERROR_MESSAGE_CODES)로 gate한다. 지금 avatar 쪽
+    // 코드는 전부 이 목록 밖이라 message는 항상 제네릭으로 떨어진다(안전한 기본값 —
+    // 사람 문장으로 확認된 avatar 코드가 생기면 그때 등재).
+    const json = await res.json() as { data?: AvatarApiError; error?: AvatarApiError; detail?: AvatarApiError };
+    const raw = json.error ?? json.data ?? json.detail ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` };
+    if (!HUMAN_SAFE_ERROR_MESSAGE_CODES.has(raw.code)) {
+      return { code: raw.code, message: `HTTP ${res.status}` };
+    }
+    return raw;
   } catch {
     return { code: 'UNKNOWN', message: `HTTP ${res.status}` };
   }
