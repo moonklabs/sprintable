@@ -78,22 +78,29 @@ export function BlockedUsersSection() {
         </div>
       </SectionCardHeader>
       <SectionCardBody className="divide-y divide-border">
-        {rows.map((row) => (
-          <div key={row.blocked_member_id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
-            <span className="flex items-center gap-2 text-sm text-foreground">
-              <ShieldOff className="h-4 w-4 text-muted-foreground" aria-hidden />
-              {nameById[row.blocked_member_id] ?? row.blocked_member_id}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleUnblock(row.blocked_member_id)}
-              disabled={busyId === row.blocked_member_id}
-            >
-              {busyId === row.blocked_member_id ? '...' : t('unblockUserAction')}
-            </Button>
-          </div>
-        ))}
+        {rows.map((row, index) => {
+          // story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「차단 해제」 접근 이름이라
+          // 보조기술 버튼 목록에서 어느 사용자 행인지 못 가른다. 순번+현재 보이는 라벨을
+          // 그대로 품는 aria-label로 가른다(새 낱말 0 — 보이는 글자는 불변).
+          const visibleLabel = busyId === row.blocked_member_id ? '...' : t('unblockUserAction');
+          return (
+            <div key={row.blocked_member_id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+              <span className="flex items-center gap-2 text-sm text-foreground">
+                <ShieldOff className="h-4 w-4 text-muted-foreground" aria-hidden />
+                {nameById[row.blocked_member_id] ?? row.blocked_member_id}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleUnblock(row.blocked_member_id)}
+                disabled={busyId === row.blocked_member_id}
+                aria-label={t('unblockUserAriaLabel', { n: index + 1, label: visibleLabel })}
+              >
+                {visibleLabel}
+              </Button>
+            </div>
+          );
+        })}
       </SectionCardBody>
     </SectionCard>
   );

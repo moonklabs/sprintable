@@ -245,7 +245,7 @@ export function AgentRunsList() {
             <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
           ) : (
             <div className="space-y-3">
-              {runs.map((run) => (
+              {runs.map((run, index) => (
                 <div
                   key={run.id}
                   className="rounded-md border border-border bg-muted/30 px-4 py-4 transition hover:border-primary/20 hover:bg-muted"
@@ -300,7 +300,13 @@ export function AgentRunsList() {
                         <Activity className="size-3.5" />
                         <span>{toLocaleDateStr(run.created_at, locale, displayTimezone)}</span>
                       </div>
-                      <Button variant="glass" size="sm" onClick={() => setSelectedRunId(run.id)}>
+                      {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「상세 보기」
+                          접근 이름이라 보조기술 버튼 목록에서 어느 실행 행인지 못
+                          가른다. */}
+                      <Button
+                        variant="glass" size="sm" onClick={() => setSelectedRunId(run.id)}
+                        aria-label={t('openDetailAriaLabel', { n: index + 1, label: t('openDetail') })}
+                      >
                         {t('openDetail')}
                       </Button>
                     </div>

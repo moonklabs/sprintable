@@ -606,6 +606,20 @@ async def refresh_comments_now(
         await db.commit()
         raise
     except CommentFetchError as exc:
+        # story #3597(잔여, PO 라이브 회차 2026-09-07 02:27~02:33Z 실측·PO 確定) —
+        # 스케줄 루프(process_due_comment_collections)는 CONNECTION 실패 시
+        # `_promote_connection_status`를 부르는데 이 수동 경로는 그 호출이 아예
+        # 없었다(AC1 「수집이 connection 실패로 끝나면 칩이 선다」가 「다시 수집」
+        # 버튼에서 안 섬 — 라이브 실측: FB 샌드박스 502 CHANNEL_TOKEN_EXPIRED 뒤에도
+        # connection.status가 active 그대로). 루프와 같은 순서(승격 먼저, 그 다음
+        # schedule_row 상태 기록)로 맞춘다. `_schedule_next_continuous_poll_if_active`
+        # 는 여기서 안 부른다 — 그건 «다음 자동 폴링 예약» 개념인데 이 경로는 사람이
+        # 그 자리에서 손으로 누른 1회성 재수집이라 다음 폴링 스케줄과 무관하다(루프
+        # 전용 개념을 수동 경로에 섞지 않는다).
+        from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION
+
+        if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION:
+            await _promote_connection_status(db, publication_id=publication_id)
         schedule_row.status = "failed"
         schedule_row.error_code = exc.error_code
         await db.commit()
@@ -698,9 +712,6 @@ async def list_comments_for_publication(
     sent_reply_counts_by_comment_id = await _sent_reply_counts_by_comment_ids(
         db, comment_ids=[c.id for c in rows],
     )
-    latest_sent_reply_status_by_comment_id = await _latest_sent_reply_status_by_comment_ids(
-        db, comment_ids=[c.id for c in rows],
-    )
 
     # story #3529(additive, 유나 §22-15 채택) — 댓글 목록 reply{} 요약에 발송 명령
     # 상태 4필드(command_status·failure_kind·next_attempt_at·reason_code)를 얹기
@@ -728,7 +739,6 @@ async def list_comments_for_publication(
         "reply_counts_by_comment_id": reply_counts_by_comment_id,
         "open_reply_draft_by_comment_id": open_reply_draft_by_comment_id,
         "sent_reply_counts_by_comment_id": sent_reply_counts_by_comment_id,
-        "latest_sent_reply_status_by_comment_id": latest_sent_reply_status_by_comment_id,
     }
 
 
@@ -757,8 +767,11 @@ async def _latest_reply_by_comment_ids(
     되돌렸다: 이 필드(reply)는 칩 4상태·답변 미리보기(latestReplyText)·실패
     줄(replyFailureAction)·「다시 상신」(replyId)까지 겹쳐 쓴다 — draft/pending을
     빼면 그 전부가 통째로 꺼진다(실측: 미응답 회귀 4건). 배지 «최신 상태» 주어
-    불일치(보낸 답변 있는데 배지가 초안을 말하는 자리)는 이 필드를 안 건드리고
-    별도 additive 필드(`latest_sent_reply_status`, 아래)로 해소한다."""
+    불일치(보낸 답변 있는데 배지가 초안을 말하는 자리)는 그때 별도 additive
+    필드(`latest_sent_reply_status`)로 해소했으나, story #3592(유나 §22-16 ②
+    「제3의 답」, PO 決 2026-09-07 01:24Z)가 그 처방 자체를 폐기했다 — 배지
+    status 주어는 count 임계와 무관하게 이 필드(`reply.status`) 하나로
+    되돌아간다(그 additive 필드·소비 전부 제거됨)."""
     if not comment_ids:
         return {}
     from sqlalchemy.orm import aliased
@@ -819,36 +832,6 @@ async def _sent_reply_counts_by_comment_ids(
         .group_by(ChannelPostCommentReply.comment_id)
     )).all()
     return {comment_id: count for comment_id, count in rows}
-
-
-async def _latest_sent_reply_status_by_comment_ids(
-    db: AsyncSession, *, comment_ids: list[uuid.UUID],
-) -> dict[uuid.UUID, str]:
-    """story #3596(유나 Design CHANGES①, 페드루 PO 정정 2026-09-07) — 댓글당 «보낸»
-    답변(status=="sent") 중 최신 1건의 status만. `_latest_reply_by_comment_ids`
-    (draft/pending 포함 최신)와 별도 축 — 배지 「답변 {count} · 최신 {status}」
-    (count>=2)의 status 주어를 이 값으로 바꿔, 최신이 안 보낸 초안이어도 배지가
-    "보낸 답변"을 말하게 한다(수·상태 주어를 하나로). count<2(임계 아래) 칩은
-    그대로 `reply.status`를 쓴다(이 필드 미적용 — PO 스코프 정정, 별건 후보).
-    없으면 dict에 그 comment_id 자체가 없다(호출부 `.get(comment_id)`→None)."""
-    if not comment_ids:
-        return {}
-    from sqlalchemy.orm import aliased
-
-    rn = func.row_number().over(
-        partition_by=ChannelPostCommentReply.comment_id, order_by=ChannelPostCommentReply.created_at.desc(),
-    ).label("rn")
-    subq = (
-        select(ChannelPostCommentReply, rn)
-        .where(
-            ChannelPostCommentReply.comment_id.in_(comment_ids),
-            ChannelPostCommentReply.status == "sent",
-        )
-        .subquery()
-    )
-    reply_alias = aliased(ChannelPostCommentReply, subq)
-    rows = (await db.execute(select(reply_alias).where(subq.c.rn == 1))).scalars().all()
-    return {reply.comment_id: reply.status for reply in rows}
 
 
 async def _reply_counts_by_comment_ids(

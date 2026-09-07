@@ -161,7 +161,7 @@ export function WorkflowTriggerTypesSection() {
           <p className="text-sm text-muted-foreground">...</p>
         ) : (
           <div className="space-y-2">
-            {triggerTypes.map((tt) => (
+            {triggerTypes.map((tt, index) => (
               <div key={tt.id} className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                 {editingId === tt.id ? (
                   <div className="space-y-2">
@@ -197,12 +197,21 @@ export function WorkflowTriggerTypesSection() {
                         <p className="mt-0.5 text-xs text-muted-foreground">{tt.description}</p>
                       ) : null}
                     </div>
+                    {/* story #3592(§17-20 ⑧·§22-18 동형) — 토글 버튼만 이번 PR에서
+                        가른다(판정표 명시 대상). 같은 행의 edit/delete/confirm/cancel
+                        (tc(...) 공용 키)도 행마다 반복되는 같은 결함이지만 공용
+                        namespace라 이 스토리 범위 밖 — 조용히 빼지 않고 남김(후속
+                        확인 필요, 3592 판정표에 추가 대상). */}
                     <div className="flex shrink-0 gap-2">
                       <Button
                         variant="glass"
                         size="sm"
                         onClick={() => void handleToggle(tt)}
                         disabled={togglingId === tt.id}
+                        aria-label={t('workflowToggleAriaLabel', {
+                          n: index + 1,
+                          label: togglingId === tt.id ? '...' : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn'),
+                        })}
                       >
                         {togglingId === tt.id ? '...' : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn')}
                       </Button>

@@ -153,10 +153,11 @@ export default function OrganizationEventsPage() {
             <SectionCardBody>
               {customDefs.length > 0 ? (
                 <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {customDefs.map((def) => (
+                  {customDefs.map((def, index) => (
                     <EventDefRow
                       key={def.key}
                       def={def}
+                      index={index}
                       expanded={expandedKey === def.key}
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly={false}
@@ -185,10 +186,11 @@ export default function OrganizationEventsPage() {
             <SectionCardBody>
               {presetDefs.length > 0 ? (
                 <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {presetDefs.map((def) => (
+                  {presetDefs.map((def, index) => (
                     <EventDefRow
                       key={def.key}
                       def={def}
+                      index={index}
                       expanded={expandedKey === def.key}
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly
@@ -264,9 +266,10 @@ export default function OrganizationEventsPage() {
 }
 
 function EventDefRow({
-  def, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, onApply, t,
+  def, index, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, onApply, t,
 }: {
   def: EventDefinition;
+  index: number;
   expanded: boolean;
   onToggleExpand: () => void;
   readonly: boolean;
@@ -302,20 +305,42 @@ function EventDefRow({
             <Badge variant="outline">{t('eventVersionLabel', { version: def.version })}</Badge>
           </div>
         </div>
+        {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 접근 이름이라 보조기술
+            버튼 목록에서 어느 이벤트 정의 행인지 못 가른다. customDefs·presetDefs는
+            화면상 별개 목록(제목이 다른 SectionCard 둘)이라 순번은 각 목록 안에서
+            1부터 다시 센다(호출부 두 곳이 각자 map index를 넘긴다). */}
         <div className="flex shrink-0 gap-1.5">
           {!readonly && isAdmin ? (
-            <Button size="sm" variant="ghost" disabled={!def.enabled} onClick={onTestPublish}>
+            <Button
+              size="sm" variant="ghost" disabled={!def.enabled} onClick={onTestPublish}
+              aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventTestPublishCta') })}
+            >
               {t('eventTestPublishCta')}
             </Button>
           ) : null}
           {canApply ? (
-            <Button size="sm" variant="outline" onClick={onApply}>{t('eventApplyCta')}</Button>
+            <Button
+              size="sm" variant="outline" onClick={onApply}
+              aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventApplyCta') })}
+            >
+              {t('eventApplyCta')}
+            </Button>
           ) : null}
           {canMutate ? (
             <>
-              <Button size="sm" variant="outline" onClick={onEdit}>{t('eventEditCta')}</Button>
+              <Button
+                size="sm" variant="outline" onClick={onEdit}
+                aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventEditCta') })}
+              >
+                {t('eventEditCta')}
+              </Button>
               {def.enabled ? (
-                <Button size="sm" variant="destructive" onClick={onDeactivate}>{t('eventDeactivateCta')}</Button>
+                <Button
+                  size="sm" variant="destructive" onClick={onDeactivate}
+                  aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventDeactivateCta') })}
+                >
+                  {t('eventDeactivateCta')}
+                </Button>
               ) : null}
             </>
           ) : null}
