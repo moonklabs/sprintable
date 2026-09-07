@@ -113,7 +113,7 @@ export default function OrganizationEventsPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } } | null;
-        throw new Error(body?.error?.message ?? body?.detail?.message ?? `HTTP ${res.status}`);
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
       addToast({ type: 'success', title: t('eventDeactivateSuccessToast') });
       await refresh();
@@ -568,7 +568,7 @@ function EventFormDialog({
       }
       if (!res.ok) {
         const resBody = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } } | null;
-        throw new Error(resBody?.error?.message ?? resBody?.detail?.message ?? `HTTP ${res.status}`);
+        throw new Error(resBody?.error?.message ?? `HTTP ${res.status}`);
       }
       // POST /api/events/definitions는 raw passthrough(proxyToFastapi, apiSuccess로 안 감쌈)라
       // BE(EventDefinitionDetailResponse)를 그대로 준다 — {data:...}가 아니다. 다만 이 계층
@@ -777,7 +777,7 @@ function TestPublishDialog({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } } | null;
-        throw new Error(body?.error?.message ?? body?.detail?.message ?? `HTTP ${res.status}`);
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
       addToast({ type: 'success', title: t('eventTestPublishSuccessToast') });
       onOpenChange(false);
