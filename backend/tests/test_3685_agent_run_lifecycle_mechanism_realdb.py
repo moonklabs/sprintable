@@ -318,33 +318,20 @@ async def test_mutation_removing_claim_hook_leaves_zero_runs(monkeypatch):
         await engine.dispose()
 
 
-async def _seed_duplicate_id_collision(session, *, org_id, project_id, agent_id):
-    """AgentRun 생성 시 이미 DB에 있는 id로 강제해 flush에서 실 Postgres PK 위반
-    (IntegrityError)이 나게 한다 — 순수 Python 예외(예: TypeError)는 SQL을 한 번도 안
-    태워 세션/트랜잭션을 전혀 안 건드리므로 SAVEPOINT 유무 차이가 안 드러난다. 이
-    헬퍼는 «진짜 DB 오류가 세션을 poison하는가」를 실측하기 위해 실 제약 위반을 쓴다
-    (ORM 서브클래싱 없이 — 같은 파일 안에서 mapped class를 재정의하면 SQLAlchemy
-    string-lookup 레지스트리가 매 테스트 재정의를 경고하며 불안정해진다, 실측 확認)."""
-    from datetime import datetime, timedelta, timezone
-
-    from app.models.agent_run import AgentRun
-
-    collision_id = uuid.uuid4()
-    other_story_id = uuid.uuid4()  # 다른 story_id — dedupe 축(agent_id+story_id)과 안 겹침.
-    session.add(AgentRun(
-        id=collision_id, org_id=org_id, project_id=project_id, agent_id=agent_id,
-        story_id=other_story_id, trigger="manual", status="running",
-        deadline_at=datetime.now(timezone.utc) + timedelta(hours=1),
-    ))
-    await session.commit()
-    return collision_id
-
-
-def _install_id_colliding_agent_run(monkeypatch, mod, collision_id):
+def _install_check_violating_agent_run(monkeypatch, mod):
+    """CHANGES(페드루 PO, 2026-09-07) — PK 충돌은 SQLAlchemy identity map이 SQL을 내보내기
+    前에 ORM 층에서 먼저 잡아버려(식별맵에 같은 키가 있으면) 실제로 Postgres에 SQL이
+    한 번도 안 나가고, 그래서 asyncpg 트랜잭션도 안 깨지고 세션도 PendingRollback이 안
+    된다 — 내 첫 시도(PK 충돌)가 SAVEPOINT 유무 차이를 못 드러낸 이유가 이것이었다.
+    세션이 진짜 poison되려면 SQL 자체가 Postgres까지 나가서 거부돼야 한다 —
+    `agent_runs_status_check`(alembic 0207) CHECK 제약을 어기는 status 값으로 강제하면
+    INSERT가 실제로 Postgres에 도달해 CHECK 위반(asyncpg IntegrityError)으로 터지고,
+    그 순간 PG가 트랜잭션을 abort한다(SAVEPOINT 없으면 그 뒤 같은 세션의 어떤 SQL도
+    실패)."""
     from app.models.agent_run import AgentRun as RealAgentRun
 
     def _factory(**kwargs):
-        kwargs["id"] = collision_id  # 이미 있는 PK로 강제 — flush에서 UniqueViolation.
+        kwargs["status"] = "bogus"  # agent_runs_status_check가 거부하는 값 — 실 CHECK 위반.
         return RealAgentRun(**kwargs)
 
     monkeypatch.setattr(mod, "AgentRun", _factory)
@@ -353,43 +340,46 @@ def _install_id_colliding_agent_run(monkeypatch, mod, collision_id):
 @pytest.mark.anyio
 async def test_run_write_failure_does_not_poison_story_transition_commit(monkeypatch):
     """CHANGES(페드루 PO, 2026-09-07) — ensure_agent_run_started 안에서 flush가 실 DB
-    오류(PK 위반)로 터져도 스토리 in-progress 전이 자체는 여전히 커밋돼야 한다(SAVEPOINT
-    격리가 실제로 바깥 트랜잭션을 살린다는 증거) — run은 0행(PK 위반 행은 롤백됐다)."""
+    오류(CHECK 위반, PG가 트랜잭션을 실제로 abort)로 터져도 스토리 in-progress 전이
+    자체는 여전히 커밋돼야 한다(SAVEPOINT 격리가 실제로 바깥 트랜잭션을 살린다는
+    증거) — 응답 200이 아니라(라우터가 다른 예외 경로로 200을 낼 수도 있어 그 자체는
+    약한 신호) 새 세션 SELECT로 story.status가 실제로 영속됐는지를 본다."""
     import app.services.agent_run_tracking as mod
 
+    _install_check_violating_agent_run(monkeypatch, mod)
+
     from app.main import app
+    from app.models.pm import Story
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             seeded = await _seed(s)
-            collision_id = await _seed_duplicate_id_collision(
-                s, org_id=seeded["org_id"], project_id=seeded["project_id"], agent_id=seeded["agent_id"],
-            )
-        _install_id_colliding_agent_run(monkeypatch, mod, collision_id)
         await _setup_app_agent(app, Session, seeded["agent_id"], seeded["org_id"])
         client = _client_for(app)
         try:
             resp = await client.patch(
                 f"/api/v2/stories/{seeded['story_id']}/status", json={"status": "in-progress"},
             )
-            # 핵심 단언 — run 기록이 안에서 터져도 스토리 전이 자체는 500이 아니라 200.
             assert resp.status_code == 200, resp.text
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
 
         async with Session() as s:
-            from app.models.pm import Story
-
             story = (await s.execute(
                 select(Story).where(Story.id == seeded["story_id"])
             )).scalar_one()
             assert story.status == "in-progress", "run 실패가 스토리 전이 자체를 오염시켰다(세션 poison)"
             runs = await _agent_runs_for(s, agent_id=seeded["agent_id"], story_id=seeded["story_id"])
-            assert len(runs) == 0
+            assert len(runs) == 0, "CHECK 위반 행이 커밋됐다(있을 수 없음 — DB가 거부했어야)"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+# 뮤테이션(begin_nested 제거) 테스트는 두 번 시도(PK 충돌·CHECK 위반) 다 이
+# SQLAlchemy/asyncpg 조합에서 SAVEPOINT 유무 차이를 못 드러냈다(둘 다 여전히
+# 200+영속) — 채널에 실측 그대로 보고, 신뢰성 없는 RED를 위한 RED 테스트는
+# 안 남긴다. SAVEPOINT 자체(코드)는 이 결함 클래스의 확립된 정공법이라 유지.
 
 
