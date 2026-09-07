@@ -36,7 +36,10 @@ from .toolset import is_tool_allowed
 from .tools.a2a import (
     LinkGateToTaskInput, ListAgentCardsInput, link_gate_to_task, list_agent_cards,
 )
-from .tools.channel_posts import WithdrawChannelPostDraftInput, withdraw_channel_post_draft
+from .tools.channel_posts import (
+    GetPublicationInsightsInput, WithdrawChannelPostDraftInput,
+    get_publication_insights, withdraw_channel_post_draft,
+)
 from .tools.decisions import RequestDecisionInput, request_decision
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
@@ -985,6 +988,16 @@ _TOOL_DEFS: list[tuple] = [
      "게이트는 사유 「작성자가 폐기」로 rejected 종결, 이미 발행된 초안은 409(발행 취소는 "
      "별도 unpublish 경로). 이미 폐기된 초안 재호출은 멱등.",
      WithdrawChannelPostDraftInput, withdraw_channel_post_draft),
+    # 발행물 1일·7일 인사이트 — story #3651(2026-09-07). 블루프린트 §7 Phase 2 AC
+    # 「1일·7일 성과를 비교해 후속 스토리를 만든다」의 에이전트 몫(스토리 생성 자체는
+    # 기존 sprintable_add_story).
+    ("sprintable_get_publication_insights",
+     "[일감] 발행물의 1일·7일 인사이트 스냅샷 목록 + 둘 사이 키별 델타(v7-v1)를 준다 — "
+     "publication_id 직접 지정 또는 draft_id로 「마지막 발행」을 대신 찾음(초안 미발행 "
+     "시 그 사실을 알림). delta_1d_to_7d는 두 스냅샷 모두 captured일 때만 채워지고, "
+     "미도래(pending)·실패(failed)면 null+사유. 한쪽이라도 미제공(null)인 지표는 델타도 "
+     "null(0과 섞지 않음). 후속 스토리는 이 도구가 대신 안 만든다 — sprintable_add_story를 쓸 것.",
+     GetPublicationInsightsInput, get_publication_insights),
 ]
 
 for _name, _doc, _cls, _fn in _TOOL_DEFS:

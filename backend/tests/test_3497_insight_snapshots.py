@@ -602,6 +602,81 @@ async def test_insights_list_endpoint_org_mismatch_403():
 
 
 @pytest.mark.anyio
+async def test_insights_list_endpoint_offset_label_nulls_out_superseded_snapshots_after_republish():
+    """카디르 발견(PR#4003, 2026-09-07) — hosted_site 재발행은 같은 publication_id를
+    유지한 채 published_at을 갱신하고 새 due_at 2행을 더 연다(UNIQUE(publication_id,
+    due_at)는 «새» due_at을 안 막는다). offset_label은 due_at을 «지금» published_at
+    기준으로 재해석해야 한다 — 옛 사이클의 due_at은 더 이상 +1일/+7일 어느 쪽도
+    아니게 되어 null, 재발행 사이클의 두 행만 1d/7d로 라벨돼야 한다(인덱스 기반
+    라벨링이던 시절은 이 값이 서버에 없었다 — 지금은 소비부가 대신 흉내 낼 필요가
+    없다는 것 자체가 이 계약의 요점)."""
+    from app.main import app
+    from app.models.site_post import SitePost
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            work_item_id = uuid.uuid4()
+
+            first_published_at = datetime.now(timezone.utc) - timedelta(days=20)
+            post = SitePost(
+                id=uuid.uuid4(), org_id=org_id, lang="ko", slug="republish-post", title="제목",
+                summary="요약", tags=[], body_md="본문", published_at=first_published_at,
+                source_story_id=work_item_id, gate_id=uuid.uuid4(),
+            )
+            s.add(post)
+            await s.commit()
+
+            # 최초 발행 사이클 — 이 두 due_at은 재발행 뒤 더 이상 유효한 1d/7d가 아니다.
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=post.id,
+                publication_kind="site_post", channel="hosted_site", external_id=None,
+                anchor_at=first_published_at,
+            )
+            await s.commit()
+
+            # 재발행 — published_at 갱신 + 새 due_at 2행(다른 anchor_at이라 UNIQUE 충돌 없음).
+            republish_at = datetime.now(timezone.utc) - timedelta(days=5)
+            post.published_at = republish_at
+            await s.commit()
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=post.id,
+                publication_kind="site_post", channel="hosted_site", external_id=None,
+                anchor_at=republish_at,
+            )
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publications/{post.id}/insights")
+        assert r.status_code == 200, r.text
+        rows = r.json()
+        assert len(rows) == 4, "최초 사이클 2행 + 재발행 사이클 2행"
+
+        by_label: dict[str | None, int] = {}
+        for row in rows:
+            by_label[row["offset_label"]] = by_label.get(row["offset_label"], 0) + 1
+        assert by_label == {None: 2, "1d": 1, "7d": 1}, by_label
+
+        # 카운트만으론 부족 — «어느 사이클»의 due_at이 1d/7d로 라벨됐는지 직접 확認한다
+        # (뮤테이션 대상: rows[0].due_at 기준 역산 같은 우회는 이 표본에서 우연히 같은
+        # 카운트 분포를 낼 수 있다 — 실제 republish_at 앵커와 정확히 일치해야 한다).
+        labeled_by_due_at = {row["due_at"]: row["offset_label"] for row in rows}
+        expected_1d_due = (republish_at + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+        expected_7d_due = (republish_at + timedelta(days=7)).isoformat().replace("+00:00", "Z")
+        matched_1d = [due for due, label in labeled_by_due_at.items() if label == "1d"]
+        matched_7d = [due for due, label in labeled_by_due_at.items() if label == "7d"]
+        assert len(matched_1d) == 1 and matched_1d[0].startswith(expected_1d_due[:19])
+        assert len(matched_7d) == 1 and matched_7d[0].startswith(expected_7d_due[:19])
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_compute_insight_snapshot_counts_tallies_by_status_within_window():
     """확定⑤ — 3475 접합용 카운트 함수(이 PR에선 호출부 미배선, 함수만). created_at
     기준 window 밖 행은 안 세고, pending 행도 안 센다(3종만)."""

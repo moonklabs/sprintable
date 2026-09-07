@@ -15,7 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user
 from app.dependencies.auth import get_verified_org_id
 from app.dependencies.database import get_db
-from app.services.insight_snapshots import list_insight_snapshots_for_publication
+from app.services.insight_snapshots import (
+    label_snapshot_offset,
+    list_insight_snapshots_for_publication,
+    resolve_publication_published_at,
+)
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["insight-snapshots"])
 
@@ -29,6 +33,12 @@ class InsightSnapshotView(BaseModel):
     normalized: dict[str, int | None] | None
     source: str | None
     error_code: str | None
+    # story #3651 CHANGES(카디르 발견, PR#4003, 2026-09-07) — insights_board.py가 이미
+    # 쓰던 「due_at−«지금» published_at」 라벨링을 소비부(MCP 도구)가 각자 인덱스로
+    # 흉내 내다 재발행(같은 publication_id, published_at 갱신 + 새 due_at 2행 추가)
+    # 사례에서 오라벨했다. 서버가 정본 라벨을 낸다 — null=옛 발행 사이클의 잔존
+    # 스냅샷(그 due_at이 «지금» published_at의 +1일/+7일 어느 쪽도 아님).
+    offset_label: str | None = None
 
 
 @router.get(
@@ -49,10 +59,22 @@ async def list_publication_insights_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     rows = await list_insight_snapshots_for_publication(db, org_id=org_id, publication_id=publication_id)
+    # story #3651 CHANGES — 이 publication의 «지금» published_at 1회 조회(행마다 반복
+    # 조회 0, 어차피 폴리모픽 publication_id 하나당 kind는 하나다 — rows[0]에서 그대로
+    # 읽는다). 스냅샷이 없으면 조회 자체를 스킵(빈 목록 반환은 그대로 유지).
+    published_at = None
+    if rows:
+        published_at = await resolve_publication_published_at(
+            db, publication_kind=rows[0].publication_kind, publication_id=publication_id,
+        )
     return [
         InsightSnapshotView(
             id=r.id, channel=r.channel, due_at=r.due_at, captured_at=r.captured_at,
             status=r.status, normalized=r.normalized, source=r.source, error_code=r.error_code,
+            offset_label=(
+                label_snapshot_offset(due_at=r.due_at, published_at=published_at)
+                if published_at is not None else None
+            ),
         )
         for r in rows
     ]
