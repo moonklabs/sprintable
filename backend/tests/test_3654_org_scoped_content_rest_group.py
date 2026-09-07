@@ -24,7 +24,7 @@ _APP_DIR = Path(__file__).parent.parent / "app"
 _ROUTERS_DIR = _APP_DIR / "routers"
 
 
-def _extract_org_scoped_segments() -> dict[str, list[str]]:
+def _extract_org_scoped_segments(routers_dir: Path = _ROUTERS_DIR) -> dict[str, list[str]]:
     """`app/routers/*.py` 전수에서 `<var> = APIRouter(prefix="/api/v2/organizations", ...)`
     로 선언된 라우터 변수(파일당 여러 개 가능 — 예: gate_config.py의 router+org_router)를
     찾고, 그 변수에 걸린 `@<var>.<method>("<path>", ...)` 데코레이터의 path 리터럴에서
@@ -38,10 +38,23 @@ def _extract_org_scoped_segments() -> dict[str, list[str]]:
       "(root, org_id only)".
     - path가 비어있으면("") "(empty/root)".
     - 그 외(동적 파라미터로 시작 안 함 — 이 스토리 대상 밖 모양)는 무시(collect 안 함,
-      org_id 뒤에 붙는 형이 아니므로 이 가드의 관심사가 아니다)."""
-    router_method_re = re.compile(r'@(\w+)\.(get|post|put|patch|delete)\(\s*\n?\s*"([^"]*)"')
+      org_id 뒤에 붙는 형이 아니므로 이 가드의 관심사가 아니다).
+
+    카디르 qa:changes(PR #4006, 2026-09-07) — `@router.get("/path", ...)` 위치 인자
+    형만 잡고 `@router.get(path="/path", ...)` 키워드 인자 형은 못 봤다(실 라우트 추가로
+    재현·현재 사용례 0이지만 이 가드의 존재 이유가 "미래 누락 방지"라 이 구멍은 닫는다).
+    아래 정규식에 선택적 "path=" 키워드 접두 허용 그룹을 추가했다.
+
+    ⚠️이 가드가 여전히 못 잡는 것(의도적 잔여 사각 — AST 전환은 지금 안 함, 아래가
+    그 신뢰 경계 선언) — `router.add_api_route(...)` 동적 등록 · 변수/f-string으로
+    조립된 경로(`f"/{prefix}/..."` 등, 문자열 리터럴이 아니라서 정규식이 값을 못 봄)
+    · `router.api_route(...)`(메서드 무관 다중 등록). 다음에 이 사각을 밟는 사람이
+    있다면 그게 이 판단이 틀렸다는 신호이니 그때 확장한다."""
+    router_method_re = re.compile(
+        r'@(\w+)\.(get|post|put|patch|delete)\(\s*\n?\s*(?:path\s*=\s*)?"([^"]*)"'
+    )
     segments: dict[str, list[str]] = {}
-    for path in sorted(_ROUTERS_DIR.glob("*.py")):
+    for path in sorted(routers_dir.glob("*.py")):
         text = path.read_text()
         org_router_vars = set(re.findall(r'(\w+)\s*=\s*APIRouter\(\s*prefix="/api/v2/organizations"', text))
         if not org_router_vars:
@@ -69,6 +82,24 @@ def test_grounding_extraction_finds_known_content_segments():
     assert "channel_posts.py" in segments["channel-posts"]
     assert "publications" in segments
     assert {"channel_post_comments.py", "insight_snapshots.py"} <= set(segments["publications"])
+
+
+def test_scanner_regex_catches_path_keyword_argument_style(tmp_path):
+    """카디르 qa:changes(PR #4006, 2026-09-07) 양성대조 — `@router.get(path="/x/y", ...)`
+    처럼 path를 키워드 인자로 넘긴 데코레이터도 실 스캐너 함수(`_extract_org_scoped_
+    segments`, 정규식 중복 없이 그대로 재사용)가 세그먼트를 뽑는다. 고치기 前엔 이
+    표본이 못 잡혀야 한다(실패 가능한 양성대조 — `routers_dir` 주입으로 실 app/routers
+    무접촉, 합성 파일 하나로 스캐너 로직만 격리 재확認)."""
+    (tmp_path / "sample_router.py").write_text(
+        'router = APIRouter(prefix="/api/v2/organizations")\n'
+        '@router.get(path="/{org_id}/widgets")\n'
+        'async def f(): ...\n'
+    )
+    segments = _extract_org_scoped_segments(routers_dir=tmp_path)
+    assert "widgets" in segments, (
+        "스캐너가 path= 키워드 인자 형을 못 잡음 — 정규식이 여전히 위치 인자 형만 본다"
+    )
+    assert segments["widgets"] == ["sample_router.py"]
 
 
 def test_every_org_scoped_segment_is_mapped_or_explicitly_excused():
