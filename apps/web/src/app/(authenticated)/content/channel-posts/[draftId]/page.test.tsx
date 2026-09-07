@@ -1984,7 +1984,12 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       // dead_letter는 체크리스트가 없다(needs_check 전용).
       expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]')).toBeNull();
 
-      const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmCancel);
+      // story #3641 — cancelBtn이 undefined면 dispatchEvent가 옵셔널 체이닝으로 조용히
+      // no-op해 아래 retryCalled===0 단언이 "취소를 클릭 안 한 것"만으로도 거짓 통과한다
+      // (키 삭제·라벨 변경이 이 자리를 못 잡는 함정, story 본문이 명시 경고). 버튼을 실제로
+      // 찾았는지부터 먼저 확認한다.
+      const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.common.cancel);
+      expect(cancelBtn).toBeDefined();
       await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(retryCalled).toBe(0);
     });
