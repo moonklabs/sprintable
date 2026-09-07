@@ -18,6 +18,9 @@ import path from 'node:path';
 // GNB(components/ui/sidebar.tsx·components/nav/top-bar.tsx)는 이번 스토리에서 lg:로
 // 전환 완료돼 있어야 하므로 의도적으로 목록에 없다(재도입 시 이 스크립트가 잡는다).
 export const ALLOWLIST = new Set([
+  // story #3677 — InlineSaveIndicator를 page.tsx에서 이 형제 모듈로 이사(바이트
+  // 그대로, md:max-w-none 신규 분기 0) — grandfather 취지 그대로 옮김.
+  'app/(authenticated)/[ws]/[proj]/docs/[slug]/inline-save-indicator.tsx',
   'app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx',
   'app/(authenticated)/[ws]/[proj]/mockups/page.tsx',
   'app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx',
