@@ -2581,6 +2581,7 @@
     "channelPostsImageAttachLabel": "이미지 첨부",
     "channelPostsImageSpecTag": "{formats} · 최대 {maxBytes} · 비율 최대 {aspectMax}:1 · 너비 {widthMin}–{widthMax}px · 색상공간 {colorSpace}",
     "channelPostsImageSpecTagWithMin": "{formats} · 최대 {maxBytes} · 비율 {aspectMinDisplay} ~ {aspectMaxDisplay} · 너비 {widthMin}–{widthMax}px · 색상공간 {colorSpace}",
+    "channelPostsCoverSpecTag": "{formats} · 최대 {maxBytes} · 비율 {aspectTarget} · 너비 {widthMin}–{widthMax}px · 색상공간 {colorSpace}",
     "channelPostsImageAttachTriggerCta": "이미지 선택",
     "channelPostsImageAttachAlt": "첨부 이미지",
     "channelPostsImageUploadRequestingUrl": "업로드 준비 중…",

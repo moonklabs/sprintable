@@ -4049,6 +4049,49 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     expect(container.querySelector('[data-testid="channel-post-video-attach-trigger"]')?.textContent).toBe('영상 교체');
   });
 
+  // story #3591(§17-23④ 짝, PO 確定 2026-09-06) — 영상 붙은 초안의 커버 규격 태그가
+  // 캐러셀 비율(image_aspect_min/max)을 그대로 말해 3586 거부 문장("9:16이어야")과
+  // 한 화면에서 다른 세계였다. 비율 조각만 videoSpec 이름표로 바뀌고 나머지(형식·
+  // 용량·너비·색상공간)는 이미지 규격 그대로인지 고정.
+  it('⭐#3591 — 영상 첨부 後 커버 규격 태그는 videoSpec 이름표(9:16)를 쓰고 캐러셀 범위(1:1.25)는 안 보인다', async () => {
+    stubXhrForVideoUpload();
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0.5625, videoCodecs: ['avc1'],
+      imageMaxCount: 1, imageAspectMin: 0.8, imageAspectMax: 1.91,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const specTag = container.querySelector('[data-testid="channel-post-image-spec-tag"]')?.textContent ?? '';
+    expect(specTag).toContain('9:16');
+    expect(specTag).not.toContain('1:1.25');
+    expect(specTag).not.toContain('~');
+    // 나머지 조각은 이미지 규격 그대로(형식·용량·너비·색상공간 무변).
+    expect(specTag).toContain('320');
+    expect(specTag).toContain('1440');
+    expect(specTag).toContain('sRGB');
+  });
+
+  it('⭐#3591 — 영상 없으면 커버 분기가 안 타고 캐러셀 범위(1:1.25 ~ 1.91:1)가 그대로 뜬다(회귀)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024,
+      imageMaxCount: 1, imageAspectMin: 0.8, imageAspectMax: 1.91,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const specTag = container.querySelector('[data-testid="channel-post-image-spec-tag"]')?.textContent ?? '';
+    expect(specTag).toContain('1:1.25 ~ 1.91:1');
+    expect(specTag).not.toContain('9:16');
+  });
+
   // story #3577(유나 헤더 실측·페드루 PO 지적 2026-09-06) — putVideoWithProgress
   // 내부(구 :1133)와 호출부(:1173)가 둘 다 Content-Type을 세팅해 XHR이
   // setRequestHeader를 같은 헤더 이름으로 두 번 불러 "video/mp4, video/mp4"로
