@@ -2432,6 +2432,7 @@
     "errorGateAlreadyHeldLink": "그 초안 보기",
     "errorRawDetailsToggle": "서버 응답 보기",
     "insightSectionLabel": "성과",
+    "insightViewInBoardCta": "{board}에서 보기",
     "insightMetricImpressions": "노출",
     "insightMetricReach": "도달",
     "insightMetricViews": "조회",

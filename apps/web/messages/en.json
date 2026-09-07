@@ -2432,6 +2432,7 @@
     "errorGateAlreadyHeldLink": "View that draft",
     "errorRawDetailsToggle": "View server response",
     "insightSectionLabel": "Performance",
+    "insightViewInBoardCta": "View in {board}",
     "insightMetricImpressions": "Impressions",
     "insightMetricReach": "Reach",
     "insightMetricViews": "Views",
