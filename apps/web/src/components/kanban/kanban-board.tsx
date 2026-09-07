@@ -805,6 +805,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
+        } else {
+          // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③) — FORBIDDEN 외의
+          // 실 실패(500·네트워크 등)는 롤백만 하고 조용했다. epic-swimlane-board.tsx가
+          // #3637에서 이미 쓴 storyMoveFailed를 형제 자리에도.
+          addToast({ type: 'error', title: t('storyMoveFailed') });
         }
         return;
       }
@@ -831,6 +836,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         body: JSON.stringify({ position: newPosition }),
       });
     } catch {
+      addToast({ type: 'error', title: t('storyMoveFailed') });
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
       );
@@ -936,6 +942,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
+        } else {
+          // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③, kanban-board.tsx:929) —
+          // FORBIDDEN 외의 실 실패는 롤백만 하고 조용했다.
+          addToast({ type: 'error', title: t('storyMoveFailed') });
         }
         return;
       }
@@ -950,6 +960,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         body: JSON.stringify({ position: newPosition }),
       });
     } catch {
+      addToast({ type: 'error', title: t('storyMoveFailed') });
       // 롤백 (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
@@ -996,6 +1007,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
+        } else {
+          // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③) — handleDragEnd/
+          // handleTrustDragEnd와 동일 병(메뉴 경로 버전, 문서에는 미등재 — 3638 그라운딩
+          // 중 발견한 세 번째 쌍둥이).
+          addToast({ type: 'error', title: t('storyMoveFailed') });
         }
         return;
       }
@@ -1004,6 +1020,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const violation = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId)?.violation : null;
       if (violation) addToast({ type: 'warning', title: t('transitionViolation') });
     } catch {
+      addToast({ type: 'error', title: t('storyMoveFailed') });
       // Rollback (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),

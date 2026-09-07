@@ -890,3 +890,32 @@ describe('StoryDetailPanel — 라벨 제거 버튼 접근성 이름 i18n(story 
     expect(removeBtn).toBeTruthy();
   });
 });
+
+// story #3638(유나 §8 별건, patchStory 층에서 발견) — handleAssigneeToggle 형제는 이미
+// 실패 토스트를 냈는데(else 분기), 제목/설명/완료기준 저장은 편집창만 닫히고 조용히
+// 원래 값으로 남아 실패 신호가 없었다. 기본 stubFetch(모든 fetch → ok:false)가 이미
+// PATCH 실패를 재현하므로 별도 스텁 없이 그대로 실패 경로를 탄다.
+describe('StoryDetailPanel — 제목/설명/완료기준 저장 실패 시 문장(story #3638)', () => {
+  function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('제목 저장 실패 시 titleSaveFailed 토스트가 뜬다(구 조용히 닫히는 편집창)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({ title: '원래 제목' })} tasks={[]} onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('원래 제목'));
+    await act(async () => { titleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('[data-testid="story-title-input"]') as HTMLInputElement;
+    await act(async () => { setNativeValue(input, '새 제목'); });
+    const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '저장');
+    await act(async () => { saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('제목 저장에 실패했습니다.');
+  });
+});

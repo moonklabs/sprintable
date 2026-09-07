@@ -546,12 +546,15 @@ export default function RetroSessionPage() {
     if (!projectId) return;
     try {
       const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/export?project_id=${projectId}`);
-      if (!res.ok) return;
+      // story #3638(유나 §8 별건 21건 — 이 문서의 v2.1 스캐너가 새로 잡은 자리) — 「내보내기」
+      // 클릭이 실패해도 아무 일도 안 일어난 것처럼 보이던 자리(문구 0). exportCopied와
+      // 동형 신규 1키.
+      if (!res.ok) { addToast({ title: t('exportFailed'), type: 'error' }); return; }
       const json = await res.json() as { data: { markdown: string } };
       await navigator.clipboard.writeText(json.data.markdown);
       addToast({ title: t('exportCopied'), type: 'success' });
     } catch {
-      // ignore
+      addToast({ title: t('exportFailed'), type: 'error' });
     }
   }
 

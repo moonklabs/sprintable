@@ -137,6 +137,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const isMobile = useIsMobile();
   const { toasts, addToast, dismissToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // story #3638(유나 디자인 CHANGES 2026-09-07) — 초기 로드(:349) 실패가 messages를
+  // 빈 배열로 남겨 「대화를 시작하세요」를 그렸다 — 메시지가 있는 대화를 «없다»고
+  // 말하는 §1 클래스(모름을 없음으로 오독). ConnectionLostBanner는 handlePoll 경로
+  // 하나만 덮어(SSE 끊김에서만 뜸) 이 자리를 못 막는다. messages.length===0 렌더
+  // 분기에서만 소비되므로(성공 뒤 메시지가 있으면 이 플래그가 서 있어도 무해) 별도
+  // 호출부 분기 없이 fetchMessages() 공용 함수 레벨에서 갱신한다.
+  const [messagesLoadFailed, setMessagesLoadFailed] = useState(false);
   // story #2265(C-7) 저장 조각(2026-07-29) — write 엔드포인트(#2632)가 서서 citeAction을
   // 실제로 켠다. 선택 확定(confirming) 후 스토리 피커를 열어 골라진 스토리에 저장한다.
   const citeSelection = useMessageRangeSelection();
@@ -325,7 +332,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       const params = new URLSearchParams({ limit: '50' });
       if (before) params.set('before', before);
       const res = await fetch(`${apiPrefix}/${threadId}/messages?${params.toString()}`);
-      if (!res.ok) return undefined;
+      if (!res.ok) { setMessagesLoadFailed(true); return undefined; }
       // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
       const raw = await res.json() as Record<string, unknown>;
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
@@ -338,7 +345,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       }
       setCursor(meta?.next_cursor ?? null);
       setHasMore(meta?.has_more ?? false);
+      setMessagesLoadFailed(false);
       return merged;
+    } catch {
+      // story #3638(유나 재판정 CHANGES 2026-09-07) — fetch 자체가 던지면(오프라인·
+      // DNS·res.json() 파싱 실패) !res.ok 분기를 안 거쳐 setMessagesLoadFailed가
+      // 안 서고 finally만 돌아 messages=[]·플래그=false로 「대화를 시작하세요」가
+      // 다시 섰다. 이 함수의 계약(undefined 반환=실패, handlePoll이 그대로 소비)을
+      // 지키며 던짐도 !res.ok와 동일하게 처리한다.
+      setMessagesLoadFailed(true);
+      return undefined;
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -939,6 +955,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             {loading ? (
               <div className="flex h-full items-center justify-center">
                 <p className="text-sm text-muted-foreground">불러오는 중…</p>
+              </div>
+            ) : messages.length === 0 && messagesLoadFailed ? (
+              <div className="flex h-full items-center justify-center">
+                <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
+                  {t('messagesLoadFailed')}
+                </p>
               </div>
             ) : messages.length === 0 ? (
               <div className="flex h-full items-center justify-center">

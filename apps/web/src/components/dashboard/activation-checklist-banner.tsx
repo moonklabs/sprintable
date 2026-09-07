@@ -29,6 +29,7 @@ export function ActivationChecklistBanner() {
   const { projectId } = useDashboardContext();
   const { state, allComplete } = useActivationStatus();
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
+  const [instructionStartError, setInstructionStartError] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -67,9 +68,15 @@ export function ActivationChecklistBanner() {
     }
     if (!projectId) return;
     setNavigatingToInstruction(true);
+    setInstructionStartError(false);
     try {
       const convId = await createFirstInstructionConversation(projectId);
+      // story #3638(유나 §8 별건) — 대화 생성 실패 시 스피너만 멈추고 조용했다(클릭했는데
+      // 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은 null을 «건너뛰고
+      // 진행»으로 의도적으로 쓰지만(범위 밖, 그쪽은 그대로 둠), 이 배너는 그 클릭 자체가
+      // 유일한 목적이라 실패를 알려야 한다.
       if (convId) router.push(`/chats/${convId}`);
+      else setInstructionStartError(true);
     } finally {
       setNavigatingToInstruction(false);
     }
@@ -133,6 +140,11 @@ export function ActivationChecklistBanner() {
                   {navigatingToInstruction ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : icon}
                   <span>{label}</span>
                 </Button>
+                {instructionStartError ? (
+                  <p role="alert" aria-live="assertive" aria-atomic="true" className="px-1 pt-0.5 text-xs text-destructive">
+                    {t('firstInstructionStartFailed')}
+                  </p>
+                ) : null}
               </li>
             );
           }

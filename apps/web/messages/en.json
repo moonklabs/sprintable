@@ -55,6 +55,7 @@
     "stepOrgCreated": "Create an organization",
     "stepAgentConnected": "Connect an agent",
     "stepFirstRoundtrip": "Send an instruction and get a reply",
+    "firstInstructionStartFailed": "Couldn't start the conversation. Please try again.",
     "collapseAria": "Collapse",
     "expandAria": "Expand",
     "collapsedChip": "Setup {completed}/{total}"
@@ -67,7 +68,8 @@
     "switching": "Switching…",
     "switchFailed": "Failed to switch account. Please try again.",
     "reloginRequired": "Re-login required",
-    "capReached": "Account limit reached"
+    "capReached": "Account limit reached",
+    "addAccountFailed": "Failed to add account. Please try again."
   },
   "mobileTabBar": {
     "navLabel": "Mobile tab navigation",
@@ -1029,6 +1031,9 @@
     "addStoryCancel": "Cancel",
     "createStoryFailed": "Failed to add story",
     "storyMoveFailed": "Failed to move story",
+    "titleSaveFailed": "Failed to save title.",
+    "descriptionSaveFailed": "Failed to save description.",
+    "acSaveFailed": "Failed to save acceptance criteria.",
     "filters": "Filters",
     "filterTitle": "Filter",
     "filterAll": "All",
@@ -2006,6 +2011,7 @@
     "advancing": "Advancing...",
     "export": "Export",
     "exportCopied": "Copied to clipboard.",
+    "exportFailed": "Failed to export.",
     "categoryGood": "👍 Good",
     "categoryBad": "👎 Bad",
     "categoryImprove": "💡 Improve",
@@ -4294,6 +4300,7 @@
     "approvalRequestLabel": "Approval request",
     "approvalRequestNotFound": "The approval gate could not be found.",
     "approvalRequestLoadError": "Failed to load approval details.",
+    "messagesLoadFailed": "Couldn't load the conversation.",
     "approvalRequestResolvedStatus": "Resolved — status: {status}",
     "approvalRequestStatusApproved": "Approved",
     "approvalRequestStatusRejected": "Rejected",
@@ -4437,6 +4444,7 @@
     "deliveryContractFreeResponseDesc": "When on, participants set to \"mentions only\" in this conversation also receive messages that don't mention them.",
     "deliveryContractReasonGapNote": "Why a message wasn't delivered (e.g. chain limit reached) isn't shown here yet.",
     "deliveryContractSaveFailed": "Failed to save. Please try again.",
+    "muteToggleFailed": "Failed to update notification settings.",
     "you": "You",
     "team": "Team",
     "agent": "Agent",

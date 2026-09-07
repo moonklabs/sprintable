@@ -980,11 +980,70 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
       expect(container.textContent).toContain('완료복귀카드');
     });
   });
+
+  // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③) — handleTrustDragEnd의
+  // !res.ok 분기가 FORBIDDEN만 말하고 그 외 실 실패(500 등)는 롤백만 하고 조용했다.
+  describe('트러스트축 드래그 — FORBIDDEN 아닌 실패도 알린다(story #3638)', () => {
+    it('500 응답이면 storyMoveFailed 토스트가 뜬다(구 조용한 롤백)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+          const status = new URL(url, 'http://localhost').searchParams.get('status');
+          const matched = status === 'ready-for-dev'
+            ? [{ id: 's-queued', title: '대기카드', status: 'ready-for-dev', priority: 'medium', trust_stage: 'queued' }]
+            : [];
+          return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+        }
+        if (typeof url === 'string' && url.startsWith('/api/members')) {
+          return { ok: true, json: async () => ({ data: [] }) };
+        }
+        if (typeof url === 'string' && url === '/api/stories/bulk') {
+          return { ok: false, json: async () => ({ error: { code: 'INTERNAL_ERROR' } }) };
+        }
+        return { ok: false, json: async () => null };
+      }));
+      await mount();
+      await toggleToTrustAxis();
+
+      const handler = capturedDragEndHandlers.at(-1);
+      expect(handler, 'handleTrustDragEnd를 캡처 못 함').toBeDefined();
+      await act(async () => {
+        handler!({ active: { id: 's-queued' }, over: { id: 'running' } });
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('스토리 이동에 실패했습니다');
+    });
+  });
 });
 
 // story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — viewMode('board'|'list')가 예전엔 뷰포트 무관
 // 'board'로 하드코딩돼 있었다(유나 실측: flow-client의 view='list' 세그로 진입해도 여기서
 // 다시 'board'로 떨어져 3.55배 가로 overflow 재발 — 이름이 같은 두 「board/list」 개념 충돌).
+// story #3638(유나 §8 kanban-board.tsx:929/:987, PO 확定 착수분) — 5-status 클래식 드래그
+// (handleDragEnd)도 트러스트축 형제와 동일 병(FORBIDDEN만 말하고 나머지는 조용)을 앓는다.
+describe('KanbanBoard — 5-status 클래식 드래그, FORBIDDEN 아닌 실패도 알린다(story #3638)', () => {
+  it('bulk PATCH 500이면 storyMoveFailed 토스트가 뜬다(구 조용한 롤백)', async () => {
+    stubFetch([{ id: 's-classic', title: '클래식카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    // 기본은 6단계 신뢰축(P0-04) — 5-status 클래식으로 명시 전환해야 handleDragEnd가 걸린다.
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    await act(async () => { classicBtn!.click(); });
+    expect(container.textContent).toContain('클래식카드');
+
+    const handler = capturedDragEndHandlers.at(-1);
+    expect(handler, 'handleDragEnd를 캡처 못 함').toBeDefined();
+    await act(async () => {
+      handler!({ active: { id: 's-classic' }, over: { id: 'in-progress' } });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 기본 stubFetch는 /api/stories/bulk를 명시 처리 안 해 그레이스풀 { ok: false }로
+    // 떨어진다(주석 그대로) — 이 스위트의 다른 테스트들에는 무해했지만(드래그를 직접
+    // 발화한 테스트가 이제껏 0건), 이 테스트에선 그 자체가 "실 실패" 재현이다.
+    expect(container.textContent).toContain('스토리 이동에 실패했습니다');
+  });
+});
+
 describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in)', () => {
   it('모바일(isMobile=true)이면 기본값이 list다 — board 다열 컬럼이 아니라 KanbanListView가 뜬다', async () => {
     isMobileMock = true;
