@@ -183,10 +183,16 @@ async def test_insight_snapshot_connection_failure_fills_last_error_trio(monkeyp
 
 
 @pytest.mark.anyio
-async def test_promote_no_op_leaves_last_error_trio_untouched():
-    """AC2 no-op 불변 — 이미 revoked인 연결은 status도 last_error 3종도 그대로
-    (test_3597_ig_fb_connection_status_promote.py::test_facebook_connection_failure_
-    does_not_downgrade_revoked_or_error와 동형, last_error 3종 축만 추가)."""
+async def test_promote_no_op_keeps_status_but_still_updates_last_error_trio():
+    """story #3605 CHANGES-2(유나 §13-9 ④-2, 페드루 PO 채택 2026-09-07)로 이
+    테스트의 기대값이 갱신됐다 — status는 sticky(이미 revoked면 절대 안 바뀜)지만
+    last_error 3종은 sticky 여부와 무관하게 항상 갱신된다. 근거(PO 원문): status=
+    "active"로 되돌리는 대입 셋(재연결 upsert·자격 교체·apply_refresh_result)이
+    전부 last_error=None까지 같이 지우므로, 얼음은 한 실패 국면 안에서만 서고
+    「지금도 실패하나」는 last_error{code,message,at}가 진다 — status가 얼어
+    있는 동안에도 last_error가 최신 실패를 계속 반영해야 그 역할을 할 수 있다.
+    (원래 이 테스트는 이 트리오도 no-op으로 불변이길 기대했다 — #3605가 그
+    가정 자체를 교정한다.)"""
     from app.models.channel_connection import ChannelConnection
     from app.services.channel_post_comments import _promote_connection_status
 
@@ -199,13 +205,13 @@ async def test_promote_no_op_leaves_last_error_trio_untouched():
             await s.commit()
 
             await _promote_connection_status(
-                s, publication_id=pub.id, error_code="CHANNEL_TOKEN_EXPIRED", message="이 값은 절대 안 들어가야 한다",
+                s, publication_id=pub.id, error_code="CHANNEL_TOKEN_EXPIRED", message="지금도 계속 실패 中",
             )
             await s.commit()
             refreshed = await s.get(ChannelConnection, conn.id)
             assert refreshed.status == "revoked"
-            assert refreshed.last_error is None
-            assert refreshed.last_error_code is None
-            assert refreshed.last_error_at is None
+            assert refreshed.last_error == "지금도 계속 실패 中"
+            assert refreshed.last_error_code == "CHANNEL_TOKEN_EXPIRED"
+            assert refreshed.last_error_at is not None
     finally:
         await engine.dispose()
