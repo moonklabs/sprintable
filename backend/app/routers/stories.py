@@ -2630,6 +2630,27 @@ async def update_story_status(
         except Exception:  # noqa: BLE001
             pass
 
+    # story #3685(Trust·customer-zero, 페드루 PO 確定 2026-09-07) — run을 "지침"이 아니라
+    # "메커니즘"으로 기록한다. 위 participation 보장과 같은 트리거(in-progress 진입)·같은
+    # fail-open 규율(agent_run_tracking.py 내부가 이미 try/except — 여기선 추가로 감싸지
+    # 않는다, 이중 삼킴 불필요). 에이전트가 착수한 것만(사람은 agent_run 개념 밖).
+    if (
+        story_before is not None and old_status != "in-progress" and body.status == "in-progress"
+        and _line_actor_id is not None and _line_actor_type == "agent"
+    ):
+        from app.services.agent_run_tracking import ensure_agent_run_started
+        await ensure_agent_run_started(
+            db, org_id=repo.org_id, project_id=story_before.project_id,
+            agent_id=_line_actor_id, story_id=id,
+        )
+
+    # story #3685 — in-review/done 전이는 "닫는 행위자"와 무관하게 그 story의 열린 run을
+    # 닫는다(사람이 PR을 머지해 done으로 옮겨도 그 안에서 일한 에이전트의 run은 끝난 게
+    # 맞다 — agent_id 미지정, close_agent_runs_for_story의 no-op 멱등이 반복 전이를 감당).
+    if story_before is not None and body.status in ("in-review", "done"):
+        from app.services.agent_run_tracking import close_agent_runs_for_story
+        await close_agent_runs_for_story(db, story_id=id, status="completed")
+
     # E-DG S7: agent-handoff relay — status 적용 후 같은 트랜잭션에서 dispatch(commit=False)·step_run
     # delivery 기록(원자). wake/CC delivery 는 commit(아래) 후 recipient_seq 확정 후 발화(P1-2 불변식).
     # relay 실패도 전이 비차단(fail-open).
