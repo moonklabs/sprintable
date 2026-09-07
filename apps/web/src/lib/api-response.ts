@@ -44,12 +44,17 @@ export function apiError(
   message: string,
   status = 400,
   details?: Record<string, unknown>,
+  // story #3998 CHANGES(카디르 codex 발견, 2026-09-07) — fastapi-proxy.ts의
+  // UPSTREAM_NON_JSON 분기가 이미 계산해 둔 Retry-After를 실을 길이 없어(이
+  // 함수가 headers를 아예 못 받음) 3516이 한 번 고쳤던 헤더 소실이 재발했다.
+  // 선택 인자 additive — 기존 호출부 전부 그대로(undefined→헤더 오버라이드 0).
+  headers?: Record<string, string>,
 ): NextResponse<ApiErrorResponse> {
   return NextResponse.json({
     data: null,
     error: details ? { code, message, details } : { code, message },
     meta: null,
-  }, { status });
+  }, headers ? { status, headers } : { status });
 }
 
 export function apiUpgradeRequired(message: string, meterType: string, status = 403) {

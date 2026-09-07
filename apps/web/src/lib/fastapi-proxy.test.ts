@@ -278,6 +278,25 @@ describe('fastapi-proxy — 봉투가 사라지는 자리 전수 fix(story #3644
     expect(body.error.message.length).toBeGreaterThan(0);
   });
 
+  // story #3998 CHANGES(카디르 codex 발견, 2026-09-07) — 3516이 한 번 고쳤던
+  // Retry-After 소실이 UPSTREAM_NON_JSON 분기에서 재발했다(resHeaders는 계산되지만
+  // apiError() 호출에 안 실려 버려짐). CF 429 HTML 오류 페이지도 Retry-After를
+  // 실어 보낼 수 있다 — 그 값이 이 봉투에도 보존돼야 한다.
+  it('상류가 429+비-JSON(HTML) 본문+Retry-After를 내면 UPSTREAM_NON_JSON 봉투에도 Retry-After가 보존된다', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      '<html><body>rate limited</body></html>',
+      { status: 429, headers: { 'content-type': 'text/html', 'retry-after': '30' } },
+    ));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('30');
+    const body = (await res.json()) as { data: null; error: { code: string } };
+    expect(body.error.code).toBe('UPSTREAM_NON_JSON');
+  });
+
   // 표본 2 — 503 JSON 봉투: BE 전역 핸들러가 이미 만든 정상 JSON 오류 봉투는 파싱이
   // 성공하니 그대로 통과(옳음 5 BFF 라우트 무변경 — 이 헬퍼가 재해석하지 않는다).
   it('상류가 503+정상 JSON 오류 봉투를 내면 그대로 통과한다(재해석 0)', async () => {

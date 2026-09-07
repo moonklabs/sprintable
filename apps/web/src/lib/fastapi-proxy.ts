@@ -137,7 +137,17 @@ export async function proxyToFastapi(
     try {
       JSON.parse(resBody);
     } catch {
-      return apiError('UPSTREAM_NON_JSON', '서버 응답을 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', res.status);
+      // story #3998 CHANGES(카디르 codex 발견, 2026-09-07) — resHeaders(위에서 이미
+      // 계산됨)가 이 분기에서 apiError()에 안 실려 통째로 버려졌다 — 3516이 한 번
+      // 고쳤던 Retry-After 소실의 재발(CF 429 HTML 오류 페이지도 Retry-After를
+      // 실어 보낼 수 있다). resHeaders 전체가 아니라 retry-after만 골라 넘긴다 —
+      // resHeaders['Content-Type']은 상류의 원래 타입(HTML이면 text/html)이라 새로
+      // 감싸는 JSON 봉투와 안 맞는다(apiError가 스스로 application/json을 낸다).
+      const retryAfter = resHeaders['retry-after'];
+      return apiError(
+        'UPSTREAM_NON_JSON', '서버 응답을 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', res.status,
+        undefined, retryAfter ? { 'Retry-After': retryAfter } : undefined,
+      );
     }
   }
   return new Response(resBody, {
