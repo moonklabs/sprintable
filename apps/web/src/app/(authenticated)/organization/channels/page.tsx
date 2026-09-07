@@ -870,6 +870,10 @@ export default function OrganizationChannelsPage() {
 
   const connected = searchParams.get('connected');
   const connectError = searchParams.get('connect_error');
+  // story #3672(2026-09-07, 3663 실사고) — BE unhandled_exception_handler가 실어 준
+  // error_id를 BFF(authorize/callback route.ts)가 그대로 릴레이한다(AC4). 있을 때만
+  // 표시(AC5) — 없으면 지금 문구 그대로, 복사 가능한 일반 텍스트(select-text).
+  const connectErrorId = searchParams.get('error_id');
   // story #3650(PO Test Org 실측 2026-09-07) — 재연결 대상 행과 콜백이 실제로 갱신한
   // 행이 다를 때(다른 계정을 승인) BFF가 함께 싣는 두 id. 라벨은 이 화면이 이미
   // 불러온 connections에서 붙인다(콜백 라우트는 opaque 릴레이 그대로 유지).
@@ -922,7 +926,14 @@ export default function OrganizationChannelsPage() {
           {/* story #3504 — CHANNEL_APP_CREDENTIALS_MISSING의 "누구에게 요청하나" 분기는
               app-credentials 등록 자격(owner 전용, 앱 자격 저장과 같은 폭)을 묻는다 —
               owner|admin 폭인 isOwnerOrAdmin이 아니라 isOwnerStrict가 맞다. */}
-          <AlertDescription>{t(connectErrorLabelKey(connectError, isOwnerStrict))}</AlertDescription>
+          <AlertDescription>
+            {t(connectErrorLabelKey(connectError, isOwnerStrict))}
+            {connectErrorId ? (
+              <span className="mt-1 block select-text text-xs text-muted-foreground">
+                {t('channelConnectErrorId', { errorId: connectErrorId })}
+              </span>
+            ) : null}
+          </AlertDescription>
         </Alert>
       ) : null}
       {loadError ? (

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -226,7 +227,7 @@ async def lifespan(app: FastAPI):
             await worker_engine.dispose()
 
 
-from app.routers import a2a, account, activation, activity_logs, admin_billing, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, channel_post_comments, channel_post_comment_replies, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, measurement_connections, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activation, activity_logs, admin_billing, admin_unhandled_errors, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, channel_post_comments, channel_post_comment_replies, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, measurement_connections, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -324,9 +325,35 @@ async def rate_limit_storage_error_handler(request: Request, exc: StorageError) 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지."""
-    _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
+    """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지.
+
+    story #3672(2026-09-07, 3663 실사고) — 이 로그가 Cloud Run에만 남아 gcloud
+    재로그인 없이는 원인 추적이 안 됐다(사람 의존 재개 경로). error_id(uuid4) 하나를
+    로그 한 줄·응답 봉투 `error.error_id`·`unhandled_error_events` 행 셋에 같은 값으로
+    싣는다 — 셋을 나중에 그 id로 상관시킬 수 있다. DB 기록은 best-effort(실패해도
+    이 500 응답 자체는 그대로 나간다, record_unhandled_error_event 참고)."""
+    error_id = uuid.uuid4()
+    _logger.exception(
+        "Unhandled exception on %s %s [error_id=%s]: %s", request.method, request.url.path, error_id, exc
+    )
     detail = str(exc) if settings.debug else "Internal server error"
+
+    try:
+        from app.services.unhandled_error_events import record_unhandled_error_event
+        # story #3173 소비처와 같은 request.state 자리(au_org_id) — get_current_user()가
+        # 인증에 성공했을 때만 채운다(그 前에 죽은 요청은 None이 정직한 값, 지어내지
+        # 않는다). 문자열로 심겨 있어(AuthContext.org_id: str) UUID로 변환.
+        _raw_org_id = getattr(request.state, "au_org_id", None)
+        _raw_user_id = getattr(request.state, "au_user_id", None)
+        await record_unhandled_error_event(
+            error_id=error_id, method=request.method, path=request.url.path,
+            exception_class=type(exc).__name__, message=str(exc)[:2000] if str(exc) else None,
+            org_id=uuid.UUID(_raw_org_id) if _raw_org_id else None,
+            user_id=uuid.UUID(_raw_user_id) if _raw_user_id else None,
+            request_id=request.headers.get("x-request-id"),
+        )
+    except Exception:
+        _logger.exception("record_unhandled_error_event itself raised for error_id=%s", error_id)
 
     # story #2003: /rpc의 미처리 예외도 JSON-RPC envelope으로(code=-32603 표준 Internal error,
     # retryable=True — 5xx 분류). http_exception_handler와 동일 경로-정밀 매치.
@@ -335,7 +362,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
     return JSONResponse(
         status_code=500,
-        content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None},
+        content={
+            "data": None,
+            "error": {"code": "INTERNAL_ERROR", "message": detail, "error_id": str(error_id)},
+            "meta": None,
+        },
     )
 
 
@@ -495,6 +526,7 @@ app.include_router(toss_webhooks.router)
 app.include_router(org_subscription_checkout.router)
 app.include_router(billing_packs.router)
 app.include_router(admin_billing.router)
+app.include_router(admin_unhandled_errors.router)
 app.include_router(account.router)
 app.include_router(account.accounts_router)
 app.include_router(oss.router)

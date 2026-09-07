@@ -2187,6 +2187,7 @@
     "channelReauthError": "This connection can't publish right now — please reconnect.",
     "channelLoadFailed": "Failed to load channel connections.",
     "channelConnectSuccess": "{channel} is now connected.",
+    "channelConnectErrorId": "Error number: {errorId}",
     "channelConnectErrorGeneric": "Connection failed. Please try again in a moment.",
     "channelConnectErrorAppCredentialsMissing": "Can't start connecting — no app credentials are registered. Please register them in \"App credentials\" below.",
     "channelConnectErrorAppCredentialsMissingMember": "Can't start connecting — no app credentials are registered. Please ask an organization owner to register them.",

@@ -116,4 +116,27 @@ describe('GET /api/oauth-channel/authorize (story #3376)', () => {
     expect(h.cookiesSetMock).not.toHaveBeenCalled();
     expect(res.headers.get('location')).toContain('connect_error=CHANNEL_APP_CREDENTIALS_MISSING');
   });
+
+  // story #3672(2026-09-07, 3663 실사고, AC4) — BE unhandled_exception_handler가
+  // error.error_id를 실어 주면 그대로 쿼리에 릴레이한다.
+  it('BE 500이 error.error_id를 실으면 connect_error 뒤에 error_id를 그대로 붙인다', async () => {
+    h.cookiesGetMock.mockReturnValue({ value: 'sp-at-token' });
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ data: null, error: { code: 'INTERNAL_ERROR', error_id: '11111111-2222-3333-4444-555555555555' } }),
+    });
+    const res = await GET(makeRequest({ org: 'org-1', channel: 'threads' }));
+    const location = res.headers.get('location') ?? '';
+    expect(location).toContain('connect_error=INTERNAL_ERROR');
+    expect(location).toContain('error_id=11111111-2222-3333-4444-555555555555');
+  });
+
+  it('BE 오류에 error_id가 없으면(기존 4xx류) 지금과 동일 — error_id 쿼리 자체가 없다', async () => {
+    h.cookiesGetMock.mockReturnValue({ value: 'sp-at-token' });
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ data: null, error: { code: 'CHANNEL_APP_CREDENTIALS_MISSING' } }) });
+    const res = await GET(makeRequest({ org: 'org-1', channel: 'threads' }));
+    const location = res.headers.get('location') ?? '';
+    expect(location).toContain('connect_error=CHANNEL_APP_CREDENTIALS_MISSING');
+    expect(location).not.toContain('error_id=');
+  });
 });

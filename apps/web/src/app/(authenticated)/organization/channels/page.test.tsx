@@ -308,6 +308,26 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(container.textContent).toContain(koMessages.channelConnect.channelConnectErrorGeneric);
   });
 
+  // story #3672(2026-09-07, 3663 실사고, AC5) — BFF가 릴레이한 error_id가 있으면
+  // Alert 안에 「오류 번호: …」 한 줄이 덧붙는다(복사 가능한 일반 텍스트).
+  it('?connect_error=에 error_id가 실려 있으면 「오류 번호」 줄이 덧붙는다', async () => {
+    useSearchParamsMock.mockReturnValue(
+      new URLSearchParams('connect_error=INTERNAL_ERROR&error_id=11111111-2222-3333-4444-555555555555'),
+    );
+    stubFetch({ connections: [] });
+    await mount('owner');
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectErrorId.replace('{errorId}', '11111111-2222-3333-4444-555555555555'),
+    );
+  });
+
+  it('?connect_error=에 error_id가 없으면(기존 4xx류) 「오류 번호」 줄 자체가 안 뜬다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=CHANNEL_APP_CREDENTIALS_MISSING'));
+    stubFetch({ connections: [] });
+    await mount('owner');
+    expect(container.textContent).not.toContain('오류 번호');
+  });
+
   it('⭐story #3409 — CHANNEL_APP_CREDENTIALS_MISSING을 member가 보면 owner에게 요청하라는 별도 키가 뜬다(owner용 화면 안 문구는 안 뜸)', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=CHANNEL_APP_CREDENTIALS_MISSING'));
     stubFetch({ connections: [] });
