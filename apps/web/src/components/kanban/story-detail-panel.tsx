@@ -1340,6 +1340,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <div className="space-y-2">
                 <input
                   ref={titleInputRef}
+                  data-testid="story-title-input"
                   type="text"
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
@@ -1634,6 +1635,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       <EntityAwareTextarea>로 바꾸고 projectId만 넘기면 `#` 피커가 붙는다.
                       참조 코어(chat-input-entity-tokens.ts/use-entity-picker.ts) diff 0. */}
                   <EntityAwareTextarea
+                    data-testid="story-description-input"
                     value={descriptionDraft}
                     onChange={setDescriptionDraft}
                     onPaste={handlePasteAttach}
