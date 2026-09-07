@@ -139,6 +139,66 @@ async def test_facebook_sandbox_list_pages_marker_branches():
     assert default_two[1]["name"] == "Sandbox Page 2"
 
 
+# ─── facebook_sandbox_oauth.py — story #3613(결함 2: 브라우저가 실제로 authorize
+# URL을 방문했을 때 콜백에 닿는 경로가 없었다) ────────────────────────────────
+
+
+def test_facebook_sandbox_build_authorize_url_redirects_straight_back_to_its_own_callback():
+    """story #3613 — 원판은 `https://sandbox.local/...`(실존 안 함)을 냈다. 이제
+    `redirect_uri`(=그 채널의 콜백 URL 그 자체)로 가짜 code+real state를 실어 곧장
+    돌아간다 — 브라우저가 이 URL을 실제로 따라가면 곧바로 콜백 라우트에 닿는다
+    (real Meta 없이도 같은 코드 경로, 새 엔드포인트 0)."""
+    from app.services.facebook_sandbox_oauth import build_authorize_url
+    from urllib.parse import urlparse, parse_qs
+
+    redirect_uri = "https://dev-app.sprintable.ai/api/oauth-channel/callback/facebook_sandbox"
+    url = build_authorize_url(redirect_uri=redirect_uri, state="signed-state-abc", app_id="app-id")
+
+    parsed = urlparse(url)
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == redirect_uri, (
+        "브라우저가 authorize URL을 그대로 따라가면 이 채널의 콜백 라우트 자신에게 도착해야 한다"
+    )
+    qs = parse_qs(parsed.query)
+    assert qs["state"] == ["signed-state-abc"], "state는 반드시 실물(BE가 서명 검증한다) — 지어내면 안 됨"
+    assert qs["code"][0], "code는 exchange 단계에서 검증 없이 소비되므로 값 자체는 임의(비어있지만 않으면 됨)"
+
+
+@pytest.mark.anyio
+async def test_facebook_sandbox_authorize_url_is_navigable_back_into_the_real_callback_endpoint():
+    """story #3613 — 결함 2의 종단 재현: authorize가 낸 url을 «파싱해서 code/state를
+    꺼내» 실제 callback 엔드포인트에 그대로 태우면(브라우저가 그 URL을 따라갔을 때
+    벌어질 일 그대로) 연결이 정상적으로 만들어진다 — 원판(`sandbox.local`)이었다면
+    이 url 자체에서 code/state를 뽑아낼 수조차 없었다(도메인만 있고 쿼리에 code가
+    아예 없었다)."""
+    from app.main import app
+    from urllib.parse import urlparse, parse_qs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+            await _register_facebook_sandbox_app_credentials(s, org_id=org_id, updated_by=owner_id, app_id="app:pages-1")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+
+        async with _client_for(app) as client:
+            r_auth = await client.post(f"/api/v2/organizations/{org_id}/channel-connections/facebook_sandbox/authorize")
+            assert r_auth.status_code == 200, r_auth.text
+            authorize_url = r_auth.json()["url"]
+
+            parsed = urlparse(authorize_url)
+            qs = parse_qs(parsed.query)
+            code, state = qs["code"][0], qs["state"][0]
+
+            r_cb = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/facebook_sandbox/callback",
+                json={"code": code, "state": state},
+            )
+            assert r_cb.status_code == 200, r_cb.text
+    finally:
+        await engine.dispose()
+
+
 # ─── 콜백 3갈래(0/1/2+) — 실 authorize→callback 라우터 코드, HTTP 왕복 ────────
 
 

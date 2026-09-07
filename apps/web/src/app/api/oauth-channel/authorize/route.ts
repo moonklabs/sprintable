@@ -38,8 +38,17 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/organization/channels?connect_error=${errCode}`);
   }
 
-  const json = await res.json() as { data?: { url?: string } };
-  const url = json.data?.url;
+  // story #3613(BE 그라운딩·페드루 PO 確定 2026-09-07) — BE `authorize_channel_
+  // connection`(channel_connections.py:403)은 `response_model=AuthorizeResponse`로
+  // 성공 응답을 맨몸(`{url,state}`)으로 낸다 — backend/app에 성공 응답 전역 봉투가
+  // 없어(에러만 http_exception_handler가 `{error:{code,message}}`로 감싼다) 이
+  // 원시 fetch 라우트가 성공 시 `json.data?.url`을 읽으면 항상 undefined였다(이
+  // 파일 생성 시점부터 한 번도 성립한 적 없던 형 — #3907 squash 유일 커밋).
+  // «형은 한 곳에서만 정의» 원칙: 이 라우트는 BE를 직접 부르므로 BE의 실제 성공
+  // 형(맨몸)을 그대로 읽는다(sibling proxy 라우트는 apiSuccess로 다시 감싸므로
+  // 그쪽만 `.data.url`이 맞다 — 두 라우트가 각자의 실제 소스 형을 따른다).
+  const json = await res.json() as { url?: string };
+  const url = json.url;
   if (!url) {
     return NextResponse.redirect(`${origin}/organization/channels?connect_error=CHANNEL_AUTHORIZE_FAILED`);
   }
