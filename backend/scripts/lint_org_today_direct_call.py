@@ -5,7 +5,7 @@
 걸 막는 가드. 정답은 항상 `app.services.org_time`의 헬퍼(org_today·to_org_date·
 org_midnight_utc·org_date_sql)를 org_id/org_timezone과 함께 쓰는 것.
 
-⛔이 lint가 잡는 패턴 4종(backend/app/ 전수, `.py` 파일):
+⛔이 lint가 잡는 패턴 5종(backend/app/ 전수, `.py` 파일):
   ① `date.today()`(datetime.date의 today — 프로세스 로컬 TZ, 3665 원 결함)
   ② `utcnow().date()`(datetime.utcnow() 자체가 이미 폐기 예정 API인데다 여전히
      "조직의 오늘"을 무시)
@@ -14,13 +14,19 @@ org_midnight_utc·org_date_sql)를 org_id/org_timezone과 함께 쓰는 것.
      2026-09-07, pageview_counter.py 실물이 이 형이었다: 함수 파라미터로 받은
      `now: datetime`을 그대로 `.date()`해 org tz를 건너뛰었다. ①~③은 "그 자리에서
      즉시 계산"만 잡고 "먼저 변수에 담아 나중에 .date()"는 못 봤던 사각.
+  ⑤ `today.date()`(④와 동형 사각, 식별자 이름만 `today` — CHANGES 페드루 PO
+     2026-09-07, org_subscription_checkout.py 실물: 함수 파라미터 `today: datetime`
+     을 그대로 `.date()`).
 
 ⛔이 lint가 «못 잡는» 것: 동적으로 조립된 표현(변수 재할당 뒤 다단계 호출), 이
-리터럴 텍스트 패턴이 한 줄 안에 정확히 이어지지 않는 형태, `now` 아닌 다른
-이름으로 담은 변수(④는 식별자 이름이 정확히 `now`일 때만 잡는다 — `order.created_
-at.date()`류(스토리에 저장된 과거 시각의 날짜 부분을 비교/키잉에 쓰는 것, "오늘"
-계산이 아님)까지 넓히면 오탐이 폭증한다, billing_scheduler.py의 `order.created_at.
-date()`·`period_end.date()` 등이 그 예). 오탐 방지 우선(다른 lint_*.py와 동일 원칙).
+리터럴 텍스트 패턴이 한 줄 안에 정확히 이어지지 않는 형태, `now`/`today` 아닌
+다른 이름으로 담은 변수(④⑤는 식별자 이름이 정확히 그 둘일 때만 잡는다 —
+`order.created_at.date()`류(저장된 과거 시각의 날짜 부분을 비교/키잉에 쓰는 것,
+"오늘" 계산이 아님)까지 넓히면 오탐이 폭증한다, billing_scheduler.py의 `order.
+created_at.date()`·`period_end.date()` 등이 그 예). 새 변수 이름이 나올 때마다
+패턴을 추가하는 대신 AST 기반 재작성도 고려할 수 있으나, 지금까지 발견된 자리가
+전부 `now`/`today` 두 관례적 이름에 수렴해 텍스트 패턴으로 충분(오탐 방지 우선,
+다른 lint_*.py와 동일 원칙).
 
 허용 목록은 **파일 + 그 줄의 strip()된 내용 완전 일치**로 키를 잡는다(줄번호 X —
 story #3609/#3611의 처방과 동형: 무관한 줄이 위에 추가돼 줄번호만 밀려도 안 깨진다).
@@ -39,6 +45,7 @@ _PATTERNS = [
     re.compile(r"\butcnow\(\)\.date\(\)"),
     re.compile(r"\bnow\(timezone\.utc\)\.date\(\)"),
     re.compile(r"\bnow\.date\(\)"),  # ④ — 변수 now(파라미터·지역변수)의 .date().
+    re.compile(r"\btoday\.date\(\)"),  # ⑤ — 변수 today(파라미터·지역변수)의 .date().
 ]
 
 
@@ -71,6 +78,16 @@ ALLOWLIST: list[AllowlistEntry] = [
         file="app/services/billing_scheduler.py",
         line_content="grace_anchor = order.created_at.date() if order is not None else now.date()",
         reason="order 없는 극단 실패 폴백 앵커 — dunning 내부 잡·UTC 의도(order.created_at.date()와 같은 축)",
+        added_by="story #3674 CHANGES(페드루 PO)",
+    ),
+    # story #3674 CHANGES 2회차(페드루 PO, 2026-09-07) — checkout idempotency 키의
+    # 날짜 축. 결제 내부 결정적 키(같은 org+offering+"같은 날"에 여러 번 요청해도
+    # 같은 order_id로 수렴)라 org의 "표시" 시간대와 무관하게 UTC로 결정적이어야
+    # 한다 — billing_scheduler.py의 dunning 케이던스와 동일 축.
+    AllowlistEntry(
+        file="app/services/org_subscription_checkout.py",
+        line_content='return f"checkout:{org_id}:{offering_version_id}:{today.date().isoformat()}"',
+        reason="checkout idempotency 키 날짜 축 — 결제 내부 키·UTC 의도",
         added_by="story #3674 CHANGES(페드루 PO)",
     ),
 ]

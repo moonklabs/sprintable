@@ -52,6 +52,16 @@ def test_flags_bare_now_variable_date(tmp_path):
     assert "now.date()" in violations[0]
 
 
+def test_flags_bare_today_variable_date(tmp_path):
+    """⑤ CHANGES(페드루 PO, 2회차) — org_subscription_checkout.py 실물: 파라미터
+    `today: datetime`을 그대로 .date()해 org tz를 건너뛴다. ④와 동형 사각, 식별자
+    이름만 다르다."""
+    p = _write(tmp_path, "site_g.py", "key = f\"{today.date().isoformat()}\"\n")
+    violations = find_violations(p, label="site_g.py")
+    assert len(violations) == 1
+    assert "today.date()" in violations[0]
+
+
 # ─── ⭐음성대조 — org_time.py 헬퍼로 고친 뒤엔 오탐 없음 ───────────────────
 
 def test_org_today_helper_call_not_flagged(tmp_path):
