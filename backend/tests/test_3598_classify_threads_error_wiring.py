@@ -13,6 +13,7 @@ import uuid
 import httpx
 
 from app.services.channel_posts import (
+    ChannelConnectionAuthError,
     ChannelConnectionRevokedError,
     ChannelPublishProviderError,
     ChannelTokenExpiredError,
@@ -57,14 +58,17 @@ def test_revoked_error_is_still_a_channel_token_expired_error_so_old_except_clau
     assert isinstance(mapped, ChannelTokenExpiredError)
 
 
-def test_unknown_subcode_under_oauth_exception_falls_through_to_existing_401_heuristic():
-    """code==190/OAuthException인데 subcode가 미지(AC6 이전 — error 버킷은 아직 이
-    분기에서 직접 처리 안 함, 다음 커밋 몫) → 기존 401 휴리스틱으로 폴스루해
-    CHANNEL_TOKEN_EXPIRED(회귀 0, 미분류 revoked/error로 잘못 새지 않는다)."""
+def test_unknown_subcode_under_oauth_exception_classifies_as_auth_error():
+    """story #3605 CHANGES-4(페드루 PO 채택 2026-09-07) — 계약 변경: code==190/
+    OAuthException인데 subcode가 미지면 이제 fail-closed로 CHANNEL_CONNECTION_
+    AUTH_ERROR(사유 불명이지만 인증 계열은 확실 — AC6 원칙 그대로). 옛 계약(이
+    경우를 401 휴리스틱으로 폴스루시켜 CHANNEL_TOKEN_EXPIRED로 뭉뚱그림)은 3605가
+    도입한 code-only family 판정과 맞물려 더는 사실이 아니다 — «미지 subcode»와
+    «순수 401(Graph envelope 없음)»은 이제 서로 다른 낱말이어야 한다."""
     exc = _exc(status_code=401, provider_error_code=190, provider_error_subcode=999, provider_error_type="OAuthException")
     error_code, mapped = _classify_threads_error(exc, connection_id=_CONN_ID)
-    assert error_code == "CHANNEL_TOKEN_EXPIRED"
-    assert type(mapped) is ChannelTokenExpiredError
+    assert error_code == "CHANNEL_CONNECTION_AUTH_ERROR"
+    assert type(mapped) is ChannelConnectionAuthError
 
 
 def test_non_oauth_5xx_error_is_unchanged_provider_error():
