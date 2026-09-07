@@ -635,6 +635,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
 
             {selectedStory && (
               <StoryDetailPanel
+                key={selectedStory.id}
                 story={selectedStory}
                 tasks={storyTasks}
                 getStatusLabel={domainLabels.statusLabel}

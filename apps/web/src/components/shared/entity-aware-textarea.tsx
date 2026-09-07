@@ -22,6 +22,7 @@ interface EntityAwareTextareaProps {
    * chat-input-entity-tokens.ts의 canonical entityTypeLabel() 그대로(회귀 0). 참조 코어
    * 파일(chat-input-entity-tokens.ts) 자체는 diff 0 규율(#2264 AC3)이라 여기 소비처에서만 얹는다. */
   getEntityTypeLabel?: (canonicalSlug: string) => string | undefined;
+  'data-testid'?: string;
 }
 
 /**
@@ -30,7 +31,7 @@ interface EntityAwareTextareaProps {
  * use-entity-picker.ts, 이 파일은 그 위의 얇은 렌더 래퍼 — chat-input.tsx의 entity dropdown
  * JSX를 그대로 재사용). story description/AC(story-detail-panel.tsx)가 첫 소비자.
  */
-export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste, getEntityTypeLabel }: EntityAwareTextareaProps) {
+export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste, getEntityTypeLabel, 'data-testid': dataTestId }: EntityAwareTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const entityPicker = useEntityPicker(projectId);
 
@@ -71,6 +72,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
     <div className="relative">
       <textarea
         ref={textareaRef}
+        data-testid={dataTestId}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}

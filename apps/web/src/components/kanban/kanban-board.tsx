@@ -1803,6 +1803,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
       {selectedStory && (
         <StoryDetailPanel
+          key={selectedStory.id}
           story={selectedStory}
           tasks={storyTasks}
           memberMap={memberMap}

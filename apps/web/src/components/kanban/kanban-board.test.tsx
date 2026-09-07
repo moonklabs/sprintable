@@ -647,6 +647,44 @@ describe('KanbanBoard — 실시간(SSE) 상세 패널 동기화(#2137)', () => 
   });
 });
 
+// story #3588 — StoryDetailPanel이 selectedStory prop만 바뀌고 리마운트 안 되면(kanban-board.tsx/
+// epic-swimlane-board.tsx 둘 다 <StoryDetailPanel key 없이> 소비) editingTitle 등 로컬 state가
+// A→B 카드 전환 뒤에도 살아남는다. key={story.id}로 통짜 리마운트해 전부 초기화되는지 고정한다.
+describe('KanbanBoard — 상세 패널 story 전환 시 로컬 state 리셋(#3588)', () => {
+  async function openPanel(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('A에서 제목 편집모드 진입 후 B로 전환하면 편집모드가 자동으로 닫힌다', async () => {
+    stubFetch([
+      { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+      { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+    ]);
+    await mount();
+    await openPanel('S1');
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog()).not.toBeNull();
+
+    const titleButton = dialog().querySelector('h2')!.closest('button') as HTMLElement;
+    await act(async () => {
+      titleButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(dialog().querySelector('[data-testid="story-title-input"]')).not.toBeNull();
+
+    await openPanel('S2');
+
+    expect(dialog().querySelector('[data-testid="story-title-input"]')).toBeNull();
+    expect(dialog().textContent).toContain('S2');
+  });
+});
+
 // story #2104 — BE stories.py:1056(human-only 영구삭제 403)를 FE가 미리 안 보고 에이전트
 // 계정에도 삭제 트리거를 무조건 열었다(#2091/#2103과 같은 결함). 양방향 고정 — human까지
 // 잠그면 정당한 삭제가 봉쇄되는 더 큰 사고다(승격 위험목록의 잔여 미검증 칸 해소).
