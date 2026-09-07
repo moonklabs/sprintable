@@ -31,6 +31,8 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "ci_alembic_sibling_pr_collision_check.py",   # story #2401 — CI 전용, git+gh api만 사용(운영 DB 무접속)
     "ci_alembic_single_step_promotion_check.py",  # story #2330 — CI 전용 fresh-DB 재현
     "lint_business_info_email_footer_drift.py",   # story #3216 — CI lint 게이트(정적 텍스트 대조, 운영 DB 무접속)
+    "lint_fe_error_envelope_detail_mismatch.py",  # story #3601 — CI lint 게이트(apps/web/src
+                                                   # 재귀 정규식 정적 스캔, 운영 DB 무접속·scripts/jobs 아님).
     "lint_candidate_source_ownership.py",         # story #2363 AC6 — CI lint 게이트
     "lint_commit_before_validate.py",             # story #2459 — CI lint 게이트(AST 정적분석, 운영 DB 무접속)
     "lint_dependency_override_get_read_db.py",    # story #2451 — CI lint 게이트(tests/ override 스캔, 운영 DB 무접속)

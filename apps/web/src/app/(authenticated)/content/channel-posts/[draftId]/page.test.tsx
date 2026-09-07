@@ -3914,10 +3914,16 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(document.querySelector('[data-testid="comments-reply-error"]')?.textContent).toBe('답변 대상 댓글이 삭제되어 상신할 수 없습니다.');
   });
 
-  // story #3601(디디 전수 표 2026-09-07) — handleRetryReply(dead_letter 「다시
-  // 보내기」)도 실 봉투({error:{message}})로 서버 문구가 그대로 선다. 이전엔
-  // body?.detail?.message만 읽어 이 자리 전용 테스트가 아예 없었다(회귀 갭).
-  it('「다시 보내기」(dead_letter) 실패 — 실 봉투({error:{message}})로 서버 문구가 그대로 뜬다', async () => {
+  // story #3601(디디 전수 표 2026-09-07·페드루 PO 정정) — handleRetryReply
+  // (dead_letter 「다시 보내기」)의 실제 유일한 실패는 command_service.py::
+  // retry_dead_letter_command가 None을 반환하는 404뿐이다(command_id 불일치/이미
+  // 처리됨 둘 다 존재 비노출로 같은 404, PO 決 AC5) — 전역 핸들러가 그 plain-string
+  // detail을 `error:{code:"NOT_FOUND", message:"..."}`으로 감싼다. `NOT_FOUND`는
+  // 앱 전체 미지정 404가 공유하는 제네릭 라벨이라(다른 자리는 uuid를 담기도 함)
+  // HUMAN_SAFE_ERROR_MESSAGE_CODES에 못 올린다 — 이 code일 땐 항상 제네릭으로
+  // 떨어지는 게 맞다(이전 버전은 code 없이 message만 봐 이 실 BE 문장도 우연히
+  // 통과시켰다 — 안전 쪽으로 조인 결과지 회귀 아님).
+  it('「다시 보내기」(dead_letter) 실패 — 404(NOT_FOUND, allowlist 밖)는 제네릭 문구', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: {
@@ -3931,7 +3937,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
           },
         }],
       },
-      onCommentReplyRetry: () => ({ status: 409, body: { data: null, error: { code: 'PUBLICATION_COMMAND_NOT_RETRYABLE', message: '이미 처리된 명령입니다.' }, meta: null } }),
+      onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' }, meta: null } }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
@@ -3939,7 +3945,8 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(retryBtn).not.toBeNull();
     await act(async () => { retryBtn.click(); });
     await flush();
-    expect(document.body.textContent).toContain('이미 처리된 명령입니다.');
+    expect(document.body.textContent).toContain('요청을 처리하지 못했습니다.');
+    expect(document.body.textContent).not.toContain('재시도 대상이 아닙니다');
   });
 
   // story #3517(BE #3865 조각①) — 수동 재수집. 429/422/403 문장을 서버 응답 그대로
@@ -4025,18 +4032,28 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('사람만 다시 수집할 수 있습니다');
   });
 
-  it('재수집 502(채널 fetch 실패) — flat {code,message} shape도 그대로 보인다', async () => {
+  // story #3601(유나 Design CHANGES, 페드루 PO 정정 2026-09-07) — 이전 표본
+  // (`CHANNEL_FETCH_FAILED`)은 BE에 실재하지 않는 가상 code였고, 예전엔
+  // `?? body?.message`(우리 봉투에 없는 죽은 폴백)로 우연히 그 문구가 통과했다.
+  // 실제 502 원인(CHANNEL_PUBLISH_PROVIDER_ERROR 등)의 message는 provider raw
+  // exception repr이라 사람에게 그대로 보이면 안 된다 — allowlist에 없는 코드는
+  // 제네릭으로 떨어져야 한다(이 테스트가 그 방향을 고정).
+  it('재수집 502(CHANNEL_PUBLISH_PROVIDER_ERROR, allowlist 밖) — raw provider 메시지 대신 제네릭', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 },
-      onCommentsRefresh: () => ({ status: 502, body: { code: 'CHANNEL_FETCH_FAILED', message: '채널에서 응답을 받지 못했습니다' } }),
+      onCommentsRefresh: () => ({
+        status: 502,
+        body: { data: null, error: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: "ThreadsPublishError(status_code=502, body='<html>Bad Gateway</html>')" }, meta: null },
+      }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
-    expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('채널에서 응답을 받지 못했습니다');
+    expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe(koMessages.content.commentsRefreshErrorGeneric);
+    expect(document.body.textContent).not.toContain('ThreadsPublishError');
   });
 
   // story #3601(디디 전수 표 2026-09-07) — 실 BE 봉투({data:null,error:{...},meta:null},

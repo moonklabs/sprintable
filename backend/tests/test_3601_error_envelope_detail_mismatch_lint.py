@@ -108,7 +108,7 @@ def test_allowlist_is_pinned_to_known_safe_lines():
         "src/app/(authenticated)/organization/events/page.tsx:116",
         "src/app/(authenticated)/organization/events/page.tsx:546",
         "src/app/(authenticated)/organization/events/page.tsx:755",
-        "src/app/(authenticated)/content/channel-posts/[draftId]/page.tsx:509",
+        "src/app/(authenticated)/content/channel-posts/[draftId]/page.tsx:511",
     }
 
 

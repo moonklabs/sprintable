@@ -56,7 +56,7 @@ _ALLOWED_MATCHES: dict[str, str] = {
     "src/app/(authenticated)/organization/events/page.tsx:755": (
         "위와 동형."
     ),
-    "src/app/(authenticated)/content/channel-posts/[draftId]/page.tsx:509": (
+    "src/app/(authenticated)/content/channel-posts/[draftId]/page.tsx:511": (
         "story #3596/#3953이 만든 `.error?.message ?? .detail?.message ?? ...` — "
         ".error 1순위 확認 완료, #3601 스코프 밖(그 스토리가 이미 닫은 자리)."
     ),
