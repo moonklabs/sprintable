@@ -636,7 +636,10 @@ async def refresh_comments_now(
         from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION
 
         if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION:
-            await _promote_connection_status(db, publication_id=publication_id)
+            # story #3603(잔여, 페드루 PO 追加 2026-09-07) — error_code/message를 안 실으면
+            # 이 수동 경로만 last_error 3종이 안 채워져(3597과 같은 클래스 재발) 「서버
+            # 응답 보기」가 여기서 시작된 만료엔 비거나 옛 오류를 보인다.
+            await _promote_connection_status(db, publication_id=publication_id, error_code=exc.error_code, message=str(exc))
         schedule_row.status = "failed"
         schedule_row.error_code = exc.error_code
         await db.commit()

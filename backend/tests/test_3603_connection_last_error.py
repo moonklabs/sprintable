@@ -96,6 +96,44 @@ async def test_comment_collection_connection_failure_fills_last_error_trio(monke
 
 
 @pytest.mark.anyio
+async def test_manual_refresh_connection_failure_fills_last_error_trio(monkeypatch):
+    """story #3603(잔여, 페드루 PO 追加 2026-09-07) — 수동 「다시 수집」(refresh_comments_now,
+    #3597 잔여가 승격 자체는 이미 고침)도 last_error 3종을 채워야 한다. 승격 호출에
+    error_code/message를 안 실으면 이 경로만 last_error_code가 비어(3597과 같은
+    클래스) AC1이 스케줄 루프에서만 참이 된다."""
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_post_comments import CommentFetchError, refresh_comments_now
+    from app.services.threads_publish import ThreadsPublishError
+    import app.services.facebook_publish as facebook_publish
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="facebook")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="facebook", external_id="media-1")
+            await s.commit()
+
+            before = datetime.now(timezone.utc)
+
+            async def _raise_expired(client, *, access_token, media_id):
+                raise ThreadsPublishError("TOKEN_EXPIRED", "sandbox: 401 시뮬레이션", status_code=401)
+
+            monkeypatch.setattr(facebook_publish, "fetch_replies", _raise_expired)
+            with pytest.raises(CommentFetchError):
+                await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
+
+            refreshed = await s.get(ChannelConnection, conn.id)
+            assert refreshed.status == "expired"
+            assert refreshed.last_error is not None and "401" in refreshed.last_error
+            assert refreshed.last_error_code == "CHANNEL_TOKEN_EXPIRED"
+            assert refreshed.last_error_at is not None
+            assert refreshed.last_error_at >= before
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_insight_snapshot_connection_failure_fills_last_error_trio(monkeypatch):
     """AC1·AC2(인사이트 경로) — IG CONNECTION 실패도 동형."""
     import httpx
