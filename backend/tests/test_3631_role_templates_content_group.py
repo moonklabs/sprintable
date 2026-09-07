@@ -1,4 +1,4 @@
-"""story #3631 — migration 0349: role_templates.default_tool_groups에 "content" 부여
+"""story #3631 — migration 0350: role_templates.default_tool_groups에 "content" 부여
 (growth-hacker·performance-marketer 2종 한정, 0181_role_templates_canvas_group.py와 동형
 scoped-UPDATE 패턴 — 0246처럼 전체가 아니다).
 
@@ -19,12 +19,12 @@ pytestmark = pytest.mark.destructive_schema
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 _MIG = os.path.join(
-    os.path.dirname(__file__), "..", "alembic", "versions", "0349_role_templates_content_group.py"
+    os.path.dirname(__file__), "..", "alembic", "versions", "0350_role_templates_content_group.py"
 )
 
 
 def _load_migration():
-    spec = importlib.util.spec_from_file_location("mig0349", _MIG)
+    spec = importlib.util.spec_from_file_location("mig0350", _MIG)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
