@@ -588,7 +588,7 @@ async def post_channel_post_image_upload_url(
             },
         ) from exc
     except ChannelImageUploadFailedError as exc:
-        raise HTTPException(status_code=502, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
     return ChannelPostImageUploadUrlResponse(**result)
 
 
@@ -642,7 +642,7 @@ async def post_channel_post_video_upload_url(
             },
         ) from exc
     except ChannelVideoUploadFailedError as exc:
-        raise HTTPException(status_code=502, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
     return ChannelPostVideoUploadUrlResponse(**result)
 
 
@@ -723,7 +723,7 @@ async def post_channel_post_video_confirm(
             },
         ) from exc
     except ChannelVideoUploadFailedError as exc:
-        raise HTTPException(status_code=502, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
     except ChannelVideoRequiresSingleCoverError as exc:
         raise HTTPException(
             status_code=422, detail={"code": "CHANNEL_VIDEO_REQUIRES_SINGLE_COVER", "message": str(exc)},
@@ -832,7 +832,7 @@ async def post_channel_post_image_confirm(
             },
         ) from exc
     except ChannelImageUploadFailedError as exc:
-        raise HTTPException(status_code=502, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
     return _image_response(version, image_row)
 
 
@@ -1736,7 +1736,7 @@ async def publish_channel_post_draft_endpoint(
         )
         await db.commit()
         raise HTTPException(
-            status_code=502,
+            status_code=503,
             detail=_with_command_state({"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)}),
         ) from exc
     except ChannelPublishInProgressError as exc:
@@ -1762,7 +1762,7 @@ async def publish_channel_post_draft_endpoint(
         )
         await db.commit()
         raise HTTPException(
-            status_code=502,
+            status_code=503,
             detail=_with_command_state({
                 "code": "CHANNEL_IMAGE_CONTAINER_FAILED", "message": str(exc),
                 "container_status": exc.container_status,
@@ -2007,7 +2007,7 @@ async def unpublish_channel_post_endpoint(
         ) from exc
     except ChannelPublishProviderError as exc:
         raise HTTPException(
-            status_code=502,
+            status_code=503,
             detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)},
         ) from exc
 

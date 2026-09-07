@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 // story #3517(BE #3865 조각①, 유나 §22-10③, PO 確定 2026-09-05) — 수동 재수집.
 // 세 갈래를 구분한다(전부 뭉뚱그린 문자열 message 하나로 두면 429/422가 같은 취급을
@@ -159,8 +160,14 @@ export function CommentsRefreshButton({ onRefresh, nextAllowedAt }: CommentsRefr
             : t('commentsRefreshRateLimitedUnknown')}
         </p>
       ) : null}
+      {/* story #3632(PO 자기정정) — 화면 관례(insights-board 등과 동형)로 승격: 무늬만
+          destructive text가 아니라 실제 role=alert 배너라 스크린리더가 뜨는 즉시 읽는다.
+          문장 자체는 이미 있었다(BE 4xx user_message 폴백 체인, api-error-message.ts) —
+          이 자리의 결함은 접근성 마킹 부재였다. */}
       {genericError ? (
-        <p className="text-xs text-destructive" data-testid="comments-refresh-error">{genericError}</p>
+        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true" data-testid="comments-refresh-error">
+          <AlertDescription>{genericError}</AlertDescription>
+        </Alert>
       ) : null}
     </div>
   );

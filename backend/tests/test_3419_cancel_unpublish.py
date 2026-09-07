@@ -636,7 +636,7 @@ async def test_unpublish_twice_second_time_returns_409_not_published():
 
 
 @pytest.mark.anyio
-async def test_unpublish_provider_error_maps_to_502():
+async def test_unpublish_provider_error_maps_to_503():
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
     from app.main import app
@@ -666,7 +666,7 @@ async def test_unpublish_provider_error_maps_to_502():
         ):
             async with _client_for(app) as client:
                 r_unpub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/unpublish")
-        assert r_unpub.status_code == 502, r_unpub.text
+        assert r_unpub.status_code == 503, r_unpub.text  # story #3632 — 진짜 상류 실패는 502 대신 503(CF 통과)
         error = r_unpub.json().get("error") or r_unpub.json()
         assert error["code"] == "CHANNEL_PUBLISH_PROVIDER_ERROR"
 

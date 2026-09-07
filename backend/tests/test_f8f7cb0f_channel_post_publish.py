@@ -432,7 +432,7 @@ async def test_partial_success_retry_only_calls_publish_not_create_container():
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
                 r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-            assert r1.status_code == 502, r1.text
+            assert r1.status_code == 503, r1.text  # story #3632 — 진짜 상류 실패는 502 대신 503(CF 통과)
             assert r1.json()["error"]["code"] == "CHANNEL_PUBLISH_PROVIDER_ERROR"
 
             async with Session() as s:
@@ -498,7 +498,7 @@ async def test_container_creation_failure_upserts_same_row_not_new_one():
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
                 r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-            assert r1.status_code == 502, r1.text
+            assert r1.status_code == 503, r1.text  # story #3632 — 진짜 상류 실패는 502 대신 503(CF 통과)
 
             async with Session() as s:
                 from app.models.channel_publication import ChannelPublication

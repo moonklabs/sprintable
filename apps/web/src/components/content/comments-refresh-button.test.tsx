@@ -91,6 +91,19 @@ describe('CommentsRefreshButton', () => {
     expect(container.querySelector('[data-testid="comments-refresh-error"]')?.textContent).toBe('사람만 다시 수집할 수 있습니다');
   });
 
+  // story #3632(PO 자기정정, 2026-09-07) — 문장 자체는 이미 있었다(BE 4xx user_message
+  // 폴백 체인) — 이 자리의 결함은 접근성 마킹 부재였다. insights-board 등과 동형인
+  // role=alert 배너로 승격(화면 관례 일치).
+  it('generic 오류는 role=alert 배너(Alert variant=destructive)로 선다', async () => {
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'generic', message: '다시 수집하지 못했습니다.' });
+    await mount(<CommentsRefreshButton onRefresh={onRefresh} />);
+    const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const errorEl = container.querySelector('[data-testid="comments-refresh-error"]');
+    expect(errorEl?.getAttribute('role')).toBe('alert');
+    expect(errorEl?.textContent).toBe('다시 수집하지 못했습니다.');
+  });
+
   // story #3517 조각②-b(BE #3876, 유나 16회차 보강, PO 確定 2026-09-06) — 로드
   // 시점에 이미 nextAllowedAt이 미래면 사람이 한 번도 안 눌렀어도 비활성+사유 —
   // 429 응답을 받고서야 아는 게 아니라 로드 시점에 미리 안다. 60초 이상 남으면

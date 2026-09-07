@@ -252,9 +252,62 @@ async def refresh_publication_comments_endpoint(
             ),
         ) from exc
     except CommentFetchError as exc:
+        # story #3632(PO 실측, 2026-09-07) — Cloudflare 에지가 origin의 502/504만 자체
+        # HTML 에러 페이지로 대체한다(Enterprise 미만 플랜, Origin Error Page Pass-thru
+        # 없음) — 봉투(error.code·user_message)가 브라우저에 아예 도달하지 않아 화면이
+        # 침묵했다. 규칙: 「우리 상태」로 인한 거절(연결 비활성·발행 기록 없음·채널
+        # 미구현·필수 데이터 없음)은 CF가 그대로 통과시키는 4xx로, 「진짜 상류 실패」
+        # (채널 API가 실제로 오류/타임아웃 응답)만 503(재시도 의미 있음, CF 통과)으로 —
+        # 502는 이제 이 분기 어디에서도 내지 않는다.
         if exc.error_code == "COMMENT_PUBLICATION_NOT_FOUND":
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        raise HTTPException(status_code=502, detail={"code": exc.error_code, "message": str(exc)}) from exc
+        if exc.error_code == "CHANNEL_RATE_LIMITED":
+            # 우리 쪽 5분 쿨다운(CommentRefreshRateLimitedError, 위)과는 다른 축 —
+            # 채널(Graph API) 자체가 이 호출을 rate-limit한 경우. HTTP 의미상 429 그대로
+            # (channel_posts.py 발행 경로의 CHANNEL_RATE_LIMITED 처리와 동형).
+            raise HTTPException(
+                status_code=429,
+                detail=human_error(
+                    exc.error_code, str(exc),
+                    user_message="채널 쪽 호출이 많아 지금은 다시 수집할 수 없습니다 — 잠시 후 다시 시도해 주세요.",
+                ),
+            ) from exc
+        from app.services.publication_command import classify_failure_kind, FAILURE_KIND_TRANSIENT
+
+        if classify_failure_kind(exc.error_code) == FAILURE_KIND_TRANSIENT:
+            # CHANNEL_PUBLISH_PROVIDER_ERROR류 — 채널 API가 실제로 실패 응답을 준 경우
+            # (SSOT 분류는 publication_command.py, channel_posts.py 발행 경로와 동일
+            # 어휘 재사용 — 새 판정 로직 0).
+            raise HTTPException(
+                status_code=503,
+                detail=human_error(
+                    exc.error_code, str(exc),
+                    user_message="채널에서 일시적인 오류가 발생해 다시 수집하지 못했습니다 — 잠시 후 다시 시도해 주세요.",
+                ),
+            ) from exc
+        # 그 외(CHANNEL_CONNECTION_NOT_ACTIVE·CHANNEL_TOKEN_EXPIRED·CHANNEL_CONNECTION_
+        # REVOKED·CHANNEL_CONNECTION_AUTH_ERROR·COMMENT_CHANNEL_NOT_IMPLEMENTED·
+        # COMMENT_EXTERNAL_ID_MISSING) — 전부 "우리 상태"(연결·설정·데이터) 문제라 409.
+        # CHANNEL_TOKEN_EXPIRED/REVOKED/AUTH_ERROR는 channel_posts.py 발행 경로가 이미
+        # 409로 내는 것과 동형(다른 메커니즘은 다른 낱말이되 같은 축은 같은 코드).
+        # story #3615(페드루 PO 정정 2026-09-07) — CHANNEL_CONNECTION_NOT_ACTIVE 등은
+        # `str(exc)`에 connection_id/publication_id uuid가 그대로 담겨(HUMAN_SAFE_ERROR_
+        # MESSAGE_CODES allowlist 등재 금지 사유) FE가 그 원문을 보일 수 없다 — 여기서
+        # human_error()로 안전한 손글 문장을 직접 채운다(그 자리 raise 20곳+ 전수 확認
+        # 대신, 이 엔드포인트가 새로 내는 자리만 사람 문장 보장 — 기존 다른 raise 자리는
+        # 이 스토리 범위 밖).
+        _CONNECTION_STATE_MESSAGES = {
+            "CHANNEL_CONNECTION_NOT_ACTIVE": "연결이 활성 상태가 아니라 댓글을 대조/수집할 수 없습니다 — 연결 화면에서 확인해 주세요.",
+            "CHANNEL_TOKEN_EXPIRED": "채널 연결이 만료되어 댓글을 수집할 수 없습니다 — 연결 화면에서 다시 연결해 주세요.",
+            "CHANNEL_CONNECTION_REVOKED": "채널 연결이 해지되어 댓글을 수집할 수 없습니다 — 연결 화면에서 다시 연결해 주세요.",
+            "CHANNEL_CONNECTION_AUTH_ERROR": "채널 인증에 문제가 있어 댓글을 수집할 수 없습니다 — 연결 화면에서 확인해 주세요.",
+        }
+        user_message = _CONNECTION_STATE_MESSAGES.get(
+            exc.error_code, "지금은 댓글을 다시 수집할 수 없습니다 — 잠시 후 다시 시도해 주세요.",
+        )
+        raise HTTPException(
+            status_code=409, detail=human_error(exc.error_code, str(exc), user_message=user_message),
+        ) from exc
 
     return CommentRefreshResponse(
         fetched=result["fetched"], deleted=result["deleted"], captured_at=result["captured_at"].isoformat(),

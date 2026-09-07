@@ -719,6 +719,82 @@ async def test_api_refresh_allows_human_and_returns_counts(monkeypatch):
         await engine.dispose()
 
 
+# ─── story #3632(PO 실측, 2026-09-07) — Cloudflare가 502/504만 HTML로 가로챈다.
+# 「우리 상태」거절은 4xx로·「진짜 상류 실패」는 503으로 갈라야 CF를 통과한다 ──────
+
+@pytest.mark.anyio
+async def test_api_refresh_connection_not_active_returns_409_not_502():
+    """PO 실측 그대로 재현 — 연결이 만료(expired)된 채 「다시 수집」을 누르면(선검사
+    실패, 상류 호출 자체가 안 감) 이전엔 502였다. CF가 그 502를 HTML로 대체해
+    화면이 침묵했다 — 409(CF 통과)로 정정."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            # sandbox는 access_token="sandbox" 고정이라 연결 상태 선검사 자체를 안 거친다
+            # (channel_post_comments.py::fetch_replies 분기) — 실 채널(facebook)로
+            # 그 분기를 타게 한다(test_3612와 동형 세팅).
+            conn = await _seed_channel_connection(s, org_id, channel="facebook", status="expired")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="facebook", external_id="media-1")
+            human_id = await _seed_human(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        try:
+            async with _client_for(app) as client:
+                resp = await client.post(f"/api/v2/organizations/{org_id}/publications/{pub.id}/comments/refresh")
+        finally:
+            app.dependency_overrides.clear()
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "CHANNEL_CONNECTION_NOT_ACTIVE"
+        # story #3615/AC4(2026-09-07 PO 정정) — CHANNEL_CONNECTION_NOT_ACTIVE는 raise
+        # 자리 다수가 uuid를 그대로 담아(api-error-message.ts allowlist 등재 금지 사유)
+        # FE가 원문 message를 못 보인다 — 이 엔드포인트는 human_error()로 안전한 손글
+        # 문장을 직접 채운다. uuid가 안 섞였는지 직접 확認(connection.id 문자열 부재).
+        assert body["error"]["user_message"] == "연결이 활성 상태가 아니라 댓글을 대조/수집할 수 없습니다 — 연결 화면에서 확인해 주세요."
+        assert str(conn.id) not in body["error"]["user_message"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_api_refresh_provider_error_returns_503_not_502(monkeypatch):
+    """진짜 상류 실패(채널 API가 실제로 실패 응답) — 이건 CF를 통과시켜야 하는 503으로
+    분류된다(publication_command.py의 FAILURE_KIND_TRANSIENT SSOT 재사용, 새 판정
+    로직 0)."""
+    from app.main import app
+    import app.services.sandbox_publish as sandbox_publish
+    from app.services.threads_publish import ThreadsPublishError
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+            human_id = await _seed_human(s, org_id)
+
+        async def _fetch_fails(client, *, access_token, media_id):
+            raise ThreadsPublishError("PROVIDER_DOWN", "provider down", status_code=500)
+
+        monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch_fails)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        try:
+            async with _client_for(app) as client:
+                resp = await client.post(f"/api/v2/organizations/{org_id}/publications/{pub.id}/comments/refresh")
+        finally:
+            app.dependency_overrides.clear()
+        assert resp.status_code == 503, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "CHANNEL_PUBLISH_PROVIDER_ERROR"
+        assert body["error"]["user_message"] == "채널에서 일시적인 오류가 발생해 다시 수집하지 못했습니다 — 잠시 후 다시 시도해 주세요."
+    finally:
+        await engine.dispose()
+
+
 # ─── insights_board.py::comments_count 배선 ──────────────────────────────────
 
 
