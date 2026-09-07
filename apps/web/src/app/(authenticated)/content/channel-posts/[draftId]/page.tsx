@@ -474,18 +474,26 @@ export default function ChannelPostEditPage() {
       });
       const body = await res.json().catch(() => null) as {
         data?: ReplyView;
-        detail?: { message?: string; existing_reply_id?: string };
+        // story #3596(페드루 PO 追加 2026-09-07, 그라운딩 실측) — 이 프록시는
+        // BE 전역 HTTPException 핸들러(app/main.py http_exception_handler)의
+        // {data:null,error:{...},meta:null} 봉투를 그대로 통과시킨다(proxyToFastapi
+        // 주석 "Errors already enveloped by the BE global handler" — detail 키는
+        // 존재한 적이 없다, 이 파일 다른 자리의 body?.detail 패턴은 그 봉투와
+        // 안 맞아 늘 폴백 메시지로 떨어지는 별개 결함 — 이 스토리 스코프 밖,
+        // 발견만 남긴다).
+        error?: { message?: string; existing_reply_id?: string };
+        detail?: { message?: string };
         message?: string;
       } | null;
       if (!res.ok || !body?.data) {
-        // story #3596(페드루 PO 追加 2026-09-07) — 409(COMMENT_REPLY_DRAFT_ALREADY_OPEN)면
-        // BE가 existing_reply_id를 같이 준다(레이스: 이 다이얼로그를 열어 두고
-        // 있던 사이 다른 세션이 먼저 초안을 만든 경우). 재시도로 우회하지 않고
-        // 그 초안 id를 그대로 넘겨 다이얼로그가 이어가게 한다.
+        // 409(COMMENT_REPLY_DRAFT_ALREADY_OPEN)면 BE가 existing_reply_id를 같이
+        // 준다(레이스: 이 다이얼로그를 열어 두고 있던 사이 다른 세션이 먼저 초안을
+        // 만든 경우). 재시도로 우회하지 않고 그 초안 id를 그대로 넘겨 다이얼로그가
+        // 이어가게 한다.
         return {
           ok: false,
-          errorMessage: body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric'),
-          existingReplyId: body?.detail?.existing_reply_id,
+          errorMessage: body?.error?.message ?? body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric'),
+          existingReplyId: body?.error?.existing_reply_id,
         };
       }
       return { ok: true, reply: body.data };
@@ -547,21 +555,21 @@ export default function ChannelPostEditPage() {
   // 단건 GET이 실패했다」인지를 이 플래그로 가른다(둘 다 undefined라 그 필드
   // 하나로는 못 가른다).
   const [replyPrefillFetchFailed, setReplyPrefillFetchFailed] = useState(false);
-  // story #3596(Phase2·FE, 페드루 PO 確定 2026-09-06, AC2·AC7·AC11) — 「이어서
-  // 답변」이 여는 자리. comment.openReplyDraft{id,text}는 이미 목록 GET이 실어
-  // 준 값(추가 왕복 0) — 그 초안 id로 상신까지 곧장 간다(create를 다시 안 부른다,
-  // create_comment_reply_draft가 409로 막는 이유와 같은 축). 단건 GET(AC11이
-  // 허용한 재사용)은 create가 나중에 레이스로 409를 내는 자리에서만 쓴다
-  // (handleFetchReplyText·onFetchReplyText 참고).
+  // story #3596(Phase2·FE, 페드루 PO 確定 2026-09-06→2026-09-07 수정, AC2·AC7·AC11) —
+  // 「이어서 답변」이 여는 자리. comment.openReplyDraft.id로 상신까지 곧장
+  // 간다(create를 다시 안 부른다 — create_comment_reply_draft가 409로 막는
+  // 이유와 같은 축). 원문은 목록 GET 스냅샷(open_reply_draft.text)을 그대로
+  // 안 쓴다(유나 지적·PO 決 2026-09-07) — 그 스냅샷은 버튼 갈래 판정에만
+  // 쓰고, 열 때마다 단건 GET 1회로 다시 확인한다: 다른 탭·에이전트가 그 사이
+  // 초안을 고쳤을 수 있고, 옛 텍스트를 그대로 상신하면 새 편집을 덮어쓴다
+  // (409 가드는 "초안이 둘 생기는 것"만 막지 "옛 것으로 덮어쓰는 것"은 못
+  // 막는다). 실패하면 commentsReplyDraftPrefillFetchFailed로 안전 폴백해도
+  // 상신 자체는 그대로 간다(서버가 이미 갖고 있는 초안을 상신할 뿐이라 로컬
+  // 표시 실패가 그 능력을 막지 않는다).
   const [continuingReplyDraft, setContinuingReplyDraft] = useState<{ id: string; text: string } | null>(null);
-  const handleOpenReply = useCallback((comment: CommentItem) => {
-    setReplyPrefillText(undefined);
-    setReplyPrefillFetchFailed(false);
-    setContinuingReplyDraft(comment.openReplyDraft ? { id: comment.openReplyDraft.id, text: comment.openReplyDraft.text } : null);
-    setReplyComment(comment);
-  }, []);
+  const [continuingReplyDraftPrefillFetchFailed, setContinuingReplyDraftPrefillFetchFailed] = useState(false);
   // story #3544 조각⑧ 원문·story #3596(AC11) 재사용 — 단건 GET .../replies/{replyId}
-  // 하나로 두 자리(voided 「다시 상신」·이 아래 409 레이스 복구)를 같이 쓴다.
+  // 하나로 세 자리(voided 「다시 상신」·이어서 답변 직행·409 레이스 복구)를 같이 쓴다.
   const handleFetchReplyText = useCallback(async (commentId: string, replyId: string): Promise<string | undefined> => {
     if (!orgId) return undefined;
     try {
@@ -572,6 +580,20 @@ export default function ChannelPostEditPage() {
       return undefined;
     }
   }, [orgId]);
+  const handleOpenReply = useCallback(async (comment: CommentItem) => {
+    setReplyPrefillText(undefined);
+    setReplyPrefillFetchFailed(false);
+    if (comment.openReplyDraft) {
+      const draftId = comment.openReplyDraft.id;
+      const fresh = await handleFetchReplyText(comment.id, draftId);
+      setContinuingReplyDraft({ id: draftId, text: fresh ?? '' });
+      setContinuingReplyDraftPrefillFetchFailed(fresh === undefined);
+    } else {
+      setContinuingReplyDraft(null);
+      setContinuingReplyDraftPrefillFetchFailed(false);
+    }
+    setReplyComment(comment);
+  }, [handleFetchReplyText]);
   const handleResubmitReply = useCallback(async (comment: CommentItem) => {
     const prefill = comment.replyId ? await handleFetchReplyText(comment.id, comment.replyId) : undefined;
     // comment.replyId===null이면(있을 수 없는 자리지만) 원래 로직대로 실패로 친다
@@ -579,6 +601,7 @@ export default function ChannelPostEditPage() {
     setReplyPrefillText(prefill);
     setReplyPrefillFetchFailed(prefill === undefined);
     setContinuingReplyDraft(null);
+    setContinuingReplyDraftPrefillFetchFailed(false);
     setReplyComment(comment);
   }, [handleFetchReplyText]);
   const [versions, setVersions] = useState<ChannelPostVersion[]>([]);
@@ -2550,13 +2573,14 @@ export default function ChannelPostEditPage() {
           comment={replyComment}
           onClose={() => {
             setReplyComment(null); setReplyPrefillText(undefined); setReplyPrefillFetchFailed(false);
-            setContinuingReplyDraft(null);
+            setContinuingReplyDraft(null); setContinuingReplyDraftPrefillFetchFailed(false);
           }}
           onCreateDraft={handleCreateReplyDraft}
           onSubmit={handleSubmitReply}
           initialText={replyPrefillText}
           prefillFetchFailed={replyPrefillFetchFailed}
           initialDraft={continuingReplyDraft ?? undefined}
+          draftPrefillFetchFailed={continuingReplyDraftPrefillFetchFailed}
           onFetchReplyText={(replyId) => handleFetchReplyText(replyComment.id, replyId)}
         />
       ) : null}

@@ -145,4 +145,73 @@ describe('CommentReplyDialog', () => {
     await act(async () => { (document.querySelector('[data-testid="comments-reply-submit-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     expect(document.querySelector('[data-testid="comments-reply-error"]')?.textContent).toBe('답변 대상 댓글이 삭제되어 상신할 수 없습니다.');
   });
+
+  // story #3596(AC2·AC7·AC11) — 「이어서 답변」이 여는 자리. 목록 GET이 이미
+  // 실어 준 initialDraft{id,text}로 create 단계를 완전히 건너뛴다(같은 댓글에
+  // 새 초안을 만들면 서버가 409를 낸다 — onCreateDraft 자체를 부를 필요가
+  // 없다). 뮤테이션 대상③(채움 제거 — initialDraft를 안 쓰면 이 테스트가
+  // 빈 create 폼을 보게 돼 RED).
+  it('initialDraft가 있으면 create 단계 없이 곧장 draft 뷰가 채워져 뜬다', async () => {
+    const onCreateDraft = vi.fn<() => Promise<CommentReplyOutcome>>();
+    const onSubmit = vi.fn<() => Promise<CommentReplyOutcome>>().mockResolvedValue({ ok: true, reply: { ...DRAFT_REPLY, status: 'pending', target_comment_state: 'current' } });
+    await act(async () => {
+      root.render(wrap(
+        <CommentReplyDialog
+          comment={COMMENT} onClose={vi.fn()} onCreateDraft={onCreateDraft} onSubmit={onSubmit}
+          initialDraft={{ id: 'r-existing', text: '작성하던 답변' }}
+        />,
+      ));
+    });
+    // create 폼(텍스트 입력·임시저장 버튼) 자체가 없다 — 곧장 상신 버튼.
+    expect(document.querySelector('#comments-reply-text')).toBeNull();
+    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')).toBeNull();
+    expect(document.body.textContent).toContain('작성하던 답변');
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-submit-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    expect(onCreateDraft).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith('r-existing');
+  });
+
+  // story #3596(페드루 PO 追加 2026-09-07) — 레이스: 목록은 초안이 없다고 봤지만
+  // (일반 「답변」로 빈 create 폼을 연 채) 다른 세션이 먼저 초안을 만들어 create가
+  // 409+existingReplyId로 막힌다. 재시도로 우회하지 않고 그 초안 원문을 단건
+  // GET(AC11 재사용)으로 채워 이어간다 — 뮤테이션 대상②(409 갈래 제거 — RED).
+  it('create가 409+existingReplyId를 돌려주면 그 초안 원문을 단건 GET으로 채워 이어간다', async () => {
+    const onCreateDraft = vi.fn<() => Promise<CommentReplyOutcome>>().mockResolvedValue({
+      ok: false, errorMessage: '안 보낸 초안이 이미 있습니다.', existingReplyId: 'r-race',
+    });
+    const onFetchReplyText = vi.fn<(replyId: string) => Promise<string | undefined>>().mockResolvedValue('레이스로 먼저 생긴 초안');
+    await act(async () => {
+      root.render(wrap(
+        <CommentReplyDialog comment={COMMENT} onClose={vi.fn()} onCreateDraft={onCreateDraft} onSubmit={vi.fn()} onFetchReplyText={onFetchReplyText} />,
+      ));
+    });
+    await act(async () => { setValue(document.querySelector('#comments-reply-text') as HTMLTextAreaElement, '내가 막 쓰던 것'); });
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    expect(onFetchReplyText).toHaveBeenCalledWith('r-race');
+    // 409 자체는 에러 배너가 아니라 draft 뷰 전환으로 흡수된다 — 에러 문구 없음.
+    expect(document.querySelector('[data-testid="comments-reply-error"]')).toBeNull();
+    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')).toBeNull();
+    expect(document.body.textContent).toContain('레이스로 먼저 생긴 초안');
+    expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
+  });
+
+  // 위 레이스 복구의 단건 GET 자체가 실패하면(신규 문구, voided 「다시 상신」과
+  // 재사용 0) commentsReplyDraftPrefillFetchFailed로 안전 폴백한다 — 원문을
+  // 못 보여줘도 상신은 그대로 가능(서버가 이미 갖고 있는 그 초안을 상신할
+  // 뿐이라 로컬 표시 실패가 그 능력 자체를 막지 않는다).
+  it('레이스 복구의 단건 GET이 실패하면 commentsReplyDraftPrefillFetchFailed로 폴백한다', async () => {
+    const onCreateDraft = vi.fn<() => Promise<CommentReplyOutcome>>().mockResolvedValue({
+      ok: false, errorMessage: '안 보낸 초안이 이미 있습니다.', existingReplyId: 'r-race',
+    });
+    const onFetchReplyText = vi.fn<(replyId: string) => Promise<string | undefined>>().mockResolvedValue(undefined);
+    await act(async () => {
+      root.render(wrap(
+        <CommentReplyDialog comment={COMMENT} onClose={vi.fn()} onCreateDraft={onCreateDraft} onSubmit={vi.fn()} onFetchReplyText={onFetchReplyText} />,
+      ));
+    });
+    await act(async () => { setValue(document.querySelector('#comments-reply-text') as HTMLTextAreaElement, '내가 막 쓰던 것'); });
+    await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')?.textContent).toBe('작성한 답변을 불러오지 못했습니다 — 직접 적어 주세요.');
+    expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
+  });
 });

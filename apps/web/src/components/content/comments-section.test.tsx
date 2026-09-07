@@ -322,6 +322,24 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     expect(buttons[1]?.textContent).toBe('답변 더하기');
   });
 
+  // story #3596 AC7(유나 규격 確定 2026-09-06 15:33Z) — 3갈래 우선순위: 안 보낸
+  // 초안 있음 → 「이어서 답변」이 이긴다(보낸 답변이 함께 있어도) / 초안 없고
+  // 보낸 답변 있음 → 「답변 더하기」 / 둘 다 없음 → 「답변」. 뮤테이션 대상①
+  // (갈래 자체를 지우면 c2·c3가 똑같이 「답변 더하기」로 붕괴해 RED가 나야 한다).
+  it('openReplyDraft 있으면 sentRepliesCount 무관하게 「이어서 답변」이 이긴다(3갈래)', async () => {
+    const face = loadedFace([
+      baseComment({ id: 'c1', sentRepliesCount: 0, openReplyDraft: null }),
+      baseComment({ id: 'c2', sentRepliesCount: 1, replyStatus: 'published', openReplyDraft: null }),
+      baseComment({ id: 'c3', sentRepliesCount: 1, replyStatus: 'published', openReplyDraft: { id: 'r-open', status: 'draft', text: '작성 중' } }),
+    ]);
+    const { container, root } = mount();
+    await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
+    const buttons = container.querySelectorAll('[data-testid="comments-item-reply"]');
+    expect(buttons[0]?.textContent).toBe('답변');
+    expect(buttons[1]?.textContent).toBe('답변 더하기');
+    expect(buttons[2]?.textContent).toBe('이어서 답변');
+  });
+
   // story #3593 AC4·AC5 — 답변 2건 이상이면 배지가 「답변 N · 최신 {상태}」로
   // 바뀌고, 1건이면 기존 배지("발행됨" 낱말 그대로) 그대로다.
   // story #3596 AC8 — 배지 개수·임계(>=2)의 주어가 sentRepliesCount로 바뀐다
