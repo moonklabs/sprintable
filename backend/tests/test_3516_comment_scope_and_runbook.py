@@ -130,6 +130,11 @@ async def test_agent_scope_matrix():
             )
             human_reply = await submit_comment_reply(s, org_id=org_id, reply_id=human_draft.id, requester_member_id=human_id)
             gate_id = human_reply.gate_id
+            # story #3596 — 안 보낸 초안(draft/pending)이 있는 댓글엔 새 초안 생성이
+            # 409(CommentReplyDraftAlreadyOpenError). 아래 에이전트 초안 POST가 같은
+            # 댓글을 쓰므로, gate_id 확보에 쓴 이 답변을 sent로 닫아 그 축과 분리한다.
+            human_reply.status = "sent"
+            await s.commit()
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         try:

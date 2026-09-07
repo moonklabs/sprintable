@@ -269,6 +269,11 @@ async def test_comment_list_reply_summary_picks_latest_of_multiple_drafts():
                 s, org_id=org_id, comment_id=comment.id, text="진짜 최신(먼저 삽입)",
                 created_by_member_id=human_id, created_by_kind="human",
             )
+            # story #3596 — 안 보낸 초안(draft/pending)이 있는 댓글엔 새 초안 생성이
+            # 409(CommentReplyDraftAlreadyOpenError). 이 테스트의 의도(최신 선택
+            # 검증)와 무관한 축이라 먼저 만든 초안을 sent로 닫은 뒤 다음 초안을 만든다.
+            newer_by_time.status = "sent"
+            await s.commit()
             older_by_time = await create_comment_reply_draft(
                 s, org_id=org_id, comment_id=comment.id, text="진짜 과거(나중 삽입)",
                 created_by_member_id=human_id, created_by_kind="human",
