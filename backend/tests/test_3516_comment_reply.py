@@ -615,7 +615,7 @@ async def test_insights_board_carries_three_comment_signal_fields(monkeypatch):
             await s.commit()
 
             async def _fetch(client, *, access_token, media_id):
-                return [_fake_comment("c1")], True
+                return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
             await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)

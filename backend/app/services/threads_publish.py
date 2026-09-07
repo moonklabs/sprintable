@@ -233,15 +233,24 @@ _REPLIES_FIELDS = "id,text,username,timestamp,has_replies,is_reply,hide_status,r
 _REPLIES_MAX_PAGES = 10
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
-    """이 media의 댓글 목록 + 완전 수집 여부. `paging.cursors.after`로 최대
-    `_REPLIES_MAX_PAGES`페이지까지 따라간다 — 더 볼 커서가 없으면 (items, True),
-    상한에 걸려 아직 더 남았으면 (items, False)(그 페이지들은 유실이 아니라 다음
-    due 창에 다시 시도)."""
+async def fetch_replies(
+    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+) -> tuple[list[dict], bool, int | None]:
+    """이 media의 댓글 목록 + 완전 수집 여부 + 채널이 말하는 전체 개수(story #3618,
+    §7 Phase2 「댓글 누락률」 정의의 분모). `paging.cursors.after`로 최대
+    `_REPLIES_MAX_PAGES`페이지까지 따라간다 — 더 볼 커서가 없으면 (items, True, n),
+    상한에 걸려 아직 더 남았으면 (items, False, n)(그 페이지들은 유실이 아니라 다음
+    due 창에 다시 시도).
+
+    `summary=true`를 실어 Graph API의 `summary.total_count`를 받는다(요청 안 하면
+    응답에 아예 없는 opt-in 필드 — 매 페이지 응답에 동일값으로 실리므로 마지막으로
+    받은 값을 쓴다). 필드 자체가 없으면(구버전 API·이 미디어 타입이 지원 안 함 등)
+    None="채널이 말 안 함"(0과 구분 — 이 스토리 척추 규약 그대로)."""
     items: list[dict] = []
+    reported_total: int | None = None
     after_cursor: str | None = None
     for _ in range(_REPLIES_MAX_PAGES):
-        params = {"fields": _REPLIES_FIELDS, "access_token": access_token}
+        params = {"fields": _REPLIES_FIELDS, "access_token": access_token, "summary": "true"}
         if after_cursor:
             params["after"] = after_cursor
         resp = await client.get(_REPLIES_URL_TMPL.format(media_id=media_id), params=params)
@@ -249,10 +258,13 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             raise error_from_response("THREADS_FETCH_REPLIES_FAILED", resp)
         body = resp.json()
         items.extend(body.get("data") or [])
+        summary_total = (body.get("summary") or {}).get("total_count")
+        if isinstance(summary_total, int):
+            reported_total = summary_total
         after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
         if not after_cursor:
-            return items, True
-    return items, False
+            return items, True, reported_total
+    return items, False, reported_total
 
 
 async def reply(

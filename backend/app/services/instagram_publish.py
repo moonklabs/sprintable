@@ -275,10 +275,13 @@ _COMMENTS_FIELDS = "id,text,timestamp,from{id,username}"
 _REPLIES_MAX_PAGES = 10  # threads_publish.py::fetch_replies와 동일 상한·동일 사유
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
-    """이 media의 댓글 목록 + 완전 수집 여부(threads_publish.py::fetch_replies와
-    동형 커서 상한 방어 — PR#3865 리뷰에서 나온 "첫 페이지만 보고 리컨실하면
-    뒷페이지가 오삭제되는" 결함 클래스를 여기서도 똑같이 막는다).
+async def fetch_replies(
+    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+) -> tuple[list[dict], bool, int | None]:
+    """이 media의 댓글 목록 + 완전 수집 여부 + 채널이 말하는 전체 개수(story #3618,
+    threads_publish.py::fetch_replies와 동형 — summary=true opt-in 요청, 없으면
+    None="미제공"; 커서 상한 방어도 그와 동형 — PR#3865 리뷰에서 나온 "첫 페이지만
+    보고 리컨실하면 뒷페이지가 오삭제되는" 결함 클래스를 여기서도 똑같이 막는다).
 
     `channel_post_comments.py::collect_comments_for_publication`은 각 항목의
     `raw.get("username")`을 top-level에서 읽는다(sandbox/threads raw 모양과
@@ -286,9 +289,10 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
     `username`과 다른 응답 모양) 여기서 `username`/`from_id`를 top-level로
     끌어올려 얹는다(원본 `from` 필드도 raw에 그대로 보존, 유실 없음)."""
     items: list[dict] = []
+    reported_total: int | None = None
     after_cursor: str | None = None
     for _ in range(_REPLIES_MAX_PAGES):
-        params = {"fields": _COMMENTS_FIELDS, "access_token": access_token}
+        params = {"fields": _COMMENTS_FIELDS, "access_token": access_token, "summary": "true"}
         if after_cursor:
             params["after"] = after_cursor
         resp = await client.get(_COMMENTS_URL_TMPL.format(media_id=media_id), params=params)
@@ -301,10 +305,13 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             item["username"] = frm.get("username")
             item["from_id"] = frm.get("id")
             items.append(item)
+        summary_total = (body.get("summary") or {}).get("total_count")
+        if isinstance(summary_total, int):
+            reported_total = summary_total
         after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
         if not after_cursor:
-            return items, True
-    return items, False
+            return items, True, reported_total
+    return items, False, reported_total
 
 
 async def reply(

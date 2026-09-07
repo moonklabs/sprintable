@@ -19,6 +19,7 @@ import { channelLabel } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
+import { Phase2MetricsCards } from '@/components/insights-board/phase2-metrics-cards';
 import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-board-comments-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
@@ -194,6 +195,8 @@ export default function InsightsBoardPage() {
         <h1 className="text-lg font-semibold text-foreground">{t('pageTitle')}</h1>
         <p className="text-sm text-muted-foreground">{t('pageDescription')}</p>
       </div>
+
+      {orgId && <Phase2MetricsCards orgId={orgId} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <DropdownMenu>

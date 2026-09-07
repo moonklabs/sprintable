@@ -155,9 +155,12 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
     }
 
 
-async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> tuple[list[dict], bool]:
+async def fetch_replies(
+    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+) -> tuple[list[dict], bool, int | None]:
     """instagram_sandbox_publish.py::fetch_replies와 동형 — media_id 하나엔 항상
-    같은 2건(순서 고정), complete=True 고정(페이지네이션 개념 없음).
+    같은 2건(순서 고정), complete=True 고정(페이지네이션 개념 없음). 세 번째 값
+    (채널이 말하는 전체 개수, story #3618)도 동형 — 항상 `len(items)`.
 
     story #3597 — media_id가 `_EXPIRE_AFTER_PUBLISH_SUFFIX`를 달고 있으면 401을
     던진다(instagram_sandbox_publish.py::fetch_replies와 동형)."""
@@ -166,7 +169,8 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             "SANDBOX_FACEBOOK_TOKEN_EXPIRED",
             "sandbox: [sandbox:expire-after-publish] 마커 시뮬레이션(발행 후 토큰 만료)", status_code=401,
         )
-    return [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)], True
+    items = [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)]
+    return items, True, len(items)
 
 
 async def reply(

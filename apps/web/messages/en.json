@@ -5298,6 +5298,15 @@
     "followUpClose": "Close",
     "followUpSuccessMessage": "Follow-up story created.",
     "followUpSuccessLink": "View story",
-    "followUpErrorGeneric": "Couldn't create the follow-up."
+    "followUpErrorGeneric": "Couldn't create the follow-up.",
+    "phase2MetricsTitle": "Phase 2 measurement",
+    "phase2AttributionRate": "Attribution rate",
+    "phase2CommentMissRate": "Comment miss rate",
+    "phase2FollowUpRate": "Follow-up creation rate",
+    "phase2Unmeasured": "—",
+    "phase2ReasonNoPageviews": "No pageviews to measure",
+    "phase2ReasonNoCommentData": "Channel hasn't reported original comment counts yet",
+    "phase2ReasonNoSnapshots": "No publication snapshots to measure",
+    "phase2MetricsErrorGeneric": "Couldn't load the measurements."
   }
 }

@@ -117,14 +117,39 @@ async def test_facebook_fetch_replies_normalizes_message_from_created_time_to_to
         async def get(self, url, *, params):
             return _FakeResponse()
 
-    items, complete = await fetch_replies(_FakeClient(), access_token="tok", media_id="post-1")
+    items, complete, reported_total = await fetch_replies(_FakeClient(), access_token="tok", media_id="post-1")
     assert complete is True
     assert items[0]["text"] == "댓글1"
     assert items[0]["username"] == "스프린터블 데모"
     assert items[0]["from_id"] == "u1"
     assert items[0]["timestamp"] == "2026-09-06T00:00:00+0000"
-    assert items[0]["from"] == {"id": "u1", "name": "스프린터블 데모"}  # 원본 보존.
-    assert items[0]["message"] == "댓글1"  # 원본 필드도 유실 없음.
+    # story #3618 — summary 필드를 응답이 아예 안 주면(구 픽스처 그대로) None="미제공".
+    assert reported_total is None
+
+
+@pytest.mark.anyio
+async def test_facebook_fetch_replies_reports_channel_total_count_from_summary():
+    """story #3618(§7 Phase2 「댓글 누락률」 분모) — Graph API가 `summary=true` 요청에
+    응답하면 그 total_count를 세 번째 값으로 낸다(0과 None="미제공"을 구분)."""
+    from app.services.facebook_publish import fetch_replies
+
+    class _FakeResponse:
+        status_code = 200
+        def json(self):
+            return {
+                "data": [{"id": "c1", "message": "a", "from": {"name": "u1"}}],
+                "paging": {},
+                "summary": {"order": "chronological", "total_count": 7},
+            }
+
+    class _FakeClient:
+        async def get(self, url, *, params):
+            assert params.get("summary") == "true", "summary=true를 안 실으면 채널이 이 필드를 아예 안 준다"
+            return _FakeResponse()
+
+    items, complete, reported_total = await fetch_replies(_FakeClient(), access_token="tok", media_id="post-1")
+    assert reported_total == 7
+    assert reported_total != len(items), "0과 실제 개수가 다를 수 있다는 것(누락) 자체가 이 지표의 존재 이유"
 
 
 @pytest.mark.anyio
@@ -150,7 +175,7 @@ async def test_facebook_fetch_replies_follows_cursor_until_exhausted():
             call_count["n"] += 1
             return resp
 
-    items, complete = await fetch_replies(_FakeClient(), access_token="tok", media_id="post-1")
+    items, complete, _reported = await fetch_replies(_FakeClient(), access_token="tok", media_id="post-1")
     assert [i["id"] for i in items] == ["c1", "c2"]
     assert complete is True
     assert call_count["n"] == 2
@@ -230,11 +255,11 @@ async def test_facebook_reply_failure_raises():
 async def test_facebook_sandbox_fetch_replies_deterministic_two_comments():
     from app.services.facebook_sandbox_publish import fetch_replies
 
-    items, complete = await fetch_replies(None, access_token="x", media_id="post-1")
+    items, complete, _reported = await fetch_replies(None, access_token="x", media_id="post-1")
     assert complete is True
     assert [i["id"] for i in items] == ["sandbox-fb-comment-post-1-1", "sandbox-fb-comment-post-1-2"]
 
-    items2, _ = await fetch_replies(None, access_token="x", media_id="post-1")
+    items2, _, _reported2 = await fetch_replies(None, access_token="x", media_id="post-1")
     assert items == items2, "결정적이어야 함(같은 media_id는 매번 같은 값)"
 
 
@@ -269,7 +294,7 @@ async def test_collect_comments_for_publication_dispatches_facebook(monkeypatch)
             )
 
             async def _fake_fetch(client, *, access_token, media_id):
-                return [{"id": "c1", "text": "댓글", "username": "u1", "timestamp": datetime.now(timezone.utc).isoformat()}], True
+                return [{"id": "c1", "text": "댓글", "username": "u1", "timestamp": datetime.now(timezone.utc).isoformat()}], True, None
 
             monkeypatch.setattr(facebook_publish, "fetch_replies", _fake_fetch)
             await collect_comments_for_publication(

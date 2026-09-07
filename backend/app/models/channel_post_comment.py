@@ -99,4 +99,10 @@ class CommentCollectionSchedule(Base):
     # story #3528(마이그 0341, additive) — transient 백오프. NULL=대기 없음(기존
     # 행·최초 시도). tick은 `next_attempt_at IS NULL OR <= now`만 집는다.
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3618(마이그 0348, additive) — 「채널이 말한 댓글 수」(§7 Phase2 「댓글
+    # 누락률」 정의의 분모). 수집 성공(captured) 시점에 채운다 — 채널 어댑터가 그 값을
+    # 안 주면(대부분 실 어댑터가 아직 summary 필드를 요청 안 함) NULL="미측정"(0과
+    # 구분, null≠0 정규화 규약 승계). 샌드박스는 항상 채운다(반환 목록 길이=seed 수
+    # 자체가 이미 전량 — 페이지네이션 개념이 없어 "말한 수"가 곧 "돌려준 수").
+    channel_reported_comment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
