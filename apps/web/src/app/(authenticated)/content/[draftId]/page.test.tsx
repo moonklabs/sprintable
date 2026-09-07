@@ -752,7 +752,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — 주 데이터(/versions)
 // 실패를 404/403/그 외/네트워크 예외 4갈래로 문장을 가른다(추정 0, 서버 status 그대로).
 describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', () => {
-  it('로드 실패(500) — 기존 editLoadFailed를 보인다', async () => {
+  it('로드 실패(500) — 기존 editLoadFailed를 보인다 · 나가는 링크는 0', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsStatus: 500 });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -760,9 +760,11 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    // story #3667(3662 후속) — 그 외 실패(3644/3632 봉투)엔 목록 링크를 안 그린다.
+    expect(container.querySelector('a[href="/content"]')).toBeNull();
   });
 
-  it('로드 실패(404) — 「찾을 수 없습니다」를 보인다', async () => {
+  it('로드 실패(404) — 「찾을 수 없습니다」+목록으로 나가는 링크', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsStatus: 404 });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -771,9 +773,13 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
 
     expect(container.textContent).toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+    // story #3667 — 유나 #4016 적기만 ②(막다른 길) 처방: 목록으로 나가는 링크 1개.
+    const backLink = container.querySelector('a[href="/content"]');
+    expect(backLink).not.toBeNull();
+    expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
-  it('로드 실패(403) — 「볼 권한이 없습니다」를 보인다', async () => {
+  it('로드 실패(403) — 「볼 권한이 없습니다」+목록으로 나가는 링크', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsStatus: 403 });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -782,9 +788,12 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
 
     expect(container.textContent).toContain(koMessages.content.editForbidden);
     expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+    const backLink = container.querySelector('a[href="/content"]');
+    expect(backLink).not.toBeNull();
+    expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
-  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다', async () => {
+  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다 · 나가는 링크는 0', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsReject: true });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -794,6 +803,7 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
     expect(container.textContent).not.toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('a[href="/content"]')).toBeNull();
   });
 });
 
