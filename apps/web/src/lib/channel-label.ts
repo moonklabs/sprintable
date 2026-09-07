@@ -27,3 +27,15 @@ export function channelLabel(channel: string, t: (key: string) => string): strin
   const key = CHANNEL_LABEL_KEYS[channel];
   return key ? t(key) : channel;
 }
+
+// story #3661(3650 후속, 유나 판정 정정 2026-09-07) — mismatch Alert 문장이 account_label
+// null인 연결에서 account_id로 폴백했는데, webhook류는 그 값이 139자 URL이라 문장을
+// 관통했다("무엇이 갱신됐는지"가 URL에 묻힘). 폴백은 «채널명 + 식별자 짧은 꼬리»로
+// 정체는 남기고 자른다 — sha256 앞 8자(story #3641)와 같은 "짧은 꼬리" 관례, 연결
+// 자신의 id(항상 UUID·URL이 아님)에서 뽑아 채널 종류와 무관하게 안전하다. 새 낱말 0
+// (channelLabel 재사용).
+export function channelConnectionIdentityLabel(
+  conn: { id: string; channel: string; account_label: string | null }, t: (key: string) => string,
+): string {
+  return conn.account_label ?? `${channelLabel(conn.channel, t)}(…${conn.id.slice(-8)})`;
+}

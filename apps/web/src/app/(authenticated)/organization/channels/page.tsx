@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { channelConnectionIdentityLabel, channelLabel } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChannelStatusChip } from '@/components/channel-connect/channel-status-chip';
@@ -877,6 +877,12 @@ export default function OrganizationChannelsPage() {
   const mismatchUpdatedId = searchParams.get('updated');
   const mismatchTargetConn = connections.find((c) => c.id === mismatchTargetId);
   const mismatchUpdatedConn = connections.find((c) => c.id === mismatchUpdatedId);
+  // story #3661(유나 판정 정정) — mismatch 파라미터가 있으면 이미 「불일치 재연결」로
+  // 확定된 것(plain 성공 배너 대상이 아니다). 목록이 아직 안 불렸으면(connections=[])
+  // find()가 둘 다 undefined라 아래 렌더 조건이 자연히 막는다 — 대상 연결을 못
+  // 찾은 채로(로드 前이든 삭제된 뒤든) raw UUID로 Alert를 그리는 대신 조용히
+  // 건너뛴다(«모르는 것을 UUID로 단정» 금지).
+  const isMismatchCase = Boolean(connected && mismatchTargetId && mismatchUpdatedId);
 
   // story #3549(§13-8②, 3547 계약) — 콜백 BFF(api/oauth-channel/callback/[channel])가
   // 2개 이상 페이지를 찾으면 `?select_pending={channel}&pending_id=...&candidates=...`
@@ -903,16 +909,16 @@ export default function OrganizationChannelsPage() {
         <p className="text-sm text-muted-foreground">{t('pageDescription')}</p>
       </div>
 
-      {connected && mismatchTargetId && mismatchUpdatedId ? (
+      {isMismatchCase && mismatchTargetConn && mismatchUpdatedConn ? (
         <Alert variant="info" role="status" aria-live="polite" aria-atomic="true" data-testid="channel-reauth-mismatch-note">
           <AlertDescription>
             {t('channelReauthMismatchNote', {
-              updated: mismatchUpdatedConn?.account_label ?? mismatchUpdatedConn?.account_id ?? mismatchUpdatedId,
-              intended: mismatchTargetConn?.account_label ?? mismatchTargetConn?.account_id ?? mismatchTargetId,
+              updated: channelConnectionIdentityLabel(mismatchUpdatedConn, t),
+              intended: channelConnectionIdentityLabel(mismatchTargetConn, t),
             })}
           </AlertDescription>
         </Alert>
-      ) : connected ? (
+      ) : connected && !isMismatchCase ? (
         <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
           <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected, t) })}</AlertDescription>
         </Alert>
