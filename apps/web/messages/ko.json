@@ -1510,7 +1510,7 @@
       "validating": "검증 중...",
       "saveCta": "키 저장",
       "validationSuccess": "API 키가 유효합니다.",
-      "validationError": "API 키 검증에 실패했습니다. 키를 확인하고 다시 시도하세요.",
+      "validationError": "API 키가 유효하지 않습니다. 키를 확인하고 다시 시도하세요.",
       "validationUnknown": "확인하지 못했습니다 — 네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
       "saveSuccess": "API 키가 저장되었습니다.",
       "deleteSuccess": "저장된 BYOM 키를 삭제했습니다.",

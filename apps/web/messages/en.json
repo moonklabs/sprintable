@@ -1510,7 +1510,7 @@
       "validating": "Validating...",
       "saveCta": "Save Key",
       "validationSuccess": "API key is valid and working.",
-      "validationError": "API key validation failed. Check the key and try again.",
+      "validationError": "API key is not valid. Check the key and try again.",
       "validationUnknown": "Couldn't check — check your network connection and try again.",
       "saveSuccess": "API key saved successfully.",
       "deleteSuccess": "Saved BYOM key deleted successfully.",
