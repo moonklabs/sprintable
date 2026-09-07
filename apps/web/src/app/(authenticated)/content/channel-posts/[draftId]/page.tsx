@@ -381,6 +381,11 @@ export default function ChannelPostEditPage() {
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
+  // story #3641(유나 전수·PO 채택) — 확認 다이얼로그 취소 버튼: 버릴 게 있으면 「취소」,
+  // 이미 끝났으면 「닫기」. 재시도/회수 확認은 취소하면 "그 시도 자체를 버리는" 것이라
+  // 「취소」가 맞다(형제 발행 취소 확認·:1351이 이미 「취소」인데 재시도/회수만 어긋나
+  // 있었다).
+  const tc = useTranslations('common');
   const locale = useLocale();
 
   const [draft, setDraft] = useState<ChannelPostDraftDetail | null>(null);
@@ -1934,7 +1939,7 @@ export default function ChannelPostEditPage() {
               ) : null}
             </>
           )}
-          cancelLabel={t('channelPostsRetryConfirmCancel')}
+          cancelLabel={tc('cancel')}
           confirmLabel={retrying ? t('channelPostsRetryConfirmPendingCta') : t('channelPostsRetryConfirmAction')}
           confirmDisabled={retrying || (failureAction?.kind === 'needs_check' && !retryChecklistConfirmed)}
           destructive={false}
@@ -2329,7 +2334,7 @@ export default function ChannelPostEditPage() {
               <span className="block" data-testid="channel-post-unpublish-confirm-reversible">{t('channelPostsUnpublishConfirmReversible')}</span>
             </>
           )}
-          cancelLabel={t('channelPostsUnpublishConfirmCancel')}
+          cancelLabel={tc('cancel')}
           confirmLabel={t('channelPostsUnpublishConfirmAction')}
           onConfirm={() => void handleUnpublish()}
         />
@@ -2356,7 +2361,7 @@ export default function ChannelPostEditPage() {
               <span className="block" data-testid="channel-post-withdraw-confirm-reversible">{t('channelPostsWithdrawConfirmReversible')}</span>
             </>
           )}
-          cancelLabel={t('channelPostsWithdrawConfirmCancel')}
+          cancelLabel={tc('cancel')}
           confirmLabel={t('channelPostsWithdrawConfirmAction')}
           onConfirm={() => void handleWithdraw()}
         />

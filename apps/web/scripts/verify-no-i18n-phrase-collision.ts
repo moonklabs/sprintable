@@ -442,6 +442,10 @@ export const EXEMPT_PAIRS = new Set<string>([
   'settings.invite <-> settings.memberLimitExceededError',
   'settings.invite <-> settings.orgInviteRowActionAriaLabel',
   'settings.invite <-> settings.orgInvitesListHeading',
+  // story #3641 — 버튼 라벨(행위) ↔ 그 행위가 불가한 이유 문장. «두 셈» 혼동이 아니고
+  // 보간도 수가 아니라 상태 문자열({status})이라 AC4㉣ 근사가 성립하지 않는다.
+  // 다시 볼 때: 가드가 보간을 숫자형으로 좁히면 이 예외는 저절로 불필요해진다.
+  'common.cancel <-> content.channelPostsCommandNotCancellable',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

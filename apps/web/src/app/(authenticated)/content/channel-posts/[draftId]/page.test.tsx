@@ -1289,6 +1289,31 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).toBeNull();
   });
 
+  it('⭐폐기 확認 다이얼로그 취소 — 버튼 접근 이름="취소"·클릭해도 withdraw 미호출', async () => {
+    let withdrawCalled = false;
+    stubFetch({
+      draftDetail: { draft_status: 'draft', published_at: null },
+      onWithdraw: () => { withdrawCalled = true; return { status: 200, body: { status: 'withdrawn', gate_id: null, gate_status: null } }; },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-withdraw-button"]') as HTMLButtonElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    // story #3641 — cancelBtn?.dispatchEvent가 옵셔널 체이닝이라 키 삭제·라벨 되돌림이
+    // undefined로 조용히 통과하는 함정을 재시도 자리에서 이미 잡았다(page.test.tsx의
+    // «다시 시도할까요?» 테스트) — 같은 함정을 여기서도 toBeDefined()로 먼저 막는다.
+    const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== trigger).find((b) => b.textContent === koMessages.common.cancel);
+    expect(cancelBtn).toBeDefined();
+    await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(withdrawCalled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-withdraw-button"]')).not.toBeNull();
+  });
+
   // story #3608(유나 §22-18 ④-2) 규격 — pending 中 "..." 금지.
   it('⭐폐기 pending 中 — 버튼 보이는 글자가 "..." 없이 "폐기 중…"으로 바뀐다', async () => {
     let resolveWithdraw!: () => void;
@@ -1984,7 +2009,12 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       // dead_letter는 체크리스트가 없다(needs_check 전용).
       expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]')).toBeNull();
 
-      const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmCancel);
+      // story #3641 — cancelBtn이 undefined면 dispatchEvent가 옵셔널 체이닝으로 조용히
+      // no-op해 아래 retryCalled===0 단언이 "취소를 클릭 안 한 것"만으로도 거짓 통과한다
+      // (키 삭제·라벨 변경이 이 자리를 못 잡는 함정, story 본문이 명시 경고). 버튼을 실제로
+      // 찾았는지부터 먼저 확認한다.
+      const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.common.cancel);
+      expect(cancelBtn).toBeDefined();
       await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(retryCalled).toBe(0);
     });
