@@ -3,12 +3,14 @@
 // story #3677(FE·대비·確定, 2026-09-07) — InlineSaveIndicator의 status='error' 칩이
 // hover:text-destructive/80(resting state보다 대비를 낮추는 방향)을 썼다 — hover는
 // underline으로 피드백을 표현하고 색은 그대로(text-destructive, 알파 없음) 두도록
-// 교체. page.tsx 전체를 마운트하지 않고 이 하위 컴포넌트만 직접 렌더(export 추가,
-// 동작 무변 — page.test.tsx 부재라 이 파일이 유일한 회귀가드).
+// 교체. page.tsx 전체를 마운트하지 않고 이 하위 컴포넌트만 직접 렌더(카디르 CI
+// 지적: app-router page.tsx는 named export가 있으면 build type check가 깨져
+// 형제 모듈 inline-save-indicator.tsx로 분리 — page.test.tsx 부재라 이 파일이
+// 유일한 회귀가드).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { InlineSaveIndicator } from './page';
+import { InlineSaveIndicator } from './inline-save-indicator';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

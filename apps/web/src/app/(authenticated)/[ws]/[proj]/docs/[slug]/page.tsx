@@ -9,10 +9,11 @@ import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { docsListUrl, docUrl } from '@/components/docs/lib/doc-project-url';
-import { useDocSync, unwrapDocResponse, type SaveStatus } from '@/components/docs/use-doc-sync';
+import { useDocSync, unwrapDocResponse } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
-import { Check, Copy, Eye, Link2, Loader2, MoreHorizontal, Share2, Trash2, XCircle } from 'lucide-react';
+import { Check, Copy, Eye, Link2, MoreHorizontal, Share2, Trash2 } from 'lucide-react';
+import { InlineSaveIndicator } from './inline-save-indicator';
 import { DocShareDialog } from '@/components/docs/doc-share-dialog';
 import { DocSyncBanner } from '@/components/docs/doc-sync-banner';
 import {
@@ -53,76 +54,6 @@ interface DocDetail {
   // #1691 payload enrich(이중 fetch 제거·additive·nullable): 담당자 요약 + 수정이력 요약 동봉.
   assignee?: { id: string; name: string; avatar_url?: string | null } | null;
   revisions?: { count: number; latest_at?: string | null } | null;
-}
-
-// story #3677(FE·대비·確定) — export만 추가(테스트 격리용, 동작 무변) — 렌더 테스트가
-// 이 하위 컴포넌트만 직접 마운트해 hover 클래스를 검증한다(page.tsx 전체를 마운트하면
-// useParams/fetch 등 무관한 의존성까지 다 갖춰야 해 이 1pt 스토리 범위를 넘는다).
-export function InlineSaveIndicator({
-  status,
-  onAction,
-  t,
-}: {
-  status: SaveStatus;
-  onAction: () => void;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const [show, setShow] = useState(false);
-  const [fading, setFading] = useState(false);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (status === 'idle') { setShow(false); setFading(false); return; }
-    setShow(true);
-    setFading(false);
-    if (status !== 'saved') return;
-    const t1 = setTimeout(() => setFading(true), 200);
-    const t2 = setTimeout(() => setShow(false), 1600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [status]);
-
-  if (!show) return null;
-
-  if (status === 'saving') {
-    return (
-      <span aria-label={t('statusSaving')} title={t('statusSaving')} className="flex items-center">
-        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-      </span>
-    );
-  }
-  if (status === 'saved') {
-    return (
-      <span aria-label={t('statusSaved')} title={t('statusSaved')} className={`flex items-center transition-opacity duration-[1400ms] ${fading ? 'opacity-0' : 'opacity-100'}`}>
-        <span className="size-2 rounded-full bg-success" />
-      </span>
-    );
-  }
-  if (status === 'unsaved') {
-    return (
-      <span aria-label={t('statusUnsaved')} title={t('statusUnsaved')} className="flex items-center">
-        <span className="size-2 rounded-full bg-warning" />
-      </span>
-    );
-  }
-  if (status === 'error') {
-    return (
-      <button type="button" onClick={onAction}
-        aria-label={`${t('statusError')} · ${t('retry')}`}
-        title={`${t('statusError')} · ${t('retry')}`}
-        // story #3677(FE·대비·確定) — hover:text-destructive/80은 resting state(text-
-        // destructive, 알파 없음)보다 대비를 "낮추는" 방향이라 새 규칙 위반. 색은
-        // 그대로 두고 underline으로 hover 피드백을 표현(대비 하락 0).
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:underline md:max-w-none"
-      >
-        <XCircle className="size-3.5 shrink-0" />
-        <span className="truncate">{t('statusError')} · {t('retry')}</span>
-      </button>
-    );
-  }
-  // conflict / remote-changed are surfaced by DocSyncBanner (the off-ramp), not this
-  // status chip — keeping a chip here too would double-surface and re-expose the
-  // dead-end onAction. (fc4d4264 FIX-4)
-  return null;
 }
 
 export default function DocSlugPage() {
