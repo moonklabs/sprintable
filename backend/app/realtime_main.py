@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -172,9 +173,44 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
+    """story #3672(2026-09-07, 페드루 PO 권고③ — main.py와 같은 서비스로) — app/main.py의
+    동형 핸들러와 완전히 같은 처방(error_id 3자리 상관, best-effort DB persist). 이 서비스
+    (realtime, SSE 전용 별도 entrypoint)는 get_current_user 경로를 안 태우는 라우터만
+    마운트해(위 모듈 docstring 참고) request.state.au_org_id/au_user_id가 지금은 늘
+    비어 있을 것 — 그건 정직한 값이다(모르는데 지어내지 않는다), main.py와 코드는 같다."""
+    error_id = uuid.uuid4()
+    _logger.exception(
+        "Unhandled exception on %s %s [error_id=%s]: %s", request.method, request.url.path, error_id, exc
+    )
     detail = str(exc) if settings.debug else "Internal server error"
-    return JSONResponse(status_code=500, content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None})
+
+    try:
+        from app.services.unhandled_error_events import record_unhandled_error_event
+        _raw_org_id = getattr(request.state, "au_org_id", None)
+        _raw_user_id = getattr(request.state, "au_user_id", None)
+        _request_id = (
+            request.headers.get("x-request-id")
+            or request.headers.get("cf-ray")
+            or request.headers.get("x-cloud-trace-context")
+        )
+        await record_unhandled_error_event(
+            error_id=error_id, method=request.method, path=request.url.path,
+            exception_class=type(exc).__name__, message=str(exc)[:2000] if str(exc) else None,
+            org_id=uuid.UUID(_raw_org_id) if _raw_org_id else None,
+            user_id=uuid.UUID(_raw_user_id) if _raw_user_id else None,
+            request_id=_request_id,
+        )
+    except Exception:
+        _logger.exception("record_unhandled_error_event itself raised for error_id=%s", error_id)
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "data": None,
+            "error": {"code": "INTERNAL_ERROR", "message": detail, "error_id": str(error_id)},
+            "meta": None,
+        },
+    )
 
 
 app.state.limiter = limiter

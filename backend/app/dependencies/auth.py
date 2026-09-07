@@ -498,6 +498,11 @@ async def get_current_user(
     if request is not None:
         request.state.au_actor = "agent" if is_au_billable_agent(auth) else "human"
         request.state.au_org_id = auth.org_id
+        # story #3672 — 소비처③: main.py::unhandled_exception_handler가 미처리 500
+        # 발생 시 「누구 요청이었나」를 지어내지 않고 알 때만 싣는다(au_org_id와 동일
+        # 자리·동일 이유 — FastAPI dependency는 라우터 밖 미들웨어/전역 예외 핸들러로
+        # 안 새어나가 request.state에 명시 기록해야 그쪽이 볼 수 있다).
+        request.state.au_user_id = auth.user_id
         if (
             request.state.au_actor == "agent"
             and request.method in _WRITE_METHODS

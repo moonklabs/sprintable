@@ -66,9 +66,13 @@ export async function GET(request: Request, { params }: RouteParams) {
   ).catch(() => null);
 
   if (!res?.ok) {
-    const errBody = await res?.json().catch(() => null) as { error?: { code?: string } } | null;
+    const errBody = await res?.json().catch(() => null) as { error?: { code?: string; error_id?: string } } | null;
     const errCode = errBody?.error?.code ?? 'CHANNEL_CALLBACK_FAILED';
-    return NextResponse.redirect(`${origin}/organization/channels?connect_error=${errCode}`);
+    // story #3672(2026-09-07, 3663 실사고) — authorize/route.ts와 동형: BE
+    // unhandled_exception_handler의 error_id가 있으면 그대로 넘긴다(AC4).
+    const errorId = errBody?.error?.error_id;
+    const suffix = errorId ? `&error_id=${encodeURIComponent(errorId)}` : '';
+    return NextResponse.redirect(`${origin}/organization/channels?connect_error=${errCode}${suffix}`);
   }
 
   // story #3549(3547 BE·디디 계약, 유나 §13-8②, PO 確定 2026-09-06) — Facebook Page가

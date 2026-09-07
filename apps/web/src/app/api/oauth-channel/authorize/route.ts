@@ -40,9 +40,13 @@ export async function GET(request: Request) {
   ).catch(() => null);
 
   if (!res?.ok) {
-    const errBody = await res?.json().catch(() => null) as { error?: { code?: string } } | null;
+    const errBody = await res?.json().catch(() => null) as { error?: { code?: string; error_id?: string } } | null;
     const errCode = errBody?.error?.code ?? 'CHANNEL_AUTHORIZE_FAILED';
-    return NextResponse.redirect(`${origin}/organization/channels?connect_error=${errCode}`);
+    // story #3672(2026-09-07, 3663 실사고) — BE unhandled_exception_handler가 실어 준
+    // error_id가 있으면 그대로 넘긴다(있을 때만·없으면 기존 동작 그대로, AC4).
+    const errorId = errBody?.error?.error_id;
+    const suffix = errorId ? `&error_id=${encodeURIComponent(errorId)}` : '';
+    return NextResponse.redirect(`${origin}/organization/channels?connect_error=${errCode}${suffix}`);
   }
 
   // story #3613(BE 그라운딩·페드루 PO 確定 2026-09-07) — BE `authorize_channel_

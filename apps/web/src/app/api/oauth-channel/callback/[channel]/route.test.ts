@@ -101,6 +101,29 @@ describe('GET /api/oauth-channel/callback/[channel] (story #3376)', () => {
     const res = await GET(makeRequest({ code: 'c', state: 's' }), routeParams());
     expect(res.headers.get('location')).toContain('connect_error=CHANNEL_OAUTH_STATE_INVALID');
   });
+
+  // story #3672(2026-09-07, 3663 실사고, AC4) — authorize/route.ts와 동형: BE
+  // unhandled_exception_handler의 error.error_id가 있으면 그대로 릴레이한다.
+  it('BE 500이 error.error_id를 실으면 connect_error 뒤에 error_id를 그대로 붙인다', async () => {
+    stubCookies();
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ data: null, error: { code: 'INTERNAL_ERROR', error_id: '11111111-2222-3333-4444-555555555555' } }),
+    });
+    const res = await GET(makeRequest({ code: 'c', state: 's' }), routeParams());
+    const location = res.headers.get('location') ?? '';
+    expect(location).toContain('connect_error=INTERNAL_ERROR');
+    expect(location).toContain('error_id=11111111-2222-3333-4444-555555555555');
+  });
+
+  it('BE 오류에 error_id가 없으면(기존 4xx류) 지금과 동일 — error_id 쿼리 자체가 없다', async () => {
+    stubCookies();
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ data: null, error: { code: 'CHANNEL_OAUTH_STATE_INVALID' } }) });
+    const res = await GET(makeRequest({ code: 'c', state: 's' }), routeParams());
+    const location = res.headers.get('location') ?? '';
+    expect(location).toContain('connect_error=CHANNEL_OAUTH_STATE_INVALID');
+    expect(location).not.toContain('error_id=');
+  });
 });
 
 // story #3549(3547 BE·디디 계약, 유나 §13-8②, PO 確定 2026-09-06) — Facebook Page가

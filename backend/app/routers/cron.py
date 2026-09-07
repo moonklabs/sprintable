@@ -1337,6 +1337,14 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("oauth-pending-selections sweep tick error: %s", exc)
             counts["oauth_pending_selections_swept"] = {"error": "unhandled"}
+        # story #3672(2026-09-07) — unhandled_error_events 30일 보존 정리. 위 세 축과
+        # 같은 피기백 사상(새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.unhandled_error_events import sweep_old_unhandled_error_events
+            counts["unhandled_error_events_swept"] = await sweep_old_unhandled_error_events(session)
+        except Exception as exc:
+            logger.exception("unhandled-error-events sweep tick error: %s", exc)
+            counts["unhandled_error_events_swept"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)
