@@ -176,10 +176,21 @@ export function WorkflowTriggerTypesSection() {
                       placeholder={t('workflowDescriptionPlaceholder')}
                     />
                     <div className="flex gap-2">
-                      <Button variant="hero" size="sm" onClick={() => void handleSaveEdit(tt.id)} disabled={!editLabel.trim() || saving === tt.id}>
+                      <Button
+                        variant="hero"
+                        size="sm"
+                        onClick={() => void handleSaveEdit(tt.id)}
+                        disabled={!editLabel.trim() || saving === tt.id}
+                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: saving === tt.id ? '...' : tc('save') })}
+                      >
                         {saving === tt.id ? '...' : tc('save')}
                       </Button>
-                      <Button variant="glass" size="sm" onClick={() => setEditingId(null)}>
+                      <Button
+                        variant="glass"
+                        size="sm"
+                        onClick={() => setEditingId(null)}
+                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('cancel') })}
+                      >
                         {tc('cancel')}
                       </Button>
                     </div>
@@ -197,11 +208,12 @@ export function WorkflowTriggerTypesSection() {
                         <p className="mt-0.5 text-xs text-muted-foreground">{tt.description}</p>
                       ) : null}
                     </div>
-                    {/* story #3592(§17-20 ⑧·§22-18 동형) — 토글 버튼만 이번 PR에서
-                        가른다(판정표 명시 대상). 같은 행의 edit/delete/confirm/cancel
-                        (tc(...) 공용 키)도 행마다 반복되는 같은 결함이지만 공용
-                        namespace라 이 스토리 범위 밖 — 조용히 빼지 않고 남김(후속
-                        확인 필요, 3592 판정표에 추가 대상). */}
+                    {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO
+                        確定 2026-09-07) — edit/delete/confirm/cancel(tc(...) 공용 키)도
+                        같은 map·같은 index라 settings 네임스페이스의 기존
+                        workflowToggleAriaLabel(토글 버튼이 이미 쓰는 템플릿)을 그대로
+                        재사용해 마감한다 — common 키 자체는 안 건드림, aria 템플릿만
+                        이 파일 네임스페이스 것을 씀(§22-18 원칙 그대로). */}
                     <div className="flex shrink-0 gap-2">
                       <Button
                         variant="glass"
@@ -225,6 +237,7 @@ export function WorkflowTriggerTypesSection() {
                               setEditLabel(tt.label);
                               setEditDescription(tt.description ?? '');
                             }}
+                            aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('edit') })}
                           >
                             {tc('edit')}
                           </Button>
@@ -235,15 +248,26 @@ export function WorkflowTriggerTypesSection() {
                                 size="sm"
                                 onClick={() => void handleDelete(tt.id)}
                                 disabled={deletingId === tt.id}
+                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: deletingId === tt.id ? '...' : tc('confirm') })}
                               >
                                 {deletingId === tt.id ? '...' : tc('confirm')}
                               </Button>
-                              <Button variant="glass" size="sm" onClick={() => setConfirmDeleteId(null)}>
+                              <Button
+                                variant="glass"
+                                size="sm"
+                                onClick={() => setConfirmDeleteId(null)}
+                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('cancel') })}
+                              >
                                 {tc('cancel')}
                               </Button>
                             </>
                           ) : (
-                            <Button variant="glass" size="sm" onClick={() => setConfirmDeleteId(tt.id)}>
+                            <Button
+                              variant="glass"
+                              size="sm"
+                              onClick={() => setConfirmDeleteId(tt.id)}
+                              aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('delete') })}
+                            >
                               {tc('delete')}
                             </Button>
                           )}

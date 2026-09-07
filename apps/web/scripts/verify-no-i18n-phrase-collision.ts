@@ -428,6 +428,17 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 자리(다이얼로그 헤더 vs 본문 안내)에서 다른 걸 말한다. #2352/#2365가 잡으려는
   // "같은 화면의 두 «수»가 헷갈리는" 병이 아니다(count는 이 안내 문장에만 있다).
   'content.commentsReplyAlreadySentCount <-> content.commentsReplyDialogTitle',
+  // story #3606(잔여, 페드루 PO 確定 2026-09-07) — org-members-section.tsx가 이
+  // 스토리에서 처음으로 settings.invite("초대", 버튼 라벨)를 이 파일 안에서 다른
+  // "초대"류 문구와 같이 렌더하게 됐다. memberLimitExceededError는 초대 실패 시
+  // «에러 배너»(다른 트리거·다른 위치)에만 뜨고, orgInvitesListHeading·
+  // orgInviteRowActionAriaLabel은 초대를 보낸 «뒤» 대기 목록 섹션(폼과 별개 카드)
+  // 에만 뜬다 — 버튼 라벨과 이 셋이 같은 순간·같은 자리에 같이 서는 경우가 없다
+  // (#2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다, invite
+  // 자체엔 수가 없다).
+  'settings.invite <-> settings.memberLimitExceededError',
+  'settings.invite <-> settings.orgInviteRowActionAriaLabel',
+  'settings.invite <-> settings.orgInvitesListHeading',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

@@ -424,9 +424,9 @@ export function ApprovalsQueue() {
               <p className="text-sm text-foreground">{item.title}</p>
               <p className="line-clamp-2 text-[11px] text-muted-foreground">{item.prompt}</p>
               {canResolveHitl ? (
-                // story #3592(§17-20 ⑧·§22-18 동형) — gateReject만 이 PR에서 가른다
-                // (판정표 명시 대상). gateApprove도 행마다 반복되는 같은 결함이지만
-                // 이번 착수분 밖 — 조용히 빼지 않고 남김(후속 확인 필요).
+                // story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
+                // 2026-09-07) — gateApprove도 gateReject와 같은 자리(같은 map·같은
+                // index)라 같은 기존 키(gateRowActionAriaLabel) 재사용으로 마감.
                 <div className="mt-1 flex justify-end gap-1.5">
                   <Button
                     size="sm"
@@ -449,6 +449,7 @@ export function ApprovalsQueue() {
                     className="h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground"
                     disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'approved')}
+                    aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateApprove') })}
                   >
                     <CheckCircle className="size-3.5" />
                     {t('gateApprove')}
@@ -711,10 +712,10 @@ export function ApprovalsQueue() {
                 order 유틸+wrapper의 sm:contents로 DOM은 한 세트만 유지한다(버튼 중복 렌더
                 금지 — 테스트·접근성 트리 둘 다 단일 소스여야 함). */}
             <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-end">
-              {/* story #3592(§17-20 ⑧·§22-18 동형) — sigRequestChanges·gateDiscussSubmit
-                  만 이 PR에서 가른다(판정표 명시 대상). primaryLabel(승인류) 버튼도
-                  행마다 반복되는 같은 결함이지만 라벨 자체가 게이트 타입별로 동적이라
-                  판정이 더 필요 — 이번 착수분 밖(조용히 빼지 않고 남김). */}
+              {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
+                  2026-09-07) — primaryLabel(승인류) 버튼도 같은 기존 키로 마감.
+                  disabled 중엔 화면이 "..."를 보이므로 label도 그 값 그대로(그때
+                  보이는 낱말 통째 — §22-18 원칙, 고정 낱말 지어내지 않음). */}
               <div className="order-2 flex gap-1.5 sm:contents">
                 <Button
                   size="sm"
@@ -744,6 +745,7 @@ export function ApprovalsQueue() {
                 className="order-1 h-9 w-full gap-1.5 sm:order-3 sm:h-8 sm:w-auto"
                 disabled={disabled || (requiresOptionChoice && !selectedOption)}
                 onClick={primaryOnClick}
+                aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: disabled && !isSigFlow ? '...' : primaryLabel })}
               >
                 <CheckCircle className="size-3.5" />
                 {disabled && !isSigFlow ? '...' : primaryLabel}
