@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -81,6 +81,30 @@ async def schedule_comment_collection(
             external_id=external_id, due_at=anchor_at + offset, status="pending",
         ).on_conflict_do_nothing(constraint="uq_comment_collection_schedule_publication_due_at")
         await db.execute(stmt)
+
+
+async def wake_resting_comment_schedules(db: AsyncSession, *, connection_id: uuid.UUID) -> int:
+    """story #3612(라이브 결함, 배포 47) — `process_due_comment_collections`가
+    CHANNEL_CONNECTION_NOT_ACTIVE 선검사에 막히면 그 스케줄 행을 `status=
+    "connection_inactive"`로 쉬게 한다(AC2, 매 틱 재시도 0 — 승격/기록도 안 함).
+    쉬게만 하고 깨우는 손이 없으면 연결이 나중에 복귀해도 그 발행은 영영 재수집이
+    안 되는 반쪽 처방이 된다 — 연결이 non-active→active로 돌아오는 «모든» 경로
+    (재연결 upsert·자격 교체·자동 갱신 성공, `channel_connection.py`의 세 자리)가
+    공유하는 단일 깨우는 손이 이 함수다(호출부마다 각자 깨우는 로직을 새로 짜지
+    않는다). due_at=now()로 되돌려 다음 루프 틱이 즉시 다시 집는다."""
+    from app.models.channel_publication import ChannelPublication
+
+    result = await db.execute(
+        update(CommentCollectionSchedule)
+        .where(
+            CommentCollectionSchedule.status == "connection_inactive",
+            CommentCollectionSchedule.publication_id.in_(
+                select(ChannelPublication.id).where(ChannelPublication.connection_id == connection_id)
+            ),
+        )
+        .values(status="pending", due_at=func.now())
+    )
+    return result.rowcount
 
 
 def _text_sha256(text: str) -> str:
@@ -379,7 +403,15 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
     has_open_row_due_soon = (
         select(func.count()).select_from(CommentCollectionSchedule).where(
             CommentCollectionSchedule.publication_id == ChannelPublication.id,
-            CommentCollectionSchedule.status.in_(("pending", "in_progress")),
+            # story #3612 — connection_inactive도 "열린 행"으로 센다. 이 스윕은 그
+            # 상태를 모르고 "due 3창 소진+최근활동없음"만 보는데, 뺴놓으면 매 틱
+            # (a) 루프가 connection_inactive로 쉬게 함 → (b) 이 스윕이 그 즉시
+            # "행 0"으로 보고 due_at=now 씨앗을 다시 심음 → (c) 다음 틱이 다시 그
+            # 씨앗을 집어 선검사에 또 막혀 connection_inactive → 반복. "쉬게 한다
+            # (AC2 매 틱 재시도 0)"가 이 스윕 때문에 무력화되던 것을 실측(로컬
+            # 재현)으로 잡음 — 연결이 복귀하면 wake_resting_comment_schedules가
+            # pending으로 되돌리므로 그 뒤엔 정상적으로 다시 열린 행으로 잡힌다.
+            CommentCollectionSchedule.status.in_(("pending", "in_progress", "connection_inactive")),
             CommentCollectionSchedule.due_at <= due_soon_cutoff,
         ).correlate(ChannelPublication).scalar_subquery()
     )
@@ -463,7 +495,20 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
                 continue
             except CommentFetchError as exc:
                 failure_kind = classify_failure_kind(exc.error_code)
-                if failure_kind == FAILURE_KIND_CONNECTION:
+                if exc.error_code == "CHANNEL_CONNECTION_NOT_ACTIVE":
+                    # story #3612(라이브 결함, 배포 47) — 이건 선검사(이미 비활성/연결
+                    # 없음/무자격)가 막은 것이지 provider가 새로 알려준 사실이 아니다.
+                    # 승격·last_error 기록 대상이 아니다(AC1 — 안 그러면 그 이전에
+                    # 적힌 진짜 원인(CHANNEL_TOKEN_EXPIRED 등)이 매 틱 이 순환 문구로
+                    # 덮인다, 실사고 재현). 지속폴링 재생성도 안 부른다 — 이 행을
+                    # "쉬게" 한다(pending이 아니라 connection_inactive라 다음 due
+                    # 스캔에서 안 잡힘, AC2 "매 틱 재시도 0"). 연결이 active로 복귀
+                    # 하면 wake_resting_comment_schedules()가 pending으로 되돌린다.
+                    row.status = "connection_inactive"
+                    row.error_code = exc.error_code
+                    await db.commit()
+                    counts["connection_inactive"] = counts.get("connection_inactive", 0) + 1
+                elif failure_kind == FAILURE_KIND_CONNECTION:
                     await _promote_connection_status(
                         db, publication_id=row.publication_id, error_code=exc.error_code, message=str(exc),
                     )
@@ -635,7 +680,12 @@ async def refresh_comments_now(
         # 전용 개념을 수동 경로에 섞지 않는다).
         from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION
 
-        if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION:
+        # story #3612(라이브 결함, 배포 47) — CHANNEL_CONNECTION_NOT_ACTIVE는 선검사
+        # (이미 비활성/연결 없음/무자격)일 뿐 새 증거가 아니다 — 승격·기록 대상이
+        # 아니다(AC3, 스케줄 루프 쪽 AC1과 동형). 사람에게는 그대로 409로 알린다
+        # (schedule_row.status="failed"·raise는 불변) — «기록 안 함»과 «알림 안 함»은
+        # 다르다, 이 버튼을 누른 그 사람에게는 지금 실패했다는 사실 자체가 유효한 응답.
+        if classify_failure_kind(exc.error_code) == FAILURE_KIND_CONNECTION and exc.error_code != "CHANNEL_CONNECTION_NOT_ACTIVE":
             # story #3603(잔여, 페드루 PO 追加 2026-09-07) — error_code/message를 안 실으면
             # 이 수동 경로만 last_error 3종이 안 채워져(3597과 같은 클래스 재발) 「서버
             # 응답 보기」가 여기서 시작된 만료엔 비거나 옛 오류를 보인다.

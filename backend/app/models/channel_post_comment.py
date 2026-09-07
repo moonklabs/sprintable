@@ -87,7 +87,12 @@ class CommentCollectionSchedule(Base):
     external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # 'pending'|'in_progress'|'captured'|'unsupported'|'failed' — insight_snapshot.status와 동형.
+    # 'pending'|'in_progress'|'captured'|'unsupported'|'failed'|'connection_inactive' —
+    # insight_snapshot.status와 동형(마지막 값만 이쪽 전용, story #3612). connection_
+    # inactive=선검사(CHANNEL_CONNECTION_NOT_ACTIVE — 연결 비활성/없음/무자격)로 막힌
+    # 행. «연결에 대한 새 증거»가 아니라 이미 아는 사실의 재확인이라 승격·지속폴링
+    # 재생성 대상이 아니고(매 틱 재시도 0), pending처럼 due 스캔에도 안 걸린다 —
+    # 연결이 active로 복귀하면 wake_resting_comment_schedules()가 pending으로 되돌린다.
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
