@@ -2335,10 +2335,24 @@ export default function ChannelPostEditPage() {
             </span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-image-spec-tag">
-            {/* story #3530(유나 §17-16④, PO 確定 2026-09-06) — aspectMin>0(선언
+            {/* story #3591(유나 §17-23④ 짝, PO 確定 2026-09-06) — 영상이 있으면
+                이 구역은 커버(BE가 video_aspect_target으로 잰다, 3578) — 비율
+                조각만 videoSpec 이름표(formatVideoAspectRatio, 3586 거부 문장과
+                같은 헬퍼)로 바꾸고 나머지 조각(형식·용량·너비·색상공간)은 이미지
+                규격 그대로. 영상 없으면 아래 캐러셀 분기 무변. */}
+            {video && videoSpec
+              ? t('channelPostsCoverSpecTag', {
+                  formats: imageSpec.formats.map((f) => f.replace('image/', '').toUpperCase()).join(', '),
+                  maxBytes: formatFileSize(imageSpec.maxBytes),
+                  aspectTarget: formatVideoAspectRatio(videoSpec.aspectTarget),
+                  widthMin: imageSpec.widthMin,
+                  widthMax: imageSpec.widthMax,
+                  colorSpace: imageSpec.colorSpace,
+                })
+              : /* story #3530(유나 §17-16④, PO 確定 2026-09-06) — aspectMin>0(선언
                 있음)일 때만 두 경계를 보인다. 0(미선언)이면 지금처럼 최대만 —
-                0을 1:∞로 뒤집지 않는다. */}
-            {imageSpec.aspectMin > 0
+                0을 1:∞로 뒤집지 않는다. */
+              imageSpec.aspectMin > 0
               ? t('channelPostsImageSpecTagWithMin', {
                   formats: imageSpec.formats.map((f) => f.replace('image/', '').toUpperCase()).join(', '),
                   maxBytes: formatFileSize(imageSpec.maxBytes),

@@ -2581,6 +2581,7 @@
     "channelPostsImageAttachLabel": "Attach image",
     "channelPostsImageSpecTag": "{formats} · up to {maxBytes} · max aspect {aspectMax}:1 · width {widthMin}–{widthMax}px · color space {colorSpace}",
     "channelPostsImageSpecTagWithMin": "{formats} · up to {maxBytes} · aspect {aspectMinDisplay} ~ {aspectMaxDisplay} · width {widthMin}–{widthMax}px · color space {colorSpace}",
+    "channelPostsCoverSpecTag": "{formats} · up to {maxBytes} · aspect {aspectTarget} · width {widthMin}–{widthMax}px · color space {colorSpace}",
     "channelPostsImageAttachTriggerCta": "Choose image",
     "channelPostsImageAttachAlt": "Attached image",
     "channelPostsImageUploadRequestingUrl": "Preparing upload…",
