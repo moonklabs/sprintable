@@ -52,12 +52,27 @@ class GetPublicationInsightsInput(SprintableInput):
 # GA4 유입 3키)을 이 MCP 프로세스는 직접 import 못 한다(별도 패키지, REST 경계 너머) —
 # 여기서 키 목록을 재선언하지 않고 응답에 실제로 있는 키의 합집합으로 델타를 낸다(BE가
 # 키를 늘려도 이 축이 안 깨진다, 새 계약 문서 동기화 불요).
+def _is_numeric(v: object) -> bool:
+    """bool은 int의 서브클래스라(`isinstance(True, int) is True`) 명시로 뺀다 — 정규화
+    값에 boolean이 올 계약은 없지만, 있다면 델타로 계산되면 안 되는 종류다."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 def _label_snapshots_and_compute_delta(
     snapshots: list[dict],
-) -> tuple[list[dict], dict[str, int | None] | None, str | None]:
+) -> tuple[list[dict], dict[str, int | float | None] | None, str | None]:
     """due_at 오름차순 정렬 뒤 offset_label(1d|7d)을 매기고, 둘 다 captured일 때만
     키별 v7−v1 델타를 낸다. 페드루 決定(3321 원칙) — 0과 null(미제공)을 섞지 않는다:
-    두 값 중 하나라도 None이면 그 키의 델타는 None(0으로 대체하지 않는다)."""
+    두 값 중 하나라도 None이면 그 키의 델타는 None(0으로 대체하지 않는다). 값은
+    int뿐 아니라 float도 허용(spend·GA4 유입 파생값 등 실수로 올 수 있는 지표가
+    조용히 null 처리되면 «제공된 값»을 «미제공」으로 오판하는 것이라 — 페드루 CHANGES
+    2026-09-07, PR#4003).
+
+    ⚠️전제(관찰, 페드루 CHANGES 동시 지적) — 라벨은 idx 0=1d·나머지 전부=7d다. 원장
+    (`_SNAPSHOT_OFFSETS`, insight_snapshots.py)이 지금 오프셋 2개(1d·7d)만 등록해
+    한 publication_id·채널 조합엔 스냅샷이 정확히 2건뿐이라 안전하지만, 재시도 등으로
+    3건 이상이 생기면 셋째부터도 "7d"로 잘못 찍힌다 — 이 스토리 범위 밖(원장에
+    오프셋이 늘어나면 그때 이 함수도 같이 고칠 자리)."""
     sorted_snapshots = sorted(snapshots, key=lambda s: s["due_at"])
     labeled = [
         {**snap, "offset_label": "1d" if idx == 0 else "7d"}
@@ -74,10 +89,10 @@ def _label_snapshots_and_compute_delta(
 
     normalized_1d = snapshot_1d.get("normalized") or {}
     normalized_7d = snapshot_7d.get("normalized") or {}
-    delta: dict[str, int | None] = {}
+    delta: dict[str, int | float | None] = {}
     for key in sorted(set(normalized_1d) | set(normalized_7d)):
         v1, v7 = normalized_1d.get(key), normalized_7d.get(key)
-        delta[key] = (v7 - v1) if isinstance(v1, int) and isinstance(v7, int) else None
+        delta[key] = (v7 - v1) if _is_numeric(v1) and _is_numeric(v7) else None
     return labeled, delta, None
 
 

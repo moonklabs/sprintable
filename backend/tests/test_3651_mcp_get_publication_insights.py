@@ -105,6 +105,29 @@ async def test_unprovided_metric_stays_null_not_zero(monkeypatch):
     assert body["delta_1d_to_7d"]["conversions"] == 7
 
 
+async def test_float_metrics_get_real_delta_not_null(monkeypatch):
+    """페드루 CHANGES(2026-09-07, PR#4003) — 정규화 값이 float으로 와도(spend·GA4 유입
+    파생값 등) «제공된 값」으로 취급해 실수 델타를 낸다. 이전 버전은 isinstance(v, int)만
+    허용해 float 쌍이 조용히 null이 됐다(제공된 값을 미제공으로 오판). 한쪽만 float이고
+    한쪽이 null이면(진짜 미제공) 여전히 null."""
+    from sprintable_mcp.tools import channel_posts
+
+    snapshots = [
+        _snapshot(due_at="2026-09-08T00:00:00Z", normalized={"spend": 12.5, "ctr": None}),
+        _snapshot(due_at="2026-09-14T00:00:00Z", normalized={"spend": 30.25, "ctr": 0.042}),
+    ]
+    monkeypatch.setattr(channel_posts.client, "get", _RecordingGet([snapshots]))
+    monkeypatch.setattr(type(channel_posts.client), "org_id", property(lambda self: "org-1"))
+
+    result = await channel_posts.get_publication_insights(
+        channel_posts.GetPublicationInsightsInput(publication_id="pub-1"),
+    )
+    body = jsonlib.loads(result[0].text)
+
+    assert body["delta_1d_to_7d"]["spend"] == pytest.approx(17.75)
+    assert body["delta_1d_to_7d"]["ctr"] is None  # 1일값이 null(미제공)이라 여전히 null
+
+
 async def test_draft_id_without_publication_surfaces_be_error_as_text(monkeypatch):
     """다른 org의 draft_id(또는 존재하지 않는 draft_id)를 주면 draft 상세 조회 자체가
     BE에서 404로 거부된다 — SprintableApiError를 삼키지 않고 그대로 err()로 낸다(3651
