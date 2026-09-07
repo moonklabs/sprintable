@@ -361,3 +361,180 @@ async def test_facebook_sandbox_expire_after_publish_marker_promotes_status_expi
             assert conn.status == "expired"
     finally:
         await engine.dispose()
+
+
+# ─── story #3640(BE·샌드박스 리그·소형, 페드루 PO 確定 2026-09-07) — expire-after-
+# publish 마커의 「영구 지뢰」화 방지: 발행 뒤 첫 수집 1회만 401(위 두 테스트가
+# 고정하는 양성대조), 그 뒤(사람이 「다시 연결」한 뒤 등)는 정상 200·연결 active
+# 유지. dev PO Test Org Sandbox Page 1(641adabf)이 표본이 살아있는 한 영원히
+# 못 쓰던 실사고를 여기서 코드로 고정한다.
+
+
+async def _seed_second_tick(s, *, org_id, publication_id, channel, external_id, due_at):
+    """schedule_comment_collection은 (publication_id, due_at) UNIQUE라 첫 seed와
+    같은 anchor를 재사용하면 충돌한다 — 두 번째 수집 틱은 별도 due_at로 직접
+    삽입(헬퍼 재사용 없이 새 세팅 로직 발명 0, 컬럼은 schedule_comment_collection과
+    동형)."""
+    from app.models.channel_post_comment import CommentCollectionSchedule
+
+    s.add(CommentCollectionSchedule(
+        id=uuid.uuid4(), org_id=org_id, publication_id=publication_id, channel=channel,
+        external_id=external_id, due_at=due_at, status="pending",
+    ))
+
+
+@pytest.mark.anyio
+async def test_instagram_sandbox_expire_after_publish_marker_second_collection_succeeds_and_stays_active():
+    """AC1 — 첫 수집(위 test_instagram_sandbox_expire_after_publish_marker_
+    promotes_status_expired와 동일 경로)은 401·expired 그대로, 두 번째 수집은
+    200·connection active 유지(사람이 「다시 연결」한 것과 동형 — 재연결 후 다음
+    틱이 또 만료시키던 실사고가 여기서 재현되면 이 테스트가 RED)."""
+    from app.services.channel_post_comments import process_due_comment_collections, schedule_comment_collection
+    import app.services.instagram_sandbox_publish as ig_sandbox
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="instagram_sandbox")
+
+            creation_id = await ig_sandbox.create_container(
+                None, access_token="x", threads_user_id="u", text="[sandbox:expire-after-publish]",
+                image_url="https://example.com/i.jpg",
+            )
+            media_id = await ig_sandbox.publish_container(None, access_token="x", threads_user_id="u", creation_id=creation_id)
+
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="instagram_sandbox", external_id=media_id,
+            )
+            anchor = datetime.now(timezone.utc) - timedelta(hours=2)
+            await schedule_comment_collection(
+                s, org_id=org_id, publication_id=pub.id, channel="instagram_sandbox", external_id=media_id, anchor_at=anchor,
+            )
+            await s.commit()
+
+            counts = await process_due_comment_collections(s)
+            assert counts["failed"] == 1
+            await s.refresh(conn)
+            assert conn.status == "expired"
+
+            # 사람이 「다시 연결」(3613 AC3와 동형 — 여기선 status만 되돌린다, 그
+            # 다시연결 플로우 자체는 이 스토리 스코프 밖).
+            conn.status = "active"
+            await _seed_second_tick(
+                s, org_id=org_id, publication_id=pub.id, channel="instagram_sandbox", external_id=media_id,
+                due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            )
+            await s.commit()
+
+            counts2 = await process_due_comment_collections(s)
+            assert counts2["failed"] == 0, f"두 번째 수집도 실패로 잡히면 안 된다: {counts2}"
+            assert counts2["captured"] == 1
+
+            await s.refresh(conn)
+            assert conn.status == "active", "두 번째 수집이 다시 연결을 expired로 되돌리면 안 된다(영구 지뢰 재발)"
+
+            await s.refresh(pub)
+            assert pub.sandbox_expired_once is True
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_facebook_sandbox_expire_after_publish_marker_second_collection_succeeds_and_stays_active():
+    """AC1(facebook_sandbox 짝) — ig와 동형."""
+    from app.services.channel_post_comments import process_due_comment_collections, schedule_comment_collection
+    import app.services.facebook_sandbox_publish as fb_sandbox
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="facebook_sandbox")
+
+            creation_id = await fb_sandbox.create_container(
+                None, access_token="x", threads_user_id="u", text="[sandbox:expire-after-publish]",
+            )
+            media_id = await fb_sandbox.publish_container(None, access_token="x", threads_user_id="u", creation_id=creation_id)
+
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="facebook_sandbox", external_id=media_id,
+            )
+            anchor = datetime.now(timezone.utc) - timedelta(hours=2)
+            await schedule_comment_collection(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox", external_id=media_id, anchor_at=anchor,
+            )
+            await s.commit()
+
+            counts = await process_due_comment_collections(s)
+            assert counts["failed"] == 1
+            await s.refresh(conn)
+            assert conn.status == "expired"
+
+            conn.status = "active"
+            await _seed_second_tick(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox", external_id=media_id,
+                due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            )
+            await s.commit()
+
+            counts2 = await process_due_comment_collections(s)
+            assert counts2["failed"] == 0, f"두 번째 수집도 실패로 잡히면 안 된다: {counts2}"
+            assert counts2["captured"] == 1
+
+            await s.refresh(conn)
+            assert conn.status == "active"
+
+            await s.refresh(pub)
+            assert pub.sandbox_expired_once is True
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_instagram_sandbox_expire_marker_without_one_shot_flag_still_401s_mutation():
+    """뮤테이션(AC1) — sandbox_expired_once가 아직 False인 채로(=1회성 로직이
+    없었다면) 두 번째 수집을 돌리면 여전히 401·failed다. 위 성공 테스트가 실제로
+    이 결함을 잡는다는 증거(회귀 가드 자체를 검증) — pub.sandbox_expired_once를
+    다시 False로 되돌려 「관측 기록이 없었다」를 재현."""
+    from app.services.channel_post_comments import process_due_comment_collections, schedule_comment_collection
+    import app.services.instagram_sandbox_publish as ig_sandbox
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="instagram_sandbox")
+
+            creation_id = await ig_sandbox.create_container(
+                None, access_token="x", threads_user_id="u", text="[sandbox:expire-after-publish]",
+                image_url="https://example.com/i.jpg",
+            )
+            media_id = await ig_sandbox.publish_container(None, access_token="x", threads_user_id="u", creation_id=creation_id)
+
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="instagram_sandbox", external_id=media_id,
+            )
+            anchor = datetime.now(timezone.utc) - timedelta(hours=2)
+            await schedule_comment_collection(
+                s, org_id=org_id, publication_id=pub.id, channel="instagram_sandbox", external_id=media_id, anchor_at=anchor,
+            )
+            await s.commit()
+
+            await process_due_comment_collections(s)
+            await s.refresh(pub)
+            assert pub.sandbox_expired_once is True
+
+            # 뮤테이션 — 관측 기록을 되돌려 "1회성 로직이 없었다"를 재현.
+            pub.sandbox_expired_once = False
+            conn.status = "active"
+            await _seed_second_tick(
+                s, org_id=org_id, publication_id=pub.id, channel="instagram_sandbox", external_id=media_id,
+                due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            )
+            await s.commit()
+
+            counts2 = await process_due_comment_collections(s)
+            assert counts2["failed"] == 1, "sandbox_expired_once 없이는 두 번째도 401(영구 지뢰) — 뮤테이션 RED 확認"
+    finally:
+        await engine.dispose()

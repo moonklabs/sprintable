@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,6 +39,13 @@ class ChannelPublication(Base):
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3640(BE·샌드박스 리그·소형, 페드루 PO 確定 2026-09-07) — `[sandbox:
+    # expire-after-publish]` 마커가 발행 시 media_id에 영구 접미사를 새겨 fetch_replies가
+    # «매번» 401을 던지던 「영구 지뢰」를 닫는다. 이 발행물에서 그 401을 이미 한 번
+    # 관측했으면(양성대조 완료) True — channel_post_comments.py가 그 뒤부터 접미사를
+    # 벗긴 media_id로 재조회해 200을 받는다(sandbox 어댑터 자체는 결정적·상태 없음 그대로,
+    # 상태는 이 발행물 행에만 산다).
+    sandbox_expired_once: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

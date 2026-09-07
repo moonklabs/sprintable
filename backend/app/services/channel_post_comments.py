@@ -146,13 +146,39 @@ async def _fetch_replies_raw(
     if channel in ("sandbox", "instagram_sandbox"):
         if external_id is None:
             raise CommentFetchError(error_code="COMMENT_EXTERNAL_ID_MISSING", message="external_id가 없습니다")
+        # story #3640 — instagram_sandbox의 [sandbox:expire-after-publish] 마커가
+        # media_id에 새긴 영구 접미사를 fetch_replies가 볼 때마다 401을 던지던
+        # 「영구 지뢰」를 닫는다: 이 발행물이 이미 한 번 그 401을 관측했으면
+        # (sandbox_expired_once) 접미사를 벗긴 media_id로 불러 200을 받는다.
+        # sandbox_publish.py(channel="sandbox")엔 이 마커가 없어(그라운딩 확認)
+        # pub 조회 자체를 skip — 새 DB 왕복 0.
+        pub = None
+        effective_external_id = external_id
+        if channel == "instagram_sandbox":
+            from app.services.instagram_sandbox_publish import (
+                _EXPIRE_AFTER_PUBLISH_SUFFIX as _IG_EXPIRE_SUFFIX,
+            )
+
+            if external_id.endswith(_IG_EXPIRE_SUFFIX):
+                from app.models.channel_publication import ChannelPublication
+
+                pub = await db.get(ChannelPublication, publication_id)
+                if pub is not None and pub.sandbox_expired_once:
+                    effective_external_id = external_id[: -len(_IG_EXPIRE_SUFFIX)]
         _publish_client = get_publish_client_module(channel)
         from app.services.threads_publish import ThreadsPublishError
         import httpx
         try:
             async with httpx.AsyncClient() as client:
-                return await _publish_client.fetch_replies(client, access_token="sandbox", media_id=external_id)
+                return await _publish_client.fetch_replies(
+                    client, access_token="sandbox", media_id=effective_external_id,
+                )
         except ThreadsPublishError as exc:
+            # story #3640 — 위에서 접미사를 못 벗겼다(=이번이 첫 401)면 여기서
+            # 「관측했다」로 표시해 다음 틱부터 벗겨진 media_id로 부른다(AC1).
+            if pub is not None and not pub.sandbox_expired_once:
+                pub.sandbox_expired_once = True
+                await db.flush()
             # story #3597 — instagram_sandbox_publish.py::fetch_replies가 새
             # [sandbox:expire-after-publish] 마커로 401을 던지기 전까지는 이 분기가
             # 예외를 낼 일이 없어(sandbox_publish.py는 fetch_replies에서 절대
@@ -207,12 +233,36 @@ async def _fetch_replies_raw(
             error_code="COMMENT_CHANNEL_NOT_IMPLEMENTED", message=f"fetch_replies dispatch가 없습니다: {channel}",
         ) from exc
 
+    # story #3640 — facebook_sandbox의 [sandbox:expire-after-publish] 마커도 ig와
+    # 동형(영구 접미사 → 매 틱 401). 이 공용 블록이 이미 pub를 갖고 있어 sandbox
+    # 분기 재사용 없이 여기서 바로(실 threads/instagram/facebook은 접미사가 애초에
+    # 안 붙으니 이 if가 no-op).
+    effective_external_id = pub.external_id
+    if channel == "facebook_sandbox":
+        from app.services.facebook_sandbox_publish import (
+            _EXPIRE_AFTER_PUBLISH_SUFFIX as _FB_EXPIRE_SUFFIX,
+        )
+
+        if pub.external_id.endswith(_FB_EXPIRE_SUFFIX) and pub.sandbox_expired_once:
+            effective_external_id = pub.external_id[: -len(_FB_EXPIRE_SUFFIX)]
+
     import httpx
     try:
         async with httpx.AsyncClient() as client:
-            return await _publish_client.fetch_replies(client, access_token=access_token, media_id=pub.external_id)
+            return await _publish_client.fetch_replies(
+                client, access_token=access_token, media_id=effective_external_id,
+            )
     except Exception as exc:  # noqa: BLE001 — ThreadsPublishError는 상태코드로 분류(threads/instagram/facebook 공용)
         if isinstance(exc, ThreadsPublishError):
+            # story #3640 — 첫 401(=접미사를 못 벗겼다)이면 관측 기록.
+            if channel == "facebook_sandbox" and not pub.sandbox_expired_once:
+                from app.services.facebook_sandbox_publish import (
+                    _EXPIRE_AFTER_PUBLISH_SUFFIX as _FB_EXPIRE_SUFFIX,
+                )
+
+                if pub.external_id.endswith(_FB_EXPIRE_SUFFIX):
+                    pub.sandbox_expired_once = True
+                    await db.flush()
             # story #3605 — 위 sandbox 분기와 동일하게 classify_graph_error_code로
             # 교체(새 판정 로직 0, 공용 함수 재사용).
             from app.services.graph_api_errors import classify_graph_error_code
