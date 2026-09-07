@@ -569,6 +569,52 @@ async def _fetch_threads_via_connection(db: AsyncSession, snapshot: InsightSnaps
         return await _fetch_threads(client, access_token=access_token, media_id=pub.external_id)
 
 
+# story #3660 CHANGES①(페드루 PO, 2026-09-07, PR #4015) — 클레임(pending→in_progress
+# 전이·commit) 뒤 개별 처리 사이의 창에서, 같은 publication의 재발행이 이 행을
+# superseded로 회수할 수 있다(schedule_insight_snapshots, 별도 트랜잭션). 실측(라이브
+# 재현) — 처음엔 `snapshot.status = "captured"`처럼 status도 **파이썬 속성**으로 대입해
+# 뒀는데, 그 뒤(같은 반복 안에서) `_maybe_enrich_with_ga4_inflow`가 부르는
+# `db.execute(select(...))` 같은 다른 쿼리가 **autoflush**를 유발해 그 dirty
+# status="captured"가 가드 UPDATE보다 **먼저** 무조건 DB에 써져 버렸다 — 그 뒤로는 내
+# 가드(`WHERE status='in_progress'`)가 항상 거짓으로 "이미 회수됨"이라 오판했다(제 손
+# 으로 in_progress를 지워 놓고). 처방 — **status는 파이썬 속성으로 절대 대입하지
+# 않는다**(다른 필드는 무해 — autoflush돼도 그 값 자체는 그대로 맞다). 오직 이 함수의
+# `new_status` 인자(지역 변수, ORM dirty-tracking 밖)로만 가드 UPDATE에 실린다.
+_NON_STATUS_TERMINAL_FIELDS = ("captured_at", "error_code", "raw_payload", "normalized", "source", "attempt_count")
+
+
+async def _finalize_snapshot_write(db: AsyncSession, snapshot: InsightSnapshot, *, new_status: str) -> bool:
+    """`snapshot`의 status 아닌 필드(이미 파이썬 속성으로 대입돼 있음, autoflush돼도
+    무해)를 그대로 읽고, `new_status`(호출자의 지역 변수 — `snapshot.status`엔 한 번도
+    대입 안 됨)를 더해 `WHERE id=:id AND status='in_progress'` 가드가 붙은 명시적
+    UPDATE로 쓴다. `db.expunge(snapshot)`로 세션 추적에서 뗀 뒤 실행 — 안 그러면
+    `db.execute()`의 autoflush가(non-status 필드라도) 이 객체의 dirty 상태를 내 가드
+    보다 먼저 써 버릴 수 있다. `synchronize_session=False` — 이 UPDATE가 세션의
+    identity map과 동기화하려 들면(기본 "auto"), 같은 배치의 *다른* still-attached
+    InsightSnapshot(예: 같은 tick의 7d 짝)까지 재평가하다 만료된/미로딩 속성을
+    lazy-load하려 시도해 async 세션에서 MissingGreenlet으로 죽는다(실측) — 이 UPDATE는
+    정확히 이 한 행만 겨눈다는 것을 이미 아니 동기화가 불필요하다.
+
+    반환 False(가드 미통과=그 사이 superseded로 회수됨)면 이 트랜잭션 전체를 rollback
+    한다 — 이 반복에서 `db.add()`한 부수 기록(예: `_record_insight_evidence`의 Evidence)
+    도 같이 버려진다(이미 회수된 옛 사이클의 evidence를 남기지 않는다, 올바른 동작)."""
+    values = {f: getattr(snapshot, f) for f in _NON_STATUS_TERMINAL_FIELDS}
+    values["status"] = new_status
+    snapshot_id = snapshot.id
+    db.expunge(snapshot)
+    result = await db.execute(
+        update(InsightSnapshot)
+        .where(InsightSnapshot.id == snapshot_id, InsightSnapshot.status == "in_progress")
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 0:
+        await db.rollback()
+        return False
+    await db.commit()
+    return True
+
+
 async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """story #3497 그라운딩④ — `process_due_publication_commands`와 동형 SKIP LOCKED
     2단계 커밋(클레임 commit → 개별 처리 commit/rollback 격리). due_at이 도래한
@@ -595,10 +641,9 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
             adapter = CHANNEL_ADAPTERS.get(snapshot.channel)
             declared = adapter.insight_metrics if adapter is not None else ()
             if not declared:
-                snapshot.status = "unsupported"
                 snapshot.captured_at = now
-                await db.commit()
-                counts["unsupported"] += 1
+                if await _finalize_snapshot_write(db, snapshot, new_status="unsupported"):
+                    counts["unsupported"] += 1
                 continue
 
             try:
@@ -609,37 +654,32 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
                     await _promote_connection_status_for_snapshot(
                         db, snapshot, error_code=exc.error_code, message=str(exc),
                     )
-                    snapshot.status = "failed"
                     snapshot.error_code = exc.error_code
-                    await db.commit()
-                    counts["failed"] += 1
+                    if await _finalize_snapshot_write(db, snapshot, new_status="failed"):
+                        counts["failed"] += 1
                 elif failure_kind == FAILURE_KIND_TRANSIENT:
                     snapshot.attempt_count += 1
                     snapshot.error_code = exc.error_code
                     if snapshot.attempt_count >= 5:
-                        snapshot.status = "failed"
-                        await db.commit()
-                        counts["failed"] += 1
+                        if await _finalize_snapshot_write(db, snapshot, new_status="failed"):
+                            counts["failed"] += 1
                     else:
-                        snapshot.status = "pending"
-                        await db.commit()
-                        counts["pending_retry"] += 1
+                        if await _finalize_snapshot_write(db, snapshot, new_status="pending"):
+                            counts["pending_retry"] += 1
                 else:
-                    snapshot.status = "failed"
                     snapshot.error_code = exc.error_code
-                    await db.commit()
-                    counts["failed"] += 1
+                    if await _finalize_snapshot_write(db, snapshot, new_status="failed"):
+                        counts["failed"] += 1
                 continue
 
             snapshot.raw_payload = result["raw"]
             snapshot.normalized = _normalize(declared_metrics=declared, values=result["values"])
-            snapshot.status = "captured"
             snapshot.captured_at = now
             snapshot.source = snapshot.channel
             await _maybe_enrich_with_ga4_inflow(db, snapshot)
             await _record_insight_evidence(db, snapshot)
-            await db.commit()
-            counts["captured"] += 1
+            if await _finalize_snapshot_write(db, snapshot, new_status="captured"):
+                counts["captured"] += 1
         except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
             await db.rollback()
             counts["error"] += 1
