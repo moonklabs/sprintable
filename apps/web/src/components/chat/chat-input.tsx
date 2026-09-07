@@ -454,7 +454,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         setSteerError(
           (body?.error?.code ?? detail?.code) === 'conversation_target_mismatch'
             ? t('steerErrorNotParticipant')
-            : extractBackendErrorMessage(body) ?? t('sendFailed'),
+            : extractBackendErrorMessage(body, t) ?? t('sendFailed'),
         );
         return;
       }

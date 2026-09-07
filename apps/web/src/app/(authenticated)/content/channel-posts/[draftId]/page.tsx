@@ -447,7 +447,7 @@ export default function ChannelPostEditPage() {
       }
       // story #3601(페드루 PO 追加 2026-09-07) — body?.message는 우리 봉투에 없는
       // 자리라 죽은 폴백이었다(추가 검증 없이 걷는다).
-      const message = extractBackendErrorMessage(body) ?? t('commentsRefreshErrorGeneric');
+      const message = extractBackendErrorMessage(body, t) ?? t('commentsRefreshErrorGeneric');
       return { ok: false, kind: 'generic', message };
     } catch {
       return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
@@ -470,7 +470,7 @@ export default function ChannelPostEditPage() {
       const body = await res.json().catch(() => null) as { data?: { story_id?: string }; error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
       if (!res.ok) {
         // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
-        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
+        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
       }
       const storyId = body?.data?.story_id;
       if (!storyId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
@@ -527,7 +527,7 @@ export default function ChannelPostEditPage() {
       const body = await res.json().catch(() => null) as { data?: ReplyView; error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
       if (!res.ok || !body?.data) {
         // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
-        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
+        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
       }
       return { ok: true, reply: body.data };
     } catch {
@@ -552,7 +552,7 @@ export default function ChannelPostEditPage() {
       if (!res.ok) {
         // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
         const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
-        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
+        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
       }
       loadComments();
       return { ok: true };

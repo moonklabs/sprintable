@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.channel_post_version import ChannelPostVersion
@@ -110,12 +111,14 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     엔드포인트와 같은 권한 폭: org 멤버인 휴먼이면 누구나)."""
     resolved = await resolve_member(auth, org_id, db)
     if resolved.type != "human":
+        # story #3615 — 이미 사람 문장(3601 allowlist 등재분)이라 그대로 user_message로.
         raise HTTPException(
             status_code=403,
-            detail={
-                "code": "CHANNEL_POST_PUBLISH_HUMAN_ONLY",
-                "message": "채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
-            },
+            detail=human_error(
+                "CHANNEL_POST_PUBLISH_HUMAN_ONLY",
+                "채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
+                user_message="채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
+            ),
         )
     return resolved
 

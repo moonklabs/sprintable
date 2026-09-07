@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.channel_post_comments import (
@@ -30,10 +31,10 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     if resolved.type != "human":
         raise HTTPException(
             status_code=403,
-            detail={
-                "code": "COMMENT_REFRESH_HUMAN_ONLY",
-                "message": "댓글 재수집은 휴먼 멤버만 가능합니다.",
-            },
+            detail=human_error(
+                "COMMENT_REFRESH_HUMAN_ONLY", "댓글 재수집은 휴먼 멤버만 가능합니다.",
+                user_message="댓글 재수집은 휴먼 멤버만 가능합니다.",
+            ),
         )
     return resolved
 
@@ -245,7 +246,10 @@ async def refresh_publication_comments_endpoint(
     except CommentCollectionUnsupportedError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"code": "COMMENT_COLLECTION_UNSUPPORTED", "message": "이 채널은 댓글 수집을 지원하지 않습니다."},
+            detail=human_error(
+                "COMMENT_COLLECTION_UNSUPPORTED", "이 채널은 댓글 수집을 지원하지 않습니다.",
+                user_message="이 채널은 댓글 수집을 지원하지 않습니다.",
+            ),
         ) from exc
     except CommentFetchError as exc:
         if exc.error_code == "COMMENT_PUBLICATION_NOT_FOUND":
