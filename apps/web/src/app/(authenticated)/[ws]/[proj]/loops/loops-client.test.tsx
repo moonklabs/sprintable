@@ -90,7 +90,12 @@ describe('LoopsClient — 실험실 first-touch 정체성', () => {
     expect(html).toContain('첫 루프 시작하기');
     expect(html).toContain('가설 하나로 충분해요');
     expect(html).toContain('AI가 초안을 도와요');
-    expect(html).not.toContain('Loop이 없습니다'); // 구 카피 소거
+    // story #3643(2026-09-07, 유나 제안·PO 決) — 두 세대 낡은 부정 단언("Loop이 없습니다"
+    // 소거)은 그 정확한 문자열만 지켜 아무것도 안 지키는 상태였다. 「Loop」로 넓혀 이
+    // 화면 키 14개(이 컴포넌트가 t()로 부르는 loops.* 전체)에 영문 loop이 0임을 지킨다
+    // (entityTypeLoop을 쓰는 context-pack-panel.tsx는 이 파일이 import하지 않는다 — 유나
+    // 확認 済).
+    expect(html).not.toContain('Loop');
   });
 
   it('빈 상태 CTA 클릭 시 LoopCreateDialog가 open=true로 전환된다(동일 다이얼로그 재사용)', async () => {
