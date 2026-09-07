@@ -338,6 +338,212 @@ async def test_cron_max_retries_reaches_dead_letter():
 
 
 @pytest.mark.anyio
+async def test_cron_rate_limited_max_retries_reaches_dead_letter_but_connection_stays_active():
+    """story #3598(유나 Design CHANGES 1, 2026-09-07 정정) — CHANNEL_RATE_LIMITED는
+    "시간이 지나면 스스로 풀리는" 한도 초과라 재시도 상한 승격(connection.status=
+    error)에서 반드시 제외돼야 한다. 제외 없이 그대로 승격하면 일시 한도 초과
+    5연속(부하가 몰리는 정상 상황)만으로 발행이 전면 차단되고 사람의 재연결
+    없인 못 풀리는 자해 잠금이 된다(3595 본문·AC6 「연결 상태는 사람이 고쳐야
+    풀리는 것에만 · 한도 초과는 잔량·시각」 원칙). command 자체는 여전히
+    dead_letter(재시도 상한 도달은 맞다) — connection만 건드리지 않는다."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.publication_command import MAX_RETRIES, process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+                attempt_count=MAX_RETRIES - 1,
+            )
+            s.add(cmd)
+            await s.commit()
+            cmd_id = cmd.id
+
+        # quota_usage>=quota_total → ChannelRateLimitedError(위 rate-limited 테스트와
+        # 동형 트리거).
+        with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 300))):
+            async with Session() as s:
+                await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_connection import ChannelConnection
+            from sqlalchemy import select
+            cmd = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd.status == "dead_letter", "재시도 상한 도달 자체는 그대로여야 한다"
+            conn = (await s.execute(
+                select(ChannelConnection).where(ChannelConnection.id == connection_id)
+            )).scalar_one()
+        assert conn.status == "active", (
+            "일시 한도 초과가 상한에 닿아도 connection은 건드리면 안 된다(자해 잠금 방지)"
+        )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_max_retries_reaches_dead_letter_also_escalates_connection_to_error():
+    """story #3598(AC6, PO 確定 2026-09-06) — transient가 재시도 상한(MAX_RETRIES, 댓글
+    수집 attempt_count>=5와 동형 임계값)에 도달해도 connection.status가 그대로
+    "active"로 남아 「연결됨」 칩이 거짓으로 보이던 결함(3595 표 ③④류 "미표시"와 같은
+    클래스). dead_letter 승격과 같은 자리에서 connection.status="error"(reason=error)
+    로도 승격해야 한다. 위 test_cron_max_retries_reaches_dead_letter와 완전히 동형
+    세팅 — command 승격만 추가 검증."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.publication_command import MAX_RETRIES, process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+                attempt_count=MAX_RETRIES - 1,
+            )
+            s.add(cmd)
+            await s.commit()
+
+        from app.services.threads_publish import ThreadsPublishError
+        with (
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
+                status_code=500, code="SERVER_ERROR", message="boom",
+            ))),
+        ):
+            async with Session() as s:
+                await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.channel_connection import ChannelConnection
+            from sqlalchemy import select
+            conn = (await s.execute(
+                select(ChannelConnection).where(ChannelConnection.id == connection_id)
+            )).scalar_one()
+        assert conn.status == "error", (
+            "transient 재시도 상한 도달 후에도 「연결됨」 칩이 거짓으로 남으면 안 된다"
+        )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_retryable_failure_below_cap_does_not_prematurely_escalate_connection():
+    """⭐뮤테이션 대조군 — attempt_count가 상한 미만이면(아직 백오프 재시도 중) connection
+    은 절대 건드리면 안 된다(위 신설 분기가 조건 없이 항상 실행되면 이 테스트가 잡는다)."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.publication_command import MAX_RETRIES, process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+                attempt_count=0,
+            )
+            assert MAX_RETRIES > 1, "이 대조군은 attempt_count=0이 상한 미만이어야 의미가 있다"
+            s.add(cmd)
+            await s.commit()
+
+        from app.services.threads_publish import ThreadsPublishError
+        with (
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
+                status_code=500, code="SERVER_ERROR", message="boom",
+            ))),
+        ):
+            async with Session() as s:
+                await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.channel_connection import ChannelConnection
+            from sqlalchemy import select
+            conn = (await s.execute(
+                select(ChannelConnection).where(ChannelConnection.id == connection_id)
+            )).scalar_one()
+        assert conn.status == "active"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_cron_token_expired_blocks_command_and_escalates_connection_status():
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp

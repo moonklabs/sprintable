@@ -116,6 +116,18 @@ class ChannelTokenExpiredError(Exception):
         super().__init__(f"연결 토큰이 만료됐습니다(connection_id={connection_id}) — 재인증이 필요합니다")
 
 
+class ChannelConnectionRevokedError(ChannelTokenExpiredError):
+    """story #3598 — Graph API error_subcode가 「사용자/보안 행동에 의한 무효화」
+    (458 앱 권한 없음·460 비번 변경·467 무효·490 사용자가 앱 권한 취소)일 때. 자연
+    시간 만료(463, 부모 클래스 그대로)와 달리 자동 갱신으로 풀리지 않는다는 점이
+    다르지만, 화면 문장은 기존 needs_reauth 낱말 그대로 재사용한다(유나 앵커, 새
+    낱말 0) — 그래서 `ChannelTokenExpiredError`를 상속해 기존
+    `except ChannelTokenExpiredError`(라우터·publication_command.py) 전부가 신규
+    except 절 없이 그대로 이 예외도 잡는다. `connection.status`만 "expired" 대신
+    "revoked"로 정확히 남기는 것이 이 클래스가 존재하는 유일한 이유(3595 표 행
+    ②「권한 회수」가 "미감지"에서 "감지+표시"로 바뀌는 지점)."""
+
+
 class ChannelRateLimitedError(Exception):
     """story #f8f7cb0f — 발행 직전 재조회한 한도 잔량이 0. `reset_at`은
     `now + quota_duration`으로 근사(Meta가 명시적 reset 타임스탬프를 안 줌, threads_
@@ -1108,7 +1120,35 @@ def _classify_threads_error(
     create_container 단계에서 429를 내는 걸 정확히 분류하려고 필요해졌다). 기존
     get_publishing_limit 사전조회가 놓친 경우(예: 조회와 실제 생성 호출 사이 경합)에도
     이 분기가 동작해 Threads 실 provider가 create_container에서 직접 429를 낼 가능성
-    까지 함께 커버한다 — sandbox 전용 로직이 아니라 일반 강건성 개선."""
+    까지 함께 커버한다 — sandbox 전용 로직이 아니라 일반 강건성 개선.
+
+    story #3598 — code==190/OAuthException이면 `classify_graph_oauth_error`(공용
+    파서, IG·FB·threads 어댑터가 전부 `error_from_response()`로 채운 `.provider_
+    error_*` 3필드를 읽는다)로 먼저 세분화한다: expired는 기존 CHANNEL_TOKEN_EXPIRED
+    그대로(회귀 0), revoked는 신설 CHANNEL_CONNECTION_REVOKED(ChannelTokenExpiredError
+    상속이라 기존 except 절 무변경). error 버킷은 AC6(fail-closed 승격·재시도 상한,
+    다음 커밋)에서 다룬다 — 지금은 미분류 provider 오류와 동일하게 아래 401/403/429
+    휴리스틱으로 떨어진다(회귀 0). 파서가 관할 밖(None — code!=190 ∧ type!=
+    OAuthException, 또는 애초에 파싱 가능한 Graph 오류 envelope이 없던 경우)이면
+    기존 401/403 휴리스틱이 계속 유일한 판정 근거다(비-Meta 오류·malformed body 대비)."""
+    from app.services.graph_api_errors import classify_graph_oauth_error
+
+    oauth_reason = classify_graph_oauth_error(
+        error_code=exc.provider_error_code, error_subcode=exc.provider_error_subcode,
+        error_type=exc.provider_error_type,
+    )
+    if oauth_reason is not None:
+        status, _reason = oauth_reason
+        if status == "expired":
+            return "CHANNEL_TOKEN_EXPIRED", ChannelTokenExpiredError(
+                connection_id=connection_id, provider_message=exc.message,
+            )
+        if status == "revoked":
+            return "CHANNEL_CONNECTION_REVOKED", ChannelConnectionRevokedError(
+                connection_id=connection_id, provider_message=exc.message,
+            )
+        # status == "error" — AC6(다음 커밋)에서 fail-closed 승격·재시도 상한과 함께
+        # 처리. 지금은 아래 401/403/429 휴리스틱으로 폴스루(회귀 0).
     if exc.status_code in (401, 403):
         return "CHANNEL_TOKEN_EXPIRED", ChannelTokenExpiredError(
             connection_id=connection_id, provider_message=exc.message,
@@ -1253,7 +1293,7 @@ async def publish_channel_post_draft(
 
     import httpx
     from app.services.channel_adapters import get_publish_client_module
-    from app.services.channel_connection import apply_refresh_failure
+    from app.services.channel_connection import apply_connection_failure, apply_refresh_failure
     from app.services.threads_publish import ThreadsPublishError
 
     # story 5b27b32f — sandbox 채널이면 threads_publish 대신 sandbox_publish(같은
@@ -1365,6 +1405,10 @@ async def publish_channel_post_draft(
                             raise ChannelTokenExpiredError(
                                 connection_id=connection.id, provider_message=row.last_error or "",
                             )
+                        if row.error_code == "CHANNEL_CONNECTION_REVOKED":
+                            raise ChannelConnectionRevokedError(
+                                connection_id=connection.id, provider_message=row.last_error or "",
+                            )
                         raise ChannelPublishProviderError(
                             provider_code=row.error_code or "UNKNOWN", provider_message=row.last_error or "",
                         )
@@ -1426,6 +1470,10 @@ async def publish_channel_post_draft(
                     await db.commit()
                     if error_code == "CHANNEL_TOKEN_EXPIRED":
                         await apply_refresh_failure(db, connection=connection, error_message=exc.message)
+                    elif error_code == "CHANNEL_CONNECTION_REVOKED":
+                        await apply_connection_failure(
+                            db, connection=connection, status="revoked", error_message=exc.message,
+                        )
                     raise mapped_exc from exc
                 row.external_container_id = container_id
                 row.status = "container_created"
@@ -1457,6 +1505,10 @@ async def publish_channel_post_draft(
                     await db.commit()
                     if error_code == "CHANNEL_TOKEN_EXPIRED":
                         await apply_refresh_failure(db, connection=connection, error_message=exc.message)
+                    elif error_code == "CHANNEL_CONNECTION_REVOKED":
+                        await apply_connection_failure(
+                            db, connection=connection, status="revoked", error_message=exc.message,
+                        )
                     raise mapped_exc from exc
                 if container_status == "IN_PROGRESS":
                     # story 620beefc(페드루 리뷰 블로커 B3) — Meta 문서(그라운딩 §②):
@@ -1505,6 +1557,10 @@ async def publish_channel_post_draft(
                 await db.commit()
                 if error_code == "CHANNEL_TOKEN_EXPIRED":
                     await apply_refresh_failure(db, connection=connection, error_message=exc.message)
+                elif error_code == "CHANNEL_CONNECTION_REVOKED":
+                    await apply_connection_failure(
+                        db, connection=connection, status="revoked", error_message=exc.message,
+                    )
                 raise mapped_exc from exc
 
             row.external_id = media_id

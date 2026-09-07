@@ -1249,6 +1249,16 @@ async def refresh_channel_tokens(
         # 안전하지만, instagram은 이제 "아는 채널"이니 여기도 등록해야 실제로
         # 갱신된다. 등록 안 된 채널은 여전히 스킵되고 다음 refresh tick도 못
         # 건드리므로 만료 방치 위험 — 새 채널 추가 시 이 dict도 같이 늘릴 것).
+        #
+        # story #3598(BE·중형, PO 確定 2026-09-06) — facebook은 «의도적 부재»(조용히
+        # 빠진 게 아니다). Meta 문서: 장기 사용자 토큰으로 얻은 페이지 액세스 토큰은
+        # 만료되지 않는다(channel_adapters.py::"facebook".refresh_mode 주석에 인용문
+        # 전문) — 시간 경과로 갱신이 필요한 경로 자체가 없다. facebook 연결은 이제
+        # refresh_mode="manual"이라 list_connections_due_for_refresh()가 애초에 이
+        # 루프로 올리지도 않는다(can_auto_refresh("manual")==False) — 이 dict에 없는
+        # 건 "몰라서"가 아니라 "필요 없어서"다. facebook에 필요한 건 갱신이 아니라
+        # «무효화 감지»(classify_graph_oauth_error·샌드박스 마커 3종이 담당, 발행/댓글
+        # 수집 시점에 401/403으로 드러난다 — cron 사전 갱신과는 다른 자리).
         _REFRESH_FN_BY_CHANNEL = {"threads": refresh_threads_token, "instagram": refresh_instagram_token}
         _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError)
 

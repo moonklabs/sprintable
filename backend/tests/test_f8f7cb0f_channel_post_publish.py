@@ -732,6 +732,75 @@ async def test_token_expired_returns_409_and_marks_connection_expired():
         await engine.dispose()
 
 
+# story #3598(페드루 PO 지적 2026-09-07 00:55Z) — 상속(ChannelConnectionRevokedError ⊂
+# ChannelTokenExpiredError)만으로 기존 except 절이 안 깨지는 것과, 그 경로를 실제로
+# 지나 connection.status가 (expired가 아니라) "revoked"로 정확히 남는 것은 다른
+# 주장이다 — 위 test_token_expired_*와 완전히 동형으로 HTTP 왕복까지 실측한다.
+@pytest.mark.anyio
+async def test_revoked_returns_409_with_token_expired_code_but_marks_connection_revoked():
+    """AC4 「화면 문장은 기존 needs_reauth 낱말 재사용(새 낱말 0)」 — HTTP 응답
+    error.code는 그대로 CHANNEL_TOKEN_EXPIRED(상속 덕에 기존 except 절이 그대로
+    잡는다, 새 HTTP 코드 0)이지만, connection.status는 "expired"가 아니라 정확히
+    "revoked"로 남아야 한다(3595 표 행 ② 「권한 회수」가 "미감지"→"감지+표시"로
+    바뀌는 지점 — status가 여전히 expired로 뭉개지면 이 스토리는 아무것도 안 고친
+    것과 같다)."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.threads_publish import ThreadsPublishError
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            draft_id, gate_id = await _seed_and_submit_and_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+            )
+
+        # subcode 490(스토리 본문 確定① — "사용자가 앱 권한 취소") = 명확한 revoked 사례.
+        with (
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+            patch.object(
+                tp, "create_container",
+                AsyncMock(side_effect=ThreadsPublishError(
+                    "THREADS_CREATE_CONTAINER_FAILED", "user has not authorized the application", status_code=401,
+                    provider_error_code=190, provider_error_subcode=490, provider_error_type="OAuthException",
+                )),
+            ),
+        ):
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+            async with _client_for(app) as client:
+                r_publish = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+        assert r_publish.status_code == 409, r_publish.text
+        # 상속 덕에 기존 except 절이 잡는다 — HTTP 응답 code는 새 낱말 0(AC4).
+        assert r_publish.json()["error"]["code"] == "CHANNEL_TOKEN_EXPIRED"
+
+        async with Session() as s:
+            from app.models.channel_connection import ChannelConnection
+            from sqlalchemy import select
+
+            conn = (await s.execute(
+                select(ChannelConnection).where(ChannelConnection.id == connection_id)
+            )).scalar_one()
+        assert conn.status == "revoked", (
+            "subcode 490(권한 취소)은 expired가 아니라 revoked로 정확히 남아야 한다 — "
+            "상속으로 except 절이 안 깨지는 것과 실제 DB 값이 정확한 것은 다른 주장"
+        )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_utm_skipped_when_link_already_has_utm_params():
     """AC4 — link_url에 이미 utm_*가 있으면 부착을 스킵(기존 값 보존)."""

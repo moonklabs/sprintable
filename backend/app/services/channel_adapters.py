@@ -255,7 +255,19 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 2026-09-06 — threads_manage_replies 선례와 동형: 기존 연결은 재인증 전까지
         # 답변이 막힌다, 의도).
         scope="pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_engagement",
-        refresh_mode="reissue_from_access_token",
+        # story #3598(BE·중형, PO 確定 2026-09-06) — FB 사전 갱신 필요성 판정. Meta 문서
+        # 인용: 「장기 사용자 토큰으로 얻은 페이지 액세스 토큰은 만료되지 않는다」(developers.
+        # facebook.com/docs/facebook-login/guides/access-tokens#pagetokens) — 비밀번호
+        # 변경·권한 회수·앱 비활성 등 사용자/보안 행동으로만 "무효화"된다(시간 경과로는
+        # 무효화 0). 결론: FB에 필요한 건 «갱신»이 아니라 «무효화 감지»(이 스토리의
+        # classify_graph_oauth_error·샌드박스 마커 3종이 그 감지를 담당) — 이전에
+        # "reissue_from_access_token"(threads류 자동 갱신 가능)로 잘못 선언돼 있었다:
+        # can_auto_refresh()가 True를 내 list_connections_due_for_refresh()가 facebook
+        # 연결을 "갱신 대상"으로 매 tick 집어 왔지만 cron._REFRESH_FN_BY_CHANNEL에
+        # facebook이 없어 조용히 continue만 반복하던 죽은 경로(무해하나 FE
+        # can_auto_refresh 플래그도 거짓 — "자동 갱신됨"이라 오해하게 함)였다. "manual"
+        # (자동 갱신 불가 — 재인증 유도, 필드 docstring 그대로)이 사실과 맞는 선언.
+        refresh_mode="manual",
         credential_kind="oauth",
         display_name="Facebook Page",
         max_text_length=63206,  # ⚠️미확認 — Meta 문서 지식(Facebook 피드 게시물 상한).

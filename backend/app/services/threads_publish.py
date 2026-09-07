@@ -26,13 +26,51 @@ class ThreadsPublishError(Exception):
     """컨테이너 생성/publish/한도 조회/permalink 조회 실패. `.code`/`.message`가 그대로
     호출부(라우터)의 에러 매핑 축이 된다. `.status_code`는 provider가 준 HTTP status —
     401/403이면 호출부가 CHANNEL_TOKEN_EXPIRED로, 그 외는 CHANNEL_PUBLISH_PROVIDER_ERROR
-    (502)로 매핑한다(story 본문 에러코드표)."""
+    (502)로 매핑한다(story 본문 에러코드표).
 
-    def __init__(self, code: str, message: str, *, status_code: int):
+    story #3598 — `.provider_error_code`/`.provider_error_subcode`/`.provider_error_type`
+    (전부 파싱 실패·미선언 시 None)은 Graph 표준 오류 envelope(`{"error": {"code",
+    "error_subcode","type",...}}`)에서 뽑은 원시값 — `graph_api_errors.classify_
+    graph_oauth_error`가 이 3필드로 code==190/OAuthException을 더 세분화한다(호출부
+    `channel_posts.py::_classify_threads_error`). `error_from_response()`가 이 3필드를
+    자동으로 채워 생성한다 — 개별 raise 지점은 파싱 로직을 몰라도 된다."""
+
+    def __init__(
+        self, code: str, message: str, *, status_code: int,
+        provider_error_code: int | None = None,
+        provider_error_subcode: int | None = None,
+        provider_error_type: str | None = None,
+    ):
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.provider_error_code = provider_error_code
+        self.provider_error_subcode = provider_error_subcode
+        self.provider_error_type = provider_error_type
         super().__init__(message)
+
+
+def error_from_response(code: str, resp: httpx.Response) -> ThreadsPublishError:
+    """story #3598 — `resp.text[:500]`/`resp.status_code`는 기존 그대로(회귀 0), Graph
+    표준 오류 envelope이 파싱되면 `.provider_error_*` 3필드도 함께 채운다. envelope이
+    없거나(malformed body·비-JSON 응답) `error` 키가 dict가 아니면 3필드 전부 None —
+    지어내지 않는다(기존 401/403 휴리스틱 폴백이 그 경우를 계속 담당)."""
+    provider_error_code: int | None = None
+    provider_error_subcode: int | None = None
+    provider_error_type: str | None = None
+    try:
+        err = resp.json().get("error")
+    except Exception:
+        err = None
+    if isinstance(err, dict):
+        provider_error_code = err.get("code")
+        provider_error_subcode = err.get("error_subcode")
+        provider_error_type = err.get("type")
+    return ThreadsPublishError(
+        code, resp.text[:500], status_code=resp.status_code,
+        provider_error_code=provider_error_code, provider_error_subcode=provider_error_subcode,
+        provider_error_type=provider_error_type,
+    )
 
 
 async def create_container(
@@ -55,9 +93,7 @@ async def create_container(
         params["text"] = text
     resp = await client.post(_CONTAINER_URL_TMPL.format(user_id=threads_user_id), params=params)
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_CREATE_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("THREADS_CREATE_CONTAINER_FAILED", resp)
     body = resp.json()
     creation_id = body.get("id")
     if not creation_id:
@@ -86,9 +122,7 @@ async def get_container_status(
         params={"fields": "status,error_message", "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_CONTAINER_STATUS_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("THREADS_CONTAINER_STATUS_FAILED", resp)
     body = resp.json()
     status = body.get("status")
     if not status:
@@ -107,9 +141,7 @@ async def publish_container(
         params={"creation_id": creation_id, "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_PUBLISH_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("THREADS_PUBLISH_CONTAINER_FAILED", resp)
     body = resp.json()
     media_id = body.get("id")
     if not media_id:
@@ -134,9 +166,7 @@ async def get_publishing_limit(
         params={"fields": "quota_usage,config", "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_PUBLISHING_LIMIT_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("THREADS_PUBLISHING_LIMIT_FAILED", resp)
     body = resp.json()
     data = body.get("data") or [{}]
     row = data[0] if data else {}
@@ -165,9 +195,7 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
         _MEDIA_URL_TMPL.format(media_id=media_id), params={"access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_DELETE_MEDIA_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("THREADS_DELETE_MEDIA_FAILED", resp)
     body = resp.json()
     if not body.get("success"):
         raise ThreadsPublishError(
@@ -185,9 +213,7 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
         params={"fields": "permalink", "access_token": access_token},
     )
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_GET_PERMALINK_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("THREADS_GET_PERMALINK_FAILED", resp)
     body = resp.json()
     permalink = body.get("permalink")
     return str(permalink) if permalink else None
@@ -224,9 +250,7 @@ async def fetch_replies(client: httpx.AsyncClient, *, access_token: str, media_i
             params["after"] = after_cursor
         resp = await client.get(_REPLIES_URL_TMPL.format(media_id=media_id), params=params)
         if resp.status_code != 200:
-            raise ThreadsPublishError(
-                "THREADS_FETCH_REPLIES_FAILED", resp.text[:500], status_code=resp.status_code,
-            )
+            raise error_from_response("THREADS_FETCH_REPLIES_FAILED", resp)
         body = resp.json()
         items.extend(body.get("data") or [])
         after_cursor = ((body.get("paging") or {}).get("cursors") or {}).get("after")
@@ -246,9 +270,7 @@ async def reply(
     params = {"access_token": access_token, "media_type": "TEXT", "text": text, "reply_to_id": reply_to_id}
     resp = await client.post(_CONTAINER_URL_TMPL.format(user_id=threads_user_id), params=params)
     if resp.status_code != 200:
-        raise ThreadsPublishError(
-            "THREADS_REPLY_CREATE_CONTAINER_FAILED", resp.text[:500], status_code=resp.status_code,
-        )
+        raise error_from_response("THREADS_REPLY_CREATE_CONTAINER_FAILED", resp)
     creation_id = resp.json().get("id")
     if not creation_id:
         raise ThreadsPublishError(

@@ -464,6 +464,52 @@ async def test_sandbox_publish_expired_token_marker():
     assert exc_info.value.status_code == 401
 
 
+# story #3598 — 3595 표 행 ②③④(권한 회수·페이지 연결 해제·앱 비활성) 시뮬레이션
+# 마커 3종. 각 1 테스트(AC2) — 마커가 401을 내는 것뿐 아니라 그 401이 실제로
+# _classify_threads_error를 거쳐 CHANNEL_CONNECTION_REVOKED(신설, expired가 아님)로
+# 분류되는지까지 확認한다 — 마커만 있고 분류가 안 되면 3595 표는 여전히 "미감지".
+@pytest.mark.anyio
+async def test_sandbox_publish_revoked_marker_classifies_as_connection_revoked():
+    import uuid
+    from app.services import sandbox_publish as sp
+    from app.services.threads_publish import ThreadsPublishError
+    from app.services.channel_posts import _classify_threads_error
+
+    with pytest.raises(ThreadsPublishError) as exc_info:
+        await sp.create_container(None, access_token="x", threads_user_id="u", text="[sandbox:revoked]")
+    assert exc_info.value.status_code == 401
+    error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
+    assert error_code == "CHANNEL_CONNECTION_REVOKED"
+
+
+@pytest.mark.anyio
+async def test_sandbox_publish_page_unlinked_marker_classifies_as_connection_revoked():
+    import uuid
+    from app.services import sandbox_publish as sp
+    from app.services.threads_publish import ThreadsPublishError
+    from app.services.channel_posts import _classify_threads_error
+
+    with pytest.raises(ThreadsPublishError) as exc_info:
+        await sp.create_container(None, access_token="x", threads_user_id="u", text="[sandbox:page-unlinked]")
+    assert exc_info.value.status_code == 401
+    error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
+    assert error_code == "CHANNEL_CONNECTION_REVOKED"
+
+
+@pytest.mark.anyio
+async def test_sandbox_publish_app_inactive_marker_classifies_as_connection_revoked():
+    import uuid
+    from app.services import sandbox_publish as sp
+    from app.services.threads_publish import ThreadsPublishError
+    from app.services.channel_posts import _classify_threads_error
+
+    with pytest.raises(ThreadsPublishError) as exc_info:
+        await sp.create_container(None, access_token="x", threads_user_id="u", text="[sandbox:app-inactive]")
+    assert exc_info.value.status_code == 401
+    error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
+    assert error_code == "CHANNEL_CONNECTION_REVOKED"
+
+
 @pytest.mark.anyio
 async def test_sandbox_publish_container_error_marker():
     from app.services import sandbox_publish as sp

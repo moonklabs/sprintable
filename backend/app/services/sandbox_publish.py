@@ -28,6 +28,18 @@
   분류).
 - `[sandbox:expired-token]` — `create_container`가 401로 실패(기존 _classify_threads_
   error가 이미 CHANNEL_TOKEN_EXPIRED로 분류).
+- `[sandbox:revoked]`·`[sandbox:page-unlinked]`·`[sandbox:app-inactive]`(story #3598,
+  3595 표 행 ②③④를 시뮬레이션 가능하게) — 셋 다 `create_container`가 401로 실패하되
+  Graph 표준 오류 envelope(`provider_error_code`/`_subcode`/`_type`)을 함께 실어
+  `classify_graph_oauth_error`가 CHANNEL_CONNECTION_REVOKED로 분류하게 한다. subcode는
+  스토리 본문 確定①에 PO가 못박은 목록(458 앱 권한 없음/460 비번 변경/463 만료/467
+  무효/490 사용자가 앱 권한 취소) 안에서만 고른다 — 3595 표의 3사건과 정확히 1:1
+  대응하는 별도 subcode가 Meta 쪽에 없어(그라운딩 갭, PO 재확認 요망) 의미가 가장
+  가까운 것으로 잠정 배정했다: `revoked`=490(문자 그대로 "권한 취소"), `page-unlinked`
+  =458(페이지에 대한 앱 권한을 잃는 것 — "앱 권한 없음"과 같은 결과), `app-inactive`
+  =467(앱이 꺼지면 그 앱으로 발급된 토큰이 "무효"가 된다는 해석). 셋 다 classify_graph_
+  oauth_error 안에서는 동일하게 "revoked"로 수렴한다(현재 reason 어휘가 expired|
+  revoked|error 3종뿐이라 그 이상 세분화할 자리가 없다 — 어휘가 늘면 재배정).
 - `[sandbox:container-error]` — 컨테이너 생성 자체는 성공하지만, 폴링(get_container_
   status)이 ERROR를 낸다(AC3 "컨테이너 ERROR"). ⚠️**이미지 첨부 초안 전용** — 오케스트
   레이션(channel_posts.py::publish_channel_post_draft)이 `has_image`일 때만 폴링을
@@ -62,6 +74,11 @@ from app.services.threads_publish import ThreadsPublishError
 _MARKER_429 = "[sandbox:429]"
 _MARKER_PROVIDER_ERROR = "[sandbox:provider-error]"
 _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
+# story #3598 — 3595 표 행 ②③④(권한 회수·페이지 연결 해제·앱 비활성) 시뮬레이션
+# 마커. subcode 배정 근거는 위 모듈 docstring 참고(PO 재확認 요망 — 잠정 배정).
+_MARKER_REVOKED = "[sandbox:revoked]"
+_MARKER_PAGE_UNLINKED = "[sandbox:page-unlinked]"
+_MARKER_APP_INACTIVE = "[sandbox:app-inactive]"
 _MARKER_CONTAINER_ERROR = "[sandbox:container-error]"
 _MARKER_CONTAINER_SLOW = "[sandbox:container-slow]"
 # story #3516 AC8(페드루 PO 確定 2026-09-05) — 라이브 런북 재료. 댓글 수집 리컨실
@@ -126,6 +143,21 @@ async def create_container(
     if _MARKER_EXPIRED_TOKEN in text:
         raise ThreadsPublishError(
             "SANDBOX_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
+        )
+    if _MARKER_REVOKED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_CONNECTION_REVOKED", "sandbox: [sandbox:revoked] 마커 시뮬레이션", status_code=401,
+            provider_error_code=190, provider_error_subcode=490, provider_error_type="OAuthException",
+        )
+    if _MARKER_PAGE_UNLINKED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_PAGE_UNLINKED", "sandbox: [sandbox:page-unlinked] 마커 시뮬레이션", status_code=401,
+            provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
+        )
+    if _MARKER_APP_INACTIVE in text:
+        raise ThreadsPublishError(
+            "SANDBOX_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
+            provider_error_code=190, provider_error_subcode=467, provider_error_type="OAuthException",
         )
 
     mode = "error" if _MARKER_CONTAINER_ERROR in text else "ok"

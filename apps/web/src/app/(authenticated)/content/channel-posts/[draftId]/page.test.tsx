@@ -1551,6 +1551,27 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.textContent).toContain(formatScheduledAt(resetAt, resolveDisplayTimezone().tz).display);
   });
 
+  // story #3598(유나 §AC9 문구 確定 2026-09-06 15:44Z) — errorChannelPublishProviderError
+  // 교체 2 — 「받지 못했습니다」(전달 실패 단정)를 「처리하지 못했습니다 — 자동 재시도
+  // 중」으로(뒷문장은 AC6 승격 조건과 같은 판에 나가야 참이 되는 문구, 새 낱말 0).
+  it('⭐#3598 — CHANNEL_PUBLISH_PROVIDER_ERROR 발행 실패는 새 문구(처리 실패·자동 재시도)를 렌더한다', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 502, body: { detail: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: 'raw' } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await flush();
+
+    expect(container.textContent).toContain(
+      '채널이 요청을 처리하지 못했습니다 — 자동으로 다시 시도하고 있습니다. 계속 실패하면 연결 상태에 표시됩니다.',
+    );
+    expect(container.textContent).not.toContain('채널이 요청을 받지 못했습니다.');
+  });
+
   // 카디르 QA 계획(2026-09-04) ⑤ — "api-error.ts가 파싱한다"는 사실만으로 화면 렌더까지
   // 됐다고 넘기지 않는다. AC10 12행 중 GATE_ALREADY_HELD·TEXT_TOO_LONG·RATE_LIMITED를
   // 뺀 나머지를 각 코드마다 개별 mock 응답으로 주입해 실제 렌더 문구를 pin한다.
