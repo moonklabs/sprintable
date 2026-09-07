@@ -10,6 +10,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
@@ -75,6 +76,7 @@ export default function ConversationPage() {
   const scrollToMessageId = searchParams.get('messageId') ?? undefined;
   const t = useTranslations('chats');
   const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { toasts, addToast, dismissToast } = useToast();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
@@ -128,11 +130,16 @@ export default function ConversationPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ muted: next }),
       });
-      if (!res.ok) setMeta((m) => (m ? { ...m, muted: !next } : m));
+      // story #3638(유나 §8 별건) — 뮤트 토글이 실패해도 조용히 원복되던 자리(§2 클래스).
+      if (!res.ok) {
+        addToast({ title: t('muteToggleFailed'), type: 'error' });
+        setMeta((m) => (m ? { ...m, muted: !next } : m));
+      }
     } catch {
+      addToast({ title: t('muteToggleFailed'), type: 'error' });
       setMeta((m) => (m ? { ...m, muted: !next } : m));
     }
-  }, [meta, conversation_id]);
+  }, [meta, conversation_id, addToast, t]);
 
   // EF-S2: rename a group room. Optimistic; the BE PATCH persists the title.
   const handleSaveTitle = useCallback(async () => {
@@ -374,6 +381,7 @@ export default function ConversationPage() {
           onFreeResponseChange={(next) => setMeta((m) => (m ? { ...m, freeResponse: next } : m))}
         />
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

@@ -245,4 +245,24 @@ describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #320
     );
     expect(emailItem?.querySelector('button')).toBeNull();
   });
+
+  // story #3638(유나 §8 별건) — 대화 생성이 null을 반환하면(실패) 스피너만 멈추고
+  // 조용했다(클릭했는데 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은
+  // null을 "건너뛰고 진행"으로 의도적으로 쓰므로(온보딩 흐름이 이 클릭 하나로 안
+  // 막혀야 함) 그쪽은 그대로 두고, 이 배너는 클릭 자체가 유일한 목적이라 실패를 알린다.
+  it('신규 DM 생성이 실패(null)하면 firstInstructionStartFailed 문구가 뜬다(구 침묵)', async () => {
+    stubChecklist({ ...PARTIAL, first_instruction_conversation_id: null });
+    createFirstInstructionConversationMock.mockResolvedValue(null);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const target = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+    await act(async () => { target.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(routerPushMock).not.toHaveBeenCalledWith(expect.stringContaining('/chats/'));
+    expect(container.textContent).toContain('대화를 시작하지 못했습니다. 다시 시도해 주세요.');
+  });
 });

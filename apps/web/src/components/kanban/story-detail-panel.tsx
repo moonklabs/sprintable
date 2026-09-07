@@ -1019,7 +1019,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     const { story: updated } = await patchStory({ title: titleDraft.trim() });
     setSavingTitle(false);
     setEditingTitle(false);
+    // story #3638(유나 §8 별건, 유나 자가 patchStory 층에서 잡음) — 담당자 토글 형제
+    // (handleAssigneeToggle)는 이미 실패 토스트를 냈는데, 제목 저장은 편집창만 닫히고
+    // 조용히 원래 값으로 남아 실패 신호가 없었다.
     if (updated) onStoryUpdate?.({ ...story, title: updated.title });
+    else addToast({ type: 'error', title: t('titleSaveFailed') });
   };
 
   // E-BOARD S6: 복수 assignee. assignee_ids 우선, 없으면 단일 assignee_id로 폴백(하위호환).
@@ -1085,6 +1089,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setEditingDescription(false);
     setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, description: updated.description });
+    else addToast({ type: 'error', title: t('descriptionSaveFailed') });
   };
 
   const handleSaveAC = async () => {
@@ -1098,6 +1103,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setEditingAC(false);
     setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
+    else addToast({ type: 'error', title: t('acSaveFailed') });
   };
 
   // E-FILE S4: 스토리 첨부 — GCS 업로드 후 PATCH {attachments} (전체 교체이므로 기존+신규 머지 필수).
