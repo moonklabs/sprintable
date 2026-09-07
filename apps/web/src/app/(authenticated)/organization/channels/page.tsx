@@ -507,7 +507,7 @@ function ConnectionRow({
               시각이 아직 없는 옛 행(3603 이전 승격·토큰 갱신 실패 경로)은 원문 한
               줄만 그대로 — 새 값을 지어내지 않는다. */}
           {conn.last_error_code || conn.last_error_at ? (
-            <p className="mt-1 font-mono opacity-70">
+            <p className="mt-1 font-mono">
               {[conn.last_error_code, conn.last_error_at ? formatRelativeTime(conn.last_error_at, locale, displayTimezone) : null]
                 .filter(Boolean)
                 .join(' · ')}
