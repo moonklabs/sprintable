@@ -144,6 +144,19 @@ describe('Alert variant 라이트 대비 통일 (story #2513)', () => {
     expect(container.firstElementChild?.className).not.toContain('border-l-2');
   });
 
+  // story #3676(유나 실측 2026-09-07) — AlertDescription 자체가 부모 opacity를
+  // 가지면 그 안의 text-muted-foreground가 자식에 opacity-100을 줘도 안 풀리는
+  // 채로 배경과 합성돼 틴트 4종 전부 라이트 AA 미달로 떨어진다(4.15~4.34). 이
+  // 컴포넌트 층에 opacity 클래스가 다시 안 생기는지 고정 — 뮤테이션 대상.
+  it('AlertDescription 자신은 opacity 클래스를 갖지 않는다(부모 opacity 재발 방지)', async () => {
+    await act(async () => {
+      root.render(<Alert variant="destructive"><AlertDescription>메시지</AlertDescription></Alert>);
+    });
+    const description = container.querySelectorAll('p')[0];
+    const classes = (description?.className ?? '').split(/\s+/);
+    expect(classes.some((c) => /^opacity-/.test(c))).toBe(false);
+  });
+
   // 글자만 foreground로 통일됐을 뿐 variant 구분(색 정체성) 자체는 border/tint로 남아야
   // 한다 — 넷이 서로 다른 border-*-border/bg-*-tint를 갖는지 직접 대조.
   it('variant별 색 정체성(border·tint)은 서로 다르게 유지된다(글자 통일이 구분을 지우지 않는다)', async () => {
