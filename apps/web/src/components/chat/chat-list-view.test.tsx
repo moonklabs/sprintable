@@ -33,11 +33,14 @@ vi.mock('next/navigation', () => ({
 // onReconnect 배선을 검증해야 하니 마지막 호출의 옵션을 캡처해 테스트에서 직접 불러낸다
 // (SSE 백오프/타이머 전체를 재현하지 않는다 — sse-multiplexer.test.tsx가 이미 그 축은
 // "실제 재연결 타이밍은 별도"로 선언하고 옵션 배선만 고정하는 동일 관례).
-const { useChatSseMock } = vi.hoisted(() => ({ useChatSseMock: vi.fn() }));
 // story #3621 — connected/polling을 반환하는 실제 훅 shape과 맞춘다(그전엔 이 컴포넌트가
-// 반환값을 안 읽어 undefined 반환도 무해했지만, 이제 destructure한다).
+// 반환값을 안 읽어 undefined 반환도 무해했지만, 이제 destructure한다). 기본값은 연결됨 —
+// 끊김/폴링 배너 테스트는 useChatSseMock.mockReturnValue로 개별 오버라이드한다.
+const { useChatSseMock } = vi.hoisted(() => ({
+  useChatSseMock: vi.fn((_opts?: unknown) => ({ connected: true, polling: false })),
+}));
 vi.mock('@/hooks/use-chat-sse', () => ({
-  useChatSse: (opts: unknown) => { useChatSseMock(opts); return { connected: true, polling: false }; },
+  useChatSse: (opts: unknown) => useChatSseMock(opts),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -435,5 +438,59 @@ describe('ChatListView — 참가자 이름 해석 실패 폴백(story #3203)', 
     const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '알 수 없는 멤버');
     expect(nameEl).not.toBeUndefined();
     expect(container.textContent).not.toContain('767988e5');
+  });
+});
+
+// story #3621(유나 CHANGES, 2026-09-07) — chat-view.tsx·chat-list-view.tsx 둘 다 같은
+// ConnectionLostBanner를 쓴다(단일화, 문구 갈라짐 방지). {connected:false, polling:true}를
+// 직접 모킹해 실제로 그 배너가 서는지 확인한다 — 이전엔 두 뷰 테스트가 전부 polling:false만
+// 모킹해 어느 쪽도 이 렌더 경로를 실제로 확인한 적이 없었다.
+describe('ChatListView — 끊김+폴링 배너(story #3621, useChatSse mock 오버라이드)', () => {
+  it('connected=false·polling=true면 "자동 새로고침 중" 배너가 선다', async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSseMock.mockReturnValue({ connected: false, polling: true });
+      stubFetchWithConversations([]);
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); }); // showDisconnectedBanner 2s 지연
+      const banner = container.querySelector('[data-testid="connection-lost-banner"]');
+      expect(banner).not.toBeNull();
+      expect(container.querySelector('[data-testid="connection-lost-banner-text"]')?.textContent)
+        .toBe(koMessages.chats.connectionLostPolling);
+    } finally {
+      vi.useRealTimers();
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+    }
+  });
+
+  it('connected=false·polling=false(아직 threshold 전)면 "연결이 끊겼어요"만 뜨고, 새로고침 버튼은 여전히 있다', async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSseMock.mockReturnValue({ connected: false, polling: false });
+      stubFetchWithConversations([]);
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(container.querySelector('[data-testid="connection-lost-banner-text"]')?.textContent)
+        .toBe(koMessages.chats.connectionLost);
+      const refreshButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.chats.refreshNow));
+      expect(refreshButton).not.toBeUndefined(); // 배너(2s)·폴링(10s) 사이에도 조치 수단이 있다.
+    } finally {
+      vi.useRealTimers();
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+    }
+  });
+
+  it('connected=true면 배너 자체가 안 뜬다', async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+      stubFetchWithConversations([]);
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(container.querySelector('[data-testid="connection-lost-banner"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+    }
   });
 });

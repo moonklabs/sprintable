@@ -1,12 +1,13 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, RefreshCw, WifiOff, UserX } from 'lucide-react';
+import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
+import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
@@ -891,26 +892,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
         <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
-          {/* story #2987 AC2 후반 — 자동 재연결(§1)이 대부분 소리 없이 복구하지만, 실패하면
-              (예: 서버가 실제로 죽음) 주소창 없는 앱에선 새로고침 우회조차 없다 — 수동 갱신
-              affordance가 유일한 탈출구. 빨강(destructive) 아님 — "네가 실패했다"가 아니라
-              "연결이 끊긴 상태"(reference-drop-notice.tsx와 동일 warning-tint 관례). */}
+          {/* story #2987 AC2 후반+#3621(유나 CHANGES, 단일화) — ConnectionLostBanner
+              (connection-lost-banner.tsx) 참고. */}
           {showDisconnectedBanner && (
-            <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
-              <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
-              {/* story #3621 AC3 — 폴링이 켜지면(threshold 이상 지속) "폴링으로 갱신 중"을
-                  덧붙인다 — 갱신이 사람 조작 없이도 서고 있다는 신호(기존 문구 재사용,
-                  새 어휘는 이 한 줄뿐). */}
-              <span className="flex-1">{polling ? t('connectionLostPolling') : t('connectionLost')}</span>
-              <button
-                type="button"
-                onClick={() => void fetchMessages()}
-                className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
-              >
-                <RefreshCw className="h-3 w-3" />
-                {t('refreshNow')}
-              </button>
-            </div>
+            <ConnectionLostBanner polling={polling} onRefresh={() => void fetchMessages()} />
           )}
           {/* story #3194(PO 신규 회원 친절도 실측) — 미연결 에이전트에게 첫 메시지를 보내도
               화면 어디에도 신호가 없어 "제품이 죽었다"로 읽히던 결함. 판별자(verified===false)

@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Users, WifiOff } from 'lucide-react';
+import { MessageSquare, Users } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
+import { ConnectionLostBanner } from './connection-lost-banner';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
@@ -609,14 +610,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   return (
     <div className="flex h-full flex-col">
-      {/* story #3621 AC3 — chat-view.tsx의 끊김 배너와 같은 낱말·같은 2s 지연(§2987
-          경고톤 관례 그대로 — "네가 실패했다"가 아니라 "연결이 끊긴 상태"). 폴링이
-          켜지면(threshold 이상 지속) 문구가 "폴링으로 갱신 중"으로 바뀐다. */}
+      {/* story #3621 AC3(유나 CHANGES, 단일화) — ConnectionLostBanner(connection-
+          lost-banner.tsx) 참고. 배너(2s)·폴링 시작(10s) 사이 8초 구간에도 새로고침
+          버튼을 항상 같이 그린다(조치 수단 0인 구간 제거). */}
       {showDisconnectedBanner && (
-        <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
-          <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
-          <span className="flex-1">{polling ? t('connectionLostPolling') : t('connectionLost')}</span>
-        </div>
+        <ConnectionLostBanner polling={polling} onRefresh={handlePoll} />
       )}
       {/* story #3177(S3a)+#3178(S3b) — chat 구심점 최상단 고정 「지금」 스트립+pulse 카드
           (대화 스크롤과 분리, 훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게
