@@ -14,7 +14,10 @@ import { Button } from '@/components/ui/button';
 //     이 상태는 컴포넌트 로컬(useState)이라 마운트 한정 — 페이지를 새로고침하면
 //     되돌아온다. 지속형(다시 마운트해도 안 뜨는) 처리는 조각②의 `comments_supported`
 //     필드 몫이다(PO 확定 2026-09-05).
-//   - generic — 그 외(403·502 등)는 서버 message를 그대로 버튼 밑에 보인다.
+//   - generic — 그 외(403·502 등)는 code가 `HUMAN_SAFE_ERROR_MESSAGE_CODES`
+//     allowlist(lib/api-error-message.ts, story #3601 페드루 PO 정정 2026-09-07)에
+//     있을 때만 서버 message를 그대로 버튼 밑에 보인다 — 목록 밖 code는 message가
+//     uuid·내부명·raw exception repr을 담을 수 있어 호출부 자기 폴백(commentsRefreshErrorGeneric)으로 대신 떨어진다.
 export type CommentsRefreshOutcome =
   | { ok: true }
   | { ok: false; kind: 'rate_limited'; retryAfterSeconds: number | null }

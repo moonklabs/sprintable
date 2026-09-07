@@ -11,27 +11,40 @@
  * CONTENT_TYPE`의 "…content_type: 'image/gif' (허용: […])"). §object 형(`error.message`·
  * `detail.message`) 자리만 `HUMAN_SAFE_ERROR_MESSAGE_CODES` 허용목록으로 gate한다 — 그
  * 코드가 목록에 있을 때만 원문을 그대로 보여주고, 없으면 null(호출부가 자기 폴백 문구로
- * 돌아간다, "예전 얼굴"). `detail`이 순수 문자열인 형(FastAPI 다른 라우트가 그대로 내는
- * 정책거부 사유 등, story #2647 DeliveryContractModal 계약)은 code 자체가 없어 안전성을
- * 잴 수 없으므로 이 gate 밖 — 기존 동작 그대로 무조건 통과(그 화면들의 계약을 이 스토리가
- * 건드리지 않는다).
+ * 돌아간다, "예전 얼굴"). `detail`이 순수 문자열인 형은 code 자체가 없어 안전성을 잴 수
+ * 없으므로 이 gate 밖 — 기존 동작 그대로 무조건 통과시킨다. 페드루 PO 정정(2026-09-07)
+ * — 이 형이 "다른 라우트가 실제로 내는 합법적 shape"라는 건 부정확하다: 우리 BE 전역
+ * 핸들러는 string detail로 raise된 HTTPException도 object(`error:{code,message}`)로
+ * 감싼다(lint_fe_error_envelope_detail_mismatch.py 참고) — 우리 BE가 실제로 내는 string
+ * detail은 없다(Pydantic 422조차 object가 아니라 `[{loc,msg,type}]` 배열이라 이 분기와
+ * 무관). 이 분기는 순수하게 `DeliveryContractModal.test.tsx`(#2647)의 옛 픽스처 계약을
+ * 깨지 않으려는 하위호환일 뿐 — 실 BE 오늘 산출물이 아니다.
  *
- * 새 코드를 이 목록에 추가하려면: 그 코드의 실제 BE 원문을 읽고(uuid·내부 이름·raw
- * exception repr 없음을 확認) PR 본문에 그 문장을 그대로 인용할 것 — "안전해 보인다"가
- * 아니라 "확認했다"가 등재 기준이다.
+ * 새 코드를 이 목록에 추가하려면: **그 code로 raise하는 자리를 저장소 전체에서 grep해
+ * 전수**를 세고, 그 전부의 원문을 읽어(uuid·내부 이름·raw exception repr 없음을 확認)
+ * 하나도 빠짐없이 사람 문장일 때만 등재한다. 한 자리만 확認하고 "한 자리로 보인다"로
+ * 등재하지 않는다 — 페드루 PO 정정(2026-09-07): `CHANNEL_CONNECTION_NOT_ACTIVE`가 실제
+ * 반례다. 이 code로 raise하는 자리가 저장소에 20곳 넘게 있고 그중 다수(site_posts.py·
+ * insight_snapshots.py·publication_command.py 등)가 `f"...{connection.id}"`처럼 uuid를
+ * 그대로 담는다 — 한 자리(channel_post_comments.py의 fetch 공용 블록)만 보고 "댓글 수집
+ * 흐름의 이 code는 안전하다"로 처음 등재했던 게 오판이었다. PR 본문에 코드마다 「raise
+ * 자리 수 → 문장 전부」를 표로 남길 것 — "안전해 보인다"가 아니라 "전수 확認했다"가
+ * 등재 기준이다.
  */
 export const HUMAN_SAFE_ERROR_MESSAGE_CODES = new Set<string>([
-  // channel_post_comments.py::refresh_publication_comments_endpoint
+  // channel_post_comments.py::refresh_publication_comments_endpoint(raise 1곳)
   'COMMENT_REFRESH_HUMAN_ONLY', // "댓글 재수집은 휴먼 멤버만 가능합니다."
-  'COMMENT_COLLECTION_UNSUPPORTED', // "이 채널은 댓글 수집을 지원하지 않습니다."
-  'CHANNEL_CONNECTION_NOT_ACTIVE', // "연결에 자격이 없습니다."
-  // channel_post_comment_replies.py
-  'COMMENT_REPLY_HUMAN_ONLY', // "이 액션은 휴먼 멤버만 가능합니다."
-  'COMMENT_REPLY_TARGET_DELETED', // "답변 대상 댓글이 삭제되어 상신할 수 없습니다."
-  'COMMENT_REPLY_CHANNEL_UNSUPPORTED', // "이 채널은 답변 발송을 지원하지 않습니다."
-  'COMMENT_REPLY_DRAFT_ALREADY_OPEN', // "안 보낸 초안이 이미 있습니다."
-  // channel_posts.py::_require_human(발행류 공용, retry 엔드포인트도 공유)
+  'COMMENT_COLLECTION_UNSUPPORTED', // "이 채널은 댓글 수집을 지원하지 않습니다."(raise 1곳)
+  // channel_post_comment_replies.py·gates.py
+  'COMMENT_REPLY_HUMAN_ONLY', // "이 액션은 휴먼 멤버만 가능합니다."(raise 1곳)
+  'COMMENT_REPLY_TARGET_DELETED', // raise 2곳 — "답변 대상 댓글이 삭제되어 상신할 수 없습니다."(replies.py) · "…승인할 수 없습니다."(gates.py) 둘 다 안전
+  'COMMENT_REPLY_CHANNEL_UNSUPPORTED', // "이 채널은 답변 발송을 지원하지 않습니다."(raise 1곳)
+  'COMMENT_REPLY_DRAFT_ALREADY_OPEN', // "안 보낸 초안이 이미 있습니다."(raise 1곳)
+  // channel_posts.py::_require_human(발행류 공용, retry 엔드포인트도 공유, raise 1곳)
   'CHANNEL_POST_PUBLISH_HUMAN_ONLY', // "채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지)."
+  // ⛔ CHANNEL_CONNECTION_NOT_ACTIVE는 raise 20곳+(site_posts.py·insight_snapshots.py·
+  // publication_command.py·channel_posts.py·channel_post_comments.py 등) — 그중 다수가
+  // uuid(connection.id·publication_id)를 그대로 담아 등재 금지(2026-09-07 정정, 페드루 PO).
 ]);
 
 export function extractBackendErrorMessage(body: unknown): string | null {
