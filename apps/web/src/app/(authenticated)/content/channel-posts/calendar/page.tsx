@@ -12,6 +12,7 @@ import { CalendarGrid, type CalendarChannel } from '@/components/content/calenda
 import { UnscheduledLane } from '@/components/content/unscheduled-lane';
 import { CalendarRangeControls } from '@/components/content/calendar-range-controls';
 import { defaultCalendarRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { channelConnectionIdentityLabel } from '@/lib/channel-label';
 
 /**
  * story #3422(Phase1·마케팅운영, doc §11 T8/T9) — 채널 포스트 캘린더. ③ 조립 조각 —
@@ -27,6 +28,9 @@ import { defaultCalendarRange, resolveDisplayTimezone } from '@/components/conte
  */
 interface ChannelConnectionSummary {
   id: string;
+  // story #3671(3661 클래스 잔여, 페드루 PO 確定 2026-09-07) — channelConnectionIdentityLabel
+  // 폴백 문구에 필요(BE 응답엔 원래 있던 필드).
+  channel: string;
   account_label: string | null;
   account_id: string;
 }
@@ -70,8 +74,8 @@ export default function ChannelPostCalendarPage() {
   }, [orgId]);
 
   const channels: CalendarChannel[] = useMemo(
-    () => connections.map((c) => ({ connectionId: c.id, label: c.account_label ?? c.account_id })),
-    [connections],
+    () => connections.map((c) => ({ connectionId: c.id, label: channelConnectionIdentityLabel(c, t) })),
+    [connections, t],
   );
 
   return (
