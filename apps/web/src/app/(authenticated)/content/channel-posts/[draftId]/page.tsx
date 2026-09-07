@@ -2361,7 +2361,7 @@ export default function ChannelPostEditPage() {
               <span className="block" data-testid="channel-post-withdraw-confirm-reversible">{t('channelPostsWithdrawConfirmReversible')}</span>
             </>
           )}
-          cancelLabel={t('channelPostsWithdrawConfirmCancel')}
+          cancelLabel={tc('cancel')}
           confirmLabel={t('channelPostsWithdrawConfirmAction')}
           onConfirm={() => void handleWithdraw()}
         />

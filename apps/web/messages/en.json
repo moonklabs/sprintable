@@ -2583,7 +2583,6 @@
     "channelPostsWithdrawConfirmTitle": "Discard this draft?",
     "channelPostsWithdrawConfirmWhat": "The draft will close and disappear from the inbox and list.",
     "channelPostsWithdrawConfirmReversible": "This can't be undone.",
-    "channelPostsWithdrawConfirmCancel": "Close",
     "channelPostsWithdrawConfirmAction": "Discard",
     "channelPostsWithdrawSuccess": "Discarded.",
     "channelPostsWithdrawFailed": "Couldn't discard the draft.",
