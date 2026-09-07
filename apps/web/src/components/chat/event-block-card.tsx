@@ -278,7 +278,7 @@ function EventPublishActionButton({
         // 그대로 보여준다(BE가 실 권위이자 유일한 메시지 출처). story #2647에서
         // extractBackendErrorMessage로 공통화(DeliveryContractModal과 동형 패턴 공유).
         const body = await res.json().catch(() => null);
-        const msg = extractBackendErrorMessage(body) ?? `HTTP ${res.status}`;
+        const msg = extractBackendErrorMessage(body, t) ?? `HTTP ${res.status}`;
         throw new Error(msg);
       }
       setPublished(true);

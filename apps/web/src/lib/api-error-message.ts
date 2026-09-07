@@ -30,6 +30,16 @@
  * 흐름의 이 code는 안전하다"로 처음 등재했던 게 오판이었다. PR 본문에 코드마다 「raise
  * 자리 수 → 문장 전부」를 표로 남길 것 — "안전해 보인다"가 아니라 "전수 확認했다"가
  * 등재 기준이다.
+ *
+ * story #3615(BE·계약, 페드루 PO 確定 2026-09-07) — 이 allowlist는 "FE가 코드별로
+ * 안전한지 암기"하는 구조라 코드가 늘 때마다(#3605 CHANGES-3처럼) FE도 손으로 따라
+ * 고쳐야 했다. 이 계약이 그 판별을 BE로 옮긴다 — `error.user_message`(BE가 직접 쓴,
+ * 사람에게 그대로 보여도 되는 문장)·`error.user_message_key`(FE i18n 키)가 있으면
+ * **allowlist 조회 없이** 그걸 최우선으로 쓴다(`human_error()`로 채운 자리부터 점진
+ * 전환, `app/core/error_envelope.py` 참고). 아래 allowlist는 아직 human_error()로
+ * 전환 안 된 자리들의 안전망으로 당분간 남는다 — 전환이 끝나(등재 0건 수렴) 이 파일
+ * 자체와 `lint_fe_error_envelope_detail_mismatch.py`를 은퇴시키는 게 이 스토리가 연
+ * 길이다(이 PR에서 즉시 은퇴는 아님 — AC3, "수렴 가능함을 보인다"까지).
  */
 export const HUMAN_SAFE_ERROR_MESSAGE_CODES = new Set<string>([
   // channel_post_comments.py::refresh_publication_comments_endpoint(raise 1곳)
@@ -47,9 +57,41 @@ export const HUMAN_SAFE_ERROR_MESSAGE_CODES = new Set<string>([
   // uuid(connection.id·publication_id)를 그대로 담아 등재 금지(2026-09-07 정정, 페드루 PO).
 ]);
 
-export function extractBackendErrorMessage(body: unknown): string | null {
+interface ErrorLikeShape {
+  code?: unknown;
+  message?: unknown;
+  user_message?: unknown;
+  user_message_key?: unknown;
+}
+
+/**
+ * story #3615 — BE `human_error()` 계약(있으면 allowlist 조회 없이 최우선): (1)
+ * `user_message_key`가 있고 `t`가 주어졌으면 그 키로 렌더 (2) `user_message`가 있으면
+ * 그대로 (3) 둘 다 없으면 `null`(호출부가 코드별 generic 폴백으로 — 이 함수의 기존
+ * allowlist 분기로 계속 넘어간다).
+ */
+function resolveContractMessage(shape: ErrorLikeShape, t?: (key: string) => string): string | null {
+  const key = typeof shape.user_message_key === 'string' ? shape.user_message_key : undefined;
+  if (key && t) return t(key);
+  const userMessage = typeof shape.user_message === 'string' ? shape.user_message : undefined;
+  if (userMessage) return userMessage;
+  return null;
+}
+
+/**
+ * `t`는 선택 — next-intl `useTranslations()`의 반환값(또는 동형 `(key: string) =>
+ * string`)을 넘기면 `user_message_key` 자리도 렌더된다. 생략하면 그 자리는 건너뛰고
+ * `user_message`→allowlist 순으로 그대로 진행(회귀 0, 기존 4개 호출부가 당장 안 바꿔도
+ * 깨지지 않는다).
+ */
+export function extractBackendErrorMessage(body: unknown, t?: (key: string) => string): string | null {
   if (!body || typeof body !== 'object') return null;
-  const b = body as { error?: { code?: unknown; message?: unknown }; detail?: unknown };
+  const b = body as { error?: ErrorLikeShape; detail?: unknown };
+
+  if (b.error && typeof b.error === 'object') {
+    const fromContract = resolveContractMessage(b.error, t);
+    if (fromContract) return fromContract;
+  }
   const errorCode = typeof b.error?.code === 'string' ? b.error.code : undefined;
   if (errorCode && HUMAN_SAFE_ERROR_MESSAGE_CODES.has(errorCode) && typeof b.error?.message === 'string') {
     return b.error.message;
@@ -57,7 +99,9 @@ export function extractBackendErrorMessage(body: unknown): string | null {
   // 순수 문자열 detail — code가 없어 이 gate 밖(위 docstring 참고, story #2647 계약 보존).
   if (typeof b.detail === 'string') return b.detail;
   if (b.detail && typeof b.detail === 'object') {
-    const d = b.detail as { code?: unknown; message?: unknown };
+    const d = b.detail as ErrorLikeShape;
+    const fromContractDetail = resolveContractMessage(d, t);
+    if (fromContractDetail) return fromContractDetail;
     const detailCode = typeof d.code === 'string' ? d.code : undefined;
     if (detailCode && HUMAN_SAFE_ERROR_MESSAGE_CODES.has(detailCode) && typeof d.message === 'string') {
       return d.message;

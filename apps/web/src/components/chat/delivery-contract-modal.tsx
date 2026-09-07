@@ -111,7 +111,7 @@ export function DeliveryContractModal({
         // 안 붙인다(재시도해도 같은 정책 거부라 오도). 5xx/사유 미상은 기존 일반 문구+재시도
         // 안내를 유지한다(원인 모름 — 재시도가 유효할 수 있어 그 안내가 정직하다).
         const body = await res.json().catch(() => null);
-        const backendMsg = extractBackendErrorMessage(body);
+        const backendMsg = extractBackendErrorMessage(body, t);
         if (backendMsg && res.status >= 400 && res.status < 500) {
           setLevel(prev);
           setError(backendMsg);

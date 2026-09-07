@@ -447,7 +447,7 @@ export default function ChannelPostEditPage() {
       }
       // story #3601(페드루 PO 追加 2026-09-07) — body?.message는 우리 봉투에 없는
       // 자리라 죽은 폴백이었다(추가 검증 없이 걷는다).
-      const message = extractBackendErrorMessage(body) ?? t('commentsRefreshErrorGeneric');
+      const message = extractBackendErrorMessage(body, t) ?? t('commentsRefreshErrorGeneric');
       return { ok: false, kind: 'generic', message };
     } catch {
       return { ok: false, kind: 'generic', message: t('commentsRefreshErrorGeneric') };
@@ -470,7 +470,7 @@ export default function ChannelPostEditPage() {
       const body = await res.json().catch(() => null) as { data?: { story_id?: string }; error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
       if (!res.ok) {
         // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
-        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
+        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
       }
       const storyId = body?.data?.story_id;
       if (!storyId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
@@ -508,7 +508,13 @@ export default function ChannelPostEditPage() {
         // 이어가게 한다.
         return {
           ok: false,
-          errorMessage: body?.error?.message ?? body?.detail?.message ?? body?.message ?? t('commentsActionErrorGeneric'),
+          // story #3615 CHANGES-2(페드루 재확認) — 형제 4곳(:450/:473/:536/:561)과
+          // 같은 형으로 통일: extractBackendErrorMessage(body, t) ?? generic 딱 둘.
+          // CHANGES-1에서 헬퍼를 앞에 붙였지만 원문 폴백 셋(error.message 등)이 뒤에
+          // 남아 있어, 헬퍼가 null인(user_message 없고 allowlist 밖) 코드에서는 여전히
+          // 원문이 새는 구멍이었다(AC2 "원문 message는 어떤 분기에서도 사람 화면에 0"
+          // 위반). existingReplyId(헬퍼가 안 다루는 #3596 전용 필드)만 별도로 뽑는다.
+          errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric'),
           existingReplyId: body?.error?.existing_reply_id,
         };
       }
@@ -527,7 +533,7 @@ export default function ChannelPostEditPage() {
       const body = await res.json().catch(() => null) as { data?: ReplyView; error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
       if (!res.ok || !body?.data) {
         // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
-        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
+        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
       }
       return { ok: true, reply: body.data };
     } catch {
@@ -552,7 +558,7 @@ export default function ChannelPostEditPage() {
       if (!res.ok) {
         // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
         const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
-        return { ok: false, errorMessage: extractBackendErrorMessage(body) ?? t('commentsActionErrorGeneric') };
+        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
       }
       loadComments();
       return { ok: true };
