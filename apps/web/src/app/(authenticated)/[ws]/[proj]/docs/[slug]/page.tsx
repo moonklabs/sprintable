@@ -55,7 +55,10 @@ interface DocDetail {
   revisions?: { count: number; latest_at?: string | null } | null;
 }
 
-function InlineSaveIndicator({
+// story #3677(FE·대비·確定) — export만 추가(테스트 격리용, 동작 무변) — 렌더 테스트가
+// 이 하위 컴포넌트만 직접 마운트해 hover 클래스를 검증한다(page.tsx 전체를 마운트하면
+// useParams/fetch 등 무관한 의존성까지 다 갖춰야 해 이 1pt 스토리 범위를 넘는다).
+export function InlineSaveIndicator({
   status,
   onAction,
   t,
@@ -106,7 +109,10 @@ function InlineSaveIndicator({
       <button type="button" onClick={onAction}
         aria-label={`${t('statusError')} · ${t('retry')}`}
         title={`${t('statusError')} · ${t('retry')}`}
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:text-destructive/80 md:max-w-none"
+        // story #3677(FE·대비·確定) — hover:text-destructive/80은 resting state(text-
+        // destructive, 알파 없음)보다 대비를 "낮추는" 방향이라 새 규칙 위반. 색은
+        // 그대로 두고 underline으로 hover 피드백을 표현(대비 하락 0).
+        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:underline md:max-w-none"
       >
         <XCircle className="size-3.5 shrink-0" />
         <span className="truncate">{t('statusError')} · {t('retry')}</span>
