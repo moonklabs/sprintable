@@ -1244,8 +1244,13 @@
     },
     {
       "file": "tests/test_3498_generation_budget.py",
-      "sec": 42.0,
-      "source": "story-3558-run-34011626732(2026-09-06, 부하 정상 run 1건 실측 — 잠정값. actions/upload-artifact shard-durations-*·DB 준비 제외 순수 pytest wall time. 기존 로컬×6 추정 스냅샷을 대체)"
+      "sec": 52.0,
+      "source": "story-3619(2026-09-07) — #3971 run 34089668525 shard 4에서 이 파일(당시 25테스트·등재 42s) 격리실행이 100s>88s로 60초 가드 초과. 즉시 rerun(같은 run) 40.30s로 재현이 러너 경합에 크게 좌우됨을 확認. 조각①/⑤/PUT3종(11테스트)을 test_3498_generation_budget_evidence_and_config.py로 분리(원인 실측·분리 판단은 그 파일 docstring) — 이 파일에 남은 12/25 비율로 100s를 안분(12/25*100=52.0)해 등재, 경합 재발까지 감안한 보수값(40.30s 기준 안분 21.0s가 아니라 100s 기준 안분을 택함)"
+    },
+    {
+      "file": "tests/test_3498_generation_budget_evidence_and_config.py",
+      "sec": 48.0,
+      "source": "story-3619(2026-09-07) — test_3498_generation_budget.py 분리 신설분(조각①·⑤·PUT3종, 11테스트). #3971 run 34089668525 100s(25테스트)를 11/25 비율로 안분(11/25*100=44.0, 반올림 여유 48.0) — 로컬 격리측정 7.28s(무경합)와 별개로 CI 경합 배율을 그대로 반영"
     },
     {
       "file": "tests/test_3506_utm_attribution.py",
