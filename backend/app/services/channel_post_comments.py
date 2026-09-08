@@ -97,20 +97,44 @@ async def wake_resting_comment_schedules(db: AsyncSession, *, connection_id: uui
     안 되는 반쪽 처방이 된다 — 연결이 non-active→active로 돌아오는 «모든» 경로
     (재연결 upsert·자격 교체·자동 갱신 성공, `channel_connection.py`의 세 자리)가
     공유하는 단일 깨우는 손이 이 함수다(호출부마다 각자 깨우는 로직을 새로 짜지
-    않는다). due_at=now()로 되돌려 다음 루프 틱이 즉시 다시 집는다."""
+    않는다).
+
+    story #3663(라이브 결함, 배포 51) — 한 publication에는 `_COLLECTION_OFFSETS`별
+    행이 여러 개 있고, 연결이 오래 쉬면 그 행들이 전부 connection_inactive가 된다.
+    예전엔 그 «전부»에 같은 `func.now()`(트랜잭션 타임스탬프 하나)를 줘서, 쉬는
+    행이 2개 이상인 publication에서 (publication_id, due_at) 유니크가 결정적으로
+    깨졌다(재연결 콜백 500). 지금은 행마다 마이크로초씩 벌려 서로 다른 due_at을
+    준다 — 이미 지난(due_at<=now) 행만 그렇게 "지금 이후"로 되돌리고, 아직 미래인
+    행은 원래 due_at을 그대로 둔다(앞당기지 않는다 — 그런 행이 지금 실제로 나오진
+    않지만 방어적으로 유지)."""
     from app.models.channel_publication import ChannelPublication
 
-    result = await db.execute(
-        update(CommentCollectionSchedule)
+    now = datetime.now(timezone.utc)
+    resting = (await db.execute(
+        select(CommentCollectionSchedule.id, CommentCollectionSchedule.due_at)
         .where(
             CommentCollectionSchedule.status == "connection_inactive",
             CommentCollectionSchedule.publication_id.in_(
                 select(ChannelPublication.id).where(ChannelPublication.connection_id == connection_id)
             ),
         )
-        .values(status="pending", due_at=func.now())
-    )
-    return result.rowcount
+        .order_by(CommentCollectionSchedule.publication_id, CommentCollectionSchedule.due_at)
+        .with_for_update()
+    )).all()
+
+    wake_offset = 0
+    for row_id, due_at in resting:
+        if due_at is not None and due_at > now:
+            new_due_at = due_at
+        else:
+            new_due_at = now + timedelta(microseconds=wake_offset)
+            wake_offset += 1
+        await db.execute(
+            update(CommentCollectionSchedule)
+            .where(CommentCollectionSchedule.id == row_id)
+            .values(status="pending", due_at=new_due_at)
+        )
+    return len(resting)
 
 
 def _text_sha256(text: str) -> str:
