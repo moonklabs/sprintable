@@ -69,6 +69,18 @@ async def _seed_resting_row(session, *, org_id, publication_id, channel, externa
     return row
 
 
+async def _seed_row_with_status(session, *, org_id, publication_id, channel, external_id, due_at, status):
+    from app.models.channel_post_comment import CommentCollectionSchedule
+
+    row = CommentCollectionSchedule(
+        id=uuid.uuid4(), org_id=org_id, publication_id=publication_id, channel=channel,
+        external_id=external_id, due_at=due_at, status=status,
+    )
+    session.add(row)
+    await session.commit()
+    return row
+
+
 @pytest.mark.anyio
 async def test_ac1_wakes_n2_resting_rows_without_unique_violation():
     """AC1 — 한 publication에 `_COLLECTION_OFFSETS` 3개 오프셋 행이 전부
@@ -170,6 +182,59 @@ async def test_new_offset_avoids_collision_with_preserved_future_due_at(monkeypa
             due_ats = [r.due_at for r in rows]
             assert len(set(due_ats)) == 3, "새로 배정된 값이 보존된 미래 값과 겹치면 안 된다"
             assert {row.id for row in (past_row_a, past_row_b, future_row)} == {r.id for r in rows}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_new_offset_avoids_collision_with_other_status_row_same_publication(monkeypatch):
+    """CHANGES(3차, 카디르 QA real PG 재현, PO 페드루 처방 2026-09-08) —
+    `uq_comment_collection_schedule_publication_due_at`는 status 무관 테이블
+    전체에 걸린다. 2차 처방(회피집합=이번 배치의 보존 미래 행)은 같은
+    publication의 «다른 상태»(pending 등) 행이 이미 쥔 due_at은 못 본다 — 그
+    행이 정확히 새로 배정될 첫 후보(now+0µs)를 쥐고 있으면 여전히 충돌한다."""
+    from app.models.channel_post_comment import CommentCollectionSchedule
+    import app.services.channel_post_comments as channel_post_comments_module
+    from app.services.channel_post_comments import wake_resting_comment_schedules
+
+    fixed_now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            return fixed_now
+
+    monkeypatch.setattr(channel_post_comments_module, "datetime", _FixedDatetime)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="facebook_sandbox", status="expired")
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="facebook_sandbox", external_id="media-1",
+            )
+            # 다른 상태(pending) 행이 정확히 새 배정 후보(now+0µs)를 이미 쥐고 있다
+            # — 이 publication의 다른 발행 오프셋 행(예: +7d)이 아직 안 쉬고 있는
+            # 정상적인 상황을 흉내(3663 시나리오의 흔한 실물 배열).
+            pending_row = await _seed_row_with_status(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox",
+                external_id="media-1", due_at=fixed_now, status="pending",
+            )
+            resting_row = await _seed_resting_row(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox",
+                external_id="media-1", due_at=fixed_now - timedelta(hours=1),
+            )
+
+            woken = await wake_resting_comment_schedules(s, connection_id=conn.id)
+            await s.commit()  # 옛(2·3차) 코드였다면 이 commit이 IntegrityError를 냈다.
+            assert woken == 1
+
+            refreshed_pending = await s.get(CommentCollectionSchedule, pending_row.id)
+            refreshed_resting = await s.get(CommentCollectionSchedule, resting_row.id)
+            assert refreshed_pending.due_at == fixed_now, "다른 상태 행의 기존 due_at은 건드리지 않는다"
+            assert refreshed_resting.status == "pending"
+            assert refreshed_resting.due_at != refreshed_pending.due_at, "새 값이 다른 상태 행의 due_at과 겹치면 안 된다"
     finally:
         await engine.dispose()
 

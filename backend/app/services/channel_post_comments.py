@@ -107,13 +107,14 @@ async def wake_resting_comment_schedules(db: AsyncSession, *, connection_id: uui
     준다 — 이미 지난(due_at<=now) 행만 그렇게 "지금 이후"로 되돌리고, 아직 미래인
     행은 원래 due_at을 그대로 둔다(앞당기지 않는다).
 
-    CHANGES(카디르 QA real PG 재현, PO 페드루 처방 2026-09-08) — 마이크로초
-    오프셋이 "새로 배정하는 값들끼리만" 겹치지 않게 했을 뿐, «보존하기로 정한»
-    미래 due_at과는 대조를 안 해 정확히 같은 마이크로초에서 재충돌할 수 있었다
-    (도달가능성은 낮지만 이 함수 자신의 유니크 계약을 반례로 깨는 결함). 이제
-    같은 publication의 보존 예정 due_at 집합을 먼저 걷고, 새 값 후보가 그 집합과
-    겹치면 다음 마이크로초로 건너뛴다(publication별로 독립 — 유니크 제약 자체가
-    publication_id 단위)."""
+    CHANGES(카디르 QA real PG 재현, PO 페드루 처방 2026-09-08, 2·3차) — 마이크로초
+    오프셋이 "새로 배정하는 값들끼리만"·"이번에 깨우는 배치의 보존 미래 행만"과는
+    안 겹치게 했지만, `uq_comment_collection_schedule_publication_due_at`는
+    **status 무관 테이블 전체**에 걸린 제약이다 — 같은 publication의 다른 상태
+    (pending·in_progress·captured 등) 행이 이미 쥔 due_at은 이 함수 시야 밖이라
+    새로 배정한 값이 그것과도 충돌할 수 있었다(부분집합 3형: 새-새·새-보존미래·
+    새-타상태). 근본 처방 — 새 due_at을 정할 때 회피집합을 그 publication의
+    «상태 무관 기존 due_at 전체»로 넓힌다."""
     from app.models.channel_publication import ChannelPublication
 
     now = datetime.now(timezone.utc)
@@ -131,21 +132,26 @@ async def wake_resting_comment_schedules(db: AsyncSession, *, connection_id: uui
         .order_by(CommentCollectionSchedule.publication_id, CommentCollectionSchedule.due_at)
         .with_for_update()
     )).all()
+    if not resting:
+        return 0
 
-    preserved_due_ats_by_pub: dict[uuid.UUID, set[datetime]] = {}
-    for _row_id, publication_id, due_at in resting:
-        if due_at is not None and due_at > now:
-            preserved_due_ats_by_pub.setdefault(publication_id, set()).add(due_at)
+    publication_ids = {publication_id for _row_id, publication_id, _due_at in resting}
+    occupied_by_pub: dict[uuid.UUID, set[datetime]] = {}
+    for publication_id, due_at in (await db.execute(
+        select(CommentCollectionSchedule.publication_id, CommentCollectionSchedule.due_at)
+        .where(CommentCollectionSchedule.publication_id.in_(publication_ids))
+    )).all():
+        occupied_by_pub.setdefault(publication_id, set()).add(due_at)
 
     wake_offset_by_pub: dict[uuid.UUID, int] = {}
     for row_id, publication_id, due_at in resting:
         if due_at is not None and due_at > now:
             new_due_at = due_at
         else:
-            preserved = preserved_due_ats_by_pub.get(publication_id, set())
+            occupied = occupied_by_pub.get(publication_id, set())
             offset = wake_offset_by_pub.get(publication_id, 0)
             new_due_at = now + timedelta(microseconds=offset)
-            while new_due_at in preserved:
+            while new_due_at in occupied:
                 offset += 1
                 new_due_at = now + timedelta(microseconds=offset)
             wake_offset_by_pub[publication_id] = offset + 1
