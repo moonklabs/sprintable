@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MessageSquare, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -78,20 +78,24 @@ export function TossSheet({
   const t = useTranslations('chats');
   const [conversations, setConversations] = useState<TossConversation[] | null>(null);
   const [loading, setLoading] = useState(false);
+  // story #3701(design CHANGES, 유나 — "완결 못 하면 완결인 척 안 한다") — 전량 로드가
+  // 끝까지 못 간 3갈래(중간 페이지 !ok·MAX_PAGES 소진·total 부재라 완결 여부 판별 불가)를
+  // 이 플래그 하나로 모은다. partial=true면 지금까지 모은 목록은 화면에 보여주되(누락된
+  // 후보 있을 수 있음을 안내), candidates가 0건이어도 "대상 없음"으로 단정하지 않는다.
+  const [partial, setPartial] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [alreadyThereIds, setAlreadyThereIds] = useState<Set<string>>(new Set());
   const fetchedRef = useRef(false);
+  const cancelledRef = useRef(false);
 
-  useEffect(() => {
-    if (!open) return;
-    setError(null);
-    setSelectedId(null);
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
+  const loadConversations = useCallback(() => {
+    cancelledRef.current = false;
+    const cancelToken = cancelledRef;
     setLoading(true);
+    setPartial(false);
     // story #3701 — `/api/conversations`는 has_more/next_cursor가 아니라 offset+total
     // 계약(#2231 세 번째 벌)이라, limit=100 한 페이지만 보고 끝내면 참여 대화가 101건을
     // 넘는 프로젝트에서 뒤쪽 대화가 후보 목록에서 침묵 절단됐다(토스 대상이 "없는 것"처럼
@@ -99,32 +103,53 @@ export function TossSheet({
     // offset을 밀어 전량을 모은다. MAX_PAGES는 무한루프 안전판일 뿐(2000건은 실사용 밖).
     const PAGE_SIZE = 100;
     const MAX_PAGES = 20;
-    let cancelled = false;
-    (async () => {
+    void (async () => {
       const all: TossConversation[] = [];
       let offset = 0;
+      let sawPartial = false;
       for (let page = 0; page < MAX_PAGES; page += 1) {
-        const res = await fetchWithAuth(`/api/conversations?project_id=${projectId}&limit=${PAGE_SIZE}&offset=${offset}`);
-        if (!res.ok) break;
-        const json = (await res.json()) as { data?: TossConversation[]; total?: number } | null;
+        let res: Awaited<ReturnType<typeof fetchWithAuth>>;
+        try {
+          res = await fetchWithAuth(`/api/conversations?project_id=${projectId}&limit=${PAGE_SIZE}&offset=${offset}`);
+        } catch {
+          sawPartial = true;
+          break;
+        }
+        if (!res.ok) {
+          sawPartial = true;
+          break;
+        }
+        const json = await res.json().catch(() => null) as { data?: TossConversation[]; total?: number } | null;
         const pageData = json?.data ?? [];
         all.push(...pageData);
         offset += pageData.length;
-        const total = json?.total ?? all.length;
+        const total = json?.total;
+        if (typeof total !== 'number') {
+          // total이 없으면 "이게 전부"인지 알 도리가 없다 — 이 페이지까지만 신뢰하고 멈춘다.
+          sawPartial = true;
+          break;
+        }
         if (pageData.length === 0 || all.length >= total) break;
+        if (page === MAX_PAGES - 1) sawPartial = true;
       }
-      if (!cancelled) setConversations(all);
-    })()
-      .catch(() => {
-        if (!cancelled) setConversations((prev) => prev ?? []);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      if (cancelToken.current) return;
+      setConversations(all);
+      setPartial(sawPartial);
+      setLoading(false);
+    })();
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    setSelectedId(null);
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+    loadConversations();
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
-  }, [open, projectId]);
+  }, [open, loadConversations]);
 
   const candidates = useMemo(() => {
     const list = (conversations ?? []).filter((c) =>
@@ -187,13 +212,33 @@ export function TossSheet({
         </div>
         <div className="max-h-72 overflow-y-auto px-2 pb-2">
           {error ? <p role="alert" aria-live="assertive" className="px-2 pb-2 text-[11px] text-foreground">{error}</p> : null}
+          {!loading && partial ? (
+            <div className="mb-1.5 flex items-center justify-between gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              <span>{t('approvalRequestTossPartialBanner')}</span>
+              <button type="button" onClick={loadConversations} className="shrink-0 font-medium text-foreground underline underline-offset-2">
+                {t('approvalRequestTossPartialRetry')}
+              </button>
+            </div>
+          ) : null}
           {loading ? (
             <div className="h-16 animate-pulse rounded-lg bg-muted" />
           ) : candidates.length === 0 ? (
-            <EmptyState
-              title={t('approvalRequestTossEmptyTitle')}
-              description={t('approvalRequestTossEmptyBody', { name: approverLabel })}
-            />
+            partial ? (
+              <EmptyState
+                title={t('approvalRequestTossPartialEmptyTitle')}
+                description={t('approvalRequestTossEmptyBody', { name: approverLabel })}
+                action={
+                  <Button size="sm" variant="outline" onClick={loadConversations}>
+                    {t('approvalRequestTossPartialRetry')}
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                title={t('approvalRequestTossEmptyTitle')}
+                description={t('approvalRequestTossEmptyBody', { name: approverLabel })}
+              />
+            )
           ) : (
             candidates.map((c) => {
               const name = conversationDisplayName(c, currentTeamMemberId, t);
