@@ -130,6 +130,8 @@ async def get_insights_board_endpoint(
     sort_dir: str = Query(default="desc"),
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
+    # story #bf290f69 — story별 성과 대조(blog+social 발행물을 한 story로 좁혀 보기).
+    work_item_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth: AuthContext = Depends(get_current_user),
@@ -141,6 +143,7 @@ async def get_insights_board_endpoint(
         result = await list_insights_board(
             db, org_id=org_id, window=window, channel=channel, status=status,
             sort=sort, sort_dir=sort_dir, cursor=cursor, limit=limit,
+            work_item_id=work_item_id,
         )
     except InsightsBoardInvalidWindowError as exc:
         raise HTTPException(
