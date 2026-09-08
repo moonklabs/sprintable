@@ -1542,6 +1542,11 @@
       "file": "tests/test_3359_content_rules_channel_connector_map_write.py",
       "sec": 18.0,
       "source": "story-3359-channel-connector-resolver-write-contract(2026-09-08 CHANGES, 로컬 raw pytest 3건 2.9s(app.main import 1회 포함) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 18s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3696_insight_channel_dispatch_registered_guard.py",
+      "sec": 15.0,
+      "source": "story-3696-instagram-sandbox-insight-dispatch-guard(2026-09-08, 로컬 raw pytest 2건 1.9s(app.core.database 등 import 포함) 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 15s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
