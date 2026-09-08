@@ -47,6 +47,15 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
   const [stories, setStories] = useState<BoardBridgeStory[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // story #3703 CHANGES(유나 재-design, 2026-09-08 — blocking) — 디바운스로 fetch를 옮기며
+  // setLoading(true)도 250ms 지연 안에 들어가, 보드 선택 직후 250ms는 loading=false인데
+  // stories/loadError는 "이전 보드"(또는 최초 [])의 값 그대로다 — 그 창에서 화면이 「이
+  // 보드에 스토리가 없다」를 물어보지도 않고 단정하거나(첫 진입), 심하면 A보드 목록이
+  // B보드인 양 보여 그 행을 클릭하면 onSelectStory(A스토리, B보드) 어긋난 짝으로 잘못된
+  // 연결이 실제로 생긴다(#4052와 같은 클래스 — fix 자신이 새로 연 「모르는 것을 아는 척」
+  // 창). loadedKey=「이 (보드,질의) 조합의 응답이 실제로 도착했다」를 별도로 추적해
+  // settled로만 렌더 분기한다(loading 플래그 단독 신뢰 안 함).
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -54,6 +63,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
       setQuery('');
       setStories([]);
       setLoadError(null);
+      setLoadedKey(null);
     }
   }, [open]);
 
@@ -80,7 +90,10 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
         } catch {
           if (!cancelled) setLoadError(t('bridgeLoadFailed'));
         } finally {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) {
+            setLoading(false);
+            setLoadedKey(`${selectedBoardId}|${query.trim()}`);
+          }
         }
       })();
     }, 250);
@@ -88,6 +101,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
   }, [selectedBoardId, query, t]);
 
   const selectedBoard = boards.find((b) => b.projectId === selectedBoardId) ?? null;
+  const settled = loadedKey === `${selectedBoardId}|${query.trim()}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -121,7 +135,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
                 placeholder={t('bridgeSearchPlaceholder')}
                 className="mb-2"
               />
-              {loading ? (
+              {loading || !settled ? (
                 <div className="space-y-2">
                   {[1, 2, 3].map((item) => (
                     <div key={item} className="h-12 animate-pulse rounded-lg bg-muted" />
