@@ -92,13 +92,38 @@ export function TossSheet({
     if (fetchedRef.current) return;
     fetchedRef.current = true;
     setLoading(true);
-    void fetchWithAuth(`/api/conversations?project_id=${projectId}&limit=100`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: { data?: TossConversation[] } | null) => {
-        setConversations(json?.data ?? []);
+    // story #3701 — `/api/conversations`는 has_more/next_cursor가 아니라 offset+total
+    // 계약(#2231 세 번째 벌)이라, limit=100 한 페이지만 보고 끝내면 참여 대화가 101건을
+    // 넘는 프로젝트에서 뒤쪽 대화가 후보 목록에서 침묵 절단됐다(토스 대상이 "없는 것"처럼
+    // 보임 — #4049 비교뷰 has_more 무시와 동류). all.length가 total에 닿을 때까지
+    // offset을 밀어 전량을 모은다. MAX_PAGES는 무한루프 안전판일 뿐(2000건은 실사용 밖).
+    const PAGE_SIZE = 100;
+    const MAX_PAGES = 20;
+    let cancelled = false;
+    (async () => {
+      const all: TossConversation[] = [];
+      let offset = 0;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const res = await fetchWithAuth(`/api/conversations?project_id=${projectId}&limit=${PAGE_SIZE}&offset=${offset}`);
+        if (!res.ok) break;
+        const json = (await res.json()) as { data?: TossConversation[]; total?: number } | null;
+        const pageData = json?.data ?? [];
+        all.push(...pageData);
+        offset += pageData.length;
+        const total = json?.total ?? all.length;
+        if (pageData.length === 0 || all.length >= total) break;
+      }
+      if (!cancelled) setConversations(all);
+    })()
+      .catch(() => {
+        if (!cancelled) setConversations((prev) => prev ?? []);
       })
-      .catch(() => setConversations([]))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open, projectId]);
 
   const candidates = useMemo(() => {

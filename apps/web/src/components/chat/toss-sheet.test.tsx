@@ -228,6 +228,33 @@ describe('TossSheet — 제출(성공/409/기타 에러)', () => {
   });
 });
 
+// story #3701 — `/api/conversations`는 has_more/next_cursor가 아니라 offset+total 계약
+// (#2231 세 번째 벌)이라, limit=100 한 페이지만 보고 끝내면 참여 대화가 101건을 넘는
+// 프로젝트에서 101번째 이후가 토스 대상 후보에서 침묵 절단됐다(designated가 그 대화에만
+// 있으면 화면이 "대상 없음"처럼 보임). offset을 밀어 전량을 모으는지 pin.
+describe('TossSheet — 완결 로드(story #3701, offset+total 계약 전량 확보)', () => {
+  it('참여 대화가 101건(offset+total, 2페이지)이면 101번째도 후보에서 안 빠진다', async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      id: `conv-${i}`, type: 'group' as const, title: `잡담방 ${i}`, participants: [{ member_id: 'member-2', name: '유나' }],
+    }));
+    const page2Only = {
+      id: 'conv-101', type: 'group' as const, title: '101번째 방', participants: [{ member_id: 'member-9', name: '선생님' }],
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      const offset = Number(new URL(url, 'http://x').searchParams.get('offset') ?? '0');
+      if (offset === 0) return { ok: true, json: async () => ({ data: page1, total: 101 }) };
+      return { ok: true, json: async () => ({ data: [page2Only], total: 101 }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount(); // designatedApproverId='member-9' — page1엔 아무도 없고 conv-101에만 있다
+
+    expect(document.body.textContent).toContain('101번째 방');
+    // page1(offset=0)·page2(offset=100) 두 번 불렀는지 — 첫 페이지만 보고 끝내는 구코드로
+    // 되돌리면 호출 1회·"101번째 방" 부재 둘 다로 즉시 실패한다(mutation-kill).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 // story #3203(선생님 실사고·2026-08-29) — 참가자 이름 해석 실패(BE orphan 폴백, name=null)
 // 시 uuid가 그대로 새던 표시결함 pin. conversationDisplayName의 그룹-무참가자 폴백(conv.id
 // 앞 8자)·참가자 이름 폴백('?') 둘 다 사람 언어("알 수 없는 멤버")로 통일했다.
