@@ -22,4 +22,15 @@ describe('agent-run-status 카탈로그', () => {
   it('모르는 status 문자열은 outline으로 폴백한다', () => {
     expect(agentRunStatusBadgeVariant('never-seen-status')).toBe('outline');
   });
+
+  // CHANGES(카디르 QA 실결함, PO 페드루 처방 2026-09-08) — plain object 인덱싱 뒤
+  // `??`만으로는 own-property가 아닌 Object.prototype 체인 키에서 값이 샌다
+  // (constructor·toString·__proto__는 전부 undefined가 아니라서 `??`가 안 걸린다).
+  // Object.hasOwn 가드로 이 셋 모두 outline이어야 한다.
+  it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__', 'valueOf'])(
+    'Object.prototype 체인 키 "%s"는 outline으로 폴백한다(카디르 재현)',
+    (protoKey) => {
+      expect(agentRunStatusBadgeVariant(protoKey)).toBe('outline');
+    },
+  );
 });

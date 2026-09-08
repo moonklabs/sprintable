@@ -32,6 +32,12 @@ export const AGENT_RUN_STATUS_BADGE_VARIANT: Record<AgentRunStatus, AgentRunStat
   abandoned: 'warning',
 };
 
+// story #3689 CHANGES(카디르 QA, PO 페드루 처방 2026-09-08) — plain object 인덱싱
+// 뒤 `??`만으로는 own-property가 아닌 status(constructor·toString·__proto__ 등
+// Object.prototype 체인)에서 값이 새어나온다(`??`는 null/undefined만 폴백,
+// 프로토타입 상속값은 undefined가 아니다) — "모르는 status는 outline" 계약을
+// Object.hasOwn으로 먼저 지킨 뒤에만 조회한다.
 export function agentRunStatusBadgeVariant(status: string): AgentRunStatusBadgeVariant {
-  return (AGENT_RUN_STATUS_BADGE_VARIANT as Record<string, AgentRunStatusBadgeVariant>)[status] ?? 'outline';
+  if (!Object.hasOwn(AGENT_RUN_STATUS_BADGE_VARIANT, status)) return 'outline';
+  return (AGENT_RUN_STATUS_BADGE_VARIANT as Record<string, AgentRunStatusBadgeVariant>)[status];
 }
