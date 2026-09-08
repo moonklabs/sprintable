@@ -209,7 +209,8 @@ async def create_agent_run(
         cost_usd=body.cost_usd,
         deadline_at=datetime.now(timezone.utc) + timedelta(hours=AGENT_RUN_TIMEOUT_HOURS),
     )
-    return AgentRunResponse.model_validate(run)
+    name_map = await _agent_name_map(session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
 
 
 @router.patch("/{id}", response_model=AgentRunResponse)
@@ -280,4 +281,5 @@ async def update_agent_run(
                 entity_id=id,
                 context={"length_changes": _length_changes},
             )
-    return AgentRunResponse.model_validate(run)
+    name_map = await _agent_name_map(repo.session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
