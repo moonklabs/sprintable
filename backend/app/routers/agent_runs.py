@@ -98,12 +98,16 @@ async def list_agent_runs(
             from_dt = datetime.fromisoformat(from_)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid from (expected ISO 8601 datetime)")
+        if from_dt.tzinfo is None:
+            from_dt = from_dt.replace(tzinfo=timezone.utc)
     to_dt: datetime | None = None
     if to:
         try:
             to_dt = datetime.fromisoformat(to)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid to (expected ISO 8601 datetime)")
+        if to_dt.tzinfo is None:
+            to_dt = to_dt.replace(tzinfo=timezone.utc)
     if from_dt is not None and to_dt is not None and from_dt > to_dt:
         raise HTTPException(status_code=422, detail="from must not be after to")
     runs = await repo.list(

@@ -153,6 +153,31 @@ async def test_from_after_to_rejected_422():
 
 
 @pytest.mark.anyio
+async def test_from_after_to_naive_aware_mix_rejected_422_not_500():
+    """카디르 재현(CHANGES) — from이 naive·to가 tz-aware(또는 그 반대)면 datetime.fromisoformat()
+    만으로 비교 시 TypeError(offset-naive/aware 비교 불가)로 500이 났다. naive는 UTC로 간주해
+    정규화한 뒤 비교해야 하고, 여전히 from>to인 조합이면 그대로 422(500이 아니라)로 나와야 한다."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                f"/api/v2/agent-runs?project_id={seeded['project_a_id']}"
+                "&from=2026-09-07T00:00:00&to=2026-09-06T00:00:00Z"
+            )
+            assert resp.status_code == 422, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_mutation_removing_status_filter_loses_narrowing(monkeypatch):
     """뮤테이션 — repo.list()가 status를 무시하면(옛 사각지대 재현) status=running 필터가
     completed 행까지 함께 돌려주는 것을 고정(이 필터가 실제로 쿼리에 반영된다는 증거)."""
