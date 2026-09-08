@@ -97,7 +97,14 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     id: 'now',
     labelKey: 'zoneNow',
     items: [
-      { id: 'org-briefing', labelKey: 'orgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing', scope: 'org' },
+      // story #9c5e82dc(IA·S3, 카디르 QA 지적 반영·PO 정정 2026-09-08) — 애매(scope 필드
+      // 없음)로 재분류. 옛 판정(org)이 틀렸다 — org-briefing-shell.tsx의 「지금」(Now) 패널은
+      // org 전체 요청 집계지만, 같은 화면의 「실험실」(LoopFace)·「워크포스」(WorkforceFace)
+      // 패널은 projectId 없으면 스켈레톤만 그리고 있으면 project_id로 실 데이터를 건다
+      // (loop-face.tsx:26 `/api/hypotheses?project_id=`·workforce-face.tsx:30 `/api/stories?
+      // ...&project_id=`) — 화면 «일부»만 project라 표식이 "화면 전체에 대한 약속"을 못
+      // 지킨다(PO 원칙: 혼합 화면은 project로도 org로도 정직할 수 없어 무표식).
+      { id: 'org-briefing', labelKey: 'orgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' },
       // story #9c5e82dc(IA·S3, PO 確定) — inbox는 scope 필드를 안 쓴다(애매). 메인 조회
       // (/api/notifications)가 project_id·org_id 둘 다 안 걸어 순수 사용자 개인 알림이다 —
       // project도 org도 아닌 계정 축이라 AC2 "화면은 모르는 것을 단정하지 않는다"로 무표식.
@@ -141,24 +148,34 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 그대로 — 상태·발행 URL 열을 가진 목록이 문서 하나로 오독되는 것을 막기 위함.
       // 「관리」 구역의 org-connectors로도 옮기지 않는다 — 연결은 owner의 설정 행위,
       // 운영은 마케터의 일상 행위라는 가름(§5-2)이 그대로 적용된다.
+      // 근거: content/page.tsx 주석이 직접 "project 슬러그 불필요"라 명시(org_id 단일 스코프,
+      // site-posts drafts backend가 organizations/{org_id}/... 경로), project 필터 0건.
       { id: 'content', labelKey: 'content', icon: FileText, kind: 'static', path: '/content', scope: 'org' },
       // story #3402(Phase1·마케팅운영, PO 결정 2026-09-03 23:17Z) — 채널 포스트(Threads)
       // 관리 화면. NavItemConfig에 중첩 하위메뉴 구조가 없어(app-sidebar.tsx는 group.items를
       // 평평하게 순회) "블로그 포스트 아래" 배치는 이 배열에서 content 바로 뒤에 두는 것으로
       // 표현한다 — content(호스팅 블로그, org 스코프)와 같은 이유로 kind:'static'·top-level
       // 경로(channel_post_drafts도 org 스코프, project 무관).
+      // 근거: content/channel-posts/page.tsx에 project 관련 키워드 grep 0건(channel_post_
+      // drafts도 content와 동형 org 단일 스코프).
       { id: 'channel-posts', labelKey: 'channelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org' },
       // story #3376(페드루 PO 確定 2026-09-03) — 소셜 채널 OAuth 연결(조직이 소유한 외부
       // 계정·토큰). 예전 organization 구역에서 이관 — 「연결」 행위 자체는 마케터가 채널을
       // 붙이는 일상 실물이라 도메인 축(마케팅)으로 옮긴다(path 불변). story #ee78b047
       // (IA·S2, 2026-09-08, PO 確定) — 라벨은 「채널 연결」(옛 「채널」이 이웃 「채널
       // 포스트」의 접두어였다 — 이름이 스스로 갈라야 한다는 S2 AC1).
+      // 근거: organization/channels/page.tsx에 project 관련 키워드 grep 0건 — 채널 OAuth
+      // 연결은 org가 소유(project 무관).
       { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
       // story #3472(페드루 PO 確定 2026-09-05) — 콘텐츠 규칙(금칙어·UTM 필수·톤·택소노미·
       // 채널 우선순위·브랜드 킷). 예전 organization 구역에서 이관 — path 불변.
+      // 근거: organization/content-rules/page.tsx에 project 관련 키워드 grep 0건 — 규칙 세트가
+      // org 단일 스코프(금칙어·톤·택소노미 등 조직 공통 정책).
       { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
       // story #3503(성과 보드 화면) — 발행된 글의 D+1/D+7 성과 표. 예전 organization
       // 구역에서 이관 — path 불변.
+      // 근거: organization/insights-board/page.tsx에 project 관련 키워드 grep 0건 — 발행 글
+      // 성과가 org 전체 집계(project로 안 거름).
       { id: 'org-insights-board', labelKey: 'orgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board', scope: 'org' },
     ],
   },
@@ -175,6 +192,11 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // organization 흡수(시안 매핑표) — 신뢰 축의 실물이 이제 여기 있다(이전엔 organization
       // 그룹 소속). path 불변, 그룹 소속만 이동. 라벨도 zoneTrust와 겹치던 "신뢰"→"신뢰 센터"로
       // 정정(같은 구역 안에서 구역명과 항목명이 동어반복하지 않게, 시안 신뢰 센터 표기 그대로).
+      // 근거(#9c5e82dc 카디르 QA 재감사 2026-09-08) — trust/page.tsx가 project_id를 쓰긴
+      // 하나(line 39) 실질 콘텐츠(rosterRows·groupedRoster, /api/trust-scores/org-summary)는
+      // project 무관이고, project_id는 team-members 조회로 표시 이름을 채우는 데만 쓰인다
+      // (mergeMemberLookup 이름 보완 — 부수적) — 목록 자체는 project 전환에 안 바뀌므로 org
+      // 유지(org-briefing·org-workforce와 달리 "일부 패널이 project"가 아니라 "이름표만").
       { id: 'org-trust', labelKey: 'orgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org' },
     ],
   },
@@ -186,6 +208,7 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'artifacts', labelKey: 'artifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project' },
       { id: 'storage', labelKey: 'storage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project' },
       // organization 흡수(시안 매핑표) — memory는 지식 축의 실물. path 불변, 그룹 소속만 이동.
+      // 근거: memory/page.tsx에 project 관련 키워드 grep 0건 — 조직 공유 기억(org 단일 스코프).
       { id: 'org-memory', labelKey: 'orgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org' },
     ],
   },
@@ -202,11 +225,23 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     id: 'organization',
     labelKey: 'zoneOrganization',
     items: [
+      // 근거: OrgMembersSection의 project_ids는 초대할 때 «대상 프로젝트를 고르는» 액션
+      // 파라미터일 뿐(org-members-section.tsx:144), 멤버 목록 자체를 현재 project로 거르지
+      // 않는다 — 화면 콘텐츠가 project 전환에 안 바뀌므로 org.
       { id: 'org-members', labelKey: 'orgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org' },
-      { id: 'org-workforce', labelKey: 'workforce', icon: Bot, kind: 'static', path: '/organization/workforce', scope: 'org' },
+      // story #9c5e82dc(IA·S3, 카디르 QA 지적 반영·PO 정정 2026-09-08) — 애매로 재분류.
+      // agents-page-tabs.tsx 4탭 중 기본(manage)·access는 project 무관(access는 오히려 «전
+      // project를 한 매트릭스로» 보여줌)인데, stats 탭(agent-performance-panel.tsx:97-99
+      // team-members/velocity-history/leaderboard 전부 `project_id=`)과 recruit 탭은
+      // project 걸림 — 탭에 따라 갈리는 혼합 화면이라 무표식.
+      { id: 'org-workforce', labelKey: 'workforce', icon: Bot, kind: 'static', path: '/organization/workforce' },
+      // 근거: role-member.tsx류 권한 목록이 org_id 스코프(팀 전체 권한 매트릭스), project
+      // 필터 없음.
       { id: 'org-roles', labelKey: 'orgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org' },
+      // 근거: 조직 이벤트 정의(org 레벨 웹훅/트리거 카탈로그), project 필터 없음.
       { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org' },
-      // story 4180f67f — 마케팅자동화 발행 커넥터(threads/stibee/instagram 등) org_config 설정 화면.
+      // story 4180f67f — 마케팅자동화 발행 커넥터(threads/stibee/instagram 등) org_config 설정
+      // 화면. 근거: connectors/page.tsx에 project 관련 키워드 grep 0건, org_config 단일 스코프.
       { id: 'org-connectors', labelKey: 'orgConnectors', icon: Plug, kind: 'static', path: '/organization/connectors', scope: 'org' },
     ],
   },
