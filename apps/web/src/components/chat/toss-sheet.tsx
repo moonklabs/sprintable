@@ -132,7 +132,15 @@ export function TossSheet({
         if (pageData.length === 0 || all.length >= total) break;
         if (page === MAX_PAGES - 1) sawPartial = true;
       }
-      if (cancelToken.current) return;
+      if (cancelToken.current) {
+        // story #3701(design CHANGES②, 유나) — 로드 도중 시트가 닫히면 여기서 그냥
+        // return하면 setLoading(false)를 영원히 못 불러 "영원한 스켈레톤"으로 굳는다
+        // (닫혀 있으니 안 보일 뿐, 다시 열어도 fetchedRef가 true라 재요청 자체가 없었다).
+        // fetchedRef를 되돌려 **다음 열림에서 처음부터 다시 로드**하게 한다 — "다시
+        // 열면 다시 부른다"가 "멈춘 채 아무것도 안 보여준다"보다 정직하다.
+        fetchedRef.current = false;
+        return;
+      }
       setConversations(all);
       setPartial(sawPartial);
       setLoading(false);
@@ -226,7 +234,7 @@ export function TossSheet({
             partial ? (
               <EmptyState
                 title={t('approvalRequestTossPartialEmptyTitle')}
-                description={t('approvalRequestTossEmptyBody', { name: approverLabel })}
+                description={t('approvalRequestTossPartialEmptyBody')}
                 action={
                   <Button size="sm" variant="outline" onClick={loadConversations}>
                     {t('approvalRequestTossPartialRetry')}

@@ -281,12 +281,17 @@ describe('TossSheet — 완결 실패를 완결인 척 안 함(story #3701 parti
     expect(document.body.textContent).toContain(koMessages.chats.approvalRequestTossPartialBanner);
   });
 
-  it('후보가 0건+partial이면 "대상 없음" 대신 "못 불러옴" 문구+재시도 버튼', async () => {
+  it('후보가 0건+partial이면 "대상 없음" 대신 "못 불러옴" 제목+설명+재시도 버튼', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => null })));
     await mount();
 
     expect(document.body.textContent).not.toContain(koMessages.chats.approvalRequestTossEmptyTitle);
+    // design CHANGES② — 제목만 고치고 설명이 approvalRequestTossEmptyBody("...만들어라")
+    // 그대로면 제목을 되돌려 다시 "없다"를 단정하는 문장이 된다 — 설명도 partial 전용
+    // 문구(approvalRequestTossPartialEmptyBody)인지 반드시 단언.
     expect(document.body.textContent).toContain(koMessages.chats.approvalRequestTossPartialEmptyTitle);
+    expect(document.body.textContent).toContain(koMessages.chats.approvalRequestTossPartialEmptyBody);
+    expect(document.body.textContent).not.toContain(koMessages.chats.approvalRequestTossEmptyBody);
     expect(document.body.textContent).toContain(koMessages.chats.approvalRequestTossPartialRetry);
   });
 
@@ -315,6 +320,69 @@ describe('TossSheet — 완결 실패를 완결인 척 안 함(story #3701 parti
     expect(document.body.textContent).not.toContain(koMessages.chats.approvalRequestTossPartialBanner);
     expect(document.body.textContent).not.toContain(koMessages.chats.approvalRequestTossPartialEmptyTitle);
     expect(document.body.textContent).toContain('101번째 방');
+  });
+
+  it('로드 도중 시트를 닫았다 다시 열면 «영원한 스켈레톤» 없이 새로 불러온다(design CHANGES①)', async () => {
+    // 첫 열림의 요청은 절대 안 끝나는 pending Promise로 묶어(취소 경로만 보기 위해)
+    // sheet를 닫아 cancel시킨 뒤, 재오픈 때의 두 번째 요청은 정상 응답하게 한다.
+    let resolveFirst: (v: { ok: boolean; json: () => Promise<unknown> }) => void = () => {};
+    const firstPending = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve) => { resolveFirst = resolve; });
+    const secondCandidate = { id: 'conv-reopen', type: 'group' as const, title: '재오픈 방', participants: [{ member_id: 'member-9', name: '선생님' }] };
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount += 1;
+      if (callCount === 1) return firstPending;
+      return { ok: true, json: async () => ({ data: [secondCandidate], total: 1 }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    let isOpen = true;
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TossSheet
+            open={isOpen} onOpenChange={onOpenChange} gateId="gate-1" projectId="proj-1"
+            currentTeamMemberId="member-1" designatedApproverId="member-9" designatedApproverName="선생님"
+            onTossed={vi.fn()} onAlreadyResolved={vi.fn()}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+
+    // 첫 요청이 아직 pending인 채로 닫는다(취소).
+    isOpen = false;
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TossSheet
+            open={isOpen} onOpenChange={onOpenChange} gateId="gate-1" projectId="proj-1"
+            currentTeamMemberId="member-1" designatedApproverId="member-9" designatedApproverName="선생님"
+            onTossed={vi.fn()} onAlreadyResolved={vi.fn()}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    // 닫힌 뒤에야 첫 요청이 뒤늦게 도착(취소 가드가 이걸 조용히 삼켜야 함).
+    await act(async () => { resolveFirst({ ok: true, json: async () => ({ data: [], total: 0 }) }); });
+
+    // 다시 연다 — fetchedRef가 취소 경로에서 풀려 있어야 새 요청(2번째 mock 분기)이 나간다.
+    isOpen = true;
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TossSheet
+            open={isOpen} onOpenChange={onOpenChange} gateId="gate-1" projectId="proj-1"
+            currentTeamMemberId="member-1" designatedApproverId="member-9" designatedApproverName="선생님"
+            onTossed={vi.fn()} onAlreadyResolved={vi.fn()}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 재오픈이 실제로 새 요청을 냈는지(재요청 0이면 옛 결함 재현)
+    expect(document.body.textContent).toContain('재오픈 방'); // 영원한 스켈레톤/빈 상태에 갇히지 않았는지
   });
 });
 

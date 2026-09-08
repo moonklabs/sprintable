@@ -4328,6 +4328,7 @@
     "approvalRequestTossCancel": "Cancel",
     "approvalRequestTossEmptyTitle": "No conversations to send to",
     "approvalRequestTossPartialEmptyTitle": "Couldn't load the full list",
+    "approvalRequestTossPartialEmptyBody": "They may appear after retrying",
     "approvalRequestTossEmptyBody": "{name} needs to be in a conversation first",
     "approvalRequestTossPartialBanner": "Only some conversations loaded · the list may be incomplete",
     "approvalRequestTossPartialRetry": "Retry",
