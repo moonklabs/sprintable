@@ -837,9 +837,31 @@ async def _maybe_enrich_with_ga4_inflow(db: AsyncSession, snapshot: InsightSnaps
     campaign = resolve_utm_campaign(version.link_url, fallback_draft_id=version.draft_id)
 
     from app.core.config import settings
+    from app.services.org_time import get_org_timezone, to_org_date
 
-    start_date = pub.published_at.date().isoformat()
-    end_date = (snapshot.due_at or datetime.now(timezone.utc)).date().isoformat()
+    # story #3684(3682 그라운딩 확定, PO 確定 2026-09-07) — GA4 dateRanges는 속성
+    # 시간대의 "온전한 날"만 받는다. published_at/due_at(둘 다 UTC datetime)을
+    # 그대로 .date()로 자르면 org가 UTC보다 앞선 시간대(KST 등)일 때 자정~그
+    # 시차만큼의 발행분이 "발행 前날"로 잘못 잘린다(3682 실측: KST 00~09시
+    # 발행분, moonklabs 실 사례 — org tz=property tz=Asia/Seoul인데도 코드가
+    # 어느 쪽 tz도 거치지 않아 어긋났다). «날»의 정의(PO 確定): 1일 유입=발행
+    # org-일 단 하루, 7일 유입=발행 org-일부터 7 org-일 — GA4가 보는 "온전한 날"
+    # 창은 그 자체로 24시간 경과 스냅샷(due_at, _SNAPSHOT_OFFSETS)과는 다른
+    # 축이다(그 스냅샷 계약 자체는 무변).
+    #
+    # 불변식 — 이 창의 마지막 org-일은 due_at 直前(자정 기준)에 끝난다(1d:
+    # 발행 당일 하루<다음날 due_at, 7d: 발행+6일<발행+7일 due_at) — due_at에
+    # 아직 데이터가 안 채워진 미완은 GA4 처리 지연뿐이고, 그건 기존 rows=[]
+    # "미제공" 처리 그대로다(due_at은 "언제 수집 시도하나"만 담당, 이 날짜
+    # 문자열과는 이제 분리된 축).
+    org_timezone = await get_org_timezone(db, snapshot.org_id)
+    start_org_date = to_org_date(pub.published_at, org_timezone)
+    offset_days = round(
+        ((snapshot.due_at or pub.published_at) - pub.published_at).total_seconds() / 86400
+    )
+    end_org_date = start_org_date + timedelta(days=max(offset_days - 1, 0))
+    start_date = start_org_date.isoformat()
+    end_date = end_org_date.isoformat()
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
