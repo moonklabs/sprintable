@@ -53,7 +53,7 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     await mount();
     expect(container.textContent).toContain('이벤트');
     expect(container.textContent).toContain('구성원');
-    expect(container.textContent).toContain('워크포스');
+    expect(container.textContent).toContain('에이전트');
     expect(container.textContent).toContain('조직 브리핑');
   });
 
