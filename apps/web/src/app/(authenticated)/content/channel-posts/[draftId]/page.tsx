@@ -152,6 +152,10 @@ interface ChannelPostVersion {
   author_kind: 'agent' | 'human';
   created_at: string;
   tagged_link_preview: string | null;
+  // story #3679(3656 후속) — BE additive(ChannelPostVersionHistoryItem). null=미태깅
+  // (insights-board group-rows와 같은 낱말 「미분류」로 표시 — docs 네임스페이스 재사용,
+  // 새 낱말 0).
+  hook_key: string | null;
 }
 
 // story #3550(Phase2·풀스택, BE 2/2 #3910 계약, 페드루 PO 確定 2026-09-06) — 캐러셀
@@ -385,6 +389,10 @@ export default function ChannelPostEditPage() {
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
+  // story #3679 — 훅 미태깅 라벨은 새 낱말을 안 만들고 insights-board가 이미 재사용
+  // 중인 docs 네임스페이스 키(indexCategoryUncategorized, 「미분류」)를 그대로 쓴다
+  // (같은 사실=같은 낱말, 유나 §3656 확定과 동형).
+  const tDocs = useTranslations('docs');
   // story #3641(유나 전수·PO 채택) — 확認 다이얼로그 취소 버튼: 버릴 게 있으면 「취소」,
   // 이미 끝났으면 「닫기」. 재시도/회수 확認은 취소하면 "그 시도 자체를 버리는" 것이라
   // 「취소」가 맞다(형제 발행 취소 확認·:1351이 이미 「취소」인데 재시도/회수만 어긋나
@@ -2033,6 +2041,15 @@ export default function ChannelPostEditPage() {
             </p>
           </div>
         ) : null}
+        {/* story #3679(3656 후속) — 링크 미리보기와 달리 이 줄은 항상 그린다(값이
+            없어도 「미분류」로 — 훅 축은 "있으면만 보인다"가 아니라 "항상 있는 축인데
+            안 태깅된 상태"가 있는 것, insights-board와 같은 사실 표현). */}
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">{t('channelPostsApprovalHookLabel')}</span>
+          <span data-testid="channel-post-hook-key">
+            {versions[versions.length - 1]?.hook_key ?? tDocs('indexCategoryUncategorized')}
+          </span>
+        </div>
         {/* story #3428(T5-M·§17-14) — 썸네일 + 자동 변환 배지. was_converted=false면
             원본=최종이라 배지 자체를 안 그린다(값은 서버가 낸 것만, 문구 조립만 화면
             몫 — 판정은 안 함). 이미지 없는 초안(thumbnail_url=null)은 이 블록 전체를

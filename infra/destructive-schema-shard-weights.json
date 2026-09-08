@@ -1522,6 +1522,11 @@
       "file": "tests/test_3666_channel_post_image_import.py",
       "sec": 22.0,
       "source": "story-3666-channel-post-image-import(PR 개설 前 선제 등재 — 로컬 raw pytest 4건 3.68s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 22s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3679_hook_key_read_round_trip.py",
+      "sec": 20.0,
+      "source": "story-3679-hook-key-read-round-trip(PR 개설 前 선제 등재 — 로컬 raw pytest 3건 3.33s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 20s 잠정값, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }

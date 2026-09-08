@@ -250,6 +250,11 @@ class ChannelPostDraftListItem(BaseModel):
     # _validate_text_length(422 검증)와 두 곳이 갈리지 않게 헬퍼 하나를 공유한다.
     text_preview: str
     text_length: int
+    # story #3679(3656 후속, 페드루 PO 確定 2026-09-07) — 최신 버전 hook_key(3645가 쓰기
+    # 경로에만 심어 두고 읽기 경로가 없었던 갭). additive — 없으면 null(3645 착지 前
+    # 초안·훅 미태깅 둘 다 이 값과 구별 안 됨, "모른다≠다르다" 원칙과 달리 여긴 순수
+    # "값 없음"만 표현한다).
+    hook_key: str | None = None
     # story #3394(AC1·AC3) — site_posts.SitePostDraftListItem(#3742)과 같은 이름·의미로
     # 미러. gate 없으면 전부 None("모른다≠다르다" — 아직 상신 전이라는 뜻).
     gate_status: str | None = None
@@ -373,6 +378,9 @@ class ChannelPostVersionHistoryItem(BaseModel):
     author_kind: str
     created_at: str
     tagged_link_preview: str | None = None
+    # story #3679(3656 후속, 페드루 PO 確定 2026-09-07) — 이 버전 자체의 hook_key(값은
+    # 버전별, ChannelPostDraftListItem.hook_key=최신 버전과 동일 소스).
+    hook_key: str | None = None
 
 
 class CreateChannelPostImageUploadUrlRequest(BaseModel):
@@ -1153,6 +1161,7 @@ def _to_draft_list_item(
         latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
         updated_at=latest.created_at.isoformat(),
         text_preview=build_text_preview(latest.text), text_length=text_char_count(latest.text),
+        hook_key=latest.hook_key,
         body_sha256=latest.body_sha256,
         gate_status=gate.status if gate else None,
         reapproval_required=gate.reapproval_required if gate else None,
@@ -1402,6 +1411,7 @@ async def list_channel_post_draft_version_history(
                 build_tagged_link(channel=draft.channel, link_url=v.link_url, draft_id=draft.id, utm_rules=utm_rules)
                 if v.link_url else None
             ),
+            hook_key=v.hook_key,
         )
         for v in versions
     ]
