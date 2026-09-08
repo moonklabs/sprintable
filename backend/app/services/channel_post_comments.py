@@ -105,13 +105,23 @@ async def wake_resting_comment_schedules(db: AsyncSession, *, connection_id: uui
     행이 2개 이상인 publication에서 (publication_id, due_at) 유니크가 결정적으로
     깨졌다(재연결 콜백 500). 지금은 행마다 마이크로초씩 벌려 서로 다른 due_at을
     준다 — 이미 지난(due_at<=now) 행만 그렇게 "지금 이후"로 되돌리고, 아직 미래인
-    행은 원래 due_at을 그대로 둔다(앞당기지 않는다 — 그런 행이 지금 실제로 나오진
-    않지만 방어적으로 유지)."""
+    행은 원래 due_at을 그대로 둔다(앞당기지 않는다).
+
+    CHANGES(카디르 QA real PG 재현, PO 페드루 처방 2026-09-08) — 마이크로초
+    오프셋이 "새로 배정하는 값들끼리만" 겹치지 않게 했을 뿐, «보존하기로 정한»
+    미래 due_at과는 대조를 안 해 정확히 같은 마이크로초에서 재충돌할 수 있었다
+    (도달가능성은 낮지만 이 함수 자신의 유니크 계약을 반례로 깨는 결함). 이제
+    같은 publication의 보존 예정 due_at 집합을 먼저 걷고, 새 값 후보가 그 집합과
+    겹치면 다음 마이크로초로 건너뛴다(publication별로 독립 — 유니크 제약 자체가
+    publication_id 단위)."""
     from app.models.channel_publication import ChannelPublication
 
     now = datetime.now(timezone.utc)
     resting = (await db.execute(
-        select(CommentCollectionSchedule.id, CommentCollectionSchedule.due_at)
+        select(
+            CommentCollectionSchedule.id, CommentCollectionSchedule.publication_id,
+            CommentCollectionSchedule.due_at,
+        )
         .where(
             CommentCollectionSchedule.status == "connection_inactive",
             CommentCollectionSchedule.publication_id.in_(
@@ -122,13 +132,23 @@ async def wake_resting_comment_schedules(db: AsyncSession, *, connection_id: uui
         .with_for_update()
     )).all()
 
-    wake_offset = 0
-    for row_id, due_at in resting:
+    preserved_due_ats_by_pub: dict[uuid.UUID, set[datetime]] = {}
+    for _row_id, publication_id, due_at in resting:
+        if due_at is not None and due_at > now:
+            preserved_due_ats_by_pub.setdefault(publication_id, set()).add(due_at)
+
+    wake_offset_by_pub: dict[uuid.UUID, int] = {}
+    for row_id, publication_id, due_at in resting:
         if due_at is not None and due_at > now:
             new_due_at = due_at
         else:
-            new_due_at = now + timedelta(microseconds=wake_offset)
-            wake_offset += 1
+            preserved = preserved_due_ats_by_pub.get(publication_id, set())
+            offset = wake_offset_by_pub.get(publication_id, 0)
+            new_due_at = now + timedelta(microseconds=offset)
+            while new_due_at in preserved:
+                offset += 1
+                new_due_at = now + timedelta(microseconds=offset)
+            wake_offset_by_pub[publication_id] = offset + 1
         await db.execute(
             update(CommentCollectionSchedule)
             .where(CommentCollectionSchedule.id == row_id)

@@ -112,6 +112,69 @@ async def test_ac1_wakes_n2_resting_rows_without_unique_violation():
 
 
 @pytest.mark.anyio
+async def test_new_offset_avoids_collision_with_preserved_future_due_at(monkeypatch):
+    """CHANGES(카디르 QA real PG 재현, PO 페드루 처방 2026-09-08) — 마이크로초
+    오프셋이 "새로 배정하는 값들끼리만" 겹치지 않던 결함의 정확한 반례: 같은
+    publication에 과거 행 2개(now-2s·now-1s)와 보존될 미래 행 1개(now+1µs)가
+    있으면, 옛 코드는 두 번째 과거 행에 정확히 now+1µs를 줘 보존 행과 충돌했다
+    (real PG UniqueViolationError). now를 고정해 이 정확한 배열을 재현한다."""
+    from app.models.channel_post_comment import CommentCollectionSchedule
+    import app.services.channel_post_comments as channel_post_comments_module
+    from app.services.channel_post_comments import wake_resting_comment_schedules
+
+    fixed_now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001 — datetime.now 시그니처 그대로.
+            return fixed_now
+
+    monkeypatch.setattr(channel_post_comments_module, "datetime", _FixedDatetime)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="facebook_sandbox", status="expired")
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="facebook_sandbox", external_id="media-1",
+            )
+            past_row_a = await _seed_resting_row(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox",
+                external_id="media-1", due_at=fixed_now - timedelta(seconds=2),
+            )
+            past_row_b = await _seed_resting_row(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox",
+                external_id="media-1", due_at=fixed_now - timedelta(seconds=1),
+            )
+            preserved_future_due_at = fixed_now + timedelta(microseconds=1)
+            future_row = await _seed_resting_row(
+                s, org_id=org_id, publication_id=pub.id, channel="facebook_sandbox",
+                external_id="media-1", due_at=preserved_future_due_at,
+            )
+
+            woken = await wake_resting_comment_schedules(s, connection_id=conn.id)
+            await s.commit()  # 옛 코드였다면 이 commit이 IntegrityError를 냈다.
+            assert woken == 3
+
+            refreshed_future = await s.get(CommentCollectionSchedule, future_row.id)
+            assert refreshed_future.due_at == preserved_future_due_at, "보존 예정 미래 행은 앞당기지 않는다"
+
+            rows = (await s.execute(
+                sqlalchemy.select(CommentCollectionSchedule).where(
+                    CommentCollectionSchedule.publication_id == pub.id,
+                )
+            )).scalars().all()
+            assert len(rows) == 3
+            assert all(r.status == "pending" for r in rows)
+            due_ats = [r.due_at for r in rows]
+            assert len(set(due_ats)) == 3, "새로 배정된 값이 보존된 미래 값과 겹치면 안 된다"
+            assert {row.id for row in (past_row_a, past_row_b, future_row)} == {r.id for r in rows}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_ac2_future_due_at_not_pulled_forward():
     """AC2 — 아직 미래인 due_at을 가진 connection_inactive 행은 앞당기지 않는다
     (원 due_at 유지). 이미 지난 행만 새 시각을 받는다."""
