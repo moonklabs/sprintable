@@ -13,6 +13,7 @@ import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition, getT
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
 
 interface ToolCallEntry {
   type?: string;
@@ -90,10 +91,7 @@ interface RunDetail {
   model: string | null;
   llm_provider: 'managed' | 'byom' | null;
   llm_provider_key: string | null;
-  // story #3680 — 'abandoned'(agent_runs_status_check DB CHECK 7값 중 하나, alembic
-  // 0207) 추가. agent-runs-list.tsx AgentRun.status와 동형(그 파일과 동시 수정 —
-  // 목록에서 이 상태로 진입했을 때 상세도 낱말·배지가 있어야 한다).
-  status: 'queued' | 'held' | 'running' | 'hitl_pending' | 'completed' | 'failed' | 'abandoned';
+  status: AgentRunStatus;
   duration_ms: number | null;
   llm_call_count: number;
   input_tokens: number | null;
@@ -117,17 +115,6 @@ interface RunDetail {
   finished_at: string | null;
   created_at: string;
 }
-
-const STATUS_BADGE_VARIANT: Record<string, 'success' | 'destructive' | 'info' | 'outline' | 'secondary'> = {
-  completed: 'success',
-  hitl_pending: 'secondary',
-  failed: 'destructive',
-  running: 'info',
-  queued: 'outline',
-  held: 'secondary',
-  // story #3680 — failed와 동형 색(둘 다 "정상 종료가 아닌 종단" 사실).
-  abandoned: 'destructive',
-};
 
 function formatDuration(ms: number | null): string {
   if (ms == null) return '-';
@@ -313,7 +300,7 @@ export function AgentRunDetail({
         <SectionCard>
           <SectionCardHeader>
             <div className="flex flex-wrap items-center gap-3">
-              <Badge variant={STATUS_BADGE_VARIANT[run.status] ?? 'outline'}>
+              <Badge variant={agentRunStatusBadgeVariant(run.status)}>
                 {t(`status_${run.status}`)}
               </Badge>
               <span className="text-xs text-muted-foreground">
