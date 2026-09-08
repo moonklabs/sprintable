@@ -46,9 +46,26 @@ interface AppSidebarProps {
 
 function KbdHint({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="ml-auto hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80 sm:inline-flex">
+    <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80 sm:inline-flex">
       {children}
     </kbd>
+  );
+}
+
+// story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「이 항목은 프로젝트 것」이라는 «성질»
+// 표식. 칩/배지 모양(테두리·배경) 금지 — 칩은 "누를 수 있는 것"으로 읽히는데 이건 행위가
+// 아니라 성질이다. 라틴 약어("PJ")·아이콘 단독+sr-only 둘 다 기각(유나 § 그대로 — 약어는
+// 배워야 하는 어휘, sr-only는 시각 사용자에게 아무 말도 안 함). kbd(#KbdHint)와 같은
+// 자리·비슷한 크기(10px)지만 mono가 아니라 본문 폰트(한글이라). 순서는 라벨→표식→kbd
+// (성질이 이름에 붙고 행위가 끝에 간다).
+//
+// ⛔️무표식 = 조직 범위가 아니다(유나 § 명시) — org 13항목 + 애매 2항목(inbox·settings)
+// 둘 다 무표식이다. 이 표식은 "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
+function ScopeMark({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80">
+      {children}
+    </span>
   );
 }
 
@@ -259,8 +276,13 @@ export function AppSidebar({
                         tooltip={label}
                       >
                         <Icon />
-                        <span>{label}</span>
-                        {item.kbdHint ? <KbdHint>{item.kbdHint}</KbdHint> : null}
+                        <span data-nav-label>{label}</span>
+                        {item.scope === 'project' || item.kbdHint ? (
+                          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                            {item.scope === 'project' ? <ScopeMark>{t('scopeProject')}</ScopeMark> : null}
+                            {item.kbdHint ? <KbdHint>{item.kbdHint}</KbdHint> : null}
+                          </span>
+                        ) : null}
                         {item.badgeKey && badgeCount > 0 ? (
                           <SidebarMenuBadge>
                             {badgeCount > badgeCap ? `${badgeCap}+` : badgeCount}
