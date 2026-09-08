@@ -5343,6 +5343,7 @@
     "followUpSuccessLink": "스토리 보기",
     "followUpErrorGeneric": "후속 조치를 만들지 못했습니다.",
     "storyCompareTitle": "성과 대조",
+    "storyComparePartialNotice": "일부 발행물은 표시되지 않았습니다 — 전체는 성과 보드에서 볼 수 있습니다",
     "storyCompareAxisBlog": "블로그",
     "storyCompareAxisSocial": "소셜",
     "storyCompareSourceSiteBeacon": "사이트 방문 집계",

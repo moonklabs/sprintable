@@ -146,6 +146,10 @@ export function StoryInsightsCompareSection({ storyId }: StoryInsightsCompareSec
   const tBoard = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
   const [rows, setRows] = useState<InsightsBoardRow[] | null>(null);
+  // story #3697(유나 § ②) — has_more는 kind별 상한(BE)에 잘린 게 있는지만 말한다(몇 건인지는
+  // 모른다 — 수를 지어내지 않는다). 섹션 수준 한 줄로만 쓴다(어느 축이 잘렸는지는 has_more가
+  // 말 안 해서 특정 축 밑에 붙이면 모르는 것을 단정하게 된다).
+  const [hasMore, setHasMore] = useState(false);
 
   // MeasuredMetricsCards와 동형 패턴(인라인 IIFE — 별도 useCallback으로 안 뺀다).
   useEffect(() => {
@@ -168,6 +172,7 @@ export function StoryInsightsCompareSection({ storyId }: StoryInsightsCompareSec
         const json = (await res.json().catch(() => null)) as { data?: InsightsBoardResponse } | null;
         if (cancelled) return;
         setRows(json?.data?.rows ?? []);
+        setHasMore(json?.data?.has_more ?? false);
       } catch {
         if (!cancelled) setRows([]);
       }
@@ -183,6 +188,11 @@ export function StoryInsightsCompareSection({ storyId }: StoryInsightsCompareSec
   return (
     <div className="space-y-3" data-testid="story-insights-compare-section">
       <p className="text-xs font-medium text-muted-foreground">{tBoard('storyCompareTitle')}</p>
+      {hasMore ? (
+        <p className="text-xs text-muted-foreground" data-testid="story-compare-partial-notice">
+          {tBoard('storyComparePartialNotice')}
+        </p>
+      ) : null}
       <AxisGroup titleKey="storyCompareAxisBlog" rows={blogRows} orgId={orgId} tBoard={tBoard} tContent={tContent} />
       <AxisGroup titleKey="storyCompareAxisSocial" rows={socialRows} orgId={orgId} tBoard={tBoard} tContent={tContent} />
     </div>

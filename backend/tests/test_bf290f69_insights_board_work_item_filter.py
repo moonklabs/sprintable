@@ -143,6 +143,44 @@ async def test_social_crowd_out_does_not_hide_blog_row():
         assert sp.id in ids, "blog 1건이 social 51건에 밀려 사라졌다 — crowd-out 회귀"
         kinds = {r["kind"] for r in result["rows"]}
         assert "site_post" in kinds and "channel_publication" in kinds
+        # story #3697(유나 § ②) — social 51건 중 1건은 상한(50)에 잘렸으니 has_more가
+        # 정직하게 True여야 한다(화면이 "일부 표시 안 됨" 배너를 켤 신호).
+        assert result["has_more"] is True, "kind별 상한 초과인데 has_more가 False — 잘림이 조용히 숨겨짐"
+        # story #3697(유나 § ③) — 두 kind를 합쳐 재정렬한 결과라 keyset이 아니다 —
+        # next_cursor는 "이어받는 길이 있다"는 거짓 약속이라 항상 None이어야 한다.
+        assert result["next_cursor"] is None, "merged-resort 결과에 next_cursor를 냄 — 따라가면 틀린 값을 주는 거짓 약속"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_work_item_scoped_no_truncation_reports_has_more_false():
+    """story #3697(유나 § ② 대조군) — 상한 밑이면(잘림 없음) has_more가 정직하게
+    False여야 한다(항상 True로 하드코딩하는 뮤테이션을 잡는 짝)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_a = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_a, slug="post-small", title="Small",
+                published_at=now - timedelta(days=1),
+            )
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_a)
+            cp = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=gate.id, channel="threads", published_at=now - timedelta(days=1),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="90d", work_item_id=story_a)
+
+        ids = {r["publication_id"] for r in result["rows"]}
+        assert ids == {sp.id, cp.id}
+        assert result["has_more"] is False
+        assert result["next_cursor"] is None
     finally:
         await engine.dispose()
 

@@ -5343,6 +5343,7 @@
     "followUpSuccessLink": "View story",
     "followUpErrorGeneric": "Couldn't create the follow-up.",
     "storyCompareTitle": "Performance comparison",
+    "storyComparePartialNotice": "Some publications aren't shown here — see the full list on the performance board.",
     "storyCompareAxisBlog": "Blog",
     "storyCompareAxisSocial": "Social",
     "storyCompareSourceSiteBeacon": "Site visit count",

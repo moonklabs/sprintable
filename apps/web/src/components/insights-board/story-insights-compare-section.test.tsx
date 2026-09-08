@@ -48,9 +48,9 @@ function wrap(node: React.ReactNode) {
   );
 }
 
-function stubFetchRows(rows: InsightsBoardRow[]) {
+function stubFetchRows(rows: InsightsBoardRow[], hasMore = false) {
   vi.stubGlobal('fetch', vi.fn(async () => ({
-    ok: true, json: async () => ({ data: { rows, has_more: false, next_cursor: null } }),
+    ok: true, json: async () => ({ data: { rows, has_more: hasMore, next_cursor: null } }),
   })));
 }
 
@@ -198,5 +198,26 @@ describe('StoryInsightsCompareSection — story #3697', () => {
     expect(calledUrl).toContain('/api/organizations/org-1/insights-board?');
     expect(calledUrl).toContain('work_item_id=story-42');
     expect(calledUrl).toContain('window=90d');
+  });
+
+  // story #3697(유나 § ②) — has_more는 kind별 상한에 잘린 게 있다는 뜻(수는 모른다) —
+  // 섹션 수준 한 줄 배너로만 정직하게 알린다(특정 축 밑이 아니다 — has_more가 어느 축이
+  // 잘렸는지 말 안 해서 축 밑에 붙이면 모르는 것을 단정하게 된다).
+  it('has_more=true면 섹션 수준 "일부 표시 안 됨" 배너가 뜬다(유나 § 카피 그대로)', async () => {
+    stubFetchRows([blogRow(), socialRow()], true);
+    await act(async () => { root.render(wrap(<StoryInsightsCompareSection storyId="story-1" />)); });
+    await flush();
+
+    const notice = container.querySelector('[data-testid="story-compare-partial-notice"]');
+    expect(notice).toBeDefined();
+    expect(notice?.textContent).toBe(koMessages.insightsBoard.storyComparePartialNotice);
+  });
+
+  it('has_more=false면 배너가 안 뜬다(정직 — 안 잘렸는데 잘렸다고 안 함)', async () => {
+    stubFetchRows([blogRow(), socialRow()], false);
+    await act(async () => { root.render(wrap(<StoryInsightsCompareSection storyId="story-1" />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="story-compare-partial-notice"]')).toBeNull();
   });
 });
