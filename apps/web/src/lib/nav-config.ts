@@ -285,3 +285,45 @@ export const MOBILE_HUB_EXCLUDE_IDS = new Set(['board', 'inbox', 'chats']);
 export const CHAT_CENTER_ITEM: NavItemConfig = {
   id: 'chats', labelKey: 'chats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
+
+// story #d986fd6c(IA·S4, PO 確定 2026-09-08) — 구역 기본 접힘. 「규칙」과 「임계값」을
+// 분리한다: 규칙(이 함수)은 지금 배선하고, 임계값(SIDEBAR_FIRST_SCREEN_ITEM_BUDGET)만
+// 배포 54(S1/S2/3694 라이브) 뒤 실측으로 채운다 — AC1이 "지금 재면 옛 구조를 재는 것"
+// 이라 명시한 그대로, dev-app이 아직 옛 6구역이라 지금 재는 수치는 무의미하다(PO 확認).
+//
+// 규칙 — NAV_GROUPS 순서대로(위에서부터, 'now'가 항상 먼저라 사실상 최우선) 항목을
+// 누적하다 예산을 넘기는 첫 구역부터 그 구역과 그 뒤 구역 전부를 기본 접힘으로 둔다.
+// "탐(순서상 앞선 구역)이 우선"이라는 단순한 원칙 — 임의로 특정 구역을 손으로 골라
+// 접지 않는다(AC1 "임의로 고른 수 금지"의 정신을 구역 선택에도 적용).
+export interface GroupItemCount {
+  id: string;
+  itemCount: number;
+}
+
+// ⚠️PENDING(페드루 PO 확認 예정, 배포 54 뒤) — dev-app이 새 7구역(S1~S3) 구조로 재배포된
+// 뒤, 실 뷰포트에서 "스크롤 없이 보이는 항목 수"를 재서 이 값을 채운다. 그 전까지는
+// 회귀가드가 이 상수를 직접 쓰지 않고(합성 예산으로 규칙 함수만 단위 테스트) — 이 값
+// 자체를 규칙의 정답으로 삼는 테스트는 배포 뒤 추가한다.
+export const SIDEBAR_FIRST_SCREEN_ITEM_BUDGET: number | null = null;
+
+export function computeDefaultCollapsedGroupIds(
+  groups: readonly GroupItemCount[],
+  budget: number,
+): Set<string> {
+  const collapsed = new Set<string>();
+  let used = 0;
+  let overBudget = false;
+  for (const group of groups) {
+    if (overBudget) {
+      collapsed.add(group.id);
+      continue;
+    }
+    if (used + group.itemCount > budget) {
+      overBudget = true;
+      collapsed.add(group.id);
+      continue;
+    }
+    used += group.itemCount;
+  }
+  return collapsed;
+}

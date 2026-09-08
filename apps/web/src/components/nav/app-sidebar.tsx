@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Search, MessageSquare } from 'lucide-react';
+import { ChevronDown, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
@@ -12,7 +12,13 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
+import { cn } from '@/lib/utils';
+import {
+  NAV_GROUPS,
+  CHAT_CENTER_ITEM,
+  computeDefaultCollapsedGroupIds,
+  SIDEBAR_FIRST_SCREEN_ITEM_BUDGET,
+} from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
   Sidebar,
@@ -42,6 +48,50 @@ interface AppSidebarProps {
   // story #2007(perf·서버부하): dashboard-shell.tsx가 단일 useChatUnreadTotal() 호출 결과를
   // prop으로 내려준다 — 여기서 직접 훅을 호출하면 MobileTabBar와 각자 SSE 연결을 열게 된다.
   chatUnreadTotal: number;
+}
+
+// story #d986fd6c(IA·S4, PO 確定 2026-09-08) — 기본 접힘 집합(규칙은 nav-config.ts::
+// computeDefaultCollapsedGroupIds, 임계값은 SIDEBAR_FIRST_SCREEN_ITEM_BUDGET). 임계값이
+// 아직 PENDING(null — 배포 54 뒤 실측)이라 지금은 빈 집합(전 구역 기본 펼침) — 임의로
+// 특정 구역을 손으로 접어 두지 않는다(AC1 "임의 수 금지"의 정신). 임계값이 채워지는
+// 순간 이 상수도 그 규칙을 그대로 따른다(코드 변경 0, 값만 채우면 됨).
+const DEFAULT_COLLAPSED_GROUP_IDS: Set<string> = SIDEBAR_FIRST_SCREEN_ITEM_BUDGET != null
+  ? computeDefaultCollapsedGroupIds(
+      NAV_GROUPS.map((g) => ({ id: g.id, itemCount: g.items.length })),
+      SIDEBAR_FIRST_SCREEN_ITEM_BUDGET,
+    )
+  : new Set<string>();
+
+// 사람별 기억(AC3) — 그룹 id별 접힘 여부. localStorage(계정 단위가 아니라 이 브라우저 단위
+// 이지만, "사람별로 기억된다"는 AC 문면은 "같은 사람이 다시 왔을 때 유지"를 요구할 뿐
+// 서버 동기화까지 요구하지 않는다 — sidebar_width와 같은 관례). 값이 없는 그룹은
+// DEFAULT_COLLAPSED_GROUP_IDS를 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
+const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
+
+function readStoredCollapsedOverrides(): Record<string, boolean> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function mergeStoredCollapsedOverrides(
+  defaults: Set<string>,
+  overrides: Record<string, boolean>,
+): Set<string> {
+  const next = new Set(defaults);
+  for (const group of NAV_GROUPS) {
+    const stored = overrides[group.id];
+    if (stored === undefined) continue;
+    if (stored) next.add(group.id);
+    else next.delete(group.id);
+  }
+  return next;
 }
 
 function KbdHint({ children }: { children: React.ReactNode }) {
@@ -119,6 +169,43 @@ export function AppSidebar({
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
+
+  // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
+  // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
+  // 읽기와 동형 패턴 — ui/sidebar.tsx:81-83) 마운트 후 이 effect가 localStorage 원문을
+  // 그대로 얹는다. localStorage는 React 밖 외부 저장소라 마운트 시점 1회 동기화는 정확히
+  // 이 effect가 있어야 하는 자리(구독 없는 단발성 읽기 — storage 이벤트는 다른 탭 변경만
+  // 알리고 같은 탭 내 최초 하이드레이션은 못 잡는다).
+  // sidebar_width와 같은 목적(SSR-세이프 localStorage 하이드레이션)이나 그쪽은 원시값
+  // 단일 setState라 react-hooks/set-state-in-effect에 안 걸리고, 이쪽은 객체라 걸린다 —
+  // 파생값(Set)은 이미 위 useMemo로 분리해 뒀으니 이 setState 자체는 "외부 저장소를
+  // 그대로 얹는" 정당한 동기화다.
+  const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const overrides = readStoredCollapsedOverrides();
+    if (Object.keys(overrides).length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCollapsedOverrides(overrides);
+    }
+  }, []);
+  const collapsedGroupIds = useMemo(
+    () => mergeStoredCollapsedOverrides(DEFAULT_COLLAPSED_GROUP_IDS, collapsedOverrides),
+    [collapsedOverrides],
+  );
+
+  const toggleGroupCollapsed = useCallback((groupId: string) => {
+    setCollapsedOverrides((prev) => {
+      const wasCollapsed = collapsedGroupIds.has(groupId);
+      const next = { ...prev, [groupId]: !wasCollapsed };
+      try {
+        window.localStorage.setItem(SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // story #d986fd6c — localStorage 실패(프라이빗 창·용량 등)는 이 세션 안 상태만
+        // 유지하고 조용히 넘어간다(기억 실패가 사이드바 자체를 못 쓰게 만들면 안 된다).
+      }
+      return next;
+    });
+  }, [collapsedGroupIds]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -255,9 +342,30 @@ export function AppSidebar({
             그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). story #2930 I1 — 이제 4구역+관리
             프레임 순서(오늘→워크스페이스→신뢰→지식→조직→설정)로 재편됐다. chats는 위
             챗 center로 승격돼 이 순회 밖이라 badgeKey는 이제 'inbox' 하나만 실질 도달한다. */}
-        {NAV_GROUPS.map((group) => (
+        {NAV_GROUPS.map((group) => {
+          // story #d986fd6c(IA·S4) — 라벨 없는 유틸 그룹(설정)은 접기 대상이 아니다(항목
+          // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
+          // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
+          const isCollapsible = Boolean(group.labelKey);
+          const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id);
+          return (
           <SidebarGroup key={group.id}>
-            {group.labelKey ? <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel> : null}
+            {group.labelKey ? (
+              <SidebarGroupLabel
+                render={
+                  <button
+                    type="button"
+                    onClick={() => toggleGroupCollapsed(group.id)}
+                    aria-expanded={!isCollapsed}
+                  />
+                }
+                className="w-full cursor-pointer justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              >
+                <span>{t(group.labelKey)}</span>
+                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', isCollapsed && '-rotate-90')} />
+              </SidebarGroupLabel>
+            ) : null}
+            {!isCollapsed ? (
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
@@ -294,8 +402,10 @@ export function AppSidebar({
                 })}
               </SidebarMenu>
             </SidebarGroupContent>
+            ) : null}
           </SidebarGroup>
-        ))}
+          );
+        })}
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">

@@ -314,4 +314,53 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(link!.className).toContain('shadow-[var(--elev-card)]');
     expect(link!.className).not.toContain('bg-proof-blue-soft');
   });
+
+  // story #d986fd6c(IA·S4, PO 確定 2026-09-08) — 구역 접기/펴기. 임계값이 아직 PENDING
+  // (null)이라 기본 상태는 "전 구역 펼침"이다(임의로 특정 구역을 손으로 접어 두지 않음).
+  it('임계값 미확定 상태에선 기본으로 모든 구역이 펼쳐져 있다(빈 구역 헤더 클릭 전)', async () => {
+    await mount();
+    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardLink).toBeDefined();
+  });
+
+  it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {
+    await mount();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeader).toBeDefined();
+    expect(devHeader?.getAttribute('aria-expanded')).toBe('true');
+
+    await act(async () => { devHeader!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeUndefined();
+    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeaderAfter?.getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => { devHeaderAfter!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeDefined();
+  });
+
+  it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
+    await mount();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    await act(async () => { devHeader!.click(); });
+
+    const stored = JSON.parse(localStorage.getItem('sidebar_group_collapsed') ?? '{}');
+    expect(stored.dev).toBe(true);
+  });
+
+  it('기억된 접힘 상태가 마운트 시 그대로 재현된다(기억 있으면 그 값, AC3)', async () => {
+    localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ dev: true }));
+    await mount();
+    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardLink).toBeUndefined();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeader?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('라벨 없는 설정 그룹엔 접기 토글이 없다(헤더 자체가 없음)', async () => {
+    await mount();
+    const settingsLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '설정');
+    expect(settingsLink).toBeDefined();
+    const toggles = [...container.querySelectorAll('button[aria-expanded]')];
+    expect(toggles.some((b) => b.textContent?.includes('설정'))).toBe(false);
+  });
 });
