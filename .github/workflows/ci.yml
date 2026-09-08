@@ -1539,6 +1539,16 @@ jobs:
         run: |
           pnpm --filter web verify:no-new-repeated-row-action-names -- --selftest
 
+      # story #3688(3687→3686 그라운딩, 3680 클래스) 회귀가드 — fetchWithAuth 응답을
+      # r.ok 검사 없이 바로 .json()→데이터로 쓰는 자리(#3680 agent-runs-list.tsx·#3687
+      # chat-input.tsx가 이미 겪은 병: BE 422가 조용히 빈 목록으로 삼켜진다)가 새로 늘면
+      # FAIL. baseline-freeze(verify-no-new-raw-fetch-api.ts와 동형) — 기존 28곳은
+      # fetch-response-without-ok-check-baseline.json에 얼리되, 고쳐진 항목을 baseline에서
+      # 안 지우면(stale) 그것도 FAIL(허용목록은 줄어들기만).
+      - name: "Verify no fetch response without .ok check (story #3688 regression guard)"
+        run: |
+          pnpm --filter web verify:no-fetch-response-without-ok-check -- --selftest
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op

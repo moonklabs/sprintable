@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "story #3688 grandfather baseline — 이 가드 첫 도입 시점 develop의 기존",
+    "fetchWithAuth 응답 .ok 미검사 자리(3687 그라운딩 28곳). 새 자리 0을 보장하고,",
+    "고쳐진 항목은 여기서 지운다(stale이면 가드가 FAIL — 줄어들기만 원칙 강제)."
+  ],
+  "keys": [
+    "app/(authenticated)/channel/page.tsx::fetchWithAuth('/api/channel/token')",
+    "app/(authenticated)/content/channel-posts/[draftId]/page.tsx::const imagesRes = await fetchWithAuth(",
+    "app/(authenticated)/content/channel-posts/[draftId]/page.tsx::const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${replyComment.id}/replies/${replyId}/submit`, {",
+    "app/(authenticated)/content/channel-posts/[draftId]/page.tsx::const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${replyComment.id}/replies`, {",
+    "app/(authenticated)/organization/channels/page.tsx::const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${conn.id}/test`, { method: 'POST' });",
+    "app/(authenticated)/organization/trust/page.tsx::const res = await fetchWithAuth(`/api/trust-scores?member_id=${currentTeamMemberId}`).catch(() => null);",
+    "app/(authenticated)/settings/page.tsx::const orgListRes = await fetchWithAuth('/api/organizations').catch(() => null);",
+    "app/(authenticated)/settings/page.tsx::const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);",
+    "app/(authenticated)/settings/page.tsx::const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}`, {",
+    "app/(authenticated)/settings/page.tsx::const res = await fetchWithAuth(`/api/team-members?project_id=${currentProjectId}&type=human`).catch(() => null);",
+    "components/agents/access-matrix-tab.tsx::const g = await fetchWithAuth(`/api/agents/access-matrix`).catch(() => null);",
+    "components/chat/add-participant-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
+    "components/chat/chat-input.tsx::fetchWithAuth(`/api/members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)",
+    "components/chat/file-viewer.tsx::const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {",
+    "components/chat/file-viewer.tsx::const signRes = await fetchWithAuth(",
+    "components/chat/new-conversation-modal.tsx::fetchWithAuth('/api/team-members?type=agent')",
+    "components/chat/new-conversation-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
+    "components/organization/apply-recipe-dialog.tsx::const res = await fetchWithAuth(`/api/events/definitions/${target.id}/apply`, {",
+    "components/settings/agent-project-access-section.tsx::const g = await fetchWithAuth(`/api/projects/${projectId}/access`).catch(() => null);",
+    "components/settings/mcp-connection-settings.tsx::const response = await fetchWithAuth(`/api/projects/${projectId}/mcp-connections`, { cache: 'no-store' });",
+    "components/settings/org-members-section.tsx::const res = await fetchWithAuth(`/api/organizations/${orgId}/invites`, {",
+    "components/settings/set-password-section.tsx::const res = await fetchWithAuth('/api/auth/set-password/request', {",
+    "components/settings/workflow-template-gallery-section.tsx::const r = await fetchWithAuth(`/api/events/definitions/${d.id}/bindings?project_id=${projectId}`).catch(() => null);",
+    "components/settings/workflow-template-gallery-section.tsx::const res = await fetchWithAuth(`/api/events/definitions/${selected.id}/apply`, {",
+    "components/standup/standup-history-section.tsx::fetchWithAuth(`/api/standup/history?project_id=${projectId}&limit=20`)",
+    "ee/components/billing/billing-actions.ts::const res = await fetchWithAuth('/api/billing/billing-key', { method: 'DELETE', credentials: 'include' });",
+    "ee/components/billing/billing-tab.tsx::fetchWithAuth('/api/billing/status', { credentials: 'include' })",
+    "hooks/use-entity-picker.ts::fetchWithAuth(`/api/entities/search?${params}`)"
+  ]
+}
