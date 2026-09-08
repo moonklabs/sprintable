@@ -121,22 +121,26 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     labelKey: 'zoneMarketing',
     items: [
       // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §5-2) — 호스팅
-      // 블로그 「글 관리」. site-posts drafts는 org 스코프(프로젝트 무관, backend
-      // organizations/{org_id}/site-posts/drafts)라 org-connectors(/organization/connectors)와
-      // 동형으로 kind:'static'·top-level 경로다. 「지식」 문서 트리(parent_id 계층) 밑에 두지
-      // 않는 이유는 §5-2 그대로 — 상태·발행 URL 열을 가진 목록이 문서 하나로 오독되는 것을
-      // 막기 위함. 「관리」 구역의 org-connectors로도 옮기지 않는다 — 연결은 owner의 설정
-      // 행위, 운영은 마케터의 일상 행위라는 가름(§5-2)이 그대로 적용된다.
+      // 블로그 글 관리(story #ee78b047 IA·S2, 2026-09-08, PO 確定으로 라벨은 「블로그
+      // 포스트」 — 「콘텐츠 규칙」과 접두 관계이던 옛 「콘텐츠」에서 개명). site-posts
+      // drafts는 org 스코프(프로젝트 무관, backend organizations/{org_id}/site-posts/
+      // drafts)라 org-connectors(/organization/connectors)와 동형으로 kind:'static'·
+      // top-level 경로다. 「지식」 문서 트리(parent_id 계층) 밑에 두지 않는 이유는 §5-2
+      // 그대로 — 상태·발행 URL 열을 가진 목록이 문서 하나로 오독되는 것을 막기 위함.
+      // 「관리」 구역의 org-connectors로도 옮기지 않는다 — 연결은 owner의 설정 행위,
+      // 운영은 마케터의 일상 행위라는 가름(§5-2)이 그대로 적용된다.
       { id: 'content', labelKey: 'content', icon: FileText, kind: 'static', path: '/content' },
       // story #3402(Phase1·마케팅운영, PO 결정 2026-09-03 23:17Z) — 채널 포스트(Threads)
       // 관리 화면. NavItemConfig에 중첩 하위메뉴 구조가 없어(app-sidebar.tsx는 group.items를
-      // 평평하게 순회) "콘텐츠 아래" 배치는 이 배열에서 content 바로 뒤에 두는 것으로
+      // 평평하게 순회) "블로그 포스트 아래" 배치는 이 배열에서 content 바로 뒤에 두는 것으로
       // 표현한다 — content(호스팅 블로그, org 스코프)와 같은 이유로 kind:'static'·top-level
       // 경로(channel_post_drafts도 org 스코프, project 무관).
       { id: 'channel-posts', labelKey: 'channelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts' },
       // story #3376(페드루 PO 確定 2026-09-03) — 소셜 채널 OAuth 연결(조직이 소유한 외부
       // 계정·토큰). 예전 organization 구역에서 이관 — 「연결」 행위 자체는 마케터가 채널을
-      // 붙이는 일상 실물이라 도메인 축(마케팅)으로 옮긴다(path 불변).
+      // 붙이는 일상 실물이라 도메인 축(마케팅)으로 옮긴다(path 불변). story #ee78b047
+      // (IA·S2, 2026-09-08, PO 確定) — 라벨은 「채널 연결」(옛 「채널」이 이웃 「채널
+      // 포스트」의 접두어였다 — 이름이 스스로 갈라야 한다는 S2 AC1).
       { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels' },
       // story #3472(페드루 PO 確定 2026-09-05) — 콘텐츠 규칙(금칙어·UTM 필수·톤·택소노미·
       // 채널 우선순위·브랜드 킷). 예전 organization 구역에서 이관 — path 불변.

@@ -110,7 +110,7 @@
     "goals": "목표",
     "loops": "실험실",
     "storage": "스토리지",
-    "content": "콘텐츠",
+    "content": "블로그 포스트",
     "channelPosts": "채널 포스트",
     "zoneNow": "오늘",
     "zoneDev": "개발",
@@ -126,7 +126,7 @@
     "orgMemory": "기억",
     "orgEvents": "이벤트",
     "orgConnectors": "커넥터",
-    "orgChannels": "채널",
+    "orgChannels": "채널 연결",
     "orgContentRules": "콘텐츠 규칙",
     "orgInsightsBoard": "성과 보드",
     "switcherOrgSettingsAria": "Organization 설정",
@@ -2132,7 +2132,7 @@
     "imageUnavailable": "공개 보기에서 이미지를 표시할 수 없습니다"
   },
   "channelConnect": {
-    "pageTitle": "채널",
+    "pageTitle": "채널 연결",
     "pageDescription": "소셜 채널 계정을 연결하고 상태를 관리합니다. 자격(앱 id·secret)과 OAuth 토큰은 여기서만 다룹니다.",
     "channelStatusNotConnected": "미연결",
     "channelStatusConfigIncomplete": "설정 미완",
@@ -2257,7 +2257,7 @@
     "measurementGa4DisconnectEffect": "연결을 해제하면 앞으로의 유입 수집이 멈춥니다. 지금까지 모인 값은 남습니다."
   },
   "content": {
-    "title": "글 관리",
+    "title": "블로그 포스트",
     "description": "호스팅 블로그에 실릴 글의 초안·승인·발행을 관리합니다.",
     "loadFailed": "글 목록을 불러오지 못했습니다.",
     "emptyTitle": "아직 초안이 없습니다",

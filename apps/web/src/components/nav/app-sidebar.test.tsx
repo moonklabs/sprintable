@@ -96,7 +96,7 @@ async function mount() {
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림'] },
   { labelKey: 'zoneDev', labels: ['보드', '목표', '실험실', '스탠드업', '회고'] },
-  { labelKey: 'zoneMarketing', labels: ['콘텐츠', '채널 포스트', '채널', '콘텐츠 규칙', '성과 보드'] },
+  { labelKey: 'zoneMarketing', labels: ['블로그 포스트', '채널 포스트', '채널 연결', '콘텐츠 규칙', '성과 보드'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
   { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터'] },
@@ -120,11 +120,12 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 챗 제외 22→23항목. story #3503 — 조직 그룹에 '성과 보드'(/organization/insights-board)
 // 추가돼 챗 제외 23→24항목.
 //
-// ⚠️'채널 포스트'는 텍스트가 '채널'로 시작한다 — 아래 매칭 로직의 startsWith 폴백이
-// '채널'을 찾을 때 '채널 포스트' 링크를 먼저 집을 위험이 있었다(페드루 PO 실측,
-// PR#3768 CI red). exact-match-first로 고쳐 해소했다(kbd힌트 항목은 텍스트에 공백
-// 없이 붙어 startsWith가 여전히 필요 — '보드'+'B'='보드B', exact 매치가 없어 정상적으로
-// startsWith로 폴백한다).
+// story #ee78b047(IA·S2, 2026-09-08, PO 確定) — 예전엔 '채널 포스트'가 텍스트상 '채널'로
+// 시작해 아래 매칭 로직의 startsWith 폴백이 '채널'을 찾을 때 '채널 포스트' 링크를 먼저
+// 집을 위험이 있었다(페드루 PO 실측, PR#3768 CI red — exact-match-first로 그때 해소).
+// S2가 '채널'을 '채널 연결'로 개명해 그 접두 관계 자체가 이제 없다 — exact-match-first
+// 자체는 일반 규율로 그대로 둔다(kbd힌트 항목은 텍스트에 공백 없이 붙어 startsWith가
+// 여전히 필요 — '보드'+'B'='보드B', exact 매치가 없어 정상적으로 startsWith로 폴백한다).
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '채널 포스트': '/content/channel-posts',
   '구성원': '/organization/members',
@@ -134,7 +135,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '기억': '/organization/memory',
   '이벤트': '/organization/events',
   '커넥터': '/organization/connectors',
-  '채널': '/organization/channels',
+  '채널 연결': '/organization/channels',
   '콘텐츠 규칙': '/organization/content-rules',
   '성과 보드': '/organization/insights-board',
   '조직 브리핑': '/org-briefing',
@@ -144,7 +145,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '실험실': '/loops',
   '스탠드업': '/standup',
   '회고': '/retro',
-  '콘텐츠': '/content',
+  '블로그 포스트': '/content',
   '활동 로그': '/activity',
   '문서': '/docs',
   '산출물': '/artifacts',
@@ -240,9 +241,10 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
       // story #3402(페드루 PO 실측, PR#3768 CI red) — exact match를 먼저 찾고, 없을
       // 때만 startsWith로 폴백한다. kbd 힌트 항목은 텍스트에 공백 없이 붙어("보드"+"B"
-      // ="보드B") exact가 안 걸려 여전히 startsWith로 정상 폴백하지만, '채널 포스트'처럼
-      // 두 단어를 공백으로 이은 라벨이 다른 라벨('채널')의 접두어가 되는 경우는 exact
-      // 우선이라야 정확한 항목을 집는다(순서 의존 없이 결정적).
+      // ="보드B") exact가 안 걸려 여전히 startsWith로 정상 폴백한다. story #ee78b047
+      // (IA·S2) 이전엔 '채널 포스트'가 다른 라벨('채널')의 접두어라 exact 우선이 결정적
+      // 정확성의 유일한 버팀목이었다 — S2가 '채널'을 '채널 연결'로 개명해 그 접두 관계는
+      // 사라졌지만, exact-match-first 자체는 일반 규율로 유지한다.
       const link = links.find((a) => a.textContent === label) ?? links.find((a) => a.textContent?.startsWith(label));
       expect(link, `링크 "${label}"를 찾지 못함`).toBeDefined();
       expect(link!.getAttribute('href'), `"${label}"의 href`).toBe(expectedHref);
