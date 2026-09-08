@@ -53,7 +53,7 @@ const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
   ['gateConfig.actor_', ['agent', 'human'], 'gate-level-matrix.tsx ACTOR_TYPES'],
   ['standup.reviewType_', ['comment', 'approve', 'request_changes'], 'standup-feedback-dialog.tsx StandupReviewType'],
   ['agentRuns.billingMode_', ['managed', 'byom'], 'agent-runs-list.tsx AgentRun.llm_provider'],
-  ['agentRuns.status_', ['queued', 'held', 'running', 'hitl_pending', 'completed', 'failed'], 'agent-runs-list.tsx AgentRun.status'],
+  ['agentRuns.status_', ['queued', 'held', 'running', 'hitl_pending', 'completed', 'failed', 'abandoned'], 'agent-runs-list.tsx AgentRun.status(story #3680 — abandoned 추가)'],
   ['agentRuns.failureDisposition_', ['retry_scheduled', 'retry_launched', 'retry_exhausted', 'non_retryable'], 'agent-runs-list.tsx AgentRun.failure_disposition'],
   ['agentRuns.toolAuditSource_', ['builtin', 'external'], 'agent-run-detail.tsx:19 toolSource 타입(런타임 추출값은 unconstrained string — 알려진 2값만 커버, ①로 별도 명시)'],
   ['agents.toolPermissions.groups.', ['core', 'stories', 'tasks', 'sprints', 'epics', 'chat', 'docs', 'analytics', 'retro', 'standup', 'meetings', 'notifications', 'webhooks', 'rewards', 'audit', 'agent_runs', 'admin'], 'toolset-catalog.ts 폴백 그룹(BE가 SSOT — ②로 별도 명시)'],

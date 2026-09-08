@@ -19,6 +19,9 @@ class AgentRunRepository:
         project_id: uuid.UUID,
         agent_id: uuid.UUID | None = None,
         story_id: uuid.UUID | None = None,
+        status: str | None = None,
+        from_dt: datetime | None = None,
+        to_dt: datetime | None = None,
         limit: int = 50,
         cursor: datetime | None = None,
     ) -> list[AgentRun]:
@@ -35,6 +38,13 @@ class AgentRunRepository:
         # 않는다 — 타 project의 story_id를 넣어도 그 project agent의 run은 agent_ids에 없어 0건.
         if story_id is not None:
             q = q.where(AgentRun.story_id == story_id)
+        # story #3680 — status/from/to 전부 narrowing(AND)뿐, story_id와 동형(인가 축 신규 0).
+        if status is not None:
+            q = q.where(AgentRun.status == status)
+        if from_dt is not None:
+            q = q.where(AgentRun.created_at >= from_dt)
+        if to_dt is not None:
+            q = q.where(AgentRun.created_at <= to_dt)
         if cursor:
             q = q.where(AgentRun.created_at < cursor)
         q = q.order_by(AgentRun.created_at.desc()).limit(min(limit, 200))
