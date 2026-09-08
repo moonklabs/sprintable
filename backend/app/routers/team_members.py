@@ -743,6 +743,15 @@ async def claim_story(
     from app.services.participation_helpers import ensure_implementation_participation
     participation_ensured = await ensure_implementation_participation(session, org_id, body.story_id, id)
 
+    # story #3685(Trust·customer-zero, 페드루 PO 確定 2026-09-07) — run을 "지침"이 아니라
+    # "메커니즘"으로 기록한다. claim=착수(사람은 agent_run 개념 밖 — member.type=="agent"만).
+    if member.type == "agent":
+        from app.services.agent_run_tracking import ensure_agent_run_started
+        await ensure_agent_run_started(
+            session, org_id=org_id, project_id=effective_project_id,
+            agent_id=id, story_id=body.story_id,
+        )
+
     # story 8b7e52d6(PO 재정의, 2026-09-04) — "신호 보정": claim_story의 실제 동작(위)은
     # story 3414b6d7 결정 그대로 assignee/board를 절대 안 건드린다 — 그런데 기존 응답
     # `{"claimed": True}` 한 줄만으로는 호출자가 "claim=내 것이 됨(assignee·board 반영)"
@@ -801,12 +810,23 @@ async def unclaim_story(
 
     await assert_caller_is_member(id, auth, session, org_id, detail="Cannot unclaim as another member")
 
+    # story #3685 — active_story_id를 null로 지우기 前에 캡처(그 값이 사라지면 어느 run을
+    # 닫을지 알 방법이 없다).
+    prior_active_story_id = member.active_story_id
+
     # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.
     from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, active_story_id=None)
     # AC7: unclaim 시 해당 멤버의 모든 file lock 해제
     from app.routers.file_locks import release_all_file_locks
     await release_all_file_locks(session, id)
+
+    # story #3685(Trust·customer-zero, 페드루 PO 確定 2026-09-07) — unclaim=포기. claim과
+    # 대칭(사람은 agent_run 개념 밖).
+    if member.type == "agent" and prior_active_story_id is not None:
+        from app.services.agent_run_tracking import close_agent_runs_for_story
+        await close_agent_runs_for_story(session, story_id=prior_active_story_id, status="abandoned", agent_id=id)
+
     return {"unclaimed": True}
 
 
