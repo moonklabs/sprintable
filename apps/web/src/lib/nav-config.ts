@@ -37,6 +37,14 @@ import {
 //                (앞 슬래시 없음 — 슬래시 유무로 kind를 오인하지 않게 값 자체로 구분).
 export type NavItemKind = 'static' | 'resource';
 
+// story #9c5e82dc(IA·S3, PO 確定 2026-09-08) — 「프로젝트를 바꿨을 때 내용이 실제로
+// 바뀌는가」로 잰 값(추정이 아니라 각 화면의 실 데이터 페칭 코드를 읽어 확認 — activity가
+// kind:'static'인데도 project_id로 실제 필터되는 것을 이렇게 잡아 8→9로 정정했다).
+// undefined(필드 자체를 안 씀) = 애매(inbox·settings — 화면 개념이 project/org 어느 한쪽으로
+// 안 떨어짐, AC2 "화면은 모르는 것을 단정하지 않는다") — 사이드바가 이 값을 몰라야 «표식을
+// 안 붙인다»는 사실 자체가 코드로 드러난다(기본값으로 org를 깔고 안 보여주는 게 아니다).
+export type NavItemScope = 'project' | 'org';
+
 export interface NavItemConfig {
   id: string;
   labelKey: string;
@@ -46,6 +54,7 @@ export interface NavItemConfig {
   kbdHint?: string;
   // 배지 소스 — 현재 카운트 자체는 컴포넌트 상태(폴링·SSE)라 여기 값이 아니라 렌더 쪽이 채운다.
   badgeKey?: 'inbox' | 'chats';
+  scope?: NavItemScope;
 }
 
 export interface NavGroupConfig {
@@ -88,7 +97,10 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     id: 'now',
     labelKey: 'zoneNow',
     items: [
-      { id: 'org-briefing', labelKey: 'orgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' },
+      { id: 'org-briefing', labelKey: 'orgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing', scope: 'org' },
+      // story #9c5e82dc(IA·S3, PO 確定) — inbox는 scope 필드를 안 쓴다(애매). 메인 조회
+      // (/api/notifications)가 project_id·org_id 둘 다 안 걸어 순수 사용자 개인 알림이다 —
+      // project도 org도 아닌 계정 축이라 AC2 "화면은 모르는 것을 단정하지 않는다"로 무표식.
       { id: 'inbox', labelKey: 'inbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox' },
       // story #3179(S3c) — 'dashboard'(대시보드, /dashboard) 항목 제거. attention(S3a)·
       // pulse(S3b)가 chat으로 이전되며 /dashboard는 폐합(redirect-only 스텁)됐다 — 같은
@@ -105,11 +117,11 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     id: 'dev',
     labelKey: 'zoneDev',
     items: [
-      { id: 'board', labelKey: 'board', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B' },
-      { id: 'goals', labelKey: 'goals', icon: Layers, kind: 'resource', path: 'goals' },
-      { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops' },
-      { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S' },
-      { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R' },
+      { id: 'board', labelKey: 'board', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B', scope: 'project' },
+      { id: 'goals', labelKey: 'goals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project' },
+      { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project' },
+      { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S', scope: 'project' },
+      { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R', scope: 'project' },
     ],
   },
   {
@@ -129,47 +141,52 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 그대로 — 상태·발행 URL 열을 가진 목록이 문서 하나로 오독되는 것을 막기 위함.
       // 「관리」 구역의 org-connectors로도 옮기지 않는다 — 연결은 owner의 설정 행위,
       // 운영은 마케터의 일상 행위라는 가름(§5-2)이 그대로 적용된다.
-      { id: 'content', labelKey: 'content', icon: FileText, kind: 'static', path: '/content' },
+      { id: 'content', labelKey: 'content', icon: FileText, kind: 'static', path: '/content', scope: 'org' },
       // story #3402(Phase1·마케팅운영, PO 결정 2026-09-03 23:17Z) — 채널 포스트(Threads)
       // 관리 화면. NavItemConfig에 중첩 하위메뉴 구조가 없어(app-sidebar.tsx는 group.items를
       // 평평하게 순회) "블로그 포스트 아래" 배치는 이 배열에서 content 바로 뒤에 두는 것으로
       // 표현한다 — content(호스팅 블로그, org 스코프)와 같은 이유로 kind:'static'·top-level
       // 경로(channel_post_drafts도 org 스코프, project 무관).
-      { id: 'channel-posts', labelKey: 'channelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts' },
+      { id: 'channel-posts', labelKey: 'channelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org' },
       // story #3376(페드루 PO 確定 2026-09-03) — 소셜 채널 OAuth 연결(조직이 소유한 외부
       // 계정·토큰). 예전 organization 구역에서 이관 — 「연결」 행위 자체는 마케터가 채널을
       // 붙이는 일상 실물이라 도메인 축(마케팅)으로 옮긴다(path 불변). story #ee78b047
       // (IA·S2, 2026-09-08, PO 確定) — 라벨은 「채널 연결」(옛 「채널」이 이웃 「채널
       // 포스트」의 접두어였다 — 이름이 스스로 갈라야 한다는 S2 AC1).
-      { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels' },
+      { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
       // story #3472(페드루 PO 確定 2026-09-05) — 콘텐츠 규칙(금칙어·UTM 필수·톤·택소노미·
       // 채널 우선순위·브랜드 킷). 예전 organization 구역에서 이관 — path 불변.
-      { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules' },
+      { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
       // story #3503(성과 보드 화면) — 발행된 글의 D+1/D+7 성과 표. 예전 organization
       // 구역에서 이관 — path 불변.
-      { id: 'org-insights-board', labelKey: 'orgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board' },
+      { id: 'org-insights-board', labelKey: 'orgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board', scope: 'org' },
     ],
   },
   {
     id: 'trust',
     labelKey: 'zoneTrust',
     items: [
-      { id: 'activity', labelKey: 'activity', icon: ClipboardList, kind: 'static', path: '/activity' },
+      // story #9c5e82dc(IA·S3, PO 確定) — kind:'static'(고정 경로)라 겉보기엔 org스러웠지만
+      // 실제 데이터 페칭(activity-log-view.tsx)이 useDashboardContext().projectId로
+      // `/api/activity-logs?project_id=...`를 건다 — project 전환 시 내용이 실제로 바뀐다.
+      // 3600 문서의 "실측 8"은 구현 前 추정이었고(kind:'resource' 8항목만 셈), 이 화면은
+      // kind가 'static'이라 그 신호에서 빠졌다 — 실 코드가 정본이라 project로 정정(8→9).
+      { id: 'activity', labelKey: 'activity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project' },
       // organization 흡수(시안 매핑표) — 신뢰 축의 실물이 이제 여기 있다(이전엔 organization
       // 그룹 소속). path 불변, 그룹 소속만 이동. 라벨도 zoneTrust와 겹치던 "신뢰"→"신뢰 센터"로
       // 정정(같은 구역 안에서 구역명과 항목명이 동어반복하지 않게, 시안 신뢰 센터 표기 그대로).
-      { id: 'org-trust', labelKey: 'orgTrust', icon: Award, kind: 'static', path: '/organization/trust' },
+      { id: 'org-trust', labelKey: 'orgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org' },
     ],
   },
   {
     id: 'knowledge',
     labelKey: 'zoneKnowledge',
     items: [
-      { id: 'docs', labelKey: 'docs', icon: BookOpen, kind: 'resource', path: 'docs' },
-      { id: 'artifacts', labelKey: 'artifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts' },
-      { id: 'storage', labelKey: 'storage', icon: HardDrive, kind: 'resource', path: 'storage' },
+      { id: 'docs', labelKey: 'docs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project' },
+      { id: 'artifacts', labelKey: 'artifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project' },
+      { id: 'storage', labelKey: 'storage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project' },
       // organization 흡수(시안 매핑표) — memory는 지식 축의 실물. path 불변, 그룹 소속만 이동.
-      { id: 'org-memory', labelKey: 'orgMemory', icon: Brain, kind: 'static', path: '/organization/memory' },
+      { id: 'org-memory', labelKey: 'orgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org' },
     ],
   },
   {
@@ -185,17 +202,20 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     id: 'organization',
     labelKey: 'zoneOrganization',
     items: [
-      { id: 'org-members', labelKey: 'orgMembers', icon: Users2, kind: 'static', path: '/organization/members' },
-      { id: 'org-workforce', labelKey: 'workforce', icon: Bot, kind: 'static', path: '/organization/workforce' },
-      { id: 'org-roles', labelKey: 'orgRoles', icon: Shield, kind: 'static', path: '/organization/roles' },
-      { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events' },
+      { id: 'org-members', labelKey: 'orgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org' },
+      { id: 'org-workforce', labelKey: 'workforce', icon: Bot, kind: 'static', path: '/organization/workforce', scope: 'org' },
+      { id: 'org-roles', labelKey: 'orgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org' },
+      { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org' },
       // story 4180f67f — 마케팅자동화 발행 커넥터(threads/stibee/instagram 등) org_config 설정 화면.
-      { id: 'org-connectors', labelKey: 'orgConnectors', icon: Plug, kind: 'static', path: '/organization/connectors' },
+      { id: 'org-connectors', labelKey: 'orgConnectors', icon: Plug, kind: 'static', path: '/organization/connectors', scope: 'org' },
     ],
   },
   {
     id: 'settings',
     items: [
+      // story #9c5e82dc(IA·S3, PO 確定) — scope 필드를 안 쓴다(애매). 화면 전체 개념은
+      // 계정 설정인데, 팀원 관리 탭 하나만 project_id를 쓴다(섞인 화면) — AC2 "화면은
+      // 모르는 것을 단정하지 않는다"로 org/project 어느 쪽 표식도 안 붙인다.
       { id: 'settings', labelKey: 'settings', icon: Settings, kind: 'static', path: '/settings' },
     ],
   },
