@@ -234,10 +234,31 @@ async def list_insights_board(
                 metric_col.desc().nulls_last(), rows_cte.c.published_at.desc(), rows_cte.c.publication_id.desc(),
             )
 
-    query = query.limit(limit + 1)
-    result = (await db.execute(query)).all()
-    has_more = len(result) > limit
-    page = result[:limit]
+    # story #3697(카디르 QA 실결함, PR#4049, 페드루 PO 確定 2026-09-08) — work_item_id
+    # 스코프(한 story의 blog↔social 대조가 목적)에서 flat published_at-desc+단일 LIMIT를
+    # 그대로 쓰면 한 kind가 많으면(예: social 51건) 다른 kind(blog)가 페이지 밖으로
+    # 밀려나 에러 없이 조용히 반쪽만 보인다 — 이 비교뷰의 핵심 목적(양쪽 나란히)이 깨진다.
+    # work_item_id는 이미 한 story로 좁혀 커서 keyset 페이지네이션을 이어갈 이유가
+    # 없다(현재 어떤 호출부도 work_item_id+cursor를 같이 안 쓴다 — test_bf290f69 확認,
+    # 이 함수 최상단 PO 確定(a)의 "커서가 두 팔 사이에서 깨진다"는 org 전체 무한스크롤
+    # 얘기라 이 스코프엔 적용 안 됨). kind별로 따로 상한을 두고 합쳐 다시 정렬한다 —
+    # 어느 kind도 다른 kind에 밀려 0건이 되지 않는다. metric 정렬(sort != "published_at")
+    # 조합은 이 결함 재현 경로가 아니라(FE 소비처가 항상 published_at 기본값만 씀)
+    # 기존 flat 동작을 그대로 둔다(NULLS LAST 3키 병합 정렬을 새로 짓는 위험을 안 진다).
+    if work_item_id is not None and sort == "published_at":
+        blog_result = (await db.execute(query.where(rows_cte.c.kind == "site_post").limit(limit + 1))).all()
+        social_result = (
+            await db.execute(query.where(rows_cte.c.kind == "channel_publication").limit(limit + 1))
+        ).all()
+        has_more = len(blog_result) > limit or len(social_result) > limit
+        combined = blog_result[:limit] + social_result[:limit]
+        combined.sort(key=lambda r: (r.published_at, r.publication_id), reverse=(sort_dir != "asc"))
+        page = combined
+    else:
+        query = query.limit(limit + 1)
+        result = (await db.execute(query)).all()
+        has_more = len(result) > limit
+        page = result[:limit]
 
     # 스냅샷 배치 조회(N+1 회피, assets.py 관례 동형) — 페이지 최대 `limit`건이라
     # publication_id도 최대 그만큼, 행당 스냅샷도 최대 2건이라 이 IN 조회 하나로 충분.

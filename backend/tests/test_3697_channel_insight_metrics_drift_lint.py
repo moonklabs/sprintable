@@ -6,8 +6,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from lint_channel_insight_metrics_drift import (  # noqa: E402
+    ChannelExtractionIncompleteError,
+    EXPECTED_BACKEND_CHANNELS,
     extract_backend_declared_metrics,
     extract_frontend_declared_metrics,
     find_drift,
@@ -49,9 +53,14 @@ export const CHANNEL_DECLARED_METRICS: Record<string, readonly BoardMetric[]> = 
 };
 """
 
+# BACKEND_PY_MATCHING이 실제로 선언한 채널 4개뿐(threads·hosted_site·wordpress·sandbox) —
+# 합성 fixture 테스트는 실물의 9개 전부를 요구하지 않는다(find_drift의 expected_channels
+# 문서 참고). 완전성 백스톱 자체는 아래 별도 테스트가 판다.
+FIXTURE_EXPECTED_CHANNELS = frozenset({"threads", "hosted_site", "wordpress", "sandbox"})
+
 
 def test_matching_files_report_zero_drift():
-    assert find_drift(BACKEND_PY_MATCHING, FRONTEND_TS_MATCHING) == []
+    assert find_drift(BACKEND_PY_MATCHING, FRONTEND_TS_MATCHING, expected_channels=FIXTURE_EXPECTED_CHANNELS) == []
 
 
 def test_single_channel_mismatch_is_detected():
@@ -61,7 +70,7 @@ def test_single_channel_mismatch_is_detected():
         'insight_metrics=("views", "engagements"),',
         'insight_metrics=("views", "engagements", "clicks"),',
     )
-    drifted = find_drift(changed_backend, FRONTEND_TS_MATCHING)
+    drifted = find_drift(changed_backend, FRONTEND_TS_MATCHING, expected_channels=FIXTURE_EXPECTED_CHANNELS)
     assert len(drifted) == 1
     assert drifted[0][0] == "threads"
     assert sorted(drifted[0][1]) == ["clicks", "engagements", "views"]
@@ -73,7 +82,7 @@ def test_wordpress_empty_declaration_matches_fe_absence():
     키가 아예 없는 게 정상 일치다(빈 배열=빈 배열)."""
     assert extract_backend_declared_metrics(BACKEND_PY_MATCHING)["wordpress"] == []
     assert "wordpress" not in extract_frontend_declared_metrics(FRONTEND_TS_MATCHING)
-    assert find_drift(BACKEND_PY_MATCHING, FRONTEND_TS_MATCHING) == []
+    assert find_drift(BACKEND_PY_MATCHING, FRONTEND_TS_MATCHING, expected_channels=FIXTURE_EXPECTED_CHANNELS) == []
 
 
 def test_fe_missing_a_declared_channel_entirely_is_drift():
@@ -82,7 +91,7 @@ def test_fe_missing_a_declared_channel_entirely_is_drift():
     frontend_missing_hosted_site = FRONTEND_TS_MATCHING.replace(
         "  hosted_site: ['views', 'clicks'],\n", ""
     )
-    drifted = find_drift(BACKEND_PY_MATCHING, frontend_missing_hosted_site)
+    drifted = find_drift(BACKEND_PY_MATCHING, frontend_missing_hosted_site, expected_channels=FIXTURE_EXPECTED_CHANNELS)
     channels = [d[0] for d in drifted]
     assert "hosted_site" in channels
 
@@ -93,7 +102,7 @@ def test_metric_order_difference_is_not_drift():
     reordered_frontend = FRONTEND_TS_MATCHING.replace(
         "threads: ['views', 'engagements'],", "threads: ['engagements', 'views'],"
     )
-    assert find_drift(BACKEND_PY_MATCHING, reordered_frontend) == []
+    assert find_drift(BACKEND_PY_MATCHING, reordered_frontend, expected_channels=FIXTURE_EXPECTED_CHANNELS) == []
 
 
 def test_conditional_sandbox_registration_is_still_extracted():
@@ -113,14 +122,43 @@ def test_mutation_removing_value_comparison_causes_missed_detection():
 
     original = mod.find_drift
     try:
-        mod.find_drift = lambda a, b: []
+        mod.find_drift = lambda a, b, **kw: []
         changed_backend = BACKEND_PY_MATCHING.replace(
             'insight_metrics=("views", "engagements"),',
             'insight_metrics=("views", "engagements", "clicks"),',
         )
-        assert mod.find_drift(changed_backend, FRONTEND_TS_MATCHING) == [], "뮤테이션 후에는 탐지가 0이어야 정상"
+        assert mod.find_drift(changed_backend, FRONTEND_TS_MATCHING, expected_channels=FIXTURE_EXPECTED_CHANNELS) == [], "뮤테이션 후에는 탐지가 0이어야 정상"
     finally:
         mod.find_drift = original
+
+
+def test_parser_missing_a_channel_fails_loud_not_silently_green():
+    """⭐카디르 QA 실측(fails-silent 구멍 정정, PR#4049) — 파서가 threads를 못 읽게
+    만들면(따옴표를 작은따옴표로 바꿔 정규식이 안 걸림) find_drift가 조용히
+    "threads 없음=드리프트 대상 자체가 없음"으로 green을 내지 않고, 완전성 백스톱이
+    즉시 예외를 던져야 한다(fails-silent → fails-closed)."""
+    import pytest
+
+    unreadable_backend = BACKEND_PY_MATCHING.replace(
+        '"threads": ChannelAdapterConfig(', "'threads': ChannelAdapterConfig(",
+    )
+    assert "threads" not in extract_backend_declared_metrics(unreadable_backend), (
+        "뮤테이션이 파서를 실제로 못 읽게 만들지 못함 — 정규식이 작은따옴표도 허용하게 바뀌었을 수 있음"
+    )
+    with pytest.raises(ChannelExtractionIncompleteError, match="threads"):
+        find_drift(unreadable_backend, FRONTEND_TS_MATCHING, expected_channels=FIXTURE_EXPECTED_CHANNELS)
+
+
+def test_expected_backend_channels_matches_real_channel_adapters_count():
+    """EXPECTED_BACKEND_CHANNELS(9개, 손 유지)가 실물 channel_adapters.py와 지금 실제로
+    맞는지 — 실물에 새 채널이 추가/삭제되면 이 테스트가 먼저 깨져 EXPECTED_BACKEND_
+    CHANNELS를 갱신하라고 알린다(안 갱신하면 완전성 백스톱 자체가 항상 실패하게 되어
+    누구도 못 지나칠 정도로 시끄럽다 — 조용히 stale해지지 않는다)."""
+    import lint_channel_insight_metrics_drift as mod
+
+    real_backend = mod.CHANNEL_ADAPTERS_PY_PATH.read_text(encoding="utf-8")
+    real_channels = set(extract_backend_declared_metrics(real_backend).keys())
+    assert real_channels == EXPECTED_BACKEND_CHANNELS
 
 
 def test_ac_mutation_real_backend_source_triggers_red(monkeypatch):

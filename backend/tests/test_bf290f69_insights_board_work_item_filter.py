@@ -109,6 +109,45 @@ async def test_no_work_item_id_param_keeps_org_wide_behavior_unchanged():
 
 
 @pytest.mark.anyio
+async def test_social_crowd_out_does_not_hide_blog_row():
+    """story #3697(카디르 QA 실결함, PR#4049, 페드루 PO 確定 2026-09-08) — 이 스토리의
+    핵심 목적(한 story의 blog↔social 나란히 비교)이 걸린 회귀. social 발행물이 기본
+    limit(50)보다 많으면(51건) flat published_at-desc+단일 LIMIT는 그보다 오래된 blog
+    발행물 1건을 페이지 밖으로 밀어낸다 — 에러 없이 조용히 반쪽만 보이는 게 이 버그의
+    정확한 증상이었다. kind별 fair-limit 처방 뒤엔 blog가 여전히 보여야 한다."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_a = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+
+            # blog는 가장 오래됨(social 51건보다 이전, window=90d 안에는 들어옴) —
+            # flat published_at-desc라면 51번째 뒤로 밀려 기본 limit=50 페이지 밖.
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_a, slug="post-crowd", title="Crowd Test Blog",
+                published_at=now - timedelta(days=89),
+            )
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_a)
+            for i in range(51):
+                await _seed_channel_publication(
+                    s, org_id=org_id, gate_id=gate.id, channel="threads",
+                    published_at=now - timedelta(days=i),  # 전부 blog보다 최신(0~50일 전)
+                )
+
+            result = await list_insights_board(s, org_id=org_id, window="90d", work_item_id=story_a)
+
+        ids = {r["publication_id"] for r in result["rows"]}
+        assert sp.id in ids, "blog 1건이 social 51건에 밀려 사라졌다 — crowd-out 회귀"
+        kinds = {r["kind"] for r in result["rows"]}
+        assert "site_post" in kinds and "channel_publication" in kinds
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_work_item_id_combines_with_channel_filter():
     """work_item_id도 channel/status와 같은 AND-narrowing 축 — 같은 story 안에서도
     channel로 더 좁힐 수 있다(신규 상호작용 버그 없음 확인)."""
