@@ -247,6 +247,10 @@ async def promote_bare_story_refs(
     같은 N이 org 전체(레포 무관) `pull_request_story_link.pr_number`에도 있으면
     모호(스토리 번호와 PR 번호가 우연히 겹침)로 보고 치환하지 않는다(PO rule② — 둘
     다 이 플랫폼 원장이라 "같은 프레임"으로 판정, 다른 소스를 비교하지 않는다).
+    story #3702(rule② 사각 정정) — 원장(PullRequestStoryLink)에 아직 안 링크된 PR도
+    이 메시지 «자신»이 ①(explicit — GitHub URL·owner/repo#N)로 그 번호를 PR로 이미
+    증언했으면 같은 모호함이다(실사고: "PR #4052(URL 포함)... #4052" — 뒤 #4052가
+    org 원장엔 없어도(링크 전) message-local 증거로 모호 처리한다).
 
     두 갈래 모두 resolve 실패(그 번호/PR의 대상이 없음·타 project 소속)면 **그 매치만**
     원문 그대로 남긴다(전체 all-or-nothing 아님 — 은퇴한 @handle 파서의 "매치 0건=조회도
@@ -338,9 +342,16 @@ async def promote_bare_story_refs(
         return result, promoted_ids
     protected = _protected_spans(result)
     candidates = [c for c in candidates if not _in_protected_span(c[0], protected)]
-    # PO rule② — 같은 N이 org(레포 무관) pr_number에도 있으면 모호. story_number와
-    # pr_number가 같은 플랫폼 원장(다른 소스가 아니다)이라 이 대조가 "같은 프레임"이다.
-    candidates = [c for c in candidates if c[2] not in org_pr_numbers]
+    # story #3702(rule② 사각 정정, 페드루 PO 確定 2026-09-08) — rule②(org_pr_numbers)는
+    # PullRequestStoryLink에 «이미 링크된» PR만 안다. 아직 스토리에 안 링크된 PR을
+    # 이 메시지 안에서 GitHub URL이나 owner/repo#N으로 먼저 명시했으면(①이 찾은 explicit,
+    # 원장 링크 존재 여부 무관 — story_id 해석 성공/실패와 무관하게 「이 메시지 안에서 N이
+    # PR 번호로 쓰였다」는 사실 자체는 확정) 그 번호가 뒤에서 맨 #N으로 다시 나와도 같은
+    # 모호함이다(실사고: "PR #4052(URL 포함) 머지됐는. #4052 관련..." — 뒤 #4052가 org_pr_
+    # numbers엔 없어도(링크 전) story #4052로 오승격됐다). org_pr_numbers(영속 원장)와
+    # message_pr_numbers(이 메시지 자체가 증언하는 PR 번호)를 합쳐 하나의 모호 집합으로 본다.
+    message_pr_numbers = frozenset(n for _, _, _, n in explicit)
+    candidates = [c for c in candidates if c[2] not in org_pr_numbers and c[2] not in message_pr_numbers]
     if not candidates:
         return result, promoted_ids
 

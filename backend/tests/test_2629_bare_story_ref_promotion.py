@@ -800,6 +800,103 @@ async def test_promote_bare_number_ambiguous_with_org_pr_number_not_promoted():
         await engine.dispose()
 
 
+async def test_promote_message_local_unlinked_pr_url_makes_later_bare_number_ambiguous():
+    """story #3702(rule② 사각 정정, 페드루 PO 確定 2026-09-08) — 실사고 재현: 같은
+    메시지 안에서 GitHub PR URL로 N을 먼저 명시했는데(원장에 아직 안 링크됨 — 갓 연
+    PR) 뒤에서 별도로 맨 #N을 또 쓰면, org_pr_numbers(영속 원장)엔 그 N이 없어도
+    message-local 증거(explicit)로 모호 처리해 story 승격을 막아야 한다. 원장 링크가
+    없으니 URL 부분도 그대로 남는다(PO rule① "없으면 침묵")."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            wrong_story = await _seed_story(s, org.id, project.id, number=4052, title="무관한 스토리")
+            content = (
+                "PR #4052 (https://github.com/moonklabs/sprintable/pull/4052) 머지됐는. "
+                "#4052 관련 후속 확認 바라는"
+            )
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content  # 둘 다 손 안 댐 — URL은 원장 미링크(침묵), 뒤 #4052는 모호.
+            assert promoted_ids == set()
+            assert wrong_story.id not in promoted_ids
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_message_local_owner_repo_hash_makes_later_bare_number_ambiguous():
+    """story #3702 — owner/repo#N 형태(URL 아님)로도 같은 message-local 모호함이 걸린다."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            wrong_story = await _seed_story(s, org.id, project.id, number=46, title="무관한 스토리")
+            content = "moonklabs/sprintable#46 확인 필요. #46 후속도 같이"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            assert result == content
+            assert promoted_ids == set()
+            assert wrong_story.id not in promoted_ids
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_message_local_linked_pr_url_still_resolves_and_later_bare_number_stays_ambiguous():
+    """story #3702 — URL이 원장에 «이미 링크된» PR을 가리키면 ①이 정상 승격하고
+    (기존 rule① 무회귀), 뒤의 맨 #N(같은 번호)은 여전히 모호(=이번엔 org_pr_numbers
+    로도 이미 걸림 — 이 테스트는 두 경로가 서로 안 부딪히는지 확認)."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+    from app.services.reference_token import build_reference_token
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            wrong_story = await _seed_story(s, org.id, project.id, number=46, title="무관한 스토리")
+            linked_story = await _seed_story(s, org.id, project.id, number=999, title="연결된 작업")
+            await _seed_pr_link(
+                s, org.id, linked_story.id, repo_full_name="moonklabs/sprintable", pr_number=46,
+            )
+            content = "https://github.com/moonklabs/sprintable/pull/46 머지됐는. #46 후속 확認"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            expected_token = build_reference_token("story", linked_story.id, "#46 연결된 작업")
+            assert result == f"{expected_token} 머지됐는. #46 후속 확認"
+            assert promoted_ids == {linked_story.id}
+            assert wrong_story.id not in promoted_ids
+    finally:
+        await engine.dispose()
+
+
+async def test_promote_message_local_ambiguity_does_not_affect_unrelated_numbers():
+    """story #3702 음성대조 — message-local PR 번호와 무관한 다른 #N은 그대로 승격된다
+    (과잉 배제 방지, 무회귀)."""
+    from app.services.story_ref_promoter import promote_bare_story_refs
+    from app.services.reference_token import build_reference_token
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            unrelated_story = await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
+            content = "https://github.com/moonklabs/sprintable/pull/4052 참고. #24 도 확認"
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
+            expected_token = build_reference_token("story", unrelated_story.id, "#24 보드 리팩터")
+            assert result == f"https://github.com/moonklabs/sprintable/pull/4052 참고. {expected_token} 도 확認"
+            assert promoted_ids == {unrelated_story.id}
+    finally:
+        await engine.dispose()
+
+
 async def test_promote_github_pr_url_resolves_to_linked_story():
     """PO rule① — GitHub PR URL은 owner/repo가 URL 자체에 명시돼 있어 원장 유일성
     문제 없이 바로 (repo_full_name, pr_number)를 뽑아 대조한다."""
