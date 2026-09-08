@@ -349,6 +349,14 @@ export function AppSidebar({
           // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
           const isCollapsible = Boolean(group.labelKey);
           const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id);
+          const groupLabel = group.labelKey ? t(group.labelKey) : '';
+          // 카디르 QA(a11y, §22-18 가드) — render prop이 넘기는 <button>은 SidebarGroupLabel의
+          // children(그룹명 텍스트+쉐브론 아이콘)을 감싸기만 할 뿐 버튼 자체에 접근가능한
+          // 이름이 안 실린다(스크린리더가 7구역 토글을 구별 못 함) — aria-label에 그룹명+
+          // 접힘상태를 명시로 채워 넣는다.
+          const toggleAriaLabel = isCollapsed
+            ? t('groupExpand', { group: groupLabel })
+            : t('groupCollapse', { group: groupLabel });
           return (
           <SidebarGroup key={group.id}>
             {group.labelKey ? (
@@ -358,11 +366,12 @@ export function AppSidebar({
                     type="button"
                     onClick={() => toggleGroupCollapsed(group.id)}
                     aria-expanded={!isCollapsed}
+                    aria-label={toggleAriaLabel}
                   />
                 }
                 className="w-full cursor-pointer justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               >
-                <span>{t(group.labelKey)}</span>
+                <span>{groupLabel}</span>
                 <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', isCollapsed && '-rotate-90')} />
               </SidebarGroupLabel>
             ) : null}

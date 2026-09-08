@@ -369,6 +369,20 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeDefined();
   });
 
+  // 카디르 QA(a11y, §22-18 가드) — render prop 버튼이 SidebarGroupLabel의 children(그룹명
+  // 텍스트+쉐브론)을 감싸긴 하지만, 접근성 트리에서 버튼 자체의 이름은 aria-label로
+  // 명시해야 스크린리더가 7구역 토글을 구별한다(textContent만으론 landmark 목록 등에서
+  // 이름이 안 실리는 경우가 있다) — aria-label에 그룹명+접힘상태를 담는다.
+  it('구역 토글 버튼의 aria-label이 그룹명+접힘상태를 담는다(카디르 QA a11y 처방)', async () => {
+    await mount();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeader?.getAttribute('aria-label')).toBe('개발 접기');
+
+    await act(async () => { devHeader!.click(); });
+    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeaderAfter?.getAttribute('aria-label')).toBe('개발 펼치기');
+  });
+
   it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
     await mount();
     const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
