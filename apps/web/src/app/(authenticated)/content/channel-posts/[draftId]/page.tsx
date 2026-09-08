@@ -1737,10 +1737,16 @@ export default function ChannelPostEditPage() {
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
   }
+  // story #3673(유나 #4016 적기만 ①) — role/aria-live/aria-atomic을 여기서
+  // 재선언하지 않는다. Alert(components/ui/alert.tsx)가 variant="destructive"
+  // 이면 이미 role="alert" aria-live="assertive" aria-atomic="true"를 기본
+  // 유도한다(getAlertRole/getAlertAriaLive) — content/[draftId]가 이 셋을
+  // 문자열로 복붙해 온 것과 이 화면이 role만 붙인 것 둘 다 "화면별 재선언"이라
+  // AC2 위반. 공용 컴포넌트의 기본값 하나로 두 화면이 저절로 같은 층이 된다.
   if (notFound) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-3 p-6">
-        <Alert variant="destructive" role="alert">
+        <Alert variant="destructive">
           <AlertDescription>{t('editNotFound')}</AlertDescription>
         </Alert>
         {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
@@ -1755,7 +1761,7 @@ export default function ChannelPostEditPage() {
   if (forbidden) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-3 p-6">
-        <Alert variant="destructive" role="alert">
+        <Alert variant="destructive">
           <AlertDescription>{t('editForbidden')}</AlertDescription>
         </Alert>
         <Link href="/content/channel-posts" className="text-sm font-medium text-primary underline">
@@ -1767,7 +1773,7 @@ export default function ChannelPostEditPage() {
   if (loadError || !draft) {
     return (
       <div className="mx-auto w-full max-w-2xl p-6">
-        <Alert variant="destructive" role="alert">
+        <Alert variant="destructive">
           <AlertDescription>{t('editLoadFailed')}</AlertDescription>
         </Alert>
       </div>

@@ -779,6 +779,22 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
     expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
+  // story #3673(유나 #4016 적기만 ①) — 이 화면은 이미 role/aria-live/aria-atomic을
+  // 문자열로 재선언했었다(#3673에서 그 재선언을 걷고 Alert 기본값에 맡김) — 결과
+  // 값은 무변, channel-posts/[draftId]와 같은 층임을 여기서도 고정.
+  it('로드 실패(404) — 오류 Alert가 role=alert·aria-live=assertive·aria-atomic=true를 갖는다', async () => {
+    stubFetchWithVersions([], undefined, undefined, { versionsStatus: 404 });
+    await act(async () => {
+      root.render(wrap(<ContentPostEditPage />));
+    });
+    await flush();
+
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl).not.toBeNull();
+    expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+    expect(alertEl?.getAttribute('aria-atomic')).toBe('true');
+  });
+
   it('로드 실패(403) — 「볼 권한이 없습니다」+목록으로 나가는 링크', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsStatus: 403 });
     await act(async () => {

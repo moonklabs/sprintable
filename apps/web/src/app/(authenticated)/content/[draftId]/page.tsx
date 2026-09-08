@@ -1012,10 +1012,15 @@ export default function ContentPostEditPage() {
     );
   }
 
+  // story #3673(유나 #4016 적기만 ①) — role/aria-live/aria-atomic 문자열 복붙을
+  // 걷는다. Alert(components/ui/alert.tsx)가 variant="destructive"면 이미
+  // role="alert" aria-live="assertive" aria-atomic="true"를 기본 유도한다
+  // (getAlertRole/getAlertAriaLive) — 여기서 재선언하면 그 기본값과 화면별
+  // 재선언이 언젠가 갈라질 수 있는 여지만 남는다(AC2, "화면별 재선언 0").
   if (notFound) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+        <Alert variant="destructive">
           <AlertDescription>{t('editNotFound')}</AlertDescription>
         </Alert>
         {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
@@ -1030,7 +1035,7 @@ export default function ContentPostEditPage() {
   if (forbidden) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+        <Alert variant="destructive">
           <AlertDescription>{t('editForbidden')}</AlertDescription>
         </Alert>
         <Link href="/content" className="text-sm font-medium text-primary underline">
@@ -1042,7 +1047,7 @@ export default function ContentPostEditPage() {
   if (loadError || !latest) {
     return (
       <div className="mx-auto w-full max-w-3xl p-6">
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+        <Alert variant="destructive">
           <AlertDescription>{t('editLoadFailed')}</AlertDescription>
         </Alert>
       </div>

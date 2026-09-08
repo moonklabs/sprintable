@@ -2028,6 +2028,22 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
+  // story #3673(유나 #4016 적기만 ① — content/[draftId]와 같은 a11y 층) — role=alert
+  // aria-live=assertive aria-atomic=true 셋 다 이 화면 오류 Alert에도 있어야 한다.
+  // Alert 컴포넌트 기본 유도값이므로 화면이 문자열로 재선언하지 않아도 된다(AC2).
+  it('로드 실패(404) — 오류 Alert가 role=alert·aria-live=assertive·aria-atomic=true를 갖는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl).not.toBeNull();
+    expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+    expect(alertEl?.getAttribute('aria-atomic')).toBe('true');
+  });
+
   it('로드 실패(403) — 「볼 권한이 없습니다」+목록으로 나가는 링크', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) })));
     await act(async () => {
