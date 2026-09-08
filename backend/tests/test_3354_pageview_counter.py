@@ -361,3 +361,95 @@ async def test_beacon_route_cors_preflight_open():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ── story #3674 CHANGES(페드루 PO, 2026-09-07) — count_7d 창이 org 시간대로 ────
+
+@pytest.mark.anyio
+async def test_beacon_status_count_7d_uses_org_timezone_boundary_realdb():
+    """쓰기 쪽(record_pageview)이 이미 org tz로 "오늘" 버킷을 잡는데, 읽기 쪽
+    (get_beacon_status의 count_7d 창)이 여전히 now.date()(UTC)면 org tz가 UTC보다
+    앞선(Asia/Seoul 등) 조직은 방금 쓴 "오늘" 버킷을 7일 창 기준점이 하루 어긋나
+    놓칠 수 있다 — 뮤테이션 표적: to_org_date(now, org_timezone)을 now.date()로
+    되돌리면 8일 전 표본이 7일 창 밖으로 안 빠져(경계가 하루 밀림) 이 테스트가 RED.
+
+    경계 표본: now=UTC 2026-09-07T23:30 — org tz=Asia/Seoul이면 "오늘"=09-08(7일
+    창=[09-02, 09-08]) · org tz=UTC(버그)면 "오늘"=09-07(7일 창=[09-01, 09-07]).
+    두 창이 갈리는 지점만 심는다: day=09-08(Seoul 창 안·UTC 창 밖 — org tz 안
+    쓰면 이 값이 통째로 빠진다)·day=09-02(둘 다 안·컨트롤)·day=09-01(UTC 창
+    안·Seoul 창 밖 — org tz 안 쓰면 이 값이 잘못 들어온다). 정답(Seoul)=09-08+
+    09-02=4, 버그(UTC)라면=09-02+09-01=3 — 값 자체가 갈려 뮤테이션이 바로 드러난다."""
+    from app.services.pageview_counter import get_beacon_status, get_or_create_active_key
+    from app.models.org_pageview_daily import OrgPageviewDaily
+    from datetime import date, datetime, timezone
+    from sqlalchemy import text as sa_text
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            await s.execute(sa_text(
+                f"UPDATE organizations SET timezone='Asia/Seoul' WHERE id='{org_id}'"
+            ))
+            await s.commit()
+            await get_or_create_active_key(s, org_id=org_id)
+            for day, count in [(date(2026, 9, 8), 3), (date(2026, 9, 2), 1), (date(2026, 9, 1), 2)]:
+                s.add(OrgPageviewDaily(org_id=org_id, path="/p", day=day, count=count))
+            await s.commit()
+
+        async with Session() as s:
+            beacon = await get_beacon_status(s, org_id=org_id, now=datetime(2026, 9, 7, 23, 30, tzinfo=timezone.utc))
+        assert beacon["count_7d"] == 4, "09-08(3)+09-02(1)=4(Seoul 창) — 09-01(2)은 Seoul 기준 창 밖"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_beacon_write_bucket_uses_org_timezone_realdb():
+    """쓰기 쪽(public_pageview.py::post_pageview → org_today(org_timezone)) 경계
+    표본 — UTC 2026-09-07T23:30에 beacon이 오면 org.timezone='Asia/Seoul'인
+    조직은 day='2026-09-08'(그 조직의 "오늘")로 집계돼야 한다(UTC라면 '2026-09-07'
+    로 잘못 잡힘). `app.services.org_time.datetime`을 이 순간으로 고정한다.
+
+    story #3674 CHANGES(페드루 PO) 참고 — `org_pageview_daily.day`는 사전 집계라
+    org.timezone을 나중에 설정/변경하면 그 순간의 미완료 "오늘" 버킷 하나가 경계를
+    한 번 옮겨 앉을 수 있다(예: UTC 버킷에 이미 쌓인 오늘 치가 org tz 전환 후엔
+    다른 날짜로 갈릴 후속 hit을 받는다) — 이는 사전 집계의 구조적 성질이지 결함이
+    아니다(과거 행을 소급 재계산하지 않는다, 그날 하루만 일시적으로 두 버킷에
+    나뉠 수 있음 — 백필 없음 정책과 동형)."""
+    from unittest.mock import patch
+    from app.main import app
+    from app.services.pageview_counter import get_or_create_active_key
+    from app.models.org_pageview_daily import OrgPageviewDaily
+    from datetime import date, datetime, timezone
+    from sqlalchemy import select, text as sa_text
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            await s.execute(sa_text(f"UPDATE organizations SET timezone='Asia/Seoul' WHERE id='{org_id}'"))
+            await s.commit()
+            public_key = await get_or_create_active_key(s, org_id=org_id)
+
+        _setup_public_app(app, Session)
+        with patch("app.services.org_time.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 9, 7, 23, 30, tzinfo=timezone.utc)
+            async with _client_for(app) as public_client:
+                r = await public_client.post(
+                    "/api/v2/public/pageview",
+                    json={"public_key": public_key, "path": "/ko/blog/tz-boundary"},
+                    headers={"user-agent": "Mozilla/5.0 test-browser-tz"},
+                )
+        assert r.status_code == 204
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(OrgPageviewDaily.day).where(
+                    OrgPageviewDaily.org_id == org_id, OrgPageviewDaily.path == "/ko/blog/tz-boundary",
+                )
+            )).scalars().all()
+        assert rows == [date(2026, 9, 8)], "org tz(Asia/Seoul) 기준 '오늘'(09-08)로 집계돼야 한다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

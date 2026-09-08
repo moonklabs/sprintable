@@ -28,6 +28,9 @@ interface OrgMembership {
   name: string;
   slug: string;
   role: string;
+  // story #3674 — GET /api/v2/organizations 응답에 이미 실려오던 필드(BE #46da6450), FE가
+  // 안 읽고 있었을 뿐. 「현재 org」의 timezone을 찾는 데만 쓴다(아래 currentOrgTimezone).
+  timezone?: string | null;
 }
 
 export default async function AuthenticatedLayout({
@@ -86,6 +89,10 @@ export default async function AuthenticatedLayout({
     orgSlug: o.slug,
     role: o.role,
   }));
+  // story #3674 — 「현재 org」(me.org_id)의 timezone. rawOrgs에서 그 org를 찾아서만 뽑는다
+  // (OrgSwitcherItem은 스위처 UI 전용 공유 타입이라 안 건드린다 — 이 값은 그 목록과 무관하게
+  // DashboardContext에 직접 흘려보낸다).
+  const currentOrgTimezone = rawOrgs.find((o) => o.id === me?.org_id)?.timezone ?? null;
 
   // story #2093 — /me/memberships 는 JWT의 "현재 org" 클레임으로 스코프된다(BE
   // app/routers/me.py get_my_memberships). URL 경로가 계정 상태와 다른 org를 가리키면(cross-org
@@ -138,6 +145,7 @@ export default async function AuthenticatedLayout({
     <DashboardShell
       currentTeamMemberId={me?.id}
       orgId={me?.org_id}
+      orgTimezone={currentOrgTimezone}
       // story #2545(카디르 라이브 재QA, 2026-08-10) — `me?.org_id`는 JWT `app_metadata.org_id`
       // 클레임(#2544가 "top-level org_id"라 부른 바로 그 필드 — backend/app/dependencies/
       // auth.py의 `jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")`와 동일

@@ -19,12 +19,10 @@ import { channelConnectionIdentityLabel } from '@/lib/channel-label';
  * ②에서 만든 부품(useChannelPostCalendarData·CalendarGrid·UnscheduledLane·
  * CalendarRangeControls)을 한 라우트로 배선하기만 한다(새 로직을 여기서 만들지 않는다).
  *
- * 조직 timezone — story #46da6450(BE 착수, 2026-09-04) 착지 前이라 organizations
- * 응답에 그 필드가 없다. 페드루 PO 지시("optional chaining으로 null 취급") 그대로 —
- * 지금은 org 객체 자체가 없어 undefined를 그대로 넘긴다(useChannelPostCalendarData가
- * undefined를 브라우저 tz 폴백으로 처리, resolveDisplayTimezone 참고). BE 착지 뒤
- * 이 한 줄(orgTimezone 값의 출처)만 바꾸면 된다 — 그 외 배선은 이미 tz 인자 구조로
- * 흡수돼 있다.
+ * 조직 timezone — story #3674(BE #46da6450 착지 뒤) DashboardContext.orgTimezone에서
+ * 읽는다(layout.tsx가 GET /api/v2/organizations 응답의 timezone을 me.org_id로 찾아
+ * 흘려보낸 값). null/undefined면 useChannelPostCalendarData가 브라우저 tz로 폴백
+ * (resolveDisplayTimezone 참고) — org에 timezone 미설정인 경우와 동형.
  */
 interface ChannelConnectionSummary {
   id: string;
@@ -36,10 +34,9 @@ interface ChannelConnectionSummary {
 }
 
 export default function ChannelPostCalendarPage() {
-  const { orgId } = useDashboardContext();
+  const { orgId, orgTimezone } = useDashboardContext();
   const t = useTranslations('content');
 
-  const orgTimezone = undefined; // BE #46da6450 착지 前 — 위 docstring 참고.
   // story #3422 B1(페드루 PO 재판정) — range 경계는 display tz 기준이어야 한다(UTC
   // 자정 기준이면 KST 등 양의 오프셋 tz에서 첫/끝 열이 부분 표본이 된다 —
   // schedule-format.ts::defaultCalendarRange 상단 주석 참고). orgTimezone은

@@ -41,6 +41,10 @@ export interface DashboardProjectOption {
 interface DashboardContext {
   currentTeamMemberId?: string;
   orgId?: string;
+  // story #3674 — 현재 org의 timezone(layout.tsx가 GET /api/v2/organizations 응답에서
+  // me.org_id로 찾아 흘려보낸 값, null이면 org에 미설정 — org_time.py의 UTC 폴백과 대칭).
+  // 소비부는 calendar/page.tsx(resolveDisplayTimezone 인자)가 최초.
+  orgTimezone?: string | null;
   projectId?: string;
   projectName?: string;
   // story a539c649 S2: 현재 project 의 slug(사이드바/⌘K 가 /{ws}/{proj}/docs 직접 path 를
@@ -286,6 +290,7 @@ function useProjectSsot(
 export function DashboardShell({
   currentTeamMemberId,
   orgId,
+  orgTimezone,
   projectId,
   projectName,
   currentProjectSlug,
@@ -382,7 +387,7 @@ export function DashboardShell({
   // 참고) — 이 훅 호출은 <RealtimeProvider> 자식 위치(ShellBody 안)로 옮겨졌다.
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>

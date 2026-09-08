@@ -41,6 +41,8 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "lint_project_access_403.py",                 # story #2342 AC7 — CI lint 게이트
     "lint_query_sentinel_direct_calls.py",        # story #2335 — CI lint 게이트
     "lint_no_script_output_artifacts.py",         # story #3008 — CI lint 게이트(scripts/ 파일명·내용 정적 스캔, 운영 DB 무접속)
+    "lint_org_today_direct_call.py",              # story #3674 — CI lint 게이트(app/**/*.py 정적
+                                                   # 정규식 스캔, 운영 DB 무접속).
     "lint_destructive_schema_weights_registered.py",  # story 23bf1913 — CI lint 게이트(pytest
                                                    # --collect-only + infra/destructive-schema-shard-
                                                    # weights.json 정적 대조, Postgres·운영 DB 무접속 —

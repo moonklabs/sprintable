@@ -7,22 +7,25 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
+
+from app.services.org_time import org_today
 
 logger = logging.getLogger(__name__)
 
 
-def _make_date_range(date_range_days: int) -> tuple[str, str]:
+def _make_date_range(date_range_days: int, org_timezone: str | None = None) -> tuple[str, str]:
     """date_range_days일 전 ~ 어제 (GA4 데이터 지연 고려).
 
-    story #3665 CHANGES(페드루 PO, 2026-09-07) — `date.today()`는 프로세스(OS) 로컬
-    타임존 기준이라 배포 컨테이너 시스템 TZ가 UTC가 아니면 "어제"가 실행 환경에 따라
-    비결정적이다(#3665 원 결함과 같은 클래스, standups.py:308 참고). "오늘"의 뜻이
-    org 로컬 일 경계(organizations.timezone)여야 하는지는 별도 제품 질문 — 그 헬퍼가
-    아직 없어(그라운딩 확認) 이번엔 UTC로 결정적으로만 만든다(org 로컬 일 경계 정합은
-    범위 밖, PO 확定)."""
-    end = datetime.now(timezone.utc).date() - timedelta(days=1)
+    story #3674(BE 確定 2026-09-07) — "어제"는 조직 시간대 기준(org_time.py).
+    org_timezone 미지정(None)이면 UTC로 폴백해 3665(#4020)의 환경-TZ 고정 동작을
+    보존한다(회귀 0). ⚠️GA4 property 자신의 timezone(Admin API property.timeZone,
+    이 코드가 아직 파싱/저장하지 않음 — 별도 축)은 이 스토리 범위 밖이다: "GA4가
+    보는 어제"는 원래 그 property TZ 기준이라, org.timezone으로 맞춰도 GA4
+    property TZ와 다르면 여전히 어긋날 수 있다(그라운딩 ① 메모, 여기선 org TZ
+    결정화까지만 한다)."""
+    end = org_today(org_timezone) - timedelta(days=1)
     start = end - timedelta(days=date_range_days - 1)
     return start.isoformat(), end.isoformat()
 
@@ -31,6 +34,7 @@ def fetch_ga4_metric(
     property_id: str,
     ga4_metric: str,
     date_range_days: int,
+    org_timezone: str | None = None,
 ) -> float | None:
     """GA4 Data API runReport로 단일 지표 값 회수.
 
@@ -58,7 +62,7 @@ def fetch_ga4_metric(
         )
 
         client = BetaAnalyticsDataClient()
-        start_date, end_date = _make_date_range(date_range_days)
+        start_date, end_date = _make_date_range(date_range_days, org_timezone)
 
         request = RunReportRequest(
             property=f"properties/{property_id}",

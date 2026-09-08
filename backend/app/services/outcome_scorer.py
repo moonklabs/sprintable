@@ -156,8 +156,12 @@ def score_epic_outcome(
     return _build_result(verdict, metric, target_f, actual_raw, direction)
 
 
-def score_ga4_outcome(metric_definition: dict[str, Any]) -> dict[str, Any]:
+def score_ga4_outcome(metric_definition: dict[str, Any], org_timezone: str | None = None) -> dict[str, Any]:
     """GA4 Data API 기반 채점 (지연 cron에서 호출).
+
+    story #3674(BE 確定 2026-09-07) — org_timezone(호출부가 cron.py에서 sprint/
+    story/goal.org_id로 조회해 넘김)을 fetch_ga4_metric까지 그대로 전달 — "어제"
+    계산이 org 시간대 기준이 되도록(org_time.py). 생략 시 UTC 폴백(회귀 0).
 
     Returns:
         dict → {'outcome_status': ..., 'outcome_result': ...}
@@ -174,7 +178,7 @@ def score_ga4_outcome(metric_definition: dict[str, Any]) -> dict[str, Any]:
         return {"outcome_status": "pending", "outcome_result": None}
 
     from app.services.ga4_client import fetch_ga4_metric
-    actual = fetch_ga4_metric(str(property_id), str(ga4_metric), int(date_range_days))
+    actual = fetch_ga4_metric(str(property_id), str(ga4_metric), int(date_range_days), org_timezone)
 
     if actual is None:
         return {"outcome_status": "pending", "outcome_result": None}
