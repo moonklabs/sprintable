@@ -83,7 +83,7 @@ describe('computeActiveZoneCollapsedGroupIds — story #d986fd6c(IA·S4 AC1 규�
     expect(SIDEBAR_NOW_GROUP_ID).toBe(NAV_GROUPS[0]!.id);
   });
 
-  it('실 NAV_GROUPS 최대 구역 크기는 5다(활성 구역 단독 펼침이 872 문턱 없이도 항상 775.5px 이하로 들어간다는 전제 회귀가드)', () => {
+  it('실 NAV_GROUPS 최대 구역 크기는 5다(활성 구역 단독 펼침이 872 문턱 없이도 항상 807.5px 이하로 들어간다는 전제 회귀가드)', () => {
     const maxItems = Math.max(...NAV_GROUPS.map((g) => g.items.length));
     expect(maxItems).toBe(5);
   });
