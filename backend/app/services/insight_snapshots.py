@@ -837,9 +837,55 @@ async def _maybe_enrich_with_ga4_inflow(db: AsyncSession, snapshot: InsightSnaps
     campaign = resolve_utm_campaign(version.link_url, fallback_draft_id=version.draft_id)
 
     from app.core.config import settings
+    from app.services.org_time import get_org_timezone, to_org_date
 
-    start_date = pub.published_at.date().isoformat()
-    end_date = (snapshot.due_at or datetime.now(timezone.utc)).date().isoformat()
+    # story #3684(3682 그라운딩 확定, PO 確定 2026-09-07) — GA4 dateRanges는 속성
+    # 시간대의 "온전한 날"만 받는다. published_at/due_at(둘 다 UTC datetime)을
+    # 그대로 .date()로 자르면 org가 UTC보다 앞선 시간대(KST 등)일 때 자정~그
+    # 시차만큼의 발행분이 "발행 前날"로 잘못 잘린다(3682 실측: KST 00~09시
+    # 발행분, moonklabs 실 사례 — org tz=property tz=Asia/Seoul인데도 코드가
+    # 어느 쪽 tz도 거치지 않아 어긋났다). «날»의 정의(PO 確定): 1일 유입=발행
+    # org-일 단 하루, 7일 유입=발행 org-일부터 7 org-일 — GA4가 보는 "온전한 날"
+    # 창은 그 자체로 24시간 경과 스냅샷(due_at, _SNAPSHOT_OFFSETS)과는 다른
+    # 축이다(그 스냅샷 계약 자체는 무변).
+    #
+    # 불변식 — 이 창의 마지막 org-일은 due_at 直前(자정 기준)에 끝난다(1d:
+    # 발행 당일 하루<다음날 due_at, 7d: 발행+6일<발행+7일 due_at) — due_at에
+    # 아직 데이터가 안 채워진 미완은 GA4 처리 지연뿐이고, 그건 기존 rows=[]
+    # "미제공" 처리 그대로다(due_at은 "언제 수집 시도하나"만 담당, 이 날짜
+    # 문자열과는 이제 분리된 축).
+    org_timezone = await get_org_timezone(db, snapshot.org_id)
+    start_org_date = to_org_date(pub.published_at, org_timezone)
+    # story #3684 CHANGES(카디르 QA·PO 페드루 처방①, 2026-09-08) — offset_days를
+    # due_at의 경과 wall-time을 86400으로 나눠 역산하지 않는다. 스케줄 시점에 이미
+    # 아는 의도(_SNAPSHOT_OFFSETS의 1d/7d)를 due_at과 직접 대조해 그대로 읽는다 —
+    # "경과시간 ÷ 하루초" 라는 암묵적 등식 자체를 걷어낸다(날짜창은 org-date
+    # 산술이라 이미 DST 무관하게 견고, 아래 참고).
+    offset_days = next(
+        (offset.days for offset in _SNAPSHOT_OFFSETS if snapshot.due_at == pub.published_at + offset),
+        None,
+    )
+    if offset_days is None:
+        # 알려진 오프셋과 due_at이 정확히 안 맞는 행(레거시/수동 seed 등) — 예전
+        # 근사식으로 폴백(이 갈래는 새 코드 경로가 아니라 안전망).
+        offset_days = round(
+            ((snapshot.due_at or pub.published_at) - pub.published_at).total_seconds() / 86400
+        )
+    end_org_date = start_org_date + timedelta(days=max(offset_days - 1, 0))
+    start_date = start_org_date.isoformat()
+    end_date = end_org_date.isoformat()
+    # ⚠️알려진 제약(카디르 QA 재현·PO 페드루 確定 2026-09-08, 스코프 밖) — due_at
+    # 자체는 여전히 `_SNAPSHOT_OFFSETS`가 주는 고정 UTC 경과시간(24h/7×24h)이다.
+    # org 시간대가 DST를 쓰면 fall-back일(로컬 25시간짜리 하루)을 낀 창에서 due_at이
+    # 그 org-일의 실제 로컬 자정(끝)보다 최대 1시간 먼저 올 수 있다(카디르 재현:
+    # America/New_York 2026-11-01 04:30 UTC 발행 → due_at=+24h=2026-11-02 04:30 UTC
+    # 인데 그 org-일 로컬 자정은 2026-11-02 05:00 UTC — 30분 모자람, 아래 회귀
+    # 테스트가 이 표본을 고정한다). 완전한 처방(due_at 자체를 org-로컬 자정 경계로
+    # 다시 계산)은 due_at을 만드는 `schedule_insight_snapshots`의 스케줄링 자체를
+    # 바꿔야 하는데, 그 due_at은 이 GA4 보강뿐 아니라 스냅샷 캡처 틱 자체의
+    # 트리거이기도 해(story #3497) 이 스토리 스코프(GA4 날짜창 계산 하나)보다
+    # 크다 — PO 確定으로 이번엔 알려진 제약으로 남긴다. DST가 없는 tz(Asia/Seoul 등)
+    # 는 전혀 안 걸린다.
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:

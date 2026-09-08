@@ -11,7 +11,7 @@ snapshots.py·test_3583_ga4_measurement_connection_router.py 재사용(중복
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -104,6 +104,278 @@ async def test_enrich_skips_when_ga4_not_connected():
 
             await _maybe_enrich_with_ga4_inflow(s, snap)  # GA4Connection 행 자체가 없음.
             assert snap.normalized["inflow_sessions"] is None
+    finally:
+        await engine.dispose()
+
+
+# story #3684(3682 그라운딩 확定, PO 確定 2026-09-07) — KST 00:30 발행(=UTC 전날
+# 15:30) 표본. org tz=Asia/Seoul이면 GA4에 보내는 날짜창이 "발행 org-일"(09-08)로
+# 잡혀야 한다(발행 前날 09-07이 1일 성과에 섞이던 3682 실측 결함의 처방).
+async def _seed_org_with_timezone(session, *, timezone: str | None):
+    org_id, project_id = await _seed_org(session)
+    if timezone is not None:
+        from sqlalchemy import update as sa_update
+        from app.models.organization import Organization
+        await session.execute(sa_update(Organization).where(Organization.id == org_id).values(timezone=timezone))
+        await session.commit()
+    return org_id, project_id
+
+
+@pytest.mark.anyio
+async def test_enrich_ga4_date_range_uses_org_day_for_1d_snapshot_kst_midnight_sample(monkeypatch):
+    """AC1 — KST 09-08 00:30 발행 표본, 1d 스냅샷(due_at=+1일) → GA4 요청 날짜창이
+    startDate=endDate="2026-09-08"(발행 org-일 단 하루) — 발행 前날(09-07, UTC
+    truncate 기준 옛 동작)이 안 섞인다."""
+    import httpx
+
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import _maybe_enrich_with_ga4_inflow
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_with_timezone(s, timezone="Asia/Seoul")
+            await _seed_ga4_connection(s, org_id, status="connected", property_id="1", property_name="p")
+            conn = await _seed_channel_connection(s, org_id, channel="threads")
+            _draft, version = await _seed_channel_post_version(
+                s, org_id=org_id, work_item_id=uuid.uuid4(), connection_id=conn.id, channel="threads",
+                link_url="https://blog.example/ko/blog/my-post",
+            )
+            from app.models.channel_publication import ChannelPublication
+            published_at = datetime(2026, 9, 7, 15, 30, tzinfo=timezone.utc)  # = KST 09-08 00:30
+            pub = ChannelPublication(
+                id=uuid.uuid4(), org_id=org_id, gate_id=uuid.uuid4(), version_id=version.id,
+                connection_id=conn.id, channel="threads", status="published",
+                external_id="media-1", published_at=published_at,
+            )
+            s.add(pub)
+            await s.commit()
+            snap = InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, publication_kind="channel_publication",
+                work_item_id=uuid.uuid4(), channel="threads", due_at=published_at + timedelta(days=1),
+                normalized={"inflow_sessions": None, "inflow_users": None, "inflow_conversions": None},
+            )
+            s.add(snap)
+            await s.commit()
+
+            captured_body: dict = {}
+
+            def _handler(request: "httpx.Request") -> "httpx.Response":
+                if request.url.path.endswith("/token"):
+                    return httpx.Response(200, json={"access_token": "fresh-at", "expires_in": 3600})
+                import json as _json
+                captured_body.update(_json.loads(request.content))
+                return httpx.Response(200, json={
+                    "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
+                    "rows": [{"metricValues": [{"value": "3"}, {"value": "2"}, {"value": "0"}]}],
+                })
+
+            _patch_transport(monkeypatch, _handler)
+            await _maybe_enrich_with_ga4_inflow(s, snap)
+
+            date_range = captured_body["dateRanges"][0]
+            assert date_range["startDate"] == "2026-09-08"
+            assert date_range["endDate"] == "2026-09-08"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_enrich_ga4_date_range_dst_fallback_day_known_limitation(monkeypatch):
+    """CHANGES(카디르 QA 재현, PO 페드루 確定 2026-09-08) — America/New_York DST
+    종료일(2026-11-01, fall-back — 로컬 25시간짜리 하루)로 발행. 이 PR이 고치는
+    건 «날짜창의 캘린더 날짜 자체»(offset_days를 due_at 대조로 읽어 org-date
+    산술만으로 구성 — 이 표본에서도 정확히 startDate=endDate="2026-11-01") —
+    «due_at이 그 org-일의 실제 로컬 자정(끝)보다 먼저 올 수 있다»는 타이밍
+    문제는 이 스토리 스코프 밖(알려진 제약, insight_snapshots.py 주석 참고).
+    이 테스트는 그 갭을 실제 숫자로 고정한다 — due_at(2026-11-02 04:30 UTC)이
+    로컬 자정(2026-11-02 05:00 UTC)보다 30분 이르다."""
+    import httpx
+    from zoneinfo import ZoneInfo
+
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import _maybe_enrich_with_ga4_inflow
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_with_timezone(s, timezone="America/New_York")
+            await _seed_ga4_connection(s, org_id, status="connected", property_id="1", property_name="p")
+            conn = await _seed_channel_connection(s, org_id, channel="threads")
+            _draft, version = await _seed_channel_post_version(
+                s, org_id=org_id, work_item_id=uuid.uuid4(), connection_id=conn.id, channel="threads",
+                link_url="https://blog.example/en/blog/my-post",
+            )
+            from app.models.channel_publication import ChannelPublication
+            # = 2026-11-01 00:30 EDT(DST 전환 前) — 카디르 재현 표본 그대로.
+            published_at = datetime(2026, 11, 1, 4, 30, tzinfo=timezone.utc)
+            pub = ChannelPublication(
+                id=uuid.uuid4(), org_id=org_id, gate_id=uuid.uuid4(), version_id=version.id,
+                connection_id=conn.id, channel="threads", status="published",
+                external_id="media-1", published_at=published_at,
+            )
+            s.add(pub)
+            await s.commit()
+            due_at = published_at + timedelta(days=1)  # = 2026-11-02 04:30 UTC(23:30 EST, DST 전환 後)
+            snap = InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, publication_kind="channel_publication",
+                work_item_id=uuid.uuid4(), channel="threads", due_at=due_at,
+                normalized={"inflow_sessions": None, "inflow_users": None, "inflow_conversions": None},
+            )
+            s.add(snap)
+            await s.commit()
+
+            # 알려진 제약을 숫자로 고정 — due_at은 그 org-일(11-01)의 실제 로컬
+            # 자정(11-02 00:00 America/New_York = 11-02 05:00 UTC)보다 30분 이르다.
+            local_midnight_end = datetime(2026, 11, 2, tzinfo=ZoneInfo("America/New_York")).astimezone(timezone.utc)
+            assert local_midnight_end == datetime(2026, 11, 2, 5, 0, tzinfo=timezone.utc)
+            assert due_at < local_midnight_end
+            assert local_midnight_end - due_at == timedelta(minutes=30)
+
+            captured_body: dict = {}
+
+            def _handler(request: "httpx.Request") -> "httpx.Response":
+                if request.url.path.endswith("/token"):
+                    return httpx.Response(200, json={"access_token": "fresh-at", "expires_in": 3600})
+                import json as _json
+                captured_body.update(_json.loads(request.content))
+                return httpx.Response(200, json={
+                    "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
+                    "rows": [{"metricValues": [{"value": "1"}, {"value": "1"}, {"value": "0"}]}],
+                })
+
+            _patch_transport(monkeypatch, _handler)
+            await _maybe_enrich_with_ga4_inflow(s, snap)
+
+            # 날짜 자체는 DST와 무관하게 정확하다(발행 org-일 단 하루) — 깨지는 건
+            # 위에서 고정한 «타이밍»뿐, «날짜»가 아니다.
+            date_range = captured_body["dateRanges"][0]
+            assert date_range["startDate"] == "2026-11-01"
+            assert date_range["endDate"] == "2026-11-01"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_enrich_ga4_date_range_spans_7_org_days_for_7d_snapshot(monkeypatch):
+    """AC1 — 같은 발행 표본의 7d 스냅샷(due_at=+7일) → startDate="2026-09-08"·
+    endDate="2026-09-14"(발행 org-일부터 7 org-일, PO 確定 정의)."""
+    import httpx
+
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import _maybe_enrich_with_ga4_inflow
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_with_timezone(s, timezone="Asia/Seoul")
+            await _seed_ga4_connection(s, org_id, status="connected", property_id="1", property_name="p")
+            conn = await _seed_channel_connection(s, org_id, channel="threads")
+            _draft, version = await _seed_channel_post_version(
+                s, org_id=org_id, work_item_id=uuid.uuid4(), connection_id=conn.id, channel="threads",
+                link_url="https://blog.example/ko/blog/my-post",
+            )
+            from app.models.channel_publication import ChannelPublication
+            published_at = datetime(2026, 9, 7, 15, 30, tzinfo=timezone.utc)  # = KST 09-08 00:30
+            pub = ChannelPublication(
+                id=uuid.uuid4(), org_id=org_id, gate_id=uuid.uuid4(), version_id=version.id,
+                connection_id=conn.id, channel="threads", status="published",
+                external_id="media-1", published_at=published_at,
+            )
+            s.add(pub)
+            await s.commit()
+            snap = InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, publication_kind="channel_publication",
+                work_item_id=uuid.uuid4(), channel="threads", due_at=published_at + timedelta(days=7),
+                normalized={"inflow_sessions": None, "inflow_users": None, "inflow_conversions": None},
+            )
+            s.add(snap)
+            await s.commit()
+
+            captured_body: dict = {}
+
+            def _handler(request: "httpx.Request") -> "httpx.Response":
+                if request.url.path.endswith("/token"):
+                    return httpx.Response(200, json={"access_token": "fresh-at", "expires_in": 3600})
+                import json as _json
+                captured_body.update(_json.loads(request.content))
+                return httpx.Response(200, json={
+                    "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
+                    "rows": [{"metricValues": [{"value": "9"}, {"value": "8"}, {"value": "1"}]}],
+                })
+
+            _patch_transport(monkeypatch, _handler)
+            await _maybe_enrich_with_ga4_inflow(s, snap)
+
+            date_range = captured_body["dateRanges"][0]
+            assert date_range["startDate"] == "2026-09-08"
+            assert date_range["endDate"] == "2026-09-14"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_enrich_ga4_date_range_org_timezone_null_falls_back_to_utc_date(monkeypatch):
+    """AC2 — org.timezone 미설정(null)이면 시작일은 옛 동작과 같다(UTC .date()
+    truncate, "09-07"). 같은 발행 시각(UTC 09-07T15:30Z)이 org tz=Asia/Seoul이면
+    "09-08"이 됐던 것과 대조.
+
+    카디르 QA 정정(2026-09-08, PR #4036) — 종료일까지 "회귀 0"은 부정확한 서술
+    이었다. 옛 코드는 end_date를 due_at.date()로 따로 truncate해 이 표본에서
+    "09-08"(2일 범위, 09-07~09-08)을 냈다 — 1일 유입인데 이틀치가 섞이던 별개의
+    UTC-truncate 결함. 이 PR은 end_date를 offset_days로 org-date 산술해 유도하므로
+    null-tz(=UTC 폴백)에서도 "09-07"(1일 범위) — 값이 바뀐다(다운스트림 대시보드
+    관측치도 바뀜, AC "1일 유입=발행 org-일 단 하루"엔 이 새 값이 맞다)."""
+    import httpx
+
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import _maybe_enrich_with_ga4_inflow
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_with_timezone(s, timezone=None)
+            await _seed_ga4_connection(s, org_id, status="connected", property_id="1", property_name="p")
+            conn = await _seed_channel_connection(s, org_id, channel="threads")
+            _draft, version = await _seed_channel_post_version(
+                s, org_id=org_id, work_item_id=uuid.uuid4(), connection_id=conn.id, channel="threads",
+                link_url="https://blog.example/ko/blog/my-post",
+            )
+            from app.models.channel_publication import ChannelPublication
+            published_at = datetime(2026, 9, 7, 15, 30, tzinfo=timezone.utc)
+            pub = ChannelPublication(
+                id=uuid.uuid4(), org_id=org_id, gate_id=uuid.uuid4(), version_id=version.id,
+                connection_id=conn.id, channel="threads", status="published",
+                external_id="media-1", published_at=published_at,
+            )
+            s.add(pub)
+            await s.commit()
+            snap = InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, publication_kind="channel_publication",
+                work_item_id=uuid.uuid4(), channel="threads", due_at=published_at + timedelta(days=1),
+                normalized={"inflow_sessions": None, "inflow_users": None, "inflow_conversions": None},
+            )
+            s.add(snap)
+            await s.commit()
+
+            captured_body: dict = {}
+
+            def _handler(request: "httpx.Request") -> "httpx.Response":
+                if request.url.path.endswith("/token"):
+                    return httpx.Response(200, json={"access_token": "fresh-at", "expires_in": 3600})
+                import json as _json
+                captured_body.update(_json.loads(request.content))
+                return httpx.Response(200, json={
+                    "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}],
+                    "rows": [{"metricValues": [{"value": "1"}, {"value": "1"}, {"value": "0"}]}],
+                })
+
+            _patch_transport(monkeypatch, _handler)
+            await _maybe_enrich_with_ga4_inflow(s, snap)
+
+            date_range = captured_body["dateRanges"][0]
+            assert date_range["startDate"] == "2026-09-07"
+            assert date_range["endDate"] == "2026-09-07"
     finally:
         await engine.dispose()
 
