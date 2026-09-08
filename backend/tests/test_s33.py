@@ -242,12 +242,27 @@ async def test_members_list_200():
 
 
 @pytest.mark.anyio
-async def test_members_missing_project_id_422():
+async def test_members_missing_project_id_returns_org_scope_200():
+    """story #3687(PO CHANGES 2026-09-07) — project_id 없음은 더 이상 422가 아니다.
+    org-level 대화(@멘션 등)는 애초에 project 접근권 개념이 없어 grant 판정 자체가
+    무의미한 별도 분기(org 스코프) — 휴먼=org_members 전원, 에이전트=org의
+    team_members(type=agent) 전원. IDOR 축(다른 org 멤버 0건) 실측 검증은
+    test_3687_members_org_scope_realdb.py(실 PG)가 담당 — 이 파일은 mock 기반이라
+    "project_id 없으면 더 이상 422가 아니라 200"이라는 계약 자체만 고정한다."""
     client, session, app = await _client()
     try:
+        # 휴먼 분기(list_org_human_members) — raw SQL execute()를 직접 순회(row._mapping).
+        human_result = MagicMock()
+        human_result.__iter__ = MagicMock(return_value=iter([]))
+        # 에이전트 분기(repo.list) — select().scalars().all().
+        agent_result = MagicMock()
+        agent_result.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(side_effect=[human_result, agent_result])
+
         async with client as c:
             resp = await c.get("/api/v2/members")
 
-        assert resp.status_code == 422
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == []
     finally:
         app.dependency_overrides.clear()
