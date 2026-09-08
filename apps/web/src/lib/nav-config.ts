@@ -98,14 +98,28 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     ],
   },
   {
-    id: 'work',
-    labelKey: 'zoneWork',
+    // story #a2b004f9(IA·S1, 유나 3600 부록 E·선생님 2026-09-07 IA 재검토 지시) — 예전
+    // 'work'(zoneWork·「워크스페이스」)에서 마케팅 실물(content·channel-posts)이 「마케팅」
+    // 구역으로 빠지며 남은 5항목(board·goals·loops·standup·retro)이 이 구역의 전부다 —
+    // id·labelKey도 그 실체(개발/운영 리듬 도구)에 맞게 개명한다. path는 전부 불변.
+    id: 'dev',
+    labelKey: 'zoneDev',
     items: [
       { id: 'board', labelKey: 'board', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B' },
       { id: 'goals', labelKey: 'goals', icon: Layers, kind: 'resource', path: 'goals' },
       { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops' },
       { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S' },
       { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R' },
+    ],
+  },
+  {
+    // story #a2b004f9(IA·S1) — 신규 「마케팅」 구역(안 A). 워크스페이스의 발행 실물
+    // (content·channel-posts)과 조직 프레임에 흩어져 있던 마케팅 실물(org-channels·
+    // org-content-rules·org-insights-board)을 도메인 축 하나로 묶는다 — 항목 5,
+    // path는 전부 불변(묶음만 이동, 라우트 0).
+    id: 'marketing',
+    labelKey: 'zoneMarketing',
+    items: [
       // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §5-2) — 호스팅
       // 블로그 「글 관리」. site-posts drafts는 org 스코프(프로젝트 무관, backend
       // organizations/{org_id}/site-posts/drafts)라 org-connectors(/organization/connectors)와
@@ -120,6 +134,16 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 표현한다 — content(호스팅 블로그, org 스코프)와 같은 이유로 kind:'static'·top-level
       // 경로(channel_post_drafts도 org 스코프, project 무관).
       { id: 'channel-posts', labelKey: 'channelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts' },
+      // story #3376(페드루 PO 確定 2026-09-03) — 소셜 채널 OAuth 연결(조직이 소유한 외부
+      // 계정·토큰). 예전 organization 구역에서 이관 — 「연결」 행위 자체는 마케터가 채널을
+      // 붙이는 일상 실물이라 도메인 축(마케팅)으로 옮긴다(path 불변).
+      { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels' },
+      // story #3472(페드루 PO 確定 2026-09-05) — 콘텐츠 규칙(금칙어·UTM 필수·톤·택소노미·
+      // 채널 우선순위·브랜드 킷). 예전 organization 구역에서 이관 — path 불변.
+      { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules' },
+      // story #3503(성과 보드 화면) — 발행된 글의 D+1/D+7 성과 표. 예전 organization
+      // 구역에서 이관 — path 불변.
+      { id: 'org-insights-board', labelKey: 'orgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board' },
     ],
   },
   {
@@ -151,6 +175,9 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     // 프레임이라 배열 위치도 맨 뒤로 옮긴다(app-sidebar.tsx는 배열 순서 그대로 렌더하므로 —
     // MOBILE_HUB_GROUP_ORDER는 이미 예전부터 이 그룹을 knowledge 뒤에 뒀었다, 이번에 데스크톱이
     // 그 순서를 따라잡는 것뿐).
+    //
+    // story #a2b004f9(IA·S1) — org-channels·org-content-rules·org-insights-board 3항목이
+    // 「마케팅」 구역으로 이관(위 참고, path 불변) — 8→5항목.
     id: 'organization',
     labelKey: 'zoneOrganization',
     items: [
@@ -160,18 +187,6 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events' },
       // story 4180f67f — 마케팅자동화 발행 커넥터(threads/stibee/instagram 등) org_config 설정 화면.
       { id: 'org-connectors', labelKey: 'orgConnectors', icon: Plug, kind: 'static', path: '/organization/connectors' },
-      // story #3376(PO 확定, 2026-09-03) — 소셜 채널 OAuth 연결(조직이 소유한 외부 계정·토큰).
-      // org-connectors(위, «에이전트가 쓰는 도구 계약»)와 주체·수명이 달라 별도 라우트로
-      // 분리한다 — 한 페이지 탭으로 섞으면 "연결"이라는 같은 말을 두 뜻으로 읽는다(PO 판단).
-      { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels' },
-      // story #3472(페드루 PO 確定 2026-09-05) — 콘텐츠 규칙(금칙어·UTM 필수·톤·택소노미·
-      // 채널 우선순위·브랜드 킷) 화면. 읽기 전용 화면이라 owner 아닌 사람에게도 보인다
-      // (편집 컨트롤만 owner 전용 — 화면 자체의 자리는 전 역할 공통).
-      { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules' },
-      // story #3503(성과 보드 화면) — 발행된 글의 D+1/D+7 성과 표. org-channels·
-      // org-content-rules와 같은 이유로 kind:'static'·top-level 경로(org 스코프,
-      // project 무관 — publication은 프로젝트가 아니라 조직 소유 자산이다).
-      { id: 'org-insights-board', labelKey: 'orgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board' },
     ],
   },
   {
@@ -190,7 +205,10 @@ export const NAV_GROUPS: NavGroupConfig[] = [
 // 맨 뒤로) 이제 둘이 정확히 같은 순서다(둘 다 "4구역→관리→설정"). 이 상수 자체는 그대로 두되
 // (모바일이 자기 순서를 자기 상수로 명시하는 SSOT 원칙은 무변화), 예전 "데스크톱과 다르다"는
 // 전제였던 주석은 더 이상 사실이 아니라 정정한다.
-export const MOBILE_HUB_GROUP_ORDER = ['now', 'work', 'trust', 'knowledge', 'organization', 'settings'];
+//
+// story #a2b004f9(IA·S1) — 'work'가 'dev'로 개명되고 신규 'marketing'이 그 바로 뒤에
+// 등재된다(데스크톱 NAV_GROUPS 순서와 동일하게 유지 — I1 원칙 그대로).
+export const MOBILE_HUB_GROUP_ORDER = ['now', 'dev', 'marketing', 'trust', 'knowledge', 'organization', 'settings'];
 
 // flow·inbox·chats는 바텀 탭(지금/결재/채팅)이 이미 depth 1로 커버한다(doc §2.2 "자주" 축) —
 // 허브에 또 실으면 같은 목적지로 가는 진입점이 두 개가 되고 "몇 탭"의 의미가 흐려진다.

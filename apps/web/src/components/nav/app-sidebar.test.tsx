@@ -89,15 +89,17 @@ async function mount() {
 // 1차 메뉴 제거를 시도했으나 CI orphan 가드(story #2376)가 막았다 — command-palette에 대체
 // entry가 없어 nav서 빼면 진짜 orphan이 됐다(sprints와 달리). 「자동 리듬 표면」(doc B2, 구현
 // PO)이 아직 없어 생긴 커플링이라 표면이 설 때까지 nav에 남긴다(②=ⓐ→되돌림, 유나 QA 처방).
+// story #a2b004f9(IA·S1, 2026-09-08) — 'work'(zoneWork)가 'dev'(zoneDev)로 개명되고
+// content·channel-posts가 신규 'marketing'(zoneMarketing) 구역으로 이관(org-channels·
+// org-content-rules·org-insights-board도 조직에서 마케팅으로 합류) — 그룹 소속만 이동,
+// 항목 24·모든 라벨·href는 무변(EXPECTED_HREF_BY_LABEL 그대로).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림'] },
-  // story #3402 — 워크 그룹에 '채널 포스트'(/content/channel-posts) 추가돼 6→7항목.
-  { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고', '콘텐츠', '채널 포스트'] },
+  { labelKey: 'zoneDev', labels: ['보드', '목표', '실험실', '스탠드업', '회고'] },
+  { labelKey: 'zoneMarketing', labels: ['콘텐츠', '채널 포스트', '채널', '콘텐츠 규칙', '성과 보드'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
-  // story #3472(페드루 PO 확定 2026-09-05) — '콘텐츠 규칙'(/organization/content-rules) 추가돼 6→7항목.
-  // story #3503 — '성과 보드'(/organization/insights-board) 추가돼 7→8항목.
-  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터', '채널', '콘텐츠 규칙', '성과 보드'] },
+  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터'] },
   { labelKey: null, labels: ['설정'] },
 ];
 
@@ -151,10 +153,10 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
 };
 
 describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story #2930 I1 4구역 재편', () => {
-  it('그룹 순서·라벨·항목 순서·라벨이 2930 확定대로다(오늘→워크스페이스→신뢰→지식→조직→설정)', async () => {
+  it('그룹 순서·라벨·항목 순서·라벨이 IA·S1 확定대로다(오늘→개발→마케팅→신뢰→지식→조직→설정)', async () => {
     await mount();
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['오늘', '워크스페이스', '신뢰', '지식', '조직']);
+    expect(groupLabels).toEqual(['오늘', '개발', '마케팅', '신뢰', '지식', '조직']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
@@ -172,7 +174,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(eventsLink?.getAttribute('href')).toBe('/organization/events');
   });
 
-  it('리소스 항목(작업 그룹, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
+  it('리소스 항목(개발 그룹, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
     await mount();
     // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
     const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
