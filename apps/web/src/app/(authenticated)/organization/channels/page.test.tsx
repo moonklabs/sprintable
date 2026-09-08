@@ -281,6 +281,39 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(testBtn?.disabled).toBeFalsy();
   });
 
+  // story #3661 후속(2026-09-07) — 「연결 시험」 성공 응답에 계정 username이 없으면
+  // 이전엔 conn.account_id(webhook류는 139자 URL)로 폴백했다. channelConnectionIdentityLabel
+  // 재사용으로 통일 — account_label이 없으면 「채널명(…짧은 꼬리)」.
+  it('연결 시험 성공 응답에 username이 없으면 raw account_id 대신 채널명+짧은 꼬리로 폴백한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/channel-connections/available-channels')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: [{ channel: 'webhook', display_name: 'Webhook', credential_kind: 'pasted_secret', kind: 'social' }] }),
+        } as Response;
+      }
+      if (url.includes('/app-credentials')) {
+        return { ok: true, status: 200, json: async () => ({ data: { configured: false, app_id_suffix: null, effective_source: 'platform' } }) } as Response;
+      }
+      if (url.endsWith('/test') && init?.method === 'POST') {
+        return { ok: true, status: 200, json: async () => ({ data: { ok: true, account: {} } }) } as Response;
+      }
+      if (url.includes('/channel-connections')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: [{ ...CONNECTION_ACTIVE, id: 'conn-webhook-1', channel: 'webhook', account_label: null, account_id: 'https://example.com/webhook' }] }),
+        } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({ data: null, error: { code: 'NOT_FOUND' } }) } as Response;
+    }));
+    await mount('owner');
+    const testBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '연결 시험') as HTMLButtonElement;
+    await act(async () => { testBtn.click(); });
+    await flush();
+    expect(container.textContent).not.toContain('https://example.com/webhook');
+    expect(container.textContent).toContain('…');
+  });
+
   it('?connected= 쿼리로 성공 배너가 뜬다', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads'));
     stubFetch({ connections: [] });
@@ -677,13 +710,15 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
   it('⭐sandbox 「연결 만들기」를 누르면 BFF POST 성공 뒤 리로드 없이 새 연결 행이 추가된다', async () => {
     stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
     await mount('owner');
-    expect(container.textContent).not.toContain('sandbox-org-1');
+    // story #3661 후속 — account_label이 null인 새 연결은 raw account_id(sandbox-org-1)가
+    // 아니라 channelConnectionIdentityLabel 폴백(「테스트용(…연결id 짧은 꼬리)」)으로 선다.
+    expect(container.textContent).not.toContain('테스트용(…onn-sb-1)');
 
     const btn = container.querySelector('[data-testid="channel-connect-sandbox-button"]') as HTMLButtonElement;
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    expect(container.textContent).toContain('sandbox-org-1');
+    expect(container.textContent).toContain('테스트용(…onn-sb-1)');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-error"]')).toBeNull();
   });
 

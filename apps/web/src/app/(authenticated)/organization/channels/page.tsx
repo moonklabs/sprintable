@@ -474,7 +474,7 @@ function ConnectionRow({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-1.5 truncate text-sm font-medium text-foreground">
-            {conn.account_label ?? conn.account_id}
+            {channelConnectionIdentityLabel(conn, t)}
             {/* story f30da19a AC4③(유나 확定) — 연결 카드는 「테스트용 연결」(글 목록/
                 캘린더의 「테스트」와 다른 정본 — 여기는 "이 연결 자체가 테스트"라는 뜻).
                 story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — channel===
@@ -526,7 +526,7 @@ function ConnectionRow({
             aria-hidden="true"
           />
           {testResult.ok
-            ? t('channelTestOk', { account: String(testResult.account?.['username'] ?? conn.account_id) })
+            ? t('channelTestOk', { account: String(testResult.account?.['username'] ?? channelConnectionIdentityLabel(conn, t)) })
             : t('channelTestFailed', { error: testResult.error ?? '' })}
         </p>
       ) : null}
