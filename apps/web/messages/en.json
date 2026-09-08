@@ -110,7 +110,7 @@
     "goals": "Goals",
     "loops": "Lab",
     "storage": "Storage",
-    "content": "Content",
+    "content": "Blog posts",
     "channelPosts": "Channel Posts",
     "zoneNow": "Today",
     "zoneDev": "Dev",
@@ -126,7 +126,7 @@
     "orgMemory": "Memory",
     "orgEvents": "Events",
     "orgConnectors": "Connectors",
-    "orgChannels": "Channels",
+    "orgChannels": "Channel connections",
     "orgContentRules": "Content rules",
     "orgInsightsBoard": "Performance board",
     "switcherOrgSettingsAria": "Organization settings",
@@ -2132,7 +2132,7 @@
     "imageUnavailable": "Image unavailable in public view"
   },
   "channelConnect": {
-    "pageTitle": "Channels",
+    "pageTitle": "Channel connections",
     "pageDescription": "Connect social channel accounts and manage their status. App credentials and OAuth tokens are handled only here.",
     "channelStatusNotConnected": "Not connected",
     "channelStatusConfigIncomplete": "Setup incomplete",
@@ -2257,7 +2257,7 @@
     "measurementGa4DisconnectEffect": "Disconnecting stops future traffic collection. Values collected so far are kept."
   },
   "content": {
-    "title": "Content",
+    "title": "Blog posts",
     "description": "Manage drafts, approvals, and publishing for hosted blog posts.",
     "loadFailed": "Failed to load posts.",
     "emptyTitle": "No drafts yet",
