@@ -66,7 +66,7 @@ function expandAllGroups() {
   }));
 }
 
-// jsdom 기본 innerHeight(768)는 「오늘」 얹기 문턱(840)에 못 미친다 — 문턱 위/아래 양쪽을
+// jsdom 기본 innerHeight(768)는 「오늘」 얹기 문턱(872)에 못 미친다 — 문턱 위/아래 양쪽을
 // 재는 테스트를 위한 스텁.
 function stubViewportHeight(height: number) {
   Object.defineProperty(window, 'innerHeight', { value: height, writable: true, configurable: true });
@@ -350,10 +350,10 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(link!.className).not.toContain('bg-proof-blue-soft');
   });
 
-  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — 유나 실측 반영) — budget-누적 규칙을
-  // 「현재 구역 인지 + 뷰포트 조건」으로 교체했다: 기본은 활성 구역만 펼침, 뷰포트
-  // ≥840px면 「오늘」도 얹는다.
-  it('기본 상태는 활성 구역만 펼치고 나머지는 접는다(뷰포트<840, pathname=/dashboard → 활성 구역 없음)', async () => {
+  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — 유나 실측 반영, 배포 55 라이브
+  // 재실측으로 840→872 정정) — budget-누적 규칙을 「현재 구역 인지 + 뷰포트 조건」으로
+  // 교체했다: 기본은 활성 구역만 펼침, 뷰포트 ≥872px면 「오늘」도 얹는다.
+  it('기본 상태는 활성 구역만 펼치고 나머지는 접는다(뷰포트<872, pathname=/dashboard → 활성 구역 없음)', async () => {
     stubViewportHeight(700);
     await mount();
     // pathname mock 기본값 '/dashboard'는 어느 nav 항목과도 안 맞아 활성 구역이 없다
@@ -378,7 +378,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(boardLink).toBeUndefined();
   });
 
-  it('뷰포트 ≥840이면 활성 구역 밖이어도 「오늘」이 함께 펼쳐진다', async () => {
+  it('뷰포트 ≥872이면 활성 구역 밖이어도 「오늘」이 함께 펼쳐진다', async () => {
     pathnameRef.current = '/organization/events';
     stubViewportHeight(900);
     await mount();
@@ -386,9 +386,9 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(orgBriefingLink).toBeDefined();
   });
 
-  it('뷰포트 839(문턱 바로 아래)면 「오늘」은 안 얹힌다(경계값)', async () => {
+  it('뷰포트 871(문턱 바로 아래)면 「오늘」은 안 얹힌다(경계값)', async () => {
     pathnameRef.current = '/organization/events';
-    stubViewportHeight(839);
+    stubViewportHeight(871);
     await mount();
     const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
     expect(orgBriefingLink).toBeUndefined();

@@ -9,7 +9,8 @@ import {
 
 // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — budget-누적 규칙(순서 고정)을 유나의
 // 라이브 실측(필요 뷰포트=615.5+32×N)이 반증해 「현재 구역 인지 + 뷰포트 조건」으로
-// 교체했다. 기본 = 활성 구역만 펼침, 뷰포트 ≥840px면 「오늘」도 얹는다.
+// 교체했다. 기본 = 활성 구역만 펼침, 뷰포트 ≥872px면 「오늘」도 얹는다(배포 55 라이브
+// 재실측으로 840→872 정정 — N 정의 누락분 상시 행(설정) 1개 보정, 유나 § 12:52Z).
 describe('computeActiveZoneCollapsedGroupIds — story #d986fd6c(IA·S4 AC1 규칙, 유나 실측 반영)', () => {
   const groups: GroupItemCount[] = [
     { id: 'now', itemCount: 2 },
@@ -32,15 +33,15 @@ describe('computeActiveZoneCollapsedGroupIds — story #d986fd6c(IA·S4 AC1 규�
     expect(collapsed.has('marketing')).toBe(false);
   });
 
-  it('뷰포트 ≥840이면 활성 구역+「오늘」 둘 다 펼친다', () => {
-    const collapsed = computeActiveZoneCollapsedGroupIds({ groups, activeGroupId: 'organization', viewportHeight: 840 });
+  it('뷰포트 ≥872이면 활성 구역+「오늘」 둘 다 펼친다', () => {
+    const collapsed = computeActiveZoneCollapsedGroupIds({ groups, activeGroupId: 'organization', viewportHeight: 872 });
     expect(collapsed.has('organization')).toBe(false);
     expect(collapsed.has('now')).toBe(false);
     expect(collapsed).toEqual(new Set(['dev', 'marketing', 'trust', 'knowledge', 'settings']));
   });
 
-  it('뷰포트 839(문턱 바로 아래)면 「오늘」은 안 얹는다(경계값)', () => {
-    const collapsed = computeActiveZoneCollapsedGroupIds({ groups, activeGroupId: 'organization', viewportHeight: 839 });
+  it('뷰포트 871(문턱 바로 아래)면 「오늘」은 안 얹는다(경계값)', () => {
+    const collapsed = computeActiveZoneCollapsedGroupIds({ groups, activeGroupId: 'organization', viewportHeight: 871 });
     expect(collapsed.has('now')).toBe(true);
   });
 
@@ -55,7 +56,7 @@ describe('computeActiveZoneCollapsedGroupIds — story #d986fd6c(IA·S4 AC1 규�
     expect(collapsed).toEqual(new Set(groups.map((g) => g.id)));
   });
 
-  it('활성 구역이 null이어도 뷰포트 ≥840이면 「오늘」은 펼친다', () => {
+  it('활성 구역이 null이어도 뷰포트 ≥872이면 「오늘」은 펼친다', () => {
     const collapsed = computeActiveZoneCollapsedGroupIds({ groups, activeGroupId: null, viewportHeight: 900 });
     expect(collapsed.has('now')).toBe(false);
   });
@@ -64,15 +65,15 @@ describe('computeActiveZoneCollapsedGroupIds — story #d986fd6c(IA·S4 AC1 규�
     expect(computeActiveZoneCollapsedGroupIds({ groups: [], activeGroupId: 'dev', viewportHeight: 900 })).toEqual(new Set());
   });
 
-  it('SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT는 840이다(유나 실측 615.5+32×7=839.5 반올림, 임의 수 아님)', () => {
-    expect(SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT).toBe(840);
+  it('SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT는 872이다(유나 실측 615.5+32×8=871.5 반올림, N=8=활성5+오늘2+상시행1, 임의 수 아님)', () => {
+    expect(SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT).toBe(872);
   });
 
   it('SIDEBAR_NOW_GROUP_ID는 실 NAV_GROUPS의 첫 구역 id와 일치한다(회귀가드)', () => {
     expect(SIDEBAR_NOW_GROUP_ID).toBe(NAV_GROUPS[0]!.id);
   });
 
-  it('실 NAV_GROUPS 최대 구역 크기는 5다(활성 구역 단독 펼침이 840 문턱 없이도 항상 775.5px 이하로 들어간다는 전제 회귀가드)', () => {
+  it('실 NAV_GROUPS 최대 구역 크기는 5다(활성 구역 단독 펼침이 872 문턱 없이도 항상 775.5px 이하로 들어간다는 전제 회귀가드)', () => {
     const maxItems = Math.max(...NAV_GROUPS.map((g) => g.items.length));
     expect(maxItems).toBe(5);
   });
