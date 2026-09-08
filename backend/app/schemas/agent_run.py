@@ -47,6 +47,11 @@ class AgentRunResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
     agent_id: uuid.UUID
+    # story #4725d9c0(라이브 결함) — 유나 배포 53 라이브: 목록/상세 전 행이 「알 수 없는
+    # 에이전트」였다(서버는 agent_id로 실재 멤버를 아는데 응답에 이름을 안 실었다). additive
+    # (agent_id 자체는 그대로 정본) — team_members에서 조인해 채우고, 못 찾으면(예: 멤버 삭제)
+    # null(지어내지 않는다).
+    agent_name: str | None = None
     story_id: uuid.UUID | None = None
     memo_id: uuid.UUID | None = None
     trigger: str

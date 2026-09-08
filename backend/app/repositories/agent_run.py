@@ -25,12 +25,15 @@ class AgentRunRepository:
         limit: int = 50,
         cursor: datetime | None = None,
     ) -> list[AgentRun]:
-        from app.models.team import TeamMember
-        agent_ids_q = select(TeamMember.id).where(TeamMember.project_id == project_id)
-        agent_ids_r = await self.session.execute(agent_ids_q)
-        agent_ids = [r[0] for r in agent_ids_r.all()]
-
-        q = select(AgentRun).where(AgentRun.agent_id.in_(agent_ids))
+        # story #8defd8d4(BE·보안·cross-project 노출, 카디르 재검수 발견) — 예전엔 caller가
+        # 준 project_id로 "그 project에 grant된 agent 목록"을 구해 AgentRun.agent_id.in_(...)만
+        # 대조했다. 두 project에 겸직 grant된 agent의 run은 run 자신의 project_id와 무관하게
+        # 그 agent가 소속된 아무 project_id로 조회해도 새어 나왔다(agent membership ≠ run이
+        # 실제로 속한 project). AgentRun.project_id(NOT NULL, run 생성 시점에 caller가 검증
+        # 완료한 실측값)를 직접 대조하는 게 정본 — TeamMember join은 agent가 caller project_id
+        # 소속인지와 무관한 narrowing이었을 뿐 인가 축이 아니었다(제거해도 결과가 정확해질
+        # 뿐, agent_id 필터가 여전히 옵션 narrowing으로 아래에 남는다).
+        q = select(AgentRun).where(AgentRun.project_id == project_id)
         if agent_id is not None:
             q = q.where(AgentRun.agent_id == agent_id)
         # story_id: 이미 project 소속 agent들의 run으로 bound된 집합을 story 단위로 좁히는

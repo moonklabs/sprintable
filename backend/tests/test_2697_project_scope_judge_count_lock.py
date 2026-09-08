@@ -48,6 +48,10 @@ _KNOWN_HITS = {
     "app/routers/activity_logs.py::list_activity_logs",
     "app/routers/activity_stream.py::get_activity_stream",
     "app/routers/agent_runs.py::create_agent_run",
+    # story #4725d9c0(2026-09-08) — 신설 GET /agent-runs/{id}. PATCH(형제 update_agent_run)와
+    # 동일 인가축(org 검증 후 has_project_access) — 존재/타org/무접근권 전부 404 비노출.
+    # require_project_access로 아직 수렴 안 한 정당한 신규 잔존(형제 함수들과 동형 패턴).
+    "app/routers/agent_runs.py::get_agent_run",
     "app/routers/agent_runs.py::list_agent_runs",
     "app/routers/agent_runs.py::update_agent_run",
     "app/routers/analytics.py::_assert_project_access",
@@ -98,11 +102,12 @@ _KNOWN_HITS = {
     "app/services/project_auth.py::require_project_access",
     "app/services/workflow_parallel_approval.py::reassign_approver",
 }
-# raw 총량(고유 키 54개 + 아래 5개 함수의 내부 중복 5건 = 59) — len(_KNOWN_HITS)와 분리해 명시.
+# raw 총량(고유 키 55개 + 아래 5개 함수의 내부 중복 5건 = 60) — len(_KNOWN_HITS)와 분리해 명시.
 # story #1969(2026-08-30) — inbox_items 기능 완전 은퇴로 notifications.py::list_inbox/
 # list_incoming 자체가 삭제돼 그 2건의 raw 인라인 패턴도 함께 걷혀 61→59(story #2923이 더했던
-# 값이 정확히 되돌아감).
-_RAW_INLINE_RAISE_BASELINE = 59
+# 값이 정확히 되돌아감). story #4725d9c0(2026-09-08) — agent_runs.py::get_agent_run 신설로
+# +1(59→60, 위 _KNOWN_HITS 항목 참조).
+_RAW_INLINE_RAISE_BASELINE = 60
 
 
 def _qualname_of(node: ast.AST, parents: dict[int, ast.AST]) -> str:

@@ -114,7 +114,44 @@ async def list_agent_runs(
         project_id=project_id, agent_id=agent_id, story_id=story_id, status=status,
         from_dt=from_dt, to_dt=to_dt, limit=limit, cursor=cursor_dt,
     )
-    return [AgentRunResponse.model_validate(r) for r in runs]
+    name_map = await _agent_name_map(session, {r.agent_id for r in runs})
+    return [
+        AgentRunResponse.model_validate(r).model_copy(update={"agent_name": name_map.get(r.agent_id)})
+        for r in runs
+    ]
+
+
+@router.get("/{id}", response_model=AgentRunResponse)
+async def get_agent_run(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    repo: AgentRunRepository = Depends(_get_repo),
+) -> AgentRunResponse:
+    """story #4725d9c0(라이브 결함, 유나 배포 53) — 이 라우터에 단건 GET이 아예 없어(GET ""·
+    POST ""·PATCH "/{id}"만 존재) 상세 화면이 405를 받았다(BFF는 이미 이 경로를 부르고
+    있었다 — 구조적 미도달). PATCH와 동일 인가축(org 검증 후 has_project_access) — 존재하지
+    않거나 타org·무접근권은 전부 404(비노출 관례)."""
+    from app.services.project_auth import has_project_access
+
+    run = await repo.get(id)
+    if run is None or run.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), run.project_id, org_id):
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    name_map = await _agent_name_map(session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
+
+
+async def _agent_name_map(session: AsyncSession, agent_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """story #4725d9c0 — team_members는 멀티프로젝트 grant면 같은 id가 N행(VIEW)이지만 name은
+    멤버 전역값이라 dict 축약이 안전(같은 키에 같은 값 재기록뿐). 못 찾는 id는 그냥 dict에 없다
+    (호출부가 .get(...)으로 None 처리 — 지어내지 않는다)."""
+    if not agent_ids:
+        return {}
+    result = await session.execute(select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(agent_ids)))
+    return {row[0]: row[1] for row in result.all()}
 
 
 @router.post("", response_model=AgentRunResponse, status_code=201)
@@ -172,7 +209,8 @@ async def create_agent_run(
         cost_usd=body.cost_usd,
         deadline_at=datetime.now(timezone.utc) + timedelta(hours=AGENT_RUN_TIMEOUT_HOURS),
     )
-    return AgentRunResponse.model_validate(run)
+    name_map = await _agent_name_map(session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
 
 
 @router.patch("/{id}", response_model=AgentRunResponse)
@@ -243,4 +281,5 @@ async def update_agent_run(
                 entity_id=id,
                 context={"length_changes": _length_changes},
             )
-    return AgentRunResponse.model_validate(run)
+    name_map = await _agent_name_map(repo.session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
