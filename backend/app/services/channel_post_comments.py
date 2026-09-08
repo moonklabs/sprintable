@@ -97,20 +97,70 @@ async def wake_resting_comment_schedules(db: AsyncSession, *, connection_id: uui
     안 되는 반쪽 처방이 된다 — 연결이 non-active→active로 돌아오는 «모든» 경로
     (재연결 upsert·자격 교체·자동 갱신 성공, `channel_connection.py`의 세 자리)가
     공유하는 단일 깨우는 손이 이 함수다(호출부마다 각자 깨우는 로직을 새로 짜지
-    않는다). due_at=now()로 되돌려 다음 루프 틱이 즉시 다시 집는다."""
+    않는다).
+
+    story #3663(라이브 결함, 배포 51) — 한 publication에는 `_COLLECTION_OFFSETS`별
+    행이 여러 개 있고, 연결이 오래 쉬면 그 행들이 전부 connection_inactive가 된다.
+    예전엔 그 «전부»에 같은 `func.now()`(트랜잭션 타임스탬프 하나)를 줘서, 쉬는
+    행이 2개 이상인 publication에서 (publication_id, due_at) 유니크가 결정적으로
+    깨졌다(재연결 콜백 500). 지금은 행마다 마이크로초씩 벌려 서로 다른 due_at을
+    준다 — 이미 지난(due_at<=now) 행만 그렇게 "지금 이후"로 되돌리고, 아직 미래인
+    행은 원래 due_at을 그대로 둔다(앞당기지 않는다).
+
+    CHANGES(카디르 QA real PG 재현, PO 페드루 처방 2026-09-08, 2·3차) — 마이크로초
+    오프셋이 "새로 배정하는 값들끼리만"·"이번에 깨우는 배치의 보존 미래 행만"과는
+    안 겹치게 했지만, `uq_comment_collection_schedule_publication_due_at`는
+    **status 무관 테이블 전체**에 걸린 제약이다 — 같은 publication의 다른 상태
+    (pending·in_progress·captured 등) 행이 이미 쥔 due_at은 이 함수 시야 밖이라
+    새로 배정한 값이 그것과도 충돌할 수 있었다(부분집합 3형: 새-새·새-보존미래·
+    새-타상태). 근본 처방 — 새 due_at을 정할 때 회피집합을 그 publication의
+    «상태 무관 기존 due_at 전체»로 넓힌다."""
     from app.models.channel_publication import ChannelPublication
 
-    result = await db.execute(
-        update(CommentCollectionSchedule)
+    now = datetime.now(timezone.utc)
+    resting = (await db.execute(
+        select(
+            CommentCollectionSchedule.id, CommentCollectionSchedule.publication_id,
+            CommentCollectionSchedule.due_at,
+        )
         .where(
             CommentCollectionSchedule.status == "connection_inactive",
             CommentCollectionSchedule.publication_id.in_(
                 select(ChannelPublication.id).where(ChannelPublication.connection_id == connection_id)
             ),
         )
-        .values(status="pending", due_at=func.now())
-    )
-    return result.rowcount
+        .order_by(CommentCollectionSchedule.publication_id, CommentCollectionSchedule.due_at)
+        .with_for_update()
+    )).all()
+    if not resting:
+        return 0
+
+    publication_ids = {publication_id for _row_id, publication_id, _due_at in resting}
+    occupied_by_pub: dict[uuid.UUID, set[datetime]] = {}
+    for publication_id, due_at in (await db.execute(
+        select(CommentCollectionSchedule.publication_id, CommentCollectionSchedule.due_at)
+        .where(CommentCollectionSchedule.publication_id.in_(publication_ids))
+    )).all():
+        occupied_by_pub.setdefault(publication_id, set()).add(due_at)
+
+    wake_offset_by_pub: dict[uuid.UUID, int] = {}
+    for row_id, publication_id, due_at in resting:
+        if due_at is not None and due_at > now:
+            new_due_at = due_at
+        else:
+            occupied = occupied_by_pub.get(publication_id, set())
+            offset = wake_offset_by_pub.get(publication_id, 0)
+            new_due_at = now + timedelta(microseconds=offset)
+            while new_due_at in occupied:
+                offset += 1
+                new_due_at = now + timedelta(microseconds=offset)
+            wake_offset_by_pub[publication_id] = offset + 1
+        await db.execute(
+            update(CommentCollectionSchedule)
+            .where(CommentCollectionSchedule.id == row_id)
+            .values(status="pending", due_at=new_due_at)
+        )
+    return len(resting)
 
 
 def _text_sha256(text: str) -> str:
