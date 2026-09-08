@@ -234,10 +234,38 @@ async def list_insights_board(
                 metric_col.desc().nulls_last(), rows_cte.c.published_at.desc(), rows_cte.c.publication_id.desc(),
             )
 
-    query = query.limit(limit + 1)
-    result = (await db.execute(query)).all()
-    has_more = len(result) > limit
-    page = result[:limit]
+    # story #3697(카디르 QA 실결함 + 유나 design 후속 2건, PR#4049, 페드루 PO 確定
+    # 2026-09-08) — work_item_id 스코프(한 story의 blog↔social 대조가 목적)에서 flat
+    # published_at-desc+단일 LIMIT를 그대로 쓰면 한 kind가 많으면(예: social 51건) 다른
+    # kind(blog)가 페이지 밖으로 밀려나 에러 없이 조용히 반쪽만 보인다 — 이 비교뷰의
+    # 핵심 목적(양쪽 나란히)이 깨진다.
+    #
+    # 1차 처방(kind별 상한+has_more)을 유나가 «같은 클래스의 조용한 결손 2건»으로
+    # 재차 잡았다:
+    # ② 상한 내에서도 잘릴 수 있는데 has_more 하나만으론 "어느 kind가 얼마나 잘렸는지"
+    #    화면이 「N건 중 M건」으로 정직하게 못 말한다 — 섹션 수준 배너로만 "일부는 표시
+    #    안 됨"을 말하고(유나 § 카피, story-insights-compare-section.tsx), 수는 안 지어
+    #    낸다(has_more는 불리언이라 몇 건인지 모른다).
+    # ③ 두 kind를 합쳐 재정렬한 결과는 keyset이 아닌데 next_cursor를 내주면 따라간
+    #    사람이 틀린 값을 받는다("지금 아무도 안 따라간다"가 계약을 참으로 만들지
+    #    않는다) — 이 분기는 next_cursor를 명시적으로 안 낸다(아래).
+    #
+    # metric 정렬(sort != "published_at") 조합은 이 결함 재현 경로가 아니라(FE
+    # 소비처가 항상 published_at 기본값만 씀) 기존 flat 동작을 그대로 둔다.
+    if work_item_id is not None and sort == "published_at":
+        blog_result = (await db.execute(query.where(rows_cte.c.kind == "site_post").limit(limit + 1))).all()
+        social_result = (
+            await db.execute(query.where(rows_cte.c.kind == "channel_publication").limit(limit + 1))
+        ).all()
+        has_more = len(blog_result) > limit or len(social_result) > limit
+        combined = blog_result[:limit] + social_result[:limit]
+        combined.sort(key=lambda r: (r.published_at, r.publication_id), reverse=(sort_dir != "asc"))
+        page = combined
+    else:
+        query = query.limit(limit + 1)
+        result = (await db.execute(query)).all()
+        has_more = len(result) > limit
+        page = result[:limit]
 
     # 스냅샷 배치 조회(N+1 회피, assets.py 관례 동형) — 페이지 최대 `limit`건이라
     # publication_id도 최대 그만큼, 행당 스냅샷도 최대 2건이라 이 IN 조회 하나로 충분.
@@ -325,8 +353,16 @@ async def list_insights_board(
             "hook_key": hook_key,
         })
 
+    # story #3697(유나 § — 「지금 아무도 안 따라간다」가 계약을 참으로 만들지 않는다) —
+    # work_item_id 스코프는 두 kind를 각자 조회해 Python에서 합쳐 재정렬한 결과라
+    # keyset이 아니다. 그 마지막 행으로 encode_cursor를 내면 "다음 페이지 시작점"으로
+    # 읽히는 값이 나오지만, 그 값을 실제로 다음 호출에 넣으면(work_item_id+cursor 조합,
+    # 지금 아무도 안 하지만) 커서가 전제하는 keyset 성질(정렬된 단일 스트림의 이어짐)이
+    # 성립 안 해 틀린 결과를 준다 — 이 분기는 커서를 아예 안 낸다(has_more만으로
+    # "더 있다"는 정직하게 말하고 "이어받는 길"은 비운다).
+    is_work_item_scoped_merge = work_item_id is not None and sort == "published_at"
     next_cursor = None
-    if has_more and rows_out:
+    if has_more and rows_out and not is_work_item_scoped_merge:
         last = page[-1]
         if sort == "published_at":
             next_cursor = encode_cursor(last.published_at, last.publication_id)
