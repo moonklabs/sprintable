@@ -185,6 +185,11 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
   'sources', 'excludes', 'slug', 'tier', 'date', 'provider', 'channel',
+  // story #3698(IA·후속) — commandPalette.goDestination="{label}{particle} 이동". 둘 다
+  // 문자열(nav 라벨·한글 조사 으로/로)이지 카운터가 아니다 — command-palette.tsx 안에서
+  // 'navigate'="이동"과 부분문자열로 겹치는 건 «이동» 섹션 헤더와 «항목별 이동 문구»라
+  // 애초에 사람이 헷갈릴 자리가 아니다(#2352·#2365류 "다른 두 셈이 같은 말"이 아니다).
+  'label', 'particle',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
@@ -283,13 +288,10 @@ export function findSubstringCollisions(
 // 흔한 정상 패턴이다(H1 "문서" 다음 "24개 문서"라는 산문이 오는 건 혼동을 안 낳는다).
 // 카디르 QA/유나 design 리뷰가 이 추가의 승인 자리(가드 규율 §41번째 항목부터).
 // story #2958(2026-08-23, goals-client.tsx/goal-trust-rail.tsx) — #2955와 정확히 같은 클래스
-// 3건. ①②는 마스트헤드 dek의 "활성 N·완료 M" 카운트(goals.indexCountActive/indexCountDone)와
-// 상태 필터 칩의 "활성"/"완료"(goals.statusActive/statusDone) — 제목류 단문+그 단문을 포함하는
-// 카운트 문장, #2955의 docs.title<->docs.indexDocCount와 동형. ③은 goal-trust-rail.tsx의
-// ProofCapsule(density="audit") stateLabel prop에 goals.outcomeLabel="결과"를 채우는데(그
-// 값 자체는 AuditRow가 시각 렌더하지 않는 required prop 채움용, #2955 doc-status-rail.tsx와
-// 동일 관례) 같은 컴포넌트가 goals.trustRailOutcomeJudged="결과 확定 · {label}"도 렌더한다 —
-// 부분문자열은 겹치지만 하나는 애초에 안 보이는 값이라 혼동 여지가 실질 0.
+// 2건(③은 story #3698에서 자동 해소 — 아래 참고). ①②는 마스트헤드 dek의 "활성 N·완료 M"
+// 카운트(goals.indexCountActive/indexCountDone)와 상태 필터 칩의 "활성"/"완료"(goals.
+// statusActive/statusDone) — 제목류 단문+그 단문을 포함하는 카운트 문장, #2955의
+// docs.title<->docs.indexDocCount와 동형.
 // story #3402(2026-09-04, 유나 design review·페드루 PO 판정) — content.channelPostsTextTooLong/
 // channelPostsRateLimitedUntil(둘 다 {max}/{current}/{time} 보간이 있어 numberAdjacent=true)
 // <-> content.originAuthorUnknown("—" 한 글자, 보간 없음)가 겪던 오탐. 겹치는 건 오직 문장
@@ -340,7 +342,12 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 정의 {label}") — 위 commentsSectionTitle류와 동형(섹션 제목 vs 행 aria-label).
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
-  'goals.outcomeLabel <-> goals.trustRailOutcomeJudged',
+  // story #3698(IA·후속) — goals.outcomeLabel <-> goals.trustRailOutcomeJudged 항목은 여기
+  // 있었으나(#2958), NON_NUMBER_PLACEHOLDER_NAMES에 'label'이 추가되며(commandPalette.
+  // goDestination 처방) trustRailOutcomeJudged("결과 확定 · {label}", {n} 없이 {label}
+  // 하나뿐)가 더는 numberAdjacent가 아니게 됐다 — 애초에 "혼동 여지 실질 0"이라고 적어
+  // 뒀던 그 판단이 이제 구조로도 맞아떨어진 것(EXEMPT였던 게 아예 후보에서 빠짐, 죽은
+  // 예외 축적 아님 — 아래 회귀가드가 "선언된 건 전부 실제로 걸린다"를 지킨다).
   'docs.indexDocCount <-> docs.title',
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',
