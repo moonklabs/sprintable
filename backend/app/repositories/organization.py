@@ -95,6 +95,34 @@ class OrganizationRepository:
                 ),
                 {"org_id": str(org.id), "member_id": str(owner_member_id)},
             )
+            # story #3635(BE·결함 클래스 근본·prod, 카디르 PR#3987 재발견, 페드루 코드 재확認
+            # 2026-09-07) — 4번째 org_member 생성 경로. organizations.py::create_organization
+            # 라우터의 owner_member_id=None 갈래(아래)만 ensure_human_member를 불렀고, 이
+            # owner_member_id 지정 갈래(admin이 team_members id로 owner를 지정하는 호출)는
+            # 여기 원자 INSERT만 하고 앵커를 안 만들었다 — ON CONFLICT DO NOTHING이라 RETURNING
+            # 불가라, 라우터의 동형 패턴(94-107행) 그대로 두 단계(대상 user_id 조회 → 그
+            # user_id로 방금 만든 org_member.id 재조회)로 캡처한 뒤 ensure_human_member를 부른다.
+            from app.services.agent_anchor_sync import ensure_human_member
+
+            target_user_id = (
+                await self.session.execute(
+                    text("SELECT user_id FROM team_members WHERE id = :member_id"),
+                    {"member_id": str(owner_member_id)},
+                )
+            ).scalar_one_or_none()
+            if target_user_id is not None:
+                om_id = (
+                    await self.session.execute(
+                        text(
+                            "SELECT id FROM org_members"
+                            " WHERE org_id = :org_id AND user_id = :user_id"
+                            " AND deleted_at IS NULL LIMIT 1"
+                        ),
+                        {"org_id": str(org.id), "user_id": str(target_user_id)},
+                    )
+                ).scalar_one_or_none()
+                if om_id is not None:
+                    await ensure_human_member(self.session, om_id)
         # fresh org에 default implementation 역할 시드 — 없으면 merge gate가
         # "no implementation participation"으로 gate row 없이 영구 보류(교착).
         from app.services.participation_helpers import seed_default_participation_role
