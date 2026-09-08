@@ -7,6 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { CommandPalette } from './command-palette';
+import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
 import koMessagesRaw from '../../../messages/ko.json';
 
 type LooseMessages = { [key: string]: string | LooseMessages };
@@ -55,16 +56,79 @@ async function mount(props: Partial<React.ComponentProps<typeof CommandPalette>>
 }
 
 describe('CommandPalette — existing navigate/search behavior (regression guard)', () => {
-  it('still renders all 7 navigate destinations with no context (existing behavior untouched)', async () => {
+  it('renders navigate destinations with correct 으로/로 조사(회귀 — story #3698 실측으로 잡힌 "알림로" 오생성)', async () => {
     await mount();
-    expect(document.body.textContent).toContain('알림으로 이동');
-    expect(document.body.textContent).toContain('보드로 이동');
-    expect(document.body.textContent).toContain('문서로 이동');
+    expect(document.body.textContent).toContain('알림으로 이동'); // 림=ㅁ받침
+    expect(document.body.textContent).toContain('보드로 이동'); // 드=받침없음
+    expect(document.body.textContent).toContain('문서로 이동'); // 서=받침없음
   });
 
   it('shows no context chip when there is no contextStoryId', async () => {
     await mount();
     expect(document.body.textContent).not.toContain('◆');
+  });
+});
+
+// story #3698(IA·후속, PO 確定 2026-09-08) — navigate 목적지=NAV_GROUPS(24)+CHAT_CENTER_
+// ITEM(1) 파생. AC3는 "수 고정"이 아니라 "집합 대조"로 잠근다(페드루 PO 정련 — nav가 늘면
+// 파생도 같이 늘어 고정 수 테스트는 오탐 RED가 된다. 집합 대조라야 "어떤 nav 목적지도
+// 팔레트서 안 빠진다"를 nav 성장과 무관하게 지킨다). go-sprints·go-epics 2개는 NAV_GROUPS
+// 밖의 문서화된 예외(#2376 orphan-route 가드 앵커)라 집합에서 뺀 뒤 대조한다.
+describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 AC1·AC3)', () => {
+  const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics']);
+
+  it('팔레트 navigate id 집합이 정확히 NAV_GROUPS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
+    await mount();
+    const renderedIds = new Set(
+      [...document.querySelectorAll('[data-command-group="navigate"] [data-command-id]')]
+        .map((el) => el.getAttribute('data-command-id')!),
+    );
+    const renderedNavIds = new Set([...renderedIds].filter((id) => !GUARD_ANCHOR_IDS.has(id)));
+    const expectedNavIds = new Set([
+      ...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id)),
+      CHAT_CENTER_ITEM.id,
+    ]);
+    // 집합 대조(수 고정 아님) — nav가 늘어도 이 두 집합은 같은 소스(NAV_GROUPS)에서
+    // 나오므로 항상 같이 늘어난다. 파생이 깨져(예: 하드코딩으로 되돌아가) 어떤 nav
+    // 항목이 팔레트서 빠지면 이 대조가 그 즉시 RED가 된다.
+    expect(renderedNavIds).toEqual(expectedNavIds);
+    // 앵커 2개는 여전히 렌더되지만(아래 별도 테스트) 이 집합 밖(문서화된 예외).
+    expect([...GUARD_ANCHOR_IDS].every((id) => renderedIds.has(id))).toBe(true);
+  });
+
+  it('org-workforce(에이전트)·docs(문서)·board(보드) 등 서로 다른 구역의 항목이 전부 실제로 렌더된다(하드코딩 7개 시절엔 누락됐던 항목들)', async () => {
+    await mount();
+    // S1 이전엔 팔레트가 24 중 5(inbox·board·chats·org-workforce·docs)만 도달했다 — 이번
+    // 파생으로 그 밖의 항목(신뢰·지식·마케팅·조직 구역)도 전부 도달하는지 표본 확認.
+    expect(document.body.textContent).toContain('신뢰 센터'); // org-trust(신뢰 구역, 예전엔 누락)
+    expect(document.body.textContent).toContain('블로그 포스트'); // content(마케팅 구역, 예전엔 누락)
+    expect(document.body.textContent).toContain('기억'); // org-memory(지식 구역, 예전엔 누락)
+    expect(document.body.textContent).toContain('설정'); // settings(예전엔 누락)
+  });
+
+  it('기존 단축키(G I/B/M/A/S)가 파생 항목에도 그대로 보존된다', async () => {
+    await mount();
+    const shortcutTexts = [...document.querySelectorAll('kbd')].map((el) => el.textContent);
+    expect(shortcutTexts).toContain('G');
+    expect(shortcutTexts).toContain('I');
+    expect(shortcutTexts).toContain('B');
+    expect(shortcutTexts).toContain('M');
+    expect(shortcutTexts).toContain('A');
+    expect(shortcutTexts).toContain('S');
+  });
+
+  it('go-sprints·go-epics 가드 앵커는 그대로 남아 있다(#2376 orphan-route 가드용, 지우면 안 됨)', async () => {
+    await mount();
+    expect(document.body.textContent).toContain('스프린트로 이동');
+    expect(document.body.textContent).toContain('에픽으로 이동');
+  });
+
+  it('board 목적지는 /flow?view=list로 라우팅한다(리다이렉트 경유 금지, story #2224)', async () => {
+    await mount();
+    const boardBtn = document.querySelector('[data-command-id="board"]') as HTMLButtonElement;
+    expect(boardBtn).toBeDefined();
+    await act(async () => { boardBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/flow?view=list');
   });
 });
 
