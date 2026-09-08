@@ -752,7 +752,7 @@ describe('ContentPostEditPage (story #3368 S3)', () => {
 // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — 주 데이터(/versions)
 // 실패를 404/403/그 외/네트워크 예외 4갈래로 문장을 가른다(추정 0, 서버 status 그대로).
 describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', () => {
-  it('로드 실패(500) — 기존 editLoadFailed를 보인다', async () => {
+  it('로드 실패(500) — 기존 editLoadFailed를 보인다 · 나가는 링크는 0', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsStatus: 500 });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -760,9 +760,11 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    // story #3667(3662 후속) — 그 외 실패(3644/3632 봉투)엔 목록 링크를 안 그린다.
+    expect(container.querySelector('a[href="/content"]')).toBeNull();
   });
 
-  it('로드 실패(404) — 「찾을 수 없습니다」를 보인다', async () => {
+  it('로드 실패(404) — 「찾을 수 없습니다」+목록으로 나가는 링크', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsStatus: 404 });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -771,9 +773,13 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
 
     expect(container.textContent).toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+    // story #3667 — 유나 #4016 적기만 ②(막다른 길) 처방: 목록으로 나가는 링크 1개.
+    const backLink = container.querySelector('a[href="/content"]');
+    expect(backLink).not.toBeNull();
+    expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
-  it('로드 실패(403) — 「볼 권한이 없습니다」를 보인다', async () => {
+  it('로드 실패(403) — 「볼 권한이 없습니다」+목록으로 나가는 링크', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsStatus: 403 });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -782,9 +788,12 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
 
     expect(container.textContent).toContain(koMessages.content.editForbidden);
     expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+    const backLink = container.querySelector('a[href="/content"]');
+    expect(backLink).not.toBeNull();
+    expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
-  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다', async () => {
+  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다 · 나가는 링크는 0', async () => {
     stubFetchWithVersions([], undefined, undefined, { versionsReject: true });
     await act(async () => {
       root.render(wrap(<ContentPostEditPage />));
@@ -794,6 +803,7 @@ describe('ContentPostEditPage — story #3662(로드 실패 문구 3갈래)', ()
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
     expect(container.textContent).not.toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('a[href="/content"]')).toBeNull();
   });
 });
 
@@ -1578,6 +1588,25 @@ describe('ContentPostEditPage — 콘텐츠 규칙 위반 표시(story #3483, §
     expect(container.querySelector('[data-testid="content-rule-violation-title"]')).toBeNull();
     const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.submitCta) as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(false); // violations=[]라 상신 자체는 안 막힌다.
+    expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')?.textContent)
+      .toBe(koMessages.content.contentRuleViolationsLoadFailed);
+  });
+
+  // 페드루 PO 권고(#4022 리뷰, 2026-09-07) — 유나 #4016 적기만 ③(엇갈린 status
+  // 조합 미측). 부수 데이터(단건 GET)가 404/403이어도 — 그 status가 마치 「이
+  // 초안 자체가 없다/권한 없다」로 보일 수 있는 값이어도 — 주 데이터(/versions)가
+  // 200이면 notFound/forbidden 어느 쪽도 아니다(오직 /versions만 본다는 의도의
+  // 고정, 위 500 표본과 같은 결 — 404/403이라는 "그럴듯한" 값으로도 안 새는지).
+  it('엇갈린 status(부수 단건 GET 404여도 주 데이터 /versions는 200) — notFound가 아니라 violations 안내 줄로 접힌다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, { draftStatus: 404 });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('#post-title') as HTMLInputElement | null;
+    expect(titleInput?.value).toBe(VERSION_1.title);
+    expect(container.textContent).not.toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('a[href="/content"]')).toBeNull();
     expect(container.querySelector('[data-testid="content-rule-violation-load-failed"]')?.textContent)
       .toBe(koMessages.content.contentRuleViolationsLoadFailed);
   });

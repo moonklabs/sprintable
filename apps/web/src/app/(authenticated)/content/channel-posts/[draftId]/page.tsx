@@ -1731,19 +1731,28 @@ export default function ChannelPostEditPage() {
   }
   if (notFound) {
     return (
-      <div className="mx-auto w-full max-w-2xl p-6">
+      <div className="mx-auto w-full max-w-2xl space-y-3 p-6">
         <Alert variant="destructive" role="alert">
           <AlertDescription>{t('editNotFound')}</AlertDescription>
         </Alert>
+        {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
+            읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
+            새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
+        <Link href="/content/channel-posts" className="text-sm font-medium text-primary underline">
+          {t('channelPostsCalendarBackToListCta')}
+        </Link>
       </div>
     );
   }
   if (forbidden) {
     return (
-      <div className="mx-auto w-full max-w-2xl p-6">
+      <div className="mx-auto w-full max-w-2xl space-y-3 p-6">
         <Alert variant="destructive" role="alert">
           <AlertDescription>{t('editForbidden')}</AlertDescription>
         </Alert>
+        <Link href="/content/channel-posts" className="text-sm font-medium text-primary underline">
+          {t('channelPostsCalendarBackToListCta')}
+        </Link>
       </div>
     );
   }

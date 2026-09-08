@@ -1977,7 +1977,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
   });
 
-  it('로드 실패(500) — 오류 알림을 보인다', async () => {
+  it('로드 실패(500) — 오류 알림을 보인다 · 나가는 링크는 0(막다른 길 아닌 다시 시도 부류)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
@@ -1985,11 +1985,13 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    // story #3667(3662 후속) — 그 외 실패(3644/3632 봉투)엔 목록 링크를 안 그린다.
+    expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
   });
 
   // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — 404/403/네트워크
   // 예외까지 4표본으로 문장이 갈리는지 고정(500은 위 표본이 이미 editLoadFailed로 커버).
-  it('로드 실패(404) — 「찾을 수 없습니다」를 보인다', async () => {
+  it('로드 실패(404) — 「찾을 수 없습니다」+목록으로 나가는 링크', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
@@ -1998,9 +2000,13 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.textContent).toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+    // story #3667 — 유나 #4016 적기만 ②(막다른 길) 처방: 목록으로 나가는 링크 1개.
+    const backLink = container.querySelector('a[href="/content/channel-posts"]');
+    expect(backLink).not.toBeNull();
+    expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
-  it('로드 실패(403) — 「볼 권한이 없습니다」를 보인다', async () => {
+  it('로드 실패(403) — 「볼 권한이 없습니다」+목록으로 나가는 링크', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) })));
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
@@ -2009,9 +2015,12 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.textContent).toContain(koMessages.content.editForbidden);
     expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
+    const backLink = container.querySelector('a[href="/content/channel-posts"]');
+    expect(backLink).not.toBeNull();
+    expect(backLink?.textContent).toBe(koMessages.content.channelPostsCalendarBackToListCta);
   });
 
-  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다', async () => {
+  it('로드 실패(네트워크 예외) — 기존 editLoadFailed로 남는다 · 나가는 링크는 0', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
     await act(async () => {
       root.render(wrap(<ChannelPostEditPage />));
@@ -2021,6 +2030,32 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
     expect(container.textContent).not.toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
+  });
+
+  // 페드루 PO 권고(#4022 리뷰, 2026-09-07) — 유나 #4016 적기만 ③(엇갈린 status
+  // 조합 미측). 주 데이터(draftRes)는 200인데 보조(versionsRes)만 404/403이면
+  // 「서버 불변식 위반에 가까워 그 외/loadError로 접는다」(코드 주석 그대로)가
+  // 실제로도 그렇게 동작함을 못 박는다 — draftRes.status만 본다는 의도의 고정.
+  it('엇갈린 status(주 데이터 200 + 보조 404) — notFound가 아니라 editLoadFailed로 접힌다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/channel-posts/drafts/${DRAFT_ID}/versions`)) {
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+      if (url.includes(`/channel-posts/drafts/${DRAFT_ID}`)) {
+        return { ok: true, status: 200, json: async () => ({ data: DRAFT_DETAIL }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.content.editNotFound);
+    expect(container.textContent).not.toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
   });
 
 
