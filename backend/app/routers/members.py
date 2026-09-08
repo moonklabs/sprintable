@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.team import TeamMember
+from app.repositories.team_member import TeamMemberRepository
 from app.services.project_auth import assert_target_in_caller_org, has_project_access
 
 router = APIRouter(prefix="/api/v2/members", tags=["members", "Organization"])
@@ -25,16 +26,37 @@ class MemberResponse(BaseModel):
 
 @router.get("", response_model=list[MemberResponse])
 async def list_members(
-    project_id: uuid.UUID = Query(...),
+    project_id: uuid.UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[MemberResponse]:
-    """프로젝트 멤버 목록.
+    """멤버 목록 — canonical SSOT(휴먼: org_members+project_access grant, 에이전트: team_members
+    type=agent). team_members 뷰 기반 /api/v2/team-members와 달리 grant 휴먼·owner/admin
+    누락이 없다(BFF route.ts 주석과 동일 계약 — 이 계약을 지키는 게 이 엔드포인트의 존재
+    이유라 project_id 스코프에서 team-members로 대체하면 안 된다).
 
-    Human: org_members + project_access JOIN (grant 모델 — 레코드 있음 = 접근 허용).
-    Agent: team_members(type=agent) 그대로 유지.
+    story #3687(3680 클래스) — project_id 없는 대화(org-level DM 등)는 애초에 "프로젝트
+    접근권" 개념이 없다. 이 경우는 grant 판정 자체가 무의미한 **별도 분기**(project 스코프
+    "grant 모델이라 못 바꾼다"는 여기 해당 안 됨) — 휴먼은 org_members 전원(SSOT 직접 해소,
+    list_org_human_members·S:166051f0과 동일 방식, grant 무관 — DM 상대가 프로젝트 grant가
+    없어도 org 소속이면 멘션 가능해야 한다), 에이전트는 org의 team_members(type=agent) 전원
+    (프로젝트 무관, 이 org에서 일하는 모든 에이전트).
     """
+    if project_id is None:
+        result: list[MemberResponse] = []
+        repo = TeamMemberRepository(session, org_id)
+        for row in await repo.list_org_human_members():
+            result.append(MemberResponse(id=row["id"], name=row["name"], type="human", role=row["role"], is_active=True))
+
+        # team_members는 members⋈project_access VIEW(0088)라 project_id로 안 좁히면 grant
+        # 프로젝트 수만큼 같은 에이전트가 중복 행으로 나온다 — repo.list()가 이미 이 축(project_id
+        # 미필터 시 DISTINCT ON team_members.id)을 처리해 두어 그대로 재사용(중복 재발명 금지,
+        # team_members.py org-스코프 분기와 동일 패턴).
+        for agent in await repo.list(type="agent", is_active=True):
+            result.append(MemberResponse.model_validate(agent))
+        return result
+
     # E-SECURITY SEC-S6(story 54248174·까심 QA 부수발견 D): project_id가 caller org 소속인지
     # 대조한 적이 없어 타 org project_id로 그 org 멤버 로스터가 그대로 열거됐다(cross-org IDOR).
     # 존재/타org 둘 다 404(존재 비노출).

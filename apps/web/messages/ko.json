@@ -4447,6 +4447,7 @@
     "deliveryContractLevel_all": "전체",
     "deliveryContractLevel_mentions": "멘션만",
     "deliveryContractLevel_mute": "끄기",
+    "mentionLoadFailed": "멤버 목록을 불러오지 못했습니다.",
     "deliveryContractFreeResponseLabel": "멘션 없이도 자유롭게 응답",
     "deliveryContractFreeResponseDesc": "켜면 이 대화에서 «멘션만» 설정한 참여자도 멘션 없는 메시지를 받습니다.",
     "deliveryContractReasonGapNote": "메시지가 전달되지 않은 이유(연쇄 한도 초과 등)는 아직 이 화면에서 바로 보이지 않습니다.",
