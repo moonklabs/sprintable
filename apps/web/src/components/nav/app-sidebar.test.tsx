@@ -162,7 +162,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
     groups.forEach((groupEl, i) => {
-      const itemLabels = [...groupEl.querySelectorAll('[data-slot="sidebar-menu-button"] span')].map((el) => el.textContent);
+      const itemLabels = [...groupEl.querySelectorAll('[data-slot="sidebar-menu-button"] span[data-nav-label]')].map((el) => el.textContent);
       expect(itemLabels).toEqual(EXPECTED_GROUPS[i]!.labels);
     });
   });
@@ -188,6 +188,49 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(boardBtn?.textContent).toContain('B');
     const standupBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('스탠드업'));
     expect(standupBtn?.textContent).toContain('S');
+  });
+
+  // story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「프로젝트」 표식은 scope:'project'
+  // 9항목에만 붙고, org 13·애매 2(inbox·settings)엔 안 붙는다(무표식=org를 뜻하지 않는다 —
+  // 이 테스트는 그 둘을 각각 대표 표본으로 확認한다).
+  it('scope:project 항목(보드)엔 「프로젝트」 표식이 붙는다', async () => {
+    await mount();
+    const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardBtn?.textContent).toContain('프로젝트');
+  });
+
+  it('org 항목(구성원)엔 「프로젝트」 표식이 안 붙는다', async () => {
+    await mount();
+    const membersBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
+    expect(membersBtn?.textContent).not.toContain('프로젝트');
+  });
+
+  it('애매 항목(알림·설정)엔 「프로젝트」 표식이 안 붙는다', async () => {
+    await mount();
+    const inboxBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('알림'));
+    expect(inboxBtn?.textContent).not.toContain('프로젝트');
+    const settingsBtn = [...container.querySelectorAll('a')].find((a) => a.textContent === '설정');
+    expect(settingsBtn?.textContent).not.toContain('프로젝트');
+  });
+
+  it('순서는 라벨→표식→kbd다(보드: "보드" 다음 "프로젝트" 다음 "B")', async () => {
+    await mount();
+    const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    const text = boardBtn?.textContent ?? '';
+    const labelIdx = text.indexOf('보드');
+    const scopeIdx = text.indexOf('프로젝트');
+    const kbdIdx = text.lastIndexOf('B');
+    expect(labelIdx).toBeGreaterThanOrEqual(0);
+    expect(scopeIdx).toBeGreaterThan(labelIdx);
+    expect(kbdIdx).toBeGreaterThan(scopeIdx);
+  });
+
+  it('표식은 칩/배지 모양(테두리·배경)을 안 쓴다(유나 § — 성질이지 행위가 아니다)', async () => {
+    await mount();
+    const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    const scopeEl = [...(boardBtn?.querySelectorAll('span') ?? [])].find((s) => s.textContent === '프로젝트');
+    expect(scopeEl).toBeDefined();
+    expect(scopeEl?.className).not.toMatch(/border|bg-/);
   });
 
   it('현재 경로와 일치하는 정적 항목이 active로 표시된다(isActive 판정 보존)', async () => {
