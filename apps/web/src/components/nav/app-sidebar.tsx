@@ -381,7 +381,7 @@ export function AppSidebar({
           const isCollapsible = Boolean(group.labelKey);
           const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id);
           const groupLabel = group.labelKey ? t(group.labelKey) : '';
-          // 카디르 QA(a11y, §22-18 가드) — render prop이 넘기는 <button>은 SidebarGroupLabel의
+          // 카디르 QA(a11y, §22-18 가드) — render prop이 넘기는 버튼 요소는 SidebarGroupLabel의
           // children(그룹명 텍스트+쉐브론 아이콘)을 감싸기만 할 뿐 버튼 자체에 접근가능한
           // 이름이 안 실린다(스크린리더가 7구역 토글을 구별 못 함) — aria-label에 그룹명+
           // 접힘상태를 명시로 채워 넣는다.
