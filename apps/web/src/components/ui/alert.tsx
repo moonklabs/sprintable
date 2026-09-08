@@ -74,13 +74,21 @@ const AlertTitle = React.forwardRef<
 ));
 AlertTitle.displayName = 'AlertTitle';
 
+// story #3676(유나 실측 2026-09-07, PR #4025 판정 中 발견) — 이 자리에 부모
+// 불투명도 클래스(90%)가 있었다. 부모 opacity는 자식 색과 합성돼(자식에
+// opacity-100을 줘도 안 풀림) 안의
+// text-muted-foreground를 틴트 4종 전부 라이트 AA 미달(4.15~4.34)로 떨어뜨렸다
+// — 제거 뒤에도 다크 테마 muted는 여유가 0.3~0.4뿐이라, 이 컴포넌트 안에서
+// **12px 미만 글자에는 text-muted-foreground를 쓰지 않는다**(그 자리는
+// text-foreground) — 지금 이대로도 이미 얇은 마진이라, 폰트가 더 작아지면
+// 미달로 넘어간다.
 const AlertDescription = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('col-start-2 text-xs leading-relaxed opacity-90 [overflow-wrap:anywhere]', className)}
+    className={cn('col-start-2 text-xs leading-relaxed [overflow-wrap:anywhere]', className)}
     {...props}
   />
 ));
