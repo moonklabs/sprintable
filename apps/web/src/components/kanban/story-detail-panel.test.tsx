@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { StoryDetailPanel } from './story-detail-panel';
+import { StoryDetailPanel, type Task } from './story-detail-panel';
 import type { KanbanStory } from './types';
 import koMessages from '../../../messages/ko.json';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
@@ -917,5 +917,56 @@ describe('StoryDetailPanel — 제목/설명/완료기준 저장 실패 시 문�
     await act(async () => { saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
 
     expect(container.textContent).toContain('제목 저장에 실패했습니다.');
+  });
+});
+
+// story #3703(FE 완전성-정직, 유나 § 2026-09-08) — Tasks 탭 라벨이 로드된 tasks.length가
+// 아니라 진짜 총계(tasksTotalCount)를 말해야 「Tasks (20)」이 "총 20개"로 오독되지 않는다.
+// 로드분<총계면 목록 아래에 그 사실을 한 줄로 드러낸다(더 보기 버튼 유무와 무관한 축).
+describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', () => {
+  function makeTask(id: string): Task {
+    return { id, title: `task-${id}`, status: 'todo' };
+  }
+
+  it('tasksTotalCount 미제공(하위호환) — tasks.length를 그대로 라벨에 쓴다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} onClose={() => {}} />));
+    });
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
+    expect(tasksTab?.textContent).toBe('Tasks (2)');
+  });
+
+  it('tasksTotalCount가 로드분보다 크면 라벨=총계이고, 목록 아래에 "로드분/총계" 정직 문구가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} tasksTotalCount={25} onClose={() => {}} />,
+      ));
+    });
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
+    expect(tasksTab?.textContent).toBe('Tasks (25)'); // 20개만 로드됐어도 탭은 총계를 말한다.
+    expect(container.textContent).toContain(koMessages.board.tasksPartialCount.replace('{total}', '25').replace('{loaded}', '2'));
+  });
+
+  it('tasksTotalCount === tasks.length(완결)면 정직 문구가 안 뜬다(과잉 경고 방지)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} tasksTotalCount={2} onClose={() => {}} />,
+      ));
+    });
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
+    expect(tasksTab?.textContent).toBe('Tasks (2)');
+    expect(container.textContent).not.toContain('표시 중');
+  });
+
+  it('nextTasksCursor가 없는 호출부(flow-node-story-panel류, 더 보기 버튼 자체가 없음)여도 정직 문구는 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={5} nextTasksCursor={null} onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).toContain('5개 중 1개 표시 중');
+    // 더 보기 버튼은 nextTasksCursor 축이라 안 뜬다(별개 — 이 테스트가 둘을 명시적으로 가른다).
+    const loadMoreBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '더 보기');
+    expect(loadMoreBtn).toBeUndefined();
   });
 });

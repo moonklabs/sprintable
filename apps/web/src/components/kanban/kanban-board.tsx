@@ -159,6 +159,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
   const [storyTasksNextCursor, setStoryTasksNextCursor] = useState<string | null>(null);
+  // story #3703(FE 완전성-정직) — /api/tasks의 meta.totalCount(story_id 지정 시 BE 항상
+  // 반환). 기존에도 fetch는 하고 있었지만 nextCursor만 뽑고 이 값은 버렸다.
+  const [storyTasksTotalCount, setStoryTasksTotalCount] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingMoreEpics, setLoadingMoreEpics] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
@@ -534,6 +537,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const handleStoryClick = useCallback(async (story: KanbanStory, { replace = false } = {}) => {
     setSelectedStory(story);
     setStoryTasksNextCursor(null);
+    setStoryTasksTotalCount(null);
 
     // URL에 스토리 ID 반영
     const params = new URLSearchParams(searchParams);
@@ -550,10 +554,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         const json = await res.json();
         setStoryTasks(json.data ?? []);
         setStoryTasksNextCursor(json.meta?.nextCursor ?? null);
+        setStoryTasksTotalCount(typeof json.meta?.totalCount === 'number' ? json.meta.totalCount : null);
       }
     } catch {
       setStoryTasks([]);
       setStoryTasksNextCursor(null);
+      setStoryTasksTotalCount(null);
     }
   }, [searchParams, router]);
 
@@ -1823,6 +1829,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           key={selectedStory.id}
           story={selectedStory}
           tasks={storyTasks}
+          tasksTotalCount={storyTasksTotalCount}
           memberMap={memberMap}
           members={members}
           getStatusLabel={domainLabels.statusLabel}
@@ -1840,6 +1847,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 return [...prev, ...(json.data ?? []).filter((t: Task) => !existingIds.has(t.id))];
               });
               setStoryTasksNextCursor(json.meta?.nextCursor ?? null);
+              setStoryTasksTotalCount(typeof json.meta?.totalCount === 'number' ? json.meta.totalCount : null);
             }
             setLoadingMoreStoryTasks(false);
           }}

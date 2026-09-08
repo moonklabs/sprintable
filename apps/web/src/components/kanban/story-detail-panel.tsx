@@ -83,6 +83,11 @@ interface Activity {
 interface StoryDetailPanelProps {
   story: KanbanStory;
   tasks: Task[];
+  /** story #3703(FE 완전성-정직, 유나 § 2026-09-08) — /api/tasks의 meta.totalCount(story_id
+   * 지정 시 BE가 항상 반환, route.ts:110-119). 탭 라벨이 로드된 tasks.length가 아니라 이
+   * 진짜 총계를 말해야 「Tasks (20)」이 "총 20개"로 오독되지 않는다. 호출부가 안 넘기면
+   * (null/undefined) tasks.length로 자연 폴백 — 하위호환. */
+  tasksTotalCount?: number | null;
   nextTasksCursor?: string | null;
   loadingMoreTasks?: boolean;
   onLoadMoreTasks?: () => void;
@@ -343,7 +348,7 @@ export function DescriptionViewer({
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
@@ -2160,7 +2165,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             {/* Tabs for Tasks, Comments, Activity */}
             <Tabs defaultValue="tasks" className="w-full">
               <TabsList className="w-full">
-                <TabsTrigger value="tasks" className="flex-1">Tasks ({tasks.length})</TabsTrigger>
+                <TabsTrigger value="tasks" className="flex-1">Tasks ({tasksTotalCount ?? tasks.length})</TabsTrigger>
                 <TabsTrigger value="comments" className="flex-1">Comments ({comments.length})</TabsTrigger>
                 <TabsTrigger value="activity" className="flex-1">Activity</TabsTrigger>
               </TabsList>
@@ -2178,6 +2183,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                         </li>
                       ))}
                     </ul>
+                    {/* story #3703(FE 완전성-정직) — 「더 보기」 버튼(nextTasksCursor)과
+                        별개로, 로드분(tasks.length)이 진짜 총계(tasksTotalCount)보다 적으면
+                        그 사실 자체를 한 줄로 말한다. onLoadMoreTasks가 없는 호출부
+                        (flow-node-story-panel.tsx — 더 보기 자체가 없음)에서도 「일부만
+                        보인다」는 정직하게 드러나야 한다(버튼 유무와 무관한 축). */}
+                    {tasksTotalCount != null && tasksTotalCount > tasks.length ? (
+                      <p className="mt-2 text-center text-xs text-muted-foreground">
+                        {t('tasksPartialCount', { loaded: tasks.length, total: tasksTotalCount })}
+                      </p>
+                    ) : null}
                     {nextTasksCursor ? (
                       <div className="mt-3 text-center">
                         <Button variant="outline" size="sm" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
