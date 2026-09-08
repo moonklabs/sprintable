@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Search, MessageSquare } from 'lucide-react';
+import { ChevronDown, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
@@ -12,7 +12,12 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
+import { cn } from '@/lib/utils';
+import {
+  NAV_GROUPS,
+  CHAT_CENTER_ITEM,
+  computeActiveZoneCollapsedGroupIds,
+} from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
   Sidebar,
@@ -44,6 +49,43 @@ interface AppSidebarProps {
   chatUnreadTotal: number;
 }
 
+// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — 유나 실측 반영) — 기본 접힘은 이제
+// 정적 module 상수가 아니라 현재 라우트(활성 구역)+뷰포트 높이에 따라 매 렌더 파생되는
+// 값이다(규칙은 nav-config.ts::computeActiveZoneCollapsedGroupIds, 근거는 그 정의부
+// 주석 참고) — 컴포넌트 내부의 useMemo(defaultCollapsedGroupIds)가 이를 계산한다.
+//
+// 사람별 기억(AC3) — 그룹 id별 접힘 여부 수동 오버라이드. localStorage(계정 단위가 아니라
+// 이 브라우저 단위이지만, "사람별로 기억된다"는 AC 문면은 "같은 사람이 다시 왔을 때
+// 유지"를 요구할 뿐 서버 동기화까지 요구하지 않는다 — sidebar_width와 같은 관례). 값이
+// 없는 그룹은 위 동적 기본값을 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
+const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
+
+function readStoredCollapsedOverrides(): Record<string, boolean> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function mergeStoredCollapsedOverrides(
+  defaults: Set<string>,
+  overrides: Record<string, boolean>,
+): Set<string> {
+  const next = new Set(defaults);
+  for (const group of NAV_GROUPS) {
+    const stored = overrides[group.id];
+    if (stored === undefined) continue;
+    if (stored) next.add(group.id);
+    else next.delete(group.id);
+  }
+  return next;
+}
+
 function KbdHint({ children }: { children: React.ReactNode }) {
   return (
     <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80 sm:inline-flex">
@@ -59,8 +101,9 @@ function KbdHint({ children }: { children: React.ReactNode }) {
 // 자리·비슷한 크기(10px)지만 mono가 아니라 본문 폰트(한글이라). 순서는 라벨→표식→kbd
 // (성질이 이름에 붙고 행위가 끝에 간다).
 //
-// ⛔️무표식 = 조직 범위가 아니다(유나 § 명시) — org 13항목 + 애매 2항목(inbox·settings)
-// 둘 다 무표식이다. 이 표식은 "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
+// ⛔️무표식 = 조직 범위가 아니다(유나 § 명시) — org 11항목 + 애매 4항목(inbox·settings·
+// org-briefing·org-workforce, 카디르 QA 재감사로 2→4 정정) 둘 다 무표식이다. 이 표식은
+// "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
 function ScopeMark({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80">
@@ -94,6 +137,12 @@ export function AppSidebar({
   // board를 flow와 나란히 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" —
   // §7-3) — /flow 안의 보기 전환(?view=list)이 "내비 2Depth 이하" 요건을 충족하는 그 자리다.
   const flowLink = resourceLink('flow');
+  // story #d986fd6c(IA·S4) — 정적 항목 active 판정. 원래 렌더 루프 바로 앞(구 위치)에
+  // 있었으나, 활성 구역 계산(아래)이 접힘 state보다 먼저 알아야 해 이 자리로 옮겼다 —
+  // pathname/href만의 순수 함수라 위치 이동에 따른 의미 변화 없음.
+  function isActive(href: string) {
+    return pathname === href || (href !== '/' && pathname.startsWith(href));
+  }
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
@@ -119,6 +168,80 @@ export function AppSidebar({
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
+
+  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 현재 라우트가 속한 구역. 렌더
+  // 루프와 같은 isActive/resourceLink 판정을 재사용해 "어느 구역이 활성인가"를 미리
+  // 한 번 훑는다(항목 배지·href 계산과 완전히 독립된 목적이라 렌더 루프 안에 끼워
+  // 넣지 않고 별도 pass로 둔다 — 접힘 여부가 항목 렌더 자체보다 먼저 정해져야 한다).
+  const activeGroupId = useMemo(() => {
+    for (const group of NAV_GROUPS) {
+      for (const item of group.items) {
+        const link = item.kind === 'static' ? { isActive: isActive(item.path) } : resourceLink(item.path);
+        if (link.isActive) return group.id;
+      }
+    }
+    return null;
+    // isActive/resourceLink는 pathname·orgSlug·currentProjectSlug에서 매 렌더 새로
+    // 만들어지는 클로저라 그 원시값들만 의존성으로 충분하다(함수 자체를 넣으면 항상
+    // 새 참조라 메모가 무의미해진다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, orgSlug, currentProjectSlug]);
+
+  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 「오늘」을 얹을지 가르는 뷰포트
+  // 높이. SSR엔 window가 없어 null로 시작(하이드레이션 불일치 방지, sidebar_width와
+  // 동형 패턴) — 마운트 후 실측하고 resize에도 재측정한다.
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const measure = () => setViewportHeight(window.innerHeight);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  const defaultCollapsedGroupIds = useMemo(
+    () => computeActiveZoneCollapsedGroupIds({
+      groups: NAV_GROUPS.map((g) => ({ id: g.id, itemCount: g.items.length })),
+      activeGroupId,
+      viewportHeight,
+    }),
+    [activeGroupId, viewportHeight],
+  );
+
+  // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
+  // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
+  // 읽기와 동형 패턴 — ui/sidebar.tsx:81-83) 마운트 후 이 effect가 localStorage 원문을
+  // 그대로 얹는다. localStorage는 React 밖 외부 저장소라 마운트 시점 1회 동기화는 정확히
+  // 이 effect가 있어야 하는 자리(구독 없는 단발성 읽기 — storage 이벤트는 다른 탭 변경만
+  // 알리고 같은 탭 내 최초 하이드레이션은 못 잡는다).
+  // sidebar_width와 같은 목적(SSR-세이프 localStorage 하이드레이션)이나 그쪽은 원시값
+  // 단일 setState라 react-hooks/set-state-in-effect에 안 걸리고, 이쪽은 객체라 걸린다 —
+  // 파생값(Set)은 이미 위 useMemo로 분리해 뒀으니 이 setState 자체는 "외부 저장소를
+  // 그대로 얹는" 정당한 동기화다.
+  const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const overrides = readStoredCollapsedOverrides();
+    if (Object.keys(overrides).length > 0) {
+      setCollapsedOverrides(overrides);
+    }
+  }, []);
+  const collapsedGroupIds = useMemo(
+    () => mergeStoredCollapsedOverrides(defaultCollapsedGroupIds, collapsedOverrides),
+    [defaultCollapsedGroupIds, collapsedOverrides],
+  );
+
+  const toggleGroupCollapsed = useCallback((groupId: string) => {
+    setCollapsedOverrides((prev) => {
+      const wasCollapsed = collapsedGroupIds.has(groupId);
+      const next = { ...prev, [groupId]: !wasCollapsed };
+      try {
+        window.localStorage.setItem(SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // story #d986fd6c — localStorage 실패(프라이빗 창·용량 등)는 이 세션 안 상태만
+        // 유지하고 조용히 넘어간다(기억 실패가 사이드바 자체를 못 쓰게 만들면 안 된다).
+      }
+      return next;
+    });
+  }, [collapsedGroupIds]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -192,10 +315,6 @@ export function AppSidebar({
     return () => { for (const unsub of unsubs) unsub(); };
   }, [mux]);
 
-  function isActive(href: string) {
-    return pathname === href || (href !== '/' && pathname.startsWith(href));
-  }
-
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="py-3">
@@ -255,9 +374,39 @@ export function AppSidebar({
             그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). story #2930 I1 — 이제 4구역+관리
             프레임 순서(오늘→워크스페이스→신뢰→지식→조직→설정)로 재편됐다. chats는 위
             챗 center로 승격돼 이 순회 밖이라 badgeKey는 이제 'inbox' 하나만 실질 도달한다. */}
-        {NAV_GROUPS.map((group) => (
+        {NAV_GROUPS.map((group) => {
+          // story #d986fd6c(IA·S4) — 라벨 없는 유틸 그룹(설정)은 접기 대상이 아니다(항목
+          // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
+          // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
+          const isCollapsible = Boolean(group.labelKey);
+          const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id);
+          const groupLabel = group.labelKey ? t(group.labelKey) : '';
+          // 카디르 QA(a11y, §22-18 가드) — render prop이 넘기는 버튼 요소는 SidebarGroupLabel의
+          // children(그룹명 텍스트+쉐브론 아이콘)을 감싸기만 할 뿐 버튼 자체에 접근가능한
+          // 이름이 안 실린다(스크린리더가 7구역 토글을 구별 못 함) — aria-label에 그룹명+
+          // 접힘상태를 명시로 채워 넣는다.
+          const toggleAriaLabel = isCollapsed
+            ? t('groupExpand', { group: groupLabel })
+            : t('groupCollapse', { group: groupLabel });
+          return (
           <SidebarGroup key={group.id}>
-            {group.labelKey ? <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel> : null}
+            {group.labelKey ? (
+              <SidebarGroupLabel
+                render={
+                  <button
+                    type="button"
+                    onClick={() => toggleGroupCollapsed(group.id)}
+                    aria-expanded={!isCollapsed}
+                    aria-label={toggleAriaLabel}
+                  />
+                }
+                className="w-full cursor-pointer justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              >
+                <span>{groupLabel}</span>
+                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', isCollapsed && '-rotate-90')} />
+              </SidebarGroupLabel>
+            ) : null}
+            {!isCollapsed ? (
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
@@ -294,8 +443,10 @@ export function AppSidebar({
                 })}
               </SidebarMenu>
             </SidebarGroupContent>
+            ) : null}
           </SidebarGroup>
-        ))}
+          );
+        })}
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">

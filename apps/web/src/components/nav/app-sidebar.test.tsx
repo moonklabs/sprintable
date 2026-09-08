@@ -54,6 +54,24 @@ function stubLocalStorage() {
   });
 }
 
+// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 기본 접힘이 이제 활성 구역+뷰포트
+// 조건으로 매 렌더 파생돼(고정 budget 아님), 이 구조적 회귀가드들(원래 story #2681)이
+// 전제하던 "항상 전 항목 렌더"가 깨진다. 접힘 기능 자체와 무관한 이 테스트들은 접힘 전
+// 상태(구조)를 재는 게 목적이라 localStorage에 전 구역 펼침을 미리 심어 둔다(오버라이드가
+// 계산된 기본값을 항상 이긴다 — mergeStoredCollapsedOverrides) — 접힘 동작 자체는 아래
+// 별도 테스트가 다룬다.
+function expandAllGroups() {
+  localStorage.setItem('sidebar_group_collapsed', JSON.stringify({
+    now: false, dev: false, marketing: false, trust: false, knowledge: false, organization: false,
+  }));
+}
+
+// jsdom 기본 innerHeight(768)는 「오늘」 얹기 문턱(840)에 못 미친다 — 문턱 위/아래 양쪽을
+// 재는 테스트를 위한 스텁.
+function stubViewportHeight(height: number) {
+  Object.defineProperty(window, 'innerHeight', { value: height, writable: true, configurable: true });
+}
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -155,6 +173,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
 
 describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story #2930 I1 4구역 재편', () => {
   it('그룹 순서·라벨·항목 순서·라벨이 IA·S1 확定대로다(오늘→개발→마케팅→신뢰→지식→조직→설정)', async () => {
+    expandAllGroups();
     await mount();
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
     expect(groupLabels).toEqual(['오늘', '개발', '마케팅', '신뢰', '지식', '조직']);
@@ -168,6 +187,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('정적 항목(조직 그룹)의 href가 무변화다(path 전부 불변, 2930 I1 핵심 제약)', async () => {
+    expandAllGroups();
     await mount();
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersLink?.getAttribute('href')).toBe('/organization/members');
@@ -176,6 +196,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('리소스 항목(개발 그룹, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
+    expandAllGroups();
     await mount();
     // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
     const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
@@ -183,6 +204,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('kbd 힌트(보드=B·스탠드업=S)가 항목별로 정확히 붙는다', async () => {
+    expandAllGroups();
     await mount();
     const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     expect(boardBtn?.textContent).toContain('B');
@@ -191,21 +213,28 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   // story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「프로젝트」 표식은 scope:'project'
-  // 9항목에만 붙고, org 13·애매 2(inbox·settings)엔 안 붙는다(무표식=org를 뜻하지 않는다 —
-  // 이 테스트는 그 둘을 각각 대표 표본으로 확認한다).
+  // 9항목에만 붙고, org 11·애매 4(inbox·settings·org-briefing·org-workforce, 카디르 QA
+  // 재감사로 2→4 정정)엔 안 붙는다(무표식=org를 뜻하지 않는다 — 이 테스트는 org 대표
+  // 표본 하나를 확認한다).
   it('scope:project 항목(보드)엔 「프로젝트」 표식이 붙는다', async () => {
+    expandAllGroups();
     await mount();
     const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     expect(boardBtn?.textContent).toContain('프로젝트');
   });
 
   it('org 항목(구성원)엔 「프로젝트」 표식이 안 붙는다', async () => {
+    // story #d986fd6c(IA·S4) — 구성원(org-members)이 속한 조직 그룹은 budget=12 기본
+    // 접힘 대상이라, 이 테스트(scope 표식 유무 확認, 접힘과 무관)가 항목을 보려면 펼쳐야
+    // 한다.
+    expandAllGroups();
     await mount();
     const membersBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersBtn?.textContent).not.toContain('프로젝트');
   });
 
   it('애매 항목(알림·설정)엔 「프로젝트」 표식이 안 붙는다', async () => {
+    expandAllGroups();
     await mount();
     const inboxBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('알림'));
     expect(inboxBtn?.textContent).not.toContain('프로젝트');
@@ -214,6 +243,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('순서는 라벨→표식→kbd다(보드: "보드" 다음 "프로젝트" 다음 "B")', async () => {
+    expandAllGroups();
     await mount();
     const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     const text = boardBtn?.textContent ?? '';
@@ -226,6 +256,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('표식은 칩/배지 모양(테두리·배경)을 안 쓴다(유나 § — 성질이지 행위가 아니다)', async () => {
+    expandAllGroups();
     await mount();
     const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     const scopeEl = [...(boardBtn?.querySelectorAll('span') ?? [])].find((s) => s.textContent === '프로젝트');
@@ -235,6 +266,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
 
   it('현재 경로와 일치하는 정적 항목이 active로 표시된다(isActive 판정 보존)', async () => {
     pathnameRef.current = '/organization/events';
+    expandAllGroups();
     await mount();
     const eventsBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('이벤트'));
     expect(eventsBtn?.hasAttribute('data-active')).toBe(true);
@@ -248,6 +280,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   // 교체됐다 — designated_approver_id=me AND status=pending만 세는 room-무관 SSOT
   // (BE gates.py::get_designated_pending_count 문서 — "AC1이 이 층에서 닫히는 근거").
   it('결재 대기 배지(inbox)가 카운트>0일 때만 렌더된다', async () => {
+    expandAllGroups();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 3 }), {
       status: 200, headers: { 'content-type': 'application/json' },
     })));
@@ -257,6 +290,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('결재 대기 0건이면 배지가 안 뜬다', async () => {
+    expandAllGroups();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 0 }), {
       status: 200, headers: { 'content-type': 'application/json' },
     })));
@@ -279,6 +313,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   // 워크 그룹에 '콘텐츠' 추가돼 19→20) 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데
   // 목적지가 틀림"을 확실히 막는다.
   it('전 22항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+    expandAllGroups();
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
@@ -313,5 +348,107 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(link!.className).toContain('border-proof-blue');
     expect(link!.className).toContain('shadow-[var(--elev-card)]');
     expect(link!.className).not.toContain('bg-proof-blue-soft');
+  });
+
+  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — 유나 실측 반영) — budget-누적 규칙을
+  // 「현재 구역 인지 + 뷰포트 조건」으로 교체했다: 기본은 활성 구역만 펼침, 뷰포트
+  // ≥840px면 「오늘」도 얹는다.
+  it('기본 상태는 활성 구역만 펼치고 나머지는 접는다(뷰포트<840, pathname=/dashboard → 활성 구역 없음)', async () => {
+    stubViewportHeight(700);
+    await mount();
+    // pathname mock 기본값 '/dashboard'는 어느 nav 항목과도 안 맞아 활성 구역이 없다
+    // (dashboard 항목 자체가 story #3179로 삭제됨) — 「오늘」도 뷰포트 미달이라 안 얹혀
+    // 전 구역이 접힌다.
+    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
+    expect(orgBriefingLink).toBeUndefined();
+    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardLink).toBeUndefined();
+  });
+
+  it('활성 구역(현재 경로가 속한 구역)은 뷰포트 무관하게 펼쳐진다', async () => {
+    pathnameRef.current = '/organization/events';
+    stubViewportHeight(700);
+    await mount();
+    const eventsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('이벤트'));
+    expect(eventsLink).toBeDefined();
+    const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('구성원'));
+    expect(membersLink).toBeDefined();
+    // 비활성 구역(개발)은 그대로 접힘.
+    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardLink).toBeUndefined();
+  });
+
+  it('뷰포트 ≥840이면 활성 구역 밖이어도 「오늘」이 함께 펼쳐진다', async () => {
+    pathnameRef.current = '/organization/events';
+    stubViewportHeight(900);
+    await mount();
+    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
+    expect(orgBriefingLink).toBeDefined();
+  });
+
+  it('뷰포트 839(문턱 바로 아래)면 「오늘」은 안 얹힌다(경계값)', async () => {
+    pathnameRef.current = '/organization/events';
+    stubViewportHeight(839);
+    await mount();
+    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
+    expect(orgBriefingLink).toBeUndefined();
+  });
+
+  it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {
+    expandAllGroups();
+    await mount();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeader).toBeDefined();
+    expect(devHeader?.getAttribute('aria-expanded')).toBe('true');
+
+    await act(async () => { devHeader!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeUndefined();
+    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeaderAfter?.getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => { devHeaderAfter!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeDefined();
+  });
+
+  // 카디르 QA(a11y, §22-18 가드) — render prop 버튼이 SidebarGroupLabel의 children(그룹명
+  // 텍스트+쉐브론)을 감싸긴 하지만, 접근성 트리에서 버튼 자체의 이름은 aria-label로
+  // 명시해야 스크린리더가 7구역 토글을 구별한다(textContent만으론 landmark 목록 등에서
+  // 이름이 안 실리는 경우가 있다) — aria-label에 그룹명+접힘상태를 담는다.
+  it('구역 토글 버튼의 aria-label이 그룹명+접힘상태를 담는다(카디르 QA a11y 처방)', async () => {
+    expandAllGroups();
+    await mount();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeader?.getAttribute('aria-label')).toBe('개발 접기');
+
+    await act(async () => { devHeader!.click(); });
+    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeaderAfter?.getAttribute('aria-label')).toBe('개발 펼치기');
+  });
+
+  it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
+    expandAllGroups();
+    await mount();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    await act(async () => { devHeader!.click(); });
+
+    const stored = JSON.parse(localStorage.getItem('sidebar_group_collapsed') ?? '{}');
+    expect(stored.dev).toBe(true);
+  });
+
+  it('기억된 접힘 상태가 마운트 시 그대로 재현된다(기억 있으면 그 값, AC3)', async () => {
+    localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ dev: true }));
+    await mount();
+    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardLink).toBeUndefined();
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeader?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('라벨 없는 설정 그룹엔 접기 토글이 없다(헤더 자체가 없음)', async () => {
+    await mount();
+    const settingsLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '설정');
+    expect(settingsLink).toBeDefined();
+    const toggles = [...container.querySelectorAll('button[aria-expanded]')];
+    expect(toggles.some((b) => b.textContent?.includes('설정'))).toBe(false);
   });
 });

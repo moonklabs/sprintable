@@ -285,3 +285,49 @@ export const MOBILE_HUB_EXCLUDE_IDS = new Set(['board', 'inbox', 'chats']);
 export const CHAT_CENTER_ITEM: NavItemConfig = {
   id: 'chats', labelKey: 'chats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
+
+// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — budget=12 되돌림) — 첫 시도(budget
+// 누적, 순서 고정)는 페드루 PO의 07:01Z 판단이 "픽셀보다 구역 성격"으로 고른 추정치였는데,
+// 유나가 배포 54 라이브에서 실측한 관계식이 그 추정을 반증했다: 필요 뷰포트(px) =
+// 615.5 + 32×N(펼친 항목 수). 12항목엔 1000px가 필요해(900px엔 8·800px엔 5만 들어감)
+// AC1 "첫 화면 스크롤 없이"를 budget=12는 못 지킨다.
+//
+// 유나 실측 규칙으로 교체 — «budget 누적(순서 고정)»이 아니라 «현재 구역 인지 + 뷰포트
+// 조건»: 기본은 현재 활성 구역만 펼침(≤5항목=775.5px, 이 앱 최대 구역 크기가 5라 항상
+// 안전). 뷰포트 ≥840px(615.5+32×7=839.5 반올림)면 「오늘」(2항목)도 같이 펼친다(자주
+// 쓰는 진입점이라 조건이 맞으면 얹는다). 나머지는 접힘. 720px 이하는 접혀도 다 못
+// 맞추는 뷰포트라 "접힘의 약속 밖"으로 명시한다 — 그 경우의 도달성은 이 표면(사이드바)이
+// 아니라 모바일 허브·커맨드 팔레트가 이미 보장한다(AC2, depth≤2 무관).
+export interface GroupItemCount {
+  id: string;
+  itemCount: number;
+}
+
+// 615.5 + 32×7 = 839.5, 반올림해 840. 「오늘」을 얹을지 가르는 뷰포트 문턱(유나 실측).
+export const SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT = 840;
+export const SIDEBAR_NOW_GROUP_ID = 'now';
+
+export interface ActiveZoneCollapseInput {
+  groups: readonly GroupItemCount[];
+  // 현재 라우트가 속한 구역 id. 어느 구역에도 안 걸리면(예: 챗 center·설정처럼 라벨 없는
+  // 유틸 그룹) null — "활성 구역이라 펼친다"는 규칙이 적용될 대상이 없다는 뜻이다.
+  activeGroupId: string | null;
+  // 마운트 전(SSR)엔 window가 없어 null — 그 상태에선 "「오늘」도 얹는다" 조건을 아직
+  // 모르니 보수적으로 안 얹는다(마운트 후 실측되면 재계산·하이드레이션 불일치 없음,
+  // sidebar_width와 동형 패턴).
+  viewportHeight: number | null;
+}
+
+export function computeActiveZoneCollapsedGroupIds(input: ActiveZoneCollapseInput): Set<string> {
+  const { groups, activeGroupId, viewportHeight } = input;
+  const expanded = new Set<string>();
+  if (activeGroupId) expanded.add(activeGroupId);
+  if (viewportHeight != null && viewportHeight >= SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT) {
+    expanded.add(SIDEBAR_NOW_GROUP_ID);
+  }
+  const collapsed = new Set<string>();
+  for (const group of groups) {
+    if (!expanded.has(group.id)) collapsed.add(group.id);
+  }
+  return collapsed;
+}
