@@ -530,11 +530,15 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> di
         return await _fetch_instagram_via_connection(db, snapshot)
     if snapshot.channel == "facebook":
         return await _fetch_facebook_via_connection(db, snapshot)
-    # story #3571(Phase2·BE, 페드루 PO 確定 2026-09-06③) — sandbox 결정값 재사용
-    # (instagram_sandbox와 달리 facebook_sandbox는 dispatch가 없으면 이 채널의
-    # insight_metrics 선언 자체가 무의미해진다 — 어댑터 선언과 dispatch를 짝으로
-    # 유지한다).
-    if snapshot.channel == "facebook_sandbox":
+    # story #3696(Phase2·BE·funnel 갭, 디디 e2e 그라운딩 발견 2026-09-08) — 이전
+    # 주석("instagram_sandbox와 달리 facebook_sandbox는 dispatch가 없으면...")이
+    # instagram_sandbox는 이미 분기가 있다는 전제로 쓰여 있었으나 실제로는 없었다
+    # (facebook_sandbox 추가 시 그 옆 채널도 있으려니 한 자기기만 — 어댑터 선언
+    # (insight_metrics 非빈)과 dispatch가 갈려, instagram_sandbox 발행물의 due
+    # 스냅샷이 매번 이 함수 끝의 INSIGHT_CHANNEL_NOT_IMPLEMENTED로 떨어져 영구
+    # 'failed'였다). 두 sandbox 채널 다 여기서 명시 — 어댑터 선언과 dispatch를
+    # 짝으로 유지한다(AC3 가드 test_3696가 이 짝을 구조적으로 계속 대조한다).
+    if snapshot.channel in ("facebook_sandbox", "instagram_sandbox"):
         return _fetch_sandbox(publication_id=snapshot.publication_id)
     raise InsightFetchError(
         error_code="INSIGHT_CHANNEL_NOT_IMPLEMENTED",
