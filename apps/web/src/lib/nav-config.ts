@@ -286,52 +286,48 @@ export const CHAT_CENTER_ITEM: NavItemConfig = {
   id: 'chats', labelKey: 'chats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
 
-// story #d986fd6c(IA·S4, PO 確定 2026-09-08) — 구역 기본 접힘. 「규칙」과 「임계값」을
-// 분리한다: 규칙(이 함수)은 지금 배선하고, 임계값(SIDEBAR_FIRST_SCREEN_ITEM_BUDGET)만
-// 배포 54(S1/S2/3694 라이브) 뒤 실측으로 채운다 — AC1이 "지금 재면 옛 구조를 재는 것"
-// 이라 명시한 그대로, dev-app이 아직 옛 6구역이라 지금 재는 수치는 무의미하다(PO 확認).
+// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — budget=12 되돌림) — 첫 시도(budget
+// 누적, 순서 고정)는 페드루 PO의 07:01Z 판단이 "픽셀보다 구역 성격"으로 고른 추정치였는데,
+// 유나가 배포 54 라이브에서 실측한 관계식이 그 추정을 반증했다: 필요 뷰포트(px) =
+// 615.5 + 32×N(펼친 항목 수). 12항목엔 1000px가 필요해(900px엔 8·800px엔 5만 들어감)
+// AC1 "첫 화면 스크롤 없이"를 budget=12는 못 지킨다.
 //
-// 규칙 — NAV_GROUPS 순서대로(위에서부터, 'now'가 항상 먼저라 사실상 최우선) 항목을
-// 누적하다 예산을 넘기는 첫 구역부터 그 구역과 그 뒤 구역 전부를 기본 접힘으로 둔다.
-// "탐(순서상 앞선 구역)이 우선"이라는 단순한 원칙 — 임의로 특정 구역을 손으로 골라
-// 접지 않는다(AC1 "임의로 고른 수 금지"의 정신을 구역 선택에도 적용).
+// 유나 실측 규칙으로 교체 — «budget 누적(순서 고정)»이 아니라 «현재 구역 인지 + 뷰포트
+// 조건»: 기본은 현재 활성 구역만 펼침(≤5항목=775.5px, 이 앱 최대 구역 크기가 5라 항상
+// 안전). 뷰포트 ≥840px(615.5+32×7=839.5 반올림)면 「오늘」(2항목)도 같이 펼친다(자주
+// 쓰는 진입점이라 조건이 맞으면 얹는다). 나머지는 접힘. 720px 이하는 접혀도 다 못
+// 맞추는 뷰포트라 "접힘의 약속 밖"으로 명시한다 — 그 경우의 도달성은 이 표면(사이드바)이
+// 아니라 모바일 허브·커맨드 팔레트가 이미 보장한다(AC2, depth≤2 무관).
 export interface GroupItemCount {
   id: string;
   itemCount: number;
 }
 
-// story #d986fd6c(IA·S4, PO 確定 2026-09-08, 배포 54 dev-app CF 실측 뒤) — budget=12 =
-// 주력 3구역(오늘·개발·마케팅) 항목 합(2+5+5) · 2차 구역(신뢰·지식·조직·설정)만 기본
-// 접힘 · 뷰포트 픽셀이 아니라 «구역 성격» 기준으로 정했다.
-//
-// 정밀측정(getBoundingClientRect, footer 경계 기준 "완전히 보이는 항목"만 카운트, 200px·
-// 256px 사이드바 폭 둘 다 — 폭은 항목 수에 무관함을 확認·라벨 truncate라 줄바꿈 없음)으로
-// 뷰포트 높이에 따라 11(1440×800)~12(1440×900)가 나왔으나, PO가 픽셀 대신 원칙으로
-// 확定했다 — budget의 일은 "매일 쓰는 주력 3구역은 기본 펼침, 2차 구역은 기본 접힘"이고,
-// 11을 쓰면 마케팅(5)이 통째로 접혀 지금 목표의 핵심 도구(블로그 포스트·채널 연결·성과
-// 보드)가 기본 숨김이 되는 게 뒤집힌 결과라 기각. 800px에서 성과 보드 하나가 접힘선에
-// 걸리는 건 "구역을 통째 접기"보다 "구역은 펼친 채 마지막 항목만 살짝 스크롤"이 낫고,
-// 전문가 화면 대부분(≥900px)에선 12가 스크롤 없이 다 들어간다.
-export const SIDEBAR_FIRST_SCREEN_ITEM_BUDGET: number | null = 12;
+// 615.5 + 32×7 = 839.5, 반올림해 840. 「오늘」을 얹을지 가르는 뷰포트 문턱(유나 실측).
+export const SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT = 840;
+export const SIDEBAR_NOW_GROUP_ID = 'now';
 
-export function computeDefaultCollapsedGroupIds(
-  groups: readonly GroupItemCount[],
-  budget: number,
-): Set<string> {
+export interface ActiveZoneCollapseInput {
+  groups: readonly GroupItemCount[];
+  // 현재 라우트가 속한 구역 id. 어느 구역에도 안 걸리면(예: 챗 center·설정처럼 라벨 없는
+  // 유틸 그룹) null — "활성 구역이라 펼친다"는 규칙이 적용될 대상이 없다는 뜻이다.
+  activeGroupId: string | null;
+  // 마운트 전(SSR)엔 window가 없어 null — 그 상태에선 "「오늘」도 얹는다" 조건을 아직
+  // 모르니 보수적으로 안 얹는다(마운트 후 실측되면 재계산·하이드레이션 불일치 없음,
+  // sidebar_width와 동형 패턴).
+  viewportHeight: number | null;
+}
+
+export function computeActiveZoneCollapsedGroupIds(input: ActiveZoneCollapseInput): Set<string> {
+  const { groups, activeGroupId, viewportHeight } = input;
+  const expanded = new Set<string>();
+  if (activeGroupId) expanded.add(activeGroupId);
+  if (viewportHeight != null && viewportHeight >= SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT) {
+    expanded.add(SIDEBAR_NOW_GROUP_ID);
+  }
   const collapsed = new Set<string>();
-  let used = 0;
-  let overBudget = false;
   for (const group of groups) {
-    if (overBudget) {
-      collapsed.add(group.id);
-      continue;
-    }
-    if (used + group.itemCount > budget) {
-      overBudget = true;
-      collapsed.add(group.id);
-      continue;
-    }
-    used += group.itemCount;
+    if (!expanded.has(group.id)) collapsed.add(group.id);
   }
   return collapsed;
 }

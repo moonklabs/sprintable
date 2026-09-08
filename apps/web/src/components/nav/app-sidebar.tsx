@@ -16,8 +16,7 @@ import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
   CHAT_CENTER_ITEM,
-  computeDefaultCollapsedGroupIds,
-  SIDEBAR_FIRST_SCREEN_ITEM_BUDGET,
+  computeActiveZoneCollapsedGroupIds,
 } from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
@@ -50,22 +49,15 @@ interface AppSidebarProps {
   chatUnreadTotal: number;
 }
 
-// story #d986fd6c(IA·S4, PO 確定 2026-09-08) — 기본 접힘 집합(규칙은 nav-config.ts::
-// computeDefaultCollapsedGroupIds, 임계값은 SIDEBAR_FIRST_SCREEN_ITEM_BUDGET=12 — 배포
-// 54 dev-app 실측+PO 확定 근거는 그 상수 정의부 주석 참고). 오늘·개발·마케팅(2+5+5=12)
-// 기본 펼침, 신뢰·지식·조직 기본 접힘(settings는 라벨 없는 유틸 그룹이라 애초에 접기
-// 대상이 아니다 — 아래 렌더 루프의 isCollapsible 가드가 무시한다).
-const DEFAULT_COLLAPSED_GROUP_IDS: Set<string> = SIDEBAR_FIRST_SCREEN_ITEM_BUDGET != null
-  ? computeDefaultCollapsedGroupIds(
-      NAV_GROUPS.map((g) => ({ id: g.id, itemCount: g.items.length })),
-      SIDEBAR_FIRST_SCREEN_ITEM_BUDGET,
-    )
-  : new Set<string>();
-
-// 사람별 기억(AC3) — 그룹 id별 접힘 여부. localStorage(계정 단위가 아니라 이 브라우저 단위
-// 이지만, "사람별로 기억된다"는 AC 문면은 "같은 사람이 다시 왔을 때 유지"를 요구할 뿐
-// 서버 동기화까지 요구하지 않는다 — sidebar_width와 같은 관례). 값이 없는 그룹은
-// DEFAULT_COLLAPSED_GROUP_IDS를 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
+// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — 유나 실측 반영) — 기본 접힘은 이제
+// 정적 module 상수가 아니라 현재 라우트(활성 구역)+뷰포트 높이에 따라 매 렌더 파생되는
+// 값이다(규칙은 nav-config.ts::computeActiveZoneCollapsedGroupIds, 근거는 그 정의부
+// 주석 참고) — 컴포넌트 내부의 useMemo(defaultCollapsedGroupIds)가 이를 계산한다.
+//
+// 사람별 기억(AC3) — 그룹 id별 접힘 여부 수동 오버라이드. localStorage(계정 단위가 아니라
+// 이 브라우저 단위이지만, "사람별로 기억된다"는 AC 문면은 "같은 사람이 다시 왔을 때
+// 유지"를 요구할 뿐 서버 동기화까지 요구하지 않는다 — sidebar_width와 같은 관례). 값이
+// 없는 그룹은 위 동적 기본값을 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
 const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
 
 function readStoredCollapsedOverrides(): Record<string, boolean> {
@@ -145,6 +137,12 @@ export function AppSidebar({
   // board를 flow와 나란히 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" —
   // §7-3) — /flow 안의 보기 전환(?view=list)이 "내비 2Depth 이하" 요건을 충족하는 그 자리다.
   const flowLink = resourceLink('flow');
+  // story #d986fd6c(IA·S4) — 정적 항목 active 판정. 원래 렌더 루프 바로 앞(구 위치)에
+  // 있었으나, 활성 구역 계산(아래)이 접힘 state보다 먼저 알아야 해 이 자리로 옮겼다 —
+  // pathname/href만의 순수 함수라 위치 이동에 따른 의미 변화 없음.
+  function isActive(href: string) {
+    return pathname === href || (href !== '/' && pathname.startsWith(href));
+  }
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
@@ -171,6 +169,44 @@ export function AppSidebar({
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
 
+  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 현재 라우트가 속한 구역. 렌더
+  // 루프와 같은 isActive/resourceLink 판정을 재사용해 "어느 구역이 활성인가"를 미리
+  // 한 번 훑는다(항목 배지·href 계산과 완전히 독립된 목적이라 렌더 루프 안에 끼워
+  // 넣지 않고 별도 pass로 둔다 — 접힘 여부가 항목 렌더 자체보다 먼저 정해져야 한다).
+  const activeGroupId = useMemo(() => {
+    for (const group of NAV_GROUPS) {
+      for (const item of group.items) {
+        const link = item.kind === 'static' ? { isActive: isActive(item.path) } : resourceLink(item.path);
+        if (link.isActive) return group.id;
+      }
+    }
+    return null;
+    // isActive/resourceLink는 pathname·orgSlug·currentProjectSlug에서 매 렌더 새로
+    // 만들어지는 클로저라 그 원시값들만 의존성으로 충분하다(함수 자체를 넣으면 항상
+    // 새 참조라 메모가 무의미해진다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, orgSlug, currentProjectSlug]);
+
+  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 「오늘」을 얹을지 가르는 뷰포트
+  // 높이. SSR엔 window가 없어 null로 시작(하이드레이션 불일치 방지, sidebar_width와
+  // 동형 패턴) — 마운트 후 실측하고 resize에도 재측정한다.
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const measure = () => setViewportHeight(window.innerHeight);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  const defaultCollapsedGroupIds = useMemo(
+    () => computeActiveZoneCollapsedGroupIds({
+      groups: NAV_GROUPS.map((g) => ({ id: g.id, itemCount: g.items.length })),
+      activeGroupId,
+      viewportHeight,
+    }),
+    [activeGroupId, viewportHeight],
+  );
+
   // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
   // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
   // 읽기와 동형 패턴 — ui/sidebar.tsx:81-83) 마운트 후 이 effect가 localStorage 원문을
@@ -185,13 +221,12 @@ export function AppSidebar({
   useEffect(() => {
     const overrides = readStoredCollapsedOverrides();
     if (Object.keys(overrides).length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCollapsedOverrides(overrides);
     }
   }, []);
   const collapsedGroupIds = useMemo(
-    () => mergeStoredCollapsedOverrides(DEFAULT_COLLAPSED_GROUP_IDS, collapsedOverrides),
-    [collapsedOverrides],
+    () => mergeStoredCollapsedOverrides(defaultCollapsedGroupIds, collapsedOverrides),
+    [defaultCollapsedGroupIds, collapsedOverrides],
   );
 
   const toggleGroupCollapsed = useCallback((groupId: string) => {
@@ -279,10 +314,6 @@ export function AppSidebar({
     ];
     return () => { for (const unsub of unsubs) unsub(); };
   }, [mux]);
-
-  function isActive(href: string) {
-    return pathname === href || (href !== '/' && pathname.startsWith(href));
-  }
 
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
