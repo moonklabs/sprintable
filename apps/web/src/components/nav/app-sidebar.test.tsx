@@ -201,8 +201,9 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   // story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「프로젝트」 표식은 scope:'project'
-  // 9항목에만 붙고, org 13·애매 2(inbox·settings)엔 안 붙는다(무표식=org를 뜻하지 않는다 —
-  // 이 테스트는 그 둘을 각각 대표 표본으로 확認한다).
+  // 9항목에만 붙고, org 11·애매 4(inbox·settings·org-briefing·org-workforce, 카디르 QA
+  // 재감사로 2→4 정정)엔 안 붙는다(무표식=org를 뜻하지 않는다 — 이 테스트는 org 대표
+  // 표본 하나를 확認한다).
   it('scope:project 항목(보드)엔 「프로젝트」 표식이 붙는다', async () => {
     await mount();
     const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
@@ -210,6 +211,10 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('org 항목(구성원)엔 「프로젝트」 표식이 안 붙는다', async () => {
+    // story #d986fd6c(IA·S4) — 구성원(org-members)이 속한 조직 그룹은 budget=12 기본
+    // 접힘 대상이라, 이 테스트(scope 표식 유무 확認, 접힘과 무관)가 항목을 보려면 펼쳐야
+    // 한다.
+    expandAllGroups();
     await mount();
     const membersBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersBtn?.textContent).not.toContain('프로젝트');

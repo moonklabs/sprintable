@@ -109,8 +109,9 @@ function KbdHint({ children }: { children: React.ReactNode }) {
 // 자리·비슷한 크기(10px)지만 mono가 아니라 본문 폰트(한글이라). 순서는 라벨→표식→kbd
 // (성질이 이름에 붙고 행위가 끝에 간다).
 //
-// ⛔️무표식 = 조직 범위가 아니다(유나 § 명시) — org 13항목 + 애매 2항목(inbox·settings)
-// 둘 다 무표식이다. 이 표식은 "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
+// ⛔️무표식 = 조직 범위가 아니다(유나 § 명시) — org 11항목 + 애매 4항목(inbox·settings·
+// org-briefing·org-workforce, 카디르 QA 재감사로 2→4 정정) 둘 다 무표식이다. 이 표식은
+// "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
 function ScopeMark({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80">
