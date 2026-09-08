@@ -17,7 +17,6 @@
     "app/(authenticated)/settings/page.tsx::const res = await fetchWithAuth(`/api/team-members?project_id=${currentProjectId}&type=human`).catch(() => null);",
     "components/agents/access-matrix-tab.tsx::const g = await fetchWithAuth(`/api/agents/access-matrix`).catch(() => null);",
     "components/chat/add-participant-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
-    "components/chat/chat-input.tsx::fetchWithAuth(`/api/members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)",
     "components/chat/file-viewer.tsx::const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {",
     "components/chat/file-viewer.tsx::const signRes = await fetchWithAuth(",
     "components/chat/new-conversation-modal.tsx::fetchWithAuth('/api/team-members?type=agent')",
