@@ -45,6 +45,16 @@ describe('computeActiveZoneCollapsedGroupIds — story #d986fd6c(IA·S4 AC1 규�
     expect(collapsed.has('now')).toBe(true);
   });
 
+  // 배포 55 라이브 결함 회귀(페드루 PO 明示) — 옛 문턱값(840)이 실제로는 N=8(활성
+  // 5+오늘 2+상시 행 1)에서 스크롤을 유발했다. 840은 이제 새 문턱(872) 아래라 「오늘」이
+  // 안 얹혀야 한다(상시 행 「설정」은 app-sidebar.tsx가 labelKey 없는 그룹을 collapsedGroupIds
+  // 와 무관하게 항상 그리는 별도 규칙이라 — 이 순수 함수 테스트가 아니라 DOM 레벨
+  // 회귀는 app-sidebar.test.tsx에 짝을 둔다).
+  it('뷰포트 840(옛 문턱값)에서 「오늘」이 안 얹힌다(배포 55 라이브 결함 회귀 — 새 문턱 872 미만)', () => {
+    const collapsed = computeActiveZoneCollapsedGroupIds({ groups, activeGroupId: 'organization', viewportHeight: 840 });
+    expect(collapsed.has('now')).toBe(true);
+  });
+
   it('활성 구역이 이미 「오늘」이면(오늘 화면 보는 중) 뷰포트 무관하게 한 번만 펼친다(집합이라 중복 없음)', () => {
     const collapsed = computeActiveZoneCollapsedGroupIds({ groups, activeGroupId: 'now', viewportHeight: 700 });
     expect(collapsed.has('now')).toBe(false);

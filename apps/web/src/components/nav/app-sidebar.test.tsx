@@ -394,6 +394,22 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(orgBriefingLink).toBeUndefined();
   });
 
+  // 배포 55 라이브 결함 회귀(페드루 PO 明示, 유나 § 실측) — 옛 문턱값(840)은 N=7(활성
+  // 5+오늘 2)만 세고 「설정」 그룹(labelKey 없음 — isCollapsible=false라 collapsedGroupIds와
+  // 무관하게 app-sidebar.tsx가 항상 그린다)을 안 세어 실제 렌더 항목이 8개인데 7개로
+  // 착각했다 — 그 결과 840서 「오늘」을 얹으면 스크롤이 났다. 840이 새 문턱(872) 아래로
+  // 떨어져 「오늘」이 접힌 채면 렌더 항목이 활성 구역(5)+설정(1)=6개로 줄어 스크롤이
+  // 안 난다(실측: 615.5+32×6=807.5 ≤ 840). 이 값이 다시 872 이상으로 낮아지면 재발한다.
+  it('뷰포트 840(옛 문턱값)에서도 「설정」은 항상 그려지고 「오늘」은 접힌다(배포 55 라이브 결함 회귀)', async () => {
+    pathnameRef.current = '/organization/events';
+    stubViewportHeight(840);
+    await mount();
+    const settingsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('설정'));
+    expect(settingsLink).toBeDefined();
+    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
+    expect(orgBriefingLink).toBeUndefined();
+  });
+
   it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {
     expandAllGroups();
     await mount();
