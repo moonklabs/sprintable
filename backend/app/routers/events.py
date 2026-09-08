@@ -1318,6 +1318,12 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
 
     draft_doc_ref: str | None = None
     draft_id: str | None = None
+    # story #3359 — 레시피 stage 게이트의 neutral_facts엔 게이트 생성 시점(recipe_gate_
+    # hooks.py::_build_approval_neutral_facts)에 이미 stage/channel이 박혀 있다. 이
+    # payload 자체엔 없어(preset.gate.verdict 계약 불변) 아래 gate_row 재조회에서만
+    # 채워진다 — publish 다음-행동 문구를 채널별 커넥터명으로 구체화하는 데 쓴다.
+    gate_stage: str | None = None
+    gate_channel: str | None = None
     # story #3487(0329) — payload에 gate_id가 있으면(이 함수의 유일한 발행부는 항상
     # 채운다) 그 행만 정확히 읽는다. story #3478(gate.scope_key) 이후 같은 work_item에
     # 목적지가 다른 external_publish 게이트가 둘 이상일 수 있어, 아래 (work_item_id,
@@ -1349,6 +1355,9 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
             # 모두에서 만들어지지 않는다) — 링크가 아니라 참조로만 싣는다(PO 2026-09-03
             # 13:33Z, 실행 권유 아님).
             draft_id = facts.get("draft_id")
+            gate_stage = facts.get("stage")
+            _channel_raw = facts.get("channel")
+            gate_channel = _channel_raw if isinstance(_channel_raw, str) and _channel_raw and _channel_raw != "미확認" else None
     if draft_doc_ref:
         lines.append(f"- 대상 산출물: {draft_doc_ref}")
     if draft_id:
@@ -1415,8 +1424,27 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
             "발행으로 자동 재오픈됩니다."
         )
     elif verdict == "approved":
+        # story #3359 — publish stage면 channel→connector_key를 리졸버로 구체화한다
+        # (예전엔 "발행 도구를 쓰세요"뿐이라 모든 채널이 정의에 박힌 connector_key
+        # 그대로 threads로 새는 클래스였다). publish가 아니거나 channel을 모르면
+        # 기존 제네릭 문구 그대로(회귀 0).
+        _connector_line: str | None = None
+        if gate_stage == "publish" and gate_channel:
+            from app.services.channel_connector_map import resolve_connector_key_for_channel
+
+            _connector_key = await resolve_connector_key_for_channel(db, org_id=org_id, channel=gate_channel)
+            if _connector_key:
+                _connector_line = (
+                    f"- 다음 행동: {_connector_key} 커넥터로 발행하세요(channel={gate_channel})."
+                )
+            else:
+                _connector_line = (
+                    f"- 다음 행동: channel={gate_channel}에 대한 커넥터 매핑이 없습니다 — "
+                    "조직 설정에 channel_connector_map을 등록하세요."
+                )
         lines.append(
-            "- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 "
+            _connector_line
+            or "- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 "
             "승인 게이트를 확인하는 발행 도구를 쓰세요)."
         )
 
@@ -2546,6 +2574,7 @@ async def apply_recipe_role_bindings(
     # story #3317 PR B — capability(publish:<channel> 등) 요구 stage의 커넥터 준비 상태를
     # 경고로만 알린다(apply 자체는 안 막음, PO 확定). capability 선언 없는 stage는 완전
     # no-op(무선언 정의 회귀 0).
+    from app.services.channel_connector_map import resolve_connector_key_for_channel
     from app.services.connector_registry import (
         find_org_connectors_by_kind, get_org_connector, missing_required_org_config,
     )
@@ -2556,7 +2585,21 @@ async def apply_recipe_role_bindings(
         if not capability:
             continue
         kind = capability["kind"]
-        connector_key = capability.get("connector_key")
+        # story #3359 — capability.connector_key는 정의 저자가 적은 채널 라벨(예:
+        # "threads"·"blog")이지 반드시 실 connector_key는 아니다. 리졸버(진리원천 하나,
+        # publish 다음-행동 문구와 동일 함수)로 해소한다 — 매핑 없으면 옛처럼 "그 커넥터가
+        # 없다"로 오인시키지 않고 "channel=X 매핑 없음"으로 명시(삼키지 않는다).
+        declared_channel = capability.get("connector_key")
+        connector_key = (
+            await resolve_connector_key_for_channel(db, org_id=org_id, channel=declared_channel)
+            if declared_channel else None
+        )
+        if declared_channel and not connector_key:
+            warnings.append(
+                f"stage={stage!r}: channel={declared_channel!r}에 대한 커넥터 매핑이 없습니다 — "
+                f"조직 설정에 channel_connector_map을 등록하세요."
+            )
+            continue
         if connector_key:
             row = await get_org_connector(db, org_id=org_id, connector_key=connector_key)
             if row is None:

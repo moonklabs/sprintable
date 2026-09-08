@@ -99,6 +99,15 @@ class ContentRulesFields(BaseModel):
     brand_kit: dict | None = None
     generation_budget: GenerationBudgetRule | None = None
     utm_rules: UtmRules | None = None
+    # story #3359 CHANGES(카디르 발견, 페드루 PO 리뷰 2026-09-08) — 리졸버
+    # (channel_connector_map.py::resolve_connector_key_for_channel)의 org override
+    # 우선순위①이 이 필드가 없어 죽은 경로였다: extra="forbid"라 PUT body에
+    # channel_connector_map을 실으면 422로 거부돼, org가 blog/newsletter 같은
+    # 별칭을 «영원히» 등록할 방법이 없었다(리졸버는 읽기만 살아있고 쓰기 계약이
+    # 없었다). 편집 UI는 여전히 후속(#3359 AC 스코프 경계 그대로)이지만, 이 스키마
+    # 필드(기존 content-rules API로 쓸 수 있게 하는 것)는 리졸버가 실제로 살아
+    # 있으려면 필수라 여기 포함한다.
+    channel_connector_map: dict[str, str] | None = None
 
 
 class PutContentRulesRequest(BaseModel):
