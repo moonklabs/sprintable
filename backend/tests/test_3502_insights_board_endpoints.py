@@ -90,6 +90,44 @@ async def test_get_insights_board_endpoint_agent_200_with_rows():
 
 
 @pytest.mark.anyio
+async def test_get_insights_board_endpoint_work_item_id_query_param_narrows_result():
+    """story #bf290f69 — HTTP 왕복으로 work_item_id 쿼리 파라미터가 실제로
+    list_insights_board까지 배선돼 있는지(서비스 함수 직접 호출 테스트는
+    test_bf290f69_insights_board_work_item_filter.py가 이미 덮는다 — 여기는 라우터
+    배선 자체만)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_a = await _seed_story(s, org_id, project_id)
+            story_b = await _seed_story(s, org_id, project_id)
+            await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_a, slug="post-wia", title="WI-A",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+            await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_b, slug="post-wib", title="WI-B",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(
+                f"/api/v2/organizations/{org_id}/insights-board?work_item_id={story_a}"
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert len(body["rows"]) == 1
+        assert body["rows"][0]["title"] == "WI-A"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_get_insights_board_endpoint_invalid_window_422():
     from app.main import app
 

@@ -135,6 +135,7 @@ async def list_insights_board(
     db: AsyncSession, *, org_id: uuid.UUID, window: str = "30d", channel: str | None = None,
     status: str | None = None, sort: str = "published_at", sort_dir: str = "desc",
     cursor: str | None = None, limit: int = 50, now: datetime | None = None,
+    work_item_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     if window not in _WINDOW_DAYS:
         raise InsightsBoardInvalidWindowError(window)
@@ -143,6 +144,13 @@ async def list_insights_board(
 
     rows_cte = _build_union(org_id=org_id, channel=channel, since=since)
     query = select(rows_cte)
+
+    # story #bf290f69(Phase2·BE, 페드루 PO 確定 2026-09-08) — story별 성과 대조. 기존
+    # channel/status와 동형 narrowing(AND)뿐, 새 인가 축이 아니다(work_item_id는
+    # rows_cte 양쪽 팔이 이미 셀렉트해 두고 있었다 — #3516 comments_count 조인용).
+    # 다른 파라미터와 그대로 조합 가능(window/channel/status/sort 전부 무변).
+    if work_item_id is not None:
+        query = query.where(rows_cte.c.work_item_id == work_item_id)
 
     if status is not None:
         query = query.where(exists(
