@@ -54,6 +54,14 @@ function stubLocalStorage() {
   });
 }
 
+// story #d986fd6c(IA·S4) — budget=12 확定 뒤 신뢰·지식·조직이 기본 접힘이라, 이 구조적
+// 회귀가드들(원래 story #2681)이 전제하던 "항상 전 항목 렌더"가 깨진다. 접힘 기능 자체와
+// 무관한 이 테스트들은 접힘 전 상태(구조)를 재는 게 목적이라 localStorage에 전 구역
+// 펼침을 미리 심어 둔다 — 접힘 동작 자체는 아래 별도 테스트가 다룬다.
+function expandAllGroups() {
+  localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ trust: false, knowledge: false, organization: false }));
+}
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -155,6 +163,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
 
 describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story #2930 I1 4구역 재편', () => {
   it('그룹 순서·라벨·항목 순서·라벨이 IA·S1 확定대로다(오늘→개발→마케팅→신뢰→지식→조직→설정)', async () => {
+    expandAllGroups();
     await mount();
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
     expect(groupLabels).toEqual(['오늘', '개발', '마케팅', '신뢰', '지식', '조직']);
@@ -168,6 +177,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('정적 항목(조직 그룹)의 href가 무변화다(path 전부 불변, 2930 I1 핵심 제약)', async () => {
+    expandAllGroups();
     await mount();
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersLink?.getAttribute('href')).toBe('/organization/members');
@@ -235,6 +245,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
 
   it('현재 경로와 일치하는 정적 항목이 active로 표시된다(isActive 판정 보존)', async () => {
     pathnameRef.current = '/organization/events';
+    expandAllGroups();
     await mount();
     const eventsBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('이벤트'));
     expect(eventsBtn?.hasAttribute('data-active')).toBe(true);
@@ -279,6 +290,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   // 워크 그룹에 '콘텐츠' 추가돼 19→20) 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데
   // 목적지가 틀림"을 확실히 막는다.
   it('전 22항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+    expandAllGroups();
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
@@ -315,12 +327,26 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(link!.className).not.toContain('bg-proof-blue-soft');
   });
 
-  // story #d986fd6c(IA·S4, PO 確定 2026-09-08) — 구역 접기/펴기. 임계값이 아직 PENDING
-  // (null)이라 기본 상태는 "전 구역 펼침"이다(임의로 특정 구역을 손으로 접어 두지 않음).
-  it('임계값 미확定 상태에선 기본으로 모든 구역이 펼쳐져 있다(빈 구역 헤더 클릭 전)', async () => {
+  // story #d986fd6c(IA·S4, PO 確定 2026-09-08) — budget=12(오늘2+개발5+마케팅5) 확定 뒤
+  // 기본 상태: 주력 3구역(오늘·개발·마케팅)은 기본 펼침, 2차 구역(신뢰·지식·조직)은 기본
+  // 접힘(설정은 애초에 접기 대상 아님).
+  it('기본 상태는 주력 3구역(오늘·개발·마케팅) 펼침·2차 구역(신뢰·지식·조직) 접힘이다(budget=12)', async () => {
     await mount();
     const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     expect(boardLink).toBeDefined();
+    const contentLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('블로그 포스트'));
+    expect(contentLink).toBeDefined();
+    const activityLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('활동 로그'));
+    expect(activityLink).toBeUndefined();
+    const docsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('문서'));
+    expect(docsLink).toBeUndefined();
+    const orgMembersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('구성원'));
+    expect(orgMembersLink).toBeUndefined();
+
+    const trustHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('신뢰'));
+    expect(trustHeader?.getAttribute('aria-expanded')).toBe('false');
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    expect(devHeader?.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {

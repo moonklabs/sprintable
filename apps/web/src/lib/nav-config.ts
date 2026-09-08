@@ -300,11 +300,19 @@ export interface GroupItemCount {
   itemCount: number;
 }
 
-// ⚠️PENDING(페드루 PO 확認 예정, 배포 54 뒤) — dev-app이 새 7구역(S1~S3) 구조로 재배포된
-// 뒤, 실 뷰포트에서 "스크롤 없이 보이는 항목 수"를 재서 이 값을 채운다. 그 전까지는
-// 회귀가드가 이 상수를 직접 쓰지 않고(합성 예산으로 규칙 함수만 단위 테스트) — 이 값
-// 자체를 규칙의 정답으로 삼는 테스트는 배포 뒤 추가한다.
-export const SIDEBAR_FIRST_SCREEN_ITEM_BUDGET: number | null = null;
+// story #d986fd6c(IA·S4, PO 確定 2026-09-08, 배포 54 dev-app CF 실측 뒤) — budget=12 =
+// 주력 3구역(오늘·개발·마케팅) 항목 합(2+5+5) · 2차 구역(신뢰·지식·조직·설정)만 기본
+// 접힘 · 뷰포트 픽셀이 아니라 «구역 성격» 기준으로 정했다.
+//
+// 정밀측정(getBoundingClientRect, footer 경계 기준 "완전히 보이는 항목"만 카운트, 200px·
+// 256px 사이드바 폭 둘 다 — 폭은 항목 수에 무관함을 확認·라벨 truncate라 줄바꿈 없음)으로
+// 뷰포트 높이에 따라 11(1440×800)~12(1440×900)가 나왔으나, PO가 픽셀 대신 원칙으로
+// 확定했다 — budget의 일은 "매일 쓰는 주력 3구역은 기본 펼침, 2차 구역은 기본 접힘"이고,
+// 11을 쓰면 마케팅(5)이 통째로 접혀 지금 목표의 핵심 도구(블로그 포스트·채널 연결·성과
+// 보드)가 기본 숨김이 되는 게 뒤집힌 결과라 기각. 800px에서 성과 보드 하나가 접힘선에
+// 걸리는 건 "구역을 통째 접기"보다 "구역은 펼친 채 마지막 항목만 살짝 스크롤"이 낫고,
+// 전문가 화면 대부분(≥900px)에선 12가 스크롤 없이 다 들어간다.
+export const SIDEBAR_FIRST_SCREEN_ITEM_BUDGET: number | null = 12;
 
 export function computeDefaultCollapsedGroupIds(
   groups: readonly GroupItemCount[],

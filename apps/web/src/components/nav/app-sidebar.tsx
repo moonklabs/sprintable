@@ -51,10 +51,10 @@ interface AppSidebarProps {
 }
 
 // story #d986fd6c(IA·S4, PO 確定 2026-09-08) — 기본 접힘 집합(규칙은 nav-config.ts::
-// computeDefaultCollapsedGroupIds, 임계값은 SIDEBAR_FIRST_SCREEN_ITEM_BUDGET). 임계값이
-// 아직 PENDING(null — 배포 54 뒤 실측)이라 지금은 빈 집합(전 구역 기본 펼침) — 임의로
-// 특정 구역을 손으로 접어 두지 않는다(AC1 "임의 수 금지"의 정신). 임계값이 채워지는
-// 순간 이 상수도 그 규칙을 그대로 따른다(코드 변경 0, 값만 채우면 됨).
+// computeDefaultCollapsedGroupIds, 임계값은 SIDEBAR_FIRST_SCREEN_ITEM_BUDGET=12 — 배포
+// 54 dev-app 실측+PO 확定 근거는 그 상수 정의부 주석 참고). 오늘·개발·마케팅(2+5+5=12)
+// 기본 펼침, 신뢰·지식·조직 기본 접힘(settings는 라벨 없는 유틸 그룹이라 애초에 접기
+// 대상이 아니다 — 아래 렌더 루프의 isCollapsible 가드가 무시한다).
 const DEFAULT_COLLAPSED_GROUP_IDS: Set<string> = SIDEBAR_FIRST_SCREEN_ITEM_BUDGET != null
   ? computeDefaultCollapsedGroupIds(
       NAV_GROUPS.map((g) => ({ id: g.id, itemCount: g.items.length })),

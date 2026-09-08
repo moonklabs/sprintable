@@ -44,14 +44,26 @@ describe('computeDefaultCollapsedGroupIds — story #d986fd6c(IA·S4 AC1 규칙)
     expect(computeDefaultCollapsedGroupIds([], 5)).toEqual(new Set());
   });
 
-  // 임계값 자체는 배포 54 뒤 실측 전까지 PENDING(null) — 이 테스트는 "아직 안 채워졌다"는
-  // 사실을 고정한다(누가 실측 없이 임의 수를 채워 넣으면 이 테스트가 지적한다).
-  it('SIDEBAR_FIRST_SCREEN_ITEM_BUDGET은 아직 null이다(배포 54 뒤 실측 전까지 — 임의 수 금지)', () => {
-    expect(SIDEBAR_FIRST_SCREEN_ITEM_BUDGET).toBeNull();
+  // budget=12 확定(PO, 배포 54 dev-app 실측 뒤 2026-09-08) — 근거는 nav-config.ts::
+  // SIDEBAR_FIRST_SCREEN_ITEM_BUDGET 정의부 주석. 뷰포트 픽셀(1440×800→11, 1440×900→12)
+  // 이 아니라 «구역 성격»(주력 3구역 오늘·개발·마케팅 항목 합=12) 기준으로 PO가 골랐다 —
+  // 이 테스트는 그 값이 임의로 흔들리면 잡는다.
+  it('SIDEBAR_FIRST_SCREEN_ITEM_BUDGET은 12다(주력 3구역 오늘2+개발5+마케팅5 합, PO 확定 근거는 정의부 참고)', () => {
+    expect(SIDEBAR_FIRST_SCREEN_ITEM_BUDGET).toBe(12);
   });
 
   it('실 NAV_GROUPS 항목 수 합은 24다(회귀 시 이 값부터 어긋난다)', () => {
     const total = NAV_GROUPS.reduce((sum, g) => sum + g.items.length, 0);
     expect(total).toBe(24);
+  });
+
+  // 실 NAV_GROUPS + 확定 budget으로 규칙을 돌리면 PO가 의도한 정확히 그 결과가 나온다는
+  // 통합 회귀가드 — 순수 함수 단위 테스트(위)와 실제 배선(app-sidebar.tsx)을 잇는다.
+  it('실 NAV_GROUPS·budget=12로 규칙을 돌리면 신뢰·지식·조직·설정이 접히고 오늘·개발·마케팅은 펼쳐진다', () => {
+    const collapsed = computeDefaultCollapsedGroupIds(
+      NAV_GROUPS.map((g) => ({ id: g.id, itemCount: g.items.length })),
+      SIDEBAR_FIRST_SCREEN_ITEM_BUDGET!,
+    );
+    expect(collapsed).toEqual(new Set(['trust', 'knowledge', 'organization', 'settings']));
   });
 });
