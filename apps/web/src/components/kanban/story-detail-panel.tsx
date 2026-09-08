@@ -23,6 +23,7 @@ import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
+import { StoryInsightsCompareSection } from '@/components/insights-board/story-insights-compare-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
@@ -2151,6 +2152,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <StoryMergeGate storyId={story.id} />
               {/* E-CANVAS AC2 attachment point — BE(C1-S3) 미착지 동안 404→무표시(mock 0). */}
               <ArtifactSection storyId={story.id} memberMap={memberMap} />
+              {/* story #3697(Phase2·FE) — 이 story의 blog↔social 성과 대조(#4047 work_item_id
+                  필터, 배포 55). rows 0건이면 섹션 자체 무표시(ArtifactSection과 동형 관례). */}
+              <StoryInsightsCompareSection storyId={story.id} />
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}
