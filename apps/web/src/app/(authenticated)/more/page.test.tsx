@@ -40,14 +40,13 @@ async function mount() {
 }
 
 describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () => {
-  // story #2930(P0-G) I1 — zoneNow/zoneWork 텍스트가 "오늘"/"워크스페이스"로 개명(시안
-  // ia-4zone-redesign-2930 그대로). 순서 자체(오늘→워크스페이스→신뢰→지식→조직→설정)는
-  // MOBILE_HUB_GROUP_ORDER 무변화 — 데스크톱이 이 순서를 따라잡았을 뿐, 모바일은 원래도 이
-  // 순서였다(더 이상 "데스크톱과 다른 순서"가 아니다, app-sidebar.test.tsx도 동일 순서로 갱신).
-  it('섹션 순서가 doc §2.3 그대로다(오늘/워크스페이스/신뢰/지식/조직/설정)', async () => {
+  // story #a2b004f9(IA·S1, 2026-09-08) — 'work'(zoneWork·「워크스페이스」)가 'dev'
+  // (zoneDev·「개발」)로 개명되고 신규 'marketing'(zoneMarketing·「마케팅」)이 그 뒤에
+  // 등재(MOBILE_HUB_GROUP_ORDER 갱신, app-sidebar.test.tsx도 동일 순서로 갱신).
+  it('섹션 순서가 IA·S1 확定대로다(오늘/개발/마케팅/신뢰/지식/조직/설정)', async () => {
     await mount();
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent);
-    expect(sectionLabels).toEqual(['오늘', '워크스페이스', '신뢰', '지식', '조직', '설정']);
+    expect(sectionLabels).toEqual(['오늘', '개발', '마케팅', '신뢰', '지식', '조직', '설정']);
   });
 
   it('조직 그룹(이벤트 포함)과 조직브리핑이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
