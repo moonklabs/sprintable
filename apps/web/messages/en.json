@@ -120,7 +120,7 @@
     "orgBriefing": "Org Briefing",
     "zoneOrganization": "Organization",
     "orgMembers": "Members",
-    "workforce": "Workforce",
+    "workforce": "Agents",
     "orgRoles": "Permissions",
     "orgTrust": "Trust Center",
     "orgMemory": "Memory",
@@ -540,7 +540,7 @@
     "memberRoleChangeLastOwnerError": "The last owner can't be demoted",
     "rolesAdminOnly": "Admin-only page",
     "rolesAdminOnlyHint": "The full member list with emails is only visible to admins and owners.",
-    "trustSlotTitle": "Trust",
+    "trustSlotTitle": "Trust Center",
     "trustSlotBody": "Org-level trust capital is coming soon.",
     "trustPurposeFraming": "Helps you delegate and orchestrate work based on trust. This isn't evaluation or surveillance — it's a reference for deciding who to trust with what.",
     "trustSelfTitle": "My trust",
@@ -1883,7 +1883,7 @@
     "relatedPlan": "Related plan",
     "missingOrgStandup": "No organization standup yet",
     "missingOrgHint": "Based on a single organization-level entry. Once written, it shows as submitted across every project you can access.",
-    "title": "Daily Standup",
+    "title": "Standup",
     "cancel": "Cancel",
     "surfaceDescription": "Update your standup and review the team state on one operator surface.",
     "entryDate": "Date",
@@ -1986,7 +1986,7 @@
     "bridgeRemove": "Remove"
   },
   "retro": {
-    "title": "Sprint Retro",
+    "title": "Retro",
     "surfaceDescription": "Create retro sessions and monitor their current phase from one operator surface.",
     "sessionList": "Retro sessions",
     "newSession": "New Session",
@@ -2685,7 +2685,7 @@
     "channelPostsPublicationFailedNotice": "Publishing failed — republishing this draft will continue that attempt."
   },
   "docs": {
-    "title": "Documentation",
+    "title": "Docs",
     "searchPlaceholder": "Search docs...",
     "noDocs": "No documents",
     "docGateLabel": "Document approval status",

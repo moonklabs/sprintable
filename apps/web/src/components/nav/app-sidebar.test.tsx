@@ -99,7 +99,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneMarketing', labels: ['블로그 포스트', '채널 포스트', '채널 연결', '콘텐츠 규칙', '성과 보드'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
-  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트', '커넥터'] },
+  { labelKey: 'zoneOrganization', labels: ['구성원', '에이전트', '권한', '이벤트', '커넥터'] },
   { labelKey: null, labels: ['설정'] },
 ];
 
@@ -129,7 +129,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '채널 포스트': '/content/channel-posts',
   '구성원': '/organization/members',
-  '워크포스': '/organization/workforce',
+  '에이전트': '/organization/workforce',
   '권한': '/organization/roles',
   '신뢰 센터': '/organization/trust',
   '기억': '/organization/memory',
