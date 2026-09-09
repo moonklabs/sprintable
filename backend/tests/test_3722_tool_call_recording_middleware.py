@@ -202,6 +202,9 @@ async def test_story_id_extracted_from_path_param_and_passed_to_attribution(monk
     assert resp.status_code == 200
     assert len(recorded) == 1
     assert recorded[0]["story_id"] == "s-123"
+    assert recorded[0]["input_summary"]["path"] == {"id": "s-123"}, (
+        "story #3722 페드루 PO 追加 — path_params가 input_summary에 실려야"
+    )
 
 
 @pytest.mark.anyio

@@ -42,10 +42,21 @@ def mask_mapping(data: dict[str, Any]) -> dict[str, Any]:
     return {k: _mask_value(k, v) for k, v in data.items()}
 
 
-def build_input_summary(*, query_params: dict[str, Any], body: dict[str, Any] | None) -> dict[str, Any] | None:
-    """쿼리+바디를 마스킹해 하나의 요약으로 합친다. 요청에 실을 게 아예 없으면(둘 다
-    빈 경우) None — 「빈 dict를 저장」과 「실을 게 없었다」를 가른다(지어내지 않는다)."""
+def build_input_summary(
+    *,
+    path_params: dict[str, Any] | None = None,
+    query_params: dict[str, Any],
+    body: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """경로+쿼리+바디를 마스킹해 하나의 요약으로 합친다. 요청에 실을 게 아예 없으면(셋
+    다 빈 경우) None — 「빈 dict를 저장」과 「실을 게 없었다」를 가른다(지어내지 않는다).
+
+    path_params(페드루 PO 追加 2026-09-09) — route 템플릿(`/stories/{id}/...`)만으로는
+    «어느 스토리/태스크를 건드렸나»가 안 남는다. story_id 추출에 이미 읽는 값이라
+    비용 0 — denylist·절단 규칙 동일 적용(id류는 보통 denylist에 안 걸림)."""
     summary: dict[str, Any] = {}
+    if path_params:
+        summary["path"] = mask_mapping(path_params)
     if query_params:
         summary["query"] = mask_mapping(query_params)
     if body:

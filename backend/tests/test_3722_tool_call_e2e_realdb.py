@@ -229,6 +229,53 @@ async def test_get_tool_calls_endpoint_returns_rows_for_that_run_newest_first():
         assert len(body) == 2
         assert body[0]["path"] == "/api/v2/newer", "최신순(created_at DESC)이어야"
         assert body[1]["path"] == "/api/v2/older"
+        assert resp.headers["X-Total-Count"] == "2"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_tool_calls_x_total_count_reflects_full_count_not_page_size():
+    """페드루 PO 追加(2026-09-09) — X-Total-Count는 limit 適用 前 run_id 기준 전체
+    건수(3703/3706류 «한 페이지=전부» 오판 재발 방지). 51행 표본에 limit=50 → 헤더 51."""
+    from datetime import datetime, timedelta
+
+    from app.main import app
+    from app.models.agent_run import AgentRun
+    from app.models.agent_run_tool_call import AgentRunToolCall
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            ctx = await _seed_agent_with_key(s)
+            run = AgentRun(
+                id=uuid.uuid4(), org_id=ctx["org_id"], agent_id=ctx["agent_id"],
+                project_id=ctx["project_id"], trigger="manual", status="running",
+            )
+            s.add(run)
+            await s.commit()
+
+            now = datetime.now(UTC)
+            for i in range(51):
+                s.add(AgentRunToolCall(
+                    id=uuid.uuid4(), org_id=ctx["org_id"], agent_id=ctx["agent_id"], run_id=run.id,
+                    method="GET", path=f"/api/v2/row-{i}", status_code=200, duration_ms=1,
+                    started_at=now - timedelta(seconds=i), attribution_reason="single_running",
+                    created_at=now - timedelta(seconds=i),
+                ))
+            await s.commit()
+            run_id = run.id
+
+        app.dependency_overrides.clear()
+        _wire_db(app, Session)
+        client = _client_with_key(app, ctx["raw_key"])
+        async with _PatchedGlobalSessionFactory(Session), client:
+            resp = await client.get(f"/api/v2/agent-runs/{run_id}/tool-calls?limit=50")
+            await _drain_background_tasks()
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()) == 50, "limit=50이 페이지를 자름"
+        assert resp.headers["X-Total-Count"] == "51", "헤더는 limit 適用 前 전체 건수"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

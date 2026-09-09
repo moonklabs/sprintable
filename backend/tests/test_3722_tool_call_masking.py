@@ -61,9 +61,18 @@ def test_build_input_summary_combines_query_and_body():
     assert summary == {"query": {"status": "failed"}, "body": {"title": "t", "token": "[REDACTED]"}}
 
 
+def test_build_input_summary_includes_masked_path_params():
+    """story #3722 — 페드루 PO 追加(2026-09-09): route 템플릿만으로는 «어느 스토리/태스크를
+    건드렸나»가 안 남는다. path_params도 같은 마스킹 규칙으로 실린다."""
+    summary = build_input_summary(
+        path_params={"id": "story-123", "token": "leak"}, query_params={}, body=None,
+    )
+    assert summary == {"path": {"id": "story-123", "token": "[REDACTED]"}}
+
+
 def test_build_input_summary_returns_none_when_nothing_to_record():
     assert build_input_summary(query_params={}, body=None) is None
-    assert build_input_summary(query_params={}, body={}) is None
+    assert build_input_summary(path_params={}, query_params={}, body={}) is None
 
 
 def test_build_input_summary_truncates_whole_payload_over_2kb():

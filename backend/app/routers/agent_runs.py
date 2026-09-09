@@ -2,8 +2,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -148,6 +148,7 @@ async def get_agent_run(
 
 @router.get("/{id}/tool-calls", response_model=list[AgentRunToolCallResponse])
 async def list_agent_run_tool_calls(
+    response: Response,
     id: uuid.UUID,
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = Query(default=None),
@@ -159,7 +160,11 @@ async def list_agent_run_tool_calls(
     """story #3722(Trust·BE) — AgentRunResponse엔 안 싣는다(크기·조회 축 분리, PO 確定).
     같은 인가축(get_agent_run과 동일 — org 검증 후 has_project_access, 없거나 타org·
     무접근권은 404). 최신순(created_at DESC) — cursor는 이전 페이지 마지막 행의
-    created_at(ISO 8601), list_agent_runs의 커서 관례와 동형."""
+    created_at(ISO 8601), list_agent_runs의 커서 관례와 동형.
+
+    X-Total-Count(페드루 PO 追加 2026-09-09) — run_id 기준 전체 건수(limit 適用 前,
+    cursor 페이지와 무관) — 3703/3706류(«한 페이지=전부」 오판) 재발 방지, goals.py
+    list_goals와 동형 관례."""
     from app.services.project_auth import has_project_access
 
     run = await repo.get(id)
@@ -174,6 +179,11 @@ async def list_agent_run_tool_calls(
             cursor_dt = datetime.fromisoformat(cursor)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid cursor (expected ISO 8601 datetime)")
+
+    total = (await session.execute(
+        select(func.count()).select_from(AgentRunToolCall).where(AgentRunToolCall.run_id == id)
+    )).scalar_one()
+    response.headers["X-Total-Count"] = str(total)
 
     q = select(AgentRunToolCall).where(AgentRunToolCall.run_id == id)
     if cursor_dt is not None:

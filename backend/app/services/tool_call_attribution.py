@@ -8,7 +8,7 @@
     정확히 1개일 때 그것.
   ⓑ single_running — story_id가 없거나(또는 있어도 그 story엔 running run이 0개라
     ⓑ'가 못 정했을 때) 이 agent 전체의 running run이 정확히 1개일 때 그것.
-  ⓒ 미귀속(run_id=None) — 그 외 전부. attribution_reason으로 세 갈래를 가른다:
+  ⓒ 미귀속(run_id=None) — 그 외 전부. attribution_reason으로 갈래를 가른다:
     - no_running_run: agent 전체 running run이 0개.
     - ambiguous_multi_run: agent 전체 running run이 2개 이상(story_scope도 못 정한 뒤).
     - ambiguous_multi_run_same_story: story_id는 있는데 **그 story**의 running run이
@@ -16,10 +16,13 @@
       거기서 이미 모호하면, 그 문맥을 버리고 agent 전체에서 다시 고르는 게 오히려 틀린
       run을 정직해 보이게 만든다 — story 스코프가 있었다는 사실 자체를 reason에 남긴다).
 
-디디 판단(문서화 — 확認 필요, 명시 안 된 갈림길): story_id가 있는데 그 story의 running
+디디 판단(채택 — 페드루 PO 2026-09-09 06:22Z): story_id가 있는데 그 story의 running
 run이 **0개**인 경우는 ambiguous도 no_running_run도 아니라서 그대로 agent-wide ⓑ로
 내려간다(그 story 자체는 지금 안 도는 중일 뿐, agent 전체엔 다른 running run이 있을 수
-있다 — «이 story 얘기는 아니지만 이 agent 얘기는 맞다»는 뜻)."""
+있다 — «이 story 얘기는 아니지만 이 agent 얘기는 맞다»는 뜻). 단 이 낙하로 정해진 run은
+정의상 그 story의 것이 아니므로(그랬다면 위에서 이미 story_running에 걸렸을 것) reason을
+평범한 single_running과 갈라 **single_running_other_story**로 남긴다 — 「오귀속 의심」을
+나중에 셀 수 있는 유일한 단서(페드루 PO 追加)."""
 from __future__ import annotations
 
 import uuid
@@ -62,6 +65,7 @@ async def attribute_tool_call(
                 return AttributionResult(run_id=owned, reason="header")
 
     # ⓑ' story_scope
+    story_fallthrough = False
     if story_id:
         try:
             story_uuid = uuid.UUID(story_id)
@@ -78,14 +82,17 @@ async def attribute_tool_call(
                 return AttributionResult(run_id=story_running[0], reason="story_scope")
             if len(story_running) >= 2:
                 return AttributionResult(run_id=None, reason="ambiguous_multi_run_same_story")
-            # 0개 — story 문맥은 있으나 그 story엔 running run이 없다. agent-wide로 계속.
+            # 0개 — story 문맥은 있으나 그 story엔 running run이 없다. agent-wide로 계속
+            # (아래서 고르는 run은 정의상 이 story의 것이 아니다 — reason을 갈라 남긴다).
+            story_fallthrough = True
 
     # ⓑ single_running(agent 전체)
     agent_running = list((await session.execute(
         select(AgentRun.id).where(AgentRun.agent_id == agent_id, AgentRun.status == "running")
     )).scalars().all())
     if len(agent_running) == 1:
-        return AttributionResult(run_id=agent_running[0], reason="single_running")
+        reason = "single_running_other_story" if story_fallthrough else "single_running"
+        return AttributionResult(run_id=agent_running[0], reason=reason)
     if len(agent_running) == 0:
         return AttributionResult(run_id=None, reason="no_running_run")
     return AttributionResult(run_id=None, reason="ambiguous_multi_run")

@@ -136,7 +136,9 @@ class ToolCallRecordingMiddleware(BaseHTTPMiddleware):
             story_id = extract_story_id(
                 route_path=route_path, path_params=path_params, query_params=query_params, body=body,
             )
-            input_summary = build_input_summary(query_params=query_params or {}, body=body)
+            input_summary = build_input_summary(
+                path_params=path_params, query_params=query_params or {}, body=body,
+            )
             error = None if response.status_code < 400 else f"HTTP {response.status_code}"
 
             fire_and_forget(_record_tool_call_safe(

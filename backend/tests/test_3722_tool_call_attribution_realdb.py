@@ -160,9 +160,11 @@ async def test_ambiguous_multi_run_same_story_does_not_fall_back_to_agent_wide()
 
 
 @pytest.mark.anyio
-async def test_story_with_zero_running_falls_back_to_agent_wide_single_running():
-    """디디 판단(문서화) — story 문맥은 있는데 그 story엔 running run이 0개면 agent
-    전체로 넘어간다(그 story 얘기는 아니지만 이 agent 얘기는 맞다)."""
+async def test_story_with_zero_running_falls_back_to_agent_wide_single_running_other_story():
+    """디디 판단(채택 — 페드루 PO 06:22Z) — story 문맥은 있는데 그 story엔 running run이
+    0개면 agent 전체로 넘어간다(그 story 얘기는 아니지만 이 agent 얘기는 맞다). 단 이렇게
+    정해진 run은 정의상 그 story의 것이 아니므로 reason은 평범한 single_running이 아니라
+    single_running_other_story(오귀속 의심 단서, 페드루 PO 追加)."""
     from app.services.tool_call_attribution import attribute_tool_call
 
     engine, Session = await _session_factory()
@@ -176,7 +178,7 @@ async def test_story_with_zero_running_falls_back_to_agent_wide_single_running()
                 s, agent_id=ctx["agent_id"], header_run_id=None, story_id=str(uuid.uuid4()),
             )
             assert result.run_id == agent_wide_run.id
-            assert result.reason == "single_running"
+            assert result.reason == "single_running_other_story"
     finally:
         await engine.dispose()
 
