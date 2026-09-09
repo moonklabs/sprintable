@@ -5,7 +5,12 @@ method/path·비밀값 미저장) — run_id만 예외로 FK를 건다(agent_run
 run의 도구 호출 기록만 남는」 모순 방지). agent_id/org_id는 FK 없음(unhandled_error_
 events 관례 그대로 — 조회용 요약 테이블, 강제 조인 이유 0).
 
-Revision ID: 0356
+⚠️페드루 PO 지시(2026-09-09 07:28Z) — 미르코 #4079(3734, 0356_site_channel_post_
+drafts_soft_delete)와 revision 0356이 충돌해 #4079를 먼저 착지시키기로(선생님 급)
+0357·down_revision="0355"(임시)로 재번호했다. #4079 착지 뒤 develop 리베이스하며
+down_revision을 "0356"으로 한 번 더 고칠 것 — 지금은 과도기 상태.
+
+Revision ID: 0357
 Revises: 0355
 Create Date: 2026-09-09
 """
@@ -16,7 +21,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "0356"
+revision = "0357"
 down_revision = "0355"
 branch_labels = None
 depends_on = None
