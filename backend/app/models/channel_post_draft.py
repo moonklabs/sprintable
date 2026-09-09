@@ -13,7 +13,12 @@
 `source_content_item_id`(story #3437, 페드루 PO 確定 2026-09-04) — 이 채널 변형이 파생된
 content_item(=SitePostDraft.id). FK 없음(이 도메인 전체 관례) — org 일치는 서비스 계층이
 초안 생성 시 검증한다(다른 조직 원문 참조는 422). nullable — 소스 없는 단독 채널 초안도
-기존처럼 허용(회귀, AC6)."""
+기존처럼 허용(회귀, AC6).
+
+`deleted_at`(SoftDeleteMixin, story #3734) — site_post_draft.py와 동형. 「보관」 저장 축,
+목록 기본 제외·`include_deleted=True`로 보관함. `status`(draft|withdrawn)와 다른 독립
+축 — withdrawn 상태의 초안도 보관할 수 있고(폐기와 보관은 별개), 발행 이력(Gate·
+ChannelPublication)은 이 컬럼과 무관하다."""
 from __future__ import annotations
 
 import uuid
@@ -24,9 +29,10 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.models.base import SoftDeleteMixin
 
 
-class ChannelPostDraft(Base):
+class ChannelPostDraft(Base, SoftDeleteMixin):
     __tablename__ = "channel_post_drafts"
     __table_args__ = (
         UniqueConstraint(

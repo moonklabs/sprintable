@@ -29,6 +29,7 @@ from app.services.channel_posts import (
     ChannelImageRequiredError,
     ChannelPostApproverRoleMissingError,
     ChannelPostDraftAlreadyPublishedError,
+    ChannelPostDraftArchiveForbiddenError,
     ChannelPostDraftForbiddenError,
     ChannelPostDraftNotFoundError,
     ChannelPostGateAlreadyHeldError,
@@ -50,6 +51,7 @@ from app.services.channel_posts import (
     ExternalPublishGateNotApprovedError,
     PublicationCommandNotCancellableError,
     PublicationCommandNotFoundError,
+    archive_channel_post_draft,
     build_tagged_link,
     build_text_preview,
     cancel_scheduled_publication,
@@ -61,6 +63,7 @@ from app.services.channel_posts import (
     list_channel_post_draft_versions,
     list_channel_post_drafts,
     publish_channel_post_draft,
+    restore_channel_post_draft,
     submit_channel_post_draft,
     text_char_count,
     unpublish_channel_post,
@@ -241,6 +244,11 @@ class ChannelPostDraftListItem(BaseModel):
     # 이 값이 true일 때만 「폐기」 버튼을 그린다 — org_id/author 비교를 FE가 직접
     # 하지 않는다(그리고 403을 내는 "그렸다가 막는" 이중 정책 금지, 이웃과 같은 규칙).
     can_withdraw: bool = False
+    # story #3734 — 「보관」 배지·행 액션 판정. can_withdraw와 동형 정책·같은 인가 축
+    # (origin author 또는 org owner/admin) — status(draft|withdrawn)와 독립. is_deleted는
+    # SoftDeleteMixin.deleted_at의 존재 여부만(값 자체는 이 스토리 스코프 밖).
+    is_deleted: bool = False
+    can_archive: bool = False
     current_version: int
     latest_author_kind: str
     origin_author_kind: str
@@ -1143,6 +1151,11 @@ def _to_draft_list_item(
         and requester_member_id is not None
         and (is_org_admin or str(origin.author_member_id) == str(requester_member_id))
     )
+    # story #3734 — can_archive는 can_withdraw와 달리 status·발행 여부와 무관하다(보관은
+    # 순수 가시성 축, 발행된 draft도 보관 가능 — #3291 정합).
+    can_archive = requester_member_id is not None and (
+        is_org_admin or str(origin.author_member_id) == str(requester_member_id)
+    )
     command_status = latest_command.status if latest_command else None
     # story #3525 — publication_status/error_code는 의도적으로 latest_pub(현재
     # 최신 버전의 발행 시도) 축 그대로 둔다 — "지금 버전이 발행 中/실패인지"는
@@ -1157,7 +1170,8 @@ def _to_draft_list_item(
     )
     return ChannelPostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
-        connection_id=draft.connection_id, draft_status=draft.status, can_withdraw=can_withdraw, current_version=latest.version,
+        connection_id=draft.connection_id, draft_status=draft.status, can_withdraw=can_withdraw,
+        is_deleted=draft.deleted_at is not None, can_archive=can_archive, current_version=latest.version,
         latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
         updated_at=latest.created_at.isoformat(),
         text_preview=build_text_preview(latest.text), text_length=text_char_count(latest.text),
@@ -1230,6 +1244,11 @@ async def list_channel_post_drafts_endpoint(
         description="story #3614(AC2) — true면 폐기된(status='withdrawn') 초안도 목록에 "
         "포함한다(「폐기됨 보기」 필터). 기본은 제외 — 폐기는 결재함·목록 양쪽에서 사라진다.",
     ),
+    include_deleted: bool = Query(
+        default=False,
+        description="story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 "
+        "포함한다(「보관됨 보기」 필터). include_withdrawn과 독립 축. 기본은 제외.",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -1273,7 +1292,7 @@ async def list_channel_post_drafts_endpoint(
     rows = await list_channel_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset,
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
-        include_withdrawn=include_withdrawn,
+        include_withdrawn=include_withdrawn, include_deleted=include_deleted,
     )
     source_titles = await get_source_titles_and_latest_versions(
         db, org_id=org_id,
@@ -1310,9 +1329,11 @@ async def get_channel_post_draft_detail_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    # story #3614 — 단건 조회는 폐기 여부와 무관하게 항상 보인다(목록 기본 필터가
-    # 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
-    rows = await list_channel_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True)
+    # story #3614/#3734 — 단건 조회는 폐기·보관 여부와 무관하게 항상 보인다(목록 기본
+    # 필터가 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
+    rows = await list_channel_post_drafts(
+        db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True, include_deleted=True,
+    )
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
     source_titles = await get_source_titles_and_latest_versions(
@@ -1553,6 +1574,75 @@ async def withdraw_channel_post_draft_endpoint(
     return WithdrawChannelPostDraftResponse(
         status=draft.status, gate_id=gate.id if gate else None, gate_status=gate.status if gate else None,
     )
+
+
+class ArchiveChannelPostDraftResponse(BaseModel):
+    draft_id: uuid.UUID
+    is_deleted: bool
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/archive", response_model=ArchiveChannelPostDraftResponse,
+)
+async def archive_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ArchiveChannelPostDraftResponse:
+    """story #3734 — 「보관」(화면 낱말, 유나 定). withdraw_channel_post_draft_endpoint
+    (#3614)와 인가 축은 같지만 게이트·커맨드는 전혀 안 건드리는 순수 가시성 축 —
+    발행된 draft도 보관 가능(withdraw는 발행되면 409로 막힌다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    try:
+        draft = await archive_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftArchiveForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_POST_ARCHIVE_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    return ArchiveChannelPostDraftResponse(draft_id=draft.id, is_deleted=draft.deleted_at is not None)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/restore", response_model=ArchiveChannelPostDraftResponse,
+)
+async def restore_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ArchiveChannelPostDraftResponse:
+    """story #3734 — 「보관 해제」. archive_channel_post_draft_endpoint의 정확한 역."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    try:
+        draft = await restore_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftArchiveForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_POST_ARCHIVE_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    return ArchiveChannelPostDraftResponse(draft_id=draft.id, is_deleted=draft.deleted_at is not None)
 
 
 class PublishChannelPostResponse(BaseModel):

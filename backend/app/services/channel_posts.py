@@ -324,6 +324,17 @@ class ChannelPostDraftForbiddenError(Exception):
         super().__init__(f"이 초안을 폐기할 권한이 없습니다: {draft_id}")
 
 
+class ChannelPostDraftArchiveForbiddenError(Exception):
+    """story #3734 — 보관/보관 해제는 이 초안의 origin author(versions[0].
+    author_member_id, 에이전트 포함) 또는 org owner/admin만 가능하다.
+    ChannelPostDraftForbiddenError(#3614, 폐기 전용)와 인가 축은 같지만 별도
+    클래스로 둔다 — 메시지·에러코드가 «폐기»가 아니라 «보관»이어야 한다."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"이 초안을 보관할 권한이 없습니다: {draft_id}")
+
+
 class ChannelPostDraftAlreadyPublishedError(Exception):
     """story #3614 AC1 — 이미 발행된 초안(연결된 게이트에 status='published' publication
     존재)은 폐기 대상이 아니다(발행 취소는 별도 unpublish 경로) — 409."""
@@ -732,6 +743,7 @@ async def list_channel_post_drafts(
     unscheduled: bool = False,
     source_content_item_id: uuid.UUID | None = None,
     include_withdrawn: bool = False,
+    include_deleted: bool = False,
 ) -> list[
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
@@ -778,6 +790,11 @@ async def list_channel_post_drafts(
     `latest_image`(9번째 원소, story 620beefc)는 **최신 버전**에 붙은 `ChannelPostImage`
     (없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처, latest_command와
     같은 "최신 버전/게이트 기준" 원칙.
+
+    story #3734 — `include_deleted=False`(기본)면 보관된(`deleted_at` not null) 초안을
+    결과에서 뺀다. `status`(draft|withdrawn)와 독립 축 — withdrawn이면서 보관 안 됐거나,
+    보관됐지만 withdrawn은 아닌 조합 둘 다 가능하다. **`draft_id` 단건 조회 호출자는
+    반드시 `include_deleted=True`로 넘길 것**(아래 include_withdrawn과 동일 이유).
 
     story #3614(AC2) — `include_withdrawn=False`(기본)면 `status='withdrawn'`(폐기된)
     초안을 결과에서 뺀다. **`draft_id` 단건 조회 호출자는 반드시 `include_withdrawn=
@@ -828,6 +845,8 @@ async def list_channel_post_drafts(
     )
     if not include_withdrawn:
         stmt = stmt.where(ChannelPostDraft.status != "withdrawn")
+    if not include_deleted:
+        stmt = stmt.where(ChannelPostDraft.deleted_at.is_(None))
 
     schedule_filter_active = unscheduled or scheduled_from is not None or scheduled_to is not None
     if schedule_filter_active:
@@ -1849,6 +1868,61 @@ async def unpublish_channel_post(
     )
     await db.commit()
     return pub
+
+
+async def _require_channel_post_draft_author_or_admin(
+    db: AsyncSession, *, draft_id: uuid.UUID, requester_member_id: uuid.UUID, is_org_admin: bool,
+) -> None:
+    """story #3734 — 보관/보관 해제 인가. withdraw_channel_post_draft(#3614)의 인가
+    분기와 같은 축(origin author 또는 org owner/admin)을 별도 헬퍼로 뽑아 재사용 —
+    withdraw는 그 뒤 게이트/커맨드 처리가 이어지지만 보관은 순수 가시성 축이라 함수를
+    합치지 않는다(억지 일반화 금지, site_posts.py와 동형 분리)."""
+    versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    origin_author_member_id = versions[0].author_member_id
+    if not is_org_admin and str(origin_author_member_id) != str(requester_member_id):
+        raise ChannelPostDraftArchiveForbiddenError(draft_id)
+
+
+async def archive_channel_post_draft(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+    requester_member_id: uuid.UUID, is_org_admin: bool,
+) -> ChannelPostDraft:
+    """story #3734 — 「보관」(화면 낱말, 유나 定). channel_post_drafts.deleted_at
+    (SoftDeleteMixin)을 세워 목록 기본 조회에서 뺀다. `status`(draft|withdrawn)와
+    독립 축 — 폐기(withdraw)와 달리 게이트·커맨드·발행 상태는 전혀 안 건드린다(순수
+    가시성 축, #3291 정합). 발행된 draft도 보관 가능. 멱등 — withdraw_channel_post_
+    draft(#3614 CHANGES)와 동일 순서 규율: 인가가 멱등 반환보다 항상 먼저."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    await _require_channel_post_draft_author_or_admin(
+        db, draft_id=draft_id, requester_member_id=requester_member_id, is_org_admin=is_org_admin,
+    )
+    if draft.deleted_at is None:
+        draft.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(draft)
+    return draft
+
+
+async def restore_channel_post_draft(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+    requester_member_id: uuid.UUID, is_org_admin: bool,
+) -> ChannelPostDraft:
+    """story #3734 — 「보관 해제」. archive_channel_post_draft의 정확한 역."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    await _require_channel_post_draft_author_or_admin(
+        db, draft_id=draft_id, requester_member_id=requester_member_id, is_org_admin=is_org_admin,
+    )
+    if draft.deleted_at is not None:
+        draft.deleted_at = None
+        await db.commit()
+        await db.refresh(draft)
+    return draft
 
 
 async def withdraw_channel_post_draft(

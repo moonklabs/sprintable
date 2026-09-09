@@ -13,7 +13,12 @@ Campaign(campaign.py). FK 없음(이 도메인 전체 관례). nullable — camp
 나가는 목적지(`channel_connections` 행). FK 없음(이 도메인 전체 관례). nullable —
 null=hosted_site(Sprintable 호스팅, 기존 기본 동작·기존 draft 전부 무변경). 승인 뒤
 바뀌면 재승인 대상(gate.sealed_destination_connection_id와 비교, site_posts.py::
-_reseal_gate_on_new_version 참고)."""
+_reseal_gate_on_new_version 참고).
+
+`deleted_at`(SoftDeleteMixin, story #3734) — 「보관」(화면 낱말, 유나 定)의 저장 축.
+레포 SSOT 관례 재사용(archived_at 신설 안 함) — 목록은 기본 이 컬럼이 null인 행만,
+`include_deleted=True`로 보관함 조회. Gate·SitePost(발행 projection) 등 승인·발행
+기록은 이 컬럼과 완전히 무관 — 삭제가 아니라 목록에서만 빼는 축이라 무변."""
 from __future__ import annotations
 
 import uuid
@@ -24,9 +29,10 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.models.base import SoftDeleteMixin
 
 
-class SitePostDraft(Base):
+class SitePostDraft(Base, SoftDeleteMixin):
     __tablename__ = "site_post_drafts"
     __table_args__ = (
         UniqueConstraint("org_id", "work_item_id", "slug", name="uq_site_post_drafts_org_work_item_slug"),

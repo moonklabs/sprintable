@@ -61,11 +61,19 @@ async function flush() {
   });
 }
 
+// story #3734(카디르 CI 적발·content-bff-route-coverage.guard.test.ts #3445) — 실
+// 코드가 `?`를 항상 템플릿 «안»에 두도록 바뀌어(가드가 `?` 밖 보간을 못 읽어서) 기본
+// 뷰(showArchived=false)도 이제 트레일링 빈 `?`를 붙여 부른다(`.../drafts?`) — 두
+// stub 모두 트레일링 `?` 유무 둘 다 받아들이게 정규화한다.
+function stripTrailingBareQuery(url: string): string {
+  return url.endsWith('?') ? url.slice(0, -1) : url;
+}
+
 function stubFetch(drafts: unknown[] | { status: number }) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
+      const url = stripTrailingBareQuery(String(input));
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts`) {
         if (!Array.isArray(drafts)) return { ok: false, status: drafts.status, json: async () => ({}) };
         return { ok: true, status: 200, json: async () => ({ data: drafts, error: null, meta: null }) };
@@ -73,6 +81,38 @@ function stubFetch(drafts: unknown[] | { status: number }) {
       throw new Error('unexpected fetch: ' + url);
     }),
   );
+}
+
+// story #3734 — 실 BE 동작(목록 기본 제외·include_deleted=true 조회·archive/restore
+// POST가 draft.is_deleted를 뒤집음)을 상태 머신으로 흉내내는 stub. 위 stubFetch(정적
+// 목록 하나만)와 달리 토글·액션 클릭의 왕복(요청→상태 변화→재조회)까지 실제로 검증한다.
+function stubFetchStateful(initial: Array<Record<string, unknown> & { draft_id: string; is_deleted?: boolean }>) {
+  const state = new Map(initial.map((d) => [d.draft_id, { ...d }]));
+  const calls: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawUrl = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${rawUrl}`);
+      const url = stripTrailingBareQuery(rawUrl);
+      const listBase = `/api/organizations/${ORG_ID}/site-posts/drafts`;
+      if (url === listBase || url === `${listBase}?include_deleted=true`) {
+        const includeDeleted = url.includes('include_deleted=true');
+        const rows = [...state.values()].filter((d) => includeDeleted || !d.is_deleted);
+        return { ok: true, status: 200, json: async () => ({ data: rows, error: null, meta: null }) };
+      }
+      const actionMatch = /\/site-posts\/drafts\/([^/]+)\/(archive|restore)$/.exec(url);
+      if (actionMatch && init?.method === 'POST') {
+        const [, draftId, action] = actionMatch;
+        const draft = state.get(draftId);
+        if (!draft) return { ok: false, status: 404, json: async () => ({}) };
+        draft.is_deleted = action === 'archive';
+        return { ok: true, status: 200, json: async () => ({ data: { draft_id: draftId, is_deleted: draft.is_deleted }, error: null, meta: null }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }),
+  );
+  return { state, calls };
 }
 
 const DRAFT_A = {
@@ -282,5 +322,253 @@ describe('ContentPostListPage (story #3368)', () => {
     const latestCell = container.querySelector('[data-testid="content-latest-author"]');
     expect(originCell?.querySelector('.proof-surface')).not.toBeNull();
     expect(latestCell?.querySelector('.proof-surface')).not.toBeNull();
+  });
+
+  // story #3734 — 「보관」 행 액션·「보관됨 보기」 토글.
+  describe('보관(story #3734)', () => {
+    it('⭐can_archive=false — 「보관」 버튼이 안 보인다(fail-closed, can_withdraw와 동형 정책)', async () => {
+      stubFetch([{ ...DRAFT_A, can_archive: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-archive-action"]')).toBeNull();
+    });
+
+    it('⭐can_archive=true — 「보관」 버튼 클릭 시 POST .../archive를 호출하고, 기본 목록(보관됨 숨김)에서 그 행이 즉시 사라진다', async () => {
+      const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.archiveAction);
+      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        button.click();
+      });
+      await flush();
+
+      expect(calls).toContain(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/archive`);
+      expect(state.get('d1')?.is_deleted).toBe(true);
+      expect(container.querySelector('[data-testid="content-list-row"]')).toBeNull();
+      expect(container.textContent).toContain(koMessages.content.emptyTitle);
+    });
+
+    it('⭐「보관됨 보기」 토글 — include_deleted=true로 재조회해 보관된 행이 「보관됨」 배지·「보관 해제」 버튼과 함께 보인다', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      // 기본 상태 — 보관된 행 제외이므로 빈 목록.
+      expect(container.textContent).toContain(koMessages.content.emptyTitle);
+
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      expect(toggle.textContent).toBe(koMessages.content.showArchivedToggle);
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      expect(toggle.textContent).toBe(koMessages.content.hideArchivedToggle);
+      expect(container.querySelector('[data-testid="content-archived-badge"]')?.textContent).toBe(
+        koMessages.content.contentStatusArchived,
+      );
+      const restoreButton = container.querySelector('[data-testid="content-archive-action"]');
+      expect(restoreButton?.textContent).toBe(koMessages.content.unarchiveAction);
+    });
+
+    it('⭐「보관됨 보기」에서 「보관 해제」 클릭 — POST .../restore 호출 후에도 그 행은 목록에 남고(include_deleted=true는 "포함"이지 "전용"이 아니다) 배지·버튼만 뒤집힌다', async () => {
+      const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      const restoreButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        restoreButton.click();
+      });
+      await flush();
+
+      expect(calls).toContain(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/restore`);
+      expect(state.get('d1')?.is_deleted).toBe(false);
+      expect(container.querySelector('[data-testid="content-list-row"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="content-archived-badge"]')).toBeNull();
+      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+        koMessages.content.archiveAction,
+      );
+    });
+
+    it('⭐「보관됨 보기」 뷰에서 아직 안 보관된 행을 「보관」 클릭 — 행은 그대로 남고 배지·버튼이 「보관됨」/「보관 해제」로 뒤집힌다(include_deleted=true는 "포함", "전용" 아님 — 뮤테이션 표적)', async () => {
+      const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+      // 토글 전환 직후엔 미보관 행이라 「보관」 버튼.
+      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+        koMessages.content.archiveAction,
+      );
+
+      const archiveButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        archiveButton.click();
+      });
+      await flush();
+
+      expect(calls).toContain(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/archive`);
+      expect(state.get('d1')?.is_deleted).toBe(true);
+      expect(container.querySelector('[data-testid="content-list-row"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="content-archived-badge"]')?.textContent).toBe(
+        koMessages.content.contentStatusArchived,
+      );
+      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+        koMessages.content.unarchiveAction,
+      );
+    });
+
+    it('⭐기본 뷰(보관됨 숨김)에서 「보관」 클릭 직후 로컬 낙관 갱신으로 행이 즉시 사라진다(재요청 없이)', async () => {
+      const { calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const callsAfterInitialLoad = calls.length;
+
+      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        button.click();
+      });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-list-row"]')).toBeNull();
+      // 낙관 갱신 — archive POST 하나만 추가되고, 목록 GET이 다시 안 나간다.
+      expect(calls.length).toBe(callsAfterInitialLoad + 1);
+      expect(calls[calls.length - 1]).toBe(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/archive`);
+    });
+
+    // 카디르 CI 적발(story #3734) — 정적 라벨(「보관」/「보관 해제」)이 행마다 똑같아
+    // verify-no-new-repeated-row-action-names(§22-18) 위반. aria-label에 순번+라벨을
+    // 품는 것으로 처방 — 여기서 그 값이 실제로 항목별로 갈리는지 직접 확認한다(가드
+    // 자신은 "aria-label 있다/없다"만 보고 값의 «품음 여부»는 안 잰다는 것이 스크립트
+    // 자체 ⚠️ 선언 — 이 assertion이 그 사각을 메운다).
+    it('⭐「보관」 버튼의 aria-label이 행 순번을 품어 두 행이 서로 다른 값을 갖는다(§22-18 처방 검증)', async () => {
+      stubFetch([
+        { ...DRAFT_A, draft_id: 'd1', can_archive: true },
+        { ...DRAFT_A, draft_id: 'd2', can_archive: true },
+      ]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      const buttons = container.querySelectorAll('[data-testid="content-archive-action"]');
+      expect(buttons).toHaveLength(2);
+      const labels = [...buttons].map((b) => b.getAttribute('aria-label'));
+      expect(labels[0]).not.toBeNull();
+      expect(labels[0]).not.toBe(labels[1]);
+      expect(labels[0]).toContain('1');
+      expect(labels[1]).toContain('2');
+    });
+
+    // 유나 CHANGES(story #3734, PR#4079 코멘트) — 보관 직후 행이 그냥 사라지면 「삭제」로
+    // 읽힌다. 토스트(「보관했습니다」+「보관됨 보기」 액션)로 "어디로 갔는지"를 알린다.
+    it('⭐「보관」 클릭 — 「보관했습니다」 토스트가 뜨고, 그 액션 클릭 시 「보관됨 보기」로 전환된다', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        button.click();
+      });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.archivedToast);
+      const toastActionButtons = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === koMessages.content.showArchivedToggle,
+      );
+      // 헤더 토글(이미 「보관됨 보기」로 그려진 상태)과 토스트 액션 버튼 둘 다 같은 라벨을
+      // 쓴다(유나 定 — 기존 토글 낱말 재사용) — 토스트 쪽을 눌러도 같은 효과인지 본다.
+      expect(toastActionButtons.length).toBeGreaterThanOrEqual(1);
+      const toggleBefore = container.querySelector('[data-testid="content-show-archived-toggle"]')?.textContent;
+      expect(toggleBefore).toBe(koMessages.content.showArchivedToggle);
+
+      const toastAction = toastActionButtons[toastActionButtons.length - 1];
+      await act(async () => {
+        toastAction.click();
+      });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-show-archived-toggle"]')?.textContent).toBe(
+        koMessages.content.hideArchivedToggle,
+      );
+    });
+
+    it('⭐「보관 해제」(restore) 클릭 — 토스트가 안 뜬다(되돌리기 자체는 이미 보이는 화면 상태의 반전이라 "어디로 갔는지" 안내가 불필요)', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      const restoreButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        restoreButton.click();
+      });
+      await flush();
+
+      expect(container.textContent).not.toContain(koMessages.content.archivedToast);
+    });
+
+    // PO 추가(08:12Z) — 「보관됨 보기」가 이미 켜진 화면에서 보관하면 토스트는 뜨되
+    // 액션은 없다(그 액션은 "지금 있는 곳으로 가라"가 돼 의미가 없다 — 뮤테이션 표적).
+    it('⭐「보관됨 보기」가 이미 켜진 상태에서 「보관」 클릭 — 토스트는 뜨지만 액션 버튼은 없다(PO 추가 08:12Z)', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      const archiveButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        archiveButton.click();
+      });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.archivedToast);
+      // showArchived=true인 상태라 헤더 토글은 이미 hideArchivedToggle로 바뀌어 있다 —
+      // showArchivedToggle 라벨을 가진 버튼이 전혀 없어야 한다(헤더에도 토스트에도 없음).
+      const showArchivedLabelButtons = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === koMessages.content.showArchivedToggle,
+      );
+      expect(showArchivedLabelButtons.length).toBe(0);
+    });
   });
 });
