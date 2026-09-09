@@ -252,7 +252,7 @@ function hasFieldValue(field: FieldKey, rules: ContentRules): boolean {
 }
 
 export default function ContentRulesPage() {
-  const { orgId, orgMemberships } = useDashboardContext();
+  const { orgId, orgMemberships, currentTeamMemberId } = useDashboardContext();
   const currentRole = orgMemberships.find((o) => o.orgId === orgId)?.role ?? 'member';
   const canEditRules = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('contentRules');
@@ -262,17 +262,26 @@ export default function ContentRulesPage() {
 
   const [rules, setRules] = useState<ContentRules>(EMPTY_RULES);
   const [loadedRules, setLoadedRules] = useState<ContentRules>(EMPTY_RULES);
-  const [version, setVersion] = useState<number | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [updatedBy, setUpdatedBy] = useState<UpdatedBy | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [expandedField, setExpandedField] = useState<FieldKey | null>(null);
   const [savingField, setSavingField] = useState<FieldKey | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
-  const [conflictField, setConflictField] = useState<{ field: FieldKey; updatedByName: string | null } | null>(null);
+  const [conflictField, setConflictField] = useState<
+    { field: FieldKey; updatedByName: string | null; updatedByMemberId: string | null; viaUndo: boolean } | null
+  >(null);
   const [budget, setBudget] = useState<GenerationBudgetState>({ status: 'loading' });
   // story #3501(§20-3, 재사용) — 되돌리기(undo)용 직전 값 스냅샷(필드별 1개).
   const draftBeforeSave = useRef<Partial<ContentRules>>({});
+  // 페드루 PO 라이브 결함(2026-09-09, 3747 배포 뒤 직접 왕복 발견) — 되돌리기 버튼의
+  // onClick 클로저는 그 저장을 시작시킨 saveField 호출 안에서 만들어지므로, version을
+  // state로 두면 그 호출 동안 클로저에 갇힌 **저장 前** 값을 그대로 들고 있다(React
+  // state는 그 실행 안에서 스냅샷 — 리렌더로 안 바뀜). 되돌리기가 그 값으로 PUT하면
+  // 방금 자신이 만든 저장 자체와 버전이 어긋나 항상 409. version은 렌더에 안 쓰이므로
+  // (충돌 여부·성공/실패만 렌더에 영향) 아예 state가 아니라 ref로 — 모든 성공 응답에서
+  // 즉시 갱신돼 항상 "그 시점 최신"이 보인다.
+  const versionRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -285,7 +294,7 @@ export default function ContentRulesPage() {
         const merged = mergeRulesResponse(json.data.rules);
         setRules(merged);
         setLoadedRules(merged);
-        setVersion(json.data.version);
+        versionRef.current = json.data.version;
         setUpdatedAt(json.data.updated_at);
         setUpdatedBy(json.data.updated_by);
         setLoadState('ready');
@@ -327,8 +336,10 @@ export default function ContentRulesPage() {
   // (저장소가 필드 단위 CAS를 못 함) 409면 겹침으로 가른다: 내가 고친 필드가 서버측
   // 변경과 겹치면 그 필드만 충돌 배너(재시도 안 함) · 안 겹치면 최신 버전으로 조용히
   // 한 번 재저장(사람 개입 없이 자동 rebase).
-  const saveField = useCallback(async (field: FieldKey, nextRules: ContentRules, previousValue: ContentRules[FieldKey]) => {
-    if (version === null) return;
+  const saveField = useCallback(async (
+    field: FieldKey, nextRules: ContentRules, previousValue: ContentRules[FieldKey], viaUndo = false,
+  ) => {
+    if (versionRef.current === null) return;
     setSavingField(field);
     setRowErrors((prev) => { const { [field]: _drop, ...rest } = prev; return rest; });
     // 되돌리기(undo)용 직전 값 스냅샷. field는 런타임에 실제 값과 짝이 맞지만
@@ -350,14 +361,15 @@ export default function ContentRulesPage() {
         const merged = mergeRulesResponse(json.data.rules);
         setRules(merged);
         setLoadedRules(merged);
-        setVersion(json.data.version);
+        versionRef.current = json.data.version;
         setUpdatedAt(json.data.updated_at);
         setUpdatedBy(json.data.updated_by);
         setConflictField(null);
         return { status: 'ok', rebased };
       }
       if (res.status === 409) {
-        const errBody = (await res.json().catch(() => null)) as { error?: { updated_by?: { name: string | null } | null } } | null;
+        const errBody = (await res.json().catch(() => null)) as
+          { error?: { updated_by?: { member_id: string | null; name: string | null } | null } } | null;
         const freshRes = await fetchWithAuth(`/api/organizations/${orgId}/content-rules`);
         const freshJson = freshRes.ok
           ? ((await freshRes.json().catch(() => null)) as { data?: ContentRulesResponse } | null)
@@ -367,10 +379,15 @@ export default function ContentRulesPage() {
         // §20-4 — 서버가 내가 로드한 이후 실제로 바꾼 필드 목록.
         const serverChanged = diffFieldNames(loadedRules, freshRules);
         if (serverChanged.includes(field)) {
-          setConflictField({ field, updatedByName: errBody?.error?.updated_by?.name ?? null });
+          setConflictField({
+            field,
+            updatedByName: errBody?.error?.updated_by?.name ?? null,
+            updatedByMemberId: errBody?.error?.updated_by?.member_id ?? null,
+            viaUndo,
+          });
           setRules((r) => ({ ...r, [field]: freshRules[field] }));
           setLoadedRules(freshRules);
-          setVersion(freshJson.data.version);
+          versionRef.current = freshJson.data.version;
           setUpdatedAt(freshJson.data.updated_at);
           setUpdatedBy(freshJson.data.updated_by);
           return { status: 'conflict-mine' };
@@ -400,7 +417,7 @@ export default function ContentRulesPage() {
 
     let outcome: AttemptOutcome;
     try {
-      outcome = await attempt(nextRules, version, false);
+      outcome = await attempt(nextRules, versionRef.current, false);
     } catch {
       setRowErrors((prev) => ({ ...prev, [field]: t('saveFailed') }));
       outcome = { status: 'error' };
@@ -413,11 +430,11 @@ export default function ContentRulesPage() {
         action: { label: t('contentRulesUndoAction'), onClick: () => {
           const prev = draftBeforeSave.current[field];
           if (prev === undefined) return;
-          void saveField(field, { ...rules, [field]: prev } as ContentRules, nextRules[field]);
+          void saveField(field, { ...rules, [field]: prev } as ContentRules, nextRules[field], true);
         } },
       });
     }
-  }, [orgId, version, loadedRules, rules, t, addToast]);
+  }, [orgId, loadedRules, rules, t, addToast]);
 
   const fieldTitle = useCallback((field: FieldKey) => {
     const KEYS: Record<FieldKey, string> = {
@@ -692,9 +709,12 @@ export default function ContentRulesPage() {
           {conflictField ? (
             <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true" data-testid="content-rules-version-conflict">
               <AlertDescription>
-                {conflictField.updatedByName
-                  ? t('versionConflictFieldWithName', { field: fieldTitle(conflictField.field), name: conflictField.updatedByName })
-                  : t('versionConflictFieldFact', { field: fieldTitle(conflictField.field) })}
+                {conflictField.viaUndo ? `${t('contentRulesUndoFailedPrefix')} ` : ''}
+                {conflictField.updatedByMemberId !== null && conflictField.updatedByMemberId === currentTeamMemberId
+                  ? t('versionConflictFieldSelfOtherTab', { field: fieldTitle(conflictField.field) })
+                  : conflictField.updatedByName
+                    ? t('versionConflictFieldWithName', { field: fieldTitle(conflictField.field), name: conflictField.updatedByName })
+                    : t('versionConflictFieldFact', { field: fieldTitle(conflictField.field) })}
               </AlertDescription>
             </Alert>
           ) : null}

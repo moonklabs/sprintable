@@ -100,9 +100,10 @@ function stubFetch(opts: {
   }));
 }
 
-async function mount(role: string) {
+async function mount(role: string, extra: Record<string, unknown> = {}) {
   useDashboardContextMock.mockReturnValue({
     orgId: ORG_ID, orgMemberships: [{ orgId: ORG_ID, orgName: 'Org', orgSlug: 'org', role }], projectMemberships: [],
+    ...extra,
   });
   await act(async () => { root.render(wrap(<ContentRulesPage />)); });
   await flush();
@@ -319,6 +320,108 @@ describe('ContentRulesPage — 행 저장(story #3747 AC2)', () => {
 
     expect(row('tone').textContent).toContain('친근하게');
     expect(putCount).toBe(2);
+  });
+
+  // 페드루 PO 라이브 결함(2026-09-09, 3747 배포 뒤 owner 실왕복) — 되돌리기 onClick
+  // 클로저가 `version` state를 직접 읽으면 그 저장을 시작시킨 saveField 호출 안에
+  // 갇힌 **저장 前** 값을 그대로 들고 있어, 되돌리기가 방금 자신이 만든 저장과 버전이
+  // 어긋나 항상 409였다(위 테스트는 onPut이 expected_version을 안 따져 이 버그를
+  // 놓쳤다 — 이 테스트는 실 서버처럼 expected_version 불일치 시 409를 낸다).
+  it('⭐되돌리기는 저장 응답의 새 버전을 쓴다(저장 前 버전 재사용 금지 — 실서버형 스텁으로 재현)', async () => {
+    let serverVersion = 3;
+    stubFetch({
+      onPut: (body) => {
+        const b = body as { rules: typeof RULES_V1; expected_version: number };
+        if (b.expected_version !== serverVersion) {
+          return { status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: serverVersion, updated_by: { member_id: 'm', name: '송윤재' } } };
+        }
+        serverVersion += 1;
+        return { status: 200, body: { org_id: ORG_ID, rules: b.rules, version: serverVersion, updated_at: '2026-09-07T00:00:00Z', updated_by: { member_id: 'm', name: '송윤재' } } };
+      },
+    });
+    await mount('owner');
+    await expandRow('tone');
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '바뀐 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { rowSaveButton().click(); });
+    await flush();
+    expect(row('tone').textContent).toContain('바뀐 톤');
+
+    const undoBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.contentRules.contentRulesUndoAction) as HTMLButtonElement;
+    await act(async () => { undoBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="content-rules-version-conflict"]')).toBeNull();
+    expect(row('tone').textContent).toContain('친근하게');
+  });
+
+  // 유나 定(2026-09-09) — 되돌리기가 실패하면 배너는 "누가 먼저 저장했다"만이 아니라
+  // "되돌리지 못했습니다"가 먼저(되돌리기를 누른 사람의 물음에 답함) + 그 사유가 붙는다.
+  it('⭐되돌리기가 겹침으로 실패하면 배너에 「되돌리지 못했습니다」가 사유보다 먼저 선다', async () => {
+    let putCalls = 0;
+    stubFetch({
+      onPut: () => {
+        putCalls += 1;
+        if (putCalls === 1) {
+          return { status: 200, body: { org_id: ORG_ID, rules: { ...RULES_V1, tone: '바뀐 톤' }, version: 4, updated_at: '2026-09-07T00:00:00Z', updated_by: { member_id: 'm', name: '송윤재' } } };
+        }
+        return { status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 5, updated_by: { member_id: 'm-2', name: '유나' } } };
+      },
+      getAfterConflict: { rules: { ...RULES_V1, tone: '서버가 또 바꾼 톤' }, version: 5 },
+    });
+    await mount('owner');
+    await expandRow('tone');
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '바뀐 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { rowSaveButton().click(); });
+    await flush();
+
+    const undoBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.contentRules.contentRulesUndoAction) as HTMLButtonElement;
+    await act(async () => { undoBtn.click(); });
+    await flush();
+
+    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
+    expect(banner).not.toBeNull();
+    const text = banner!.textContent ?? '';
+    const prefixIdx = text.indexOf(koMessages.contentRules.contentRulesUndoFailedPrefix);
+    const reasonIdx = text.indexOf(
+      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel),
+    );
+    expect(prefixIdx).toBeGreaterThanOrEqual(0);
+    expect(reasonIdx).toBeGreaterThan(prefixIdx);
+  });
+
+  // 유나 定(2026-09-09) — 충돌한 값을 저장한 사람이 «나 자신»(다른 탭 등)이면 자기 이름을
+  // 대는 대신 "다른 탭에서 먼저 저장됐습니다"로 — 자기 이름을 보면 "내가 언제?"로 멈춘다.
+  it('⭐충돌 상대가 나 자신(다른 탭)이면 이름 대신 「다른 탭에서 먼저 저장됐습니다」', async () => {
+    stubFetch({
+      onPut: () => ({ status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: { member_id: 'm-1', name: '유나' } } }),
+      getAfterConflict: { rules: { ...RULES_V1, tone: '서버가 먼저 바꾼 톤' }, version: 4 },
+    });
+    await mount('owner', { currentTeamMemberId: 'm-1' });
+    await expandRow('tone');
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '내가 고친 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { rowSaveButton().click(); });
+    await flush();
+
+    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
+    expect(banner?.textContent).toContain(
+      koMessages.contentRules.versionConflictFieldSelfOtherTab.replace('{field}', koMessages.contentRules.toneLabel),
+    );
+    expect(banner?.textContent).not.toContain('유나');
   });
 
   it('403 CONTENT_RULES_ADMIN_ONLY — 그 행 안에 인라인 오류', async () => {
