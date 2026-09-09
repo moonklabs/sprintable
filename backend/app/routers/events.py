@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 from sqlalchemy import String, and_, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2225,11 +2225,18 @@ class CreateEventDefinitionRequest(BaseModel):
     # 가드①) — 비어 있으면(신호형/측정형) 검증 스킵.
     stage_metadata: dict = {}
 
+    # story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — 빈 이름을 막아도 org 커스텀
+    # 정의가 name=key로(코드 키를 그대로 이름 자리에) 등록되면 화면 제목 자리에 코드 키가
+    # 그대로 서는 같은 결함이 재발한다 — 빈 문자열과 "같은 결함 클래스"라 같은 필드
+    # validator에서 나란히 막는다(에러 loc도 name 그대로).
     @field_validator("name")
     @classmethod
-    def _name_not_blank(cls, v: str) -> str:
+    def _name_not_blank(cls, v: str, info: ValidationInfo) -> str:
         if not v.strip():
             raise ValueError("name은 비울 수 없습니다(공백뿐인 값도 안 됨)")
+        key = info.data.get("key")
+        if key is not None and v.strip() == key:
+            raise ValueError("name은 key와 같을 수 없습니다(코드 키를 이름으로 쓸 수 없음)")
         return v
 
 
@@ -2421,6 +2428,16 @@ async def update_event_definition(
     )).scalar_one_or_none()
     if definition is None:
         raise HTTPException(status_code=404, detail="event definition not found")
+
+    # story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — `UpdateEventDefinitionRequest`
+    # 스키마엔 key가 없어(PATCH는 key를 안 바꾼다) 이 규칙을 Pydantic field_validator로 못
+    # 건다 — DB에서 방금 읽은 `definition.key`와 대조해 여기서 막는다. POST의 빈 이름
+    # 검증(`_name_not_blank`)과 같은 결함 클래스라 코드도 그 이웃에 등록.
+    if body.name is not None and body.name.strip() == definition.key:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "definition_name_equals_key", "message": "name은 key와 같을 수 없습니다(코드 키를 이름으로 쓸 수 없음)"},
+        )
 
     # story #2792 가드① — stage_metadata는 payload_schema와 짝인 검증이라, 둘 중 하나만
     # 바뀌어도 **유효 조합**(새 값 있으면 새 값·없으면 기존 값)으로 재검증한다. payload_schema만
