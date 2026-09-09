@@ -5234,7 +5234,7 @@
   },
   "insightsBoard": {
     "pageTitle": "성과 보드",
-    "pageDescription": "발행된 글의 D+1·D+7 성과를 한 곳에서 확인합니다.",
+    "pageDescription": "발행된 글의 발행 다음날·7일 뒤 성과를 한 곳에서 확인합니다.",
     "windowLabel": "기간",
     "window7d": "7일",
     "window30d": "30일",
