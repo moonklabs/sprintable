@@ -36,6 +36,7 @@ from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_asset
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
+    UNNAMED_MEMBER_LABEL,
     ResolvedMember,
     filter_human_member_ids,
     filter_org_member_ids,
@@ -2945,7 +2946,10 @@ async def send_message(
                         await dispatch_notification(
                             db, org_id=org_id, event_type="conversation.mention",
                             target_member_ids=human_mention_targets,
-                            title=f"{sender.name}님이 회원님을 멘션했습니다",
+                            # story #3758 — sender.name이 None일 수 있다(ResolvedMember/
+                            # TeamMember 둘 다 name nullable 완화 뒤) — 그대로 f-string에
+                            # 꽂으면 "None님이..."로 샌다.
+                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 회원님을 멘션했습니다",
                             body=(msg.content or "")[:200],
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
@@ -2983,7 +2987,8 @@ async def send_message(
                     await dispatch_notification(
                         db, org_id=org_id, event_type="conversation.message",
                         target_member_ids=message_targets,
-                        title=f"{sender.name}님의 새 메시지",
+                        # story #3758 — 위 mention 블록과 동형(sender.name None-safe).
+                        title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
                         body=(msg.content or "")[:200],
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,

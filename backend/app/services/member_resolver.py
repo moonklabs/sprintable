@@ -24,6 +24,13 @@ from app.services.project_auth import has_project_access
 
 logger = logging.getLogger(__name__)
 
+# story #3758 — 서버가 직접 조립하는 한국어 알림 문구(next-intl 밖, conversations.py
+# mention/message 알림 title 등)용 공용 폴백. FE `common.memberUnnamed`(member-display.ts)
+# 와 같은 값 — 이름 없는 실존 구성원을 f-string에 그대로 꽂으면 "None님이..."로 새는
+# 자리를 막는다. 여기가 SSOT(ResolvedMember와 같은 자리) — 새 문구를 다른 파일에서
+# 따로 짓지 않는다.
+UNNAMED_MEMBER_LABEL = "이름 없는 구성원"
+
 
 @dataclass
 class ResolvedMember:

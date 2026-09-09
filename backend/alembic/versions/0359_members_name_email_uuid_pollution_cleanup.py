@@ -12,6 +12,12 @@ email 로컬파트를 썼던 케이스는 members.name이 아니라 users.displa
 
 name을 NULL로 되돌리려면 컬럼이 nullable이어야 한다 — DROP NOT NULL을 UPDATE보다
 먼저 실행.
+
+downgrade는 의도적 no-op이다(페드루 PO 지적 2026-09-09, 코드가 그 사실을 말로 안 적어
+뒀던 것 정정) — 정리는 일방향(NULL로 뭉친 행이 원래 email이었는지 user_id::text였는지
+이 시점엔 구분 불가), nullable 완화는 그대로 유지, NULL 행이 실제로 존재하는 채로는
+NOT NULL을 복원할 수도 없다(그러면 downgrade 자체가 크래시). 「downgrade까지 검증」은
+이 no-op이 예외 없이 도는지 확認했다는 뜻이지, 데이터/제약을 원상복구한다는 뜻이 아니다.
 """
 from __future__ import annotations
 
@@ -56,8 +62,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # 가역이 아니다(G5류, 0354와 동일 관례) — NULL로 되돌린 행이 원래 email이었는지
-    # user_id::text였는지 이 시점엔 구분 불가(둘 다 NULL로 수렴). NOT NULL 제약도
-    # 되돌리지 않는다(그 사이 정당하게 NULL이 된 새 앵커 행이 있으면 downgrade 자체가
-    # 깨진다 — 메타데이터-only 가역 관례, 0075/0354 동일).
+    # 의도적 no-op — 정리는 일방향·nullable 완화는 유지·NULL 행이 있어 NOT NULL 복원
+    # 불가(가역 아님, G5류, 0354와 동일 관례). NULL로 되돌린 행이 원래 email이었는지
+    # user_id::text였는지 이 시점엔 구분 불가(둘 다 NULL로 수렴)라 데이터도 못 되돌리고,
+    # NOT NULL을 다시 걸면 이 마이그가 만든(또는 그 사이 정당하게 생긴) NULL 행에서
+    # downgrade 자체가 크래시한다 — 메타데이터-only 가역 관례 그대로 pass.
     pass
