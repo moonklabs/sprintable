@@ -563,15 +563,19 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
     expect(container.querySelector('[data-testid="channel-section-rows"]')).toBeNull();
   });
 
-  it('⭐연결 1개 — 헤더 자리 칩 0·행 컨테이너 안에 정확히 1개(같은 문장 두 번 안 남, 자리 뒤바뀜도 잡힘)', async () => {
+  // story #3743(UI 재설계 ③) — 채널 행 머리(ListRow)가 이제 모든 연결 수에서 일관되게
+  // 상태 칩을 보인다(#3743 원칙 — 접기/펼치기가 없어져 머리가 항상 유일한 요약 자리다).
+  // 중복 억제는 그대로 살되 방향이 바뀌었다 — 연결 1개면 안쪽(ConnectionRow) 칩을
+  // 숨긴다(머리 칩과 같은 문장이 두 번 안 서는 목적은 동일, 억제 대상만 바뀜).
+  it('⭐연결 1개 — 헤더 자리 칩 1(항상)·행 컨테이너 안엔 0(같은 문장 두 번 안 남, 억제 대상이 뒤바뀜)', async () => {
     stubFetch({ connections: [CONNECTION_ACTIVE] });
     await mount('owner');
     const header = container.querySelector('[data-testid="channel-section-header"]')!;
     const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
-    expect(header.querySelectorAll('[data-status-chip]')).toHaveLength(0);
-    const rowChips = rows.querySelectorAll('[data-status-chip]');
-    expect(rowChips).toHaveLength(1);
-    expect(rowChips[0]?.getAttribute('data-status-chip')).toBe('connected');
+    const headerChips = header.querySelectorAll('[data-status-chip]');
+    expect(headerChips).toHaveLength(1);
+    expect(headerChips[0]?.getAttribute('data-status-chip')).toBe('connected');
+    expect(rows.querySelectorAll('[data-status-chip]')).toHaveLength(0);
   });
 
   it('⭐연결 2개(active+expired) — 헤더 자리에 정확히 1개(최악=expired)·행 컨테이너 안에 정확히 2개(현행 유지)', async () => {
@@ -1678,5 +1682,84 @@ describe('OrganizationChannelsPage — Facebook Page 연결(story #3549)', () =>
     expect(selectCalled).toBe(true);
     expect(container.querySelector('[data-testid="channel-connect-facebook-select"]')).toBeNull();
     expect(container.textContent).toContain('Sandbox Page 1');
+  });
+});
+
+// story #3743(UI 재설계 ③, 페드루 PO 決) — 헤더 주 액션 「앱 자격 등록」. 공유 stubFetch는
+// credentials가 전 채널 공용이라(url.includes만 봄) 채널별로 다른 effective_source를 못
+// 만든다 — 이 describe만 자체 fetch mock을 쓴다.
+describe('OrganizationChannelsPage — 헤더 주 액션(story #3743)', () => {
+  function stubFetchPerChannel(channels: { channel: string; effectiveSource: 'org' | 'platform' | 'none' }[]) {
+    const availableChannels = channels.map((c) => ({ channel: c.channel, display_name: c.channel, credential_kind: 'oauth', kind: 'social' }));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/available-channels')) return { ok: true, status: 200, json: async () => ({ data: availableChannels }) } as Response;
+      if (url.includes('/app-credentials')) {
+        const seg = channels.find((c) => url.includes(`/${c.channel}/app-credentials`));
+        return { ok: true, status: 200, json: async () => ({ data: { configured: false, app_id_suffix: null, effective_source: seg?.effectiveSource ?? 'platform' } }) } as Response;
+      }
+      if (url.includes('/measurement-connections')) return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+      if (url.includes('/org-members')) return { ok: false, status: 403, json: async () => ({ data: null, error: {} }) } as Response;
+      if (url.includes('/channel-connections')) return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+      return { ok: false, status: 404, json: async () => ({ data: null, error: {} }) } as Response;
+    }));
+  }
+
+  // story #3743(로컬 캡처 中 자가 발견 — 페드루 PO 확認) — 앱 자격 등록은 owner 전용인데
+  // 헤더 버튼이 role 무관하게 서 있던 실 결함. 되돌리면(isOwnerStrict 조건 제거) RED.
+  it('⭐비-소유자는 미등록 채널이 있어도 헤더 주 액션이 안 보인다(owner 전용, §5-2)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }]);
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
+  });
+
+  it('⭐미등록(effective_source=none) oauth 채널이 0개면 주 액션 자체를 안 그린다(그려진 컨트롤=할 수 있다는 약속)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'platform' }]);
+    await mount('owner');
+    // 채널 행 안의 AppCredentialsCard도 같은 문구("앱 자격 등록")를 쓸 수 있어(effective_
+    // source='platform'이면 재입력이 아니라 등록 문구) 텍스트 대조는 안 쓴다 — 헤더 자리
+    // 자체(testid)의 부재를 잰다.
+    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
+  });
+
+  it('⭐미등록 채널이 1개면 메뉴 없이 버튼 하나(누르면 그 채널 행으로 스크롤)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
+    await mount('owner');
+    const btn = container.querySelector('[data-testid="channel-connect-header-register-action"]');
+    expect(btn).toBeTruthy();
+    expect(btn?.tagName).toBe('BUTTON');
+    // 메뉴(팝업)가 아니라 단일 버튼이라 클릭해도 role="menu"가 새로 안 생긴다.
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('⭐미등록 채널이 2개 이상이면 메뉴로 고른다(항목=channelLabel 표시명, 메뉴 제목 없음)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
+    await mount('owner');
+    const trigger = container.querySelector('[data-testid="channel-connect-header-register-action"]');
+    expect(trigger).toBeTruthy();
+    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(container.textContent).toContain(koMessages.channelConnect.channelThreads);
+    expect(container.textContent).toContain(koMessages.channelConnect.channelLabelFacebook);
+  });
+});
+
+// story #3743(유나 定, 페드루 PO 決 — 72h 아님, 48h 그대로·문구는 실값 N일) — 만료 임박
+// 노트가 실제 남은 일수를 낱말로 보인다.
+describe('OrganizationChannelsPage — 만료 임박 실값(story #3743)', () => {
+  it('⭐24시간 이내면 「오늘」, 그 외는 실 일수(예: 2일 뒤)', async () => {
+    const soon = new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(); // 20시간 뒤
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'active', token_expires_at: soon, can_auto_refresh: false }] });
+    await mount('owner');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelExpiringToday);
+  });
+
+  it('⭐N일 남았으면 그 실값이 뜬다(지어낸 날짜 문구 없음 — 임계 48h 안쪽에서 47h=1일)', async () => {
+    // connection-status.ts 임계(48h)를 넘으면 애초에 expiring_soon이 안 뜬다(connected로
+    // 판정) — 47h는 그 안쪽이면서 floor(47/24)=1로 정확히 "1일 뒤"를 낸다(경계값 47h에
+    // 붙어 있는 48h 자체를 테스트에 쓰면 밀리초 타이밍에 따라 흔들린다).
+    const in47h = new Date(Date.now() + 47 * 60 * 60 * 1000).toISOString();
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'active', token_expires_at: in47h, can_auto_refresh: false }] });
+    await mount('owner');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelExpiringDaysCount.replace('{count}', '1'));
   });
 });

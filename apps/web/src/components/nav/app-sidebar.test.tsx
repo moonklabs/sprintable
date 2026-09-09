@@ -118,7 +118,9 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneMarketing', labels: ['블로그 포스트', '채널 포스트', '채널 연결', '콘텐츠 규칙', '성과 보드'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
-  { labelKey: 'zoneOrganization', labels: ['구성원', '에이전트', '권한', '이벤트', '커넥터'] },
+  // story #3743(UI 재설계 ③, 페드루 PO 決) — '커넥터'가 '채널 연결'로 흡수·리다이렉트돼
+  // nav 항목 자체가 걷혔다(⑦ IA 25→24 실물).
+  { labelKey: 'zoneOrganization', labels: ['구성원', '에이전트', '권한', '이벤트'] },
   { labelKey: null, labels: ['설정'] },
 ];
 
@@ -137,7 +139,9 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 포스트'(/content/channel-posts) 추가돼 챗 제외 21→22항목. story #3472(페드루 PO
 // 확定 2026-09-05) — 조직 그룹에 '콘텐츠 규칙'(/organization/content-rules) 추가돼
 // 챗 제외 22→23항목. story #3503 — 조직 그룹에 '성과 보드'(/organization/insights-board)
-// 추가돼 챗 제외 23→24항목.
+// 추가돼 챗 제외 23→24항목. story #3743(UI 재설계 ③, 페드루 PO 決) — 조직 그룹의
+// '커넥터'(/organization/connectors)가 '채널 연결'로 흡수·리다이렉트돼 nav 항목 자체가
+// 빠져(4180f67f가 열었던 자리를 여기서 닫는다) 챗 제외 24→23항목.
 //
 // story #ee78b047(IA·S2, 2026-09-08, PO 確定) — 예전엔 '채널 포스트'가 텍스트상 '채널'로
 // 시작해 아래 매칭 로직의 startsWith 폴백이 '채널'을 찾을 때 '채널 포스트' 링크를 먼저
@@ -153,7 +157,6 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '신뢰 센터': '/organization/trust',
   '기억': '/organization/memory',
   '이벤트': '/organization/events',
-  '커넥터': '/organization/connectors',
   '채널 연결': '/organization/channels',
   '콘텐츠 규칙': '/organization/content-rules',
   '성과 보드': '/organization/insights-board',
