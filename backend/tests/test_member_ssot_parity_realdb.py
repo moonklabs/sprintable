@@ -191,8 +191,9 @@ async def test_lookup_members_parity_identity_and_canonicalization():
         # 직접 member(휴먼/에이전트) + orphan: id·type 동일
         for k in (AG1, AG2, OM_OWNER, OM_MEM, ORPHAN):
             assert (str(legacy[k].id), legacy[k].type) == (str(anchor[k].id), anchor[k].type), f"{k} 불일치"
-        # 휴먼 direct name = email (M1 정합, 단일/batch 일관)
-        assert anchor[OM_MEM].name == "mem@pg.test"
+        # story #3755 — 휴먼 direct name = display_name(email 폴백 0, M1 정합·단일/batch 일관).
+        # 시드된 U_MEM.display_name='Mem'(위 _seed INSERT).
+        assert anchor[OM_MEM].name == "Mem"
         # 레거시 휴먼 team_member.id → canonical 휴먼 member(org_member.id)
         assert anchor[TM_OWNER].id == OM_OWNER
     finally:

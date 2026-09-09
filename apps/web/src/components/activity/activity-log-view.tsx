@@ -11,6 +11,7 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { memberDisplayLabel } from '@/lib/member-display';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -345,13 +346,21 @@ export function auditContextTooltip(item: ActivityLogItem): string | undefined {
 // 그 외(human·null=미상)는 기존처럼 human으로(보수적 기본값, storage-uploader-avatar.tsx
 // 선례와 동형 — 지어내지 않음). auditClaim/auditContextTooltip과 동형 패턴(순수함수 export)으로
 // 렌더 없이 유닛테스트 가능하게 분리.
-export function auditActorProps(item: ActivityLogItem): {
+//
+// story #3755(BE·표시명·결함 클래스) — actor_id는 있는데 actor_name이 null인 경우(member_resolver
+// 해소 결과 display_name 없음, activity_logs.py:180 `actor_name_map.get(log.actor_id) if
+// log.actor_id else None`)와 actor_id 자체가 null(진짜 시스템 액션 — 액터가 없음)이 같은
+// `!item.actor_name`으로 뭉뚱그려져 있었다 — 전자는 실존 구성원이라 「이름 없는 구성원」으로
+// 정직하게 표시해야 하고, 후자는(액터 자체가 없음) 기존대로 빈 슬롯이 맞다. actor_id로 갈라
+// 구분한다.
+export function auditActorProps(item: ActivityLogItem, t: (key: string) => string): {
   human?: { name: string; role: string };
   agent?: { name: string; initial: string };
 } {
-  if (!item.actor_name) return {};
-  if (item.actor_type === 'agent') return { agent: { name: item.actor_name, initial: item.actor_name.slice(0, 1) } };
-  return { human: { name: item.actor_name, role: item.actor_type ?? 'human' } };
+  if (!item.actor_id) return {}; // 진짜 액터 없음(시스템 액션) — 빈 슬롯 유지.
+  const name = memberDisplayLabel(item.actor_name, t);
+  if (item.actor_type === 'agent') return { agent: { name, initial: name.slice(0, 1) } };
+  return { human: { name, role: item.actor_type ?? 'human' } };
 }
 
 function ActivityRow({ item }: { item: ActivityLogItem }) {
@@ -361,7 +370,8 @@ function ActivityRow({ item }: { item: ActivityLogItem }) {
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const time = formatRelativeTime(item.created_at, locale, displayTimezone);
-  const { human, agent } = auditActorProps(item);
+  const tc = useTranslations('common');
+  const { human, agent } = auditActorProps(item, tc);
   return (
     <div title={auditContextTooltip(item)}>
       <ProofCapsule

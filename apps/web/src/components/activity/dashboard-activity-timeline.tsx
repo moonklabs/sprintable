@@ -9,6 +9,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { memberDisplayLabel } from '@/lib/member-display';
 
 interface ActivityLogItem {
   id: string;
@@ -36,6 +37,18 @@ function getInitials(name: string | null): string {
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase() ?? '')
     .join('');
+}
+
+// story #3755(BE·표시명·결함 클래스) — actor_id 있는데(실존 구성원) actor_name null(display_name
+// 없음)인 경우와 actor_id 자체가 null(진짜 시스템 액션)인 경우가 예전엔 같은 `unknownActor`
+// (「시스템」)로 뭉뚱그려졌다 — activity-log-view.tsx의 auditActorProps와 동형 처방.
+export function activityActorLabel(
+  item: Pick<ActivityLogItem, 'actor_id' | 'actor_name'>,
+  t: (key: string) => string,
+  tc: (key: string) => string,
+): string {
+  if (!item.actor_id) return t('unknownActor'); // 진짜 액터 없음(시스템 액션).
+  return memberDisplayLabel(item.actor_name, tc); // 실존 구성원 — 이름 있으면 그대로, 없으면 「이름 없는 구성원」.
 }
 
 function avatarClass(type: 'human' | 'agent' | null): string {
@@ -83,6 +96,7 @@ function RelativeTime({ iso, locale }: { iso: string; locale: string }) {
 
 export function DashboardActivityTimeline({ projectId }: DashboardActivityTimelineProps) {
   const t = useTranslations('activityTimeline');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const [items, setItems] = useState<ActivityLogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,7 +177,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
               </span>
               <div className="min-w-0 flex-1">
                 <span className="text-xs font-medium text-foreground">
-                  {item.actor_name ?? t('unknownActor')}
+                  {activityActorLabel(item, t, tc)}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {' — '}
