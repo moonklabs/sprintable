@@ -190,6 +190,67 @@ async def test_refresh_with_session_started_after_password_change_succeeds_200_n
 
 
 @pytest.mark.anyio
+async def test_refresh_with_password_set_same_second_as_session_start_succeeds_200():
+    """story #3750(BE·보안·bug, 미르코 그라운딩 2026-09-09) — 좌변(password_set_at.
+    timestamp(), float)과 우변(session_started_at, 초 절삭 int)을 단위 안 맞추고
+    비교하던 결함의 정확히 그 경계. 가입 직후처럼 password_set_at과 토큰 발급이
+    같은 정수 초 안에 떨어지면(password_set_at의 소수부가 0보다 큼) 예전 코드는
+    `float > int`가 True로 나와(초 뒤 소수부만큼 항상 더 크므로) 방금 만든 세션을
+    즉시 stale로 오판했다 — 이 테스트가 그 경계를 정확히 pin한다. 되돌리면 RED."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        # 세션이 시작된 바로 그 정수 초 «안»에서(소수부가 0보다 크게) 비밀번호가
+        # 찍힌 경우 — 가입 핸들러의 실제 순서(password_set_at 먼저, 토큰 발급
+        # 나중)와 반대로 구성해도 "같은 초"라는 사실 자체가 핵심이라 무해하다.
+        session_started_at = int(datetime.now(timezone.utc).timestamp())
+        password_set_at = datetime.fromtimestamp(session_started_at + 0.87, tz=timezone.utc)
+        async with Session() as s:
+            user_id = await _seed_user_with_password(s, password_set_at=password_set_at)
+            raw_rt = await _seed_refresh_token(s, user_id, session_started_at=session_started_at)
+
+        await _setup_db_override(app, Session)
+        client = _client_for(app)
+        try:
+            resp = await client.post("/api/v2/auth/refresh", json={"refresh_token": raw_rt})
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_with_password_set_next_second_after_session_start_401():
+    """story #3750 — 위 테스트의 반대쪽 경계(기존 보안 판정이 그대로 서 있는지).
+    비밀번호가 세션 시작 «다음 정수 초»에 찍혔으면(진짜로 나중에 바뀐 것) 여전히
+    stale이어야 한다 — 초 절삭 정정이 «항상 False»로 물러진 게 아님을 확認."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        session_started_at = int(datetime.now(timezone.utc).timestamp())
+        password_set_at = datetime.fromtimestamp(session_started_at + 1.01, tz=timezone.utc)
+        async with Session() as s:
+            user_id = await _seed_user_with_password(s, password_set_at=password_set_at)
+            raw_rt = await _seed_refresh_token(s, user_id, session_started_at=session_started_at)
+
+        await _setup_db_override(app, Session)
+        client = _client_for(app)
+        try:
+            resp = await client.post("/api/v2/auth/refresh", json={"refresh_token": raw_rt})
+            assert resp.status_code == 401, resp.text
+            assert resp.json()["error"]["code"] == "SESSION_INVALIDATED"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_switch_project_with_stale_session_401():
     from app.main import app
 
