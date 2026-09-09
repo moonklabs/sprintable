@@ -72,12 +72,15 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
   }, [selectedBoardId]);
 
   useEffect(() => {
-    // story #3703 CHANGES(카디르 QA blocker②, 2026-09-08) — loadedKey를 여기서 같이 안
-    // 지우면, 보드를 해제했다가 «같은 보드 A를 다시 선택」할 때 loadedKey가 옛 `A|` 그대로
-    // 남아 있어 새 selectedBoardId|query와 우연히 같은 문자열이 돼 settled=true가 즉시
-    // 참이 된다 — 실제로 새 fetch가 도착하기 전인데 "정착됨"으로 오판해 그 찰나 옛 화면이
-    // 잠깐 보인다(loadedKey 가드 자신의 재사용 결함).
-    if (!selectedBoardId) { setStories([]); setLoadedKey(null); return; }
+    // story #3703 CHANGES(카디르 재-QA blocker②-2, 2026-09-09) — 무효화를 «완전 해제»
+    // 분기 하나에만 걸어두면, 부분 일치(A→B→A를 디바운스 250ms 안에 왕복하거나 검색어를
+    // ''→'x'→''로 왕복)에서 loadedKey가 훨씬 전의 옛 값과 우연히 같은 문자열이 돼
+    // settled=true로 오판한다(카디르가 head에 재현 테스트 2건을 얹어 둘 다 FAIL 실증).
+    // 불변식은 「어떤 선택 변경이든 그 순간부터 그 변경 자신의 응답이 닿을 때까지
+    // settled=false」다 — 그래서 이 effect가 재실행되는 매 순간(=의존성이 바뀔 때마다)
+    // 첫 줄에서 무효화한다. 「완전 해제」도 이 재실행에 포함되므로 별도 처리가 필요 없다.
+    setLoadedKey(null);
+    if (!selectedBoardId) { setStories([]); return; }
     let cancelled = false;
     // story-picker-dialog.tsx와 동형 — setLoading을 디바운스 콜백 안에 둬 effect 본문
     // 동기 setState를 피한다(react-hooks/set-state-in-effect).

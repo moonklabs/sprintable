@@ -202,4 +202,60 @@ describe('BoardBridgeModal — 디바운스 창 정직성(story #3703 CHANGES, �
     const staleButton = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('보드1 스토리'));
     expect(staleButton).toBeUndefined();
   });
+
+  it('보드 A→B→A를 디바운스 안에서 왕복 — 옛 loadedKey 우연 일치로 즉시 정착 오단정하지 않는다(카디르 재-QA blocker②-2 a)', async () => {
+    let boardACalls = 0;
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      const isBoard1 = url.includes(`project_id=${BOARD.projectId}`);
+      if (isBoard1) {
+        boardACalls += 1;
+        return { ok: true, json: async () => ({ data: [story('s1', `보드1 스토리 v${boardACalls}`)] }) };
+      }
+      return { ok: true, json: async () => ({ data: [story('s2', '보드2 스토리')] }) };
+    });
+    await act(async () => {
+      root.render(wrap(
+        <BoardBridgeModal open onOpenChange={() => {}} boards={[BOARD, BOARD_2]} alreadySelectedIds={[]} onSelectStory={() => {}} />,
+      ));
+    });
+    await selectBoard(BOARD.projectId);
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).toContain('보드1 스토리 v1'); // A 최초 정착.
+
+    await selectBoard(BOARD_2.projectId); // 디바운스(250ms) 안에서 B로.
+    await selectBoard(BOARD.projectId); // 그 250ms 안에 다시 A — 파생 키는 최초 정착 때의 `p1|`와 우연히 같다.
+    const staleButton = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('보드1 스토리'));
+    expect(staleButton).toBeUndefined(); // v1(옛 응답)을 "정착"으로 오판해 보여주면 안 된다 — 새 응답 前엔 스켈레톤.
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).toContain('보드1 스토리 v2'); // 이번 A 선택 «자신의» 새 응답이 도착한 後에만 정착.
+  });
+
+  it("검색어를 ''→'x'→''로 디바운스 안에서 왕복 — 옛 loadedKey 우연 일치로 즉시 정착 오단정하지 않는다(카디르 재-QA blocker②-2 b)", async () => {
+    let emptyQueryCalls = 0;
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      const q = new URL(url, 'http://localhost').searchParams.get('q');
+      if (!q) {
+        emptyQueryCalls += 1;
+        return { ok: true, json: async () => ({ data: [story('s1', `보드1 스토리 v${emptyQueryCalls}`)] }) };
+      }
+      return { ok: true, json: async () => ({ data: [story('s2', 'x 검색결과')] }) };
+    });
+    await act(async () => {
+      root.render(wrap(
+        <BoardBridgeModal open onOpenChange={() => {}} boards={[BOARD]} alreadySelectedIds={[]} onSelectStory={() => {}} />,
+      ));
+    });
+    await selectBoard(BOARD.projectId);
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).toContain('보드1 스토리 v1'); // 빈 질의 최초 정착.
+
+    act(() => { typeQuery('x'); }); // 디바운스 안에서 검색어 입력.
+    act(() => { typeQuery(''); }); // 250ms 안에 다시 빈 문자열로 — 파생 키가 최초 정착 때의 `p1|`와 우연히 같다.
+    const staleButton = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('보드1 스토리'));
+    expect(staleButton).toBeUndefined();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).toContain('보드1 스토리 v2'); // 이번 왕복 «자신의» 새 응답이 도착한 後에만 정착.
+  });
 });
