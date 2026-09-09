@@ -119,13 +119,13 @@ describe('Toast 접근성 (story #2096)', () => {
 
   // story #3759 CHANGES(페드루 PO 지적, #4106) — 컬럼이 높이 예산을 갖게 되면서 토스트
   // 스택이 넘치는 몫을 진다(overflow-hidden). 잘려야 하는 건 «가장 오래된» 토스트다(최신은
-  // min-h-[5.5rem] 바닥으로 항상 온전 — CHANGES 2차). jsdom엔 레이아웃 엔진이 없어 실제
-  // 클리핑(픽셀)은 못 재지만(로컬 puppeteer 실측은 bottom-dock.tsx 코드 주석 참고 —
-  // 375×667·패널 열림+내용 채움·토스트 5장에서 최신 3장은 스택 자기 박스 안에 온전히 남고
-  // 오래된 2장만 그 박스 밖으로 밀려남을 실측 확認), «DOM 순서가 실제로 새것-먼저인가»는
-  // jsdom이 그대로 잴 수 있는 실제 값이다 — flex-col-reverse가 그 DOM 순서를 «오래된 게
-  // 위·새것이 아래»라는 정상 시각 순서로 되돌리고, overflow가 나면 DOM 뒤쪽(오래된 것들)
-  // 부터 컨테이너 박스 밖으로 밀려 잘린다.
+  // 별도 shrink-0 래퍼로 항상 온전 — CHANGES 3차, 아래 별도 describe). jsdom엔 레이아웃
+  // 엔진이 없어 실제 클리핑(픽셀)은 못 재지만(로컬 puppeteer 실측은 bottom-dock.tsx 코드
+  // 주석 참고 — 375×667·패널 열림+내용 채움·토스트 5장(두 줄 본문 최신 픽스처)에서 최신은
+  // 자연 높이 그대로 온전, 오래된 2장만 그 박스 밖으로 밀려남을 실측 확認), «DOM 순서가
+  // 실제로 새것-먼저인가»는 jsdom이 그대로 잴 수 있는 실제 값이다 — flex-col-reverse가 그
+  // DOM 순서를 «오래된 게 위·새것이 아래»라는 정상 시각 순서로 되돌리고, overflow가 나면
+  // DOM 뒤쪽(오래된 것들)부터 컨테이너 박스 밖으로 밀려 잘린다.
   it('DOM 자식 순서가 새것-먼저다(newest-first) — 되돌리면(toasts 그대로 매핑) 이 assertion이 실패한다', async () => {
     const items = [
       toast({ id: 'oldest', title: '오래된' }),
@@ -139,17 +139,53 @@ describe('Toast 접근성 (story #2096)', () => {
     expect(rendered).toEqual([expect.stringContaining('새것'), expect.stringContaining('중간'), expect.stringContaining('오래된')]);
   });
 
-  // story #3759 CHANGES 2차(유나 定+페드루 判, #4106) — min-h-0(0까지 눌릴 수 있음)은 정정
-  // 캡처에서 최신 토스트까지 27px 조각으로 잘리는 걸 실제로 보고 min-h-[5.5rem](카드 한
-  // 장+gap 바닥)으로 교체됐다 — «토스트 1장은 항상 온전».
-  it('컨테이너 wrapper가 flex-col-reverse + min-h-[5.5rem] + overflow-hidden이다(최신 1장은 항상 온전·정상 시각 순서 유지)', async () => {
+  // story #3759 CHANGES 3차(유나 ⛔+페드루 判, #4106) — CHANGES 2차의 min-h-[5.5rem](88px)
+  // 수치 바닥은 배포 CSS 실측에서 두 줄 감기는 본문 토스트(90px)를 2px 못 덮어 «온전» 약속이
+  // 깨졌다(캡처 픽스처가 한 줄이라 가려졌던 축). 수치 비교를 아예 없애고 구조로: 최신
+  // 토스트는 그 실제 높이가 몇 px든(58·74·90 전부) shrink-0 래퍼의 «직계 자식»이면
+  // flexbox가 정의상 그 래퍼를 절대 안 줄인다 — jsdom이 실제로 잴 수 있는 진짜 DOM 구조
+  // 단언(레이아웃 없이도 참).
+  it('최신 토스트가 shrink-0 래퍼의 직계 자식이다(수치 바닥 아님 — 내용이 몇 px든 구조로 온전 보장)', async () => {
+    const items = [
+      toast({ id: 'oldest', title: '오래된' }),
+      toast({ id: 'middle', title: '중간' }),
+      toast({ id: 'newest', title: '새것', body: '두 줄로 자연스럽게 감길 만큼 충분히 긴 본문 텍스트를 넣어 CHANGES 2차의 88px 바닥을 넘기는 실제 높이를 재현' }),
+    ];
     await act(async () => {
-      root.render(wrap(<ToastContainer toasts={[toast({ id: 't1' }), toast({ id: 't2' })]} onDismiss={() => {}} />));
+      root.render(wrap(<ToastContainer toasts={items} onDismiss={() => {}} />));
     });
-    const wrapperEl = container.querySelector('[role]')?.parentElement;
-    expect(wrapperEl?.className).toContain('flex-col-reverse');
-    expect(wrapperEl?.className).toContain('min-h-[5.5rem]');
-    expect(wrapperEl?.className).toContain('overflow-hidden');
+    const newestEl = [...container.querySelectorAll('[role]')].find((el) => el.textContent?.includes('새것'));
+    expect(newestEl).toBeDefined();
+    const parent = newestEl?.parentElement;
+    expect(parent?.className).toBe('shrink-0');
+    // 형제가 없어야 한다(오래된 것들과 같은 스택에 섞이면 flexbox가 함께 눌릴 수 있다).
+    expect(parent?.children.length).toBe(1);
+  });
+
+  it('오래된 토스트들은 별도 min-h-0 overflow-hidden 서브스택에 있다(최신의 shrink-0 래퍼와 분리)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ToastContainer
+          toasts={[toast({ id: 'oldest' }), toast({ id: 'newest' })]}
+          onDismiss={() => {}}
+        />,
+      ));
+    });
+    const oldestEl = container.querySelector('[data-testid]') ?? [...container.querySelectorAll('[role]')][1];
+    const olderStackEl = oldestEl.parentElement;
+    expect(olderStackEl?.className).toContain('min-h-0');
+    expect(olderStackEl?.className).toContain('overflow-hidden');
+    expect(olderStackEl?.className).toContain('flex-col-reverse');
+    expect(olderStackEl?.className).not.toBe('shrink-0');
+  });
+
+  it('토스트 1장뿐이면 오래된 서브스택 자체가 렌더되지 않는다(빈 flex 자식의 불필요한 gap 방지)', async () => {
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={[toast({ id: 'only' })]} onDismiss={() => {}} />));
+    });
+    const newestEl = container.querySelector('[role]');
+    const outerWrapper = newestEl?.parentElement?.parentElement;
+    expect(outerWrapper?.children.length).toBe(1);
   });
 });
 

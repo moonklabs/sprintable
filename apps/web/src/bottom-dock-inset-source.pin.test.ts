@@ -14,6 +14,15 @@ function read(relativePath: string): string {
   return readFileSync(join(SRC_ROOT, relativePath), 'utf-8');
 }
 
+// story #3759 CHANGES 3차 — 코드 주석 자체가 지난 회귀(min-h-[5.5rem])를 설명하려고 그
+// 리터럴을 그대로 인용한다. "그 리터럴이 코드에 없다"를 재는 negative-match 정규식이
+// 그 설명 줄까지 걸리면 오탐이다(bottom-dock-inset.guard.test.ts COMMENT_LINE_RE와
+// 동형 처방) — 순수 코드 줄만 남기고 재는다.
+const COMMENT_LINE_RE = /^\s*(\/\/|\*|\{\/\*)/;
+function stripCommentLines(content: string): string {
+  return content.split('\n').filter((l) => !COMMENT_LINE_RE.test(l)).join('\n');
+}
+
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
@@ -97,15 +106,22 @@ describe('<ToastContainer> 렌더 자리 전수 1(story #3759 AC1) — 셸(Botto
 
 // story #3759 CHANGES(유나 定+페드루 判, #4106) — 컬럼에 높이 예산이 없어 토스트가 쌓일수록
 // 패널이 뷰포트 위로 밀려났다(375×667·토스트 1장에서 패널 top -31, #3756이 세운 "패널
-// top ≥ 0" 회귀). 처방 3곳(컬럼 max-h+min-h-0 · 패널 max-h- · 토스트 스택 min-h-[5.5rem]+
-// overflow-hidden)을 소스 텍스트 수준에서 고정 — 셋 중 하나라도 되돌리면 이 describe가
-// RED(jsdom엔 레이아웃 엔진이 없어 실제 겹침/클리핑 자체는 못 재므로, 로컬 puppeteer 실측
-// 수치는 bottom-dock.tsx의 코드 주석에 남긴다 — doc-editor.tsx의 기존 관례와 동형).
+// top ≥ 0" 회귀). 처방(컬럼 max-h+min-h-0 · 패널 max-h-)을 소스 텍스트 수준에서 고정 —
+// 되돌리면 이 describe가 RED(jsdom엔 레이아웃 엔진이 없어 실제 겹침/클리핑 자체는 못
+// 재므로, 로컬 puppeteer 실측 수치는 bottom-dock.tsx의 코드 주석에 남긴다 — doc-editor.tsx의
+// 기존 관례와 동형).
 //
 // story #3759 CHANGES 2차(유나 定+페드루 判, #4106) — 패널의 shrink-0(절대 안 줄어듦)을
-// 걷고 min-h-0(양보하는 쪽)으로 뒤집었다 — 토스트 1장은 항상 온전해야 하고(min-h-[5.5rem]
-// 바닥), 그 대신 패널이 필요한 만큼 줄어든다(자기 스크롤이 있어 내용을 안 잃는다).
-describe('BottomDock 높이 예산 3종(story #3759 CHANGES, #4106) — 패널 top ≥ 0 회귀가드', () => {
+// 걷고 min-h-0(양보하는 쪽)으로 뒤집었다 — 토스트 1장은 항상 온전해야 하고, 그 대신
+// 패널이 필요한 만큼 줄어든다(자기 스크롤이 있어 내용을 안 잃는다).
+//
+// story #3759 CHANGES 3차(유나 ⛔+페드루 判, #4106) — 「토스트 1장 항상 온전」을 애초에
+// min-h-[5.5rem](88px) 수치 바닥으로 세웠는데, 배포 CSS 실측(제목만 58·짧은 본문 74·
+// 두 줄 본문 90px)에서 90>88이라 최신이 2px 잘렸다 — 회피 상수를 없앤 스토리에 새 회피
+// 상수가 다시 들어온 모순(캡처 픽스처가 한 줄이라 못 걸렸던 축). 처방을 구조로 바꿨다:
+// 최신 한 장만 shrink-0 래퍼로 분리(수치 비교 없이 무조건 안 줄어듦), 나머지는 별도
+// min-h-0 overflow-hidden 서브스택.
+describe('BottomDock 높이 예산(story #3759 CHANGES, #4106) — 패널 top ≥ 0 + 토스트 1장 항상 온전 회귀가드', () => {
   it('bottom-dock.tsx 컬럼이 max-h 예산과 min-h-0을 갖는다(예산 없이 무한정 자라지 않는다)', () => {
     const content = read('src/components/nav/bottom-dock.tsx');
     expect(content).toContain('max-h-[calc(100vh-var(--bottom-dock-inset)-2rem)]');
@@ -127,14 +143,27 @@ describe('BottomDock 높이 예산 3종(story #3759 CHANGES, #4106) — 패널 t
     expect(panelClassNameLine).not.toContain('shrink-0');
   });
 
-  it('toast.tsx ToastContainer가 min-h-[5.5rem](카드 한 장 바닥) + overflow-hidden + flex-col-reverse다', () => {
+  it('toast.tsx ToastContainer가 최신 토스트를 shrink-0 래퍼로 분리한다(수치 바닥 아님 — 되돌리기 잘림 회귀가드)', () => {
     const content = read('src/components/ui/toast.tsx');
-    expect(content).toContain('min-h-[5.5rem] flex-col-reverse gap-2 overflow-hidden');
+    expect(content).toContain('<div className="shrink-0">');
+    // story #3759 CHANGES 3차의 핵심 회귀가드 — min-h-[5.5rem] 같은 픽셀/rem 수치 바닥이
+    // 코드(주석 제외)에 다시 들어오면 실패한다(수치는 콘텐츠에 따라 항상 깨질 수 있다 —
+    // 구조만이 안전). 주석은 이 회귀 자체를 설명하려 그 리터럴을 그대로 인용하므로 코드
+    // 줄만 걸러 검사한다(stripCommentLines).
+    const codeOnly = stripCommentLines(content);
+    expect(codeOnly).not.toMatch(/min-h-\[[\d.]+rem\]/);
+    expect(codeOnly).not.toMatch(/min-h-\[[\d.]+px\]/);
   });
 
-  it('toast.tsx ToastContainer가 렌더 전 배열을 뒤집는다(새것-DOM-먼저 — 안 그러면 col-reverse가 최신을 자른다)', () => {
+  it('toast.tsx ToastContainer가 오래된 토스트를 별도 min-h-0 overflow-hidden 서브스택으로 둔다(넘치면 그쪽만 자름)', () => {
     const content = read('src/components/ui/toast.tsx');
-    expect(content).toMatch(/\[\.\.\.toasts\]\.reverse\(\)/);
-    expect(content).toMatch(/newestFirst\.map\(/);
+    expect(content).toContain('flex min-h-0 flex-col-reverse gap-2 overflow-hidden');
+  });
+
+  it('toast.tsx ToastContainer가 최신=toasts 마지막·오래된=나머지 뒤집은 순으로 분리한다(구조 자체가 우선순위를 담음)', () => {
+    const content = read('src/components/ui/toast.tsx');
+    expect(content).toMatch(/toasts\[toasts\.length\s*-\s*1\]/);
+    expect(content).toMatch(/toasts\.slice\(0,\s*-1\)/);
+    expect(content).toMatch(/\[\.\.\.older\]\.reverse\(\)/);
   });
 });

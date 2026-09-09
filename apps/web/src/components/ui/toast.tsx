@@ -183,16 +183,37 @@ export function ToastContainer({
   // 토스트 2장째부터). 근거: 반쯤 그려진 토스트는 「누를 수 있다」고 말해 놓고(role=status·
   // 되돌리기 버튼 살아있음) 못 누르게 하는 거짓 어포던스 — 8초짜리 「되돌리기」 액션이 실린
   // 토스트가 조각으로 잘리면 사용자가 그 버튼을 못 찾는다. 패널은 사용자가 스스로 연
-  // 지속 표면이라 줄어도 내용을 안 잃는다(자체 overflow-y-auto 스크롤). `min-h-0`(예산
-  // 안에서 0까지 눌릴 수 있음)을 `min-h-[5.5rem]`(카드 한 장+gap, 2줄 토스트 기준)로
-  // 바꿔 이 스택 자신에게 «최소 한 장은 절대 안 줄어드는» 바닥을 준다 — 그 아래로는
-  // flexbox가 패널(support-widget-launcher.tsx, shrink-0 해제) 쪽에서 공간을 뺏어온다.
-  const newestFirst = [...toasts].reverse();
+  // 지속 표면이라 줄어도 내용을 안 잃는다(자체 overflow-y-auto 스크롤).
+  //
+  // story #3759 CHANGES 3차(유나 ⛔+페드루 判 동의, #4106) — 1차 처방(`min-h-[5.5rem]`)이
+  // 다시 회피 상수였다: 배포 CSS 위 실측으로 제목만 58px·제목+짧은 본문 74px·제목+두 줄
+  // 감기는 본문 90px — 88px(5.5rem) 바닥이 90px 토스트를 2px 못 덮어 «온전» 약속이 그
+  // 자리서 깨졌다(#3759 자체 목표 — 회피 상수를 «수식에서» 없앤 것인데 그 자리에 또 다른
+  // 상수가 들어온 모순). 처방은 다시 구조로: 배열 전체를 하나의 min-h 스택에 욱여넣는
+  // 대신, 최신 한 장만 별도 `shrink-0` 래퍼로 분리한다 — shrink-0은 그 장의 실제 높이가
+  // 58이든 90이든 «절대 안 줄어듦»을 무조건 보장한다(수치 비교가 필요 없다). 나머지
+  // (오래된 것들)는 별개의 `min-h-0 overflow-hidden` 서브스택 — flexbox가 부족한 공간을
+  // 전부 이 서브스택에서만 뺏어가고(그다음 패널에서), shrink-0 래퍼는 애초에 후보에서
+  // 빠진다.
+  // DOM 순서 주의: 컨테이너 자체가 flex-col-reverse라 «1번째 DOM 자식이 main-start(=
+  // 이 전체 레인의 바닥, 런처 쪽)»다. 그래서 shrink-0 래퍼(최신)가 반드시 먼저 와야
+  // 최신이 바닥에 남는다 — 서브스택을 먼저 두면 최신이 위로 올라가 버린다(그 반대는
+  // #3759 CHANGES 2차까지의 단일 스택 규약과도 어긋남).
+  const newest = toasts[toasts.length - 1];
+  const older = toasts.slice(0, -1);
+  const olderNewestFirst = [...older].reverse();
   return (
-    <div className="pointer-events-auto flex min-h-[5.5rem] flex-col-reverse gap-2 overflow-hidden">
-      {newestFirst.map((t) => (
-        <Toast key={t.id} item={t} onDismiss={onDismiss} />
-      ))}
+    <div className="pointer-events-auto flex min-h-0 flex-col-reverse gap-2">
+      <div className="shrink-0">
+        <Toast item={newest} onDismiss={onDismiss} />
+      </div>
+      {older.length > 0 && (
+        <div className="flex min-h-0 flex-col-reverse gap-2 overflow-hidden">
+          {olderNewestFirst.map((t) => (
+            <Toast key={t.id} item={t} onDismiss={onDismiss} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
