@@ -98,4 +98,15 @@ describe('OrgBriefingShell — 프로젝트 안내 배너 (story #2212, 유나�
     await mount();
     expect(container.textContent).not.toContain('프로젝트를 선택하면');
   });
+
+  // story #3748(잔여②, 페드루 PO 確定 2026-09-09) — 손코딩 rounded-xl div를 집안 `Alert`
+  // role="status"로 이관. ⭐되돌리면 RED — role="status" 사라지거나 손코딩 div로 되돌아가면 실패.
+  it('⭐배너는 손코딩 div가 아니라 role="status" Alert다', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], orgMemberships: [], projectId: undefined });
+    await mount();
+    const statusEl = container.querySelector('[role="status"]');
+    expect(statusEl).toBeTruthy();
+    expect(statusEl?.textContent).toBe('프로젝트를 선택하면 여기에 현황이 표시됩니다.');
+    expect(container.querySelector('.rounded-xl.border.border-border.bg-muted\\/40')).toBeNull();
+  });
 });

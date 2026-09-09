@@ -479,7 +479,7 @@
     "clusterSilentStallBucket1moPlus": "1개월+",
     "clusterSilentStallAgeDays": "{n}일째",
     "clusterSilentStallUnassigned": "담당자 미배정",
-    "clusterViewAll": "{n}건 전체보기 →",
+    "clusterViewAll": "{n}건 전체보기",
     "clusterViewLess": "접기",
     "clusterUnclosedTitle": "결과를 안 적고 끝난 목표",
     "clusterUnclosedSub": "측정 기한이 지났거나 결과 판정이 없는 항목",

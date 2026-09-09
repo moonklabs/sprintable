@@ -80,6 +80,19 @@ describe('Alert 접근성 (story #2149)', () => {
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
 
+  // 카디르 QA 지적(story #3748, 2026-09-09) — aria-live 기본값은 variant가 아니라 실제
+  // role을 따라야 한다. variant="default"라도 호출부가 role="status"를 명시하면(예:
+  // org-briefing-shell.tsx 안내 배너) 옛 손코딩 div(aria-live 없음=암묵 polite)와 동형으로
+  // polite여야 옳다 — 되돌리면 이관이 접근성 회귀(assertive)를 만든다.
+  it('⭐variant=default라도 role="status"를 명시하면 aria-live 기본값은 polite다(variant 아닌 role 기준)', async () => {
+    await act(async () => {
+      root.render(<Alert role="status"><AlertDescription>안내</AlertDescription></Alert>);
+    });
+    const el = container.querySelector('[role="status"]');
+    expect(el).not.toBeNull();
+    expect(el?.getAttribute('aria-live')).toBe('polite');
+  });
+
   it('destructive와 status가 동시에 잡히지 않는다(이중 낭독 방지)', async () => {
     await act(async () => {
       root.render(<Alert variant="destructive"><AlertDescription>에러</AlertDescription></Alert>);

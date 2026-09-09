@@ -98,6 +98,24 @@ describe('AttentionClusterBoard', () => {
     expect(container.textContent).toContain(koMessages.orgBriefing.clusterFalsifiedResultUnknown);
   });
 
+  // story #3748(잔여①, 페드루 PO 確定 2026-09-09) — clusterViewAll(「{n}건 전체보기」)의
+  // 실 동작은 ViewAllToggle의 제자리 펼침 <button>이지 화면을 떠나는 링크가 아니다.
+  // 「→」는 집안에서 "여길 떠난다"는 뜻으로 쓰는 기호라 여기 붙어 있으면 거짓 신호다.
+  // ⭐되돌리면 RED — clusterViewAll 값에 「→」가 남으면 이 버튼 텍스트에 그대로 찍힌다.
+  it('⭐top-N(3) 초과 시 나오는 「전체보기」 버튼에 화살표(→)가 없다(제자리 펼침, 링크 아님)', async () => {
+    const items: FalsifiedClusterItem[] = Array.from({ length: 4 }, (_, i) => ({
+      id: `h${i}`, title: `가설 ${i}`, target: 50, actual: 30, hasOutcome: true,
+      supersededId: null, href: `/flow?hypothesis=h${i}`, crossProjectLabel: null,
+    }));
+    await act(async () => {
+      root.render(wrap(<AttentionClusterBoard falsified={items} silentStall={EMPTY_SILENT_STALL} {...NO_LOOP} />));
+    });
+    const toggle = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('전체보기'));
+    expect(toggle).toBeTruthy();
+    expect(toggle?.textContent).toBe(koMessages.orgBriefing.clusterViewAll.replace('{n}', '1'));
+    expect(toggle?.textContent).not.toContain('→');
+  });
+
   // story #93b076c8(2250) FE — 「침묵의 정체」 4구간 요약(top-N 펼침이 아니라 구간별 접힘행).
   describe('silent stall cluster (story #93b076c8/#2250)', () => {
     it('빈 구간은 행 자체를 그리지 않는다(0건을 굳이 그리지 않음)', async () => {
