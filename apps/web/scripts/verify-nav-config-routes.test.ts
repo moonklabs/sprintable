@@ -12,7 +12,7 @@ describe('verify-nav-config-routes — story #2681 AC3', () => {
   // 교체) 죽은 링크·미등재 목적지를 이 가드가 정확히 잡아내는지 확인한다.
   it('죽은 static 링크를 정확히 잡아낸다(RED 실증)', () => {
     const fakeGroups = [
-      { id: 'g1', labelKey: 'x', items: [{ id: 'dead', labelKey: 'x', icon: AlertCircle, kind: 'static' as const, path: '/no/such/route' }] },
+      { id: 'g1', labelKey: 'x', items: [{ id: 'dead', labelKey: 'x', descriptionKey: 'x', icon: AlertCircle, kind: 'static' as const, path: '/no/such/route' }] },
     ];
     const alwaysMissing: RouteChecker = { staticExists: () => false, resourceExists: () => false };
     expect(findBrokenNavEntries(fakeGroups, alwaysMissing)).toEqual([
@@ -22,7 +22,7 @@ describe('verify-nav-config-routes — story #2681 AC3', () => {
 
   it('미등재 resource 목적지를 정확히 잡아낸다(RED 실증)', () => {
     const fakeGroups = [
-      { id: 'g1', items: [{ id: 'ghost', labelKey: 'x', icon: AlertCircle, kind: 'resource' as const, path: 'no_such_resource' }] },
+      { id: 'g1', items: [{ id: 'ghost', labelKey: 'x', descriptionKey: 'x', icon: AlertCircle, kind: 'resource' as const, path: 'no_such_resource' }] },
     ];
     const alwaysMissing: RouteChecker = { staticExists: () => false, resourceExists: () => false };
     expect(findBrokenNavEntries(fakeGroups, alwaysMissing)).toEqual([
@@ -32,7 +32,7 @@ describe('verify-nav-config-routes — story #2681 AC3', () => {
 
   it('전부 정합하면 빈 배열을 낸다(양성대조)', () => {
     const fakeGroups = [
-      { id: 'g1', items: [{ id: 'ok', labelKey: 'x', icon: AlertCircle, kind: 'static' as const, path: '/anything' }] },
+      { id: 'g1', items: [{ id: 'ok', labelKey: 'x', descriptionKey: 'x', icon: AlertCircle, kind: 'static' as const, path: '/anything' }] },
     ];
     const alwaysPresent: RouteChecker = { staticExists: () => true, resourceExists: () => true };
     expect(findBrokenNavEntries(fakeGroups, alwaysPresent)).toEqual([]);
