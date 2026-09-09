@@ -225,14 +225,14 @@ describe('StoryDetailPanel — org-switch 잔여 레이스 stale-guard (story #2
     await act(async () => {
       resolveSecond?.({ ok: true, json: async () => ({ data: [{ id: 'fresh', content: 'FRESH_ORG_COMMENT', created_by: 'u', created_at: '2026-01-01' }] }) });
     });
-    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Comments'));
-    expect(trigger()?.textContent).toBe('Comments (1)');
+    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('댓글'));
+    expect(trigger()?.textContent).toBe('댓글 (1)');
 
     // 구 org 응답(1st)이 뒤늦게 도착 — cancelled라 무시돼야 fresh 상태가 안 덮인다.
     await act(async () => {
       resolveFirst?.({ ok: true, json: async () => ({ data: [{ id: 'stale', content: 'STALE_ORG_COMMENT', created_by: 'u', created_at: '2026-01-01' }] }) });
     });
-    expect(trigger()?.textContent).toBe('Comments (1)'); // 여전히 1 — stale 응답이 2번째로 덮어쓰지 않았다
+    expect(trigger()?.textContent).toBe('댓글 (1)'); // 여전히 1 — stale 응답이 2번째로 덮어쓰지 않았다
   });
 });
 
@@ -253,13 +253,13 @@ describe('StoryDetailPanel — Comments 탭 라벨 loadingComments(story #3712, 
     await act(async () => {
       root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
     });
-    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Comments'));
-    expect(trigger()?.textContent).toBe('Comments'); // "(0)" 없음 — 아직 조회 中이라 모른다.
+    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('댓글'));
+    expect(trigger()?.textContent).toBe('댓글'); // "(0)" 없음 — 아직 조회 中이라 모른다.
 
     await act(async () => {
       resolveComments?.({ ok: true, json: async () => ({ data: [{ id: 'c1', content: 'hi', created_by: 'u', created_at: '2026-01-01' }] }) });
     });
-    expect(trigger()?.textContent).toBe('Comments (1)'); // 응답 뒤엔 지금처럼 수 표시.
+    expect(trigger()?.textContent).toBe('댓글 (1)'); // 응답 뒤엔 지금처럼 수 표시.
   });
 });
 
@@ -959,8 +959,8 @@ describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', 
     await act(async () => {
       root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} onClose={() => {}} />));
     });
-    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
-    expect(tasksTab?.textContent).toBe('Tasks (2)');
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab?.textContent).toBe('태스크 (2)');
   });
 
   it('tasksTotalCount가 로드분보다 크면 라벨=총계이고, 목록 아래에 "로드분/총계" 정직 문구가 뜬다', async () => {
@@ -969,8 +969,8 @@ describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', 
         <StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} tasksTotalCount={25} onClose={() => {}} />,
       ));
     });
-    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
-    expect(tasksTab?.textContent).toBe('Tasks (25)'); // 20개만 로드됐어도 탭은 총계를 말한다.
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab?.textContent).toBe('태스크 (25)'); // 20개만 로드됐어도 탭은 총계를 말한다.
     expect(container.textContent).toContain(koMessages.board.tasksPartialCount.replace('{total}', '25').replace('{loaded}', '2'));
   });
 
@@ -980,8 +980,8 @@ describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', 
         <StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} tasksTotalCount={2} onClose={() => {}} />,
       ));
     });
-    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
-    expect(tasksTab?.textContent).toBe('Tasks (2)');
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab?.textContent).toBe('태스크 (2)');
     expect(container.textContent).not.toContain('표시 중');
   });
 
@@ -1072,8 +1072,8 @@ describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () 
         <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,
       ));
     });
-    const tasksTab = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
-    expect(tasksTab()?.textContent).toBe('Tasks'); // "(0)" 없음 — 조회 中이라 아직 모른다.
+    const tasksTab = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab()?.textContent).toBe('태스크'); // "(0)" 없음 — 조회 中이라 아직 모른다.
 
     await act(async () => { root.unmount(); });
     container = document.createElement('div');
@@ -1084,6 +1084,6 @@ describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () 
         <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={1} onClose={() => {}} />,
       ));
     });
-    expect(tasksTab()?.textContent).toBe('Tasks (1)'); // 응답 뒤엔 지금처럼 수 표시.
+    expect(tasksTab()?.textContent).toBe('태스크 (1)'); // 응답 뒤엔 지금처럼 수 표시.
   });
 });

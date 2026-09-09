@@ -2175,13 +2175,13 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     개수를 아예 말하지 않는다. tasksLoading인데도 「Tasks (0)」을 그리면
                     40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 재발한다
                     (탭 라벨=아는 척·본문=정직, 서로 다른 사실을 동시에 말하는 꼴). */}
-                <TabsTrigger value="tasks" className="flex-1">{tasksLoading ? 'Tasks' : `Tasks (${tasksTotalCount ?? tasks.length})`}</TabsTrigger>
+                <TabsTrigger value="tasks" className="flex-1">{tasksLoading ? t('tasks') : t('tasksCountLabel', { count: tasksTotalCount ?? tasks.length })}</TabsTrigger>
                 {/* story #3712(FE 완전성-정직, #4060/#3709 Tasks 탭과 같은 얼굴) — 조회
                     中엔 개수를 아예 말하지 않는다. loadingComments인데도 「Comments (0)」을
                     그리면 40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 된다
                     (본문은 이미 loadingComments를 먼저 검사한다 — 라벨만 빠져 있었다). */}
-                <TabsTrigger value="comments" className="flex-1">{loadingComments ? 'Comments' : `Comments (${comments.length})`}</TabsTrigger>
-                <TabsTrigger value="activity" className="flex-1">Activity</TabsTrigger>
+                <TabsTrigger value="comments" className="flex-1">{loadingComments ? t('comments') : t('commentsCountLabel', { count: comments.length })}</TabsTrigger>
+                <TabsTrigger value="activity" className="flex-1">{t('activityTab')}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="tasks" className="mt-4 space-y-2">
@@ -2238,7 +2238,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {/* Comment input */}
                 <div className="space-y-2">
                   <textarea
-                    placeholder="Add a comment..."
+                    placeholder={t('commentInputPlaceholder')}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
                     className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -2254,7 +2254,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       onClick={handleSubmitComment}
                       disabled={!commentInput.trim() || submittingComment}
                     >
-                      {submittingComment ? t('loading') : 'Comment'}
+                      {submittingComment ? t('loading') : t('commentSubmit')}
                     </Button>
                   </div>
                 </div>
@@ -2263,7 +2263,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {loadingComments ? (
                   <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : comments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No comments yet</p>
+                  <p className="text-sm text-muted-foreground">{t('noComments')}</p>
                 ) : (
                   <>
                     <ul className="space-y-3">
@@ -2293,7 +2293,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {loadingActivities ? (
                   <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : activities.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No activity yet</p>
+                  <p className="text-sm text-muted-foreground">{t('noActivity')}</p>
                 ) : (
                   <>
                     <ul className="space-y-2">
