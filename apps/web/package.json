@@ -33,6 +33,7 @@
     "verify:no-raw-error-message": "tsx scripts/verify-no-raw-error-message.ts",
     "verify:no-duplicate-i18n-keys": "tsx scripts/verify-no-duplicate-i18n-keys.ts",
     "verify:no-hanja-in-i18n": "tsx scripts/verify-no-hanja-in-i18n.ts",
+    "verify:i18n-keys-exist": "tsx scripts/verify-i18n-keys-exist.ts",
     "verify:no-new-raw-button": "tsx scripts/verify-no-new-raw-button.ts",
     "verify:ci-wires-all-verify-scripts": "tsx scripts/verify-ci-wires-all-verify-scripts.ts",
     "verify:no-handrolled-card": "tsx scripts/verify-no-handrolled-card.ts",
