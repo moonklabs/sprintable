@@ -1745,6 +1745,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # story #3751(PO 실측 2026-09-09 17:31Z~) — `playwright install --with-deps`가 내부
+      # `apt-get update`를 돌리는데, GH 러너 이미지에 기본 등록된 google-chrome apt 소스
+      # (dl.google.com)가 이따금 Hash Sum mismatch로 죽어 코드와 무관하게 이 잡을 통째로
+      # 빨갛게 만든다(같은 head가 그 전엔 초록이었다 — 외부 미러 동기화 타이밍 문제).
+      # 우리는 google-chrome apt 패키지를 안 쓴다(playwright가 자체 번들 chromium을 깐다) —
+      # 그 소스 자체를 지워 이 미러 의존을 0으로 만든다.
+      - name: Remove flaky google-chrome apt source (story #3751)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list
+          sudo apt-get update
+
       - name: Install Playwright chromium
         run: pnpm --filter web exec playwright install --with-deps chromium
 
