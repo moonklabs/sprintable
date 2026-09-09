@@ -685,6 +685,106 @@ describe('KanbanBoard — 상세 패널 story 전환 시 로컬 state 리셋(#35
   });
 });
 
+// story #3704(유나 발견+카디르 비블로커, #4054 재리뷰 中) — handleStoryClick이 진입 시
+// storyTasks 자신을 안 비우고, A→B 연타에서 늦게 온 A 응답이 B의 tasks/nextCursor/totalCount를
+// 덮을 수 있었다(형제 epic-swimlane-board.tsx엔 cancelled 가드가 있는데 kanban-board만 없었다).
+function deferredTaskResponse() {
+  let resolve!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+  const promise = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+function taskOk(rows: Array<{ id: string; title: string; status: string }>, totalCount: number) {
+  return { ok: true, json: async () => ({ data: rows, meta: { nextCursor: null, totalCount } }) };
+}
+
+function stubFetchWithTasks(
+  stories: Array<Record<string, unknown> & { status: string }>,
+  taskHandlers: Record<string, () => Promise<{ ok: boolean; json: () => Promise<unknown> }>>,
+) {
+  const withTrustStage = stories.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(s.status) }));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+      const status = new URL(url, 'http://localhost').searchParams.get('status');
+      const matched = withTrustStage.filter((s) => s.status === status);
+      return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+    }
+    if (typeof url === 'string' && url.startsWith('/api/members')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    if (typeof url === 'string' && url.startsWith('/api/tasks?story_id=')) {
+      const storyId = new URL(url, 'http://localhost').searchParams.get('story_id')!;
+      const handler = taskHandlers[storyId];
+      if (handler) return handler();
+      return taskOk([], 0);
+    }
+    return { ok: false, json: async () => null };
+  }));
+}
+
+describe('KanbanBoard — handleStoryClick storyTasks 리셋·취소 가드(story #3704)', () => {
+  async function clickStory(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('A 로드 後 B 클릭 응답 500 — B 패널에 A의 태스크가 한 건도 안 남는다(blocker①)', async () => {
+    stubFetchWithTasks(
+      [
+        { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+        { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+      ],
+      {
+        s1: () => Promise.resolve(taskOk([{ id: 't1', title: 'A태스크', status: 'todo' }], 1)),
+        s2: () => Promise.resolve({ ok: false, json: async () => null }),
+      },
+    );
+    await mount();
+    await clickStory('S1');
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).toContain('A태스크');
+
+    await clickStory('S2');
+    expect(dialog().textContent).not.toContain('A태스크'); // 옛 스토리 태스크가 남으면 안 됨.
+    expect(dialog().textContent).toContain(koMessages.board.noTasks); // 정직한 빈 상태.
+  });
+
+  it('A 클릭→B 클릭, A 응답이 B보다 늦게 도착 — 패널은 끝까지 B 값이다(blocker②)', async () => {
+    const aResponse = deferredTaskResponse();
+    stubFetchWithTasks(
+      [
+        { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+        { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+      ],
+      {
+        s1: () => aResponse.promise,
+        s2: () => Promise.resolve(taskOk([{ id: 't2', title: 'B태스크', status: 'todo' }], 1)),
+      },
+    );
+    await mount();
+    await clickStory('S1'); // A 요청 발화 — 아직 응답 안 옴(deferred).
+    await clickStory('S2'); // B 요청 발화+즉시 응답 — 패널은 B 값으로 정착.
+
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).toContain('B태스크');
+
+    await act(async () => { // 이제야 A의 늦은 응답이 도착 — 요청 순번이 안 맞아 버려져야 한다.
+      aResponse.resolve(taskOk([{ id: 't1', title: 'A태스크', status: 'todo' }], 1));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dialog().textContent).toContain('B태스크'); // 여전히 B.
+    expect(dialog().textContent).not.toContain('A태스크'); // 늦게 온 A가 덮으면 안 됨.
+  });
+});
+
 // story #2104 — BE stories.py:1056(human-only 영구삭제 403)를 FE가 미리 안 보고 에이전트
 // 계정에도 삭제 트리거를 무조건 열었다(#2091/#2103과 같은 결함). 양방향 고정 — human까지
 // 잠그면 정당한 삭제가 봉쇄되는 더 큰 사고다(승격 위험목록의 잔여 미검증 칸 해소).
