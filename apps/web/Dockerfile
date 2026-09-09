@@ -30,6 +30,12 @@ COPY --from=deps /app/packages ./packages
 COPY apps/web/ apps/web/
 # ee overlay (SaaS 빌드 시 주입, OSS에서는 빈 디렉토리 허용)
 COPY ee/ ee/
+# story #3729(배포 58 실사고, 2026-09-09) — 레포 루트 공유 스크립트(scripts/i18n-key-parser.js,
+# story #3156). apps/web 안 3파일(verify-no-new-raw-fetch-api.ts·i18n-key-coverage.test.ts·
+# pagination-envelope-consumers.test.ts)이 `../../../scripts/...`로 이 밖을 import하는데
+# builder 컨텍스트엔 없어 `pnpm build`의 타입체크가 Cannot find module로 죽었다(CI는 전체
+# 체크아웃이라 이 축을 안 잰다 — Docker 컨텍스트 전용 결함).
+COPY scripts/ scripts/
 WORKDIR /app/apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
 # rewrites()가 빌드 시점에 routes-manifest.json으로 베이크인되므로 ARG로 주입 필요
