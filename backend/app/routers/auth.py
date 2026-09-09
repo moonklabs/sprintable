@@ -158,6 +158,18 @@ class RegisterRequest(BaseModel):
     def normalize_email(cls, v: str) -> str:
         return _normalize_email(v)
 
+    @field_validator("display_name")
+    @classmethod
+    def reject_blank_display_name(cls, v: str) -> str:
+        # story #3758 — `display_name: str`(Optional 아님)이라 필드 자체 부재는 422로
+        # 이미 막히지만, 빈 문자열/공백뿐인 값은 그 갭을 통과했다 — 그 통로로 이 라우터가
+        # (예전엔) email 로컬파트 절반을 이름 자리에 지어냈다(member_resolver.py 5자리·
+        # #3755와 같은 클래스). 원천에서 422로 거부해 그 폴백 자체를 필요 없게 만든다.
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("display_name must not be blank")
+        return stripped
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
@@ -681,7 +693,9 @@ async def register(
         email=body.email,
         hashed_password=hash_password(body.password),
         password_set_at=datetime.now(timezone.utc),
-        display_name=body.display_name.strip() or body.email.split("@")[0],
+        # story #3758 — display_name은 이제 reject_blank_display_name validator가 이미
+        # strip·비공백 보장(422로 거부 안 된 값은 그대로 실명) — email.split 폴백 제거.
+        display_name=body.display_name,
         is_active=True,
         email_verified=False,
         tos_accepted_at=datetime.now(timezone.utc),

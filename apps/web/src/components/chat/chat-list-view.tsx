@@ -19,6 +19,7 @@ import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { participantDisplayLabel } from '@/lib/member-display';
 
 interface Participant {
   member_id: string;
@@ -28,6 +29,11 @@ interface Participant {
   /** story #3106(#3092 후속) — BE `_fetch_conversation_participants`가 이미 싣던 필드(agent만
    * 값, human=null)를 이 타입이 안 받아 그동안 버려지고 있었다. */
   runtime_type?: string | null;
+  // story #3758(9번째, PO 決) — name=null이 「실존·표시명 없음」인지 「orphan(해소 실패)」
+  // 인지 가르는 비트(같은 BE 헬퍼 `_fetch_conversation_participants` 소비 — chats/
+  // [conversation_id]/page.tsx의 Participant와 동일 계약). optional — BE 기본값(True)과
+  // 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
+  resolved?: boolean;
 }
 
 interface ConversationItem {
@@ -72,16 +78,19 @@ function formatParticipantNames(
   currentMemberId: string,
   type: 'dm' | 'group',
   t: (key: string, values?: Record<string, string | number>) => string,
+  tc: (key: string) => string,
 ): string {
   const others = participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return type === 'dm' ? 'DM' : t('groupSection');
   // story #3203 — 이름 해석 실패(orphan/삭제 멤버, BE participant.name=null) 폴백은
   // '?' 1글자가 아니라 사람 언어 문구로("uuid 노출" 실사고 재발 방지 축 — BE는 raw
-  // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다).
-  if (type === 'dm') return others[0]?.name ?? t('unknownMember');
+  // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다). story #3758
+  // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
+  // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
+  if (type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc);
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
-  const visible = others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ');
+  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
+  const visible = others.slice(0, MAX).map((p) => participantDisplayLabel(p, t, tc)).join(', ');
   return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
 }
 
@@ -105,12 +114,13 @@ function ConversationRow({
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0
-      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t)
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t, tc)
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   const preview = conv.latest_message?.content ?? t('noMessages');
@@ -138,8 +148,8 @@ function ConversationRow({
         <span>↔</span>
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
           {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
-              동일 사람언어 폴백으로 통일('...'는 비인간어). */}
-          {others[0]?.name ?? t('unknownMember')}
+              동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트. */}
+          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc)}
         </span>
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
@@ -173,7 +183,7 @@ function ConversationRow({
         <span className="truncate">
           {isAgentInConv && agentCount > 0
             ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => p.name ?? t('unknownMember')).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
+            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, t, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
           }
         </span>
       </div>
@@ -240,13 +250,14 @@ function OutsideProjectRow({
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   // story #2972 — DM 행 title은 항상 NULL(list_conversations 관례)이라 participants로
   // 조립해야만 상대 이름이 뜬다(ConversationRow와 동일 패턴). BE가 이제 participants를
   // 실어줘(delta) 여기서도 formatParticipantNames를 탈 수 있다 — participants가 비어있는
   // 진짜 무재료 상황만 no-fiction 폴백(dmWith/groupSection, 완결된 단어로 수정됨)으로 떨어진다.
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0
-      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t)
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t, tc)
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   return (

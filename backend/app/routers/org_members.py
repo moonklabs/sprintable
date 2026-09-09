@@ -51,7 +51,10 @@ async def list_org_members(
     _repo: OrgMemberRepository = Depends(_require_admin),
 ) -> list[OrgMemberResponse]:
     """org_members + users JOIN — email 포함 응답. admin/owner 전용."""
-    # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name → email 순.
+    # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name(story #3758 —
+    # email 폴백 0, member_resolver.py 5자리·#3755와 같은 클래스의 독립 raw SQL 자리).
+    # `email` 컬럼 자체(별도 응답 필드)는 그대로 유지(페드루 판정 2026-08-30, admin/owner
+    # 전용 관리 행위 노출 — 이 스토리 범위 밖, name 슬롯만 처방).
     # members는 (org_id, user_id) 활성 휴먼으로 LEFT JOIN (없으면 display_name/email 폴백).
     result = await session.execute(
         text(
@@ -59,7 +62,7 @@ async def list_org_members(
             SELECT om.id, om.org_id, om.user_id, om.role,
                    om.created_at, om.deleted_at,
                    u.email,
-                   COALESCE(m.name, u.display_name, u.email) AS name
+                   COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name
             FROM org_members om
             LEFT JOIN users u ON u.id = om.user_id
             LEFT JOIN members m
@@ -115,7 +118,7 @@ async def list_eligible_approvers(
             SELECT om.id, om.org_id, om.user_id, om.role,
                    om.created_at, om.deleted_at,
                    u.email,
-                   COALESCE(m.name, u.display_name, u.email) AS name
+                   COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name
             FROM org_members om
             LEFT JOIN users u ON u.id = om.user_id
             LEFT JOIN members m

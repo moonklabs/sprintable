@@ -16,6 +16,7 @@ import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { participantDisplayLabel } from '@/lib/member-display';
 
 interface Participant {
   member_id: string;
@@ -27,6 +28,10 @@ interface Participant {
   // story #3194 — 미연결 배너 판별용(아래 fetchPresence가 채움). conversation 응답 자체엔
   // 없는 필드라 항상 undefined로 시작 — merge된 값만 ChatView에 내려간다(mutate 아님).
   verified?: boolean | null;
+  // story #3758(9번째, PO 決) — name=null이 「실존·표시명 없음」인지 「orphan(해소 실패)」
+  // 인지 가르는 비트(conversations.py `_fetch_conversation_participants`가 채움). optional
+  // — BE 기본값(True)과 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
+  resolved?: boolean;
 }
 
 interface ConversationMeta {
@@ -52,16 +57,20 @@ function isValidProjectId(value: string | null): value is string {
   return !!value && UUID_RE.test(value);
 }
 
-function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string, t: (key: string) => string): string {
+function formatHeaderTitle(
+  meta: ConversationMeta, currentMemberId: string, t: (key: string) => string, tc: (key: string) => string,
+): string {
   if (meta.title) return meta.title;
   const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return meta.type === 'dm' ? 'DM' : '그룹 채팅';
   // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, chat-list-view.tsx의
-  // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어).
-  if (meta.type === 'dm') return others[0]?.name ?? t('unknownMember');
+  // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어). story #3758
+  // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
+  // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
+  if (meta.type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc);
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
-  return `${others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ')} 외 ${others.length - MAX}명`;
+  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
+  return `${others.slice(0, MAX).map((p) => participantDisplayLabel(p, t, tc)).join(', ')} 외 ${others.length - MAX}명`;
 }
 
 export default function ConversationPage() {
@@ -75,6 +84,7 @@ export default function ConversationPage() {
   const searchParams = useSearchParams();
   const scrollToMessageId = searchParams.get('messageId') ?? undefined;
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const { toasts, addToast, dismissToast } = useToast();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
@@ -210,7 +220,7 @@ export default function ConversationPage() {
   }
 
   const headerTitle = meta
-    ? formatHeaderTitle(meta, currentTeamMemberId, t)
+    ? formatHeaderTitle(meta, currentTeamMemberId, t, tc)
     : (meta === null ? '채팅' : '로딩 중…');
 
   // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
@@ -224,7 +234,8 @@ export default function ConversationPage() {
   const commandTargets = (meta?.participants ?? [])
     .filter((p) => p.type === 'agent' && p.member_id !== currentTeamMemberId && p.runtime_type !== undefined)
     // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
-    .map((p) => ({ agentId: p.member_id, agentName: p.name ?? t('unknownMember'), runtimeType: p.runtime_type ?? null }));
+    // story #3758(9번째) — resolved 비트로 갈라 그린다.
+    .map((p) => ({ agentId: p.member_id, agentName: participantDisplayLabel(p, t, tc), runtimeType: p.runtime_type ?? null }));
 
   return (
     <>
@@ -257,7 +268,8 @@ export default function ConversationPage() {
             {headerAvatarParticipant && (
               <Avatar
                 // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
-                name={headerAvatarParticipant.name ?? t('unknownMember')}
+                // story #3758(9번째) — resolved 비트로 갈라 그린다.
+                name={participantDisplayLabel(headerAvatarParticipant, t, tc)}
                 avatarUrl={headerAvatarParticipant.avatar_url ?? null}
                 actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
                 size={24}

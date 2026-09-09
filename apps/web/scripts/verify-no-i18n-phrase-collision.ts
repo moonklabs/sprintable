@@ -276,10 +276,13 @@ export function findSubstringCollisions(
 // 기준으로 재스캔해도 이 항목은 여전히 필요하다(아래 게이트 로그로 확認) — #2792의 임시
 // 항목과 달리 이건 #2410의 근본 fix로 해소되는 축이 아니라서 그대로 남는다.
 // story #2485(2026-08-06) — settings.tabProjects/roleMember <-> onboarding/settings의
-// PLAN_LIMIT_EXCEEDED 안내문 2쌍. sprints.days와 같은 축(길이 짧은 일반명사 키가 긴
-// 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는" 병이
-// 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는 건 오직
-// "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는 상황이 아니다.
+// PLAN_LIMIT_EXCEEDED 안내문 2쌍이었다. sprints.days와 같은 축(길이 짧은 일반명사 키가
+// 긴 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는"
+// 병이 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는
+// 건 오직 "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는
+// 상황이 아니다. story #3758(2026-09-09, 낱말 정 — settings.roleMember "멤버"→"구성원")
+// — roleMember 쪽 짝은 이제 죽은 예외다(양성대조: 이 fix로 exemptHit이 실제로 40으로
+// 줄어 걸림, 다시 늘어나지 않아야 한다). tabProjects 짝만 아래 그대로 남는다.
 // story #2955(2026-08-23, docs-index.tsx) — docs.title="문서"(마스트헤드 H1, 수 없음)
 // <-> docs.indexDocCount="{count}개 문서"(dek의 총 문서 수). 같은 파일에 이미 그라운핑된
 // 동형 쌍(docs.title <-> docs.searchResultCount="{count}개 문서 일치", 위 GRANDFATHER_
@@ -351,7 +354,6 @@ export const EXEMPT_PAIRS = new Set<string>([
   'docs.indexDocCount <-> docs.title',
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',
-  'settings.memberLimitExceededError <-> settings.roleMember',
   // story #3422(2026-09-04, ②-c FailureActionBadge) — channelPostsFailureAutoRetryAt
   // ({time} 보간 있음) <-> channelPostsFailureRetryCta("다시 시도", 보간 없음). 겹치는
   // 건 "다시 시도"라는 흔한 동사구 하나뿐 — auto_retry(자동, 버튼 없음)와 dead_letter

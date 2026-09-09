@@ -206,8 +206,10 @@ async def get_me(
                         Member.deleted_at.is_(None),
                     )
                 )).scalar_one_or_none()
-                # E-ONBOARDING S2: display_name 우선, 없을 때만 email (기존 무조건 email → 실명 반영)
-                name = member_anchor or ((user.display_name or user.email) if user else str(uid))
+                # E-ONBOARDING S2: display_name 우선. story #3758 — email/uuid 폴백 제거,
+                # canonical member 앵커도 display_name도 없으면 None을 정직하게 돌린다
+                # (member_resolver.py 5자리·#3755와 같은 email/id 폴백 클래스의 독립 자리).
+                name = member_anchor or (user.display_name if user else None)
                 try:
                     proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
                 except (ValueError, AttributeError):

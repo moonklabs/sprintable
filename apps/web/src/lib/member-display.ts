@@ -6,17 +6,12 @@
 // 기준): activity-log-view.tsx·dashboard-activity-timeline.tsx(활동 로그 actor) ·
 // organization/events/page.tsx(이벤트 발행 이력 sender).
 //
-// 대화 참여자 화면(chats/[conversation_id]/page.tsx)은 이 헬퍼를 **안 쓰는게 아니라 못
-// 쓴다**(유나 디자인 게이트 정정, 2026-09-09) — 정정: 그 화면도 이 결함 클래스의 영향을
-// 실제로 받았다(conversations.py:398이 이 PR이 고친 lookup_members_by_ids를 그대로 쓰고
-// :417 name=resolved.name으로 흘려보낸다). 다만 참여자 응답 payload가 「실존 구성원인데
-// display_name만 없음」과 「orphan(member/alias 자체가 없음)」 둘 다 name=None으로 채우고
-// 그 둘을 가르는 필드가 없다(member_resolver.py의 orphan-fallback과 실존-무이름 분기가
-// 응답에 남기는 신호가 동일 — member_id·avatar_url·type·runtime_type뿐). 이 헬퍼가 전제로
-// 하는 "이름이 없다=이름 없는 구성원"이라는 단일 사실이 이 화면에선 두 사실(진짜 없음/
-// orphan) 중 하나를 지어내는 셈이라 적용하면 다른 방식으로 거짓말이 된다 — BE가
-// orphan에만 별도 신호(예: resolved:false)를 싣고 이 화면이 그 신호로 갈라 쓰는 처방은
-// story #3758(9번째 항목)로 분리했다.
+// 대화 참여자 화면(chats/[conversation_id]/page.tsx)은 이 헬퍼를 직접 못 쓴다 — 참여자
+// payload가 「실존 구성원인데 display_name만 없음」과 「orphan(member/alias 자체가
+// 없음)」 둘 다 name=None으로 채워서다(member_resolver.py orphan-fallback·실존-무이름
+// 분기가 같은 신호를 남김). story #3758(9번째, PO 決 2026-09-09) — BE가 `ResolvedMember.
+// resolved: bool` 비트를 신설해(orphan만 False) 참여자 payload에 그대로 흘려보내고,
+// 아래 `participantDisplayLabel()`이 그 비트로 갈라 이 헬퍼를 우회 없이 쓴다.
 //
 // 유나 디자인 게이트 적기만②(2026-09-09) — `??`는 null/undefined만 잡고 빈 문자열은
 // 그대로 통과시킨다. BE가 ""를 name으로 준 적은 실측 0건이지만(전부 None 아니면 실
@@ -24,6 +19,23 @@
 // (표시할 이름이 없다)이라 다른 취급을 둘 이유가 없다.
 export function memberDisplayLabel(name: string | null | undefined, t: (key: string) => string): string {
   return name ? name : t('memberUnnamed');
+}
+
+// story #3758(9번째, PO 決 2026-09-09) — 대화 참여자 전용. `resolved === false`(진짜
+// orphan — member/alias 해소 자체가 실패)는 t('unknownMember')(「알 수 없는 구성원」,
+// 낱말 정 적용 — chats.unknownMember 값 자체는 이 스토리가 갱신) · 그 외(실존 구성원,
+// 표시명만 없을 수 있음)는 memberDisplayLabel로 「이름 없는 구성원」/실명. activity-log-view.tsx
+// auditActorProps(actor_id 유무로 가름)·publishHistorySenderLabel(sender_id 유무)과 같은
+// 모양 — 여기는 신호가 BE가 직접 실어 보내는 `resolved` 비트라는 점만 다르다.
+export function participantDisplayLabel(
+  p: { name: string | null; resolved?: boolean },
+  t: (key: string) => string,
+  tc: (key: string) => string,
+): string {
+  // BE ResolvedMember.resolved 기본값(True)과 짝 — 필드 자체가 없는 호출부(레거시 캐시·
+  // 아직 안 지나간 필드)는 "모른다"가 아니라 "실존"으로 읽는다. orphan만 명시 false.
+  if (p.resolved === false) return t('unknownMember');
+  return memberDisplayLabel(p.name, tc);
 }
 
 // story #3755 CHANGES(카디르 QA 지적 2026-09-09) — organization/events/page.tsx의

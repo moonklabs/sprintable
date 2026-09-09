@@ -229,7 +229,8 @@ async def ensure_agent_project_profile(
 async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -> bool:
     """휴먼 org_member의 앵커 members 행을 멱등 보장(AC3-2c grant write-sync).
 
-    members.id = org_member.id (0075 휴먼 불변식). 0075 백필 동형(name=users.email/display_name).
+    members.id = org_member.id (0075 휴먼 불변식). name=users.display_name(story #3758부터
+    email/user_id 폴백 0 — 0075 당시 백필 동형은 폐기, 마이그 0359가 기존 오염 행 정리).
     project_access.member_id=org_member.id를 세팅하기 전 호출 — fk_project_access_member(NOT VALID이나
     신규 INSERT 검증)가 members 행을 요구하므로. 신규 휴먼(0075 이후)은 members 행이 없을 수 있다.
 
@@ -261,7 +262,12 @@ async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -
     ).scalar_one_or_none()
     # orphan user면 user_id=NULL(members.user_id FK 위반 회피, 0084 LEFT JOIN u.id 동형)
     user_id_val = user.id if user is not None else None
-    name = (getattr(user, "display_name", None) or getattr(user, "email", None) or str(om.user_id)) if user else str(om.user_id)
+    # story #3758(페드루 PO 決 2026-09-09) — 이 앵커가 «canonical 우선 소스»(members.name)에
+    # 직접 INSERT하는 쓰기 층 자리라, 여기서 email/user_id를 지어내면 읽기 쪽 COALESCE
+    # (members.py 등 #3758 7자리)가 첫 항(m.name)에서 이미 오염된 값을 만나 무력화된다
+    # (member_resolver.py 5자리·#3755와 같은 결함 클래스). display_name 없으면 None 정직
+    # (컬럼 nullable 완화 — 마이그 0359, app/models/member.py).
+    name = user.display_name if user is not None else None
 
     await session.execute(
         pg_insert(Member.__table__)

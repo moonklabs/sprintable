@@ -425,19 +425,34 @@ describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
 // 것(member_resolver.py) — 이제 BE는 name=null을 실어보내고, FE가 그 null을 '?' 1글자가
 // 아니라 사람 언어 문구로 폴백해야 한다.
 describe('ChatListView — 참가자 이름 해석 실패 폴백(story #3203)', () => {
-  it('DM 상대의 name이 null이면(BE orphan 폴백) "알 수 없는 멤버"로 뜬다 — uuid도 물음표도 아니다', async () => {
+  it('DM 상대의 name이 null이면(BE orphan 폴백) "알 수 없는 구성원"으로 뜬다 — uuid도 물음표도 아니다', async () => {
+    // story #3758(9번째) — resolved=false가 진짜 orphan 신호(word 정 — "멤버"→"구성원").
     stubFetchWithConversations([{
       id: 'conv-dm-orphan-1', type: 'dm', title: null,
       latest_message: null, updated_at: '2026-08-29T00:00:00Z', unread_count: 0,
       participants: [
-        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
-        { member_id: '767988e5-df5b-48e8-9964-7062fe84d691', name: null, avatar_url: null, type: 'human' },
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+        { member_id: '767988e5-df5b-48e8-9964-7062fe84d691', name: null, avatar_url: null, type: 'human', resolved: false },
       ],
     }]);
     await mount();
-    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '알 수 없는 멤버');
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '알 수 없는 구성원');
     expect(nameEl).not.toBeUndefined();
     expect(container.textContent).not.toContain('767988e5');
+  });
+
+  it('참가자가 실존(resolved=true)인데 name만 null이면 "이름 없는 구성원"으로 뜬다(orphan과 다른 문구)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-nameless-1', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-29T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+        { member_id: 'real-member-1', name: null, avatar_url: null, type: 'human', resolved: true },
+      ],
+    }]);
+    await mount();
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '이름 없는 구성원');
+    expect(nameEl).not.toBeUndefined();
   });
 });
 
