@@ -67,7 +67,12 @@ export async function GET(request: Request) {
     const assigneeId = searchParams.get('assignee_id') ?? undefined;
     const status = searchParams.get('status') ?? undefined;
     const statusNe = searchParams.get('status_ne') ?? undefined;
-    const daysSince = searchParams.get('days_since') ? Number(searchParams.get('days_since')) : undefined;
+    // story #3713 후속(페드루 PO CHANGES, 2026-09-09) — days_since는 BE tasks 라우터에
+    // 대응 Query 파라미터가 없어(project_id·status_ne·ids·limit·cursor만 받음) FastAPI가
+    // 조용히 버렸다 — 이 스토리가 막으려는 바로 그 클래스(«경계 넘는 이름이 양쪽 다르면
+    // 조용히 버려진다»)를 FE→BE 경계에서 재현하고 있었다. 실사용처도 0(어떤 FE 화면도
+    // 이 파라미터를 실제로 안 씀)이라 forwarding으로 «완전성»을 흉내내는 대신 끝단까지
+    // 은퇴한다(TaskListFilters/TASK_LIST_FILTER_KEYS에서도 같이 제거).
     const pageInput = parseCursorPageInput({
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
@@ -100,7 +105,6 @@ export async function GET(request: Request) {
       assignee_id: assigneeId,
       status,
       status_ne: statusNe,
-      days_since: daysSince,
       limit: pageInput.limit,
       cursor: pageInput.cursor,
     });
