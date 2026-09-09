@@ -22,7 +22,7 @@ from app.services.content_rules import (
     ContentRulesVersionConflictError, get_org_content_rules, put_org_content_rules,
 )
 from app.services.generation_budget import compute_generation_budget_status
-from app.services.member_resolver import resolve_member, resolve_member_identity
+from app.services.member_resolver import resolve_member, resolve_member_display_name
 from app.services.project_auth import assert_target_in_caller_org
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["content-rules"])
@@ -131,15 +131,22 @@ class PutContentRulesRequest(BaseModel):
 
 # story #3747(ⓑ, 페드루 PO 確定 2026-09-09) — GET·PUT 성공 응답 공용 조립. 409
 # 충돌 경로(#3501)와 같은 "이름은 있으면만 싣는다" 규율 — orphan 멤버라 해소
-# 실패하면 updated_by를 아예 안 싣는다(화면이 "누가"를 지어내지 않는다).
+# 실패하면 name을 None으로(화면이 "누가"를 지어내지 않는다).
+#
+# story #3747 CHANGES①(페드루 PO 지적, 2026-09-09) — 처음엔 `resolve_member_identity()`를
+# 썼는데, 그 함수의 grant-only 휴먼(OrgMember만 있고 TeamMember 없음) 분기가 표시명이
+# 없으면 이메일로 채워 넣어(member_resolver.py:599) 이 화면 부제·409 배너 둘 다에
+# 이메일이 그대로 샜다(라이브 캡처로 실측). `resolve_member_display_name()`(표시명
+# 전용, 이메일·id 폴백 0)으로 교체 — None이면 FE가 "이름 모름"(날짜만) 갈래로 정직하게
+# 떨어진다. member_id는 행에 이미 있어(row.updated_by_member_id) 해소 성공 여부와
+# 무관하게 항상 실을 수 있다.
 async def _build_content_rules_response(
     row: OrgContentRule, db: AsyncSession,
 ) -> ContentRulesResponse:
     updated_by = None
     if row.updated_by_member_id is not None:
-        member = await resolve_member_identity(row.updated_by_member_id, row.org_id, db)
-        if member is not None:
-            updated_by = ContentRulesUpdatedBy(member_id=member.id, name=member.name)
+        name = await resolve_member_display_name(row.updated_by_member_id, row.org_id, db)
+        updated_by = ContentRulesUpdatedBy(member_id=row.updated_by_member_id, name=name)
     return ContentRulesResponse(
         org_id=row.org_id, rules=row.rules, version=row.version,
         updated_at=row.updated_at.isoformat(), updated_by=updated_by,
@@ -195,13 +202,14 @@ async def put_content_rules_endpoint(
     except ContentRulesVersionConflictError as exc:
         # story #3501(doc a0da40c9 §20-2) — "서버가 «누가»를 주면 그때 이름을 쓴다"
         # PO 決定: updated_by_member_id가 있으면 이름을 해소해 싣고, 없으면(row가
-        # 아직 없던 경우, 또는 orphan 멤버라 해소 실패) updated_by를 아예 안 싣는다
-        # — 화면이 "누가"를 지어내지 않는다(§20-2 규율 그대로).
+        # 아직 없던 경우) updated_by를 아예 안 싣는다 — 화면이 "누가"를 지어내지
+        # 않는다(§20-2 규율 그대로). story #3747 CHANGES①(2026-09-09) — 이름 해소는
+        # `resolve_member_display_name()`(표시명 전용, 이메일 폴백 0)으로. 이유는
+        # `_build_content_rules_response`와 동일(이메일 노출 사고 재발 방지).
         updated_by = None
         if exc.updated_by_member_id is not None:
-            member = await resolve_member_identity(exc.updated_by_member_id, org_id, db)
-            if member is not None:
-                updated_by = ContentRulesUpdatedBy(member_id=member.id, name=member.name)
+            name = await resolve_member_display_name(exc.updated_by_member_id, org_id, db)
+            updated_by = ContentRulesUpdatedBy(member_id=exc.updated_by_member_id, name=name)
         raise HTTPException(
             status_code=409,
             detail={

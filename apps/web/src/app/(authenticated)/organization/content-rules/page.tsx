@@ -440,11 +440,13 @@ export default function ContentRulesPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
-      <PageHeader
-        title={t('pageTitle')}
-        description={<>{t('pageDescription')}{lastChangedText ? ` ${lastChangedText}` : ''}</>}
-        size="section"
-      />
+      {/* story #3747 CHANGES③(페드루 PO 지적, 2026-09-09) — 「마지막 변경」을 설명
+          문장에 이어 붙이면 한 문단으로 흘러 줄바꿈된다(시안은 설명 아래 별도 muted
+          줄). PageHeader에 부제 슬롯이 없어 컴포넌트 밖에서 별도 줄로 그린다. */}
+      <PageHeader title={t('pageTitle')} description={t('pageDescription')} size="section" />
+      {lastChangedText ? (
+        <p className="-mt-4 text-xs text-muted-foreground" data-testid="content-rules-last-changed">{lastChangedText}</p>
+      ) : null}
 
       {loadState === 'error' ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
@@ -601,15 +603,12 @@ export default function ContentRulesPage() {
                   saving={savingField === 'tone'} t={t}
                 >
                   {(draft, setDraft) => (
-                    <div className="space-y-1.5">
-                      <input
-                        id="content-rules-tone"
-                        type="text" value={draft ?? ''} onChange={(e) => setDraft(e.target.value || null)}
-                        placeholder={t('tonePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                        data-testid="content-rules-tone"
-                      />
-                      <p className="text-xs text-muted-foreground">{t('toneHint')}</p>
-                    </div>
+                    <input
+                      id="content-rules-tone"
+                      type="text" value={draft ?? ''} onChange={(e) => setDraft(e.target.value || null)}
+                      placeholder={t('tonePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                      data-testid="content-rules-tone"
+                    />
                   )}
                 </RowEditForm>
               </RuleRowShell>

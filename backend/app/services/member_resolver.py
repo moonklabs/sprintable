@@ -602,6 +602,44 @@ async def resolve_member_identity(
     )
 
 
+async def resolve_member_display_name(
+    member_id: uuid.UUID,
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> str | None:
+    """story #3747(①, 페드루 PO 確定 2026-09-09) — «사람에게 보여줄 이름» 전용 해소.
+    `resolve_member_identity()`의 OrgMember(grant-only 휴먼) 분기는 표시명이 없으면
+    이메일(`user.email`)로, 그마저 없으면 id 문자열로 채워 넣는다 — 그건 "신원을
+    잃지 않는다"는 그 함수의 목적엔 맞지만, 화면에 그대로 찍으면 이메일이 UI에
+    새는 사고가 된다(#3747 content-rules 헤더 부제·409 배너 두 자리에서 실제로
+    발생). 이 함수는 그 반대 계약이다 — TeamMember.name 또는 User.display_name
+    "만" 인정하고, 없으면 이메일도 id도 안 지어내고 그냥 None을 돌린다(호출부가
+    "이름 모름" 갈래로 정직하게 떨어진다, 지어내지 않는다 원칙)."""
+    tm = (await session.execute(
+        select(TeamMember).where(
+            TeamMember.id == member_id,
+            TeamMember.org_id == org_id,
+        )
+    )).scalars().first()
+    if tm is not None:
+        return tm.name
+
+    om = (await session.execute(
+        select(OrgMember).where(
+            OrgMember.id == member_id,
+            OrgMember.org_id == org_id,
+            OrgMember.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if om is None:
+        return None
+
+    user = (await session.execute(
+        select(User).where(User.id == om.user_id)
+    )).scalar_one_or_none()
+    return user.display_name if user else None
+
+
 async def filter_org_member_ids(
     member_ids: set[uuid.UUID],
     org_id: uuid.UUID,

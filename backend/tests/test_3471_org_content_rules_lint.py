@@ -90,11 +90,14 @@ async def _seed_agent(session, org_id, project_id, *, name="담롱"):
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="owner"):
+async def _seed_human(session, org_id, *, role="owner", display_name=None):
     from app.models.project import OrgMember
     from app.models.user import User
 
-    user = User(id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+    user = User(
+        id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x",
+        display_name=display_name,
+    )
     session.add(user)
     await session.commit()
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
@@ -211,19 +214,13 @@ async def test_owner_put_content_rules_reflected_in_get_and_version_plus_one():
 # updated_by를 응답에서 걷으면 이 테스트가 KeyError로 죽는다).
 @pytest.mark.anyio
 async def test_put_content_rules_populates_updated_at_and_updated_by():
-    from sqlalchemy import select
-
     from app.main import app
-    from app.models.user import User
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            owner_id = await _seed_human(s, org_id, role="owner")
-            owner_email = (await s.execute(
-                select(User.email).where(User.id == owner_id)
-            )).scalar_one()
+            owner_id = await _seed_human(s, org_id, role="owner")  # display_name 없음.
 
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
@@ -234,14 +231,46 @@ async def test_put_content_rules_populates_updated_at_and_updated_by():
             assert r_put.status_code == 200, r_put.text
             put_body = r_put.json()
             assert put_body["updated_at"] is not None
-            assert put_body["updated_by"]["name"] == owner_email
+            # story #3747 CHANGES①(페드루 PO 지적, 2026-09-09) — display_name이 없는
+            # org_member 휴먼은 member_id는 실리되 name은 None이어야 한다(이메일도
+            # id 문자열도 지어내지 않는다 — 라이브 캡처에서 이메일이 그대로 화면에
+            # 새던 사고의 회귀 방지, resolve_member_display_name() 재사용).
+            assert put_body["updated_by"]["member_id"] is not None
+            assert put_body["updated_by"]["name"] is None
 
             r_get = await client.get(f"/api/v2/organizations/{org_id}/content-rules")
         get_body = r_get.json()
         # PUT 응답과 그 뒤 GET 응답이 같은 행을 본다 — updated_at·updated_by가 일치.
         assert get_body["updated_at"] == put_body["updated_at"]
         assert get_body["updated_by"]["member_id"] == put_body["updated_by"]["member_id"]
-        assert get_body["updated_by"]["name"] == owner_email
+        assert get_body["updated_by"]["name"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# story #3747 CHANGES①(페드루 PO 지적, 2026-09-09) — display_name이 «있으면» 그
+# 표시명이 그대로 실린다(위 테스트의 반대쪽 — None-폴백만 확인하고 실 표시명 경로를
+# 안 재는 반쪽짜리 검증을 막는다, [[feedback_one_directional_check_vacuous_pass]] 동형).
+@pytest.mark.anyio
+async def test_put_content_rules_updated_by_uses_display_name_when_present():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner", display_name="유나 홀름")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r_put = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"tone": "친근하게"}, "expected_version": 0},
+            )
+            assert r_put.status_code == 200, r_put.text
+            put_body = r_put.json()
+            assert put_body["updated_by"]["name"] == "유나 홀름"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -283,7 +312,11 @@ async def test_put_version_mismatch_returns_409_with_current_version_and_updated
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            owner_id = await _seed_human(s, org_id, role="owner")
+            # story #3747 CHANGES①(2026-09-09) — display_name을 심어야 이름 해소가
+            # 실제로 뭔가를 반환하는지 재는 테스트가 된다(display_name 없는 휴먼이면
+            # resolve_member_display_name()이 정직하게 None을 돌려주는 게 정답이라
+            # "이름 해소" 자체를 검증하려면 이름이 있는 픽스처가 필요하다).
+            owner_id = await _seed_human(s, org_id, role="owner", display_name="유나 홀름")
 
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
@@ -306,7 +339,7 @@ async def test_put_version_mismatch_returns_409_with_current_version_and_updated
         # updated_by_member_id 컬럼이 이미 있어(첫 PUT이 owner로 채웠다) 이름을 해소해
         # 싣는다 — §20-2 "서버가 «누가»를 주면 그때 이름을 쓴다".
         assert error["updated_by"] is not None
-        assert error["updated_by"]["name"] is not None
+        assert error["updated_by"]["name"] == "유나 홀름"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

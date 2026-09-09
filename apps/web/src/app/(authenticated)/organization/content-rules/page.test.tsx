@@ -128,14 +128,14 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     await mount('owner');
     expect(row('banned_terms').textContent).toContain('무료체험');
     expect(row('tone').textContent).toContain('친근하게');
-    const header = container.querySelector('h1')!.parentElement!;
+    const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
     expect(header.textContent).toContain(koMessages.contentRules.pageLastChangedWithName.replace('{name}', '송윤재').replace('{date}', '9월 7일'));
   });
 
   it('⭐아직 한 번도 규칙을 안 정한 조직(row 자체가 없음) — 「아직 정한 적 없습니다」(빈 줄 아님)', async () => {
     stubFetch({ updatedAt: null, updatedByName: null, rules: { ...RULES_V1, banned_terms: [], tone: null } });
     await mount('owner');
-    const header = container.querySelector('h1')!.parentElement!;
+    const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
     expect(header.textContent).toContain(koMessages.contentRules.pageNeverSetSuffix);
     expect(header.textContent).not.toContain('마지막 변경');
   });
@@ -143,7 +143,7 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
   it('updated_by_member_id가 null이면(이름 모름) 날짜만 — 지어내지 않는다', async () => {
     stubFetch({ updatedByName: null });
     await mount('owner');
-    const header = container.querySelector('h1')!.parentElement!;
+    const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
     expect(header.textContent).toContain(koMessages.contentRules.pageLastChangedDateOnly.replace('{date}', '9월 7일'));
   });
 
