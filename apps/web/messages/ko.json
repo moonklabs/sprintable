@@ -2199,7 +2199,7 @@
     "appCredentialsPlatformActive": "Sprintable 공용 앱으로 연결합니다(기본)",
     "appCredentialsNone": "설정 미완 — 연결을 시작하려면 앱 자격을 등록해야 합니다.",
     "appCredentialsAskOwner": "조직 소유자에게 앱 자격 등록을 요청해 주세요.",
-    "appCredentialsAskOwnerNamed": "조직 소유자 {name}에게 앱 자격 등록을 요청해 주세요.",
+    "appCredentialsAskOwnerNamed": "조직 소유자 {name}님에게 앱 자격 등록을 요청해 주세요.",
     "appCredentialsRegisterAction": "앱 자격 등록",
     "appCredentialsReenterAction": "다시 입력",
     "appCredentialsAppIdLabel": "App ID",

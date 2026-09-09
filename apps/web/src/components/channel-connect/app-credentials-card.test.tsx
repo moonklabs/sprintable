@@ -66,7 +66,7 @@ describe('AppCredentialsCard(story #3733)', () => {
       ));
     });
     expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).toContain('조직 소유자 이윤재에게 앱 자격 등록을 요청해 주세요.');
+    expect(container.textContent).toContain('조직 소유자 이윤재님에게 앱 자격 등록을 요청해 주세요.');
   });
 
   it('소유자 이름을 못 얻으면(plain member, 403) 이름 없는 문장으로 폴백한다 — 지어내지 않는다', async () => {

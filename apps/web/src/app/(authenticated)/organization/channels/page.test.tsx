@@ -654,7 +654,7 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
       orgMembers: [{ role: 'owner', name: '이윤재', email: 'owner@sprintable.dev' }],
     });
     await mount('member');
-    expect(container.textContent).toContain('조직 소유자 이윤재에게 앱 자격 등록을 요청해 주세요.');
+    expect(container.textContent).toContain('조직 소유자 이윤재님에게 앱 자격 등록을 요청해 주세요.');
     expect(container.textContent).not.toContain('owner@sprintable.dev');
   });
 });
