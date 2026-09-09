@@ -15,6 +15,12 @@ export class TaskService {
     return this.repository.list(filters);
   }
 
+  // story #3718 — 진짜 총계(BE X-Total-Count). list(...).length는 안 쓴다(getStoryTaskCounts
+  // 참고).
+  async count(filters: Omit<TaskListFilters, 'limit' | 'cursor'>) {
+    return this.repository.count(filters);
+  }
+
   async getById(id: string, scope?: RepositoryScopeContext) {
     return this.repository.getById(id, scope);
   }

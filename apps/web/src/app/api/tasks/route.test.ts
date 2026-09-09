@@ -5,12 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), createTaskRepository: vi.fn(),
   list: vi.fn(), create: vi.fn(), parseBody: vi.fn(),
+  // story #3718 — getStoryTaskCounts가 service.list(길이 세기) 대신 service.count
+  // (BE X-Total-Count)를 쓰도록 바뀌어 mock 표면도 같이 늘어난다.
+  count: vi.fn(),
 }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createTaskRepository: h.createTaskRepository }));
 vi.mock('@/services/task', async (importActual) => ({
   ...(await importActual<typeof import('@/services/task')>()),
-  TaskService: class { list = h.list; create = h.create; },
+  TaskService: class { list = h.list; create = h.create; count = h.count; },
 }));
 vi.mock('@sprintable/shared', async (importActual) => ({
   // 공유 모듈은 export 다수(VALID_STORY_TRANSITIONS 등 타 소비자 참조) — importActual로 전부 유지·parseBody만 오버라이드.
@@ -45,17 +48,18 @@ describe('/api/tasks (직접 서비스 TaskService)', () => {
     expect(body.meta).toBeTruthy();
   });
 
-  it('GET: single story_id adds totalCount/doneCount (getStoryTaskCounts)', async () => {
-    // main list + counts(all, done) = 3 호출
-    h.list
-      .mockResolvedValueOnce([task('1', 'todo'), task('2', 'done')])  // main page
-      .mockResolvedValueOnce([task('1'), task('2')])                  // all
-      .mockResolvedValueOnce([task('2', 'done')]);                    // done
+  it('GET: single story_id adds totalCount/doneCount from service.count(story #3718 — X-Total-Count, list().length 아님)', async () => {
+    h.list.mockResolvedValueOnce([task('1', 'todo'), task('2', 'done')]); // main page
+    h.count
+      .mockResolvedValueOnce(2)  // total
+      .mockResolvedValueOnce(1); // done
     const res = await GET(new Request('http://localhost/api/tasks?story_id=s1'));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.meta.totalCount).toBe(2);
     expect(body.meta.doneCount).toBe(1);
+    expect(h.count).toHaveBeenCalledWith({ story_id: 's1' });
+    expect(h.count).toHaveBeenCalledWith({ story_id: 's1', status: 'done' });
   });
 
   it('POST: 401 when unauthenticated', async () => {
@@ -168,5 +172,51 @@ describe('/api/tasks GET — cursor pagination hasMore/nextCursor 과대조회(s
     expect(body.data).toHaveLength(5);
     expect(body.meta.hasMore).toBe(false);
     expect(body.meta.nextCursor).toBeNull();
+  });
+});
+
+// story #3718(FE 완전성-정직, 3713/3717 후속) — getStoryTaskCounts가 service.list(...).length
+// 로 총계를 셌다. BE 기본 페이지 상한(미지정 시 1000)에 잘린 근사치라 태스크 1000건 초과
+// 스토리에선 「N개 중 M개」의 N 자체가 거짓이었다. service.count(BE X-Total-Count)로 교체.
+describe('/api/tasks GET — getStoryTaskCounts가 목록 길이가 아닌 service.count를 쓴다(story #3718)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createTaskRepository.mockResolvedValue({});
+  });
+
+  it('(a) count가 1500(목록 길이 상한 1000을 초과하는 값)을 반환하면 totalCount=1500 그대로 나간다(list().length였다면 1000 이하로 잘렸을 값 — 되돌리면 RED)', async () => {
+    h.list.mockResolvedValueOnce(Array.from({ length: 20 }, (_, i) => task(String(i))));
+    h.count.mockResolvedValueOnce(1500).mockResolvedValueOnce(300);
+    const res = await GET(new Request('http://localhost/api/tasks?story_id=s1&limit=20'));
+    const body = await res.json();
+    expect(body.meta.totalCount).toBe(1500);
+    expect(body.meta.doneCount).toBe(300);
+  });
+
+  it('(c) count가 둘 다 null(BE 헤더 부재)이면 totalCount/doneCount는 현재 페이지 길이로 폴백한다(무회귀 — 화면이 깨지지 않게)', async () => {
+    h.list.mockResolvedValueOnce([task('1', 'todo'), task('2', 'done')]);
+    h.count.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    const res = await GET(new Request('http://localhost/api/tasks?story_id=s1'));
+    const body = await res.json();
+    expect(body.meta.totalCount).toBe(2);
+    expect(body.meta.doneCount).toBe(1);
+  });
+
+  it('(d) getStoryTaskCounts는 story_id 분기에서 service.list를 카운트 목적으로 부르지 않는다(main page 호출 1회만 — 목록 길이로 세는 경로 0)', async () => {
+    h.list.mockResolvedValueOnce([task('1')]);
+    h.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    await GET(new Request('http://localhost/api/tasks?story_id=s1'));
+    expect(h.list).toHaveBeenCalledTimes(1); // main page만 — counts용 list 호출 0
+    expect(h.count).toHaveBeenCalledTimes(2); // total·done
+  });
+
+  it('25건 이하(기존 표본 규모) 무회귀 — count 값 그대로 반영', async () => {
+    h.list.mockResolvedValueOnce(Array.from({ length: 20 }, (_, i) => task(String(i), i % 5 === 0 ? 'done' : 'todo')));
+    h.count.mockResolvedValueOnce(25).mockResolvedValueOnce(5);
+    const res = await GET(new Request('http://localhost/api/tasks?story_id=s1&limit=20'));
+    const body = await res.json();
+    expect(body.meta.totalCount).toBe(25);
+    expect(body.meta.doneCount).toBe(5);
   });
 });

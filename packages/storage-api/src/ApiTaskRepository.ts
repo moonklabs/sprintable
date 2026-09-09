@@ -1,5 +1,5 @@
 import type { ITaskRepository, Task, CreateTaskInput, UpdateTaskInput, TaskListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
-import { fastapiCall } from './utils';
+import { fastapiCall, fastapiCallWithMeta } from './utils';
 
 // story #3713(라이브 결함, 유나 배포 56 실측 02:40Z) — list() query 조립이 TaskListFilters의
 // cursor·limit(+project_id·status_ne)을 안 실어 BE 커서가 전진하지 않았다(같은 5행·같은
@@ -47,6 +47,29 @@ export class ApiTaskRepository implements ITaskRepository {
         cursor: filters.cursor,
       },
     });
+  }
+
+  // story #3718(FE 완전성-정직, 3713/3717 후속) — getStoryTaskCounts(tasks/route.ts)가
+  // list().length로 총계를 셌다 — BE 기본 페이지 상한(미지정 시 1000)에 잘린 근사치를
+  // 「N개 중 M개」의 N으로 써 왔다(태스크 1000건 초과 스토리에서만 드러나는 병, 낮은
+  // 우선순위지만 실 결함). BE tasks.py는 필터 適用 後·limit 適用 前 COUNT를 X-Total-Count
+  // 헤더로 이미 준다(goals.py와 동형 규약) — limit=1로 행 자체는 최소화하고 헤더만 읽는다.
+  async count(filters: Omit<TaskListFilters, 'limit' | 'cursor'>): Promise<number | null> {
+    const { headers } = await fastapiCallWithMeta<Task[]>('GET', '/api/v2/tasks', this.accessToken, {
+      query: {
+        story_id: filters.story_id,
+        project_id: filters.project_id,
+        assignee_id: filters.assignee_id,
+        status: filters.status,
+        status_ne: filters.status_ne,
+        ids: filters.ids?.join(','),
+        limit: 1,
+      },
+    });
+    const raw = headers.get('x-total-count');
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Task> {

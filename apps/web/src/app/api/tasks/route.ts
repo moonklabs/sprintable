@@ -14,15 +14,16 @@ async function getStoryTaskCounts(
   dbClient: DbClient | undefined,
 ) {
   if (!dbClient) {
-    const [allTasks, doneTasks] = await Promise.all([
-      service.list({ story_id: storyId }),
-      service.list({ story_id: storyId, status: 'done' }),
+    // story #3718(FE 완전성-정직, 3713/3717 후속) — list(...).length는 BE 기본 페이지
+    // 상한(미지정 시 1000)에 잘린 근사치였다(태스크 1000건 초과 스토리에서 「N개 중
+    // M개」의 N 자체가 거짓). count()가 BE X-Total-Count(필터 適用 後·limit 適用 前
+    // 진짜 총계)를 읽는다 — 헤더가 없으면 null(false/0으로 위장 안 함).
+    const [totalCount, doneCount] = await Promise.all([
+      service.count({ story_id: storyId }),
+      service.count({ story_id: storyId, status: 'done' }),
     ]);
 
-    return {
-      totalCount: allTasks.length,
-      doneCount: doneTasks.length,
-    };
+    return { totalCount, doneCount };
   }
 
   const [totalResult, doneResult] = await Promise.all([

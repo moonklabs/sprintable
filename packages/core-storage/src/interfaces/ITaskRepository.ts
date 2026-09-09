@@ -47,6 +47,13 @@ export interface TaskListFilters extends PaginationOptions {
 export interface ITaskRepository {
   create(input: CreateTaskInput): Promise<Task>;
   list(filters: TaskListFilters): Promise<Task[]>;
+  /** story #3718(FE 완전성-정직, 3713/3717 후속) — 필터 適用 後·limit 適用 前 진짜 총계
+   * (BE X-Total-Count, tasks.py 규약 — goals.py와 동형). `list(...).length`는 BE 기본
+   * 페이지 상한(미지정 시 1000)에 잘린 근사치라 총계로 못 쓴다(getStoryTaskCounts가
+   * 이 병을 앓았다). 헤더가 없거나 파싱 불가면 null — false/0으로 위장하지 않는다
+   * (story #3705와 동형 규율: "모르면 모른다고 표시"). cursor/limit은 count 의미상
+   * 무관하므로 필터에서 제외. */
+  count(filters: Omit<TaskListFilters, 'limit' | 'cursor'>): Promise<number | null>;
   getById(id: string, scope?: RepositoryScopeContext): Promise<Task>;
   update(id: string, input: UpdateTaskInput): Promise<Task>;
   delete(id: string, orgId: string): Promise<void>;
