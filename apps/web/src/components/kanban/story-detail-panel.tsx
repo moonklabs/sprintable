@@ -2175,7 +2175,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 재발한다
                     (탭 라벨=아는 척·본문=정직, 서로 다른 사실을 동시에 말하는 꼴). */}
                 <TabsTrigger value="tasks" className="flex-1">{tasksLoading ? 'Tasks' : `Tasks (${tasksTotalCount ?? tasks.length})`}</TabsTrigger>
-                <TabsTrigger value="comments" className="flex-1">Comments ({comments.length})</TabsTrigger>
+                {/* story #3712(FE 완전성-정직, #4060/#3709 Tasks 탭과 같은 얼굴) — 조회
+                    中엔 개수를 아예 말하지 않는다. loadingComments인데도 「Comments (0)」을
+                    그리면 40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 된다
+                    (본문은 이미 loadingComments를 먼저 검사한다 — 라벨만 빠져 있었다). */}
+                <TabsTrigger value="comments" className="flex-1">{loadingComments ? 'Comments' : `Comments (${comments.length})`}</TabsTrigger>
                 <TabsTrigger value="activity" className="flex-1">Activity</TabsTrigger>
               </TabsList>
 

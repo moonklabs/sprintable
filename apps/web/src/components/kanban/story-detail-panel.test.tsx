@@ -236,6 +236,33 @@ describe('StoryDetailPanel — org-switch 잔여 레이스 stale-guard (story #2
   });
 });
 
+// story #3712(FE 완전성-정직, #3709/#4060 Tasks 탭과 같은 얼굴) — 조회 中(응답 前)엔
+// comments=[]인데 탭 라벨이 loadingComments를 안 봐서 "Comments (0)"을 그렸다 — 본문은
+// 이미 loadingComments를 먼저 검사해 「불러오는 중」을 보이는데 라벨만 뒤처져 같은 화면
+// 두 세계였다.
+describe('StoryDetailPanel — Comments 탭 라벨 loadingComments(story #3712, 완전성-정직)', () => {
+  it('조회 中엔 탭 라벨이 개수를 안 보인다 — 응답 뒤엔 다시 보인다', async () => {
+    let resolveComments: ((v: unknown) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return new Promise((resolve) => { resolveComments = resolve; });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Comments'));
+    expect(trigger()?.textContent).toBe('Comments'); // "(0)" 없음 — 아직 조회 中이라 모른다.
+
+    await act(async () => {
+      resolveComments?.({ ok: true, json: async () => ({ data: [{ id: 'c1', content: 'hi', created_by: 'u', created_at: '2026-01-01' }] }) });
+    });
+    expect(trigger()?.textContent).toBe('Comments (1)'); // 응답 뒤엔 지금처럼 수 표시.
+  });
+});
+
 // story #2933 H1(P0-H) — 구 FE 재파생(gate 목록+localStatus 조합, #3336 MEDIUM 드리프트
 // 실사례로 이미 1회 버그난 그 로직)을 폐기하고 story.trust_stage(BE derive_trust_stage()
 // 판정값)를 그대로 소비한다는 회귀가드. gate fetch를 몰라도(PO 조건① — 판정은 BE 한 곳)
