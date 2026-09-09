@@ -2200,7 +2200,7 @@
     "appCredentialsNone": "Setup incomplete — register app credentials to start connecting.",
     "appCredentialsAskOwner": "Ask an organization owner to register app credentials.",
     "appCredentialsAskOwnerNamed": "Ask organization owner {name} to register app credentials.",
-    "appCredentialsRegisterAction": "Register your own app",
+    "appCredentialsRegisterAction": "Register app credentials",
     "appCredentialsReenterAction": "Re-enter",
     "appCredentialsAppIdLabel": "App ID",
     "appCredentialsAppSecretLabel": "App Secret",

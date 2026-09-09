@@ -609,7 +609,7 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
   it('owner가 등록 버튼을 누르면 App Secret 입력란이 password 타입으로 뜬다', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('owner');
-    const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
+    const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '앱 자격 등록');
     await act(async () => { registerBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const secretInput = container.querySelector('input[type="password"]');
     expect(secretInput).not.toBeNull();
@@ -622,7 +622,7 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
     // 스텁엔 없어 unnamed 폴백 문구가 정답 — 이름을 지어내지 않는다).
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('member');
-    const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
+    const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '앱 자격 등록');
     expect(registerBtn).toBeUndefined();
     expect(container.textContent).toContain('조직 소유자에게 앱 자격 등록을 요청해 주세요.');
   });
@@ -630,7 +630,7 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
   it('story #3504 — admin도 앱 자격 등록 버튼이 없다(owner 전용, admin은 owner|admin이 아니다)', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('admin');
-    const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
+    const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '앱 자격 등록');
     expect(registerBtn).toBeUndefined();
     expect(container.textContent).toContain('조직 소유자에게 앱 자격 등록을 요청해 주세요.');
   });
