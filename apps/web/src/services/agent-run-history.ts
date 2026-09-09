@@ -26,25 +26,6 @@ export function getRunFailureDisposition(input: RetryableFailureInput & { failur
   return getFailureDisposition(input);
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-export function getToolAuditOutcome(input: { eventType?: string | null; payload?: unknown }): 'allowed' | 'denied' | 'failed' {
-  const payload = asRecord(input.payload);
-  const outcome = typeof payload?.outcome === 'string' ? payload.outcome : null;
-  if (outcome === 'allowed' || outcome === 'denied' || outcome === 'failed') return outcome;
-
-  const eventType = input.eventType ?? '';
-  if (eventType === 'agent_tool.acl_denied' || eventType === 'agent_tool.cross_scope_blocked') return 'denied';
-  if (eventType === 'agent_tool.ambiguous_external_mapping') return 'failed';
-  if (eventType.endsWith('.failed')) return 'failed';
-  if (eventType.endsWith('.executed')) return 'allowed';
-  if (eventType.startsWith('agent_tool.')) return 'failed';
-
-  return 'failed';
-}
-
 export function canManuallyRetryRun(input: RetryableFailureInput & { failure_disposition?: AgentRunFailureDisposition | null }) {
   const disposition = getRunFailureDisposition(input);
   return input.status === 'failed' && disposition !== 'retry_scheduled' && disposition !== 'retry_launched' && disposition !== 'non_retryable';
