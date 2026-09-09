@@ -999,3 +999,64 @@ describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', 
     expect(container.textContent).toContain('태스크가 없습니다');
   });
 });
+
+// story #3709(FE 완전성-정직, 3704 후속) — 조회 中(응답 前)엔 tasks=[]·tasksTotalCount=null
+// 상태가 tasksLoading 없이는 "정말 0개"와 구별이 안 갔다. flow-node-story-panel.tsx와
+// 같은 낱말(t('loading')="불러오는 중...")로 조회 중임을 그대로 드러낸다.
+describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () => {
+  function makeTask(id: string): Task {
+    return { id, title: `task-${id}`, status: 'todo' };
+  }
+
+  it('tasksLoading=true면 tasks=[]·tasksTotalCount=null이어도 "태스크가 없습니다" 대신 "불러오는 중"이 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).not.toContain(koMessages.board.noTasks);
+    expect(container.textContent).toContain(koMessages.board.loading);
+  });
+
+  it('tasksLoading=false(기본값, 미제공)면 기존 동작 그대로 — 회귀 0', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={0} onClose={() => {}} />)); // tasksLoading 미제공
+    });
+    expect(container.textContent).toContain(koMessages.board.noTasks);
+    expect(container.textContent).not.toContain(koMessages.board.loading);
+  });
+
+  it('tasksLoading=true는 실제 태스크가 이미 있어도(예: 낙관적 이전 값 잔존) 우선한다 — 조회 中 신호가 최우선', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={1} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).toContain(koMessages.board.loading);
+    expect(container.textContent).not.toContain('task-1');
+  });
+
+  // story #3709 후속(페드루 PO 지적, 유나 PASS 뒤 한 줄 더, 2026-09-09) — 탭 라벨
+  // 「Tasks (0)」이 조회 中에도 개수를 말해, 40px 아래 본문의 「불러오는 중...」과
+  // 같은 화면 두 세계였다(탭=아는 척, 본문=정직).
+  it('조회 中엔 탭 라벨이 개수를 안 보인다 — 응답 뒤엔 다시 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    const tasksTab = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
+    expect(tasksTab()?.textContent).toBe('Tasks'); // "(0)" 없음 — 조회 中이라 아직 모른다.
+
+    await act(async () => { root.unmount(); });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={1} onClose={() => {}} />,
+      ));
+    });
+    expect(tasksTab()?.textContent).toBe('Tasks (1)'); // 응답 뒤엔 지금처럼 수 표시.
+  });
+});

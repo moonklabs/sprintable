@@ -155,6 +155,13 @@ type FetchStub = {
   // QA changes 10R HIGH③(카디르+codex, 2026-08-22) — StoryDetailPanel 배선 검증용(tasks
   // 실 fetch·delete 성공 시 카드 제거). story_id별 태스크 목록.
   tasksByStoryId?: Record<string, Array<Record<string, unknown>>>;
+  // story #3709(FE 완전성-정직) — 이 story_id의 /api/tasks 응답을 즉시 안 주고 붙잡아 둔다
+  // (조회 中 상태를 직접 재는 테스트용). 해소는 resolvePendingTasksFetch(storyId, rows)로.
+  deferTasksFor?: string[];
+  // story #3709 후속(카디르 재-QA, PR#4060) — 응답 객체(res.ok)는 즉시 오되 res.json()
+  // 파싱만 붙잡아 둔다 — "파싱 사이에 다른 스토리로 전환" 레이스 재현용. 해소는
+  // resolvePendingTasksJson(storyId, rows)로.
+  deferTasksJsonFor?: string[];
   deleteStorySpy?: (id: string) => void;
   // story #3299 — kanban-board.test.tsx #3287 AC4와 동형(domain-labels 응답 스텁).
   domainLabels?: Array<{ domain: string; canonical_slug: string; label_ko: string | null; label_en: string | null }>;
@@ -167,6 +174,26 @@ type FetchStub = {
 // 지연)」을 CI 로그만으로 갈라준다(페드루 의심 — 순수 지연이면 레인 테스트도 가끔 튀어야
 // 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
 let callLog: string[] = [];
+
+// story #3709(FE 완전성-정직) — deferTasksFor에 걸린 story_id의 /api/tasks 응답을
+// 붙잡아 둘 resolver 저장소. 조회 中 상태(tasksLoading)를 직접 재려면 fetch를
+// stubFetch의 tasksByStoryId(즉시 resolve)와 별개로 지연시킬 수 있어야 한다.
+let pendingTasksResolvers: Record<string, (v: { ok: boolean; json: () => Promise<unknown> }) => void> = {};
+function resolvePendingTasksFetch(storyId: string, rows: Array<Record<string, unknown>>) {
+  const resolve = pendingTasksResolvers[storyId];
+  if (!resolve) throw new Error(`no pending /api/tasks fetch for story_id=${storyId}`);
+  resolve({ ok: true, json: async () => ({ data: rows, meta: { hasMore: false, nextCursor: null } }) });
+  delete pendingTasksResolvers[storyId];
+}
+
+// story #3709 후속 — deferTasksJsonFor 짝(json() 파싱 지연 전용).
+let pendingTasksJsonResolvers: Record<string, (v: unknown) => void> = {};
+function resolvePendingTasksJson(storyId: string, rows: Array<Record<string, unknown>>) {
+  const resolve = pendingTasksJsonResolvers[storyId];
+  if (!resolve) throw new Error(`no pending /api/tasks json() for story_id=${storyId}`);
+  resolve({ data: rows, meta: { hasMore: false, nextCursor: null } });
+  delete pendingTasksJsonResolvers[storyId];
+}
 
 // story #2959(PO 배포 실픽셀, 2026-08-23) — 기본축이 trust로 반전되면서(kanban-board.tsx
 // #3378 도입분에 이어 이 뷰도) trust_stage 없는 고정 fixture가 어느 컬럼에도 안 걸려
@@ -184,10 +211,12 @@ function withDefaultTrustStage(list: Array<Record<string, unknown>>): Array<Reco
   return list.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(String(s['status'])) }));
 }
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false, tasksByStoryId = {}, deleteStorySpy, domainLabels }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false, tasksByStoryId = {}, deferTasksFor = [], deferTasksJsonFor = [], deleteStorySpy, domainLabels }: FetchStub) {
   stories = withDefaultTrustStage(stories);
   storyPages = storyPages?.map((page) => ({ ...page, stories: withDefaultTrustStage(page.stories) }));
   callLog = [];
+  pendingTasksResolvers = {};
+  pendingTasksJsonResolvers = {};
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
     if (typeof url === 'string' && url.includes('/domain-labels')) {
@@ -211,6 +240,17 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
     }
     if (typeof url === 'string' && url.startsWith('/api/tasks?')) {
       const storyId = new URL(url, 'http://localhost').searchParams.get('story_id') ?? '';
+      if (deferTasksFor.includes(storyId)) {
+        return new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve) => {
+          pendingTasksResolvers[storyId] = resolve;
+        });
+      }
+      if (deferTasksJsonFor.includes(storyId)) {
+        return {
+          ok: true,
+          json: () => new Promise<unknown>((resolve) => { pendingTasksJsonResolvers[storyId] = resolve; }),
+        };
+      }
       return { ok: true, json: async () => ({ data: tasksByStoryId[storyId] ?? [], meta: { hasMore: false, nextCursor: null } }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
@@ -845,6 +885,55 @@ describe('EpicSwimlaneBoard — StoryDetailPanel 배선(story #2931, QA changes 
     await waitForCondition(() => deletedId === 's1', 'DELETE 호출 발화');
     await waitForCondition(() => !(container.textContent?.includes('삭제될카드') ?? false), '삭제 후 카드 실종(onDeleteSuccess 배선)');
     expect(container.textContent).not.toContain('삭제될카드');
+  });
+
+  // story #3709(FE 완전성-정직, 3704 후속) — 응답 前(조회 中)엔 tasks=[]·totalCount=null인데
+  // 로딩 신호가 없으면 StoryDetailPanel이 이걸 "정말 0개"로 오단정했다(kanban-board.tsx와
+  // 동형 갭 — 형제 호출부).
+  it('응답 前(조회 中)엔 "태스크가 없습니다" 대신 "불러오는 중"이 뜬다', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '로딩카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      deferTasksFor: ['s1'],
+    });
+    const card = container.querySelector('[title="로딩카드"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await waitForCondition(() => container.textContent?.includes('로딩카드') ?? false, '패널 오픈');
+
+    expect(container.textContent).not.toContain(koMessages.board.noTasks);
+    expect(container.textContent).toContain(koMessages.board.loading);
+
+    await act(async () => { resolvePendingTasksFetch('s1', []); }); // 응답 도착 — 진짜 0건.
+    await waitForCondition(() => (container.textContent?.includes(koMessages.board.noTasks) ?? false), '응답 後 정당한 빈 상태');
+    expect(container.textContent).not.toContain(koMessages.board.loading);
+  });
+
+  // story #3709 후속(카디르 재-QA, PR#4060 2026-09-09) — 위 cancelled 대조가 fetch 직후일
+  // 뿐, res.json() 자체가 비동기라 그 파싱 사이에 다른 스토리로 전환될 수 있다
+  // (kanban-board.tsx #3704 후속과 동형 갭) — 재대조 없으면 늦게 파싱된 A 응답이 B의
+  // tasksLoading을 false로 내려 «조회 中»을 «없음»으로 오단정한다.
+  it('json() 파싱 사이 다른 스토리로 전환하면 늦게 파싱된 응답이 새 스토리 상태를 안 덮는다', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [
+        { id: 's1', title: 'A카드', status: 'backlog', priority: 'medium', epic_id: 'e1' },
+        { id: 's2', title: 'B카드', status: 'backlog', priority: 'medium', epic_id: 'e1' },
+      ],
+      deferTasksJsonFor: ['s1'],
+      tasksByStoryId: { s2: [{ id: 't2', title: 'B태스크', status: 'todo' }] },
+    });
+    const cardA = container.querySelector('[title="A카드"]') as HTMLElement;
+    await act(async () => { cardA.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await waitForCondition(() => container.textContent?.includes('A카드') ?? false, 'A 패널 오픈'); // fetch 레벨 응답은 옴 — json() 파싱만 대기 中.
+
+    const cardB = container.querySelector('[title="B카드"]') as HTMLElement;
+    await act(async () => { cardB.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await waitForCondition(() => container.textContent?.includes('B태스크') ?? false, 'B 정착');
+
+    await act(async () => { resolvePendingTasksJson('s1', [{ id: 't1', title: 'A태스크', status: 'todo' }]); });
+    expect(container.textContent).toContain('B태스크'); // 여전히 B 값 그대로.
+    expect(container.textContent).not.toContain('A태스크'); // 늦게 파싱된 A가 섞이면 안 됨.
+    expect(container.textContent).not.toContain(koMessages.board.loading); // B가 다시 로딩으로 안 내려가야 함.
   });
 });
 

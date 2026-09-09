@@ -276,6 +276,9 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   // story #3703(FE 완전성-정직) — /api/tasks의 meta.totalCount(story_id 지정 시 BE 항상
   // 반환). 기존에도 fetch는 하고 있었지만 nextCursor만 뽑고 이 값은 버렸다.
   const [storyTasksTotalCount, setStoryTasksTotalCount] = useState<number | null>(null);
+  // story #3709(FE 완전성-정직, 3704 후속) — 조회 中(응답 前)엔 tasks=[]·totalCount=null이라
+  // StoryDetailPanel이 "정말 0개"와 구별을 못 했다(kanban-board.tsx와 동형 갭).
+  const [storyTasksLoading, setStoryTasksLoading] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
   const { toasts, addToast, dismissToast } = useToast();
 
@@ -290,25 +293,34 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
       setStoryTasks([]);
       setStoryTasksNextCursor(null);
       setStoryTasksTotalCount(null);
+      setStoryTasksLoading(false);
       return;
     }
     let cancelled = false;
     setStoryTasks([]);
     setStoryTasksNextCursor(null);
     setStoryTasksTotalCount(null);
+    setStoryTasksLoading(true);
     (async () => {
       try {
         const res = await fetchWithAuth(`/api/tasks?story_id=${selectedStoryId}&limit=20`);
         if (cancelled) return;
         if (res.ok) {
           const json = await res.json();
+          // story #3709 후속(카디르 재-QA, PR#4060, 2026-09-09) — 위 대조는 fetch 직후일
+          // 뿐, res.json() 자체가 비동기라 그 파싱 사이에 다른 스토리로 전환될 수 있다
+          // (kanban-board.tsx #3704 후속과 동형 갭) — 파싱 뒤 재대조 없으면 늦게 온 옛
+          // 응답이 새 스토리의 tasksLoading을 false로 내려 «조회 中»을 «없음»으로
+          // 오단정한다.
+          if (cancelled) return;
           setStoryTasks(json.data ?? []);
           const tasksMeta = parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks');
           setStoryTasksNextCursor(tasksMeta.nextCursor);
           setStoryTasksTotalCount(typeof tasksMeta.totalCount === 'number' ? tasksMeta.totalCount : null);
         }
+        setStoryTasksLoading(false);
       } catch {
-        if (!cancelled) { setStoryTasks([]); setStoryTasksNextCursor(null); setStoryTasksTotalCount(null); }
+        if (!cancelled) { setStoryTasks([]); setStoryTasksNextCursor(null); setStoryTasksTotalCount(null); setStoryTasksLoading(false); }
       }
     })();
     return () => { cancelled = true; };
@@ -662,6 +674,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                 story={selectedStory}
                 tasks={storyTasks}
                 tasksTotalCount={storyTasksTotalCount}
+                tasksLoading={storyTasksLoading}
                 getStatusLabel={domainLabels.statusLabel}
                 getEntityTypeLabel={domainLabels.entityTypeLabel}
                 nextTasksCursor={storyTasksNextCursor}
