@@ -20,7 +20,9 @@ describe('memberDisplayLabel — story #3755', () => {
     expect(memberDisplayLabel(undefined, t)).toBe('이름 없는 구성원');
   });
 
-  it('빈 문자열은 폴백하지 않는다(BE가 "" 을 name으로 준 적은 없지만, 폴백 조건은 null/undefined만 — ?? 연산자 계약 그대로)', () => {
-    expect(memberDisplayLabel('', t)).toBe('');
+  // ⭐되돌리면 RED — 유나 디자인 게이트 적기만②(2026-09-09). `??`(null/undefined만 폴백)
+  // 로 되돌리면 빈 문자열이 그대로 통과해 화면에 빈 칸이 뜬다.
+  it('⭐빈 문자열도 같은 폴백으로 묶인다(name 없다는 같은 사실 — falsy 전체를 폴백)', () => {
+    expect(memberDisplayLabel('', t)).toBe('이름 없는 구성원');
   });
 });

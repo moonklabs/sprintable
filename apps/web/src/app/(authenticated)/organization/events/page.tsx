@@ -22,6 +22,7 @@ import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { memberDisplayLabel } from '@/lib/member-display';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -429,8 +430,23 @@ interface PublishHistoryItem {
 
 type PublishHistoryState = { kind: 'loading' } | { kind: 'resolved'; items: PublishHistoryItem[] } | { kind: 'error' };
 
+// story #3755(BE·표시명·결함 클래스, 유나 디자인 게이트 지적 2026-09-09) — sender_id는 있는데
+// sender_name이 null(실존 발신자, display_name 미설정 — #3755 BE fix가 이제 email 대신
+// 정직한 None을 돌린다)인 경우와 sender_id 자체가 null(발신자 정보 자체가 없음)인 경우가
+// 예전엔 둘 다 eventPublishHistoryUnknownSender("알 수 없음")로 뭉뚱그려졌다 — activity-log-view.tsx
+// auditActorProps와 동형 처방(sender_id 유무로 갈라 전자는 memberUnnamed).
+export function publishHistorySenderLabel(
+  item: Pick<PublishHistoryItem, 'sender_id' | 'sender_name'>,
+  t: (key: string) => string,
+  tc: (key: string) => string,
+): string {
+  if (!item.sender_id) return t('eventPublishHistoryUnknownSender');
+  return memberDisplayLabel(item.sender_name, tc);
+}
+
 function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t: ReturnType<typeof useTranslations> }) {
   const locale = useLocale();
+  const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
   const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
 
@@ -463,7 +479,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
         <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2">
           {state.items.map((item) => (
             <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="text-foreground">{item.sender_name ?? t('eventPublishHistoryUnknownSender')}</span>
+              <span className="text-foreground">{publishHistorySenderLabel(item, t, tc)}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
                 {formatRelativeTime(item.created_at, locale, displayTimezone)}
                 <Link href={`/chats/${item.conversation_id}`} className="text-primary hover:underline">
