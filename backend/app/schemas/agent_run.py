@@ -18,6 +18,11 @@ class CreateAgentRun(BaseModel):
     memo_id: uuid.UUID | None = None
     status: str = "running"
     result_summary: str | None = None
+    # story #3707 — 모델(agent_run.py)엔 error_message 컬럼이 실재하고 리퍼(agent_run_lifecycle.py
+    # abandoned 전이)는 이걸 직접 쓰는데, 이 공개 API 스키마엔 필드가 아예 없어 MCP
+    # emit_event/update_run_status가 실어 보내도 Pydantic이 조용히 버렸다(extra=ignore 기본값)
+    # — dev 전 프로젝트에 「failed + error_message」 실행이 0건이던 근본.
+    error_message: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
@@ -28,6 +33,8 @@ class CreateAgentRun(BaseModel):
 class UpdateAgentRun(BaseModel):
     status: str
     result_summary: str | None = None
+    # story #3707 — CreateAgentRun과 동형 갭(위 코멘트 참조).
+    error_message: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
@@ -58,6 +65,9 @@ class AgentRunResponse(BaseModel):
     model: str | None = None
     status: str
     result_summary: str | None = None
+    # story #3707 — 위 CreateAgentRun/UpdateAgentRun 코멘트와 동형: 값이 있어도 응답 스키마에
+    # 없으면 API 소비자(실행 상세 화면)는 절대 못 본다.
+    error_message: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None

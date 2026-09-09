@@ -26,6 +26,9 @@ def _mock_run(status: str = "running") -> MagicMock:
     r.model = "claude-opus-4-7"
     r.status = status
     r.result_summary = None
+    # story #3707 — AgentRunResponse에 error_message 추가. MagicMock은 명시 안 하면 자동으로
+    # MagicMock을 만들어내(str|None 위반 → ValidationError) agent_name과 동형으로 세팅.
+    r.error_message = None
     r.input_tokens = None
     r.output_tokens = None
     r.cost_usd = None

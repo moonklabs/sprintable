@@ -204,6 +204,7 @@ async def create_agent_run(
         memo_id=body.memo_id,
         status=body.status,
         result_summary=body.result_summary,
+        error_message=body.error_message,
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         cost_usd=body.cost_usd,
