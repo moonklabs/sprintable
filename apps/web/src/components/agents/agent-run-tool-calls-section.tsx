@@ -188,8 +188,9 @@ function ToolCallRowItem({
               <Button
                 type="button"
                 variant="ghost"
+                size="sm"
                 onClick={onToggleExpand}
-                className="h-auto gap-1 truncate p-0 px-1 font-mono text-sm font-normal text-foreground"
+                className="gap-1 truncate p-0 px-1 font-mono text-sm font-normal text-foreground"
                 data-testid={`tool-call-toggle-${row.id}`}
               >
                 {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
