@@ -1,3 +1,4 @@
+import { fetchWithAuth } from '@/lib/db/client';
 import type { HeroMember } from './hero-logic';
 import { parseAttentionSignals, type BeAttentionSignal } from './derive-exception-signals';
 
@@ -10,7 +11,7 @@ import { parseAttentionSignals, type BeAttentionSignal } from './derive-exceptio
 // 겨냥한 100건 잘림 버그가 이 화면엔 애초에 없었다), 죽은 경로를 정직화하는 대신 통째로
 // 걷어낸다 — "은퇴했는데 코드는 살아 있다"를 남기지 않는다.
 //
-// 남는 2개 fetch(`/api/team-members`·`/api/glance/attention`)는 실 소비처가 있다:
+// 남는 두 엔드포인트(team-members·glance/attention)는 실 소비처가 있다:
 // memberMap(NextMakerScreen의 GoalStemCard 담당자 이름)·attentionSignals(ExceptionStream).
 export interface GlanceDataPartialErrors {
   members: boolean;
@@ -32,7 +33,10 @@ function unwrap<T>(json: unknown): T | null {
 }
 
 async function fetchJson(url: string): Promise<unknown> {
-  return fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  // story #4062 후속(2026-09-09, 페드루 PO 決) — raw fetch 가드(#2691)가 fetch 4→2 축소로
+  // grandfather 호출 모양 키가 사라져 나머지 둘을 "신규"로 잡았다. fetchWithAuth(정본 401
+  // 재시도 경로)로 전환 — 이 파일이 조용히 재인증 없이 401을 삼키지 않게 한다.
+  return fetchWithAuth(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 }
 
 /**

@@ -7,20 +7,11 @@
  * 유일 소비처였던 `load-glance-data.ts`의 에픽 fetch·로드맵 계산이 죽은 경로였다("갈래" 뷰는
  * 이제 `NextMakerScreen`이 `/api/goals`를 cursor 모드로 독립 로드해 그린다 — grep 전수: `flow-
  * client.tsx`는 `loadGlanceData` 결과 중 `attentionSignals`·`memberMap`만 소비, roadmap은
- * 소비 0). `RoadmapEpic`(→`derive-flow.ts`)·`BeFocalStory`(→`derive-hero-envelope.ts`)는
- * 여전히 실 소비처가 있어 남겨 둔다.
+ * 소비 0). story #4062 후속(같은 날, 페드루 PO 決) — `RoadmapStatus`·`RoadmapEpic`도 마저
+ * 걷어냈다: 마지막 소비처였던 `derive-flow.ts`의 `deriveFlowLaneRows`가 그 사이 삭제되며
+ * (유일 소비처 FlowLane 은퇴) 방금 소비처 0이 됐다 — 남기면 "살아 있는 추상". `BeFocalStory`
+ * (→`derive-hero-envelope.ts`)는 여전히 실 소비처가 있어 남겨 둔다.
  */
-
-export type RoadmapStatus = 'done' | 'active' | 'upcoming';
-
-export interface RoadmapEpic {
-  id: string;
-  title: string;
-  roadmapStatus: RoadmapStatus;
-  done: number;
-  total: number;
-  completionPct: number;
-}
 
 /** story #2298/#2303 — `?include=glance` 옵트인 시 `focal_story`에 실리는 9필드. `/api/glance/hero?story_id=`
  * 전체 웨이브를 대체(#2303 그라운딩: glance-hero.tsx + 호출체인이 실제로 읽는 필드만 — description·
