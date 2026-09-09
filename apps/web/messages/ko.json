@@ -3850,7 +3850,7 @@
     "outcomeReasonHint": "근거 없이는 닫을 수 없습니다.",
     "outcomeUnmeasurableReasonHint": "측정 불가 사유를 적어주세요.",
     "outcomeSkipLink": "판정 없이 닫기",
-    "outcomeSkipWarning": "판정 없이 닫으면 «결과 미기록」으로 마킹되어 「결과를 안 적고 끝난 목표」에 남습니다.",
+    "outcomeSkipWarning": "판정 없이 닫으면 「결과 미기록」으로 표시되어 「결과를 안 적고 끝난 목표」에 남습니다.",
     "outcomeSkipConfirm": "그대로 닫기",
     "outcomeSubmit": "판정 저장",
     "progress": "진행 상황",
