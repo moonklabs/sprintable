@@ -48,10 +48,11 @@ interface AppSidebarProps {
   chatUnreadTotal: number;
 }
 
-// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — 유나 실측 반영) — 기본 접힘은 이제
-// 정적 module 상수가 아니라 현재 라우트(활성 구역)+뷰포트 높이에 따라 매 렌더 파생되는
-// 값이다(규칙은 nav-config.ts::computeActiveZoneCollapsedGroupIds, 근거는 그 정의부
-// 주석 참고) — 컴포넌트 내부의 useMemo(defaultCollapsedGroupIds)가 이를 계산한다.
+// story #d986fd6c(IA·S4)의 «활성 구역+뷰포트 높이로 기본 접힘을 역산» 규칙은 폐기된
+// 전제다(선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고 접을 수 있게 하면
+// 좋을 것 같다」 — story #f81657f8). nav-config.ts::computeActiveZoneCollapsedGroupIds
+// 자체가 삭제됐고, 기본 접힘은 이제 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침) —
+// 컴포넌트 내부의 useMemo(defaultCollapsedGroupIds)가 그 상수를 그대로 반환한다.
 //
 // 사람별 기억(AC3) — 그룹 id별 접힘 여부 수동 오버라이드. localStorage(계정 단위가 아니라
 // 이 브라우저 단위이지만, "사람별로 기억된다"는 AC 문면은 "같은 사람이 다시 왔을 때
@@ -186,11 +187,19 @@ export function AppSidebar({
   // 단일 setState라 react-hooks/set-state-in-effect에 안 걸리고, 이쪽은 객체라 걸린다 —
   // 파생값(Set)은 이미 위 useMemo로 분리해 뒀으니 이 setState 자체는 "외부 저장소를
   // 그대로 얹는" 정당한 동기화다.
+  //
+  // story #f81657f8 후속(페드루 PO 지적 2026-09-09) — 이 effect는 원래부터 이 형태였는데
+  // disable 없이도 lint가 초록이었다(컴포넌트가 activeGroupId/viewportHeight 등 hook이
+  // 많아 react-hooks 정적분석이 이 지점까지 못 들어가고 bail-out했던 것으로 보임). 이번
+  // PR이 그 두 hook을 제거해 컴포넌트를 단순화하면서 분석이 실제로 이 자리까지 도달해
+  // 가려져 있던 위반이 드러났다 — 지워 보고 lint를 돌려 재확인(그대로 걸림). 정당성은
+  // 위 문단 그대로: localStorage 마운트-후 1회 하이드레이션(구독 없는 단발 읽기), 파생값은
+  // 이미 useMemo로 분리.
   const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const overrides = readStoredCollapsedOverrides();
     if (Object.keys(overrides).length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 위 정당성 참고(localStorage 1회 하이드레이션)
       setCollapsedOverrides(overrides);
     }
   }, []);
