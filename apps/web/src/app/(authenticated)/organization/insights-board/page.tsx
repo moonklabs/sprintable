@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -18,8 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel } from '@/lib/channel-label';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
 import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-board-comments-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
@@ -111,7 +110,6 @@ export default function InsightsBoardPage() {
   // story #3656 — 훅 미태깅 묶음 라벨은 새 낱말을 안 만들고 docs 네임스페이스 기존
   // 키(indexCategoryUncategorized, 「미분류」)를 재사용한다(유나 確定).
   const tDocs = useTranslations('docs');
-  const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const windowParam = (searchParams.get('window') as InsightsBoardWindow | null) ?? DEFAULT_WINDOW;
@@ -579,8 +577,16 @@ export default function InsightsBoardPage() {
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">{channelLabel(row.channel, tContent)}</td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {formatRelativeTime(row.published_at, locale, displayTimezone)}
+                    {/* story #3746(유나 픽셀 PASS 곁들임, 2026-09-09) — 「발행」 칸은
+                        merge-base부터 상대 시각(formatRelativeTime)이었다. 이 화면
+                        정정 판에서 같이 잡는다: 「그저께」류가 서로 다른 날을 겹쳐
+                        가리고(정렬 축인데 눈으로 안 보임)·d1/d7 앵커 기준인데 ±12h가
+                        뭉개지고·7일이 지나면 절대 표기로 넘어가 30d/90d 기간에선
+                        한 열에 상대·절대 표기가 섞인다. `formatScheduledAt(...)
+                        .display`(절대 날짜)로 고정 — 이 화면의 다른 절대-시각
+                        칸(computed_at 등)과도 형이 맞는다. */}
+                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="insights-board-published-at">
+                      {formatScheduledAt(row.published_at, displayTimezone).display}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
                       <InsightsBoardMetricCell bucket={row.d1} metric={metricParam} tContent={tContent} tBoard={t} />

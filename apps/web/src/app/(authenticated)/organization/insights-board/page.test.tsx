@@ -211,6 +211,28 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     await mount();
     expect(container.textContent).toContain(koMessages.insightsBoard.emptyTitle);
   });
+
+  // story #3746(유나 픽셀 PASS 곁들임, 2026-09-09) — 「발행」 칸이 merge-base부터
+  // 상대 시각(formatRelativeTime)이었다 — 「그저께」류가 서로 다른 날을 겹쳐 가리고
+  // (정렬 축인데 눈으로 안 갈림)·d1/d7 앵커 기준인데 ±12h가 뭉개지고·7일 지나면
+  // 절대 표기로 넘어가 30d/90d 기간에선 한 열에 표기가 섞였다. §11-2 정본 절대
+  // 포맷(formatScheduledAt)으로 고정 — 이 화면의 다른 절대-시각 칸과 형이 맞는다.
+  //
+  // ROW_A~C는 고정 과거 날짜(2026-09-01 등)라 formatRelativeTime 자체가 이미
+  // 7일 초과 분기에서 formatScheduledAt로 위임한다(§ 위 주석 그대로) — 그
+  // 고정 픽스처로는 이 뮤테이션(포맷 함수를 되돌리는 것)이 안 걸린다. 이 테스트는
+  // «지금부터 2일 전»을 매번 계산해 formatRelativeTime이 정말 쓰였다면 반드시
+  // 상대 문구("2일 전"류)가 나올 자리를 만든다(뮤테이션 킬로 실제 확認 완료).
+  it('⭐「발행」 칸이 §11-2 정본 절대 포맷(MM-DD HH:mm)이다 — 상대 시각(예: N일 전) 아님', async () => {
+    const recentPublishedAt = new Date(Date.now() - 2 * 86400000).toISOString();
+    stubFetch({ page1: [{ ...ROW_A, published_at: recentPublishedAt }] });
+    await mount();
+
+    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const publishedCell = rows[0]!.querySelector('[data-testid="insights-board-published-at"]');
+    expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2} /);
+    expect(publishedCell?.textContent).not.toMatch(/전|그저께|어제|오늘/);
+  });
 });
 
 describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
