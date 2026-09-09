@@ -129,7 +129,9 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     expect(row('banned_terms').textContent).toContain('무료체험');
     expect(row('tone').textContent).toContain('친근하게');
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
-    expect(header.textContent).toContain(koMessages.contentRules.pageLastChangedWithName.replace('{name}', '송윤재').replace('{date}', '9월 7일'));
+    // story #3747 CHANGES(§11-2 정본 formatScheduledAt) — "MM-DD HH:mm TZ" 꼴(브라우저
+    // toLocaleString 아님). TZ는 테스트 실행 환경에 따라 달라 정규식으로만 pin.
+    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} .+ · 송윤재/);
   });
 
   it('⭐아직 한 번도 규칙을 안 정한 조직(row 자체가 없음) — 「아직 정한 적 없습니다」(빈 줄 아님)', async () => {
@@ -144,7 +146,7 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     stubFetch({ updatedByName: null });
     await mount('owner');
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
-    expect(header.textContent).toContain(koMessages.contentRules.pageLastChangedDateOnly.replace('{date}', '9월 7일'));
+    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} /);
   });
 
   it('⭐member는 행 액션(고치기/정하기) 버튼이 없고 값은 그대로 본다(secret 아님)', async () => {

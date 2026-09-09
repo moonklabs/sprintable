@@ -12,6 +12,7 @@ import {
   formatMinorCurrency, majorToMinor, minorToMajor,
   type GenerationBudgetState, type GenerationBudgetCurrency,
 } from '@/components/content/generation-budget-indicator';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
@@ -432,11 +433,17 @@ export default function ContentRulesPage() {
   // story #3747(첫 절 §갈래 셋, 페드루 PO 確定 2026-09-09) — updated_at은 row가 있으면
   // 항상 값이 있다(모델 nullable=False) · null이면 「row 자체가 없다」는 뜻이라 아직
   // 한 번도 안 정함을 사람말로 설명한다(빈 줄 0). updated_by는 그 안에서만 갈린다.
+  //
+  // story #3747 CHANGES(페드루 PO 지적, 2026-09-09, CI 가드 story #3493) — 날짜는
+  // `toLocaleDateString` 직접 호출 대신 doc §11-2 정본 `formatScheduledAt()`(「MM-DD
+  // HH:mm {TZ}」+`resolveDisplayTimezone()`)로. 시안의 "9월 7일" 형은 이 정본 함수가
+  // 이미 확定해 둔 형과 달라 코드 쪽이 정본(유나 통지는 PO 몫).
+  const displayTimezone = resolveDisplayTimezone().tz;
   const lastChangedText = loadState !== 'ready' ? null : updatedAt === null
     ? t('pageNeverSetSuffix')
     : updatedBy?.name
-      ? t('pageLastChangedWithName', { date: new Date(updatedAt).toLocaleDateString(locale, { month: 'long', day: 'numeric' }), name: updatedBy.name })
-      : t('pageLastChangedDateOnly', { date: new Date(updatedAt).toLocaleDateString(locale, { month: 'long', day: 'numeric' }) });
+      ? t('pageLastChangedWithName', { date: formatScheduledAt(updatedAt, displayTimezone).display, name: updatedBy.name })
+      : t('pageLastChangedDateOnly', { date: formatScheduledAt(updatedAt, displayTimezone).display });
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
